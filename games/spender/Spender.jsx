@@ -44,25 +44,33 @@ const css = `
 	--red-gem:#e05555;--black-gem:#6a6a7a;--gold-gem:#f5c842;
 	--radius:8px;--radius-lg:14px;
 }
-body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,serif;min-height:100vh}
+html,body{height:100%;}
+body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,serif;min-height:100vh;
+	/* respect device safe areas (notches) */
+	padding-top:env(safe-area-inset-top, 0px);
+	padding-bottom:env(safe-area-inset-bottom, 0px);
+	padding-left:env(safe-area-inset-left, 0px);
+	padding-right:env(safe-area-inset-right, 0px);
+}
 .app{min-height:100vh;display:flex;flex-direction:column}
 
 /* Lobby */
-.lobby{max-width:480px;margin:0 auto;padding:60px 24px;text-align:center}
+.lobby{max-width:480px;margin:0 auto;padding:48px 20px 24px 20px;text-align:center}
 .lobby h1{font-family:'Cinzel',serif;font-size:3rem;font-weight:700;color:var(--gold);letter-spacing:.06em;margin-bottom:8px}
 .tagline{color:var(--text-dim);font-style:italic;font-size:1.1rem;margin-bottom:48px}
-.lobby-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px;margin-bottom:16px;text-align:left}
+.lobby-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:22px;margin-bottom:16px;text-align:left}
 .lobby-card h2{font-family:'Cinzel',serif;font-size:1rem;color:var(--gold);margin-bottom:16px;letter-spacing:.08em}
 .room-id-display{font-family:'Cinzel',serif;font-size:2rem;letter-spacing:.25em;color:var(--gold-light);text-align:center;padding:16px;background:var(--surface2);border-radius:var(--radius);margin:8px 0 16px;border:1px solid var(--border)}
 .input{width:100%;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'Cinzel',serif;font-size:1rem;letter-spacing:.1em;outline:none}
 .input:focus{border-color:var(--gold)}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 22px;border-radius:var(--radius);border:none;cursor:pointer;font-family:'Cinzel',serif;font-size:.85rem;letter-spacing:.06em;font-weight:600;transition:all .15s}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 22px;border-radius:var(--radius);border:none;cursor:pointer;font-family:'Cinzel',serif;font-size:.95rem;letter-spacing:.06em;font-weight:600;transition:all .15s}
 .btn-gold{background:var(--gold);color:#0f0e0c}.btn-gold:hover{background:var(--gold-light)}
 .btn-outline{background:transparent;color:var(--gold);border:1px solid var(--gold)}.btn-outline:hover{background:var(--gold);color:#0f0e0c}
 .btn-ghost{background:transparent;color:var(--text-dim);border:1px solid var(--border)}.btn-ghost:hover{border-color:var(--text-dim);color:var(--text)}
 .btn:disabled{opacity:.4;cursor:not-allowed}
 .btn-full{width:100%}
 .gap-8{display:flex;gap:8px}
+.small-muted{font-size:0.9rem;color:var(--text-dim)}
 .mt-8{margin-top:8px}
 .status-msg{font-size:.9rem;color:var(--text-dim);font-style:italic;text-align:center;padding:8px 0}
 .error-msg{font-size:.9rem;color:var(--red-gem);text-align:center;padding:8px 0}
@@ -82,6 +90,17 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,se
 @media(max-width:900px){.game-sidebar{grid-column:1}}
 .panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px}
 .panel-title{font-family:'Cinzel',serif;font-size:.7rem;letter-spacing:.12em;color:var(--gold);margin-bottom:10px;text-transform:uppercase}
+
+.copy-btn{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:8px 10px;border-radius:8px;cursor:pointer}
+
+@media(max-width:600px){
+	.lobby{padding:20px 14px}
+	.lobby-card{padding:16px}
+	.lobby h1{font-size:2.2rem}
+	.tagline{font-size:1rem}
+	.btn{width:100%;display:block}
+	.gap-8{flex-direction:column}
+}
 
 /* Bank */
 .bank-gems{display:flex;gap:8px;flex-wrap:wrap}
@@ -517,6 +536,17 @@ export default function SpenderApp() {
 									onClick={handleStart}>Start Game</button>
 							: <p className="status-msg">Waiting for host to start…</p>
 						}
+
+						{/* Reconnect token display for convenience */}
+						{roomData?.reconnect_tokens && roomData.reconnect_tokens[myId] && (
+							<div style={{marginTop:12,display:'flex',gap:8,alignItems:'center'}}>
+								<div className="small-muted">Reconnect token</div>
+								<div style={{flex:1,background:'var(--surface2)',padding:8,borderRadius:8}}>{roomData.reconnect_tokens[myId]}</div>
+								<button className="copy-btn" onClick={() => { navigator.clipboard?.writeText(roomData.reconnect_tokens[myId]); }}>
+									Copy
+								</button>
+							</div>
+						)}
 					</div>
 				</div>
 			</div>
