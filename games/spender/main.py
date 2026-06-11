@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
+import math
 import random
 import string
+from itertools import combinations
 from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -532,73 +535,6 @@ def _ai_score_card(card: dict, game: dict, ai_pid: str, urgency: float) -> float
     return point_score + bonus_score + noble_score
 
 
-def _ai_pick_gems(game: dict, ai_pid: str, urgency: float | None = None) -> list[str]:
-    if urgency is None:
-        urgency = _game_urgency(game)
-    ps = game["players"][ai_pid]
-    bonuses = bonuses_from(ps["purchased"])
-    token_total = sum(ps["tokens"].values())
-    max_take = min(3, 10 - token_total)
-    if max_take <= 0:
-        return []
-
-    need: dict[str, float] = {c: 0.0 for c in GEM_COLORS}
-    level_wt = {"L1": 1.0, "L2": 1.5, "L3": 2.0}
-
-    # Board cards + reserved: weight gem need by card value and how reachable it is
-    all_cards: list[tuple[dict, float]] = []
-    for lk in ["L1", "L2", "L3"]:
-        for card in (game["board"].get(lk) or []):
-            if card:
-                all_cards.append((card, level_wt[lk]))
-    for card in ps["reserved"]:
-        all_cards.append((card, 1.5))
-
-    for card, lw in all_cards:
-        pts = card["points"]
-        # In late game skip 0-pt filler cards — they won't win the game
-        if urgency > 0.65 and pts == 0:
-            continue
-        total_deficit = 0
-        card_deficit: dict[str, int] = {}
-        for color, cost in card["cost"].items():
-            if color not in need:
-                continue
-            effective = max(0, cost - bonuses.get(color, 0))
-            deficit = max(0, effective - ps["tokens"].get(color, 0))
-            if deficit > 0:
-                card_deficit[color] = deficit
-                total_deficit += deficit
-        if not card_deficit or total_deficit > 10:
-            continue
-        # Card value scales with points and urgency (high-pt cards worth much more late)
-        card_value = (pts + 1) * lw * (1.0 + urgency * pts * 0.5)
-        for color, deficit in card_deficit.items():
-            need[color] += deficit * card_value / max(1, total_deficit)
-
-    # Noble-aware: add gem need for board cards that give noble-required bonuses
-    for noble in (game.get("nobles") or []):
-        for bonus_color, req_count in noble.get("req", {}).items():
-            missing_bonus = max(0, req_count - bonuses.get(bonus_color, 0))
-            if missing_bonus <= 0:
-                continue
-            for lk in ["L1", "L2", "L3"]:
-                for card in (game["board"].get(lk) or []):
-                    if not card or card.get("bonus") != bonus_color:
-                        continue
-                    for color, cost in card["cost"].items():
-                        if color not in need:
-                            continue
-                        effective = max(0, cost - bonuses.get(color, 0))
-                        deficit = max(0, effective - ps["tokens"].get(color, 0))
-                        need[color] += deficit * missing_bonus * noble["points"] * 0.25
-
-    top = max(GEM_COLORS, key=lambda c: need[c]) if any(need[c] > 0 for c in GEM_COLORS) else None
-    if top and need[top] >= 6 and game["bank"].get(top, 0) >= 4 and max_take >= 2:
-        return [top, top]
-    candidates = sorted([c for c in GEM_COLORS if game["bank"].get(c, 0) > 0], key=lambda c: -need[c])
-    return candidates[:max_take]
-
 
 def _ai_discard_one(game: dict, ai_pid: str) -> None:
     ps = game["players"][ai_pid]
@@ -672,55 +608,256 @@ def _ai_find_reserve_target(game: dict, ai_pid: str, urgency: float) -> dict | N
     return best if best_score > 3.0 else None
 
 
-def _ai_choose_move(game: dict, ai_pid: str) -> dict:
-    ps = game["players"][ai_pid]
-    bonuses = bonuses_from(ps["purchased"])
-    urgency = _game_urgency(game)
-    token_total = sum(ps["tokens"].values())
-    opp_pid = next((p for p in game["order"] if p != ai_pid), None)
+# ─── MCTS ─────────────────────────────────────────────────────────────────────
 
-    # 1. Buy best affordable card, scored by urgency-aware heuristic
-    buyable = []
+def _get_all_moves(game: dict, pid: str) -> list[dict]:
+    """Enumerate candidate moves for MCTS: all buys, pruned gem combos, top reserves."""
+    ps = game["players"][pid]
+    bonuses = bonuses_from(ps["purchased"])
+    moves: list[dict] = []
+
     for lk in ["L3", "L2", "L1"]:
         for card in (game["board"].get(lk) or []):
             if card and can_afford(card["cost"], ps["tokens"], bonuses):
-                buyable.append(card)
+                moves.append({"type": "buy", "card_id": card["id"]})
     for card in ps["reserved"]:
         if can_afford(card["cost"], ps["tokens"], bonuses):
-            buyable.append(card)
-    if buyable:
-        best = max(buyable, key=lambda c: _ai_score_card(c, game, ai_pid, urgency))
-        return {"type": "buy", "card_id": best["id"]}
+            moves.append({"type": "buy", "card_id": card["id"]})
 
-    # 2. Block opponent if game is tense and they're close to a high-value card
-    if urgency >= 0.5 and opp_pid and len(ps["reserved"]) < 3:
-        block = _ai_find_block(game, ai_pid, opp_pid, urgency)
-        if block:
-            return {"type": "reserve", "card_id": block["id"]}
-
-    # 3. Take gems strategically toward best reachable targets
-    colors = _ai_pick_gems(game, ai_pid, urgency)
-    if colors:
-        return {"type": "take_gems", "colors": colors}
-
-    # 4. Reserve a high-value card for ourselves (locks in the card + gets gold)
-    if len(ps["reserved"]) < 3:
-        target = _ai_find_reserve_target(game, ai_pid, urgency)
-        if target:
-            return {"type": "reserve", "card_id": target["id"]}
-
-    # 5. Fallback: take any available gems
-    available = [c for c in GEM_COLORS if game["bank"].get(c, 0) > 0]
+    token_total = sum(ps["tokens"].values())
     max_take = min(3, 10 - token_total)
-    if available and max_take > 0:
-        return {"type": "take_gems", "colors": available[:max_take]}
+    if max_take > 0:
+        need: dict[str, float] = {c: 0.0 for c in GEM_COLORS}
+        for lk in ["L1", "L2", "L3"]:
+            for card in (game["board"].get(lk) or []):
+                if card:
+                    for color, cost in card["cost"].items():
+                        if color in need:
+                            eff = max(0, cost - bonuses.get(color, 0))
+                            need[color] += max(0, eff - ps["tokens"].get(color, 0))
+        available = [c for c in GEM_COLORS if game["bank"].get(c, 0) > 0]
+        by_need = sorted(available, key=lambda c: -need[c])
+        seen: set[tuple] = set()
+        # 3-color combos from top 4 most-needed colors
+        for combo in combinations(by_need[:4], min(3, max_take, len(by_need[:4]))):
+            key = tuple(sorted(combo))
+            if key not in seen:
+                moves.append({"type": "take_gems", "colors": list(combo)})
+                seen.add(key)
+        # 2-color combos from top 3 (extra breadth)
+        if max_take >= 2:
+            for combo in combinations(by_need[:3], min(2, len(by_need[:3]))):
+                key = tuple(sorted(combo))
+                if key not in seen:
+                    moves.append({"type": "take_gems", "colors": list(combo)})
+                    seen.add(key)
+        # Double-take best needed color
+        for c in by_need:
+            if game["bank"].get(c, 0) >= 4 and max_take >= 2:
+                key = (c, c)
+                if key not in seen:
+                    moves.append({"type": "take_gems", "colors": [c, c]})
+                    seen.add(key)
+                break
+
+    if len(ps["reserved"]) < 3:
+        urgency = _game_urgency(game)
+        opp_pid = next((p for p in game["order"] if p != pid), None)
+        reserve_ids: set[str] = set()
+        target = _ai_find_reserve_target(game, pid, urgency)
+        if target:
+            moves.append({"type": "reserve", "card_id": target["id"]})
+            reserve_ids.add(target["id"])
+        if opp_pid and urgency >= 0.4:
+            block = _ai_find_block(game, pid, opp_pid, urgency)
+            if block and block["id"] not in reserve_ids:
+                moves.append({"type": "reserve", "card_id": block["id"]})
+
+    return moves or [{"type": "take_gems", "colors": []}]
+
+
+def _sim_apply_move(game: dict, pid: str, mv: dict) -> None:
+    """Apply any move in-place for MCTS simulation. Calls _finish_turn; never calls _post_turn."""
+    ps = game["players"][pid]
+    bonuses = bonuses_from(ps["purchased"])
+
+    if mv["type"] == "buy":
+        card_id = mv["card_id"]
+        card: dict | None = None
+        source: tuple | None = None
+        for lk in ["L1", "L2", "L3"]:
+            for i, c in enumerate(game["board"][lk]):
+                if c and c["id"] == card_id:
+                    card, source = c, ("board", lk, i)
+                    break
+            if card:
+                break
+        if not card:
+            for i, c in enumerate(ps["reserved"]):
+                if c["id"] == card_id:
+                    card, source = c, ("reserved", i)
+                    break
+        if card and source:
+            spend = calc_spend(card["cost"], ps["tokens"], bonuses)
+            for c2, n in spend.items():
+                ps["tokens"][c2] = ps["tokens"].get(c2, 0) - n
+                game["bank"][c2] = game["bank"].get(c2, 0) + n
+            ps["purchased"].append(card)
+            if source[0] == "board":
+                lk2 = source[1]
+                game["board"][lk2][source[2]] = game["decks"][lk2].pop() if game["decks"][lk2] else None
+            else:
+                ps["reserved"].pop(source[1])
+            claimable = _check_nobles(game, pid)
+            if claimable:
+                noble = claimable[0]
+                ps["nobles"].append(noble)
+                game["nobles"] = [x for x in game["nobles"] if x["id"] != noble["id"]]
+
+    elif mv["type"] == "take_gems":
+        for c2 in mv["colors"]:
+            if game["bank"].get(c2, 0) > 0:
+                game["bank"][c2] -= 1
+                ps["tokens"][c2] = ps["tokens"].get(c2, 0) + 1
+        while sum(ps["tokens"].values()) > 10:
+            _ai_discard_one(game, pid)
+
+    elif mv["type"] == "reserve":
+        card_id = mv.get("card_id")
+        card = None
+        if card_id:
+            for lk in ["L1", "L2", "L3"]:
+                for i, c in enumerate(game["board"][lk]):
+                    if c and c["id"] == card_id:
+                        card = c
+                        game["board"][lk][i] = game["decks"][lk].pop() if game["decks"][lk] else None
+                        break
+                if card:
+                    break
+        if card:
+            ps["reserved"].append(card)
+            if game["bank"].get("gold", 0) > 0:
+                game["bank"]["gold"] -= 1
+                ps["tokens"]["gold"] = ps["tokens"].get("gold", 0) + 1
+            while sum(ps["tokens"].values()) > 10:
+                _ai_discard_one(game, pid)
+
+    _finish_turn(game, pid)
+
+
+def _fast_rollout_move(game: dict, pid: str) -> dict:
+    """Lightweight move selection for simulation rollouts: buy best pts, else take needed gems."""
+    ps = game["players"][pid]
+    bonuses = bonuses_from(ps["purchased"])
+
+    best_card: dict | None = None
+    best_pts = -1
+    for lk in ["L3", "L2", "L1"]:
+        for card in (game["board"].get(lk) or []):
+            if card and can_afford(card["cost"], ps["tokens"], bonuses) and card["points"] > best_pts:
+                best_card = card
+                best_pts = card["points"]
+    for card in ps["reserved"]:
+        if can_afford(card["cost"], ps["tokens"], bonuses) and card["points"] > best_pts:
+            best_card = card
+            best_pts = card["points"]
+    if best_card:
+        return {"type": "buy", "card_id": best_card["id"]}
+
+    token_total = sum(ps["tokens"].values())
+    max_take = min(3, 10 - token_total)
+    if max_take > 0:
+        need = {c: 0 for c in GEM_COLORS}
+        for lk in ["L1", "L2", "L3"]:
+            for card in (game["board"].get(lk) or []):
+                if card:
+                    for color, cost in card["cost"].items():
+                        if color in need:
+                            eff = max(0, cost - bonuses.get(color, 0))
+                            need[color] += max(0, eff - ps["tokens"].get(color, 0))
+        available = sorted([c for c in GEM_COLORS if game["bank"].get(c, 0) > 0], key=lambda c: -need[c])
+        if available:
+            return {"type": "take_gems", "colors": available[:max_take]}
+
     return {"type": "take_gems", "colors": []}
+
+
+def _sim_rollout(game: dict, max_turns: int = 50) -> str | list | None:
+    """Play out a simulation to terminal or max_turns using fast heuristic for both players."""
+    for _ in range(max_turns):
+        if game.get("phase") != "playing":
+            break
+        pid = game["turn"]
+        mv = _fast_rollout_move(game, pid)
+        _sim_apply_move(game, pid, mv)
+
+    if game.get("phase") == "over":
+        return game.get("winner")
+
+    # Hit turn limit — judge by current score
+    scores = {pid: (_calc_points(game["players"][pid]), -len(game["players"][pid]["purchased"]))
+              for pid in game["order"]}
+    best = max(scores.values())
+    leaders = [pid for pid, s in scores.items() if s == best]
+    return leaders[0] if len(leaders) == 1 else leaders
+
+
+def _mcts_choose_move(game: dict, ai_pid: str, time_limit: float = 0.5) -> dict:
+    """UCB1 flat Monte Carlo tree search. Each candidate move is evaluated via game rollouts."""
+    candidates = _get_all_moves(game, ai_pid)
+    if len(candidates) == 1:
+        return candidates[0]
+
+    # Pre-apply each candidate move to get the resulting state
+    # node: [move, post_move_game, visits, wins]
+    nodes: list[list] = []
+    for mv in candidates:
+        g = copy.deepcopy(game)
+        _sim_apply_move(g, ai_pid, mv)
+        nodes.append([mv, g, 0, 0.0])
+
+    # Immediately take any move that wins right now
+    for node in nodes:
+        if node[1].get("phase") == "over":
+            w = node[1].get("winner")
+            if w == ai_pid or (isinstance(w, list) and ai_pid in w):
+                return node[0]
+
+    deadline = time.time() + time_limit
+    total_visits = 0
+
+    while time.time() < deadline:
+        if total_visits == 0:
+            node = nodes[0]
+        else:
+            log_n = math.log(total_visits)
+            node = max(
+                nodes,
+                key=lambda n: (
+                    n[3] / n[2] + 1.414 * math.sqrt(log_n / n[2])
+                    if n[2] > 0 else float("inf")
+                ),
+            )
+
+        g_sim = copy.deepcopy(node[1])
+        winner = _sim_rollout(g_sim)
+
+        node[2] += 1
+        if winner == ai_pid:
+            node[3] += 1.0
+        elif isinstance(winner, list) and ai_pid in winner:
+            node[3] += 0.5
+        total_visits += 1
+
+    # Pick most-visited move (UCB1 concentrates visits on best moves)
+    best_node = max(nodes, key=lambda n: (n[2], n[3]))
+    return best_node[0]
 
 
 def _run_ai_turn(game: dict, ai_pid: str) -> None:
     ps = game["players"][ai_pid]
     bonuses = bonuses_from(ps["purchased"])
-    mv = _ai_choose_move(game, ai_pid)
+    mv = _mcts_choose_move(game, ai_pid)
 
     if mv["type"] == "buy":
         card_id = mv["card_id"]
