@@ -446,11 +446,40 @@ def _advance_turn(game: dict) -> str:
     return order[(order.index(game["turn"]) + 1) % len(order)]
 
 
+def _calc_points(ps: dict) -> int:
+    return sum(c["points"] for c in ps["purchased"]) + sum(n["points"] for n in ps["nobles"])
+
+
+def _resolve_winner(game: dict) -> None:
+    """End the game: pick winner(s) via tiebreakers — most pts → fewest purchased → fewest reserved → shared."""
+    def score_key(pid):
+        ps = game["players"][pid]
+        return (_calc_points(ps), -len(ps["purchased"]), -len(ps["reserved"]))
+
+    scores = {pid: score_key(pid) for pid in game["order"]}
+    best = max(scores.values())
+    winners = [pid for pid, s in scores.items() if s == best]
+    game["phase"] = "over"
+    game["winner"] = winners[0] if len(winners) == 1 else winners
+
+
+def _finish_turn(game: dict, pid: str) -> None:
+    """Advance turn after pid's action; start final-round countdown if pid hit 15+; end game when round completes."""
+    if _calc_points(game["players"][pid]) >= 15 and "final_round_trigger" not in game:
+        game["final_round_trigger"] = pid
+
+    new_turn = _advance_turn(game)
+    game["turn"] = new_turn
+
+    if "final_round_trigger" in game:
+        trigger_idx = game["order"].index(game["final_round_trigger"])
+        if game["order"].index(new_turn) <= trigger_idx:
+            _resolve_winner(game)
+
+
 def _check_winner(game: dict) -> str | None:
     for pid in game["order"]:
-        ps = game["players"][pid]
-        pts = sum(c["points"] for c in ps["purchased"]) + sum(n["points"] for n in ps["nobles"])
-        if pts >= 15:
+        if _calc_points(game["players"][pid]) >= 15:
             return pid
     return None
 
@@ -633,7 +662,9 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                             if sum(ps["tokens"].values()) > 10:
                                                 _discard_pid = pid
                                             else:
-                                                g["turn"] = _advance_turn(g)
+                                                _finish_turn(g, pid)
+                                                if g.get("phase") == "over":
+                                                    r["status"] = "over"
 
                             elif move_type == "discard":
                                 color = mv.get("color")
@@ -646,7 +677,9 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                     if sum(ps["tokens"].values()) > 10:
                                         _discard_pid = pid
                                     else:
-                                        g["turn"] = _advance_turn(g)
+                                        _finish_turn(g, pid)
+                                        if g.get("phase") == "over":
+                                            r["status"] = "over"
 
                             elif move_type == "buy":
                                 card_id = mv.get("card_id")
@@ -686,13 +719,9 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                             n = claimable[0]
                                             ps["nobles"].append(n)
                                             g["nobles"] = [x for x in g["nobles"] if x["id"] != n["id"]]
-                                        winner = _check_winner(g)
-                                        if winner:
-                                            g["phase"] = "over"
-                                            g["winner"] = winner
+                                        _finish_turn(g, pid)
+                                        if g.get("phase") == "over":
                                             r["status"] = "over"
-                                        else:
-                                            g["turn"] = _advance_turn(g)
                                         _did_change = True
 
                             elif move_type == "reserve":
@@ -726,7 +755,9 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                         if sum(ps["tokens"].values()) > 10:
                                             _discard_pid = pid
                                         else:
-                                            g["turn"] = _advance_turn(g)
+                                            _finish_turn(g, pid)
+                                            if g.get("phase") == "over":
+                                                r["status"] = "over"
                             else:
                                 _err = "unknown move type"
 

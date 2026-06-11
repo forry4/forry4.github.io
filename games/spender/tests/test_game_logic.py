@@ -237,3 +237,84 @@ def test_take_gems_double_allowed_with_4_in_bank():
     doubles = [c for c, n in freq.items() if n == 2]
     is_blocked = bool(doubles and g["bank"].get(doubles[0], 0) < 4)
     assert not is_blocked
+
+
+# ─── Final-round and tiebreaker logic ────────────────────────────────────────
+
+def test_p1_hits_15_p2_still_gets_turn():
+    """If p1 (index 0) hits 15+ pts, game must NOT end until p2 has played."""
+    g = make_game_state("p1", "p2")
+    g["players"]["p1"]["purchased"] = [
+        {"bonus": "blue", "cost": {}, "points": 15, "id": "c1"},
+    ]
+    # Simulate end of p1's turn
+    main._finish_turn(g, "p1")
+    # final_round_trigger set, but game not over — p2 still needs to play
+    assert g.get("final_round_trigger") == "p1"
+    assert g.get("phase") != "over"
+    assert g["turn"] == "p2"
+
+
+def test_p2_hits_15_game_ends_immediately():
+    """If p2 (index 1) hits 15+ pts on their turn, the game ends — p1 already had their turn."""
+    g = make_game_state("p1", "p2")
+    g["turn"] = "p2"
+    g["players"]["p2"]["purchased"] = [
+        {"bonus": "blue", "cost": {}, "points": 15, "id": "c1"},
+    ]
+    main._finish_turn(g, "p2")
+    assert g.get("phase") == "over"
+
+
+def test_final_round_ends_after_p2_plays():
+    """After p1 triggers 15+, p2 plays their final turn and then the game resolves."""
+    g = make_game_state("p1", "p2")
+    g["players"]["p1"]["purchased"] = [
+        {"bonus": "blue", "cost": {}, "points": 15, "id": "c1"},
+    ]
+    # p1's turn ends
+    main._finish_turn(g, "p1")
+    assert g.get("phase") != "over"
+    # Now p2 takes their final turn (no points scored — p1 still wins)
+    main._finish_turn(g, "p2")
+    assert g.get("phase") == "over"
+    assert g["winner"] == "p1"
+
+
+def test_resolve_winner_tiebreak_fewest_purchased():
+    """Tiebreak: both at same pts → player with fewer purchased cards wins."""
+    g = make_game_state("p1", "p2")
+    g["players"]["p1"]["purchased"] = [
+        {"bonus": "blue", "cost": {}, "points": 15, "id": "c1"},
+        {"bonus": "red",  "cost": {}, "points": 0,  "id": "c2"},
+        {"bonus": "red",  "cost": {}, "points": 0,  "id": "c3"},
+    ]
+    g["players"]["p2"]["purchased"] = [
+        {"bonus": "blue", "cost": {}, "points": 15, "id": "c4"},
+    ]
+    main._resolve_winner(g)
+    # p2 has 1 card vs p1's 3 — p2 wins the tiebreak
+    assert g["winner"] == "p2"
+
+
+def test_resolve_winner_tiebreak_fewest_reserved():
+    """Second tiebreak: same pts and same purchased count → fewest reserved cards wins."""
+    g = make_game_state("p1", "p2")
+    card = {"bonus": "blue", "cost": {}, "points": 15, "id": "c1"}
+    g["players"]["p1"]["purchased"] = [dict(card, id="c1")]
+    g["players"]["p2"]["purchased"] = [dict(card, id="c2")]
+    g["players"]["p1"]["reserved"] = [{"bonus": "red", "cost": {}, "points": 0, "id": "r1"}]
+    # p2 has no reserved — p2 wins
+    main._resolve_winner(g)
+    assert g["winner"] == "p2"
+
+
+def test_resolve_winner_shared_victory():
+    """All tiebreakers exhausted → shared victory returned as a list."""
+    g = make_game_state("p1", "p2")
+    card = {"bonus": "blue", "cost": {}, "points": 15, "id": "c1"}
+    g["players"]["p1"]["purchased"] = [dict(card, id="c1")]
+    g["players"]["p2"]["purchased"] = [dict(card, id="c2")]
+    main._resolve_winner(g)
+    assert isinstance(g["winner"], list)
+    assert set(g["winner"]) == {"p1", "p2"}

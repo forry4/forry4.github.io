@@ -955,22 +955,24 @@ export default function SpenderApp() {
 
 	// Winner screen
 	if (screen === "game" && game?.phase === "over") {
-		const winner = game.winner;
-		const winnerName = roomData?.players?.[winner] || winner;
+		const winners = Array.isArray(game.winner) ? game.winner : [game.winner];
+		const isTie = winners.length > 1;
+		const winnerNames = winners.map(w => roomData?.players?.[w] || w).join(" & ");
 		return (
 			<>
 				<style>{css}</style>
 				<div className="app">
 					<div className="winner-screen">
-						<div className="winner-title">Victory!</div>
-						<p className="winner-sub">{winnerName} claims the gem trade</p>
+						<div className="winner-title">{isTie ? "Draw!" : "Victory!"}</div>
+						<p className="winner-sub">{isTie ? `${winnerNames} share the gem trade` : `${winnerNames} claims the gem trade`}</p>
 						<div className="final-scores">
 							{(game.order || []).map(pid => {
 								const score = totalPoints(game.players?.[pid]?.purchased || [], game.players?.[pid]?.nobles || []);
 								const name = roomData?.players?.[pid] || pid.slice(0, 6);
+								const isWinner = winners.includes(pid);
 								return (
-									<div key={pid} className={`score-row${pid === winner ? " winner" : ""}`}>
-										{pid === winner ? "★ " : ""}{name} — {score} pts
+									<div key={pid} className={`score-row${isWinner ? " winner" : ""}`}>
+										{isWinner ? "★ " : ""}{name} — {score} pts
 									</div>
 								);
 							})}
