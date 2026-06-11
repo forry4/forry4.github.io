@@ -4,12 +4,15 @@ import asyncio
 import json
 import random
 import string
-from collections import defaultdict
 from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import logging
+import sqlite3
+import os
+import time
 
 app = FastAPI(title="Spender API")
 
@@ -23,8 +26,8 @@ app.add_middleware(
 
 @app.get("/health")
 async def health():
-    """Simple health check used by platforms and load balancers."""
     return {"status": "ok", "service": "spender", "version": "1.0"}
+
 
 # ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -111,9 +114,7 @@ def build_deck() -> dict:
     l1 = [make_card(1, d, i) for i, d in enumerate(LEVEL1)]
     l2 = [make_card(2, d, i) for i, d in enumerate(LEVEL2)]
     l3 = [make_card(3, d, i) for i, d in enumerate(LEVEL3)]
-    random.shuffle(l1)
-    random.shuffle(l2)
-    random.shuffle(l3)
+    random.shuffle(l1); random.shuffle(l2); random.shuffle(l3)
     return {"L1": l1, "L2": l2, "L3": l3}
 
 
@@ -140,12 +141,12 @@ def calc_spend(cost: dict, tokens: dict, bonuses: dict) -> dict[str, int]:
         need = max(0, cost.get(c, 0) - bonuses.get(c, 0))
         have = min(tokens.get(c, 0), need)
         spend[c] = have
-        gap = need - have
-        spend["gold"] = spend.get("gold", 0) + gap
+        spend["gold"] = spend.get("gold", 0) + (need - have)
     return spend
 
 
-# ─── Minimal WebSocket / room manager (in-memory, single-process) ──────────
+# ─── Room manager ────────────────────────────────────────────────────────────
+
 ROOMS: dict[str, dict] = {}
 ROOM_LOCK = asyncio.Lock()
 LOG = logging.getLogger("games.spender")
@@ -156,17 +157,266 @@ def normalize_room(rid: str) -> str:
     return (rid or "").upper()
 
 
+# ─── Database ────────────────────────────────────────────────────────────────
+
+DB_PATH = os.path.join(os.path.dirname(__file__), "users.db")
+
+
+def get_db_conn():
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        password_hash TEXT,
+        session_token TEXT,
+        session_expiry INTEGER
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS reconnect_tokens (
+        token TEXT PRIMARY KEY,
+        user_id TEXT,
+        room_id TEXT,
+        player_id TEXT,
+        expires_at INTEGER,
+        used INTEGER DEFAULT 0
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS games (
+        id TEXT PRIMARY KEY,
+        status TEXT NOT NULL DEFAULT 'open',
+        player1_id TEXT,
+        player1_name TEXT,
+        player2_id TEXT,
+        player2_name TEXT,
+        host_id TEXT,
+        state_json TEXT,
+        created_at INTEGER,
+        updated_at INTEGER
+    )""")
+    conn.commit()
+    conn.close()
+
+
+def gen_token(n=32):
+    return ''.join(random.choices(string.ascii_letters + string.digits, k=n))
+
+
+def create_user(name: str, password: str) -> dict | None:
+    import hashlib
+    uid = gen_token(10)
+    salt = gen_token(6)
+    h = hashlib.sha256((salt + password).encode()).hexdigest()
+    conn = get_db_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("INSERT INTO users (id,name,password_hash) VALUES (?,?,?)", (uid, name, f"{salt}${h}"))
+        conn.commit()
+    except Exception:
+        conn.close()
+        return None
+    conn.close()
+    return {"id": uid, "name": name}
+
+
+def authenticate_user(name: str, password: str) -> dict | None:
+    import hashlib
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM users WHERE name = ?", (name,))
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return None
+    try:
+        salt, h = row["password_hash"].split("$")
+    except Exception:
+        conn.close()
+        return None
+    if hashlib.sha256((salt + password).encode()).hexdigest() != h:
+        conn.close()
+        return None
+    token = gen_token(32)
+    expiry = int(time.time()) + 7 * 24 * 3600
+    cur.execute("UPDATE users SET session_token=?, session_expiry=? WHERE id=?", (token, expiry, row["id"]))
+    conn.commit()
+    conn.close()
+    return {"id": row["id"], "name": row["name"], "session_token": token}
+
+
+def get_user_by_session(token: str) -> dict | None:
+    if not token:
+        return None
+    conn = get_db_conn()
+    cur = conn.cursor()
+    now = int(time.time())
+    cur.execute("SELECT * FROM users WHERE session_token=? AND session_expiry>?", (token, now))
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {"id": row["id"], "name": row["name"]}
+
+
+def create_reconnect_token(user_id: str, room_id: str, player_id: str, ttl: int = 120) -> str:
+    token = gen_token(12)
+    expires_at = int(time.time()) + ttl
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO reconnect_tokens (token,user_id,room_id,player_id,expires_at,used) VALUES (?,?,?,?,?,0)",
+                (token, user_id, room_id, player_id, expires_at))
+    conn.commit()
+    conn.close()
+    return token
+
+
+def validate_reconnect_token(token: str) -> dict | None:
+    conn = get_db_conn()
+    cur = conn.cursor()
+    now = int(time.time())
+    cur.execute("SELECT * FROM reconnect_tokens WHERE token=? AND expires_at>? AND used=0", (token, now))
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {"token": row["token"], "user_id": row["user_id"], "room_id": row["room_id"], "player_id": row["player_id"]}
+
+
+def mark_reconnect_token_used(token: str):
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE reconnect_tokens SET used=1 WHERE token=?", (token,))
+    conn.commit()
+    conn.close()
+
+
+# ─── Game persistence helpers ─────────────────────────────────────────────────
+
+def save_game(room_id: str) -> None:
+    """Upsert the current in-memory room state to the games table."""
+    room = ROOMS.get(room_id)
+    if not room:
+        return
+    pids = list(room.get("players", {}).keys())
+    names = list(room.get("players", {}).values())
+    state = {
+        "players": room.get("players", {}),
+        "host": room.get("host"),
+        "status": room.get("status", "open"),
+        "game": room.get("game"),
+        "meta": room.get("meta", {}),
+    }
+    now = int(time.time())
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM games WHERE id=?", (room_id,))
+    exists = cur.fetchone() is not None
+    if exists:
+        cur.execute("""UPDATE games SET status=?, player2_id=?, player2_name=?, state_json=?, updated_at=?
+                       WHERE id=?""",
+                    (room.get("status"),
+                     pids[1] if len(pids) > 1 else None,
+                     names[1] if len(names) > 1 else None,
+                     json.dumps(state), now, room_id))
+    else:
+        cur.execute("""INSERT INTO games
+                       (id,status,player1_id,player1_name,player2_id,player2_name,host_id,state_json,created_at,updated_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    (room_id, room.get("status", "open"),
+                     pids[0] if pids else None, names[0] if names else None,
+                     pids[1] if len(pids) > 1 else None, names[1] if len(names) > 1 else None,
+                     room.get("host"), json.dumps(state), now, now))
+    conn.commit()
+    conn.close()
+
+
+def load_game_to_memory(room_id: str) -> bool:
+    """Load a persisted game from DB into ROOMS. Returns True if found."""
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT state_json FROM games WHERE id=?", (room_id,))
+    row = cur.fetchone()
+    conn.close()
+    if not row or not row["state_json"]:
+        return False
+    try:
+        state = json.loads(row["state_json"])
+    except Exception:
+        return False
+    ROOMS[room_id] = {
+        "players": state.get("players", {}),
+        "host": state.get("host"),
+        "status": state.get("status", "open"),
+        "game": state.get("game"),
+        "meta": state.get("meta", {}),
+        "sockets": {},
+    }
+    LOG.info("loaded game %s from DB", room_id)
+    return True
+
+
+def list_open_games() -> list[dict]:
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute("""SELECT id, player1_name, created_at FROM games
+                   WHERE status='open' ORDER BY created_at DESC LIMIT 20""")
+    rows = cur.fetchall()
+    conn.close()
+    return [{"id": r["id"], "host_name": r["player1_name"], "created_at": r["created_at"]} for r in rows]
+
+
+def list_user_games(user_id: str) -> list[dict]:
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute("""SELECT id, status, player1_id, player1_name, player2_id, player2_name,
+                          state_json, created_at, updated_at
+                   FROM games
+                   WHERE (player1_id=? OR player2_id=?) AND status != 'over'
+                   ORDER BY updated_at DESC""", (user_id, user_id))
+    rows = cur.fetchall()
+    conn.close()
+    result = []
+    for r in rows:
+        try:
+            state = json.loads(r["state_json"] or "{}")
+        except Exception:
+            state = {}
+        g = state.get("game") or {}
+        is_p1 = r["player1_id"] == user_id
+        opponent = r["player2_name"] if is_p1 else r["player1_name"]
+        your_turn = isinstance(g, dict) and g.get("turn") == user_id
+        result.append({
+            "id": r["id"],
+            "status": r["status"],
+            "opponent_name": opponent,
+            "your_turn": your_turn,
+            "created_at": r["created_at"],
+            "updated_at": r["updated_at"],
+        })
+    return result
+
+
+init_db()
+
+
+# ─── Room helpers ─────────────────────────────────────────────────────────────
+
 async def broadcast_room(room_id: str, msg: dict[str, Any]):
     room = ROOMS.get(room_id)
     if not room:
         return
-    websockets = list(room.get("sockets", {}).values())
     data = json.dumps(msg)
-    for ws in websockets:
+    for ws in list(room.get("sockets", {}).values()):
         try:
             await ws.send_text(data)
         except Exception:
-            # ignore send errors; cleanup happens on disconnect
             pass
 
 
@@ -175,11 +425,37 @@ def mk_room_state(room_id: str) -> dict[str, Any]:
     return {
         "room_id": room_id,
         "players": room.get("players", {}),
-        "status": room.get("status", "waiting"),
+        "host": room.get("host"),
+        "status": room.get("status", "open"),
         "game": room.get("game"),
-        "reconnect_tokens": {p: info.get("token") for p, info in room.get("meta", {}).items()} if room.get("meta") else {}
+        "reconnect_tokens": {p: info.get("token") for p, info in room.get("meta", {}).items()} if room.get("meta") else {},
     }
 
+
+def _deal_board(decks: dict) -> dict:
+    return {lk: [decks[lk].pop() if decks[lk] else None for _ in range(4)] for lk in ["L1", "L2", "L3"]}
+
+
+def _check_nobles(game: dict, pid: str) -> list:
+    bonuses = bonuses_from(game["players"][pid]["purchased"])
+    return [n for n in game["nobles"] if all(bonuses.get(c, 0) >= v for c, v in n["req"].items())]
+
+
+def _advance_turn(game: dict) -> str:
+    order = game["order"]
+    return order[(order.index(game["turn"]) + 1) % len(order)]
+
+
+def _check_winner(game: dict) -> str | None:
+    for pid in game["order"]:
+        ps = game["players"][pid]
+        pts = sum(c["points"] for c in ps["purchased"]) + sum(n["points"] for n in ps["nobles"])
+        if pts >= 15:
+            return pid
+    return None
+
+
+# ─── WebSocket ────────────────────────────────────────────────────────────────
 
 @app.websocket("/ws/{room}/{player}")
 async def ws_room_player(websocket: WebSocket, room: str, player: str):
@@ -187,15 +463,17 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
     room_id = normalize_room(room)
     pid = player
     LOG.info("ws connect room=%s player=%s", room_id, pid)
+
     async with ROOM_LOCK:
-        r = ROOMS.setdefault(room_id, {"players": {}, "sockets": {}, "status": "waiting", "game": None})
-        # attach socket immediately (may be replaced by a later join with name)
+        if room_id not in ROOMS:
+            load_game_to_memory(room_id)
+        r = ROOMS.setdefault(room_id, {"players": {}, "sockets": {}, "status": "open", "game": None, "host": None})
         r["sockets"][pid] = websocket
-        # ensure meta block for tokens/players
         r.setdefault("meta", {})
+
     try:
-        # initial send: advertise current room state
         await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
+
         while True:
             text = await websocket.receive_text()
             try:
@@ -205,33 +483,40 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                 continue
 
             action = msg.get("action")
+
+            # ── create ──────────────────────────────────────────────────────
             if action == "create":
                 name = msg.get("name") or pid
                 async with ROOM_LOCK:
-                    r = ROOMS.setdefault(room_id, {"players": {}, "sockets": {}, "status": "waiting", "game": None})
+                    r = ROOMS.setdefault(room_id, {"players": {}, "sockets": {}, "status": "open", "game": None, "host": None})
                     r["players"][pid] = name
-                    # create minimal game state
-                    r["game"] = {"bank": {c:4 for c in GEM_COLORS}, "deck": build_deck(), "players_state": {}, "turn": None}
-                    # assign initial tokens and metadata
-                    r["meta"][pid] = {"token": ''.join(random.choices(string.ascii_letters+string.digits, k=6))}
-                    r["game"]["players_state"][pid] = {"tokens": empty_gems(), "purchased": [], "reserved": [], "nobles": []}
+                    r["host"] = pid
+                    r["status"] = "open"
+                    bank = {c: 4 for c in GEM_COLORS}
+                    bank["gold"] = 5
+                    r["game"] = {
+                        "bank": bank, "decks": build_deck(), "board": None, "nobles": None,
+                        "players": {}, "turn": None, "order": [], "phase": "waiting", "winner": None,
+                    }
+                    r["meta"][pid] = {"token": gen_token(6)}
+                    r["game"]["players"][pid] = {"tokens": empty_gems(), "purchased": [], "reserved": [], "nobles": []}
+                save_game(room_id)
                 await websocket.send_text(json.dumps({"type": "created", "room_id": room_id, "room": mk_room_state(room_id)}))
-                await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
 
+            # ── reconnect ───────────────────────────────────────────────────
             elif action == "reconnect":
                 token = msg.get("token")
                 async with ROOM_LOCK:
-                    meta = r.setdefault("meta", {})
-                    info = meta.get(pid)
+                    info = r.setdefault("meta", {}).get(pid)
                     if not info or info.get("token") != token:
                         await websocket.send_text(json.dumps({"type": "error", "message": "invalid token"}))
                         continue
-                    # swap socket
                     r["sockets"][pid] = websocket
                 LOG.info("player %s reconnected to room %s", pid, room_id)
                 await websocket.send_text(json.dumps({"type": "reconnected", "room": mk_room_state(room_id)}))
                 await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
 
+            # ── join ────────────────────────────────────────────────────────
             elif action == "join":
                 name = msg.get("name") or pid
                 async with ROOM_LOCK:
@@ -239,88 +524,221 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                         await websocket.send_text(json.dumps({"type": "error", "message": "room not found"}))
                         continue
                     r = ROOMS[room_id]
+                    if len(r["players"]) >= 2 and pid not in r["players"]:
+                        await websocket.send_text(json.dumps({"type": "error", "message": "room full"}))
+                        continue
                     r["players"][pid] = name
                     r["sockets"][pid] = websocket
-                    # assign reconnect token and player state if missing
                     r.setdefault("meta", {})
                     if pid not in r["meta"]:
-                        r["meta"][pid] = {"token": ''.join(random.choices(string.ascii_letters+string.digits, k=6))}
-                    if r.get("game") and pid not in r["game"]["players_state"]:
-                        r["game"]["players_state"][pid] = {"tokens": empty_gems(), "purchased": [], "reserved": [], "nobles": []}
+                        r["meta"][pid] = {"token": gen_token(6)}
+                    if r.get("game") and pid not in r["game"]["players"]:
+                        r["game"]["players"][pid] = {"tokens": empty_gems(), "purchased": [], "reserved": [], "nobles": []}
+                save_game(room_id)
                 await websocket.send_text(json.dumps({"type": "joined", "room_id": room_id, "room": mk_room_state(room_id)}))
                 await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
 
-            elif action == "reconnect":
+            # ── auth_reconnect ──────────────────────────────────────────────
+            elif action == "auth_reconnect":
                 token = msg.get("token")
+                info = validate_reconnect_token(token)
+                if not info:
+                    await websocket.send_text(json.dumps({"type": "error", "message": "invalid or expired reconnect token"}))
+                    continue
+                if normalize_room(info.get("room_id") or "") != room_id or info.get("player_id") != pid:
+                    await websocket.send_text(json.dumps({"type": "error", "message": "token mismatch"}))
+                    continue
                 async with ROOM_LOCK:
-                    r = ROOMS.get(room_id)
-                    if not r:
-                        await websocket.send_text(json.dumps({"type":"error","message":"room not found"}))
-                        continue
-                    meta = r.setdefault("meta", {})
-                    info = meta.get(pid)
-                    if not info or info.get("token") != token:
-                        await websocket.send_text(json.dumps({"type":"error","message":"invalid token"}))
-                        continue
+                    r = ROOMS.setdefault(room_id, {"players": {}, "sockets": {}, "status": "open", "game": None, "host": None})
+                    r.setdefault("meta", {})
                     r["sockets"][pid] = websocket
-                LOG.info("player %s reconnected (base handler) to room %s", pid, room_id)
-                await websocket.send_text(json.dumps({"type":"reconnected","room":mk_room_state(room_id)}))
-                await broadcast_room(room_id, {"type":"room_update","room":mk_room_state(room_id)})
-
-            elif action == "reconnect":
-                token = msg.get("token")
-                async with ROOM_LOCK:
-                    meta = r.setdefault("meta", {})
-                    info = meta.get(pid)
-                    if not info or info.get("token") != token:
-                        await websocket.send_text(json.dumps({"type": "error", "message": "invalid token"}))
-                        continue
-                    r["sockets"][pid] = websocket
-                LOG.info("player %s reconnected (join handler) to room %s", pid, room_id)
+                    r["meta"].setdefault(pid, {})["user_id"] = info.get("user_id")
+                mark_reconnect_token_used(token)
                 await websocket.send_text(json.dumps({"type": "reconnected", "room": mk_room_state(room_id)}))
                 await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
 
+            # ── start ───────────────────────────────────────────────────────
             elif action == "start":
-                # validate enough players and initialize turn order
+                _err: str | None = None
                 async with ROOM_LOCK:
                     r = ROOMS.get(room_id)
-                    if r and len(r["players"])>=2:
+                    if not r or r.get("host") != pid:
+                        _err = "only the host can start"
+                    elif len(r["players"]) < 2:
+                        _err = "need 2 players to start"
+                    else:
                         r["status"] = "playing"
-                        # set starting turn (first player key)
-                        first = next(iter(r["players"].keys()))
-                        if r.get("game"):
-                            r["game"]["turn"] = first
-                await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
+                        g = r["game"]
+                        order = list(r["players"].keys())
+                        random.shuffle(order)
+                        g["order"] = order
+                        g["turn"] = order[0]
+                        g["phase"] = "playing"
+                        g["board"] = _deal_board(g["decks"])
+                        nobles_pool = list(ALL_NOBLES)
+                        random.shuffle(nobles_pool)
+                        g["nobles"] = nobles_pool[:len(order) + 1]
+                if _err:
+                    await websocket.send_text(json.dumps({"type": "error", "message": _err}))
+                else:
+                    save_game(room_id)
+                    await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
 
+            # ── move ────────────────────────────────────────────────────────
             elif action == "move":
                 mv = msg.get("move") or {}
-                # basic validation: must be playing
+                _err = None
+                _did_change = False
+                _discard_pid: str | None = None
+
                 async with ROOM_LOCK:
                     r = ROOMS.get(room_id)
-                    if not r or r.get("status")!="playing":
-                        await websocket.send_text(json.dumps({"type":"error","message":"game not started"}))
-                        continue
-                    # simple move types handled: take_gems (colors), buy (card_id)
-                    if mv.get("type")=="take_gems":
-                        colors = mv.get("colors", [])
-                        # naive: decrement bank and add to player's tokens
-                        ok = True
-                        for c in colors:
-                            if r["game"]["bank"].get(c,0)<=0:
-                                ok = False
-                        if not ok:
-                            await websocket.send_text(json.dumps({"type":"error","message":"not enough gems in bank"}))
-                            continue
-                        for c in colors:
-                            r["game"]["bank"][c] -= 1
-                            r["game"]["players_state"][pid]["tokens"][c] = r["game"]["players_state"][pid]["tokens"].get(c,0)+1
-                        await broadcast_room(room_id, {"type":"room_update","room":mk_room_state(room_id)})
-                    elif mv.get("type")=="buy":
-                        # minimal: just broadcast buy attempt; full buy logic is out of scope for now
-                        await broadcast_room(room_id, {"type":"move","from":pid,"move":mv})
+                    if not r or r.get("status") != "playing":
+                        _err = "game not started"
                     else:
-                        await websocket.send_text(json.dumps({"type":"error","message":"unknown move type"}))
-                        continue
+                        g = r["game"]
+                        if g.get("phase") == "over":
+                            _err = "game is over"
+                        elif g.get("turn") != pid:
+                            _err = "not your turn"
+                        else:
+                            ps = g["players"][pid]
+                            move_type = mv.get("type")
+
+                            if move_type == "take_gems":
+                                colors = mv.get("colors", [])
+                                if not colors or len(colors) > 3:
+                                    _err = "take 1-3 gems"
+                                else:
+                                    freq: dict[str, int] = {}
+                                    for c in colors:
+                                        freq[c] = freq.get(c, 0) + 1
+                                    doubles = [c for c, n in freq.items() if n == 2]
+                                    if any(n > 2 for n in freq.values()) or len(doubles) > 1:
+                                        _err = "invalid gem selection"
+                                    elif doubles and (len(colors) != 2 or len(freq) != 1):
+                                        _err = "double take must be exactly 2 of one color"
+                                    elif doubles and g["bank"].get(doubles[0], 0) < 4:
+                                        _err = "need >= 4 in bank for double take"
+                                    else:
+                                        for c in colors:
+                                            if g["bank"].get(c, 0) <= 0:
+                                                _err = f"no {c} in bank"
+                                                break
+                                        else:
+                                            for c in colors:
+                                                g["bank"][c] -= 1
+                                                ps["tokens"][c] = ps["tokens"].get(c, 0) + 1
+                                            _did_change = True
+                                            if sum(ps["tokens"].values()) > 10:
+                                                _discard_pid = pid
+                                            else:
+                                                g["turn"] = _advance_turn(g)
+
+                            elif move_type == "discard":
+                                color = mv.get("color")
+                                if not color or ps["tokens"].get(color, 0) <= 0:
+                                    _err = "can't discard that"
+                                else:
+                                    ps["tokens"][color] -= 1
+                                    g["bank"][color] = g["bank"].get(color, 0) + 1
+                                    _did_change = True
+                                    if sum(ps["tokens"].values()) > 10:
+                                        _discard_pid = pid
+                                    else:
+                                        g["turn"] = _advance_turn(g)
+
+                            elif move_type == "buy":
+                                card_id = mv.get("card_id")
+                                card: dict | None = None
+                                source: tuple | None = None
+                                for lk in ["L1", "L2", "L3"]:
+                                    for i, c in enumerate(g["board"][lk]):
+                                        if c and c["id"] == card_id:
+                                            card, source = c, ("board", lk, i)
+                                            break
+                                    if card:
+                                        break
+                                if not card:
+                                    for i, c in enumerate(ps["reserved"]):
+                                        if c["id"] == card_id:
+                                            card, source = c, ("reserved", i)
+                                            break
+                                if not card:
+                                    _err = "card not found"
+                                else:
+                                    bonuses = bonuses_from(ps["purchased"])
+                                    if not can_afford(card["cost"], ps["tokens"], bonuses):
+                                        _err = "can't afford"
+                                    else:
+                                        spend = calc_spend(card["cost"], ps["tokens"], bonuses)
+                                        for c, n in spend.items():
+                                            ps["tokens"][c] = ps["tokens"].get(c, 0) - n
+                                            g["bank"][c] = g["bank"].get(c, 0) + n
+                                        ps["purchased"].append(card)
+                                        if source[0] == "board":  # type: ignore[index]
+                                            lk, idx = source[1], source[2]  # type: ignore[misc]
+                                            g["board"][lk][idx] = g["decks"][lk].pop() if g["decks"][lk] else None
+                                        else:
+                                            ps["reserved"].pop(source[1])  # type: ignore[index]
+                                        claimable = _check_nobles(g, pid)
+                                        if claimable:
+                                            n = claimable[0]
+                                            ps["nobles"].append(n)
+                                            g["nobles"] = [x for x in g["nobles"] if x["id"] != n["id"]]
+                                        winner = _check_winner(g)
+                                        if winner:
+                                            g["phase"] = "over"
+                                            g["winner"] = winner
+                                            r["status"] = "over"
+                                        else:
+                                            g["turn"] = _advance_turn(g)
+                                        _did_change = True
+
+                            elif move_type == "reserve":
+                                if len(ps["reserved"]) >= 3:
+                                    _err = "already have 3 reserved"
+                                else:
+                                    card_id = mv.get("card_id")
+                                    deck_level = mv.get("deck_level")
+                                    card = None
+                                    if card_id:
+                                        for lk in ["L1", "L2", "L3"]:
+                                            for i, c in enumerate(g["board"][lk]):
+                                                if c and c["id"] == card_id:
+                                                    card = c
+                                                    g["board"][lk][i] = g["decks"][lk].pop() if g["decks"][lk] else None
+                                                    break
+                                            if card:
+                                                break
+                                    elif deck_level:
+                                        lk = f"L{deck_level}"
+                                        if g["decks"][lk]:
+                                            card = g["decks"][lk].pop()
+                                    if not card:
+                                        _err = "card not found"
+                                    else:
+                                        ps["reserved"].append(card)
+                                        if g["bank"].get("gold", 0) > 0:
+                                            g["bank"]["gold"] -= 1
+                                            ps["tokens"]["gold"] = ps["tokens"].get("gold", 0) + 1
+                                        _did_change = True
+                                        if sum(ps["tokens"].values()) > 10:
+                                            _discard_pid = pid
+                                        else:
+                                            g["turn"] = _advance_turn(g)
+                            else:
+                                _err = "unknown move type"
+
+                if _err:
+                    await websocket.send_text(json.dumps({"type": "error", "message": _err}))
+                elif _did_change:
+                    save_game(room_id)
+                    room_state = mk_room_state(room_id)
+                    msg_out: dict[str, Any] = {"type": "room_update", "room": room_state}
+                    if _discard_pid:
+                        msg_out["needs_discard"] = _discard_pid
+                    await broadcast_room(room_id, msg_out)
 
             else:
                 await websocket.send_text(json.dumps({"type": "error", "message": "unknown action"}))
@@ -328,85 +746,63 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
     except WebSocketDisconnect:
         LOG.info("ws disconnected room=%s player=%s", room_id, pid)
     finally:
-        # cleanup
         async with ROOM_LOCK:
             r = ROOMS.get(room_id)
             if r:
                 r["sockets"].pop(pid, None)
-                # keep player name in players mapping for persistence until explicitly removed
                 if not r["sockets"]:
-                    # no connected sockets left; remove room
                     ROOMS.pop(room_id, None)
                 else:
-                    # notify remaining
                     asyncio.create_task(broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)}))
 
 
-@app.websocket("/ws/{player}")
-async def ws_player_base(websocket: WebSocket, player: str):
-    # legacy single-socket-per-client handler: treats incoming messages that include room_id
-    await websocket.accept()
-    pid = player
-    try:
-        while True:
-            text = await websocket.receive_text()
-            try:
-                msg = json.loads(text)
-            except Exception:
-                await websocket.send_text(json.dumps({"type": "error", "message": "invalid json"}))
-                continue
-            action = msg.get("action")
-            room_id = normalize_room(msg.get("room_id") or "")
-            if not room_id:
-                await websocket.send_text(json.dumps({"type": "error", "message": "room_id required"}))
-                continue
+# ─── HTTP endpoints ───────────────────────────────────────────────────────────
 
-            # ensure room exists for join/create
-            if action == "create":
-                name = msg.get("name") or pid
-                async with ROOM_LOCK:
-                    r = ROOMS.setdefault(room_id, {"players": {}, "sockets": {}, "status": "waiting", "game": None})
-                    r["players"][pid] = name
-                    r["sockets"][pid] = websocket
-                await websocket.send_text(json.dumps({"type": "created", "room_id": room_id, "room": mk_room_state(room_id)}))
-                await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
+class RegisterBody(BaseModel):
+    name: str
+    password: str
 
-            elif action == "join":
-                name = msg.get("name") or pid
-                async with ROOM_LOCK:
-                    if room_id not in ROOMS:
-                        await websocket.send_text(json.dumps({"type": "error", "message": "room not found"}))
-                        continue
-                    r = ROOMS[room_id]
-                    r["players"][pid] = name
-                    r["sockets"][pid] = websocket
-                await websocket.send_text(json.dumps({"type": "joined", "room_id": room_id, "room": mk_room_state(room_id)}))
-                await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
 
-            elif action == "start":
-                async with ROOM_LOCK:
-                    r = ROOMS.get(room_id)
-                    if r:
-                        r["status"] = "playing"
-                await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
+class LoginBody(BaseModel):
+    name: str
+    password: str
 
-            elif action == "move":
-                await broadcast_room(room_id, {"type": "move", "from": pid, "move": msg.get("move")})
 
-            else:
-                await websocket.send_text(json.dumps({"type": "error", "message": "unknown action"}))
+@app.post("/auth/register")
+async def auth_register(body: RegisterBody):
+    user = create_user(body.name, body.password)
+    if not user:
+        return {"ok": False, "message": "name already taken"}
+    return {"ok": True, "user": user}
 
-    except WebSocketDisconnect:
-        # remove socket from any rooms where it was registered
-        async with ROOM_LOCK:
-            for rid, r in list(ROOMS.items()):
-                if r.get("sockets", {}).get(pid) is websocket:
-                    r["sockets"].pop(pid, None)
-                    if not r["sockets"]:
-                        ROOMS.pop(rid, None)
-                    else:
-                        asyncio.create_task(broadcast_room(rid, {"type": "room_update", "room": mk_room_state(rid)}))
-        return
 
-# ... (omitted rest for brevity in patch) ...
+@app.post("/auth/login")
+async def auth_login(body: LoginBody):
+    u = authenticate_user(body.name, body.password)
+    if not u:
+        return {"ok": False, "message": "invalid name or password"}
+    return {"ok": True, "user": {"id": u["id"], "name": u["name"]}, "session_token": u["session_token"]}
 
+
+@app.get("/games")
+async def get_open_games():
+    return {"ok": True, "games": list_open_games()}
+
+
+@app.get("/games/mine")
+async def get_my_games(token: str | None = None):
+    user = get_user_by_session(token)
+    if not user:
+        return {"ok": False, "games": [], "message": "unauthenticated"}
+    return {"ok": True, "games": list_user_games(user["id"])}
+
+
+@app.post("/me/session-token")
+async def session_token(token: str | None = None, room_id: str | None = None, player_id: str | None = None):
+    user = get_user_by_session(token)
+    if not user:
+        return {"ok": False, "message": "unauthenticated"}
+    if not room_id or not player_id:
+        return {"ok": False, "message": "room_id and player_id required"}
+    rt = create_reconnect_token(user["id"], normalize_room(room_id), player_id, ttl=120)
+    return {"ok": True, "reconnect_token": rt}

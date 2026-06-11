@@ -1,20 +1,27 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
 // ─── Config ────────────────────────────────────────────────────────────────
-// Replace with your deployed Railway/Render URL, e.g.:
-// const WS_BASE = "wss://spender-production.up.railway.app/ws";
 const WS_BASE = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
+const HTTP_BASE = WS_BASE.replace(/^ws/, "http").replace(/\/ws$/, "");
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 const GEM_COLORS = ["white", "blue", "green", "red", "black"];
-const GEM_LABELS = { white:"Diamond", blue:"Sapphire", green:"Emerald", red:"Ruby", black:"Onyx", gold:"Gold" };
-const GEM_HEX    = { white:"#e8e0d0", blue:"#4a9eff", green:"#3dba6e", red:"#e05555", black:"#4a4a5a", gold:"#f5c842" };
+const GEM_LABELS = { white: "Diamond", blue: "Sapphire", green: "Emerald", red: "Ruby", black: "Onyx", gold: "Gold" };
+const GEM_HEX = { white: "#ddd4be", blue: "#4a9eff", green: "#3dba6e", red: "#e05555", black: "#6a6a7a", gold: "#f5c842" };
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 function uid() { return Math.random().toString(36).slice(2, 10); }
-function emptyGems() { return { white:0, blue:0, green:0, red:0, black:0, gold:0 }; }
-function gemTotal(tokens) { return Object.values(tokens).reduce((a,b) => a+b, 0); }
-
+function roomCode() { return Array.from({ length: 6 }, () => "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[Math.floor(Math.random() * 26)]).join(""); }
+function emptyGems() { return { white: 0, blue: 0, green: 0, red: 0, black: 0, gold: 0 }; }
+function gemTotal(tokens) { return Object.values(tokens).reduce((a, b) => a + b, 0); }
+function timeAgo(ts) {
+	if (!ts) return "";
+	const diff = Math.floor(Date.now() / 1000) - ts;
+	if (diff < 60) return "just now";
+	if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+	if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+	return `${Math.floor(diff / 86400)}d ago`;
+}
 function bonusesFrom(purchased) {
 	const b = emptyGems();
 	for (const c of purchased) b[c.bonus] = (b[c.bonus] || 0) + 1;
@@ -23,14 +30,14 @@ function bonusesFrom(purchased) {
 function canAfford(cost, tokens, bonuses) {
 	let gold = 0;
 	for (const c of GEM_COLORS) {
-		const need = Math.max(0, (cost[c]||0) - (bonuses[c]||0));
-		const have = tokens[c]||0;
+		const need = Math.max(0, (cost[c] || 0) - (bonuses[c] || 0));
+		const have = tokens[c] || 0;
 		if (have < need) gold += need - have;
 	}
-	return gold <= (tokens.gold||0);
+	return gold <= (tokens.gold || 0);
 }
 function totalPoints(purchased, nobles) {
-	return purchased.reduce((s,c) => s+c.points, 0) + nobles.reduce((s,n) => s+n.points, 0);
+	return purchased.reduce((s, c) => s + c.points, 0) + nobles.reduce((s, n) => s + n.points, 0);
 }
 
 // ─── Styles ────────────────────────────────────────────────────────────────
@@ -38,152 +45,192 @@ const css = `
 @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Crimson+Pro:ital,wght@0,300;0,400;1,300&display=swap');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-	--bg:#0f0e0c;--surface:#1a1814;--surface2:#242018;--border:#3a342a;
-	--gold:#c9a84c;--gold-light:#e8c96a;--text:#e8dfc8;--text-dim:#8a7d6a;
-	--white-gem:#ddd4be;--blue-gem:#4a9eff;--green-gem:#3dba6e;
-	--red-gem:#e05555;--black-gem:#6a6a7a;--gold-gem:#f5c842;
-	--radius:8px;--radius-lg:14px;
+  --bg:#0f0e0c;--surface:#1a1814;--surface2:#242018;--surface3:#2c2820;--border:#3a342a;
+  --gold:#c9a84c;--gold-light:#e8c96a;--text:#e8dfc8;--text-dim:#8a7d6a;--text-muted:#5a5248;
+  --white-gem:#ddd4be;--blue-gem:#4a9eff;--green-gem:#3dba6e;--red-gem:#e05555;--black-gem:#6a6a7a;--gold-gem:#f5c842;
+  --radius:8px;--radius-lg:14px;
 }
-html,body{height:100%;}
+html,body{height:100%}
 body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,serif;min-height:100vh;
-	/* respect device safe areas (notches) */
-	padding-top:env(safe-area-inset-top, 0px);
-	padding-bottom:env(safe-area-inset-bottom, 0px);
-	padding-left:env(safe-area-inset-left, 0px);
-	padding-right:env(safe-area-inset-right, 0px);
-}
+  padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+  padding-left:env(safe-area-inset-left,0px);padding-right:env(safe-area-inset-right,0px)}
 .app{min-height:100vh;display:flex;flex-direction:column}
 
-/* Lobby */
-.lobby{max-width:480px;margin:0 auto;padding:48px 20px 24px 20px;text-align:center}
-.lobby h1{font-family:'Cinzel',serif;font-size:3rem;font-weight:700;color:var(--gold);letter-spacing:.06em;margin-bottom:8px}
-.tagline{color:var(--text-dim);font-style:italic;font-size:1.1rem;margin-bottom:48px}
-.lobby-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:22px;margin-bottom:16px;text-align:left}
-.lobby-card h2{font-family:'Cinzel',serif;font-size:1rem;color:var(--gold);margin-bottom:16px;letter-spacing:.08em}
-.room-id-display{font-family:'Cinzel',serif;font-size:2rem;letter-spacing:.25em;color:var(--gold-light);text-align:center;padding:16px;background:var(--surface2);border-radius:var(--radius);margin:8px 0 16px;border:1px solid var(--border)}
-.input{width:100%;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'Cinzel',serif;font-size:1rem;letter-spacing:.1em;outline:none}
-.input:focus{border-color:var(--gold)}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 22px;border-radius:var(--radius);border:none;cursor:pointer;font-family:'Cinzel',serif;font-size:.95rem;letter-spacing:.06em;font-weight:600;transition:all .15s}
+/* ─── Auth ──────────────────────────────────────────────────────────────── */
+.auth-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:32px 20px;background:var(--bg)}
+.auth-logo{font-family:'Cinzel',serif;font-size:3rem;font-weight:700;color:var(--gold);letter-spacing:.06em;margin-bottom:4px}
+.auth-tagline{color:var(--text-dim);font-style:italic;font-size:1.05rem;margin-bottom:32px}
+.auth-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px 28px 24px;width:100%;max-width:400px}
+.auth-tabs{display:flex;border-bottom:1px solid var(--border);margin-bottom:22px}
+.auth-tab{flex:1;padding:10px 0;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--text-dim);cursor:pointer;font-family:'Cinzel',serif;font-size:.78rem;letter-spacing:.1em;text-transform:uppercase;margin-bottom:-1px;transition:all .15s}
+.auth-tab.active{color:var(--gold);border-bottom-color:var(--gold)}
+.auth-tab:hover:not(.active){color:var(--text)}
+.auth-field{width:100%;padding:11px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'Cinzel',serif;font-size:.9rem;letter-spacing:.04em;outline:none;margin-bottom:10px}
+.auth-field:focus{border-color:var(--gold)}
+.auth-or{text-align:center;color:var(--text-muted);font-size:.8rem;font-style:italic;margin:18px 0 14px;position:relative}
+.auth-or::before,.auth-or::after{content:'';position:absolute;top:50%;width:40%;height:1px;background:var(--border)}
+.auth-or::before{left:0}.auth-or::after{right:0}
+.auth-error{font-size:.82rem;color:var(--red-gem);padding:6px 0 2px;text-align:center}
+.guest-name-row{display:flex;gap:8px;align-items:center;margin-bottom:10px}
+.guest-name-row .auth-field{margin-bottom:0;flex:1}
+
+/* ─── Common ────────────────────────────────────────────────────────────── */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 20px;border-radius:var(--radius);border:none;cursor:pointer;font-family:'Cinzel',serif;font-size:.88rem;letter-spacing:.06em;font-weight:600;transition:all .15s;white-space:nowrap}
 .btn-gold{background:var(--gold);color:#0f0e0c}.btn-gold:hover{background:var(--gold-light)}
 .btn-outline{background:transparent;color:var(--gold);border:1px solid var(--gold)}.btn-outline:hover{background:var(--gold);color:#0f0e0c}
 .btn-ghost{background:transparent;color:var(--text-dim);border:1px solid var(--border)}.btn-ghost:hover{border-color:var(--text-dim);color:var(--text)}
-.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-danger{background:transparent;color:var(--red-gem);border:1px solid var(--red-gem)}.btn-danger:hover{background:var(--red-gem);color:#fff}
+.btn:disabled{opacity:.35;cursor:not-allowed}
 .btn-full{width:100%}
-.gap-8{display:flex;gap:8px}
-.small-muted{font-size:0.9rem;color:var(--text-dim)}
-.mt-8{margin-top:8px}
-.status-msg{font-size:.9rem;color:var(--text-dim);font-style:italic;text-align:center;padding:8px 0}
-.error-msg{font-size:.9rem;color:var(--red-gem);text-align:center;padding:8px 0}
+.btn-sm{padding:7px 14px;font-size:.78rem}
+.input{width:100%;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'Cinzel',serif;font-size:1rem;letter-spacing:.1em;outline:none}
+.input:focus{border-color:var(--gold)}
+.conn-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px;flex-shrink:0}
+.conn-dot.connected{background:var(--green-gem)}.conn-dot.disconnected{background:var(--red-gem)}
 
-/* Waiting */
-.waiting{text-align:center}
-.waiting h2{font-family:'Cinzel',serif;color:var(--gold);margin-bottom:8px}
-.player-list{list-style:none;margin:16px 0}
-.player-list li{padding:8px 12px;background:var(--surface2);border-radius:var(--radius);margin-bottom:6px;font-family:'Cinzel',serif;font-size:.85rem;letter-spacing:.05em}
+/* ─── Browser ───────────────────────────────────────────────────────────── */
+.browser{max-width:820px;margin:0 auto;padding:28px 20px 48px}
+.browser-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:36px;padding-bottom:16px;border-bottom:1px solid var(--border)}
+.browser-title{font-family:'Cinzel',serif;font-size:2rem;font-weight:700;color:var(--gold);letter-spacing:.04em}
+.browser-user{display:flex;align-items:center;gap:10px}
+.browser-username{font-family:'Cinzel',serif;font-size:.8rem;color:var(--text-dim);letter-spacing:.06em;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.browser-guest-badge{font-size:.65rem;letter-spacing:.1em;color:var(--text-muted);border:1px solid var(--border);padding:2px 7px;border-radius:10px;font-family:'Cinzel',serif;text-transform:uppercase}
+.browser-create{margin-bottom:36px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.browser-section{margin-bottom:32px}
+.section-hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+.section-title{font-family:'Cinzel',serif;font-size:.7rem;letter-spacing:.18em;color:var(--gold);text-transform:uppercase}
+.game-cards{display:flex;flex-direction:column;gap:8px}
+.game-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 16px;display:flex;align-items:center;gap:14px;transition:border-color .15s}
+.game-card:hover{border-color:rgba(201,168,76,.4)}
+.game-card-info{flex:1;min-width:0}
+.game-card-title{font-family:'Cinzel',serif;font-size:.88rem;letter-spacing:.04em;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.game-card-meta{font-size:.78rem;color:var(--text-dim)}
+.game-card-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.your-turn-badge{background:var(--gold);color:#0f0e0c;padding:3px 10px;border-radius:12px;font-family:'Cinzel',serif;font-size:.63rem;letter-spacing:.12em;font-weight:700;text-transform:uppercase;white-space:nowrap}
+.playing-badge{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border);padding:3px 10px;border-radius:12px;font-family:'Cinzel',serif;font-size:.63rem;letter-spacing:.1em;text-transform:uppercase;white-space:nowrap}
+.empty-state{text-align:center;padding:28px 16px;color:var(--text-dim);font-style:italic;font-size:.9rem;background:var(--surface2);border-radius:var(--radius);border:1px dashed var(--border)}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--gold);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.refresh-btn{background:transparent;border:none;color:var(--text-muted);cursor:pointer;font-size:.9rem;padding:2px 6px;border-radius:4px;transition:color .15s}
+.refresh-btn:hover{color:var(--gold)}
+
+/* ─── Waiting ───────────────────────────────────────────────────────────── */
+.waiting-screen{max-width:480px;margin:0 auto;padding:48px 20px 24px;text-align:center}
+.waiting-title{font-family:'Cinzel',serif;font-size:1.1rem;color:var(--gold);margin-bottom:6px;letter-spacing:.1em}
+.waiting-sub{color:var(--text-dim);font-size:.85rem;margin-bottom:24px}
+.room-code-box{font-family:'Cinzel',serif;font-size:2.2rem;letter-spacing:.3em;color:var(--gold-light);text-align:center;padding:18px;background:var(--surface2);border-radius:var(--radius);margin-bottom:20px;border:1px solid var(--border);cursor:pointer;transition:border-color .15s}
+.room-code-box:hover{border-color:var(--gold)}
+.player-list{list-style:none;margin:0 0 20px}
+.player-list li{display:flex;align-items:center;gap:8px;padding:9px 14px;background:var(--surface2);border-radius:var(--radius);margin-bottom:6px;font-family:'Cinzel',serif;font-size:.82rem;letter-spacing:.05em}
 .player-list li.me{border:1px solid var(--gold);color:var(--gold)}
+.copy-hint{font-size:.75rem;color:var(--text-muted);font-style:italic;margin-bottom:12px}
 
-/* Game */
-.game{display:grid;grid-template-columns:1fr 280px;gap:12px;padding:12px;min-height:100vh}
+/* ─── Game layout ───────────────────────────────────────────────────────── */
+.game{display:grid;grid-template-columns:1fr 272px;gap:12px;padding:10px;min-height:100vh}
 @media(max-width:900px){.game{grid-template-columns:1fr}}
-.game-main{grid-column:1;display:flex;flex-direction:column;gap:10px}
-.game-sidebar{grid-column:2;display:flex;flex-direction:column;gap:10px}
-@media(max-width:900px){.game-sidebar{grid-column:1}}
+.game-main{display:flex;flex-direction:column;gap:10px}
+.game-sidebar{display:flex;flex-direction:column;gap:10px}
+@media(max-width:900px){.game-sidebar{order:-1}}
 .panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px}
-.panel-title{font-family:'Cinzel',serif;font-size:.7rem;letter-spacing:.12em;color:var(--gold);margin-bottom:10px;text-transform:uppercase}
+.panel-title{font-family:'Cinzel',serif;font-size:.68rem;letter-spacing:.14em;color:var(--gold);margin-bottom:10px;text-transform:uppercase}
 
-.copy-btn{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--text);padding:8px 10px;border-radius:8px;cursor:pointer}
-
-@media(max-width:600px){
-	.lobby{padding:20px 14px}
-	.lobby-card{padding:16px}
-	.lobby h1{font-size:2.2rem}
-	.tagline{font-size:1rem}
-	.btn{width:100%;display:block}
-	.gap-8{flex-direction:column}
-}
-
-/* Bank */
+/* ─── Bank ──────────────────────────────────────────────────────────────── */
 .bank-gems{display:flex;gap:8px;flex-wrap:wrap}
-.gem-stack{display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;transition:transform .12s}
+.gem-stack{display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;transition:transform .12s;user-select:none}
 .gem-stack:hover .gem-token{transform:scale(1.08)}
-.gem-stack.selected .gem-token{box-shadow:0 0 0 2px var(--gold-light)}
+.gem-stack.selected .gem-token{box-shadow:0 0 0 2px var(--gold-light),0 0 12px rgba(232,201,106,.3)}
 .gem-stack.disabled{opacity:.35;cursor:not-allowed}
-.gem-token{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Cinzel',serif;font-weight:700;font-size:.95rem;border:2px solid rgba(255,255,255,.15);transition:all .12s}
+.gem-token{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Cinzel',serif;font-weight:700;font-size:.95rem;border:2px solid rgba(255,255,255,.12);transition:all .12s}
 .gem-count{font-size:.75rem;color:var(--text-dim);font-family:'Cinzel',serif}
 
-/* Cards */
+/* ─── Cards ─────────────────────────────────────────────────────────────── */
 .level-row{display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap}
-.deck-pile{width:72px;min-height:100px;border-radius:var(--radius);border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;font-family:'Cinzel',serif;font-size:.7rem;color:var(--text-dim);cursor:pointer;flex-shrink:0;background:var(--surface2);transition:border-color .12s;flex-direction:column;gap:4px}
+.deck-pile{width:72px;min-height:100px;border-radius:var(--radius);border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;font-family:'Cinzel',serif;font-size:.68rem;color:var(--text-dim);cursor:pointer;flex-shrink:0;background:var(--surface2);transition:all .12s;flex-direction:column;gap:4px}
 .deck-pile:hover{border-color:var(--gold);color:var(--gold)}
-.deck-pile.disabled{cursor:not-allowed}
-.deck-remaining{font-size:1.2rem;font-weight:700;color:var(--text);font-family:'Cinzel',serif}
+.deck-pile.disabled{cursor:not-allowed;opacity:.5}
+.deck-remaining{font-size:1.3rem;font-weight:700;color:var(--text);font-family:'Cinzel',serif}
 .card{width:88px;min-height:120px;border-radius:var(--radius);background:var(--surface2);border:1px solid var(--border);padding:8px 6px 6px;display:flex;flex-direction:column;cursor:pointer;transition:all .15s;flex-shrink:0}
-.card:hover{border-color:var(--gold);transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.4)}
+.card:hover{border-color:rgba(201,168,76,.5);transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.4)}
 .card.selected{border-color:var(--gold-light);box-shadow:0 0 0 2px var(--gold-light)}
 .card.affordable{border-color:var(--green-gem)}
 .card.disabled{cursor:not-allowed;opacity:.6}
 .card-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px}
 .card-points{font-family:'Cinzel',serif;font-weight:700;font-size:1.1rem;color:var(--gold);min-width:16px}
 .card-points.zero{color:transparent}
-.card-bonus{width:20px;height:20px;border-radius:50%;flex-shrink:0}
+.card-bonus{width:20px;height:20px;border-radius:50%;flex-shrink:0;border:1.5px solid rgba(255,255,255,.12)}
 .card-cost{display:flex;flex-direction:column;gap:3px;margin-top:auto}
 .cost-row{display:flex;align-items:center;gap:4px}
 .cost-gem{width:10px;height:10px;border-radius:50%;flex-shrink:0}
 .cost-num{font-family:'Cinzel',serif;font-size:.7rem;color:var(--text-dim)}
 
-/* Nobles */
+/* ─── Nobles ────────────────────────────────────────────────────────────── */
 .nobles-row{display:flex;gap:8px;flex-wrap:wrap}
 .noble{width:72px;min-height:72px;border-radius:var(--radius);background:var(--surface2);border:1px solid var(--border);padding:6px;display:flex;flex-direction:column;align-items:center;gap:4px}
 .noble-points{font-family:'Cinzel',serif;font-size:1rem;font-weight:700;color:var(--gold)}
 .noble-req{display:flex;flex-direction:column;gap:2px;width:100%}
 .noble-req-row{display:flex;gap:3px;align-items:center;font-size:.65rem;color:var(--text-dim);font-family:'Cinzel',serif}
 
-/* Action bar */
+/* ─── Action bar ────────────────────────────────────────────────────────── */
 .action-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg)}
-.action-hint{flex:1;font-style:italic;color:var(--text-dim);font-size:.9rem}
-.turn-badge{font-family:'Cinzel',serif;font-size:.75rem;letter-spacing:.08em;padding:4px 10px;border-radius:20px}
+.action-hint{flex:1;font-style:italic;color:var(--text-dim);font-size:.88rem;min-width:120px}
+.turn-badge{font-family:'Cinzel',serif;font-size:.72rem;letter-spacing:.08em;padding:4px 12px;border-radius:20px;white-space:nowrap}
 .turn-badge.mine{background:var(--gold);color:#0f0e0c}
 .turn-badge.theirs{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border)}
+.gap-8{display:flex;gap:8px;flex-wrap:wrap}
 
-/* Player panels */
+/* ─── Player panels ─────────────────────────────────────────────────────── */
 .players-area{display:flex;flex-direction:column;gap:8px}
 .player-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px;transition:border-color .2s}
-.player-panel.active-turn{border-color:var(--gold)}
+.player-panel.active-turn{border-color:var(--gold);background:var(--surface3)}
 .player-panel.me{border-left:3px solid var(--gold)}
 .player-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.player-name-row{display:flex;align-items:center;gap:6px}
 .player-name{font-family:'Cinzel',serif;font-size:.8rem;letter-spacing:.06em}
+.active-dot{width:6px;height:6px;border-radius:50%;background:var(--gold);flex-shrink:0;animation:pulse 1.5s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 .player-score{font-family:'Cinzel',serif;font-size:1.1rem;font-weight:700;color:var(--gold)}
-.player-tokens{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px}
+.player-tokens{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px}
 .token-pill{display:flex;align-items:center;gap:3px;padding:2px 7px;border-radius:12px;font-family:'Cinzel',serif;font-size:.7rem;font-weight:700}
-.player-bonuses{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px}
+.player-bonuses{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px}
 .bonus-pill{display:flex;align-items:center;gap:3px;padding:2px 7px;border-radius:12px;font-family:'Cinzel',serif;font-size:.7rem;font-weight:700;border:1px solid}
-.reserved-label{font-size:.65rem;color:var(--text-dim);font-family:'Cinzel',serif;letter-spacing:.06em;margin-bottom:4px}
+.reserved-label{font-size:.62rem;color:var(--text-dim);font-family:'Cinzel',serif;letter-spacing:.06em;margin-bottom:4px;text-transform:uppercase}
 .reserved-row{display:flex;gap:4px;flex-wrap:wrap}
+.gem-total{font-size:.7rem;color:var(--text-muted);font-family:'Cinzel',serif;margin-top:2px}
 
-/* Winner */
+/* ─── Winner ────────────────────────────────────────────────────────────── */
 .winner-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:32px}
-.winner-title{font-family:'Cinzel',serif;font-size:3rem;color:var(--gold);margin-bottom:8px}
+.winner-title{font-family:'Cinzel',serif;font-size:3rem;color:var(--gold);margin-bottom:8px;letter-spacing:.04em}
 .winner-sub{color:var(--text-dim);font-style:italic;margin-bottom:32px}
 .final-scores{display:flex;flex-direction:column;gap:8px;margin-bottom:32px}
-.score-row{font-family:'Cinzel',serif;font-size:1.1rem;padding:8px 24px;background:var(--surface);border-radius:var(--radius)}
-.score-row.winner{border:1px solid var(--gold);color:var(--gold)}
+.score-row{font-family:'Cinzel',serif;font-size:1.05rem;padding:10px 28px;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border)}
+.score-row.winner{border-color:var(--gold);color:var(--gold)}
 
-/* Toast */
-.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--surface);border:1px solid var(--gold);padding:10px 20px;border-radius:var(--radius);font-family:'Cinzel',serif;font-size:.8rem;color:var(--gold);z-index:999;pointer-events:none;animation:fadeup .3s ease}
+/* ─── Toast ─────────────────────────────────────────────────────────────── */
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--surface);border:1px solid var(--gold);padding:10px 20px;border-radius:var(--radius);font-family:'Cinzel',serif;font-size:.8rem;color:var(--gold);z-index:999;pointer-events:none;animation:fadeup .3s ease;white-space:nowrap}
 @keyframes fadeup{from{opacity:0;transform:translateX(-50%) translateY(10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
 
-/* Discard modal */
-.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:100}
-.modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:24px;max-width:400px;width:90%}
+/* ─── Discard modal ─────────────────────────────────────────────────────── */
+.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.8);display:flex;align-items:center;justify-content:center;z-index:100}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px;max-width:400px;width:90%}
 .modal h3{font-family:'Cinzel',serif;color:var(--gold);margin-bottom:8px}
 .modal p{color:var(--text-dim);font-size:.9rem;margin-bottom:16px}
 .discard-gems{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-bottom:16px}
-.discard-btn{padding:6px 14px;border-radius:var(--radius);border:1px solid var(--border);background:var(--surface2);color:var(--text);cursor:pointer;font-family:'Cinzel',serif;font-size:.8rem;transition:all .12s}
+.discard-btn{padding:8px 16px;border-radius:var(--radius);border:1px solid var(--border);background:var(--surface2);color:var(--text);cursor:pointer;font-family:'Cinzel',serif;font-size:.82rem;transition:all .12s;display:flex;align-items:center;gap:6px}
 .discard-btn:hover{border-color:var(--gold);color:var(--gold)}
 .discard-count{text-align:center;font-family:'Cinzel',serif;color:var(--text-dim);font-size:.85rem}
-.conn-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}
-.conn-dot.connected{background:var(--green-gem)}
-.conn-dot.disconnected{background:var(--red-gem)}
+
+/* ─── Error/status ──────────────────────────────────────────────────────── */
+.error-msg{font-size:.88rem;color:var(--red-gem);text-align:center;padding:6px 0}
+.status-msg{font-size:.85rem;color:var(--text-dim);font-style:italic;text-align:center;padding:6px 0;display:flex;align-items:center;justify-content:center}
+.small-muted{font-size:.8rem;color:var(--text-muted)}
+.mt-8{margin-top:8px}.mt-12{margin-top:12px}
+
+@media(max-width:600px){
+  .browser{padding:16px 14px 40px}
+  .browser-title{font-size:1.6rem}
+  .game{padding:6px}
+  .game-card{padding:10px 12px}
+}
 `;
 
 // ─── Sub-components ───────────────────────────────────────────────────────
@@ -202,16 +249,16 @@ function GemToken({ color, size = 42 }) {
 function CardView({ card, selected, affordable, disabled, onClick, compact }) {
 	return (
 		<div
-			className={`card${selected?" selected":""}${affordable?" affordable":""}${disabled?" disabled":""}`}
+			className={`card${selected ? " selected" : ""}${affordable ? " affordable" : ""}${disabled ? " disabled" : ""}`}
 			style={{ width: compact ? 72 : 88, minHeight: compact ? 96 : 120 }}
 			onClick={disabled ? undefined : onClick}
 		>
 			<div className="card-header">
-				<span className={`card-points${card.points===0?" zero":""}`}>{card.points||""}</span>
+				<span className={`card-points${card.points === 0 ? " zero" : ""}`}>{card.points || ""}</span>
 				<div className="card-bonus" style={{ background: GEM_HEX[card.bonus] }} />
 			</div>
 			<div className="card-cost">
-				{Object.entries(card.cost).map(([c,n]) => n>0 && (
+				{Object.entries(card.cost).map(([c, n]) => n > 0 && (
 					<div key={c} className="cost-row">
 						<div className="cost-gem" style={{ background: GEM_HEX[c] }} />
 						<span className="cost-num">{n}</span>
@@ -227,9 +274,9 @@ function NobleView({ noble }) {
 		<div className="noble">
 			<span className="noble-points">{noble.points}</span>
 			<div className="noble-req">
-				{Object.entries(noble.req).map(([c,n]) => (
+				{Object.entries(noble.req).map(([c, n]) => (
 					<div key={c} className="noble-req-row">
-						<div style={{width:8,height:8,borderRadius:"50%",background:GEM_HEX[c]}}/>
+						<div style={{ width: 8, height: 8, borderRadius: "50%", background: GEM_HEX[c] }} />
 						<span>{n}</span>
 					</div>
 				))}
@@ -238,20 +285,33 @@ function NobleView({ noble }) {
 	);
 }
 
-// ─── useWebSocket hook ─────────────────────────────────────────────────────
+// ─── useWebSocket ─────────────────────────────────────────────────────────
 
-function useWebSocket(onMessage) {
+function useWebSocket(onMessage, { onOpen, onClose } = {}) {
 	const wsRef = useRef(null);
 	const [connected, setConnected] = useState(false);
 	const onMsgRef = useRef(onMessage);
+	const onOpenRef = useRef(onOpen);
+	const onCloseRef = useRef(onClose);
 	onMsgRef.current = onMessage;
+	onOpenRef.current = onOpen;
+	onCloseRef.current = onClose;
 
 	const connect = useCallback((url) => {
 		if (wsRef.current) wsRef.current.close();
 		const ws = new WebSocket(url);
 		wsRef.current = ws;
-		ws.onopen = () => setConnected(true);
-		ws.onclose = () => setConnected(false);
+		const send = (data) => {
+			if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(data));
+		};
+		ws.onopen = (ev) => {
+			setConnected(true);
+			try { onOpenRef.current?.({ event: ev, send }); } catch {}
+		};
+		ws.onclose = (ev) => {
+			setConnected(false);
+			try { onCloseRef.current?.(ev); } catch {}
+		};
 		ws.onerror = () => setConnected(false);
 		ws.onmessage = (e) => {
 			try { onMsgRef.current(JSON.parse(e.data)); } catch {}
@@ -259,9 +319,8 @@ function useWebSocket(onMessage) {
 	}, []);
 
 	const send = useCallback((data) => {
-		if (wsRef.current?.readyState === WebSocket.OPEN) {
+		if (wsRef.current?.readyState === WebSocket.OPEN)
 			wsRef.current.send(JSON.stringify(data));
-		}
 	}, []);
 
 	const disconnect = useCallback(() => {
@@ -275,89 +334,217 @@ function useWebSocket(onMessage) {
 // ─── Main App ──────────────────────────────────────────────────────────────
 
 export default function SpenderApp() {
-	const [myId] = useState(() => uid());
-	const [myName, setMyName] = useState("");
-	const [screen, setScreen] = useState("lobby");
-	const [roomId, setRoomId] = useState("");
-	const [joinInput, setJoinInput] = useState("");
-	const [roomData, setRoomData] = useState(null);
-	const [error, setError] = useState("");
-	const [toast, setToast] = useState("");
-	const [needsDiscard, setNeedsDiscard] = useState(false);
+	// ── Persistent identity ────────────────────────────────────────────────
+	const [authUser, setAuthUser] = useState(() => {
+		try { const s = localStorage.getItem("spender_user"); if (s) return JSON.parse(s); } catch {}
+		return null;
+	});
+	const [myId, setMyId] = useState(() => {
+		try {
+			const s = localStorage.getItem("spender_user");
+			if (s) { const u = JSON.parse(s); if (u?.id) return u.id; }
+			const g = localStorage.getItem("spender_myId");
+			if (g) return g;
+		} catch {}
+		const id = uid();
+		try { localStorage.setItem("spender_myId", id); } catch {}
+		return id;
+	});
 
-	// game interaction state
+	// ── Screen & room state ────────────────────────────────────────────────
+	const [screen, setScreen] = useState(() => {
+		try { const s = localStorage.getItem("spender_user"); if (s && JSON.parse(s)) return "browser"; } catch {}
+		return "auth";
+	});
+	const [roomId, setRoomId] = useState("");
+	const [roomData, setRoomData] = useState(null);
+	const [needsDiscard, setNeedsDiscard] = useState(false);
 	const [selectedGems, setSelectedGems] = useState([]);
 	const [selectedCard, setSelectedCard] = useState(null);
+	const [toast, setToast] = useState("");
 
+	// ── Auth form state ────────────────────────────────────────────────────
+	const [authTab, setAuthTab] = useState("login");
+	const [authName, setAuthName] = useState("");
+	const [authPassword, setAuthPassword] = useState("");
+	const [guestName, setGuestName] = useState("");
+	const [authError, setAuthError] = useState("");
+	const [authLoading, setAuthLoading] = useState(false);
+
+	// ── Browser state ──────────────────────────────────────────────────────
+	const [openGames, setOpenGames] = useState([]);
+	const [myGames, setMyGames] = useState([]);
+	const [browserLoading, setBrowserLoading] = useState(false);
+
+	const playerName = authUser?.name || "";
+
+	// ── fetchGames ─────────────────────────────────────────────────────────
+	const fetchGames = useCallback(async (user) => {
+		setBrowserLoading(true);
+		try {
+			const openP = fetch(`${HTTP_BASE}/games`).then(r => r.json()).catch(() => ({ games: [] }));
+			const mineP = (user && !user.guest && user.session_token)
+				? fetch(`${HTTP_BASE}/games/mine?token=${user.session_token}`).then(r => r.json()).catch(() => ({ games: [] }))
+				: Promise.resolve({ games: [] });
+			const [open, mine] = await Promise.all([openP, mineP]);
+			setOpenGames(open.games || []);
+			setMyGames(mine.games || []);
+		} catch {
+			setOpenGames([]); setMyGames([]);
+		}
+		setBrowserLoading(false);
+	}, []);
+
+	// ── handleMessage ──────────────────────────────────────────────────────
 	const handleMessage = useCallback((msg) => {
+		const room = msg.room;
+		if (room?.reconnect_tokens?.[myId]) {
+			const rid = room.room_id || roomId;
+			try {
+				localStorage.setItem(`spender_token_${rid}_${myId}`, room.reconnect_tokens[myId]);
+				if (rid) localStorage.setItem("spender_roomId", rid);
+			} catch {}
+		}
+
 		if (msg.type === "created") {
-			setRoomId(msg.room_id);
 			setRoomData(msg.room);
 			setScreen("waiting");
+		} else if (msg.type === "joined") {
+			setRoomData(msg.room);
+			setScreen("waiting");
+		} else if (msg.type === "reconnected") {
+			setRoomData(msg.room);
+			if (msg.room.status === "playing") setScreen("game");
+			else setScreen("waiting");
 		} else if (msg.type === "room_update") {
 			setRoomData(msg.room);
 			if (msg.room.status === "playing" && screen !== "game") setScreen("game");
-			if (msg.room.game?.phase === "over") setScreen("game");
-			if (msg.needs_discard === myId) setNeedsDiscard(true);
-			else setNeedsDiscard(false);
+			setNeedsDiscard(msg.needs_discard === myId);
 		} else if (msg.type === "error") {
+			if (msg.message === "invalid token") {
+				try { localStorage.removeItem("spender_roomId"); } catch {}
+			}
 			setToast(msg.message);
 		}
-	}, [myId, screen]);
+	}, [myId, screen, roomId]);
 
-	const { connected, connect, send, disconnect } = useWebSocket(handleMessage);
+	// ── WebSocket ──────────────────────────────────────────────────────────
+	const { connected, connect, send, disconnect } = useWebSocket(handleMessage, {
+		onOpen: ({ send: wsSend }) => {
+			try {
+				const savedRoomId = localStorage.getItem("spender_roomId");
+				const tok = savedRoomId ? localStorage.getItem(`spender_token_${savedRoomId}_${myId}`) : null;
+				if (tok) wsSend({ action: "reconnect", token: tok });
+			} catch {}
+		},
+		onClose: () => {},
+	});
 
-	// Connect WebSocket on mount
+	// ── Mount: auto-reconnect to saved room ────────────────────────────────
 	useEffect(() => {
-			// attempt reconnect with saved token for any room if present
-			try{
-				const tok = localStorage.getItem('spender_token_' + myId);
-				if(tok){
-					// connect and send reconnect with token
-					connect(`${WS_BASE}/${myId}`);
-					setTimeout(() => send({ action: 'reconnect', token: tok }), 300);
-				}else{
-					connect(`${WS_BASE}/${myId}`);
-				}
-			}catch(e){ connect(`${WS_BASE}/${myId}`); }
+		try {
+			const savedRoomId = localStorage.getItem("spender_roomId");
+			const savedToken = savedRoomId ? localStorage.getItem(`spender_token_${savedRoomId}_${myId}`) : null;
+			if (savedRoomId && savedToken) {
+				setRoomId(savedRoomId);
+				connect(`${WS_BASE}/${savedRoomId}/${myId}`);
+			}
+		} catch {}
 		return () => disconnect();
-	}, [connect, disconnect, myId]);
+	}, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+	useEffect(() => {
+		if (screen === "browser" && authUser) fetchGames(authUser);
+	}, [screen]); // eslint-disable-line react-hooks/exhaustive-deps
 
 	useEffect(() => {
 		if (toast) { const t = setTimeout(() => setToast(""), 2500); return () => clearTimeout(t); }
 	}, [toast]);
 
-	const game = roomData?.game;
-	const me = game?.players?.[myId];
-	const myTurn = game?.turn === myId;
-	const myBonuses = me ? bonusesFrom(me.purchased) : emptyGems();
+	// ── Auth actions ───────────────────────────────────────────────────────
+	const handleAuth = async () => {
+		if (!authName.trim() || !authPassword.trim()) {
+			setAuthError("Name and password required"); return;
+		}
+		setAuthError(""); setAuthLoading(true);
+		try {
+			const endpoint = authTab === "login" ? "/auth/login" : "/auth/register";
+			const res = await fetch(`${HTTP_BASE}${endpoint}`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ name: authName.trim(), password: authPassword.trim() }),
+			});
+			const data = await res.json();
+			if (data.ok) {
+				const user = { id: data.user.id, name: data.user.name, session_token: data.session_token || null };
+				try { localStorage.setItem("spender_user", JSON.stringify(user)); localStorage.setItem("spender_myId", user.id); } catch {}
+				setAuthUser(user);
+				setMyId(user.id);
+				setScreen("browser");
+				fetchGames(user);
+			} else {
+				setAuthError(data.message || "Something went wrong");
+			}
+		} catch {
+			setAuthError("Could not reach server");
+		}
+		setAuthLoading(false);
+	};
 
-	// ── Actions ────────────────────────────────────────────────────────────
+	const handleGuestPlay = () => {
+		const name = guestName.trim() || `Guest${Math.floor(Math.random() * 9000 + 1000)}`;
+		const user = { id: myId, name, guest: true };
+		setAuthUser(user);
+		setScreen("browser");
+		fetchGames(null);
+	};
 
+	const handleLogout = () => {
+		try {
+			localStorage.removeItem("spender_user");
+			localStorage.removeItem("spender_roomId");
+		} catch {}
+		const newId = uid();
+		setMyId(newId);
+		try { localStorage.setItem("spender_myId", newId); } catch {}
+		setAuthUser(null);
+		setScreen("auth");
+		setRoomData(null);
+		setRoomId("");
+		disconnect();
+	};
+
+	// ── Room / game actions ────────────────────────────────────────────────
 	const handleCreate = () => {
-		if (!myName.trim()) { setError("Enter your name first"); return; }
-		setError("");
-		send({ action: "create", name: myName.trim() });
+		const newRoomId = roomCode();
+		setRoomId(newRoomId);
+		try { localStorage.setItem("spender_roomId", newRoomId); } catch {}
+		connect(`${WS_BASE}/${newRoomId}/${myId}`);
+		setTimeout(() => send({ action: "create", name: playerName }), 100);
 	};
 
-	const handleJoin = () => {
-		if (!myName.trim()) { setError("Enter your name first"); return; }
-		const id = joinInput.trim().toUpperCase();
-		if (!id) { setError("Enter a room code"); return; }
-		setError("");
-		setRoomId(id);
-		connect(`${WS_BASE}/${myId}`);
-		// slight delay to let WS open before sending join
-		setTimeout(() => send({ action: "join", room_id: id, name: myName.trim() }), 300);
+	const handleJoinGame = (gameId) => {
+		setRoomId(gameId);
+		try { localStorage.setItem("spender_roomId", gameId); } catch {}
+		connect(`${WS_BASE}/${gameId}/${myId}`);
+		setTimeout(() => send({ action: "join", name: playerName }), 100);
 	};
 
-	const handleStart = () => {
-		send({ action: "start", room_id: roomId });
+	const handleContinue = (gameId) => {
+		const savedToken = localStorage.getItem(`spender_token_${gameId}_${myId}`);
+		setRoomId(gameId);
+		try { localStorage.setItem("spender_roomId", gameId); } catch {}
+		connect(`${WS_BASE}/${gameId}/${myId}`);
+		if (savedToken) {
+			setTimeout(() => send({ action: "reconnect", token: savedToken }), 100);
+		} else {
+			setTimeout(() => send({ action: "join", name: playerName }), 100);
+		}
 	};
 
-	const sendMove = (move) => {
-		send({ action: "move", room_id: roomId, move });
-	};
+	const handleStart = () => send({ action: "start" });
+
+	const sendMove = (move) => send({ action: "move", move });
 
 	const handleTakeGems = () => {
 		if (!myTurn || selectedGems.length === 0) return;
@@ -367,11 +554,8 @@ export default function SpenderApp() {
 
 	const handleReserve = (card, deckLevel) => {
 		if (!myTurn) return;
-		if (deckLevel) {
-			sendMove({ type: "reserve", deck_level: deckLevel });
-		} else {
-			sendMove({ type: "reserve", card_id: card.id });
-		}
+		if (deckLevel) sendMove({ type: "reserve", deck_level: deckLevel });
+		else sendMove({ type: "reserve", card_id: card.id });
 		setSelectedCard(null);
 	};
 
@@ -381,20 +565,17 @@ export default function SpenderApp() {
 		setSelectedCard(null);
 	};
 
-	const handleDiscard = (color) => {
-		sendMove({ type: "discard", color });
-	};
+	const handleDiscard = (color) => sendMove({ type: "discard", color });
 
-	// ── Gem selection ──────────────────────────────────────────────────────
 	const handleGemClick = (color) => {
 		if (!myTurn) return;
 		if ((game?.bank[color] || 0) <= 0) return;
 		setSelectedGems(prev => {
 			const freq = {};
-			for (const c of prev) freq[c] = (freq[c]||0)+1;
+			for (const c of prev) freq[c] = (freq[c] || 0) + 1;
 			if (prev.includes(color)) {
 				const idx = prev.lastIndexOf(color);
-				return [...prev.slice(0,idx),...prev.slice(idx+1)];
+				return [...prev.slice(0, idx), ...prev.slice(idx + 1)];
 			}
 			if (prev.length >= 3) return prev;
 			if (freq[color] === 1) {
@@ -406,9 +587,15 @@ export default function SpenderApp() {
 		});
 	};
 
+	// ── Derived game state ─────────────────────────────────────────────────
+	const game = roomData?.game;
+	const me = game?.players?.[myId];
+	const myTurn = game?.turn === myId && game?.phase === "playing";
+	const myBonuses = me ? bonusesFrom(me.purchased) : emptyGems();
+
 	// ── Render helpers ─────────────────────────────────────────────────────
-	function renderCard(card, opts={}) {
-		if (!card) return <div key={Math.random()} style={{width:88,minHeight:120}}/>;
+	function renderCard(card, opts = {}) {
+		if (!card) return <div key={Math.random()} style={{ width: 88, minHeight: 120 }} />;
 		const affordable = me && canAfford(card.cost, me.tokens, myBonuses);
 		const isSelected = selectedCard?.card?.id === card.id;
 		return (
@@ -418,7 +605,7 @@ export default function SpenderApp() {
 				disabled={opts.disabled}
 				onClick={() => {
 					if (!myTurn) return;
-					setSelectedCard(isSelected ? null : { card, source: opts.source||"board" });
+					setSelectedCard(isSelected ? null : { card, source: opts.source || "board" });
 				}}
 			/>
 		);
@@ -427,37 +614,43 @@ export default function SpenderApp() {
 	function renderPlayerPanel(pid) {
 		const p = game?.players?.[pid];
 		if (!p) return null;
-		const name = roomData?.players?.[pid] || pid.slice(0,6);
+		const name = roomData?.players?.[pid] || pid.slice(0, 6);
 		const bonuses = bonusesFrom(p.purchased);
 		const score = totalPoints(p.purchased, p.nobles);
 		const isMe = pid === myId;
 		const isActive = game?.turn === pid;
 		return (
-			<div key={pid} className={`player-panel${isMe?" me":""}${isActive?" active-turn":""}`}>
+			<div key={pid} className={`player-panel${isMe ? " me" : ""}${isActive ? " active-turn" : ""}`}>
 				<div className="player-header">
-					<span className="player-name">{name}{isMe?" (you)":""}{isActive?" ●":""}</span>
+					<div className="player-name-row">
+						{isActive && <span className="active-dot" />}
+						<span className="player-name">{name}{isMe ? " (you)" : ""}</span>
+					</div>
 					<span className="player-score">{score} pts</span>
 				</div>
 				<div className="player-tokens">
-					{[...GEM_COLORS,"gold"].map(c => (p.tokens[c]||0)>0 && (
-						<span key={c} className="token-pill" style={{background:GEM_HEX[c]+"33",border:`1px solid ${GEM_HEX[c]}`}}>
-							<span style={{width:8,height:8,borderRadius:"50%",background:GEM_HEX[c],display:"inline-block"}}/>
+					{[...GEM_COLORS, "gold"].map(c => (p.tokens[c] || 0) > 0 && (
+						<span key={c} className="token-pill" style={{ background: GEM_HEX[c] + "33", border: `1px solid ${GEM_HEX[c]}` }}>
+							<span style={{ width: 8, height: 8, borderRadius: "50%", background: GEM_HEX[c], display: "inline-block" }} />
 							{p.tokens[c]}
 						</span>
 					))}
 				</div>
+				{Object.values(p.tokens).some(v => v > 0) && (
+					<div className="gem-total">{gemTotal(p.tokens)} gems</div>
+				)}
 				<div className="player-bonuses">
-					{GEM_COLORS.map(c => (bonuses[c]||0)>0 && (
-						<span key={c} className="bonus-pill" style={{borderColor:GEM_HEX[c],color:GEM_HEX[c]}}>+{bonuses[c]} {c[0].toUpperCase()}</span>
+					{GEM_COLORS.map(c => (bonuses[c] || 0) > 0 && (
+						<span key={c} className="bonus-pill" style={{ borderColor: GEM_HEX[c], color: GEM_HEX[c] }}>+{bonuses[c]} {c[0].toUpperCase()}</span>
 					))}
 					{p.nobles.map(n => (
-						<span key={n.id} className="bonus-pill" style={{borderColor:"var(--gold)",color:"var(--gold)"}}>★{n.points}</span>
+						<span key={n.id} className="bonus-pill" style={{ borderColor: "var(--gold)", color: "var(--gold)" }}>★{n.points}</span>
 					))}
 				</div>
-				{isMe && p.reserved?.length>0 && (
+				{isMe && p.reserved?.length > 0 && (
 					<>
-						<div className="reserved-label">RESERVED ({p.reserved.length}/3)</div>
-						<div className="reserved-row">{p.reserved.map(c => renderCard(c,{source:"reserved"}))}</div>
+						<div className="reserved-label">Reserved ({p.reserved.length}/3)</div>
+						<div className="reserved-row">{p.reserved.map(c => renderCard(c, { source: "reserved" }))}</div>
 					</>
 				)}
 			</div>
@@ -465,94 +658,215 @@ export default function SpenderApp() {
 	}
 
 	function getHint() {
-		if (!myTurn) return `Waiting for ${roomData?.players?.[game?.turn]||"opponent"}…`;
+		if (!myTurn) return `Waiting for ${roomData?.players?.[game?.turn] || "opponent"}…`;
 		if (selectedCard) {
-			const affordable = canAfford(selectedCard.card.cost, me?.tokens||emptyGems(), myBonuses);
+			const affordable = canAfford(selectedCard.card.cost, me?.tokens || emptyGems(), myBonuses);
 			return affordable ? "Buy or reserve this card" : "Reserve this card (can't afford yet)";
 		}
 		if (selectedGems.length > 0) return `${selectedGems.length} gem(s) selected — confirm to take`;
-		return "Select gems, or click a card to buy/reserve";
+		return "Select gems to take, or click a card to buy/reserve";
 	}
 
 	// ── Screens ────────────────────────────────────────────────────────────
 
-	if (screen === "lobby") return (
+	// Auth screen
+	if (screen === "auth") return (
 		<>
 			<style>{css}</style>
-			<div className="app">
-				<div className="lobby">
-					<h1>Spender</h1>
-					<p className="tagline">A gem merchant's game of prestige</p>
-					<div className="lobby-card">
-						<h2>YOUR NAME</h2>
-						<input className="input" placeholder="Enter your name…" value={myName}
-							onChange={e => setMyName(e.target.value)} maxLength={18}
-							onKeyDown={e => e.key==="Enter" && handleCreate()}
-						/>
+			<div className="app auth-screen">
+				<div className="auth-logo">Spender</div>
+				<p className="auth-tagline">A gem merchant's game of prestige</p>
+
+				<div className="auth-card">
+					<div className="auth-tabs">
+						{["login", "register", "guest"].map(tab => (
+							<button key={tab} className={`auth-tab${authTab === tab ? " active" : ""}`}
+								onClick={() => { setAuthTab(tab); setAuthError(""); }}>
+								{tab === "login" ? "Sign In" : tab === "register" ? "Register" : "Guest"}
+							</button>
+						))}
 					</div>
-					<div className="lobby-card">
-						<h2>CREATE ROOM</h2>
-						<p style={{fontSize:".85rem",color:"var(--text-dim)",marginBottom:12,lineHeight:1.5}}>
-							Start a new game and share the room code with your opponent.
-						</p>
-						<button className="btn btn-gold btn-full" onClick={handleCreate}>Create Room</button>
-					</div>
-					<div className="lobby-card">
-						<h2>JOIN ROOM</h2>
-						<input className="input" placeholder="ROOM CODE" value={joinInput}
-							onChange={e => setJoinInput(e.target.value.toUpperCase())} maxLength={6}
-							style={{marginBottom:8,textAlign:"center"}}
-							onKeyDown={e => e.key==="Enter" && handleJoin()}
-						/>
-						<button className="btn btn-outline btn-full mt-8" onClick={handleJoin}>Join Room</button>
-					</div>
-					{error && <p className="error-msg">{error}</p>}
-					<p className="status-msg">
-						<span className={`conn-dot ${connected?"connected":"disconnected"}`}/>
-						{connected ? "Connected to server" : "Connecting…"}
-					</p>
+
+					{authTab !== "guest" ? (
+						<>
+							<input className="auth-field" placeholder="Name" value={authName}
+								onChange={e => setAuthName(e.target.value)} maxLength={20}
+								onKeyDown={e => e.key === "Enter" && handleAuth()} />
+							<input className="auth-field" placeholder="Password" type="password" value={authPassword}
+								onChange={e => setAuthPassword(e.target.value)} maxLength={64}
+								onKeyDown={e => e.key === "Enter" && handleAuth()} />
+							{authError && <div className="auth-error">{authError}</div>}
+							<button className="btn btn-gold btn-full mt-8" onClick={handleAuth} disabled={authLoading}>
+								{authLoading && <span className="spinner" />}
+								{authTab === "login" ? "Sign In" : "Create Account"}
+							</button>
+						</>
+					) : (
+						<>
+							<p style={{ color: "var(--text-dim)", fontSize: ".88rem", marginBottom: 14, lineHeight: 1.5 }}>
+								Play without an account. Your game history won't be saved.
+							</p>
+							<div className="guest-name-row">
+								<input className="auth-field" placeholder="Display name (optional)"
+									value={guestName} onChange={e => setGuestName(e.target.value)} maxLength={20}
+									onKeyDown={e => e.key === "Enter" && handleGuestPlay()} />
+							</div>
+							<button className="btn btn-outline btn-full mt-8" onClick={handleGuestPlay}>
+								Play as Guest
+							</button>
+						</>
+					)}
 				</div>
+
+				<p className="status-msg mt-12">
+					<span className={`conn-dot ${connected ? "connected" : "disconnected"}`} />
+					{connected ? "Server connected" : "Connecting to server…"}
+				</p>
 			</div>
 		</>
 	);
 
-	if (screen === "waiting") return (
+	// Game browser screen
+	if (screen === "browser") return (
 		<>
 			<style>{css}</style>
 			<div className="app">
-				<div className="lobby">
-					<div className="lobby-card waiting">
-						<h2>Room {roomId}</h2>
-						<p style={{color:"var(--text-dim)",fontSize:".85rem",marginBottom:12}}>Share this code:</p>
-						<div className="room-id-display">{roomId}</div>
-						<ul className="player-list">
-							{roomData?.players && Object.entries(roomData.players).map(([id,name]) => (
-								<li key={id} className={id===myId?"me":""}>{name}{id===myId?" (you)":""}</li>
-							))}
-						</ul>
-						{roomData?.host === myId
-							? <button className="btn btn-gold btn-full"
-									disabled={!roomData?.players||Object.keys(roomData.players).length<2}
-									onClick={handleStart}>Start Game</button>
-							: <p className="status-msg">Waiting for host to start…</p>
-						}
+				<div className="browser">
+					<div className="browser-header">
+						<div className="browser-title">Spender</div>
+						<div className="browser-user">
+							{authUser?.guest && <span className="browser-guest-badge">Guest</span>}
+							<span className="browser-username">{authUser?.name}</span>
+							<button className="btn btn-ghost btn-sm" onClick={handleLogout}>
+								{authUser?.guest ? "Exit" : "Logout"}
+							</button>
+						</div>
+					</div>
 
-						{/* Reconnect token display for convenience */}
-						{roomData?.reconnect_tokens && roomData.reconnect_tokens[myId] && (
-							<div style={{marginTop:12,display:'flex',gap:8,alignItems:'center'}}>
-								<div className="small-muted">Reconnect token</div>
-								<div style={{flex:1,background:'var(--surface2)',padding:8,borderRadius:8}}>{roomData.reconnect_tokens[myId]}</div>
-								<button className="copy-btn" onClick={() => { navigator.clipboard?.writeText(roomData.reconnect_tokens[myId]); }}>
-									Copy
-								</button>
+					<div className="browser-create">
+						<button className="btn btn-gold" onClick={handleCreate}>
+							+ Create New Game
+						</button>
+						<button className="refresh-btn" title="Refresh" onClick={() => fetchGames(authUser)}>
+							{browserLoading ? <span className="spinner" /> : "↻"}
+						</button>
+					</div>
+
+					{myGames.length > 0 && (
+						<div className="browser-section">
+							<div className="section-hd">
+								<span className="section-title">Your Games</span>
+								<span className="small-muted">{myGames.length} active</span>
+							</div>
+							<div className="game-cards">
+								{myGames.map(g => (
+									<div key={g.id} className="game-card">
+										<div className="game-card-info">
+											<div className="game-card-title">
+												{g.opponent_name ? `vs ${g.opponent_name}` : "Waiting for opponent…"}
+											</div>
+											<div className="game-card-meta">
+												{g.id} · {timeAgo(g.updated_at)}
+											</div>
+										</div>
+										<div className="game-card-actions">
+											{g.status === "playing" && (
+												g.your_turn
+													? <span className="your-turn-badge">Your Turn</span>
+													: <span className="playing-badge">Their Turn</span>
+											)}
+											<button className="btn btn-outline btn-sm"
+												onClick={() => handleContinue(g.id)}>
+												{g.status === "open" ? "Return" : "Continue"}
+											</button>
+										</div>
+									</div>
+								))}
+							</div>
+						</div>
+					)}
+
+					<div className="browser-section">
+						<div className="section-hd">
+							<span className="section-title">Open Games</span>
+							<span className="small-muted">waiting for a second player</span>
+						</div>
+						{browserLoading && openGames.length === 0 ? (
+							<div className="empty-state"><span className="spinner" />Loading…</div>
+						) : openGames.length === 0 ? (
+							<div className="empty-state">No open games right now. Create one!</div>
+						) : (
+							<div className="game-cards">
+								{openGames.map(g => (
+									<div key={g.id} className="game-card">
+										<div className="game-card-info">
+											<div className="game-card-title">{g.host_name}'s game</div>
+											<div className="game-card-meta">{g.id} · {timeAgo(g.created_at)}</div>
+										</div>
+										<div className="game-card-actions">
+											<button className="btn btn-gold btn-sm" onClick={() => handleJoinGame(g.id)}>
+												Join
+											</button>
+										</div>
+									</div>
+								))}
 							</div>
 						)}
 					</div>
 				</div>
+				{toast && <div className="toast">{toast}</div>}
 			</div>
 		</>
 	);
 
+	// Waiting screen
+	if (screen === "waiting") return (
+		<>
+			<style>{css}</style>
+			<div className="app" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
+				<div className="waiting-screen">
+					<p className="waiting-title">Room Code</p>
+					<p className="waiting-sub">Share this code with your opponent</p>
+					<div className="room-code-box" title="Click to copy"
+						onClick={() => { navigator.clipboard?.writeText(roomId); setToast("Copied!"); }}>
+						{roomId}
+					</div>
+					<p className="copy-hint">tap code to copy</p>
+
+					<ul className="player-list">
+						{roomData?.players && Object.entries(roomData.players).map(([id, name]) => (
+							<li key={id} className={id === myId ? "me" : ""}>
+								<span className={`conn-dot ${roomData?.status !== "over" ? "connected" : "disconnected"}`} />
+								{name}{id === myId ? " (you)" : ""}
+								{id === roomData?.host ? " ♔" : ""}
+							</li>
+						))}
+					</ul>
+
+					{roomData?.host === myId ? (
+						<button className="btn btn-gold btn-full"
+							disabled={!roomData?.players || Object.keys(roomData.players).length < 2}
+							onClick={handleStart}>
+							Start Game
+						</button>
+					) : (
+						<p className="status-msg">Waiting for the host to start…</p>
+					)}
+
+					<button className="btn btn-ghost btn-full mt-8" onClick={() => {
+						try { localStorage.removeItem("spender_roomId"); } catch {}
+						setScreen("browser"); setRoomData(null); setRoomId(""); disconnect();
+						fetchGames(authUser);
+					}}>
+						← Back to Browser
+					</button>
+				</div>
+				{toast && <div className="toast">{toast}</div>}
+			</div>
+		</>
+	);
+
+	// Winner screen
 	if (screen === "game" && game?.phase === "over") {
 		const winner = game.winner;
 		const winnerName = roomData?.players?.[winner] || winner;
@@ -564,18 +878,22 @@ export default function SpenderApp() {
 						<div className="winner-title">Victory!</div>
 						<p className="winner-sub">{winnerName} claims the gem trade</p>
 						<div className="final-scores">
-							{game.order.map(pid => {
-								const score = totalPoints(game.players[pid].purchased, game.players[pid].nobles);
-								const name = roomData?.players?.[pid]||pid.slice(0,6);
+							{(game.order || []).map(pid => {
+								const score = totalPoints(game.players?.[pid]?.purchased || [], game.players?.[pid]?.nobles || []);
+								const name = roomData?.players?.[pid] || pid.slice(0, 6);
 								return (
-									<div key={pid} className={`score-row${pid===winner?" winner":""}`}>
-										{pid===winner?"★ ":""}{name} — {score} pts
+									<div key={pid} className={`score-row${pid === winner ? " winner" : ""}`}>
+										{pid === winner ? "★ " : ""}{name} — {score} pts
 									</div>
 								);
 							})}
 						</div>
-						<button className="btn btn-outline" onClick={() => { setScreen("lobby"); setRoomData(null); setRoomId(""); }}>
-							Back to Lobby
+						<button className="btn btn-outline" onClick={() => {
+							try { localStorage.removeItem("spender_roomId"); } catch {}
+							setScreen("browser"); setRoomData(null); setRoomId(""); disconnect();
+							fetchGames(authUser);
+						}}>
+							Back to Browser
 						</button>
 					</div>
 				</div>
@@ -583,6 +901,7 @@ export default function SpenderApp() {
 		);
 	}
 
+	// Game screen
 	if (screen === "game" && game) return (
 		<>
 			<style>{css}</style>
@@ -592,37 +911,39 @@ export default function SpenderApp() {
 
 						<div className="panel">
 							<div className="panel-title">Nobles</div>
-							<div className="nobles-row">{game.nobles.map(n => <NobleView key={n.id} noble={n}/>)}</div>
+							<div className="nobles-row">
+								{(game.nobles || []).map(n => <NobleView key={n.id} noble={n} />)}
+							</div>
 						</div>
 
-						{[["L3","L2","L1"].map((lk,i) => (
+						{["L3", "L2", "L1"].map((lk, i) => (
 							<div key={lk} className="panel">
-								<div className="panel-title">Level {["III","II","I"][i]}</div>
+								<div className="panel-title">Level {["III", "II", "I"][i]}</div>
 								<div className="level-row">
-									<div className={`deck-pile${!myTurn?" disabled":""}`}
-										onClick={() => myTurn && handleReserve(null, 3-i)}
+									<div className={`deck-pile${!myTurn ? " disabled" : ""}`}
+										onClick={() => myTurn && handleReserve(null, 3 - i)}
 										title="Reserve blind from deck">
-										<span style={{fontSize:".65rem",letterSpacing:".08em"}}>DECK</span>
-										<span className="deck-remaining">{game.decks[lk]?.length||0}</span>
+										<span style={{ fontSize: ".62rem", letterSpacing: ".08em" }}>DECK</span>
+										<span className="deck-remaining">{game.decks?.[lk]?.length || 0}</span>
 									</div>
-									{game.board[lk].map((c,j) => c ? renderCard(c) : <div key={j} style={{width:88}}/>)}
+									{(game.board?.[lk] || []).map((c, j) => c ? renderCard(c) : <div key={j} style={{ width: 88 }} />)}
 								</div>
 							</div>
-						))]}
+						))}
 
 						<div className="panel">
 							<div className="panel-title">Gem Bank</div>
 							<div className="bank-gems">
-								{[...GEM_COLORS,"gold"].map(c => {
-									const count = game.bank[c]||0;
-									const isGold = c==="gold";
-									const isSel = selectedGems.filter(x=>x===c).length>0;
+								{[...GEM_COLORS, "gold"].map(c => {
+									const count = game.bank[c] || 0;
+									const isGold = c === "gold";
+									const selCount = selectedGems.filter(x => x === c).length;
 									return (
 										<div key={c}
-											className={`gem-stack${isSel?" selected":""}${!myTurn||isGold||count===0?" disabled":""}`}
+											className={`gem-stack${selCount > 0 ? " selected" : ""}${!myTurn || isGold || count === 0 ? " disabled" : ""}`}
 											onClick={() => !isGold && handleGemClick(c)}
 											title={GEM_LABELS[c]}>
-											<GemToken color={c}/>
+											<GemToken color={c} />
 											<span className="gem-count">{count}</span>
 										</div>
 									);
@@ -631,24 +952,24 @@ export default function SpenderApp() {
 						</div>
 
 						<div className="action-bar">
-							<span className={`turn-badge ${myTurn?"mine":"theirs"}`}>
+							<span className={`turn-badge ${myTurn ? "mine" : "theirs"}`}>
 								{myTurn ? "Your Turn" : `${roomData?.players?.[game.turn]}'s Turn`}
 							</span>
 							<span className="action-hint">{getHint()}</span>
-							{myTurn && selectedGems.length>0 && (
+							{myTurn && selectedGems.length > 0 && (
 								<button className="btn btn-gold" onClick={handleTakeGems}>
-									Take {selectedGems.length} Gem{selectedGems.length>1?"s":""}
+									Take {selectedGems.length} Gem{selectedGems.length > 1 ? "s" : ""}
 								</button>
 							)}
 							{myTurn && selectedCard && (() => {
-								const affordable = canAfford(selectedCard.card.cost, me?.tokens||emptyGems(), myBonuses);
+								const affordable = canAfford(selectedCard.card.cost, me?.tokens || emptyGems(), myBonuses);
 								return (
 									<div className="gap-8">
-										{affordable && <button className="btn btn-gold" onClick={() => handleBuy(selectedCard.card)}>Buy Card</button>}
-										{selectedCard.source!="reserved" && me?.reserved?.length<3 && (
+										{affordable && <button className="btn btn-gold" onClick={() => handleBuy(selectedCard.card)}>Buy</button>}
+										{selectedCard.source !== "reserved" && me?.reserved?.length < 3 && (
 											<button className="btn btn-outline" onClick={() => handleReserve(selectedCard.card)}>Reserve</button>
 										)}
-										<button className="btn btn-ghost" onClick={() => setSelectedCard(null)}>Cancel</button>
+										<button className="btn btn-ghost" onClick={() => setSelectedCard(null)}>✕</button>
 									</div>
 								);
 							})()}
@@ -656,8 +977,10 @@ export default function SpenderApp() {
 					</div>
 
 					<div className="game-sidebar">
-						<div className="panel-title" style={{padding:"0 4px"}}>Players</div>
-						<div className="players-area">{game.order.map(pid => renderPlayerPanel(pid))}</div>
+						<div className="panel-title" style={{ padding: "0 4px" }}>Players</div>
+						<div className="players-area">
+							{(game.order || []).map(pid => renderPlayerPanel(pid))}
+						</div>
 					</div>
 				</div>
 
@@ -665,21 +988,19 @@ export default function SpenderApp() {
 					<div className="modal-backdrop">
 						<div className="modal">
 							<h3>Too Many Gems</h3>
-							<p>Discard down to 10 gems total.</p>
+							<p>You have {gemTotal(me.tokens)} gems. Discard down to 10.</p>
 							<div className="discard-gems">
-								{[...GEM_COLORS,"gold"].map(c => {
-									const count = me.tokens[c]||0;
-									return count>0 && (
+								{[...GEM_COLORS, "gold"].map(c => {
+									const count = me.tokens[c] || 0;
+									return count > 0 && (
 										<button key={c} className="discard-btn" onClick={() => handleDiscard(c)}>
-											<span style={{display:"inline-block",width:10,height:10,borderRadius:"50%",background:GEM_HEX[c],marginRight:6}}/>
+											<span style={{ width: 10, height: 10, borderRadius: "50%", background: GEM_HEX[c], display: "inline-block" }} />
 											{GEM_LABELS[c]} ({count})
 										</button>
 									);
 								})}
 							</div>
-							<div className="discard-count">
-								Total: {gemTotal(me.tokens)} / 10
-							</div>
+							<div className="discard-count">Total: {gemTotal(me.tokens)} / 10</div>
 						</div>
 					</div>
 				)}
@@ -689,13 +1010,13 @@ export default function SpenderApp() {
 		</>
 	);
 
+	// Loading / fallback
 	return (
 		<>
 			<style>{css}</style>
-			<div className="app" style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh"}}>
-				<p style={{color:"var(--text-dim)",fontStyle:"italic"}}>Loading…</p>
+			<div className="app" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
+				<p style={{ color: "var(--text-dim)", fontStyle: "italic", fontFamily: "'Cinzel',serif", fontSize: ".9rem" }}>Loading…</p>
 			</div>
 		</>
 	);
 }
-
