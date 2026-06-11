@@ -435,7 +435,8 @@ export default function SpenderApp() {
 
 		if (msg.type === "created") {
 			setRoomData(msg.room);
-			setScreen("waiting");
+			if (msg.room?.status === "playing") setScreen("game");
+			else setScreen("waiting");
 		} else if (msg.type === "joined") {
 			setRoomData(msg.room);
 			setScreen("waiting");
@@ -565,11 +566,13 @@ export default function SpenderApp() {
 	};
 
 	// ── Room / game actions ────────────────────────────────────────────────
-	const handleCreate = () => {
+	const handleCreate = (vsAI = false) => {
 		const newRoomId = roomCode();
 		setRoomId(newRoomId);
 		try { localStorage.setItem("spender_roomId", newRoomId); } catch {}
-		pendingActionRef.current = { action: "create", name: playerName };
+		pendingActionRef.current = vsAI
+			? { action: "create", name: playerName, vs_ai: true }
+			: { action: "create", name: playerName };
 		connect(`${WS_BASE}/${newRoomId}/${myId}`);
 	};
 
@@ -811,8 +814,11 @@ export default function SpenderApp() {
 					</div>
 
 					<div className="browser-create">
-						<button className="btn btn-gold" onClick={handleCreate}>
+						<button className="btn btn-gold" onClick={() => handleCreate(false)}>
 							+ Create New Game
+						</button>
+						<button className="btn btn-outline" onClick={() => handleCreate(true)}>
+							Play vs AI
 						</button>
 						<button className="refresh-btn" title="Refresh" onClick={() => fetchGames(authUser)}>
 							{browserLoading ? <span className="spinner" /> : "↻"}

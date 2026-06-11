@@ -484,6 +484,170 @@ def _check_winner(game: dict) -> str | None:
     return None
 
 
+# ─── AI Player ────────────────────────────────────────────────────────────────
+
+def _ai_pick_gems(game: dict, ai_pid: str) -> list[str]:
+    ps = game["players"][ai_pid]
+    bonuses = bonuses_from(ps["purchased"])
+    token_total = sum(ps["tokens"].values())
+    max_take = min(3, 10 - token_total)
+    if max_take <= 0:
+        return []
+    need: dict[str, float] = {c: 0.0 for c in GEM_COLORS}
+    for lk in ["L1", "L2", "L3"]:
+        for card in (game["board"].get(lk) or []):
+            if not card:
+                continue
+            for color, cost in card["cost"].items():
+                if color not in need:
+                    continue
+                effective = max(0, cost - bonuses.get(color, 0))
+                deficit = max(0, effective - ps["tokens"].get(color, 0))
+                need[color] += deficit * (card["points"] + 1)
+    for card in ps["reserved"]:
+        for color, cost in card["cost"].items():
+            if color not in need:
+                continue
+            effective = max(0, cost - bonuses.get(color, 0))
+            deficit = max(0, effective - ps["tokens"].get(color, 0))
+            need[color] += deficit * (card["points"] + 1)
+    top = max(GEM_COLORS, key=lambda c: need[c]) if any(need[c] > 0 for c in GEM_COLORS) else None
+    if top and need[top] >= 8 and game["bank"].get(top, 0) >= 4 and max_take >= 2:
+        return [top, top]
+    candidates = sorted([c for c in GEM_COLORS if game["bank"].get(c, 0) > 0], key=lambda c: -need[c])
+    return candidates[:max_take]
+
+
+def _ai_discard_one(game: dict, ai_pid: str) -> None:
+    ps = game["players"][ai_pid]
+    bonuses = bonuses_from(ps["purchased"])
+    need: dict[str, float] = {c: 0.0 for c in GEM_COLORS}
+    for lk in ["L1", "L2", "L3"]:
+        for card in (game["board"].get(lk) or []):
+            if not card:
+                continue
+            for color, cost in card["cost"].items():
+                if color in need:
+                    effective = max(0, cost - bonuses.get(color, 0))
+                    need[color] += max(0, effective - ps["tokens"].get(color, 0))
+    held = [(c, ps["tokens"].get(c, 0)) for c in GEM_COLORS + ["gold"] if ps["tokens"].get(c, 0) > 0]
+    if not held:
+        return
+    # Non-gold least-needed first; keep gold for last
+    worst = min(held, key=lambda x: (1 if x[0] == "gold" else 0, need.get(x[0], 0.0)))
+    ps["tokens"][worst[0]] -= 1
+    game["bank"][worst[0]] = game["bank"].get(worst[0], 0) + 1
+
+
+def _ai_choose_move(game: dict, ai_pid: str) -> dict:
+    ps = game["players"][ai_pid]
+    bonuses = bonuses_from(ps["purchased"])
+    token_total = sum(ps["tokens"].values())
+    buyable = []
+    for lk in ["L3", "L2", "L1"]:
+        for card in (game["board"].get(lk) or []):
+            if card and can_afford(card["cost"], ps["tokens"], bonuses):
+                buyable.append(card)
+    for card in ps["reserved"]:
+        if can_afford(card["cost"], ps["tokens"], bonuses):
+            buyable.append(card)
+    if buyable:
+        return {"type": "buy", "card_id": max(buyable, key=lambda c: c["points"])["id"]}
+    colors = _ai_pick_gems(game, ai_pid)
+    if colors:
+        return {"type": "take_gems", "colors": colors}
+    if len(ps["reserved"]) < 3:
+        for lk in ["L3", "L2"]:
+            for card in (game["board"].get(lk) or []):
+                if card and card["points"] >= 3:
+                    return {"type": "reserve", "card_id": card["id"]}
+    available = [c for c in GEM_COLORS if game["bank"].get(c, 0) > 0]
+    max_take = min(3, 10 - token_total)
+    if available and max_take > 0:
+        return {"type": "take_gems", "colors": available[:max_take]}
+    return {"type": "take_gems", "colors": []}
+
+
+def _run_ai_turn(game: dict, ai_pid: str) -> None:
+    ps = game["players"][ai_pid]
+    bonuses = bonuses_from(ps["purchased"])
+    mv = _ai_choose_move(game, ai_pid)
+
+    if mv["type"] == "buy":
+        card_id = mv["card_id"]
+        card: dict | None = None
+        source: tuple | None = None
+        for lk in ["L1", "L2", "L3"]:
+            for i, c in enumerate(game["board"][lk]):
+                if c and c["id"] == card_id:
+                    card, source = c, ("board", lk, i)
+                    break
+            if card:
+                break
+        if not card:
+            for i, c in enumerate(ps["reserved"]):
+                if c["id"] == card_id:
+                    card, source = c, ("reserved", i)
+                    break
+        if card and source:
+            spend = calc_spend(card["cost"], ps["tokens"], bonuses)
+            for c, n in spend.items():
+                ps["tokens"][c] = ps["tokens"].get(c, 0) - n
+                game["bank"][c] = game["bank"].get(c, 0) + n
+            ps["purchased"].append(card)
+            if source[0] == "board":
+                game["board"][source[1]][source[2]] = game["decks"][source[1]].pop() if game["decks"][source[1]] else None
+            else:
+                ps["reserved"].pop(source[1])
+            claimable = _check_nobles(game, ai_pid)
+            if claimable:
+                n = claimable[0]
+                ps["nobles"].append(n)
+                game["nobles"] = [x for x in game["nobles"] if x["id"] != n["id"]]
+
+    elif mv["type"] == "take_gems":
+        for c in mv["colors"]:
+            if game["bank"].get(c, 0) > 0:
+                game["bank"][c] -= 1
+                ps["tokens"][c] = ps["tokens"].get(c, 0) + 1
+        while sum(ps["tokens"].values()) > 10:
+            _ai_discard_one(game, ai_pid)
+
+    elif mv["type"] == "reserve":
+        card_id = mv.get("card_id")
+        card = None
+        if card_id:
+            for lk in ["L1", "L2", "L3"]:
+                for i, c in enumerate(game["board"][lk]):
+                    if c and c["id"] == card_id:
+                        card = c
+                        game["board"][lk][i] = game["decks"][lk].pop() if game["decks"][lk] else None
+                        break
+                if card:
+                    break
+        if card:
+            ps["reserved"].append(card)
+            if game["bank"].get("gold", 0) > 0:
+                game["bank"]["gold"] -= 1
+                ps["tokens"]["gold"] = ps["tokens"].get("gold", 0) + 1
+            while sum(ps["tokens"].values()) > 10:
+                _ai_discard_one(game, ai_pid)
+
+    _finish_turn(game, ai_pid)
+
+
+def _post_turn(game: dict, r: dict) -> None:
+    """After _finish_turn: sync room status and run AI turn if it's next."""
+    if game.get("phase") == "over":
+        r["status"] = "over"
+        return
+    ai_pid = game.get("ai_player")
+    if ai_pid and game.get("turn") == ai_pid and game.get("phase") == "playing":
+        _run_ai_turn(game, ai_pid)
+        if game.get("phase") == "over":
+            r["status"] = "over"
+
+
 # ─── WebSocket ────────────────────────────────────────────────────────────────
 
 @app.websocket("/ws/{room}/{player}")
@@ -516,6 +680,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
             # ── create ──────────────────────────────────────────────────────
             if action == "create":
                 name = msg.get("name") or pid
+                vs_ai = bool(msg.get("vs_ai"))
                 async with ROOM_LOCK:
                     r = ROOMS.setdefault(room_id, {"players": {}, "sockets": {}, "status": "open", "game": None, "host": None})
                     r["players"][pid] = name
@@ -529,6 +694,26 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                     }
                     r["meta"][pid] = {"token": gen_token(6)}
                     r["game"]["players"][pid] = {"tokens": empty_gems(), "purchased": [], "reserved": [], "nobles": []}
+                    if vs_ai:
+                        ai_pid = "ai"
+                        r["players"][ai_pid] = "AI"
+                        g = r["game"]
+                        g["players"][ai_pid] = {"tokens": empty_gems(), "purchased": [], "reserved": [], "nobles": []}
+                        g["ai_player"] = ai_pid
+                        order = [pid, ai_pid]
+                        random.shuffle(order)
+                        g["order"] = order
+                        g["turn"] = order[0]
+                        g["phase"] = "playing"
+                        g["board"] = _deal_board(g["decks"])
+                        nobles_pool = list(ALL_NOBLES)
+                        random.shuffle(nobles_pool)
+                        g["nobles"] = nobles_pool[:3]
+                        r["status"] = "playing"
+                        if g["turn"] == ai_pid:
+                            _run_ai_turn(g, ai_pid)
+                            if g.get("phase") == "over":
+                                r["status"] = "over"
                 save_game(room_id)
                 await websocket.send_text(json.dumps({"type": "created", "room_id": room_id, "room": mk_room_state(room_id)}))
 
@@ -663,8 +848,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                                 _discard_pid = pid
                                             else:
                                                 _finish_turn(g, pid)
-                                                if g.get("phase") == "over":
-                                                    r["status"] = "over"
+                                                _post_turn(g, r)
 
                             elif move_type == "discard":
                                 color = mv.get("color")
@@ -678,8 +862,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                         _discard_pid = pid
                                     else:
                                         _finish_turn(g, pid)
-                                        if g.get("phase") == "over":
-                                            r["status"] = "over"
+                                        _post_turn(g, r)
 
                             elif move_type == "buy":
                                 card_id = mv.get("card_id")
@@ -720,8 +903,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                             ps["nobles"].append(n)
                                             g["nobles"] = [x for x in g["nobles"] if x["id"] != n["id"]]
                                         _finish_turn(g, pid)
-                                        if g.get("phase") == "over":
-                                            r["status"] = "over"
+                                        _post_turn(g, r)
                                         _did_change = True
 
                             elif move_type == "reserve":
@@ -756,8 +938,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                             _discard_pid = pid
                                         else:
                                             _finish_turn(g, pid)
-                                            if g.get("phase") == "over":
-                                                r["status"] = "over"
+                                            _post_turn(g, r)
                             else:
                                 _err = "unknown move type"
 
