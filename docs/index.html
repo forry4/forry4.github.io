@@ -150,6 +150,17 @@
     }
     return null;
   }
+
+  // Auto-run detection on page load so visitors don't have to click anything.
+  (async function autoDetectBackendOnLoad(){
+    try{
+      // small delay to let the UI render
+      await new Promise(r => setTimeout(r, 250));
+      const chosen = await chooseBackendCandidate();
+      if(chosen){ base = chosen; backendDisplay.textContent = base; appendLine('backend auto-detected: ' + base); }
+      else { backendDisplay.textContent = 'manual required'; backendSettings.style.display = 'block'; appendLine('no backend auto-detected — open Settings to set one', 'var(--muted)'); }
+    }catch(e){ console.warn('auto-detect failed', e); backendDisplay.textContent = 'manual required'; backendSettings.style.display = 'block'; }
+  })();
   function endpoint(room, player){ return (base || '').replace(/^http/,'ws').replace(/\/+$/,'') + '/ws/' + encodeURIComponent(room) + '/' + encodeURIComponent(player); }
 
   document.getElementById('create').addEventListener('click', async () => {
