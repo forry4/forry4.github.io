@@ -9,6 +9,7 @@ from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+import logging
 
 app = FastAPI(title="Spender API")
 
@@ -147,6 +148,8 @@ def calc_spend(cost: dict, tokens: dict, bonuses: dict) -> dict[str, int]:
 # ─── Minimal WebSocket / room manager (in-memory, single-process) ──────────
 ROOMS: dict[str, dict] = {}
 ROOM_LOCK = asyncio.Lock()
+LOG = logging.getLogger("games.spender")
+logging.basicConfig(level=logging.INFO)
 
 
 def normalize_room(rid: str) -> str:
@@ -174,6 +177,7 @@ def mk_room_state(room_id: str) -> dict[str, Any]:
         "players": room.get("players", {}),
         "status": room.get("status", "waiting"),
         "game": room.get("game"),
+        "reconnect_tokens": {p: info.get("token") for p, info in room.get("meta", {}).items()} if room.get("meta") else {}
     }
 
 
@@ -182,10 +186,13 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
     await websocket.accept()
     room_id = normalize_room(room)
     pid = player
+    LOG.info("ws connect room=%s player=%s", room_id, pid)
     async with ROOM_LOCK:
         r = ROOMS.setdefault(room_id, {"players": {}, "sockets": {}, "status": "waiting", "game": None})
         # attach socket immediately (may be replaced by a later join with name)
         r["sockets"][pid] = websocket
+        # ensure meta block for tokens/players
+        r.setdefault("meta", {})
     try:
         # initial send: advertise current room state
         await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
@@ -203,7 +210,26 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                 async with ROOM_LOCK:
                     r = ROOMS.setdefault(room_id, {"players": {}, "sockets": {}, "status": "waiting", "game": None})
                     r["players"][pid] = name
+                    # create minimal game state
+                    r["game"] = {"bank": {c:4 for c in GEM_COLORS}, "deck": build_deck(), "players_state": {}, "turn": None}
+                    # assign initial tokens and metadata
+                    r["meta"][pid] = {"token": ''.join(random.choices(string.ascii_letters+string.digits, k=6))}
+                    r["game"]["players_state"][pid] = {"tokens": empty_gems(), "purchased": [], "reserved": [], "nobles": []}
                 await websocket.send_text(json.dumps({"type": "created", "room_id": room_id, "room": mk_room_state(room_id)}))
+                await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
+
+            elif action == "reconnect":
+                token = msg.get("token")
+                async with ROOM_LOCK:
+                    meta = r.setdefault("meta", {})
+                    info = meta.get(pid)
+                    if not info or info.get("token") != token:
+                        await websocket.send_text(json.dumps({"type": "error", "message": "invalid token"}))
+                        continue
+                    # swap socket
+                    r["sockets"][pid] = websocket
+                LOG.info("player %s reconnected to room %s", pid, room_id)
+                await websocket.send_text(json.dumps({"type": "reconnected", "room": mk_room_state(room_id)}))
                 await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
 
             elif action == "join":
@@ -215,25 +241,92 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                     r = ROOMS[room_id]
                     r["players"][pid] = name
                     r["sockets"][pid] = websocket
+                    # assign reconnect token and player state if missing
+                    r.setdefault("meta", {})
+                    if pid not in r["meta"]:
+                        r["meta"][pid] = {"token": ''.join(random.choices(string.ascii_letters+string.digits, k=6))}
+                    if r.get("game") and pid not in r["game"]["players_state"]:
+                        r["game"]["players_state"][pid] = {"tokens": empty_gems(), "purchased": [], "reserved": [], "nobles": []}
                 await websocket.send_text(json.dumps({"type": "joined", "room_id": room_id, "room": mk_room_state(room_id)}))
                 await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
 
-            elif action == "start":
+            elif action == "reconnect":
+                token = msg.get("token")
                 async with ROOM_LOCK:
                     r = ROOMS.get(room_id)
-                    if r:
+                    if not r:
+                        await websocket.send_text(json.dumps({"type":"error","message":"room not found"}))
+                        continue
+                    meta = r.setdefault("meta", {})
+                    info = meta.get(pid)
+                    if not info or info.get("token") != token:
+                        await websocket.send_text(json.dumps({"type":"error","message":"invalid token"}))
+                        continue
+                    r["sockets"][pid] = websocket
+                LOG.info("player %s reconnected (base handler) to room %s", pid, room_id)
+                await websocket.send_text(json.dumps({"type":"reconnected","room":mk_room_state(room_id)}))
+                await broadcast_room(room_id, {"type":"room_update","room":mk_room_state(room_id)})
+
+            elif action == "reconnect":
+                token = msg.get("token")
+                async with ROOM_LOCK:
+                    meta = r.setdefault("meta", {})
+                    info = meta.get(pid)
+                    if not info or info.get("token") != token:
+                        await websocket.send_text(json.dumps({"type": "error", "message": "invalid token"}))
+                        continue
+                    r["sockets"][pid] = websocket
+                LOG.info("player %s reconnected (join handler) to room %s", pid, room_id)
+                await websocket.send_text(json.dumps({"type": "reconnected", "room": mk_room_state(room_id)}))
+                await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
+
+            elif action == "start":
+                # validate enough players and initialize turn order
+                async with ROOM_LOCK:
+                    r = ROOMS.get(room_id)
+                    if r and len(r["players"])>=2:
                         r["status"] = "playing"
+                        # set starting turn (first player key)
+                        first = next(iter(r["players"].keys()))
+                        if r.get("game"):
+                            r["game"]["turn"] = first
                 await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
 
             elif action == "move":
-                # broadcast moves to all players (game logic not enforced here)
-                await broadcast_room(room_id, {"type": "move", "from": pid, "move": msg.get("move")})
+                mv = msg.get("move") or {}
+                # basic validation: must be playing
+                async with ROOM_LOCK:
+                    r = ROOMS.get(room_id)
+                    if not r or r.get("status")!="playing":
+                        await websocket.send_text(json.dumps({"type":"error","message":"game not started"}))
+                        continue
+                    # simple move types handled: take_gems (colors), buy (card_id)
+                    if mv.get("type")=="take_gems":
+                        colors = mv.get("colors", [])
+                        # naive: decrement bank and add to player's tokens
+                        ok = True
+                        for c in colors:
+                            if r["game"]["bank"].get(c,0)<=0:
+                                ok = False
+                        if not ok:
+                            await websocket.send_text(json.dumps({"type":"error","message":"not enough gems in bank"}))
+                            continue
+                        for c in colors:
+                            r["game"]["bank"][c] -= 1
+                            r["game"]["players_state"][pid]["tokens"][c] = r["game"]["players_state"][pid]["tokens"].get(c,0)+1
+                        await broadcast_room(room_id, {"type":"room_update","room":mk_room_state(room_id)})
+                    elif mv.get("type")=="buy":
+                        # minimal: just broadcast buy attempt; full buy logic is out of scope for now
+                        await broadcast_room(room_id, {"type":"move","from":pid,"move":mv})
+                    else:
+                        await websocket.send_text(json.dumps({"type":"error","message":"unknown move type"}))
+                        continue
 
             else:
                 await websocket.send_text(json.dumps({"type": "error", "message": "unknown action"}))
 
     except WebSocketDisconnect:
-        pass
+        LOG.info("ws disconnected room=%s player=%s", room_id, pid)
     finally:
         # cleanup
         async with ROOM_LOCK:
