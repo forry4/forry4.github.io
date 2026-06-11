@@ -814,6 +814,33 @@ export default function SpenderApp() {
 						</button>
 					</div>
 
+					{(() => {
+						const savedId = (() => { try { return localStorage.getItem("spender_roomId"); } catch { return null; } })();
+						const savedToken = savedId ? (() => { try { return localStorage.getItem(`spender_token_${savedId}_${myId}`); } catch { return null; } })() : null;
+						const alreadyInMyGames = myGames.some(g => g.id === savedId);
+						if (!savedId || !savedToken || alreadyInMyGames) return null;
+						return (
+							<div className="browser-section">
+								<div className="section-hd">
+									<span className="section-title">Resume</span>
+								</div>
+								<div className="game-cards">
+									<div className="game-card" style={{ borderColor: "rgba(201,168,76,.4)" }}>
+										<div className="game-card-info">
+											<div className="game-card-title">Game in progress</div>
+											<div className="game-card-meta">{savedId}</div>
+										</div>
+										<div className="game-card-actions">
+											<button className="btn btn-gold btn-sm" onClick={() => handleContinue(savedId)}>
+												Resume
+											</button>
+										</div>
+									</div>
+								</div>
+							</div>
+						);
+					})()}
+
 					{myGames.length > 0 && (
 						<div className="browser-section">
 							<div className="section-hd">
