@@ -454,7 +454,7 @@ export default function SpenderApp() {
 	// ── WebSocket ──────────────────────────────────────────────────────────
 	const pendingActionRef = useRef(null);
 
-	const { connected, connect, send, disconnect } = useWebSocket(handleMessage, {
+	const { connected, connect, send, disconnect, getReadyState } = useWebSocket(handleMessage, {
 		onOpen: ({ send: wsSend }) => {
 			if (pendingActionRef.current) {
 				wsSend(pendingActionRef.current);
