@@ -231,8 +231,26 @@
     const url = endpoint(room, player);
     appendLine('Connecting ' + url);
     try{ ws = new WebSocket(url); }catch(e){ appendLine('WebSocket error: '+ e, 'var(--danger)'); setStatus('error', 'var(--danger)'); return }
-    ws.onopen = () => { appendLine('connected', 'var(--success)'); setStatus('connected', 'var(--success)'); onopen && onopen(); }
-    ws.onmessage = (ev) => { appendLine('recv: ' + ev.data); }
+    ws.onopen = () => {
+      appendLine('connected', 'var(--success)'); setStatus('connected', 'var(--success)');
+      // attempt reconnect if we have a saved token for this room/player
+      try{
+        const key = 'spender_token_' + room + '_' + player;
+        const tok = localStorage.getItem(key);
+        if(tok){ appendLine('attempting reconnect with token'); ws.send(JSON.stringify({action:'reconnect', room_id: room, token: tok})); }
+      }catch(e){}
+      onopen && onopen();
+    }
+    ws.onmessage = (ev) => {
+      appendLine('recv: ' + ev.data);
+      try{
+        const msg = JSON.parse(ev.data);
+        const rt = msg.room && msg.room.reconnect_tokens;
+        if(rt && rt[player]){
+          try{ localStorage.setItem('spender_token_' + msg.room.room_id + '_' + player, rt[player]); appendLine('saved reconnect token'); }catch(e){}
+        }
+      }catch(e){}
+    }
     ws.onclose = () => { appendLine('closed'); setStatus('closed', 'var(--muted)'); }
     ws.onerror = (e) => { appendLine('error'); setStatus('error', 'var(--danger)'); }
   }

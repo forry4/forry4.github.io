@@ -290,7 +290,17 @@ export default function SpenderApp() {
 
 	// Connect WebSocket on mount
 	useEffect(() => {
-		connect(`${WS_BASE}/${myId}`);
+			// attempt reconnect with saved token for any room if present
+			try{
+				const tok = localStorage.getItem('spender_token_' + myId);
+				if(tok){
+					// connect and send reconnect with token
+					connect(`${WS_BASE}/${myId}`);
+					setTimeout(() => send({ action: 'reconnect', token: tok }), 300);
+				}else{
+					connect(`${WS_BASE}/${myId}`);
+				}
+			}catch(e){ connect(`${WS_BASE}/${myId}`); }
 		return () => disconnect();
 	}, [connect, disconnect, myId]);
 
