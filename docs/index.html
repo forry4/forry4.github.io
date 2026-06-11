@@ -1,102 +1,146 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Spender - Minimal Client</title>
+  <title>Spender — Demo Client</title>
+  <meta name="description" content="Lightweight WebSocket demo client for Spender game" />
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; }
-    textarea { width: 100%; height: 200px; }
-    input, button { padding: .5rem; margin: .25rem 0; }
-    .row { display:flex; gap: .5rem; }
+    :root{
+      --bg:#0f1115; --panel:#16181d; --muted:#9aa3b2; --accent:#7c5cff; --success:#3ddc84; --danger:#ff6b6b; --glass: rgba(255,255,255,0.03);
+      --radius:10px; --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", "Segoe UI Mono";
+    }
+    html,body{height:100%;}
+    body{
+      margin:0; font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background:linear-gradient(180deg,var(--bg),#0b0c0e); color:#e6eef8; -webkit-font-smoothing:antialiased;
+      display:flex; align-items:center; justify-content:center; padding:2rem;
+    }
+    .wrap{ width:100%; max-width:980px; }
+    header{display:flex; gap:1rem; align-items:center; margin-bottom:1rem}
+    .logo{width:56px;height:56px;border-radius:12px;background:linear-gradient(135deg,var(--accent),#5fd3ff);display:flex;align-items:center;justify-content:center;color:#071023;font-weight:700;font-size:20px}
+    h1{margin:0;font-size:1.25rem}
+    p.lead{margin:0;color:var(--muted);font-size:0.95rem}
+
+    .panel{background:linear-gradient(180deg,var(--panel), rgba(22,24,29,0.9)); border-radius:var(--radius); padding:1rem; box-shadow: 0 6px 30px rgba(2,6,23,0.6);}
+    .grid{display:grid;grid-template-columns:1fr 360px; gap:1rem}
+    .controls{display:flex;flex-direction:column;gap:0.6rem}
+    label{font-size:0.85rem;color:var(--muted)}
+    input[type=text], input[type=url], select{background:var(--glass); border:1px solid rgba(255,255,255,0.04); color:inherit; padding:0.6rem 0.75rem; border-radius:8px}
+    .row{display:flex;gap:0.5rem}
+    button{background:linear-gradient(180deg,var(--accent),#6d4bff); color:#061028; border:none; padding:0.6rem 0.85rem; border-radius:8px; cursor:pointer; font-weight:600}
+    button.secondary{background:transparent;color:var(--muted);border:1px solid rgba(255,255,255,0.04)}
+    .actions{display:flex;gap:0.5rem;flex-wrap:wrap}
+
+    .log{background:#05060a;border-radius:8px;padding:0.5rem;height:420px;overflow:auto;font-family:var(--mono);font-size:13px;color:var(--muted);border:1px solid rgba(255,255,255,0.03)}
+    .log .line{padding:0.25rem 0.35rem;border-bottom:1px dashed rgba(255,255,255,0.02)}
+    .status{font-size:0.85rem;color:var(--muted);}
+
+    footer{margin-top:1rem;color:var(--muted);font-size:0.85rem;text-align:center}
+
+    @media(max-width:900px){ .grid{grid-template-columns:1fr; } .log{height:260px} }
   </style>
 </head>
 <body>
-  <h1>Spender - Minimal Client</h1>
-  <p>Set <code>BACKEND_URL</code> to your deployed backend (wss/https). For local testing use <code>wss://<your-ngrok>.ngrok.io</code> or <code>wss://127.0.0.1:8000</code>.</p>
+  <div class="wrap">
+    <header>
+      <div class="logo">SP</div>
+      <div>
+        <h1>Spender — Demo Client</h1>
+        <p class="lead">A lightweight WebSocket client to create/join rooms and exercise the Spender game server.</p>
+      </div>
+    </header>
 
-  <label>Backend WebSocket base URL (wss://)</label>
-  <input id="backend" placeholder="wss://your-backend.onrender.com" style="width:100%" />
+    <div class="panel grid">
+      <div>
+        <div class="controls">
+          <div>
+            <label for="backend">Backend base URL (wss:// or https://)</label>
+            <input id="backend" type="url" placeholder="wss://your-backend.onrender.com" value="wss://localhost:8000" />
+          </div>
 
-  <div class="row">
-    <input id="player" placeholder="player id (e.g. P1)" />
-    <input id="name" placeholder="player name" />
+          <div class="row">
+            <div style="flex:1">
+              <label for="player">Player ID</label>
+              <input id="player" type="text" placeholder="P1" />
+            </div>
+            <div style="width:170px">
+              <label for="name">Display name</label>
+              <input id="name" type="text" placeholder="Player" />
+            </div>
+          </div>
+
+          <div class="row">
+            <button id="create">Create Room</button>
+            <input id="room" type="text" placeholder="room id (or created)" style="flex:1" />
+            <button id="join" class="secondary">Join Room</button>
+          </div>
+
+          <div class="actions">
+            <button id="start" class="secondary">Start Game</button>
+            <button id="take" class="secondary">Take Gems</button>
+            <button id="buy" class="secondary">Buy</button>
+            <input id="cardid" type="text" placeholder="card id (for buy)" style="min-width:220px" />
+          </div>
+
+          <div style="margin-top:0.5rem">
+            <div class="status">Connection: <span id="conn">idle</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="log" id="log" aria-live="polite"></div>
+      </div>
+    </div>
+
+    <footer>
+      Built for quick testing — the full game client lives in the project source.
+    </footer>
   </div>
 
-  <div class="row">
-    <button id="create">Create Room</button>
-    <input id="room" placeholder="room id (or created)" />
-    <button id="join">Join Room</button>
-  </div>
+  <script>
+  // minimal client behavior (same features, cleaner logs)
+  const logEl = document.getElementById('log');
+  const connEl = document.getElementById('conn');
+  function appendLine(text, cls){ const d = document.createElement('div'); d.className='line'; d.textContent = text; if(cls) d.style.color = cls; logEl.appendChild(d); logEl.scrollTop = logEl.scrollHeight; }
 
-  <div>
-    <button id="start">Start Game</button>
-    <button id="take">Take Gems (example)</button>
-    <button id="buy">Buy (example)</button>
-  </div>
+  let ws = null; let base = '';
+  function endpoint(room, player){ return (base || '').replace(/^http/,'ws').replace(/\/+$/,'') + '/ws/' + encodeURIComponent(room) + '/' + encodeURIComponent(player); }
 
-  <h3>Messages</h3>
-  <textarea id="log" readonly></textarea>
-
-<script>
-const log = (s) => { const ta = document.getElementById('log'); ta.value += s + '\n'; ta.scrollTop = ta.scrollHeight; }
-let ws;
-let base;
-
-function endpoint(room, player){ return base.replace(/^http/,'ws') + '/ws/' + room + '/' + player }
-
-document.getElementById('create').addEventListener('click', async () => {
-  base = document.getElementById('backend').value.trim();
-  const player = (document.getElementById('player').value || 'P1').trim();
-  const name = (document.getElementById('name').value || 'Player').trim();
-  if(!base) return alert('Set backend URL');
-  const rid = Math.random().toString(36).slice(2,6).toUpperCase();
-  document.getElementById('room').value = rid;
-  connect(rid, player, () => {
-    send({action:'create', name});
+  document.getElementById('create').addEventListener('click', () => {
+    base = document.getElementById('backend').value.trim(); const player = (document.getElementById('player').value || 'P1').trim(); const name = (document.getElementById('name').value || 'Player').trim();
+    if(!base) return alert('Set backend URL');
+    const rid = Math.random().toString(36).slice(2,6).toUpperCase(); document.getElementById('room').value = rid;
+    connect(rid, player, () => send({action:'create', name}));
   });
-});
 
-document.getElementById('join').addEventListener('click', () => {
-  base = document.getElementById('backend').value.trim();
-  const player = (document.getElementById('player').value || 'P2').trim();
-  const name = (document.getElementById('name').value || 'Player').trim();
-  const rid = document.getElementById('room').value.trim();
-  if(!base || !rid) return alert('Set backend and room');
-  connect(rid, player, () => send({action:'join', room_id:rid, name}));
-});
+  document.getElementById('join').addEventListener('click', () => {
+    base = document.getElementById('backend').value.trim(); const player = (document.getElementById('player').value || 'P2').trim(); const name = (document.getElementById('name').value || 'Player').trim(); const rid = document.getElementById('room').value.trim();
+    if(!base || !rid) return alert('Set backend and room');
+    connect(rid, player, () => send({action:'join', room_id:rid, name}));
+  });
 
-function connect(room, player, onopen){
-  if(ws) ws.close();
-  const url = endpoint(room, player);
-  log('Connecting ' + url);
-  try{
-    ws = new WebSocket(url);
-  }catch(e){ log('WebSocket error: ' + e); return }
-  ws.onopen = () => { log('connected'); onopen && onopen(); }
-  ws.onmessage = (ev) => { log('recv: ' + ev.data); }
-  ws.onclose = () => log('closed');
-  ws.onerror = (e) => log('error '+e);
-}
+  function setStatus(s, color){ connEl.textContent = s; connEl.style.color = color || 'var(--muted)'; }
 
-function send(obj){
-  if(!ws || ws.readyState !== WebSocket.OPEN) return log('ws not open');
-  const s = JSON.stringify(obj);
-  log('send: ' + s);
-  ws.send(s);
-}
+  function connect(room, player, onopen){
+    if(ws){ try{ ws.close(); }catch(e){} }
+    const url = endpoint(room, player);
+    appendLine('Connecting ' + url);
+    try{ ws = new WebSocket(url); }catch(e){ appendLine('WebSocket error: '+ e, 'var(--danger)'); setStatus('error', 'var(--danger)'); return }
+    ws.onopen = () => { appendLine('connected', 'var(--success)'); setStatus('connected', 'var(--success)'); onopen && onopen(); }
+    ws.onmessage = (ev) => { appendLine('recv: ' + ev.data); }
+    ws.onclose = () => { appendLine('closed'); setStatus('closed', 'var(--muted)'); }
+    ws.onerror = (e) => { appendLine('error'); setStatus('error', 'var(--danger)'); }
+  }
 
-document.getElementById('start').addEventListener('click', () => {
-  const rid = document.getElementById('room').value.trim(); send({action:'start', room_id:rid});
-});
+  function send(obj){ if(!ws || ws.readyState !== WebSocket.OPEN) { appendLine('ws not open', 'var(--muted)'); return } const s = JSON.stringify(obj); appendLine('send: ' + s); ws.send(s); }
 
-document.getElementById('take').addEventListener('click', () => {
-  const rid = document.getElementById('room').value.trim(); send({action:'move', room_id:rid, move:{type:'take_gems', colors:['blue','green','red']}})
-});
+  document.getElementById('start').addEventListener('click', () => { const rid = document.getElementById('room').value.trim(); send({action:'start', room_id:rid}); });
+  document.getElementById('take').addEventListener('click', () => { const rid = document.getElementById('room').value.trim(); send({action:'move', room_id:rid, move:{type:'take_gems', colors:['blue','green','red']}}); });
+  document.getElementById('buy').addEventListener('click', () => { const rid = document.getElementById('room').value.trim(); send({action:'move', room_id:rid, move:{type:'buy', card_id:document.getElementById('cardid').value||null}}); });
 
-document.getElementById('buy').addEventListener('click', () => {
-  const rid = document.getElementById('room').value.trim(); send({action:'move', room_id:rid, move:{type:'buy', card_id:document.getElementById('cardid')?.value||null}})
-});
-</script>
+  // a little helper: clear log on double-click
+  logEl.addEventListener('dblclick', () => { logEl.innerHTML = ''; appendLine('log cleared'); });
+  </script>
 </body>
 </html>
