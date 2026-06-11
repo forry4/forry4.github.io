@@ -17,4 +17,4 @@ jobs:
         run: |
           response=$(curl -s -o /dev/null -w "%{http_code}" "${{ secrets.RENDER_DEPLOY_HOOK }}")
           echo "Render response: $response"
-          [ "$response" = "200" ] || { echo "Deploy hook failed with status $response"; exit 1; }
+          [ "$response" = "200" ] || [ "$response" = "202" ] || { echo "Deploy hook failed with status $response"; exit 1; }
