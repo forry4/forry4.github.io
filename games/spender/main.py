@@ -486,33 +486,115 @@ def _check_winner(game: dict) -> str | None:
 
 # ─── AI Player ────────────────────────────────────────────────────────────────
 
-def _ai_pick_gems(game: dict, ai_pid: str) -> list[str]:
+def _game_urgency(game: dict) -> float:
+    """0 = early game, 1.0 = someone has reached the 15-pt threshold."""
+    pts = [_calc_points(game["players"][pid]) for pid in game["order"]]
+    return min(1.0, max(pts) / 15.0)
+
+
+def _ai_score_card(card: dict, game: dict, ai_pid: str, urgency: float) -> float:
+    """Score a card for purchase. Points weighted heavily in late game;
+    bonus utility and noble progress weighted in early/mid game."""
+    ps = game["players"][ai_pid]
+    bonuses = bonuses_from(ps["purchased"])
+    bonus_color = card.get("bonus")
+    pts = card["points"]
+
+    # Points become up to 5× more valuable as the game approaches its end
+    point_score = pts * (1.0 + urgency * 4.0)
+
+    # Bonus utility: how many future gem-saves does this card's bonus provide?
+    bonus_score = 0.0
+    if bonus_color:
+        level_mult = {"L1": 0.2, "L2": 0.45, "L3": 0.75}
+        for lk in ["L1", "L2", "L3"]:
+            for c in (game["board"].get(lk) or []):
+                if c and bonus_color in c.get("cost", {}):
+                    bonus_score += c["cost"][bonus_color] * level_mult[lk]
+        for c in ps["reserved"]:
+            if bonus_color in c.get("cost", {}):
+                bonus_score += c["cost"][bonus_color] * 0.5
+        # Bonus utility matters less as the game nears its end
+        bonus_score *= (1.0 - urgency * 0.8)
+
+    # Noble contribution: partial credit toward each noble this bonus advances
+    noble_score = 0.0
+    if bonus_color:
+        for noble in (game.get("nobles") or []):
+            req = noble.get("req", {})
+            if bonus_color in req:
+                current = bonuses.get(bonus_color, 0)
+                needed = req[bonus_color]
+                if current < needed:
+                    progress = current / needed
+                    noble_score += noble["points"] * (1.0 - progress) * 0.6
+
+    return point_score + bonus_score + noble_score
+
+
+def _ai_pick_gems(game: dict, ai_pid: str, urgency: float | None = None) -> list[str]:
+    if urgency is None:
+        urgency = _game_urgency(game)
     ps = game["players"][ai_pid]
     bonuses = bonuses_from(ps["purchased"])
     token_total = sum(ps["tokens"].values())
     max_take = min(3, 10 - token_total)
     if max_take <= 0:
         return []
+
     need: dict[str, float] = {c: 0.0 for c in GEM_COLORS}
+    level_wt = {"L1": 1.0, "L2": 1.5, "L3": 2.0}
+
+    # Board cards + reserved: weight gem need by card value and how reachable it is
+    all_cards: list[tuple[dict, float]] = []
     for lk in ["L1", "L2", "L3"]:
         for card in (game["board"].get(lk) or []):
-            if not card:
-                continue
-            for color, cost in card["cost"].items():
-                if color not in need:
-                    continue
-                effective = max(0, cost - bonuses.get(color, 0))
-                deficit = max(0, effective - ps["tokens"].get(color, 0))
-                need[color] += deficit * (card["points"] + 1)
+            if card:
+                all_cards.append((card, level_wt[lk]))
     for card in ps["reserved"]:
+        all_cards.append((card, 1.5))
+
+    for card, lw in all_cards:
+        pts = card["points"]
+        # In late game skip 0-pt filler cards — they won't win the game
+        if urgency > 0.65 and pts == 0:
+            continue
+        total_deficit = 0
+        card_deficit: dict[str, int] = {}
         for color, cost in card["cost"].items():
             if color not in need:
                 continue
             effective = max(0, cost - bonuses.get(color, 0))
             deficit = max(0, effective - ps["tokens"].get(color, 0))
-            need[color] += deficit * (card["points"] + 1)
+            if deficit > 0:
+                card_deficit[color] = deficit
+                total_deficit += deficit
+        if not card_deficit or total_deficit > 10:
+            continue
+        # Card value scales with points and urgency (high-pt cards worth much more late)
+        card_value = (pts + 1) * lw * (1.0 + urgency * pts * 0.5)
+        for color, deficit in card_deficit.items():
+            need[color] += deficit * card_value / max(1, total_deficit)
+
+    # Noble-aware: add gem need for board cards that give noble-required bonuses
+    for noble in (game.get("nobles") or []):
+        for bonus_color, req_count in noble.get("req", {}).items():
+            missing_bonus = max(0, req_count - bonuses.get(bonus_color, 0))
+            if missing_bonus <= 0:
+                continue
+            for lk in ["L1", "L2", "L3"]:
+                for card in (game["board"].get(lk) or []):
+                    if not card or card.get("bonus") != bonus_color:
+                        continue
+                    for color, cost in card["cost"].items():
+                        if color not in need:
+                            continue
+                        effective = max(0, cost - bonuses.get(color, 0))
+                        deficit = max(0, effective - ps["tokens"].get(color, 0))
+                        need[color] += deficit * missing_bonus * noble["points"] * 0.25
+
     top = max(GEM_COLORS, key=lambda c: need[c]) if any(need[c] > 0 for c in GEM_COLORS) else None
-    if top and need[top] >= 8 and game["bank"].get(top, 0) >= 4 and max_take >= 2:
+    if top and need[top] >= 6 and game["bank"].get(top, 0) >= 4 and max_take >= 2:
         return [top, top]
     candidates = sorted([c for c in GEM_COLORS if game["bank"].get(c, 0) > 0], key=lambda c: -need[c])
     return candidates[:max_take]
@@ -539,10 +621,65 @@ def _ai_discard_one(game: dict, ai_pid: str) -> None:
     game["bank"][worst[0]] = game["bank"].get(worst[0], 0) + 1
 
 
+def _ai_find_block(game: dict, ai_pid: str, opp_pid: str, urgency: float) -> dict | None:
+    """Return a board card to reserve in order to block the opponent, or None."""
+    opp = game["players"][opp_pid]
+    opp_bonuses = bonuses_from(opp["purchased"])
+    best: dict | None = None
+    best_score = 0.0
+    for lk in ["L3", "L2", "L1"]:
+        for card in (game["board"].get(lk) or []):
+            if not card or card["points"] < 3:
+                continue
+            deficit = 0
+            for color, cost in card["cost"].items():
+                if color == "gold":
+                    continue
+                effective = max(0, cost - opp_bonuses.get(color, 0))
+                deficit += max(0, effective - opp["tokens"].get(color, 0))
+            gold = opp["tokens"].get("gold", 0)
+            deficit = max(0, deficit - gold)
+            if deficit <= 2:
+                score = card["points"] * urgency / max(1.0, float(deficit))
+                if score > best_score:
+                    best_score = score
+                    best = card
+    return best if best_score >= 2.0 else None
+
+
+def _ai_find_reserve_target(game: dict, ai_pid: str, urgency: float) -> dict | None:
+    """Return a high-value board card worth reserving for ourselves, or None."""
+    ps = game["players"][ai_pid]
+    bonuses = bonuses_from(ps["purchased"])
+    already = {c["id"] for c in ps["reserved"]}
+    best: dict | None = None
+    best_score = -1.0
+    for lk in ["L3", "L2"]:
+        lw = 1.5 if lk == "L3" else 1.0
+        for card in (game["board"].get(lk) or []):
+            if not card or card["id"] in already or card["points"] < 3:
+                continue
+            deficit = sum(
+                max(0, max(0, cost - bonuses.get(color, 0)) - ps["tokens"].get(color, 0))
+                for color, cost in card["cost"].items() if color in GEM_COLORS
+            )
+            if deficit > 7:
+                continue
+            score = _ai_score_card(card, game, ai_pid, urgency) * lw / (deficit * 0.3 + 1)
+            if score > best_score:
+                best_score = score
+                best = card
+    return best if best_score > 3.0 else None
+
+
 def _ai_choose_move(game: dict, ai_pid: str) -> dict:
     ps = game["players"][ai_pid]
     bonuses = bonuses_from(ps["purchased"])
+    urgency = _game_urgency(game)
     token_total = sum(ps["tokens"].values())
+    opp_pid = next((p for p in game["order"] if p != ai_pid), None)
+
+    # 1. Buy best affordable card, scored by urgency-aware heuristic
     buyable = []
     for lk in ["L3", "L2", "L1"]:
         for card in (game["board"].get(lk) or []):
@@ -552,15 +689,27 @@ def _ai_choose_move(game: dict, ai_pid: str) -> dict:
         if can_afford(card["cost"], ps["tokens"], bonuses):
             buyable.append(card)
     if buyable:
-        return {"type": "buy", "card_id": max(buyable, key=lambda c: c["points"])["id"]}
-    colors = _ai_pick_gems(game, ai_pid)
+        best = max(buyable, key=lambda c: _ai_score_card(c, game, ai_pid, urgency))
+        return {"type": "buy", "card_id": best["id"]}
+
+    # 2. Block opponent if game is tense and they're close to a high-value card
+    if urgency >= 0.5 and opp_pid and len(ps["reserved"]) < 3:
+        block = _ai_find_block(game, ai_pid, opp_pid, urgency)
+        if block:
+            return {"type": "reserve", "card_id": block["id"]}
+
+    # 3. Take gems strategically toward best reachable targets
+    colors = _ai_pick_gems(game, ai_pid, urgency)
     if colors:
         return {"type": "take_gems", "colors": colors}
+
+    # 4. Reserve a high-value card for ourselves (locks in the card + gets gold)
     if len(ps["reserved"]) < 3:
-        for lk in ["L3", "L2"]:
-            for card in (game["board"].get(lk) or []):
-                if card and card["points"] >= 3:
-                    return {"type": "reserve", "card_id": card["id"]}
+        target = _ai_find_reserve_target(game, ai_pid, urgency)
+        if target:
+            return {"type": "reserve", "card_id": target["id"]}
+
+    # 5. Fallback: take any available gems
     available = [c for c in GEM_COLORS if game["bank"].get(c, 0) > 0]
     max_take = min(3, 10 - token_total)
     if available and max_take > 0:
