@@ -1,11 +1,10 @@
 services:
   - type: web
     name: spender-backend
-    env: python
+    env: docker
     plan: free
     branch: main
-    buildCommand: "pip install -r games/spender/requirements.txt"
-    startCommand: "python -m uvicorn games.spender.app:app --host 0.0.0.0 --port $PORT"
+    dockerfilePath: games/spender/Dockerfile
     envVars:
       - key: PYTHONUNBUFFERED
         value: "1"

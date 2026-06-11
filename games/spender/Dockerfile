@@ -1,19 +1,23 @@
-FROM python:3.9-slim
+FROM python:3.11-slim
 
-# Set the working directory
+# Lightweight image for running the FastAPI app
 WORKDIR /app
 
-# Copy the requirements file
-COPY requirements.txt .
+# Install runtime dependencies (uncomment apt-get lines if you need system libs)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+	build-essential \
+	&& rm -rf /var/lib/apt/lists/* || true
 
-# Install the dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy requirements and install Python packages
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# Copy the application code
-COPY . .
+# Copy application code
+COPY . /app
 
-# Expose the port the app runs on
+# Expose a default port (documentation only; Render will inject $PORT)
 EXPOSE 8000
 
-# Command to run the application (use games.spender.app:app)
-CMD ["uvicorn", "games.spender.app:app", "--host", "0.0.0.0", "--port", "8000"]
+# Start the server. Use the PORT environment variable when provided by the platform.
+# Use shell form so ${PORT} is expanded at runtime. Fallback to 8000 locally.
+CMD ["sh", "-c", "uvicorn games.spender.app:app --host 0.0.0.0 --port ${PORT:-8000}"]
