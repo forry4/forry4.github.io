@@ -9,11 +9,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 	&& rm -rf /var/lib/apt/lists/* || true
 
 # Copy requirements and install Python packages
-COPY requirements.txt /app/requirements.txt
+COPY games/spender/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# Copy application code
-COPY . /app
+# Copy application code from repo relative path (Render builds from repo root)
+COPY games/spender /app
 
 # Expose a default port (documentation only; Render will inject $PORT)
 EXPOSE 8000
