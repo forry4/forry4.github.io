@@ -48,8 +48,10 @@ Error generating stack: `+o.message+`
 }
 html,body{height:100%}
 body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,serif;min-height:100vh;
-  padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
   padding-left:env(safe-area-inset-left,0px);padding-right:env(safe-area-inset-right,0px)}
+/* screens without a sticky nav bar own the top safe area themselves */
+.auth-screen,.browser{padding-top:calc(env(safe-area-inset-top,0px) + 32px)}
 .app{min-height:100vh;display:flex;flex-direction:column}
 
 /* ─── Auth ──────────────────────────────────────────────────────────────── */
@@ -85,7 +87,7 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,se
 .conn-dot.connected{background:var(--green-gem)}.conn-dot.disconnected{background:var(--red-gem)}
 
 /* ─── Browser ───────────────────────────────────────────────────────────── */
-.browser{max-width:820px;margin:0 auto;padding:28px 20px 48px}
+.browser{max-width:820px;margin:0 auto;padding:0 20px 48px}
 .browser-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:36px;padding-bottom:16px;border-bottom:1px solid var(--border)}
 .browser-title{font-family:'Cinzel',serif;font-size:2rem;font-weight:700;color:var(--gold);letter-spacing:.04em}
 .browser-user{display:flex;align-items:center;gap:10px}
@@ -224,11 +226,11 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,se
 .mt-8{margin-top:8px}.mt-12{margin-top:12px}
 
 /* ─── Game nav bar ──────────────────────────────────────────────────────── */
-.game-nav{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border-bottom:1px solid var(--border);background:var(--surface)}
+.game-nav{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;padding-top:calc(env(safe-area-inset-top,0px) + 8px);border-bottom:1px solid var(--border);background:var(--surface);position:sticky;top:0;z-index:50;width:100%}
 .game-nav-title{font-family:'Cinzel',serif;font-size:.72rem;letter-spacing:.16em;color:var(--gold);text-transform:uppercase}
 
 @media(max-width:600px){
-  .browser{padding:16px 14px 40px}
+  .browser{padding:0 14px 40px}
   .browser-title{font-size:1.6rem}
   .game{padding:6px}
   .game-card{padding:10px 12px}
