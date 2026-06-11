@@ -746,35 +746,42 @@ def _sim_apply_move(game: dict, pid: str, mv: dict) -> None:
 
 
 def _fast_rollout_move(game: dict, pid: str) -> dict:
-    """Lightweight move selection for simulation rollouts: buy best pts, else take needed gems."""
+    """Rollout policy: buy best card by heuristic score, else take urgency-weighted needed gems."""
     ps = game["players"][pid]
     bonuses = bonuses_from(ps["purchased"])
+    urgency = _game_urgency(game)
 
     best_card: dict | None = None
-    best_pts = -1
+    best_score = -1.0
     for lk in ["L3", "L2", "L1"]:
         for card in (game["board"].get(lk) or []):
-            if card and can_afford(card["cost"], ps["tokens"], bonuses) and card["points"] > best_pts:
-                best_card = card
-                best_pts = card["points"]
+            if card and can_afford(card["cost"], ps["tokens"], bonuses):
+                s = _ai_score_card(card, game, pid, urgency)
+                if s > best_score:
+                    best_card, best_score = card, s
     for card in ps["reserved"]:
-        if can_afford(card["cost"], ps["tokens"], bonuses) and card["points"] > best_pts:
-            best_card = card
-            best_pts = card["points"]
+        if can_afford(card["cost"], ps["tokens"], bonuses):
+            s = _ai_score_card(card, game, pid, urgency)
+            if s > best_score:
+                best_card, best_score = card, s
     if best_card:
         return {"type": "buy", "card_id": best_card["id"]}
 
     token_total = sum(ps["tokens"].values())
     max_take = min(3, 10 - token_total)
     if max_take > 0:
-        need = {c: 0 for c in GEM_COLORS}
+        need: dict[str, float] = {c: 0.0 for c in GEM_COLORS}
         for lk in ["L1", "L2", "L3"]:
             for card in (game["board"].get(lk) or []):
                 if card:
+                    pts = card["points"]
+                    if urgency > 0.65 and pts == 0:
+                        continue
                     for color, cost in card["cost"].items():
                         if color in need:
                             eff = max(0, cost - bonuses.get(color, 0))
-                            need[color] += max(0, eff - ps["tokens"].get(color, 0))
+                            deficit = max(0, eff - ps["tokens"].get(color, 0))
+                            need[color] += deficit * (pts + 1) * (1.0 + urgency * pts * 0.3)
         available = sorted([c for c in GEM_COLORS if game["bank"].get(c, 0) > 0], key=lambda c: -need[c])
         if available:
             return {"type": "take_gems", "colors": available[:max_take]}
@@ -802,7 +809,7 @@ def _sim_rollout(game: dict, max_turns: int = 50) -> str | list | None:
     return leaders[0] if len(leaders) == 1 else leaders
 
 
-def _mcts_choose_move(game: dict, ai_pid: str, time_limit: float = 0.5) -> dict:
+def _mcts_choose_move(game: dict, ai_pid: str, time_limit: float = 1.0) -> dict:
     """UCB1 flat Monte Carlo tree search. Each candidate move is evaluated via game rollouts."""
     candidates = _get_all_moves(game, ai_pid)
     if len(candidates) == 1:
