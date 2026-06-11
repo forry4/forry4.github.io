@@ -429,8 +429,16 @@ export default function SpenderApp() {
 	}, [myId, screen, roomId]);
 
 	// ── WebSocket ──────────────────────────────────────────────────────────
+	const pendingActionRef = useRef(null);
+
 	const { connected, connect, send, disconnect } = useWebSocket(handleMessage, {
 		onOpen: ({ send: wsSend }) => {
+			if (pendingActionRef.current) {
+				wsSend(pendingActionRef.current);
+				pendingActionRef.current = null;
+				return;
+			}
+			// auto-reconnect on page load
 			try {
 				const savedRoomId = localStorage.getItem("spender_roomId");
 				const tok = savedRoomId ? localStorage.getItem(`spender_token_${savedRoomId}_${myId}`) : null;
@@ -519,27 +527,25 @@ export default function SpenderApp() {
 		const newRoomId = roomCode();
 		setRoomId(newRoomId);
 		try { localStorage.setItem("spender_roomId", newRoomId); } catch {}
+		pendingActionRef.current = { action: "create", name: playerName };
 		connect(`${WS_BASE}/${newRoomId}/${myId}`);
-		setTimeout(() => send({ action: "create", name: playerName }), 100);
 	};
 
 	const handleJoinGame = (gameId) => {
 		setRoomId(gameId);
 		try { localStorage.setItem("spender_roomId", gameId); } catch {}
+		pendingActionRef.current = { action: "join", name: playerName };
 		connect(`${WS_BASE}/${gameId}/${myId}`);
-		setTimeout(() => send({ action: "join", name: playerName }), 100);
 	};
 
 	const handleContinue = (gameId) => {
 		const savedToken = localStorage.getItem(`spender_token_${gameId}_${myId}`);
 		setRoomId(gameId);
 		try { localStorage.setItem("spender_roomId", gameId); } catch {}
+		pendingActionRef.current = savedToken
+			? { action: "reconnect", token: savedToken }
+			: { action: "join", name: playerName };
 		connect(`${WS_BASE}/${gameId}/${myId}`);
-		if (savedToken) {
-			setTimeout(() => send({ action: "reconnect", token: savedToken }), 100);
-		} else {
-			setTimeout(() => send({ action: "join", name: playerName }), 100);
-		}
 	};
 
 	const handleStart = () => send({ action: "start" });
