@@ -13,7 +13,7 @@
     html,body{height:100%;}
     body{
       margin:0; font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background:linear-gradient(180deg,var(--bg),#0b0c0e); color:#e6eef8; -webkit-font-smoothing:antialiased;
-      display:flex; align-items:center; justify-content:center; padding:2rem;
+      display:flex; align-items:center; justify-content:center; padding:1rem; -webkit-text-size-adjust:100%;
     }
     .wrap{ width:100%; max-width:980px; }
     header{display:flex; gap:1rem; align-items:center; margin-bottom:1rem}
@@ -22,13 +22,21 @@
     p.lead{margin:0;color:var(--muted);font-size:0.95rem}
 
     .panel{background:linear-gradient(180deg,var(--panel), rgba(22,24,29,0.9)); border-radius:var(--radius); padding:1rem; box-shadow: 0 6px 30px rgba(2,6,23,0.6);}
-    .grid{display:grid;grid-template-columns:1fr 360px; gap:1rem}
+  .grid{display:grid;grid-template-columns:1fr 360px; gap:1rem}
     .controls{display:flex;flex-direction:column;gap:0.6rem}
     label{font-size:0.85rem;color:var(--muted)}
     input[type=text], input[type=url], select{background:var(--glass); border:1px solid rgba(255,255,255,0.04); color:inherit; padding:0.6rem 0.75rem; border-radius:8px}
     .row{display:flex;gap:0.5rem}
-    button{background:linear-gradient(180deg,var(--accent),#6d4bff); color:#061028; border:none; padding:0.6rem 0.85rem; border-radius:8px; cursor:pointer; font-weight:600}
+    button{background:linear-gradient(180deg,var(--accent),#6d4bff); color:#061028; border:none; padding:0.6rem 0.85rem; border-radius:8px; cursor:pointer; font-weight:600; -webkit-tap-highlight-color: transparent; touch-action: manipulation}
     button.secondary{background:transparent;color:var(--muted);border:1px solid rgba(255,255,255,0.04)}
+
+    /* Mobile first improvements: larger touch targets */
+    @media (max-width:600px){
+      button, input[type=text], input[type=url], select { font-size:16px; padding:12px 14px; }
+      .logo{width:48px;height:48px;font-size:18px}
+      .wrap{padding:0.5rem}
+      .actions{gap:0.4rem}
+    }
     .actions{display:flex;gap:0.5rem;flex-wrap:wrap}
 
     .log{background:#05060a;border-radius:8px;padding:0.5rem;height:420px;overflow:auto;font-family:var(--mono);font-size:13px;color:var(--muted);border:1px solid rgba(255,255,255,0.03)}
@@ -38,6 +46,10 @@
     footer{margin-top:1rem;color:var(--muted);font-size:0.85rem;text-align:center}
 
     @media(max-width:900px){ .grid{grid-template-columns:1fr; } .log{height:260px} }
+    @media (max-width:420px){
+      .log{height:200px;font-size:14px}
+      .controls { gap:0.5rem }
+    }
   </style>
 </head>
 <body>
@@ -82,6 +94,11 @@
             <button id="create">Create Room</button>
             <input id="room" type="text" placeholder="room id (or created)" style="flex:1" />
             <button id="join" class="secondary">Join Room</button>
+          </div>
+
+          <!-- Quick Connect for mobile users: creates a short room and connects as P1 -->
+          <div style="margin-top:0.5rem">
+            <button id="quickConnect" class="secondary" style="display:none;">Quick Connect</button>
           </div>
 
           <div class="actions">
@@ -144,7 +161,8 @@
     const hostCandidate = proto + '://' + location.host; // same host
     const candidates = [hostCandidate, 'wss://localhost:8000', 'ws://127.0.0.1:8000', 'ws://localhost:8000'];
     for(const c of candidates){
-      appendLine('probing ' + c + ' ...');
+      // keep probing logs minimal on mobile
+      if(window.innerWidth > 480) appendLine('probing ' + c + ' ...');
       const ok = await probeWs(c);
       if(ok) return c;
     }
@@ -176,6 +194,19 @@
     if(!base){ const chosen = await chooseBackendCandidate(); if(chosen){ base = chosen; backendDisplay.textContent = base; appendLine('backend detected: ' + base); } else { backendDisplay.textContent = 'manual required'; backendSettings.style.display = 'block'; appendLine('no backend auto-detected — open Settings to set one', 'var(--muted)'); return; } }
     connect(rid, player, () => send({action:'join', room_id:rid, name}));
   });
+
+  // Quick connect helper: create a random room and connect as P1.
+  function isMobile(){ return /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 600 }
+  const quickBtn = document.getElementById('quickConnect');
+  quickBtn.addEventListener('click', async () => {
+    const player = 'P1'; const name = 'MobilePlayer';
+    const rid = Math.random().toString(36).slice(2,6).toUpperCase(); document.getElementById('room').value = rid;
+    if(!base){ const chosen = await chooseBackendCandidate(); if(chosen){ base = chosen; backendDisplay.textContent = base; appendLine('backend detected: ' + base); } else { backendDisplay.textContent = 'manual required'; backendSettings.style.display = 'block'; appendLine('no backend auto-detected — open Settings to set one', 'var(--muted)'); return; } }
+    connect(rid, player, () => send({action:'create', name}));
+  });
+
+  // show quick connect on mobile
+  if(isMobile()){ quickBtn.style.display = 'inline-block'; }
 
   function setStatus(s, color){ connEl.textContent = s; connEl.style.color = color || 'var(--muted)'; }
 
