@@ -632,6 +632,7 @@ export default function SpenderApp() {
 
 	const handleGemClick = (color) => {
 		if (!myTurn) return;
+		setSelectedCard(null);
 		const bankCount = game?.bank[color] || 0;
 		if (bankCount <= 0) return;
 		setSelectedGems(prev => {
@@ -669,6 +670,7 @@ export default function SpenderApp() {
 				disabled={opts.disabled}
 				onClick={() => {
 					if (!myTurn) return;
+					setSelectedGems([]);
 					setSelectedCard(isSelected ? null : { card, source: opts.source || "board" });
 				}}
 			/>
@@ -1011,9 +1013,12 @@ export default function SpenderApp() {
 							</span>
 							<span className="action-hint">{getHint()}</span>
 							{myTurn && selectedGems.length > 0 && (
-								<button className="btn btn-gold" onClick={handleTakeGems}>
-									Take {selectedGems.length} Gem{selectedGems.length > 1 ? "s" : ""}
-								</button>
+								<div className="gap-8">
+									<button className="btn btn-gold" onClick={handleTakeGems}>
+										Take {selectedGems.length} Gem{selectedGems.length > 1 ? "s" : ""}
+									</button>
+									<button className="btn btn-ghost" onClick={() => setSelectedGems([])}>✕</button>
+								</div>
 							)}
 							{myTurn && selectedCard?.source === "deck" && (
 								<div className="gap-8">
@@ -1063,7 +1068,7 @@ export default function SpenderApp() {
 								<div className="panel-title">Level {["III", "II", "I"][i]}</div>
 								<div className="level-row">
 									<div className={`deck-pile${!myTurn ? " disabled" : ""}${selectedCard?.source === "deck" && selectedCard?.deckLevel === 3 - i ? " selected" : ""}`}
-										onClick={() => myTurn && setSelectedCard(s => s?.source === "deck" && s?.deckLevel === 3 - i ? null : { source: "deck", deckLevel: 3 - i })}
+										onClick={() => { if (!myTurn) return; setSelectedGems([]); setSelectedCard(s => s?.source === "deck" && s?.deckLevel === 3 - i ? null : { source: "deck", deckLevel: 3 - i }); }}
 										title="Reserve blind from deck">
 										<span style={{ fontSize: ".62rem", letterSpacing: ".08em" }}>DECK</span>
 										<span className="deck-remaining">{game.decks?.[lk]?.length || 0}</span>
