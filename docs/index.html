@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <title>Spender — Demo Client</title>
   <meta name="description" content="Lightweight WebSocket demo client for Spender game" />
   <style>
@@ -18,14 +18,16 @@
       min-height:100vh; /* ensure the gradient/background covers the full viewport */
       padding-top:calc(env(safe-area-inset-top, 0px) + 1rem);
       padding-bottom:calc(env(safe-area-inset-bottom, 0px) + 1rem);
+      padding-left:calc(env(safe-area-inset-left, 0px) + 1rem);
+      padding-right:calc(env(safe-area-inset-right, 0px) + 1rem);
     }
     .wrap{ width:100%; max-width:980px; }
-  header{display:flex; gap:1rem; align-items:center; margin-bottom:1rem;}
+  header{display:flex; gap:1rem; align-items:center; margin-bottom:1rem; padding-top:0.25rem}
     .logo{width:56px;height:56px;border-radius:12px;background:linear-gradient(135deg,var(--accent),#5fd3ff);display:flex;align-items:center;justify-content:center;color:#071023;font-weight:700;font-size:20px}
     h1{margin:0;font-size:1.25rem}
     p.lead{margin:0;color:var(--muted);font-size:0.95rem}
 
-    .panel{background:linear-gradient(180deg,var(--panel), rgba(22,24,29,0.9)); border-radius:var(--radius); padding:1rem; box-shadow: 0 6px 30px rgba(2,6,23,0.6); width:100%; overflow:visible}
+  .panel{background:linear-gradient(180deg,var(--panel), rgba(22,24,29,0.9)); border-radius:var(--radius); padding:1rem; box-shadow: 0 6px 30px rgba(2,6,23,0.6); width:100%; overflow:visible; padding-bottom:1.25rem}
     .grid{display:grid;grid-template-columns:1fr 360px; gap:1rem}
   .controls{display:flex;flex-direction:column;gap:0.6rem}
     label{font-size:0.85rem;color:var(--muted)}
