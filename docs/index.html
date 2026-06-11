@@ -13,20 +13,25 @@
     html,body{height:100%;}
     body{
       margin:0; font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background:linear-gradient(180deg,var(--bg),#0b0c0e); color:#e6eef8; -webkit-font-smoothing:antialiased;
-      display:flex; align-items:center; justify-content:center; padding:1rem; -webkit-text-size-adjust:100%;
+      /* keep the page anchored to the top on small screens so headers aren't hidden by UI chrome/keyboard */
+      display:flex; align-items:flex-start; justify-content:center; padding:1rem; -webkit-text-size-adjust:100%;
+      min-height:100vh; /* ensure the gradient/background covers the full viewport */
+      padding-top:calc(env(safe-area-inset-top, 0px) + 1rem);
+      padding-bottom:calc(env(safe-area-inset-bottom, 0px) + 1rem);
     }
     .wrap{ width:100%; max-width:980px; }
-    header{display:flex; gap:1rem; align-items:center; margin-bottom:1rem}
+  header{display:flex; gap:1rem; align-items:center; margin-bottom:1rem;}
     .logo{width:56px;height:56px;border-radius:12px;background:linear-gradient(135deg,var(--accent),#5fd3ff);display:flex;align-items:center;justify-content:center;color:#071023;font-weight:700;font-size:20px}
     h1{margin:0;font-size:1.25rem}
     p.lead{margin:0;color:var(--muted);font-size:0.95rem}
 
-    .panel{background:linear-gradient(180deg,var(--panel), rgba(22,24,29,0.9)); border-radius:var(--radius); padding:1rem; box-shadow: 0 6px 30px rgba(2,6,23,0.6);}
-  .grid{display:grid;grid-template-columns:1fr 360px; gap:1rem}
-    .controls{display:flex;flex-direction:column;gap:0.6rem}
+    .panel{background:linear-gradient(180deg,var(--panel), rgba(22,24,29,0.9)); border-radius:var(--radius); padding:1rem; box-shadow: 0 6px 30px rgba(2,6,23,0.6); width:100%; overflow:visible}
+    .grid{display:grid;grid-template-columns:1fr 360px; gap:1rem}
+  .controls{display:flex;flex-direction:column;gap:0.6rem}
     label{font-size:0.85rem;color:var(--muted)}
     input[type=text], input[type=url], select{background:var(--glass); border:1px solid rgba(255,255,255,0.04); color:inherit; padding:0.6rem 0.75rem; border-radius:8px}
-    .row{display:flex;gap:0.5rem}
+  .row{display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center}
+  .row > *{min-width:0}
     button{background:linear-gradient(180deg,var(--accent),#6d4bff); color:#061028; border:none; padding:0.6rem 0.85rem; border-radius:8px; cursor:pointer; font-weight:600; -webkit-tap-highlight-color: transparent; touch-action: manipulation}
     button.secondary{background:transparent;color:var(--muted);border:1px solid rgba(255,255,255,0.04)}
 
@@ -36,8 +41,11 @@
       .logo{width:48px;height:48px;font-size:18px}
       .wrap{padding:0.5rem}
       .actions{gap:0.4rem}
+      /* make action buttons stack and fill the panel width on small screens */
+      .actions{flex-direction:column}
+      .actions button, .actions input, .row > button{width:100%; box-sizing:border-box}
     }
-    .actions{display:flex;gap:0.5rem;flex-wrap:wrap}
+  .actions{display:flex;gap:0.5rem;flex-wrap:wrap}
 
     .log{background:#05060a;border-radius:8px;padding:0.5rem;height:420px;overflow:auto;font-family:var(--mono);font-size:13px;color:var(--muted);border:1px solid rgba(255,255,255,0.03)}
     .log .line{padding:0.25rem 0.35rem;border-bottom:1px dashed rgba(255,255,255,0.02)}
@@ -49,6 +57,9 @@
     @media (max-width:420px){
       .log{height:200px;font-size:14px}
       .controls { gap:0.5rem }
+      /* slightly reduce header size to avoid clipping on very small screens */
+      h1{font-size:1.05rem}
+      p.lead{font-size:0.9rem}
     }
   </style>
 </head>
