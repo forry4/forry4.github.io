@@ -444,6 +444,19 @@ def _check_nobles(game: dict, pid: str) -> list:
     return [n for n in game["nobles"] if all(bonuses.get(c, 0) >= v for c, v in n["req"].items())]
 
 
+def _ai_pick_noble(claimable: list, game: dict, ai_pid: str) -> dict:
+    """Pick the claimable noble the opponent is closest to obtaining (maximizes denial)."""
+    if len(claimable) == 1:
+        return claimable[0]
+    opp_pid = next((p for p in game["order"] if p != ai_pid), None)
+    if not opp_pid:
+        return claimable[0]
+    opp_bonuses = bonuses_from(game["players"][opp_pid]["purchased"])
+    def opp_deficit(n: dict) -> int:
+        return sum(max(0, need - opp_bonuses.get(c, 0)) for c, need in n["req"].items())
+    return min(claimable, key=opp_deficit)
+
+
 def _advance_turn(game: dict) -> str:
     order = game["order"]
     return order[(order.index(game["turn"]) + 1) % len(order)]
@@ -454,10 +467,10 @@ def _calc_points(ps: dict) -> int:
 
 
 def _resolve_winner(game: dict) -> None:
-    """End the game: pick winner(s) via tiebreakers — most pts → fewest purchased → fewest reserved → shared."""
+    """End the game: pick winner(s) via tiebreakers — most pts → fewest purchased → shared."""
     def score_key(pid):
         ps = game["players"][pid]
-        return (_calc_points(ps), -len(ps["purchased"]), -len(ps["reserved"]))
+        return (_calc_points(ps), -len(ps["purchased"]))
 
     scores = {pid: score_key(pid) for pid in game["order"]}
     best = max(scores.values())
@@ -718,7 +731,7 @@ def _sim_apply_move(game: dict, pid: str, mv: dict) -> None:
                 ps["reserved"].pop(source[1])
             claimable = _check_nobles(game, pid)
             if claimable:
-                noble = claimable[0]
+                noble = _ai_pick_noble(claimable, game, pid)
                 ps["nobles"].append(noble)
                 game["nobles"] = [x for x in game["nobles"] if x["id"] != noble["id"]]
 
@@ -903,7 +916,7 @@ def _run_ai_turn(game: dict, ai_pid: str) -> None:
             _log_move(game, ai_pid, "buy", card={"color": card["bonus"], "points": card["points"]})
             claimable = _check_nobles(game, ai_pid)
             if claimable:
-                n = claimable[0]
+                n = _ai_pick_noble(claimable, game, ai_pid)
                 ps["nobles"].append(n)
                 game["nobles"] = [x for x in game["nobles"] if x["id"] != n["id"]]
                 _log_move(game, ai_pid, "noble", pts=n["points"])
@@ -1110,6 +1123,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                 _err = None
                 _did_change = False
                 _discard_pid: str | None = None
+                _noble_choice_pid: str | None = None
 
                 async with ROOM_LOCK:
                     r = ROOMS.get(room_id)
@@ -1125,7 +1139,9 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                             ps = g["players"][pid]
                             move_type = mv.get("type")
 
-                            if move_type == "take_gems":
+                            if g.get("pending_noble_pid") == pid and move_type != "pick_noble":
+                                _err = "must choose a noble first"
+                            elif move_type == "take_gems":
                                 colors = mv.get("colors", [])
                                 if not colors or len(colors) > 3:
                                     _err = "take 1-3 gems"
@@ -1206,13 +1222,20 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                             ps["reserved"].pop(source[1])  # type: ignore[index]
                                         _log_move(g, pid, "buy", card={"color": card["bonus"], "points": card["points"]})
                                         claimable = _check_nobles(g, pid)
-                                        if claimable:
+                                        if len(claimable) > 1:
+                                            g["pending_noble_choice"] = [n["id"] for n in claimable]
+                                            g["pending_noble_pid"] = pid
+                                            _noble_choice_pid = pid
+                                        elif claimable:
                                             n = claimable[0]
                                             ps["nobles"].append(n)
                                             g["nobles"] = [x for x in g["nobles"] if x["id"] != n["id"]]
                                             _log_move(g, pid, "noble", pts=n["points"])
-                                        _finish_turn(g, pid)
-                                        _post_turn(g, r)
+                                            _finish_turn(g, pid)
+                                            _post_turn(g, r)
+                                        else:
+                                            _finish_turn(g, pid)
+                                            _post_turn(g, r)
                                         _did_change = True
 
                             elif move_type == "reserve":
@@ -1249,6 +1272,24 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                         else:
                                             _finish_turn(g, pid)
                                             _post_turn(g, r)
+                            elif move_type == "pick_noble":
+                                noble_id = mv.get("noble_id")
+                                pending = g.get("pending_noble_choice") or []
+                                if g.get("pending_noble_pid") != pid or noble_id not in pending:
+                                    _err = "no noble choice pending"
+                                else:
+                                    noble = next((n for n in g["nobles"] if n["id"] == noble_id), None)
+                                    if not noble:
+                                        _err = "noble not found"
+                                    else:
+                                        ps["nobles"].append(noble)
+                                        g["nobles"] = [x for x in g["nobles"] if x["id"] != noble_id]
+                                        _log_move(g, pid, "noble", pts=noble["points"])
+                                        g.pop("pending_noble_choice", None)
+                                        g.pop("pending_noble_pid", None)
+                                        _finish_turn(g, pid)
+                                        _post_turn(g, r)
+                                        _did_change = True
                             else:
                                 _err = "unknown move type"
 
@@ -1260,6 +1301,8 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                     msg_out: dict[str, Any] = {"type": "room_update", "room": room_state}
                     if _discard_pid:
                         msg_out["needs_discard"] = _discard_pid
+                    if _noble_choice_pid:
+                        msg_out["needs_noble_choice"] = _noble_choice_pid
                     await broadcast_room(room_id, msg_out)
 
             # ── abandon ─────────────────────────────────────────────────────

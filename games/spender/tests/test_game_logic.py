@@ -298,15 +298,15 @@ def test_resolve_winner_tiebreak_fewest_purchased():
 
 
 def test_resolve_winner_tiebreak_fewest_reserved():
-    """Second tiebreak: same pts and same purchased count → fewest reserved cards wins."""
+    """Reserved cards no longer break ties per official rules → shared victory."""
     g = make_game_state("p1", "p2")
     card = {"bonus": "blue", "cost": {}, "points": 15, "id": "c1"}
     g["players"]["p1"]["purchased"] = [dict(card, id="c1")]
     g["players"]["p2"]["purchased"] = [dict(card, id="c2")]
     g["players"]["p1"]["reserved"] = [{"bonus": "red", "cost": {}, "points": 0, "id": "r1"}]
-    # p2 has no reserved — p2 wins
     main._resolve_winner(g)
-    assert g["winner"] == "p2"
+    assert isinstance(g["winner"], list)
+    assert set(g["winner"]) == {"p1", "p2"}
 
 
 def test_resolve_winner_shared_victory():
@@ -318,3 +318,505 @@ def test_resolve_winner_shared_victory():
     main._resolve_winner(g)
     assert isinstance(g["winner"], list)
     assert set(g["winner"]) == {"p1", "p2"}
+
+
+# ─── _calc_points ─────────────────────────────────────────────────────────────
+
+def test_calc_points_zero():
+    ps = {"purchased": [], "nobles": []}
+    assert main._calc_points(ps) == 0
+
+
+def test_calc_points_from_cards_only():
+    ps = {"purchased": [
+        {"bonus": "blue", "cost": {}, "points": 3, "id": "c1"},
+        {"bonus": "red",  "cost": {}, "points": 2, "id": "c2"},
+    ], "nobles": []}
+    assert main._calc_points(ps) == 5
+
+
+def test_calc_points_from_nobles_only():
+    ps = {"purchased": [], "nobles": [{"id": "n1", "points": 3, "req": {}}]}
+    assert main._calc_points(ps) == 3
+
+
+def test_calc_points_combined():
+    ps = {
+        "purchased": [{"bonus": "blue", "cost": {}, "points": 4, "id": "c1"}],
+        "nobles":    [{"id": "n1", "points": 3, "req": {}}],
+    }
+    assert main._calc_points(ps) == 7
+
+
+# ─── Noble claiming — multiple and partial matches ────────────────────────────
+
+def test_check_nobles_multiple_match():
+    """Player qualifying for two nobles simultaneously — both returned."""
+    g = make_game_state("p1", "p2")
+    g["nobles"] = [
+        {"id": "n1", "points": 3, "req": {"white": 3}},
+        {"id": "n2", "points": 3, "req": {"blue": 3}},
+    ]
+    g["players"]["p1"]["purchased"] = (
+        [{"bonus": "white", "cost": {}, "points": 0, "id": f"w{i}"} for i in range(3)] +
+        [{"bonus": "blue",  "cost": {}, "points": 0, "id": f"b{i}"} for i in range(3)]
+    )
+    claimable = main._check_nobles(g, "p1")
+    assert len(claimable) == 2
+    assert {n["id"] for n in claimable} == {"n1", "n2"}
+
+
+def test_check_nobles_partial_multi_color_no_match():
+    """Noble needing two colors fails if only one color is met."""
+    g = make_game_state("p1", "p2")
+    g["nobles"] = [{"id": "n1", "points": 3, "req": {"white": 3, "blue": 3}}]
+    g["players"]["p1"]["purchased"] = [
+        {"bonus": "white", "cost": {}, "points": 0, "id": f"c{i}"} for i in range(3)
+    ]
+    assert main._check_nobles(g, "p1") == []
+
+
+def test_noble_requires_exact_bonus_threshold():
+    """Noble needs exactly N cards of a color; N-1 is not enough."""
+    g = make_game_state("p1", "p2")
+    g["nobles"] = [{"id": "n1", "points": 3, "req": {"green": 4}}]
+    g["players"]["p1"]["purchased"] = [
+        {"bonus": "green", "cost": {}, "points": 0, "id": f"g{i}"} for i in range(3)
+    ]
+    assert main._check_nobles(g, "p1") == []
+    g["players"]["p1"]["purchased"].append(
+        {"bonus": "green", "cost": {}, "points": 0, "id": "g3"}
+    )
+    assert len(main._check_nobles(g, "p1")) == 1
+
+
+# ─── _ai_pick_noble ───────────────────────────────────────────────────────────
+
+def test_ai_pick_noble_single():
+    """Single claimable noble is always returned as-is."""
+    g = make_game_state("p1", "p2")
+    noble = {"id": "n1", "points": 3, "req": {"white": 4}}
+    assert main._ai_pick_noble([noble], g, "p1") == noble
+
+
+def test_ai_pick_noble_picks_closest_for_opponent():
+    """AI picks the noble the opponent is closest to (minimum opponent deficit)."""
+    g = make_game_state("p1", "p2")
+    # Opponent already has 3 white bonuses — only 1 more white needed for n_close
+    g["players"]["p2"]["purchased"] = [
+        {"bonus": "white", "cost": {}, "points": 0, "id": f"w{i}"} for i in range(3)
+    ]
+    noble_close = {"id": "n_close", "points": 3, "req": {"white": 4}}  # opponent deficit = 1
+    noble_far   = {"id": "n_far",   "points": 3, "req": {"blue": 4}}   # opponent deficit = 4
+    picked = main._ai_pick_noble([noble_close, noble_far], g, "p1")
+    assert picked["id"] == "n_close"
+
+
+def test_ai_pick_noble_no_opponent_returns_first():
+    """With only one player in order, falls back to first noble."""
+    g = make_game_state("p1", "p2")
+    g["order"] = ["p1"]
+    nobles = [
+        {"id": "n1", "points": 3, "req": {"white": 3}},
+        {"id": "n2", "points": 3, "req": {"blue": 3}},
+    ]
+    assert main._ai_pick_noble(nobles, g, "p1") == nobles[0]
+
+
+# ─── _sim_apply_move — buy ────────────────────────────────────────────────────
+
+def test_sim_buy_board_card_moves_to_purchased():
+    """Buying a board card places it in purchased, slot filled from deck."""
+    g = make_game_state("p1", "p2")
+    card = g["board"]["L1"][0]
+    assert card is not None
+    deck_before = len(g["decks"]["L1"])
+    g["players"]["p1"]["tokens"] = {c: 4 for c in main.GEM_COLORS}
+    g["players"]["p1"]["tokens"]["gold"] = 0
+    main._sim_apply_move(g, "p1", {"type": "buy", "card_id": card["id"]})
+    assert card in g["players"]["p1"]["purchased"]
+    assert len(g["decks"]["L1"]) == deck_before - 1
+
+
+def test_sim_buy_deck_empty_leaves_slot_none():
+    """When deck is exhausted, buying from board leaves that slot as None."""
+    g = make_game_state("p1", "p2")
+    g["decks"]["L1"] = []
+    card = g["board"]["L1"][0]
+    assert card is not None
+    g["players"]["p1"]["tokens"] = {c: 4 for c in main.GEM_COLORS}
+    g["players"]["p1"]["tokens"]["gold"] = 0
+    main._sim_apply_move(g, "p1", {"type": "buy", "card_id": card["id"]})
+    assert card in g["players"]["p1"]["purchased"]
+    assert any(slot is None for slot in g["board"]["L1"])
+
+
+def test_sim_buy_reserved_card():
+    """Buying a reserved card removes it from the reserved hand."""
+    g = make_game_state("p1", "p2")
+    reserved = {"bonus": "blue", "cost": {"blue": 2}, "points": 1, "id": "r1"}
+    g["players"]["p1"]["reserved"] = [reserved]
+    g["players"]["p1"]["tokens"] = {**main.empty_gems(), "blue": 2}
+    main._sim_apply_move(g, "p1", {"type": "buy", "card_id": "r1"})
+    assert reserved in g["players"]["p1"]["purchased"]
+    assert g["players"]["p1"]["reserved"] == []
+
+
+def test_sim_buy_spends_tokens_to_bank():
+    """Token cost is deducted from player and returned to the bank."""
+    g = make_game_state("p1", "p2")
+    card = {"bonus": "blue", "cost": {"white": 2, "red": 1}, "points": 1, "id": "tc1"}
+    g["board"]["L1"][0] = card
+    g["players"]["p1"]["tokens"] = {**main.empty_gems(), "white": 2, "red": 1}
+    bank_white_before = g["bank"]["white"]
+    bank_red_before   = g["bank"]["red"]
+    main._sim_apply_move(g, "p1", {"type": "buy", "card_id": "tc1"})
+    assert g["players"]["p1"]["tokens"]["white"] == 0
+    assert g["players"]["p1"]["tokens"]["red"]   == 0
+    assert g["bank"]["white"] == bank_white_before + 2
+    assert g["bank"]["red"]   == bank_red_before   + 1
+
+
+def test_sim_buy_gold_covers_shortfall():
+    """Gold is spent to cover the gap between cost and available tokens."""
+    g = make_game_state("p1", "p2")
+    card = {"bonus": "red", "cost": {"red": 3}, "points": 1, "id": "gc1"}
+    g["board"]["L2"][0] = card
+    g["players"]["p1"]["tokens"] = {**main.empty_gems(), "red": 1, "gold": 2}
+    main._sim_apply_move(g, "p1", {"type": "buy", "card_id": "gc1"})
+    assert card in g["players"]["p1"]["purchased"]
+    assert g["players"]["p1"]["tokens"]["gold"] == 0
+    assert g["players"]["p1"]["tokens"]["red"]  == 0
+
+
+def test_sim_buy_bonuses_reduce_cost():
+    """Purchased card bonuses reduce the token cost for buying."""
+    g = make_game_state("p1", "p2")
+    # 2 white bonuses; card costs 2 white → free
+    g["players"]["p1"]["purchased"] = [
+        {"bonus": "white", "cost": {}, "points": 0, "id": f"b{i}"} for i in range(2)
+    ]
+    card = {"bonus": "green", "cost": {"white": 2}, "points": 1, "id": "disc1"}
+    g["board"]["L1"][0] = card
+    main._sim_apply_move(g, "p1", {"type": "buy", "card_id": "disc1"})
+    assert card in g["players"]["p1"]["purchased"]
+    # No tokens were spent
+    assert g["players"]["p1"]["tokens"]["white"] == 0
+
+
+def test_sim_buy_triggers_noble():
+    """Noble is auto-claimed after a purchase completes its requirement."""
+    g = make_game_state("p1", "p2")
+    g["nobles"] = [{"id": "n1", "points": 3, "req": {"white": 3}}]
+    g["players"]["p1"]["purchased"] = [
+        {"bonus": "white", "cost": {}, "points": 0, "id": f"pw{i}"} for i in range(2)
+    ]
+    triggering = {"bonus": "white", "cost": {}, "points": 1, "id": "pw3"}
+    g["board"]["L1"][0] = triggering
+    main._sim_apply_move(g, "p1", {"type": "buy", "card_id": "pw3"})
+    assert len(g["players"]["p1"]["nobles"]) == 1
+    assert g["nobles"] == []
+
+
+# ─── _sim_apply_move — take_gems ─────────────────────────────────────────────
+
+def test_sim_take_gems_moves_to_player():
+    """Gems move from bank to player tokens."""
+    g = make_game_state("p1", "p2")
+    bank_white_before = g["bank"]["white"]
+    main._sim_apply_move(g, "p1", {"type": "take_gems", "colors": ["white", "blue", "green"]})
+    assert g["players"]["p1"]["tokens"]["white"] == 1
+    assert g["players"]["p1"]["tokens"]["blue"]  == 1
+    assert g["players"]["p1"]["tokens"]["green"] == 1
+    assert g["bank"]["white"] == bank_white_before - 1
+
+
+def test_sim_take_gems_skips_empty_bank_color():
+    """If requested color is empty in the bank, it is skipped silently."""
+    g = make_game_state("p1", "p2")
+    g["bank"]["white"] = 0
+    main._sim_apply_move(g, "p1", {"type": "take_gems", "colors": ["white"]})
+    assert g["players"]["p1"]["tokens"]["white"] == 0
+
+
+def test_sim_take_gems_double():
+    """Double-taking the same color gives 2 gems."""
+    g = make_game_state("p1", "p2")
+    g["bank"]["red"] = 4
+    main._sim_apply_move(g, "p1", {"type": "take_gems", "colors": ["red", "red"]})
+    assert g["players"]["p1"]["tokens"]["red"] == 2
+    assert g["bank"]["red"] == 2
+
+
+def test_sim_take_gems_overflow_trimmed_to_10():
+    """When taking gems pushes total past 10, ai_discard_one trims back to ≤10."""
+    g = make_game_state("p1", "p2")
+    g["players"]["p1"]["tokens"] = {**main.empty_gems(), "white": 9}
+    main._sim_apply_move(g, "p1", {"type": "take_gems", "colors": ["blue", "red", "green"]})
+    assert sum(g["players"]["p1"]["tokens"].values()) <= 10
+
+
+# ─── _sim_apply_move — reserve ────────────────────────────────────────────────
+
+def test_sim_reserve_board_card_awards_gold():
+    """Reserving a board card moves it to hand and gives 1 gold from bank."""
+    g = make_game_state("p1", "p2")
+    card = g["board"]["L2"][0]
+    assert card is not None
+    gold_before = g["bank"]["gold"]
+    main._sim_apply_move(g, "p1", {"type": "reserve", "card_id": card["id"]})
+    assert card in g["players"]["p1"]["reserved"]
+    assert g["players"]["p1"]["tokens"]["gold"] == 1
+    assert g["bank"]["gold"] == gold_before - 1
+
+
+def test_sim_reserve_no_gold_when_bank_empty():
+    """Reserving when gold bank is exhausted gives no gold."""
+    g = make_game_state("p1", "p2")
+    g["bank"]["gold"] = 0
+    card = g["board"]["L1"][0]
+    main._sim_apply_move(g, "p1", {"type": "reserve", "card_id": card["id"]})
+    assert card in g["players"]["p1"]["reserved"]
+    assert g["players"]["p1"]["tokens"]["gold"] == 0
+
+
+def test_sim_reserve_slot_replenished_from_deck():
+    """After reserving a board card, deck fills the empty slot."""
+    g = make_game_state("p1", "p2")
+    card = g["board"]["L1"][0]
+    deck_before = len(g["decks"]["L1"])
+    main._sim_apply_move(g, "p1", {"type": "reserve", "card_id": card["id"]})
+    assert len(g["decks"]["L1"]) == deck_before - 1
+    assert card not in g["board"]["L1"]
+
+
+def test_sim_reserve_overflow_trimmed():
+    """Reserving gold while already at 10 tokens triggers a discard."""
+    g = make_game_state("p1", "p2")
+    g["players"]["p1"]["tokens"] = {**main.empty_gems(), "white": 10}
+    g["bank"]["gold"] = 3
+    card = g["board"]["L1"][0]
+    main._sim_apply_move(g, "p1", {"type": "reserve", "card_id": card["id"]})
+    assert sum(g["players"]["p1"]["tokens"].values()) <= 10
+
+
+# ─── Reserve limit ────────────────────────────────────────────────────────────
+
+def test_get_all_moves_no_reserve_at_three():
+    """When already holding 3 reserved cards, no reserve moves are generated."""
+    g = make_game_state("p1", "p2")
+    ps = g["players"]["p1"]
+    for i in range(3):
+        c = g["board"]["L1"][i]
+        if c:
+            ps["reserved"].append(c)
+            g["board"]["L1"][i] = None
+    moves = main._get_all_moves(g, "p1")
+    assert not any(m["type"] == "reserve" for m in moves)
+
+
+# ─── _get_all_moves ───────────────────────────────────────────────────────────
+
+def test_get_all_moves_always_nonempty():
+    """Move list is never empty even at the start of the game."""
+    g = make_game_state("p1", "p2")
+    assert len(main._get_all_moves(g, "p1")) > 0
+
+
+def test_get_all_moves_includes_affordable_buy():
+    """A zero-cost card on the board appears as a buy move."""
+    g = make_game_state("p1", "p2")
+    free_card = {"bonus": "red", "cost": {}, "points": 1, "id": "free1"}
+    g["board"]["L1"][0] = free_card
+    moves = main._get_all_moves(g, "p1")
+    assert any(m["type"] == "buy" and m["card_id"] == "free1" for m in moves)
+
+
+def test_get_all_moves_excludes_unaffordable_buy():
+    """A card requiring 7 gems the player doesn't have is excluded."""
+    g = make_game_state("p1", "p2")
+    expensive = {"bonus": "blue", "cost": {"blue": 7}, "points": 4, "id": "exp1"}
+    g["board"]["L3"][0] = expensive
+    moves = main._get_all_moves(g, "p1")
+    assert not any(m["type"] == "buy" and m["card_id"] == "exp1" for m in moves)
+
+
+def test_get_all_moves_has_gem_takes_with_nonempty_bank():
+    """take_gems moves are generated when the bank has gems."""
+    g = make_game_state("p1", "p2")
+    assert any(m["type"] == "take_gems" for m in main._get_all_moves(g, "p1"))
+
+
+def test_get_all_moves_no_gems_at_capacity():
+    """Player at 10 tokens cannot take gems — no take_gems in move list."""
+    g = make_game_state("p1", "p2")
+    g["players"]["p1"]["tokens"] = {c: 2 for c in main.GEM_COLORS}
+    moves = main._get_all_moves(g, "p1")
+    assert not any(m["type"] == "take_gems" for m in moves)
+
+
+# ─── _fast_rollout_move ───────────────────────────────────────────────────────
+
+def test_fast_rollout_always_returns_move():
+    """Rollout policy always returns a well-formed move dict."""
+    g = make_game_state("p1", "p2")
+    mv = main._fast_rollout_move(g, "p1")
+    assert isinstance(mv, dict) and "type" in mv
+
+
+def test_fast_rollout_buys_affordable_card():
+    """With a free card on the board the rollout chooses to buy it."""
+    g = make_game_state("p1", "p2")
+    free_card = {"bonus": "blue", "cost": {}, "points": 2, "id": "fr1"}
+    g["board"]["L1"][0] = free_card
+    mv = main._fast_rollout_move(g, "p1")
+    assert mv["type"] == "buy" and mv["card_id"] == "fr1"
+
+
+# ─── _game_urgency ────────────────────────────────────────────────────────────
+
+def test_game_urgency_zero_at_start():
+    g = make_game_state("p1", "p2")
+    assert main._game_urgency(g) == 0.0
+
+
+def test_game_urgency_one_at_15():
+    g = make_game_state("p1", "p2")
+    g["players"]["p1"]["purchased"] = [{"bonus": "blue", "cost": {}, "points": 15, "id": "c1"}]
+    assert main._game_urgency(g) == 1.0
+
+
+def test_game_urgency_proportional():
+    g = make_game_state("p1", "p2")
+    g["players"]["p1"]["purchased"] = [
+        {"bonus": "blue", "cost": {}, "points": 7, "id": "c1"},
+        {"bonus": "red",  "cost": {}, "points": 1, "id": "c2"},
+    ]
+    urgency = main._game_urgency(g)
+    assert abs(urgency - 8 / 15) < 0.01
+
+
+# ─── _ai_discard_one ─────────────────────────────────────────────────────────
+
+def test_ai_discard_removes_least_needed():
+    """AI discards the token with lowest future need, not the most valuable color."""
+    g = make_game_state("p1", "p2")
+    # Board card needs red; player has plenty of blue (not needed) and 1 red
+    g["board"] = {
+        "L1": [{"bonus": "red", "cost": {"red": 3}, "points": 1, "id": "rd1"}, None, None, None],
+        "L2": [None, None, None, None],
+        "L3": [None, None, None, None],
+    }
+    g["players"]["p1"]["tokens"] = {**main.empty_gems(), "blue": 5, "red": 1}
+    main._ai_discard_one(g, "p1")
+    assert g["players"]["p1"]["tokens"]["blue"] == 4  # blue discarded
+    assert g["players"]["p1"]["tokens"]["red"]  == 1  # red kept
+
+
+def test_ai_discard_one_reduces_total_by_one():
+    g = make_game_state("p1", "p2")
+    g["players"]["p1"]["tokens"] = {**main.empty_gems(), "white": 3, "blue": 2}
+    total_before = sum(g["players"]["p1"]["tokens"].values())
+    main._ai_discard_one(g, "p1")
+    assert sum(g["players"]["p1"]["tokens"].values()) == total_before - 1
+
+
+# ─── _sim_rollout ─────────────────────────────────────────────────────────────
+
+def test_sim_rollout_terminates():
+    """Rollout always completes without raising, regardless of initial state."""
+    g = make_game_state("p1", "p2")
+    result = main._sim_rollout(g, max_turns=100)
+    assert result is None or isinstance(result, (str, list))
+
+
+def test_sim_rollout_returns_winner_string_or_list():
+    """If game ends during rollout, winner is a string (solo) or list (tie)."""
+    import time
+    for _ in range(5):
+        g = make_game_state("p1", "p2")
+        result = main._sim_rollout(g, max_turns=200)
+        if result is not None:
+            assert isinstance(result, (str, list))
+
+
+# ─── Final round with both players at 15+ ────────────────────────────────────
+
+def test_both_players_hit_15_tiebreaker_applies():
+    """Both players reach 15+ in the final round; fewest-purchased tiebreaker decides."""
+    g = make_game_state("p1", "p2")
+    g["players"]["p1"]["purchased"] = [{"bonus": "blue", "cost": {}, "points": 15, "id": "c1"}]
+    main._finish_turn(g, "p1")
+    assert g.get("final_round_trigger") == "p1"
+    # p2 also reaches 15 but buys an extra card (more purchased → loses tiebreak)
+    g["players"]["p2"]["purchased"] = [
+        {"bonus": "red", "cost": {}, "points": 15, "id": "c2"},
+        {"bonus": "red", "cost": {}, "points": 0,  "id": "c3"},
+    ]
+    main._finish_turn(g, "p2")
+    assert g["phase"] == "over"
+    assert g["winner"] == "p1"
+
+
+def test_final_round_trigger_set_only_once():
+    """final_round_trigger is not overwritten if a second player also hits 15."""
+    g = make_game_state("p1", "p2")
+    g["players"]["p1"]["purchased"] = [{"bonus": "blue", "cost": {}, "points": 15, "id": "c1"}]
+    main._finish_turn(g, "p1")
+    assert g["final_round_trigger"] == "p1"
+    # Even if p2 would also trigger it, the key stays as p1 (already set)
+    g["players"]["p2"]["purchased"] = [{"bonus": "red", "cost": {}, "points": 16, "id": "c2"}]
+    main._finish_turn(g, "p2")
+    assert g["final_round_trigger"] == "p1"  # unchanged
+
+
+# ─── Three-way shared victory ─────────────────────────────────────────────────
+
+def test_resolve_winner_three_way_tie():
+    """Three players all tied → shared victory list contains all three."""
+    decks = main.build_deck()
+    board = main._deal_board(decks)
+    nobles = list(main.ALL_NOBLES)[:4]
+    bank = {c: 7 for c in main.GEM_COLORS}
+    bank["gold"] = 5
+
+    def ps():
+        return {"tokens": main.empty_gems(), "purchased": [], "reserved": [], "nobles": []}
+
+    g = {
+        "bank": bank, "decks": decks, "board": board, "nobles": nobles,
+        "players": {"p1": ps(), "p2": ps(), "p3": ps()},
+        "order": ["p1", "p2", "p3"], "turn": "p1", "phase": "playing", "winner": None,
+    }
+    card = {"bonus": "blue", "cost": {}, "points": 15, "id": "base"}
+    for pid in ["p1", "p2", "p3"]:
+        g["players"][pid]["purchased"] = [dict(card, id=f"c_{pid}")]
+    main._resolve_winner(g)
+    assert isinstance(g["winner"], list)
+    assert set(g["winner"]) == {"p1", "p2", "p3"}
+
+
+# ─── can_afford edge cases ────────────────────────────────────────────────────
+
+def test_can_afford_combined_bonus_token_gold():
+    """Cost covered by a combination of bonus, regular token, and gold."""
+    tokens  = {**main.empty_gems(), "blue": 1, "gold": 1}
+    cost    = {"blue": 3}
+    bonuses = {**main.empty_gems(), "blue": 1}
+    # effective need = 3-1=2; have 1 blue + 1 gold → just enough
+    assert main.can_afford(cost, tokens, bonuses)
+
+
+def test_can_afford_zero_cost_card():
+    """A card with no cost requirements is always affordable."""
+    tokens  = main.empty_gems()
+    bonuses = main.empty_gems()
+    assert main.can_afford({}, tokens, bonuses)
+
+
+def test_cannot_afford_gold_only_covers_part():
+    """One gold cannot cover a 3-gem deficit."""
+    tokens  = {**main.empty_gems(), "gold": 1}
+    cost    = {"red": 3}
+    bonuses = main.empty_gems()
+    assert not main.can_afford(cost, tokens, bonuses)

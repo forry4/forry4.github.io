@@ -409,6 +409,7 @@ export default function SpenderApp() {
 	const [roomId, setRoomId] = useState("");
 	const [roomData, setRoomData] = useState(null);
 	const [needsDiscard, setNeedsDiscard] = useState(false);
+	const [needsNobleChoice, setNeedsNobleChoice] = useState(false);
 	const [selectedGems, setSelectedGems] = useState([]);
 	const [selectedCard, setSelectedCard] = useState(null);
 	const [toast, setToast] = useState("");
@@ -472,6 +473,7 @@ export default function SpenderApp() {
 			setRoomData(msg.room);
 			if (msg.room.status === "playing" && screen !== "game") setScreen("game");
 			setNeedsDiscard(msg.needs_discard === myId);
+				setNeedsNobleChoice(msg.needs_noble_choice === myId);
 		} else if (msg.type === "error") {
 			if (msg.message === "invalid token") {
 				try { localStorage.removeItem("spender_roomId"); } catch {}
@@ -708,6 +710,10 @@ export default function SpenderApp() {
 	};
 
 	const handleDiscard = (color) => sendMove({ type: "discard", color });
+	const handleNobleChoice = (nobleId) => {
+		sendMove({ type: "pick_noble", noble_id: nobleId });
+		setNeedsNobleChoice(false);
+	};
 
 	const handleGemClick = (color) => {
 		if (!myTurn) return;
@@ -1216,6 +1222,27 @@ export default function SpenderApp() {
 						</div>
 					</div>
 				)}
+
+				{needsNobleChoice && (() => {
+					const pending = game?.pending_noble_choice || [];
+					const choices = (game?.nobles || []).filter(n => pending.includes(n.id));
+					return choices.length > 0 && (
+						<div className="modal-backdrop">
+							<div className="modal">
+								<h3>Choose a Noble</h3>
+								<p>You qualify for multiple nobles. Choose one to claim.</p>
+								<div style={{ display: "flex", gap: 12, marginTop: 12, justifyContent: "center", flexWrap: "wrap" }}>
+									{choices.map(n => (
+										<button key={n.id} className="btn btn-gold" onClick={() => handleNobleChoice(n.id)}
+											style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: "12px 16px" }}>
+											<NobleView noble={n} />
+										</button>
+									))}
+								</div>
+							</div>
+						</div>
+					);
+				})()}
 
 				{confirmAbandon && (
 					<div className="modal-backdrop">
