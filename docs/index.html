@@ -54,8 +54,17 @@
       <div>
         <div class="controls">
           <div>
-            <label for="backend">Backend base URL (wss:// or https://)</label>
-            <input id="backend" type="url" placeholder="wss://your-backend.onrender.com" value="wss://localhost:8000" />
+            <label>Backend</label>
+            <div class="row">
+              <div style="flex:1">
+                <div id="backendDisplay" style="background:var(--glass);padding:0.5rem;border-radius:8px;color:var(--muted)">Auto-detecting…</div>
+              </div>
+              <button id="showSettings" class="secondary">Settings</button>
+            </div>
+            <div id="backendSettings" style="display:none;margin-top:0.6rem">
+              <input id="backendInput" type="url" placeholder="wss://your-backend.onrender.com" style="width:100%" />
+              <div style="margin-top:0.5rem"><button id="saveBackend" class="secondary">Use this backend</button></div>
+            </div>
           </div>
 
           <div class="row">
@@ -105,18 +114,53 @@
   function appendLine(text, cls){ const d = document.createElement('div'); d.className='line'; d.textContent = text; if(cls) d.style.color = cls; logEl.appendChild(d); logEl.scrollTop = logEl.scrollHeight; }
 
   let ws = null; let base = '';
+  const backendDisplay = document.getElementById('backendDisplay');
+  const backendSettings = document.getElementById('backendSettings');
+  const backendInput = document.getElementById('backendInput');
+  document.getElementById('showSettings').addEventListener('click', () => { backendSettings.style.display = backendSettings.style.display === 'none' ? 'block' : 'none'; });
+  document.getElementById('saveBackend').addEventListener('click', () => { const v = backendInput.value.trim(); if(!v) return; base = v; backendDisplay.textContent = base; appendLine('backend set to ' + base); backendSettings.style.display = 'none'; });
+
+  function getQueryParam(name){ try{ const params = new URLSearchParams(window.location.search); return params.get(name); }catch(e){return null} }
+
+  // probe a websocket URL and resolve true if it opens within timeout
+  function probeWs(url, timeout=2000){ return new Promise((resolve) => {
+    let resolved = false; let s;
+    try{ s = new WebSocket(url); }catch(e){ return resolve(false); }
+    const t = setTimeout(() => { try{ s.close(); }catch(_){} if(!resolved){ resolved=true; resolve(false); } }, timeout);
+    s.onopen = () => { if(!resolved){ resolved=true; clearTimeout(t); try{ s.close(); }catch(_){} resolve(true); } }
+    s.onerror = () => { if(!resolved){ resolved=true; clearTimeout(t); try{ s.close(); }catch(_){} resolve(false); } }
+    s.onclose = () => { /* ignore */ }
+  }); }
+
+  async function chooseBackendCandidate(){
+    // 1) URL param ?backend=...
+    const q = getQueryParam('backend'); if(q) return q;
+    // 2) global override (optional): window.__BACKEND_URL
+    if(window.__BACKEND_URL) return window.__BACKEND_URL;
+    // 3) probe candidates: same-origin, localhost, 127.0.0.1
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    const hostCandidate = proto + '://' + location.host; // same host
+    const candidates = [hostCandidate, 'wss://localhost:8000', 'ws://127.0.0.1:8000', 'ws://localhost:8000'];
+    for(const c of candidates){
+      appendLine('probing ' + c + ' ...');
+      const ok = await probeWs(c);
+      if(ok) return c;
+    }
+    return null;
+  }
   function endpoint(room, player){ return (base || '').replace(/^http/,'ws').replace(/\/+$/,'') + '/ws/' + encodeURIComponent(room) + '/' + encodeURIComponent(player); }
 
-  document.getElementById('create').addEventListener('click', () => {
-    base = document.getElementById('backend').value.trim(); const player = (document.getElementById('player').value || 'P1').trim(); const name = (document.getElementById('name').value || 'Player').trim();
-    if(!base) return alert('Set backend URL');
+  document.getElementById('create').addEventListener('click', async () => {
+    const player = (document.getElementById('player').value || 'P1').trim(); const name = (document.getElementById('name').value || 'Player').trim();
     const rid = Math.random().toString(36).slice(2,6).toUpperCase(); document.getElementById('room').value = rid;
+    if(!base){ const chosen = await chooseBackendCandidate(); if(chosen){ base = chosen; backendDisplay.textContent = base; appendLine('backend detected: ' + base); } else { backendDisplay.textContent = 'manual required'; backendSettings.style.display = 'block'; appendLine('no backend auto-detected — open Settings to set one', 'var(--muted)'); return; } }
     connect(rid, player, () => send({action:'create', name}));
   });
 
-  document.getElementById('join').addEventListener('click', () => {
-    base = document.getElementById('backend').value.trim(); const player = (document.getElementById('player').value || 'P2').trim(); const name = (document.getElementById('name').value || 'Player').trim(); const rid = document.getElementById('room').value.trim();
-    if(!base || !rid) return alert('Set backend and room');
+  document.getElementById('join').addEventListener('click', async () => {
+    const player = (document.getElementById('player').value || 'P2').trim(); const name = (document.getElementById('name').value || 'Player').trim(); const rid = document.getElementById('room').value.trim();
+    if(!rid) return alert('Set room');
+    if(!base){ const chosen = await chooseBackendCandidate(); if(chosen){ base = chosen; backendDisplay.textContent = base; appendLine('backend detected: ' + base); } else { backendDisplay.textContent = 'manual required'; backendSettings.style.display = 'block'; appendLine('no backend auto-detected — open Settings to set one', 'var(--muted)'); return; } }
     connect(rid, player, () => send({action:'join', room_id:rid, name}));
   });
 
