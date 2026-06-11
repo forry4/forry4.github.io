@@ -230,7 +230,8 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,se
 .mt-8{margin-top:8px}.mt-12{margin-top:12px}
 
 /* ─── Game nav bar ──────────────────────────────────────────────────────── */
-.game-nav{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;padding-top:calc(env(safe-area-inset-top,0px) + 8px);border-bottom:1px solid var(--border);background:var(--surface);position:sticky;top:0;z-index:50;width:100%}
+.game-nav{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;padding-top:calc(env(safe-area-inset-top,0px) + 8px);border-bottom:1px solid var(--border);background:var(--surface);position:fixed;top:0;left:0;right:0;z-index:50}
+.game-nav-spacer{height:calc(env(safe-area-inset-top,0px) + 48px);flex-shrink:0}
 .game-nav-title{font-family:'Cinzel',serif;font-size:.72rem;letter-spacing:.16em;color:var(--gold);text-transform:uppercase}
 
 @media(max-width:600px){
@@ -1000,6 +1001,7 @@ export default function SpenderApp() {
 					<span className="game-nav-title">Spender</span>
 					<button className="btn btn-danger btn-sm" onClick={() => setConfirmAbandon(true)}>Abandon</button>
 				</div>
+				<div className="game-nav-spacer" />
 				<div className="game">
 					<div className="game-main">
 
