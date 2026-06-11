@@ -209,6 +209,30 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,se
 .score-row{font-family:'Cinzel',serif;font-size:1.05rem;padding:10px 28px;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border)}
 .score-row.winner{border-color:var(--gold);color:var(--gold)}
 
+/* ─── Move log ──────────────────────────────────────────────────────────── */
+.move-log{display:flex;flex-direction:column;gap:0;max-height:200px;overflow-y:auto}
+.move-log::-webkit-scrollbar{width:3px}.move-log::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.log-entry{display:flex;gap:6px;align-items:baseline;font-size:.76rem;color:var(--text-dim);padding:4px 0;border-bottom:1px solid rgba(58,52,42,.4);line-height:1.4;animation:log-in .2s ease}
+.log-entry:last-child{border-bottom:none}
+.log-entry:first-child{color:var(--text)}
+.log-name{font-family:'Cinzel',serif;font-size:.7rem;color:var(--gold-light);flex-shrink:0}
+.log-action{flex:1}
+@keyframes log-in{from{opacity:0;transform:translateX(6px)}to{opacity:1;transform:none}}
+
+/* ─── Card animations ───────────────────────────────────────────────────── */
+@keyframes card-appear{from{opacity:0;transform:scale(.82) translateY(-6px)}to{opacity:1;transform:none}}
+.card{animation:card-appear .22s ease}
+
+/* ─── Gem flash ─────────────────────────────────────────────────────────── */
+@keyframes gem-pop{0%,100%{transform:scale(1)}45%{transform:scale(1.3)}}
+.gem-stack.flashing .gem-token{animation:gem-pop .38s ease}
+
+/* ─── AI thinking dots ──────────────────────────────────────────────────── */
+.ai-thinking{display:inline-flex;align-items:center;gap:5px;font-size:.78rem;color:var(--text-muted);font-style:italic}
+.think-dot{width:5px;height:5px;border-radius:50%;background:var(--text-muted);animation:think-blink .9s ease-in-out infinite}
+.think-dot:nth-child(2){animation-delay:.2s}.think-dot:nth-child(3){animation-delay:.4s}
+@keyframes think-blink{0%,100%{opacity:.25;transform:scale(.7)}50%{opacity:1;transform:scale(1.2)}}
+
 /* ─── Toast ─────────────────────────────────────────────────────────────── */
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--surface);border:1px solid var(--gold);padding:10px 20px;border-radius:var(--radius);font-family:'Cinzel',serif;font-size:.8rem;color:var(--gold);z-index:999;pointer-events:none;animation:fadeup .3s ease;white-space:nowrap}
 @keyframes fadeup{from{opacity:0;transform:translateX(-50%) translateY(10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
@@ -512,6 +536,58 @@ export default function SpenderApp() {
 		if (toast) { const t = setTimeout(() => setToast(""), 2500); return () => clearTimeout(t); }
 	}, [toast]);
 
+	// ── Gem flash when bank count drops ───────────────────────────────────────
+	const prevBankRef = useRef(null);
+	const [flashGems, setFlashGems] = useState(new Set());
+	useEffect(() => {
+		if (!game?.bank) return;
+		const prev = prevBankRef.current;
+		if (prev) {
+			const flashing = new Set(
+				[...GEM_COLORS, "gold"].filter(c => (prev[c] ?? 0) > (game.bank[c] ?? 0))
+			);
+			if (flashing.size > 0) {
+				setFlashGems(flashing);
+				const t = setTimeout(() => setFlashGems(new Set()), 420);
+				prevBankRef.current = { ...game.bank };
+				return () => clearTimeout(t);
+			}
+		}
+		prevBankRef.current = { ...game.bank };
+	}, [game]); // eslint-disable-line react-hooks/exhaustive-deps
+
+	// ── Move log helpers ──────────────────────────────────────────────────────
+	function formatLogMove(mv) {
+		const isMe = mv.pid === myId;
+		const name = isMe ? "You" : (roomData?.players?.[mv.pid] || mv.pid.slice(0, 6));
+		if (mv.type === "take_gems") {
+			if (!mv.colors?.length) return { name, action: "passed" };
+			const freq = {};
+			for (const c of mv.colors) freq[c] = (freq[c] || 0) + 1;
+			const parts = Object.entries(freq).map(([c, n]) => (
+				<span key={c} style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+					{n > 1 ? `${n}× ` : ""}
+					<span style={{ width: 8, height: 8, borderRadius: "50%", background: GEM_HEX[c], display: "inline-block", flexShrink: 0 }} />
+				</span>
+			));
+			return { name, action: <span>took {parts.reduce((a, b) => [a, " ", b])}</span> };
+		}
+		if (mv.type === "buy") {
+			const dot = mv.card?.color
+				? <span style={{ width: 8, height: 8, borderRadius: "50%", background: GEM_HEX[mv.card.color], display: "inline-block", marginLeft: 2, marginRight: 2, verticalAlign: "middle" }} />
+				: null;
+			return { name, action: <span>bought{dot}{mv.card?.points ? `+${mv.card.points}` : ""}</span> };
+		}
+		if (mv.type === "reserve") {
+			const dot = mv.card?.color
+				? <span style={{ width: 8, height: 8, borderRadius: "50%", background: GEM_HEX[mv.card.color], display: "inline-block", marginLeft: 2, marginRight: 2, verticalAlign: "middle" }} />
+				: null;
+			return { name, action: <span>reserved{dot}card</span> };
+		}
+		if (mv.type === "noble") return { name, action: `claimed noble +${mv.pts}pts` };
+		return { name, action: mv.type };
+	}
+
 	// ── Auth actions ───────────────────────────────────────────────────────
 	const handleAuth = async () => {
 		if (!authName.trim() || !authPassword.trim()) {
@@ -660,6 +736,7 @@ export default function SpenderApp() {
 	const me = game?.players?.[myId];
 	const myTurn = game?.turn === myId && game?.phase === "playing";
 	const myBonuses = me ? bonusesFrom(me.purchased) : emptyGems();
+	const aiThinking = game?.ai_player && game?.turn === game?.ai_player && game?.phase === "playing";
 
 	// ── Render helpers ─────────────────────────────────────────────────────
 	function renderCard(card, opts = {}) {
@@ -1017,7 +1094,10 @@ export default function SpenderApp() {
 							<span className={`turn-badge ${myTurn ? "mine" : "theirs"}`}>
 								{myTurn ? "Your Turn" : `${roomData?.players?.[game.turn]}'s Turn`}
 							</span>
-							<span className="action-hint">{getHint()}</span>
+							{aiThinking
+								? <span className="ai-thinking"><span className="think-dot"/><span className="think-dot"/><span className="think-dot"/> thinking…</span>
+								: <span className="action-hint">{getHint()}</span>
+							}
 							{myTurn && selectedGems.length > 0 && (
 								<div className="gap-8">
 									<button className="btn btn-gold" onClick={handleTakeGems}>
@@ -1058,7 +1138,7 @@ export default function SpenderApp() {
 									const selCount = selectedGems.filter(x => x === c).length;
 									return (
 										<div key={c}
-											className={`gem-stack${selCount > 0 ? " selected" : ""}${!myTurn || isGold || count === 0 ? " disabled" : ""}`}
+											className={`gem-stack${selCount > 0 ? " selected" : ""}${flashGems.has(c) ? " flashing" : ""}${!myTurn || isGold || count === 0 ? " disabled" : ""}`}
 											onClick={() => !isGold && handleGemClick(c)}
 											title={GEM_LABELS[c]}>
 											<GemToken color={c} />
@@ -1093,6 +1173,22 @@ export default function SpenderApp() {
 					</div>
 
 					<div className="game-sidebar">
+						{(game.moves?.length > 0) && (
+							<div className="panel">
+								<div className="panel-title">Recent Moves</div>
+								<div className="move-log">
+									{(game.moves || []).map((mv, i) => {
+										const { name, action } = formatLogMove(mv);
+										return (
+											<div key={i} className="log-entry">
+												<span className="log-name">{name}</span>
+												<span className="log-action">{action}</span>
+											</div>
+										);
+									})}
+								</div>
+							</div>
+						)}
 						<div className="panel-title" style={{ padding: "0 4px" }}>Players</div>
 						<div className="players-area">
 							{(game.order || []).map(pid => renderPlayerPanel(pid))}

@@ -487,6 +487,14 @@ def _check_winner(game: dict) -> str | None:
     return None
 
 
+def _log_move(game: dict, pid: str, mv_type: str, **details) -> None:
+    """Prepend a move record to game['moves']; keep the most recent 20."""
+    entry: dict = {"pid": pid, "type": mv_type}
+    entry.update({k: v for k, v in details.items() if v is not None})
+    game.setdefault("moves", []).insert(0, entry)
+    game["moves"] = game["moves"][:20]
+
+
 # ─── AI Player ────────────────────────────────────────────────────────────────
 
 def _game_urgency(game: dict) -> float:
@@ -892,11 +900,13 @@ def _run_ai_turn(game: dict, ai_pid: str) -> None:
                 game["board"][source[1]][source[2]] = game["decks"][source[1]].pop() if game["decks"][source[1]] else None
             else:
                 ps["reserved"].pop(source[1])
+            _log_move(game, ai_pid, "buy", card={"color": card["bonus"], "points": card["points"]})
             claimable = _check_nobles(game, ai_pid)
             if claimable:
                 n = claimable[0]
                 ps["nobles"].append(n)
                 game["nobles"] = [x for x in game["nobles"] if x["id"] != n["id"]]
+                _log_move(game, ai_pid, "noble", pts=n["points"])
 
     elif mv["type"] == "take_gems":
         for c in mv["colors"]:
@@ -905,6 +915,7 @@ def _run_ai_turn(game: dict, ai_pid: str) -> None:
                 ps["tokens"][c] = ps["tokens"].get(c, 0) + 1
         while sum(ps["tokens"].values()) > 10:
             _ai_discard_one(game, ai_pid)
+        _log_move(game, ai_pid, "take_gems", colors=mv["colors"])
 
     elif mv["type"] == "reserve":
         card_id = mv.get("card_id")
@@ -925,6 +936,7 @@ def _run_ai_turn(game: dict, ai_pid: str) -> None:
                 ps["tokens"]["gold"] = ps["tokens"].get("gold", 0) + 1
             while sum(ps["tokens"].values()) > 10:
                 _ai_discard_one(game, ai_pid)
+            _log_move(game, ai_pid, "reserve", card={"color": card["bonus"], "points": card["points"]})
 
     _finish_turn(game, ai_pid)
 
@@ -984,6 +996,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                     r["game"] = {
                         "bank": bank, "decks": build_deck(), "board": None, "nobles": None,
                         "players": {}, "turn": None, "order": [], "phase": "waiting", "winner": None,
+                        "moves": [],
                     }
                     r["meta"][pid] = {"token": gen_token(6)}
                     r["game"]["players"][pid] = {"tokens": empty_gems(), "purchased": [], "reserved": [], "nobles": []}
@@ -1136,6 +1149,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                             for c in colors:
                                                 g["bank"][c] -= 1
                                                 ps["tokens"][c] = ps["tokens"].get(c, 0) + 1
+                                            _log_move(g, pid, "take_gems", colors=colors)
                                             _did_change = True
                                             if sum(ps["tokens"].values()) > 10:
                                                 _discard_pid = pid
@@ -1190,11 +1204,13 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                             g["board"][lk][idx] = g["decks"][lk].pop() if g["decks"][lk] else None
                                         else:
                                             ps["reserved"].pop(source[1])  # type: ignore[index]
+                                        _log_move(g, pid, "buy", card={"color": card["bonus"], "points": card["points"]})
                                         claimable = _check_nobles(g, pid)
                                         if claimable:
                                             n = claimable[0]
                                             ps["nobles"].append(n)
                                             g["nobles"] = [x for x in g["nobles"] if x["id"] != n["id"]]
+                                            _log_move(g, pid, "noble", pts=n["points"])
                                         _finish_turn(g, pid)
                                         _post_turn(g, r)
                                         _did_change = True
@@ -1226,6 +1242,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                         if g["bank"].get("gold", 0) > 0:
                                             g["bank"]["gold"] -= 1
                                             ps["tokens"]["gold"] = ps["tokens"].get("gold", 0) + 1
+                                        _log_move(g, pid, "reserve", card={"color": card["bonus"], "points": card["points"]})
                                         _did_change = True
                                         if sum(ps["tokens"].values()) > 10:
                                             _discard_pid = pid
