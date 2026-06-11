@@ -298,11 +298,17 @@ function useWebSocket(onMessage, { onOpen, onClose } = {}) {
 	const onMsgRef = useRef(onMessage);
 	const onOpenRef = useRef(onOpen);
 	const onCloseRef = useRef(onClose);
+	const urlRef = useRef(null);
+	const intentionalRef = useRef(false);
+	const retryTimerRef = useRef(null);
 	onMsgRef.current = onMessage;
 	onOpenRef.current = onOpen;
 	onCloseRef.current = onClose;
 
 	const connect = useCallback((url) => {
+		intentionalRef.current = false;
+		urlRef.current = url;
+		if (retryTimerRef.current) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null; }
 		if (wsRef.current) wsRef.current.close();
 		const ws = new WebSocket(url);
 		wsRef.current = ws;
@@ -313,11 +319,15 @@ function useWebSocket(onMessage, { onOpen, onClose } = {}) {
 			setConnected(true);
 			try { onOpenRef.current?.({ event: ev, send }); } catch {}
 		};
-		ws.onclose = (ev) => {
+		ws.onclose = () => {
 			setConnected(false);
-			try { onCloseRef.current?.(ev); } catch {}
+			try { onCloseRef.current?.(); } catch {}
+			// auto-reconnect unless the user intentionally disconnected
+			if (!intentionalRef.current && urlRef.current) {
+				retryTimerRef.current = setTimeout(() => connect(urlRef.current), 2000);
+			}
 		};
-		ws.onerror = () => setConnected(false);
+		ws.onerror = () => {};
 		ws.onmessage = (e) => {
 			try { onMsgRef.current(JSON.parse(e.data)); } catch {}
 		};
@@ -329,11 +339,18 @@ function useWebSocket(onMessage, { onOpen, onClose } = {}) {
 	}, []);
 
 	const disconnect = useCallback(() => {
+		intentionalRef.current = true;
+		urlRef.current = null;
+		if (retryTimerRef.current) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null; }
 		wsRef.current?.close();
 		wsRef.current = null;
+		setConnected(false);
 	}, []);
 
-	return { connected, connect, send, disconnect };
+	// reconnect when the tab becomes visible (iOS kills sockets in the background)
+	const getReadyState = useCallback(() => wsRef.current?.readyState ?? WebSocket.CLOSED, []);
+
+	return { connected, connect, send, disconnect, getReadyState };
 }
 
 // ─── Main App ──────────────────────────────────────────────────────────────
@@ -466,6 +483,21 @@ export default function SpenderApp() {
 		} catch {}
 		return () => disconnect();
 	}, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+	// ── Reconnect when tab becomes visible (iOS kills WS in background) ────
+	const roomIdRef = useRef(roomId);
+	roomIdRef.current = roomId;
+	useEffect(() => {
+		const handleVisibility = () => {
+			if (document.visibilityState === "visible"
+				&& roomIdRef.current
+				&& getReadyState() !== WebSocket.OPEN) {
+				connect(`${WS_BASE}/${roomIdRef.current}/${myId}`);
+			}
+		};
+		document.addEventListener("visibilitychange", handleVisibility);
+		return () => document.removeEventListener("visibilitychange", handleVisibility);
+	}, [myId, connect, getReadyState]); // eslint-disable-line react-hooks/exhaustive-deps
 
 	useEffect(() => {
 		if (screen === "browser" && authUser) fetchGames(authUser);
