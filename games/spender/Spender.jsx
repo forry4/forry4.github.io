@@ -938,28 +938,6 @@ export default function SpenderApp() {
 					<div className="game-main">
 
 						<div className="panel">
-							<div className="panel-title">Nobles</div>
-							<div className="nobles-row">
-								{(game.nobles || []).map(n => <NobleView key={n.id} noble={n} />)}
-							</div>
-						</div>
-
-						{["L3", "L2", "L1"].map((lk, i) => (
-							<div key={lk} className="panel">
-								<div className="panel-title">Level {["III", "II", "I"][i]}</div>
-								<div className="level-row">
-									<div className={`deck-pile${!myTurn ? " disabled" : ""}`}
-										onClick={() => myTurn && handleReserve(null, 3 - i)}
-										title="Reserve blind from deck">
-										<span style={{ fontSize: ".62rem", letterSpacing: ".08em" }}>DECK</span>
-										<span className="deck-remaining">{game.decks?.[lk]?.length || 0}</span>
-									</div>
-									{(game.board?.[lk] || []).map((c, j) => c ? renderCard(c) : <div key={j} style={{ width: 88 }} />)}
-								</div>
-							</div>
-						))}
-
-						<div className="panel">
 							<div className="panel-title">Gem Bank</div>
 							<div className="bank-gems">
 								{[...GEM_COLORS, "gold"].map(c => {
@@ -1001,6 +979,28 @@ export default function SpenderApp() {
 									</div>
 								);
 							})()}
+						</div>
+
+						{["L3", "L2", "L1"].map((lk, i) => (
+							<div key={lk} className="panel">
+								<div className="panel-title">Level {["III", "II", "I"][i]}</div>
+								<div className="level-row">
+									<div className={`deck-pile${!myTurn ? " disabled" : ""}`}
+										onClick={() => myTurn && handleReserve(null, 3 - i)}
+										title="Reserve blind from deck">
+										<span style={{ fontSize: ".62rem", letterSpacing: ".08em" }}>DECK</span>
+										<span className="deck-remaining">{game.decks?.[lk]?.length || 0}</span>
+									</div>
+									{(game.board?.[lk] || []).map((c, j) => c ? renderCard(c) : <div key={j} style={{ width: 88 }} />)}
+								</div>
+							</div>
+						))}
+
+						<div className="panel">
+							<div className="panel-title">Nobles</div>
+							<div className="nobles-row">
+								{(game.nobles || []).map(n => <NobleView key={n.id} noble={n} />)}
+							</div>
 						</div>
 					</div>
 
