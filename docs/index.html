@@ -34,6 +34,7 @@
     input[type=text], input[type=url], select{background:var(--glass); border:1px solid rgba(255,255,255,0.04); color:inherit; padding:0.6rem 0.75rem; border-radius:8px}
   .row{display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center}
   .row > *{min-width:0}
+  .col-fixed{width:170px}
     button{background:linear-gradient(180deg,var(--accent),#6d4bff); color:#061028; border:none; padding:0.6rem 0.85rem; border-radius:8px; cursor:pointer; font-weight:600; -webkit-tap-highlight-color: transparent; touch-action: manipulation}
     button.secondary{background:transparent;color:var(--muted);border:1px solid rgba(255,255,255,0.04)}
 
@@ -46,6 +47,8 @@
       /* make action buttons stack and fill the panel width on small screens */
       .actions{flex-direction:column}
       .actions button, .actions input, .row > button{width:100%; box-sizing:border-box}
+      /* make the previously fixed-width column expand to full width on small screens */
+      .col-fixed{width:100%}
     }
   .actions{display:flex;gap:0.5rem;flex-wrap:wrap}
 
@@ -97,7 +100,7 @@
               <label for="player">Player ID</label>
               <input id="player" type="text" placeholder="P1" />
             </div>
-            <div style="width:170px">
+            <div class="col-fixed">
               <label for="name">Display name</label>
               <input id="name" type="text" placeholder="Player" />
             </div>
