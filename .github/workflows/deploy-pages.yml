@@ -1,0 +1,40 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'games/spender/**'
+      - '.github/workflows/deploy-pages.yml'
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: games/spender/webapp
+        run: npm install
+
+      - name: Build
+        working-directory: games/spender/webapp
+        env:
+          VITE_WS_URL: wss://splendid-nelz.onrender.com/ws
+        run: npm run build
+
+      - name: Deploy to docs/
+        run: |
+          rm -rf docs/
+          cp -r games/spender/webapp/dist/ docs/
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/
+          git diff --cached --quiet || git commit -m "deploy: update GitHub Pages from Vite build [skip ci]"
+          git push

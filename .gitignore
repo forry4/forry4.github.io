@@ -16,3 +16,4 @@ __pycache__/
 # Misc
 .DS_Store
 node_modules/
+dist/
