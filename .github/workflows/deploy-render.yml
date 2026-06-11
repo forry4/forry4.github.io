@@ -4,9 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'games/spender/main.py'
-      - 'games/spender/requirements.txt'
-      - 'games/spender/app.py'
+      - 'games/spender/**'
   workflow_dispatch:
 
 jobs:
