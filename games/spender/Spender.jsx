@@ -225,6 +225,10 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,se
 .small-muted{font-size:.8rem;color:var(--text-muted)}
 .mt-8{margin-top:8px}.mt-12{margin-top:12px}
 
+/* ─── Game nav bar ──────────────────────────────────────────────────────── */
+.game-nav{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border-bottom:1px solid var(--border);background:var(--surface)}
+.game-nav-title{font-family:'Cinzel',serif;font-size:.72rem;letter-spacing:.16em;color:var(--gold);text-transform:uppercase}
+
 @media(max-width:600px){
   .browser{padding:16px 14px 40px}
   .browser-title{font-size:1.6rem}
@@ -362,6 +366,7 @@ export default function SpenderApp() {
 	const [selectedGems, setSelectedGems] = useState([]);
 	const [selectedCard, setSelectedCard] = useState(null);
 	const [toast, setToast] = useState("");
+	const [confirmAbandon, setConfirmAbandon] = useState(false);
 
 	// ── Auth form state ────────────────────────────────────────────────────
 	const [authTab, setAuthTab] = useState("login");
@@ -546,6 +551,21 @@ export default function SpenderApp() {
 			? { action: "reconnect", token: savedToken }
 			: { action: "join", name: playerName };
 		connect(`${WS_BASE}/${gameId}/${myId}`);
+	};
+
+	const goToMenu = () => {
+		disconnect();
+		setScreen("browser");
+		setRoomData(null);
+		setSelectedGems([]);
+		setSelectedCard(null);
+		setConfirmAbandon(false);
+		fetchGames(authUser);
+	};
+
+	const handleAbandon = () => {
+		send({ action: "abandon" });
+		setConfirmAbandon(false);
 	};
 
 	const handleStart = () => send({ action: "start" });
@@ -860,12 +880,8 @@ export default function SpenderApp() {
 						<p className="status-msg">Waiting for the host to start…</p>
 					)}
 
-					<button className="btn btn-ghost btn-full mt-8" onClick={() => {
-						try { localStorage.removeItem("spender_roomId"); } catch {}
-						setScreen("browser"); setRoomData(null); setRoomId(""); disconnect();
-						fetchGames(authUser);
-					}}>
-						← Back to Browser
+					<button className="btn btn-ghost btn-full mt-8" onClick={goToMenu}>
+						← Back to Menu
 					</button>
 				</div>
 				{toast && <div className="toast">{toast}</div>}
@@ -913,6 +929,11 @@ export default function SpenderApp() {
 		<>
 			<style>{css}</style>
 			<div className="app">
+				<div className="game-nav">
+					<button className="btn btn-ghost btn-sm" onClick={goToMenu}>← Menu</button>
+					<span className="game-nav-title">Spender</span>
+					<button className="btn btn-danger btn-sm" onClick={() => setConfirmAbandon(true)}>Abandon</button>
+				</div>
 				<div className="game">
 					<div className="game-main">
 
@@ -1008,6 +1029,19 @@ export default function SpenderApp() {
 								})}
 							</div>
 							<div className="discard-count">Total: {gemTotal(me.tokens)} / 10</div>
+						</div>
+					</div>
+				)}
+
+				{confirmAbandon && (
+					<div className="modal-backdrop">
+						<div className="modal">
+							<h3>Abandon Game?</h3>
+							<p>This counts as a loss for you. Your opponent will be awarded the win.</p>
+							<div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+								<button className="btn btn-danger" onClick={handleAbandon}>Yes, Abandon</button>
+								<button className="btn btn-ghost" onClick={() => setConfirmAbandon(false)}>Cancel</button>
+							</div>
 						</div>
 					</div>
 				)}

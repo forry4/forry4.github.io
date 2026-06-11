@@ -740,6 +740,33 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                         msg_out["needs_discard"] = _discard_pid
                     await broadcast_room(room_id, msg_out)
 
+            # ── abandon ─────────────────────────────────────────────────────
+            elif action == "abandon":
+                _err = None
+                _did_change = False
+                async with ROOM_LOCK:
+                    r = ROOMS.get(room_id)
+                    if not r or r.get("status") != "playing":
+                        _err = "no active game to abandon"
+                    else:
+                        g = r["game"]
+                        if g.get("phase") == "over":
+                            _err = "game already over"
+                        else:
+                            other = next((p for p in g.get("order", []) if p != pid), None)
+                            if not other:
+                                _err = "no opponent found"
+                            else:
+                                g["phase"] = "over"
+                                g["winner"] = other
+                                r["status"] = "over"
+                                _did_change = True
+                if _err:
+                    await websocket.send_text(json.dumps({"type": "error", "message": _err}))
+                elif _did_change:
+                    save_game(room_id)
+                    await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
+
             else:
                 await websocket.send_text(json.dumps({"type": "error", "message": "unknown action"}))
 
