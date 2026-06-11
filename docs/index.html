@@ -1,0 +1,102 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Spender - Minimal Client</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; }
+    textarea { width: 100%; height: 200px; }
+    input, button { padding: .5rem; margin: .25rem 0; }
+    .row { display:flex; gap: .5rem; }
+  </style>
+</head>
+<body>
+  <h1>Spender - Minimal Client</h1>
+  <p>Set <code>BACKEND_URL</code> to your deployed backend (wss/https). For local testing use <code>wss://<your-ngrok>.ngrok.io</code> or <code>wss://127.0.0.1:8000</code>.</p>
+
+  <label>Backend WebSocket base URL (wss://)</label>
+  <input id="backend" placeholder="wss://your-backend.onrender.com" style="width:100%" />
+
+  <div class="row">
+    <input id="player" placeholder="player id (e.g. P1)" />
+    <input id="name" placeholder="player name" />
+  </div>
+
+  <div class="row">
+    <button id="create">Create Room</button>
+    <input id="room" placeholder="room id (or created)" />
+    <button id="join">Join Room</button>
+  </div>
+
+  <div>
+    <button id="start">Start Game</button>
+    <button id="take">Take Gems (example)</button>
+    <button id="buy">Buy (example)</button>
+  </div>
+
+  <h3>Messages</h3>
+  <textarea id="log" readonly></textarea>
+
+<script>
+const log = (s) => { const ta = document.getElementById('log'); ta.value += s + '\n'; ta.scrollTop = ta.scrollHeight; }
+let ws;
+let base;
+
+function endpoint(room, player){ return base.replace(/^http/,'ws') + '/ws/' + room + '/' + player }
+
+document.getElementById('create').addEventListener('click', async () => {
+  base = document.getElementById('backend').value.trim();
+  const player = (document.getElementById('player').value || 'P1').trim();
+  const name = (document.getElementById('name').value || 'Player').trim();
+  if(!base) return alert('Set backend URL');
+  const rid = Math.random().toString(36).slice(2,6).toUpperCase();
+  document.getElementById('room').value = rid;
+  connect(rid, player, () => {
+    send({action:'create', name});
+  });
+});
+
+document.getElementById('join').addEventListener('click', () => {
+  base = document.getElementById('backend').value.trim();
+  const player = (document.getElementById('player').value || 'P2').trim();
+  const name = (document.getElementById('name').value || 'Player').trim();
+  const rid = document.getElementById('room').value.trim();
+  if(!base || !rid) return alert('Set backend and room');
+  connect(rid, player, () => send({action:'join', room_id:rid, name}));
+});
+
+function connect(room, player, onopen){
+  if(ws) ws.close();
+  const url = endpoint(room, player);
+  log('Connecting ' + url);
+  try{
+    ws = new WebSocket(url);
+  }catch(e){ log('WebSocket error: ' + e); return }
+  ws.onopen = () => { log('connected'); onopen && onopen(); }
+  ws.onmessage = (ev) => { log('recv: ' + ev.data); }
+  ws.onclose = () => log('closed');
+  ws.onerror = (e) => log('error '+e);
+}
+
+function send(obj){
+  if(!ws || ws.readyState !== WebSocket.OPEN) return log('ws not open');
+  const s = JSON.stringify(obj);
+  log('send: ' + s);
+  ws.send(s);
+}
+
+document.getElementById('start').addEventListener('click', () => {
+  const rid = document.getElementById('room').value.trim(); send({action:'start', room_id:rid});
+});
+
+document.getElementById('take').addEventListener('click', () => {
+  const rid = document.getElementById('room').value.trim(); send({action:'move', room_id:rid, move:{type:'take_gems', colors:['blue','green','red']}})
+});
+
+document.getElementById('buy').addEventListener('click', () => {
+  const rid = document.getElementById('room').value.trim(); send({action:'move', room_id:rid, move:{type:'buy', card_id:document.getElementById('cardid')?.value||null}})
+});
+</script>
+</body>
+</html>

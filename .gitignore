@@ -1,0 +1,18 @@
+# Virtual environments
+.venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Editor directories
+.vscode/
+.idea/
+
+# Env files
+.env
+
+# Misc
+.DS_Store
+node_modules/
