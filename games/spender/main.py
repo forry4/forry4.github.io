@@ -143,5 +143,177 @@ def calc_spend(cost: dict, tokens: dict, bonuses: dict) -> dict[str, int]:
         spend["gold"] = spend.get("gold", 0) + gap
     return spend
 
+
+# ─── Minimal WebSocket / room manager (in-memory, single-process) ──────────
+ROOMS: dict[str, dict] = {}
+ROOM_LOCK = asyncio.Lock()
+
+
+def normalize_room(rid: str) -> str:
+    return (rid or "").upper()
+
+
+async def broadcast_room(room_id: str, msg: dict[str, Any]):
+    room = ROOMS.get(room_id)
+    if not room:
+        return
+    websockets = list(room.get("sockets", {}).values())
+    data = json.dumps(msg)
+    for ws in websockets:
+        try:
+            await ws.send_text(data)
+        except Exception:
+            # ignore send errors; cleanup happens on disconnect
+            pass
+
+
+def mk_room_state(room_id: str) -> dict[str, Any]:
+    room = ROOMS.get(room_id, {})
+    return {
+        "room_id": room_id,
+        "players": room.get("players", {}),
+        "status": room.get("status", "waiting"),
+        "game": room.get("game"),
+    }
+
+
+@app.websocket("/ws/{room}/{player}")
+async def ws_room_player(websocket: WebSocket, room: str, player: str):
+    await websocket.accept()
+    room_id = normalize_room(room)
+    pid = player
+    async with ROOM_LOCK:
+        r = ROOMS.setdefault(room_id, {"players": {}, "sockets": {}, "status": "waiting", "game": None})
+        # attach socket immediately (may be replaced by a later join with name)
+        r["sockets"][pid] = websocket
+    try:
+        # initial send: advertise current room state
+        await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
+        while True:
+            text = await websocket.receive_text()
+            try:
+                msg = json.loads(text)
+            except Exception:
+                await websocket.send_text(json.dumps({"type": "error", "message": "invalid json"}))
+                continue
+
+            action = msg.get("action")
+            if action == "create":
+                name = msg.get("name") or pid
+                async with ROOM_LOCK:
+                    r = ROOMS.setdefault(room_id, {"players": {}, "sockets": {}, "status": "waiting", "game": None})
+                    r["players"][pid] = name
+                await websocket.send_text(json.dumps({"type": "created", "room_id": room_id, "room": mk_room_state(room_id)}))
+                await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
+
+            elif action == "join":
+                name = msg.get("name") or pid
+                async with ROOM_LOCK:
+                    if room_id not in ROOMS:
+                        await websocket.send_text(json.dumps({"type": "error", "message": "room not found"}))
+                        continue
+                    r = ROOMS[room_id]
+                    r["players"][pid] = name
+                    r["sockets"][pid] = websocket
+                await websocket.send_text(json.dumps({"type": "joined", "room_id": room_id, "room": mk_room_state(room_id)}))
+                await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
+
+            elif action == "start":
+                async with ROOM_LOCK:
+                    r = ROOMS.get(room_id)
+                    if r:
+                        r["status"] = "playing"
+                await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
+
+            elif action == "move":
+                # broadcast moves to all players (game logic not enforced here)
+                await broadcast_room(room_id, {"type": "move", "from": pid, "move": msg.get("move")})
+
+            else:
+                await websocket.send_text(json.dumps({"type": "error", "message": "unknown action"}))
+
+    except WebSocketDisconnect:
+        pass
+    finally:
+        # cleanup
+        async with ROOM_LOCK:
+            r = ROOMS.get(room_id)
+            if r:
+                r["sockets"].pop(pid, None)
+                # keep player name in players mapping for persistence until explicitly removed
+                if not r["sockets"]:
+                    # no connected sockets left; remove room
+                    ROOMS.pop(room_id, None)
+                else:
+                    # notify remaining
+                    asyncio.create_task(broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)}))
+
+
+@app.websocket("/ws/{player}")
+async def ws_player_base(websocket: WebSocket, player: str):
+    # legacy single-socket-per-client handler: treats incoming messages that include room_id
+    await websocket.accept()
+    pid = player
+    try:
+        while True:
+            text = await websocket.receive_text()
+            try:
+                msg = json.loads(text)
+            except Exception:
+                await websocket.send_text(json.dumps({"type": "error", "message": "invalid json"}))
+                continue
+            action = msg.get("action")
+            room_id = normalize_room(msg.get("room_id") or "")
+            if not room_id:
+                await websocket.send_text(json.dumps({"type": "error", "message": "room_id required"}))
+                continue
+
+            # ensure room exists for join/create
+            if action == "create":
+                name = msg.get("name") or pid
+                async with ROOM_LOCK:
+                    r = ROOMS.setdefault(room_id, {"players": {}, "sockets": {}, "status": "waiting", "game": None})
+                    r["players"][pid] = name
+                    r["sockets"][pid] = websocket
+                await websocket.send_text(json.dumps({"type": "created", "room_id": room_id, "room": mk_room_state(room_id)}))
+                await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
+
+            elif action == "join":
+                name = msg.get("name") or pid
+                async with ROOM_LOCK:
+                    if room_id not in ROOMS:
+                        await websocket.send_text(json.dumps({"type": "error", "message": "room not found"}))
+                        continue
+                    r = ROOMS[room_id]
+                    r["players"][pid] = name
+                    r["sockets"][pid] = websocket
+                await websocket.send_text(json.dumps({"type": "joined", "room_id": room_id, "room": mk_room_state(room_id)}))
+                await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
+
+            elif action == "start":
+                async with ROOM_LOCK:
+                    r = ROOMS.get(room_id)
+                    if r:
+                        r["status"] = "playing"
+                await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
+
+            elif action == "move":
+                await broadcast_room(room_id, {"type": "move", "from": pid, "move": msg.get("move")})
+
+            else:
+                await websocket.send_text(json.dumps({"type": "error", "message": "unknown action"}))
+
+    except WebSocketDisconnect:
+        # remove socket from any rooms where it was registered
+        async with ROOM_LOCK:
+            for rid, r in list(ROOMS.items()):
+                if r.get("sockets", {}).get(pid) is websocket:
+                    r["sockets"].pop(pid, None)
+                    if not r["sockets"]:
+                        ROOMS.pop(rid, None)
+                    else:
+                        asyncio.create_task(broadcast_room(rid, {"type": "room_update", "room": mk_room_state(rid)}))
+        return
+
 # ... (omitted rest for brevity in patch) ...
 
