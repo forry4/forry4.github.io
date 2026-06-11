@@ -144,7 +144,8 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,se
 .gem-count{font-size:.75rem;color:var(--text-dim);font-family:'Cinzel',serif}
 
 /* ─── Cards ─────────────────────────────────────────────────────────────── */
-.level-row{display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap}
+.level-row{display:flex;gap:8px;align-items:flex-start;flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}
+.level-row::-webkit-scrollbar{height:4px}.level-row::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
 .deck-pile{width:72px;min-height:100px;border-radius:var(--radius);border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;font-family:'Cinzel',serif;font-size:.68rem;color:var(--text-dim);cursor:pointer;flex-shrink:0;background:var(--surface2);transition:all .12s;flex-direction:column;gap:4px}
 .deck-pile:hover{border-color:var(--gold);color:var(--gold)}
 .deck-pile.disabled{cursor:not-allowed;opacity:.5}
@@ -937,26 +938,6 @@ export default function SpenderApp() {
 				<div className="game">
 					<div className="game-main">
 
-						<div className="panel">
-							<div className="panel-title">Gem Bank</div>
-							<div className="bank-gems">
-								{[...GEM_COLORS, "gold"].map(c => {
-									const count = game.bank[c] || 0;
-									const isGold = c === "gold";
-									const selCount = selectedGems.filter(x => x === c).length;
-									return (
-										<div key={c}
-											className={`gem-stack${selCount > 0 ? " selected" : ""}${!myTurn || isGold || count === 0 ? " disabled" : ""}`}
-											onClick={() => !isGold && handleGemClick(c)}
-											title={GEM_LABELS[c]}>
-											<GemToken color={c} />
-											<span className="gem-count">{count}</span>
-										</div>
-									);
-								})}
-							</div>
-						</div>
-
 						<div className="action-bar">
 							<span className={`turn-badge ${myTurn ? "mine" : "theirs"}`}>
 								{myTurn ? "Your Turn" : `${roomData?.players?.[game.turn]}'s Turn`}
@@ -979,6 +960,26 @@ export default function SpenderApp() {
 									</div>
 								);
 							})()}
+						</div>
+
+						<div className="panel">
+							<div className="panel-title">Gem Bank</div>
+							<div className="bank-gems">
+								{[...GEM_COLORS, "gold"].map(c => {
+									const count = game.bank[c] || 0;
+									const isGold = c === "gold";
+									const selCount = selectedGems.filter(x => x === c).length;
+									return (
+										<div key={c}
+											className={`gem-stack${selCount > 0 ? " selected" : ""}${!myTurn || isGold || count === 0 ? " disabled" : ""}`}
+											onClick={() => !isGold && handleGemClick(c)}
+											title={GEM_LABELS[c]}>
+											<GemToken color={c} />
+											<span className="gem-count">{count}</span>
+										</div>
+									);
+								})}
+							</div>
 						</div>
 
 						{["L3", "L2", "L1"].map((lk, i) => (
