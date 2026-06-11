@@ -575,21 +575,22 @@ export default function SpenderApp() {
 
 	const handleGemClick = (color) => {
 		if (!myTurn) return;
-		if ((game?.bank[color] || 0) <= 0) return;
+		const bankCount = game?.bank[color] || 0;
+		if (bankCount <= 0) return;
 		setSelectedGems(prev => {
 			const freq = {};
 			for (const c of prev) freq[c] = (freq[c] || 0) + 1;
-			if (prev.includes(color)) {
-				const idx = prev.lastIndexOf(color);
-				return [...prev.slice(0, idx), ...prev.slice(idx + 1)];
+			const has = freq[color] || 0;
+
+			if (has === 2) return [];                          // deselect double
+			if (has === 1) {
+				if (bankCount >= 4) return [color, color];     // upgrade to double-take
+				return prev.filter(c => c !== color);          // deselect single
 			}
+			// has === 0: adding a new color
 			if (prev.length >= 3) return prev;
-			if (freq[color] === 1) {
-				if (Object.keys(freq).length === 1) return [...prev, color];
-				return prev;
-			}
-			if (Object.keys(freq).length < 3) return [...prev, color];
-			return prev;
+			if (Object.values(freq).some(n => n === 2)) return prev; // already in double-take mode
+			return [...prev, color];
 		});
 	};
 
