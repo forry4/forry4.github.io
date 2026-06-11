@@ -19,6 +19,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.get("/health")
+async def health():
+    """Simple health check used by platforms and load balancers."""
+    return {"status": "ok", "service": "spender", "version": "1.0"}
+
 # ─── Types ─────────────────────────────────────────────────────────────────
 
 GEM_COLORS = ["white", "blue", "green", "red", "black"]
