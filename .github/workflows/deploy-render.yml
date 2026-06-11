@@ -14,4 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Render deploy
-        run: curl -s "${{ secrets.RENDER_DEPLOY_HOOK }}"
+        run: |
+          response=$(curl -s -o /dev/null -w "%{http_code}" "${{ secrets.RENDER_DEPLOY_HOOK }}")
+          echo "Render response: $response"
+          [ "$response" = "200" ] || { echo "Deploy hook failed with status $response"; exit 1; }
