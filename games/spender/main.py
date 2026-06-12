@@ -501,11 +501,12 @@ def _check_winner(game: dict) -> str | None:
 
 
 def _log_move(game: dict, pid: str, mv_type: str, **details) -> None:
-    """Prepend a move record to game['moves']; keep the most recent 20."""
+    """Prepend a move record to game['moves']; keep the most recent 50 (the
+    end-game Review screen shows this log)."""
     entry: dict = {"pid": pid, "type": mv_type}
     entry.update({k: v for k, v in details.items() if v is not None})
     game.setdefault("moves", []).insert(0, entry)
-    game["moves"] = game["moves"][:20]
+    game["moves"] = game["moves"][:50]
 
 
 # ─── AI tunable weights ─────────────────────────────────────────────────────

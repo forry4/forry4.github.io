@@ -422,6 +422,7 @@ export default function SpenderApp() {
 	const [selectedCard, setSelectedCard] = useState(null);
 	const [toast, setToast] = useState("");
 	const [confirmAbandon, setConfirmAbandon] = useState(false);
+	const [reviewing, setReviewing] = useState(false);  // end-game: viewing final board + log
 
 	// ── Auth form state ────────────────────────────────────────────────────
 	const [authTab, setAuthTab] = useState("login");
@@ -687,6 +688,7 @@ export default function SpenderApp() {
 		setSelectedGems([]);
 		setSelectedCard(null);
 		setConfirmAbandon(false);
+		setReviewing(false);
 		fetchGames(authUser);
 	};
 
@@ -749,15 +751,16 @@ export default function SpenderApp() {
 	// ── Render helpers ─────────────────────────────────────────────────────
 	function renderCard(card, opts = {}) {
 		if (!card) return <div key={Math.random()} style={{ width: 88, minHeight: 120 }} />;
-		const affordable = me && canAfford(card.cost, me.tokens, myBonuses);
-		const isSelected = selectedCard?.card?.id === card.id;
+		// readonly: opponent's reserved cards — visible but not selectable/affordable.
+		const affordable = !opts.readonly && me && canAfford(card.cost, me.tokens, myBonuses);
+		const isSelected = !opts.readonly && selectedCard?.card?.id === card.id;
 		return (
 			<CardView key={card.id} card={card}
 				selected={isSelected}
 				affordable={affordable && myTurn}
 				disabled={opts.disabled}
 				onClick={() => {
-					if (!myTurn) return;
+					if (opts.readonly || !myTurn) return;
 					setSelectedGems([]);
 					setSelectedCard(isSelected ? null : { card, source: opts.source || "board" });
 				}}
@@ -801,10 +804,10 @@ export default function SpenderApp() {
 						<span key={n.id} className="bonus-pill" style={{ borderColor: "var(--gold)", color: "var(--gold)" }}>★{n.points}</span>
 					))}
 				</div>
-				{isMe && p.reserved?.length > 0 && (
+				{p.reserved?.length > 0 && (
 					<>
 						<div className="reserved-label">Reserved ({p.reserved.length}/3)</div>
-						<div className="reserved-row">{p.reserved.map(c => renderCard(c, { source: "reserved" }))}</div>
+						<div className="reserved-row">{p.reserved.map(c => renderCard(c, { source: "reserved", readonly: !isMe }))}</div>
 					</>
 				)}
 			</div>
@@ -1048,7 +1051,7 @@ export default function SpenderApp() {
 	);
 
 	// Winner screen
-	if (screen === "game" && game?.phase === "over") {
+	if (screen === "game" && game?.phase === "over" && !reviewing) {
 		const winners = Array.isArray(game.winner) ? game.winner : [game.winner];
 		const isTie = winners.length > 1;
 		const winnerNames = winners.map(w => roomData?.players?.[w] || w).join(" & ");
@@ -1071,13 +1074,19 @@ export default function SpenderApp() {
 								);
 							})}
 						</div>
-						<button className="btn btn-outline" onClick={() => {
-							try { localStorage.removeItem("spender_roomId"); } catch {}
-							setScreen("browser"); setRoomData(null); setRoomId(""); disconnect();
-							fetchGames(authUser);
-						}}>
-							Back to Browser
-						</button>
+						<div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
+							<button className="btn btn-gold" onClick={() => setReviewing(true)}>
+								Review Board & Log
+							</button>
+							<button className="btn btn-outline" onClick={() => {
+								try { localStorage.removeItem("spender_roomId"); } catch {}
+								setReviewing(false);
+								setScreen("browser"); setRoomData(null); setRoomId(""); disconnect();
+								fetchGames(authUser);
+							}}>
+								Back to Browser
+							</button>
+						</div>
 					</div>
 				</div>
 			</>
@@ -1090,21 +1099,27 @@ export default function SpenderApp() {
 			<style>{css}</style>
 			<div className="app">
 				<div className="game-nav">
-					<button className="btn btn-ghost btn-sm" onClick={goToMenu}>← Menu</button>
-					<span className="game-nav-title">Spender</span>
-					<button className="btn btn-danger btn-sm" onClick={() => setConfirmAbandon(true)}>Abandon</button>
+					{game.phase === "over"
+						? <button className="btn btn-ghost btn-sm" onClick={() => setReviewing(false)}>← Back to Results</button>
+						: <button className="btn btn-ghost btn-sm" onClick={goToMenu}>← Menu</button>}
+					<span className="game-nav-title">Spender{game.phase === "over" ? " — Review" : ""}</span>
+					{game.phase === "over"
+						? <span style={{ width: 64 }} />
+						: <button className="btn btn-danger btn-sm" onClick={() => setConfirmAbandon(true)}>Abandon</button>}
 				</div>
 				<div className="game-nav-spacer" />
 				<div className="game">
 					<div className="game-main">
 
 						<div className="action-bar">
-							<span className={`turn-badge ${myTurn ? "mine" : "theirs"}`}>
-								{myTurn ? "Your Turn" : `${roomData?.players?.[game.turn]}'s Turn`}
+							<span className={`turn-badge ${game.phase === "over" ? "theirs" : myTurn ? "mine" : "theirs"}`}>
+								{game.phase === "over" ? "Game Over" : myTurn ? "Your Turn" : `${roomData?.players?.[game.turn]}'s Turn`}
 							</span>
-							{aiThinking
-								? <span className="ai-thinking"><span className="think-dot"/><span className="think-dot"/><span className="think-dot"/> thinking…</span>
-								: <span className="action-hint">{getHint()}</span>
+							{game.phase === "over"
+								? <span className="action-hint">Final board &amp; game log</span>
+								: aiThinking
+									? <span className="ai-thinking"><span className="think-dot"/><span className="think-dot"/><span className="think-dot"/> thinking…</span>
+									: <span className="action-hint">{getHint()}</span>
 							}
 							{myTurn && selectedGems.length > 0 && (
 								<div className="gap-8">
