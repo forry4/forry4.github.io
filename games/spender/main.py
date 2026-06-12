@@ -1567,7 +1567,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
 
                             if g.get("pending_noble_pid") == pid and move_type != "pick_noble":
                                 _err = "must choose a noble first"
-                            elif g.get("pending_discard_pid") == pid and move_type != "discard":
+                            elif g.get("pending_discard_pid") == pid and move_type not in ("discard", "undo_discard"):
                                 _err = "must discard down to 10 gems first"
                             elif move_type == "take_gems":
                                 colors = mv.get("colors", [])
@@ -1590,6 +1590,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                                 _err = f"no {c} in bank"
                                                 break
                                         else:
+                                            _pre = copy.deepcopy(g)  # for undo if this overfills
                                             for c in colors:
                                                 g["bank"][c] -= 1
                                                 ps["tokens"][c] = ps["tokens"].get(c, 0) + 1
@@ -1598,6 +1599,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                             if sum(ps["tokens"].values()) > 10:
                                                 _discard_pid = pid
                                                 g["pending_discard_pid"] = pid
+                                                g["pre_discard_snapshot"] = _pre
                                             else:
                                                 g.pop("pending_discard_pid", None)
                                                 _finish_turn(g, pid)
@@ -1616,8 +1618,20 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                         g["pending_discard_pid"] = pid
                                     else:
                                         g.pop("pending_discard_pid", None)
+                                        g.pop("pre_discard_snapshot", None)
                                         _finish_turn(g, pid)
                                         _post_turn(g, r)
+
+                            elif move_type == "undo_discard":
+                                # Revert the whole over-filling action (take/reserve) and any
+                                # discards made since, restoring the pre-action snapshot.
+                                snap = g.get("pre_discard_snapshot")
+                                if g.get("pending_discard_pid") != pid or not snap:
+                                    _err = "nothing to undo"
+                                else:
+                                    r["game"] = copy.deepcopy(snap)  # snapshot has no pending/snapshot keys
+                                    g = r["game"]
+                                    _did_change = True
 
                             elif move_type == "buy":
                                 card_id = mv.get("card_id")
@@ -1674,6 +1688,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                 if len(ps["reserved"]) >= 3:
                                     _err = "already have 3 reserved"
                                 else:
+                                    _pre = copy.deepcopy(g)  # for undo if this overfills
                                     card_id = mv.get("card_id")
                                     deck_level = mv.get("deck_level")
                                     card = None
@@ -1702,6 +1717,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                         if sum(ps["tokens"].values()) > 10:
                                             _discard_pid = pid
                                             g["pending_discard_pid"] = pid
+                                            g["pre_discard_snapshot"] = _pre
                                         else:
                                             g.pop("pending_discard_pid", None)
                                             _finish_turn(g, pid)

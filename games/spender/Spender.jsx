@@ -729,6 +729,7 @@ export default function SpenderApp() {
 	};
 
 	const handleDiscard = (color) => sendMove({ type: "discard", color });
+	const handleUndoDiscard = () => sendMove({ type: "undo_discard" });
 	const handleNobleChoice = (nobleId) => sendMove({ type: "pick_noble", noble_id: nobleId });
 
 	const handleGemClick = (color) => {
@@ -1248,6 +1249,9 @@ export default function SpenderApp() {
 								})}
 							</div>
 							<div className="discard-count">Total: {gemTotal(me.tokens)} / 10</div>
+							<div style={{ display: "flex", justifyContent: "center", marginTop: 14 }}>
+								<button className="btn btn-ghost btn-sm" onClick={handleUndoDiscard}>↩ Undo turn</button>
+							</div>
 						</div>
 					</div>
 				)}
