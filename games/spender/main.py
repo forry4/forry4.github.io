@@ -508,6 +508,65 @@ def _log_move(game: dict, pid: str, mv_type: str, **details) -> None:
     game["moves"] = game["moves"][:20]
 
 
+# ─── AI tunable weights ─────────────────────────────────────────────────────
+# These constants drive the heuristic the AI uses both as a standalone greedy
+# policy and as the rollout/position-evaluator inside MCTS. They were originally
+# hand-tuned; train.py can learn better values via self-play and write them to
+# weights.json, which is loaded at import time below. Defaults here are the
+# original hand-tuned values, so production behaviour is unchanged until a
+# weights.json is present.
+
+DEFAULT_WEIGHTS: dict[str, float] = {
+    # _ai_score_card — card purchase valuation
+    "point_urgency_mult": 4.0,     # how much late-game urgency amplifies raw points
+    "bonus_l1": 0.2,               # value of a bonus toward affording L1 cards
+    "bonus_l2": 0.45,              # ... L2 cards
+    "bonus_l3": 0.75,              # ... L3 cards
+    "bonus_reserved": 0.5,         # value of a bonus toward our reserved cards
+    "bonus_urgency_decay": 0.8,    # how fast bonus utility fades as the game ends
+    "noble_card": 0.6,             # partial credit for advancing a noble
+    "access_base": 0.3,            # base gem-distance penalty slope
+    "access_urgency": 0.4,         # extra distance penalty slope in late game
+    # _fast_rollout_move — rollout policy
+    "rollout_reserve_threshold": 5.0,  # min score before the rollout reserves a card
+    # _pos_score — truncated-position evaluator (TD-learned)
+    "pos_points": 1.0,             # weight on realised points
+    "pos_buyable": 0.5,            # weight on immediately-buyable points (momentum)
+    "pos_noble": 0.3,             # weight on noble proximity
+    "pos_bonus_count": 0.0,        # weight on total bonus count (starts neutral)
+}
+
+WEIGHTS: dict[str, float] = dict(DEFAULT_WEIGHTS)
+
+WEIGHTS_PATH = os.path.join(os.path.dirname(__file__), "weights.json")
+
+
+def load_weights(path: str | None = None) -> dict[str, float]:
+    """Merge weights.json (if present) over the defaults into the global WEIGHTS.
+    Unknown keys are ignored; missing keys keep their default. Safe to call at
+    import; never raises on a missing or malformed file."""
+    global WEIGHTS
+    merged = dict(DEFAULT_WEIGHTS)
+    p = path or WEIGHTS_PATH
+    try:
+        with open(p, "r") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            for k, v in data.items():
+                if k in DEFAULT_WEIGHTS and isinstance(v, (int, float)):
+                    merged[k] = float(v)
+            LOG.info("loaded AI weights from %s", p)
+    except FileNotFoundError:
+        pass
+    except Exception as e:  # malformed file — fall back to defaults
+        LOG.warning("could not load weights from %s: %s", p, e)
+    WEIGHTS = merged
+    return WEIGHTS
+
+
+load_weights()
+
+
 # ─── AI Player ────────────────────────────────────────────────────────────────
 
 def _game_urgency(game: dict) -> float:
@@ -526,21 +585,21 @@ def _ai_score_card(card: dict, game: dict, ai_pid: str, urgency: float) -> float
     pts = card["points"]
 
     # Points become up to 5× more valuable as the game approaches its end
-    point_score = pts * (1.0 + urgency * 4.0)
+    point_score = pts * (1.0 + urgency * WEIGHTS["point_urgency_mult"])
 
     # Bonus utility: how many future gem-saves does this card's bonus provide?
     bonus_score = 0.0
     if bonus_color:
-        level_mult = {"L1": 0.2, "L2": 0.45, "L3": 0.75}
+        level_mult = {"L1": WEIGHTS["bonus_l1"], "L2": WEIGHTS["bonus_l2"], "L3": WEIGHTS["bonus_l3"]}
         for lk in ["L1", "L2", "L3"]:
             for c in (game["board"].get(lk) or []):
                 if c and bonus_color in c.get("cost", {}):
                     bonus_score += c["cost"][bonus_color] * level_mult[lk]
         for c in ps["reserved"]:
             if bonus_color in c.get("cost", {}):
-                bonus_score += c["cost"][bonus_color] * 0.5
+                bonus_score += c["cost"][bonus_color] * WEIGHTS["bonus_reserved"]
         # Bonus utility matters less as the game nears its end
-        bonus_score *= (1.0 - urgency * 0.8)
+        bonus_score *= (1.0 - urgency * WEIGHTS["bonus_urgency_decay"])
 
     # Noble contribution: partial credit toward each noble this bonus advances
     noble_score = 0.0
@@ -552,7 +611,7 @@ def _ai_score_card(card: dict, game: dict, ai_pid: str, urgency: float) -> float
                 needed = req[bonus_color]
                 if current < needed:
                     progress = current / needed
-                    noble_score += noble["points"] * (1.0 - progress) * 0.6
+                    noble_score += noble["points"] * (1.0 - progress) * WEIGHTS["noble_card"]
 
     # Accessibility: discount cards that are many gems away. The penalty steepens
     # in late game so the AI doesn't chase distant cards when it needs points now.
@@ -561,7 +620,7 @@ def _ai_score_card(card: dict, game: dict, ai_pid: str, urgency: float) -> float
         for color, cost in card["cost"].items() if color in GEM_COLORS
     )
     deficit = max(0, raw_short - ps["tokens"].get("gold", 0))
-    accessibility = 1.0 / (deficit * (0.3 + urgency * 0.4) + 1.0)
+    accessibility = 1.0 / (deficit * (WEIGHTS["access_base"] + urgency * WEIGHTS["access_urgency"]) + 1.0)
 
     return (point_score + bonus_score + noble_score) * accessibility
 
@@ -814,7 +873,7 @@ def _fast_rollout_move(game: dict, pid: str) -> dict:
                 if s > best_reserve_score:
                     best_reserve_score = s
                     best_reserve = card
-        if best_reserve and best_reserve_score > 5.0:
+        if best_reserve and best_reserve_score > WEIGHTS["rollout_reserve_threshold"]:
             return {"type": "reserve", "card_id": best_reserve["id"]}
 
     # 3. Take most-needed gems
@@ -872,7 +931,11 @@ def _sim_rollout(game: dict, max_turns: int = 25) -> str | list | None:
                                for c, need in n["req"].items()) + 1)
             for n in (game.get("nobles") or [])
         )
-        return pts + buyable * 0.5 + noble_proximity * 0.3
+        bonus_count = sum(bonuses.get(c, 0) for c in GEM_COLORS)
+        return (pts * WEIGHTS["pos_points"]
+                + buyable * WEIGHTS["pos_buyable"]
+                + noble_proximity * WEIGHTS["pos_noble"]
+                + bonus_count * WEIGHTS["pos_bonus_count"])
 
     scores = {pid: _pos_score(pid) for pid in game["order"]}
     best = max(scores.values())
@@ -942,8 +1005,14 @@ class _MCTSNode:
             node = node.parent
 
 
-def _mcts_choose_move(game: dict, ai_pid: str, time_limit: float = 5.0) -> dict:
-    """UCB1 tree MCTS: select → expand → simulate → backprop."""
+def _mcts_choose_move(game: dict, ai_pid: str, time_limit: float = 5.0,
+                      max_iters: int | None = None) -> dict:
+    """UCB1 tree MCTS: select → expand → simulate → backprop.
+
+    Stops at whichever of ``time_limit`` (wall-clock) or ``max_iters`` (iteration
+    count) is hit first. Training passes a small ``max_iters`` for fast,
+    wall-clock-independent self-play; production leaves it None and uses the 5s
+    budget."""
     candidates = _get_all_moves(game, ai_pid)
     if len(candidates) == 1:
         return candidates[0]
@@ -959,8 +1028,10 @@ def _mcts_choose_move(game: dict, ai_pid: str, time_limit: float = 5.0) -> dict:
 
     root = _MCTSNode(copy.deepcopy(game))
     deadline = time.time() + time_limit
+    iters = 0
 
-    while time.time() < deadline:
+    while time.time() < deadline and (max_iters is None or iters < max_iters):
+        iters += 1
         # 1. Selection: walk down via UCB1 until reaching an unexpanded or terminal node
         node = root
         while node.is_fully_expanded() and not node.is_terminal():
