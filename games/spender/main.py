@@ -677,13 +677,6 @@ def _get_all_moves(game: dict, pid: str) -> list[dict]:
             if key not in seen:
                 moves.append({"type": "take_gems", "colors": list(combo)})
                 seen.add(key)
-        # 2-color combos from top 3 (extra breadth)
-        if max_take >= 2:
-            for combo in combinations(by_need[:3], min(2, len(by_need[:3]))):
-                key = tuple(sorted(combo))
-                if key not in seen:
-                    moves.append({"type": "take_gems", "colors": list(combo)})
-                    seen.add(key)
         # Double-take best needed color
         for c in by_need:
             if game["bank"].get(c, 0) >= 4 and max_take >= 2:
