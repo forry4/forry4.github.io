@@ -77,6 +77,9 @@ docs/              # GitHub Pages static site (Vite production build output)
 It guards internally: returns immediately if not AI's turn, game not found, or phase not "playing".
 Called from: move handler, create action (vs_ai), both reconnect handlers.
 
+### WS disconnect cleanup — stale-socket guard
+The `finally` block in `ws_room_player` only removes a socket and potentially the room if `r["sockets"].get(pid) is websocket` (the exact WS object for this handler). This prevents a reconnect race: when WS1→WS2, WS2 registers its socket first; without the guard, WS1's finally would remove WS2 and delete the room, causing "game not started" on the next move or a waiting-screen flash if the reconnect response was built after deletion.
+
 ### AI pipeline
 - `_mcts_choose_move(game, ai_pid, time_limit=5.0)` — tree MCTS with `_MCTSNode`
 - `_MCTSNode` uses `__slots__`, UCB1 child selection (negates exploit for opponent nodes), iterative backprop
@@ -100,6 +103,12 @@ else:
 
 ### Screen flow
 `"auth"` → `"browser"` → `"waiting"` (2-player) | `"game"` (vs-AI goes directly)
+
+### Message handlers that transition screen
+- `"created"`: → `"game"` if status is `"playing"`, else `"waiting"`
+- `"joined"`: → `"game"` if status is `"playing"`, else `"waiting"` (mirrors `"reconnected"`)
+- `"reconnected"`: → `"game"` if status is `"playing"`, else `"waiting"`
+- `"room_update"`: → `"game"` only if status is `"playing"` AND screen is not already `"game"`
 
 ### Key derived state (hoisted ABOVE all useEffect hooks — required to avoid TDZ)
 ```javascript
@@ -137,6 +146,7 @@ Stored in `localStorage` as `spender_token_${roomId}_${myId}`. Sent on reconnect
 | AI blocking UI for 5s (human + AI moves batched) | Replaced sync `_post_turn` AI call with async `_schedule_ai_turn` task |
 | "Game Not Started" when game was actually over | Split status check: `== "over"` → "game is over" before generic "not started" |
 | Game stuck after socket drop during AI think | `_schedule_ai_turn` now called in both reconnect handlers |
+| "Game Not Started" toast + waiting screen flash on reconnect | Race: WS1→WS2 reconnect, WS1 `finally` removed WS2's socket and deleted the room. Fixed with `r["sockets"].get(pid) is websocket` guard in `finally`. Also fixed `"joined"` handler to check `msg.room?.status` before setting screen (was always going to `"waiting"`). |
 
 ---
 
