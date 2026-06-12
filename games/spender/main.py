@@ -628,6 +628,13 @@ _VALUE_MODEL: dict | None = None
 USE_VALUE_LEAF: bool = False
 # Human-readable feature order (for the trainer / introspection); MUST match
 # _value_features below.
+# Per-player feature names (all p0-minus-p1 diffs except the final shared "turn").
+# NOTE: Stage 1c tried a richer representation (per-colour bonuses/tokens +
+# per-card reachability/threat signals). It did NOT improve held-out accuracy
+# (~0.64 either way) and is slower, so it was reverted. Conclusion: static-eval
+# accuracy plateaus ~0.65 regardless of model/features — the remaining lever is
+# search, not evaluation. Do not re-litigate richer eval features without a new
+# idea about *what information* a static eval is missing.
 VALUE_FEATURES = [
     "points", "buyable_pts", "noble_prox", "bonus_count", "scarce_noble",
     "total_tokens", "gold", "reserved", "purchased",  # these 9 are p0-minus-p1 diffs
@@ -709,10 +716,16 @@ def load_value_model(path: str | None = None) -> dict | None:
         with open(p, "r") as f:
             data = json.load(f)
         if isinstance(data, dict) and (("w" in data and "b" in data) or "W1" in data):
+            expected = len(VALUE_FEATURES)
+            dim = len(data["W1"][0]) if "W1" in data else len(data["w"])
+            if dim != expected:
+                LOG.warning("value model at %s has %d features, expected %d — "
+                            "ignoring it (falling back to rollout MCTS)", p, dim, expected)
+                return _VALUE_MODEL
             _VALUE_MODEL = data
             USE_VALUE_LEAF = True
             kind = "mlp" if "W1" in data else "linear"
-            LOG.info("loaded %s value model from %s", kind, p)
+            LOG.info("loaded %s value model from %s (%d features)", kind, p, dim)
     except FileNotFoundError:
         pass
     except Exception as e:
