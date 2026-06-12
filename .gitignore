@@ -17,3 +17,6 @@ __pycache__/
 .DS_Store
 node_modules/
 dist/
+
+# SQLite databases (contain user data)
+*.db
