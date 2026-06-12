@@ -1,0 +1,29 @@
+{
+  "w": [
+    0.316925,
+    0.197786,
+    0.935726,
+    0.228261,
+    1.37276,
+    0.065499,
+    -0.21783,
+    -0.129623,
+    0.228261,
+    0.341249
+  ],
+  "b": -0.076158,
+  "features": [
+    "points",
+    "buyable_pts",
+    "noble_prox",
+    "bonus_count",
+    "scarce_noble",
+    "total_tokens",
+    "gold",
+    "reserved",
+    "purchased",
+    "turn"
+  ],
+  "trained_games": 3000,
+  "positions": 172054
+}

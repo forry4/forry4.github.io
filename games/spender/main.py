@@ -519,26 +519,34 @@ def _log_move(game: dict, pid: str, mv_type: str, **details) -> None:
 DEFAULT_WEIGHTS: dict[str, float] = {
     # _ai_score_card — card purchase valuation
     "point_urgency_mult": 4.0,     # how much late-game urgency amplifies raw points
+    "efficiency_weight": 0.0,      # reward for a card's points-per-gem (good-deal) value
     "bonus_l1": 0.2,               # value of a bonus toward affording L1 cards
     "bonus_l2": 0.45,              # ... L2 cards
     "bonus_l3": 0.75,              # ... L3 cards
     "bonus_reserved": 0.5,         # value of a bonus toward our reserved cards
+    "bonus_target_pts": 0.0,       # how much a bonus's value scales with the POINTS of cards it unlocks
     "bonus_urgency_decay": 0.8,    # how fast bonus utility fades as the game ends
     "noble_card": 0.6,             # partial credit for advancing a noble
+    "noble_scarcity": 0.0,         # how much board scarcity upweights noble card-credit
+    "contested_weight": 0.0,       # bonus value for point cards the opponent is also close to (denial)
     "access_base": 0.3,            # base gem-distance penalty slope
     "access_urgency": 0.4,         # extra distance penalty slope in late game
     # _fast_rollout_move — rollout policy
     "rollout_reserve_threshold": 5.0,  # min score before the rollout reserves a card
+    "block_urgency_gate": 1.1,     # urgency at/above which the rollout blocks (1.1 = off; lower to enable)
     # _pos_score — truncated-position evaluator (TD-learned)
     "pos_points": 1.0,             # weight on realised points
     "pos_buyable": 0.5,            # weight on immediately-buyable points (momentum)
     "pos_noble": 0.3,             # weight on noble proximity
     "pos_bonus_count": 0.0,        # weight on total bonus count (starts neutral)
+    "pos_noble_scarcity": 0.0,     # weight on scarcity-gated noble proximity (starts neutral)
 }
 
 WEIGHTS: dict[str, float] = dict(DEFAULT_WEIGHTS)
 
-WEIGHTS_PATH = os.path.join(os.path.dirname(__file__), "weights.json")
+# Path can be overridden for playtesting (e.g. SPENDER_WEIGHTS=weights.candidate.json,
+# or a nonexistent path to force the original defaults).
+WEIGHTS_PATH = os.environ.get("SPENDER_WEIGHTS") or os.path.join(os.path.dirname(__file__), "weights.json")
 
 
 def load_weights(path: str | None = None) -> dict[str, float]:
@@ -575,6 +583,165 @@ def _game_urgency(game: dict) -> float:
     return min(1.0, max(pts) / 15.0)
 
 
+# Structural constants for "a card worth racing toward" — a good-value, high-point
+# card. These define the *shape* of the target concept; the WEIGHTS control how
+# strongly that concept influences decisions (so they stay fixed; only weights tune).
+_TARGET_MIN_POINTS = 3        # only 3+ point cards count as race targets
+_TARGET_MIN_EFFICIENCY = 0.4  # points per gem of raw cost to qualify as efficient
+
+
+def _card_efficiency(card: dict) -> float:
+    """Points per gem of raw (pre-bonus) cost. 0 for free or point-less cards.
+    This is the human 'is this card a good deal?' signal — 5pts/8 (0.63) beats
+    5pts/10 (0.50)."""
+    total = sum(v for c, v in card.get("cost", {}).items() if c in GEM_COLORS)
+    pts = card.get("points", 0)
+    if total <= 0 or pts <= 0:
+        return 0.0
+    return pts / total
+
+
+def _board_scarcity(game: dict) -> float:
+    """1.0 when the board has no efficient high-point L2/L3 card to race toward,
+    falling toward 0 as more such targets appear. The signal behind 'no good race
+    target → go wide on L1, and nobles come for free'."""
+    richness = sum(
+        1 for lk in ("L2", "L3")
+        for c in (game["board"].get(lk) or [])
+        if c and c.get("points", 0) >= _TARGET_MIN_POINTS
+        and _card_efficiency(c) >= _TARGET_MIN_EFFICIENCY
+    )
+    return 1.0 / (1.0 + richness)
+
+
+# ─── Learned value model (Stage 1: NNUE-style leaf evaluation) ────────────────
+# A logistic value function V(s) = sigmoid(w·φ(s) + b) estimating P(order[0] wins).
+# When a value_model.json is present, MCTS evaluates leaf nodes with this instead
+# of playing a greedy rollout — a lower-variance, much faster estimate (no playout
+# → far more iterations in the same time budget). Absent → MCTS falls back to the
+# greedy rollout exactly as before (no behaviour change until a model is trained).
+
+# Override for playtesting: SPENDER_VALUE_MODEL=value_model.candidate.json to try a
+# candidate, or =none (a nonexistent path) to force the rollout MCTS.
+VALUE_MODEL_PATH = os.environ.get("SPENDER_VALUE_MODEL") or os.path.join(os.path.dirname(__file__), "value_model.json")
+_VALUE_MODEL: dict | None = None
+USE_VALUE_LEAF: bool = False
+# Human-readable feature order (for the trainer / introspection); MUST match
+# _value_features below.
+VALUE_FEATURES = [
+    "points", "buyable_pts", "noble_prox", "bonus_count", "scarce_noble",
+    "total_tokens", "gold", "reserved", "purchased",  # these 9 are p0-minus-p1 diffs
+    "turn",                                            # +1 if it is order[0]'s move else -1
+]
+
+
+def _value_player_feats(game: dict, pid: str, scarcity: float) -> list[float]:
+    ps = game["players"][pid]
+    bonuses = bonuses_from(ps["purchased"])
+    pts = _calc_points(ps)
+    buyable = sum(
+        c["points"] for lk in ["L3", "L2", "L1"]
+        for c in (game["board"].get(lk) or [])
+        if c and can_afford(c["cost"], ps["tokens"], bonuses)
+    ) + sum(
+        c["points"] for c in ps["reserved"] if can_afford(c["cost"], ps["tokens"], bonuses)
+    )
+    noble_prox = sum(
+        n["points"] / (sum(max(0, need - bonuses.get(c, 0))
+                           for c, need in n["req"].items()) + 1)
+        for n in (game.get("nobles") or [])
+    )
+    bonus_count = sum(bonuses.get(c, 0) for c in GEM_COLORS)
+    return [
+        float(pts), float(buyable), float(noble_prox), float(bonus_count),
+        float(noble_prox * scarcity), float(sum(ps["tokens"].values())),
+        float(ps["tokens"].get("gold", 0)), float(len(ps["reserved"])),
+        float(len(ps["purchased"])),
+    ]
+
+
+def _value_features(game: dict) -> list[float]:
+    """Perspective-independent state vector: order[0]-minus-order[1] feature diffs
+    plus a turn-to-move indicator. Used by the learned value model."""
+    order = game["order"]
+    scarcity = _board_scarcity(game)
+    a = _value_player_feats(game, order[0], scarcity)
+    b = _value_player_feats(game, order[1], scarcity)
+    diff = [x - y for x, y in zip(a, b)]
+    diff.append(1.0 if game.get("turn") == order[0] else -1.0)
+    return diff
+
+
+def _value_logit(m: dict, phi: list[float]) -> float:
+    """Raw logit for P(order[0] wins). Supports a linear model ({"w","b"}) or a
+    one-hidden-layer tanh MLP ({"mean","std","W1","b1","W2","b2"}). MLP inference
+    is pure-Python (no numpy) so production carries no ML dependency."""
+    if "W1" in m:
+        mean, std = m["mean"], m["std"]
+        x = [(phi[j] - mean[j]) / std[j] for j in range(len(phi))]
+        W1, b1, W2 = m["W1"], m["b1"], m["W2"]
+        z = m["b2"]
+        for k in range(len(b1)):
+            wk = W1[k]
+            a = b1[k]
+            for j in range(len(x)):
+                a += wk[j] * x[j]
+            z += W2[k] * math.tanh(a)
+        return z
+    return m["b"] + sum(w * x for w, x in zip(m["w"], phi))
+
+
+def _value_estimate(game: dict, ai_pid: str) -> float:
+    """P(ai_pid wins) in [0,1] from the learned value model. Assumes a model is
+    loaded (callers guard on USE_VALUE_LEAF)."""
+    z = max(-30.0, min(30.0, _value_logit(_VALUE_MODEL, _value_features(game))))  # type: ignore[arg-type]
+    p0 = 1.0 / (1.0 + math.exp(-z))            # P(order[0] wins)
+    return p0 if ai_pid == game["order"][0] else 1.0 - p0
+
+
+def load_value_model(path: str | None = None) -> dict | None:
+    """Load value_model.json into _VALUE_MODEL and switch USE_VALUE_LEAF on. Safe
+    to call at import; a missing/malformed file leaves the model off (rollouts).
+    Accepts a linear ({"w","b"}) or MLP ({"W1",...}) model."""
+    global _VALUE_MODEL, USE_VALUE_LEAF
+    p = path or VALUE_MODEL_PATH
+    try:
+        with open(p, "r") as f:
+            data = json.load(f)
+        if isinstance(data, dict) and (("w" in data and "b" in data) or "W1" in data):
+            _VALUE_MODEL = data
+            USE_VALUE_LEAF = True
+            kind = "mlp" if "W1" in data else "linear"
+            LOG.info("loaded %s value model from %s", kind, p)
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        LOG.warning("could not load value model from %s: %s", p, e)
+    return _VALUE_MODEL
+
+
+load_value_model()
+
+
+def _opp_reach(game: dict, ai_pid: str, card: dict) -> float:
+    """How close the opponent is to affording `card`: 1/(deficit+1), so 1.0 means
+    they can buy it now, decaying toward 0 as it gets further away. 0 if there is
+    no opponent. Drives the 'a card good for both players is worth more' signal."""
+    opp_pid = next((p for p in game["order"] if p != ai_pid), None)
+    if not opp_pid:
+        return 0.0
+    opp = game["players"][opp_pid]
+    opp_bonuses = bonuses_from(opp["purchased"])
+    deficit = 0
+    for color, cost in card["cost"].items():
+        if color == "gold":
+            continue
+        effective = max(0, cost - opp_bonuses.get(color, 0))
+        deficit += max(0, effective - opp["tokens"].get(color, 0))
+    deficit = max(0, deficit - opp["tokens"].get("gold", 0))
+    return 1.0 / (deficit + 1.0)
+
+
 def _ai_score_card(card: dict, game: dict, ai_pid: str, urgency: float) -> float:
     """Score a card for purchase. Points weighted heavily in late game;
     bonus utility and noble progress weighted in early/mid game;
@@ -584,26 +751,36 @@ def _ai_score_card(card: dict, game: dict, ai_pid: str, urgency: float) -> float
     bonus_color = card.get("bonus")
     pts = card["points"]
 
-    # Points become up to 5× more valuable as the game approaches its end
-    point_score = pts * (1.0 + urgency * WEIGHTS["point_urgency_mult"])
+    # Points become up to 5× more valuable as the game approaches its end. The
+    # efficiency term rewards good points-per-gem deals among equal-point cards
+    # (the human "race the cost-effective high-point cards" signal).
+    point_score = (pts * (1.0 + urgency * WEIGHTS["point_urgency_mult"])
+                   + _card_efficiency(card) * WEIGHTS["efficiency_weight"])
 
     # Bonus utility: how many future gem-saves does this card's bonus provide?
+    # Target-directed — a bonus that unlocks a high-*point* card is worth more
+    # than one that only helps point-less filler (bonus_target_pts scales this).
     bonus_score = 0.0
     if bonus_color:
         level_mult = {"L1": WEIGHTS["bonus_l1"], "L2": WEIGHTS["bonus_l2"], "L3": WEIGHTS["bonus_l3"]}
         for lk in ["L1", "L2", "L3"]:
             for c in (game["board"].get(lk) or []):
                 if c and bonus_color in c.get("cost", {}):
-                    bonus_score += c["cost"][bonus_color] * level_mult[lk]
+                    target_mult = 1.0 + c.get("points", 0) * WEIGHTS["bonus_target_pts"]
+                    bonus_score += c["cost"][bonus_color] * level_mult[lk] * target_mult
         for c in ps["reserved"]:
             if bonus_color in c.get("cost", {}):
-                bonus_score += c["cost"][bonus_color] * WEIGHTS["bonus_reserved"]
+                target_mult = 1.0 + c.get("points", 0) * WEIGHTS["bonus_target_pts"]
+                bonus_score += c["cost"][bonus_color] * WEIGHTS["bonus_reserved"] * target_mult
         # Bonus utility matters less as the game nears its end
         bonus_score *= (1.0 - urgency * WEIGHTS["bonus_urgency_decay"])
 
-    # Noble contribution: partial credit toward each noble this bonus advances
+    # Noble contribution: partial credit toward each noble this bonus advances.
+    # Scarcity-gated — nobles matter more when the board lacks efficient high-point
+    # cards to race (forcing a wide L1 engine that delivers nobles anyway).
     noble_score = 0.0
     if bonus_color:
+        noble_gate = 1.0 + _board_scarcity(game) * WEIGHTS["noble_scarcity"]
         for noble in (game.get("nobles") or []):
             req = noble.get("req", {})
             if bonus_color in req:
@@ -611,7 +788,7 @@ def _ai_score_card(card: dict, game: dict, ai_pid: str, urgency: float) -> float
                 needed = req[bonus_color]
                 if current < needed:
                     progress = current / needed
-                    noble_score += noble["points"] * (1.0 - progress) * WEIGHTS["noble_card"]
+                    noble_score += noble["points"] * (1.0 - progress) * WEIGHTS["noble_card"] * noble_gate
 
     # Accessibility: discount cards that are many gems away. The penalty steepens
     # in late game so the AI doesn't chase distant cards when it needs points now.
@@ -622,7 +799,13 @@ def _ai_score_card(card: dict, game: dict, ai_pid: str, urgency: float) -> float
     deficit = max(0, raw_short - ps["tokens"].get("gold", 0))
     accessibility = 1.0 / (deficit * (WEIGHTS["access_base"] + urgency * WEIGHTS["access_urgency"]) + 1.0)
 
-    return (point_score + bonus_score + noble_score) * accessibility
+    # Contested value: a point card the opponent is also close to is worth more
+    # (winning it doubles as denial). Skipped entirely when the weight is off.
+    contested_score = 0.0
+    if pts > 0 and WEIGHTS["contested_weight"]:
+        contested_score = pts * _opp_reach(game, ai_pid, card) * WEIGHTS["contested_weight"]
+
+    return (point_score + bonus_score + noble_score + contested_score) * accessibility
 
 
 
@@ -853,6 +1036,16 @@ def _fast_rollout_move(game: dict, pid: str) -> dict:
     if best_card:
         return {"type": "buy", "card_id": best_card["id"]}
 
+    # 1b. Block: if the opponent is about to grab a key card, reserve it to deny.
+    # Gated by block_urgency_gate (default 1.1 > max urgency = off); training lowers
+    # it to switch blocking on, which lets MCTS see — and value — denial lines.
+    if urgency >= WEIGHTS["block_urgency_gate"] and len(ps["reserved"]) < 3:
+        opp_pid = next((p for p in game["order"] if p != pid), None)
+        if opp_pid:
+            block = _ai_find_block(game, pid, opp_pid, urgency)
+            if block and block["id"] not in {c["id"] for c in ps["reserved"]}:
+                return {"type": "reserve", "card_id": block["id"]}
+
     # 2. Reserve a high-value card that is close to affordable (secures it + earns gold token)
     if len(ps["reserved"]) < 3:
         already_reserved = {c["id"] for c in ps["reserved"]}
@@ -913,6 +1106,8 @@ def _sim_rollout(game: dict, max_turns: int = 25) -> str | list | None:
 
     # Hit turn limit — evaluate position: points + immediately buyable points (momentum)
     # + light noble-proximity signal. Avoids over-committing to noble paths.
+    scarcity = _board_scarcity(game)  # board-level, shared by both players
+
     def _pos_score(pid: str) -> float:
         ps = game["players"][pid]
         bonuses = bonuses_from(ps["purchased"])
@@ -932,10 +1127,15 @@ def _sim_rollout(game: dict, max_turns: int = 25) -> str | list | None:
             for n in (game.get("nobles") or [])
         )
         bonus_count = sum(bonuses.get(c, 0) for c in GEM_COLORS)
+        # Scarcity-gated noble proximity: noble closeness matters more when the
+        # board offers no efficient race target (kept as a separate linear term so
+        # the TD learner can weight it independently of base noble proximity).
+        scarce_noble = noble_proximity * scarcity
         return (pts * WEIGHTS["pos_points"]
                 + buyable * WEIGHTS["pos_buyable"]
                 + noble_proximity * WEIGHTS["pos_noble"]
-                + bonus_count * WEIGHTS["pos_bonus_count"])
+                + bonus_count * WEIGHTS["pos_bonus_count"]
+                + scarce_noble * WEIGHTS["pos_noble_scarcity"])
 
     scores = {pid: _pos_score(pid) for pid in game["order"]}
     best = max(scores.values())
@@ -994,14 +1194,12 @@ class _MCTSNode:
         self.children.append(child)
         return child
 
-    def backprop(self, winner: str | list | None, ai_pid: str) -> None:
+    def backprop_reward(self, reward: float) -> None:
+        """Propagate a [0,1] reward (AI's perspective) up to the root."""
         node = self
         while node is not None:
             node.visits += 1
-            if winner == ai_pid:
-                node.ai_wins += 1.0
-            elif isinstance(winner, list) and ai_pid in winner:
-                node.ai_wins += 0.5
+            node.ai_wins += reward
             node = node.parent
 
 
@@ -1041,12 +1239,21 @@ def _mcts_choose_move(game: dict, ai_pid: str, time_limit: float = 5.0,
         if not node.is_terminal():
             node = node.expand()
 
-        # 3. Simulation: fast rollout from the new node's state
-        g_sim = copy.deepcopy(node.state)
-        winner = _sim_rollout(g_sim)
+        # 3. Evaluate the leaf. Terminal → real result. Otherwise use the learned
+        #    value model (Stage 1, NNUE-style: fast, low-variance, no playout) when
+        #    one is loaded; else fall back to a greedy rollout.
+        if node.is_terminal():
+            w = node.state.get("winner")
+            reward = 1.0 if w == ai_pid else (0.5 if isinstance(w, list) and ai_pid in w else 0.0)
+        elif USE_VALUE_LEAF and _VALUE_MODEL is not None:
+            reward = _value_estimate(node.state, ai_pid)
+        else:
+            g_sim = copy.deepcopy(node.state)
+            w = _sim_rollout(g_sim)
+            reward = 1.0 if w == ai_pid else (0.5 if isinstance(w, list) and ai_pid in w else 0.0)
 
-        # 4. Backpropagation: update visits and wins all the way to the root
-        node.backprop(winner, ai_pid)
+        # 4. Backpropagation: update visits and reward all the way to the root
+        node.backprop_reward(reward)
 
     if not root.children:
         return candidates[0]
