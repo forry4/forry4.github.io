@@ -990,10 +990,11 @@ def _mcts_choose_move(game: dict, ai_pid: str, time_limit: float = 5.0) -> dict:
     return max(root.children, key=lambda c: c.visits).move
 
 
-def _run_ai_turn(game: dict, ai_pid: str) -> None:
+def _run_ai_turn(game: dict, ai_pid: str, mv: dict | None = None) -> None:
     ps = game["players"][ai_pid]
     bonuses = bonuses_from(ps["purchased"])
-    mv = _mcts_choose_move(game, ai_pid)
+    if mv is None:
+        mv = _mcts_choose_move(game, ai_pid)
 
     if mv["type"] == "buy":
         card_id = mv["card_id"]
@@ -1063,15 +1064,43 @@ def _run_ai_turn(game: dict, ai_pid: str) -> None:
 
 
 def _post_turn(game: dict, r: dict) -> None:
-    """After _finish_turn: sync room status and run AI turn if it's next."""
+    """After _finish_turn: sync room status. AI move is run async via _schedule_ai_turn."""
     if game.get("phase") == "over":
         r["status"] = "over"
-        return
-    ai_pid = game.get("ai_player")
-    if ai_pid and game.get("turn") == ai_pid and game.get("phase") == "playing":
-        _run_ai_turn(game, ai_pid)
-        if game.get("phase") == "over":
+
+
+async def _schedule_ai_turn(room_id: str) -> None:
+    """Broadcast the post-human-move state immediately, then run MCTS in a thread pool
+    (non-blocking) and broadcast the AI's move when it finishes."""
+    async with ROOM_LOCK:
+        r = ROOMS.get(room_id)
+        if not r:
+            return
+        g = r.get("game")
+        if not g:
+            return
+        ai_pid = g.get("ai_player")
+        if not ai_pid or g.get("turn") != ai_pid or g.get("phase") != "playing":
+            return
+        game_snapshot = copy.deepcopy(g)
+
+    # MCTS runs in a thread pool so the event loop stays free during the 5s compute
+    loop = asyncio.get_running_loop()
+    mv = await loop.run_in_executor(None, _mcts_choose_move, game_snapshot, ai_pid)
+
+    async with ROOM_LOCK:
+        r = ROOMS.get(room_id)
+        if not r:
+            return
+        g = r.get("game")
+        if not g or g.get("turn") != ai_pid or g.get("phase") != "playing":
+            return  # game changed while AI was thinking (e.g. abandoned)
+        _run_ai_turn(g, ai_pid, mv)
+        if g.get("phase") == "over":
             r["status"] = "over"
+
+    save_game(room_id)
+    await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
 
 
 # ─── WebSocket ────────────────────────────────────────────────────────────────
@@ -1137,12 +1166,10 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                         random.shuffle(nobles_pool)
                         g["nobles"] = nobles_pool[:3]
                         r["status"] = "playing"
-                        if g["turn"] == ai_pid:
-                            _run_ai_turn(g, ai_pid)
-                            if g.get("phase") == "over":
-                                r["status"] = "over"
                 save_game(room_id)
                 await websocket.send_text(json.dumps({"type": "created", "room_id": room_id, "room": mk_room_state(room_id)}))
+                if vs_ai:
+                    asyncio.create_task(_schedule_ai_turn(room_id))
 
             # ── reconnect ───────────────────────────────────────────────────
             elif action == "reconnect":
@@ -1156,6 +1183,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                 LOG.info("player %s reconnected to room %s", pid, room_id)
                 await websocket.send_text(json.dumps({"type": "reconnected", "room": mk_room_state(room_id)}))
                 await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
+                asyncio.create_task(_schedule_ai_turn(room_id))
 
             # ── join ────────────────────────────────────────────────────────
             elif action == "join":
@@ -1197,6 +1225,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                 mark_reconnect_token_used(token)
                 await websocket.send_text(json.dumps({"type": "reconnected", "room": mk_room_state(room_id)}))
                 await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
+                asyncio.create_task(_schedule_ai_turn(room_id))
 
             # ── start ───────────────────────────────────────────────────────
             elif action == "start":
@@ -1235,7 +1264,11 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
 
                 async with ROOM_LOCK:
                     r = ROOMS.get(room_id)
-                    if not r or r.get("status") != "playing":
+                    if not r:
+                        _err = "game not started"
+                    elif r.get("status") == "over":
+                        _err = "game is over"
+                    elif r.get("status") != "playing":
                         _err = "game not started"
                     else:
                         g = r["game"]
@@ -1412,6 +1445,9 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                     if _noble_choice_pid:
                         msg_out["needs_noble_choice"] = _noble_choice_pid
                     await broadcast_room(room_id, msg_out)
+                    # If no pending human action remains, check whether it's now the AI's turn
+                    if not _discard_pid and not _noble_choice_pid:
+                        asyncio.create_task(_schedule_ai_turn(room_id))
 
             # ── abandon ─────────────────────────────────────────────────────
             elif action == "abandon":
