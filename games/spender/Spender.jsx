@@ -302,9 +302,9 @@ function CardView({ card, selected, affordable, disabled, onClick, compact }) {
 	);
 }
 
-function NobleView({ noble }) {
+function NobleView({ noble, claimedBy }) {
 	return (
-		<div className="noble">
+		<div className="noble" style={claimedBy ? { opacity: 0.5, position: "relative" } : undefined}>
 			<span className="noble-points">{noble.points}</span>
 			<div className="noble-req">
 				{Object.entries(noble.req).map(([c, n]) => (
@@ -314,6 +314,11 @@ function NobleView({ noble }) {
 					</div>
 				))}
 			</div>
+			{claimedBy && (
+				<div style={{ fontSize: ".55rem", color: "var(--gold)", fontFamily: "'Cinzel',serif", letterSpacing: ".04em", marginTop: 2 }}>
+					★ {claimedBy}
+				</div>
+			)}
 		</div>
 	);
 }
@@ -415,9 +420,11 @@ export default function SpenderApp() {
 	const myTurn = game?.turn === myId && game?.phase === "playing";
 	const myBonuses = me ? bonusesFrom(me.purchased) : emptyGems();
 	const aiThinking = game?.ai_player && game?.turn === game?.ai_player && game?.phase === "playing";
+	// Derived from game state (not a transient message) so a later room_update
+	// can't clear an unmet requirement — the server keeps these set until resolved.
+	const needsDiscard = game?.pending_discard_pid === myId;
+	const needsNobleChoice = game?.pending_noble_pid === myId;
 
-	const [needsDiscard, setNeedsDiscard] = useState(false);
-	const [needsNobleChoice, setNeedsNobleChoice] = useState(false);
 	const [selectedGems, setSelectedGems] = useState([]);
 	const [selectedCard, setSelectedCard] = useState(null);
 	const [toast, setToast] = useState("");
@@ -467,23 +474,24 @@ export default function SpenderApp() {
 			} catch {}
 		}
 
+		// A finished game ("over") still belongs on the game screen so the
+		// winner/review UI shows — only a not-yet-started game goes to "waiting".
+		const inGame = (s) => s === "playing" || s === "over";
 		if (msg.type === "created") {
 			setRoomData(msg.room);
-			if (msg.room?.status === "playing") setScreen("game");
+			if (inGame(msg.room?.status)) setScreen("game");
 			else setScreen("waiting");
 		} else if (msg.type === "joined") {
 			setRoomData(msg.room);
-			if (msg.room?.status === "playing") setScreen("game");
+			if (inGame(msg.room?.status)) setScreen("game");
 			else setScreen("waiting");
 		} else if (msg.type === "reconnected") {
 			setRoomData(msg.room);
-			if (msg.room.status === "playing") setScreen("game");
+			if (inGame(msg.room.status)) setScreen("game");
 			else setScreen("waiting");
 		} else if (msg.type === "room_update") {
 			setRoomData(msg.room);
-			if (msg.room.status === "playing" && screen !== "game") setScreen("game");
-			setNeedsDiscard(msg.needs_discard === myId);
-				setNeedsNobleChoice(msg.needs_noble_choice === myId);
+			if (inGame(msg.room.status) && screen !== "game") setScreen("game");
 		} else if (msg.type === "error") {
 			if (msg.message === "invalid token") {
 				try { localStorage.removeItem("spender_roomId"); } catch {}
@@ -721,10 +729,7 @@ export default function SpenderApp() {
 	};
 
 	const handleDiscard = (color) => sendMove({ type: "discard", color });
-	const handleNobleChoice = (nobleId) => {
-		sendMove({ type: "pick_noble", noble_id: nobleId });
-		setNeedsNobleChoice(false);
-	};
+	const handleNobleChoice = (nobleId) => sendMove({ type: "pick_noble", noble_id: nobleId });
 
 	const handleGemClick = (color) => {
 		if (!myTurn) return;
@@ -1191,6 +1196,13 @@ export default function SpenderApp() {
 							<div className="panel-title">Nobles</div>
 							<div className="nobles-row">
 								{(game.nobles || []).map(n => <NobleView key={n.id} noble={n} />)}
+								{/* In review, also show nobles that were claimed so the board is the full original set. */}
+								{game.phase === "over" && (game.order || []).flatMap(pid =>
+									(game.players?.[pid]?.nobles || []).map(n => (
+										<NobleView key={n.id} noble={n}
+											claimedBy={(roomData?.players?.[pid] || pid.slice(0, 6)) + (pid === myId ? " (you)" : "")} />
+									))
+								)}
 							</div>
 						</div>
 					</div>

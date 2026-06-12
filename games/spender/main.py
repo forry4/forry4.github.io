@@ -1567,6 +1567,8 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
 
                             if g.get("pending_noble_pid") == pid and move_type != "pick_noble":
                                 _err = "must choose a noble first"
+                            elif g.get("pending_discard_pid") == pid and move_type != "discard":
+                                _err = "must discard down to 10 gems first"
                             elif move_type == "take_gems":
                                 colors = mv.get("colors", [])
                                 if not colors or len(colors) > 3:
@@ -1595,7 +1597,9 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                             _did_change = True
                                             if sum(ps["tokens"].values()) > 10:
                                                 _discard_pid = pid
+                                                g["pending_discard_pid"] = pid
                                             else:
+                                                g.pop("pending_discard_pid", None)
                                                 _finish_turn(g, pid)
                                                 _post_turn(g, r)
 
@@ -1609,7 +1613,9 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                     _did_change = True
                                     if sum(ps["tokens"].values()) > 10:
                                         _discard_pid = pid
+                                        g["pending_discard_pid"] = pid
                                     else:
+                                        g.pop("pending_discard_pid", None)
                                         _finish_turn(g, pid)
                                         _post_turn(g, r)
 
@@ -1695,7 +1701,9 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                         _did_change = True
                                         if sum(ps["tokens"].values()) > 10:
                                             _discard_pid = pid
+                                            g["pending_discard_pid"] = pid
                                         else:
+                                            g.pop("pending_discard_pid", None)
                                             _finish_turn(g, pid)
                                             _post_turn(g, r)
                             elif move_type == "pick_noble":
