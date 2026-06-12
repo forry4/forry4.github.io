@@ -518,7 +518,8 @@ def _game_urgency(game: dict) -> float:
 
 def _ai_score_card(card: dict, game: dict, ai_pid: str, urgency: float) -> float:
     """Score a card for purchase. Points weighted heavily in late game;
-    bonus utility and noble progress weighted in early/mid game."""
+    bonus utility and noble progress weighted in early/mid game;
+    accessibility penalty discounts cards that are many gems away."""
     ps = game["players"][ai_pid]
     bonuses = bonuses_from(ps["purchased"])
     bonus_color = card.get("bonus")
@@ -553,7 +554,16 @@ def _ai_score_card(card: dict, game: dict, ai_pid: str, urgency: float) -> float
                     progress = current / needed
                     noble_score += noble["points"] * (1.0 - progress) * 0.6
 
-    return point_score + bonus_score + noble_score
+    # Accessibility: discount cards that are many gems away. The penalty steepens
+    # in late game so the AI doesn't chase distant cards when it needs points now.
+    raw_short = sum(
+        max(0, max(0, cost - bonuses.get(color, 0)) - ps["tokens"].get(color, 0))
+        for color, cost in card["cost"].items() if color in GEM_COLORS
+    )
+    deficit = max(0, raw_short - ps["tokens"].get("gold", 0))
+    accessibility = 1.0 / (deficit * (0.3 + urgency * 0.4) + 1.0)
+
+    return (point_score + bonus_score + noble_score) * accessibility
 
 
 
@@ -616,17 +626,19 @@ def _ai_find_reserve_target(game: dict, ai_pid: str, urgency: float) -> dict | N
         for card in (game["board"].get(lk) or []):
             if not card or card["id"] in already or card["points"] < 3:
                 continue
-            deficit = sum(
+            # Accessibility penalty is already baked into _ai_score_card; just
+            # hard-skip cards that are totally out of reach (raw deficit, pre-gold).
+            raw_deficit = sum(
                 max(0, max(0, cost - bonuses.get(color, 0)) - ps["tokens"].get(color, 0))
                 for color, cost in card["cost"].items() if color in GEM_COLORS
             )
-            if deficit > 7:
+            if raw_deficit > 7:
                 continue
-            score = _ai_score_card(card, game, ai_pid, urgency) * lw / (deficit * 0.3 + 1)
+            score = _ai_score_card(card, game, ai_pid, urgency) * lw
             if score > best_score:
                 best_score = score
                 best = card
-    return best if best_score > 3.0 else None
+    return best if best_score > 4.0 else None
 
 
 # ─── MCTS ─────────────────────────────────────────────────────────────────────
@@ -767,11 +779,12 @@ def _sim_apply_move(game: dict, pid: str, mv: dict) -> None:
 
 
 def _fast_rollout_move(game: dict, pid: str) -> dict:
-    """Rollout policy: buy best card by heuristic score, else take urgency-weighted needed gems."""
+    """Rollout policy: buy best card, or reserve a high-value near-affordable card, else take needed gems."""
     ps = game["players"][pid]
     bonuses = bonuses_from(ps["purchased"])
     urgency = _game_urgency(game)
 
+    # 1. Buy best affordable card
     best_card: dict | None = None
     best_score = -1.0
     for lk in ["L3", "L2", "L1"]:
@@ -788,6 +801,30 @@ def _fast_rollout_move(game: dict, pid: str) -> dict:
     if best_card:
         return {"type": "buy", "card_id": best_card["id"]}
 
+    # 2. Reserve a high-value card that is close to affordable (secures it + earns gold token)
+    if len(ps["reserved"]) < 3:
+        already_reserved = {c["id"] for c in ps["reserved"]}
+        best_reserve: dict | None = None
+        best_reserve_score = 0.0
+        for lk in ["L3", "L2"]:
+            lw = 1.4 if lk == "L3" else 1.0
+            for card in (game["board"].get(lk) or []):
+                if not card or card["id"] in already_reserved:
+                    continue
+                deficit = sum(
+                    max(0, max(0, cost - bonuses.get(color, 0)) - ps["tokens"].get(color, 0))
+                    for color, cost in card["cost"].items() if color in GEM_COLORS
+                )
+                if deficit > 5:
+                    continue
+                s = _ai_score_card(card, game, pid, urgency) * lw
+                if s > best_reserve_score:
+                    best_reserve_score = s
+                    best_reserve = card
+        if best_reserve and best_reserve_score > 5.0:
+            return {"type": "reserve", "card_id": best_reserve["id"]}
+
+    # 3. Take most-needed gems
     token_total = sum(ps["tokens"].values())
     max_take = min(3, 10 - token_total)
     if max_take > 0:
@@ -810,7 +847,7 @@ def _fast_rollout_move(game: dict, pid: str) -> dict:
     return {"type": "take_gems", "colors": []}
 
 
-def _sim_rollout(game: dict, max_turns: int = 50) -> str | list | None:
+def _sim_rollout(game: dict, max_turns: int = 25) -> str | list | None:
     """Play out a simulation to terminal or max_turns using fast heuristic for both players."""
     for _ in range(max_turns):
         if game.get("phase") != "playing":
@@ -822,64 +859,135 @@ def _sim_rollout(game: dict, max_turns: int = 50) -> str | list | None:
     if game.get("phase") == "over":
         return game.get("winner")
 
-    # Hit turn limit — judge by current score
-    scores = {pid: (_calc_points(game["players"][pid]), -len(game["players"][pid]["purchased"]))
-              for pid in game["order"]}
+    # Hit turn limit — evaluate position: points + immediately buyable points (momentum)
+    # + light noble-proximity signal. Avoids over-committing to noble paths.
+    def _pos_score(pid: str) -> float:
+        ps = game["players"][pid]
+        bonuses = bonuses_from(ps["purchased"])
+        pts = _calc_points(ps)
+        buyable = sum(
+            c["points"]
+            for lk in ["L3", "L2", "L1"]
+            for c in (game["board"].get(lk) or [])
+            if c and can_afford(c["cost"], ps["tokens"], bonuses)
+        ) + sum(
+            c["points"] for c in ps["reserved"]
+            if can_afford(c["cost"], ps["tokens"], bonuses)
+        )
+        noble_proximity = sum(
+            n["points"] / (sum(max(0, need - bonuses.get(c, 0))
+                               for c, need in n["req"].items()) + 1)
+            for n in (game.get("nobles") or [])
+        )
+        return pts + buyable * 0.5 + noble_proximity * 0.3
+
+    scores = {pid: _pos_score(pid) for pid in game["order"]}
     best = max(scores.values())
     leaders = [pid for pid, s in scores.items() if s == best]
     return leaders[0] if len(leaders) == 1 else leaders
 
 
-def _mcts_choose_move(game: dict, ai_pid: str, time_limit: float = 1.0) -> dict:
-    """UCB1 flat Monte Carlo tree search. Each candidate move is evaluated via game rollouts."""
+class _MCTSNode:
+    """Node in the MCTS search tree. ai_wins always counts wins from the AI's perspective."""
+    __slots__ = ("move", "state", "parent", "children", "_untried", "visits", "ai_wins")
+
+    def __init__(self, state: dict, parent=None, move: dict | None = None):
+        self.state = state
+        self.parent = parent
+        self.move = move
+        self.children: list = []
+        self._untried: list | None = None
+        self.visits = 0
+        self.ai_wins = 0.0
+
+    def _ensure_untried(self) -> list:
+        if self._untried is None:
+            if self.state.get("phase") == "over":
+                self._untried = []
+            else:
+                moves = _get_all_moves(self.state, self.state["turn"])
+                # Reverse so pop() tries buys first (generated first), then
+                # gem-takes, then reserves — matching priority order.
+                moves.reverse()
+                self._untried = moves
+        return self._untried
+
+    def is_terminal(self) -> bool:
+        return self.state.get("phase") == "over"
+
+    def is_fully_expanded(self) -> bool:
+        return len(self._ensure_untried()) == 0
+
+    def select_child(self, ai_pid: str) -> "_MCTSNode":
+        """UCB1 child selection. AI maximizes win rate; opponent minimizes it."""
+        log_n = math.log(self.visits)
+        maximizing = self.state["turn"] == ai_pid
+        def ucb(c: "_MCTSNode") -> float:
+            if c.visits == 0:
+                return float("inf")
+            exploit = c.ai_wins / c.visits
+            explore = 1.414 * math.sqrt(log_n / c.visits)
+            return (exploit if maximizing else -exploit) + explore
+        return max(self.children, key=ucb)
+
+    def expand(self) -> "_MCTSNode":
+        move = self._ensure_untried().pop()
+        g = copy.deepcopy(self.state)
+        _sim_apply_move(g, self.state["turn"], move)
+        child = _MCTSNode(g, parent=self, move=move)
+        self.children.append(child)
+        return child
+
+    def backprop(self, winner: str | list | None, ai_pid: str) -> None:
+        node = self
+        while node is not None:
+            node.visits += 1
+            if winner == ai_pid:
+                node.ai_wins += 1.0
+            elif isinstance(winner, list) and ai_pid in winner:
+                node.ai_wins += 0.5
+            node = node.parent
+
+
+def _mcts_choose_move(game: dict, ai_pid: str, time_limit: float = 5.0) -> dict:
+    """UCB1 tree MCTS: select → expand → simulate → backprop."""
     candidates = _get_all_moves(game, ai_pid)
     if len(candidates) == 1:
         return candidates[0]
 
-    # Pre-apply each candidate move to get the resulting state
-    # node: [move, post_move_game, visits, wins]
-    nodes: list[list] = []
+    # Grab any immediately winning move before building the tree
     for mv in candidates:
         g = copy.deepcopy(game)
         _sim_apply_move(g, ai_pid, mv)
-        nodes.append([mv, g, 0, 0.0])
-
-    # Immediately take any move that wins right now
-    for node in nodes:
-        if node[1].get("phase") == "over":
-            w = node[1].get("winner")
+        if g.get("phase") == "over":
+            w = g.get("winner")
             if w == ai_pid or (isinstance(w, list) and ai_pid in w):
-                return node[0]
+                return mv
 
+    root = _MCTSNode(copy.deepcopy(game))
     deadline = time.time() + time_limit
-    total_visits = 0
 
     while time.time() < deadline:
-        if total_visits == 0:
-            node = nodes[0]
-        else:
-            log_n = math.log(total_visits)
-            node = max(
-                nodes,
-                key=lambda n: (
-                    n[3] / n[2] + 1.414 * math.sqrt(log_n / n[2])
-                    if n[2] > 0 else float("inf")
-                ),
-            )
+        # 1. Selection: walk down via UCB1 until reaching an unexpanded or terminal node
+        node = root
+        while node.is_fully_expanded() and not node.is_terminal():
+            node = node.select_child(ai_pid)
 
-        g_sim = copy.deepcopy(node[1])
+        # 2. Expansion: add one new child for an untried move
+        if not node.is_terminal():
+            node = node.expand()
+
+        # 3. Simulation: fast rollout from the new node's state
+        g_sim = copy.deepcopy(node.state)
         winner = _sim_rollout(g_sim)
 
-        node[2] += 1
-        if winner == ai_pid:
-            node[3] += 1.0
-        elif isinstance(winner, list) and ai_pid in winner:
-            node[3] += 0.5
-        total_visits += 1
+        # 4. Backpropagation: update visits and wins all the way to the root
+        node.backprop(winner, ai_pid)
 
-    # Pick most-visited move (UCB1 concentrates visits on best moves)
-    best_node = max(nodes, key=lambda n: (n[2], n[3]))
-    return best_node[0]
+    if not root.children:
+        return candidates[0]
+    # Most-visited child is the most reliable (UCB1 concentrates budget on good moves)
+    return max(root.children, key=lambda c: c.visits).move
 
 
 def _run_ai_turn(game: dict, ai_pid: str) -> None:
