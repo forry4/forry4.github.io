@@ -425,7 +425,7 @@ async def broadcast_room(room_id: str, msg: dict[str, Any]):
 
 def mk_room_state(room_id: str) -> dict[str, Any]:
     room = ROOMS.get(room_id, {})
-    return {
+    state = {
         "room_id": room_id,
         "players": room.get("players", {}),
         "host": room.get("host"),
@@ -433,6 +433,9 @@ def mk_room_state(room_id: str) -> dict[str, Any]:
         "game": room.get("game"),
         "reconnect_tokens": {p: info.get("token") for p, info in room.get("meta", {}).items()} if room.get("meta") else {},
     }
+    if room.get("ai_variant"):
+        state["ai_variant"] = room["ai_variant"]
+    return state
 
 
 def _deal_board(decks: dict) -> dict:
@@ -529,12 +532,15 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "bonus_urgency_decay": 0.8,    # how fast bonus utility fades as the game ends
     "noble_card": 0.6,             # partial credit for advancing a noble
     "noble_scarcity": 0.0,         # how much board scarcity upweights noble card-credit
-    "contested_weight": 0.0,       # bonus value for point cards the opponent is also close to (denial)
+    "noble_race_weight": 0.0,      # boost a noble's card-credit when the OPPONENT is also closing on it (race to claim it first; 0 = off)
+    "contested_weight": 0.0,       # boost cards the opponent is also close to affording (prefer shared-good cards; all cards, not just point cards)
     "access_base": 0.3,            # base gem-distance penalty slope
     "access_urgency": 0.4,         # extra distance penalty slope in late game
     # _fast_rollout_move — rollout policy
     "rollout_reserve_threshold": 5.0,  # min score before the rollout reserves a card
     "block_urgency_gate": 1.1,     # urgency at/above which the rollout blocks (1.1 = off; lower to enable)
+    "block_efficiency_weight": 0.0,  # how much a block target's points-per-gem deal upweights it (block the cheap high-point cards, not any 3-pointer). 0 = original raw-points ranking.
+    "block_noble_weight": 0.0,     # how much a block target's noble-enabling value counts (deny cards that hand the opponent a noble they're close to). 0 = original points-only blocking. Both block_* extras hand-tuned: NOT in train.py CARD_KEYS, self-play can't judge blocking.
     # _pos_score — truncated-position evaluator (TD-learned)
     "pos_points": 1.0,             # weight on realised points
     "pos_buyable": 0.5,            # weight on immediately-buyable points (momentum)
@@ -548,6 +554,12 @@ WEIGHTS: dict[str, float] = dict(DEFAULT_WEIGHTS)
 # Path can be overridden for playtesting (e.g. SPENDER_WEIGHTS=weights.candidate.json,
 # or a nonexistent path to force the original defaults).
 WEIGHTS_PATH = os.environ.get("SPENDER_WEIGHTS") or os.path.join(os.path.dirname(__file__), "weights.json")
+_WEIGHTS_B_PATH = os.path.join(os.path.dirname(__file__), "weights.tactics.json")
+
+# Named weight variants available for per-game selection. "A" is always the
+# default deployed weights; "B" is the tactics variant (loaded at startup if the
+# file exists, otherwise falls back to defaults). Populated by load_weights().
+WEIGHT_VARIANTS: dict[str, dict[str, float]] = {}
 
 
 def load_weights(path: str | None = None) -> dict[str, float]:
@@ -570,6 +582,23 @@ def load_weights(path: str | None = None) -> dict[str, float]:
     except Exception as e:  # malformed file — fall back to defaults
         LOG.warning("could not load weights from %s: %s", p, e)
     WEIGHTS = merged
+    WEIGHT_VARIANTS["A"] = merged
+    # Load B variant from weights.tactics.json; fall back to A if absent.
+    merged_b = dict(DEFAULT_WEIGHTS)
+    try:
+        with open(_WEIGHTS_B_PATH, "r") as f:
+            data_b = json.load(f)
+        if isinstance(data_b, dict):
+            for k, v in data_b.items():
+                if k in DEFAULT_WEIGHTS and isinstance(v, (int, float)):
+                    merged_b[k] = float(v)
+        LOG.info("loaded AI variant B weights from %s", _WEIGHTS_B_PATH)
+    except FileNotFoundError:
+        merged_b = dict(merged)  # B = A if file missing
+    except Exception as e:
+        LOG.warning("could not load variant B weights: %s", e)
+        merged_b = dict(merged)
+    WEIGHT_VARIANTS["B"] = merged_b
     return WEIGHTS
 
 
@@ -795,6 +824,10 @@ def _ai_score_card(card: dict, game: dict, ai_pid: str, urgency: float) -> float
     noble_score = 0.0
     if bonus_color:
         noble_gate = 1.0 + _board_scarcity(game) * WEIGHTS["noble_scarcity"]
+        # Only resolve the opponent when racing is enabled (keeps this hot path free
+        # when noble_race_weight is off).
+        race_opp = (next((p for p in game["order"] if p != ai_pid), None)
+                    if WEIGHTS["noble_race_weight"] else None)
         for noble in (game.get("nobles") or []):
             req = noble.get("req", {})
             if bonus_color in req:
@@ -802,7 +835,13 @@ def _ai_score_card(card: dict, game: dict, ai_pid: str, urgency: float) -> float
                 needed = req[bonus_color]
                 if current < needed:
                     progress = current / needed
-                    noble_score += noble["points"] * (1.0 - progress) * WEIGHTS["noble_card"] * noble_gate
+                    credit = noble["points"] * (1.0 - progress) * WEIGHTS["noble_card"] * noble_gate
+                    # Contested noble: if the opponent is also closing on this same
+                    # noble, racing to claim it first matters (only one player gets
+                    # it). Boost credit by how close they are.
+                    if race_opp:
+                        credit *= 1.0 + _opp_noble_progress(game, race_opp, noble) * WEIGHTS["noble_race_weight"]
+                    noble_score += credit
 
     # Accessibility: discount cards that are many gems away. The penalty steepens
     # in late game so the AI doesn't chase distant cards when it needs points now.
@@ -813,11 +852,17 @@ def _ai_score_card(card: dict, game: dict, ai_pid: str, urgency: float) -> float
     deficit = max(0, raw_short - ps["tokens"].get("gold", 0))
     accessibility = 1.0 / (deficit * (WEIGHTS["access_base"] + urgency * WEIGHTS["access_urgency"]) + 1.0)
 
-    # Contested value: a point card the opponent is also close to is worth more
-    # (winning it doubles as denial). Skipped entirely when the weight is off.
+    # Contested value: a card the opponent is also close to affording is worth
+    # grabbing first. NOT framed as "denial" (the self-play opponent never threatens
+    # coherently, so denial never trains in) but as "prefer the shared-good card":
+    # a card that's cheap/efficient *for them* — low post-bonus deficit, so high
+    # _opp_reach — is one they'll also race for, so contesting it is good tempo.
+    # Unlike the old version this fires for cheap 0-point cards too (the canonical
+    # "we both have 2 red and a 2-red card is on the board, take it" case); point
+    # cards just add denial value on top via the (1 + pts) factor.
     contested_score = 0.0
-    if pts > 0 and WEIGHTS["contested_weight"]:
-        contested_score = pts * _opp_reach(game, ai_pid, card) * WEIGHTS["contested_weight"]
+    if WEIGHTS["contested_weight"]:
+        contested_score = (1.0 + pts) * _opp_reach(game, ai_pid, card) * WEIGHTS["contested_weight"]
 
     return (point_score + bonus_score + noble_score + contested_score) * accessibility
 
@@ -844,15 +889,57 @@ def _ai_discard_one(game: dict, ai_pid: str) -> None:
     game["bank"][worst[0]] = game["bank"].get(worst[0], 0) + 1
 
 
+def _opp_noble_progress(game: dict, opp_pid: str, noble: dict) -> float:
+    """A player's fractional progress (0..1) toward an (unclaimed) noble — the sum
+    of their qualifying bonuses over the noble's total requirement."""
+    opp_bonuses = bonuses_from(game["players"][opp_pid]["purchased"])
+    req = noble.get("req", {})
+    req_total = sum(req.values())
+    if not req_total:
+        return 0.0
+    return sum(min(opp_bonuses.get(c, 0), n) for c, n in req.items()) / req_total
+
+
+def _opp_noble_value(game: dict, opp_pid: str, card: dict) -> float:
+    """Noble points the opponent gains from this card's bonus, weighted by how close
+    they already are to that noble. A card that hands a near-complete noble (≈3 free
+    points) is worth denying even if the card itself is worth few points; a card
+    advancing only a distant noble is not."""
+    bonus_color = card.get("bonus")
+    if not bonus_color:
+        return 0.0
+    opp_bonuses = bonuses_from(game["players"][opp_pid]["purchased"])
+    total = 0.0
+    for noble in (game.get("nobles") or []):
+        req = noble.get("req", {})
+        need = req.get(bonus_color, 0)
+        if need and opp_bonuses.get(bonus_color, 0) < need:
+            total += noble["points"] * _opp_noble_progress(game, opp_pid, noble)
+    return total
+
+
 def _ai_find_block(game: dict, ai_pid: str, opp_pid: str, urgency: float) -> dict | None:
-    """Return a board card to reserve in order to block the opponent, or None."""
+    """Return a board card to reserve in order to deny it to the opponent, or None.
+    A card is worth denying only if it actually advances the opponent: real points
+    or progress toward a noble they're close to. Cheapness (efficiency) decides how
+    *soon* they can take it and amplifies an already-valuable card, but it never
+    substitutes for value — a cheap card worth few points that advances no noble is
+    NOT blocked, however affordable it is. Among block-worthy cards the opponent is
+    one or two buys from, the cheap high-value ones (what a good player races for)
+    win out (block_efficiency_weight scales the deal-quality bonus)."""
     opp = game["players"][opp_pid]
     opp_bonuses = bonuses_from(opp["purchased"])
     best: dict | None = None
     best_score = 0.0
     for lk in ["L3", "L2", "L1"]:
         for card in (game["board"].get(lk) or []):
-            if not card or card["points"] < 3:
+            if not card:
+                continue
+            # Worth to the opponent: its own points plus any noble it advances. Skip
+            # low-point cards that advance no noble — not worth a block, cheap or not.
+            noble_value = (_opp_noble_value(game, opp_pid, card) * WEIGHTS["block_noble_weight"]
+                           if WEIGHTS["block_noble_weight"] else 0.0)
+            if card["points"] < 3 and noble_value <= 0:
                 continue
             deficit = 0
             for color, cost in card["cost"].items():
@@ -863,7 +950,10 @@ def _ai_find_block(game: dict, ai_pid: str, opp_pid: str, urgency: float) -> dic
             gold = opp["tokens"].get("gold", 0)
             deficit = max(0, deficit - gold)
             if deficit <= 2:
-                score = card["points"] * urgency / max(1.0, float(deficit))
+                # Value = points + noble progress, amplified by how good a deal it is
+                # (points-per-gem). Cheapness only scales an already-valuable card.
+                value = (card["points"] + noble_value) * (1.0 + _card_efficiency(card) * WEIGHTS["block_efficiency_weight"])
+                score = value * urgency / max(1.0, float(deficit))
                 if score > best_score:
                     best_score = score
                     best = card
@@ -1218,13 +1308,31 @@ class _MCTSNode:
 
 
 def _mcts_choose_move(game: dict, ai_pid: str, time_limit: float = 5.0,
-                      max_iters: int | None = None) -> dict:
+                      max_iters: int | None = None,
+                      weights: dict | None = None) -> dict:
     """UCB1 tree MCTS: select → expand → simulate → backprop.
 
     Stops at whichever of ``time_limit`` (wall-clock) or ``max_iters`` (iteration
     count) is hit first. Training passes a small ``max_iters`` for fast,
     wall-clock-independent self-play; production leaves it None and uses the 5s
-    budget."""
+    budget.
+
+    ``weights`` overrides the global WEIGHTS for this call (used to run a
+    specific AI variant per room). The swap is scoped to this call and is safe
+    because _mcts_choose_move is synchronous and runs in a dedicated executor
+    thread — no other coroutine touches WEIGHTS during play."""
+    global WEIGHTS
+    _saved_weights = WEIGHTS
+    if weights is not None:
+        WEIGHTS = weights
+    try:
+        return _mcts_choose_move_impl(game, ai_pid, time_limit, max_iters)
+    finally:
+        WEIGHTS = _saved_weights
+
+
+def _mcts_choose_move_impl(game: dict, ai_pid: str, time_limit: float,
+                           max_iters: int | None) -> dict:
     candidates = _get_all_moves(game, ai_pid)
     if len(candidates) == 1:
         return candidates[0]
@@ -1368,10 +1476,14 @@ async def _schedule_ai_turn(room_id: str) -> None:
         if not ai_pid or g.get("turn") != ai_pid or g.get("phase") != "playing":
             return
         game_snapshot = copy.deepcopy(g)
+        variant = r.get("ai_variant", "A")
 
     # MCTS runs in a thread pool so the event loop stays free during the 5s compute
+    ai_weights = WEIGHT_VARIANTS.get(variant, WEIGHTS)
     loop = asyncio.get_running_loop()
-    mv = await loop.run_in_executor(None, _mcts_choose_move, game_snapshot, ai_pid)
+    mv = await loop.run_in_executor(
+        None, _mcts_choose_move, game_snapshot, ai_pid, 5.0, None, ai_weights
+    )
 
     async with ROOM_LOCK:
         r = ROOMS.get(room_id)
@@ -1421,6 +1533,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
             if action == "create":
                 name = msg.get("name") or pid
                 vs_ai = bool(msg.get("vs_ai"))
+                ai_variant = msg.get("ai_variant", "A") if vs_ai else None
                 async with ROOM_LOCK:
                     r = ROOMS.setdefault(room_id, {"players": {}, "sockets": {}, "status": "open", "game": None, "host": None})
                     r["players"][pid] = name
@@ -1437,7 +1550,8 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                     r["game"]["players"][pid] = {"tokens": empty_gems(), "purchased": [], "reserved": [], "nobles": []}
                     if vs_ai:
                         ai_pid = "ai"
-                        r["players"][ai_pid] = "AI"
+                        r["players"][ai_pid] = f"AI ({ai_variant})"
+                        r["ai_variant"] = ai_variant
                         g = r["game"]
                         g["players"][ai_pid] = {"tokens": empty_gems(), "purchased": [], "reserved": [], "nobles": []}
                         g["ai_player"] = ai_pid

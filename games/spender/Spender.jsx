@@ -180,6 +180,7 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,se
 .turn-badge{font-family:'Cinzel',serif;font-size:.72rem;letter-spacing:.08em;padding:4px 12px;border-radius:20px;white-space:nowrap}
 .turn-badge.mine{background:var(--gold);color:#0f0e0c}
 .turn-badge.theirs{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border)}
+.ai-variant-badge{font-family:'Cinzel',serif;font-size:.6rem;letter-spacing:.1em;padding:2px 8px;border-radius:20px;background:var(--surface2);color:var(--text-dim);border:1px solid var(--border);white-space:nowrap}
 .gap-8{display:flex;gap:8px;flex-wrap:wrap}
 
 /* ─── Player panels ─────────────────────────────────────────────────────── */
@@ -662,12 +663,12 @@ export default function SpenderApp() {
 	};
 
 	// ── Room / game actions ────────────────────────────────────────────────
-	const handleCreate = (vsAI = false) => {
+	const handleCreate = (vsAI = false, aiVariant = "A") => {
 		const newRoomId = roomCode();
 		setRoomId(newRoomId);
 		try { localStorage.setItem("spender_roomId", newRoomId); } catch {}
 		pendingActionRef.current = vsAI
-			? { action: "create", name: playerName, vs_ai: true }
+			? { action: "create", name: playerName, vs_ai: true, ai_variant: aiVariant }
 			: { action: "create", name: playerName };
 		connect(`${WS_BASE}/${newRoomId}/${myId}`);
 	};
@@ -911,8 +912,11 @@ export default function SpenderApp() {
 						<button className="btn btn-gold" onClick={() => handleCreate(false)}>
 							+ Create New Game
 						</button>
-						<button className="btn btn-outline" onClick={() => handleCreate(true)}>
-							Play vs AI
+						<button className="btn btn-outline" onClick={() => handleCreate(true, "A")}>
+							Play vs AI (A)
+						</button>
+						<button className="btn btn-outline" onClick={() => handleCreate(true, "B")}>
+							Play vs AI (B)
 						</button>
 						<button className="refresh-btn" title="Refresh" onClick={() => fetchGames(authUser)}>
 							{browserLoading ? <span className="spinner" /> : "↻"}
@@ -1121,6 +1125,9 @@ export default function SpenderApp() {
 							<span className={`turn-badge ${game.phase === "over" ? "theirs" : myTurn ? "mine" : "theirs"}`}>
 								{game.phase === "over" ? "Game Over" : myTurn ? "Your Turn" : `${roomData?.players?.[game.turn]}'s Turn`}
 							</span>
+							{roomData?.ai_variant && (
+								<span className="ai-variant-badge">AI {roomData.ai_variant}</span>
+							)}
 							{game.phase === "over"
 								? <span className="action-hint">Final board &amp; game log</span>
 								: aiThinking

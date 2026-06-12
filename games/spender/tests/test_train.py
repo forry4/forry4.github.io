@@ -182,6 +182,86 @@ def test_contested_weight_raises_card_score():
     assert on > off
 
 
+def test_contested_weight_boosts_cheap_zero_point_card():
+    # The whole point of generalizing past the old `pts > 0` gate: a cheap 0-point
+    # card the opponent can also afford (the "we both have 2 red, take the 2-red
+    # card" case) now gets a contested boost. Compare on-vs-off to isolate the term
+    # from board-dependent bonus/accessibility scoring.
+    g = train._new_game()
+    card = {"id": "L1-shared", "level": 1, "points": 0, "bonus": "green", "cost": {"red": 2}}
+    g["board"]["L1"][0] = card
+    g["players"]["p2"]["tokens"] = {**main.empty_gems(), "red": 2}  # opp can buy it → reach 1.0
+    main.WEIGHTS = dict(main.DEFAULT_WEIGHTS)
+    off = main._ai_score_card(card, g, "p1", 0.2)
+    main.WEIGHTS["contested_weight"] = 0.5
+    on = main._ai_score_card(card, g, "p1", 0.2)
+    assert on > off
+
+
+def test_noble_race_weight_boosts_card_for_contested_noble():
+    # A bonus that advances a noble we're after is worth more when the opponent is
+    # also closing on that same noble (race to claim it first). Compare on-vs-off to
+    # isolate the race term.
+    g = train._new_game()
+    g["nobles"] = [{"id": "n1", "req": {"red": 3, "green": 3}, "points": 3}]
+    # We hold 1 red; the card gives a red bonus (advances the noble for us).
+    g["players"]["p1"]["purchased"] = [{"bonus": "red", "cost": {}, "points": 0, "id": "r0"}]
+    # Opponent is deep into the same noble: 2 red + 3 green = 5/6 of the requirement.
+    g["players"]["p2"]["purchased"] = (
+        [{"bonus": "red", "cost": {}, "points": 0, "id": f"pr{i}"} for i in range(2)]
+        + [{"bonus": "green", "cost": {}, "points": 0, "id": f"pg{i}"} for i in range(3)]
+    )
+    card = {"id": "L1-red", "level": 1, "points": 0, "bonus": "red", "cost": {"white": 1}}
+    g["board"]["L1"][0] = card
+    main.WEIGHTS = dict(main.DEFAULT_WEIGHTS)
+    off = main._ai_score_card(card, g, "p1", 0.3)
+    main.WEIGHTS["noble_race_weight"] = 2.0
+    on = main._ai_score_card(card, g, "p1", 0.3)
+    assert on > off
+
+
+def test_block_prefers_cheaper_higher_value_card():
+    # Two 4-point cards the opponent can equally afford (both deficit 0). Blocking
+    # should target the cheaper one — the better deal a good player would race for —
+    # not pick arbitrarily by raw points (both are 4).
+    g = train._new_game()
+    g["board"] = {"L1": [None] * 4, "L2": [None] * 4, "L3": [None] * 4}
+    g["nobles"] = []  # isolate efficiency from noble-value confounds
+    cheap = {"id": "L2-cheap", "level": 2, "points": 4, "bonus": "red", "cost": {"white": 3}}
+    pricey = {"id": "L2-pricey", "level": 2, "points": 4, "bonus": "blue", "cost": {"white": 7}}
+    g["board"]["L2"][0] = cheap
+    g["board"]["L2"][1] = pricey
+    g["players"]["p2"]["tokens"] = {**main.empty_gems(), "white": 7}  # affords both, deficit 0
+    main.WEIGHTS = dict(main.DEFAULT_WEIGHTS)
+    main.WEIGHTS["block_efficiency_weight"] = 1.0  # deal-quality biasing on
+    assert main._ai_find_block(g, "p1", "p2", 0.8) is cheap
+
+
+def test_block_skips_cheap_lowpoint_card_unless_it_enables_a_noble():
+    # Late game: a cheap 1-point card the opponent can buy but which advances no
+    # noble is NOT worth blocking, however affordable. But the same kind of cheap
+    # card becomes a prime block if it completes a noble they're close to.
+    g = train._new_game()
+    g["board"] = {"L1": [None] * 4, "L2": [None] * 4, "L3": [None] * 4}
+    g["nobles"] = [{"id": "n1", "req": {"red": 4}, "points": 3}]
+    main.WEIGHTS = dict(main.DEFAULT_WEIGHTS)
+    main.WEIGHTS["block_noble_weight"] = 1.0  # noble-enabling denial on
+
+    trivial = {"id": "L1-triv", "level": 1, "points": 1, "bonus": "blue", "cost": {"white": 1}}
+    g["board"]["L1"][0] = trivial
+    g["players"]["p2"]["tokens"] = {**main.empty_gems(), "white": 1}
+    g["players"]["p2"]["purchased"] = []
+    assert main._ai_find_block(g, "p1", "p2", 0.8) is None  # few points, no noble → skip
+
+    # Opponent now has 3 red bonuses; a cheap 1-point red card completes the red-4 noble.
+    g["players"]["p2"]["purchased"] = [
+        {"bonus": "red", "cost": {}, "points": 0, "id": f"r{i}"} for i in range(3)
+    ]
+    enabler = {"id": "L1-noble", "level": 1, "points": 1, "bonus": "red", "cost": {"white": 1}}
+    g["board"]["L1"][1] = enabler
+    assert main._ai_find_block(g, "p1", "p2", 0.8) is enabler
+
+
 def test_rollout_blocks_when_gate_enabled():
     g = train._new_game()
     # Opponent: 13 pts (high urgency) and 4 blue bonuses, so a 6-blue card is only
