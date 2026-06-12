@@ -408,6 +408,14 @@ export default function SpenderApp() {
 	});
 	const [roomId, setRoomId] = useState("");
 	const [roomData, setRoomData] = useState(null);
+
+	// ── Derived game state (must be before useEffect hooks that use `game`) ──
+	const game = roomData?.game;
+	const me = game?.players?.[myId];
+	const myTurn = game?.turn === myId && game?.phase === "playing";
+	const myBonuses = me ? bonusesFrom(me.purchased) : emptyGems();
+	const aiThinking = game?.ai_player && game?.turn === game?.ai_player && game?.phase === "playing";
+
 	const [needsDiscard, setNeedsDiscard] = useState(false);
 	const [needsNobleChoice, setNeedsNobleChoice] = useState(false);
 	const [selectedGems, setSelectedGems] = useState([]);
@@ -736,13 +744,6 @@ export default function SpenderApp() {
 			return [...prev, color];
 		});
 	};
-
-	// ── Derived game state ─────────────────────────────────────────────────
-	const game = roomData?.game;
-	const me = game?.players?.[myId];
-	const myTurn = game?.turn === myId && game?.phase === "playing";
-	const myBonuses = me ? bonusesFrom(me.purchased) : emptyGems();
-	const aiThinking = game?.ai_player && game?.turn === game?.ai_player && game?.phase === "playing";
 
 	// ── Render helpers ─────────────────────────────────────────────────────
 	function renderCard(card, opts = {}) {
