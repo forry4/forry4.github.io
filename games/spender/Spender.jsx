@@ -472,7 +472,8 @@ export default function SpenderApp() {
 			else setScreen("waiting");
 		} else if (msg.type === "joined") {
 			setRoomData(msg.room);
-			setScreen("waiting");
+			if (msg.room?.status === "playing") setScreen("game");
+			else setScreen("waiting");
 		} else if (msg.type === "reconnected") {
 			setRoomData(msg.room);
 			if (msg.room.status === "playing") setScreen("game");

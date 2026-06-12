@@ -1478,11 +1478,15 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
         async with ROOM_LOCK:
             r = ROOMS.get(room_id)
             if r:
-                r["sockets"].pop(pid, None)
-                if not r["sockets"]:
-                    ROOMS.pop(room_id, None)
-                else:
-                    asyncio.create_task(broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)}))
+                # Only clean up if our socket hasn't been replaced by a reconnect.
+                # If it has, the new socket is already registered; removing it would
+                # delete the room and cause "game not started" on the next move.
+                if r["sockets"].get(pid) is websocket:
+                    r["sockets"].pop(pid, None)
+                    if not r["sockets"]:
+                        ROOMS.pop(room_id, None)
+                    else:
+                        asyncio.create_task(broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)}))
 
 
 # ─── HTTP endpoints ───────────────────────────────────────────────────────────
