@@ -1,0 +1,22 @@
+{
+  "point_urgency_mult": 4.0,
+  "efficiency_weight": 3.0,
+  "bonus_l1": 0.3,
+  "bonus_l2": 0.5,
+  "bonus_l3": 0.75,
+  "bonus_reserved": 0.0131,
+  "bonus_target_pts": 0.5,
+  "bonus_urgency_decay": 0.7862,
+  "noble_card": 0.7275,
+  "noble_scarcity": 0.0,
+  "contested_weight": 0.0,
+  "access_base": 0.3,
+  "access_urgency": 0.0,
+  "rollout_reserve_threshold": 8.7865,
+  "block_urgency_gate": 1.1,
+  "pos_points": 0.6521,
+  "pos_buyable": 0.2875,
+  "pos_noble": 2.1915,
+  "pos_bonus_count": 0.905,
+  "pos_noble_scarcity": 0.0
+}
