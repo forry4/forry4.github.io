@@ -262,6 +262,86 @@ def test_block_skips_cheap_lowpoint_card_unless_it_enables_a_noble():
     assert main._ai_find_block(g, "p1", "p2", 0.8) is enabler
 
 
+def test_noble_block_futile_when_opponent_has_other_color_outlets():
+    # The white-card example: opponent is one red away from a noble, but if TWO red
+    # cards are on the board, denying one is futile — so noble-block credit is zero
+    # and the cheap 1-point enabler is no longer worth blocking.
+    g = train._new_game()
+    g["board"] = {"L1": [None] * 4, "L2": [None] * 4, "L3": [None] * 4}
+    g["nobles"] = [{"id": "n1", "req": {"red": 4}, "points": 3}]
+    g["players"]["p2"]["purchased"] = [
+        {"bonus": "red", "cost": {}, "points": 0, "id": f"r{i}"} for i in range(3)
+    ]
+    g["players"]["p2"]["tokens"] = {**main.empty_gems(), "white": 2}
+    main.WEIGHTS = dict(main.DEFAULT_WEIGHTS)
+    main.WEIGHTS["block_noble_weight"] = 1.0
+
+    enabler = {"id": "L1-r1", "level": 1, "points": 1, "bonus": "red", "cost": {"white": 1}}
+    g["board"]["L1"][0] = enabler
+    assert main._opp_noble_value(g, "p2", enabler) > 0  # lone red outlet → worth denying
+
+    g["board"]["L1"][1] = {"id": "L1-r2", "level": 1, "points": 0, "bonus": "red", "cost": {"white": 1}}
+    assert main._opp_noble_value(g, "p2", enabler) == 0  # two red outlets → futile
+    assert main._ai_find_block(g, "p1", "p2", 0.8) is None
+
+
+def test_lose_prevention_buys_or_reserves_opponent_winning_card():
+    # Opponent at 13 points can buy a 2-point board card next turn to reach 15.
+    g = train._new_game()
+    g["board"] = {"L1": [None] * 4, "L2": [None] * 4, "L3": [None] * 4}
+    g["nobles"] = []
+    g["players"]["p2"]["purchased"] = [
+        {"bonus": "white", "cost": {}, "points": 3, "id": f"w{i}"} for i in range(4)
+    ] + [{"bonus": "white", "cost": {}, "points": 1, "id": "w4"}]  # 13 points
+    g["players"]["p2"]["tokens"] = {**main.empty_gems(), "blue": 2}
+    win_card = {"id": "L1-win", "level": 1, "points": 2, "bonus": "red", "cost": {"blue": 2}}
+    g["board"]["L1"][0] = win_card
+    assert main._opp_winning_buys(g, "p2") == [win_card]
+
+    # We can afford it → buy it (denies + scores).
+    g["players"]["p1"]["tokens"] = {**main.empty_gems(), "blue": 2}
+    g["players"]["p1"]["purchased"] = []
+    assert main._lose_prevention_move(g, "p1") == {"type": "buy", "card_id": "L1-win"}
+
+    # We can't afford it but have a reserve slot → reserve it to deny.
+    g["players"]["p1"]["tokens"] = main.empty_gems()
+    assert main._lose_prevention_move(g, "p1") == {"type": "reserve", "card_id": "L1-win"}
+
+
+def test_gold_reserve_targets_steep_single_color_card():
+    # A 5-point card costing 7 white, we hold 2 white (and no white bonus): one steep
+    # colour is the bottleneck (others covered) and we lack gold to bridge it → reserve
+    # to bank a wild. When the deficit is spread across colours, or we already hold
+    # enough gold, gem-taking is better and it should not fire.
+    g = train._new_game()
+    g["board"] = {"L1": [None] * 4, "L2": [None] * 4, "L3": [None] * 4}
+    g["bank"]["gold"] = 3
+    steep = {"id": "L3-steep", "level": 3, "points": 5, "bonus": "red", "cost": {"white": 7}}
+    g["board"]["L3"][0] = steep
+    ps = g["players"]["p1"]
+    ps["purchased"] = []
+    ps["reserved"] = []
+    ps["tokens"] = {**main.empty_gems(), "white": 2}  # short 5 white, 0 gold
+    assert main._ai_find_gold_reserve(g, "p1") is steep
+
+    ps["tokens"] = {**main.empty_gems(), "white": 2, "gold": 5}  # enough gold already
+    assert main._ai_find_gold_reserve(g, "p1") is None
+
+    # Deficit spread across colours (not a single steep bottleneck) → don't gold-reserve.
+    spread = {"id": "L2-spread", "level": 2, "points": 3, "bonus": "red", "cost": {"white": 3, "blue": 3}}
+    g["board"]["L3"][0] = None
+    g["board"]["L2"][0] = spread
+    ps["tokens"] = main.empty_gems()
+    assert main._ai_find_gold_reserve(g, "p1") is None
+
+    # No gold in the bank → reserving yields no wild, so it's pointless.
+    g["board"]["L2"][0] = None
+    g["board"]["L3"][0] = steep
+    g["bank"]["gold"] = 0
+    ps["tokens"] = {**main.empty_gems(), "white": 2}
+    assert main._ai_find_gold_reserve(g, "p1") is None
+
+
 def test_rollout_blocks_when_gate_enabled():
     g = train._new_game()
     # Opponent: 13 pts (high urgency) and 4 blue bonuses, so a 6-blue card is only

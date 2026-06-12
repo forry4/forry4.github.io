@@ -541,6 +541,8 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "block_urgency_gate": 1.1,     # urgency at/above which the rollout blocks (1.1 = off; lower to enable)
     "block_efficiency_weight": 0.0,  # how much a block target's points-per-gem deal upweights it (block the cheap high-point cards, not any 3-pointer). 0 = original raw-points ranking.
     "block_noble_weight": 0.0,     # how much a block target's noble-enabling value counts (deny cards that hand the opponent a noble they're close to). 0 = original points-only blocking. Both block_* extras hand-tuned: NOT in train.py CARD_KEYS, self-play can't judge blocking.
+    "lose_prevention": 0.0,        # 1 = if we can't win this turn but the opponent can buy a board card next turn to reach 15, buy/reserve that card to deny the loss. 0 = off. Hand-tuned safety net.
+    "gold_reserve": 0.0,           # 1 = reserve a steep single-colour high-value target to bank a gold (wild) that helps fill the hard-to-accumulate colour. 0 = off. Hand-tuned.
     # _pos_score — truncated-position evaluator (TD-learned)
     "pos_points": 1.0,             # weight on realised points
     "pos_buyable": 0.5,            # weight on immediately-buyable points (momentum)
@@ -554,51 +556,49 @@ WEIGHTS: dict[str, float] = dict(DEFAULT_WEIGHTS)
 # Path can be overridden for playtesting (e.g. SPENDER_WEIGHTS=weights.candidate.json,
 # or a nonexistent path to force the original defaults).
 WEIGHTS_PATH = os.environ.get("SPENDER_WEIGHTS") or os.path.join(os.path.dirname(__file__), "weights.json")
-_WEIGHTS_B_PATH = os.path.join(os.path.dirname(__file__), "weights.tactics.json")
 
-# Named weight variants available for per-game selection. "A" is always the
-# default deployed weights; "B" is the tactics variant (loaded at startup if the
-# file exists, otherwise falls back to defaults). Populated by load_weights().
+# Named weight variants available for per-game selection. "A" is the default
+# deployed weights (env-overridable for playtest scripts); the rest load from the
+# files below at startup, each falling back to A if its file is absent. Populated
+# by load_weights().
 WEIGHT_VARIANTS: dict[str, dict[str, float]] = {}
+VARIANT_FILES: dict[str, str] = {
+    "B": "weights.tactics.json",
+    "C": "weights.tactics_c.json",
+}
 
 
-def load_weights(path: str | None = None) -> dict[str, float]:
-    """Merge weights.json (if present) over the defaults into the global WEIGHTS.
-    Unknown keys are ignored; missing keys keep their default. Safe to call at
-    import; never raises on a missing or malformed file."""
-    global WEIGHTS
-    merged = dict(DEFAULT_WEIGHTS)
-    p = path or WEIGHTS_PATH
+def _merge_weights_file(path: str, fallback: dict[str, float]) -> dict[str, float]:
+    """Merge a weights JSON over `fallback`. Unknown keys ignored, missing keys
+    keep the fallback value; a missing or malformed file returns a copy of
+    fallback. Never raises."""
+    merged = dict(fallback)
     try:
-        with open(p, "r") as f:
+        with open(path, "r") as f:
             data = json.load(f)
         if isinstance(data, dict):
             for k, v in data.items():
                 if k in DEFAULT_WEIGHTS and isinstance(v, (int, float)):
                     merged[k] = float(v)
-            LOG.info("loaded AI weights from %s", p)
+            LOG.info("loaded AI weights from %s", path)
     except FileNotFoundError:
-        pass
-    except Exception as e:  # malformed file — fall back to defaults
-        LOG.warning("could not load weights from %s: %s", p, e)
-    WEIGHTS = merged
-    WEIGHT_VARIANTS["A"] = merged
-    # Load B variant from weights.tactics.json; fall back to A if absent.
-    merged_b = dict(DEFAULT_WEIGHTS)
-    try:
-        with open(_WEIGHTS_B_PATH, "r") as f:
-            data_b = json.load(f)
-        if isinstance(data_b, dict):
-            for k, v in data_b.items():
-                if k in DEFAULT_WEIGHTS and isinstance(v, (int, float)):
-                    merged_b[k] = float(v)
-        LOG.info("loaded AI variant B weights from %s", _WEIGHTS_B_PATH)
-    except FileNotFoundError:
-        merged_b = dict(merged)  # B = A if file missing
-    except Exception as e:
-        LOG.warning("could not load variant B weights: %s", e)
-        merged_b = dict(merged)
-    WEIGHT_VARIANTS["B"] = merged_b
+        return dict(fallback)
+    except Exception as e:  # malformed file — fall back
+        LOG.warning("could not load weights from %s: %s", path, e)
+        return dict(fallback)
+    return merged
+
+
+def load_weights(path: str | None = None) -> dict[str, float]:
+    """Load the deployed weights into the global WEIGHTS (variant A) and load every
+    named variant in VARIANT_FILES. Safe to call at import; never raises."""
+    global WEIGHTS
+    WEIGHTS = _merge_weights_file(path or WEIGHTS_PATH, DEFAULT_WEIGHTS)
+    WEIGHT_VARIANTS.clear()
+    WEIGHT_VARIANTS["A"] = WEIGHTS
+    here = os.path.dirname(__file__)
+    for name, fname in VARIANT_FILES.items():
+        WEIGHT_VARIANTS[name] = _merge_weights_file(os.path.join(here, fname), WEIGHTS)
     return WEIGHTS
 
 
@@ -618,6 +618,8 @@ def _game_urgency(game: dict) -> float:
 # strongly that concept influences decisions (so they stay fixed; only weights tune).
 _TARGET_MIN_POINTS = 3        # only 3+ point cards count as race targets
 _TARGET_MIN_EFFICIENCY = 0.4  # points per gem of raw cost to qualify as efficient
+_GOLD_RESERVE_MIN_DEFICIT = 3  # a single-colour token shortfall this large is "steep"
+                               # (slow to fill from the bank → reserve to bank gold)
 
 
 def _card_efficiency(card: dict) -> float:
@@ -868,6 +870,49 @@ def _ai_score_card(card: dict, game: dict, ai_pid: str, urgency: float) -> float
 
 
 
+def _opp_winning_buys(game: dict, opp_pid: str) -> list[dict]:
+    """Board cards the opponent could buy on their next turn to reach 15+ and win,
+    given their current tokens/bonuses (highest-point first). These are the cards we
+    can deny by buying or reserving them. A winning card already in their reserved
+    hand is unblockable and is not returned. (Noble-assisted wins are not modelled —
+    this is a conservative safety net that prefers under- to over-triggering.)"""
+    opp = game["players"][opp_pid]
+    opp_pts = _calc_points(opp)
+    opp_bonuses = bonuses_from(opp["purchased"])
+    winners = []
+    for lk in ("L1", "L2", "L3"):
+        for card in (game["board"].get(lk) or []):
+            if not card:
+                continue
+            if (card.get("points", 0) and opp_pts + card["points"] >= 15
+                    and can_afford(card["cost"], opp["tokens"], opp_bonuses)):
+                winners.append(card)
+    winners.sort(key=lambda c: -c["points"])
+    return winners
+
+
+def _lose_prevention_move(game: dict, ai_pid: str) -> dict | None:
+    """If the opponent can win next turn by buying a board card and we can't win this
+    turn (the caller checks that), return a move that denies it: buy the card if we
+    can afford it (denies + scores), else reserve it. None if nothing to deny or no
+    reserve slot. Only the single most valuable threat is denied — if there are
+    several distinct winning cards we cannot stop them all."""
+    opp_pid = next((p for p in game["order"] if p != ai_pid), None)
+    if not opp_pid:
+        return None
+    winners = _opp_winning_buys(game, opp_pid)
+    if not winners:
+        return None
+    ps = game["players"][ai_pid]
+    bonuses = bonuses_from(ps["purchased"])
+    for card in winners:  # prefer buying a threat (denies AND scores) over reserving
+        if can_afford(card["cost"], ps["tokens"], bonuses):
+            return {"type": "buy", "card_id": card["id"]}
+    if len(ps["reserved"]) < 3:
+        return {"type": "reserve", "card_id": winners[0]["id"]}
+    return None
+
+
 def _ai_discard_one(game: dict, ai_pid: str) -> None:
     ps = game["players"][ai_pid]
     bonuses = bonuses_from(ps["purchased"])
@@ -900,11 +945,37 @@ def _opp_noble_progress(game: dict, opp_pid: str, noble: dict) -> float:
     return sum(min(opp_bonuses.get(c, 0), n) for c, n in req.items()) / req_total
 
 
+def _opp_color_outlets(game: dict, opp_pid: str, color: str, max_deficit: int = 3) -> int:
+    """How many board cards grant `color` as a bonus that the opponent is within
+    `max_deficit` gems of affording. Used to tell whether denying one such card
+    actually blocks a noble: if the opponent has several outlets for the colour they
+    still need, reserving one is futile (the white-card example)."""
+    opp = game["players"][opp_pid]
+    opp_bonuses = bonuses_from(opp["purchased"])
+    count = 0
+    for lk in ("L1", "L2", "L3"):
+        for card in (game["board"].get(lk) or []):
+            if not card or card.get("bonus") != color:
+                continue
+            deficit = 0
+            for c, cost in card["cost"].items():
+                if c == "gold":
+                    continue
+                effective = max(0, cost - opp_bonuses.get(c, 0))
+                deficit += max(0, effective - opp["tokens"].get(c, 0))
+            deficit = max(0, deficit - opp["tokens"].get("gold", 0))
+            if deficit <= max_deficit:
+                count += 1
+    return count
+
+
 def _opp_noble_value(game: dict, opp_pid: str, card: dict) -> float:
     """Noble points the opponent gains from this card's bonus, weighted by how close
     they already are to that noble. A card that hands a near-complete noble (≈3 free
     points) is worth denying even if the card itself is worth few points; a card
-    advancing only a distant noble is not."""
+    advancing only a distant noble is not. Denial is only credited when this card is
+    the opponent's *only* close source of the needed colour — if other board cards
+    grant it, blocking one does not stop them, so it earns nothing."""
     bonus_color = card.get("bonus")
     if not bonus_color:
         return 0.0
@@ -914,7 +985,9 @@ def _opp_noble_value(game: dict, opp_pid: str, card: dict) -> float:
         req = noble.get("req", {})
         need = req.get(bonus_color, 0)
         if need and opp_bonuses.get(bonus_color, 0) < need:
-            total += noble["points"] * _opp_noble_progress(game, opp_pid, noble)
+            # Only worth blocking if this is their lone close outlet for the colour.
+            if _opp_color_outlets(game, opp_pid, bonus_color) <= 1:
+                total += noble["points"] * _opp_noble_progress(game, opp_pid, noble)
     return total
 
 
@@ -987,6 +1060,47 @@ def _ai_find_reserve_target(game: dict, ai_pid: str, urgency: float) -> dict | N
     return best if best_score > 4.0 else None
 
 
+def _ai_find_gold_reserve(game: dict, ai_pid: str) -> dict | None:
+    """A high-value target whose cost is concentrated in one colour we're badly short
+    on: reserving it banks a gold (wild) that helps fill that hard-to-accumulate gap
+    (you can only pull two of a colour per turn, and the bank runs dry). Returns the
+    best such board card to reserve, or None. Only fires when one colour is the
+    bottleneck (the rest of the cost is nearly covered) and we still lack the gold to
+    bridge it — otherwise plain gem-taking is better. Gated by the gold_reserve weight."""
+    ps = game["players"][ai_pid]
+    if len(ps["reserved"]) >= 3 or game["bank"].get("gold", 0) <= 0:
+        return None  # no reserve slot, or reserving would yield no gold
+    bonuses = bonuses_from(ps["purchased"])
+    gold = ps["tokens"].get("gold", 0)
+    already = {c["id"] for c in ps["reserved"]}
+    best: dict | None = None
+    best_score = 0.0
+    for lk in ("L3", "L2"):
+        for card in (game["board"].get(lk) or []):
+            if not card or card.get("points", 0) < _TARGET_MIN_POINTS or card["id"] in already:
+                continue
+            max_color_short = 0
+            total_short = 0
+            for color, cost in card["cost"].items():
+                if color not in GEM_COLORS:
+                    continue
+                eff = max(0, cost - bonuses.get(color, 0))
+                short = max(0, eff - ps["tokens"].get(color, 0))
+                total_short += short
+                if short > max_color_short:
+                    max_color_short = short
+            # One steep colour is the bottleneck (others nearly covered) and we still
+            # lack the gold to bridge it — exactly when banking a wild beats taking gems.
+            if (max_color_short >= _GOLD_RESERVE_MIN_DEFICIT
+                    and total_short - max_color_short <= 2
+                    and gold < max_color_short):
+                score = card["points"] * max_color_short
+                if score > best_score:
+                    best_score = score
+                    best = card
+    return best
+
+
 # ─── MCTS ─────────────────────────────────────────────────────────────────────
 
 def _get_all_moves(game: dict, pid: str) -> list[dict]:
@@ -1044,6 +1158,11 @@ def _get_all_moves(game: dict, pid: str) -> list[dict]:
             block = _ai_find_block(game, pid, opp_pid, urgency)
             if block and block["id"] not in reserve_ids:
                 moves.append({"type": "reserve", "card_id": block["id"]})
+        if WEIGHTS["gold_reserve"]:
+            gold_target = _ai_find_gold_reserve(game, pid)
+            if gold_target and gold_target["id"] not in reserve_ids:
+                moves.append({"type": "reserve", "card_id": gold_target["id"]})
+                reserve_ids.add(gold_target["id"])
 
     return moves or [{"type": "take_gems", "colors": []}]
 
@@ -1172,6 +1291,13 @@ def _fast_rollout_move(game: dict, pid: str) -> dict:
                     best_reserve = card
         if best_reserve and best_reserve_score > WEIGHTS["rollout_reserve_threshold"]:
             return {"type": "reserve", "card_id": best_reserve["id"]}
+
+    # 2b. Reserve a steep single-colour target to bank gold instead of slowly taking
+    # gems toward it (the hard-to-accumulate colour the wild gold helps bridge).
+    if WEIGHTS["gold_reserve"] and len(ps["reserved"]) < 3:
+        gold_target = _ai_find_gold_reserve(game, pid)
+        if gold_target:
+            return {"type": "reserve", "card_id": gold_target["id"]}
 
     # 3. Take most-needed gems
     token_total = sum(ps["tokens"].values())
@@ -1345,6 +1471,14 @@ def _mcts_choose_move_impl(game: dict, ai_pid: str, time_limit: float,
             w = g.get("winner")
             if w == ai_pid or (isinstance(w, list) and ai_pid in w):
                 return mv
+
+    # We can't win this turn (no winning move above). If the opponent could win on
+    # their next turn by buying a board card, deny it (buy or reserve) — losing is
+    # worse than any line MCTS would otherwise explore.
+    if WEIGHTS["lose_prevention"]:
+        deny = _lose_prevention_move(game, ai_pid)
+        if deny is not None:
+            return deny
 
     root = _MCTSNode(copy.deepcopy(game))
     deadline = time.time() + time_limit
@@ -1534,6 +1668,8 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                 name = msg.get("name") or pid
                 vs_ai = bool(msg.get("vs_ai"))
                 ai_variant = msg.get("ai_variant", "A") if vs_ai else None
+                if vs_ai and ai_variant not in WEIGHT_VARIANTS:
+                    ai_variant = "A"
                 async with ROOM_LOCK:
                     r = ROOMS.setdefault(room_id, {"players": {}, "sockets": {}, "status": "open", "game": None, "host": None})
                     r["players"][pid] = name
