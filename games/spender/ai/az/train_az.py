@@ -126,7 +126,10 @@ def main():
                     help="0..1 blend of point-margin into the value target (breaks the "
                          "0-0 fewest-cards self-play equilibrium); 0 = pure win/loss")
     ap.add_argument("--shaping-scale", type=float, default=6.0,
-                    help="point-margin divisor inside tanh for reward shaping")
+                    help="point-margin divisor for reward shaping (use ~15 for linear)")
+    ap.add_argument("--shaping-mode", default="tanh", choices=["tanh", "linear"],
+                    help="tanh saturates at large deficits (gradient dies); linear keeps a "
+                         "constant per-point gradient — better when the net loses most games")
     ap.add_argument("--workers", type=int, default=1,
                     help="parallel CPU self-play worker processes "
                          "(1 = single-process torch path; >1 fans games across cores)")
@@ -197,7 +200,7 @@ def main():
                       f"pool={len(pool_files)} opp_iters={args.opp_iters}")
     print(f"[train_az] device={args.device} sims={args.sims} games/iter={args.games} "
           f"parallel={args.parallel} workers={args.workers} | shaping={args.reward_shaping} "
-          f"(scale={args.shaping_scale}) temp={args.temperature}x{args.temp_moves} "
+          f"({args.shaping_mode} scale={args.shaping_scale}) temp={args.temperature}x{args.temp_moves} "
           f"dir_eps={args.dirichlet_eps}{league_msg}", flush=True)
 
     for it in range(start_iter, args.iters):
@@ -215,7 +218,7 @@ def main():
                     worker_parallel=args.worker_parallel, temperature=args.temperature,
                     temp_moves=args.temp_moves, dirichlet_eps=args.dirichlet_eps,
                     reward_shaping=args.reward_shaping, shaping_scale=args.shaping_scale,
-                    seed=1000 + it)
+                    shaping_mode=args.shaping_mode, seed=1000 + it)
                 parts_f.append(sf); parts_p.append(sp); parts_z.append(sz)
                 winpts = st["avg_winpts"]
             scores = {}
@@ -224,7 +227,8 @@ def main():
                     pool, work_best, assignments, n_sims=args.sims,
                     temperature=args.temperature, temp_moves=args.temp_moves,
                     dirichlet_eps=args.dirichlet_eps, reward_shaping=args.reward_shaping,
-                    shaping_scale=args.shaping_scale, seed=5000 + it)
+                    shaping_scale=args.shaping_scale, shaping_mode=args.shaping_mode,
+                    seed=5000 + it)
                 parts_f.append(lf); parts_p.append(lp); parts_z.append(lz)
             feats = np.concatenate(parts_f)
             pis = np.concatenate(parts_p)
@@ -242,14 +246,16 @@ def main():
                     worker_parallel=args.worker_parallel,
                     temperature=args.temperature, temp_moves=args.temp_moves,
                     dirichlet_eps=args.dirichlet_eps, reward_shaping=args.reward_shaping,
-                    shaping_scale=args.shaping_scale, seed=1000 + it)
+                    shaping_scale=args.shaping_scale, shaping_mode=args.shaping_mode,
+                    seed=1000 + it)
             else:
                 evaluate = make_evaluator(best, args.device)
                 (feats, pis, zs), st = selfplay.run_games(
                     args.games, evaluate, n_sims=args.sims, max_parallel=args.parallel,
                     temperature=args.temperature, temp_moves=args.temp_moves,
                     dirichlet_eps=args.dirichlet_eps, reward_shaping=args.reward_shaping,
-                    shaping_scale=args.shaping_scale, seed=1000 + it)
+                    shaping_scale=args.shaping_scale, shaping_mode=args.shaping_mode,
+                    seed=1000 + it)
             for k in range(len(zs)):
                 buffer.append((feats[k], pis[k], zs[k]))
             print(f"[iter {it}] selfplay: {st['games']} games, {len(zs)} positions, "

@@ -32,6 +32,7 @@ from . import features as F
 from .arena import _heuristic_action, _load_opp_weights
 from .infer_np import load_evaluator
 from .mcts import Search, pick_action
+from .selfplay import shaped_value
 
 
 def _az_opponent_action(evaluate, s: E.State, rng: random.Random, n_sims: int) -> int:
@@ -49,7 +50,7 @@ def play_recorded_game(net_eval, opponent_fn, net_seat: int, rng: random.Random,
                        c_puct: float = 2.0, dirichlet_alpha: float = 0.5,
                        dirichlet_eps: float = 0.25, add_noise: bool = True,
                        max_plies: int = 400, reward_shaping: float = 0.5,
-                       shaping_scale: float = 6.0):
+                       shaping_scale: float = 6.0, shaping_mode: str = "tanh"):
     """Play one game; record only the net's decisions. Returns
     (feats[k,F], pis[k,A], zs[k], result) where result is the net's game score
     in {0,0.5,1} and net/opp final points for stats."""
@@ -85,11 +86,8 @@ def play_recorded_game(net_eval, opponent_fn, net_seat: int, rng: random.Random,
     feats, pis, zs = [], [], []
     for f, pi, to_play in records:
         terminal = 0.0 if z_for is None else (1.0 if to_play == z_for else -1.0)
-        if reward_shaping > 0.0:
-            margin = s.points[to_play] - s.points[1 - to_play]
-            z = (1.0 - reward_shaping) * terminal + reward_shaping * math.tanh(margin / shaping_scale)
-        else:
-            z = terminal
+        margin = s.points[to_play] - s.points[1 - to_play]
+        z = shaped_value(terminal, margin, reward_shaping, shaping_scale, shaping_mode)
         feats.append(f)
         pis.append(pi)
         zs.append(z)
@@ -124,7 +122,8 @@ def _league_worker(task: dict):
             n_sims=task["n_sims"], temperature=task["temperature"],
             temp_moves=task["temp_moves"], dirichlet_eps=task["dirichlet_eps"],
             add_noise=task["add_noise"], reward_shaping=task["reward_shaping"],
-            shaping_scale=task["shaping_scale"])
+            shaping_scale=task["shaping_scale"],
+            shaping_mode=task.get("shaping_mode", "tanh"))
         feats_all.extend(f)
         pis_all.extend(p)
         zs_all.extend(z)
@@ -141,7 +140,7 @@ def run_league_games(pool, net_npz: str, assignments: list[tuple[dict, int]], *,
                      n_sims: int = 128, temperature: float = 1.0, temp_moves: int = 20,
                      dirichlet_eps: float = 0.35, add_noise: bool = True,
                      reward_shaping: float = 0.5, shaping_scale: float = 6.0,
-                     seed: int = 0):
+                     shaping_mode: str = "tanh", seed: int = 0):
     """Fan league games across the pool. `assignments` is a list of
     (opponent_spec, n_games); each is split into worker-sized sub-tasks.
     Returns (examples, per_opponent_scores) where per_opponent_scores maps
@@ -160,7 +159,7 @@ def run_league_games(pool, net_npz: str, assignments: list[tuple[dict, int]], *,
                 "temperature": temperature, "temp_moves": temp_moves,
                 "dirichlet_eps": dirichlet_eps, "add_noise": add_noise,
                 "reward_shaping": reward_shaping, "shaping_scale": shaping_scale,
-                "seed": seed + si * 99989,
+                "shaping_mode": shaping_mode, "seed": seed + si * 99989,
             })
             si += 1
     t0 = time.time()

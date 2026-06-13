@@ -20,6 +20,27 @@ from . import features as F
 from .mcts import Search, pick_action
 
 
+def shaped_value(terminal: float, margin: int, weight: float, scale: float,
+                 mode: str = "tanh") -> float:
+    """Blend terminal win/loss (+/-1, 0 draw) with a point-margin term.
+
+    mode="tanh": shaped = tanh(margin/scale) — bounded but SATURATES, so the
+      per-point gradient vanishes at large deficits (a net stuck losing by ~12
+      gets almost no signal to improve). Kept for back-compat.
+    mode="linear": shaped = clamp(margin/scale, -1, 1) — constant per-point
+      gradient until the clamp; the right choice when the net loses most games
+      and needs a live signal to claw the margin back. Use scale >= the typical
+      deficit (~15) so the operating range isn't clamped flat.
+    """
+    if weight <= 0.0:
+        return terminal
+    if mode == "linear":
+        shaped = max(-1.0, min(1.0, margin / scale))
+    else:
+        shaped = math.tanh(margin / scale)
+    return (1.0 - weight) * terminal + weight * shaped
+
+
 class _Game:
     __slots__ = ("state", "search", "sims_done", "records", "plies", "rng",
                  "seat_of_a", "moves_made")
@@ -41,7 +62,8 @@ def run_games(n_games: int, eval_a, eval_b=None, *,
               c_puct: float = 2.0, dirichlet_alpha: float = 0.5,
               dirichlet_eps: float = 0.25, add_noise: bool = True,
               max_plies: int = 400, seed: int = 0, record: bool = True,
-              reward_shaping: float = 0.0, shaping_scale: float = 6.0):
+              reward_shaping: float = 0.0, shaping_scale: float = 6.0,
+              shaping_mode: str = "tanh"):
     """Play n_games. If eval_b is None this is self-play with eval_a.
     Otherwise A plays B (A's seat alternates per game; no recording).
 
@@ -98,12 +120,9 @@ def run_games(n_games: int, eval_a, eval_b=None, *,
         if record:
             for feats, pi, to_play in g.records:
                 terminal = 0.0 if z_for is None else (1.0 if to_play == z_for else -1.0)
-                if reward_shaping > 0.0:
-                    margin = s.points[to_play] - s.points[1 - to_play]
-                    shaped = math.tanh(margin / shaping_scale)
-                    z = (1.0 - reward_shaping) * terminal + reward_shaping * shaped
-                else:
-                    z = terminal
+                margin = s.points[to_play] - s.points[1 - to_play]
+                z = shaped_value(terminal, margin, reward_shaping, shaping_scale,
+                                 shaping_mode)
                 feats_out.append(feats)
                 pis_out.append(pi)
                 zs_out.append(z)
@@ -223,7 +242,8 @@ def _run_chunk(task: dict):
         c_puct=task["c_puct"], dirichlet_alpha=task["dirichlet_alpha"],
         dirichlet_eps=task["dirichlet_eps"], add_noise=task["add_noise"],
         max_plies=task["max_plies"], seed=task["seed"], record=task["record"],
-        reward_shaping=task["reward_shaping"], shaping_scale=task["shaping_scale"])
+        reward_shaping=task["reward_shaping"], shaping_scale=task["shaping_scale"],
+        shaping_mode=task.get("shaping_mode", "tanh"))
     return feats, pis, zs, stats
 
 
@@ -234,7 +254,8 @@ def run_games_parallel(pool, n_workers: int, npz_a: str, n_games: int, *,
                        c_puct: float = 2.0, dirichlet_alpha: float = 0.5,
                        dirichlet_eps: float = 0.25, add_noise: bool = True,
                        max_plies: int = 400, seed: int = 0, record: bool = True,
-                       reward_shaping: float = 0.0, shaping_scale: float = 6.0):
+                       reward_shaping: float = 0.0, shaping_scale: float = 6.0,
+                       shaping_mode: str = "tanh"):
     """Fan `n_games` across `n_workers` pool processes, each running run_games on
     a chunk. Same (examples, stats) contract as run_games; stats are merged
     (games summed, the rest game-weighted, secs = wall-clock of the fan-out).
@@ -254,6 +275,7 @@ def run_games_parallel(pool, n_workers: int, npz_a: str, n_games: int, *,
             "dirichlet_eps": dirichlet_eps, "add_noise": add_noise,
             "max_plies": max_plies, "seed": seed + i * 999331, "record": record,
             "reward_shaping": reward_shaping, "shaping_scale": shaping_scale,
+            "shaping_mode": shaping_mode,
         })
     t0 = time.time()
     results = pool.map(_run_chunk, tasks)
