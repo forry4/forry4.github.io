@@ -142,6 +142,8 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,se
 .gem-stack:hover .gem-token{transform:scale(1.08)}
 .gem-stack.selected .gem-token{box-shadow:0 0 0 2px var(--gold-light),0 0 12px rgba(232,201,106,.3)}
 .gem-stack.disabled{opacity:.35;cursor:not-allowed}
+.gem-stack.reserve-ready .gem-token{box-shadow:0 0 0 2px var(--gold-light),0 0 14px rgba(232,201,106,.6);animation:reserve-pulse 1.1s ease-in-out infinite}
+@keyframes reserve-pulse{0%,100%{box-shadow:0 0 0 2px var(--gold-light),0 0 8px rgba(232,201,106,.45)}50%{box-shadow:0 0 0 2px var(--gold-light),0 0 18px rgba(232,201,106,.85)}}
 .gem-token{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Cinzel',serif;font-weight:700;font-size:.95rem;border:2px solid rgba(255,255,255,.12);transition:all .12s}
 .gem-count{font-size:.75rem;color:var(--text-dim);font-family:'Cinzel',serif}
 
@@ -723,6 +725,15 @@ export default function SpenderApp() {
 		setSelectedCard(null);
 	};
 
+	// Reserve the currently-selected card (board or deck) — triggered by clicking
+	// the gold coin (you take a gold token when you reserve).
+	const handleReserveSelected = () => {
+		if (!myTurn || !selectedCard || selectedCard.source === "reserved") return;
+		if ((me?.reserved?.length || 0) >= 3) return;
+		if (selectedCard.source === "deck") handleReserve(null, selectedCard.deckLevel);
+		else handleReserve(selectedCard.card);
+	};
+
 	const handleBuy = (card) => {
 		if (!myTurn) return;
 		sendMove({ type: "buy", card_id: card.id });
@@ -823,13 +834,17 @@ export default function SpenderApp() {
 
 	function getHint() {
 		if (!myTurn) return `Waiting for ${roomData?.players?.[game?.turn] || "opponent"}…`;
-		if (selectedCard?.source === "deck") return `Reserve blind from Level ${selectedCard.deckLevel} deck?`;
+		const slotsFull = (me?.reserved?.length || 0) >= 3;
+		if (selectedCard?.source === "deck")
+			return slotsFull ? "Reserved slots full (3/3)" : `Click the gold coin to reserve blind from Level ${selectedCard.deckLevel} deck`;
 		if (selectedCard) {
 			const affordable = canAfford(selectedCard.card.cost, me?.tokens || emptyGems(), myBonuses);
-			return affordable ? "Buy or reserve this card" : "Reserve this card (can't afford yet)";
+			const canReserve = selectedCard.source !== "reserved" && !slotsFull;
+			if (affordable) return canReserve ? "Buy this card, or click the gold coin to reserve" : "Buy this card";
+			return canReserve ? "Click the gold coin to reserve this card" : "Can't afford yet";
 		}
 		if (selectedGems.length > 0) return `${selectedGems.length} gem(s) selected — confirm to take`;
-		return "Select gems to take, or click a card to buy/reserve";
+		return "Take gems, or click a card then the gold coin to reserve";
 	}
 
 	// ── Screens ────────────────────────────────────────────────────────────
@@ -1153,9 +1168,8 @@ export default function SpenderApp() {
 							)}
 							{myTurn && selectedCard?.source === "deck" && (
 								<div className="gap-8">
-									{me?.reserved?.length < 3
-										? <button className="btn btn-outline" onClick={() => { handleReserve(null, selectedCard.deckLevel); setSelectedCard(null); }}>Reserve from Deck</button>
-										: <span style={{ color: "var(--text-muted)", fontSize: ".82rem" }}>Reserved slots full</span>
+									{me?.reserved?.length >= 3 &&
+										<span style={{ color: "var(--text-muted)", fontSize: ".82rem" }}>Reserved slots full</span>
 									}
 									<button className="btn btn-ghost" onClick={() => setSelectedCard(null)}>✕</button>
 								</div>
@@ -1165,9 +1179,6 @@ export default function SpenderApp() {
 								return (
 									<div className="gap-8">
 										{affordable && <button className="btn btn-gold" onClick={() => handleBuy(selectedCard.card)}>Buy</button>}
-										{selectedCard.source !== "reserved" && me?.reserved?.length < 3 && (
-											<button className="btn btn-outline" onClick={() => handleReserve(selectedCard.card)}>Reserve</button>
-										)}
 										<button className="btn btn-ghost" onClick={() => setSelectedCard(null)}>✕</button>
 									</div>
 								);
@@ -1181,11 +1192,19 @@ export default function SpenderApp() {
 									const count = game.bank[c] || 0;
 									const isGold = c === "gold";
 									const selCount = selectedGems.filter(x => x === c).length;
+									// Gold coin doubles as the "reserve" button: lit when a board/deck
+									// card is selected and a reserve slot is free (gold bank can be 0 —
+									// you still reserve, just without gaining a gold).
+									const goldReserveReady = isGold && myTurn && selectedCard
+										&& selectedCard.source !== "reserved" && (me?.reserved?.length || 0) < 3;
+									const disabled = isGold ? !goldReserveReady : (!myTurn || count === 0);
 									return (
 										<div key={c}
-											className={`gem-stack${selCount > 0 ? " selected" : ""}${flashGems.has(c) ? " flashing" : ""}${!myTurn || isGold || count === 0 ? " disabled" : ""}`}
-											onClick={() => !isGold && handleGemClick(c)}
-											title={GEM_LABELS[c]}>
+											className={`gem-stack${selCount > 0 ? " selected" : ""}${goldReserveReady ? " reserve-ready" : ""}${flashGems.has(c) ? " flashing" : ""}${disabled ? " disabled" : ""}`}
+											onClick={() => { if (isGold) { if (goldReserveReady) handleReserveSelected(); } else handleGemClick(c); }}
+											title={isGold
+												? (goldReserveReady ? "Reserve the selected card (take a gold)" : "Gold — select a card, then click here to reserve")
+												: GEM_LABELS[c]}>
 											<GemToken color={c} />
 											<span className="gem-count">{count}</span>
 										</div>
