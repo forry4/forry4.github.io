@@ -694,12 +694,21 @@ export default function SpenderApp() {
 	};
 
 	const handleCancel = async (gameId) => {
+		let ok = false;
 		try {
-			const tok = authUser?.session_token;
-			await fetch(`${HTTP_BASE}/games/${gameId}/cancel${tok ? `?token=${tok}` : ""}`, { method: "POST" });
-		} catch {}
+			const params = new URLSearchParams({ player_id: myId });
+			if (authUser?.session_token) params.set("token", authUser.session_token);
+			const res = await fetch(`${HTTP_BASE}/games/${gameId}/cancel?${params}`, { method: "POST" });
+			const data = await res.json().catch(() => ({}));
+			ok = !!data.ok;
+			if (!ok) setToast(data.message || "Couldn't cancel that game");
+		} catch {
+			setToast("Couldn't reach the server");
+		}
+		if (!ok) return;   // only clear local resume pointers once the game is really gone
 		try {
 			if (localStorage.getItem("spender_roomId") === gameId) localStorage.removeItem("spender_roomId");
+			localStorage.removeItem(`spender_token_${gameId}_${myId}`);
 		} catch {}
 		fetchGames(authUser);
 	};

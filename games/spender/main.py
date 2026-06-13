@@ -2182,12 +2182,17 @@ async def get_my_games(token: str | None = None):
 
 
 @app.post("/games/{game_id}/cancel")
-async def cancel_open_game(game_id: str, token: str | None = None):
+async def cancel_open_game(game_id: str, token: str | None = None,
+                           player_id: str | None = None):
+    # An open game is just a public waiting room (host_id is listed in /games).
+    # Authorize by a live session OR by the host's player_id, so cancelling still
+    # works after the session token expires (which otherwise breaks it silently).
     user = get_user_by_session(token)
-    if not user:
-        return {"ok": False, "message": "unauthenticated"}
+    owner = user["id"] if user else (player_id or None)
+    if not owner:
+        return {"ok": False, "message": "missing identity"}
     room_id = normalize_room(game_id)
-    deleted = delete_open_game(room_id, user["id"])
+    deleted = delete_open_game(room_id, owner)
     if deleted:
         async with ROOM_LOCK:
             ROOMS.pop(room_id, None)
