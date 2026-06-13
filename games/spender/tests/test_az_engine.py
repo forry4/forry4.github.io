@@ -251,14 +251,25 @@ def test_reserve_cap_3():
     assert all(not (E.A_RES_BOARD <= a < E.A_BUY_BOARD) for a in legal)
 
 
+def _nobles_requiring_white():
+    """Noble ids that need white (BONUS color 0), highest white-req first.
+    Derived from NOBLE_REQ so these tests don't hardcode the card data."""
+    nids = [nid for nid in range(E.N_NOBLES) if E.NOBLE_REQ[nid][0] > 0]
+    return sorted(nids, key=lambda n: -E.NOBLE_REQ[n][0])
+
+
 def test_multi_noble_enters_choice_phase():
     s = _fresh()
-    # Engineer: seat 0 one white bonus short of two nobles at once.
-    n_a = E.NOBLE_ID_BY_NAME["n1"]   # white4 + green4
-    n_b = E.NOBLE_ID_BY_NAME["n8"]   # white4 + blue4
+    # Two nobles with the SAME white requirement: seat 0 set one white short of
+    # both, so a single white-bonus buy makes both claimable at once.
+    whites = _nobles_requiring_white()
+    n_a = whites[0]
+    n_b = next(n for n in whites[1:] if E.NOBLE_REQ[n][0] == E.NOBLE_REQ[n_a][0])
     s.nobles = [n_a, n_b, -1]
-    s.bonuses[0][:] = [3, 4, 4, 0, 0]  # white3, blue4, green4
-    # Find a white-bonus board card and make it free to buy.
+    ra, rb = E.NOBLE_REQ[n_a], E.NOBLE_REQ[n_b]
+    bonuses = [max(ra[i], rb[i]) for i in range(5)]
+    bonuses[0] -= 1  # one white short of both
+    s.bonuses[0][:] = bonuses
     slot = next(i for i, ci in enumerate(s.board) if ci >= 0 and E.BONUS[ci] == 0)
     s.tokens[0][:] = [7, 7, 7, 7, 7, 5]
     E.apply(s, E.A_BUY_BOARD + slot)
@@ -276,9 +287,11 @@ def test_multi_noble_enters_choice_phase():
 
 def test_single_noble_autoclaims():
     s = _fresh()
-    n_a = E.NOBLE_ID_BY_NAME["n1"]  # white4 + green4
+    n_a = _nobles_requiring_white()[0]
     s.nobles = [n_a, -1, -1]
-    s.bonuses[0][:] = [3, 0, 4, 0, 0]
+    bonuses = list(E.NOBLE_REQ[n_a])
+    bonuses[0] -= 1  # one white short of the only noble
+    s.bonuses[0][:] = bonuses
     slot = next(i for i, ci in enumerate(s.board) if ci >= 0 and E.BONUS[ci] == 0)
     s.tokens[0][:] = [7, 7, 7, 7, 7, 5]
     E.apply(s, E.A_BUY_BOARD + slot)
