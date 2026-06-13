@@ -9,6 +9,7 @@ Forced moves (single legal action) skip search and are not recorded.
 """
 from __future__ import annotations
 
+import math
 import random
 import time
 
@@ -39,9 +40,17 @@ def run_games(n_games: int, eval_a, eval_b=None, *,
               temperature: float = 1.0, temp_moves: int = 10,
               c_puct: float = 2.0, dirichlet_alpha: float = 0.5,
               dirichlet_eps: float = 0.25, add_noise: bool = True,
-              max_plies: int = 400, seed: int = 0, record: bool = True):
+              max_plies: int = 400, seed: int = 0, record: bool = True,
+              reward_shaping: float = 0.0, shaping_scale: float = 6.0):
     """Play n_games. If eval_b is None this is self-play with eval_a.
     Otherwise A plays B (A's seat alternates per game; no recording).
+
+    reward_shaping (0..1) blends the terminal win/loss (+/-1, 0 draw) value
+    target with tanh(point_margin / shaping_scale) from each position's mover
+    perspective. This breaks the degenerate self-play equilibrium where games
+    finish 0-0 and the *fewest-cards* tiebreak rewards buying nothing: with
+    shaping > 0 a 0-0 game is a true neutral and actually scoring points is
+    what gets rewarded. shaping=0 reproduces the old pure-terminal target.
 
     Returns (examples, stats):
       examples: (features [N,Ff], policies [N,A], values [N]) float32 arrays
@@ -53,6 +62,8 @@ def run_games(n_games: int, eval_a, eval_b=None, *,
     finished = 0
     score_a = 0.0
     total_plies = 0
+    total_points = 0      # combined end-of-game points across both seats
+    total_winpts = 0      # winner's points (0 on draw)
     feats_out, pis_out, zs_out = [], [], []
     t0 = time.time()
 
@@ -70,10 +81,13 @@ def run_games(n_games: int, eval_a, eval_b=None, *,
         return eval_a if g.state.turn == g.seat_of_a else eval_b
 
     def finish_game(g: _Game, drawn: bool):
-        nonlocal finished, score_a, total_plies
+        nonlocal finished, score_a, total_plies, total_points, total_winpts
         finished += 1
         total_plies += g.plies
         s = g.state
+        total_points += s.points[0] + s.points[1]
+        if not (drawn or s.winner == E.WIN_DRAW):
+            total_winpts += s.points[s.winner]
         if drawn or s.winner == E.WIN_DRAW:
             score_a += 0.5
             z_for = None
@@ -83,9 +97,16 @@ def run_games(n_games: int, eval_a, eval_b=None, *,
                 score_a += 1.0
         if record:
             for feats, pi, to_play in g.records:
+                terminal = 0.0 if z_for is None else (1.0 if to_play == z_for else -1.0)
+                if reward_shaping > 0.0:
+                    margin = s.points[to_play] - s.points[1 - to_play]
+                    shaped = math.tanh(margin / shaping_scale)
+                    z = (1.0 - reward_shaping) * terminal + reward_shaping * shaped
+                else:
+                    z = terminal
                 feats_out.append(feats)
                 pis_out.append(pi)
-                zs_out.append(0.0 if z_for is None else (1.0 if to_play == z_for else -1.0))
+                zs_out.append(z)
 
     def step_move(g: _Game) -> bool:
         """Finish the current move decision. Returns False if game ended."""
@@ -175,6 +196,83 @@ def run_games(n_games: int, eval_a, eval_b=None, *,
         "score_a": score_a / max(1, finished),
         "games": finished,
         "avg_plies": total_plies / max(1, finished),
+        "avg_points": total_points / max(1, finished),    # combined pts/game
+        "avg_winpts": total_winpts / max(1, finished),     # winner's pts/game
         "secs": time.time() - t0,
     }
     return examples, stats
+
+
+# ── Multiprocessing self-play ────────────────────────────────────────────────
+# Self-play games are independent, so they parallelize across CPU cores with no
+# quality cost (the only bottleneck is single-core Python MCTS; the net is tiny).
+# Workers run CPU numpy inference (infer_np) off a .npz snapshot of the current
+# net, so the GPU stays free for the training step. The worker fn and its
+# imports are module-level for Windows 'spawn' picklability; create the Pool
+# from inside an `if __name__ == "__main__"` entry point.
+
+def _run_chunk(task: dict):
+    """Pool worker: load numpy evaluator(s) from .npz and run a chunk of games."""
+    from .infer_np import load_evaluator
+    eval_a = load_evaluator(task["npz_a"])
+    eval_b = load_evaluator(task["npz_b"]) if task.get("npz_b") else None
+    (feats, pis, zs), stats = run_games(
+        task["n_games"], eval_a, eval_b,
+        n_sims=task["n_sims"], max_parallel=task["max_parallel"],
+        temperature=task["temperature"], temp_moves=task["temp_moves"],
+        c_puct=task["c_puct"], dirichlet_alpha=task["dirichlet_alpha"],
+        dirichlet_eps=task["dirichlet_eps"], add_noise=task["add_noise"],
+        max_plies=task["max_plies"], seed=task["seed"], record=task["record"],
+        reward_shaping=task["reward_shaping"], shaping_scale=task["shaping_scale"])
+    return feats, pis, zs, stats
+
+
+def run_games_parallel(pool, n_workers: int, npz_a: str, n_games: int, *,
+                       npz_b: str | None = None, n_sims: int = 128,
+                       worker_parallel: int | None = None,
+                       temperature: float = 1.0, temp_moves: int = 10,
+                       c_puct: float = 2.0, dirichlet_alpha: float = 0.5,
+                       dirichlet_eps: float = 0.25, add_noise: bool = True,
+                       max_plies: int = 400, seed: int = 0, record: bool = True,
+                       reward_shaping: float = 0.0, shaping_scale: float = 6.0):
+    """Fan `n_games` across `n_workers` pool processes, each running run_games on
+    a chunk. Same (examples, stats) contract as run_games; stats are merged
+    (games summed, the rest game-weighted, secs = wall-clock of the fan-out).
+    Per-worker seeds are widely spaced so games stay independent + reproducible.
+    """
+    base, rem = divmod(n_games, n_workers)
+    chunks = [base + (1 if i < rem else 0) for i in range(n_workers)]
+    tasks = []
+    for i, c in enumerate(chunks):
+        if c <= 0:
+            continue
+        tasks.append({
+            "npz_a": npz_a, "npz_b": npz_b, "n_games": c, "n_sims": n_sims,
+            "max_parallel": min(worker_parallel or c, c),
+            "temperature": temperature, "temp_moves": temp_moves,
+            "c_puct": c_puct, "dirichlet_alpha": dirichlet_alpha,
+            "dirichlet_eps": dirichlet_eps, "add_noise": add_noise,
+            "max_plies": max_plies, "seed": seed + i * 999331, "record": record,
+            "reward_shaping": reward_shaping, "shaping_scale": shaping_scale,
+        })
+    t0 = time.time()
+    results = pool.map(_run_chunk, tasks)
+    secs = time.time() - t0
+
+    feats = np.concatenate([r[0] for r in results])
+    pis = np.concatenate([r[1] for r in results])
+    zs = np.concatenate([r[2] for r in results])
+    tot_g = sum(r[3]["games"] for r in results)
+
+    def wavg(key):
+        return sum(r[3][key] * r[3]["games"] for r in results) / max(1, tot_g)
+
+    stats = {
+        "score_a": wavg("score_a"),
+        "games": tot_g,
+        "avg_plies": wavg("avg_plies"),
+        "avg_points": wavg("avg_points"),
+        "avg_winpts": wavg("avg_winpts"),
+        "secs": secs,
+    }
+    return (feats, pis, zs), stats

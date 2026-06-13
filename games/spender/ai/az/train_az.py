@@ -14,9 +14,19 @@ az_last.pt + buffer are saved every iteration, so --resume continues cleanly.
 """
 from __future__ import annotations
 
+import os
+
+# Single-threaded BLAS/OMP, set BEFORE numpy/torch import so it sticks (and is
+# inherited by spawned self-play workers). Each parallel worker does its own CPU
+# numpy inference; without this every worker's BLAS spins one thread PER CORE, so
+# N workers x ~ncores threads thrash the box (10 workers once hung for 30 min+
+# producing nothing). GPU training in the parent is unaffected (CUDA, not BLAS).
+for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+           "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
+    os.environ.setdefault(_v, "1")
+
 import argparse
 import copy
-import os
 import pickle
 import time
 from collections import deque
@@ -57,6 +67,42 @@ def _train_candidate(net, buffer, steps, batch_size, lr, device):
     return p_loss_t / steps, v_loss_t / steps
 
 
+def _heur_assignments(args, n_total):
+    """Even (spec, n_games) split of n_total across the heuristic variants."""
+    variants = [v.strip() for v in args.heur_variants.split(",") if v.strip()]
+    per = n_total // max(1, len(variants))
+    return [({"kind": "heur", "variant": v, "opp_iters": args.opp_iters}, per)
+            for v in variants if per > 0]
+
+
+def _league_assignments(args, pool_files):
+    """(spec, n_games) list for the heuristic + past-AZ fractions of one iter."""
+    assignments = _heur_assignments(args, int(round(args.games * args.heur_frac)))
+    n_league = int(round(args.games * args.league_frac))
+    if n_league > 0 and pool_files:
+        sel = pool_files[-args.pool_size:]
+        per = max(1, n_league // len(sel))
+        for f in sel:
+            assignments.append(({"kind": "az", "npz": f, "label": "past",
+                                 "opp_sims": args.opp_sims}, per))
+    return assignments
+
+
+def _league_gate(pool, league, args, cand_npz, best_npz, it):
+    """Promotion gate for league mode: candidate vs best on the SAME heuristic
+    set, greedy. Returns (cand_score, best_score, cand_per_opponent)."""
+    assigns = _heur_assignments(args, args.gate_games)
+    _, cand_scores, _ = league.run_league_games(
+        pool, cand_npz, assigns, n_sims=args.gate_sims, temperature=0.0,
+        temp_moves=0, add_noise=False, reward_shaping=0.0, seed=9000 + it)
+    _, best_scores, _ = league.run_league_games(
+        pool, best_npz, assigns, n_sims=args.gate_sims, temperature=0.0,
+        temp_moves=0, add_noise=False, reward_shaping=0.0, seed=9000 + it)
+    cand = sum(cand_scores.values()) / max(1, len(cand_scores))
+    best = sum(best_scores.values()) / max(1, len(best_scores))
+    return cand, best, cand_scores
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--iters", type=int, default=30)
@@ -70,7 +116,35 @@ def main():
     ap.add_argument("--gate-games", type=int, default=60)
     ap.add_argument("--gate-sims", type=int, default=96)
     ap.add_argument("--gate-threshold", type=float, default=0.55)
-    ap.add_argument("--temp-moves", type=int, default=10)
+    ap.add_argument("--temperature", type=float, default=1.0,
+                    help="self-play action-selection temperature for first temp-moves")
+    ap.add_argument("--temp-moves", type=int, default=10,
+                    help="number of opening moves played at --temperature before going greedy")
+    ap.add_argument("--dirichlet-eps", type=float, default=0.25,
+                    help="root Dirichlet noise fraction (higher = more exploration)")
+    ap.add_argument("--reward-shaping", type=float, default=0.0,
+                    help="0..1 blend of point-margin into the value target (breaks the "
+                         "0-0 fewest-cards self-play equilibrium); 0 = pure win/loss")
+    ap.add_argument("--shaping-scale", type=float, default=6.0,
+                    help="point-margin divisor inside tanh for reward shaping")
+    ap.add_argument("--workers", type=int, default=1,
+                    help="parallel CPU self-play worker processes "
+                         "(1 = single-process torch path; >1 fans games across cores)")
+    ap.add_argument("--worker-parallel", type=int, default=None,
+                    help="games batched per worker for the numpy forward (default = chunk size)")
+    # League: train against a pool of opponents, not only self (the strength
+    # lever once pure self-play plateaus vs the heuristics). Requires workers>1.
+    ap.add_argument("--league", action="store_true",
+                    help="mix in recorded games vs heuristics + past AZ checkpoints")
+    ap.add_argument("--self-frac", type=float, default=0.4, help="fraction of games via self-play")
+    ap.add_argument("--heur-frac", type=float, default=0.4,
+                    help="fraction vs heuristics (split across --heur-variants)")
+    ap.add_argument("--league-frac", type=float, default=0.2,
+                    help="fraction vs sampled past AZ checkpoints (folds into self when pool empty)")
+    ap.add_argument("--heur-variants", default="A,B,C2", help="comma-list of heuristic opponents")
+    ap.add_argument("--opp-iters", type=int, default=120, help="heuristic opponent MCTS iters")
+    ap.add_argument("--opp-sims", type=int, default=96, help="past-AZ opponent PUCT sims")
+    ap.add_argument("--pool-size", type=int, default=6, help="max past-AZ checkpoints kept in the league pool")
     ap.add_argument("--out", default=DEF_DIR)
     ap.add_argument("--resume", action="store_true")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -81,6 +155,16 @@ def main():
     last_path = os.path.join(args.out, "az_last.pt")
     buf_path = os.path.join(args.out, "buffer.pkl")
     npz_path = os.path.join(args.out, "az_model.npz")
+    work_best = os.path.join(args.out, "_work_best.npz")   # current-best snapshot for CPU workers
+    work_cand = os.path.join(args.out, "_work_cand.npz")   # candidate snapshot for the gate
+    pool_dir = os.path.join(args.out, "league_pool")       # frozen past-AZ opponents
+
+    league = pool_files = None
+    if args.league:
+        from . import league                               # imports arena/incumbent; lazy
+        os.makedirs(pool_dir, exist_ok=True)
+        pool_files = sorted(os.path.join(pool_dir, f) for f in os.listdir(pool_dir)
+                            if f.endswith(".npz"))
 
     best = SpenderNet()
     buffer: deque = deque(maxlen=args.buffer)
@@ -98,40 +182,125 @@ def main():
         print(f"[resume] iter {start_iter}, buffer {len(buffer)}, promotions {promotions}",
               flush=True)
 
+    if args.league and args.workers <= 1:
+        raise SystemExit("--league requires --workers > 1 (opponent games run in worker processes)")
+
+    pool = None
+    if args.workers > 1:
+        import multiprocessing as mp
+        pool = mp.Pool(args.workers)
+
+    league_msg = ""
+    if args.league:
+        league_msg = (f" | LEAGUE self={args.self_frac} heur={args.heur_frac}"
+                      f"({args.heur_variants}) past={args.league_frac} "
+                      f"pool={len(pool_files)} opp_iters={args.opp_iters}")
     print(f"[train_az] device={args.device} sims={args.sims} games/iter={args.games} "
-          f"parallel={args.parallel}", flush=True)
+          f"parallel={args.parallel} workers={args.workers} | shaping={args.reward_shaping} "
+          f"(scale={args.shaping_scale}) temp={args.temperature}x{args.temp_moves} "
+          f"dir_eps={args.dirichlet_eps}{league_msg}", flush=True)
 
     for it in range(start_iter, args.iters):
         t0 = time.time()
-        evaluate = make_evaluator(best, args.device)
-        (feats, pis, zs), st = selfplay.run_games(
-            args.games, evaluate, n_sims=args.sims, max_parallel=args.parallel,
-            temp_moves=args.temp_moves, seed=1000 + it)
-        for k in range(len(zs)):
-            buffer.append((feats[k], pis[k], zs[k]))
-        print(f"[iter {it}] selfplay: {st['games']} games, {len(zs)} positions, "
-              f"avg {st['avg_plies']:.1f} plies, {st['secs']:.0f}s "
-              f"({st['games']/st['secs']:.2f} games/s) | buffer {len(buffer)}", flush=True)
+        if args.league:
+            export_npz(best, work_best)
+            assignments = _league_assignments(args, pool_files)
+            n_assigned = sum(c for _, c in assignments)
+            n_self = max(0, args.games - n_assigned)
+            parts_f, parts_p, parts_z = [], [], []
+            winpts = 0.0
+            if n_self > 0:
+                (sf, sp, sz), st = selfplay.run_games_parallel(
+                    pool, args.workers, work_best, n_self, n_sims=args.sims,
+                    worker_parallel=args.worker_parallel, temperature=args.temperature,
+                    temp_moves=args.temp_moves, dirichlet_eps=args.dirichlet_eps,
+                    reward_shaping=args.reward_shaping, shaping_scale=args.shaping_scale,
+                    seed=1000 + it)
+                parts_f.append(sf); parts_p.append(sp); parts_z.append(sz)
+                winpts = st["avg_winpts"]
+            scores = {}
+            if assignments:
+                (lf, lp, lz), scores, _ = league.run_league_games(
+                    pool, work_best, assignments, n_sims=args.sims,
+                    temperature=args.temperature, temp_moves=args.temp_moves,
+                    dirichlet_eps=args.dirichlet_eps, reward_shaping=args.reward_shaping,
+                    shaping_scale=args.shaping_scale, seed=5000 + it)
+                parts_f.append(lf); parts_p.append(lp); parts_z.append(lz)
+            feats = np.concatenate(parts_f)
+            pis = np.concatenate(parts_p)
+            zs = np.concatenate(parts_z)
+            for k in range(len(zs)):
+                buffer.append((feats[k], pis[k], zs[k]))
+            sstr = " ".join(f"{k} {v:.2f}" for k, v in sorted(scores.items()))
+            print(f"[iter {it}] league: {len(zs)} pos (self {n_self} winpts {winpts:.1f}) "
+                  f"| net-vs: {sstr} | buffer {len(buffer)}", flush=True)
+        else:
+            if pool is not None:
+                export_npz(best, work_best)   # snapshot current best for the CPU workers
+                (feats, pis, zs), st = selfplay.run_games_parallel(
+                    pool, args.workers, work_best, args.games, n_sims=args.sims,
+                    worker_parallel=args.worker_parallel,
+                    temperature=args.temperature, temp_moves=args.temp_moves,
+                    dirichlet_eps=args.dirichlet_eps, reward_shaping=args.reward_shaping,
+                    shaping_scale=args.shaping_scale, seed=1000 + it)
+            else:
+                evaluate = make_evaluator(best, args.device)
+                (feats, pis, zs), st = selfplay.run_games(
+                    args.games, evaluate, n_sims=args.sims, max_parallel=args.parallel,
+                    temperature=args.temperature, temp_moves=args.temp_moves,
+                    dirichlet_eps=args.dirichlet_eps, reward_shaping=args.reward_shaping,
+                    shaping_scale=args.shaping_scale, seed=1000 + it)
+            for k in range(len(zs)):
+                buffer.append((feats[k], pis[k], zs[k]))
+            print(f"[iter {it}] selfplay: {st['games']} games, {len(zs)} positions, "
+                  f"avg {st['avg_plies']:.1f} plies, winpts {st['avg_winpts']:.1f} "
+                  f"(combined {st['avg_points']:.1f}), {st['secs']:.0f}s "
+                  f"({st['games']/st['secs']:.2f} games/s) | buffer {len(buffer)}", flush=True)
 
         candidate = copy.deepcopy(best)
         p_l, v_l = _train_candidate(candidate, buffer, args.train_steps,
                                     args.batch_size, args.lr, args.device)
         print(f"[iter {it}] train: policy_loss {p_l:.3f} value_loss {v_l:.3f}", flush=True)
 
-        _, gate = selfplay.run_games(
-            args.gate_games, make_evaluator(candidate, args.device),
-            make_evaluator(best, args.device), n_sims=args.gate_sims,
-            max_parallel=args.gate_games, add_noise=False, temperature=0.0,
-            record=False, seed=9000 + it)
-        promoted = gate["score_a"] >= args.gate_threshold
+        if args.league:
+            export_npz(candidate, work_cand)
+            export_npz(best, work_best)
+            cand_s, best_s, cand_scores = _league_gate(
+                pool, league, args, work_cand, work_best, it)
+            promoted = cand_s >= best_s
+            sstr = " ".join(f"{k} {v:.2f}" for k, v in sorted(cand_scores.items()))
+            gate_msg = f"gate(league): cand {cand_s:.3f} vs best {best_s:.3f} [{sstr}]"
+        elif pool is not None:
+            export_npz(candidate, work_cand)
+            export_npz(best, work_best)
+            _, gate = selfplay.run_games_parallel(
+                pool, args.workers, work_cand, args.gate_games, npz_b=work_best,
+                n_sims=args.gate_sims, worker_parallel=args.worker_parallel,
+                add_noise=False, temperature=0.0, record=False, seed=9000 + it)
+            promoted = gate["score_a"] >= args.gate_threshold
+            gate_msg = f"gate: candidate {gate['score_a']:.3f} vs best ({gate['games']} games)"
+        else:
+            _, gate = selfplay.run_games(
+                args.gate_games, make_evaluator(candidate, args.device),
+                make_evaluator(best, args.device), n_sims=args.gate_sims,
+                max_parallel=args.gate_games, add_noise=False, temperature=0.0,
+                record=False, seed=9000 + it)
+            promoted = gate["score_a"] >= args.gate_threshold
+            gate_msg = f"gate: candidate {gate['score_a']:.3f} vs best ({gate['games']} games)"
+
         if promoted:
             best = candidate
             promotions += 1
             torch.save({"best": best.state_dict(), "iter": it,
                         "promotions": promotions}, best_path)
             export_npz(best, npz_path)
-        print(f"[iter {it}] gate: candidate {gate['score_a']:.3f} vs best "
-              f"({gate['games']} games) -> {'PROMOTED' if promoted else 'rejected'} "
+            if args.league:
+                snap = os.path.join(pool_dir, f"az_iter{it}.npz")
+                export_npz(best, snap)
+                pool_files.append(snap)
+                if len(pool_files) > args.pool_size:
+                    pool_files = pool_files[-args.pool_size:]
+        print(f"[iter {it}] {gate_msg} -> {'PROMOTED' if promoted else 'rejected'} "
               f"| total {time.time()-t0:.0f}s", flush=True)
 
         torch.save({"best": best.state_dict(), "iter": it,
@@ -139,6 +308,9 @@ def main():
         with open(buf_path, "wb") as f:
             pickle.dump(buffer, f)
 
+    if pool is not None:
+        pool.close()
+        pool.join()
     print(f"[train_az] done: {promotions} promotions", flush=True)
 
 

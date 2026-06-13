@@ -26,6 +26,7 @@ dist/
 
 # AZ training artifacts (checkpoints, replay buffer) — az_model.npz ships separately
 games/spender/ai/az/checkpoints/
+games/spender/ai/az/checkpoints*/
 
 # SQLite databases (contain user data)
 *.db
