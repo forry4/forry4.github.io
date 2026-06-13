@@ -568,6 +568,7 @@ WEIGHT_VARIANTS: dict[str, dict[str, float]] = {}
 VARIANT_FILES: dict[str, str] = {
     "B": "weights.tactics.json",
     "C": "weights.tactics_c.json",
+    "C2": "weights.c2.json",   # B + noble_scarcity 2.5 + pos_noble_scarcity 0.5 (0.583 vs B confirm)
 }
 
 
