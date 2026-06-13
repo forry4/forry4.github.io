@@ -921,6 +921,9 @@ export default function SpenderApp() {
 						<button className="btn btn-outline" onClick={() => handleCreate(true, "C")}>
 							Play vs AI (C)
 						</button>
+						<button className="btn btn-outline" onClick={() => handleCreate(true, "Z")}>
+							Play vs AI (Z)
+						</button>
 						<button className="refresh-btn" title="Refresh" onClick={() => fetchGames(authUser)}>
 							{browserLoading ? <span className="spinner" /> : "↻"}
 						</button>

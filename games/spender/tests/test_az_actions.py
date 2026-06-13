@@ -55,6 +55,26 @@ def test_move_to_action_round_trip():
         E.apply(s, rng.choice(acts))
 
 
+def test_az_choose_move_returns_legal_dict_move(monkeypatch):
+    """Variant-Z serving path: with a (fake) evaluator loaded, _az_choose_move
+    must return a move the incumbent engine accepts, and variant gating must
+    open/close with the evaluator."""
+    from games.spender import main as inc
+
+    s = E.new_game(random.Random(23))
+    game = E.to_game_dict(s, ("human", "ai"))
+
+    monkeypatch.setattr(inc, "AZ_EVALUATE", _uniform_eval)
+    assert inc._ai_variant_valid("Z")
+    mv = inc._az_choose_move(game, "ai", time_limit=0.2)
+    a = A.move_to_action(s, mv)  # raises if not mappable
+    assert a in E.legal_actions(s)
+
+    monkeypatch.setattr(inc, "AZ_EVALUATE", None)
+    assert not inc._ai_variant_valid("Z")
+    assert inc._ai_variant_valid("A")
+
+
 def test_arena_bridge_plays_full_game():
     from games.spender import main as inc
     from games.spender.ai.az import arena

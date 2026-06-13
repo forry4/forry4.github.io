@@ -607,6 +607,63 @@ def load_weights(path: str | None = None) -> dict[str, float]:
 load_weights()
 
 
+# ─── AlphaZero variant ("Z") ──────────────────────────────────────────────────
+# When an exported az_model.npz is present, an AlphaZero-trained net becomes
+# selectable as AI variant "Z" (PUCT search + numpy inference — no torch in
+# production). Absent → AZ_EVALUATE stays None and nothing changes.
+
+AZ_MODEL_PATH = os.environ.get("SPENDER_AZ_MODEL") or os.path.join(_AI_DIR, "az_model.npz")
+AZ_EVALUATE = None
+
+
+def load_az_model() -> None:
+    """Load the exported AZ net for variant Z. Safe at import; never raises."""
+    global AZ_EVALUATE
+    AZ_EVALUATE = None
+    if os.environ.get("SPENDER_AZ_MODEL") == "none":
+        return
+    try:
+        if os.path.exists(AZ_MODEL_PATH):
+            from games.spender.ai.az.infer_np import load_evaluator
+            AZ_EVALUATE = load_evaluator(AZ_MODEL_PATH)
+            LOG.info("loaded AZ model from %s (AI variant Z enabled)", AZ_MODEL_PATH)
+    except Exception as e:
+        LOG.warning("could not load AZ model from %s: %s", AZ_MODEL_PATH, e)
+
+
+load_az_model()
+
+
+def _ai_variant_valid(variant: str) -> bool:
+    return variant in WEIGHT_VARIANTS or (variant == "Z" and AZ_EVALUATE is not None)
+
+
+def _az_choose_move(game: dict, ai_pid: str, time_limit: float = 5.0) -> dict:
+    """Variant-Z move selection: time-budgeted PUCT over the fast az engine.
+    Returns an incumbent dict-move; post-move discard/noble sub-decisions are
+    resolved by _run_ai_turn's heuristics, same as the other variants."""
+    from games.spender.ai.az import actions as _aza
+    from games.spender.ai.az import engine as _aze
+    from games.spender.ai.az.mcts import Search
+
+    s = _aze.from_game_dict(game)
+    legal = _aze.legal_actions(s)
+    if len(legal) == 1:
+        return _aza.action_to_move(s, legal[0])
+    search = Search(s, random.Random(), add_noise=False)
+    deadline = time.time() + time_limit
+    while time.time() < deadline:
+        for _ in range(32):  # check the clock every 32 simulations
+            req = search.leaf_batch()
+            if req is None:
+                continue
+            feats, mask = req
+            p, v = AZ_EVALUATE(feats[None, :], mask[None, :])
+            search.apply_evals(p[0], float(v[0]))
+    visits = search.root.N
+    return _aza.action_to_move(s, max(range(len(visits)), key=visits.__getitem__))
+
+
 # ─── AI Player ────────────────────────────────────────────────────────────────
 
 def _game_urgency(game: dict) -> float:
@@ -1615,11 +1672,14 @@ async def _schedule_ai_turn(room_id: str) -> None:
         variant = r.get("ai_variant", "A")
 
     # MCTS runs in a thread pool so the event loop stays free during the 5s compute
-    ai_weights = WEIGHT_VARIANTS.get(variant, WEIGHTS)
     loop = asyncio.get_running_loop()
-    mv = await loop.run_in_executor(
-        None, _mcts_choose_move, game_snapshot, ai_pid, 5.0, None, ai_weights
-    )
+    if variant == "Z" and AZ_EVALUATE is not None:
+        mv = await loop.run_in_executor(None, _az_choose_move, game_snapshot, ai_pid, 5.0)
+    else:
+        ai_weights = WEIGHT_VARIANTS.get(variant, WEIGHTS)
+        mv = await loop.run_in_executor(
+            None, _mcts_choose_move, game_snapshot, ai_pid, 5.0, None, ai_weights
+        )
 
     async with ROOM_LOCK:
         r = ROOMS.get(room_id)
@@ -1670,7 +1730,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                 name = msg.get("name") or pid
                 vs_ai = bool(msg.get("vs_ai"))
                 ai_variant = msg.get("ai_variant", "A") if vs_ai else None
-                if vs_ai and ai_variant not in WEIGHT_VARIANTS:
+                if vs_ai and not _ai_variant_valid(ai_variant):
                     ai_variant = "A"
                 async with ROOM_LOCK:
                     r = ROOMS.setdefault(room_id, {"players": {}, "sockets": {}, "status": "open", "game": None, "host": None})
