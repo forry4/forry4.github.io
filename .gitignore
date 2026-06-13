@@ -21,5 +21,11 @@ CLAUDE.md
 node_modules/
 dist/
 
+# Training run logs
+*.log
+
+# AZ training artifacts (checkpoints, replay buffer) — az_model.npz ships separately
+games/spender/ai/az/checkpoints/
+
 # SQLite databases (contain user data)
 *.db
