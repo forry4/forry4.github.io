@@ -202,7 +202,12 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,se
 .bonus-pill{display:flex;align-items:center;gap:3px;padding:2px 7px;border-radius:12px;font-family:'Cinzel',serif;font-size:.7rem;font-weight:700;border:1px solid}
 .reserved-label{font-size:.62rem;color:var(--text-dim);font-family:'Cinzel',serif;letter-spacing:.06em;margin-bottom:4px;text-transform:uppercase}
 .reserved-row{display:flex;gap:4px;flex-wrap:wrap}
-.gem-total{font-size:.7rem;color:var(--text-muted);font-family:'Cinzel',serif;margin-top:2px}
+.gem-total{display:inline-block;font-size:.66rem;color:var(--text);font-family:'Cinzel',serif;font-weight:600;letter-spacing:.03em;margin-top:3px;background:var(--surface3);border:1px solid var(--border);padding:1px 8px;border-radius:8px}
+.tableau-mini{display:flex;gap:5px;margin-top:7px;margin-bottom:6px;flex-wrap:wrap;align-items:flex-start}
+.tableau-file{display:flex;flex-direction:column;align-items:center}
+.mini-card{width:18px;height:24px;border-radius:3px;border:1px solid rgba(0,0,0,.45);box-shadow:0 1px 1px rgba(0,0,0,.3);display:flex;align-items:flex-start;justify-content:center}
+.mini-card + .mini-card{margin-top:-17px}
+.mini-card-pts{font-size:.5rem;font-weight:700;font-family:'Cinzel',serif;color:#fff;text-shadow:0 1px 1px rgba(0,0,0,.75);line-height:1;padding-top:1px}
 
 /* ─── Winner ────────────────────────────────────────────────────────────── */
 .winner-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:32px}
@@ -430,6 +435,7 @@ export default function SpenderApp() {
 
 	const [selectedGems, setSelectedGems] = useState([]);
 	const [selectedCard, setSelectedCard] = useState(null);
+	const [reserveArmed, setReserveArmed] = useState(false);  // gold-first reserve: click gold, then a card
 	const [toast, setToast] = useState("");
 	const [confirmAbandon, setConfirmAbandon] = useState(false);
 	const [reviewing, setReviewing] = useState(false);  // end-game: viewing final board + log
@@ -723,6 +729,7 @@ export default function SpenderApp() {
 		if (deckLevel) sendMove({ type: "reserve", deck_level: deckLevel });
 		else sendMove({ type: "reserve", card_id: card.id });
 		setSelectedCard(null);
+		setReserveArmed(false);
 	};
 
 	// Reserve the currently-selected card (board or deck) — triggered by clicking
@@ -738,6 +745,7 @@ export default function SpenderApp() {
 		if (!myTurn) return;
 		sendMove({ type: "buy", card_id: card.id });
 		setSelectedCard(null);
+		setReserveArmed(false);
 	};
 
 	const handleDiscard = (color) => sendMove({ type: "discard", color });
@@ -747,6 +755,7 @@ export default function SpenderApp() {
 	const handleGemClick = (color) => {
 		if (!myTurn) return;
 		setSelectedCard(null);
+		setReserveArmed(false);
 		const bankCount = game?.bank[color] || 0;
 		if (bankCount <= 0) return;
 		setSelectedGems(prev => {
@@ -779,8 +788,15 @@ export default function SpenderApp() {
 				disabled={opts.disabled}
 				onClick={() => {
 					if (opts.readonly || !myTurn) return;
+					const source = opts.source || "board";
+					// gold-first reserve: gold armed, then click a (non-reserved) card
+					if (reserveArmed && source !== "reserved" && (me?.reserved?.length || 0) < 3) {
+						handleReserve(card);
+						return;
+					}
 					setSelectedGems([]);
-					setSelectedCard(isSelected ? null : { card, source: opts.source || "board" });
+					setReserveArmed(false);
+					setSelectedCard(isSelected ? null : { card, source });
 				}}
 			/>
 		);
@@ -814,6 +830,23 @@ export default function SpenderApp() {
 				{Object.values(p.tokens).some(v => v > 0) && (
 					<div className="gem-total">{gemTotal(p.tokens)} gems</div>
 				)}
+				{p.purchased?.length > 0 && (
+					<div className="tableau-mini">
+						{GEM_COLORS.map(col => {
+							const cards = p.purchased.filter(pc => pc.bonus === col);
+							if (!cards.length) return null;
+							return (
+								<div key={col} className="tableau-file" title={`${cards.length} ${col} card${cards.length > 1 ? "s" : ""}`}>
+									{cards.map((pc, k) => (
+										<div key={pc.id ?? k} className="mini-card" style={{ background: GEM_HEX[col] }}>
+											{pc.points > 0 && <span className="mini-card-pts">{pc.points}</span>}
+										</div>
+									))}
+								</div>
+							);
+						})}
+					</div>
+				)}
 				<div className="player-bonuses">
 					{GEM_COLORS.map(c => (bonuses[c] || 0) > 0 && (
 						<span key={c} className="bonus-pill" style={{ borderColor: GEM_HEX[c], color: GEM_HEX[c] }}>+{bonuses[c]} {c[0].toUpperCase()}</span>
@@ -835,6 +868,7 @@ export default function SpenderApp() {
 	function getHint() {
 		if (!myTurn) return `Waiting for ${roomData?.players?.[game?.turn] || "opponent"}…`;
 		const slotsFull = (me?.reserved?.length || 0) >= 3;
+		if (reserveArmed) return "Reserve armed — click a card or deck to reserve it (or the gold coin to cancel)";
 		if (selectedCard?.source === "deck")
 			return slotsFull ? "Reserved slots full (3/3)" : `Click the gold coin to reserve blind from Level ${selectedCard.deckLevel} deck`;
 		if (selectedCard) {
@@ -1192,18 +1226,29 @@ export default function SpenderApp() {
 									const count = game.bank[c] || 0;
 									const isGold = c === "gold";
 									const selCount = selectedGems.filter(x => x === c).length;
-									// Gold coin doubles as the "reserve" button: lit when a board/deck
-									// card is selected and a reserve slot is free (gold bank can be 0 —
-									// you still reserve, just without gaining a gold).
+									// Gold coin doubles as the "reserve" control, both directions:
+									//   card-first: select a card, then click gold to reserve it
+									//   gold-first: click gold to ARM, then click any card to reserve it
+									// (gold bank can be 0 — you still reserve, just without gaining a gold).
+									const slotsOpen = (me?.reserved?.length || 0) < 3;
 									const goldReserveReady = isGold && myTurn && selectedCard
-										&& selectedCard.source !== "reserved" && (me?.reserved?.length || 0) < 3;
-									const disabled = isGold ? !goldReserveReady : (!myTurn || count === 0);
+										&& selectedCard.source !== "reserved" && slotsOpen;
+									const goldActive = isGold && myTurn && slotsOpen;     // clickable (arm or complete)
+									const goldLit = goldReserveReady || (isGold && reserveArmed);  // pulse when engaged
+									const disabled = isGold ? !goldActive : (!myTurn || count === 0);
 									return (
 										<div key={c}
-											className={`gem-stack${selCount > 0 ? " selected" : ""}${goldReserveReady ? " reserve-ready" : ""}${flashGems.has(c) ? " flashing" : ""}${disabled ? " disabled" : ""}`}
-											onClick={() => { if (isGold) { if (goldReserveReady) handleReserveSelected(); } else handleGemClick(c); }}
+											className={`gem-stack${selCount > 0 ? " selected" : ""}${goldLit ? " reserve-ready" : ""}${flashGems.has(c) ? " flashing" : ""}${disabled ? " disabled" : ""}`}
+											onClick={() => {
+												if (!isGold) { handleGemClick(c); return; }
+												if (goldReserveReady) { handleReserveSelected(); return; }
+												if (slotsOpen) { setSelectedGems([]); setSelectedCard(null); setReserveArmed(a => !a); }
+											}}
 											title={isGold
-												? (goldReserveReady ? "Reserve the selected card (take a gold)" : "Gold — select a card, then click here to reserve")
+												? (goldReserveReady ? "Reserve the selected card (take a gold)"
+													: reserveArmed ? "Reserve armed — click a card to reserve it"
+													: slotsOpen ? "Reserve: click here then a card, or select a card first"
+													: "Reserve slots full (3/3)")
 												: GEM_LABELS[c]}>
 											<GemToken color={c} />
 											<span className="gem-count">{count}</span>
@@ -1217,8 +1262,13 @@ export default function SpenderApp() {
 							<div key={lk} className="panel">
 								<div className="panel-title">Level {["III", "II", "I"][i]}</div>
 								<div className="level-row">
-									<div className={`deck-pile${!myTurn ? " disabled" : ""}${selectedCard?.source === "deck" && selectedCard?.deckLevel === 3 - i ? " selected" : ""}`}
-										onClick={() => { if (!myTurn) return; setSelectedGems([]); setSelectedCard(s => s?.source === "deck" && s?.deckLevel === 3 - i ? null : { source: "deck", deckLevel: 3 - i }); }}
+									<div className={`deck-pile${!myTurn ? " disabled" : ""}${reserveArmed ? " reserve-ready" : ""}${selectedCard?.source === "deck" && selectedCard?.deckLevel === 3 - i ? " selected" : ""}`}
+										onClick={() => {
+											if (!myTurn) return;
+											if (reserveArmed && (me?.reserved?.length || 0) < 3) { handleReserve(null, 3 - i); return; }
+											setSelectedGems([]); setReserveArmed(false);
+											setSelectedCard(s => s?.source === "deck" && s?.deckLevel === 3 - i ? null : { source: "deck", deckLevel: 3 - i });
+										}}
 										title="Reserve blind from deck">
 										<span style={{ fontSize: ".62rem", letterSpacing: ".08em" }}>DECK</span>
 										<span className="deck-remaining">{game.decks?.[lk]?.length || 0}</span>
