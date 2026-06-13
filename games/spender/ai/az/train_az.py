@@ -88,6 +88,41 @@ def _league_assignments(args, pool_files):
     return assignments
 
 
+def _curr_specs(args, curr_p, n_total):
+    """Eps-opponent specs (one per heuristic variant) sharing n_total games,
+    all labeled 'cur' so their net win rate aggregates as the difficulty signal."""
+    variants = [v.strip() for v in args.heur_variants.split(",") if v.strip()]
+    per = max(1, n_total // len(variants))
+    return [({"kind": "eps", "variant": v, "p": curr_p,
+              "opp_iters": args.curr_opp_iters, "label": "cur"}, per)
+            for v in variants]
+
+
+def _curriculum_assignments(args, curr_p, pool_files):
+    """Heuristic fraction -> eps-opponent at curr_p; plus the past-AZ fraction."""
+    assignments = _curr_specs(args, curr_p, int(round(args.games * args.heur_frac)))
+    n_league = int(round(args.games * args.league_frac))
+    if n_league > 0 and pool_files:
+        sel = pool_files[-args.pool_size:]
+        per = max(1, n_league // len(sel))
+        for f in sel:
+            assignments.append(({"kind": "az", "npz": f, "label": "past",
+                                 "opp_sims": args.opp_sims}, per))
+    return assignments
+
+
+def _curriculum_gate(pool, league, args, cand_npz, best_npz, curr_p, it):
+    """Gate at the current difficulty p: candidate vs best, greedy."""
+    assigns = _curr_specs(args, curr_p, args.gate_games)
+    _, cand_scores, _ = league.run_league_games(
+        pool, cand_npz, assigns, n_sims=args.gate_sims, temperature=0.0,
+        temp_moves=0, add_noise=False, reward_shaping=0.0, seed=9000 + it)
+    _, best_scores, _ = league.run_league_games(
+        pool, best_npz, assigns, n_sims=args.gate_sims, temperature=0.0,
+        temp_moves=0, add_noise=False, reward_shaping=0.0, seed=9000 + it)
+    return cand_scores.get("cur", 0.0), best_scores.get("cur", 0.0)
+
+
 def _league_gate(pool, league, args, cand_npz, best_npz, it):
     """Promotion gate for league mode: candidate vs best on the SAME heuristic
     set, greedy. Returns (cand_score, best_score, cand_per_opponent)."""
@@ -148,10 +183,23 @@ def main():
     ap.add_argument("--opp-iters", type=int, default=120, help="heuristic opponent MCTS iters")
     ap.add_argument("--opp-sims", type=int, default=96, help="past-AZ opponent PUCT sims")
     ap.add_argument("--pool-size", type=int, default=6, help="max past-AZ checkpoints kept in the league pool")
+    # Curriculum: replace the fixed-strength heuristic fraction with an
+    # epsilon-mixed opponent (heuristic move w.p. p, else random) whose p
+    # auto-climbs as the net masters the current difficulty. p is a TEMPO knob:
+    # p=0 is a non-racing random player the net can beat; p=1 is the full racer.
+    # This lets the net cross the loss-minimizing -> winning fitness valley.
+    ap.add_argument("--curriculum", action="store_true",
+                    help="adaptive epsilon-opponent curriculum for the heuristic fraction")
+    ap.add_argument("--curr-p", type=float, default=0.4, help="starting heuristic-move probability")
+    ap.add_argument("--curr-target", type=float, default=0.55, help="net win-rate the curriculum holds")
+    ap.add_argument("--curr-step", type=float, default=0.05, help="p adjustment per iteration")
+    ap.add_argument("--curr-opp-iters", type=int, default=30, help="heuristic strength when the eps-opponent acts")
     ap.add_argument("--out", default=DEF_DIR)
     ap.add_argument("--resume", action="store_true")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args()
+    if args.curriculum:
+        args.league = True   # curriculum runs inside the league generation/gate path
 
     os.makedirs(args.out, exist_ok=True)
     best_path = os.path.join(args.out, "az_best.pt")
@@ -173,17 +221,19 @@ def main():
     buffer: deque = deque(maxlen=args.buffer)
     start_iter = 0
     promotions = 0
+    curr_p = args.curr_p            # current curriculum difficulty (adaptive)
     if args.resume and os.path.exists(last_path):
         ck = torch.load(last_path, map_location="cpu", weights_only=False)
         best.load_state_dict(ck["best"])
         start_iter = ck["iter"] + 1
         promotions = ck.get("promotions", 0)
+        curr_p = ck.get("curr_p", curr_p)
         if os.path.exists(buf_path):
             with open(buf_path, "rb") as f:
                 buffer = pickle.load(f)
             buffer = deque(buffer, maxlen=args.buffer)
-        print(f"[resume] iter {start_iter}, buffer {len(buffer)}, promotions {promotions}",
-              flush=True)
+        print(f"[resume] iter {start_iter}, buffer {len(buffer)}, promotions {promotions}"
+              + (f", curr_p {curr_p:.2f}" if args.curriculum else ""), flush=True)
 
     if args.league and args.workers <= 1:
         raise SystemExit("--league requires --workers > 1 (opponent games run in worker processes)")
@@ -194,7 +244,11 @@ def main():
         pool = mp.Pool(args.workers)
 
     league_msg = ""
-    if args.league:
+    if args.curriculum:
+        league_msg = (f" | CURRICULUM p={curr_p:.2f}->1.0 target={args.curr_target} "
+                      f"opp_iters={args.curr_opp_iters} self={args.self_frac} "
+                      f"heur={args.heur_frac} past={args.league_frac} pool={len(pool_files)}")
+    elif args.league:
         league_msg = (f" | LEAGUE self={args.self_frac} heur={args.heur_frac}"
                       f"({args.heur_variants}) past={args.league_frac} "
                       f"pool={len(pool_files)} opp_iters={args.opp_iters}")
@@ -207,7 +261,8 @@ def main():
         t0 = time.time()
         if args.league:
             export_npz(best, work_best)
-            assignments = _league_assignments(args, pool_files)
+            assignments = (_curriculum_assignments(args, curr_p, pool_files)
+                           if args.curriculum else _league_assignments(args, pool_files))
             n_assigned = sum(c for _, c in assignments)
             n_self = max(0, args.games - n_assigned)
             parts_f, parts_p, parts_z = [], [], []
@@ -235,8 +290,9 @@ def main():
             zs = np.concatenate(parts_z)
             for k in range(len(zs)):
                 buffer.append((feats[k], pis[k], zs[k]))
+            ptag = f"p={curr_p:.2f} " if args.curriculum else ""  # p adapts after the (greedy) gate
             sstr = " ".join(f"{k} {v:.2f}" for k, v in sorted(scores.items()))
-            print(f"[iter {it}] league: {len(zs)} pos (self {n_self} winpts {winpts:.1f}) "
+            print(f"[iter {it}] league: {ptag}{len(zs)} pos (self {n_self} winpts {winpts:.1f}) "
                   f"| net-vs: {sstr} | buffer {len(buffer)}", flush=True)
         else:
             if pool is not None:
@@ -268,7 +324,24 @@ def main():
                                     args.batch_size, args.lr, args.device)
         print(f"[iter {it}] train: policy_loss {p_l:.3f} value_loss {v_l:.3f}", flush=True)
 
-        if args.league:
+        if args.curriculum:
+            export_npz(candidate, work_cand)
+            export_npz(best, work_best)
+            cand_s, best_s = _curriculum_gate(
+                pool, league, args, work_cand, work_best, curr_p, it)
+            promoted = cand_s >= best_s
+            # Adapt difficulty from the GREEDY gate score of whichever net is now
+            # best (cleaner signal than the exploratory generation win rate).
+            ability = cand_s if promoted else best_s
+            new_p = curr_p
+            if ability >= args.curr_target + 0.05:
+                new_p = min(1.0, curr_p + args.curr_step)
+            elif ability <= args.curr_target - 0.10:
+                new_p = max(0.0, curr_p - args.curr_step)
+            gate_msg = (f"gate(curr p={curr_p:.2f}->{new_p:.2f}): "
+                        f"cand {cand_s:.3f} vs best {best_s:.3f}")
+            curr_p = new_p
+        elif args.league:
             export_npz(candidate, work_cand)
             export_npz(best, work_best)
             cand_s, best_s, cand_scores = _league_gate(
@@ -298,7 +371,7 @@ def main():
             best = candidate
             promotions += 1
             torch.save({"best": best.state_dict(), "iter": it,
-                        "promotions": promotions}, best_path)
+                        "promotions": promotions, "curr_p": curr_p}, best_path)
             export_npz(best, npz_path)
             if args.league:
                 snap = os.path.join(pool_dir, f"az_iter{it}.npz")
@@ -310,7 +383,7 @@ def main():
               f"| total {time.time()-t0:.0f}s", flush=True)
 
         torch.save({"best": best.state_dict(), "iter": it,
-                    "promotions": promotions}, last_path)
+                    "promotions": promotions, "curr_p": curr_p}, last_path)
         with open(buf_path, "wb") as f:
             pickle.dump(buffer, f)
 

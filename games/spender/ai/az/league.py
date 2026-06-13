@@ -104,6 +104,19 @@ def _make_opponent_fn(spec: dict, rng: random.Random):
         ev = load_evaluator(spec["npz"])
         n = spec["opp_sims"]
         return lambda s: _az_opponent_action(ev, s, rng, n)
+    if spec["kind"] == "eps":
+        # Curriculum opponent: a competent heuristic move with probability p,
+        # else a random legal move. p is the difficulty/TEMPO knob — p=0 is a
+        # non-racing random player (beatable), p=1 a full racer. The smooth ramp
+        # between lets the net climb from winnable games toward the real target.
+        weights = _load_opp_weights(spec["variant"])
+        p, opp_iters = spec["p"], spec["opp_iters"]
+
+        def _eps(s):
+            if rng.random() < p:
+                return _heuristic_action(s, weights, opp_iters)
+            return rng.choice(E.legal_actions(s))
+        return _eps
     raise ValueError(f"unknown opponent kind: {spec['kind']}")
 
 
@@ -128,7 +141,7 @@ def _league_worker(task: dict):
         pis_all.extend(p)
         zs_all.extend(z)
         score += result
-    label = task["spec"].get("variant") or task["spec"].get("label", "az")
+    label = task["spec"].get("label") or task["spec"].get("variant", "az")
     stats = {"label": label, "games": task["n_games"], "net_score": score}
     feats = np.stack(feats_all) if feats_all else np.zeros((0, F.N_FEATURES), np.float32)
     pis = np.stack(pis_all) if pis_all else np.zeros((0, E.N_ACTIONS), np.float32)
