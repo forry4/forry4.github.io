@@ -1,0 +1,4 @@
+# Hashed Vite bundles are build artifacts: never line-ending-normalize or
+# 3-way text-merge them (a rename/rename deploy conflict once concatenated two
+# bundles into a corrupt file). Treat as opaque binary.
+docs/assets/*.js binary
