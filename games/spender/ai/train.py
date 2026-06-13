@@ -23,10 +23,12 @@ The two phases tune different, composable parts of the same agent: Phase 1 the
 move policy, Phase 2 the position evaluation that policy's tree search leans on.
 
 Usage:
-    python -m games.spender.train all       --out games/spender/weights.json
-    python -m games.spender.train evolve     --generations 15 --pop 10
-    python -m games.spender.train td         --games 2000
-    python -m games.spender.train validate   --games 40        # MCTS, learned vs default
+    python -m games.spender.ai.train all      --out games/spender/ai/weights.json
+    python -m games.spender.ai.train evolve    --generations 15 --pop 10
+    python -m games.spender.ai.train td        --games 2000
+    python -m games.spender.ai.train validate  --games 40        # MCTS, learned vs default
+    python -m games.spender.ai.train tournament                  # real-MCTS A/B/C round-robin
+    python -m games.spender.ai.train coevolve                    # tune tactics under real MCTS
 """
 from __future__ import annotations
 
@@ -39,7 +41,7 @@ import random
 import time
 
 from games.spender import main
-from games.spender import strategist
+from games.spender.ai import strategist
 
 # ─── Weight groups ────────────────────────────────────────────────────────────
 
@@ -74,6 +76,27 @@ CARD_BOUNDS = {
     "rollout_reserve_threshold": (0.0, 15.0),
     "block_urgency_gate": (0.0, 1.1),
 }
+
+# Opponent-aware tactical weights (added after the original CARD_KEYS were frozen).
+# These are excluded from the greedy `evolve` because greedy self-play can't judge
+# them — its opponent never threatens coherently, so denial/race/lose-prevention
+# never pay off (documented). The `coevolve` mode tunes them under REAL-MCTS games,
+# where threats ARE coherent, to test whether they survive selection.
+TACTICAL_KEYS = [
+    "noble_race_weight", "block_efficiency_weight", "block_noble_weight",
+    "lose_prevention", "gold_reserve",
+]
+TACTICAL_BOUNDS = {
+    "noble_race_weight": (0.0, 4.0),
+    "block_efficiency_weight": (0.0, 3.0),
+    "block_noble_weight": (0.0, 3.0),
+    "lose_prevention": (0.0, 1.0),   # used as a truthy gate (>0 = on)
+    "gold_reserve": (0.0, 1.0),      # used as a truthy gate (>0 = on)
+}
+# Co-evolution tunes the move policy AND the tactical features together. CARD_KEYS
+# already covers contested_weight / noble_scarcity; pos_* are left fixed.
+COEVOLVE_KEYS = CARD_KEYS + TACTICAL_KEYS
+COEVOLVE_BOUNDS = {**CARD_BOUNDS, **TACTICAL_BOUNDS}
 
 WEIGHTS_OUT = os.path.join(os.path.dirname(__file__), "weights.json")
 
@@ -221,6 +244,120 @@ def evolve(generations: int, pop_size: int, games_per_pair: int, *,
     print("[evolve] best card weights:")
     for k in CARD_KEYS:
         print(f"    {k:28s} {best[k]:.3f}  (was {main.DEFAULT_WEIGHTS[k]})")
+    return best
+
+
+# ─── Real-MCTS tournament + tactical co-evolution ─────────────────────────────
+# The greedy `evolve` above can't judge opponent-aware tactics (its rollout
+# opponent never threatens coherently). These run games under ACTUAL MCTS, so a
+# competent racing/blocking opponent exists and tactical features can be rewarded
+# — or shown to still not matter. Value-leaf is forced off (rollout MCTS) so the
+# card weights / tactical features are what's being measured, matching the
+# A/B/C playtest configs.
+
+def _mutate_keys(weights: dict, keys: list[str], bounds: dict, sigma: float,
+                 rng: random.Random) -> dict:
+    """Gaussian perturbation of `keys`, each clamped to its bound."""
+    child = dict(weights)
+    for k in keys:
+        lo, hi = bounds[k]
+        child[k] = min(hi, max(lo, weights[k] + rng.gauss(0.0, sigma * (hi - lo))))
+    return child
+
+
+def _round_robin_fitness_mcts(pop: list[dict], games_per_pair: int,
+                              mcts_iters: int, seed: int) -> list[float]:
+    """Round-robin fitness under real-MCTS games (coherent threats)."""
+    n = len(pop)
+    score = [0.0] * n
+    played = [0] * n
+    for i in range(n):
+        for j in range(i + 1, n):
+            a = match(pop[i], pop[j], games_per_pair, policy="mcts",
+                      mcts_iters=mcts_iters, base_seed=seed + i * 1000 + j)
+            score[i] += a * games_per_pair
+            score[j] += (1.0 - a) * games_per_pair
+            played[i] += games_per_pair
+            played[j] += games_per_pair
+    return [score[i] / played[i] if played[i] else 0.0 for i in range(n)]
+
+
+def tournament(configs: dict[str, dict], games_per_pair: int, mcts_iters: int,
+               seed: int = 20) -> dict[str, float]:
+    """Real-MCTS round-robin among named weight configs. Prints a win-rate matrix
+    and ranking; returns {name: avg_score across all its games}."""
+    main.USE_VALUE_LEAF = False  # rollout MCTS — measure the card/tactical weights
+    names = list(configs)
+    n = len(names)
+    mat: dict[str, dict[str, float | None]] = {a: {b: None for b in names} for a in names}
+    tot = {a: 0.0 for a in names}
+    played = {a: 0 for a in names}
+    print(f"[tournament] {n} configs, {games_per_pair} games/pair, "
+          f"{mcts_iters} iters/move (rollout MCTS)")
+    for i in range(n):
+        for j in range(i + 1, n):
+            a, b = names[i], names[j]
+            t0 = time.time()
+            s = match(configs[a], configs[b], games_per_pair, policy="mcts",
+                      mcts_iters=mcts_iters, base_seed=seed + i * 1000 + j)
+            mat[a][b], mat[b][a] = s, 1.0 - s
+            tot[a] += s * games_per_pair
+            tot[b] += (1.0 - s) * games_per_pair
+            played[a] += games_per_pair
+            played[b] += games_per_pair
+            print(f"  {a:>12} vs {b:<12} {s:.3f} : {1 - s:.3f}  ({time.time() - t0:.0f}s)")
+    avg = {a: (tot[a] / played[a] if played[a] else 0.0) for a in names}
+    print("\n[tournament] win-rate matrix (row's score vs col):")
+    print("            " + "".join(f"{b:>12}" for b in names))
+    for a in names:
+        cells = "".join((f"{mat[a][b]:>12.3f}" if mat[a][b] is not None else f"{'—':>12}")
+                        for b in names)
+        print(f"{a:>12}{cells}")
+    print("\n[tournament] ranking:")
+    for a in sorted(names, key=lambda x: -avg[x]):
+        print(f"  {a:>12}  {avg[a]:.3f}")
+    return avg
+
+
+def coevolve(generations: int, pop_size: int, games_per_pair: int, mcts_iters: int, *,
+             start: dict, sigma: float = 0.15, seed: int = 2024,
+             also_seed: dict | None = None) -> dict:
+    """Evolve move-policy + tactical weights together under real-MCTS round-robin
+    self-play. Each generation prints the best fitness and the population-MEAN of
+    every tactical weight, so we can watch whether selection keeps the opponent-
+    aware features on (they help) or erodes them toward 0 (the documented blindness,
+    now under coherent threats). Returns the best full weight dict found."""
+    main.USE_VALUE_LEAF = False
+    rng = random.Random(seed)
+    base = dict(start)
+    pop = [dict(base)] + [_mutate_keys(base, COEVOLVE_KEYS, COEVOLVE_BOUNDS, sigma, rng)
+                          for _ in range(pop_size - 1)]
+    if also_seed is not None and pop_size >= 2:
+        pop[1] = dict(also_seed)  # guarantee a tactics-off lineage is represented
+    n_elite = max(1, int(round(pop_size * 0.3)))
+    best, best_fit = dict(base), -1.0
+    print(f"[coevolve] pop={pop_size} gpp={games_per_pair} iters={mcts_iters} "
+          f"gens={generations} — tuning {len(COEVOLVE_KEYS)} weights under rollout MCTS")
+    for gen in range(generations):
+        t0 = time.time()
+        fit = _round_robin_fitness_mcts(pop, games_per_pair, mcts_iters, seed + gen)
+        ranked = sorted(range(len(pop)), key=lambda i: fit[i], reverse=True)
+        elites = [pop[i] for i in ranked[:n_elite]]
+        if fit[ranked[0]] > best_fit:
+            best_fit, best = fit[ranked[0]], dict(pop[ranked[0]])
+        tmeans = {k: sum(p[k] for p in pop) / len(pop) for k in TACTICAL_KEYS}
+        decay = sigma * (1.0 - 0.6 * gen / max(1, generations - 1))
+        nxt = [dict(e) for e in elites]
+        while len(nxt) < pop_size:
+            parent = elites[rng.randrange(len(elites))]
+            nxt.append(_mutate_keys(parent, COEVOLVE_KEYS, COEVOLVE_BOUNDS, decay, rng))
+        pop = nxt
+        tm = "  ".join(f"{k.split('_')[0]}={tmeans[k]:.2f}" for k in TACTICAL_KEYS)
+        print(f"[coevolve] gen {gen + 1}/{generations} best={fit[ranked[0]]:.3f} "
+              f"overall={best_fit:.3f} | pop-mean {tm} ({time.time() - t0:.0f}s)")
+    print("[coevolve] best tactical weights:")
+    for k in TACTICAL_KEYS:
+        print(f"    {k:28s} {best[k]:.3f}")
     return best
 
 
@@ -722,6 +859,23 @@ def main_cli() -> None:
                      help="wall-clock budget (s/move) instead of fixed iters")
     pvv.add_argument("--weights", default=WEIGHTS_OUT)
 
+    ptr = sub.add_parser("tournament", help="Real-MCTS round-robin among A/B/C (+ extra files)")
+    ptr.add_argument("--games-per-pair", type=int, default=30)
+    ptr.add_argument("--mcts-iters", type=int, default=120)
+    ptr.add_argument("--configs", nargs="*", default=[],
+                     help="extra configs as name=path/to/weights.json")
+
+    pco = sub.add_parser("coevolve", help="Evolve policy+tactical weights under real-MCTS self-play")
+    pco.add_argument("--generations", type=int, default=8)
+    pco.add_argument("--pop", type=int, default=8)
+    pco.add_argument("--games-per-pair", type=int, default=6)
+    pco.add_argument("--mcts-iters", type=int, default=100)
+    pco.add_argument("--sigma", type=float, default=0.15)
+    pco.add_argument("--start", default=None, help="seed config file (default: variant C)")
+    pco.add_argument("--out", default=None, help="write the best config to this file")
+    pco.add_argument("--validate-games", type=int, default=0,
+                     help="after evolving, validate the best vs deployed weights with MCTS")
+
     pb = sub.add_parser("benchmark", help="Play the AI vs the scripted strategist")
     pb.add_argument("--games", type=int, default=40)
     pb.add_argument("--mcts-iters", type=int, default=150)
@@ -767,6 +921,26 @@ def main_cli() -> None:
         label = args.baseline if args.baseline else "default"
         validate(_load(args.infile), args.games, args.mcts_iters,
                  baseline=baseline, baseline_label=label)
+
+    elif args.cmd == "tournament":
+        main.load_weights()
+        configs = {name: dict(main.WEIGHT_VARIANTS[name]) for name in ("A", "B", "C")}
+        for spec in args.configs:
+            name, path = spec.split("=", 1)
+            configs[name] = _load(path)
+        tournament(configs, args.games_per_pair, args.mcts_iters)
+
+    elif args.cmd == "coevolve":
+        main.load_weights()
+        start = _load(args.start) if args.start else dict(main.WEIGHT_VARIANTS["C"])
+        a_off = dict(main.WEIGHT_VARIANTS["A"])
+        best = coevolve(args.generations, args.pop, args.games_per_pair, args.mcts_iters,
+                        start=start, sigma=args.sigma, also_seed=a_off)
+        if args.out:
+            _save(best, args.out)
+        if args.validate_games:
+            validate(best, args.validate_games, args.mcts_iters,
+                     baseline=dict(main.WEIGHT_VARIANTS["A"]), baseline_label="deployed-A")
 
     elif args.cmd == "value":
         cw = _load(args.weights)

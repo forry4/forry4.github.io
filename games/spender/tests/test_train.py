@@ -11,8 +11,8 @@ import random
 
 import pytest
 
-from games.spender import main, train
-from games.spender import strategist
+from games.spender import main
+from games.spender.ai import train, strategist
 
 
 @pytest.fixture(autouse=True)
@@ -100,6 +100,32 @@ def test_mutate_only_touches_card_keys():
     child = train._mutate(base, sigma=0.3, rng=rng)
     for k in train.POS_KEYS:
         assert child[k] == base[k]
+
+
+def test_coevolve_key_sets_are_valid_and_bounded():
+    # Every co-evolved key is a real weight with a bound, and the tactical keys are
+    # exactly the new opponent-aware features (not already in the greedy CARD_KEYS).
+    for k in train.COEVOLVE_KEYS:
+        assert k in main.DEFAULT_WEIGHTS, f"{k} not a real weight"
+        assert k in train.COEVOLVE_BOUNDS, f"{k} has no bound"
+    for k in train.TACTICAL_KEYS:
+        assert k not in train.CARD_KEYS, f"{k} should not be in greedy CARD_KEYS"
+        assert main.DEFAULT_WEIGHTS[k] == 0.0, f"{k} should default off"
+
+
+def test_mutate_keys_respects_bounds_for_tactical_weights():
+    rng = random.Random(0)
+    base = dict(main.WEIGHT_VARIANTS["C"])
+    for _ in range(200):
+        child = train._mutate_keys(base, train.COEVOLVE_KEYS, train.COEVOLVE_BOUNDS,
+                                   sigma=0.5, rng=rng)
+        for k in train.COEVOLVE_KEYS:
+            lo, hi = train.COEVOLVE_BOUNDS[k]
+            assert lo <= child[k] <= hi, f"{k}={child[k]} out of [{lo},{hi}]"
+        # pos_* untouched by co-evolution
+        for k in train.POS_KEYS:
+            assert child[k] == base[k]
+        base = child
 
 
 def test_evolve_returns_full_inbounds_weights():

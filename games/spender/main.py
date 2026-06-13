@@ -553,9 +553,12 @@ DEFAULT_WEIGHTS: dict[str, float] = {
 
 WEIGHTS: dict[str, float] = dict(DEFAULT_WEIGHTS)
 
+# AI data files (weight sets + value model) live in the ai/ subpackage.
+_AI_DIR = os.path.join(os.path.dirname(__file__), "ai")
+
 # Path can be overridden for playtesting (e.g. SPENDER_WEIGHTS=weights.candidate.json,
 # or a nonexistent path to force the original defaults).
-WEIGHTS_PATH = os.environ.get("SPENDER_WEIGHTS") or os.path.join(os.path.dirname(__file__), "weights.json")
+WEIGHTS_PATH = os.environ.get("SPENDER_WEIGHTS") or os.path.join(_AI_DIR, "weights.json")
 
 # Named weight variants available for per-game selection. "A" is the default
 # deployed weights (env-overridable for playtest scripts); the rest load from the
@@ -596,9 +599,8 @@ def load_weights(path: str | None = None) -> dict[str, float]:
     WEIGHTS = _merge_weights_file(path or WEIGHTS_PATH, DEFAULT_WEIGHTS)
     WEIGHT_VARIANTS.clear()
     WEIGHT_VARIANTS["A"] = WEIGHTS
-    here = os.path.dirname(__file__)
     for name, fname in VARIANT_FILES.items():
-        WEIGHT_VARIANTS[name] = _merge_weights_file(os.path.join(here, fname), WEIGHTS)
+        WEIGHT_VARIANTS[name] = _merge_weights_file(os.path.join(_AI_DIR, fname), WEIGHTS)
     return WEIGHTS
 
 
@@ -655,7 +657,7 @@ def _board_scarcity(game: dict) -> float:
 
 # Override for playtesting: SPENDER_VALUE_MODEL=value_model.candidate.json to try a
 # candidate, or =none (a nonexistent path) to force the rollout MCTS.
-VALUE_MODEL_PATH = os.environ.get("SPENDER_VALUE_MODEL") or os.path.join(os.path.dirname(__file__), "value_model.json")
+VALUE_MODEL_PATH = os.environ.get("SPENDER_VALUE_MODEL") or os.path.join(_AI_DIR, "value_model.json")
 _VALUE_MODEL: dict | None = None
 USE_VALUE_LEAF: bool = False
 # Human-readable feature order (for the trainer / introspection); MUST match
