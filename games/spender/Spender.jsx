@@ -99,7 +99,8 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,se
 .browser-guest-badge{font-size:.65rem;letter-spacing:.1em;color:var(--text-muted);border:1px solid var(--border);padding:2px 7px;border-radius:10px;font-family:'Cinzel',serif;text-transform:uppercase}
 .browser-create{margin-bottom:36px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .btn-outline.active{background:var(--gold);color:#0f0e0c}
-.ai-picker{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:-22px 0 36px;padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg)}
+.ai-picker-wrap{position:relative;display:inline-flex}
+.ai-picker{position:absolute;top:calc(100% + 8px);left:0;z-index:30;display:flex;gap:8px;align-items:center;flex-wrap:wrap;max-width:min(92vw,420px);padding:12px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:0 10px 28px rgba(0,0,0,.5)}
 .ai-picker-label{font-family:'Cinzel',serif;font-size:.72rem;letter-spacing:.06em;color:var(--text-dim);text-transform:uppercase;margin-right:4px}
 .browser-section{margin-bottom:32px}
 .section-hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
@@ -976,26 +977,27 @@ export default function SpenderApp() {
 						<button className="btn btn-gold" onClick={() => handleCreate(false)}>
 							+ Create New Game
 						</button>
-						<button className={`btn btn-outline${showAiPicker ? " active" : ""}`}
-							onClick={() => setShowAiPicker(v => !v)}>
-							Play vs AI {showAiPicker ? "▴" : "▾"}
-						</button>
+						<div className="ai-picker-wrap">
+							<button className={`btn btn-outline${showAiPicker ? " active" : ""}`}
+								onClick={() => setShowAiPicker(v => !v)}>
+								Play vs AI {showAiPicker ? "▴" : "▾"}
+							</button>
+							{showAiPicker && (
+								<div className="ai-picker">
+									<span className="ai-picker-label">Choose AI opponent</span>
+									{["A", "B", "C", "C2", "Z"].map(v => (
+										<button key={v} className="btn btn-outline btn-sm"
+											onClick={() => { setShowAiPicker(false); handleCreate(true, v); }}>
+											AI {v}
+										</button>
+									))}
+								</div>
+							)}
+						</div>
 						<button className="refresh-btn" title="Refresh" onClick={() => fetchGames(authUser)}>
 							{browserLoading ? <span className="spinner" /> : "↻"}
 						</button>
 					</div>
-
-					{showAiPicker && (
-						<div className="ai-picker">
-							<span className="ai-picker-label">Choose AI opponent</span>
-							{["A", "B", "C", "C2", "Z"].map(v => (
-								<button key={v} className="btn btn-outline btn-sm"
-									onClick={() => handleCreate(true, v)}>
-									AI {v}
-								</button>
-							))}
-						</div>
-					)}
 
 					{(() => {
 						const savedId = (() => { try { return localStorage.getItem("spender_roomId"); } catch { return null; } })();
