@@ -373,11 +373,12 @@ def load_game_to_memory(room_id: str) -> bool:
 def list_open_games() -> list[dict]:
     conn = get_db_conn()
     cur = conn.cursor()
-    cur.execute("""SELECT id, player1_name, created_at FROM games
+    cur.execute("""SELECT id, player1_id, player1_name, created_at FROM games
                    WHERE status='open' ORDER BY created_at DESC LIMIT 20""")
     rows = cur.fetchall()
     conn.close()
-    return [{"id": r["id"], "host_name": r["player1_name"], "created_at": r["created_at"]} for r in rows]
+    return [{"id": r["id"], "host_id": r["player1_id"], "host_name": r["player1_name"],
+             "created_at": r["created_at"]} for r in rows]
 
 
 def list_user_games(user_id: str) -> list[dict]:
@@ -404,11 +405,27 @@ def list_user_games(user_id: str) -> list[dict]:
             "id": r["id"],
             "status": r["status"],
             "opponent_name": opponent,
+            "player1_name": r["player1_name"],   # full matchup, perspective-independent
+            "player2_name": r["player2_name"],
+            "you_are_p1": is_p1,
             "your_turn": your_turn,
             "created_at": r["created_at"],
             "updated_at": r["updated_at"],
         })
     return result
+
+
+def delete_open_game(game_id: str, user_id: str) -> bool:
+    """Delete an OPEN game the user hosts (browser 'cancel'). Returns True if a
+    row was removed. Only open games can be cancelled this way."""
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM games WHERE id=? AND player1_id=? AND status='open'",
+                (game_id, user_id))
+    deleted = cur.rowcount > 0
+    conn.commit()
+    conn.close()
+    return deleted
 
 
 init_db()
@@ -2162,6 +2179,19 @@ async def get_my_games(token: str | None = None):
     if not user:
         return {"ok": False, "games": [], "message": "unauthenticated"}
     return {"ok": True, "games": list_user_games(user["id"])}
+
+
+@app.post("/games/{game_id}/cancel")
+async def cancel_open_game(game_id: str, token: str | None = None):
+    user = get_user_by_session(token)
+    if not user:
+        return {"ok": False, "message": "unauthenticated"}
+    room_id = normalize_room(game_id)
+    deleted = delete_open_game(room_id, user["id"])
+    if deleted:
+        async with ROOM_LOCK:
+            ROOMS.pop(room_id, None)
+    return {"ok": deleted, "message": None if deleted else "not your open game"}
 
 
 @app.post("/me/session-token")

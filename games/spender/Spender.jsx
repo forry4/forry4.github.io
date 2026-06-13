@@ -98,6 +98,9 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,se
 .browser-username{font-family:'Cinzel',serif;font-size:.8rem;color:var(--text-dim);letter-spacing:.06em;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .browser-guest-badge{font-size:.65rem;letter-spacing:.1em;color:var(--text-muted);border:1px solid var(--border);padding:2px 7px;border-radius:10px;font-family:'Cinzel',serif;text-transform:uppercase}
 .browser-create{margin-bottom:36px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.btn-outline.active{background:var(--gold);color:#0f0e0c}
+.ai-picker{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:-22px 0 36px;padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg)}
+.ai-picker-label{font-family:'Cinzel',serif;font-size:.72rem;letter-spacing:.06em;color:var(--text-dim);text-transform:uppercase;margin-right:4px}
 .browser-section{margin-bottom:32px}
 .section-hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
 .section-title{font-family:'Cinzel',serif;font-size:.7rem;letter-spacing:.18em;color:var(--gold);text-transform:uppercase}
@@ -177,7 +180,7 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,se
 .noble-req-row{display:flex;gap:3px;align-items:center;font-size:.65rem;color:var(--text-dim);font-family:'Cinzel',serif}
 
 /* ─── Action bar ────────────────────────────────────────────────────────── */
-.action-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg)}
+.action-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-sizing:border-box;min-height:62px}
 .action-hint{flex:1;font-style:italic;color:var(--text-dim);font-size:.88rem;min-width:120px}
 .turn-badge{font-family:'Cinzel',serif;font-size:.72rem;letter-spacing:.08em;padding:4px 12px;border-radius:20px;white-space:nowrap}
 .turn-badge.mine{background:var(--gold);color:#0f0e0c}
@@ -452,6 +455,7 @@ export default function SpenderApp() {
 	const [openGames, setOpenGames] = useState([]);
 	const [myGames, setMyGames] = useState([]);
 	const [browserLoading, setBrowserLoading] = useState(false);
+	const [showAiPicker, setShowAiPicker] = useState(false);
 
 	const playerName = authUser?.name || "";
 
@@ -686,6 +690,17 @@ export default function SpenderApp() {
 		try { localStorage.setItem("spender_roomId", gameId); } catch {}
 		pendingActionRef.current = { action: "join", name: playerName };
 		connect(`${WS_BASE}/${gameId}/${myId}`);
+	};
+
+	const handleCancel = async (gameId) => {
+		try {
+			const tok = authUser?.session_token;
+			await fetch(`${HTTP_BASE}/games/${gameId}/cancel${tok ? `?token=${tok}` : ""}`, { method: "POST" });
+		} catch {}
+		try {
+			if (localStorage.getItem("spender_roomId") === gameId) localStorage.removeItem("spender_roomId");
+		} catch {}
+		fetchGames(authUser);
 	};
 
 	const handleContinue = (gameId) => {
@@ -961,25 +976,26 @@ export default function SpenderApp() {
 						<button className="btn btn-gold" onClick={() => handleCreate(false)}>
 							+ Create New Game
 						</button>
-						<button className="btn btn-outline" onClick={() => handleCreate(true, "A")}>
-							Play vs AI (A)
-						</button>
-						<button className="btn btn-outline" onClick={() => handleCreate(true, "B")}>
-							Play vs AI (B)
-						</button>
-						<button className="btn btn-outline" onClick={() => handleCreate(true, "C")}>
-							Play vs AI (C)
-						</button>
-						<button className="btn btn-outline" onClick={() => handleCreate(true, "C2")}>
-							Play vs AI (C2)
-						</button>
-						<button className="btn btn-outline" onClick={() => handleCreate(true, "Z")}>
-							Play vs AI (Z)
+						<button className={`btn btn-outline${showAiPicker ? " active" : ""}`}
+							onClick={() => setShowAiPicker(v => !v)}>
+							Play vs AI {showAiPicker ? "▴" : "▾"}
 						</button>
 						<button className="refresh-btn" title="Refresh" onClick={() => fetchGames(authUser)}>
 							{browserLoading ? <span className="spinner" /> : "↻"}
 						</button>
 					</div>
+
+					{showAiPicker && (
+						<div className="ai-picker">
+							<span className="ai-picker-label">Choose AI opponent</span>
+							{["A", "B", "C", "C2", "Z"].map(v => (
+								<button key={v} className="btn btn-outline btn-sm"
+									onClick={() => handleCreate(true, v)}>
+									AI {v}
+								</button>
+							))}
+						</div>
+					)}
 
 					{(() => {
 						const savedId = (() => { try { return localStorage.getItem("spender_roomId"); } catch { return null; } })();
@@ -1019,7 +1035,11 @@ export default function SpenderApp() {
 									<div key={g.id} className="game-card">
 										<div className="game-card-info">
 											<div className="game-card-title">
-												{g.opponent_name ? `vs ${g.opponent_name}` : "Waiting for opponent…"}
+												{g.you_are_p1 ? `${g.player1_name} (you)` : g.player1_name}
+												{" vs "}
+												{g.player2_name
+													? (g.you_are_p1 ? g.player2_name : `${g.player2_name} (you)`)
+													: "waiting for opponent…"}
 											</div>
 											<div className="game-card-meta">
 												{g.id} · {timeAgo(g.updated_at)}
@@ -1056,13 +1076,19 @@ export default function SpenderApp() {
 								{openGames.map(g => (
 									<div key={g.id} className="game-card">
 										<div className="game-card-info">
-											<div className="game-card-title">{g.host_name}'s game</div>
+											<div className="game-card-title">
+												{g.host_id === myId ? "Your game" : `${g.host_name}'s game`}
+											</div>
 											<div className="game-card-meta">{g.id} · {timeAgo(g.created_at)}</div>
 										</div>
 										<div className="game-card-actions">
-											<button className="btn btn-gold btn-sm" onClick={() => handleJoinGame(g.id)}>
-												Join
-											</button>
+											{g.host_id === myId
+												? <button className="btn btn-ghost btn-sm" onClick={() => handleCancel(g.id)}>
+													Cancel
+												</button>
+												: <button className="btn btn-gold btn-sm" onClick={() => handleJoinGame(g.id)}>
+													Join
+												</button>}
 										</div>
 									</div>
 								))}
