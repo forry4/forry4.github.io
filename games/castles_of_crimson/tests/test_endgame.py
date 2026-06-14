@@ -57,7 +57,8 @@ def test_tiebreak_furthest_back_on_track():
     g["players"]["p1"]["vp"] = 5
     g["players"]["p2"]["vp"] = 5
     # Equal empties (touch neither duchy). Farthest back on the track wins.
-    g["turn_order_track"] = ["p2", "p1"]   # p1 is last -> farthest back
+    # p2 is furthest forward (space 6), p1 is at the back (space 0) -> p1 wins the tie.
+    g["track"] = [["p1"], [], [], [], [], [], ["p2"]]
     assert engine.winner(g) == "p1"
 
 

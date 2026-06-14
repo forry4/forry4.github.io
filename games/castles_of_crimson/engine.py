@@ -68,13 +68,46 @@ def _refill_goods_queue(game: dict) -> None:
     game["goods_queue"] = _draw(game["goods_supply"], tiles.GOODS_PER_PHASE)
 
 
+# ── Turn-order track (7 spaces, players stack; ships advance you forward) ─────
+NUM_TRACK_SPACES = 7
+
+
+def _track_order(game: dict) -> list:
+    """Turn order, front-to-back: furthest-forward space first, top-of-stack first."""
+    order = []
+    for s in range(NUM_TRACK_SPACES - 1, -1, -1):
+        for pid in reversed(game["track"][s]):   # top of stack acts before those beneath
+            order.append(pid)
+    return order
+
+
+def _player_space(game: dict, pid: str) -> int:
+    for s in range(NUM_TRACK_SPACES):
+        if pid in game["track"][s]:
+            return s
+    return 0
+
+
+def _advance_track(game: dict, pid: str, n: int = 1) -> None:
+    """Move pid forward n spaces, landing on TOP of the destination stack."""
+    if n <= 0:
+        return
+    cur = _player_space(game, pid)
+    if pid in game["track"][cur]:
+        game["track"][cur].remove(pid)
+    dest = min(cur + n, NUM_TRACK_SPACES - 1)
+    game["track"][dest].append(pid)
+
+
 def _begin_round(game: dict) -> None:
     """Roll everyone's dice + the white die, and place this round's goods tile.
 
-    The start player for the round is the front of the turn-order track (ships
-    can change this during play); they hold the white die.
+    Turn order for the round is read off the track (ships advance markers during
+    play, changing future rounds); the front-most player is the start player and
+    holds the white die.
     """
-    game["start_player"] = game["turn_order_track"][0]
+    game["round_order"] = _track_order(game)
+    game["start_player"] = game["round_order"][0]
 
     rng = _make_rng(game)
     for pid in game["order"]:
@@ -90,6 +123,7 @@ def _begin_round(game: dict) -> None:
     game["turn"] = game["start_player"]
     game["black_depot_used_this_turn"] = False
     game["m6_used_this_turn"] = False
+    game["ship_advance_pending"] = 0
     _snapshot_turn(game)
 
 
@@ -133,7 +167,11 @@ def new_game(player_ids: list[str], names: dict[str, str] | None = None, seed: i
         "phase": "playing",                  # "playing" | "over"
         "winner": None,
         "order": list(player_ids),
-        "turn_order_track": list(player_ids),
+        # Turn-order track: 7 spaces, each a stack of pids (bottom-to-top). All
+        # players start stacked on space 0 with the first player on top.
+        "track": [list(reversed(player_ids))] + [[] for _ in range(NUM_TRACK_SPACES - 1)],
+        "round_order": list(player_ids),
+        "ship_advance_pending": 0,
         "start_player": player_ids[0],
         "white_die": None,
         "dice": {},
@@ -223,8 +261,8 @@ def winner(game: dict) -> str | list[str]:
     if len(tied) == 1:
         return tied[0]
 
-    track = game["turn_order_track"]
-    tied.sort(key=lambda pid: track.index(pid), reverse=True)  # farthest back first
+    order = _track_order(game)
+    tied.sort(key=lambda pid: order.index(pid), reverse=True)  # farthest back on the track wins
     return tied[0]
 
 
@@ -302,12 +340,13 @@ def _snapshot_turn(game: dict) -> None:
 
 
 def _advance_turn(game: dict) -> None:
-    track = game["turn_order_track"]
-    idx = track.index(game["turn"])
-    if idx + 1 < len(track):
-        game["turn"] = track[idx + 1]
+    order = game["round_order"]
+    idx = order.index(game["turn"])
+    if idx + 1 < len(order):
+        game["turn"] = order[idx + 1]
         game["black_depot_used_this_turn"] = False
         game["m6_used_this_turn"] = False
+        game["ship_advance_pending"] = 0
         _snapshot_turn(game)
     else:
         _advance_round(game)
@@ -462,14 +501,6 @@ def _place_building_effect(game: dict, pid: str, sid: str, tile: dict) -> None:
     _log(game, pid, "building_effect", building=bt)
 
 
-def _advance_turn_order(game: dict, pid: str) -> None:
-    """Move the player one step forward on the turn-order track (front = start)."""
-    track = game["turn_order_track"]
-    idx = track.index(pid)
-    if idx > 0:
-        track[idx - 1], track[idx] = track[idx], track[idx - 1]
-
-
 def _take_all_goods_from_depot(game: dict, pid: str, depot: int) -> None:
     p = game["players"][pid]
     d = game["depots"][str(depot)]
@@ -483,10 +514,11 @@ def _take_all_goods_from_depot(game: dict, pid: str, depot: int) -> None:
 
 
 def _place_ship_effect(game: dict, pid: str, sid: str, tile: dict) -> None:
+    # Each ship advances your track marker one space when you end your turn.
+    game["ship_advance_pending"] = game.get("ship_advance_pending", 0) + 1
+    # Plus you immediately take all goods from a depot of your choice (if any exist).
     total_goods = sum(len(game["depots"][str(d)]["goods"]) for d in range(1, 7))
-    if total_goods == 0:
-        _advance_turn_order(game, pid)
-    else:
+    if total_goods > 0:
         _set_pending(game, pid, "ship_choose_depot", {})
 
 
@@ -673,6 +705,11 @@ def _h_adjust_die(game, pid, move):
 
 
 def _h_end_turn(game, pid, move):
+    # Apply this turn's queued ship advances to the track (each ship = 1 space).
+    n = game.get("ship_advance_pending", 0)
+    if n > 0:
+        _advance_track(game, pid, n)
+        _log(game, pid, "track_advance", spaces=n)
     _log(game, pid, "end_turn")
     _advance_turn(game)
     return True, None
@@ -724,7 +761,7 @@ def _r_ship_take_goods(game, pid, move):
     if 5 in game["players"][pid]["monastery_effects"]:
         adj_depot = d + 1 if d < 6 else d - 1
         _take_all_goods_from_depot(game, pid, adj_depot)
-    _advance_turn_order(game, pid)
+    # (The ship's track advance was queued at placement and applies at end of turn.)
     _log(game, pid, "ship_take_goods", depot=d)
     return True, None
 
@@ -770,8 +807,8 @@ def _r_townhall_place(game, pid, move):
 
 def _r_skip_pending(game, pid, move):
     kind = game["pending_kind"]
-    if kind == "ship_choose_depot":
-        _advance_turn_order(game, pid)        # a ship advances the track even if no goods taken
+    # (A ship's track advance was already queued at placement; skipping the depot
+    # choice just forgoes the goods.)
     _clear_pending(game)
     _log(game, pid, "skip_pending", kind=kind)
     return True, None

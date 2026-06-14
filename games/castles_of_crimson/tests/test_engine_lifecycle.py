@@ -129,6 +129,29 @@ def test_depots_refilled_each_phase():
         assert len(g["depots"][str(i)]["hexes"]) == tiles.DEPOT_FILL_2P
 
 
+def test_track_initial_order_and_advance():
+    g = engine.new_game(["p1", "p2"], seed=1)
+    assert g["track"][0] == ["p2", "p1"]               # both on space 0, p1 on top
+    assert engine._track_order(g) == ["p1", "p2"]      # p1 (top) goes first
+    engine._advance_track(g, "p2", 1)
+    assert engine._player_space(g, "p2") == 1
+    assert engine._track_order(g) == ["p2", "p1"]      # p2 now furthest forward
+
+
+def test_track_stacking_on_occupied_space():
+    g = engine.new_game(["p1", "p2"], seed=1)
+    engine._advance_track(g, "p2", 2)
+    engine._advance_track(g, "p1", 2)                  # lands on space 2, on top of p2
+    assert g["track"][2] == ["p2", "p1"]               # p1 on top
+    assert engine._track_order(g)[0] == "p1"
+
+
+def test_track_caps_at_last_space():
+    g = engine.new_game(["p1", "p2"], seed=1)
+    engine._advance_track(g, "p1", 99)
+    assert engine._player_space(g, "p1") == engine.NUM_TRACK_SPACES - 1
+
+
 def test_undo_turn_reverts_actions():
     g = engine.new_game(["p1", "p2"], seed=4)
     g["turn"] = "p1"

@@ -260,10 +260,12 @@ variant **Z**. 2-player only. Key facts:
   (numpy-only PUCT via `infer_np.py`, same 5s thread-pool path). No file → Z
   falls back to A; zero behavior change. `SPENDER_AZ_MODEL=none` disables.
   Production deps gained only `numpy`; torch stays out of prod.
-  **`az_model.npz` is currently deployed** (exported from iter-95 best checkpoint,
-  p=0.85, sims=512). Variant Z is live on the website. Export process:
+  **`az_model.npz` is currently deployed** (exported from iter-177 best checkpoint,
+  p=0.90, 113 promotions, sims=512). Variant Z is live on the website. Export process:
   `ckpt = torch.load('az_best.pt', map_location='cpu'); net.load_state_dict(ckpt['best']); export_npz(net, 'az_model.npz')`.
   Render auto-deploys on push to `ai/az_model.npz` (wired in `deploy-render.yml`).
+  Can export mid-training safely (training writes `az_best.pt`; export reads it and
+  writes `az_model.npz` — separate files, no interference).
 - **arena.py**: AZ vs heuristic tournaments (heuristic plays via dict
   conversion + its own `_mcts_choose_move`; sub-decisions replicate
   `_ai_discard_one`/`_ai_pick_noble`). Wilson CIs. Deploy gate: >=0.70 vs B
@@ -427,12 +429,71 @@ visit distribution, so shallow search = weak policy targets; deeper search also
 finds the efficient racing lines the net otherwise never sees (directly attacks
 the tempo problem) AND makes the curriculum games themselves better-played. Try a
 bigger net (the MLP is only ~600k params) ONLY if sims plateaus — capacity before
-data/search quality just overfits. **sims subsequently bumped 384→512** (gate-sims
-192→256) after plateau at p=0.80 for ~15 iters — confirmed working: frontier
-moved from p=0.80 to p=0.85, which then held for 10+ consecutive iters. Current
-run: `checkpoints_v3`, at iter 98, p=0.85, sims=512, --iters 200. Gate scores
-trending up slowly (0.517→0.533→0.542 over iters 96–98); target is ≥0.60 to
-advance p to 0.90.
+data/search quality just overfits. **sims bumped 384→512** after plateau at p=0.80
+— confirmed working, frontier moved to p=0.85 then p=0.90. **sims bumped again
+512→768** (gate-sims 256, opp-sims 128) after plateau at p=0.90 for ~18 iters
+with gate scores stuck at 0.53–0.58 — watching whether frontier moves to p=0.95.
+
+**gate-games bumped 60→120** (SE ±0.065 → ±0.046) after variance was causing
+artificial p drops: a single unlucky 26/60 gate ended a 14-iter p=0.90 streak.
+With 120 games the net held p=0.90 for 18+ consecutive iters cleanly before the
+sims bump.
+
+Current run: `checkpoints_v3`, at iter ~196, p=0.95, sims=768, --iters 300.
+sims=768 pushed frontier to p=0.95 by iter 191 (best=0.617) and the net is
+**holding p=0.95** for the first time (5 consecutive iters 192–196, gate scores
+0.40–0.52). `az_model.npz` deployed at iter 177 (113 promotions). Next milestone:
+gate score ≥0.60 at p=0.95 → push to p=1.0 → arena vs B/C2 → ship if ≥0.70.
+
+**Human playtest finding (iter 177 net):** the net **over-reserves** — reserving
+frequently and often reserving cards that don't make strategic sense. Root cause:
+(1) self-play doesn't punish tempo loss from bad reserves because both players do
+it; (2) gold token over-valuation in the value head biases toward reserving;
+(3) shallow search doesn't see the downstream cost of a wasted turn. Sims bump
+directly attacks (3). (1) and (2) require structural fixes:
+- **Better features** (planned for next retrain — incompatible with current weights,
+  requires fresh start): three high-value additions:
+  1. **Effective cost** per card (raw cost minus player's current bonuses, per color).
+     The net can technically derive this from existing features but has to learn
+     the subtraction internally; explicit = much easier to use.
+  2. **Engine value** per card — pre-computed scalar: this card's bonus color ×
+     sum of cost-reduction it provides to every other visible card, weighted by
+     those cards' point value. This is a *cross-card interaction* an MLP cannot
+     easily discover on its own from a flat feature vector (requires reasoning
+     across multiple cards simultaneously). Pre-computing it as a feature is a
+     genuine win — directly addresses "which card is worth reserving/buying."
+  3. **Turns-to-afford** per card — cost gap per color ÷ estimated gems/turn.
+     Addresses reserve *frequency* (tempo awareness), not just card selection.
+     "This card needs 4 more red gems; I'm collecting ~1/turn → 4 turns away"
+     directly distinguishes smart reserves from wasteful ones.
+  Noble-progress per card (how many noble requirements this satisfies) is also
+  worth adding but partially encoded already.
+  **Do NOT add these features mid-run** — input dimension change invalidates all
+  current weights. Schedule for a fresh retrain after the current run finishes.
+- **Harder opponents**: C2 races but doesn't punish bad reserves as severely as a
+  human. The net needs to face opponents that end the game before wasteful reserves
+  pay off.
+- **Sims ceiling**: more search helps up to a point, but if the value head
+  fundamentally misvalues tempo, MCTS just finds better moves within a flawed
+  strategy. The remaining lever after sims is value function quality + features.
+
+**Checkpoint system and branching (how to experiment safely):**
+- Training saves to `checkpoints_v3/`: `az_best.pt` (best promoted net — dict with
+  `best` weights, `iter`, `promotions`, `curr_p`), `az_last.pt` (latest candidate),
+  `buffer.pkl` (300k-position replay buffer). All gitignored.
+- **Fully resumable**: stop anytime, restart with `--resume` — picks up exact iter,
+  p value, and buffer. Can pause indefinitely.
+- **Branching for a feature experiment**:
+  1. Stop current run.
+  2. Copy `checkpoints_v3/` → `checkpoints_v3_backup/` to preserve the original.
+  3. Modify `features.py` (new features change input dimension → old weights incompatible).
+  4. Start a **fresh** run in a new dir (e.g. `checkpoints_v4_features/`) — no `--resume`.
+  5. If new net wins arena → ship; if worse → delete branch, `--resume` from backup.
+  - The branch is a genuine fresh start — the 196+ iters of learned weights cannot
+    carry over to a new input dimension. Trade-off: known-good current net vs
+    untested feature-enriched net that starts from zero.
+  - **Decision point**: finish current run first, evaluate iter-300 net strength,
+    then decide if a feature-enriched retrain is worth losing the current weights.
 
 ### Heuristic-tuning campaign results (June 2026 — superseded by AZ stack)
 - Ablation (40g, 120 iters, seed 777): `noble_scarcity=1.5` → 0.688 vs B was

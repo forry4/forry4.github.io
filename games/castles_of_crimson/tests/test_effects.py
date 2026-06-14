@@ -191,23 +191,26 @@ def test_castle_grants_extra_action():
     assert g["pending_pid"] is None
 
 
-# ── Ship: take goods + advance turn order ─────────────────────────────────────
-def test_ship_takes_goods_and_advances_track():
+# ── Ship: take goods now; advance the track marker at end of turn ─────────────
+def test_ship_takes_goods_and_queues_track_advance():
     g = fresh()
     blue = [(s, i["number"]) for s, i in board.SPACES.items() if i["color"] == "blue"]
     sid, num = blue[0]
     enable_adj(g, sid)
     g["depots"]["4"]["goods"] = [{"id": "gd", "kind": "goods", "color": "rose"}]
-    g["turn_order_track"] = ["p2", "p1"]  # p1 is behind
     g["dice"]["p1"]["values"] = [num, 6]
     g["players"]["p1"]["storage"] = [hext("ship", "blue", "sh")]
+    assert engine._player_space(g, "p1") == 0
     ok, err = engine.apply_move(g, "p1", {"type": "place_tile", "die_index": 0, "tile_id": "sh", "space_id": sid})
     assert ok, err
+    assert g["ship_advance_pending"] == 1
     assert g["pending_kind"] == "ship_choose_depot"
     ok2, err2 = engine.apply_move(g, "p1", {"type": "ship_take_goods", "depot": 4})
     assert ok2, err2
     assert g["players"]["p1"]["goods"].get("rose") == 1
-    assert g["turn_order_track"] == ["p1", "p2"]  # advanced forward
+    assert engine._player_space(g, "p1") == 0          # not advanced yet
+    engine.apply_move(g, "p1", {"type": "end_turn"})   # advance applies now
+    assert engine._player_space(g, "p1") == 1
 
 
 # ── Livestock pasture re-scoring ──────────────────────────────────────────────
