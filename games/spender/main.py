@@ -1631,7 +1631,7 @@ def _run_ai_turn(game: dict, ai_pid: str, mv: dict | None = None) -> None:
                 game["board"][source[1]][source[2]] = game["decks"][source[1]].pop() if game["decks"][source[1]] else None
             else:
                 ps["reserved"].pop(source[1])
-            _log_move(game, ai_pid, "buy", card={"color": card["bonus"], "points": card["points"]})
+            _log_move(game, ai_pid, "buy", card={"id": card["id"], "bonus": card["bonus"], "color": card["bonus"], "points": card["points"], "cost": card["cost"], "level": card.get("level")})
             claimable = _check_nobles(game, ai_pid)
             if claimable:
                 n = _ai_pick_noble(claimable, game, ai_pid)
@@ -1667,7 +1667,7 @@ def _run_ai_turn(game: dict, ai_pid: str, mv: dict | None = None) -> None:
                 ps["tokens"]["gold"] = ps["tokens"].get("gold", 0) + 1
             while sum(ps["tokens"].values()) > 10:
                 _ai_discard_one(game, ai_pid)
-            _log_move(game, ai_pid, "reserve", card={"color": card["bonus"], "points": card["points"]})
+            _log_move(game, ai_pid, "reserve", card={"id": card["id"], "bonus": card["bonus"], "color": card["bonus"], "points": card["points"], "cost": card["cost"], "level": card.get("level")})
 
     _finish_turn(game, ai_pid)
 
@@ -2001,7 +2001,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                             g["board"][lk][idx] = g["decks"][lk].pop() if g["decks"][lk] else None
                                         else:
                                             ps["reserved"].pop(source[1])  # type: ignore[index]
-                                        _log_move(g, pid, "buy", card={"color": card["bonus"], "points": card["points"]})
+                                        _log_move(g, pid, "buy", card={"id": card["id"], "bonus": card["bonus"], "color": card["bonus"], "points": card["points"], "cost": card["cost"], "level": card.get("level")})
                                         claimable = _check_nobles(g, pid)
                                         if len(claimable) > 1:
                                             g["pending_noble_choice"] = [n["id"] for n in claimable]
@@ -2047,7 +2047,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                         if g["bank"].get("gold", 0) > 0:
                                             g["bank"]["gold"] -= 1
                                             ps["tokens"]["gold"] = ps["tokens"].get("gold", 0) + 1
-                                        _log_move(g, pid, "reserve", card={"color": card["bonus"], "points": card["points"]})
+                                        _log_move(g, pid, "reserve", card={"id": card["id"], "bonus": card["bonus"], "color": card["bonus"], "points": card["points"], "cost": card["cost"], "level": card.get("level")})
                                         _did_change = True
                                         if sum(ps["tokens"].values()) > 10:
                                             _discard_pid = pid

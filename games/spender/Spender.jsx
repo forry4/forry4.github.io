@@ -229,8 +229,8 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,se
 /* ─── Move log ──────────────────────────────────────────────────────────── */
 .move-log{display:flex;flex-direction:column;gap:0;max-height:200px;overflow-y:auto}
 .move-log::-webkit-scrollbar{width:3px}.move-log::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
-.log-entry{display:flex;gap:6px;align-items:baseline;font-size:.76rem;color:var(--text-dim);padding:4px 0;border-bottom:1px solid rgba(58,52,42,.4);line-height:1.4;animation:log-in .2s ease}
-.log-entry:last-child{border-bottom:none}
+.log-entry{display:flex;gap:6px;align-items:baseline;font-size:.76rem;color:var(--text-dim);padding:4px 0;line-height:1.4;animation:log-in .2s ease}
+.log-entry+.log-entry{border-top:1px solid rgba(58,52,42,.4)}
 .log-entry:first-child{color:var(--text)}
 .log-entry.clickable{cursor:pointer}
 .log-entry.clickable:hover{background:rgba(201,168,76,.08);border-radius:4px;margin:0 -4px;padding-left:4px;padding-right:4px}
@@ -665,14 +665,14 @@ export default function SpenderApp() {
 			const dot = col
 				? <span style={{ width: 8, height: 8, borderRadius: "50%", background: GEM_HEX[col], display: "inline-block", marginLeft: 2, marginRight: 2, verticalAlign: "middle" }} />
 				: null;
-			return { name, action: <span>bought{dot}card{mv.card?.points ? ` +${mv.card.points}pts` : ""}</span>, card: mv.card?.id ? mv.card : null };
+			return { name, action: <span>bought{dot}card{mv.card?.points ? ` +${mv.card.points}pts` : ""}</span>, card: mv.card?.cost ? mv.card : null };
 		}
 		if (mv.type === "reserve") {
 			const col = mv.card?.bonus || mv.card?.color;
 			const dot = col
 				? <span style={{ width: 8, height: 8, borderRadius: "50%", background: GEM_HEX[col], display: "inline-block", marginLeft: 2, marginRight: 2, verticalAlign: "middle" }} />
 				: null;
-			return { name, action: <span>reserved{dot}card</span>, card: mv.card?.id ? mv.card : null };
+			return { name, action: <span>reserved{dot}card</span>, card: mv.card?.cost ? mv.card : null };
 		}
 		if (mv.type === "noble") return { name, action: `claimed noble +${mv.pts}pts` };
 		return { name, action: mv.type };
