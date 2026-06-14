@@ -216,7 +216,7 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,se
 .bonus-pill{display:flex;align-items:center;gap:3px;padding:2px 7px;border-radius:12px;font-family:'Cinzel',serif;font-size:.7rem;font-weight:700;border:1px solid}
 .reserved-label{font-size:.62rem;color:var(--text-dim);font-family:'Cinzel',serif;letter-spacing:.06em;margin-bottom:4px;text-transform:uppercase}
 .reserved-row{display:flex;gap:4px;flex-wrap:wrap}
-.gem-total{display:inline-block;font-size:.66rem;color:var(--text);font-family:'Cinzel',serif;font-weight:600;letter-spacing:.03em;margin-top:3px;background:var(--surface3);border:1px solid var(--border);padding:1px 8px;border-radius:8px}
+.gem-total{display:inline-block;font-size:.66rem;color:var(--text);font-family:'Cinzel',serif;font-weight:600;letter-spacing:.03em;margin-top:3px;background:var(--surface3);border:1.5px solid #7a6e58;padding:1px 8px;border-radius:8px;box-shadow:0 0 0 1px rgba(0,0,0,.5)}
 
 /* ─── Winner ────────────────────────────────────────────────────────────── */
 .winner-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:32px}
@@ -428,6 +428,7 @@ export default function SpenderApp() {
 	// ── Screen & room state ────────────────────────────────────────────────
 	const [screen, setScreen] = useState("loading");
 	const [loadingProgress, setLoadingProgress] = useState(0);
+	const [showLoading, setShowLoading] = useState(false);
 	const [modalCard, setModalCard] = useState(null);
 	const [roomId, setRoomId] = useState("");
 	const [roomData, setRoomData] = useState(null);
@@ -579,35 +580,48 @@ export default function SpenderApp() {
 	// ── Loading: ping backend until ready, then proceed to auth/browser ────
 	useEffect(() => {
 		if (screen !== "loading") return;
-		const startTime = Date.now();
 		let cancelled = false;
 		const dest = (() => {
 			try { const s = localStorage.getItem("spender_user"); if (s && JSON.parse(s)) return "browser"; } catch {}
 			return "auth";
 		})();
-		const interval = setInterval(() => {
-			if (cancelled) return;
-			setLoadingProgress(Math.min((Date.now() - startTime) / 25000, 0.9));
-		}, 100);
-		const poll = async () => {
-			while (!cancelled) {
-				try {
-					const ctrl = new AbortController();
-					const t = setTimeout(() => ctrl.abort(), 5000);
-					const res = await fetch(`${HTTP_BASE}/games`, { signal: ctrl.signal });
-					clearTimeout(t);
-					if (res.ok && !cancelled) {
-						clearInterval(interval);
-						setLoadingProgress(1);
-						setTimeout(() => { if (!cancelled) setScreen(dest); }, 350);
-						return;
-					}
-				} catch {}
-				if (!cancelled) await new Promise(r => setTimeout(r, 2000));
-			}
+		let interval = null;
+		const startPolling = () => {
+			const startTime = Date.now();
+			interval = setInterval(() => {
+				if (cancelled) return;
+				setLoadingProgress(Math.min((Date.now() - startTime) / 25000, 0.9));
+			}, 100);
+			(async () => {
+				while (!cancelled) {
+					try {
+						const ctrl = new AbortController();
+						const t = setTimeout(() => ctrl.abort(), 5000);
+						const res = await fetch(`${HTTP_BASE}/games`, { signal: ctrl.signal });
+						clearTimeout(t);
+						if (res.ok && !cancelled) {
+							clearInterval(interval);
+							setLoadingProgress(1);
+							setTimeout(() => { if (!cancelled) setScreen(dest); }, 350);
+							return;
+						}
+					} catch {}
+					if (!cancelled) await new Promise(r => setTimeout(r, 2000));
+				}
+			})();
 		};
-		poll();
-		return () => { cancelled = true; clearInterval(interval); };
+		// Fast path: if backend responds within 250ms, skip the loading screen entirely
+		(async () => {
+			try {
+				const ctrl = new AbortController();
+				const t = setTimeout(() => ctrl.abort(), 250);
+				const res = await fetch(`${HTTP_BASE}/games`, { signal: ctrl.signal });
+				clearTimeout(t);
+				if (res.ok && !cancelled) { setScreen(dest); return; }
+			} catch {}
+			if (!cancelled) { setShowLoading(true); startPolling(); }
+		})();
+		return () => { cancelled = true; if (interval) clearInterval(interval); };
 	}, [screen]); // eslint-disable-line react-hooks/exhaustive-deps
 
 	// ── Gem flash when bank count drops ───────────────────────────────────────
@@ -933,22 +947,25 @@ export default function SpenderApp() {
 
 	// ── Screens ────────────────────────────────────────────────────────────
 
-	// Loading screen
-	if (screen === "loading") return (
-		<>
-			<style>{css}</style>
-			<div className="app loading-screen">
-				<div className="loading-logo">Spender</div>
-				<p className="loading-sub">Waking up the server…</p>
-				<div className="loading-bar-wrap">
-					<div className="loading-bar" style={{ width: `${Math.round(loadingProgress * 100)}%` }} />
+	// Loading screen (only shown after 250ms fast-path check misses)
+	if (screen === "loading") {
+		if (!showLoading) return <style>{css}</style>;
+		return (
+			<>
+				<style>{css}</style>
+				<div className="app loading-screen">
+					<div className="loading-logo">Spender</div>
+					<p className="loading-sub">Waking up the server…</p>
+					<div className="loading-bar-wrap">
+						<div className="loading-bar" style={{ width: `${Math.round(loadingProgress * 100)}%` }} />
+					</div>
+					<p className="loading-hint">
+						{loadingProgress >= 0.99 ? "Ready!" : loadingProgress < 0.05 ? "Connecting…" : `${Math.round(loadingProgress * 100)}%`}
+					</p>
 				</div>
-				<p className="loading-hint">
-					{loadingProgress >= 0.99 ? "Ready!" : loadingProgress < 0.05 ? "Connecting…" : `${Math.round(loadingProgress * 100)}%`}
-				</p>
-			</div>
-		</>
-	);
+			</>
+		);
+	}
 
 	// Auth screen
 	if (screen === "auth") return (
