@@ -212,7 +212,7 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,se
 .player-score{font-family:'Cinzel',serif;font-size:1.1rem;font-weight:700;color:var(--gold)}
 .player-tokens{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px}
 .token-pill{display:flex;align-items:center;gap:3px;padding:2px 7px;border-radius:12px;font-family:'Cinzel',serif;font-size:.7rem;font-weight:700}
-.player-bonuses{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px}
+.player-bonuses{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;margin-bottom:6px}
 .bonus-pill{display:flex;align-items:center;gap:3px;padding:2px 7px;border-radius:12px;font-family:'Cinzel',serif;font-size:.7rem;font-weight:700;border:1px solid}
 .reserved-label{font-size:.62rem;color:var(--text-dim);font-family:'Cinzel',serif;letter-spacing:.06em;margin-bottom:4px;text-transform:uppercase}
 .reserved-row{display:flex;gap:4px;flex-wrap:wrap}
@@ -888,8 +888,8 @@ export default function SpenderApp() {
 				</div>
 				<div className="player-tokens">
 					{[...GEM_COLORS, "gold"].map(c => (p.tokens[c] || 0) > 0 && (
-						<span key={c} className="token-pill" style={{ background: GEM_HEX[c] + "33", border: `1px solid ${GEM_HEX[c]}` }}>
-							<span style={{ width: 8, height: 8, borderRadius: "50%", background: GEM_HEX[c], display: "inline-block" }} />
+						<span key={c} className="token-pill" style={{ background: GEM_HEX[c] + "55", border: `1px solid ${GEM_HEX[c]}` }}>
+							<span style={{ width: 10, height: 10, borderRadius: "50%", background: GEM_HEX[c], display: "inline-block" }} />
 							{p.tokens[c]}
 						</span>
 					))}
