@@ -1422,11 +1422,6 @@ export default function SpenderApp() {
 							<div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
 								<CardView card={modalCard} />
 							</div>
-							<div style={{ color: "var(--text-dim)", fontSize: ".82rem", marginBottom: 14, lineHeight: 1.5 }}>
-								{modalCard.level ? `Level ${modalCard.level} · ` : ""}
-								{GEM_LABELS[modalCard.bonus || modalCard.color] || modalCard.bonus || modalCard.color} bonus
-								{modalCard.points > 0 ? ` · ${modalCard.points} pts` : ""}
-							</div>
 							<button className="btn btn-ghost btn-sm" style={{ width: "100%" }} onClick={() => setModalCard(null)}>Close</button>
 						</div>
 					</div>
