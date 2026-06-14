@@ -1458,7 +1458,6 @@ export default function SpenderApp() {
 
 						{["L3", "L2", "L1"].map((lk, i) => (
 							<div key={lk} className="panel">
-								<div className="panel-title">Level {["III", "II", "I"][i]}</div>
 								<div className="level-row">
 									<div className={`deck-pile${!myTurn ? " disabled" : ""}${reserveArmed ? " reserve-ready" : ""}${selectedCard?.source === "deck" && selectedCard?.deckLevel === 3 - i ? " selected" : ""}`}
 										onClick={() => {
