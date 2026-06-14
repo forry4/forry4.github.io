@@ -19,6 +19,7 @@ further randomness.
 """
 from __future__ import annotations
 
+import copy
 import random
 from typing import Any
 
@@ -89,6 +90,7 @@ def _begin_round(game: dict) -> None:
     game["turn"] = game["start_player"]
     game["black_depot_used_this_turn"] = False
     game["m6_used_this_turn"] = False
+    _snapshot_turn(game)
 
 
 def _new_player(name: str) -> dict:
@@ -292,7 +294,13 @@ def _building_town_ok(p: dict, tile: dict, sid: str) -> bool:
     return tile["building"] not in p["town_buildings"].get(board.region_of(sid), [])
 
 
-# ── Turn / round lifecycle (basic; phase-end effects completed in M5) ─────────
+# ── Turn / round lifecycle ────────────────────────────────────────────────────
+def _snapshot_turn(game: dict) -> None:
+    """Snapshot the game at the start of the current player's turn (for undo)."""
+    snap = {k: v for k, v in game.items() if k != "turn_undo"}
+    game["turn_undo"] = copy.deepcopy(snap)
+
+
 def _advance_turn(game: dict) -> None:
     track = game["turn_order_track"]
     idx = track.index(game["turn"])
@@ -300,6 +308,7 @@ def _advance_turn(game: dict) -> None:
         game["turn"] = track[idx + 1]
         game["black_depot_used_this_turn"] = False
         game["m6_used_this_turn"] = False
+        _snapshot_turn(game)
     else:
         _advance_round(game)
 
@@ -837,6 +846,21 @@ def apply_move(game: dict, pid: str, move: dict) -> tuple[bool, str | None]:
     if is_over(game):
         return False, "game is over"
     mt = move.get("type")
+    # Undo the whole current turn (including any pending sub-decision). Restores
+    # the snapshot taken when this player's turn began, dropping every action
+    # logged this turn.
+    if mt == "undo_turn":
+        if game.get("turn") != pid:
+            return False, "can only undo on your turn"
+        snap = game.get("turn_undo")
+        if not snap:
+            return False, "nothing to undo"
+        restored = copy.deepcopy(snap)
+        game.clear()
+        game.update(restored)
+        _snapshot_turn(game)
+        _log(game, pid, "undo_turn")
+        return True, None
     if game["pending_pid"] is not None:
         if pid != game["pending_pid"]:
             return False, "not your turn"

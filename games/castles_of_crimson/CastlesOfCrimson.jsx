@@ -6,8 +6,12 @@ const COC_WS = WS_RAW.replace(/\/ws$/, "/coc/ws");
 const COC_HTTP = WS_RAW.replace(/^ws/, "http").replace(/\/ws$/, "/coc");
 
 const TILE_HEX = {
-  burgundy: "#8c3543", blue: "#3d6ea5", gray: "#6b6f76",
-  green: "#4f7d43", beige: "#c4a86a", yellow: "#d4b234",
+  burgundy: "#1f4d2b",   // castle  -> dark green
+  blue: "#3d6ea5",       // ship
+  gray: "#6b6f76",       // mine
+  green: "#8cc873",      // livestock -> light green
+  beige: "#c4a86a",      // building
+  yellow: "#ffd21a",     // monastery -> bright yellow
 };
 const GOODS_HEX = {
   amber: "#e0a526", rose: "#d6678b", jade: "#3fae8e",
@@ -17,6 +21,49 @@ const TYPE_LABEL = {
   castle: "Castle", ship: "Ship", mine: "Mine",
   livestock: "Livestock", building: "Building", monastery: "Monastery",
 };
+// Two-letter building codes so tiles are identifiable without mousing over.
+const BUILDING_ABBR = {
+  market: "Mk", carpenter: "Cp", church: "Ch", warehouse: "Wh",
+  boarding: "Bo", bank: "Bk", townhall: "TH", watchtower: "WT",
+};
+const BUILDING_DESC = {
+  market: "Market — take a ship or livestock tile from a depot.",
+  carpenter: "Carpenter's Workshop — take a building tile from a depot.",
+  church: "Church — take a mine, monastery, or castle tile from a depot.",
+  warehouse: "Warehouse — immediately sell a goods type.",
+  boarding: "Boarding House — gain 4 workers.",
+  bank: "Bank — gain 2 silver.",
+  townhall: "Town Hall — immediately place an additional tile.",
+  watchtower: "Watchtower — score 4 VP.",
+};
+// Short on-tile label: monastery number, building code, livestock animal+count.
+function tileGlyph(t) {
+  if (!t) return "";
+  if (t.type === "monastery") return String(t.effect_id);
+  if (t.type === "building") return BUILDING_ABBR[t.building] || "B";
+  if (t.type === "livestock") return (t.animal?.[0]?.toUpperCase() || "L") + t.count;
+  return "";
+}
+// Full mouse-over description of what a tile does.
+function tileDesc(t, board) {
+  if (!t) return "";
+  if (t.kind === "goods") {
+    const n = board ? board.goods_colors.indexOf(t.color) + 1 : "?";
+    return `Goods — sell with die ${n} to gain 1 silver and 2 VP per good (2-player).`;
+  }
+  switch (t.type) {
+    case "castle": return "Castle — when placed, take an immediate bonus action (a die of your choice).";
+    case "ship": return "Ship — when placed, take all goods from one depot and advance the turn order.";
+    case "mine": return "Mine — gain 1 silver at the end of each phase.";
+    case "livestock": return `Livestock (${t.animal} ×${t.count}) — score VP for the animals; same-type animals in a pasture re-score.`;
+    case "building": return BUILDING_DESC[t.building] || "Building.";
+    case "monastery": {
+      const d = board?.monastery_meta?.[t.effect_id];
+      return `Monastery #${t.effect_id}${d ? " — " + d : " — special effect."}`;
+    }
+    default: return TYPE_LABEL[t.type] || "Tile";
+  }
+}
 
 function uid() { return Math.random().toString(36).slice(2, 10); }
 function roomCode() { return Array.from({ length: 6 }, () => "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[Math.floor(Math.random() * 26)]).join(""); }
@@ -57,6 +104,7 @@ const css = `
 .coc-btn.gold{background:var(--gold);color:#120c0d}.coc-btn.gold:hover:not(:disabled){background:var(--gold-l)}
 .coc-btn.crimson{background:var(--crimson);color:#fff}.coc-btn.crimson:hover:not(:disabled){background:var(--crimson-l)}
 .coc-btn.ghost{background:transparent;color:var(--text-dim);border:1px solid var(--border)}.coc-btn.ghost:hover:not(:disabled){color:var(--text);border-color:var(--text-dim)}
+.coc-btn.tool{background:var(--surface2);color:var(--gold-l);border:1px solid var(--gold)}.coc-btn.tool:hover:not(:disabled){background:#3a2a18;color:var(--gold-l)}
 .coc-btn.outline{background:transparent;color:var(--gold);border:1px solid var(--gold)}.coc-btn.outline:hover:not(:disabled){background:var(--gold);color:#120c0d}
 .coc-btn.sm{padding:6px 11px;font-size:.74rem}
 .coc-hero{text-align:center;margin:24px 0 30px}
@@ -89,9 +137,11 @@ const css = `
 .coc-depot.match{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset}
 .coc-depot-n{font-family:'Cinzel',serif;font-size:.7rem;color:var(--text-dim);text-align:center;margin-bottom:4px}
 .coc-tilewrap{display:flex;flex-wrap:wrap;gap:3px;justify-content:center}
-.coc-tile{width:22px;height:22px;border-radius:4px;border:1px solid rgba(0,0,0,.4);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:.6rem;font-family:'Cinzel',serif;color:#1a1010;font-weight:700;transition:transform .1s}
-.coc-tile:hover{transform:scale(1.12)}
-.coc-tile.goods{width:14px;height:14px;border-radius:50%}
+.coc-tile{width:26px;height:26px;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:.62rem;font-family:'Cinzel',serif;color:#15100a;font-weight:700;transition:transform .1s;line-height:1;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%)}
+.coc-tile:hover{transform:scale(1.14)}
+.coc-tile.goods{width:21px;height:21px;border-radius:50%;clip-path:none;color:#fff;font-size:.66rem;text-shadow:0 1px 2px rgba(0,0,0,.7)}
+.coc-whitedie{display:flex;align-items:center;gap:6px;margin-left:auto}
+.coc-whitedie .lbl{font-family:'Cinzel',serif;font-size:.66rem;letter-spacing:.06em;color:var(--text-dim);text-transform:uppercase}
 .coc-dicebar{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
 .coc-die{width:46px;height:46px;border-radius:8px;background:#f3ead8;color:#1a1010;font-family:'Cinzel',serif;font-weight:700;font-size:1.3rem;display:flex;align-items:center;justify-content:center;cursor:pointer;border:2px solid transparent;position:relative}
 .coc-die.sel{border-color:var(--gold);box-shadow:0 0 8px rgba(201,168,76,.6)}
@@ -159,6 +209,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
 
   const playerName = authUser?.name || "Player";
   const pendingAction = useRef(null);
+  // The die value needed to sell a goods color (its index in the goods order + 1).
+  const goodsSellNum = (color) => (board ? board.goods_colors.indexOf(color) + 1 : 0);
 
   // ── derived ──
   const game = roomData?.game;
@@ -452,13 +504,14 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           let fill, num = "";
           if (tile) {
             fill = TILE_HEX[tile.color] || "#555";
-            if (tile.type === "monastery") num = String(tile.effect_id);
+            num = tileGlyph(tile);
           } else {
             fill = TILE_HEX[sp.color] || "#444";
             num = String(sp.number);
           }
           return (
             <g key={sid} className={`coc-hex${legal ? " legal" : ""}`} onClick={() => interactive && clickHex(sid, legal)}>
+              <title>{tile ? tileDesc(tile, board) : `Empty ${sp.color} space — place a matching tile using die ${sp.number}.`}</title>
               <polygon points={hexPoints(c.x, c.y, HEX_S - 1.5)}
                 fill={fill} fillOpacity={tile ? 1 : 0.32}
                 stroke={legal ? "var(--gold)" : "#1a1010"} strokeWidth={legal ? 2.5 : 1} />
@@ -490,6 +543,10 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           <span className={`coc-turnbadge ${myTurnRaw ? "you" : "them"}`}>
             {over ? "Game over" : aiThinking ? "Bot is playing…" : myTurnRaw ? (pendingMine ? "Your decision" : "Your turn") : `${players[game.turn] || "Opponent"}'s turn`}
           </span>
+          {game.turn === myId && !over && (
+            <button className="coc-btn ghost sm" title="Undo everything you've done this turn"
+              onClick={() => { setSelDie(null); setSelStorage(null); setExtraValue(null); mv({ type: "undo_turn" }); }}>↩ Undo Turn</button>
+          )}
           <div className="coc-vp">
             <span className="v">{me ? "You" : ""} <b>{me?.vp ?? 0}</b></span>
             {opp && <span className="v">{players[oppId]} <b>{opp.vp}</b></span>}
@@ -509,13 +566,12 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                   <div className="coc-tilewrap">
                     {depot.hexes.map((t) => (
                       <div key={t.id} className="coc-tile" style={{ background: TILE_HEX[t.color] }}
-                        title={TYPE_LABEL[t.type] + (t.type === "monastery" ? ` #${t.effect_id}` : t.type === "livestock" ? ` (${t.animal} ${t.count})` : t.type === "building" ? ` (${t.building})` : "")}
-                        onClick={() => clickDepotTile(d, t)}>
-                        {t.type === "monastery" ? t.effect_id : ""}
+                        title={tileDesc(t, board)} onClick={() => clickDepotTile(d, t)}>
+                        {tileGlyph(t)}
                       </div>
                     ))}
                     {depot.goods.map((gt) => (
-                      <div key={gt.id} className="coc-tile goods" style={{ background: GOODS_HEX[gt.color] }} title={`goods: ${gt.color}`} />
+                      <div key={gt.id} className="coc-tile goods" style={{ background: GOODS_HEX[gt.color] }} title={tileDesc(gt, board)}>{goodsSellNum(gt.color)}</div>
                     ))}
                   </div>
                 </div>
@@ -527,12 +583,15 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             <div className="coc-tilewrap">
               {game.black_depot.map((t) => (
                 <div key={t.id} className="coc-tile" style={{ background: TILE_HEX[t.color], opacity: .85 }}
-                  title={`${TYPE_LABEL[t.type]} — buy for 2 silver`} onClick={() => clickBlackTile(t)}>
-                  {t.type === "monastery" ? t.effect_id : ""}
+                  title={`${tileDesc(t, board)}  (Black depot: buy for 2 silver.)`} onClick={() => clickBlackTile(t)}>
+                  {tileGlyph(t)}
                 </div>
               ))}
             </div>
-            <span className="coc-pill" style={{ marginLeft: "auto" }}>White die <b>{game.white_die}</b></span>
+            <div className="coc-whitedie">
+              <span className="lbl">White die</span>
+              <div className="coc-die white" title="white die (sets the goods depot)">{game.white_die}</div>
+            </div>
           </div>
         </div>
 
@@ -543,6 +602,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
 
           {/* dice + resources */}
           <div className="coc-dicebar" style={{ marginTop: 12 }}>
+            <span className="coc-pill">Your dice</span>
             {dice && [0, 1].map((i) => (
               <div key={i} style={{ display: "flex", gap: 4, alignItems: "center" }}>
                 <div className={`coc-die${selDie === i ? " sel" : ""}${dice.used[i] ? " used" : ""}`}
@@ -555,7 +615,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 )}
               </div>
             ))}
-            <div className="coc-die white" title="white die">{game.white_die}</div>
             <span className="coc-pill" style={{ marginLeft: 8 }}>⚒ Workers <b>{me?.workers ?? 0}</b></span>
             <span className="coc-pill">⛃ Silver <b>{me?.silver ?? 0}</b></span>
           </div>
@@ -570,9 +629,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                   if (!t) return <div key={i} className="coc-stt" style={{ background: "var(--surface2)", border: "1px dashed var(--border)" }} />;
                   return (
                     <div key={t.id} className={`coc-stt${selStorage === t.id ? " sel" : ""}`} style={{ background: TILE_HEX[t.color] }}
-                      title={TYPE_LABEL[t.type] + (t.type === "monastery" ? ` #${t.effect_id}` : "")}
+                      title={tileDesc(t, board)}
                       onClick={() => setSelStorage(selStorage === t.id ? null : t.id)}>
-                      {t.type === "monastery" ? t.effect_id : ""}
+                      {tileGlyph(t)}
                     </div>
                   );
                 })}
@@ -583,7 +642,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
               <div className="coc-goods-row">
                 {me && Object.entries(me.goods).length === 0 && <span className="coc-card-meta">none</span>}
                 {me && Object.entries(me.goods).map(([c, n]) => (
-                  <span key={c} className="coc-goods-chip"><span className="coc-tile goods" style={{ background: GOODS_HEX[c] }} />{c} ×{n}</span>
+                  <span key={c} className="coc-goods-chip" title={tileDesc({ kind: "goods", color: c }, board)}>
+                    <span className="coc-tile goods" style={{ background: GOODS_HEX[c] }}>{goodsSellNum(c)}</span>×{n}
+                  </span>
                 ))}
               </div>
             </div>
@@ -592,9 +653,11 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           {/* action buttons */}
           {myTurnRaw && !pendingMine && (
             <div className="coc-actions">
-              <button className="coc-btn ghost sm" disabled={selDie == null} onClick={doTakeWorkers}>Take 2 Workers</button>
-              <button className="coc-btn ghost sm" disabled={selDie == null || !(me?.goods?.[goodsForDie] > 0)} onClick={doSell}>
-                Sell {goodsForDie ? goodsForDie : "goods"}{goodsForDie && me?.goods?.[goodsForDie] ? ` (${me.goods[goodsForDie]})` : ""}
+              <button className="coc-btn tool sm" disabled={selDie == null} onClick={doTakeWorkers}>Take 2 Workers</button>
+              <button className="coc-btn tool sm" disabled={selDie == null || !(me?.goods?.[goodsForDie] > 0)} onClick={doSell}>
+                Sell{goodsForDie
+                  ? <> <span className="coc-tile goods" style={{ display: "inline-flex", width: 15, height: 15, fontSize: ".55rem", background: GOODS_HEX[goodsForDie] }}>{actionValue}</span>{me?.goods?.[goodsForDie] ? ` ×${me.goods[goodsForDie]}` : ""}</>
+                  : " goods"}
               </button>
               <button className="coc-btn crimson sm" onClick={() => mv({ type: "end_turn" })}>End Turn</button>
               <span className="coc-card-meta" style={{ alignSelf: "center" }}>
@@ -624,7 +687,36 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         <div className="coc-modal-bg" onClick={() => setViewOpp(false)}>
           <div className="coc-modal" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
             <h3>{players[oppId]} — {opp.vp} VP</h3>
-            <p>Silver {opp.silver} · Workers {opp.workers} · Goods {Object.values(opp.goods).reduce((a, b) => a + b, 0)}</p>
+            <p style={{ marginBottom: 10 }}>Silver {opp.silver} · Workers {opp.workers}</p>
+            <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start", marginBottom: 10 }}>
+              <div>
+                <div className="coc-pill" style={{ marginBottom: 4 }}>Dice</div>
+                <div className="coc-dicebar">
+                  {game.dice?.[oppId]?.values.map((v, i) => (
+                    <div key={i} className={`coc-die${game.dice[oppId].used[i] ? " used" : ""}`} style={{ width: 34, height: 34, fontSize: "1rem" }}>{v}</div>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div className="coc-pill" style={{ marginBottom: 4 }}>Storage</div>
+                <div className="coc-storage">
+                  {[0, 1, 2].map((i) => {
+                    const t = opp.storage?.[i];
+                    if (!t) return <div key={i} className="coc-stt" style={{ background: "var(--surface2)", border: "1px dashed var(--border)" }} />;
+                    return <div key={t.id} className="coc-stt" style={{ background: TILE_HEX[t.color] }} title={tileDesc(t, board)}>{tileGlyph(t)}</div>;
+                  })}
+                </div>
+              </div>
+              <div>
+                <div className="coc-pill" style={{ marginBottom: 4 }}>Goods</div>
+                <div className="coc-goods-row">
+                  {Object.entries(opp.goods).length === 0 && <span className="coc-card-meta">none</span>}
+                  {Object.entries(opp.goods).map(([c, n]) => (
+                    <span key={c} className="coc-goods-chip" title={tileDesc({ kind: "goods", color: c }, board)}><span className="coc-tile goods" style={{ background: GOODS_HEX[c] }}>{goodsSellNum(c)}</span>×{n}</span>
+                  ))}
+                </div>
+              </div>
+            </div>
             {renderDuchy(opp, false)}
             <div className="coc-modal-row" style={{ marginTop: 12, justifyContent: "flex-end" }}>
               <button className="coc-btn gold sm" onClick={() => setViewOpp(false)}>Close</button>
@@ -642,6 +734,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
 function PendingModal({ game, board, me, extraValue, setExtraValue, mv, goodsForDie }) {
   const kind = game.pending_kind;
   const skip = () => mv({ type: "skip_pending" });
+  const sellNum = (c) => board.goods_colors.indexOf(c) + 1;
 
   if (kind === "ship_choose_depot") {
     return (
@@ -679,7 +772,9 @@ function PendingModal({ game, board, me, extraValue, setExtraValue, mv, goodsFor
       <Modal title="Warehouse — sell goods" desc="Choose a goods type to sell.">
         <div className="coc-modal-row">
           {Object.keys(me.goods).map((c) => (
-            <button key={c} className="coc-btn outline sm" onClick={() => mv({ type: "warehouse_sell", color: c })}>{c} ×{me.goods[c]}</button>
+            <button key={c} className="coc-btn outline sm" onClick={() => mv({ type: "warehouse_sell", color: c })}>
+              <span className="coc-tile goods" style={{ display: "inline-flex", width: 15, height: 15, fontSize: ".55rem", background: GOODS_HEX[c], marginRight: 5 }}>{sellNum(c)}</span>×{me.goods[c]}
+            </button>
           ))}
           <button className="coc-btn ghost sm" onClick={skip}>Skip</button>
         </div>

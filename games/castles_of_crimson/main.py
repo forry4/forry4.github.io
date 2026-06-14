@@ -486,6 +486,7 @@ async def board_layout():
         "castle": board.space_id(*board.CASTLE_SPACE),
         "color_types": tiles.COLOR_TO_TYPE,
         "goods_colors": tiles.GOODS_COLORS,
+        "monastery_meta": {eid: m["desc"] for eid, m in tiles.MONASTERY_META.items()},
     }
 
 

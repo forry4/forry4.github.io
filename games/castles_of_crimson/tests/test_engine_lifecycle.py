@@ -129,6 +129,45 @@ def test_depots_refilled_each_phase():
         assert len(g["depots"][str(i)]["hexes"]) == tiles.DEPOT_FILL_2P
 
 
+def test_undo_turn_reverts_actions():
+    g = engine.new_game(["p1", "p2"], seed=4)
+    g["turn"] = "p1"
+    g["dice"]["p1"] = {"values": [1, 1], "used": [False, False]}
+    engine._snapshot_turn(g)  # snapshot this controlled turn start
+    w0 = g["players"]["p1"]["workers"]
+    engine.apply_move(g, "p1", {"type": "take_workers", "die_index": 0})
+    assert g["players"]["p1"]["workers"] == w0 + 2
+    assert g["dice"]["p1"]["used"][0] is True
+    ok, err = engine.apply_move(g, "p1", {"type": "undo_turn"})
+    assert ok, err
+    assert g["players"]["p1"]["workers"] == w0
+    assert g["dice"]["p1"]["used"] == [False, False]
+    # the undone action is no longer in the log (only the undo marker is most-recent)
+    assert g["moves"][0]["type"] == "undo_turn"
+    assert all(m["type"] != "take_workers" for m in g["moves"])
+
+
+def test_undo_turn_clears_pending():
+    g = engine.new_game(["p1", "p2"], seed=4)
+    g["turn"] = "p1"
+    g["dice"]["p1"] = {"values": [1, 1], "used": [False, False]}
+    engine._snapshot_turn(g)
+    # find a burgundy (castle) space and enable adjacency without completing it
+    burg = next((s, i["number"]) for s, i in board.SPACES.items() if i["color"] == "burgundy" and not i["is_castle"])
+    sid, num = burg
+    nb = board.neighbors(sid)[0]
+    g["players"]["p1"]["duchy"][nb] = {"id": "d", "kind": "hex", "type": "mine", "color": "gray"}
+    g["dice"]["p1"]["values"] = [num, 6]
+    g["players"]["p1"]["storage"] = [{"id": "c", "kind": "hex", "type": "castle", "color": "burgundy"}]
+    engine._snapshot_turn(g)  # snapshot AFTER this setup so undo returns here
+    engine.apply_move(g, "p1", {"type": "place_tile", "die_index": 0, "tile_id": "c", "space_id": sid})
+    assert g["pending_kind"] == "extra_action"
+    engine.apply_move(g, "p1", {"type": "undo_turn"})
+    assert g["pending_pid"] is None
+    assert g["players"]["p1"]["duchy"][sid] is None
+    assert any(t["id"] == "c" for t in g["players"]["p1"]["storage"])
+
+
 def test_winner_declared_on_game_over():
     g = engine.new_game(["p1", "p2"], seed=11)
     while not engine.is_over(g):
