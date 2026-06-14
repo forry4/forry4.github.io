@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import CastlesOfCrimson from "../castles_of_crimson/CastlesOfCrimson.jsx";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 const WS_BASE = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
@@ -1093,34 +1094,10 @@ export default function SpenderApp() {
 		</>
 	);
 
-	// Castles of Crimson — placeholder (game not built yet)
-	if (screen === "coc") return (
-		<>
-			<style>{css}</style>
-			<div className="app">
-				<div className="browser">
-					<div className="browser-header">
-						<div className="browser-head-left">
-							<button className="btn btn-ghost btn-sm" onClick={() => setScreen("home")}>
-								← {SITE_NAME}
-							</button>
-							<div className="browser-title">Castles of Crimson</div>
-						</div>
-					</div>
-					<div className="coc-placeholder">
-						<div className="coc-soon">Coming Soon</div>
-						<p className="coc-blurb">
-							Castles of Crimson is still being forged. Check back soon.
-						</p>
-						<button className="btn btn-outline" onClick={() => setScreen("home")}>
-							← Back to {SITE_NAME}
-						</button>
-					</div>
-				</div>
-				{toast && <div className="toast">{toast}</div>}
-			</div>
-		</>
-	);
+	// Castles of Crimson — self-contained game component, mounted by the shell.
+	if (screen === "coc") {
+		return <CastlesOfCrimson myId={myId} authUser={authUser} onExit={() => setScreen("home")} />;
+	}
 
 	// Game browser screen
 	if (screen === "browser") return (

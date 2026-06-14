@@ -8,6 +8,7 @@ on:
       - 'games/spender/requirements.txt'
       - 'games/spender/app.py'
       - 'games/spender/ai/az_model.npz'
+      - 'games/castles_of_crimson/**/*.py'
   workflow_dispatch:
 
 jobs:

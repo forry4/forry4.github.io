@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'games/spender/**'
+      - 'games/castles_of_crimson/**'
       - '.github/workflows/deploy-pages.yml'
 
 jobs:
