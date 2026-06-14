@@ -58,6 +58,14 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,se
 .auth-screen,.browser{padding-top:calc(env(safe-area-inset-top,0px) + 32px)}
 .app{min-height:100vh;display:flex;flex-direction:column}
 
+/* ─── Loading ───────────────────────────────────────────────────────────── */
+.loading-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:16px;padding:32px;text-align:center}
+.loading-logo{font-family:'Cinzel',serif;font-size:3rem;font-weight:700;color:var(--gold);letter-spacing:.06em}
+.loading-sub{color:var(--text-dim);font-style:italic;font-size:.95rem}
+.loading-bar-wrap{width:220px;height:5px;background:var(--surface2);border-radius:3px;overflow:hidden;border:1px solid var(--border)}
+.loading-bar{height:100%;background:var(--gold);border-radius:3px;transition:width .4s ease}
+.loading-hint{color:var(--text-muted);font-size:.78rem;font-style:italic}
+
 /* ─── Auth ──────────────────────────────────────────────────────────────── */
 .auth-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:32px 20px;background:var(--bg)}
 .auth-logo{font-family:'Cinzel',serif;font-size:3rem;font-weight:700;color:var(--gold);letter-spacing:.06em;margin-bottom:4px}
@@ -181,8 +189,10 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,se
 .noble-req-row{display:flex;gap:3px;align-items:center;font-size:.65rem;color:var(--text-dim);font-family:'Cinzel',serif}
 
 /* ─── Action bar ────────────────────────────────────────────────────────── */
-.action-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-sizing:border-box;min-height:62px}
-.action-hint{flex:1;font-style:italic;color:var(--text-dim);font-size:.88rem;min-width:120px}
+.action-bar{display:flex;gap:8px;align-items:center;flex-wrap:nowrap;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-sizing:border-box}
+.action-hint{flex:1;font-style:italic;color:var(--text-dim);font-size:.88rem;min-width:0}
+.action-bar-btns{display:flex;gap:8px;align-items:center;flex-shrink:0}
+.action-bar-spacer{height:43px;display:inline-block;width:1px}
 .turn-badge{font-family:'Cinzel',serif;font-size:.72rem;letter-spacing:.08em;padding:4px 12px;border-radius:20px;white-space:nowrap}
 .turn-badge.mine{background:var(--gold);color:#0f0e0c}
 .turn-badge.theirs{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border)}
@@ -207,11 +217,6 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,se
 .reserved-label{font-size:.62rem;color:var(--text-dim);font-family:'Cinzel',serif;letter-spacing:.06em;margin-bottom:4px;text-transform:uppercase}
 .reserved-row{display:flex;gap:4px;flex-wrap:wrap}
 .gem-total{display:inline-block;font-size:.66rem;color:var(--text);font-family:'Cinzel',serif;font-weight:600;letter-spacing:.03em;margin-top:3px;background:var(--surface3);border:1px solid var(--border);padding:1px 8px;border-radius:8px}
-.tableau-mini{display:flex;gap:5px;margin-top:7px;margin-bottom:6px;flex-wrap:wrap;align-items:flex-start}
-.tableau-file{display:flex;flex-direction:column;align-items:center}
-.mini-card{width:18px;height:24px;border-radius:3px;border:1px solid rgba(0,0,0,.45);box-shadow:0 1px 1px rgba(0,0,0,.3);display:flex;align-items:flex-start;justify-content:center}
-.mini-card + .mini-card{margin-top:-17px}
-.mini-card-pts{font-size:.5rem;font-weight:700;font-family:'Cinzel',serif;color:#fff;text-shadow:0 1px 1px rgba(0,0,0,.75);line-height:1;padding-top:1px}
 
 /* ─── Winner ────────────────────────────────────────────────────────────── */
 .winner-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:32px}
@@ -227,6 +232,8 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,se
 .log-entry{display:flex;gap:6px;align-items:baseline;font-size:.76rem;color:var(--text-dim);padding:4px 0;border-bottom:1px solid rgba(58,52,42,.4);line-height:1.4;animation:log-in .2s ease}
 .log-entry:last-child{border-bottom:none}
 .log-entry:first-child{color:var(--text)}
+.log-entry.clickable{cursor:pointer}
+.log-entry.clickable:hover{background:rgba(201,168,76,.08);border-radius:4px;margin:0 -4px;padding-left:4px;padding-right:4px}
 .log-name{font-family:'Cinzel',serif;font-size:.7rem;color:var(--gold-light);flex-shrink:0}
 .log-action{flex:1}
 @keyframes log-in{from{opacity:0;transform:translateX(6px)}to{opacity:1;transform:none}}
@@ -419,10 +426,9 @@ export default function SpenderApp() {
 	});
 
 	// ── Screen & room state ────────────────────────────────────────────────
-	const [screen, setScreen] = useState(() => {
-		try { const s = localStorage.getItem("spender_user"); if (s && JSON.parse(s)) return "browser"; } catch {}
-		return "auth";
-	});
+	const [screen, setScreen] = useState("loading");
+	const [loadingProgress, setLoadingProgress] = useState(0);
+	const [modalCard, setModalCard] = useState(null);
 	const [roomId, setRoomId] = useState("");
 	const [roomData, setRoomData] = useState(null);
 
@@ -570,6 +576,40 @@ export default function SpenderApp() {
 		if (toast) { const t = setTimeout(() => setToast(""), 2500); return () => clearTimeout(t); }
 	}, [toast]);
 
+	// ── Loading: ping backend until ready, then proceed to auth/browser ────
+	useEffect(() => {
+		if (screen !== "loading") return;
+		const startTime = Date.now();
+		let cancelled = false;
+		const dest = (() => {
+			try { const s = localStorage.getItem("spender_user"); if (s && JSON.parse(s)) return "browser"; } catch {}
+			return "auth";
+		})();
+		const interval = setInterval(() => {
+			if (cancelled) return;
+			setLoadingProgress(Math.min((Date.now() - startTime) / 25000, 0.9));
+		}, 100);
+		const poll = async () => {
+			while (!cancelled) {
+				try {
+					const ctrl = new AbortController();
+					const t = setTimeout(() => ctrl.abort(), 5000);
+					const res = await fetch(`${HTTP_BASE}/games`, { signal: ctrl.signal });
+					clearTimeout(t);
+					if (res.ok && !cancelled) {
+						clearInterval(interval);
+						setLoadingProgress(1);
+						setTimeout(() => { if (!cancelled) setScreen(dest); }, 350);
+						return;
+					}
+				} catch {}
+				if (!cancelled) await new Promise(r => setTimeout(r, 2000));
+			}
+		};
+		poll();
+		return () => { cancelled = true; clearInterval(interval); };
+	}, [screen]); // eslint-disable-line react-hooks/exhaustive-deps
+
 	// ── Gem flash when bank count drops ───────────────────────────────────────
 	const prevBankRef = useRef(null);
 	const [flashGems, setFlashGems] = useState(new Set());
@@ -607,16 +647,18 @@ export default function SpenderApp() {
 			return { name, action: <span>took {parts.reduce((a, b) => [a, " ", b])}</span> };
 		}
 		if (mv.type === "buy") {
-			const dot = mv.card?.color
-				? <span style={{ width: 8, height: 8, borderRadius: "50%", background: GEM_HEX[mv.card.color], display: "inline-block", marginLeft: 2, marginRight: 2, verticalAlign: "middle" }} />
+			const col = mv.card?.bonus || mv.card?.color;
+			const dot = col
+				? <span style={{ width: 8, height: 8, borderRadius: "50%", background: GEM_HEX[col], display: "inline-block", marginLeft: 2, marginRight: 2, verticalAlign: "middle" }} />
 				: null;
-			return { name, action: <span>bought{dot}{mv.card?.points ? `+${mv.card.points}` : ""}</span> };
+			return { name, action: <span>bought{dot}card{mv.card?.points ? ` +${mv.card.points}pts` : ""}</span>, card: mv.card?.id ? mv.card : null };
 		}
 		if (mv.type === "reserve") {
-			const dot = mv.card?.color
-				? <span style={{ width: 8, height: 8, borderRadius: "50%", background: GEM_HEX[mv.card.color], display: "inline-block", marginLeft: 2, marginRight: 2, verticalAlign: "middle" }} />
+			const col = mv.card?.bonus || mv.card?.color;
+			const dot = col
+				? <span style={{ width: 8, height: 8, borderRadius: "50%", background: GEM_HEX[col], display: "inline-block", marginLeft: 2, marginRight: 2, verticalAlign: "middle" }} />
 				: null;
-			return { name, action: <span>reserved{dot}card</span> };
+			return { name, action: <span>reserved{dot}card</span>, card: mv.card?.id ? mv.card : null };
 		}
 		if (mv.type === "noble") return { name, action: `claimed noble +${mv.pts}pts` };
 		return { name, action: mv.type };
@@ -855,23 +897,6 @@ export default function SpenderApp() {
 				{Object.values(p.tokens).some(v => v > 0) && (
 					<div className="gem-total">{gemTotal(p.tokens)} gems</div>
 				)}
-				{p.purchased?.length > 0 && (
-					<div className="tableau-mini">
-						{GEM_COLORS.map(col => {
-							const cards = p.purchased.filter(pc => pc.bonus === col);
-							if (!cards.length) return null;
-							return (
-								<div key={col} className="tableau-file" title={`${cards.length} ${col} card${cards.length > 1 ? "s" : ""}`}>
-									{cards.map((pc, k) => (
-										<div key={pc.id ?? k} className="mini-card" style={{ background: GEM_HEX[col] }}>
-											{pc.points > 0 && <span className="mini-card-pts">{pc.points}</span>}
-										</div>
-									))}
-								</div>
-							);
-						})}
-					</div>
-				)}
 				<div className="player-bonuses">
 					{GEM_COLORS.map(c => (bonuses[c] || 0) > 0 && (
 						<span key={c} className="bonus-pill" style={{ borderColor: GEM_HEX[c], color: GEM_HEX[c] }}>+{bonuses[c]} {c[0].toUpperCase()}</span>
@@ -907,6 +932,23 @@ export default function SpenderApp() {
 	}
 
 	// ── Screens ────────────────────────────────────────────────────────────
+
+	// Loading screen
+	if (screen === "loading") return (
+		<>
+			<style>{css}</style>
+			<div className="app loading-screen">
+				<div className="loading-logo">Spender</div>
+				<p className="loading-sub">Waking up the server…</p>
+				<div className="loading-bar-wrap">
+					<div className="loading-bar" style={{ width: `${Math.round(loadingProgress * 100)}%` }} />
+				</div>
+				<p className="loading-hint">
+					{loadingProgress >= 0.99 ? "Ready!" : loadingProgress < 0.05 ? "Connecting…" : `${Math.round(loadingProgress * 100)}%`}
+				</p>
+			</div>
+		</>
+	);
 
 	// Auth screen
 	if (screen === "auth") return (
@@ -1229,31 +1271,33 @@ export default function SpenderApp() {
 									? <span className="ai-thinking"><span className="think-dot"/><span className="think-dot"/><span className="think-dot"/> thinking…</span>
 									: <span className="action-hint">{getHint()}</span>
 							}
-							{myTurn && selectedGems.length > 0 && (
-								<div className="gap-8">
-									<button className="btn btn-gold" onClick={handleTakeGems}>
-										Take {selectedGems.length} Gem{selectedGems.length > 1 ? "s" : ""}
-									</button>
-									<button className="btn btn-ghost" onClick={() => setSelectedGems([])}>✕</button>
-								</div>
-							)}
-							{myTurn && selectedCard?.source === "deck" && (
-								<div className="gap-8">
-									{me?.reserved?.length >= 3 &&
-										<span style={{ color: "var(--text-muted)", fontSize: ".82rem" }}>Reserved slots full</span>
-									}
-									<button className="btn btn-ghost" onClick={() => setSelectedCard(null)}>✕</button>
-								</div>
-							)}
-							{myTurn && selectedCard && selectedCard.source !== "deck" && (() => {
-								const affordable = canAfford(selectedCard.card.cost, me?.tokens || emptyGems(), myBonuses);
-								return (
-									<div className="gap-8">
-										{affordable && <button className="btn btn-gold" onClick={() => handleBuy(selectedCard.card)}>Buy</button>}
+							<div className="action-bar-btns">
+								{myTurn && selectedGems.length > 0 ? (
+									<>
+										<button className="btn btn-gold" onClick={handleTakeGems}>
+											Take {selectedGems.length} Gem{selectedGems.length > 1 ? "s" : ""}
+										</button>
+										<button className="btn btn-ghost" onClick={() => setSelectedGems([])}>✕</button>
+									</>
+								) : myTurn && selectedCard?.source === "deck" ? (
+									<>
+										{me?.reserved?.length >= 3 &&
+											<span style={{ color: "var(--text-muted)", fontSize: ".82rem" }}>Reserved slots full</span>
+										}
 										<button className="btn btn-ghost" onClick={() => setSelectedCard(null)}>✕</button>
-									</div>
-								);
-							})()}
+									</>
+								) : myTurn && selectedCard && selectedCard.source !== "deck" ? (() => {
+									const affordable = canAfford(selectedCard.card.cost, me?.tokens || emptyGems(), myBonuses);
+									return (
+										<>
+											{affordable && <button className="btn btn-gold" onClick={() => handleBuy(selectedCard.card)}>Buy</button>}
+											<button className="btn btn-ghost" onClick={() => setSelectedCard(null)}>✕</button>
+										</>
+									);
+								})() : (
+									<span className="action-bar-spacer" />
+								)}
+							</div>
 						</div>
 
 						<div className="panel">
@@ -1336,9 +1380,10 @@ export default function SpenderApp() {
 								<div className="panel-title">Recent Moves</div>
 								<div className="move-log">
 									{(game.moves || []).map((mv, i) => {
-										const { name, action } = formatLogMove(mv);
+										const { name, action, card } = formatLogMove(mv);
 										return (
-											<div key={i} className="log-entry">
+											<div key={i} className={`log-entry${card ? " clickable" : ""}`}
+												onClick={card ? () => setModalCard(card) : undefined}>
 												<span className="log-name">{name}</span>
 												<span className="log-action">{action}</span>
 											</div>
@@ -1353,6 +1398,22 @@ export default function SpenderApp() {
 						</div>
 					</div>
 				</div>
+
+				{modalCard && (
+					<div className="modal-backdrop" onClick={() => setModalCard(null)}>
+						<div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 220, textAlign: "center" }}>
+							<div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
+								<CardView card={modalCard} />
+							</div>
+							<div style={{ color: "var(--text-dim)", fontSize: ".82rem", marginBottom: 14, lineHeight: 1.5 }}>
+								{modalCard.level ? `Level ${modalCard.level} · ` : ""}
+								{GEM_LABELS[modalCard.bonus || modalCard.color] || modalCard.bonus || modalCard.color} bonus
+								{modalCard.points > 0 ? ` · ${modalCard.points} pts` : ""}
+							</div>
+							<button className="btn btn-ghost btn-sm" style={{ width: "100%" }} onClick={() => setModalCard(null)}>Close</button>
+						</div>
+					</div>
+				)}
 
 				{needsDiscard && me && (
 					<div className="modal-backdrop">
