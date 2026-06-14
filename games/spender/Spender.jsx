@@ -194,7 +194,7 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,se
 /* ─── Cards ─────────────────────────────────────────────────────────────── */
 .level-row{display:flex;gap:8px;align-items:flex-start;flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}
 .level-row::-webkit-scrollbar{height:4px}.level-row::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
-.deck-pile{width:72px;min-height:100px;border-radius:var(--radius);border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;font-family:'Cinzel',serif;font-size:.68rem;color:var(--text-dim);cursor:pointer;flex-shrink:0;background:var(--surface2);transition:all .12s;flex-direction:column;gap:4px}
+.deck-pile{width:88px;min-height:120px;border-radius:var(--radius);border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;font-family:'Cinzel',serif;font-size:.68rem;color:var(--text-dim);cursor:pointer;flex-shrink:0;background:var(--surface2);transition:all .12s;flex-direction:column;gap:4px}
 .deck-pile:hover{border-color:var(--gold);color:var(--gold)}
 .deck-pile.selected{border-color:var(--gold-light);color:var(--gold-light);box-shadow:0 0 0 2px var(--gold-light)}
 .deck-pile.disabled{cursor:not-allowed;opacity:.5}
@@ -1468,6 +1468,7 @@ export default function SpenderApp() {
 											setSelectedCard(s => s?.source === "deck" && s?.deckLevel === 3 - i ? null : { source: "deck", deckLevel: 3 - i });
 										}}
 										title="Reserve blind from deck">
+										<span style={{ fontSize: "1.1rem", fontWeight: 700, color: "var(--text)", lineHeight: 1 }}>{["III","II","I"][i]}</span>
 										<span style={{ fontSize: ".62rem", letterSpacing: ".08em" }}>DECK</span>
 										<span className="deck-remaining">{game.decks?.[lk]?.length || 0}</span>
 									</div>
