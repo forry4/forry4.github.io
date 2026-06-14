@@ -2209,13 +2209,7 @@ async def session_token(token: str | None = None, room_id: str | None = None, pl
     rt = create_reconnect_token(user["id"], normalize_room(room_id), player_id, ttl=120)
     return {"ok": True, "reconnect_token": rt}
 
+# TODO: when merging castles-of-crimson branch, add back:
+#   from games.castles_of_crimson.main import coc_app
+#   app.mount("/coc", coc_app)
 
-# ── Castles of Crimson ──────────────────────────────────────────────────────
-# Second game in the Forrest Games collection. Its self-contained FastAPI
-# sub-app is mounted under /coc so the whole site runs as one backend service
-# (WS = /coc/ws/{room}/{player}, REST = /coc/...). This import is at the very
-# end of the module on purpose: coc.main lazily imports Spender's auth helpers,
-# and by the time this line runs every name coc needs is already defined above.
-from games.castles_of_crimson.main import coc_app  # noqa: E402
-
-app.mount("/coc", coc_app)
