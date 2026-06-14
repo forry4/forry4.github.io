@@ -4,6 +4,16 @@ import { useState, useEffect, useRef, useCallback } from "react";
 const WS_BASE = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
 const HTTP_BASE = WS_BASE.replace(/^ws/, "http").replace(/\/ws$/, "");
 
+// ─── Site identity ─────────────────────────────────────────────────────────
+const SITE_NAME = "Forrest Games";
+// Registry of games shown on the home menu. Add future games here — each tile
+// routes to its own `screen`. `status: "ready"` is playable; "soon" shows a
+// Coming Soon placeholder. Spender's lobby is the existing "browser" screen.
+const GAMES = [
+	{ id: "spender", name: "Spender", tagline: "A gem merchant's game of prestige", status: "ready", screen: "browser" },
+	{ id: "coc", name: "Castles of Crimson", tagline: "A realm of conquest and intrigue", status: "soon", screen: "coc" },
+];
+
 // ─── Constants ─────────────────────────────────────────────────────────────
 const GEM_COLORS = ["white", "blue", "green", "red", "black"];
 const GEM_LABELS = { white: "Diamond", blue: "Sapphire", green: "Emerald", red: "Ruby", black: "Onyx", gold: "Gold" };
@@ -98,9 +108,31 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,se
 .conn-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px;flex-shrink:0}
 .conn-dot.connected{background:var(--green-gem)}.conn-dot.disconnected{background:var(--red-gem)}
 
+/* ─── Home (Forrest Games menu) ─────────────────────────────────────────── */
+.home{max-width:900px;margin:0 auto;padding:calc(env(safe-area-inset-top,0px) + 24px) 20px 48px;min-height:100vh}
+.home-header{display:flex;justify-content:flex-end;align-items:center;min-height:34px}
+.home-hero{text-align:center;margin:40px 0 48px}
+.home-logo{font-family:'Cinzel',serif;font-size:clamp(2.4rem,8vw,3.6rem);font-weight:700;color:var(--gold);letter-spacing:.06em;line-height:1.1}
+.home-tagline{color:var(--text-dim);font-style:italic;font-size:1.1rem;margin-top:10px}
+.home-games{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:18px}
+.home-game-card{position:relative;text-align:left;font-family:inherit;color:inherit;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:26px 22px 24px;cursor:pointer;transition:border-color .15s,transform .15s,background .15s}
+.home-game-card:hover{border-color:var(--gold);transform:translateY(-2px);background:var(--surface2)}
+.home-game-card.soon{opacity:.9}
+.home-game-name{font-family:'Cinzel',serif;font-size:1.32rem;font-weight:600;color:var(--gold);letter-spacing:.03em;margin-bottom:8px}
+.home-game-desc{color:var(--text-dim);font-size:.95rem;line-height:1.45;font-style:italic}
+.home-game-badge{position:absolute;top:14px;right:14px;font-family:'Cinzel',serif;font-size:.6rem;letter-spacing:.12em;text-transform:uppercase;padding:3px 9px;border-radius:10px}
+.home-game-badge.ready{color:var(--green-gem);border:1px solid rgba(61,186,110,.5)}
+.home-game-badge.soon{color:var(--text-muted);border:1px solid var(--border)}
+
+/* ─── Castles of Crimson placeholder ────────────────────────────────────── */
+.coc-placeholder{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:18px;padding:64px 20px;min-height:48vh}
+.coc-soon{font-family:'Cinzel',serif;font-size:2rem;font-weight:700;color:var(--gold);letter-spacing:.06em}
+.coc-blurb{color:var(--text-dim);font-style:italic;font-size:1.02rem;max-width:420px;line-height:1.5}
+
 /* ─── Browser ───────────────────────────────────────────────────────────── */
 .browser{max-width:820px;margin:0 auto;padding:0 20px 48px}
-.browser-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:36px;padding-bottom:16px;border-bottom:1px solid var(--border)}
+.browser-header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:36px;padding-bottom:16px;border-bottom:1px solid var(--border)}
+.browser-head-left{display:flex;align-items:center;gap:14px;min-width:0}
 .browser-title{font-family:'Cinzel',serif;font-size:2rem;font-weight:700;color:var(--gold);letter-spacing:.04em}
 .browser-user{display:flex;align-items:center;gap:10px}
 .browser-username{font-family:'Cinzel',serif;font-size:.8rem;color:var(--text-dim);letter-spacing:.06em;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -582,7 +614,7 @@ export default function SpenderApp() {
 		if (screen !== "loading") return;
 		let cancelled = false;
 		const dest = (() => {
-			try { const s = localStorage.getItem("spender_user"); if (s && JSON.parse(s)) return "browser"; } catch {}
+			try { const s = localStorage.getItem("spender_user"); if (s && JSON.parse(s)) return "home"; } catch {}
 			return "auth";
 		})();
 		let interval = null;
@@ -697,8 +729,7 @@ export default function SpenderApp() {
 				try { localStorage.setItem("spender_user", JSON.stringify(user)); localStorage.setItem("spender_myId", user.id); } catch {}
 				setAuthUser(user);
 				setMyId(user.id);
-				setScreen("browser");
-				fetchGames(user);
+				setScreen("home");
 			} else {
 				setAuthError(data.message || "Something went wrong");
 			}
@@ -712,8 +743,7 @@ export default function SpenderApp() {
 		const name = guestName.trim() || `Guest${Math.floor(Math.random() * 9000 + 1000)}`;
 		const user = { id: myId, name, guest: true };
 		setAuthUser(user);
-		setScreen("browser");
-		fetchGames(null);
+		setScreen("home");
 	};
 
 	const handleLogout = () => {
@@ -954,7 +984,7 @@ export default function SpenderApp() {
 			<>
 				<style>{css}</style>
 				<div className="app loading-screen">
-					<div className="loading-logo">Spender</div>
+					<div className="loading-logo">{SITE_NAME}</div>
 					<p className="loading-sub">Waking up the server…</p>
 					<div className="loading-bar-wrap">
 						<div className="loading-bar" style={{ width: `${Math.round(loadingProgress * 100)}%` }} />
@@ -972,8 +1002,8 @@ export default function SpenderApp() {
 		<>
 			<style>{css}</style>
 			<div className="app auth-screen">
-				<div className="auth-logo">Spender</div>
-				<p className="auth-tagline">A gem merchant's game of prestige</p>
+				<div className="auth-logo">{SITE_NAME}</div>
+				<p className="auth-tagline">A collection of tabletop games</p>
 
 				<div className="auth-card">
 					<div className="auth-tabs">
@@ -1024,6 +1054,74 @@ export default function SpenderApp() {
 		</>
 	);
 
+	// Home menu — pick a game (Forrest Games landing)
+	if (screen === "home") return (
+		<>
+			<style>{css}</style>
+			<div className="app">
+				<div className="home">
+					<div className="home-header">
+						<div className="browser-user">
+							{authUser?.guest && <span className="browser-guest-badge">Guest</span>}
+							<span className="browser-username">{authUser?.name}</span>
+							<button className="btn btn-ghost btn-sm" onClick={handleLogout}>
+								{authUser?.guest ? "Exit" : "Logout"}
+							</button>
+						</div>
+					</div>
+
+					<div className="home-hero">
+						<div className="home-logo">{SITE_NAME}</div>
+						<p className="home-tagline">Choose a game</p>
+					</div>
+
+					<div className="home-games">
+						{GAMES.map(gm => (
+							<button key={gm.id} className={`home-game-card ${gm.status}`}
+								onClick={() => setScreen(gm.screen)}>
+								<span className={`home-game-badge ${gm.status}`}>
+									{gm.status === "ready" ? "Play" : "Soon"}
+								</span>
+								<div className="home-game-name">{gm.name}</div>
+								<div className="home-game-desc">{gm.tagline}</div>
+							</button>
+						))}
+					</div>
+				</div>
+				{toast && <div className="toast">{toast}</div>}
+			</div>
+		</>
+	);
+
+	// Castles of Crimson — placeholder (game not built yet)
+	if (screen === "coc") return (
+		<>
+			<style>{css}</style>
+			<div className="app">
+				<div className="browser">
+					<div className="browser-header">
+						<div className="browser-head-left">
+							<button className="btn btn-ghost btn-sm" onClick={() => setScreen("home")}>
+								← {SITE_NAME}
+							</button>
+							<div className="browser-title">Castles of Crimson</div>
+						</div>
+					</div>
+					<div className="coc-placeholder">
+						<div className="coc-soon">Coming Soon</div>
+						<p className="coc-blurb">
+							Castles of Crimson is still being forged. Check back soon.
+						</p>
+						<button className="btn btn-outline" onClick={() => setScreen("home")}>
+							← Back to {SITE_NAME}
+						</button>
+					</div>
+				</div>
+				{toast && <div className="toast">{toast}</div>}
+			</div>
+		</>
+	);
+
 	// Game browser screen
 	if (screen === "browser") return (
 		<>
@@ -1031,13 +1129,15 @@ export default function SpenderApp() {
 			<div className="app">
 				<div className="browser">
 					<div className="browser-header">
-						<div className="browser-title">Spender</div>
+						<div className="browser-head-left">
+							<button className="btn btn-ghost btn-sm" onClick={() => setScreen("home")}>
+								← {SITE_NAME}
+							</button>
+							<div className="browser-title">Spender</div>
+						</div>
 						<div className="browser-user">
 							{authUser?.guest && <span className="browser-guest-badge">Guest</span>}
 							<span className="browser-username">{authUser?.name}</span>
-							<button className="btn btn-ghost btn-sm" onClick={handleLogout}>
-								{authUser?.guest ? "Exit" : "Logout"}
-							</button>
 						</div>
 					</div>
 
