@@ -196,6 +196,7 @@ const css = `
 .coc-goods-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .coc-goods-chip{display:flex;align-items:center;gap:4px;font-size:.78rem;color:var(--text-dim)}
 .coc-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.coc-setup-banner{background:rgba(212,160,74,.14);border:1px solid var(--gold);border-radius:8px;padding:9px 12px;margin-bottom:12px;font-size:.85rem;line-height:1.35}
 .coc-hexsvg{width:100%;max-width:520px;display:block;margin:0 auto}
 .coc-hex{cursor:default;transition:opacity .12s}
 .coc-hex.legal{cursor:pointer}
@@ -305,6 +306,10 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const myTurnRaw = game && !over && (game.pending_pid ? game.pending_pid === myId : game.turn === myId);
   const aiThinking = game && roomData?.vs_ai && !over &&
     (game.pending_pid || game.turn) === roomData?.ai_player;
+  // Setup phase: each player places a starting castle on a burgundy space before
+  // dice are rolled. `setupMine` = it's my turn to choose.
+  const setupPhase = !!game && game.phase === "setup";
+  const setupMine = setupPhase && !over && game.turn === myId;
 
   // ── socket ──
   const handleMessage = useCallback((msg) => {
@@ -425,7 +430,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     mv({ type: "buy_black", tile_id: tile.id });
   };
   const clickHex = (sid, legal) => {
-    if (!legal || !selStorage) return;
+    if (!legal) return;
+    if (setupPhase) { mv({ type: "place_starting_castle", space_id: sid }); return; }
+    if (!selStorage) return;
     if (pendingMine && game.pending_kind === "townhall_place") { mv({ type: "townhall_place", tile_id: selStorage, space_id: sid }); return; }
     if (inExtra) { if (extraValue == null) { setToast("Pick a die value first"); return; } mv({ type: "extra_action", value: extraValue, sub: { type: "place_tile", tile_id: selStorage, space_id: sid } }); return; }
     if (selDie == null) { setToast("Select a die first"); return; }
@@ -441,7 +448,14 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const placeValue = inExtra ? extraValue : (selDie != null ? game?.dice?.[myId]?.values?.[selDie] : null);
   const ignoreNumber = pendingMine && game?.pending_kind === "townhall_place";
   const legalTarget = (sid) => {
-    if (!selStorage || !me) return false;
+    if (!me) return false;
+    // During setup any empty burgundy space is a legal starting-castle spot.
+    if (setupPhase) {
+      if (game.turn !== myId) return false;
+      const sp = boardSpaces(me.board_id)[sid];
+      return !!sp && sp.color === "burgundy" && !me.duchy[sid];
+    }
+    if (!selStorage) return false;
     const sp = boardSpaces(me.board_id)[sid];
     if (!sp || me.duchy[sid]) return false;
     const tile = me.storage.find((t) => t.id === selStorage);
@@ -627,7 +641,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           else { stroke = "rgba(0,0,0,.4)"; strokeWidth = 1; }
           return (
             <g key={sid} className={`coc-hex${legal ? " legal" : ""}`} onClick={() => interactive && clickHex(sid, legal)}>
-              <title>{tile ? tileDesc(tile, board) : `Empty ${sp.color} space — place a matching tile using die ${sp.number}.`}</title>
+              <title>{tile ? tileDesc(tile, board)
+                : setupPhase ? (sp.color === "burgundy" ? "Click to place your starting castle here." : `${sp.color} space (die ${sp.number}).`)
+                : `Empty ${sp.color} space — place a matching tile using die ${sp.number}.`}</title>
               <polygon points={hexPoints(c.x, c.y, HEX_S - 1.5)} fill={fill} fillOpacity={1}
                 stroke={stroke} strokeWidth={strokeWidth} />
               {num && <text className="coc-hexnum" x={c.x} y={c.y + 4} textAnchor="middle" fontSize={placed ? 11 : 12}
@@ -666,7 +682,11 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           <span className="coc-pill">Phase <b>{game.phase_letter}</b></span>
           <span className="coc-pill">Round <b>{game.round}/5</b></span>
           <span className={`coc-turnbadge ${myTurnRaw ? "you" : "them"}`}>
-            {over ? "Game over" : aiThinking ? "Bot is playing…" : myTurnRaw ? (pendingMine ? "Your decision" : "Your turn") : `${players[game.turn] || "Opponent"}'s turn`}
+            {over ? "Game over"
+              : setupPhase ? (setupMine ? "Place your starting castle" : aiThinking ? "Bot is choosing…" : `${players[game.turn] || "Opponent"} is choosing…`)
+              : aiThinking ? "Bot is playing…"
+              : myTurnRaw ? (pendingMine ? "Your decision" : "Your turn")
+              : `${players[game.turn] || "Opponent"}'s turn`}
           </span>
           <div className="coc-vp">
             <span className="v">{me ? "You" : ""} <b>{me?.vp ?? 0}</b></span>
@@ -746,13 +766,21 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         <div className="coc-panel">
           <div className="coc-duchy-head">
             <h3>Your Duchy — {me?.vp ?? 0} VP</h3>
-            {game.turn === myId && !over && (
+            {game.turn === myId && !over && !setupPhase && (
               <button className="coc-btn ghost sm" title="Undo everything you've done this turn"
                 onClick={() => { setSelDie(null); setSelStorage(null); setExtraValue(null); mv({ type: "undo_turn" }); }}>↩ Undo Turn</button>
             )}
           </div>
           <div className="coc-duchy-layout">
             <div className="coc-duchy-controls">
+              {setupPhase && (
+                <div className="coc-setup-banner">
+                  <b>Starting castle.</b>{" "}
+                  {setupMine
+                    ? "Click a glowing burgundy space to place it — your duchy grows outward from here."
+                    : `Waiting for ${players[game.turn] || "your opponent"} to choose…`}
+                </div>
+              )}
               {/* dice + resources */}
               <div className="coc-dicebar">
                 <span className="coc-pill">Your dice</span>
@@ -804,7 +832,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
               </div>
 
               {/* action buttons */}
-              {myTurnRaw && !pendingMine && (
+              {myTurnRaw && !pendingMine && !setupPhase && (
                 <div className="coc-actions">
                   <button className="coc-btn tool sm" disabled={selDie == null} onClick={doTakeWorkers}>Take 2 Workers</button>
                   <button className="coc-btn tool sm" disabled={selDie == null || !(me?.goods?.[goodsForDie] > 0)} onClick={doSell}>

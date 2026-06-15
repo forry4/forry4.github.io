@@ -140,8 +140,14 @@ games/castles_of_crimson/
 - Both workflow path filters now watch `games/castles_of_crimson/**` (pages = whole folder so the
   bundled `.jsx` rebuilds; render = `**/*.py`). The Dockerfile already `COPY . /app`s the package.
 - The work currently lives on the **`coc-game`** branch (the pre-existing `castles-of-crimson`
-  branch held unrelated Spender UI work). **Not yet browser-playtested** — build + WS integration
-  are green, but a manual in-browser vs-bot game is the remaining verification before merge/deploy.
+  branch held unrelated Spender UI work). **Frontend is feature-complete**: lobby board pickers
+  (your board + bot's board), per-player board rendering (your duchy + the View-Opponent peek both
+  use each player's own `board_id`), and the **setup-phase castle-selection UI** (`setupPhase`/
+  `setupMine` in the JSX — during `game.phase === "setup"` clicking a glowing burgundy space sends
+  `place_starting_castle`; normal dice/action controls are hidden and a banner guides the choice).
+  The vs-bot setup→play flow is verified deadlock-free at the engine+bot level (server `_handle_move`
+  applies `place_starting_castle` then schedules the bot, which places its own castle via
+  `legal_moves`). **Remaining before merge/deploy: a manual in-browser vs-bot playthrough.**
 
 ---
 
