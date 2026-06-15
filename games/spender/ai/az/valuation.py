@@ -102,6 +102,26 @@ def discount_count(s: E.State, ci: int, seat: int) -> int:
                and E.COST[s.board[slot]][bcol] > held)
 
 
+def reserved_discount(s: E.State, ci: int, seat: int) -> float:
+    """How much ci's +1 bonus discounts `seat`'s OWN RESERVED cards. Reserved cards
+    are committed targets -- you reserved them, you intend to buy them -- so a bonus
+    that advances one is concretely valuable (unlike a speculative board target).
+    This keeps L1 buying COHERENT with a reserve: after reserving a 7-white L3, the
+    white L1s that build toward it should outrank an unrelated (even cheaper) card.
+    Same weighting as engine_value (points + color-heaviness), summed over reserved."""
+    bcol = E.BONUS[ci]
+    held = s.bonuses[seat][bcol]
+    ev = 0.0
+    for cj in s.reserved[seat]:
+        if cj == ci:
+            continue
+        costj = E.COST[cj]
+        if costj[bcol] - held > 0:                  # cj still needs this color
+            sj = sum(costj)
+            ev += (E.PTS[cj] / 5.0 + 0.2) * (costj[bcol] / sj if sj else 0.0)
+    return ev
+
+
 def single_color_mirage(s: E.State, ci: int, seat: int, steep: int = 5) -> bool:
     """True if ci needs >= `steep` of a SINGLE color after bonuses AND there is no
     way to build that color down: no bonus held in it and no lower-level board card
@@ -296,6 +316,9 @@ class Valuation:
 
     def noble_completion_pts(self, ci: int, seat: int) -> int:
         return noble_completion_pts(self.s, ci, seat)
+
+    def reserved_discount(self, ci: int, seat: int) -> float:
+        return reserved_discount(self.s, ci, seat)
 
     def efficiency(self, ci: int, seat: int) -> float:
         return efficiency(self.s, ci, seat)

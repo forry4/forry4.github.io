@@ -193,6 +193,31 @@ def test_is_steep_and_build_path_count():
     assert V.build_path_count(s, spread_ci, seat) == 0
 
 
+def test_reserved_discount():
+    s = E.new_game(random.Random(30))
+    seat = s.turn
+    # reserve a steep card; its heaviest color is what we must build toward
+    target = max((ci for ci in range(E.N_CARDS) if E.LEVEL_OF[ci] >= 2),
+                 key=lambda ci: max(E.COST[ci]))
+    need_color = max(range(5), key=lambda c: E.COST[target][c])
+    s.reserved[seat][:] = [target]
+    # a card whose bonus is the needed color advances the reserved target -> > 0
+    giver = next(ci for ci in range(E.N_CARDS)
+                 if E.BONUS[ci] == need_color and ci != target)
+    assert V.reserved_discount(s, giver, seat) > 0.0
+    # a bonus color the target does not need contributes nothing
+    unneeded = next((c for c in range(5) if E.COST[target][c] == 0), None)
+    if unneeded is not None:
+        other = next(ci for ci in range(E.N_CARDS) if E.BONUS[ci] == unneeded)
+        assert V.reserved_discount(s, other, seat) == 0.0
+    # once you already hold enough of the color, the discount is exhausted
+    s.bonuses[seat][need_color] = E.COST[target][need_color]
+    assert V.reserved_discount(s, giver, seat) == 0.0
+    # with nothing reserved, it is always 0
+    s.reserved[seat][:] = []
+    assert V.reserved_discount(s, giver, seat) == 0.0
+
+
 def test_single_color_mirage():
     s = E.new_game(random.Random(20))
     seat = s.turn
