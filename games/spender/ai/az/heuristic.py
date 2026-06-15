@@ -23,6 +23,11 @@ counter to):
 
 Factor-combination weights are hand-set to "clearly competent", NOT tuned —
 weight-tuning is the documented saturated path; the arena is the judge.
+
+Deployed tuning lineage (each fix was playtest/diagnostic-driven): buy-livelock
+fix -> weight rebalance (points/efficiency up, engine down) -> take-gems focus
+(minimize one target's turns-to-afford) -> resource-aware stage (cards-bought)
++ engine diminishing-returns. vs greedy C2: 0.58 -> 0.69.
 """
 from __future__ import annotations
 
