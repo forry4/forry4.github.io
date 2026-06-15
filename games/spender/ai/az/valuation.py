@@ -103,24 +103,21 @@ def discount_count(s: E.State, ci: int, seat: int) -> int:
 
 
 def single_color_mirage(s: E.State, ci: int, seat: int, steep: int = 5) -> bool:
-    """True if ci needs >= `steep` of a SINGLE color after bonuses AND there is no
-    way to build that color down: no bonus held in it and no lower-level board card
-    that grants it. Such a card is a token-only target the bank can't realistically
-    supply (only ~4 of a color exist) -- committing gem-taking to it just hoards one
-    color toward a card you can never afford. The complement of build_path_count,
-    used to keep gem-collection oriented at REACHABLE cards (a steep card with even
-    one build-path card, or a <steep single-color cost, is not a mirage)."""
+    """True if ci still needs >= `steep` of a SINGLE color after `seat`'s bonuses.
+    The 2-player bank holds only 4 of each color, so a single-color cost this high
+    CANNOT be collected as tokens -- it is affordable only by first building bonuses
+    in that color (buying lower cards of it). So ci must NOT be a gem-TAKING target:
+    collecting toward its raw single-color cost just hoards tokens you can never
+    complete (you cap at 10 and discard forever -- the seed-70 deadlock). Skipping it
+    as a take-target redirects the bot to a REACHABLE card, typically the lower cards
+    that build the very color it is short on. A build path on the board does NOT make
+    it collectable (you still can't hold 5+ of one color); only BONUSES do -- once
+    they bring the single-color cost below `steep`, ci is a normal target again.
+    (Reserving such a card is still fine -- that path uses build_path_count, not this;
+    the deadlock was gem-TAKING toward an un-collectable cost.)"""
     cost = E.COST[ci]
     bon = s.bonuses[seat]
-    eff = [cost[c] - bon[c] for c in range(5)]
-    c = max(range(5), key=eff.__getitem__)
-    if eff[c] < steep:
-        return False
-    lvl = E.LEVEL_OF[ci]
-    board = sum(1 for slot in range(12)
-                if s.board[slot] >= 0 and s.board[slot] != ci
-                and E.LEVEL_OF[s.board[slot]] < lvl and E.BONUS[s.board[slot]] == c)
-    return bon[c] == 0 and board == 0
+    return any(cost[c] - bon[c] >= steep for c in range(5))
 
 
 def _color_deficits(s: E.State, ci: int, seat: int) -> list[int]:
