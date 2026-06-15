@@ -176,3 +176,71 @@ First MLP layer grows 305→566 inputs (~+134k params on a 512-wide layer; net i
 - Optional richer **league opponent** built on this same valuation as a heuristic — not
   shipped as a player (static eval caps ~0.65) but a tougher sparring partner that
   punishes bad reserves/weak openings harder than C2.
+
+## Anti-ceiling design — why v3 plateaued and how v4 avoids it
+
+**What a ceiling is NOT:** "a self-play net can't exceed its opponents." That's false —
+AlphaZero reached superhuman play from random self-play with *no external opponents*,
+because the opponent (itself) co-evolves: better net -> better games -> better targets ->
+better net. The loop creates its own richness; it is not bounded by a fixed reference.
+
+**What actually caps progress (the precise diagnosis of v3):**
+1. **A *fixed external* opponent creates a local ceiling.** The eps-curriculum pins the
+   opponent at the C2/A/B heuristics. Once the net matches them there is no gradient past
+   "just beats the heuristic" -> gate scores flatline ~0.5. This is specific to fixed
+   opponents, NOT to self-play in general.
+2. **Exploration / equilibrium collapse**, not a richness bound. Shared-net self-play
+   (which we use) can tunnel into one strategy or a degenerate equilibrium (documented
+   0-0 and single-strategy collapses) and stop generating novelty. Fixable with
+   exploration noise + asymmetric (frozen past-self) opponents.
+3. **Search depth caps target *quality*, not reachable strategy.** More sims = cleaner
+   policy/value targets, but cannot help once the explored strategy space has collapsed
+   (why the v3 sims bumps 512->768->1024 did nothing).
+4. **Features can *expand* reachable strategy, not just exploit a fixed space.** A
+   strategy the net cannot represent can never be explored into — so richer features
+   enlarge the reachable space. (Earlier framing that "features only use richness" was
+   overstated.)
+
+Compounding all of this in v3: the metric we watched (curriculum p / self-gate) was
+*internal* and rose while real strength stayed flat — the documented misleading-metric
+failure. The fix below makes the climb *self-improving* (co-evolving opponents), keeps
+exploration alive (anti-collapse), and judges progress by an *external* yardstick.
+
+### Feature additions that target known blind spots (ceilings form where the net is blind)
+- **Reserve opportunity-cost** scalar per card: `(denial value + gold flexibility) −
+  (tempo lost)`, derived from opp-affordable + turns-to-afford. Over-reserving is the
+  observed weakness; make the *cost* of reserving explicit instead of inferred. ~1 float.
+- **Opponent threat/plan**, not just opponent state: the opponent's best card by
+  efficiency + their turns-to-afford it, so "they're one turn from a 5-pt card" becomes a
+  perceivable, blockable threat. Denial is a documented self-play blind spot precisely
+  because it was never representable. ~2 floats.
+- **Future-proof the input dimension — reserve 16 zero-padded input slots now.** Later
+  features fill those slots WITHOUT changing `N_FEATURES`, so the first-layer weight shape
+  is identical and a future feature add can **warm-start/fine-tune from the existing
+  checkpoint instead of a cold start.** Costs ~8k dead params now (those columns are 0 →
+  no gradient → harmless); saves a full from-scratch retrain later.
+
+## Training run spec (v4) — concrete settings to avoid the v3 problems
+
+1. **Arena-vs-C2 as the north-star, logged every ~10 iters — NOT curriculum p.** Run a
+   40-60 game arena probe vs C2 *and* vs the v3 best net periodically; log it. All
+   decisions (plateau? ship? stop?) key off this external ground-truth number, not the
+   internal gate. Single most important process fix — it catches "internal metric rising
+   while real strength is flat" early (the exact trap that cost the v3 endgame). C2 here
+   is a *yardstick*, not the strategy to climb toward.
+2. **Co-evolving league as the primary climb, not a fixed heuristic.** Make frozen
+   past-AZ checkpoints the main opponents (AlphaZero's actual mechanism — the opponent
+   improves with the net, so there is no fixed ceiling). Keep heuristics A/B/C2 + the
+   richer v4-valuation heuristic in the mix as *diversity/anti-blind-spot* sparring (they
+   punish over-reserving / weak openings C2 ignores), but the strength gradient comes
+   from beating ever-stronger past selves.
+3. **Fixed high sims from iter 0 — no ramping.** Ramping (128->768) made early iters
+   distill weak policy targets the net later had to unlearn. Start v4 at the final sims
+   (>=512, likely 768) so every target is clean from the start.
+4. **Keep exploration high** (Dirichlet eps ~0.35, temp-moves ~20) — the anti-collapse
+   lever. v4 features let the net *represent* board-conditional plans, but it still must
+   *see* both resolve; features without exploration just tunnel faster.
+5. **Plateau-response ladder, in this order:** if arena-vs-C2 is flat for K iters ->
+   (a) more exploration, (b) more/stronger opponents (deeper league pool), (c) more sims,
+   (d) bigger net. Capacity LAST (capacity before data/search-quality just overfits).
+   Prevents the reactive sims-bump thrashing we just did.
