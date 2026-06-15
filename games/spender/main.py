@@ -606,6 +606,13 @@ def mk_room_state(room_id: str) -> dict[str, Any]:
     }
     if room.get("ai_variant"):
         state["ai_variant"] = room["ai_variant"]
+        game = room.get("game")
+        if room["ai_variant"] == "H" and game and game.get("ai_player") \
+                and game.get("phase") != "over":
+            try:
+                state["ai_card_values"] = _v4_card_values(game, game["ai_player"])
+            except Exception:
+                pass
     return state
 
 
@@ -850,6 +857,32 @@ def _v4_choose_move(game: dict, ai_pid: str) -> dict:
     s = _aze.from_game_dict(game)
     a = _azh.choose_action(s, s.turn)
     return _aza.action_to_move(s, a)
+
+
+def _v4_card_values(game: dict, ai_pid: str) -> dict:
+    """The v4 heuristic's card_value for every visible board card + the AI's own
+    reserved cards, from the AI's seat — a transparency overlay for variant-H games
+    (so a human can see what the bot thinks each card is worth). Keyed by card id
+    (CARD_NAME[ci]) so the frontend can show it per card. Cheap; recomputed per
+    broadcast. Wrapped by callers in try/except so it can never break a room update."""
+    from games.spender.ai.az import engine as _aze
+    from games.spender.ai.az import valuation as _azv
+    from games.spender.ai.az import heuristic as _azh
+
+    try:
+        seat = game["order"].index(ai_pid)
+    except (KeyError, ValueError):
+        return {}
+    s = _aze.from_game_dict(game)
+    val = _azv.Valuation(s)
+    out: dict[str, float] = {}
+    for slot in range(12):
+        ci = s.board[slot]
+        if ci >= 0:
+            out[_aze.CARD_NAME[ci]] = round(_azh.card_value(val, s, ci, seat), 1)
+    for ci in s.reserved[seat]:
+        out[_aze.CARD_NAME[ci]] = round(_azh.card_value(val, s, ci, seat), 1)
+    return out
 
 
 # ─── AI Player ────────────────────────────────────────────────────────────────
