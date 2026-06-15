@@ -95,10 +95,18 @@ games/castles_of_crimson/
   (no sets anywhere — town_buildings/livestock_types/monastery_effects are lists).
 - **Pending sub-decisions are real game-state keys** (`pending_pid`/`pending_kind`/`pending`),
   mirroring Spender's hard-won lesson, so they survive reconnect and are server-enforced.
-  Kinds: `extra_action` (castle), `ship_choose_depot`, `building_take_choice`, `warehouse_sell`,
-  `townhall_place`. Every kind also accepts `skip_pending` (the bot/engine never deadlock).
+  Kinds: `extra_action` (castle), `ship_choose_depot`, `ship_adjacent_depot` (monastery 5's
+  optional second depot), `building_take_choice`, `warehouse_sell`, `townhall_place`. Every kind
+  also accepts `skip_pending` (the bot/engine never deadlock).
 - Move types: `take_hex`/`place_tile`/`sell_goods`/`take_workers`/`buy_black`/`adjust_die`/
+  `discard_storage` (free; only legal when storage is full, to make room per the rulebook)/
   `end_turn`/`monastery6_take` + the pending resolvers above.
+- **Rulebook-fidelity invariants** (audited against the base-game PDF): starting workers are
+  seat-dependent (start player 1, next 2 — set in `new_game`, NOT a flat `START_WORKERS`); the
+  hex supply is the exact **164-tile** base-game count (124 colored + 40 black, fixed/not tunable
+  — see `tiles.build_supply` docstring); the black depot refills **4** tiles/phase
+  (`BLACK_FILL_2P`). Starting castles never score; monastery 5 lets you *choose* the adjacent
+  depot. These are locked by tests — don't "simplify" them away.
 
 ### Server (`coc_app`, mounted under `/coc`)
 - `games/spender/main.py` mounts it at its **tail** with a **defensive try/except** (an earlier
@@ -120,6 +128,13 @@ games/castles_of_crimson/
 - **Visual simplifications (user-requested)**: SVG hex duchy with plain single-color tiles (no
   icons) except **monasteries show their number**; empty spaces show their required die number;
   VP is a plain per-player counter; only your board is shown with a **View Opponent** peek button.
+- **Pending modals** render by `game.pending_kind` in `PendingModal` — one block per kind
+  (`ship_choose_depot`, `ship_adjacent_depot`, `building_take_choice`, `warehouse_sell`,
+  `townhall_place`, `extra_action`); each has a Skip. A new engine pending kind needs a matching
+  block here or the human has no way to resolve it.
+- **Discard button**: shown in the action row only when storage is full (`me.storage.length >= 3`)
+  and disabled until a storage tile is selected — sends `discard_storage` to free a key space
+  (mirrors the engine rule that the move is legal only when full).
 
 ### Deploy / branch notes
 - Both workflow path filters now watch `games/castles_of_crimson/**` (pages = whole folder so the

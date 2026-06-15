@@ -1,11 +1,13 @@
 """M6: non-monastery placement effects."""
 from games.castles_of_crimson import engine, board, tiles
+from .conftest import complete_setup, DEFAULT_CASTLE
 
-CASTLE = board.space_id(*board.CASTLE_SPACE)
+CASTLE = DEFAULT_CASTLE
 
 
 def fresh():
     g = engine.new_game(["p1", "p2"], seed=1)
+    complete_setup(g)
     g["turn"] = "p1"
     g["dice"]["p1"] = {"values": [1, 1], "used": [False, False]}
     # quiet board so building "take" effects don't fire unless a test wants them
@@ -23,12 +25,46 @@ def hext(ttype, color, tid="t", **extra):
     return t
 
 
-def adj(color):
+def adj(color, min_region_size=2):
+    """Castle neighbors of `color` in regions of at least min_region_size.
+
+    Default min_region_size=2 avoids incidentally triggering area scoring
+    when tests only care about a specific building effect.
+    """
     out = []
     for nb in board.neighbors(CASTLE):
-        if board.SPACES[nb]["color"] == color:
-            out.append((nb, board.SPACES[nb]["number"]))
+        info = board.SPACES.get(nb)
+        if info and info["color"] == color:
+            if board.REGIONS[board.region_of(nb)]["size"] >= min_region_size:
+                out.append((nb, info["number"]))
     return out
+
+
+def two_adjacent_in_same_town(color):
+    """Two spaces of `color` in the same region where the first is adjacent to
+    CASTLE and the second is adjacent to the first (so both are reachable)."""
+    for rid, reg in board.REGIONS.items():
+        if reg["color"] != color or reg["size"] < 2:
+            continue
+        # find a space in this region adjacent to the castle
+        castle_adj = [s for s in reg["spaces"] if CASTLE in board.neighbors(s)]
+        for first in castle_adj:
+            # find a second space in the same region adjacent to first
+            second_list = [s for s in reg["spaces"] if s != first and first in board.neighbors(s)]
+            if second_list:
+                return (first, board.SPACES[first]["number"],
+                        second_list[0], board.SPACES[second_list[0]]["number"])
+    raise AssertionError(f"no adjacent pair found in same {color} region")
+
+
+def burgundy_non_castle(g, pid):
+    """A burgundy space that isn't the player's starting castle and has no placed tile."""
+    castle = g["players"][pid]["castle_sid"]
+    duchy = g["players"][pid]["duchy"]
+    for sid, info in board.SPACES.items():
+        if info["color"] == "burgundy" and sid != castle and duchy[sid] is None:
+            return sid, info["number"]
+    raise AssertionError("no available burgundy space")
 
 
 def enable_adj(g, sid):
@@ -134,9 +170,7 @@ def test_warehouse_sells_goods():
 
 def test_townhall_places_additional_tile_ignoring_number():
     g = fresh()
-    sid, num = adj("beige")[0]
-    # a second beige space to place the extra building on (number need NOT match)
-    second = [s for s, n in adj("beige") if s != sid][0]
+    sid, num, second, _ = two_adjacent_in_same_town("beige")
     g["players"]["p1"]["storage"] = [
         hext("building", "beige", "th", building="townhall"),
         hext("building", "beige", "extra", building="bank"),
@@ -157,9 +191,8 @@ def test_townhall_places_additional_tile_ignoring_number():
 # ── One building of each type per town ────────────────────────────────────────
 def test_one_building_per_town():
     g = fresh()
-    beige = adj("beige")
-    (sid1, num1), (sid2, num2) = beige[0], beige[1]
-    assert board.region_of(sid1) == board.region_of(sid2)  # same town
+    sid1, num1, sid2, num2 = two_adjacent_in_same_town("beige")
+    assert board.region_of(sid1) == board.region_of(sid2)
     ok, _ = place_building(g, "market", sid1, num1, tid="m1")
     assert ok
     # second market in the same town is rejected
@@ -173,10 +206,8 @@ def test_one_building_per_town():
 # ── Castle extra action ───────────────────────────────────────────────────────
 def test_castle_grants_extra_action():
     g = fresh()
-    # a burgundy space; enable adjacency without completing the burgundy region
-    burg = [(s, i["number"]) for s, i in board.SPACES.items()
-            if i["color"] == "burgundy" and not i["is_castle"]]
-    sid, num = burg[0]
+    # a burgundy space that isn't the player's starting castle
+    sid, num = burgundy_non_castle(g, "p1")
     enable_adj(g, sid)
     g["dice"]["p1"]["values"] = [num, 6]
     g["players"]["p1"]["storage"] = [hext("castle", "burgundy", "c")]

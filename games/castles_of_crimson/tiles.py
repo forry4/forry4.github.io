@@ -1,9 +1,17 @@
 """Static tile data, scoring tables, and the tile supply for Castles of Crimson.
 
-No web/game dependency. Tile counts here are tuned for a playable 2-player game
-and are easy to adjust; only the *mechanics* (not exact counts) are load-bearing
-for correctness. Monastery effect_ids 1-26 each denote a unique tile; their
+No web/game dependency. The hex-tile supply is the exact base-game component
+breakdown: **164 tiles total** (124 colored-back + 40 black-back). This count is
+fixed, not tunable. Monastery effect_ids 1-26 each denote a unique tile; their
 behaviour lives in ``effects.py`` and is summarized in ``MONASTERY_META``.
+
+Supply breakdown (colored-back / black-back):
+    Buildings  : 40 beige   / 16 black   (8 types)
+    Livestock  : 20 green   /  8 black
+    Mines      : 10 gray    /  2 black
+    Ships      : 20 blue    /  6 black
+    Castles    : 14 burgundy/  2 black
+    Monasteries: 20 yellow  /  6 black    (effect_ids 1-26)
 """
 from __future__ import annotations
 
@@ -111,11 +119,13 @@ MONASTERY_BUILDING_SCORING = {
 ANIMALS = ["cow", "sheep", "pig"]
 LIVESTOCK_KINDS = [(a, c) for a in ANIMALS for c in (2, 3, 4)]  # 9 kinds
 
-# ── Supply tuning (2-player) ────────────────────────────────────────────────
+# ── Depot fill (2-player board) ─────────────────────────────────────────────
 DEPOT_FILL_2P = 3     # hex tiles drawn into each numbered depot at phase start
-BLACK_FILL_2P = 3     # hex tiles in the central black depot at phase start
+BLACK_FILL_2P = 4     # hex tiles in the central black depot at phase start
 GOODS_PER_PHASE = 5   # goods tiles distributed (one per round) each phase
 START_SILVER = 1
+# Starting workers are assigned by seat in engine.new_game (start player 1,
+# next player 2, ...). This constant is only the floor / placeholder default.
 START_WORKERS = 0
 START_GOODS = 3       # random goods tiles each player starts with
 
@@ -139,7 +149,8 @@ def build_supply() -> tuple[list[dict], list[dict]]:
     """Return (non_black_supply, black_supply) as fresh tile lists.
 
     Deterministic content (the *order* is randomized later by the seeded RNG).
-    Counts approximate the physical component breakdown; tweak freely.
+    Produces exactly the 164-tile base-game supply: 124 colored-back +
+    40 black-back (see module docstring for the per-type breakdown).
     """
     global _tile_counter
     _tile_counter = 0

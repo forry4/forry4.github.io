@@ -1,5 +1,6 @@
 """M8: end-of-game scoring and tiebreak chain."""
 from games.castles_of_crimson import engine, board
+from .conftest import complete_setup
 
 
 def over_game():
@@ -64,8 +65,10 @@ def test_tiebreak_furthest_back_on_track():
 
 def test_endgame_runs_to_completion_sets_winner():
     g = engine.new_game(["p1", "p2"], seed=21)
+    complete_setup(g)
     while not engine.is_over(g):
-        engine.apply_move(g, g["turn"], {"type": "end_turn"})
+        ok, err = engine.apply_move(g, g["turn"], {"type": "end_turn"})
+        assert ok, err
     assert g["winner"] in ("p1", "p2")
     s = engine.final_scores(g)
     assert s["p1"] >= 0 and s["p2"] >= 0

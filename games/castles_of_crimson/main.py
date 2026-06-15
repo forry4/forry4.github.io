@@ -49,6 +49,13 @@ ROOM_LOCK = asyncio.Lock()
 AI_PID = "bot"
 
 
+def _valid_board(board_id) -> str:
+    """Coerce a client-supplied board id to a real one (default on anything bad)."""
+    if isinstance(board_id, str) and board_id in board.BOARDS:
+        return board_id
+    return board.DEFAULT_BOARD_ID
+
+
 # ── Shared-identity / DB helpers (lazy imports avoid a circular dependency) ───
 def _db():
     from games.spender.main import get_db_conn
@@ -97,6 +104,7 @@ def save_game(room_id: str) -> None:
         "meta": room.get("meta", {}),
         "vs_ai": room.get("vs_ai", False),
         "ai_player": room.get("ai_player"),
+        "boards": room.get("boards", {}),
     }
     now = int(time.time())
     conn = _db()
@@ -142,6 +150,7 @@ def load_game_to_memory(room_id: str) -> bool:
         "meta": state.get("meta", {}),
         "vs_ai": state.get("vs_ai", False),
         "ai_player": state.get("ai_player"),
+        "boards": state.get("boards", {}),
         "sockets": {},
     }
     return True
@@ -219,6 +228,7 @@ def mk_room_state(room_id: str) -> dict[str, Any]:
         "game": room.get("game"),
         "vs_ai": room.get("vs_ai", False),
         "ai_player": room.get("ai_player"),
+        "boards": room.get("boards", {}),
         "reconnect_tokens": {p: info.get("token") for p, info in room.get("meta", {}).items()} if room.get("meta") else {},
     }
 
@@ -324,6 +334,8 @@ async def _send(ws: WebSocket, payload: dict) -> None:
 async def _handle_create(ws, room_id, pid, msg):
     name = (msg.get("name") or "Player").strip()[:24] or "Player"
     vs_ai = bool(msg.get("vs_ai"))
+    my_board = _valid_board(msg.get("board_id"))
+    opp_board = _valid_board(msg.get("opp_board_id"))
     async with ROOM_LOCK:
         if room_id in ROOMS or _ensure_room_loaded(room_id):
             await _send(ws, {"type": "error", "message": "room already exists"})
@@ -337,13 +349,16 @@ async def _handle_create(ws, room_id, pid, msg):
             "meta": {pid: {"token": _gen_token()}},
             "vs_ai": vs_ai,
             "ai_player": None,
+            "boards": {pid: my_board},
         }
         ROOMS[room_id] = room
         if vs_ai:
             room["players"][AI_PID] = "Bot"
             room["ai_player"] = AI_PID
             room["status"] = "playing"
-            room["game"] = engine.new_game([pid, AI_PID], names={pid: name, AI_PID: "Bot"})
+            room["boards"][AI_PID] = opp_board
+            room["game"] = engine.new_game([pid, AI_PID], names={pid: name, AI_PID: "Bot"},
+                                           boards=room["boards"])
         save_game(room_id)
         bot_turn = vs_ai and _bot_should_act(room)
     await _send(ws, {"type": "created", "room_id": room_id, "room": mk_room_state(room_id)})
@@ -364,6 +379,7 @@ async def _handle_join(ws, room_id, pid, msg):
                 return
             room["players"][pid] = name
             room.setdefault("meta", {})[pid] = {"token": _gen_token()}
+        room.setdefault("boards", {})[pid] = _valid_board(msg.get("board_id"))
         room["sockets"][pid] = ws
         save_game(room_id)
     await _send(ws, {"type": "joined", "room_id": room_id, "room": mk_room_state(room_id)})
@@ -387,7 +403,9 @@ async def _handle_start(ws, room_id, pid):
             await _send(ws, {"type": "error", "message": "already started"})
             return
         room["status"] = "playing"
-        room["game"] = engine.new_game(humans, names=dict(room["players"]))
+        boards = {p: _valid_board(room.get("boards", {}).get(p)) for p in humans}
+        room["boards"] = boards
+        room["game"] = engine.new_game(humans, names=dict(room["players"]), boards=boards)
         save_game(room_id)
     await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
 
@@ -476,14 +494,30 @@ async def health():
     return {"status": "ok", "service": "castles_of_crimson", "version": "1.0"}
 
 
+@coc_app.get("/boards")
+async def board_layouts():
+    """Every selectable duchy layout (single source of truth for the frontend renderer)."""
+    return {
+        "ok": True,
+        "boards": [
+            {"id": b.id, "name": b.name, "spaces": b.SPACES}
+            for b in board.BOARDS.values()
+        ],
+        "default_board": board.DEFAULT_BOARD_ID,
+        "colors": board.COLORS,
+        "color_types": tiles.COLOR_TO_TYPE,
+        "goods_colors": tiles.GOODS_COLORS,
+        "monastery_meta": {eid: m["desc"] for eid, m in tiles.MONASTERY_META.items()},
+    }
+
+
 @coc_app.get("/board")
 async def board_layout():
-    """The static duchy layout (single source of truth for the frontend renderer)."""
+    """Back-compat: the default board's layout."""
     return {
         "ok": True,
         "spaces": board.SPACES,
         "colors": board.COLORS,
-        "castle": board.space_id(*board.CASTLE_SPACE),
         "color_types": tiles.COLOR_TO_TYPE,
         "goods_colors": tiles.GOODS_COLORS,
         "monastery_meta": {eid: m["desc"] for eid, m in tiles.MONASTERY_META.items()},

@@ -2,6 +2,7 @@
 import copy
 
 from games.castles_of_crimson import engine, board, tiles
+from .conftest import complete_setup, DEFAULT_CASTLE
 
 
 def _strip_ids(game):
@@ -24,16 +25,24 @@ def test_new_game_basic_shape():
     assert g["num_players"] == 2
     assert g["phase_letter"] == "A"
     assert g["round"] == 1
-    assert g["phase"] == "playing"
+    # Game starts in setup: each player must pick a starting castle space.
+    assert g["phase"] == "setup"
     assert set(g["players"]) == {"p1", "p2"}
-    # Every duchy has all 37 spaces, only the castle pre-filled.
     for pid in ("p1", "p2"):
         duchy = g["players"][pid]["duchy"]
         assert len(duchy) == 37
+        assert all(t is None for t in duchy.values()), "duchy must be empty before castle placement"
+        assert g["players"][pid]["castle_sid"] is None
+
+    complete_setup(g)
+    assert g["phase"] == "playing"
+    for pid in ("p1", "p2"):
+        duchy = g["players"][pid]["duchy"]
         filled = [sid for sid, t in duchy.items() if t is not None]
-        assert filled == [board.space_id(*board.CASTLE_SPACE)]
+        assert len(filled) == 1
         assert duchy[filled[0]]["type"] == "castle"
         assert duchy[filled[0]].get("starting") is True
+        assert g["players"][pid]["castle_sid"] == filled[0]
 
 
 def test_depots_filled_to_2p_count():
@@ -41,16 +50,38 @@ def test_depots_filled_to_2p_count():
     for i in range(1, 7):
         assert len(g["depots"][str(i)]["hexes"]) == tiles.DEPOT_FILL_2P
     assert len(g["black_depot"]) == tiles.BLACK_FILL_2P
+    assert tiles.BLACK_FILL_2P == 4   # rulebook: 4 black tiles per phase
+
+
+def test_supply_is_exactly_164_tiles():
+    import collections
+    non_black, black = tiles.build_supply()
+    assert len(non_black) == 124
+    assert len(black) == 40
+    assert len(non_black) + len(black) == 164
+
+    nb = collections.Counter((t["type"], t["color"]) for t in non_black)
+    bk = collections.Counter((t["type"], t["color"]) for t in black)
+    # colored-back / black-back breakdown (the fixed base-game component count).
+    assert nb[("building", "beige")] == 40 and bk[("building", "beige")] == 16
+    assert nb[("livestock", "green")] == 20 and bk[("livestock", "green")] == 8
+    assert nb[("mine", "gray")] == 10 and bk[("mine", "gray")] == 2
+    assert nb[("ship", "blue")] == 20 and bk[("ship", "blue")] == 6
+    assert nb[("castle", "burgundy")] == 14 and bk[("castle", "burgundy")] == 2
+    assert nb[("monastery", "yellow")] == 20 and bk[("monastery", "yellow")] == 6
+    # all 26 monastery effect_ids are present exactly once across both pools.
+    ids = sorted(t["effect_id"] for t in non_black + black if t["type"] == "monastery")
+    assert ids == list(range(1, 27))
 
 
 def test_initial_round_rolled_and_goods_placed():
     g = engine.new_game(["p1", "p2"], seed=3)
+    complete_setup(g)
     for pid in ("p1", "p2"):
         assert len(g["dice"][pid]["values"]) == 2
         assert all(1 <= v <= 6 for v in g["dice"][pid]["values"])
         assert g["dice"][pid]["used"] == [False, False]
     assert 1 <= g["white_die"] <= 6
-    # The round's goods tile landed on the white-die depot.
     assert len(g["depots"][str(g["white_die"])]["goods"]) == 1
     assert g["turn"] == g["start_player"] == "p1"
 
@@ -60,9 +91,11 @@ def test_starting_resources():
     for pid in ("p1", "p2"):
         p = g["players"][pid]
         assert p["silver"] == tiles.START_SILVER
-        assert p["workers"] == tiles.START_WORKERS
         assert sum(p["goods"].values()) == tiles.START_GOODS
         assert len(p["goods"]) <= 3
+    # Workers are seat-dependent: start player (seat 0) gets 1, next gets 2.
+    assert g["players"]["p1"]["workers"] == 1
+    assert g["players"]["p2"]["workers"] == 2
 
 
 def test_determinism_same_seed():
@@ -74,13 +107,13 @@ def test_determinism_same_seed():
 def test_different_seeds_differ():
     a = engine.new_game(["p1", "p2"], seed=1)
     b = engine.new_game(["p1", "p2"], seed=2)
-    # Extremely unlikely to be identical; guards against ignoring the seed.
     assert _strip_ids(a) != _strip_ids(b)
 
 
 # ── M5: phase / turn lifecycle ────────────────────────────────────────────────
 def test_full_game_phase_progression():
     g = engine.new_game(["p1", "p2"], seed=11)
+    complete_setup(g)
     phases_seen = []
     end_turns = 0
     guard = 0
@@ -102,6 +135,7 @@ def test_full_game_phase_progression():
 
 def test_round_advances_after_both_players():
     g = engine.new_game(["p1", "p2"], seed=4)
+    complete_setup(g)
     assert g["round"] == 1 and g["turn"] == "p1"
     engine.apply_move(g, "p1", {"type": "end_turn"})
     assert g["round"] == 1 and g["turn"] == "p2"
@@ -111,6 +145,7 @@ def test_round_advances_after_both_players():
 
 def test_mine_silver_paid_at_phase_end():
     g = engine.new_game(["p1", "p2"], seed=9)
+    complete_setup(g)
     g["players"]["p1"]["mines_count"] = 2
     start_silver = g["players"]["p1"]["silver"]
     # Play exactly one full phase (5 rounds = 10 end_turns) to trigger end-of-phase.
@@ -122,6 +157,7 @@ def test_mine_silver_paid_at_phase_end():
 
 def test_depots_refilled_each_phase():
     g = engine.new_game(["p1", "p2"], seed=2)
+    complete_setup(g)
     for _ in range(10):  # one full phase
         engine.apply_move(g, g["turn"], {"type": "end_turn"})
     assert g["phase_letter"] == "B"
@@ -154,6 +190,7 @@ def test_track_caps_at_last_space():
 
 def test_undo_turn_reverts_actions():
     g = engine.new_game(["p1", "p2"], seed=4)
+    complete_setup(g)
     g["turn"] = "p1"
     g["dice"]["p1"] = {"values": [1, 1], "used": [False, False]}
     engine._snapshot_turn(g)  # snapshot this controlled turn start
@@ -172,11 +209,14 @@ def test_undo_turn_reverts_actions():
 
 def test_undo_turn_clears_pending():
     g = engine.new_game(["p1", "p2"], seed=4)
+    complete_setup(g)
     g["turn"] = "p1"
     g["dice"]["p1"] = {"values": [1, 1], "used": [False, False]}
     engine._snapshot_turn(g)
-    # find a burgundy (castle) space and enable adjacency without completing it
-    burg = next((s, i["number"]) for s, i in board.SPACES.items() if i["color"] == "burgundy" and not i["is_castle"])
+    # find a burgundy space that isn't already filled (not the player's chosen castle)
+    filled = g["players"]["p1"]["castle_sid"]
+    burg = next((s, i["number"]) for s, i in board.SPACES.items()
+                if i["color"] == "burgundy" and s != filled)
     sid, num = burg
     nb = board.neighbors(sid)[0]
     g["players"]["p1"]["duchy"][nb] = {"id": "d", "kind": "hex", "type": "mine", "color": "gray"}
@@ -193,8 +233,10 @@ def test_undo_turn_clears_pending():
 
 def test_winner_declared_on_game_over():
     g = engine.new_game(["p1", "p2"], seed=11)
+    complete_setup(g)
     while not engine.is_over(g):
-        engine.apply_move(g, g["turn"], {"type": "end_turn"})
+        ok, err = engine.apply_move(g, g["turn"], {"type": "end_turn"})
+        assert ok, err
     assert g["winner"] in ("p1", "p2")
     scores = engine.final_scores(g)
     assert set(scores) == {"p1", "p2"}

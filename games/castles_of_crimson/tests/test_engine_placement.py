@@ -5,7 +5,9 @@ from games.castles_of_crimson import engine, board, tiles
 
 
 def fresh(seed=1):
+    from .conftest import complete_setup
     g = engine.new_game(["p1", "p2"], seed=seed)
+    complete_setup(g)
     # Force a deterministic, controlled turn for p1.
     g["turn"] = "p1"
     g["dice"]["p1"] = {"values": [1, 1], "used": [False, False]}
@@ -13,7 +15,7 @@ def fresh(seed=1):
 
 
 def castle_sid():
-    return board.space_id(*board.CASTLE_SPACE)
+    return "0,0"
 
 
 def a_gray_castle_neighbor():
@@ -125,6 +127,31 @@ def test_take_hex_rejects_full_storage():
     g["depots"]["3"]["hexes"] = [mine_tile("d3")]
     ok, err = engine.apply_move(g, "p1", {"type": "take_hex", "die_index": 0, "tile_id": "d3"})
     assert not ok and "storage full" in err
+
+
+def test_discard_storage_then_take():
+    g = fresh()
+    g["dice"]["p1"]["values"] = [3, 6]
+    g["players"]["p1"]["storage"] = [mine_tile("a"), mine_tile("b"), mine_tile("c")]
+    g["depots"]["3"]["hexes"] = [mine_tile("d3")]
+    # discard is offered only when storage is full
+    assert {"type": "discard_storage", "tile_id": "a"} in engine.legal_moves(g, "p1")
+    ok, err = engine.apply_move(g, "p1", {"type": "discard_storage", "tile_id": "a"})
+    assert ok, err
+    assert all(t["id"] != "a" for t in g["players"]["p1"]["storage"])
+    assert g["dice"]["p1"]["used"] == [False, False]   # discarding is free, no die spent
+    # now a key space is free, so the take-hex action succeeds
+    ok2, err2 = engine.apply_move(g, "p1", {"type": "take_hex", "die_index": 0, "tile_id": "d3"})
+    assert ok2, err2
+    assert any(t["id"] == "d3" for t in g["players"]["p1"]["storage"])
+
+
+def test_discard_storage_rejected_when_not_full():
+    g = fresh()
+    g["players"]["p1"]["storage"] = [mine_tile("a")]
+    ok, err = engine.apply_move(g, "p1", {"type": "discard_storage", "tile_id": "a"})
+    assert not ok and "full" in err
+    assert {"type": "discard_storage", "tile_id": "a"} not in engine.legal_moves(g, "p1")
 
 
 # ── take_workers ──────────────────────────────────────────────────────────────

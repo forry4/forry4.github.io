@@ -1,69 +1,85 @@
 """M4: area-completion scoring, color bonus tiles, and selling goods."""
 from games.castles_of_crimson import engine, board, tiles
+from .conftest import complete_setup
 
 
 def fresh():
     g = engine.new_game(["p1", "p2"], seed=1)
+    complete_setup(g)
     g["turn"] = "p1"
     g["dice"]["p1"] = {"values": [1, 1], "used": [False, False]}
     return g
 
 
-def mine(tid):
-    return {"id": tid, "kind": "hex", "type": "mine", "color": "gray"}
+def mine(tid, color="gray"):
+    # type "mine" placed on any-color space: color match is what placement checks;
+    # the mine type avoids color-specific side effects (livestock/building/etc.) so
+    # the area-score assertion stays clean regardless of the region's color.
+    return {"id": tid, "kind": "hex", "type": "mine", "color": color}
 
 
-def region_by(color, size):
+def region_of_size(size):
+    """A region of exactly `size` whose completion scores ONLY the area value.
+
+    Picks a non-burgundy region (burgundy = castle, special scoring) whose color
+    has more than one region, so completing this one does NOT complete the whole
+    color and therefore does not also award the color-bonus tile.
+    """
+    import collections
+    per_color = collections.Counter(r["color"] for r in board.REGIONS.values())
     for reg in board.REGIONS.values():
-        if reg["color"] == color and reg["size"] == size:
+        if reg["size"] == size and reg["color"] != "burgundy" and per_color[reg["color"]] > 1:
             return reg
-    raise AssertionError(f"no {color} region of size {size}")
+    raise AssertionError(f"no clean (non-color-completing) region of size {size}")
 
 
-def prefill(g, pid, spaces):
+def prefill(g, pid, spaces, color="gray"):
     for k, sid in enumerate(spaces):
-        g["players"][pid]["duchy"][sid] = mine(f"pre_{pid}_{k}")
+        g["players"][pid]["duchy"][sid] = mine(f"pre_{pid}_{k}", color)
 
 
 # ── Area completion ──────────────────────────────────────────────────────────
-def test_area_completion_size2_phase_a():
+def test_area_completion_size3_phase_a():
     g = fresh()
-    reg = region_by("gray", 2)
+    reg = region_of_size(3)
+    color = reg["color"]
     spaces = sorted(reg["spaces"])
     last = spaces[-1]
-    prefill(g, "p1", spaces[:-1])
+    prefill(g, "p1", spaces[:-1], color)
     g["players"]["p1"]["vp"] = 0
     g["dice"]["p1"]["values"] = [board.SPACES[last]["number"], 5]
-    g["players"]["p1"]["storage"] = [mine("place")]
+    g["players"]["p1"]["storage"] = [mine("place", color)]
     ok, err = engine.apply_move(g, "p1", {"type": "place_tile", "die_index": 0, "tile_id": "place", "space_id": last})
     assert ok, err
-    assert g["players"]["p1"]["vp"] == tiles.AREA_SCORE[1] + tiles.PHASE_BONUS["A"]  # 3 + 10 = 13
+    assert g["players"]["p1"]["vp"] == tiles.AREA_SCORE[2] + tiles.PHASE_BONUS["A"]  # 6 + 10 = 16
 
 
 def test_area_completion_phase_bonus_varies():
     g = fresh()
     g["phase_letter"] = "E"
-    reg = region_by("gray", 2)
+    reg = region_of_size(3)
+    color = reg["color"]
     spaces = sorted(reg["spaces"])
     last = spaces[-1]
-    prefill(g, "p1", spaces[:-1])
+    prefill(g, "p1", spaces[:-1], color)
     g["players"]["p1"]["vp"] = 0
     g["dice"]["p1"]["values"] = [board.SPACES[last]["number"], 5]
-    g["players"]["p1"]["storage"] = [mine("place")]
+    g["players"]["p1"]["storage"] = [mine("place", color)]
     ok, err = engine.apply_move(g, "p1", {"type": "place_tile", "die_index": 0, "tile_id": "place", "space_id": last})
     assert ok, err
-    assert g["players"]["p1"]["vp"] == tiles.AREA_SCORE[1] + tiles.PHASE_BONUS["E"]  # 3 + 2 = 5
+    assert g["players"]["p1"]["vp"] == tiles.AREA_SCORE[2] + tiles.PHASE_BONUS["E"]  # 6 + 2 = 8
 
 
 def test_area_completion_size5():
     g = fresh()
-    reg = region_by("gray", 5)
+    reg = region_of_size(5)
+    color = reg["color"]
     spaces = sorted(reg["spaces"])
     last = spaces[-1]
-    prefill(g, "p1", spaces[:-1])
+    prefill(g, "p1", spaces[:-1], color)
     g["players"]["p1"]["vp"] = 0
     g["dice"]["p1"]["values"] = [board.SPACES[last]["number"], 5]
-    g["players"]["p1"]["storage"] = [mine("place")]
+    g["players"]["p1"]["storage"] = [mine("place", color)]
     ok, err = engine.apply_move(g, "p1", {"type": "place_tile", "die_index": 0, "tile_id": "place", "space_id": last})
     assert ok, err
     assert g["players"]["p1"]["vp"] == tiles.AREA_SCORE[4] + tiles.PHASE_BONUS["A"]  # 15 + 10 = 25
@@ -71,20 +87,18 @@ def test_area_completion_size5():
 
 def test_partial_area_does_not_score():
     g = fresh()
-    reg = region_by("gray", 5)
-    spaces = sorted(reg["spaces"])
-    # Fill only the first space via placement (region not complete).
-    target = spaces[0]
-    # Ensure a placed neighbor: pre-fill an adjacent gray space outside scoring path?
-    # Simpler: place on a castle-adjacent gray space and check no area score.
-    castle = board.space_id(*board.CASTLE_SPACE)
-    gray_nbr = next(s for s in board.neighbors(castle) if board.SPACES[s]["color"] == "gray")
+    castle = g["players"]["p1"]["castle_sid"]
+    # A castle-adjacent space whose region has >1 space, so one tile can't complete it.
+    target = next(s for s in board.neighbors(castle)
+                  if board.REGIONS[board.region_of(s)]["size"] > 1
+                  and g["players"]["p1"]["duchy"][s] is None)
+    color = board.SPACES[target]["color"]
     g["players"]["p1"]["vp"] = 0
-    g["dice"]["p1"]["values"] = [board.SPACES[gray_nbr]["number"], 5]
-    g["players"]["p1"]["storage"] = [mine("place")]
-    ok, err = engine.apply_move(g, "p1", {"type": "place_tile", "die_index": 0, "tile_id": "place", "space_id": gray_nbr})
+    g["dice"]["p1"]["values"] = [board.SPACES[target]["number"], 5]
+    g["players"]["p1"]["storage"] = [mine("place", color)]
+    ok, err = engine.apply_move(g, "p1", {"type": "place_tile", "die_index": 0, "tile_id": "place", "space_id": target})
     assert ok, err
-    # The size-5 gray region has 5 spaces; one tile cannot complete it.
+    # one tile cannot complete a multi-space region.
     assert g["players"]["p1"]["vp"] == 0
 
 

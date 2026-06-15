@@ -214,6 +214,15 @@ const css = `
 .coc-turnbadge{font-family:'Cinzel',serif;font-size:.74rem;padding:4px 10px;border-radius:12px;letter-spacing:.05em}
 .coc-turnbadge.you{background:var(--gold);color:#120c0d}
 .coc-turnbadge.them{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border)}
+.coc-board-pick{margin:4px 0 8px}
+.coc-board-pick .coc-section-title{display:flex;align-items:center;gap:8px}
+.coc-board-grid{display:flex;gap:8px;overflow-x:auto;padding:6px 2px 8px}
+.coc-bthumb{flex:0 0 auto;width:86px;background:var(--surface2);border:2px solid var(--border);border-radius:10px;padding:5px 5px 4px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;transition:border-color .15s,transform .1s}
+.coc-bthumb:hover{transform:translateY(-2px)}
+.coc-bthumb.sel{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold)}
+.coc-bthumb-svg{width:72px;height:66px;display:block}
+.coc-bthumb-name{font-size:.6rem;color:var(--text-dim);text-align:center;line-height:1.05;font-family:'Cinzel',serif}
+.coc-bthumb.sel .coc-bthumb-name{color:var(--gold)}
 `;
 
 // ─── Hex geometry ─────────────────────────────────────────────────────────────
@@ -228,6 +237,36 @@ function hexPoints(cx, cy, s) {
     pts.push(`${(cx + s * Math.cos(a)).toFixed(1)},${(cy + s * Math.sin(a)).toFixed(1)}`);
   }
   return pts.join(" ");
+}
+
+// A small selectable thumbnail of one board's hex layout (lobby board picker).
+function BoardThumb({ spaces, name, selected, onClick }) {
+  const sids = Object.keys(spaces || {});
+  if (!sids.length) return null;
+  let minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
+  const centers = {};
+  for (const sid of sids) {
+    const sp = spaces[sid];
+    const c = hexCenter(sp.q, sp.r);
+    centers[sid] = c;
+    minX = Math.min(minX, c.x); maxX = Math.max(maxX, c.x);
+    minY = Math.min(minY, c.y); maxY = Math.max(maxY, c.y);
+  }
+  const pad = HEX_S + 2;
+  const vb = `${(minX - pad).toFixed(0)} ${(minY - pad).toFixed(0)} ${(maxX - minX + pad * 2).toFixed(0)} ${(maxY - minY + pad * 2).toFixed(0)}`;
+  return (
+    <button type="button" className={`coc-bthumb${selected ? " sel" : ""}`} onClick={onClick} title={name}>
+      <svg viewBox={vb} className="coc-bthumb-svg" preserveAspectRatio="xMidYMid meet">
+        {sids.map((sid) => {
+          const sp = spaces[sid];
+          const c = centers[sid];
+          return <polygon key={sid} points={hexPoints(c.x, c.y, HEX_S - 1.2)}
+            fill={TILE_HEX[sp.color] || "#444"} stroke="rgba(0,0,0,.45)" strokeWidth={0.8} />;
+        })}
+      </svg>
+      <span className="coc-bthumb-name">{name}</span>
+    </button>
+  );
 }
 
 export default function CastlesOfCrimson({ myId, authUser, onExit }) {
@@ -247,6 +286,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const [extraValue, setExtraValue] = useState(null);
   const [viewOpp, setViewOpp] = useState(false);
   const [confirmAbandon, setConfirmAbandon] = useState(false);
+  const [myBoard, setMyBoard] = useState("1");          // board the local player picked
+  const [oppBoard, setOppBoard] = useState("2");        // board chosen for the bot (vs-AI)
 
   const playerName = authUser?.name || "Player";
   const pendingAction = useRef(null);
@@ -284,10 +325,21 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
 
   const { connected, connect, send, disconnect } = useSocket(handleMessage);
 
-  // fetch the static board layout once
+  // fetch every selectable board layout once (shared meta + per-board spaces)
   useEffect(() => {
-    fetch(`${COC_HTTP}/board`).then((r) => r.json()).then((d) => { if (d.ok) setBoard(d); }).catch(() => {});
+    fetch(`${COC_HTTP}/boards`).then((r) => r.json()).then((d) => {
+      if (!d.ok) return;
+      const byId = {};
+      (d.boards || []).forEach((b) => { byId[b.id] = b; });
+      setBoard({ ...d, byId });
+    }).catch(() => {});
   }, []);
+
+  // Resolve the hex layout for a given board id (falls back to the default board).
+  const boardSpaces = useCallback((boardId) => {
+    const by = board?.byId || {};
+    return (by[boardId] || by[board?.default_board] || {}).spaces || {};
+  }, [board]);
 
   const fetchGames = useCallback(() => {
     fetch(`${COC_HTTP}/games`).then((r) => r.json()).then((d) => setOpenGames(d.games || [])).catch(() => {});
@@ -322,14 +374,17 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     const rid = roomCode();
     setRoomId(rid);
     try { localStorage.setItem("coc_roomId", rid); } catch {}
-    connect(`${COC_WS}/${rid}/${myId}`, { action: "create", name: playerName, vs_ai: vsAi });
+    connect(`${COC_WS}/${rid}/${myId}`, {
+      action: "create", name: playerName, vs_ai: vsAi,
+      board_id: myBoard, opp_board_id: oppBoard,
+    });
   };
   const startJoin = (rid) => {
     rid = (rid || "").toUpperCase();
     if (!rid) return;
     setRoomId(rid);
     try { localStorage.setItem("coc_roomId", rid); } catch {}
-    connect(`${COC_WS}/${rid}/${myId}`, { action: "join", name: playerName });
+    connect(`${COC_WS}/${rid}/${myId}`, { action: "join", name: playerName, board_id: myBoard });
   };
   const resume = (rid) => {
     const tok = localStorage.getItem(`coc_token_${rid}_${myId}`);
@@ -387,7 +442,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const ignoreNumber = pendingMine && game?.pending_kind === "townhall_place";
   const legalTarget = (sid) => {
     if (!selStorage || !me) return false;
-    const sp = board?.spaces?.[sid];
+    const sp = boardSpaces(me.board_id)[sid];
     if (!sp || me.duchy[sid]) return false;
     const tile = me.storage.find((t) => t.id === selStorage);
     if (!tile || tile.color !== sp.color) return false;
@@ -425,6 +480,24 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             <h1>Castles of Crimson</h1>
             <p>Build your duchy of crimson estates.</p>
           </div>
+
+          <div className="coc-board-pick">
+            <div className="coc-section-title">Your Board <span className="coc-card-meta">— {board.byId?.[myBoard]?.name}</span></div>
+            <div className="coc-board-grid">
+              {(board.boards || []).map((b) => (
+                <BoardThumb key={b.id} spaces={b.spaces} name={b.name}
+                  selected={myBoard === b.id} onClick={() => setMyBoard(b.id)} />
+              ))}
+            </div>
+            <div className="coc-section-title">Bot's Board <span className="coc-card-meta">— {board.byId?.[oppBoard]?.name} (Play vs Bot only)</span></div>
+            <div className="coc-board-grid">
+              {(board.boards || []).map((b) => (
+                <BoardThumb key={b.id} spaces={b.spaces} name={b.name}
+                  selected={oppBoard === b.id} onClick={() => setOppBoard(b.id)} />
+              ))}
+            </div>
+          </div>
+
           <div className="coc-lobby-actions">
             <button className="coc-btn gold" onClick={() => startCreate(false)}>+ New Game</button>
             <button className="coc-btn crimson" onClick={() => startCreate(true)}>Play vs Bot</button>
@@ -523,11 +596,12 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   // ─── Game ────────────────────────────────────────────────────────────────
   const dice = game.dice?.[myId];
   const renderDuchy = (pdata, interactive) => {
-    const sids = Object.keys(board.spaces);
+    const spaces = boardSpaces(pdata.board_id);
+    const sids = Object.keys(spaces);
     let minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
     const centers = {};
     for (const sid of sids) {
-      const sp = board.spaces[sid];
+      const sp = spaces[sid];
       const c = hexCenter(sp.q, sp.r);
       centers[sid] = c;
       minX = Math.min(minX, c.x); maxX = Math.max(maxX, c.x);
@@ -538,7 +612,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     return (
       <svg className="coc-hexsvg" viewBox={vb}>
         {sids.map((sid) => {
-          const sp = board.spaces[sid];
+          const sp = spaces[sid];
           const c = centers[sid];
           const tile = pdata.duchy[sid];
           const legal = interactive && legalTarget(sid);
@@ -738,9 +812,18 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                       ? <> <span className="coc-tile goods" style={{ display: "inline-flex", width: 15, height: 15, fontSize: ".55rem", background: GOODS_HEX[goodsForDie] }}>{actionValue}</span>{me?.goods?.[goodsForDie] ? ` ×${me.goods[goodsForDie]}` : ""}</>
                       : " goods"}
                   </button>
+                  {me?.storage?.length >= 3 && (
+                    <button className="coc-btn ghost sm" disabled={!selStorage}
+                      title="Storage is full — discard a tile (back to the box) to make room"
+                      onClick={() => { mv({ type: "discard_storage", tile_id: selStorage }); setSelStorage(null); }}>
+                      Discard
+                    </button>
+                  )}
                   <button className="coc-btn crimson sm" onClick={() => mv({ type: "end_turn" })}>End Turn</button>
                   <span className="coc-card-meta" style={{ alignSelf: "center" }}>
-                    {selStorage ? "Click a glowing hex to place." : selDie != null ? "Click a depot tile to take, or a storage tile to place." : "Select a die to act."}
+                    {me?.storage?.length >= 3 && selStorage ? "Storage full — Discard frees this slot."
+                      : selStorage ? "Click a glowing hex to place."
+                      : selDie != null ? "Click a depot tile to take, or a storage tile to place." : "Select a die to act."}
                   </span>
                 </div>
               )}
@@ -827,6 +910,20 @@ function PendingModal({ game, board, me, extraValue, setExtraValue, mv, goodsFor
           {[1, 2, 3, 4, 5, 6].map((d) => {
             const n = game.depots[String(d)].goods.length;
             return <button key={d} className="coc-btn outline sm" onClick={() => mv({ type: "ship_take_goods", depot: d })}>◆{d} ({n})</button>;
+          })}
+          <button className="coc-btn ghost sm" onClick={skip}>Skip</button>
+        </div>
+      </Modal>
+    );
+  }
+  if (kind === "ship_adjacent_depot") {
+    const cands = game.pending?.ctx?.candidates || [];
+    return (
+      <Modal title="Monastery — adjacent depot" desc="You may also take all goods from one adjacent depot.">
+        <div className="coc-modal-row">
+          {cands.map((d) => {
+            const n = game.depots[String(d)].goods.length;
+            return <button key={d} className="coc-btn outline sm" onClick={() => mv({ type: "ship_adjacent_take", depot: d })}>◆{d} ({n})</button>;
           })}
           <button className="coc-btn ghost sm" onClick={skip}>Skip</button>
         </div>

@@ -2,12 +2,14 @@
 import pytest
 
 from games.castles_of_crimson import engine, board, tiles
+from .conftest import complete_setup, DEFAULT_CASTLE
 
-CASTLE = board.space_id(*board.CASTLE_SPACE)
+CASTLE = DEFAULT_CASTLE
 
 
 def fresh(effects=()):
     g = engine.new_game(["p1", "p2"], seed=1)
+    complete_setup(g)
     g["turn"] = "p1"
     g["dice"]["p1"] = {"values": [1, 1], "used": [False, False]}
     for d in range(1, 7):
@@ -99,7 +101,39 @@ def test_m5_ship_takes_adjacent_depot():
     assert place(g, hext("ship", "blue", "sh"), sid, num)[0]
     engine.apply_move(g, "p1", {"type": "ship_take_goods", "depot": 3})
     assert g["players"]["p1"]["goods"].get("rose") == 1
-    assert g["players"]["p1"]["goods"].get("jade") == 1   # adjacent depot 4 too
+    # Monastery 5 now offers a CHOICE of adjacent depot (depot 4 holds goods).
+    assert g["pending_kind"] == "ship_adjacent_depot"
+    assert g["pending"]["ctx"]["candidates"] == [4]
+    ok, err = engine.apply_move(g, "p1", {"type": "ship_adjacent_take", "depot": 4})
+    assert ok, err
+    assert g["players"]["p1"]["goods"].get("jade") == 1   # chose adjacent depot 4
+    assert g["pending_pid"] is None
+
+
+def test_m5_adjacent_choice_can_be_skipped():
+    g = fresh(effects=[5])
+    sid, num = next((s, i["number"]) for s, i in board.SPACES.items() if i["color"] == "blue")
+    enable_adj(g, sid)
+    g["depots"]["3"]["goods"] = [{"id": "g3", "kind": "goods", "color": "rose"}]
+    g["depots"]["4"]["goods"] = [{"id": "g4", "kind": "goods", "color": "jade"}]
+    assert place(g, hext("ship", "blue", "sh"), sid, num)[0]
+    engine.apply_move(g, "p1", {"type": "ship_take_goods", "depot": 3})
+    assert g["pending_kind"] == "ship_adjacent_depot"
+    engine.apply_move(g, "p1", {"type": "skip_pending"})
+    assert g["players"]["p1"]["goods"].get("jade") is None  # declined the bonus
+    assert g["pending_pid"] is None
+
+
+def test_m5_no_pending_when_no_adjacent_goods():
+    g = fresh(effects=[5])
+    sid, num = next((s, i["number"]) for s, i in board.SPACES.items() if i["color"] == "blue")
+    enable_adj(g, sid)
+    g["depots"]["3"]["goods"] = [{"id": "g3", "kind": "goods", "color": "rose"}]
+    assert place(g, hext("ship", "blue", "sh"), sid, num)[0]
+    engine.apply_move(g, "p1", {"type": "ship_take_goods", "depot": 3})
+    # Neither depot 2 nor 4 holds goods -> no follow-up decision.
+    assert g["pending_pid"] is None
+    assert g["players"]["p1"]["goods"].get("rose") == 1
 
 
 def test_m6_spend_workers_for_building():

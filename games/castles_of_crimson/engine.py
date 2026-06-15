@@ -127,12 +127,13 @@ def _begin_round(game: dict) -> None:
     _snapshot_turn(game)
 
 
-def _new_player(name: str) -> dict:
-    duchy = {sid: None for sid in board.SPACES}
-    castle_sid = board.space_id(*board.CASTLE_SPACE)
-    duchy[castle_sid] = tiles.starting_castle_tile()
+def _new_player(name: str, board_id: str = board.DEFAULT_BOARD_ID) -> dict:
+    b = board.get_board(board_id)
+    duchy = {sid: None for sid in b.SPACES}
     return {
         "name": name,
+        "board_id": b.id,
+        "castle_sid": None,                  # set when player picks their starting castle
         "duchy": duchy,
         "storage": [],                       # <=3 hex tiles awaiting placement
         "goods": {},                         # color -> count, <=3 colors
@@ -149,8 +150,10 @@ def _new_player(name: str) -> dict:
     }
 
 
-def new_game(player_ids: list[str], names: dict[str, str] | None = None, seed: int | None = None) -> dict:
+def new_game(player_ids: list[str], names: dict[str, str] | None = None, seed: int | None = None,
+             boards: dict[str, str] | None = None) -> dict:
     names = names or {}
+    boards = boards or {}
     rng = random.Random(seed)
 
     non_black, black = tiles.build_supply()
@@ -164,7 +167,7 @@ def new_game(player_ids: list[str], names: dict[str, str] | None = None, seed: i
         "phase_letter": "A",
         "round": 1,
         "round_in_game": 1,
-        "phase": "playing",                  # "playing" | "over"
+        "phase": "setup",                    # "setup" | "playing" | "over"
         "winner": None,
         "order": list(player_ids),
         # Turn-order track: 7 spaces, each a stack of pids (bottom-to-top). All
@@ -185,7 +188,7 @@ def new_game(player_ids: list[str], names: dict[str, str] | None = None, seed: i
         "goods_supply": goods_pool,
         "goods_queue": [],
         "bonus_tiles": {c: [tiles.bonus_first(len(player_ids)), tiles.bonus_second(len(player_ids))] for c in board.COLORS},
-        "players": {pid: _new_player(names.get(pid, pid)) for pid in player_ids},
+        "players": {pid: _new_player(names.get(pid, pid), boards.get(pid, board.DEFAULT_BOARD_ID)) for pid in player_ids},
         "pending_pid": None,
         "pending_kind": None,
         "pending": None,
@@ -196,15 +199,19 @@ def new_game(player_ids: list[str], names: dict[str, str] | None = None, seed: i
     # Persist the RNG so subsequent dice rolls continue this stream deterministically.
     _save_rng(game, rng)
 
-    # Starting goods for each player.
-    for pid in player_ids:
+    # Starting resources for each player. Workers are seat-dependent per the
+    # rulebook: the start player (seat 0) gets 1, the next gets 2, and so on,
+    # compensating the start player for moving first.
+    for seat, pid in enumerate(player_ids):
         p = game["players"][pid]
+        p["workers"] = seat + 1
         for g in _draw(goods_pool, tiles.START_GOODS):
             p["goods"][g["color"]] = p["goods"].get(g["color"], 0) + 1
 
     _replenish_depots(game)
     _refill_goods_queue(game)
-    _begin_round(game)
+    # First move for each player: pick a starting castle space.
+    # _begin_round is deferred until all players have placed their castle.
     return game
 
 
@@ -285,9 +292,15 @@ def _storage_tile(p: dict, tile_id: str) -> dict | None:
     return None
 
 
+def _pboard(p: dict) -> board.Board:
+    """The Board the given player state is playing on."""
+    return board.get_board(p.get("board_id"))
+
+
 def _has_placed_neighbor(game: dict, pid: str, sid: str) -> bool:
-    duchy = game["players"][pid]["duchy"]
-    return any(duchy[nb] is not None for nb in board.neighbors(sid))
+    p = game["players"][pid]
+    duchy = p["duchy"]
+    return any(duchy[nb] is not None for nb in _pboard(p).neighbors(sid))
 
 
 def _adjust_cost(game: dict, pid: str, frm: int, to: int) -> int:
@@ -329,7 +342,7 @@ def _building_town_ok(p: dict, tile: dict, sid: str) -> bool:
     """Whether placing `tile` on `sid` respects the one-building-per-town rule."""
     if tile["type"] != "building" or 1 in p["monastery_effects"]:
         return True
-    return tile["building"] not in p["town_buildings"].get(board.region_of(sid), [])
+    return tile["building"] not in p["town_buildings"].get(_pboard(p).region_of(sid), [])
 
 
 # ── Turn / round lifecycle ────────────────────────────────────────────────────
@@ -416,11 +429,12 @@ def _on_tile_placed(game: dict, pid: str, sid: str, tile: dict) -> None:
 def _score_area_and_bonus(game: dict, pid: str, sid: str) -> None:
     """After a placement on `sid`, score a newly-completed area and/or color bonus."""
     p = game["players"][pid]
+    b = _pboard(p)
     duchy = p["duchy"]
-    color = board.SPACES[sid]["color"]
+    color = b.SPACES[sid]["color"]
 
     # Area completion: the region containing this space is now fully covered.
-    region = board.REGIONS[board.region_of(sid)]
+    region = b.REGIONS[b.region_of(sid)]
     if all(duchy[s] is not None for s in region["spaces"]):
         size = region["size"]
         vp = tiles.AREA_SCORE[size - 1] + tiles.PHASE_BONUS[game["phase_letter"]]
@@ -428,7 +442,7 @@ def _score_area_and_bonus(game: dict, pid: str, sid: str) -> None:
         _log(game, pid, "area_complete", region=region["id"], size=size, vp=vp)
 
     # Color bonus: first/second player to fully cover every space of this color.
-    if all(duchy[s] is not None for s in board.SPACES_BY_COLOR[color]):
+    if all(duchy[s] is not None for s in b.SPACES_BY_COLOR[color]):
         remaining = game["bonus_tiles"].get(color, [])
         if remaining:
             val = remaining.pop(0)
@@ -454,7 +468,8 @@ def _clear_pending(game: dict) -> None:
 def _score_livestock(game: dict, pid: str, sid: str, tile: dict) -> None:
     p = game["players"][pid]
     animal = tile["animal"]
-    pasture = board.REGIONS[board.region_of(sid)]["spaces"]
+    b = _pboard(p)
+    pasture = b.REGIONS[b.region_of(sid)]["spaces"]
     same = [s for s in pasture if p["duchy"][s] is not None and p["duchy"][s].get("animal") == animal]
     total = sum(p["duchy"][s]["count"] for s in same)
     p["vp"] += total
@@ -479,7 +494,7 @@ def _place_building_effect(game: dict, pid: str, sid: str, tile: dict) -> None:
     p = game["players"][pid]
     bt = tile["building"]
     p["buildings_placed"][bt] += 1
-    p["town_buildings"].setdefault(board.region_of(sid), []).append(bt)
+    p["town_buildings"].setdefault(_pboard(p).region_of(sid), []).append(bt)
     if bt == "boarding":
         p["workers"] += 4
     elif bt == "bank":
@@ -565,7 +580,7 @@ def _do_place_tile(game, pid, value, tile_id, sid, ignore_number=False):
     tile = _storage_tile(p, tile_id)
     if tile is None:
         return False, "tile not in storage"
-    info = board.SPACES.get(sid)
+    info = _pboard(p).SPACES.get(sid)
     if info is None:
         return False, "no such space"
     if p["duchy"][sid] is not None:
@@ -704,6 +719,24 @@ def _h_adjust_die(game, pid, move):
     return True, None
 
 
+def _h_discard_storage(game, pid, move):
+    """Discard a tile from full storage (back to the box) to make room.
+
+    Per the rulebook, when you take a hex tile but have no empty key space, you
+    must first create room by discarding a stored tile. Only offered when
+    storage is full, so it is never a pointless move.
+    """
+    p = game["players"][pid]
+    if _free_storage(p):
+        return False, "storage is not full"
+    tile = _storage_tile(p, move.get("tile_id"))
+    if tile is None:
+        return False, "tile not in storage"
+    p["storage"].remove(tile)
+    _log(game, pid, "discard_storage", tile=tile)
+    return True, None
+
+
 def _h_end_turn(game, pid, move):
     # Apply this turn's queued ship advances to the track (each ship = 1 space).
     n = game.get("ship_advance_pending", 0)
@@ -715,7 +748,33 @@ def _h_end_turn(game, pid, move):
     return True, None
 
 
+def _h_place_starting_castle(game, pid, move):
+    if game["phase"] != "setup":
+        return False, "not in setup phase"
+    sid = move.get("space_id")
+    p = game["players"][pid]
+    b = _pboard(p)
+    if sid not in b.SPACES:
+        return False, "invalid space"
+    if b.SPACES[sid]["color"] != "burgundy":
+        return False, "starting castle must be placed on a burgundy space"
+    if p["duchy"][sid] is not None:
+        return False, "space already occupied"
+    p["duchy"][sid] = tiles.starting_castle_tile()
+    p["castle_sid"] = sid
+    _log(game, pid, "place_starting_castle", space_id=sid)
+    # Advance to next player who hasn't placed yet.
+    remaining = [p2 for p2 in game["order"] if game["players"][p2]["castle_sid"] is None]
+    if remaining:
+        game["turn"] = remaining[0]
+    else:
+        game["phase"] = "playing"
+        _begin_round(game)
+    return True, None
+
+
 _HANDLERS = {
+    "place_starting_castle": _h_place_starting_castle,
     "take_hex": _h_take_hex,
     "place_tile": _h_place_tile,
     "sell_goods": _h_sell_goods,
@@ -723,6 +782,7 @@ _HANDLERS = {
     "buy_black": _h_buy_black,
     "monastery6_take": _h_monastery6_take,
     "adjust_die": _h_adjust_die,
+    "discard_storage": _h_discard_storage,
     "end_turn": _h_end_turn,
 }
 
@@ -757,12 +817,27 @@ def _r_ship_take_goods(game, pid, move):
         return False, "choose a depot 1-6"
     _clear_pending(game)
     _take_all_goods_from_depot(game, pid, d)
-    # Monastery 5: also take goods from an adjacent depot.
-    if 5 in game["players"][pid]["monastery_effects"]:
-        adj_depot = d + 1 if d < 6 else d - 1
-        _take_all_goods_from_depot(game, pid, adj_depot)
-    # (The ship's track advance was queued at placement and applies at end of turn.)
     _log(game, pid, "ship_take_goods", depot=d)
+    # Monastery 5: you may ALSO take all goods from one adjacent depot of your
+    # choice. Offer it only when an adjacent depot actually holds goods.
+    if 5 in game["players"][pid]["monastery_effects"]:
+        adj = [x for x in (d - 1, d + 1)
+               if 1 <= x <= 6 and game["depots"][str(x)]["goods"]]
+        if adj:
+            _set_pending(game, pid, "ship_adjacent_depot", {"candidates": adj})
+    # (The ship's track advance was queued at placement and applies at end of turn.)
+    return True, None
+
+
+def _r_ship_adjacent_take(game, pid, move):
+    """Monastery 5 follow-up: take all goods from one chosen adjacent depot."""
+    ctx = game["pending"]["ctx"]
+    d = move.get("depot")
+    if d not in ctx.get("candidates", []):
+        return False, "not an adjacent depot with goods"
+    _clear_pending(game)
+    _take_all_goods_from_depot(game, pid, d)
+    _log(game, pid, "ship_adjacent_take", depot=d)
     return True, None
 
 
@@ -817,6 +892,7 @@ def _r_skip_pending(game, pid, move):
 _RESOLVERS = {
     "extra_action": _r_extra_action,
     "ship_take_goods": _r_ship_take_goods,
+    "ship_adjacent_take": _r_ship_adjacent_take,
     "building_take_choice": _r_building_take,
     "warehouse_sell": _r_warehouse_sell,
     "townhall_place": _r_townhall_place,
@@ -826,6 +902,7 @@ _RESOLVERS = {
 RESOLVERS_FOR = {
     "extra_action": {"extra_action", "skip_pending"},
     "ship_choose_depot": {"ship_take_goods", "skip_pending"},
+    "ship_adjacent_depot": {"ship_adjacent_take", "skip_pending"},
     "building_take_choice": {"building_take_choice", "skip_pending"},
     "warehouse_sell": {"warehouse_sell", "skip_pending"},
     "townhall_place": {"townhall_place", "skip_pending"},
@@ -840,9 +917,10 @@ def _legal_extra_actions(game, pid, v):
         for depot in _allowed_values(v, 12 in p["monastery_effects"]):
             for t in game["depots"][str(depot)]["hexes"]:
                 out.append({"type": "extra_action", "value": v, "sub": {"type": "take_hex", "depot": depot, "tile_id": t["id"]}})
+    b = _pboard(p)
     for t in p["storage"]:
         allowed = _allowed_values(v, _free_shift_for_tile(p, t["type"]))
-        for sid, info in board.SPACES.items():
+        for sid, info in b.SPACES.items():
             if (p["duchy"][sid] is None and info["color"] == t["color"] and info["number"] in allowed
                     and _has_placed_neighbor(game, pid, sid) and _building_town_ok(p, t, sid)):
                 out.append({"type": "extra_action", "value": v, "sub": {"type": "place_tile", "tile_id": t["id"], "space_id": sid}})
@@ -862,6 +940,9 @@ def _pending_legal_moves(game: dict, pid: str) -> list[dict]:
     elif kind == "ship_choose_depot":
         for d in range(1, 7):
             moves.append({"type": "ship_take_goods", "depot": d})
+    elif kind == "ship_adjacent_depot":
+        for d in ctx.get("candidates", []):
+            moves.append({"type": "ship_adjacent_take", "depot": d})
     elif kind == "building_take_choice":
         for tid in ctx.get("candidates", []):
             moves.append({"type": "building_take_choice", "tile_id": tid})
@@ -869,8 +950,9 @@ def _pending_legal_moves(game: dict, pid: str) -> list[dict]:
         for color in list(p["goods"].keys()):
             moves.append({"type": "warehouse_sell", "color": color})
     elif kind == "townhall_place":
+        b = _pboard(p)
         for t in p["storage"]:
-            for sid, info in board.SPACES.items():
+            for sid, info in b.SPACES.items():
                 if (p["duchy"][sid] is None and info["color"] == t["color"]
                         and _has_placed_neighbor(game, pid, sid) and _building_town_ok(p, t, sid)):
                     moves.append({"type": "townhall_place", "tile_id": t["id"], "space_id": sid})
@@ -883,6 +965,12 @@ def apply_move(game: dict, pid: str, move: dict) -> tuple[bool, str | None]:
     if is_over(game):
         return False, "game is over"
     mt = move.get("type")
+    if game["phase"] == "setup":
+        if mt != "place_starting_castle":
+            return False, "must place starting castle first"
+        if pid != game["turn"]:
+            return False, "not your turn"
+        return _h_place_starting_castle(game, pid, move)
     # Undo the whole current turn (including any pending sub-decision). Restores
     # the snapshot taken when this player's turn began, dropping every action
     # logged this turn.
@@ -915,6 +1003,14 @@ def apply_move(game: dict, pid: str, move: dict) -> tuple[bool, str | None]:
 def legal_moves(game: dict, pid: str) -> list[dict]:
     if is_over(game):
         return []
+    if game["phase"] == "setup":
+        if pid != game["turn"]:
+            return []
+        p = game["players"][pid]
+        b = _pboard(p)
+        return [{"type": "place_starting_castle", "space_id": sid}
+                for sid in sorted(b.SPACES_BY_COLOR["burgundy"])
+                if p["duchy"][sid] is None]
     if game["pending_pid"] is not None:
         if pid != game["pending_pid"]:
             return []
@@ -946,9 +1042,10 @@ def legal_moves(game: dict, pid: str) -> list[dict]:
                 for t in game["depots"][str(depot)]["hexes"]:
                     moves.append({"type": "take_hex", "die_index": i, "depot": depot, "tile_id": t["id"]})
         # place a storage tile on a legal space (monasteries 9-11 widen the number)
+        b = _pboard(p)
         for t in p["storage"]:
             allowed = _allowed_values(v, _free_shift_for_tile(p, t["type"]))
-            for sid, info in board.SPACES.items():
+            for sid, info in b.SPACES.items():
                 if p["duchy"][sid] is not None:
                     continue
                 if info["color"] != t["color"] or info["number"] not in allowed:
@@ -962,6 +1059,12 @@ def legal_moves(game: dict, pid: str) -> list[dict]:
     if not game["black_depot_used_this_turn"] and p["silver"] >= 2 and _free_storage(p):
         for t in game["black_depot"]:
             moves.append({"type": "buy_black", "tile_id": t["id"]})
+
+    # When storage is full, you may discard a stored tile to make room (e.g. so a
+    # subsequent take-hex has a free key space).
+    if not _free_storage(p):
+        for t in p["storage"]:
+            moves.append({"type": "discard_storage", "tile_id": t["id"]})
 
     # Monastery 6: spend 2 workers to take a building tile (once per turn).
     if 6 in p["monastery_effects"] and not game["m6_used_this_turn"] and p["workers"] >= 2 and _free_storage(p):
