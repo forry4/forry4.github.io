@@ -58,6 +58,8 @@ class SuggestionsPayload(BaseModel):
 
 # Each logged-in user may suggest at most this many books for the owner to read.
 MAX_SUGGESTIONS = 10
+# Hard ceiling on suggestions across ALL users (anti-spam safety).
+MAX_TOTAL_SUGGESTIONS = 100
 
 
 def _gen_id(n: int = 10) -> str:
@@ -290,11 +292,26 @@ def fetch_all_suggestions(conn) -> list[dict]:
     return [_row_to_suggestion(r) for r in cur.fetchall()]
 
 
+def count_all_suggestions(conn) -> int:
+    """Total suggestions across all users (for the site-wide cap)."""
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM book_suggestions")
+    return cur.fetchone()[0]
+
+
 def replace_user_suggestions(conn, user: dict | None, items: list) -> tuple[bool, str | None]:
-    """Replace just this user's suggestions (capped at MAX_SUGGESTIONS), in the
-    incoming order. Other users' suggestions are untouched."""
+    """Replace just this user's suggestions, in the incoming order. Other users'
+    suggestions are untouched. The new list is sized to BOTH the per-user cap
+    (MAX_SUGGESTIONS) and the site-wide ceiling (MAX_TOTAL_SUGGESTIONS), the latter
+    measured against the OTHER users' rows so the global total can never exceed it."""
     if not user or not user.get("id"):
         return False, "unauthenticated"
+
+    cur = conn.cursor()
+    cur.execute("DELETE FROM book_suggestions WHERE user_id=?", (user["id"],))
+    cur.execute("SELECT COUNT(*) FROM book_suggestions")  # other users' rows now
+    others_total = cur.fetchone()[0]
+    cap = min(MAX_SUGGESTIONS, max(0, MAX_TOTAL_SUGGESTIONS - others_total))
 
     now = int(time.time())
     rows = []
@@ -303,6 +320,8 @@ def replace_user_suggestions(conn, user: dict | None, items: list) -> tuple[bool
         title = (get("title") or "").strip()
         if not title:
             continue  # skip blanks
+        if len(rows) >= cap:
+            break  # per-user cap and/or site-wide ceiling reached
         rows.append((
             get("id") or _gen_id(),
             user["id"],
@@ -315,11 +334,7 @@ def replace_user_suggestions(conn, user: dict | None, items: list) -> tuple[bool
             now,
             now,
         ))
-        if len(rows) >= MAX_SUGGESTIONS:
-            break  # enforce the cap server-side, not just in the UI
 
-    cur = conn.cursor()
-    cur.execute("DELETE FROM book_suggestions WHERE user_id=?", (user["id"],))
     cur.executemany(
         """
         INSERT INTO book_suggestions
@@ -383,6 +398,8 @@ def setup_books(app, get_db_conn, get_user_by_session) -> None:
                 "is_owner": owner,
                 "logged_in": bool(user),
                 "max": MAX_SUGGESTIONS,
+                "total": count_all_suggestions(conn),
+                "max_total": MAX_TOTAL_SUGGESTIONS,
             }
         finally:
             conn.close()
@@ -395,6 +412,7 @@ def setup_books(app, get_db_conn, get_user_by_session) -> None:
             ok, err = replace_user_suggestions(conn, user, payload.suggestions)
             if not ok:
                 return {"ok": False, "message": err}
-            return {"ok": True, "mine": fetch_user_suggestions(conn, user["id"])}
+            return {"ok": True, "mine": fetch_user_suggestions(conn, user["id"]),
+                    "total": count_all_suggestions(conn), "max_total": MAX_TOTAL_SUGGESTIONS}
         finally:
             conn.close()

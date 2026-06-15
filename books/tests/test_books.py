@@ -164,3 +164,30 @@ def test_admin_has_owner_powers_regardless_of_site_owner(conn, monkeypatch):
     assert [b["title"] for b in B.fetch_books(conn)] == ["Admin Pick"]
     # a non-admin, non-owner remains locked out
     assert B.can_user_edit(conn, {"id": "u_dan", "name": "dan"}) is False
+
+
+def test_global_suggestion_cap(conn, monkeypatch):
+    monkeypatch.setattr(B, "MAX_TOTAL_SUGGESTIONS", 3)  # small ceiling for the test
+    a = {"id": "uA", "name": "a"}
+    b = {"id": "uB", "name": "b"}
+    c = {"id": "uC", "name": "c"}
+    B.replace_user_suggestions(conn, a, [{"title": "a1"}, {"title": "a2"}])
+    assert B.count_all_suggestions(conn) == 2
+    # b submits 5 but only one global slot remains -> truncated to 1
+    B.replace_user_suggestions(conn, b, [{"title": f"b{i}"} for i in range(5)])
+    assert B.count_all_suggestions(conn) == 3
+    assert len(B.fetch_user_suggestions(conn, "uB")) == 1
+    # c can add nothing -> site is full
+    B.replace_user_suggestions(conn, c, [{"title": "c1"}])
+    assert B.count_all_suggestions(conn) == 3
+    assert B.fetch_user_suggestions(conn, "uC") == []
+    # an existing user can still re-save within their own share when full
+    B.replace_user_suggestions(conn, a, [{"title": "a1x"}, {"title": "a2x"}])
+    assert B.count_all_suggestions(conn) == 3
+    assert [s["title"] for s in B.fetch_user_suggestions(conn, "uA")] == ["a1x", "a2x"]
+
+
+def test_per_user_cap_still_applies_under_high_global_cap(conn):
+    items = [{"title": f"Book {i}"} for i in range(25)]
+    B.replace_user_suggestions(conn, ALICE, items)
+    assert len(B.fetch_user_suggestions(conn, ALICE["id"])) == B.MAX_SUGGESTIONS  # 10

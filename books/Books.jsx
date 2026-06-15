@@ -236,8 +236,15 @@ export default function Books({ authUser, onExit }) {
 				method: "PUT", headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(payload),
 			});
+			const submitted = sugg.filter(s => (s.title || "").trim()).length;
 			const data = await res.json();
-			if (data.ok) { setSugg(data.mine || []); setSuggEditing(false); showToast("Suggestions saved"); }
+			if (data.ok) {
+				const saved = data.mine || [];
+				setSugg(saved); setSuggEditing(false);
+				if (saved.length < submitted)
+					showToast(`Saved ${saved.length} — the site's ${data.max_total || 100}-suggestion limit was reached`);
+				else showToast("Suggestions saved");
+			}
 			else showToast(data.message || "Save failed");
 		} catch { showToast("Save failed"); }
 		finally { setSuggSaving(false); }
