@@ -244,3 +244,44 @@ exploration alive (anti-collapse), and judges progress by an *external* yardstic
    (a) more exploration, (b) more/stronger opponents (deeper league pool), (c) more sims,
    (d) bigger net. Capacity LAST (capacity before data/search-quality just overfits).
    Prevents the reactive sims-bump thrashing we just did.
+
+## Build sequencing — heuristic-first (agreed)
+
+Build the v4 heuristic bot *before* the AZ retrain. This is not a detour: the heuristic
+and the net's feature encoder share the same valuation core, so step 1 is also the first
+half of the feature work — with a usable, testable artifact at the midpoint.
+
+**Why heuristic-first:**
+- **Shared code, built once:** `valuation.py` (the per-card/seat scalars) is imported by
+  *both* the heuristic (`card_value` + `choose_move`) and `features.py` (packs the same
+  scalars into the net input). Build once, use twice.
+- **Cheap correctness test of the whole v4 design:** if the valuation is sound, a greedy
+  bot using it should beat or match C2. If it can't, the model has a flaw — found in an
+  afternoon instead of after a multi-day training run. This is the de-risk gate.
+- **The anti-blind-spot sparring partner** the training spec already calls for (punishes
+  over-reserving / weak openings C2 ignores).
+
+**Critical caveat (ties to the anti-ceiling section):** the heuristic is a *diversity +
+yardstick* opponent, NOT the primary climb. A fixed opponent gives no gradient once
+matched (the v3 ceiling). Primary climb = co-evolving past-AZ selves; the heuristic is a
+*league slice* + the external arena yardstick. "Train against it as one ingredient" ≠
+"train against it as the goal."
+
+**Risk to avoid:** don't let the heuristic's factor-combination *weights* become a tuning
+rabbit hole — weight-tuning is the documented saturated path (~0.65 ceiling). Hand-set
+weights to "clearly competent," run one arena check vs C2/B, stop. We want behavioral
+*diversity* (reserves well, opens well), not a perfectly tuned static eval.
+
+**Steps:**
+1. `valuation.py` — shared scalar core: `effective_cost`, `total_effective_cost`,
+   `gems_to_collect`, `gold_needed`, `affordable_now`, `turns_to_afford`,
+   `noble_progress`, `engine_value` (cross-card + deck-demand term), `efficiency`,
+   `victory_closeness`. Pure Python on `engine.State`; a `Valuation` context precomputes
+   state-wide aggregates (deck color demand) once. **(current step)**
+2. Heuristic bot on the core: `card_value()` (hand-set weighted combo) + `choose_move()`
+   (buy highest-value affordable; reserve extremely-high-value-when-unaffordable; take
+   gems toward the top target(s)).
+3. **Validation gate:** arena the heuristic vs C2/B. Competent (>= ~C2) -> proceed; weak
+   -> fix the valuation before any training.
+4. `features.py` on the same module (+ 16 spare zero-padded slots) -> fresh v4 AZ retrain
+   with the heuristic as a league slice and the arena-vs-C2 north-star probe.
