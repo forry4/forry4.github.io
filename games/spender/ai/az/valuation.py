@@ -45,6 +45,19 @@ def total_effective_cost(s: E.State, ci: int, seat: int) -> int:
     return sum(c - b for c, b in zip(cost, bon) if c > b)
 
 
+def cost_concentration(s: E.State, ci: int, seat: int) -> int:
+    """Duplicate same-color gems the post-bonus cost forces you to collect:
+    total_effective_cost - distinct_colors_still_needed. 0 = perfectly spread
+    (<=1 gem per color -- takeable in a single 3-distinct take); higher = packed
+    into fewer colors, which forces slower take-2-same turns (you net 2 useful
+    gems that turn instead of 3). A pure tempo/acquisition signal, independent of
+    points and efficiency -- it separates two cards of equal total cost + bonus
+    that efficiency (0 for point-less L1s) and engine_value (bonus-color only)
+    cannot: e.g. 3-green (conc 2) vs 2-green-1-red (conc 1)."""
+    eff = effective_cost(s, ci, seat)
+    return sum(eff) - sum(1 for x in eff if x > 0)
+
+
 def gold_needed(s: E.State, ci: int, seat: int) -> int:
     """Gold tokens required to buy ci now (matches engine legality helper)."""
     return E._gold_needed(E.COST[ci], s.tokens[seat], s.bonuses[seat])
@@ -140,21 +153,56 @@ def gems_to_collect(s: E.State, ci: int, seat: int) -> int:
     return deficit if deficit > 0 else 0
 
 
+USE_TTA_GREEDY = True   # corrected turns-to-afford via greedy take simulation. The old
+                        # closed form `max(ceil(total/3), max ceil(d[c]/2))` UNDER-counted a
+                        # cost concentrated in one color that ALSO needs others: a take-3
+                        # supplies only 1 of any color, so 2g+1r is 2 turns (formula said 1),
+                        # 4w+1u is 3 (formula said 2). Flag kept so the fix is A/B-able.
+
+
 def turns_to_afford(s: E.State, ci: int, seat: int) -> int:
     """Estimated turns for `seat` to afford ci. A signal, not an oracle.
 
-    A take grabs <=3 different colors, or 2 of one color (bank>=4). The two
-    binding constraints are therefore total volume and the most-needed single
-    color, so estimate = max(ceil(net / 3), max_color ceil(deficit / 2)).
-    Returns 0 if affordable now.
+    Each turn a take grabs <=3 DISTINCT colors (1 each), or 2 of one color
+    (bank>=4). So a color needing 2+ cannot be filled by spread take-3s at 3/turn
+    -- it forces a take-2-same turn (2 gems, no room for others). The greedy
+    simulation below (spend gold on the bottleneck, then each turn take the 3
+    most-needed distinct colors, pairing the leader when <=2 colors remain) is
+    optimal for this move set and gets those concentrated-multicolor costs right.
+    Returns 0 if affordable now. Bank depletion / opponent contention ignored
+    (it's a signal). The old closed form is kept behind USE_TTA_GREEDY for A/B.
     """
-    d = _color_deficits(s, ci, seat)
-    net = sum(d) - s.tokens[seat][5]  # gold covers any color
-    if net <= 0:
-        return 0
-    by_spread = math.ceil(net / 3)
-    by_color = max((math.ceil(x / 2) for x in d if x > 0), default=0)
-    return max(by_spread, by_color)
+    d = list(_color_deficits(s, ci, seat))
+    gold = s.tokens[seat][5]
+    if not USE_TTA_GREEDY:
+        net = sum(d) - gold  # gold covers any color
+        if net <= 0:
+            return 0
+        by_spread = math.ceil(net / 3)
+        by_color = max((math.ceil(x / 2) for x in d if x > 0), default=0)
+        return max(by_spread, by_color)
+    # Spend gold on the largest deficits first (relieve the pairing bottleneck).
+    while gold > 0 and any(x > 0 for x in d):
+        i = max(range(5), key=d.__getitem__)
+        d[i] -= 1
+        gold -= 1
+    turns = 0
+    while any(x > 0 for x in d):
+        pos = sorted((c for c in range(5) if d[c] > 0), key=lambda c: -d[c])
+        if len(pos) >= 3:                 # take 1 each of the 3 most-needed (take-3)
+            for c in pos[:3]:
+                d[c] -= 1
+        elif len(pos) == 2:               # pair the leader if it needs 2+, else 1 of each
+            c0, c1 = pos
+            if d[c0] >= 2:
+                d[c0] -= 2
+            else:
+                d[c0] -= 1
+                d[c1] -= 1
+        else:                             # one color left: take 2 (or the last 1)
+            d[pos[0]] -= 2 if d[pos[0]] >= 2 else 1
+        turns += 1
+    return turns
 
 
 def noble_progress(s: E.State, ci: int, seat: int) -> float:
@@ -294,6 +342,9 @@ class Valuation:
 
     def gold_needed(self, ci: int, seat: int) -> int:
         return gold_needed(self.s, ci, seat)
+
+    def cost_concentration(self, ci: int, seat: int) -> int:
+        return cost_concentration(self.s, ci, seat)
 
     def affordable_now(self, ci: int, seat: int) -> bool:
         return affordable_now(self.s, ci, seat)

@@ -65,6 +65,37 @@ def test_turns_to_afford_zero_iff_affordable():
     assert V.turns_to_afford(s, ci, seat) == 0
 
 
+def test_turns_to_afford_concentrated_multicolor():
+    # A cost concentrated in one color that ALSO needs another can't be filled in
+    # one take-3 (which gives 1 of each distinct color). The greedy fix counts these
+    # correctly where the old closed form under-counted.
+    s = E.new_game(random.Random(1))
+    seat = s.turn
+    s.bonuses = ([0] * 5, [0] * 5)
+    s.tokens = ([0] * 6, [0] * 6)
+    # 2 of one color + 1 of another (total 3, 2 distinct) -> 2 turns, not 1.
+    ci = next((c for c in range(E.N_CARDS)
+               if sorted(x for x in E.COST[c] if x > 0) == [1, 2]), None)
+    assert ci is not None
+    assert V.turns_to_afford(s, ci, seat) == 2
+    try:
+        V.USE_TTA_GREEDY = False
+        assert V.turns_to_afford(s, ci, seat) == 1     # the old under-count (documents the bug)
+    finally:
+        V.USE_TTA_GREEDY = True
+    # 4 of one color + 1 of another -> 3 turns (old form said 2). Optional: exact
+    # shape may not exist in the deck, so only assert if present.
+    ci2 = next((c for c in range(E.N_CARDS)
+                if sorted(x for x in E.COST[c] if x > 0) == [1, 4]), None)
+    if ci2 is not None:
+        assert V.turns_to_afford(s, ci2, seat) == 3
+    # Sanity: a single-color 3-cost is 2 turns under both (by_color caught it).
+    ci3 = next((c for c in range(E.N_CARDS)
+                if sorted(x for x in E.COST[c] if x > 0) == [3]), None)
+    if ci3 is not None:
+        assert V.turns_to_afford(s, ci3, seat) == 2
+
+
 def test_noble_progress_targets_the_gap_color():
     s = E.new_game(random.Random(7))
     seat = s.turn
@@ -252,6 +283,68 @@ def test_discount_count():
     # Holding the max bonus in the color -> no card still needs it -> count 0.
     s.bonuses[seat][bcol] = 7
     assert V.discount_count(s, ci, seat) == 0
+
+
+def test_cost_concentration_counts_duplicate_gems():
+    s = E.new_game(random.Random(5))
+    seat = s.turn
+    for slot in range(12):
+        ci = s.board[slot]
+        if ci < 0:
+            continue
+        eff = V.effective_cost(s, ci, seat)
+        assert V.cost_concentration(s, ci, seat) == sum(eff) - sum(1 for x in eff if x > 0)
+    # a single-color cost of k has concentration k-1; a spread (<=1/color) cost is 0
+    single = next((ci for ci in range(E.N_CARDS)
+                   if sum(1 for x in E.COST[ci] if x > 0) == 1 and max(E.COST[ci]) >= 2), None)
+    if single is not None:
+        assert V.cost_concentration(s, single, seat) == max(E.COST[single]) - 1
+    spread = next((ci for ci in range(E.N_CARDS) if 0 < max(E.COST[ci]) <= 1), None)
+    if spread is not None:
+        assert V.cost_concentration(s, spread, seat) == 0
+
+
+def test_w_spread_discounts_concentrated_L1_only():
+    # The L1-gated cost-spread discount must lower a concentrated L1 card's value
+    # while leaving L2/L3 cards (excluded by the gate) byte-identical.
+    s = E.new_game(random.Random(5))
+    seat = s.turn
+    val = V.Valuation(s)
+    l1 = next(ci for ci in range(E.N_CARDS)
+              if E.LEVEL_OF[ci] == 1 and V.cost_concentration(s, ci, seat) > 0
+              and H.card_value(val, s, ci, seat) > 0)
+    hi = next(ci for ci in range(E.N_CARDS)
+              if E.LEVEL_OF[ci] >= 2 and V.cost_concentration(s, ci, seat) > 0)
+    assert H.W_SPREAD == 0.0                              # default off
+    base_l1 = H.card_value(val, s, l1, seat)
+    base_hi = H.card_value(val, s, hi, seat)
+    try:
+        H.W_SPREAD = 0.5
+        assert H.card_value(val, s, l1, seat) < base_l1   # concentrated L1 -> discounted
+        assert H.card_value(val, s, hi, seat) == base_hi  # L2/L3 -> untouched by the L1 gate
+    finally:
+        H.W_SPREAD = 0.0
+
+
+def test_w_cost_discounts_zero_point_cards_only():
+    # The cheapness discount must lower a 0-point card's value (efficiency is blind
+    # to cost there) while leaving point cards (priced by efficiency) untouched.
+    s = E.new_game(random.Random(5))
+    seat = s.turn
+    val = V.Valuation(s)
+    zero = next(ci for ci in range(E.N_CARDS)
+                if E.PTS[ci] == 0 and V.total_effective_cost(s, ci, seat) > 0
+                and H.card_value(val, s, ci, seat) > 0)
+    pointed = next(ci for ci in range(E.N_CARDS) if E.PTS[ci] > 0)
+    assert H.W_COST == 0.0                                 # default off
+    base_zero = H.card_value(val, s, zero, seat)
+    base_pt = H.card_value(val, s, pointed, seat)
+    try:
+        H.W_COST = 0.2
+        assert H.card_value(val, s, zero, seat) < base_zero   # 0-pt -> discounted by cost
+        assert H.card_value(val, s, pointed, seat) == base_pt  # point card -> untouched (gate)
+    finally:
+        H.W_COST = 0.0
 
 
 # ─── Heuristic contract ──────────────────────────────────────────────────────
