@@ -152,7 +152,7 @@ const css = `
 .coc-board-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
 .coc-board-head h3{margin-bottom:0}
 .coc-board-hex{position:relative;width:100%;max-width:760px;margin:6px auto 0;aspect-ratio:1/0.98}
-.coc-board-hex .coc-depot{position:absolute;width:31%;min-height:0;padding:6px;transform:translate(-50%,-50%)}
+.coc-board-hex .coc-depot{position:absolute;width:31%;min-height:96px;padding:6px;transform:translate(-50%,-50%);display:flex;flex-direction:column;justify-content:center}
 /* central black depot: a dark box holding the kite of tiles (positioned absolutely) */
 .coc-black-center{left:50%;top:50%;box-sizing:border-box;padding:0!important;border:1px solid var(--gold)!important;background:#0c0809!important;border-radius:8px;min-height:0!important;z-index:1}
 .coc-blacklbl{font-family:'Cinzel',serif;font-size:.62rem;letter-spacing:.08em;color:var(--gold);text-transform:uppercase}
@@ -403,6 +403,12 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   // "acted this turn" resets only when the turn itself changes (NOT on pending
   // open/close, since opening a pending means you already acted).
   useEffect(() => { setActedThisTurn(false); }, [game?.turn, game?.round, game?.phase_letter]);
+  // Deselect a die once it's been used (its action applied) — adjust_die leaves
+  // the die unused, so it stays selected.
+  useEffect(() => {
+    const d = game?.dice?.[myId];
+    if (selDie != null && d && d.used[selDie]) setSelDie(null);
+  }, [game, selDie, myId]);
 
   // ── actions ──
   const startCreate = (vsAi, difficulty = "hard") => {
@@ -876,10 +882,10 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                   <div key={i} style={{ display: "flex", gap: 4, alignItems: "center" }}>
                     <div className={`coc-die${selDie === i ? " sel" : ""}${dice.used[i] ? " used" : ""}`}
                       onClick={() => { if (!dice.used[i] && !pendingMine) setSelDie(i); }}>{dice.values[i]}</div>
-                    {!dice.used[i] && !pendingMine && (
+                    {!pendingMine && (
                       <div className="coc-die-adj">
-                        <button disabled={!me || me.workers < 1} onClick={() => adjustDie(i, +1)}>▲</button>
-                        <button disabled={!me || me.workers < 1} onClick={() => adjustDie(i, -1)}>▼</button>
+                        <button disabled={dice.used[i] || !me || me.workers < 1} onClick={() => adjustDie(i, +1)}>▲</button>
+                        <button disabled={dice.used[i] || !me || me.workers < 1} onClick={() => adjustDie(i, -1)}>▼</button>
                       </div>
                     )}
                   </div>
