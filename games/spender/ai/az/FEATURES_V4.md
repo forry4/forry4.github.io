@@ -1,0 +1,164 @@
+# AZ v4 feature spec — card-valuation features
+
+Planning doc for the **fresh feature-enriched retrain** (`checkpoints_v4_features/`).
+A new input dimension makes all v3 weights incompatible, so this is a clean start —
+schedule it only after the v3 run finishes and its best net is evaluated. No code or
+training change happens from this doc alone.
+
+Source of truth this maps to: [features.py](features.py) (current `N_FEATURES = 305`)
+and [engine.py](engine.py) (`State`, `COST/PTS/BONUS/NOBLE_REQ`, `_gold_needed`).
+
+## Design doctrine (why these and not others)
+
+CLAUDE.md's hard-won conclusion: **static-eval accuracy plateaus ~0.65 regardless of
+model/features — the missing info is lookahead, which is search's job, not the
+evaluator's.** So the rule for adding features is narrow:
+
+> Add a feature **only if it is expensive for the MLP to compute from the flat vector
+> itself** (cross-card interactions, multi-step arithmetic). Do **not** add things the
+> net already reads directly from raw state (its own points, token counts, noble reqs).
+> Hand the net the hard-to-derive *raw signals*; let self-play + search learn the
+> board-conditional *weighting*. We do not bake stage/strategy weighting into the
+> features — that is what the net is for.
+
+This is why factors like "how close the points bring me to victory" (user factor 8)
+get **minimal** new encoding — the net already has `points/15` and the final-round
+flag, so it can compute closeness trivially. The heavy lifting is in **effective cost**,
+**turns-to-afford**, and especially **engine value** (the cross-card term), which an
+MLP genuinely cannot discover from a flat vector.
+
+User note honored: **gem cost is NOT dropped.** Base printed cost stays in the existing
+per-card block (`cost/7`); effective (discounted) cost is *added* alongside it. Tempo
+(turns-to-afford) matters more, but raw gem cost remains a first-class signal.
+
+## Candidate-card set (which cards get the rich block)
+
+15 slots, in fixed order so indexing is stable:
+- **12 board slots** (buyable by both players → full me+opp blocks).
+- **3 of my own reserved slots** (buyable by me only → opp-block zeroed).
+
+Opponent blind reserves are NOT candidates (hidden identity; `determinize()` handles
+them). My reserved are always known to me.
+
+## Per-slot valuation block (17 floats/slot)
+
+For candidate card `ci` in a slot (all-zero if slot empty). `me = s.turn`, `opp = 1-me`.
+`bon_me = s.bonuses[me]`, `tok_me = s.tokens[me]`, etc. `bcol = E.BONUS[ci]`.
+
+### ME side (12 floats)
+| # | feature | formula | norm |
+|---|---------|---------|------|
+| 1-5 | **effective cost** per color | `max(0, COST[ci][i] - bon_me[i])` for i in 0..4 | `/7` |
+| 6 | **gems-to-collect** (tempo raw) | `sum_i max(0, COST[ci][i] - bon_me[i] - tok_me[i])` | `/10` |
+| 7 | **gold needed** | `E._gold_needed(COST[ci], tok_me, bon_me)` | `/5` |
+| 8 | **turns-to-afford** (tempo) | see formula below | `/6`, cap 1 |
+| 9 | **affordable now** | `1.0` if `gold_needed <= tok_me[5]` else `0.0` | — |
+| 10 | **my noble progress** | noble-deficit this bonus reduces (below) | 0..1 |
+| 11 | **victory closeness if bought** | `min(1, (points_me + PTS[ci] + noble_gain) / 15)` | 0..1 |
+| 12 | **engine value (me)** | cross-card scalar (below) | `/3`, cap 1 |
+
+### OPP side (5 floats) — denial / contest signals (zero for my-reserved slots)
+| # | feature | formula | norm |
+|---|---------|---------|------|
+| 13 | **opp gold needed** | `E._gold_needed(COST[ci], tok_opp, bon_opp)` | `/5` |
+| 14 | **opp affordable now** | opp could buy it next turn (key reserve/denial trigger) | — |
+| 15 | **opp noble progress** | same as #10 with `bon_opp` | 0..1 |
+| 16 | **opp victory closeness if bought** | same as #11 with opp totals | 0..1 |
+| 17 | **engine value (opp)** | same as #12 with `bon_opp` | `/3`, cap 1 |
+
+`17 × 15 slots = 255 new floats.`
+
+### Formula details
+
+**turns-to-afford (#8).** Let `d[i] = max(0, COST[ci][i] - bon_me[i] - tok_me[i])`,
+`D = sum(d)`, `net = max(0, D - tok_me[5])` (gold covers any color). A take grabs up to
+3 different colors, or 2 of one color (bank≥4). Estimate:
+```
+turns_est = max( ceil(net / 3), max_i ceil(d[i] / 2) )
+```
+A signal, not an oracle — it distinguishes "1 gem of 1 color away" from "needs 4 red,
+collecting ~1/turn." Directly attacks the over-reserve / weak-tempo problem.
+
+**noble progress (#10).** For each visible noble `ni` (`s.nobles`), if its requirement
+in color `bcol` is still unmet for this player (`NOBLE_REQ[ni][bcol] > bon[bcol]`), this
+card's +1 bonus advances it. Score:
+```
+np = sum over visible nobles of [ (NOBLE_REQ[ni][bcol] > bon[bcol]) * (closeness_ni) ]
+closeness_ni = 1 - deficit_ni / total_ni     # how near that noble already is
+```
+normalized by number of nobles. Captures user factors 3+4 (progress AND closeness) in
+one scalar, and #15 does the same for the opponent (factors 5+6).
+
+**engine value (#12) — THE cross-card factor (user factors 10/11).** Buying `ci` grants
+a permanent +1 `bcol` bonus. Value = discount it gives every *other* visible card,
+weighted by that card's worth and by how `bcol`-hungry it is, **plus** a deck-wide term
+for the cards not yet revealed:
+```
+ev = 0
+for cj in the 12 board cards, cj != ci, present:
+    needs = max(0, COST[cj][bcol] - bon_me[bcol])      # does cj still need this color?
+    if needs > 0:
+        w_value    = PTS[cj]/5 + 0.2                    # high-point cards weigh more (+floor)
+        w_scarcity = COST[cj][bcol] / max(1, sum(COST[cj]))   # cj is bcol-heavy
+        ev += w_value * w_scarcity
+ev += DECK_COLOR_DEMAND[bcol] * 0.5     # precomputed: bcol share of remaining deck costs
+```
+This is the term an MLP cannot assemble from a flat vector (it requires reasoning across
+all board cards at once). `DECK_COLOR_DEMAND` is computed once per `encode()` from
+`s.decks` (the permanent-bonus-applies-to-future-cards insight). **We deliberately do
+NOT stage-weight `ev`** — the net learns to discount engine value late-game from the
+existing point/final-trigger features.
+
+## Global additions (6 floats)
+
+| feature | formula | norm |
+|---------|---------|------|
+| **est. turns remaining** (stage) | `(15 - max(points_me, points_opp))` scaled, 0 if final_trigger set | `/15`, cap 1 |
+| **board color demand vs my bonuses** (5) | per color: `sum over board cards of max(0, COST[c][i]-bon_me[i])` | `/20`, cap 1 |
+
+The stage float makes the opening↔endgame shift crisp (the net can read "lots of turns
+left → engine value matters" vs "near end → only points matter"). Board-color-demand
+gives the diminishing-returns-on-owned-color signal: a color the board no longer
+demands is a weak bonus target.
+
+## New total
+
+```
+305 (existing, unchanged) + 255 (per-slot ×15) + 6 (global) ≈ 566 features
+```
+First MLP layer grows 305→566 inputs (~+134k params on a 512-wide layer; net is ~600k →
+~730k). Trains fine on the 4050; numpy inference cost negligible.
+
+## Implementation notes
+
+- All new computation lives in `features.encode()`. Precompute per-`encode` once:
+  `DECK_COLOR_DEMAND[6]` from `s.decks`, and the board-demand vector — then reuse across
+  the 15 slots so it stays O(cards), not O(cards²)-with-recompute.
+- `net.py`: bump the input dim constant (or read `features.N_FEATURES`); everything
+  downstream is unchanged.
+- `infer_np.py` / `export.py`: no logic change — they read `N_FEATURES` and weight
+  shapes from the net, so the larger first layer flows through automatically.
+- **Perspective:** all me/opp blocks are already side-to-move relative (existing
+  convention). Keep it. Opponent blind-reserve identity stays hidden (only my reserved
+  get the rich block; opp's hidden reserves contribute nothing here).
+
+## Branch / rollout procedure (from CLAUDE.md)
+
+1. Finish the v3 run; record iter-300 best net strength (arena vs B/C2).
+2. Copy `checkpoints_v3/` → `checkpoints_v3_backup/`.
+3. Implement this spec in `features.py` (+ input-dim bump). Update `test_az_actions.py`
+   feature tests for the new `N_FEATURES` and add unit tests for each new formula
+   (effective cost, turns-to-afford monotonicity, engine value > 0 when a same-color
+   board card exists, opp-block zero on my-reserved slots).
+4. Fresh run in `checkpoints_v4_features/` — **no `--resume`** (new input dim).
+5. Arena gate: ship only if v4 best ≥0.70 vs B and C2 AND beats the v3 best head-to-head.
+   If worse, delete the branch and `--resume` from `checkpoints_v3_backup/`.
+
+## Open knobs (decide at implementation, not now)
+
+- Whether to also oversample early-game positions in the replay buffer (the other half
+  of the weak-opening fix — keeps true value targets, just trains openings more). Cheap
+  to add; orthogonal to features.
+- Optional richer **league opponent** built on this same valuation as a heuristic — not
+  shipped as a player (static eval caps ~0.65) but a tougher sparring partner that
+  punishes bad reserves/weak openings harder than C2.
