@@ -270,14 +270,19 @@ def choose_action(s: E.State, seat: int | None = None) -> int:
         if winning:
             winning.sort(reverse=True)
             return winning[0][1]
-        bv, ba, bci = buys[0]
-        # 1b) Buy the best affordable card whenever it is worth more than the
-        #     floor. Strong Splendor play buys nearly every turn it can afford
-        #     something — deferring for a "slightly better" unaffordable card
-        #     livelocks (take gems -> hit cap -> discard -> repeat) and cedes
-        #     the race. Greedy buying is the tempo the bot needs vs C2.
-        if val.noble_progress(bci, seat) > 0.5 or bv > BUY_FLOOR:
-            return ba
+        # 1b) Buy the best affordable card worth more than a GEM. Iterate by
+        #     value and skip a card that scores 0 points, doesn't help a noble,
+        #     AND would discount <=1 other board card: its permanent bonus is
+        #     barely better than a single token, so taking a gem (flexible, no
+        #     tiebreak cost, doesn't spend gems for nothing) dominates buying it.
+        #     Strong Splendor play still buys nearly every turn it CAN do good.
+        for bv, ba, bci in buys:
+            if val.noble_progress(bci, seat) > 0.5:
+                return ba
+            if E.PTS[bci] == 0 and V.discount_count(s, bci, seat) <= 1:
+                continue            # worthless vs a gem -> skip, prefer taking a gem
+            if bv > BUY_FLOOR:
+                return ba
 
     # 2) Disciplined reserve (deny or secure a uniquely good card).
     a = _maybe_reserve(s, seat, val, targets, legal_set)

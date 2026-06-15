@@ -88,6 +88,20 @@ def build_path_count(s: E.State, ci: int, seat: int) -> int:
     return bon[c] + board   # existing bonuses count as build capacity
 
 
+def discount_count(s: E.State, ci: int, seat: int) -> int:
+    """How many OTHER board cards the +1 bonus from ci would discount -- i.e.
+    still need ci's bonus color from `seat`. A 0-point card is only worth buying
+    over just TAKING A GEM of that color if it discounts >= 2 such cards: a
+    permanent bonus you cash in once is barely better than one token, and buying
+    spends gems + adds a card toward the fewest-cards tiebreak (whereas taking a
+    gem gains a flexible token at no tiebreak cost)."""
+    bcol = E.BONUS[ci]
+    held = s.bonuses[seat][bcol]
+    return sum(1 for slot in range(12)
+               if s.board[slot] >= 0 and s.board[slot] != ci
+               and E.COST[s.board[slot]][bcol] > held)
+
+
 def _color_deficits(s: E.State, ci: int, seat: int) -> list[int]:
     """Per-color gems still needed after discounts and owned colored tokens
     (gold NOT applied here — callers fold gold in where appropriate)."""

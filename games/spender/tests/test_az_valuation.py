@@ -161,6 +161,20 @@ def test_is_steep_and_build_path_count():
     assert V.build_path_count(s, spread_ci, seat) == 0
 
 
+def test_discount_count():
+    s = E.new_game(random.Random(14))
+    seat = s.turn
+    ci = next(s.board[sl] for sl in range(12) if s.board[sl] >= 0)
+    bcol = E.BONUS[ci]
+    expected = sum(1 for sl in range(12)
+                   if s.board[sl] >= 0 and s.board[sl] != ci
+                   and E.COST[s.board[sl]][bcol] > 0)
+    assert V.discount_count(s, ci, seat) == expected
+    # Holding the max bonus in the color -> no card still needs it -> count 0.
+    s.bonuses[seat][bcol] = 7
+    assert V.discount_count(s, ci, seat) == 0
+
+
 # ─── Heuristic contract ──────────────────────────────────────────────────────
 
 def _play_game(seed, max_ply=400):
