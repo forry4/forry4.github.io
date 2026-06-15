@@ -30,14 +30,13 @@ from . import engine as E
 from . import valuation as V
 
 # ─── Hand-set weights (clearly-competent defaults; arena is the judge) ────────
-W_POINTS = 1.0        # direct VP (boosted late via stage)
-W_EFFICIENCY = 4.0    # points per effective gem — the core "good deal" lever
-W_ENGINE = 1.5        # cross-card synergy (decayed late via stage)
+W_POINTS = 2.0        # direct VP — points win the race (boosted late via stage)
+W_EFFICIENCY = 5.0    # points per effective gem — the core "good deal" lever
+W_ENGINE = 1.0        # cross-card synergy (decayed late via stage; was over-buying engine)
 W_NOBLE = 3.0         # noble advancement (a noble is worth 3 pts)
 W_TEMPO = 0.3         # penalty per estimated turn-to-afford
 
 BUY_FLOOR = 0.5       # don't bother buying a near-worthless affordable card
-WAIT_MARGIN = 1.5     # only skip an affordable buy if a clearly-better card is ~1 take away
 
 # Reserve gates (strictness rises with slots used; opening tempo protected).
 RESERVE_BASE = 4.0        # min target value to reserve with 0 slots used...
@@ -217,16 +216,12 @@ def choose_action(s: E.State, seat: int | None = None) -> int:
             winning.sort(reverse=True)
             return winning[0][1]
         bv, ba, bci = buys[0]
-        # 1b) Default to buying the best affordable card. Only WAIT (take gems
-        #     instead) if a clearly-better card is unaffordable but ~1 take away
-        #     — don't tunnel on a distant target while cheap engine cards that
-        #     get you there go unbought. Always grab a noble-completing buy.
-        top_v, top_ci, _top_idx, _top_kind = targets[0]
-        wait = (top_v > bv
-                and not val.affordable_now(top_ci, seat)
-                and val.turns_to_afford(top_ci, seat) <= 1
-                and top_v >= bv + WAIT_MARGIN)
-        if val.noble_progress(bci, seat) > 0.5 or (bv > BUY_FLOOR and not wait):
+        # 1b) Buy the best affordable card whenever it is worth more than the
+        #     floor. Strong Splendor play buys nearly every turn it can afford
+        #     something — deferring for a "slightly better" unaffordable card
+        #     livelocks (take gems -> hit cap -> discard -> repeat) and cedes
+        #     the race. Greedy buying is the tempo the bot needs vs C2.
+        if val.noble_progress(bci, seat) > 0.5 or bv > BUY_FLOOR:
             return ba
 
     # 2) Disciplined reserve (deny or secure a uniquely good card).
