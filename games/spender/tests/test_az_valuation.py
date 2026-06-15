@@ -223,21 +223,19 @@ def test_single_color_mirage():
                    key=lambda ci: max(E.COST[ci]))
     assert max(E.COST[steep_ci]) >= 5
     steep_color = max(range(5), key=lambda c: E.COST[steep_ci][c])
-    # clear the board: a steep single-color card with NO build path is a mirage
-    for slot in range(12):
-        s.board[slot] = -1
-    s.board[0] = steep_ci
+    # >= 5 of a single color (after bonuses) -> uncollectable via tokens (bank = 4)
     assert V.single_color_mirage(s, steep_ci, seat, 5)
-    # a lower-level board card granting the steep color clears the mirage
+    # a board BUILD PATH does NOT clear it -- you still can't hold 5+ of one color
     support = next(ci for ci in range(E.N_CARDS)
                    if E.LEVEL_OF[ci] < E.LEVEL_OF[steep_ci] and E.BONUS[ci] == steep_color)
     s.board[1] = support
+    assert V.single_color_mirage(s, steep_ci, seat, 5)
+    # only BONUSES that bring every single-color cost below 5 clear it
+    for c in range(5):
+        if E.COST[steep_ci][c] >= 5:
+            s.bonuses[seat][c] = E.COST[steep_ci][c] - 4
     assert not V.single_color_mirage(s, steep_ci, seat, 5)
-    # so does a held bonus in that color (a real engine path exists)
-    s.board[1] = -1
-    s.bonuses[seat][steep_color] += 1
-    assert not V.single_color_mirage(s, steep_ci, seat, 5)
-    # a spread/cheap card (max single color < steep) is never a mirage
+    # a spread/cheap card (max single color < 5) is never a mirage
     cheap = next(ci for ci in range(E.N_CARDS) if 0 < max(E.COST[ci]) < 5)
     assert not V.single_color_mirage(s, cheap, seat, 5)
 

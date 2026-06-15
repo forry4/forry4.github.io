@@ -39,7 +39,8 @@ W_POINTS = 2.0        # direct VP — points win the race (boosted late via stag
 W_EFFICIENCY = 5.0    # points per effective gem — the core "good deal" lever
 W_ENGINE = 1.0        # cross-card synergy (decayed late via stage; was over-buying engine)
 W_NOBLE = 3.0         # noble advancement (a noble is worth 3 pts)
-W_TEMPO = 0.3         # penalty per estimated turn-to-afford
+W_TEMPO = 0.3         # tempo TIME-DISCOUNT rate: value /= (1 + W_TEMPO * turns-to-afford)
+                      # -- a far-off card is worth proportionally less now, never < 0
 
 BUY_FLOOR = 0.5       # don't bother buying a near-worthless affordable card
 
@@ -51,11 +52,20 @@ BUY_FLOOR = 0.5       # don't bother buying a near-worthless affordable card
 # target-focused backward planning (hurt -- the broad engine_value is load-bearing).
 USE_NOBLE_COMPLETION = True   # value the immediate +VP a buy scores by triggering
                               # a noble, in card_value AND the winning-buy check
-USE_REACH_TAKE = True         # don't orient gem-taking toward a steep single-color
-MIRAGE_STEEP = 5              # card with no build path (a mirage you can't afford);
-                              # commit gem-collection to REACHABLE targets instead
+USE_REACH_TAKE = True         # don't orient gem-taking toward a card needing >= this
+MIRAGE_STEEP = 5              # of a SINGLE color after bonuses -- the bank holds only
+                              # 4/color, so it needs BONUSES not tokens; collect toward
+                              # reachable cards (the lower cards that build that color)
 USE_GOLD_CONSERVE = True      # among similar-value affordable buys, prefer the one that
 W_GOLD_SPEND = 0.4            # spends less GOLD (wild tokens are scarce + flexible)
+USE_ANTI_HOARD = True         # near the 10-token cap with no gate-passing buy, buy the
+TOKEN_HOARD = 8              # best affordable card anyway -- a permanent bonus + freed
+                             # token slots beat taking gems you'd just discard at the cap
+NOBLE_CONTRIB = 0.35         # don't skip a 0-pt card that ADVANCES a close noble this
+                             # much (noble_progress folds in closeness) -- progress
+                             # toward a near noble can beat taking a flexible gem
+USE_TEMPO_DISCOUNT = True    # tempo as a multiplicative time-discount (value never < 0)
+                             # instead of a flat subtraction that can drive value negative
 # (engine_value now also counts a bonus's discount to your own RESERVED cards, at a
 # slight per-card premium -- see valuation.RESERVED_ENGINE_W. This is correct: a card
 # you reserved is one you intend to buy. If it dents win rate, the cause is reserving
@@ -108,11 +118,17 @@ def card_value(val: V.Valuation, s: E.State, ci: int, seat: int) -> float:
     # one color is wasteful). Decays engine value by bonuses already held.
     eng_decay = 1.0 / (1.0 + ENG_DECAY_RATE * s.bonuses[seat][E.BONUS[ci]])
 
-    return (pts_w * (pts + nc)
+    base = (pts_w * (pts + nc)        # all four terms are >= 0, so base >= 0
             + W_EFFICIENCY * eff
             + eng_w * eng * eng_decay
-            + W_NOBLE * nob
-            - W_TEMPO * tta)
+            + W_NOBLE * nob)
+    # Tempo as a TIME-DISCOUNT, not a subtraction: a card you can't afford for a while
+    # is worth proportionally less NOW, but never < 0 (worst case = a useless card = 0).
+    # The old `- W_TEMPO*tta` could drive value negative (the -0.4 seen in the overlay),
+    # which is nonsensical -- a card can't be worth less than nothing.
+    if USE_TEMPO_DISCOUNT:
+        return base / (1.0 + W_TEMPO * tta)
+    return base - W_TEMPO * tta
 
 
 def _take_colors(a: int):
@@ -329,11 +345,19 @@ def choose_action(s: E.State, seat: int | None = None) -> int:
                 return ba
             if (E.PTS[bci] == 0 and V.discount_count(s, bci, seat) <= 1
                     and not (USE_NOBLE_COMPLETION
-                             and V.noble_completion_pts(s, bci, seat) > 0)):
+                             and V.noble_completion_pts(s, bci, seat) > 0)
+                    and val.noble_progress(bci, seat) < NOBLE_CONTRIB):
                 continue            # worthless vs a gem -> skip, prefer taking a gem
-                                    # (but never skip a 0-pt card that claims a noble)
+                                    # (but never skip a 0-pt card that CLAIMS a noble
+                                    #  or meaningfully advances a CLOSE one)
             if bv > BUY_FLOOR:
                 return ba
+        # Anti-hoard: nothing passed the gate, but we're token-rich -- buy the best
+        # affordable card (a permanent bonus + freed token slots) rather than take gems
+        # we'd just discard at the 10-cap. Breaks the cap deadlock (steep targets are
+        # skipped as un-collectable, leaving only gate-skipped cheap cards to buy).
+        if USE_ANTI_HOARD and sum(s.tokens[seat]) >= TOKEN_HOARD:
+            return buys[0][1]
 
     # 2) Disciplined reserve (deny or secure a uniquely good card).
     a = _maybe_reserve(s, seat, val, targets, legal_set)
