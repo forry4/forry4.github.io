@@ -402,6 +402,26 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     try { localStorage.removeItem("coc_roomId"); } catch {}
     setRoomData(null); setRoomId(""); setReviewing(false); setScreen("lobby"); fetchGames();
   };
+  // Cancel an open game you created (host_id === myId). Mirrors Spender: authorize
+  // by session token OR host player_id (so it still works after a session expires),
+  // and only clear local resume state AFTER the server confirms the delete.
+  const handleCancel = (id) => {
+    const params = new URLSearchParams();
+    if (authUser?.session_token) params.set("token", authUser.session_token);
+    params.set("player_id", myId);
+    fetch(`${COC_HTTP}/games/${id}/cancel?${params.toString()}`, { method: "POST" })
+      .then((r) => r.json())
+      .then((d) => {
+        if (!d.ok) { setToast(d.message || "Could not cancel"); return; }
+        try {
+          if (localStorage.getItem("coc_roomId") === id) localStorage.removeItem("coc_roomId");
+          localStorage.removeItem(`coc_token_${id}_${myId}`);
+        } catch {}
+        setToast("Game canceled");
+        fetchGames();
+      })
+      .catch(() => setToast("Could not cancel"));
+  };
   const mv = (move) => send({ action: "move", move });
 
   // ── move helpers (respect extra_action mode) ──
@@ -553,7 +573,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             openGames.map((g) => (
               <div className="coc-card" key={g.id}>
                 <div className="coc-card-info"><div className="coc-card-title">{g.host_id === myId ? "Your game" : `${g.host_name}'s game`}</div><div className="coc-card-meta">{g.id}</div></div>
-                {g.host_id !== myId && <button className="coc-btn gold sm" onClick={() => startJoin(g.id)}>Join</button>}
+                {g.host_id === myId
+                  ? <button className="coc-btn outline sm" onClick={() => handleCancel(g.id)}>Cancel</button>
+                  : <button className="coc-btn gold sm" onClick={() => startJoin(g.id)}>Join</button>}
               </div>
             ))}
         </div>
