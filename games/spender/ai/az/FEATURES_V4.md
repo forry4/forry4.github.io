@@ -278,10 +278,27 @@ weights to "clearly competent," run one arena check vs C2/B, stop. We want behav
    `noble_progress`, `engine_value` (cross-card + deck-demand term), `efficiency`,
    `victory_closeness`. Pure Python on `engine.State`; a `Valuation` context precomputes
    state-wide aggregates (deck color demand) once. **(current step)**
-2. Heuristic bot on the core: `card_value()` (hand-set weighted combo) + `choose_move()`
-   (buy highest-value affordable; reserve extremely-high-value-when-unaffordable; take
-   gems toward the top target(s)).
+2. Heuristic bot on the core: `card_value()` (hand-set weighted combo) +
+   `choose_action()`:
+   - **Buy** the highest-value affordable card; always take a winning buy (reaches 15) or
+     a noble-completing buy; otherwise buy only if its value is within `BUY_FRACTION` of
+     the best (possibly unaffordable) target — don't waste a turn on a weak card when a
+     much better one is reachable.
+   - **Reserve — disciplined, because modeling the *counter* to over-reserving is the
+     point.** Strictness rises as slots fill, and the opening is protected:
+     - value threshold *escalates with slots already used*: `RESERVE_BASE +
+       n_reserved * RESERVE_STEP` (0 used → a high-value card qualifies; the **last slot**
+       demands an extremely-high one);
+     - reserve only on a **big value-gap to the next-best card** (a unique opportunity)
+       OR an **imminent opponent buy** (denial) — and only when the card is *unaffordable
+       now* (if you can just buy it, don't reserve it);
+     - **opening tempo cap:** at most one reserve while `s.ply < OPENING_PLY` (~first 4
+       turns each) — early tempo builds the engine, not reserves.
+   - **Take gems** that best cover the color needs of the top target cards (weighted by
+     value × per-color deficit), else a generically useful take-3.
 3. **Validation gate:** arena the heuristic vs C2/B. Competent (>= ~C2) -> proceed; weak
-   -> fix the valuation before any training.
+   -> fix the valuation before any training. A *behavioral* check too: confirm it does
+   NOT over-reserve (it should rarely hold >1 reserve early) — that discipline is what
+   makes it a useful anti-blind-spot sparring partner.
 4. `features.py` on the same module (+ 16 spare zero-padded slots) -> fresh v4 AZ retrain
    with the heuristic as a league slice and the arena-vs-C2 north-star probe.
