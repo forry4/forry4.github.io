@@ -2197,7 +2197,13 @@ async def auth_register(body: RegisterBody):
     user = create_user(body.name, body.password)
     if not user:
         return {"ok": False, "message": "name already taken"}
-    return {"ok": True, "user": user}
+    # Issue a session immediately so registering also logs the user in. The
+    # frontend and session-authenticated features (e.g. the Books page) rely on
+    # session_token; without this a freshly registered user has no token and is
+    # treated as logged-out.
+    authed = authenticate_user(body.name, body.password)
+    return {"ok": True, "user": user,
+            "session_token": authed["session_token"] if authed else None}
 
 
 @app.post("/auth/login")
