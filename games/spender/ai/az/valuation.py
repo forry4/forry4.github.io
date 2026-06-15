@@ -102,6 +102,27 @@ def discount_count(s: E.State, ci: int, seat: int) -> int:
                and E.COST[s.board[slot]][bcol] > held)
 
 
+def single_color_mirage(s: E.State, ci: int, seat: int, steep: int = 5) -> bool:
+    """True if ci needs >= `steep` of a SINGLE color after bonuses AND there is no
+    way to build that color down: no bonus held in it and no lower-level board card
+    that grants it. Such a card is a token-only target the bank can't realistically
+    supply (only ~4 of a color exist) -- committing gem-taking to it just hoards one
+    color toward a card you can never afford. The complement of build_path_count,
+    used to keep gem-collection oriented at REACHABLE cards (a steep card with even
+    one build-path card, or a <steep single-color cost, is not a mirage)."""
+    cost = E.COST[ci]
+    bon = s.bonuses[seat]
+    eff = [cost[c] - bon[c] for c in range(5)]
+    c = max(range(5), key=eff.__getitem__)
+    if eff[c] < steep:
+        return False
+    lvl = E.LEVEL_OF[ci]
+    board = sum(1 for slot in range(12)
+                if s.board[slot] >= 0 and s.board[slot] != ci
+                and E.LEVEL_OF[s.board[slot]] < lvl and E.BONUS[s.board[slot]] == c)
+    return bon[c] == 0 and board == 0
+
+
 def _color_deficits(s: E.State, ci: int, seat: int) -> list[int]:
     """Per-color gems still needed after discounts and owned colored tokens
     (gold NOT applied here — callers fold gold in where appropriate)."""

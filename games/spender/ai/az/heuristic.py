@@ -51,6 +51,9 @@ BUY_FLOOR = 0.5       # don't bother buying a near-worthless affordable card
 # target-focused backward planning (hurt -- the broad engine_value is load-bearing).
 USE_NOBLE_COMPLETION = True   # value the immediate +VP a buy scores by triggering
                               # a noble, in card_value AND the winning-buy check
+USE_REACH_TAKE = True         # don't orient gem-taking toward a steep single-color
+MIRAGE_STEEP = 5              # card with no build path (a mirage you can't afford);
+                              # commit gem-collection to REACHABLE targets instead
 
 # Reserve gates (strictness rises with slots used; opening tempo protected).
 RESERVE_BASE = 4.0        # min target value to reserve with 0 slots used...
@@ -127,6 +130,8 @@ def _need_vector(s: E.State, seat: int, targets) -> list[float]:
     for tv, ci, _idx, _kind in targets[:3]:
         if tv <= 0:
             continue
+        if USE_REACH_TAKE and V.single_color_mirage(s, ci, seat, MIRAGE_STEEP):
+            continue
         d = V._color_deficits(s, ci, seat)
         for i in range(5):
             need[i] += tv * d[i]
@@ -141,6 +146,10 @@ def _take_target(val, s, seat, targets):
     best = None
     for tv, ci, _idx, _kind in targets:
         if tv <= 0:
+            continue
+        # Reachability: a steep single-color card with no build path is a mirage --
+        # collecting toward it just hoards one color for a card you can't afford.
+        if USE_REACH_TAKE and V.single_color_mirage(s, ci, seat, MIRAGE_STEEP):
             continue
         score = tv - TAKE_TEMPO * val.turns_to_afford(ci, seat)
         if best is None or score > best[0]:
