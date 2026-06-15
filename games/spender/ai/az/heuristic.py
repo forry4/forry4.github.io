@@ -94,20 +94,48 @@ def _need_vector(s: E.State, seat: int, targets) -> list[float]:
     return need
 
 
-def _choose_take(s, seat, targets, legal):
-    """Pick the legal take that best covers the top targets' color needs."""
-    need = _need_vector(s, seat, targets)
-    best_a, best_score = None, 0.0
-    for a in legal:
-        colors = _take_colors(a)
-        if colors is None:
+def _take_target(val, s, seat, targets):
+    """The single card to actively collect toward. The highest-value card that is
+    actually reachable soon (value penalized by turns-to-afford). Focusing on ONE
+    target — rather than blending several — is what lets the bot take the RIGHT
+    gems turn 1 and afford the card in the fewest turns."""
+    best = None
+    for tv, ci, _idx, _kind in targets:
+        if tv <= 0:
             continue
-        score = sum(need[c] for c in colors)
-        if score > best_score:
-            best_score, best_a = score, a
-    if best_a is not None:
-        return best_a
-    # No needed colors (or no scoring take): prefer a take-3, then any take.
+        score = tv - 0.6 * val.turns_to_afford(ci, seat)
+        if best is None or score > best[0]:
+            best = (score, ci)
+    return best[1] if best else None
+
+
+def _choose_take(s, seat, val, targets, legal):
+    """Take the gems that bring the focus target closest to affordable: minimize
+    its turns-to-afford, then its remaining deficit, then break ties by usefulness
+    to the other top targets. This one-step plan toward a specific card avoids
+    the dilution of spreading gems across several targets (which wastes tempo and
+    misses take-2-same when a single color is the bottleneck)."""
+    target = _take_target(val, s, seat, targets)
+    if target is not None:
+        need = _need_vector(s, seat, targets)
+        tok = s.tokens[seat]
+        best_a, best_key = None, None
+        for a in legal:
+            colors = _take_colors(a)
+            if colors is None:
+                continue
+            for c in colors:          # simulate taking these gems...
+                tok[c] += 1
+            key = (val.turns_to_afford(target, seat),
+                   val.gems_to_collect(target, seat),
+                   -sum(need[c] for c in colors))
+            for c in colors:          # ...then restore
+                tok[c] -= 1
+            if best_key is None or key < best_key:
+                best_key, best_a = key, a
+        if best_a is not None:
+            return best_a
+    # Fallback: a generically useful take-3, then any take.
     for a in legal:
         if E.A_TAKE3 <= a < E.A_TAKE2D:
             return a
@@ -230,7 +258,7 @@ def choose_action(s: E.State, seat: int | None = None) -> int:
         return a
 
     # 3) Take gems toward the top targets.
-    a = _choose_take(s, seat, targets, legal)
+    a = _choose_take(s, seat, val, targets, legal)
     if a is not None:
         return a
 
