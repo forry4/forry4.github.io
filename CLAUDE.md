@@ -77,7 +77,9 @@ games/castles_of_crimson/
   effects.py   # (reserved) data-driven effect dispatch — currently effects live in engine.py
   engine.py    # PURE rules engine (no web deps): new_game/legal_moves/apply_move/
                #   final_scores/winner/is_over + all placement effects + lifecycle
-  bot.py       # trivial random-legal-move opponent (choose / play_turn); swap for real AI later
+  bot.py       # trivial random-legal-move opponent (choose / play_turn); rollout policy + fallback
+  ai.py        # STRONG opponent: determinized MCTS + heuristic eval (Normal / Hard)
+  ai_selfplay.py  # offline arena (hard vs normal vs random) — validation/tuning, no server/DB
   main.py      # FastAPI sub-app `coc_app` (rooms/WS/REST/persistence); thin — delegates rules to engine
   CastlesOfCrimson.jsx   # self-contained React component the shell mounts at screen "coc"
   tests/       # pytest, 102 tests (board invariants, placement, scoring, lifecycle,
@@ -114,6 +116,33 @@ games/castles_of_crimson/
   from the shuffled supply via `_draw_type` (so the specific building/monastery/animal still varies
   by seed). The supply (124 colored) comfortably covers 5 phases × 12 = 60 typed draws. Locked by
   `test_depots_follow_fixed_plan` / `test_depots_refilled_each_phase`.
+
+### AI opponent (`ai.py`) — determinized MCTS, two levels (Normal / Hard)
+The real bot. Pure Python, no new prod deps; reuses the engine contract.
+- **Determinized UCT** over `legal_moves`/`apply_move`. The ONLY hidden info is the *undrawn*
+  supply order + future dice (`supply`/`black_supply`/`goods_supply` + `rng_state`); everything
+  else is public. `_determinize` (per iteration) **canonicalizes** the undrawn pools (sort by tile
+  id) then shuffles + reseeds the RNG, so the search provably can't depend on the hidden order
+  (`test_move_invariant_under_supply_reshuffle`). Depots/duchies are left TRUE (visible). Bounded
+  in-tree horizon (`_MAX_TREE_DEPTH`) → truncated rollout → **heuristic leaf eval `_value`** (the
+  strength lever: realized `final_scores`-style score + weighted potential — mine income, area/
+  color-completion proximity, monastery effects, empties penalty; weights in `WEIGHTS`).
+- **Perf (was the hard part)**: two hot-path fixes give ~430 it/s in pure Python — (1) engine
+  `_snapshot_turn` early-returns when `game["_skip_undo"]` is set (the AI sets it on clones; avoids
+  a full `copy.deepcopy` on every simulated turn — the dominant cost), (2) `ai._clone_game` is an
+  explicit shallow clone that SHARES immutable tile dicts + the wholesale-replaced `rng_state` and
+  drops the move log (~120× faster than deepcopy). **Tiles are never mutated in place** — this
+  invariant is what makes sharing safe; don't break it.
+- **Difficulty** (`ai.DIFFICULTY`): per-decision budgets. `hard` = bigger time/iters, greedy.
+  `normal` = small budget + visit-count **temperature** sampling (beatable blunders). Measured:
+  **hard ≫ normal ≫ random** (hard 4/4 vs random by ~80-pt margins; hard 6/6 vs normal, 100 vs 39
+  avg). Tune via `ai_selfplay.arena`; final calibration is a human playtest.
+- **Serving**: `main._schedule_bot_turn` snapshots under `ROOM_LOCK` → plans the **whole bot turn**
+  in a thread pool (`ai.play_turn_plan` via `run_in_executor`, mirrors Spender's `_schedule_ai_turn`)
+  → re-locks → applies the move sequence → a trivial-`bot` finisher guarantees the turn ends (no
+  deadlock). Room carries `ai_difficulty` (`_valid_difficulty`, default `hard`); frontend lobby has
+  a Normal/Hard "vs Bot" pair sending `ai_difficulty`. The module import is aliased
+  `from . import ai as coc_ai` because `ai` is a local var for the bot pid in `main.py`.
 
 ### Server (`coc_app`, mounted under `/coc`)
 - `games/spender/main.py` mounts it at its **tail** with a **defensive try/except** (an earlier
@@ -226,6 +255,37 @@ shared/
   `forrestm_projects-books`). Pages workflow watches `books/**` + `shared/**`; Render
   watches `books/**`. `COPY . /app` already ships the new top-level dirs.
 - **CLAUDE.md is no longer gitignored**
+
+### Persistence — Turso/libSQL (production DB) — SITE-WIDE, not just Books
+**The Render free plan has an ephemeral filesystem**: the SQLite `users.db` (which
+holds users, games, coc_games, books, book_suggestions) is recreated **empty on
+every deploy and every cold-start after the free service idles**. So accounts,
+games, AND book rankings did not persist across restarts. Books made this pressing
+(its whole point is a persistent ranking), but it affects the whole site.
+
+Fix (in `games/spender/main.py`): `get_db_conn()` is now a **dual backend** behind
+a tiny driver-agnostic wrapper:
+- **Local sqlite3** (default) — dev + the test suite + the prod *fallback*.
+- **Turso / libSQL remote** — used when **`TURSO_DATABASE_URL`** (and
+  `TURSO_AUTH_TOKEN`) env vars are set, so data persists off the ephemeral disk.
+- `_Conn`/`_Cursor`/`_Row` wrap either driver so rows work by BOTH index (`row[0]`)
+  and column name (`row["id"]`) — the existing queries are unchanged. `executemany`
+  is implemented as a loop (libsql may lack a native one).
+- A **boot-time `_turso_selftest()`** connects + round-trips a row through the
+  wrapper; **any failure logs a warning and falls back to local sqlite** (site stays
+  up, just non-persistent) — it never crashes boot. Watch the log for
+  `Turso/libsql verified` vs `falling back to LOCAL sqlite`.
+- `libsql` is in `requirements.txt` but **imported lazily** only when Turso is
+  configured. **`libsql` has no wheel for Python 3.14** (local dev) and can't build
+  without Rust — but **prod Docker is Python 3.11** (wheels exist), so it's
+  install-and-run there. **Consequence: the Turso path cannot be tested locally on
+  this machine** — validate it via Render logs + a live login that survives a
+  redeploy. The sqlite path (identical wrapper) IS locally tested.
+- **Setup the user must do** (one-time): create a free Turso DB + auth token
+  (`turso db create` / `turso db tokens create`, or dashboard), then add
+  `TURSO_DATABASE_URL` (the `libsql://...turso.io` URL) and `TURSO_AUTH_TOKEN` as
+  Render env vars. Until then prod silently uses ephemeral sqlite (zero behavior
+  change). `SITE_OWNER` is unaffected (it's env-based, not stored).
 
 ---
 

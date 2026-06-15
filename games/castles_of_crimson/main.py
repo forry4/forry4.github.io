@@ -32,8 +32,17 @@ from . import engine
 from . import board
 from . import tiles
 from . import bot
+from . import ai as coc_ai          # MCTS opponent (aliased: `ai` is used as a local for the bot pid)
 
 LOG = logging.getLogger("games.castles_of_crimson")
+
+# Valid AI difficulty levels; unknown values fall back to the default.
+AI_DIFFICULTIES = ("normal", "hard")
+DEFAULT_DIFFICULTY = "hard"
+
+
+def _valid_difficulty(value) -> str:
+    return value if value in AI_DIFFICULTIES else DEFAULT_DIFFICULTY
 
 coc_app = FastAPI(title="Castles of Crimson API")
 coc_app.add_middleware(
@@ -104,6 +113,7 @@ def save_game(room_id: str) -> None:
         "meta": room.get("meta", {}),
         "vs_ai": room.get("vs_ai", False),
         "ai_player": room.get("ai_player"),
+        "ai_difficulty": room.get("ai_difficulty", DEFAULT_DIFFICULTY),
         "boards": room.get("boards", {}),
     }
     now = int(time.time())
@@ -150,6 +160,7 @@ def load_game_to_memory(room_id: str) -> bool:
         "meta": state.get("meta", {}),
         "vs_ai": state.get("vs_ai", False),
         "ai_player": state.get("ai_player"),
+        "ai_difficulty": state.get("ai_difficulty", DEFAULT_DIFFICULTY),
         "boards": state.get("boards", {}),
         "sockets": {},
     }
@@ -228,6 +239,7 @@ def mk_room_state(room_id: str) -> dict[str, Any]:
         "game": room.get("game"),
         "vs_ai": room.get("vs_ai", False),
         "ai_player": room.get("ai_player"),
+        "ai_difficulty": room.get("ai_difficulty", DEFAULT_DIFFICULTY),
         "boards": room.get("boards", {}),
         "reconnect_tokens": {p: info.get("token") for p, info in room.get("meta", {}).items()} if room.get("meta") else {},
     }
@@ -241,28 +253,63 @@ def _sync_status_from_game(room: dict) -> None:
 
 # ── Opponent (bot) turn scheduler ─────────────────────────────────────────────
 async def _schedule_bot_turn(room_id: str) -> None:
-    """Run the placeholder bot while the active decision belongs to it.
+    """Drive the AI opponent's whole turn.
 
-    The trivial bot is instant, so it runs inline under the lock. (A future MCTS
-    AI would compute in a thread-pool, mirroring Spender's _schedule_ai_turn.)
-    """
+    The MCTS is heavy, so it plans the turn on a snapshot **in a thread pool**
+    (mirrors Spender's `_schedule_ai_turn`) and the planned move sequence is applied
+    back under the lock. A trivial-bot finisher guarantees the turn always ends, so
+    the game can never deadlock even if planning fails or the state drifts."""
     async with ROOM_LOCK:
         room = ROOMS.get(room_id)
         if not room:
             return
         game = room.get("game")
-        ai = room.get("ai_player")
-        if not game or not ai or engine.is_over(game):
+        ai_pid = room.get("ai_player")
+        if not game or not ai_pid or engine.is_over(game):
             return
-        if (game.get("pending_pid") or game.get("turn")) != ai:
+        if (game.get("pending_pid") or game.get("turn")) != ai_pid:
             return
+        difficulty = _valid_difficulty(room.get("ai_difficulty"))
+        snapshot = coc_ai._clone_game(game)      # independent of the live game
+
+    # Plan the bot's turn off the event loop (MCTS may take a couple seconds).
+    loop = asyncio.get_event_loop()
+    try:
+        seq = await loop.run_in_executor(
+            None,
+            lambda: coc_ai.play_turn_plan(snapshot, ai_pid, difficulty=difficulty, rng=random.Random()),
+        )
+    except Exception:
+        LOG.exception("CoC AI planning failed; finishing with the trivial bot")
+        seq = None
+
+    async with ROOM_LOCK:
+        room = ROOMS.get(room_id)
+        if not room:
+            return
+        game = room.get("game")
+        ai_pid = room.get("ai_player")
+        if not game or not ai_pid or engine.is_over(game):
+            return
+        if (game.get("pending_pid") or game.get("turn")) != ai_pid:
+            return
+        # Apply the planned sequence to the live game (state is unchanged since the
+        # snapshot — it is the bot's turn, so no human could have moved).
+        if seq:
+            for mv in seq:
+                if engine.is_over(game) or (game.get("pending_pid") or game.get("turn")) != ai_pid:
+                    break
+                ok, _ = engine.apply_move(game, ai_pid, mv)
+                if not ok:
+                    break
+        # Finisher: ensure the bot's turn actually ended (fallback / state drift).
         rng = random.Random()
         guard = 0
-        while not engine.is_over(game) and guard < 200:
+        while (not engine.is_over(game)
+               and (game.get("pending_pid") or game.get("turn")) == ai_pid
+               and guard < 200):
             guard += 1
-            if (game.get("pending_pid") or game.get("turn")) != ai:
-                break
-            bot.play_turn(game, ai, rng)
+            bot.play_turn(game, ai_pid, rng)
         _sync_status_from_game(room)
         save_game(room_id)
     await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
@@ -336,6 +383,7 @@ async def _handle_create(ws, room_id, pid, msg):
     vs_ai = bool(msg.get("vs_ai"))
     my_board = _valid_board(msg.get("board_id"))
     opp_board = _valid_board(msg.get("opp_board_id"))
+    difficulty = _valid_difficulty(msg.get("ai_difficulty"))
     async with ROOM_LOCK:
         if room_id in ROOMS or _ensure_room_loaded(room_id):
             await _send(ws, {"type": "error", "message": "room already exists"})
@@ -349,6 +397,7 @@ async def _handle_create(ws, room_id, pid, msg):
             "meta": {pid: {"token": _gen_token()}},
             "vs_ai": vs_ai,
             "ai_player": None,
+            "ai_difficulty": difficulty,
             "boards": {pid: my_board},
         }
         ROOMS[room_id] = room

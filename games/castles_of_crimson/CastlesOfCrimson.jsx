@@ -122,6 +122,8 @@ const css = `
 .coc-hero h1{font-family:'Cinzel',serif;font-size:2.4rem;color:var(--crimson-l);letter-spacing:.04em}
 .coc-hero p{color:var(--text-dim);font-style:italic;margin-top:6px}
 .coc-lobby-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:24px}
+.coc-vsbot{display:inline-flex;align-items:center;gap:6px;padding:3px 8px 3px 10px;border:1px solid var(--border);border-radius:var(--radius)}
+.coc-vsbot-lbl{font-family:'Cinzel',serif;font-size:.62rem;letter-spacing:.1em;color:var(--text-dim);text-transform:uppercase}
 .coc-join{display:flex;gap:8px}
 .coc-input{padding:9px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'Cinzel',serif;letter-spacing:.12em;outline:none;width:130px;text-transform:uppercase}
 .coc-input:focus{border-color:var(--gold)}
@@ -403,13 +405,14 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   useEffect(() => { setActedThisTurn(false); }, [game?.turn, game?.round, game?.phase_letter]);
 
   // ── actions ──
-  const startCreate = (vsAi) => {
+  const startCreate = (vsAi, difficulty = "hard") => {
     const rid = roomCode();
     setRoomId(rid);
     try { localStorage.setItem("coc_roomId", rid); } catch {}
     connect(`${COC_WS}/${rid}/${myId}`, {
       action: "create", name: playerName, vs_ai: vsAi,
       board_id: myBoard, opp_board_id: oppBoard,
+      ai_difficulty: difficulty,
     });
   };
   const startJoin = (rid) => {
@@ -566,7 +569,13 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
 
           <div className="coc-lobby-actions">
             <button className="coc-btn gold" onClick={() => startCreate(false)}>+ New Game</button>
-            <button className="coc-btn crimson" onClick={() => startCreate(true)}>Play vs Bot</button>
+            <span className="coc-vsbot">
+              <span className="coc-vsbot-lbl">vs Bot</span>
+              <button className="coc-btn crimson sm" title="A capable opponent that makes the occasional mistake"
+                onClick={() => startCreate(true, "normal")}>Normal</button>
+              <button className="coc-btn crimson sm" title="Full-strength search — a real challenge"
+                onClick={() => startCreate(true, "hard")}>Hard</button>
+            </span>
             <div className="coc-join">
               <input className="coc-input" placeholder="CODE" value={joinCode} maxLength={6}
                 onChange={(e) => setJoinCode(e.target.value)} onKeyDown={(e) => e.key === "Enter" && startJoin(joinCode)} />

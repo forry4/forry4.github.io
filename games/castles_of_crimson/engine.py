@@ -363,7 +363,13 @@ def _building_town_ok(p: dict, tile: dict, sid: str) -> bool:
 
 # ── Turn / round lifecycle ────────────────────────────────────────────────────
 def _snapshot_turn(game: dict) -> None:
-    """Snapshot the game at the start of the current player's turn (for undo)."""
+    """Snapshot the game at the start of the current player's turn (for undo).
+
+    Skipped when ``game["_skip_undo"]`` is set — the AI search clones the game and
+    steps it thousands of times and never needs undo, so it disables the per-turn
+    deepcopy (a major hot-path cost). Real games never set the flag."""
+    if game.get("_skip_undo"):
+        return
     snap = {k: v for k, v in game.items() if k != "turn_undo"}
     game["turn_undo"] = copy.deepcopy(snap)
 
