@@ -165,6 +165,31 @@ penalty under-rates how far steep cards are, so the bot over-values mirages. (He
 result of reachability + this refinement: see the deployed tuning lineage in
 `heuristic.py`.)
 
+## Heuristic structural-campaign findings → net-feature guidance (June 2026)
+
+A 1-ply greedy A/B campaign on the v4 heuristic (committed in `heuristic.py`) tested four
+structural ideas on **fresh paired seeds** vs the A/B/C/C2 greedy mix. **Read these
+results as net-feature guidance through one caveat that flips the usual intuition:**
+
+> **The 1-ply A/B is a WEAK test for a net feature.** It only measures whether a greedy
+> argmax bot uses the signal better — not whether a *searching* net (with a co-evolving
+> league) can exploit it. A feature that is neutral-or-negative at 1-ply can still be
+> valuable for the net, because search + diverse opponents teach uses a greedy policy
+> never demonstrates. Same logic as "self-play is blind to denial the opponent never
+> threatens": the cure is to *give the net the feature*, not to omit it.
+
+| idea | 1-ply A/B result | net-feature verdict |
+|------|------------------|---------------------|
+| **noble-completion VP** (the +3 a buy claims) | **+0.024, z=2.05 — WIN** | **Include, crisply.** Helped even greedy → unambiguous. Expose the discrete noble-claim VP per candidate as its own float (today it's only folded into victory-closeness #11); the net benefits from the sharp scalar — add `noble_gain/3` per me/opp side. `valuation.noble_completion_pts()` already computes it. |
+| **tempo** (turns-to-afford #8) | multiplicative time-discount reshape = wash | **Keep the RAW feature.** Wash means the *greedy* use is saturated; the net learns racing/tempo through lookahead. Do NOT pre-bake a tempo discount into the feature — hand it raw turns-to-afford and let search weight it. |
+| **opponent-contest / denial** (opp proximity × opp VP) | wash at 1-ply (confirmed at 2000 games) | **Keep — this is precisely a "documented blind spot" feature.** Greedy denial rarely pays, so 1-ply *cannot* show its value; the opp block (#13–17) + "Opponent threat/plan" addition give the net the raw material to learn denial **with** search + league. The 1-ply wash is the expected, non-disqualifying result. |
+| **backward-planning** (target-focused engine value) | **hurt** (−0.04 sig as add-on; −0.38 as replacement) | **At most an ADDITIVE feature, never a valuation override.** The collapse when it *replaced* `engine_value` proved the broad engine_value is load-bearing. The "incoming" half (reachability) is already a feature; an "outgoing target-focus" float is low-priority (it hurt even additively at 1-ply) — defer unless the net shows a specific gap. |
+
+**Takeaway:** the campaign's *negative* 1-ply results are not vetoes on features — they
+confirm the features encode signal the *greedy* policy can't use, which is exactly where a
+searching net has headroom. The one place the heuristic result is a direct feature
+instruction: **noble-completion** earned an explicit crisp scalar (`noble_gain/3`).
+
 ## Global additions (6 floats)
 
 | feature | formula | norm |
