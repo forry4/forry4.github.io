@@ -72,7 +72,7 @@ const css = baseCss + `
 .auth-tab{flex:1;padding:10px 0;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--text-dim);cursor:pointer;font-family:'Cinzel',serif;font-size:.78rem;letter-spacing:.1em;text-transform:uppercase;margin-bottom:-1px;transition:all .15s}
 .auth-tab.active{color:var(--gold);border-bottom-color:var(--gold)}
 .auth-tab:hover:not(.active){color:var(--text)}
-.auth-field{width:100%;padding:11px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'Cinzel',serif;font-size:.9rem;letter-spacing:.04em;outline:none;margin-bottom:10px}
+.auth-field{width:100%;padding:11px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'Crimson Pro',Georgia,serif;font-size:1rem;letter-spacing:normal;outline:none;margin-bottom:10px}
 .auth-field:focus{border-color:var(--gold)}
 .auth-or{text-align:center;color:var(--text-muted);font-size:.8rem;font-style:italic;margin:18px 0 14px;position:relative}
 .auth-or::before,.auth-or::after{content:'';position:absolute;top:50%;width:40%;height:1px;background:var(--border)}
