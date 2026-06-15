@@ -52,14 +52,30 @@ def _draw(pool: list[dict], n: int) -> list[dict]:
     return out
 
 
-def _replenish_depots(game: dict) -> None:
-    """Discard leftover hex tiles and refill each depot from the supply.
+def _draw_type(pool: list[dict], ttype: str) -> dict | None:
+    """Pop the first tile of the given type from a pre-shuffled pool (or None)."""
+    for i, t in enumerate(pool):
+        if t["type"] == ttype:
+            return pool.pop(i)
+    return None
 
-    Goods already sitting on depots are NOT removed (they persist across phases).
+
+def _replenish_depots(game: dict) -> None:
+    """Discard leftover hex tiles and refill each depot per the fixed DEPOT_PLAN.
+
+    Each numbered depot gets exactly the two hex types listed for it in
+    ``tiles.DEPOT_PLAN`` (drawn from the shuffled supply so the specific
+    building/monastery/animal varies by seed). Goods already sitting on depots are
+    NOT removed (they persist across phases).
     """
     for i in range(1, 7):
         d = game["depots"][str(i)]
-        d["hexes"] = _draw(game["supply"], tiles.DEPOT_FILL_2P)
+        hexes = []
+        for ttype in tiles.DEPOT_PLAN[i]:
+            t = _draw_type(game["supply"], ttype)
+            if t is not None:
+                hexes.append(t)
+        d["hexes"] = hexes
     game["black_depot"] = _draw(game["black_supply"], tiles.BLACK_FILL_2P)
 
 

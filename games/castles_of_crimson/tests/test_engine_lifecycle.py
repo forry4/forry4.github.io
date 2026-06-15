@@ -51,6 +51,14 @@ def test_depots_filled_to_2p_count():
         assert len(g["depots"][str(i)]["hexes"]) == tiles.DEPOT_FILL_2P
     assert len(g["black_depot"]) == tiles.BLACK_FILL_2P
     assert tiles.BLACK_FILL_2P == 4   # rulebook: 4 black tiles per phase
+    assert tiles.DEPOT_FILL_2P == 2   # fixed plan: 2 hexes per numbered depot
+
+
+def test_depots_follow_fixed_plan():
+    g = engine.new_game(["p1", "p2"], seed=7)
+    for i in range(1, 7):
+        types = sorted(t["type"] for t in g["depots"][str(i)]["hexes"])
+        assert types == sorted(tiles.DEPOT_PLAN[i]), (i, types)
 
 
 def test_supply_is_exactly_164_tiles():
@@ -162,7 +170,8 @@ def test_depots_refilled_each_phase():
         engine.apply_move(g, g["turn"], {"type": "end_turn"})
     assert g["phase_letter"] == "B"
     for i in range(1, 7):
-        assert len(g["depots"][str(i)]["hexes"]) == tiles.DEPOT_FILL_2P
+        types = sorted(t["type"] for t in g["depots"][str(i)]["hexes"])
+        assert types == sorted(tiles.DEPOT_PLAN[i]), (i, types)
 
 
 def test_track_initial_order_and_advance():

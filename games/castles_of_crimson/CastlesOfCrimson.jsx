@@ -149,20 +149,22 @@ const css = `
 /* hexagon board layout */
 .coc-board-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
 .coc-board-head h3{margin-bottom:0}
-.coc-board-hex{position:relative;width:100%;max-width:500px;margin:6px auto 0;aspect-ratio:1/0.92}
-.coc-board-hex .coc-depot{position:absolute;width:30%;min-height:0;padding:6px;transform:translate(-50%,-50%)}
-.coc-black-center{left:50%;top:50%;width:30%;border-color:var(--gold)!important;background:#0c0809!important}
+.coc-board-hex{position:relative;width:100%;max-width:760px;margin:6px auto 0;aspect-ratio:1/0.98}
+.coc-board-hex .coc-depot{position:absolute;width:31%;min-height:0;padding:6px;transform:translate(-50%,-50%)}
+/* central black depot: a dark box holding the kite of tiles (positioned absolutely) */
+.coc-black-center{left:50%;top:50%;box-sizing:border-box;padding:0!important;border:1px solid var(--gold)!important;background:#0c0809!important;border-radius:8px;min-height:0!important;z-index:1}
 .coc-blacklbl{font-family:'Cinzel',serif;font-size:.62rem;letter-spacing:.08em;color:var(--gold);text-transform:uppercase}
-/* turn-order track */
-.coc-track{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:2px 0 4px}
+/* turn-order track — boxed, sat at the board's upper-left (left of depot 1) */
+.coc-track-block{position:absolute;left:-15%;top:4%;z-index:3;max-width:360px;background:var(--surface2);border:1px solid var(--gold);border-radius:8px;padding:7px 9px;box-shadow:0 2px 8px rgba(0,0,0,.45)}
+.coc-track{display:flex;flex-direction:column;align-items:flex-start;gap:3px;margin:0}
 .coc-track-lbl{font-family:'Cinzel',serif;font-size:.62rem;letter-spacing:.1em;color:var(--text-dim);text-transform:uppercase;white-space:nowrap}
-.coc-track-spaces{display:flex;gap:4px;align-items:stretch}
-.coc-track-space{position:relative;width:44px;min-height:42px;border:1px solid var(--border);border-radius:5px;background:var(--surface2);display:flex;flex-direction:column;justify-content:flex-end;gap:2px;padding:13px 3px 3px}
-.coc-track-snum{position:absolute;top:2px;left:0;right:0;text-align:center;font-family:'Cinzel',serif;font-size:.55rem;color:var(--text-muted)}
-.coc-track-stack{display:flex;flex-direction:column;gap:2px}
-.coc-track-token{border-radius:3px;font-family:'Cinzel',serif;font-size:.56rem;font-weight:700;text-align:center;padding:2px 0;line-height:1}
+.coc-track-spaces{display:flex;gap:3px;align-items:stretch}
+.coc-track-space{position:relative;width:42px;min-height:58px;border:1px solid var(--border);border-radius:5px;background:var(--surface);display:flex;flex-direction:column;justify-content:flex-end;gap:2px;padding:19px 3px 5px}
+.coc-track-snum{position:absolute;top:3px;left:0;right:0;text-align:center;font-family:'Cinzel',serif;font-size:.64rem;color:var(--text-dim)}
+.coc-track-stack{display:flex;flex-direction:column;gap:6px}
+.coc-track-token{border-radius:3px;font-family:'Cinzel',serif;font-size:.56rem;font-weight:700;text-align:center;padding:2px 1px;line-height:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .coc-track-token.start{box-shadow:0 0 0 2px #fff}
-.coc-track-cap{font-size:.6rem;color:var(--text-dim);font-style:italic}
+.coc-track-cap{display:block;margin:3px 0 0;font-size:.58rem;color:var(--text-dim);font-style:italic}
 
 /* duchy: controls on the left, board on the right */
 .coc-duchy-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px}
@@ -173,11 +175,11 @@ const css = `
 .coc-duchy-board .coc-hexsvg{max-width:100%;margin:0}
 @media (max-width:760px){.coc-duchy-layout{flex-direction:column}.coc-duchy-board{width:100%}}
 .coc-depot-n{display:flex;justify-content:center;margin-bottom:5px}
-.coc-minidie{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;background:#f3ead8;color:#15100a;font-family:'Cinzel',serif;font-weight:700;font-size:.88rem;border-radius:5px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.25),0 1px 2px rgba(0,0,0,.45)}
+.coc-minidie{position:absolute;transform:translate(-50%,-50%);z-index:3;pointer-events:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;background:#f3ead8;color:#15100a;font-family:'Cinzel',serif;font-weight:700;font-size:.82rem;border-radius:5px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.3),0 1px 3px rgba(0,0,0,.55)}
 .coc-tilewrap{display:flex;flex-wrap:wrap;gap:3px;justify-content:center}
-.coc-tile{width:44px;height:44px;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:.9rem;font-family:'Cinzel',serif;color:#15100a;font-weight:700;transition:transform .1s;line-height:1;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%)}
+.coc-tile{width:70px;height:81px;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.05rem;font-family:'Cinzel',serif;color:#15100a;font-weight:700;transition:transform .1s;line-height:1;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%)}
 .coc-tile:hover{transform:scale(1.1)}
-.coc-tile.goods{width:34px;height:34px;border-radius:50%;clip-path:none;color:#fff;font-size:.82rem;text-shadow:0 1px 2px rgba(0,0,0,.7)}
+.coc-tile.goods{width:34px;height:34px;border-radius:4px;clip-path:none;color:#fff;font-size:.82rem;text-shadow:0 1px 2px rgba(0,0,0,.7)}
 .coc-whitedie{display:flex;align-items:center;gap:6px;margin-left:auto}
 .coc-whitedie .lbl{font-family:'Cinzel',serif;font-size:.66rem;letter-spacing:.06em;color:var(--text-dim);text-transform:uppercase}
 .coc-dicebar{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
@@ -189,7 +191,7 @@ const css = `
 .coc-die-adj button{width:20px;height:20px;font-size:.7rem;line-height:1;border:1px solid var(--border);background:var(--surface2);color:var(--text);border-radius:4px;cursor:pointer}
 .coc-die-adj button:disabled{opacity:.3;cursor:not-allowed}
 .coc-storage{display:flex;gap:6px;flex-wrap:wrap}
-.coc-stt{width:36px;height:36px;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:.66rem;font-family:'Cinzel',serif;font-weight:700;color:#15100a;transition:transform .1s}
+.coc-stt{width:70px;height:81px;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.05rem;font-family:'Cinzel',serif;font-weight:700;color:#15100a;transition:transform .1s}
 .coc-stt:hover{transform:scale(1.08)}
 .coc-stt.empty{cursor:default}
 .coc-stt.sel{filter:drop-shadow(0 0 3px var(--gold)) drop-shadow(0 0 2px var(--gold))}
@@ -240,6 +242,28 @@ function hexPoints(cx, cy, s) {
   return pts.join(" ");
 }
 
+// Fixed pixel size for the CSS clip-path hex tiles on the shared board (depots +
+// black depot) and in the storage row, so they read at the same scale as the
+// duchy hexes and stay constant across every board. KEEP IN SYNC with the
+// `.coc-tile` / `.coc-stt` width/height in the stylesheet below.
+// On-board / storage hex tiles. The box is NOT square: a regular pointy-top hex
+// has width:height = √3:2, so height = width * 2/√3. With that ratio the
+// clip-path renders a true (un-squished) hexagon matching the duchy hexes.
+// KEEP IN SYNC with `.coc-tile` / `.coc-stt` width/height in the stylesheet.
+const HEX_W = 70;
+const HEX_H = 81;   // ≈ 70 * 2/√3
+// Central black depot: its (up to 4) tiles sit in a kite — 1 top, 2 middle,
+// 1 bottom. Horizontal offsets use HEX_W, vertical offsets use HEX_H so the
+// hexes nest exactly into a diamond.
+const BLACK_KITE = [
+  { left: 0.5 * HEX_W, top: 0 },             // top
+  { left: 0,           top: 0.75 * HEX_H },  // middle-left
+  { left: HEX_W,       top: 0.75 * HEX_H },  // middle-right
+  { left: 0.5 * HEX_W, top: 1.5 * HEX_H },   // bottom
+];
+// Breathing room (px) between the kite and the black box border around it.
+const BLACK_PAD = 9;
+
 // A small selectable thumbnail of one board's hex layout (lobby board picker).
 function BoardThumb({ spaces, name, selected, onClick }) {
   const sids = Object.keys(spaces || {});
@@ -284,6 +308,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   // interaction state
   const [selDie, setSelDie] = useState(null);
   const [selStorage, setSelStorage] = useState(null);
+  const [actedThisTurn, setActedThisTurn] = useState(false);  // did I take any action this turn? (gates Undo)
   const [extraValue, setExtraValue] = useState(null);
   const [viewOpp, setViewOpp] = useState(false);
   const [confirmAbandon, setConfirmAbandon] = useState(false);
@@ -373,6 +398,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
 
   // clear selection at the start of a fresh decision
   useEffect(() => { setSelDie(null); setSelStorage(null); setExtraValue(null); }, [game?.turn, game?.round, game?.pending_kind]);
+  // "acted this turn" resets only when the turn itself changes (NOT on pending
+  // open/close, since opening a pending means you already acted).
+  useEffect(() => { setActedThisTurn(false); }, [game?.turn, game?.round, game?.phase_letter]);
 
   // ── actions ──
   const startCreate = (vsAi) => {
@@ -422,7 +450,11 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
       })
       .catch(() => setToast("Could not cancel"));
   };
-  const mv = (move) => send({ action: "move", move });
+  const mv = (move) => {
+    // Any action other than the undo itself means there's now something to undo.
+    if (move?.type && move.type !== "undo_turn") setActedThisTurn(true);
+    send({ action: "move", move });
+  };
 
   // ── move helpers (respect extra_action mode) ──
   const inExtra = pendingMine && game?.pending_kind === "extra_action";
@@ -631,6 +663,13 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
 
   // ─── Game ────────────────────────────────────────────────────────────────
   const dice = game.dice?.[myId];
+  // You must use BOTH dice before ending the turn (take-2-workers is always a
+  // legal use for an otherwise-stuck die, so this can never soft-lock).
+  const bothDiceUsed = !!dice && dice.used[0] && dice.used[1];
+  // Something is undoable once you've spent a die / bought black / used monastery 6,
+  // or this client recorded an action (covers worker-only die adjusts).
+  const hasActed = actedThisTurn || (!!dice && (dice.used[0] || dice.used[1]))
+    || !!game.black_depot_used_this_turn || !!game.m6_used_this_turn;
   const renderDuchy = (pdata, interactive) => {
     const spaces = boardSpaces(pdata.board_id);
     const sids = Object.keys(spaces);
@@ -726,36 +765,51 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             </div>
           </div>
 
-          {/* Turn-order track: 7 spaces, players stack; ships move you toward "first" */}
-          <div className="coc-track">
-            <span className="coc-track-lbl">Turn order</span>
-            <div className="coc-track-spaces">
-              {(game.track || []).map((stack, s) => (
-                <div className="coc-track-space" key={s}>
-                  <span className="coc-track-snum">{s + 1}</span>
-                  <div className="coc-track-stack">
-                    {[...stack].reverse().map((pid) => (
-                      <div key={pid} className={`coc-track-token${pid === game.start_player ? " start" : ""}`}
-                        style={{ background: pid === myId ? "var(--gold)" : "#5a86c4", color: pid === myId ? "#15100a" : "#fff" }}
-                        title={`${pid === myId ? "You" : (players[pid] || "Opp")}${pid === game.start_player ? " — goes first" : ""}`}>
-                        {pid === myId ? "You" : (players[pid] || "Opp")}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-            <span className="coc-track-cap">furthest right goes first · each ship moves you 1 space right</span>
-          </div>
-
           <div className="coc-board-hex">
+            {/* Turn-order track: label on top, positioned at the upper-left (left of depot 1) */}
+            <div className="coc-track-block">
+              <div className="coc-track">
+                <span className="coc-track-lbl">Turn order</span>
+                <div className="coc-track-spaces">
+                  {(game.track || []).map((stack, s) => (
+                    <div className="coc-track-space" key={s}>
+                      <span className="coc-track-snum">{s}</span>
+                      <div className="coc-track-stack">
+                        {[...stack].reverse().map((pid) => (
+                          <div key={pid} className={`coc-track-token${pid === game.start_player ? " start" : ""}`}
+                            style={{ background: pid === myId ? "var(--gold)" : "#5a86c4", color: pid === myId ? "#15100a" : "#fff" }}
+                            title={`${pid === myId ? "You" : (players[pid] || "Opp")}${pid === game.start_player ? " — goes first" : ""}`}>
+                            {pid === myId ? "You" : (players[pid] || "Opp")}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="coc-track-cap">furthest right and furthest up goes first · each ship moves you 1 space right</div>
+            </div>
             {[1, 2, 3, 4, 5, 6].map((d, idx) => {
               const depot = game.depots[String(d)];
               const match = dice && !pendingMine && [0, 1].some((i) => !dice.used[i] && dice.values[i] === d);
               const pos = DEPOT_POS[idx];
+              // Put the number JUST OUTSIDE the box edge that faces the central
+              // black depot. Pick the dominant axis of the vector toward center,
+              // then sit the square a few px beyond that edge.
+              const vx = 50 - pos.left, vy = 50 - pos.top, G = 6;
+              let numStyle;
+              if (Math.abs(vx) >= Math.abs(vy)) {
+                numStyle = vx < 0
+                  ? { left: 0, top: "50%", transform: `translate(calc(-100% - ${G}px), -50%)` }
+                  : { left: "100%", top: "50%", transform: `translate(${G}px, -50%)` };
+              } else {
+                numStyle = vy < 0
+                  ? { left: "50%", top: 0, transform: `translate(-50%, calc(-100% - ${G}px))` }
+                  : { left: "50%", top: "100%", transform: `translate(-50%, ${G}px)` };
+              }
               return (
                 <div key={d} className={`coc-depot${match ? " match" : ""}`} style={{ left: `${pos.left}%`, top: `${pos.top}%` }}>
-                  <div className="coc-depot-n"><span className="coc-minidie" title={`Depot ${d} — take a tile here with a die showing ${d}`}>{d}</span></div>
+                  <span className="coc-minidie" style={numStyle} title={`Depot ${d} — take a tile here with a die showing ${d}`}>{d}</span>
                   <div className="coc-tilewrap">
                     {depot.hexes.map((t) => (
                       <div key={t.id} className="coc-tile" style={{ background: TILE_HEX[t.color] }}
@@ -770,16 +824,18 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 </div>
               );
             })}
-            <div className="coc-depot coc-black-center">
-              <div className="coc-depot-n"><span className="coc-blacklbl">Black</span></div>
-              <div className="coc-tilewrap">
-                {game.black_depot.map((t) => (
-                  <div key={t.id} className="coc-tile" style={{ background: TILE_HEX[t.color], opacity: .85 }}
+            <div className="coc-depot coc-black-center" style={{ width: 2 * HEX_W + 2 * BLACK_PAD, height: 2.5 * HEX_H + 2 * BLACK_PAD }}
+              title="Central black depot — buy one tile per turn for 2 silver">
+              {game.black_depot.map((t, i) => {
+                const k = BLACK_KITE[i];
+                if (!k) return null;   // the black depot holds at most 4 tiles
+                return (
+                  <div key={t.id} className="coc-tile" style={{ position: "absolute", left: `${k.left + BLACK_PAD}px`, top: `${k.top + BLACK_PAD}px`, background: TILE_HEX[t.color], opacity: .9 }}
                     title={`${tileDesc(t, board)}  (Black depot: buy for 2 silver.)`} onClick={() => clickBlackTile(t)}>
                     {tileGlyph(t)}
                   </div>
-                ))}
-              </div>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -789,8 +845,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           <div className="coc-duchy-head">
             <h3>Your Duchy — {me?.vp ?? 0} VP</h3>
             {game.turn === myId && !over && !setupPhase && (
-              <button className="coc-btn ghost sm" title="Undo everything you've done this turn"
-                onClick={() => { setSelDie(null); setSelStorage(null); setExtraValue(null); mv({ type: "undo_turn" }); }}>↩ Undo Turn</button>
+              <button className="coc-btn ghost sm" disabled={!hasActed}
+                title={hasActed ? "Undo everything you've done this turn" : "Nothing to undo yet"}
+                onClick={() => { setSelDie(null); setSelStorage(null); setExtraValue(null); setActedThisTurn(false); mv({ type: "undo_turn" }); }}>↩ Undo Turn</button>
             )}
           </div>
           <div className="coc-duchy-layout">
@@ -869,7 +926,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                       Discard
                     </button>
                   )}
-                  <button className="coc-btn crimson sm" onClick={() => mv({ type: "end_turn" })}>End Turn</button>
+                  <button className="coc-btn crimson sm" disabled={!bothDiceUsed}
+                    title={bothDiceUsed ? "End your turn" : "Use both dice before ending your turn"}
+                    onClick={() => mv({ type: "end_turn" })}>End Turn</button>
                   <span className="coc-card-meta" style={{ alignSelf: "center" }}>
                     {me?.storage?.length >= 3 && selStorage ? "Storage full — Discard frees this slot."
                       : selStorage ? "Click a glowing hex to place."

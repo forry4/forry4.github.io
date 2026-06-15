@@ -120,7 +120,19 @@ ANIMALS = ["cow", "sheep", "pig"]
 LIVESTOCK_KINDS = [(a, c) for a in ANIMALS for c in (2, 3, 4)]  # 9 kinds
 
 # ── Depot fill (2-player board) ─────────────────────────────────────────────
-DEPOT_FILL_2P = 3     # hex tiles drawn into each numbered depot at phase start
+# Each numbered depot is refilled at the START OF EVERY PHASE with exactly the
+# two hex TYPES listed for it — a fixed layout, NOT random draws. "pasture" is a
+# livestock (green) tile. The specific building/monastery/animal still comes from
+# the shuffled supply (so it varies by seed); only the types are fixed.
+DEPOT_PLAN = {
+    1: ("ship", "building"),
+    2: ("castle", "monastery"),
+    3: ("livestock", "building"),    # pasture + building
+    4: ("ship", "building"),
+    5: ("mine", "monastery"),
+    6: ("livestock", "building"),    # pasture + building
+}
+DEPOT_FILL_2P = 2     # hex tiles per numbered depot at phase start (see DEPOT_PLAN)
 BLACK_FILL_2P = 4     # hex tiles in the central black depot at phase start
 GOODS_PER_PHASE = 5   # goods tiles distributed (one per round) each phase
 START_SILVER = 1

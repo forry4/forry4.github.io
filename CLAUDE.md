@@ -107,6 +107,13 @@ games/castles_of_crimson/
   — see `tiles.build_supply` docstring); the black depot refills **4** tiles/phase
   (`BLACK_FILL_2P`). Starting castles never score; monastery 5 lets you *choose* the adjacent
   depot. These are locked by tests — don't "simplify" them away.
+- **Deliberate house variant — fixed depot layout** (overrides the rulebook's random
+  replenishment): each numbered depot is refilled every phase with exactly **two** hex tiles of
+  fixed TYPES per `tiles.DEPOT_PLAN` (1: ship+building, 2: castle+monastery, 3: pasture+building,
+  4: ship+building, 5: mine+monastery, 6: pasture+building). `_replenish_depots` draws those types
+  from the shuffled supply via `_draw_type` (so the specific building/monastery/animal still varies
+  by seed). The supply (124 colored) comfortably covers 5 phases × 12 = 60 typed draws. Locked by
+  `test_depots_follow_fixed_plan` / `test_depots_refilled_each_phase`.
 
 ### Server (`coc_app`, mounted under `/coc`)
 - `games/spender/main.py` mounts it at its **tail** with a **defensive try/except** (an earlier
@@ -148,6 +155,77 @@ games/castles_of_crimson/
   The vs-bot setup→play flow is verified deadlock-free at the engine+bot level (server `_handle_move`
   applies `place_starting_castle` then schedules the bot, which places its own castle via
   `legal_moves`). **Remaining before merge/deploy: a manual in-browser vs-bot playthrough.**
+
+---
+
+## Books (site feature — not a game)
+
+A standalone site page for ranking favorite books + collecting reading suggestions
+from other users. **Deliberately NOT under `games/` or `spender/`** — it lives in
+its own top-level package so it's neither a game nor part of Spender.
+
+```
+books/
+  __init__.py
+  api.py            # FastAPI routes + SQLite logic (pure functions + thin handlers)
+  Books.jsx         # self-contained React page the shell mounts at screen "books"
+  tests/test_books.py   # 14 tests, in-memory DB (no server / no real users.db)
+shared/
+  theme.js          # baseCss — the site's shared design system (see below)
+```
+
+### Backend (`books/api.py`)
+- Tables in the **shared `users.db`**: `books` (ranking), `books_meta` (owner claim),
+  `book_suggestions` (per-user). Created by `init_books_db` via injected `get_db_conn`.
+- Routes: `GET/PUT /books` (public read; owner-only write — full-list replace, blanks
+  skipped, rating clamped 1–5, `sort_order` recomputed per-rating from incoming order)
+  and `GET/PUT /books/suggestions` (each logged-in user manages their own up to
+  `MAX_SUGGESTIONS=10` ranked picks + a why-read-it blurb; the **owner** `GET` also
+  returns everyone's, grouped by suggester; 10-cap enforced server-side).
+- **Wired into Spender's app**, not its own sub-app: `main.py` does
+  `from books.api import setup_books; setup_books(app, get_db_conn, get_user_by_session)`.
+  Deps are **injected** so `books` never imports `main` (no cycle). The absolute import
+  is safe because `books` is a **sibling top-level package of `games/`** — repo root is
+  on `sys.path` wherever `games.spender.app` loads (Procfile `python -m uvicorn`,
+  Dockerfile `COPY . /app` + WORKDIR /app, pytest from root).
+- Pure functions (`fetch_books`/`replace_books`/`fetch_user_suggestions`/
+  `replace_user_suggestions`/`can_user_edit`/`is_owner`) take a sqlite conn → unit-tested
+  against `:memory:` with no web server.
+
+### Site-owner identity (reusable, in `main.py`)
+- `site_owner_name()` / `is_site_owner(user)` read the **`SITE_OWNER` env var** (a
+  *username*; read at call time). This is the **site-wide** owner check — books is the
+  first consumer, but it's intended for any future owner/admin feature.
+- `SITE_OWNER` **is set on Render** (to the owner's username). `books/api.py` reads the
+  same `SITE_OWNER` key. If unset, books falls back to **first-authenticated-saver
+  claims ownership** (stored in `books_meta.owner_id`) — convenient for local dev.
+  `is_owner` is strict (unclaimed → nobody); `can_user_edit` treats unclaimed as
+  editable-by-any-auth-user (so the first save can claim).
+
+### Frontend (`books/Books.jsx`)
+- Mounted by the shell (`Spender.jsx`) on `screen === "books"`; reached from a "📚 Books"
+  link on the home menu (separate from the games grid). Props `{ authUser, onExit }`.
+- Public ranking view (sections per star tier 5→1, ordered within) + owner edit mode
+  (drag-reorder within a tier, rating picker, manual add). Suggestions section: owner
+  sees all (grouped by suggester); other logged-in users get their own up-to-10 editor;
+  logged-out users see a "log in to suggest" prompt.
+- **Open Library** search-to-add (`<BookSearch>`, reused by both editors): keyless,
+  CORS-enabled, queried client-side; picking a result auto-fills title/author/cover;
+  covers from `covers.openlibrary.org` (`?default=false` so misses fall back to 📖).
+
+### Shared theme (`shared/theme.js`)
+- `baseCss` is the **single source of truth** for the site design: Cinzel/Crimson Pro
+  font `@import`, `:root` color tokens, base `body`/`.app`, and `.btn`/`.input`
+  primitives. Both `Spender.jsx` and `Books.jsx` import it and prepend it to their own
+  CSS (`<style>{baseCss + screenCss}</style>`); the `@import` must stay first, so
+  baseCss always leads. Extracting it left Spender's rendered CSS byte-identical (the
+  primitives just moved out of Spender.jsx into the shared file).
+
+### Deploy / branch notes
+- Work lives on the **`feat/books`** branch (off `main`, isolated in worktree
+  `forrestm_projects-books`). Pages workflow watches `books/**` + `shared/**`; Render
+  watches `books/**`. `COPY . /app` already ships the new top-level dirs.
+- **CLAUDE.md is no longer gitignored**
 
 ---
 
