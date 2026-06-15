@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'games/spender/**'
+      - 'books/**'
       - '.github/workflows/deploy-pages.yml'
 
 jobs:

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import Books from "../../books/Books.jsx";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 const WS_BASE = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
@@ -1087,6 +1088,16 @@ export default function SpenderApp() {
 							</button>
 						))}
 					</div>
+
+					<div style={{ textAlign: "center", marginTop: 24 }}>
+						<button onClick={() => setScreen("books")}
+							style={{
+								background: "none", border: "1px solid #3a3550", color: "#b8b0cc",
+								borderRadius: 10, padding: "10px 22px", fontSize: 15, cursor: "pointer",
+							}}>
+							📚 Books
+						</button>
+					</div>
 				</div>
 				{toast && <div className="toast">{toast}</div>}
 			</div>
@@ -1094,7 +1105,11 @@ export default function SpenderApp() {
 	);
 
 	// Castles of Crimson — placeholder (game not built yet)
-	if (screen === "coc") return (
+	if (screen === "books") return (
+			<Books authUser={authUser} onExit={() => setScreen("home")} />
+		);
+
+		if (screen === "coc") return (
 		<>
 			<style>{css}</style>
 			<div className="app">

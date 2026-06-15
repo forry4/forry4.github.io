@@ -273,6 +273,21 @@ def get_user_by_session(token: str) -> dict | None:
     return {"id": row["id"], "name": row["name"]}
 
 
+# ─── Site owner identity ──────────────────────────────────────────────────────
+# The site owner (you) is identified site-wide by the SITE_OWNER env var, whose
+# value is the owner's username. Reused by any feature that needs an owner/admin
+# check (the books page is the first consumer). Read at call time so a restart
+# with a changed env var takes effect without code changes.
+def site_owner_name() -> str | None:
+    v = os.environ.get("SITE_OWNER")
+    return v.strip() if v and v.strip() else None
+
+
+def is_site_owner(user: dict | None) -> bool:
+    owner = site_owner_name()
+    return bool(user and owner and user.get("name") == owner)
+
+
 def create_reconnect_token(user_id: str, room_id: str, player_id: str, ttl: int = 120) -> str:
     token = gen_token(12)
     expires_at = int(time.time()) + ttl
@@ -429,6 +444,13 @@ def delete_open_game(game_id: str, user_id: str) -> bool:
 
 
 init_db()
+
+# Books — a standalone top-level feature (books/), public read + owner write.
+# `books` is a sibling top-level package of `games/`, so it is importable wherever
+# games.spender.app is (repo root is on sys.path). Deps are injected so books
+# never imports main (no cycle).
+from books.api import setup_books  # noqa: E402
+setup_books(app, get_db_conn, get_user_by_session)
 
 
 # ─── Room helpers ─────────────────────────────────────────────────────────────

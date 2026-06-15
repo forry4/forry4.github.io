@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'games/spender/main.py'
+      - 'books/**'
       - 'games/spender/requirements.txt'
       - 'games/spender/app.py'
       - 'games/spender/ai/az_model.npz'
