@@ -1144,7 +1144,7 @@ export default function SpenderApp() {
 							{showAiPicker && (
 								<div className="ai-picker">
 									<span className="ai-picker-label">Choose AI opponent</span>
-									{["A", "B", "C", "C2", "Z"].map(v => (
+									{["A", "B", "C", "C2", "Z", "H"].map(v => (
 										<button key={v} className="btn btn-outline btn-sm"
 											onClick={() => { setShowAiPicker(false); handleCreate(true, v); }}>
 											AI {v}

@@ -680,7 +680,9 @@ load_az_model()  # loads ai/az_model.npz → variant Z
 
 
 def _ai_variant_valid(variant: str) -> bool:
-    return variant in WEIGHT_VARIANTS or (variant == "Z" and AZ_EVALUATE is not None)
+    return (variant in WEIGHT_VARIANTS
+            or (variant == "Z" and AZ_EVALUATE is not None)
+            or variant == "H")  # H = v4 valuation heuristic (pure code, always available)
 
 
 def _az_choose_move(game: dict, ai_pid: str, time_limit: float = 5.0) -> dict:
@@ -707,6 +709,20 @@ def _az_choose_move(game: dict, ai_pid: str, time_limit: float = 5.0) -> dict:
             search.apply_evals(p[0], float(v[0]))
     visits = search.root.N
     return _aza.action_to_move(s, max(range(len(visits)), key=visits.__getitem__))
+
+
+def _v4_choose_move(game: dict, ai_pid: str) -> dict:
+    """Variant-H move selection: the v4 valuation heuristic — a 1-ply greedy
+    argmax over the shared card-valuation model (no search). Returns an
+    incumbent dict-move; post-move discard/noble sub-decisions are resolved by
+    _run_ai_turn, same as the other variants. Fast (no model file, no MCTS)."""
+    from games.spender.ai.az import actions as _aza
+    from games.spender.ai.az import engine as _aze
+    from games.spender.ai.az import heuristic as _azh
+
+    s = _aze.from_game_dict(game)
+    a = _azh.choose_action(s, s.turn)
+    return _aza.action_to_move(s, a)
 
 
 # ─── AI Player ────────────────────────────────────────────────────────────────
@@ -1720,6 +1736,8 @@ async def _schedule_ai_turn(room_id: str) -> None:
     loop = asyncio.get_running_loop()
     if variant == "Z" and AZ_EVALUATE is not None:
         mv = await loop.run_in_executor(None, _az_choose_move, game_snapshot, ai_pid, 5.0)
+    elif variant == "H":
+        mv = await loop.run_in_executor(None, _v4_choose_move, game_snapshot, ai_pid)
     else:
         ai_weights = WEIGHT_VARIANTS.get(variant, WEIGHTS)
         mv = await loop.run_in_executor(
