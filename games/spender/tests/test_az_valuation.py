@@ -95,6 +95,38 @@ def test_noble_progress_targets_the_gap_color():
         assert gap_score == max(all_scores.values())
 
 
+def test_noble_completion_zero_with_no_bonuses():
+    # From scratch no single card can complete a noble (each needs >=3 bonuses),
+    # so noble_completion_pts must never fire a false positive.
+    s = E.new_game(random.Random(3))
+    seat = s.turn
+    for slot in range(12):
+        ci = s.board[slot]
+        if ci >= 0:
+            assert V.noble_completion_pts(s, ci, seat) == 0
+
+
+def test_noble_completion_fires_when_one_short():
+    # Hold every requirement of a visible noble except one bonus in the gap color;
+    # a card whose +1 bonus is that color completes it -> scores NOBLE_PTS.
+    s = E.new_game(random.Random(7))
+    seat = s.turn
+    ni = next(n for n in s.nobles if n >= 0)
+    req = E.NOBLE_REQ[ni]
+    gap = next(i for i in range(5) if req[i] > 0)
+    for i in range(5):
+        s.bonuses[seat][i] = req[i]
+    s.bonuses[seat][gap] -= 1                       # one short in the gap color
+    by_color = {E.BONUS[s.board[sl]]: s.board[sl]
+                for sl in range(12) if s.board[sl] >= 0}
+    if gap in by_color:
+        assert V.noble_completion_pts(s, by_color[gap], seat) == E.NOBLE_PTS[ni]
+    # a color the noble does not need cannot complete it (still short in gap)
+    nonneed = next((c for c in range(5) if req[c] == 0 and c in by_color), None)
+    if nonneed is not None:
+        assert V.noble_completion_pts(s, by_color[nonneed], seat) == 0
+
+
 def test_engine_value_nonneg_and_rewards_same_color_demand():
     s = E.new_game(random.Random(5))
     seat = s.turn

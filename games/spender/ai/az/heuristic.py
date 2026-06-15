@@ -43,6 +43,15 @@ W_TEMPO = 0.3         # penalty per estimated turn-to-afford
 
 BUY_FLOOR = 0.5       # don't bother buying a near-worthless affordable card
 
+# ─── Structural feature toggle ────────────────────────────────────────────────
+# noble-completion was the one validated structural win (+0.024, z=2.05 vs the
+# A/B/C/C2 greedy mix, 600 fresh paired seeds). Three other structural ideas were
+# tested and rejected on fresh paired seeds: a multiplicative tempo time-discount
+# (wash), an opponent-contest/denial term (wash, confirmed at 2000 games), and
+# target-focused backward planning (hurt -- the broad engine_value is load-bearing).
+USE_NOBLE_COMPLETION = True   # value the immediate +VP a buy scores by triggering
+                              # a noble, in card_value AND the winning-buy check
+
 # Reserve gates (strictness rises with slots used; opening tempo protected).
 RESERVE_BASE = 4.0        # min target value to reserve with 0 slots used...
 RESERVE_STEP = 1.5        # ...+this per slot already reserved (last slot precious)
@@ -50,6 +59,13 @@ RESERVE_GAP = 2.0         # value gap to the next-best card that justifies secur
 OPENING_PLY = 8           # within the first ~4 turns each, cap at one reserve
 MIN_BUILD_PATH = 3        # a steep card needs >= this many lower-level same-color cards
                           # on the board before reserving it (else it's a mirage)
+
+# Stage / tempo coefficients (exposed as constants so they're tunable).
+PTS_STAGE_GAIN = 0.5      # points weight grows by this * stage
+ENG_STAGE_DECAY = 0.7     # engine weight shrinks by this * stage
+ENGINE_STAGE_DIV = 10.0   # cards-bought / this = engine-size component of stage
+ENG_DECAY_RATE = 0.5      # engine value decays by 1/(1 + rate * bonuses-held-in-color)
+TAKE_TEMPO = 0.6          # take-target value penalty per estimated turn-to-afford
 
 
 def card_value(val: V.Valuation, s: E.State, ci: int, seat: int) -> float:
@@ -60,6 +76,10 @@ def card_value(val: V.Valuation, s: E.State, ci: int, seat: int) -> float:
     eng = val.engine_value(ci, seat)
     nob = val.noble_progress(ci, seat)
     tta = val.turns_to_afford(ci, seat)
+    # Immediate VP this buy scores by triggering a noble (+3). A real point gain,
+    # so it rides the same stage-ramped points weight as the card's own points --
+    # NOT the soft noble_progress nudge, which only credits incremental advance.
+    nc = val.noble_completion_pts(ci, seat) if USE_NOBLE_COMPLETION else 0
 
     # Stage ramps engine->points. Key it on points AND engine size (cards
     # bought): "0 points but 8 cards" means the game is near its end (engine
@@ -67,19 +87,19 @@ def card_value(val: V.Valuation, s: E.State, ci: int, seat: int) -> float:
     # leaving engine over-weighted so the bot pivots to points too late.
     # Efficient turns (buys) advance the stage; wasted gem-takes don't.
     point_stage = max(s.points[0], s.points[1]) / E.WIN_POINTS
-    engine_stage = s.purchased_n[seat] / 10.0
+    engine_stage = s.purchased_n[seat] / ENGINE_STAGE_DIV
     stage = point_stage if point_stage > engine_stage else engine_stage
     if stage > 1.0:
         stage = 1.0
-    pts_w = W_POINTS * (1.0 + 0.5 * stage)     # points matter more late
-    eng_w = W_ENGINE * (1.0 - 0.7 * stage)     # engine matters less late
+    pts_w = W_POINTS * (1.0 + PTS_STAGE_GAIN * stage)   # points matter more late
+    eng_w = W_ENGINE * (1.0 - ENG_STAGE_DECAY * stage)  # engine matters less late
 
     # Diminishing returns: the Nth bonus in a color you already hold a lot of is
     # worth less (fewer remaining cards need that color from you, and stacking
     # one color is wasteful). Decays engine value by bonuses already held.
-    eng_decay = 1.0 / (1.0 + 0.5 * s.bonuses[seat][E.BONUS[ci]])
+    eng_decay = 1.0 / (1.0 + ENG_DECAY_RATE * s.bonuses[seat][E.BONUS[ci]])
 
-    return (pts_w * pts
+    return (pts_w * (pts + nc)
             + W_EFFICIENCY * eff
             + eng_w * eng * eng_decay
             + W_NOBLE * nob
@@ -122,7 +142,7 @@ def _take_target(val, s, seat, targets):
     for tv, ci, _idx, _kind in targets:
         if tv <= 0:
             continue
-        score = tv - 0.6 * val.turns_to_afford(ci, seat)
+        score = tv - TAKE_TEMPO * val.turns_to_afford(ci, seat)
         if best is None or score > best[0]:
             best = (score, ci)
     return best[1] if best else None
@@ -265,8 +285,16 @@ def choose_action(s: E.State, seat: int | None = None) -> int:
     if buys:
         buys.sort(reverse=True, key=lambda b: b[0])
         # 1a) Winning buy: if any affordable buy reaches 15, take the best one.
-        winning = [(E.PTS[ci], a) for _v, a, ci in buys
-                   if s.points[seat] + E.PTS[ci] >= E.WIN_POINTS]
+        #     Count noble VP the buy triggers too -- a card that wins VIA a noble
+        #     (e.g. 13 pts + a 0-pt card that completes a noble -> 16) was
+        #     previously invisible here, since the check only summed card points.
+        winning = []
+        for _v, a, ci in buys:
+            gain = E.PTS[ci]
+            if USE_NOBLE_COMPLETION:
+                gain += V.noble_completion_pts(s, ci, seat)
+            if s.points[seat] + gain >= E.WIN_POINTS:
+                winning.append((gain, a))
         if winning:
             winning.sort(reverse=True)
             return winning[0][1]
@@ -279,8 +307,11 @@ def choose_action(s: E.State, seat: int | None = None) -> int:
         for bv, ba, bci in buys:
             if val.noble_progress(bci, seat) > 0.5:
                 return ba
-            if E.PTS[bci] == 0 and V.discount_count(s, bci, seat) <= 1:
+            if (E.PTS[bci] == 0 and V.discount_count(s, bci, seat) <= 1
+                    and not (USE_NOBLE_COMPLETION
+                             and V.noble_completion_pts(s, bci, seat) > 0)):
                 continue            # worthless vs a gem -> skip, prefer taking a gem
+                                    # (but never skip a 0-pt card that claims a noble)
             if bv > BUY_FLOOR:
                 return ba
 

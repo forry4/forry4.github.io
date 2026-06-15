@@ -163,6 +163,31 @@ def noble_progress(s: E.State, ci: int, seat: int) -> float:
     return score / n if n else 0.0
 
 
+def noble_completion_pts(s: E.State, ci: int, seat: int) -> int:
+    """Immediate noble VP `seat` would score by buying ci. ci grants +1 bonus in
+    its color; if that newly satisfies a visible noble's full requirements the
+    engine claims it (+NOBLE_PTS, see engine._after_buy_nobles). Splendor claims
+    at most one noble per turn, so this returns the best single newly-claimable
+    noble's points (else 0).
+
+    A player never already-qualifies for an unclaimed visible noble (the engine
+    auto-claims on the PRIOR buy), so 'would bon+1 satisfy it' is exactly 'this
+    buy triggers a fresh claim' -- not double-counting a noble already won."""
+    bcol = E.BONUS[ci]
+    bon = s.bonuses[seat]
+    best = 0
+    for slot in range(3):
+        ni = s.nobles[slot]
+        if ni < 0:
+            continue
+        req = E.NOBLE_REQ[ni]
+        if all(bon[c] + (1 if c == bcol else 0) >= req[c] for c in range(5)):
+            p = E.NOBLE_PTS[ni]
+            if p > best:
+                best = p
+    return best
+
+
 def efficiency(s: E.State, ci: int, seat: int) -> float:
     """Points per effective gem — the 'good deal' lever. +1 in the denominator
     keeps 0-cost / 0-point cards finite and ranks free points highest."""
@@ -247,6 +272,9 @@ class Valuation:
 
     def noble_progress(self, ci: int, seat: int) -> float:
         return noble_progress(self.s, ci, seat)
+
+    def noble_completion_pts(self, ci: int, seat: int) -> int:
+        return noble_completion_pts(self.s, ci, seat)
 
     def efficiency(self, ci: int, seat: int) -> float:
         return efficiency(self.s, ci, seat)
