@@ -193,6 +193,55 @@ def test_is_steep_and_build_path_count():
     assert V.build_path_count(s, spread_ci, seat) == 0
 
 
+def test_engine_value_counts_reserved_cards():
+    # engine_value must credit a bonus for discounting your OWN reserved cards
+    # (committed targets), at a slight per-card premium over a board card.
+    s = E.new_game(random.Random(30))
+    seat = s.turn
+    giver = next(s.board[sl] for sl in range(12) if s.board[sl] >= 0)
+    gcol = E.BONUS[giver]
+    s.reserved[seat][:] = []
+    base = V.Valuation(s).engine_value(giver, seat)
+    # reserving a card that still needs giver's color raises engine_value
+    target = next((ci for ci in range(E.N_CARDS)
+                   if ci != giver and E.COST[ci][gcol] > s.bonuses[seat][gcol]), None)
+    assert target is not None
+    s.reserved[seat][:] = [target]
+    assert V.Valuation(s).engine_value(giver, seat) > base
+    # reserving a card that does NOT need that color leaves engine_value unchanged
+    none_need = next((ci for ci in range(E.N_CARDS) if E.COST[ci][gcol] == 0), None)
+    if none_need is not None:
+        s.reserved[seat][:] = [none_need]
+        assert V.Valuation(s).engine_value(giver, seat) == base
+
+
+def test_single_color_mirage():
+    s = E.new_game(random.Random(20))
+    seat = s.turn
+    # the steepest single-color L2/L3 card (max single color >= 5)
+    steep_ci = max((ci for ci in range(E.N_CARDS) if E.LEVEL_OF[ci] >= 2),
+                   key=lambda ci: max(E.COST[ci]))
+    assert max(E.COST[steep_ci]) >= 5
+    steep_color = max(range(5), key=lambda c: E.COST[steep_ci][c])
+    # clear the board: a steep single-color card with NO build path is a mirage
+    for slot in range(12):
+        s.board[slot] = -1
+    s.board[0] = steep_ci
+    assert V.single_color_mirage(s, steep_ci, seat, 5)
+    # a lower-level board card granting the steep color clears the mirage
+    support = next(ci for ci in range(E.N_CARDS)
+                   if E.LEVEL_OF[ci] < E.LEVEL_OF[steep_ci] and E.BONUS[ci] == steep_color)
+    s.board[1] = support
+    assert not V.single_color_mirage(s, steep_ci, seat, 5)
+    # so does a held bonus in that color (a real engine path exists)
+    s.board[1] = -1
+    s.bonuses[seat][steep_color] += 1
+    assert not V.single_color_mirage(s, steep_ci, seat, 5)
+    # a spread/cheap card (max single color < steep) is never a mirage
+    cheap = next(ci for ci in range(E.N_CARDS) if 0 < max(E.COST[ci]) < 5)
+    assert not V.single_color_mirage(s, cheap, seat, 5)
+
+
 def test_discount_count():
     s = E.new_game(random.Random(14))
     seat = s.turn

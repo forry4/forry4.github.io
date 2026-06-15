@@ -173,7 +173,8 @@ const css = baseCss + `
 .deck-pile.selected{border-color:var(--gold-light);color:var(--gold-light);box-shadow:0 0 0 2px var(--gold-light)}
 .deck-pile.disabled{cursor:not-allowed;opacity:.5}
 .deck-remaining{font-size:1.3rem;font-weight:700;color:var(--text);font-family:'Cinzel',serif}
-.card{width:88px;min-height:120px;border-radius:var(--radius);background:var(--surface2);border:1px solid var(--border);padding:8px 6px 6px;display:flex;flex-direction:column;cursor:pointer;transition:all .15s;flex-shrink:0}
+.card{width:88px;min-height:120px;border-radius:var(--radius);background:var(--surface2);border:1px solid var(--border);padding:8px 6px 6px;display:flex;flex-direction:column;cursor:pointer;transition:all .15s;flex-shrink:0;position:relative}
+.ai-val{position:absolute;bottom:5px;right:5px;font-family:'Cinzel',serif;font-size:.62rem;font-weight:600;color:#e8c86a;background:rgba(0,0,0,.4);border-radius:4px;padding:0 4px;line-height:1.4;pointer-events:none}
 .card:hover{border-color:rgba(201,168,76,.5);transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.4)}
 .card.selected{border-color:var(--gold-light);box-shadow:0 0 0 2px var(--gold-light)}
 .card.affordable{border-color:var(--green-gem)}
@@ -304,7 +305,7 @@ function GemToken({ color, size = 42 }) {
 	);
 }
 
-function CardView({ card, selected, affordable, disabled, onClick, compact }) {
+function CardView({ card, selected, affordable, disabled, onClick, compact, aiValue }) {
 	return (
 		<div
 			className={`card${selected ? " selected" : ""}${affordable ? " affordable" : ""}${disabled ? " disabled" : ""}`}
@@ -323,6 +324,9 @@ function CardView({ card, selected, affordable, disabled, onClick, compact }) {
 					</div>
 				))}
 			</div>
+			{aiValue != null && (
+				<span className="ai-val" title="AI card value (variant H)">{aiValue}</span>
+			)}
 		</div>
 	);
 }
@@ -870,6 +874,7 @@ export default function SpenderApp() {
 			<CardView key={card.id} card={card}
 				selected={isSelected}
 				affordable={affordable && myTurn}
+				aiValue={roomData?.ai_card_values?.[card.id]}
 				disabled={opts.disabled}
 				onClick={() => {
 					if (opts.readonly || !myTurn) return;

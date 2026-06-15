@@ -51,6 +51,15 @@ BUY_FLOOR = 0.5       # don't bother buying a near-worthless affordable card
 # target-focused backward planning (hurt -- the broad engine_value is load-bearing).
 USE_NOBLE_COMPLETION = True   # value the immediate +VP a buy scores by triggering
                               # a noble, in card_value AND the winning-buy check
+USE_REACH_TAKE = True         # don't orient gem-taking toward a steep single-color
+MIRAGE_STEEP = 5              # card with no build path (a mirage you can't afford);
+                              # commit gem-collection to REACHABLE targets instead
+USE_GOLD_CONSERVE = True      # among similar-value affordable buys, prefer the one that
+W_GOLD_SPEND = 0.4            # spends less GOLD (wild tokens are scarce + flexible)
+# (engine_value now also counts a bonus's discount to your own RESERVED cards, at a
+# slight per-card premium -- see valuation.RESERVED_ENGINE_W. This is correct: a card
+# you reserved is one you intend to buy. If it dents win rate, the cause is reserving
+# bad cards, not the valuation -- the fix is the reserve decision, not ignoring reserves.)
 
 # Reserve gates (strictness rises with slots used; opening tempo protected).
 RESERVE_BASE = 4.0        # min target value to reserve with 0 slots used...
@@ -127,6 +136,8 @@ def _need_vector(s: E.State, seat: int, targets) -> list[float]:
     for tv, ci, _idx, _kind in targets[:3]:
         if tv <= 0:
             continue
+        if USE_REACH_TAKE and V.single_color_mirage(s, ci, seat, MIRAGE_STEEP):
+            continue
         d = V._color_deficits(s, ci, seat)
         for i in range(5):
             need[i] += tv * d[i]
@@ -141,6 +152,10 @@ def _take_target(val, s, seat, targets):
     best = None
     for tv, ci, _idx, _kind in targets:
         if tv <= 0:
+            continue
+        # Reachability: a steep single-color card with no build path is a mirage --
+        # collecting toward it just hoards one color for a card you can't afford.
+        if USE_REACH_TAKE and V.single_color_mirage(s, ci, seat, MIRAGE_STEEP):
             continue
         score = tv - TAKE_TEMPO * val.turns_to_afford(ci, seat)
         if best is None or score > best[0]:
@@ -283,7 +298,12 @@ def choose_action(s: E.State, seat: int | None = None) -> int:
             buys.append((card_value(val, s, ci, seat), a, ci))
 
     if buys:
-        buys.sort(reverse=True, key=lambda b: b[0])
+        # Rank by value, but conserve gold: subtract a small penalty per gold token
+        # the buy would spend, so a similar-value card buyable WITHOUT gold outranks
+        # one that burns a flexible wild. b[0] stays raw card_value for the BUY_FLOOR
+        # check below (the penalty only reorders near-ties, never lowers the floor).
+        buys.sort(reverse=True, key=lambda b: b[0] - (
+            W_GOLD_SPEND * V.gold_needed(s, b[2], seat) if USE_GOLD_CONSERVE else 0.0))
         # 1a) Winning buy: if any affordable buy reaches 15, take the best one.
         #     Count noble VP the buy triggers too -- a card that wins VIA a noble
         #     (e.g. 13 pts + a 0-pt card that completes a noble -> 16) was
