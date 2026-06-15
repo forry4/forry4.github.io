@@ -48,6 +48,8 @@ RESERVE_BASE = 4.0        # min target value to reserve with 0 slots used...
 RESERVE_STEP = 1.5        # ...+this per slot already reserved (last slot precious)
 RESERVE_GAP = 2.0         # value gap to the next-best card that justifies securing it
 OPENING_PLY = 8           # within the first ~4 turns each, cap at one reserve
+MIN_BUILD_PATH = 3        # a steep card needs >= this many lower-level same-color cards
+                          # on the board before reserving it (else it's a mirage)
 
 
 def card_value(val: V.Valuation, s: E.State, ci: int, seat: int) -> float:
@@ -217,7 +219,15 @@ def _maybe_reserve(s, seat, val, targets, legal_set):
         return None
 
     second = targets[1][0] if len(targets) > 1 else 0.0
-    big_gap = (tv - second) >= RESERVE_GAP            # uniquely good card
+    # Acquisition reserve (secure a uniquely good card) needs a real build path:
+    # a steep single-color card is only worth tying up a slot for if the board
+    # has >= MIN_BUILD_PATH lower-level cards of that color to build toward it.
+    # 1-2 such cards yields ~1-2 bonuses -> still 5-6 gems short -> a speculative
+    # reserve that mostly goes unused (the diagnostic's 78%-unused finding).
+    # Spread-cost cards aren't steep and don't need a path.
+    buildable = (not V.is_steep(s, ci, seat)
+                 or V.build_path_count(s, ci, seat) >= MIN_BUILD_PATH)
+    big_gap = (tv - second) >= RESERVE_GAP and buildable
     opp = 1 - seat
     opp_threat = val.affordable_now(ci, opp) or val.turns_to_afford(ci, opp) <= 1
     return a if (big_gap or opp_threat) else None
@@ -260,14 +270,19 @@ def choose_action(s: E.State, seat: int | None = None) -> int:
         if winning:
             winning.sort(reverse=True)
             return winning[0][1]
-        bv, ba, bci = buys[0]
-        # 1b) Buy the best affordable card whenever it is worth more than the
-        #     floor. Strong Splendor play buys nearly every turn it can afford
-        #     something — deferring for a "slightly better" unaffordable card
-        #     livelocks (take gems -> hit cap -> discard -> repeat) and cedes
-        #     the race. Greedy buying is the tempo the bot needs vs C2.
-        if val.noble_progress(bci, seat) > 0.5 or bv > BUY_FLOOR:
-            return ba
+        # 1b) Buy the best affordable card worth more than a GEM. Iterate by
+        #     value and skip a card that scores 0 points, doesn't help a noble,
+        #     AND would discount <=1 other board card: its permanent bonus is
+        #     barely better than a single token, so taking a gem (flexible, no
+        #     tiebreak cost, doesn't spend gems for nothing) dominates buying it.
+        #     Strong Splendor play still buys nearly every turn it CAN do good.
+        for bv, ba, bci in buys:
+            if val.noble_progress(bci, seat) > 0.5:
+                return ba
+            if E.PTS[bci] == 0 and V.discount_count(s, bci, seat) <= 1:
+                continue            # worthless vs a gem -> skip, prefer taking a gem
+            if bv > BUY_FLOOR:
+                return ba
 
     # 2) Disciplined reserve (deny or secure a uniquely good card).
     a = _maybe_reserve(s, seat, val, targets, legal_set)

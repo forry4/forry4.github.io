@@ -116,6 +116,55 @@ all board cards at once). `DECK_COLOR_DEMAND` is computed once per `encode()` fr
 NOT stage-weight `ev`** — the net learns to discount engine value late-game from the
 existing point/final-trigger features.
 
+**The principled definition (the *why* behind the formula above).** A bonus is worth
+exactly: **(the number of future cards you will actually buy that the discount applies
+to) × (those cards' value).** Every property of engine value falls out of this one
+statement:
+- **It decays with game stage** because at the end you will buy almost no more cards, so
+  the discount lands on nothing → ~0 value; early, many future buys → high value. (This
+  is why a *free* 0-point card can be worthless late — see the heuristic's buy-vs-gem
+  gate: a card discounting <=1 other card is worth no more than a single token.)
+- **It rises when the board shows high-value, same-color-heavy L2/L3 cards**, because
+  those are the cards you *intend* to buy, so the discount will actually be realized on
+  them — captured by `w_value × w_scarcity`.
+The formula above is the static proxy (visible board + a crude deck term + the net's
+stage discounting). The **sharp** version is "expected future discounted purchases ×
+value", which only a searching agent can evaluate (it sees how many cards it really buys
+downstream). HEURISTIC NOTE: four 1-ply refinements toward this sharp form (reachability
+term, cost-discounting, end-game stage-decay, buy-vs-gem gate) were A/B'd and all came
+back neutral-to-negative — the greedy bot's static engine value is *saturated*; only the
+net can exploit the sharper signal. Keep this definition as the engine-value feature's
+north star for the retrain.
+
+**reachability — the COMPLEMENT of engine value (incoming build-path support).** Engine
+value asks "how much does buying `ci` help me afford *other* cards" (outgoing). Reach-
+ability asks the reverse: "how much do the *other board cards* help me afford `ci`"
+(incoming). It exists because an expensive card with a steep single-color cost is only a
+realistic target if the board offers a path to build that color — otherwise it is a
+**mirage** the bot chases/reserves but never buys (the diagnostic found **78% of the
+heuristic's reserves go unused**, almost all steep L3s). Defined for a card with a steep
+single-color need only:
+```
+reach = 0
+for c in 0..4 where COST[ci][c] - bon_me[c] >= REACH_STEEP (=4):   # steep colors only
+    for cj in the 12 board cards, cj != ci:
+        if LEVEL[cj] < LEVEL[ci] and BONUS[cj] == c:               # lower-level, same color
+            reach += PTS[cj]/5 + 0.3                               # high-value support weighs more
+```
+0 for any card with no steep single-color cost (those are reachable by normal spread
+gem-taking and need no path). This is the **"is this target actually reachable from the
+board"** half of the strategy model's backward-planning (the engine-value half is the
+"which L1s advance my targets" direction). Like engine value, it is a cross-card
+interaction an MLP cannot easily derive — a genuine feature, not a re-weighting.
+
+**Single-color tempo realism (refines turns-to-afford #8).** The bank holds only 4 of a
+color and depletes (and the opponent competes), so you cannot sustain take-2-same on one
+color. Model a single-color deficit as ~1 turn for the first 2, then 1/turn: a
+7-of-one-color card is ~6 turns, not the naive `ceil(7/2)=4`. Without this the tempo
+penalty under-rates how far steep cards are, so the bot over-values mirages. (Heuristic
+result of reachability + this refinement: see the deployed tuning lineage in
+`heuristic.py`.)
+
 ## Global additions (6 floats)
 
 | feature | formula | norm |

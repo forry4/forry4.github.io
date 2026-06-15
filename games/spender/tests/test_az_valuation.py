@@ -126,6 +126,55 @@ def test_deck_color_demand_normalized():
     assert all(d >= 0.0 for d in val.deck_color_demand)
 
 
+def test_is_steep_and_build_path_count():
+    s = E.new_game(random.Random(11))
+    seat = s.turn
+    # The L3 with the steepest single-color cost (stays steep through a couple bonuses).
+    steep_ci = max((ci for ci in range(E.N_CARDS) if E.LEVEL_OF[ci] == 3),
+                   key=lambda ci: max(E.COST[ci]))
+    assert max(E.COST[steep_ci]) >= 6
+    assert V.is_steep(s, steep_ci, seat)
+    steep_color = max(range(5), key=lambda c: E.COST[steep_ci][c])
+
+    # Empty board, no bonuses -> no build capacity.
+    for slot in range(12):
+        s.board[slot] = -1
+    s.board[0] = steep_ci
+    assert V.build_path_count(s, steep_ci, seat) == 0
+
+    # 3 lower-level cards granting the steep color -> capacity 3.
+    supports = [ci for ci in range(E.N_CARDS)
+                if E.LEVEL_OF[ci] == 1 and E.BONUS[ci] == steep_color][:3]
+    for i, ci in enumerate(supports):
+        s.board[1 + i] = ci
+    assert V.build_path_count(s, steep_ci, seat) == 3
+
+    # Existing bonuses in the color count too (committed engine -> reservable).
+    s.bonuses[seat][steep_color] += 2
+    assert V.is_steep(s, steep_ci, seat)             # still steep (cost>=6, eff>=4)
+    assert V.build_path_count(s, steep_ci, seat) == 5   # 2 bonuses + 3 board cards
+
+    # A spread-cost card is not steep and has no build-path requirement.
+    spread_ci = next(ci for ci in range(E.N_CARDS)
+                     if 0 < max(E.COST[ci]) < V.REACH_STEEP)
+    assert not V.is_steep(s, spread_ci, seat)
+    assert V.build_path_count(s, spread_ci, seat) == 0
+
+
+def test_discount_count():
+    s = E.new_game(random.Random(14))
+    seat = s.turn
+    ci = next(s.board[sl] for sl in range(12) if s.board[sl] >= 0)
+    bcol = E.BONUS[ci]
+    expected = sum(1 for sl in range(12)
+                   if s.board[sl] >= 0 and s.board[sl] != ci
+                   and E.COST[s.board[sl]][bcol] > 0)
+    assert V.discount_count(s, ci, seat) == expected
+    # Holding the max bonus in the color -> no card still needs it -> count 0.
+    s.bonuses[seat][bcol] = 7
+    assert V.discount_count(s, ci, seat) == 0
+
+
 # ─── Heuristic contract ──────────────────────────────────────────────────────
 
 def _play_game(seed, max_ply=400):

@@ -55,6 +55,53 @@ def affordable_now(s: E.State, ci: int, seat: int) -> bool:
     return gold_needed(s, ci, seat) <= s.tokens[seat][5]
 
 
+REACH_STEEP = 4   # a single-color cost this high (after bonuses) needs a build path
+
+
+def is_steep(s: E.State, ci: int, seat: int) -> bool:
+    """True if ci has a single-color cost >= REACH_STEEP after `seat`'s bonuses
+    -- i.e. it needs a build path to be realistically affordable, rather than
+    being gettable by normal spread gem-taking."""
+    cost = E.COST[ci]
+    bon = s.bonuses[seat]
+    return any(cost[c] - bon[c] >= REACH_STEEP for c in range(5))
+
+
+def build_path_count(s: E.State, ci: int, seat: int) -> int:
+    """Build *capacity* toward ci's steepest single color: the bonuses `seat`
+    ALREADY holds in that color PLUS the lower-level board cards that grant it.
+    0 if ci isn't steep. Counting existing bonuses is deliberate -- if you've
+    already built that color you should be free to reserve the expensive card
+    (the requirement is really 'do you have a real path', which a committed
+    engine satisfies); a thin path (1-2) on an unbuilt color means you'd land
+    1-2 bonuses, still 5-6 gems short -> a speculative reserve that goes unused."""
+    cost = E.COST[ci]
+    bon = s.bonuses[seat]
+    eff = [cost[c] - bon[c] for c in range(5)]
+    c = max(range(5), key=eff.__getitem__)   # the steepest single color (after bonuses)
+    if eff[c] < REACH_STEEP:
+        return 0
+    lvl = E.LEVEL_OF[ci]
+    board = sum(1 for slot in range(12)
+                if s.board[slot] >= 0 and s.board[slot] != ci
+                and E.LEVEL_OF[s.board[slot]] < lvl and E.BONUS[s.board[slot]] == c)
+    return bon[c] + board   # existing bonuses count as build capacity
+
+
+def discount_count(s: E.State, ci: int, seat: int) -> int:
+    """How many OTHER board cards the +1 bonus from ci would discount -- i.e.
+    still need ci's bonus color from `seat`. A 0-point card is only worth buying
+    over just TAKING A GEM of that color if it discounts >= 2 such cards: a
+    permanent bonus you cash in once is barely better than one token, and buying
+    spends gems + adds a card toward the fewest-cards tiebreak (whereas taking a
+    gem gains a flexible token at no tiebreak cost)."""
+    bcol = E.BONUS[ci]
+    held = s.bonuses[seat][bcol]
+    return sum(1 for slot in range(12)
+               if s.board[slot] >= 0 and s.board[slot] != ci
+               and E.COST[s.board[slot]][bcol] > held)
+
+
 def _color_deficits(s: E.State, ci: int, seat: int) -> list[int]:
     """Per-color gems still needed after discounts and owned colored tokens
     (gold NOT applied here — callers fold gold in where appropriate)."""
