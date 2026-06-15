@@ -294,3 +294,99 @@ def test_heuristic_actually_scores():
     avg_winner_points = total / 8
     assert avg_winner_points >= E.WIN_POINTS, (
         f"winner avg only {avg_winner_points:.1f} pts — bot is not scoring")
+
+
+# ─── End-game defense ────────────────────────────────────────────────────────
+
+def _eg_state():
+    """A cleared end-game state: empty board/reserves, 0 bonuses, 4 cards each, no
+    tokens, no final-round trigger, seat 0 to move. Tests fill in the relevant cards."""
+    s = E.new_game(random.Random(1))
+    for slot in range(12):
+        s.board[slot] = -1
+    s.reserved = ([], [])
+    s.bonuses = ([0] * 5, [0] * 5)
+    s.points = [0, 0]
+    s.purchased_n = [4, 4]
+    s.tokens = ([0] * 6, [0] * 6)
+    s.final_trigger = -1
+    s.phase = E.PLAY
+    s.turn = 0
+    return s
+
+
+def _afford(s, seat, ci):
+    s.tokens[seat][:] = list(E.COST[ci]) + [0]          # exactly enough to buy ci
+
+
+_PT2 = [ci for ci in range(E.N_CARDS) if E.PTS[ci] == 2 and sum(E.COST[ci]) <= 9]
+_PT3 = [ci for ci in range(E.N_CARDS) if E.PTS[ci] == 3 and sum(E.COST[ci]) <= 9]
+
+
+def test_endgame_secure_win_seat1_takes_buy():
+    # Second player: reaching 15 ends the game immediately -> secure -> take it.
+    s = _eg_state()
+    s.turn = 1
+    win = _PT2[0]
+    s.board[0] = win
+    s.points[1] = 13
+    _afford(s, 1, win)
+    assert H.choose_action(s, 1) == E.A_BUY_BOARD + 0
+
+
+def test_endgame_insecure_seat0_denies_overtake():
+    # First player: our 15 lets the opponent overtake on their final turn -> deny it.
+    s = _eg_state()
+    win, over = _PT2[0], _PT3[0]
+    s.board[0] = win                                    # us: 13 + 2 = 15
+    s.board[4] = over                                   # opp: 14 + 3 = 17 -> overtakes
+    s.points = [13, 14]
+    _afford(s, 0, win)
+    _afford(s, 1, over)
+    assert H.choose_action(s, 0) == E.A_RES_BOARD + 4   # reserve (deny) the overtake card
+
+
+def test_endgame_insecure_undeniable_grabs_win():
+    # Overtake comes from the opponent's OWN reserved card -> can't deny -> grab 15.
+    s = _eg_state()
+    win, over = _PT2[0], _PT3[0]
+    s.board[0] = win
+    s.reserved = ([], [over])
+    s.points = [13, 14]
+    _afford(s, 0, win)
+    _afford(s, 1, over)
+    assert H.choose_action(s, 0) == E.A_BUY_BOARD + 0
+
+
+def test_endgame_secure_seat0_no_overtake_takes_win():
+    # First player but the opponent is broke/far -> can't overtake -> secure -> take it.
+    s = _eg_state()
+    win = _PT2[0]
+    s.board[0] = win
+    s.points = [13, 5]
+    _afford(s, 0, win)                                  # opp tokens stay 0
+    assert H.choose_action(s, 0) == E.A_BUY_BOARD + 0
+
+
+def test_endgame_cant_win_denies_opp_win():
+    # We can't reach 15, but the opponent can win next turn via a board card -> deny it.
+    s = _eg_state()
+    opp_win = _PT3[0]
+    s.board[4] = opp_win
+    s.points = [5, 13]                                   # opp 13 + 3 = 16 next turn
+    _afford(s, 1, opp_win)                               # we hold no tokens -> no buy
+    assert H.choose_action(s, 0) == E.A_RES_BOARD + 4
+
+
+def test_secure_win_tiebreak_by_cards():
+    # Both reach 15: the fewest-cards tiebreak decides whether our 15 is secure.
+    s = _eg_state()
+    over = _PT2[0]
+    s.board[4] = over
+    s.points = [13, 13]
+    _afford(s, 1, over)                                  # opp's best buy -> 13 + 2 = 15
+    val = V.Valuation(s)
+    s.purchased_n = [6, 4]                               # opp ends with fewer cards -> opp wins tie
+    assert not H._secure_win(s, 0, 15, 7, val)
+    s.purchased_n = [4, 6]                               # opp ends with more cards -> we win tie
+    assert H._secure_win(s, 0, 15, 5, val)

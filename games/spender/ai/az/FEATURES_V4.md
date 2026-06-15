@@ -97,9 +97,11 @@ normalized by number of nobles. Captures user factors 3+4 (progress AND closenes
 one scalar, and #15 does the same for the opponent (factors 5+6).
 
 **engine value (#12) — THE cross-card factor (user factors 10/11).** Buying `ci` grants
-a permanent +1 `bcol` bonus. Value = discount it gives every *other* visible card,
-weighted by that card's worth and by how `bcol`-hungry it is, **plus** a deck-wide term
-for the cards not yet revealed:
+a permanent +1 `bcol` bonus. Value = discount it gives every *other* card that still needs
+`bcol` — the visible board cards **and** the player's own **reserved** cards (committed
+targets you intend to buy, so a bonus advancing one is real engine value) — weighted by
+each card's worth and by how `bcol`-hungry it is, **plus** a deck-wide term for the cards
+not yet revealed:
 ```
 ev = 0
 for cj in the 12 board cards, cj != ci, present:
@@ -108,8 +110,20 @@ for cj in the 12 board cards, cj != ci, present:
         w_value    = PTS[cj]/5 + 0.2                    # high-point cards weigh more (+floor)
         w_scarcity = COST[cj][bcol] / max(1, sum(COST[cj]))   # cj is bcol-heavy
         ev += w_value * w_scarcity
+for cj in my reserved cards, cj != ci:                 # committed targets count too
+    needs = max(0, COST[cj][bcol] - bon_me[bcol])
+    if needs > 0:
+        ev += RESERVED_ENGINE_W * (PTS[cj]/5 + 0.2) * (COST[cj][bcol] / max(1, sum(COST[cj])))
 ev += DECK_COLOR_DEMAND[bcol] * 0.5     # precomputed: bcol share of remaining deck costs
 ```
+`RESERVED_ENGINE_W = 1.05` — a reserved card counts a hair MORE than one board card (a
+commitment premium), not a pile that dominates the board. **Net-feature note:** the
+encoder's me-side engine value (#12) must include this reserved-card contribution so the
+feature matches the heuristic's `valuation.engine_value`; the opp-side engine value (#17)
+stays board-only (opponent blind reserves are hidden). Validated as a *correctness* fix
+(a bonus toward a card you reserved genuinely IS engine value); if it dents win rate the
+cause is reserving bad cards — a reserve-*decision* problem, not a valuation flaw, fixed by
+the reserve gates + end-game denial below, not by ignoring reserves.
 This is the term an MLP cannot assemble from a flat vector (it requires reasoning across
 all board cards at once). `DECK_COLOR_DEMAND` is computed once per `encode()` from
 `s.decks` (the permanent-bonus-applies-to-future-cards insight). **We deliberately do
@@ -167,7 +181,7 @@ result of reachability + this refinement: see the deployed tuning lineage in
 
 ## Heuristic structural-campaign findings → net-feature guidance (June 2026)
 
-A 1-ply greedy A/B campaign on the v4 heuristic (committed in `heuristic.py`) tested four
+A 1-ply greedy A/B campaign on the v4 heuristic (committed in `heuristic.py`) tested five
 structural ideas on **fresh paired seeds** vs the A/B/C/C2 greedy mix. **Read these
 results as net-feature guidance through one caveat that flips the usual intuition:**
 
@@ -184,11 +198,63 @@ results as net-feature guidance through one caveat that flips the usual intuitio
 | **tempo** (turns-to-afford #8) | multiplicative time-discount reshape = wash | **Keep the RAW feature.** Wash means the *greedy* use is saturated; the net learns racing/tempo through lookahead. Do NOT pre-bake a tempo discount into the feature — hand it raw turns-to-afford and let search weight it. |
 | **opponent-contest / denial** (opp proximity × opp VP) | wash at 1-ply (confirmed at 2000 games) | **Keep — this is precisely a "documented blind spot" feature.** Greedy denial rarely pays, so 1-ply *cannot* show its value; the opp block (#13–17) + "Opponent threat/plan" addition give the net the raw material to learn denial **with** search + league. The 1-ply wash is the expected, non-disqualifying result. |
 | **backward-planning** (target-focused engine value) | **hurt** (−0.04 sig as add-on; −0.38 as replacement) | **At most an ADDITIVE feature, never a valuation override.** The collapse when it *replaced* `engine_value` proved the broad engine_value is load-bearing. The "incoming" half (reachability) is already a feature; an "outgoing target-focus" float is low-priority (it hurt even additively at 1-ply) — defer unless the net shows a specific gap. |
+| **end-game defense** (secure-win + 1-turn overtake/win denial) | **+0.048, z=+8.09 — BIGGEST WIN** (positive vs all of A/B/C/C2; diagnostic cut "won 15 first but lost" 1.8%→1.0%) | **Add NO new feature — it is SEARCH.** A lookahead behavior fully representable by features already planned here: opp affordable-now (#14) + opp victory-closeness (#16) + the final-trigger / seat-parity globals + noble-completion (`noble_gain/3`). Keep the final-round signal SHARP (flag + seat-parity bit) so the net can tell "does my 15 actually end the game." It is the *positive-result* sibling of the "Opponent threat/plan" blind-spot feature. See the dedicated subsection below. |
 
 **Takeaway:** the campaign's *negative* 1-ply results are not vetoes on features — they
 confirm the features encode signal the *greedy* policy can't use, which is exactly where a
 searching net has headroom. The one place the heuristic result is a direct feature
 instruction: **noble-completion** earned an explicit crisp scalar (`noble_gain/3`).
+
+### End-game defense (June 2026) — analytic 1-turn win / denial (a WIN, and a SEARCH behavior)
+
+A fifth structural idea, added after a playtest where the bot **handed back a winnable
+game**: it grabbed its 15th point as *first* player, then the opponent took a final turn
+and overtook. The engine's final-round rule (`engine._finish_turn`): a player reaching 15
+sets `final_trigger`; the game ends only when, after the turn flips, `s.turn <=
+final_trigger`. In 2p that means **seat 0 (first player) reaching 15 grants the opponent
+one final turn** (they can reach 16+, or tie at 15 and win the **fewest-cards** tiebreak),
+while **seat 1 reaching 15 ends the game immediately** (a secure win). The bot ignored this
+and treated any winning buy as a win.
+
+The fix (`USE_ENDGAME_DEFENSE`, all analytic — *no simulation*, 1 turn ahead for both
+sides; `affordable_now` is exact, so there is zero estimation error):
+- `_opp_best_buy(s, opp)` — the opponent's best single buy **next turn** over board +
+  their own reserved cards they can afford **now**, by `PTS + noble_completion_pts`;
+  returns its board slot (deniable) or −1 (their reserved → not deniable).
+- `_secure_win(...)` — reaching `p_win` actually wins iff seat 1 / already on the final
+  turn, **or** the opponent's best buy can't overtake on `(points, −cards)`.
+- behavior: take a winning buy only if `_secure_win`; else **deny** the opponent's
+  overtaking card (reserve it, else buy it) and win securely next turn; if undeniable
+  (their own reserved, or no legal reserve/buy) grab 15 and hope. Separately, when the bot
+  **can't** win this turn but the opponent can win on theirs via a *board* card, deny it.
+
+**Result — the LARGEST measured structural win of the campaign** (bigger than
+noble-completion's +0.024, and unlike denial's *wash*). Two validations:
+- **A/B vs the full A/B/C/C2 mix, 2000 fresh paired seeds, OFF→ON: +0.0480, z=+8.09**
+  (122 seeds better / 25 worse) — overall 0.732 → 0.780, and positive against **every**
+  opponent (A +0.059, B +0.039, C +0.032, C2 +0.062). It generalizes because the
+  secure-win check stops the bot "winning into a first-player loss" against any racer, not
+  just one.
+- **Diagnostic**, bot as FIRST player (seat 0) vs C2, 800 games, OFF→ON: win rate
+  **0.759 → 0.797 (+0.038)**, and the exact failure it targets — "reached 15 first but
+  LOST" — fell **1.8% → 1.0%** (14→8 games), confirming the gain comes from the mechanism
+  it was designed for, not a side effect.
+
+**Net-feature verdict — give the raw signal crisply; this is SEARCH, not a new feature.**
+Unlike the other rows, end-game defense adds **no new feature** — it is a lookahead
+behavior a searching net produces for free, and it is *fully representable by features
+already planned here*: **opp affordable-now (#14)** and **opp victory-closeness-if-bought
+(#16)** are the overtake signal; the **final-round / seat-parity globals** (`final_trigger`
+flag + side-to-move, already in state) are the secure-vs-insecure distinction;
+**noble-completion** (`noble_gain/3`, the crisp scalar above) makes a win-*via-noble*
+visible to the same check. Two consequences for the retrain:
+1. It is the *positive-result* sibling of the **"Opponent threat/plan"** blind-spot
+   feature (Anti-ceiling section): denial was a 1-ply *wash* because greedy denial rarely
+   pays, but the secure-win/overtake distinction is exploitable **even greedily** (+0.038)
+   — strong evidence the opp-block + threat features are load-bearing, not speculative.
+2. Make the final-round signal **sharp**: keep the `final_trigger` flag AND a seat-parity
+   bit so the net can compute "does my 15 actually end the game" without having to infer it
+   — the heuristic needed exactly that distinction to stop throwing first-player wins.
 
 ## Global additions (6 floats)
 
@@ -287,7 +353,10 @@ exploration alive (anti-collapse), and judges progress by an *external* yardstic
 - **Opponent threat/plan**, not just opponent state: the opponent's best card by
   efficiency + their turns-to-afford it, so "they're one turn from a 5-pt card" becomes a
   perceivable, blockable threat. Denial is a documented self-play blind spot precisely
-  because it was never representable. ~2 floats.
+  because it was never representable. ~2 floats. **Concrete evidence it's load-bearing:**
+  the heuristic's end-game defense (above) computes exactly this — the opponent's best
+  next-turn buy — and turning it on is a measured +0.038 win rate as first player vs C2.
+  The general (any-turn) version is the same signal one move earlier.
 - **Future-proof the input dimension — reserve 16 zero-padded input slots now.** Later
   features fill those slots WITHOUT changing `N_FEATURES`, so the first-layer weight shape
   is identical and a future feature add can **warm-start/fine-tune from the existing

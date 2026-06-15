@@ -66,6 +66,9 @@ NOBLE_CONTRIB = 0.35         # don't skip a 0-pt card that ADVANCES a close nobl
                              # toward a near noble can beat taking a flexible gem
 USE_TEMPO_DISCOUNT = True    # tempo as a multiplicative time-discount (value never < 0)
                              # instead of a flat subtraction that can drive value negative
+USE_ENDGAME_DEFENSE = True   # near the end: take a winning buy only if it's SECURE (a
+                             # first player's 15 lets the opponent overtake on their final
+                             # turn); else deny the opponent's overtaking/winning board card
 # (engine_value now also counts a bonus's discount to your own RESERVED cards, at a
 # slight per-card premium -- see valuation.RESERVED_ENGINE_W. This is correct: a card
 # you reserved is one you intend to buy. If it dents win rate, the cause is reserving
@@ -284,6 +287,57 @@ def _maybe_reserve(s, seat, val, targets, legal_set):
     return a if (big_gap or opp_threat) else None
 
 
+def _opp_best_buy(s, opp, val):
+    """The opponent's best single buy on their NEXT turn: over board + their own
+    reserved cards they can afford NOW, the one maximizing points + any noble it
+    triggers. Returns (gain, ci, slot) -- slot is the board slot (>=0, deniable) or
+    -1 (their own reserved card, not deniable). 'Afford now' is exact for their next
+    move: nothing we do this turn changes the tokens they already hold."""
+    best_gain, best_ci, best_slot = 0, -1, -1
+    for slot in range(12):
+        ci = s.board[slot]
+        if ci >= 0 and val.affordable_now(ci, opp):
+            gain = E.PTS[ci] + val.noble_completion_pts(ci, opp)
+            if gain > best_gain:
+                best_gain, best_ci, best_slot = gain, ci, slot
+    for ci in s.reserved[opp]:
+        if val.affordable_now(ci, opp):
+            gain = E.PTS[ci] + val.noble_completion_pts(ci, opp)
+            if gain > best_gain:
+                best_gain, best_ci, best_slot = gain, ci, -1
+    return best_gain, best_ci, best_slot
+
+
+def _secure_win(s, seat, p_win, cards_win, val):
+    """Would reaching `p_win` points (with `cards_win` purchased cards) actually WIN,
+    given the final-round rule (engine._finish_turn)? Seat 1 -- or the bot already on
+    the final turn (final_trigger is the opponent) -- wins immediately. Seat 0 hands
+    the opponent one final turn, so it's secure only if they cannot overtake with
+    their best buy (tiebreak: most points, then FEWEST cards)."""
+    opp = 1 - seat
+    if seat == 1 or s.final_trigger == opp:
+        return True
+    gain, _ci, _slot = _opp_best_buy(s, opp, val)
+    opp_pts = s.points[opp] + gain
+    opp_cards = s.purchased_n[opp] + (1 if gain > 0 else 0)
+    overtakes = opp_pts > p_win or (opp_pts == p_win and opp_cards < cards_win)
+    return not overtakes
+
+
+def _deny(s, seat, slot, ci, val, legal_set):
+    """Deny the opponent a board card: reserve it (a free slot) else buy it (if we can
+    afford it). Returns a legal action, or None if neither is possible."""
+    if len(s.reserved[seat]) < 3:
+        a = E.A_RES_BOARD + slot
+        if a in legal_set:
+            return a
+    if val.affordable_now(ci, seat):
+        a = E.A_BUY_BOARD + slot
+        if a in legal_set:
+            return a
+    return None
+
+
 def choose_action(s: E.State, seat: int | None = None) -> int:
     """Return a legal engine action index for `seat` (defaults to side to move)."""
     if seat is None:
@@ -313,6 +367,8 @@ def choose_action(s: E.State, seat: int | None = None) -> int:
         if a in legal_set:
             buys.append((card_value(val, s, ci, seat), a, ci))
 
+    opp = 1 - seat
+
     if buys:
         # Rank by value, but conserve gold: subtract a small penalty per gold token
         # the buy would spend, so a similar-value card buyable WITHOUT gold outranks
@@ -320,10 +376,8 @@ def choose_action(s: E.State, seat: int | None = None) -> int:
         # check below (the penalty only reorders near-ties, never lowers the floor).
         buys.sort(reverse=True, key=lambda b: b[0] - (
             W_GOLD_SPEND * V.gold_needed(s, b[2], seat) if USE_GOLD_CONSERVE else 0.0))
-        # 1a) Winning buy: if any affordable buy reaches 15, take the best one.
-        #     Count noble VP the buy triggers too -- a card that wins VIA a noble
-        #     (e.g. 13 pts + a 0-pt card that completes a noble -> 16) was
-        #     previously invisible here, since the check only summed card points.
+        # 1a) Winning buy: the best affordable buy that reaches 15 (incl. noble VP --
+        #     a card that wins VIA a noble was previously invisible to this check).
         winning = []
         for _v, a, ci in buys:
             gain = E.PTS[ci]
@@ -333,7 +387,31 @@ def choose_action(s: E.State, seat: int | None = None) -> int:
                 winning.append((gain, a))
         if winning:
             winning.sort(reverse=True)
-            return winning[0][1]
+            w_gain, w_a = winning[0]
+            # Take the win only if it is SECURE: as first player, reaching 15 gives the
+            # opponent a final turn to overtake (16+, or tie + fewest cards). If insecure,
+            # deny their overtaking card first (we then win securely next turn); if we
+            # can't deny it, grab 15 and hope they miss it.
+            if not USE_ENDGAME_DEFENSE or _secure_win(
+                    s, seat, s.points[seat] + w_gain, s.purchased_n[seat] + 1, val):
+                return w_a
+            og, oci, oslot = _opp_best_buy(s, opp, val)
+            if oslot >= 0:
+                da = _deny(s, seat, oslot, oci, val, legal_set)
+                if da is not None:
+                    return da
+            return w_a
+
+    # 1.5) End-game defense: we can't win this turn -- if the opponent can win on THEIR
+    #      next turn via a board card, deny it (reserve, else buy) rather than develop.
+    if USE_ENDGAME_DEFENSE:
+        og, oci, oslot = _opp_best_buy(s, opp, val)
+        if oslot >= 0 and s.points[opp] + og >= E.WIN_POINTS:
+            da = _deny(s, seat, oslot, oci, val, legal_set)
+            if da is not None:
+                return da
+
+    if buys:
         # 1b) Buy the best affordable card worth more than a GEM. Iterate by
         #     value and skip a card that scores 0 points, doesn't help a noble,
         #     AND would discount <=1 other board card: its permanent bonus is
