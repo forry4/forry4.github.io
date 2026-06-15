@@ -27,9 +27,16 @@ flag, so it can compute closeness trivially. The heavy lifting is in **effective
 **turns-to-afford**, and especially **engine value** (the cross-card term), which an
 MLP genuinely cannot discover from a flat vector.
 
-User note honored: **gem cost is NOT dropped.** Base printed cost stays in the existing
-per-card block (`cost/7`); effective (discounted) cost is *added* alongside it. Tempo
-(turns-to-afford) matters more, but raw gem cost remains a first-class signal.
+User note honored: the **post-cost-reduction gem cost is NOT dropped** — it's a
+first-class signal, distinct from tempo. The "effective cost" block (features 1-5 below)
+is exactly `cost − your bonuses`, i.e. the discounted gem cost after your card
+reductions. Tempo (turns-to-afford) is weighted higher, but effective cost matters
+*independently* of tempo because it drives three things tempo cannot see: **efficiency**
+(points per effective gem — the strategy model's core "is this a good deal" lever),
+**token economy** (total gems you must spend / discard pressure), and **contestability**
+(a cheap-effective high-value card is one the opponent can also afford soon). Base
+printed cost also remains in the existing per-card block (`cost/7`), but that's
+incidental — the signal that matters is the post-reduction cost.
 
 ## Candidate-card set (which cards get the rich block)
 
@@ -156,6 +163,13 @@ First MLP layer grows 305→566 inputs (~+134k params on a 512-wide layer; net i
 
 ## Open knobs (decide at implementation, not now)
 
+- **Explicit efficiency / value-density feature** per candidate card: `points / (total
+  effective cost + 1)`, and likely a noble-inclusive variant `(points + expected noble
+  pts) / (effective cost + 1)`. Rationale: the strategy model treats points-per-gem as
+  the core "good deal" lever, and that's a *ratio* — ReLU MLPs approximate division
+  poorly, so the net may not derive it cleanly from effective cost (#1-5) + points alone.
+  Falls under the same "expensive for the MLP to compute" doctrine as engine value. ~1-2
+  floats/slot. Lean toward including it.
 - Whether to also oversample early-game positions in the replay buffer (the other half
   of the weak-opening fix — keeps true value targets, just trains openings more). Cheap
   to add; orthogonal to features.
