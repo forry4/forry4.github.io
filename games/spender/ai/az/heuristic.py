@@ -23,6 +23,11 @@ counter to):
 
 Factor-combination weights are hand-set to "clearly competent", NOT tuned —
 weight-tuning is the documented saturated path; the arena is the judge.
+
+Deployed tuning lineage (each fix was playtest/diagnostic-driven): buy-livelock
+fix -> weight rebalance (points/efficiency up, engine down) -> take-gems focus
+(minimize one target's turns-to-afford) -> resource-aware stage (cards-bought)
++ engine diminishing-returns. vs greedy C2: 0.58 -> 0.69.
 """
 from __future__ import annotations
 
@@ -54,15 +59,27 @@ def card_value(val: V.Valuation, s: E.State, ci: int, seat: int) -> float:
     nob = val.noble_progress(ci, seat)
     tta = val.turns_to_afford(ci, seat)
 
-    stage = max(s.points[0], s.points[1]) / E.WIN_POINTS
+    # Stage ramps engine->points. Key it on points AND engine size (cards
+    # bought): "0 points but 8 cards" means the game is near its end (engine
+    # nearly complete, point-surge imminent), which a points-only stage misses,
+    # leaving engine over-weighted so the bot pivots to points too late.
+    # Efficient turns (buys) advance the stage; wasted gem-takes don't.
+    point_stage = max(s.points[0], s.points[1]) / E.WIN_POINTS
+    engine_stage = s.purchased_n[seat] / 10.0
+    stage = point_stage if point_stage > engine_stage else engine_stage
     if stage > 1.0:
         stage = 1.0
     pts_w = W_POINTS * (1.0 + 0.5 * stage)     # points matter more late
     eng_w = W_ENGINE * (1.0 - 0.7 * stage)     # engine matters less late
 
+    # Diminishing returns: the Nth bonus in a color you already hold a lot of is
+    # worth less (fewer remaining cards need that color from you, and stacking
+    # one color is wasteful). Decays engine value by bonuses already held.
+    eng_decay = 1.0 / (1.0 + 0.5 * s.bonuses[seat][E.BONUS[ci]])
+
     return (pts_w * pts
             + W_EFFICIENCY * eff
-            + eng_w * eng
+            + eng_w * eng * eng_decay
             + W_NOBLE * nob
             - W_TEMPO * tta)
 
