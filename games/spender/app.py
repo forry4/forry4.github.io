@@ -7,4 +7,6 @@ This allows running the server with a short import path:
 """
 from .main import app
 
+# Deploy entrypoint: this file is watched by deploy-render.yml, so a no-op edit
+# here is a convenient way to trigger a Render redeploy.
 __all__ = ["app"]
