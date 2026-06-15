@@ -56,10 +56,10 @@ MIRAGE_STEEP = 5              # card with no build path (a mirage you can't affo
                               # commit gem-collection to REACHABLE targets instead
 USE_GOLD_CONSERVE = True      # among similar-value affordable buys, prefer the one that
 W_GOLD_SPEND = 0.4            # spends less GOLD (wild tokens are scarce + flexible)
-# (reserved_discount -- valuing cards toward your own reserved cards -- was tried here
-# and REVERTED: it makes the 1-ply bot over-commit to reserves, monotonically worse with
-# weight (0.3 neutral, 1.5 -0.012, tanks C2). Kept in valuation.py as a net-feature
-# candidate; a searching net can weigh it without blindly over-committing.)
+# (engine_value now also counts a bonus's discount to your own RESERVED cards, at a
+# slight per-card premium -- see valuation.RESERVED_ENGINE_W. This is correct: a card
+# you reserved is one you intend to buy. If it dents win rate, the cause is reserving
+# bad cards, not the valuation -- the fix is the reserve decision, not ignoring reserves.)
 
 # Reserve gates (strictness rises with slots used; opening tempo protected).
 RESERVE_BASE = 4.0        # min target value to reserve with 0 slots used...

@@ -102,31 +102,6 @@ def discount_count(s: E.State, ci: int, seat: int) -> int:
                and E.COST[s.board[slot]][bcol] > held)
 
 
-def reserved_discount(s: E.State, ci: int, seat: int) -> float:
-    """How much ci's +1 bonus discounts `seat`'s OWN RESERVED cards. Reserved cards
-    are committed targets -- you reserved them, you intend to buy them -- so a bonus
-    that advances one is concretely valuable (unlike a speculative board target).
-    This keeps L1 buying COHERENT with a reserve: after reserving a 7-white L3, the
-    white L1s that build toward it should outrank an unrelated (even cheaper) card.
-    Same weighting as engine_value (points + color-heaviness), summed over reserved.
-
-    NOTE: tried in the 1-ply heuristic's card_value and REVERTED -- it makes the
-    greedy bot OVER-COMMIT to reserves (monotonically worse with weight: 0.3 neutral,
-    1.5 -0.012, tanks C2). Retained as a candidate FEATURE for the searching net,
-    which can weigh "advances a committed reserve" without blindly over-committing."""
-    bcol = E.BONUS[ci]
-    held = s.bonuses[seat][bcol]
-    ev = 0.0
-    for cj in s.reserved[seat]:
-        if cj == ci:
-            continue
-        costj = E.COST[cj]
-        if costj[bcol] - held > 0:                  # cj still needs this color
-            sj = sum(costj)
-            ev += (E.PTS[cj] / 5.0 + 0.2) * (costj[bcol] / sj if sj else 0.0)
-    return ev
-
-
 def single_color_mirage(s: E.State, ci: int, seat: int, steep: int = 5) -> bool:
     """True if ci needs >= `steep` of a SINGLE color after bonuses AND there is no
     way to build that color down: no bonus held in it and no lower-level board card
@@ -248,6 +223,10 @@ def victory_closeness(s: E.State, ci: int, seat: int, noble_pts: int = 0) -> flo
     return v if v < 1.0 else 1.0
 
 
+RESERVED_ENGINE_W = 1.05   # a reserved card counts this much vs one board card in
+                           # engine_value (committed target -> slight premium, not a pile)
+
+
 # ─── Stateful context (precomputes state-wide aggregates once) ───────────────
 
 class Valuation:
@@ -277,9 +256,13 @@ class Valuation:
 
     # cross-card factor (the one an MLP cannot assemble from a flat vector) ----
     def engine_value(self, ci: int, seat: int) -> float:
-        """Value of the permanent +1 `bcol` bonus ci grants: the discount it
-        gives every *other* visible card (weighted by that card's worth and how
-        `bcol`-hungry it is) plus a deck-wide term for unrevealed cards."""
+        """Value of the permanent +1 `bcol` bonus ci grants: the discount it gives
+        every *other* card that still needs `bcol` -- the visible board cards AND
+        `seat`'s own RESERVED cards (committed targets you intend to buy, so a bonus
+        that advances one is real engine value) -- weighted by each card's worth and
+        `bcol`-hunger, plus a deck-wide term for unrevealed cards. A reserved card
+        counts RESERVED_ENGINE_W *per card* (a slight commitment premium over a
+        single board card), NOT a pile that dominates the board."""
         s = self.s
         bcol = E.BONUS[ci]
         bon_b = s.bonuses[seat][bcol]
@@ -294,6 +277,14 @@ class Valuation:
                 sj = sum(costj)
                 w_scarcity = costj[bcol] / sj if sj else 0.0  # cj is bcol-heavy
                 ev += w_value * w_scarcity
+        for cj in s.reserved[seat]:       # committed targets count too (slight premium)
+            if cj == ci:
+                continue
+            costj = E.COST[cj]
+            if costj[bcol] - bon_b > 0:
+                sj = sum(costj)
+                ev += RESERVED_ENGINE_W * (E.PTS[cj] / 5.0 + 0.2) \
+                    * (costj[bcol] / sj if sj else 0.0)
         ev += self.deck_color_demand[bcol] * 0.5
         return ev
 
@@ -321,9 +312,6 @@ class Valuation:
 
     def noble_completion_pts(self, ci: int, seat: int) -> int:
         return noble_completion_pts(self.s, ci, seat)
-
-    def reserved_discount(self, ci: int, seat: int) -> float:
-        return reserved_discount(self.s, ci, seat)
 
     def efficiency(self, ci: int, seat: int) -> float:
         return efficiency(self.s, ci, seat)
