@@ -8,6 +8,7 @@ on:
       - 'books/**'
       - 'games/spender/requirements.txt'
       - 'games/spender/app.py'
+      - 'games/spender/Dockerfile'
       - 'games/spender/ai/az_model.npz'
       - 'games/spender/ai/az/**/*.py'   # serving imports: heuristic, valuation, engine, actions, mcts, infer_np
   workflow_dispatch:

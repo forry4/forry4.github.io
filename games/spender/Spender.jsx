@@ -74,9 +74,6 @@ const css = baseCss + `
 .auth-tab:hover:not(.active){color:var(--text)}
 .auth-field{width:100%;padding:11px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'Crimson Pro',Georgia,serif;font-size:1rem;letter-spacing:normal;outline:none;margin-bottom:10px}
 .auth-field:focus{border-color:var(--gold)}
-.auth-or{text-align:center;color:var(--text-muted);font-size:.8rem;font-style:italic;margin:18px 0 14px;position:relative}
-.auth-or::before,.auth-or::after{content:'';position:absolute;top:50%;width:40%;height:1px;background:var(--border)}
-.auth-or::before{left:0}.auth-or::after{right:0}
 .auth-error{font-size:.82rem;color:var(--red-gem);padding:6px 0 2px;text-align:center}
 .guest-name-row{display:flex;gap:8px;align-items:center;margin-bottom:10px}
 .guest-name-row .auth-field{margin-bottom:0;flex:1}
@@ -865,7 +862,7 @@ export default function SpenderApp() {
 
 	// ── Render helpers ─────────────────────────────────────────────────────
 	function renderCard(card, opts = {}) {
-		if (!card) return <div key={Math.random()} style={{ width: 88, minHeight: 120 }} />;
+		if (!card) return <div style={{ width: 88, minHeight: 120 }} />;
 		// readonly: opponent's reserved cards — visible but not selectable/affordable.
 		const affordable = !opts.readonly && me && canAfford(card.cost, me.tokens, myBonuses);
 		const isSelected = !opts.readonly && selectedCard?.card?.id === card.id;
@@ -1066,11 +1063,7 @@ export default function SpenderApp() {
 					</div>
 
 					<div style={{ textAlign: "center", marginTop: 24 }}>
-						<button onClick={() => setScreen("books")}
-							style={{
-								background: "none", border: "1px solid #3a3550", color: "#b8b0cc",
-								borderRadius: 10, padding: "10px 22px", fontSize: 15, cursor: "pointer",
-							}}>
+						<button type="button" className="btn btn-ghost" onClick={() => setScreen("books")}>
 							📚 Books
 						</button>
 					</div>
@@ -1080,12 +1073,13 @@ export default function SpenderApp() {
 		</>
 	);
 
-	// Castles of Crimson — placeholder (game not built yet)
+	// Books — personal ranked reading list (public read, owner edit)
 	if (screen === "books") return (
-			<Books authUser={authUser} onExit={() => setScreen("home")} />
-		);
+		<Books authUser={authUser} onExit={() => setScreen("home")} />
+	);
 
-		if (screen === "coc") return (
+	// Castles of Crimson — placeholder (game not built yet)
+	if (screen === "coc") return (
 		<>
 			<style>{css}</style>
 			<div className="app">

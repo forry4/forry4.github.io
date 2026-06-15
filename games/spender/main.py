@@ -16,6 +16,8 @@ import logging
 import sqlite3
 import os
 import time
+import hashlib
+import hmac
 
 app = FastAPI(title="Spender API")
 
@@ -344,17 +346,45 @@ def gen_token(n=32):
     return ''.join(random.choices(string.ascii_letters + string.digits, k=n))
 
 
+# Password hashing: PBKDF2-HMAC-SHA256 (stdlib) stored as "pbkdf2$<iters>$<salt>$<hex>".
+# verify_password also accepts the legacy "<salt>$<sha256hex>" format and the caller
+# transparently upgrades those to PBKDF2 on the next successful login.
+PBKDF2_ITERS = 200_000
+
+
+def hash_password(password: str) -> str:
+    salt = gen_token(16)
+    h = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), PBKDF2_ITERS).hex()
+    return f"pbkdf2${PBKDF2_ITERS}${salt}${h}"
+
+
+def verify_password(stored: str, password: str) -> bool:
+    parts = (stored or "").split("$")
+    if len(parts) == 4 and parts[0] == "pbkdf2":
+        try:
+            calc = hashlib.pbkdf2_hmac("sha256", password.encode(), parts[2].encode(), int(parts[1])).hex()
+        except ValueError:
+            return False
+        return hmac.compare_digest(calc, parts[3])
+    if len(parts) == 2:  # legacy salt$sha256
+        salt, h = parts
+        return hmac.compare_digest(hashlib.sha256((salt + password).encode()).hexdigest(), h)
+    return False
+
+
 def create_user(name: str, password: str) -> dict | None:
-    import hashlib
     uid = gen_token(10)
-    salt = gen_token(6)
-    h = hashlib.sha256((salt + password).encode()).hexdigest()
     conn = get_db_conn()
     cur = conn.cursor()
     try:
-        cur.execute("INSERT INTO users (id,name,password_hash) VALUES (?,?,?)", (uid, name, f"{salt}${h}"))
+        cur.execute("INSERT INTO users (id,name,password_hash) VALUES (?,?,?)",
+                    (uid, name, hash_password(password)))
         conn.commit()
-    except Exception:
+    except sqlite3.IntegrityError:
+        conn.close()
+        return None  # name already taken
+    except Exception as e:  # noqa: BLE001 - don't 500 the endpoint; surface in logs
+        LOG.error("create_user failed for %r: %s", name, e)
         conn.close()
         return None
     conn.close()
@@ -362,7 +392,6 @@ def create_user(name: str, password: str) -> dict | None:
 
 
 def authenticate_user(name: str, password: str) -> dict | None:
-    import hashlib
     conn = get_db_conn()
     cur = conn.cursor()
     cur.execute("SELECT * FROM users WHERE name = ?", (name,))
@@ -370,16 +399,15 @@ def authenticate_user(name: str, password: str) -> dict | None:
     if not row:
         conn.close()
         return None
-    try:
-        salt, h = row["password_hash"].split("$")
-    except Exception:
-        conn.close()
-        return None
-    if hashlib.sha256((salt + password).encode()).hexdigest() != h:
+    stored = row["password_hash"]
+    if not verify_password(stored, password):
         conn.close()
         return None
     token = gen_token(32)
     expiry = int(time.time()) + 7 * 24 * 3600
+    # Upgrade legacy (non-PBKDF2) hashes on successful login.
+    if not (stored or "").startswith("pbkdf2$"):
+        cur.execute("UPDATE users SET password_hash=? WHERE id=?", (hash_password(password), row["id"]))
     cur.execute("UPDATE users SET session_token=?, session_expiry=? WHERE id=?", (token, expiry, row["id"]))
     conn.commit()
     conn.close()
@@ -1909,7 +1937,8 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
             text = await websocket.receive_text()
             try:
                 msg = json.loads(text)
-            except Exception:
+            except json.JSONDecodeError as e:
+                LOG.warning("invalid JSON from ws client: %s", e)
                 await websocket.send_text(json.dumps({"type": "error", "message": "invalid json"}))
                 continue
 

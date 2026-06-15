@@ -131,7 +131,7 @@ def _stored_owner_id(conn) -> str | None:
     cur = conn.cursor()
     cur.execute("SELECT value FROM books_meta WHERE key='owner_id'")
     row = cur.fetchone()
-    return row[0] if row else None
+    return row["value"] if row else None
 
 
 def can_user_edit(conn, user: dict | None) -> bool:
@@ -190,8 +190,8 @@ def fetch_books(conn) -> list[dict]:
     out = []
     for r in cur.fetchall():
         out.append({
-            "id": r[0], "title": r[1], "author": r[2], "rating": r[3],
-            "sort_order": r[4], "note": r[5], "cover_url": r[6],
+            "id": r["id"], "title": r["title"], "author": r["author"], "rating": r["rating"],
+            "sort_order": r["sort_order"], "note": r["note"], "cover_url": r["cover_url"],
         })
     return out
 
@@ -249,8 +249,8 @@ def replace_books(conn, user: dict | None, items: list) -> tuple[bool, str | Non
 # ── suggestions (per-user, public users suggest books for the owner) ──────────
 def _row_to_suggestion(r) -> dict:
     return {
-        "id": r[0], "user_id": r[1], "user_name": r[2], "title": r[3],
-        "author": r[4], "cover_url": r[5], "blurb": r[6], "sort_order": r[7],
+        "id": r["id"], "user_id": r["user_id"], "user_name": r["user_name"], "title": r["title"],
+        "author": r["author"], "cover_url": r["cover_url"], "blurb": r["blurb"], "sort_order": r["sort_order"],
     }
 
 

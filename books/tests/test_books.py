@@ -14,6 +14,7 @@ from books import api as B
 @pytest.fixture()
 def conn():
     c = sqlite3.connect(":memory:")
+    c.row_factory = sqlite3.Row  # mirror the app's _Conn: rows support name access
     B.init_books_db(c)
     yield c
     c.close()
