@@ -134,10 +134,18 @@ def _stored_owner_id(conn) -> str | None:
     return row["value"] if row else None
 
 
+def _is_admin(user: dict | None) -> bool:
+    """Site admins (main.py's durable `admins` role, surfaced as user['is_admin'])
+    always have owner powers here, regardless of the SITE_OWNER name match."""
+    return bool(user and user.get("is_admin"))
+
+
 def can_user_edit(conn, user: dict | None) -> bool:
     """True if `user` may edit. Does NOT claim ownership (that happens on save)."""
     if not user or not user.get("id"):
         return False
+    if _is_admin(user):
+        return True
     env_owner = _site_owner_name()
     if env_owner is not None:
         return user.get("name") == env_owner
@@ -148,10 +156,12 @@ def can_user_edit(conn, user: dict | None) -> bool:
 
 
 def is_owner(conn, user: dict | None) -> bool:
-    """Strict ownership check — only the confirmed owner. Unlike can_user_edit,
-    an unclaimed list returns False (nobody is the owner yet)."""
+    """Strict ownership check — only the confirmed owner (or a site admin). Unlike
+    can_user_edit, an unclaimed list returns False (nobody is the owner yet)."""
     if not user or not user.get("id"):
         return False
+    if _is_admin(user):
+        return True
     env_owner = _site_owner_name()
     if env_owner is not None:
         return user.get("name") == env_owner
@@ -161,6 +171,8 @@ def is_owner(conn, user: dict | None) -> bool:
 
 def _claim_or_check(conn, user: dict) -> bool:
     """Authorize a write, claiming an unclaimed list for `user`. Returns allowed."""
+    if _is_admin(user):
+        return True
     env_owner = _site_owner_name()
     if env_owner is not None:
         return user.get("name") == env_owner

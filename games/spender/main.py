@@ -338,6 +338,14 @@ def init_db():
         created_at INTEGER,
         updated_at INTEGER
     )""")
+    # Site admins (durable role). Membership = a row keyed by user id. Kept as its
+    # own table (not a users column) so it needs only CREATE TABLE IF NOT EXISTS —
+    # no ALTER-TABLE migration against the existing prod/Turso users table.
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS admins (
+        user_id    TEXT PRIMARY KEY,
+        granted_at INTEGER
+    )""")
     conn.commit()
     conn.close()
 
@@ -410,8 +418,14 @@ def authenticate_user(name: str, password: str) -> dict | None:
         cur.execute("UPDATE users SET password_hash=? WHERE id=?", (hash_password(password), row["id"]))
     cur.execute("UPDATE users SET session_token=?, session_expiry=? WHERE id=?", (token, expiry, row["id"]))
     conn.commit()
+    # Bootstrap the admin role: the SITE_OWNER username is auto-granted admin on
+    # login (durable thereafter via the admins table).
+    owner = site_owner_name()
+    if owner and row["name"] == owner:
+        grant_admin(conn, row["id"])
+    admin = is_admin_id(conn, row["id"])
     conn.close()
-    return {"id": row["id"], "name": row["name"], "session_token": token}
+    return {"id": row["id"], "name": row["name"], "session_token": token, "is_admin": admin}
 
 
 def get_user_by_session(token: str) -> dict | None:
@@ -420,27 +434,50 @@ def get_user_by_session(token: str) -> dict | None:
     conn = get_db_conn()
     cur = conn.cursor()
     now = int(time.time())
-    cur.execute("SELECT * FROM users WHERE session_token=? AND session_expiry>?", (token, now))
+    # Single query (1 round-trip) — is_admin via EXISTS subquery; positional read
+    # avoids depending on the driver aliasing the computed column in row metadata.
+    cur.execute(
+        "SELECT id, name, (SELECT 1 FROM admins WHERE user_id = users.id) "
+        "FROM users WHERE session_token=? AND session_expiry>?",
+        (token, now),
+    )
     row = cur.fetchone()
     conn.close()
     if not row:
         return None
-    return {"id": row["id"], "name": row["name"]}
+    return {"id": row[0], "name": row[1], "is_admin": bool(row[2])}
 
 
-# ─── Site owner identity ──────────────────────────────────────────────────────
-# The site owner (you) is identified site-wide by the SITE_OWNER env var, whose
-# value is the owner's username. Reused by any feature that needs an owner/admin
-# check (the books page is the first consumer). Read at call time so a restart
-# with a changed env var takes effect without code changes.
+# ─── Site owner / admin identity ──────────────────────────────────────────────
+# Admin is a durable role stored in the `admins` table; the SITE_OWNER env var
+# (a username) is the bootstrap that auto-grants admin on login. `is_site_owner`
+# is the canonical "is this an admin" check used by features (books is the first
+# consumer). SITE_OWNER is read at call time so an env change takes effect on the
+# next restart with no code change.
 def site_owner_name() -> str | None:
     v = os.environ.get("SITE_OWNER")
     return v.strip() if v and v.strip() else None
 
 
+def grant_admin(conn, user_id: str) -> None:
+    conn.execute("INSERT OR IGNORE INTO admins (user_id, granted_at) VALUES (?, ?)",
+                 (user_id, int(time.time())))
+    conn.commit()
+
+
+def is_admin_id(conn, user_id: str) -> bool:
+    cur = conn.cursor()
+    cur.execute("SELECT 1 FROM admins WHERE user_id = ?", (user_id,))
+    return cur.fetchone() is not None
+
+
 def is_site_owner(user: dict | None) -> bool:
+    if not user:
+        return False
+    if user.get("is_admin"):
+        return True
     owner = site_owner_name()
-    return bool(user and owner and user.get("name") == owner)
+    return bool(owner and user.get("name") == owner)
 
 
 def create_reconnect_token(user_id: str, room_id: str, player_id: str, ttl: int = 120) -> str:
@@ -2391,7 +2428,8 @@ async def auth_register(body: RegisterBody):
     # session_token; without this a freshly registered user has no token and is
     # treated as logged-out.
     authed = authenticate_user(body.name, body.password)
-    return {"ok": True, "user": user,
+    return {"ok": True,
+            "user": {**user, "is_admin": bool(authed and authed.get("is_admin"))},
             "session_token": authed["session_token"] if authed else None}
 
 
@@ -2400,7 +2438,9 @@ async def auth_login(body: LoginBody):
     u = authenticate_user(body.name, body.password)
     if not u:
         return {"ok": False, "message": "invalid name or password"}
-    return {"ok": True, "user": {"id": u["id"], "name": u["name"]}, "session_token": u["session_token"]}
+    return {"ok": True,
+            "user": {"id": u["id"], "name": u["name"], "is_admin": bool(u.get("is_admin"))},
+            "session_token": u["session_token"]}
 
 
 @app.get("/games")

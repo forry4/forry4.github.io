@@ -71,3 +71,25 @@ def test_password_legacy_sha256_still_verifies():
     assert m.verify_password(legacy, "hunter2") is True
     assert m.verify_password(legacy, "nope") is False
     assert m.verify_password("garbage-no-dollar", "x") is False
+
+
+def test_admin_grant_and_check_idempotent():
+    c = _conn()
+    c.cursor().execute("CREATE TABLE admins (user_id TEXT PRIMARY KEY, granted_at INTEGER)")
+    c.commit()
+    assert m.is_admin_id(c, "u1") is False
+    m.grant_admin(c, "u1")
+    assert m.is_admin_id(c, "u1") is True
+    m.grant_admin(c, "u1")  # INSERT OR IGNORE -> idempotent
+    assert m.is_admin_id(c, "u1") is True
+    c.close()
+
+
+def test_is_site_owner_honors_admin_flag_and_env(monkeypatch):
+    monkeypatch.delenv("SITE_OWNER", raising=False)
+    assert m.is_site_owner({"id": "x", "name": "bob"}) is False
+    assert m.is_site_owner({"id": "x", "name": "bob", "is_admin": True}) is True  # durable role
+    monkeypatch.setenv("SITE_OWNER", "bob")
+    assert m.is_site_owner({"id": "x", "name": "bob"}) is True   # env bootstrap
+    assert m.is_site_owner({"id": "x", "name": "eve"}) is False
+    assert m.is_site_owner(None) is False

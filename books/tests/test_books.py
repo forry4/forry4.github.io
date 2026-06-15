@@ -152,3 +152,15 @@ def test_suggestion_blank_titles_skipped(conn):
     B.replace_user_suggestions(conn, ALICE, [{"title": "  "}, {"title": "Real"}])
     mine = B.fetch_user_suggestions(conn, ALICE["id"])
     assert [s["title"] for s in mine] == ["Real"]
+
+
+def test_admin_has_owner_powers_regardless_of_site_owner(conn, monkeypatch):
+    monkeypatch.setenv("SITE_OWNER", "alice")  # alice is the env owner
+    admin = {"id": "u_carol", "name": "carol", "is_admin": True}  # not alice, but admin
+    assert B.can_user_edit(conn, admin) is True
+    assert B.is_owner(conn, admin) is True
+    ok, err = B.replace_books(conn, admin, [{"title": "Admin Pick", "rating": 5}])
+    assert ok is True and err is None
+    assert [b["title"] for b in B.fetch_books(conn)] == ["Admin Pick"]
+    # a non-admin, non-owner remains locked out
+    assert B.can_user_edit(conn, {"id": "u_dan", "name": "dan"}) is False
