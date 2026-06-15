@@ -6,6 +6,7 @@ on:
     paths:
       - 'games/spender/**'
       - 'books/**'
+      - 'shared/**'
       - '.github/workflows/deploy-pages.yml'
 
 jobs:
