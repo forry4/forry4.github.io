@@ -54,10 +54,12 @@ USE_NOBLE_COMPLETION = True   # value the immediate +VP a buy scores by triggeri
 USE_REACH_TAKE = True         # don't orient gem-taking toward a steep single-color
 MIRAGE_STEEP = 5              # card with no build path (a mirage you can't afford);
                               # commit gem-collection to REACHABLE targets instead
-USE_RESERVED_ENGINE = True    # value a bonus for discounting your OWN RESERVED cards
-W_RESERVED = 1.5              # (committed targets) so L1 buys stay coherent with a reserve
 USE_GOLD_CONSERVE = True      # among similar-value affordable buys, prefer the one that
 W_GOLD_SPEND = 0.4            # spends less GOLD (wild tokens are scarce + flexible)
+# (reserved_discount -- valuing cards toward your own reserved cards -- was tried here
+# and REVERTED: it makes the 1-ply bot over-commit to reserves, monotonically worse with
+# weight (0.3 neutral, 1.5 -0.012, tanks C2). Kept in valuation.py as a net-feature
+# candidate; a searching net can weigh it without blindly over-committing.)
 
 # Reserve gates (strictness rises with slots used; opening tempo protected).
 RESERVE_BASE = 4.0        # min target value to reserve with 0 slots used...
@@ -106,16 +108,9 @@ def card_value(val: V.Valuation, s: E.State, ci: int, seat: int) -> float:
     # one color is wasteful). Decays engine value by bonuses already held.
     eng_decay = 1.0 / (1.0 + ENG_DECAY_RATE * s.bonuses[seat][E.BONUS[ci]])
 
-    eng_term = eng_w * eng * eng_decay
-    if USE_RESERVED_ENGINE:
-        # Coherence with a reserve: credit a bonus for advancing your own reserved
-        # (committed) cards, so L1 buys build toward what you reserved. Not stage-
-        # decayed -- a reserved target stays a commitment regardless of game stage.
-        eng_term += W_RESERVED * val.reserved_discount(ci, seat)
-
     return (pts_w * (pts + nc)
             + W_EFFICIENCY * eff
-            + eng_term
+            + eng_w * eng * eng_decay
             + W_NOBLE * nob
             - W_TEMPO * tta)
 

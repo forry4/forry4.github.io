@@ -108,7 +108,12 @@ def reserved_discount(s: E.State, ci: int, seat: int) -> float:
     that advances one is concretely valuable (unlike a speculative board target).
     This keeps L1 buying COHERENT with a reserve: after reserving a 7-white L3, the
     white L1s that build toward it should outrank an unrelated (even cheaper) card.
-    Same weighting as engine_value (points + color-heaviness), summed over reserved."""
+    Same weighting as engine_value (points + color-heaviness), summed over reserved.
+
+    NOTE: tried in the 1-ply heuristic's card_value and REVERTED -- it makes the
+    greedy bot OVER-COMMIT to reserves (monotonically worse with weight: 0.3 neutral,
+    1.5 -0.012, tanks C2). Retained as a candidate FEATURE for the searching net,
+    which can weigh "advances a committed reserve" without blindly over-committing."""
     bcol = E.BONUS[ci]
     held = s.bonuses[seat][bcol]
     ev = 0.0
