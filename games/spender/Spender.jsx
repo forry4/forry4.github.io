@@ -171,6 +171,8 @@ const css = baseCss + `
 .deck-remaining{font-size:1.3rem;font-weight:700;color:var(--text);font-family:'Cinzel',serif}
 .card{width:88px;min-height:120px;border-radius:var(--radius);background:var(--surface2);border:1px solid var(--border);padding:8px 6px 6px;display:flex;flex-direction:column;cursor:pointer;transition:all .15s;flex-shrink:0;position:relative}
 .ai-val{position:absolute;bottom:5px;right:5px;font-family:'Cinzel',serif;font-size:.62rem;font-weight:600;color:#e8c86a;background:rgba(0,0,0,.4);border-radius:4px;padding:0 4px;line-height:1.4;pointer-events:none}
+.ai-vals{position:absolute;bottom:3px;right:3px;display:grid;grid-template-columns:auto auto;gap:0 5px;font-family:'Cinzel',serif;font-size:.5rem;font-weight:600;color:#e8c86a;background:rgba(0,0,0,.5);border-radius:4px;padding:2px 4px;line-height:1.4;pointer-events:none}
+.ai-vals b{color:#9a8fb0;font-weight:700;margin-right:1px}
 .card:hover{border-color:rgba(201,168,76,.5);transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.4)}
 .card.selected{border-color:var(--gold-light);box-shadow:0 0 0 2px var(--gold-light)}
 .card.affordable{border-color:var(--green-gem)}
@@ -320,9 +322,16 @@ function CardView({ card, selected, affordable, disabled, onClick, compact, aiVa
 					</div>
 				))}
 			</div>
-			{aiValue != null && (
+			{aiValue != null && (typeof aiValue === "object" ? (
+				<div className="ai-vals" title="H2 — take / engine / point / cost">
+					<span><b>T</b>{aiValue.t}</span>
+					<span><b>E</b>{aiValue.e}</span>
+					<span><b>P</b>{aiValue.p}</span>
+					<span><b>C</b>{aiValue.c}</span>
+				</div>
+			) : (
 				<span className="ai-val" title="AI card value (variant H)">{aiValue}</span>
-			)}
+			))}
 		</div>
 	);
 }
@@ -1115,7 +1124,7 @@ export default function SpenderApp() {
 							{showAiPicker && (
 								<div className="ai-picker">
 									<span className="ai-picker-label">Choose AI opponent</span>
-									{["A", "B", "C", "C2", "Z", "H"].map(v => (
+									{["A", "B", "C", "C2", "Z", "H", "H2"].map(v => (
 										<button key={v} className="btn btn-outline btn-sm"
 											onClick={() => { setShowAiPicker(false); handleCreate(true, v); }}>
 											AI {v}
