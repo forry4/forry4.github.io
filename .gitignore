@@ -13,9 +13,6 @@ __pycache__/
 # Env files
 .env
 
-# Claude Code
-CLAUDE.md
-
 # Misc
 .DS_Store
 node_modules/

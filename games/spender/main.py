@@ -2484,7 +2484,17 @@ async def session_token(token: str | None = None, room_id: str | None = None, pl
     rt = create_reconnect_token(user["id"], normalize_room(room_id), player_id, ttl=120)
     return {"ok": True, "reconnect_token": rt}
 
-# TODO: when merging castles-of-crimson branch, add back:
-#   from games.castles_of_crimson.main import coc_app
-#   app.mount("/coc", coc_app)
+# ── Castles of Crimson ──────────────────────────────────────────────────────
+# Second game in the Forrest Games collection. Its self-contained FastAPI
+# sub-app is mounted under /coc so the whole site runs as one backend service
+# (WS = /coc/ws/{room}/{player}, REST = /coc/...). The mount is defensive: if
+# the optional game package is ever absent in a given deploy, the core backend
+# must still start (this is why an earlier unconditional import was reverted).
+try:
+    from games.castles_of_crimson.main import coc_app
+    app.mount("/coc", coc_app)
+    LOG.info("mounted Castles of Crimson at /coc")
+except Exception as _coc_err:  # pragma: no cover - optional package
+    import logging as _logging
+    _logging.getLogger("games.spender").warning("Castles of Crimson not mounted: %s", _coc_err)
 

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import CastlesOfCrimson from "../castles_of_crimson/CastlesOfCrimson.jsx";
 import Books from "../../books/Books.jsx";
 import { baseCss } from "../../shared/theme.js";
 
@@ -13,7 +14,7 @@ const SITE_NAME = "Forrest Games";
 // Coming Soon placeholder. Spender's lobby is the existing "browser" screen.
 const GAMES = [
 	{ id: "spender", name: "Spender", tagline: "A gem merchant's game of prestige", status: "ready", screen: "browser" },
-	{ id: "coc", name: "Castles of Crimson", tagline: "A realm of conquest and intrigue", status: "soon", screen: "coc" },
+	{ id: "coc", name: "Castles of Crimson", tagline: "A realm of conquest and intrigue", status: "ready", screen: "coc" },
 ];
 
 // ─── Constants ─────────────────────────────────────────────────────────────
@@ -97,11 +98,6 @@ const css = baseCss + `
 .home-game-badge{position:absolute;top:14px;right:14px;font-family:'Cinzel',serif;font-size:.6rem;letter-spacing:.12em;text-transform:uppercase;padding:3px 9px;border-radius:10px}
 .home-game-badge.ready{color:var(--green-gem);border:1px solid rgba(61,186,110,.5)}
 .home-game-badge.soon{color:var(--text-muted);border:1px solid var(--border)}
-
-/* ─── Castles of Crimson placeholder ────────────────────────────────────── */
-.coc-placeholder{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:18px;padding:64px 20px;min-height:48vh}
-.coc-soon{font-family:'Cinzel',serif;font-size:2rem;font-weight:700;color:var(--gold);letter-spacing:.06em}
-.coc-blurb{color:var(--text-dim);font-style:italic;font-size:1.02rem;max-width:420px;line-height:1.5}
 
 /* ─── Browser ───────────────────────────────────────────────────────────── */
 .browser{max-width:820px;margin:0 auto;padding:0 20px 48px}
@@ -1083,34 +1079,10 @@ export default function SpenderApp() {
 		<Books authUser={authUser} onExit={() => setScreen("home")} />
 	);
 
-	// Castles of Crimson — placeholder (game not built yet)
-	if (screen === "coc") return (
-		<>
-			<style>{css}</style>
-			<div className="app">
-				<div className="browser">
-					<div className="browser-header">
-						<div className="browser-head-left">
-							<button className="btn btn-ghost btn-sm" onClick={() => setScreen("home")}>
-								← {SITE_NAME}
-							</button>
-							<div className="browser-title">Castles of Crimson</div>
-						</div>
-					</div>
-					<div className="coc-placeholder">
-						<div className="coc-soon">Coming Soon</div>
-						<p className="coc-blurb">
-							Castles of Crimson is still being forged. Check back soon.
-						</p>
-						<button className="btn btn-outline" onClick={() => setScreen("home")}>
-							← Back to {SITE_NAME}
-						</button>
-					</div>
-				</div>
-				{toast && <div className="toast">{toast}</div>}
-			</div>
-		</>
-	);
+	// Castles of Crimson — self-contained game component, mounted by the shell.
+	if (screen === "coc") {
+		return <CastlesOfCrimson myId={myId} authUser={authUser} onExit={() => setScreen("home")} />;
+	}
 
 	// Game browser screen
 	if (screen === "browser") return (
