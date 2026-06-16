@@ -329,11 +329,40 @@ its optimum, and two more mirages were caught by the disjoint confirm:
 - **Inert (exactly 0.0000 diff @1000):** `RESERVE_BASE`, `RESERVE_STEP`, `OPENING_PLY` — they
   never bind in greedy play. No lever; don't re-sweep.
 
-**Net of the sweep:** of ~20 tunables screened across 3 rounds, exactly **one** adoptable win
-(ENG_STAGE_DECAY 0.7→0.9, +0.013 replicated). The rest are saturated at their hand-set values
-or inert — the heuristic's constants were already well-chosen; the structural *features* (above)
-are where the gains lived. Three @1000 false positives (BUY_FLOOR, TOKEN_HOARD=9, plus W_SPREAD
-earlier) all died on disjoint confirms, validating the replication bar.
+**Rounds 4–5 — finer re-screen of the stage/value cluster at the 0.9 baseline, then a
+decisive 4000-seed final.** Re-probing the parameters that interact with the adopted
+ENG_STAGE_DECAY change (`ENGINE_STAGE_DIV`, `PTS_STAGE_GAIN`, `W_POINTS`, `W_ENGINE`,
+`ENG_DECAY_RATE`, `W_EFFICIENCY`) surfaced two more @1000 leaners that **both died on
+high-N confirms**:
+- **`PTS_STAGE_GAIN=0.4`** — z=2.40 @1000 → **exactly +0.0000 @2000** (a 4th mirage). Stays 0.5.
+- **`W_EFFICIENCY=4.5`** — the most deceptive: +0.007 @1000 (z=1.70) → +0.0063 @2000 (z=**1.90**,
+  *growing* with N — the textbook signature of a real sub-threshold effect) → **−0.0001 @4000
+  (z=−0.05)**. It vanished. **Even a signal that strengthens 1k→2k can still be noise** — the
+  reason the final round used 4000 seeds. `W_ENGINE=0.8` leaned positive throughout but its z
+  *shrank* with N (1.12 → 1.06 → 1.05) and the `WEFF+WENG` combo added nothing beyond it;
+  neither adoptable. **No round-4/5 adoption.**
+
+**Net of the entire 5-round sweep:** of ~20 tunables screened, exactly **one** adoptable win
+(ENG_STAGE_DECAY 0.7→0.9, +0.013, the only candidate that replicated on a *disjoint* set —
+and re-confirmed a sharp peak in round 3). The rest are saturated at their hand-set values or
+inert: **the heuristic's constants were already well-chosen**, and the structural *features*
+(above) are where the gains lived. **Five @1000/@2000 false positives** (BUY_FLOOR,
+TOKEN_HOARD=9, PTS_STAGE_GAIN=0.4, W_EFFICIENCY=4.5, plus W_SPREAD earlier) all died on
+higher-N disjoint confirms — the replication bar earned its keep. **Final locked constants
+(variant H, shipped):**
+
+| constant | value | constant | value | constant | value |
+|----------|-------|----------|-------|----------|-------|
+| W_POINTS | 2.0 | W_EFFICIENCY | 5.0 | W_ENGINE | 1.0 |
+| W_NOBLE | 3.0 | W_TEMPO | 0.3 | W_COST | 0.4 |
+| W_GOLD_SPEND | 0.4 | TAKE_TEMPO | 0.6 | BUY_FLOOR | 0.5 |
+| PTS_STAGE_GAIN | 0.5 | **ENG_STAGE_DECAY** | **0.9** | ENGINE_STAGE_DIV | 10.0 |
+| ENG_DECAY_RATE | 0.5 | NOBLE_CONTRIB | 0.35 | MIRAGE_STEEP | 5 |
+| TOKEN_HOARD | 8 | RESERVE_BASE | 4.0 | RESERVE_STEP | 1.5 |
+| RESERVE_GAP | 2.0 | OPENING_PLY | 8 | MIN_BUILD_PATH | 3 |
+
+ENG_STAGE_DECAY=0.9 is the only value that changed during the campaign; all others are the
+original hand-tuned constants, now empirically confirmed at/near their optima.
 
 ## Global additions (6 floats)
 
