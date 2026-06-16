@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import CastlesOfCrimson from "../castles_of_crimson/CastlesOfCrimson.jsx";
+import Books from "../../books/Books.jsx";
+import { baseCss } from "../../shared/theme.js";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 const WS_BASE = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
@@ -12,7 +14,7 @@ const SITE_NAME = "Forrest Games";
 // Coming Soon placeholder. Spender's lobby is the existing "browser" screen.
 const GAMES = [
 	{ id: "spender", name: "Spender", tagline: "A gem merchant's game of prestige", status: "ready", screen: "browser" },
-	{ id: "coc", name: "Castles of Crimson", tagline: "A realm of conquest and intrigue", status: "soon", screen: "coc" },
+	{ id: "coc", name: "Castles of Crimson", tagline: "A realm of conquest and intrigue", status: "ready", screen: "coc" },
 ];
 
 // ─── Constants ─────────────────────────────────────────────────────────────
@@ -52,22 +54,7 @@ function totalPoints(purchased, nobles) {
 }
 
 // ─── Styles ────────────────────────────────────────────────────────────────
-const css = `
-@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Crimson+Pro:ital,wght@0,300;0,400;1,300&display=swap');
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{
-  --bg:#0f0e0c;--surface:#1a1814;--surface2:#242018;--surface3:#2c2820;--border:#3a342a;
-  --gold:#c9a84c;--gold-light:#e8c96a;--text:#e8dfc8;--text-dim:#8a7d6a;--text-muted:#5a5248;
-  --white-gem:#ddd4be;--blue-gem:#4a9eff;--green-gem:#3dba6e;--red-gem:#e05555;--black-gem:#6a6a7a;--gold-gem:#f5c842;
-  --radius:8px;--radius-lg:14px;
-}
-html,body{height:100%}
-body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,serif;min-height:100vh;
-  padding-bottom:env(safe-area-inset-bottom,0px);
-  padding-left:env(safe-area-inset-left,0px);padding-right:env(safe-area-inset-right,0px)}
-/* screens without a sticky nav bar own the top safe area themselves */
-.auth-screen,.browser{padding-top:calc(env(safe-area-inset-top,0px) + 32px)}
-.app{min-height:100vh;display:flex;flex-direction:column}
+const css = baseCss + `
 
 /* ─── Loading ───────────────────────────────────────────────────────────── */
 .loading-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:16px;padding:32px;text-align:center}
@@ -86,26 +73,13 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,se
 .auth-tab{flex:1;padding:10px 0;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--text-dim);cursor:pointer;font-family:'Cinzel',serif;font-size:.78rem;letter-spacing:.1em;text-transform:uppercase;margin-bottom:-1px;transition:all .15s}
 .auth-tab.active{color:var(--gold);border-bottom-color:var(--gold)}
 .auth-tab:hover:not(.active){color:var(--text)}
-.auth-field{width:100%;padding:11px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'Cinzel',serif;font-size:.9rem;letter-spacing:.04em;outline:none;margin-bottom:10px}
+.auth-field{width:100%;padding:11px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'Crimson Pro',Georgia,serif;font-size:1rem;letter-spacing:normal;outline:none;margin-bottom:10px}
 .auth-field:focus{border-color:var(--gold)}
-.auth-or{text-align:center;color:var(--text-muted);font-size:.8rem;font-style:italic;margin:18px 0 14px;position:relative}
-.auth-or::before,.auth-or::after{content:'';position:absolute;top:50%;width:40%;height:1px;background:var(--border)}
-.auth-or::before{left:0}.auth-or::after{right:0}
 .auth-error{font-size:.82rem;color:var(--red-gem);padding:6px 0 2px;text-align:center}
 .guest-name-row{display:flex;gap:8px;align-items:center;margin-bottom:10px}
 .guest-name-row .auth-field{margin-bottom:0;flex:1}
 
 /* ─── Common ────────────────────────────────────────────────────────────── */
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 20px;border-radius:var(--radius);border:none;cursor:pointer;font-family:'Cinzel',serif;font-size:.88rem;letter-spacing:.06em;font-weight:600;transition:all .15s;white-space:nowrap}
-.btn-gold{background:var(--gold);color:#0f0e0c}.btn-gold:hover{background:var(--gold-light)}
-.btn-outline{background:transparent;color:var(--gold);border:1px solid var(--gold)}.btn-outline:hover{background:var(--gold);color:#0f0e0c}
-.btn-ghost{background:transparent;color:var(--text-dim);border:1px solid var(--border)}.btn-ghost:hover{border-color:var(--text-dim);color:var(--text)}
-.btn-danger{background:transparent;color:var(--red-gem);border:1px solid var(--red-gem)}.btn-danger:hover{background:var(--red-gem);color:#fff}
-.btn:disabled{opacity:.35;cursor:not-allowed}
-.btn-full{width:100%}
-.btn-sm{padding:7px 14px;font-size:.78rem}
-.input{width:100%;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'Cinzel',serif;font-size:1rem;letter-spacing:.1em;outline:none}
-.input:focus{border-color:var(--gold)}
 .conn-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px;flex-shrink:0}
 .conn-dot.connected{background:var(--green-gem)}.conn-dot.disconnected{background:var(--red-gem)}
 
@@ -124,11 +98,6 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,se
 .home-game-badge{position:absolute;top:14px;right:14px;font-family:'Cinzel',serif;font-size:.6rem;letter-spacing:.12em;text-transform:uppercase;padding:3px 9px;border-radius:10px}
 .home-game-badge.ready{color:var(--green-gem);border:1px solid rgba(61,186,110,.5)}
 .home-game-badge.soon{color:var(--text-muted);border:1px solid var(--border)}
-
-/* ─── Castles of Crimson placeholder ────────────────────────────────────── */
-.coc-placeholder{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:18px;padding:64px 20px;min-height:48vh}
-.coc-soon{font-family:'Cinzel',serif;font-size:2rem;font-weight:700;color:var(--gold);letter-spacing:.06em}
-.coc-blurb{color:var(--text-dim);font-style:italic;font-size:1.02rem;max-width:420px;line-height:1.5}
 
 /* ─── Browser ───────────────────────────────────────────────────────────── */
 .browser{max-width:820px;margin:0 auto;padding:0 20px 48px}
@@ -200,7 +169,8 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,se
 .deck-pile.selected{border-color:var(--gold-light);color:var(--gold-light);box-shadow:0 0 0 2px var(--gold-light)}
 .deck-pile.disabled{cursor:not-allowed;opacity:.5}
 .deck-remaining{font-size:1.3rem;font-weight:700;color:var(--text);font-family:'Cinzel',serif}
-.card{width:88px;min-height:120px;border-radius:var(--radius);background:var(--surface2);border:1px solid var(--border);padding:8px 6px 6px;display:flex;flex-direction:column;cursor:pointer;transition:all .15s;flex-shrink:0}
+.card{width:88px;min-height:120px;border-radius:var(--radius);background:var(--surface2);border:1px solid var(--border);padding:8px 6px 6px;display:flex;flex-direction:column;cursor:pointer;transition:all .15s;flex-shrink:0;position:relative}
+.ai-val{position:absolute;bottom:5px;right:5px;font-family:'Cinzel',serif;font-size:.62rem;font-weight:600;color:#e8c86a;background:rgba(0,0,0,.4);border-radius:4px;padding:0 4px;line-height:1.4;pointer-events:none}
 .card:hover{border-color:rgba(201,168,76,.5);transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.4)}
 .card.selected{border-color:var(--gold-light);box-shadow:0 0 0 2px var(--gold-light)}
 .card.affordable{border-color:var(--green-gem)}
@@ -331,7 +301,7 @@ function GemToken({ color, size = 42 }) {
 	);
 }
 
-function CardView({ card, selected, affordable, disabled, onClick, compact }) {
+function CardView({ card, selected, affordable, disabled, onClick, compact, aiValue }) {
 	return (
 		<div
 			className={`card${selected ? " selected" : ""}${affordable ? " affordable" : ""}${disabled ? " disabled" : ""}`}
@@ -350,6 +320,9 @@ function CardView({ card, selected, affordable, disabled, onClick, compact }) {
 					</div>
 				))}
 			</div>
+			{aiValue != null && (
+				<span className="ai-val" title="AI card value (variant H)">{aiValue}</span>
+			)}
 		</div>
 	);
 }
@@ -889,7 +862,7 @@ export default function SpenderApp() {
 
 	// ── Render helpers ─────────────────────────────────────────────────────
 	function renderCard(card, opts = {}) {
-		if (!card) return <div key={Math.random()} style={{ width: 88, minHeight: 120 }} />;
+		if (!card) return <div style={{ width: 88, minHeight: 120 }} />;
 		// readonly: opponent's reserved cards — visible but not selectable/affordable.
 		const affordable = !opts.readonly && me && canAfford(card.cost, me.tokens, myBonuses);
 		const isSelected = !opts.readonly && selectedCard?.card?.id === card.id;
@@ -897,6 +870,7 @@ export default function SpenderApp() {
 			<CardView key={card.id} card={card}
 				selected={isSelected}
 				affordable={affordable && myTurn}
+				aiValue={roomData?.ai_card_values?.[card.id]}
 				disabled={opts.disabled}
 				onClick={() => {
 					if (opts.readonly || !myTurn) return;
@@ -1088,10 +1062,21 @@ export default function SpenderApp() {
 							</button>
 						))}
 					</div>
+
+					<div style={{ textAlign: "center", marginTop: 24 }}>
+						<button type="button" className="btn btn-ghost" onClick={() => setScreen("books")}>
+							📚 Books
+						</button>
+					</div>
 				</div>
 				{toast && <div className="toast">{toast}</div>}
 			</div>
 		</>
+	);
+
+	// Books — personal ranked reading list (public read, owner edit)
+	if (screen === "books") return (
+		<Books authUser={authUser} onExit={() => setScreen("home")} />
 	);
 
 	// Castles of Crimson — self-contained game component, mounted by the shell.
@@ -1130,7 +1115,7 @@ export default function SpenderApp() {
 							{showAiPicker && (
 								<div className="ai-picker">
 									<span className="ai-picker-label">Choose AI opponent</span>
-									{["A", "B", "C", "C2", "Z"].map(v => (
+									{["A", "B", "C", "C2", "Z", "H"].map(v => (
 										<button key={v} className="btn btn-outline btn-sm"
 											onClick={() => { setShowAiPicker(false); handleCreate(true, v); }}>
 											AI {v}

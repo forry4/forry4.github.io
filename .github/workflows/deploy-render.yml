@@ -5,9 +5,12 @@ on:
     branches: [main]
     paths:
       - 'games/spender/main.py'
+      - 'books/**'
       - 'games/spender/requirements.txt'
       - 'games/spender/app.py'
+      - 'games/spender/Dockerfile'
       - 'games/spender/ai/az_model.npz'
+      - 'games/spender/ai/az/**/*.py'   # serving imports: heuristic, valuation, engine, actions, mcts, infer_np
       - 'games/castles_of_crimson/**/*.py'
   workflow_dispatch:
 

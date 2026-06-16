@@ -16,6 +16,8 @@ import logging
 import sqlite3
 import os
 import time
+import hashlib
+import hmac
 
 app = FastAPI(title="Spender API")
 
@@ -166,14 +168,141 @@ def normalize_room(rid: str) -> str:
 
 
 # ─── Database ────────────────────────────────────────────────────────────────
+# Two backends behind one tiny DBAPI-ish wrapper:
+#   * local stdlib sqlite3  — default (dev + tests; also the prod *fallback*)
+#   * Turso / libsql remote — used in production when TURSO_DATABASE_URL is set,
+#     so data survives Render's ephemeral filesystem (which wipes a local sqlite
+#     file on every deploy/cold-start).
+# The wrapper makes rows accessible by BOTH index (row[0]) and column name
+# (row["id"]) regardless of the underlying driver's native row type, so the
+# existing query code is unchanged. Turso is verified by a boot-time self-test;
+# if anything about it fails we fall back to local sqlite (the site stays up,
+# just non-persistent) instead of crashing.
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "users.db")
+TURSO_URL = os.environ.get("TURSO_DATABASE_URL")
+TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
+
+
+class _Row:
+    """Row supporting row[i] and row['col'] (sqlite3.Row-compatible subset)."""
+    __slots__ = ("_cols", "_vals")
+
+    def __init__(self, cols, vals):
+        self._cols = cols
+        self._vals = vals
+
+    def __getitem__(self, k):
+        if isinstance(k, str):
+            return self._vals[self._cols.index(k)]
+        return self._vals[k]
+
+    def __iter__(self):
+        return iter(self._vals)
+
+    def __len__(self):
+        return len(self._vals)
+
+
+class _Cursor:
+    """Cursor over a raw connection's execute() result; yields _Row objects.
+    Implements executemany via a loop so it works on drivers (libsql) that may
+    not expose a native executemany."""
+
+    def __init__(self, raw_conn):
+        self._conn = raw_conn
+        self._res = None
+
+    def execute(self, sql, params=()):
+        self._res = self._conn.execute(sql, params)
+        return self
+
+    def executemany(self, sql, seq):
+        for p in seq:
+            self._res = self._conn.execute(sql, p)
+        return self
+
+    @property
+    def description(self):
+        return getattr(self._res, "description", None)
+
+    def _cols(self):
+        d = self.description
+        return [c[0] for c in d] if d else []
+
+    def fetchone(self):
+        r = self._res.fetchone()
+        return None if r is None else _Row(self._cols(), list(r))
+
+    def fetchall(self):
+        cols = self._cols()
+        return [_Row(cols, list(r)) for r in self._res.fetchall()]
+
+
+class _Conn:
+    """Thin connection wrapper exposing cursor()/execute()/commit()/close()
+    uniformly over stdlib sqlite3 and libsql connections."""
+
+    def __init__(self, raw):
+        self._raw = raw
+
+    def cursor(self):
+        return _Cursor(self._raw)
+
+    def execute(self, sql, params=()):
+        return _Cursor(self._raw).execute(sql, params)
+
+    def executemany(self, sql, seq):
+        return _Cursor(self._raw).executemany(sql, seq)
+
+    def commit(self):
+        self._raw.commit()
+
+    def close(self):
+        try:
+            self._raw.close()
+        except Exception:
+            pass
+
+
+def _connect_turso():
+    import libsql  # lazy: only imported when Turso is configured
+    return libsql.connect(database=TURSO_URL, auth_token=TURSO_TOKEN)
+
+
+def _turso_selftest() -> bool:
+    """Verify the Turso connection AND that name-based row access works through
+    our wrapper. Any failure -> False (fall back to local sqlite)."""
+    if not TURSO_URL:
+        return False
+    try:
+        raw = _connect_turso()
+        raw.execute("CREATE TABLE IF NOT EXISTS _selftest (id TEXT, name TEXT)")
+        raw.execute("DELETE FROM _selftest")
+        raw.execute("INSERT INTO _selftest (id, name) VALUES (?, ?)", ("x", "ok"))
+        raw.commit()
+        res = raw.execute("SELECT id, name FROM _selftest")
+        row = res.fetchone()
+        cols = [c[0] for c in res.description]
+        assert row is not None and _Row(cols, list(row))["name"] == "ok"
+        raw.execute("DROP TABLE _selftest")
+        raw.commit()
+        raw.close()
+        LOG.info("Turso/libsql verified — using persistent Turso database.")
+        return True
+    except Exception as e:  # noqa: BLE001 - never let DB setup crash boot
+        LOG.warning("TURSO_DATABASE_URL set but Turso is unusable (%s); "
+                    "falling back to LOCAL sqlite (data will NOT persist).", e)
+        return False
+
+
+_USE_TURSO = _turso_selftest()
 
 
 def get_db_conn():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
+    if _USE_TURSO:
+        return _Conn(_connect_turso())
+    return _Conn(sqlite3.connect(DB_PATH, check_same_thread=False))
 
 
 def init_db():
@@ -209,6 +338,14 @@ def init_db():
         created_at INTEGER,
         updated_at INTEGER
     )""")
+    # Site admins (durable role). Membership = a row keyed by user id. Kept as its
+    # own table (not a users column) so it needs only CREATE TABLE IF NOT EXISTS —
+    # no ALTER-TABLE migration against the existing prod/Turso users table.
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS admins (
+        user_id    TEXT PRIMARY KEY,
+        granted_at INTEGER
+    )""")
     conn.commit()
     conn.close()
 
@@ -217,17 +354,45 @@ def gen_token(n=32):
     return ''.join(random.choices(string.ascii_letters + string.digits, k=n))
 
 
+# Password hashing: PBKDF2-HMAC-SHA256 (stdlib) stored as "pbkdf2$<iters>$<salt>$<hex>".
+# verify_password also accepts the legacy "<salt>$<sha256hex>" format and the caller
+# transparently upgrades those to PBKDF2 on the next successful login.
+PBKDF2_ITERS = 200_000
+
+
+def hash_password(password: str) -> str:
+    salt = gen_token(16)
+    h = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), PBKDF2_ITERS).hex()
+    return f"pbkdf2${PBKDF2_ITERS}${salt}${h}"
+
+
+def verify_password(stored: str, password: str) -> bool:
+    parts = (stored or "").split("$")
+    if len(parts) == 4 and parts[0] == "pbkdf2":
+        try:
+            calc = hashlib.pbkdf2_hmac("sha256", password.encode(), parts[2].encode(), int(parts[1])).hex()
+        except ValueError:
+            return False
+        return hmac.compare_digest(calc, parts[3])
+    if len(parts) == 2:  # legacy salt$sha256
+        salt, h = parts
+        return hmac.compare_digest(hashlib.sha256((salt + password).encode()).hexdigest(), h)
+    return False
+
+
 def create_user(name: str, password: str) -> dict | None:
-    import hashlib
     uid = gen_token(10)
-    salt = gen_token(6)
-    h = hashlib.sha256((salt + password).encode()).hexdigest()
     conn = get_db_conn()
     cur = conn.cursor()
     try:
-        cur.execute("INSERT INTO users (id,name,password_hash) VALUES (?,?,?)", (uid, name, f"{salt}${h}"))
+        cur.execute("INSERT INTO users (id,name,password_hash) VALUES (?,?,?)",
+                    (uid, name, hash_password(password)))
         conn.commit()
-    except Exception:
+    except sqlite3.IntegrityError:
+        conn.close()
+        return None  # name already taken
+    except Exception as e:  # noqa: BLE001 - don't 500 the endpoint; surface in logs
+        LOG.error("create_user failed for %r: %s", name, e)
         conn.close()
         return None
     conn.close()
@@ -235,7 +400,6 @@ def create_user(name: str, password: str) -> dict | None:
 
 
 def authenticate_user(name: str, password: str) -> dict | None:
-    import hashlib
     conn = get_db_conn()
     cur = conn.cursor()
     cur.execute("SELECT * FROM users WHERE name = ?", (name,))
@@ -243,20 +407,25 @@ def authenticate_user(name: str, password: str) -> dict | None:
     if not row:
         conn.close()
         return None
-    try:
-        salt, h = row["password_hash"].split("$")
-    except Exception:
-        conn.close()
-        return None
-    if hashlib.sha256((salt + password).encode()).hexdigest() != h:
+    stored = row["password_hash"]
+    if not verify_password(stored, password):
         conn.close()
         return None
     token = gen_token(32)
     expiry = int(time.time()) + 7 * 24 * 3600
+    # Upgrade legacy (non-PBKDF2) hashes on successful login.
+    if not (stored or "").startswith("pbkdf2$"):
+        cur.execute("UPDATE users SET password_hash=? WHERE id=?", (hash_password(password), row["id"]))
     cur.execute("UPDATE users SET session_token=?, session_expiry=? WHERE id=?", (token, expiry, row["id"]))
     conn.commit()
+    # Bootstrap the admin role: the SITE_OWNER username is auto-granted admin on
+    # login (durable thereafter via the admins table).
+    owner = site_owner_name()
+    if owner and row["name"] == owner:
+        grant_admin(conn, row["id"])
+    admin = is_admin_id(conn, row["id"])
     conn.close()
-    return {"id": row["id"], "name": row["name"], "session_token": token}
+    return {"id": row["id"], "name": row["name"], "session_token": token, "is_admin": admin}
 
 
 def get_user_by_session(token: str) -> dict | None:
@@ -265,12 +434,50 @@ def get_user_by_session(token: str) -> dict | None:
     conn = get_db_conn()
     cur = conn.cursor()
     now = int(time.time())
-    cur.execute("SELECT * FROM users WHERE session_token=? AND session_expiry>?", (token, now))
+    # Single query (1 round-trip) — is_admin via EXISTS subquery; positional read
+    # avoids depending on the driver aliasing the computed column in row metadata.
+    cur.execute(
+        "SELECT id, name, (SELECT 1 FROM admins WHERE user_id = users.id) "
+        "FROM users WHERE session_token=? AND session_expiry>?",
+        (token, now),
+    )
     row = cur.fetchone()
     conn.close()
     if not row:
         return None
-    return {"id": row["id"], "name": row["name"]}
+    return {"id": row[0], "name": row[1], "is_admin": bool(row[2])}
+
+
+# ─── Site owner / admin identity ──────────────────────────────────────────────
+# Admin is a durable role stored in the `admins` table; the SITE_OWNER env var
+# (a username) is the bootstrap that auto-grants admin on login. `is_site_owner`
+# is the canonical "is this an admin" check used by features (books is the first
+# consumer). SITE_OWNER is read at call time so an env change takes effect on the
+# next restart with no code change.
+def site_owner_name() -> str | None:
+    v = os.environ.get("SITE_OWNER")
+    return v.strip() if v and v.strip() else None
+
+
+def grant_admin(conn, user_id: str) -> None:
+    conn.execute("INSERT OR IGNORE INTO admins (user_id, granted_at) VALUES (?, ?)",
+                 (user_id, int(time.time())))
+    conn.commit()
+
+
+def is_admin_id(conn, user_id: str) -> bool:
+    cur = conn.cursor()
+    cur.execute("SELECT 1 FROM admins WHERE user_id = ?", (user_id,))
+    return cur.fetchone() is not None
+
+
+def is_site_owner(user: dict | None) -> bool:
+    if not user:
+        return False
+    if user.get("is_admin"):
+        return True
+    owner = site_owner_name()
+    return bool(owner and user.get("name") == owner)
 
 
 def create_reconnect_token(user_id: str, room_id: str, player_id: str, ttl: int = 120) -> str:
@@ -430,6 +637,13 @@ def delete_open_game(game_id: str, user_id: str) -> bool:
 
 init_db()
 
+# Books — a standalone top-level feature (books/), public read + owner write.
+# `books` is a sibling top-level package of `games/`, so it is importable wherever
+# games.spender.app is (repo root is on sys.path). Deps are injected so books
+# never imports main (no cycle).
+from books.api import setup_books  # noqa: E402
+setup_books(app, get_db_conn, get_user_by_session)
+
 
 # ─── Room helpers ─────────────────────────────────────────────────────────────
 
@@ -457,6 +671,13 @@ def mk_room_state(room_id: str) -> dict[str, Any]:
     }
     if room.get("ai_variant"):
         state["ai_variant"] = room["ai_variant"]
+        game = room.get("game")
+        if room["ai_variant"] == "H" and game and game.get("ai_player") \
+                and game.get("phase") != "over":
+            try:
+                state["ai_card_values"] = _v4_card_values(game, game["ai_player"])
+            except Exception:
+                pass
     return state
 
 
@@ -658,7 +879,9 @@ load_az_model()  # loads ai/az_model.npz → variant Z
 
 
 def _ai_variant_valid(variant: str) -> bool:
-    return variant in WEIGHT_VARIANTS or (variant == "Z" and AZ_EVALUATE is not None)
+    return (variant in WEIGHT_VARIANTS
+            or (variant == "Z" and AZ_EVALUATE is not None)
+            or variant == "H")  # H = v4 valuation heuristic (pure code, always available)
 
 
 def _az_choose_move(game: dict, ai_pid: str, time_limit: float = 5.0) -> dict:
@@ -685,6 +908,46 @@ def _az_choose_move(game: dict, ai_pid: str, time_limit: float = 5.0) -> dict:
             search.apply_evals(p[0], float(v[0]))
     visits = search.root.N
     return _aza.action_to_move(s, max(range(len(visits)), key=visits.__getitem__))
+
+
+def _v4_choose_move(game: dict, ai_pid: str) -> dict:
+    """Variant-H move selection: the v4 valuation heuristic — a 1-ply greedy
+    argmax over the shared card-valuation model (no search). Returns an
+    incumbent dict-move; post-move discard/noble sub-decisions are resolved by
+    _run_ai_turn, same as the other variants. Fast (no model file, no MCTS)."""
+    from games.spender.ai.az import actions as _aza
+    from games.spender.ai.az import engine as _aze
+    from games.spender.ai.az import heuristic as _azh
+
+    s = _aze.from_game_dict(game)
+    a = _azh.choose_action(s, s.turn)
+    return _aza.action_to_move(s, a)
+
+
+def _v4_card_values(game: dict, ai_pid: str) -> dict:
+    """The v4 heuristic's card_value for every visible board card + the AI's own
+    reserved cards, from the AI's seat — a transparency overlay for variant-H games
+    (so a human can see what the bot thinks each card is worth). Keyed by card id
+    (CARD_NAME[ci]) so the frontend can show it per card. Cheap; recomputed per
+    broadcast. Wrapped by callers in try/except so it can never break a room update."""
+    from games.spender.ai.az import engine as _aze
+    from games.spender.ai.az import valuation as _azv
+    from games.spender.ai.az import heuristic as _azh
+
+    try:
+        seat = game["order"].index(ai_pid)
+    except (KeyError, ValueError):
+        return {}
+    s = _aze.from_game_dict(game)
+    val = _azv.Valuation(s)
+    out: dict[str, float] = {}
+    for slot in range(12):
+        ci = s.board[slot]
+        if ci >= 0:
+            out[_aze.CARD_NAME[ci]] = round(_azh.card_value(val, s, ci, seat), 1)
+    for ci in s.reserved[seat]:
+        out[_aze.CARD_NAME[ci]] = round(_azh.card_value(val, s, ci, seat), 1)
+    return out
 
 
 # ─── AI Player ────────────────────────────────────────────────────────────────
@@ -1698,6 +1961,8 @@ async def _schedule_ai_turn(room_id: str) -> None:
     loop = asyncio.get_running_loop()
     if variant == "Z" and AZ_EVALUATE is not None:
         mv = await loop.run_in_executor(None, _az_choose_move, game_snapshot, ai_pid, 5.0)
+    elif variant == "H":
+        mv = await loop.run_in_executor(None, _v4_choose_move, game_snapshot, ai_pid)
     else:
         ai_weights = WEIGHT_VARIANTS.get(variant, WEIGHTS)
         mv = await loop.run_in_executor(
@@ -1742,7 +2007,8 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
             text = await websocket.receive_text()
             try:
                 msg = json.loads(text)
-            except Exception:
+            except json.JSONDecodeError as e:
+                LOG.warning("invalid JSON from ws client: %s", e)
                 await websocket.send_text(json.dumps({"type": "error", "message": "invalid json"}))
                 continue
 
@@ -2157,7 +2423,14 @@ async def auth_register(body: RegisterBody):
     user = create_user(body.name, body.password)
     if not user:
         return {"ok": False, "message": "name already taken"}
-    return {"ok": True, "user": user}
+    # Issue a session immediately so registering also logs the user in. The
+    # frontend and session-authenticated features (e.g. the Books page) rely on
+    # session_token; without this a freshly registered user has no token and is
+    # treated as logged-out.
+    authed = authenticate_user(body.name, body.password)
+    return {"ok": True,
+            "user": {**user, "is_admin": bool(authed and authed.get("is_admin"))},
+            "session_token": authed["session_token"] if authed else None}
 
 
 @app.post("/auth/login")
@@ -2165,7 +2438,9 @@ async def auth_login(body: LoginBody):
     u = authenticate_user(body.name, body.password)
     if not u:
         return {"ok": False, "message": "invalid name or password"}
-    return {"ok": True, "user": {"id": u["id"], "name": u["name"]}, "session_token": u["session_token"]}
+    return {"ok": True,
+            "user": {"id": u["id"], "name": u["name"], "is_admin": bool(u.get("is_admin"))},
+            "session_token": u["session_token"]}
 
 
 @app.get("/games")

@@ -5,3 +5,4 @@ pydantic
 websockets
 pytest
 numpy
+libsql              # Turso/libSQL client for persistent prod DB (imported only when TURSO_DATABASE_URL is set)
