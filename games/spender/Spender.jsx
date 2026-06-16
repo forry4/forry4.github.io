@@ -20,7 +20,7 @@ const GAMES = [
 // ─── Constants ─────────────────────────────────────────────────────────────
 const GEM_COLORS = ["white", "blue", "green", "red", "black"];
 const GEM_LABELS = { white: "Diamond", blue: "Sapphire", green: "Emerald", red: "Ruby", black: "Onyx", gold: "Gold" };
-const GEM_HEX = { white: "#ddd4be", blue: "#4a9eff", green: "#3dba6e", red: "#e05555", black: "#6a6a7a", gold: "#f5c842" };
+const GEM_HEX = { white: "#ddd4be", blue: "#6e74ff", green: "#54c23d", red: "#e05555", black: "#6a6a7a", gold: "#f5c842" };
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 function uid() { return Math.random().toString(36).slice(2, 10); }
@@ -96,7 +96,7 @@ const css = baseCss + `
 .home-game-name{font-family:'Cinzel',serif;font-size:1.32rem;font-weight:600;color:var(--gold);letter-spacing:.03em;margin-bottom:8px}
 .home-game-desc{color:var(--text-dim);font-size:.95rem;line-height:1.45;font-style:italic}
 .home-game-badge{position:absolute;top:14px;right:14px;font-family:'Cinzel',serif;font-size:.6rem;letter-spacing:.12em;text-transform:uppercase;padding:3px 9px;border-radius:10px}
-.home-game-badge.ready{color:var(--green-gem);border:1px solid rgba(61,186,110,.5)}
+.home-game-badge.ready{color:var(--green-gem);border:1px solid rgba(84,194,61,.5)}
 .home-game-badge.soon{color:var(--text-muted);border:1px solid var(--border)}
 
 /* ─── Browser ───────────────────────────────────────────────────────────── */
