@@ -9,8 +9,7 @@ import string
 from itertools import combinations
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 import logging
 import sqlite3
@@ -25,17 +24,14 @@ from core.auth import (
     create_reconnect_token, validate_reconnect_token, mark_reconnect_token_used,
 )
 
-app = FastAPI(title="Spender API")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Spender's HTTP + WebSocket routes live on this router. The composition root
+# (top-level app.py) creates the FastAPI app, applies CORS middleware, includes
+# this router, wires Books, and mounts Castles of Crimson — so the root app is no
+# longer owned by this game module.
+router = APIRouter()
 
 
-@app.get("/health")
+@router.get("/health")
 async def health():
     return {"status": "ok", "service": "spender", "version": "1.0"}
 
@@ -331,13 +327,6 @@ def delete_open_game(game_id: str, user_id: str) -> bool:
 
 
 init_db()
-
-# Books — a standalone top-level feature (books/), public read + owner write.
-# `books` is a sibling top-level package of `games/`, so it is importable wherever
-# games.spender.app is (repo root is on sys.path). Deps are injected so books
-# never imports main (no cycle).
-from books.api import setup_books  # noqa: E402
-setup_books(app, get_db_conn, get_user_by_session)
 
 
 # ─── Room helpers ─────────────────────────────────────────────────────────────
@@ -1728,7 +1717,7 @@ async def _schedule_ai_turn(room_id: str) -> None:
 
 # ─── WebSocket ────────────────────────────────────────────────────────────────
 
-@app.websocket("/ws/{room}/{player}")
+@router.websocket("/ws/{room}/{player}")
 async def ws_room_player(websocket: WebSocket, room: str, player: str):
     await websocket.accept()
     room_id = normalize_room(room)
@@ -2160,7 +2149,7 @@ class LoginBody(BaseModel):
     password: str
 
 
-@app.post("/auth/register")
+@router.post("/auth/register")
 async def auth_register(body: RegisterBody):
     user = create_user(body.name, body.password)
     if not user:
@@ -2175,7 +2164,7 @@ async def auth_register(body: RegisterBody):
             "session_token": authed["session_token"] if authed else None}
 
 
-@app.post("/auth/login")
+@router.post("/auth/login")
 async def auth_login(body: LoginBody):
     u = authenticate_user(body.name, body.password)
     if not u:
@@ -2185,12 +2174,12 @@ async def auth_login(body: LoginBody):
             "session_token": u["session_token"]}
 
 
-@app.get("/games")
+@router.get("/games")
 async def get_open_games():
     return {"ok": True, "games": list_open_games()}
 
 
-@app.get("/games/mine")
+@router.get("/games/mine")
 async def get_my_games(token: str | None = None):
     user = get_user_by_session(token)
     if not user:
@@ -2198,7 +2187,7 @@ async def get_my_games(token: str | None = None):
     return {"ok": True, "games": list_user_games(user["id"])}
 
 
-@app.post("/games/{game_id}/cancel")
+@router.post("/games/{game_id}/cancel")
 async def cancel_open_game(game_id: str, token: str | None = None,
                            player_id: str | None = None):
     # An open game is just a public waiting room (host_id is listed in /games).
@@ -2216,7 +2205,7 @@ async def cancel_open_game(game_id: str, token: str | None = None,
     return {"ok": deleted, "message": None if deleted else "not your open game"}
 
 
-@app.post("/me/session-token")
+@router.post("/me/session-token")
 async def session_token(token: str | None = None, room_id: str | None = None, player_id: str | None = None):
     user = get_user_by_session(token)
     if not user:
@@ -2226,17 +2215,6 @@ async def session_token(token: str | None = None, room_id: str | None = None, pl
     rt = create_reconnect_token(user["id"], normalize_room(room_id), player_id, ttl=120)
     return {"ok": True, "reconnect_token": rt}
 
-# ── Castles of Crimson ──────────────────────────────────────────────────────
-# Second game in the Forrest Games collection. Its self-contained FastAPI
-# sub-app is mounted under /coc so the whole site runs as one backend service
-# (WS = /coc/ws/{room}/{player}, REST = /coc/...). The mount is defensive: if
-# the optional game package is ever absent in a given deploy, the core backend
-# must still start (this is why an earlier unconditional import was reverted).
-try:
-    from games.castles_of_crimson.main import coc_app
-    app.mount("/coc", coc_app)
-    LOG.info("mounted Castles of Crimson at /coc")
-except Exception as _coc_err:  # pragma: no cover - optional package
-    import logging as _logging
-    _logging.getLogger("games.spender").warning("Castles of Crimson not mounted: %s", _coc_err)
+# Books wiring and the Castles of Crimson mount now live in the composition root
+# (top-level app.py), which includes this `router`. main.py no longer owns the app.
 

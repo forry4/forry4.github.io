@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths:
+      - 'app.py'   # composition root — creates the FastAPI app + mounts the features
       - 'core/**/*.py'   # shared DB + auth layer imported by main + coc + books
       - 'games/spender/main.py'
       - 'books/**'

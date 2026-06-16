@@ -18,8 +18,8 @@ package, NOT under `games/spender/`** — it was extracted out of
 
 ```
 games/spender/
-  main.py          # FastAPI + WebSocket backend (server + MCTS AI logic)
-  app.py           # thin re-export of main:app for the deploy entrypoint
+  main.py          # Spender server + MCTS AI logic; exposes `router` (APIRouter), not the app
+  app.py           # deploy-entrypoint shim → re-exports the top-level composition-root app
   Spender.jsx      # React 18 frontend (single file)
   users.db         # SQLite — users + games tables
   Dockerfile, requirements.txt
@@ -49,6 +49,7 @@ games/spender/
     test_train.py    # offline trainer: harness, evolve/TD phases, weight I/O
     test_az_engine.py   # az engine: 200-game differential parity vs main.py + edge cases
     test_az_actions.py  # masks, features, MCTS smoke, arena bridge, variant-Z serving
+app.py             # ── composition root (REPO ROOT): FastAPI app + middleware + feature wiring ──
 core/              # ── shared backend platform (imported by spender, coc, books) ──
   db.py            # dual sqlite/Turso connection wrapper (_Conn/_Cursor/_Row) + get_db_conn + init_core_schema
   auth.py          # users/sessions/passwords, admin + SITE_OWNER identity, reconnect tokens
@@ -339,9 +340,24 @@ imports the old arrangement required.
   `get_user_by_session` `setup_books` still receives — main passes the core functions).
 - **Tests**: `core/tests/test_db_auth.py` (wrapper + password + admin + `init_core_schema`,
   in-memory sqlite). CI runs `core/tests/` first; Render watches `core/**/*.py`.
-- **Not yet done** (later phases): a composition-root `app.py` (so the FastAPI `app`
-  + mounts stop living in a game module — that one touches the deploy entrypoint), the
-  frontend shell extraction, and DRYing the duplicated room-server scaffolding.
+- **Not yet done** (later phases): the frontend shell extraction (the site shell still
+  lives inside `Spender.jsx`), and DRYing the duplicated room-server scaffolding (Phase 3).
+
+### Composition root — top-level `app.py` (Phase 2, done)
+The FastAPI **`app` and the feature wiring no longer live in a game module.** The
+top-level **`app.py`** is the composition root: it creates `app = FastAPI(...)`,
+applies CORS middleware, `include_router`s Spender's routes, `setup_books(...)`,
+and mounts Castles of Crimson at `/coc` (same defensive try/except as before).
+- `games/spender/main.py` now exposes **`router = APIRouter()`** (all its routes use
+  `@router.…`, including the single `/ws/{room}/{player}` websocket) instead of owning
+  the app. It still runs `init_db()` at import.
+- **Layering**: `core/` (bottom) → features (`games.spender`, `games.castles_of_crimson`,
+  `books`) → `app.py` (top). The composition root depends on features; features don't
+  depend on it. `core` depends on neither.
+- **Deploy entrypoint is unchanged**: `games/spender/app.py` is a thin shim doing
+  `from app import app` (absolute import of the top-level module — repo root is on
+  sys.path), so Procfile/Dockerfile/render.yaml keep targeting `games.spender.app:app`.
+  Render also watches the new top-level `app.py`.
 
 ---
 
