@@ -43,11 +43,26 @@ from . import valuation2 as V
 W_TEMPO = 0.5      # cost: turns to collect
 W_GEM = 0.2        # cost: total post-bonus gems to pay
 W_GOLD = 0.4       # cost: estimated gold coins needed
-NOBLE_SCALE = 2.0  # noble-progress contribution, scaled toward a noble's VP
+NOBLE_SCALE = 3.0  # noble-progress contribution, scaled toward a noble's VP
 
 # point staging: future points scaled by a global game stage (low early -> 1 late)
 STAGE_K = 8        # cards-bought for a full engine-stage; stage = max(cards/STAGE_K, leader_pts/15)
 STAGE_FLOOR = 0.25  # early floor: fraction of point value still counted at game start
+
+# engine horizon-decay (the MIRROR of point staging): an engine card built late has few
+# remaining buys to pay off, so engine value should fall as we accumulate cards. Scales engine
+# by (1 - ENG_DECAY * own), own = min(1, cards_we_own/STAGE_K). 0.0 = OFF (flat engine value).
+# 0.3 (tuned): engine fades to ~70% of early value by ~8 cards bought -- a gentle fade, not a
+# collapse. The ROBUST value: positive on all 6 fresh holdout seed sets (11/12 over both rounds).
+# Higher over-corrected (0.5 had a real -0.025 downside seed; 1.0 was -0.045); lower (0.1) was a
+# no-op (~0.000).
+#   CAVEAT: the effect is MINIMAL -- only ~+0.011 win rate vs H (the big lever was ENG_DECK_W +
+#   NOBLE_SCALE, ~+0.06). Worth keeping for correctness (it's the conceptual mirror of the point
+#   stage), but it is NOT a major strength driver. It also reuses `own = cards/STAGE_K` -- exactly
+#   the quantity behind the point `stage` -- so a future cleanup could FOLD this into the stage
+#   machinery (one shared game-progress signal driving points up AND engine down) instead of
+#   carrying ENG_DECAY as a separate knob.
+ENG_DECAY = 0.3
 
 # token-cap anti-hoard: near the 10-cap, buy the best affordable instead of taking gems
 CAP9_BUY_ABOVE = 0.5    # at 9 tokens, buy the best affordable card if its take_value exceeds this
@@ -61,6 +76,21 @@ USE_SPECULATIVE_RESERVE = False  # acquisition + gold-necessary reserves: OFF --
 RESERVE_GAP = 0.5                # acquisition (speculative only): reserve the top unaffordable board
                                  # card when its take_value exceeds the next board card's by >= this.
 
+# take-2-same: the model otherwise assumes <=1 gem/color/turn, so the bot never takes 2 of one
+# color. _bottleneck_take2 implements the one defensible exception -- take 2 to finish a card we
+# have RESERVED that is waiting on a SINGLE remaining color (>= TAKE2_MIN_STEEP) the bank is full
+# of. RESERVED-only is the conceptually-right form: a reserved card is locked (opponent can't take
+# it, board can't churn it away), so committing 2 gems to its one remaining color has none of the
+# option-value cost that made take-2 toward a BOARD card a measured wash (-0.006) / the naive
+# any-card version an outright loss (-0.03).
+#   MEASURED ~NEUTRAL (slightly -0.003), but only because it almost never fires (0.27%): H2's only
+#   reserves are WINNING reserves, which are gold-necessary (blocked by a gem the bank CAN'T
+#   supply) -- the opposite of take-2's "bank full of it", so the two conditions rarely co-occur.
+#   To make this matter, the bot would need to SPECULATIVELY reserve deep single-color cards and
+#   then take-2 to finish them (an untested combined experiment). Kept behind the flag, default OFF.
+USE_TAKE2 = False
+TAKE2_MIN_STEEP = 2              # min remaining need in the bottleneck color to fire the take-2
+
 
 def components(val: V.Valuation, s: E.State, ci: int, seat: int):
     """The take_value pieces for `ci` from `seat`: (take, engine, point, cost).
@@ -69,6 +99,9 @@ def components(val: V.Valuation, s: E.State, ci: int, seat: int):
             + W_GEM * val.gem_cost(ci, seat)
             + W_GOLD * val.gold_cost(ci, seat))
     engine = val.engine_value(ci, seat)
+    if ENG_DECAY:  # horizon-decay engine as we own more cards (few remaining buys to pay off)
+        own = s.purchased_n[seat] / STAGE_K
+        engine *= 1.0 - ENG_DECAY * (own if own < 1.0 else 1.0)
     stage = max(s.purchased_n[seat] / STAGE_K, max(s.points[0], s.points[1]) / E.WIN_POINTS)
     if stage > 1.0:
         stage = 1.0
@@ -151,6 +184,37 @@ def _choose_take(s, seat, val, targets, legal):
         if _take_colors(a) is not None and not _is_take2s(a):
             return a
     return None
+
+
+def _bottleneck_take2(s, seat, val, legal_set):
+    """Take-2 of a single-color bottleneck, but ONLY to finish a card we have RESERVED.
+
+    Reserved cards are LOCKED (the opponent can't take them, the board can't churn them away) and
+    are typically the deep single-color L2/L3s you commit to -- so pouring 2 gems into a reserved
+    card's one remaining color has none of the option-value cost that made take-2 toward a BOARD
+    card a wash (a board card can vanish or be out-raced; a reserved one is already yours, just
+    complete it). The "2 white when you also need red" trap is excluded by requiring a SINGLE
+    remaining color. Fires for the reserved card closest to done that qualifies:
+      - reserved + unaffordable now,
+      - exactly ONE color still needed, >= TAKE2_MIN_STEEP of it,
+      - the take-2 action for that color is legal (engine requires bank[color] >= 4 == full).
+    Returns the take-2 action, or None.
+    """
+    best = None
+    for ci in s.reserved[seat]:
+        if val.affordable_now(ci, seat):
+            continue
+        d = V._color_deficits(s, ci, seat)
+        needed = [c for c in range(5) if d[c] > 0]
+        if len(needed) != 1:                  # single remaining color (excludes the multi-color trap)
+            continue
+        col = needed[0]
+        if d[col] < TAKE2_MIN_STEEP:          # need 2+ of it for a take-2 to beat a take-1
+            continue
+        a = E.A_TAKE2S + col
+        if a in legal_set and (best is None or d[col] < best[1]):   # closest reserved card to done
+            best = (a, d[col])
+    return best[0] if best else None
 
 
 def _choose_discard(s, seat, legal, targets):
@@ -382,6 +446,14 @@ def choose_action(s: E.State, seat: int | None = None) -> int:
         top_a = (E.A_BUY_BOARD + top_idx) if top_kind == "board" else (E.A_BUY_RESV + top_idx)
         if top_a in legal_set:
             return top_a
+
+    # 4b) Take-2-same to FINISH a RESERVED card waiting on a single color the bank is full of.
+    #     Reserved = locked, so committing 2 gems to its bottleneck has no option-value cost.
+    #     n_tokens < 8 here, so take-2 -> <= 9 (never trips the cap).
+    if USE_TAKE2:
+        a = _bottleneck_take2(s, seat, val, legal_set)
+        if a is not None:
+            return a
 
     # 5) Speculative reserve (acquisition + gold-necessary). OFF by default -- a measured
     #    tempo drag; the winning-reserve above is the only reserve on by default.

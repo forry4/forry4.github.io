@@ -32,7 +32,7 @@ from . import engine as E
 GOLD_BANK_CAP = 2   # gems of the bottleneck color assumed pullable from the bank in gold_cost
 ENG_DIV = 8.0       # engine_value: PTS divisor (higher = flatter; values broad colors over point-heavy ones)
 ENG_FLOOR = 0.2     # engine_value: zero-point floor in each card's weight
-ENG_DECK_W = 1.0    # engine_value: weight on the forward-looking deck-demand term
+ENG_DECK_W = 3.5    # engine_value: weight on the forward-looking deck-demand term
 NOBLE_CLOSE_FLOOR = 0.2   # noble_progress: a card whose color a visible noble needs scores at least
                           # this (per such noble) even at zero bonuses -- "relevance" survives distance
 
