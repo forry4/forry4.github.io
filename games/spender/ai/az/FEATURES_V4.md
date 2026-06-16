@@ -256,6 +256,42 @@ visible to the same check. Two consequences for the retrain:
    bit so the net can compute "does my 15 actually end the game" without having to infer it
    — the heuristic needed exactly that distinction to stop throwing first-player wins.
 
+### Cost / tempo-accuracy campaign (June 2026) — one WIN (W_COST), the rest saturated
+
+A second wave of structural A/Bs, all on the corrected-tta base. **The headline: a card's
+total *cost* is a real, missing signal; making the tempo *estimate* more accurate is not.**
+
+- **`W_COST` — SHIPPED (the win).** A cheapness discount for **0-point cards only**:
+  `card_value /= (1 + 0.4 * total_effective_cost)`. Rationale: `efficiency = pts/(cost+1)`
+  is 0 for point-less cards, so cost is invisible there and two same-bonus 0-pt cards tie
+  regardless of price (engine/noble key only on bonus *color*); this prices the cheaper one
+  higher (same engine benefit for less invested → more leftover gems). Validated **+0.028,
+  z=+2.87** vs all-off over 2000 paired seeds; "W_COST + W_SPREAD combined" was no better
+  than W_COST alone. **Net guidance:** expose **`total_effective_cost` per candidate** (and
+  it already underlies `efficiency`) — the net needs the raw cost, not just points-per-cost,
+  because for 0-point engine cards the *level* of investment is the whole signal.
+- **Tested and REJECTED** (all default-off, stripped from the heuristic; kept here so we
+  don't relitigate):
+  | idea | result | why |
+  |------|--------|-----|
+  | **W_SPREAD** (L1 cost-concentration discount) | +0.039 @1000 → **−0.002 @2000 (wash)** | the 1000-seed gain was regression-to-the-mean noise; `cost_concentration` survives only as a *net* scalar candidate |
+  | **cap-aware take** (avoid overflowing the 10-cap) | **−0.0145 (hurt)** | the "take-then-discard" churn is cosmetic; banking the extra gem + choosing what to keep beats the tidy discard |
+  | **reserve-for-gold** (reserve a 1-gold-short target for the wild) | +0.0005 (inert) | the trigger almost never fires |
+  | **noble-contention** (boost a card whose noble the opp also races) | +0.010 @1000 → −0.004 @1000 (wash) | denial is a documented 1-ply blind spot; a *net* feature, not a greedy win |
+  | **TTA_PAIR_ONCE** (take-2-same needs bank≥4 → pair a color once) | **−0.026, z=−1.86 (hurt)** | *correct* (4-of-a-color is really 3 turns) but the slightly-optimistic tta keeps the bot usefully aggressive; accuracy here costs more than the error did |
+  | **engine-value tta-decay** (discount engine value by turns-away) | +0.005 (wash) | consistent positive *lean* but never significant — a sharper net signal, not a greedy win |
+
+**The load-bearing meta-finding (do NOT relitigate):** every tempo/reachability *accuracy*
+refinement washed or hurt for the greedy bot — and `cap-aware`/`pair-once` actively **hurt**
+because they make it more *pessimistic*, and the mildly-optimistic tempo estimate keeps it
+aggressively pursuing cards (which beats caution). This is the saturation thesis in sharp
+form: **for the 1-ply policy, value/scoring signals (end-game defense, W_COST) win; tempo
+accuracy does not.** These accuracy refinements are exactly the sharper signals a *searching*
+net can exploit where a greedy argmax can't — so they belong in the feature set, not as
+greedy levers. (Mirage note: a planned `unreachable_by_taking` check generalizes the hard
+`≥5-single-color` mirage to "affordable within the 10-hold cap + gold budget, on *effective*
+cost" — same class; expected to help the net more than greedy H.)
+
 ## Global additions (6 floats)
 
 | feature | formula | norm |

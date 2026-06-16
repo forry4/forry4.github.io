@@ -69,21 +69,15 @@ USE_TEMPO_DISCOUNT = True    # tempo as a multiplicative time-discount (value ne
 USE_ENDGAME_DEFENSE = True   # near the end: take a winning buy only if it's SECURE (a
                              # first player's 15 lets the opponent overtake on their final
                              # turn); else deny the opponent's overtaking/winning board card
-W_SPREAD = 0.0               # EXPERIMENTAL (default 0 = off, byte-identical): L1-ONLY cost-
-                             # spread discount -- card_value /= (1 + W_SPREAD * cost_concentration)
-                             # for level-1 cards only, so a spread cost (2g+1r) outranks a
-                             # single-color one (3g) of equal value: spread cards collect 3
-                             # distinct useful gems/turn vs forcing a take-2-same (2 useful).
-                             # Gated to L1 because L2/L3 concentration is often a legit rush
-                             # target where efficiency should rule. Sweep before shipping.
-W_COST = 0.0                 # EXPERIMENTAL (default 0 = off, byte-identical): cheapness discount
-                             # for 0-POINT cards only -- card_value /= (1 + W_COST * total_eff_cost).
-                             # efficiency = pts/(cost+1) is 0 for point-less cards, so cost is
-                             # invisible there and two same-bonus 0-pt cards tie regardless of price;
-                             # engine/noble key only on bonus color. This prices the cheaper one
-                             # higher (less invested for the same engine benefit -> more leftover
-                             # gems). Gated to PTS==0 so point cards (where efficiency already
-                             # prices cost) are not double-penalized. Sweep before shipping.
+W_COST = 0.4                 # cheapness discount for 0-POINT cards only -- card_value /=
+                             # (1 + W_COST * total_eff_cost). efficiency = pts/(cost+1) is 0 for
+                             # point-less cards, so cost is invisible there and two same-bonus 0-pt
+                             # cards tie regardless of price (engine/noble key only on bonus color);
+                             # this prices the cheaper one higher (less invested for the same engine
+                             # benefit -> more leftover gems). Gated to PTS==0 so point cards (priced
+                             # by efficiency) aren't double-penalized. VALIDATED: +0.028 (z=2.87) vs
+                             # all-off over 2000 paired seeds. (A parallel L1 cost-spread discount,
+                             # W_SPREAD, was tested alongside it and WASHED at 2000 seeds -- dropped.)
 # (engine_value now also counts a bonus's discount to your own RESERVED cards, at a
 # slight per-card premium -- see valuation.RESERVED_ENGINE_W. This is correct: a card
 # you reserved is one you intend to buy. If it dents win rate, the cause is reserving
@@ -148,10 +142,6 @@ def card_value(val: V.Valuation, s: E.State, ci: int, seat: int) -> float:
         v = base / (1.0 + W_TEMPO * tta)
     else:
         v = base - W_TEMPO * tta
-    # L1-only cost-spread discount (default off): a single-color-concentrated L1 cost
-    # is slower / less gem-efficient to collect than a spread one of equal value.
-    if W_SPREAD and E.LEVEL_OF[ci] == 1:
-        v = v / (1.0 + W_SPREAD * val.cost_concentration(ci, seat))
     # 0-point cards: efficiency can't see cost, so price the cheaper one higher.
     if W_COST and E.PTS[ci] == 0:
         v = v / (1.0 + W_COST * val.total_effective_cost(ci, seat))

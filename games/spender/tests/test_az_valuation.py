@@ -304,47 +304,27 @@ def test_cost_concentration_counts_duplicate_gems():
         assert V.cost_concentration(s, spread, seat) == 0
 
 
-def test_w_spread_discounts_concentrated_L1_only():
-    # The L1-gated cost-spread discount must lower a concentrated L1 card's value
-    # while leaving L2/L3 cards (excluded by the gate) byte-identical.
-    s = E.new_game(random.Random(5))
-    seat = s.turn
-    val = V.Valuation(s)
-    l1 = next(ci for ci in range(E.N_CARDS)
-              if E.LEVEL_OF[ci] == 1 and V.cost_concentration(s, ci, seat) > 0
-              and H.card_value(val, s, ci, seat) > 0)
-    hi = next(ci for ci in range(E.N_CARDS)
-              if E.LEVEL_OF[ci] >= 2 and V.cost_concentration(s, ci, seat) > 0)
-    assert H.W_SPREAD == 0.0                              # default off
-    base_l1 = H.card_value(val, s, l1, seat)
-    base_hi = H.card_value(val, s, hi, seat)
-    try:
-        H.W_SPREAD = 0.5
-        assert H.card_value(val, s, l1, seat) < base_l1   # concentrated L1 -> discounted
-        assert H.card_value(val, s, hi, seat) == base_hi  # L2/L3 -> untouched by the L1 gate
-    finally:
-        H.W_SPREAD = 0.0
-
-
 def test_w_cost_discounts_zero_point_cards_only():
-    # The cheapness discount must lower a 0-point card's value (efficiency is blind
-    # to cost there) while leaving point cards (priced by efficiency) untouched.
+    # The cheapness discount (shipped at W_COST=0.4) lowers a 0-point card's value
+    # (efficiency is blind to cost there) while leaving point cards (priced by
+    # efficiency) untouched. Default-agnostic: compares W_COST off vs on explicitly.
     s = E.new_game(random.Random(5))
     seat = s.turn
     val = V.Valuation(s)
-    zero = next(ci for ci in range(E.N_CARDS)
-                if E.PTS[ci] == 0 and V.total_effective_cost(s, ci, seat) > 0
-                and H.card_value(val, s, ci, seat) > 0)
-    pointed = next(ci for ci in range(E.N_CARDS) if E.PTS[ci] > 0)
-    assert H.W_COST == 0.0                                 # default off
-    base_zero = H.card_value(val, s, zero, seat)
-    base_pt = H.card_value(val, s, pointed, seat)
+    saved = H.W_COST
     try:
-        H.W_COST = 0.2
+        H.W_COST = 0.0                                     # baseline: off
+        zero = next(ci for ci in range(E.N_CARDS)
+                    if E.PTS[ci] == 0 and V.total_effective_cost(s, ci, seat) > 0
+                    and H.card_value(val, s, ci, seat) > 0)
+        pointed = next(ci for ci in range(E.N_CARDS) if E.PTS[ci] > 0)
+        base_zero = H.card_value(val, s, zero, seat)
+        base_pt = H.card_value(val, s, pointed, seat)
+        H.W_COST = 0.4                                      # on (the shipped value)
         assert H.card_value(val, s, zero, seat) < base_zero   # 0-pt -> discounted by cost
         assert H.card_value(val, s, pointed, seat) == base_pt  # point card -> untouched (gate)
     finally:
-        H.W_COST = 0.0
+        H.W_COST = saved
 
 
 # ─── Heuristic contract ──────────────────────────────────────────────────────
