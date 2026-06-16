@@ -164,6 +164,13 @@ The real bot. Pure Python, no new prod deps; reuses the engine contract.
 - **Visual simplifications (user-requested)**: SVG hex duchy with plain single-color tiles (no
   icons) except **monasteries show their number**; empty spaces show their required die number;
   VP is a plain per-player counter; only your board is shown with a **View Opponent** peek button.
+- **Depot ghost outlines (memory aid)**: because each numbered depot refills with the same two
+  TYPES every phase (`tiles.DEPOT_PLAN`), a taken hex leaves a faint **colored hex outline** in its
+  planned slot so the player remembers what goes where next phase. Driven by `DEPOT_PLAN_COLORS` +
+  `depotGhostColors(d, hexes)` (planned-minus-present multiset) in the JSX; `.coc-tile-ghost` is a
+  full-color clip-path hex with an inset `::after` filled `var(--surface2)` (the depot bg), leaving
+  only a rim. Ghosts are inert (no click) and the central **black depot** (no fixed plan) is left
+  untouched. `DEPOT_PLAN_COLORS`/`COLOR_TYPE_LABEL` are hardcoded mirrors of the backend plan.
 - **Pending modals** render by `game.pending_kind` in `PendingModal` — one block per kind
   (`ship_choose_depot`, `ship_adjacent_depot`, `building_take_choice`, `warehouse_sell`,
   `townhall_place`, `extra_action`); each has a Skip. A new engine pending kind needs a matching
@@ -175,15 +182,21 @@ The real bot. Pure Python, no new prod deps; reuses the engine contract.
 ### Deploy / branch notes
 - Both workflow path filters now watch `games/castles_of_crimson/**` (pages = whole folder so the
   bundled `.jsx` rebuilds; render = `**/*.py`). The Dockerfile already `COPY . /app`s the package.
-- The work currently lives on the **`coc-game`** branch (the pre-existing `castles-of-crimson`
-  branch held unrelated Spender UI work). **Frontend is feature-complete**: lobby board pickers
-  (your board + bot's board), per-player board rendering (your duchy + the View-Opponent peek both
-  use each player's own `board_id`), and the **setup-phase castle-selection UI** (`setupPhase`/
-  `setupMine` in the JSX — during `game.phase === "setup"` clicking a glowing burgundy space sends
-  `place_starting_castle`; normal dice/action controls are hidden and a banner guides the choice).
-  The vs-bot setup→play flow is verified deadlock-free at the engine+bot level (server `_handle_move`
-  applies `place_starting_castle` then schedules the bot, which places its own castle via
-  `legal_moves`). **Remaining before merge/deploy: a manual in-browser vs-bot playthrough.**
+- **LIVE as of 2026-06-16.** `coc-game` was merged to `main` (PR #1) and the game is deployed:
+  the **Castles of Crimson** home card is `status: "ready"` (shows **Play**), GitHub Pages serves
+  the CoC-bundled frontend, and the backend mounts `coc_app` at `/coc` (`GET /coc/health` → ok).
+  The merge brought `coc-game` (which was 48 commits behind) current with `main` — the only manual
+  conflict resolutions were the two deploy workflows (path-filter unions), `Spender.jsx` (kept main's
+  Books/variant-H additions + re-added the CoC import/entry/mount, dropped the old "Coming Soon"
+  placeholder), and the `az_model.npz` binary (took main's). Validated by the full suite (433 passed)
+  + a scripted vs-bot smoke (hard/normal to completion, no deadlock).
+- **Frontend is feature-complete**: lobby board pickers, per-player board rendering, the setup-phase
+  castle-selection UI (`setupPhase`/`setupMine`; clicking a glowing burgundy space during
+  `game.phase === "setup"` sends `place_starting_castle`), and the depot ghost outlines (above).
+- **Deploy flow (per user preference — see memory):** land changes on `main` directly, don't hand
+  over a PR. `gh` is not installed and `main` is checked out in the `forrestm_projects-ai` worktree,
+  so from the primary worktree: branch off `origin/main`, make the change, then
+  `git push origin <branch>:main` (fast-forwards `origin/main`); CI rebuilds `docs/` + redeploys.
 
 ---
 
