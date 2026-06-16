@@ -315,6 +315,26 @@ what separated the real win from the mirage here.
   weight is at its ceiling; this and the ENG_STAGE_DECAY win agree engine value wants *less*
   emphasis, not more.
 
+**Round 3 — the reserve / take / anti-hoard / structure thresholds (all UNTESTED before).**
+Screened @1000 at the 0.9 baseline; no adoption — every current value is already at or near
+its optimum, and two more mirages were caught by the disjoint confirm:
+- **`ENG_STAGE_DECAY=0.85` → −0.0165, z=−3.12** — *worse* than 0.9, confirming a **sharp
+  peak at 0.9** (0.85 below, 0.95/1.0 above both weaker). Not a plateau.
+- **`MIRAGE_STEEP=5`, `RESERVE_GAP=2.0`, `TOKEN_HOARD=8` all confirmed optimal** — both
+  directions hurt: MIRAGE_STEEP=6 −0.059 (z=−3.56, it's pinned to the bank-of-4 rule),
+  RESERVE_GAP=1.0 −0.051 (z=−3.77), and on a disjoint 2000-seed confirm TOKEN_HOARD 9/10/11
+  fell −0.015 / −0.033 / **−0.146** (the round-3 @1000 +0.010 for 9 was regression-to-mean).
+  TOKEN_HOARD=11 disables anti-hoard entirely (sum can't exceed the 10-cap) → **−0.146,
+  z=−13.2**, so **anti-hoard is among the most load-bearing factors in the bot.**
+- **Inert (exactly 0.0000 diff @1000):** `RESERVE_BASE`, `RESERVE_STEP`, `OPENING_PLY` — they
+  never bind in greedy play. No lever; don't re-sweep.
+
+**Net of the sweep:** of ~20 tunables screened across 3 rounds, exactly **one** adoptable win
+(ENG_STAGE_DECAY 0.7→0.9, +0.013 replicated). The rest are saturated at their hand-set values
+or inert — the heuristic's constants were already well-chosen; the structural *features* (above)
+are where the gains lived. Three @1000 false positives (BUY_FLOOR, TOKEN_HOARD=9, plus W_SPREAD
+earlier) all died on disjoint confirms, validating the replication bar.
+
 ## Global additions (6 floats)
 
 | feature | formula | norm |
