@@ -728,6 +728,26 @@ don't tune them further (saturated path).
   branch atomically → human playtest. Until then, **v3's iter-177 `az_model.npz` stays
   deployed** (variant Z is still the 305-dim v3 net).
 
+### H2 — the `take_value` heuristic (served website variant "H2", June 2026)
+`ai/az/heuristic2.py` + `valuation2.py` = **variant H2**: a from-scratch greedy heuristic on a
+single per-card scalar `take_value = (engine + point_value) / (1 + total_cost)`. **Full reference:
+`ai/az/H2.md`** — read it before touching H2. Key points:
+- `total_cost = W_TEMPO*tempo + W_GEM*gem + W_GOLD*gold` (post-bonus; **no-take-2** assumption, so
+  the steepest single color sets `tempo`); `point_value` is **distance-discounted by tempo** (`RATE`)
+  while `engine_value` is undiscounted → early-engine/late-points with no stage ramp.
+- **Tuned config (committed defaults)**: `W_TEMPO=0.5,W_GEM=0.2,W_GOLD=0.4,RATE=2.0,NOBLE_SCALE=2.0,
+  CAP8=0.8,CAP9=0.5,GOLD_TIEBREAK=0.2` + valuation2 `GOLD_BANK_CAP=2,ENG_DIV=8,ENG_FLOOR=0.2,
+  ENG_DECK_W=1.0`. → turn-1 sanity 0.92, ~0.81 vs **greedy** C2, ties/beats H (~0.49–0.51).
+- **Reserving — DON'T relitigate**: only the **winning-reserve** is on (a winning card blocked by an
+  out-of-bank gem → reserve to bank the gold and win; verified). All speculative reserving
+  (contested/acquisition/gold) measured neutral-to-negative and is OFF behind
+  `USE_SPECULATIVE_RESERVE`. Measured: **H itself gains ≈0 from reserving** (ON−OFF=+0.001) — it's
+  not a strength lever for either bot (matches the "denial is a wash / over-reserving is the
+  weakness" conclusion). 0.70 vs a *strong* C2 is unreachable by any heuristic (needs the AZ stack).
+- **Served**: `main.py` `_h2_choose_move` + `_h2_card_values` (4-value T/E/P/C overlay via the shared
+  `heuristic2.components`); `_ai_variant_valid`/dispatch accept "H2"; `Spender.jsx` lobby picker lists
+  "H2". Tests: `tests/test_h2_take_value.py`.
+
 ### AZ v4 — playstyle BASELINE snapshot: v4 net vs H (iter ~25, June 2026)
 Recorded so later snapshots show how the net's STYLE evolves. Tool: **`diag_v4_vs_h.py`**
 (plays the best net head-to-head vs H, seat-swapped, tallying per-agent per-game action

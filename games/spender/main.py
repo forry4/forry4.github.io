@@ -680,10 +680,13 @@ def mk_room_state(room_id: str) -> dict[str, Any]:
     if room.get("ai_variant"):
         state["ai_variant"] = room["ai_variant"]
         game = room.get("game")
-        if room["ai_variant"] == "H" and game and game.get("ai_player") \
+        if room["ai_variant"] in ("H", "H2") and game and game.get("ai_player") \
                 and game.get("phase") != "over":
             try:
-                state["ai_card_values"] = _v4_card_values(game, game["ai_player"])
+                if room["ai_variant"] == "H2":
+                    state["ai_card_values"] = _h2_card_values(game, game["ai_player"])
+                else:
+                    state["ai_card_values"] = _v4_card_values(game, game["ai_player"])
             except Exception:
                 pass
     return state
@@ -889,7 +892,7 @@ load_az_model()  # loads ai/az_model.npz → variant Z
 def _ai_variant_valid(variant: str) -> bool:
     return (variant in WEIGHT_VARIANTS
             or (variant == "Z" and AZ_EVALUATE is not None)
-            or variant == "H")  # H = v4 valuation heuristic (pure code, always available)
+            or variant in ("H", "H2"))  # H/H2 = v4 valuation heuristics (pure code, always available)
 
 
 def _az_choose_move(game: dict, ai_pid: str, time_limit: float = 5.0) -> dict:
@@ -955,6 +958,48 @@ def _v4_card_values(game: dict, ai_pid: str) -> dict:
             out[_aze.CARD_NAME[ci]] = round(_azh.card_value(val, s, ci, seat), 1)
     for ci in s.reserved[seat]:
         out[_aze.CARD_NAME[ci]] = round(_azh.card_value(val, s, ci, seat), 1)
+    return out
+
+
+def _h2_choose_move(game: dict, ai_pid: str) -> dict:
+    """Variant-H2 move selection: the take_value heuristic (heuristic2) — a 1-ply
+    greedy choose_action over the take_value model. Same dict-move contract as H/Z."""
+    from games.spender.ai.az import actions as _aza
+    from games.spender.ai.az import engine as _aze
+    from games.spender.ai.az import heuristic2 as _azh2
+
+    s = _aze.from_game_dict(game)
+    a = _azh2.choose_action(s, s.turn)
+    return _aza.action_to_move(s, a)
+
+
+def _h2_card_values(game: dict, ai_pid: str) -> dict:
+    """Variant-H2 transparency overlay: per visible board card + the AI's reserved
+    cards, the four take_value pieces {t: take, e: engine, p: point, c: cost} from the
+    AI's seat. Keyed by card id (CARD_NAME[ci]). Wrapped by callers in try/except."""
+    from games.spender.ai.az import engine as _aze
+    from games.spender.ai.az import valuation2 as _azv2
+    from games.spender.ai.az import heuristic2 as _azh2
+
+    try:
+        seat = game["order"].index(ai_pid)
+    except (KeyError, ValueError):
+        return {}
+    s = _aze.from_game_dict(game)
+    val = _azv2.Valuation(s)
+
+    def rec(ci: int) -> dict:
+        take, engine, point, cost = _azh2.components(val, s, ci, seat)
+        return {"t": round(take, 2), "e": round(engine, 2),
+                "p": round(point, 2), "c": round(cost, 1)}
+
+    out: dict[str, dict] = {}
+    for slot in range(12):
+        ci = s.board[slot]
+        if ci >= 0:
+            out[_aze.CARD_NAME[ci]] = rec(ci)
+    for ci in s.reserved[seat]:
+        out[_aze.CARD_NAME[ci]] = rec(ci)
     return out
 
 
@@ -1971,6 +2016,8 @@ async def _schedule_ai_turn(room_id: str) -> None:
         mv = await loop.run_in_executor(None, _az_choose_move, game_snapshot, ai_pid, 5.0)
     elif variant == "H":
         mv = await loop.run_in_executor(None, _v4_choose_move, game_snapshot, ai_pid)
+    elif variant == "H2":
+        mv = await loop.run_in_executor(None, _h2_choose_move, game_snapshot, ai_pid)
     else:
         ai_weights = WEIGHT_VARIANTS.get(variant, WEIGHTS)
         mv = await loop.run_in_executor(
