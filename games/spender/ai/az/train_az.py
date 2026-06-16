@@ -194,6 +194,15 @@ def main():
     ap.add_argument("--curr-target", type=float, default=0.55, help="net win-rate the curriculum holds")
     ap.add_argument("--curr-step", type=float, default=0.05, help="p adjustment per iteration")
     ap.add_argument("--curr-opp-iters", type=int, default=30, help="heuristic strength when the eps-opponent acts")
+    # North-star arena probe: the EXTERNAL ground-truth metric (vs the v4 heuristic).
+    # All go/no-go / plateau decisions key off THIS, not the internal gate (v3's trap
+    # was watching an internal metric that rose while real strength stayed flat).
+    ap.add_argument("--arena-every", type=int, default=10,
+                    help="run the north-star arena probe every N iters (0=off)")
+    ap.add_argument("--arena-games", type=int, default=40)
+    ap.add_argument("--arena-sims", type=int, default=128, help="AZ MCTS sims in the arena probe")
+    ap.add_argument("--arena-opp", default="H",
+                    help="north-star opponent: H (v4 heuristic) | A|B|C|C2 | weights-json")
     ap.add_argument("--out", default=DEF_DIR)
     ap.add_argument("--resume", action="store_true")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -381,6 +390,20 @@ def main():
                     pool_files = pool_files[-args.pool_size:]
         print(f"[iter {it}] {gate_msg} -> {'PROMOTED' if promoted else 'rejected'} "
               f"| total {time.time()-t0:.0f}s", flush=True)
+
+        # ── NORTH-STAR: external arena vs the v4 heuristic (the decisive metric) ──
+        # Uses the pure-numpy npz evaluator (CPU, efficient at batch-1, unlike GPU
+        # per-leaf). Watch this climb off ~0.08 toward the heuristic; the early
+        # go/no-go (~iter 20-30) and every plateau call key off this number.
+        if args.arena_every and (it % args.arena_every == 0 or it == args.iters - 1):
+            from . import arena
+            from .infer_np import load_evaluator as _np_eval
+            export_npz(best, work_best)
+            asc = arena.run_match(
+                _np_eval(work_best), arena.make_opponent(args.arena_opp, args.opp_iters),
+                args.arena_games, az_sims=args.arena_sims, seed=20000 + it,
+                label=f"{args.arena_opp}(north-star)")
+            print(f"[iter {it}] NORTH-STAR vs {args.arena_opp}: {asc:.3f}", flush=True)
 
         torch.save({"best": best.state_dict(), "iter": it,
                     "promotions": promotions, "curr_p": curr_p}, last_path)

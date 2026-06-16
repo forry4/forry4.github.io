@@ -94,12 +94,24 @@ def play_recorded_game(net_eval, opponent_fn, net_seat: int, rng: random.Random,
     return feats, pis, zs, result, s.points[net_seat], s.points[1 - net_seat]
 
 
+def _heur_move_fn(variant: str, opp_iters: int):
+    """Move-fn for a heuristic opponent (returns a compact-engine action int).
+
+    Variant 'H' is the v4 greedy heuristic (`heuristic.choose_action`) — the strong,
+    FAST fixed sparring partner (~0.27 ms/move, ~126x faster than C2 at opp_iters=120
+    and stronger). A/B/C2 are the incumbent MCTS heuristics via `_heuristic_action`
+    (opp_iters search budget); slower but kept as diversity slices."""
+    if variant == "H":
+        from . import heuristic as H4
+        return lambda s: H4.choose_action(s, s.turn)
+    weights = _load_opp_weights(variant)
+    return lambda s: _heuristic_action(s, weights, opp_iters)
+
+
 def _make_opponent_fn(spec: dict, rng: random.Random):
     """Build an opponent move-fn from a picklable spec."""
     if spec["kind"] == "heur":
-        weights = _load_opp_weights(spec["variant"])
-        opp_iters = spec["opp_iters"]
-        return lambda s: _heuristic_action(s, weights, opp_iters)
+        return _heur_move_fn(spec["variant"], spec["opp_iters"])
     if spec["kind"] == "az":
         ev = load_evaluator(spec["npz"])
         n = spec["opp_sims"]
@@ -109,12 +121,12 @@ def _make_opponent_fn(spec: dict, rng: random.Random):
         # else a random legal move. p is the difficulty/TEMPO knob — p=0 is a
         # non-racing random player (beatable), p=1 a full racer. The smooth ramp
         # between lets the net climb from winnable games toward the real target.
-        weights = _load_opp_weights(spec["variant"])
-        p, opp_iters = spec["p"], spec["opp_iters"]
+        move = _heur_move_fn(spec["variant"], spec["opp_iters"])
+        p = spec["p"]
 
         def _eps(s):
             if rng.random() < p:
-                return _heuristic_action(s, weights, opp_iters)
+                return move(s)
             return rng.choice(E.legal_actions(s))
         return _eps
     raise ValueError(f"unknown opponent kind: {spec['kind']}")

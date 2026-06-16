@@ -77,13 +77,21 @@ def test_az_choose_move_returns_legal_dict_move(monkeypatch):
 
 
 def test_arena_bridge_plays_full_game():
-    from games.spender import main as inc
     from games.spender.ai.az import arena
 
     rng = random.Random(17)
-    score = arena.play_game(_uniform_eval, 0, dict(inc.DEFAULT_WEIGHTS),
-                            az_sims=16, opp_iters=10, rng=rng)
+    opp = arena.make_opponent("B", 10)            # incumbent MCTS heuristic move-fn
+    score = arena.play_game(_uniform_eval, 0, opp, az_sims=16, rng=rng)
     assert score in (0.0, 0.5, 1.0)
+
+
+def test_arena_h_opponent_move_fn():
+    # The v4 heuristic is a valid arena opponent (the north-star metric uses it).
+    from games.spender.ai.az import arena
+
+    opp = arena.make_opponent("H", 1)
+    s = E.new_game(random.Random(5))
+    assert opp(s) in set(E.legal_actions(s))
 
 
 # ─── features ─────────────────────────────────────────────────────────────────

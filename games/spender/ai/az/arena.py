@@ -56,9 +56,21 @@ def _heuristic_action(s: E.State, weights: dict, opp_iters: int) -> int:
     return A.move_to_action(s, mv)
 
 
-def play_game(evaluate, az_seat: int, weights: dict, *, az_sims: int,
-              opp_iters: int, rng: random.Random, max_plies: int = 400) -> float:
-    """Returns AZ's score in {0, 0.5, 1}."""
+def make_opponent(spec: str, opp_iters: int):
+    """Opponent move-fn `s -> action` for an arena match. Spec 'H' is the v4 greedy
+    heuristic (`heuristic.choose_action`) — the strong, FAST north-star opponent
+    (~0.27 ms/move). A/B/C/C2 or a weights-json path use the incumbent MCTS heuristic
+    at `opp_iters`."""
+    if spec == "H":
+        from . import heuristic as H4
+        return lambda s: H4.choose_action(s, s.turn)
+    weights = _load_opp_weights(spec)
+    return lambda s: _heuristic_action(s, weights, opp_iters)
+
+
+def play_game(evaluate, az_seat: int, opp_move, *, az_sims: int,
+              rng: random.Random, max_plies: int = 400) -> float:
+    """Returns AZ's score in {0, 0.5, 1}. `opp_move(s) -> action` is the opponent."""
     s = E.new_game(rng)
     for _ in range(max_plies):
         if s.phase == E.OVER:
@@ -72,20 +84,19 @@ def play_game(evaluate, az_seat: int, weights: dict, *, az_sims: int,
             visits = search.run(evaluate, az_sims)
             E.apply(s, max(range(len(visits)), key=visits.__getitem__))
         else:
-            E.apply(s, _heuristic_action(s, weights, opp_iters))
+            E.apply(s, opp_move(s))
     if s.phase != E.OVER or s.winner == E.WIN_DRAW:
         return 0.5
     return 1.0 if s.winner == az_seat else 0.0
 
 
-def run_match(evaluate, weights: dict, n_games: int, *, az_sims: int,
-              opp_iters: int, seed: int = 0, label: str = "") -> float:
+def run_match(evaluate, opp_move, n_games: int, *, az_sims: int,
+              seed: int = 0, label: str = "") -> float:
     rng = random.Random(seed)
     total = 0.0
     t0 = time.time()
     for i in range(n_games):
-        total += play_game(evaluate, i % 2, weights, az_sims=az_sims,
-                           opp_iters=opp_iters, rng=rng)
+        total += play_game(evaluate, i % 2, opp_move, az_sims=az_sims, rng=rng)
         if (i + 1) % 20 == 0:
             print(f"  ... {i+1}/{n_games}: az {total/(i+1):.3f} "
                   f"({time.time()-t0:.0f}s)", flush=True)
@@ -119,7 +130,7 @@ def _load_evaluator(path: str, device: str):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--az", required=True, help=".npz or .pt checkpoint")
-    ap.add_argument("--opp", default="B", help="A|B|C or weights-json path")
+    ap.add_argument("--opp", default="B", help="H (v4 heuristic) | A|B|C|C2 | weights-json path")
     ap.add_argument("--games", type=int, default=200)
     ap.add_argument("--az-sims", type=int, default=300)
     ap.add_argument("--opp-iters", type=int, default=120)
@@ -129,9 +140,9 @@ def main():
 
     inc.USE_VALUE_LEAF = False  # heuristic plays rollout MCTS (our eval standard)
     evaluate = _load_evaluator(args.az, args.device)
-    weights = _load_opp_weights(args.opp)
-    run_match(evaluate, weights, args.games, az_sims=args.az_sims,
-              opp_iters=args.opp_iters, seed=args.seed, label=args.opp)
+    opp_move = make_opponent(args.opp, args.opp_iters)
+    run_match(evaluate, opp_move, args.games, az_sims=args.az_sims,
+              seed=args.seed, label=args.opp)
 
 
 if __name__ == "__main__":
