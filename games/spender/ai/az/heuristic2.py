@@ -8,16 +8,21 @@ Model — every card gets a single scalar:
     take_value = (engine_value + point_value) / (1 + total_cost)
 
     total_cost  = W_TEMPO*tempo + W_GEM*gem + W_GOLD*gold        (importance tempo > gem > gold)
-    point_value = (PTS + NOBLE_SCALE*noble_progress + noble_completion) / (1 + RATE*tempo)
+    point_value = stage * (PTS + NOBLE_SCALE*noble_progress) + noble_completion
     engine_value = valuation2.engine_value (undiscounted -- realized + compounding on purchase)
 
 All cost terms are post-cost-reduction (minus owned-card bonuses), never base cost. `tempo`
 and `gold` are on REMAINING need (also minus held tokens); `gem` is the post-bonus sticker
-price. No take-2 is assumed (1 gem of a color per turn). Points are distance-discounted by
-`tempo`, so far points count little until a card is nearly affordable -- this makes cheap
-engine cards top the turn-1 ranking (the sanity check) and points take over late, with no
-stage ramp. Weights below are the offline-tuned config (sanity 0.92, ~0.81 vs greedy C2,
-beats H ~0.51).
+price. No take-2 is assumed (1 gem of a color per turn). `tempo` lives ONLY in `total_cost`
+-- it is collection EFFORT (a cost), not a devaluation of a card's points/engine.
+
+POINT STAGING (replaces the old per-card tempo-discount): the *future* points
+(PTS + noble_progress) are scaled by a global game STAGE -- low early, ramping to 1 -- so the
+bot builds its engine first and values points as the game develops; the +3 from
+noble_completion is realized immediately, so it is NOT staged.
+  stage = floor + (1-floor) * min(1, max(cards_bought/STAGE_K, leader_points/15))
+Being a global multiplier (same for every card), a 2-pt card's point_value is exactly 2x a
+1-pt card's at the same stage. This beats H ~0.62 (vs 0.485 for the old tempo-discount).
 
 Policy (`choose_action`): winning buy (secure) > winning-via-RESERVE > endgame denial >
 token-cap anti-hoard > buy the top-take_value card if affordable, else take gems toward it
@@ -34,12 +39,15 @@ from __future__ import annotations
 from . import engine as E
 from . import valuation2 as V
 
-# ─── Tuned config (offline search: sanity 0.92, ~0.81 vs greedy C2, beats H ~0.51) ───
-W_TEMPO = 0.5     # cost: turns to collect
-W_GEM = 0.2       # cost: total post-bonus gems to pay
-W_GOLD = 0.4      # cost: estimated gold coins needed
-RATE = 2.0        # point distance-discount: point_value /= (1 + RATE * tempo)
+# ─── Tuned config (offline search; beats H ~0.62) ────────────────────────────────────
+W_TEMPO = 0.5      # cost: turns to collect
+W_GEM = 0.2        # cost: total post-bonus gems to pay
+W_GOLD = 0.4       # cost: estimated gold coins needed
 NOBLE_SCALE = 2.0  # noble-progress contribution, scaled toward a noble's VP
+
+# point staging: future points scaled by a global game stage (low early -> 1 late)
+STAGE_K = 8        # cards-bought for a full engine-stage; stage = max(cards/STAGE_K, leader_pts/15)
+STAGE_FLOOR = 0.25  # early floor: fraction of point value still counted at game start
 
 # token-cap anti-hoard: near the 10-cap, buy the best affordable instead of taking gems
 CAP9_BUY_ABOVE = 0.5    # at 9 tokens, buy the best affordable card if its take_value exceeds this
@@ -57,14 +65,17 @@ RESERVE_GAP = 0.5                # acquisition (speculative only): reserve the t
 def components(val: V.Valuation, s: E.State, ci: int, seat: int):
     """The take_value pieces for `ci` from `seat`: (take, engine, point, cost).
     One source of truth for both the policy and the on-card transparency overlay."""
-    tempo = val.tempo(ci, seat)
-    cost = (W_TEMPO * tempo
+    cost = (W_TEMPO * val.tempo(ci, seat)
             + W_GEM * val.gem_cost(ci, seat)
             + W_GOLD * val.gold_cost(ci, seat))
     engine = val.engine_value(ci, seat)
-    point = (E.PTS[ci]
-             + NOBLE_SCALE * val.noble_progress(ci, seat)
-             + val.noble_completion_pts(ci, seat)) / (1.0 + RATE * tempo)
+    stage = max(s.purchased_n[seat] / STAGE_K, max(s.points[0], s.points[1]) / E.WIN_POINTS)
+    if stage > 1.0:
+        stage = 1.0
+    stage_factor = STAGE_FLOOR + (1.0 - STAGE_FLOOR) * stage
+    # future points are staged (engine-first early); noble_completion is realized now, un-staged
+    point = (stage_factor * (E.PTS[ci] + NOBLE_SCALE * val.noble_progress(ci, seat))
+             + val.noble_completion_pts(ci, seat))
     take = (engine + point) / (1.0 + cost)
     return take, engine, point, cost
 

@@ -33,6 +33,8 @@ GOLD_BANK_CAP = 2   # gems of the bottleneck color assumed pullable from the ban
 ENG_DIV = 8.0       # engine_value: PTS divisor (higher = flatter; values broad colors over point-heavy ones)
 ENG_FLOOR = 0.2     # engine_value: zero-point floor in each card's weight
 ENG_DECK_W = 1.0    # engine_value: weight on the forward-looking deck-demand term
+NOBLE_CLOSE_FLOOR = 0.2   # noble_progress: a card whose color a visible noble needs scores at least
+                          # this (per such noble) even at zero bonuses -- "relevance" survives distance
 
 
 # ─── Stateless per-card/seat scalars ─────────────────────────────────────────
@@ -214,8 +216,10 @@ def turns_to_afford(s: E.State, ci: int, seat: int) -> int:
 def noble_progress(s: E.State, ci: int, seat: int) -> float:
     """How much ci's +1 bonus advances visible nobles for `seat`, in [0, 1].
 
-    Folds in both *progress* (does this bonus color still help a noble) and
-    *closeness* (how near that noble already is), averaged over visible nobles.
+    Folds in both *relevance* (does this bonus color still help a noble) and *closeness*
+    (how near that noble already is), averaged over visible nobles. Closeness carries a
+    floor (NOBLE_CLOSE_FLOOR): a card whose color a noble needs scores > 0 for that noble
+    even at zero bonuses, so noble-relevance survives distance (a far noble still counts).
     """
     bcol = E.BONUS[ci]
     bon = s.bonuses[seat]
@@ -231,7 +235,8 @@ def noble_progress(s: E.State, ci: int, seat: int) -> float:
             total = sum(req)
             if total:
                 deficit = sum(req[i] - bon[i] for i in range(5) if req[i] > bon[i])
-                score += 1.0 - deficit / total
+                close = 1.0 - deficit / total
+                score += NOBLE_CLOSE_FLOOR + (1.0 - NOBLE_CLOSE_FLOOR) * close
     return score / n if n else 0.0
 
 
