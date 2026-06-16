@@ -12,6 +12,7 @@ from games.spender.ai.az import actions as A
 from games.spender.ai.az import engine as E
 from games.spender.ai.az import features as F
 from games.spender.ai.az import mcts as M
+from games.spender.ai.az import valuation as V
 
 
 def _fresh(seed=3):
@@ -127,8 +128,80 @@ def test_encode_during_discard_and_noble_phases():
     E.apply(s, E.A_TAKE1 + 4)  # 12th token -> discard phase
     assert s.phase == E.DISCARD
     x = F.encode(s)
-    phase_off = F.N_FEATURES - 9
+    phase_off = F._BASE_FEATURES - 9   # phase/final-trigger/deck close the BASE block
     assert x[phase_off + E.DISCARD] == 1.0
+
+
+# ─── v4 valuation block ─────────────────────────────────────────────────────────
+
+def _midgame(seed=11, steps=24):
+    s = E.new_game(random.Random(seed))
+    rng = random.Random(seed * 13 + 1)
+    for _ in range(steps):
+        la = E.legal_actions(s)
+        if not la or s.phase == E.OVER:
+            break
+        E.apply(s, rng.choice(la))
+    return s
+
+
+def test_encode_v4_block_matches_valuation():
+    """The de-risk: the net must train on the SAME numbers the heuristic plays on.
+    For each board candidate slot, the encoded floats must equal the valuation.py
+    scalar (independently recomputed) at the right offset, seat, and normalization."""
+    s = _midgame()
+    me, opp = s.turn, 1 - s.turn
+    val = V.Valuation(s)
+    x = F.encode(s)
+    checked = 0
+    engine_seen = False
+    for slot in range(12):
+        ci = s.board[slot]
+        o = F._VAL_OFF + slot * F._SLOT_F
+        if ci < 0:
+            assert x[o:o + F._SLOT_F].sum() == 0.0      # empty slot -> all zero
+            continue
+        checked += 1
+        # ME side
+        assert x[o + 0] == pytest.approx(val.effective_cost(ci, me)[0] / 7.0)
+        assert x[o + 7] == pytest.approx(min(val.turns_to_afford(ci, me), 6) / 6.0)
+        assert x[o + 8] == (1.0 if val.affordable_now(ci, me) else 0.0)
+        assert x[o + 9] == pytest.approx(val.noble_progress(ci, me))
+        nc = val.noble_completion_pts(ci, me)
+        assert x[o + 10] == pytest.approx(val.victory_closeness(ci, me, nc))
+        assert x[o + 11] == pytest.approx(min(val.engine_value(ci, me), 3.0) / 3.0)
+        assert x[o + 12] == pytest.approx(min(val.efficiency(ci, me), 1.5) / 1.5)
+        assert x[o + 13] == pytest.approx(min(val.cost_concentration(ci, me), 6) / 6.0)
+        # OPP side (present for board cards; engine value is BOARD-ONLY)
+        assert x[o + 15] == (1.0 if val.affordable_now(ci, opp) else 0.0)
+        assert x[o + 18] == pytest.approx(
+            min(val.engine_value(ci, opp, include_reserved=False), 3.0) / 3.0)
+        assert x[o + 19] == pytest.approx(min(val.turns_to_afford(ci, opp), 6) / 6.0)
+        engine_seen = engine_seen or x[o + 11] > 0.0
+    assert checked >= 3                 # the midgame state really exercised board slots
+    assert engine_seen                  # engine value fires when same-color demand exists
+
+
+def test_encode_v4_my_reserved_have_no_opp_block():
+    """My reserved cards get the me-block but a zeroed opp-block (the opponent
+    cannot buy them, so the denial/threat signals are meaningless)."""
+    s = _fresh()
+    me = s.turn
+    s.reserved[me].append(s.decks[1].pop())
+    s.reserved_blind[me].append(False)
+    val = V.Valuation(s)
+    x = F.encode(s)
+    ci = s.reserved[me][0]
+    o = F._VAL_OFF + (12 + 0) * F._SLOT_F
+    assert x[o + 0] == pytest.approx(val.effective_cost(ci, me)[0] / 7.0)  # me-side present
+    assert x[o + 14:o + 20].sum() == 0.0                                  # opp-block zeroed
+
+
+def test_encode_v4_pad_slots_are_zero():
+    s = _midgame()
+    x = F.encode(s)
+    assert x[F._PAD_OFF:].sum() == 0.0
+    assert F.N_FEATURES - F._PAD_OFF == F._PAD_F
 
 
 # ─── determinization ──────────────────────────────────────────────────────────

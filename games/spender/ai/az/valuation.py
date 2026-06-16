@@ -300,14 +300,19 @@ class Valuation:
         self.deck_color_demand = [d / total for d in demand] if total else [0.0] * 5
 
     # cross-card factor (the one an MLP cannot assemble from a flat vector) ----
-    def engine_value(self, ci: int, seat: int) -> float:
+    def engine_value(self, ci: int, seat: int, include_reserved: bool = True) -> float:
         """Value of the permanent +1 `bcol` bonus ci grants: the discount it gives
         every *other* card that still needs `bcol` -- the visible board cards AND
         `seat`'s own RESERVED cards (committed targets you intend to buy, so a bonus
         that advances one is real engine value) -- weighted by each card's worth and
         `bcol`-hunger, plus a deck-wide term for unrevealed cards. A reserved card
         counts RESERVED_ENGINE_W *per card* (a slight commitment premium over a
-        single board card), NOT a pile that dominates the board."""
+        single board card), NOT a pile that dominates the board.
+
+        `include_reserved=False` returns the BOARD-ONLY value: used by the feature
+        encoder for the OPPONENT side, whose reserved-card identities are hidden from
+        the side to move (encoding them would leak through determinization). The
+        heuristic + the me-side feature keep the default (reserved counted)."""
         s = self.s
         bcol = E.BONUS[ci]
         bon_b = s.bonuses[seat][bcol]
@@ -322,14 +327,15 @@ class Valuation:
                 sj = sum(costj)
                 w_scarcity = costj[bcol] / sj if sj else 0.0  # cj is bcol-heavy
                 ev += w_value * w_scarcity
-        for cj in s.reserved[seat]:       # committed targets count too (slight premium)
-            if cj == ci:
-                continue
-            costj = E.COST[cj]
-            if costj[bcol] - bon_b > 0:
-                sj = sum(costj)
-                ev += RESERVED_ENGINE_W * (E.PTS[cj] / 5.0 + 0.2) \
-                    * (costj[bcol] / sj if sj else 0.0)
+        if include_reserved:
+            for cj in s.reserved[seat]:   # committed targets count too (slight premium)
+                if cj == ci:
+                    continue
+                costj = E.COST[cj]
+                if costj[bcol] - bon_b > 0:
+                    sj = sum(costj)
+                    ev += RESERVED_ENGINE_W * (E.PTS[cj] / 5.0 + 0.2) \
+                        * (costj[bcol] / sj if sj else 0.0)
         ev += self.deck_color_demand[bcol] * 0.5
         return ev
 

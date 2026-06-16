@@ -1,12 +1,25 @@
 # AZ v4 feature spec — card-valuation features
 
 Planning doc for the **fresh feature-enriched retrain** (`checkpoints_v4_features/`).
-A new input dimension makes all v3 weights incompatible, so this is a clean start —
-schedule it only after the v3 run finishes and its best net is evaluated. No code or
-training change happens from this doc alone.
+A new input dimension makes all v3 weights incompatible, so this is a clean start.
 
-Source of truth this maps to: [features.py](features.py) (current `N_FEATURES = 305`)
-and [engine.py](engine.py) (`State`, `COST/PTS/BONUS/NOBLE_REQ`, `_gold_needed`).
+> **STATUS (June 2026) — ENCODER IMPLEMENTED & SHIPPED IN CODE.** The "heuristic-first"
+> half is done ([valuation.py](valuation.py) validated, variant H deployed), and
+> [features.py](features.py) now packs the v4 block: **`N_FEATURES = 627`** (305 base +
+> 15 candidate slots × 20 + 6 globals + 16 zero-pad). Decisions locked this session:
+> **keep the full feature set** (no prune — redundant-but-correct features barely cost a
+> ~600k net; "greedy wash ≠ net noise") and **branch to v4 now** (v3 plateaued). The encoder
+> packs `valuation.py`'s validated scalars **directly** (single source of truth) — the
+> formulas below are the *definitions*; `valuation.py` is the *authority* (e.g. #8
+> turns-to-afford is `valuation.turns_to_afford`, the greedy `USE_TTA_GREEDY` form, NOT the
+> naive closed form once written here). A parity test (`test_encode_v4_block_matches_valuation`)
+> asserts the encoder packs exactly those scalars, so the net trains on the same numbers the
+> heuristic plays on. Remaining work is the **training run**, not the features (see the run
+> spec near the end).
+
+Source of truth this maps to: [valuation.py](valuation.py) (the scalar authority) +
+[features.py](features.py) (`N_FEATURES = 627`) and [engine.py](engine.py) (`State`,
+`COST/PTS/BONUS/NOBLE_REQ`, `_gold_needed`).
 
 ## Design doctrine (why these and not others)
 
@@ -47,7 +60,15 @@ incidental — the signal that matters is the post-reduction cost.
 Opponent blind reserves are NOT candidates (hidden identity; `determinize()` handles
 them). My reserved are always known to me.
 
-## Per-slot valuation block (17 floats/slot)
+## Per-slot valuation block (20 floats/slot — as shipped)
+
+> **As implemented in `features.py::_write_slot`:** 14 ME + 6 OPP = **20 floats/slot**. The
+> 17 below are the design core; the shipped block adds the two doc-endorsed me-side extras
+> (**efficiency**, **cost_concentration** — both already in `valuation.py`) and an opp-side
+> **turns-to-afford** as the threat signal (#20). All packed straight from `valuation.py` and
+> normalized to ~[0,1] (effective_cost/7, gems/10, gold/5, tta/6, engine/3, efficiency/1.5,
+> cost_concentration/6). OPP `engine_value` is **board-only** (`include_reserved=False`) so
+> hidden opp reserves never leak.
 
 For candidate card `ci` in a slot (all-zero if slot empty). `me = s.turn`, `opp = 1-me`.
 `bon_me = s.bonuses[me]`, `tok_me = s.tokens[me]`, etc. `bcol = E.BONUS[ci]`.
@@ -405,13 +426,17 @@ left → engine value matters" vs "near end → only points matter"). Board-colo
 gives the diminishing-returns-on-owned-color signal: a color the board no longer
 demands is a weak bonus target.
 
-## New total
+## New total (as shipped)
 
 ```
-305 (existing, unchanged) + 255 (per-slot ×15) + 6 (global) ≈ 566 features
+305 (base, unchanged) + 300 (20/slot ×15) + 6 (global) + 16 (zero-pad) = 627 features
 ```
-First MLP layer grows 305→566 inputs (~+134k params on a 512-wide layer; net is ~600k →
-~730k). Trains fine on the 4050; numpy inference cost negligible.
+First MLP layer grows 305→627 inputs (~+165k params on a 512-wide layer; net ~600k → ~765k).
+Trains fine on the 4050. **Encoder CPU cost is the real new expense** (~0.5–1 ms/`encode` from
+the per-slot valuation calls — turns_to_afford / engine_value / noble_*), not the net's first
+layer. encode is called once per MCTS simulation, so at high sims this is the selfplay
+bottleneck to watch; assess at the smoke-train and optimize (share intermediates / cache the
+determinization-invariant public-state block) only if iter time demands it.
 
 ## Implementation notes
 
@@ -525,7 +550,12 @@ exploration alive (anti-collapse), and judges progress by an *external* yardstic
    (d) bigger net. Capacity LAST (capacity before data/search-quality just overfits).
    Prevents the reactive sims-bump thrashing we just did.
 
-## Build sequencing — heuristic-first (agreed)
+## Build sequencing — heuristic-first (agreed) — ✓ COMPLETE
+
+> **DONE (June 2026).** `valuation.py` is built + validated, the v4 heuristic (variant H) is
+> shipped and is the strongest fixed opponent (~0.80 vs the A/B/C/C2 mix), and `features.py`
+> now packs that same valuation core. The steps below are kept as the record of why this
+> ordering was chosen. Next is the training run only.
 
 Build the v4 heuristic bot *before* the AZ retrain. This is not a detour: the heuristic
 and the net's feature encoder share the same valuation core, so step 1 is also the first
