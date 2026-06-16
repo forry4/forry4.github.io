@@ -364,6 +364,35 @@ higher-N disjoint confirms — the replication bar earned its keep. **Final lock
 ENG_STAGE_DECAY=0.9 is the only value that changed during the campaign; all others are the
 original hand-tuned constants, now empirically confirmed at/near their optima.
 
+### Forced L1 0-point opening (June 2026) — a top-two structural WIN
+
+`USE_FORCED_L1_OPENING` (shipped ON): **until the bot buys its first card, it may only
+pursue L1 0-point cards** — buy the best affordable one (ranked by the normal `card_value`,
+so it picks the highest-engine-value L1 0-pt card), else take gems toward the best such
+target. No reserving during the opening (reserving isn't a purchase and wastes opening
+tempo). After the first buy, normal logic resumes. Implemented as a branch at the top of
+`choose_action` (after DISCARD/NOBLE, before the buy logic); the filtered target list also
+feeds `_choose_take`, so gem-taking is restricted to L1 0-pt cards too.
+
+- **Rationale:** a cheap point-less L1 card is the canonical strong-Splendor opening — it
+  starts the bonus engine for the lowest gem investment, cutting the cost of everything
+  bought later. The greedy bot would sometimes open by chasing a point card or an expensive
+  card instead, paying full price with no engine and falling behind on tempo.
+- **VALIDATED — one of the two biggest structural wins (on par with end-game defense):**
+  +0.0520 (z=3.13) @1000 seeds, replicated **+0.0435 (z=3.59) on a disjoint 2000-seed set**
+  vs the A/B/C/C2 mix. z *grew* with N — a large real effect, the opposite of the four
+  weight-sweep mirages (which all shrank). Mechanism verified: over 300 games the bot's first
+  purchase was an L1 0-pt card **300/300** (`test_forced_opening_*`).
+- **Why it works where weight-tuning didn't:** this is a *structural* constraint on the
+  opening, not a re-weighting of the existing factors — exactly the lesson of the whole
+  campaign (features/structure carry the gains; weights were saturated). L1 0-pt cards never
+  need ≥5 of a color, so they're always reachable; the (effectively impossible) all-1-point-L1
+  board falls through to normal logic to avoid a deadlock.
+- **Net-feature verdict:** like end-game defense, this is a behavior a *searching* net should
+  discover for free given the engine-value + tempo features — but it's a sharp, cheap prior
+  worth encoding. For the heuristic it's a direct win; for the net it argues the opening-phase
+  signal (cards-bought == 0, engine-value of cheap L1s) is load-bearing.
+
 ## Global additions (6 floats)
 
 | feature | formula | norm |

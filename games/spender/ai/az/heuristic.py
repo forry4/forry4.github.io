@@ -69,6 +69,14 @@ USE_TEMPO_DISCOUNT = True    # tempo as a multiplicative time-discount (value ne
 USE_ENDGAME_DEFENSE = True   # near the end: take a winning buy only if it's SECURE (a
                              # first player's 15 lets the opponent overtake on their final
                              # turn); else deny the opponent's overtaking/winning board card
+USE_FORCED_L1_OPENING = True   # engine-first opening: until the FIRST card is bought, the
+                               # bot may only pursue L1 0-point cards -- buy the best
+                               # affordable one, else take gems toward the best such target
+                               # (no reserving). Starts the engine with cheap point-less
+                               # bonuses before normal logic resumes. VALIDATED: +0.052
+                               # (z=3.13) @1000 and +0.0435 (z=3.59) on a disjoint 2000-seed
+                               # set vs the A/B/C/C2 mix -- one of the two biggest wins, on
+                               # par with end-game defense.
 W_COST = 0.4                 # cheapness discount for 0-POINT cards only -- card_value /=
                              # (1 + W_COST * total_eff_cost). efficiency = pts/(cost+1) is 0 for
                              # point-less cards, so cost is invisible there and two same-bonus 0-pt
@@ -368,6 +376,26 @@ def choose_action(s: E.State, seat: int | None = None) -> int:
         return _choose_discard(s, seat, legal, targets)
     if s.phase == E.NOBLE:
         return legal[0]  # nobles are all worth 3 — any claimable is equal
+
+    # Forced engine-first opening: until the bot buys its FIRST card, it may ONLY
+    # pursue L1 0-point cards -- buy the best affordable one, else take gems toward
+    # the best such target (no reserving). L1 0-pt cards never need >=5 of a color,
+    # so they're always reachable; only the (vanishingly rare) all-1-point-L1 board
+    # falls through to normal logic to avoid a deadlock.
+    if USE_FORCED_L1_OPENING and s.purchased_n[seat] == 0:
+        l1z = [t for t in targets if E.LEVEL_OF[t[1]] == 1 and E.PTS[t[1]] == 0]
+        if l1z:
+            best_buy = None
+            for tv, ci, idx, kind in l1z:
+                a = (E.A_BUY_BOARD + idx) if kind == "board" else (E.A_BUY_RESV + idx)
+                if a in legal_set and val.affordable_now(ci, seat):
+                    if best_buy is None or tv > best_buy[0]:
+                        best_buy = (tv, a)
+            if best_buy is not None:
+                return best_buy[1]
+            a = _choose_take(s, seat, val, l1z, legal)
+            if a is not None:
+                return a
 
     # Affordable buys (board + reserved), by value.
     buys = []  # (value, action, ci)

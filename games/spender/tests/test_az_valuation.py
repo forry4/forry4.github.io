@@ -463,3 +463,73 @@ def test_secure_win_tiebreak_by_cards():
     assert not H._secure_win(s, 0, 15, 7, val)
     s.purchased_n = [4, 6]                               # opp ends with more cards -> we win tie
     assert H._secure_win(s, 0, 15, 5, val)
+
+
+# ─── Forced L1 0-point opening ──────────────────────────────────────────────
+
+_L1Z = [ci for ci in range(E.N_CARDS) if E.LEVEL_OF[ci] == 1 and E.PTS[ci] == 0]
+
+
+def _open_state():
+    """Cleared state with 0 cards bought (the forced-opening regime), seat 0 to move."""
+    s = _eg_state()
+    s.purchased_n = [0, 0]
+    return s
+
+
+def test_forced_opening_prefers_l1_zero_over_affordable_point_card():
+    # 0 cards bought + flag on: buy the affordable L1 0-pt card even when a
+    # higher-value point card is ALSO affordable (engine-first opening).
+    saved = H.USE_FORCED_L1_OPENING
+    H.USE_FORCED_L1_OPENING = True
+    try:
+        s = _open_state()
+        l1z, pt = _L1Z[0], _PT2[0]
+        s.board[0], s.board[4] = l1z, pt
+        tok = [max(E.COST[l1z][c], E.COST[pt][c]) for c in range(5)] + [2]
+        s.tokens = (tok[:], [0] * 6)
+        val = V.Valuation(s)
+        assert val.affordable_now(l1z, 0) and val.affordable_now(pt, 0)  # both buyable
+        assert H.choose_action(s, 0) == E.A_BUY_BOARD + 0                # picks the L1 0-pt
+    finally:
+        H.USE_FORCED_L1_OPENING = saved
+
+
+def test_forced_opening_off_can_open_with_point_card():
+    # Same both-affordable state, flag OFF: normal logic buys the higher-value point card.
+    saved = H.USE_FORCED_L1_OPENING
+    H.USE_FORCED_L1_OPENING = False
+    try:
+        s = _open_state()
+        l1z, pt = _L1Z[0], _PT2[0]
+        s.board[0], s.board[4] = l1z, pt
+        tok = [max(E.COST[l1z][c], E.COST[pt][c]) for c in range(5)] + [2]
+        s.tokens = (tok[:], [0] * 6)
+        assert H.choose_action(s, 0) == E.A_BUY_BOARD + 4                # the point card
+    finally:
+        H.USE_FORCED_L1_OPENING = saved
+
+
+def test_forced_opening_first_purchase_always_l1_zero():
+    # Over self-play games, seat 0's FIRST purchase is always an L1 0-pt card, and the
+    # opening never buys a reserved card (it never reserves during the opening).
+    saved = H.USE_FORCED_L1_OPENING
+    H.USE_FORCED_L1_OPENING = True
+    try:
+        for seed in range(20):
+            s = E.new_game(random.Random(seed))
+            checked = False
+            while s.phase != E.OVER and s.ply < 400 and not checked:
+                seat = s.turn
+                a = H.choose_action(s, seat)
+                if seat == 0 and s.purchased_n[0] == 0:
+                    if E.A_BUY_BOARD <= a < E.A_BUY_BOARD + 12:
+                        ci = s.board[a - E.A_BUY_BOARD]
+                        assert E.LEVEL_OF[ci] == 1 and E.PTS[ci] == 0, (
+                            f"seed {seed}: first buy was L{E.LEVEL_OF[ci]} {E.PTS[ci]}-pt")
+                        checked = True
+                    elif E.A_BUY_RESV <= a < E.A_BUY_RESV + 3:
+                        assert False, f"seed {seed}: bought a reserved card in the opening"
+                E.apply(s, a)
+    finally:
+        H.USE_FORCED_L1_OPENING = saved
