@@ -292,6 +292,29 @@ greedy levers. (Mirage note: a planned `unreachable_by_taking` check generalizes
 `≥5-single-color` mirage to "affordable within the 10-hold cap + gold budget, on *effective*
 cost" — same class; expected to help the net more than greedy H.)
 
+### Weight-tuning sweep (June 2026) — one WIN (ENG_STAGE_DECAY), the rest noise
+
+Coordinate-descent over all kept tunables (`_v4_tune*.py`): screen each variable's ±
+perturbations @1000 paired seeds, confirm any leaner at 2000, adopt only a hit that
+**replicates on a disjoint seed set**. The replication bar is load-bearing — it is exactly
+what separated the real win from the mirage here.
+
+- **`ENG_STAGE_DECAY` 0.7 → 0.9 — SHIPPED (the win).** Late-game engine-value decay:
+  `eng_w = W_ENGINE * (1 − ENG_STAGE_DECAY * stage)`, so at stage 1 the engine weight drops
+  from `0.3·W_ENGINE` to `0.1·W_ENGINE`. Rationale: once either player nears 15, cross-card
+  synergy has no time to pay off — raw points should dominate. Validated **+0.0147 (z=2.05)**
+  @2000 seeds and independently **+0.0130 (z=2.04)** on a *disjoint* 2500-seed set; 0.95/1.0
+  were slightly weaker (keep a 10% engine residual, don't zero it). A **value/stage** signal,
+  consistent with the saturation thesis (value wins, accuracy washes).
+- **`BUY_FLOOR` ↑ — the mirage, REJECTED.** Round-1's *strongest* screen signal (0.7 →
+  +0.0195, z=1.42 @1000) **evaporated to −0.0037 @2000** and BUY_FLOOR=0.9/1.1 actively
+  *hurt* (−0.016 / −0.022). Same regression-to-mean pattern as W_SPREAD; **stays at 0.5.**
+- **Washes @2000** (no adoption): `W_COST=0.6` (+0.003 — 0.4 already optimal),
+  `NOBLE_CONTRIB=0.5` (−0.001), `W_NOBLE=4.0` (−0.006), `PTS_STAGE_GAIN=0.25` (−0.002).
+- **Significantly HURT @1000** (don't raise): `W_ENGINE=1.5` (−0.030, z=−2.26) — engine
+  weight is at its ceiling; this and the ENG_STAGE_DECAY win agree engine value wants *less*
+  emphasis, not more.
+
 ## Global additions (6 floats)
 
 | feature | formula | norm |

@@ -93,7 +93,7 @@ MIN_BUILD_PATH = 3        # a steep card needs >= this many lower-level same-col
 
 # Stage / tempo coefficients (exposed as constants so they're tunable).
 PTS_STAGE_GAIN = 0.5      # points weight grows by this * stage
-ENG_STAGE_DECAY = 0.7     # engine weight shrinks by this * stage
+ENG_STAGE_DECAY = 0.9     # engine weight shrinks by this * stage (tuned 0.7->0.9: +0.013, z~2.05 over two disjoint 2k-seed runs)
 ENGINE_STAGE_DIV = 10.0   # cards-bought / this = engine-size component of stage
 ENG_DECAY_RATE = 0.5      # engine value decays by 1/(1 + rate * bonuses-held-in-color)
 TAKE_TEMPO = 0.6          # take-target value penalty per estimated turn-to-afford
