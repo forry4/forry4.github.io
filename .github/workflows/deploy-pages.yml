@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths:
+      - 'webapp/**'
       - 'games/spender/**'
       - 'games/castles_of_crimson/**'
       - 'books/**'
@@ -25,11 +26,11 @@ jobs:
           node-version: '20'
 
       - name: Install dependencies
-        working-directory: games/spender/webapp
+        working-directory: webapp
         run: npm install
 
       - name: Build
-        working-directory: games/spender/webapp
+        working-directory: webapp
         env:
           VITE_WS_URL: wss://splendid-nelz.onrender.com/ws
         run: npm run build
@@ -37,7 +38,7 @@ jobs:
       - name: Deploy to docs/
         run: |
           rm -rf docs/
-          cp -r games/spender/webapp/dist/ docs/
+          cp -r webapp/dist/ docs/
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add docs/

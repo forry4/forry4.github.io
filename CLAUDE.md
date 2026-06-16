@@ -40,10 +40,6 @@ games/spender/
       arena.py     # AZ vs heuristic tournaments;  bench.py  # throughput
       export.py / infer_np.py   # .pt -> .npz -> pure-numpy production inference
       checkpoints/ # gitignored: az_best.pt, az_last.pt, buffer.pkl, az_model.npz
-  webapp/          # Vite wrapper that imports Spender.jsx
-    main.jsx
-    index.html
-    vite.config.js
   tests/
     test_game_logic.py
     test_train.py    # offline trainer: harness, evolve/TD phases, weight I/O
@@ -54,6 +50,9 @@ core/              # ── shared backend platform (imported by spender, coc, b
   db.py            # dual sqlite/Turso connection wrapper (_Conn/_Cursor/_Row) + get_db_conn + init_core_schema
   auth.py          # users/sessions/passwords, admin + SITE_OWNER identity, reconnect tokens
   tests/test_db_auth.py   # wrapper + password + admin unit tests (in-memory sqlite, no server)
+webapp/            # ── Vite + React build (REPO ROOT, neutral — not under games/spender/) ──
+  main.jsx         # mounts games/spender/Spender.jsx (the shell, which routes to all features)
+  index.html / vite.config.js / package.json
 docs/              # GitHub Pages static site (Vite production build output) — REPO ROOT
   index.html
   assets/          # Hashed JS bundles (e.g. index-XXXXXXXX.js)
@@ -65,7 +64,7 @@ into `games/spender/ai/` by default.
 
 ### Serving
 - Backend: `uvicorn games.spender.main:app --reload` (port 8000)
-- Dev frontend: `cd games/spender/webapp && npm run dev` (port 5173, proxies /ws to 8000)
+- Dev frontend: `cd webapp && npm run dev` (port 5173, proxies /ws to 8000) — repo-root, neutral
 - Production: GitHub Pages serves `docs/`, which is **built and committed by CI** (`deploy-pages.yml`) on every push to `games/spender/**`. **Never hand-build/commit `docs/`** — commit source only and let CI deploy (see "Build + deploy steps" below).
 
 ---

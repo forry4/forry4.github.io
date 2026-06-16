@@ -1,6 +1,6 @@
 import React from 'react'
 import { createRoot } from 'react-dom/client'
-import SpenderApp from '../Spender.jsx'
+import SpenderApp from '../games/spender/Spender.jsx'
 
 class ErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { err: null }; }
