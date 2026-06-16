@@ -539,7 +539,7 @@ export default function SpenderApp() {
 	// ── WebSocket ──────────────────────────────────────────────────────────
 	const pendingActionRef = useRef(null);
 
-	const { connected, connect, send, disconnect, getReadyState } = useWebSocket(handleMessage, {
+	const { connect, send, disconnect, getReadyState } = useWebSocket(handleMessage, {
 		onOpen: ({ send: wsSend }) => {
 			if (pendingActionRef.current) {
 				wsSend(pendingActionRef.current);
@@ -1067,11 +1067,6 @@ export default function SpenderApp() {
 						</>
 					)}
 				</div>
-
-				<p className="status-msg mt-12">
-					<span className={`conn-dot ${connected ? "connected" : "disconnected"}`} />
-					{connected ? "Server connected" : "Connecting to server…"}
-				</p>
 			</div>
 		</>
 	);
