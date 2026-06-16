@@ -11,6 +11,8 @@ on:
       - 'games/spender/Dockerfile'
       - 'games/spender/ai/az_model.npz'
       - 'games/spender/ai/az/**/*.py'   # serving imports: heuristic, valuation, engine, actions, mcts, infer_np
+      - 'games/spender/ai/weights*.json'   # variants A/B/C/C2 — loaded at import (main.load_weights)
+      - 'games/spender/ai/value_model.json'   # value-leaf model — loaded at import (main.load_value_model)
       - 'games/castles_of_crimson/**/*.py'
   workflow_dispatch:
 
