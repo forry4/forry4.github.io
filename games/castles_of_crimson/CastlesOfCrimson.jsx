@@ -21,6 +21,36 @@ const TYPE_LABEL = {
   castle: "Castle", ship: "Ship", mine: "Mine",
   livestock: "Livestock", building: "Building", monastery: "Monastery",
 };
+// Fixed per-phase depot layout — mirrors tiles.DEPOT_PLAN (a deliberate house
+// variant: each numbered depot always refills with the SAME two tile types).
+// We keep a faint colored hex outline ("ghost") in any planned slot whose tile
+// has been taken, so players can remember what goes where across phases. Colors
+// are the tile-type colors from TILE_HEX above.
+const DEPOT_PLAN_COLORS = {
+  1: ["blue", "beige"],       // ship + building
+  2: ["burgundy", "yellow"],  // castle + monastery
+  3: ["green", "beige"],      // livestock + building
+  4: ["blue", "beige"],       // ship + building
+  5: ["gray", "yellow"],      // mine + monastery
+  6: ["green", "beige"],      // livestock + building
+};
+// Tile color -> its type label (inverse of TILE_HEX's type comments), for ghost tooltips.
+const COLOR_TYPE_LABEL = {
+  burgundy: "Castle", blue: "Ship", gray: "Mine",
+  green: "Livestock", beige: "Building", yellow: "Monastery",
+};
+// Planned colors not currently present in `hexes` (multiset diff) → the ghost
+// outlines to draw for a depot. Keeps slot identity stable across takes.
+function depotGhostColors(d, hexes) {
+  const present = (hexes || []).map((t) => t.color);
+  const ghosts = [];
+  for (const c of DEPOT_PLAN_COLORS[d] || []) {
+    const i = present.indexOf(c);
+    if (i >= 0) present.splice(i, 1);  // consume a matching present tile
+    else ghosts.push(c);               // planned but missing → ghost it
+  }
+  return ghosts;
+}
 // Two-letter building codes so tiles are identifiable without mousing over.
 const BUILDING_ABBR = {
   market: "Mk", carpenter: "Cp", church: "Ch", warehouse: "Wh",
@@ -182,6 +212,12 @@ const css = `
 .coc-tile{width:70px;height:81px;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.05rem;font-family:'Cinzel',serif;color:#15100a;font-weight:700;transition:transform .1s;line-height:1;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%)}
 .coc-tile:hover{transform:scale(1.1)}
 .coc-tile.goods{width:34px;height:34px;border-radius:4px;clip-path:none;color:#fff;font-size:.82rem;text-shadow:0 1px 2px rgba(0,0,0,.7)}
+/* Ghost: a taken tile leaves a colored hex OUTLINE (its type color) so the fixed
+   per-phase depot layout stays memorable. The element is a full-color hex; the
+   ::after carves the center back to the depot surface, leaving a colored rim. */
+.coc-tile-ghost{cursor:default;position:relative;opacity:.7}
+.coc-tile-ghost:hover{transform:none}
+.coc-tile-ghost::after{content:"";position:absolute;inset:3px;background:var(--surface2);clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%)}
 .coc-whitedie{display:flex;align-items:center;gap:6px;margin-left:auto}
 .coc-whitedie .lbl{font-family:'Cinzel',serif;font-size:.66rem;letter-spacing:.06em;color:var(--text-dim);text-transform:uppercase}
 .coc-dicebar{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
@@ -830,6 +866,12 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                       <div key={t.id} className="coc-tile" style={{ background: TILE_HEX[t.color] }}
                         title={tileDesc(t, board)} onClick={() => clickDepotTile(d, t)}>
                         {tileGlyph(t)}
+                      </div>
+                    ))}
+                    {depotGhostColors(d, depot.hexes).map((c, i) => (
+                      <div key={`ghost-${c}-${i}`} className="coc-tile coc-tile-ghost"
+                        style={{ background: TILE_HEX[c] }}
+                        title={`${COLOR_TYPE_LABEL[c] || "Tile"} taken — this depot refills a ${COLOR_TYPE_LABEL[c]?.toLowerCase() || ""} tile here each phase`}>
                       </div>
                     ))}
                     {depot.goods.map((gt) => (
