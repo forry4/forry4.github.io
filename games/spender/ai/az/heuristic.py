@@ -106,10 +106,36 @@ ENGINE_STAGE_DIV = 10.0   # cards-bought / this = engine-size component of stage
 ENG_DECAY_RATE = 0.5      # engine value decays by 1/(1 + rate * bonuses-held-in-color)
 TAKE_TEMPO = 0.6          # take-target value penalty per estimated turn-to-afford
 
+# ─── Noble-aggressiveness league variants (sparring diversity for the AZ retrain) ─
+# Base H pursues nobles at noble_aggr = 1.0. Two tunable sibling variants give the
+# net a SPREAD of noble styles to train against -- the documented "self-play is blind
+# to a style the opponent never demonstrates" cure, applied to the noble/go-wide axis.
+# The knob scales ONLY the incremental noble_progress pull (W_NOBLE * nob) and the two
+# noble POLICY gates; it never touches noble_COMPLETION (a real +3 VP both variants
+# always grab), so both keep a solid win rate -- they differ in how much they DETOUR to
+# build toward not-yet-complete nobles, not in whether they take free noble points.
+#   HN (noble):  > 1.0 -- values noble progress more, lower gates => builds/buys wide
+#   HR (rusher): < 1.0 -- de-emphasizes nobles, races efficient points instead
+# Calibrated by heuristic_variants_arena (win rate vs H/C2 + avg nobles_won/game).
+# Calibrated (200g vs base H, seat-swapped): HR claims ~0.55 nobles/game vs H's ~1.0
+# (a clear rusher) at a SOLID 0.53 win rate; HN claims ~1.1 (+0.25 over H) at 0.46.
+# The high side is compressed -- base H already pursues nobles near the practical
+# board ceiling (only 3 nobles up; H won't target-lock by design) -- so HN differs
+# more in buy STYLE (favoring noble-color cards, ~1 pt traded for noble focus) than in
+# raw noble count. aggr>4 keeps claiming ~1.1 nobles while bleeding win rate (0.41 @10).
+NOBLE_AGGR_HN = 4.0
+NOBLE_AGGR_HR = 0.4
+_NOBLE_BUY_GATE = 0.5     # base noble_progress above which 1b auto-buys; /noble_aggr at call
 
-def card_value(val: V.Valuation, s: E.State, ci: int, seat: int) -> float:
+
+def card_value(val: V.Valuation, s: E.State, ci: int, seat: int,
+               noble_aggr: float = 1.0) -> float:
     """Single scalar worth of card `ci` to `seat`, combining the valuation
-    factors with a game-stage modulation (engine matters early, points late)."""
+    factors with a game-stage modulation (engine matters early, points late).
+
+    `noble_aggr` scales ONLY the incremental noble_progress pull (the go-wide-toward-
+    nobles term); 1.0 = base H, >1 = the HN noble variant, <1 = the HR rusher. The
+    real-VP noble_completion term is left at full weight for every variant."""
     pts = E.PTS[ci]
     eff = val.efficiency(ci, seat)
     eng = val.engine_value(ci, seat)
@@ -141,7 +167,7 @@ def card_value(val: V.Valuation, s: E.State, ci: int, seat: int) -> float:
     base = (pts_w * (pts + nc)        # all four terms are >= 0, so base >= 0
             + W_EFFICIENCY * eff
             + eng_w * eng * eng_decay
-            + W_NOBLE * nob)
+            + W_NOBLE * noble_aggr * nob)   # noble_aggr scales the go-wide-to-nobles pull
     # Tempo as a TIME-DISCOUNT, not a subtraction: a card you can't afford for a while
     # is worth proportionally less NOW, but never < 0 (worst case = a useless card = 0).
     # The old `- W_TEMPO*tta` could drive value negative (the -0.4 seen in the overlay),
@@ -255,15 +281,15 @@ def _choose_discard(s, seat, legal, targets):
     return best_a
 
 
-def _targets(val, s, seat):
+def _targets(val, s, seat, noble_aggr: float = 1.0):
     """All board + own-reserved cards as (value, ci, index, kind), best first."""
     out = []
     for slot in range(12):
         ci = s.board[slot]
         if ci >= 0:
-            out.append((card_value(val, s, ci, seat), ci, slot, "board"))
+            out.append((card_value(val, s, ci, seat, noble_aggr), ci, slot, "board"))
     for ri, ci in enumerate(s.reserved[seat]):
-        out.append((card_value(val, s, ci, seat), ci, ri, "resv"))
+        out.append((card_value(val, s, ci, seat, noble_aggr), ci, ri, "resv"))
     out.sort(reverse=True, key=lambda t: t[0])
     return out
 
@@ -360,8 +386,13 @@ def _deny(s, seat, slot, ci, val, legal_set):
     return None
 
 
-def choose_action(s: E.State, seat: int | None = None) -> int:
-    """Return a legal engine action index for `seat` (defaults to side to move)."""
+def choose_action(s: E.State, seat: int | None = None, *,
+                  noble_aggr: float = 1.0) -> int:
+    """Return a legal engine action index for `seat` (defaults to side to move).
+
+    `noble_aggr` selects the noble style: 1.0 = base H, NOBLE_AGGR_HN (>1) = the
+    noble variant (HN), NOBLE_AGGR_HR (<1) = the rusher (HR). It scales the
+    card-value noble term AND the two noble policy gates below, coherently."""
     if seat is None:
         seat = s.turn
     legal = E.legal_actions(s)
@@ -369,8 +400,16 @@ def choose_action(s: E.State, seat: int | None = None) -> int:
         return E.A_PASS
     legal_set = set(legal)
 
+    # Noble policy gates scale with aggressiveness: a more noble-hungry variant
+    # auto-buys noble-advancing cards at a lower progress bar and protects more
+    # 0-pt noble-advancing cards from the take-a-gem skip. A rusher raises both
+    # bars (the auto-buy bar can exceed 1.0 => it never fires => pure point race).
+    na = max(noble_aggr, 1e-6)
+    nb_gate = _NOBLE_BUY_GATE / na     # 1b auto-buy: noble_progress must exceed this
+    nc_gate = NOBLE_CONTRIB / na       # skip-protection: keep a 0-pt card if progress >= this
+
     val = V.Valuation(s)
-    targets = _targets(val, s, seat)
+    targets = _targets(val, s, seat, noble_aggr)
 
     if s.phase == E.DISCARD:
         return _choose_discard(s, seat, legal, targets)
@@ -403,11 +442,11 @@ def choose_action(s: E.State, seat: int | None = None) -> int:
         ci = s.board[slot]
         a = E.A_BUY_BOARD + slot
         if ci >= 0 and a in legal_set:
-            buys.append((card_value(val, s, ci, seat), a, ci))
+            buys.append((card_value(val, s, ci, seat, noble_aggr), a, ci))
     for ri, ci in enumerate(s.reserved[seat]):
         a = E.A_BUY_RESV + ri
         if a in legal_set:
-            buys.append((card_value(val, s, ci, seat), a, ci))
+            buys.append((card_value(val, s, ci, seat, noble_aggr), a, ci))
 
     opp = 1 - seat
 
@@ -461,12 +500,12 @@ def choose_action(s: E.State, seat: int | None = None) -> int:
         #     tiebreak cost, doesn't spend gems for nothing) dominates buying it.
         #     Strong Splendor play still buys nearly every turn it CAN do good.
         for bv, ba, bci in buys:
-            if val.noble_progress(bci, seat) > 0.5:
+            if val.noble_progress(bci, seat) > nb_gate:
                 return ba
             if (E.PTS[bci] == 0 and V.discount_count(s, bci, seat) <= 1
                     and not (USE_NOBLE_COMPLETION
                              and V.noble_completion_pts(s, bci, seat) > 0)
-                    and val.noble_progress(bci, seat) < NOBLE_CONTRIB):
+                    and val.noble_progress(bci, seat) < nc_gate):
                 continue            # worthless vs a gem -> skip, prefer taking a gem
                                     # (but never skip a 0-pt card that CLAIMS a noble
                                     #  or meaningfully advances a CLOSE one)

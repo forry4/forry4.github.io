@@ -598,11 +598,13 @@ artificial p drops: a single unlucky 26/60 gate ended a 14-iter p=0.90 streak.
 With 120 games the net held p=0.90 for 18+ consecutive iters cleanly before the
 sims bump.
 
-Current run: `checkpoints_v3`, at iter ~196, p=0.95, sims=768, --iters 300.
-sims=768 pushed frontier to p=0.95 by iter 191 (best=0.617) and the net is
-**holding p=0.95** for the first time (5 consecutive iters 192–196, gate scores
-0.40–0.52). `az_model.npz` deployed at iter 177 (113 promotions). Next milestone:
-gate score ≥0.60 at p=0.95 → push to p=1.0 → arena vs B/C2 → ship if ≥0.70.
+v3 run (`checkpoints_v3`, **now SUPERSEDED — branched to v4, see "AZ v4" below**):
+reached iter ~196, p=0.95, sims=768. sims=768 pushed frontier to p=0.95 by iter 191
+(best=0.617), holding p=0.95 (iters 192–196, gate 0.40–0.52). `az_model.npz` deployed
+at iter 177 (113 promotions) — **still the live 305-dim variant Z** until v4 ships.
+v3 backed up; the curriculum/p machinery is retained but v4 spars vs the H heuristic
+instead of the eps-curriculum (the v4 features made the heuristic a beatable-then-
+surpassable opponent, so the explicit p ramp is subsumed by the league).
 
 **Human playtest finding (iter 177 net):** the net **over-reserves** — reserving
 frequently and often reserving cards that don't make strategic sense. Root cause:
@@ -653,6 +655,112 @@ directly attacks (3). (1) and (2) require structural fixes:
     untested feature-enriched net that starts from zero.
   - **Decision point**: finish current run first, evaluate iter-300 net strength,
     then decide if a feature-enriched retrain is worth losing the current weights.
+
+### AZ v4 — feature-enriched retrain: THE PLATEAU BREAKER (June 2026)
+**The v4 retrain works — it broke the v3 ceiling. Do not relitigate the feature bet.**
+Decision taken (user-approved): branch now (don't finish v3), keep the FULL feature
+set (no prune), spar against the v4 heuristic (not C2). All v4 code lives on branch
+**`feat/az-v4-features`** — see the production-safety note below.
+
+- **Diagnosis that justified it**: v3 plateaued (arena-vs-C2 flat ~0.0–0.03 for its
+  whole life) **despite** already having the league, a past-AZ pool, sims bumps, and
+  high exploration. So the ceiling was NOT the training loop — it was a **policy-
+  REPRESENTATION** limit: on the 305 raw-state features an MLP can't assemble the
+  cross-card reasoning ("this bonus is good because it discounts *those* high-point
+  cards") that good move-selection needs. Search can't explore into a strategy the net
+  can't express. v4 changes the ONE limiting variable: the features.
+- **`features.py` is now 627-dim** (was 305): the original 305 block is byte-identical,
+  plus a per-candidate-slot block of **`valuation.py` scalars** × 15 slots (12 board + my
+  3 reserved; opp-block zeroed on my-reserved), 6 globals, and **16 zero pad slots** (a
+  later feature add fills them → warm-start, not another cold start). Per slot ME:
+  effective_cost×5, gems_to_collect, gold_needed, turns_to_afford, affordable_now,
+  noble_progress, victory_closeness, **engine_value** (the cross-card crown jewel),
+  efficiency, cost_concentration. OPP side (board-only `engine_value` via
+  `include_reserved=False` so hidden reserves don't leak): gold_needed, affordable_now,
+  noble_progress, victory_closeness, engine_value, opp turns_to_afford (the denial
+  THREAT signal). One `Valuation(s)` built per `encode()` → ~0.45 ms/encode (~10× the
+  v3 selfplay cost; optimizable, parity-guarded, if iter time ever demands). Parity test
+  `test_encode_v4_block_matches_valuation` guarantees the net trains on the SAME numbers
+  the heuristic plays on.
+- **PRODUCTION SAFETY — why it's on a branch.** The deployed `az_model.npz` is a
+  **305-input** net and `infer_np` does `feats @ W0` (W0 is 305×hidden); a 627-dim
+  `features.py` on `main` would **crash serving variant Z**, and Render auto-deploys
+  `main` on `ai/az/**/*.py`. So `main` stays 305-dim; v4 (627-dim features + the new
+  variants + the new npz) ships **atomically** only when the branch merges. Don't push
+  627-dim `features.py` to main without the matching 627-npz.
+- **THE RESULT (north-star = best net vs the v4 heuristic H, every 10 iters):**
+  **0.000 (iter 0, cold) → 0.300 (iter 10) → 0.650 (iter 20)** — the net BEATS base H by
+  iter 20, from random init. v3 never got off ~0.0. Independent 30-game probe corroborated
+  (0.55 at iter 22). This is the plateau breaking. The honest residual risks (over-reserve,
+  close-out craft vs a perfect defender, single-strategy collapse) are watch-items for the
+  human playtest, not blockers.
+
+### AZ v4 — the H heuristic + its noble/rusher league variants (June 2026)
+`ai/az/heuristic.py` = **variant H**: a greedy policy over `valuation.py`, engine-native
+(no dict conversion). Two jobs: (1) a correctness proof that strong, board-conditional
+play is REPRESENTABLE on the v4 features (it beats the A/B/C/C2 mix ~0.80 greedy — the
+evidence v3 never had), and (2) the league sparring partner + north-star opponent. It is
+FAST (~0.27 ms/move, ~126× C2 at opp_iters=120). Locked constants + the structural wins
+(forced-L1 opening +0.044, end-game defense, W_COST, ENG_STAGE_DECAY) are in its header;
+don't tune them further (saturated path).
+- **Noble/rusher variants (the diversity lever).** One knob, `noble_aggr`, scales ONLY
+  the incremental `noble_progress` pull (`W_NOBLE * noble_aggr * nob`) and the two noble
+  policy gates (auto-buy `0.5/aggr`, skip-protect `NOBLE_CONTRIB/aggr`) — it NEVER touches
+  `noble_completion` (a real +3 VP both variants always grab), so both keep a solid win
+  rate; they differ in how much they DETOUR to build toward not-yet-complete nobles.
+  Defaults `noble_aggr=1.0` → base H byte-identical (additive; the live run's "H" is
+  unaffected even if a worker re-imports). **`NOBLE_AGGR_HN=4.0`** (noble), **`HR=0.4`**
+  (rusher). Wired by NAME ("HN"/"HR") into `league._heur_move_fn` + `arena.make_opponent`.
+- **Calibration** (200g seat-swapped vs base H, `heuristic_variants_arena.py` — reports
+  win rate + avg `nobles_won`/game): **HR 0.53 win / 0.55 nobles** (vs H's ~1.0 — a clear
+  rusher, slightly STRONGER since racing efficient points beats noble detours on most
+  boards). **HN 0.48 win / 1.10 nobles** (+0.21 over H). The noble side is COMPRESSED —
+  base H already pursues nobles near a practical ceiling (only 3 nobles up; H won't
+  target-lock by design), so HN differs more in buy STYLE than raw noble count; aggr>4
+  keeps ~1.1 nobles while bleeding win rate (0.41 @10).
+- **League mix is now `--heur-variants H,HN,HR`** (C2 dropped — not strong enough, per
+  the user). Full mix: self 0.4 / heur 0.4 (split H+HN+HR) / past-AZ pool 0.2; north-star
+  stays vs **base H**. The gate (`_league_gate`) scores cand-vs-best on the same H/HN/HR
+  set. **`resume_v4.ps1`** (repo root) one-command-resumes the run after a reboot (logs to
+  `checkpoints_v4_features/train_v4.log`); fully `--resume`-able like v3.
+- **Open**: ride the climb to the ship gate — best net beats H by a clear margin (≥~0.55)
+  AND beats v3-best head-to-head at production budget → export the 627-npz → merge the
+  branch atomically → human playtest. Until then, **v3's iter-177 `az_model.npz` stays
+  deployed** (variant Z is still the 305-dim v3 net).
+
+### AZ v4 — playstyle BASELINE snapshot: v4 net vs H (iter ~25, June 2026)
+Recorded so later snapshots show how the net's STYLE evolves. Tool: **`diag_v4_vs_h.py`**
+(plays the best net head-to-head vs H, seat-swapped, tallying per-agent per-game action
+categories). Snapshot = `_work_best.npz` at **iter ~25**, **sims=128, 50 games, seed 100**.
+Re-run the EXACT same command near ship time (and after any feature change) to compare.
+
+| per-game avg        |   v4 |    H |
+|---------------------|-----:|-----:|
+| win rate (v4)       | 0.46 |   —  |
+| final points        | 13.0 | 13.9 |
+| cards bought        | 15.7 | 14.8 |
+| &nbsp;&nbsp;buy L1  | 11.5 |  9.7 |
+| &nbsp;&nbsp;buy L2  |  3.5 |  4.4 |
+| &nbsp;&nbsp;buy L3  | 0.76 | 0.76 |
+| nobles claimed      | 1.00 | 0.80 |
+| reserves (board)    | 2.42 | 1.92 |
+| reserves (deck)     | 0.22 | 0.00 |
+| buy-from-reserve    | 0.68 | 0.44 |
+| take-2-same         | 0.14 | 1.00 |
+| discards            | 0.38 | 1.20 |
+
+- **v4 = wide cheap engine-builder**: more cards, L1-skewed (11.5 vs 9.7), more nobles
+  (breadth → nobles fall out), barely discards (0.38) and almost never take-2-same — it
+  funnels gems straight into many cheap buys so tokens rarely hit the cap.
+- **H = tighter point-racer**: fewer cards but more L2 (4.4 vs 3.5), rushes single colors
+  (take-2-same 1.0/game), over-collects then discards 1.2/game; scores slightly MORE raw
+  points (13.9) from a leaner build. v4 wins ~parity anyway by converting breadth+nobles.
+- **Over-reserve is real but mild**: v4 reserves ~38% more (2.64 vs 1.92, and is the only
+  one to ever reserve blind from the deck) — BUT per-reserve waste is similar (both buy
+  back only ~23–26% of reserves; the rest are denial/gold-grabs). So v4 over-reserves by
+  FREQUENCY (~0.7 extra/game tempo cost), not by reserving more wastefully than H.
+- **Caveat**: the 0.46 win rate here (50g, sims=128, SE ~0.07) is within noise of the
+  iter-20/22 north-star (0.55–0.65) — this snapshot is for STYLE, not strength.
 
 ### Heuristic-tuning campaign results (June 2026 — superseded by AZ stack)
 - Ablation (40g, 120 iters, seed 777): `noble_scarcity=1.5` → 0.688 vs B was

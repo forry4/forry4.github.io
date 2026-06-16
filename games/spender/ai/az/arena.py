@@ -59,11 +59,13 @@ def _heuristic_action(s: E.State, weights: dict, opp_iters: int) -> int:
 def make_opponent(spec: str, opp_iters: int):
     """Opponent move-fn `s -> action` for an arena match. Spec 'H' is the v4 greedy
     heuristic (`heuristic.choose_action`) — the strong, FAST north-star opponent
-    (~0.27 ms/move). A/B/C/C2 or a weights-json path use the incumbent MCTS heuristic
+    (~0.27 ms/move); 'HN'/'HR' are its noble/rusher siblings (scaled noble
+    aggressiveness). A/B/C/C2 or a weights-json path use the incumbent MCTS heuristic
     at `opp_iters`."""
-    if spec == "H":
+    if spec in ("H", "HN", "HR"):
         from . import heuristic as H4
-        return lambda s: H4.choose_action(s, s.turn)
+        aggr = {"H": 1.0, "HN": H4.NOBLE_AGGR_HN, "HR": H4.NOBLE_AGGR_HR}[spec]
+        return lambda s: H4.choose_action(s, s.turn, noble_aggr=aggr)
     weights = _load_opp_weights(spec)
     return lambda s: _heuristic_action(s, weights, opp_iters)
 

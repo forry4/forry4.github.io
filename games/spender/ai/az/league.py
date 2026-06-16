@@ -99,11 +99,14 @@ def _heur_move_fn(variant: str, opp_iters: int):
 
     Variant 'H' is the v4 greedy heuristic (`heuristic.choose_action`) — the strong,
     FAST fixed sparring partner (~0.27 ms/move, ~126x faster than C2 at opp_iters=120
-    and stronger). A/B/C2 are the incumbent MCTS heuristics via `_heuristic_action`
+    and stronger). 'HN'/'HR' are H's noble/rusher siblings (same bot, scaled noble
+    aggressiveness) — extra style diversity on the noble axis for the net to train
+    against. A/B/C2 are the incumbent MCTS heuristics via `_heuristic_action`
     (opp_iters search budget); slower but kept as diversity slices."""
-    if variant == "H":
+    if variant in ("H", "HN", "HR"):
         from . import heuristic as H4
-        return lambda s: H4.choose_action(s, s.turn)
+        aggr = {"H": 1.0, "HN": H4.NOBLE_AGGR_HN, "HR": H4.NOBLE_AGGR_HR}[variant]
+        return lambda s: H4.choose_action(s, s.turn, noble_aggr=aggr)
     weights = _load_opp_weights(variant)
     return lambda s: _heuristic_action(s, weights, opp_iters)
 
