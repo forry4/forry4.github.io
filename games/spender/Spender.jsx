@@ -596,10 +596,47 @@ export default function SpenderApp() {
 	useEffect(() => {
 		if (screen !== "loading") return;
 		let cancelled = false;
-		const dest = (() => {
-			try { const s = localStorage.getItem("spender_user"); if (s && JSON.parse(s)) return "home"; } catch {}
-			return "auth";
-		})();
+		// Resolve the landing screen. For a logged-in (non-guest) user we also
+		// validate the stored session token here: it can be silently dead (7-day
+		// expiry, or superseded by a login on another device — there's one token
+		// per user), which downgrades every authenticated request to anonymous
+		// (e.g. the Books "Edit ranking" button disappears) while the UI still
+		// shows you logged in. A definite ok:false clears the stale login so you
+		// land on auth and can re-login. A network/parse error keeps you logged in
+		// (a blip must never log anyone out). Called only after the backend is
+		// confirmed reachable, so the error branch means a real transport failure.
+		const resolveDest = async () => {
+			let stored = null;
+			try { const s = localStorage.getItem("spender_user"); if (s) stored = JSON.parse(s); } catch {}
+			if (!stored) return "auth";
+			if (stored.guest || !stored.session_token) return "home";
+			try {
+				const ctrl = new AbortController();
+				const t = setTimeout(() => ctrl.abort(), 5000);
+				const res = await fetch(`${HTTP_BASE}/auth/session?token=${encodeURIComponent(stored.session_token)}`,
+					{ signal: ctrl.signal });
+				clearTimeout(t);
+				const data = await res.json();
+				if (data?.ok && data.user) {
+					// Keep the token; refresh the cached identity (name / is_admin).
+					const fresh = { ...stored, name: data.user.name, is_admin: !!data.user.is_admin };
+					try { localStorage.setItem("spender_user", JSON.stringify(fresh)); } catch {}
+					if (!cancelled) setAuthUser(fresh);
+					return "home";
+				}
+				if (data && data.ok === false) {  // definitively invalid — clear it
+					try {
+						localStorage.removeItem("spender_user");
+						localStorage.removeItem("spender_roomId");
+					} catch {}
+					const newId = uid();
+					try { localStorage.setItem("spender_myId", newId); } catch {}
+					if (!cancelled) { setAuthUser(null); setMyId(newId); }
+					return "auth";
+				}
+			} catch { /* transport/parse error — don't punish a blip, stay logged in */ }
+			return "home";
+		};
 		let interval = null;
 		const startPolling = () => {
 			const startTime = Date.now();
@@ -617,6 +654,7 @@ export default function SpenderApp() {
 						if (res.ok && !cancelled) {
 							clearInterval(interval);
 							setLoadingProgress(1);
+							const dest = await resolveDest();
 							setTimeout(() => { if (!cancelled) setScreen(dest); }, 350);
 							return;
 						}
@@ -632,7 +670,7 @@ export default function SpenderApp() {
 				const t = setTimeout(() => ctrl.abort(), 250);
 				const res = await fetch(`${HTTP_BASE}/games`, { signal: ctrl.signal });
 				clearTimeout(t);
-				if (res.ok && !cancelled) { setScreen(dest); return; }
+				if (res.ok && !cancelled) { const dest = await resolveDest(); if (!cancelled) setScreen(dest); return; }
 			} catch {}
 			if (!cancelled) { setShowLoading(true); startPolling(); }
 		})();

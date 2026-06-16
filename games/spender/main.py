@@ -2174,6 +2174,23 @@ async def auth_login(body: LoginBody):
             "session_token": u["session_token"]}
 
 
+@router.get("/auth/session")
+async def auth_session(token: str | None = None):
+    """Validate a stored session token. The frontend restores its "logged in"
+    state from localStorage and otherwise never checks the token, so a token that
+    has expired (7-day TTL) or been superseded by a login elsewhere (one token per
+    user) silently downgrades every authenticated request to anonymous — e.g. the
+    Books "Edit ranking" button vanishes while the UI still shows you logged in.
+    The app calls this on load: `ok: False` means the token is definitively dead
+    (clear the stale login); a network/transport error is NOT a False here, so a
+    blip never logs anyone out."""
+    user = get_user_by_session(token)
+    if not user:
+        return {"ok": False}
+    return {"ok": True,
+            "user": {"id": user["id"], "name": user["name"], "is_admin": bool(user.get("is_admin"))}}
+
+
 @router.get("/games")
 async def get_open_games():
     return {"ok": True, "games": list_open_games()}
