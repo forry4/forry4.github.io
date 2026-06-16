@@ -10,7 +10,11 @@
 All Spender code/data lives under `games/spender/`. Root-level files (`Procfile`,
 `render.yaml`, `docs/`, `requirements-lock.txt`) are repo-level deploy/Pages
 orchestration and stay at root (they're structurally pinned there and will
-orchestrate future games too).
+orchestrate future games too). **Cross-cutting backend infrastructure (the DB
+connection + the user/session/admin auth layer) lives in the top-level `core/`
+package, NOT under `games/spender/`** — it was extracted out of
+`games/spender/main.py` so features depend on `core`, not on a game (see
+"`core/` — shared backend platform" below).
 
 ```
 games/spender/
@@ -45,6 +49,10 @@ games/spender/
     test_train.py    # offline trainer: harness, evolve/TD phases, weight I/O
     test_az_engine.py   # az engine: 200-game differential parity vs main.py + edge cases
     test_az_actions.py  # masks, features, MCTS smoke, arena bridge, variant-Z serving
+core/              # ── shared backend platform (imported by spender, coc, books) ──
+  db.py            # dual sqlite/Turso connection wrapper (_Conn/_Cursor/_Row) + get_db_conn + init_core_schema
+  auth.py          # users/sessions/passwords, admin + SITE_OWNER identity, reconnect tokens
+  tests/test_db_auth.py   # wrapper + password + admin unit tests (in-memory sqlite, no server)
 docs/              # GitHub Pages static site (Vite production build output) — REPO ROOT
   index.html
   assets/          # Hashed JS bundles (e.g. index-XXXXXXXX.js)
@@ -152,9 +160,12 @@ The real bot. Pure Python, no new prod deps; reuses the engine contract.
   serves the static layout to the frontend.
 - Mirrors Spender's patterns: in-memory `ROOMS` under `ROOM_LOCK`, `save_game`/`load_game_to_memory`,
   `broadcast_room`, `mk_room_state`, stale-socket disconnect guard, async opponent scheduler.
-- **Shared site identity**: imports Spender's auth helpers **lazily** (inside functions) to avoid
-  the import-time circular dep; persists rooms in its **own `coc_games` table** in the shared
-  `users.db`; reuses the `reconnect_tokens` table.
+- **Shared site identity**: imports the auth/DB helpers **directly at the top** from the `core`
+  package (`from core.db import get_db_conn`, `from core.auth import gen_token, get_user_by_session,
+  validate_reconnect_token, mark_reconnect_token_used`). These used to be lazy imports from
+  `games.spender.main` to dodge an import-time circular dep; the `core` extraction removed the cycle
+  (core depends on no game), so the lazy shims are gone. Persists rooms in its **own `coc_games`
+  table** in the shared site DB; reuses the `reconnect_tokens` table (created by `core.init_core_schema`).
 
 ### Frontend (`CastlesOfCrimson.jsx`)
 - Self-contained component the shell (`Spender.jsx`) mounts when `screen === "coc"`, passed
@@ -276,8 +287,8 @@ every deploy and every cold-start after the free service idles**. So accounts,
 games, AND book rankings did not persist across restarts. Books made this pressing
 (its whole point is a persistent ranking), but it affects the whole site.
 
-Fix (in `games/spender/main.py`): `get_db_conn()` is now a **dual backend** behind
-a tiny driver-agnostic wrapper:
+Fix (now in **`core/db.py`** — extracted out of `games/spender/main.py`):
+`get_db_conn()` is a **dual backend** behind a tiny driver-agnostic wrapper:
 - **Local sqlite3** (default) — dev + the test suite + the prod *fallback*.
 - **Turso / libSQL remote** — used when **`TURSO_DATABASE_URL`** (and
   `TURSO_AUTH_TOKEN`) env vars are set, so data persists off the ephemeral disk.
@@ -299,6 +310,38 @@ a tiny driver-agnostic wrapper:
   `TURSO_DATABASE_URL` (the `libsql://...turso.io` URL) and `TURSO_AUTH_TOKEN` as
   Render env vars. Until then prod silently uses ephemeral sqlite (zero behavior
   change). `SITE_OWNER` is unaffected (it's env-based, not stored).
+
+---
+
+## `core/` — shared backend platform (DB + auth)
+
+The **top-level `core/` package** holds the cross-cutting backend infrastructure
+that every site feature needs. It was **extracted out of `games/spender/main.py`**
+(Phase 1 of the architecture cleanup) so features depend on a neutral platform
+layer instead of reaching into a game module. **`core` imports nothing from
+`games`/`books`** — it is the bottom layer, which is what removed the circular
+imports the old arrangement required.
+
+- **`core/db.py`** — the dual **sqlite/Turso** connection: `_Row`/`_Cursor`/`_Conn`
+  wrapper, `_turso_selftest`, `get_db_conn`, and **`init_core_schema(conn)`** (creates
+  the cross-cutting `users` / `admins` / `reconnect_tokens` tables). `DB_PATH`
+  defaults to the legacy `games/spender/users.db` for backward-compat (override with
+  `SITE_DB_PATH`); in prod Turso is used and this path is only the fallback.
+- **`core/auth.py`** — `gen_token`, `hash_password`/`verify_password` (PBKDF2 + legacy),
+  `create_user`, `authenticate_user`, `get_user_by_session`, the SITE_OWNER/admin
+  identity helpers (`site_owner_name`, `grant_admin`, `is_admin_id`, `is_site_owner`),
+  and the reconnect-token helpers (`create`/`validate`/`mark_used`). Imports
+  `get_db_conn` from `core.db`.
+- **Who imports it now**: `games/spender/main.py` (`from core.db import …`,
+  `from core.auth import …`; its `init_db()` calls `init_core_schema` then creates only
+  the Spender-owned `games` table), `games/castles_of_crimson/main.py` (directly at the
+  top — the old lazy shims are gone), and Books (via the injected `get_db_conn`/
+  `get_user_by_session` `setup_books` still receives — main passes the core functions).
+- **Tests**: `core/tests/test_db_auth.py` (wrapper + password + admin + `init_core_schema`,
+  in-memory sqlite). CI runs `core/tests/` first; Render watches `core/**/*.py`.
+- **Not yet done** (later phases): a composition-root `app.py` (so the FastAPI `app`
+  + mounts stop living in a game module — that one touches the deploy entrypoint), the
+  frontend shell extraction, and DRYing the duplicated room-server scaffolding.
 
 ---
 

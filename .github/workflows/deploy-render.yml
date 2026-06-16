@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths:
+      - 'core/**/*.py'   # shared DB + auth layer imported by main + coc + books
       - 'games/spender/main.py'
       - 'books/**'
       - 'games/spender/requirements.txt'

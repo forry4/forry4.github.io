@@ -10,11 +10,10 @@ proven patterns in ``games.spender.main`` (in-memory ``ROOMS`` under a single
 ``asyncio.Lock``, SQLite persistence, the stale-socket disconnect guard, and the
 async opponent-turn scheduler).
 
-Site identity (users/sessions) is shared with Spender: the auth helpers are
-imported lazily from ``games.spender.main`` inside the functions that use them,
-which avoids an import-time circular dependency (Spender imports ``coc_app`` at
-the very end of its module). Room persistence uses a separate ``coc_games``
-table in the shared ``users.db``.
+Site identity (users/sessions) and the database connection are shared site-wide
+via the ``core`` package (``core.db`` / ``core.auth``), imported directly at the
+top — there is no circular dependency because ``core`` depends on no game. Room
+persistence uses a separate ``coc_games`` table in the shared site database.
 """
 from __future__ import annotations
 
@@ -33,6 +32,11 @@ from . import board
 from . import tiles
 from . import bot
 from . import ai as coc_ai          # MCTS opponent (aliased: `ai` is used as a local for the bot pid)
+
+from core.db import get_db_conn
+from core.auth import (
+    gen_token, get_user_by_session, validate_reconnect_token, mark_reconnect_token_used,
+)
 
 LOG = logging.getLogger("games.castles_of_crimson")
 
@@ -65,14 +69,12 @@ def _valid_board(board_id) -> str:
     return board.DEFAULT_BOARD_ID
 
 
-# ── Shared-identity / DB helpers (lazy imports avoid a circular dependency) ───
+# ── Shared-identity / DB helpers (thin aliases over the shared core package) ──
 def _db():
-    from games.spender.main import get_db_conn
     return get_db_conn()
 
 
 def _gen_token(n: int = 12) -> str:
-    from games.spender.main import gen_token
     return gen_token(n)
 
 
@@ -500,7 +502,6 @@ async def _handle_reconnect(ws, room_id, pid, msg):
 
 
 async def _handle_auth_reconnect(ws, room_id, pid, msg):
-    from games.spender.main import validate_reconnect_token, mark_reconnect_token_used
     token = msg.get("token")
     info = validate_reconnect_token(token)
     if not info or info.get("room_id") != room_id or info.get("player_id") != pid:
@@ -580,7 +581,6 @@ async def games_open():
 
 @coc_app.get("/games/mine")
 async def games_mine(token: str | None = None):
-    from games.spender.main import get_user_by_session
     user = get_user_by_session(token) if token else None
     if not user:
         return {"ok": False, "games": [], "message": "unauthenticated"}
@@ -589,7 +589,6 @@ async def games_mine(token: str | None = None):
 
 @coc_app.post("/games/{game_id}/cancel")
 async def games_cancel(game_id: str, token: str | None = None, player_id: str | None = None):
-    from games.spender.main import get_user_by_session
     game_id = normalize_room(game_id)
     owner = None
     user = get_user_by_session(token) if token else None

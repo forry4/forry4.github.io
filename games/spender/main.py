@@ -19,6 +19,12 @@ import time
 import hashlib
 import hmac
 
+from core.db import get_db_conn, init_core_schema
+from core.auth import (
+    gen_token, create_user, authenticate_user, get_user_by_session,
+    create_reconnect_token, validate_reconnect_token, mark_reconnect_token_used,
+)
+
 app = FastAPI(title="Spender API")
 
 app.add_middleware(
@@ -167,164 +173,15 @@ def normalize_room(rid: str) -> str:
     return (rid or "").upper()
 
 
-# ─── Database ────────────────────────────────────────────────────────────────
-# Two backends behind one tiny DBAPI-ish wrapper:
-#   * local stdlib sqlite3  — default (dev + tests; also the prod *fallback*)
-#   * Turso / libsql remote — used in production when TURSO_DATABASE_URL is set,
-#     so data survives Render's ephemeral filesystem (which wipes a local sqlite
-#     file on every deploy/cold-start).
-# The wrapper makes rows accessible by BOTH index (row[0]) and column name
-# (row["id"]) regardless of the underlying driver's native row type, so the
-# existing query code is unchanged. Turso is verified by a boot-time self-test;
-# if anything about it fails we fall back to local sqlite (the site stays up,
-# just non-persistent) instead of crashing.
-
-DB_PATH = os.path.join(os.path.dirname(__file__), "users.db")
-TURSO_URL = os.environ.get("TURSO_DATABASE_URL")
-TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
-
-
-class _Row:
-    """Row supporting row[i] and row['col'] (sqlite3.Row-compatible subset)."""
-    __slots__ = ("_cols", "_vals")
-
-    def __init__(self, cols, vals):
-        self._cols = cols
-        self._vals = vals
-
-    def __getitem__(self, k):
-        if isinstance(k, str):
-            return self._vals[self._cols.index(k)]
-        return self._vals[k]
-
-    def __iter__(self):
-        return iter(self._vals)
-
-    def __len__(self):
-        return len(self._vals)
-
-
-class _Cursor:
-    """Cursor over a raw connection's execute() result; yields _Row objects.
-    Implements executemany via a loop so it works on drivers (libsql) that may
-    not expose a native executemany."""
-
-    def __init__(self, raw_conn):
-        self._conn = raw_conn
-        self._res = None
-
-    def execute(self, sql, params=()):
-        self._res = self._conn.execute(sql, params)
-        return self
-
-    def executemany(self, sql, seq):
-        for p in seq:
-            self._res = self._conn.execute(sql, p)
-        return self
-
-    @property
-    def description(self):
-        return getattr(self._res, "description", None)
-
-    def _cols(self):
-        d = self.description
-        return [c[0] for c in d] if d else []
-
-    def fetchone(self):
-        r = self._res.fetchone()
-        return None if r is None else _Row(self._cols(), list(r))
-
-    def fetchall(self):
-        cols = self._cols()
-        return [_Row(cols, list(r)) for r in self._res.fetchall()]
-
-
-class _Conn:
-    """Thin connection wrapper exposing cursor()/execute()/commit()/close()
-    uniformly over stdlib sqlite3 and libsql connections."""
-
-    def __init__(self, raw):
-        self._raw = raw
-
-    def cursor(self):
-        return _Cursor(self._raw)
-
-    def execute(self, sql, params=()):
-        return _Cursor(self._raw).execute(sql, params)
-
-    def executemany(self, sql, seq):
-        return _Cursor(self._raw).executemany(sql, seq)
-
-    def commit(self):
-        self._raw.commit()
-
-    def close(self):
-        try:
-            self._raw.close()
-        except Exception:
-            pass
-
-
-def _connect_turso():
-    import libsql  # lazy: only imported when Turso is configured
-    return libsql.connect(database=TURSO_URL, auth_token=TURSO_TOKEN)
-
-
-def _turso_selftest() -> bool:
-    """Verify the Turso connection AND that name-based row access works through
-    our wrapper. Any failure -> False (fall back to local sqlite)."""
-    if not TURSO_URL:
-        return False
-    try:
-        raw = _connect_turso()
-        raw.execute("CREATE TABLE IF NOT EXISTS _selftest (id TEXT, name TEXT)")
-        raw.execute("DELETE FROM _selftest")
-        raw.execute("INSERT INTO _selftest (id, name) VALUES (?, ?)", ("x", "ok"))
-        raw.commit()
-        res = raw.execute("SELECT id, name FROM _selftest")
-        row = res.fetchone()
-        cols = [c[0] for c in res.description]
-        assert row is not None and _Row(cols, list(row))["name"] == "ok"
-        raw.execute("DROP TABLE _selftest")
-        raw.commit()
-        raw.close()
-        LOG.info("Turso/libsql verified — using persistent Turso database.")
-        return True
-    except Exception as e:  # noqa: BLE001 - never let DB setup crash boot
-        LOG.warning("TURSO_DATABASE_URL set but Turso is unusable (%s); "
-                    "falling back to LOCAL sqlite (data will NOT persist).", e)
-        return False
-
-
-_USE_TURSO = _turso_selftest()
-
-
-def get_db_conn():
-    if _USE_TURSO:
-        return _Conn(_connect_turso())
-    return _Conn(sqlite3.connect(DB_PATH, check_same_thread=False))
-
+# ─── Spender DB schema ──────────────────────────
+# The dual sqlite/Turso connection, the user/session/admin auth layer, and the
+# users/admins/reconnect_tokens tables live in core.db / core.auth. init_db just
+# ensures the shared core schema plus Spender's own `games` table exist.
 
 def init_db():
     conn = get_db_conn()
+    init_core_schema(conn)
     cur = conn.cursor()
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        id TEXT PRIMARY KEY,
-        name TEXT,
-        password_hash TEXT,
-        session_token TEXT,
-        session_expiry INTEGER
-    )""")
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS reconnect_tokens (
-        token TEXT PRIMARY KEY,
-        user_id TEXT,
-        room_id TEXT,
-        player_id TEXT,
-        expires_at INTEGER,
-        used INTEGER DEFAULT 0
-    )""")
     cur.execute("""
     CREATE TABLE IF NOT EXISTS games (
         id TEXT PRIMARY KEY,
@@ -338,176 +195,6 @@ def init_db():
         created_at INTEGER,
         updated_at INTEGER
     )""")
-    # Site admins (durable role). Membership = a row keyed by user id. Kept as its
-    # own table (not a users column) so it needs only CREATE TABLE IF NOT EXISTS —
-    # no ALTER-TABLE migration against the existing prod/Turso users table.
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS admins (
-        user_id    TEXT PRIMARY KEY,
-        granted_at INTEGER
-    )""")
-    conn.commit()
-    conn.close()
-
-
-def gen_token(n=32):
-    return ''.join(random.choices(string.ascii_letters + string.digits, k=n))
-
-
-# Password hashing: PBKDF2-HMAC-SHA256 (stdlib) stored as "pbkdf2$<iters>$<salt>$<hex>".
-# verify_password also accepts the legacy "<salt>$<sha256hex>" format and the caller
-# transparently upgrades those to PBKDF2 on the next successful login.
-PBKDF2_ITERS = 200_000
-
-
-def hash_password(password: str) -> str:
-    salt = gen_token(16)
-    h = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), PBKDF2_ITERS).hex()
-    return f"pbkdf2${PBKDF2_ITERS}${salt}${h}"
-
-
-def verify_password(stored: str, password: str) -> bool:
-    parts = (stored or "").split("$")
-    if len(parts) == 4 and parts[0] == "pbkdf2":
-        try:
-            calc = hashlib.pbkdf2_hmac("sha256", password.encode(), parts[2].encode(), int(parts[1])).hex()
-        except ValueError:
-            return False
-        return hmac.compare_digest(calc, parts[3])
-    if len(parts) == 2:  # legacy salt$sha256
-        salt, h = parts
-        return hmac.compare_digest(hashlib.sha256((salt + password).encode()).hexdigest(), h)
-    return False
-
-
-def create_user(name: str, password: str) -> dict | None:
-    uid = gen_token(10)
-    conn = get_db_conn()
-    cur = conn.cursor()
-    try:
-        cur.execute("INSERT INTO users (id,name,password_hash) VALUES (?,?,?)",
-                    (uid, name, hash_password(password)))
-        conn.commit()
-    except sqlite3.IntegrityError:
-        conn.close()
-        return None  # name already taken
-    except Exception as e:  # noqa: BLE001 - don't 500 the endpoint; surface in logs
-        LOG.error("create_user failed for %r: %s", name, e)
-        conn.close()
-        return None
-    conn.close()
-    return {"id": uid, "name": name}
-
-
-def authenticate_user(name: str, password: str) -> dict | None:
-    conn = get_db_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM users WHERE name = ?", (name,))
-    row = cur.fetchone()
-    if not row:
-        conn.close()
-        return None
-    stored = row["password_hash"]
-    if not verify_password(stored, password):
-        conn.close()
-        return None
-    token = gen_token(32)
-    expiry = int(time.time()) + 7 * 24 * 3600
-    # Upgrade legacy (non-PBKDF2) hashes on successful login.
-    if not (stored or "").startswith("pbkdf2$"):
-        cur.execute("UPDATE users SET password_hash=? WHERE id=?", (hash_password(password), row["id"]))
-    cur.execute("UPDATE users SET session_token=?, session_expiry=? WHERE id=?", (token, expiry, row["id"]))
-    conn.commit()
-    # Bootstrap the admin role: the SITE_OWNER username is auto-granted admin on
-    # login (durable thereafter via the admins table).
-    owner = site_owner_name()
-    if owner and row["name"] == owner:
-        grant_admin(conn, row["id"])
-    admin = is_admin_id(conn, row["id"])
-    conn.close()
-    return {"id": row["id"], "name": row["name"], "session_token": token, "is_admin": admin}
-
-
-def get_user_by_session(token: str) -> dict | None:
-    if not token:
-        return None
-    conn = get_db_conn()
-    cur = conn.cursor()
-    now = int(time.time())
-    # Single query (1 round-trip) — is_admin via EXISTS subquery; positional read
-    # avoids depending on the driver aliasing the computed column in row metadata.
-    cur.execute(
-        "SELECT id, name, (SELECT 1 FROM admins WHERE user_id = users.id) "
-        "FROM users WHERE session_token=? AND session_expiry>?",
-        (token, now),
-    )
-    row = cur.fetchone()
-    conn.close()
-    if not row:
-        return None
-    return {"id": row[0], "name": row[1], "is_admin": bool(row[2])}
-
-
-# ─── Site owner / admin identity ──────────────────────────────────────────────
-# Admin is a durable role stored in the `admins` table; the SITE_OWNER env var
-# (a username) is the bootstrap that auto-grants admin on login. `is_site_owner`
-# is the canonical "is this an admin" check used by features (books is the first
-# consumer). SITE_OWNER is read at call time so an env change takes effect on the
-# next restart with no code change.
-def site_owner_name() -> str | None:
-    v = os.environ.get("SITE_OWNER")
-    return v.strip() if v and v.strip() else None
-
-
-def grant_admin(conn, user_id: str) -> None:
-    conn.execute("INSERT OR IGNORE INTO admins (user_id, granted_at) VALUES (?, ?)",
-                 (user_id, int(time.time())))
-    conn.commit()
-
-
-def is_admin_id(conn, user_id: str) -> bool:
-    cur = conn.cursor()
-    cur.execute("SELECT 1 FROM admins WHERE user_id = ?", (user_id,))
-    return cur.fetchone() is not None
-
-
-def is_site_owner(user: dict | None) -> bool:
-    if not user:
-        return False
-    if user.get("is_admin"):
-        return True
-    owner = site_owner_name()
-    return bool(owner and user.get("name") == owner)
-
-
-def create_reconnect_token(user_id: str, room_id: str, player_id: str, ttl: int = 120) -> str:
-    token = gen_token(12)
-    expires_at = int(time.time()) + ttl
-    conn = get_db_conn()
-    cur = conn.cursor()
-    cur.execute("INSERT INTO reconnect_tokens (token,user_id,room_id,player_id,expires_at,used) VALUES (?,?,?,?,?,0)",
-                (token, user_id, room_id, player_id, expires_at))
-    conn.commit()
-    conn.close()
-    return token
-
-
-def validate_reconnect_token(token: str) -> dict | None:
-    conn = get_db_conn()
-    cur = conn.cursor()
-    now = int(time.time())
-    cur.execute("SELECT * FROM reconnect_tokens WHERE token=? AND expires_at>? AND used=0", (token, now))
-    row = cur.fetchone()
-    conn.close()
-    if not row:
-        return None
-    return {"token": row["token"], "user_id": row["user_id"], "room_id": row["room_id"], "player_id": row["player_id"]}
-
-
-def mark_reconnect_token_used(token: str):
-    conn = get_db_conn()
-    cur = conn.cursor()
-    cur.execute("UPDATE reconnect_tokens SET used=1 WHERE token=?", (token,))
     conn.commit()
     conn.close()
 
