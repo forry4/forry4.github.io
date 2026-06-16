@@ -304,14 +304,15 @@ def gem_cost(s: E.State, ci: int, seat: int) -> int:
 def gold_cost(s: E.State, ci: int, seat: int) -> int:
     """Estimated gold coins needed: the bottleneck (steepest single REMAINING) color's need
     minus the up-to-GOLD_BANK_CAP of it you can pull from the bank (fewer if the opponent has
-    drained it); the rest is paid in gold. Not floored, so it may be negative when the
-    bottleneck is cheap and the bank is full. 0 when nothing colored is still needed."""
+    drained it); the rest is paid in gold. Floored at 0 -- a cheap, easily-collected bottleneck
+    contributes no gold cost (never a negative credit, which used to make a spread card score
+    cheaper than a smaller concentrated one). 0 when nothing colored is still needed."""
     d = _color_deficits(s, ci, seat)
     steepest = max(d)
     if steepest <= 0:
         return 0
     color = max(range(5), key=d.__getitem__)
-    return steepest - max(0, min(GOLD_BANK_CAP, s.bank[color]))
+    return max(0, steepest - min(GOLD_BANK_CAP, s.bank[color]))
 
 
 def gold_shortfall(s: E.State, ci: int, seat: int) -> int:

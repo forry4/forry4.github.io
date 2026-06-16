@@ -85,12 +85,12 @@ def _find_card_on_board_with_cost(s, seat):
 
 # ─── gold_cost ──────────────────────────────────────────────────────────────────
 
-def test_gold_cost_negative_when_cheap_and_bank_full():
+def test_gold_cost_floored_when_cheap_and_bank_full():
     s = E.new_game(random.Random(0))           # bank full (4 each) at start
     seat = s.turn
     cheap = _find_card(lambda c: 0 < max(c) < V.GOLD_BANK_CAP)
     assert cheap is not None
-    assert V.gold_cost(s, cheap, seat) < 0      # steepest < cap, pulled from a full bank -> negative
+    assert V.gold_cost(s, cheap, seat) == 0     # floored: a cheap bottleneck gives no negative credit
 
 
 def test_gold_cost_positive_for_steep_card():
