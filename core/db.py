@@ -21,6 +21,15 @@ import sqlite3
 
 LOG = logging.getLogger("core.db")
 
+# Configure logging HERE, before the Turso self-test runs at import (below). This
+# module is imported very early (main.py imports it at the top, before its own
+# logging.basicConfig), and uvicorn's default config adds no root handler — so
+# without this the "Turso/libsql verified" INFO line is silently dropped and you
+# can't confirm persistence from the logs. (A failure WARNING would still surface
+# via logging's lastResort handler, but the success line would not.) basicConfig is
+# a no-op if the root logger already has handlers, so this never double-configures.
+logging.basicConfig(level=logging.INFO)
+
 # The site SQLite database. It historically lived at games/spender/users.db (it
 # predates this package), so the default stays there for backward-compat with
 # existing local/dev data; override with SITE_DB_PATH. In production
