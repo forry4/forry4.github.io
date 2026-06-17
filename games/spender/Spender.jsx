@@ -142,7 +142,7 @@ const css = baseCss + `
 .copy-hint{font-size:.75rem;color:var(--text-muted);font-style:italic;margin-bottom:12px}
 
 /* ─── Game layout ───────────────────────────────────────────────────────── */
-.game{display:grid;grid-template-columns:1fr 272px;gap:12px;padding:10px;min-height:100vh}
+.game{display:grid;grid-template-columns:1fr 272px;gap:12px;padding:10px;flex:1;min-height:0}
 @media(max-width:900px){.game{grid-template-columns:1fr}}
 .game-main{display:flex;flex-direction:column;gap:10px}
 .game-sidebar{display:flex;flex-direction:column;gap:10px}
