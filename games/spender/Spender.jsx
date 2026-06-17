@@ -164,10 +164,10 @@ const css = baseCss + `
 .gem-count{font-size:.75rem;color:var(--text-dim);font-family:'Cinzel',serif}
 
 /* ─── Cards ─────────────────────────────────────────────────────────────── */
-/* overflow-x:auto forces overflow-y to clip, which would cut off the top of cards
-   (flush at the top, lifted on hover). padding-top + matching -margin gives the lift
-   and the top border clip-room without changing where the row sits. */
-.level-row{display:flex;gap:8px;align-items:flex-start;flex-wrap:nowrap;overflow-x:auto;padding:6px 0 4px;margin-top:-6px}
+/* overflow-x:auto clips both axes, which would cut off the hover lift / top border
+   and the selection outline of the first & last items (flush at the clip edges).
+   Padding on all sides + matching -margin gives clip-room without moving the row. */
+.level-row{display:flex;gap:8px;align-items:flex-start;flex-wrap:nowrap;overflow-x:auto;padding:6px 4px 4px;margin:-6px -4px 0}
 .level-row::-webkit-scrollbar{height:4px}.level-row::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
 .deck-pile{width:88px;min-height:120px;border-radius:var(--radius);border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;font-family:'Cinzel',serif;font-size:.68rem;color:var(--text-dim);cursor:pointer;flex-shrink:0;background:var(--surface2);transition:all .12s;flex-direction:column;gap:4px}
 .deck-pile:hover{border-color:var(--gold);color:var(--gold)}
