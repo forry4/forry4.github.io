@@ -42,6 +42,9 @@ _TURNS_KEYS = None      # list of known keys (for the NN fallback)
 _TURNS_CACHE = {}       # memoized lookups (exact + NN results) -- persists per process
 _TURNS_FALLBACK = 12.0
 GEM_DIST_W = 0.25       # NN distance weight on gems: 4 gems ~ 1 card (gems are worth less than cards)
+TURNS_FLOOR = 1.0       # floor on estimated_turns_remaining: you always have at least the current turn,
+                        # and the final-turn winning logic handles immediate points, so engine/noble
+                        # building never assumes < this many turns left. 0.0 = no floor (legacy).
 
 
 def _load_turns_table():
@@ -518,16 +521,19 @@ class Valuation:
                     total += cost[i]
         self.deck_color_demand = [d / total for d in demand] if total else [0.0] * 5
 
-    def turns_remaining(self) -> float:
+    def estimated_turns_remaining(self) -> float:
         """Estimated FUTURE main turns left in the game (the engine-compounding horizon), read from
         the typical-game table: min over BOTH players of lookup(their cards, points) -- the game ends
-        when the leader finishes, so the more-advanced player sets the clock. Cached per state."""
+        when the leader finishes, so the more-advanced player sets the clock. Cached per state.
+        FLOORED at 1.0: you always have at least the current turn, and the final-turn winning logic
+        already handles immediate points -- so engine/noble building never assume < 1 turn left."""
         if self._turns_cache is not None:
             return self._turns_cache
         s = self.s
-        self._turns_cache = min(
+        tr = min(
             _lookup_turns(s.purchased_n[0], s.points[0], sum(s.tokens[0])),
             _lookup_turns(s.purchased_n[1], s.points[1], sum(s.tokens[1])))
+        self._turns_cache = tr if tr > TURNS_FLOOR else TURNS_FLOOR
         return self._turns_cache
 
     # cross-card factor (the one an MLP cannot assemble from a flat vector) ----
@@ -885,7 +891,7 @@ class Valuation:
         s = self.s
         bcol = E.BONUS[ci]
         bon = s.bonuses[seat]
-        eff = self.turns_remaining() - self.tempo(ci, seat)  # turns left after acquiring this card
+        eff = self.estimated_turns_remaining() - self.tempo(ci, seat)  # turns left after acquiring this card
         if eff < 0.0:
             eff = 0.0
         score = 0.0

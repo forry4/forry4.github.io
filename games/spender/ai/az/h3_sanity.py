@@ -42,7 +42,7 @@ def _validate_formula():
     s.bonuses = [bon, [0] * 5]
     val = V3.Valuation(s, H3.W_TEMPO, H3.W_GEM, H3.W_GOLD)
     take, eng, pt, cost = H3.components(val, s, X, seat)
-    T = val.turns_remaining()
+    T = val.estimated_turns_remaining()
     tempo = val.tempo(X, seat)
     raw_eng = val.engine_value(X, seat)   # components returns the POST-multiplier engine; pass raw here
     mine = _take_formula(pt, raw_eng, tempo, val.gem_cost(X, seat), val.gold_cost(X, seat), T)

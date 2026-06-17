@@ -27,18 +27,13 @@ def main():
     if AT._WORKERS > 1:
         AT._POOL = mp.Pool(processes=AT._WORKERS)
 
-    base = AT.read_current()  # baked package: W_TEMPO=0.1, NCF=0.3, W_ENGINE=0.15, POT_REACH_W=0
-    # verify the baked default reproduces ~0.54/0.76, and re-test POT_REACH_W (sanity check c) in
-    # the new turns_remaining model (it regressed in the OLD stage model -- does it now help/wash?).
-    # corrected formulas (steepness-scaled floor; affordable-gated, deficit-weighted reachability).
-    # reachability scale grew (xdeficit), so POT_REACH_W is swept lower.
+    base = AT.read_current()
+    # Re-confirm the grid leader (#2: gold 0.4->0.3) + runner-up (#3: gem 0.3->0.4) on a 2nd seed.
     CONFIGS = [
-        ("baseline (both 0)",        {}),
-        ("floor=0.1 only",           {"BUILD_FLOOR_W": 0.1}),
-        ("floor=0.2 only",           {"BUILD_FLOOR_W": 0.2}),
-        ("reach=0.03 only",          {"POT_REACH_W": 0.03}),
-        ("reach=0.06 only",          {"POT_REACH_W": 0.06}),
-        ("floor=0.15 + reach=0.04",  {"BUILD_FLOOR_W": 0.15, "POT_REACH_W": 0.04}),
+        ("baseline 0.1/0.3/0.4", {}),
+        ("#2 gold->0.3",         {"W_GOLD": 0.3}),
+        ("#3 gem->0.4",          {"W_GEM": 0.4}),
+        ("#2+#3 0.1/0.4/0.3",    {"W_GEM": 0.4, "W_GOLD": 0.3}),
     ]
     print(f"[h3-eval] N={args.n} seeds H2={args.seed_h2} H={args.seed_h}  "
           f"(source W_TEMPO={base['W_TEMPO']} NCF={base['NOBLE_CLOSE_FLOOR']} W_ENGINE={base['W_ENGINE']})",

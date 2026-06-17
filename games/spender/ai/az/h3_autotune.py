@@ -49,6 +49,8 @@ KNOBS = {
     "NOBLE_CLOSE_FLOOR": (V3, [0.1, 0.2, 0.3]),
     "NOBLE_TIME_GATE":   (V3, [False, True]),               # time-discount noble_progress (eff/(eff+w*deficit))
     "NOBLE_TURN_W":      (V3, [0.5, 1.0, 1.5, 2.0]),         # turns-per-bonus weight in the noble time fade
+    "TURNS_FLOOR":       (V3, [0.0, 1.0, 2.0]),              # floor on estimated_turns_remaining
+    "USE_FINISH_RESERVE": (H3, [False, True]),              # slot-pressure: reserve a near top board card
     "GOLD_BANK_CAP":     (V3, [1, 2, 3]),
     "GOLD_TIEBREAK":     (H3, [0.0, 0.1, 0.2, 0.3]),
     "POT_REACH_W":       (V3, [0.0, 0.05, 0.1, 0.2]),

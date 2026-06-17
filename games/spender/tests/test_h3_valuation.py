@@ -314,3 +314,52 @@ def test_second_builder_lifts_reach_and_first_builder(restore_flags):
         assert eng_two > eng_one         # and the first builder is worth more (shared target's reach rose)
     finally:
         E.COST, E.PTS, E.BONUS, E.LEVEL_OF = orig
+
+
+# ─── (e) slot-pressure reserve finisher (policy: choose_action, not valuation) ─
+def _reserve_state(white_deficit, n_tokens, *, n_reserved=0, bank_gold=5):
+    """Seat-0 state: board slot 0 holds a steep-white card the seat is `white_deficit` white short of,
+    with `n_tokens` non-white / non-gold tokens, `n_reserved` (unaffordable) reserved cards, and
+    `bank_gold` gold in the bank. The card is the SOLE board card -> the top take_value target."""
+    s = _blank_state()
+    X = _steep_white_card()
+    rem = [0] * 5
+    rem[WHITE] = white_deficit
+    _set_remaining(s, 0, X, rem)
+    s.board = [-1] * 12
+    s.board[0] = X
+    # tokens spread over non-white colors (so they don't reduce the white deficit); no gold held
+    s.tokens = [[0] * 6, [0] * 6]
+    for i in range(n_tokens):
+        s.tokens[0][[BLUE, GREEN, 3, BLACK][i % 4]] += 1
+    # reserved slots filled with steep white cards the seat can't afford (so the bot won't just buy them)
+    steep = [c for c in sorted(range(len(E.COST)), key=lambda c: -E.COST[c][WHITE]) if c != X]
+    s.reserved = [steep[:n_reserved], []]
+    s.bank = [4, 4, 4, 4, 4, bank_gold]
+    s.turn = 0
+    return s, X
+
+
+def test_e_reserve_fires_8tokens_two_of_one_color():
+    """At 8 tokens and exactly 2 of ONE color short of the top board card, the bot RESERVES it."""
+    assert H3.USE_FINISH_RESERVE                       # the validated default
+    s, _X = _reserve_state(white_deficit=2, n_tokens=8)
+    assert H3.choose_action(s, 0) == E.A_RES_BOARD + 0
+
+
+def test_e_reserve_fires_9tokens_one_gem():
+    """At 9 tokens and 1 gem short of the top board card, the bot RESERVES it (banked gold finishes it)."""
+    s, _X = _reserve_state(white_deficit=1, n_tokens=9)
+    assert H3.choose_action(s, 0) == E.A_RES_BOARD + 0
+
+
+def test_e_reserve_skips_without_bank_gold():
+    """No gold in the bank -> reserving banks nothing, so the bot takes gems rather than reserve."""
+    s, _X = _reserve_state(white_deficit=2, n_tokens=8, bank_gold=0)
+    assert H3.choose_action(s, 0) != E.A_RES_BOARD + 0
+
+
+def test_e_reserve_skips_when_slots_full():
+    """All 3 reserve slots used -> the finisher cannot fire (reserve is illegal); the bot takes gems."""
+    s, _X = _reserve_state(white_deficit=2, n_tokens=8, n_reserved=3)
+    assert H3.choose_action(s, 0) != E.A_RES_BOARD + 0

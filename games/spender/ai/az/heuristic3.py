@@ -141,6 +141,18 @@ TAKE2_MIN_STEEP = 2              # min remaining need in the bottleneck color to
 USE_OPP_SNIPE = False
 SNIPE_REQUIRE_OPP_TOP = True
 
+# ─── slot-pressure reserve finisher ──────────────────────────────────────────────────────────
+# Near the token cap the spread take-1/take-3 path can STALL: it grabs 1 gem/turn toward a single-
+# color bottleneck, climbs to 8-10 tokens, then take-and-discard churns without ever finishing the
+# card (observed: bot 2 white short of its top card at 8/10 slots, never closing it). Fix: when the
+# TOP take_value target is one good turn from done, RESERVE it -- this locks it from the opponent /
+# board churn AND banks a gold that covers the remaining need.
+#   Validated +0.011..+0.014 vs H2 and +0.013..+0.016 vs H over two disjoint seed sets (N=4-6k).
+# (A companion take-2 finisher was tested and SCRAPPED: even restricted to a single remaining color
+#  it was a wash vs H2 / slight drag vs H, and hurt the win rate when combined with this reserve.)
+USE_FINISH_RESERVE = True   # at 8 tokens & exactly 2-of-one-color away, or 9 tokens & 1 gem away,
+                            # reserve the top board card (free reserve slot + bank gold required)
+
 
 def components(val: V.Valuation, s: E.State, ci: int, seat: int):
     """The take_value pieces for `ci` from `seat`: (take, engine, point, cost).
@@ -154,7 +166,7 @@ def components(val: V.Valuation, s: E.State, ci: int, seat: int):
     # A card that can't be finished before the game ends contributes ~0 engine; an engine acquired
     # with many turns left is worth proportionally more. Replaces point-staging + ENG_DECAY.
     engine = val.engine_value(ci, seat)
-    compound_turns = val.turns_remaining() - val.tempo(ci, seat)
+    compound_turns = val.estimated_turns_remaining() - val.tempo(ci, seat)
     engine *= W_ENGINE * (compound_turns if compound_turns > 0.0 else 0.0)
     # points are NOT staged -- full value always.
     noble_scale = NOBLE_SCALE
@@ -439,6 +451,32 @@ def _take_targets(s, seat, val, targets):
     return kept if kept else targets
 
 
+def _finish_reserve(s, seat, val, targets, legal_set):
+    """Slot-pressure reserve: when near the cap and the TOP take_value target is a board card one
+    good turn from done, RESERVE it instead of take-and-discarding. Reserving banks a gold (covers a
+    remaining gem) and LOCKS the card from the opponent / board churn. Two triggers, on the post-bonus
+    / post-token color deficits:
+      - 8 tokens & exactly 2 of a SINGLE color away  -> reserve (gold + one take finishes it)
+      - 9 tokens & exactly 1 gem away                -> reserve (the banked gold finishes it next turn)
+    Requires a free reserve slot and gold in the bank. Returns the reserve action, or None."""
+    if not targets or len(s.reserved[seat]) >= 3 or s.bank[5] <= 0:
+        return None
+    _tv, ci, idx, kind = targets[0]
+    if kind != "board" or val.affordable_now(ci, seat):
+        return None
+    a = E.A_RES_BOARD + idx
+    if a not in legal_set:
+        return None
+    n_tokens = sum(s.tokens[seat])
+    d = V._color_deficits(s, ci, seat)
+    total = sum(d)
+    if n_tokens == 8 and total == 2 and max(d) == 2:   # 2 of one color away
+        return a
+    if n_tokens == 9 and total == 1:                   # 1 gem away
+        return a
+    return None
+
+
 def choose_action(s: E.State, seat: int | None = None) -> int:
     """Return a legal engine action index for `seat` (defaults to side to move)."""
     if seat is None:
@@ -523,7 +561,11 @@ def choose_action(s: E.State, seat: int | None = None) -> int:
                 return best_a
             if n_tokens == 8 and best_tv > CAP8_BUY_ABOVE:
                 return best_a
-        # bar not met (or nothing affordable): take gems
+        # bar not met (or nothing affordable): reserve a near top board card, else take gems.
+        if USE_FINISH_RESERVE:
+            a = _finish_reserve(s, seat, val, take_targets, legal_set)
+            if a is not None:
+                return a
         a = _choose_take(s, seat, val, take_targets, legal)
         return a if a is not None else legal[0]
 
