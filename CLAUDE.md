@@ -754,6 +754,41 @@ directly attacks (3). (1) and (2) require structural fixes:
 - Conclusion: weight-space tuning over the existing features saturates around
   0.6 vs B. This is why the AZ rewrite exists.
 
+### Variant H2 (`ai/az/heuristic2.py` + `valuation2.py`) — the `take_value` heuristic (DEPLOYED)
+A from-scratch greedy heuristic, **served as website variant "H2"**, separate from variant H.
+**Full write-up: `games/spender/ai/az/H2.md` — read it before touching H2.**
+- **Model:** `take_value = (engine_value + point_value) / (1 + total_cost)`. cost = `W_TEMPO·tempo +
+  W_GEM·gem + W_GOLD·gold` (all post-bonus); points are game-STAGE-scaled (engine early → points late,
+  + `ENG_DECAY` fades engine as cards accumulate); `engine_value` includes a forward-looking
+  undealt-deck-demand term. 1-ply greedy, same serving path as H.
+- **Deployed config (committed on main; beats H ~0.69 greedy):** `heuristic2` W_TEMPO 0.5 / W_GEM 0.2 /
+  W_GOLD 0.4 / NOBLE_SCALE 3.0 / STAGE_K 8 / STAGE_FLOOR 0.25 / ENG_DECAY 0.3; `valuation2` ENG_DECK_W 3.5
+  / ENG_DIV 8 / ENG_FLOOR 0.2 / NOBLE_CLOSE_FLOOR 0.2 / GOLD_BANK_CAP 2. The big levers were ENG_DECK_W↑
+  + NOBLE_SCALE↑ (~+0.06); ENG_DECAY +0.011; cost weights saturated.
+- **Tooling (offline; restore modules after):** `h2_tune.py` (CRN A/B; `--opp H` vs heuristic H, `--opp h2`
+  = self-gate vs the CURRENT committed H2 — far more sensitive once H2 ≫ H) and `h2_autotune.py`
+  (autonomous coordinate-descent campaign, NO human input: screen → validate on disjoint holdout vs self
+  AND vs H → adopt → re-screen; prints a vetted config, never edits source).
+- **Tuning methodology — DO NOT regress:** CRN (same seeds across configs) is for the *comparison*; the
+  final estimate MUST come from FRESH **disjoint** holdout seeds (tuning-set optimism shrank gains ~⅔).
+  **Seed-spacing bug:** `h2_tune` uses deck seed `base_seed+i` over N games, so two base seeds must be
+  spaced **≥ N apart** to be independent (seeds 1–3 apart share ~1598/1600 games → fake "agreement").
+  Self-gate tuning needs a **self-exploit guard**: adopt only if the change ALSO doesn't regress vs H — a
+  change can beat *this* config via rock-paper-scissors yet be weaker vs the external yardstick.
+- **Tested & REJECTED — parked default-OFF behind flags in `heuristic2.py` (do not relitigate):**
+  `USE_TAKE2` (take-2-of-a-color): naive form made bad moves (−0.03), reserved-only form ~neutral (fires
+  0.27% — winning reserves are gold-necessary, the opposite of take-2's full-bank need). `W_SHORTFALL`
+  (bank-aware gold shortfall in cost): cuts a 14.9%→11.6% "stall on an un-completable card" rate, +0.006
+  lean but sub-significant. `NOBLE_SCARCITY` (scarcity-gated nobles): INERT — `board_scarcity`≈0 on 98%
+  of boards (real Splendor boards almost always offer an efficient L2/L3 deal). `USE_OPP_SNIPE` (pivot off
+  a card the opponent will buy): wash/negative — contention is a documented 1-ply greedy wash. **All four
+  are good NET-feature candidates, not greedy levers** (see FEATURES_V4.md + `.claude-plans` H2 feature doc).
+- **On-card AI-values overlay is now ADMIN-ONLY (default OFF):** the per-card T/E/P/C box (H2) / single
+  value (H) only renders for `authUser.is_admin`, behind a "Show/Hide AI values" toggle in the game
+  action bar (AI games only; persisted in `localStorage.spender_show_ai_vals`). Frontend gating in
+  `Spender.jsx` — the data is still in the WS payload (non-sensitive AI valuations), just not shown to
+  non-admins; a backend per-recipient gate was deemed not worth it for this non-sensitive overlay.
+
 ### Hard-won conclusions — DO NOT relitigate
 These cost many self-play/training cycles to establish:
 - **Eval-weight tuning is saturated.** One gain (0.725 vs original), nothing since. The first run captured it.
