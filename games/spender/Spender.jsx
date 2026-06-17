@@ -1240,7 +1240,7 @@ export default function SpenderApp() {
 											)}
 											<button className="btn btn-outline btn-sm"
 												onClick={() => handleContinue(g.id)}>
-												{g.status === "open" ? "Return" : "Continue"}
+												{g.status === "open" ? "Return" : "Resume"}
 											</button>
 										</div>
 									</div>
