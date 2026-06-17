@@ -348,8 +348,15 @@ imports the old arrangement required.
   `get_user_by_session` `setup_books` still receives — main passes the core functions).
 - **Tests**: `core/tests/test_db_auth.py` (wrapper + password + admin + `init_core_schema`,
   in-memory sqlite). CI runs `core/tests/` first; Render watches `core/**/*.py`.
-- **Not yet done** (later phases): the frontend shell extraction (the site shell still
-  lives inside `Spender.jsx`), and DRYing the duplicated room-server scaffolding (Phase 3).
+- **Frontend** (partial, by design): the Vite build was relocated to a neutral top-level
+  `webapp/` (no longer under `games/spender/`). The deeper **stateful shell/game split of
+  `Spender.jsx` was deliberately SKIPPED** — it's a re-architecture of shared `screen` state
+  + the mount-time WS auto-resume on a test-free, auto-deploying, TDZ-prone component, for
+  purity only (the real coupling — CoC/Books reaching into Spender — was the backend, already
+  fixed). Don't attempt it without a strong reason + local playtest gate.
+- **Not yet done**: DRYing the duplicated room-server scaffolding (`ROOMS`/`ROOM_LOCK`/
+  `broadcast_room`/`save_game`/`mk_room_state`/`_schedule_*_turn` are copy-mirrored in Spender
+  and CoC `main.py`) into a shared `core` helper — Phase 3, defer until game #3.
 
 ### Composition root — top-level `app.py` (Phase 2, done)
 The FastAPI **`app` and the feature wiring no longer live in a game module.** The
@@ -807,6 +814,20 @@ gets a random `uid()` in `localStorage.spender_myId`. The room player id (`pid`)
 sent in the WS path IS `myId`, so a created game's `player1_id`/`host_id` equals
 the creator's `myId` (= account id when logged in). `normalize_room` uppercases.
 
+### Session validation on load (stale-token fix)
+The frontend restores its "logged in" state from `localStorage` (`spender_user`),
+but a stored `session_token` can be silently dead — it expires after 7 days, and
+there's **one token per user**, so a login on another browser/device supersedes the
+old one. A dead token downgrades every authenticated request to anonymous while the
+UI still shows you logged in (e.g. the Books "Edit ranking" button vanishes for the
+admin until a re-login). Fix: the loading effect validates the token **before
+routing**. **`GET /auth/session?token=`** (thin wrapper over `core.auth.get_user_by_session`)
+returns `{ok:false}` for a definitively-dead token → the app clears the stale login
+and routes to the auth screen; `{ok:true,user}` → stays logged in and refreshes the
+cached identity (name/is_admin). A network error/timeout NEVER logs you out (a blip
+must not), validation runs only after the backend is confirmed reachable, and it
+degrades safely if `/auth/session` isn't deployed yet (404 → stay logged in).
+
 ### Lobby UI (June 2026)
 - **AI opponent picker** is a floating dropdown (`.ai-picker`, `position:absolute`
   in a `.ai-picker-wrap`), NOT inline — inline reveal shifted the whole page.
@@ -886,10 +907,12 @@ From a strong human player; drives the structural features (not just weights —
 ## Build + deploy steps (production)
 
 **`docs/` is CI-owned — NEVER build or commit it by hand.** The
-`.github/workflows/deploy-pages.yml` Action fires on every push touching
-`games/spender/**`: it `rm -rf docs/`, rebuilds the webapp from source (with
-`VITE_WS_URL=wss://splendid-nelz.onrender.com/ws` baked in), and commits/pushes
-`deploy: update GitHub Pages from Vite build [skip ci]`. So a hand-built `docs/`
+`.github/workflows/deploy-pages.yml` Action fires on every push touching the
+frontend (`webapp/**`, `games/spender/**`, `games/castles_of_crimson/**`,
+`books/**`, `shared/**`): it `rm -rf docs/`, rebuilds the **top-level `webapp/`**
+(relocated there from `games/spender/webapp/` — neutral, not owned by a game) from
+source (with `VITE_WS_URL=wss://splendid-nelz.onrender.com/ws` baked in), and
+commits/pushes `deploy: update GitHub Pages from Vite build [skip ci]`. So a hand-built `docs/`
 bundle is (a) overwritten by CI within ~1 min anyway, (b) the *sole cause* of
 the recurring push-rejected → rebase → minified-bundle conflict loop, and (c) a
 latent wrong-WS-URL bug (local builds don't set `VITE_WS_URL`).
