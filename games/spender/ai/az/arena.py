@@ -66,6 +66,10 @@ def make_opponent(spec: str, opp_iters: int):
         from . import heuristic as H4
         aggr = {"H": 1.0, "HN": H4.NOBLE_AGGR_HN, "HR": H4.NOBLE_AGGR_HR}[spec]
         return lambda s: H4.choose_action(s, s.turn, noble_aggr=aggr)
+    if spec in ("H2", "H2N", "H2R"):
+        from . import heuristic2 as H2  # the stronger take_value heuristic + noble/rusher siblings
+        aggr = {"H2": 1.0, "H2N": H2.NOBLE_AGGR_H2N, "H2R": H2.NOBLE_AGGR_H2R}[spec]
+        return lambda s: H2.choose_action(s, s.turn, noble_aggr=aggr)
     weights = _load_opp_weights(spec)
     return lambda s: _heuristic_action(s, weights, opp_iters)
 

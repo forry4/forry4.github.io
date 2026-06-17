@@ -32,7 +32,28 @@ from . import engine as E
 GOLD_BANK_CAP = 2   # gems of the bottleneck color assumed pullable from the bank in gold_cost
 ENG_DIV = 8.0       # engine_value: PTS divisor (higher = flatter; values broad colors over point-heavy ones)
 ENG_FLOOR = 0.2     # engine_value: zero-point floor in each card's weight
-ENG_DECK_W = 1.0    # engine_value: weight on the forward-looking deck-demand term
+ENG_DECK_W = 7.0    # engine_value: forward-looking deck-demand weight (autotuned 3.5->7.0 on cost+tempo)
+# Per-card weight model for engine_value. The +1 bcol bonus's value to card cj is the actual cost
+# it saves cj: 1 gem (always, since cj needs bcol to be in this sum) + 1 turn if it lowers cj's
+# steepest-remaining color (reduces_tempo). This REPLACED the old w_scarcity = COST[bcol]/sum(COST)
+# fraction proxy (a +1 saves exactly 1 gem regardless of how bcol-heavy cj is, so the fraction was
+# mis-weighting). Non-recursive: importance stays the PTS-based w_value (level-0 approximation).
+#   ENG_WEIGHT_MODE = 1 (SHIPPED): cost+tempo model. 0 = revert to the fraction proxy.
+#   Validated +0.0073 vs H on fresh holdout seeds (3/4 positive), +0.020 on the tuning seeds.
+ENG_WEIGHT_MODE = 1
+ENG_TEMPO_SCALE = 0.3   # scale on (1 + reduces_tempo); swept best of {0.2..0.4} (0.3: +0.020, 5/6 pos)
+# level-1 recursion: a card is worth discounting MORE if it's itself a strong engine card. importance(cj)
+# = PTS-weight + ENG_RECURSE_W * engine_value_0(cj), where engine_value_0 is cj's LEVEL-0 (non-recursive)
+# engine value, precomputed/cached per state so the whole thing stays O(cards^2). 0.0 = OFF (level-0).
+# TESTED, net-NEGATIVE for greedy H2 vs the level-0 model (6 disjoint seeds): lambda 0.1 -0.003,
+# 0.2 -0.006, 0.3 -0.007, 0.5 -0.014 -- monotonic, 0/6 positive at 0.5. It over-weights cheap
+# engine-of-engine cards at the expense of points/tempo. Left OFF; level-0 is best.
+ENG_RECURSE_W = 0.0
+NOBLE_CLOSE_FLOOR = 0.35  # noble_progress (autotuned 0.2->0.35): a card whose color a visible noble needs scores at least
+                          # this (per such noble) even at zero bonuses -- "relevance" survives distance
+EFF_REF = 0.45            # board_scarcity: reference points-per-effective-gem. If the board offers an
+                          # L2/L3 deal at/above this, nobles are noise (scarcity 0); a poor board
+                          # (best deal well below this) -> high scarcity -> go wide for nobles.
 
 
 # ─── Stateless per-card/seat scalars ─────────────────────────────────────────
@@ -214,8 +235,10 @@ def turns_to_afford(s: E.State, ci: int, seat: int) -> int:
 def noble_progress(s: E.State, ci: int, seat: int) -> float:
     """How much ci's +1 bonus advances visible nobles for `seat`, in [0, 1].
 
-    Folds in both *progress* (does this bonus color still help a noble) and
-    *closeness* (how near that noble already is), averaged over visible nobles.
+    Folds in both *relevance* (does this bonus color still help a noble) and *closeness*
+    (how near that noble already is), averaged over visible nobles. Closeness carries a
+    floor (NOBLE_CLOSE_FLOOR): a card whose color a noble needs scores > 0 for that noble
+    even at zero bonuses, so noble-relevance survives distance (a far noble still counts).
     """
     bcol = E.BONUS[ci]
     bon = s.bonuses[seat]
@@ -231,7 +254,8 @@ def noble_progress(s: E.State, ci: int, seat: int) -> float:
             total = sum(req)
             if total:
                 deficit = sum(req[i] - bon[i] for i in range(5) if req[i] > bon[i])
-                score += 1.0 - deficit / total
+                close = 1.0 - deficit / total
+                score += NOBLE_CLOSE_FLOOR + (1.0 - NOBLE_CLOSE_FLOOR) * close
     return score / n if n else 0.0
 
 
@@ -299,14 +323,15 @@ def gem_cost(s: E.State, ci: int, seat: int) -> int:
 def gold_cost(s: E.State, ci: int, seat: int) -> int:
     """Estimated gold coins needed: the bottleneck (steepest single REMAINING) color's need
     minus the up-to-GOLD_BANK_CAP of it you can pull from the bank (fewer if the opponent has
-    drained it); the rest is paid in gold. Not floored, so it may be negative when the
-    bottleneck is cheap and the bank is full. 0 when nothing colored is still needed."""
+    drained it); the rest is paid in gold. Floored at 0 -- a cheap, easily-collected bottleneck
+    contributes no gold cost (never a negative credit, which used to make a spread card score
+    cheaper than a smaller concentrated one). 0 when nothing colored is still needed."""
     d = _color_deficits(s, ci, seat)
     steepest = max(d)
     if steepest <= 0:
         return 0
     color = max(range(5), key=d.__getitem__)
-    return steepest - max(0, min(GOLD_BANK_CAP, s.bank[color]))
+    return max(0, steepest - min(GOLD_BANK_CAP, s.bank[color]))
 
 
 def gold_shortfall(s: E.State, ci: int, seat: int) -> int:
@@ -317,6 +342,22 @@ def gold_shortfall(s: E.State, ci: int, seat: int) -> int:
     'reserving is necessary' signal, e.g. needs 1 white but the bank has 0 white left."""
     d = _color_deficits(s, ci, seat)
     return sum(max(0, d[c] - s.bank[c]) for c in range(5))
+
+
+def _reduces_tempo(costj, bon, bcol: int) -> float:
+    """1.0 if a +1 `bcol` bonus lowers card cj's steepest-remaining color (saves a TURN), else 0.0.
+    Uses H2's tempo definition (steepest single need, +1 if the remainder is exactly 1-1-1-1) on the
+    post-bonus remainder. Caller has gated on cj still needing bcol, so rem[bcol] >= 1. O(5), no recursion."""
+    rem = [costj[c] - bon[c] if costj[c] > bon[c] else 0 for c in range(5)]
+
+    def _t(r):
+        st = max(r)
+        nz = sorted(x for x in r if x > 0)
+        return st + (1 if nz == [1, 1, 1, 1] else 0)
+
+    before = _t(rem)
+    rem[bcol] -= 1
+    return 1.0 if _t(rem) < before else 0.0
 
 
 RESERVED_ENGINE_W = 1.05   # a reserved card counts this much vs one board card in
@@ -333,10 +374,12 @@ class Valuation:
     Stateless scalars above are re-exposed as methods for a single call site.
     """
 
-    __slots__ = ("s", "deck_color_demand")
+    __slots__ = ("s", "deck_color_demand", "_scarcity_cache", "_eng_base_cache")
 
     def __init__(self, s: E.State):
         self.s = s
+        self._scarcity_cache = {}
+        self._eng_base_cache = {}
         # Permanent-bonus future value: share of remaining (undealt) deck cost
         # that is each color. A bonus in a deck-heavy color keeps paying off on
         # cards not yet revealed, not just the 12 on the board.
@@ -351,17 +394,21 @@ class Valuation:
         self.deck_color_demand = [d / total for d in demand] if total else [0.0] * 5
 
     # cross-card factor (the one an MLP cannot assemble from a flat vector) ----
-    def engine_value(self, ci: int, seat: int) -> float:
+    def engine_value(self, ci: int, seat: int, _recurse: bool = True) -> float:
         """Value of the permanent +1 `bcol` bonus ci grants: the discount it gives
         every *other* card that still needs `bcol` -- the visible board cards AND
         `seat`'s own RESERVED cards (committed targets you intend to buy, so a bonus
         that advances one is real engine value) -- weighted by each card's worth and
-        `bcol`-hunger, plus a deck-wide term for unrevealed cards. A reserved card
-        counts RESERVED_ENGINE_W *per card* (a slight commitment premium over a
-        single board card), NOT a pile that dominates the board."""
+        the cost/tempo it saves (`_w_card`), plus a deck-wide term for unrevealed cards.
+
+        Each card cj's importance is its PTS-weight, plus (if ENG_RECURSE_W) a level-1
+        term ENG_RECURSE_W * (cj's own LEVEL-0 engine value) -- a card you discount is
+        worth more if it is itself a strong engine card. `_recurse=False` computes the
+        level-0 value (no recursion); the level-1 path calls it via `_eng_base` (cached)."""
         s = self.s
         bcol = E.BONUS[ci]
         bon_b = s.bonuses[seat][bcol]
+        recurse = _recurse and ENG_RECURSE_W
         ev = 0.0
         for slot in range(12):
             cj = s.board[slot]
@@ -369,20 +416,64 @@ class Valuation:
                 continue
             costj = E.COST[cj]
             if costj[bcol] - bon_b > 0:  # cj still needs this color
-                w_value = E.PTS[cj] / ENG_DIV + ENG_FLOOR   # high-point cards weigh more (+floor)
-                sj = sum(costj)
-                w_scarcity = costj[bcol] / sj if sj else 0.0  # cj is bcol-heavy
-                ev += w_value * w_scarcity
+                imp = E.PTS[cj] / ENG_DIV + ENG_FLOOR   # importance: high-point cards weigh more (+floor)
+                if recurse:
+                    imp += ENG_RECURSE_W * self._eng_base(cj, seat)
+                ev += imp * self._w_card(costj, s.bonuses[seat], bcol)
         for cj in s.reserved[seat]:       # committed targets count too (slight premium)
             if cj == ci:
                 continue
             costj = E.COST[cj]
             if costj[bcol] - bon_b > 0:
-                sj = sum(costj)
-                ev += RESERVED_ENGINE_W * (E.PTS[cj] / ENG_DIV + ENG_FLOOR) \
-                    * (costj[bcol] / sj if sj else 0.0)
+                imp = E.PTS[cj] / ENG_DIV + ENG_FLOOR
+                if recurse:
+                    imp += ENG_RECURSE_W * self._eng_base(cj, seat)
+                ev += RESERVED_ENGINE_W * imp * self._w_card(costj, s.bonuses[seat], bcol)
         ev += self.deck_color_demand[bcol] * ENG_DECK_W
         return ev
+
+    @staticmethod
+    def _w_card(costj, bon, bcol: int) -> float:
+        """Per-card engine weight: cost+tempo (gem saved 1 + turn saved 0/1, scaled) when
+        ENG_WEIGHT_MODE, else the legacy w_scarcity cost-fraction proxy."""
+        if ENG_WEIGHT_MODE:
+            return ENG_TEMPO_SCALE * (1.0 + _reduces_tempo(costj, bon, bcol))
+        sj = sum(costj)
+        return costj[bcol] / sj if sj else 0.0
+
+    def _eng_base(self, cj: int, seat: int) -> float:
+        """cj's LEVEL-0 engine value (no recursion), cached per state -- the recursive importance term."""
+        key = (cj, seat)
+        v = self._eng_base_cache.get(key)
+        if v is None:
+            v = self.engine_value(cj, seat, _recurse=False)
+            self._eng_base_cache[key] = v
+        return v
+
+    def board_scarcity(self, seat: int) -> float:
+        """How scarce efficient high-point targets are on the board, in [0, 1] (high = scarce).
+
+        The strategy model: noble value scales INVERSELY with board efficiency. When the board has
+        an efficient high-point L2/L3 card to race (good points-per-effective-gem), nobles are noise;
+        when it doesn't, the only way to afford the inefficient point cards is a wide L1 engine, and
+        breadth delivers nobles for free -- so nobles are worth more. Scarcity = how far the board's
+        BEST L2/L3 deal falls below EFF_REF. Cached per seat (state-wide, not per-card)."""
+        c = self._scarcity_cache.get(seat)
+        if c is not None:
+            return c
+        s = self.s
+        best = 0.0
+        for slot in range(12):
+            ci = s.board[slot]
+            if ci < 0 or E.LEVEL_OF[ci] < 2:      # L2/L3 are the point-racing cards
+                continue
+            e = self.efficiency(ci, seat)         # PTS / (total_effective_cost + 1)
+            if e > best:
+                best = e
+        v = 1.0 - best / EFF_REF
+        v = 0.0 if v < 0.0 else (1.0 if v > 1.0 else v)
+        self._scarcity_cache[seat] = v
+        return v
 
     # thin re-exports so a heuristic / encoder has one object to call ----------
     def effective_cost(self, ci: int, seat: int) -> list[int]:

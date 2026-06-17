@@ -8,16 +8,21 @@ Model — every card gets a single scalar:
     take_value = (engine_value + point_value) / (1 + total_cost)
 
     total_cost  = W_TEMPO*tempo + W_GEM*gem + W_GOLD*gold        (importance tempo > gem > gold)
-    point_value = (PTS + NOBLE_SCALE*noble_progress + noble_completion) / (1 + RATE*tempo)
+    point_value = stage * (PTS + NOBLE_SCALE*noble_progress) + noble_completion
     engine_value = valuation2.engine_value (undiscounted -- realized + compounding on purchase)
 
 All cost terms are post-cost-reduction (minus owned-card bonuses), never base cost. `tempo`
 and `gold` are on REMAINING need (also minus held tokens); `gem` is the post-bonus sticker
-price. No take-2 is assumed (1 gem of a color per turn). Points are distance-discounted by
-`tempo`, so far points count little until a card is nearly affordable -- this makes cheap
-engine cards top the turn-1 ranking (the sanity check) and points take over late, with no
-stage ramp. Weights below are the offline-tuned config (sanity 0.92, ~0.81 vs greedy C2,
-beats H ~0.51).
+price. No take-2 is assumed (1 gem of a color per turn). `tempo` lives ONLY in `total_cost`
+-- it is collection EFFORT (a cost), not a devaluation of a card's points/engine.
+
+POINT STAGING (replaces the old per-card tempo-discount): the *future* points
+(PTS + noble_progress) are scaled by a global game STAGE -- low early, ramping to 1 -- so the
+bot builds its engine first and values points as the game develops; the +3 from
+noble_completion is realized immediately, so it is NOT staged.
+  stage = floor + (1-floor) * min(1, max(cards_bought/STAGE_K, leader_points/15))
+Being a global multiplier (same for every card), a 2-pt card's point_value is exactly 2x a
+1-pt card's at the same stage. This beats H ~0.62 (vs 0.485 for the old tempo-discount).
 
 Policy (`choose_action`): winning buy (secure) > winning-via-RESERVE > endgame denial >
 token-cap anti-hoard > buy the top-take_value card if affordable, else take gems toward it
@@ -34,12 +39,55 @@ from __future__ import annotations
 from . import engine as E
 from . import valuation2 as V
 
-# ─── Tuned config (offline search: sanity 0.92, ~0.81 vs greedy C2, beats H ~0.51) ───
-W_TEMPO = 0.5     # cost: turns to collect
-W_GEM = 0.2       # cost: total post-bonus gems to pay
-W_GOLD = 0.4      # cost: estimated gold coins needed
-RATE = 2.0        # point distance-discount: point_value /= (1 + RATE * tempo)
-NOBLE_SCALE = 2.0  # noble-progress contribution, scaled toward a noble's VP
+# ─── Tuned config (offline search; beats H ~0.62) ────────────────────────────────────
+W_TEMPO = 0.2      # cost: turns to collect (autotuned 0.5->0.2 on the cost+tempo engine model)
+W_GEM = 0.3        # cost: total post-bonus gems to pay (2D (W_TEMPO,W_GEM) grid: 0.2->0.3, +0.01 vs H)
+W_GOLD = 0.4       # cost: estimated gold coins needed (bottleneck color vs the bank)
+W_SHORTFALL = 0.0  # cost: gems the bank CANNOT supply across ALL needed colors (gold_shortfall).
+                   # gold_cost only sees the bottleneck color, so a card blocked on a NON-bottleneck
+                   # color isn't demoted and the bot stalls collecting toward an un-completable card
+                   # (~14.9% of take-turns). This term penalizes ALL bank-blocked colors so the
+                   # ranking pivots to an attainable card. TESTED at 0.2: cuts stalls 14.9%->11.6%
+                   # and leans +0.006 win rate (6/8 disjoint seeds positive) but below significance
+                   # -- a marginal correctness fix, left OFF (0.0). Flip to ~0.2 to re-enable.
+NOBLE_SCALE = 3.0  # noble-progress contribution, scaled toward a noble's VP
+NOBLE_SCARCITY = 0.0  # board-conditional noble boost: noble term *= (1 + NOBLE_SCARCITY*board_scarcity).
+                      # Per the strategy model nobles matter MORE when the board lacks efficient
+                      # high-point cards to race (go wide for nobles). H2 loses the noble race in its
+                      # losses (0.48 vs opp 1.27 nobles) with a FLAT noble weight; this gates it on the
+                      # board. 0.0 = OFF (flat, no change); tuned below.
+
+# ── Noble-aggressiveness league variants (H2N noble / H2R rusher) ──────────────
+# A single knob `noble_aggr` scales ONLY the staged noble_progress term (never
+# noble_completion, a real +3 VP both variants always grab -> both stay competent).
+# noble_aggr=1.0 = base H2 byte-identical. Mirrors heuristic.py's HN/HR for the
+# stronger take_value bot, so the league keeps noble-style diversity at H2 strength.
+# RECALIBRATED vs the AUTOTUNED base H2 by heuristic_variants_arena (win + nobles/game)
+# -- the old 2.5/0.4 were tuned on the pre-autotune base (W_TEMPO=0.5, ENG_DECK_W=3.5).
+NOBLE_AGGR_H2N = 2.0   # noble variant: +0.19 nobles/game, ~0.46 win vs base (300g). The autotuned
+                       # base already plays nobles strongly, so the lean SATURATES -- 2.0 gives
+                       # near-max divergence at the best win rate; higher aggr just costs strength.
+NOBLE_AGGR_H2R = 0.4   # rusher variant: -0.41 nobles/game, ~0.47 win vs base (races points; the
+                       # rusher direction has more headroom than H2N on this noble-sticky base).
+
+# point staging: future points scaled by a global game stage (low early -> 1 late)
+STAGE_K = 8        # cards-bought for a full engine-stage; stage = max(cards/STAGE_K, leader_pts/15)
+STAGE_FLOOR = 0.25  # early floor: fraction of point value still counted at game start
+
+# engine horizon-decay (the MIRROR of point staging): an engine card built late has few
+# remaining buys to pay off, so engine value should fall as we accumulate cards. Scales engine
+# by (1 - ENG_DECAY * own), own = min(1, cards_we_own/STAGE_K). 0.0 = OFF (flat engine value).
+# 0.3 (tuned): engine fades to ~70% of early value by ~8 cards bought -- a gentle fade, not a
+# collapse. The ROBUST value: positive on all 6 fresh holdout seed sets (11/12 over both rounds).
+# Higher over-corrected (0.5 had a real -0.025 downside seed; 1.0 was -0.045); lower (0.1) was a
+# no-op (~0.000).
+#   CAVEAT: the effect is MINIMAL -- only ~+0.011 win rate vs H (the big lever was ENG_DECK_W +
+#   NOBLE_SCALE, ~+0.06). Worth keeping for correctness (it's the conceptual mirror of the point
+#   stage), but it is NOT a major strength driver. It also reuses `own = cards/STAGE_K` -- exactly
+#   the quantity behind the point `stage` -- so a future cleanup could FOLD this into the stage
+#   machinery (one shared game-progress signal driving points up AND engine down) instead of
+#   carrying ENG_DECAY as a separate knob.
+ENG_DECAY = 0.3
 
 # token-cap anti-hoard: near the 10-cap, buy the best affordable instead of taking gems
 CAP9_BUY_ABOVE = 0.5    # at 9 tokens, buy the best affordable card if its take_value exceeds this
@@ -53,26 +101,66 @@ USE_SPECULATIVE_RESERVE = False  # acquisition + gold-necessary reserves: OFF --
 RESERVE_GAP = 0.5                # acquisition (speculative only): reserve the top unaffordable board
                                  # card when its take_value exceeds the next board card's by >= this.
 
+# take-2-same: the model otherwise assumes <=1 gem/color/turn, so the bot never takes 2 of one
+# color. _bottleneck_take2 implements the one defensible exception -- take 2 to finish a card we
+# have RESERVED that is waiting on a SINGLE remaining color (>= TAKE2_MIN_STEEP) the bank is full
+# of. RESERVED-only is the conceptually-right form: a reserved card is locked (opponent can't take
+# it, board can't churn it away), so committing 2 gems to its one remaining color has none of the
+# option-value cost that made take-2 toward a BOARD card a measured wash (-0.006) / the naive
+# any-card version an outright loss (-0.03).
+#   MEASURED ~NEUTRAL (slightly -0.003), but only because it almost never fires (0.27%): H2's only
+#   reserves are WINNING reserves, which are gold-necessary (blocked by a gem the bank CAN'T
+#   supply) -- the opposite of take-2's "bank full of it", so the two conditions rarely co-occur.
+#   To make this matter, the bot would need to SPECULATIVELY reserve deep single-color cards and
+#   then take-2 to finish them (an untested combined experiment). Kept behind the flag, default OFF.
+USE_TAKE2 = False
+TAKE2_MIN_STEEP = 2              # min remaining need in the bottleneck color to fire the take-2
 
-def components(val: V.Valuation, s: E.State, ci: int, seat: int):
+# opponent-snipe pivot: if your top take_value target is unaffordable to YOU but affordable to the
+# OPPONENT, assume they buy it -> don't waste tempo collecting toward a card you'll lose; pivot
+# gem-taking to your next-best attainable target. SNIPE_REQUIRE_OPP_TOP only pivots when the card
+# is ALSO the opponent's highest take_value pick (high-confidence they actually take it).
+# TESTED, left OFF: ungated (any opp-affordable) was clearly NEGATIVE (all 3 seeds, -0.003..-0.012);
+# gated (opp-top) was a high-variance WASH (mean ~+0.003 over 5 disjoint seeds but two -0.013 seeds).
+# Matches the documented "contention/denial is a 1-ply greedy wash" -- a NET-feature candidate (opp
+# affordability + contention), not a greedy-H2 lever. Flip to True (+ keep the gate) to re-enable.
+USE_OPP_SNIPE = False
+SNIPE_REQUIRE_OPP_TOP = True
+
+
+def components(val: V.Valuation, s: E.State, ci: int, seat: int,
+               noble_aggr: float = 1.0):
     """The take_value pieces for `ci` from `seat`: (take, engine, point, cost).
-    One source of truth for both the policy and the on-card transparency overlay."""
-    tempo = val.tempo(ci, seat)
-    cost = (W_TEMPO * tempo
+    One source of truth for both the policy and the on-card transparency overlay.
+    `noble_aggr` scales the staged noble_progress term (1.0 = base H2)."""
+    cost = (W_TEMPO * val.tempo(ci, seat)
             + W_GEM * val.gem_cost(ci, seat)
             + W_GOLD * val.gold_cost(ci, seat))
+    if W_SHORTFALL:  # penalize bank-uncollectable gems (all colors) -> demote un-completable cards
+        cost += W_SHORTFALL * val.gold_shortfall(ci, seat)
     engine = val.engine_value(ci, seat)
-    point = (E.PTS[ci]
-             + NOBLE_SCALE * val.noble_progress(ci, seat)
-             + val.noble_completion_pts(ci, seat)) / (1.0 + RATE * tempo)
+    if ENG_DECAY:  # horizon-decay engine as we own more cards (few remaining buys to pay off)
+        own = s.purchased_n[seat] / STAGE_K
+        engine *= 1.0 - ENG_DECAY * (own if own < 1.0 else 1.0)
+    stage = max(s.purchased_n[seat] / STAGE_K, max(s.points[0], s.points[1]) / E.WIN_POINTS)
+    if stage > 1.0:
+        stage = 1.0
+    stage_factor = STAGE_FLOOR + (1.0 - STAGE_FLOOR) * stage
+    # future points are staged (engine-first early); noble_completion is realized now, un-staged
+    noble_scale = NOBLE_SCALE
+    if NOBLE_SCARCITY:  # board-conditional: weight nobles more when efficient point cards are scarce
+        noble_scale *= 1.0 + NOBLE_SCARCITY * val.board_scarcity(seat)
+    point = (stage_factor * (E.PTS[ci] + noble_scale * noble_aggr * val.noble_progress(ci, seat))
+             + val.noble_completion_pts(ci, seat))
     take = (engine + point) / (1.0 + cost)
     return take, engine, point, cost
 
 
-def take_value(val: V.Valuation, s: E.State, ci: int, seat: int) -> float:
+def take_value(val: V.Valuation, s: E.State, ci: int, seat: int,
+               noble_aggr: float = 1.0) -> float:
     """Single scalar worth of card `ci` to `seat`: benefit (engine + distance-
     discounted points) over (1 + total cost). See the module docstring."""
-    return components(val, s, ci, seat)[0]
+    return components(val, s, ci, seat, noble_aggr)[0]
 
 
 def _take_colors(a: int):
@@ -142,6 +230,37 @@ def _choose_take(s, seat, val, targets, legal):
     return None
 
 
+def _bottleneck_take2(s, seat, val, legal_set):
+    """Take-2 of a single-color bottleneck, but ONLY to finish a card we have RESERVED.
+
+    Reserved cards are LOCKED (the opponent can't take them, the board can't churn them away) and
+    are typically the deep single-color L2/L3s you commit to -- so pouring 2 gems into a reserved
+    card's one remaining color has none of the option-value cost that made take-2 toward a BOARD
+    card a wash (a board card can vanish or be out-raced; a reserved one is already yours, just
+    complete it). The "2 white when you also need red" trap is excluded by requiring a SINGLE
+    remaining color. Fires for the reserved card closest to done that qualifies:
+      - reserved + unaffordable now,
+      - exactly ONE color still needed, >= TAKE2_MIN_STEEP of it,
+      - the take-2 action for that color is legal (engine requires bank[color] >= 4 == full).
+    Returns the take-2 action, or None.
+    """
+    best = None
+    for ci in s.reserved[seat]:
+        if val.affordable_now(ci, seat):
+            continue
+        d = V._color_deficits(s, ci, seat)
+        needed = [c for c in range(5) if d[c] > 0]
+        if len(needed) != 1:                  # single remaining color (excludes the multi-color trap)
+            continue
+        col = needed[0]
+        if d[col] < TAKE2_MIN_STEEP:          # need 2+ of it for a take-2 to beat a take-1
+            continue
+        a = E.A_TAKE2S + col
+        if a in legal_set and (best is None or d[col] < best[1]):   # closest reserved card to done
+            best = (a, d[col])
+    return best[0] if best else None
+
+
 def _choose_discard(s, seat, legal, targets):
     """Discard the token least useful to the top targets; never gold unless only gold."""
     need = _need_vector(s, seat, targets)
@@ -157,15 +276,15 @@ def _choose_discard(s, seat, legal, targets):
     return best_a
 
 
-def _targets(val, s, seat):
+def _targets(val, s, seat, noble_aggr: float = 1.0):
     """All board + own-reserved cards as (take_value, ci, index, kind), best first."""
     out = []
     for slot in range(12):
         ci = s.board[slot]
         if ci >= 0:
-            out.append((take_value(val, s, ci, seat), ci, slot, "board"))
+            out.append((take_value(val, s, ci, seat, noble_aggr), ci, slot, "board"))
     for ri, ci in enumerate(s.reserved[seat]):
-        out.append((take_value(val, s, ci, seat), ci, ri, "resv"))
+        out.append((take_value(val, s, ci, seat, noble_aggr), ci, ri, "resv"))
     out.sort(reverse=True, key=lambda t: t[0])
     return out
 
@@ -280,8 +399,44 @@ def _maybe_reserve(s, seat, val, targets, legal_set):
     return None
 
 
-def choose_action(s: E.State, seat: int | None = None) -> int:
-    """Return a legal engine action index for `seat` (defaults to side to move)."""
+def _opp_top_board_ci(s, val, opp):
+    """The opponent's highest-take_value BOARD card (the card they're most likely to buy/aim at)."""
+    best, bc = -1.0, -1
+    for slot in range(12):
+        ci = s.board[slot]
+        if ci >= 0:
+            v = take_value(val, s, ci, opp)
+            if v > best:
+                best, bc = v, ci
+    return bc
+
+
+def _take_targets(s, seat, val, targets):
+    """`targets` with leading cards the opponent will likely SNIPE removed (the user's pivot): a card
+    we can't afford but the opponent CAN (and, if SNIPE_REQUIRE_OPP_TOP, is their own top pick) is
+    assumed gone -- don't burn tempo collecting toward it; aim at the next attainable target. Never
+    returns empty (if every target is sniped, fall back to the original list)."""
+    if not USE_OPP_SNIPE or len(targets) <= 1:
+        return targets
+    opp = 1 - seat
+    opp_top = _opp_top_board_ci(s, val, opp) if SNIPE_REQUIRE_OPP_TOP else -1
+    kept = []
+    for t in targets:
+        ci = t[1]
+        sniped = (not val.affordable_now(ci, seat)         # we can't buy it now
+                  and val.affordable_now(ci, opp)          # but they can
+                  and (not SNIPE_REQUIRE_OPP_TOP or ci == opp_top))
+        if not sniped:
+            kept.append(t)
+    return kept if kept else targets
+
+
+def choose_action(s: E.State, seat: int | None = None, *,
+                  noble_aggr: float = 1.0) -> int:
+    """Return a legal engine action index for `seat` (defaults to side to move).
+
+    `noble_aggr` picks the noble style: 1.0 = base H2, NOBLE_AGGR_H2N (>1) = the
+    noble variant (H2N), NOBLE_AGGR_H2R (<1) = the rusher variant (H2R)."""
     if seat is None:
         seat = s.turn
     legal = E.legal_actions(s)
@@ -292,12 +447,12 @@ def choose_action(s: E.State, seat: int | None = None) -> int:
     val = V.Valuation(s)
 
     if s.phase == E.DISCARD:
-        return _choose_discard(s, seat, legal, _targets(val, s, seat))
+        return _choose_discard(s, seat, legal, _targets(val, s, seat, noble_aggr))
     if s.phase == E.NOBLE:
         return legal[0]  # all nobles worth 3 — any claimable is equal
 
     opp = 1 - seat
-    targets = _targets(val, s, seat)
+    targets = _targets(val, s, seat, noble_aggr)
 
     # Affordable buys (board + own reserved), ranked by take_value with a small
     # gold-spend tiebreaker (prefer spending less of the scarce wild on near-ties).
@@ -306,11 +461,11 @@ def choose_action(s: E.State, seat: int | None = None) -> int:
         ci = s.board[slot]
         a = E.A_BUY_BOARD + slot
         if ci >= 0 and a in legal_set:
-            buys.append((take_value(val, s, ci, seat), a, ci))
+            buys.append((take_value(val, s, ci, seat, noble_aggr), a, ci))
     for ri, ci in enumerate(s.reserved[seat]):
         a = E.A_BUY_RESV + ri
         if a in legal_set:
-            buys.append((take_value(val, s, ci, seat), a, ci))
+            buys.append((take_value(val, s, ci, seat, noble_aggr), a, ci))
     buys.sort(reverse=True,
               key=lambda b: b[0] - GOLD_TIEBREAK * V.gold_needed(s, b[2], seat))
 
@@ -348,6 +503,10 @@ def choose_action(s: E.State, seat: int | None = None) -> int:
         if da is not None:
             return da
 
+    # Take-path target list: drop leading cards the opponent will likely snipe (the pivot). No-op
+    # unless USE_OPP_SNIPE. Winning/denial above still use the full `targets`/`buys`.
+    take_targets = _take_targets(s, seat, val, targets)
+
     # 3) Token-cap anti-hoard: near the 10-cap, cash in a buy rather than take-and-discard.
     #    The more tokens, the lower the bar to buy (9 < 8 threshold; 10 always buys).
     n_tokens = sum(s.tokens[seat])
@@ -361,16 +520,24 @@ def choose_action(s: E.State, seat: int | None = None) -> int:
             if n_tokens == 8 and best_tv > CAP8_BUY_ABOVE:
                 return best_a
         # bar not met (or nothing affordable): take gems
-        a = _choose_take(s, seat, val, targets, legal)
+        a = _choose_take(s, seat, val, take_targets, legal)
         return a if a is not None else legal[0]
 
     # 4) Otherwise (< 8 tokens): buy the highest-take_value card if affordable, else
     #    take gems toward it (a legal buy action implies the engine deemed it affordable).
-    if targets:
-        _tv, top_ci, top_idx, top_kind = targets[0]
+    if take_targets:
+        _tv, top_ci, top_idx, top_kind = take_targets[0]
         top_a = (E.A_BUY_BOARD + top_idx) if top_kind == "board" else (E.A_BUY_RESV + top_idx)
         if top_a in legal_set:
             return top_a
+
+    # 4b) Take-2-same to FINISH a RESERVED card waiting on a single color the bank is full of.
+    #     Reserved = locked, so committing 2 gems to its bottleneck has no option-value cost.
+    #     n_tokens < 8 here, so take-2 -> <= 9 (never trips the cap).
+    if USE_TAKE2:
+        a = _bottleneck_take2(s, seat, val, legal_set)
+        if a is not None:
+            return a
 
     # 5) Speculative reserve (acquisition + gold-necessary). OFF by default -- a measured
     #    tempo drag; the winning-reserve above is the only reserve on by default.
@@ -379,7 +546,7 @@ def choose_action(s: E.State, seat: int | None = None) -> int:
         if a is not None:
             return a
 
-    a = _choose_take(s, seat, val, targets, legal)
+    a = _choose_take(s, seat, val, take_targets, legal)
     if a is not None:
         return a
     return legal[0]
