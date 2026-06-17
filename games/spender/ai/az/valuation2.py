@@ -42,6 +42,13 @@ ENG_DECK_W = 3.5    # engine_value: weight on the forward-looking deck-demand te
 #   Validated +0.0073 vs H on fresh holdout seeds (3/4 positive), +0.020 on the tuning seeds.
 ENG_WEIGHT_MODE = 1
 ENG_TEMPO_SCALE = 0.3   # scale on (1 + reduces_tempo); swept best of {0.2..0.4} (0.3: +0.020, 5/6 pos)
+# level-1 recursion: a card is worth discounting MORE if it's itself a strong engine card. importance(cj)
+# = PTS-weight + ENG_RECURSE_W * engine_value_0(cj), where engine_value_0 is cj's LEVEL-0 (non-recursive)
+# engine value, precomputed/cached per state so the whole thing stays O(cards^2). 0.0 = OFF (level-0).
+# TESTED, net-NEGATIVE for greedy H2 vs the level-0 model (6 disjoint seeds): lambda 0.1 -0.003,
+# 0.2 -0.006, 0.3 -0.007, 0.5 -0.014 -- monotonic, 0/6 positive at 0.5. It over-weights cheap
+# engine-of-engine cards at the expense of points/tempo. Left OFF; level-0 is best.
+ENG_RECURSE_W = 0.0
 NOBLE_CLOSE_FLOOR = 0.2   # noble_progress: a card whose color a visible noble needs scores at least
                           # this (per such noble) even at zero bonuses -- "relevance" survives distance
 EFF_REF = 0.45            # board_scarcity: reference points-per-effective-gem. If the board offers an
@@ -367,11 +374,12 @@ class Valuation:
     Stateless scalars above are re-exposed as methods for a single call site.
     """
 
-    __slots__ = ("s", "deck_color_demand", "_scarcity_cache")
+    __slots__ = ("s", "deck_color_demand", "_scarcity_cache", "_eng_base_cache")
 
     def __init__(self, s: E.State):
         self.s = s
         self._scarcity_cache = {}
+        self._eng_base_cache = {}
         # Permanent-bonus future value: share of remaining (undealt) deck cost
         # that is each color. A bonus in a deck-heavy color keeps paying off on
         # cards not yet revealed, not just the 12 on the board.
@@ -386,17 +394,21 @@ class Valuation:
         self.deck_color_demand = [d / total for d in demand] if total else [0.0] * 5
 
     # cross-card factor (the one an MLP cannot assemble from a flat vector) ----
-    def engine_value(self, ci: int, seat: int) -> float:
+    def engine_value(self, ci: int, seat: int, _recurse: bool = True) -> float:
         """Value of the permanent +1 `bcol` bonus ci grants: the discount it gives
         every *other* card that still needs `bcol` -- the visible board cards AND
         `seat`'s own RESERVED cards (committed targets you intend to buy, so a bonus
         that advances one is real engine value) -- weighted by each card's worth and
-        `bcol`-hunger, plus a deck-wide term for unrevealed cards. A reserved card
-        counts RESERVED_ENGINE_W *per card* (a slight commitment premium over a
-        single board card), NOT a pile that dominates the board."""
+        the cost/tempo it saves (`_w_card`), plus a deck-wide term for unrevealed cards.
+
+        Each card cj's importance is its PTS-weight, plus (if ENG_RECURSE_W) a level-1
+        term ENG_RECURSE_W * (cj's own LEVEL-0 engine value) -- a card you discount is
+        worth more if it is itself a strong engine card. `_recurse=False` computes the
+        level-0 value (no recursion); the level-1 path calls it via `_eng_base` (cached)."""
         s = self.s
         bcol = E.BONUS[ci]
         bon_b = s.bonuses[seat][bcol]
+        recurse = _recurse and ENG_RECURSE_W
         ev = 0.0
         for slot in range(12):
             cj = s.board[slot]
@@ -404,27 +416,39 @@ class Valuation:
                 continue
             costj = E.COST[cj]
             if costj[bcol] - bon_b > 0:  # cj still needs this color
-                w_value = E.PTS[cj] / ENG_DIV + ENG_FLOOR   # high-point cards weigh more (+floor)
-                if ENG_WEIGHT_MODE:   # cost+tempo model: gem saved (1) + turn saved (0/1)
-                    w = ENG_TEMPO_SCALE * (1.0 + _reduces_tempo(costj, s.bonuses[seat], bcol))
-                else:                 # fraction proxy (current): how bcol-heavy cj is
-                    sj = sum(costj)
-                    w = costj[bcol] / sj if sj else 0.0
-                ev += w_value * w
+                imp = E.PTS[cj] / ENG_DIV + ENG_FLOOR   # importance: high-point cards weigh more (+floor)
+                if recurse:
+                    imp += ENG_RECURSE_W * self._eng_base(cj, seat)
+                ev += imp * self._w_card(costj, s.bonuses[seat], bcol)
         for cj in s.reserved[seat]:       # committed targets count too (slight premium)
             if cj == ci:
                 continue
             costj = E.COST[cj]
             if costj[bcol] - bon_b > 0:
-                w_value = E.PTS[cj] / ENG_DIV + ENG_FLOOR
-                if ENG_WEIGHT_MODE:
-                    w = ENG_TEMPO_SCALE * (1.0 + _reduces_tempo(costj, s.bonuses[seat], bcol))
-                else:
-                    sj = sum(costj)
-                    w = costj[bcol] / sj if sj else 0.0
-                ev += RESERVED_ENGINE_W * w_value * w
+                imp = E.PTS[cj] / ENG_DIV + ENG_FLOOR
+                if recurse:
+                    imp += ENG_RECURSE_W * self._eng_base(cj, seat)
+                ev += RESERVED_ENGINE_W * imp * self._w_card(costj, s.bonuses[seat], bcol)
         ev += self.deck_color_demand[bcol] * ENG_DECK_W
         return ev
+
+    @staticmethod
+    def _w_card(costj, bon, bcol: int) -> float:
+        """Per-card engine weight: cost+tempo (gem saved 1 + turn saved 0/1, scaled) when
+        ENG_WEIGHT_MODE, else the legacy w_scarcity cost-fraction proxy."""
+        if ENG_WEIGHT_MODE:
+            return ENG_TEMPO_SCALE * (1.0 + _reduces_tempo(costj, bon, bcol))
+        sj = sum(costj)
+        return costj[bcol] / sj if sj else 0.0
+
+    def _eng_base(self, cj: int, seat: int) -> float:
+        """cj's LEVEL-0 engine value (no recursion), cached per state -- the recursive importance term."""
+        key = (cj, seat)
+        v = self._eng_base_cache.get(key)
+        if v is None:
+            v = self.engine_value(cj, seat, _recurse=False)
+            self._eng_base_cache[key] = v
+        return v
 
     def board_scarcity(self, seat: int) -> float:
         """How scarce efficient high-point targets are on the board, in [0, 1] (high = scarce).
