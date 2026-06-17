@@ -33,7 +33,7 @@ from . import tiles
 from . import bot
 from . import ai as coc_ai          # MCTS opponent (aliased: `ai` is used as a local for the bot pid)
 
-from core.db import get_db_conn
+from core.db import get_db_conn, cleanup_stale_games, maybe_cleanup_games
 from core.auth import (
     gen_token, get_user_by_session, validate_reconnect_token, mark_reconnect_token_used,
 )
@@ -98,6 +98,8 @@ def coc_init_db() -> None:
 
 
 coc_init_db()
+# Retention: same policy as Spender (guest 24h / registered 30d, by last activity).
+cleanup_stale_games("coc_games")
 
 
 # ── Persistence ───────────────────────────────────────────────────────────────
@@ -170,6 +172,7 @@ def load_game_to_memory(room_id: str) -> bool:
 
 
 def list_open_games() -> list[dict]:
+    maybe_cleanup_games("coc_games")  # throttled (<=1/h): prune stale games during long-awake periods
     conn = _db()
     cur = conn.cursor()
     cur.execute("""SELECT id, player1_id, player1_name, created_at FROM coc_games

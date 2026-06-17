@@ -18,6 +18,7 @@ table, Castles of Crimson's ``coc_games``, and the Books tables.
 import logging
 import os
 import sqlite3
+import time
 
 LOG = logging.getLogger("core.db")
 
@@ -193,3 +194,65 @@ def init_core_schema(conn) -> None:
         granted_at INTEGER
     )""")
     conn.commit()
+
+
+# ── Game retention / cleanup ──────────────────────────────────────────────────
+# Shared by both game tables (`games`, `coc_games`), which share the same shape:
+# player1_id / player2_id (a registered user's id is a row in `users`; a guest's
+# is a random id that isn't) + updated_at (epoch seconds, last activity).
+DEFAULT_GUEST_RETENTION = 24 * 3600        # guest games: 24 hours
+DEFAULT_USER_RETENTION = 30 * 24 * 3600    # registered-user games: 30 days
+
+# Throttle: this runs opportunistically off lobby browsing, so cap it to once per
+# hour per table per process (races are harmless — the DELETE is idempotent).
+_CLEANUP_MIN_INTERVAL = 3600
+_last_cleanup: dict[str, int] = {}
+
+
+def cleanup_stale_games(table: str, guest_seconds: int = DEFAULT_GUEST_RETENTION,
+                        user_seconds: int = DEFAULT_USER_RETENTION) -> int:
+    """Delete stale rows from a games table by LAST ACTIVITY (`updated_at`):
+      * an all-guest game (no player id present in `users`) once it's older than
+        `guest_seconds` (default 24h),
+      * a game with ANY registered player once it's older than `user_seconds`
+        (default 30d) — so a registered user's history survives even a game they
+        played with a guest.
+    `table` is a trusted internal constant ("games" / "coc_games"), not user input.
+    Returns the number of rows deleted (counted first, since the driver-agnostic
+    cursor has no reliable rowcount on libsql)."""
+    now = int(time.time())
+    guest_where = ("updated_at < ? "
+                   "AND (player1_id IS NULL OR player1_id NOT IN (SELECT id FROM users)) "
+                   "AND (player2_id IS NULL OR player2_id NOT IN (SELECT id FROM users))")
+    user_where = ("updated_at < ? "
+                  "AND (player1_id IN (SELECT id FROM users) OR player2_id IN (SELECT id FROM users))")
+    conn = get_db_conn()
+    try:
+        cur = conn.cursor()
+        deleted = 0
+        for where, cutoff in ((guest_where, now - guest_seconds), (user_where, now - user_seconds)):
+            cur.execute(f"SELECT COUNT(*) FROM {table} WHERE {where}", (cutoff,))
+            n = cur.fetchone()[0]
+            if n:
+                cur.execute(f"DELETE FROM {table} WHERE {where}", (cutoff,))
+                deleted += n
+        conn.commit()
+        if deleted:
+            LOG.info("cleanup_stale_games(%s): removed %d stale game(s)", table, deleted)
+        return deleted
+    finally:
+        conn.close()
+
+
+def maybe_cleanup_games(table: str, **kwargs) -> int:
+    """Throttled `cleanup_stale_games` — a no-op unless at least an hour has passed
+    since this process last cleaned `table`. Safe to call on every lobby fetch."""
+    now = int(time.time())
+    if now - _last_cleanup.get(table, 0) < _CLEANUP_MIN_INTERVAL:
+        return 0
+    _last_cleanup[table] = now
+    try:
+        return cleanup_stale_games(table, **kwargs)
+    except Exception as e:  # noqa: BLE001 - cleanup must never break a lobby request
+        LOG.warning("maybe_cleanup_games(%s) failed: %s", table, e)
+        return 0

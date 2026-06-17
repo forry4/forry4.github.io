@@ -18,7 +18,7 @@ import time
 import hashlib
 import hmac
 
-from core.db import get_db_conn, init_core_schema
+from core.db import get_db_conn, init_core_schema, cleanup_stale_games, maybe_cleanup_games
 from core.auth import (
     gen_token, create_user, authenticate_user, get_user_by_session,
     create_reconnect_token, validate_reconnect_token, mark_reconnect_token_used,
@@ -261,6 +261,7 @@ def load_game_to_memory(room_id: str) -> bool:
 
 
 def list_open_games() -> list[dict]:
+    maybe_cleanup_games("games")  # throttled (<=1/h): prune stale games during long-awake periods
     conn = get_db_conn()
     cur = conn.cursor()
     cur.execute("""SELECT id, player1_id, player1_name, created_at FROM games
@@ -327,6 +328,10 @@ def delete_open_game(game_id: str, user_id: str) -> bool:
 
 
 init_db()
+# Retention: drop stale games on boot (guest 24h / registered 30d, by last
+# activity). Also runs throttled off lobby browsing (list_open_games) so it
+# happens during long-awake periods too, not only on cold-start.
+cleanup_stale_games("games")
 
 
 # ─── Room helpers ─────────────────────────────────────────────────────────────

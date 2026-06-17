@@ -332,6 +332,15 @@ imports the old arrangement required.
   identity helpers (`site_owner_name`, `grant_admin`, `is_admin_id`, `is_site_owner`),
   and the reconnect-token helpers (`create`/`validate`/`mark_used`). Imports
   `get_db_conn` from `core.db`.
+- **Game retention** (`core/db.py`): `cleanup_stale_games(table)` deletes stale rows
+  from a games table (`games` / `coc_games` — same shape) by **last activity
+  (`updated_at`)**: an **all-guest** game (no player id present in `users`) after **24h**,
+  a game with **any registered player** after **30d** (so a registered user's history
+  survives even a game played with a guest). `maybe_cleanup_games(table)` is the throttled
+  wrapper (≤1×/hour/table/process). Wired in BOTH games: `cleanup_stale_games(...)` once at
+  module import (cold-start) + `maybe_cleanup_games(...)` at the top of each `list_open_games`
+  (so it also runs during long-awake periods — Render's free tier has no cron). Tests:
+  `core/tests/test_game_retention.py`.
 - **Who imports it now**: `games/spender/main.py` (`from core.db import …`,
   `from core.auth import …`; its `init_db()` calls `init_core_schema` then creates only
   the Spender-owned `games` table), `games/castles_of_crimson/main.py` (directly at the
