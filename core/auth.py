@@ -16,7 +16,6 @@ import hmac
 import logging
 import os
 import random
-import sqlite3
 import string
 import time
 
@@ -60,13 +59,18 @@ def create_user(name: str, password: str) -> dict | None:
     conn = get_db_conn()
     cur = conn.cursor()
     try:
+        # Enforce unique usernames explicitly. The users.name column has no UNIQUE
+        # constraint (and on the libsql driver a constraint violation isn't a
+        # sqlite3.IntegrityError anyway), so the old IntegrityError-only guard never
+        # fired and duplicate names slipped through. Check before inserting.
+        cur.execute("SELECT 1 FROM users WHERE name = ?", (name,))
+        if cur.fetchone() is not None:
+            conn.close()
+            return None  # name already taken
         cur.execute("INSERT INTO users (id,name,password_hash) VALUES (?,?,?)",
                     (uid, name, hash_password(password)))
         conn.commit()
-    except sqlite3.IntegrityError:
-        conn.close()
-        return None  # name already taken
-    except Exception as e:  # noqa: BLE001 - don't 500 the endpoint; surface in logs
+    except Exception as e:  # noqa: BLE001 - includes a UNIQUE-index race; treat as not-created
         LOG.error("create_user failed for %r: %s", name, e)
         conn.close()
         return None

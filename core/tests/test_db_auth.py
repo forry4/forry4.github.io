@@ -132,6 +132,31 @@ def test_get_user_by_session_agrees_with_login_on_admin(tmp_path, monkeypatch):
     assert authm.get_user_by_session(rando_login["session_token"])["is_admin"] is False
 
 
+def test_create_user_rejects_duplicate_usernames(tmp_path, monkeypatch):
+    # Regression: users.name had no UNIQUE constraint and create_user only caught
+    # IntegrityError, so duplicate usernames slipped through (two "Forrestm" rows in
+    # prod). Now rejected explicitly AND enforced by a unique index as a race backstop.
+    monkeypatch.setattr(dbm, "DB_PATH", str(tmp_path / "u.db"))
+    conn = dbm.get_db_conn()
+    dbm.init_core_schema(conn)
+    conn.close()
+
+    assert authm.create_user("Forrestm", "pw") is not None      # first registration wins
+    assert authm.create_user("Forrestm", "other") is None       # duplicate name rejected
+
+    c = dbm.get_db_conn()
+    n = c.cursor().execute("SELECT COUNT(*) FROM users WHERE name = ?", ("Forrestm",)).fetchone()[0]
+    raised = False
+    try:  # the unique index is the DB-level backstop against a race past the check
+        c.execute("INSERT INTO users (id,name,password_hash) VALUES (?,?,?)", ("x", "Forrestm", "h"))
+        c.commit()
+    except Exception:
+        raised = True
+    c.close()
+    assert n == 1
+    assert raised
+
+
 def test_is_site_owner_honors_admin_flag_and_env(monkeypatch):
     monkeypatch.delenv("SITE_OWNER", raising=False)
     assert authm.is_site_owner({"id": "x", "name": "bob"}) is False
