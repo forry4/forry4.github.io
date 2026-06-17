@@ -197,8 +197,8 @@ const css = baseCss + `
 .noble-req-row{display:flex;gap:3px;align-items:center;font-size:.65rem;color:var(--text-dim);font-family:'Cinzel',serif}
 
 /* ─── Action bar ────────────────────────────────────────────────────────── */
-.action-bar{display:flex;gap:8px;align-items:center;flex-wrap:nowrap;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-sizing:border-box}
-.action-hint{flex:1;font-style:italic;color:var(--text-dim);font-size:.88rem;min-width:0}
+.action-bar{display:flex;gap:8px;align-items:center;flex-wrap:nowrap;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-sizing:border-box;min-height:62px}
+.action-hint{flex:1;font-style:italic;color:var(--text-dim);font-size:.88rem;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .action-bar-btns{display:flex;gap:8px;align-items:center;flex-shrink:0}
 .action-bar-spacer{height:43px;display:inline-block;width:1px}
 .turn-badge{font-family:'Cinzel',serif;font-size:.72rem;letter-spacing:.08em;padding:4px 12px;border-radius:20px;white-space:nowrap}
