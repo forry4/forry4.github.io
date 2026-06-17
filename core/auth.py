@@ -120,7 +120,11 @@ def get_user_by_session(token: str) -> dict | None:
     conn.close()
     if not row:
         return None
-    return {"id": row[0], "name": row[1], "is_admin": bool(row[2])}
+    # is_admin = durable admins-table grant OR a live SITE_OWNER username match (so the owner is
+    # recognized even if the login-time grant never ran for an older session). Mirrors is_site_owner.
+    owner = site_owner_name()
+    is_admin = bool(row[2]) or (owner is not None and row[1] == owner)
+    return {"id": row[0], "name": row[1], "is_admin": is_admin}
 
 
 # ─── Site owner / admin identity ──────────────────────────────────────────────
