@@ -210,8 +210,9 @@ const css = baseCss + `
 /* ─── Player panels ─────────────────────────────────────────────────────── */
 .players-area{display:flex;flex-direction:column;gap:8px}
 .player-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px;transition:border-color .2s}
+/* the active player's box gets a clean gold rounded border (the only highlight);
+   your own box is identified by the active dot + "(you)" label, no extra accent. */
 .player-panel.active-turn{border-color:var(--gold);background:var(--surface3)}
-.player-panel.me{box-shadow:inset 3px 0 0 var(--gold)}
 .player-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
 .player-name-row{display:flex;align-items:center;gap:6px}
 .player-name{font-family:'Cinzel',serif;font-size:.8rem;letter-spacing:.06em}
