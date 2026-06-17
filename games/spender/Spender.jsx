@@ -20,7 +20,7 @@ const GAMES = [
 // ─── Constants ─────────────────────────────────────────────────────────────
 const GEM_COLORS = ["white", "blue", "green", "red", "black"];
 const GEM_LABELS = { white: "Diamond", blue: "Sapphire", green: "Emerald", red: "Ruby", black: "Onyx", gold: "Gold" };
-const GEM_HEX = { white: "#ddd4be", blue: "#6e74ff", green: "#54c23d", red: "#e05555", black: "#6a6a7a", gold: "#f5c842" };
+const GEM_HEX = { white: "#ddd4be", blue: "#6e74ff", green: "#54c23d", red: "#e05555", black: "#4a4a58", gold: "#f5c842" };
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 function uid() { return Math.random().toString(36).slice(2, 10); }
@@ -148,6 +148,8 @@ const css = baseCss + `
 .game-sidebar{display:flex;flex-direction:column;gap:10px}
 @media(max-width:900px){.game-sidebar{order:-1}}
 .panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px}
+.panel-slim{padding:9px 14px}
+.panel-slim .panel-title{margin-bottom:6px}
 .panel-title{font-family:'Cinzel',serif;font-size:.68rem;letter-spacing:.14em;color:var(--gold);margin-bottom:10px;text-transform:uppercase}
 
 /* ─── Bank ──────────────────────────────────────────────────────────────── */
@@ -162,7 +164,10 @@ const css = baseCss + `
 .gem-count{font-size:.75rem;color:var(--text-dim);font-family:'Cinzel',serif}
 
 /* ─── Cards ─────────────────────────────────────────────────────────────── */
-.level-row{display:flex;gap:8px;align-items:flex-start;flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}
+/* overflow-x:auto forces overflow-y to clip, which would cut off the top of cards
+   (flush at the top, lifted on hover). padding-top + matching -margin gives the lift
+   and the top border clip-room without changing where the row sits. */
+.level-row{display:flex;gap:8px;align-items:flex-start;flex-wrap:nowrap;overflow-x:auto;padding:6px 0 4px;margin-top:-6px}
 .level-row::-webkit-scrollbar{height:4px}.level-row::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
 .deck-pile{width:88px;min-height:120px;border-radius:var(--radius);border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;font-family:'Cinzel',serif;font-size:.68rem;color:var(--text-dim);cursor:pointer;flex-shrink:0;background:var(--surface2);transition:all .12s;flex-direction:column;gap:4px}
 .deck-pile:hover{border-color:var(--gold);color:var(--gold)}
@@ -194,7 +199,7 @@ const css = baseCss + `
 .noble-req-row{display:flex;gap:3px;align-items:center;font-size:.65rem;color:var(--text-dim);font-family:'Cinzel',serif}
 
 /* ─── Action bar ────────────────────────────────────────────────────────── */
-.action-bar{display:flex;gap:8px;align-items:center;flex-wrap:nowrap;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-sizing:border-box}
+.action-bar{display:flex;gap:8px;align-items:center;flex-wrap:nowrap;padding:6px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-sizing:border-box}
 .action-hint{flex:1;font-style:italic;color:var(--text-dim);font-size:.88rem;min-width:0}
 .action-bar-btns{display:flex;gap:8px;align-items:center;flex-shrink:0}
 .action-bar-spacer{height:43px;display:inline-block;width:1px}
@@ -208,7 +213,7 @@ const css = baseCss + `
 .players-area{display:flex;flex-direction:column;gap:8px}
 .player-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px;transition:border-color .2s}
 .player-panel.active-turn{border-color:var(--gold);background:var(--surface3)}
-.player-panel.me{border-left:3px solid var(--gold)}
+.player-panel.me{box-shadow:inset 3px 0 0 var(--gold)}
 .player-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
 .player-name-row{display:flex;align-items:center;gap:6px}
 .player-name{font-family:'Cinzel',serif;font-size:.8rem;letter-spacing:.06em}
@@ -900,14 +905,17 @@ export default function SpenderApp() {
 			for (const c of prev) freq[c] = (freq[c] || 0) + 1;
 			const has = freq[color] || 0;
 
-			if (has === 2) return [];                          // deselect double
+			if (has === 2) return [];                          // clicking the doubled gem clears it
 			if (has === 1) {
-				if (bankCount >= 4) return [color, color];     // upgrade to double-take
-				return prev.filter(c => c !== color);          // deselect single
+				// Double-take (two of one color) is only allowed when the pile is full
+				// AND this is the only gem selected. With anything else selected, a
+				// click on an already-selected gem just deselects it.
+				if (prev.length === 1 && bankCount >= 4) return [color, color];
+				return prev.filter(c => c !== color);          // deselect it
 			}
 			// has === 0: adding a new color
 			if (prev.length >= 3) return prev;
-			if (Object.values(freq).some(n => n === 2)) return prev; // already in double-take mode
+			if (Object.values(freq).some(n => n === 2)) return prev; // can't mix with a double-take
 			return [...prev, color];
 		});
 	};
@@ -1436,7 +1444,7 @@ export default function SpenderApp() {
 							</div>
 						</div>
 
-						<div className="panel">
+						<div className="panel panel-slim">
 							<div className="panel-title">Gem Bank</div>
 							<div className="bank-gems">
 								{[...GEM_COLORS, "gold"].map(c => {
@@ -1495,7 +1503,7 @@ export default function SpenderApp() {
 							</div>
 						))}
 
-						<div className="panel">
+						<div className="panel panel-slim">
 							<div className="panel-title">Nobles</div>
 							<div className="nobles-row">
 								{(game.nobles || []).map(n => <NobleView key={n.id} noble={n} />)}
