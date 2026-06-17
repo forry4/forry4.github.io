@@ -32,7 +32,7 @@ from . import engine as E
 GOLD_BANK_CAP = 2   # gems of the bottleneck color assumed pullable from the bank in gold_cost
 ENG_DIV = 8.0       # engine_value: PTS divisor (higher = flatter; values broad colors over point-heavy ones)
 ENG_FLOOR = 0.2     # engine_value: zero-point floor in each card's weight
-ENG_DECK_W = 3.5    # engine_value: weight on the forward-looking deck-demand term
+ENG_DECK_W = 7.0    # engine_value: forward-looking deck-demand weight (autotuned 3.5->7.0 on cost+tempo)
 # Per-card weight model for engine_value. The +1 bcol bonus's value to card cj is the actual cost
 # it saves cj: 1 gem (always, since cj needs bcol to be in this sum) + 1 turn if it lowers cj's
 # steepest-remaining color (reduces_tempo). This REPLACED the old w_scarcity = COST[bcol]/sum(COST)
@@ -49,7 +49,7 @@ ENG_TEMPO_SCALE = 0.3   # scale on (1 + reduces_tempo); swept best of {0.2..0.4}
 # 0.2 -0.006, 0.3 -0.007, 0.5 -0.014 -- monotonic, 0/6 positive at 0.5. It over-weights cheap
 # engine-of-engine cards at the expense of points/tempo. Left OFF; level-0 is best.
 ENG_RECURSE_W = 0.0
-NOBLE_CLOSE_FLOOR = 0.2   # noble_progress: a card whose color a visible noble needs scores at least
+NOBLE_CLOSE_FLOOR = 0.35  # noble_progress (autotuned 0.2->0.35): a card whose color a visible noble needs scores at least
                           # this (per such noble) even at zero bonuses -- "relevance" survives distance
 EFF_REF = 0.45            # board_scarcity: reference points-per-effective-gem. If the board offers an
                           # L2/L3 deal at/above this, nobles are noise (scarcity 0); a poor board
