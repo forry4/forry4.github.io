@@ -20,7 +20,7 @@ const GAMES = [
 // ─── Constants ─────────────────────────────────────────────────────────────
 const GEM_COLORS = ["white", "blue", "green", "red", "black"];
 const GEM_LABELS = { white: "Diamond", blue: "Sapphire", green: "Emerald", red: "Ruby", black: "Onyx", gold: "Gold" };
-const GEM_HEX = { white: "#ddd4be", blue: "#4257ff", green: "#3f9c2e", red: "#e05555", black: "#2b2a33", gold: "#f5c842" };
+const GEM_HEX = { white: "#ddd4be", blue: "#4257ff", green: "#3f9c2e", red: "#e05555", black: "#01090a", gold: "#f5c842" };
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 function uid() { return Math.random().toString(36).slice(2, 10); }
@@ -183,10 +183,10 @@ const css = baseCss + `
 .card-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px}
 .card-points{font-family:'Cinzel',serif;font-weight:700;font-size:1.1rem;color:var(--gold);min-width:16px}
 .card-points.zero{color:transparent}
-.card-bonus{width:20px;height:20px;border-radius:50%;flex-shrink:0;border:1.5px solid rgba(255,255,255,.12)}
+.card-bonus{width:20px;height:20px;border-radius:50%;flex-shrink:0;border:1.5px solid rgba(255,255,255,.25)}
 .card-cost{display:flex;flex-direction:column;gap:3px;margin-top:auto}
 .cost-row{display:flex;align-items:center;gap:4px}
-.cost-gem{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.cost-gem{width:10px;height:10px;border-radius:50%;flex-shrink:0;border:1px solid rgba(255,255,255,.25)}
 .cost-num{font-family:'Cinzel',serif;font-size:.7rem;color:var(--text-dim)}
 
 /* ─── Nobles ────────────────────────────────────────────────────────────── */
@@ -981,7 +981,7 @@ export default function SpenderApp() {
 				)}
 				<div className="player-bonuses">
 					{GEM_COLORS.map(c => (bonuses[c] || 0) > 0 && (
-						<span key={c} className="bonus-pill" style={{ borderColor: GEM_HEX[c], color: GEM_HEX[c] }}>+{bonuses[c]} {c[0].toUpperCase()}</span>
+						<span key={c} className="bonus-pill" style={{ background: GEM_HEX[c] + "55", borderColor: GEM_HEX[c], color: GEM_HEX[c] }}>+{bonuses[c]} {c[0].toUpperCase()}</span>
 					))}
 					{p.nobles.map(n => (
 						<span key={n.id} className="bonus-pill" style={{ borderColor: "var(--gold)", color: "var(--gold)" }}>★{n.points}</span>

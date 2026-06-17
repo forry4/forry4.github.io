@@ -10,7 +10,7 @@ export const baseCss = `
 :root{
   --bg:#0f0e0c;--surface:#1a1814;--surface2:#242018;--surface3:#2c2820;--border:#3a342a;
   --gold:#c9a84c;--gold-light:#e8c96a;--text:#e8dfc8;--text-dim:#8a7d6a;--text-muted:#5a5248;
-  --white-gem:#ddd4be;--blue-gem:#4257ff;--green-gem:#3f9c2e;--red-gem:#e05555;--black-gem:#2b2a33;--gold-gem:#f5c842;
+  --white-gem:#ddd4be;--blue-gem:#4257ff;--green-gem:#3f9c2e;--red-gem:#e05555;--black-gem:#01090a;--gold-gem:#f5c842;
   --radius:8px;--radius-lg:14px;
 }
 html,body{height:100%}
