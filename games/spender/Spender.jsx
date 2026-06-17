@@ -20,7 +20,7 @@ const GAMES = [
 // ─── Constants ─────────────────────────────────────────────────────────────
 const GEM_COLORS = ["white", "blue", "green", "red", "black"];
 const GEM_LABELS = { white: "Diamond", blue: "Sapphire", green: "Emerald", red: "Ruby", black: "Onyx", gold: "Gold" };
-const GEM_HEX = { white: "#ddd4be", blue: "#6e74ff", green: "#54c23d", red: "#e05555", black: "#2b2a33", gold: "#f5c842" };
+const GEM_HEX = { white: "#ddd4be", blue: "#4257ff", green: "#3f9c2e", red: "#e05555", black: "#2b2a33", gold: "#f5c842" };
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 function uid() { return Math.random().toString(36).slice(2, 10); }
