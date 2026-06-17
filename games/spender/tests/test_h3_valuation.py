@@ -363,3 +363,44 @@ def test_e_reserve_skips_when_slots_full():
     """All 3 reserve slots used -> the finisher cannot fire (reserve is illegal); the bot takes gems."""
     s, _X = _reserve_state(white_deficit=2, n_tokens=8, n_reserved=3)
     assert H3.choose_action(s, 0) != E.A_RES_BOARD + 0
+
+
+# ─── (f) winning-reserve tempo gate (don't lock a "win" too far to complete soon) ─
+def _winning_reserve_state(white_need, *, pts_seat=13):
+    """Seat-0 state: board slot 0 is a WINNING card (seat reaches >= WIN_POINTS) that's unaffordable and
+    gold-blocked, with remaining need == `white_need` white (so tempo == white_need). No nobles, gold in
+    the bank, none held -- the canonical winning-reserve setup."""
+    s = _blank_state()
+    s.nobles = [-1, -1, -1]
+    s.points = [pts_seat, 0]
+    X = next(c for c in range(len(E.COST))
+             if E.PTS[c] >= E.WIN_POINTS - pts_seat and E.COST[c][WHITE] >= white_need)
+    rem = [0] * 5
+    rem[WHITE] = white_need
+    _set_remaining(s, 0, X, rem)
+    s.board = [-1] * 12
+    s.board[0] = X
+    s.reserved = [[], []]
+    s.tokens = [[0] * 6, [0] * 6]                  # no gold held
+    s.bank = [white_need - 2, 4, 4, 4, 4, 3]       # short 2 white -> gold_shortfall 2 (bankable); gold avail
+    s.turn = 0
+    return s, X
+
+
+def test_winning_reserve_tempo_gate():
+    """The tempo gate blocks a FAR winning card (tempo 5) -- the SAME card IS reserved with the gate
+    disabled (isolating the gate as the cause) -- while a NEAR winning card (tempo 3) is still reserved."""
+    saved = H3.WIN_RESERVE_MAX_TEMPO
+    try:
+        s_far, _ = _winning_reserve_state(white_need=5)        # tempo 5
+        ls_far = set(E.legal_actions(s_far))
+        H3.WIN_RESERVE_MAX_TEMPO = 99                          # gate OFF -> far card IS a winning reserve
+        assert H3._winning_reserve(s_far, 0, _val(s_far), ls_far) == E.A_RES_BOARD + 0
+        H3.WIN_RESERVE_MAX_TEMPO = 4                           # gate ON (default) -> far card skipped
+        assert H3._winning_reserve(s_far, 0, _val(s_far), ls_far) is None
+
+        s_near, _ = _winning_reserve_state(white_need=3)       # tempo 3 < 4 -> still reserved
+        assert H3._winning_reserve(s_near, 0, _val(s_near),
+                                   set(E.legal_actions(s_near))) == E.A_RES_BOARD + 0
+    finally:
+        H3.WIN_RESERVE_MAX_TEMPO = saved

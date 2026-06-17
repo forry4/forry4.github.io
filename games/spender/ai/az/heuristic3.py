@@ -114,6 +114,10 @@ USE_SPECULATIVE_RESERVE = False  # acquisition + gold-necessary reserves: OFF --
                                  # (H gains ~0 from reserving too). Kept behind the flag for A/B.
 RESERVE_GAP = 0.5                # acquisition (speculative only): reserve the top unaffordable board
                                  # card when its take_value exceeds the next board card's by >= this.
+WIN_RESERVE_MAX_TEMPO = 4        # winning-reserve only fires when the winning card is < this many turns
+                                 # (tempo) from collectable. Without it the bot would lock a "win" it
+                                 # can't complete soon -- a far gold-blocked card (e.g. tempo 6) got
+                                 # reserved over building the reachable top card. >= 99 disables it.
 
 # take-2-same: the model otherwise assumes <=1 gem/color/turn, so the bot never takes 2 of one
 # color. _bottleneck_take2 implements the one defensible exception -- take 2 to finish a card we
@@ -384,6 +388,8 @@ def _winning_reserve(s, seat, val, legal_set):
         if ci < 0 or val.affordable_now(ci, seat):
             continue
         if s.points[seat] + E.PTS[ci] + val.noble_completion_pts(ci, seat) < E.WIN_POINTS:
+            continue
+        if val.tempo(ci, seat) >= WIN_RESERVE_MAX_TEMPO:   # too far to be a real near-term win
             continue
         a = _reservable(s, seat, ci, slot, val, legal_set)
         if a is not None and (best is None or E.PTS[ci] > best[1]):
