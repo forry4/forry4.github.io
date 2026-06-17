@@ -41,7 +41,9 @@ from . import engine as E
 from . import valuation3 as V
 
 # ─── Tuned config (offline search; beats H ~0.62) ────────────────────────────────────
-W_TEMPO = 0.5      # cost: turns to collect
+W_TEMPO = 0.1      # cost: turns to collect. TUNED for the turns_remaining model (was 0.5): with
+                   # engine now scaled by compounding turns, low tempo-cost plays best. Part of the
+                   # validated package {W_TEMPO=0.1, NOBLE_CLOSE_FLOOR=0.3, W_ENGINE=0.15}.
 W_GEM = 0.3        # cost: total post-bonus gems to pay. TUNED for H3 (H2 uses 0.2): the gain is
                    # COUPLED to the new engine (valuation3 measures discounts in this currency) --
                    # raising it with the engine OFF is neutral vs H2 (~0.497). Set back to 0.2 to
@@ -64,6 +66,17 @@ NOBLE_SCARCITY = 0.0  # board-conditional noble boost: noble term *= (1 + NOBLE_
 # point staging: future points scaled by a global game stage (low early -> 1 late)
 STAGE_K = 8        # cards-bought for a full engine-stage; stage = max(cards/STAGE_K, leader_pts/15)
 STAGE_FLOOR = 0.25  # early floor: fraction of point value still counted at game start
+# NEW stage model (STAGE_BLEND): instead of stage = max(YOUR cards/STAGE_K, LEADER points/15),
+# blend BOTH players' totals into each term, weighting your own above the opponent's:
+#   cards_term  = (your_cards  + STAGE_CARD_OPP_W * opp_cards)  / STAGE_K
+#   points_term = (your_points + STAGE_PTS_OPP_W  * opp_points) / WIN_POINTS
+#   stage       = max(cards_term, points_term)            # capped at 1
+# So total board progress (both players' cards) AND total points advance the stage, but yours count
+# more. STAGE_CARD_OPP_W = STAGE_PTS_OPP_W = 0 recovers the old "yours-cards / leader-points" behavior
+# only if you also revert the points term to max(); the flag toggles the whole new form vs the old.
+STAGE_BLEND = True       # use the blended stage above (False = legacy max(your_cards, leader_points))
+STAGE_CARD_OPP_W = 0.5   # weight on the OPPONENT's purchased cards in the stage cards term (yours = 1.0)
+STAGE_PTS_OPP_W = 0.5    # weight on the OPPONENT's points in the stage points term (yours = 1.0)
 
 # engine horizon-decay (the MIRROR of point staging): an engine card built late has few
 # remaining buys to pay off, so engine value should fall as we accumulate cards. Scales engine
@@ -78,7 +91,17 @@ STAGE_FLOOR = 0.25  # early floor: fraction of point value still counted at game
 #   the quantity behind the point `stage` -- so a future cleanup could FOLD this into the stage
 #   machinery (one shared game-progress signal driving points up AND engine down) instead of
 #   carrying ENG_DECAY as a separate knob.
-ENG_DECAY = 0.3
+ENG_DECAY = 0.3    # SUPERSEDED by the turns_remaining engine model (W_ENGINE) -- no longer read.
+
+# ─── turns_remaining engine model (replaces point-staging + ENG_DECAY) ───────────────────────
+# Points are no longer stage-scaled (full value always). Instead, engine value is multiplied by the
+# turns it will actually COMPOUND: W_ENGINE * max(0, turns_remaining - tempo), where turns_remaining
+# is the estimated future main turns (valuation3 turns_table) and tempo is the card's acquisition
+# cost in turns. So a card you can't finish before the game ends contributes ~0 engine value, and an
+# engine acquired early (many turns left) is worth proportionally more. W_ENGINE keeps the (now
+# turns-scaled, so much larger) engine term balanced against unscaled points; tune it.
+W_ENGINE = 0.15   # TUNED: clean peak on two disjoint seed ranges (0.533/0.542 vs H2; 0.10 starves
+                  # the engine, 0.25+ over-feeds it). Balances the turns-scaled engine vs unscaled points.
 
 # token-cap anti-hoard: near the 10-cap, buy the best affordable instead of taking gems
 CAP9_BUY_ABOVE = 0.5    # at 9 tokens, buy the best affordable card if its take_value exceeds this
@@ -127,20 +150,17 @@ def components(val: V.Valuation, s: E.State, ci: int, seat: int):
             + W_GOLD * val.gold_cost(ci, seat))
     if W_SHORTFALL:  # penalize bank-uncollectable gems (all colors) -> demote un-completable cards
         cost += W_SHORTFALL * val.gold_shortfall(ci, seat)
+    # engine value is multiplied by the turns it will COMPOUND: max(0, turns_remaining - tempo).
+    # A card that can't be finished before the game ends contributes ~0 engine; an engine acquired
+    # with many turns left is worth proportionally more. Replaces point-staging + ENG_DECAY.
     engine = val.engine_value(ci, seat)
-    if ENG_DECAY:  # horizon-decay engine as we own more cards (few remaining buys to pay off)
-        own = s.purchased_n[seat] / STAGE_K
-        engine *= 1.0 - ENG_DECAY * (own if own < 1.0 else 1.0)
-    stage = max(s.purchased_n[seat] / STAGE_K, max(s.points[0], s.points[1]) / E.WIN_POINTS)
-    if stage > 1.0:
-        stage = 1.0
-    stage_factor = STAGE_FLOOR + (1.0 - STAGE_FLOOR) * stage
-    # future points are staged (engine-first early); noble_completion is realized now, un-staged
+    compound_turns = val.turns_remaining() - val.tempo(ci, seat)
+    engine *= W_ENGINE * (compound_turns if compound_turns > 0.0 else 0.0)
+    # points are NOT staged -- full value always.
     noble_scale = NOBLE_SCALE
     if NOBLE_SCARCITY:  # board-conditional: weight nobles more when efficient point cards are scarce
         noble_scale *= 1.0 + NOBLE_SCARCITY * val.board_scarcity(seat)
-    point = (stage_factor * (E.PTS[ci] + noble_scale * val.noble_progress(ci, seat))
-             + val.noble_completion_pts(ci, seat))
+    point = E.PTS[ci] + noble_scale * val.noble_progress(ci, seat) + val.noble_completion_pts(ci, seat)
     take = (engine + point) / (1.0 + cost)
     return take, engine, point, cost
 

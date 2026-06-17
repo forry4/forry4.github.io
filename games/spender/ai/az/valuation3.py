@@ -24,9 +24,59 @@ perspective of `seat` (0 or 1):
 """
 from __future__ import annotations
 
+import json
 import math
+import os
 
 from . import engine as E
+
+# ─── turns_remaining estimator (typical-game length table; see h3_measure_turns.py) ──────────
+# turns_table.json maps (cards_owned, points, gems_held) -> average FUTURE main turns in a typical
+# H3-vs-H2 game. turns_remaining = min over BOTH players of the lookup (the game ends when the
+# leader finishes, so the more-advanced player sets the clock). GEMS are included so turn 0 (0 gems)
+# and turn 1 (a few gems) differ -- but gems count LESS than cards (see GEM_DIST_W). Missing cells
+# fall back to nearest neighbor (points weighted 2x, gems 0.25x); absent file -> flat fallback.
+# Re-measure (h3_measure_turns) after big model changes; the table is mildly self-referential.
+_TURNS_DATA = None      # dict (cards, points, gems) -> avg turns-left
+_TURNS_KEYS = None      # list of known keys (for the NN fallback)
+_TURNS_CACHE = {}       # memoized lookups (exact + NN results) -- persists per process
+_TURNS_FALLBACK = 12.0
+GEM_DIST_W = 0.25       # NN distance weight on gems: 4 gems ~ 1 card (gems are worth less than cards)
+
+
+def _load_turns_table():
+    global _TURNS_DATA, _TURNS_KEYS
+    path = os.path.join(os.path.dirname(__file__), "turns_table.json")
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except (FileNotFoundError, ValueError):
+        return
+    d = {(row[0], row[1], row[2]): row[3] for row in data["rows"]}
+    _TURNS_DATA = d
+    _TURNS_KEYS = list(d.keys())
+
+
+def _lookup_turns(cards: int, points: int, gems: int) -> float:
+    if _TURNS_DATA is None:
+        return _TURNS_FALLBACK
+    key = (cards, points, gems)
+    hit = _TURNS_CACHE.get(key)
+    if hit is not None:
+        return hit
+    v = _TURNS_DATA.get(key)
+    if v is None:                              # nearest known cell (points 2x, gems 0.25x)
+        best, bestd = _TURNS_FALLBACK, None
+        for (kc, kp, kg) in _TURNS_KEYS:
+            dd = abs(kc - cards) + 2.0 * abs(kp - points) + GEM_DIST_W * abs(kg - gems)
+            if bestd is None or dd < bestd:
+                bestd, best = dd, _TURNS_DATA[(kc, kp, kg)]
+        v = best
+    _TURNS_CACHE[key] = v
+    return v
+
+
+_load_turns_table()
 
 # ─── Tuned valuation constants (found by the offline search; see H2.md) ───────
 GOLD_BANK_CAP = 2   # gems of the bottleneck color assumed pullable from the bank in gold_cost
@@ -46,7 +96,7 @@ ENG_TEMPO_SCALE = 0.3   # scale on (1 + reduces_tempo); swept best of {0.2..0.4}
 # = PTS-weight + ENG_RECURSE_W * engine_value_0(cj), where engine_value_0 is cj's LEVEL-0 (non-recursive)
 # engine value, precomputed/cached per state so the whole thing stays O(cards^2). 0.0 = OFF (level-0).
 ENG_RECURSE_W = 0.0
-NOBLE_CLOSE_FLOOR = 0.2   # noble_progress: a card whose color a visible noble needs scores at least
+NOBLE_CLOSE_FLOOR = 0.3   # TUNED for H3 (was 0.2). noble_progress: a card whose color a noble needs scores at least
                           # this (per such noble) even at zero bonuses -- "relevance" survives distance
 EFF_REF = 0.45            # board_scarcity: reference points-per-effective-gem. If the board offers an
                           # L2/L3 deal at/above this, nobles are noise (scarcity 0); a poor board
@@ -75,6 +125,39 @@ POT_REACH_W = 0.0    # weight on REACHABILITY (cheap board discounters for this 
                      # every level tested REGRESSED vs H2 -- discounters already earn value via the
                      # Delta-take engine term, so multiplying potential by reach double-counts them).
 REACH_DIV = 4.0      # normalizer for the summed discounter accessibility in _reachability
+# Floor on _delta_take's per-step gap = max(convexity, BUILD_FLOOR_W/(1+cost)). The pure convexity
+# makes the FIRST step of a deep build (a far steep card) read ~worthless, throttling a far card's
+# potential (and thus reachability) ~30x. The floor lets far high-potential cards credit their
+# builders; near cards are unchanged (convexity already exceeds the floor). 0 = OFF (convexity only).
+BUILD_FLOOR_W = 0.0
+
+# ─── H3 deep recursion: damped fixed-point engine (behind ENG_FIXEDPOINT; default OFF == 1-level) ──
+# The one-level path above truncates the recursion: potential(t) uses _eng_base(t), the LEGACY
+# level-0 engine value. But engine_value is genuinely a FIXED POINT -- a card's worth as a discounter
+# depends on the worth of the cards it discounts, which are themselves discounters (Katz / eigenvector
+# centrality on the "discounts" graph). This path solves that fixed point directly over the universe
+# U = board cards + seat's reserved cards:
+#     engine[A]    = deck_term[A] + Sum_{B in U, B needs color(A)} w_AB * convexity(A->B) * potential[B]
+#     potential[B] = PTS[B] + POT_ENGINE_W * engine[B]
+# by ENG_FP_ITERS Neumann iterations (engine_0 = 0; each iteration adds one more recursion hop:
+# ITERS=1 => potential is points-only, ITERS=2 ~ one level, ITERS>=3 deeper). The convexity
+# coefficients w_AB*convexity(A->B) are precomputed ONCE per (state, seat); only the cheap linear
+# combine iterates, so the whole solve is O(|U|^2 * ITERS) per decision (|U| ~ 15) -- negligible.
+# Converges iff POT_ENGINE_W * spectral_radius(M) < 1, so the best w here should sit BELOW the
+# one-level peak of 0.5 (the fixed point amplifies more than a single hop). w_AB = RESERVED_ENGINE_W
+# for reserved targets, else 1.0 -- mirroring the one-level engine's reserved premium.
+#
+# TESTED & REJECTED (h3_fp_sweep, screen N=800 + fresh N=2000 disjoint, June 2026): a WASH, do not
+# adopt. NO (w, iters) beat the 1-level baseline -- on the screen every FP config was below it on
+# BOTH vs-H2 and vs-H; on the fresh seeds the vs-H2 delta FLIPPED to +0.008..+0.018 (noise: the
+# baseline itself moved 0.018 vs-H between seed sets, larger than any FP delta) while vs-H stayed
+# consistently -0.007..-0.009. ITERS barely mattered (i2~i6 within 0.005) -> the recursion converges
+# by ~2 hops and the higher-order terms carry no usable signal: at low w they're negligible, at high
+# w they over-amplify (i2 w0.5 was the single worst screen config, -0.040 vs H2). The one-level
+# _eng_base truncation at POT_ENGINE_W=0.5 already captures essentially all the recursion. Kept
+# default OFF (and the solver intact) only as the documented record; flip ON to reproduce.
+ENG_FIXEDPOINT = False
+ENG_FP_ITERS = 4
 
 
 # ─── Stateless per-card/seat scalars ─────────────────────────────────────────
@@ -396,7 +479,8 @@ class Valuation:
     """
 
     __slots__ = ("s", "deck_color_demand", "_scarcity_cache", "_eng_base_cache",
-                 "w_tempo", "w_gem", "w_gold", "_take0_cache", "_pot_cache")
+                 "w_tempo", "w_gem", "w_gold", "_take0_cache", "_pot_cache", "_fp_cache",
+                 "_turns_cache")
 
     def __init__(self, s: E.State, w_tempo: float = 0.5, w_gem: float = 0.2,
                  w_gold: float = 0.4):
@@ -412,6 +496,8 @@ class Valuation:
         self.w_gold = w_gold
         self._take0_cache = {}
         self._pot_cache = {}
+        self._fp_cache = {}   # seat -> {card_id: converged engine value} (ENG_FIXEDPOINT path)
+        self._turns_cache = None   # estimated game turns_remaining (state-level, cached)
         # Permanent-bonus future value: share of remaining (undealt) deck cost
         # that is each color. A bonus in a deck-heavy color keeps paying off on
         # cards not yet revealed, not just the 12 on the board.
@@ -425,6 +511,18 @@ class Valuation:
                     total += cost[i]
         self.deck_color_demand = [d / total for d in demand] if total else [0.0] * 5
 
+    def turns_remaining(self) -> float:
+        """Estimated FUTURE main turns left in the game (the engine-compounding horizon), read from
+        the typical-game table: min over BOTH players of lookup(their cards, points) -- the game ends
+        when the leader finishes, so the more-advanced player sets the clock. Cached per state."""
+        if self._turns_cache is not None:
+            return self._turns_cache
+        s = self.s
+        self._turns_cache = min(
+            _lookup_turns(s.purchased_n[0], s.points[0], sum(s.tokens[0])),
+            _lookup_turns(s.purchased_n[1], s.points[1], sum(s.tokens[1])))
+        return self._turns_cache
+
     # cross-card factor (the one an MLP cannot assemble from a flat vector) ----
     def engine_value(self, ci: int, seat: int, _recurse: bool = True) -> float:
         """Value of the permanent +1 bonus ci grants. Dispatches on USE_POTENTIAL_ENGINE:
@@ -436,22 +534,29 @@ class Valuation:
         importance multiplier here: _delta_take carries both, so there is no double count."""
         if not USE_POTENTIAL_ENGINE:
             return self._engine_value_legacy(ci, seat, _recurse)
-        s = self.s
-        bcol = E.BONUS[ci]
-        bon_b = s.bonuses[seat][bcol]
-        ev = 0.0
-        for slot in range(12):
-            cj = s.board[slot]
-            if cj < 0 or cj == ci:
-                continue
-            if E.COST[cj][bcol] - bon_b > 0:            # cj still needs this color
-                ev += self._delta_take(cj, seat, bcol)
-        for cj in s.reserved[seat]:                     # committed targets: slight premium
-            if cj == ci:
-                continue
-            if E.COST[cj][bcol] - bon_b > 0:
-                ev += RESERVED_ENGINE_W * self._delta_take(cj, seat, bcol)
-        ev += self.deck_color_demand[bcol] * ENG_DECK_W
+        if ENG_FIXEDPOINT:                              # deep recursion: solve the damped fixed point
+            fp = self._fp_cache.get(seat)
+            if fp is None:
+                fp = self._solve_engine_fixedpoint(seat)
+            v = fp.get(ci)
+            ev = v if v is not None else self._engine_one_pass(ci, seat, fp)
+        else:
+            s = self.s
+            bcol = E.BONUS[ci]
+            bon_b = s.bonuses[seat][bcol]
+            ev = 0.0
+            for slot in range(12):
+                cj = s.board[slot]
+                if cj < 0 or cj == ci:
+                    continue
+                if E.COST[cj][bcol] - bon_b > 0:            # cj still needs this color
+                    ev += self._delta_take(cj, seat, bcol)
+            for cj in s.reserved[seat]:                     # committed targets: slight premium
+                if cj == ci:
+                    continue
+                if E.COST[cj][bcol] - bon_b > 0:
+                    ev += RESERVED_ENGINE_W * self._delta_take(cj, seat, bcol)
+            ev += self.deck_color_demand[bcol] * ENG_DECK_W
         return ev
 
     def _engine_value_legacy(self, ci: int, seat: int, _recurse: bool = True) -> float:
@@ -548,22 +653,49 @@ class Valuation:
             self._take0_cache[key] = v
         return v
 
+    def _potential_base(self, ci: int, seat: int) -> float:
+        """ci's potential WITHOUT the reachability multiplier: realizable points + its own (level-0)
+        engine value. Used both as the base in potential_value AND as the per-discounter weight in
+        _reachability -- excluding the reachability term here is what keeps that recursion bounded."""
+        return E.PTS[ci] + POT_ENGINE_W * self._eng_base(ci, seat)
+
     def _reachability(self, ci: int, seat: int) -> float:
-        """How reachable ci is via the engine: summed ACCESSIBILITY (1/(1+cost)) of OTHER
-        board cards whose bonus color ci still needs -- cheap cards that build the colors ci
-        is short on. High for a costly card the board can cheaply build (the '7-white amid
-        white L1s' case). Cost-accessibility, not take value, so 0-pt engine cards still count."""
+        """How reachable ci is via the engine: for each color ci still needs, the TOTAL COST
+        (tempo+gem+gold) that a +1 bonus in that color removes from ci, times the VALUE-PER-COST
+        (_potential_base / (1+cost)) of the builders available in that color.
+
+        Two things fall out of weighting by the cost REDUCTION (not a deficit count):
+          * a builder that clears ci's BOTTLENECK counts more -- if a color is ci's sole/steepest
+            need, a bonus there drops ci's tempo AND a gem; if another color keeps the bottleneck,
+            the same bonus only shaves a gem. So a black builder lifts a '1 black away' card more
+            than a '1 black + 1 green away' card (whose tempo stays at 1).
+          * a builder only counts to the extent it is itself worth buying (value-per-cost), so a
+            low-value L3 barely lifts reachability even if its color fits, while a cheap engine L1
+            still counts.
+        Uses _potential_base (not the full potential) so the reachability->potential recursion stays
+        bounded; returns 0 for an already-affordable card (nothing to 'reach')."""
+        if self.affordable_now(ci, seat):   # you can buy it now -- nothing to 'reach', no boost
+            return 0.0
         s = self.s
         cost = E.COST[ci]
         bon = s.bonuses[seat]
-        need = [cost[c] - bon[c] > 0 for c in range(5)]
-        r = 0.0
+        base = self._cost_scalar(ci, seat)
+        # quality of builders available per color ci still needs
+        by_color = [0.0] * 5
         for slot in range(12):
             cj = s.board[slot]
             if cj < 0 or cj == ci:
                 continue
-            if need[E.BONUS[cj]]:
-                r += 1.0 / (1.0 + self._cost_scalar(cj, seat))
+            bc = E.BONUS[cj]
+            if cost[bc] - bon[bc] > 0:
+                by_color[bc] += self._potential_base(cj, seat) / (1.0 + self._cost_scalar(cj, seat))
+        # weight each color by the cost (tempo+gem+gold) a +1 bonus there removes from ci
+        r = 0.0
+        for c in range(5):
+            if by_color[c] > 0.0:
+                reduction = base - self._cost_scalar(ci, seat, extra_bcol=c)
+                if reduction > 0.0:
+                    r += reduction * by_color[c]
         return r / REACH_DIV
 
     def potential_value(self, ci: int, seat: int) -> float:
@@ -578,19 +710,114 @@ class Valuation:
         key = (ci, seat)
         v = self._pot_cache.get(key)
         if v is None:
-            v = E.PTS[ci] + POT_ENGINE_W * self._eng_base(ci, seat)
+            v = self._potential_base(ci, seat)
             if POT_REACH_W:
                 v *= 1.0 + POT_REACH_W * self._reachability(ci, seat)
             self._pot_cache[key] = v
         return v
 
     def _delta_take(self, ci: int, seat: int, bcol: int) -> float:
-        """take-value uplift a +1 `bcol` bonus gives card ci: potential(ci) * the convexity gap
-        1/(1+cost') - 1/(1+cost). >= 0 (a +1 in a needed color never raises cost). The convexity
-        auto-weights a near-affordable discount (2->1) above a far one (6->5) with no extra knob."""
+        """take-value uplift a +1 `bcol` bonus gives card ci: potential(ci) * the per-step gap.
+        The gap is the convexity 1/(1+cost') - 1/(1+cost) (auto-weights a near-affordable discount
+        2->1 above a far 6->5), but FLOORED at BUILD_FLOOR_W * (need_bcol / total_need) -- i.e. scaled
+        by how STEEP ci's remaining need is in bcol. The pure convexity makes the FIRST step of a deep
+        build (a far steep card) look ~worthless (~0.03), throttling that card's potential -- and thus
+        reachability -- by ~30x; the steepness-scaled floor lets a far card STEEP IN bcol still credit
+        its builders, while leaving near cards (convexity > floor) and spread cards (low need_bcol/total)
+        unchanged."""
         c0 = self._cost_scalar(ci, seat)
         c1 = self._cost_scalar(ci, seat, extra_bcol=bcol)
-        return self.potential_value(ci, seat) * (1.0 / (1.0 + c1) - 1.0 / (1.0 + c0))
+        gap = 1.0 / (1.0 + c1) - 1.0 / (1.0 + c0)
+        if BUILD_FLOOR_W:  # floor scaled by STEEPNESS in bcol (need_bcol/total) -- binds only for a
+            s = self.s     # card steep in this color, and (no /(1+cost)) does not vanish for far cards
+            cost = E.COST[ci]
+            bon = s.bonuses[seat]
+            tok = s.tokens[seat]
+            eff = [cost[c] - bon[c] - tok[c] for c in range(5)]
+            need_b = eff[bcol] if eff[bcol] > 0 else 0
+            total = sum(x for x in eff if x > 0)
+            if total > 0 and need_b > 0:
+                floor = BUILD_FLOOR_W * (need_b / total)
+                if floor > gap:
+                    gap = floor
+        return self.potential_value(ci, seat) * gap
+
+    # ─── H3 deep recursion: damped fixed-point engine (ENG_FIXEDPOINT) ───────────
+    def _solve_engine_fixedpoint(self, seat: int) -> dict:
+        """Solve the damped fixed-point engine over U = board cards + `seat`'s reserved cards
+        (see the ENG_FIXEDPOINT note). Precompute the convexity coefficients once, then iterate the
+        linear combine ENG_FP_ITERS times (engine_0 = 0). Returns {card_id: engine value}, cached
+        per seat. Replaces the one-level _eng_base truncation with the true (truncated-Neumann)
+        fixed point: a card's importance as a discount target is its OWN converged engine value,
+        not its legacy level-0 value."""
+        s = self.s
+        w = POT_ENGINE_W
+        board_cards = [s.board[i] for i in range(12) if s.board[i] >= 0]
+        reserved = list(s.reserved[seat])
+        U = board_cards + reserved
+        n = len(U)
+        if n == 0:
+            self._fp_cache[seat] = {}
+            return {}
+        is_res = [False] * len(board_cards) + [True] * len(reserved)
+        pts = [E.PTS[c] for c in U]
+        bcol = [E.BONUS[c] for c in U]
+        bon = s.bonuses[seat]
+        deck_term = [self.deck_color_demand[bcol[k]] * ENG_DECK_W for k in range(n)]
+        # per-target convexity gap by discounter-color: gap[b][col] = take-uplift to U[b] from a +1
+        # in `col` (0 unless U[b] still needs col). The no-extra cost scalar is shared across colors.
+        inv_base = [1.0 / (1.0 + self._cost_scalar(U[b], seat)) for b in range(n)]
+        gap = [[0.0] * 5 for _ in range(n)]
+        for b in range(n):
+            cost = E.COST[U[b]]
+            for col in range(5):
+                if cost[col] - bon[col] > 0:            # U[b] still needs this color
+                    gap[b][col] = 1.0 / (1.0 + self._cost_scalar(U[b], seat, extra_bcol=col)) - inv_base[b]
+        # coefficient rows: for discounter A, the (target_index, weight*gap) of every OTHER card it helps
+        rows = []
+        for a in range(n):
+            ca = bcol[a]
+            row = [(b, (RESERVED_ENGINE_W if is_res[b] else 1.0) * gap[b][ca])
+                   for b in range(n) if b != a and gap[b][ca] > 0.0]
+            rows.append(row)
+        eng = [0.0] * n
+        for _ in range(ENG_FP_ITERS):
+            nxt = list(deck_term)
+            for a in range(n):
+                acc = 0.0
+                for b, coef in rows[a]:
+                    acc += coef * (pts[b] + w * eng[b])
+                nxt[a] += acc
+            eng = nxt
+        fp = {U[k]: eng[k] for k in range(n)}
+        self._fp_cache[seat] = fp
+        return fp
+
+    def _engine_one_pass(self, ci: int, seat: int, fp: dict) -> float:
+        """engine_value for a card NOT in the fixed-point universe (evaluated but neither on the
+        board nor reserved): one Delta-take pass using the converged potentials
+        (potential[B] = PTS[B] + POT_ENGINE_W * engine_fp[B]), keeping such off-universe queries
+        consistent with the solved fixed point."""
+        s = self.s
+        bcol = E.BONUS[ci]
+        bon_b = s.bonuses[seat][bcol]
+        w = POT_ENGINE_W
+        ev = 0.0
+        gapf = lambda cj: (1.0 / (1.0 + self._cost_scalar(cj, seat, extra_bcol=bcol))
+                           - 1.0 / (1.0 + self._cost_scalar(cj, seat)))
+        for slot in range(12):
+            cj = s.board[slot]
+            if cj < 0 or cj == ci:
+                continue
+            if E.COST[cj][bcol] - bon_b > 0:
+                ev += (E.PTS[cj] + w * fp.get(cj, 0.0)) * gapf(cj)
+        for cj in s.reserved[seat]:
+            if cj == ci:
+                continue
+            if E.COST[cj][bcol] - bon_b > 0:
+                ev += RESERVED_ENGINE_W * (E.PTS[cj] + w * fp.get(cj, 0.0)) * gapf(cj)
+        ev += self.deck_color_demand[bcol] * ENG_DECK_W
+        return ev
 
     def board_scarcity(self, seat: int) -> float:
         """How scarce efficient high-point targets are on the board, in [0, 1] (high = scarce).

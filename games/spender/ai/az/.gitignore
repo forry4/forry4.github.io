@@ -1,0 +1,5 @@
+# H3 sandbox run artifacts (scratch eval outputs / logs / autotune results) -- not source
+h3_*.out
+*.console.log
+h3_autotune.log
+h3_best.json
