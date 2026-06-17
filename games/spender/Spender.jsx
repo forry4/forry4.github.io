@@ -465,6 +465,11 @@ export default function SpenderApp() {
 	const [toast, setToast] = useState("");
 	const [confirmAbandon, setConfirmAbandon] = useState(false);
 	const [reviewing, setReviewing] = useState(false);  // end-game: viewing final board + log
+	// Admin-only debug overlay: the per-card AI values (H2's take/engine/point/cost, H's value).
+	// OFF by default; only admins get the toggle, so regular players never see it.
+	const [showAiVals, setShowAiVals] = useState(() => {
+		try { return localStorage.getItem("spender_show_ai_vals") === "1"; } catch { return false; }
+	});
 
 	// ── Auth form state ────────────────────────────────────────────────────
 	const [authTab, setAuthTab] = useState("login");
@@ -917,7 +922,7 @@ export default function SpenderApp() {
 			<CardView key={card.id} card={card}
 				selected={isSelected}
 				affordable={affordable && myTurn}
-				aiValue={roomData?.ai_card_values?.[card.id]}
+				aiValue={(authUser?.is_admin && showAiVals) ? roomData?.ai_card_values?.[card.id] : null}
 				disabled={opts.disabled}
 				onClick={() => {
 					if (opts.readonly || !myTurn) return;
@@ -1385,6 +1390,16 @@ export default function SpenderApp() {
 							</span>
 							{roomData?.ai_variant && (
 								<span className="ai-variant-badge">AI {roomData.ai_variant}</span>
+							)}
+							{authUser?.is_admin && roomData?.ai_variant && roomData?.ai_card_values && (
+								<button className="btn btn-ghost btn-sm" title="Admin: show/hide the AI's per-card value overlay"
+									onClick={() => setShowAiVals(v => {
+										const n = !v;
+										try { localStorage.setItem("spender_show_ai_vals", n ? "1" : "0"); } catch {}
+										return n;
+									})}>
+									{showAiVals ? "Hide AI values" : "Show AI values"}
+								</button>
 							)}
 							{game.phase === "over"
 								? <span className="action-hint">Final board &amp; game log</span>
