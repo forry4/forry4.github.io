@@ -970,7 +970,8 @@ export default function SpenderApp() {
 				<div className="player-tokens">
 					{[...GEM_COLORS, "gold"].map(c => (p.tokens[c] || 0) > 0 && (
 						<span key={c} className="token-pill" style={{ background: GEM_HEX[c] + "55", border: `1px solid ${GEM_HEX[c]}` }}>
-							<span style={{ width: 10, height: 10, borderRadius: "50%", background: GEM_HEX[c], display: "inline-block" }} />
+							{/* light rim so the near-black onyx gem stays visible on the warm "your turn" (surface3) panel */}
+							<span style={{ width: 10, height: 10, borderRadius: "50%", background: GEM_HEX[c], border: "1px solid rgba(255,255,255,.25)", display: "inline-block" }} />
 							{p.tokens[c]}
 						</span>
 					))}
