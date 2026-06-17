@@ -98,6 +98,40 @@ def test_admin_grant_and_check_idempotent():
     c.close()
 
 
+def test_get_user_by_session_agrees_with_login_on_admin(tmp_path, monkeypatch):
+    # Regression: get_user_by_session computed is_admin via a correlated subquery
+    # that read NULL on the prod libsql driver, so a refreshed session saw any admin
+    # as non-admin even though login (is_admin_id) saw admin. The session path must
+    # now agree with login, and a SITE_OWNER name-match must self-heal regardless.
+    monkeypatch.setattr(dbm, "DB_PATH", str(tmp_path / "site.db"))
+    monkeypatch.setenv("SITE_OWNER", "owner")
+    conn = dbm.get_db_conn()
+    dbm.init_core_schema(conn)
+    conn.close()
+
+    authm.create_user("owner", "pw")     # the SITE_OWNER
+    authm.create_user("staff", "pw")     # a non-owner admin (granted via the table)
+    authm.create_user("rando", "pw")     # a normal user
+
+    # Owner: login grants admin; the session path must agree.
+    owner_login = authm.authenticate_user("owner", "pw")
+    assert owner_login["is_admin"] is True
+    assert authm.get_user_by_session(owner_login["session_token"])["is_admin"] is True
+
+    # Non-owner admin: grant via the table directly (no name match), then log in.
+    staff_login = authm.authenticate_user("staff", "pw")
+    grant_conn = dbm.get_db_conn()
+    authm.grant_admin(grant_conn, staff_login["id"])
+    grant_conn.close()
+    # Session path must report admin for them too (the bug hid this behind the owner-only fallback).
+    assert authm.get_user_by_session(staff_login["session_token"])["is_admin"] is True
+
+    # Normal user: not admin via either path.
+    rando_login = authm.authenticate_user("rando", "pw")
+    assert rando_login["is_admin"] is False
+    assert authm.get_user_by_session(rando_login["session_token"])["is_admin"] is False
+
+
 def test_is_site_owner_honors_admin_flag_and_env(monkeypatch):
     monkeypatch.delenv("SITE_OWNER", raising=False)
     assert authm.is_site_owner({"id": "x", "name": "bob"}) is False

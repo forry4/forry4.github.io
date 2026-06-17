@@ -109,21 +109,21 @@ def get_user_by_session(token: str) -> dict | None:
     conn = get_db_conn()
     cur = conn.cursor()
     now = int(time.time())
-    # Single query (1 round-trip) — is_admin via EXISTS subquery; positional read
-    # avoids depending on the driver aliasing the computed column in row metadata.
     cur.execute(
-        "SELECT id, name, (SELECT 1 FROM admins WHERE user_id = users.id) "
-        "FROM users WHERE session_token=? AND session_expiry>?",
+        "SELECT id, name FROM users WHERE session_token=? AND session_expiry>?",
         (token, now),
     )
     row = cur.fetchone()
-    conn.close()
     if not row:
+        conn.close()
         return None
-    # is_admin = durable admins-table grant OR a live SITE_OWNER username match (so the owner is
-    # recognized even if the login-time grant never ran for an older session). Mirrors is_site_owner.
+    # is_admin = durable admins-table grant (via the SAME direct query the login path uses,
+    # is_admin_id — NOT a correlated subquery, which read NULL on the prod libsql driver and so
+    # reported any admin as non-admin on every session refresh) OR a live SITE_OWNER username
+    # match (so the owner is recognized even if the login-time grant never ran). Mirrors is_site_owner.
     owner = site_owner_name()
-    is_admin = bool(row[2]) or (owner is not None and row[1] == owner)
+    is_admin = is_admin_id(conn, row[0]) or (owner is not None and row[1] == owner)
+    conn.close()
     return {"id": row[0], "name": row[1], "is_admin": is_admin}
 
 
