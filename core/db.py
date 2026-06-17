@@ -194,17 +194,18 @@ def init_core_schema(conn) -> None:
         granted_at INTEGER
     )""")
     conn.commit()
-    # Enforce unique usernames at the DB level (defense in depth alongside
-    # create_user's explicit check). users.name predates this, so it's a unique-INDEX
-    # migration, not a column constraint. Tolerant: if duplicate names already exist the
-    # index can't be built — log and continue (boot must never fail); it builds itself
-    # once the duplicates are cleaned up.
+    # Enforce CASE-INSENSITIVE unique usernames at the DB level (defense in depth alongside
+    # create_user's explicit NOCASE check). users.name predates this, so it's a unique-INDEX
+    # migration, not a column constraint. Drop the earlier case-sensitive index it supersedes.
+    # Tolerant: if case-folded duplicate names already exist the index can't be built — log and
+    # continue (boot must never fail); it builds itself once the duplicates are cleaned up.
     try:
-        cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_name ON users(name)")
+        cur.execute("DROP INDEX IF EXISTS idx_users_name")  # superseded by the NOCASE index below
+        cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_name_ci ON users(name COLLATE NOCASE)")
         conn.commit()
     except Exception as e:  # noqa: BLE001
-        LOG.warning("unique index on users.name not created — duplicate usernames likely "
-                    "exist; clean them up so it can be built (%s)", e)
+        LOG.warning("case-insensitive unique index on users.name not created — duplicate "
+                    "usernames (ignoring case) likely exist; clean them up so it can build (%s)", e)
 
 
 # ── Game retention / cleanup ──────────────────────────────────────────────────

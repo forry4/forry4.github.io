@@ -132,23 +132,30 @@ def test_get_user_by_session_agrees_with_login_on_admin(tmp_path, monkeypatch):
     assert authm.get_user_by_session(rando_login["session_token"])["is_admin"] is False
 
 
-def test_create_user_rejects_duplicate_usernames(tmp_path, monkeypatch):
+def test_create_user_rejects_duplicate_usernames_case_insensitively(tmp_path, monkeypatch):
     # Regression: users.name had no UNIQUE constraint and create_user only caught
-    # IntegrityError, so duplicate usernames slipped through (two "Forrestm" rows in
-    # prod). Now rejected explicitly AND enforced by a unique index as a race backstop.
+    # IntegrityError, so duplicate usernames slipped through (two "Forrestm" rows in prod).
+    # Now rejected CASE-INSENSITIVELY, enforced by a NOCASE unique index, and login matches.
     monkeypatch.setattr(dbm, "DB_PATH", str(tmp_path / "u.db"))
     conn = dbm.get_db_conn()
     dbm.init_core_schema(conn)
     conn.close()
 
-    assert authm.create_user("Forrestm", "pw") is not None      # first registration wins
-    assert authm.create_user("Forrestm", "other") is None       # duplicate name rejected
+    assert authm.create_user("Forrestm", "pw") is not None       # first registration wins
+    assert authm.create_user("Forrestm", "other") is None        # exact duplicate rejected
+    assert authm.create_user("forrestm", "other") is None        # case-variant rejected too
+    assert authm.create_user("FORRESTM", "other") is None
+
+    # login is case-insensitive: any casing authenticates the single account
+    assert authm.authenticate_user("forrestm", "pw") is not None
+    assert authm.authenticate_user("FORRESTM", "pw") is not None
 
     c = dbm.get_db_conn()
-    n = c.cursor().execute("SELECT COUNT(*) FROM users WHERE name = ?", ("Forrestm",)).fetchone()[0]
+    n = c.cursor().execute("SELECT COUNT(*) FROM users WHERE name = ? COLLATE NOCASE",
+                           ("forrestm",)).fetchone()[0]
     raised = False
-    try:  # the unique index is the DB-level backstop against a race past the check
-        c.execute("INSERT INTO users (id,name,password_hash) VALUES (?,?,?)", ("x", "Forrestm", "h"))
+    try:  # the NOCASE unique index blocks a case-variant insert that raced past the check
+        c.execute("INSERT INTO users (id,name,password_hash) VALUES (?,?,?)", ("x", "FORRESTM", "h"))
         c.commit()
     except Exception:
         raised = True

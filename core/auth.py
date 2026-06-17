@@ -59,11 +59,12 @@ def create_user(name: str, password: str) -> dict | None:
     conn = get_db_conn()
     cur = conn.cursor()
     try:
-        # Enforce unique usernames explicitly. The users.name column has no UNIQUE
-        # constraint (and on the libsql driver a constraint violation isn't a
-        # sqlite3.IntegrityError anyway), so the old IntegrityError-only guard never
-        # fired and duplicate names slipped through. Check before inserting.
-        cur.execute("SELECT 1 FROM users WHERE name = ?", (name,))
+        # Enforce unique usernames explicitly, CASE-INSENSITIVELY ("Forrestm" == "forrestm").
+        # The users.name column has no UNIQUE constraint (and on the libsql driver a constraint
+        # violation isn't a sqlite3.IntegrityError anyway), so the old IntegrityError-only guard
+        # never fired and duplicate names slipped through. Check before inserting; the matching
+        # NOCASE unique index (init_core_schema) is the race backstop.
+        cur.execute("SELECT 1 FROM users WHERE name = ? COLLATE NOCASE", (name,))
         if cur.fetchone() is not None:
             conn.close()
             return None  # name already taken
@@ -81,7 +82,8 @@ def create_user(name: str, password: str) -> dict | None:
 def authenticate_user(name: str, password: str) -> dict | None:
     conn = get_db_conn()
     cur = conn.cursor()
-    cur.execute("SELECT * FROM users WHERE name = ?", (name,))
+    # Case-insensitive lookup so login matches registration ("Forrestm" logs in as "forrestm").
+    cur.execute("SELECT * FROM users WHERE name = ? COLLATE NOCASE", (name,))
     row = cur.fetchone()
     if not row:
         conn.close()
