@@ -210,6 +210,8 @@ def save_game(room_id: str) -> None:
         "status": room.get("status", "open"),
         "game": room.get("game"),
         "meta": room.get("meta", {}),
+        "ai_variant": room.get("ai_variant"),  # persist so a reconnect/redeploy keeps the
+                                                # right bot AND the admin value overlay
     }
     now = int(time.time())
     conn = get_db_conn()
@@ -248,12 +250,24 @@ def load_game_to_memory(room_id: str) -> bool:
         state = json.loads(row["state_json"])
     except Exception:
         return False
+    game = state.get("game")
+    ai_variant = state.get("ai_variant")
+    if not ai_variant and game and game.get("ai_player"):
+        # Back-compat for games saved before ai_variant was persisted: recover it from the
+        # AI player's display name ("AI (X)"), so an in-flight game reconnected after the
+        # fix deploys still gets the right bot + the admin value overlay (not just new games).
+        nm = state.get("players", {}).get(game["ai_player"], "")
+        if isinstance(nm, str) and nm.startswith("AI (") and nm.endswith(")"):
+            v = nm[4:-1]
+            if _ai_variant_valid(v):
+                ai_variant = v
     ROOMS[room_id] = {
         "players": state.get("players", {}),
         "host": state.get("host"),
         "status": state.get("status", "open"),
-        "game": state.get("game"),
+        "game": game,
         "meta": state.get("meta", {}),
+        "ai_variant": ai_variant,
         "sockets": {},
     }
     LOG.info("loaded game %s from DB", room_id)
