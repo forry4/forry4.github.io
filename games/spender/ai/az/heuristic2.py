@@ -42,8 +42,20 @@ from . import valuation2 as V
 # ─── Tuned config (offline search; beats H ~0.62) ────────────────────────────────────
 W_TEMPO = 0.5      # cost: turns to collect
 W_GEM = 0.2        # cost: total post-bonus gems to pay
-W_GOLD = 0.4       # cost: estimated gold coins needed
+W_GOLD = 0.4       # cost: estimated gold coins needed (bottleneck color vs the bank)
+W_SHORTFALL = 0.0  # cost: gems the bank CANNOT supply across ALL needed colors (gold_shortfall).
+                   # gold_cost only sees the bottleneck color, so a card blocked on a NON-bottleneck
+                   # color isn't demoted and the bot stalls collecting toward an un-completable card
+                   # (~14.9% of take-turns). This term penalizes ALL bank-blocked colors so the
+                   # ranking pivots to an attainable card. TESTED at 0.2: cuts stalls 14.9%->11.6%
+                   # and leans +0.006 win rate (6/8 disjoint seeds positive) but below significance
+                   # -- a marginal correctness fix, left OFF (0.0). Flip to ~0.2 to re-enable.
 NOBLE_SCALE = 3.0  # noble-progress contribution, scaled toward a noble's VP
+NOBLE_SCARCITY = 0.0  # board-conditional noble boost: noble term *= (1 + NOBLE_SCARCITY*board_scarcity).
+                      # Per the strategy model nobles matter MORE when the board lacks efficient
+                      # high-point cards to race (go wide for nobles). H2 loses the noble race in its
+                      # losses (0.48 vs opp 1.27 nobles) with a FLAT noble weight; this gates it on the
+                      # board. 0.0 = OFF (flat, no change); tuned below.
 
 # point staging: future points scaled by a global game stage (low early -> 1 late)
 STAGE_K = 8        # cards-bought for a full engine-stage; stage = max(cards/STAGE_K, leader_pts/15)
@@ -91,6 +103,17 @@ RESERVE_GAP = 0.5                # acquisition (speculative only): reserve the t
 USE_TAKE2 = False
 TAKE2_MIN_STEEP = 2              # min remaining need in the bottleneck color to fire the take-2
 
+# opponent-snipe pivot: if your top take_value target is unaffordable to YOU but affordable to the
+# OPPONENT, assume they buy it -> don't waste tempo collecting toward a card you'll lose; pivot
+# gem-taking to your next-best attainable target. SNIPE_REQUIRE_OPP_TOP only pivots when the card
+# is ALSO the opponent's highest take_value pick (high-confidence they actually take it).
+# TESTED, left OFF: ungated (any opp-affordable) was clearly NEGATIVE (all 3 seeds, -0.003..-0.012);
+# gated (opp-top) was a high-variance WASH (mean ~+0.003 over 5 disjoint seeds but two -0.013 seeds).
+# Matches the documented "contention/denial is a 1-ply greedy wash" -- a NET-feature candidate (opp
+# affordability + contention), not a greedy-H2 lever. Flip to True (+ keep the gate) to re-enable.
+USE_OPP_SNIPE = False
+SNIPE_REQUIRE_OPP_TOP = True
+
 
 def components(val: V.Valuation, s: E.State, ci: int, seat: int):
     """The take_value pieces for `ci` from `seat`: (take, engine, point, cost).
@@ -98,6 +121,8 @@ def components(val: V.Valuation, s: E.State, ci: int, seat: int):
     cost = (W_TEMPO * val.tempo(ci, seat)
             + W_GEM * val.gem_cost(ci, seat)
             + W_GOLD * val.gold_cost(ci, seat))
+    if W_SHORTFALL:  # penalize bank-uncollectable gems (all colors) -> demote un-completable cards
+        cost += W_SHORTFALL * val.gold_shortfall(ci, seat)
     engine = val.engine_value(ci, seat)
     if ENG_DECAY:  # horizon-decay engine as we own more cards (few remaining buys to pay off)
         own = s.purchased_n[seat] / STAGE_K
@@ -107,7 +132,10 @@ def components(val: V.Valuation, s: E.State, ci: int, seat: int):
         stage = 1.0
     stage_factor = STAGE_FLOOR + (1.0 - STAGE_FLOOR) * stage
     # future points are staged (engine-first early); noble_completion is realized now, un-staged
-    point = (stage_factor * (E.PTS[ci] + NOBLE_SCALE * val.noble_progress(ci, seat))
+    noble_scale = NOBLE_SCALE
+    if NOBLE_SCARCITY:  # board-conditional: weight nobles more when efficient point cards are scarce
+        noble_scale *= 1.0 + NOBLE_SCARCITY * val.board_scarcity(seat)
+    point = (stage_factor * (E.PTS[ci] + noble_scale * val.noble_progress(ci, seat))
              + val.noble_completion_pts(ci, seat))
     take = (engine + point) / (1.0 + cost)
     return take, engine, point, cost
@@ -355,6 +383,38 @@ def _maybe_reserve(s, seat, val, targets, legal_set):
     return None
 
 
+def _opp_top_board_ci(s, val, opp):
+    """The opponent's highest-take_value BOARD card (the card they're most likely to buy/aim at)."""
+    best, bc = -1.0, -1
+    for slot in range(12):
+        ci = s.board[slot]
+        if ci >= 0:
+            v = take_value(val, s, ci, opp)
+            if v > best:
+                best, bc = v, ci
+    return bc
+
+
+def _take_targets(s, seat, val, targets):
+    """`targets` with leading cards the opponent will likely SNIPE removed (the user's pivot): a card
+    we can't afford but the opponent CAN (and, if SNIPE_REQUIRE_OPP_TOP, is their own top pick) is
+    assumed gone -- don't burn tempo collecting toward it; aim at the next attainable target. Never
+    returns empty (if every target is sniped, fall back to the original list)."""
+    if not USE_OPP_SNIPE or len(targets) <= 1:
+        return targets
+    opp = 1 - seat
+    opp_top = _opp_top_board_ci(s, val, opp) if SNIPE_REQUIRE_OPP_TOP else -1
+    kept = []
+    for t in targets:
+        ci = t[1]
+        sniped = (not val.affordable_now(ci, seat)         # we can't buy it now
+                  and val.affordable_now(ci, opp)          # but they can
+                  and (not SNIPE_REQUIRE_OPP_TOP or ci == opp_top))
+        if not sniped:
+            kept.append(t)
+    return kept if kept else targets
+
+
 def choose_action(s: E.State, seat: int | None = None) -> int:
     """Return a legal engine action index for `seat` (defaults to side to move)."""
     if seat is None:
@@ -423,6 +483,10 @@ def choose_action(s: E.State, seat: int | None = None) -> int:
         if da is not None:
             return da
 
+    # Take-path target list: drop leading cards the opponent will likely snipe (the pivot). No-op
+    # unless USE_OPP_SNIPE. Winning/denial above still use the full `targets`/`buys`.
+    take_targets = _take_targets(s, seat, val, targets)
+
     # 3) Token-cap anti-hoard: near the 10-cap, cash in a buy rather than take-and-discard.
     #    The more tokens, the lower the bar to buy (9 < 8 threshold; 10 always buys).
     n_tokens = sum(s.tokens[seat])
@@ -436,13 +500,13 @@ def choose_action(s: E.State, seat: int | None = None) -> int:
             if n_tokens == 8 and best_tv > CAP8_BUY_ABOVE:
                 return best_a
         # bar not met (or nothing affordable): take gems
-        a = _choose_take(s, seat, val, targets, legal)
+        a = _choose_take(s, seat, val, take_targets, legal)
         return a if a is not None else legal[0]
 
     # 4) Otherwise (< 8 tokens): buy the highest-take_value card if affordable, else
     #    take gems toward it (a legal buy action implies the engine deemed it affordable).
-    if targets:
-        _tv, top_ci, top_idx, top_kind = targets[0]
+    if take_targets:
+        _tv, top_ci, top_idx, top_kind = take_targets[0]
         top_a = (E.A_BUY_BOARD + top_idx) if top_kind == "board" else (E.A_BUY_RESV + top_idx)
         if top_a in legal_set:
             return top_a
@@ -462,7 +526,7 @@ def choose_action(s: E.State, seat: int | None = None) -> int:
         if a is not None:
             return a
 
-    a = _choose_take(s, seat, val, targets, legal)
+    a = _choose_take(s, seat, val, take_targets, legal)
     if a is not None:
         return a
     return legal[0]
