@@ -41,7 +41,7 @@ from . import valuation2 as V
 
 # ─── Tuned config (offline search; beats H ~0.62) ────────────────────────────────────
 W_TEMPO = 0.2      # cost: turns to collect (autotuned 0.5->0.2 on the cost+tempo engine model)
-W_GEM = 0.2        # cost: total post-bonus gems to pay
+W_GEM = 0.3        # cost: total post-bonus gems to pay (2D (W_TEMPO,W_GEM) grid: 0.2->0.3, +0.01 vs H)
 W_GOLD = 0.4       # cost: estimated gold coins needed (bottleneck color vs the bank)
 W_SHORTFALL = 0.0  # cost: gems the bank CANNOT supply across ALL needed colors (gold_shortfall).
                    # gold_cost only sees the bottleneck color, so a card blocked on a NON-bottleneck
