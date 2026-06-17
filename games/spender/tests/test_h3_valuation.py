@@ -25,7 +25,7 @@ from games.spender.ai.az import engine as E
 from games.spender.ai.az import heuristic3 as H3
 from games.spender.ai.az import valuation3 as V3
 
-WHITE, GREEN, BLACK = 0, 2, 4
+WHITE, BLUE, GREEN, BLACK = 0, 1, 2, 4
 
 
 def _blank_state(seat=0):
@@ -216,3 +216,101 @@ def test_d_reachability_completion_sensitivity(restore_flags):
     # D removes (W_TEMPO + W_GEM) of cost from the first card but only W_GEM from the second, so the
     # first's reachability is lifted ~ (W_TEMPO+W_GEM)/W_GEM as much; assert a clear margin.
     assert reach_one_black > 1.2 * reach_black_green
+
+
+# ─── reachability changes BUILDERS' value, never the card's own take value ───
+def test_reachability_does_not_affect_own_take(restore_flags):
+    """A card's OWN reachability must not change its OWN take value -- reachability only flows into
+    the take value of the cards that BUILD toward it (its discounters). Toggling POT_REACH_W must
+    leave the target's own take value identical while lifting a builder's take value."""
+    seat = 0
+    # X: steep-white target whose BONUS is blue -> on a board with no blue-cost card, X discounts
+    #    nothing, so its own engine value is constant. B: a white builder X needs, not costing blue.
+    X = max((c for c in range(len(E.COST)) if E.BONUS[c] == BLUE and E.COST[c][WHITE] >= 5),
+            key=lambda c: E.COST[c][WHITE])
+    B = next(c for c in range(len(E.COST))
+             if E.BONUS[c] == WHITE and E.COST[c][BLUE] == 0 and c != X)
+
+    def takes(reach_w):
+        V3.POT_REACH_W = reach_w
+        s = _blank_state()
+        s.board = [-1] * 12
+        s.board[0] = X
+        s.board[1] = B
+        v = _val(s)
+        return H3.take_value(v, s, X, seat), H3.take_value(v, s, B, seat)
+
+    tX_off, tB_off = takes(0.0)
+    tX_on, tB_on = takes(0.3)
+    assert tX_off == pytest.approx(tX_on)   # the target's OWN take value is invariant to its reachability
+    assert tB_on > tB_off                   # but a builder toward it becomes more valuable
+
+
+# ─── a builder is worth more toward a HIGH-point target than a 0-point one ───
+def test_higher_point_target_lifts_builder_more(restore_flags):
+    """A white builder toward a 5pt card (7 white 3 blue) is worth significantly more than toward a
+    0pt card of the SAME cost: the target's points flow into its potential and thus into the credit
+    the builder earns for discounting it. Uses two synthetic same-cost cards (no real Splendor pair
+    has identical cost but different points)."""
+    seat = 0
+    n = E.N_CARDS
+    orig = (E.COST, E.PTS, E.BONUS, E.LEVEL_OF)
+    try:
+        # W = cheap white builder; T_hi = 5pt 7w3b; T_lo = 0pt 7w3b (same cost, different points)
+        E.COST = E.COST + ((1, 1, 0, 0, 0), (7, 3, 0, 0, 0), (7, 3, 0, 0, 0))
+        E.PTS = E.PTS + (0, 5, 0)
+        E.BONUS = E.BONUS + (WHITE, BLACK, BLACK)
+        E.LEVEL_OF = E.LEVEL_OF + (1, 3, 3)
+        W, T_hi, T_lo = n, n + 1, n + 2
+
+        def measure(target):
+            s = _blank_state()
+            s.board = [-1] * 12
+            s.board[0] = W
+            s.board[1] = target
+            v = _val(s)
+            return H3.take_value(v, s, W, seat), v._delta_take(target, seat, WHITE)
+
+        take_hi, dt_hi = measure(T_hi)
+        take_lo, dt_lo = measure(T_lo)
+        # the credit the target gives the builder is far larger for the 5pt card (points -> potential)
+        assert dt_hi > 3.0 * dt_lo
+        # and buying the builder is meaningfully more valuable toward the 5pt target
+        assert take_hi > 1.08 * take_lo
+    finally:
+        E.COST, E.PTS, E.BONUS, E.LEVEL_OF = orig
+
+
+# ─── builders are complementary: a 2nd builder lifts the target's reach AND the 1st builder ──
+def test_second_builder_lifts_reach_and_first_builder(restore_flags):
+    """Adding a second white builder raises the white target's reachability, and -- with reachability
+    on -- that in turn raises the FIRST white builder's engine value: the shared target became more
+    reachable, so discounting it is worth more. (The builders cost non-white, so they don't discount
+    each other; W1's engine value reflects only the shared target T.)"""
+    V3.POT_REACH_W = 0.3
+    seat = 0
+    n = E.N_CARDS
+    orig = (E.COST, E.PTS, E.BONUS, E.LEVEL_OF)
+    try:
+        # T = 5pt 7white+3blue (bonus black); W1 = 1pt white builder (cost 2 blue);
+        # W2 = 0pt white builder (cost 1 blue + 1 green) -- both white sources, neither costs white
+        E.COST = E.COST + ((7, 3, 0, 0, 0), (0, 2, 0, 0, 0), (0, 1, 1, 0, 0))
+        E.PTS = E.PTS + (5, 1, 0)
+        E.BONUS = E.BONUS + (BLACK, WHITE, WHITE)
+        E.LEVEL_OF = E.LEVEL_OF + (3, 1, 1)
+        T, W1, W2 = n, n + 1, n + 2
+
+        def measure(board_cards):
+            s = _blank_state()
+            s.board = [-1] * 12
+            for i, c in enumerate(board_cards):
+                s.board[i] = c
+            v = _val(s)
+            return v._reachability(T, seat), v.engine_value(W1, seat)
+
+        reach_one, eng_one = measure([T, W1])          # one white builder
+        reach_two, eng_two = measure([T, W1, W2])      # add a second white builder
+        assert reach_two > reach_one     # target more reachable with more white builders
+        assert eng_two > eng_one         # and the first builder is worth more (shared target's reach rose)
+    finally:
+        E.COST, E.PTS, E.BONUS, E.LEVEL_OF = orig
