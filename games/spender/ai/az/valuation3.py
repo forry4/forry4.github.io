@@ -98,6 +98,13 @@ ENG_TEMPO_SCALE = 0.3   # scale on (1 + reduces_tempo); swept best of {0.2..0.4}
 ENG_RECURSE_W = 0.0
 NOBLE_CLOSE_FLOOR = 0.3   # TUNED for H3 (was 0.2). noble_progress: a card whose color a noble needs scores at least
                           # this (per such noble) even at zero bonuses -- "relevance" survives distance
+NOBLE_TIME_GATE = True    # discount noble_progress by how plausibly the noble can be completed in the turns
+                          # left AFTER acquiring this card: eff = max(0, turns_remaining - tempo(ci)), then per
+                          # noble scale by the SMOOTH factor  eff / (eff + NOBLE_TURN_W * deficit)  (deficit =
+                          # bonuses still needed). turns_remaining is only an ESTIMATE, so this is a gradual fade
+                          # toward 0 for a far/late noble -- NO hard cliff. So a 0-pt card advancing a noble that
+                          # can't realistically be finished stops looking good. False = legacy (no time awareness).
+NOBLE_TURN_W = 1.0        # turns-per-bonus weight in the noble time discount (higher = fade faster with deficit)
 EFF_REF = 0.45            # board_scarcity: reference points-per-effective-gem. If the board offers an
                           # L2/L3 deal at/above this, nobles are noise (scarcity 0); a poor board
                           # (best deal well below this) -> high scarcity -> go wide for nobles.
@@ -867,7 +874,38 @@ class Valuation:
         return turns_to_afford(self.s, ci, seat)
 
     def noble_progress(self, ci: int, seat: int) -> float:
-        return noble_progress(self.s, ci, seat)
+        """How much ci's +1 bonus advances visible nobles (relevance x closeness, per noble), but
+        -- when NOBLE_TIME_GATE -- smoothly discounted by how plausibly each noble can be completed
+        in the turns left AFTER acquiring this card. eff = turns_remaining - tempo(ci) (the turns you
+        still have once you've spent tempo getting this card, mirroring the engine's max(0, T-tempo)),
+        then per noble factor = eff / (eff + NOBLE_TURN_W * deficit), deficit = bonuses still needed.
+        A far/late noble fades toward 0 -- a smooth fade (turns_remaining is an estimate), no cliff."""
+        if not NOBLE_TIME_GATE:
+            return noble_progress(self.s, ci, seat)
+        s = self.s
+        bcol = E.BONUS[ci]
+        bon = s.bonuses[seat]
+        eff = self.turns_remaining() - self.tempo(ci, seat)  # turns left after acquiring this card
+        if eff < 0.0:
+            eff = 0.0
+        score = 0.0
+        n = 0
+        for slot in range(3):
+            ni = s.nobles[slot]
+            if ni < 0:
+                continue
+            n += 1
+            req = E.NOBLE_REQ[ni]
+            if req[bcol] > bon[bcol]:  # this color still helps the noble
+                total = sum(req)
+                if not total:
+                    continue
+                deficit = sum(req[i] - bon[i] for i in range(5) if req[i] > bon[i])  # bonuses still needed
+                close = 1.0 - deficit / total
+                base = NOBLE_CLOSE_FLOOR + (1.0 - NOBLE_CLOSE_FLOOR) * close
+                time_factor = eff / (eff + NOBLE_TURN_W * deficit)  # smooth fade; no cliff
+                score += base * time_factor
+        return score / n if n else 0.0
 
     def noble_completion_pts(self, ci: int, seat: int) -> int:
         return noble_completion_pts(self.s, ci, seat)

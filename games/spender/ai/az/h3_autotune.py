@@ -47,6 +47,8 @@ KNOBS = {
     "ENG_TEMPO_SCALE":   (V3, [0.2, 0.3, 0.4]),
     "NOBLE_SCALE":       (H3, [2.0, 2.5, 3.0, 3.5, 4.0]),
     "NOBLE_CLOSE_FLOOR": (V3, [0.1, 0.2, 0.3]),
+    "NOBLE_TIME_GATE":   (V3, [False, True]),               # time-discount noble_progress (eff/(eff+w*deficit))
+    "NOBLE_TURN_W":      (V3, [0.5, 1.0, 1.5, 2.0]),         # turns-per-bonus weight in the noble time fade
     "GOLD_BANK_CAP":     (V3, [1, 2, 3]),
     "GOLD_TIEBREAK":     (H3, [0.0, 0.1, 0.2, 0.3]),
     "POT_REACH_W":       (V3, [0.0, 0.05, 0.1, 0.2]),

@@ -789,6 +789,63 @@ A from-scratch greedy heuristic, **served as website variant "H2"**, separate fr
   `Spender.jsx` — the data is still in the WS payload (non-sensitive AI valuations), just not shown to
   non-admins; a backend per-recipient gate was deemed not worth it for this non-sensitive overlay.
 
+### Variant H3 (`ai/az/heuristic3.py` + `valuation3.py`) — turns-remaining engine horizon (DEPLOYED)
+A sandbox fork of H2, **served as website variant "H3"** (a playable opponent + a per-card potential overlay,
+wired in `main.py`). Same 1-ply greedy `choose_action`/`components` contract; it reframes H2's value model around
+a **potential vs take** distinction and a **turns-remaining horizon**. Permanent invariants live in
+`games/spender/tests/test_h3_valuation.py` (9 tests) — keep them green.
+
+**Model** (`components`): `take = (engine_term + point) / (1 + cost)`
+- `cost = W_TEMPO·tempo + W_GEM·gem + W_GOLD·gold` (post-bonus; one currency used everywhere).
+- `point = PTS + NOBLE_SCALE·noble_progress + noble_completion` — **NOT stage-scaled** (full value always; H2's
+  point-staging, `ENG_DECAY`, and the per-card tempo-discount were all REMOVED).
+- `engine_term = W_ENGINE · max(0, turns_remaining − tempo) · engine_value(ci)` — engine value × the turns it
+  will COMPOUND. A card you can't finish before the game ends contributes ~0 engine. This horizon replaces
+  stage/eng_decay (`W_ENGINE` is the engine-vs-points balance knob).
+- `engine_value(ci) = Σ over OTHER cards cj still needing ci's bonus color of _delta_take(cj)` (+ reserved
+  premium + deck-demand term); `_delta_take(cj) = potential(cj) · [1/(1+cost') − 1/(1+cost)]` — the take-value
+  uplift ci's +1 gives cj; the `1/(1+cost)` convexity auto-weights a near-affordable discount (2→1) over a far
+  one (6→5), no extra knob.
+- `potential(cj) = (PTS + POT_ENGINE_W·eng_base) · (1 + POT_REACH_W·reachability)` — worth as a DESTINATION,
+  distinct from take_value (a far high-point card has high potential but ~0 take, which is exactly why its
+  *builders* earn engine value while chasing it now is bad). `eng_base` = the legacy level-0 engine value (cached).
+- `turns_remaining`: estimated future main-turns from `turns_table.json` (a MEASURED `(cards, points, gems) →
+  avg turns-left` table from H3-vs-H2 games; rebuild with `h3_measure_turns.py`), **min over both players** (the
+  leader sets the clock). NN-filled, gems weighted 0.25× a card. Absent file → flat fallback.
+
+**Noble time-gate** (`NOBLE_TIME_GATE=True`, `NOBLE_TURN_W=1.0`) — the one structural fix that paid: a 0-pt card
+advancing a far/late noble used to contribute a flat ~0.5 (no time awareness). Now `noble_progress` is smoothly
+discounted by completability — `× eff/(eff + NOBLE_TURN_W·deficit)`, `eff = max(0, turns_remaining − tempo(ci))`
+(turns left AFTER acquiring the card), `deficit` = bonuses still needed. Smooth fade toward 0, **no hard cliff**
+(turns_remaining is an estimate). **~+0.02 vs H2** (the biggest recent greedy gain; `NOBLE_TURN_W` peaks at 1.0).
+
+**Baked config**: `W_TEMPO=0.1, W_GEM=0.3, W_GOLD=0.4, NOBLE_CLOSE_FLOOR=0.3, POT_ENGINE_W=0.5, W_ENGINE=0.15,
+NOBLE_TIME_GATE on / NOBLE_TURN_W=1.0, POT_REACH_W=0 (OFF), BUILD_FLOOR_W=0 (OFF)`. Strength: **~0.54 vs H2,
+~0.76 vs H** greedy (edges the old stage model; beats the external yardstick H by more than H2 does). To recover
+exact-H2 for A/B: `USE_POTENTIAL_ENGINE=False` + `W_GEM=0.2`.
+
+**Tuning findings — DO NOT relitigate** (validated on disjoint seeds, N≥3000):
+- **The engine balance is a flat RIDGE.** `W_ENGINE` and `POT_ENGINE_W` both scale the engine term (pe sits
+  inside potential → engine_value, which W_ENGINE multiplies), so they trade off — tune W_ENGINE *jointly* with
+  pe, never in isolation. Optimal band `W_ENGINE 0.15–0.20 × pe 0.25–0.5`, all ~0.54; outside (we≤0.1 / ≥0.3,
+  or we=0.2+pe=0.5) is worse. vs-H2 is **flat ~0.54** across the band — no sharp peak.
+- **Reachability (`POT_REACH_W`) doesn't pay** in greedy — win-rate wash-to-negative across the full `we×pe×pr`
+  grid (≥0.4 clearly hurts). The reworked formula (cost-reduction-weighted, affordable-gated, value-per-cost
+  builders) is *correct and unit-tested*, but it's a NET-feature candidate, not a greedy lever. Left OFF.
+- **`BUILD_FLOOR_W` hurts** (over-invests in builders for far targets it never finishes). OFF.
+- **`W_GEM=0.3` (vs H2's 0.2) is coupled to the engine** — neutral with the engine off; only helps with the
+  turns-remaining engine on.
+- **Greedy H3-vs-H2 saturates ~0.54** regardless of potential/reachability weights — same ceiling as H2's
+  weight-tuning. Remaining lever is search/net. The exception that paid was the noble time-gate (structure, not
+  a re-weight) — look for structural fixes, not more weight-tuning.
+
+**Tooling** (offline; all parallel via multiprocessing — pure-Python games, BLAS is NOT a factor): `h3_vs_h2.py`
+(H3-vs-H/H2 arena, `--set`/`--opp`), `h3_eval.py` (named-config A/B), `h3_autotune.py` (coordinate descent,
+screen→disjoint-holdout), `h3_measure_turns.py` (rebuild `turns_table.json`), `h3_sanity.py` (interactive value
+probes), `h3_stage_sweep.py`. **Methodology: a UNIQUE output file per run** (two runs writing the same `>` file
+interleave and corrupt — happened once); confirm gains on DISJOINT seeds; re-measure `turns_table.json` after big
+model changes (it's mildly self-referential). `h3_*.out`/`h3_best.json` are gitignored scratch.
+
 ### Hard-won conclusions — DO NOT relitigate
 These cost many self-play/training cycles to establish:
 - **Eval-weight tuning is saturated.** One gain (0.725 vs original), nothing since. The first run captured it.
