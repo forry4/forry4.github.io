@@ -332,6 +332,20 @@ imports the old arrangement required.
   identity helpers (`site_owner_name`, `grant_admin`, `is_admin_id`, `is_site_owner`),
   and the reconnect-token helpers (`create`/`validate`/`mark_used`). Imports
   `get_db_conn` from `core.db`.
+- **Auth correctness (hard-won, June 2026 — DO NOT regress):**
+  - **`is_admin` is computed the SAME way on every path** — `is_admin_id(conn, id)` (a plain
+    `SELECT 1 FROM admins WHERE user_id=?`) OR a live `SITE_OWNER` username match. `get_user_by_session`
+    previously used a **correlated subquery** `(SELECT 1 FROM admins WHERE user_id=users.id)` that read
+    **NULL on the prod libsql driver** (works on sqlite, so invisible in tests): a refreshed session
+    reported the owner as non-admin while login (via `is_admin_id`) said admin → the admin UI vanished
+    on every reload until re-login. **Never use a correlated subquery here; reuse `is_admin_id`.**
+  - **Usernames are unique, CASE-INSENSITIVELY.** `users.name` has **no UNIQUE column constraint**, so
+    `create_user` checks `WHERE name=? COLLATE NOCASE` before inserting (the old `except
+    sqlite3.IntegrityError` guard never fired — no constraint to violate, and libsql wouldn't raise that
+    type anyway — so duplicate "Forrestm" rows slipped in). `init_core_schema` builds a NOCASE unique
+    index **`idx_users_name_ci`** (dropping the earlier case-sensitive `idx_users_name`), tolerant of
+    pre-existing dups so boot never fails. `authenticate_user` looks up NOCASE too, so login matches
+    registration regardless of case.
 - **Game retention** (`core/db.py`): `cleanup_stale_games(table)` deletes stale rows
   from a games table (`games` / `coc_games` — same shape) by **last activity
   (`updated_at`)**: an **all-guest** game (no player id present in `users`) after **24h**,
@@ -405,6 +419,12 @@ and mounts Castles of Crimson at `/coc` (same defensive try/except as before).
 ### DB persistence
 - `save_game(room_id)` — upserts room to `games` table (called after every state change, outside lock)
 - `load_game_to_memory(room_id)` — called on WS connect if room not in ROOMS; loads from DB
+- **`ai_variant` is persisted** in the saved room state and restored on load. Without it, a vs-AI game
+  reconnected after a redeploy (which wipes in-memory `ROOMS`) lost the room-level variant: the move
+  scheduler fell back to variant **"A"** (wrong bot) and `mk_room_state` dropped `ai_variant` +
+  `ai_card_values` (so the admin value-overlay button disappeared, working only on a fresh game).
+  `load_game_to_memory` has a **back-compat fallback** recovering the variant from the AI player's
+  `"AI (X)"` display name for games saved before the field was persisted.
 
 ### Lock
 `ROOM_LOCK = asyncio.Lock()` — all ROOMS mutations happen under this lock.
@@ -845,6 +865,12 @@ screen→disjoint-holdout), `h3_measure_turns.py` (rebuild `turns_table.json`), 
 probes), `h3_stage_sweep.py`. **Methodology: a UNIQUE output file per run** (two runs writing the same `>` file
 interleave and corrupt — happened once); confirm gains on DISJOINT seeds; re-measure `turns_table.json` after big
 model changes (it's mildly self-referential). `h3_*.out`/`h3_best.json` are gitignored scratch.
+- **Serving + overlay specifics:** `_h3_choose_move` (1-ply `choose_action`) + `_h3_card_values` are wired
+  into `_ai_variant_valid` + `mk_room_state` + the move scheduler (same path as H/H2; `mk_room_state`
+  includes `ai_card_values` only for in-progress H/H2/H3 games). The admin overlay shows H2's T/E/P/C
+  **plus a 5th `Po` (potential)** — gated in `Spender.jsx` by `aiValue.pot != null`, leaving H2's 4-value
+  box unchanged. (Aside: an `az_vs_h2.py` arena measured H2/H3 **beating the deployed AZ net
+  `az_model.npz` ~0.75 @ 300 sims** — the greedy heuristics currently out-play variant Z.)
 
 ### Hard-won conclusions — DO NOT relitigate
 These cost many self-play/training cycles to establish:
