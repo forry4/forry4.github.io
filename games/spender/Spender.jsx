@@ -148,8 +148,6 @@ const css = baseCss + `
 .game-sidebar{display:flex;flex-direction:column;gap:10px}
 @media(max-width:900px){.game-sidebar{order:-1}}
 .panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px}
-.panel-slim{padding:9px 14px}
-.panel-slim .panel-title{margin-bottom:6px}
 .panel-title{font-family:'Cinzel',serif;font-size:.68rem;letter-spacing:.14em;color:var(--gold);margin-bottom:10px;text-transform:uppercase}
 
 /* ─── Bank ──────────────────────────────────────────────────────────────── */
@@ -199,7 +197,7 @@ const css = baseCss + `
 .noble-req-row{display:flex;gap:3px;align-items:center;font-size:.65rem;color:var(--text-dim);font-family:'Cinzel',serif}
 
 /* ─── Action bar ────────────────────────────────────────────────────────── */
-.action-bar{display:flex;gap:8px;align-items:center;flex-wrap:nowrap;padding:6px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-sizing:border-box}
+.action-bar{display:flex;gap:8px;align-items:center;flex-wrap:nowrap;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-sizing:border-box}
 .action-hint{flex:1;font-style:italic;color:var(--text-dim);font-size:.88rem;min-width:0}
 .action-bar-btns{display:flex;gap:8px;align-items:center;flex-shrink:0}
 .action-bar-spacer{height:43px;display:inline-block;width:1px}
@@ -1444,7 +1442,7 @@ export default function SpenderApp() {
 							</div>
 						</div>
 
-						<div className="panel panel-slim">
+						<div className="panel">
 							<div className="panel-title">Gem Bank</div>
 							<div className="bank-gems">
 								{[...GEM_COLORS, "gold"].map(c => {
@@ -1503,7 +1501,7 @@ export default function SpenderApp() {
 							</div>
 						))}
 
-						<div className="panel panel-slim">
+						<div className="panel">
 							<div className="panel-title">Nobles</div>
 							<div className="nobles-row">
 								{(game.nobles || []).map(n => <NobleView key={n.id} noble={n} />)}
