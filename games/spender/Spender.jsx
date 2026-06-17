@@ -327,11 +327,14 @@ function CardView({ card, selected, affordable, disabled, onClick, compact, aiVa
 				))}
 			</div>
 			{aiValue != null && (typeof aiValue === "object" ? (
-				<div className="ai-vals" title="H2 — take / engine / point / cost">
+				<div className="ai-vals" title={aiValue.pot != null
+					? "H3 — take / engine / point / cost / potential"
+					: "H2 — take / engine / point / cost"}>
 					<span><b>T</b>{aiValue.t}</span>
 					<span><b>E</b>{aiValue.e}</span>
 					<span><b>P</b>{aiValue.p}</span>
 					<span><b>C</b>{aiValue.c}</span>
+					{aiValue.pot != null && <span><b>Po</b>{aiValue.pot}</span>}
 				</div>
 			) : (
 				<span className="ai-val" title="AI card value (variant H)">{aiValue}</span>
@@ -1169,7 +1172,7 @@ export default function SpenderApp() {
 							{showAiPicker && (
 								<div className="ai-picker">
 									<span className="ai-picker-label">Choose AI opponent</span>
-									{["A", "B", "C", "C2", "Z", "H", "H2"].map(v => (
+									{["A", "B", "C", "C2", "Z", "H", "H2", "H3"].map(v => (
 										<button key={v} className="btn btn-outline btn-sm"
 											onClick={() => { setShowAiPicker(false); handleCreate(true, v); }}>
 											AI {v}
