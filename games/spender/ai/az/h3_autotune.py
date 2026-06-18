@@ -31,7 +31,7 @@ from . import heuristic as H1  # noqa: E402
 from . import heuristic2 as H2  # noqa: E402
 from . import heuristic3 as H3  # noqa: E402
 from . import valuation3 as V3  # noqa: E402
-from .h3_vs_h2 import play_game  # noqa: E402
+from .h3_vs_h2 import play_game, H2N, H2R  # noqa: E402
 
 # knob registry: name -> (module, candidate values). Only knobs that are LIVE under the
 # H3 model (USE_POTENTIAL_ENGINE on). ENG_DIV/ENG_FLOOR/ENG_TEMPO_SCALE/ENG_DECK_W still
@@ -45,7 +45,7 @@ KNOBS = {
     "ENG_DIV":           (V3, [6.0, 8.0, 10.0, 12.0]),
     "ENG_FLOOR":         (V3, [0.1, 0.2, 0.3, 0.4]),
     "ENG_TEMPO_SCALE":   (V3, [0.2, 0.3, 0.4]),
-    "NOBLE_SCALE":       (H3, [2.0, 2.5, 3.0, 3.5, 4.0]),
+    "NOBLE_SCALE":       (H3, [3.0, 4.0, 5.0, 6.0, 7.0]),    # baseline 5.0 (the +0.0073 noble bump)
     "NOBLE_CLOSE_FLOOR": (V3, [0.1, 0.2, 0.3]),
     "NOBLE_TIME_GATE":   (V3, [False, True]),               # time-discount noble_progress (eff/(eff+w*deficit))
     "NOBLE_TURN_W":      (V3, [0.5, 1.0, 1.5, 2.0]),         # turns-per-bonus weight in the noble time fade
@@ -64,7 +64,7 @@ KNOBS = {
     # NOTE: STAGE_*/ENG_DECAY/ENG_TEMPO_DIV were removed -- superseded by the turns_remaining model.
 }
 
-OPP = {"H2": H2, "H": H1}
+OPP = {"H2": H2, "H": H1, "H2N": H2N, "H2R": H2R}
 
 _DIR = os.path.dirname(__file__)
 LOG_PATH = os.path.join(_DIR, "h3_autotune.log")

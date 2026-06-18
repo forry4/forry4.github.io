@@ -839,10 +839,32 @@ discounted by completability — `× eff/(eff + NOBLE_TURN_W·deficit)`, `eff = 
 (turns left AFTER acquiring the card), `deficit` = bonuses still needed. Smooth fade toward 0, **no hard cliff**
 (turns_remaining is an estimate). **~+0.02 vs H2** (the biggest recent greedy gain; `NOBLE_TURN_W` peaks at 1.0).
 
-**Baked config**: `W_TEMPO=0.1, W_GEM=0.3, W_GOLD=0.4, NOBLE_CLOSE_FLOOR=0.3, POT_ENGINE_W=0.5, W_ENGINE=0.15,
-NOBLE_TIME_GATE on / NOBLE_TURN_W=1.0, POT_REACH_W=0 (OFF), BUILD_FLOOR_W=0 (OFF)`. Strength: **~0.54 vs H2,
-~0.76 vs H** greedy (edges the old stage model; beats the external yardstick H by more than H2 does). To recover
-exact-H2 for A/B: `USE_POTENTIAL_ENGINE=False` + `W_GEM=0.2`.
+**Deferred idea — time-gate the raw card POINTS too (not done; noted on request):** `noble_progress` and the
+engine term are both gated by buy-in-time feasibility (`max(0, T − tempo)`), but the raw `E.PTS[ci]` term in
+`components` is NOT — so late-game `_choose_take` can still collect gems toward a high-point card it can't finish
+before the game ends (the same blind spot the noble gate fixed, applied to a card's own points). The fix would be a
+**clamped step** `min(1, max(0, (T − tempo)/M))` on `E.PTS[ci]` — distinct from the engine's *linear* ramp (points
+are a ONE-TIME grab, so extra spare turns don't multiply them) and from the noble *deficit* fade. NOT double-counting
+the `(1+cost)` denominator (that's time-blind). Likely a NARROW win at best — the engine term already zeroes an
+unfinishable card's engine contribution, so only the points leak remains. A/B it behind a `POINT_TIME_GATE` flag if
+revisited; expect it could be a wash (like the TURNS_FLOOR test was).
+
+**Baked config**: `W_TEMPO=0.1, W_GEM=0.3, W_GOLD=0.4, NOBLE_SCALE=5.0, NOBLE_CLOSE_FLOOR=0.3, POT_ENGINE_W=0.5,
+W_ENGINE=0.15, NOBLE_TIME_GATE on / NOBLE_TURN_W=1.0, POT_REACH_W=0 (OFF), BUILD_FLOOR_W=0 (OFF)`. Strength: **~0.54
+vs H2, ~0.76 vs H** greedy (edges the old stage model; beats the external yardstick H by more than H2 does). To
+recover exact-H2 for A/B: `USE_POTENTIAL_ENGINE=False` + `W_GEM=0.2`.
+
+**Noble-weight campaign (June 2026) — `NOBLE_SCALE` 3.0→5.0 is the only gain, and it's small.** A broad campaign
+(curves on noble closeness/engine distance; game-stage scaling of points/nobles/cost-weights; victory-proximity;
+quadratic/exponent engine-distance reshapes) was run against the **H2 racer family** — `H2R` (rusher, `NOBLE_SCALE
+×0.4`) and `H2N` (noble-heavy, `×2.0`), ported from `feat/az-v4-features` as `_AggrH2` wrappers in `h3_vs_h2.py`
+(kept as **test infra**; H2N dropped from the metric as too weak/circular). Verdict on a **10-seed-base CRN
+confirm** (the single-seed batches inflated badly): `NOBLE_SCALE=5.0` = **+0.0073 avg(H2,H2R)** (won 7–8/10 seeds
+vs each racer), neutral vs H — shipped. **Everything else washed or hurt** on confirm: STAGE-scaling was robustly
+**−0.02**; `NOBLE_CLOSE_EXP` (convex closeness), `VICT_PROX_W`, all engine-distance curves ≤ flat. This re-confirms
+the **static greedy eval is saturated** — re-weighting can't beat ~+1pp; the remaining lever is search/net (see the
+recursion/depth+1 direction noted for "at some point"). Campaign scratch (`h3_camp.py`/`h3_final.py`/`camp_*.out`)
+was removed; the H2N/H2R wrappers + `h3_autotune` plumbing stay.
 
 **Tuning findings — DO NOT relitigate** (validated on disjoint seeds, N≥3000):
 - **The engine balance is a flat RIDGE.** `W_ENGINE` and `POT_ENGINE_W` both scale the engine term (pe sits

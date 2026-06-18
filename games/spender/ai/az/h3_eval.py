@@ -28,13 +28,7 @@ def main():
         AT._POOL = mp.Pool(processes=AT._WORKERS)
 
     base = AT.read_current()
-    # Re-confirm the grid leader (#2: gold 0.4->0.3) + runner-up (#3: gem 0.3->0.4) on a 2nd seed.
-    CONFIGS = [
-        ("baseline 0.1/0.3/0.4", {}),
-        ("#2 gold->0.3",         {"W_GOLD": 0.3}),
-        ("#3 gem->0.4",          {"W_GEM": 0.4}),
-        ("#2+#3 0.1/0.4/0.3",    {"W_GEM": 0.4, "W_GOLD": 0.3}),
-    ]
+    CONFIGS = [("baseline H3 (deployed)", {})]
     print(f"[h3-eval] N={args.n} seeds H2={args.seed_h2} H={args.seed_h}  "
           f"(source W_TEMPO={base['W_TEMPO']} NCF={base['NOBLE_CLOSE_FLOOR']} W_ENGINE={base['W_ENGINE']})",
           flush=True)

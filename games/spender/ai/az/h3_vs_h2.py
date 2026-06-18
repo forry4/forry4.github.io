@@ -30,7 +30,25 @@ from . import heuristic2 as H2
 from . import heuristic3 as H3
 from . import valuation3 as V3
 
-OPPONENTS = {"H": H1, "H2": H2}
+class _AggrH2:
+    """H2 at a noble-aggressiveness multiplier on NOBLE_SCALE -- the H2N/H2R league variants ported
+    from feat/az-v4-features. The multiplier scales ONLY noble_progress (completion +3 is untouched,
+    so both variants stay competent): H2N=2.0 (noble-heavy), H2R=0.4 (rusher, races points)."""
+    def __init__(self, aggr: float):
+        self.aggr = aggr
+
+    def choose_action(self, s, seat=None):
+        saved = H2.NOBLE_SCALE
+        H2.NOBLE_SCALE = saved * self.aggr
+        try:
+            return H2.choose_action(s, seat)
+        finally:
+            H2.NOBLE_SCALE = saved
+
+
+H2N = _AggrH2(2.0)   # noble variant (NOBLE_AGGR_H2N from feat)
+H2R = _AggrH2(0.4)   # rusher variant (NOBLE_AGGR_H2R from feat)
+OPPONENTS = {"H": H1, "H2": H2, "H2N": H2N, "H2R": H2R}
 
 
 def wilson_ci(score: float, n: int, z: float = 1.96) -> tuple[float, float]:

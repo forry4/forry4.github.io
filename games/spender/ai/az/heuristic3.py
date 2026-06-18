@@ -56,7 +56,9 @@ W_SHORTFALL = 0.0  # cost: gems the bank CANNOT supply across ALL needed colors 
                    # ranking pivots to an attainable card. TESTED at 0.2: cuts stalls 14.9%->11.6%
                    # and leans +0.006 win rate (6/8 disjoint seeds positive) but below significance
                    # -- a marginal correctness fix, left OFF (0.0). Flip to ~0.2 to re-enable.
-NOBLE_SCALE = 3.0  # noble-progress contribution, scaled toward a noble's VP
+NOBLE_SCALE = 5.0  # noble-progress contribution, scaled toward a noble's VP. Bumped 3.0->5.0:
+                   # +0.0073 avg(H2,H2R) on a 10-seed-base CRN confirm (won 7-8/10 seeds vs each
+                   # racer), neutral vs H. The static-eval ceiling -- nothing else moved the needle.
 NOBLE_SCARCITY = 0.0  # board-conditional noble boost: noble term *= (1 + NOBLE_SCARCITY*board_scarcity).
                       # Per the strategy model nobles matter MORE when the board lacks efficient
                       # high-point cards to race (go wide for nobles). H2 loses the noble race in its
