@@ -76,7 +76,7 @@ def test_a_tempo_convexity(restore_flags):
         rem = [0] * 5
         rem[WHITE] = n
         _set_remaining(s, seat, X, rem)
-        return H3.take_value(_val(s), s, X, seat)
+        return H3.take_value(_val(s), X, seat)
 
     assert take_need(1) - take_need(2) > take_need(6) - take_need(7)
 
@@ -106,7 +106,7 @@ def test_b_gem_convexity(restore_flags):
         _set_remaining(s, seat, Y, rem)
         v = _val(s)
         assert v.tempo(Y, seat) == ts  # tempo held fixed across the comparison
-        return H3.take_value(v, s, Y, seat)
+        return H3.take_value(v, Y, seat)
 
     # low total gem: steepest at ts, `other` needs 2 -> reduce it to 1
     lo = [0] * 5
@@ -238,7 +238,7 @@ def test_reachability_does_not_affect_own_take(restore_flags):
         s.board[0] = X
         s.board[1] = B
         v = _val(s)
-        return H3.take_value(v, s, X, seat), H3.take_value(v, s, B, seat)
+        return H3.take_value(v, X, seat), H3.take_value(v, B, seat)
 
     tX_off, tB_off = takes(0.0)
     tX_on, tB_on = takes(0.3)
@@ -269,7 +269,7 @@ def test_higher_point_target_lifts_builder_more(restore_flags):
             s.board[0] = W
             s.board[1] = target
             v = _val(s)
-            return H3.take_value(v, s, W, seat), v._delta_take(target, seat, WHITE)
+            return H3.take_value(v, W, seat), v._delta_take(target, seat, WHITE)
 
         take_hi, dt_hi = measure(T_hi)
         take_lo, dt_lo = measure(T_lo)
@@ -431,7 +431,7 @@ def test_g_noble_completion_not_double_counted():
         val, s, X = _noble_state(E.NOBLE_REQ)
         assert val.noble_completion_pts(X, 0) == 3          # completes noble A
         assert val.noble_progress(X, 0) == 0.0              # ...and is NOT also scored as progress
-        _take, _eng, point, _cost = H3.components(val, s, X, 0)
+        _take, _eng, point, _cost = H3.components(val, X, 0)
         assert point == pytest.approx(E.PTS[X] + 3)         # P == own points + completion only
     finally:
         E.NOBLE_REQ, E.NOBLE_PTS = orig

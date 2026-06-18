@@ -375,12 +375,12 @@ def mk_room_state(room_id: str) -> dict[str, Any]:
     if room.get("ai_variant"):
         state["ai_variant"] = room["ai_variant"]
         game = room.get("game")
-        if room["ai_variant"] in ("H", "H2", "H3") and game and game.get("ai_player") \
+        if room["ai_variant"] in ("H", "H2", "H3", "S") and game and game.get("ai_player") \
                 and game.get("phase") != "over":
             try:
                 if room["ai_variant"] == "H2":
                     state["ai_card_values"] = _h2_card_values(game, game["ai_player"])
-                elif room["ai_variant"] == "H3":
+                elif room["ai_variant"] in ("H3", "S"):   # S shares H3's per-card components overlay
                     state["ai_card_values"] = _h3_card_values(game, game["ai_player"])
                 else:
                     state["ai_card_values"] = _v4_card_values(game, game["ai_player"])
@@ -589,7 +589,7 @@ load_az_model()  # loads ai/az_model.npz → variant Z
 def _ai_variant_valid(variant: str) -> bool:
     return (variant in WEIGHT_VARIANTS
             or (variant == "Z" and AZ_EVALUATE is not None)
-            or variant in ("H", "H2", "H3"))  # H/H2/H3 = v4 valuation heuristics (pure code, always available)
+            or variant in ("H", "H2", "H3", "S"))  # H/H2/H3 = greedy heuristics; S = H3-eval + PUCT search (pure code, always available)
 
 
 def _az_choose_move(game: dict, ai_pid: str, time_limit: float = 5.0) -> dict:
@@ -730,7 +730,7 @@ def _h3_card_values(game: dict, ai_pid: str) -> dict:
     val = _azv3.Valuation(s, _azh3.W_TEMPO, _azh3.W_GEM, _azh3.W_GOLD)
 
     def rec(ci: int) -> dict:
-        take, engine, point, cost = _azh3.components(val, s, ci, seat)
+        take, engine, point, cost = _azh3.components(val, ci, seat)
         return {"t": round(take, 2), "e": round(engine, 2), "p": round(point, 2),
                 "c": round(cost, 1), "pot": round(val.potential_value(ci, seat), 1)}
 
@@ -742,6 +742,20 @@ def _h3_card_values(game: dict, ai_pid: str) -> dict:
     for ci in s.reserved[seat]:
         out[_aze.CARD_NAME[ci]] = rec(ci)
     return out
+
+
+def _s_choose_move(game: dict, ai_pid: str) -> dict:
+    """Variant-S move selection: vsearch — v_state.value (a whole-POSITION evaluator built from H3's
+    engine/turns-horizon/noble-time-gate components) used as the LEAF of determinized PUCT search,
+    with an H3 policy prior. Gives the strong static eval LOOKAHEAD (the documented #1 remaining
+    lever); wall-clock budgeted. Same dict-move contract as H3/Z."""
+    from games.spender.ai.az import actions as _aza
+    from games.spender.ai.az import engine as _aze
+    from games.spender.ai.az import vsearch as _azvs
+
+    s = _aze.from_game_dict(game)
+    a = _azvs.choose_action(s, s.turn, time_limit=_azvs.SERVE_TIME)
+    return _aza.action_to_move(s, a)
 
 
 # ─── AI Player ────────────────────────────────────────────────────────────────
@@ -1761,6 +1775,8 @@ async def _schedule_ai_turn(room_id: str) -> None:
         mv = await loop.run_in_executor(None, _h2_choose_move, game_snapshot, ai_pid)
     elif variant == "H3":
         mv = await loop.run_in_executor(None, _h3_choose_move, game_snapshot, ai_pid)
+    elif variant == "S":
+        mv = await loop.run_in_executor(None, _s_choose_move, game_snapshot, ai_pid)
     else:
         ai_weights = WEIGHT_VARIANTS.get(variant, WEIGHTS)
         mv = await loop.run_in_executor(

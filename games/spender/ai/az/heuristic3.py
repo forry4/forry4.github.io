@@ -160,9 +160,21 @@ USE_FINISH_RESERVE = True   # at 8 tokens & exactly 2-of-one-color away, or 9 to
                             # reserve the top board card (free reserve slot + bank gold required)
 
 
-def components(val: V.Valuation, s: E.State, ci: int, seat: int):
+def components(val: V.Valuation, ci: int, seat: int):
     """The take_value pieces for `ci` from `seat`: (take, engine, point, cost).
-    One source of truth for both the policy and the on-card transparency overlay."""
+    One source of truth for both the policy and the on-card transparency overlay.
+    The state is `val.s` (the Valuation owns it) — no separate state arg to pass wrongly.
+
+    Cached per (ci, seat) on the Valuation: the same card is scored repeatedly within a leaf (the H3
+    policy-anchor's `_targets` re-sweep + the `_seat_targets`/buy overlap), so this dedupes the WHOLE
+    components computation. Guard-safe: a cache hit still calls `estimated_turns_remaining()` (cheap,
+    `_turns_cache`-backed) so the freshness assert fires on EVERY components call, hit or miss."""
+    cache = val._comp_cache
+    ck = (ci, seat)
+    hit = cache.get(ck)
+    if hit is not None:
+        val.estimated_turns_remaining()   # fire the freshness guard (+ catch stale reuse) on cache hits
+        return hit
     cost = (W_TEMPO * val.tempo(ci, seat)
             + W_GEM * val.gem_cost(ci, seat)
             + W_GOLD * val.gold_cost(ci, seat))
@@ -180,13 +192,15 @@ def components(val: V.Valuation, s: E.State, ci: int, seat: int):
         noble_scale *= 1.0 + NOBLE_SCARCITY * val.board_scarcity(seat)
     point = E.PTS[ci] + noble_scale * val.noble_progress(ci, seat) + val.noble_completion_pts(ci, seat)
     take = (engine + point) / (1.0 + cost)
-    return take, engine, point, cost
+    result = (take, engine, point, cost)
+    cache[ck] = result
+    return result
 
 
-def take_value(val: V.Valuation, s: E.State, ci: int, seat: int) -> float:
+def take_value(val: V.Valuation, ci: int, seat: int) -> float:
     """Single scalar worth of card `ci` to `seat`: benefit (engine + distance-
     discounted points) over (1 + total cost). See the module docstring."""
-    return components(val, s, ci, seat)[0]
+    return components(val, ci, seat)[0]
 
 
 def _take_colors(a: int):
@@ -308,9 +322,9 @@ def _targets(val, s, seat):
     for slot in range(12):
         ci = s.board[slot]
         if ci >= 0:
-            out.append((take_value(val, s, ci, seat), ci, slot, "board"))
+            out.append((take_value(val, ci, seat), ci, slot, "board"))
     for ri, ci in enumerate(s.reserved[seat]):
-        out.append((take_value(val, s, ci, seat), ci, ri, "resv"))
+        out.append((take_value(val, ci, seat), ci, ri, "resv"))
     out.sort(reverse=True, key=lambda t: t[0])
     return out
 
@@ -433,7 +447,7 @@ def _opp_top_board_ci(s, val, opp):
     for slot in range(12):
         ci = s.board[slot]
         if ci >= 0:
-            v = take_value(val, s, ci, opp)
+            v = take_value(val, ci, opp)
             if v > best:
                 best, bc = v, ci
     return bc
@@ -485,8 +499,13 @@ def _finish_reserve(s, seat, val, targets, legal_set):
     return None
 
 
-def choose_action(s: E.State, seat: int | None = None) -> int:
-    """Return a legal engine action index for `seat` (defaults to side to move)."""
+def choose_action(s: E.State, seat: int | None = None, *, val: V.Valuation | None = None) -> int:
+    """Return a legal engine action index for `seat` (defaults to side to move).
+
+    `val`: an optional pre-built Valuation on `s` to REUSE — variant S's search passes the leaf's
+    own val, which avoids a duplicate build AND warms the take_value caches (so the anchor sweep is
+    mostly cache hits). It MUST be a Valuation of `s` with H3's W_TEMPO/W_GEM/W_GOLD weights, so the
+    result is identical to building it here; `None` builds fresh (every other caller's behavior)."""
     if seat is None:
         seat = s.turn
     legal = E.legal_actions(s)
@@ -494,7 +513,8 @@ def choose_action(s: E.State, seat: int | None = None) -> int:
         return E.A_PASS
     legal_set = set(legal)
 
-    val = V.Valuation(s, W_TEMPO, W_GEM, W_GOLD)  # weights feed the H3 potential/engine model
+    if val is None:
+        val = V.Valuation(s, W_TEMPO, W_GEM, W_GOLD)  # weights feed the H3 potential/engine model
 
     if s.phase == E.DISCARD:
         return _choose_discard(s, seat, legal, _targets(val, s, seat))
@@ -511,11 +531,11 @@ def choose_action(s: E.State, seat: int | None = None) -> int:
         ci = s.board[slot]
         a = E.A_BUY_BOARD + slot
         if ci >= 0 and a in legal_set:
-            buys.append((take_value(val, s, ci, seat), a, ci))
+            buys.append((take_value(val, ci, seat), a, ci))
     for ri, ci in enumerate(s.reserved[seat]):
         a = E.A_BUY_RESV + ri
         if a in legal_set:
-            buys.append((take_value(val, s, ci, seat), a, ci))
+            buys.append((take_value(val, ci, seat), a, ci))
     buys.sort(reverse=True,
               key=lambda b: b[0] - GOLD_TIEBREAK * V.gold_needed(s, b[2], seat))
 

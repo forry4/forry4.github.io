@@ -41,7 +41,7 @@ def _validate_formula():
     bon[WHITE] = max(0, E.COST[X][WHITE] - need)
     s.bonuses = [bon, [0] * 5]
     val = V3.Valuation(s, H3.W_TEMPO, H3.W_GEM, H3.W_GOLD)
-    take, eng, pt, cost = H3.components(val, s, X, seat)
+    take, eng, pt, cost = H3.components(val, X, seat)
     T = val.estimated_turns_remaining()
     tempo = val.tempo(X, seat)
     raw_eng = val.engine_value(X, seat)   # components returns the POST-multiplier engine; pass raw here
@@ -101,7 +101,7 @@ def check_c():
                 s.board[1 + i] = whites[i]
             val = V3.Valuation(s, H3.W_TEMPO, H3.W_GEM, H3.W_GOLD)
             pot = val.potential_value(X, seat)
-            tk = H3.take_value(val, s, X, seat)
+            tk = H3.take_value(val, X, seat)
             row.append((k, pot, tk))
         desc = ", ".join(f"k={k}:pot={p:.3f},take={t:.3f}" for k, p, t in row)
         rising = row[-1][1] > row[0][1] + 1e-9

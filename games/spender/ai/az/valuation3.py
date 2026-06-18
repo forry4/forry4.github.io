@@ -492,11 +492,17 @@ class Valuation:
 
     __slots__ = ("s", "deck_color_demand", "_scarcity_cache", "_eng_base_cache",
                  "w_tempo", "w_gem", "w_gold", "_take0_cache", "_pot_cache", "_fp_cache",
-                 "_turns_cache")
+                 "_turns_cache", "_build_fp", "_dt_cache", "_comp_cache")
 
     def __init__(self, s: E.State, w_tempo: float = 0.5, w_gem: float = 0.2,
                  w_gold: float = 0.4):
         self.s = s
+        # Freshness fingerprint: a Valuation caches state-derived aggregates (deck_color_demand,
+        # turns, engine, scarcity), so reusing it after its state mutates returns silently-stale
+        # numbers. (ply, phase, turn) change on any turn-ending / phase-transitioning apply; we
+        # assert it in estimated_turns_remaining -- the one method every scoring path hits -- so a
+        # stale reuse fails LOUDLY. Build a fresh Valuation per state; never apply() then re-query it.
+        self._build_fp = (s.ply, s.phase, s.turn)
         self._scarcity_cache = {}
         self._eng_base_cache = {}
         # take_value cost weights -- ONLY used by the H3 potential/engine model (so it
@@ -508,6 +514,8 @@ class Valuation:
         self.w_gold = w_gold
         self._take0_cache = {}
         self._pot_cache = {}
+        self._dt_cache = {}   # (ci, seat, bcol) -> _delta_take (dedupes same-color discounters / repeats)
+        self._comp_cache = {}  # (ci, seat) -> heuristic3.components tuple (dedupes the anchor's board re-sweep)
         self._fp_cache = {}   # seat -> {card_id: converged engine value} (ENG_FIXEDPOINT path)
         self._turns_cache = None   # estimated game turns_remaining (state-level, cached)
         # Permanent-bonus future value: share of remaining (undealt) deck cost
@@ -528,7 +536,16 @@ class Valuation:
         the typical-game table: min over BOTH players of lookup(their cards, points) -- the game ends
         when the leader finishes, so the more-advanced player sets the clock. Cached per state.
         FLOORED at 1.0: you always have at least the current turn, and the final-turn winning logic
-        already handles immediate points -- so engine/noble building never assume < 1 turn left."""
+        already handles immediate points -- so engine/noble building never assume < 1 turn left.
+
+        Single freshness chokepoint: every scoring path hits this method (components always reads
+        ETR for compound_turns; v_state.engine_stock/noble_stand call it directly), so one inlined
+        assert here catches a Valuation reused after its state mutated -- the lookahead footgun
+        `val = Valuation(s); E.apply(s, a); val.<query>()`. Inlined so `python -O` strips it whole;
+        the (ply, phase, turn) fingerprint changes on any turn-ending / phase-transitioning apply."""
+        assert (self.s.ply, self.s.phase, self.s.turn) == self._build_fp, (
+            f"stale Valuation reused after state mutation (built at {self._build_fp}). "
+            "Build a fresh Valuation per state; never apply() then re-query the same one.")
         if self._turns_cache is not None:
             return self._turns_cache
         s = self.s
@@ -546,7 +563,8 @@ class Valuation:
         color of Delta-take(cj) (+ reserved at a premium + the deck-demand term) -- the
         take-value uplift ci's bonus gives each cj, already weighted by cj's POTENTIAL and
         its nearness-to-affordable (the 1/(1+cost) convexity inside _delta_take). No extra
-        importance multiplier here: _delta_take carries both, so there is no double count."""
+        importance multiplier here: _delta_take carries both, so there is no double count.
+        (Freshness is asserted in estimated_turns_remaining, which every scoring path also hits.)"""
         if not USE_POTENTIAL_ENGINE:
             return self._engine_value_legacy(ci, seat, _recurse)
         if ENG_FIXEDPOINT:                              # deep recursion: solve the damped fixed point
@@ -640,21 +658,37 @@ class Valuation:
         cost = E.COST[ci]
         bon = s.bonuses[seat]
         tok = s.tokens[seat]
-
-        def b(c):
-            return bon[c] + (1 if c == extra_bcol else 0)
-
-        gem = sum(cost[c] - b(c) for c in range(5) if cost[c] > b(c))   # sticker price (tokens NOT subtracted)
-        d = [cost[c] - b(c) - tok[c] for c in range(5)]                 # remaining after bonuses + held tokens
-        d = [x if x > 0 else 0 for x in d]
-        steepest = max(d)
+        # Hot path (profile #1): one hand-rolled loop, inlining the per-color effective bonus and
+        # avoiding the `b(c)` closure + generator expressions. Behavior-identical to the old
+        # comprehension form -- gem = sum of post-bonus sticker; the steepest post-token remaining
+        # need sets tempo (+1 iff the remainder is exactly 1-1-1-1, i.e. four needs all == 1); gold
+        # is the bottleneck color's need beyond what the bank can supply. Ties for `color` go to the
+        # lowest index, matching max(range(5), key=d.__getitem__).
+        gem = 0
+        steepest = 0
+        color = 0
+        nonzero = 0
+        ones = 0
+        for c in range(5):
+            bc = bon[c] + (1 if c == extra_bcol else 0)
+            sticker = cost[c] - bc
+            if sticker > 0:
+                gem += sticker
+            need = sticker - tok[c]
+            if need > 0:
+                nonzero += 1
+                if need == 1:
+                    ones += 1
+                if need > steepest:
+                    steepest = need
+                    color = c
         if steepest <= 0:
             tempo = gold = 0
         else:
-            nz = sorted(x for x in d if x > 0)
-            tempo = steepest + (1 if nz == [1, 1, 1, 1] else 0)
-            color = max(range(5), key=d.__getitem__)
-            gold = max(0, steepest - min(GOLD_BANK_CAP, s.bank[color]))
+            tempo = steepest + (1 if nonzero == 4 and ones == 4 else 0)
+            gold = steepest - min(GOLD_BANK_CAP, s.bank[color])
+            if gold < 0:
+                gold = 0
         return self.w_tempo * tempo + self.w_gem * gem + self.w_gold * gold
 
     def take0(self, ci: int, seat: int) -> float:
@@ -740,6 +774,10 @@ class Valuation:
         reachability -- by ~30x; the steepness-scaled floor lets a far card STEEP IN bcol still credit
         its builders, while leaving near cards (convexity > floor) and spread cards (low need_bcol/total)
         unchanged."""
+        key = (ci, seat, bcol)
+        cached = self._dt_cache.get(key)
+        if cached is not None:                  # dedupes same-color discounters / repeated targets
+            return cached
         c0 = self._cost_scalar(ci, seat)
         c1 = self._cost_scalar(ci, seat, extra_bcol=bcol)
         gap = 1.0 / (1.0 + c1) - 1.0 / (1.0 + c0)
@@ -755,7 +793,9 @@ class Valuation:
                 floor = BUILD_FLOOR_W * (need_b / total)
                 if floor > gap:
                     gap = floor
-        return self.potential_value(ci, seat) * gap
+        result = self.potential_value(ci, seat) * gap
+        self._dt_cache[key] = result
+        return result
 
     # ─── H3 deep recursion: damped fixed-point engine (ENG_FIXEDPOINT) ───────────
     def _solve_engine_fixedpoint(self, seat: int) -> dict:

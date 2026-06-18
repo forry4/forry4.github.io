@@ -900,12 +900,80 @@ model changes (it's mildly self-referential). `h3_*.out`/`h3_best.json` are giti
   box unchanged. (Aside: an `az_vs_h2.py` arena measured H2/H3 **beating the deployed AZ net
   `az_model.npz` ~0.75 @ 300 sims** — the greedy heuristics currently out-play variant Z.)
 
+### Variant S (`ai/az/v_state.py` + `vsearch.py`) — V(state) whole-position eval + determinized PUCT (STRONGEST; June 2026)
+The first variant to pair the strong H-family judgment with **real search** (the documented #1 remaining
+lever). **Strongest variant yet:** panel avg **0.758** — vs greedy **H3 0.733**, H2 0.729, H2N 0.808, H2R
+0.762 (N=120, sims=160) — beating greedy H3, which itself beats the deployed AZ net Z ~0.75. Served as
+website variant **"S"**.
+- **`v_state.py` — the position evaluator (the new piece).** The H-family scores ACTIONS (`take_value` of
+  acquiring a card); `v_state.value(s, seat)` scores a whole POSITION:
+  `V = tanh((STAND(me) − STAND(opp)) / SCALE)` in [−1,1]. `STAND(seat)` = weighted sum of five terms, each
+  REUSING H3 primitives: realized points (+ convex near-win kicker); **engine_stock** (held bonuses' forward
+  value, deck-demand-weighted × turns-remaining horizon); **progress** (top-k `take_value` of reachable
+  targets); **noble_stand** (closest completable noble, time-gated); **econ** (useful gold − hoard penalty,
+  aimed at the AZ-net over-reserve weakness). Scoring the opponent with the IDENTICAL function and
+  subtracting makes **denial fall out of the search backup for free** (no `contested_weight` knob — the
+  structural cure for the self-play denial blind spot). Opp blind reserves are an expected CONSTANT in static
+  V (mirrors `features.encode`), concretized by determinization inside search. Public `value`/`components`
+  build the Valuation; internal helpers read `val.s` (one source of truth).
+- **`vsearch.py` — determinized PUCT, V leaf, H3 policy prior.** Reuses `az/mcts.Search` UNCHANGED for the
+  hard parts (ISMCTS determinization of hidden info; correct non-alternating-turn backups) via a minimal
+  `leaf_state=True` mode (hands the leaf State to the evaluator instead of `features.encode`). Leaf VALUE =
+  `v_state.value_with` (NOT a rollout). Policy PRIOR = softmax over H3 per-action scores (buys/reserves by
+  `take_value`, takes by the NORMALIZED need-vector) + an **H3-greedy-pick anchor** (`H3_PICK_W`). Serving
+  uses a wall-clock budget (`SERVE_TIME=4.5s`); offline A/B uses fixed `sims`.
+- **Serving:** `_s_choose_move` in `main.py` (mirrors `_h3_choose_move`/`_az_choose_move`) wired into
+  `_ai_variant_valid` ("S") + `_schedule_ai_turn` + `mk_room_state` (reuses the H3 `_h3_card_values` overlay);
+  `Spender.jsx` lobby picker includes "S".
+- **DO NOT relitigate (findings):**
+  - **Static value-leaf ≫ rollout leaf** (`h3l_probe.py`: static 0.58 panel vs rollout **0.28**, ~10× slower).
+    Confirms "value-leaf beats rollout" — V is the judge, never a playout.
+  - **Single-sample determinization is noisy** (the crude `h3_lookahead.py` 1-ply); PUCT AVERAGING over many
+    determinized sims is the fix.
+  - **The policy prior MUST be scale-normalized.** First cut used the raw need-vector (~5–45) for takes vs
+    `take_value` (~1–3) for buys → softmax put ~all mass on taking gems → the bot bought nothing, lost
+    **0/16**. Normalizing the take score + the H3-pick anchor → 0.69+ instantly (same class as the AZ
+    buy-nothing collapse).
+  - **Search is the lever, empirically:** greedy H3 ≈0.5 vs panel → V+search **0.73**. The static eval alone
+    saturates ~0.65 (the plateau); the gain is from SEARCH.
+- **Hardening — DO NOT regress (`valuation3`):** `Valuation` captures a `(ply, phase, turn)` fingerprint at
+  construction; a single inlined `assert` in `estimated_turns_remaining` (the one method every scoring path
+  hits; `-O`-strippable) catches a Valuation reused after its state mutated — the lookahead/distillation
+  footgun `val = Valuation(s); apply(s, a); val.<query>()` (silently mixes post-apply live state with
+  pre-apply caches). The vestigial `s` param was DROPPED from `heuristic3.components`/`take_value` + all
+  callers (never used; the state is `val.s`); `v_state` helpers read `val.s`.
+- **Perf (behavior-preserving; profile: ~84% of search time is the V leaf):** `_cost_scalar` rewritten as one
+  inlined loop (no `b(c)` closure / genexprs) = **2.75× less work**; `_delta_take` memoized per-Valuation
+  (`_dt_cache`, ~**78% hit**) = 4.5× fewer `_cost_scalar` calls; `heuristic3.choose_action` accepts an
+  optional `val=` and the H3-prior anchor in `vsearch` passes the leaf's Valuation (no 2nd build — 2/sim →
+  1/sim — and the anchor's `take_value` sweep hits the warm cache: `_cost_scalar` 298K → 200K, a modest
+  ~5–7% on top). Net ~**2–2.6× more sims/move** in timed serving; offline fixed-sims play is BYTE-IDENTICAL
+  (exact-value tests in `test_h3_valuation.py` + `test_vsearch.py` gate it). The fingerprint catches
+  turn-ending AND phase-transition mutations. **Profiling note:** measure throughput on a QUIET box —
+  `vsearch_profile.py`'s clean sims/s is corrupted by a busy autotuner; the contention-independent truth is
+  the cProfile call counts (builds/sim, `_cost_scalar` calls).
+- **Tooling** (offline, parallel): `vsearch_camp.py` (panel A/B, CRN, Wilson CIs), `vsearch_autotune.py`
+  (coordinate descent, **panel-MEAN objective over {H3,H2,H2N,H2R}** + a `--min-opp` floor so a gain can't
+  collapse one matchup), `v_state_eval.py` (sign(V) win-prediction discrimination vs the ~0.65 plateau),
+  `vsearch_profile.py` (clean wall-clock + cProfile), `h3l_probe.py` (the static-vs-rollout probe). Tests:
+  `games/spender/tests/test_vsearch.py`.
+- **The next ceiling — distill V+search into a numpy value net (Path C), and its TENSION.** A numpy net leaf
+  (reuse `net.py`/`export.py`/`infer_np.py` + the 305-feature encoder) is ~100× cheaper → 10–50× more sims →
+  deeper search. BUT V's strength is `engine_value` — the cross-card term the docs flag as "the one an MLP
+  cannot assemble from a flat vector" (why Z plateaued / lost to H3). Cheap raw features → net caps ~0.65
+  (maybe no better than Z); precompute `engine_value` as a feature → costs as much as V (no speedup). So it's
+  a **measure-gated bet** that could hit the same features wall that left Z behind — prototype the cheapest
+  distillation (V → current 305 features) and arena-gate vs the panel BEFORE any big investment. The Python
+  micro-opts above are the banked, safe depth.
+- **Open:** human playtest (verify the `econ`-term over-reserve fix); deploy (`-heuristics` → main);
+  `vsearch_autotune` panel run in progress.
+
 ### Hard-won conclusions — DO NOT relitigate
 These cost many self-play/training cycles to establish:
 - **Eval-weight tuning is saturated.** One gain (0.725 vs original), nothing since. The first run captured it.
 - **Evaluation quality is NOT the bottleneck.** Static-eval accuracy plateaus ~0.65 *regardless of model class or features*: an **MLP** (more capacity) and **Stage 1c richer features** (per-colour bonuses/tokens, reachability/threat) both gave the same ~0.64–0.66 and were reverted. The missing information (future deck draws, deep lines) isn't in any static snapshot — it needs **lookahead**. **The remaining lever is SEARCH, not evaluation.**
 - **Self-play is blind to blocking/contested tactics** — its opponent never threatens coherently, so denial never pays off and those features (`contested_weight`, `block_urgency_gate`) train toward off. A scripted `strategist.py` opponent is competent (~greedy strength) but **MCTS saturates it 12–0**, so it can't measure improvements above current strength either. **The only reliable judge of the human-exploitable weakness is a human playtest.**
-- **Next lever = search**: (1) audit `_get_all_moves` pruning (winning lines may never be enumerated), (2) tree reuse between moves + UCB sweep, (3) AlphaZero-style policy head + real exploration (the eventual cure for tactics, biggest build).
+- **Next lever = search**: (1) audit `_get_all_moves` pruning (winning lines may never be enumerated), (2) tree reuse between moves + UCB sweep, (3) AlphaZero-style policy head + real exploration (the eventual cure for tactics, biggest build). **UPDATE (June 2026): the search lever is realized by variant S** — `v_state` V(state) + determinized PUCT on the H3 eval — at **0.733 vs greedy H3 / 0.758 panel**, confirming search (not eval) was the bottleneck. See "Variant S" above.
 
 ### Move handler error hierarchy
 ```python

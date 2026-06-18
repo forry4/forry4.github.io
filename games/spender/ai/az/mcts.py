@@ -65,7 +65,8 @@ class Search:
 
     def __init__(self, root: E.State, rng: random.Random, *,
                  c_puct: float = 2.0, dirichlet_alpha: float = 0.5,
-                 dirichlet_eps: float = 0.25, add_noise: bool = True):
+                 dirichlet_eps: float = 0.25, add_noise: bool = True,
+                 leaf_state: bool = False):
         if root.phase == E.OVER:
             raise ValueError("cannot search a terminal state")
         self.root_state = root
@@ -74,6 +75,10 @@ class Search:
         self.dir_alpha = dirichlet_alpha
         self.dir_eps = dirichlet_eps
         self.add_noise = add_noise
+        # leaf_state: hand the leaf STATE to the evaluator instead of F.encode(s) — for a heuristic
+        # value leaf (v_state) that reads the State directly (no net-feature packing). The driver
+        # must use the incremental leaf_batch()/apply_evals() API, NOT run() (which numpy-batches).
+        self.leaf_state = leaf_state
         self.root = Node(root.turn)
         self._pending: tuple[list, Node, E.State] | None = None
 
@@ -104,12 +109,12 @@ class Search:
                 node.children[a] = child
             node = child
 
-        feats = F.encode(s)
+        leaf = s if self.leaf_state else F.encode(s)
         mask = np.zeros(E.N_ACTIONS, dtype=bool)
         for a in E.legal_actions(s):
             mask[a] = True
         self._pending = (path, node, s)
-        return feats, mask
+        return leaf, mask
 
     def apply_evals(self, probs: np.ndarray, value: float) -> None:
         path, node, s = self._pending
