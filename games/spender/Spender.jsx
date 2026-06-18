@@ -21,6 +21,14 @@ const GAMES = [
 const GEM_COLORS = ["white", "blue", "green", "red", "black"];
 const GEM_LABELS = { white: "Diamond", blue: "Sapphire", green: "Emerald", red: "Ruby", black: "Onyx", gold: "Gold" };
 const GEM_HEX = { white: "#ddd4be", blue: "#4257ff", green: "#3f9c2e", red: "#dc4040", black: "#15151a", gold: "#f5c842" };
+// Frontend-only display names for the AI variants (wire codes stay H2/H3/S).
+const AI_PERSONAS = { H2: "Henry", H3: "Herald", S: "Steve" };
+const AI_TIERS = { H2: "easy", H3: "medium", S: "hard" };
+const aiPersona = (v) => AI_PERSONAS[v] || `AI ${v}`;         // variant code -> persona name (retired codes -> "AI <code>")
+const displayName = (name) => {                                // backend "AI (H2)" -> "Henry"; everything else unchanged
+	const m = typeof name === "string" && name.match(/^AI \((.+)\)$/);
+	return m ? aiPersona(m[1]) : name;
+};
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 function uid() { return Math.random().toString(36).slice(2, 10); }
@@ -729,7 +737,7 @@ export default function SpenderApp() {
 	// ── Move log helpers ──────────────────────────────────────────────────────
 	function formatLogMove(mv) {
 		const isMe = mv.pid === myId;
-		const name = isMe ? "You" : (roomData?.players?.[mv.pid] || mv.pid.slice(0, 6));
+		const name = isMe ? "You" : displayName(roomData?.players?.[mv.pid] || mv.pid.slice(0, 6));
 		if (mv.type === "take_gems") {
 			if (!mv.colors?.length) return { name, action: "passed" };
 			const freq = {};
@@ -972,7 +980,7 @@ export default function SpenderApp() {
 	function renderPlayerPanel(pid) {
 		const p = game?.players?.[pid];
 		if (!p) return null;
-		const name = roomData?.players?.[pid] || pid.slice(0, 6);
+		const name = displayName(roomData?.players?.[pid] || pid.slice(0, 6));
 		const bonuses = bonusesFrom(p.purchased);
 		const score = totalPoints(p.purchased, p.nobles);
 		const isMe = pid === myId;
@@ -1017,7 +1025,7 @@ export default function SpenderApp() {
 	}
 
 	function getHint() {
-		if (!myTurn) return `Waiting for ${roomData?.players?.[game?.turn] || "opponent"}…`;
+		if (!myTurn) return `Waiting for ${displayName(roomData?.players?.[game?.turn] || "opponent")}…`;
 		const slotsFull = (me?.reserved?.length || 0) >= 3;
 		if (reserveArmed) return "Reserve armed — click a card or deck to reserve it (or the gold coin to cancel)";
 		if (selectedCard?.source === "deck")
@@ -1195,7 +1203,7 @@ export default function SpenderApp() {
 									{["H2", "H3", "S"].map(v => (
 										<button key={v} className="btn btn-outline btn-sm"
 											onClick={() => { setShowAiPicker(false); handleCreate(true, v); }}>
-											AI {v}
+											{aiPersona(v)} ({AI_TIERS[v]})
 										</button>
 									))}
 								</div>
@@ -1244,10 +1252,10 @@ export default function SpenderApp() {
 									<div key={g.id} className="game-card">
 										<div className="game-card-info">
 											<div className="game-card-title">
-												{g.you_are_p1 ? `${g.player1_name} (you)` : g.player1_name}
+												{g.you_are_p1 ? `${displayName(g.player1_name)} (you)` : displayName(g.player1_name)}
 												{" vs "}
 												{g.player2_name
-													? (g.you_are_p1 ? g.player2_name : `${g.player2_name} (you)`)
+													? (g.you_are_p1 ? displayName(g.player2_name) : `${displayName(g.player2_name)} (you)`)
 													: "waiting for opponent…"}
 											</div>
 											<div className="game-card-meta">
@@ -1357,7 +1365,7 @@ export default function SpenderApp() {
 	if (screen === "game" && game?.phase === "over" && !reviewing) {
 		const winners = Array.isArray(game.winner) ? game.winner : [game.winner];
 		const isTie = winners.length > 1;
-		const winnerNames = winners.map(w => roomData?.players?.[w] || w).join(" & ");
+		const winnerNames = winners.map(w => displayName(roomData?.players?.[w] || w)).join(" & ");
 		return (
 			<>
 				<style>{css}</style>
@@ -1368,7 +1376,7 @@ export default function SpenderApp() {
 						<div className="final-scores">
 							{(game.order || []).map(pid => {
 								const score = totalPoints(game.players?.[pid]?.purchased || [], game.players?.[pid]?.nobles || []);
-								const name = roomData?.players?.[pid] || pid.slice(0, 6);
+								const name = displayName(roomData?.players?.[pid] || pid.slice(0, 6));
 								const isWinner = winners.includes(pid);
 								return (
 									<div key={pid} className={`score-row${isWinner ? " winner" : ""}`}>
@@ -1416,10 +1424,10 @@ export default function SpenderApp() {
 
 						<div className="action-bar">
 							<span className={`turn-badge ${game.phase === "over" ? "theirs" : myTurn ? "mine" : "theirs"}`}>
-								{game.phase === "over" ? "Game Over" : myTurn ? "Your Turn" : `${roomData?.players?.[game.turn]}'s Turn`}
+								{game.phase === "over" ? "Game Over" : myTurn ? "Your Turn" : `${displayName(roomData?.players?.[game.turn])}'s Turn`}
 							</span>
 							{roomData?.ai_variant && (
-								<span className="ai-variant-badge">AI {roomData.ai_variant}</span>
+								<span className="ai-variant-badge">{aiPersona(roomData.ai_variant)}</span>
 							)}
 							{authUser?.is_admin && roomData?.ai_variant && roomData?.ai_card_values && (
 								<button className="btn btn-ghost btn-sm" title="Admin: show/hide the AI's per-card value overlay"
@@ -1533,7 +1541,7 @@ export default function SpenderApp() {
 								{game.phase === "over" && (game.order || []).flatMap(pid =>
 									(game.players?.[pid]?.nobles || []).map(n => (
 										<NobleView key={n.id} noble={n}
-											claimedBy={(roomData?.players?.[pid] || pid.slice(0, 6)) + (pid === myId ? " (you)" : "")} />
+											claimedBy={displayName(roomData?.players?.[pid] || pid.slice(0, 6)) + (pid === myId ? " (you)" : "")} />
 									))
 								)}
 							</div>
