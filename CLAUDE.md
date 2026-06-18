@@ -875,6 +875,12 @@ was removed; the H2N/H2R wrappers + `h3_autotune` plumbing stay.
   grid (≥0.4 clearly hurts). The reworked formula (cost-reduction-weighted, affordable-gated, value-per-cost
   builders) is *correct and unit-tested*, but it's a NET-feature candidate, not a greedy lever. Left OFF.
 - **`BUILD_FLOOR_W` hurts** (over-invests in builders for far targets it never finishes). OFF.
+- **Sharpening the take denominator (`take = num/(C0+cost)`, C0<1) is the strongest REJECT measured.** Tested
+  C0 = 0.7 / 0.5 / 0.3 to "make cost matter more" (motivated by an expensive L2 1-pointer edging a cheaper L1
+  on turn 1): cratered **−0.025 / −0.060 / −0.122 avg(H2,H2R), 0/10 seeds, monotonic**, also negative vs H. The
+  `+1` constant is **load-bearing** — making cost bite harder makes H3 too cheap-greedy and it under-builds toward
+  point/engine cards. The take *numerator* should win those ties; a near-tie favoring the point-bearing card is
+  correct, not a bug. (Confirms again: cost-side reshapes don't pay; the static greedy eval is saturated.)
 - **`W_GEM=0.3` (vs H2's 0.2) is coupled to the engine** — neutral with the engine off; only helps with the
   turns-remaining engine on.
 - **Greedy H3-vs-H2 saturates ~0.54** regardless of potential/reachability weights — same ceiling as H2's

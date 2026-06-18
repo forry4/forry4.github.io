@@ -62,6 +62,8 @@ KNOBS = {
     # turns_remaining engine model: the engine-vs-points balance lever (engine is now turns-scaled)
     "W_ENGINE":          (H3, [0.02, 0.05, 0.1, 0.15, 0.25, 0.4]),
     # NOTE: STAGE_*/ENG_DECAY/ENG_TEMPO_DIV were removed -- superseded by the turns_remaining model.
+    # COST_DENOM_C0 (take=num/(C0+cost), <1 sharpens cost) was tested & REJECTED -- cratered
+    # -0.025..-0.12 (0/10 seeds, monotonic) vs H2/H2R/H. The +1 constant is load-bearing.
 }
 
 OPP = {"H2": H2, "H": H1, "H2N": H2N, "H2R": H2R}
