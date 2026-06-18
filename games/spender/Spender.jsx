@@ -188,6 +188,12 @@ const css = baseCss + `
 .deck-pile.disabled{cursor:not-allowed;opacity:.5}
 .deck-remaining{font-size:1.3rem;font-weight:700;color:var(--text);font-family:'Cinzel',serif}
 .card{width:88px;min-height:120px;border-radius:var(--radius);background:var(--surface2);border:1px solid var(--border);padding:8px 6px 6px;display:flex;flex-direction:column;cursor:pointer;transition:all .15s;flex-shrink:0;position:relative}
+/* Each cell in a level row (deck pile / card / empty slot) shares the row width
+   equally but never exceeds its natural 88px. A full level (deck + 4 cards) then
+   always fits a phone's width — no horizontal scroll or clipped 4th card — while
+   wide screens are unchanged (every cell just caps at 88px). !important + width:auto
+   override the inline widths CardView and the empty slots set. */
+.level-row>*{flex:1 1 0!important;min-width:0!important;width:auto!important;max-width:88px!important}
 .ai-val{position:absolute;bottom:5px;right:5px;font-family:'Cinzel',serif;font-size:.62rem;font-weight:600;color:#e8c86a;background:rgba(0,0,0,.4);border-radius:4px;padding:0 4px;line-height:1.4;pointer-events:none}
 .ai-vals{position:absolute;bottom:3px;right:3px;display:grid;grid-template-columns:auto auto;gap:0 5px;font-family:'Cinzel',serif;font-size:.5rem;font-weight:600;color:#e8c86a;background:rgba(0,0,0,.5);border-radius:4px;padding:2px 4px;line-height:1.4;pointer-events:none}
 .ai-vals b{color:#9a8fb0;font-weight:700;margin-right:1px}
@@ -311,6 +317,10 @@ const css = baseCss + `
   .browser-title{font-size:1.6rem}
   .game{padding:6px}
   .game-card{padding:10px 12px}
+  /* Let the turn hint use its own full-width line instead of being squeezed to
+     an ellipsis next to the badges + buttons. */
+  .action-bar{flex-wrap:wrap}
+  .action-hint{flex-basis:100%;order:10;white-space:normal}
 }
 `;
 
