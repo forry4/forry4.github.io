@@ -404,3 +404,49 @@ def test_winning_reserve_tempo_gate():
                                    set(E.legal_actions(s_near))) == E.A_RES_BOARD + 0
     finally:
         H3.WIN_RESERVE_MAX_TEMPO = saved
+
+
+# ─── (g) a COMPLETED noble is credited once (completion), never double-counted in progress ──
+def _noble_state(reqs):
+    """Seat-0 state with synthetic nobles `reqs` and a 0-pt WHITE card affordable; bonuses white 3 /
+    blue 2 / red 2, so the card's +1 white completes a [4-white] noble. Returns (val, s, X)."""
+    s = _blank_state()
+    s.points = [6, 6]; s.purchased_n = [5, 5]
+    s.bonuses = [[3, 2, 0, 2, 0], [0] * 5]
+    s.tokens = [[5, 5, 5, 5, 5, 0], [0] * 6]                 # X affordable -> tempo 0
+    X = next(c for c in range(len(E.COST)) if E.BONUS[c] == WHITE and E.PTS[c] == 0)
+    s.board = [-1] * 12; s.board[0] = X
+    s.nobles = [0, 1, 2]
+    return _val(s), s, X
+
+
+def test_g_noble_completion_not_double_counted():
+    """A 0-pt card that COMPLETES a noble and helps no OTHER noble scores exactly the completion VP --
+    the completed noble must not ALSO appear in noble_progress (the double-count this guards against)."""
+    orig = (E.NOBLE_REQ, E.NOBLE_PTS)
+    try:
+        # A (4 white) is completed by the white card; B (4 blue), C (4 red) are NOT the card's color.
+        E.NOBLE_REQ = ((4, 0, 0, 0, 0), (0, 4, 0, 0, 0), (0, 0, 0, 4, 0))
+        E.NOBLE_PTS = (3, 3, 3)
+        val, s, X = _noble_state(E.NOBLE_REQ)
+        assert val.noble_completion_pts(X, 0) == 3          # completes noble A
+        assert val.noble_progress(X, 0) == 0.0              # ...and is NOT also scored as progress
+        _take, _eng, point, _cost = H3.components(val, s, X, 0)
+        assert point == pytest.approx(E.PTS[X] + 3)         # P == own points + completion only
+    finally:
+        E.NOBLE_REQ, E.NOBLE_PTS = orig
+
+
+def test_g_noble_progress_still_counts_other_nobles():
+    """The fix removes ONLY the double-counted completed noble: a card completing one noble while
+    genuinely advancing OTHERS of its color still credits those others in noble_progress."""
+    orig = (E.NOBLE_REQ, E.NOBLE_PTS)
+    try:
+        # A (4 white) completed; B (4 white+4 blue), C (4 white+4 red) advanced by white, not completed.
+        E.NOBLE_REQ = ((4, 0, 0, 0, 0), (4, 4, 0, 0, 0), (4, 0, 0, 4, 0))
+        E.NOBLE_PTS = (3, 3, 3)
+        val, s, X = _noble_state(E.NOBLE_REQ)
+        assert val.noble_completion_pts(X, 0) == 3
+        assert val.noble_progress(X, 0) > 0.0               # B and C (uncompleted, need white) still count
+    finally:
+        E.NOBLE_REQ, E.NOBLE_PTS = orig

@@ -362,9 +362,11 @@ def noble_progress(s: E.State, ci: int, seat: int) -> float:
         ni = s.nobles[slot]
         if ni < 0:
             continue
-        n += 1
         req = E.NOBLE_REQ[ni]
-        if req[bcol] > bon[bcol]:  # this color is still needed by the noble
+        if all(bon[c] + (1 if c == bcol else 0) >= req[c] for c in range(5)):
+            continue  # this buy COMPLETES the noble -> scored by noble_completion_pts, not here (no double count)
+        n += 1
+        if req[bcol] > bon[bcol]:  # this color is still needed by the (uncompleted) noble
             total = sum(req)
             if total:
                 deficit = sum(req[i] - bon[i] for i in range(5) if req[i] > bon[i])
@@ -900,9 +902,11 @@ class Valuation:
             ni = s.nobles[slot]
             if ni < 0:
                 continue
-            n += 1
             req = E.NOBLE_REQ[ni]
-            if req[bcol] > bon[bcol]:  # this color still helps the noble
+            if all(bon[c] + (1 if c == bcol else 0) >= req[c] for c in range(5)):
+                continue  # this buy COMPLETES the noble -> scored by noble_completion_pts, not here (no double count)
+            n += 1
+            if req[bcol] > bon[bcol]:  # the card's color still advances this (uncompleted) noble
                 total = sum(req)
                 if not total:
                     continue
