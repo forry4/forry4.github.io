@@ -820,3 +820,75 @@ def test_cannot_afford_gold_only_covers_part():
     cost    = {"red": 3}
     bonuses = main.empty_gems()
     assert not main.can_afford(cost, tokens, bonuses)
+
+
+# ─── Blind deck-reserve hidden info (_redact_blind_reserves) ────────────────────
+
+def _blind_card():
+    return {"id": "L2-r3", "cost": {"red": 3}, "points": 1, "bonus": "blue", "level": 2,
+            "from_deck": True}
+
+def _faceup_card():
+    return {"id": "L1-w1", "cost": {"white": 1}, "points": 0, "bonus": "green", "level": 1}
+
+
+def test_blind_reserve_hidden_from_opponent():
+    """Bob's deck-top reserve is a face-down placeholder in Alice's view, never its identity."""
+    g = make_game_state()
+    g["players"]["bob"]["reserved"] = [_blind_card()]
+    red = main._redact_blind_reserves(g, viewer_pid="alice")
+    card = red["players"]["bob"]["reserved"][0]
+    assert card.get("hidden") is True
+    assert card.get("level") == 2          # the level (which deck) is public
+    assert "cost" not in card and card.get("id") != "L2-r3"   # identity is gone
+
+
+def test_blind_reserve_visible_to_owner():
+    """The owner always sees their own reserved card in full."""
+    g = make_game_state()
+    g["players"]["bob"]["reserved"] = [_blind_card()]
+    red = main._redact_blind_reserves(g, viewer_pid="bob")
+    assert red["players"]["bob"]["reserved"][0]["id"] == "L2-r3"
+
+
+def test_faceup_reserve_visible_to_all():
+    """A face-up board reserve (no from_deck) is public — never redacted."""
+    g = make_game_state()
+    g["players"]["bob"]["reserved"] = [_faceup_card()]
+    red = main._redact_blind_reserves(g, viewer_pid="alice")
+    assert red["players"]["bob"]["reserved"][0]["id"] == "L1-w1"
+    assert red is g                        # nothing to hide → no copy
+
+
+def test_blind_reserve_revealed_at_game_over():
+    """Once the game is over everything is revealed (review screen)."""
+    g = make_game_state()
+    g["phase"] = "over"
+    g["players"]["bob"]["reserved"] = [_blind_card()]
+    red = main._redact_blind_reserves(g, viewer_pid="alice")
+    assert red["players"]["bob"]["reserved"][0]["id"] == "L2-r3"
+
+
+def test_no_viewer_means_full_view():
+    """viewer_pid=None (internal/full) is unredacted."""
+    g = make_game_state()
+    g["players"]["bob"]["reserved"] = [_blind_card()]
+    assert main._redact_blind_reserves(g, viewer_pid=None) is g
+
+
+def test_blind_reserve_move_log_stripped_for_opponent():
+    """A blind-reserve log entry hides the card from the opponent but keeps it for the owner."""
+    g = make_game_state()
+    g["moves"] = [{"pid": "bob", "type": "reserve", "from_deck": True, "card": _blind_card()}]
+    alice_view = main._redact_blind_reserves(g, viewer_pid="alice")
+    assert alice_view["moves"][0]["card"] is None
+    bob_view = main._redact_blind_reserves(g, viewer_pid="bob")
+    assert bob_view["moves"][0]["card"]["id"] == "L2-r3"
+
+
+def test_redaction_does_not_mutate_original():
+    """Redaction copies — the canonical game keeps the true reserved card."""
+    g = make_game_state()
+    g["players"]["bob"]["reserved"] = [_blind_card()]
+    main._redact_blind_reserves(g, viewer_pid="alice")
+    assert g["players"]["bob"]["reserved"][0]["id"] == "L2-r3"

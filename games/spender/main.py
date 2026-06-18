@@ -354,22 +354,72 @@ async def broadcast_room(room_id: str, msg: dict[str, Any]):
     room = ROOMS.get(room_id)
     if not room:
         return
+    sockets = list(room.get("sockets", {}).items())
+    if "room" in msg:
+        # Per-recipient: rebuild the room state for each viewer so an opponent's blind
+        # deck-reserves are redacted (hidden info). Other message keys are preserved.
+        for pid, ws in sockets:
+            m = dict(msg)
+            m["room"] = mk_room_state(room_id, viewer_pid=pid)
+            try:
+                await ws.send_text(json.dumps(m))
+            except Exception:
+                pass
+        return
     data = json.dumps(msg)
-    for ws in list(room.get("sockets", {}).values()):
+    for _pid, ws in sockets:
         try:
             await ws.send_text(data)
         except Exception:
             pass
 
 
-def mk_room_state(room_id: str) -> dict[str, Any]:
+def _redact_blind_reserves(game: dict | None, viewer_pid: str | None) -> dict | None:
+    """Hide other players' blind (deck-top) reserves from `viewer_pid`. A card reserved
+    from a deck is secret in Splendor — the opponent sees only a face-down placeholder
+    (its level), never the card identity, and likewise can't read it in the move log.
+    Returns `game` unchanged when there is nothing to hide (no copy made), when no viewer
+    is given (full view), or once the game is over (everything is revealed on review)."""
+    if not game or viewer_pid is None or game.get("phase") == "over":
+        return game
+
+    def _blind(c):
+        return isinstance(c, dict) and c.get("from_deck")
+
+    players = game.get("players", {})
+    has_hidden = any(
+        pid != viewer_pid and any(_blind(c) for c in ps.get("reserved", []))
+        for pid, ps in players.items()
+    ) or any(
+        mv.get("type") == "reserve" and mv.get("from_deck") and mv.get("pid") != viewer_pid
+        for mv in game.get("moves", [])
+    )
+    if not has_hidden:
+        return game
+
+    g = copy.deepcopy(game)
+    for pid, ps in g.get("players", {}).items():
+        if pid == viewer_pid:
+            continue
+        reserved = ps.get("reserved", [])
+        for i, c in enumerate(reserved):
+            if _blind(c):
+                reserved[i] = {"hidden": True, "level": c.get("level"),
+                               "id": f"{pid}:hidden:{i}"}
+    for mv in g.get("moves", []):
+        if mv.get("type") == "reserve" and mv.get("from_deck") and mv.get("pid") != viewer_pid:
+            mv["card"] = None  # strip the secret card from the opponent's move-log view
+    return g
+
+
+def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]:
     room = ROOMS.get(room_id, {})
     state = {
         "room_id": room_id,
         "players": room.get("players", {}),
         "host": room.get("host"),
         "status": room.get("status", "open"),
-        "game": room.get("game"),
+        "game": _redact_blind_reserves(room.get("game"), viewer_pid),
         "reconnect_tokens": {p: info.get("token") for p, info in room.get("meta", {}).items()} if room.get("meta") else {},
     }
     if room.get("ai_variant"):
@@ -1867,7 +1917,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                         g["nobles"] = nobles_pool[:3]
                         r["status"] = "playing"
                 save_game(room_id)
-                await websocket.send_text(json.dumps({"type": "created", "room_id": room_id, "room": mk_room_state(room_id)}))
+                await websocket.send_text(json.dumps({"type": "created", "room_id": room_id, "room": mk_room_state(room_id, viewer_pid=pid)}))
                 if vs_ai:
                     asyncio.create_task(_schedule_ai_turn(room_id))
 
@@ -1881,7 +1931,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                         continue
                     r["sockets"][pid] = websocket
                 LOG.info("player %s reconnected to room %s", pid, room_id)
-                await websocket.send_text(json.dumps({"type": "reconnected", "room": mk_room_state(room_id)}))
+                await websocket.send_text(json.dumps({"type": "reconnected", "room": mk_room_state(room_id, viewer_pid=pid)}))
                 await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
                 asyncio.create_task(_schedule_ai_turn(room_id))
 
@@ -1904,7 +1954,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                     if r.get("game") and pid not in r["game"]["players"]:
                         r["game"]["players"][pid] = {"tokens": empty_gems(), "purchased": [], "reserved": [], "nobles": []}
                 save_game(room_id)
-                await websocket.send_text(json.dumps({"type": "joined", "room_id": room_id, "room": mk_room_state(room_id)}))
+                await websocket.send_text(json.dumps({"type": "joined", "room_id": room_id, "room": mk_room_state(room_id, viewer_pid=pid)}))
                 await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
 
             # ── auth_reconnect ──────────────────────────────────────────────
@@ -1923,7 +1973,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                     r["sockets"][pid] = websocket
                     r["meta"].setdefault(pid, {})["user_id"] = info.get("user_id")
                 mark_reconnect_token_used(token)
-                await websocket.send_text(json.dumps({"type": "reconnected", "room": mk_room_state(room_id)}))
+                await websocket.send_text(json.dumps({"type": "reconnected", "room": mk_room_state(room_id, viewer_pid=pid)}))
                 await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
                 asyncio.create_task(_schedule_ai_turn(room_id))
 
@@ -2120,6 +2170,8 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                         lk = f"L{deck_level}"
                                         if g["decks"][lk]:
                                             card = g["decks"][lk].pop()
+                                            # blind deck-top reserve — hidden from the opponent (Splendor rule)
+                                            card["from_deck"] = True
                                     if not card:
                                         _err = "card not found"
                                     else:
@@ -2127,7 +2179,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                         if g["bank"].get("gold", 0) > 0:
                                             g["bank"]["gold"] -= 1
                                             ps["tokens"]["gold"] = ps["tokens"].get("gold", 0) + 1
-                                        _log_move(g, pid, "reserve", card={"id": card["id"], "bonus": card["bonus"], "color": card["bonus"], "points": card["points"], "cost": card["cost"], "level": card.get("level")})
+                                        _log_move(g, pid, "reserve", card={"id": card["id"], "bonus": card["bonus"], "color": card["bonus"], "points": card["points"], "cost": card["cost"], "level": card.get("level")}, from_deck=card.get("from_deck"))
                                         _did_change = True
                                         if sum(ps["tokens"].values()) > 10:
                                             _discard_pid = pid

@@ -185,6 +185,10 @@ const css = baseCss + `
 .card.affordable{border-color:var(--green-gem)}
 .card.affordable-gold{border-color:var(--gold-light)}
 .card.disabled{cursor:not-allowed;opacity:.6}
+.card-back{cursor:default;align-items:center;justify-content:center;gap:8px;border-style:dashed;background:repeating-linear-gradient(45deg,var(--surface2),var(--surface2) 6px,var(--surface) 6px,var(--surface) 12px)}
+.card-back:hover{transform:none;border-color:var(--border);box-shadow:none}
+.card-back-level{font-family:'Cinzel',serif;font-weight:700;font-size:1.3rem;color:var(--text-dim)}
+.card-back-label{font-family:'Cinzel',serif;font-size:.55rem;letter-spacing:.1em;color:var(--text-dim);text-transform:uppercase}
 .card-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px}
 .card-points{font-family:'Cinzel',serif;font-weight:700;font-size:1.1rem;color:var(--gold);min-width:16px}
 .card-points.zero{color:transparent}
@@ -313,6 +317,15 @@ function GemToken({ color, size = 42 }) {
 }
 
 function CardView({ card, selected, affordable, needsGold, disabled, onClick, compact, aiValue }) {
+	// An opponent's blind deck-top reserve is hidden info — show a face-down back, not the card.
+	if (card.hidden) {
+		return (
+			<div className="card card-back" style={{ width: compact ? 72 : 88, minHeight: compact ? 96 : 120 }}>
+				<span className="card-back-level">{["I", "II", "III"][(card.level || 1) - 1]}</span>
+				<span className="card-back-label">Reserved</span>
+			</div>
+		);
+	}
 	return (
 		<div
 			className={`card${selected ? " selected" : ""}${affordable ? (needsGold ? " affordable-gold" : " affordable") : ""}${disabled ? " disabled" : ""}`}

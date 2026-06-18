@@ -429,7 +429,8 @@ def to_game_dict(s: State, pids: tuple[str, str] = ("p0", "p1")) -> dict:
         game["players"][pid] = {
             "tokens": {c: s.tokens[seat][i] for i, c in enumerate(GEM_COLORS)} | {"gold": s.tokens[seat][5]},
             "purchased": [_card_dict(ci) for ci in s.purchased[seat]],
-            "reserved": [_card_dict(ci) for ci in s.reserved[seat]],
+            "reserved": [({**_card_dict(ci), "from_deck": True} if s.reserved_blind[seat][ri]
+                          else _card_dict(ci)) for ri, ci in enumerate(s.reserved[seat])],
             "nobles": [dict(ALL_NOBLES[ni]) for ni in s.nobles_won[seat]],
         }
     return game
@@ -464,7 +465,9 @@ def from_game_dict(game: dict) -> State:
             s.points[seat] += NOBLE_PTS[ni]
         for card in ps["reserved"]:
             s.reserved[seat].append(CARD_ID_BY_NAME[card["id"]])
-            s.reserved_blind[seat].append(False)
+            # a deck-top reserve is hidden info; determinization/features then hide an
+            # opponent's blind reserve from the searching seat (no info-cheat).
+            s.reserved_blind[seat].append(bool(card.get("from_deck")))
     s.board = []
     for lvl in range(3):
         row = game["board"][f"L{lvl+1}"]
