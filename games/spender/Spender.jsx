@@ -328,13 +328,12 @@ function CardView({ card, selected, affordable, disabled, onClick, compact, aiVa
 			</div>
 			{aiValue != null && (typeof aiValue === "object" ? (
 				<div className="ai-vals" title={aiValue.pot != null
-					? "H3 — take / engine / point / cost / potential"
+					? "H3 — take / engine / point / cost"
 					: "H2 — take / engine / point / cost"}>
 					<span><b>T</b>{aiValue.t}</span>
 					<span><b>E</b>{aiValue.e}</span>
 					<span><b>P</b>{aiValue.p}</span>
 					<span><b>C</b>{aiValue.c}</span>
-					{aiValue.pot != null && <span><b>Po</b>{aiValue.pot}</span>}
 				</div>
 			) : (
 				<span className="ai-val" title="AI card value (variant H)">{aiValue}</span>
