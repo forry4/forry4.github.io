@@ -209,7 +209,7 @@ const css = baseCss + `
 .action-bar{display:flex;gap:8px;align-items:center;flex-wrap:nowrap;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-sizing:border-box;min-height:62px}
 .action-hint{flex:1;font-style:italic;color:var(--text-dim);font-size:.88rem;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .action-bar-btns{display:flex;gap:8px;align-items:center;flex-shrink:0;min-width:150px;justify-content:flex-end}
-.action-bar-spacer{height:43px;display:inline-block;width:1px}
+.action-bar-spacer{visibility:hidden;pointer-events:none}
 .turn-badge{font-family:'Cinzel',serif;font-size:.72rem;letter-spacing:.08em;padding:4px 12px;border-radius:20px;white-space:nowrap}
 .turn-badge.mine{background:var(--gold);color:#0f0e0c}
 .turn-badge.theirs{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border)}
@@ -1461,7 +1461,7 @@ export default function SpenderApp() {
 										</>
 									);
 								})() : (
-									<span className="action-bar-spacer" />
+									<button className="btn action-bar-spacer" aria-hidden="true" tabIndex={-1}>{" "}</button>
 								)}
 							</div>
 						</div>
