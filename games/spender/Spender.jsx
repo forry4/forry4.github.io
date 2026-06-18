@@ -1461,7 +1461,7 @@ export default function SpenderApp() {
 										</>
 									);
 								})() : (
-									<button className="btn btn-ghost action-bar-spacer" aria-hidden="true" tabIndex={-1}>{" "}</button>
+									<button className="btn btn-ghost action-bar-spacer" aria-hidden="true" tabIndex={-1}>{"✕"}</button>
 								)}
 							</div>
 						</div>
