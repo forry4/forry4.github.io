@@ -154,10 +154,13 @@ const css = baseCss + `
 .copy-hint{font-size:.75rem;color:var(--text-muted);font-style:italic;margin-bottom:12px}
 
 /* ─── Game layout ───────────────────────────────────────────────────────── */
-.game{display:grid;grid-template-columns:1fr 272px;gap:12px;padding:10px;flex:1;min-height:0}
+.game{display:grid;grid-template-columns:1fr 272px;gap:12px;padding:10px;flex:1;min-height:0;width:100%;max-width:100%;overflow-x:hidden}
 @media(max-width:900px){.game{grid-template-columns:1fr}}
-.game-main{display:flex;flex-direction:column;gap:10px}
-.game-sidebar{display:flex;flex-direction:column;gap:10px}
+/* min-width:0 stops a grid track's implicit min-width:auto from growing past the
+   viewport when a child (e.g. the horizontally-scrolling card rows) is wide —
+   the overflow is what made mobile Safari fit-to-content and render zoomed out. */
+.game-main{display:flex;flex-direction:column;gap:10px;min-width:0}
+.game-sidebar{display:flex;flex-direction:column;gap:10px;min-width:0}
 @media(max-width:900px){.game-sidebar{order:-1}}
 .panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px}
 .panel-title{font-family:'Cinzel',serif;font-size:.68rem;letter-spacing:.14em;color:var(--gold);margin-bottom:10px;text-transform:uppercase}
@@ -628,6 +631,21 @@ export default function SpenderApp() {
 	useEffect(() => {
 		if (toast) { const t = setTimeout(() => setToast(""), 2500); return () => clearTimeout(t); }
 	}, [toast]);
+
+	// ── Mobile zoom fix ────────────────────────────────────────────────────
+	// On the game screen, iOS Safari otherwise picks a too-small page scale on
+	// first paint (it fits-to-content while the layout momentarily overflows the
+	// viewport) and renders the board zoomed out until a reflow — e.g. the first
+	// Take/✕ button appearing — snaps it back to scale 1. Pinning the viewport to
+	// scale 1 (user-scalable=no) while the game is mounted forces the correct
+	// zoom the whole time; the cleanup restores normal pinch-zoom on other screens.
+	useEffect(() => {
+		const vp = document.querySelector('meta[name="viewport"]');
+		if (!vp) return;
+		const base = "width=device-width, initial-scale=1.0";
+		if (screen === "game") vp.setAttribute("content", base + ", maximum-scale=1.0, user-scalable=no");
+		return () => vp.setAttribute("content", base);
+	}, [screen]);
 
 	// ── Loading: ping backend until ready, then proceed to auth/browser ────
 	useEffect(() => {
