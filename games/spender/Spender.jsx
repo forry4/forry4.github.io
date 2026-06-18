@@ -20,7 +20,7 @@ const GAMES = [
 // ─── Constants ─────────────────────────────────────────────────────────────
 const GEM_COLORS = ["white", "blue", "green", "red", "black"];
 const GEM_LABELS = { white: "Diamond", blue: "Sapphire", green: "Emerald", red: "Ruby", black: "Onyx", gold: "Gold" };
-const GEM_HEX = { white: "#ddd4be", blue: "#4257ff", green: "#3f9c2e", red: "#e05555", black: "#01090a", gold: "#f5c842" };
+const GEM_HEX = { white: "#ddd4be", blue: "#4257ff", green: "#3f9c2e", red: "#dc4040", black: "#15151a", gold: "#f5c842" };
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 function uid() { return Math.random().toString(36).slice(2, 10); }
@@ -349,7 +349,7 @@ function NobleView({ noble, claimedBy }) {
 			<div className="noble-req">
 				{Object.entries(noble.req).map(([c, n]) => (
 					<div key={c} className="noble-req-row">
-						<div style={{ width: 8, height: 8, borderRadius: "50%", background: GEM_HEX[c] }} />
+						<div style={{ width: 8, height: 8, borderRadius: "50%", background: GEM_HEX[c], border: "1px solid rgba(255,255,255,.12)" }} />
 						<span>{n}</span>
 					</div>
 				))}
@@ -719,7 +719,7 @@ export default function SpenderApp() {
 			const parts = Object.entries(freq).map(([c, n]) => (
 				<span key={c} style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
 					{n > 1 ? `${n}× ` : ""}
-					<span style={{ width: 8, height: 8, borderRadius: "50%", background: GEM_HEX[c], display: "inline-block", flexShrink: 0 }} />
+					<span style={{ width: 8, height: 8, borderRadius: "50%", background: GEM_HEX[c], border: "1px solid rgba(255,255,255,.12)", display: "inline-block", flexShrink: 0 }} />
 				</span>
 			));
 			return { name, action: <span>took {parts.reduce((a, b) => [a, " ", b])}</span> };
@@ -727,14 +727,14 @@ export default function SpenderApp() {
 		if (mv.type === "buy") {
 			const col = mv.card?.bonus || mv.card?.color;
 			const dot = col
-				? <span style={{ width: 8, height: 8, borderRadius: "50%", background: GEM_HEX[col], display: "inline-block", marginLeft: 2, marginRight: 2, verticalAlign: "middle" }} />
+				? <span style={{ width: 8, height: 8, borderRadius: "50%", background: GEM_HEX[col], border: "1px solid rgba(255,255,255,.12)", display: "inline-block", marginLeft: 2, marginRight: 2, verticalAlign: "middle" }} />
 				: null;
 			return { name, action: <span>bought{dot}card{mv.card?.points ? ` +${mv.card.points}pts` : ""}</span>, card: mv.card?.cost ? mv.card : null };
 		}
 		if (mv.type === "reserve") {
 			const col = mv.card?.bonus || mv.card?.color;
 			const dot = col
-				? <span style={{ width: 8, height: 8, borderRadius: "50%", background: GEM_HEX[col], display: "inline-block", marginLeft: 2, marginRight: 2, verticalAlign: "middle" }} />
+				? <span style={{ width: 8, height: 8, borderRadius: "50%", background: GEM_HEX[col], border: "1px solid rgba(255,255,255,.12)", display: "inline-block", marginLeft: 2, marginRight: 2, verticalAlign: "middle" }} />
 				: null;
 			return { name, action: <span>reserved{dot}card</span>, card: mv.card?.cost ? mv.card : null };
 		}
@@ -968,9 +968,9 @@ export default function SpenderApp() {
 				</div>
 				<div className="player-tokens">
 					{[...GEM_COLORS, "gold"].map(c => (p.tokens[c] || 0) > 0 && (
-						<span key={c} className="token-pill" style={{ background: GEM_HEX[c] + "55", border: `1px solid ${GEM_HEX[c]}` }}>
+						<span key={c} className="token-pill" style={{ background: GEM_HEX[c] + "55", border: `1px solid ${c === "black" ? "rgba(255,255,255,.4)" : GEM_HEX[c]}` }}>
 							{/* light rim so the near-black onyx gem stays visible on the warm "your turn" (surface3) panel */}
-							<span style={{ width: 10, height: 10, borderRadius: "50%", background: GEM_HEX[c], border: "1px solid rgba(255,255,255,.25)", display: "inline-block" }} />
+							<span style={{ width: 10, height: 10, borderRadius: "50%", background: GEM_HEX[c], border: c === "black" ? "1px solid rgba(255,255,255,.4)" : "1px solid rgba(255,255,255,.25)", display: "inline-block" }} />
 							{p.tokens[c]}
 						</span>
 					))}
@@ -980,7 +980,7 @@ export default function SpenderApp() {
 				)}
 				<div className="player-bonuses">
 					{GEM_COLORS.map(c => (bonuses[c] || 0) > 0 && (
-						<span key={c} className="bonus-pill" style={{ background: GEM_HEX[c] + "55", borderColor: GEM_HEX[c], color: GEM_HEX[c] }}>+{bonuses[c]} {c[0].toUpperCase()}</span>
+						<span key={c} className="bonus-pill" style={{ background: GEM_HEX[c] + "55", borderColor: c === "black" ? "rgba(255,255,255,.4)" : GEM_HEX[c], color: c === "black" ? "#a8a8a8" : GEM_HEX[c] }}>+{bonuses[c]} {c[0].toUpperCase()}</span>
 					))}
 					{p.nobles.map(n => (
 						<span key={n.id} className="bonus-pill" style={{ borderColor: "var(--gold)", color: "var(--gold)" }}>★{n.points}</span>
