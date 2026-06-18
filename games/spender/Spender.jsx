@@ -40,14 +40,18 @@ function bonusesFrom(purchased) {
 	for (const c of purchased) b[c.bonus] = (b[c.bonus] || 0) + 1;
 	return b;
 }
-function canAfford(cost, tokens, bonuses) {
+function goldToAfford(cost, tokens, bonuses) {
+	// gold (wild) gems needed to cover the colored shortfall after bonuses + colored tokens.
 	let gold = 0;
 	for (const c of GEM_COLORS) {
 		const need = Math.max(0, (cost[c] || 0) - (bonuses[c] || 0));
 		const have = tokens[c] || 0;
 		if (have < need) gold += need - have;
 	}
-	return gold <= (tokens.gold || 0);
+	return gold;
+}
+function canAfford(cost, tokens, bonuses) {
+	return goldToAfford(cost, tokens, bonuses) <= (tokens.gold || 0);
 }
 function totalPoints(purchased, nobles) {
 	return purchased.reduce((s, c) => s + c.points, 0) + nobles.reduce((s, n) => s + n.points, 0);
@@ -179,6 +183,7 @@ const css = baseCss + `
 .card:hover{border-color:rgba(201,168,76,.5);transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.4)}
 .card.selected{border-color:var(--gold-light);box-shadow:0 0 0 2px var(--gold-light)}
 .card.affordable{border-color:var(--green-gem)}
+.card.affordable-gold{border-color:var(--gold-light)}
 .card.disabled{cursor:not-allowed;opacity:.6}
 .card-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px}
 .card-points{font-family:'Cinzel',serif;font-weight:700;font-size:1.1rem;color:var(--gold);min-width:16px}
@@ -199,7 +204,7 @@ const css = baseCss + `
 /* ─── Action bar ────────────────────────────────────────────────────────── */
 .action-bar{display:flex;gap:8px;align-items:center;flex-wrap:nowrap;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-sizing:border-box;min-height:62px}
 .action-hint{flex:1;font-style:italic;color:var(--text-dim);font-size:.88rem;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.action-bar-btns{display:flex;gap:8px;align-items:center;flex-shrink:0}
+.action-bar-btns{display:flex;gap:8px;align-items:center;flex-shrink:0;min-width:150px;justify-content:flex-end}
 .action-bar-spacer{height:43px;display:inline-block;width:1px}
 .turn-badge{font-family:'Cinzel',serif;font-size:.72rem;letter-spacing:.08em;padding:4px 12px;border-radius:20px;white-space:nowrap}
 .turn-badge.mine{background:var(--gold);color:#0f0e0c}
@@ -307,10 +312,10 @@ function GemToken({ color, size = 42 }) {
 	);
 }
 
-function CardView({ card, selected, affordable, disabled, onClick, compact, aiValue }) {
+function CardView({ card, selected, affordable, needsGold, disabled, onClick, compact, aiValue }) {
 	return (
 		<div
-			className={`card${selected ? " selected" : ""}${affordable ? " affordable" : ""}${disabled ? " disabled" : ""}`}
+			className={`card${selected ? " selected" : ""}${affordable ? (needsGold ? " affordable-gold" : " affordable") : ""}${disabled ? " disabled" : ""}`}
 			style={{ width: compact ? 72 : 88, minHeight: compact ? 96 : 120 }}
 			onClick={disabled ? undefined : onClick}
 		>
@@ -926,11 +931,13 @@ export default function SpenderApp() {
 		if (!card) return <div style={{ width: 88, minHeight: 120 }} />;
 		// readonly: opponent's reserved cards — visible but not selectable/affordable.
 		const affordable = !opts.readonly && me && canAfford(card.cost, me.tokens, myBonuses);
+		const needsGold = affordable && goldToAfford(card.cost, me.tokens, myBonuses) > 0;
 		const isSelected = !opts.readonly && selectedCard?.card?.id === card.id;
 		return (
 			<CardView key={card.id} card={card}
 				selected={isSelected}
 				affordable={affordable && myTurn}
+				needsGold={needsGold && myTurn}
 				aiValue={(authUser?.is_admin && showAiVals) ? roomData?.ai_card_values?.[card.id] : null}
 				disabled={opts.disabled}
 				onClick={() => {
@@ -1421,7 +1428,7 @@ export default function SpenderApp() {
 								{myTurn && selectedGems.length > 0 ? (
 									<>
 										<button className="btn btn-gold" onClick={handleTakeGems}>
-											Take {selectedGems.length} Gem{selectedGems.length > 1 ? "s" : ""}
+											Take {selectedGems.length}
 										</button>
 										<button className="btn btn-ghost" onClick={() => setSelectedGems([])}>✕</button>
 									</>
