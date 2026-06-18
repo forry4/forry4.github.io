@@ -900,7 +900,7 @@ model changes (it's mildly self-referential). `h3_*.out`/`h3_best.json` are giti
   box unchanged. (Aside: an `az_vs_h2.py` arena measured H2/H3 **beating the deployed AZ net
   `az_model.npz` ~0.75 @ 300 sims** — the greedy heuristics currently out-play variant Z.)
 
-### Variant S (`ai/az/v_state.py` + `vsearch.py`) — V(state) whole-position eval + determinized PUCT (STRONGEST; June 2026)
+### Variant S (`ai/az/v_state.py` + `vsearch.py`) — V(state) whole-position eval + determinized PUCT (STRONGEST; DEPLOYED June 2026)
 The first variant to pair the strong H-family judgment with **real search** (the documented #1 remaining
 lever). **Strongest variant yet:** panel avg **0.758** — vs greedy **H3 0.733**, H2 0.729, H2N 0.808, H2R
 0.762 (N=120, sims=160) — beating greedy H3, which itself beats the deployed AZ net Z ~0.75. Served as
@@ -953,10 +953,30 @@ website variant **"S"**.
   `vsearch_profile.py`'s clean sims/s is corrupted by a busy autotuner; the contention-independent truth is
   the cProfile call counts (builds/sim, `_cost_scalar` calls).
 - **Tooling** (offline, parallel): `vsearch_camp.py` (panel A/B, CRN, Wilson CIs), `vsearch_autotune.py`
-  (coordinate descent, **panel-MEAN objective over {H3,H2,H2N,H2R}** + a `--min-opp` floor so a gain can't
-  collapse one matchup), `v_state_eval.py` (sign(V) win-prediction discrimination vs the ~0.65 plateau),
+  (coordinate descent, **MAXIMIN objective over {H3,H2,H2N,H2R}** — maximize the WORST matchup, mean only as a
+  tie-break (`MEAN_EPS`), with larger screen/holdout N since the min is a noisier statistic. Switched FROM
+  panel-mean after the mean run found ZERO adoptions on the disjoint holdout — i.e. the hand-set V weights are
+  already near-optimal, confirming "weight-tuning saturates"; vs-H3 (~0.635 @ sims=120) is the lone weakness
+  maximin targets), `v_state_eval.py` (sign(V) win-prediction discrimination vs the ~0.65 plateau),
   `vsearch_profile.py` (clean wall-clock + cProfile), `h3l_probe.py` (the static-vs-rollout probe). Tests:
   `games/spender/tests/test_vsearch.py`.
+- **Before spending on the next ceiling — the THREE-WAY diagnostic (decided, not yet run).** "Re-evaluate
+  favorability with self-play of the now-strong S" splits into TWO different questions with DIFFERENT
+  yardsticks, and conflating them is the trap: (a) **static V vs actual OUTCOMES** (eventual winner/margin
+  from strong S-vs-S play) = "is the leaf *biased*?" → a **structural-V** lead (re-weight / new feature);
+  (b) **static V vs its own SEARCH-BACKED value** = "does lookahead move the estimate?" → the **Path C**
+  (more-search) lead. They are NOT the same green light — a large V-vs-outcome error could be a biased leaf
+  (search can't fix it) OR insufficient depth; only the V-vs-searchV gap isolates depth. CAVEAT: search uses
+  V *as its leaf*, so searchV inherits V's bias → a small gap is ambiguous, and you need the outcome as a
+  third anchor. **Decision: harvest all three at the same snapshots** ({static V, search-backed value,
+  outcome} from S-vs-S games; run search only on a small PROBED subset since it's the expensive part) and
+  decompose: V≈searchV but both≠outcome → biased leaf (structural fix / fresh net, NOT distilling *this* V);
+  V≠searchV and searchV closer to outcome → lookahead works → **Path C**; V≠searchV but searchV NOT closer →
+  search is adding noise, fix the leaf first. Implement as a `--teacher S` harvest mode in `v_state_eval.py`.
+  **Do NOT re-tune V on self-play OUTCOMES as the objective** — a mirror match is ~0.5 (no gradient) and it
+  reintroduces the documented single-strategy-collapse / denial-blind risks; the style-diverse MAXIMIN panel
+  is the arbiter. Gate Path C on this diagnostic + the panel + shaped targets + head-to-head. **Not worth
+  starting until the maximin run confirms the static config is settled.**
 - **The next ceiling — distill V+search into a numpy value net (Path C), and its TENSION.** A numpy net leaf
   (reuse `net.py`/`export.py`/`infer_np.py` + the 305-feature encoder) is ~100× cheaper → 10–50× more sims →
   deeper search. BUT V's strength is `engine_value` — the cross-card term the docs flag as "the one an MLP
@@ -965,8 +985,13 @@ website variant **"S"**.
   a **measure-gated bet** that could hit the same features wall that left Z behind — prototype the cheapest
   distillation (V → current 305 features) and arena-gate vs the panel BEFORE any big investment. The Python
   micro-opts above are the banked, safe depth.
-- **Open:** human playtest (verify the `econ`-term over-reserve fix); deploy (`-heuristics` → main);
-  `vsearch_autotune` panel run in progress.
+- **DEPLOYED (untuned, June 2026):** shipped to `main` as commit `da18bab` (`feat(az): variant S …`) via a
+  selective-commit + rebase-onto-`origin/main` (the H4 sandbox / scratch / `shared/theme.js` stayed untracked
+  and untouched); CI redeploys GitHub Pages (the "S" picker) + Render (`_s_choose_move`). Shipped the UNTUNED
+  hand-set V weights — the mean autotuner's zero adoptions said they're already near-optimal.
+- **Open:** human playtest on live S (verify the `econ` term fixes the over-reserve weakness — the one thing
+  offline numbers can't measure); the MAXIMIN `vsearch_autotune` run is in progress (a robust min gain → small
+  follow-up commit; none expected if it just confirms saturation).
 
 ### Hard-won conclusions — DO NOT relitigate
 These cost many self-play/training cycles to establish:
