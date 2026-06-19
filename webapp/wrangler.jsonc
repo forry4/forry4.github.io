@@ -1,0 +1,13 @@
+{
+  // Cloudflare Workers static-assets config for the STAGING deploy only (this
+  // file lives on the `staging` branch). It tells Workers Builds to serve the
+  // Vite output in ./dist as a static SPA — without it, `wrangler deploy` errors
+  // with "Missing entry-point to Worker script or to assets directory".
+  // Prod (GitHub Pages, branch main) does not use this file.
+  "name": "spender-staging",
+  "compatibility_date": "2025-01-01",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}
