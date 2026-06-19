@@ -164,7 +164,15 @@ const css = baseCss + `
    the overflow is what made mobile Safari fit-to-content and render zoomed out. */
 .game-main{display:flex;flex-direction:column;gap:10px;min-width:0}
 .game-sidebar{display:flex;flex-direction:column;gap:10px;min-width:0}
-@media(max-width:900px){.game-sidebar{order:-1}}
+@media(max-width:900px){
+  .game-sidebar{order:-1}
+  /* Single column (tablet + phone): Take/Buy/✕ (or the AI 'thinking' indicator)
+     sit beside the nobles; the desktop gem-bank button group stays hidden. */
+  .nobles-panel{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+  .nobles-panel .nobles-row{flex:1 1 auto}
+  .board-actions{display:flex;gap:6px;align-items:center;margin-left:auto;flex-shrink:0}
+  .board-actions .btn{padding:9px 14px}
+}
 .panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px}
 .panel-title{font-family:'Cinzel',serif;font-size:.68rem;letter-spacing:.14em;color:var(--gold);margin-bottom:10px;text-transform:uppercase}
 
@@ -190,18 +198,18 @@ const css = baseCss + `
    Padding on all sides + matching -margin gives clip-room without moving the row. */
 .level-row{display:flex;gap:8px;align-items:flex-start;flex-wrap:nowrap;overflow-x:auto;padding:6px 4px 4px;margin:-6px -4px 0}
 .level-row::-webkit-scrollbar{height:4px}.level-row::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
-.deck-pile{width:88px;min-height:120px;border-radius:var(--radius);border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;font-family:'Cinzel',serif;font-size:.68rem;color:var(--text-dim);cursor:pointer;flex-shrink:0;background:var(--surface2);transition:all .12s;flex-direction:column;gap:4px}
+.deck-pile{width:var(--card-w,88px);min-height:var(--card-h,120px);border-radius:var(--radius);border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;font-family:'Cinzel',serif;font-size:.68rem;color:var(--text-dim);cursor:pointer;flex-shrink:0;background:var(--surface2);transition:all .12s;flex-direction:column;gap:4px}
 .deck-pile:hover{border-color:var(--gold);color:var(--gold)}
 .deck-pile.selected{border-color:var(--gold-light);color:var(--gold-light);box-shadow:0 0 0 2px var(--gold-light)}
 .deck-pile.disabled{cursor:not-allowed;opacity:.5}
 .deck-remaining{font-size:1.3rem;font-weight:700;color:var(--text);font-family:'Cinzel',serif}
-.card{width:88px;min-height:120px;border-radius:var(--radius);background:var(--surface2);border:1px solid var(--border);padding:8px 6px 6px;display:flex;flex-direction:column;cursor:pointer;transition:all .15s;flex-shrink:0;position:relative}
+.card{width:var(--card-w,88px);min-height:var(--card-h,120px);border-radius:var(--radius);background:var(--surface2);border:1px solid var(--border);padding:8px 6px 6px;display:flex;flex-direction:column;cursor:pointer;transition:all .15s;flex-shrink:0;position:relative}
+.card-slot{width:var(--card-w,88px);flex-shrink:0}
 /* Each cell in a level row (deck pile / card / empty slot) shares the row width
-   equally but never exceeds its natural 88px. A full level (deck + 4 cards) then
-   always fits a phone's width — no horizontal scroll or clipped 4th card — while
-   wide screens are unchanged (every cell just caps at 88px). !important + width:auto
-   override the inline widths CardView and the empty slots set. */
-.level-row>*{flex:1 1 0!important;min-width:0!important;width:auto!important;max-width:88px!important}
+   equally but never exceeds --card-w (88px default; bigger on desktop). A full
+   level (deck + 4 cards) always fits the column width — no horizontal scroll or
+   clipped card — at every size. */
+.level-row>*{flex:1 1 0;min-width:0;max-width:var(--card-w,88px)}
 .ai-val{position:absolute;bottom:5px;right:5px;font-family:'Cinzel',serif;font-size:.62rem;font-weight:600;color:#e8c86a;background:rgba(0,0,0,.4);border-radius:4px;padding:0 4px;line-height:1.4;pointer-events:none}
 .ai-vals{position:absolute;bottom:3px;right:3px;display:grid;grid-template-columns:auto auto;gap:0 5px;font-family:'Cinzel',serif;font-size:.5rem;font-weight:600;color:#e8c86a;background:rgba(0,0,0,.5);border-radius:4px;padding:2px 4px;line-height:1.4;pointer-events:none}
 .ai-vals b{color:#9a8fb0;font-weight:700;margin-right:1px}
@@ -231,7 +239,10 @@ const css = baseCss + `
 .noble-req-row{display:flex;gap:3px;align-items:center;font-size:.65rem;color:var(--text-dim);font-family:'Cinzel',serif}
 
 /* ─── Action bar ────────────────────────────────────────────────────────── */
-.action-bar{display:flex;gap:8px;align-items:center;flex-wrap:nowrap;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-sizing:border-box;min-height:62px}
+/* The turn/action bar is removed on all sizes now — the Take/Buy/✕ controls live
+   in the gem bank (desktop) or beside the nobles (mobile/tablet). */
+.action-bar{display:none}
+.bank-actions-top{display:none}
 .action-hint{flex:1;font-style:italic;color:var(--text-dim);font-size:.88rem;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .action-bar-btns{display:flex;gap:8px;align-items:center;flex-shrink:0;min-width:150px;justify-content:flex-end}
 .action-bar-spacer{visibility:hidden;pointer-events:none;transition:none}
@@ -331,6 +342,35 @@ const css = baseCss + `
 .game-nav-spacer{height:calc(env(safe-area-inset-top,0px) + 48px);flex-shrink:0}
 .game-nav-title{font-family:'Cinzel',serif;font-size:.72rem;letter-spacing:.16em;color:var(--gold);text-transform:uppercase}
 
+/* ── Desktop (wide) game layout ──────────────────────────────────────────────
+   game-main becomes a 2-column grid: a big-card board on the left and the gem
+   bank as a vertical column on its right (so the bank sits just left of the
+   player sidebar). The Take/Buy/✕ controls move to the top of the gem bank, and
+   cards get much larger (--card-w/--card-h). */
+@media(min-width:901px){
+  .game-main{display:grid;grid-template-columns:1fr 156px;gap:16px;align-items:start;--card-w:142px;--card-h:194px}
+  .game-main>.levels{grid-column:1}
+  .game-main>.nobles-panel{grid-column:1}
+  .bank-panel{grid-column:2;grid-row:1 / -1;align-self:start}
+
+  /* Vertical gem bank with the action buttons stacked at the top. */
+  .bank-gems{flex-direction:column;align-items:center;gap:12px}
+  .bank-actions-top{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-bottom:12px}
+  .bank-actions-top .btn{padding:8px 12px;font-size:.8rem}
+
+  /* Bigger board cards: scale the box (via --card-*) and the inner content. */
+  .level-row{overflow-x:visible;gap:12px}
+  .level-row .card{padding:12px 10px 10px}
+  .level-row .card-header{margin-bottom:10px}
+  .level-row .card-points{font-size:1.7rem}
+  .level-row .card-bonus{width:30px;height:30px}
+  .level-row .cost-gem{width:15px;height:15px}
+  .level-row .cost-num{font-size:.95rem}
+  .level-row .card-cost{gap:5px}
+  .level-row .deck-pile{font-size:.8rem;gap:6px}
+  .level-row .deck-remaining{font-size:1.7rem}
+}
+
 @media(max-width:600px){
   .browser{padding:0 14px 40px}
   .browser-title{font-size:1.6rem}
@@ -360,12 +400,7 @@ const css = baseCss + `
   /* Gem bank: full-width row of evenly spread tokens (unchanged layout). */
   .gem-token{width:38px;height:38px;font-size:.88rem}
   .bank-gems{gap:6px;justify-content:space-between}
-
-  /* Take/Buy/✕ (or the AI "thinking" indicator) sit to the right of the nobles. */
-  .nobles-panel{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
-  .nobles-panel .nobles-row{flex:1 1 auto}
-  .board-actions{display:flex;gap:6px;align-items:center;margin-left:auto;flex-shrink:0}
-  .board-actions .btn{padding:9px 14px}
+  /* (nobles+buttons row handled in the max-width:900 block so tablets get it too) */
 
   /* L3 / L2 / L1 share a single box, rows tight together. */
   .levels{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:8px;gap:4px}
@@ -414,7 +449,7 @@ function CardView({ card, selected, affordable, needsGold, disabled, onClick, co
 	// An opponent's blind deck-top reserve is hidden info — show a face-down back, not the card.
 	if (card.hidden) {
 		return (
-			<div className="card card-back" style={{ width: compact ? 72 : 88, minHeight: compact ? 96 : 120 }}>
+			<div className={`card card-back${compact ? " card-compact" : ""}`}>
 				<span className="card-back-level">{["I", "II", "III"][(card.level || 1) - 1]}</span>
 				<span className="card-back-label">Reserved</span>
 			</div>
@@ -422,8 +457,7 @@ function CardView({ card, selected, affordable, needsGold, disabled, onClick, co
 	}
 	return (
 		<div
-			className={`card${selected ? " selected" : ""}${affordable ? (needsGold ? " affordable-gold" : " affordable") : ""}${disabled ? " disabled" : ""}`}
-			style={{ width: compact ? 72 : 88, minHeight: compact ? 96 : 120 }}
+			className={`card${compact ? " card-compact" : ""}${selected ? " selected" : ""}${affordable ? (needsGold ? " affordable-gold" : " affordable") : ""}${disabled ? " disabled" : ""}`}
 			onClick={disabled ? undefined : onClick}
 		>
 			<div className="card-header">
@@ -1054,7 +1088,7 @@ export default function SpenderApp() {
 
 	// ── Render helpers ─────────────────────────────────────────────────────
 	function renderCard(card, opts = {}) {
-		if (!card) return <div style={{ width: 88, minHeight: 120 }} />;
+		if (!card) return <div className="card-slot" />;
 		// readonly: opponent's reserved cards — visible but not selectable/affordable.
 		const affordable = !opts.readonly && me && canAfford(card.cost, me.tokens, myBonuses);
 		const needsGold = affordable && goldToAfford(card.cost, me.tokens, myBonuses) > 0;
@@ -1614,8 +1648,15 @@ export default function SpenderApp() {
 							</div>
 						</div>
 
-						<div className="panel">
+						<div className="panel bank-panel">
 							<div className="panel-title">Gem Bank</div>
+							{/* Desktop only (CSS): the Take/Buy/✕ controls sit at the top of the
+							    (vertical) gem bank; the AI 'thinking' indicator shows here too. */}
+							<div className="bank-actions-top">
+								{aiThinking
+									? <span className="ai-thinking"><span className="think-dot"/><span className="think-dot"/><span className="think-dot"/> thinking…</span>
+									: renderActionButtons()}
+							</div>
 							<div className="bank-gems">
 								{[...GEM_COLORS, "gold"].map(c => {
 									const count = game.bank[c] || 0;
@@ -1669,7 +1710,7 @@ export default function SpenderApp() {
 										<span style={{ fontSize: ".62rem", letterSpacing: ".08em" }}>DECK</span>
 										<span className="deck-remaining">{game.decks?.[lk]?.length || 0}</span>
 									</div>
-									{(game.board?.[lk] || []).map((c, j) => c ? renderCard(c) : <div key={j} style={{ width: 88 }} />)}
+									{(game.board?.[lk] || []).map((c, j) => c ? renderCard(c) : <div key={j} className="card-slot" />)}
 								</div>
 							</div>
 						))}
