@@ -170,6 +170,11 @@ const css = baseCss + `
 
 /* ─── Bank ──────────────────────────────────────────────────────────────── */
 .bank-gems{display:flex;gap:8px;flex-wrap:wrap}
+/* Desktop: the three level boxes sit in a column with the same 10px gap they had
+   as direct game-main children; the bank-actions (mobile button group) is hidden
+   because the controls live in the action bar. Mobile overrides both below. */
+.levels{display:flex;flex-direction:column;gap:10px}
+.bank-actions{display:none}
 .gem-stack{display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;transition:transform .12s;user-select:none}
 .gem-stack:hover .gem-token{transform:scale(1.08)}
 .gem-stack.selected .gem-token{box-shadow:0 0 0 2px var(--gold-light),0 0 12px rgba(232,201,106,.3)}
@@ -333,9 +338,9 @@ const css = baseCss + `
   .game-card{padding:10px 12px}
 
   /* ── Board-first compact mobile game layout ──────────────────────────────
-     The decision surface (action bar -> bank -> cards) leads; players + log
-     drop below. Player panels collapse to one-line summaries; the move log
-     collapses behind a tap. */
+     The decision surface (bank+actions -> cards) leads; players + log drop
+     below. Player panels collapse to one-line summaries; the move log collapses
+     behind a tap. */
   .game-sidebar{order:0}            /* undo desktop order:-1 -> board comes first */
   .game-main{gap:8px}
   .game-sidebar{gap:8px}
@@ -345,19 +350,23 @@ const css = baseCss + `
      header (.log-head) is kept: it doubles as the expand control. */
   .game .panel-title:not(.log-head){display:none}
 
-  /* Action bar sticks just under the fixed nav so turn + Take/Buy stay visible
-     while you scroll the cards. */
-  .action-bar{flex-wrap:wrap;position:sticky;top:calc(env(safe-area-inset-top,0px) + 48px);z-index:40;box-shadow:0 6px 14px rgba(0,0,0,.35);min-height:0;padding:8px 12px}
-  .action-hint{flex-basis:100%;order:10;white-space:normal}
-  /* Push the buttons to the right edge with no phantom min-width gap. */
-  .action-bar-btns{min-width:0;margin-left:auto}
-  /* Admin-only AI-values toggle: drop it to its own compact line below the
-     turn/action row so it stops bulking up that section. */
-  .ai-vals-toggle{order:11;font-size:.64rem;padding:4px 10px;margin-right:auto}
+  /* The whole turn/action bar (badge + persona + hint + AI-values) is removed on
+     mobile; its Take/Buy/✕ controls move next to the gem bank instead. */
+  .action-bar{display:none}
 
-  /* Slightly smaller bank tokens so all 6 + counts sit comfortably in one row. */
-  .gem-token{width:38px;height:38px;font-size:.88rem}
-  .bank-gems{gap:6px;justify-content:space-between}
+  /* Gem bank becomes one row: gems packed tight on the left, action buttons (or
+     the AI "thinking" indicator) on the right. */
+  .bank-panel{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+  .gem-token{width:34px;height:34px;font-size:.82rem}
+  .gem-stack{gap:3px}
+  .bank-gems{gap:4px;flex:1 1 auto;justify-content:flex-start}
+  .bank-actions{display:flex;gap:6px;align-items:center;margin-left:auto;flex-shrink:0}
+  .bank-actions .btn{padding:9px 14px}
+
+  /* L3 / L2 / L1 share a single box, rows tight together. */
+  .levels{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:8px;gap:4px}
+  .level-panel{background:none;border:none;border-radius:0;padding:0}
+  .level-row{overflow-x:visible;margin:0;padding:2px 0}
 
   /* Compact player panels: cards + gems always shown via the summary row; the
      full pill detail is replaced by it, and only reserved cards hide behind the
@@ -1143,6 +1152,34 @@ export default function SpenderApp() {
 		);
 	}
 
+	// The Take/Buy/✕ controls. Rendered in the desktop action bar AND (on mobile)
+	// inline with the gem bank — shared so the logic lives in one place.
+	function renderActionButtons() {
+		if (game.phase === "over" || !myTurn) return null;
+		if (selectedGems.length > 0) return (
+			<>
+				<button className="btn btn-gold" onClick={handleTakeGems}>Take {selectedGems.length}</button>
+				<button className="btn btn-ghost" onClick={() => setSelectedGems([])}>✕</button>
+			</>
+		);
+		if (selectedCard?.source === "deck") return (
+			<>
+				{me?.reserved?.length >= 3 && <span style={{ color: "var(--text-muted)", fontSize: ".82rem" }}>Reserved slots full</span>}
+				<button className="btn btn-ghost" onClick={() => setSelectedCard(null)}>✕</button>
+			</>
+		);
+		if (selectedCard && selectedCard.source !== "deck") {
+			const affordable = canAfford(selectedCard.card.cost, me?.tokens || emptyGems(), myBonuses);
+			return (
+				<>
+					{affordable && <button className="btn btn-gold" onClick={() => handleBuy(selectedCard.card)}>Buy</button>}
+					<button className="btn btn-ghost" onClick={() => setSelectedCard(null)}>✕</button>
+				</>
+			);
+		}
+		return null;
+	}
+
 	function getHint() {
 		if (!myTurn) return `Waiting for ${displayName(roomData?.players?.[game?.turn] || "opponent")}…`;
 		const slotsFull = (me?.reserved?.length || 0) >= 3;
@@ -1565,35 +1602,11 @@ export default function SpenderApp() {
 									: <span className="action-hint">{getHint()}</span>
 							}
 							<div className="action-bar-btns">
-								{myTurn && selectedGems.length > 0 ? (
-									<>
-										<button className="btn btn-gold" onClick={handleTakeGems}>
-											Take {selectedGems.length}
-										</button>
-										<button className="btn btn-ghost" onClick={() => setSelectedGems([])}>✕</button>
-									</>
-								) : myTurn && selectedCard?.source === "deck" ? (
-									<>
-										{me?.reserved?.length >= 3 &&
-											<span style={{ color: "var(--text-muted)", fontSize: ".82rem" }}>Reserved slots full</span>
-										}
-										<button className="btn btn-ghost" onClick={() => setSelectedCard(null)}>✕</button>
-									</>
-								) : myTurn && selectedCard && selectedCard.source !== "deck" ? (() => {
-									const affordable = canAfford(selectedCard.card.cost, me?.tokens || emptyGems(), myBonuses);
-									return (
-										<>
-											{affordable && <button className="btn btn-gold" onClick={() => handleBuy(selectedCard.card)}>Buy</button>}
-											<button className="btn btn-ghost" onClick={() => setSelectedCard(null)}>✕</button>
-										</>
-									);
-								})() : (
-									<button className="btn btn-ghost action-bar-spacer" aria-hidden="true" tabIndex={-1}>{"✕"}</button>
-								)}
+								{renderActionButtons() || <button className="btn btn-ghost action-bar-spacer" aria-hidden="true" tabIndex={-1}>{"✕"}</button>}
 							</div>
 						</div>
 
-						<div className="panel">
+						<div className="panel bank-panel">
 							<div className="panel-title">Gem Bank</div>
 							<div className="bank-gems">
 								{[...GEM_COLORS, "gold"].map(c => {
@@ -1630,10 +1643,18 @@ export default function SpenderApp() {
 									);
 								})}
 							</div>
+							{/* Mobile only (CSS): turn-action controls sit next to the gems
+							    instead of in a separate bar. */}
+							<div className="bank-actions">
+								{aiThinking
+									? <span className="ai-thinking"><span className="think-dot"/><span className="think-dot"/><span className="think-dot"/> thinking…</span>
+									: renderActionButtons()}
+							</div>
 						</div>
 
+						<div className="levels">
 						{["L3", "L2", "L1"].map((lk, i) => (
-							<div key={lk} className="panel">
+							<div key={lk} className="panel level-panel">
 								<div className="level-row">
 									<div className={`deck-pile${!myTurn ? " disabled" : ""}${reserveArmed ? " reserve-ready" : ""}${selectedCard?.source === "deck" && selectedCard?.deckLevel === 3 - i ? " selected" : ""}`}
 										onClick={() => {
@@ -1651,6 +1672,7 @@ export default function SpenderApp() {
 								</div>
 							</div>
 						))}
+						</div>
 
 						<div className="panel">
 							<div className="panel-title">Nobles</div>
