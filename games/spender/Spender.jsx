@@ -351,10 +351,12 @@ const css = baseCss + `
 @media(min-width:901px){
   /* 3 columns: vertical nobles | big-card board | vertical gem bank. The player
      sidebar is the outer grid's 2nd column, so L-to-R: nobles, cards, bank, players. */
-  .game-main{display:grid;grid-template-columns:auto 1fr 156px;gap:16px;align-items:start;--card-w:142px;--card-h:194px}
+  /* align-items:center so the shorter nobles + gem columns line up vertically
+     with the tall card board instead of floating at the top. */
+  .game-main{display:grid;grid-template-columns:auto 1fr 156px;gap:16px;align-items:center;--card-w:142px;--card-h:194px}
   .game-main>.nobles-panel{grid-column:1}
   .game-main>.levels{grid-column:2}
-  .bank-panel{grid-column:3;align-self:start}
+  .bank-panel{grid-column:3}
 
   /* Nobles: vertical stack to the left of the decks, 1.5x larger. */
   .nobles-row{flex-direction:column;align-items:stretch;gap:9px}
