@@ -154,7 +154,10 @@ const css = baseCss + `
 .copy-hint{font-size:.75rem;color:var(--text-muted);font-style:italic;margin-bottom:12px}
 
 /* ─── Game layout ───────────────────────────────────────────────────────── */
-.game{display:grid;grid-template-columns:1fr 272px;gap:12px;padding:10px;flex:1;min-height:0;width:100%;max-width:100%;overflow-x:hidden}
+/* overflow-x:clip (not hidden) keeps stray horizontal overflow contained WITHOUT
+   making .game a scroll container — hidden made it one, which broke the sticky
+   action bar's offset (it was measured against .game, not the viewport). */
+.game{display:grid;grid-template-columns:1fr 272px;gap:12px;padding:10px;flex:1;min-height:0;width:100%;max-width:100%;overflow-x:clip}
 @media(max-width:900px){.game{grid-template-columns:1fr}}
 /* min-width:0 stops a grid track's implicit min-width:auto from growing past the
    viewport when a child (e.g. the horizontally-scrolling card rows) is wide —
@@ -336,12 +339,17 @@ const css = baseCss + `
   .game-main{gap:8px}
   .game-sidebar{gap:8px}
   .panel{padding:10px}
-  .panel-title{margin-bottom:8px}
+  /* Drop the section labels (Gem Bank / Nobles / Players) on mobile — the
+     content is self-evident and they only cost vertical space. The move log's
+     header (.log-head) is kept: it doubles as the expand control. */
+  .game .panel-title:not(.log-head){display:none}
 
   /* Action bar sticks just under the fixed nav so turn + Take/Buy stay visible
      while you scroll the cards. */
   .action-bar{flex-wrap:wrap;position:sticky;top:calc(env(safe-area-inset-top,0px) + 48px);z-index:40;box-shadow:0 6px 14px rgba(0,0,0,.35);min-height:0;padding:8px 12px}
   .action-hint{flex-basis:100%;order:10;white-space:normal}
+  /* Push the buttons to the right edge with no phantom min-width gap. */
+  .action-bar-btns{min-width:0;margin-left:auto}
 
   /* Slightly smaller bank tokens so all 6 + counts sit comfortably in one row. */
   .gem-token{width:38px;height:38px;font-size:.88rem}
@@ -355,12 +363,10 @@ const css = baseCss + `
   .player-panel.expanded .player-detail{display:block}
   .players-area{gap:6px}
 
-  /* Collapsible move log. */
-  .log-head{cursor:pointer;display:flex;align-items:center;gap:6px;margin-bottom:0}
-  .log-caret{display:inline}
-  .log-panel.open .log-head{margin-bottom:8px}
-  .log-panel .move-log{display:none}
-  .log-panel.open .move-log{display:flex}
+  /* Move log: the most recent entry stays visible; tap to expand the rest. */
+  .log-head{cursor:pointer;display:flex;align-items:center;gap:6px;margin-bottom:8px}
+  .log-caret{display:inline;margin-left:auto}
+  .log-panel:not(.open) .log-entry:not(:first-child){display:none}
 
   /* Tighter nobles so the row stays one screen-width. */
   .noble{width:62px;min-height:62px;padding:5px}
