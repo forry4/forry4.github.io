@@ -237,6 +237,7 @@ const css = baseCss + `
 .noble-points{font-family:'Cinzel',serif;font-size:1rem;font-weight:700;color:var(--gold)}
 .noble-req{display:flex;flex-direction:column;gap:2px;width:100%}
 .noble-req-row{display:flex;gap:3px;align-items:center;font-size:.65rem;color:var(--text-dim);font-family:'Cinzel',serif}
+.noble-req-dot{width:8px;height:8px;border-radius:50%;border:1px solid rgba(255,255,255,.12);flex-shrink:0}
 
 /* ─── Action bar ────────────────────────────────────────────────────────── */
 /* The turn/action bar is removed on all sizes now — the Take/Buy/✕ controls live
@@ -348,13 +349,24 @@ const css = baseCss + `
    player sidebar). The Take/Buy/✕ controls move to the top of the gem bank, and
    cards get much larger (--card-w/--card-h). */
 @media(min-width:901px){
-  .game-main{display:grid;grid-template-columns:1fr 156px;gap:16px;align-items:start;--card-w:142px;--card-h:194px}
-  .game-main>.levels{grid-column:1}
+  /* 3 columns: vertical nobles | big-card board | vertical gem bank. The player
+     sidebar is the outer grid's 2nd column, so L-to-R: nobles, cards, bank, players. */
+  .game-main{display:grid;grid-template-columns:auto 1fr 156px;gap:16px;align-items:start;--card-w:142px;--card-h:194px}
   .game-main>.nobles-panel{grid-column:1}
-  .bank-panel{grid-column:2;grid-row:1 / -1;align-self:start}
+  .game-main>.levels{grid-column:2}
+  .bank-panel{grid-column:3;align-self:start}
 
-  /* Vertical gem bank with the action buttons stacked at the top. */
-  .bank-gems{flex-direction:column;align-items:center;gap:12px}
+  /* Nobles: vertical stack to the left of the decks, 1.8x larger. */
+  .nobles-row{flex-direction:column;align-items:stretch;gap:10px}
+  .noble{width:130px;min-height:130px;padding:11px;gap:7px}
+  .noble-points{font-size:1.8rem}
+  .noble-req-row{font-size:1.05rem;gap:5px}
+  .noble-req-dot{width:15px;height:15px}
+
+  /* Vertical gem bank with the action buttons stacked at the top; gems 1.8x. */
+  .bank-gems{flex-direction:column;align-items:center;gap:16px}
+  .bank-gems .gem-token{width:76px!important;height:76px!important;font-size:1.7rem!important}
+  .bank-gems .gem-count{font-size:1.2rem}
   .bank-actions-top{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-bottom:12px}
   .bank-actions-top .btn{padding:8px 12px;font-size:.8rem}
 
@@ -495,7 +507,7 @@ function NobleView({ noble, claimedBy }) {
 			<div className="noble-req">
 				{Object.entries(noble.req).map(([c, n]) => (
 					<div key={c} className="noble-req-row">
-						<div style={{ width: 8, height: 8, borderRadius: "50%", background: GEM_HEX[c], border: "1px solid rgba(255,255,255,.12)" }} />
+						<div className="noble-req-dot" style={{ background: GEM_HEX[c] }} />
 						<span>{n}</span>
 					</div>
 				))}
