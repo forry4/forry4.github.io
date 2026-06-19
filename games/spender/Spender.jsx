@@ -319,6 +319,9 @@ const css = baseCss + `
    per-flyer --dx/--dy/--s0/--s1 set the trip + start/end scale. */
 .fly-layer{position:fixed;inset:0;pointer-events:none;z-index:90}
 .fly-gem{position:fixed;border-radius:50%;border:2px solid rgba(255,255,255,.3);box-shadow:0 2px 10px rgba(0,0,0,.55);animation:fly .42s ease both;will-change:transform,opacity}
+.fly-card{position:fixed;border-radius:8px;background:var(--surface2);border:2px solid var(--border);box-shadow:0 6px 20px rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:space-between;padding:6px 8px;overflow:hidden;transform-origin:center;animation:fly .5s ease both;will-change:transform,opacity}
+.fly-card-pt{font-family:'Cinzel',serif;font-weight:700;color:var(--gold);font-size:1.3rem;line-height:1}
+.fly-card-dot{width:18px;height:18px;border-radius:50%;border:1px solid rgba(255,255,255,.3);flex-shrink:0}
 @keyframes fly{from{transform:translate(0,0) scale(var(--s0));opacity:1}to{transform:translate(var(--dx),var(--dy)) scale(var(--s1));opacity:.5}}
 
 /* ─── AI thinking dots ──────────────────────────────────────────────────── */
@@ -511,7 +514,7 @@ function GemToken({ color, size = 42 }) {
 	);
 }
 
-function CardView({ card, selected, affordable, needsGold, disabled, onClick, compact, aiValue }) {
+function CardView({ card, selected, affordable, needsGold, disabled, onClick, compact, aiValue, dataPos }) {
 	// An opponent's blind deck-top reserve is hidden info — show a face-down back, not the card.
 	if (card.hidden) {
 		return (
@@ -522,7 +525,7 @@ function CardView({ card, selected, affordable, needsGold, disabled, onClick, co
 		);
 	}
 	return (
-		<div
+		<div data-pos={dataPos}
 			className={`card${compact ? " card-compact" : ""}${selected ? " selected" : ""}${affordable ? (needsGold ? " affordable-gold" : " affordable") : ""}${disabled ? " disabled" : ""}`}
 			onClick={disabled ? undefined : onClick}
 		>
@@ -945,34 +948,64 @@ export default function SpenderApp() {
 	//    reserve-gold (bank->you, shrink) for every player including the AI. ──────
 	const [flyers, setFlyers] = useState([]);
 	const prevPlayersRef = useRef(null);
+	const prevBoardRef = useRef(null);
 	const prevMovesLenRef = useRef(0);
 	const flyIdRef = useRef(0);
 	useEffect(() => {
 		const players = game?.players;
 		if (!players) return;
 		const prev = prevPlayersRef.current;
+		const prevBoard = prevBoardRef.current;
 		const movesLen = game?.moves?.length || 0;
 		const prevMovesLen = prevMovesLenRef.current;
+		// Snapshot players (tokens + purchased ids) + board slot ids for next diff.
 		const snap = {};
-		for (const pid of Object.keys(players)) snap[pid] = { ...(players[pid].tokens || {}) };
+		for (const pid of Object.keys(players)) {
+			snap[pid] = { tokens: { ...(players[pid].tokens || {}) }, purchased: (players[pid].purchased || []).map(c => c.id) };
+		}
+		const boardSnap = {};
+		for (const lk of ["L3", "L2", "L1"]) boardSnap[lk] = (game.board?.[lk] || []).map(c => c ? c.id : null);
 		prevPlayersRef.current = snap;
+		prevBoardRef.current = boardSnap;
 		prevMovesLenRef.current = movesLen;
 		// Only animate exactly one new move (avoids a burst on load/reconnect).
 		if (!prev || movesLen !== prevMovesLen + 1) return;
 
 		const ALL = [...GEM_COLORS, "gold"];
-		const specs = [];
+		const specs = [];   // gem moves
 		for (const pid of Object.keys(players)) {
 			const before = prev[pid];
 			if (!before) continue;
 			const now = players[pid].tokens || {};
 			for (const c of ALL) {
-				const delta = (now[c] || 0) - (before[c] || 0);
+				const delta = (now[c] || 0) - (before.tokens[c] || 0);
 				if (delta > 0) specs.push({ pid, color: c, count: delta, grow: false });   // bank -> player
 				else if (delta < 0) specs.push({ pid, color: c, count: -delta, grow: true }); // player -> bank
 			}
 		}
-		if (!specs.length) return;
+
+		// A bought card: a player's purchased grew. Find the new card + the board
+		// slot it came from (so it can fly from there to the buyer's box).
+		let cardFly = null;
+		for (const pid of Object.keys(players)) {
+			const before = prev[pid];
+			if (!before) continue;
+			const nowPurchased = players[pid].purchased || [];
+			if (nowPurchased.length > before.purchased.length) {
+				const beforeIds = new Set(before.purchased);
+				const bought = nowPurchased.find(c => !beforeIds.has(c.id));
+				if (bought) {
+					let pos = null;
+					if (prevBoard) for (const lk of ["L3", "L2", "L1"]) {
+						const idx = (prevBoard[lk] || []).indexOf(bought.id);
+						if (idx >= 0) { pos = `${lk}-${idx}`; break; }
+					}
+					cardFly = { pid, card: bought, pos };
+				}
+			}
+		}
+
+		if (!specs.length && !cardFly) return;
 
 		const raf = requestAnimationFrame(() => {
 			const made = [];
@@ -991,9 +1024,26 @@ export default function SpenderApp() {
 				const n = Math.min(s.count, 5);
 				for (let i = 0; i < n && total < 8; i++, total++) {
 					made.push({
-						id: ++flyIdRef.current, color: s.color, size,
+						id: ++flyIdRef.current, kind: "gem", color: s.color, size,
 						x: from.x, y: from.y, dx: to.x - from.x, dy: to.y - from.y,
 						s0: s.grow ? 0.35 : 1, s1: s.grow ? 1 : 0.35, delay: i * 55,
+					});
+				}
+			}
+			// Bought card flies from its board slot to the buyer's box, shrinking.
+			if (cardFly && cardFly.pos) {
+				const slotEl = document.querySelector(`.level-row [data-pos="${cardFly.pos}"]`);
+				const boxEl = document.querySelector(`.player-panel[data-pid="${cardFly.pid}"]`);
+				if (slotEl && boxEl) {
+					const sr = slotEl.getBoundingClientRect();
+					const xr = boxEl.getBoundingClientRect();
+					const cx = sr.left + sr.width / 2, cy = sr.top + sr.height / 2;
+					const boxC = { x: xr.left + xr.width / 2, y: xr.top + xr.height / 2 };
+					made.push({
+						id: ++flyIdRef.current, kind: "card",
+						color: cardFly.card.bonus, points: cardFly.card.points,
+						x: sr.left, y: sr.top, w: Math.round(sr.width), h: Math.round(sr.height),
+						dx: boxC.x - cx, dy: boxC.y - cy, s0: 1, s1: 0.22, delay: 0,
 					});
 				}
 			}
@@ -1001,7 +1051,7 @@ export default function SpenderApp() {
 			setFlyers(f => [...f, ...made]);
 			const ids = new Set(made.map(m => m.id));
 			const maxDelay = made.reduce((m, x) => Math.max(m, x.delay), 0);
-			setTimeout(() => setFlyers(f => f.filter(x => !ids.has(x.id))), 480 + maxDelay);
+			setTimeout(() => setFlyers(f => f.filter(x => !ids.has(x.id))), 560 + maxDelay);
 		});
 		return () => cancelAnimationFrame(raf);
 	}, [game]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1231,6 +1281,7 @@ export default function SpenderApp() {
 				selected={isSelected}
 				affordable={affordable && myTurn}
 				needsGold={needsGold && myTurn}
+				dataPos={opts.dataPos}
 				aiValue={(authUser?.is_admin && showAiVals) ? roomData?.ai_card_values?.[card.id] : null}
 				disabled={opts.disabled}
 				onClick={() => {
@@ -1836,7 +1887,7 @@ export default function SpenderApp() {
 										<span style={{ fontSize: ".62rem", letterSpacing: ".08em" }}>DECK</span>
 										<span className="deck-remaining">{game.decks?.[lk]?.length || 0}</span>
 									</div>
-									{(game.board?.[lk] || []).map((c, j) => c ? renderCard(c) : <div key={j} className="card-slot" />)}
+									{(game.board?.[lk] || []).map((c, j) => c ? renderCard(c, { dataPos: `${lk}-${j}` }) : <div key={j} className="card-slot" data-pos={`${lk}-${j}`} />)}
 								</div>
 							</div>
 						))}
@@ -1904,7 +1955,16 @@ export default function SpenderApp() {
 
 				{flyers.length > 0 && (
 					<div className="fly-layer">
-						{flyers.map(f => (
+						{flyers.map(f => f.kind === "card" ? (
+							<div key={f.id} className="fly-card" style={{
+								left: f.x, top: f.y, width: f.w, height: f.h, borderColor: GEM_HEX[f.color],
+								"--dx": `${f.dx}px`, "--dy": `${f.dy}px`, "--s0": f.s0, "--s1": f.s1,
+								animationDelay: `${f.delay}ms`,
+							}}>
+								<span className="fly-card-pt">{f.points || ""}</span>
+								<span className="fly-card-dot" style={{ background: GEM_HEX[f.color] }} />
+							</div>
+						) : (
 							<div key={f.id} className="fly-gem" style={{
 								left: f.x - f.size / 2, top: f.y - f.size / 2, width: f.size, height: f.size,
 								background: GEM_HEX[f.color],
