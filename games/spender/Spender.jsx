@@ -358,13 +358,16 @@ const css = baseCss + `
   /* align-content:start keeps the rows packed at the top — without it grid's
      default stretches the auto rows to fill a tall viewport, inflating the top
      row into a big gap above the cards. */
-  .game-main{display:grid;grid-template-columns:auto 1fr 132px;column-gap:16px;row-gap:10px;align-items:start;align-content:start;--card-w:142px;--card-h:194px}
+  /* Explicit grid-template-rows is REQUIRED: with auto/implicit rows, the bank's
+     grid-row:1/-1 resolved to a single row (-1 == line 1) so it never spanned
+     down to the cards, and the cards got pushed into a separate band (the gap). */
+  .game-main{display:grid;grid-template-columns:auto 1fr 132px;grid-template-rows:auto auto;column-gap:16px;row-gap:10px;align-items:start;align-content:start;--card-w:142px;--card-h:194px}
   .game-main>.nobles-panel{grid-column:1;grid-row:1}
   .actions-panel{grid-column:2;grid-row:1;display:flex;flex-direction:column;justify-content:center;gap:12px}
   .game-main>.levels{grid-column:1 / 3;grid-row:2}
-  /* Bank stretches to fill the nobles+cards height so it runs down to the bottom
-     of the card board (and gems spread over that height). */
-  .bank-panel{grid-column:3;grid-row:1 / -1;align-self:stretch;display:flex;flex-direction:column}
+  /* Bank spans both rows (explicit span) + stretches, so it runs down to the
+     bottom of the card board (gems spread over that height). */
+  .bank-panel{grid-column:3;grid-row:1 / span 2;align-self:stretch;display:flex;flex-direction:column}
 
   /* Nobles: horizontal row on top of the cards, 1.5x larger; no title. */
   .nobles-panel .panel-title{display:none}
