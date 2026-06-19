@@ -364,9 +364,13 @@ const css = baseCss + `
   /* Top row = nobles box + an actions box (hint + Take/Buy/✕) side by side, on
      top of the card board; a vertical gem bank spans to their right; the player
      sidebar is the outer grid's wide 2nd column. L-to-R: nobles/cards, bank, players. */
-  .game{grid-template-columns:1fr 460px}
-  /* Sidebar is two full-height columns: players (left) + recent moves (far right). */
-  .game-sidebar{display:grid;grid-template-columns:1.1fr 0.9fr;column-gap:14px;align-items:stretch}
+  /* Cap the whole game to the viewport height (minus the fixed nav) so nothing —
+     especially the recent-moves list — grows the page past the window; internal
+     sections (the move log) scroll instead. */
+  .game{grid-template-columns:1fr 560px;flex:none;height:calc(100vh - 48px);overflow:hidden}
+  /* Sidebar = two full-height columns: players (left, wider so 6 tokens fit one
+     row) + recent moves (far right). */
+  .game-sidebar{display:grid;grid-template-columns:1.6fr 1fr;column-gap:14px;align-items:stretch}
   /* Both pinned to row 1 — without an explicit row the descending DOM-order vs
      column-order (log-panel first=col2, players second=col1) made grid's sparse
      flow drop the players to row 2 (moves top-right, players bottom-left). */
@@ -384,7 +388,7 @@ const css = baseCss + `
      down to the cards, and the cards got pushed into a separate band (the gap). */
   /* Row 2 is 1fr so the card board fills the remaining viewport height; the card
      rows then spread to reach the bottom of the screen. */
-  .game-main{display:grid;grid-template-columns:auto 1fr 132px;grid-template-rows:auto 1fr;column-gap:16px;row-gap:10px;align-items:start;--card-w:144px;--card-h:182px}
+  .game-main{display:grid;grid-template-columns:auto 1fr 132px;grid-template-rows:auto 1fr;column-gap:16px;row-gap:10px;align-items:start;--card-w:144px;--card-h:185px}
   .game-main>.nobles-panel{grid-column:1;grid-row:1}
   /* align-self:stretch so the hint box matches the nobles box height in row 1;
      hint on the left, buttons pushed to the right edge of the box. */
@@ -406,7 +410,7 @@ const css = baseCss + `
   /* Actions box: hint takes the left, bigger buttons pinned to the right. */
   .actions-panel .action-hint{flex:1;font-size:1rem;white-space:normal;color:var(--text-dim);font-style:italic}
   .actions-panel-btns{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-left:auto;flex-shrink:0}
-  .actions-panel-btns .btn{padding:13px 26px;font-size:.98rem}
+  .actions-panel-btns .btn{padding:16px 34px;font-size:1.15rem}
 
   /* Vertical gem bank; gems clustered toward the vertical center, closer together. */
   .bank-gems{flex-direction:column;align-items:center;flex:1;justify-content:center;gap:18px}
@@ -1835,7 +1839,8 @@ export default function SpenderApp() {
 						<div className="panel bank-panel">
 							<div className="panel-title">Gem Bank</div>
 							<div className="bank-gems">
-								{[...GEM_COLORS, "gold"].map(c => {
+								{/* gold (the wild/reserve token) first so it sits above white */}
+								{["gold", ...GEM_COLORS].map(c => {
 									const count = game.bank[c] || 0;
 									const isGold = c === "gold";
 									const selCount = selectedGems.filter(x => x === c).length;
