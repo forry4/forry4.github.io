@@ -1271,7 +1271,11 @@ DESKTOP look is added in `@media(min-width:901px)`** (an inversion worth knowing
 editing base affects phone/tablet, not desktop):
 - **Desktop (`@media(min-width:901px)`)**: `.app.game-screen{height:100vh;overflow:hidden}`
   locks the screen to the window (no page scroll). `.game` is a 2-col grid
-  `1fr 560px` (board | sidebar). `.game-main` is a 3-col / 2-row grid
+  `1fr 560px` (board | sidebar) **with `grid-template-rows:minmax(0,1fr)`** — that
+  `minmax(0,…)` is essential: an auto row grows to its tallest content (the
+  recent-moves list) and pushes past the screen, but bounding it to the viewport
+  makes the sidebar a fixed height so the **move log scrolls internally** and the
+  player/moves boxes never resize as moves accumulate. `.game-main` is a 3-col / 2-row grid
   `grid-template-columns:auto 1fr 132px; grid-template-rows:auto 1fr`: row 1 =
   nobles box (horizontal, `data`-less) + an **actions box** (turn hint + Take/Buy/✕,
   right-aligned); row 2 = the **levels** (`grid-column:1/3`, `1fr` so the 3 card rows
