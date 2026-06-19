@@ -354,9 +354,12 @@ const css = baseCss + `
   /* align-items:center so the shorter nobles + gem columns line up vertically
      with the tall card board instead of floating at the top. */
   .game-main{display:grid;grid-template-columns:auto 1fr 156px;gap:16px;align-items:center;--card-w:142px;--card-h:194px}
-  .game-main>.nobles-panel{grid-column:1}
-  .game-main>.levels{grid-column:2}
-  .bank-panel{grid-column:3}
+  /* All three pinned to row 1 (cols 1/2/3). Without explicit rows, the DOM order
+     (bank, then cards, then nobles = descending columns) made grid's sparse flow
+     drop each to a new row -> a diagonal staircase. */
+  .game-main>.nobles-panel{grid-column:1;grid-row:1}
+  .game-main>.levels{grid-column:2;grid-row:1}
+  .bank-panel{grid-column:3;grid-row:1}
 
   /* Nobles: vertical stack to the left of the decks, 1.5x larger. */
   .nobles-row{flex-direction:column;align-items:stretch;gap:9px}
