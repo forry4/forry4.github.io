@@ -5,19 +5,26 @@ service's /move with the shared secret, and renders variant S's move in an injec
 The secret is filled in CLIENT-SIDE on the page (typed by the user) so it is never sent to or
 stored by this server; the generated text is what the user copies and shares with the friend.
 
-Optional think-time: append ?t=<seconds> to the /move URL to override the server's default budget
-(clamped server-side). The generator page exposes this as a "seconds to think" field.
+The three editable knobs (SECS think-time, SVC url, KEY secret) are hoisted to the FRONT of the
+one-liner so they're easy to find/edit. SECS=0 means "use the server default"; otherwise it's
+appended as ?t=<SECS> (clamped server-side to 1-60s).
 """
 from __future__ import annotations
 import json
 
-# Overlay bookmarklet. Placeholders __MOVE_URL__ / __SECRET__ are filled in (here or in the page).
-# ASCII-only; HTML built with backtick templates so single quotes inside attributes don't clash.
+# Overlay bookmarklet. Placeholders __SECS__ / __MOVE_URL__ / __SECRET__ are filled in (here or in
+# the page). Config vars come FIRST so they're trivial to find. ASCII-only; HTML uses backtick
+# templates so single quotes inside attributes don't clash with the surrounding Python double quotes.
 BOOKMARKLET_TEMPLATE = (
-    "javascript:(function(){try{"
+    "javascript:(function(){"
+    "var SECS=__SECS__;"                         # <-- seconds for Steve to think (0=default, max 60)
+    "var SVC='__MOVE_URL__';"                    # <-- WWSD service /move URL
+    "var KEY='__SECRET__';"                      # <-- shared secret
+    "try{"
     "var g=Meteor.connection._mongo_livedata_collections['games'].find().fetch()"
     ".map(function(x){return{status:x.status,settings:x.settings,players:x.players,data:x.data};});"
     "var body=JSON.stringify({games:g});"
+    "var url=SVC+(SECS?(SVC.indexOf('?')>=0?'&':'?')+'t='+SECS:'');"
     "var b=document.getElementById('wwsd');"
     "if(!b){b=document.createElement('div');b.id='wwsd';"
     "b.style.cssText='position:fixed;top:12px;right:12px;z-index:2147483647;max-width:340px;"
@@ -26,8 +33,7 @@ BOOKMARKLET_TEMPLATE = (
     "document.body.appendChild(b);b.onclick=function(e){if(e.target.id==='wx')b.remove();};}"
     "var head=`<b style='color:#e8c170'>WWSD</b> <span id=wx style='float:right;cursor:pointer'>x</span>`;"
     "b.innerHTML=head+`<div style='margin-top:6px'>thinking... (first call can take ~40s to wake the server)</div>`;"
-    "fetch('__MOVE_URL__',{method:'POST',headers:{'Content-Type':'application/json',"
-    "'X-WWSD-Secret':'__SECRET__'},body:body})"
+    "fetch(url,{method:'POST',headers:{'Content-Type':'application/json','X-WWSD-Secret':KEY},body:body})"
     ".then(function(r){return r.json();}).then(function(d){"
     "if(!d.ok){b.innerHTML=head+`<div style='margin-top:6px'>`+(d.message||'no result')+`</div>`;return;}"
     "var h=`<div style='margin-top:6px;font-weight:700;color:#e8c170'>`+d.recommendation+`</div>`"
@@ -41,12 +47,12 @@ BOOKMARKLET_TEMPLATE = (
 
 
 def build_bookmarklet(move_url: str, secret: str, seconds=None) -> str:
-    """Fill the template with a concrete /move URL + secret. `seconds`, if given, is appended as a
-    ?t= think-time override (used by tests / for direct generation)."""
-    url = move_url
-    if seconds:
-        url += ("&" if "?" in url else "?") + "t=" + str(seconds)
-    return BOOKMARKLET_TEMPLATE.replace("__MOVE_URL__", url).replace("__SECRET__", secret)
+    """Fill the template. `seconds` becomes the leading `var SECS=` (0 => server default)."""
+    secs = int(seconds) if seconds else 0
+    return (BOOKMARKLET_TEMPLATE
+            .replace("__SECS__", str(secs))
+            .replace("__MOVE_URL__", move_url)
+            .replace("__SECRET__", secret))
 
 
 def page_html() -> str:
@@ -77,7 +83,7 @@ def page_html() -> str:
  <label>Seconds for Steve to think (optional; blank = server default ~3.5s, max 60 &mdash; longer = stronger but slower)</label>
  <input id="secs" placeholder="e.g. 15">
  <button id="gen">Build bookmarklet</button>
- <label>Copy this and save it as a bookmark named "WWSD" (share it with your friend):</label>
+ <label>Copy this and save it as a bookmark named "WWSD" (the think-time is the <code>SECS=</code> at the very front, easy to tweak):</label>
  <textarea id="bm" readonly placeholder="(generated here)"></textarea>
 </div>
 <div class="box">
@@ -91,12 +97,13 @@ def page_html() -> str:
 const TPL = __TPL__;
 const BASE = location.origin + '/move';
 function esc(s){return (s+'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
-function moveUrl(){ const s=document.getElementById('secs').value.trim();
-  return s ? BASE+(BASE.indexOf('?')>=0?'&':'?')+'t='+encodeURIComponent(s) : BASE; }
+function secsVal(){ return parseInt(document.getElementById('secs').value.trim())||0; }
+function moveUrl(){ const s=secsVal(); return s ? BASE+(BASE.indexOf('?')>=0?'&':'?')+'t='+s : BASE; }
 document.getElementById('gen').onclick=()=>{
   const sec=document.getElementById('secret').value.trim();
-  document.getElementById('bm').value = sec ? TPL.replace('__MOVE_URL__',moveUrl()).replace('__SECRET__',sec)
-                                            : 'enter your secret first';
+  document.getElementById('bm').value = sec
+    ? TPL.replace('__SECS__',secsVal()).replace('__MOVE_URL__',BASE).replace('__SECRET__',sec)
+    : 'enter your secret first';
 };
 document.getElementById('go').onclick=async()=>{
   const out=document.getElementById('out'); const sec=document.getElementById('secret').value.trim();

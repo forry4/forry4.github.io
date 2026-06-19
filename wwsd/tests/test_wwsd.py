@@ -91,14 +91,15 @@ def test_process_move_secret_and_json_guards():
 def test_build_bookmarklet_fills_placeholders():
     bm = B.build_bookmarklet("https://wwsd.example.com/move", "s3cr3t")
     assert "https://wwsd.example.com/move" in bm and "s3cr3t" in bm
-    assert "__MOVE_URL__" not in bm and "__SECRET__" not in bm
+    assert "__MOVE_URL__" not in bm and "__SECRET__" not in bm and "__SECS__" not in bm
     assert bm.startswith("javascript:")
-    assert "?t=" not in bm                                       # no think-time query by default
+    assert "var SECS=0;" in bm                                   # default think-time (server default)
 
 
-def test_build_bookmarklet_with_seconds_appends_t():
+def test_build_bookmarklet_seconds_front_loaded():
     bm = B.build_bookmarklet("https://wwsd.example.com/move", "s3cr3t", seconds=15)
-    assert "https://wwsd.example.com/move?t=15" in bm
+    assert "var SECS=15;" in bm
+    assert bm.index("SECS=15") < bm.index("https://wwsd.example.com/move")  # config is at the front
 
 
 def test_budget_clamps_t_param():
