@@ -391,11 +391,15 @@ imports the old arrangement required.
   the cross-cutting `users` / `admins` / `reconnect_tokens` tables). `DB_PATH`
   defaults to the legacy `games/spender/users.db` for backward-compat (override with
   `SITE_DB_PATH`); in prod Turso is used and this path is only the fallback.
-- **`core/auth.py`** — `gen_token`, `hash_password`/`verify_password` (PBKDF2 + legacy),
-  `create_user`, `authenticate_user`, `get_user_by_session`, the SITE_OWNER/admin
-  identity helpers (`site_owner_name`, `grant_admin`, `is_admin_id`, `is_site_owner`),
-  and the reconnect-token helpers (`create`/`validate`/`mark_used`). Imports
-  `get_db_conn` from `core.db`.
+- **`core/auth.py`** — `gen_token` (**CSPRNG via `secrets`** — see Security hardening),
+  `hash_password`/`verify_password` (PBKDF2 + legacy), `create_user`, `authenticate_user`,
+  `get_user_by_session`, `validate_credentials` (registration input rules), the SITE_OWNER/admin
+  identity helpers (`site_owner_name`, `grant_admin`, `is_admin_id`, `is_site_owner`), and the
+  reconnect-token helpers (`create`/`validate`/`mark_used` + `cleanup_reconnect_tokens`/
+  `maybe_cleanup_reconnect_tokens`). Imports `get_db_conn` from `core.db`.
+- **`core/ratelimit.py`** — `SlidingWindowLimiter` (in-memory per-process abuse throttle; used by the
+  auth routes). **`core/config.py`** — `cors_allowed_origins()` (env-driven CORS allowlist, no
+  web-framework deps so both `app.py` and the CoC sub-app share it).
 - **Auth correctness (hard-won, June 2026 — DO NOT regress):**
   - **`is_admin` is computed the SAME way on every path** — `is_admin_id(conn, id)` (a plain
     `SELECT 1 FROM admins WHERE user_id=?`) OR a live `SITE_OWNER` username match. `get_user_by_session`
@@ -410,6 +414,32 @@ imports the old arrangement required.
     index **`idx_users_name_ci`** (dropping the earlier case-sensitive `idx_users_name`), tolerant of
     pre-existing dups so boot never fails. `authenticate_user` looks up NOCASE too, so login matches
     registration regardless of case.
+- **Security hardening (June 2026 — DO NOT regress):**
+  - **Tokens use a CSPRNG.** `gen_token` uses `secrets.choice`, NOT `random.choices` — it mints
+    session tokens, account ids, reconnect tokens, AND password salts, and `random`'s Mersenne Twister
+    is reconstructable from observed output (predict-the-next-token). Never revert it to `random`.
+  - **Registration input validation.** `validate_credentials(name, password)` returns a human message
+    or `None`: username **1–12 chars, `[A-Za-z0-9]` only**; password **1–16 chars**. Enforced at
+    `/auth/register` ONLY — login stays permissive so pre-existing accounts still sign in (with a guard:
+    reject name>64 / password>128 *unhashed*, a PBKDF2-on-huge-input DoS guard). Frontend input
+    `maxLength` mirrors it (register 12/16; login 64/128, so legacy passwords stay typeable).
+  - **Auth rate limiting** (`core/ratelimit.py` — in-memory, per-process; OK because the Procfile runs
+    a SINGLE uvicorn process). `/auth/login`: 20/5min per IP + 10 **failures**/15min per username (the
+    per-username streak resets on success, so multi-device logins aren't locked out). `/auth/register`:
+    10/hour per IP. Client IP from `X-Forwarded-For` first hop (Render proxy), socket peer otherwise.
+    Over-limit returns `{ok:False, message}` at **HTTP 200** (NOT 429) so the existing frontend error UI
+    shows it. Residual: XFF is client-spoofable to rotate the per-IP key — the per-username failure
+    limiter is the real brute-force defense.
+  - **Session token in the `Authorization: Bearer` header, not the URL.** `bearer_token` (FastAPI
+    dependency in `games/spender/main.py`) reads `Authorization: Bearer <tok>` with a `?token=` query
+    **fallback** (so cached clients don't break mid-deploy). Applied to every session-token route in
+    Spender, Books (injected into `setup_books` as `token_resolver` so books still imports no game), and
+    CoC (a LOCAL `_bearer_token` copy — keeps CoC independent of Spender). The WS path is unchanged: it
+    uses room-meta / reconnect tokens in the message BODY, never the URL. Frontends send the header
+    (Spender 3 fetches, Books 4, CoC 2). Goal: keep the secret out of access/proxy logs + browser history.
+  - **Reconnect-token cleanup.** `cleanup_reconnect_tokens()` deletes used/expired rows;
+    `maybe_cleanup_reconnect_tokens()` throttles to ≤1/h/process and runs opportunistically inside
+    `create_reconnect_token` (short-lived single-use tokens were accumulating forever).
 - **Game retention** (`core/db.py`): `cleanup_stale_games(table)` deletes stale rows
   from a games table (`games` / `coc_games` — same shape) by **last activity
   (`updated_at`)**: an **all-guest** game (no player id present in `users`) after **24h**,
@@ -424,8 +454,10 @@ imports the old arrangement required.
   the Spender-owned `games` table), `games/castles_of_crimson/main.py` (directly at the
   top — the old lazy shims are gone), and Books (via the injected `get_db_conn`/
   `get_user_by_session` `setup_books` still receives — main passes the core functions).
-- **Tests**: `core/tests/test_db_auth.py` (wrapper + password + admin + `init_core_schema`,
-  in-memory sqlite). CI runs `core/tests/` first; Render watches `core/**/*.py`.
+- **Tests**: `core/tests/test_db_auth.py` (wrapper + password + admin + `init_core_schema` +
+  `gen_token`/`validate_credentials`/reconnect-token cleanup) and `core/tests/test_ratelimit.py`
+  (sliding-window limiter, `now` injected so it's deterministic), in-memory sqlite. CI runs
+  `core/tests/` first; Render watches `core/**/*.py`.
 - **Frontend** (partial, by design): the Vite build was relocated to a neutral top-level
   `webapp/` (no longer under `games/spender/`). The deeper **stateful shell/game split of
   `Spender.jsx` was deliberately SKIPPED** — it's a re-architecture of shared `screen` state
@@ -439,14 +471,27 @@ imports the old arrangement required.
 ### Composition root — top-level `app.py` (Phase 2, done)
 The FastAPI **`app` and the feature wiring no longer live in a game module.** The
 top-level **`app.py`** is the composition root: it creates `app = FastAPI(...)`,
-applies CORS middleware, `include_router`s Spender's routes, `setup_books(...)`,
-and mounts Castles of Crimson at `/coc` (same defensive try/except as before).
+applies CORS + security-headers middleware (see below), `include_router`s Spender's routes,
+`setup_books(...)`, and mounts Castles of Crimson at `/coc` (same defensive try/except as before).
 - `games/spender/main.py` now exposes **`router = APIRouter()`** (all its routes use
   `@router.…`, including the single `/ws/{room}/{player}` websocket) instead of owning
   the app. It still runs `init_db()` at import.
 - **Layering**: `core/` (bottom) → features (`games.spender`, `games.castles_of_crimson`,
   `books`) → `app.py` (top). The composition root depends on features; features don't
   depend on it. `core` depends on neither.
+- **CORS + security headers** (`app.py` + `core/config.py`): CORS is **pinned** to
+  `cors_allowed_origins()` — default `https://forry4.github.io` (GitHub Pages prod; origin =
+  scheme+host, NO path, even though the Vite `base` is `/WebProjects/`) plus localhost dev; override
+  with the **`CORS_ALLOWED_ORIGINS`** env var (comma-separated) for a future custom domain. Methods
+  GET/POST/PUT/OPTIONS, headers Authorization/Content-Type, **no credentials** (token auth, not cookies
+  — so `*`-origin was never a credential leak, but pinning is hygiene). `SecurityHeadersMiddleware`
+  (pure-ASGI, in `app.py`) adds `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+  `Referrer-Policy`, `Strict-Transport-Security` (HSTS), `Permissions-Policy` to EVERY response —
+  **including the mounted `/coc` sub-app**, because the parent ASGI middleware threads `send` down into
+  the mount. CoC's own CORS is aligned to the same list (the parent overrides it when mounted, but it
+  matters if CoC runs standalone). **No CSP on the API** — it serves JSON (CSP guards HTML, which is
+  GitHub Pages' job) and a strict policy would break FastAPI's `/docs` Swagger UI; a frontend `<meta>`
+  CSP is a deferred follow-up.
 - **Deploy entrypoint is unchanged**: `games/spender/app.py` is a thin shim doing
   `from app import app` (absolute import of the top-level module — repo root is on
   sys.path), so Procfile/Dockerfile/render.yaml keep targeting `games.spender.app:app`.
