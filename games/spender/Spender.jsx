@@ -252,6 +252,16 @@ const css = baseCss + `
 .reserved-label{font-size:.62rem;color:var(--text-dim);font-family:'Cinzel',serif;letter-spacing:.06em;margin-bottom:4px;text-transform:uppercase}
 .reserved-row{display:flex;gap:4px;flex-wrap:wrap}
 .gem-total{display:inline-block;font-size:.66rem;color:var(--text);font-family:'Cinzel',serif;font-weight:600;letter-spacing:.03em;margin-top:3px;background:var(--surface3);border:1.5px solid #7a6e58;padding:1px 8px;border-radius:8px;box-shadow:0 0 0 1px rgba(0,0,0,.5)}
+/* Compact mobile player summary + log caret — hidden on desktop (shown only in
+   the max-width:600px block below), so the laptop layout is unchanged. */
+.player-summary{display:none;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}
+.sum-chip{display:inline-flex;align-items:center;gap:3px;font-family:'Cinzel',serif;font-size:.74rem;font-weight:700;color:var(--text)}
+.sum-dot{width:11px;height:11px;border-radius:50%;border:1px solid rgba(255,255,255,.25);flex-shrink:0}
+.sum-noble{color:var(--gold)}
+.sum-gem{color:var(--text-dim)}
+.sum-res{color:var(--text-dim)}
+.sum-caret{margin-left:auto;color:var(--text-dim);font-size:.8rem}
+.log-caret{display:none}
 
 /* ─── Winner ────────────────────────────────────────────────────────────── */
 .winner-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:32px}
@@ -317,10 +327,43 @@ const css = baseCss + `
   .browser-title{font-size:1.6rem}
   .game{padding:6px}
   .game-card{padding:10px 12px}
-  /* Let the turn hint use its own full-width line instead of being squeezed to
-     an ellipsis next to the badges + buttons. */
-  .action-bar{flex-wrap:wrap}
+
+  /* ── Board-first compact mobile game layout ──────────────────────────────
+     The decision surface (action bar -> bank -> cards) leads; players + log
+     drop below. Player panels collapse to one-line summaries; the move log
+     collapses behind a tap. */
+  .game-sidebar{order:0}            /* undo desktop order:-1 -> board comes first */
+  .game-main{gap:8px}
+  .game-sidebar{gap:8px}
+  .panel{padding:10px}
+  .panel-title{margin-bottom:8px}
+
+  /* Action bar sticks just under the fixed nav so turn + Take/Buy stay visible
+     while you scroll the cards. */
+  .action-bar{flex-wrap:wrap;position:sticky;top:calc(env(safe-area-inset-top,0px) + 48px);z-index:40;box-shadow:0 6px 14px rgba(0,0,0,.35);min-height:0;padding:8px 12px}
   .action-hint{flex-basis:100%;order:10;white-space:normal}
+
+  /* Slightly smaller bank tokens so all 6 + counts sit comfortably in one row. */
+  .gem-token{width:38px;height:38px;font-size:.88rem}
+  .bank-gems{gap:6px;justify-content:space-between}
+
+  /* Compact player panels: one-line summary by default, tap to expand detail. */
+  .player-panel{padding:9px 11px}
+  .player-header{margin-bottom:0;cursor:pointer}
+  .player-summary{display:flex}
+  .player-detail{display:none;margin-top:8px}
+  .player-panel.expanded .player-detail{display:block}
+  .players-area{gap:6px}
+
+  /* Collapsible move log. */
+  .log-head{cursor:pointer;display:flex;align-items:center;gap:6px;margin-bottom:0}
+  .log-caret{display:inline}
+  .log-panel.open .log-head{margin-bottom:8px}
+  .log-panel .move-log{display:none}
+  .log-panel.open .move-log{display:flex}
+
+  /* Tighter nobles so the row stays one screen-width. */
+  .noble{width:62px;min-height:62px;padding:5px}
 }
 `;
 
@@ -510,6 +553,10 @@ export default function SpenderApp() {
 	const [toast, setToast] = useState("");
 	const [confirmAbandon, setConfirmAbandon] = useState(false);
 	const [reviewing, setReviewing] = useState(false);  // end-game: viewing final board + log
+	// Mobile-only: per-player expand toggle (compact one-line summaries) + log collapse.
+	// No effect on desktop, where CSS always shows full panels + the move log.
+	const [playerExpanded, setPlayerExpanded] = useState({});
+	const [logOpen, setLogOpen] = useState(false);
 	// Admin-only debug overlay: the per-card AI values (H2's take/engine/point/cost, H's value).
 	// OFF by default; only admins get the toggle, so regular players never see it.
 	const [showAiVals, setShowAiVals] = useState(() => {
@@ -1013,15 +1060,35 @@ export default function SpenderApp() {
 		const score = totalPoints(p.purchased, p.nobles);
 		const isMe = pid === myId;
 		const isActive = game?.turn === pid;
+		// Mobile compact view: your own panel expands by default (you need your
+		// tokens/reserved to act); opponents collapse to the one-line summary.
+		const expanded = playerExpanded[pid] ?? isMe;
+		const toggleExpand = () => setPlayerExpanded(m => ({ ...m, [pid]: !(m[pid] ?? isMe) }));
+		const noblePts = p.nobles.reduce((s, n) => s + n.points, 0);
 		return (
-			<div key={pid} className={`player-panel${isMe ? " me" : ""}${isActive ? " active-turn" : ""}`}>
-				<div className="player-header">
+			<div key={pid} className={`player-panel${isMe ? " me" : ""}${isActive ? " active-turn" : ""}${expanded ? " expanded" : ""}`}>
+				<div className="player-header" onClick={toggleExpand}>
 					<div className="player-name-row">
 						{isActive && <span className="active-dot" />}
 						<span className="player-name">{name}{isMe ? " (you)" : ""}</span>
 					</div>
 					<span className="player-score">{score} pts</span>
 				</div>
+				{/* compact at-a-glance row — shown on mobile only (CSS); bonuses are the
+				    affordability signal you track most, plus gems/nobles/reserved counts. */}
+				<div className="player-summary" onClick={toggleExpand}>
+					{GEM_COLORS.map(c => (bonuses[c] || 0) > 0 && (
+						<span key={c} className="sum-chip">
+							<span className="sum-dot" style={{ background: GEM_HEX[c], borderColor: c === "black" ? "rgba(255,255,255,.45)" : "rgba(255,255,255,.25)" }} />
+							{bonuses[c]}
+						</span>
+					))}
+					{noblePts > 0 && <span className="sum-chip sum-noble">★{noblePts}</span>}
+					<span className="sum-chip sum-gem">{gemTotal(p.tokens)}g</span>
+					{p.reserved?.length > 0 && <span className="sum-chip sum-res">R{p.reserved.length}</span>}
+					<span className="sum-caret">{expanded ? "▾" : "▸"}</span>
+				</div>
+				<div className="player-detail">
 				<div className="player-tokens">
 					{[...GEM_COLORS, "gold"].map(c => (p.tokens[c] || 0) > 0 && (
 						<span key={c} className="token-pill" style={{ background: GEM_HEX[c] + "55", border: `1px solid ${c === "black" ? "rgba(255,255,255,.4)" : GEM_HEX[c]}` }}>
@@ -1048,6 +1115,7 @@ export default function SpenderApp() {
 						<div className="reserved-row">{p.reserved.map(c => renderCard(c, { source: "reserved", readonly: !isMe }))}</div>
 					</>
 				)}
+				</div>
 			</div>
 		);
 	}
@@ -1578,8 +1646,10 @@ export default function SpenderApp() {
 
 					<div className="game-sidebar">
 						{(game.moves?.length > 0) && (
-							<div className="panel">
-								<div className="panel-title">Recent Moves</div>
+							<div className={`panel log-panel${logOpen ? " open" : ""}`}>
+								<div className="panel-title log-head" onClick={() => setLogOpen(o => !o)}>
+									Recent Moves <span className="log-caret">{logOpen ? "▾" : "▸"}</span>
+								</div>
 								<div className="move-log">
 									{(game.moves || []).map((mv, i) => {
 										const { name, action, card } = formatLogMove(mv);
