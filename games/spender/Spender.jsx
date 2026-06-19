@@ -746,7 +746,7 @@ export default function SpenderApp() {
 		try {
 			const openP = fetch(`${HTTP_BASE}/games`).then(r => r.json()).catch(() => ({ games: [] }));
 			const mineP = (user && !user.guest && user.session_token)
-				? fetch(`${HTTP_BASE}/games/mine?token=${user.session_token}`).then(r => r.json()).catch(() => ({ games: [] }))
+				? fetch(`${HTTP_BASE}/games/mine`, { headers: { Authorization: `Bearer ${user.session_token}` } }).then(r => r.json()).catch(() => ({ games: [] }))
 				: Promise.resolve({ games: [] });
 			const [open, mine] = await Promise.all([openP, mineP]);
 			setOpenGames(open.games || []);
@@ -886,8 +886,8 @@ export default function SpenderApp() {
 			try {
 				const ctrl = new AbortController();
 				const t = setTimeout(() => ctrl.abort(), 5000);
-				const res = await fetch(`${HTTP_BASE}/auth/session?token=${encodeURIComponent(stored.session_token)}`,
-					{ signal: ctrl.signal });
+				const res = await fetch(`${HTTP_BASE}/auth/session`,
+					{ signal: ctrl.signal, headers: { Authorization: `Bearer ${stored.session_token}` } });
 				clearTimeout(t);
 				const data = await res.json();
 				if (data?.ok && data.user) {
@@ -1199,8 +1199,8 @@ export default function SpenderApp() {
 		let ok = false;
 		try {
 			const params = new URLSearchParams({ player_id: myId });
-			if (authUser?.session_token) params.set("token", authUser.session_token);
-			const res = await fetch(`${HTTP_BASE}/games/${gameId}/cancel?${params}`, { method: "POST" });
+			const headers = authUser?.session_token ? { Authorization: `Bearer ${authUser.session_token}` } : {};
+			const res = await fetch(`${HTTP_BASE}/games/${gameId}/cancel?${params}`, { method: "POST", headers });
 			const data = await res.json().catch(() => ({}));
 			ok = !!data.ok;
 			if (!ok) setToast(data.message || "Couldn't cancel that game");
@@ -1500,10 +1500,10 @@ export default function SpenderApp() {
 					{authTab !== "guest" ? (
 						<>
 							<input className="auth-field" placeholder="Name" value={authName}
-								onChange={e => setAuthName(e.target.value)} maxLength={20}
+								onChange={e => setAuthName(e.target.value)} maxLength={authTab === "register" ? 12 : 64}
 								onKeyDown={e => e.key === "Enter" && handleAuth()} />
 							<input className="auth-field" placeholder="Password" type="password" value={authPassword}
-								onChange={e => setAuthPassword(e.target.value)} maxLength={64}
+								onChange={e => setAuthPassword(e.target.value)} maxLength={authTab === "register" ? 16 : 128}
 								onKeyDown={e => e.key === "Enter" && handleAuth()} />
 							{authError && <div className="auth-error">{authError}</div>}
 							<button className="btn btn-gold btn-full mt-8" onClick={handleAuth} disabled={authLoading}>

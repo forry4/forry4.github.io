@@ -27,6 +27,7 @@ import time
 import random
 import string
 
+from fastapi import Depends, Query
 from pydantic import BaseModel
 
 
@@ -348,11 +349,19 @@ def replace_user_suggestions(conn, user: dict | None, items: list) -> tuple[bool
 
 
 # ── route registration ───────────────────────────────────────────────────────
-def setup_books(app, get_db_conn, get_user_by_session) -> None:
+def _default_token_resolver(token: str | None = Query(default=None)) -> str | None:
+    """Fallback resolver (query param only) if the composition root doesn't inject
+    one. The real app passes the bearer-or-query resolver from games.spender.main."""
+    return token
+
+
+def setup_books(app, get_db_conn, get_user_by_session, token_resolver=None) -> None:
     """Create tables and register the /books routes on `app`.
 
-    `get_db_conn` and `get_user_by_session` are injected from main.py so this
-    module never imports main (avoiding the import cycle).
+    `get_db_conn`, `get_user_by_session`, and `token_resolver` are injected from the
+    composition root so this module never imports a game module (avoiding the import
+    cycle). `token_resolver` is a FastAPI dependency that reads the session token from
+    the `Authorization: Bearer` header (or the legacy `?token=` query param).
     """
     conn = get_db_conn()
     try:
@@ -360,8 +369,10 @@ def setup_books(app, get_db_conn, get_user_by_session) -> None:
     finally:
         conn.close()
 
+    resolve_token = token_resolver or _default_token_resolver
+
     @app.get("/books")
-    async def get_books(token: str | None = None):
+    async def get_books(token: str | None = Depends(resolve_token)):
         conn = get_db_conn()
         try:
             user = get_user_by_session(token) if token else None
@@ -374,7 +385,7 @@ def setup_books(app, get_db_conn, get_user_by_session) -> None:
             conn.close()
 
     @app.put("/books")
-    async def put_books(payload: BooksPayload, token: str | None = None):
+    async def put_books(payload: BooksPayload, token: str | None = Depends(resolve_token)):
         conn = get_db_conn()
         try:
             user = get_user_by_session(token) if token else None
@@ -386,7 +397,7 @@ def setup_books(app, get_db_conn, get_user_by_session) -> None:
             conn.close()
 
     @app.get("/books/suggestions")
-    async def get_suggestions(token: str | None = None):
+    async def get_suggestions(token: str | None = Depends(resolve_token)):
         conn = get_db_conn()
         try:
             user = get_user_by_session(token) if token else None
@@ -405,7 +416,7 @@ def setup_books(app, get_db_conn, get_user_by_session) -> None:
             conn.close()
 
     @app.put("/books/suggestions")
-    async def put_suggestions(payload: SuggestionsPayload, token: str | None = None):
+    async def put_suggestions(payload: SuggestionsPayload, token: str | None = Depends(resolve_token)):
         conn = get_db_conn()
         try:
             user = get_user_by_session(token) if token else None

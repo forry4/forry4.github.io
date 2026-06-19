@@ -412,7 +412,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const fetchGames = useCallback(() => {
     fetch(`${COC_HTTP}/games`).then((r) => r.json()).then((d) => setOpenGames(d.games || [])).catch(() => {});
     if (authUser && !authUser.guest && authUser.session_token) {
-      fetch(`${COC_HTTP}/games/mine?token=${authUser.session_token}`).then((r) => r.json())
+      fetch(`${COC_HTTP}/games/mine`, { headers: { Authorization: `Bearer ${authUser.session_token}` } }).then((r) => r.json())
         .then((d) => setMyGames(d.games || [])).catch(() => {});
     }
   }, [authUser]);
@@ -480,9 +480,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   // and only clear local resume state AFTER the server confirms the delete.
   const handleCancel = (id) => {
     const params = new URLSearchParams();
-    if (authUser?.session_token) params.set("token", authUser.session_token);
     params.set("player_id", myId);
-    fetch(`${COC_HTTP}/games/${id}/cancel?${params.toString()}`, { method: "POST" })
+    const headers = authUser?.session_token ? { Authorization: `Bearer ${authUser.session_token}` } : {};
+    fetch(`${COC_HTTP}/games/${id}/cancel?${params.toString()}`, { method: "POST", headers })
       .then((r) => r.json())
       .then((d) => {
         if (!d.ok) { setToast(d.message || "Could not cancel"); return; }

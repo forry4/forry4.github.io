@@ -9,7 +9,7 @@ import string
 from itertools import combinations
 from typing import Any
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Request, Depends, Header, Query
 from pydantic import BaseModel
 import logging
 import sqlite3
@@ -22,7 +22,9 @@ from core.db import get_db_conn, init_core_schema, cleanup_stale_games, maybe_cl
 from core.auth import (
     gen_token, create_user, authenticate_user, get_user_by_session,
     create_reconnect_token, validate_reconnect_token, mark_reconnect_token_used,
+    validate_credentials,
 )
+from core.ratelimit import SlidingWindowLimiter
 
 # Spender's HTTP + WebSocket routes live on this router. The composition root
 # (top-level app.py) creates the FastAPI app, applies CORS middleware, includes
@@ -2274,6 +2276,41 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
 
 # ─── HTTP endpoints ───────────────────────────────────────────────────────────
 
+def bearer_token(authorization: str | None = Header(default=None),
+                 token: str | None = Query(default=None)) -> str | None:
+    """Resolve the session token from the `Authorization: Bearer <token>` header,
+    falling back to the legacy `?token=` query param. The header keeps the secret
+    out of URLs (and therefore out of access/proxy logs and browser history); the
+    query fallback keeps already-cached frontends working across the deploy."""
+    if authorization:
+        scheme, _, value = authorization.partition(" ")
+        if scheme.lower() == "bearer" and value.strip():
+            return value.strip()
+    return token
+
+
+def _client_ip(request: Request) -> str:
+    """Best-effort client IP for rate-limiting. Render terminates TLS at a proxy,
+    so the real client is the first hop in X-Forwarded-For; fall back to the socket
+    peer for local/dev."""
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+# Abuse throttles (in-memory, per process — see core.ratelimit). Limits are
+# generous for humans but cut brute-force/spam to a trickle.
+_TOO_MANY = "Too many attempts. Please wait a minute and try again."
+_login_ip_limiter = SlidingWindowLimiter(max_hits=20, window_seconds=300)      # 20 / 5min / IP
+_login_user_limiter = SlidingWindowLimiter(max_hits=10, window_seconds=900)    # 10 failures / 15min / username
+_register_ip_limiter = SlidingWindowLimiter(max_hits=10, window_seconds=3600)  # 10 / hour / IP
+# Guards login against a PBKDF2-on-huge-input CPU DoS without blocking legacy
+# accounts (the old frontend allowed up to 64-char passwords).
+_LOGIN_NAME_MAX = 64
+_LOGIN_PASSWORD_MAX = 128
+
+
 class RegisterBody(BaseModel):
     name: str
     password: str
@@ -2285,7 +2322,16 @@ class LoginBody(BaseModel):
 
 
 @router.post("/auth/register")
-async def auth_register(body: RegisterBody):
+async def auth_register(body: RegisterBody, request: Request):
+    ip = _client_ip(request)
+    if _register_ip_limiter.exceeded(ip):
+        return {"ok": False, "message": _TOO_MANY}
+    _register_ip_limiter.record(ip)
+
+    err = validate_credentials(body.name, body.password)
+    if err:
+        return {"ok": False, "message": err}
+
     user = create_user(body.name, body.password)
     if not user:
         return {"ok": False, "message": "name already taken"}
@@ -2300,17 +2346,30 @@ async def auth_register(body: RegisterBody):
 
 
 @router.post("/auth/login")
-async def auth_login(body: LoginBody):
+async def auth_login(body: LoginBody, request: Request):
+    ip = _client_ip(request)
+    name_key = (body.name or "").lower()
+    if _login_ip_limiter.exceeded(ip) or _login_user_limiter.exceeded(name_key):
+        return {"ok": False, "message": _TOO_MANY}
+    _login_ip_limiter.record(ip)
+
+    # Reject absurdly long inputs without hashing (PBKDF2-on-huge-input DoS guard).
+    if len(body.name or "") > _LOGIN_NAME_MAX or len(body.password or "") > _LOGIN_PASSWORD_MAX:
+        _login_user_limiter.record(name_key)
+        return {"ok": False, "message": "invalid name or password"}
+
     u = authenticate_user(body.name, body.password)
     if not u:
+        _login_user_limiter.record(name_key)
         return {"ok": False, "message": "invalid name or password"}
+    _login_user_limiter.reset(name_key)  # clear failure streak on success
     return {"ok": True,
             "user": {"id": u["id"], "name": u["name"], "is_admin": bool(u.get("is_admin"))},
             "session_token": u["session_token"]}
 
 
 @router.get("/auth/session")
-async def auth_session(token: str | None = None):
+async def auth_session(token: str | None = Depends(bearer_token)):
     """Validate a stored session token. The frontend restores its "logged in"
     state from localStorage and otherwise never checks the token, so a token that
     has expired (7-day TTL) or been superseded by a login elsewhere (one token per
@@ -2332,7 +2391,7 @@ async def get_open_games():
 
 
 @router.get("/games/mine")
-async def get_my_games(token: str | None = None):
+async def get_my_games(token: str | None = Depends(bearer_token)):
     user = get_user_by_session(token)
     if not user:
         return {"ok": False, "games": [], "message": "unauthenticated"}
@@ -2340,7 +2399,7 @@ async def get_my_games(token: str | None = None):
 
 
 @router.post("/games/{game_id}/cancel")
-async def cancel_open_game(game_id: str, token: str | None = None,
+async def cancel_open_game(game_id: str, token: str | None = Depends(bearer_token),
                            player_id: str | None = None):
     # An open game is just a public waiting room (host_id is listed in /games).
     # Authorize by a live session OR by the host's player_id, so cancelling still
@@ -2358,7 +2417,8 @@ async def cancel_open_game(game_id: str, token: str | None = None,
 
 
 @router.post("/me/session-token")
-async def session_token(token: str | None = None, room_id: str | None = None, player_id: str | None = None):
+async def session_token(token: str | None = Depends(bearer_token),
+                        room_id: str | None = None, player_id: str | None = None):
     user = get_user_by_session(token)
     if not user:
         return {"ok": False, "message": "unauthenticated"}

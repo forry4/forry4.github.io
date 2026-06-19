@@ -128,7 +128,9 @@ export default function Books({ authUser, onExit }) {
 	const [toast, setToast] = useState("");
 
 	const token = authUser?.session_token || null;
-	const tokenQS = token ? `?token=${encodeURIComponent(token)}` : "";
+	// Send the session token in the Authorization header (keeps it out of URLs/logs);
+	// the backend still accepts ?token= as a fallback for older clients.
+	const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
 	const maxSugg = suggInfo?.max || 10;
 
 	// ── data load ──
@@ -136,7 +138,7 @@ export default function Books({ authUser, onExit }) {
 		let cancelled = false;
 		(async () => {
 			try {
-				const res = await fetch(`${HTTP_BASE}/books${tokenQS}`);
+				const res = await fetch(`${HTTP_BASE}/books`, { headers: authHeaders });
 				const data = await res.json();
 				if (cancelled) return;
 				if (data.ok) { setBooks(data.books || []); setCanEdit(!!data.can_edit); }
@@ -144,13 +146,13 @@ export default function Books({ authUser, onExit }) {
 			finally { if (!cancelled) setLoading(false); }
 		})();
 		return () => { cancelled = true; };
-	}, [tokenQS]);
+	}, [token]);
 
 	useEffect(() => {
 		let cancelled = false;
 		(async () => {
 			try {
-				const res = await fetch(`${HTTP_BASE}/books/suggestions${tokenQS}`);
+				const res = await fetch(`${HTTP_BASE}/books/suggestions`, { headers: authHeaders });
 				const data = await res.json();
 				if (cancelled || !data.ok) return;
 				setSugg(data.mine || []);
@@ -159,7 +161,7 @@ export default function Books({ authUser, onExit }) {
 			} catch { /* leave empty */ }
 		})();
 		return () => { cancelled = true; };
-	}, [tokenQS]);
+	}, [token]);
 
 	const showToast = (m) => { setToast(m); setTimeout(() => setToast(""), 2500); };
 
@@ -194,8 +196,8 @@ export default function Books({ authUser, onExit }) {
 				books: books.map(({ id, title, author, rating, note, cover_url }) =>
 					({ id, title, author, rating, note, cover_url })),
 			};
-			const res = await fetch(`${HTTP_BASE}/books${tokenQS}`, {
-				method: "PUT", headers: { "Content-Type": "application/json" },
+			const res = await fetch(`${HTTP_BASE}/books`, {
+				method: "PUT", headers: { "Content-Type": "application/json", ...authHeaders },
 				body: JSON.stringify(payload),
 			});
 			const data = await res.json();
@@ -232,8 +234,8 @@ export default function Books({ authUser, onExit }) {
 				suggestions: sugg.map(({ id, title, author, cover_url, blurb }) =>
 					({ id, title, author, cover_url, blurb })),
 			};
-			const res = await fetch(`${HTTP_BASE}/books/suggestions${tokenQS}`, {
-				method: "PUT", headers: { "Content-Type": "application/json" },
+			const res = await fetch(`${HTTP_BASE}/books/suggestions`, {
+				method: "PUT", headers: { "Content-Type": "application/json", ...authHeaders },
 				body: JSON.stringify(payload),
 			});
 			const submitted = sugg.filter(s => (s.title || "").trim()).length;

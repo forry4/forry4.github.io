@@ -9,6 +9,8 @@ infrastructure moved out of games.spender.main into the neutral core package.)
 """
 import hashlib
 import sqlite3
+import string
+import time
 
 from core import db as dbm
 from core import auth as authm
@@ -16,6 +18,54 @@ from core import auth as authm
 
 def _conn():
     return dbm._Conn(sqlite3.connect(":memory:"))
+
+
+def test_gen_token_length_alphabet_and_uniqueness():
+    t = authm.gen_token(32)
+    assert len(t) == 32
+    assert all(c in string.ascii_letters + string.digits for c in t)
+    # CSPRNG-backed: two draws practically never collide.
+    assert authm.gen_token(16) != authm.gen_token(16)
+
+
+def test_validate_credentials_username_rules():
+    assert authm.validate_credentials("bob", "pw") is None
+    assert authm.validate_credentials("abcdefghijkl", "pw") is None      # 12 chars OK
+    assert authm.validate_credentials("", "pw") == "Username is required."
+    assert "12 characters" in authm.validate_credentials("abcdefghijklm", "pw")  # 13 chars
+    assert "letters and numbers" in authm.validate_credentials("has space", "pw")
+    assert "letters and numbers" in authm.validate_credentials("bad!", "pw")
+
+
+def test_validate_credentials_password_rules():
+    assert authm.validate_credentials("bob", "x") is None
+    assert authm.validate_credentials("bob", "x" * 16) is None           # 16 chars OK
+    assert authm.validate_credentials("bob", "") == "Password is required."
+    assert "16 characters" in authm.validate_credentials("bob", "x" * 17)
+
+
+def test_cleanup_reconnect_tokens_removes_used_and_expired(tmp_path, monkeypatch):
+    monkeypatch.setattr(dbm, "DB_PATH", str(tmp_path / "rt.db"))
+    conn = dbm.get_db_conn()
+    dbm.init_core_schema(conn)
+    conn.close()
+
+    now = int(time.time())
+    c = dbm.get_db_conn()
+    cur = c.cursor()
+    ins = ("INSERT INTO reconnect_tokens (token,user_id,room_id,player_id,expires_at,used) "
+           "VALUES (?,?,?,?,?,?)")
+    cur.execute(ins, ("fresh", "u", "R", "p", now + 1000, 0))     # valid, unused -> keep
+    cur.execute(ins, ("expired", "u", "R", "p", now - 1000, 0))   # expired -> drop
+    cur.execute(ins, ("used", "u", "R", "p", now + 1000, 1))      # used -> drop
+    c.commit()
+    c.close()
+
+    assert authm.cleanup_reconnect_tokens() == 2
+    c = dbm.get_db_conn()
+    rows = c.cursor().execute("SELECT token FROM reconnect_tokens").fetchall()
+    c.close()
+    assert {r[0] for r in rows} == {"fresh"}
 
 
 def test_row_index_and_name_access():

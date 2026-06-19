@@ -19,26 +19,69 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from core.db import get_db_conn
 from core.auth import get_user_by_session
-from games.spender.main import router as spender_router
+from core.config import cors_allowed_origins
+from games.spender.main import router as spender_router, bearer_token
 from books.api import setup_books
 
 LOG = logging.getLogger("app")
 
+
+class SecurityHeadersMiddleware:
+    """Pure-ASGI middleware that adds hardening headers to every HTTP response.
+    Implemented at the ASGI layer (not BaseHTTPMiddleware) so it threads `send`
+    down into the mounted /coc sub-app — its responses get the headers too — and
+    cleanly ignores WebSocket scopes. Only sets a header if not already present."""
+
+    # Security-relevant response headers. No Content-Security-Policy here: the API
+    # serves JSON (CSP guards HTML documents — that belongs on the GitHub Pages
+    # frontend) and a strict policy would break FastAPI's /docs (Swagger UI).
+    _HEADERS = {
+        "x-content-type-options": "nosniff",
+        "x-frame-options": "DENY",
+        "referrer-policy": "strict-origin-when-cross-origin",
+        "strict-transport-security": "max-age=63072000; includeSubDomains",
+        "permissions-policy": "geolocation=(), microphone=(), camera=()",
+    }
+
+    def __init__(self, app):
+        self.app = app
+        self._encoded = [(k.encode(), v.encode()) for k, v in self._HEADERS.items()]
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                headers = message.setdefault("headers", [])
+                present = {k.lower() for k, _ in headers}
+                headers.extend((k, v) for k, v in self._encoded if k not in present)
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
+
 app = FastAPI(title="Forrest Games API")
 
+# CORS: pinned to the known frontend origins (not "*"). Auth is token-based (no
+# cookies), so credentials stay off. Only the headers/methods the frontend uses
+# are allowed. Covers /coc too — the parent CORS layer wraps the mounted sub-app.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=cors_allowed_origins(),
+    allow_methods=["GET", "POST", "PUT", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
+app.add_middleware(SecurityHeadersMiddleware)
 
 # Spender's HTTP + WebSocket routes (auth, games, /ws, /health) at the site root.
 app.include_router(spender_router)
 
 # Books — public read + owner write. Deps are injected (from core) so books never
-# imports a game module (no cycle).
-setup_books(app, get_db_conn, get_user_by_session)
+# imports a game module (no cycle). bearer_token lets Books accept the same
+# Authorization: Bearer header (with ?token= fallback) as the Spender routes.
+setup_books(app, get_db_conn, get_user_by_session, bearer_token)
 
 # Castles of Crimson — its self-contained sub-app mounted under /coc. Defensive:
 # a CoC import error must NOT take down the core backend (an earlier unconditional

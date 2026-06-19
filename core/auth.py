@@ -15,7 +15,8 @@ import hashlib
 import hmac
 import logging
 import os
-import random
+import re
+import secrets
 import string
 import time
 
@@ -23,9 +24,14 @@ from .db import get_db_conn
 
 LOG = logging.getLogger("core.auth")
 
+_TOKEN_ALPHABET = string.ascii_letters + string.digits
+
 
 def gen_token(n=32):
-    return ''.join(random.choices(string.ascii_letters + string.digits, k=n))
+    # CSPRNG (secrets), not random.choices — these strings are session tokens,
+    # account ids, reconnect tokens, AND password salts. random's Mersenne Twister
+    # is predictable from observed output; secrets is not.
+    return ''.join(secrets.choice(_TOKEN_ALPHABET) for _ in range(n))
 
 
 # Password hashing: PBKDF2-HMAC-SHA256 (stdlib) stored as "pbkdf2$<iters>$<salt>$<hex>".
@@ -52,6 +58,34 @@ def verify_password(stored: str, password: str) -> bool:
         salt, h = parts
         return hmac.compare_digest(hashlib.sha256((salt + password).encode()).hexdigest(), h)
     return False
+
+
+# ─── Registration input validation ───────────────────────────────────────────
+# Usernames: 1-12 chars, basic letters/digits only. Passwords: 1-16 chars. These
+# are enforced at registration (the /auth/register route); login stays permissive
+# so pre-existing accounts that predate these limits can still sign in.
+USERNAME_MAX = 12
+PASSWORD_MIN = 1
+PASSWORD_MAX = 16
+_USERNAME_RE = re.compile(r"[A-Za-z0-9]+")
+
+
+def validate_credentials(name: str, password: str) -> str | None:
+    """Return a human-readable error message if (name, password) is invalid for
+    registration, or None if it's acceptable."""
+    name = name or ""
+    password = password or ""
+    if len(name) < 1:
+        return "Username is required."
+    if len(name) > USERNAME_MAX:
+        return f"Username must be {USERNAME_MAX} characters or fewer."
+    if not _USERNAME_RE.fullmatch(name):
+        return "Username may only contain letters and numbers."
+    if len(password) < PASSWORD_MIN:
+        return "Password is required."
+    if len(password) > PASSWORD_MAX:
+        return f"Password must be {PASSWORD_MAX} characters or fewer."
+    return None
 
 
 def create_user(name: str, password: str) -> dict | None:
@@ -165,7 +199,47 @@ def is_site_owner(user: dict | None) -> bool:
     return bool(owner and user.get("name") == owner)
 
 
+# Reconnect tokens are short-lived (120s) and single-use, so used/expired rows are
+# pure dead weight. Prune them opportunistically when new ones are minted, throttled
+# to at most once per hour per process (the DELETE is idempotent, so races are fine).
+_RT_CLEANUP_MIN_INTERVAL = 3600
+_rt_last_cleanup = 0
+
+
+def cleanup_reconnect_tokens() -> int:
+    """Delete every used or expired reconnect token. Returns the number removed."""
+    conn = get_db_conn()
+    try:
+        cur = conn.cursor()
+        now = int(time.time())
+        cur.execute("SELECT COUNT(*) FROM reconnect_tokens WHERE used=1 OR expires_at < ?", (now,))
+        n = cur.fetchone()[0]
+        if n:
+            cur.execute("DELETE FROM reconnect_tokens WHERE used=1 OR expires_at < ?", (now,))
+            conn.commit()
+            LOG.info("cleanup_reconnect_tokens: removed %d stale token(s)", n)
+        return n
+    finally:
+        conn.close()
+
+
+def maybe_cleanup_reconnect_tokens() -> int:
+    """Throttled `cleanup_reconnect_tokens` — a no-op unless an hour has passed since
+    this process last pruned. Never raises (cleanup must not break token minting)."""
+    global _rt_last_cleanup
+    now = int(time.time())
+    if now - _rt_last_cleanup < _RT_CLEANUP_MIN_INTERVAL:
+        return 0
+    _rt_last_cleanup = now
+    try:
+        return cleanup_reconnect_tokens()
+    except Exception as e:  # noqa: BLE001
+        LOG.warning("maybe_cleanup_reconnect_tokens failed: %s", e)
+        return 0
+
+
 def create_reconnect_token(user_id: str, room_id: str, player_id: str, ttl: int = 120) -> str:
+    maybe_cleanup_reconnect_tokens()  # throttled (<=1/h): prune used/expired rows
     token = gen_token(12)
     expires_at = int(time.time()) + ttl
     conn = get_db_conn()

@@ -24,7 +24,7 @@ import random
 import time
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import engine
@@ -37,6 +37,7 @@ from core.db import get_db_conn, cleanup_stale_games, maybe_cleanup_games
 from core.auth import (
     gen_token, get_user_by_session, validate_reconnect_token, mark_reconnect_token_used,
 )
+from core.config import cors_allowed_origins
 
 LOG = logging.getLogger("games.castles_of_crimson")
 
@@ -49,11 +50,13 @@ def _valid_difficulty(value) -> str:
     return value if value in AI_DIFFICULTIES else DEFAULT_DIFFICULTY
 
 coc_app = FastAPI(title="Castles of Crimson API")
+# Same pinned origins as the parent app (it overrides this layer when mounted, but
+# keeping them aligned matters if coc_app is ever run standalone). See core.config.
 coc_app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=cors_allowed_origins(),
+    allow_methods=["GET", "POST", "PUT", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 # ── In-memory room state ──────────────────────────────────────────────────────
@@ -582,8 +585,20 @@ async def games_open():
     return {"ok": True, "games": list_open_games()}
 
 
+def _bearer_token(authorization: str | None = Header(default=None),
+                  token: str | None = Query(default=None)) -> str | None:
+    """Session token from the `Authorization: Bearer` header (keeping it out of URLs
+    and logs), falling back to the legacy `?token=` query param. Mirrors the resolver
+    in games.spender.main; kept local so this sub-app stays independent of Spender."""
+    if authorization:
+        scheme, _, value = authorization.partition(" ")
+        if scheme.lower() == "bearer" and value.strip():
+            return value.strip()
+    return token
+
+
 @coc_app.get("/games/mine")
-async def games_mine(token: str | None = None):
+async def games_mine(token: str | None = Depends(_bearer_token)):
     user = get_user_by_session(token) if token else None
     if not user:
         return {"ok": False, "games": [], "message": "unauthenticated"}
@@ -591,7 +606,8 @@ async def games_mine(token: str | None = None):
 
 
 @coc_app.post("/games/{game_id}/cancel")
-async def games_cancel(game_id: str, token: str | None = None, player_id: str | None = None):
+async def games_cancel(game_id: str, token: str | None = Depends(_bearer_token),
+                       player_id: str | None = None):
     game_id = normalize_room(game_id)
     owner = None
     user = get_user_by_session(token) if token else None
