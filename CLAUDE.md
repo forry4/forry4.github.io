@@ -960,23 +960,35 @@ website variant **"S"**.
   maximin targets), `v_state_eval.py` (sign(V) win-prediction discrimination vs the ~0.65 plateau),
   `vsearch_profile.py` (clean wall-clock + cProfile), `h3l_probe.py` (the static-vs-rollout probe). Tests:
   `games/spender/tests/test_vsearch.py`.
-- **Before spending on the next ceiling — the THREE-WAY diagnostic (decided, not yet run).** "Re-evaluate
-  favorability with self-play of the now-strong S" splits into TWO different questions with DIFFERENT
-  yardsticks, and conflating them is the trap: (a) **static V vs actual OUTCOMES** (eventual winner/margin
-  from strong S-vs-S play) = "is the leaf *biased*?" → a **structural-V** lead (re-weight / new feature);
-  (b) **static V vs its own SEARCH-BACKED value** = "does lookahead move the estimate?" → the **Path C**
-  (more-search) lead. They are NOT the same green light — a large V-vs-outcome error could be a biased leaf
-  (search can't fix it) OR insufficient depth; only the V-vs-searchV gap isolates depth. CAVEAT: search uses
-  V *as its leaf*, so searchV inherits V's bias → a small gap is ambiguous, and you need the outcome as a
-  third anchor. **Decision: harvest all three at the same snapshots** ({static V, search-backed value,
-  outcome} from S-vs-S games; run search only on a small PROBED subset since it's the expensive part) and
-  decompose: V≈searchV but both≠outcome → biased leaf (structural fix / fresh net, NOT distilling *this* V);
-  V≠searchV and searchV closer to outcome → lookahead works → **Path C**; V≠searchV but searchV NOT closer →
-  search is adding noise, fix the leaf first. Implement as a `--teacher S` harvest mode in `v_state_eval.py`.
-  **Do NOT re-tune V on self-play OUTCOMES as the objective** — a mirror match is ~0.5 (no gradient) and it
-  reintroduces the documented single-strategy-collapse / denial-blind risks; the style-diverse MAXIMIN panel
-  is the arbiter. Gate Path C on this diagnostic + the panel + shaped targets + head-to-head. **Not worth
-  starting until the maximin run confirms the static config is settled.**
+- **THREE-WAY diagnostic (RUN, June 2026) → Path C favored.** `v_state_eval.py --teacher S` plays S-vs-S
+  (search-driven) and at every PLAY snapshot records {static V, search-backed root value `sum(W)/sum(N)`,
+  eventual outcome} from the mover's perspective, then compares each eval's AUC/Brier vs outcome. The
+  decisive question was whether the search-over-leaf advantage GROWS with depth. It does — sweep at
+  sims=128/384/768 (240 S-vs-S games each, ~13k snapshots):
+  | sims | V_static AUC | V_search AUC | dAUC | agree corr |
+  |------|------|------|------|------|
+  | 128 | 0.642 | 0.680 | +0.038 | 0.822 |
+  | 384 | 0.688 | 0.737 | +0.049 | 0.811 |
+  | 768 | 0.645 | 0.700 | +0.055 | 0.789 |
+  Three concordant trends: **dAUC grows, Brier gap widens, agreement falls** as search deepens — deeper search
+  increasingly diverges from AND outperforms the leaf. The leaf AUC ~0.64 sits exactly on the documented
+  static plateau (re-confirmed now against STRONG S-vs-S labels, not H3-level) → **re-weighting V is dead**.
+  Only the WITHIN-row paired dAUC is a clean comparison (each sims row plays a different game set, so absolute
+  AUCs wobble); all three deltas move the same way → trust the trend. Verdict: **Path C (distill V+search →
+  numpy net → deeper search) is the lever.** **Do NOT re-tune V on self-play OUTCOMES as the objective** — a
+  mirror match is ~0.5 (no gradient) and reintroduces single-strategy-collapse / denial-blind risks; the
+  style-diverse MAXIMIN panel stays the arbiter. (For the framing/decomposition that designed this test —
+  static-V-vs-outcome = "biased leaf?" vs static-V-vs-searchV = "needs depth?", and why you need the outcome
+  as a third anchor since searchV inherits the leaf's bias — see git history of this section.)
+- **Take-pruning of dominated gem-takes — TESTED & REJECTED (wash; do not relitigate).** The engine offers
+  take-2-different / take-1 even when a superset take-3 is available; under the token cap these are weakly
+  dominated. A search-local prune (`legal_fn` hook on `Search` + a `_search_legal` that drops them when total
+  tokens ≤7) was sound in theory but **panel A/B was an exact wash (0.8104 = 0.8104)**, with a noise-level
+  per-opp wobble that if anything nudged the worst matchup (vs-H3) down. Reason: the **policy prior already
+  soft-prunes** them (low `take_value`/need → ~0 prior → ~0 visits), so explicit pruning frees no sims.
+  Reverted. (At 8/9 tokens take-fewer is genuinely distinct anyway; the equivalence "take-3 then discard the
+  just-taken gem ≡ take-2D" holds only in the search's model, and serving executes that discard via greedy H3,
+  not search — a separate reason not to lean on it.)
 - **The next ceiling — distill V+search into a numpy value net (Path C), and its TENSION.** A numpy net leaf
   (reuse `net.py`/`export.py`/`infer_np.py` + the 305-feature encoder) is ~100× cheaper → 10–50× more sims →
   deeper search. BUT V's strength is `engine_value` — the cross-card term the docs flag as "the one an MLP
@@ -985,13 +997,21 @@ website variant **"S"**.
   a **measure-gated bet** that could hit the same features wall that left Z behind — prototype the cheapest
   distillation (V → current 305 features) and arena-gate vs the panel BEFORE any big investment. The Python
   micro-opts above are the banked, safe depth.
-- **DEPLOYED (untuned, June 2026):** shipped to `main` as commit `da18bab` (`feat(az): variant S …`) via a
-  selective-commit + rebase-onto-`origin/main` (the H4 sandbox / scratch / `shared/theme.js` stayed untracked
-  and untouched); CI redeploys GitHub Pages (the "S" picker) + Render (`_s_choose_move`). Shipped the UNTUNED
-  hand-set V weights — the mean autotuner's zero adoptions said they're already near-optimal.
-- **Open:** human playtest on live S (verify the `econ` term fixes the over-reserve weakness — the one thing
-  offline numbers can't measure); the MAXIMIN `vsearch_autotune` run is in progress (a robust min gain → small
-  follow-up commit; none expected if it just confirms saturation).
+- **DEPLOYED + MAXIMIN-TUNED (June 2026):** shipped to `main` (variant S = `da18bab`; maximin config =
+  `31bbfbd`). The maximin `vsearch_autotune` pass-0 adopted exactly two knobs — **`W_ENGINE_STK` 0.8→0.4**
+  (`v_state.py`) and **`C_PUCT` 2.0→1.5** (`vsearch.py`) — confirmed on DISJOINT fresh seeds (N=360, sims=120):
+  worst-matchup **min 0.664→0.750**, mean 0.729→0.777, every panel matchup up; validated at higher sims via the
+  panel-vs-sims speedcurve (min 0.812 / vs-H3 0.875 at sims=800). The bigger lever was `C_PUCT` (a SEARCH knob,
+  not a leaf weight) — consistent with "search is the lever." We stopped the autotuner after pass 0 (a watcher
+  tree-killed it at the first `[p1]`); pass-1+ gains are marginal. Speedcurve also showed raw-sims strength
+  still climbing but with **diminishing returns** by 400–800 sims (S@hi-vs-S@lo adjacent doublings ~0.5–0.59;
+  8× span 0.73) → speed micro-opts give modest gains; leaf quality is the bigger lever.
+- **Open / next:** (1) **Path-C distillation prototype** — the diagnostic's recommended next gate: harvest
+  `(features.encode(s), V_search)` from S-vs-S (the `--teacher S` harness already produces the labels), train a
+  numpy value net, measure its STATIC AUC against the **≈0.64 leaf floor** (features wall bit → stall) vs the
+  **≈0.70 sims-768 search target** (→ Path C validated). (2) human playtest on live S (the `econ` over-reserve
+  fix — the one thing offline numbers can't measure). Parked: "search owns DISCARD/NOBLE + a discard prior"
+  (low expected gain; would also make take-pruning sound, but pruning is a wash regardless).
 
 ### Hard-won conclusions — DO NOT relitigate
 These cost many self-play/training cycles to establish:
