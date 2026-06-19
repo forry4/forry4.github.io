@@ -25,9 +25,9 @@ const GEM_HEX = { white: "#ddd4be", blue: "#4257ff", green: "#3f9c2e", red: "#dc
 const AI_PERSONAS = { H2: "Henry", H3: "Herald", S: "Steve" };
 const AI_TIERS = { H2: "easy", H3: "medium", S: "hard" };
 const aiPersona = (v) => AI_PERSONAS[v] || `AI ${v}`;         // variant code -> persona name (retired codes -> "AI <code>")
-const displayName = (name) => {                                // backend "AI (H2)" -> "Henry"; everything else unchanged
+const displayName = (name) => {                                // backend "AI (H2)" -> "Henry (AI)"; humans unchanged
 	const m = typeof name === "string" && name.match(/^AI \((.+)\)$/);
-	return m ? aiPersona(m[1]) : name;
+	return m ? aiPersona(m[1]) + " (AI)" : name;                // tag AI names so a same-named human isn't confused for the bot
 };
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -456,7 +456,7 @@ const css = baseCss + `
   .log-name{font-size:.84rem}
 
   /* Board cards: scale the box (via --card-*) and the inner content. */
-  .level-row{overflow-x:visible;gap:10px}
+  .level-row{overflow-x:visible;gap:10px;justify-content:center}
   .level-row .card{padding:9px 8px 8px}
   .level-row .card-header{margin-bottom:8px}
   .level-row .card-points{font-size:1.7rem}
@@ -1393,7 +1393,7 @@ export default function SpenderApp() {
 					))}
 				</div>
 				{/* always render (even "0 gems") so the bonus pills below keep a fixed position */}
-				<div className="gem-total">{gemTotal(p.tokens)} gems</div>
+				<div className="gem-total">{gemTotal(p.tokens)} {gemTotal(p.tokens) === 1 ? "gem" : "gems"}</div>
 				<div className="player-bonuses">
 					{GEM_COLORS.map(c => (bonuses[c] || 0) > 0 && (
 						<span key={c} data-bonus={c} className="bonus-pill" style={{ background: GEM_HEX[c] + "55", borderColor: c === "black" ? "rgba(255,255,255,.4)" : GEM_HEX[c], color: c === "black" ? "#a8a8a8" : GEM_HEX[c] }}>+{bonuses[c]} {c[0].toUpperCase()}</span>

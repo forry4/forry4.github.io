@@ -469,7 +469,6 @@ export default function Books({ authUser, onExit }) {
 
 				<div className="bk-hero">
 					<div className="bk-logo">My Bookshelf</div>
-					<p className="bk-tagline">Favorites I've read, ranked — grouped by stars, ordered within.</p>
 				</div>
 
 				{loading ? <div className="bk-empty">Loading…</div> : (editing ? rankEditView() : rankReadView())}
