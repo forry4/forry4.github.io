@@ -8,3 +8,4 @@ vsearch_*.out
 vsearch_autotune.log
 vsearch_best.json
 v_state_eval*.out
+*cache*.npz

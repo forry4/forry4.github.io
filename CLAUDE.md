@@ -989,14 +989,39 @@ website variant **"S"**.
   Reverted. (At 8/9 tokens take-fewer is genuinely distinct anyway; the equivalence "take-3 then discard the
   just-taken gem ≡ take-2D" holds only in the search's model, and serving executes that discard via greedy H3,
   not search — a separate reason not to lean on it.)
-- **The next ceiling — distill V+search into a numpy value net (Path C), and its TENSION.** A numpy net leaf
-  (reuse `net.py`/`export.py`/`infer_np.py` + the 305-feature encoder) is ~100× cheaper → 10–50× more sims →
-  deeper search. BUT V's strength is `engine_value` — the cross-card term the docs flag as "the one an MLP
-  cannot assemble from a flat vector" (why Z plateaued / lost to H3). Cheap raw features → net caps ~0.65
-  (maybe no better than Z); precompute `engine_value` as a feature → costs as much as V (no speedup). So it's
-  a **measure-gated bet** that could hit the same features wall that left Z behind — prototype the cheapest
-  distillation (V → current 305 features) and arena-gate vs the panel BEFORE any big investment. The Python
-  micro-opts above are the banked, safe depth.
+- **Path C (distill V+search → numpy net) PROTOTYPED & the bottleneck PINNED to FEATURES, not arch (June
+  2026).** Tooling: `vsearch_distill.py` (harvest `(features, V_static, V_search, outcome)` from S-vs-S +
+  ridge/MLP distill, with a `--enriched` mode + `--cache`), `attn_distill.py` (card-set attention pre-check on
+  the cache). Findings, all measured on ~33k S-vs-S snapshots @ sims=384 (leaf AUC ~0.69, search target ~0.74):
+  - **Cheap-feature distillation STALLS.** ridge/MLP/**card-attention** all cap **AUC ~0.65–0.67** predicting
+    V_search — *below* the leaf, far below the search target. Not validated.
+  - **It's a FEATURE-information bottleneck, not architecture.** Targeting V_static, models REPRODUCE the leaf
+    at **corr ~0.91** yet still cap AUC ~0.66; the ceiling is the SAME (~0.66) whether the target is V_search or
+    V_static → the limit is what the 305 encoder *contains*. **Attention ≈ linear** here (no arch advantage)
+    because neither has the inputs: the encoder omits the leaf's derived terms — **turns-remaining horizon,
+    deck composition/per-color demand, engine/reachability/potential**. This is the truer cause of variant Z's
+    plateau: Z trained on these same lossy features → capped ~0.65 *before architecture mattered*. (Bug noted:
+    the attention pre-check first looked negative because per-card tokens lacked the mover's bonuses — fixed by
+    injecting them; still capped, confirming features not arch.)
+  - **Redirect → ENRICH THE ENCODER** (the #1 pre-retrain adjustment). Feed the net the leaf's own derived
+    terms (base 305 + per-board-card H3 `(take,engine,point,cost)` + `v_state` component breakdown + turns).
+    Costs ~leaf-level compute (so NOT the Path-C "100× cheaper for deeper search" bet — the retrain chases
+    STRENGTH, not speed). **Pre-check RESULT (RUN, `--enriched`, same 600-game/sims384 harvest): enrichment
+    UNBLOCKS it — direction validated.** On THIS test set (leaf 0.670, search target 0.717): ridge **0.694**,
+    MLP 0.681 — both now ABOVE the leaf (on base features NOTHING beat it), capturing **51% of the search-vs-leaf
+    gap**; ridge's fit to V_search jumped corr 0.76→0.85. So a *learnable* eval can beat the hand-leaf once the
+    features carry its terms. Caveats: magnitude is modest (+0.024 linear; the other ~49% of the gap is pure
+    lookahead no static eval recovers — search on the better leaf reclaims it), and the harness MLP is still
+    undertrained (< ridge — a regularization/early-stop issue, NOT capacity), so the true NET ceiling is likely
+    higher, and the per-card-terms-in-attention-tokens test (not yet run on enriched) should push further.
+    Verdict: **retrain green light, with bounded-but-real upside.**
+  - **The retrain decision (locked direction):** if green, it's an AlphaZero retrain with (a) **enriched
+    encoder** [feature set must be locked BEFORE start — input-dim change = full restart], (b) **card-set
+    attention** value+policy heads, (c) **bootstrap by distilling S's (V_search value, MCTS visit-policy)** so
+    self-play starts competent — NOT from-scratch (every from-scratch/flat-feature net LOST to the heuristics).
+    Reuse the built shaping/league/curriculum. Verify a numpy-export path for attention before committing, and
+    consider a C/Cython engine first (self-play game-gen is the wall-clock sink). `distill_cache*.npz` are
+    gitignored scratch.
 - **DEPLOYED + MAXIMIN-TUNED (June 2026):** shipped to `main` (variant S = `da18bab`; maximin config =
   `31bbfbd`). The maximin `vsearch_autotune` pass-0 adopted exactly two knobs — **`W_ENGINE_STK` 0.8→0.4**
   (`v_state.py`) and **`C_PUCT` 2.0→1.5** (`vsearch.py`) — confirmed on DISJOINT fresh seeds (N=360, sims=120):
@@ -1006,12 +1031,14 @@ website variant **"S"**.
   tree-killed it at the first `[p1]`); pass-1+ gains are marginal. Speedcurve also showed raw-sims strength
   still climbing but with **diminishing returns** by 400–800 sims (S@hi-vs-S@lo adjacent doublings ~0.5–0.59;
   8× span 0.73) → speed micro-opts give modest gains; leaf quality is the bigger lever.
-- **Open / next:** (1) **Path-C distillation prototype** — the diagnostic's recommended next gate: harvest
-  `(features.encode(s), V_search)` from S-vs-S (the `--teacher S` harness already produces the labels), train a
-  numpy value net, measure its STATIC AUC against the **≈0.64 leaf floor** (features wall bit → stall) vs the
-  **≈0.70 sims-768 search target** (→ Path C validated). (2) human playtest on live S (the `econ` over-reserve
-  fix — the one thing offline numbers can't measure). Parked: "search owns DISCARD/NOBLE + a discard prior"
-  (low expected gain; would also make take-pruning sound, but pruning is a wash regardless).
+- **Open / next:** (1) **Per-card-enriched ATTENTION pre-check** — sharpen the magnitude: put the per-card
+  H3 `(take,engine,point,cost)` terms IN the attention card tokens (not the global branch) on the enriched
+  cache; expect > ridge's 0.694. Also fix the harness net-training (MLP < ridge = under-trained). (2) **Build
+  the retrain** (green-lit): enriched encoder [lock feature set first] → card-set attention value+policy →
+  bootstrap-distill S's (V_search, visit-policy) → self-play with the built shaping/league/curriculum; verify
+  numpy-export for attention; consider a C/Cython engine first (self-play game-gen is the wall-clock sink).
+  (3) **human playtest on live S** (the `econ` over-reserve fix — the one thing offline numbers can't measure;
+  worth doing regardless of the retrain). Parked: "search owns DISCARD/NOBLE + a discard prior" (low gain).
 
 ### Hard-won conclusions — DO NOT relitigate
 These cost many self-play/training cycles to establish:
