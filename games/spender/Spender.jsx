@@ -379,7 +379,10 @@ const css = baseCss + `
   .game{grid-template-columns:1fr 560px;grid-template-rows:minmax(0,1fr);flex:none;height:calc(100vh - 48px);overflow:hidden}
   /* Sidebar = two full-height columns: players (left, wider so 6 tokens fit one
      row) + recent moves (far right). min-height:0 lets the move log scroll. */
-  .game-sidebar{display:grid;grid-template-columns:1.6fr 1fr;column-gap:14px;align-items:stretch;min-height:0}
+  /* grid-template-rows:minmax(0,1fr) bounds the sidebar's row to its (definite)
+     height too — without it the inner row grows to the moves content and the log
+     gets clipped instead of scrolling (same trap as the outer .game grid). */
+  .game-sidebar{display:grid;grid-template-columns:1.6fr 1fr;grid-template-rows:minmax(0,1fr);column-gap:14px;align-items:stretch;min-height:0}
   /* Both pinned to row 1 — without an explicit row the descending DOM-order vs
      column-order (log-panel first=col2, players second=col1) made grid's sparse
      flow drop the players to row 2 (moves top-right, players bottom-left). */
@@ -435,6 +438,8 @@ const css = baseCss + `
   .player-name{font-size:1rem}
   .player-score{font-size:1.4rem}
   .token-pill,.bonus-pill{font-size:.82rem;padding:3px 9px}
+  /* reserve the token-row height so 0 gems doesn't shift the bonus pills up */
+  .player-tokens{min-height:30px}
   /* Moves fill the full-height column (flush to the bottom) and scroll within. */
   .move-log{max-height:none;flex:1;min-height:0}
   .log-entry{font-size:.92rem;padding:6px 0}
@@ -1377,9 +1382,8 @@ export default function SpenderApp() {
 						</span>
 					))}
 				</div>
-				{Object.values(p.tokens).some(v => v > 0) && (
-					<div className="gem-total">{gemTotal(p.tokens)} gems</div>
-				)}
+				{/* always render (even "0 gems") so the bonus pills below keep a fixed position */}
+				<div className="gem-total">{gemTotal(p.tokens)} gems</div>
 				<div className="player-bonuses">
 					{GEM_COLORS.map(c => (bonuses[c] || 0) > 0 && (
 						<span key={c} data-bonus={c} className="bonus-pill" style={{ background: GEM_HEX[c] + "55", borderColor: c === "black" ? "rgba(255,255,255,.4)" : GEM_HEX[c], color: c === "black" ? "#a8a8a8" : GEM_HEX[c] }}>+{bonuses[c]} {c[0].toUpperCase()}</span>
