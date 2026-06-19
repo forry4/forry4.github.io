@@ -1162,10 +1162,16 @@ website variant **"S"**.
     surpass it.** (Reusable byproduct kept on main: `league.py`/`train_az.py` now accept **`S` as a league/gate
     opponent** via `--heur-variants S` + `--opp-s-sims`; `vsearch.LEAF_MODE`/`net.SpenderNet(in_features=)` are
     byte-identical-default. `*cache*.npz`/`leaf_model.npz`/`checkpoints_bootstrap*` are gitignored scratch.)
-- **Open / next:** (1) **21-point game mode + a re-tuned "S21" — ACTIVE** (full plan in `.claude-plans/`):
-  parametrize `win_points` per-game (default 15 → byte-identical), re-measure a 21-point `turns_table` (reuse
-  `s_measure_turns.py`), retune at win_points=21, serve S21 + a "Classic 15 / Long 21" lobby toggle.
-  Human playtest DONE. Parked: "search owns DISCARD/NOBLE + a discard prior" (low gain).
+- **21-point "Long" mode — LIVE (playable-first).** Per-game `win_points` (default 15) is wired through the
+  engine, production rules (`main._win_points`), and the AI stack (v_state convex zone, `victory_closeness`,
+  heuristic3 win-checks all read `s.win_points`); the lobby has a **Classic 15 / Long 21** toggle threading
+  `win_points` into `create`. **Any picked AI auto-adapts to 21** (no separate variant needed) — so a Long game
+  is a strong matchup with S as-is. Shipped 836ad6d (Phase 1) + 567e5d8 (toggle). 508 tests + new 21-pt unit
+  tests green; byte-identical for Classic.
+- **Open / next:** (1) **OPTIONAL S21 retune** (only if Long-mode playtests show S misvaluing the longer game):
+  re-measure a 21-point `turns_table` (`s_measure_turns.py` + `--win-points`, to thread), retune weights at
+  win_points=21 → `vsearch_s21.json` applied when `win_points==21`. Expected modest (weight-tuning saturates
+  ~0.54 all session). Parked: "search owns DISCARD/NOBLE + a discard prior" (low gain).
 
 ### Hard-won conclusions — DO NOT relitigate
 These cost many self-play/training cycles to establish:
