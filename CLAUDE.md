@@ -1200,7 +1200,11 @@ const aiThinking = game?.ai_player && game?.turn === game?.ai_player && game?.ph
 **These must stay before all `useEffect` hooks** — they appear in dep arrays and must be initialized first or Firefox throws a TDZ ReferenceError in production builds.
 
 ### WebSocket URL
-`WS_BASE` is derived from `window.location`: `wss://host/ws` in prod, `ws://localhost:8000/ws` in dev.
+`WS_BASE = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws"` — **baked in at
+build time** (NOT derived from `window.location`). `HTTP_BASE` is derived from it.
+This is why a separate front-end host (e.g. the Cloudflare staging build) can point
+at the prod backend just by setting `VITE_WS_URL=wss://splendid-nelz.onrender.com/ws`
+(see "Staging environment" below).
 
 ### Reconnect tokens
 Stored in `localStorage` as `spender_token_${roomId}_${myId}`. Sent on reconnect as `{action: "reconnect", token}`.
@@ -1259,6 +1263,57 @@ quietly empties "Your Games"). The frontend `handleCancel` only clears the
 `spender_roomId` resume pointer + reconnect token **after the server confirms the
 delete** (`data.ok`); on failure it toasts the reason. Never clear local resume
 state before confirming the delete.
+
+### Responsive game layout (June 2026 — the big UI overhaul; do not regress)
+The game screen has THREE layouts driven by width; all CSS lives in the one `css`
+string in `Spender.jsx`. **The base styles are the small/compact foundation; the
+DESKTOP look is added in `@media(min-width:901px)`** (an inversion worth knowing —
+editing base affects phone/tablet, not desktop):
+- **Desktop (`@media(min-width:901px)`)**: `.app.game-screen{height:100vh;overflow:hidden}`
+  locks the screen to the window (no page scroll). `.game` is a 2-col grid
+  `1fr 560px` (board | sidebar). `.game-main` is a 3-col / 2-row grid
+  `grid-template-columns:auto 1fr 132px; grid-template-rows:auto 1fr`: row 1 =
+  nobles box (horizontal, `data`-less) + an **actions box** (turn hint + Take/Buy/✕,
+  right-aligned); row 2 = the **levels** (`grid-column:1/3`, `1fr` so the 3 card rows
+  spread flush to the bottom via `justify-content:space-between`); the **gem bank** is
+  a vertical column (`grid-column:3; grid-row:1/span 2`) with the gold/wild token
+  FIRST (top). The **sidebar** is itself a 2-col grid (players left | recent moves
+  far-right), both `grid-row:1` full-height — player boxes `flex:1` (top & bottom
+  halves), the move log `flex:1; min-height:0` so it **scrolls internally** instead of
+  growing the page. Card size is driven by `--card-w/--card-h` (≈144×185) set on
+  `.game-main`.
+- **Tablet (`@media(max-width:900px)`)**: single column; Take/Buy/✕ move beside the
+  nobles (`.board-actions`).
+- **Phone (`@media(max-width:600px)`)**: board-first order; the nav scrolls (not
+  fixed); player panels collapse to a one-line `cards | gems` summary that taps to
+  expand reserved cards; the move log shows the most-recent entry + a tap-to-expand;
+  L3/L2/L1 merge into one box.
+- **Card sizing is fully CSS-driven** — `CardView`/empty slots set NO inline width;
+  `.card`/`.card-slot`/`.deck-pile` use `var(--card-w/--card-h)`, and
+  `.level-row>*{flex:1 1 0;max-width:var(--card-w)}` makes a full level (deck + 4
+  cards) shrink to fit any column width.
+- **CSS-grid "staircase" gotcha (hit TWICE — board + sidebar):** if DOM order places
+  a later element in an EARLIER column (descending columns), grid's *sparse* auto-flow
+  refuses to backtrack and drops it to a new row → a diagonal staircase. **Fix: pin
+  every grid child to an explicit `grid-row`.** Relatedly, `grid-row:1/-1` needs an
+  explicit `grid-template-rows` or `-1` collapses to line 1 (item spans only row 1).
+
+### Action animations — flying gems + cards (`.fly-layer` / `flyers`)
+A single `useEffect([game])` diff (mirrors the `prevBankRef`/`flashGems` pattern)
+drives all move animations, so it covers EVERY player incl. the AI with no per-handler
+hooks. It snapshots each player's **tokens + purchased ids** and the **board slot ids**;
+on the next state it computes deltas and, **only when the move log advanced by exactly
+one** (burst guard for load/reconnect), spawns absolutely-positioned flyers in a fixed
+`.fly-layer` overlay:
+- gem gained (delta>0) → fly bank→player, shrink (take / reserve-gold);
+- gem spent (delta<0) → fly player→bank, grow (buy / discard);
+- a player's `purchased` grew → fly a card-shaped flyer from the board slot it came
+  from to the buyer's box, shrink.
+Positions are measured at runtime via `getBoundingClientRect()` on `data-color`
+(bank tokens), `data-pid` (player boxes), and `data-pos` (board card slots — the slot
+persists after the buy because it's replenished). One `@keyframes fly` (translate +
+scale via per-flyer `--dx/--dy/--s0/--s1` inline vars); flyers are removed by a
+timeout. Keep these three `data-*` attributes when touching the bank/players/board.
 
 ---
 
@@ -1326,3 +1381,25 @@ The two deploy workflows: **deploy-pages.yml** (frontend → GitHub Pages `docs/
 and **deploy-render.yml** (backend → Render). Backend (`main.py` etc.) also
 deploys on push to main. `npm run build` locally is only for *verifying a build
 compiles* — discard the `dist/`, never copy it into `docs/`.
+
+### Staging environment (Cloudflare — test frontend changes live before prod)
+A live staging site mirrors the front end so UI changes (esp. mobile/desktop layout)
+can be tested on a real URL before shipping to prod:
+- **URL:** https://webprojectsstaging.forry4.workers.dev/ — a **Cloudflare Worker**
+  (`name: webprojectsstaging`) that auto-rebuilds on every push to the **`staging`**
+  git branch. Build config (Cloudflare dashboard): root `webapp`, build `npm run build`,
+  output `dist`; env `VITE_BASE=/`, `VITE_WS_URL=wss://splendid-nelz.onrender.com/ws`,
+  `NODE_VERSION=20`. It **reuses the prod backend** (no separate Render service / DB),
+  so only FRONTEND changes are testable and any test games/accounts hit the real DB
+  (use vs-AI games to stay private).
+- **Enabling code (now on main):** `webapp/vite.config.js` reads `base` from
+  `VITE_BASE` (default `/WebProjects/` for GitHub Pages); Vite was upgraded **5→6**
+  (Cloudflare auto-config requires ≥6); `webapp/wrangler.jsonc`
+  (`name: webprojectsstaging`, `assets: ./dist`, SPA) drives the Worker deploy and is
+  ignored by GitHub Pages.
+- **Workflow:** work in a `staging` worktree → `git push` → test at the workers.dev
+  URL → to ship, integrate with main: `git rebase origin/main` (UI vs backend work
+  usually touch disjoint files), `git push origin staging:main` (fast-forward), then
+  `git push -f origin staging` to resync. CI then rebuilds `docs/` + redeploys prod.
+- The local↔Cloudflare bundle **hashes differ** (different build envs), so verify a
+  deploy by the served CSS/markers, not the filename.
