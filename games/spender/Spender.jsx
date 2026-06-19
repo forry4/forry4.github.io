@@ -296,6 +296,7 @@ const css = baseCss + `
 
 /* ─── Move log ──────────────────────────────────────────────────────────── */
 .move-log{display:flex;flex-direction:column;gap:0;max-height:200px;overflow-y:auto;overflow-x:hidden}
+.log-empty{color:var(--text-muted);font-style:italic;font-size:.85rem;padding:4px 0}
 .move-log::-webkit-scrollbar{width:3px}.move-log::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
 .log-entry{display:flex;gap:6px;align-items:baseline;font-size:.76rem;color:var(--text-dim);padding:4px 0;line-height:1.4;animation:log-in .2s ease}
 .log-entry+.log-entry{border-top:1px solid rgba(58,52,42,.4)}
@@ -364,13 +365,14 @@ const css = baseCss + `
   /* Top row = nobles box + an actions box (hint + Take/Buy/✕) side by side, on
      top of the card board; a vertical gem bank spans to their right; the player
      sidebar is the outer grid's wide 2nd column. L-to-R: nobles/cards, bank, players. */
-  /* Cap the whole game to the viewport height (minus the fixed nav) so nothing —
-     especially the recent-moves list — grows the page past the window; internal
-     sections (the move log) scroll instead. */
-  .game{grid-template-columns:1fr 560px;flex:none;height:calc(100vh - 48px);overflow:hidden}
+  /* Lock the game screen to the viewport so nothing (esp. the recent-moves list)
+     grows the page past the window; the board fills naturally and the move log
+     scrolls internally instead. */
+  .game-screen{height:100vh;overflow:hidden}
+  .game{grid-template-columns:1fr 560px}
   /* Sidebar = two full-height columns: players (left, wider so 6 tokens fit one
-     row) + recent moves (far right). */
-  .game-sidebar{display:grid;grid-template-columns:1.6fr 1fr;column-gap:14px;align-items:stretch}
+     row) + recent moves (far right). min-height:0 lets the move log scroll. */
+  .game-sidebar{display:grid;grid-template-columns:1.6fr 1fr;column-gap:14px;align-items:stretch;min-height:0}
   /* Both pinned to row 1 — without an explicit row the descending DOM-order vs
      column-order (log-panel first=col2, players second=col1) made grid's sparse
      flow drop the players to row 2 (moves top-right, players bottom-left). */
@@ -1794,7 +1796,7 @@ export default function SpenderApp() {
 	if (screen === "game" && game) return (
 		<>
 			<style>{css}</style>
-			<div className="app">
+			<div className="app game-screen">
 				<div className="game-nav">
 					{game.phase === "over"
 						? <button className="btn btn-ghost btn-sm" onClick={() => setReviewing(false)}>← Back to Results</button>
@@ -1932,12 +1934,13 @@ export default function SpenderApp() {
 					</div>
 
 					<div className="game-sidebar">
-						{(game.moves?.length > 0) && (
+						{(
 							<div className={`panel log-panel${logOpen ? " open" : ""}`}>
 								<div className="panel-title log-head" onClick={() => setLogOpen(o => !o)}>
 									Recent Moves <span className="log-caret">{logOpen ? "▾" : "▸"}</span>
 								</div>
 								<div className="move-log">
+									{(game.moves || []).length === 0 && <div className="log-empty">No moves yet</div>}
 									{(game.moves || []).map((mv, i) => {
 										const { name, action, card } = formatLogMove(mv);
 										return (
