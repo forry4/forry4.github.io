@@ -1407,3 +1407,21 @@ can be tested on a real URL before shipping to prod:
   `git push -f origin staging` to resync. CI then rebuilds `docs/` + redeploys prod.
 - The local↔Cloudflare bundle **hashes differ** (different build envs), so verify a
   deploy by the served CSS/markers, not the filename.
+
+### Frontend smoke test (`npm run smoke`) — catch blank-page regressions
+`webapp/test/smoke.mjs` (Playwright) builds the app, serves it with `vite preview`,
+loads it in a headless browser, and FAILS if `#root` doesn't render or any uncaught
+page error fires. This catches the nasty class where **the bundle compiles but
+throws at runtime → a blank white page**. The bug that motivated it: a CSS comment
+in the `css` template literal contained backticks (`` `.game` ``); a backtick inside
+a JS template literal terminates it, so the rest parsed as a stray tagged-template
+(`str.game\`…\`` → "…is not a function" at load). **NEVER put a backtick inside the
+`css` string** (the css const spans ~`Spender.jsx:69–515`; only its two delimiters
+may be backticks).
+- **Run `npm run smoke` (in `webapp/`) before pushing** — esp. to the `staging`
+  branch, since Cloudflare does NOT run it. Locally it uses the system Edge channel
+  (no browser download); in CI it uses bundled chromium.
+- It **gates the prod deploy**: `deploy-pages.yml` runs `npx playwright install
+  --with-deps chromium` + `npm run smoke` BEFORE the real build, so a blank-page
+  build can't reach GitHub Pages. (It runs before the WS-URL build so its throwaway
+  build doesn't become the deployed artifact.)

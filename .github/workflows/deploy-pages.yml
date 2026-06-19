@@ -29,6 +29,17 @@ jobs:
         working-directory: webapp
         run: npm install
 
+      # Gate the deploy: build the app, load it in a headless browser, and fail if
+      # the page is blank / throws (e.g. a stray backtick in the CSS template). This
+      # runs BEFORE the real Build step so its throwaway build can't ship.
+      - name: Install browser for smoke test
+        working-directory: webapp
+        run: npx playwright install --with-deps chromium
+
+      - name: Smoke test (app must render, no blank page)
+        working-directory: webapp
+        run: npm run smoke
+
       - name: Build
         working-directory: webapp
         env:
