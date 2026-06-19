@@ -48,7 +48,9 @@ from . import valuation3 as V
 # ─── tunable weights (panel-tuned later by vsearch_autotune) ─────────────────────────────────
 W_POINTS = 1.0        # realized victory points (the hard currency)
 W_ENGINE_STK = 0.4    # forward value of bonuses already held (future-deck coverage); maximin-tuned (was 0.8)
-W_PROGRESS = 1.5      # imminent scoring strength: take_value of the best reachable targets
+W_PROGRESS = 2.5      # imminent scoring strength: take_value of the best reachable targets. 1.5->2.5
+                      # found by the self-gate (vs frozen-S) + confirmed at sims=400 (panel avg
+                      # 0.8125->0.8262, min not worse); the weak panel's maximin tune had missed it.
 W_NOBLE = 0.6         # progress toward the closest completable noble (time-gated)
 W_ECON = 0.3          # token economy: useful gold minus hoard pressure
 SCALE = 8.0           # points-equivalent margin that maps to tanh(1) ≈ 0.76
@@ -61,6 +63,10 @@ ENGINE_DR_EXP = 0.5   # diminishing-returns exponent on held bonuses per color (
 ECON_HOARD = 0.15     # penalty per token held above 8 (discourage hoarding / over-reserving)
 ECON_GOLD = 0.2       # credit per gold that actually furthers the best target (gold_needed-capped)
 BLIND_RESERVE_CONST = 0.5  # expected standing of one unknown opponent face-down reserve
+RESERVE_PENALTY = 0.0  # tempo/waste cost subtracted per RESERVED card a seat holds. The static eval
+                       # otherwise rewards reserving (gold bank + the card stays a `progress` target)
+                       # with no cost for the turn it spends -> the measured OVER-RESERVE (S reserves
+                       # ~4x H3, ~56% never bought). Default 0 = byte-identical; swept by the fix expt.
 
 
 def _points_term(val: V.Valuation, seat: int) -> float:
@@ -166,6 +172,8 @@ def _stand(val: V.Valuation, seat: int, observer: int) -> float:
              + W_PROGRESS * _progress(targets)
              + W_NOBLE * _noble_stand(val, seat)
              + W_ECON * _econ(val, seat, targets))
+    if RESERVE_PENALTY:
+        stand -= RESERVE_PENALTY * len(val.s.reserved[seat])   # tempo cost of held reserves (both seats)
     if hide_blind:
         n_blind = sum(1 for b in val.s.reserved_blind[seat] if b)
         stand += BLIND_RESERVE_CONST * n_blind

@@ -46,6 +46,23 @@ TURNS_FLOOR = 1.0       # floor on estimated_turns_remaining: you always have at
                         # and the final-turn winning logic handles immediate points, so engine/noble
                         # building never assumes < this many turns left. 0.0 = no floor (legacy).
 
+# ─── turns-remaining MODE selector (A/B lever; string knob so the --set harness can route it) ──
+# "table"   -> the deployed H3-measured lookup table (turns_table.json) -- the default, byte-identical.
+# "table_s" -> a turns table RE-MEASURED from S-vs-S play (turns_table_s.json); recalibrates the
+#              who-played bias but is still board-blind. Missing file -> silently falls back to "table".
+# "planner" -> a board-CONDITIONAL greedy turns-to-win estimate (see _planner_turns_seat). Causal and
+#              board-aware (no lookup table, not self-referential, adapts to win_points for free).
+TURNS_MODE = "table"
+PLANNER_DECK_RATE = 0.5   # points/turn assumed for the residual once the board's point cards are spent
+PLANNER_MAX_STEPS = 12    # cap on greedy point-card buys in the plan (safety; a real game buys ~<12)
+PLANNER_SCALE = 1.0       # calibration multiplier on the raw plan length (the plan over-counts: it sums
+                          # per-card tempo with no token carryover and ignores nobles/engine cards, so it
+                          # runs long vs measured turns-left -- set < 1 to match the data after validation)
+_TURNS_DATA_S = None      # lazy-loaded S-measured table (mode "table_s")
+_TURNS_KEYS_S = None
+_TURNS_CACHE_S = {}
+_S_TABLE_LOADED = False
+
 
 def _load_turns_table():
     global _TURNS_DATA, _TURNS_KEYS
@@ -60,23 +77,115 @@ def _load_turns_table():
     _TURNS_KEYS = list(d.keys())
 
 
-def _lookup_turns(cards: int, points: int, gems: int) -> float:
-    if _TURNS_DATA is None:
+def _lookup_turns(cards: int, points: int, gems: int, data=None, keys=None, cache=None) -> float:
+    """NN lookup into a turns table. Defaults to the deployed H3 table; pass data/keys/cache to query
+    a different table (e.g. the S-measured one) with its own memo cache. Behavior on the default
+    table is unchanged (the old 3-arg call still works exactly as before)."""
+    data = _TURNS_DATA if data is None else data
+    keys = _TURNS_KEYS if keys is None else keys
+    cache = _TURNS_CACHE if cache is None else cache
+    if data is None:
         return _TURNS_FALLBACK
     key = (cards, points, gems)
-    hit = _TURNS_CACHE.get(key)
+    hit = cache.get(key)
     if hit is not None:
         return hit
-    v = _TURNS_DATA.get(key)
+    v = data.get(key)
     if v is None:                              # nearest known cell (points 2x, gems 0.25x)
         best, bestd = _TURNS_FALLBACK, None
-        for (kc, kp, kg) in _TURNS_KEYS:
+        for (kc, kp, kg) in keys:
             dd = abs(kc - cards) + 2.0 * abs(kp - points) + GEM_DIST_W * abs(kg - gems)
             if bestd is None or dd < bestd:
-                bestd, best = dd, _TURNS_DATA[(kc, kp, kg)]
+                bestd, best = dd, data[(kc, kp, kg)]
         v = best
-    _TURNS_CACHE[key] = v
+    cache[key] = v
     return v
+
+
+def _ensure_s_table():
+    """Lazy-load turns_table_s.json (mode 'table_s'). Once; missing/bad file leaves _TURNS_DATA_S None
+    so estimated_turns_remaining falls back to the default table."""
+    global _TURNS_DATA_S, _TURNS_KEYS_S, _S_TABLE_LOADED
+    if _S_TABLE_LOADED:
+        return
+    _S_TABLE_LOADED = True
+    path = os.path.join(os.path.dirname(__file__), "turns_table_s.json")
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except (FileNotFoundError, ValueError):
+        return
+    d = {(row[0], row[1], row[2]): row[3] for row in data["rows"]}
+    _TURNS_DATA_S = d
+    _TURNS_KEYS_S = list(d.keys())
+
+
+def _plan_tempo(cost, bon) -> int:
+    """Turns to afford a card under SIMULATED bonuses `bon`, tokens ignored (assumed spent across the
+    plan). Mirrors heuristic-`tempo`: the steepest single-color remaining need, +1 when the remainder
+    is exactly four distinct 1s (a take-3 then a take-1)."""
+    steepest = 0
+    nonzero = 0
+    ones = 0
+    for c in range(5):
+        need = cost[c] - bon[c]
+        if need > 0:
+            nonzero += 1
+            if need == 1:
+                ones += 1
+            if need > steepest:
+                steepest = need
+    return steepest + (1 if nonzero == 4 and ones == 4 else 0)
+
+
+def _planner_turns_seat(s, seat: int, win: int) -> float:
+    """Board-CONDITIONAL estimate of `seat`'s future main turns to reach `win` points: a greedy plan
+    that repeatedly 'buys' the best points-per-tempo POINT card actually available (board + own
+    non-blind reserves), summing each card's tempo (turns to afford under the bonuses accrued so far,
+    so the engine accelerates) and accruing its bonus. Any points the board can't supply are covered
+    at PLANNER_DECK_RATE pts/turn from the unseen deck. Conditions on the real board (rich board ->
+    few turns; poor board -> many), needs no lookup table, and is not self-referential. Nobles, the
+    token cap, and contention are intentionally omitted (a signal, validated against measured data)."""
+    need = win - s.points[seat]
+    if need <= 0:
+        return TURNS_FLOOR
+    bon = list(s.bonuses[seat])
+    cands = []
+    for slot in range(12):
+        ci = s.board[slot]
+        if ci >= 0 and E.PTS[ci] > 0:
+            cands.append(ci)
+    blind = s.reserved_blind[seat]
+    for ri, ci in enumerate(s.reserved[seat]):
+        if not blind[ri] and E.PTS[ci] > 0:
+            cands.append(ci)
+    turns = 0.0
+    used = [False] * len(cands)
+    steps = 0
+    while need > 0 and steps < PLANNER_MAX_STEPS:
+        bi = -1
+        bscore = -1.0
+        btempo = 0
+        bpts = 0
+        bbcol = 0
+        for i, ci in enumerate(cands):
+            if used[i]:
+                continue
+            tp = _plan_tempo(E.COST[ci], bon)
+            sc = E.PTS[ci] / (tp + 1.0)
+            if sc > bscore:
+                bscore, bi, btempo, bpts, bbcol = sc, i, tp, E.PTS[ci], E.BONUS[ci]
+        if bi < 0:
+            break
+        turns += btempo if btempo > 1 else 1     # the buy itself still costs ~a turn even if affordable
+        need -= bpts
+        bon[bbcol] += 1
+        used[bi] = True
+        steps += 1
+    if need > 0:
+        turns += need / PLANNER_DECK_RATE
+    turns *= PLANNER_SCALE
+    return turns if turns > TURNS_FLOOR else TURNS_FLOOR
 
 
 _load_turns_table()
@@ -549,9 +658,24 @@ class Valuation:
         if self._turns_cache is not None:
             return self._turns_cache
         s = self.s
-        tr = min(
-            _lookup_turns(s.purchased_n[0], s.points[0], sum(s.tokens[0])),
-            _lookup_turns(s.purchased_n[1], s.points[1], sum(s.tokens[1])))
+        if TURNS_MODE == "planner":
+            win = getattr(s, "win_points", E.WIN_POINTS)
+            tr = min(_planner_turns_seat(s, 0, win), _planner_turns_seat(s, 1, win))
+        elif TURNS_MODE == "table_s":
+            _ensure_s_table()
+            if _TURNS_DATA_S is None:                       # missing file -> default table
+                tr = min(_lookup_turns(s.purchased_n[0], s.points[0], sum(s.tokens[0])),
+                         _lookup_turns(s.purchased_n[1], s.points[1], sum(s.tokens[1])))
+            else:
+                tr = min(
+                    _lookup_turns(s.purchased_n[0], s.points[0], sum(s.tokens[0]),
+                                  _TURNS_DATA_S, _TURNS_KEYS_S, _TURNS_CACHE_S),
+                    _lookup_turns(s.purchased_n[1], s.points[1], sum(s.tokens[1]),
+                                  _TURNS_DATA_S, _TURNS_KEYS_S, _TURNS_CACHE_S))
+        else:                                               # "table" (default, byte-identical)
+            tr = min(
+                _lookup_turns(s.purchased_n[0], s.points[0], sum(s.tokens[0])),
+                _lookup_turns(s.purchased_n[1], s.points[1], sum(s.tokens[1])))
         self._turns_cache = tr if tr > TURNS_FLOOR else TURNS_FLOOR
         return self._turns_cache
 

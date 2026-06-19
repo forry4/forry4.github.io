@@ -1031,14 +1031,50 @@ website variant **"S"**.
   tree-killed it at the first `[p1]`); pass-1+ gains are marginal. Speedcurve also showed raw-sims strength
   still climbing but with **diminishing returns** by 400–800 sims (S@hi-vs-S@lo adjacent doublings ~0.5–0.59;
   8× span 0.73) → speed micro-opts give modest gains; leaf quality is the bigger lever.
-- **Open / next:** (1) **Per-card-enriched ATTENTION pre-check** — sharpen the magnitude: put the per-card
-  H3 `(take,engine,point,cost)` terms IN the attention card tokens (not the global branch) on the enriched
-  cache; expect > ridge's 0.694. Also fix the harness net-training (MLP < ridge = under-trained). (2) **Build
-  the retrain** (green-lit): enriched encoder [lock feature set first] → card-set attention value+policy →
-  bootstrap-distill S's (V_search, visit-policy) → self-play with the built shaping/league/curriculum; verify
-  numpy-export for attention; consider a C/Cython engine first (self-play game-gen is the wall-clock sink).
-  (3) **human playtest on live S** (the `econ` over-reserve fix — the one thing offline numbers can't measure;
-  worth doing regardless of the retrain). Parked: "search owns DISCARD/NOBLE + a discard prior" (low gain).
+- **Behavioral audit + self-gate campaign (June 2026):**
+  - **Over-reserve — TESTED & REJECTED (don't relitigate).** `blunder_finder.py` found S reserves ~4.3×
+    greedy H3 (12.6% of moves vs 2.9%, ~56% never bought) — an EVAL bias (a deep search AMPLIFIES it → the
+    leaf over-values reserving, not a shallow-search artifact). BUT the **human playtest** verdict was
+    "reserves mostly GOOD, only slightly excessive," and a new `v_state.RESERVE_PENALTY` knob (default 0 =
+    byte-identical) at 0.3 **HURT the worst matchup** (vs-H3 min 0.785→0.745) for no avg gain → the reserves
+    are tactically useful (denial/securing vs the racing H3); "wasted at game-end" ≠ a blunder. **Keep
+    `RESERVE_PENALTY=0`.** The self-gate later re-rejected it independently (screened ≤0.50 vs frozen-S).
+    Lesson: win-rate-vs-a-beatable-panel is blind to behavioral biases, and so is self-play *mirror* (both
+    sides share them) — only a behavioral audit vs a non-sharing reference (H3) + a human caught it, and you
+    need the fix-knob to EXIST and an *asymmetric* comparison that varies that axis to tune it.
+  - **Policy head — ruled out.** `policy_precheck.py`: the H3 policy prior already matches the search's
+    top move ~86% (the learned net underperformed it, undertrained) → little room. Low priority.
+  - **Self-gate autotuner `vsearch_selfgate.py` (tune vs a STRONG opponent) — paid off.** Candidate config
+    vs FROZEN today's-S (NOT the weak panel), **paired CRN**: each board is played both first-player ways
+    with `vsearch._RNG` reset, so `cand==frozen` scores EXACTLY 0.5 (unbiased + race-free; `engine.new_game`
+    always makes seat 0 first, so the pairing is what balances first-player). Found **`W_PROGRESS` 1.5→2.5**
+    that the maximin run (judged on the beatable panel's MIN) had missed: vs-frozen **+0.024** (fresh N=200)
+    AND panel avg 0.766→0.797 / **min 0.741→0.778 (+0.037)**, RPS-clean (objectively stronger). Confirms the
+    user's thesis: weak-panel tuning saturates; a strong equal opponent sharpens the gradient. All other
+    knobs (incl. RESERVE_PENALTY) held. **SHIPPED (on main):** the sims=400 panel confirm HELD — avg
+    0.8125→0.8262, **min not worse** (H3 .770→.772; only H2N −.013, within ±.029 noise) — so `v_state.py`
+    now has `W_PROGRESS=2.5` deployed (variant S). Tuned at sims=160, confirmed it transfers up to 400.
+  - **Turns-remaining estimator — TESTED, NO CHANGE (don't relitigate).** Hypothesis: `turns_table.json` (the
+    horizon, measured from H3-vs-H2) is mis-calibrated for the far-stronger S, inflating the horizon-gated
+    terms (`_engine_stock`/`_noble_stand`/noble time-gate) and feeding the over-reserve. **Both fixes failed.**
+    (1) Re-measuring the table from **S-vs-S** play (`s_measure_turns.py`, 320 games @ sims=128) gives a table
+    essentially IDENTICAL to the H3 one: count-weighted mean(S − H3) = **−0.020 turns**, and even the start
+    cell (0,0,0) matches (26.35 vs 26.28). The table keys on the **game STATE** (cards/points/gems), which
+    already encodes progress, so turns-to-finish from a fixed state is ~play-quality-invariant — a stronger
+    player REACHES good states sooner but the trajectory FROM a state is the same (so the docstring's
+    "self-referential" caveat is genuinely mild). (2) A board-CONDITIONAL greedy **turns-to-win planner**
+    (`valuation3._planner_turns_seat`, behind `TURNS_MODE`, default off) is a WORSE turns predictor (corr
+    0.946 vs the table's 0.981; MAE 2.21 vs 1.30) AND makes S weaker in the A/B (`turns_ab.py`): **0.469 vs
+    frozen-S**, panel avg 0.720 vs 0.783. Board composition barely moves turns-left once points-needed is
+    known. **Keep `TURNS_MODE="table"`.** The planner/`table_s` machinery is parked default-off (byte-identical).
+    `s_measure_turns.py` (also reusable for the 21-point turns re-measure) + `turns_ab.py` are committed tooling;
+    `turns_table_s.json` + the `.out` logs are gitignored scratch.
+- **Open / next:** (1) **21-point game mode + a re-tuned "S21"** — full plan written (`.claude-plans/`): parametrize
+  `win_points` per-game (default 15 → byte-identical), re-measure a 21-point `turns_table`, retune at
+  win_points=21, serve S21 + a "Classic 15 / Long 21" lobby toggle. (2) **the enriched-features retrain**
+  (the big structural bet — a learned net leaf beats the hand-leaf +0.02–0.05; **attention ≈ linear** on
+  enriched features, so a plain MLP suffices), gated on the three-way diagnostic + a net-training fix.
+  Human playtest DONE. Parked: "search owns DISCARD/NOBLE + a discard prior" (low gain).
 
 ### Hard-won conclusions — DO NOT relitigate
 These cost many self-play/training cycles to establish:
