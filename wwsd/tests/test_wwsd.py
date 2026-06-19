@@ -71,6 +71,8 @@ def test_analyze_live_position_returns_a_move():
     assert isinstance(r["recommendation"], str) and r["recommendation"]
     assert r["sims"] >= 1
     assert "eval" in r and -1.0 <= r["eval"] <= 1.0       # S's post-search position value
+    assert "rec_eval" in r and -1.0 <= r["rec_eval"] <= 1.0   # the recommended move's value
+    assert all("eval" in a for a in r["alternatives"])        # each alternative carries its eval
 
 
 def test_analyze_finished_game_has_no_move():

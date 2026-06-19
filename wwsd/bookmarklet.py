@@ -32,16 +32,18 @@ BOOKMARKLET_TEMPLATE = (
     "font:14px system-ui,sans-serif;box-shadow:0 6px 24px rgba(0,0,0,.5)';"
     "document.body.appendChild(b);b.onclick=function(e){if(e.target.id==='wx')b.remove();};}"
     "var head=`<b style='color:#e8c170'>WWSD</b> <span id=wx style='float:right;cursor:pointer'>x</span>`;"
-    "b.innerHTML=head+`<div style='margin-top:6px'>thinking... (first call can take ~40s to wake the server)</div>`;"
+    "b.innerHTML=head+`<div style='margin-top:6px'>thinking...</div>`;"
     "fetch(url,{method:'POST',headers:{'Content-Type':'application/json','X-WWSD-Secret':KEY},body:body})"
     ".then(function(r){return r.json();}).then(function(d){"
     "if(!d.ok){b.innerHTML=head+`<div style='margin-top:6px'>`+(d.message||'no result')+`</div>`;return;}"
-    "var h=`<div style='margin-top:6px;font-weight:700;color:#e8c170'>`+d.recommendation+`</div>`;"
+    "var sev=function(v){return (v>=0?'+':'')+v.toFixed(2);};"
+    "var h=`<div style='margin-top:6px;font-weight:700;color:#e8c170'>`+d.recommendation"
+    "+(d.rec_eval!=null?` <span style='color:#b8a888;font-weight:400;font-size:12px'>(eval `+sev(d.rec_eval)+`)</span>`:``)+`</div>`;"
     "if(d.eval!=null){var ev=d.eval;var lbl=ev>0.15?'favored':(ev<-0.15?'behind':'even');"
-    "h+=`<div style='margin-top:4px;color:#cdbfa8;font-size:12px'>position: `+(ev>=0?'+':'')+ev.toFixed(2)+` (`+lbl+`)</div>`;}"
+    "h+=`<div style='margin-top:4px;color:#cdbfa8;font-size:12px'>position now: `+sev(ev)+` (`+lbl+`)</div>`;}"
     "h+=`<div style='margin-top:4px;color:#b8a888;font-size:12px'>`+d.turn_name+` to move - `+d.sims+` sims - target `+d.target+`</div>`;"
     "if(d.alternatives&&d.alternatives.length){h+=`<ul style='margin:6px 0 0;padding-left:18px;color:#cdbfa8;font-size:12px'>`;"
-    "d.alternatives.forEach(function(a){h+=`<li>`+a.pct+`% `+a.text+`</li>`;});h+=`</ul>`;}"
+    "d.alternatives.forEach(function(a){h+=`<li>`+a.pct+`% `+a.text+(a.eval!=null?` (`+sev(a.eval)+`)`:``)+`</li>`;});h+=`</ul>`;}"
     "b.innerHTML=head+h;"
     "}).catch(function(e){b.innerHTML=head+`<div>error: `+e.message+`</div>`;});"
     "}catch(e){alert('WWSD error: '+e.message);}})();"
@@ -115,12 +117,13 @@ document.getElementById('go').onclick=async()=>{
                                    body:document.getElementById('inp').value});
     const d=await r.json();
     if(!d.ok){ out.innerHTML='<span class="msg">'+esc(d.message||'no result')+'</span>'; return; }
-    let h='<div class="rec">'+esc(d.recommendation)+'</div>';
+    const sev=v=>(v>=0?'+':'')+v.toFixed(2);
+    let h='<div class="rec">'+esc(d.recommendation)+(d.rec_eval!=null?' <span style="color:#b8a888;font-size:14px">(eval '+sev(d.rec_eval)+')</span>':'')+'</div>';
     if(d.eval!=null){const ev=d.eval,lbl=ev>0.15?'favored':(ev<-0.15?'behind':'even');
-      h+='<div class="meta">position: '+(ev>=0?'+':'')+ev.toFixed(2)+' ('+lbl+')</div>';}
+      h+='<div class="meta">position now: '+sev(ev)+' ('+lbl+')</div>';}
     h+='<div class="meta">'+esc(d.turn_name)+' to move &middot; '+d.sims+' sims &middot; target '+d.target+(d.budget?' &middot; '+d.budget+'s':'')+'</div>';
     if(d.alternatives&&d.alternatives.length){h+='<ul style="color:#cdbfa8;font-size:13px">';
-      d.alternatives.forEach(a=>h+='<li>'+a.pct+'% '+esc(a.text)+'</li>');h+='</ul>';}
+      d.alternatives.forEach(a=>h+='<li>'+a.pct+'% '+esc(a.text)+(a.eval!=null?' ('+sev(a.eval)+')':'')+'</li>');h+='</ul>';}
     out.innerHTML=h;
   }catch(e){ out.innerHTML='<span class="err">error: '+esc(e.message)+'</span>'; }
 };

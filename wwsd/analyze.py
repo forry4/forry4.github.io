@@ -134,7 +134,9 @@ def _search_with_eval(s, seat, time_limit):
     root = search.root
     tot = sum(root.N)
     root_val = (sum(root.W) / tot) if tot else 0.0    # root.W is from root.to_play (= side to move)
-    return root.N[:], root_val
+    # per-move value: edge Q = W[a]/N[a] = S's value of the position AFTER that move (same perspective)
+    qvals = [(root.W[a] / root.N[a]) if root.N[a] > 0 else None for a in range(len(root.N))]
+    return root.N[:], root_val, qvals
 
 
 def analyze(doc, time_limit=None) -> dict:
@@ -161,13 +163,15 @@ def analyze(doc, time_limit=None) -> dict:
     if not legal:
         out["message"] = "No legal moves in this position."
         return out
-    visits, root_val = _search_with_eval(s.clone(), seat, time_limit)
+    visits, root_val, qvals = _search_with_eval(s.clone(), seat, time_limit)
     order = sorted([a for a in legal if visits[a] > 0], key=lambda a: -visits[a]) or list(legal)
     tv = sum(visits) or 1
+    def _mv_eval(a):
+        return round(qvals[a], 3) if qvals[a] is not None else None
     out.update(ok=True, sims=int(sum(visits)), eval=round(root_val, 3),
-               recommendation=_describe_move(s, order[0]),
-               alternatives=[{"pct": round(100 * visits[a] / tv, 1), "text": _describe_move(s, a)}
-                             for a in order[1:6]])
+               recommendation=_describe_move(s, order[0]), rec_eval=_mv_eval(order[0]),
+               alternatives=[{"pct": round(100 * visits[a] / tv, 1), "text": _describe_move(s, a),
+                              "eval": _mv_eval(a)} for a in order[1:6]])
     if job not in ("SPENDEE_REGULAR", None):
         out["note"] = ("Pending '%s' sub-decision — S gives the main move; "
                        "noble/discard sub-decisions fall back to greedy H3." % job)
