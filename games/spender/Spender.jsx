@@ -356,17 +356,17 @@ const css = baseCss + `
   .game-main>.levels{grid-column:2}
   .bank-panel{grid-column:3;align-self:start}
 
-  /* Nobles: vertical stack to the left of the decks, 1.8x larger. */
-  .nobles-row{flex-direction:column;align-items:stretch;gap:10px}
-  .noble{width:130px;min-height:130px;padding:11px;gap:7px}
-  .noble-points{font-size:1.8rem}
-  .noble-req-row{font-size:1.05rem;gap:5px}
-  .noble-req-dot{width:15px;height:15px}
+  /* Nobles: vertical stack to the left of the decks, 1.5x larger. */
+  .nobles-row{flex-direction:column;align-items:stretch;gap:9px}
+  .noble{width:108px;min-height:108px;padding:9px;gap:6px}
+  .noble-points{font-size:1.5rem}
+  .noble-req-row{font-size:.95rem;gap:4px}
+  .noble-req-dot{width:12px;height:12px}
 
-  /* Vertical gem bank with the action buttons stacked at the top; gems 1.8x. */
-  .bank-gems{flex-direction:column;align-items:center;gap:16px}
-  .bank-gems .gem-token{width:76px!important;height:76px!important;font-size:1.7rem!important}
-  .bank-gems .gem-count{font-size:1.2rem}
+  /* Vertical gem bank with the action buttons stacked at the top; gems 1.5x. */
+  .bank-gems{flex-direction:column;align-items:center;gap:14px}
+  .bank-gems .gem-token{width:63px!important;height:63px!important;font-size:1.45rem!important}
+  .bank-gems .gem-count{font-size:1.1rem}
   .bank-actions-top{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-bottom:12px}
   .bank-actions-top .btn{padding:8px 12px;font-size:.8rem}
 
