@@ -349,31 +349,41 @@ const css = baseCss + `
    player sidebar). The Take/Buy/✕ controls move to the top of the gem bank, and
    cards get much larger (--card-w/--card-h). */
 @media(min-width:901px){
-  /* 3 columns: vertical nobles | big-card board | vertical gem bank. The player
-     sidebar is the outer grid's 2nd column, so L-to-R: nobles, cards, bank, players. */
-  /* align-items:center so the shorter nobles + gem columns line up vertically
-     with the tall card board instead of floating at the top. */
-  .game-main{display:grid;grid-template-columns:auto 1fr 156px;gap:16px;align-items:center;--card-w:142px;--card-h:194px}
-  /* All three pinned to row 1 (cols 1/2/3). Without explicit rows, the DOM order
-     (bank, then cards, then nobles = descending columns) made grid's sparse flow
-     drop each to a new row -> a diagonal staircase. */
+  /* Left column = nobles (horizontal) on top of the card board; right of it a
+     tall vertical gem bank. The player sidebar is the outer grid's wide 2nd
+     column. L-to-R: nobles/cards, gem bank, players. */
+  .game{grid-template-columns:1fr 360px}
+  .game-main{display:grid;grid-template-columns:1fr 156px;grid-template-rows:auto 1fr;gap:16px;align-items:start;--card-w:142px;--card-h:194px}
   .game-main>.nobles-panel{grid-column:1;grid-row:1}
-  .game-main>.levels{grid-column:2;grid-row:1}
-  .bank-panel{grid-column:3;grid-row:1}
+  .game-main>.levels{grid-column:1;grid-row:2}
+  /* Bank spans both rows + stretches so it runs nearly top-to-bottom. */
+  .bank-panel{grid-column:2;grid-row:1 / -1;align-self:stretch;display:flex;flex-direction:column}
 
-  /* Nobles: vertical stack to the left of the decks, 1.5x larger. */
-  .nobles-row{flex-direction:column;align-items:stretch;gap:9px}
+  /* Nobles: horizontal row on top of the cards, 1.5x larger. */
   .noble{width:108px;min-height:108px;padding:9px;gap:6px}
   .noble-points{font-size:1.5rem}
   .noble-req-row{font-size:.95rem;gap:4px}
   .noble-req-dot{width:12px;height:12px}
 
-  /* Vertical gem bank with the action buttons stacked at the top; gems 1.5x. */
-  .bank-gems{flex-direction:column;align-items:center;gap:14px}
+  /* Tall vertical gem bank: buttons at the top, gems spread top-to-bottom; 1.5x. */
+  .bank-gems{flex-direction:column;align-items:center;flex:1;justify-content:space-between}
   .bank-gems .gem-token{width:63px!important;height:63px!important;font-size:1.45rem!important}
   .bank-gems .gem-count{font-size:1.1rem}
   .bank-actions-top{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-bottom:12px}
   .bank-actions-top .btn{padding:8px 12px;font-size:.8rem}
+
+  /* Drop the Gem Bank + Players labels on desktop (Nobles + Recent Moves stay). */
+  .bank-panel .panel-title{display:none}
+  .game-sidebar>.panel-title{display:none}
+
+  /* Bigger recent-moves + player boxes in the wider sidebar. */
+  .player-panel{padding:16px}
+  .player-name{font-size:1rem}
+  .player-score{font-size:1.4rem}
+  .token-pill,.bonus-pill{font-size:.82rem;padding:3px 9px}
+  .move-log{max-height:340px}
+  .log-entry{font-size:.92rem;padding:6px 0}
+  .log-name{font-size:.84rem}
 
   /* Bigger board cards: scale the box (via --card-*) and the inner content. */
   .level-row{overflow-x:visible;gap:12px}
