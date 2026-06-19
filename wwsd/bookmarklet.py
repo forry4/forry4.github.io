@@ -36,8 +36,10 @@ BOOKMARKLET_TEMPLATE = (
     "fetch(url,{method:'POST',headers:{'Content-Type':'application/json','X-WWSD-Secret':KEY},body:body})"
     ".then(function(r){return r.json();}).then(function(d){"
     "if(!d.ok){b.innerHTML=head+`<div style='margin-top:6px'>`+(d.message||'no result')+`</div>`;return;}"
-    "var h=`<div style='margin-top:6px;font-weight:700;color:#e8c170'>`+d.recommendation+`</div>`"
-    "+`<div style='margin-top:4px;color:#b8a888;font-size:12px'>`+d.turn_name+` - target `+d.target+` - `+d.sims+` sims</div>`;"
+    "var h=`<div style='margin-top:6px;font-weight:700;color:#e8c170'>`+d.recommendation+`</div>`;"
+    "if(d.eval!=null){var ev=d.eval;var lbl=ev>0.15?'favored':(ev<-0.15?'behind':'even');"
+    "h+=`<div style='margin-top:4px;color:#cdbfa8;font-size:12px'>position: `+(ev>=0?'+':'')+ev.toFixed(2)+` (`+lbl+`)</div>`;}"
+    "h+=`<div style='margin-top:4px;color:#b8a888;font-size:12px'>`+d.turn_name+` to move - `+d.sims+` sims - target `+d.target+`</div>`;"
     "if(d.alternatives&&d.alternatives.length){h+=`<ul style='margin:6px 0 0;padding-left:18px;color:#cdbfa8;font-size:12px'>`;"
     "d.alternatives.forEach(function(a){h+=`<li>`+a.pct+`% `+a.text+`</li>`;});h+=`</ul>`;}"
     "b.innerHTML=head+h;"
@@ -113,8 +115,10 @@ document.getElementById('go').onclick=async()=>{
                                    body:document.getElementById('inp').value});
     const d=await r.json();
     if(!d.ok){ out.innerHTML='<span class="msg">'+esc(d.message||'no result')+'</span>'; return; }
-    let h='<div class="rec">'+esc(d.recommendation)+'</div><div class="meta">'+esc(d.turn_name)
-      +' to move &middot; target '+d.target+' &middot; '+d.sims+' sims'+(d.budget?' &middot; '+d.budget+'s':'')+'</div>';
+    let h='<div class="rec">'+esc(d.recommendation)+'</div>';
+    if(d.eval!=null){const ev=d.eval,lbl=ev>0.15?'favored':(ev<-0.15?'behind':'even');
+      h+='<div class="meta">position: '+(ev>=0?'+':'')+ev.toFixed(2)+' ('+lbl+')</div>';}
+    h+='<div class="meta">'+esc(d.turn_name)+' to move &middot; '+d.sims+' sims &middot; target '+d.target+(d.budget?' &middot; '+d.budget+'s':'')+'</div>';
     if(d.alternatives&&d.alternatives.length){h+='<ul style="color:#cdbfa8;font-size:13px">';
       d.alternatives.forEach(a=>h+='<li>'+a.pct+'% '+esc(a.text)+'</li>');h+='</ul>';}
     out.innerHTML=h;

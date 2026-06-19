@@ -70,6 +70,7 @@ def test_analyze_live_position_returns_a_move():
     assert r["turn_name"] == "guest2273055" and r["target"] == 15
     assert isinstance(r["recommendation"], str) and r["recommendation"]
     assert r["sims"] >= 1
+    assert "eval" in r and -1.0 <= r["eval"] <= 1.0       # S's post-search position value
 
 
 def test_analyze_finished_game_has_no_move():

@@ -14,8 +14,10 @@ calls it lazily (idempotent).
 from __future__ import annotations
 import json
 import os
+import time
 
 from games.spender.ai.az import engine as E
+from games.spender.ai.az import mcts as _mcts
 from games.spender.ai.az import vsearch as VS
 
 CLR = E.GEM_COLORS                                   # [white, blue, green, red, black]
@@ -116,6 +118,25 @@ def _describe_move(s, a) -> str:
     ri = a - E.A_BUY_RESV; return f"BUY your reserved card: {card(s.reserved[s.turn][ri])}"
 
 
+def _search_with_eval(s, seat, time_limit):
+    """Run variant S's search and return (root visit counts, root value in [-1,1] for the side to
+    move). Mirrors vsearch._run_search_timed but also reads the root's averaged value (sum W / sum N)
+    so we can surface S's POST-search assessment of the position next to its chosen move. Kept here
+    (not in vsearch) so the deployed game backend's az modules stay untouched."""
+    search = _mcts.Search(s, VS._RNG, c_puct=VS.C_PUCT, add_noise=False, leaf_state=True)
+    deadline = time.time() + time_limit
+    done = 0
+    while done < VS.SERVE_MAX_SIMS:
+        VS._expand(search)
+        done += 1
+        if done >= VS.SERVE_MIN_SIMS and time.time() >= deadline:
+            break
+    root = search.root
+    tot = sum(root.N)
+    root_val = (sum(root.W) / tot) if tot else 0.0    # root.W is from root.to_play (= side to move)
+    return root.N[:], root_val
+
+
 def analyze(doc, time_limit=None) -> dict:
     """Take a dumped 'games' collection doc (or a single game doc) and return what variant S would
     do, as a structured dict. Never raises on game content."""
@@ -140,10 +161,11 @@ def analyze(doc, time_limit=None) -> dict:
     if not legal:
         out["message"] = "No legal moves in this position."
         return out
-    visits = VS._run_search_timed(s.clone(), seat, time_limit)
+    visits, root_val = _search_with_eval(s.clone(), seat, time_limit)
     order = sorted([a for a in legal if visits[a] > 0], key=lambda a: -visits[a]) or list(legal)
     tv = sum(visits) or 1
-    out.update(ok=True, sims=int(sum(visits)), recommendation=_describe_move(s, order[0]),
+    out.update(ok=True, sims=int(sum(visits)), eval=round(root_val, 3),
+               recommendation=_describe_move(s, order[0]),
                alternatives=[{"pct": round(100 * visits[a] / tv, 1), "text": _describe_move(s, a)}
                              for a in order[1:6]])
     if job not in ("SPENDEE_REGULAR", None):
