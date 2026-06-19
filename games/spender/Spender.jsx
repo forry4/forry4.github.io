@@ -243,7 +243,9 @@ const css = baseCss + `
 /* The turn/action bar is removed on all sizes now — the Take/Buy/✕ controls live
    in the gem bank (desktop) or beside the nobles (mobile/tablet). */
 .action-bar{display:none}
-.bank-actions-top{display:none}
+/* The desktop-only actions box (hint + buttons beside the nobles) is hidden on
+   mobile/tablet, where the controls live next to the nobles via .board-actions. */
+.actions-panel{display:none}
 .action-hint{flex:1;font-style:italic;color:var(--text-dim);font-size:.88rem;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .action-bar-btns{display:flex;gap:8px;align-items:center;flex-shrink:0;min-width:150px;justify-content:flex-end}
 .action-bar-spacer{visibility:hidden;pointer-events:none;transition:none}
@@ -349,30 +351,34 @@ const css = baseCss + `
    player sidebar). The Take/Buy/✕ controls move to the top of the gem bank, and
    cards get much larger (--card-w/--card-h). */
 @media(min-width:901px){
-  /* Left column = nobles (horizontal) on top of the card board; right of it a
-     tall vertical gem bank. The player sidebar is the outer grid's wide 2nd
-     column. L-to-R: nobles/cards, gem bank, players. */
+  /* Top row = nobles box + an actions box (hint + Take/Buy/✕) side by side, on
+     top of the card board; a vertical gem bank spans to their right; the player
+     sidebar is the outer grid's wide 2nd column. L-to-R: nobles/cards, bank, players. */
   .game{grid-template-columns:1fr 360px}
-  .game-main{display:grid;grid-template-columns:1fr 156px;grid-template-rows:auto 1fr;gap:16px;align-items:start;--card-w:142px;--card-h:194px}
+  .game-main{display:grid;grid-template-columns:auto 1fr 132px;column-gap:16px;row-gap:10px;align-items:start;--card-w:142px;--card-h:194px}
   .game-main>.nobles-panel{grid-column:1;grid-row:1}
-  .game-main>.levels{grid-column:1;grid-row:2}
-  /* Bank spans both rows + stretches so it runs nearly top-to-bottom. */
-  .bank-panel{grid-column:2;grid-row:1 / -1;align-self:stretch;display:flex;flex-direction:column}
+  .actions-panel{grid-column:2;grid-row:1;display:flex;flex-direction:column;justify-content:center;gap:12px}
+  .game-main>.levels{grid-column:1 / 3;grid-row:2}
+  .bank-panel{grid-column:3;grid-row:1 / -1;align-self:start}
 
-  /* Nobles: horizontal row on top of the cards, 1.5x larger. */
+  /* Nobles: horizontal row on top of the cards, 1.5x larger; no title. */
+  .nobles-panel .panel-title{display:none}
   .noble{width:108px;min-height:108px;padding:9px;gap:6px}
   .noble-points{font-size:1.5rem}
   .noble-req-row{font-size:.95rem;gap:4px}
   .noble-req-dot{width:12px;height:12px}
 
-  /* Tall vertical gem bank: buttons at the top, gems spread top-to-bottom; 1.5x. */
-  .bank-gems{flex-direction:column;align-items:center;flex:1;justify-content:space-between}
+  /* Actions box: hint + buttons. */
+  .actions-panel .action-hint{font-size:1rem;white-space:normal;color:var(--text-dim);font-style:italic}
+  .actions-panel-btns{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+
+  /* Vertical gem bank, 1.5x tokens, content height (not stretched, so it never
+     forces the page to scroll). */
+  .bank-gems{flex-direction:column;align-items:center;gap:14px}
   .bank-gems .gem-token{width:63px!important;height:63px!important;font-size:1.45rem!important}
   .bank-gems .gem-count{font-size:1.1rem}
-  .bank-actions-top{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-bottom:12px}
-  .bank-actions-top .btn{padding:8px 12px;font-size:.8rem}
 
-  /* Drop the Gem Bank + Players labels on desktop (Nobles + Recent Moves stay). */
+  /* Drop the Gem Bank + Players labels on desktop (Recent Moves stays). */
   .bank-panel .panel-title{display:none}
   .game-sidebar>.panel-title{display:none}
 
@@ -1677,13 +1683,6 @@ export default function SpenderApp() {
 
 						<div className="panel bank-panel">
 							<div className="panel-title">Gem Bank</div>
-							{/* Desktop only (CSS): the Take/Buy/✕ controls sit at the top of the
-							    (vertical) gem bank; the AI 'thinking' indicator shows here too. */}
-							<div className="bank-actions-top">
-								{aiThinking
-									? <span className="ai-thinking"><span className="think-dot"/><span className="think-dot"/><span className="think-dot"/> thinking…</span>
-									: renderActionButtons()}
-							</div>
 							<div className="bank-gems">
 								{[...GEM_COLORS, "gold"].map(c => {
 									const count = game.bank[c] || 0;
@@ -1758,6 +1757,17 @@ export default function SpenderApp() {
 							{/* Mobile only (CSS): the Take/Buy/✕ controls sit to the right of the
 							    nobles (or the AI "thinking" indicator during the bot's turn). */}
 							<div className="board-actions">
+								{aiThinking
+									? <span className="ai-thinking"><span className="think-dot"/><span className="think-dot"/><span className="think-dot"/> thinking…</span>
+									: renderActionButtons()}
+							</div>
+						</div>
+
+						{/* Desktop only (CSS): a box beside the nobles with the turn hint +
+						    the Take/Buy/✕ controls (AI 'thinking' indicator on the bot's turn). */}
+						<div className="panel actions-panel">
+							<span className="action-hint">{game.phase === "over" ? "Final board & game log" : getHint()}</span>
+							<div className="actions-panel-btns">
 								{aiThinking
 									? <span className="ai-thinking"><span className="think-dot"/><span className="think-dot"/><span className="think-dot"/> thinking…</span>
 									: renderActionButtons()}
