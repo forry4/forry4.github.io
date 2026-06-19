@@ -363,7 +363,7 @@ const css = baseCss + `
      down to the cards, and the cards got pushed into a separate band (the gap). */
   /* Row 2 is 1fr so the card board fills the remaining viewport height; the card
      rows then spread to reach the bottom of the screen. */
-  .game-main{display:grid;grid-template-columns:auto 1fr 132px;grid-template-rows:auto 1fr;column-gap:16px;row-gap:10px;align-items:start;--card-w:132px;--card-h:158px}
+  .game-main{display:grid;grid-template-columns:auto 1fr 132px;grid-template-rows:auto 1fr;column-gap:16px;row-gap:10px;align-items:start;--card-w:140px;--card-h:174px}
   .game-main>.nobles-panel{grid-column:1;grid-row:1}
   /* align-self:stretch so the hint box matches the nobles box height in row 1. */
   .actions-panel{grid-column:2;grid-row:1;align-self:stretch;display:flex;flex-direction:column;justify-content:center;gap:12px}
@@ -408,13 +408,13 @@ const css = baseCss + `
   .level-row{overflow-x:visible;gap:10px}
   .level-row .card{padding:9px 8px 8px}
   .level-row .card-header{margin-bottom:8px}
-  .level-row .card-points{font-size:1.55rem}
-  .level-row .card-bonus{width:27px;height:27px}
-  .level-row .cost-gem{width:14px;height:14px}
-  .level-row .cost-num{font-size:.88rem}
-  .level-row .card-cost{gap:4px}
-  .level-row .deck-pile{font-size:.76rem;gap:5px}
-  .level-row .deck-remaining{font-size:1.55rem}
+  .level-row .card-points{font-size:1.7rem}
+  .level-row .card-bonus{width:29px;height:29px}
+  .level-row .cost-gem{width:15px;height:15px}
+  .level-row .cost-num{font-size:.92rem}
+  .level-row .card-cost{gap:5px}
+  .level-row .deck-pile{font-size:.78rem;gap:6px}
+  .level-row .deck-remaining{font-size:1.7rem}
 }
 
 @media(max-width:600px){
