@@ -361,9 +361,10 @@ const css = baseCss + `
   /* Explicit grid-template-rows is REQUIRED: with auto/implicit rows, the bank's
      grid-row:1/-1 resolved to a single row (-1 == line 1) so it never spanned
      down to the cards, and the cards got pushed into a separate band (the gap). */
-  .game-main{display:grid;grid-template-columns:auto 1fr 132px;grid-template-rows:auto auto;column-gap:16px;row-gap:10px;align-items:start;align-content:start;--card-w:142px;--card-h:194px}
+  .game-main{display:grid;grid-template-columns:auto 1fr 124px;grid-template-rows:auto auto;column-gap:16px;row-gap:10px;align-items:start;align-content:start;--card-w:120px;--card-h:150px}
   .game-main>.nobles-panel{grid-column:1;grid-row:1}
-  .actions-panel{grid-column:2;grid-row:1;display:flex;flex-direction:column;justify-content:center;gap:12px}
+  /* align-self:stretch so the hint box matches the nobles box height in row 1. */
+  .actions-panel{grid-column:2;grid-row:1;align-self:stretch;display:flex;flex-direction:column;justify-content:center;gap:12px}
   .game-main>.levels{grid-column:1 / 3;grid-row:2}
   /* Bank spans both rows (explicit span) + stretches, so it runs down to the
      bottom of the card board (gems spread over that height). */
@@ -380,10 +381,10 @@ const css = baseCss + `
   .actions-panel .action-hint{font-size:1rem;white-space:normal;color:var(--text-dim);font-style:italic}
   .actions-panel-btns{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 
-  /* Vertical gem bank, 1.5x tokens; gems spread top-to-bottom to fill the bank. */
+  /* Vertical gem bank; gems spread top-to-bottom to fill the bank. */
   .bank-gems{flex-direction:column;align-items:center;flex:1;justify-content:space-between}
-  .bank-gems .gem-token{width:63px!important;height:63px!important;font-size:1.45rem!important}
-  .bank-gems .gem-count{font-size:1.1rem}
+  .bank-gems .gem-token{width:54px!important;height:54px!important;font-size:1.25rem!important}
+  .bank-gems .gem-count{font-size:1rem}
 
   /* Drop the Gem Bank + Players labels on desktop (Recent Moves stays). */
   .bank-panel .panel-title{display:none}
@@ -394,21 +395,22 @@ const css = baseCss + `
   .player-name{font-size:1rem}
   .player-score{font-size:1.4rem}
   .token-pill,.bonus-pill{font-size:.82rem;padding:3px 9px}
-  .move-log{max-height:340px}
+  /* Show ~6 recent moves, then scroll for older ones. */
+  .move-log{max-height:200px}
   .log-entry{font-size:.92rem;padding:6px 0}
   .log-name{font-size:.84rem}
 
-  /* Bigger board cards: scale the box (via --card-*) and the inner content. */
-  .level-row{overflow-x:visible;gap:12px}
-  .level-row .card{padding:12px 10px 10px}
-  .level-row .card-header{margin-bottom:10px}
-  .level-row .card-points{font-size:1.7rem}
-  .level-row .card-bonus{width:30px;height:30px}
-  .level-row .cost-gem{width:15px;height:15px}
-  .level-row .cost-num{font-size:.95rem}
-  .level-row .card-cost{gap:5px}
-  .level-row .deck-pile{font-size:.8rem;gap:6px}
-  .level-row .deck-remaining{font-size:1.7rem}
+  /* Board cards: scale the box (via --card-*) and the inner content. */
+  .level-row{overflow-x:visible;gap:10px}
+  .level-row .card{padding:9px 8px 8px}
+  .level-row .card-header{margin-bottom:8px}
+  .level-row .card-points{font-size:1.45rem}
+  .level-row .card-bonus{width:25px;height:25px}
+  .level-row .cost-gem{width:13px;height:13px}
+  .level-row .cost-num{font-size:.85rem}
+  .level-row .card-cost{gap:4px}
+  .level-row .deck-pile{font-size:.74rem;gap:5px}
+  .level-row .deck-remaining{font-size:1.45rem}
 }
 
 @media(max-width:600px){
