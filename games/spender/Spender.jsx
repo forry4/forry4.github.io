@@ -237,7 +237,9 @@ const css = baseCss + `
 .noble-points{font-family:'Cinzel',serif;font-size:1rem;font-weight:700;color:var(--gold)}
 .noble-req{display:flex;flex-direction:column;gap:2px;width:100%}
 .noble-req-row{display:flex;gap:3px;align-items:center;font-size:.65rem;color:var(--text-dim);font-family:'Cinzel',serif}
-.noble-req-dot{width:8px;height:8px;border-radius:50%;border:1px solid rgba(255,255,255,.12);flex-shrink:0}
+.noble-req-dot{width:8px;height:8px;border-radius:2px;border:1px solid rgba(255,255,255,.12);flex-shrink:0}
+/* blank placeholder kept in a claimed noble's slot so positions never shift */
+.noble-empty{background:transparent;border:1px dashed var(--border)}
 
 /* ─── Action bar ────────────────────────────────────────────────────────── */
 /* The turn/action bar is removed on all sizes now — the Take/Buy/✕ controls live
@@ -414,7 +416,8 @@ const css = baseCss + `
 
   /* Nobles: horizontal row on top of the cards, 1.5x larger; no title. */
   .nobles-panel .panel-title{display:none}
-  .noble{width:111px;min-height:108px;padding:9px;gap:6px}
+  /* exactly square: aspect-ratio:1 makes height track the (wider) width */
+  .noble{width:120px;aspect-ratio:1;padding:9px;gap:6px;justify-content:center}
   .noble-points{font-size:1.5rem}
   .noble-req-row{font-size:.95rem;gap:4px}
   .noble-req-dot{width:12px;height:12px}
@@ -437,11 +440,18 @@ const css = baseCss + `
   .player-panel{padding:16px}
   .player-name{font-size:1rem}
   .player-score{font-size:1.4rem}
-  .token-pill,.bonus-pill{font-size:.82rem;padding:3px 9px}
-  /* reserve the token-row height so 0 gems doesn't shift the bonus pills up */
-  .player-tokens{min-height:30px}
-  /* Moves fill the full-height column (flush to the bottom) and scroll within. */
-  .move-log{max-height:none;flex:1;min-height:0}
+  /* gem + card (bonus) indicators +20% via zoom (scales box+content+inline dots, with reflow) */
+  .token-pill,.bonus-pill{font-size:.82rem;padding:3px 9px;zoom:1.2}
+  .bonus-pill{padding:3px 9.5px}      /* card bonus indicator width +1px net (9->9.5 each side) */
+  .gem-total{zoom:1.2}                /* "N gems" counter +20% */
+  .player-reserved .card{zoom:1.1;width:89px}    /* reserved cards +10%, width 89px */
+  /* reserve the token-row height so 0 gems doesn't shift the bonus pills up;
+     align-items:flex-start so the row's min-height doesn't STRETCH the pills taller */
+  .player-tokens{min-height:28px;align-items:flex-start}
+  /* Cap the move log to ~viewport height (explicit, so it bounds even if the
+     nested-grid height chain doesn't propagate) — it scrolls within and never
+     pushes the page past the window. */
+  .move-log{max-height:calc(100vh - 140px);flex:1;min-height:0}
   .log-entry{font-size:.92rem;padding:6px 0}
   .log-name{font-size:.84rem}
 
@@ -575,9 +585,9 @@ function CardView({ card, selected, affordable, needsGold, disabled, onClick, co
 	);
 }
 
-function NobleView({ noble, claimedBy }) {
+function NobleView({ noble, claimedBy, dimmed }) {
 	return (
-		<div className="noble" style={claimedBy ? { opacity: 0.5, position: "relative" } : undefined}>
+		<div className="noble" style={(claimedBy || dimmed) ? { opacity: 0.5, position: "relative" } : undefined}>
 			<span className="noble-points">{noble.points}</span>
 			<div className="noble-req">
 				{Object.entries(noble.req).map(([c, n]) => (
@@ -1922,14 +1932,26 @@ export default function SpenderApp() {
 						<div className="panel nobles-panel">
 							<div className="panel-title">Nobles</div>
 							<div className="nobles-row">
-								{(game.nobles || []).map(n => <NobleView key={n.id} noble={n} />)}
-								{/* In review, also show nobles that were claimed so the board is the full original set. */}
-								{game.phase === "over" && (game.order || []).flatMap(pid =>
-									(game.players?.[pid]?.nobles || []).map(n => (
-										<NobleView key={n.id} noble={n}
-											claimedBy={displayName(roomData?.players?.[pid] || pid.slice(0, 6)) + (pid === myId ? " (you)" : "")} />
-									))
-								)}
+								{(() => {
+									// Render the FULL original noble set in a stable id-sorted order so
+									// nobles NEVER move when one is claimed. A claimed noble shows as a
+									// blank slot during play (and dimmed + claimer's name in review).
+									const claimerOf = {};
+									(game.order || []).forEach(pid =>
+										(game.players?.[pid]?.nobles || []).forEach(n => {
+											claimerOf[n.id] = displayName(roomData?.players?.[pid] || pid.slice(0, 6)) + (pid === myId ? " (you)" : "");
+										}));
+									const claimed = (game.order || []).flatMap(pid => game.players?.[pid]?.nobles || []);
+									const all = [...(game.nobles || []), ...claimed].sort((a, b) => String(a.id).localeCompare(String(b.id)));
+									const unclaimed = new Set((game.nobles || []).map(n => n.id));
+									return all.map(n =>
+										unclaimed.has(n.id)
+											? <NobleView key={n.id} noble={n} />
+											: game.phase === "over"
+												? <NobleView key={n.id} noble={n} dimmed claimedBy={claimerOf[n.id]} />
+												: <div key={n.id} className="noble noble-empty" />
+									);
+								})()}
 							</div>
 							{/* Mobile only (CSS): the Take/Buy/✕ controls sit to the right of the
 							    nobles (or the AI "thinking" indicator during the bot's turn). */}

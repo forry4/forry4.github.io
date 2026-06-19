@@ -1271,11 +1271,18 @@ DESKTOP look is added in `@media(min-width:901px)`** (an inversion worth knowing
 editing base affects phone/tablet, not desktop):
 - **Desktop (`@media(min-width:901px)`)**: `.app.game-screen{height:100vh;overflow:hidden}`
   locks the screen to the window (no page scroll). `.game` is a 2-col grid
-  `1fr 560px` (board | sidebar) **with `grid-template-rows:minmax(0,1fr)`** — that
-  `minmax(0,…)` is essential: an auto row grows to its tallest content (the
-  recent-moves list) and pushes past the screen, but bounding it to the viewport
-  makes the sidebar a fixed height so the **move log scrolls internally** and the
-  player/moves boxes never resize as moves accumulate. `.game-main` is a 3-col / 2-row grid
+  `1fr 560px` (board | sidebar) that **needs an explicit definite height**
+  (`flex:none; height:calc(100vh - 48px)`) **AND `grid-template-rows:minmax(0,1fr)`** —
+  both, and it took 3 tries to learn why. `flex:1` yields a `flex-basis:0%` that is NOT
+  a definite height the grid `fr`/`minmax` can resolve against, so the row grows to its
+  tallest content (the recent-moves list) and pushes past the screen; the explicit
+  height + `minmax(0,…)` bounds the row to the viewport. **The SAME bound must be
+  repeated on the inner `.game-sidebar` grid** (`grid-template-rows:minmax(0,1fr)`) —
+  bounding only the outer `.game` left the sidebar's own auto row growing to the moves,
+  so the log was CLIPPED, not scrolled (the "EXACT SAME ISSUE" recurrence). **Belt-and-
+  suspenders:** the move log ALSO carries an explicit `max-height:calc(100vh - 140px)`,
+  so it bounds + scrolls even if the nested-grid height chain ever fails to propagate.
+  `.game-main` is a 3-col / 2-row grid
   `grid-template-columns:auto 1fr 132px; grid-template-rows:auto 1fr`: row 1 =
   nobles box (horizontal, `data`-less) + an **actions box** (turn hint + Take/Buy/✕,
   right-aligned); row 2 = the **levels** (`grid-column:1/3`, `1fr` so the 3 card rows
@@ -1301,6 +1308,32 @@ editing base affects phone/tablet, not desktop):
   refuses to backtrack and drops it to a new row → a diagonal staircase. **Fix: pin
   every grid child to an explicit `grid-row`.** Relatedly, `grid-row:1/-1` needs an
   explicit `grid-template-rows` or `-1` collapses to line 1 (item spans only row 1).
+
+### Player box + nobles details (desktop; do not regress)
+- **Indicator sizing uses `zoom`, not font/padding math.** The desktop player box scales
+  its indicators with `zoom` (scales box + text + the inline gem dots together, WITH
+  reflow — unlike `transform:scale`, which overlaps neighbors): gem pills (`.token-pill`)
+  and card/bonus pills (`.bonus-pill`) `zoom:1.2`, the "N gems" total (`.gem-total`)
+  `zoom:1.2`, reserved cards (`.player-reserved .card`) `zoom:1.1` + `width:89px` (the
+  sidebar does NOT inherit `--card-w`, so reserved cards fall back to 88px — set width
+  explicitly). Per-px width nudges ride on top via horizontal padding (e.g.
+  `.bonus-pill{padding:3px 9.5px}`). `zoom` is supported in current Firefox (126+) and
+  Chromium. **Remember the zoom factor when a request says "+1px"** — the on-screen delta
+  is `px × zoom`.
+- **0 gems must not shift the bonus pills.** The "N gems" total ALWAYS renders (even
+  "0 gems"), and `.player-tokens` has a `min-height` reserving the empty token row — but
+  with `align-items:flex-start` so that `min-height` does NOT stretch the pills taller
+  (the row is `display:flex`; default `align-items:stretch` made the pills grow — a
+  regression the user caught immediately).
+- **Nobles are square + fixed-position.** Desktop `.noble` is `width:120px;aspect-ratio:1`
+  (exactly square); requirement markers (`.noble-req-dot`) are rounded SQUARES
+  (`border-radius:2px`), reading as cards not gems. **Claiming a noble never moves the
+  others**: the row renders the FULL original set in a stable id-sorted order
+  (`game.nobles` ∪ every player's claimed `nobles`, sorted by id), and a claimed noble
+  shows as a **blank slot** (`.noble.noble-empty`, dashed placeholder) in its fixed
+  position during play (dimmed + claimer's name only in the end-game review). The backend
+  removes claimed nobles from `game["nobles"]` (so positions would otherwise compact/
+  shift) — this position-preserving reconstruction is frontend-only.
 
 ### Action animations — flying gems + cards (`.fly-layer` / `flyers`)
 A single `useEffect([game])` diff (mirrors the `prevBankRef`/`flashGems` pattern)
@@ -1407,6 +1440,14 @@ can be tested on a real URL before shipping to prod:
   `git push -f origin staging` to resync. CI then rebuilds `docs/` + redeploys prod.
 - The local↔Cloudflare bundle **hashes differ** (different build envs), so verify a
   deploy by the served CSS/markers, not the filename.
+- **Fastest iteration loop = local vite dev pointed at the prod backend** (the
+  Cloudflare deploy is ~30–45s/change; HMR is instant). From `webapp/`:
+  `VITE_BASE=/ VITE_WS_URL=wss://splendid-nelz.onrender.com/ws npm run dev` — open the
+  printed `localhost:<port>` (vite bumps the port if 5173 is taken, e.g. 5174), log in,
+  and **resume your real game from the account-based games list** (so the long-move
+  board is there to test layout). Edits hot-reload into that tab. Gotcha hit once: a
+  stale 302-redirecting server on :5173 sent the user to prod — confirm the exact port
+  vite printed.
 
 ### Frontend smoke test (`npm run smoke`) — catch blank-page regressions
 `webapp/test/smoke.mjs` (Playwright) builds the app, serves it with `vite preview`,
