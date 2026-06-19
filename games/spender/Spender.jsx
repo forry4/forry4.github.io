@@ -314,6 +314,13 @@ const css = baseCss + `
 @keyframes gem-pop{0%,100%{transform:scale(1)}45%{transform:scale(1.3)}}
 .gem-stack.flashing .gem-token{animation:gem-pop .38s ease}
 
+/* ─── Flying gems (action animations) ───────────────────────────────────────
+   A fixed overlay layer of gem dots animated between the bank and a player box;
+   per-flyer --dx/--dy/--s0/--s1 set the trip + start/end scale. */
+.fly-layer{position:fixed;inset:0;pointer-events:none;z-index:90}
+.fly-gem{position:fixed;border-radius:50%;border:2px solid rgba(255,255,255,.3);box-shadow:0 2px 10px rgba(0,0,0,.55);animation:fly .42s ease both;will-change:transform,opacity}
+@keyframes fly{from{transform:translate(0,0) scale(var(--s0));opacity:1}to{transform:translate(var(--dx),var(--dy)) scale(var(--s1));opacity:.5}}
+
 /* ─── AI thinking dots ──────────────────────────────────────────────────── */
 .ai-thinking{display:inline-flex;align-items:center;gap:5px;font-size:.78rem;color:var(--text-muted);font-style:italic}
 .think-dot{width:5px;height:5px;border-radius:50%;background:var(--text-muted);animation:think-blink .9s ease-in-out infinite}
@@ -925,6 +932,73 @@ export default function SpenderApp() {
 		prevBankRef.current = { ...game.bank };
 	}, [game]); // eslint-disable-line react-hooks/exhaustive-deps
 
+	// ── Flying gems: on each single move, animate the gems that moved between the
+	//    bank and the acting player's box. Driven by per-player token deltas, so it
+	//    covers take (bank->you, shrink), buy/discard (you->bank, grow), and
+	//    reserve-gold (bank->you, shrink) for every player including the AI. ──────
+	const [flyers, setFlyers] = useState([]);
+	const prevPlayersRef = useRef(null);
+	const prevMovesLenRef = useRef(0);
+	const flyIdRef = useRef(0);
+	useEffect(() => {
+		const players = game?.players;
+		if (!players) return;
+		const prev = prevPlayersRef.current;
+		const movesLen = game?.moves?.length || 0;
+		const prevMovesLen = prevMovesLenRef.current;
+		const snap = {};
+		for (const pid of Object.keys(players)) snap[pid] = { ...(players[pid].tokens || {}) };
+		prevPlayersRef.current = snap;
+		prevMovesLenRef.current = movesLen;
+		// Only animate exactly one new move (avoids a burst on load/reconnect).
+		if (!prev || movesLen !== prevMovesLen + 1) return;
+
+		const ALL = [...GEM_COLORS, "gold"];
+		const specs = [];
+		for (const pid of Object.keys(players)) {
+			const before = prev[pid];
+			if (!before) continue;
+			const now = players[pid].tokens || {};
+			for (const c of ALL) {
+				const delta = (now[c] || 0) - (before[c] || 0);
+				if (delta > 0) specs.push({ pid, color: c, count: delta, grow: false });   // bank -> player
+				else if (delta < 0) specs.push({ pid, color: c, count: -delta, grow: true }); // player -> bank
+			}
+		}
+		if (!specs.length) return;
+
+		const raf = requestAnimationFrame(() => {
+			const made = [];
+			let total = 0;
+			for (const s of specs) {
+				const bankEl = document.querySelector(`.gem-stack[data-color="${s.color}"] .gem-token`);
+				const boxEl = document.querySelector(`.player-panel[data-pid="${s.pid}"]`);
+				if (!bankEl || !boxEl) continue;
+				const br = bankEl.getBoundingClientRect();
+				const xr = boxEl.getBoundingClientRect();
+				const bank = { x: br.left + br.width / 2, y: br.top + br.height / 2 };
+				const box = { x: xr.left + xr.width / 2, y: xr.top + xr.height / 2 };
+				const size = Math.max(18, Math.round(br.width || 40));
+				const from = s.grow ? box : bank;
+				const to = s.grow ? bank : box;
+				const n = Math.min(s.count, 5);
+				for (let i = 0; i < n && total < 8; i++, total++) {
+					made.push({
+						id: ++flyIdRef.current, color: s.color, size,
+						x: from.x, y: from.y, dx: to.x - from.x, dy: to.y - from.y,
+						s0: s.grow ? 0.35 : 1, s1: s.grow ? 1 : 0.35, delay: i * 55,
+					});
+				}
+			}
+			if (!made.length) return;
+			setFlyers(f => [...f, ...made]);
+			const ids = new Set(made.map(m => m.id));
+			const maxDelay = made.reduce((m, x) => Math.max(m, x.delay), 0);
+			setTimeout(() => setFlyers(f => f.filter(x => !ids.has(x.id))), 480 + maxDelay);
+		});
+		return () => cancelAnimationFrame(raf);
+	}, [game]); // eslint-disable-line react-hooks/exhaustive-deps
+
 	// ── Move log helpers ──────────────────────────────────────────────────────
 	function formatLogMove(mv) {
 		const isMe = mv.pid === myId;
@@ -1182,7 +1256,7 @@ export default function SpenderApp() {
 		const toggleExpand = () => setPlayerExpanded(m => ({ ...m, [pid]: !(m[pid] ?? isMe) }));
 		const noblePts = p.nobles.reduce((s, n) => s + n.points, 0);
 		return (
-			<div key={pid} className={`player-panel${isMe ? " me" : ""}${isActive ? " active-turn" : ""}${expanded ? " expanded" : ""}`}>
+			<div key={pid} data-pid={pid} className={`player-panel${isMe ? " me" : ""}${isActive ? " active-turn" : ""}${expanded ? " expanded" : ""}`}>
 				<div className="player-header" onClick={p.reserved?.length > 0 ? toggleExpand : undefined}>
 					<div className="player-name-row">
 						{isActive && <span className="active-dot" />}
@@ -1718,7 +1792,7 @@ export default function SpenderApp() {
 									const goldLit = goldReserveReady || (isGold && reserveArmed);  // pulse when engaged
 									const disabled = isGold ? !goldActive : (!myTurn || count === 0);
 									return (
-										<div key={c}
+										<div key={c} data-color={c}
 											className={`gem-stack${selCount > 0 ? " selected" : ""}${goldLit ? " reserve-ready" : ""}${flashGems.has(c) ? " flashing" : ""}${disabled ? " disabled" : ""}`}
 											onClick={() => {
 												if (!isGold) { handleGemClick(c); return; }
@@ -1820,6 +1894,19 @@ export default function SpenderApp() {
 						</div>
 					</div>
 				</div>
+
+				{flyers.length > 0 && (
+					<div className="fly-layer">
+						{flyers.map(f => (
+							<div key={f.id} className="fly-gem" style={{
+								left: f.x - f.size / 2, top: f.y - f.size / 2, width: f.size, height: f.size,
+								background: GEM_HEX[f.color],
+								"--dx": `${f.dx}px`, "--dy": `${f.dy}px`, "--s0": f.s0, "--s1": f.s1,
+								animationDelay: `${f.delay}ms`,
+							}} />
+						))}
+					</div>
+				)}
 
 				{modalCard && (
 					<div className="modal-backdrop" onClick={() => setModalCard(null)}>
