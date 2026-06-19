@@ -1020,14 +1020,22 @@ export default function SpenderApp() {
 		const raf = requestAnimationFrame(() => {
 			const made = [];
 			let total = 0;
+			// Center of the first VISIBLE element matching `sel` inside the box (its
+			// per-color gem/card indicator); falls back to the box center (e.g. on
+			// mobile where the detail pills are hidden).
+			const targetIn = (boxEl, sel) => {
+				const el = boxEl.querySelector(sel);
+				if (el) { const r = el.getBoundingClientRect(); if (r.width > 0) return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }
+				const r = boxEl.getBoundingClientRect();
+				return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+			};
 			for (const s of specs) {
 				const bankEl = document.querySelector(`.gem-stack[data-color="${s.color}"] .gem-token`);
 				const boxEl = document.querySelector(`.player-panel[data-pid="${s.pid}"]`);
 				if (!bankEl || !boxEl) continue;
 				const br = bankEl.getBoundingClientRect();
-				const xr = boxEl.getBoundingClientRect();
 				const bank = { x: br.left + br.width / 2, y: br.top + br.height / 2 };
-				const box = { x: xr.left + xr.width / 2, y: xr.top + xr.height / 2 };
+				const box = targetIn(boxEl, `.token-pill[data-token="${s.color}"]`);  // this color's gem indicator
 				const size = Math.max(18, Math.round(br.width || 40));
 				const from = s.grow ? box : bank;
 				const to = s.grow ? bank : box;
@@ -1046,14 +1054,14 @@ export default function SpenderApp() {
 				const boxEl = document.querySelector(`.player-panel[data-pid="${cardFly.pid}"]`);
 				if (slotEl && boxEl) {
 					const sr = slotEl.getBoundingClientRect();
-					const xr = boxEl.getBoundingClientRect();
 					const cx = sr.left + sr.width / 2, cy = sr.top + sr.height / 2;
-					const boxC = { x: xr.left + xr.width / 2, y: xr.top + xr.height / 2 };
+					// fly to this card's bonus-color indicator (its card pill); fallback box center
+					const dest = targetIn(boxEl, `.bonus-pill[data-bonus="${cardFly.card.bonus}"]`);
 					made.push({
 						id: ++flyIdRef.current, kind: "card",
 						color: cardFly.card.bonus, points: cardFly.card.points,
 						x: sr.left, y: sr.top, w: Math.round(sr.width), h: Math.round(sr.height),
-						dx: boxC.x - cx, dy: boxC.y - cy, s0: 1, s1: 0.22, delay: 0,
+						dx: dest.x - cx, dy: dest.y - cy, s0: 1, s1: 0.22, delay: 0,
 					});
 				}
 			}
@@ -1359,7 +1367,7 @@ export default function SpenderApp() {
 				<div className="player-detail">
 				<div className="player-tokens">
 					{[...GEM_COLORS, "gold"].map(c => (p.tokens[c] || 0) > 0 && (
-						<span key={c} className="token-pill" style={{ background: GEM_HEX[c] + "55", border: `1px solid ${c === "black" ? "rgba(255,255,255,.4)" : GEM_HEX[c]}` }}>
+						<span key={c} data-token={c} className="token-pill" style={{ background: GEM_HEX[c] + "55", border: `1px solid ${c === "black" ? "rgba(255,255,255,.4)" : GEM_HEX[c]}` }}>
 							{/* light rim so the near-black onyx gem stays visible on the warm "your turn" (surface3) panel */}
 							<span style={{ width: 10, height: 10, borderRadius: "50%", background: GEM_HEX[c], border: c === "black" ? "1px solid rgba(255,255,255,.4)" : "1px solid rgba(255,255,255,.25)", display: "inline-block" }} />
 							{p.tokens[c]}
@@ -1371,7 +1379,7 @@ export default function SpenderApp() {
 				)}
 				<div className="player-bonuses">
 					{GEM_COLORS.map(c => (bonuses[c] || 0) > 0 && (
-						<span key={c} className="bonus-pill" style={{ background: GEM_HEX[c] + "55", borderColor: c === "black" ? "rgba(255,255,255,.4)" : GEM_HEX[c], color: c === "black" ? "#a8a8a8" : GEM_HEX[c] }}>+{bonuses[c]} {c[0].toUpperCase()}</span>
+						<span key={c} data-bonus={c} className="bonus-pill" style={{ background: GEM_HEX[c] + "55", borderColor: c === "black" ? "rgba(255,255,255,.4)" : GEM_HEX[c], color: c === "black" ? "#a8a8a8" : GEM_HEX[c] }}>+{bonuses[c]} {c[0].toUpperCase()}</span>
 					))}
 					{p.nobles.map(n => (
 						<span key={n.id} className="bonus-pill" style={{ borderColor: "var(--gold)", color: "var(--gold)" }}>★{n.points}</span>
