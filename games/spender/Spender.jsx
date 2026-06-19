@@ -354,7 +354,11 @@ const css = baseCss + `
   /* Top row = nobles box + an actions box (hint + Take/Buy/✕) side by side, on
      top of the card board; a vertical gem bank spans to their right; the player
      sidebar is the outer grid's wide 2nd column. L-to-R: nobles/cards, bank, players. */
-  .game{grid-template-columns:1fr 360px}
+  .game{grid-template-columns:1fr 460px}
+  /* Sidebar is two full-height columns: players (left) + recent moves (far right). */
+  .game-sidebar{display:grid;grid-template-columns:1.1fr 0.9fr;column-gap:14px;align-items:stretch}
+  .game-sidebar>.players-area{grid-column:1;height:100%;justify-content:space-between}
+  .game-sidebar>.log-panel{grid-column:2;height:100%;display:flex;flex-direction:column}
   /* align-content:start keeps the rows packed at the top — without it grid's
      default stretches the auto rows to fill a tall viewport, inflating the top
      row into a big gap above the cards. */
@@ -363,10 +367,11 @@ const css = baseCss + `
      down to the cards, and the cards got pushed into a separate band (the gap). */
   /* Row 2 is 1fr so the card board fills the remaining viewport height; the card
      rows then spread to reach the bottom of the screen. */
-  .game-main{display:grid;grid-template-columns:auto 1fr 132px;grid-template-rows:auto 1fr;column-gap:16px;row-gap:10px;align-items:start;--card-w:140px;--card-h:174px}
+  .game-main{display:grid;grid-template-columns:auto 1fr 132px;grid-template-rows:auto 1fr;column-gap:16px;row-gap:10px;align-items:start;--card-w:144px;--card-h:182px}
   .game-main>.nobles-panel{grid-column:1;grid-row:1}
-  /* align-self:stretch so the hint box matches the nobles box height in row 1. */
-  .actions-panel{grid-column:2;grid-row:1;align-self:stretch;display:flex;flex-direction:column;justify-content:center;gap:12px}
+  /* align-self:stretch so the hint box matches the nobles box height in row 1;
+     hint on the left, buttons pushed to the right edge of the box. */
+  .actions-panel{grid-column:2;grid-row:1;align-self:stretch;display:flex;flex-direction:row;align-items:center;gap:16px}
   /* Fill row 2 and space the three card rows out so the bottom row is flush with
      the bottom of the screen. */
   .game-main>.levels{grid-column:1 / 3;grid-row:2;align-self:stretch;justify-content:space-between}
@@ -381,12 +386,13 @@ const css = baseCss + `
   .noble-req-row{font-size:.95rem;gap:4px}
   .noble-req-dot{width:12px;height:12px}
 
-  /* Actions box: hint + buttons. */
-  .actions-panel .action-hint{font-size:1rem;white-space:normal;color:var(--text-dim);font-style:italic}
-  .actions-panel-btns{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  /* Actions box: hint takes the left, bigger buttons pinned to the right. */
+  .actions-panel .action-hint{flex:1;font-size:1rem;white-space:normal;color:var(--text-dim);font-style:italic}
+  .actions-panel-btns{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-left:auto;flex-shrink:0}
+  .actions-panel-btns .btn{padding:13px 26px;font-size:.98rem}
 
-  /* Vertical gem bank; gems spread top-to-bottom to fill the bank. */
-  .bank-gems{flex-direction:column;align-items:center;flex:1;justify-content:space-between}
+  /* Vertical gem bank; gems clustered toward the vertical center, closer together. */
+  .bank-gems{flex-direction:column;align-items:center;flex:1;justify-content:center;gap:18px}
   .bank-gems .gem-token{width:64px!important;height:64px!important;font-size:1.4rem!important}
   .bank-gems .gem-count{font-size:1.05rem}
 
@@ -399,8 +405,8 @@ const css = baseCss + `
   .player-name{font-size:1rem}
   .player-score{font-size:1.4rem}
   .token-pill,.bonus-pill{font-size:.82rem;padding:3px 9px}
-  /* Show ~6 recent moves, then scroll for older ones. */
-  .move-log{max-height:200px}
+  /* Moves fill the full-height column (flush to the bottom) and scroll within. */
+  .move-log{max-height:none;flex:1;min-height:0}
   .log-entry{font-size:.92rem;padding:6px 0}
   .log-name{font-size:.84rem}
 
