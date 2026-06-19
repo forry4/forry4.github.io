@@ -369,11 +369,13 @@ const css = baseCss + `
      grows the page past the window; the board fills naturally and the move log
      scrolls internally instead. */
   .game-screen{height:100vh;overflow:hidden}
-  /* grid-template-rows:minmax(0,1fr) BOUNDS the single row to the viewport height
-     (an auto row would grow to the tallest content — the recent-moves list — and
-     push past the screen). With it bounded, the sidebar/columns are a FIXED height:
-     the move log scrolls internally and the player boxes never resize. */
-  .game{grid-template-columns:1fr 560px;grid-template-rows:minmax(0,1fr)}
+  /* `.game` needs an EXPLICIT definite height (not flex:1 — flex-basis:0% isn't a
+     definite height the grid's fr/minmax can resolve against, so the row would
+     grow to its tallest content = the recent-moves list, pushing past the screen
+     and resizing the player boxes). flex:none + height:calc + minmax(0,1fr) BOUNDS
+     the single row to the viewport, so the sidebar is a fixed height: the move log
+     scrolls internally and the player boxes never resize. */
+  .game{grid-template-columns:1fr 560px;grid-template-rows:minmax(0,1fr);flex:none;height:calc(100vh - 48px);overflow:hidden}
   /* Sidebar = two full-height columns: players (left, wider so 6 tokens fit one
      row) + recent moves (far right). min-height:0 lets the move log scroll. */
   .game-sidebar{display:grid;grid-template-columns:1.6fr 1fr;column-gap:14px;align-items:stretch;min-height:0}
