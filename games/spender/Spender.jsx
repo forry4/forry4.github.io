@@ -737,6 +737,7 @@ export default function SpenderApp() {
 	const [myGames, setMyGames] = useState([]);
 	const [browserLoading, setBrowserLoading] = useState(false);
 	const [showAiPicker, setShowAiPicker] = useState(false);
+	const [winPoints, setWinPoints] = useState(15);   // 15 = Classic, 21 = Long mode
 
 	const playerName = authUser?.name || "";
 
@@ -1178,13 +1179,13 @@ export default function SpenderApp() {
 	};
 
 	// ── Room / game actions ────────────────────────────────────────────────
-	const handleCreate = (vsAI = false, aiVariant = "A") => {
+	const handleCreate = (vsAI = false, aiVariant = "A", wp = 15) => {
 		const newRoomId = roomCode();
 		setRoomId(newRoomId);
 		try { localStorage.setItem("spender_roomId", newRoomId); } catch {}
 		pendingActionRef.current = vsAI
-			? { action: "create", name: playerName, vs_ai: true, ai_variant: aiVariant }
-			: { action: "create", name: playerName };
+			? { action: "create", name: playerName, vs_ai: true, ai_variant: aiVariant, win_points: wp }
+			: { action: "create", name: playerName, win_points: wp };
 		connect(`${WS_BASE}/${newRoomId}/${myId}`);
 	};
 
@@ -1606,7 +1607,15 @@ export default function SpenderApp() {
 					</div>
 
 					<div className="browser-create">
-						<button className="btn btn-gold" onClick={() => handleCreate(false)}>
+						<div className="mode-toggle" title="Classic = race to 15 points; Long = race to 21">
+							{[[15, "Classic 15"], [21, "Long 21"]].map(([wp, label]) => (
+								<button key={wp} className={`btn btn-sm${winPoints === wp ? " btn-gold" : " btn-outline"}`}
+									onClick={() => setWinPoints(wp)}>
+									{label}
+								</button>
+							))}
+						</div>
+						<button className="btn btn-gold" onClick={() => handleCreate(false, "A", winPoints)}>
 							+ Create New Game
 						</button>
 						<div className="ai-picker-wrap">
@@ -1619,7 +1628,7 @@ export default function SpenderApp() {
 									<span className="ai-picker-label">Choose AI opponent</span>
 									{["H2", "H3", "S"].map(v => (
 										<button key={v} className="btn btn-outline btn-sm"
-											onClick={() => { setShowAiPicker(false); handleCreate(true, v); }}>
+											onClick={() => { setShowAiPicker(false); handleCreate(true, v, winPoints); }}>
 											{aiPersona(v)} ({AI_TIERS[v]})
 										</button>
 									))}
