@@ -892,3 +892,41 @@ def test_redaction_does_not_mutate_original():
     g["players"]["bob"]["reserved"] = [_blind_card()]
     main._redact_blind_reserves(g, viewer_pid="alice")
     assert g["players"]["bob"]["reserved"][0]["id"] == "L2-r3"
+
+
+# ─── 21-point (Long) mode ───────────────────────────────────────────────────────
+
+def _pts_card(n):
+    return {"id": "pc", "level": 1, "points": n, "bonus": "white", "cost": {}}
+
+
+def test_win_points_default_15():
+    g = make_game_state()                         # no win_points key -> Classic 15
+    assert main._win_points(g) == 15
+    g["players"]["alice"]["purchased"] = [_pts_card(15)]
+    assert main._check_winner(g) == "alice"
+    g["players"]["alice"]["purchased"] = [_pts_card(14)]
+    assert main._check_winner(g) is None
+
+
+def test_win_points_21_production():
+    g = make_game_state("p1", "p2")
+    g["win_points"] = 21
+    # 18 points must NOT trigger the final round at 21
+    g["players"]["p1"]["purchased"] = [_pts_card(18)]
+    g["turn"] = "p1"
+    main._finish_turn(g, "p1")
+    assert "final_round_trigger" not in g
+    # 21 points triggers
+    g["players"]["p1"]["purchased"] = [_pts_card(21)]
+    g.pop("final_round_trigger", None)
+    g["turn"] = "p1"
+    main._finish_turn(g, "p1")
+    assert g.get("final_round_trigger") == "p1"
+    # _check_winner honors 21: 16-20 is not a win
+    g2 = make_game_state()
+    g2["win_points"] = 21
+    g2["players"]["alice"]["purchased"] = [_pts_card(16)]
+    assert main._check_winner(g2) is None
+    g2["players"]["alice"]["purchased"] = [_pts_card(21)]
+    assert main._check_winner(g2) == "alice"

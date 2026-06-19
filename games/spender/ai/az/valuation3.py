@@ -525,7 +525,7 @@ def victory_closeness(s: E.State, ci: int, seat: int, noble_pts: int = 0) -> flo
     """How near to the 15-point win buying ci (plus any noble it triggers)
     brings `seat`, capped at 1.0."""
     pts = s.points[seat] + E.PTS[ci] + noble_pts
-    v = pts / E.WIN_POINTS
+    v = pts / s.win_points
     return v if v < 1.0 else 1.0
 
 

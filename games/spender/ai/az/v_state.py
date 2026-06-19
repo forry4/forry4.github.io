@@ -73,7 +73,7 @@ def _points_term(val: V.Valuation, seat: int) -> float:
     """Realized VP plus a convex kicker in the winning zone (>10 pts), where each point is worth
     disproportionately more (the race-to-15 / final-round pressure the linear count misses)."""
     p = val.s.points[seat]
-    over = p - 10
+    over = p - (val.s.win_points - 5)        # convex kicker in the last 5 points (->10 at 15, ->16 at 21)
     return p + (WIN_CONVEX * over * over if over > 0 else 0.0)
 
 

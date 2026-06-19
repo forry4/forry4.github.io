@@ -315,3 +315,26 @@ def test_buy_spends_colored_then_gold_and_returns_to_bank():
     for i in range(5):
         assert s.bank[i] == bank_before[i] + toks[i]
     assert s.bank[5] == bank_before[5] + deficit
+
+
+def test_win_points_21_engine():
+    """21-point mode: win_points carried by new_game/clone/dict round-trip; final round
+    triggers at >=21 (not 16-20); defaults to 15 (incl. old saves without the key)."""
+    s = E.new_game(random.Random(1), win_points=21)
+    assert s.win_points == 21
+    assert s.clone().win_points == 21
+    g = E.to_game_dict(s)
+    assert g["win_points"] == 21
+    assert E.from_game_dict(g).win_points == 21
+    g_old = {k: v for k, v in g.items() if k != "win_points"}  # pre-feature save
+    assert E.from_game_dict(g_old).win_points == 15
+    assert E.new_game(random.Random(1)).win_points == 15
+    s.points[0] = 18
+    s.final_trigger = -1
+    E._finish_turn(s, 0)
+    assert s.final_trigger == -1, "must not trigger at 18/21"
+    s.points[0] = 21
+    s.final_trigger = -1
+    s.turn = 0
+    E._finish_turn(s, 0)
+    assert s.final_trigger == 0, "must trigger at 21/21"

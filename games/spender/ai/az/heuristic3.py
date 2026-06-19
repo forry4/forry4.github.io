@@ -403,7 +403,7 @@ def _winning_reserve(s, seat, val, legal_set):
         ci = s.board[slot]
         if ci < 0 or val.affordable_now(ci, seat):
             continue
-        if s.points[seat] + E.PTS[ci] + val.noble_completion_pts(ci, seat) < E.WIN_POINTS:
+        if s.points[seat] + E.PTS[ci] + val.noble_completion_pts(ci, seat) < s.win_points:
             continue
         if val.tempo(ci, seat) >= WIN_RESERVE_MAX_TEMPO:   # too far to be a real near-term win
             continue
@@ -544,7 +544,7 @@ def choose_action(s: E.State, seat: int | None = None, *, val: V.Valuation | Non
         winning = []
         for _v, a, ci in buys:
             gain = E.PTS[ci] + V.noble_completion_pts(s, ci, seat)
-            if s.points[seat] + gain >= E.WIN_POINTS:
+            if s.points[seat] + gain >= s.win_points:
                 winning.append((gain, a))
         if winning:
             winning.sort(reverse=True)
@@ -568,7 +568,7 @@ def choose_action(s: E.State, seat: int | None = None, *, val: V.Valuation | Non
 
     # 2) Endgame denial — we can't win now, but the opponent can next turn off the board.
     og, oci, oslot = _opp_best_buy(s, opp, val)
-    if oslot >= 0 and s.points[opp] + og >= E.WIN_POINTS:
+    if oslot >= 0 and s.points[opp] + og >= s.win_points:
         da = _deny(s, seat, oslot, oci, val, legal_set)
         if da is not None:
             return da

@@ -92,6 +92,7 @@ class State:
         "final_trigger",   # -1 or seat that hit 15
         "winner",          # WIN_NONE | 0 | 1 | WIN_DRAW
         "ply",             # half-move counter (turn-cap safety in self-play)
+        "win_points",      # points needed to trigger the final round (15 default; 21 for the long mode)
     )
 
     def clone(self) -> "State":
@@ -114,10 +115,11 @@ class State:
         s.final_trigger = self.final_trigger
         s.winner = self.winner
         s.ply = self.ply
+        s.win_points = self.win_points
         return s
 
 
-def new_game(rng: random.Random | None = None) -> State:
+def new_game(rng: random.Random | None = None, win_points: int = WIN_POINTS) -> State:
     rng = rng or random
     s = State.__new__(State)
     s.bank = list(BANK_INIT)
@@ -150,6 +152,7 @@ def new_game(rng: random.Random | None = None) -> State:
     s.final_trigger = -1
     s.winner = WIN_NONE
     s.ply = 0
+    s.win_points = win_points
     return s
 
 
@@ -238,7 +241,7 @@ def legal_actions(s: State) -> list[int]:
 # ─── Apply ────────────────────────────────────────────────────────────────────
 
 def _finish_turn(s: State, seat: int) -> None:
-    if s.points[seat] >= WIN_POINTS and s.final_trigger < 0:
+    if s.points[seat] >= s.win_points and s.final_trigger < 0:
         s.final_trigger = seat
     s.turn = 1 - s.turn
     s.ply += 1
@@ -415,6 +418,7 @@ def to_game_dict(s: State, pids: tuple[str, str] = ("p0", "p1")) -> dict:
         "phase": "over" if s.phase == OVER else "playing",
         "winner": None,
         "moves": [],
+        "win_points": s.win_points,
     }
     if s.final_trigger >= 0:
         game["final_round_trigger"] = pids[s.final_trigger]
@@ -497,4 +501,5 @@ def from_game_dict(game: dict) -> State:
     w = game.get("winner")
     s.winner = (WIN_DRAW if isinstance(w, list) else pids.index(w)) if w else WIN_NONE
     s.ply = 0
+    s.win_points = int(game.get("win_points", WIN_POINTS))
     return s

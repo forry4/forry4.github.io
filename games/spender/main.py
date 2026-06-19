@@ -485,9 +485,15 @@ def _resolve_winner(game: dict) -> None:
     game["winner"] = winners[0] if len(winners) == 1 else winners
 
 
+def _win_points(game: dict) -> int:
+    """Points needed to trigger the final round. Defaults to 15 (Classic); 21 for the Long mode.
+    Read per-game so the value lives in the game dict (persisted by save/load; old saves -> 15)."""
+    return int(game.get("win_points", 15))
+
+
 def _finish_turn(game: dict, pid: str) -> None:
-    """Advance turn after pid's action; start final-round countdown if pid hit 15+; end game when round completes."""
-    if _calc_points(game["players"][pid]) >= 15 and "final_round_trigger" not in game:
+    """Advance turn after pid's action; start final-round countdown if pid hit the win threshold; end game when round completes."""
+    if _calc_points(game["players"][pid]) >= _win_points(game) and "final_round_trigger" not in game:
         game["final_round_trigger"] = pid
 
     new_turn = _advance_turn(game)
@@ -500,8 +506,9 @@ def _finish_turn(game: dict, pid: str) -> None:
 
 
 def _check_winner(game: dict) -> str | None:
+    wp = _win_points(game)
     for pid in game["order"]:
-        if _calc_points(game["players"][pid]) >= 15:
+        if _calc_points(game["players"][pid]) >= wp:
             return pid
     return None
 
@@ -813,9 +820,9 @@ def _s_choose_move(game: dict, ai_pid: str) -> dict:
 # ─── AI Player ────────────────────────────────────────────────────────────────
 
 def _game_urgency(game: dict) -> float:
-    """0 = early game, 1.0 = someone has reached the 15-pt threshold."""
+    """0 = early game, 1.0 = someone has reached the win threshold."""
     pts = [_calc_points(game["players"][pid]) for pid in game["order"]]
-    return min(1.0, max(pts) / 15.0)
+    return min(1.0, max(pts) / float(_win_points(game)))
 
 
 # Structural constants for "a card worth racing toward" — a good-value, high-point
@@ -1089,7 +1096,7 @@ def _opp_winning_buys(game: dict, opp_pid: str) -> list[dict]:
         for card in (game["board"].get(lk) or []):
             if not card:
                 continue
-            if (card.get("points", 0) and opp_pts + card["points"] >= 15
+            if (card.get("points", 0) and opp_pts + card["points"] >= _win_points(game)
                     and can_afford(card["cost"], opp["tokens"], opp_bonuses)):
                 winners.append(card)
     winners.sort(key=lambda c: -c["points"])
@@ -1887,6 +1894,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                 ai_variant = msg.get("ai_variant", "A") if vs_ai else None
                 if vs_ai and not _ai_variant_valid(ai_variant):
                     ai_variant = "A"
+                win_points = 21 if msg.get("win_points") == 21 else 15   # Classic 15 / Long 21
                 async with ROOM_LOCK:
                     r = ROOMS.setdefault(room_id, {"players": {}, "sockets": {}, "status": "open", "game": None, "host": None})
                     r["players"][pid] = name
@@ -1897,7 +1905,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                     r["game"] = {
                         "bank": bank, "decks": build_deck(), "board": None, "nobles": None,
                         "players": {}, "turn": None, "order": [], "phase": "waiting", "winner": None,
-                        "moves": [],
+                        "moves": [], "win_points": win_points,
                     }
                     r["meta"][pid] = {"token": gen_token(6)}
                     r["game"]["players"][pid] = {"tokens": empty_gems(), "purchased": [], "reserved": [], "nobles": []}
