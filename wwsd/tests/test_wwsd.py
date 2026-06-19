@@ -93,3 +93,17 @@ def test_build_bookmarklet_fills_placeholders():
     assert "https://wwsd.example.com/move" in bm and "s3cr3t" in bm
     assert "__MOVE_URL__" not in bm and "__SECRET__" not in bm
     assert bm.startswith("javascript:")
+    assert "?t=" not in bm                                       # no think-time query by default
+
+
+def test_build_bookmarklet_with_seconds_appends_t():
+    bm = B.build_bookmarklet("https://wwsd.example.com/move", "s3cr3t", seconds=15)
+    assert "https://wwsd.example.com/move?t=15" in bm
+
+
+def test_budget_clamps_t_param():
+    assert A._budget(None) == A.TIME_BUDGET          # absent -> server default
+    assert A._budget("abc") == A.TIME_BUDGET         # invalid -> server default
+    assert A._budget("12") == 12.0                   # within range, honoured
+    assert A._budget("9999") == A.TIME_MAX           # clamp to ceiling (Cloudflare safety)
+    assert A._budget("0.01") == A.TIME_MIN           # clamp to floor

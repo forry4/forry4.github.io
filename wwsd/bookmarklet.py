@@ -4,6 +4,9 @@ The bookmarklet reads the live Meteor 'games' doc out of the spendee page, POSTs
 service's /move with the shared secret, and renders variant S's move in an injected overlay panel.
 The secret is filled in CLIENT-SIDE on the page (typed by the user) so it is never sent to or
 stored by this server; the generated text is what the user copies and shares with the friend.
+
+Optional think-time: append ?t=<seconds> to the /move URL to override the server's default budget
+(clamped server-side). The generator page exposes this as a "seconds to think" field.
 """
 from __future__ import annotations
 import json
@@ -37,14 +40,18 @@ BOOKMARKLET_TEMPLATE = (
 )
 
 
-def build_bookmarklet(move_url: str, secret: str) -> str:
-    """Fill the template with a concrete /move URL + secret (used by tests / for direct generation)."""
-    return BOOKMARKLET_TEMPLATE.replace("__MOVE_URL__", move_url).replace("__SECRET__", secret)
+def build_bookmarklet(move_url: str, secret: str, seconds=None) -> str:
+    """Fill the template with a concrete /move URL + secret. `seconds`, if given, is appended as a
+    ?t= think-time override (used by tests / for direct generation)."""
+    url = move_url
+    if seconds:
+        url += ("&" if "?" in url else "?") + "t=" + str(seconds)
+    return BOOKMARKLET_TEMPLATE.replace("__MOVE_URL__", url).replace("__SECRET__", secret)
 
 
 def page_html() -> str:
-    """Generator + tester page. Builds the bookmarklet client-side from a typed secret +
-    this page's own origin, so the secret never reaches the server."""
+    """Generator + tester page. Builds the bookmarklet client-side from a typed secret + optional
+    think-time + this page's own origin, so the secret never reaches the server."""
     tpl = json.dumps(BOOKMARKLET_TEMPLATE)   # safe JS string literal
     return """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>What Would Steve Do?</title>
@@ -67,6 +74,8 @@ def page_html() -> str:
  <b style="color:#e8c170">1. Make your bookmarklet</b>
  <label>Your shared secret (the <code>WWSD_SECRET</code> set on the server)</label>
  <input id="secret" placeholder="paste the secret">
+ <label>Seconds for Steve to think (optional; blank = server default ~3.5s, max 60 &mdash; longer = stronger but slower)</label>
+ <input id="secs" placeholder="e.g. 15">
  <button id="gen">Build bookmarklet</button>
  <label>Copy this and save it as a bookmark named "WWSD" (share it with your friend):</label>
  <textarea id="bm" readonly placeholder="(generated here)"></textarea>
@@ -80,23 +89,25 @@ def page_html() -> str:
 </div>
 <script>
 const TPL = __TPL__;
-const MOVE = location.origin + '/move';
+const BASE = location.origin + '/move';
 function esc(s){return (s+'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+function moveUrl(){ const s=document.getElementById('secs').value.trim();
+  return s ? BASE+(BASE.indexOf('?')>=0?'&':'?')+'t='+encodeURIComponent(s) : BASE; }
 document.getElementById('gen').onclick=()=>{
   const sec=document.getElementById('secret').value.trim();
-  document.getElementById('bm').value = sec ? TPL.replace('__MOVE_URL__',MOVE).replace('__SECRET__',sec)
+  document.getElementById('bm').value = sec ? TPL.replace('__MOVE_URL__',moveUrl()).replace('__SECRET__',sec)
                                             : 'enter your secret first';
 };
 document.getElementById('go').onclick=async()=>{
   const out=document.getElementById('out'); const sec=document.getElementById('secret').value.trim();
   out.innerHTML='<span class="msg">thinking...</span>';
   try{
-    const r=await fetch(MOVE,{method:'POST',headers:{'Content-Type':'application/json','X-WWSD-Secret':sec},
-                             body:document.getElementById('inp').value});
+    const r=await fetch(moveUrl(),{method:'POST',headers:{'Content-Type':'application/json','X-WWSD-Secret':sec},
+                                   body:document.getElementById('inp').value});
     const d=await r.json();
     if(!d.ok){ out.innerHTML='<span class="msg">'+esc(d.message||'no result')+'</span>'; return; }
     let h='<div class="rec">'+esc(d.recommendation)+'</div><div class="meta">'+esc(d.turn_name)
-      +' to move &middot; target '+d.target+' &middot; '+d.sims+' sims</div>';
+      +' to move &middot; target '+d.target+' &middot; '+d.sims+' sims'+(d.budget?' &middot; '+d.budget+'s':'')+'</div>';
     if(d.alternatives&&d.alternatives.length){h+='<ul style="color:#cdbfa8;font-size:13px">';
       d.alternatives.forEach(a=>h+='<li>'+a.pct+'% '+esc(a.text)+'</li>');h+='</ul>';}
     out.innerHTML=h;

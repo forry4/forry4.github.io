@@ -24,7 +24,9 @@ from wwsd.bookmarklet import page_html
 
 SECRET = os.environ.get("WWSD_SECRET", "")
 ORIGIN = os.environ.get("WWSD_ORIGIN", "https://spendee.mattle.online")
-TIME_BUDGET = float(os.environ.get("WWSD_TIME", "3.5"))      # tuned below local 4.5s for the slow free CPU
+TIME_BUDGET = float(os.environ.get("WWSD_TIME", "3.5"))      # default budget; a per-request ?t= overrides it
+TIME_MIN = float(os.environ.get("WWSD_TIME_MIN", "1"))       # ?t= clamp floor
+TIME_MAX = float(os.environ.get("WWSD_TIME_MAX", "60"))      # ?t= ceiling (stay under Cloudflare's ~100s timeout)
 RATE_MAX = int(os.environ.get("WWSD_RATE_MAX", "20"))         # requests per window per IP
 RATE_WINDOW = float(os.environ.get("WWSD_RATE_WINDOW", "60"))
 
@@ -59,7 +61,17 @@ def _client_ip(req: Request) -> str:
     return xff.split(",")[0].strip() if xff else (req.client.host if req.client else "?")
 
 
-def process_move(raw_body: bytes, secret_header: str, ip: str):
+def _budget(t_param) -> float:
+    """Resolve the per-request think-time from the ?t= query param, clamped to [MIN, MAX]."""
+    if t_param is None:
+        return TIME_BUDGET
+    try:
+        return max(TIME_MIN, min(TIME_MAX, float(t_param)))
+    except (TypeError, ValueError):
+        return TIME_BUDGET
+
+
+def process_move(raw_body: bytes, secret_header: str, ip: str, t_param=None):
     """Pure handler (no HTTP types) -> (status_code, body_dict). Unit-testable without a server."""
     if not hmac.compare_digest(secret_header or "", SECRET):
         return 401, {"ok": False, "message": "bad or missing secret"}
@@ -70,7 +82,11 @@ def process_move(raw_body: bytes, secret_header: str, ip: str):
     except Exception as e:
         return 400, {"ok": False, "message": f"bad json: {e}"}
     try:
-        return 200, W.analyze(doc, time_limit=TIME_BUDGET)
+        budget = _budget(t_param)
+        result = W.analyze(doc, time_limit=budget)
+        if isinstance(result, dict):
+            result.setdefault("budget", round(budget, 1))
+        return 200, result
     except Exception as e:
         return 500, {"ok": False, "message": f"analyze error: {e}"}
 
@@ -87,5 +103,6 @@ def index():
 
 @app.post("/move")
 async def move(req: Request):
-    code, body = process_move(await req.body(), req.headers.get("X-WWSD-Secret", ""), _client_ip(req))
+    code, body = process_move(await req.body(), req.headers.get("X-WWSD-Secret", ""),
+                              _client_ip(req), req.query_params.get("t"))
     return JSONResponse(body, status_code=code)
