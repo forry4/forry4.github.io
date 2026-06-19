@@ -62,6 +62,12 @@ _TURNS_DATA_S = None      # lazy-loaded S-measured table (mode "table_s")
 _TURNS_KEYS_S = None
 _TURNS_CACHE_S = {}
 _S_TABLE_LOADED = False
+RESERVE_TURN_ADJ = 0.0    # turns-left subtracted PER RESERVED card a seat holds, correcting the
+                          # reserve-BLIND table key. MEASURED (turns_feat_diag, S-vs-S): holding a
+                          # reserve correlates with ~0.72 fewer turns left than (cards,points,gems)
+                          # implies (residual −0.35/−0.86/−1.40 at 1/2/3+ reserves) -- so the table
+                          # OVER-estimates the horizon in S's reserve-heavy states, plausibly feeding
+                          # the over-reserve. Applied per-seat before the min. Default 0 = byte-identical.
 
 
 def _load_turns_table():
@@ -661,21 +667,18 @@ class Valuation:
         if TURNS_MODE == "planner":
             win = getattr(s, "win_points", E.WIN_POINTS)
             tr = min(_planner_turns_seat(s, 0, win), _planner_turns_seat(s, 1, win))
-        elif TURNS_MODE == "table_s":
-            _ensure_s_table()
-            if _TURNS_DATA_S is None:                       # missing file -> default table
-                tr = min(_lookup_turns(s.purchased_n[0], s.points[0], sum(s.tokens[0])),
-                         _lookup_turns(s.purchased_n[1], s.points[1], sum(s.tokens[1])))
-            else:
-                tr = min(
-                    _lookup_turns(s.purchased_n[0], s.points[0], sum(s.tokens[0]),
-                                  _TURNS_DATA_S, _TURNS_KEYS_S, _TURNS_CACHE_S),
-                    _lookup_turns(s.purchased_n[1], s.points[1], sum(s.tokens[1]),
-                                  _TURNS_DATA_S, _TURNS_KEYS_S, _TURNS_CACHE_S))
-        else:                                               # "table" (default, byte-identical)
-            tr = min(
-                _lookup_turns(s.purchased_n[0], s.points[0], sum(s.tokens[0])),
-                _lookup_turns(s.purchased_n[1], s.points[1], sum(s.tokens[1])))
+        else:                                               # "table" (default) or "table_s"
+            if TURNS_MODE == "table_s":
+                _ensure_s_table()
+            use_s = TURNS_MODE == "table_s" and _TURNS_DATA_S is not None
+            d, k, c = ((_TURNS_DATA_S, _TURNS_KEYS_S, _TURNS_CACHE_S) if use_s
+                       else (None, None, None))
+            t0 = _lookup_turns(s.purchased_n[0], s.points[0], sum(s.tokens[0]), d, k, c)
+            t1 = _lookup_turns(s.purchased_n[1], s.points[1], sum(s.tokens[1]), d, k, c)
+            if RESERVE_TURN_ADJ:                            # reserve-blind-key correction (per seat)
+                t0 -= RESERVE_TURN_ADJ * len(s.reserved[0])
+                t1 -= RESERVE_TURN_ADJ * len(s.reserved[1])
+            tr = min(t0, t1)
         self._turns_cache = tr if tr > TURNS_FLOOR else TURNS_FLOOR
         return self._turns_cache
 

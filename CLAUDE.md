@@ -1068,7 +1068,18 @@ website variant **"S"**.
     frozen-S**, panel avg 0.720 vs 0.783. Board composition barely moves turns-left once points-needed is
     known. **Keep `TURNS_MODE="table"`.** The planner/`table_s` machinery is parked default-off (byte-identical).
     `s_measure_turns.py` (also reusable for the 21-point turns re-measure) + `turns_ab.py` are committed tooling;
-    `turns_table_s.json` + the `.out` logs are gitignored scratch.
+    `turns_table_s.json` + the `.out` logs are gitignored scratch. (3) The KEY-lossiness follow-up (the user's
+    sharper point — the key is RESERVE-BLIND, and H3 barely reserves while S reserves constantly): `turns_feat_diag.py`
+    confirms reserved-count carries **real** omitted signal — holding a reserve correlates with ~**−0.72 turns**
+    left (monotonic residual −0.35/−0.86/−1.40 at 1/2/3+ reserves) — so the table genuinely over-estimates the
+    horizon in S's reserve-heavy states (your hypothesis was directionally CORRECT). BUT correcting it
+    (`valuation3.RESERVE_TURN_ADJ`, subtract turns/reserve, default 0) is a **WASH for PLAY**: vs frozen-S the
+    head-to-head is 0.527/0.510/0.517 at adj 0.4/0.7/1.0 (all CIs cross 0.50) and the panel is non-monotonic
+    (noise). It doesn't convert because the horizon scales only the SECONDARY engine/noble standing terms;
+    points/progress dominate move-choice, so a sub-turn horizon shift barely moves it (aggregate dR²=+0.0024).
+    **Gold weighting is NOT supported either** — controlling for reserves, gold advances you LESS per token than
+    a colored gem (coef −0.20 vs −0.41); its raw effect was just reserve-correlation. **Keep `RESERVE_TURN_ADJ=0`.**
+    Net lesson: R² gain ≠ strength; the turns horizon is not a strength lever for S (3 independent washes).
 - **Open / next:** (1) **21-point game mode + a re-tuned "S21"** — full plan written (`.claude-plans/`): parametrize
   `win_points` per-game (default 15 → byte-identical), re-measure a 21-point `turns_table`, retune at
   win_points=21, serve S21 + a "Classic 15 / Long 21" lobby toggle. (2) **the enriched-features retrain**
