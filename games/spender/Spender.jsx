@@ -369,7 +369,11 @@ const css = baseCss + `
      grows the page past the window; the board fills naturally and the move log
      scrolls internally instead. */
   .game-screen{height:100vh;overflow:hidden}
-  .game{grid-template-columns:1fr 560px}
+  /* grid-template-rows:minmax(0,1fr) BOUNDS the single row to the viewport height
+     (an auto row would grow to the tallest content — the recent-moves list — and
+     push past the screen). With it bounded, the sidebar/columns are a FIXED height:
+     the move log scrolls internally and the player boxes never resize. */
+  .game{grid-template-columns:1fr 560px;grid-template-rows:minmax(0,1fr)}
   /* Sidebar = two full-height columns: players (left, wider so 6 tokens fit one
      row) + recent moves (far right). min-height:0 lets the move log scroll. */
   .game-sidebar{display:grid;grid-template-columns:1.6fr 1fr;column-gap:14px;align-items:stretch;min-height:0}
@@ -404,7 +408,7 @@ const css = baseCss + `
 
   /* Nobles: horizontal row on top of the cards, 1.5x larger; no title. */
   .nobles-panel .panel-title{display:none}
-  .noble{width:108px;min-height:108px;padding:9px;gap:6px}
+  .noble{width:111px;min-height:108px;padding:9px;gap:6px}
   .noble-points{font-size:1.5rem}
   .noble-req-row{font-size:.95rem;gap:4px}
   .noble-req-dot{width:12px;height:12px}
