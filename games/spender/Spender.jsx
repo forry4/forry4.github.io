@@ -171,10 +171,10 @@ const css = baseCss + `
 /* ─── Bank ──────────────────────────────────────────────────────────────── */
 .bank-gems{display:flex;gap:8px;flex-wrap:wrap}
 /* Desktop: the three level boxes sit in a column with the same 10px gap they had
-   as direct game-main children; the bank-actions (mobile button group) is hidden
-   because the controls live in the action bar. Mobile overrides both below. */
+   as direct game-main children; the board-actions (mobile button group beside the
+   nobles) is hidden because the controls live in the action bar. Mobile below. */
 .levels{display:flex;flex-direction:column;gap:10px}
-.bank-actions{display:none}
+.board-actions{display:none}
 .gem-stack{display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;transition:transform .12s;user-select:none}
 .gem-stack:hover .gem-token{transform:scale(1.08)}
 .gem-stack.selected .gem-token{box-shadow:0 0 0 2px var(--gold-light),0 0 12px rgba(232,201,106,.3)}
@@ -338,9 +338,8 @@ const css = baseCss + `
   .game-card{padding:10px 12px}
 
   /* ── Board-first compact mobile game layout ──────────────────────────────
-     The decision surface (bank+actions -> cards) leads; players + log drop
-     below. Player panels collapse to one-line summaries; the move log collapses
-     behind a tap. */
+     The board leads (bank -> cards -> nobles+actions); players, then the move
+     log, drop below. */
   .game-sidebar{order:0}            /* undo desktop order:-1 -> board comes first */
   .game-main{gap:8px}
   .game-sidebar{gap:8px}
@@ -350,18 +349,23 @@ const css = baseCss + `
      header (.log-head) is kept: it doubles as the expand control. */
   .game .panel-title:not(.log-head){display:none}
 
+  /* The nav scrolls with the page on mobile instead of staying pinned. */
+  .game-nav{position:static}
+  .game-nav-spacer{display:none}
+
   /* The whole turn/action bar (badge + persona + hint + AI-values) is removed on
-     mobile; its Take/Buy/✕ controls move next to the gem bank instead. */
+     mobile; its Take/Buy/✕ controls move beside the nobles instead. */
   .action-bar{display:none}
 
-  /* Gem bank becomes one row: gems packed tight on the left, action buttons (or
-     the AI "thinking" indicator) on the right. */
-  .bank-panel{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
-  .gem-token{width:34px;height:34px;font-size:.82rem}
-  .gem-stack{gap:3px}
-  .bank-gems{gap:4px;flex:1 1 auto;justify-content:flex-start}
-  .bank-actions{display:flex;gap:6px;align-items:center;margin-left:auto;flex-shrink:0}
-  .bank-actions .btn{padding:9px 14px}
+  /* Gem bank: full-width row of evenly spread tokens (unchanged layout). */
+  .gem-token{width:38px;height:38px;font-size:.88rem}
+  .bank-gems{gap:6px;justify-content:space-between}
+
+  /* Take/Buy/✕ (or the AI "thinking" indicator) sit to the right of the nobles. */
+  .nobles-panel{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+  .nobles-panel .nobles-row{flex:1 1 auto}
+  .board-actions{display:flex;gap:6px;align-items:center;margin-left:auto;flex-shrink:0}
+  .board-actions .btn{padding:9px 14px}
 
   /* L3 / L2 / L1 share a single box, rows tight together. */
   .levels{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:8px;gap:4px}
@@ -378,6 +382,10 @@ const css = baseCss + `
   .player-reserved{display:none}
   .player-panel.expanded .player-reserved{display:block;margin-top:8px}
   .players-area{gap:6px}
+
+  /* Push the move log below the player boxes (it's first in the sidebar DOM so
+     it can lead on desktop's right column). */
+  .log-panel{order:1}
 
   /* Move log: the most recent entry stays visible; tap to expand the rest. */
   .log-head{cursor:pointer;display:flex;align-items:center;gap:6px;margin-bottom:8px}
@@ -1606,7 +1614,7 @@ export default function SpenderApp() {
 							</div>
 						</div>
 
-						<div className="panel bank-panel">
+						<div className="panel">
 							<div className="panel-title">Gem Bank</div>
 							<div className="bank-gems">
 								{[...GEM_COLORS, "gold"].map(c => {
@@ -1643,13 +1651,6 @@ export default function SpenderApp() {
 									);
 								})}
 							</div>
-							{/* Mobile only (CSS): turn-action controls sit next to the gems
-							    instead of in a separate bar. */}
-							<div className="bank-actions">
-								{aiThinking
-									? <span className="ai-thinking"><span className="think-dot"/><span className="think-dot"/><span className="think-dot"/> thinking…</span>
-									: renderActionButtons()}
-							</div>
 						</div>
 
 						<div className="levels">
@@ -1674,7 +1675,7 @@ export default function SpenderApp() {
 						))}
 						</div>
 
-						<div className="panel">
+						<div className="panel nobles-panel">
 							<div className="panel-title">Nobles</div>
 							<div className="nobles-row">
 								{(game.nobles || []).map(n => <NobleView key={n.id} noble={n} />)}
@@ -1685,6 +1686,13 @@ export default function SpenderApp() {
 											claimedBy={displayName(roomData?.players?.[pid] || pid.slice(0, 6)) + (pid === myId ? " (you)" : "")} />
 									))
 								)}
+							</div>
+							{/* Mobile only (CSS): the Take/Buy/✕ controls sit to the right of the
+							    nobles (or the AI "thinking" indicator during the bot's turn). */}
+							<div className="board-actions">
+								{aiThinking
+									? <span className="ai-thinking"><span className="think-dot"/><span className="think-dot"/><span className="think-dot"/> thinking…</span>
+									: renderActionButtons()}
 							</div>
 						</div>
 					</div>
