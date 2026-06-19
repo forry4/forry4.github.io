@@ -313,6 +313,70 @@ Fix (now in **`core/db.py`** — extracted out of `games/spender/main.py`):
 
 ---
 
+## WWSD ("What Would Steve Do") — variant-S advisor for a FRIEND's external Splendor site
+
+`wwsd/` (top-level package) is a standalone tool that recommends a move for a Splendor position taken
+from a **friend's external site** — mattle's "spendee" (`spendee.mattle.online`, a **Meteor** app),
+NOT the user's own Spender game. A browser **bookmarklet** on the friend's page reads the live game
+state out of the Meteor client cache (`Meteor.connection._mongo_livedata_collections['games'].find()
+.fetch()` — a request-free LOCAL read of already-synced Minimongo), POSTs it to a public endpoint,
+and renders variant **S**'s move (+ position eval) in an injected overlay panel.
+
+### Deployed as a SECOND Render service (process isolation is the whole point)
+- Its own Render web service **`wwsd`** → `https://wwsd.onrender.com`, a **separate process** from
+  the game backend `spender-backend`. **Why separate:** `wwsd.analyze` rewrites the shared
+  `games.spender.ai.az.engine` deck globals (`COST/PTS/BONUS/NOBLE_REQ/WIN_POINTS`) to the friend's
+  deck; the live game backend's own AI (`_az/_h2/_h3_choose_move`) reads those SAME globals inside a
+  thread-pool compute that does NOT hold `ROOM_LOCK`, so sharing a process would corrupt live game
+  moves. The override runs in `analyze.prepare()` (called at `app.py` startup; lazy in `analyze()`),
+  **never at import** — a stray `import wwsd` can't corrupt anything.
+- Defined in `render.yaml` as a 2nd `web` service: SAME repo/`Dockerfile` (`COPY . /app` ships
+  `wwsd/`), only the **dockerCommand** differs (`uvicorn wwsd.app:app`). Env: `WWSD_SECRET`
+  (`sync:false`, set in the dashboard — NOT in the repo), `WWSD_ORIGIN`, `WWSD_TIME`,
+  `SPENDER_AZ_MODEL=none` (skip the numpy AZ load — unused here). Created manually in the Render
+  dashboard (or via blueprint sync).
+- **Variant S is already on `main`** (`vsearch`/`v_state`/`mcts` `leaf_state`/`heuristic3`/
+  `valuation3`/`engine`), so wwsd just `import`s the az modules — **no vendoring**. Built in a
+  dedicated `forrestm_projects-wwsd` worktree off `origin/main`, pushed to `main` (auto-deploys).
+
+### The deck (`wwsd/wwsd_defs.json`)
+The friend's 90-card + 10-noble deck, **extracted from THEIR site's client** (their Meteor module
+`games/spendee/imports/api/utils/constants.js`, read via the browser console — no server request).
+It's the canonical Splendor deck in the SAME colour order as ours (identity matches **89/90**; our
+Spender deck deviates on one card). `analyze.override_engine()` rebuilds the engine's card/noble
+tables from THEIRS so S analyses their EXACT game (their card index = our engine card id; 0-39 L1 /
+40-69 L2 / 70-89 L3). Validated against a finished-game dump (90-card partition + token conservation
++ noble satisfaction).
+
+### Files + API
+- `wwsd/analyze.py` — `analyze(doc, time_limit)` (a dumped `{games:[...]}` doc → engine State →
+  variant S → structured dict); `to_state`, `override_engine`/`prepare`, and `_search_with_eval`
+  (runs the search, then reads the root value + per-edge Q **without** modifying `vsearch`).
+- `wwsd/app.py` — FastAPI: `POST /move` (gated by header `X-WWSD-Secret` via `hmac.compare_digest`;
+  small self-contained per-IP sliding-window rate limit; CORS pinned to `WWSD_ORIGIN`; honours a
+  `?t=<seconds>` think-time override **clamped 1-60s** to stay under Cloudflare's ~100s ceiling),
+  `GET /health`, `GET /` (the bookmarklet generator/tester page).
+- `wwsd/bookmarklet.py` — the overlay bookmarklet (config vars `SECS`/`SVC`/`KEY` hoisted to the
+  FRONT for easy editing) + `build_bookmarklet()` + the `GET /` page (builds the bookmarklet
+  CLIENT-side, so the secret never reaches the server).
+- `wwsd/tests/test_wwsd.py` — deck-rebuild correctness, `analyze` on real dumps, secret/json guards,
+  `?t=` clamp, bookmarklet generation, eval fields (`python -m pytest wwsd/tests -q`).
+- **`analyze` response**: `recommendation` + `rec_eval`; `alternatives[]` (pct + text + `eval`);
+  `eval` = S's POST-search **position** value (root `sum(W)/sum(N)`, [-1,1] from the side to move);
+  `sims`, `budget`, `turn_name`, `target`. Per-move evals are the MCTS **edge Q** (searched → noisy
+  at low sims; higher `SECS` steadies them). A static-`v_state`-after-each-move alternative was
+  discussed (stable but shallow + needs refill-averaging for buy/reserve) — not implemented.
+
+### Caveats
+Render free tier: ~30-50s cold start; slow shared CPU → far FEWER sims than local (~hundreds at a few
+seconds vs ~4,600 on a dev box). **Sims, not seconds, is the strength currency** — bump `WWSD_TIME`
+or the bookmarklet's `SECS` (`?t=`) to climb toward the local strength (capped by `vsearch`'s
+`SERVE_MAX_SIMS`). For full local strength without the wait, a tunnel (Tailscale Funnel / Cloudflare)
+or a cheap dedicated-core VPS beats the free tier. `turns_table.json` (H3-vs-H2-measured, 15-pt) feeds
+S's leaf eval → 15-pt games exact, 21-pt approximate.
+
+---
+
 ## `core/` — shared backend platform (DB + auth)
 
 The **top-level `core/` package** holds the cross-cutting backend infrastructure
