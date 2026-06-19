@@ -355,11 +355,16 @@ const css = baseCss + `
      top of the card board; a vertical gem bank spans to their right; the player
      sidebar is the outer grid's wide 2nd column. L-to-R: nobles/cards, bank, players. */
   .game{grid-template-columns:1fr 360px}
-  .game-main{display:grid;grid-template-columns:auto 1fr 132px;column-gap:16px;row-gap:10px;align-items:start;--card-w:142px;--card-h:194px}
+  /* align-content:start keeps the rows packed at the top — without it grid's
+     default stretches the auto rows to fill a tall viewport, inflating the top
+     row into a big gap above the cards. */
+  .game-main{display:grid;grid-template-columns:auto 1fr 132px;column-gap:16px;row-gap:10px;align-items:start;align-content:start;--card-w:142px;--card-h:194px}
   .game-main>.nobles-panel{grid-column:1;grid-row:1}
   .actions-panel{grid-column:2;grid-row:1;display:flex;flex-direction:column;justify-content:center;gap:12px}
   .game-main>.levels{grid-column:1 / 3;grid-row:2}
-  .bank-panel{grid-column:3;grid-row:1 / -1;align-self:start}
+  /* Bank stretches to fill the nobles+cards height so it runs down to the bottom
+     of the card board (and gems spread over that height). */
+  .bank-panel{grid-column:3;grid-row:1 / -1;align-self:stretch;display:flex;flex-direction:column}
 
   /* Nobles: horizontal row on top of the cards, 1.5x larger; no title. */
   .nobles-panel .panel-title{display:none}
@@ -372,9 +377,8 @@ const css = baseCss + `
   .actions-panel .action-hint{font-size:1rem;white-space:normal;color:var(--text-dim);font-style:italic}
   .actions-panel-btns{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 
-  /* Vertical gem bank, 1.5x tokens, content height (not stretched, so it never
-     forces the page to scroll). */
-  .bank-gems{flex-direction:column;align-items:center;gap:14px}
+  /* Vertical gem bank, 1.5x tokens; gems spread top-to-bottom to fill the bank. */
+  .bank-gems{flex-direction:column;align-items:center;flex:1;justify-content:space-between}
   .bank-gems .gem-token{width:63px!important;height:63px!important;font-size:1.45rem!important}
   .bank-gems .gem-count{font-size:1.1rem}
 
