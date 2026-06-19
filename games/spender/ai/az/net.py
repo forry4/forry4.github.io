@@ -12,9 +12,9 @@ HIDDEN = (512, 512, 256)
 
 
 class SpenderNet(nn.Module):
-    def __init__(self):
+    def __init__(self, in_features: int = F.N_FEATURES):
         super().__init__()
-        dims = (F.N_FEATURES,) + HIDDEN
+        dims = (in_features,) + HIDDEN
         self.trunk = nn.Sequential(
             *[m for i in range(len(HIDDEN))
               for m in (nn.Linear(dims[i], dims[i + 1]), nn.ReLU())]

@@ -1144,11 +1144,27 @@ website variant **"S"**.
     **Gold weighting is NOT supported either** — controlling for reserves, gold advances you LESS per token than
     a colored gem (coef −0.20 vs −0.41); its raw effect was just reserve-correlation. **Keep `RESERVE_TURN_ADJ=0`.**
     Net lesson: R² gain ≠ strength; the turns horizon is not a strength lever for S (3 independent washes).
-- **Open / next:** (1) **21-point game mode + a re-tuned "S21"** — full plan written (`.claude-plans/`): parametrize
-  `win_points` per-game (default 15 → byte-identical), re-measure a 21-point `turns_table`, retune at
-  win_points=21, serve S21 + a "Classic 15 / Long 21" lobby toggle. (2) **the enriched-features retrain**
-  (the big structural bet — a learned net leaf beats the hand-leaf +0.02–0.05; **attention ≈ linear** on
-  enriched features, so a plain MLP suffices), gated on the three-way diagnostic + a net-training fix.
+  - **Net retrain / learnable-leaf path — EXHAUSTED, beats nothing (DO NOT relitigate).** A pre-retrain
+    derisking sweep (offline scripts: `distill_features.py`/`distill_fit.py`/`leaf_ab.py`, `bootstrap_harvest.py`/
+    `bootstrap_train.py`/`net_vs_s.py`, `policy_arch_test.py`) tested every lever a learned net could give S.
+    **Six converging negatives:** (a) **leaf-swap** — an enriched ridge leaf distilled toward V_search (held-out
+    AUC 0.718 vs the static leaf's 0.670) made S only **0.534** vs frozen-S (n.s.), panel wash → a sharper static
+    leaf does NOT convert through search. (b) **base-feature bootstrap** — a net distilled from S (value+policy)
+    scored **0.042** vs S (near-uniform policy CE 2.67). (c) **enriched bootstrap** — value sharp (MSE 0.027),
+    policy lifted to 0.52 top-1 but still **0.315** vs S. (d) **structured/per-card policy head** — 0.554 top-1 ≈
+    flat 0.535, both ≪ the H3 prior's **0.86**. The wall is NOT features or architecture: **S's search move ≈
+    H3's greedy move 86%, and predicting it essentially requires recomputing H3** — any net is a lossy
+    approximation (~0.55). So the best static policy IS the H3 prior, which **S already uses**; "H3 prior + net
+    value" just rebuilds ≈ S. Combined with "better value doesn't convert," **no net configuration beats S.**
+    The only untested path is self-play discovering a >H3 policy from the 0.315 enriched bootstrap, but the net
+    represents policies at ~0.55 fidelity and base-feature self-play already capped sub-S (variant Z) → low odds,
+    not pursued. **Conclusion: S is at the ceiling of the heuristic+search approach; the learnable-net path can't
+    surpass it.** (Reusable byproduct kept on main: `league.py`/`train_az.py` now accept **`S` as a league/gate
+    opponent** via `--heur-variants S` + `--opp-s-sims`; `vsearch.LEAF_MODE`/`net.SpenderNet(in_features=)` are
+    byte-identical-default. `*cache*.npz`/`leaf_model.npz`/`checkpoints_bootstrap*` are gitignored scratch.)
+- **Open / next:** (1) **21-point game mode + a re-tuned "S21" — ACTIVE** (full plan in `.claude-plans/`):
+  parametrize `win_points` per-game (default 15 → byte-identical), re-measure a 21-point `turns_table` (reuse
+  `s_measure_turns.py`), retune at win_points=21, serve S21 + a "Classic 15 / Long 21" lobby toggle.
   Human playtest DONE. Parked: "search owns DISCARD/NOBLE + a discard prior" (low gain).
 
 ### Hard-won conclusions — DO NOT relitigate

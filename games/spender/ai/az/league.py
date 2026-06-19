@@ -29,6 +29,7 @@ from games.spender import main as inc
 from . import actions as A
 from . import engine as E
 from . import features as F
+from . import vsearch
 from .arena import _heuristic_action, _load_opp_weights
 from .infer_np import load_evaluator
 from .mcts import Search, pick_action
@@ -104,6 +105,12 @@ def _make_opponent_fn(spec: dict, rng: random.Random):
         ev = load_evaluator(spec["npz"])
         n = spec["opp_sims"]
         return lambda s: _az_opponent_action(ev, s, rng, n)
+    if spec["kind"] == "s":
+        # Variant S (vsearch: v_state leaf + determinized PUCT) -- the real bar the net must beat.
+        # Seed vsearch's process-local determinization RNG once so games in this worker are reproducible.
+        vsearch._RNG = random.Random(spec.get("seed") or rng.randrange(2 ** 31))
+        n = spec["opp_sims"]
+        return lambda s: vsearch.choose_action(s, s.turn, sims=n)
     if spec["kind"] == "eps":
         # Curriculum opponent: a competent heuristic move with probability p,
         # else a random legal move. p is the difficulty/TEMPO knob — p=0 is a

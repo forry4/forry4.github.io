@@ -50,32 +50,7 @@ from . import valuation3 as V3     # noqa: E402
 from . import vsearch              # noqa: E402
 from .mcts import Search           # noqa: E402
 
-_GLOB_KEYS = ("points_me", "engine_me", "progress_me", "noble_me", "econ_me",
-              "points_opp", "engine_opp", "progress_opp", "noble_opp", "econ_opp",
-              "stand_me", "stand_opp")
-ENRICHED_F = F.N_FEATURES + 12 * 4 + len(_GLOB_KEYS) + 1   # base + per-card TEPC + globals + turns
-
-
-def _feat_enriched(s, seat):
-    """Base 305 features + the LEAF's derived terms the encoder omits: per board card the H3
-    (take, engine, point, cost), the v_state component breakdown for both seats, and the
-    turns-remaining horizon. Tests whether feeding the net what the leaf computes lifts the wall."""
-    base = F.encode(s)
-    val = V3.Valuation(s, H3.W_TEMPO, H3.W_GEM, H3.W_GOLD)
-    pc = []
-    for slot in range(12):
-        ci = s.board[slot]
-        if ci >= 0:
-            t, e, p, c = H3.components(val, ci, seat)
-            pc.extend((t, e, p, c))
-        else:
-            pc.extend((0.0, 0.0, 0.0, 0.0))
-    turns = val.estimated_turns_remaining()
-    comp = v_state.components(s, seat)
-    glob = [comp[k] for k in _GLOB_KEYS]
-    return np.concatenate([base, np.asarray(pc, np.float32),
-                           np.asarray(glob, np.float32),
-                           np.asarray([turns], np.float32)]).astype(np.float32)
+from .distill_features import ENRICHED_F, feat_enriched as _feat_enriched  # noqa: E402 (single source)
 
 
 def _harvest_chunk(args):

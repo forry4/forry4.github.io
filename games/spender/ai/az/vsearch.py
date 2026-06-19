@@ -26,6 +26,7 @@ import time
 
 import numpy as np
 
+from . import distill_features as DF
 from . import engine as E
 from . import heuristic3 as H3
 from . import v_state
@@ -45,6 +46,29 @@ SERVE_MIN_SIMS = 32   # always run at least this many sims before the clock may 
 SERVE_MAX_SIMS = 6000 # hard cap so a fast box can't spin unboundedly inside the budget
 
 _RNG = random.Random(0x5EA5C4)   # determinization shuffle (process-local; advanced across calls)
+
+# ─── leaf-evaluator swap (experiment): "vstate" = the deployed v_state V(state); "distill" = the
+# ridge-on-enriched-features model distilled toward V_search (leaf_model.npz). Tests whether a
+# SHARPER static leaf -> stronger S at equal sims. Default "vstate" = byte-identical to production.
+LEAF_MODE = "vstate"
+_LEAF_MODEL = None
+
+
+def _load_leaf_model():
+    global _LEAF_MODEL
+    if _LEAF_MODEL is None:
+        import os
+        d = np.load(os.path.join(os.path.dirname(__file__), "leaf_model.npz"))
+        _LEAF_MODEL = (d["w"].astype(np.float64), d["mu"].astype(np.float64), d["sd"].astype(np.float64))
+    return _LEAF_MODEL
+
+
+def _distill_value(leaf_s) -> float:
+    """Distilled-leaf value for the player to move at leaf_s, clipped to [-1, 1] (the MCTS range)."""
+    w, mu, sd = _load_leaf_model()
+    f = DF.feat_enriched(leaf_s, leaf_s.turn).astype(np.float64)
+    pred = ((f - mu) / sd) @ w[:-1] + w[-1]
+    return -1.0 if pred < -1.0 else (1.0 if pred > 1.0 else float(pred))
 
 
 def _card_for_action(s, seat: int, a: int) -> int:
@@ -117,7 +141,7 @@ def _expand(search) -> None:
     leaf_s, mask = req
     legal = [a for a in range(E.N_ACTIONS) if mask[a]]
     val = V.Valuation(leaf_s, H3.W_TEMPO, H3.W_GEM, H3.W_GOLD)
-    value = v_state.value_with(val, leaf_s.turn)
+    value = _distill_value(leaf_s) if LEAF_MODE == "distill" else v_state.value_with(val, leaf_s.turn)
     probs = _policy_prior(val, leaf_s, leaf_s.turn, legal)
     search.apply_evals(probs, value)
 

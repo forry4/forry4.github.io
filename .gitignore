@@ -29,5 +29,9 @@ games/spender/ai/az/checkpoints*/
 games/spender/ai/az/*.out
 games/spender/ai/az/turns_table_s.json
 
+# net-retrain investigation scratch (harvested caches + fitted leaf model; regenerable)
+games/spender/ai/az/*cache*.npz
+games/spender/ai/az/leaf_model.npz
+
 # SQLite databases (contain user data)
 *.db

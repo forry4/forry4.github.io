@@ -67,12 +67,18 @@ def _train_candidate(net, buffer, steps, batch_size, lr, device):
     return p_loss_t / steps, v_loss_t / steps
 
 
+def _opp_spec(args, v):
+    """Spec for one opponent variant. 'S' -> variant S (vsearch); else a weight-set heuristic."""
+    if v.upper() == "S":
+        return {"kind": "s", "opp_sims": args.opp_s_sims, "label": "S"}
+    return {"kind": "heur", "variant": v, "opp_iters": args.opp_iters}
+
+
 def _heur_assignments(args, n_total):
-    """Even (spec, n_games) split of n_total across the heuristic variants."""
+    """Even (spec, n_games) split of n_total across the heuristic variants (S allowed)."""
     variants = [v.strip() for v in args.heur_variants.split(",") if v.strip()]
     per = n_total // max(1, len(variants))
-    return [({"kind": "heur", "variant": v, "opp_iters": args.opp_iters}, per)
-            for v in variants if per > 0]
+    return [(_opp_spec(args, v), per) for v in variants if per > 0]
 
 
 def _league_assignments(args, pool_files):
@@ -93,8 +99,10 @@ def _curr_specs(args, curr_p, n_total):
     all labeled 'cur' so their net win rate aggregates as the difficulty signal."""
     variants = [v.strip() for v in args.heur_variants.split(",") if v.strip()]
     per = max(1, n_total // len(variants))
-    return [({"kind": "eps", "variant": v, "p": curr_p,
-              "opp_iters": args.curr_opp_iters, "label": "cur"}, per)
+    # 'S' is the hard target, not part of the eps difficulty ramp -> always a full-strength S opponent.
+    return [(({"kind": "s", "opp_sims": args.opp_s_sims, "label": "S"} if v.upper() == "S"
+              else {"kind": "eps", "variant": v, "p": curr_p,
+                    "opp_iters": args.curr_opp_iters, "label": "cur"}), per)
             for v in variants]
 
 
@@ -179,7 +187,10 @@ def main():
                     help="fraction vs heuristics (split across --heur-variants)")
     ap.add_argument("--league-frac", type=float, default=0.2,
                     help="fraction vs sampled past AZ checkpoints (folds into self when pool empty)")
-    ap.add_argument("--heur-variants", default="A,B,C2", help="comma-list of heuristic opponents")
+    ap.add_argument("--heur-variants", default="A,B,C2",
+                    help="comma-list of opponents; 'S' = variant S (vsearch), the real bar to beat")
+    ap.add_argument("--opp-s-sims", type=int, default=128,
+                    help="search budget for an 'S' (vsearch) league/gate opponent")
     ap.add_argument("--opp-iters", type=int, default=120, help="heuristic opponent MCTS iters")
     ap.add_argument("--opp-sims", type=int, default=96, help="past-AZ opponent PUCT sims")
     ap.add_argument("--pool-size", type=int, default=6, help="max past-AZ checkpoints kept in the league pool")
