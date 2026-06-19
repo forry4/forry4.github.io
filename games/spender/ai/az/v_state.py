@@ -47,7 +47,7 @@ from . import valuation3 as V
 
 # ─── tunable weights (panel-tuned later by vsearch_autotune) ─────────────────────────────────
 W_POINTS = 1.0        # realized victory points (the hard currency)
-W_ENGINE_STK = 0.8    # forward value of bonuses already held (future-deck coverage)
+W_ENGINE_STK = 0.4    # forward value of bonuses already held (future-deck coverage); maximin-tuned (was 0.8)
 W_PROGRESS = 1.5      # imminent scoring strength: take_value of the best reachable targets
 W_NOBLE = 0.6         # progress toward the closest completable noble (time-gated)
 W_ECON = 0.3          # token economy: useful gold minus hoard pressure

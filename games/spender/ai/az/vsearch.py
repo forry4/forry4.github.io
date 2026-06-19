@@ -34,7 +34,7 @@ from .mcts import Search
 
 # ─── tunables (the autotuner sweeps these on the panel-average objective) ─────────────────────
 SIMS = 200            # MCTS simulations per PLAY decision (serving uses a wall-clock budget instead)
-C_PUCT = 2.0          # PUCT exploration constant (mcts default)
+C_PUCT = 1.5          # PUCT exploration constant; maximin-tuned (was 2.0)
 POLICY_TEMP = 0.7     # softmax temperature on the H3 action-score prior (lower = sharper toward H3)
 RESERVE_PRIOR_W = 0.5 # reserve actions get this fraction of the card's take_value as their prior score
 TAKE_PRIOR_W = 1.0    # scale on the (normalized) need-vector alignment score for take actions
