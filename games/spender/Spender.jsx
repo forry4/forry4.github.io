@@ -364,7 +364,11 @@ const css = baseCss + `
   .game{grid-template-columns:1fr 460px}
   /* Sidebar is two full-height columns: players (left) + recent moves (far right). */
   .game-sidebar{display:grid;grid-template-columns:1.1fr 0.9fr;column-gap:14px;align-items:stretch}
-  .game-sidebar>.players-area{grid-column:1;height:100%;justify-content:space-between}
+  /* Players column: the two boxes each take half the height — box 1 flush to the
+     top down to the middle, box 2 flush to the bottom up to the middle. */
+  .game-sidebar>.players-area{grid-column:1;height:100%}
+  .game-sidebar .player-panel{flex:1;min-height:0}
+  /* Moves column fills the full height (flush to the bottom of the screen). */
   .game-sidebar>.log-panel{grid-column:2;height:100%;display:flex;flex-direction:column}
   /* align-content:start keeps the rows packed at the top — without it grid's
      default stretches the auto rows to fill a tall viewport, inflating the top
