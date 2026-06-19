@@ -257,13 +257,14 @@ const css = baseCss + `
 .gem-total{display:inline-block;font-size:.66rem;color:var(--text);font-family:'Cinzel',serif;font-weight:600;letter-spacing:.03em;margin-top:3px;background:var(--surface3);border:1.5px solid #7a6e58;padding:1px 8px;border-radius:8px;box-shadow:0 0 0 1px rgba(0,0,0,.5)}
 /* Compact mobile player summary + log caret — hidden on desktop (shown only in
    the max-width:600px block below), so the laptop layout is unchanged. */
-.player-summary{display:none;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}
+.player-summary{display:none;flex-wrap:wrap;gap:5px;align-items:center;margin-top:8px}
 .sum-chip{display:inline-flex;align-items:center;gap:3px;font-family:'Cinzel',serif;font-size:.74rem;font-weight:700;color:var(--text)}
 .sum-dot{width:11px;height:11px;border-radius:50%;border:1px solid rgba(255,255,255,.25);flex-shrink:0}
+.sum-label{font-family:'Cinzel',serif;font-size:.56rem;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)}
+.sum-div{width:1px;align-self:stretch;min-height:14px;background:var(--border);margin:0 3px}
+.sum-none{color:var(--text-muted);font-size:.74rem}
 .sum-noble{color:var(--gold)}
-.sum-gem{color:var(--text-dim)}
-.sum-res{color:var(--text-dim)}
-.sum-caret{margin-left:auto;color:var(--text-dim);font-size:.8rem}
+.sum-caret{margin-left:auto;cursor:pointer;color:var(--gold);font-size:.72rem;font-family:'Cinzel',serif;letter-spacing:.04em}
 .log-caret{display:none}
 
 /* ─── Winner ────────────────────────────────────────────────────────────── */
@@ -350,17 +351,23 @@ const css = baseCss + `
   .action-hint{flex-basis:100%;order:10;white-space:normal}
   /* Push the buttons to the right edge with no phantom min-width gap. */
   .action-bar-btns{min-width:0;margin-left:auto}
+  /* Admin-only AI-values toggle: drop it to its own compact line below the
+     turn/action row so it stops bulking up that section. */
+  .ai-vals-toggle{order:11;font-size:.64rem;padding:4px 10px;margin-right:auto}
 
   /* Slightly smaller bank tokens so all 6 + counts sit comfortably in one row. */
   .gem-token{width:38px;height:38px;font-size:.88rem}
   .bank-gems{gap:6px;justify-content:space-between}
 
-  /* Compact player panels: one-line summary by default, tap to expand detail. */
+  /* Compact player panels: cards + gems always shown via the summary row; the
+     full pill detail is replaced by it, and only reserved cards hide behind the
+     expand caret. */
   .player-panel{padding:9px 11px}
-  .player-header{margin-bottom:0;cursor:pointer}
+  .player-header{margin-bottom:0}
   .player-summary{display:flex}
-  .player-detail{display:none;margin-top:8px}
-  .player-panel.expanded .player-detail{display:block}
+  .player-detail{display:none}
+  .player-reserved{display:none}
+  .player-panel.expanded .player-reserved{display:block;margin-top:8px}
   .players-area{gap:6px}
 
   /* Move log: the most recent entry stays visible; tap to expand the rest. */
@@ -1073,26 +1080,36 @@ export default function SpenderApp() {
 		const noblePts = p.nobles.reduce((s, n) => s + n.points, 0);
 		return (
 			<div key={pid} className={`player-panel${isMe ? " me" : ""}${isActive ? " active-turn" : ""}${expanded ? " expanded" : ""}`}>
-				<div className="player-header" onClick={toggleExpand}>
+				<div className="player-header" onClick={p.reserved?.length > 0 ? toggleExpand : undefined}>
 					<div className="player-name-row">
 						{isActive && <span className="active-dot" />}
 						<span className="player-name">{name}{isMe ? " (you)" : ""}</span>
 					</div>
 					<span className="player-score">{score} pts</span>
 				</div>
-				{/* compact at-a-glance row — shown on mobile only (CSS); bonuses are the
-				    affordability signal you track most, plus gems/nobles/reserved counts. */}
-				<div className="player-summary" onClick={toggleExpand}>
+				{/* Compact at-a-glance row — mobile only (CSS). Shows cards bought AND
+				    gems held so both are visible WITHOUT expanding; the caret appears
+				    only when there are reserved cards (the one thing expand reveals). */}
+				<div className="player-summary" onClick={p.reserved?.length > 0 ? toggleExpand : undefined}>
+					<span className="sum-label">cards</span>
 					{GEM_COLORS.map(c => (bonuses[c] || 0) > 0 && (
-						<span key={c} className="sum-chip">
+						<span key={"b" + c} className="sum-chip">
 							<span className="sum-dot" style={{ background: GEM_HEX[c], borderColor: c === "black" ? "rgba(255,255,255,.45)" : "rgba(255,255,255,.25)" }} />
 							{bonuses[c]}
 						</span>
 					))}
+					{GEM_COLORS.every(c => !(bonuses[c] > 0)) && <span className="sum-none">—</span>}
 					{noblePts > 0 && <span className="sum-chip sum-noble">★{noblePts}</span>}
-					<span className="sum-chip sum-gem">{gemTotal(p.tokens)}g</span>
-					{p.reserved?.length > 0 && <span className="sum-chip sum-res">R{p.reserved.length}</span>}
-					<span className="sum-caret">{expanded ? "▾" : "▸"}</span>
+					<span className="sum-div" />
+					<span className="sum-label">gems</span>
+					{[...GEM_COLORS, "gold"].map(c => (p.tokens[c] || 0) > 0 && (
+						<span key={"t" + c} className="sum-chip">
+							<span className="sum-dot" style={{ background: GEM_HEX[c], borderColor: c === "black" ? "rgba(255,255,255,.45)" : "rgba(255,255,255,.25)" }} />
+							{p.tokens[c]}
+						</span>
+					))}
+					{gemTotal(p.tokens) === 0 && <span className="sum-none">—</span>}
+					{p.reserved?.length > 0 && <span className="sum-caret">{expanded ? "▾" : "▸"} {p.reserved.length} reserved</span>}
 				</div>
 				<div className="player-detail">
 				<div className="player-tokens">
@@ -1115,13 +1132,13 @@ export default function SpenderApp() {
 						<span key={n.id} className="bonus-pill" style={{ borderColor: "var(--gold)", color: "var(--gold)" }}>★{n.points}</span>
 					))}
 				</div>
+				</div>
 				{p.reserved?.length > 0 && (
-					<>
+					<div className="player-reserved">
 						<div className="reserved-label">Reserved ({p.reserved.length}/3)</div>
 						<div className="reserved-row">{p.reserved.map(c => renderCard(c, { source: "reserved", readonly: !isMe }))}</div>
-					</>
+					</div>
 				)}
-				</div>
 			</div>
 		);
 	}
@@ -1532,7 +1549,7 @@ export default function SpenderApp() {
 								<span className="ai-variant-badge">{aiPersona(roomData.ai_variant)}</span>
 							)}
 							{authUser?.is_admin && roomData?.ai_variant && roomData?.ai_card_values && (
-								<button className="btn btn-ghost btn-sm" title="Admin: show/hide the AI's per-card value overlay"
+								<button className="btn btn-ghost btn-sm ai-vals-toggle" title="Admin: show/hide the AI's per-card value overlay"
 									onClick={() => setShowAiVals(v => {
 										const n = !v;
 										try { localStorage.setItem("spender_show_ai_vals", n ? "1" : "0"); } catch {}
