@@ -215,13 +215,23 @@ def list_user_games(user_id: str) -> list[dict]:
 
 
 def delete_open_game(game_id: str, user_id: str) -> bool:
+    """Delete an OPEN game the user hosts (lobby 'cancel'). Returns True if a row
+    was removed. Uses an existence check rather than cursor.rowcount: the
+    driver-agnostic core.db wrapper (sqlite3 / libsql) doesn't expose rowcount,
+    and libsql's rowcount semantics are unreliable -- on the prod Turso backend
+    `cur.rowcount` raised, 500ing cancel. SELECT-then-DELETE is correct on both
+    backends (mirrors Spender's delete_open_game)."""
     conn = _db()
     cur = conn.cursor()
-    cur.execute("DELETE FROM coc_games WHERE id=? AND player1_id=? AND status='open'", (game_id, user_id))
-    deleted = cur.rowcount > 0
-    conn.commit()
+    cur.execute("SELECT 1 FROM coc_games WHERE id=? AND player1_id=? AND status='open'",
+                (game_id, user_id))
+    existed = cur.fetchone() is not None
+    if existed:
+        conn.execute("DELETE FROM coc_games WHERE id=? AND player1_id=? AND status='open'",
+                     (game_id, user_id))
+        conn.commit()
     conn.close()
-    return deleted
+    return existed
 
 
 # ── Room helpers ──────────────────────────────────────────────────────────────
