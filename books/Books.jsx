@@ -30,21 +30,35 @@ function BookSearch({ onPick, placeholder }) {
 	const [query, setQuery] = useState("");
 	const [results, setResults] = useState([]);
 	const [searching, setSearching] = useState(false);
+	const [error, setError] = useState("");
 
 	useEffect(() => {
 		const q = query.trim();
-		if (q.length < 3) { setResults([]); setSearching(false); return; }
+		if (q.length < 3) { setResults([]); setSearching(false); setError(""); return; }
 		const ctrl = new AbortController();
+		let timedOut = false;
 		setSearching(true);
+		setError("");
 		const t = setTimeout(async () => {
+			// Open Library is keyless but can be slow/flaky; cap the request so a hung
+			// fetch can't leave the UI stuck on "Searching…" forever (it has no timeout of its own).
+			const guard = setTimeout(() => { timedOut = true; ctrl.abort(); }, 12000);
+			let superseded = false;
 			try {
 				const url = `https://openlibrary.org/search.json?q=${encodeURIComponent(q)}`
 					+ `&limit=8&fields=key,title,author_name,cover_i,first_publish_year`;
 				const res = await fetch(url, { signal: ctrl.signal });
 				const data = await res.json();
 				setResults((data.docs || []).slice(0, 8));
-			} catch (e) { if (e.name !== "AbortError") setResults([]); }
-			finally { setSearching(false); }
+			} catch (e) {
+				if (e.name === "AbortError" && !timedOut) { superseded = true; return; }  // newer keystroke owns it
+				setResults([]);
+				setError(timedOut ? "Open Library is slow right now — try again."
+					: "Couldn't reach Open Library — check your connection and try again.");
+			} finally {
+				clearTimeout(guard);
+				if (!superseded) setSearching(false);
+			}
 		}, 300);
 		return () => { ctrl.abort(); clearTimeout(t); };
 	}, [query]);
@@ -55,10 +69,11 @@ function BookSearch({ onPick, placeholder }) {
 		<div className="bk-search">
 			<input className="bk-in bk-search-in" placeholder={placeholder || "Search a book…"}
 				value={query} onChange={(e) => setQuery(e.target.value)} />
-			{(searching || results.length > 0) && (
+			{(searching || error || results.length > 0) && (
 				<div className="bk-results">
 					{searching && <div className="bk-result-hint">Searching…</div>}
-					{!searching && results.length === 0 && <div className="bk-result-hint">No matches</div>}
+					{!searching && error && <div className="bk-result-hint">{error}</div>}
+					{!searching && !error && results.length === 0 && <div className="bk-result-hint">No matches</div>}
 					{results.map(r => (
 						<button type="button" key={r.key} className="bk-result" onClick={() => pick(r)}>
 							{r.cover_i
