@@ -139,6 +139,7 @@ export default function Books({ authUser, onExit }) {
 	const [suggSaving, setSuggSaving] = useState(false);
 	const suggSnap = useRef(null);
 	const suggDrag = useRef(null);
+	const [dragOverId, setDragOverId] = useState(null);  // row currently under the drag (visual cue)
 
 	const [toast, setToast] = useState("");
 
@@ -285,6 +286,29 @@ export default function Books({ authUser, onExit }) {
 	const onRankDrop = makeDrop(rankDrag, setBooks, true);
 	const onSuggDrop = makeDrop(suggDrag, setSugg, false);
 
+	// ── ▲/▼ reorder buttons (native drag-and-drop doesn't work on touch, and is fiddly
+	//    on desktop — buttons give a precise, mobile-friendly way to nudge order). ──
+	const moveBook = (id, dir) => setBooks(b => {
+		const arr = [...b];
+		const fi = arr.findIndex(x => x.id === id);
+		if (fi < 0) return b;
+		const rating = arr[fi].rating;
+		let ni = -1;                                   // nearest same-tier neighbour in `dir`
+		for (let i = fi + dir; i >= 0 && i < arr.length; i += dir)
+			if (arr[i].rating === rating) { ni = i; break; }
+		if (ni < 0) return b;                          // already at the tier edge
+		[arr[fi], arr[ni]] = [arr[ni], arr[fi]];
+		return arr;
+	});
+	const moveSugg = (id, dir) => setSugg(s => {
+		const arr = [...s];
+		const fi = arr.findIndex(x => x.id === id);
+		const ni = fi + dir;
+		if (fi < 0 || ni < 0 || ni >= arr.length) return s;
+		[arr[fi], arr[ni]] = [arr[ni], arr[fi]];
+		return arr;
+	});
+
 	// ── ranking render ──
 	const byRating = (r) => books.filter(b => b.rating === r);
 
@@ -329,13 +353,19 @@ export default function Books({ authUser, onExit }) {
 						<div className="bk-tier-head"><Stars value={r} /></div>
 						{!group.length && <div className="bk-tier-empty">— drag a book here or set a book to {r}★ —</div>}
 						<div className="bk-cards">
-							{group.map((b) => (
-								<div key={b.id} className="bk-edit-row"
-									draggable
-									onDragStart={() => { rankDrag.current = b.id; }}
-									onDragOver={(e) => e.preventDefault()}
-									onDrop={() => onRankDrop(b.id)}>
-									<span className="bk-handle" title="Drag to reorder within this rating">⠿</span>
+							{group.map((b, i) => (
+								<div key={b.id} className={"bk-edit-row" + (dragOverId === b.id ? " bk-dragover" : "")}
+									onDragOver={(e) => { e.preventDefault(); if (dragOverId !== b.id) setDragOverId(b.id); }}
+									onDrop={() => { onRankDrop(b.id); setDragOverId(null); }}>
+									<div className="bk-reorder">
+										<button type="button" className="bk-move" title="Move up" disabled={i === 0}
+											onClick={() => moveBook(b.id, -1)}>▲</button>
+										<span className="bk-handle" draggable title="Drag to reorder within this rating"
+											onDragStart={() => { rankDrag.current = b.id; }}
+											onDragEnd={() => setDragOverId(null)}>⠿</span>
+										<button type="button" className="bk-move" title="Move down" disabled={i === group.length - 1}
+											onClick={() => moveBook(b.id, 1)}>▼</button>
+									</div>
 									<div className="bk-fields">
 										<div className="bk-field-line">
 											<input className="bk-in bk-in-title" placeholder="Title"
@@ -379,13 +409,19 @@ export default function Books({ authUser, onExit }) {
 			<BookSearch onPick={addSuggFromSearch} placeholder="Search a book to suggest…" />
 			<div className="bk-counter">{sugg.length} / {maxSugg}</div>
 			<div className="bk-cards">
-				{sugg.map((s) => (
-					<div key={s.id} className="bk-edit-row"
-						draggable
-						onDragStart={() => { suggDrag.current = s.id; }}
-						onDragOver={(e) => e.preventDefault()}
-						onDrop={() => onSuggDrop(s.id)}>
-						<span className="bk-handle" title="Drag to reorder">⠿</span>
+				{sugg.map((s, i) => (
+					<div key={s.id} className={"bk-edit-row" + (dragOverId === s.id ? " bk-dragover" : "")}
+						onDragOver={(e) => { e.preventDefault(); if (dragOverId !== s.id) setDragOverId(s.id); }}
+						onDrop={() => { onSuggDrop(s.id); setDragOverId(null); }}>
+						<div className="bk-reorder">
+							<button type="button" className="bk-move" title="Move up" disabled={i === 0}
+								onClick={() => moveSugg(s.id, -1)}>▲</button>
+							<span className="bk-handle" draggable title="Drag to reorder"
+								onDragStart={() => { suggDrag.current = s.id; }}
+								onDragEnd={() => setDragOverId(null)}>⠿</span>
+							<button type="button" className="bk-move" title="Move down" disabled={i === sugg.length - 1}
+								onClick={() => moveSugg(s.id, 1)}>▼</button>
+						</div>
 						{s.cover_url
 							? <img className="bk-cover" src={s.cover_url} alt=""
 								onError={(e) => { e.currentTarget.style.display = "none"; }} />
@@ -532,7 +568,14 @@ const css = `
 /* edit mode */
 .bk-edit-row{display:flex;gap:10px;background:var(--surface);border:1px solid var(--border);
 	border-radius:var(--radius-lg);padding:12px;align-items:flex-start;}
-.bk-handle{flex:none;cursor:grab;color:var(--text-muted);font-size:18px;padding-top:6px;user-select:none;}
+.bk-edit-row.bk-dragover{border-color:var(--gold);box-shadow:inset 0 3px 0 0 var(--gold);}
+.bk-reorder{flex:none;display:flex;flex-direction:column;align-items:center;gap:2px;}
+.bk-move{background:var(--surface2);border:1px solid var(--border);color:var(--text-dim);
+	border-radius:var(--radius);width:30px;height:26px;line-height:1;font-size:12px;cursor:pointer;padding:0;}
+.bk-move:hover:not(:disabled){border-color:var(--gold);color:var(--gold);}
+.bk-move:disabled{opacity:.3;cursor:default;}
+.bk-handle{cursor:grab;color:var(--text-muted);font-size:18px;user-select:none;line-height:1;}
+.bk-handle:active{cursor:grabbing;}
 .bk-fields{flex:1;min-width:0;display:flex;flex-direction:column;gap:7px;}
 .bk-field-line{display:flex;gap:7px;}
 .bk-in{background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:var(--radius);
