@@ -490,9 +490,14 @@ applies CORS + security-headers middleware (see below), `include_router`s Spende
   `books`) → `app.py` (top). The composition root depends on features; features don't
   depend on it. `core` depends on neither.
 - **CORS + security headers** (`app.py` + `core/config.py`): CORS is **pinned** to
-  `cors_allowed_origins()` — default `https://forry4.github.io` (GitHub Pages prod; origin =
-  scheme+host, NO path, even though the Vite `base` is `/WebProjects/`) plus localhost dev; override
-  with the **`CORS_ALLOWED_ORIGINS`** env var (comma-separated) for a future custom domain. Methods
+  `cors_allowed_origins()` — the site's own frontends are ALWAYS allowed: `https://forry4.github.io`
+  (GitHub Pages prod; origin = scheme+host, NO path, even though the Vite `base` is `/WebProjects/`),
+  the **Cloudflare staging mirror** `https://webprojectsstaging.forry4.workers.dev` (it reuses this same
+  backend over HTTP), plus localhost dev. **`CORS_ALLOWED_ORIGINS`** (comma-separated) ADDS extra origins
+  (e.g. a future custom domain) — it **merges with, no longer replaces, the defaults** (do not regress:
+  the old replace-semantics meant setting the env var silently locked out the staging mirror, so its
+  browser fetches got no `Access-Control-Allow-Origin` → the loading screen hung at 90% on `/games`;
+  staging is frontend-only on the prod backend, so this is the ONLY way it can call the API). Methods
   GET/POST/PUT/OPTIONS, headers Authorization/Content-Type, **no credentials** (token auth, not cookies
   — so `*`-origin was never a credential leak, but pinning is hygiene). `SecurityHeadersMiddleware`
   (pure-ASGI, in `app.py`) adds `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
@@ -1371,6 +1376,27 @@ state before confirming the delete.
   `not r.get("host") or r.get("game") is None` ("this game is no longer available"); the frontend
   error handler clears the stale resume pointer and `fetchGames` to drop the dead game. Verified
   e2e (create→cancel→join-rejected).
+
+### Lobby Open/Active split + Resume card (June 2026; do not regress)
+- **The lobby is split into "Open Games" (top) + "Active Games" (below), with NO overlap.** "Open
+  Games" (from `list_open_games` — ALL `status='open'` lobbies) is the SOLE home for not-yet-started
+  lobbies: the owner (`g.host_id === myId`) gets **Return** (`handleContinue`, re-enter to start once
+  someone joins) **+ Cancel**; everyone else gets **Join**. "Active Games" filters `myGames` (from
+  `list_user_games`, which returns the user's `status != 'over'` games) to **`status === "playing"`
+  only**. Before the split, a user's own open lobby showed in BOTH lists (because `list_user_games`
+  also returns open games) — that's the overlap this removed. Active Games is intentionally NOT
+  length-filtered (you want all your in-progress games); **Open Games IS** filtered by the Classic 15 /
+  Long 21 toggle (`openGames.filter(g => (g.win_points||15) === winPoints)`). Frontend-only — the
+  backend endpoints were already returning `status` per game.
+- **The Resume card no longer flashes on Back-to-Menu.** The `Resume` fallback IIFE (shows a saved
+  `spender_roomId`+token that isn't in your fetched lists) is gated on **`!browserLoading`** AND hidden
+  when the saved id is in **`openGames` OR `myGames`** (not just `myGames`). Without the `browserLoading`
+  gate it flashed right after creating a game: Back-to-Menu re-rendered the browser with STALE lists
+  before `fetchGames` resolved → Resume appeared → vanished once the new game landed in Open Games. The
+  `openGames` check also removes a **guest-side duplicate** (guests have an empty `myGames` because
+  `/games/mine` is logged-in-only, so a guest's own open lobby lives only in `openGames`).
+- **In-game "Target: X" label** (`.target-label`) is `font-size:1.05rem` (bumped 50% from `.7rem`),
+  shared by the desktop `.hint-col` and the mobile action-bar placements.
 
 ### Responsive game layout (June 2026 — the big UI overhaul; do not regress)
 The game screen has THREE layouts driven by width; all CSS lives in the one `css`
