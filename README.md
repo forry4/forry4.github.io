@@ -1,83 +1,99 @@
-# Spender
+# Forrest Games
 
-Spender is a small FastAPI backend that implements a Splendor-like board game using WebSockets. This repository includes the backend server and a minimal browser client you can host with GitHub Pages.
+A small collection of board games and site features, built as one full-stack app
+and hosted at **https://forry4.github.io/**. A single FastAPI backend serves every
+game and feature; a single React frontend — a shell that mounts each feature —
+is the site.
 
-Repository layout
-- `Spender/` - Python package containing the FastAPI app and game logic
-- `docs/` - static client (`index.html`) suitable for GitHub Pages
-- `Procfile` and `render.yaml` - deployment helpers (repo root)
-- `.github/workflows/` - CI for running tests on push
+## What's inside
 
-Quick start (development)
+### Games
+- **Spender** — a Splendor-like game of gem trading and prestige. Two players,
+  human-vs-human or human-vs-AI, racing to 15 points (Classic) or 21 (Long). The
+  AI is the deep part of the project: hand-built heuristics, a determinized-search
+  variant (a whole-position evaluator + PUCT), and an offline AlphaZero stack.
+  *Live.*
+- **Castles of Crimson** — a faithful digital port of the duchy-building
+  dice-and-tile euro game. Two players, human-vs-human or vs a determinized-MCTS
+  bot (Normal / Hard). *Live.*
+- **Where Wolf?** — a One Night Werewolf-style social-deduction party game for
+  3–10 humans, with a server-driven timed "night conductor" and per-player hidden
+  information. *In development* (backend landed; not yet wired into the home menu).
 
-1. Create and activate a Python virtual environment (PowerShell example):
+### Site features
+- **Books** — a public ranking of favourite books, plus reading suggestions that
+  any signed-in user can submit.
+- **WWSD** ("What Would Steve Do") — a standalone move-advisor for a friend's
+  external Splendor site, deployed as its own service (see [`wwsd/`](wwsd/)).
 
-```powershell
-cd 'C:\Users\Forrest\forrestm_projects\Spender'
-python -m venv .venv
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process -Force
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-```
+## Tech stack
 
-2. Start the server from the repository parent so package imports resolve:
+| Layer | Tech |
+|-------|------|
+| Backend | FastAPI, asyncio, WebSockets; SQLite for dev, Turso/libSQL for persistent prod |
+| Frontend | React 18, Vite 6, single-file components, one shared shell |
+| AI | MCTS, determinized PUCT, hand-built heuristics, AlphaZero (PyTorch offline → NumPy inference in prod) |
+| Auth | session tokens + per-room reconnect tokens, PBKDF2 passwords, in-process rate limiting |
+| Hosting | GitHub Pages (frontend), Render (backend), Cloudflare Worker (staging) |
 
-```powershell
-cd 'C:\Users\Forrest\forrestm_projects'
-python -m uvicorn games.spender.app:app --reload --host 127.0.0.1 --port 8000
-```
-
-3. Check health:
-
-```
-http://127.0.0.1:8000/health
-```
-
-Minimal browser client
-
-Open `docs/index.html` in a browser (or host the `docs/` folder with GitHub Pages). Provide the backend WebSocket base URL (for example `ws://127.0.0.1:8000`) and use the UI to create/join a game. The client logs messages and sends simple game actions over the WebSocket.
-
-Deploying the backend (Render)
-
-1. Push this repository to GitHub.
-2. On Render, create a new Web Service and connect your GitHub repo.
-3. Set the build command to:
+## Repository layout
 
 ```
-pip install -r Spender/requirements.txt
+app.py            # composition root: FastAPI app, CORS + security headers, wires every feature
+core/             # shared backend platform — DB (sqlite/Turso), auth, rate limiting, config
+games/
+  spender/        # Spender server + game logic + the AI stack (ai/, ai/az/)
+  castles_of_crimson/
+  wherewolf/
+books/            # Books site feature
+shared/           # shared frontend theme
+webapp/           # Vite + React build; the shell that mounts every feature
+wwsd/             # standalone Splendor move-advisor (separate service)
+docs/             # GitHub Pages output — BUILT BY CI, do not hand-edit
+Procfile, render.yaml, requirements-lock.txt   # deploy config
 ```
 
-4. Set the start command to:
+The backend is layered so features never depend on each other: `core/` (bottom) →
+features (`games.*`, `books`) → `app.py` (the composition root that wires them).
 
-```
-python -m uvicorn games.spender.app:app --host 0.0.0.0 --port $PORT
-```
+## Local development
 
-After deployment you'll have a public HTTPS URL; use `wss://<your-host>` as the backend WebSocket URL in the client.
+Backend — serves the whole site (every game and feature) from the composition root:
 
-CI and tests
-
-Run tests locally with:
-
-```
-python -m pytest
+```bash
+pip install -r games/spender/requirements.txt
+python -m uvicorn app:app --reload --port 8000
+# health check: http://127.0.0.1:8000/health
 ```
 
-The repository includes a GitHub Actions workflow that runs tests on push.
+Frontend — Vite dev server, proxies WebSockets to the backend on :8000:
 
-Security and production notes
+```bash
+cd webapp
+npm install
+npm run dev
+```
 
-- Restrict CORS to only the frontend domains before making the service public.
-- Add short-lived join tokens or simple auth to prevent unauthenticated room joins.
-- Use Redis (or another durable store) if you need persistence across restarts or multiple backend instances.
-- Consider rate-limiting and request validation for public deployments.
+Tests:
 
-Where to edit the client URL
+```bash
+python -m pytest            # backend: game engines, AI, core/auth, ...
+cd webapp && npm run smoke  # frontend: builds + headless-loads, fails on a blank page
+```
 
-The `docs/index.html` client has an input labeled "Backend WebSocket base URL" — update that to point at your deployed backend (use `wss://` for production over HTTPS).
+## Deployment
 
-Questions or next steps
+- **Frontend** → GitHub Pages at https://forry4.github.io/. CI
+  (`.github/workflows/deploy-pages.yml`) builds `webapp/`, runs the smoke test, and
+  commits the result to `docs/` on every push to `main` that touches the frontend.
+  Never hand-build or commit `docs/`.
+- **Backend** → Render (one web service hosts every game and feature); auto-deploys
+  on push to `main`. WWSD runs as a second Render service.
+- **Staging** → a Cloudflare Worker mirrors the frontend from the `staging` branch
+  (reusing the prod backend) so UI changes can be tested on a real URL before they
+  ship.
 
-- I removed the duplicate `Procfile` and `render.yaml` files that were inside `Spender/` and consolidated README material here.
-- If you'd like, I can also add a Dockerfile at the repo root, wire the docs client to automatically detect the backend when deployed, or add templated environment configs for Render.
+## More
+
+[`CLAUDE.md`](CLAUDE.md) is the detailed engineering log — architecture decisions,
+the AI research, and the hard-won "do not regress" notes for each subsystem.
