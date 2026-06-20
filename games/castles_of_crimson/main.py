@@ -214,6 +214,35 @@ def list_user_games(user_id: str) -> list[dict]:
     return out
 
 
+def list_active_games() -> list[dict]:
+    """All IN-PROGRESS games (any player, vs-bot or not) for the public "Active
+    Games" lobby list. Public like list_open_games: the frontend pins the viewer's
+    own games to the top (mine = a player id == myId) with a Resume button; others
+    are read-only. Exposes player ids + whose turn (list_open_games already exposes
+    host_id, so no new exposure)."""
+    conn = _db()
+    cur = conn.cursor()
+    cur.execute("""SELECT id, player1_id, player1_name, player2_id, player2_name,
+                          state_json, created_at, updated_at FROM coc_games
+                   WHERE status='playing' ORDER BY updated_at DESC LIMIT 100""")
+    rows = cur.fetchall()
+    conn.close()
+    out = []
+    for r in rows:
+        try:
+            g = (json.loads(r["state_json"] or "{}").get("game") or {})
+        except Exception:
+            g = {}
+        out.append({
+            "id": r["id"],
+            "player1_id": r["player1_id"], "player1_name": r["player1_name"],
+            "player2_id": r["player2_id"], "player2_name": r["player2_name"],
+            "turn": g.get("turn") if isinstance(g, dict) else None,
+            "created_at": r["created_at"], "updated_at": r["updated_at"],
+        })
+    return out
+
+
 def delete_open_game(game_id: str, user_id: str) -> bool:
     """Delete an OPEN game the user hosts (lobby 'cancel'). Returns True if a row
     was removed. Uses an existence check rather than cursor.rowcount: the
@@ -613,6 +642,12 @@ async def games_mine(token: str | None = Depends(_bearer_token)):
     if not user:
         return {"ok": False, "games": [], "message": "unauthenticated"}
     return {"ok": True, "games": list_user_games(user["id"])}
+
+
+@coc_app.get("/games/active")
+async def games_active():
+    # Public: all in-progress games (yours + others'). Frontend pins yours on top.
+    return {"ok": True, "games": list_active_games()}
 
 
 @coc_app.post("/games/{game_id}/cancel")
