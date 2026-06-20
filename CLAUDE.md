@@ -1128,6 +1128,23 @@ website variant **"S"**.
   turn-ending AND phase-transition mutations. **Profiling note:** measure throughput on a QUIET box —
   `vsearch_profile.py`'s clean sims/s is corrupted by a busy autotuner; the contention-independent truth is
   the cProfile call counts (builds/sim, `_cost_scalar` calls).
+- **Perf round 2 — deployed sims-starvation diagnosed + leaf sped ~1.76× (June 2026).** Production
+  serving logs (`vsearch._run_search_timed` now logs `[S] serving search: N sims in Ts (sims/s)` per move)
+  showed **Render's free CPU runs ~330–450 sims/move at ~85 sims/s in the decisive midgame — ~10–11× FEWER
+  than local's ~4,300 @ ~950 sims/s** (only trivial near-terminal moves spike, where most sims hit OVER
+  cheaply). So the deployed S a strong human beats is badly sims-starved, NOT algorithmically weaker — and
+  per the speedcurve strength climbs with sims, so the lever is leaf SPEED (no UX cost; the user declined
+  raising `SERVE_TIME`). Profiling the leaf found redundant recomputation, all fixed BYTE-IDENTICAL (gated by
+  the exact-value tests, 254 pass): (1) `valuation3._steps` replaces the `sorted(positives)==[1,1,1,1]` test
+  in `tempo`/`_reduces_tempo` with `max==1 and count_positive==4` — killed **100% of the ~592k sorts/move**
+  (the #1 self-time; +24%); (2) `_color_deficits` append-loop → walrus comprehension (drops ~1.2M appends);
+  (3) `noble_progress`/`noble_completion_pts` memoized by **`(bcol, seat)`** (the 3-noble loop depends only on
+  the bonus COLOR, not the card — only `noble_progress`'s time-gate `eff/(eff+W·deficit)` combine stays
+  per-card via `_noble_terms`); (4) `_w_card` memoized by `(cj, bcol, seat)` (`_rtempo_cache`) — the engine
+  loop recomputed `_reduces_tempo` identically for every ci sharing a color (213k→96k). Net **891 → ~1,570
+  clean sims/s (1.76×)**; so deployed midgame ~380 → ~670 sims/move. Remaining hotspots (`_cost_scalar` —
+  already a tight flat loop ~1µs so caching ≈ recompute; `components`/`engine_value`/`_delta_take` — already
+  memoized) need a numpy/Cython VECTORIZATION of the leaf for the next multiplier (bigger effort, uncertain).
 - **Tooling** (offline, parallel): `vsearch_camp.py` (panel A/B, CRN, Wilson CIs), `vsearch_autotune.py`
   (coordinate descent, **MAXIMIN objective over {H3,H2,H2N,H2R}** — maximize the WORST matchup, mean only as a
   tie-break (`MEAN_EPS`), with larger screen/holdout N since the min is a noisier statistic. Switched FROM

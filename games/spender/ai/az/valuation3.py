@@ -417,11 +417,8 @@ def _color_deficits(s: E.State, ci: int, seat: int) -> list[int]:
     cost = E.COST[ci]
     bon = s.bonuses[seat]
     tok = s.tokens[seat]
-    out = []
-    for i in range(5):
-        need = cost[i] - bon[i] - tok[i]
-        out.append(need if need > 0 else 0)
-    return out
+    # comprehension (not an append loop) — this is a leaf hotspot; the walrus avoids recomputing `need`.
+    return [n if (n := cost[i] - bon[i] - tok[i]) > 0 else 0 for i in range(5)]
 
 
 def gems_to_collect(s: E.State, ci: int, seat: int) -> int:
@@ -557,14 +554,30 @@ def victory_closeness(s: E.State, ci: int, seat: int, noble_pts: int = 0) -> flo
 # assumed: you gain at most 1 of a color per turn, so the steepest single color sets the
 # turn count.
 
+def _steps(d) -> int:
+    """Turns to collect remaining need `d` at 1 gem/color/turn: the steepest single-color need,
+    +1 iff the remainder is exactly 1-1-1-1 (four distinct colors each needing 1 -> a take-3 plus a
+    take-1 = 2 turns, which the bare steepest of 1 would miss). `d[c] >= 0`.
+
+    'nonzero == [1,1,1,1]' (the old sorted-equality test) holds iff exactly four entries are positive
+    and all are 1 -- i.e. steepest == 1 AND four entries > 0. Computed without a sort (this is THE leaf
+    hotspot: ~592k sorts/move came from here + _reduces_tempo); byte-identical to the sorted form."""
+    st = max(d)
+    if st == 1:
+        npos = 0
+        for x in d:
+            if x > 0:
+                npos += 1
+        if npos == 4:
+            return 2
+    return st
+
+
 def tempo(s: E.State, ci: int, seat: int) -> int:
     """Turns to collect ci at 1 gem/color/turn: the steepest single-color REMAINING
     need, +1 if the remaining cost is exactly 1-1-1-1 (four distinct colors need a
     take-3 plus a take-1 = 2 turns, which the bare steepest of 1 would miss)."""
-    d = _color_deficits(s, ci, seat)
-    steepest = max(d)
-    nonzero = sorted(x for x in d if x > 0)
-    return steepest + (1 if nonzero == [1, 1, 1, 1] else 0)
+    return _steps(_color_deficits(s, ci, seat))
 
 
 def gem_cost(s: E.State, ci: int, seat: int) -> int:
@@ -602,15 +615,9 @@ def _reduces_tempo(costj, bon, bcol: int) -> float:
     Uses H2's tempo definition (steepest single need, +1 if the remainder is exactly 1-1-1-1) on the
     post-bonus remainder. Caller has gated on cj still needing bcol, so rem[bcol] >= 1. O(5), no recursion."""
     rem = [costj[c] - bon[c] if costj[c] > bon[c] else 0 for c in range(5)]
-
-    def _t(r):
-        st = max(r)
-        nz = sorted(x for x in r if x > 0)
-        return st + (1 if nz == [1, 1, 1, 1] else 0)
-
-    before = _t(rem)
+    before = _steps(rem)
     rem[bcol] -= 1
-    return 1.0 if _t(rem) < before else 0.0
+    return 1.0 if _steps(rem) < before else 0.0
 
 
 RESERVED_ENGINE_W = 1.05   # a reserved card counts this much vs one board card in
@@ -629,7 +636,8 @@ class Valuation:
 
     __slots__ = ("s", "deck_color_demand", "_scarcity_cache", "_eng_base_cache",
                  "w_tempo", "w_gem", "w_gold", "_take0_cache", "_pot_cache", "_fp_cache",
-                 "_turns_cache", "_build_fp", "_dt_cache", "_comp_cache")
+                 "_turns_cache", "_build_fp", "_dt_cache", "_comp_cache",
+                 "_noble_terms_cache", "_noble_comp_cache", "_rtempo_cache")
 
     def __init__(self, s: E.State, w_tempo: float = 0.5, w_gem: float = 0.2,
                  w_gold: float = 0.4):
@@ -653,6 +661,12 @@ class Valuation:
         self._pot_cache = {}
         self._dt_cache = {}   # (ci, seat, bcol) -> _delta_take (dedupes same-color discounters / repeats)
         self._comp_cache = {}  # (ci, seat) -> heuristic3.components tuple (dedupes the anchor's board re-sweep)
+        # bcol-keyed memo: the noble loop in noble_progress/noble_completion_pts depends only on the
+        # bonus COLOR + seat (not the full card), so it's recomputed identically for every card sharing
+        # a color. Cache the per-color terms; only the cheap time-gate combine stays per-card.
+        self._noble_terms_cache = {}  # (bcol, seat) -> (n, [(base, deficit), ...]) for noble_progress
+        self._noble_comp_cache = {}   # (bcol, seat) -> noble_completion_pts (fully bcol-determined)
+        self._rtempo_cache = {}       # (cj, bcol, seat) -> _reduces_tempo (engine-loop hotspot dedupe)
         self._fp_cache = {}   # seat -> {card_id: converged engine value} (ENG_FIXEDPOINT path)
         self._turns_cache = None   # estimated game turns_remaining (state-level, cached)
         # Permanent-bonus future value: share of remaining (undealt) deck cost
@@ -772,7 +786,7 @@ class Valuation:
                 imp = E.PTS[cj] / ENG_DIV + ENG_FLOOR   # importance: high-point cards weigh more (+floor)
                 if recurse:
                     imp += ENG_RECURSE_W * self._eng_base(cj, seat)
-                ev += imp * self._w_card(costj, s.bonuses[seat], bcol)
+                ev += imp * self._w_card_for(cj, seat, bcol)
         for cj in s.reserved[seat]:       # committed targets count too (slight premium)
             if cj == ci:
                 continue
@@ -781,7 +795,7 @@ class Valuation:
                 imp = E.PTS[cj] / ENG_DIV + ENG_FLOOR
                 if recurse:
                     imp += ENG_RECURSE_W * self._eng_base(cj, seat)
-                ev += RESERVED_ENGINE_W * imp * self._w_card(costj, s.bonuses[seat], bcol)
+                ev += RESERVED_ENGINE_W * imp * self._w_card_for(cj, seat, bcol)
         ev += self.deck_color_demand[bcol] * ENG_DECK_W
         return ev
 
@@ -793,6 +807,16 @@ class Valuation:
             return ENG_TEMPO_SCALE * (1.0 + _reduces_tempo(costj, bon, bcol))
         sj = sum(costj)
         return costj[bcol] / sj if sj else 0.0
+
+    def _w_card_for(self, cj: int, seat: int, bcol: int) -> float:
+        """Cached _w_card: pure in (cj, bcol, seat) within a fixed state, but the engine loop calls it
+        for the SAME (cj, bcol) across every ci sharing a color -> heavy redundancy on _reduces_tempo."""
+        key = (cj, bcol, seat)
+        v = self._rtempo_cache.get(key)
+        if v is None:
+            v = self._w_card(E.COST[cj], self.s.bonuses[seat], bcol)
+            self._rtempo_cache[key] = v
+        return v
 
     def _eng_base(self, cj: int, seat: int) -> float:
         """cj's LEVEL-0 (legacy, non-recursive) engine value, cached per state. Used as the
@@ -1087,14 +1111,31 @@ class Valuation:
         A far/late noble fades toward 0 -- a smooth fade (turns_remaining is an estimate), no cliff."""
         if not NOBLE_TIME_GATE:
             return noble_progress(self.s, ci, seat)
-        s = self.s
         bcol = E.BONUS[ci]
-        bon = s.bonuses[seat]
+        key = (bcol, seat)
+        terms = self._noble_terms_cache.get(key)
+        if terms is None:
+            terms = self._noble_terms(bcol, seat)   # the bcol-determined noble loop (cached)
+            self._noble_terms_cache[key] = terms
+        n, pairs = terms
+        if not n:
+            return 0.0
         eff = self.estimated_turns_remaining() - self.tempo(ci, seat)  # turns left after acquiring this card
         if eff < 0.0:
             eff = 0.0
         score = 0.0
+        for base, deficit in pairs:                 # only the per-card time-gate combine stays live
+            score += base * (eff / (eff + NOBLE_TURN_W * deficit))
+        return score / n
+
+    def _noble_terms(self, bcol: int, seat: int):
+        """The part of noble_progress that depends only on the bonus COLOR + seat (not the card): the
+        count `n` of nobles this color's buy does NOT complete, and per advancing noble its (base
+        closeness, deficit). The per-card time_factor (eff/(eff+W*deficit)) is applied by the caller."""
+        s = self.s
+        bon = s.bonuses[seat]
         n = 0
+        pairs = []
         for slot in range(3):
             ni = s.nobles[slot]
             if ni < 0:
@@ -1110,12 +1151,16 @@ class Valuation:
                 deficit = sum(req[i] - bon[i] for i in range(5) if req[i] > bon[i])  # bonuses still needed
                 close = 1.0 - deficit / total
                 base = NOBLE_CLOSE_FLOOR + (1.0 - NOBLE_CLOSE_FLOOR) * close
-                time_factor = eff / (eff + NOBLE_TURN_W * deficit)  # smooth fade; no cliff
-                score += base * time_factor
-        return score / n if n else 0.0
+                pairs.append((base, deficit))
+        return n, pairs
 
     def noble_completion_pts(self, ci: int, seat: int) -> int:
-        return noble_completion_pts(self.s, ci, seat)
+        key = (E.BONUS[ci], seat)                   # fully bonus-color-determined within a fixed state
+        v = self._noble_comp_cache.get(key)
+        if v is None:
+            v = noble_completion_pts(self.s, ci, seat)
+            self._noble_comp_cache[key] = v
+        return v
 
     def efficiency(self, ci: int, seat: int) -> float:
         return efficiency(self.s, ci, seat)
