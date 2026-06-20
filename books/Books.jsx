@@ -527,9 +527,10 @@ export default function Books({ authUser, onExit }) {
 					<div className="bk-logo">My Bookshelf</div>
 				</div>
 
-				{loading ? <div className="bk-empty">Loading…</div> : (editing ? rankEditView() : rankReadView())}
-
-				{suggestionsSection()}
+				<div className="bk-columns">
+					{loading ? <div className="bk-empty">Loading…</div> : (editing ? rankEditView() : rankReadView())}
+					{suggestionsSection()}
+				</div>
 
 				{toast && <div className="bk-toast">{toast}</div>}
 			</div>
@@ -551,6 +552,15 @@ const css = `
 	color:var(--gold);letter-spacing:.06em;}
 .bk-tagline{color:var(--text-dim);margin:10px 0 0;font-style:italic;font-size:1.02rem;}
 .bk-list{max-width:720px;margin:0 auto;padding:0 20px;}
+/* two-column layout: bookshelf left, suggestions top-right (stacks on narrow screens) */
+.bk-columns{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:32px;align-items:start;
+	max-width:1160px;margin:0 auto;padding:0 20px;}
+.bk-columns>.bk-list{max-width:none;margin:0;padding:0;}
+.bk-columns>.bk-section{max-width:none;margin:0;padding:0;border-top:none;}
+@media(max-width:920px){
+	.bk-columns{display:block;max-width:720px;}
+	.bk-columns>.bk-section{margin-top:40px;padding-top:24px;border-top:1px solid var(--border);}
+}
 .bk-empty{text-align:center;color:var(--text-dim);padding:30px 0;font-style:italic;}
 .bk-tier{margin-bottom:30px;}
 .bk-tier-head{margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:8px;}
