@@ -374,7 +374,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const [viewOpp, setViewOpp] = useState(false);
   const [confirmAbandon, setConfirmAbandon] = useState(false);
   const [myBoard, setMyBoard] = useState("1");          // board the local player picked
-  const [oppBoard, setOppBoard] = useState("2");        // board chosen for the bot (vs-AI)
+  const [oppBoard, setOppBoard] = useState("1");        // board chosen for the bot (vs-AI)
 
   const playerName = authUser?.name || "Player";
   const pendingAction = useRef(null);
