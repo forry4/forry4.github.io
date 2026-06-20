@@ -1660,8 +1660,11 @@ export default function SpenderApp() {
 					{(() => {
 						const savedId = (() => { try { return localStorage.getItem("spender_roomId"); } catch { return null; } })();
 						const savedToken = savedId ? (() => { try { return localStorage.getItem(`spender_token_${savedId}_${myId}`); } catch { return null; } })() : null;
-						const alreadyInMyGames = myGames.some(g => g.id === savedId);
-						if (!savedId || !savedToken || alreadyInMyGames) return null;
+						const inLists = myGames.some(g => g.id === savedId) || openGames.some(g => g.id === savedId);
+						// While games load the lists are stale, so suppress Resume until the
+						// fetch settles — otherwise it flashes on Back-to-Menu right after
+						// creating a game, then vanishes once the game appears in Open Games.
+						if (!savedId || !savedToken || inLists || browserLoading) return null;
 						return (
 							<div className="browser-section">
 								<div className="section-hd">
