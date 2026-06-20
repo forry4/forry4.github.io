@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import CastlesOfCrimson from "../castles_of_crimson/CastlesOfCrimson.jsx";
+import WhereWolf from "../wherewolf/WhereWolf.jsx";
 import Books from "../../books/Books.jsx";
 import { baseCss } from "../../shared/theme.js";
 
@@ -15,6 +16,7 @@ const SITE_NAME = "Forrest Games";
 const GAMES = [
 	{ id: "spender", name: "Spender", tagline: "A gem merchant's game of prestige", status: "ready", screen: "browser" },
 	{ id: "coc", name: "Castles of Crimson", tagline: "A realm of conquest and intrigue", status: "ready", screen: "coc" },
+	{ id: "wherewolf", name: "Where Wolf?", tagline: "A village of secrets and lies", status: "ready", screen: "werewolf" },
 ];
 
 // ─── Constants ─────────────────────────────────────────────────────────────
@@ -1604,6 +1606,11 @@ export default function SpenderApp() {
 	// Castles of Crimson — self-contained game component, mounted by the shell.
 	if (screen === "coc") {
 		return <CastlesOfCrimson myId={myId} authUser={authUser} onExit={() => setScreen("home")} />;
+	}
+
+	// Where Wolf? — self-contained social-deduction game component.
+	if (screen === "werewolf") {
+		return <WhereWolf myId={myId} authUser={authUser} onExit={() => setScreen("home")} />;
 	}
 
 	// Game browser screen

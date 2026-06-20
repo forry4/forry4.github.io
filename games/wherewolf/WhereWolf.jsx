@@ -1,0 +1,627 @@
+import { useState, useEffect, useRef, useCallback } from "react";
+import { baseCss } from "../../shared/theme.js";
+
+// ─── Config ────────────────────────────────────────────────────────────────
+const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
+const WW_WS = WS_RAW.replace(/\/ws$/, "/werewolf/ws");
+const WW_HTTP = WS_RAW.replace(/^ws/, "http").replace(/\/ws$/, "/werewolf");
+
+// Display metadata per role. `letter` mirrors the backend token letters
+// (mason = "MA"); collisions (tanner/troublemaker both "T") are intentional —
+// the physical tokens collide too.
+const ROLE_META = {
+  werewolf: { name: "Werewolf", color: "#b3322f" },
+  villager: { name: "Villager", color: "#5b8c5a" },
+  seer: { name: "Seer", color: "#6a4ea3" },
+  robber: { name: "Robber", color: "#b8863b" },
+  troublemaker: { name: "Troublemaker", color: "#c25b8a" },
+  tanner: { name: "Tanner", color: "#8a6d3b" },
+  drunk: { name: "Drunk", color: "#7a8aa0" },
+  hunter: { name: "Hunter", color: "#7d5a3c" },
+  mason: { name: "Mason", color: "#3f8f8f" },
+  insomniac: { name: "Insomniac", color: "#a05a7a" },
+  minion: { name: "Minion", color: "#9a3a3a" },
+  doppelganger: { name: "Doppelganger", color: "#6a6aa0" },
+};
+const roleName = (r) => (r && ROLE_META[r]?.name) || (r ? r : "Unknown");
+const roleColor = (r) => (r && ROLE_META[r]?.color) || "#3a342a";
+
+function uid() { return Math.random().toString(36).slice(2, 10); }
+function roomCode() {
+  return Array.from({ length: 4 }, () => "ABCDEFGHJKLMNPQRSTUVWXYZ"[Math.floor(Math.random() * 24)]).join("");
+}
+function fmtTime(s) {
+  if (s == null) return "";
+  s = Math.max(0, Math.floor(s));
+  return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+}
+
+// Seat position on a unit circle (percent of the square table). `rel` is the
+// seat index relative to the local player, who sits at rel 0 = 6 o'clock (bottom).
+function seatXY(rel, total) {
+  const ang = Math.PI / 2 + (rel / total) * 2 * Math.PI;   // +PI/2 = bottom
+  return { x: 50 + 39 * Math.cos(ang), y: 50 + 39 * Math.sin(ang) };
+}
+
+// ─── Minimal WebSocket hook (same shape as the other games) ──────────────────
+function useSocket(onMessage) {
+  const wsRef = useRef(null);
+  const [connected, setConnected] = useState(false);
+  const onMsg = useRef(onMessage);
+  onMsg.current = onMessage;
+  const connect = useCallback((url, firstMsg) => {
+    try { wsRef.current?.close(); } catch {}
+    const ws = new WebSocket(url);
+    wsRef.current = ws;
+    ws.onopen = () => { setConnected(true); if (firstMsg) ws.send(JSON.stringify(firstMsg)); };
+    ws.onclose = () => setConnected(false);
+    ws.onmessage = (e) => { try { onMsg.current(JSON.parse(e.data)); } catch {} };
+  }, []);
+  const send = useCallback((obj) => { try { wsRef.current?.send(JSON.stringify(obj)); } catch {} }, []);
+  const disconnect = useCallback(() => { try { wsRef.current?.close(); } catch {} wsRef.current = null; setConnected(false); }, []);
+  return { connected, connect, send, disconnect };
+}
+
+// ─── Countdown hook (ticks while a deadline is set; server is the clock) ──────
+function useNow(active) {
+  const [now, setNow] = useState(() => Date.now() / 1000);
+  useEffect(() => {
+    if (!active) return;
+    const t = setInterval(() => setNow(Date.now() / 1000), 250);
+    return () => clearInterval(t);
+  }, [active]);
+  return now;
+}
+
+// ─── Styles (baseCss first; NEVER put a backtick inside this template) ───────
+const css = baseCss + `
+.ww{min-height:100vh;background:radial-gradient(120% 90% at 50% -10%,#241a2e 0%,#0d0b12 60%);color:var(--text)}
+.ww *,.ww *::before,.ww *::after{box-sizing:border-box}
+.ww-wrap{max-width:1000px;margin:0 auto;padding:14px 14px 40px;display:flex;flex-direction:column;gap:14px}
+.ww-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.ww-top-left{display:flex;align-items:center;gap:10px;min-width:0}
+.ww-title{font-family:Cinzel,serif;font-weight:700;color:var(--gold-light);letter-spacing:.5px}
+.ww-user{color:var(--text-dim);font-size:13px}
+.ww-btn{font-family:Cinzel,serif;font-size:14px;border:1px solid var(--border);background:var(--surface2);color:var(--text);
+  padding:9px 16px;border-radius:var(--radius);cursor:pointer;transition:all .15s}
+.ww-btn:hover{border-color:var(--gold);color:var(--gold-light)}
+.ww-btn.gold{background:linear-gradient(180deg,#7a3f4a,#5a2630);border-color:#9a4a58;color:#f2dcc4}
+.ww-btn.gold:hover{filter:brightness(1.12)}
+.ww-btn.sm{padding:6px 11px;font-size:12px}
+.ww-btn.ghost{background:transparent;border-color:transparent;color:var(--text-dim)}
+.ww-btn.ghost:hover{color:var(--gold-light)}
+.ww-btn:disabled{opacity:.4;cursor:not-allowed}
+.ww-input{font-family:Cinzel,serif;letter-spacing:3px;text-transform:uppercase;background:var(--surface);border:1px solid var(--border);
+  color:var(--text);padding:9px 12px;border-radius:var(--radius);width:120px;text-align:center}
+.ww-hero{text-align:center;padding:8px 0 4px}
+.ww-hero h1{font-family:Cinzel,serif;font-size:30px;color:var(--gold-light)}
+.ww-hero p{color:var(--text-dim)}
+.ww-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:center}
+.ww-section{font-family:Cinzel,serif;color:var(--gold);font-size:14px;margin-top:10px;border-bottom:1px solid var(--border);padding-bottom:4px}
+.ww-card{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);padding:10px 14px}
+.ww-card-title{font-family:Cinzel,serif}
+.ww-card-meta{color:var(--text-dim);font-size:12px}
+.ww-empty{color:var(--text-muted);text-align:center;padding:20px}
+.ww-toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#2a1c20;border:1px solid var(--gold);
+  color:var(--gold-light);padding:10px 18px;border-radius:var(--radius);z-index:50;font-size:14px}
+
+/* waiting room */
+.ww-code{font-family:Cinzel,serif;font-size:40px;letter-spacing:8px;color:var(--gold-light);text-align:center}
+.ww-players-list{display:flex;flex-direction:column;gap:6px}
+.ww-pl{display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:8px 12px}
+.ww-pl .crown{color:var(--gold)}
+
+/* the table */
+.ww-table-wrap{display:flex;flex-direction:column;align-items:center;gap:8px}
+.ww-banner{min-height:30px;text-align:center;font-family:Cinzel,serif;color:var(--gold-light);font-size:16px}
+.ww-sub{text-align:center;color:var(--text-dim);font-size:13px;min-height:18px}
+.ww-table{position:relative;width:min(92vw,68vh);aspect-ratio:1;margin:4px auto}
+.ww-table.night{filter:saturate(.5) brightness(.62)}
+.ww-arrows{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3}
+.ww-seat{position:absolute;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:3px;z-index:2}
+.ww-seat .seat-name{font-size:11px;color:var(--text-dim);max-width:74px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ww-seat.me .seat-name{color:var(--gold-light)}
+.ww-pcard{width:62px;height:84px;border-radius:8px;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;
+  text-align:center;font-family:Cinzel,serif;font-size:12px;line-height:1.15;padding:4px;background:#1a1622;position:relative;transition:all .15s}
+.ww-pcard.back{background:repeating-linear-gradient(45deg,#241a2e,#241a2e 6px,#2c2038 6px,#2c2038 12px);color:transparent}
+.ww-pcard.back::after{content:"?";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#54486a;font-size:24px}
+.ww-pcard.clickable{cursor:pointer;border-color:var(--gold)}
+.ww-pcard.clickable:hover{box-shadow:0 0 0 2px var(--gold-light);transform:translateY(-2px)}
+.ww-pcard.selected{box-shadow:0 0 0 3px var(--gold-light)}
+.ww-pcard.revealed{box-shadow:0 0 0 3px #e0c14c}
+.ww-badge{position:absolute;top:-9px;right:-9px;background:var(--gold);color:#1a1410;border-radius:999px;min-width:20px;height:20px;
+  display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;padding:0 5px}
+.ww-lock{position:absolute;top:-9px;left:-9px;font-size:14px}
+.ww-ready{position:absolute;bottom:-8px;font-size:13px}
+
+/* center: the 3 face-down cards + the token row */
+.ww-center{position:absolute;top:42%;left:50%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:8px;z-index:2}
+.ww-center-cards{display:flex;gap:8px}
+.ww-ccard{width:52px;height:72px;border-radius:7px;border:2px solid var(--border);background:repeating-linear-gradient(45deg,#241a2e,#241a2e 6px,#2c2038 6px,#2c2038 12px);
+  display:flex;align-items:center;justify-content:center;font-family:Cinzel,serif;font-size:11px;color:transparent;position:relative}
+.ww-ccard::after{content:"";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#54486a;font-size:18px}
+.ww-ccard.up{background:#1a1622;color:var(--text)}
+.ww-ccard.clickable{cursor:pointer;border-color:var(--gold)}
+.ww-ccard.clickable:hover{box-shadow:0 0 0 2px var(--gold-light)}
+.ww-ccard.selected{box-shadow:0 0 0 3px var(--gold-light)}
+.ww-tokens{display:flex;gap:5px;flex-wrap:wrap;justify-content:center;max-width:230px}
+.ww-token{width:26px;height:26px;border-radius:999px;border:1px solid #6a5a3a;background:#2a2418;color:var(--gold-light);
+  display:flex;align-items:center;justify-content:center;font-family:Cinzel,serif;font-size:11px;font-weight:700}
+
+/* action bar */
+.ww-actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:center;min-height:44px}
+.ww-you{font-size:13px;color:var(--text-dim)}
+.ww-you b{color:var(--gold-light)}
+.ww-timer{font-family:Cinzel,serif;font-size:18px;color:var(--gold-light)}
+
+/* win screen */
+.ww-win{text-align:center;padding:14px}
+.ww-win h2{font-family:Cinzel,serif;font-size:34px;margin-bottom:6px}
+.ww-win.villagers h2{color:#7ed07a}
+.ww-win.wolves h2{color:#e0655a}
+`;
+
+// ─── Component ───────────────────────────────────────────────────────────────
+export default function WhereWolf({ myId, authUser, onExit }) {
+  const [screen, setScreen] = useState("lobby");      // lobby | waiting | game
+  const [roomId, setRoomId] = useState("");
+  const [roomData, setRoomData] = useState(null);
+  const [openGames, setOpenGames] = useState([]);
+  const [myGames, setMyGames] = useState([]);
+  const [joinCode, setJoinCode] = useState("");
+  const [toast, setToast] = useState("");
+
+  // narration
+  const [caption, setCaption] = useState("");
+  const [narrateOn, setNarrateOn] = useState(() => {
+    try { const v = localStorage.getItem("werewolf_narrate"); return v == null ? null : v === "1"; } catch { return null; }
+  });
+
+  // night/day interaction selection
+  const [centerSel, setCenterSel] = useState([]);     // seer: selected center indices
+  const [tmSel, setTmSel] = useState([]);             // troublemaker: selected pids
+
+  const playerName = authUser?.name || "Guest";
+
+  // ── derived game state ──
+  const game = roomData?.game;
+  const phase = game?.phase;
+  const order = game?.order || [];
+  const myIdx = order.indexOf(myId);
+  const myDealt = game?.your_dealt_role || null;
+  const step = game?.night_step;
+  const acted = game?.acted || {};
+  const isHost = roomData?.host === myId;
+
+  // effective narrate: explicit pref wins, else default ON for the host only
+  const effNarrate = narrateOn == null ? isHost : narrateOn;
+  const narrateRef = useRef(effNarrate);
+  narrateRef.current = effNarrate;
+
+  // ── socket ──
+  const handleMessage = useCallback((msg) => {
+    if (msg.type === "error") { setToast(msg.message || "error"); return; }
+    if (msg.type === "narrate") {
+      setCaption(msg.text || "");
+      if (narrateRef.current && typeof window !== "undefined" && window.speechSynthesis && msg.text) {
+        try {
+          window.speechSynthesis.cancel();
+          window.speechSynthesis.speak(new SpeechSynthesisUtterance(msg.text));
+        } catch {}
+      }
+      return;
+    }
+    const room = msg.room;
+    if (!room) return;
+    const tok = room.reconnect_tokens?.[myId];
+    const rid = room.room_id || roomId;
+    if (tok) { try { localStorage.setItem(`werewolf_token_${rid}_${myId}`, tok); localStorage.setItem("werewolf_roomId", rid); } catch {} }
+    setRoomData(room);
+    const inGame = room.status === "playing" || room.status === "over";
+    if (msg.type === "created" || msg.type === "joined" || msg.type === "reconnected") {
+      setScreen(inGame ? "game" : "waiting");
+    } else if (msg.type === "room_update") {
+      setScreen(inGame ? "game" : "waiting");
+    }
+  }, [myId, roomId]);
+
+  const { connected, connect, send, disconnect } = useSocket(handleMessage);
+
+  const fetchGames = useCallback(() => {
+    fetch(`${WW_HTTP}/games`).then((r) => r.json()).then((d) => setOpenGames(d.games || [])).catch(() => {});
+    if (authUser && !authUser.guest && authUser.session_token) {
+      fetch(`${WW_HTTP}/games/mine`, { headers: { Authorization: `Bearer ${authUser.session_token}` } })
+        .then((r) => r.json()).then((d) => setMyGames(d.games || [])).catch(() => {});
+    }
+  }, [authUser]);
+
+  useEffect(() => { if (screen === "lobby") fetchGames(); }, [screen, fetchGames]);
+
+  // auto-resume a saved room on mount
+  useEffect(() => {
+    try {
+      const rid = localStorage.getItem("werewolf_roomId");
+      const tok = rid ? localStorage.getItem(`werewolf_token_${rid}_${myId}`) : null;
+      if (rid && tok) {
+        setRoomId(rid);
+        connect(`${WW_WS}/${rid}/${myId}`, { action: "reconnect", token: tok });
+      }
+    } catch {}
+    return () => disconnect();
+  }, []); // eslint-disable-line
+
+  useEffect(() => { if (toast) { const t = setTimeout(() => setToast(""), 2400); return () => clearTimeout(t); } }, [toast]);
+  // clear transient selection when the step changes
+  useEffect(() => { setCenterSel([]); setTmSel([]); }, [step, phase]);
+
+  // Wall-clock tick for the night/day countdowns (hook must run unconditionally,
+  // BEFORE the lobby/waiting early returns — server deadlines are authoritative).
+  const now = useNow(phase === "night" || phase === "day");
+
+  // ── lobby actions ──
+  const startCreate = () => {
+    const rid = roomCode();
+    setRoomId(rid);
+    try { localStorage.setItem("werewolf_roomId", rid); } catch {}
+    connect(`${WW_WS}/${rid}/${myId}`, { action: "create", name: playerName });
+  };
+  const startJoin = (rid) => {
+    rid = (rid || "").toUpperCase().trim();
+    if (!rid) return;
+    setRoomId(rid);
+    try { localStorage.setItem("werewolf_roomId", rid); } catch {}
+    connect(`${WW_WS}/${rid}/${myId}`, { action: "join", name: playerName });
+  };
+  const resume = (rid) => {
+    const tok = localStorage.getItem(`werewolf_token_${rid}_${myId}`);
+    setRoomId(rid);
+    try { localStorage.setItem("werewolf_roomId", rid); } catch {}
+    connect(`${WW_WS}/${rid}/${myId}`, tok ? { action: "reconnect", token: tok } : { action: "join", name: playerName });
+  };
+  const leaveToLobby = () => {
+    try { send({ action: "abandon" }); } catch {}
+    disconnect();
+    try { localStorage.removeItem("werewolf_roomId"); } catch {}
+    setRoomData(null); setRoomId(""); setCaption(""); setScreen("lobby"); fetchGames();
+  };
+  const handleCancel = (id) => {
+    const params = new URLSearchParams();
+    params.set("player_id", myId);
+    const headers = authUser?.session_token ? { Authorization: `Bearer ${authUser.session_token}` } : {};
+    fetch(`${WW_HTTP}/games/${id}/cancel?${params.toString()}`, { method: "POST", headers })
+      .then((r) => r.json()).then((d) => {
+        if (!d.ok) { setToast(d.message || "Could not cancel"); return; }
+        try {
+          if (localStorage.getItem("werewolf_roomId") === id) localStorage.removeItem("werewolf_roomId");
+          localStorage.removeItem(`werewolf_token_${id}_${myId}`);
+        } catch {}
+        setToast("Game canceled"); fetchGames();
+      }).catch(() => setToast("Could not cancel"));
+  };
+  const startGame = () => send({ action: "start" });
+  const mv = (move) => send({ action: "move", move });
+  const toggleNarrate = () => {
+    const next = !effNarrate;
+    setNarrateOn(next);
+    try { localStorage.setItem("werewolf_narrate", next ? "1" : "0"); } catch {}
+    if (!next && window.speechSynthesis) { try { window.speechSynthesis.cancel(); } catch {} }
+  };
+
+  // ── click handlers on the table ──
+  const myActiveStep = phase === "night" && step === myDealt && !acted[step];
+  const clickPlayer = (pid) => {
+    if (phase === "day") {
+      if (game.locked?.[myId]) { setToast("Unlock to change your vote"); return; }
+      mv({ type: "vote", target: pid });
+      return;
+    }
+    if (phase !== "night") return;
+    if (step === "seer" && myDealt === "seer" && !acted.seer) {
+      if (pid === myId) return;
+      mv({ type: "seer_peek_player", target: pid });
+    } else if (step === "robber" && myDealt === "robber" && !acted.robber) {
+      if (pid === myId) return;
+      mv({ type: "robber_swap", target: pid });
+    } else if (step === "troublemaker" && myDealt === "troublemaker" && !acted.troublemaker) {
+      setTmSel((sel) => {
+        const next = sel.includes(pid) ? sel.filter((x) => x !== pid) : [...sel, pid];
+        if (next.length === 2) { mv({ type: "troublemaker_swap", a: next[0], b: next[1] }); return []; }
+        return next;
+      });
+    }
+  };
+  const clickCenter = (idx) => {
+    if (phase !== "night" || step !== "seer" || myDealt !== "seer" || acted.seer) return;
+    setCenterSel((sel) => {
+      const next = sel.includes(idx) ? sel.filter((x) => x !== idx) : [...sel, idx];
+      if (next.length === 2) { mv({ type: "seer_peek_center", indices: next }); return []; }
+      return next;
+    });
+  };
+
+  // ─── Lobby ─────────────────────────────────────────────────────────────────
+  if (screen === "lobby") {
+    const savedId = (() => { try { return localStorage.getItem("werewolf_roomId"); } catch { return null; } })();
+    const savedTok = savedId ? (() => { try { return localStorage.getItem(`werewolf_token_${savedId}_${myId}`); } catch { return null; } })() : null;
+    return (
+      <div className="ww"><style>{css}</style>
+        <div className="ww-wrap">
+          <div className="ww-top">
+            <div className="ww-top-left">
+              <button className="ww-btn ghost sm" onClick={onExit}>← Forrest Games</button>
+              <span className="ww-title">Where Wolf?</span>
+            </div>
+            <span className="ww-user">{playerName}</span>
+          </div>
+          <div className="ww-hero">
+            <h1>Where Wolf?</h1>
+            <p>A night of deception. One of you is not who they seem.</p>
+            <p className="ww-card-meta">3–10 players · one device each</p>
+          </div>
+
+          <div className="ww-row">
+            <button className="ww-btn gold" onClick={startCreate}>+ New Game</button>
+            <input className="ww-input" placeholder="CODE" value={joinCode} maxLength={4}
+              onChange={(e) => setJoinCode(e.target.value)} onKeyDown={(e) => e.key === "Enter" && startJoin(joinCode)} />
+            <button className="ww-btn" onClick={() => startJoin(joinCode)}>Join</button>
+            <button className="ww-btn ghost sm" onClick={fetchGames}>↻</button>
+          </div>
+
+          {savedId && savedTok && (
+            <>
+              <div className="ww-section">Resume</div>
+              <div className="ww-card">
+                <div><div className="ww-card-title">Game in progress</div><div className="ww-card-meta">{savedId}</div></div>
+                <button className="ww-btn gold sm" onClick={() => resume(savedId)}>Resume</button>
+              </div>
+            </>
+          )}
+
+          {openGames.length > 0 && (
+            <>
+              <div className="ww-section">Open Games</div>
+              {openGames.map((g) => (
+                <div className="ww-card" key={g.id}>
+                  <div><div className="ww-card-title">{g.host_name || "Game"}</div>
+                    <div className="ww-card-meta">{g.id} · {g.players} player{g.players === 1 ? "" : "s"}</div></div>
+                  {g.host_id === myId
+                    ? <button className="ww-btn ghost sm" onClick={() => handleCancel(g.id)}>Cancel</button>
+                    : <button className="ww-btn sm" onClick={() => startJoin(g.id)}>Join</button>}
+                </div>
+              ))}
+            </>
+          )}
+          {toast && <div className="ww-toast">{toast}</div>}
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Waiting room ────────────────────────────────────────────────────────────
+  if (screen === "waiting") {
+    const players = roomData?.players || {};
+    const ids = Object.keys(players);
+    const enough = ids.length >= (roomData?.min_players || 3);
+    return (
+      <div className="ww"><style>{css}</style>
+        <div className="ww-wrap">
+          <div className="ww-top">
+            <div className="ww-top-left"><button className="ww-btn ghost sm" onClick={leaveToLobby}>← Leave</button>
+              <span className="ww-title">Where Wolf?</span></div>
+            <span className="ww-user">{playerName}</span>
+          </div>
+          <div className="ww-hero"><p className="ww-card-meta">Share this code</p><div className="ww-code">{roomId}</div></div>
+          <div className="ww-section">Players ({ids.length}/{roomData?.max_players || 10})</div>
+          <div className="ww-players-list">
+            {ids.map((pid) => (
+              <div className="ww-pl" key={pid}>
+                {roomData?.host === pid && <span className="crown">♛</span>}
+                <span>{players[pid]}{pid === myId ? " (you)" : ""}</span>
+              </div>
+            ))}
+          </div>
+          <div className="ww-row" style={{ marginTop: 12 }}>
+            {isHost
+              ? <button className="ww-btn gold" disabled={!enough} onClick={startGame}>
+                  {enough ? "Deal & Start" : `Need ${roomData?.min_players || 3}+ players`}</button>
+              : <span className="ww-card-meta">Waiting for the host to start…</span>}
+          </div>
+          {toast && <div className="ww-toast">{toast}</div>}
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Game ────────────────────────────────────────────────────────────────────
+  const players = game?.players || {};
+  const dayActive = phase === "day";
+  const voteLeft = dayActive && game?.vote_deadline ? game.vote_deadline - now : null;
+  const stepLeft = phase === "night" && game?.step_deadline ? game.step_deadline - now : null;
+
+  // banner + sub-prompt
+  let banner = caption;
+  let subPrompt = "";
+  if (phase === "dealing") {
+    banner = "This is your card. Memorize it.";
+    subPrompt = players[myId]?.ready ? "Waiting for everyone to be ready…" : "Tap Ready when you have it.";
+  } else if (phase === "night") {
+    if (!caption) banner = "Night falls…";
+    if (myActiveStep) {
+      if (step === "seer") subPrompt = centerSel.length === 1 ? "Pick one more center card…" : "Tap a player's card, or two center cards.";
+      else if (step === "robber") subPrompt = "Tap a player to rob and see your new card.";
+      else if (step === "troublemaker") subPrompt = tmSel.length === 1 ? "Tap one more player…" : "Tap two players to swap their cards.";
+    } else if (step === "werewolves" && myDealt === "werewolf") {
+      subPrompt = "You are a Werewolf. Note the others.";
+    } else {
+      subPrompt = "Keep your eyes closed.";
+    }
+  } else if (phase === "day") {
+    banner = "Daybreak — who is the werewolf?";
+    subPrompt = game?.locked?.[myId] ? "Vote locked. Tap Unlock to change." : "Tap a player to vote. Tap Lock when sure.";
+  }
+
+  const seatNode = (pid, i) => {
+    const rel = ((i - myIdx) + order.length) % order.length;
+    const pos = seatXY(rel, order.length);
+    const pdata = players[pid] || {};
+    const faceUp = pdata.card != null;
+    const isMe = pid === myId;
+    const voteCount = phase === "over" ? (game.vote_tally?.[pid] || 0) : null;
+    const dayVotes = dayActive ? Object.values(game.votes || {}).filter((t) => t === pid).length : 0;
+    const clickable =
+      (phase === "day" && !game.locked?.[myId]) ||
+      (phase === "night" && myActiveStep && step === "seer" && !isMe) ||
+      (phase === "night" && myActiveStep && step === "robber" && !isMe) ||
+      (phase === "night" && myActiveStep && step === "troublemaker");
+    const selected = tmSel.includes(pid);
+    const revealed = phase === "over" && game.revealed_pid === pid;
+    return (
+      <div className={`ww-seat${isMe ? " me" : ""}`} key={pid} style={{ left: pos.x + "%", top: pos.y + "%" }}>
+        <div
+          data-pid={pid}
+          className={`ww-pcard${faceUp ? "" : " back"}${clickable ? " clickable" : ""}${selected ? " selected" : ""}${revealed ? " revealed" : ""}`}
+          style={faceUp ? { borderColor: roleColor(pdata.card), background: "#1a1622" } : undefined}
+          onClick={clickable ? () => clickPlayer(pid) : undefined}
+        >
+          {faceUp ? roleName(pdata.card) : ""}
+          {phase === "dealing" && pdata.ready && <span className="ww-ready">✓</span>}
+          {dayActive && game.locked?.[pid] && <span className="ww-lock">🔒</span>}
+          {dayActive && dayVotes > 0 && <span className="ww-badge">{dayVotes}</span>}
+          {phase === "over" && voteCount > 0 && <span className="ww-badge">{voteCount}</span>}
+        </div>
+        <span className="seat-name">{roomData?.players?.[pid] || pdata.name}{isMe ? " (you)" : ""}{roomData?.host === pid ? " ♛" : ""}</span>
+      </div>
+    );
+  };
+
+  // vote arrows (square table → simple unit viewBox, no DOM measuring needed)
+  const arrows = dayActive ? Object.entries(game.votes || {}).map(([voter, target]) => {
+    const vi = order.indexOf(voter), ti = order.indexOf(target);
+    if (vi < 0 || ti < 0 || voter === target) return null;
+    const a = seatXY(((vi - myIdx) + order.length) % order.length, order.length);
+    const b = seatXY(((ti - myIdx) + order.length) % order.length, order.length);
+    return { id: voter, x1: a.x, y1: a.y, x2: b.x, y2: b.y, me: voter === myId };
+  }).filter(Boolean) : [];
+
+  return (
+    <div className="ww"><style>{css}</style>
+      <div className="ww-wrap">
+        <div className="ww-top">
+          <div className="ww-top-left"><button className="ww-btn ghost sm" onClick={leaveToLobby}>← Leave</button>
+            <span className="ww-title">Where Wolf?</span></div>
+          <div className="ww-row" style={{ gap: 8 }}>
+            <button className="ww-btn ghost sm" title="Narration voice" onClick={toggleNarrate}>{effNarrate ? "🔊" : "🔇"}</button>
+            {myDealt && phase !== "over" && <span className="ww-you">You: <b>{roleName(myDealt)}</b></span>}
+          </div>
+        </div>
+
+        {phase === "over" ? (
+          <WinScreen game={game} order={order} myIdx={myIdx} players={players} roomData={roomData} onExit={leaveToLobby} />
+        ) : (
+          <div className="ww-table-wrap">
+            <div className="ww-banner">{banner}</div>
+            <div className="ww-sub">{subPrompt}</div>
+
+            <div className={`ww-table${phase === "night" ? " night" : ""}`}>
+              <svg className="ww-arrows" viewBox="0 0 100 100" preserveAspectRatio="none">
+                <defs>
+                  <marker id="ww-ah" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto">
+                    <path d="M0,0 L5,2.5 L0,5 Z" fill="#e0c14c" />
+                  </marker>
+                  <marker id="ww-ah-me" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto">
+                    <path d="M0,0 L5,2.5 L0,5 Z" fill="#e0655a" />
+                  </marker>
+                </defs>
+                {arrows.map((ar) => (
+                  <line key={ar.id} x1={ar.x1} y1={ar.y1} x2={ar.x2} y2={ar.y2}
+                    stroke={ar.me ? "#e0655a" : "#e0c14c"} strokeWidth="0.7" strokeOpacity="0.85"
+                    markerEnd={ar.me ? "url(#ww-ah-me)" : "url(#ww-ah)"} />
+                ))}
+              </svg>
+
+              {/* center: 3 cards + token row */}
+              <div className="ww-center">
+                <div className="ww-center-cards">
+                  {(game?.center || []).map((c, i) => {
+                    const up = c != null;
+                    const sel = centerSel.includes(i);
+                    const clickable = phase === "night" && myActiveStep && step === "seer";
+                    return (
+                      <div key={i} data-center-idx={i}
+                        className={`ww-ccard${up ? " up" : ""}${clickable ? " clickable" : ""}${sel ? " selected" : ""}`}
+                        onClick={clickable ? () => clickCenter(i) : undefined}>
+                        {up ? roleName(c) : ""}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="ww-tokens">
+                  {(game?.roles_in_play || []).map((t, i) => <span className="ww-token" key={i}>{t}</span>)}
+                </div>
+              </div>
+
+              {order.map((pid, i) => seatNode(pid, i))}
+            </div>
+
+            <div className="ww-actions">
+              {phase === "dealing" && !players[myId]?.ready &&
+                <button className="ww-btn gold" onClick={() => mv({ type: "ready" })}>Ready</button>}
+              {phase === "dealing" && players[myId]?.ready &&
+                <span className="ww-card-meta">Ready ✓ — waiting for {order.filter((p) => !players[p]?.ready).length} more…</span>}
+
+              {myActiveStep && <button className="ww-btn sm" onClick={() => mv({ type: "skip" })}>Skip</button>}
+              {phase === "night" && stepLeft != null && myActiveStep &&
+                <span className="ww-timer">{Math.ceil(stepLeft)}s</span>}
+
+              {dayActive && (
+                <>
+                  <span className="ww-timer">{fmtTime(voteLeft)}</span>
+                  {game.votes?.[myId] && (game.locked?.[myId]
+                    ? <button className="ww-btn" onClick={() => mv({ type: "unlock_vote" })}>Unlock</button>
+                    : <button className="ww-btn gold" onClick={() => mv({ type: "lock_vote" })}>Lock vote</button>)}
+                </>
+              )}
+            </div>
+          </div>
+        )}
+        {toast && <div className="ww-toast">{toast}</div>}
+      </div>
+    </div>
+  );
+}
+
+function WinScreen({ game, order, myIdx, players, roomData, onExit }) {
+  const win = game.winner;
+  const revealed = game.revealed_pid;
+  return (
+    <div className="ww-table-wrap">
+      <div className={`ww-win ${win === "villagers" ? "villagers" : "wolves"}`}>
+        <h2>{win === "villagers" ? "VILLAGERS WIN" : "WHERE WOLVES WIN"}</h2>
+        <p className="ww-card-meta">
+          {revealed ? `${roomData?.players?.[revealed] || "A player"} was voted out — ${roleName(game.players?.[revealed]?.card)}.`
+                    : "The vote was tied — no one was revealed."}
+        </p>
+      </div>
+      <div className="ww-table">
+        {order.map((pid, i) => {
+          const rel = ((i - myIdx) + order.length) % order.length;
+          const pos = seatXY(rel, order.length);
+          const pdata = players[pid] || {};
+          const isRevealed = revealed === pid;
+          const votes = game.vote_tally?.[pid] || 0;
+          return (
+            <div className={`ww-seat${pid === (order[myIdx]) ? " me" : ""}`} key={pid} style={{ left: pos.x + "%", top: pos.y + "%" }}>
+              <div className={`ww-pcard${isRevealed ? " revealed" : ""}`} style={{ borderColor: roleColor(pdata.card), background: "#1a1622" }}>
+                {roleName(pdata.card)}
+                {votes > 0 && <span className="ww-badge">{votes}</span>}
+              </div>
+              <span className="seat-name">{roomData?.players?.[pid] || pdata.name}</span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="ww-row"><button className="ww-btn gold" onClick={onExit}>Back to lobby</button></div>
+    </div>
+  );
+}
