@@ -36,6 +36,8 @@ from .mcts import Search
 # ─── tunables (the autotuner sweeps these on the panel-average objective) ─────────────────────
 SIMS = 200            # MCTS simulations per PLAY decision (serving uses a wall-clock budget instead)
 C_PUCT = 1.5          # PUCT exploration constant; maximin-tuned (was 2.0)
+BACKUP_LAMBDA = 0.0   # mixmax selection-Q blend (0 = pure averaging, byte-identical). TESTED & REJECTED
+                      # (see mcts.Search.backup_lambda): monotonic degradation vs frozen-S; parked off.
 POLICY_TEMP = 0.7     # softmax temperature on the H3 action-score prior (lower = sharper toward H3)
 RESERVE_PRIOR_W = 0.5 # reserve actions get this fraction of the card's take_value as their prior score
 TAKE_PRIOR_W = 1.0    # scale on the (normalized) need-vector alignment score for take actions
@@ -148,7 +150,8 @@ def _expand(search) -> None:
 
 def _run_search(s, seat: int, sims: int):
     """Fixed-iteration search (offline A/B + tuning). Returns root visit counts."""
-    search = Search(s, _RNG, c_puct=C_PUCT, add_noise=False, leaf_state=True)
+    search = Search(s, _RNG, c_puct=C_PUCT, add_noise=False, leaf_state=True,
+                    backup_lambda=BACKUP_LAMBDA)
     for _ in range(sims):
         _expand(search)
     return search.root.N
@@ -156,7 +159,8 @@ def _run_search(s, seat: int, sims: int):
 
 def _run_search_timed(s, seat: int, time_limit: float):
     """Wall-clock-budgeted search (serving): sims until the deadline, with a min floor + hard cap."""
-    search = Search(s, _RNG, c_puct=C_PUCT, add_noise=False, leaf_state=True)
+    search = Search(s, _RNG, c_puct=C_PUCT, add_noise=False, leaf_state=True,
+                    backup_lambda=BACKUP_LAMBDA)
     deadline = time.time() + time_limit
     done = 0
     while done < SERVE_MAX_SIMS:

@@ -1139,6 +1139,20 @@ website variant **"S"**.
   Reverted. (At 8/9 tokens take-fewer is genuinely distinct anyway; the equivalence "take-3 then discard the
   just-taken gem ≡ take-2D" holds only in the search's model, and serving executes that discard via greedy H3,
   not search — a separate reason not to lean on it.)
+- **Mixmax / pessimistic backup — TESTED & REJECTED (do not relitigate; June 2026).** The user's intuition
+  "assume the opponent plays at least somewhat well" → blend each edge's diluted mean Q with the best reply
+  one ply down (`mcts.Search(backup_lambda=L)`, `vsearch.BACKUP_LAMBDA`, parked default-0 = byte-identical;
+  the best-reply Q is averaged over determinizations so it pessimizes over DECISIONS not deck luck — correct
+  ISMCTS). **Self-gate vs FROZEN today's-S (paired CRN, the sharp instrument) showed a clean MONOTONIC
+  degradation:** lam=0.15/0.3/0.5 → 0.481/0.463/0.383 on the same seed base (lam=0.5 ~4 SE below 0.5). A lone
+  fresh-seed 0.520 for lam=0.15 contradicted its own 0.481 screen (regression-to-mean noise ~0.5); the panel
+  +0.046-min is the documented weak/noisy discriminator (~1.2 SE, different game set) — not ship-grade. The
+  negative slope matches the **maximization bias** (the max is over noisy 1-visit grandchildren → over-estimates
+  the opponent's best reply → over-pessimism that grows with lam). A min-visit guard on the max could debias it
+  but was not pursued (the naive monotonic-negative result + the strong prior make a small-lam rescue unlikely).
+  Confirms again: the static eval is **already used near-optimally by the plain averaging backup** — re-shaping
+  *how* the leaf is aggregated in PUCT washes, same as re-shaping the leaf itself. Tooling: `backup_lambda_ab.py`
+  (focused self-gate: screen → fresh disjoint-seed → panel RPS guard for the one knob).
 - **Path C (distill V+search → numpy net) PROTOTYPED & the bottleneck PINNED to FEATURES, not arch (June
   2026).** Tooling: `vsearch_distill.py` (harvest `(features, V_static, V_search, outcome)` from S-vs-S +
   ridge/MLP distill, with a `--enriched` mode + `--cache`), `attn_distill.py` (card-set attention pre-check on

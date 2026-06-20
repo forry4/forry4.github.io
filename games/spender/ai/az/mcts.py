@@ -66,7 +66,7 @@ class Search:
     def __init__(self, root: E.State, rng: random.Random, *,
                  c_puct: float = 2.0, dirichlet_alpha: float = 0.5,
                  dirichlet_eps: float = 0.25, add_noise: bool = True,
-                 leaf_state: bool = False):
+                 leaf_state: bool = False, backup_lambda: float = 0.0):
         if root.phase == E.OVER:
             raise ValueError("cannot search a terminal state")
         self.root_state = root
@@ -75,6 +75,18 @@ class Search:
         self.dir_alpha = dirichlet_alpha
         self.dir_eps = dirichlet_eps
         self.add_noise = add_noise
+        # backup_lambda: mixmax selection-Q blend (default 0.0 == pure mean == byte-identical).
+        # When >0, an edge's selection Q is (1-lam)*mean + lam*(best reply one ply down), sharpening
+        # the diluted average toward the minimax line ("assume both sides play their best reply").
+        # The best-reply Q is itself averaged over determinizations, so this pessimizes over DECISIONS
+        # only, never over hidden-info samples (the correct ISMCTS semantics).
+        # TESTED & REJECTED for variant S (June 2026 — do not relitigate): self-gate vs frozen-S showed
+        # a clean MONOTONIC degradation with lam (0.481/0.463/0.383 at lam=0.15/0.3/0.5; lam=0.5 ~4 SE
+        # below 0.5); a lone fresh-seed 0.520 for lam=0.15 contradicted its own screen (noise ~0.5).
+        # The negative slope matches the maximization bias (max over noisy 1-visit grandchildren ->
+        # over-pessimism at opponent nodes). Parked default-off; confirms "search-aggregation re-tweaks
+        # wash" — the static eval is already used near-optimally by the averaging backup.
+        self.backup_lambda = backup_lambda
         # leaf_state: hand the leaf STATE to the evaluator instead of F.encode(s) — for a heuristic
         # value leaf (v_state) that reads the State directly (no net-feature packing). The driver
         # must use the incremental leaf_batch()/apply_evals() API, NOT run() (which numpy-batches).
@@ -145,15 +157,39 @@ class Search:
 
     def _select(self, node: Node, acts: list[int]) -> int:
         sqrt_total = math.sqrt(sum(node.N[a] for a in acts) + 1)
+        lam = self.backup_lambda
         best_a, best_u = acts[0], -1e30
         for a in acts:
             n = node.N[a]
             q = node.W[a] / n if n else 0.0
+            if lam > 0.0 and n:
+                q = self._mixmax_q(node, a, q, lam)
             p = node.P[a] if node.P[a] > 0 else _EPS_PRIOR
             u = q + self.c_puct * p * sqrt_total / (1 + n)
             if u > best_u:
                 best_a, best_u = a, u
         return best_a
+
+    def _mixmax_q(self, node: Node, a: int, mean: float, lam: float) -> float:
+        """Blend an edge's mean Q with the best reply one ply down (from `node.to_play`'s view).
+        child.W is stored from child.to_play's perspective; flip when the opponent moves at the child
+        so 'their best reply' becomes 'worst for us'. Returns `mean` when no child/grandchild exists
+        yet (a terminal edge has no child node — its mean is already the exact terminal value)."""
+        child = node.children.get(a)
+        if child is None:
+            return mean
+        cN, cW = child.N, child.W
+        best = None
+        for b in range(E.N_ACTIONS):
+            nb = cN[b]
+            if nb:
+                qb = cW[b] / nb
+                if best is None or qb > best:
+                    best = qb
+        if best is None:
+            return mean
+        reply = best if child.to_play == node.to_play else -best
+        return (1.0 - lam) * mean + lam * reply
 
     def _mix_root_noise(self, s: E.State) -> None:
         acts = E.legal_actions(s)
