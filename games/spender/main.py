@@ -14,6 +14,7 @@ from pydantic import BaseModel
 import logging
 import sqlite3
 import os
+import threading
 import time
 import hashlib
 import hmac
@@ -810,17 +811,69 @@ def _h3_card_values(game: dict, ai_pid: str) -> dict:
     return out
 
 
+# ─── S21: 21-point specialization of variant S ──────────────────────────────────
+# When a game is win_points==21, variant S applies a config tuned for the longer game (weights that
+# the offline 21-point retune found differ from the 15-point S) on top of the per-game win_points the
+# engine/eval already honor (the convex near-win zone, the 21-point turns table). The overrides live
+# in ai/az/vsearch_s21.json as {KEY: VALUE}; an EMPTY/absent file means the retune found no weight
+# change worth making, so 21-point S == 15-point S (still correct, just not re-weighted).
+_S21_LOCK = threading.Lock()   # serializes S searches while S21 overrides exist (they mutate module globals)
+
+
+def _load_s21_config() -> dict:
+    p = os.path.join(os.path.dirname(__file__), "ai", "az", "vsearch_s21.json")
+    try:
+        with open(p) as f:
+            cfg = json.load(f)
+        return cfg if isinstance(cfg, dict) else {}
+    except (FileNotFoundError, ValueError):
+        return {}
+
+
+S21_CONFIG = _load_s21_config()
+
+
+def _s_route_attr(key: str):
+    """Module that defines `key` (vsearch / v_state / heuristic3 / valuation3), or None."""
+    from games.spender.ai.az import heuristic3 as _h3
+    from games.spender.ai.az import v_state as _vs
+    from games.spender.ai.az import valuation3 as _v3
+    from games.spender.ai.az import vsearch as _azvs
+    for mod in (_azvs, _vs, _h3, _v3):
+        if hasattr(mod, key):
+            return mod
+    return None
+
+
 def _s_choose_move(game: dict, ai_pid: str) -> dict:
     """Variant-S move selection: vsearch — v_state.value (a whole-POSITION evaluator built from H3's
     engine/turns-horizon/noble-time-gate components) used as the LEAF of determinized PUCT search,
     with an H3 policy prior. Gives the strong static eval LOOKAHEAD (the documented #1 remaining
-    lever); wall-clock budgeted. Same dict-move contract as H3/Z."""
+    lever); wall-clock budgeted. Same dict-move contract as H3/Z. On a win_points==21 game with a
+    non-empty S21 config, the tuned overrides are applied under a lock (race-safe vs concurrent
+    15-point searches that read the same module globals)."""
     from games.spender.ai.az import actions as _aza
     from games.spender.ai.az import engine as _aze
     from games.spender.ai.az import vsearch as _azvs
 
     s = _aze.from_game_dict(game)
-    a = _azvs.choose_action(s, s.turn, time_limit=_azvs.SERVE_TIME)
+    if not S21_CONFIG:                                    # no overrides exist -> no lock, no swap
+        a = _azvs.choose_action(s, s.turn, time_limit=_azvs.SERVE_TIME)
+        return _aza.action_to_move(s, a)
+    with _S21_LOCK:
+        apply21 = _win_points(game) == 21
+        saved = {}
+        if apply21:
+            for k, v in S21_CONFIG.items():
+                mod = _s_route_attr(k)
+                if mod is not None:
+                    saved[(mod, k)] = getattr(mod, k)
+                    setattr(mod, k, v)
+        try:
+            a = _azvs.choose_action(s, s.turn, time_limit=_azvs.SERVE_TIME)
+        finally:
+            for (mod, k), v in saved.items():
+                setattr(mod, k, v)
     return _aza.action_to_move(s, a)
 
 

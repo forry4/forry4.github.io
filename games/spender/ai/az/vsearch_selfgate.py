@@ -72,6 +72,7 @@ _cache: dict = {}
 _POOL = None
 _WORKERS = 1
 _SIMS = 120
+_WP = 15            # win_points for the games (15 default; 21 for the S21 retune). Set in main + workers.
 FROZEN: dict = {}
 
 
@@ -99,7 +100,7 @@ def _play_selfgate(cand: dict, frozen: dict, cand_seat: int, seed: int, sims: in
     determinization RNG is reset to `seed` so paired games / CRN across configs share the search's
     random draws (differ only by config/first-player). Returns the candidate's score in {0,0.5,1}."""
     vsearch._RNG = random.Random(seed)          # reproducible determinization (CRN pairing)
-    s = E.new_game(random.Random(seed))
+    s = E.new_game(random.Random(seed), win_points=_WP)
     for _ in range(max_plies):
         if s.phase == E.OVER:
             break
@@ -119,7 +120,9 @@ def _trial(cand, frozen, seed, sims):
 
 
 def _chunk(args):
-    cand, frozen, seed_base, lo, hi, sims = args
+    cand, frozen, seed_base, lo, hi, sims, wp = args
+    global _WP
+    _WP = wp
     return sum(_trial(cand, frozen, seed_base + g, sims) for g in range(lo, hi))
 
 
@@ -133,7 +136,7 @@ def score(cand: dict, n: int, seed: int) -> float:
         total = sum(_trial(cand, FROZEN, seed + g, _SIMS) for g in range(n))
     else:
         step = math.ceil(n / _WORKERS)
-        tasks = [(cand, FROZEN, seed, lo, min(lo + step, n), _SIMS) for lo in range(0, n, step)]
+        tasks = [(cand, FROZEN, seed, lo, min(lo + step, n), _SIMS, _WP) for lo in range(0, n, step)]
         total = sum(_POOL.map(_chunk, tasks))
     _cache[key] = r = total / (2 * n)
     return r
@@ -146,20 +149,22 @@ def _panel_anchor(cand: dict, n: int, seed0: int, step: int) -> dict:
     for i, nm in enumerate(PANEL):
         sb = seed0 + i * step
         if _POOL is None:
-            tot = sum(play_one(OPP[nm], j % 2, seed=sb + j, sims=_SIMS) for j in range(n))
+            tot = sum(play_one(OPP[nm], j % 2, seed=sb + j, sims=_SIMS, win_points=_WP) for j in range(n))
         else:
             st = math.ceil(n / _WORKERS)
-            tasks = [(nm, sb, lo, min(lo + st, n), _SIMS, cand) for lo in range(0, n, st)]
+            tasks = [(nm, sb, lo, min(lo + st, n), _SIMS, cand, _WP) for lo in range(0, n, st)]
             tot = sum(_POOL.map(_panel_chunk, tasks))
         out[nm] = tot / n
     return out
 
 
 def _panel_chunk(args):
-    nm, sb, lo, hi, sims, cand = args
+    nm, sb, lo, hi, sims, cand, wp = args
+    global _WP
+    _WP = wp
     set_config(cand)
     opp = OPP[nm]
-    return sum(play_one(opp, i % 2, seed=sb + i, sims=sims) for i in range(lo, hi))
+    return sum(play_one(opp, i % 2, seed=sb + i, sims=sims, win_points=wp) for i in range(lo, hi))
 
 
 def _log(msg, fh):
@@ -187,11 +192,13 @@ def main():
     ap.add_argument("--panel-seed", type=int, default=130_000_000)
     ap.add_argument("--step", type=int, default=100_000)
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 1))
+    ap.add_argument("--win-points", type=int, default=15, help="retune for games to this many points (15/21)")
     args = ap.parse_args()
 
-    global _POOL, _WORKERS, _SIMS, FROZEN
+    global _POOL, _WORKERS, _SIMS, _WP, FROZEN
     _WORKERS = max(1, args.workers)
     _SIMS = args.sims
+    _WP = args.win_points
     FROZEN = read_current()                 # today's committed S (the fixed opponent)
     if _WORKERS > 1:
         _POOL = mp.Pool(processes=_WORKERS)

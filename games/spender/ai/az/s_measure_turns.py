@@ -74,13 +74,13 @@ def _planner_est(s, win):
 
 
 def _play_chunk(args):
-    seed_base, lo, hi, sims = args
+    seed_base, lo, hi, sims, win_points = args
     cells = defaultdict(lambda: [0.0, 0, 0])          # (cards,points,gems) -> [sum_tl, count, won]
     acc_t, acc_p = _acc(), _acc()                     # table / planner accuracy
     for g in range(lo, hi):
         seed = seed_base + g
         vsearch._RNG = random.Random(seed)
-        s = E.new_game(random.Random(seed))
+        s = E.new_game(random.Random(seed), win_points=win_points)
         win = getattr(s, "win_points", E.WIN_POINTS)
         snaps = {0: [], 1: []}                        # per seat: (triple, table_est, planner_est)
         for _ in range(800):
@@ -171,12 +171,16 @@ def main():
     ap.add_argument("--workers", type=int, default=12)
     ap.add_argument("--seed0", type=int, default=160_000_000)
     ap.add_argument("--min-count", type=int, default=20)
+    ap.add_argument("--win-points", type=int, default=15,
+                    help="play games to this many points (21 -> writes turns_table_21.json for S21)")
     args = ap.parse_args()
 
+    out_path = (os.path.join(_DIR, "turns_table_21.json") if args.win_points == 21 else OUT_PATH)
     t0 = time.time()
     workers = max(1, args.workers)
     step = math.ceil(args.games / workers)
-    tasks = [(args.seed0, lo, min(lo + step, args.games), args.sims) for lo in range(0, args.games, step)]
+    tasks = [(args.seed0, lo, min(lo + step, args.games), args.sims, args.win_points)
+             for lo in range(0, args.games, step)]
 
     merged = defaultdict(lambda: [0.0, 0, 0])
     acc_t, acc_p = _acc(), _acc()
@@ -202,13 +206,13 @@ def main():
     max_gems = max(r[2] for r in rows)
     payload = {"rows": rows, "max_cards": max_cards, "max_points": max_points,
                "max_gems": max_gems, "n_games": args.games, "n_cells": len(rows),
-               "source": "S-vs-S", "sims": args.sims}
-    with open(OUT_PATH, "w") as f:
+               "source": "S-vs-S", "sims": args.sims, "win_points": args.win_points}
+    with open(out_path, "w") as f:
         json.dump(payload, f)
 
-    print(f"[s-measure] {args.games} S-vs-S games @ sims={args.sims} -> {len(rows)} cells "
-          f"(max_cards={max_cards} max_points={max_points} max_gems={max_gems})  "
-          f"({time.time()-t0:.0f}s)  -> turns_table_s.json", flush=True)
+    print(f"[s-measure] {args.games} S-vs-S games to {args.win_points}pts @ sims={args.sims} -> {len(rows)} "
+          f"cells (max_cards={max_cards} max_points={max_points} max_gems={max_gems})  "
+          f"({time.time()-t0:.0f}s)  -> {os.path.basename(out_path)}", flush=True)
     print(f"[accuracy] estimator vs ground-truth (acting seat's future own turns), {acc_t[0]} positions:",
           flush=True)
     print(_stats(acc_t, "TABLE"), flush=True)

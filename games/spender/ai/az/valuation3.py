@@ -62,6 +62,10 @@ _TURNS_DATA_S = None      # lazy-loaded S-measured table (mode "table_s")
 _TURNS_KEYS_S = None
 _TURNS_CACHE_S = {}
 _S_TABLE_LOADED = False
+_TURNS_DATA_21 = None     # lazy-loaded 21-point-measured table (used when s.win_points == 21)
+_TURNS_KEYS_21 = None
+_TURNS_CACHE_21 = {}
+_T21_TABLE_LOADED = False
 RESERVE_TURN_ADJ = 0.0    # turns-left subtracted PER RESERVED card a seat holds, correcting the
                           # reserve-BLIND table key. MEASURED (turns_feat_diag, S-vs-S): holding a
                           # reserve correlates with ~0.72 fewer turns left than (cards,points,gems)
@@ -124,6 +128,24 @@ def _ensure_s_table():
     d = {(row[0], row[1], row[2]): row[3] for row in data["rows"]}
     _TURNS_DATA_S = d
     _TURNS_KEYS_S = list(d.keys())
+
+
+def _ensure_21_table():
+    """Lazy-load turns_table_21.json (used when win_points==21). Missing file -> stays None and the
+    horizon falls back to the default 15-point table (a mild under-estimate at 21, a minor lever)."""
+    global _TURNS_DATA_21, _TURNS_KEYS_21, _T21_TABLE_LOADED
+    if _T21_TABLE_LOADED:
+        return
+    _T21_TABLE_LOADED = True
+    path = os.path.join(os.path.dirname(__file__), "turns_table_21.json")
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except (FileNotFoundError, ValueError):
+        return
+    d = {(row[0], row[1], row[2]): row[3] for row in data["rows"]}
+    _TURNS_DATA_21 = d
+    _TURNS_KEYS_21 = list(d.keys())
 
 
 def _plan_tempo(cost, bon) -> int:
@@ -670,9 +692,17 @@ class Valuation:
         else:                                               # "table" (default) or "table_s"
             if TURNS_MODE == "table_s":
                 _ensure_s_table()
-            use_s = TURNS_MODE == "table_s" and _TURNS_DATA_S is not None
-            d, k, c = ((_TURNS_DATA_S, _TURNS_KEYS_S, _TURNS_CACHE_S) if use_s
-                       else (None, None, None))
+                use_s = _TURNS_DATA_S is not None
+            else:
+                use_s = False
+            if use_s:
+                d, k, c = _TURNS_DATA_S, _TURNS_KEYS_S, _TURNS_CACHE_S
+            elif getattr(s, "win_points", 15) == 21:         # S21: the 21-point-measured horizon
+                _ensure_21_table()
+                d, k, c = ((_TURNS_DATA_21, _TURNS_KEYS_21, _TURNS_CACHE_21)
+                           if _TURNS_DATA_21 is not None else (None, None, None))
+            else:                                            # default 15-point table
+                d, k, c = None, None, None
             t0 = _lookup_turns(s.purchased_n[0], s.points[0], sum(s.tokens[0]), d, k, c)
             t1 = _lookup_turns(s.purchased_n[1], s.points[1], sum(s.tokens[1]), d, k, c)
             if RESERVE_TURN_ADJ:                            # reserve-blind-key correction (per seat)

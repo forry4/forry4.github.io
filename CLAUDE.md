@@ -1217,12 +1217,11 @@ website variant **"S"**.
     surpass it.** (Reusable byproduct kept on main: `league.py`/`train_az.py` now accept **`S` as a league/gate
     opponent** via `--heur-variants S` + `--opp-s-sims`; `vsearch.LEAF_MODE`/`net.SpenderNet(in_features=)` are
     byte-identical-default. `*cache*.npz`/`leaf_model.npz`/`checkpoints_bootstrap*` are gitignored scratch.)
-- **21-point "Long" mode — LIVE (playable-first).** Per-game `win_points` (default 15) is wired through the
+- **21-point "Long" mode — LIVE + specialized.** Per-game `win_points` (default 15) is wired through the
   engine, production rules (`main._win_points`), and the AI stack (v_state convex zone, `victory_closeness`,
   heuristic3 win-checks all read `s.win_points`); the lobby has a **Classic 15 / Long 21** toggle threading
-  `win_points` into `create`. **Any picked AI auto-adapts to 21** (no separate variant needed) — so a Long game
-  is a strong matchup with S as-is. Shipped 836ad6d (Phase 1) + 567e5d8 (toggle). 508 tests + new 21-pt unit
-  tests green; byte-identical for Classic.
+  `win_points` into `create`. **Any picked AI auto-adapts to 21** (no separate variant needed). Shipped 836ad6d
+  (Phase 1) + 567e5d8 (toggle); byte-identical for Classic.
   - **Lobby UX follow-ups (June 2026):** the toggle was reworked to a segmented `.length-toggle`/`.len-btn`
     whose selected state changes ONLY background+color (fixed border/padding) — the old `.mode-toggle`
     swapped `btn-outline`↔`btn-gold` whose borders differ, which **shifted the page on select**. The toggle
@@ -1231,10 +1230,21 @@ website variant **"S"**.
     "**Target: N**" label sits above the hint (`.hint-col` wraps target+hint in the desktop actions-panel; an
     inline `.target-label` in the mobile action-bar), reading `game.win_points || 15`. Create button is just
     "+ Create Game" (length comes from the toggle).
-- **Open / next:** (1) **OPTIONAL S21 retune** (only if Long-mode playtests show S misvaluing the longer game):
-  re-measure a 21-point `turns_table` (`s_measure_turns.py` + `--win-points`, to thread), retune weights at
-  win_points=21 → `vsearch_s21.json` applied when `win_points==21`. Expected modest (weight-tuning saturates
-  ~0.54 all session). Parked: "search owns DISCARD/NOBLE + a discard prior" (low gain).
+  - **The genuine specialization is STRUCTURAL (done):** (1) the convex near-win zone auto-shifts to the last 5
+    of `win_points` (→16 at 21); (2) **`turns_table_21.json`** — a 21-point-MEASURED horizon table, auto-loaded
+    by valuation3 when `s.win_points==21` (the 15-table under-counts the 21 horizon by ~3.8 turns — a real
+    structural gap, unlike the player-strength recalibration which was a wash). S-at-21 beats the heuristic
+    panel ~0.76 (H3 .70 / H2 .82 / H2N .70 / H2R .81).
+  - **Weight retune — NO honest change (don't relitigate).** The self-gate at `--win-points 21` (vs frozen-S-at-21)
+    adopted `W_ENGINE_STK 0.4→0.2` on the reused per-knob holdout (0.529), but it **failed the fresh disjoint-seed
+    re-measurement (0.4979, below 0.50) AND the RPS guard** (worse vs H3) → a holdout artifact, not adopted.
+    Everything else screened-high-but-failed-holdout (W_ECON 0.637, W_POINTS 0.575, W_PROGRESS 2.0). So
+    **`vsearch_s21.json` is empty** → S21 = S's 15-weights + the structural 21-adaptations. Serving:
+    `_s_choose_move` applies any S21 overrides under `_S21_LOCK` only on `win_points==21` (empty config = no-op,
+    byte-identical). Harnesses gained `--win-points` (`s_measure_turns`/`vsearch_camp`/`vsearch_selfgate`).
+- **Open / next:** the 15-pt **pessimistic-backup / search-aggregation** experiment (changes how the eval is
+  *used* in PUCT, the proven-to-matter lever, vs eval quality which the leaf-swap showed doesn't convert) is the
+  most promising untapped 15-pt strength idea. Parked: "search owns DISCARD/NOBLE + a discard prior" (low gain).
 
 ### Hard-won conclusions — DO NOT relitigate
 These cost many self-play/training cycles to establish:

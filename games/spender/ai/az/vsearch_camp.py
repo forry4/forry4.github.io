@@ -42,9 +42,10 @@ def _apply_overrides(overrides: dict):
             raise SystemExit(f"unknown override key '{k}'")
 
 
-def play_one(opp, prot_seat: int, *, seed: int, sims: int, max_plies: int = 400) -> float:
+def play_one(opp, prot_seat: int, *, seed: int, sims: int, max_plies: int = 400,
+             win_points: int = 15) -> float:
     """One vsearch-vs-opp game on deck `seed`; returns vsearch's score in {0, 0.5, 1}."""
-    s = E.new_game(random.Random(seed))
+    s = E.new_game(random.Random(seed), win_points=win_points)
     for _ in range(max_plies):
         if s.phase == E.OVER:
             break
@@ -59,22 +60,24 @@ def play_one(opp, prot_seat: int, *, seed: int, sims: int, max_plies: int = 400)
 
 
 def _chunk(args):
-    opp_name, seed_base, lo, hi, sims, overrides = args
+    opp_name, seed_base, lo, hi, sims, overrides, win_points = args
     if overrides:
         _apply_overrides(overrides)
     opp = OPP[opp_name]
-    return sum(play_one(opp, i % 2, seed=seed_base + i, sims=sims) for i in range(lo, hi))
+    return sum(play_one(opp, i % 2, seed=seed_base + i, sims=sims, win_points=win_points)
+               for i in range(lo, hi))
 
 
-def run(opp_name, n, seed_base, sims, overrides, pool, workers):
+def run(opp_name, n, seed_base, sims, overrides, pool, workers, win_points=15):
     t0 = time.time()
     if pool is None:
         if overrides:
             _apply_overrides(overrides)
-        total = sum(play_one(OPP[opp_name], i % 2, seed=seed_base + i, sims=sims) for i in range(n))
+        total = sum(play_one(OPP[opp_name], i % 2, seed=seed_base + i, sims=sims, win_points=win_points)
+                    for i in range(n))
     else:
         step = math.ceil(n / workers)
-        tasks = [(opp_name, seed_base, lo, min(lo + step, n), sims, overrides)
+        tasks = [(opp_name, seed_base, lo, min(lo + step, n), sims, overrides, win_points)
                  for lo in range(0, n, step)]
         total = sum(pool.map(_chunk, tasks))
     wr = total / n
@@ -94,6 +97,7 @@ def main():
     ap.add_argument("--step", type=int, default=1_000_000)
     ap.add_argument("--set", nargs="+", default=None, dest="overrides",
                     help="vsearch/v_state/H3/valuation3 overrides, e.g. W_PROGRESS=2.0 SCALE=7 SIMS=300")
+    ap.add_argument("--win-points", type=int, default=15, help="play games to this many points (15 or 21)")
     args = ap.parse_args()
 
     overrides = {}
@@ -116,7 +120,8 @@ def main():
     try:
         wrs = {}
         for i, nm in enumerate(opps):
-            wrs[nm] = run(nm, args.n, args.seed0 + i * args.step, args.sims, overrides, pool, workers)
+            wrs[nm] = run(nm, args.n, args.seed0 + i * args.step, args.sims, overrides, pool, workers,
+                          args.win_points)
         avg = sum(wrs.values()) / len(wrs)
         print(f"[vsearch-camp] panel avg = {avg:.4f}   "
               + "  ".join(f"{k} {v:.3f}" for k, v in wrs.items()), flush=True)
