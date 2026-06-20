@@ -255,7 +255,7 @@ const css = baseCss + `
    mobile/tablet, where the controls live next to the nobles via .board-actions. */
 .actions-panel{display:none}
 .action-hint{flex:1;font-style:italic;color:var(--text-dim);font-size:.88rem;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.target-label{font-family:'Cinzel',serif;font-size:.7rem;font-weight:700;letter-spacing:.08em;color:var(--gold);text-transform:uppercase;flex-shrink:0}
+.target-label{font-family:'Cinzel',serif;font-size:1.05rem;font-weight:700;letter-spacing:.08em;color:var(--gold);text-transform:uppercase;flex-shrink:0}
 .hint-col{display:flex;flex-direction:column;gap:1px;flex:1;min-width:0;justify-content:center}
 .action-bar-btns{display:flex;gap:8px;align-items:center;flex-shrink:0;min-width:150px;justify-content:flex-end}
 .action-bar-spacer{visibility:hidden;pointer-events:none;transition:none}
