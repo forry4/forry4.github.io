@@ -166,6 +166,13 @@ The real bot. Pure Python, no new prod deps; reuses the engine contract.
   `games.spender.main` to dodge an import-time circular dep; the `core` extraction removed the cycle
   (core depends on no game), so the lazy shims are gone. Persists rooms in its **own `coc_games`
   table** in the shared site DB; reuses the `reconnect_tokens` table (created by `core.init_core_schema`).
+- **Cancel must NOT use `cur.rowcount` (libsql 500 gotcha — DO NOT regress).** `delete_open_game`
+  uses a **SELECT-then-DELETE** existence check, not `cursor.rowcount`: the driver-agnostic
+  `core.db` wrapper doesn't expose `rowcount` on the libsql/**Turso** backend (it raised), so the
+  rowcount form **500'd the cancel endpoint in production** (the frontend's `r.json()` then choked on
+  the plain-text "Internal Server Error" body → "Could not cancel"). This is the same fix Spender's
+  `delete_open_game` already had; CoC just hadn't gotten it. Any new libsql write that needs an
+  affected-row count must use SELECT-then-DELETE/UPDATE, never `rowcount`.
 
 ### Frontend (`CastlesOfCrimson.jsx`)
 - Self-contained component the shell (`Spender.jsx`) mounts when `screen === "coc"`, passed
@@ -189,6 +196,25 @@ The real bot. Pure Python, no new prod deps; reuses the engine contract.
 - **Discard button**: shown in the action row only when storage is full (`me.storage.length >= 3`)
   and disabled until a storage tile is selected — sends `discard_storage` to free a key space
   (mirrors the engine rule that the move is legal only when full).
+- **No white frame (mounted-bare gotcha):** the shell early-returns `<CastlesOfCrimson/>` WITHOUT
+  Spender's `baseCss`, and CoC's reset only targets `.coc *` descendants — never `body`. So the
+  browser-default `body{margin:8px}` over an unstyled (white) body showed as a frame around the dark
+  page. Fix: CoC's own `<style>` resets `html,body{margin:0;padding:0;background:#120c0d}` (scoped to
+  while CoC is mounted, so no cross-screen effect). If you ever wrap CoC in `.app`/baseCss, this is
+  moot — but don't drop the body reset while it's mounted bare.
+- **Lobby mirrors Spender (Open Games / Active Games — NO "Your Games"):** three sections —
+  (1) a localStorage **fallback "Active Games" card** (`coc_roomId`/`coc_token_*`) for guests (who
+  have no `/games/mine`), guarded so it never renders when the game is already listed, while games
+  load, or when the real Active Games section shows (no duplicate header); (2) **Open Games** (all
+  open games; **your own** open lobby shows **Return + Cancel**, others show **Join**); (3) **Active
+  Games** = `myGames.filter(status==="playing")` with matchup + Your Turn/Their Turn badge + Resume.
+  The old "Your Games" section listed all your non-over games, so an open lobby appeared in BOTH it
+  and Open Games — splitting open(→Open Games)/playing(→Active Games) makes a game live in exactly
+  one place. Section CSS: `.coc-section-hd`/`.coc-muted`/`.coc-turn-badge`/`.coc-their-badge`/
+  `.coc-spinner`; `timeAgo()` is a module-level helper. Backend already returns
+  `you_are_p1`/`your_turn`/`created_at`/`updated_at`/`host_*`.
+- **Bot's default board is board 1** (`oppBoard` default `"1"`, was `"2"`) so a fresh vs-bot game
+  doesn't preselect a different board than the player's.
 
 ### Deploy / branch notes
 - Both workflow path filters now watch `games/castles_of_crimson/**` (pages = whole folder so the
@@ -1377,6 +1403,13 @@ degrades safely if `/auth/session` isn't deployed yet (404 → stay logged in).
   `AI (X)`); backend `list_user_games` returns both names + `you_are_p1`.
 - **Cancel own open game**: open games where `g.host_id === myId` show Cancel
   (you only Join *others'* games). `list_open_games` returns `host_id`.
+- **In-progress section is ALWAYS "Active Games", never "Resume".** Two sections —
+  **Open Games** (`/games`; your own open lobby shows Return + Cancel) and **Active
+  Games** (`myGames.filter(status==="playing")`). The localStorage fallback card
+  (saved `spender_roomId`, shown to guests with no `/games/mine`) is ALSO titled
+  "Active Games" and guarded (`!inLists && !browserLoading && !hasActiveGames`) so it
+  never co-renders with the real Active Games section (no duplicate header). There is
+  no "Resume" *section* heading anymore — only the per-card **Resume** *button*.
 - **`.action-bar` has `min-height:62px`** so the turn badge row doesn't shrink
   when the contextual button (Take Gems / Buy) is absent.
 - **Reserve = click a card then the gold coin** (bidirectional: gold-first arms
