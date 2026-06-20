@@ -1661,14 +1661,18 @@ export default function SpenderApp() {
 						const savedId = (() => { try { return localStorage.getItem("spender_roomId"); } catch { return null; } })();
 						const savedToken = savedId ? (() => { try { return localStorage.getItem(`spender_token_${savedId}_${myId}`); } catch { return null; } })() : null;
 						const inLists = myGames.some(g => g.id === savedId) || openGames.some(g => g.id === savedId);
-						// While games load the lists are stale, so suppress Resume until the
-						// fetch settles — otherwise it flashes on Back-to-Menu right after
-						// creating a game, then vanishes once the game appears in Open Games.
-						if (!savedId || !savedToken || inLists || browserLoading) return null;
+						// This is the localStorage fallback "Active Games" card — shown mainly to
+						// guests, who have no /games/mine list. Suppress it when the real Active
+						// Games section (below) is rendering, so there's never a second "Active
+						// Games" header. Also suppress while the lists load (they're stale), else
+						// it flashes on Back-to-Menu right after creating a game, then vanishes
+						// once the game appears in a list.
+						const hasActiveGames = myGames.some(g => g.status === "playing");
+						if (!savedId || !savedToken || inLists || browserLoading || hasActiveGames) return null;
 						return (
 							<div className="browser-section">
 								<div className="section-hd">
-									<span className="section-title">Resume</span>
+									<span className="section-title">Active Games</span>
 								</div>
 								<div className="game-cards">
 									<div className="game-card" style={{ borderColor: "rgba(201,168,76,.4)" }}>
