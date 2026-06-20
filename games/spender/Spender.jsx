@@ -120,6 +120,12 @@ const css = baseCss + `
 .browser-username{font-family:'Cinzel',serif;font-size:.8rem;color:var(--text-dim);letter-spacing:.06em;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .browser-guest-badge{font-size:.65rem;letter-spacing:.1em;color:var(--text-muted);border:1px solid var(--border);padding:2px 7px;border-radius:10px;font-family:'Cinzel',serif;text-transform:uppercase}
 .browser-create{margin-bottom:36px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+/* game-length toggle: selected state changes ONLY background+color (fixed border/padding)
+   so selecting never changes the element's size / shifts the layout */
+.length-toggle{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;flex-shrink:0}
+.len-btn{padding:9px 14px;background:transparent;border:none;color:var(--text-dim);font-family:'Cinzel',serif;font-size:.8rem;letter-spacing:.03em;cursor:pointer;transition:background .12s,color .12s;white-space:nowrap}
+.len-btn+.len-btn{border-left:1px solid var(--border)}
+.len-btn.sel{background:var(--gold);color:#1c1710}
 .btn-outline.active{background:var(--gold);color:#0f0e0c}
 .ai-picker-wrap{position:relative;display:inline-flex}
 .ai-picker{position:absolute;top:calc(100% + 8px);left:0;z-index:30;display:flex;gap:8px;align-items:center;flex-wrap:wrap;max-width:min(92vw,420px);padding:12px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:0 10px 28px rgba(0,0,0,.5)}
@@ -249,6 +255,8 @@ const css = baseCss + `
    mobile/tablet, where the controls live next to the nobles via .board-actions. */
 .actions-panel{display:none}
 .action-hint{flex:1;font-style:italic;color:var(--text-dim);font-size:.88rem;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.target-label{font-family:'Cinzel',serif;font-size:.7rem;font-weight:700;letter-spacing:.08em;color:var(--gold);text-transform:uppercase;flex-shrink:0}
+.hint-col{display:flex;flex-direction:column;gap:1px;flex:1;min-width:0;justify-content:center}
 .action-bar-btns{display:flex;gap:8px;align-items:center;flex-shrink:0;min-width:150px;justify-content:flex-end}
 .action-bar-spacer{visibility:hidden;pointer-events:none;transition:none}
 .turn-badge{font-family:'Cinzel',serif;font-size:.72rem;letter-spacing:.08em;padding:4px 12px;border-radius:20px;white-space:nowrap}
@@ -788,12 +796,18 @@ export default function SpenderApp() {
 			setRoomData(msg.room);
 			if (inGame(msg.room.status) && screen !== "game") setScreen("game");
 		} else if (msg.type === "error") {
-			if (msg.message === "invalid token") {
+			// A join into a cancelled/gone game (the backend rejects it now instead of
+			// fabricating a hostless room): clear the stale pointer + refresh the list
+			// so the dead game disappears.
+			const gone = typeof msg.message === "string"
+				&& (msg.message.includes("no longer available") || msg.message === "room not found");
+			if (msg.message === "invalid token" || gone) {
 				try { localStorage.removeItem("spender_roomId"); } catch {}
 			}
+			if (gone && authUser) fetchGames(authUser);
 			setToast(msg.message);
 		}
-	}, [myId, screen, roomId]);
+	}, [myId, screen, roomId, authUser, fetchGames]);
 
 	// ── WebSocket ──────────────────────────────────────────────────────────
 	const pendingActionRef = useRef(null);
@@ -831,9 +845,14 @@ export default function SpenderApp() {
 	// ── Reconnect when tab becomes visible (iOS kills WS in background) ────
 	const roomIdRef = useRef(roomId);
 	roomIdRef.current = roomId;
+	const screenRef = useRef(screen);
+	screenRef.current = screen;
 	useEffect(() => {
 		const handleVisibility = () => {
+			// Only auto-reconnect when actively on the game screen — otherwise tabbing
+			// back would dump a lobby/waiting user into a stale waiting room.
 			if (document.visibilityState === "visible"
+				&& screenRef.current === "game"
 				&& roomIdRef.current
 				&& getReadyState() !== WebSocket.OPEN) {
 				connect(`${WS_BASE}/${roomIdRef.current}/${myId}`);
@@ -1607,16 +1626,14 @@ export default function SpenderApp() {
 					</div>
 
 					<div className="browser-create">
-						<div className="mode-toggle" title="Classic = race to 15 points; Long = race to 21">
+						<div className="length-toggle" title="Game length (Classic = race to 15, Long = race to 21) — also filters the open games below">
 							{[[15, "Classic 15"], [21, "Long 21"]].map(([wp, label]) => (
-								<button key={wp} className={`btn btn-sm${winPoints === wp ? " btn-gold" : " btn-outline"}`}
-									onClick={() => setWinPoints(wp)}>
-									{label}
-								</button>
+								<button key={wp} type="button" className={`len-btn${winPoints === wp ? " sel" : ""}`}
+									onClick={() => setWinPoints(wp)}>{label}</button>
 							))}
 						</div>
 						<button className="btn btn-gold" onClick={() => handleCreate(false, "A", winPoints)}>
-							+ Create New Game
+							+ Create Game
 						</button>
 						<div className="ai-picker-wrap">
 							<button className={`btn btn-outline${showAiPicker ? " active" : ""}`}
@@ -1708,15 +1725,15 @@ export default function SpenderApp() {
 					<div className="browser-section">
 						<div className="section-hd">
 							<span className="section-title">Open Games</span>
-							<span className="small-muted">waiting for a second player</span>
+							<span className="small-muted">{winPoints === 21 ? "Long (21)" : "Classic (15)"} - waiting for a second player</span>
 						</div>
 						{browserLoading && openGames.length === 0 ? (
 							<div className="empty-state"><span className="spinner" />Loading…</div>
-						) : openGames.length === 0 ? (
-							<div className="empty-state">No open games right now. Create one!</div>
+						) : openGames.filter(g => (g.win_points || 15) === winPoints).length === 0 ? (
+							<div className="empty-state">No open {winPoints === 21 ? "Long (21)" : "Classic (15)"} games right now. Create one!</div>
 						) : (
 							<div className="game-cards">
-								{openGames.map(g => (
+								{openGames.filter(g => (g.win_points || 15) === winPoints).map(g => (
 									<div key={g.id} className="game-card">
 										<div className="game-card-info">
 											<div className="game-card-title">
@@ -1869,7 +1886,7 @@ export default function SpenderApp() {
 								? <span className="action-hint">Final board &amp; game log</span>
 								: aiThinking
 									? <span className="ai-thinking"><span className="think-dot"/><span className="think-dot"/><span className="think-dot"/> thinking…</span>
-									: <span className="action-hint">{getHint()}</span>
+									: <><span className="target-label" style={{ marginRight: 6 }}>Target: {game.win_points || 15}</span><span className="action-hint">{getHint()}</span></>
 							}
 							<div className="action-bar-btns">
 								{renderActionButtons() || <button className="btn btn-ghost action-bar-spacer" aria-hidden="true" tabIndex={-1}>{"✕"}</button>}
@@ -1974,7 +1991,10 @@ export default function SpenderApp() {
 						{/* Desktop only (CSS): a box beside the nobles with the turn hint +
 						    the Take/Buy/✕ controls (AI 'thinking' indicator on the bot's turn). */}
 						<div className="panel actions-panel">
-							<span className="action-hint">{game.phase === "over" ? "Final board & game log" : getHint()}</span>
+							<div className="hint-col">
+								{game.phase !== "over" && <span className="target-label">Target: {game.win_points || 15}</span>}
+								<span className="action-hint">{game.phase === "over" ? "Final board & game log" : getHint()}</span>
+							</div>
 							<div className="actions-panel-btns">
 								{aiThinking
 									? <span className="ai-thinking"><span className="think-dot"/><span className="think-dot"/><span className="think-dot"/> thinking…</span>

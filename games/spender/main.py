@@ -280,12 +280,19 @@ def list_open_games() -> list[dict]:
     maybe_cleanup_games("games")  # throttled (<=1/h): prune stale games during long-awake periods
     conn = get_db_conn()
     cur = conn.cursor()
-    cur.execute("""SELECT id, player1_id, player1_name, created_at FROM games
+    cur.execute("""SELECT id, player1_id, player1_name, state_json, created_at FROM games
                    WHERE status='open' ORDER BY created_at DESC LIMIT 20""")
     rows = cur.fetchall()
     conn.close()
-    return [{"id": r["id"], "host_id": r["player1_id"], "host_name": r["player1_name"],
-             "created_at": r["created_at"]} for r in rows]
+    out = []
+    for r in rows:
+        try:
+            wp = int((json.loads(r["state_json"] or "{}").get("game") or {}).get("win_points", 15))
+        except Exception:
+            wp = 15
+        out.append({"id": r["id"], "host_id": r["player1_id"], "host_name": r["player1_name"],
+                    "win_points": wp, "created_at": r["created_at"]})
+    return out
 
 
 def list_user_games(user_id: str) -> list[dict]:
@@ -1953,6 +1960,12 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                         await websocket.send_text(json.dumps({"type": "error", "message": "room not found"}))
                         continue
                     r = ROOMS[room_id]
+                    # A cancelled/never-created game leaves only a phantom room (the connect-time
+                    # setdefault) with no host and no game. Joining it would create a hostless room
+                    # nobody can start, so reject it.
+                    if not r.get("host") or r.get("game") is None:
+                        await websocket.send_text(json.dumps({"type": "error", "message": "this game is no longer available"}))
+                        continue
                     if len(r["players"]) >= 2 and pid not in r["players"]:
                         await websocket.send_text(json.dumps({"type": "error", "message": "room full"}))
                         continue

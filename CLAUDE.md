@@ -1223,6 +1223,14 @@ website variant **"S"**.
   `win_points` into `create`. **Any picked AI auto-adapts to 21** (no separate variant needed) — so a Long game
   is a strong matchup with S as-is. Shipped 836ad6d (Phase 1) + 567e5d8 (toggle). 508 tests + new 21-pt unit
   tests green; byte-identical for Classic.
+  - **Lobby UX follow-ups (June 2026):** the toggle was reworked to a segmented `.length-toggle`/`.len-btn`
+    whose selected state changes ONLY background+color (fixed border/padding) — the old `.mode-toggle`
+    swapped `btn-outline`↔`btn-gold` whose borders differ, which **shifted the page on select**. The toggle
+    now ALSO **filters the Open Games list** to the selected length (`openGames.filter(g => (g.win_points||15)
+    === winPoints)`; `list_open_games` parses `win_points` out of `state_json` and returns it). In-game, a
+    "**Target: N**" label sits above the hint (`.hint-col` wraps target+hint in the desktop actions-panel; an
+    inline `.target-label` in the mobile action-bar), reading `game.win_points || 15`. Create button is just
+    "+ Create Game" (length comes from the toggle).
 - **Open / next:** (1) **OPTIONAL S21 retune** (only if Long-mode playtests show S misvaluing the longer game):
   re-measure a 21-point `turns_table` (`s_measure_turns.py` + `--win-points`, to thread), retune weights at
   win_points=21 → `vsearch_s21.json` applied when `win_points==21`. Expected modest (weight-tuning saturates
@@ -1340,6 +1348,19 @@ quietly empties "Your Games"). The frontend `handleCancel` only clears the
 `spender_roomId` resume pointer + reconnect token **after the server confirms the
 delete** (`data.ok`); on failure it toasts the reason. Never clear local resume
 state before confirming the delete.
+
+### Tab-back + cancelled-join fixes (June 2026; do not regress)
+- **Tab-back only rejoins ACTIVE games.** The visibilitychange reconnect (iOS kills backgrounded
+  WS) now also guards `screenRef.current === "game"` — without it, tabbing back while in the
+  lobby/waiting re-opened a stale waiting room (the "dumped into waiting" report).
+- **Joining a cancelled game is rejected.** On WS connect the handler `ROOMS.setdefault`s a fresh
+  empty room for ANY id (needed so the creator can then `create`). After a host cancels (room
+  popped from ROOMS + deleted from DB), a second client connecting to that id fabricated a
+  **phantom hostless room**, and `join` then succeeded into it → neither player was host →
+  un-startable (the bug the user hit). Fix: the `join` action rejects when
+  `not r.get("host") or r.get("game") is None` ("this game is no longer available"); the frontend
+  error handler clears the stale resume pointer and `fetchGames` to drop the dead game. Verified
+  e2e (create→cancel→join-rejected).
 
 ### Responsive game layout (June 2026 — the big UI overhaul; do not regress)
 The game screen has THREE layouts driven by width; all CSS lives in the one `css`
