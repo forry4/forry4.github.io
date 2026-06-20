@@ -651,46 +651,21 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             <button className="coc-btn ghost sm" onClick={fetchGames}>↻</button>
           </div>
 
-          {savedId && savedTok && (
+          {/* localStorage fallback "Active Games" card — shown mainly to guests (no
+              /games/mine list) for an in-progress game. Suppressed when the game is
+              already in a list, while games load, or when the real Active Games
+              section below is rendering, so there's never a duplicate / double header. */}
+          {savedId && savedTok && !loadingGames
+            && !myGames.some((g) => g.id === savedId) && !openGames.some((g) => g.id === savedId)
+            && !myGames.some((g) => g.status === "playing") && (
             <>
-              <div className="coc-section-title">Resume</div>
+              <div className="coc-section-hd"><div className="coc-section-title">Active Games</div></div>
               <div className="coc-card">
                 <div className="coc-card-info"><div className="coc-card-title">Game in progress</div><div className="coc-card-meta">{savedId}</div></div>
-                <button className="coc-btn gold sm" onClick={() => resume(savedId)}>Resume</button>
-              </div>
-            </>
-          )}
-
-          {myGames.length > 0 && (
-            <>
-              <div className="coc-section-hd">
-                <div className="coc-section-title">Your Games</div>
-                <span className="coc-muted">{myGames.length} active</span>
-              </div>
-              {myGames.map((g) => (
-                <div className="coc-card" key={g.id}>
-                  <div className="coc-card-info">
-                    <div className="coc-card-title">
-                      {g.you_are_p1 ? `${g.player1_name} (you)` : g.player1_name}
-                      {" vs "}
-                      {g.player2_name
-                        ? (g.you_are_p1 ? g.player2_name : `${g.player2_name} (you)`)
-                        : "waiting for opponent…"}
-                    </div>
-                    <div className="coc-card-meta">{g.id} · {timeAgo(g.updated_at)}</div>
-                  </div>
-                  <div className="coc-card-actions">
-                    {g.status === "playing" && (
-                      g.your_turn
-                        ? <span className="coc-turn-badge">Your Turn</span>
-                        : <span className="coc-their-badge">Their Turn</span>
-                    )}
-                    <button className="coc-btn outline sm" onClick={() => resume(g.id)}>
-                      {g.status === "open" ? "Return" : "Resume"}
-                    </button>
-                  </div>
+                <div className="coc-card-actions">
+                  <button className="coc-btn gold sm" onClick={() => resume(savedId)}>Resume</button>
                 </div>
-              ))}
+              </div>
             </>
           )}
 
@@ -711,11 +686,43 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 </div>
                 <div className="coc-card-actions">
                   {g.host_id === myId
-                    ? <button className="coc-btn ghost sm" onClick={() => handleCancel(g.id)}>Cancel</button>
+                    ? <>
+                        <button className="coc-btn outline sm" onClick={() => resume(g.id)}>Return</button>
+                        <button className="coc-btn ghost sm" onClick={() => handleCancel(g.id)}>Cancel</button>
+                      </>
                     : <button className="coc-btn gold sm" onClick={() => startJoin(g.id)}>Join</button>}
                 </div>
               </div>
             ))
+          )}
+
+          {myGames.some((g) => g.status === "playing") && (
+            <>
+              <div className="coc-section-hd">
+                <div className="coc-section-title">Active Games</div>
+                <span className="coc-muted">{myGames.filter((g) => g.status === "playing").length} in progress</span>
+              </div>
+              {myGames.filter((g) => g.status === "playing").map((g) => (
+                <div className="coc-card" key={g.id}>
+                  <div className="coc-card-info">
+                    <div className="coc-card-title">
+                      {g.you_are_p1 ? `${g.player1_name} (you)` : g.player1_name}
+                      {" vs "}
+                      {g.player2_name
+                        ? (g.you_are_p1 ? g.player2_name : `${g.player2_name} (you)`)
+                        : "waiting for opponent…"}
+                    </div>
+                    <div className="coc-card-meta">{g.id} · {timeAgo(g.updated_at)}</div>
+                  </div>
+                  <div className="coc-card-actions">
+                    {g.your_turn
+                      ? <span className="coc-turn-badge">Your Turn</span>
+                      : <span className="coc-their-badge">Their Turn</span>}
+                    <button className="coc-btn outline sm" onClick={() => resume(g.id)}>Resume</button>
+                  </div>
+                </div>
+              ))}
+            </>
           )}
         </div>
         {toast && <div className="coc-toast">{toast}</div>}
