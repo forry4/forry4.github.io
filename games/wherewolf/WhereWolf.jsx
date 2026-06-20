@@ -201,23 +201,38 @@ export default function WhereWolf({ myId, authUser, onExit }) {
 
   // bounded auto-reconnect attempts (reset to 0 once a socket opens)
   const reconnectTries = useRef(0);
+  // what the most recent connect() was for, so an error can be handled in context:
+  // "auto"/"reconnect" fail SILENTLY (no scary toast); "join" retries once.
+  const attemptRef = useRef({ kind: null, rid: null, retried: false });
 
   // ── socket ──
   const handleMessage = useCallback((msg) => {
     if (msg.type === "error") {
       const m = msg.message || "error";
-      setToast(m);
-      // A dead room / bad token must not trap us in an endless reconnect: forget
-      // the stale resume pointer and drop cleanly back to the lobby.
-      if (/invalid token|no such room/i.test(m)) {
+      const at = attemptRef.current;
+      const stale = /invalid token|no such room/i.test(m);
+      // A join that hit a transient "no such room" (cold-started backend / a racing
+      // stale socket) — retry it once before giving up.
+      if (stale && at.kind === "join" && !at.retried) {
+        at.retried = true;
+        setTimeout(() => { try { connect(`${WW_WS}/${at.rid}/${myId}`, { action: "join", name: playerName }); } catch {} }, 600);
+        return;
+      }
+      if (stale) {
+        // Recoverable: a dead/stale room pointer. Clean up and return to the lobby —
+        // SILENTLY for an automatic (re)connect so it never flashes an alarming toast.
         reconnectTries.current = 99;
         try {
-          const rid = localStorage.getItem("werewolf_roomId");
-          if (rid) localStorage.removeItem(`werewolf_token_${rid}_${myId}`);
+          const sid = localStorage.getItem("werewolf_roomId");
+          if (sid) localStorage.removeItem(`werewolf_token_${sid}_${myId}`);
           localStorage.removeItem("werewolf_roomId");
         } catch {}
+        if (at.kind === "join" || at.kind === "resume") setToast("That game is no longer available");
+        attemptRef.current = { kind: null, rid: null, retried: false };
         setScreen("lobby");   // the lobby effect refreshes the games list
+        return;
       }
+      setToast(m);
       return;
     }
     if (msg.type === "narrate") {
@@ -235,6 +250,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
     const tok = room.reconnect_tokens?.[myId];
     const rid = room.room_id || roomId;
     if (tok) { try { localStorage.setItem(`werewolf_token_${rid}_${myId}`, tok); localStorage.setItem("werewolf_roomId", rid); } catch {} }
+    attemptRef.current = { kind: null, rid: null, retried: false };   // connected OK
     setRoomData(room);
     const inGame = room.status === "playing" || room.status === "over";
     if (msg.type === "created" || msg.type === "joined" || msg.type === "reconnected") {
@@ -263,6 +279,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
       const tok = rid ? localStorage.getItem(`werewolf_token_${rid}_${myId}`) : null;
       if (rid && tok) {
         setRoomId(rid);
+        attemptRef.current = { kind: "auto", rid, retried: true };   // silent on failure
         connect(`${WW_WS}/${rid}/${myId}`, { action: "reconnect", token: tok });
       }
     } catch {}
@@ -286,6 +303,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
       reconnectTries.current += 1;
       let tok = null;
       try { tok = localStorage.getItem(`werewolf_token_${rid}_${myId}`); } catch {}
+      attemptRef.current = { kind: "reconnect", rid, retried: true };   // silent on failure
       connect(`${WW_WS}/${rid}/${myId}`, tok ? { action: "reconnect", token: tok } : { action: "join", name: playerName });
     }, 1500);
     return () => clearTimeout(t);
@@ -300,6 +318,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
     const rid = roomCode();
     setRoomId(rid);
     try { localStorage.setItem("werewolf_roomId", rid); } catch {}
+    attemptRef.current = { kind: "create", rid, retried: true };
     connect(`${WW_WS}/${rid}/${myId}`, { action: "create", name: playerName });
   };
   const startJoin = (rid) => {
@@ -307,12 +326,14 @@ export default function WhereWolf({ myId, authUser, onExit }) {
     if (!rid) return;
     setRoomId(rid);
     try { localStorage.setItem("werewolf_roomId", rid); } catch {}
+    attemptRef.current = { kind: "join", rid, retried: false };
     connect(`${WW_WS}/${rid}/${myId}`, { action: "join", name: playerName });
   };
   const resume = (rid) => {
     const tok = localStorage.getItem(`werewolf_token_${rid}_${myId}`);
     setRoomId(rid);
     try { localStorage.setItem("werewolf_roomId", rid); } catch {}
+    attemptRef.current = { kind: tok ? "resume" : "join", rid, retried: false };
     connect(`${WW_WS}/${rid}/${myId}`, tok ? { action: "reconnect", token: tok } : { action: "join", name: playerName });
   };
   // Step out to the lobby but STAY a member of the room (socket only drops): the
@@ -331,6 +352,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
     try { tok = localStorage.getItem(`werewolf_token_${rid}_${myId}`); } catch {}
     reconnectTries.current = 0;
     setRoomId(rid);
+    attemptRef.current = { kind: tok ? "reconnect" : "join", rid, retried: !tok ? false : true };
     connect(`${WW_WS}/${rid}/${myId}`, tok ? { action: "reconnect", token: tok } : { action: "join", name: playerName });
   };
   const handleCancel = (id) => {
@@ -535,7 +557,6 @@ export default function WhereWolf({ myId, authUser, onExit }) {
     const faceUp = pdata.card != null;
     const isMe = pid === myId;
     const voteCount = phase === "over" ? (game.vote_tally?.[pid] || 0) : null;
-    const dayVotes = dayActive ? Object.values(game.votes || {}).filter((t) => t === pid).length : 0;
     const clickable =
       (phase === "day" && !game.locked?.[myId]) ||
       (phase === "night" && myActiveStep && step === "seer" && !isMe) ||
@@ -554,7 +575,6 @@ export default function WhereWolf({ myId, authUser, onExit }) {
           {faceUp ? roleName(pdata.card) : ""}
           {phase === "dealing" && pdata.ready && <span className="ww-ready">✓</span>}
           {dayActive && game.locked?.[pid] && <span className="ww-lock">🔒</span>}
-          {dayActive && dayVotes > 0 && <span className="ww-badge">{dayVotes}</span>}
           {phase === "over" && voteCount > 0 && <span className="ww-badge">{voteCount}</span>}
         </div>
         <span className="seat-name">{roomData?.players?.[pid] || pdata.name}{isMe ? " (you)" : ""}{roomData?.host === pid ? " ♛" : ""}</span>
@@ -672,6 +692,14 @@ function WinScreen({ game, order, myIdx, players, roomData, onExit }) {
         </p>
       </div>
       <div className="ww-table">
+        <div className="ww-center">
+          <div className="ww-card-meta">Center cards</div>
+          <div className="ww-center-cards">
+            {(game.center || []).map((c, i) => (
+              <div key={i} className="ww-ccard up" style={{ borderColor: roleColor(c) }}>{roleName(c)}</div>
+            ))}
+          </div>
+        </div>
         {order.map((pid, i) => {
           const rel = ((i - myIdx) + order.length) % order.length;
           const pos = seatXY(rel, order.length);
