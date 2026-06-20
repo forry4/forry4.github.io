@@ -128,9 +128,23 @@ function useSocket(onMessage) {
   return { connected, connect, send, disconnect };
 }
 
+// Relative timestamp for the lobby game lists (mirrors Spender's timeAgo).
+function timeAgo(ts) {
+  if (!ts) return "";
+  const diff = Math.floor(Date.now() / 1000) - ts;
+  if (diff < 60) return "just now";
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
+
 // ─── Styles ───────────────────────────────────────────────────────────────-
 const css = `
 @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Crimson+Pro:ital,wght@0,300;0,400;1,300&display=swap');
+/* CoC is mounted bare (the shell early-returns it without Spender's baseCss), so
+   reset the body here too — otherwise the browser-default body margin shows an
+   unstyled (white) frame around the dark .coc page. */
+html,body{margin:0;padding:0;background:#120c0d}
 .coc *,.coc *::before,.coc *::after{box-sizing:border-box;margin:0;padding:0}
 .coc{--bg:#120c0d;--surface:#1d1416;--surface2:#281a1d;--border:#3e2a2e;--crimson:#a3263a;--crimson-l:#c8455a;
   --gold:#c9a84c;--gold-l:#e8c96a;--text:#ecdfd6;--text-dim:#9c8780;--radius:8px;--radius-lg:14px;
@@ -162,7 +176,15 @@ const css = `
 .coc-card-info{flex:1;min-width:0}
 .coc-card-title{font-family:'Cinzel',serif;font-size:.85rem}
 .coc-card-meta{font-size:.78rem;color:var(--text-dim)}
-.coc-empty{color:var(--text-dim);font-style:italic;padding:14px;text-align:center}
+.coc-empty{text-align:center;padding:28px 16px;color:var(--text-dim);font-style:italic;font-size:.9rem;background:var(--surface2);border-radius:var(--radius);border:1px dashed var(--border)}
+.coc-section-hd{display:flex;justify-content:space-between;align-items:center;margin:18px 0 10px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+.coc-section-hd .coc-section-title{margin:0;border:none;padding:0}
+.coc-muted{font-size:.74rem;color:var(--text-dim)}
+.coc-card-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.coc-turn-badge{background:var(--gold);color:#120c0d;padding:3px 10px;border-radius:12px;font-family:'Cinzel',serif;font-size:.62rem;letter-spacing:.12em;font-weight:700;text-transform:uppercase;white-space:nowrap}
+.coc-their-badge{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border);padding:3px 10px;border-radius:12px;font-family:'Cinzel',serif;font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;white-space:nowrap}
+.coc-spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--gold);border-radius:50%;animation:coc-spin .7s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes coc-spin{to{transform:rotate(360deg)}}
 .coc-waiting{max-width:420px;margin:60px auto;text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px}
 .coc-code{font-family:'Cinzel',serif;font-size:2rem;letter-spacing:.3em;color:var(--gold);background:var(--surface2);border:1px dashed var(--border);border-radius:var(--radius);padding:12px;margin:14px 0;cursor:pointer}
 /* game */
@@ -339,6 +361,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const [roomData, setRoomData] = useState(null);
   const [openGames, setOpenGames] = useState([]);
   const [myGames, setMyGames] = useState([]);
+  const [loadingGames, setLoadingGames] = useState(false);
   const [joinCode, setJoinCode] = useState("");
   const [toast, setToast] = useState("");
   const [reviewing, setReviewing] = useState(false);
@@ -410,7 +433,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   }, [board]);
 
   const fetchGames = useCallback(() => {
-    fetch(`${COC_HTTP}/games`).then((r) => r.json()).then((d) => setOpenGames(d.games || [])).catch(() => {});
+    setLoadingGames(true);
+    fetch(`${COC_HTTP}/games`).then((r) => r.json()).then((d) => setOpenGames(d.games || []))
+      .catch(() => {}).finally(() => setLoadingGames(false));
     if (authUser && !authUser.guest && authUser.session_token) {
       fetch(`${COC_HTTP}/games/mine`, { headers: { Authorization: `Bearer ${authUser.session_token}` } }).then((r) => r.json())
         .then((d) => setMyGames(d.games || [])).catch(() => {});
@@ -638,29 +663,60 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
 
           {myGames.length > 0 && (
             <>
-              <div className="coc-section-title">Your Games</div>
+              <div className="coc-section-hd">
+                <div className="coc-section-title">Your Games</div>
+                <span className="coc-muted">{myGames.length} active</span>
+              </div>
               {myGames.map((g) => (
                 <div className="coc-card" key={g.id}>
                   <div className="coc-card-info">
-                    <div className="coc-card-title">{g.player1_name} vs {g.player2_name || "waiting…"}</div>
-                    <div className="coc-card-meta">{g.id} · {g.status}{g.your_turn ? " · your turn" : ""}</div>
+                    <div className="coc-card-title">
+                      {g.you_are_p1 ? `${g.player1_name} (you)` : g.player1_name}
+                      {" vs "}
+                      {g.player2_name
+                        ? (g.you_are_p1 ? g.player2_name : `${g.player2_name} (you)`)
+                        : "waiting for opponent…"}
+                    </div>
+                    <div className="coc-card-meta">{g.id} · {timeAgo(g.updated_at)}</div>
                   </div>
-                  <button className="coc-btn outline sm" onClick={() => resume(g.id)}>Continue</button>
+                  <div className="coc-card-actions">
+                    {g.status === "playing" && (
+                      g.your_turn
+                        ? <span className="coc-turn-badge">Your Turn</span>
+                        : <span className="coc-their-badge">Their Turn</span>
+                    )}
+                    <button className="coc-btn outline sm" onClick={() => resume(g.id)}>
+                      {g.status === "open" ? "Return" : "Resume"}
+                    </button>
+                  </div>
                 </div>
               ))}
             </>
           )}
 
-          <div className="coc-section-title">Open Games</div>
-          {openGames.length === 0 ? <div className="coc-empty">No open games. Create one!</div> :
+          <div className="coc-section-hd">
+            <div className="coc-section-title">Open Games</div>
+            <span className="coc-muted">waiting for a second player</span>
+          </div>
+          {loadingGames && openGames.length === 0 ? (
+            <div className="coc-empty"><span className="coc-spinner" />Loading…</div>
+          ) : openGames.length === 0 ? (
+            <div className="coc-empty">No open games. Create one!</div>
+          ) : (
             openGames.map((g) => (
               <div className="coc-card" key={g.id}>
-                <div className="coc-card-info"><div className="coc-card-title">{g.host_id === myId ? "Your game" : `${g.host_name}'s game`}</div><div className="coc-card-meta">{g.id}</div></div>
-                {g.host_id === myId
-                  ? <button className="coc-btn outline sm" onClick={() => handleCancel(g.id)}>Cancel</button>
-                  : <button className="coc-btn gold sm" onClick={() => startJoin(g.id)}>Join</button>}
+                <div className="coc-card-info">
+                  <div className="coc-card-title">{g.host_id === myId ? "Your game" : `${g.host_name}'s game`}</div>
+                  <div className="coc-card-meta">{g.id} · {timeAgo(g.created_at)}</div>
+                </div>
+                <div className="coc-card-actions">
+                  {g.host_id === myId
+                    ? <button className="coc-btn ghost sm" onClick={() => handleCancel(g.id)}>Cancel</button>
+                    : <button className="coc-btn gold sm" onClick={() => startJoin(g.id)}>Join</button>}
+                </div>
               </div>
-            ))}
+            ))
+          )}
         </div>
         {toast && <div className="coc-toast">{toast}</div>}
       </div>
