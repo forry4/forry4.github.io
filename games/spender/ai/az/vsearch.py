@@ -41,7 +41,15 @@ BACKUP_LAMBDA = 0.0   # mixmax selection-Q blend (0 = pure averaging, byte-ident
 POLICY_TEMP = 0.7     # softmax temperature on the H3 action-score prior (lower = sharper toward H3)
 RESERVE_PRIOR_W = 0.5 # reserve actions get this fraction of the card's take_value as their prior score
 TAKE_PRIOR_W = 1.0    # scale on the (normalized) need-vector alignment score for take actions
-PRIOR_BASE = 0.1      # floor added to every legal action's prior score (keeps exploration alive)
+PRIOR_BASE = 0.1      # (VESTIGIAL no-op: added to EVERY action's score, so it cancels in the softmax)
+PRIOR_UNIFORM = 0.0   # mix this much uniform mass into the prior: P=(1-u)*softmax + u/n. A real
+                      # exploration floor (unlike the vestigial PRIOR_BASE). Default 0 = byte-identical.
+                      # TESTED & REJECTED (June 2026, do not relitigate): self-gate vs frozen-S at
+                      # sims=200 — PRIOR_UNIFORM 0.1/0.25 screened 0.546/0.538 but 0.1 fell to 0.494 on
+                      # FRESH disjoint seeds (regression to mean); POLICY_TEMP=1.0 was 0.496; panel a
+                      # slight wash. No gain because mcts._select's _EPS_PRIOR floor + PUCT's sqrt(N)
+                      # term ALREADY visit every legal move — dark moves aren't starved, just correctly
+                      # not preferred at this search depth. The lever is depth/eval, not breadth.
 H3_PICK_W = 1.5       # prior bonus on H3's own greedy choice (PUCT expands it first; 0 disables)
 SERVE_TIME = 4.5      # serving wall-clock budget (s); leaves margin under the 5s thread-pool slot
 SERVE_MIN_SIMS = 32   # always run at least this many sims before the clock may stop the search
@@ -130,6 +138,11 @@ def _policy_prior(val: V.Valuation, s, seat: int, legal) -> np.ndarray:
         tot += e
     if tot > 0.0:
         probs /= tot
+    if PRIOR_UNIFORM > 0.0:                       # mix in uniform mass over legal moves (real floor)
+        u = PRIOR_UNIFORM / len(legal)
+        keep = 1.0 - PRIOR_UNIFORM
+        for a in legal:
+            probs[a] = keep * probs[a] + u
     return probs
 
 

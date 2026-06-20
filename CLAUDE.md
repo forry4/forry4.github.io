@@ -1179,6 +1179,20 @@ website variant **"S"**.
   Confirms again: the static eval is **already used near-optimally by the plain averaging backup** — re-shaping
   *how* the leaf is aggregated in PUCT washes, same as re-shaping the leaf itself. Tooling: `backup_lambda_ab.py`
   (focused self-gate: screen → fresh disjoint-seed → panel RPS guard for the one knob).
+- **Search exploration breadth — TESTED & REJECTED (wash; do not relitigate; June 2026).** Hypothesis
+  (from a human who still beats S): "S never CONSIDERS the move that beats me" → widen the policy prior so
+  PUCT visits moves H3 dislikes. Two mechanisms, both parked default-off byte-identical: `vsearch.PRIOR_UNIFORM`
+  (mix uniform mass: `P=(1-u)*softmax + u/n`, the REAL floor) and `POLICY_TEMP`↑ (flatten the H3 prior).
+  **Discovery: the existing `PRIOR_BASE=0.1` is a VESTIGIAL no-op** — it's added to EVERY action's score so it
+  cancels in the softmax (softmax is shift-invariant). Self-gate vs frozen-S at sims=200: `PRIOR_UNIFORM`
+  0.1/0.25 screened 0.546/0.538 but 0.1 fell to **0.494 on FRESH disjoint seeds** (regression to mean),
+  `POLICY_TEMP=1.0` = 0.496, panel a slight wash. **No gain because `mcts._select`'s `_EPS_PRIOR=1e-3` floor +
+  PUCT's `sqrt(N)/(1+n)` term ALREADY make every legal move get visited** — dark moves are NOT starved; S sees
+  them, evaluates them, and correctly doesn't prefer them at the depth it searches. So the human-exploitable
+  gap is **eval-depth/search-budget, not exploration breadth** (and widening breadth at the LOW sims the
+  deployed Render CPU runs would only spread the budget thinner). Re-confirms the two remaining live levers:
+  search DEPTH (needs a faster leaf/engine → more sims) and the production sim budget. Tooling:
+  `config_selfgate.py` (generic config-vs-frozen self-gate, screen → fresh → panel guard).
 - **Path C (distill V+search → numpy net) PROTOTYPED & the bottleneck PINNED to FEATURES, not arch (June
   2026).** Tooling: `vsearch_distill.py` (harvest `(features, V_static, V_search, outcome)` from S-vs-S +
   ridge/MLP distill, with a `--enriched` mode + `--cache`), `attn_distill.py` (card-set attention pre-check on
