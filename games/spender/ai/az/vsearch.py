@@ -20,11 +20,14 @@ the admin overlay.
 """
 from __future__ import annotations
 
+import logging
 import math
 import random
 import time
 
 import numpy as np
+
+_LOG = logging.getLogger("games.spender")   # share the prod log stream (Render captures it)
 
 from . import distill_features as DF
 from . import engine as E
@@ -174,13 +177,19 @@ def _run_search_timed(s, seat: int, time_limit: float):
     """Wall-clock-budgeted search (serving): sims until the deadline, with a min floor + hard cap."""
     search = Search(s, _RNG, c_puct=C_PUCT, add_noise=False, leaf_state=True,
                     backup_lambda=BACKUP_LAMBDA)
-    deadline = time.time() + time_limit
+    t0 = time.time()
+    deadline = t0 + time_limit
     done = 0
     while done < SERVE_MAX_SIMS:
         _expand(search)
         done += 1
         if done >= SERVE_MIN_SIMS and time.time() >= deadline:
             break
+    dt = time.time() - t0
+    # diagnostic: how much search did this serving decision actually get? On a fast box ~thousands; on
+    # Render's free shared CPU likely far fewer (the suspected cause of weak deployed play). One line/move.
+    _LOG.info("[S] serving search: %d sims in %.2fs (%.0f sims/s; budget %.1fs, cap %d)",
+              done, dt, done / dt if dt > 0 else 0.0, time_limit, SERVE_MAX_SIMS)
     return search.root.N
 
 
