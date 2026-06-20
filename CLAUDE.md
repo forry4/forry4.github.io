@@ -352,6 +352,16 @@ tables from THEIRS so S analyses their EXACT game (their card index = our engine
 - `wwsd/analyze.py` — `analyze(doc, time_limit)` (a dumped `{games:[...]}` doc → engine State →
   variant S → structured dict); `to_state`, `override_engine`/`prepare`, and `_search_with_eval`
   (runs the search, then reads the root value + per-edge Q **without** modifying `vsearch`).
+  - **Win-points auto-detect (Classic 15 / Long 21).** `_detect_target(game, data)` reads
+    `settings.targetScore` (spendee stores it as a STRING, e.g. `"15"`/`"21"`; falls back to
+    `data.targetScore`, then 15) and `analyze` threads it BOTH ways: `set_target(t)` aligns the
+    engine GLOBAL `E.WIN_POINTS` (non-S leaves + getattr fallbacks) AND `to_state(data, target)`
+    sets the **per-state `s.win_points`** — which is authoritative, since the engine win check
+    (`_finish_turn`) and the whole S stack (`v_state._points_term` convex zone, `heuristic3`,
+    `valuation3`) read `s.win_points` per-state. **`to_state` MUST set it** or the search
+    AttributeErrors mid-rollout (the State is built via `__new__`, so every slot is set by hand).
+    21-pt games are analysed correctly (right victory zone), just with the 15-pt `turns_table`
+    horizon (best-effort, see Caveats).
 - `wwsd/app.py` — FastAPI: `POST /move` (gated by header `X-WWSD-Secret` via `hmac.compare_digest`;
   small self-contained per-IP sliding-window rate limit; CORS pinned to `WWSD_ORIGIN`; honours a
   `?t=<seconds>` think-time override **clamped 1-60s** to stay under Cloudflare's ~100s ceiling),

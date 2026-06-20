@@ -75,6 +75,34 @@ def test_analyze_live_position_returns_a_move():
     assert all("eval" in a for a in r["alternatives"])        # each alternative carries its eval
 
 
+def test_detect_target_autodetects_15_and_21():
+    """Auto-detection reads settings.targetScore (string), falls back to data.targetScore, else 15."""
+    assert W._detect_target({"settings": {"targetScore": "15"}}, {}) == 15
+    assert W._detect_target({"settings": {"targetScore": "21"}}, {}) == 21
+    assert W._detect_target({}, {"targetScore": 21}) == 21        # data-level fallback
+    assert W._detect_target({}, {}) == 15                         # nothing present -> classic
+    assert W._detect_target({"settings": {"targetScore": "bad"}}, {}) == 15   # unparseable -> 15
+
+
+def test_to_state_threads_win_points_onto_the_state():
+    """The State the AI searches MUST carry win_points (v_state/heuristic3/valuation3 read s.win_points)."""
+    W.prepare()
+    data = LIVE["games"][0]["data"]
+    assert W.to_state(data, 15).win_points == 15
+    assert W.to_state(data, 21).win_points == 21
+    assert W.to_state(data).win_points == W.E.WIN_POINTS          # default falls back to the global
+
+
+def test_analyze_autodetects_long_mode_target():
+    """A 21-pt (Long) game is detected and analysed end-to-end without crashing on s.win_points."""
+    long_game = json.loads(json.dumps(LIVE))                      # deep copy
+    long_game["games"][0]["settings"]["targetScore"] = "21"
+    r = W.analyze(long_game, time_limit=0.4)
+    assert r["ok"] is True and r["target"] == 21
+    assert isinstance(r["recommendation"], str) and r["recommendation"]
+    assert r["sims"] >= 1
+
+
 def test_analyze_finished_game_has_no_move():
     r = W.analyze({"games": [{"status": "FINISHED", "settings": {"targetScore": "21"},
                               "players": [{"name": "a"}, {"name": "b"}],

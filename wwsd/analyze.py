@@ -52,13 +52,32 @@ def prepare() -> None:
 
 
 def set_target(t) -> None:
-    """Their game can be to 15 or 21; align the engine win threshold (heuristics read E.WIN_POINTS).
-    NB: H3's turns_table.json is measured from 15-pt games, so 21 is best-effort, not exact."""
+    """Align the engine's GLOBAL win threshold to the detected target (15 / 21). Variant S reads the
+    PER-STATE `s.win_points` (set in to_state) — that's authoritative; this global only keeps the
+    non-S leaves (H/H2 via E.WIN_POINTS) and the getattr() fallbacks in sync. NB: H3's
+    turns_table.json is measured from 15-pt games, so 21 is best-effort, not exact."""
     E.WIN_POINTS = int(t)
 
 
-def to_state(d):
-    """Build an engine State from a 'spendee' live `data` snapshot (identity card ids & colours)."""
+def _detect_target(game, data) -> int:
+    """Auto-detect the victory target (15 = Classic, 21 = Long mode) from a spendee doc. spendee
+    stores it as settings.targetScore (a string like "15"/"21"); fall back to data.targetScore,
+    then to 15. Any non-positive / unparseable value defaults to 15."""
+    raw = (game.get("settings") or {}).get("targetScore")
+    if raw is None:
+        raw = data.get("targetScore")
+    try:
+        t = int(raw)
+    except (TypeError, ValueError):
+        t = 0
+    return t if t > 0 else 15
+
+
+def to_state(d, win_points=None):
+    """Build an engine State from a 'spendee' live `data` snapshot (identity card ids & colours).
+    `win_points` (15 Classic / 21 Long) is stored on the State: the engine win check and the whole
+    variant-S stack (v_state / heuristic3 / valuation3) read `s.win_points` PER-STATE, so it MUST be
+    set here or the search AttributeErrors. Defaults to the engine global when not passed."""
     bank, players = d["bank"], d["players"]
     s = E.State.__new__(E.State)
     s.bank = list(bank["chips"]) + [bank.get("goldChips", 0)]
@@ -92,6 +111,7 @@ def to_state(d):
     s.turn = cpi if cpi is not None else 0
     s.phase = E.PLAY
     s.pending_nobles = []; s.final_trigger = -1; s.winner = E.WIN_NONE; s.ply = 0
+    s.win_points = int(win_points) if win_points else E.WIN_POINTS
     return s
 
 
@@ -147,7 +167,7 @@ def analyze(doc, time_limit=None) -> dict:
         time_limit = VS.SERVE_TIME
     game = doc["games"][0] if isinstance(doc, dict) and "games" in doc else doc
     data = game["data"]
-    target = int((game.get("settings") or {}).get("targetScore") or data.get("targetScore") or 15)
+    target = _detect_target(game, data)
     set_target(target)
     st = data["state"]; seat = st.get("currentPlayerIndex"); job = st.get("currentJob")
     names = [p.get("name", f"P{i}") for i, p in enumerate(game.get("players", [{}, {}]))]
@@ -156,7 +176,7 @@ def analyze(doc, time_limit=None) -> dict:
     if seat is None or game.get("status") == "FINISHED":
         out["message"] = "This game is finished — nothing for S to decide."
         return out
-    s = to_state(data)
+    s = to_state(data, target)
     out["scores"] = [{"name": names[i], "pts": s.points[i]} for i in (0, 1)]
     out["gold_bank"] = s.bank[5]
     legal = E.legal_actions(s)
