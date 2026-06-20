@@ -279,7 +279,12 @@ export default function Books({ authUser, onExit }) {
 			if (fi < 0 || ti < 0) return arrIn;
 			if (sameGroup && arr[fi].rating !== arr[ti].rating) return arrIn; // tier-locked
 			const [moved] = arr.splice(fi, 1);
-			arr.splice(arr.findIndex(x => x.id === targetId), 0, moved);
+			// Insert AFTER the target when dragging downward (source was above it), BEFORE when
+			// dragging upward — else a downward drop re-inserts before the target and nothing
+			// visibly moves (the source was already above it).
+			let at = arr.findIndex(x => x.id === targetId);
+			if (fi < ti) at += 1;
+			arr.splice(at, 0, moved);
 			return arr;
 		});
 	};
