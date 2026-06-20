@@ -259,12 +259,38 @@ shared/
 - Mounted by the shell (`Spender.jsx`) on `screen === "books"`; reached from a "📚 Books"
   link on the home menu (separate from the games grid). Props `{ authUser, onExit }`.
 - Public ranking view (sections per star tier 5→1, ordered within) + owner edit mode
-  (drag-reorder within a tier, rating picker, manual add). Suggestions section: owner
+  (reorder within a tier, rating picker, manual add). Suggestions section: owner
   sees all (grouped by suggester); other logged-in users get their own up-to-10 editor;
   logged-out users see a "log in to suggest" prompt.
+- **Two-column layout** (`.bk-columns` grid, capped 1160px, top-aligned): bookshelf left,
+  suggestions in a 360px right column. Collapses to ONE stacked column below 920px (the
+  `.bk-section` top-border separator is restored there). The `>` child combinator scopes
+  the column overrides to the top-level `.bk-list`/`.bk-section` (NOT the nested `.bk-list`
+  inside the suggestion editor).
+- **Reorder UX (don't regress):** each edit row has **▲/▼ buttons** that move a book within
+  its star tier (and a suggestion within its flat list), disabled at the tier/list ends —
+  these exist because native HTML5 drag-and-drop **doesn't work on touch** and is fiddly on
+  desktop. Drag is the secondary path: **only the ⠿ handle is `draggable`** (so the row's
+  text inputs stay selectable — making the whole row draggable fought with editing), the row
+  is the drop target and highlights (`.bk-dragover`). **`makeDrop` inserts AFTER the target
+  when dragging downward** (source index < target), BEFORE when upward — otherwise a downward
+  drop re-inserts before the target, which is where the source already was, so nothing
+  visibly moved (the original asymmetric "drag up works, drag down doesn't" bug).
 - **Open Library** search-to-add (`<BookSearch>`, reused by both editors): keyless,
-  CORS-enabled, queried client-side; picking a result auto-fills title/author/cover;
-  covers from `covers.openlibrary.org` (`?default=false` so misses fall back to 📖).
+  CORS-enabled, queried client-side; picking a result auto-fills title/author/cover.
+  **The fetch is capped at 12s** (a guard timer aborts the AbortController) — Open Library is
+  flaky (observed 7-10s connects) and has no timeout of its own, so a hung request would
+  otherwise stick on "Searching…" forever. A real timeout/network failure shows a recoverable
+  message; a supersede-abort (newer keystroke) is distinguished so it doesn't flash an error.
+- **Covers are cached as inline `data:` URIs** (`inlineCover`, applied to ranking + suggestions
+  on **save**): `covers.openlibrary.org` serves through **two 302 redirects** (→ archive.org)
+  with only a **3-hour** cache, so covers re-fetch slowly every few hours. CORS is open
+  (`ACAO *`), so on save the browser fetches each remote cover once, **downscales** it
+  (128×192, JPEG q0.82) via canvas, and stores a self-contained data URI in `cover_url` — it
+  then renders instantly from the list payload with no external request. Any fetch/CORS/decode
+  failure falls back to keeping the original URL (graceful). **Existing books need one
+  Edit→Save to backfill**; new adds bake in on the next save. (Inline data URIs are ideal for a
+  shelf of dozens; at hundreds, a cacheable backend image endpoint would scale better.)
 
 ### Shared theme (`shared/theme.js`)
 - `baseCss` is the **single source of truth** for the site design: Cinzel/Crimson Pro
