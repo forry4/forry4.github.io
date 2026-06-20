@@ -491,7 +491,7 @@ applies CORS + security-headers middleware (see below), `include_router`s Spende
   depend on it. `core` depends on neither.
 - **CORS + security headers** (`app.py` + `core/config.py`): CORS is **pinned** to
   `cors_allowed_origins()` — the site's own frontends are ALWAYS allowed: `https://forry4.github.io`
-  (GitHub Pages prod; origin = scheme+host, NO path, even though the Vite `base` is `/WebProjects/`),
+  (GitHub Pages USER site served at the root `https://forry4.github.io/`, so the Vite `base` is `/`),
   the **Cloudflare staging mirror** `https://webprojectsstaging.forry4.workers.dev` (it reuses this same
   backend over HTTP), plus localhost dev. **`CORS_ALLOWED_ORIGINS`** (comma-separated) ADDS extra origins
   (e.g. a future custom domain) — it **merges with, no longer replaces, the defaults** (do not regress:
@@ -1564,7 +1564,7 @@ can be tested on a real URL before shipping to prod:
   so only FRONTEND changes are testable and any test games/accounts hit the real DB
   (use vs-AI games to stay private).
 - **Enabling code (now on main):** `webapp/vite.config.js` reads `base` from
-  `VITE_BASE` (default `/WebProjects/` for GitHub Pages); Vite was upgraded **5→6**
+  `VITE_BASE` (default `/` — the GitHub Pages user site serves at the root); Vite was upgraded **5→6**
   (Cloudflare auto-config requires ≥6); `webapp/wrangler.jsonc`
   (`name: webprojectsstaging`, `assets: ./dist`, SPA) drives the Worker deploy and is
   ignored by GitHub Pages.

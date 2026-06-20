@@ -5,8 +5,8 @@ Lives in core so both the composition root (app.py) and the mounted sub-apps
 """
 import os
 
-# Origins allowed to call the API from a browser. The production frontend is
-# GitHub Pages at https://forry4.github.io/WebProjects/ (origin = scheme+host, no
+# Origins allowed to call the API from a browser. The production frontend is the
+# GitHub Pages user site at https://forry4.github.io/ (origin = scheme+host, no
 # path); the Cloudflare staging mirror (webprojectsstaging.forry4.workers.dev)
 # reuses this same backend, so it must be allowed too; plus the local Vite dev
 # server and backend for development. CORS_ALLOWED_ORIGINS (comma-separated) ADDS

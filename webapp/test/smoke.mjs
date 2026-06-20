@@ -11,8 +11,8 @@ import { chromium } from "playwright";
 
 const webappDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = 4188;
-// Default build base is /WebProjects/ (vite.config); preview serves there.
-const url = `http://localhost:${PORT}/WebProjects/`;
+// Default build base is / (vite.config); preview serves at the root.
+const url = `http://localhost:${PORT}/`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function run(cmd, args, env) {
@@ -40,8 +40,8 @@ async function launchBrowser() {
 let code = 1;
 let preview;
 try {
-	// Build with the default base (/WebProjects/); preview serves it there. The JS
-	// is identical across bases, so a render crash is caught regardless.
+	// Build with the default base (/); preview serves it at the root. The JS is
+	// identical across bases, so a render crash is caught regardless.
 	await run("npx", ["vite", "build"], {});
 	preview = spawn("npx", ["vite", "preview", "--port", String(PORT), "--strictPort"],
 		{ cwd: webappDir, stdio: "ignore", shell: true });
