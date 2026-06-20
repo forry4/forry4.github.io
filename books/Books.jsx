@@ -13,6 +13,32 @@ const coverUrl = (id, size) => id
 	? `https://covers.openlibrary.org/b/id/${id}-${size}.jpg?default=false`
 	: "";
 
+// Open Library covers are served through TWO 302 redirects (-> archive.org) and cached
+// for only 3 hours, so they re-fetch slowly every few hours. A bookshelf is stable, so we
+// bake each cover into the saved record once: fetch it (CORS is open: ACAO *), downscale to
+// the small size it's shown at, and store it as a self-contained data: URI in cover_url.
+// Saved covers then render instantly from the list payload with no external request.
+// Any failure (offline / a host without CORS) falls back to keeping the original URL.
+const COVER_MAX_W = 128, COVER_MAX_H = 192;
+async function inlineCover(url) {
+	if (!url || url.startsWith("data:")) return url || "";
+	try {
+		const res = await fetch(url, { mode: "cors" });
+		if (!res.ok) return url;
+		const bmp = await createImageBitmap(await res.blob());
+		const scale = Math.min(1, COVER_MAX_W / bmp.width, COVER_MAX_H / bmp.height);
+		const w = Math.max(1, Math.round(bmp.width * scale));
+		const h = Math.max(1, Math.round(bmp.height * scale));
+		const canvas = document.createElement("canvas");
+		canvas.width = w; canvas.height = h;
+		canvas.getContext("2d").drawImage(bmp, 0, 0, w, h);
+		bmp.close && bmp.close();
+		return canvas.toDataURL("image/jpeg", 0.82);
+	} catch {
+		return url;  // keep the remote URL if we can't inline it
+	}
+}
+
 function Stars({ value }) {
 	return (
 		<span className="bk-stars" aria-label={`${value} out of 5 stars`}>
@@ -208,8 +234,13 @@ export default function Books({ authUser, onExit }) {
 	const save = async () => {
 		setSaving(true);
 		try {
+			// Bake any remote covers into the records (downscaled data: URIs) so they load
+			// instantly next time instead of re-fetching through Open Library's redirects.
+			const inlined = await Promise.all(books.map(async b =>
+				({ ...b, cover_url: await inlineCover(b.cover_url) })));
+			setBooks(inlined);
 			const payload = {
-				books: books.map(({ id, title, author, rating, note, cover_url }) =>
+				books: inlined.map(({ id, title, author, rating, note, cover_url }) =>
 					({ id, title, author, rating, note, cover_url })),
 			};
 			const res = await fetch(`${HTTP_BASE}/books`, {
@@ -246,8 +277,11 @@ export default function Books({ authUser, onExit }) {
 	const saveSugg = async () => {
 		setSuggSaving(true);
 		try {
+			const inlined = await Promise.all(sugg.map(async s =>
+				({ ...s, cover_url: await inlineCover(s.cover_url) })));
+			setSugg(inlined);
 			const payload = {
-				suggestions: sugg.map(({ id, title, author, cover_url, blurb }) =>
+				suggestions: inlined.map(({ id, title, author, cover_url, blurb }) =>
 					({ id, title, author, cover_url, blurb })),
 			};
 			const res = await fetch(`${HTTP_BASE}/books/suggestions`, {
