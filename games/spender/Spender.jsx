@@ -1684,14 +1684,53 @@ export default function SpenderApp() {
 						);
 					})()}
 
-					{myGames.length > 0 && (
+					<div className="browser-section">
+						<div className="section-hd">
+							<span className="section-title">Open Games</span>
+							<span className="small-muted">{winPoints === 21 ? "Long (21)" : "Classic (15)"} - waiting for a second player</span>
+						</div>
+						{browserLoading && openGames.length === 0 ? (
+							<div className="empty-state"><span className="spinner" />Loading…</div>
+						) : openGames.filter(g => (g.win_points || 15) === winPoints).length === 0 ? (
+							<div className="empty-state">No open {winPoints === 21 ? "Long (21)" : "Classic (15)"} games right now. Create one!</div>
+						) : (
+							<div className="game-cards">
+								{openGames.filter(g => (g.win_points || 15) === winPoints).map(g => (
+									<div key={g.id} className="game-card">
+										<div className="game-card-info">
+											<div className="game-card-title">
+												{g.host_id === myId ? "Your game" : `${g.host_name}'s game`}
+											</div>
+											<div className="game-card-meta">{g.id} · {timeAgo(g.created_at)}</div>
+										</div>
+										<div className="game-card-actions">
+											{g.host_id === myId
+												? <>
+													<button className="btn btn-outline btn-sm" onClick={() => handleContinue(g.id)}>
+														Return
+													</button>
+													<button className="btn btn-ghost btn-sm" onClick={() => handleCancel(g.id)}>
+														Cancel
+													</button>
+												</>
+												: <button className="btn btn-gold btn-sm" onClick={() => handleJoinGame(g.id)}>
+													Join
+												</button>}
+										</div>
+									</div>
+								))}
+							</div>
+						)}
+					</div>
+
+					{myGames.some(g => g.status === "playing") && (
 						<div className="browser-section">
 							<div className="section-hd">
-								<span className="section-title">Your Games</span>
-								<span className="small-muted">{myGames.length} active</span>
+								<span className="section-title">Active Games</span>
+								<span className="small-muted">{myGames.filter(g => g.status === "playing").length} in progress</span>
 							</div>
 							<div className="game-cards">
-								{myGames.map(g => (
+								{myGames.filter(g => g.status === "playing").map(g => (
 									<div key={g.id} className="game-card">
 										<div className="game-card-info">
 											<div className="game-card-title">
@@ -1721,40 +1760,6 @@ export default function SpenderApp() {
 							</div>
 						</div>
 					)}
-
-					<div className="browser-section">
-						<div className="section-hd">
-							<span className="section-title">Open Games</span>
-							<span className="small-muted">{winPoints === 21 ? "Long (21)" : "Classic (15)"} - waiting for a second player</span>
-						</div>
-						{browserLoading && openGames.length === 0 ? (
-							<div className="empty-state"><span className="spinner" />Loading…</div>
-						) : openGames.filter(g => (g.win_points || 15) === winPoints).length === 0 ? (
-							<div className="empty-state">No open {winPoints === 21 ? "Long (21)" : "Classic (15)"} games right now. Create one!</div>
-						) : (
-							<div className="game-cards">
-								{openGames.filter(g => (g.win_points || 15) === winPoints).map(g => (
-									<div key={g.id} className="game-card">
-										<div className="game-card-info">
-											<div className="game-card-title">
-												{g.host_id === myId ? "Your game" : `${g.host_name}'s game`}
-											</div>
-											<div className="game-card-meta">{g.id} · {timeAgo(g.created_at)}</div>
-										</div>
-										<div className="game-card-actions">
-											{g.host_id === myId
-												? <button className="btn btn-ghost btn-sm" onClick={() => handleCancel(g.id)}>
-													Cancel
-												</button>
-												: <button className="btn btn-gold btn-sm" onClick={() => handleJoinGame(g.id)}>
-													Join
-												</button>}
-										</div>
-									</div>
-								))}
-							</div>
-						)}
-					</div>
 				</div>
 				{toast && <div className="toast">{toast}</div>}
 			</div>
