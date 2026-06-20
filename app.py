@@ -92,3 +92,12 @@ try:
     LOG.info("mounted Castles of Crimson at /coc")
 except Exception as _coc_err:  # pragma: no cover - optional package
     LOG.warning("Castles of Crimson not mounted: %s", _coc_err)
+
+# Where Wolf? — its self-contained sub-app mounted under /werewolf. Same defensive
+# guard: an import error here must not take down the rest of the backend.
+try:
+    from games.wherewolf.main import werewolf_app
+    app.mount("/werewolf", werewolf_app)
+    LOG.info("mounted Where Wolf? at /werewolf")
+except Exception as _ww_err:  # pragma: no cover - optional package
+    LOG.warning("Where Wolf? not mounted: %s", _ww_err)

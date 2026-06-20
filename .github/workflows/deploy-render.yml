@@ -16,6 +16,7 @@ on:
       - 'games/spender/ai/weights*.json'   # variants A/B/C/C2 — loaded at import (main.load_weights)
       - 'games/spender/ai/value_model.json'   # value-leaf model — loaded at import (main.load_value_model)
       - 'games/castles_of_crimson/**/*.py'
+      - 'games/wherewolf/**/*.py'
   workflow_dispatch:
 
 jobs:
