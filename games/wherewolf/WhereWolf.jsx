@@ -199,9 +199,27 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   const narrateRef = useRef(effNarrate);
   narrateRef.current = effNarrate;
 
+  // bounded auto-reconnect attempts (reset to 0 once a socket opens)
+  const reconnectTries = useRef(0);
+
   // ── socket ──
   const handleMessage = useCallback((msg) => {
-    if (msg.type === "error") { setToast(msg.message || "error"); return; }
+    if (msg.type === "error") {
+      const m = msg.message || "error";
+      setToast(m);
+      // A dead room / bad token must not trap us in an endless reconnect: forget
+      // the stale resume pointer and drop cleanly back to the lobby.
+      if (/invalid token|no such room/i.test(m)) {
+        reconnectTries.current = 99;
+        try {
+          const rid = localStorage.getItem("werewolf_roomId");
+          if (rid) localStorage.removeItem(`werewolf_token_${rid}_${myId}`);
+          localStorage.removeItem("werewolf_roomId");
+        } catch {}
+        setScreen("lobby");   // the lobby effect refreshes the games list
+      }
+      return;
+    }
     if (msg.type === "narrate") {
       setCaption(msg.text || "");
       if (narrateRef.current && typeof window !== "undefined" && window.speechSynthesis && msg.text) {
@@ -255,6 +273,24 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   // clear transient selection when the step changes
   useEffect(() => { setCenterSel([]); setTmSel([]); }, [step, phase]);
 
+  // Auto-reconnect if the socket drops while we expect to be in a room (network
+  // blip, laptop sleep, or a connection getting replaced). Bounded retries spaced
+  // out; resets once a socket re-opens. A manual Reconnect button is also shown.
+  useEffect(() => {
+    if (connected) { reconnectTries.current = 0; return; }
+    if (screen !== "waiting" && screen !== "game") return;
+    let rid = roomId;
+    try { rid = rid || localStorage.getItem("werewolf_roomId"); } catch {}
+    if (!rid || reconnectTries.current >= 6) return;
+    const t = setTimeout(() => {
+      reconnectTries.current += 1;
+      let tok = null;
+      try { tok = localStorage.getItem(`werewolf_token_${rid}_${myId}`); } catch {}
+      connect(`${WW_WS}/${rid}/${myId}`, tok ? { action: "reconnect", token: tok } : { action: "join", name: playerName });
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [connected, screen, roomId, myId]); // eslint-disable-line
+
   // Wall-clock tick for the night/day countdowns (hook must run unconditionally,
   // BEFORE the lobby/waiting early returns — server deadlines are authoritative).
   const now = useNow(phase === "night" || phase === "day");
@@ -279,11 +315,23 @@ export default function WhereWolf({ myId, authUser, onExit }) {
     try { localStorage.setItem("werewolf_roomId", rid); } catch {}
     connect(`${WW_WS}/${rid}/${myId}`, tok ? { action: "reconnect", token: tok } : { action: "join", name: playerName });
   };
+  // Step out to the lobby but STAY a member of the room (socket only drops): the
+  // resume pointer + reconnect token are kept so the Resume card / Your Games can
+  // bring you right back. Use Cancel (host) to actually dispose of an open game.
   const leaveToLobby = () => {
-    try { send({ action: "abandon" }); } catch {}
     disconnect();
-    try { localStorage.removeItem("werewolf_roomId"); } catch {}
-    setRoomData(null); setRoomId(""); setCaption(""); setScreen("lobby"); fetchGames();
+    setRoomData(null); setCaption(""); setScreen("lobby"); fetchGames();
+  };
+  // Force a fresh connection to the current room (manual recovery from a drop).
+  const reconnectNow = (ridArg) => {
+    let rid = ridArg || roomId;
+    try { rid = rid || localStorage.getItem("werewolf_roomId"); } catch {}
+    if (!rid) return;
+    let tok = null;
+    try { tok = localStorage.getItem(`werewolf_token_${rid}_${myId}`); } catch {}
+    reconnectTries.current = 0;
+    setRoomId(rid);
+    connect(`${WW_WS}/${rid}/${myId}`, tok ? { action: "reconnect", token: tok } : { action: "join", name: playerName });
   };
   const handleCancel = (id) => {
     const params = new URLSearchParams();
@@ -368,13 +416,29 @@ export default function WhereWolf({ myId, authUser, onExit }) {
             <button className="ww-btn ghost sm" onClick={fetchGames}>↻</button>
           </div>
 
-          {savedId && savedTok && (
+          {savedId && savedTok && !myGames.some((g) => g.id === savedId) && (
             <>
               <div className="ww-section">Resume</div>
               <div className="ww-card">
                 <div><div className="ww-card-title">Game in progress</div><div className="ww-card-meta">{savedId}</div></div>
                 <button className="ww-btn gold sm" onClick={() => resume(savedId)}>Resume</button>
               </div>
+            </>
+          )}
+
+          {myGames.length > 0 && (
+            <>
+              <div className="ww-section">Your Games</div>
+              {myGames.map((g) => (
+                <div className="ww-card" key={g.id}>
+                  <div><div className="ww-card-title">{g.status === "open" ? "Waiting room" : "In progress"}</div>
+                    <div className="ww-card-meta">{g.id} · {g.players} player{g.players === 1 ? "" : "s"}{g.you_are_host ? " · host" : ""}</div></div>
+                  <div className="ww-row" style={{ gap: 6 }}>
+                    <button className="ww-btn gold sm" onClick={() => resume(g.id)}>Rejoin</button>
+                    {g.you_are_host && g.status === "open" && <button className="ww-btn ghost sm" onClick={() => handleCancel(g.id)}>Cancel</button>}
+                  </div>
+                </div>
+              ))}
             </>
           )}
 
@@ -409,7 +473,10 @@ export default function WhereWolf({ myId, authUser, onExit }) {
           <div className="ww-top">
             <div className="ww-top-left"><button className="ww-btn ghost sm" onClick={leaveToLobby}>← Leave</button>
               <span className="ww-title">Where Wolf?</span></div>
-            <span className="ww-user">{playerName}</span>
+            <div className="ww-row" style={{ gap: 8 }}>
+              {!connected && <button className="ww-btn sm" onClick={() => reconnectNow()} title="Reconnect">⟳ Reconnecting…</button>}
+              <span className="ww-user">{playerName}</span>
+            </div>
           </div>
           <div className="ww-hero"><p className="ww-card-meta">Share this code</p><div className="ww-code">{roomId}</div></div>
           <div className="ww-section">Players ({ids.length}/{roomData?.max_players || 10})</div>
@@ -511,6 +578,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
           <div className="ww-top-left"><button className="ww-btn ghost sm" onClick={leaveToLobby}>← Leave</button>
             <span className="ww-title">Where Wolf?</span></div>
           <div className="ww-row" style={{ gap: 8 }}>
+            {!connected && <button className="ww-btn sm" onClick={() => reconnectNow()} title="Reconnect">⟳ Reconnecting…</button>}
             <button className="ww-btn ghost sm" title="Narration voice" onClick={toggleNarrate}>{effNarrate ? "🔊" : "🔇"}</button>
             {myDealt && phase !== "over" && <span className="ww-you">You: <b>{roleName(myDealt)}</b></span>}
           </div>
