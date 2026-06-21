@@ -57,6 +57,20 @@ SERVE_TIME = 4.5      # serving wall-clock budget (s); leaves margin under the 5
 SERVE_MIN_SIMS = 32   # always run at least this many sims before the clock may stop the search
 SERVE_MAX_SIMS = 6000 # hard cap so a fast box can't spin unboundedly inside the budget
 
+# ─── endgame deeper search (Gap B) ───────────────────────────────────────────────────────────
+# The decisive finish (final round / near-win) is a small, short tree — the cheapest place to search
+# deeper, and where reaching real terminals matters most (terminals are exactly tiebreak-aware). Spend
+# more there: offline a sim MULTIPLIER, serving a (longer) endgame wall-clock budget. Defaults = no-op.
+ENDGAME_NEAR = 3          # "endgame" = final round triggered OR a seat within this many pts of the win
+ENDGAME_SIM_MULT = 1.0    # multiply the (offline/fixed) sim budget for an endgame root. 1 = byte-identical
+ENDGAME_SERVE_TIME = 4.5  # serving wall-clock for endgame moves (>= SERVE_TIME). == SERVE_TIME = no change
+
+
+def _is_endgame(s: E.State) -> bool:
+    """True once the game is in its decisive finish: the final round has triggered, or either seat is
+    within ENDGAME_NEAR points of the win threshold (so the next buy could trigger it)."""
+    return s.final_trigger >= 0 or max(s.points[0], s.points[1]) >= s.win_points - ENDGAME_NEAR
+
 _RNG = random.Random(0x5EA5C4)   # determinization shuffle (process-local; advanced across calls)
 
 # ─── leaf-evaluator swap (experiment): "vstate" = the deployed v_state V(state); "distill" = the
@@ -208,9 +222,14 @@ def choose_action(s: E.State, seat: int | None = None, *, sims: int | None = Non
     if s.phase != E.PLAY or len(legal) == 1:
         return H3.choose_action(s, seat)
     if time_limit is not None:
+        if ENDGAME_SERVE_TIME > time_limit and _is_endgame(s):   # spend longer on the decisive finish
+            time_limit = ENDGAME_SERVE_TIME
         visits = _run_search_timed(s, seat, time_limit)
     else:
-        visits = _run_search(s, seat, SIMS if sims is None else sims)
+        n = SIMS if sims is None else sims
+        if ENDGAME_SIM_MULT != 1.0 and _is_endgame(s):           # deeper offline search in the endgame
+            n = int(round(n * ENDGAME_SIM_MULT))
+        visits = _run_search(s, seat, n)
     return max(legal, key=lambda a: visits[a])
 
 

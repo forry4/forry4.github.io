@@ -58,10 +58,14 @@ KNOBS = {
     "SCALE":        (v_state, [6.0, 8.0, 10.0]),
     "WIN_CONVEX":   (v_state, [0.0, 0.1, 0.2]),
     "PROGRESS_TOPK": (v_state, [1, 2, 3]),
-    "POLICY_TEMP":  (vsearch, [0.5, 0.7, 1.0]),
-    "C_PUCT":       (vsearch, [1.0, 1.5, 2.0]),
-    "H3_PICK_W":    (vsearch, [1.0, 1.5, 2.5]),
-    "RESERVE_PRIOR_W": (vsearch, [0.3, 0.5, 0.7]),
+    "POLICY_TEMP":  (vsearch, [0.4, 0.55, 0.7, 0.85, 1.0]),
+    "C_PUCT":       (vsearch, [1.0, 1.25, 1.5, 1.75, 2.0]),
+    "H3_PICK_W":    (vsearch, [1.0, 1.5, 2.0, 2.5]),
+    "RESERVE_PRIOR_W": (vsearch, [0.3, 0.4, 0.5, 0.6, 0.7]),
+    # endgame knobs (Gap A/B) — swept finely at the prod operating point (sims>=400) where the earlier
+    # sims=160 screen was a wash; included so a real prod-sims optimum (if any) is found, not assumed.
+    "ENDGAME_SIM_MULT":   (vsearch, [1.0, 1.5, 2.0, 2.5, 3.0]),
+    "ENDGAME_TIEBREAK_W": (v_state, [0.0, 0.02, 0.04, 0.06]),
 }
 
 _DIR = os.path.dirname(__file__)
@@ -193,7 +197,15 @@ def main():
     ap.add_argument("--step", type=int, default=100_000)
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 1))
     ap.add_argument("--win-points", type=int, default=15, help="retune for games to this many points (15/21)")
+    ap.add_argument("--knobs", default="", help="comma-separated subset of KNOBS to sweep (default: all). "
+                                                "Non-swept knobs stay pinned at their committed defaults.")
     args = ap.parse_args()
+
+    sweep_names = [k.strip() for k in args.knobs.split(",") if k.strip()] if args.knobs else list(KNOBS)
+    unknown = [k for k in sweep_names if k not in KNOBS]
+    if unknown:
+        raise SystemExit(f"unknown knobs: {unknown}")
+    sweep = {k: KNOBS[k] for k in sweep_names}
 
     global _POOL, _WORKERS, _SIMS, _WP, FROZEN
     _WORKERS = max(1, args.workers)
@@ -213,9 +225,10 @@ def main():
     bw = score(best, args.holdout_n, args.hold_seed)        # == 0.5 (candidate == frozen)
     _log(f"[start] best==frozen vs-frozen holdout = {bw:.4f} (expect ~0.5)", fh)
 
+    _log(f"[sweep] knobs: {sweep_names}", fh)
     for p in range(args.max_passes):
         improved = False
-        for knob, (mod, vals) in KNOBS.items():
+        for knob, (mod, vals) in sweep.items():
             cur = best[knob]
             scored = []
             for v in vals:

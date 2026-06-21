@@ -68,6 +68,17 @@ RESERVE_PENALTY = 0.0  # tempo/waste cost subtracted per RESERVED card a seat ho
                        # with no cost for the turn it spends -> the measured OVER-RESERVE (S reserves
                        # ~4x H3, ~56% never bought). Default 0 = byte-identical; swept by the fix expt.
 
+# ─── endgame fewest-cards tiebreak (Gap A) ───────────────────────────────────────────────────
+# The win is decided by points, then FEWEST purchased cards. STAND scores raw points and is blind to
+# the card count, so two positions with equal points but different card counts evaluate identically —
+# the leaf can't tell that an extra 0-point card LOSES the tiebreak. (A non-terminal leaf only; at a
+# true terminal `value` already returns the engine's exact tiebreak-aware win/loss.) This term, gated
+# tightly to the endgame, nudges the side-to-move diff toward holding fewer cards when the tiebreak is
+# actually live. Default W=0 = byte-identical.
+ENDGAME_TIEBREAK_W = 0.0   # points-equivalent value of a 1-card tiebreak advantage, at full gate
+ENDGAME_TIE_ZONE = 5.0     # ramps in over the last N points before the win (matches the convex zone)
+ENDGAME_TIE_GAP = 3.0      # fades to 0 as the point gap exceeds this (the tiebreak only decides near-ties)
+
 
 def _points_term(val: V.Valuation, seat: int) -> float:
     """Realized VP plus a convex kicker in the winning zone (>10 pts), where each point is worth
@@ -180,6 +191,29 @@ def _stand(val: V.Valuation, seat: int, observer: int) -> float:
     return stand
 
 
+def _tiebreak_delta(val: V.Valuation, me: int, opp: int) -> float:
+    """Endgame fewest-cards tiebreak as a points-equivalent bonus to `me`'s standing (a CROSS-seat
+    term, so it lives in the diff, not in per-seat STAND). Zero unless the game is near the win
+    (someone in the convex zone) AND the seats are near-tied on points — exactly when pts->fewest-cards
+    actually decides. Rewards `me` for holding fewer purchased cards than `opp`."""
+    if not ENDGAME_TIEBREAK_W:
+        return 0.0
+    s = val.s
+    lead = s.points[me] if s.points[me] > s.points[opp] else s.points[opp]
+    zone = (lead - (s.win_points - ENDGAME_TIE_ZONE)) / ENDGAME_TIE_ZONE
+    if zone <= 0.0:
+        return 0.0
+    if zone > 1.0:
+        zone = 1.0
+    gap = s.points[me] - s.points[opp]
+    if gap < 0:
+        gap = -gap
+    close = 1.0 - gap / ENDGAME_TIE_GAP
+    if close <= 0.0:
+        return 0.0
+    return ENDGAME_TIEBREAK_W * zone * close * (s.purchased_n[opp] - s.purchased_n[me])
+
+
 def components(s, seat: int | None = None) -> dict:
     """Per-component breakdown for both seats (sanity checks, the discrimination test, the overlay).
     Keys: points/engine/progress/noble/econ for me & opp, plus stand_me/stand_opp/value."""
@@ -196,9 +230,11 @@ def components(s, seat: int | None = None) -> dict:
         out[f"progress_{tag}"] = _progress(tg)
         out[f"noble_{tag}"] = _noble_stand(val, st)
         out[f"econ_{tag}"] = _econ(val, st, tg)
+    tb = _tiebreak_delta(val, me, opp)
     out["stand_me"] = _stand(val, me, me)
     out["stand_opp"] = _stand(val, opp, me)
-    out["value"] = math.tanh((out["stand_me"] - out["stand_opp"]) / SCALE)
+    out["tiebreak_me"] = tb
+    out["value"] = math.tanh((out["stand_me"] + tb - out["stand_opp"]) / SCALE)
     return out
 
 
@@ -207,7 +243,8 @@ def value_with(val: V.Valuation, seat: int) -> float:
     the policy prior (avoids building it twice per leaf). The state is `val.s`; assumes it is
     non-terminal (the MCTS leaf is never terminal: leaf_batch backs terminals up directly)."""
     me = seat
-    return math.tanh((_stand(val, me, me) - _stand(val, 1 - me, me)) / SCALE)
+    opp = 1 - me
+    return math.tanh((_stand(val, me, me) - _stand(val, opp, me) + _tiebreak_delta(val, me, opp)) / SCALE)
 
 
 def value(s, seat: int | None = None) -> float:
