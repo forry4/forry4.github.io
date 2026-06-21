@@ -789,7 +789,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
       (phase === "day" && !game.locked?.[myId]) ||
       (phase === "night" && myActiveStep && step === "seer" && !isMe) ||
       (phase === "night" && myActiveStep && step === "robber" && !isMe) ||
-      (phase === "night" && myActiveStep && step === "troublemaker");
+      (phase === "night" && myActiveStep && step === "troublemaker" && !isMe);   // swaps two OTHERS
     const selected = tmSel.includes(pid);
     const revealed = phase === "over" && (game.deaths || []).includes(pid);
     return (
