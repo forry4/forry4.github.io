@@ -1245,6 +1245,22 @@ website variant **"S"**.
   deployed Render CPU runs would only spread the budget thinner). Re-confirms the two remaining live levers:
   search DEPTH (needs a faster leaf/engine → more sims) and the production sim budget. Tooling:
   `config_selfgate.py` (generic config-vs-frozen self-gate, screen → fresh → panel guard).
+- **Search-efficiency / "fewer sims needed" (sharper prior) — REAL low-sims effect, but NOT shippable; do
+  not relitigate (June 2026).** Idea: a sharper prior concentrates visits faster, so the deployed sims-starved
+  S plays better at a fixed (small) budget. Self-gate vs frozen-S **at sims=80** (below the original
+  sims=120–160 tuning regime) found **`C_PUCT=1.0` (less exploration) beats the current 1.5**: fresh-seed
+  0.531 (consistent with its 0.563 screen) AND panel **+0.025 min, up on all four matchups** (RPS-clean) — a
+  genuine, non-artifact win that confirms the principle (when sims are scarce, commit faster). `POLICY_TEMP=0.5`
+  (0.49) and `H3_PICK_W=2.5` (0.44) failed even at 80 — it's specifically PUCT exploration, not prior shape.
+  **But it's a LOW-SIMS-ONLY win below the deployed operating point:** the maximin tuning already found
+  `C_PUCT=1.5` optimal at sims=120–160 and transferring to 400, so there's a **crossover ~80–160**, and the
+  deployed box runs ~380 midgame sims (more after Cython) — well above it. Shipping `1.0` globally would help
+  only rare very-low-sim moves and HURT the typical midgame → net neutral-to-negative for deployed. The only
+  way to capture it is a **sim-budget-conditional `C_PUCT`** (sims unknown until after the search, box speed
+  varies — too fiddly for a sub-significant edge). **Verdict: keep `C_PUCT=1.5`; search-efficiency tuning
+  saturates at the operating point too.** Transposition caching was dismissed un-tested (determinization
+  reshuffles boards per sim → near-zero exact-state hit rate in Splendor's wide state space). Tooling:
+  `config_selfgate.py --sims N`.
 - **Path C (distill V+search → numpy net) PROTOTYPED & the bottleneck PINNED to FEATURES, not arch (June
   2026).** Tooling: `vsearch_distill.py` (harvest `(features, V_static, V_search, outcome)` from S-vs-S +
   ridge/MLP distill, with a `--enriched` mode + `--cache`), `attn_distill.py` (card-set attention pre-check on
