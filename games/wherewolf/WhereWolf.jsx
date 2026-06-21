@@ -10,21 +10,37 @@ const WW_HTTP = WS_RAW.replace(/^ws/, "http").replace(/\/ws$/, "/werewolf");
 // (mason = "MA"); collisions (tanner/troublemaker both "T") are intentional —
 // the physical tokens collide too.
 const ROLE_META = {
-  werewolf: { name: "Werewolf", color: "#b3322f" },
-  villager: { name: "Villager", color: "#5b8c5a" },
-  seer: { name: "Seer", color: "#6a4ea3" },
-  robber: { name: "Robber", color: "#b8863b" },
-  troublemaker: { name: "Troublemaker", color: "#c25b8a" },
-  tanner: { name: "Tanner", color: "#8a6d3b" },
-  drunk: { name: "Drunk", color: "#7a8aa0" },
-  hunter: { name: "Hunter", color: "#7d5a3c" },
-  mason: { name: "Mason", color: "#3f8f8f" },
-  insomniac: { name: "Insomniac", color: "#a05a7a" },
-  minion: { name: "Minion", color: "#9a3a3a" },
-  doppelganger: { name: "Doppelganger", color: "#6a6aa0" },
+  werewolf: { name: "Werewolf", color: "#b3322f", team: "werewolf",
+    desc: "Wakes to see the other werewolves. The werewolf team wins if no werewolf is killed." },
+  villager: { name: "Villager", color: "#5b8c5a", team: "village",
+    desc: "No night action — just a townsperson trying to root out the werewolves." },
+  seer: { name: "Seer", color: "#6a4ea3", team: "village",
+    desc: "May look at one other player's card, or two of the three center cards." },
+  robber: { name: "Robber", color: "#b8863b", team: "village",
+    desc: "May swap their card with another player's, then look at their new card." },
+  troublemaker: { name: "Troublemaker", color: "#c25b8a", team: "village",
+    desc: "May swap two OTHER players' cards — without looking at either." },
+  tanner: { name: "Tanner", color: "#8a6d3b", team: "tanner",
+    desc: "Hates their job: wins only by being killed, and a tanner death denies the werewolves their win." },
+  drunk: { name: "Drunk", color: "#7a8aa0", team: "village",
+    desc: "Swaps their card with a center card — blindly, never seeing the new one." },
+  hunter: { name: "Hunter", color: "#7d5a3c", team: "village",
+    desc: "If the hunter is killed, the player they voted for dies too." },
+  mason: { name: "Mason", color: "#3f8f8f", team: "village",
+    desc: "Wakes to see the other Mason (or that they're alone)." },
+  insomniac: { name: "Insomniac", color: "#a05a7a", team: "village",
+    desc: "Wakes at the end of the night to look at their own (possibly swapped) card." },
+  minion: { name: "Minion", color: "#9a3a3a", team: "werewolf",
+    desc: "Sees the werewolves and wins with them — but is NOT a werewolf, so killing the minion doesn't save the village." },
+  doppelganger: { name: "Doppelganger", color: "#6a6aa0", team: "village",
+    desc: "Copies another player's role and acts as it. (Not available yet.)" },
 };
 const roleName = (r) => (r && ROLE_META[r]?.name) || (r ? r : "Unknown");
 const roleColor = (r) => (r && ROLE_META[r]?.color) || "#3a342a";
+const roleDesc = (r) => (r && ROLE_META[r]?.desc) || "";
+// Public token letter for a role (mirror of roles.TOKEN_LETTERS — mason is "MA" so
+// it doesn't collide with minion's "M").
+const tokenLetter = (r) => (r === "mason" ? "MA" : (r ? r[0].toUpperCase() : "?"));
 
 // On the small cards, Cinzel renders as wide caps, so the longer role names don't
 // fit one line. Insert a soft break opportunity (<wbr>) at a clean syllable so a
@@ -36,14 +52,16 @@ const cardLabel = (r) => {
   return at ? <>{n.slice(0, at)}<wbr />{n.slice(at)}</> : n;
 };
 
-// Seat cards scale down as the table fills so up to 10 still ring the circle on a
-// phone (card height must stay under the chord between adjacent seats), while the
-// common 3–7 player games get big, readable cards. Returns inline CSS vars set on
-// the table; the cards read them via var(--pcw/--pch/--pcf).
-const cardVars = (n) => {
-  const [w, h, f] = n <= 7 ? ["76px", "98px", "11.5px"]
-                  : n <= 9 ? ["66px", "86px", "10.5px"]
-                  : ["56px", "76px", "10px"];
+// Seat cards scale down as the table fills so up to 10 still ring the circle (card
+// height must stay under the chord between adjacent seats), while the common 3–7
+// player games get big, readable cards. On a phone the whole table is smaller and
+// the ellipse is tall, so the tiers are tighter. Returns inline CSS vars the cards
+// read via var(--pcw/--pch/--pcf).
+const cardVars = (n, mobile) => {
+  const tiers = mobile
+    ? (n <= 7 ? ["58px", "76px", "10px"] : n <= 9 ? ["52px", "68px", "9.5px"] : ["46px", "60px", "9px"])
+    : (n <= 7 ? ["76px", "98px", "11.5px"] : n <= 9 ? ["66px", "86px", "10.5px"] : ["56px", "76px", "10px"]);
+  const [w, h, f] = tiers;
   return { "--pcw": w, "--pch": h, "--pcf": f };
 };
 
@@ -103,6 +121,21 @@ function useNow(active) {
     return () => clearInterval(t);
   }, [active]);
   return now;
+}
+
+// ─── Phone breakpoint (drives the smaller seat cards; the table itself reshapes
+// to a tall ellipse via the @media block). Mirrors the 600px CSS breakpoint. ──
+function useIsMobile() {
+  const [m, setM] = useState(() => typeof window !== "undefined" && !!window.matchMedia?.("(max-width:600px)").matches);
+  useEffect(() => {
+    const mq = window.matchMedia?.("(max-width:600px)");
+    if (!mq) return;
+    const fn = () => setM(mq.matches);
+    fn();
+    mq.addEventListener?.("change", fn);
+    return () => mq.removeEventListener?.("change", fn);
+  }, []);
+  return m;
 }
 
 // ─── Styles (baseCss first; NEVER put a backtick inside this template) ───────
@@ -179,7 +212,10 @@ const css = baseCss + `
 .ww-ccard.selected{box-shadow:0 0 0 3px var(--gold-light)}
 .ww-tokens{display:flex;gap:5px;flex-wrap:wrap;justify-content:center;max-width:230px}
 .ww-token{width:26px;height:26px;border-radius:999px;border:1px solid #6a5a3a;background:#2a2418;color:var(--gold-light);
-  display:flex;align-items:center;justify-content:center;font-family:Cinzel,serif;font-size:11px;font-weight:700}
+  display:flex;align-items:center;justify-content:center;font-family:Cinzel,serif;font-size:11px;font-weight:700;cursor:pointer;user-select:none}
+.ww-token:hover{border-color:var(--gold);color:#fff}
+.ww-token-info{max-width:280px;margin-top:2px;text-align:center;font-family:Crimson Pro,serif;font-size:12px;line-height:1.25;
+  color:var(--text-dim);background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:5px 9px;cursor:pointer}
 
 /* action bar */
 .ww-actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:center;min-height:44px}
@@ -211,6 +247,24 @@ const css = baseCss + `
 .ww-cap-btn:hover:not(:disabled){border-color:var(--gold);color:var(--gold-light)}
 .ww-cap-btn:disabled{opacity:.35;cursor:not-allowed}
 .ww-rp-chip{border:1px solid var(--border);border-radius:999px;padding:3px 9px;font-size:12px;font-family:Cinzel,serif}
+
+/* ── Phone: use the whole screen — the table becomes a TALL ellipse so YOU sit at
+   the very bottom and everyone else rings the edges; cards shrink (see cardVars). ── */
+@media(max-width:600px){
+  .ww-wrap{min-height:100dvh;padding:8px 6px 6px;gap:8px}
+  .ww-banner{font-size:14px;min-height:24px}
+  .ww-sub{font-size:12px;min-height:16px}
+  /* the game's table area fills the space between the sub-prompt and the action bar */
+  .ww-table-wrap{flex:1;min-height:0;width:100%;gap:4px}
+  .ww-table{width:100%;height:auto;flex:1;min-height:0;aspect-ratio:auto;margin:0}
+  /* center cluster sits a bit higher so the tall ellipse stays balanced */
+  .ww-center{top:40%;gap:5px}
+  .ww-ccard{width:50px;height:66px;font-size:10px}
+  .ww-tokens{gap:4px;max-width:96vw}
+  .ww-token{width:23px;height:23px;font-size:10px}
+  .ww-seat .seat-name{font-size:10px;max-width:64px}
+  .ww-actions{min-height:38px;gap:8px}
+}
 `;
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -233,6 +287,8 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   const [centerSel, setCenterSel] = useState([]);     // seer: selected center indices
   const [tmSel, setTmSel] = useState([]);             // troublemaker: selected pids
   const [pickDeck, setPickDeck] = useState(null);     // host's local role-picker deck
+  const [tokenInfo, setTokenInfo] = useState(null);   // role whose info is shown (token tap)
+  const isMobile = useIsMobile();
 
   const playerName = authUser?.name || "Guest";
 
@@ -580,8 +636,12 @@ export default function WhereWolf({ myId, authUser, onExit }) {
     const ids = Object.keys(players);
     const need = ids.length + 3;
     const enough = ids.length >= (roomData?.min_players || 3);
+    // Non-hosts see EXACTLY what the host has picked (room.deck) — no recommended
+    // fallback, so before the host picks they see nothing (not a misleading default),
+    // and they see over-/under-full selections as-is. The host seeds their own picker
+    // from the recommended default for convenience.
     const curDeck = (isHost ? (pickDeck || roomData?.deck || roomData?.recommended_deck)
-                            : (roomData?.deck || roomData?.recommended_deck)) || [];
+                            : roomData?.deck) || [];
     const counts = deckCounts(curDeck);
     const selected = curDeck.length;
     const deckOk = selected === need;
@@ -609,7 +669,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
 
           <div className="ww-section">Roles in the deck
             <span className={`ww-deck-status ${deckOk ? "ok" : "bad"}`}>
-              {selected} / {need}{deckOk ? " ✓" : selected < need ? ` · add ${need - selected}` : ` · remove ${selected - need}`}
+              {selected} / {need}{deckOk ? " ✓" : isHost ? (selected < need ? ` · add ${need - selected}` : ` · remove ${selected - need}`) : ""}
             </span>
           </div>
           {isHost ? (
@@ -618,7 +678,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
                 {PICKABLE.map((role) => {
                   const n = counts[role] || 0;
                   return (
-                    <div className="ww-rolepick-row" key={role}>
+                    <div className="ww-rolepick-row" key={role} title={roleDesc(role)}>
                       <span className="ww-rp-name" style={{ color: roleColor(role) }}>{roleName(role)}</span>
                       <button className="ww-cap-btn" disabled={n <= 0} onClick={() => adjustRole(role, -1)}>−</button>
                       <span className="ww-rp-count">{n}</span>
@@ -635,11 +695,13 @@ export default function WhereWolf({ myId, authUser, onExit }) {
           ) : (
             <div className="ww-rolepick readonly">
               {Object.keys(counts).sort().map((role) => (
-                <span className="ww-rp-chip" key={role} style={{ borderColor: roleColor(role) }}>
+                <span className="ww-rp-chip" key={role} title={roleDesc(role)} style={{ borderColor: roleColor(role) }}>
                   {roleName(role)}{counts[role] > 1 ? ` ×${counts[role]}` : ""}
                 </span>
               ))}
-              <div className="ww-card-meta" style={{ width: "100%", marginTop: 4 }}>Host is choosing the roles…</div>
+              <div className="ww-card-meta" style={{ width: "100%", marginTop: 4 }}>
+                {curDeck.length ? "The host is setting the roles…" : "The host is choosing the roles…"}
+              </div>
             </div>
           )}
 
@@ -747,13 +809,13 @@ export default function WhereWolf({ myId, authUser, onExit }) {
         </div>
 
         {phase === "over" ? (
-          <WinScreen game={game} order={order} myIdx={myIdx} players={players} roomData={roomData} onExit={leaveToLobby} />
+          <WinScreen game={game} order={order} myIdx={myIdx} players={players} roomData={roomData} isMobile={isMobile} onExit={leaveToLobby} />
         ) : (
           <div className="ww-table-wrap">
             <div className="ww-banner">{banner}</div>
             <div className="ww-sub">{subPrompt}</div>
 
-            <div className={`ww-table${phase === "night" ? " night" : ""}`} style={cardVars(order.length)}>
+            <div className={`ww-table${phase === "night" ? " night" : ""}`} style={cardVars(order.length, isMobile)}>
               <svg className="ww-arrows" viewBox="0 0 100 100" preserveAspectRatio="none">
                 <defs>
                   <marker id="ww-ah" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto">
@@ -788,8 +850,25 @@ export default function WhereWolf({ myId, authUser, onExit }) {
                   })}
                 </div>
                 <div className="ww-tokens">
-                  {(game?.roles_in_play || []).map((t, i) => <span className="ww-token" key={i}>{t}</span>)}
+                  {/* game.deck = public role multiset (== the token row). Render the
+                      public letter + hover/tap for what the role does. Falls back to
+                      the legacy roles_in_play letters if an old payload lacks deck. */}
+                  {(game?.deck ? [...game.deck].sort() : (game?.roles_in_play || [])).map((r, i) => {
+                    const known = !!ROLE_META[r];
+                    return (
+                      <span className="ww-token" key={i}
+                        title={known ? `${roleName(r)} — ${roleDesc(r)}` : r}
+                        onClick={known ? () => setTokenInfo((c) => (c === r ? null : r)) : undefined}>
+                        {known ? tokenLetter(r) : r}
+                      </span>
+                    );
+                  })}
                 </div>
+                {tokenInfo && (
+                  <div className="ww-token-info" onClick={() => setTokenInfo(null)}>
+                    <b style={{ color: roleColor(tokenInfo) }}>{roleName(tokenInfo)}</b> — {roleDesc(tokenInfo)}
+                  </div>
+                )}
               </div>
 
               {order.map((pid, i) => seatNode(pid, i))}
@@ -823,7 +902,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   );
 }
 
-function WinScreen({ game, order, myIdx, players, roomData, onExit }) {
+function WinScreen({ game, order, myIdx, players, roomData, isMobile, onExit }) {
   const teams = game.winning_teams || [];
   const deaths = game.deaths || [];
   const winners = game.winners || [];
@@ -840,7 +919,7 @@ function WinScreen({ game, order, myIdx, players, roomData, onExit }) {
         <h2>{game.headline || "Game over"}</h2>
         <p className="ww-card-meta">{deathLine}</p>
       </div>
-      <div className="ww-table" style={cardVars(order.length)}>
+      <div className="ww-table" style={cardVars(order.length, isMobile)}>
         <div className="ww-center">
           <div className="ww-card-meta">Center cards</div>
           <div className="ww-center-cards">
