@@ -204,6 +204,10 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   // what the most recent connect() was for, so an error can be handled in context:
   // "auto"/"reconnect" fail SILENTLY (no scary toast); "join" retries once.
   const attemptRef = useRef({ kind: null, rid: null, retried: false });
+  // true once this game is finished — stops auto-reconnect from re-entering a
+  // game that's already over (you stay on the results screen until you leave).
+  const overRef = useRef(false);
+  overRef.current = phase === "over";
 
   // ── socket ──
   const handleMessage = useCallback((msg) => {
@@ -251,6 +255,12 @@ export default function WhereWolf({ myId, authUser, onExit }) {
     const rid = room.room_id || roomId;
     if (tok) { try { localStorage.setItem(`werewolf_token_${rid}_${myId}`, tok); localStorage.setItem("werewolf_roomId", rid); } catch {} }
     attemptRef.current = { kind: null, rid: null, retried: false };   // connected OK
+    // A finished game is GONE: drop the resume pointer so it can't be resumed/listed
+    // or auto-rejoined. This does NOT navigate away — you stay on the results screen
+    // (it's driven by roomData) until you choose to leave.
+    if (room.status === "over" || room.game?.phase === "over") {
+      try { localStorage.removeItem(`werewolf_token_${rid}_${myId}`); localStorage.removeItem("werewolf_roomId"); } catch {}
+    }
     setRoomData(room);
     const inGame = room.status === "playing" || room.status === "over";
     if (msg.type === "created" || msg.type === "joined" || msg.type === "reconnected") {
@@ -296,6 +306,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   useEffect(() => {
     if (connected) { reconnectTries.current = 0; return; }
     if (screen !== "waiting" && screen !== "game") return;
+    if (overRef.current) return;   // game's done; don't re-enter it on a drop
     let rid = roomId;
     try { rid = rid || localStorage.getItem("werewolf_roomId"); } catch {}
     if (!rid || reconnectTries.current >= 6) return;
