@@ -318,11 +318,6 @@ async def _narrate(room_id: str, key: str) -> None:
     await broadcast_narration(room_id, roles.NARRATION.get(key, ""), key)
 
 
-def _lone_wolf(room_id: str) -> bool:
-    g = _game(room_id)
-    return bool(g and len(g.get("wolf_pids", [])) == 1)
-
-
 async def _begin_day(room_id: str) -> None:
     async with ROOM_LOCK:
         room = ROOMS.get(room_id)
@@ -377,14 +372,17 @@ async def _run_night(room_id: str) -> None:
             if role not in deck_roles:
                 continue                          # role not in this game → skip silently
             window = ACTION_WINDOW if step in roles.ACTION_STEPS else INFO_WINDOW
-            # The werewolves step is info, but a LONE wolf gets an action window to
-            # optionally peek a center card.
-            if step == engine.STEP_WOLVES and _lone_wolf(room_id):
+            # The werewolves step ALWAYS uses an action window and ALWAYS narrates the
+            # lone-wolf line (conditional wording) — so neither the timing nor the
+            # narration can leak whether there is only ONE werewolf (the secret a lone
+            # wolf must keep). A lone wolf simply peeks a center card during the window;
+            # with two wolves nobody peeks, but the beat looks/sounds identical.
+            if step == engine.STEP_WOLVES:
                 window = ACTION_WINDOW
             if not await _set_night(room_id, step, time.time() + window):
                 return
             await _narrate(room_id, step)
-            if step == engine.STEP_WOLVES and _lone_wolf(room_id):
+            if step == engine.STEP_WOLVES:
                 await _narrate(room_id, "lone_wolf")
             await asyncio.sleep(window)
             if not _is_night(room_id):

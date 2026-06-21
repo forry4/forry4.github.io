@@ -76,7 +76,7 @@ MAX_PLAYERS = 10
 NARRATION = {
     "intro": "Everyone, close your eyes.",
     "werewolves": "Werewolves, wake up and look for other werewolves.",
-    "lone_wolf": "Lone wolf, you may look at a card in the center.",
+    "lone_wolf": "If you are the only werewolf, you may look at a card in the center.",
     "minion": "Minion, wake up and see who the werewolves are.",
     "masons": "Masons, wake up and look for other Masons.",
     "seer": "Seer, wake up. You may look at another player's card, or two of the center cards.",
