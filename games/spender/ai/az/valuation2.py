@@ -166,11 +166,7 @@ def _color_deficits(s: E.State, ci: int, seat: int) -> list[int]:
     cost = E.COST[ci]
     bon = s.bonuses[seat]
     tok = s.tokens[seat]
-    out = []
-    for i in range(5):
-        need = cost[i] - bon[i] - tok[i]
-        out.append(need if need > 0 else 0)
-    return out
+    return [n if (n := cost[i] - bon[i] - tok[i]) > 0 else 0 for i in range(5)]
 
 
 def gems_to_collect(s: E.State, ci: int, seat: int) -> int:
@@ -304,14 +300,26 @@ def victory_closeness(s: E.State, ci: int, seat: int, noble_pts: int = 0) -> flo
 # assumed: you gain at most 1 of a color per turn, so the steepest single color sets the
 # turn count.
 
+def _steps(d) -> int:
+    """Turns to collect remaining need `d` at 1 gem/color/turn: the steepest single-color need, +1 iff
+    the remainder is exactly 1-1-1-1 (four distinct colors each needing 1). 'sorted(positives)==[1,1,1,1]'
+    holds iff steepest == 1 AND exactly four entries are positive -- computed without a sort."""
+    st = max(d)
+    if st == 1:
+        npos = 0
+        for x in d:
+            if x > 0:
+                npos += 1
+        if npos == 4:
+            return 2
+    return st
+
+
 def tempo(s: E.State, ci: int, seat: int) -> int:
     """Turns to collect ci at 1 gem/color/turn: the steepest single-color REMAINING
     need, +1 if the remaining cost is exactly 1-1-1-1 (four distinct colors need a
     take-3 plus a take-1 = 2 turns, which the bare steepest of 1 would miss)."""
-    d = _color_deficits(s, ci, seat)
-    steepest = max(d)
-    nonzero = sorted(x for x in d if x > 0)
-    return steepest + (1 if nonzero == [1, 1, 1, 1] else 0)
+    return _steps(_color_deficits(s, ci, seat))
 
 
 def gem_cost(s: E.State, ci: int, seat: int) -> int:
@@ -349,15 +357,9 @@ def _reduces_tempo(costj, bon, bcol: int) -> float:
     Uses H2's tempo definition (steepest single need, +1 if the remainder is exactly 1-1-1-1) on the
     post-bonus remainder. Caller has gated on cj still needing bcol, so rem[bcol] >= 1. O(5), no recursion."""
     rem = [costj[c] - bon[c] if costj[c] > bon[c] else 0 for c in range(5)]
-
-    def _t(r):
-        st = max(r)
-        nz = sorted(x for x in r if x > 0)
-        return st + (1 if nz == [1, 1, 1, 1] else 0)
-
-    before = _t(rem)
+    before = _steps(rem)
     rem[bcol] -= 1
-    return 1.0 if _t(rem) < before else 0.0
+    return 1.0 if _steps(rem) < before else 0.0
 
 
 RESERVED_ENGINE_W = 1.05   # a reserved card counts this much vs one board card in
