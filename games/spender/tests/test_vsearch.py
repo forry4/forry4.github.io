@@ -135,6 +135,31 @@ def test_tiebreak_inert_when_points_gap_wide():
         v_state.ENDGAME_TIEBREAK_W = 0.0
 
 
+def test_noble_multi_default_is_max_only():
+    """Default NOBLE_MULTI_W=0 -> _noble_stand counts only the best noble (byte-identical)."""
+    assert v_state.NOBLE_MULTI_W == 0.0
+
+
+def test_noble_multi_credits_secondary_nobles():
+    """With the knob on, a position progressing toward multiple nobles scores >= one toward a single
+    noble (sum >= max for non-negative per-noble standings), and STRICTLY greater on boards where 2+
+    nobles contribute. Broad bonuses make several nobles partially-met across seeds."""
+    strictly_greater = 0
+    for seed in range(12):
+        s = E.new_game(random.Random(seed))
+        s.bonuses = ([2, 2, 2, 2, 2], [0, 0, 0, 0, 0])   # broad progress -> several nobles partially met
+        base = v_state._noble_stand(_val(s), 0)          # W=0 (max only)
+        v_state.NOBLE_MULTI_W = 1.0
+        try:
+            multi = v_state._noble_stand(_val(s), 0)      # W=1 (best + full sum of the others)
+        finally:
+            v_state.NOBLE_MULTI_W = 0.0
+        assert multi >= base - 1e-9
+        if multi > base + 1e-9:
+            strictly_greater += 1
+    assert strictly_greater > 0                          # the knob demonstrably credits secondary nobles
+
+
 def test_is_endgame_detection():
     s = E.new_game(random.Random(3))
     assert not vsearch._is_endgame(s)              # fresh game, 0-0

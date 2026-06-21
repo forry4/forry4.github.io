@@ -57,6 +57,12 @@ SCALE = 8.0           # points-equivalent margin that maps to tanh(1) ≈ 0.76
 
 WIN_CONVEX = 0.1      # convex kicker on points in the winning zone (>10): (p-10)^2 * WIN_CONVEX
 NOBLE_TURN_W = 1.0    # noble time-gate fade speed (mirrors valuation3.NOBLE_TURN_W)
+NOBLE_MULTI_W = 0.0   # credit toward SECONDARY nobles at the POSITION level. _noble_stand normally
+                      # counts only the single best noble (max); with W>0 it adds W * (sum of the other
+                      # nobles' gated standings), so a position progressing toward 2-3 nobles outscores
+                      # one toward 1 (you may claim several; breadth is also more robust to denial).
+                      # Default 0 = max-only = byte-identical. (Per-card noble_progress already rewards
+                      # multi-noble cards via its n-normalized sum; this is the position-eval counterpart.)
 PROGRESS_TOPK = 2     # average the top-K target take_values for the progress term
 TURNS_REF = 12.0      # horizon normalizer (estimated_turns_remaining ~ 1..12)
 ENGINE_DR_EXP = 0.5   # diminishing-returns exponent on held bonuses per color (sqrt by default)
@@ -139,7 +145,7 @@ def _noble_stand(val: V.Valuation, seat: int) -> float:
     s = val.s
     bon = s.bonuses[seat]
     horizon = val.estimated_turns_remaining()
-    best = 0.0
+    vals = []
     for slot in range(3):
         ni = s.nobles[slot]
         if ni < 0:
@@ -150,11 +156,16 @@ def _noble_stand(val: V.Valuation, seat: int) -> float:
             continue
         deficit = sum(req[c] - bon[c] for c in range(5) if req[c] > bon[c])
         if deficit == 0:                       # already qualifies (engine normally auto-claims)
-            best = max(best, float(E.NOBLE_PTS[ni]))
+            vals.append(float(E.NOBLE_PTS[ni]))
             continue
         close = 1.0 - deficit / total
         time_factor = horizon / (horizon + NOBLE_TURN_W * deficit)
-        best = max(best, E.NOBLE_PTS[ni] * close * time_factor)
+        vals.append(E.NOBLE_PTS[ni] * close * time_factor)
+    if not vals:
+        return 0.0
+    best = max(vals)
+    if NOBLE_MULTI_W:                          # also credit progress toward the OTHER nobles, not just the best
+        return best + NOBLE_MULTI_W * (sum(vals) - best)
     return best
 
 

@@ -43,7 +43,7 @@ _MODS = (vsearch, v_state, H3, V3)
 #  silently breaking the A/B.)
 _PROBE_KEYS = ["PRIOR_UNIFORM", "POLICY_TEMP", "C_PUCT", "BACKUP_LAMBDA",
                "H3_PICK_W", "RESERVE_PRIOR_W", "TAKE_PRIOR_W",
-               "ENDGAME_TIEBREAK_W",                              # v_state (Gap A)
+               "ENDGAME_TIEBREAK_W", "NOBLE_MULTI_W",            # v_state (Gap A + multi-noble)
                "ENDGAME_SIM_MULT", "ENDGAME_SERVE_TIME", "ENDGAME_NEAR"]  # vsearch (Gap B)
 FROZEN: dict = {}
 

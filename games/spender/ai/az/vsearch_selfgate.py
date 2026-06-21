@@ -53,6 +53,7 @@ KNOBS = {
     "W_PROGRESS":   (v_state, [1.0, 1.5, 2.0, 2.5]),
     "W_ENGINE_STK": (v_state, [0.2, 0.4, 0.8]),
     "W_NOBLE":      (v_state, [0.3, 0.6, 0.9]),
+    "NOBLE_MULTI_W": (v_state, [0.0, 0.25, 0.5, 0.75, 1.0]),
     "W_ECON":       (v_state, [0.0, 0.3, 0.6]),
     "W_POINTS":     (v_state, [0.8, 1.0, 1.3]),
     "SCALE":        (v_state, [6.0, 8.0, 10.0]),
