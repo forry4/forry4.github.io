@@ -56,13 +56,13 @@ def test_troublemaker_swaps_two_others():
     assert g["players"]["c"]["dealt_role"] == "werewolf"
 
 
-def test_troublemaker_may_include_self():
+def test_troublemaker_cannot_include_self():
+    # Official ONUW: the Troublemaker switches two OTHER players' cards — never its own.
     g = setup(engine.STEP_TMAKER, {"a": "troublemaker", "b": "villager"})
     ac, bc = g["players"]["a"]["card"], g["players"]["b"]["card"]
     ok, err = engine.apply_move(g, "a", {"type": "troublemaker_swap", "a": "a", "b": "b"})
-    assert ok, err
-    assert g["players"]["a"]["card"] == bc
-    assert g["players"]["b"]["card"] == ac
+    assert not ok and "OTHER" in (err or "")
+    assert g["players"]["a"]["card"] == ac and g["players"]["b"]["card"] == bc   # unchanged
 
 
 def test_troublemaker_same_target_rejected():

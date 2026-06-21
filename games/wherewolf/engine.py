@@ -263,6 +263,8 @@ def _apply_night(game: dict, pid: str, move: dict) -> tuple[bool, str | None]:
         a_id, b_id = move.get("a"), move.get("b")
         if a_id == b_id or a_id not in game["players"] or b_id not in game["players"]:
             return False, "pick two different players"
+        if pid in (a_id, b_id):
+            return False, "the troublemaker swaps two OTHER players"   # never itself
         pa, pb = game["players"][a_id], game["players"][b_id]
         pa["card"], pb["card"] = pb["card"], pa["card"]
         game["troublemaker_swap"] = {"a": a_id, "b": b_id}
