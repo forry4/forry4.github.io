@@ -637,7 +637,8 @@ class Valuation:
     __slots__ = ("s", "deck_color_demand", "_scarcity_cache", "_eng_base_cache",
                  "w_tempo", "w_gem", "w_gold", "_take0_cache", "_pot_cache", "_fp_cache",
                  "_turns_cache", "_build_fp", "_dt_cache", "_comp_cache",
-                 "_noble_terms_cache", "_noble_comp_cache", "_rtempo_cache")
+                 "_noble_terms_cache", "_noble_comp_cache", "_rtempo_cache",
+                 "_tempo_cache", "_cost_cache")
 
     def __init__(self, s: E.State, w_tempo: float = 0.5, w_gem: float = 0.2,
                  w_gold: float = 0.4):
@@ -667,6 +668,8 @@ class Valuation:
         self._noble_terms_cache = {}  # (bcol, seat) -> (n, [(base, deficit), ...]) for noble_progress
         self._noble_comp_cache = {}   # (bcol, seat) -> noble_completion_pts (fully bcol-determined)
         self._rtempo_cache = {}       # (cj, bcol, seat) -> _reduces_tempo (engine-loop hotspot dedupe)
+        self._tempo_cache = {}        # (ci, seat) -> tempo (recomputed per card across noble/cost paths)
+        self._cost_cache = {}         # (ci, seat, extra_bcol) -> _cost_scalar (take_value cost)
         self._fp_cache = {}   # seat -> {card_id: converged engine value} (ENG_FIXEDPOINT path)
         self._turns_cache = None   # estimated game turns_remaining (state-level, cached)
         # Permanent-bonus future value: share of remaining (undealt) deck cost
@@ -835,6 +838,10 @@ class Valuation:
         """take_value's total_cost (W_TEMPO*tempo + W_GEM*gem + W_GOLD*gold) for ci, optionally
         as if `seat` held one EXTRA bonus in `extra_bcol`. Mirrors tempo()/gem_cost()/gold_cost()
         so the H3 engine measures a discount in the exact currency take_value charges."""
+        ck = (ci, seat, extra_bcol)            # pure in these args within a fixed state
+        cached = self._cost_cache.get(ck)
+        if cached is not None:
+            return cached
         s = self.s
         cost = E.COST[ci]
         bon = s.bonuses[seat]
@@ -870,7 +877,9 @@ class Valuation:
             gold = steepest - min(GOLD_BANK_CAP, s.bank[color])
             if gold < 0:
                 gold = 0
-        return self.w_tempo * tempo + self.w_gem * gem + self.w_gold * gold
+        r = self.w_tempo * tempo + self.w_gem * gem + self.w_gold * gold
+        self._cost_cache[ck] = r
+        return r
 
     def take0(self, ci: int, seat: int) -> float:
         """Level-0 take value: realizable POINTS over (1 + cost), with NO engine term in the
@@ -1169,7 +1178,12 @@ class Valuation:
         return victory_closeness(self.s, ci, seat, noble_pts)
 
     def tempo(self, ci: int, seat: int) -> int:
-        return tempo(self.s, ci, seat)
+        key = (ci, seat)                       # pure in (ci, seat); recomputed across noble/cost paths
+        v = self._tempo_cache.get(key)
+        if v is None:
+            v = tempo(self.s, ci, seat)
+            self._tempo_cache[key] = v
+        return v
 
     def gem_cost(self, ci: int, seat: int) -> int:
         return gem_cost(self.s, ci, seat)
