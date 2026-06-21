@@ -44,9 +44,8 @@ BACKUP_LAMBDA = 0.0   # mixmax selection-Q blend (0 = pure averaging, byte-ident
 POLICY_TEMP = 0.7     # softmax temperature on the H3 action-score prior (lower = sharper toward H3)
 RESERVE_PRIOR_W = 0.5 # reserve actions get this fraction of the card's take_value as their prior score
 TAKE_PRIOR_W = 1.0    # scale on the (normalized) need-vector alignment score for take actions
-PRIOR_BASE = 0.1      # (VESTIGIAL no-op: added to EVERY action's score, so it cancels in the softmax)
 PRIOR_UNIFORM = 0.0   # mix this much uniform mass into the prior: P=(1-u)*softmax + u/n. A real
-                      # exploration floor (unlike the vestigial PRIOR_BASE). Default 0 = byte-identical.
+                      # exploration floor. Default 0 = byte-identical.
                       # TESTED & REJECTED (June 2026, do not relitigate): self-gate vs frozen-S at
                       # sims=200 — PRIOR_UNIFORM 0.1/0.25 screened 0.546/0.538 but 0.1 fell to 0.494 on
                       # FRESH disjoint seeds (regression to mean); POLICY_TEMP=1.0 was 0.496; panel a
@@ -109,17 +108,16 @@ def _action_scores(val: V.Valuation, s, seat: int, legal) -> dict:
     for a in legal:
         if E.A_BUY_BOARD <= a < E.A_BUY_RESV + 3:                 # buys (board + reserved)
             ci = _card_for_action(s, seat, a)
-            scores[a] = PRIOR_BASE + (H3.take_value(val, ci, seat) if ci >= 0 else 0.0)
+            scores[a] = H3.take_value(val, ci, seat) if ci >= 0 else 0.0
         elif E.A_RES_BOARD <= a < E.A_RES_DECK + 3:               # reserves (board + deck)
             ci = _card_for_action(s, seat, a)
             tv = H3.take_value(val, ci, seat) if ci >= 0 else 0.0
-            scores[a] = PRIOR_BASE + RESERVE_PRIOR_W * tv
+            scores[a] = RESERVE_PRIOR_W * tv
         elif E.A_TAKE3 <= a < E.A_PASS:                           # gem takes (normalized demand)
             colors = H3._take_colors(a)
-            scores[a] = PRIOR_BASE + TAKE_PRIOR_W * (sum(need[c] for c in colors) / need_tot
-                                                     if colors else 0.0)
+            scores[a] = TAKE_PRIOR_W * (sum(need[c] for c in colors) / need_tot if colors else 0.0)
         else:                                                     # pass / discard / noble
-            scores[a] = PRIOR_BASE
+            scores[a] = 0.0
     if H3_PICK_W > 0.0:                                           # policy-improvement anchor on H3's move
         a_star = H3.choose_action(s, seat, val=val)               # reuse the leaf's val (no 2nd build; warm cache)
         if a_star in scores:

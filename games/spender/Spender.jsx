@@ -550,11 +550,11 @@ function GemToken({ color, size = 42 }) {
 	);
 }
 
-function CardView({ card, selected, affordable, needsGold, disabled, onClick, compact, aiValue, dataPos }) {
+function CardView({ card, selected, affordable, needsGold, disabled, onClick, aiValue, dataPos }) {
 	// An opponent's blind deck-top reserve is hidden info — show a face-down back, not the card.
 	if (card.hidden) {
 		return (
-			<div className={`card card-back${compact ? " card-compact" : ""}`}>
+			<div className="card card-back">
 				<span className="card-back-level">{["I", "II", "III"][(card.level || 1) - 1]}</span>
 				<span className="card-back-label">Reserved</span>
 			</div>
@@ -562,7 +562,7 @@ function CardView({ card, selected, affordable, needsGold, disabled, onClick, co
 	}
 	return (
 		<div data-pos={dataPos}
-			className={`card${compact ? " card-compact" : ""}${selected ? " selected" : ""}${affordable ? (needsGold ? " affordable-gold" : " affordable") : ""}${disabled ? " disabled" : ""}`}
+			className={`card${selected ? " selected" : ""}${affordable ? (needsGold ? " affordable-gold" : " affordable") : ""}${disabled ? " disabled" : ""}`}
 			onClick={disabled ? undefined : onClick}
 		>
 			<div className="card-header">
@@ -618,7 +618,6 @@ function NobleView({ noble, claimedBy, dimmed }) {
 
 function useWebSocket(onMessage, { onOpen, onClose } = {}) {
 	const wsRef = useRef(null);
-	const [connected, setConnected] = useState(false);
 	const onMsgRef = useRef(onMessage);
 	const onOpenRef = useRef(onOpen);
 	const onCloseRef = useRef(onClose);
@@ -640,11 +639,9 @@ function useWebSocket(onMessage, { onOpen, onClose } = {}) {
 			if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(data));
 		};
 		ws.onopen = (ev) => {
-			setConnected(true);
 			try { onOpenRef.current?.({ event: ev, send }); } catch {}
 		};
 		ws.onclose = () => {
-			setConnected(false);
 			try { onCloseRef.current?.(); } catch {}
 			// auto-reconnect unless the user intentionally disconnected
 			if (!intentionalRef.current && urlRef.current) {
@@ -668,13 +665,12 @@ function useWebSocket(onMessage, { onOpen, onClose } = {}) {
 		if (retryTimerRef.current) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null; }
 		wsRef.current?.close();
 		wsRef.current = null;
-		setConnected(false);
 	}, []);
 
 	// reconnect when the tab becomes visible (iOS kills sockets in the background)
 	const getReadyState = useCallback(() => wsRef.current?.readyState ?? WebSocket.CLOSED, []);
 
-	return { connected, connect, send, disconnect, getReadyState };
+	return { connect, send, disconnect, getReadyState };
 }
 
 // ─── Main App ──────────────────────────────────────────────────────────────

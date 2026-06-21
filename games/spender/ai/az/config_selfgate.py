@@ -39,7 +39,7 @@ PANEL = ["H3", "H2", "H2N", "H2R"]
 _MODS = (vsearch, v_state, H3, V3)
 
 # every knob any config may touch — frozen pins these to their committed defaults, captured at import.
-_PROBE_KEYS = ["PRIOR_UNIFORM", "POLICY_TEMP", "C_PUCT", "PRIOR_BASE", "BACKUP_LAMBDA",
+_PROBE_KEYS = ["PRIOR_UNIFORM", "POLICY_TEMP", "C_PUCT", "BACKUP_LAMBDA",
                "H3_PICK_W", "RESERVE_PRIOR_W", "TAKE_PRIOR_W"]
 FROZEN: dict = {}
 
