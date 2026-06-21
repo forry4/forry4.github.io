@@ -26,6 +26,17 @@ const ROLE_META = {
 const roleName = (r) => (r && ROLE_META[r]?.name) || (r ? r : "Unknown");
 const roleColor = (r) => (r && ROLE_META[r]?.color) || "#3a342a";
 
+// Host role picker: selectable roles (no doppelganger yet) + per-role copy caps.
+const ROLE_CAPS = { werewolf: 2, villager: 3, mason: 2, seer: 1, robber: 1,
+  troublemaker: 1, minion: 1, tanner: 1, drunk: 1, hunter: 1, insomniac: 1 };
+const PICKABLE = ["werewolf", "villager", "seer", "robber", "troublemaker", "mason",
+  "minion", "tanner", "drunk", "hunter", "insomniac"];
+const ACTION_ROLES = ["seer", "robber", "troublemaker", "drunk"];   // take a move in their step
+const TEAM_CLASS = { village: "villagers", werewolf: "wolves", tanner: "tanner", minion: "wolves" };
+function deckCounts(deck) {
+  const c = {}; (deck || []).forEach((r) => { c[r] = (c[r] || 0) + 1; }); return c;
+}
+
 function uid() { return Math.random().toString(36).slice(2, 10); }
 function roomCode() {
   return Array.from({ length: 4 }, () => "ABCDEFGHJKLMNPQRSTUVWXYZ"[Math.floor(Math.random() * 24)]).join("");
@@ -157,9 +168,28 @@ const css = baseCss + `
 
 /* win screen */
 .ww-win{text-align:center;padding:14px}
-.ww-win h2{font-family:Cinzel,serif;font-size:34px;margin-bottom:6px}
+.ww-win h2{font-family:Cinzel,serif;font-size:30px;margin-bottom:6px}
 .ww-win.villagers h2{color:#7ed07a}
 .ww-win.wolves h2{color:#e0655a}
+.ww-win.tanner h2{color:#d6a24a}
+.ww-win.neutral h2{color:var(--gold-light)}
+.ww-dead{position:absolute;top:-9px;left:-9px;font-size:14px}
+.ww-won{color:#7ed07a;font-weight:700}
+.ww-lost{color:var(--text-muted)}
+
+/* host role picker */
+.ww-deck-status{font-family:Crimson Pro,serif;font-size:13px;margin-left:8px}
+.ww-deck-status.ok{color:#7ed07a}
+.ww-deck-status.bad{color:#d99}
+.ww-rolepick{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px 10px;margin:4px 0}
+.ww-rolepick.readonly{display:flex;flex-wrap:wrap;gap:6px}
+.ww-rolepick-row{display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:4px 8px}
+.ww-rp-name{flex:1;font-family:Cinzel,serif;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ww-rp-count{min-width:14px;text-align:center;font-family:Cinzel,serif}
+.ww-cap-btn{width:24px;height:24px;border-radius:6px;border:1px solid var(--border);background:var(--surface3);color:var(--text);cursor:pointer;font-size:15px;line-height:1}
+.ww-cap-btn:hover:not(:disabled){border-color:var(--gold);color:var(--gold-light)}
+.ww-cap-btn:disabled{opacity:.35;cursor:not-allowed}
+.ww-rp-chip{border:1px solid var(--border);border-radius:999px;padding:3px 9px;font-size:12px;font-family:Cinzel,serif}
 `;
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -181,6 +211,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   // night/day interaction selection
   const [centerSel, setCenterSel] = useState([]);     // seer: selected center indices
   const [tmSel, setTmSel] = useState([]);             // troublemaker: selected pids
+  const [pickDeck, setPickDeck] = useState(null);     // host's local role-picker deck
 
   const playerName = authUser?.name || "Guest";
 
@@ -300,6 +331,13 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   // clear transient selection when the step changes
   useEffect(() => { setCenterSel([]); setTmSel([]); }, [step, phase]);
 
+  // Seed the host's role picker from the server's chosen deck / recommended default.
+  useEffect(() => {
+    if (screen === "waiting" && isHost && pickDeck == null && roomData) {
+      setPickDeck(roomData.deck || roomData.recommended_deck || null);
+    }
+  }, [screen, isHost, roomData, pickDeck]);
+
   // Auto-reconnect if the socket drops while we expect to be in a room (network
   // blip, laptop sleep, or a connection getting replaced). Bounded retries spaced
   // out; resets once a socket re-opens. A manual Reconnect button is also shown.
@@ -382,6 +420,18 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   };
   const startGame = () => send({ action: "start" });
   const mv = (move) => send({ action: "move", move });
+  // host role picker: set the local deck + push it to the room.
+  const pushDeck = (deck) => { setPickDeck(deck); send({ action: "set_roles", deck }); };
+  const adjustRole = (role, delta) => {
+    const base = pickDeck || roomData?.deck || roomData?.recommended_deck || [];
+    const counts = deckCounts(base);
+    const cur = counts[role] || 0;
+    const next = cur + delta;
+    if (next < 0 || next > (ROLE_CAPS[role] || 0)) return;
+    const deck = base.filter((r) => r !== role);
+    for (let i = 0; i < next; i++) deck.push(role);
+    pushDeck(deck);
+  };
   const toggleNarrate = () => {
     const next = !effNarrate;
     setNarrateOn(next);
@@ -390,7 +440,10 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   };
 
   // ── click handlers on the table ──
-  const myActiveStep = phase === "night" && step === myDealt && !acted[step];
+  // Only the move-taking roles (seer/robber/troublemaker/drunk) get an "active" step;
+  // info roles (minion/mason/insomniac) just look. The lone wolf is handled separately.
+  const myActiveStep = phase === "night" && ACTION_ROLES.includes(myDealt) && step === myDealt && !acted[step];
+  const loneWolfActive = phase === "night" && step === "werewolves" && game?.is_lone_wolf && game?.lone_wolf_peek == null;
   const clickPlayer = (pid) => {
     if (phase === "day") {
       if (game.locked?.[myId]) { setToast("Unlock to change your vote"); return; }
@@ -413,12 +466,17 @@ export default function WhereWolf({ myId, authUser, onExit }) {
     }
   };
   const clickCenter = (idx) => {
-    if (phase !== "night" || step !== "seer" || myDealt !== "seer" || acted.seer) return;
-    setCenterSel((sel) => {
-      const next = sel.includes(idx) ? sel.filter((x) => x !== idx) : [...sel, idx];
-      if (next.length === 2) { mv({ type: "seer_peek_center", indices: next }); return []; }
-      return next;
-    });
+    if (phase !== "night") return;
+    if (step === "seer" && myDealt === "seer" && !acted.seer) {
+      setCenterSel((sel) => {
+        const next = sel.includes(idx) ? sel.filter((x) => x !== idx) : [...sel, idx];
+        if (next.length === 2) { mv({ type: "seer_peek_center", indices: next }); return []; }
+        return next;
+      });
+      return;
+    }
+    if (step === "drunk" && myDealt === "drunk" && !acted.drunk) { mv({ type: "drunk_swap", center_index: idx }); return; }
+    if (loneWolfActive) { mv({ type: "wolf_peek_center", index: idx }); return; }
   };
 
   // ─── Lobby ─────────────────────────────────────────────────────────────────
@@ -495,11 +553,17 @@ export default function WhereWolf({ myId, authUser, onExit }) {
     );
   }
 
-  // ─── Waiting room ────────────────────────────────────────────────────────────
+  // ─── Waiting room (+ host role picker) ───────────────────────────────────────
   if (screen === "waiting") {
     const players = roomData?.players || {};
     const ids = Object.keys(players);
+    const need = ids.length + 3;
     const enough = ids.length >= (roomData?.min_players || 3);
+    const curDeck = (isHost ? (pickDeck || roomData?.deck || roomData?.recommended_deck)
+                            : (roomData?.deck || roomData?.recommended_deck)) || [];
+    const counts = deckCounts(curDeck);
+    const selected = curDeck.length;
+    const deckOk = selected === need;
     return (
       <div className="ww"><style>{css}</style>
         <div className="ww-wrap">
@@ -521,10 +585,47 @@ export default function WhereWolf({ myId, authUser, onExit }) {
               </div>
             ))}
           </div>
+
+          <div className="ww-section">Roles in the deck
+            <span className={`ww-deck-status ${deckOk ? "ok" : "bad"}`}>
+              {selected} / {need}{deckOk ? " ✓" : selected < need ? ` · add ${need - selected}` : ` · remove ${selected - need}`}
+            </span>
+          </div>
+          {isHost ? (
+            <>
+              <div className="ww-rolepick">
+                {PICKABLE.map((role) => {
+                  const n = counts[role] || 0;
+                  return (
+                    <div className="ww-rolepick-row" key={role}>
+                      <span className="ww-rp-name" style={{ color: roleColor(role) }}>{roleName(role)}</span>
+                      <button className="ww-cap-btn" disabled={n <= 0} onClick={() => adjustRole(role, -1)}>−</button>
+                      <span className="ww-rp-count">{n}</span>
+                      <button className="ww-cap-btn" disabled={n >= (ROLE_CAPS[role] || 0)} onClick={() => adjustRole(role, 1)}>+</button>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="ww-row" style={{ gap: 8 }}>
+                <button className="ww-btn sm" onClick={() => pushDeck(roomData?.recommended_deck || [])}>Recommended</button>
+                <span className="ww-card-meta">3 cards are placed face-down in the center.</span>
+              </div>
+            </>
+          ) : (
+            <div className="ww-rolepick readonly">
+              {Object.keys(counts).sort().map((role) => (
+                <span className="ww-rp-chip" key={role} style={{ borderColor: roleColor(role) }}>
+                  {roleName(role)}{counts[role] > 1 ? ` ×${counts[role]}` : ""}
+                </span>
+              ))}
+              <div className="ww-card-meta" style={{ width: "100%", marginTop: 4 }}>Host is choosing the roles…</div>
+            </div>
+          )}
+
           <div className="ww-row" style={{ marginTop: 12 }}>
             {isHost
-              ? <button className="ww-btn gold" disabled={!enough} onClick={startGame}>
-                  {enough ? "Deal & Start" : `Need ${roomData?.min_players || 3}+ players`}</button>
+              ? <button className="ww-btn gold" disabled={!enough || !deckOk} onClick={startGame}>
+                  {!enough ? `Need ${roomData?.min_players || 3}+ players` : !deckOk ? `Deck ${selected}/${need}` : "Deal & Start"}</button>
               : <span className="ww-card-meta">Waiting for the host to start…</span>}
           </div>
           {toast && <div className="ww-toast">{toast}</div>}
@@ -551,8 +652,17 @@ export default function WhereWolf({ myId, authUser, onExit }) {
       if (step === "seer") subPrompt = centerSel.length === 1 ? "Pick one more center card…" : "Tap a player's card, or two center cards.";
       else if (step === "robber") subPrompt = "Tap a player to rob and see your new card.";
       else if (step === "troublemaker") subPrompt = tmSel.length === 1 ? "Tap one more player…" : "Tap two players to swap their cards.";
+      else if (step === "drunk") subPrompt = "Tap a center card to swap with — you won't see your new card.";
+    } else if (loneWolfActive) {
+      subPrompt = "You are the lone wolf — you may tap one center card to peek.";
     } else if (step === "werewolves" && myDealt === "werewolf") {
-      subPrompt = "You are a Werewolf. Note the others.";
+      subPrompt = "You are a Werewolf. Note the other werewolves.";
+    } else if (step === "minion" && myDealt === "minion") {
+      subPrompt = "You are the Minion. The werewolves are revealed to you.";
+    } else if (step === "masons" && myDealt === "mason") {
+      subPrompt = "You are a Mason. Your fellow Masons are revealed.";
+    } else if (step === "insomniac" && myDealt === "insomniac") {
+      subPrompt = "You wake and check your card.";
     } else {
       subPrompt = "Keep your eyes closed.";
     }
@@ -574,7 +684,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
       (phase === "night" && myActiveStep && step === "robber" && !isMe) ||
       (phase === "night" && myActiveStep && step === "troublemaker");
     const selected = tmSel.includes(pid);
-    const revealed = phase === "over" && game.revealed_pid === pid;
+    const revealed = phase === "over" && (game.deaths || []).includes(pid);
     return (
       <div className={`ww-seat${isMe ? " me" : ""}`} key={pid} style={{ left: pos.x + "%", top: pos.y + "%" }}>
         <div
@@ -645,7 +755,8 @@ export default function WhereWolf({ myId, authUser, onExit }) {
                   {(game?.center || []).map((c, i) => {
                     const up = c != null;
                     const sel = centerSel.includes(i);
-                    const clickable = phase === "night" && myActiveStep && step === "seer";
+                    const clickable = phase === "night" && (
+                      (myActiveStep && (step === "seer" || step === "drunk")) || loneWolfActive);
                     return (
                       <div key={i} data-center-idx={i}
                         className={`ww-ccard${up ? " up" : ""}${clickable ? " clickable" : ""}${sel ? " selected" : ""}`}
@@ -669,8 +780,9 @@ export default function WhereWolf({ myId, authUser, onExit }) {
               {phase === "dealing" && players[myId]?.ready &&
                 <span className="ww-card-meta">Ready ✓ — waiting for {order.filter((p) => !players[p]?.ready).length} more…</span>}
 
-              {myActiveStep && <button className="ww-btn sm" onClick={() => mv({ type: "skip" })}>Skip</button>}
-              {phase === "night" && stepLeft != null && myActiveStep &&
+              {((myActiveStep && step !== "drunk") || loneWolfActive) &&
+                <button className="ww-btn sm" onClick={() => mv({ type: "skip" })}>Skip</button>}
+              {phase === "night" && stepLeft != null && (myActiveStep || loneWolfActive) &&
                 <span className="ww-timer">{Math.ceil(stepLeft)}s</span>}
 
               {dayActive && (
@@ -691,16 +803,21 @@ export default function WhereWolf({ myId, authUser, onExit }) {
 }
 
 function WinScreen({ game, order, myIdx, players, roomData, onExit }) {
-  const win = game.winner;
-  const revealed = game.revealed_pid;
+  const teams = game.winning_teams || [];
+  const deaths = game.deaths || [];
+  const winners = game.winners || [];
+  const klass = teams.includes("village") ? "villagers"
+    : teams.includes("werewolf") ? "wolves"
+    : teams.includes("tanner") ? "tanner"
+    : teams.includes("minion") ? "wolves" : "neutral";
+  const deathLine = deaths.length
+    ? "Died: " + deaths.map((p) => `${roomData?.players?.[p] || players[p]?.name || p} (${roleName(game.players?.[p]?.card)})`).join(", ")
+    : "No one died.";
   return (
     <div className="ww-table-wrap">
-      <div className={`ww-win ${win === "villagers" ? "villagers" : "wolves"}`}>
-        <h2>{win === "villagers" ? "VILLAGERS WIN" : "WHERE WOLVES WIN"}</h2>
-        <p className="ww-card-meta">
-          {revealed ? `${roomData?.players?.[revealed] || "A player"} was voted out — ${roleName(game.players?.[revealed]?.card)}.`
-                    : "The vote was tied — no one was revealed."}
-        </p>
+      <div className={`ww-win ${klass}`}>
+        <h2>{game.headline || "Game over"}</h2>
+        <p className="ww-card-meta">{deathLine}</p>
       </div>
       <div className="ww-table">
         <div className="ww-center">
@@ -715,15 +832,17 @@ function WinScreen({ game, order, myIdx, players, roomData, onExit }) {
           const rel = ((i - myIdx) + order.length) % order.length;
           const pos = seatXY(rel, order.length);
           const pdata = players[pid] || {};
-          const isRevealed = revealed === pid;
+          const isDead = deaths.includes(pid);
           const votes = game.vote_tally?.[pid] || 0;
+          const won = winners.includes(pid);
           return (
-            <div className={`ww-seat${pid === (order[myIdx]) ? " me" : ""}`} key={pid} style={{ left: pos.x + "%", top: pos.y + "%" }}>
-              <div className={`ww-pcard${isRevealed ? " revealed" : ""}`} style={{ borderColor: roleColor(pdata.card), background: "#1a1622" }}>
+            <div className={`ww-seat${pid === order[myIdx] ? " me" : ""}`} key={pid} style={{ left: pos.x + "%", top: pos.y + "%" }}>
+              <div className={`ww-pcard${isDead ? " revealed" : ""}`} style={{ borderColor: roleColor(pdata.card), background: "#1a1622" }}>
                 {roleName(pdata.card)}
                 {votes > 0 && <span className="ww-badge">{votes}</span>}
+                {isDead && <span className="ww-dead">☠</span>}
               </div>
-              <span className="seat-name">{roomData?.players?.[pid] || pdata.name}</span>
+              <span className="seat-name">{roomData?.players?.[pid] || pdata.name} <span className={won ? "ww-won" : "ww-lost"}>{won ? "✓" : "✗"}</span></span>
             </div>
           );
         })}
