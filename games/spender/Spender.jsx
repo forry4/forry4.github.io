@@ -1536,7 +1536,7 @@ export default function SpenderApp() {
 					{authTab !== "guest" ? (
 						<>
 							<input className="auth-field" placeholder="Name" value={authName}
-								onChange={e => setAuthName(e.target.value)} maxLength={authTab === "register" ? 12 : 64}
+								onChange={e => setAuthName(e.target.value)} maxLength={authTab === "register" ? 16 : 64}
 								onKeyDown={e => e.key === "Enter" && handleAuth()} />
 							<input className="auth-field" placeholder="Password" type="password" value={authPassword}
 								onChange={e => setAuthPassword(e.target.value)} maxLength={authTab === "register" ? 16 : 128}

@@ -61,10 +61,10 @@ def verify_password(stored: str, password: str) -> bool:
 
 
 # ─── Registration input validation ───────────────────────────────────────────
-# Usernames: 1-12 chars, basic letters/digits only. Passwords: 1-16 chars. These
+# Usernames: 1-16 chars, basic letters/digits only. Passwords: 1-16 chars. These
 # are enforced at registration (the /auth/register route); login stays permissive
 # so pre-existing accounts that predate these limits can still sign in.
-USERNAME_MAX = 12
+USERNAME_MAX = 16
 PASSWORD_MIN = 1
 PASSWORD_MAX = 16
 _USERNAME_RE = re.compile(r"[A-Za-z0-9]+")

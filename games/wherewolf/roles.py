@@ -107,7 +107,7 @@ def build_deck(n_players: int, rng: random.Random) -> list[str]:
     """Return the SHUFFLED default deck of exactly ``n_players + 3`` cards (the
     pre-picker default; kept for back-compat + when no deck is chosen)."""
     if not (MIN_PLAYERS <= n_players <= MAX_PLAYERS):
-        raise ValueError(f"player count must be {MIN_PLAYERS}..{MAX_PLAYERS}, got {n_players}")
+        raise ValueError(f"player count must be {MIN_PLAYERS}-{MAX_PLAYERS}, got {n_players}")
     cards = list(_BASE_3)
     if n_players >= 4:
         cards.append("villager")
@@ -134,21 +134,25 @@ def recommended_deck(n_players: int) -> list[str]:
     NOT in the default (they only make sense as a pair — the host adds them manually);
     every default stays within the copy caps."""
     if not (MIN_PLAYERS <= n_players <= MAX_PLAYERS):
-        raise ValueError(f"player count must be {MIN_PLAYERS}..{MAX_PLAYERS}, got {n_players}")
+        raise ValueError(f"player count must be {MIN_PLAYERS}-{MAX_PLAYERS}, got {n_players}")
     deck = list(_REC_BASE) + _REC_PROGRESSION[: n_players - 2]
     assert len(deck) == n_players + 3, (n_players, len(deck))
     return deck
 
 
-def validate_deck(deck, n_players: int) -> tuple[bool, str | None]:
+def validate_deck(deck, n_players: int, partial: bool = False) -> tuple[bool, str | None]:
     """Validate a host-chosen deck: exact count (players+3), copy limits, known
-    roles, no doppelganger. No-werewolf decks and a single mason are allowed."""
+    roles, no doppelganger. No-werewolf decks and a single mason are allowed.
+
+    ``partial=True`` skips ONLY the exact-count requirement — used while the host is
+    still editing the deck so the in-progress selection can be broadcast to the other
+    players (the exact count is re-checked, fully, when the game is dealt)."""
     if not isinstance(deck, list) or not all(isinstance(r, str) for r in deck):
         return False, "bad deck"
     if not (MIN_PLAYERS <= n_players <= MAX_PLAYERS):
-        return False, f"player count must be {MIN_PLAYERS}..{MAX_PLAYERS}"
+        return False, f"player count must be {MIN_PLAYERS}-{MAX_PLAYERS}"
     need = n_players + 3
-    if len(deck) != need:
+    if not partial and len(deck) != need:
         return False, f"deck must have exactly {need} cards (players + 3), has {len(deck)}"
     for role, cnt in Counter(deck).items():
         if role == "doppelganger":

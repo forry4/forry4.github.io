@@ -547,7 +547,10 @@ async def _handle_set_roles(ws, room_id, pid, msg):
             await _send(ws, {"type": "error", "message": "game already started"})
             return
         deck = msg.get("deck")
-        ok, err = roles.validate_deck(deck, len(room["players"]))
+        # partial=True: accept the in-progress selection (any count) so the other
+        # players see exactly what the host has picked live; the exact count is
+        # enforced when the game is dealt (_handle_start).
+        ok, err = roles.validate_deck(deck, len(room["players"]), partial=True)
         if not ok:
             await _send(ws, {"type": "error", "message": err})
             return

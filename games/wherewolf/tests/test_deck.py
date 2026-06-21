@@ -81,6 +81,15 @@ def test_validate_deck_rejects_wrong_count():
     assert not roles.validate_deck(["villager"] * 8, 4)[0]   # need 7, has 8
 
 
+def test_validate_deck_partial_skips_count_but_keeps_caps():
+    # partial=True (host still editing) accepts any count so the in-progress deck
+    # can be broadcast, but still enforces copy caps / known roles / player range.
+    assert roles.validate_deck(["seer", "robber", "troublemaker"], 4, partial=True)[0]  # 3 cards, need 7 — OK
+    assert roles.validate_deck([], 4, partial=True)[0]                 # empty OK
+    assert not roles.validate_deck(["werewolf"] * 3, 4, partial=True)[0]  # cap still enforced
+    assert not roles.validate_deck(["villager"], 2, partial=True)[0]      # player range still enforced
+
+
 def test_validate_deck_copy_limits():
     assert not roles.validate_deck(["werewolf"] * 3 + ["villager"] * 3, 3)[0]  # 3 werewolves
     assert not roles.validate_deck(["villager"] * 4 + ["werewolf", "seer"], 3)[0]  # 4 villagers

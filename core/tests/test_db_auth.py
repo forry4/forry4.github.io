@@ -30,9 +30,9 @@ def test_gen_token_length_alphabet_and_uniqueness():
 
 def test_validate_credentials_username_rules():
     assert authm.validate_credentials("bob", "pw") is None
-    assert authm.validate_credentials("abcdefghijkl", "pw") is None      # 12 chars OK
+    assert authm.validate_credentials("abcdefghijklmnop", "pw") is None  # 16 chars OK
     assert authm.validate_credentials("", "pw") == "Username is required."
-    assert "12 characters" in authm.validate_credentials("abcdefghijklm", "pw")  # 13 chars
+    assert "16 characters" in authm.validate_credentials("abcdefghijklmnopq", "pw")  # 17 chars
     assert "letters and numbers" in authm.validate_credentials("has space", "pw")
     assert "letters and numbers" in authm.validate_credentials("bad!", "pw")
 
