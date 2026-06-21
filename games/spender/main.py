@@ -133,6 +133,20 @@ def build_deck() -> dict:
     return {"L1": l1, "L2": l2, "L3": l3}
 
 
+def card_catalog() -> dict:
+    """Static id -> {level, points, bonus, cost} map for every card in the deck.
+    The deck is deterministic (ids are LEVEL-list indices like 'L2-7'), so this is
+    constant across games. Used to resolve the id-only move log (the log stores
+    card_id, not the full card) when analysing a game outside the live client."""
+    out: dict = {}
+    for lvl, data in ((1, LEVEL1), (2, LEVEL2), (3, LEVEL3)):
+        for i, d in enumerate(data):
+            c = make_card(lvl, d, i)
+            out[c["id"]] = {"level": c["level"], "points": c["points"],
+                            "bonus": c["bonus"], "cost": c["cost"]}
+    return out
+
+
 def bonuses_from(purchased: list[dict]) -> dict[str, int]:
     b = empty_gems()
     for card in purchased:
@@ -447,7 +461,12 @@ def _redact_blind_reserves(game: dict | None, viewer_pid: str | None) -> dict | 
                                "id": f"{pid}:hidden:{i}"}
     for mv in g.get("moves", []):
         if mv.get("type") == "reserve" and mv.get("from_deck") and mv.get("pid") != viewer_pid:
-            mv["card"] = None  # strip the secret card from the opponent's move-log view
+            # Strip the secret card from the opponent's move-log view. card_id alone would
+            # reveal the identity via the static catalog, so it must go too. ("card" is the
+            # legacy verbose field from games saved before the id-only log — null it if present.)
+            mv["card_id"] = None
+            if "card" in mv:
+                mv["card"] = None
     return g
 
 
@@ -551,12 +570,15 @@ def _check_winner(game: dict) -> str | None:
 
 
 def _log_move(game: dict, pid: str, mv_type: str, **details) -> None:
-    """Prepend a move record to game['moves']; keep the most recent 50 (the
-    end-game Review screen shows this log)."""
+    """Prepend a move record to game['moves'] (newest first). Entries are COMPACT — a
+    buy/reserve stores only `card_id` (resolve via card_catalog()/build_deck()), not the
+    full card dict — so the whole game is cheap to keep and ship over the wire. The 500
+    cap is a safety bound (a real game is well under it). Read by the end-game Review
+    screen and the admin GET /games/{id}/full analysis endpoint."""
     entry: dict = {"pid": pid, "type": mv_type}
     entry.update({k: v for k, v in details.items() if v is not None})
     game.setdefault("moves", []).insert(0, entry)
-    game["moves"] = game["moves"][:50]
+    game["moves"] = game["moves"][:500]
 
 
 # ─── AI tunable weights ─────────────────────────────────────────────────────
@@ -1850,13 +1872,13 @@ def _run_ai_turn(game: dict, ai_pid: str, mv: dict | None = None) -> None:
                 game["board"][source[1]][source[2]] = game["decks"][source[1]].pop() if game["decks"][source[1]] else None
             else:
                 ps["reserved"].pop(source[1])
-            _log_move(game, ai_pid, "buy", card={"id": card["id"], "bonus": card["bonus"], "color": card["bonus"], "points": card["points"], "cost": card["cost"], "level": card.get("level")})
+            _log_move(game, ai_pid, "buy", card_id=card["id"])
             claimable = _check_nobles(game, ai_pid)
             if claimable:
                 n = _ai_pick_noble(claimable, game, ai_pid)
                 ps["nobles"].append(n)
                 game["nobles"] = [x for x in game["nobles"] if x["id"] != n["id"]]
-                _log_move(game, ai_pid, "noble", pts=n["points"])
+                _log_move(game, ai_pid, "noble", pts=n["points"], noble_id=n["id"])
 
     elif mv["type"] == "take_gems":
         for c in mv["colors"]:
@@ -1886,7 +1908,7 @@ def _run_ai_turn(game: dict, ai_pid: str, mv: dict | None = None) -> None:
                 ps["tokens"]["gold"] = ps["tokens"].get("gold", 0) + 1
             while sum(ps["tokens"].values()) > 10:
                 _ai_discard_one(game, ai_pid)
-            _log_move(game, ai_pid, "reserve", card={"id": card["id"], "bonus": card["bonus"], "color": card["bonus"], "points": card["points"], "cost": card["cost"], "level": card.get("level")})
+            _log_move(game, ai_pid, "reserve", card_id=card["id"])
 
     _finish_turn(game, ai_pid)
 
@@ -2236,7 +2258,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                             g["board"][lk][idx] = g["decks"][lk].pop() if g["decks"][lk] else None
                                         else:
                                             ps["reserved"].pop(source[1])  # type: ignore[index]
-                                        _log_move(g, pid, "buy", card={"id": card["id"], "bonus": card["bonus"], "color": card["bonus"], "points": card["points"], "cost": card["cost"], "level": card.get("level")})
+                                        _log_move(g, pid, "buy", card_id=card["id"])
                                         claimable = _check_nobles(g, pid)
                                         if len(claimable) > 1:
                                             g["pending_noble_choice"] = [n["id"] for n in claimable]
@@ -2246,7 +2268,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                             n = claimable[0]
                                             ps["nobles"].append(n)
                                             g["nobles"] = [x for x in g["nobles"] if x["id"] != n["id"]]
-                                            _log_move(g, pid, "noble", pts=n["points"])
+                                            _log_move(g, pid, "noble", pts=n["points"], noble_id=n["id"])
                                             _finish_turn(g, pid)
                                             _post_turn(g, r)
                                         else:
@@ -2284,7 +2306,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                         if g["bank"].get("gold", 0) > 0:
                                             g["bank"]["gold"] -= 1
                                             ps["tokens"]["gold"] = ps["tokens"].get("gold", 0) + 1
-                                        _log_move(g, pid, "reserve", card={"id": card["id"], "bonus": card["bonus"], "color": card["bonus"], "points": card["points"], "cost": card["cost"], "level": card.get("level")}, from_deck=card.get("from_deck"))
+                                        _log_move(g, pid, "reserve", card_id=card["id"], from_deck=card.get("from_deck"))
                                         _did_change = True
                                         if sum(ps["tokens"].values()) > 10:
                                             _discard_pid = pid
@@ -2306,7 +2328,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                     else:
                                         ps["nobles"].append(noble)
                                         g["nobles"] = [x for x in g["nobles"] if x["id"] != noble_id]
-                                        _log_move(g, pid, "noble", pts=noble["points"])
+                                        _log_move(g, pid, "noble", pts=noble["points"], noble_id=noble_id)
                                         g.pop("pending_noble_choice", None)
                                         g.pop("pending_noble_pid", None)
                                         _finish_turn(g, pid)
@@ -2505,6 +2527,45 @@ async def get_my_games(token: str | None = Depends(bearer_token)):
     if not user:
         return {"ok": False, "games": [], "message": "unauthenticated"}
     return {"ok": True, "games": list_user_games(user["id"])}
+
+
+@router.get("/games/{game_id}/full")
+async def get_game_full(game_id: str, token: str | None = Depends(bearer_token)):
+    """Admin-only: the complete persisted game (final state + the FULL id-only move log)
+    plus a card_catalog to resolve the ids — a self-contained dump for offline analysis.
+    Prefers the live in-memory copy (fresh for an in-progress game); falls back to the DB
+    row for a finished/cold game. Admin-gated because it returns unredacted hidden info."""
+    user = get_user_by_session(token)
+    if not user or not user.get("is_admin"):
+        return {"ok": False, "message": "admin only"}
+    room_id = normalize_room(game_id)
+    payload = None
+    async with ROOM_LOCK:
+        room = ROOMS.get(room_id)
+        if room and room.get("game"):
+            payload = {"game": copy.deepcopy(room["game"]),
+                       "players": dict(room.get("players", {})),
+                       "ai_variant": room.get("ai_variant")}
+    if payload is None:  # not in memory — read the persisted row (read-only, no ROOMS mutation)
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT state_json FROM games WHERE id=?", (room_id,))
+        row = cur.fetchone()
+        conn.close()
+        if not row or not row["state_json"]:
+            return {"ok": False, "message": "game not found"}
+        try:
+            state = json.loads(row["state_json"])
+        except Exception:
+            return {"ok": False, "message": "corrupt game state"}
+        if not state.get("game"):
+            return {"ok": False, "message": "game not found"}
+        payload = {"game": state.get("game"),
+                   "players": state.get("players", {}),
+                   "ai_variant": state.get("ai_variant")}
+    payload["ok"] = True
+    payload["card_catalog"] = card_catalog()
+    return payload
 
 
 @router.post("/games/{game_id}/cancel")

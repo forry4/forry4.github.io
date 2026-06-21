@@ -894,6 +894,30 @@ def test_redaction_does_not_mutate_original():
     assert g["players"]["bob"]["reserved"][0]["id"] == "L2-r3"
 
 
+def test_blind_reserve_move_log_id_stripped_for_opponent():
+    """Id-only log: a blind-reserve's card_id (which would reveal identity via the static
+    catalog) is hidden from the opponent but kept for the owner."""
+    g = make_game_state()
+    g["moves"] = [{"pid": "bob", "type": "reserve", "from_deck": True, "card_id": "L2-r3"}]
+    alice_view = main._redact_blind_reserves(g, viewer_pid="alice")
+    assert alice_view["moves"][0]["card_id"] is None
+    bob_view = main._redact_blind_reserves(g, viewer_pid="bob")
+    assert bob_view["moves"][0]["card_id"] == "L2-r3"
+
+
+def test_card_catalog_resolves_every_card():
+    """The static catalog covers every deck card and round-trips id -> definition, so the
+    id-only move log can always be resolved offline."""
+    cat = main.card_catalog()
+    deck = main.build_deck()
+    assert len(cat) == sum(len(deck[lk]) for lk in ("L1", "L2", "L3"))
+    for lk in ("L1", "L2", "L3"):
+        for c in deck[lk]:
+            entry = cat[c["id"]]
+            assert (entry["points"], entry["bonus"], entry["cost"], entry["level"]) \
+                == (c["points"], c["bonus"], c["cost"], c["level"])
+
+
 # ─── 21-point (Long) mode ───────────────────────────────────────────────────────
 
 def _pts_card(n):

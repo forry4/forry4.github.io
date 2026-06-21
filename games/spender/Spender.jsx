@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import CastlesOfCrimson from "../castles_of_crimson/CastlesOfCrimson.jsx";
 import Books from "../../books/Books.jsx";
 import { baseCss } from "../../shared/theme.js";
@@ -711,6 +711,23 @@ export default function SpenderApp() {
 	// can't clear an unmet requirement — the server keeps these set until resolved.
 	const needsDiscard = game?.pending_discard_pid === myId;
 	const needsNobleChoice = game?.pending_noble_pid === myId;
+	// Catalog of every card currently visible in state (board + both players'
+	// purchased/reserved), keyed by id. The move log stores only card_id (the server
+	// log is id-only); this resolves those ids back to full cards for display + the
+	// inspect modal. Complete by construction: a logged buy/reserve card is always
+	// present somewhere in the live state (purchased/reserved/board).
+	const cardsById = useMemo(() => {
+		const m = {};
+		if (!game) return m;
+		const add = (c) => { if (c && c.id && c.cost) m[c.id] = c; };
+		const b = game.board || {};
+		for (const lk of ["L1", "L2", "L3"]) (b[lk] || []).forEach(add);
+		for (const p of Object.values(game.players || {})) {
+			(p.purchased || []).forEach(add);
+			(p.reserved || []).forEach(add);
+		}
+		return m;
+	}, [game]);
 
 	const [selectedGems, setSelectedGems] = useState([]);
 	const [selectedCard, setSelectedCard] = useState(null);
@@ -1124,19 +1141,22 @@ export default function SpenderApp() {
 			));
 			return { name, action: <span>took {parts.reduce((a, b) => [a, " ", b])}</span> };
 		}
+		// Resolve the card: new logs carry card_id (look up the catalog); older saved
+		// games carry the full mv.card inline. Either path yields a full card dict.
+		const mvCard = mv.card || (mv.card_id ? cardsById[mv.card_id] : null);
 		if (mv.type === "buy") {
-			const col = mv.card?.bonus || mv.card?.color;
+			const col = mvCard?.bonus || mvCard?.color;
 			const dot = col
 				? <span style={{ width: 8, height: 8, borderRadius: "50%", background: GEM_HEX[col], border: "1px solid rgba(255,255,255,.12)", display: "inline-block", marginLeft: 2, marginRight: 2, verticalAlign: "middle" }} />
 				: null;
-			return { name, action: <span>bought{dot}card{mv.card?.points ? ` +${mv.card.points}pts` : ""}</span>, card: mv.card?.cost ? mv.card : null };
+			return { name, action: <span>bought{dot}card{mvCard?.points ? ` +${mvCard.points}pts` : ""}</span>, card: mvCard?.cost ? mvCard : null };
 		}
 		if (mv.type === "reserve") {
-			const col = mv.card?.bonus || mv.card?.color;
+			const col = mvCard?.bonus || mvCard?.color;
 			const dot = col
 				? <span style={{ width: 8, height: 8, borderRadius: "50%", background: GEM_HEX[col], border: "1px solid rgba(255,255,255,.12)", display: "inline-block", marginLeft: 2, marginRight: 2, verticalAlign: "middle" }} />
 				: null;
-			return { name, action: <span>reserved{dot}card</span>, card: mv.card?.cost ? mv.card : null };
+			return { name, action: <span>reserved{dot}card</span>, card: mvCard?.cost ? mvCard : null };
 		}
 		if (mv.type === "noble") return { name, action: `claimed noble +${mv.pts}pts` };
 		return { name, action: mv.type };
