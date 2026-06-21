@@ -123,3 +123,64 @@ def test_wrong_step_rejected():
 def test_night_move_rejected_outside_night():
     g = make_game(["a", "b", "c"], seed=1)  # still in DEALING
     assert not engine.apply_move(g, "a", {"type": "robber_swap", "target": "b"})[0]
+
+
+# ── Drunk (blind swap with a center card) ─────────────────────────────────────
+def test_drunk_blind_swap_moves_card_no_leak():
+    g = setup(engine.STEP_DRUNK, {"a": "drunk", "b": "villager"})
+    old_center0 = g["center"][0]
+    ok, err = engine.apply_move(g, "a", {"type": "drunk_swap", "center_index": 0})
+    assert ok, err
+    assert g["players"]["a"]["dealt_role"] == "drunk"        # night role immutable
+    assert g["players"]["a"]["card"] == old_center0          # took the center card
+    assert g["center"][0] == "drunk"                         # drunk card went to center
+    # the whole point: the drunk does NOT see their new card
+    assert engine.player_view(g, "a")["players"]["a"]["card"] is None
+
+
+def test_drunk_rejects_bad_center_index():
+    g = setup(engine.STEP_DRUNK, {"a": "drunk"})
+    assert not engine.apply_move(g, "a", {"type": "drunk_swap", "center_index": 9})[0]
+    assert not engine.apply_move(g, "b", {"type": "drunk_swap", "center_index": 0})[0]
+
+
+# ── Lone wolf optional center peek ────────────────────────────────────────────
+def test_lone_wolf_center_peek_is_private():
+    g = setup(engine.STEP_WOLVES, {"a": "werewolf", "b": "villager", "c": "villager"},
+              players=("a", "b", "c"))
+    ok, err = engine.apply_move(g, "a", {"type": "wolf_peek_center", "index": 0})
+    assert ok, err
+    assert engine.player_view(g, "a")["center"][0] == g["center"][0]
+    assert engine.player_view(g, "a")["center"][1] is None
+    assert engine.player_view(g, "b")["center"] == [None, None, None]
+
+
+def test_two_wolves_cannot_peek_center():
+    g = setup(engine.STEP_WOLVES, {"a": "werewolf", "b": "werewolf", "c": "villager"},
+              players=("a", "b", "c"))
+    assert not engine.apply_move(g, "a", {"type": "wolf_peek_center", "index": 0})[0]
+
+
+# ── Minion / Masons / Insomniac (info reveals) ────────────────────────────────
+def test_minion_sees_wolves_not_vice_versa():
+    g = setup(engine.STEP_MINION, {"a": "minion", "b": "werewolf", "c": "villager"},
+              players=("a", "b", "c"))
+    assert engine.player_view(g, "a")["players"]["b"]["card"] == "werewolf"   # minion sees wolf
+    assert engine.player_view(g, "b")["players"]["a"]["card"] is None          # wolf does NOT see minion
+
+
+def test_masons_see_each_other():
+    g = setup(engine.STEP_MASONS, {"a": "mason", "b": "mason", "c": "villager"},
+              players=("a", "b", "c"))
+    assert engine.player_view(g, "a")["players"]["b"]["card"] == "mason"
+    assert engine.player_view(g, "b")["players"]["a"]["card"] == "mason"
+    assert engine.player_view(g, "c")["players"]["a"]["card"] is None
+
+
+def test_insomniac_sees_own_changed_card():
+    g = setup(engine.STEP_INSOMNIAC, {"a": "insomniac", "b": "villager"})
+    g["players"]["a"]["card"] = "robber"        # simulate having been robbed/troublemade
+    assert engine.player_view(g, "a")["players"]["a"]["card"] == "robber"
+    # at a different step the insomniac does NOT see their own card
+    engine.set_step(g, engine.STEP_MASONS)
+    assert engine.player_view(g, "a")["players"]["a"]["card"] is None

@@ -1,43 +1,59 @@
-"""Full random games (3..10 players) driven through every phase at the engine
-level — no crash, valid winner, player_view never throws."""
+"""Full games across several explicit decks (the host role picker) driven through
+every phase at the engine level — every present night action, vote, resolve; no
+crash, valid outcome, player_view never throws."""
 import random
 
-from games.wherewolf import engine
-from .conftest import make_game
+from games.wherewolf import engine, roles
+
+DECKS = [
+    # all-roles 8-player
+    ["werewolf", "werewolf", "seer", "robber", "troublemaker",
+     "minion", "mason", "mason", "drunk", "insomniac", "hunter"],
+    # no-werewolf 4-player
+    ["seer", "robber", "troublemaker", "villager", "villager", "mason", "mason"],
+    # 2-mason 5-player
+    ["werewolf", "mason", "mason", "seer", "villager", "villager", "villager", "robber"],
+    # tanner + hunter + minion 6-player
+    ["werewolf", "werewolf", "tanner", "hunter", "minion",
+     "seer", "villager", "villager", "robber"],
+]
 
 
-def _first_with_role(g, role):
+def _first(g, role):
     return next((p for p in g["order"] if g["players"][p]["dealt_role"] == role), None)
 
 
 def _drive_night(g, rng):
     engine.start_night(g)
-    engine.set_step(g, engine.STEP_WOLVES)
-
-    engine.set_step(g, engine.STEP_SEER)
-    seer = _first_with_role(g, "seer")
-    if seer:
-        engine.apply_move(g, seer, {"type": "seer_peek_center", "indices": [0, 1]})
-
-    engine.set_step(g, engine.STEP_ROBBER)
-    robber = _first_with_role(g, "robber")
-    if robber:
-        others = [p for p in g["order"] if p != robber]
-        engine.apply_move(g, robber, {"type": "robber_swap", "target": rng.choice(others)})
-
-    engine.set_step(g, engine.STEP_TMAKER)
-    tm = _first_with_role(g, "troublemaker")
-    if tm:
-        others = [p for p in g["order"] if p != tm]
-        if len(others) >= 2:
+    for step in roles.NIGHT_ORDER:
+        role = roles.STEP_ROLE[step]
+        if role not in g["deck"]:
+            continue
+        engine.set_step(g, step)
+        actor = _first(g, role)
+        if actor is None:
+            continue                              # role is in the center → no one acts
+        others = [p for p in g["order"] if p != actor]
+        if step == "seer":
+            engine.apply_move(g, actor, {"type": "seer_peek_center", "indices": [0, 1]})
+        elif step == "robber":
+            engine.apply_move(g, actor, {"type": "robber_swap", "target": rng.choice(others)})
+        elif step == "troublemaker" and len(others) >= 2:
             a, b = rng.sample(others, 2)
-            engine.apply_move(g, tm, {"type": "troublemaker_swap", "a": a, "b": b})
+            engine.apply_move(g, actor, {"type": "troublemaker_swap", "a": a, "b": b})
+        elif step == "drunk":
+            engine.apply_move(g, actor, {"type": "drunk_swap", "center_index": rng.randint(0, 2)})
+        elif step == "werewolves" and len(g["wolf_pids"]) == 1:
+            engine.apply_move(g, actor, {"type": "wolf_peek_center", "index": 0})
 
 
-def test_full_games_all_sizes():
-    rng = random.Random(7)
-    for n in range(3, 11):
-        g = make_game([f"p{i}" for i in range(n)], seed=n)
+def test_full_games_custom_decks():
+    rng = random.Random(11)
+    for di, deck in enumerate(DECKS):
+        n = len(deck) - 3
+        players = [f"p{i}" for i in range(n)]
+        g = engine.new_game(players, names={p: p for p in players}, seed=di, deck=deck)
+        assert g["phase"] == engine.DEALING and len(g["center"]) == 3
         for p in g["order"]:
             assert engine.apply_move(g, p, {"type": "ready"})[0]
         assert engine.all_ready(g)
@@ -52,10 +68,12 @@ def test_full_games_all_sizes():
 
         engine.resolve_votes(g)
         assert engine.is_over(g)
-        assert g["winner"] in ("villagers", "wolves")
+        assert isinstance(g["headline"], str) and g["headline"]
+        assert set(g["winners"]) <= set(g["order"])
+        assert set(g["deaths"]) <= set(g["order"])
 
-        # Every player's end-of-game view is well-formed and reveals all cards.
         for p in g["order"]:
             v = engine.player_view(g, p)
             assert v["phase"] == engine.OVER
             assert all(pd["card"] is not None for pd in v["players"].values())
+            assert all(c is not None for c in v["center"])

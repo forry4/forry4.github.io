@@ -65,3 +65,33 @@ def test_token_letters():
 
 def test_determinism():
     assert deck(7, seed=123) == deck(7, seed=123)
+
+
+# ── recommended_deck / validate_deck (host role picker) ───────────────────────
+def test_recommended_deck_shape_and_valid():
+    for n in range(3, 11):
+        d = roles.recommended_deck(n)
+        assert len(d) == n + 3
+        ok, err = roles.validate_deck(d, n)
+        assert ok, (n, err)
+
+
+def test_validate_deck_rejects_wrong_count():
+    assert not roles.validate_deck(["villager"] * 6, 4)[0]   # need 7, has 6
+    assert not roles.validate_deck(["villager"] * 8, 4)[0]   # need 7, has 8
+
+
+def test_validate_deck_copy_limits():
+    assert not roles.validate_deck(["werewolf"] * 3 + ["villager"] * 3, 3)[0]  # 3 werewolves
+    assert not roles.validate_deck(["villager"] * 4 + ["werewolf", "seer"], 3)[0]  # 4 villagers
+    assert not roles.validate_deck(["mason"] * 3 + ["villager"] * 3, 3)[0]     # 3 masons
+
+
+def test_validate_deck_rejects_doppelganger_and_unknown():
+    assert not roles.validate_deck(["doppelganger"] + ["villager"] * 5, 3)[0]
+    assert not roles.validate_deck(["wizard"] + ["villager"] * 5, 3)[0]
+
+
+def test_validate_deck_allows_no_werewolf_and_single_mason():
+    ok, _ = roles.validate_deck(["seer", "robber", "troublemaker", "villager", "villager", "mason"], 3)
+    assert ok          # no werewolf + a lone mason are both allowed
