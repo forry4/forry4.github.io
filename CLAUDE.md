@@ -1571,9 +1571,41 @@ website variant **"S"**.
     **`vsearch_s21.json` is empty** → S21 = S's 15-weights + the structural 21-adaptations. Serving:
     `_s_choose_move` applies any S21 overrides under `_S21_LOCK` only on `win_points==21` (empty config = no-op,
     byte-identical). Harnesses gained `--win-points` (`s_measure_turns`/`vsearch_camp`/`vsearch_selfgate`).
-- **Open / next:** the 15-pt **pessimistic-backup / search-aggregation** experiment (changes how the eval is
-  *used* in PUCT, the proven-to-matter lever, vs eval quality which the leaf-swap showed doesn't convert) is the
-  most promising untapped 15-pt strength idea. Parked: "search owns DISCARD/NOBLE + a discard prior" (low gain).
+- **Endgame & multi-noble experiments (June 2026) — default-off knobs, committed LOCALLY (`2c27b14`,
+  `2da6e4d`), NOT pushed; under test.** Three structural ideas (a human still beats S in their own games),
+  each byte-identical at its default and unit-tested (`test_vsearch.py`):
+  - **Gap A — `v_state.ENDGAME_TIEBREAK_W` (tiebreak awareness)**: a CROSS-seat leaf term (added in the value
+    diff `value_with`/`components`, NOT per-seat STAND) that — gated to near-win + near-tie + differing card
+    counts — nudges toward the pts→fewest-cards tiebreak. **DEAD:** wash at sims=160 (0.500/0.502), wash→NEGATIVE
+    at sims=500 (0.02=0.500, 0.06=0.465). As predicted: the leaf tiebreak only helps when search MISSES
+    terminals, which happens LESS at higher sims (a true terminal already returns the engine's exact
+    tiebreak-aware win/loss). Reject. Don't relitigate.
+  - **Gap B — `vsearch.ENDGAME_SIM_MULT` / `ENDGAME_SERVE_TIME` (deeper final-round search)**: spend more
+    search once `final_trigger>=0` or a seat is within `ENDGAME_NEAR=3` of the win (offline sim multiplier /
+    longer serving wall-clock; `_is_endgame`). **Faint wash:** ~0.51-0.53 screen (160 and 500), never clears
+    the +0.02 holdout bar, no panel gain. The endgame is too few moves + already near sim-saturation to pay.
+  - **Multi-noble — `v_state.NOBLE_MULTI_W`** (the USER's idea): `_noble_stand` counted only the single best
+    noble (max over 3); W>0 adds `W*(sum of the OTHER nobles' time-gated standings)` so a position advancing
+    2-3 nobles outscores one advancing 1. (Per-card `valuation3.noble_progress` ALREADY rewards multi-noble
+    cards via its n-normalized sum; this is its POSITION-eval counterpart, the real gap.) **Implemented +
+    unit-tested, NOT YET RUN** (queued behind the sims=500 autotune; don't oversubscribe cores). **Strong
+    real-game evidence (a 15-10 loss to a human):** S piled red4/black4 (enough for its one noble n6, +1 spare
+    each) but left blue at 2 → finished EXACTLY one blue short of a 2nd noble (n9 = g3/b3/r3), while the human
+    balanced w3 b3 g3 r3 and claimed TWO nobles (6 vs 3 = the game's whole margin). The max-over-nobles leaf
+    gave S no gradient to balance. **Most promising of the three** — test sims=160 screen → sims=500 confirm.
+  - Tooling: `vsearch_selfgate` gained the endgame + `NOBLE_MULTI_W` knobs (finer search-knob grids) + a
+    `--knobs` subset filter (full set intact for future full tunes); `config_selfgate._PROBE_KEYS` pins them.
+- **sims=500 self-gate autotune (endgame + search knobs) — IN PROGRESS.** Run at the PROD operating point —
+  the user flagged that sims=160 tuning may not transfer to prod's ~600 (valid: the documented C_PUCT crossover).
+  Screen 240 g/candidate, holdout 600 (CI ±0.04). Interim findings (stable): **`C_PUCT=1.5` confirmed optimal
+  at sims=500 — NO crossover above 160** (every alt screens <0.5; the 1.0-best crossover is below ~120 only);
+  tiebreak dead; sim-mult faint wash; one **borderline `H3_PICK_W` 1.5→2.0 adoption (holdout 0.524, barely over
+  the +0.02 bar; its screen was 0.467 → screen↔holdout inconsistency ⇒ likely noise, and sharper-prior is the
+  documented don't-survive family)** pending the final fresh-seed + panel RPS arbiter.
+- **Open / next:** finish the sims=500 autotune (treat the H3_PICK_W adoption skeptically — confirm or reject
+  via fresh + panel); then run `NOBLE_MULTI_W`. The proven lever remains search DEPTH (sims throughput), not
+  eval re-weighting (re-confirmed: every endgame/search re-weight washed at the prod operating point). Parked:
+  "search owns DISCARD/NOBLE + a discard prior" (low gain).
 
 ### Hard-won conclusions — DO NOT relitigate
 These cost many self-play/training cycles to establish:
@@ -1676,10 +1708,22 @@ degrades safely if `/auth/session` isn't deployed yet (404 → stay logged in).
 - **Deck cards**: sized to match dealt cards (88px wide, min-height 120px). Level
   numeral (III/II/I) appears inside the deck outline above "DECK". No "Level I/II/III"
   panel titles — they were removed to reduce vertical space.
-- **Move log**: clicking a buy/reserve row opens a card inspect modal (shows
-  `<CardView />` + Close; no description text). Backend logs full card data (`id`,
-  `cost`, `points`, `bonus`, `level`) on every buy/reserve so the frontend can
-  reconstruct it. Clickable condition: `mv.card?.cost`.
+- **Move log = id-only + a static catalog (June 2026; `e4beb19`).** `_log_move` stores only
+  `card_id` per buy/reserve (+ `noble_id` on noble claims), NOT the full card dict — entries are now
+  ~one short string, so the **50-cap was raised to 500** and `game["moves"]` holds the WHOLE game (and
+  every `room_update` WS payload shrank). Resolve ids via `main.card_catalog()` (deterministic
+  id→{level,points,bonus,cost} for all 90 cards; the deck is fixed). Frontend: a `cardsById` useMemo
+  built from visible state (board + both players' purchased/reserved) resolves the log ids — complete by
+  construction (a logged card is always somewhere in the live state). **Backward-compatible**: old saved
+  games carry verbose `mv.card`, new ones `mv.card_id`; `renderMove` reads `mv.card || cardsById[mv.card_id]`.
+  Clickable condition is now that-resolved-card. **Blind-reserve redaction strips `card_id` too** (the id
+  alone reveals the hidden card via the catalog).
+- **Admin game-dump endpoint `GET /games/{id}/full`** (admin-gated): returns the complete persisted game
+  (final state + full id-only move log) + a `card_catalog`, a self-contained dump for offline analysis
+  (prefers the live in-memory copy, falls back to the DB row). Prod data lives in Turso (no local access),
+  so the workflow is a browser console snippet that reads `spender_roomId`+`spender_user.session_token`
+  from localStorage, fetches the endpoint, and downloads the JSON (clipboard `copy()`/chat-paste choke on
+  the ~20-30KB blob → download-to-file + Read is the reliable path). Used to analyse real vs-S games.
 - **Loading screen**: 250ms fast-path — AbortController fetch with 250ms timeout;
   if server responds in time → skip loading screen entirely; if not → show spinner
   + progress polling. `showLoading` state gates the spinner so a blank flash never
