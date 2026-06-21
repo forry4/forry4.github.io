@@ -1,0 +1,13 @@
+# keep host build artifacts / heavy non-backend dirs out of the build context
+**/__pycache__/
+*.pyc
+*.pyo
+*.so
+*.pyd
+games/spender/ai/az/valuation3.c
+.git/
+node_modules/
+webapp/node_modules/
+webapp/dist/
+docs/
+*.out

@@ -30,6 +30,17 @@ import os
 
 from . import engine as E
 
+# Cython PURE-PYTHON MODE: the hot leaf functions below carry `cython.*` type annotations. Under
+# CPython these are inert (`from __future__ import annotations` makes them strings; nothing is
+# evaluated), so this file runs as ordinary Python with no compiler. When Cython compiles it (prod /
+# the build container) the SAME source becomes a typed C extension (valuation3.so shadows the .py).
+# ONE source of truth -- no separate .pyx, nothing to keep in sync. The exact-value tests run in BOTH
+# modes (the Docker build runs them against the compiled module) gate that play is byte-identical.
+try:
+    import cython
+except ImportError:   # Cython absent: annotations stay inert; pure-Python path runs unchanged
+    cython = None
+
 # ─── turns_remaining estimator (typical-game length table; see h3_measure_turns.py) ──────────
 # turns_table.json maps (cards_owned, points, gems_held) -> average FUTURE main turns in a typical
 # H3-vs-H2 game. turns_remaining = min over BOTH players of the lookup (the game ends when the
@@ -411,14 +422,20 @@ def single_color_mirage(s: E.State, ci: int, seat: int, steep: int = 5) -> bool:
     return any(cost[c] - bon[c] >= steep for c in range(5))
 
 
-def _color_deficits(s: E.State, ci: int, seat: int) -> list[int]:
+def _color_deficits(s: E.State, ci: int, seat: int) -> list:
     """Per-color gems still needed after discounts and owned colored tokens
-    (gold NOT applied here — callers fold gold in where appropriate)."""
-    cost = E.COST[ci]
-    bon = s.bonuses[seat]
-    tok = s.tokens[seat]
-    # comprehension (not an append loop) — this is a leaf hotspot; the walrus avoids recomputing `need`.
-    return [n if (n := cost[i] - bon[i] - tok[i]) > 0 else 0 for i in range(5)]
+    (gold NOT applied here — callers fold gold in where appropriate). Leaf hotspot:
+    Cython-typed (pure mode) so the loop compiles to C; inert/normal under CPython."""
+    cost: tuple = E.COST[ci]
+    bon: list = s.bonuses[seat]
+    tok: list = s.tokens[seat]
+    out: list = [0, 0, 0, 0, 0]
+    i: cython.int
+    need: cython.int
+    for i in range(5):
+        need = cost[i] - bon[i] - tok[i]
+        out[i] = need if need > 0 else 0
+    return out
 
 
 def gems_to_collect(s: E.State, ci: int, seat: int) -> int:
@@ -561,12 +578,19 @@ def _steps(d) -> int:
 
     'nonzero == [1,1,1,1]' (the old sorted-equality test) holds iff exactly four entries are positive
     and all are 1 -- i.e. steepest == 1 AND four entries > 0. Computed without a sort (this is THE leaf
-    hotspot: ~592k sorts/move came from here + _reduces_tempo); byte-identical to the sorted form."""
-    st = max(d)
+    hotspot: ~592k sorts/move came from here + _reduces_tempo); byte-identical to the sorted form.
+    Cython-typed (pure mode); the max is unrolled as a typed loop (== max(d) for the 5-vector)."""
+    st: cython.int = d[0]
+    npos: cython.int = 0
+    i: cython.int
+    x: cython.int
+    for i in range(1, 5):
+        x = d[i]
+        if x > st:
+            st = x
     if st == 1:
-        npos = 0
-        for x in d:
-            if x > 0:
+        for i in range(5):
+            if d[i] > 0:
                 npos += 1
         if npos == 4:
             return 2
@@ -613,10 +637,17 @@ def gold_shortfall(s: E.State, ci: int, seat: int) -> int:
 def _reduces_tempo(costj, bon, bcol: int) -> float:
     """1.0 if a +1 `bcol` bonus lowers card cj's steepest-remaining color (saves a TURN), else 0.0.
     Uses H2's tempo definition (steepest single need, +1 if the remainder is exactly 1-1-1-1) on the
-    post-bonus remainder. Caller has gated on cj still needing bcol, so rem[bcol] >= 1. O(5), no recursion."""
-    rem = [costj[c] - bon[c] if costj[c] > bon[c] else 0 for c in range(5)]
+    post-bonus remainder. Caller has gated on cj still needing bcol, so rem[bcol] >= 1. O(5), no recursion.
+    Cython-typed (pure mode)."""
+    rem: list = [0, 0, 0, 0, 0]
+    c: cython.int
+    v: cython.int
+    before: cython.int
+    for c in range(5):
+        v = costj[c] - bon[c]
+        rem[c] = v if v > 0 else 0
     before = _steps(rem)
-    rem[bcol] -= 1
+    rem[bcol] = rem[bcol] - 1
     return 1.0 if _steps(rem) < before else 0.0
 
 
@@ -834,31 +865,40 @@ class Valuation:
         return v
 
     # ─── H3 potential/engine model (active only when USE_POTENTIAL_ENGINE) ───────
-    def _cost_scalar(self, ci: int, seat: int, extra_bcol: int | None = None) -> float:
+    def _cost_scalar(self, ci: cython.int, seat: cython.int, extra_bcol=None) -> float:
         """take_value's total_cost (W_TEMPO*tempo + W_GEM*gem + W_GOLD*gold) for ci, optionally
         as if `seat` held one EXTRA bonus in `extra_bcol`. Mirrors tempo()/gem_cost()/gold_cost()
-        so the H3 engine measures a discount in the exact currency take_value charges."""
+        so the H3 engine measures a discount in the exact currency take_value charges.
+
+        The #1 leaf hotspot. Cython-typed (pure mode): the per-color loop compiles to C; under CPython
+        the annotations are inert and it runs as ordinary Python. Byte-identical either way."""
         ck = (ci, seat, extra_bcol)            # pure in these args within a fixed state
         cached = self._cost_cache.get(ck)
         if cached is not None:
             return cached
         s = self.s
-        cost = E.COST[ci]
-        bon = s.bonuses[seat]
-        tok = s.tokens[seat]
-        # Hot path (profile #1): one hand-rolled loop, inlining the per-color effective bonus and
-        # avoiding the `b(c)` closure + generator expressions. Behavior-identical to the old
-        # comprehension form -- gem = sum of post-bonus sticker; the steepest post-token remaining
-        # need sets tempo (+1 iff the remainder is exactly 1-1-1-1, i.e. four needs all == 1); gold
-        # is the bottleneck color's need beyond what the bank can supply. Ties for `color` go to the
-        # lowest index, matching max(range(5), key=d.__getitem__).
-        gem = 0
-        steepest = 0
-        color = 0
-        nonzero = 0
-        ones = 0
+        cost: tuple = E.COST[ci]
+        bon: list = s.bonuses[seat]
+        tok: list = s.tokens[seat]
+        bank: list = s.bank
+        # gem = sum of post-bonus sticker; the steepest post-token remaining need sets tempo (+1 iff the
+        # remainder is exactly 1-1-1-1, i.e. four needs all == 1); gold is the bottleneck color's need
+        # beyond GOLD_BANK_CAP of the bank. Ties for `color` go to the lowest index.
+        eb: cython.int = -1 if extra_bcol is None else extra_bcol
+        gem: cython.int = 0
+        steepest: cython.int = 0
+        color: cython.int = 0
+        nonzero: cython.int = 0
+        ones: cython.int = 0
+        c: cython.int
+        bc: cython.int
+        sticker: cython.int
+        need: cython.int
+        tempo: cython.int
+        gold: cython.int
+        capped: cython.int
         for c in range(5):
-            bc = bon[c] + (1 if c == extra_bcol else 0)
+            bc = bon[c] + (1 if c == eb else 0)
             sticker = cost[c] - bc
             if sticker > 0:
                 gem += sticker
@@ -871,13 +911,20 @@ class Valuation:
                     steepest = need
                     color = c
         if steepest <= 0:
-            tempo = gold = 0
+            tempo = 0
+            gold = 0
         else:
-            tempo = steepest + (1 if nonzero == 4 and ones == 4 else 0)
-            gold = steepest - min(GOLD_BANK_CAP, s.bank[color])
+            tempo = steepest + (1 if (nonzero == 4 and ones == 4) else 0)
+            capped = bank[color]
+            if GOLD_BANK_CAP < capped:
+                capped = GOLD_BANK_CAP
+            gold = steepest - capped
             if gold < 0:
                 gold = 0
-        r = self.w_tempo * tempo + self.w_gem * gem + self.w_gold * gold
+        wt: cython.double = self.w_tempo
+        wg: cython.double = self.w_gem
+        wgo: cython.double = self.w_gold
+        r: cython.double = wt * tempo + wg * gem + wgo * gold
         self._cost_cache[ck] = r
         return r
 

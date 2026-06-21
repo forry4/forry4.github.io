@@ -35,3 +35,11 @@ games/spender/ai/az/leaf_model.npz
 
 # SQLite databases (contain user data)
 *.db
+
+# Cython build artifacts — the hot-path module (valuation3) is compiled in the Docker build, never committed
+games/spender/ai/az/valuation3.c
+games/spender/ai/az/*.so
+games/spender/ai/az/*.pyd
+
+# Cython/setuptools build temp dir
+build/
