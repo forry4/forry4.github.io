@@ -26,6 +26,27 @@ const ROLE_META = {
 const roleName = (r) => (r && ROLE_META[r]?.name) || (r ? r : "Unknown");
 const roleColor = (r) => (r && ROLE_META[r]?.color) || "#3a342a";
 
+// On the small cards, Cinzel renders as wide caps, so the longer role names don't
+// fit one line. Insert a soft break opportunity (<wbr>) at a clean syllable so a
+// too-wide name wraps tidily (TROUBLE/MAKER) instead of overflowing; names that do
+// fit one line ignore the hint. Index = where to split.
+const CARD_WBR = { werewolf: 4, villager: 4, troublemaker: 7, insomniac: 5, doppelganger: 6 };
+const cardLabel = (r) => {
+  const n = roleName(r), at = CARD_WBR[r];
+  return at ? <>{n.slice(0, at)}<wbr />{n.slice(at)}</> : n;
+};
+
+// Seat cards scale down as the table fills so up to 10 still ring the circle on a
+// phone (card height must stay under the chord between adjacent seats), while the
+// common 3–7 player games get big, readable cards. Returns inline CSS vars set on
+// the table; the cards read them via var(--pcw/--pch/--pcf).
+const cardVars = (n) => {
+  const [w, h, f] = n <= 7 ? ["76px", "98px", "11.5px"]
+                  : n <= 9 ? ["66px", "86px", "10.5px"]
+                  : ["56px", "76px", "10px"];
+  return { "--pcw": w, "--pch": h, "--pcf": f };
+};
+
 // Host role picker: selectable roles (no doppelganger yet) + per-role copy caps.
 const ROLE_CAPS = { werewolf: 2, villager: 3, mason: 2, seer: 1, robber: 1,
   troublemaker: 1, minion: 1, tanner: 1, drunk: 1, hunter: 1, insomniac: 1 };
@@ -133,8 +154,8 @@ const css = baseCss + `
 .ww-seat{position:absolute;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:3px;z-index:2}
 .ww-seat .seat-name{font-size:11px;color:var(--text-dim);max-width:74px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ww-seat.me .seat-name{color:var(--gold-light)}
-.ww-pcard{width:62px;height:84px;border-radius:8px;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;
-  text-align:center;font-family:Cinzel,serif;font-size:12px;line-height:1.15;padding:4px;background:#1a1622;position:relative;transition:all .15s}
+.ww-pcard{width:var(--pcw,72px);height:var(--pch,94px);border-radius:8px;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;
+  text-align:center;font-family:Cinzel,serif;font-size:var(--pcf,11px);line-height:1.1;padding:3px;overflow-wrap:break-word;background:#1a1622;position:relative;transition:all .15s}
 .ww-pcard.back{background:repeating-linear-gradient(45deg,#241a2e,#241a2e 6px,#2c2038 6px,#2c2038 12px);color:transparent}
 .ww-pcard.back::after{content:"?";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#54486a;font-size:24px}
 .ww-pcard.clickable{cursor:pointer;border-color:var(--gold)}
@@ -149,8 +170,8 @@ const css = baseCss + `
 /* center: the 3 face-down cards + the token row */
 .ww-center{position:absolute;top:42%;left:50%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:8px;z-index:2}
 .ww-center-cards{display:flex;gap:8px}
-.ww-ccard{width:52px;height:72px;border-radius:7px;border:2px solid var(--border);background:repeating-linear-gradient(45deg,#241a2e,#241a2e 6px,#2c2038 6px,#2c2038 12px);
-  display:flex;align-items:center;justify-content:center;font-family:Cinzel,serif;font-size:11px;color:transparent;position:relative}
+.ww-ccard{width:62px;height:82px;border-radius:7px;border:2px solid var(--border);background:repeating-linear-gradient(45deg,#241a2e,#241a2e 6px,#2c2038 6px,#2c2038 12px);
+  display:flex;align-items:center;justify-content:center;text-align:center;font-family:Cinzel,serif;font-size:11px;line-height:1.1;padding:3px;overflow-wrap:break-word;color:transparent;position:relative}
 .ww-ccard::after{content:"";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#54486a;font-size:18px}
 .ww-ccard.up{background:#1a1622;color:var(--text)}
 .ww-ccard.clickable{cursor:pointer;border-color:var(--gold)}
@@ -693,7 +714,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
           style={faceUp ? { borderColor: roleColor(pdata.card), background: "#1a1622" } : undefined}
           onClick={clickable ? () => clickPlayer(pid) : undefined}
         >
-          {faceUp ? roleName(pdata.card) : ""}
+          {faceUp ? cardLabel(pdata.card) : ""}
           {phase === "dealing" && pdata.ready && <span className="ww-ready">✓</span>}
           {dayActive && game.locked?.[pid] && <span className="ww-lock">🔒</span>}
           {phase === "over" && voteCount > 0 && <span className="ww-badge">{voteCount}</span>}
@@ -732,7 +753,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
             <div className="ww-banner">{banner}</div>
             <div className="ww-sub">{subPrompt}</div>
 
-            <div className={`ww-table${phase === "night" ? " night" : ""}`}>
+            <div className={`ww-table${phase === "night" ? " night" : ""}`} style={cardVars(order.length)}>
               <svg className="ww-arrows" viewBox="0 0 100 100" preserveAspectRatio="none">
                 <defs>
                   <marker id="ww-ah" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto">
@@ -761,7 +782,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
                       <div key={i} data-center-idx={i}
                         className={`ww-ccard${up ? " up" : ""}${clickable ? " clickable" : ""}${sel ? " selected" : ""}`}
                         onClick={clickable ? () => clickCenter(i) : undefined}>
-                        {up ? roleName(c) : ""}
+                        {up ? cardLabel(c) : ""}
                       </div>
                     );
                   })}
@@ -819,12 +840,12 @@ function WinScreen({ game, order, myIdx, players, roomData, onExit }) {
         <h2>{game.headline || "Game over"}</h2>
         <p className="ww-card-meta">{deathLine}</p>
       </div>
-      <div className="ww-table">
+      <div className="ww-table" style={cardVars(order.length)}>
         <div className="ww-center">
           <div className="ww-card-meta">Center cards</div>
           <div className="ww-center-cards">
             {(game.center || []).map((c, i) => (
-              <div key={i} className="ww-ccard up" style={{ borderColor: roleColor(c) }}>{roleName(c)}</div>
+              <div key={i} className="ww-ccard up" style={{ borderColor: roleColor(c) }}>{cardLabel(c)}</div>
             ))}
           </div>
         </div>
@@ -838,7 +859,7 @@ function WinScreen({ game, order, myIdx, players, roomData, onExit }) {
           return (
             <div className={`ww-seat${pid === order[myIdx] ? " me" : ""}`} key={pid} style={{ left: pos.x + "%", top: pos.y + "%" }}>
               <div className={`ww-pcard${isDead ? " revealed" : ""}`} style={{ borderColor: roleColor(pdata.card), background: "#1a1622" }}>
-                {roleName(pdata.card)}
+                {cardLabel(pdata.card)}
                 {votes > 0 && <span className="ww-badge">{votes}</span>}
                 {isDead && <span className="ww-dead">☠</span>}
               </div>
