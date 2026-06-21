@@ -1142,9 +1142,44 @@ website variant **"S"**.
   the bonus COLOR, not the card — only `noble_progress`'s time-gate `eff/(eff+W·deficit)` combine stays
   per-card via `_noble_terms`); (4) `_w_card` memoized by `(cj, bcol, seat)` (`_rtempo_cache`) — the engine
   loop recomputed `_reduces_tempo` identically for every ci sharing a color (213k→96k). Net **891 → ~1,570
-  clean sims/s (1.76×)**; so deployed midgame ~380 → ~670 sims/move. Remaining hotspots (`_cost_scalar` —
-  already a tight flat loop ~1µs so caching ≈ recompute; `components`/`engine_value`/`_delta_take` — already
-  memoized) need a numpy/Cython VECTORIZATION of the leaf for the next multiplier (bigger effort, uncertain).
+  clean sims/s (1.76×)**; so deployed midgame ~380 → ~670 sims/move. A follow-up memoized **`tempo(ci,seat)`**
+  (pure in (ci,seat), recomputed ~197k×/move across the noble/cost paths — caching it also kills the
+  `_color_deficits`/`_steps` it spawned) and **`_cost_scalar`** by (ci,seat,extra_bcol): paired A/B ~1545 →
+  ~1636 (**+6%, →1.84× cumulative**, byte-identical). That exhausted pure-Python (rounds gave +24/+24/+6% —
+  tapering); the remaining hotspots are already-memoized core work + interpreter overhead → next lever is
+  compilation (round 3).
+- **Perf round 3 — Cython "pure-Python mode" hot leaf (~1.27× more, single source; June 2026).** The
+  remaining leaf time is raw CPython interpreter overhead on the numeric loops (no redundancy left to cache).
+  Compiled it with Cython — but in **pure-Python mode, NOT a separate `.pyx`** (the deliberate architecture
+  choice): the hot functions in `valuation3.py` (`_cost_scalar`/`_color_deficits`/`_steps`/`_reduces_tempo`)
+  carry `cython.*` type annotations that are **inert under CPython** (`from __future__ import annotations`
+  makes them strings; nothing is evaluated, and `import cython` is guarded → no runtime dep) and become a
+  **typed C extension when Cython compiles the module**. ONE source of truth — no duplicated logic, no parity
+  test to maintain (a separate `.pyx` was prototyped first — 8.7× on `cost_scalar`, 1.25× end-to-end — then
+  discarded for the single-source pure-mode form, which matched it). **Serving = the compiled `valuation3.so`
+  shadows the `.py`** (extension > source in import priority); **local dev / any box without a C compiler runs
+  the `.py` unchanged** (byte-identical fallback).
+  - **Build wiring (`games/spender/Dockerfile`):** the *builder* stage `pip install cython` + `cythonize -i -3
+    games/spender/ai/az/valuation3.py`; the slim *runtime* `COPY --from=builder` the `.so` in next to the
+    `.py`, then a **build GATE** — `RUN python -m pytest test_h3_valuation test_vsearch` against the COMPILED
+    module — so a Cython miscompile fails the image build and can never reach prod (a failed build just leaves
+    the previous image serving; the site can't break from this). Shared by the wwsd service too (same
+    Dockerfile). `.gitignore`/`.dockerignore` keep the generated `.c`/`.so`/`build/` out of git + context.
+  - **Validated in a `python:3.11` container (= prod):** compiled **2114 vs uncompiled 1666 clean sims/s
+    (~1.27×)**, 24 exact-value tests pass compiled. Cumulative session ≈ **2.3×** (1.84 × 1.27); Render midgame
+    ~380 → ~870 sims/move.
+  - **Build env reality:** the dev box (Windows / Python 3.14) has **no C compiler**, so this is built +
+    validated in Docker (`python:3.11`, matches prod). There is **no runtime kill-switch** anymore (pure-mode
+    has no `if _FV` branch — it's compiled or not at build time); the byte-identical guarantee is the
+    build-gate tests, not a flag.
+  - **The ceiling — DO NOT relitigate the deeper Cython without a strong reason.** Pure-mode annotations got
+    ~most of what this code can give: the whole module compiling is the baseline gain, typed loops add the
+    rest. Going to the targeted **2–3×** would need (a) making `Valuation` a **`@cython.cclass`** (cdef
+    methods/typed attrs) to kill the now-dominant **method-dispatch + dict-cache** overhead — a big, risky
+    rewrite of a 1,000-line cached class — AND (b) Cythonizing `mcts.py`/`engine.py`, because **~15–25% of
+    per-sim time (determinize / `_select` / `clone` / `legal_actions`) lives OUTSIDE `valuation3`** — a hard
+    ceiling on any leaf-only effort. Judged poor effort/risk/reward vs the 2.3× already banked + diminishing
+    sim-returns; **stopped at the leaf.**
 - **Tooling** (offline, parallel): `vsearch_camp.py` (panel A/B, CRN, Wilson CIs), `vsearch_autotune.py`
   (coordinate descent, **MAXIMIN objective over {H3,H2,H2N,H2R}** — maximize the WORST matchup, mean only as a
   tie-break (`MEAN_EPS`), with larger screen/holdout N since the min is a noisier statistic. Switched FROM
