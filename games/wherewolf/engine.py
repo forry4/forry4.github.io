@@ -1,16 +1,15 @@
-"""Pure rules engine for Where Wolf? — a One Night Werewolf-style party game.
+"""Pure rules engine for Where Wolf? — a One Night Ultimate Werewolf clone.
 
 Web-free and deterministic (seedable). All game state lives in one JSON-safe dict
 (no sets/tuples; the RNG is persisted in ``game["rng_state"]`` as lists), so a game
 survives save/load and reconnects. Mirrors the engine contract used by the other
-games (``new_game`` / ``apply_move`` / ``is_over`` / ``winner``), plus the two
-pieces this game needs:
+games (``new_game`` / ``apply_move`` / ``is_over`` / ``winner``), plus:
 
-  * ``player_view(game, pid)`` — a PER-RECIPIENT redaction of the game. This is the
-    hidden-information boundary: a client is only ever sent the cards it is allowed
-    to see in the current phase; everything else is ``None`` in the payload, so a
-    snooping client literally cannot read a hidden card.
-  * ``resolve_votes(game)`` — pure tally → reveal → winner.
+  * ``player_view(game, pid)`` — a PER-RECIPIENT redaction (the hidden-information
+    boundary). A client is only ever sent the cards it may see; everything else is
+    ``None`` in the payload, so a snooping client literally cannot read a hidden card.
+  * ``resolve_votes(game)`` — official ONUW multi-death tally + Hunter chain + the
+    full team/tanner/minion win logic.
 
 THE load-bearing rule: a player PERFORMS the role they were DEALT for the whole
 night (``players[pid]["dealt_role"]`` — immutable). Swaps only move the CARD in
@@ -20,17 +19,17 @@ front of you when night ends is your FINAL role (possibly unknown to you).
 from __future__ import annotations
 
 import random
-from typing import Any
 
 from . import roles
 
 # ── Phases ────────────────────────────────────────────────────────────────────
 DEALING, NIGHT, DAY, OVER = "dealing", "night", "day", "over"
 
-# Night steps (also the conductor's narration cadence). ``intro``/``wakeup`` are
-# "all eyes closed" beats; the middle three are the action windows.
-STEP_INTRO, STEP_WOLVES, STEP_SEER, STEP_ROBBER, STEP_TMAKER, STEP_WAKE = (
-    "intro", "werewolves", "seer", "robber", "troublemaker", "wakeup")
+# Night steps (also the conductor's narration cadence).
+STEP_INTRO, STEP_WOLVES, STEP_MINION, STEP_MASONS, STEP_SEER, STEP_ROBBER, \
+    STEP_TMAKER, STEP_DRUNK, STEP_INSOMNIAC, STEP_WAKE = (
+        "intro", "werewolves", "minion", "masons", "seer", "robber",
+        "troublemaker", "drunk", "insomniac", "wakeup")
 
 
 # ── RNG persistence (JSON-safe; mirrors the other engines) ────────────────────
@@ -54,13 +53,24 @@ def _dealt(game: dict, pid: str) -> str | None:
 
 # ── Construction ──────────────────────────────────────────────────────────────
 def new_game(player_ids: list[str], names: dict[str, str] | None = None,
-             seed: int | None = None) -> dict:
-    """Deal hidden roles and enter the DEALING (ready) phase."""
+             seed: int | None = None, deck: list[str] | None = None) -> dict:
+    """Deal hidden roles and enter the DEALING (ready) phase.
+
+    ``deck`` (optional): the host-chosen multiset of role cards (length players+3).
+    Validated then seeded-shuffled. When omitted, the default ``build_deck`` is used.
+    """
     names = names or {}
     rng = random.Random(seed)
     order = list(player_ids)
     n = len(order)
-    cards = roles.build_deck(n, rng)
+    if deck is None:
+        cards = roles.build_deck(n, rng)
+    else:
+        ok, err = roles.validate_deck(deck, n)
+        if not ok:
+            raise ValueError(err)
+        cards = list(deck)
+        rng.shuffle(cards)
 
     players: dict[str, dict] = {}
     for i, pid in enumerate(order):
@@ -70,32 +80,41 @@ def new_game(player_ids: list[str], names: dict[str, str] | None = None,
 
     game = {
         "phase": DEALING,
-        "winner": None,                       # "villagers" | "wolves" | None
+        "winner": None,                       # legacy: "villagers" | "wolves" | None
         "order": order,
         "names": {pid: names.get(pid, pid) for pid in order},
         "players": players,
         "center": center,
-        # Public token row — the multiset of tokens for EVERY card in play. Reveals
-        # WHICH roles exist (never who holds them). Sorted so it leaks no position.
+        "deck": list(cards),                  # public multiset in play (drives the conductor)
         "roles_in_play": sorted(roles.TOKEN_LETTERS[c] for c in cards),
-        "wolf_pids": [pid for pid in order if players[pid]["dealt_role"] == "werewolf"],
+        # Dealt-role groupings (server-only; redacted by player_view).
+        "wolf_pids": [p for p in order if players[p]["dealt_role"] == "werewolf"],
+        "mason_pids": [p for p in order if players[p]["dealt_role"] == "mason"],
+        "minion_pids": [p for p in order if players[p]["dealt_role"] == "minion"],
 
         # Night conductor state.
         "night_step": None,
         "step_deadline": None,
-        "acted": {"seer": False, "robber": False, "troublemaker": False},
+        "acted": {"seer": False, "robber": False, "troublemaker": False, "drunk": False},
         "seer_peek": None,                    # {"kind":"player","pid":X} | {"kind":"center","indices":[i,j]}
         "robber_swap": None,                  # {"target": pid}
         "troublemaker_swap": None,            # {"a": pid, "b": pid}
+        "drunk_swap": None,                   # {"center_index": i}  (BLIND — card moved, not revealed)
+        "lone_wolf_peek": None,               # {"index": i}  (i == -1 means "declined")
 
         # Day / voting.
         "votes": {},                          # {voter_pid: target_pid}
         "locked": {},                         # {pid: bool}
         "vote_deadline": None,                # epoch seconds
 
-        # Outcome.
-        "revealed_pid": None,                 # whose card got flipped (None on tie)
+        # Outcome (multi-death).
+        "deaths": [],                         # pids who died
+        "revealed": [],                       # == deaths (revealed at OVER)
+        "revealed_pid": None,                 # legacy: first dead pid (back-compat)
         "vote_tally": {},
+        "winners": [],                        # pids who won
+        "winning_teams": [],                  # ["village"] | ["werewolf"] | ["tanner"] | ...
+        "headline": None,                     # human result string
 
         "rng_state": None,
     }
@@ -161,7 +180,7 @@ def apply_move(game: dict, pid: str, move: dict) -> tuple[bool, str | None]:
         return True, None
 
     if mtype in ("seer_peek_player", "seer_peek_center", "robber_swap",
-                 "troublemaker_swap", "skip"):
+                 "troublemaker_swap", "drunk_swap", "wolf_peek_center", "skip"):
         return _apply_night(game, pid, move)
 
     if mtype in ("vote", "lock_vote", "unlock_vote"):
@@ -178,9 +197,14 @@ def _apply_night(game: dict, pid: str, move: dict) -> tuple[bool, str | None]:
     mtype = move["type"]
 
     if mtype == "skip":
-        # The current actor declines their optional action.
-        if step in ("seer", "robber", "troublemaker") and role == step and not game["acted"][step]:
+        if (step in ("seer", "robber", "troublemaker", "drunk")
+                and role == roles.STEP_ROLE.get(step) and not game["acted"].get(step)):
             game["acted"][step] = True
+            return True, None
+        # lone wolf declining the optional center peek
+        if (step == STEP_WOLVES and role == "werewolf"
+                and len(game["wolf_pids"]) == 1 and game["lone_wolf_peek"] is None):
+            game["lone_wolf_peek"] = {"index": -1}
             return True, None
         return False, "nothing to skip"
 
@@ -237,13 +261,43 @@ def _apply_night(game: dict, pid: str, move: dict) -> tuple[bool, str | None]:
         if game["acted"]["troublemaker"]:
             return False, "already acted"
         a_id, b_id = move.get("a"), move.get("b")
-        # The troublemaker may include themselves, but the two targets must differ.
         if a_id == b_id or a_id not in game["players"] or b_id not in game["players"]:
             return False, "pick two different players"
         pa, pb = game["players"][a_id], game["players"][b_id]
         pa["card"], pb["card"] = pb["card"], pa["card"]
         game["troublemaker_swap"] = {"a": a_id, "b": b_id}
         game["acted"]["troublemaker"] = True
+        return True, None
+
+    if mtype == "drunk_swap":
+        if step != STEP_DRUNK:
+            return False, "not the drunk's turn"
+        if role != "drunk":
+            return False, "you are not the drunk"
+        if game["acted"]["drunk"]:
+            return False, "already acted"
+        ci = move.get("center_index")
+        if not (isinstance(ci, int) and 0 <= ci < len(game["center"])):
+            return False, "pick a center card"
+        p = game["players"][pid]
+        p["card"], game["center"][ci] = game["center"][ci], p["card"]   # BLIND — no reveal
+        game["drunk_swap"] = {"center_index": ci}
+        game["acted"]["drunk"] = True
+        return True, None
+
+    if mtype == "wolf_peek_center":
+        if step != STEP_WOLVES:
+            return False, "not the werewolves' turn"
+        if role != "werewolf":
+            return False, "you are not a werewolf"
+        if len(game["wolf_pids"]) != 1:
+            return False, "only a lone wolf may peek"
+        if game["lone_wolf_peek"] is not None:
+            return False, "already peeked"
+        idx = move.get("index")
+        if not (isinstance(idx, int) and 0 <= idx < len(game["center"])):
+            return False, "pick a center card"
+        game["lone_wolf_peek"] = {"index": idx}
         return True, None
 
     return False, "unknown night move"
@@ -278,70 +332,163 @@ def _apply_day(game: dict, pid: str, move: dict) -> tuple[bool, str | None]:
     return False, "unknown day move"
 
 
-def resolve_votes(game: dict) -> None:
-    """Tally votes → set ``revealed_pid`` (None on tie) → set ``winner`` → OVER.
+# ── Vote resolution (official ONUW: multi-death + Hunter + team/tanner/minion) ──
+_TEAM_NAMES = {"village": "Villagers", "werewolf": "Werewolves",
+               "tanner": "Tanner", "minion": "Minion"}
 
-    Pure and idempotent: a no-op unless the game is in the DAY phase. The revealed
-    player's FINAL card decides — a werewolf revealed means the villagers win.
-    """
+
+def _headline(winning_teams: list[str]) -> str:
+    if not winning_teams:
+        return "No one wins"
+    names = [_TEAM_NAMES.get(t, t.title()) for t in winning_teams]
+    if len(names) == 1 and winning_teams[0] in ("tanner", "minion"):
+        return names[0] + " wins"
+    return " & ".join(names) + " win"
+
+
+def resolve_votes(game: dict) -> None:
+    """Tally votes → deaths (multi-death + Hunter chain) → winners. OVER. Idempotent
+    (no-op unless DAY). Uses FINAL cards."""
     if game.get("phase") != DAY:
         return
+    order = game["order"]
+    players = game["players"]
 
     tally: dict[str, int] = {}
-    for target in game.get("votes", {}).values():
-        if target in game["players"]:
-            tally[target] = tally.get(target, 0) + 1
+    for tgt in game.get("votes", {}).values():
+        if tgt in players:
+            tally[tgt] = tally.get(tgt, 0) + 1
     game["vote_tally"] = tally
 
-    revealed = None
+    # The player(s) with the MOST votes die — but only if the max is >= 2 (if nobody
+    # got "ganged up on", no one dies). Ties at the top all die.
+    deaths: set[str] = set()
     if tally:
         top = max(tally.values())
-        leaders = [p for p, c in tally.items() if c == top]
-        if len(leaders) == 1:
-            revealed = leaders[0]
-    game["revealed_pid"] = revealed
+        if top >= 2:
+            deaths = {p for p, c in tally.items() if c == top}
 
-    if revealed is not None and game["players"][revealed]["card"] == "werewolf":
-        game["winner"] = "villagers"
-    else:
-        game["winner"] = "wolves"            # incl. tie / no-reveal
+    def final(p: str) -> str:
+        return players[p]["card"]
+
+    # Hunter chain: a dead Hunter (final card) kills the player they voted for.
+    # Transitive, with a cycle guard.
+    queue = list(deaths)
+    while queue:
+        p = queue.pop()
+        if final(p) == "hunter":
+            tgt = game.get("votes", {}).get(p)
+            if tgt in players and tgt not in deaths:
+                deaths.add(tgt)
+                queue.append(tgt)
+
+    dead = sorted(deaths, key=order.index)
+    game["deaths"] = dead
+    game["revealed"] = list(dead)
+    game["revealed_pid"] = dead[0] if dead else None
+
+    _resolve_win(game, dead)
     game["phase"] = OVER
 
 
+def _resolve_win(game: dict, dead: list[str]) -> None:
+    order = game["order"]
+    players = game["players"]
+
+    def final(p: str) -> str:
+        return players[p]["card"]
+
+    wolf_in_play = any(final(p) == "werewolf" for p in order)   # players only
+    wolf_died = any(final(p) == "werewolf" for p in dead)       # a WEREWOLF card died
+    tanner_died = any(final(p) == "tanner" for p in dead)
+    someone_died = bool(dead)
+
+    teams: set[str] = set()
+    if tanner_died:
+        teams.add("tanner")
+
+    if wolf_in_play:
+        if wolf_died:
+            teams.add("village")                 # a werewolf died → village wins
+        elif not tanner_died:
+            teams.add("werewolf")                # no wolf died (and no tanner death) → wolves win
+        # tanner died + no wolf died → only the tanner wins (wolf-team win suppressed)
+    else:
+        if not someone_died:
+            teams.add("village")                 # no wolves in play, nobody died → village wins
+        # else: village loses (no village winner)
+
+    # Minion special: a minion is in play, no werewolves are, and any NON-minion
+    # died → the minion wins.
+    minion_in_play = any(final(p) == "minion" for p in order)
+    minion_special = (minion_in_play and not wolf_in_play and someone_died
+                      and any(final(p) != "minion" for p in dead))
+
+    winners: list[str] = []
+    for p in order:
+        fc = final(p)
+        t = roles.team_of(fc)
+        if t == "tanner":
+            if "tanner" in teams and p in dead:
+                winners.append(p)              # the tanner wins ONLY by dying
+        elif t == "village":
+            if "village" in teams:
+                winners.append(p)
+        elif t == "werewolf":
+            if "werewolf" in teams:
+                winners.append(p)
+            elif fc == "minion" and minion_special:
+                winners.append(p)
+
+    winning_teams = sorted(teams)
+    if minion_special and "minion" not in winning_teams:
+        winning_teams.append("minion")
+
+    game["winners"] = winners
+    game["winning_teams"] = winning_teams
+    game["headline"] = _headline(winning_teams)
+    game["winner"] = ("villagers" if "village" in teams
+                      else "wolves" if "werewolf" in teams else None)
+
+
 # ── Per-recipient redaction (the hidden-information boundary) ──────────────────
-def _card_visible(game: dict, pid: str, target_pid: str) -> bool:
-    """May recipient ``pid`` see ``target_pid``'s CARD right now?"""
+def _card_visible(game: dict, viewer: str, target: str) -> bool:
+    """May ``viewer`` see ``target``'s CARD right now?"""
     phase = game.get("phase")
     step = game.get("night_step")
     if phase == OVER:
-        return True                                   # all final cards revealed
-    if target_pid == pid:
+        return True                                       # all final cards revealed
+    dealt = _dealt(game, viewer)
+    if target == viewer:
         if phase == DEALING:
-            return True                               # your own dealt card, pre-flip
-        if phase == NIGHT and step == STEP_ROBBER and _dealt(game, pid) == "robber":
-            return True                               # the robber views their NEW card
+            return True                                   # own dealt card, pre-flip
+        if phase == NIGHT and step == STEP_ROBBER and dealt == "robber":
+            return True                                   # robber views their NEW card
+        if phase == NIGHT and step == STEP_INSOMNIAC and dealt == "insomniac":
+            return True                                   # insomniac checks their own card
         return False
-    # Another player's card:
-    if phase == NIGHT and step == STEP_WOLVES:
-        return pid in game["wolf_pids"] and target_pid in game["wolf_pids"]
-    if phase == NIGHT and step == STEP_SEER and _dealt(game, pid) == "seer":
+    if phase != NIGHT:
+        return False
+    if step == STEP_WOLVES:
+        return viewer in game["wolf_pids"] and target in game["wolf_pids"]
+    if step == STEP_MINION:
+        # minion sees the wolves; wolves do NOT learn the minion (asymmetric).
+        return dealt == "minion" and target in game["wolf_pids"]
+    if step == STEP_MASONS:
+        return viewer in game["mason_pids"] and target in game["mason_pids"]
+    if step == STEP_SEER and dealt == "seer":
         peek = game.get("seer_peek")
-        if peek and peek.get("kind") == "player" and peek.get("pid") == target_pid:
-            return True
+        return bool(peek and peek.get("kind") == "player" and peek.get("pid") == target)
     return False
 
 
 def player_view(game: dict, pid: str) -> dict:
-    """Return a redaction of ``game`` safe to send to player ``pid``.
-
-    ``dealt_role`` is never sent for ANY player except the recipient's own (it's
-    their own start-of-night knowledge, needed to drive the night-action UI and to
-    survive reconnects). Every other player's ``card`` is ``None`` unless the
-    visibility rules permit it; the center cards are ``None`` unless the recipient
-    is the seer peeking them (or the game is over).
-    """
+    """Return a redaction of ``game`` safe to send to player ``pid``. ``dealt_role``
+    is only ever sent for the recipient's own seat; every other card is ``None``
+    unless the visibility rules permit it."""
     phase = game.get("phase")
     step = game.get("night_step")
+    dealt = _dealt(game, pid)
 
     players_out: dict[str, dict] = {}
     for tpid, pdata in game["players"].items():
@@ -351,16 +498,21 @@ def player_view(game: dict, pid: str) -> dict:
             "card": pdata["card"] if _card_visible(game, pid, tpid) else None,
         }
 
-    seer_centers: set[int] = set()
-    if phase == NIGHT and step == STEP_SEER and _dealt(game, pid) == "seer":
+    visible_centers: set[int] = set()
+    if phase == NIGHT and step == STEP_SEER and dealt == "seer":
         peek = game.get("seer_peek")
         if peek and peek.get("kind") == "center":
-            seer_centers = set(peek["indices"])
+            visible_centers = set(peek["indices"])
+    if phase == NIGHT and step == STEP_WOLVES and dealt == "werewolf":
+        lw = game.get("lone_wolf_peek")
+        if lw and lw.get("index", -1) >= 0:
+            visible_centers = {lw["index"]}
     center_out = [
-        (c if (phase == OVER or i in seer_centers) else None)
+        (c if (phase == OVER or i in visible_centers) else None)
         for i, c in enumerate(game["center"])
     ]
 
+    over = phase == OVER
     return {
         "phase": phase,
         "winner": game.get("winner"),
@@ -370,18 +522,24 @@ def player_view(game: dict, pid: str) -> dict:
         "center": center_out,
         "center_count": len(game["center"]),
         "roles_in_play": list(game["roles_in_play"]),
+        "deck": list(game.get("deck", [])),   # public multiset (== the token row)
         "you": pid,
-        # The recipient's OWN starting role — what they performed all night.
-        "your_dealt_role": _dealt(game, pid),
-        # Whether the recipient is an active role this round (drives night prompts).
-        "is_active": _dealt(game, pid) in roles.ACTIVE_ROLES,
+        "your_dealt_role": dealt,
+        "is_active": dealt in roles.ACTIVE_ROLES,
+        "is_lone_wolf": dealt == "werewolf" and len(game["wolf_pids"]) == 1,
         "night_step": step,
         "step_deadline": game.get("step_deadline"),
         "acted": dict(game.get("acted", {})),
-        # Votes/locks are public during DAY and at OVER; hidden otherwise.
+        # Votes/locks public during DAY and at OVER; hidden otherwise.
         "votes": dict(game["votes"]) if phase in (DAY, OVER) else {},
         "locked": dict(game["locked"]) if phase in (DAY, OVER) else {},
         "vote_deadline": game.get("vote_deadline") if phase == DAY else None,
-        "revealed_pid": game.get("revealed_pid") if phase == OVER else None,
-        "vote_tally": dict(game.get("vote_tally", {})) if phase == OVER else {},
+        # Outcome (OVER only).
+        "deaths": list(game.get("deaths", [])) if over else [],
+        "revealed": list(game.get("revealed", [])) if over else [],
+        "revealed_pid": game.get("revealed_pid") if over else None,
+        "vote_tally": dict(game.get("vote_tally", {})) if over else {},
+        "winners": list(game.get("winners", [])) if over else [],
+        "winning_teams": list(game.get("winning_teams", [])) if over else [],
+        "headline": game.get("headline") if over else None,
     }

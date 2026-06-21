@@ -47,15 +47,14 @@ MIN_PLAYERS = roles.MIN_PLAYERS
 MAX_PLAYERS = roles.MAX_PLAYERS
 
 # ── Conductor timing (seconds; all tunable) ───────────────────────────────────
+# Night windows are FIXED-DURATION (no early-advance): the conductor narrates a role
+# then sleeps the window while the actor acts via the normal move handler. Uniform
+# timing → no leak about whether a role is dealt vs in the center.
 INTRO_PAUSE = 3.0           # after cards flip down → "Everyone, close your eyes."
-EYES_CLOSED_PAUSE = 3.0     # → "Werewolves, wake up…"
-WOLF_WINDOW = 5.0           # wolves look at each other
-SEER_TIMEOUT = 25.0         # seer's action window (auto-advance if idle)
-SEER_VIEW = 3.0             # seer views their peek before cards flip back
-ROBBER_TIMEOUT = 25.0
-ROBBER_VIEW = 3.0           # robber views their new card
-TMAKER_TIMEOUT = 25.0
-PRE_WAKE_PAUSE = 3.0        # after "Troublemaker, close your eyes." → "Everyone, wake up!"
+EYES_CLOSED_PAUSE = 3.0     # → first role wakes
+ACTION_WINDOW = 15.0        # seer / robber / troublemaker / drunk (+ lone-wolf peek)
+INFO_WINDOW = 6.0           # werewolves / minion / masons / insomniac (look only)
+PRE_WAKE_PAUSE = 3.0        # before "Everyone, wake up!"
 DAY_SECONDS = 180.0         # 3-minute voting window
 
 werewolf_app = FastAPI(title="Where Wolf? API")
@@ -119,6 +118,7 @@ def save_game(room_id: str) -> None:
         "status": room.get("status", "open"),
         "game": room.get("game"),
         "meta": room.get("meta", {}),
+        "deck": room.get("deck"),
     }
     now = int(time.time())
     conn = _db()
@@ -171,6 +171,7 @@ def load_game_to_memory(room_id: str) -> bool:
         "status": state.get("status", "open"),
         "game": state.get("game"),
         "meta": state.get("meta", {}),
+        "deck": state.get("deck"),
         "sockets": {},
         "_events": {},
     }
@@ -247,6 +248,7 @@ def delete_open_game(game_id: str, user_id: str) -> bool:
 def mk_room_state(room_id: str, pid: str) -> dict[str, Any]:
     room = ROOMS.get(room_id, {})
     g = room.get("game")
+    n = len(room.get("players", {}))
     return {
         "room_id": room_id,
         "players": room.get("players", {}),         # {pid: name} — public lobby names
@@ -255,6 +257,10 @@ def mk_room_state(room_id: str, pid: str) -> dict[str, Any]:
         "max_players": MAX_PLAYERS,
         "min_players": MIN_PLAYERS,
         "game": engine.player_view(g, pid) if g else None,
+        # Host's chosen deck (public — it's the upcoming token row) + a sensible default
+        # for the current player count so the picker has something to seed from.
+        "deck": room.get("deck"),
+        "recommended_deck": roles.recommended_deck(n) if MIN_PLAYERS <= n <= MAX_PLAYERS else None,
         # Only the recipient's OWN reconnect token (never others').
         "reconnect_tokens": {pid: room.get("meta", {}).get(pid, {}).get("token")},
     }
@@ -294,18 +300,7 @@ def _is_night(room_id: str) -> bool:
     return bool(g and g.get("phase") == engine.NIGHT)
 
 
-def _peeked(room_id: str) -> bool:
-    g = _game(room_id)
-    return bool(g and g.get("seer_peek"))
-
-
-def _robbed(room_id: str) -> bool:
-    g = _game(room_id)
-    return bool(g and g.get("robber_swap"))
-
-
-async def _set_night(room_id: str, step: str, deadline: float | None = None,
-                     make_event: bool = False) -> bool:
+async def _set_night(room_id: str, step: str, deadline: float | None = None) -> bool:
     async with ROOM_LOCK:
         room = ROOMS.get(room_id)
         if not room:
@@ -314,8 +309,6 @@ async def _set_night(room_id: str, step: str, deadline: float | None = None,
         if not g or g.get("phase") != engine.NIGHT:
             return False
         engine.set_step(g, step, deadline)
-        if make_event:
-            room.setdefault("_events", {})[step] = asyncio.Event()
         save_game(room_id)
     await broadcast_room(room_id)
     return True
@@ -325,29 +318,9 @@ async def _narrate(room_id: str, key: str) -> None:
     await broadcast_narration(room_id, roles.NARRATION.get(key, ""), key)
 
 
-async def _actor_step(room_id: str, step: str, timeout: float) -> bool:
-    """Open an actor window (seer/robber/troublemaker): set the step + a fresh
-    Event, narrate, then wait for the player to act OR time out. The narration key
-    equals the step name. Returns False if the room/night vanished."""
-    if not await _set_night(room_id, step, time.time() + timeout, make_event=True):
-        return False
-    await _narrate(room_id, step)
-    ev = ROOMS.get(room_id, {}).get("_events", {}).get(step)
-    if ev is not None:
-        try:
-            await asyncio.wait_for(ev.wait(), timeout=timeout)
-        except asyncio.TimeoutError:
-            pass
-    async with ROOM_LOCK:
-        room = ROOMS.get(room_id)
-        if not room:
-            return False
-        g = room.get("game")
-        if not g or g.get("phase") != engine.NIGHT:
-            return False
-        g["acted"][step] = True
-        save_game(room_id)
-    return True
+def _lone_wolf(room_id: str) -> bool:
+    g = _game(room_id)
+    return bool(g and len(g.get("wolf_pids", [])) == 1)
 
 
 async def _begin_day(room_id: str) -> None:
@@ -382,36 +355,43 @@ async def _force_day(room_id: str) -> None:
 
 
 async def _run_night(room_id: str) -> None:
-    """The timed narration sequence. Fired once, when all players are ready."""
+    """The timed narration sequence (fired once, when all players are ready).
+
+    Data-driven over the SELECTED deck's night order with FIXED-DURATION windows:
+    every role IN THE DECK is announced (even one entirely in the center) so silence
+    can't leak which roles are out. Actions arrive via the normal move handler during
+    the window; there is no early-advance, so timing stays uniform/leak-free."""
     try:
         # Cards have just flipped face-down (phase==NIGHT, step==intro).
         await asyncio.sleep(INTRO_PAUSE)
         if not _is_night(room_id):
             return
         await _narrate(room_id, "intro")
-
         await asyncio.sleep(EYES_CLOSED_PAUSE)
-        if not await _set_night(room_id, engine.STEP_WOLVES):
-            return
-        await _narrate(room_id, "werewolves")
-        await asyncio.sleep(WOLF_WINDOW)
 
-        if not await _actor_step(room_id, engine.STEP_SEER, SEER_TIMEOUT):
-            return
-        if _peeked(room_id):
-            await asyncio.sleep(SEER_VIEW)   # seer views the peek before it flips back
+        g = _game(room_id)
+        deck_roles = set(g.get("deck", [])) if g else set()
 
-        if not await _actor_step(room_id, engine.STEP_ROBBER, ROBBER_TIMEOUT):
-            return
-        if _robbed(room_id):
-            await asyncio.sleep(ROBBER_VIEW)  # robber views their new card
-
-        if not await _actor_step(room_id, engine.STEP_TMAKER, TMAKER_TIMEOUT):
-            return
+        for step in roles.NIGHT_ORDER:
+            role = roles.STEP_ROLE[step]
+            if role not in deck_roles:
+                continue                          # role not in this game → skip silently
+            window = ACTION_WINDOW if step in roles.ACTION_STEPS else INFO_WINDOW
+            # The werewolves step is info, but a LONE wolf gets an action window to
+            # optionally peek a center card.
+            if step == engine.STEP_WOLVES and _lone_wolf(room_id):
+                window = ACTION_WINDOW
+            if not await _set_night(room_id, step, time.time() + window):
+                return
+            await _narrate(room_id, step)
+            if step == engine.STEP_WOLVES and _lone_wolf(room_id):
+                await _narrate(room_id, "lone_wolf")
+            await asyncio.sleep(window)
+            if not _is_night(room_id):
+                return
 
         if not await _set_night(room_id, engine.STEP_WAKE):
             return
-        await _narrate(room_id, "close_troublemaker")
         await asyncio.sleep(PRE_WAKE_PAUSE)
         await _begin_day(room_id)
         await _narrate(room_id, "wakeup")
@@ -475,6 +455,8 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                 await _handle_create(websocket, room_id, pid, msg)
             elif action == "join":
                 await _handle_join(websocket, room_id, pid, msg)
+            elif action == "set_roles":
+                await _handle_set_roles(websocket, room_id, pid, msg)
             elif action == "start":
                 await _handle_start(websocket, room_id, pid)
             elif action == "move":
@@ -520,6 +502,7 @@ async def _handle_create(ws, room_id, pid, msg):
             "status": "open",
             "host": pid,
             "game": None,
+            "deck": None,
             "meta": {pid: {"token": _gen_token()}},
             "_events": {},
         }
@@ -550,6 +533,29 @@ async def _handle_join(ws, room_id, pid, msg):
     _ensure_day_timer(room_id)
 
 
+async def _handle_set_roles(ws, room_id, pid, msg):
+    """Host picks the deck (a multiset of role names) before dealing. Lobby-only."""
+    async with ROOM_LOCK:
+        room = _ensure_room_loaded(room_id)
+        if not room:
+            await _send(ws, {"type": "error", "message": "no such room"})
+            return
+        if room.get("host") != pid:
+            await _send(ws, {"type": "error", "message": "only the host can choose roles"})
+            return
+        if room.get("status") != "open":
+            await _send(ws, {"type": "error", "message": "game already started"})
+            return
+        deck = msg.get("deck")
+        ok, err = roles.validate_deck(deck, len(room["players"]))
+        if not ok:
+            await _send(ws, {"type": "error", "message": err})
+            return
+        room["deck"] = list(deck)
+        save_game(room_id)
+    await broadcast_room(room_id)
+
+
 async def _handle_start(ws, room_id, pid):
     async with ROOM_LOCK:
         room = _ensure_room_loaded(room_id)
@@ -569,9 +575,14 @@ async def _handle_start(ws, room_id, pid):
         if len(pids) > MAX_PLAYERS:
             await _send(ws, {"type": "error", "message": f"at most {MAX_PLAYERS} players"})
             return
+        # Use the host's chosen deck; silently fall back to the recommended default
+        # if it went stale (a player joined/left after it was set) or was never set.
+        deck = room.get("deck")
+        if deck is not None and not roles.validate_deck(deck, len(pids))[0]:
+            deck = None
         room["status"] = "playing"
-        room["game"] = engine.new_game(pids, names=dict(room["players"]))
-        room["_events"] = {}
+        room["game"] = engine.new_game(pids, names=dict(room["players"]),
+                                       deck=deck or roles.recommended_deck(len(pids)))
         room["_night_started"] = False
         save_game(room_id)
     await broadcast_room(room_id)
@@ -579,7 +590,6 @@ async def _handle_start(ws, room_id, pid):
 
 async def _handle_move(ws, room_id, pid, msg):
     fire_night = False
-    signal = None
     async with ROOM_LOCK:
         room = _ensure_room_loaded(room_id)
         if not room or not room.get("game"):
@@ -592,15 +602,12 @@ async def _handle_move(ws, room_id, pid, msg):
         if not ok:
             await _send(ws, {"type": "error", "message": err or "illegal move"})
             return
-        # All ready → flip cards down and launch the night conductor (once).
+        # All ready → flip cards down and launch the night conductor (once). Night
+        # actions just apply + broadcast — the conductor uses fixed windows, not Events.
         if mtype == "ready" and engine.all_ready(game) and not room.get("_night_started"):
             room["_night_started"] = True
             engine.start_night(game)
             fire_night = True
-        # An actor finished → wake the conductor's current wait.
-        if game.get("phase") == engine.NIGHT and mtype in (
-                "seer_peek_player", "seer_peek_center", "robber_swap", "troublemaker_swap", "skip"):
-            signal = game.get("night_step")
         # Day vote/lock → resolve early once everyone has locked.
         if game.get("phase") == engine.DAY and mtype in ("vote", "lock_vote", "unlock_vote"):
             if engine.all_locked(game):
@@ -608,10 +615,6 @@ async def _handle_move(ws, room_id, pid, msg):
                 room["status"] = "over"
         save_game(room_id)
     await broadcast_room(room_id)
-    if signal:
-        ev = ROOMS.get(room_id, {}).get("_events", {}).get(signal)
-        if ev is not None:
-            ev.set()
     if fire_night:
         asyncio.create_task(_run_night(room_id))
 

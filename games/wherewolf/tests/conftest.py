@@ -8,14 +8,16 @@ def make_game(player_ids, seed=0):
 
 
 def force_roles(game, mapping):
-    """Deterministically override dealt_role+card for specific players (and
-    recompute wolf_pids). Used to set up reproducible night/vote scenarios without
-    fishing for a seed that deals the role we want."""
+    """Deterministically override dealt_role+card for specific players (and recompute
+    the wolf/mason/minion groupings). Used to set up reproducible night/vote scenarios
+    without fishing for a seed that deals the role we want."""
     for pid, role in mapping.items():
         game["players"][pid]["dealt_role"] = role
         game["players"][pid]["card"] = role
-    game["wolf_pids"] = [p for p in game["order"]
-                         if game["players"][p]["dealt_role"] == "werewolf"]
+    dealt = lambda p: game["players"][p]["dealt_role"]
+    game["wolf_pids"] = [p for p in game["order"] if dealt(p) == "werewolf"]
+    game["mason_pids"] = [p for p in game["order"] if dealt(p) == "mason"]
+    game["minion_pids"] = [p for p in game["order"] if dealt(p) == "minion"]
 
 
 def at_step(game, step, role_map=None):
