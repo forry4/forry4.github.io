@@ -6,7 +6,7 @@ const COC_WS = WS_RAW.replace(/\/ws$/, "/coc/ws");
 const COC_HTTP = WS_RAW.replace(/^ws/, "http").replace(/\/ws$/, "/coc");
 
 const TILE_HEX = {
-  burgundy: "#1f4d2b",   // castle  -> dark green
+  burgundy: "#a3263a",   // castle  -> crimson (the "burgundy" key is the backend's castle color)
   blue: "#3d6ea5",       // ship
   gray: "#6b6f76",       // mine
   green: "#8cc873",      // livestock -> light green
@@ -39,17 +39,24 @@ const COLOR_TYPE_LABEL = {
   burgundy: "Castle", blue: "Ship", gray: "Mine",
   green: "Livestock", beige: "Building", yellow: "Monastery",
 };
-// Planned colors not currently present in `hexes` (multiset diff) → the ghost
-// outlines to draw for a depot. Keeps slot identity stable across takes.
-function depotGhostColors(d, hexes) {
-  const present = (hexes || []).map((t) => t.color);
-  const ghosts = [];
+// Friendly display name for a space's color (the backend's castle color is "burgundy",
+// but the castle tiles are crimson, so show "crimson" to the player).
+const colorLabel = (c) => (c === "burgundy" ? "crimson" : c);
+// Ordered render slots for a numbered depot, one per planned tile type: each slot
+// is either the tile currently sitting there (matched by color) or a ghost outline
+// (taken). Because the slots stay in the fixed plan order, taking the LEFT tile
+// leaves a ghost in its place and does NOT shift the right tile left — slot
+// identity is stable across takes. Any unexpected extra tile is appended.
+function depotSlots(d, hexes) {
+  const present = [...(hexes || [])];
+  const slots = [];
   for (const c of DEPOT_PLAN_COLORS[d] || []) {
-    const i = present.indexOf(c);
-    if (i >= 0) present.splice(i, 1);  // consume a matching present tile
-    else ghosts.push(c);               // planned but missing → ghost it
+    const i = present.findIndex((t) => t.color === c);
+    if (i >= 0) slots.push({ tile: present.splice(i, 1)[0] });  // matching tile present
+    else slots.push({ ghost: c });                              // planned but taken → ghost
   }
-  return ghosts;
+  for (const t of present) slots.push({ tile: t });             // defensive: unexpected leftovers
+  return slots;
 }
 // Two-letter building codes so tiles are identifiable without mousing over.
 const BUILDING_ABBR = {
@@ -95,6 +102,91 @@ function tileDesc(t, board) {
   }
 }
 
+// ─── Tile icons ──────────────────────────────────────────────────────────────
+// Little monochrome SVG icons (drawn in a 0..24 box, single color `c`). ship /
+// castle / mine sit on dark tiles, so they're drawn in a light glyph; livestock
+// animals sit on the light-green pasture, so they're dark with small white facial
+// details to keep cow / pig / sheep distinguishable at tiny sizes.
+const ICON = {
+  ship: (c) => (<>
+    <path d="M11 2 L11 14 L3.5 14 Z" fill={c} />
+    <path d="M12.7 5 L12.7 14 L19 14 Z" fill={c} />
+    <path d="M2.5 15.5 H21.5 L18.5 21 H5.5 Z" fill={c} />
+  </>),
+  castle: (c) => (
+    <path fill={c} d="M3 21 V8 H5 V11 H7 V8 H9 V11 H11 V8 H13 V11 H15 V8 H17 V11 H19 V8 H21 V21 Z" />
+  ),
+  mine: (c) => (<>
+    <path d="M3 8 Q12 3 21 8 L20 10 Q12 5.5 4 10 Z" fill={c} />
+    <path d="M11 8 H13 L12.4 21 H11.6 Z" fill={c} />
+  </>),
+  cow: (c) => (<>
+    <path d="M6.5 6 Q4 3.5 2.6 5 Q4 6.2 6.5 7.4 Z" fill={c} />
+    <path d="M17.5 6 Q20 3.5 21.4 5 Q20 6.2 17.5 7.4 Z" fill={c} />
+    <ellipse cx="12" cy="13" rx="7.6" ry="6.6" fill={c} />
+    <ellipse cx="12" cy="16" rx="4.4" ry="2.9" fill="#fff" />
+    <circle cx="10.4" cy="16" r="0.7" fill={c} />
+    <circle cx="13.6" cy="16" r="0.7" fill={c} />
+    <circle cx="9" cy="11" r="1" fill="#fff" />
+    <circle cx="15" cy="11" r="1" fill="#fff" />
+  </>),
+  pig: (c) => (<>
+    <path d="M6 5.5 L10.5 6 L8.5 11 Z" fill={c} />
+    <path d="M18 5.5 L13.5 6 L15.5 11 Z" fill={c} />
+    <ellipse cx="12" cy="13.5" rx="7.6" ry="6.6" fill={c} />
+    <ellipse cx="12" cy="15" rx="3.9" ry="3" fill="#fff" />
+    <ellipse cx="10.6" cy="15" rx="0.7" ry="1" fill={c} />
+    <ellipse cx="13.4" cy="15" rx="0.7" ry="1" fill={c} />
+    <circle cx="9" cy="11" r="1" fill="#fff" />
+    <circle cx="15" cy="11" r="1" fill="#fff" />
+  </>),
+  sheep: (c) => (<>
+    <circle cx="7" cy="10.5" r="4.2" fill={c} />
+    <circle cx="12" cy="8" r="4.6" fill={c} />
+    <circle cx="17" cy="10.5" r="4.2" fill={c} />
+    <circle cx="8.5" cy="14.5" r="4.6" fill={c} />
+    <circle cx="15.5" cy="14.5" r="4.6" fill={c} />
+    <ellipse cx="12" cy="15.5" rx="3.6" ry="3.1" fill="#fff" />
+    <circle cx="10.7" cy="15" r="0.7" fill={c} />
+    <circle cx="13.3" cy="15" r="0.7" fill={c} />
+  </>),
+};
+
+function Icon({ kind, color, size }) {
+  const draw = ICON[kind];
+  if (!draw) return null;
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size}
+      style={{ display: "block", filter: "drop-shadow(0 1px 1px rgba(0,0,0,.45))" }}>
+      {draw(color)}
+    </svg>
+  );
+}
+
+// What to draw inside a hex tile: an icon for ship/castle/mine, `count`-many animal
+// icons for livestock, or the text glyph for monastery (#) / building (code). `px`
+// is the hex's pixel size so the icon/glyph scale to the depot, storage, and board.
+function TileArt({ tile, px = 70 }) {
+  if (!tile) return null;
+  const t = tile;
+  if (t.type === "ship") return <Icon kind="ship" color="#f3ead8" size={px * 0.56} />;
+  if (t.type === "castle") return <Icon kind="castle" color="#f3ead8" size={px * 0.54} />;
+  if (t.type === "mine") return <Icon kind="mine" color="#f3ead8" size={px * 0.56} />;
+  if (t.type === "livestock" && ICON[t.animal]) {
+    const n = t.count || 1;
+    const each = n >= 4 ? px * 0.34 : n === 3 ? px * 0.36 : px * 0.42;
+    return (
+      <div className="coc-animals" style={{ maxWidth: px * 0.92, maxHeight: px * 0.82 }}>
+        {Array.from({ length: n }).map((_, i) => (
+          <Icon key={i} kind={t.animal} color="#15100a" size={each} />
+        ))}
+      </div>
+    );
+  }
+  const g = tileGlyph(t);
+  return g ? <span className="coc-glyph" style={{ fontSize: px * 0.27 }}>{g}</span> : null;
+}
+
 function uid() { return Math.random().toString(36).slice(2, 10); }
 function roomCode() { return Array.from({ length: 6 }, () => "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[Math.floor(Math.random() * 26)]).join(""); }
 
@@ -136,6 +228,21 @@ function timeAgo(ts) {
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
   return `${Math.floor(diff / 86400)}d ago`;
+}
+
+// Die faces as dots/pips (1-6) instead of a numeral. Cells of a 3x3 grid:
+//   1 2 3 / 4 5 6 / 7 8 9 . Scales with the die via % sizing, so it works for the
+// big rolled dice, the white die, and the small depot mini-dice alike.
+const PIP_MAP = { 1: [5], 2: [1, 9], 3: [1, 5, 9], 4: [1, 3, 7, 9], 5: [1, 3, 5, 7, 9], 6: [1, 3, 4, 6, 7, 9] };
+function Pips({ n }) {
+  const on = PIP_MAP[n];
+  if (!on) return n;   // non-1..6 (shouldn't happen) — fall back to the numeral
+  const set = new Set(on);
+  return (
+    <span className="coc-pips" aria-label={`die showing ${n}`}>
+      {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => <span key={i} className={`coc-pip${set.has(i) ? " on" : ""}`} />)}
+    </span>
+  );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────-
@@ -189,12 +296,22 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-code{font-family:'Cinzel',serif;font-size:2rem;letter-spacing:.3em;color:var(--gold);background:var(--surface2);border:1px dashed var(--border);border-radius:var(--radius);padding:12px;margin:14px 0;cursor:pointer}
 /* game */
 .coc-game{display:grid;grid-template-columns:1fr;gap:16px}
-.coc-statusbar{display:flex;flex-wrap:wrap;align-items:center;gap:14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:10px 14px}
+.coc-statusbar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:10px 14px}
+.coc-status-left{display:flex;align-items:center;gap:14px;flex-wrap:wrap;min-width:0}
 .coc-pill{font-family:'Cinzel',serif;font-size:.72rem;letter-spacing:.06em;color:var(--text-dim)}
 .coc-pill b{color:var(--text)}
-.coc-vp{display:flex;gap:14px;margin-left:auto}
+.coc-vp{display:flex;gap:14px;justify-self:center}
 .coc-vp .v{font-family:'Cinzel',serif;font-size:.8rem}
 .coc-vp .v b{color:var(--gold);font-size:1.05rem}
+/* Abandon / View Opponent + the opponent's dice, at the right end of the status bar. */
+.coc-status-right{display:flex;align-items:center;gap:10px;justify-self:end;flex-wrap:wrap;justify-content:flex-end}
+.coc-oppdice{display:inline-flex;gap:4px;align-items:center}
+.coc-oppdie{width:26px;height:26px;border-radius:5px;background:#f3ead8;display:inline-flex;align-items:center;justify-content:center;box-shadow:inset 0 0 0 1px rgba(0,0,0,.3),0 1px 2px rgba(0,0,0,.5)}
+.coc-oppdie.used{opacity:.4}
+/* Workers / silver resources — a bit larger than the plain pills. */
+.coc-res{font-family:'Cinzel',serif;font-size:.92rem;letter-spacing:.04em;color:var(--text-dim);display:inline-flex;align-items:center;gap:5px}
+.coc-res b{color:var(--text)}
+.coc-res-ic{font-size:1.15rem;line-height:1}
 .coc-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px}
 .coc-panel h3{font-family:'Cinzel',serif;font-size:.68rem;letter-spacing:.16em;color:var(--gold);text-transform:uppercase;margin-bottom:10px}
 .coc-depots{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
@@ -230,7 +347,37 @@ html,body{margin:0;padding:0;background:#120c0d}
 @media (max-width:760px){.coc-duchy-layout{flex-direction:column}.coc-duchy-board{width:100%}}
 .coc-depot-n{display:flex;justify-content:center;margin-bottom:5px}
 .coc-minidie{position:absolute;transform:translate(-50%,-50%);z-index:3;pointer-events:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;background:#f3ead8;color:#15100a;font-family:'Cinzel',serif;font-weight:700;font-size:.82rem;border-radius:5px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.3),0 1px 3px rgba(0,0,0,.55)}
-.coc-tilewrap{display:flex;flex-wrap:wrap;gap:3px;justify-content:center}
+/* Phone: the hexagonal depot ring + absolutely-positioned turn-order track overflow
+   on narrow screens (fixed 70px hex tiles can't fit a 31%-wide depot box). Reflow the
+   shared board into a stack — turn order on top, the 6 numbered depots in a 2-col grid,
+   the black depot centered below. !important beats the inline left/top/transform. */
+@media (max-width:600px){
+  .coc-board-hex{display:grid;grid-template-columns:1fr 1fr;gap:8px;justify-items:center;aspect-ratio:auto;max-width:none;margin-top:6px}
+  .coc-board-hex .coc-track-block{position:static;left:auto;top:auto;max-width:none;grid-column:1/-1;justify-self:stretch;margin:0;padding:6px 7px}
+  /* shrink the 7 turn-order spaces so 0-6 fit on one row */
+  .coc-track-spaces{flex-wrap:wrap;gap:2px}
+  .coc-track-space{width:36px;min-height:50px;padding:16px 2px 4px}
+  /* zoom shrinks each depot card AND the black depot's inline-px diamond consistently,
+     and (unlike transform) reduces the layout footprint so the board is more compact */
+  .coc-board-hex .coc-depot{zoom:.82}
+  .coc-board-hex .coc-depot:not(.coc-black-center){position:relative;left:auto!important;top:auto!important;transform:none!important;width:auto!important;min-height:0}
+  .coc-board-hex .coc-minidie{position:static!important;left:auto!important;top:auto!important;transform:none!important;margin:0 auto 6px}
+  .coc-board-hex .coc-black-center{position:relative;grid-column:1/-1;justify-self:center;left:auto!important;top:auto!important;transform:none!important}
+  /* status bar: the 3-zone grid is too tight on phones — stack the left group on its
+     own row, then center the score + right group (Abandon/View Opp/opp dice) below */
+  .coc-statusbar{display:flex;flex-wrap:wrap;justify-content:center}
+  .coc-status-left{width:100%;justify-content:center}
+  .coc-status-right{justify-content:center}
+  /* lobby header: the big crimson title is redundant with the hero h1 below and
+     overlaps the username on narrow screens — drop it on phones, shrink the hero */
+  .coc-top-lobby .coc-title{display:none}
+  .coc-hero{margin:16px 0 22px}
+  .coc-hero h1{font-size:1.9rem}
+}
+.coc-tilewrap{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
+.coc-animals{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:1px;line-height:0}
+.coc-glyph{font-family:'Cinzel',serif;font-weight:700;color:#15100a;line-height:1}
+.coc-fo{width:100%;height:100%;display:flex;align-items:center;justify-content:center}
 .coc-tile{width:70px;height:81px;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.05rem;font-family:'Cinzel',serif;color:#15100a;font-weight:700;transition:transform .1s;line-height:1;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%)}
 .coc-tile:hover{transform:scale(1.1)}
 .coc-tile.goods{width:34px;height:34px;border-radius:4px;clip-path:none;color:#fff;font-size:.82rem;text-shadow:0 1px 2px rgba(0,0,0,.7)}
@@ -250,26 +397,38 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-die-adj{display:flex;flex-direction:column;gap:2px}
 .coc-die-adj button{width:20px;height:20px;font-size:.7rem;line-height:1;border:1px solid var(--border);background:var(--surface2);color:var(--text);border-radius:4px;cursor:pointer}
 .coc-die-adj button:disabled{opacity:.3;cursor:not-allowed}
+/* Die faces rendered as dots/pips (1-6) instead of a numeral; scales with the die. */
+.coc-pips{display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);width:82%;height:82%}
+.coc-pip{place-self:center;width:62%;height:62%;border-radius:50%}
+.coc-pip.on{background:#15100a;box-shadow:inset 0 0 1px rgba(0,0,0,.35)}
+/* Bordered hexes (depots + storage) for a bit of depth: a crisp ~1px edge all around
+   the clip-path hex (separates adjacent tiles) + a soft drop shadow to lift them. */
+.coc-tile,.coc-stt{position:relative;filter:drop-shadow(0 1.5px 1px rgba(0,0,0,.55))}
+.coc-tile.goods{filter:none}     /* goods are small squares, not hexes */
+.coc-tile-ghost{filter:none}     /* ghost placeholders stay subtle */
+/* Glossy bevel along each hex's edges (light top-left -> dark bottom-right) so the
+   flat single-color tiles read as raised/3D rather than dull. Clipped to the hex,
+   inert to clicks; excludes goods squares, ghost placeholders, and empty slots. */
+.coc-tile:not(.goods):not(.coc-tile-ghost)::after,.coc-stt:not(.empty)::after{content:"";position:absolute;inset:0;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);background:linear-gradient(150deg,rgba(255,255,255,.62) 0%,rgba(255,255,255,.16) 16%,rgba(255,255,255,0) 34%,rgba(0,0,0,.06) 56%,rgba(0,0,0,.32) 84%,rgba(0,0,0,.6) 100%);pointer-events:none}
 .coc-storage{display:flex;gap:6px;flex-wrap:wrap}
 .coc-stt{width:70px;height:81px;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.05rem;font-family:'Cinzel',serif;font-weight:700;color:#15100a;transition:transform .1s}
 .coc-stt:hover{transform:scale(1.08)}
 .coc-stt.empty{cursor:default}
 .coc-stt.sel{filter:drop-shadow(0 0 3px var(--gold)) drop-shadow(0 0 2px var(--gold))}
 .coc-goods-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.coc-goods-chip{display:flex;align-items:center;gap:4px;font-size:.78rem;color:var(--text-dim)}
+.coc-goods-chip{display:flex;align-items:center;gap:4px;font-size:.78rem;color:var(--text-dim);cursor:pointer}
 .coc-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
 .coc-setup-banner{background:rgba(212,160,74,.14);border:1px solid var(--gold);border-radius:8px;padding:9px 12px;margin-bottom:12px;font-size:.85rem;line-height:1.35}
 .coc-hexsvg{width:100%;max-width:520px;display:block;margin:0 auto}
 .coc-hex{cursor:default;transition:opacity .12s}
 .coc-hex.legal{cursor:pointer}
 .coc-hex.legal:hover{opacity:.8}
-.coc-hexnum{font-family:'Cinzel',serif;font-weight:700;pointer-events:none}
 .coc-modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px}
 .coc-modal{background:var(--surface);border:1px solid var(--gold);border-radius:var(--radius-lg);padding:20px;max-width:440px;width:100%}
 .coc-modal h3{font-family:'Cinzel',serif;color:var(--gold);font-size:1rem;margin-bottom:6px}
 .coc-modal p{color:var(--text-dim);font-size:.88rem;margin-bottom:14px}
 .coc-modal-row{display:flex;flex-wrap:wrap;gap:8px}
-.coc-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--crimson);color:#fff;padding:10px 18px;border-radius:var(--radius);font-family:'Cinzel',serif;font-size:.82rem;z-index:60;box-shadow:0 6px 20px rgba(0,0,0,.5)}
+.coc-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--crimson);color:#fff;padding:10px 18px;border-radius:var(--radius);font-family:'Cinzel',serif;font-size:.82rem;z-index:60;box-shadow:0 6px 20px rgba(0,0,0,.5);max-width:min(92vw,460px);text-align:center;line-height:1.35}
 .coc-winner{max-width:460px;margin:50px auto;text-align:center;background:var(--surface);border:1px solid var(--gold);border-radius:var(--radius-lg);padding:30px}
 .coc-winner h2{font-family:'Cinzel',serif;font-size:2rem;color:var(--gold)}
 .coc-log{max-height:150px;overflow:auto;font-size:.78rem;color:var(--text-dim)}
@@ -290,6 +449,9 @@ html,body{margin:0;padding:0;background:#120c0d}
 
 // ─── Hex geometry ─────────────────────────────────────────────────────────────
 const HEX_S = 26;
+// Side of the square foreignObject that holds a placed tile's TileArt on the duchy
+// board — sized to fit inside the hex (which is ~2*HEX_S tall, ~√3*HEX_S wide).
+const HEX_ART = HEX_S * 1.4;
 function hexCenter(q, r) {
   return { x: HEX_S * Math.sqrt(3) * (q + r / 2), y: HEX_S * 1.5 * r };
 }
@@ -300,6 +462,21 @@ function hexPoints(cx, cy, s) {
     pts.push(`${(cx + s * Math.cos(a)).toFixed(1)},${(cy + s * Math.sin(a)).toFixed(1)}`);
   }
   return pts.join(" ");
+}
+
+// A die value (1-6) as SVG pips centered in a duchy hex — replaces the numeral on
+// empty spaces so the "die you need" reads as a die face (matches the dice + depot
+// mini-dice). White dots with a thin dark rim so they show on any hex colour.
+function svgPips(cx, cy, n, key) {
+  const on = PIP_MAP[n];
+  if (!on) return null;
+  const set = new Set(on);
+  const g = HEX_S * 0.34, r = HEX_S * 0.12;
+  const cell = { 1: [-g, -g], 2: [0, -g], 3: [g, -g], 4: [-g, 0], 5: [0, 0], 6: [g, 0], 7: [-g, g], 8: [0, g], 9: [g, g] };
+  return [1, 2, 3, 4, 5, 6, 7, 8, 9].filter((i) => set.has(i)).map((i) => (
+    <circle key={`${key}-p${i}`} cx={cx + cell[i][0]} cy={cy + cell[i][1]} r={r}
+      fill="#fff" stroke="rgba(0,0,0,.55)" strokeWidth={0.7} />
+  ));
 }
 
 // Fixed pixel size for the CSS clip-path hex tiles on the shared board (depots +
@@ -314,12 +491,14 @@ const HEX_W = 70;
 const HEX_H = 81;   // ≈ 70 * 2/√3
 // Central black depot: its (up to 4) tiles sit in a kite — 1 top, 2 middle,
 // 1 bottom. Horizontal offsets use HEX_W, vertical offsets use HEX_H so the
-// hexes nest exactly into a diamond.
+// hexes nest into a diamond. BLACK_GAP nudges them apart a touch so the four
+// tiles read as separate hexes (edge-to-edge they looked like they overlapped).
+const BLACK_GAP = 6;
 const BLACK_KITE = [
-  { left: 0.5 * HEX_W, top: 0 },             // top
-  { left: 0,           top: 0.75 * HEX_H },  // middle-left
-  { left: HEX_W,       top: 0.75 * HEX_H },  // middle-right
-  { left: 0.5 * HEX_W, top: 1.5 * HEX_H },   // bottom
+  { left: 0.5 * HEX_W + 0.5 * BLACK_GAP, top: 0 },                         // top
+  { left: 0,                             top: 0.75 * HEX_H + BLACK_GAP },  // middle-left
+  { left: HEX_W + BLACK_GAP,             top: 0.75 * HEX_H + BLACK_GAP },  // middle-right
+  { left: 0.5 * HEX_W + 0.5 * BLACK_GAP, top: 1.5 * HEX_H + 2 * BLACK_GAP }, // bottom
 ];
 // Breathing room (px) between the kite and the black box border around it.
 const BLACK_PAD = 9;
@@ -360,7 +539,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const [roomId, setRoomId] = useState("");
   const [roomData, setRoomData] = useState(null);
   const [openGames, setOpenGames] = useState([]);
-  const [myGames, setMyGames] = useState([]);
+  const [activeGames, setActiveGames] = useState([]);   // ALL in-progress games (yours + others')
   const [loadingGames, setLoadingGames] = useState(false);
   const [joinCode, setJoinCode] = useState("");
   const [toast, setToast] = useState("");
@@ -392,7 +571,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const myTurnRaw = game && !over && (game.pending_pid ? game.pending_pid === myId : game.turn === myId);
   const aiThinking = game && roomData?.vs_ai && !over &&
     (game.pending_pid || game.turn) === roomData?.ai_player;
-  // Setup phase: each player places a starting castle on a burgundy space before
+  // Setup phase: each player places a starting castle on a crimson (castle) space before
   // dice are rolled. `setupMine` = it's my turn to choose.
   const setupPhase = !!game && game.phase === "setup";
   const setupMine = setupPhase && !over && game.turn === myId;
@@ -436,11 +615,10 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     setLoadingGames(true);
     fetch(`${COC_HTTP}/games`).then((r) => r.json()).then((d) => setOpenGames(d.games || []))
       .catch(() => {}).finally(() => setLoadingGames(false));
-    if (authUser && !authUser.guest && authUser.session_token) {
-      fetch(`${COC_HTTP}/games/mine`, { headers: { Authorization: `Bearer ${authUser.session_token}` } }).then((r) => r.json())
-        .then((d) => setMyGames(d.games || [])).catch(() => {});
-    }
-  }, [authUser]);
+    // Active Games is PUBLIC: all in-progress games (yours + others', vs-bot or not).
+    // The frontend pins yours to the top via myId. No auth needed.
+    fetch(`${COC_HTTP}/games/active`).then((r) => r.json()).then((d) => setActiveGames(d.games || [])).catch(() => {});
+  }, []);
 
   useEffect(() => { if (screen === "lobby") fetchGames(); }, [screen, fetchGames]);
 
@@ -538,17 +716,19 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     if (inExtra) { if (extraValue == null) return; mv({ type: "extra_action", value: extraValue, sub: { type: "sell_goods" } }); }
     else if (selDie != null) mv({ type: "sell_goods", die_index: selDie });
   };
+  // Tapping a tile you can't act on yet shows its description (mobile has no hover,
+  // so this mirrors the PC title-tooltip — see also clickBlackTile).
   const clickDepotTile = (depot, tile) => {
-    if (!pendingMine && !myTurnRaw) return;
+    if (!pendingMine && !myTurnRaw) { setToast(tileDesc(tile, board)); return; }
     if (pendingMine && game.pending_kind === "building_take_choice") {
       mv({ type: "building_take_choice", tile_id: tile.id }); return;
     }
-    if (inExtra) { if (extraValue == null) { setToast("Pick a die value first"); return; } mv({ type: "extra_action", value: extraValue, sub: { type: "take_hex", depot, tile_id: tile.id } }); return; }
-    if (selDie == null) { setToast("Select a die first"); return; }
+    if (inExtra) { if (extraValue == null) { setToast(tileDesc(tile, board)); return; } mv({ type: "extra_action", value: extraValue, sub: { type: "take_hex", depot, tile_id: tile.id } }); return; }
+    if (selDie == null) { setToast(tileDesc(tile, board)); return; }
     mv({ type: "take_hex", die_index: selDie, depot, tile_id: tile.id });
   };
   const clickBlackTile = (tile) => {
-    if (!myTurnRaw || pendingMine) return;
+    if (!myTurnRaw || pendingMine) { setToast(`${tileDesc(tile, board)}  ·  buy for 2 silver`); return; }
     mv({ type: "buy_black", tile_id: tile.id });
   };
   const clickHex = (sid, legal) => {
@@ -571,7 +751,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const ignoreNumber = pendingMine && game?.pending_kind === "townhall_place";
   const legalTarget = (sid) => {
     if (!me) return false;
-    // During setup any empty burgundy space is a legal starting-castle spot.
+    // During setup any empty castle ("burgundy" backend color) space is a legal starting-castle spot.
     if (setupPhase) {
       if (game.turn !== myId) return false;
       const sp = boardSpaces(me.board_id)[sid];
@@ -600,12 +780,10 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
 
   // ─── Lobby ───────────────────────────────────────────────────────────────
   if (screen === "lobby") {
-    const savedId = (() => { try { return localStorage.getItem("coc_roomId"); } catch { return null; } })();
-    const savedTok = savedId ? (() => { try { return localStorage.getItem(`coc_token_${savedId}_${myId}`); } catch { return null; } })() : null;
     return (
       <div className="coc"><style>{css}</style>
         <div className="coc-wrap">
-          <div className="coc-top">
+          <div className="coc-top coc-top-lobby">
             <div className="coc-top-left">
               <button className="coc-btn ghost sm" onClick={onExit}>← Forrest Games</button>
               <span className="coc-title">Castles of Crimson</span>
@@ -651,24 +829,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             <button className="coc-btn ghost sm" onClick={fetchGames}>↻</button>
           </div>
 
-          {/* localStorage fallback "Active Games" card — shown mainly to guests (no
-              /games/mine list) for an in-progress game. Suppressed when the game is
-              already in a list, while games load, or when the real Active Games
-              section below is rendering, so there's never a duplicate / double header. */}
-          {savedId && savedTok && !loadingGames
-            && !myGames.some((g) => g.id === savedId) && !openGames.some((g) => g.id === savedId)
-            && !myGames.some((g) => g.status === "playing") && (
-            <>
-              <div className="coc-section-hd"><div className="coc-section-title">Active Games</div></div>
-              <div className="coc-card">
-                <div className="coc-card-info"><div className="coc-card-title">Game in progress</div><div className="coc-card-meta">{savedId}</div></div>
-                <div className="coc-card-actions">
-                  <button className="coc-btn gold sm" onClick={() => resume(savedId)}>Resume</button>
-                </div>
-              </div>
-            </>
-          )}
-
           <div className="coc-section-hd">
             <div className="coc-section-title">Open Games</div>
             <span className="coc-muted">waiting for a second player</span>
@@ -696,34 +856,51 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             ))
           )}
 
-          {myGames.some((g) => g.status === "playing") && (
-            <>
-              <div className="coc-section-hd">
-                <div className="coc-section-title">Active Games</div>
-                <span className="coc-muted">{myGames.filter((g) => g.status === "playing").length} in progress</span>
-              </div>
-              {myGames.filter((g) => g.status === "playing").map((g) => (
-                <div className="coc-card" key={g.id}>
-                  <div className="coc-card-info">
-                    <div className="coc-card-title">
-                      {g.you_are_p1 ? `${g.player1_name} (you)` : g.player1_name}
-                      {" vs "}
-                      {g.player2_name
-                        ? (g.you_are_p1 ? g.player2_name : `${g.player2_name} (you)`)
-                        : "waiting for opponent…"}
-                    </div>
-                    <div className="coc-card-meta">{g.id} · {timeAgo(g.updated_at)}</div>
-                  </div>
-                  <div className="coc-card-actions">
-                    {g.your_turn
-                      ? <span className="coc-turn-badge">Your Turn</span>
-                      : <span className="coc-their-badge">Their Turn</span>}
-                    <button className="coc-btn outline sm" onClick={() => resume(g.id)}>Resume</button>
-                  </div>
+          {activeGames.length > 0 && (() => {
+            // All in-progress games (yours + others'). Yours pinned to the top;
+            // each sub-list is already updated_at-desc from the backend.
+            const mine = activeGames.filter((g) => g.player1_id === myId || g.player2_id === myId);
+            const others = activeGames.filter((g) => g.player1_id !== myId && g.player2_id !== myId);
+            const ordered = [...mine, ...others];
+            return (
+              <>
+                <div className="coc-section-hd">
+                  <div className="coc-section-title">Active Games</div>
+                  <span className="coc-muted">{activeGames.length} in progress</span>
                 </div>
-              ))}
-            </>
-          )}
+                {ordered.map((g) => {
+                  const isMine = g.player1_id === myId || g.player2_id === myId;
+                  const youP1 = g.player1_id === myId;
+                  const turnName = g.turn === g.player1_id ? g.player1_name
+                    : (g.turn === g.player2_id ? g.player2_name : null);
+                  return (
+                    <div className="coc-card" key={g.id}>
+                      <div className="coc-card-info">
+                        <div className="coc-card-title">
+                          {isMine
+                            ? <>{youP1 ? `${g.player1_name} (you)` : g.player1_name}{" vs "}{g.player2_name ? (youP1 ? g.player2_name : `${g.player2_name} (you)`) : "waiting…"}</>
+                            : <>{g.player1_name} vs {g.player2_name || "waiting…"}</>}
+                        </div>
+                        <div className="coc-card-meta">{g.id} · {timeAgo(g.updated_at)}</div>
+                      </div>
+                      <div className="coc-card-actions">
+                        {isMine ? (
+                          <>
+                            {g.turn === myId
+                              ? <span className="coc-turn-badge">Your Turn</span>
+                              : <span className="coc-their-badge">Their Turn</span>}
+                            <button className="coc-btn outline sm" onClick={() => resume(g.id)}>Resume</button>
+                          </>
+                        ) : (
+                          <span className="coc-their-badge">{turnName ? `${turnName}'s turn` : "In progress"}</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </>
+            );
+          })()}
         </div>
         {toast && <div className="coc-toast">{toast}</div>}
       </div>
@@ -777,6 +954,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
 
   // ─── Game ────────────────────────────────────────────────────────────────
   const dice = game.dice?.[myId];
+  const oppDice = oppId ? game.dice?.[oppId] : null;
   // You must use BOTH dice before ending the turn (take-2-workers is always a
   // legal use for an otherwise-stuck die, so this can never soft-lock).
   const bothDiceUsed = !!dice && dice.used[0] && dice.used[1];
@@ -800,6 +978,25 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     const vb = `${(minX - pad).toFixed(0)} ${(minY - pad).toFixed(0)} ${(maxX - minX + pad * 2).toFixed(0)} ${(maxY - minY + pad * 2).toFixed(0)}`;
     return (
       <svg className="coc-hexsvg" viewBox={vb}>
+        <defs>
+          {/* Empty spaces are SOCKETS the tiles drop into, so they read LOWERED: a
+              strong dark band at the top (the socket lip's shadow) fading to a faint
+              light rim at the bottom (the lit floor) — the inverse of a raised tile. */}
+          <linearGradient id="coc-socket" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#000" stopOpacity="0.62" />
+            <stop offset="42%" stopColor="#000" stopOpacity="0.16" />
+            <stop offset="84%" stopColor="#000" stopOpacity="0" />
+            <stop offset="100%" stopColor="#fff" stopOpacity="0.22" />
+          </linearGradient>
+          {/* A placed tile sits ON the board, so it gets the same raised bevel as
+              the depot tiles (light top-left -> dark bottom) to pop out of its socket. */}
+          <linearGradient id="coc-raise" x1="0" y1="0" x2="0.4" y2="1">
+            <stop offset="0%" stopColor="#fff" stopOpacity="0.55" />
+            <stop offset="26%" stopColor="#fff" stopOpacity="0.12" />
+            <stop offset="60%" stopColor="#000" stopOpacity="0.06" />
+            <stop offset="100%" stopColor="#000" stopOpacity="0.55" />
+          </linearGradient>
+        </defs>
         {sids.map((sid) => {
           const sp = spaces[sid];
           const c = centers[sid];
@@ -809,7 +1006,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           // Full colors for every hex (matching the depot tiles); placed tiles
           // are distinguished by a bright highlighted outline, not by dimming.
           const fill = placed ? (TILE_HEX[tile.color] || "#555") : (TILE_HEX[sp.color] || "#444");
-          const num = placed ? tileGlyph(tile) : String(sp.number);
           let stroke, strokeWidth;
           if (legal) { stroke = "var(--gold)"; strokeWidth = 3; }
           else if (placed) { stroke = "#fff2c0"; strokeWidth = 2.6; }
@@ -817,13 +1013,18 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           return (
             <g key={sid} className={`coc-hex${legal ? " legal" : ""}`} onClick={() => interactive && clickHex(sid, legal)}>
               <title>{tile ? tileDesc(tile, board)
-                : setupPhase ? (sp.color === "burgundy" ? "Click to place your starting castle here." : `${sp.color} space (die ${sp.number}).`)
-                : `Empty ${sp.color} space — place a matching tile using die ${sp.number}.`}</title>
-              <polygon points={hexPoints(c.x, c.y, HEX_S - 1.5)} fill={fill} fillOpacity={1}
+                : setupPhase ? (sp.color === "burgundy" ? "Click to place your starting castle here." : `${colorLabel(sp.color)} space (die ${sp.number}).`)
+                : `Empty ${colorLabel(sp.color)} space — place a matching tile using die ${sp.number}.`}</title>
+              <polygon points={hexPoints(c.x, c.y, HEX_S - 1.5)} fill={fill} fillOpacity={placed ? 1 : 0.5}
                 stroke={stroke} strokeWidth={strokeWidth} />
-              {num && <text className="coc-hexnum" x={c.x} y={c.y + 4} textAnchor="middle" fontSize={placed ? 11 : 12}
-                fill={placed ? "#15100a" : "#fff"} stroke={placed ? "none" : "rgba(0,0,0,.6)"} strokeWidth={placed ? 0 : 0.7}
-                style={{ paintOrder: "stroke" }}>{num}</text>}
+              <polygon points={hexPoints(c.x, c.y, HEX_S - 1.5)} fill={placed ? "url(#coc-raise)" : "url(#coc-socket)"}
+                stroke="none" style={{ pointerEvents: "none" }} />
+              {placed
+                ? <foreignObject x={c.x - HEX_ART / 2} y={c.y - HEX_ART / 2} width={HEX_ART} height={HEX_ART}
+                    style={{ pointerEvents: "none" }}>
+                    <div className="coc-fo"><TileArt tile={tile} px={HEX_ART} /></div>
+                  </foreignObject>
+                : svgPips(c.x, c.y, sp.number, sid)}
             </g>
           );
         })}
@@ -841,7 +1042,25 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             <button className="coc-btn ghost sm" onClick={over ? () => setReviewing(false) : leaveToLobby}>← {over ? "Results" : "Menu"}</button>
             <span className="coc-title">Castles of Crimson</span>
           </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+        </div>
+
+        <div className="coc-statusbar">
+          <div className="coc-status-left">
+            <span className="coc-pill">Phase <b>{game.phase_letter}</b></span>
+            <span className="coc-pill">Round <b>{game.round}/5</b></span>
+            <span className={`coc-turnbadge ${myTurnRaw ? "you" : "them"}`}>
+              {over ? "Game over"
+                : setupPhase ? (setupMine ? "Place your starting castle" : aiThinking ? "Bot is choosing…" : `${players[game.turn] || "Opponent"} is choosing…`)
+                : aiThinking ? "Bot is playing…"
+                : myTurnRaw ? (pendingMine ? "Your decision" : "Your turn")
+                : `${players[game.turn] || "Opponent"}'s turn`}
+            </span>
+          </div>
+          <div className="coc-vp">
+            <span className="v">{me ? "You" : ""} <b>{me?.vp ?? 0}</b></span>
+            {opp && <span className="v">{players[oppId]} <b>{opp.vp}</b></span>}
+          </div>
+          <div className="coc-status-right">
             {!over && (confirmAbandon
               ? <>
                   <span className="coc-card-meta">Abandon game?</span>
@@ -850,22 +1069,13 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 </>
               : <button className="coc-btn ghost sm" onClick={() => setConfirmAbandon(true)}>Abandon</button>)}
             <button className="coc-btn outline sm" onClick={() => setViewOpp(true)}>View Opponent</button>
-          </div>
-        </div>
-
-        <div className="coc-statusbar">
-          <span className="coc-pill">Phase <b>{game.phase_letter}</b></span>
-          <span className="coc-pill">Round <b>{game.round}/5</b></span>
-          <span className={`coc-turnbadge ${myTurnRaw ? "you" : "them"}`}>
-            {over ? "Game over"
-              : setupPhase ? (setupMine ? "Place your starting castle" : aiThinking ? "Bot is choosing…" : `${players[game.turn] || "Opponent"} is choosing…`)
-              : aiThinking ? "Bot is playing…"
-              : myTurnRaw ? (pendingMine ? "Your decision" : "Your turn")
-              : `${players[game.turn] || "Opponent"}'s turn`}
-          </span>
-          <div className="coc-vp">
-            <span className="v">{me ? "You" : ""} <b>{me?.vp ?? 0}</b></span>
-            {opp && <span className="v">{players[oppId]} <b>{opp.vp}</b></span>}
+            {oppDice && (
+              <span className="coc-oppdice" title={`${players[oppId] || "Opponent"}'s dice`}>
+                {[0, 1].map((i) => (
+                  <span key={i} className={`coc-oppdie${oppDice.used?.[i] ? " used" : ""}`}><Pips n={oppDice.values[i]} /></span>
+                ))}
+              </span>
+            )}
           </div>
         </div>
 
@@ -875,7 +1085,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             <h3>The Board</h3>
             <div className="coc-whitedie">
               <span className="lbl">White die</span>
-              <div className="coc-die white" title="white die (sets the goods depot)">{game.white_die}</div>
+              <div className="coc-die white" title="white die (sets the goods depot)"><Pips n={game.white_die} /></div>
             </div>
           </div>
 
@@ -923,28 +1133,28 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
               }
               return (
                 <div key={d} className={`coc-depot${match ? " match" : ""}`} style={{ left: `${pos.left}%`, top: `${pos.top}%` }}>
-                  <span className="coc-minidie" style={numStyle} title={`Depot ${d} — take a tile here with a die showing ${d}`}>{d}</span>
+                  <span className="coc-minidie" style={numStyle} title={`Depot ${d} — take a tile here with a die showing ${d}`}><Pips n={d} /></span>
                   <div className="coc-tilewrap">
-                    {depot.hexes.map((t) => (
-                      <div key={t.id} className="coc-tile" style={{ background: TILE_HEX[t.color] }}
-                        title={tileDesc(t, board)} onClick={() => clickDepotTile(d, t)}>
-                        {tileGlyph(t)}
+                    {depotSlots(d, depot.hexes).map((slot, i) => slot.tile ? (
+                      <div key={slot.tile.id} className="coc-tile" style={{ background: TILE_HEX[slot.tile.color] }}
+                        title={tileDesc(slot.tile, board)} onClick={() => clickDepotTile(d, slot.tile)}>
+                        <TileArt tile={slot.tile} px={HEX_W} />
                       </div>
-                    ))}
-                    {depotGhostColors(d, depot.hexes).map((c, i) => (
-                      <div key={`ghost-${c}-${i}`} className="coc-tile coc-tile-ghost"
-                        style={{ background: TILE_HEX[c] }}
-                        title={`${COLOR_TYPE_LABEL[c] || "Tile"} taken — this depot refills a ${COLOR_TYPE_LABEL[c]?.toLowerCase() || ""} tile here each phase`}>
+                    ) : (
+                      <div key={`ghost-${i}`} className="coc-tile coc-tile-ghost"
+                        style={{ background: TILE_HEX[slot.ghost] }}
+                        title={`${COLOR_TYPE_LABEL[slot.ghost] || "Tile"} taken — this depot refills a ${COLOR_TYPE_LABEL[slot.ghost]?.toLowerCase() || ""} tile here each phase`}>
                       </div>
                     ))}
                     {depot.goods.map((gt) => (
-                      <div key={gt.id} className="coc-tile goods" style={{ background: GOODS_HEX[gt.color] }} title={tileDesc(gt, board)}>{goodsSellNum(gt.color)}</div>
+                      <div key={gt.id} className="coc-tile goods" style={{ background: GOODS_HEX[gt.color] }} title={tileDesc(gt, board)}
+                        onClick={() => setToast(tileDesc(gt, board))}>{goodsSellNum(gt.color)}</div>
                     ))}
                   </div>
                 </div>
               );
             })}
-            <div className="coc-depot coc-black-center" style={{ width: 2 * HEX_W + 2 * BLACK_PAD, height: 2.5 * HEX_H + 2 * BLACK_PAD }}
+            <div className="coc-depot coc-black-center" style={{ width: 2 * HEX_W + BLACK_GAP + 2 * BLACK_PAD, height: 2.5 * HEX_H + 2 * BLACK_GAP + 2 * BLACK_PAD }}
               title="Central black depot — buy one tile per turn for 2 silver">
               {game.black_depot.map((t, i) => {
                 const k = BLACK_KITE[i];
@@ -952,7 +1162,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 return (
                   <div key={t.id} className="coc-tile" style={{ position: "absolute", left: `${k.left + BLACK_PAD}px`, top: `${k.top + BLACK_PAD}px`, background: TILE_HEX[t.color], opacity: .9 }}
                     title={`${tileDesc(t, board)}  (Black depot: buy for 2 silver.)`} onClick={() => clickBlackTile(t)}>
-                    {tileGlyph(t)}
+                    <TileArt tile={t} px={HEX_W} />
                   </div>
                 );
               })}
@@ -976,7 +1186,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 <div className="coc-setup-banner">
                   <b>Starting castle.</b>{" "}
                   {setupMine
-                    ? "Click a glowing burgundy space to place it — your duchy grows outward from here."
+                    ? "Click a glowing crimson space to place it — your duchy grows outward from here."
                     : `Waiting for ${players[game.turn] || "your opponent"} to choose…`}
                 </div>
               )}
@@ -986,7 +1196,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 {dice && [0, 1].map((i) => (
                   <div key={i} style={{ display: "flex", gap: 4, alignItems: "center" }}>
                     <div className={`coc-die${selDie === i ? " sel" : ""}${dice.used[i] ? " used" : ""}`}
-                      onClick={() => { if (!dice.used[i] && !pendingMine) setSelDie(i); }}>{dice.values[i]}</div>
+                      onClick={() => { if (!dice.used[i] && !pendingMine) setSelDie(selDie === i ? null : i); }}><Pips n={dice.values[i]} /></div>
                     {!pendingMine && (
                       <div className="coc-die-adj">
                         <button disabled={dice.used[i] || !me || me.workers < 1} onClick={() => adjustDie(i, +1)}>▲</button>
@@ -995,8 +1205,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                     )}
                   </div>
                 ))}
-                <span className="coc-pill" style={{ marginLeft: 8 }}>⚒ Workers <b>{me?.workers ?? 0}</b></span>
-                <span className="coc-pill">⛃ Silver <b>{me?.silver ?? 0}</b></span>
+                <span className="coc-res" style={{ marginLeft: 8 }}><span className="coc-res-ic">⚒</span> Workers <b>{me?.workers ?? 0}</b></span>
+                <span className="coc-res"><span className="coc-res-ic">⛃</span> Silver <b>{me?.silver ?? 0}</b></span>
               </div>
 
               {/* storage + goods */}
@@ -1011,7 +1221,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                         <div key={t.id} className={`coc-stt${selStorage === t.id ? " sel" : ""}`} style={{ background: TILE_HEX[t.color] }}
                           title={tileDesc(t, board)}
                           onClick={() => setSelStorage(selStorage === t.id ? null : t.id)}>
-                          {tileGlyph(t)}
+                          <TileArt tile={t} px={70} />
                         </div>
                       );
                     })}
@@ -1022,7 +1232,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                   <div className="coc-goods-row">
                     {me && Object.entries(me.goods).length === 0 && <span className="coc-card-meta">none</span>}
                     {me && Object.entries(me.goods).map(([c, n]) => (
-                      <span key={c} className="coc-goods-chip" title={tileDesc({ kind: "goods", color: c }, board)}>
+                      <span key={c} className="coc-goods-chip" title={tileDesc({ kind: "goods", color: c }, board)}
+                        onClick={() => setToast(tileDesc({ kind: "goods", color: c }, board))}>
                         <span className="coc-tile goods" style={{ background: GOODS_HEX[c] }}>{goodsSellNum(c)}</span>×{n}
                       </span>
                     ))}
@@ -1089,7 +1300,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 <div className="coc-pill" style={{ marginBottom: 4 }}>Dice</div>
                 <div className="coc-dicebar">
                   {game.dice?.[oppId]?.values.map((v, i) => (
-                    <div key={i} className={`coc-die${game.dice[oppId].used[i] ? " used" : ""}`} style={{ width: 34, height: 34, fontSize: "1rem" }}>{v}</div>
+                    <div key={i} className={`coc-die${game.dice[oppId].used[i] ? " used" : ""}`} style={{ width: 34, height: 34, fontSize: "1rem" }}><Pips n={v} /></div>
                   ))}
                 </div>
               </div>
@@ -1099,7 +1310,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                   {[0, 1, 2].map((i) => {
                     const t = opp.storage?.[i];
                     if (!t) return <div key={i} className="coc-stt empty" style={{ background: "var(--surface2)" }} />;
-                    return <div key={t.id} className="coc-stt" style={{ background: TILE_HEX[t.color] }} title={tileDesc(t, board)}>{tileGlyph(t)}</div>;
+                    return <div key={t.id} className="coc-stt" style={{ background: TILE_HEX[t.color] }} title={tileDesc(t, board)}><TileArt tile={t} px={70} /></div>;
                   })}
                 </div>
               </div>
@@ -1108,7 +1319,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 <div className="coc-goods-row">
                   {Object.entries(opp.goods).length === 0 && <span className="coc-card-meta">none</span>}
                   {Object.entries(opp.goods).map(([c, n]) => (
-                    <span key={c} className="coc-goods-chip" title={tileDesc({ kind: "goods", color: c }, board)}><span className="coc-tile goods" style={{ background: GOODS_HEX[c] }}>{goodsSellNum(c)}</span>×{n}</span>
+                    <span key={c} className="coc-goods-chip" title={tileDesc({ kind: "goods", color: c }, board)} onClick={() => setToast(tileDesc({ kind: "goods", color: c }, board))}><span className="coc-tile goods" style={{ background: GOODS_HEX[c] }}>{goodsSellNum(c)}</span>×{n}</span>
                   ))}
                 </div>
               </div>

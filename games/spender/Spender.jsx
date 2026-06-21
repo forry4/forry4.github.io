@@ -172,11 +172,23 @@ const css = baseCss + `
 .game-sidebar{display:flex;flex-direction:column;gap:10px;min-width:0}
 @media(max-width:900px){
   .game-sidebar{order:-1}
-  /* Single column (tablet + phone): Take/Buy/✕ (or the AI 'thinking' indicator)
-     sit beside the nobles; the desktop gem-bank button group stays hidden. */
-  .nobles-panel{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
-  .nobles-panel .nobles-row{flex:1 1 auto}
-  .board-actions{display:flex;gap:6px;align-items:center;margin-left:auto;flex-shrink:0}
+  /* Tablet + phone: the nobles and an actions box (the win-points Target + the
+     Take/Buy/✕ controls) sit side by side as TWO SEPARATE boxes — the nobles box
+     hugs only the nobles, the actions box fills the space to its right. They stack
+     (wrap) if the row gets too narrow. The outer .nobles-panel goes transparent so
+     it's just a flex row holding the two boxes. (Selectors are deliberately
+     higher-specificity so they beat the unconditional .panel / .board-actions
+     base rules that appear LATER in the stylesheet — esp. .board-actions{display:none},
+     which otherwise hid the box on mobile entirely.) */
+  .nobles-panel.panel{display:flex;flex-wrap:wrap;align-items:stretch;gap:8px;background:none;border:none;border-radius:0;padding:0}
+  .nobles-panel .panel-title{display:none}
+  .nobles-panel .nobles-row{flex:0 0 auto;align-content:center;gap:6px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:8px}
+  /* justify-content:flex-start pins the Target to the TOP so it doesn't shift up
+     when the Take/Buy/✕ buttons appear below it. */
+  .nobles-panel .board-actions{flex:1 1 auto;min-width:118px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:8px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:8px}
+  .board-actions .target-label{font-size:1rem}
+  .board-actions-btns{display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:center}
+  .board-actions-btns:empty{display:none}
   .board-actions .btn{padding:9px 14px}
 }
 .panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px}
@@ -755,7 +767,7 @@ export default function SpenderApp() {
 
 	// ── Browser state ──────────────────────────────────────────────────────
 	const [openGames, setOpenGames] = useState([]);
-	const [myGames, setMyGames] = useState([]);
+	const [activeGames, setActiveGames] = useState([]);   // ALL in-progress games (yours + others')
 	const [browserLoading, setBrowserLoading] = useState(false);
 	const [showAiPicker, setShowAiPicker] = useState(false);
 	const [winPoints, setWinPoints] = useState(15);   // 15 = Classic, 21 = Long mode
@@ -767,14 +779,14 @@ export default function SpenderApp() {
 		setBrowserLoading(true);
 		try {
 			const openP = fetch(`${HTTP_BASE}/games`).then(r => r.json()).catch(() => ({ games: [] }));
-			const mineP = (user && !user.guest && user.session_token)
-				? fetch(`${HTTP_BASE}/games/mine`, { headers: { Authorization: `Bearer ${user.session_token}` } }).then(r => r.json()).catch(() => ({ games: [] }))
-				: Promise.resolve({ games: [] });
-			const [open, mine] = await Promise.all([openP, mineP]);
+			// Active Games is PUBLIC: all in-progress games (yours + others', vs-AI or
+			// not). The frontend pins yours to the top via myId. No auth needed.
+			const activeP = fetch(`${HTTP_BASE}/games/active`).then(r => r.json()).catch(() => ({ games: [] }));
+			const [open, active] = await Promise.all([openP, activeP]);
 			setOpenGames(open.games || []);
-			setMyGames(mine.games || []);
+			setActiveGames(active.games || []);
 		} catch {
-			setOpenGames([]); setMyGames([]);
+			setOpenGames([]); setActiveGames([]);
 		}
 		setBrowserLoading(false);
 	}, []);
@@ -1673,40 +1685,6 @@ export default function SpenderApp() {
 						</button>
 					</div>
 
-					{(() => {
-						const savedId = (() => { try { return localStorage.getItem("spender_roomId"); } catch { return null; } })();
-						const savedToken = savedId ? (() => { try { return localStorage.getItem(`spender_token_${savedId}_${myId}`); } catch { return null; } })() : null;
-						const inLists = myGames.some(g => g.id === savedId) || openGames.some(g => g.id === savedId);
-						// This is the localStorage fallback "Active Games" card — shown mainly to
-						// guests, who have no /games/mine list. Suppress it when the real Active
-						// Games section (below) is rendering, so there's never a second "Active
-						// Games" header. Also suppress while the lists load (they're stale), else
-						// it flashes on Back-to-Menu right after creating a game, then vanishes
-						// once the game appears in a list.
-						const hasActiveGames = myGames.some(g => g.status === "playing");
-						if (!savedId || !savedToken || inLists || browserLoading || hasActiveGames) return null;
-						return (
-							<div className="browser-section">
-								<div className="section-hd">
-									<span className="section-title">Active Games</span>
-								</div>
-								<div className="game-cards">
-									<div className="game-card" style={{ borderColor: "rgba(201,168,76,.4)" }}>
-										<div className="game-card-info">
-											<div className="game-card-title">Game in progress</div>
-											<div className="game-card-meta">{savedId}</div>
-										</div>
-										<div className="game-card-actions">
-											<button className="btn btn-gold btn-sm" onClick={() => handleContinue(savedId)}>
-												Resume
-											</button>
-										</div>
-									</div>
-								</div>
-							</div>
-						);
-					})()}
-
 					<div className="browser-section">
 						<div className="section-hd">
 							<span className="section-title">Open Games</span>
@@ -1746,43 +1724,53 @@ export default function SpenderApp() {
 						)}
 					</div>
 
-					{myGames.some(g => g.status === "playing") && (
-						<div className="browser-section">
-							<div className="section-hd">
-								<span className="section-title">Active Games</span>
-								<span className="small-muted">{myGames.filter(g => g.status === "playing").length} in progress</span>
-							</div>
-							<div className="game-cards">
-								{myGames.filter(g => g.status === "playing").map(g => (
-									<div key={g.id} className="game-card">
-										<div className="game-card-info">
-											<div className="game-card-title">
-												{g.you_are_p1 ? `${displayName(g.player1_name)} (you)` : displayName(g.player1_name)}
-												{" vs "}
-												{g.player2_name
-													? (g.you_are_p1 ? displayName(g.player2_name) : `${displayName(g.player2_name)} (you)`)
-													: "waiting for opponent…"}
+					{activeGames.length > 0 && (() => {
+						// All in-progress games (yours + others'). Yours pinned to the top;
+						// each sub-list is already updated_at-desc from the backend.
+						const mine = activeGames.filter(g => g.player1_id === myId || g.player2_id === myId);
+						const others = activeGames.filter(g => g.player1_id !== myId && g.player2_id !== myId);
+						const ordered = [...mine, ...others];
+						return (
+							<div className="browser-section">
+								<div className="section-hd">
+									<span className="section-title">Active Games</span>
+									<span className="small-muted">{activeGames.length} in progress</span>
+								</div>
+								<div className="game-cards">
+									{ordered.map(g => {
+										const isMine = g.player1_id === myId || g.player2_id === myId;
+										const youP1 = g.player1_id === myId;
+										const turnName = g.turn === g.player1_id ? g.player1_name
+											: (g.turn === g.player2_id ? g.player2_name : null);
+										return (
+											<div key={g.id} className="game-card">
+												<div className="game-card-info">
+													<div className="game-card-title">
+														{isMine
+															? <>{youP1 ? `${displayName(g.player1_name)} (you)` : displayName(g.player1_name)}{" vs "}{g.player2_name ? (youP1 ? displayName(g.player2_name) : `${displayName(g.player2_name)} (you)`) : "waiting…"}</>
+															: <>{displayName(g.player1_name)} vs {g.player2_name ? displayName(g.player2_name) : "waiting…"}</>}
+													</div>
+													<div className="game-card-meta">{g.id} · {timeAgo(g.updated_at)}</div>
+												</div>
+												<div className="game-card-actions">
+													{isMine ? (
+														<>
+															{g.turn === myId
+																? <span className="your-turn-badge">Your Turn</span>
+																: <span className="playing-badge">Their Turn</span>}
+															<button className="btn btn-outline btn-sm" onClick={() => handleContinue(g.id)}>Resume</button>
+														</>
+													) : (
+														<span className="playing-badge">{turnName ? `${displayName(turnName)}'s turn` : "In progress"}</span>
+													)}
+												</div>
 											</div>
-											<div className="game-card-meta">
-												{g.id} · {timeAgo(g.updated_at)}
-											</div>
-										</div>
-										<div className="game-card-actions">
-											{g.status === "playing" && (
-												g.your_turn
-													? <span className="your-turn-badge">Your Turn</span>
-													: <span className="playing-badge">Their Turn</span>
-											)}
-											<button className="btn btn-outline btn-sm"
-												onClick={() => handleContinue(g.id)}>
-												{g.status === "open" ? "Return" : "Resume"}
-											</button>
-										</div>
-									</div>
-								))}
+										);
+									})}
+								</div>
 							</div>
-						</div>
-					)}
+						);
+					})()}
 				</div>
 				{toast && <div className="toast">{toast}</div>}
 			</div>
@@ -1973,9 +1961,9 @@ export default function SpenderApp() {
 											setSelectedCard(s => s?.source === "deck" && s?.deckLevel === 3 - i ? null : { source: "deck", deckLevel: 3 - i });
 										}}
 										title="Reserve blind from deck">
-										<span style={{ fontSize: "1.1rem", fontWeight: 700, color: "var(--text)", lineHeight: 1 }}>{["III","II","I"][i]}</span>
-										<span style={{ fontSize: ".62rem", letterSpacing: ".08em" }}>DECK</span>
-										<span className="deck-remaining">{game.decks?.[lk]?.length || 0}</span>
+										<span style={{ fontSize: "1.4rem", fontWeight: 700, color: "var(--text)", lineHeight: 1 }}>{["III","II","I"][i]}</span>
+										<span style={{ fontSize: ".76rem", letterSpacing: ".08em" }}>DECK</span>
+										{(game.decks?.[lk]?.length ?? 0) <= 5 && <span className="deck-remaining">{game.decks?.[lk]?.length || 0}</span>}
 									</div>
 									{(game.board?.[lk] || []).map((c, j) => c ? renderCard(c, { dataPos: `${lk}-${j}` }) : <div key={j} className="card-slot" data-pos={`${lk}-${j}`} />)}
 								</div>
@@ -2007,13 +1995,20 @@ export default function SpenderApp() {
 									);
 								})()}
 							</div>
-							{/* Mobile only (CSS): the Take/Buy/✕ controls sit to the right of the
-							    nobles (or the AI "thinking" indicator during the bot's turn). */}
-							<div className="board-actions">
-								{aiThinking
-									? <span className="ai-thinking"><span className="think-dot"/><span className="think-dot"/><span className="think-dot"/> thinking…</span>
-									: renderActionButtons()}
-							</div>
+							{/* Mobile/tablet only (CSS): a box to the right of the nobles with the
+							    win-points Target + the Take/Buy/✕ controls (AI "thinking" indicator
+							    during the bot's turn). The hint is dropped here — no room beside the
+							    nobles. */}
+							{game.phase !== "over" && (
+								<div className="board-actions">
+									<span className="target-label">Target: {game.win_points || 15}</span>
+									<div className="board-actions-btns">
+										{aiThinking
+											? <span className="ai-thinking"><span className="think-dot"/><span className="think-dot"/><span className="think-dot"/> thinking…</span>
+											: renderActionButtons()}
+									</div>
+								</div>
+							)}
 						</div>
 
 						{/* Desktop only (CSS): a box beside the nobles with the turn hint +

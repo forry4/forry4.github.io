@@ -1582,8 +1582,18 @@ editing base affects phone/tablet, not desktop):
   halves), the move log `flex:1; min-height:0` so it **scrolls internally** instead of
   growing the page. Card size is driven by `--card-w/--card-h` (≈144×185) set on
   `.game-main`.
-- **Tablet (`@media(max-width:900px)`)**: single column; Take/Buy/✕ move beside the
-  nobles (`.board-actions`).
+- **Tablet/phone (`@media(max-width:900px)`)**: single column; the nobles and an
+  **actions box** sit side by side as TWO SEPARATE boxes — `.nobles-panel.panel` goes
+  transparent (just a flex row), `.nobles-row` gets its own tight box hugging ONLY the
+  nobles, and `.board-actions` is the box to its right holding the win-points **Target**
+  label (`Target: 15/21`; `justify-content:flex-start` pins it to the TOP so it doesn't
+  shift up when the Take/Buy/✕ buttons appear below it) + the controls. The hint is
+  dropped here (no room beside the nobles); the box is only rendered while
+  `game.phase !== "over"`. **Cascade gotcha (do not regress):** the mobile rules use
+  higher-specificity selectors (`.nobles-panel .board-actions`, `.nobles-panel.panel`)
+  because the unconditional base `.board-actions{display:none}` / `.panel{…}` rules
+  appear LATER in the stylesheet — at equal specificity they'd win, and
+  `.board-actions{display:none}` had been hiding the actions box on mobile ENTIRELY.
 - **Phone (`@media(max-width:600px)`)**: board-first order; the nav scrolls (not
   fixed); player panels collapse to a one-line `cards | gems` summary that taps to
   expand reserved cards; the move log shows the most-recent entry + a tap-to-expand;
@@ -1727,6 +1737,21 @@ can be tested on a real URL before shipping to prod:
   URL → to ship, integrate with main: `git rebase origin/main` (UI vs backend work
   usually touch disjoint files), `git push origin staging:main` (fast-forward), then
   `git push -f origin staging` to resync. CI then rebuilds `docs/` + redeploys prod.
+- **⚠️ `staging` has DIVERGED — NEVER blind-push `staging:main` (do not regress).**
+  As of 2026-06-21 `staging` is a long-lived branch that is **behind `main` on the
+  backend** (it lacks main's wherewolf engine/role fixes, Spender move-log/card-catalog,
+  S-variant perf, etc.) AND **carries the Where Wolf? home card** (`status:"ready"` in
+  `Spender.jsx` + the `WhereWolf` import/route). So `git push origin staging:main` would
+  (a) **launch Where Wolf? to prod** (forbidden — it must stay staging-only) and (b) be a
+  non-fast-forward whose force **wipes main's backend history**. **To ship staging
+  frontend selectively** (the method used for the CoC overhaul + active-games + Spender
+  mobile actions-box deploy): branch off `origin/main`; wholesale-take any file where main
+  is unchanged since the merge-base (e.g. `git checkout origin/staging -- games/castles_of_crimson/CastlesOfCrimson.jsx`);
+  for files both sides changed (`Spender.jsx`), 3-way merge them (`git merge-file -p ours
+  base theirs`, base = `git merge-base`) and **strip the Where Wolf? card blocks** (import,
+  `GAMES` entry, `screen==="werewolf"` route); `npm run smoke`; push the branch → `main`.
+  Verify the built bundle SHRINKS (no `WhereWolf.jsx`) and `grep -i werewolf` on the
+  shipped `Spender.jsx` is empty.
 - The local↔Cloudflare bundle **hashes differ** (different build envs), so verify a
   deploy by the served CSS/markers, not the filename.
 - **Fastest iteration loop = local vite dev pointed at the prod backend** (the
