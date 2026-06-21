@@ -42,13 +42,18 @@ const roleDesc = (r) => (r && ROLE_META[r]?.desc) || "";
 // it doesn't collide with minion's "M").
 const tokenLetter = (r) => (r === "mason" ? "MA" : (r ? r[0].toUpperCase() : "?"));
 
-// On the small cards, Cinzel renders as wide caps, so the longer role names don't
-// fit one line. Insert a soft break opportunity (<wbr>) at a clean syllable so a
-// too-wide name wraps tidily (TROUBLE/MAKER) instead of overflowing; names that do
-// fit one line ignore the hint. Index = where to split.
-const CARD_WBR = { werewolf: 4, villager: 4, troublemaker: 7, insomniac: 5, doppelganger: 6 };
+// Cinzel renders as wide caps, so the longer role names don't fit one card line.
+// The 12-char names (Troublemaker/Doppelganger) are too wide for ANY card, so force a
+// HARD break — a soft <wbr> is not honored reliably inside a flex item in every
+// browser, which left "Troublemaker" overflowing on desktop. The borderline names get
+// a soft <wbr> that only breaks on the narrow center cards (with overflow-wrap:anywhere
+// as the safety net). Index = where to split.
+const CARD_BR = { troublemaker: 7, doppelganger: 6 };          // always two lines
+const CARD_WBR = { werewolf: 4, villager: 4, insomniac: 5 };   // break only if it doesn't fit
 const cardLabel = (r) => {
-  const n = roleName(r), at = CARD_WBR[r];
+  const n = roleName(r);
+  if (CARD_BR[r]) { const i = CARD_BR[r]; return <>{n.slice(0, i)}<br />{n.slice(i)}</>; }
+  const at = CARD_WBR[r];
   return at ? <>{n.slice(0, at)}<wbr />{n.slice(at)}</> : n;
 };
 
@@ -91,6 +96,25 @@ function fmtTime(s) {
 function seatXY(rel, total) {
   const ang = Math.PI / 2 + (rel / total) * 2 * Math.PI;   // +PI/2 = bottom
   return { x: 50 + 39 * Math.cos(ang), y: 50 + 39 * Math.sin(ang) };
+}
+
+// A small looping arrow from a seat back to ITSELF (self-vote). The loop sits just
+// inside the seat (toward the table centre, where there's open space) and the arrow
+// curls almost all the way round so the head points back at the card. Coords are in
+// the 0..100 unit viewBox the vote SVG uses.
+function selfLoopPath(sx, sy) {
+  let ix = 50 - sx, iy = 50 - sy;                  // unit vector toward the table centre
+  const L = Math.hypot(ix, iy) || 1; ix /= L; iy /= L;
+  const cx = sx + ix * 9, cy = sy + iy * 9;        // loop centre, in open space
+  const r = 4.2, g = 0.6;                          // radius + gap (radians) for the arrow mouth
+  const px = -iy, py = ix;                         // tangent (perpendicular to inward dir)
+  // start/end both on the seat-facing side of the circle, separated by the gap `g`
+  const sX = cx - (ix * Math.cos(g) - px * Math.sin(g)) * r;
+  const sY = cy - (iy * Math.cos(g) - py * Math.sin(g)) * r;
+  const eX = cx - (ix * Math.cos(g) + px * Math.sin(g)) * r;
+  const eY = cy - (iy * Math.cos(g) + py * Math.sin(g)) * r;
+  // sweep the long way round (large-arc=1) and end at eX,eY so the head points home
+  return `M ${sX.toFixed(2)} ${sY.toFixed(2)} A ${r} ${r} 0 1 1 ${eX.toFixed(2)} ${eY.toFixed(2)}`;
 }
 
 // ─── Minimal WebSocket hook (same shape as the other games) ──────────────────
@@ -188,7 +212,7 @@ const css = baseCss + `
 .ww-seat .seat-name{font-size:11px;color:var(--text-dim);max-width:74px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ww-seat.me .seat-name{color:var(--gold-light)}
 .ww-pcard{width:var(--pcw,72px);height:var(--pch,94px);border-radius:8px;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;
-  text-align:center;font-family:Cinzel,serif;font-size:var(--pcf,11px);line-height:1.1;padding:3px;overflow-wrap:break-word;background:#1a1622;position:relative;transition:all .15s}
+  text-align:center;font-family:Cinzel,serif;font-size:var(--pcf,11px);line-height:1.1;padding:3px;overflow-wrap:anywhere;background:#1a1622;position:relative;transition:all .15s}
 .ww-pcard.back{background:repeating-linear-gradient(45deg,#241a2e,#241a2e 6px,#2c2038 6px,#2c2038 12px);color:transparent}
 .ww-pcard.back::after{content:"?";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#54486a;font-size:24px}
 .ww-pcard.clickable{cursor:pointer;border-color:var(--gold)}
@@ -204,7 +228,7 @@ const css = baseCss + `
 .ww-center{position:absolute;top:42%;left:50%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:8px;z-index:2}
 .ww-center-cards{display:flex;gap:8px}
 .ww-ccard{width:62px;height:82px;border-radius:7px;border:2px solid var(--border);background:repeating-linear-gradient(45deg,#241a2e,#241a2e 6px,#2c2038 6px,#2c2038 12px);
-  display:flex;align-items:center;justify-content:center;text-align:center;font-family:Cinzel,serif;font-size:11px;line-height:1.1;padding:3px;overflow-wrap:break-word;color:transparent;position:relative}
+  display:flex;align-items:center;justify-content:center;text-align:center;font-family:Cinzel,serif;font-size:11px;line-height:1.1;padding:3px;overflow-wrap:anywhere;color:transparent;position:relative}
 .ww-ccard::after{content:"";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#54486a;font-size:18px}
 .ww-ccard.up{background:#1a1622;color:var(--text)}
 .ww-ccard.clickable{cursor:pointer;border-color:var(--gold)}
@@ -787,13 +811,20 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   };
 
   // vote arrows (square table → simple unit viewBox, no DOM measuring needed)
-  const arrows = dayActive ? Object.entries(game.votes || {}).map(([voter, target]) => {
+  const voteEntries = dayActive ? Object.entries(game.votes || {}) : [];
+  const seatOf = (pid) => seatXY(((order.indexOf(pid) - myIdx) + order.length) % order.length, order.length);
+  const arrows = voteEntries.map(([voter, target]) => {
     const vi = order.indexOf(voter), ti = order.indexOf(target);
     if (vi < 0 || ti < 0 || voter === target) return null;
-    const a = seatXY(((vi - myIdx) + order.length) % order.length, order.length);
-    const b = seatXY(((ti - myIdx) + order.length) % order.length, order.length);
+    const a = seatOf(voter), b = seatOf(target);
     return { id: voter, x1: a.x, y1: a.y, x2: b.x, y2: b.y, me: voter === myId };
-  }).filter(Boolean) : [];
+  }).filter(Boolean);
+  // a self-vote shows a little loop curling back to the voter's own card
+  const selfArrows = voteEntries.map(([voter, target]) => {
+    if (voter !== target || order.indexOf(voter) < 0) return null;
+    const p = seatOf(voter);
+    return { id: voter, d: selfLoopPath(p.x, p.y), me: voter === myId };
+  }).filter(Boolean);
 
   return (
     <div className="ww"><style>{css}</style>
@@ -829,6 +860,11 @@ export default function WhereWolf({ myId, authUser, onExit }) {
                   <line key={ar.id} x1={ar.x1} y1={ar.y1} x2={ar.x2} y2={ar.y2}
                     stroke={ar.me ? "#e0655a" : "#e0c14c"} strokeWidth="0.7" strokeOpacity="0.85"
                     markerEnd={ar.me ? "url(#ww-ah-me)" : "url(#ww-ah)"} />
+                ))}
+                {selfArrows.map((s) => (
+                  <path key={"self-" + s.id} d={s.d} fill="none"
+                    stroke={s.me ? "#e0655a" : "#e0c14c"} strokeWidth="0.7" strokeOpacity="0.85"
+                    markerEnd={s.me ? "url(#ww-ah-me)" : "url(#ww-ah)"} />
                 ))}
               </svg>
 
