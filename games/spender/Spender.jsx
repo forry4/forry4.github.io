@@ -372,6 +372,7 @@ const css = baseCss + `
 /* ─── Winner ────────────────────────────────────────────────────────────── */
 .winner-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:32px}
 .winner-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:3rem;color:var(--gold);margin-bottom:8px;letter-spacing:.04em}
+.winner-title.defeat{color:var(--text-dim)}
 .winner-sub{color:var(--text-dim);font-style:italic;margin-bottom:32px}
 .final-scores{display:flex;flex-direction:column;gap:8px;margin-bottom:32px}
 .score-row{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.05rem;padding:10px 28px;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border)}
@@ -816,6 +817,7 @@ export default function SpenderApp() {
 	const [toast, setToast] = useState("");
 	const [confirmAbandon, setConfirmAbandon] = useState(false);
 	const [reviewing, setReviewing] = useState(false);  // end-game: viewing final board + log
+	const [resultReady, setResultReady] = useState(false);  // gate the win/loss screen until ~1s after game ends
 	// Mobile-only: per-player expand toggle (compact one-line summaries) + log collapse.
 	// No effect on desktop, where CSS always shows full panels + the move log.
 	const [playerExpanded, setPlayerExpanded] = useState({});
@@ -970,6 +972,17 @@ export default function SpenderApp() {
 	useEffect(() => {
 		if (toast) { const t = setTimeout(() => setToast(""), 2500); return () => clearTimeout(t); }
 	}, [toast]);
+
+	// Hold on the final board for ~1s after the game ends before revealing the
+	// win/loss screen, so the player sees the move that ended it. Resets whenever
+	// the game isn't over (a new game), so the next ending delays again.
+	useEffect(() => {
+		if (game?.phase === "over") {
+			const t = setTimeout(() => setResultReady(true), 1000);
+			return () => clearTimeout(t);
+		}
+		setResultReady(false);
+	}, [game?.phase]);
 
 	// ── Mobile zoom fix ────────────────────────────────────────────────────
 	// On the game screen, iOS Safari otherwise picks a too-small page scale on
@@ -1971,17 +1984,19 @@ export default function SpenderApp() {
 		</>
 	);
 
-	// Winner screen
-	if (screen === "game" && game?.phase === "over" && !reviewing) {
+	// Winner screen (held back ~1s after the game ends — see the resultReady effect —
+	// so the final board is visible for a beat before the result is revealed).
+	if (screen === "game" && game?.phase === "over" && !reviewing && resultReady) {
 		const winners = Array.isArray(game.winner) ? game.winner : [game.winner];
 		const isTie = winners.length > 1;
+		const iWon = winners.includes(myId);
 		const winnerNames = winners.map(w => displayName(roomData?.players?.[w] || w)).join(" & ");
 		return (
 			<>
 				<style>{css}</style>
 				<div className="app">
 					<div className="winner-screen">
-						<div className="winner-title">{isTie ? "Draw!" : "Victory!"}</div>
+						<div className={`winner-title${!isTie && !iWon ? " defeat" : ""}`}>{isTie ? "Draw!" : iWon ? "Victory!" : "Defeat"}</div>
 						<p className="winner-sub">{isTie ? `${winnerNames} share the gem trade` : `${winnerNames} claims the gem trade`}</p>
 						<div className="final-scores">
 							{(game.order || []).map(pid => {

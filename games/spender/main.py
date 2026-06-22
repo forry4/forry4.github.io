@@ -2019,6 +2019,24 @@ def _post_turn(game: dict, r: dict) -> None:
         r["status"] = "over"
 
 
+def _ai_think(variant: str, game: dict, ai_pid: str) -> dict:
+    """Dispatch to the configured variant's move chooser. Runs in a thread-pool executor
+    (so the event loop stays free during the compute); raises if the chooser fails — the
+    caller guards that and falls back so a failed think can't freeze the AI's turn."""
+    if variant == "Z" and AZ_EVALUATE is not None:
+        return _az_choose_move(game, ai_pid, 5.0)
+    if variant == "H":
+        return _v4_choose_move(game, ai_pid)
+    if variant == "H2":
+        return _h2_choose_move(game, ai_pid)
+    if variant == "H3":
+        return _h3_choose_move(game, ai_pid)
+    if variant == "S":
+        return _s_choose_move(game, ai_pid)
+    ai_weights = WEIGHT_VARIANTS.get(variant, WEIGHTS)
+    return _mcts_choose_move(game, ai_pid, 5.0, None, ai_weights)
+
+
 async def _schedule_ai_turn(room_id: str) -> None:
     """Broadcast the post-human-move state immediately, then run MCTS in a thread pool
     (non-blocking) and broadcast the AI's move when it finishes."""
@@ -2035,23 +2053,21 @@ async def _schedule_ai_turn(room_id: str) -> None:
         game_snapshot = copy.deepcopy(g)
         variant = r.get("ai_variant", "A")
 
-    # MCTS runs in a thread pool so the event loop stays free during the 5s compute
+    # The chooser runs in a thread pool so the event loop stays free during the ~5s compute.
+    # A failed/interrupted think (cold-start, redeploy, or a chooser bug) must never leave the
+    # game frozen on the AI's turn: on any error fall back to the cheap rollout policy so the
+    # turn still advances. (Reconnect re-fires this, but that left games stuck until a manual
+    # reload — the fallback makes it self-heal in place.)
     loop = asyncio.get_running_loop()
-    if variant == "Z" and AZ_EVALUATE is not None:
-        mv = await loop.run_in_executor(None, _az_choose_move, game_snapshot, ai_pid, 5.0)
-    elif variant == "H":
-        mv = await loop.run_in_executor(None, _v4_choose_move, game_snapshot, ai_pid)
-    elif variant == "H2":
-        mv = await loop.run_in_executor(None, _h2_choose_move, game_snapshot, ai_pid)
-    elif variant == "H3":
-        mv = await loop.run_in_executor(None, _h3_choose_move, game_snapshot, ai_pid)
-    elif variant == "S":
-        mv = await loop.run_in_executor(None, _s_choose_move, game_snapshot, ai_pid)
-    else:
-        ai_weights = WEIGHT_VARIANTS.get(variant, WEIGHTS)
-        mv = await loop.run_in_executor(
-            None, _mcts_choose_move, game_snapshot, ai_pid, 5.0, None, ai_weights
-        )
+    try:
+        mv = await loop.run_in_executor(None, _ai_think, variant, game_snapshot, ai_pid)
+    except Exception:
+        LOG.exception("AI think failed (room=%s variant=%s); falling back to rollout move", room_id, variant)
+        try:
+            mv = await loop.run_in_executor(None, _fast_rollout_move, game_snapshot, ai_pid)
+        except Exception:
+            LOG.exception("AI fallback move failed (room=%s); passing the turn", room_id)
+            mv = {"type": "take_gems", "colors": []}
 
     async with ROOM_LOCK:
         r = ROOMS.get(room_id)
@@ -2060,7 +2076,13 @@ async def _schedule_ai_turn(room_id: str) -> None:
         g = r.get("game")
         if not g or g.get("turn") != ai_pid or g.get("phase") != "playing":
             return  # game changed while AI was thinking (e.g. abandoned)
-        _run_ai_turn(g, ai_pid, mv)
+        try:
+            _run_ai_turn(g, ai_pid, mv)
+        except Exception:
+            # Applying the chosen move failed — guarantee forward progress by ending the AI's
+            # turn so the human can keep playing rather than the game freezing on the AI.
+            LOG.exception("Applying AI move failed (room=%s); ending the AI turn", room_id)
+            _finish_turn(g, ai_pid)
         if g.get("phase") == "over":
             r["status"] = "over"
 
