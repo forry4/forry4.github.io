@@ -954,3 +954,76 @@ def test_win_points_21_production():
     assert main._check_winner(g2) is None
     g2["players"]["alice"]["purchased"] = [_pts_card(21)]
     assert main._check_winner(g2) == "alice"
+
+
+# ─── Multiplayer (2-4 players) ──────────────────────────────────────────────────
+
+def make_nplayer_state(pids):
+    """Build a playable N-player game dict (N in 2..4), bank/nobles scaled."""
+    decks = main.build_deck()
+    board = main._deal_board(decks)
+    nobles_pool = list(main.ALL_NOBLES)
+    random.shuffle(nobles_pool)
+
+    def player_state():
+        return {"tokens": main.empty_gems(), "purchased": [], "reserved": [], "nobles": []}
+
+    return {
+        "bank": main._bank_for(len(pids)),
+        "decks": decks, "board": board,
+        "nobles": nobles_pool[:len(pids) + 1],
+        "players": {p: player_state() for p in pids},
+        "order": list(pids), "turn": pids[0],
+        "phase": "playing", "winner": None, "win_points": 15,
+    }
+
+
+def _pts_card(pts):
+    return {"id": f"x{pts}", "points": pts, "bonus": "white", "cost": {}, "level": 1}
+
+
+def test_bank_for_scales_by_player_count():
+    for n, per in [(2, 4), (3, 5), (4, 7)]:
+        bank = main._bank_for(n)
+        assert all(bank[c] == per for c in main.GEM_COLORS)
+        assert bank["gold"] == 5
+
+
+def test_nobles_scale_players_plus_one():
+    for pids in (["a", "b"], ["a", "b", "c"], ["a", "b", "c", "d"]):
+        g = make_nplayer_state(pids)
+        assert len(g["nobles"]) == len(pids) + 1
+
+
+def test_advance_turn_cycles_all_players():
+    g = make_nplayer_state(["a", "b", "c", "d"])
+    seen = []
+    for _ in range(4):
+        seen.append(g["turn"])
+        g["turn"] = main._advance_turn(g)
+    assert seen == ["a", "b", "c", "d"]
+    assert g["turn"] == "a"  # wraps back to the first seat
+
+
+def test_single_winner_among_four():
+    g = make_nplayer_state(["a", "b", "c", "d"])
+    g["players"]["a"]["purchased"] = [_pts_card(3)]
+    g["players"]["b"]["purchased"] = [_pts_card(5)]
+    g["players"]["c"]["purchased"] = [_pts_card(15)]
+    g["players"]["d"]["purchased"] = [_pts_card(2)]
+    main._resolve_winner(g)
+    assert g["phase"] == "over"
+    assert g["winner"] == "c"   # a single winner, not a list
+
+
+def test_final_round_completes_around_all_seats():
+    g = make_nplayer_state(["a", "b", "c", "d"])
+    g["players"]["a"]["purchased"] = [_pts_card(15)]   # 'a' hits the threshold on their turn
+    main._finish_turn(g, "a")
+    assert g["phase"] == "playing" and g.get("final_round_trigger") == "a"
+    for pid in ["b", "c"]:
+        main._finish_turn(g, pid)
+        assert g["phase"] == "playing"   # still mid final-round
+    main._finish_turn(g, "d")            # round returns to 'a' -> resolved
+    assert g["phase"] == "over"
+    assert g["winner"] == "a"

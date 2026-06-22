@@ -43,9 +43,22 @@ async def health():
 
 GEM_COLORS = ["white", "blue", "green", "red", "black"]
 
+# Multiplayer: human lobbies seat 2-4 players (AI games stay 2-player). Standard
+# Splendor scales the gem bank by player count; gold is always 5, nobles = players+1.
+MAX_PLAYERS = 4
+_BANK_PER_COLOR = {2: 4, 3: 5, 4: 7}
+
 
 def empty_gems() -> dict[str, int]:
     return {c: 0 for c in GEM_COLORS + ["gold"]}
+
+
+def _bank_for(n_players: int) -> dict[str, int]:
+    """Starting gem bank for an n-player game (standard Splendor counts)."""
+    per = _BANK_PER_COLOR.get(n_players, 4)
+    bank = {c: per for c in GEM_COLORS}
+    bank["gold"] = 5
+    return bank
 
 
 # ─── Card / Noble data ──────────────────────────────────────────────────────
@@ -203,12 +216,26 @@ def init_db():
         player1_name TEXT,
         player2_id TEXT,
         player2_name TEXT,
+        player3_id TEXT,
+        player3_name TEXT,
+        player4_id TEXT,
+        player4_name TEXT,
         host_id TEXT,
         state_json TEXT,
         created_at INTEGER,
         updated_at INTEGER
     )""")
     conn.commit()
+    # Multiplayer (2-4 players): seats 3-4 are in the CREATE above for fresh DBs; for an
+    # EXISTING table (prod) add them via ALTER. Additive + nullable, so 2-player games are
+    # unaffected. Each ALTER commits on its own so one failure can't undo the others, and
+    # "duplicate column name" (already added / present from CREATE) is caught and ignored.
+    for col in ("player3_id", "player3_name", "player4_id", "player4_name"):
+        try:
+            cur.execute(f"ALTER TABLE games ADD COLUMN {col} TEXT")
+            conn.commit()
+        except Exception:
+            pass
     conn.close()
 
 
@@ -231,24 +258,28 @@ def save_game(room_id: str) -> None:
                                                 # right bot AND the admin value overlay
     }
     now = int(time.time())
+    seat = lambda lst, i: lst[i] if len(lst) > i else None   # seat value or None (2-4 players)
     conn = get_db_conn()
     cur = conn.cursor()
     cur.execute("SELECT id FROM games WHERE id=?", (room_id,))
     exists = cur.fetchone() is not None
     if exists:
-        cur.execute("""UPDATE games SET status=?, player2_id=?, player2_name=?, state_json=?, updated_at=?
-                       WHERE id=?""",
+        cur.execute("""UPDATE games SET status=?, player2_id=?, player2_name=?,
+                              player3_id=?, player3_name=?, player4_id=?, player4_name=?,
+                              state_json=?, updated_at=? WHERE id=?""",
                     (room.get("status"),
-                     pids[1] if len(pids) > 1 else None,
-                     names[1] if len(names) > 1 else None,
+                     seat(pids, 1), seat(names, 1), seat(pids, 2), seat(names, 2),
+                     seat(pids, 3), seat(names, 3),
                      json.dumps(state), now, room_id))
     else:
         cur.execute("""INSERT INTO games
-                       (id,status,player1_id,player1_name,player2_id,player2_name,host_id,state_json,created_at,updated_at)
-                       VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                       (id,status,player1_id,player1_name,player2_id,player2_name,
+                        player3_id,player3_name,player4_id,player4_name,
+                        host_id,state_json,created_at,updated_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (room_id, room.get("status", "open"),
-                     pids[0] if pids else None, names[0] if names else None,
-                     pids[1] if len(pids) > 1 else None, names[1] if len(names) > 1 else None,
+                     seat(pids, 0), seat(names, 0), seat(pids, 1), seat(names, 1),
+                     seat(pids, 2), seat(names, 2), seat(pids, 3), seat(names, 3),
                      room.get("host"), json.dumps(state), now, now))
     conn.commit()
     conn.close()
@@ -314,10 +345,12 @@ def list_user_games(user_id: str) -> list[dict]:
     conn = get_db_conn()
     cur = conn.cursor()
     cur.execute("""SELECT id, status, player1_id, player1_name, player2_id, player2_name,
+                          player3_id, player3_name, player4_id, player4_name,
                           state_json, created_at, updated_at
                    FROM games
-                   WHERE (player1_id=? OR player2_id=?) AND status != 'over'
-                   ORDER BY updated_at DESC""", (user_id, user_id))
+                   WHERE (player1_id=? OR player2_id=? OR player3_id=? OR player4_id=?)
+                         AND status != 'over'
+                   ORDER BY updated_at DESC""", (user_id, user_id, user_id, user_id))
     rows = cur.fetchall()
     conn.close()
     result = []
@@ -328,14 +361,20 @@ def list_user_games(user_id: str) -> list[dict]:
             state = {}
         g = state.get("game") or {}
         is_p1 = r["player1_id"] == user_id
-        opponent = r["player2_name"] if is_p1 else r["player1_name"]
+        # All seated players, in order (handles 2-4; for AI games includes "AI (X)").
+        player_names = [n for n in (state.get("players") or {}).values() if n]
+        if not player_names:  # corrupt/empty state — fall back to the seat columns
+            player_names = [n for n in (r["player1_name"], r["player2_name"],
+                                        r["player3_name"], r["player4_name"]) if n]
+        opponent = r["player2_name"] if is_p1 else r["player1_name"]  # legacy (2-player view)
         your_turn = isinstance(g, dict) and g.get("turn") == user_id
         result.append({
             "id": r["id"],
             "status": r["status"],
             "opponent_name": opponent,
-            "player1_name": r["player1_name"],   # full matchup, perspective-independent
+            "player1_name": r["player1_name"],   # legacy 2-player fields (kept for back-compat)
             "player2_name": r["player2_name"],
+            "player_names": player_names,        # full seated list (2-4), for the multiplayer matchup
             "you_are_p1": is_p1,
             "your_turn": your_turn,
             "created_at": r["created_at"],
@@ -353,6 +392,7 @@ def list_active_games() -> list[dict]:
     conn = get_db_conn()
     cur = conn.cursor()
     cur.execute("""SELECT id, player1_id, player1_name, player2_id, player2_name,
+                          player3_id, player3_name, player4_id, player4_name,
                           state_json, created_at, updated_at FROM games
                    WHERE status='playing' ORDER BY updated_at DESC LIMIT 100""")
     rows = cur.fetchall()
@@ -360,13 +400,19 @@ def list_active_games() -> list[dict]:
     out = []
     for r in rows:
         try:
-            g = (json.loads(r["state_json"] or "{}").get("game") or {})
+            state = json.loads(r["state_json"] or "{}")
         except Exception:
-            g = {}
+            state = {}
+        g = state.get("game") or {}
+        player_names = [n for n in (state.get("players") or {}).values() if n]
         out.append({
             "id": r["id"],
             "player1_id": r["player1_id"], "player1_name": r["player1_name"],
             "player2_id": r["player2_id"], "player2_name": r["player2_name"],
+            # seats 3-4 so a 3rd/4th player can detect + resume their own multiplayer game
+            "player3_id": r["player3_id"], "player3_name": r["player3_name"],
+            "player4_id": r["player4_id"], "player4_name": r["player4_name"],
+            "player_names": player_names,   # full seated list (2-4) for display
             "turn": g.get("turn") if isinstance(g, dict) else None,
             "created_at": r["created_at"], "updated_at": r["updated_at"],
         })
@@ -2011,8 +2057,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                     r["players"][pid] = name
                     r["host"] = pid
                     r["status"] = "open"
-                    bank = {c: 4 for c in GEM_COLORS}
-                    bank["gold"] = 5
+                    bank = _bank_for(2)  # placeholder for the waiting room; rescaled at start to the seated count
                     r["game"] = {
                         "bank": bank, "decks": build_deck(), "board": None, "nobles": None,
                         "players": {}, "turn": None, "order": [], "phase": "waiting", "winner": None,
@@ -2070,9 +2115,17 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                     if not r.get("host") or r.get("game") is None:
                         await websocket.send_text(json.dumps({"type": "error", "message": "this game is no longer available"}))
                         continue
-                    if len(r["players"]) >= 2 and pid not in r["players"]:
-                        await websocket.send_text(json.dumps({"type": "error", "message": "room full"}))
-                        continue
+                    if pid not in r["players"]:
+                        # New player joining: only OPEN, non-AI human lobbies, up to MAX_PLAYERS.
+                        if r.get("ai_variant"):
+                            await websocket.send_text(json.dumps({"type": "error", "message": "can't join an AI game"}))
+                            continue
+                        if r.get("status") != "open":
+                            await websocket.send_text(json.dumps({"type": "error", "message": "game already started"}))
+                            continue
+                        if len(r["players"]) >= MAX_PLAYERS:
+                            await websocket.send_text(json.dumps({"type": "error", "message": "room full"}))
+                            continue
                     r["players"][pid] = name
                     r["sockets"][pid] = websocket
                     r.setdefault("meta", {})
@@ -2112,7 +2165,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                     if not r or r.get("host") != pid:
                         _err = "only the host can start"
                     elif len(r["players"]) < 2:
-                        _err = "need 2 players to start"
+                        _err = "need 2-4 players to start"
                     else:
                         r["status"] = "playing"
                         g = r["game"]
@@ -2121,6 +2174,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                         g["order"] = order
                         g["turn"] = order[0]
                         g["phase"] = "playing"
+                        g["bank"] = _bank_for(len(order))   # scale the gem bank to the seated count (4/5/7 for 2/3/4)
                         g["board"] = _deal_board(g["decks"])
                         nobles_pool = list(ALL_NOBLES)
                         random.shuffle(nobles_pool)
