@@ -419,6 +419,54 @@ def list_active_games() -> list[dict]:
     return out
 
 
+def list_user_history(user_id: str, limit: int = 20) -> list[dict]:
+    """Finished games (status='over') the user played in, most-recent first, with
+    final scores, winner(s) and opponents — for the lobby 'History' section. Works
+    for vs-AI and human games (2-4 players). Session-gated (logged-in users)."""
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute("""SELECT id, state_json, updated_at FROM games
+                   WHERE (player1_id=? OR player2_id=? OR player3_id=? OR player4_id=?)
+                         AND status='over'
+                   ORDER BY updated_at DESC LIMIT ?""",
+                (user_id, user_id, user_id, user_id, limit))
+    rows = cur.fetchall()
+    conn.close()
+    out = []
+    for r in rows:
+        try:
+            state = json.loads(r["state_json"] or "{}")
+        except Exception:
+            continue
+        g = state.get("game") or {}
+        names = state.get("players") or {}
+        order = g.get("order") or list(names.keys())
+        if not order:
+            continue
+        winner = g.get("winner")
+        winners = set(winner if isinstance(winner, list) else [winner]) if winner is not None else set()
+        players = []
+        for pid in order:
+            ps = (g.get("players") or {}).get(pid) or {}
+            try:
+                score = _calc_points(ps)
+            except Exception:
+                score = 0
+            players.append({
+                "id": pid, "name": names.get(pid, pid), "score": score,
+                "won": pid in winners, "is_you": pid == user_id,
+            })
+        players.sort(key=lambda p: (-p["score"], not p["won"]))   # winner / high score first
+        out.append({
+            "id": r["id"],
+            "finished_at": r["updated_at"],
+            "win_points": g.get("win_points", 15),
+            "players": players,
+            "you_won": any(p["is_you"] and p["won"] for p in players),
+        })
+    return out
+
+
 def delete_open_game(game_id: str, user_id: str) -> bool:
     """Delete an OPEN game the user hosts (browser 'cancel'). Returns True if a
     row was removed. Only open games can be cancelled this way.
@@ -2581,6 +2629,14 @@ async def get_my_games(token: str | None = Depends(bearer_token)):
     if not user:
         return {"ok": False, "games": [], "message": "unauthenticated"}
     return {"ok": True, "games": list_user_games(user["id"])}
+
+
+@router.get("/games/history")
+async def get_my_history(token: str | None = Depends(bearer_token)):
+    user = get_user_by_session(token)
+    if not user:
+        return {"ok": False, "games": [], "message": "unauthenticated"}
+    return {"ok": True, "games": list_user_history(user["id"])}
 
 
 @router.get("/games/{game_id}/full")
