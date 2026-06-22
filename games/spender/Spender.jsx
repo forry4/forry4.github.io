@@ -1030,6 +1030,7 @@ export default function SpenderApp() {
 							clearInterval(interval);
 							setLoadingProgress(1);
 							const dest = await resolveDest();
+							await waitFonts();
 							setTimeout(() => { if (!cancelled) setScreen(dest); }, 350);
 							return;
 						}
@@ -1038,6 +1039,27 @@ export default function SpenderApp() {
 				}
 			})();
 		};
+		// Wait for the web fonts (Cinzel/Crimson) to actually finish loading before
+		// revealing a real screen, so the first paint already uses them — otherwise the
+		// page paints in the fallback serif then "snaps" wider when the fonts swap in.
+		// document.fonts.load() is what TRIGGERS + awaits the load (document.fonts.ready
+		// alone resolves early, since the blank loading screen has no text to pull the
+		// fonts). Capped at 1.5s so a slow/failed font load never blocks the app; on
+		// reload the fonts are cached, so this resolves ~instantly.
+		const waitFonts = async () => {
+			try {
+				if (!document.fonts?.load) return;
+				await Promise.race([
+					Promise.all([
+						document.fonts.load('700 1rem Cinzel'),
+						document.fonts.load('600 1rem Cinzel'),
+						document.fonts.load('400 1rem Cinzel'),
+						document.fonts.load('400 1rem "Crimson Pro"'),
+					]),
+					new Promise(r => setTimeout(r, 1500)),
+				]);
+			} catch {}
+		};
 		// Fast path: if backend responds within 250ms, skip the loading screen entirely
 		(async () => {
 			try {
@@ -1045,7 +1067,7 @@ export default function SpenderApp() {
 				const t = setTimeout(() => ctrl.abort(), 250);
 				const res = await fetch(`${HTTP_BASE}/games`, { signal: ctrl.signal });
 				clearTimeout(t);
-				if (res.ok && !cancelled) { const dest = await resolveDest(); if (!cancelled) setScreen(dest); return; }
+				if (res.ok && !cancelled) { const dest = await resolveDest(); await waitFonts(); if (!cancelled) setScreen(dest); return; }
 			} catch {}
 			if (!cancelled) { setShowLoading(true); startPolling(); }
 		})();
