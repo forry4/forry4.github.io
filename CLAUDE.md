@@ -237,6 +237,146 @@ The real bot. Pure Python, no new prod deps; reuses the engine contract.
 
 ---
 
+## Where Wolf? (third game)
+
+`Where Wolf?` is the **third game** — a faithful **One Night Ultimate Werewolf** clone (real-time
+social-deduction party game, **3–10 players, one device each**). Built in the `forrestm_projects-wherewolf`
+worktree on the **`wherewolf`** branch. Same architecture as CoC: pure `engine.py` + thin FastAPI sub-app
+`main.py` (mounted at `/werewolf`) + a self-contained `WhereWolf.jsx`. See memory
+[[wherewolf-game-status]] for the live deploy state.
+
+```
+games/wherewolf/
+  roles.py     # deck data: DECK_COUNTS, TOKEN_LETTERS, TEAMS/team_of, NIGHT_ORDER/STEP_ROLE/
+               #   ACTION_STEPS/INFO_STEPS, recommended_deck(n) + validate_deck(deck,n), NARRATION
+  engine.py    # PURE rules: new_game(deck=)/apply_move/resolve_votes/player_view/is_over/winner +
+               #   the night-action handlers and the multi-death win logic
+  main.py      # FastAPI sub-app `werewolf_app`; ROOMS/ROOM_LOCK; WS /werewolf/ws/{room}/{player};
+               #   the async NIGHT CONDUCTOR; own `werewolf_games` table
+  WhereWolf.jsx  # self-contained React component the shell mounts at screen "werewolf"
+  tests/       # pytest, 67 tests (deck validation incl. partial in-progress decks, every night action,
+               #   the win-condition matrix, the player_view redaction matrix, multi-deck smoke)
+```
+
+### Engine model (the single source of truth)
+- **`dealt_role` is the role you PERFORM all night (immutable); `card` is your FINAL role
+  (swappable).** Swaps (robber/troublemaker/drunk) only ever move `card`/`center`, never `dealt_role`.
+  Whatever card sits in front of you when night ends IS your final role (possibly unknown to you).
+  The WIN uses FINAL cards. **Self-target is rejected for robber/seer AND the troublemaker** — the
+  troublemaker swaps two OTHER players (it once wrongly allowed itself; a stale test had frozen the bug).
+- **`player_view(game, pid)` is the hidden-information boundary** — a per-recipient redaction. A
+  client is only ever sent the cards it may see in the current phase/step (everything else is
+  literally `None` in the payload, so a snooping client can't read a hidden card). `dealt_role` is
+  only ever sent for the recipient's OWN seat. The visibility matrix (do not regress): OVER → all;
+  DEALING → own; NIGHT own only for robber (new card) + insomniac (own current card); werewolves see
+  each other; **minion sees the wolves but wolves do NOT see the minion (asymmetric)**; masons see
+  each other; seer sees the peeked player/center; **drunk sees NOTHING of its own (blind swap)**;
+  lone wolf's center peek is private. Tests in `tests/test_view.py` + `test_night.py`.
+- JSON-safe + reconnect-safe (RNG persisted in `rng_state` as lists; no sets — `wolf_pids`/`mason_pids`/
+  `minion_pids`/`deaths`/`winners` are LISTS). The whole `game` dict is persisted.
+
+### Roles + win logic (official ONUW — DEPLOYED)
+All roles **except the Doppelgänger** (deferred — its copy-a-role dual-timing is a separate larger
+effort; it stays in the deck data but is excluded from the picker + `validate_deck`). Wake order:
+werewolves (lone wolf may peek 1 center card) → minion → masons → seer → robber → troublemaker →
+drunk (blind-swaps own card with a center card) → insomniac (views own card). Hunter/tanner/villager
+have no night action. Teams: village {villager,seer,robber,troublemaker,drunk,insomniac,mason,hunter},
+werewolf {werewolf,minion}, **tanner** (own — wins only by dying).
+- **Voting is MULTI-DEATH** (`resolve_votes`): the player(s) with the most votes die; a tie for most
+  → ALL tied die; if **nobody gets ≥2 votes, no one dies**. **Hunter:** a dead hunter also kills the
+  player they voted for (transitive, cycle-guarded).
+- **Win (the load-bearing care points — DO NOT regress):** ≥1 **werewolf card** dies → village wins;
+  else werewolf-in-play + none died → wolves win; no werewolf in play → village wins iff nobody died.
+  **Killing the MINION is NOT a werewolf death** (most error-prone line). **A tanner death with no
+  werewolf death SUPPRESSES the wolf-team win** (only the tanner wins). **Minion** wins with the wolf
+  team, AND in a no-werewolf-in-play game (with a minion present) wins if any non-minion dies.
+  "Werewolf in play" counts a PLAYER's final card only (center wolves don't count). Produces
+  `deaths`/`winners`/`winning_teams`/`headline` (+ legacy `winner`/`revealed_pid`). Matrix in
+  `tests/test_win.py`.
+
+### Night conductor (`main.py`) — data-driven, fixed windows (NO Events)
+`_run_night` iterates `roles.NIGHT_ORDER` keyed on **deck presence** (`game["deck"]`): every role IN
+THE DECK is announced — *even one entirely in the center* — so silence can't leak which roles are
+out (the announcer calls every role in the game). Each step is a **FIXED-DURATION window** (action
+~15s / info ~6s): `set_step` + narrate + `sleep(window)`; player actions arrive via the normal move
+handler during the window (validated against `night_step`) and the actor sees their result for the
+remainder. **No early-advance and no per-step `asyncio.Event`** (uniform timing → leak-free; the
+v1 Event mechanism was removed). Restart recovery (NIGHT→DAY fast-forward) unchanged.
+- **Lone-wolf no-leak (DO NOT regress):** the werewolves step ALWAYS uses the action window and ALWAYS
+  narrates the conditional lone-wolf line (*"If you are the only werewolf, you may look at a card in the
+  center."*). Earlier it only did so when there was actually ONE wolf — leaking (by timing AND narration)
+  that the game had a single werewolf, which is supposed to be secret. Now a 1-wolf and a 2-wolf game
+  look/sound identical; the lone wolf just peeks a center card during the window, nobody else does.
+
+### Host role picker — `set_roles` (lobby-only, host-only)
+Before dealing, the host picks the deck (a multiset of role names) in the waiting room. WS action
+`set_roles {deck}` → **`roles.validate_deck(deck, len(players), partial=True)`** (copy caps
+`≤3 villagers / ≤2 werewolves / ≤2 masons / 1 each single` + player range + no doppelganger, but
+**NOT** the exact-count check — `partial` skips only that) → stored on `room["deck"]` (persisted) →
+broadcast (public — the upcoming token row). **`partial=True` is what lets the host's IN-PROGRESS
+selection broadcast live** as they tap +/−; the exact `players+3` count is enforced only at deal
+(`_handle_start`, which re-validates fully and silently falls back to `recommended_deck(n)` if the
+deck went stale or was never set). Frontend: host gets a +/- picker (live "selected X / need
+players+3" counter + Recommended button); **non-hosts see EXACTLY `room.deck`** — no recommended
+fallback, so they see nothing until the host picks (not a misleading minimum) and see over-/under-full
+selections as-is. The "3-10" player-range message (was "3..10"). Deal & Start is gated on
+`deckCount === players+3`. Hovering a role (host rows + non-host chips) shows what it does (`roleDesc`).
+
+### Frontend (`WhereWolf.jsx`) — do not regress
+Self-contained component (`{myId, authUser, onExit}`); namespaced localStorage
+(`werewolf_roomId`/`werewolf_token_*`/`werewolf_narrate`); WS/HTTP bases derive `/werewolf` from
+`VITE_WS_URL`; imports `baseCss`. Circle seating (each client at 6 o'clock); the 3 center cards + the
+public token row in the middle; SVG vote-arrows on the day phase (computed from seat angles — unit
+viewBox `preserveAspectRatio:none`, no DOM measuring); a 3-min day countdown.
+- **Responsive seat/center cards (`cardVars(n, isMobile)` → inline `--pcw/--pch/--pcf`):** seat cards
+  scale DOWN as the table fills (76×98 at ≤7 players → 56×76 at 10) so up to 10 still ring the circle;
+  a separate smaller mobile tier. **Long role names wrap on the cards** (`cardLabel`): the 12-char names
+  (Troublemaker/Doppelganger) take a HARD `<br>` (a soft `<wbr>` is not honored inside a flex item in
+  every browser — it overflowed on desktop), the borderline ones a soft `<wbr>` + `overflow-wrap:anywhere`.
+- **Mobile layout (`@media(max-width:600px)` + `useIsMobile`) — DO NOT regress:** the table reshapes into
+  a TALL ellipse filling the screen (`.ww-table-wrap`/`.ww-table` flex to fill, `aspect-ratio:auto`) so
+  **YOU sit at the very bottom and everyone else rings the edges**, cards auto-shrink to fit 10. (Was a
+  small centred square that left the bottom of a phone empty and overlapped cards.)
+- **Token info / role tooltips:** the in-game token row renders from the public `game.deck` (role keys,
+  not just letters) so hover (desktop) / tap (mobile) shows the role + what it does (`roleDesc`) — and the
+  shared "T" letter (Tanner vs Troublemaker) is correctly disambiguated.
+- **Self-vote → a loop arrow** (`selfLoopPath`) curling back to the voter's own card (red for you, gold
+  for others), drawn alongside the straight cross-vote arrows.
+- **Narration:** browser `SpeechSynthesis` TTS + an always-on caption banner. Server broadcasts
+  `{type:"narrate", text, key}`; the client speaks it. Per-device 🔊/🔇 toggle (default ON for host).
+- **Reconnect/rejoin hardening (do not regress):** auto-reconnect when the socket drops while in a
+  room (bounded retries) + a manual "⟳ Reconnecting…" button; "Your Games"/Resume rejoin paths;
+  leaving keeps you a room member + the resume pointer so "back out and rejoin" works and the host
+  stays host; auto-resume/reconnect failures recover **silently** (no "invalid token" flash); a join
+  that hits a transient "no such room" retries once. A finished game (`phase==="over"`) **clears the
+  resume pointer** so it's gone (not resumable/listed) without kicking anyone off the results screen.
+- **CSS gotcha:** the `css` template literal must contain NO backtick (the documented blank-page
+  smoke-test footgun, shared with Spender/CoC).
+
+### Deploy — LIVE on production as of 2026-06-21
+The game **is launched to prod**: the Where Wolf? home card is `status:"ready"` on `main`, so prod
+users can play it (commit `7efcb84`). `app.py` mounts `/werewolf` with the same defensive try/except
+as CoC. How it was launched (and the lessons, DO NOT regress):
+- **Backend** (`engine.py`/`roles.py`/`main.py`) had already been on **`main`**/prod (dormant — no
+  home card) so `/werewolf` served the logic; the staging Cloudflare site (frontend) talked to that
+  prod backend, which is why the backend had to ship first (staging shares the prod backend).
+- **Launched by a SELECTIVE add, NOT a `staging→main` push.** Brought only the wherewolf FRONTEND
+  forward onto `main` (`games/wherewolf/WhereWolf.jsx` + the Spender.jsx card hooks: import / `GAMES`
+  entry / `screen==="werewolf"` route). A blind `staging→main` push was **unsafe** because `staging`
+  had diverged: it was *behind* `main` on the wherewolf backend (lacked the troublemaker + lone-wolf
+  fixes, host-picker backend) so a force-push would have **reverted** them. main's wherewolf backend
+  is a strict superset of staging's, and the staging site already ran staging's `WhereWolf.jsx`
+  against the prod backend, so the launch pairing was pre-validated. (See the staging-divergence
+  warning in "Staging environment" below for the selective-deploy recipe.)
+- **Historical note (pre-launch):** the frontend lived staging-only while the card was kept off
+  `main`; `staging` gets force-resynced by other frontend work (which once wiped the wherewolf card),
+  so the rule was to re-apply onto the current `origin/staging` tip + `npm run smoke` + push.
+- **Testing gotcha:** distinct local players need distinct browser storage — two same-browser
+  incognito windows SHARE localStorage → same `spender_myId` → they collapse into one identity. Use
+  different browsers/profiles/devices.
+
+---
+
 ## Books (site feature — not a game)
 
 A standalone site page for ranking favorite books + collecting reading suggestions
@@ -481,10 +621,10 @@ imports the old arrangement required.
     session tokens, account ids, reconnect tokens, AND password salts, and `random`'s Mersenne Twister
     is reconstructable from observed output (predict-the-next-token). Never revert it to `random`.
   - **Registration input validation.** `validate_credentials(name, password)` returns a human message
-    or `None`: username **1–12 chars, `[A-Za-z0-9]` only**; password **1–16 chars**. Enforced at
+    or `None`: username **1–16 chars, `[A-Za-z0-9]` only**; password **1–16 chars**. Enforced at
     `/auth/register` ONLY — login stays permissive so pre-existing accounts still sign in (with a guard:
     reject name>64 / password>128 *unhashed*, a PBKDF2-on-huge-input DoS guard). Frontend input
-    `maxLength` mirrors it (register 12/16; login 64/128, so legacy passwords stay typeable).
+    `maxLength` mirrors it (register 16/16; login 64/128, so legacy passwords stay typeable).
   - **Auth rate limiting** (`core/ratelimit.py` — in-memory, per-process; OK because the Procfile runs
     a SINGLE uvicorn process). `/auth/login`: 20/5min per IP + 10 **failures**/15min per username (the
     per-username streak resets on success, so multi-device logins aren't locked out). `/auth/register`:
@@ -1509,6 +1649,47 @@ degrades safely if `/auth/session` isn't deployed yet (404 → stay logged in).
   + progress polling. `showLoading` state gates the spinner so a blank flash never
   appears on fast connections.
 
+### Multiplayer (2-4 players), History & 3-column lobby (June 2026 — LIVE on prod)
+- **Spender seats 2-4 humans** (AI games stay 2-player). The engine was already
+  player-count-agnostic (`game["order"]` + modular `_advance_turn` + single-winner
+  `_resolve_winner` with the points/fewest-cards tiebreak); the additions are setup +
+  plumbing: `MAX_PLAYERS=4`; `_bank_for(n)` scales the gem bank to standard Splendor
+  (**4/5/7** per colour for 2/3/4p, gold always 5) at START; nobles already `players+1`.
+  `join` accepts up to 4 for **OPEN, non-AI lobbies only** (rejects joining an AI game or
+  an already-started game). The host starts when **≥2** present (the existing `start`
+  flow). DB gained nullable **`player3/4_id`+`player3/4_name`** columns (in CREATE for
+  fresh DBs + a tolerant ALTER for the prod table); `save_game` / `list_user_games` /
+  `list_active_games` handle all four seats. Tests in `test_game_logic.py`
+  (`_bank_for`, nobles, 4-seat turn cycle, single winner among 4, final-round around all
+  seats). Dormant-safe: the backend shipped to prod first, invisible until the frontend.
+- **History** — `GET /games/history` → `list_user_history(user_id)`: your FINISHED games
+  (`status='over'`, any of the 4 seats), newest first, each with per-player final scores
+  (`_calc_points`), a winner flag, `is_you`, and `you_won`. Session-gated (like
+  `/games/mine`). Frontend renders **"Won/Lost vs <opponent(s)>  your-their"** (no
+  repeated username; "their" = the top opponent's score for 3-4p). Retained 30d for a
+  registered player (guest-only 24h), per `cleanup_stale_games`.
+- **3-column lobby** (`.lobby-grid` = `grid-template-columns:1fr 1fr 340px`): **Open
+  Games | Active Games | History**, each its OWN column so a long History never pushes
+  Active down. **Explicit `grid-row` on EVERY item is REQUIRED (do not regress):** the
+  DOM order is Open, History, Active, so column-only placement makes the sparse auto-flow
+  cursor (past col 3 after History) wrap Active to row 2 ("pushed down"). Each column's
+  `.game-cards` is **capped to the viewport and scrolls internally like the move log**
+  (`max-height:calc(100vh - 230px);overflow-y:auto;scrollbar-gutter:stable`) — desktop
+  3-col only. Collapses to 2-col <1280px (History spans row 2), 1-col <780px. **Active
+  Games ALWAYS renders** (with a "No games in progress." empty-state) so the middle
+  column never gaps.
+- **Open Games** show the lobby size **`x/4`** (`list_open_games` returns `player_count`
+  + `max_players`). **Active Games** list each player **one-per-line** (`.matchup`,
+  you first then `vs <opp>` per line). The Classic/Long + Create + vs-AI button row is
+  **centered** (`.browser-create{justify-content:center}`); the refresh button is a
+  **fixed 30×30** box so the ↻↔spinner swap doesn't resize/shift it.
+- **Full-width banner (flush, do not regress):** the lobby header lives OUTSIDE the
+  centered max-width `.browser` (a direct child of `.app`) so its border spans the
+  screen — three sections, **back left / game name centered / user right** (left+right
+  `flex:1`, title `flex:0`). Same for CoC (`.coc-top-lobby` moved outside `.coc-wrap`).
+- **Home-exit button reads "← Back"** everywhere (Spender / CoC / Where Wolf? / Books);
+  in-game "← Menu" / "Back to lobby" buttons are unchanged (they navigate within a game).
+
 ### Cancel / session-expiry gotcha (do not regress)
 `POST /games/{id}/cancel` authorizes by a live session **OR** the host's
 `player_id` (open games are public waiting rooms; `host_id` is already in
@@ -1740,18 +1921,17 @@ can be tested on a real URL before shipping to prod:
 - **⚠️ `staging` has DIVERGED — NEVER blind-push `staging:main` (do not regress).**
   As of 2026-06-21 `staging` is a long-lived branch that is **behind `main` on the
   backend** (it lacks main's wherewolf engine/role fixes, Spender move-log/card-catalog,
-  S-variant perf, etc.) AND **carries the Where Wolf? home card** (`status:"ready"` in
-  `Spender.jsx` + the `WhereWolf` import/route). So `git push origin staging:main` would
-  (a) **launch Where Wolf? to prod** (forbidden — it must stay staging-only) and (b) be a
-  non-fast-forward whose force **wipes main's backend history**. **To ship staging
-  frontend selectively** (the method used for the CoC overhaul + active-games + Spender
-  mobile actions-box deploy): branch off `origin/main`; wholesale-take any file where main
-  is unchanged since the merge-base (e.g. `git checkout origin/staging -- games/castles_of_crimson/CastlesOfCrimson.jsx`);
-  for files both sides changed (`Spender.jsx`), 3-way merge them (`git merge-file -p ours
-  base theirs`, base = `git merge-base`) and **strip the Where Wolf? card blocks** (import,
-  `GAMES` entry, `screen==="werewolf"` route); `npm run smoke`; push the branch → `main`.
-  Verify the built bundle SHRINKS (no `WhereWolf.jsx`) and `grep -i werewolf` on the
-  shipped `Spender.jsx` is empty.
+  S-variant perf, etc.) AND has historically **carried the Where Wolf? home card**. So
+  `git push origin staging:main` would be a non-fast-forward whose force **wipes main's
+  backend history** (and could re-introduce or revert game state unexpectedly). **To ship
+  staging frontend selectively** (the method used for the CoC overhaul + active-games +
+  Spender mobile actions-box + the Where Wolf? launch): branch off `origin/main`;
+  wholesale-take any file where main is unchanged since the merge-base (e.g.
+  `git checkout origin/staging -- games/castles_of_crimson/CastlesOfCrimson.jsx`, or just
+  `games/wherewolf/WhereWolf.jsx` for the wherewolf launch); for files both sides changed
+  (`Spender.jsx`) 3-way merge them (`git merge-file -p ours base theirs`, base =
+  `git merge-base`) and re-add/strip only the intended blocks; `npm run smoke`; push the
+  branch → `main`. Verify with `grep` on the shipped file + the built bundle size.
 - The local↔Cloudflare bundle **hashes differ** (different build envs), so verify a
   deploy by the served CSS/markers, not the filename.
 - **Fastest iteration loop = local vite dev pointed at the prod backend** (the
@@ -1763,11 +1943,14 @@ can be tested on a real URL before shipping to prod:
   stale 302-redirecting server on :5173 sent the user to prod — confirm the exact port
   vite printed.
 
-### Frontend smoke test (`npm run smoke`) — catch blank-page regressions
+### Frontend smoke test (`npm run smoke`) — catch blank-page AND layout-shift regressions
 `webapp/test/smoke.mjs` (Playwright) builds the app, serves it with `vite preview`,
-loads it in a headless browser, and FAILS if `#root` doesn't render or any uncaught
-page error fires. This catches the nasty class where **the bundle compiles but
-throws at runtime → a blank white page**. The bug that motivated it: a CSS comment
+loads it in a headless browser, and FAILS if `#root` doesn't render, any uncaught
+page error fires, **or the page shifts its layout on load past a budget** (Cumulative
+Layout Shift). This catches two classes: (1) **the bundle compiles but throws at
+runtime → a blank white page**; (2) **content/fonts/styles arriving after first paint →
+the "snaps into place" reflow** (a `layout-shift` PerformanceObserver accumulates CLS;
+budget `0.1` — current load ~0.008). The bug that motivated it: a CSS comment
 in the `css` template literal contained backticks (`` `.game` ``); a backtick inside
 a JS template literal terminates it, so the rest parsed as a stray tagged-template
 (`str.game\`…\`` → "…is not a function" at load). **NEVER put a backtick inside the
@@ -1780,3 +1963,31 @@ may be backticks).
   --with-deps chromium` + `npm run smoke` BEFORE the real build, so a blank-page
   build can't reach GitHub Pages. (It runs before the WS-URL build so its throwaway
   build doesn't become the deployed artifact.)
+
+### No-layout-shift architecture (June 2026 — do not regress)
+We kept hitting reload "snaps into place" reflows; the structural fixes (so it stops
+being whack-a-mole):
+- **Self-hosted fonts.** Cinzel + Crimson Pro are served from `webapp/public/fonts/`
+  (latin-subset **variable** woff2 — one file per family covers all weights; 3 files
+  incl. italic), `@font-face` in `shared/theme.js` baseCss (+ a copy in CoC, which
+  renders bare without baseCss; the browser dedupes by src url). The Google-Fonts
+  `<link>`/`@import` are GONE. The two main files are **preloaded** in `index.html`
+  (`<link rel="preload" as="font" crossorigin>` — crossorigin required even same-origin).
+- **Render gate.** The loading effect (`Spender.jsx`) calls **`document.fonts.load(...)`**
+  for Cinzel 400/600/700 + Crimson 400 and AWAITS them (capped 1.5s) before routing to
+  a real screen, so the first paint already uses the web fonts — no swap. `document.fonts.ready`
+  ALONE is insufficient (the blank loading screen renders no text, so nothing triggers
+  the load; `.load()` triggers + awaits it). On reload (cached) it resolves instantly.
+- **`font-display:optional`** on every face: if a font isn't ready in its tiny window it
+  uses the fallback for that load and NEVER swaps (no late reflow). Belt-and-suspenders:
+  **metric-matched fallbacks** — `'Cinzel Fallback'`/`'Crimson Fallback'` = `local('Georgia')`
+  with `size-adjust` from MEASURED width ratios (Cinzel 1.118× Georgia → 111.8%, Crimson
+  0.879× → 87.9%), wired into every font stack (`'Cinzel','Cinzel Fallback',serif`), so an
+  unloaded font occupies the same space.
+- **Inline dark bg** in `index.html` (`html,body{background:#0f0e0c}`) avoids a white flash
+  before the JS-injected CSS loads (the `--bg` token only exists in baseCss).
+- **Reserve space for stateful elements** (fixed button/icon sizes, `scrollbar-gutter:stable`,
+  `min-height` on swap-y rows) — and the **CLS smoke gate** (above) catches any new shift.
+- Known longer-term option (not done): the CSS-in-JS `<style>{baseCss+css}</style>` injects
+  styles at render; a static `<link>` stylesheet would make them render-blocking/earlier, but
+  it conflicts with the self-contained single-`.jsx` game pattern, so it was deferred.
