@@ -249,6 +249,40 @@ function TileArt({ tile, px = 70 }) {
   return g ? <span className="coc-glyph" style={{ fontSize: px * 0.27 }}>{g}</span> : null;
 }
 
+// SVG-native tile art for the duchy board (drawn straight into the hex SVG, so it
+// renders reliably — the old <foreignObject> wrapper silently failed to paint).
+// `box` is the art-box side in SVG user units; the icon is centered on (cx, cy).
+const _ART_SHADOW = { filter: "drop-shadow(0 0.6px 0.6px rgba(0,0,0,.45))" };
+function _artIcon(kind, color, cx, cy, s, key) {
+  return (
+    <g key={key} transform={`translate(${(cx - s / 2).toFixed(2)} ${(cy - s / 2).toFixed(2)}) scale(${(s / 24).toFixed(4)})`}>
+      {ICON[kind](color)}
+    </g>
+  );
+}
+function TileArtSvg({ tile, cx, cy, box }) {
+  if (!tile) return null;
+  const t = tile;
+  if (t.type === "ship") return <g style={_ART_SHADOW}>{_artIcon("ship", "#f3ead8", cx, cy, box * 0.56)}</g>;
+  if (t.type === "castle") return <g style={_ART_SHADOW}>{_artIcon("castle", "#f3ead8", cx, cy, box * 0.54)}</g>;
+  if (t.type === "mine") return <g style={_ART_SHADOW}>{_artIcon("mine", "#f3ead8", cx, cy, box * 0.56)}</g>;
+  if (t.type === "building" && ICON[t.building]) return <g style={_ART_SHADOW}>{_artIcon(t.building, "#15100a", cx, cy, box * 0.6)}</g>;
+  if (t.type === "livestock" && ICON[t.animal]) {
+    const n = Math.min(t.count || 1, 4);
+    const L = {
+      1: { s: 0.56, pos: [[0, 0]] },
+      2: { s: 0.46, pos: [[-0.55, 0], [0.55, 0]] },
+      3: { s: 0.40, pos: [[-0.56, -0.5], [0.56, -0.5], [0, 0.52]] },
+      4: { s: 0.36, pos: [[-0.56, -0.55], [0.56, -0.55], [-0.56, 0.55], [0.56, 0.55]] },
+    }[n];
+    const e = box * L.s;
+    return <g style={_ART_SHADOW}>{L.pos.map(([ox, oy], i) => _artIcon(t.animal, "#15100a", cx + ox * e, cy + oy * e, e, i))}</g>;
+  }
+  const g = tileGlyph(t);
+  return g ? <text x={cx} y={cy} textAnchor="middle" dominantBaseline="central"
+    fontFamily="'Cinzel', serif" fontWeight="700" fontSize={(box * 0.42).toFixed(1)} fill="#15100a">{g}</text> : null;
+}
+
 function uid() { return Math.random().toString(36).slice(2, 10); }
 function roomCode() { return Array.from({ length: 6 }, () => "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[Math.floor(Math.random() * 26)]).join(""); }
 
@@ -492,6 +526,11 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-stt:hover{transform:scale(1.08)}
 .coc-stt.empty{cursor:default}
 .coc-stt.sel{filter:drop-shadow(0 0 3px var(--gold)) drop-shadow(0 0 2px var(--gold))}
+/* Tile-move animation overlay (depot->storage, storage->duchy) */
+.coc-fly-layer{position:fixed;inset:0;pointer-events:none;z-index:140}
+.coc-flyer{position:fixed;display:flex;align-items:center;justify-content:center;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);filter:drop-shadow(0 2px 4px rgba(0,0,0,.6));will-change:transform;animation:coc-fly .5s cubic-bezier(.4,.05,.25,1) forwards}
+.coc-flyer::after{content:"";position:absolute;inset:0;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);background:linear-gradient(150deg,rgba(255,255,255,.62) 0%,rgba(255,255,255,.16) 16%,rgba(255,255,255,0) 34%,rgba(0,0,0,.06) 56%,rgba(0,0,0,.32) 84%,rgba(0,0,0,.6) 100%);pointer-events:none}
+@keyframes coc-fly{from{transform:translate(0,0) scale(var(--s0,1))}to{transform:translate(var(--dx),var(--dy)) scale(var(--s1,1))}}
 .coc-goods-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .coc-goods-chip{display:flex;align-items:center;gap:4px;font-size:.78rem;color:var(--text-dim);cursor:pointer}
 .coc-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
@@ -631,6 +670,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const [confirmAbandon, setConfirmAbandon] = useState(false);
   const [myBoard, setMyBoard] = useState("1");          // board the local player picked
   const [oppBoard, setOppBoard] = useState("1");        // board chosen for the bot (vs-AI)
+  const [flyers, setFlyers] = useState([]);             // tile-move animations (depot->storage, storage->duchy)
+  const animSnap = useRef(null);                        // prev snapshot for diffing my tile moves
+  const flyerSeq = useRef(0);
 
   const playerName = authUser?.name || "Player";
   const pendingAction = useRef(null);
@@ -719,6 +761,61 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   // "acted this turn" resets only when the turn itself changes (NOT on pending
   // open/close, since opening a pending means you already acted).
   useEffect(() => { setActedThisTurn(false); }, [game?.turn, game?.round, game?.phase_letter]);
+
+  // Tile-move animations: diff MY storage/duchy each update and fly the moved tile
+  // from where it was (depot / black depot / storage) to its new home. Mirrors
+  // Spender's flying overlay; uses persistent data-* anchors in the live DOM.
+  useEffect(() => {
+    if (!game || !me) { animSnap.current = null; return; }
+    const loc = {};
+    for (const d of [1, 2, 3, 4, 5, 6]) (game.depots?.[String(d)]?.hexes || []).forEach((t) => { loc[t.id] = { kind: "depot", d }; });
+    (game.black_depot || []).forEach((t) => { loc[t.id] = { kind: "black" }; });
+    (me.storage || []).forEach((t) => { loc[t.id] = { kind: "storage" }; });
+    const storageIds = new Set((me.storage || []).map((t) => t.id));
+    const duchyIds = new Set(Object.values(me.duchy || {}).filter(Boolean).map((t) => t.id));
+    const movesLen = (game.moves || []).length;
+    const prev = animSnap.current;
+    animSnap.current = { loc, storageIds, duchyIds, movesLen };
+    if (!prev) return;                                  // first paint: nothing to animate
+    const adv = movesLen - prev.movesLen;
+    if (adv < 1 || adv > 6) return;                     // skip initial load / reconnect catch-up
+    const rectOf = (spec) => {
+      if (!spec) return null;
+      const sel = spec.kind === "depot" ? `[data-depot="${spec.d}"]`
+        : spec.kind === "black" ? "[data-blackdepot]"
+        : spec.kind === "storage" ? "[data-storage]"
+        : spec.kind === "slot" ? `[data-storage-slot="${spec.i}"]`
+        : spec.kind === "hex" ? `[data-sid="${spec.sid}"]` : null;
+      const el = sel && document.querySelector(sel);
+      return el ? el.getBoundingClientRect() : null;
+    };
+    const mk = (tile, src, dest) => {
+      const s = rectOf(src), d = rectOf(dest);
+      if (!s || !d) return null;
+      const W = 58, H = 67;
+      const scx = s.left + s.width / 2, scy = s.top + s.height / 2;
+      const dcx = d.left + d.width / 2, dcy = d.top + d.height / 2;
+      const s1 = dest.kind === "hex" ? Math.max(0.5, Math.min(1, d.width / W)) : 1;
+      return { id: `f${flyerSeq.current++}`, tile, left: scx - W / 2, top: scy - H / 2, w: W, h: H, dx: dcx - scx, dy: dcy - scy, s1 };
+    };
+    const add = [];
+    const storage = me.storage || [];
+    for (let i = 0; i < storage.length; i++) {
+      const t = storage[i];
+      if (prev.storageIds.has(t.id)) continue;          // newly in storage = took / bought
+      const f = mk(t, prev.loc[t.id], { kind: "slot", i });   // fly to the exact slot it landed in
+      if (f) add.push(f);
+    }
+    for (const [sid, t] of Object.entries(me.duchy || {})) {
+      if (!t || prev.duchyIds.has(t.id)) continue;      // newly in duchy = placed
+      const f = mk(t, prev.loc[t.id], { kind: "hex", sid });
+      if (f) add.push(f);
+    }
+    if (!add.length) return;
+    setFlyers((fs) => [...fs, ...add]);
+    const ids = new Set(add.map((f) => f.id));
+    setTimeout(() => setFlyers((fs) => fs.filter((f) => !ids.has(f.id))), 560);
+  }, [game, me]);
   // Deselect a die once it's been used (its action applied) — adjust_die leaves
   // the die unused, so it stays selected.
   useEffect(() => {
@@ -1088,7 +1185,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           else if (placed) { stroke = "#fff2c0"; strokeWidth = 2.6; }
           else { stroke = "rgba(0,0,0,.4)"; strokeWidth = 1; }
           return (
-            <g key={sid} className={`coc-hex${legal ? " legal" : ""}`} onClick={() => interactive && clickHex(sid, legal)}>
+            <g key={sid} data-sid={interactive ? sid : undefined} className={`coc-hex${legal ? " legal" : ""}`}
+              onClick={() => { if (interactive && legal) clickHex(sid, legal); else if (tile) setToast(tileDesc(tile, board)); }}>
               <title>{tile ? tileDesc(tile, board)
                 : setupPhase ? (sp.color === "burgundy" ? "Click to place your starting castle here." : `${colorLabel(sp.color)} space (die ${sp.number}).`)
                 : `Empty ${colorLabel(sp.color)} space — place a matching tile using die ${sp.number}.`}</title>
@@ -1097,10 +1195,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
               <polygon points={hexPoints(c.x, c.y, HEX_S - 1.5)} fill={placed ? "url(#coc-raise)" : "url(#coc-socket)"}
                 stroke="none" style={{ pointerEvents: "none" }} />
               {placed
-                ? <foreignObject x={c.x - HEX_ART / 2} y={c.y - HEX_ART / 2} width={HEX_ART} height={HEX_ART}
-                    style={{ pointerEvents: "none" }}>
-                    <div className="coc-fo"><TileArt tile={tile} px={HEX_ART} /></div>
-                  </foreignObject>
+                ? <TileArtSvg tile={tile} cx={c.x} cy={c.y} box={HEX_ART} />
                 : svgPips(c.x, c.y, sp.number, sid)}
             </g>
           );
@@ -1209,7 +1304,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                   : { left: "50%", top: "100%", transform: `translate(-50%, ${G}px)` };
               }
               return (
-                <div key={d} className={`coc-depot${match ? " match" : ""}`} style={{ left: `${pos.left}%`, top: `${pos.top}%` }}>
+                <div key={d} data-depot={d} className={`coc-depot${match ? " match" : ""}`} style={{ left: `${pos.left}%`, top: `${pos.top}%` }}>
                   <span className="coc-minidie" style={numStyle} title={`Depot ${d} — take a tile here with a die showing ${d}`}><Pips n={d} /></span>
                   <div className="coc-tilewrap">
                     {depotSlots(d, depot.hexes).map((slot, i) => slot.tile ? (
@@ -1231,7 +1326,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 </div>
               );
             })}
-            <div className="coc-depot coc-black-center" style={{ width: 2 * HEX_W + BLACK_GAP + 2 * BLACK_PAD, height: 2.5 * HEX_H + 2 * BLACK_GAP + 2 * BLACK_PAD }}
+            <div data-blackdepot="1" className="coc-depot coc-black-center" style={{ width: 2 * HEX_W + BLACK_GAP + 2 * BLACK_PAD, height: 2.5 * HEX_H + 2 * BLACK_GAP + 2 * BLACK_PAD }}
               title="Central black depot — buy one tile per turn for 2 silver">
               {game.black_depot.map((t, i) => {
                 const k = BLACK_KITE[i];
@@ -1290,14 +1385,14 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
               <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
                 <div>
                   <div className="coc-pill" style={{ marginBottom: 4 }}>Storage</div>
-                  <div className="coc-storage">
+                  <div className="coc-storage" data-storage="1">
                     {[0, 1, 2].map((i) => {
                       const t = me?.storage?.[i];
-                      if (!t) return <div key={i} className="coc-stt empty" style={{ background: "var(--surface2)" }} />;
+                      if (!t) return <div key={i} data-storage-slot={i} className="coc-stt empty" style={{ background: "var(--surface2)" }} />;
                       return (
-                        <div key={t.id} className={`coc-stt${selStorage === t.id ? " sel" : ""}`} style={{ background: TILE_HEX[t.color] }}
+                        <div key={t.id} data-storage-slot={i} className={`coc-stt${selStorage === t.id ? " sel" : ""}`} style={{ background: TILE_HEX[t.color] }}
                           title={tileDesc(t, board)}
-                          onClick={() => setSelStorage(selStorage === t.id ? null : t.id)}>
+                          onClick={() => { setSelStorage(selStorage === t.id ? null : t.id); if (selDie == null) setToast(tileDesc(t, board)); }}>
                           <TileArt tile={t} px={70} />
                         </div>
                       );
@@ -1387,7 +1482,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                   {[0, 1, 2].map((i) => {
                     const t = opp.storage?.[i];
                     if (!t) return <div key={i} className="coc-stt empty" style={{ background: "var(--surface2)" }} />;
-                    return <div key={t.id} className="coc-stt" style={{ background: TILE_HEX[t.color] }} title={tileDesc(t, board)}><TileArt tile={t} px={70} /></div>;
+                    return <div key={t.id} className="coc-stt" style={{ background: TILE_HEX[t.color] }} title={tileDesc(t, board)} onClick={() => setToast(tileDesc(t, board))}><TileArt tile={t} px={70} /></div>;
                   })}
                 </div>
               </div>
@@ -1406,6 +1501,18 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
               <button className="coc-btn gold sm" onClick={() => setViewOpp(false)}>Close</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {flyers.length > 0 && (
+        <div className="coc-fly-layer">
+          {flyers.map((f) => (
+            <div key={f.id} className="coc-flyer"
+              style={{ left: f.left, top: f.top, width: f.w, height: f.h, background: TILE_HEX[f.tile.color] || "#555",
+                "--dx": `${f.dx}px`, "--dy": `${f.dy}px`, "--s0": 1, "--s1": f.s1 }}>
+              <TileArt tile={f.tile} px={f.w} />
+            </div>
+          ))}
         </div>
       )}
 
