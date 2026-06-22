@@ -189,8 +189,12 @@ const css = baseCss + `
 .empty-state{text-align:center;padding:28px 16px;color:var(--text-dim);font-style:italic;font-size:.9rem;background:var(--surface2);border-radius:var(--radius);border:1px dashed var(--border)}
 .spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--gold);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
 @keyframes spin{to{transform:rotate(360deg)}}
-.refresh-btn{background:transparent;border:none;color:var(--text-muted);cursor:pointer;font-size:.9rem;padding:2px 6px;border-radius:4px;transition:color .15s}
+/* Fixed square size + centered content so swapping the ↻ glyph for the spinner
+   (which carries a margin for its 'Loading…' use) doesn't resize the button and
+   shift the centered button row. */
+.refresh-btn{background:transparent;border:none;color:var(--text-muted);cursor:pointer;font-size:.9rem;padding:0;width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border-radius:4px;transition:color .15s;flex-shrink:0}
 .refresh-btn:hover{color:var(--gold)}
+.refresh-btn .spinner{margin:0}
 
 /* ─── Waiting ───────────────────────────────────────────────────────────── */
 .waiting-screen{max-width:480px;margin:0 auto;padding:48px 20px 24px;text-align:center}
