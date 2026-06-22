@@ -309,7 +309,7 @@ function Pips({ n }) {
 
 // ─── Styles ───────────────────────────────────────────────────────────────-
 const css = `
-@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Crimson+Pro:ital,wght@0,300;0,400;1,300&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Crimson+Pro:ital,wght@0,300;0,400;1,300&display=optional');
 /* CoC is mounted bare (the shell early-returns it without Spender's baseCss), so
    reset the body here too — otherwise the browser-default body margin shows an
    unstyled (white) frame around the dark .coc page. */

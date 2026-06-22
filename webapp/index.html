@@ -11,13 +11,15 @@
     <link rel="icon" type="image/png" sizes="32x32" href="%BASE_URL%favicon-32.png" />
     <link rel="apple-touch-icon" href="%BASE_URL%apple-touch-icon.png" />
     <!-- Load the site fonts in <head> (NOT only via the JS-injected @import in baseCss) so
-         they're ready at first paint. Otherwise on reload the page paints in the fallback
-         serif first, then Cinzel/Crimson (wider, letter-spaced) swap in — the "tighter then
-         snaps wider" layout shift. On reload the font files are cached, so the <link> applies
-         instantly = no swap. The inline dark bg avoids a white flash before the JS CSS loads. -->
+         they're ready at first paint. **display=optional** (not swap) is what kills the
+         reload reflow: 'swap' always paints fallback then swaps to Cinzel/Crimson (wider,
+         letter-spaced) — the "tighter then snaps wider" shift — even when cached. 'optional'
+         gives the font a tiny window: on reload (cached) it's applied at first paint with NO
+         swap; on a cold first visit it stays on the fallback for that load (still no shift)
+         and caches for next time. The inline dark bg avoids a white flash before the JS CSS. -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Crimson+Pro:ital,wght@0,300;0,400;1,300&display=swap" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Crimson+Pro:ital,wght@0,300;0,400;1,300&display=optional" />
     <style>html,body{margin:0;background:#0f0e0c}</style>
     <title>Forrest Games</title>
   </head>

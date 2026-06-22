@@ -5,7 +5,7 @@
 //   <style>{baseCss + myScreenCss}</style>
 // The @import must stay first in the stylesheet, so baseCss always leads.
 export const baseCss = `
-@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Crimson+Pro:ital,wght@0,300;0,400;1,300&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Crimson+Pro:ital,wght@0,300;0,400;1,300&display=optional');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
   --bg:#0f0e0c;--surface:#1a1814;--surface2:#242018;--surface3:#2c2820;--border:#3a342a;
