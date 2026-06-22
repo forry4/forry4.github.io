@@ -117,6 +117,40 @@ function selfLoopPath(sx, sy) {
   return `M ${sX.toFixed(2)} ${sY.toFixed(2)} A ${r} ${r} 0 1 1 ${eX.toFixed(2)} ${eY.toFixed(2)}`;
 }
 
+// ─── Narration audio ─────────────────────────────────────────────────────────
+// Prefer the pre-rendered neural clips (one mp3 per NARRATION key, rendered offline
+// by games/wherewolf/render_narration.py into webapp/public/werewolf/narration/);
+// fall back to the browser's Web Speech voice (tuned a touch lower/slower) if a clip
+// is missing or can't play. Only ever one narration audible at a time.
+let _narrAudio = null;
+function _speakFallback(text) {
+  if (typeof window === "undefined" || !window.speechSynthesis || !text) return;
+  try {
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 0.95;
+    u.pitch = 0.9;
+    window.speechSynthesis.speak(u);
+  } catch {}
+}
+function playNarration(key, text) {
+  try { if (_narrAudio) _narrAudio.pause(); } catch {}
+  _narrAudio = null;
+  try { if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel(); } catch {}
+  const base = (import.meta.env && import.meta.env.BASE_URL) || "/";
+  if (!key || typeof Audio === "undefined") { _speakFallback(text); return; }
+  const a = new Audio(`${base}werewolf/narration/${key}.mp3`);
+  _narrAudio = a;
+  let fellBack = false;
+  const fallback = () => {                 // fire at most once (onerror OR play() reject)
+    if (fellBack) return;
+    fellBack = true;
+    if (_narrAudio === a) _narrAudio = null;
+    _speakFallback(text);
+  };
+  a.onerror = fallback;
+  a.play().catch(fallback);
+}
+
 // ─── Minimal WebSocket hook (same shape as the other games) ──────────────────
 function useSocket(onMessage) {
   const wsRef = useRef(null);
@@ -373,12 +407,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
     }
     if (msg.type === "narrate") {
       setCaption(msg.text || "");
-      if (narrateRef.current && typeof window !== "undefined" && window.speechSynthesis && msg.text) {
-        try {
-          window.speechSynthesis.cancel();
-          window.speechSynthesis.speak(new SpeechSynthesisUtterance(msg.text));
-        } catch {}
-      }
+      if (narrateRef.current) playNarration(msg.key, msg.text);
       return;
     }
     const room = msg.room;
