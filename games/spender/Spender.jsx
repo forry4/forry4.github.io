@@ -121,7 +121,7 @@ const css = baseCss + `
 .browser-user{display:flex;align-items:center;gap:10px}
 .browser-username{font-family:'Cinzel',serif;font-size:.8rem;color:var(--text-dim);letter-spacing:.06em;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .browser-guest-badge{font-size:.65rem;letter-spacing:.1em;color:var(--text-muted);border:1px solid var(--border);padding:2px 7px;border-radius:10px;font-family:'Cinzel',serif;text-transform:uppercase}
-.browser-create{margin-bottom:36px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.browser-create{margin-bottom:36px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:center}
 /* game-length toggle: selected state changes ONLY background+color (fixed border/padding)
    so selecting never changes the element's size / shifts the layout */
 .length-toggle{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;flex-shrink:0}
@@ -142,6 +142,10 @@ const css = baseCss + `
 .game-card-title{font-family:'Cinzel',serif;font-size:.88rem;letter-spacing:.04em;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .game-card-meta{font-size:.78rem;color:var(--text-dim)}
 .game-card-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
+/* Open Games: current lobby size (e.g. 1/4) next to the host name. */
+.lobby-size{margin-left:8px;font-family:'Crimson Pro',Georgia,serif;font-size:.82rem;font-weight:600;letter-spacing:0;color:var(--gold)}
+/* Active Games: one player per line (override the base nowrap/ellipsis). */
+.game-card-title.matchup{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.35}
 /* Lobby: Open Games + History side by side (stack on narrow screens). */
 /* Lobby: left column = Open + Active stacked, right column = History on its own (so its
    length never pushes Active Games down). The widened .browser uses the empty side space
@@ -1761,6 +1765,7 @@ export default function SpenderApp() {
 										<div className="game-card-info">
 											<div className="game-card-title">
 												{g.host_id === myId ? "Your game" : `${g.host_name}'s game`}
+												<span className="lobby-size">{g.player_count || 1}/{g.max_players || 4}</span>
 											</div>
 											<div className="game-card-meta">{g.id} · {timeAgo(g.created_at)}</div>
 										</div>
@@ -1846,9 +1851,9 @@ export default function SpenderApp() {
 										return (
 											<div key={g.id} className="game-card">
 												<div className="game-card-info">
-													<div className="game-card-title">
+													<div className="game-card-title matchup">
 														{seats.map(([id, nm], i) => (
-															<span key={id || i}>{i > 0 ? " vs " : ""}{displayName(nm)}{id === myId ? " (you)" : ""}</span>
+															<div key={id || i}>{i > 0 ? "vs " : ""}{displayName(nm)}{id === myId ? " (you)" : ""}</div>
 														))}
 													</div>
 													<div className="game-card-meta">{g.id} · {timeAgo(g.updated_at)}</div>
