@@ -114,7 +114,7 @@ const css = baseCss + `
 .home-game-badge.soon{color:var(--text-muted);border:1px solid var(--border)}
 
 /* ─── Browser ───────────────────────────────────────────────────────────── */
-.browser{max-width:820px;margin:0 auto;padding:0 20px 48px}
+.browser{max-width:1400px;margin:0 auto;padding:0 20px 48px}
 .browser-header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:36px;padding-bottom:16px;border-bottom:1px solid var(--border)}
 .browser-head-left{display:flex;align-items:center;gap:14px;min-width:0}
 .browser-title{font-family:'Cinzel',serif;font-size:2rem;font-weight:700;color:var(--gold);letter-spacing:.04em}
@@ -142,6 +142,44 @@ const css = baseCss + `
 .game-card-title{font-family:'Cinzel',serif;font-size:.88rem;letter-spacing:.04em;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .game-card-meta{font-size:.78rem;color:var(--text-dim)}
 .game-card-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
+/* Lobby: Open Games + History side by side (stack on narrow screens). */
+/* Lobby: left column = Open + Active stacked, right column = History on its own (so its
+   length never pushes Active Games down). The widened .browser uses the empty side space
+   WITHOUT thinning the games columns. grid-template-rows:min-content auto keeps Active
+   directly under Open even when History (spanning both rows) is much longer. Stacks <1200px. */
+/* Lobby: three adjacent columns — Open Games | Active Games | History — each its own
+   column so none pushes another down. The widened .browser uses the empty side space.
+   Collapses to 2 columns (Open|Active, History spanning below) under 1280px, then 1
+   column under 780px. */
+.lobby-grid{display:grid;grid-template-columns:1fr 1fr 340px;gap:24px 28px;align-items:start;margin-bottom:32px}
+.lobby-grid>.browser-section{min-width:0;margin-bottom:0}
+/* Explicit grid-row on EVERY item is REQUIRED (do not remove): the DOM order is
+   Open, History, Active, so with column-only placement the sparse auto-flow cursor
+   (past col 3 after History) wraps Active down to row 2 — looking "pushed down" below
+   the tall History. Pinning rows makes placement ignore DOM order. */
+.lobby-grid>.open-section{grid-column:1;grid-row:1}
+.lobby-grid>.active-section{grid-column:2;grid-row:1}
+.lobby-grid>.history-section{grid-column:3;grid-row:1}
+@media(max-width:1280px){
+  .lobby-grid{grid-template-columns:1fr 1fr}
+  .lobby-grid>.open-section{grid-column:1;grid-row:1}
+  .lobby-grid>.active-section{grid-column:2;grid-row:1}
+  .lobby-grid>.history-section{grid-column:1 / span 2;grid-row:2}
+}
+@media(max-width:780px){
+  .lobby-grid{grid-template-columns:1fr}
+  .lobby-grid>.open-section{grid-column:1;grid-row:1}
+  .lobby-grid>.active-section{grid-column:1;grid-row:2}
+  .lobby-grid>.history-section{grid-column:1;grid-row:3}
+  .lobby-grid>.browser-section{margin-bottom:24px}
+}
+/* History cards: Won/Lost badge + the final scores (winner brighter), wraps freely. */
+.history-card .game-card-title{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;white-space:normal;overflow:visible}
+.hist-result{font-family:'Cinzel',serif;font-size:.6rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:2px 8px;border-radius:10px;flex-shrink:0}
+.hist-result.won{background:rgba(63,156,46,.18);color:var(--green-gem)}
+.hist-result.lost{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border)}
+.hist-scores{color:var(--text-dim);font-size:.84rem;font-family:'Crimson Pro',Georgia,serif;letter-spacing:0}
+.hist-score-num{color:var(--text);font-weight:600}
 .your-turn-badge{background:var(--gold);color:#0f0e0c;padding:3px 10px;border-radius:12px;font-family:'Cinzel',serif;font-size:.63rem;letter-spacing:.12em;font-weight:700;text-transform:uppercase;white-space:nowrap}
 .playing-badge{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border);padding:3px 10px;border-radius:12px;font-family:'Cinzel',serif;font-size:.63rem;letter-spacing:.1em;text-transform:uppercase;white-space:nowrap}
 .empty-state{text-align:center;padding:28px 16px;color:var(--text-dim);font-style:italic;font-size:.9rem;background:var(--surface2);border-radius:var(--radius);border:1px dashed var(--border)}
@@ -270,7 +308,6 @@ const css = baseCss + `
 .actions-panel{display:none}
 .action-hint{flex:1;font-style:italic;color:var(--text-dim);font-size:.88rem;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .target-label{font-family:'Cinzel',serif;font-size:1.05rem;font-weight:700;letter-spacing:.08em;color:var(--gold);text-transform:uppercase;flex-shrink:0}
-.hint-col{display:flex;flex-direction:column;gap:1px;flex:1;min-width:0;justify-content:center}
 .action-bar-btns{display:flex;gap:8px;align-items:center;flex-shrink:0;min-width:150px;justify-content:flex-end}
 .action-bar-spacer{visibility:hidden;pointer-events:none;transition:none}
 .turn-badge{font-family:'Cinzel',serif;font-size:.72rem;letter-spacing:.08em;padding:4px 12px;border-radius:20px;white-space:nowrap}
@@ -413,7 +450,9 @@ const css = baseCss + `
   /* Players column: the two boxes each take half the height — box 1 flush to the
      top down to the middle, box 2 flush to the bottom up to the middle. */
   .game-sidebar>.players-area{grid-column:1;grid-row:1;height:100%}
-  .game-sidebar .player-panel{flex:1;min-height:0}
+  /* flex:1 splits the column evenly across 2-4 player boxes; overflow-y:auto lets a
+     cramped 3-4 player box scroll internally instead of overflowing the grid. */
+  .game-sidebar .player-panel{flex:1;min-height:0;overflow-y:auto}
   /* Moves column fills the full height (flush to the bottom of the screen). */
   .game-sidebar>.log-panel{grid-column:2;grid-row:1;height:100%;display:flex;flex-direction:column}
   /* align-content:start keeps the rows packed at the top — without it grid's
@@ -428,7 +467,7 @@ const css = baseCss + `
   .game-main>.nobles-panel{grid-column:1;grid-row:1}
   /* align-self:stretch so the hint box matches the nobles box height in row 1;
      hint on the left, buttons pushed to the right edge of the box. */
-  .actions-panel{grid-column:2;grid-row:1;align-self:stretch;display:flex;flex-direction:row;align-items:center;gap:16px}
+  .actions-panel{grid-column:2;grid-row:1;align-self:stretch;display:flex;flex-direction:column;justify-content:space-between;align-items:stretch;gap:8px}
   /* Fill row 2 and space the three card rows out so the bottom row is flush with
      the bottom of the screen. */
   .game-main>.levels{grid-column:1 / 3;grid-row:2;align-self:stretch;justify-content:space-between}
@@ -445,16 +484,21 @@ const css = baseCss + `
   .noble-req-dot{width:12px;height:12px}
 
   /* Actions box: hint takes the left, bigger buttons pinned to the right. */
-  .actions-panel .action-hint{flex:1;font-size:1rem;white-space:normal;color:var(--text-dim);font-style:italic}
-  .actions-panel-btns{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-left:auto;flex-shrink:0}
-  .actions-panel-btns .btn{padding:16px 34px;font-size:1.15rem}
+  /* hint at the bottom, full box width, wraps freely (flex:0 so space-between pins it
+     to the bottom instead of it growing to fill; override base nowrap/ellipsis/flex:1). */
+  .actions-panel .action-hint{flex:0 0 auto;font-size:.95rem;white-space:normal;overflow:visible;text-overflow:clip;color:var(--text-dim);font-style:italic}
+  /* target pinned to the top, full width. */
+  .actions-panel .target-label{align-self:stretch}
+  /* buttons centered between target and hint (no margin-left:auto — that was for the old row layout). */
+  .actions-panel-btns{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;flex-shrink:0}
+  .actions-panel-btns .btn{padding:14px 30px;font-size:1.12rem}
 
   /* Vertical gem bank; gems clustered toward the vertical center, closer together. */
   .bank-gems{flex-direction:column;align-items:center;flex:1;justify-content:center;gap:18px}
   .bank-gems .gem-token{width:64px!important;height:64px!important;font-size:1.4rem!important}
   .bank-gems .gem-count{font-size:1.05rem}
 
-  /* Drop the Gem Bank + Players labels on desktop (Recent Moves stays). */
+  /* Drop the Gem Bank + Players labels on desktop (the Log label stays). */
   .bank-panel .panel-title{display:none}
   .game-sidebar>.panel-title{display:none}
 
@@ -770,6 +814,7 @@ export default function SpenderApp() {
 	// ── Browser state ──────────────────────────────────────────────────────
 	const [openGames, setOpenGames] = useState([]);
 	const [activeGames, setActiveGames] = useState([]);   // ALL in-progress games (yours + others')
+	const [historyGames, setHistoryGames] = useState([]); // your FINISHED games (vs AI or humans)
 	const [browserLoading, setBrowserLoading] = useState(false);
 	const [showAiPicker, setShowAiPicker] = useState(false);
 	const [winPoints, setWinPoints] = useState(15);   // 15 = Classic, 21 = Long mode
@@ -784,11 +829,17 @@ export default function SpenderApp() {
 			// Active Games is PUBLIC: all in-progress games (yours + others', vs-AI or
 			// not). The frontend pins yours to the top via myId. No auth needed.
 			const activeP = fetch(`${HTTP_BASE}/games/active`).then(r => r.json()).catch(() => ({ games: [] }));
-			const [open, active] = await Promise.all([openP, activeP]);
+			// History (your finished games) is session-gated — only fetch for a logged-in user.
+			const histP = user?.session_token
+				? fetch(`${HTTP_BASE}/games/history`, { headers: { Authorization: `Bearer ${user.session_token}` } })
+					.then(r => r.json()).catch(() => ({ games: [] }))
+				: Promise.resolve({ games: [] });
+			const [open, active, hist] = await Promise.all([openP, activeP, histP]);
 			setOpenGames(open.games || []);
 			setActiveGames(active.games || []);
+			setHistoryGames(hist.games || []);
 		} catch {
-			setOpenGames([]); setActiveGames([]);
+			setOpenGames([]); setActiveGames([]); setHistoryGames([]);
 		}
 		setBrowserLoading(false);
 	}, []);
@@ -1667,7 +1718,8 @@ export default function SpenderApp() {
 									onClick={() => setWinPoints(wp)}>{label}</button>
 							))}
 						</div>
-						<button className="btn btn-gold" onClick={() => handleCreate(false, "A", winPoints)}>
+						<button className="btn btn-gold" title="Create a game for 2-4 players — friends join from Open Games (or your room code)"
+							onClick={() => handleCreate(false, "A", winPoints)}>
 							+ Create Game
 						</button>
 						<div className="ai-picker-wrap">
@@ -1692,10 +1744,11 @@ export default function SpenderApp() {
 						</button>
 					</div>
 
-					<div className="browser-section">
+					<div className="lobby-grid">
+					<div className="browser-section open-section">
 						<div className="section-hd">
 							<span className="section-title">Open Games</span>
-							<span className="small-muted">{winPoints === 21 ? "Long (21)" : "Classic (15)"} - waiting for a second player</span>
+							<span className="small-muted">{winPoints === 21 ? "Long (21)" : "Classic (15)"} - waiting for players (2-4)</span>
 						</div>
 						{browserLoading && openGames.length === 0 ? (
 							<div className="empty-state"><span className="spinner" />Loading…</div>
@@ -1730,32 +1783,73 @@ export default function SpenderApp() {
 							</div>
 						)}
 					</div>
+					<div className="browser-section history-section">
+						<div className="section-hd">
+							<span className="section-title">History</span>
+							<span className="small-muted">your recent games</span>
+						</div>
+						{(!authUser || authUser.guest) ? (
+							<div className="empty-state">Log in to see your game history.</div>
+						) : historyGames.length === 0 ? (
+							<div className="empty-state">No finished games yet.</div>
+						) : (
+							<div className="game-cards">
+								{historyGames.map(g => {
+									// History is always YOUR games, so drop the repeated "you" —
+									// just show Won/Lost vs the opponent(s) and the score (yours-theirs).
+									const me = g.players.find(p => p.is_you);
+									const opps = g.players.filter(p => !p.is_you);
+									const oppNames = opps.map(o => displayName(o.name)).join(", ") || "—";
+									const myScore = me ? me.score : 0;
+									const oppScore = opps.length ? Math.max(...opps.map(o => o.score)) : 0;
+									return (
+									<div key={g.id} className="game-card history-card">
+										<div className="game-card-info">
+											<div className="game-card-title">
+												<span className={`hist-result ${g.you_won ? "won" : "lost"}`}>{g.you_won ? "Won" : "Lost"}</span>
+												<span className="hist-scores">vs {oppNames} <span className="hist-score-num">{myScore}-{oppScore}</span></span>
+											</div>
+											<div className="game-card-meta">{timeAgo(g.finished_at)}{g.win_points === 21 ? " · Long (21)" : ""}</div>
+										</div>
+									</div>
+									);
+								})}
+							</div>
+						)}
+					</div>
 
-					{activeGames.length > 0 && (() => {
+					{(() => {
 						// All in-progress games (yours + others'). Yours pinned to the top;
 						// each sub-list is already updated_at-desc from the backend.
-						const mine = activeGames.filter(g => g.player1_id === myId || g.player2_id === myId);
-						const others = activeGames.filter(g => g.player1_id !== myId && g.player2_id !== myId);
+						const hasMe = g => [g.player1_id, g.player2_id, g.player3_id, g.player4_id].includes(myId);
+						const mine = activeGames.filter(hasMe);
+						const others = activeGames.filter(g => !hasMe(g));
 						const ordered = [...mine, ...others];
 						return (
-							<div className="browser-section">
+							<div className="browser-section active-section">
 								<div className="section-hd">
 									<span className="section-title">Active Games</span>
 									<span className="small-muted">{activeGames.length} in progress</span>
 								</div>
+								{ordered.length === 0 ? (
+									<div className="empty-state">No games in progress.</div>
+								) : (
 								<div className="game-cards">
 									{ordered.map(g => {
-										const isMine = g.player1_id === myId || g.player2_id === myId;
-										const youP1 = g.player1_id === myId;
-										const turnName = g.turn === g.player1_id ? g.player1_name
-											: (g.turn === g.player2_id ? g.player2_name : null);
+										// 2-4 seats; show the full matchup, marking your own seat.
+										const seats = [
+											[g.player1_id, g.player1_name], [g.player2_id, g.player2_name],
+											[g.player3_id, g.player3_name], [g.player4_id, g.player4_name],
+										].filter(([id, nm]) => id || nm);
+										const isMine = seats.some(([id]) => id === myId);
+										const turnName = (seats.find(([id]) => id === g.turn) || [])[1] || null;
 										return (
 											<div key={g.id} className="game-card">
 												<div className="game-card-info">
 													<div className="game-card-title">
-														{isMine
-															? <>{youP1 ? `${displayName(g.player1_name)} (you)` : displayName(g.player1_name)}{" vs "}{g.player2_name ? (youP1 ? displayName(g.player2_name) : `${displayName(g.player2_name)} (you)`) : "waiting…"}</>
-															: <>{displayName(g.player1_name)} vs {g.player2_name ? displayName(g.player2_name) : "waiting…"}</>}
+														{seats.map(([id, nm], i) => (
+															<span key={id || i}>{i > 0 ? " vs " : ""}{displayName(nm)}{id === myId ? " (you)" : ""}</span>
+														))}
 													</div>
 													<div className="game-card-meta">{g.id} · {timeAgo(g.updated_at)}</div>
 												</div>
@@ -1775,9 +1869,11 @@ export default function SpenderApp() {
 										);
 									})}
 								</div>
+								)}
 							</div>
 						);
 					})()}
+					</div>
 				</div>
 				{toast && <div className="toast">{toast}</div>}
 			</div>
@@ -1791,13 +1887,14 @@ export default function SpenderApp() {
 			<div className="app" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
 				<div className="waiting-screen">
 					<p className="waiting-title">Room Code</p>
-					<p className="waiting-sub">Share this code with your opponent</p>
+					<p className="waiting-sub">Share this code with your friends — 2 to 4 players</p>
 					<div className="room-code-box" title="Click to copy"
 						onClick={() => { navigator.clipboard?.writeText(roomId); setToast("Copied!"); }}>
 						{roomId}
 					</div>
 					<p className="copy-hint">tap code to copy</p>
 
+					<p className="waiting-sub">{Object.keys(roomData?.players || {}).length}/4 players joined</p>
 					<ul className="player-list">
 						{roomData?.players && Object.entries(roomData.players).map(([id, name]) => (
 							<li key={id} className={id === myId ? "me" : ""}>
@@ -1812,7 +1909,9 @@ export default function SpenderApp() {
 						<button className="btn btn-gold btn-full"
 							disabled={!roomData?.players || Object.keys(roomData.players).length < 2}
 							onClick={handleStart}>
-							Start Game
+							{(Object.keys(roomData?.players || {}).length >= 2)
+								? `Start Game (${Object.keys(roomData.players).length} players)`
+								: "Start Game"}
 						</button>
 					) : (
 						<p className="status-msg">Waiting for the host to start…</p>
@@ -2020,16 +2119,17 @@ export default function SpenderApp() {
 
 						{/* Desktop only (CSS): a box beside the nobles with the turn hint +
 						    the Take/Buy/✕ controls (AI 'thinking' indicator on the bot's turn). */}
+						{/* Column layout (desktop): Target pinned to the TOP, hint to the BOTTOM,
+						    buttons centered between them — so a NARROW box (4-player games widen the
+						    nobles row, shrinking this column) never squishes the hint beside the buttons. */}
 						<div className="panel actions-panel">
-							<div className="hint-col">
-								{game.phase !== "over" && <span className="target-label">Target: {game.win_points || 15}</span>}
-								<span className="action-hint">{game.phase === "over" ? "Final board & game log" : getHint()}</span>
-							</div>
+							{game.phase !== "over" && <span className="target-label">Target: {game.win_points || 15}</span>}
 							<div className="actions-panel-btns">
 								{aiThinking
 									? <span className="ai-thinking"><span className="think-dot"/><span className="think-dot"/><span className="think-dot"/> thinking…</span>
 									: renderActionButtons()}
 							</div>
+							<span className="action-hint">{game.phase === "over" ? "Final board & game log" : getHint()}</span>
 						</div>
 					</div>
 
@@ -2037,7 +2137,7 @@ export default function SpenderApp() {
 						{(
 							<div className={`panel log-panel${logOpen ? " open" : ""}`}>
 								<div className="panel-title log-head" onClick={() => setLogOpen(o => !o)}>
-									Recent Moves <span className="log-caret">{logOpen ? "▾" : "▸"}</span>
+									Log <span className="log-caret">{logOpen ? "▾" : "▸"}</span>
 								</div>
 								<div className="move-log">
 									{(game.moves || []).length === 0 && <div className="log-empty">No moves yet</div>}

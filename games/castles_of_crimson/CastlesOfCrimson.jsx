@@ -120,35 +120,96 @@ const ICON = {
     <path d="M3 8 Q12 3 21 8 L20 10 Q12 5.5 4 10 Z" fill={c} />
     <path d="M11 8 H13 L12.4 21 H11.6 Z" fill={c} />
   </>),
-  cow: (c) => (<>
-    <path d="M6.5 6 Q4 3.5 2.6 5 Q4 6.2 6.5 7.4 Z" fill={c} />
-    <path d="M17.5 6 Q20 3.5 21.4 5 Q20 6.2 17.5 7.4 Z" fill={c} />
-    <ellipse cx="12" cy="13" rx="7.6" ry="6.6" fill={c} />
+  // Buildings — themed colors on the beige building tile; holes (doors/windows/
+  // clock) use fillRule="evenodd" so the tan tile shows through.
+  market: () => (<>
+    <path fill="#7ec46a" d="M3 4 H6 V7 Q4.5 8.6 3 7 Z" />
+    <path fill="#7ec46a" d="M6 4 H9 V7 Q7.5 8.6 6 7 Z" />
+    <path fill="#7ec46a" d="M9 4 H12 V7 Q10.5 8.6 9 7 Z" />
+    <path fill="#7ec46a" d="M12 4 H15 V7 Q13.5 8.6 12 7 Z" />
+    <path fill="#7ec46a" d="M15 4 H18 V7 Q16.5 8.6 15 7 Z" />
+    <path fill="#7ec46a" d="M18 4 H21 V7 Q19.5 8.6 18 7 Z" />
+    <path fill="#2f6fb0" d="M5 8.2 H6.8 V20 H5 Z M17.2 8.2 H19 V20 H17.2 Z" />
+    <path fill="#2f6fb0" d="M4.5 18 H19.5 V20 H4.5 Z" />
+  </>),
+  carpenter: () => (<>
+    <rect x="4.5" y="3.6" width="15" height="4.6" rx="1.5" fill="#4a3526" />
+    <path fill="#9a6b3a" d="M10.4 8.2 H13.6 L13 21 Q12.9 21.8 12 21.8 Q11.1 21.8 11 21 Z" />
+  </>),
+  church: () => (<>
+    <path fill="#e6b41e" d="M11.2 1 H12.8 V2.4 H14.2 V3.8 H12.8 V5.2 H11.2 V3.8 H9.8 V2.4 H11.2 Z" />
+    <path fill="#b23a3a" d="M12 5.4 L18.5 12.5 H5.5 Z" />
+    <path fill="#9a9aa3" fillRule="evenodd" d="M6.5 12.5 H17.5 V21 H6.5 Z M10.3 21 V16.8 Q12 15.2 13.7 16.8 V21 Z" />
+  </>),
+  warehouse: () => (<>
+    <path fill="#7e9abb" fillRule="evenodd" d="M3 11 L12 5 L21 11 V21 H3 Z M7 13 H17 V21 H7 Z" />
+    <path fill="#56729a" d="M7 14.6 H17 V15.6 H7 Z M7 16.8 H17 V17.8 H7 Z M7 19 H17 V20 H7 Z" />
+  </>),
+  boarding: () => (<>
+    <path fill="#9a6b3a" d="M2 7 H4.2 V13 H2 Z" />
+    <path fill="#9a6b3a" d="M2 13 H22 V16.6 H2 Z" />
+    <path fill="#9a6b3a" d="M19.8 11 H22 V16.6 H19.8 Z" />
+    <path fill="#9a6b3a" d="M2 16.6 H3.9 V19 H2 Z M20.1 16.6 H22 V19 H20.1 Z" />
+    <path fill="#9a6b3a" d="M4.6 11.2 H11 Q12 11.2 12 12.2 V13 H4.6 Z" />
+  </>),
+  bank: () => (<>
+    <path fill="#c2c6d0" d="M2.5 8 L12 3 L21.5 8 Z" />
+    <path fill="#b3b7c2" d="M3.5 8.4 H20.5 V10 H3.5 Z" />
+    <path fill="#a6abb7" d="M4.5 10.2 H6.4 V18 H4.5 Z M8.7 10.2 H10.6 V18 H8.7 Z M13.4 10.2 H15.3 V18 H13.4 Z M17.6 10.2 H19.5 V18 H17.6 Z" />
+    <path fill="#9498a4" d="M3 18 H21 V20.6 H3 Z" />
+  </>),
+  townhall: () => (<>
+    <rect x="11.4" y="1.6" width="1" height="5" fill="#b23a3a" />
+    <path fill="#b23a3a" d="M12.4 1.9 H16.2 L14.7 3.3 L16.2 4.7 H12.4 Z" />
+    <path fill="#b23a3a" fillRule="evenodd" d="M9.3 6.6 H14.7 V12 H9.3 Z M10.5 9.5 A1.5 1.5 0 1 1 13.5 9.5 A1.5 1.5 0 1 1 10.5 9.5 Z" />
+    <path fill="#b23a3a" fillRule="evenodd" d="M4 12 H20 V21 H4 Z M10.5 21 V15.6 Q12 14.2 13.5 15.6 V21 Z" />
+  </>),
+  watchtower: () => (<>
+    <path fill="#356340" fillRule="evenodd" d="M8 6 H9.6 V4.4 H11.2 V6 H12.8 V4.4 H14.4 V6 H16 V21 H8 Z M10.4 13 V10.6 Q12 8.9 13.6 10.6 V13 Z" />
+    <path fill="#284e30" d="M6.5 19 H17.5 V21 H6.5 Z" />
+  </>),
+  cow: () => (<>
+    <path d="M6.5 6 Q4 3.5 2.6 5 Q4 6.2 6.5 7.4 Z" fill="#15100a" />
+    <path d="M17.5 6 Q20 3.5 21.4 5 Q20 6.2 17.5 7.4 Z" fill="#15100a" />
+    <ellipse cx="12" cy="13" rx="7.6" ry="6.6" fill="#15100a" />
     <ellipse cx="12" cy="16" rx="4.4" ry="2.9" fill="#fff" />
-    <circle cx="10.4" cy="16" r="0.7" fill={c} />
-    <circle cx="13.6" cy="16" r="0.7" fill={c} />
+    <circle cx="10.4" cy="16" r="0.7" fill="#15100a" />
+    <circle cx="13.6" cy="16" r="0.7" fill="#15100a" />
     <circle cx="9" cy="11" r="1" fill="#fff" />
     <circle cx="15" cy="11" r="1" fill="#fff" />
   </>),
-  pig: (c) => (<>
-    <path d="M6 5.5 L10.5 6 L8.5 11 Z" fill={c} />
-    <path d="M18 5.5 L13.5 6 L15.5 11 Z" fill={c} />
-    <ellipse cx="12" cy="13.5" rx="7.6" ry="6.6" fill={c} />
-    <ellipse cx="12" cy="15" rx="3.9" ry="3" fill="#fff" />
-    <ellipse cx="10.6" cy="15" rx="0.7" ry="1" fill={c} />
-    <ellipse cx="13.4" cy="15" rx="0.7" ry="1" fill={c} />
+  pig: () => (<>
+    <path d="M6 5.5 L10.5 6 L8.5 11 Z" fill="#e493aa" />
+    <path d="M18 5.5 L13.5 6 L15.5 11 Z" fill="#e493aa" />
+    <ellipse cx="12" cy="13.5" rx="7.6" ry="6.6" fill="#e493aa" />
+    <ellipse cx="12" cy="15" rx="3.9" ry="3" fill="#f3d0db" />
+    <ellipse cx="10.6" cy="15" rx="0.7" ry="1" fill="#b05f78" />
+    <ellipse cx="13.4" cy="15" rx="0.7" ry="1" fill="#b05f78" />
     <circle cx="9" cy="11" r="1" fill="#fff" />
     <circle cx="15" cy="11" r="1" fill="#fff" />
   </>),
-  sheep: (c) => (<>
-    <circle cx="7" cy="10.5" r="4.2" fill={c} />
-    <circle cx="12" cy="8" r="4.6" fill={c} />
-    <circle cx="17" cy="10.5" r="4.2" fill={c} />
-    <circle cx="8.5" cy="14.5" r="4.6" fill={c} />
-    <circle cx="15.5" cy="14.5" r="4.6" fill={c} />
-    <ellipse cx="12" cy="15.5" rx="3.6" ry="3.1" fill="#fff" />
-    <circle cx="10.7" cy="15" r="0.7" fill={c} />
-    <circle cx="13.3" cy="15" r="0.7" fill={c} />
+  sheep: () => (<>
+    {/* round fluffy wool body: solid core + a full ring of bumps */}
+    <circle cx="12" cy="12" r="6.4" fill="#888a8f" />
+    <circle cx="18.3" cy="12" r="2.6" fill="#888a8f" />
+    <circle cx="17.5" cy="15.2" r="2.6" fill="#888a8f" />
+    <circle cx="15.2" cy="17.5" r="2.6" fill="#888a8f" />
+    <circle cx="12" cy="18.3" r="2.6" fill="#888a8f" />
+    <circle cx="8.8" cy="17.5" r="2.6" fill="#888a8f" />
+    <circle cx="6.5" cy="15.2" r="2.6" fill="#888a8f" />
+    <circle cx="5.7" cy="12" r="2.6" fill="#888a8f" />
+    <circle cx="6.5" cy="8.8" r="2.6" fill="#888a8f" />
+    <circle cx="8.8" cy="6.5" r="2.6" fill="#888a8f" />
+    <circle cx="12" cy="5.7" r="2.6" fill="#888a8f" />
+    <circle cx="15.2" cy="6.5" r="2.6" fill="#888a8f" />
+    <circle cx="17.5" cy="8.8" r="2.6" fill="#888a8f" />
+    {/* white ears poking out of the white face */}
+    <ellipse cx="8.7" cy="8.3" rx="1.7" ry="1.8" fill="#fff" transform="rotate(-28 8.7 8.3)" />
+    <ellipse cx="15.3" cy="8.3" rx="1.7" ry="1.8" fill="#fff" transform="rotate(28 15.3 8.3)" />
+    {/* white face + eyes */}
+    <rect x="8.3" y="9.1" width="7.4" height="7.4" rx="3.2" fill="#fff" />
+    <circle cx="10.5" cy="12.3" r="0.8" fill="#33312e" />
+    <circle cx="13.5" cy="12.3" r="0.8" fill="#33312e" />
   </>),
 };
 
@@ -172,6 +233,7 @@ function TileArt({ tile, px = 70 }) {
   if (t.type === "ship") return <Icon kind="ship" color="#f3ead8" size={px * 0.56} />;
   if (t.type === "castle") return <Icon kind="castle" color="#f3ead8" size={px * 0.54} />;
   if (t.type === "mine") return <Icon kind="mine" color="#f3ead8" size={px * 0.56} />;
+  if (t.type === "building" && ICON[t.building]) return <Icon kind={t.building} color="#15100a" size={px * 0.6} />;
   if (t.type === "livestock" && ICON[t.animal]) {
     const n = t.count || 1;
     const each = n >= 4 ? px * 0.34 : n === 3 ? px * 0.36 : px * 0.42;
