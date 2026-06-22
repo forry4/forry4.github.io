@@ -333,11 +333,17 @@ def list_open_games() -> list[dict]:
     out = []
     for r in rows:
         try:
-            wp = int((json.loads(r["state_json"] or "{}").get("game") or {}).get("win_points", 15))
+            state = json.loads(r["state_json"] or "{}")
+        except Exception:
+            state = {}
+        try:
+            wp = int((state.get("game") or {}).get("win_points", 15))
         except Exception:
             wp = 15
+        player_count = len(state.get("players") or {}) or 1  # players who've joined the lobby
         out.append({"id": r["id"], "host_id": r["player1_id"], "host_name": r["player1_name"],
-                    "win_points": wp, "created_at": r["created_at"]})
+                    "win_points": wp, "player_count": player_count, "max_players": MAX_PLAYERS,
+                    "created_at": r["created_at"]})
     return out
 
 
