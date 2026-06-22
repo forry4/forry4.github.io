@@ -114,11 +114,15 @@ const css = baseCss + `
 .home-game-badge.soon{color:var(--text-muted);border:1px solid var(--border)}
 
 /* ─── Browser ───────────────────────────────────────────────────────────── */
-.browser{max-width:1400px;margin:0 auto;padding:0 20px 48px}
-.browser-header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:36px;padding-bottom:16px;border-bottom:1px solid var(--border)}
-.browser-head-left{display:flex;align-items:center;gap:14px;min-width:0}
-.browser-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:2rem;font-weight:700;color:var(--gold);letter-spacing:.04em}
-.browser-user{display:flex;align-items:center;gap:10px}
+.browser{max-width:1400px;margin:0 auto;padding:28px 20px 48px}
+/* Full-width top banner (flush to the screen edges) — lives OUTSIDE the centered
+   .browser content so its bottom border spans the whole screen. Three sections:
+   back button far left, game name centered, user far right (left/right flex:1 so the
+   title is truly centered). */
+.browser-header{display:flex;align-items:center;gap:12px;padding:12px 24px;padding-top:calc(env(safe-area-inset-top,0px) + 12px);border-bottom:1px solid var(--border);background:var(--surface)}
+.browser-head-left{flex:1 1 0;display:flex;align-items:center;justify-content:flex-start;min-width:0}
+.browser-title{flex:0 0 auto;text-align:center;font-family:'Cinzel','Cinzel Fallback',serif;font-size:2rem;font-weight:700;color:var(--gold);letter-spacing:.04em}
+.browser-user{flex:1 1 0;display:flex;align-items:center;justify-content:flex-end;gap:10px;min-width:0}
 .browser-username{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.8rem;color:var(--text-dim);letter-spacing:.06em;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .browser-guest-badge{font-size:.65rem;letter-spacing:.1em;color:var(--text-muted);border:1px solid var(--border);padding:2px 7px;border-radius:10px;font-family:'Cinzel','Cinzel Fallback',serif;text-transform:uppercase}
 .browser-create{margin-bottom:36px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:center}
@@ -543,8 +547,9 @@ const css = baseCss + `
 }
 
 @media(max-width:600px){
-  .browser{padding:0 14px 40px}
-  .browser-title{font-size:1.6rem}
+  .browser{padding:20px 14px 40px}
+  .browser-title{font-size:1.4rem}
+  .browser-header{padding-left:14px;padding-right:14px}
   .game{padding:6px}
   .game-card{padding:10px 12px}
 
@@ -1727,20 +1732,19 @@ export default function SpenderApp() {
 		<>
 			<style>{css}</style>
 			<div className="app">
-				<div className="browser">
-					<div className="browser-header">
-						<div className="browser-head-left">
-							<button className="btn btn-ghost btn-sm" onClick={() => setScreen("home")}>
-								← {SITE_NAME}
-							</button>
-							<div className="browser-title">Spender</div>
-						</div>
-						<div className="browser-user">
-							{authUser?.guest && <span className="browser-guest-badge">Guest</span>}
-							<span className="browser-username">{authUser?.name}</span>
-						</div>
+				<div className="browser-header">
+					<div className="browser-head-left">
+						<button className="btn btn-ghost btn-sm" onClick={() => setScreen("home")}>
+							← {SITE_NAME}
+						</button>
 					</div>
-
+					<div className="browser-title">Spender</div>
+					<div className="browser-user">
+						{authUser?.guest && <span className="browser-guest-badge">Guest</span>}
+						<span className="browser-username">{authUser?.name}</span>
+					</div>
+				</div>
+				<div className="browser">
 					<div className="browser-create">
 						<div className="length-toggle" title="Game length (Classic = race to 15, Long = race to 21) — also filters the open games below">
 							{[[15, "Classic 15"], [21, "Long 21"]].map(([wp, label]) => (
