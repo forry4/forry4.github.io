@@ -618,7 +618,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
         <div className="ww-wrap">
           <div className="ww-top">
             <div className="ww-top-left">
-              <button className="ww-btn ghost sm" onClick={onExit}>← Forrest Games</button>
+              <button className="ww-btn ghost sm" onClick={onExit}>← Back</button>
               <span className="ww-title">Where Wolf?</span>
             </div>
             <span className="ww-user">{playerName}</span>

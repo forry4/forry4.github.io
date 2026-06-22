@@ -1745,7 +1745,7 @@ export default function SpenderApp() {
 				<div className="browser-header">
 					<div className="browser-head-left">
 						<button className="btn btn-ghost btn-sm" onClick={() => setScreen("home")}>
-							← {SITE_NAME}
+							← Back
 						</button>
 					</div>
 					<div className="browser-title">Spender</div>

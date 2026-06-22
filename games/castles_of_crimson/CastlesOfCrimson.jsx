@@ -861,7 +861,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
       <div className="coc"><style>{css}</style>
         <div className="coc-top coc-top-lobby">
           <div className="coc-top-left">
-            <button className="coc-btn ghost sm" onClick={onExit}>← Forrest Games</button>
+            <button className="coc-btn ghost sm" onClick={onExit}>← Back</button>
           </div>
           <span className="coc-title">Castles of Crimson</span>
           <span className="coc-user">{playerName}</span>

@@ -542,7 +542,7 @@ export default function Books({ authUser, onExit }) {
 			<style>{baseCss + css}</style>
 			<div className="bk-app">
 				<header className="bk-header">
-					<button className="btn btn-ghost btn-sm" onClick={onExit}>← Forrest Games</button>
+					<button className="btn btn-ghost btn-sm" onClick={onExit}>← Back</button>
 					<div className="bk-headtitle">Books</div>
 					<div className="bk-headright">
 						{canEdit && !editing && <button className="btn btn-outline btn-sm" onClick={startEdit}>Edit ranking</button>}
