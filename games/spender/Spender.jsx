@@ -72,7 +72,7 @@ const css = baseCss + `
 
 /* ─── Loading ───────────────────────────────────────────────────────────── */
 .loading-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:16px;padding:32px;text-align:center}
-.loading-logo{font-family:'Cinzel',serif;font-size:3rem;font-weight:700;color:var(--gold);letter-spacing:.06em}
+.loading-logo{font-family:'Cinzel','Cinzel Fallback',serif;font-size:3rem;font-weight:700;color:var(--gold);letter-spacing:.06em}
 .loading-sub{color:var(--text-dim);font-style:italic;font-size:.95rem}
 .loading-bar-wrap{width:220px;height:5px;background:var(--surface2);border-radius:3px;overflow:hidden;border:1px solid var(--border)}
 .loading-bar{height:100%;background:var(--gold);border-radius:3px;transition:width .4s ease}
@@ -80,14 +80,14 @@ const css = baseCss + `
 
 /* ─── Auth ──────────────────────────────────────────────────────────────── */
 .auth-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:32px 20px;background:var(--bg)}
-.auth-logo{font-family:'Cinzel',serif;font-size:3rem;font-weight:700;color:var(--gold);letter-spacing:.06em;margin-bottom:4px}
+.auth-logo{font-family:'Cinzel','Cinzel Fallback',serif;font-size:3rem;font-weight:700;color:var(--gold);letter-spacing:.06em;margin-bottom:4px}
 .auth-tagline{color:var(--text-dim);font-style:italic;font-size:1.05rem;margin-bottom:32px}
 .auth-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px 28px 24px;width:100%;max-width:400px}
 .auth-tabs{display:flex;border-bottom:1px solid var(--border);margin-bottom:22px}
-.auth-tab{flex:1;padding:10px 0;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--text-dim);cursor:pointer;font-family:'Cinzel',serif;font-size:.78rem;letter-spacing:.1em;text-transform:uppercase;margin-bottom:-1px;transition:all .15s}
+.auth-tab{flex:1;padding:10px 0;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--text-dim);cursor:pointer;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.78rem;letter-spacing:.1em;text-transform:uppercase;margin-bottom:-1px;transition:all .15s}
 .auth-tab.active{color:var(--gold);border-bottom-color:var(--gold)}
 .auth-tab:hover:not(.active){color:var(--text)}
-.auth-field{width:100%;padding:11px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'Crimson Pro',Georgia,serif;font-size:1rem;letter-spacing:normal;outline:none;margin-bottom:10px}
+.auth-field{width:100%;padding:11px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-size:1rem;letter-spacing:normal;outline:none;margin-bottom:10px}
 .auth-field:focus{border-color:var(--gold)}
 .auth-error{font-size:.82rem;color:var(--red-gem);padding:6px 0 2px;text-align:center}
 .guest-name-row{display:flex;gap:8px;align-items:center;margin-bottom:10px}
@@ -101,15 +101,15 @@ const css = baseCss + `
 .home{max-width:900px;margin:0 auto;padding:calc(env(safe-area-inset-top,0px) + 24px) 20px 48px;min-height:100vh}
 .home-header{display:flex;justify-content:flex-end;align-items:center;min-height:34px}
 .home-hero{text-align:center;margin:40px 0 48px}
-.home-logo{font-family:'Cinzel',serif;font-size:clamp(2.4rem,8vw,3.6rem);font-weight:700;color:var(--gold);letter-spacing:.06em;line-height:1.1}
+.home-logo{font-family:'Cinzel','Cinzel Fallback',serif;font-size:clamp(2.4rem,8vw,3.6rem);font-weight:700;color:var(--gold);letter-spacing:.06em;line-height:1.1}
 .home-tagline{color:var(--text-dim);font-style:italic;font-size:1.1rem;margin-top:10px}
 .home-games{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:18px}
 .home-game-card{position:relative;text-align:left;font-family:inherit;color:inherit;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:26px 22px 24px;cursor:pointer;transition:border-color .15s,transform .15s,background .15s}
 .home-game-card:hover{border-color:var(--gold);transform:translateY(-2px);background:var(--surface2)}
 .home-game-card.soon{opacity:.9}
-.home-game-name{font-family:'Cinzel',serif;font-size:1.32rem;font-weight:600;color:var(--gold);letter-spacing:.03em;margin-bottom:8px}
+.home-game-name{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.32rem;font-weight:600;color:var(--gold);letter-spacing:.03em;margin-bottom:8px}
 .home-game-desc{color:var(--text-dim);font-size:.95rem;line-height:1.45;font-style:italic}
-.home-game-badge{position:absolute;top:14px;right:14px;font-family:'Cinzel',serif;font-size:.6rem;letter-spacing:.12em;text-transform:uppercase;padding:3px 9px;border-radius:10px}
+.home-game-badge{position:absolute;top:14px;right:14px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.6rem;letter-spacing:.12em;text-transform:uppercase;padding:3px 9px;border-radius:10px}
 .home-game-badge.ready{color:var(--green-gem);border:1px solid rgba(84,194,61,.5)}
 .home-game-badge.soon{color:var(--text-muted);border:1px solid var(--border)}
 
@@ -117,33 +117,33 @@ const css = baseCss + `
 .browser{max-width:1400px;margin:0 auto;padding:0 20px 48px}
 .browser-header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:36px;padding-bottom:16px;border-bottom:1px solid var(--border)}
 .browser-head-left{display:flex;align-items:center;gap:14px;min-width:0}
-.browser-title{font-family:'Cinzel',serif;font-size:2rem;font-weight:700;color:var(--gold);letter-spacing:.04em}
+.browser-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:2rem;font-weight:700;color:var(--gold);letter-spacing:.04em}
 .browser-user{display:flex;align-items:center;gap:10px}
-.browser-username{font-family:'Cinzel',serif;font-size:.8rem;color:var(--text-dim);letter-spacing:.06em;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.browser-guest-badge{font-size:.65rem;letter-spacing:.1em;color:var(--text-muted);border:1px solid var(--border);padding:2px 7px;border-radius:10px;font-family:'Cinzel',serif;text-transform:uppercase}
+.browser-username{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.8rem;color:var(--text-dim);letter-spacing:.06em;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.browser-guest-badge{font-size:.65rem;letter-spacing:.1em;color:var(--text-muted);border:1px solid var(--border);padding:2px 7px;border-radius:10px;font-family:'Cinzel','Cinzel Fallback',serif;text-transform:uppercase}
 .browser-create{margin-bottom:36px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:center}
 /* game-length toggle: selected state changes ONLY background+color (fixed border/padding)
    so selecting never changes the element's size / shifts the layout */
 .length-toggle{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;flex-shrink:0}
-.len-btn{padding:9px 14px;background:transparent;border:none;color:var(--text-dim);font-family:'Cinzel',serif;font-size:.8rem;letter-spacing:.03em;cursor:pointer;transition:background .12s,color .12s;white-space:nowrap}
+.len-btn{padding:9px 14px;background:transparent;border:none;color:var(--text-dim);font-family:'Cinzel','Cinzel Fallback',serif;font-size:.8rem;letter-spacing:.03em;cursor:pointer;transition:background .12s,color .12s;white-space:nowrap}
 .len-btn+.len-btn{border-left:1px solid var(--border)}
 .len-btn.sel{background:var(--gold);color:#1c1710}
 .btn-outline.active{background:var(--gold);color:#0f0e0c}
 .ai-picker-wrap{position:relative;display:inline-flex}
 .ai-picker{position:absolute;top:calc(100% + 8px);left:0;z-index:30;display:flex;gap:8px;align-items:center;flex-wrap:wrap;max-width:min(92vw,420px);padding:12px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:0 10px 28px rgba(0,0,0,.5)}
-.ai-picker-label{font-family:'Cinzel',serif;font-size:.72rem;letter-spacing:.06em;color:var(--text-dim);text-transform:uppercase;margin-right:4px}
+.ai-picker-label{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;letter-spacing:.06em;color:var(--text-dim);text-transform:uppercase;margin-right:4px}
 .browser-section{margin-bottom:32px}
 .section-hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
-.section-title{font-family:'Cinzel',serif;font-size:.7rem;letter-spacing:.18em;color:var(--gold);text-transform:uppercase}
+.section-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;letter-spacing:.18em;color:var(--gold);text-transform:uppercase}
 .game-cards{display:flex;flex-direction:column;gap:8px}
 .game-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 16px;display:flex;align-items:center;gap:14px;transition:border-color .15s}
 .game-card:hover{border-color:rgba(201,168,76,.4)}
 .game-card-info{flex:1;min-width:0}
-.game-card-title{font-family:'Cinzel',serif;font-size:.88rem;letter-spacing:.04em;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.game-card-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.88rem;letter-spacing:.04em;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .game-card-meta{font-size:.78rem;color:var(--text-dim)}
 .game-card-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
 /* Open Games: current lobby size (e.g. 1/4) next to the host name. */
-.lobby-size{margin-left:8px;font-family:'Crimson Pro',Georgia,serif;font-size:.82rem;font-weight:600;letter-spacing:0;color:var(--gold)}
+.lobby-size{margin-left:8px;font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-size:.82rem;font-weight:600;letter-spacing:0;color:var(--gold)}
 /* Active Games: one player per line (override the base nowrap/ellipsis). */
 .game-card-title.matchup{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.35}
 /* Lobby: Open Games + History side by side (stack on narrow screens). */
@@ -179,13 +179,13 @@ const css = baseCss + `
 }
 /* History cards: Won/Lost badge + the final scores (winner brighter), wraps freely. */
 .history-card .game-card-title{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;white-space:normal;overflow:visible}
-.hist-result{font-family:'Cinzel',serif;font-size:.6rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:2px 8px;border-radius:10px;flex-shrink:0}
+.hist-result{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.6rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:2px 8px;border-radius:10px;flex-shrink:0}
 .hist-result.won{background:rgba(63,156,46,.18);color:var(--green-gem)}
 .hist-result.lost{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border)}
-.hist-scores{color:var(--text-dim);font-size:.84rem;font-family:'Crimson Pro',Georgia,serif;letter-spacing:0}
+.hist-scores{color:var(--text-dim);font-size:.84rem;font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;letter-spacing:0}
 .hist-score-num{color:var(--text);font-weight:600}
-.your-turn-badge{background:var(--gold);color:#0f0e0c;padding:3px 10px;border-radius:12px;font-family:'Cinzel',serif;font-size:.63rem;letter-spacing:.12em;font-weight:700;text-transform:uppercase;white-space:nowrap}
-.playing-badge{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border);padding:3px 10px;border-radius:12px;font-family:'Cinzel',serif;font-size:.63rem;letter-spacing:.1em;text-transform:uppercase;white-space:nowrap}
+.your-turn-badge{background:var(--gold);color:#0f0e0c;padding:3px 10px;border-radius:12px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.63rem;letter-spacing:.12em;font-weight:700;text-transform:uppercase;white-space:nowrap}
+.playing-badge{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border);padding:3px 10px;border-radius:12px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.63rem;letter-spacing:.1em;text-transform:uppercase;white-space:nowrap}
 .empty-state{text-align:center;padding:28px 16px;color:var(--text-dim);font-style:italic;font-size:.9rem;background:var(--surface2);border-radius:var(--radius);border:1px dashed var(--border)}
 .spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--gold);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -198,12 +198,12 @@ const css = baseCss + `
 
 /* ─── Waiting ───────────────────────────────────────────────────────────── */
 .waiting-screen{max-width:480px;margin:0 auto;padding:48px 20px 24px;text-align:center}
-.waiting-title{font-family:'Cinzel',serif;font-size:1.1rem;color:var(--gold);margin-bottom:6px;letter-spacing:.1em}
+.waiting-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.1rem;color:var(--gold);margin-bottom:6px;letter-spacing:.1em}
 .waiting-sub{color:var(--text-dim);font-size:.85rem;margin-bottom:24px}
-.room-code-box{font-family:'Cinzel',serif;font-size:2.2rem;letter-spacing:.3em;color:var(--gold-light);text-align:center;padding:18px;background:var(--surface2);border-radius:var(--radius);margin-bottom:20px;border:1px solid var(--border);cursor:pointer;transition:border-color .15s}
+.room-code-box{font-family:'Cinzel','Cinzel Fallback',serif;font-size:2.2rem;letter-spacing:.3em;color:var(--gold-light);text-align:center;padding:18px;background:var(--surface2);border-radius:var(--radius);margin-bottom:20px;border:1px solid var(--border);cursor:pointer;transition:border-color .15s}
 .room-code-box:hover{border-color:var(--gold)}
 .player-list{list-style:none;margin:0 0 20px}
-.player-list li{display:flex;align-items:center;gap:8px;padding:9px 14px;background:var(--surface2);border-radius:var(--radius);margin-bottom:6px;font-family:'Cinzel',serif;font-size:.82rem;letter-spacing:.05em}
+.player-list li{display:flex;align-items:center;gap:8px;padding:9px 14px;background:var(--surface2);border-radius:var(--radius);margin-bottom:6px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;letter-spacing:.05em}
 .player-list li.me{border:1px solid var(--gold);color:var(--gold)}
 .copy-hint{font-size:.75rem;color:var(--text-muted);font-style:italic;margin-bottom:12px}
 
@@ -240,7 +240,7 @@ const css = baseCss + `
   .board-actions .btn{padding:9px 14px}
 }
 .panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px}
-.panel-title{font-family:'Cinzel',serif;font-size:.68rem;letter-spacing:.14em;color:var(--gold);margin-bottom:10px;text-transform:uppercase}
+.panel-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;letter-spacing:.14em;color:var(--gold);margin-bottom:10px;text-transform:uppercase}
 
 /* ─── Bank ──────────────────────────────────────────────────────────────── */
 .bank-gems{display:flex;gap:8px;flex-wrap:wrap}
@@ -255,8 +255,8 @@ const css = baseCss + `
 .gem-stack.disabled{opacity:.35;cursor:not-allowed}
 .gem-stack.reserve-ready .gem-token{box-shadow:0 0 0 2px var(--gold-light),0 0 14px rgba(232,201,106,.6);animation:reserve-pulse 1.1s ease-in-out infinite}
 @keyframes reserve-pulse{0%,100%{box-shadow:0 0 0 2px var(--gold-light),0 0 8px rgba(232,201,106,.45)}50%{box-shadow:0 0 0 2px var(--gold-light),0 0 18px rgba(232,201,106,.85)}}
-.gem-token{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Cinzel',serif;font-weight:700;font-size:.95rem;border:2px solid rgba(255,255,255,.12);transition:all .12s}
-.gem-count{font-size:.75rem;color:var(--text-dim);font-family:'Cinzel',serif}
+.gem-token{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:.95rem;border:2px solid rgba(255,255,255,.12);transition:all .12s}
+.gem-count{font-size:.75rem;color:var(--text-dim);font-family:'Cinzel','Cinzel Fallback',serif}
 
 /* ─── Cards ─────────────────────────────────────────────────────────────── */
 /* overflow-x:auto clips both axes, which would cut off the hover lift / top border
@@ -264,11 +264,11 @@ const css = baseCss + `
    Padding on all sides + matching -margin gives clip-room without moving the row. */
 .level-row{display:flex;gap:8px;align-items:flex-start;flex-wrap:nowrap;overflow-x:auto;padding:6px 4px 4px;margin:-6px -4px 0}
 .level-row::-webkit-scrollbar{height:4px}.level-row::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
-.deck-pile{width:var(--card-w,88px);min-height:var(--card-h,120px);border-radius:var(--radius);border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;font-family:'Cinzel',serif;font-size:.68rem;color:var(--text-dim);cursor:pointer;flex-shrink:0;background:var(--surface2);transition:all .12s;flex-direction:column;gap:4px}
+.deck-pile{width:var(--card-w,88px);min-height:var(--card-h,120px);border-radius:var(--radius);border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;color:var(--text-dim);cursor:pointer;flex-shrink:0;background:var(--surface2);transition:all .12s;flex-direction:column;gap:4px}
 .deck-pile:hover{border-color:var(--gold);color:var(--gold)}
 .deck-pile.selected{border-color:var(--gold-light);color:var(--gold-light);box-shadow:0 0 0 2px var(--gold-light)}
 .deck-pile.disabled{cursor:not-allowed;opacity:.5}
-.deck-remaining{font-size:1.3rem;font-weight:700;color:var(--text);font-family:'Cinzel',serif}
+.deck-remaining{font-size:1.3rem;font-weight:700;color:var(--text);font-family:'Cinzel','Cinzel Fallback',serif}
 .card{width:var(--card-w,88px);min-height:var(--card-h,120px);border-radius:var(--radius);background:var(--surface2);border:1px solid var(--border);padding:8px 6px 6px;display:flex;flex-direction:column;cursor:pointer;transition:all .15s;flex-shrink:0;position:relative}
 .card-slot{width:var(--card-w,88px);flex-shrink:0}
 /* Each cell in a level row (deck pile / card / empty slot) shares the row width
@@ -276,8 +276,8 @@ const css = baseCss + `
    level (deck + 4 cards) always fits the column width — no horizontal scroll or
    clipped card — at every size. */
 .level-row>*{flex:1 1 0;min-width:0;max-width:var(--card-w,88px)}
-.ai-val{position:absolute;bottom:5px;right:5px;font-family:'Cinzel',serif;font-size:.62rem;font-weight:600;color:#e8c86a;background:rgba(0,0,0,.4);border-radius:4px;padding:0 4px;line-height:1.4;pointer-events:none}
-.ai-vals{position:absolute;bottom:3px;right:3px;display:grid;grid-template-columns:auto auto;gap:0 5px;font-family:'Cinzel',serif;font-size:.5rem;font-weight:600;color:#e8c86a;background:rgba(0,0,0,.5);border-radius:4px;padding:2px 4px;line-height:1.4;pointer-events:none}
+.ai-val{position:absolute;bottom:5px;right:5px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;font-weight:600;color:#e8c86a;background:rgba(0,0,0,.4);border-radius:4px;padding:0 4px;line-height:1.4;pointer-events:none}
+.ai-vals{position:absolute;bottom:3px;right:3px;display:grid;grid-template-columns:auto auto;gap:0 5px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.5rem;font-weight:600;color:#e8c86a;background:rgba(0,0,0,.5);border-radius:4px;padding:2px 4px;line-height:1.4;pointer-events:none}
 .ai-vals b{color:#9a8fb0;font-weight:700;margin-right:1px}
 .card:hover{border-color:rgba(201,168,76,.5);transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.4)}
 .card.selected{border-color:var(--gold-light);box-shadow:0 0 0 2px var(--gold-light)}
@@ -286,23 +286,23 @@ const css = baseCss + `
 .card.disabled{cursor:not-allowed;opacity:.6}
 .card-back{cursor:default;align-items:center;justify-content:center;gap:8px;border-style:dashed;background:repeating-linear-gradient(45deg,var(--surface2),var(--surface2) 6px,var(--surface) 6px,var(--surface) 12px)}
 .card-back:hover{transform:none;border-color:var(--border);box-shadow:none}
-.card-back-level{font-family:'Cinzel',serif;font-weight:700;font-size:1.3rem;color:var(--text-dim)}
-.card-back-label{font-family:'Cinzel',serif;font-size:.55rem;letter-spacing:.1em;color:var(--text-dim);text-transform:uppercase}
+.card-back-level{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:1.3rem;color:var(--text-dim)}
+.card-back-label{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.55rem;letter-spacing:.1em;color:var(--text-dim);text-transform:uppercase}
 .card-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px}
-.card-points{font-family:'Cinzel',serif;font-weight:700;font-size:1.1rem;color:var(--gold);min-width:16px}
+.card-points{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:1.1rem;color:var(--gold);min-width:16px}
 .card-points.zero{color:transparent}
 .card-bonus{width:20px;height:20px;border-radius:50%;flex-shrink:0;border:1.5px solid rgba(255,255,255,.25)}
 .card-cost{display:flex;flex-direction:column;gap:3px;margin-top:auto}
 .cost-row{display:flex;align-items:center;gap:4px}
 .cost-gem{width:10px;height:10px;border-radius:50%;flex-shrink:0;border:1px solid rgba(255,255,255,.25)}
-.cost-num{font-family:'Cinzel',serif;font-size:.7rem;color:var(--text-dim)}
+.cost-num{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;color:var(--text-dim)}
 
 /* ─── Nobles ────────────────────────────────────────────────────────────── */
 .nobles-row{display:flex;gap:8px;flex-wrap:wrap}
 .noble{width:72px;min-height:72px;border-radius:var(--radius);background:var(--surface2);border:1px solid var(--border);padding:6px;display:flex;flex-direction:column;align-items:center;gap:4px}
-.noble-points{font-family:'Cinzel',serif;font-size:1rem;font-weight:700;color:var(--gold)}
+.noble-points{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1rem;font-weight:700;color:var(--gold)}
 .noble-req{display:flex;flex-direction:column;gap:2px;width:100%}
-.noble-req-row{display:flex;gap:3px;align-items:center;font-size:.65rem;color:var(--text-dim);font-family:'Cinzel',serif}
+.noble-req-row{display:flex;gap:3px;align-items:center;font-size:.65rem;color:var(--text-dim);font-family:'Cinzel','Cinzel Fallback',serif}
 .noble-req-dot{width:8px;height:8px;border-radius:2px;border:1px solid rgba(255,255,255,.12);flex-shrink:0}
 /* blank placeholder kept in a claimed noble's slot so positions never shift */
 .noble-empty{background:transparent;border:1px dashed var(--border)}
@@ -315,13 +315,13 @@ const css = baseCss + `
    mobile/tablet, where the controls live next to the nobles via .board-actions. */
 .actions-panel{display:none}
 .action-hint{flex:1;font-style:italic;color:var(--text-dim);font-size:.88rem;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.target-label{font-family:'Cinzel',serif;font-size:1.05rem;font-weight:700;letter-spacing:.08em;color:var(--gold);text-transform:uppercase;flex-shrink:0}
+.target-label{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.05rem;font-weight:700;letter-spacing:.08em;color:var(--gold);text-transform:uppercase;flex-shrink:0}
 .action-bar-btns{display:flex;gap:8px;align-items:center;flex-shrink:0;min-width:150px;justify-content:flex-end}
 .action-bar-spacer{visibility:hidden;pointer-events:none;transition:none}
-.turn-badge{font-family:'Cinzel',serif;font-size:.72rem;letter-spacing:.08em;padding:4px 12px;border-radius:20px;white-space:nowrap}
+.turn-badge{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;letter-spacing:.08em;padding:4px 12px;border-radius:20px;white-space:nowrap}
 .turn-badge.mine{background:var(--gold);color:#0f0e0c}
 .turn-badge.theirs{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border)}
-.ai-variant-badge{font-family:'Cinzel',serif;font-size:.6rem;letter-spacing:.1em;padding:2px 8px;border-radius:20px;background:var(--surface2);color:var(--text-dim);border:1px solid var(--border);white-space:nowrap}
+.ai-variant-badge{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.6rem;letter-spacing:.1em;padding:2px 8px;border-radius:20px;background:var(--surface2);color:var(--text-dim);border:1px solid var(--border);white-space:nowrap}
 .gap-8{display:flex;gap:8px;flex-wrap:wrap}
 
 /* ─── Player panels ─────────────────────────────────────────────────────── */
@@ -332,35 +332,35 @@ const css = baseCss + `
 .player-panel.active-turn{border-color:var(--gold);background:var(--surface3)}
 .player-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
 .player-name-row{display:flex;align-items:center;gap:6px}
-.player-name{font-family:'Cinzel',serif;font-size:.8rem;letter-spacing:.06em}
+.player-name{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.8rem;letter-spacing:.06em}
 .active-dot{width:6px;height:6px;border-radius:50%;background:var(--gold);flex-shrink:0;animation:pulse 1.5s ease-in-out infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
-.player-score{font-family:'Cinzel',serif;font-size:1.1rem;font-weight:700;color:var(--gold)}
+.player-score{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.1rem;font-weight:700;color:var(--gold)}
 .player-tokens{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px}
-.token-pill{display:flex;align-items:center;gap:3px;padding:2px 7px;border-radius:12px;font-family:'Cinzel',serif;font-size:.7rem;font-weight:700}
+.token-pill{display:flex;align-items:center;gap:3px;padding:2px 7px;border-radius:12px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;font-weight:700}
 .player-bonuses{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;margin-bottom:6px}
-.bonus-pill{display:flex;align-items:center;gap:3px;padding:2px 7px;border-radius:12px;font-family:'Cinzel',serif;font-size:.7rem;font-weight:700;border:1px solid}
-.reserved-label{font-size:.62rem;color:var(--text-dim);font-family:'Cinzel',serif;letter-spacing:.06em;margin-bottom:4px;text-transform:uppercase}
+.bonus-pill{display:flex;align-items:center;gap:3px;padding:2px 7px;border-radius:12px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;font-weight:700;border:1px solid}
+.reserved-label{font-size:.62rem;color:var(--text-dim);font-family:'Cinzel','Cinzel Fallback',serif;letter-spacing:.06em;margin-bottom:4px;text-transform:uppercase}
 .reserved-row{display:flex;gap:4px;flex-wrap:wrap}
-.gem-total{display:inline-block;font-size:.66rem;color:var(--text);font-family:'Cinzel',serif;font-weight:600;letter-spacing:.03em;margin-top:3px;background:var(--surface3);border:1.5px solid #7a6e58;padding:1px 8px;border-radius:8px;box-shadow:0 0 0 1px rgba(0,0,0,.5)}
+.gem-total{display:inline-block;font-size:.66rem;color:var(--text);font-family:'Cinzel','Cinzel Fallback',serif;font-weight:600;letter-spacing:.03em;margin-top:3px;background:var(--surface3);border:1.5px solid #7a6e58;padding:1px 8px;border-radius:8px;box-shadow:0 0 0 1px rgba(0,0,0,.5)}
 /* Compact mobile player summary + log caret — hidden on desktop (shown only in
    the max-width:600px block below), so the laptop layout is unchanged. */
 .player-summary{display:none;flex-wrap:wrap;gap:5px;align-items:center;margin-top:8px}
-.sum-chip{display:inline-flex;align-items:center;gap:3px;font-family:'Cinzel',serif;font-size:.74rem;font-weight:700;color:var(--text)}
+.sum-chip{display:inline-flex;align-items:center;gap:3px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.74rem;font-weight:700;color:var(--text)}
 .sum-dot{width:11px;height:11px;border-radius:50%;border:1px solid rgba(255,255,255,.25);flex-shrink:0}
-.sum-label{font-family:'Cinzel',serif;font-size:.56rem;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)}
+.sum-label{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.56rem;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)}
 .sum-div{width:1px;align-self:stretch;min-height:14px;background:var(--border);margin:0 3px}
 .sum-none{color:var(--text-muted);font-size:.74rem}
 .sum-noble{color:var(--gold)}
-.sum-caret{margin-left:auto;cursor:pointer;color:var(--gold);font-size:.72rem;font-family:'Cinzel',serif;letter-spacing:.04em}
+.sum-caret{margin-left:auto;cursor:pointer;color:var(--gold);font-size:.72rem;font-family:'Cinzel','Cinzel Fallback',serif;letter-spacing:.04em}
 .log-caret{display:none}
 
 /* ─── Winner ────────────────────────────────────────────────────────────── */
 .winner-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:32px}
-.winner-title{font-family:'Cinzel',serif;font-size:3rem;color:var(--gold);margin-bottom:8px;letter-spacing:.04em}
+.winner-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:3rem;color:var(--gold);margin-bottom:8px;letter-spacing:.04em}
 .winner-sub{color:var(--text-dim);font-style:italic;margin-bottom:32px}
 .final-scores{display:flex;flex-direction:column;gap:8px;margin-bottom:32px}
-.score-row{font-family:'Cinzel',serif;font-size:1.05rem;padding:10px 28px;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border)}
+.score-row{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.05rem;padding:10px 28px;background:var(--surface);border-radius:var(--radius);border:1px solid var(--border)}
 .score-row.winner{border-color:var(--gold);color:var(--gold)}
 
 /* ─── Move log ──────────────────────────────────────────────────────────── */
@@ -372,7 +372,7 @@ const css = baseCss + `
 .log-entry:first-child{color:var(--text)}
 .log-entry.clickable{cursor:pointer}
 .log-entry.clickable:hover{background:rgba(201,168,76,.08);border-radius:4px}
-.log-name{font-family:'Cinzel',serif;font-size:.7rem;color:var(--gold-light);flex-shrink:0}
+.log-name{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;color:var(--gold-light);flex-shrink:0}
 .log-action{flex:1}
 @keyframes log-in{from{opacity:0;transform:translateX(6px)}to{opacity:1;transform:none}}
 
@@ -390,7 +390,7 @@ const css = baseCss + `
 .fly-layer{position:fixed;inset:0;pointer-events:none;z-index:90}
 .fly-gem{position:fixed;border-radius:50%;border:2px solid rgba(255,255,255,.3);box-shadow:0 2px 10px rgba(0,0,0,.55);animation:fly .42s ease both;will-change:transform,opacity}
 .fly-card{position:fixed;border-radius:8px;background:var(--surface2);border:2px solid var(--border);box-shadow:0 6px 20px rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:space-between;padding:6px 8px;overflow:hidden;transform-origin:center;animation:fly .5s ease both;will-change:transform,opacity}
-.fly-card-pt{font-family:'Cinzel',serif;font-weight:700;color:var(--gold);font-size:1.3rem;line-height:1}
+.fly-card-pt{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;color:var(--gold);font-size:1.3rem;line-height:1}
 .fly-card-dot{width:18px;height:18px;border-radius:50%;border:1px solid rgba(255,255,255,.3);flex-shrink:0}
 @keyframes fly{from{transform:translate(0,0) scale(var(--s0));opacity:1}to{transform:translate(var(--dx),var(--dy)) scale(var(--s1));opacity:.5}}
 
@@ -401,18 +401,18 @@ const css = baseCss + `
 @keyframes think-blink{0%,100%{opacity:.25;transform:scale(.7)}50%{opacity:1;transform:scale(1.2)}}
 
 /* ─── Toast ─────────────────────────────────────────────────────────────── */
-.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--surface);border:1px solid var(--gold);padding:10px 20px;border-radius:var(--radius);font-family:'Cinzel',serif;font-size:.8rem;color:var(--gold);z-index:999;pointer-events:none;animation:fadeup .3s ease;white-space:nowrap}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--surface);border:1px solid var(--gold);padding:10px 20px;border-radius:var(--radius);font-family:'Cinzel','Cinzel Fallback',serif;font-size:.8rem;color:var(--gold);z-index:999;pointer-events:none;animation:fadeup .3s ease;white-space:nowrap}
 @keyframes fadeup{from{opacity:0;transform:translateX(-50%) translateY(10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
 
 /* ─── Discard modal ─────────────────────────────────────────────────────── */
 .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.8);display:flex;align-items:center;justify-content:center;z-index:100}
 .modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px;max-width:400px;width:90%}
-.modal h3{font-family:'Cinzel',serif;color:var(--gold);margin-bottom:8px}
+.modal h3{font-family:'Cinzel','Cinzel Fallback',serif;color:var(--gold);margin-bottom:8px}
 .modal p{color:var(--text-dim);font-size:.9rem;margin-bottom:16px}
 .discard-gems{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-bottom:16px}
-.discard-btn{padding:8px 16px;border-radius:var(--radius);border:1px solid var(--border);background:var(--surface2);color:var(--text);cursor:pointer;font-family:'Cinzel',serif;font-size:.82rem;transition:all .12s;display:flex;align-items:center;gap:6px}
+.discard-btn{padding:8px 16px;border-radius:var(--radius);border:1px solid var(--border);background:var(--surface2);color:var(--text);cursor:pointer;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;transition:all .12s;display:flex;align-items:center;gap:6px}
 .discard-btn:hover{border-color:var(--gold);color:var(--gold)}
-.discard-count{text-align:center;font-family:'Cinzel',serif;color:var(--text-dim);font-size:.85rem}
+.discard-count{text-align:center;font-family:'Cinzel','Cinzel Fallback',serif;color:var(--text-dim);font-size:.85rem}
 
 /* ─── Error/status ──────────────────────────────────────────────────────── */
 .error-msg{font-size:.88rem;color:var(--red-gem);text-align:center;padding:6px 0}
@@ -423,7 +423,7 @@ const css = baseCss + `
 /* ─── Game nav bar ──────────────────────────────────────────────────────── */
 .game-nav{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;padding-top:calc(env(safe-area-inset-top,0px) + 8px);border-bottom:1px solid var(--border);background:var(--surface);position:fixed;top:0;left:0;right:0;z-index:50}
 .game-nav-spacer{height:calc(env(safe-area-inset-top,0px) + 48px);flex-shrink:0}
-.game-nav-title{font-family:'Cinzel',serif;font-size:.72rem;letter-spacing:.16em;color:var(--gold);text-transform:uppercase}
+.game-nav-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;letter-spacing:.16em;color:var(--gold);text-transform:uppercase}
 
 /* ── Desktop (wide) game layout ──────────────────────────────────────────────
    game-main becomes a 2-column grid: a big-card board on the left and the gem

@@ -309,7 +309,14 @@ function Pips({ n }) {
 
 // ─── Styles ───────────────────────────────────────────────────────────────-
 const css = `
-@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Crimson+Pro:ital,wght@0,300;0,400;1,300&display=optional');
+/* Self-hosted fonts (CoC is mounted bare without baseCss, so it carries its own copy;
+   the browser dedupes identical @font-face by src url). Metric-matched fallbacks keep
+   the layout stable if the real font isn't loaded yet. */
+@font-face{font-family:'Cinzel';font-style:normal;font-weight:400 700;font-display:optional;src:url(/fonts/cinzel.latin.woff2) format('woff2')}
+@font-face{font-family:'Crimson Pro';font-style:normal;font-weight:300 400;font-display:optional;src:url(/fonts/crimsonpro.latin.woff2) format('woff2')}
+@font-face{font-family:'Crimson Pro';font-style:italic;font-weight:300 400;font-display:optional;src:url(/fonts/crimsonpro-italic.latin.woff2) format('woff2')}
+@font-face{font-family:'Cinzel Fallback';src:local('Georgia');size-adjust:111.8%}
+@font-face{font-family:'Crimson Fallback';src:local('Georgia');size-adjust:87.9%}
 /* CoC is mounted bare (the shell early-returns it without Spender's baseCss), so
    reset the body here too — otherwise the browser-default body margin shows an
    unstyled (white) frame around the dark .coc page. */
@@ -317,13 +324,13 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc *,.coc *::before,.coc *::after{box-sizing:border-box;margin:0;padding:0}
 .coc{--bg:#120c0d;--surface:#1d1416;--surface2:#281a1d;--border:#3e2a2e;--crimson:#a3263a;--crimson-l:#c8455a;
   --gold:#c9a84c;--gold-l:#e8c96a;--text:#ecdfd6;--text-dim:#9c8780;--radius:8px;--radius-lg:14px;
-  font-family:'Crimson Pro',Georgia,serif;color:var(--text);background:var(--bg);min-height:100vh}
+  font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;color:var(--text);background:var(--bg);min-height:100vh}
 .coc-wrap{max-width:1100px;margin:0 auto;padding:calc(env(safe-area-inset-top,0px) + 18px) 16px 48px}
 .coc-top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:18px;padding-bottom:12px;border-bottom:1px solid var(--border)}
 .coc-top-left{display:flex;align-items:center;gap:12px;min-width:0}
-.coc-title{font-family:'Cinzel',serif;font-size:1.5rem;font-weight:700;color:var(--crimson-l);letter-spacing:.03em;white-space:nowrap}
-.coc-user{font-family:'Cinzel',serif;font-size:.78rem;color:var(--text-dim);letter-spacing:.05em}
-.coc-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:9px 16px;border-radius:var(--radius);border:none;cursor:pointer;font-family:'Cinzel',serif;font-size:.82rem;letter-spacing:.05em;font-weight:600;transition:all .15s;white-space:nowrap}
+.coc-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.5rem;font-weight:700;color:var(--crimson-l);letter-spacing:.03em;white-space:nowrap}
+.coc-user{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.78rem;color:var(--text-dim);letter-spacing:.05em}
+.coc-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:9px 16px;border-radius:var(--radius);border:none;cursor:pointer;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;letter-spacing:.05em;font-weight:600;transition:all .15s;white-space:nowrap}
 .coc-btn:disabled{opacity:.35;cursor:not-allowed}
 .coc-btn.gold{background:var(--gold);color:#120c0d}.coc-btn.gold:hover:not(:disabled){background:var(--gold-l)}
 .coc-btn.crimson{background:var(--crimson);color:#fff}.coc-btn.crimson:hover:not(:disabled){background:var(--crimson-l)}
@@ -332,38 +339,38 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-btn.outline{background:transparent;color:var(--gold);border:1px solid var(--gold)}.coc-btn.outline:hover:not(:disabled){background:var(--gold);color:#120c0d}
 .coc-btn.sm{padding:6px 11px;font-size:.74rem}
 .coc-hero{text-align:center;margin:24px 0 30px}
-.coc-hero h1{font-family:'Cinzel',serif;font-size:2.4rem;color:var(--crimson-l);letter-spacing:.04em}
+.coc-hero h1{font-family:'Cinzel','Cinzel Fallback',serif;font-size:2.4rem;color:var(--crimson-l);letter-spacing:.04em}
 .coc-hero p{color:var(--text-dim);font-style:italic;margin-top:6px}
 .coc-lobby-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:24px}
 .coc-vsbot{display:inline-flex;align-items:center;gap:6px;padding:3px 8px 3px 10px;border:1px solid var(--border);border-radius:var(--radius)}
-.coc-vsbot-lbl{font-family:'Cinzel',serif;font-size:.62rem;letter-spacing:.1em;color:var(--text-dim);text-transform:uppercase}
+.coc-vsbot-lbl{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:.1em;color:var(--text-dim);text-transform:uppercase}
 .coc-join{display:flex;gap:8px}
-.coc-input{padding:9px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'Cinzel',serif;letter-spacing:.12em;outline:none;width:130px;text-transform:uppercase}
+.coc-input{padding:9px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'Cinzel','Cinzel Fallback',serif;letter-spacing:.12em;outline:none;width:130px;text-transform:uppercase}
 .coc-input:focus{border-color:var(--gold)}
-.coc-section-title{font-family:'Cinzel',serif;font-size:.68rem;letter-spacing:.18em;color:var(--gold);text-transform:uppercase;margin:18px 0 8px;border-bottom:1px solid var(--border);padding-bottom:6px}
+.coc-section-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;letter-spacing:.18em;color:var(--gold);text-transform:uppercase;margin:18px 0 8px;border-bottom:1px solid var(--border);padding-bottom:6px}
 .coc-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px 14px;display:flex;align-items:center;gap:12px;margin-bottom:8px}
 .coc-card-info{flex:1;min-width:0}
-.coc-card-title{font-family:'Cinzel',serif;font-size:.85rem}
+.coc-card-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.85rem}
 .coc-card-meta{font-size:.78rem;color:var(--text-dim)}
 .coc-empty{text-align:center;padding:28px 16px;color:var(--text-dim);font-style:italic;font-size:.9rem;background:var(--surface2);border-radius:var(--radius);border:1px dashed var(--border)}
 .coc-section-hd{display:flex;justify-content:space-between;align-items:center;margin:18px 0 10px;padding-bottom:8px;border-bottom:1px solid var(--border)}
 .coc-section-hd .coc-section-title{margin:0;border:none;padding:0}
 .coc-muted{font-size:.74rem;color:var(--text-dim)}
 .coc-card-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
-.coc-turn-badge{background:var(--gold);color:#120c0d;padding:3px 10px;border-radius:12px;font-family:'Cinzel',serif;font-size:.62rem;letter-spacing:.12em;font-weight:700;text-transform:uppercase;white-space:nowrap}
-.coc-their-badge{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border);padding:3px 10px;border-radius:12px;font-family:'Cinzel',serif;font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;white-space:nowrap}
+.coc-turn-badge{background:var(--gold);color:#120c0d;padding:3px 10px;border-radius:12px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:.12em;font-weight:700;text-transform:uppercase;white-space:nowrap}
+.coc-their-badge{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border);padding:3px 10px;border-radius:12px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;white-space:nowrap}
 .coc-spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--gold);border-radius:50%;animation:coc-spin .7s linear infinite;vertical-align:middle;margin-right:6px}
 @keyframes coc-spin{to{transform:rotate(360deg)}}
 .coc-waiting{max-width:420px;margin:60px auto;text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px}
-.coc-code{font-family:'Cinzel',serif;font-size:2rem;letter-spacing:.3em;color:var(--gold);background:var(--surface2);border:1px dashed var(--border);border-radius:var(--radius);padding:12px;margin:14px 0;cursor:pointer}
+.coc-code{font-family:'Cinzel','Cinzel Fallback',serif;font-size:2rem;letter-spacing:.3em;color:var(--gold);background:var(--surface2);border:1px dashed var(--border);border-radius:var(--radius);padding:12px;margin:14px 0;cursor:pointer}
 /* game */
 .coc-game{display:grid;grid-template-columns:1fr;gap:16px}
 .coc-statusbar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:10px 14px}
 .coc-status-left{display:flex;align-items:center;gap:14px;flex-wrap:wrap;min-width:0}
-.coc-pill{font-family:'Cinzel',serif;font-size:.72rem;letter-spacing:.06em;color:var(--text-dim)}
+.coc-pill{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;letter-spacing:.06em;color:var(--text-dim)}
 .coc-pill b{color:var(--text)}
 .coc-vp{display:flex;gap:14px;justify-self:center}
-.coc-vp .v{font-family:'Cinzel',serif;font-size:.8rem}
+.coc-vp .v{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.8rem}
 .coc-vp .v b{color:var(--gold);font-size:1.05rem}
 /* Abandon / View Opponent + the opponent's dice, at the right end of the status bar. */
 .coc-status-right{display:flex;align-items:center;gap:10px;justify-self:end;flex-wrap:wrap;justify-content:flex-end}
@@ -371,11 +378,11 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-oppdie{width:26px;height:26px;border-radius:5px;background:#f3ead8;display:inline-flex;align-items:center;justify-content:center;box-shadow:inset 0 0 0 1px rgba(0,0,0,.3),0 1px 2px rgba(0,0,0,.5)}
 .coc-oppdie.used{opacity:.4}
 /* Workers / silver resources — a bit larger than the plain pills. */
-.coc-res{font-family:'Cinzel',serif;font-size:.92rem;letter-spacing:.04em;color:var(--text-dim);display:inline-flex;align-items:center;gap:5px}
+.coc-res{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.92rem;letter-spacing:.04em;color:var(--text-dim);display:inline-flex;align-items:center;gap:5px}
 .coc-res b{color:var(--text)}
 .coc-res-ic{font-size:1.15rem;line-height:1}
 .coc-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px}
-.coc-panel h3{font-family:'Cinzel',serif;font-size:.68rem;letter-spacing:.16em;color:var(--gold);text-transform:uppercase;margin-bottom:10px}
+.coc-panel h3{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;letter-spacing:.16em;color:var(--gold);text-transform:uppercase;margin-bottom:10px}
 .coc-depots{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
 .coc-depot{border:1px solid var(--border);border-radius:var(--radius);padding:6px;min-height:78px;background:var(--surface2)}
 .coc-depot.match{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset}
@@ -386,16 +393,16 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-board-hex .coc-depot{position:absolute;width:31%;min-height:96px;padding:6px;transform:translate(-50%,-50%);display:flex;flex-direction:column;justify-content:center}
 /* central black depot: a dark box holding the kite of tiles (positioned absolutely) */
 .coc-black-center{left:50%;top:50%;box-sizing:border-box;padding:0!important;border:1px solid var(--gold)!important;background:#0c0809!important;border-radius:8px;min-height:0!important;z-index:1}
-.coc-blacklbl{font-family:'Cinzel',serif;font-size:.62rem;letter-spacing:.08em;color:var(--gold);text-transform:uppercase}
+.coc-blacklbl{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:.08em;color:var(--gold);text-transform:uppercase}
 /* turn-order track — boxed, sat at the board's upper-left (left of depot 1) */
 .coc-track-block{position:absolute;left:-15%;top:4%;z-index:3;max-width:360px;background:var(--surface2);border:1px solid var(--gold);border-radius:8px;padding:7px 9px;box-shadow:0 2px 8px rgba(0,0,0,.45)}
 .coc-track{display:flex;flex-direction:column;align-items:flex-start;gap:3px;margin:0}
-.coc-track-lbl{font-family:'Cinzel',serif;font-size:.62rem;letter-spacing:.1em;color:var(--text-dim);text-transform:uppercase;white-space:nowrap}
+.coc-track-lbl{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:.1em;color:var(--text-dim);text-transform:uppercase;white-space:nowrap}
 .coc-track-spaces{display:flex;gap:3px;align-items:stretch}
 .coc-track-space{position:relative;width:42px;min-height:58px;border:1px solid var(--border);border-radius:5px;background:var(--surface);display:flex;flex-direction:column;justify-content:flex-end;gap:2px;padding:19px 3px 5px}
-.coc-track-snum{position:absolute;top:3px;left:0;right:0;text-align:center;font-family:'Cinzel',serif;font-size:.64rem;color:var(--text-dim)}
+.coc-track-snum{position:absolute;top:3px;left:0;right:0;text-align:center;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.64rem;color:var(--text-dim)}
 .coc-track-stack{display:flex;flex-direction:column;gap:6px}
-.coc-track-token{border-radius:3px;font-family:'Cinzel',serif;font-size:.56rem;font-weight:700;text-align:center;padding:2px 1px;line-height:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.coc-track-token{border-radius:3px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.56rem;font-weight:700;text-align:center;padding:2px 1px;line-height:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .coc-track-token.start{box-shadow:0 0 0 2px #fff}
 .coc-track-cap{display:block;margin:3px 0 0;font-size:.58rem;color:var(--text-dim);font-style:italic}
 
@@ -408,7 +415,7 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-duchy-board .coc-hexsvg{max-width:100%;margin:0}
 @media (max-width:760px){.coc-duchy-layout{flex-direction:column}.coc-duchy-board{width:100%}}
 .coc-depot-n{display:flex;justify-content:center;margin-bottom:5px}
-.coc-minidie{position:absolute;transform:translate(-50%,-50%);z-index:3;pointer-events:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;background:#f3ead8;color:#15100a;font-family:'Cinzel',serif;font-weight:700;font-size:.82rem;border-radius:5px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.3),0 1px 3px rgba(0,0,0,.55)}
+.coc-minidie{position:absolute;transform:translate(-50%,-50%);z-index:3;pointer-events:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;background:#f3ead8;color:#15100a;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:.82rem;border-radius:5px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.3),0 1px 3px rgba(0,0,0,.55)}
 /* Phone: the hexagonal depot ring + absolutely-positioned turn-order track overflow
    on narrow screens (fixed 70px hex tiles can't fit a 31%-wide depot box). Reflow the
    shared board into a stack — turn order on top, the 6 numbered depots in a 2-col grid,
@@ -438,9 +445,9 @@ html,body{margin:0;padding:0;background:#120c0d}
 }
 .coc-tilewrap{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
 .coc-animals{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:1px;line-height:0}
-.coc-glyph{font-family:'Cinzel',serif;font-weight:700;color:#15100a;line-height:1}
+.coc-glyph{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;color:#15100a;line-height:1}
 .coc-fo{width:100%;height:100%;display:flex;align-items:center;justify-content:center}
-.coc-tile{width:70px;height:81px;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.05rem;font-family:'Cinzel',serif;color:#15100a;font-weight:700;transition:transform .1s;line-height:1;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%)}
+.coc-tile{width:70px;height:81px;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.05rem;font-family:'Cinzel','Cinzel Fallback',serif;color:#15100a;font-weight:700;transition:transform .1s;line-height:1;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%)}
 .coc-tile:hover{transform:scale(1.1)}
 .coc-tile.goods{width:34px;height:34px;border-radius:4px;clip-path:none;color:#fff;font-size:.82rem;text-shadow:0 1px 2px rgba(0,0,0,.7)}
 /* Ghost: a taken tile leaves a colored hex OUTLINE (its type color) so the fixed
@@ -450,9 +457,9 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-tile-ghost:hover{transform:none}
 .coc-tile-ghost::after{content:"";position:absolute;inset:3px;background:var(--surface2);clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%)}
 .coc-whitedie{display:flex;align-items:center;gap:6px;margin-left:auto}
-.coc-whitedie .lbl{font-family:'Cinzel',serif;font-size:.66rem;letter-spacing:.06em;color:var(--text-dim);text-transform:uppercase}
+.coc-whitedie .lbl{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.66rem;letter-spacing:.06em;color:var(--text-dim);text-transform:uppercase}
 .coc-dicebar{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
-.coc-die{width:46px;height:46px;border-radius:8px;background:#f3ead8;color:#1a1010;font-family:'Cinzel',serif;font-weight:700;font-size:1.3rem;display:flex;align-items:center;justify-content:center;cursor:pointer;border:2px solid transparent;position:relative}
+.coc-die{width:46px;height:46px;border-radius:8px;background:#f3ead8;color:#1a1010;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:1.3rem;display:flex;align-items:center;justify-content:center;cursor:pointer;border:2px solid transparent;position:relative}
 .coc-die.sel{border-color:var(--gold);box-shadow:0 0 8px rgba(201,168,76,.6)}
 .coc-die.used{opacity:.35;cursor:not-allowed}
 .coc-die.white{background:#fff;cursor:default}
@@ -473,7 +480,7 @@ html,body{margin:0;padding:0;background:#120c0d}
    inert to clicks; excludes goods squares, ghost placeholders, and empty slots. */
 .coc-tile:not(.goods):not(.coc-tile-ghost)::after,.coc-stt:not(.empty)::after{content:"";position:absolute;inset:0;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);background:linear-gradient(150deg,rgba(255,255,255,.62) 0%,rgba(255,255,255,.16) 16%,rgba(255,255,255,0) 34%,rgba(0,0,0,.06) 56%,rgba(0,0,0,.32) 84%,rgba(0,0,0,.6) 100%);pointer-events:none}
 .coc-storage{display:flex;gap:6px;flex-wrap:wrap}
-.coc-stt{width:70px;height:81px;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.05rem;font-family:'Cinzel',serif;font-weight:700;color:#15100a;transition:transform .1s}
+.coc-stt{width:70px;height:81px;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.05rem;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;color:#15100a;transition:transform .1s}
 .coc-stt:hover{transform:scale(1.08)}
 .coc-stt.empty{cursor:default}
 .coc-stt.sel{filter:drop-shadow(0 0 3px var(--gold)) drop-shadow(0 0 2px var(--gold))}
@@ -487,15 +494,15 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-hex.legal:hover{opacity:.8}
 .coc-modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px}
 .coc-modal{background:var(--surface);border:1px solid var(--gold);border-radius:var(--radius-lg);padding:20px;max-width:440px;width:100%}
-.coc-modal h3{font-family:'Cinzel',serif;color:var(--gold);font-size:1rem;margin-bottom:6px}
+.coc-modal h3{font-family:'Cinzel','Cinzel Fallback',serif;color:var(--gold);font-size:1rem;margin-bottom:6px}
 .coc-modal p{color:var(--text-dim);font-size:.88rem;margin-bottom:14px}
 .coc-modal-row{display:flex;flex-wrap:wrap;gap:8px}
-.coc-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--crimson);color:#fff;padding:10px 18px;border-radius:var(--radius);font-family:'Cinzel',serif;font-size:.82rem;z-index:60;box-shadow:0 6px 20px rgba(0,0,0,.5);max-width:min(92vw,460px);text-align:center;line-height:1.35}
+.coc-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--crimson);color:#fff;padding:10px 18px;border-radius:var(--radius);font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;z-index:60;box-shadow:0 6px 20px rgba(0,0,0,.5);max-width:min(92vw,460px);text-align:center;line-height:1.35}
 .coc-winner{max-width:460px;margin:50px auto;text-align:center;background:var(--surface);border:1px solid var(--gold);border-radius:var(--radius-lg);padding:30px}
-.coc-winner h2{font-family:'Cinzel',serif;font-size:2rem;color:var(--gold)}
+.coc-winner h2{font-family:'Cinzel','Cinzel Fallback',serif;font-size:2rem;color:var(--gold)}
 .coc-log{max-height:150px;overflow:auto;font-size:.78rem;color:var(--text-dim)}
 .coc-log div{padding:2px 0;border-bottom:1px solid rgba(62,42,46,.4)}
-.coc-turnbadge{font-family:'Cinzel',serif;font-size:.74rem;padding:4px 10px;border-radius:12px;letter-spacing:.05em}
+.coc-turnbadge{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.74rem;padding:4px 10px;border-radius:12px;letter-spacing:.05em}
 .coc-turnbadge.you{background:var(--gold);color:#120c0d}
 .coc-turnbadge.them{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border)}
 .coc-board-pick{margin:4px 0 8px}
@@ -505,7 +512,7 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-bthumb:hover{transform:translateY(-2px)}
 .coc-bthumb.sel{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold)}
 .coc-bthumb-svg{width:72px;height:66px;display:block}
-.coc-bthumb-name{font-size:.6rem;color:var(--text-dim);text-align:center;line-height:1.05;font-family:'Cinzel',serif}
+.coc-bthumb-name{font-size:.6rem;color:var(--text-dim);text-align:center;line-height:1.05;font-family:'Cinzel','Cinzel Fallback',serif}
 .coc-bthumb.sel .coc-bthumb-name{color:var(--gold)}
 `;
 

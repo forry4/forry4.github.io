@@ -5,7 +5,17 @@
 //   <style>{baseCss + myScreenCss}</style>
 // The @import must stay first in the stylesheet, so baseCss always leads.
 export const baseCss = `
-@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Crimson+Pro:ital,wght@0,300;0,400;1,300&display=optional');
+/* Self-hosted fonts (latin-subset variable woff2 in webapp/public/fonts/) — no external
+   dependency, preloaded in index.html. font-display:optional + the load-gate (Spender.jsx)
+   keep the real font from swapping in after first paint. */
+@font-face{font-family:'Cinzel';font-style:normal;font-weight:400 700;font-display:optional;src:url(/fonts/cinzel.latin.woff2) format('woff2')}
+@font-face{font-family:'Crimson Pro';font-style:normal;font-weight:300 400;font-display:optional;src:url(/fonts/crimsonpro.latin.woff2) format('woff2')}
+@font-face{font-family:'Crimson Pro';font-style:italic;font-weight:300 400;font-display:optional;src:url(/fonts/crimsonpro-italic.latin.woff2) format('woff2')}
+/* Metric-matched fallbacks: Georgia scaled by the MEASURED width ratios (Cinzel is
+   1.118x Georgia, Crimson Pro 0.879x) so an unloaded web font occupies the same space —
+   no reflow even if the font is slow/absent. Referenced in the font stacks below. */
+@font-face{font-family:'Cinzel Fallback';src:local('Georgia');size-adjust:111.8%}
+@font-face{font-family:'Crimson Fallback';src:local('Georgia');size-adjust:87.9%}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
   --bg:#0f0e0c;--surface:#1a1814;--surface2:#242018;--surface3:#2c2820;--border:#3a342a;
@@ -14,13 +24,13 @@ export const baseCss = `
   --radius:8px;--radius-lg:14px;
 }
 html,body{height:100%}
-body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,serif;min-height:100vh;
+body{background:var(--bg);color:var(--text);font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;min-height:100vh;
   padding-bottom:env(safe-area-inset-bottom,0px);
   padding-left:env(safe-area-inset-left,0px);padding-right:env(safe-area-inset-right,0px)}
 /* screens without a sticky nav bar own the top safe area themselves */
 .auth-screen,.browser{padding-top:calc(env(safe-area-inset-top,0px) + 32px)}
 .app{min-height:100vh;display:flex;flex-direction:column}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 20px;border-radius:var(--radius);border:none;cursor:pointer;font-family:'Cinzel',serif;font-size:.88rem;letter-spacing:.06em;font-weight:600;transition:all .15s;white-space:nowrap}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 20px;border-radius:var(--radius);border:none;cursor:pointer;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.88rem;letter-spacing:.06em;font-weight:600;transition:all .15s;white-space:nowrap}
 .btn-gold{background:var(--gold);color:#0f0e0c}.btn-gold:hover{background:var(--gold-light)}
 .btn-outline{background:transparent;color:var(--gold);border:1px solid var(--gold)}.btn-outline:hover{background:var(--gold);color:#0f0e0c}
 .btn-ghost{background:transparent;color:var(--text-dim);border:1px solid var(--border)}.btn-ghost:hover{border-color:var(--text-dim);color:var(--text)}
@@ -28,6 +38,6 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro',Georgia,se
 .btn:disabled{opacity:.35;cursor:not-allowed}
 .btn-full{width:100%}
 .btn-sm{padding:7px 14px;font-size:.78rem}
-.input{width:100%;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'Cinzel',serif;font-size:1rem;letter-spacing:.1em;outline:none}
+.input{width:100%;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'Cinzel','Cinzel Fallback',serif;font-size:1rem;letter-spacing:.1em;outline:none}
 .input:focus{border-color:var(--gold)}
 `;

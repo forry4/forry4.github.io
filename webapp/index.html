@@ -10,16 +10,14 @@
     <link rel="icon" type="image/svg+xml" href="%BASE_URL%favicon.svg" />
     <link rel="icon" type="image/png" sizes="32x32" href="%BASE_URL%favicon-32.png" />
     <link rel="apple-touch-icon" href="%BASE_URL%apple-touch-icon.png" />
-    <!-- Load the site fonts in <head> (NOT only via the JS-injected @import in baseCss) so
-         they're ready at first paint. **display=optional** (not swap) is what kills the
-         reload reflow: 'swap' always paints fallback then swaps to Cinzel/Crimson (wider,
-         letter-spaced) — the "tighter then snaps wider" shift — even when cached. 'optional'
-         gives the font a tiny window: on reload (cached) it's applied at first paint with NO
-         swap; on a cold first visit it stays on the fallback for that load (still no shift)
-         and caches for next time. The inline dark bg avoids a white flash before the JS CSS. -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Crimson+Pro:ital,wght@0,300;0,400;1,300&display=optional" />
+    <!-- Preload the self-hosted fonts (same-origin, in webapp/public/fonts/) so they're
+         ready at first paint and the app's font-load gate resolves instantly — no external
+         Google Fonts round-trip. @font-face lives in baseCss (display:optional); metric-
+         matched Georgia fallbacks (in baseCss) keep layout stable if a font isn't ready.
+         crossorigin is required even same-origin (fonts fetch in CORS mode). The inline
+         dark bg avoids a white flash before the JS CSS loads. -->
+    <link rel="preload" as="font" type="font/woff2" href="%BASE_URL%fonts/cinzel.latin.woff2" crossorigin />
+    <link rel="preload" as="font" type="font/woff2" href="%BASE_URL%fonts/crimsonpro.latin.woff2" crossorigin />
     <style>html,body{margin:0;background:#0f0e0c}</style>
     <title>Forrest Games</title>
   </head>
