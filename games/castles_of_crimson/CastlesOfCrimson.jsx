@@ -330,6 +330,14 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-top-left{display:flex;align-items:center;gap:12px;min-width:0}
 .coc-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.5rem;font-weight:700;color:var(--crimson-l);letter-spacing:.03em;white-space:nowrap}
 .coc-user{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.78rem;color:var(--text-dim);letter-spacing:.05em}
+/* Lobby banner: full-width (flush to screen edges — lives OUTSIDE the centered .coc-wrap),
+   back button far left, game name centered (left/right flex:1 so it's truly centered),
+   user far right. */
+.coc-top.coc-top-lobby{margin-bottom:0;padding:12px 20px;padding-top:calc(env(safe-area-inset-top,0px) + 12px);background:var(--surface);border-bottom:1px solid var(--border)}
+.coc-top-lobby .coc-top-left{flex:1 1 0;justify-content:flex-start}
+.coc-top-lobby .coc-title{flex:0 0 auto;text-align:center}
+.coc-top-lobby .coc-user{flex:1 1 0;text-align:right}
+.coc-top-lobby + .coc-wrap{padding-top:18px}
 .coc-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:9px 16px;border-radius:var(--radius);border:none;cursor:pointer;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;letter-spacing:.05em;font-weight:600;transition:all .15s;white-space:nowrap}
 .coc-btn:disabled{opacity:.35;cursor:not-allowed}
 .coc-btn.gold{background:var(--gold);color:#120c0d}.coc-btn.gold:hover:not(:disabled){background:var(--gold-l)}
@@ -851,14 +859,14 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   if (screen === "lobby") {
     return (
       <div className="coc"><style>{css}</style>
-        <div className="coc-wrap">
-          <div className="coc-top coc-top-lobby">
-            <div className="coc-top-left">
-              <button className="coc-btn ghost sm" onClick={onExit}>← Forrest Games</button>
-              <span className="coc-title">Castles of Crimson</span>
-            </div>
-            <span className="coc-user">{playerName}</span>
+        <div className="coc-top coc-top-lobby">
+          <div className="coc-top-left">
+            <button className="coc-btn ghost sm" onClick={onExit}>← Forrest Games</button>
           </div>
+          <span className="coc-title">Castles of Crimson</span>
+          <span className="coc-user">{playerName}</span>
+        </div>
+        <div className="coc-wrap">
           <div className="coc-hero">
             <h1>Castles of Crimson</h1>
             <p>Build your duchy of crimson estates.</p>
