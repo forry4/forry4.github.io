@@ -168,6 +168,16 @@ const css = baseCss + `
 .lobby-grid>.open-section{grid-column:1;grid-row:1}
 .lobby-grid>.active-section{grid-column:2;grid-row:1}
 .lobby-grid>.history-section{grid-column:3;grid-row:1}
+/* Each column's card list behaves like the in-game move log: capped to the viewport
+   and scrolls INTERNALLY instead of growing the page (the long History list otherwise
+   made the page very tall). Desktop 3-col only — tablet/phone stack and scroll the
+   page normally. scrollbar-gutter:stable reserves the scrollbar's space so a column
+   doesn't shift when its list starts/stops scrolling. */
+@media(min-width:1281px){
+  .lobby-grid .game-cards{max-height:calc(100vh - 230px);overflow-y:auto;scrollbar-gutter:stable}
+  .lobby-grid .game-cards::-webkit-scrollbar{width:6px}
+  .lobby-grid .game-cards::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+}
 @media(max-width:1280px){
   .lobby-grid{grid-template-columns:1fr 1fr}
   .lobby-grid>.open-section{grid-column:1;grid-row:1}
