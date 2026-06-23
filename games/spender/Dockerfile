@@ -12,7 +12,10 @@ RUN pip wheel --wheel-dir=/build/wheels -r /build/requirements.txt
 # Compile the Cython hot-path module (valuation3, pure-Python mode) into a typed C extension.
 # Done here (the builder has gcc); only the resulting .so is carried into the slim runtime image.
 # The SAME valuation3.py runs as plain Python where this .so is absent (single source of truth).
-RUN pip install --no-cache-dir cython
+# Cython is PINNED: the C-array fast paths rely on version-specific pure-mode codegen behavior
+# (e.g. cython.int[5][90] -> C int[90][5] dim reversal), validated on 3.2.5; an unpinned bump could
+# change codegen and (caught by the build GATE below) block the deploy. Bump deliberately + re-gate.
+RUN pip install --no-cache-dir cython==3.2.5
 COPY games/spender/ai/az/valuation3.py /build/cy/valuation3.py
 RUN cythonize -i -3 /build/cy/valuation3.py
 

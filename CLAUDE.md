@@ -1319,7 +1319,43 @@ website variant **"S"**.
     rewrite of a 1,000-line cached class — AND (b) Cythonizing `mcts.py`/`engine.py`, because **~15–25% of
     per-sim time (determinize / `_select` / `clone` / `legal_actions`) lives OUTSIDE `valuation3`** — a hard
     ceiling on any leaf-only effort. Judged poor effort/risk/reward vs the 2.3× already banked + diminishing
-    sim-returns; **stopped at the leaf.**
+    sim-returns; **stopped at the leaf.** **(SUPERSEDED IN PART — see Perf round 4: the deeper typed-C-array
+    rewrite of the `engine_value` CHAIN (short of the full cclass) WAS done on branch `cython-perf`,
+    byte-identical, ~1.85–2.74×. The `@cython.cclass` Valuation + mcts/engine port is still deferred.)**
+- **Perf round 4 — typed-C-array rewrite of the `engine_value` chain (branch `cython-perf`, NOT merged; June 2026).**
+  Round 3's pure-mode annotations only typed loop COUNTERS — the DATA (`s.bonuses[seat]`, `E.COST[ci]`) stayed
+  PyObject lists/tuples, so a naive recompile of the deeper chain was **~1.0× (measured 13.1 vs 12.7 s/game)**.
+  The win needs the data in **C arrays** + collapsing the per-card scoring so it crosses the Python boundary ONCE
+  per call instead of thousands of times. Done in the SAME single-source pure-mode `.py` (composes with round 3):
+  - **Module-level C tables** `COST_C[90][5]`/`BONUS_C[90]`/`PTS_C[90]` filled at import inside `if cython.compiled`
+    (gotcha: Cython REVERSES array dims — `cython.int[5][90]` emits C `int[90][5]`; declaring it un-flipped is a
+    silent OOB write). **cdef helpers** `_steps_c`/`_reduces_tempo_c`/`_cost_scalar_c`/`_color_deficits_c`/`_eng_base_c`
+    (`int*`/`double` C signatures, no PyObject) carry the leaf math.
+  - **`_engine_value_h3_c`** inlines the WHOLE H3 `engine_value`
+    (delta_take→potential→eng_base→w_card→reduces_tempo→cost_scalar) in C over C arrays with **NO sub-call caches** —
+    recompute is byte-identical because every memoized helper is a deterministic pure function. Also converted: the
+    `components` cost vector (`tempo`/`gem_cost`/`gold_cost`), the per-Valuation `deck_color_demand` `__init__` loop,
+    and `noble_progress` (`_noble_progress_c`).
+  - **Every C path is gated `cython.compiled and ci < 90`** so the unchanged Python path still serves the
+    synthetic-card unit tests (which append cards past the 90-deck) and any non-deployed flag config; nobles read the
+    **LIVE `E.NOBLE_REQ`** (tests replace it) not a frozen table; tuning constants are read **LIVE per call** (NOT
+    frozen into C globals) so the offline autotuners can still sweep them.
+  - **GOTCHA — a genexpr in the same function scope as a `cython.declare(C-array)` breaks Cython codegen**
+    (`GeneratorExpressionScope` error): the C-path functions are genexpr-free (pure fallbacks rewritten without
+    `sum(... for ...)`); int/int closeness divisions forced to double via `1.0 *`.
+  - **Results — byte-identical (60-game S self-play differential parity char-identical + 32 unit tests, compiled AND
+    pure):** engine_value alone **1.49×**, +cost vector **1.85×**, +init/noble **2.74×** (cumulative). The ratio is
+    LOAD-dependent (the local box's 11-core tuning job fluctuated): the **compiled path is contention-STABLE at
+    ~2.66 s/game** while pure swings 4.9–7.3 — so ~1.85× on an idle box, ~2.74× on a busy one, and compiled is far
+    more robust to a loaded CPU (the Render shared-core scenario).
+  - **Built + validated LOCALLY** (the dev box now has MSVC + cython 3.2.5; Python 3.14 →
+    `valuation3.cp314-win_amd64.pyd`) AND in a **`python:3.11` Docker build** matching prod (cython==3.2.5 manylinux
+    wheel, cythonize under cp311+gcc → `COST_C[90][5]` identical, the line-39 gate `32 passed` on the cp311 `.so`).
+    **No Dockerfile change beyond pinning** `cython==3.2.5` (the builder already `cythonize`s `valuation3.py` + gates
+    on `test_h3_valuation`/`test_vsearch`, so this ships automatically). To fold into `heuristics`/main the
+    engine_value chain is unchanged between branches, so it applies cleanly. **Still deferred:** the `@cython.cclass`
+    Valuation + Cythonizing `mcts.py`/`engine.py` (the ~15–25% per-sim time OUTSIDE valuation3 — the hard ceiling
+    on any leaf-only effort).
 - **Tooling** (offline, parallel): `vsearch_camp.py` (panel A/B, CRN, Wilson CIs), `vsearch_autotune.py`
   (coordinate descent, **MAXIMIN objective over {H3,H2,H2N,H2R}** — maximize the WORST matchup, mean only as a
   tie-break (`MEAN_EPS`), with larger screen/holdout N since the min is a noisier statistic. Switched FROM

@@ -38,8 +38,56 @@ from . import engine as E
 # modes (the Docker build runs them against the compiled module) gate that play is byte-identical.
 try:
     import cython
-except ImportError:   # Cython absent: annotations stay inert; pure-Python path runs unchanged
-    cython = None
+except ImportError:   # Cython absent: provide a shim so the pure-Python path runs with zero dep.
+    # The compiled-only fast paths reference cython.declare / cython.int[5] / the @cython.cfunc/locals/
+    # returns decorators (evaluated at import on the cdef helpers). None of the C code RUNS in pure
+    # mode (every fast path is gated on `cython.compiled`, which is False here), but the decorator
+    # expressions must still resolve at import -- so the shim makes the type names subscriptable
+    # no-ops and the decorators identity.
+    class _CyType:
+        def __getitem__(self, n):
+            return self
+        def __call__(self, *a, **k):
+            return None
+    class _CyShim:
+        compiled = False
+        int = _CyType(); double = _CyType(); bint = _CyType()
+        p_int = _CyType(); p_double = _CyType(); Py_ssize_t = _CyType(); void = _CyType()
+        def declare(self, *a, **k):
+            return a[1] if len(a) > 1 else None
+        def cast(self, t, v, **k):
+            return v
+        def cfunc(self, f):
+            return f
+        def inline(self, f):
+            return f
+        def returns(self, *a, **k):
+            return (lambda f: f)
+        def locals(self, **k):
+            return (lambda f: f)
+    cython = _CyShim()
+
+# ─── Static card tables as C arrays (compiled only) ──────────────────────────────────────────
+# When Cython compiles this module, the hot leaf functions read card cost/bonus/points out of these
+# fixed C int arrays instead of the Python tuples E.COST/E.BONUS/E.PTS -- a direct C[ci][c] index, no
+# PyObject. Populated once at import from E.* (the SAME data, so values are identical). 2-player
+# Splendor is a fixed 90-card deck; the size is locked to that (asserted below).
+# NOTE the dim reversal: `cython.int[5][90]` declares C `int[90][5]` (Cython lists dims inner-first),
+# so COST_C[ci][c] is the intended (card, color) access. Under CPython the whole block is skipped.
+_N_CARDS_C = 90
+if cython.compiled:
+    assert len(E.COST) == _N_CARDS_C, "COST_C size locked to the 90-card deck; engine deck changed"
+    COST_C = cython.declare(cython.int[5][90])    # -> C int[90][5]; COST_C[card][color]
+    BONUS_C = cython.declare(cython.int[90])      # bonus color 0-4 per card
+    PTS_C = cython.declare(cython.int[90])        # points per card
+    _ci0 = cython.declare(cython.int)
+    _cc0 = cython.declare(cython.int)
+    for _ci0 in range(90):
+        _row0 = E.COST[_ci0]
+        for _cc0 in range(5):
+            COST_C[_ci0][_cc0] = _row0[_cc0]
+        BONUS_C[_ci0] = E.BONUS[_ci0]
+        PTS_C[_ci0] = E.PTS[_ci0]
 
 # ─── turns_remaining estimator (typical-game length table; see h3_measure_turns.py) ──────────
 # turns_table.json maps (cards_owned, points, gems_held) -> average FUTURE main turns in a typical
@@ -329,9 +377,23 @@ def effective_cost(s: E.State, ci: int, seat: int) -> list[int]:
 
 def total_effective_cost(s: E.State, ci: int, seat: int) -> int:
     """Sum of the post-discount gem cost (ignores tokens already held)."""
-    cost = E.COST[ci]
     bon = s.bonuses[seat]
-    return sum(c - b for c, b in zip(cost, bon) if c > b)
+    if cython.compiled and ci < _N_CARDS_C:
+        tot = cython.declare(cython.int, 0)
+        c = cython.declare(cython.int)
+        diff = cython.declare(cython.int)
+        for c in range(5):
+            diff = COST_C[ci][c] - bon[c]
+            if diff > 0:
+                tot += diff
+        return tot
+    cost = E.COST[ci]
+    tot = 0
+    for c in range(5):           # genexpr-free (kept-compiled branch can't sit beside a C-array local)
+        diff = cost[c] - bon[c]
+        if diff > 0:
+            tot += diff
+    return tot
 
 
 def cost_concentration(s: E.State, ci: int, seat: int) -> int:
@@ -601,6 +663,18 @@ def tempo(s: E.State, ci: int, seat: int) -> int:
     """Turns to collect ci at 1 gem/color/turn: the steepest single-color REMAINING
     need, +1 if the remaining cost is exactly 1-1-1-1 (four distinct colors need a
     take-3 plus a take-1 = 2 turns, which the bare steepest of 1 would miss)."""
+    if cython.compiled and ci < _N_CARDS_C:
+        bon_l = s.bonuses[seat]
+        tok_l = s.tokens[seat]
+        bon = cython.declare(cython.int[5])
+        tok = cython.declare(cython.int[5])
+        d = cython.declare(cython.int[5])
+        k = cython.declare(cython.int)
+        for k in range(5):
+            bon[k] = bon_l[k]
+            tok[k] = tok_l[k]
+        _color_deficits_c(ci, bon, tok, d)
+        return _steps_c(d)
     return _steps(_color_deficits(s, ci, seat))
 
 
@@ -616,6 +690,31 @@ def gold_cost(s: E.State, ci: int, seat: int) -> int:
     drained it); the rest is paid in gold. Floored at 0 -- a cheap, easily-collected bottleneck
     contributes no gold cost (never a negative credit, which used to make a spread card score
     cheaper than a smaller concentrated one). 0 when nothing colored is still needed."""
+    if cython.compiled and ci < _N_CARDS_C:
+        bon_l = s.bonuses[seat]
+        tok_l = s.tokens[seat]
+        bon = cython.declare(cython.int[5])
+        tok = cython.declare(cython.int[5])
+        d = cython.declare(cython.int[5])
+        k = cython.declare(cython.int)
+        for k in range(5):
+            bon[k] = bon_l[k]
+            tok[k] = tok_l[k]
+        _color_deficits_c(ci, bon, tok, d)
+        steepest = cython.declare(cython.int, 0)
+        color = cython.declare(cython.int, 0)
+        c = cython.declare(cython.int)
+        for c in range(5):
+            if d[c] > steepest:    # strict > -> first max index, matching max(range(5), key=...)
+                steepest = d[c]
+                color = c
+        if steepest <= 0:
+            return 0
+        capped = cython.declare(cython.int, s.bank[color])
+        if GOLD_BANK_CAP < capped:
+            capped = GOLD_BANK_CAP
+        gold = cython.declare(cython.int, steepest - capped)
+        return gold if gold > 0 else 0
     d = _color_deficits(s, ci, seat)
     steepest = max(d)
     if steepest <= 0:
@@ -651,6 +750,138 @@ def _reduces_tempo(costj, bon, bcol: int) -> float:
     return 1.0 if _steps(rem) < before else 0.0
 
 
+# ─── Compiled cdef leaf helpers (C-pointer args; called ONLY from the C engine_value path) ───────
+# These are true C functions when Cython compiles the module (`int*`/`double` signatures, no PyObject)
+# and ordinary Python functions otherwise -- but they are never CALLED in pure mode (the only caller,
+# _engine_value_h3_c, is gated on `cython.compiled`). They read the static COST_C/PTS_C C tables.
+# Each reproduces its Python twin (_steps / _reduces_tempo / _cost_scalar) operation-for-operation so
+# the float results are byte-identical. Genexpr-free by necessity (a genexpr beside a C-array local
+# breaks Cython codegen).
+
+@cython.cfunc
+@cython.returns(cython.void)
+@cython.locals(ci=cython.int, bon=cython.p_int, tok=cython.p_int, d=cython.p_int,
+               c=cython.int, need=cython.int)
+def _color_deficits_c(ci, bon, tok, d):
+    """C twin of _color_deficits: fills d[0:5] with max(0, COST_C[ci][c] - bon[c] - tok[c])."""
+    for c in range(5):
+        need = COST_C[ci][c] - bon[c] - tok[c]
+        d[c] = need if need > 0 else 0
+
+
+@cython.cfunc
+@cython.returns(cython.int)
+@cython.locals(d=cython.p_int, st=cython.int, npos=cython.int, i=cython.int, x=cython.int)
+def _steps_c(d):
+    """C twin of _steps: steepest of d[0:5], bumped to 2 iff max==1 and exactly four entries > 0."""
+    st = d[0]
+    npos = 0
+    for i in range(1, 5):
+        x = d[i]
+        if x > st:
+            st = x
+    if st == 1:
+        for i in range(5):
+            if d[i] > 0:
+                npos += 1
+        if npos == 4:
+            return 2
+    return st
+
+
+@cython.cfunc
+@cython.returns(cython.double)
+@cython.locals(ci=cython.int, bon=cython.p_int, col=cython.int, rem=cython.int[5],
+               c=cython.int, v=cython.int, before=cython.int, after=cython.int)
+def _reduces_tempo_c(ci, bon, col):
+    """C twin of _reduces_tempo (ENG_WEIGHT_MODE path): 1.0 if a +1 `col` bonus lowers card ci's
+    steepest remaining need, else 0.0. Reads COST_C[ci]; `bon` is the seat's bonus C array."""
+    for c in range(5):
+        v = COST_C[ci][c] - bon[c]
+        rem[c] = v if v > 0 else 0
+    before = _steps_c(rem)
+    rem[col] = rem[col] - 1
+    after = _steps_c(rem)
+    return 1.0 if after < before else 0.0
+
+
+@cython.cfunc
+@cython.returns(cython.double)
+@cython.locals(ci=cython.int, bon=cython.p_int, tok=cython.p_int, bank=cython.p_int, eb=cython.int,
+               wt=cython.double, wg=cython.double, wgo=cython.double, cap=cython.int,
+               gem=cython.int, steepest=cython.int, color=cython.int, nonzero=cython.int,
+               ones=cython.int, c=cython.int, bc=cython.int, sticker=cython.int, need=cython.int,
+               tempo=cython.int, gold=cython.int, capped=cython.int)
+def _cost_scalar_c(ci, bon, tok, bank, eb, wt, wg, wgo, cap):
+    """C twin of Valuation._cost_scalar: W_TEMPO*tempo + W_GEM*gem + W_GOLD*gold for card ci, optionally
+    with one extra bonus in color `eb` (-1 = none). Reads COST_C[ci]; bon/tok/bank are seat C arrays."""
+    gem = 0
+    steepest = 0
+    color = 0
+    nonzero = 0
+    ones = 0
+    for c in range(5):
+        bc = bon[c] + (1 if c == eb else 0)
+        sticker = COST_C[ci][c] - bc
+        if sticker > 0:
+            gem += sticker
+        need = sticker - tok[c]
+        if need > 0:
+            nonzero += 1
+            if need == 1:
+                ones += 1
+            if need > steepest:
+                steepest = need
+                color = c
+    if steepest <= 0:
+        tempo = 0
+        gold = 0
+    else:
+        tempo = steepest + (1 if (nonzero == 4 and ones == 4) else 0)
+        capped = bank[color]
+        if cap < capped:
+            capped = cap
+        gold = steepest - capped
+        if gold < 0:
+            gold = 0
+    return wt * tempo + wg * gem + wgo * gold
+
+
+@cython.cfunc
+@cython.returns(cython.double)
+@cython.locals(cj=cython.int, board=cython.p_int, res=cython.p_int, nres=cython.int, bon=cython.p_int,
+               dcd=cython.p_double, eng_div=cython.double, eng_floor=cython.double,
+               tempo_scale=cython.double, deck_w=cython.double, res_w=cython.double,
+               bcol2=cython.int, bon_b2=cython.int, ev=cython.double, k=cython.int, ck=cython.int,
+               ri=cython.int, imp=cython.double, w=cython.double)
+def _eng_base_c(cj, board, res, nres, bon, dcd, eng_div, eng_floor, tempo_scale, deck_w, res_w):
+    """C twin of _engine_value_legacy(cj, recurse=False) -- card cj's LEVEL-0 engine value for the seat
+    whose bonus / board[12] / reserved[nres] are in the passed C arrays: the sum over every OTHER board
+    + reserved card still needing cj's bonus color of imp * w_card (reserved at the res_w premium), plus
+    the deck-demand term. Factored out so the board-cj and reserved-cj passes of the monolith share it."""
+    bcol2 = BONUS_C[cj]
+    bon_b2 = bon[bcol2]
+    ev = 0.0
+    for k in range(12):
+        ck = board[k]
+        if ck < 0 or ck == cj:
+            continue
+        if COST_C[ck][bcol2] - bon_b2 > 0:
+            imp = PTS_C[ck] / eng_div + eng_floor
+            w = tempo_scale * (1.0 + _reduces_tempo_c(ck, bon, bcol2))
+            ev += imp * w
+    for ri in range(nres):
+        ck = res[ri]
+        if ck == cj:
+            continue
+        if COST_C[ck][bcol2] - bon_b2 > 0:
+            imp = PTS_C[ck] / eng_div + eng_floor
+            w = tempo_scale * (1.0 + _reduces_tempo_c(ck, bon, bcol2))
+            ev += res_w * imp * w
+    ev += dcd[bcol2] * deck_w
+    return ev
+
+
 RESERVED_ENGINE_W = 1.05   # a reserved card counts this much vs one board card in
                            # engine_value (committed target -> slight premium, not a pile)
 
@@ -669,7 +900,7 @@ class Valuation:
                  "w_tempo", "w_gem", "w_gold", "_take0_cache", "_pot_cache", "_fp_cache",
                  "_turns_cache", "_build_fp", "_dt_cache", "_comp_cache",
                  "_noble_terms_cache", "_noble_comp_cache", "_rtempo_cache",
-                 "_tempo_cache", "_cost_cache")
+                 "_tempo_cache", "_cost_cache", "_cards_real_cache")
 
     def __init__(self, s: E.State, w_tempo: float = 0.5, w_gem: float = 0.2,
                  w_gold: float = 0.4):
@@ -701,20 +932,49 @@ class Valuation:
         self._rtempo_cache = {}       # (cj, bcol, seat) -> _reduces_tempo (engine-loop hotspot dedupe)
         self._tempo_cache = {}        # (ci, seat) -> tempo (recomputed per card across noble/cost paths)
         self._cost_cache = {}         # (ci, seat, extra_bcol) -> _cost_scalar (take_value cost)
+        self._cards_real_cache = {}   # seat -> all board+reserved cards < 90 (gates the C engine_value)
         self._fp_cache = {}   # seat -> {card_id: converged engine value} (ENG_FIXEDPOINT path)
         self._turns_cache = None   # estimated game turns_remaining (state-level, cached)
         # Permanent-bonus future value: share of remaining (undealt) deck cost
         # that is each color. A bonus in a deck-heavy color keeps paying off on
         # cards not yet revealed, not just the 12 on the board.
-        demand = [0, 0, 0, 0, 0]
-        total = 0
-        for lvl in range(3):
-            for ci in s.decks[lvl]:
-                cost = E.COST[ci]
-                for i in range(5):
-                    demand[i] += cost[i]
-                    total += cost[i]
-        self.deck_color_demand = [d / total for d in demand] if total else [0.0] * 5
+        if cython.compiled:
+            # C accumulation over all undealt deck cards (the big per-Valuation inner loop). Deck cards
+            # are always real (< 90); a stray synthetic card falls back to E.COST per-card for safety.
+            demand_c = cython.declare(cython.int[5])
+            total_c = cython.declare(cython.int, 0)
+            i = cython.declare(cython.int)
+            ci_c = cython.declare(cython.int)
+            for i in range(5):
+                demand_c[i] = 0
+            for lvl in range(3):
+                for ci in s.decks[lvl]:
+                    ci_c = ci
+                    if ci_c < _N_CARDS_C:
+                        for i in range(5):
+                            demand_c[i] += COST_C[ci_c][i]
+                            total_c += COST_C[ci_c][i]
+                    else:
+                        cost = E.COST[ci]
+                        for i in range(5):
+                            demand_c[i] += cost[i]
+                            total_c += cost[i]
+            if total_c:
+                self.deck_color_demand = [1.0 * demand_c[0] / total_c, 1.0 * demand_c[1] / total_c,
+                                          1.0 * demand_c[2] / total_c, 1.0 * demand_c[3] / total_c,
+                                          1.0 * demand_c[4] / total_c]
+            else:
+                self.deck_color_demand = [0.0] * 5
+        else:
+            demand = [0, 0, 0, 0, 0]
+            total = 0
+            for lvl in range(3):
+                for ci in s.decks[lvl]:
+                    cost = E.COST[ci]
+                    for i in range(5):
+                        demand[i] += cost[i]
+                        total += cost[i]
+            self.deck_color_demand = [d / total for d in demand] if total else [0.0] * 5
 
     def estimated_turns_remaining(self) -> float:
         """Estimated FUTURE main turns left in the game (the engine-compounding horizon), read from
@@ -779,6 +1039,12 @@ class Valuation:
             v = fp.get(ci)
             ev = v if v is not None else self._engine_one_pass(ci, seat, fp)
         else:
+            # Compiled fast path: the WHOLE H3 chain in C (one boundary crossing, no sub-call caches),
+            # only for the deployed flag config and real (non-synthetic-test) cards. Byte-identical.
+            if (cython.compiled and ci < _N_CARDS_C
+                    and ENG_RECURSE_W == 0 and POT_REACH_W == 0 and BUILD_FLOOR_W == 0
+                    and ENG_WEIGHT_MODE == 1 and self._cards_real(seat)):
+                return self._engine_value_h3_c(ci, seat)
             s = self.s
             bcol = E.BONUS[ci]
             bon_b = s.bonuses[seat][bcol]
@@ -795,6 +1061,105 @@ class Valuation:
                 if E.COST[cj][bcol] - bon_b > 0:
                     ev += RESERVED_ENGINE_W * self._delta_take(cj, seat, bcol)
             ev += self.deck_color_demand[bcol] * ENG_DECK_W
+        return ev
+
+    def _cards_real(self, seat: int) -> bool:
+        """True iff every card on the board and in `seat`'s reserve is a real deck card (< 90) -- i.e.
+        none is a synthetic card a test appended past the deck. Gates the C engine_value (whose static
+        COST_C/PTS_C/BONUS_C tables only cover the 90-card deck). Cached per seat (board/reserve are
+        fixed for this Valuation). Production always returns True (the deck is exactly 90 cards)."""
+        v = self._cards_real_cache.get(seat)
+        if v is None:
+            s = self.s
+            v = all(c < _N_CARDS_C for c in s.board) and all(c < _N_CARDS_C for c in s.reserved[seat])
+            self._cards_real_cache[seat] = v
+        return v
+
+    def _engine_value_h3_c(self, ci, seat):
+        """Compiled C twin of engine_value's H3 path for the deployed flag config (USE_POTENTIAL_ENGINE,
+        no fixedpoint, ENG_RECURSE_W=POT_REACH_W=BUILD_FLOOR_W=0, ENG_WEIGHT_MODE=1). Inlines the entire
+        delta_take -> potential -> eng_base(legacy) -> w_card -> reduces_tempo chain in C over C arrays,
+        with NO per-sub-call Python frames and NO caches -- recomputing is byte-identical because every
+        memoized helper is a deterministic pure function of (state, args). Reproduces the Python float
+        operation order exactly. Only invoked when compiled and `_cards_real(seat)` (so all card indices
+        are < 90); see the guard in engine_value. Never executed under CPython."""
+        s = self.s
+        bon_l = s.bonuses[seat]
+        tok_l = s.tokens[seat]
+        bank_l = s.bank
+        board_l = s.board
+        res_l = s.reserved[seat]
+        dcd_l = self.deck_color_demand
+        bon = cython.declare(cython.int[5])
+        tok = cython.declare(cython.int[5])
+        bank = cython.declare(cython.int[5])
+        board = cython.declare(cython.int[12])
+        res = cython.declare(cython.int[3])
+        dcd = cython.declare(cython.double[5])
+        k = cython.declare(cython.int)
+        for k in range(5):
+            bon[k] = bon_l[k]
+            tok[k] = tok_l[k]
+            bank[k] = bank_l[k]
+            dcd[k] = dcd_l[k]
+        for k in range(12):
+            board[k] = board_l[k]
+        nres = cython.declare(cython.int, cython.cast(cython.int, len(res_l)))   # reserved <= 3
+        for k in range(nres):
+            res[k] = res_l[k]
+        # constants read once into C scalars
+        eng_div = cython.declare(cython.double, ENG_DIV)
+        eng_floor = cython.declare(cython.double, ENG_FLOOR)
+        pot_w = cython.declare(cython.double, POT_ENGINE_W)
+        tempo_scale = cython.declare(cython.double, ENG_TEMPO_SCALE)
+        deck_w = cython.declare(cython.double, ENG_DECK_W)
+        res_w = cython.declare(cython.double, RESERVED_ENGINE_W)
+        cap = cython.declare(cython.int, GOLD_BANK_CAP)
+        wt = cython.declare(cython.double, self.w_tempo)
+        wg = cython.declare(cython.double, self.w_gem)
+        wgo = cython.declare(cython.double, self.w_gold)
+        cic = cython.declare(cython.int, ci)
+        bcol = cython.declare(cython.int, BONUS_C[cic])
+        bon_b = cython.declare(cython.int, bon[bcol])
+        ev = cython.declare(cython.double, 0.0)
+        slot = cython.declare(cython.int)
+        cj = cython.declare(cython.int)
+        ri = cython.declare(cython.int)
+        c0 = cython.declare(cython.double)
+        c1 = cython.declare(cython.double)
+        gap = cython.declare(cython.double)
+        eb_val = cython.declare(cython.double)
+        pot = cython.declare(cython.double)
+        delta = cython.declare(cython.double)
+        # board cards: each qualifying cj contributes delta_take(cj) = potential(cj) * gap
+        for slot in range(12):
+            cj = board[slot]
+            if cj < 0 or cj == cic:
+                continue
+            if COST_C[cj][bcol] - bon_b > 0:
+                c0 = _cost_scalar_c(cj, bon, tok, bank, -1, wt, wg, wgo, cap)
+                c1 = _cost_scalar_c(cj, bon, tok, bank, bcol, wt, wg, wgo, cap)
+                gap = 1.0 / (1.0 + c1) - 1.0 / (1.0 + c0)
+                eb_val = _eng_base_c(cj, board, res, nres, bon, dcd,
+                                     eng_div, eng_floor, tempo_scale, deck_w, res_w)
+                pot = PTS_C[cj] + pot_w * eb_val
+                delta = pot * gap
+                ev += delta
+        # reserved cards: committed targets at the slight RESERVED_ENGINE_W premium
+        for ri in range(nres):
+            cj = res[ri]
+            if cj == cic:
+                continue
+            if COST_C[cj][bcol] - bon_b > 0:
+                c0 = _cost_scalar_c(cj, bon, tok, bank, -1, wt, wg, wgo, cap)
+                c1 = _cost_scalar_c(cj, bon, tok, bank, bcol, wt, wg, wgo, cap)
+                gap = 1.0 / (1.0 + c1) - 1.0 / (1.0 + c0)
+                eb_val = _eng_base_c(cj, board, res, nres, bon, dcd,
+                                     eng_div, eng_floor, tempo_scale, deck_w, res_w)
+                pot = PTS_C[cj] + pot_w * eb_val
+                delta = pot * gap
+                ev += res_w * delta
+        ev += dcd[bcol] * deck_w
         return ev
 
     def _engine_value_legacy(self, ci: int, seat: int, _recurse: bool = True) -> float:
@@ -870,61 +1235,66 @@ class Valuation:
         as if `seat` held one EXTRA bonus in `extra_bcol`. Mirrors tempo()/gem_cost()/gold_cost()
         so the H3 engine measures a discount in the exact currency take_value charges.
 
-        The #1 leaf hotspot. Cython-typed (pure mode): the per-color loop compiles to C; under CPython
-        the annotations are inert and it runs as ordinary Python. Byte-identical either way."""
+        Compiled, this delegates to the _cost_scalar_c cdef helper (the SAME C routine engine_value's
+        monolith uses); under CPython it runs the inline Python fallback -- byte-identical either way.
+        No longer the deployed hot path (engine_value computes its costs in C directly), but still used
+        by _delta_take / take0 and the unit tests."""
         ck = (ci, seat, extra_bcol)            # pure in these args within a fixed state
         cached = self._cost_cache.get(ck)
         if cached is not None:
             return cached
         s = self.s
-        cost: tuple = E.COST[ci]
-        bon: list = s.bonuses[seat]
-        tok: list = s.tokens[seat]
-        bank: list = s.bank
+        bon = s.bonuses[seat]
+        tok = s.tokens[seat]
+        bank = s.bank
+        eb = -1 if extra_bcol is None else extra_bcol
         # gem = sum of post-bonus sticker; the steepest post-token remaining need sets tempo (+1 iff the
         # remainder is exactly 1-1-1-1, i.e. four needs all == 1); gold is the bottleneck color's need
         # beyond GOLD_BANK_CAP of the bank. Ties for `color` go to the lowest index.
-        eb: cython.int = -1 if extra_bcol is None else extra_bcol
-        gem: cython.int = 0
-        steepest: cython.int = 0
-        color: cython.int = 0
-        nonzero: cython.int = 0
-        ones: cython.int = 0
-        c: cython.int
-        bc: cython.int
-        sticker: cython.int
-        need: cython.int
-        tempo: cython.int
-        gold: cython.int
-        capped: cython.int
-        for c in range(5):
-            bc = bon[c] + (1 if c == eb else 0)
-            sticker = cost[c] - bc
-            if sticker > 0:
-                gem += sticker
-            need = sticker - tok[c]
-            if need > 0:
-                nonzero += 1
-                if need == 1:
-                    ones += 1
-                if need > steepest:
-                    steepest = need
-                    color = c
-        if steepest <= 0:
-            tempo = 0
-            gold = 0
+        if cython.compiled and ci < _N_CARDS_C:
+            # C-array fast path: reuse the _cost_scalar_c cdef helper (the SAME code the engine_value
+            # monolith calls) so the method and the monolith can never drift. ci < 90 guard: tests
+            # append synthetic cards past the real deck (>= 90) that are not in COST_C, so those fall
+            # through to the Python branch (kept compiled because the condition is runtime, not the
+            # constant-folded `cython.compiled` alone).
+            bon_c = cython.declare(cython.int[5])
+            tok_c = cython.declare(cython.int[5])
+            bank_c = cython.declare(cython.int[5])
+            k = cython.declare(cython.int)
+            for k in range(5):
+                bon_c[k] = bon[k]
+                tok_c[k] = tok[k]
+                bank_c[k] = bank[k]
+            r = cython.declare(cython.double,
+                               _cost_scalar_c(ci, bon_c, tok_c, bank_c, eb,
+                                              self.w_tempo, self.w_gem, self.w_gold, GOLD_BANK_CAP))
         else:
-            tempo = steepest + (1 if (nonzero == 4 and ones == 4) else 0)
-            capped = bank[color]
-            if GOLD_BANK_CAP < capped:
-                capped = GOLD_BANK_CAP
-            gold = steepest - capped
-            if gold < 0:
-                gold = 0
-        wt: cython.double = self.w_tempo
-        wg: cython.double = self.w_gem
-        wgo: cython.double = self.w_gold
-        r: cython.double = wt * tempo + wg * gem + wgo * gold
+            cost = E.COST[ci]
+            gem = steepest = color = nonzero = ones = 0
+            for c in range(5):
+                bc = bon[c] + (1 if c == eb else 0)
+                sticker = cost[c] - bc
+                if sticker > 0:
+                    gem += sticker
+                need = sticker - tok[c]
+                if need > 0:
+                    nonzero += 1
+                    if need == 1:
+                        ones += 1
+                    if need > steepest:
+                        steepest = need
+                        color = c
+            if steepest <= 0:
+                tempo = gold = 0
+            else:
+                tempo = steepest + (1 if (nonzero == 4 and ones == 4) else 0)
+                capped = bank[color]
+                if GOLD_BANK_CAP < capped:
+                    capped = GOLD_BANK_CAP
+                gold = steepest - capped
+                if gold < 0:
+                    gold = 0
+            r = self.w_tempo * tempo + self.w_gem * gem + self.w_gold * gold
         self._cost_cache[ck] = r
         return r
 
@@ -1167,6 +1537,8 @@ class Valuation:
         A far/late noble fades toward 0 -- a smooth fade (turns_remaining is an estimate), no cliff."""
         if not NOBLE_TIME_GATE:
             return noble_progress(self.s, ci, seat)
+        if cython.compiled and ci < _N_CARDS_C:
+            return self._noble_progress_c(ci, seat)
         bcol = E.BONUS[ci]
         key = (bcol, seat)
         terms = self._noble_terms_cache.get(key)
@@ -1182,6 +1554,88 @@ class Valuation:
         score = 0.0
         for base, deficit in pairs:                 # only the per-card time-gate combine stays live
             score += base * (eff / (eff + NOBLE_TURN_W * deficit))
+        return score / n
+
+    def _noble_progress_c(self, ci, seat):
+        """Compiled C twin of the NOBLE_TIME_GATE noble_progress: inlines _noble_terms + the time-gate
+        combine + tempo in C, reading the LIVE E.NOBLE_REQ per visible noble (tests replace that table,
+        so it is never frozen into a C table). No _noble_terms cache (recompute is byte-identical). Calls
+        estimated_turns_remaining() only when n > 0 -- matching the Python short-circuit -- so its
+        freshness assert fires exactly as before. Only invoked compiled with ci < 90; never under CPython."""
+        s = self.s
+        cic = cython.declare(cython.int, ci)
+        bcol = cython.declare(cython.int, BONUS_C[cic])
+        bon_l = s.bonuses[seat]
+        bon = cython.declare(cython.int[5])
+        req = cython.declare(cython.int[5])
+        bases = cython.declare(cython.double[3])
+        deficits = cython.declare(cython.int[3])
+        k = cython.declare(cython.int)
+        for k in range(5):
+            bon[k] = bon_l[k]
+        bon_b = cython.declare(cython.int, bon[bcol])
+        close_floor = cython.declare(cython.double, NOBLE_CLOSE_FLOOR)
+        nobles_l = s.nobles
+        n = cython.declare(cython.int, 0)
+        npair = cython.declare(cython.int, 0)
+        slot = cython.declare(cython.int)
+        ni = cython.declare(cython.int)
+        c = cython.declare(cython.int)
+        bc = cython.declare(cython.int)
+        total = cython.declare(cython.int)
+        deficit = cython.declare(cython.int)
+        completes = cython.declare(cython.int)
+        close = cython.declare(cython.double)
+        base = cython.declare(cython.double)
+        for slot in range(3):
+            ni = nobles_l[slot]
+            if ni < 0:
+                continue
+            req_l = E.NOBLE_REQ[ni]            # LIVE (tests replace this table) -> copy into C
+            for k in range(5):
+                req[k] = req_l[k]
+            completes = 1
+            for c in range(5):
+                bc = bon[c] + (1 if c == bcol else 0)
+                if bc < req[c]:
+                    completes = 0
+                    break
+            if completes:                      # this buy completes the noble -> scored elsewhere
+                continue
+            n += 1
+            if req[bcol] > bon_b:              # the card's color still advances this noble
+                total = 0
+                for c in range(5):
+                    total += req[c]
+                if total == 0:
+                    continue
+                deficit = 0
+                for c in range(5):
+                    if req[c] > bon[c]:
+                        deficit += req[c] - bon[c]
+                close = 1.0 - 1.0 * deficit / total
+                base = close_floor + (1.0 - close_floor) * close
+                bases[npair] = base
+                deficits[npair] = deficit
+                npair += 1
+        if n == 0:
+            return 0.0
+        # eff = turns left after acquiring this card (= turns_remaining - tempo(ci)); tempo inlined
+        etr = cython.declare(cython.double, self.estimated_turns_remaining())
+        tok_l = s.tokens[seat]
+        tok = cython.declare(cython.int[5])
+        d = cython.declare(cython.int[5])
+        for k in range(5):
+            tok[k] = tok_l[k]
+        _color_deficits_c(cic, bon, tok, d)
+        eff = cython.declare(cython.double, etr - _steps_c(d))
+        if eff < 0.0:
+            eff = 0.0
+        nturn_w = cython.declare(cython.double, NOBLE_TURN_W)
+        score = cython.declare(cython.double, 0.0)
+        j = cython.declare(cython.int)
+        for j in range(npair):
+            score += bases[j] * (eff / (eff + nturn_w * deficits[j]))
         return score / n
 
     def _noble_terms(self, bcol: int, seat: int):

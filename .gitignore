@@ -40,6 +40,10 @@ games/spender/ai/az/leaf_model.npz
 games/spender/ai/az/valuation3.c
 games/spender/ai/az/*.so
 games/spender/ai/az/*.pyd
+# MSVC byproducts of a local in-place `cythonize -i` build (dev box now has a compiler)
+games/spender/ai/az/*.obj
+games/spender/ai/az/*.exp
+games/spender/ai/az/*.lib
 
 # Cython/setuptools build temp dir
 build/
