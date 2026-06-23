@@ -588,8 +588,10 @@ def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]
             try:
                 if room["ai_variant"] == "H2":
                     state["ai_card_values"] = _h2_card_values(game, game["ai_player"])
-                elif room["ai_variant"] in ("H3", "S"):   # S shares H3's per-card components overlay
+                elif room["ai_variant"] == "H3":
                     state["ai_card_values"] = _h3_card_values(game, game["ai_player"])
+                elif room["ai_variant"] == "S":
+                    state["ai_card_values"] = _s_card_values(game, game["ai_player"])
                 else:
                     state["ai_card_values"] = _v4_card_values(game, game["ai_player"])
             except Exception:
@@ -951,6 +953,34 @@ def _h3_card_values(game: dict, ai_pid: str) -> dict:
         take, engine, point, cost = _azh3.components(val, ci, seat)
         return {"t": round(take, 2), "e": round(engine, 2), "p": round(point, 2),
                 "c": round(cost, 1), "pot": round(val.potential_value(ci, seat), 1)}
+
+    out: dict[str, dict] = {}
+    for slot in range(12):
+        ci = s.board[slot]
+        if ci >= 0:
+            out[_aze.CARD_NAME[ci]] = rec(ci)
+    for ci in s.reserved[seat]:
+        out[_aze.CARD_NAME[ci]] = rec(ci)
+    return out
+
+
+def _s_card_values(game: dict, ai_pid: str) -> dict:
+    """Variant-S transparency overlay: H3's four take components {t,e,p,c} per visible board
+    card + the AI's reserved cards. No potential term. Keyed by card id."""
+    from games.spender.ai.az import engine as _aze
+    from games.spender.ai.az import valuation3 as _azv3
+    from games.spender.ai.az import heuristic3 as _azh3
+
+    try:
+        seat = game["order"].index(ai_pid)
+    except (KeyError, ValueError):
+        return {}
+    s = _aze.from_game_dict(game)
+    val = _azv3.Valuation(s, _azh3.W_TEMPO, _azh3.W_GEM, _azh3.W_GOLD)
+
+    def rec(ci: int) -> dict:
+        take, engine, point, cost = _azh3.components(val, ci, seat)
+        return {"t": round(take, 2), "e": round(engine, 2), "p": round(point, 2), "c": round(cost, 1), "_s": 1}
 
     out: dict[str, dict] = {}
     for slot in range(12):

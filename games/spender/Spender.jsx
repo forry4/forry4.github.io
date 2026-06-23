@@ -662,7 +662,9 @@ function CardView({ card, selected, affordable, needsGold, disabled, onClick, ai
 				))}
 			</div>
 			{aiValue != null && (typeof aiValue === "object" ? (
-				<div className="ai-vals" title={aiValue.pot != null
+				<div className="ai-vals" title={aiValue._s
+					? "S — take / engine / point / cost"
+					: aiValue.pot != null
 					? "H3 — take / engine / point / cost"
 					: "H2 — take / engine / point / cost"}>
 					<span><b>T</b>{aiValue.t}</span>

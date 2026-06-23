@@ -1165,7 +1165,7 @@ the `(1+cost)` denominator (that's time-blind). Likely a NARROW win at best — 
 unfinishable card's engine contribution, so only the points leak remains. A/B it behind a `POINT_TIME_GATE` flag if
 revisited; expect it could be a wash (like the TURNS_FLOOR test was).
 
-**Baked config**: `W_TEMPO=0.1, W_GEM=0.3, W_GOLD=0.4, NOBLE_SCALE=5.0, NOBLE_CLOSE_FLOOR=0.3, POT_ENGINE_W=0.5,
+**Baked config**: `W_TEMPO=0.1, W_GEM=0.3, W_GOLD=0.4, NOBLE_SCALE=3.0, NOBLE_CLOSE_FLOOR=0.3, POT_ENGINE_W=0.5,
 W_ENGINE=0.15, NOBLE_TIME_GATE on / NOBLE_TURN_W=1.0, POT_REACH_W=0 (OFF), BUILD_FLOOR_W=0 (OFF)`. Strength: **~0.54
 vs H2, ~0.76 vs H** greedy (edges the old stage model; beats the external yardstick H by more than H2 does). To
 recover exact-H2 for A/B: `USE_POTENTIAL_ENGINE=False` + `W_GEM=0.2`.
@@ -1606,6 +1606,56 @@ website variant **"S"**.
   via fresh + panel); then run `NOBLE_MULTI_W`. The proven lever remains search DEPTH (sims throughput), not
   eval re-weighting (re-confirmed: every endgame/search re-weight washed at the prod operating point). Parked:
   "search owns DISCARD/NOBLE + a discard prior" (low gain).
+
+### Session (late June 2026) — metric directive, NOBLE_SCALE 3.5, Cython rewrite (ON MAIN), weakness audit
+
+**TUNING METRIC DIRECTIVE (user instruction — SUPERSEDES the MAXIMIN {H3,H2,H2N,H2R} panel described above).**
+Judge AI tuning ONLY by **S vs frozen-S** (the self-gate; primary), with **H3 / H3N / H3R** as a strong secondary
+sanity panel. **NEVER report or weight H2 / H2N / H2R again** — too weak; weighting them gave misleading verdicts
+(e.g. the lower-`NOBLE_SCALE` "wash" was an H2N artifact). H3N = `_AggrH3(2.0)` (noble-heavy), H3R = `_AggrH3(0.4)`
+(rusher), built fixed-base off the committed `NOBLE_SCALE` so they don't drift with the candidate;
+`config_selfgate.PANEL=["H3","H3N","H3R"]`. These opponents + the rejected-experiment flags below are currently
+**UNCOMMITTED on the `heuristics` worktree** (pending a selective finalize), not yet on main. Mirror in memory
+`spender-tuning-metric-s-selfgate`.
+
+**NOBLE_SCALE 5.0 -> 3.5 -> 3.0 — SHIPPED (3.5 on `15717fe`; 3.0 on current commit).** Lower-noble S-vs-frozen-S sweep (sims=400, N=350) was a
+wash on the self-gate (3.5 fresh 0.516; all values' CIs straddle 0.5); shipped on the user's call (faint-positive
+self-gate + H3 +0.025). Affects BOTH H3 and S. COUNTERINTUITIVE H3-panel trade: lower noble HELPS vs a noble-player
+(H3N +0.068) and HURTS vs a racer (H3R -0.050) — a racer leaves S's nobles UNCONTESTED, so nobles are an edge vs
+racers; the change is matchup-lopsided, not a clean gain. (Supersedes the "3.0->5.0" note above.)
+
+**Cython `engine_value` rewrite — ON MAIN (`f82cc79`, ~1.85-2.74x).** `valuation3.py`'s engine_value chain
+(`engine_value`/`_delta_take`/`_cost_scalar` + cost/deficit primitives) is typed-Cython on C int arrays (static
+`E.COST/BONUS/PTS` -> module C arrays; per-state bonuses/tokens extracted per call). **Single-source, runs three
+ways** (verified): pure Python with cython ABSENT (an `ImportError` shim no-ops the type/decorator constructs;
+C-array blocks gated on `cython.compiled`), pure Python with cython installed, and the compiled `.so`/`.pyd` (fast).
+The **Dockerfile multi-stage-compiles it** (builder `cythonize` -> `.so`; slim runtime carries only the `.so`; build
+FAILS on miscompile, so a bad compile can't reach prod) — so merging the `.py` is enough; prod builds its own Linux
+`.so`. Gated byte-identical by the exact-value tests + a differential-parity check. PyPy was tried + REJECTED (slower
++ not bit-parity — numpy in the search hot path goes via cpyext). To prototype eval ideas, hack the readable
+pre-Cython `valuation3.py` from git history, then re-Cythonize only the winner.
+
+**Rejected this session (DO NOT relitigate — all judged by S-vs-frozen-S; flags default-off / byte-identical,
+uncommitted on `heuristics`):** endgame tiebreak (`ENDGAME_TIEBREAK_W`) + deeper-final-round sims
+(`ENDGAME_SIM_MULT`) = noise; the sims=500 autotune's `H3_PICK_W`/`POLICY_TEMP` adopts = noise ratchet (0.480 fresh);
+multi-noble position term (`NOBLE_MULTI_W`) = inert; per-card overlap reward (`NOBLE_COUNT_W`) = behaviorally ==
+pure magnitude; supply-aware noble gate (`SUPPLY_PENALTY`) = cuts a late-buy "blunder" rate ~11% but washes
+win-rate. Re-confirms eval re-weighting is saturated UP **and** DOWN; the lever is search / eval-class, not weights.
+
+**Weakness audit (7 user wins vs S over 4 days, queried straight from the Turso prod DB).** S wins the large
+majority vs the user; the losses share ONE dominant cause — **S races too slow / inefficiently**: ~0.75 pts/card
+(avg 16 cards, ~12 of them 0-point, ~12 pts) vs the human's ~1.16 (efficient point-cards); the user reaches the win
+first in 6/7. Secondary: over-reserve (4/7 end with an unbought 3+pt L3) and a horizon-1 **endgame-denial blind
+spot** (1/7, game `IYGWJQ` — `_deny`/`_opp_best_buy` only catch a NEXT-TURN opponent win, missing a 2-turn
+reserve-then-buy threat). This cluster is **human-exploitable but tuning-resistant** — S beats the synthetic racers
+(81.5% vs H3R) *because* they don't punish it, which is why every weight experiment washed while the human keeps
+winning. **QUEUED fix:** a 2-turn endgame-denial horizon (extend `_opp_best_buy`/`_deny`/`_secure_win`; `IYGWJQ` is
+the regression test). The deeper "race efficiently" fix is the documented hard lever (search / net).
+
+**Querying the prod DB directly:** Turso creds (`TURSO_DATABASE_URL`/`TURSO_AUTH_TOKEN`, Render-only) live in a
+local gitignored file `C:\Users\Forrest\.spender_turso`; query via `curl` POST to `<https-host>/v2/pipeline` (the
+libSQL HTTP API) — no libsql Python wheel needed. Note `list_user_games` excludes `status='over'`, so finished
+games aren't listable via the API — query the DB directly for them.
 
 ### Hard-won conclusions — DO NOT relitigate
 These cost many self-play/training cycles to establish:
