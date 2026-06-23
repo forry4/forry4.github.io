@@ -56,9 +56,13 @@ W_SHORTFALL = 0.0  # cost: gems the bank CANNOT supply across ALL needed colors 
                    # ranking pivots to an attainable card. TESTED at 0.2: cuts stalls 14.9%->11.6%
                    # and leans +0.006 win rate (6/8 disjoint seeds positive) but below significance
                    # -- a marginal correctness fix, left OFF (0.0). Flip to ~0.2 to re-enable.
-NOBLE_SCALE = 5.0  # noble-progress contribution, scaled toward a noble's VP. Bumped 3.0->5.0:
-                   # +0.0073 avg(H2,H2R) on a 10-seed-base CRN confirm (won 7-8/10 seeds vs each
-                   # racer), neutral vs H. The static-eval ceiling -- nothing else moved the needle.
+NOBLE_SCALE = 3.5  # noble-progress contribution, scaled toward a noble's VP. Retuned 5.0->3.5
+                   # (June 2026): a lower-noble S-vs-frozen-S sweep at sims=400/N=350 left 3.5 faintly
+                   # ahead on the self-gate (fresh 0.516) and +0.025 vs greedy H3; shipped on those (the
+                   # primary metric is S-vs-frozen-S + H3). Affects BOTH H3 and S (S reads it via prior +
+                   # leaf). Trade-off: lopsided panel -- better vs a noble-heavy opponent (H3N +0.068),
+                   # worse vs a pure racer (H3R -0.050), since a racer leaves S's nobles uncontested.
+                   # (Prior note: 3.0->5.0 was +0.0073 avg(H2,H2R), now superseded.)
 NOBLE_SCARCITY = 0.0  # board-conditional noble boost: noble term *= (1 + NOBLE_SCARCITY*board_scarcity).
                       # Per the strategy model nobles matter MORE when the board lacks efficient
                       # high-point cards to race (go wide for nobles). H2 loses the noble race in its
