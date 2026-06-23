@@ -820,7 +820,7 @@ export default function SpenderApp() {
 	const [toast, setToast] = useState("");
 	const [confirmAbandon, setConfirmAbandon] = useState(false);
 	const [reviewing, setReviewing] = useState(false);  // end-game: viewing final board + log
-	const [resultReady, setResultReady] = useState(false);  // gate the win/loss screen until ~1s after game ends
+	const [resultReady, setResultReady] = useState(false);  // gate the win/loss screen until 2s after game ends
 	// Mobile-only: per-player expand toggle (compact one-line summaries) + log collapse.
 	// No effect on desktop, where CSS always shows full panels + the move log.
 	const [playerExpanded, setPlayerExpanded] = useState({});
@@ -976,12 +976,12 @@ export default function SpenderApp() {
 		if (toast) { const t = setTimeout(() => setToast(""), 2500); return () => clearTimeout(t); }
 	}, [toast]);
 
-	// Hold on the final board for ~1s after the game ends before revealing the
+	// Hold on the final board for 2s after the game ends before revealing the
 	// win/loss screen, so the player sees the move that ended it. Resets whenever
 	// the game isn't over (a new game), so the next ending delays again.
 	useEffect(() => {
 		if (game?.phase === "over") {
-			const t = setTimeout(() => setResultReady(true), 1000);
+			const t = setTimeout(() => setResultReady(true), 2000);
 			return () => clearTimeout(t);
 		}
 		setResultReady(false);
@@ -1987,7 +1987,7 @@ export default function SpenderApp() {
 		</>
 	);
 
-	// Winner screen (held back ~1s after the game ends — see the resultReady effect —
+	// Winner screen (held back 2s after the game ends — see the resultReady effect —
 	// so the final board is visible for a beat before the result is revealed).
 	if (screen === "game" && game?.phase === "over" && !reviewing && resultReady) {
 		const winners = Array.isArray(game.winner) ? game.winner : [game.winner];

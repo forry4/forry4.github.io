@@ -10,7 +10,7 @@ const TILE_HEX = {
   blue: "#3d6ea5",       // ship
   gray: "#6b6f76",       // mine
   green: "#8cc873",      // livestock -> light green
-  beige: "#c4a86a",      // building
+  beige: "#7a5f33",      // building (darker tan — the colorful building icons sit on top)
   yellow: "#fdd520",     // monastery -> bright yellow
 };
 const GOODS_HEX = {
@@ -410,6 +410,9 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-statusbar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:10px 14px}
 .coc-status-left{display:flex;align-items:center;gap:14px;flex-wrap:wrap;min-width:0}
 .coc-pill{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;letter-spacing:.06em;color:var(--text-dim)}
+.coc-goods-left{display:inline-flex;align-items:center;gap:7px;flex-wrap:wrap}
+.coc-goods-left-lbl{text-transform:uppercase;opacity:.7}
+.coc-goods-mini{display:inline-flex;align-items:center;gap:3px}
 .coc-pill b{color:var(--text)}
 .coc-vp{display:flex;gap:14px;justify-self:center}
 .coc-vp .v{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.8rem}
@@ -544,6 +547,9 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-modal h3{font-family:'Cinzel','Cinzel Fallback',serif;color:var(--gold);font-size:1rem;margin-bottom:6px}
 .coc-modal p{color:var(--text-dim);font-size:.88rem;margin-bottom:14px}
 .coc-modal-row{display:flex;flex-wrap:wrap;gap:8px}
+/* non-blocking variant: clicks fall through to the board; panel pinned to the bottom */
+.coc-modal-float{background:transparent;pointer-events:none;align-items:flex-end;padding-bottom:16px}
+.coc-modal-float .coc-modal{pointer-events:auto;max-width:560px;box-shadow:0 8px 30px rgba(0,0,0,.7)}
 .coc-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--crimson);color:#fff;padding:10px 18px;border-radius:var(--radius);font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;z-index:60;box-shadow:0 6px 20px rgba(0,0,0,.5);max-width:min(92vw,460px);text-align:center;line-height:1.35}
 .coc-winner{max-width:460px;margin:50px auto;text-align:center;background:var(--surface);border:1px solid var(--gold);border-radius:var(--radius-lg);padding:30px}
 .coc-winner h2{font-family:'Cinzel','Cinzel Fallback',serif;font-size:2rem;color:var(--gold)}
@@ -1220,6 +1226,25 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           <div className="coc-status-left">
             <span className="coc-pill">Phase <b>{game.phase_letter}</b></span>
             <span className="coc-pill">Round <b>{game.round}/5</b></span>
+            {(() => {
+              // Goods still to be handed out this game: the undrawn supply + this
+              // phase's queued-but-not-yet-placed goods, counted per color.
+              const rem = {};
+              [...(game.goods_supply || []), ...(game.goods_queue || [])].forEach((g) => { rem[g.color] = (rem[g.color] || 0) + 1; });
+              const cols = (board && board.goods_colors) || Object.keys(rem);
+              if (!cols.length) return null;
+              return (
+                <span className="coc-pill coc-goods-left" title="Goods still to be handed out (remaining supply + this phase's queue)">
+                  <span className="coc-goods-left-lbl">Goods left</span>
+                  {cols.map((c) => (
+                    <span key={c} className="coc-goods-mini" title={tileDesc({ kind: "goods", color: c }, board)}>
+                      <span className="coc-tile goods" style={{ width: 15, height: 15, fontSize: ".52rem", background: GOODS_HEX[c] }}>{goodsSellNum(c)}</span>
+                      {rem[c] || 0}
+                    </span>
+                  ))}
+                </span>
+              );
+            })()}
             <span className={`coc-turnbadge ${myTurnRaw ? "you" : "them"}`}>
               {over ? "Game over"
                 : setupPhase ? (setupMine ? "Place your starting castle" : aiThinking ? "Bot is choosing…" : `${players[game.turn] || "Opponent"} is choosing…`)
@@ -1392,7 +1417,16 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                       return (
                         <div key={t.id} data-storage-slot={i} className={`coc-stt${selStorage === t.id ? " sel" : ""}`} style={{ background: TILE_HEX[t.color] }}
                           title={tileDesc(t, board)}
-                          onClick={() => { setSelStorage(selStorage === t.id ? null : t.id); if (selDie == null) setToast(tileDesc(t, board)); }}>
+                          onClick={() => {
+                            // Only SELECT a storage tile when there's a way to place it
+                            // (a die chosen, or an extra-action value, or a town-hall extra
+                            // placement). Otherwise a tap just shows the description.
+                            const canPlace = pendingMine
+                              ? (game.pending_kind === "townhall_place" || (inExtra && extraValue != null))
+                              : (selDie != null);
+                            if (canPlace) setSelStorage(selStorage === t.id ? null : t.id);
+                            else setToast(tileDesc(t, board));
+                          }}>
                           <TileArt tile={t} px={70} />
                         </div>
                       );
@@ -1588,14 +1622,14 @@ function PendingModal({ game, board, me, extraValue, setExtraValue, mv, goodsFor
   }
   if (kind === "townhall_place") {
     return (
-      <Modal title="Town Hall — extra placement" desc="Select a storage tile, then click a glowing hex to place it (any number).">
+      <Modal title="Town Hall — extra placement" desc="Select a storage tile, then click a glowing hex to place it (any number)." interactive>
         <div className="coc-modal-row"><button className="coc-btn ghost sm" onClick={skip}>Skip</button></div>
       </Modal>
     );
   }
   if (kind === "extra_action") {
     return (
-      <Modal title="Castle — bonus action" desc={extraValue == null ? "Pick a die value, then take an action (depot/board/buttons)." : `Value ${extraValue}: take a hex, place a tile, sell, or take workers.`}>
+      <Modal title="Castle — bonus action" desc={extraValue == null ? "Pick a die value, then take an action (depot/board/buttons)." : `Value ${extraValue}: take a hex, place a tile, sell, or take workers.`} interactive>
         <div className="coc-modal-row">
           {[1, 2, 3, 4, 5, 6].map((v) => (
             <button key={v} className={`coc-btn ${extraValue === v ? "gold" : "outline"} sm`} onClick={() => setExtraValue(v)}>{v}</button>
@@ -1614,9 +1648,13 @@ function PendingModal({ game, board, me, extraValue, setExtraValue, mv, goodsFor
   return null;
 }
 
-function Modal({ title, desc, children }) {
+// `interactive` modals (Town Hall / Castle bonus) must NOT block the board behind
+// them — the player resolves them by clicking storage tiles + glowing hexes. So the
+// backdrop passes clicks through (pointer-events:none) and the panel is pinned to the
+// bottom edge, clear of the depots/storage/duchy.
+function Modal({ title, desc, children, interactive }) {
   return (
-    <div className="coc-modal-bg">
+    <div className={`coc-modal-bg${interactive ? " coc-modal-float" : ""}`}>
       <div className="coc-modal">
         <h3>{title}</h3>
         <p>{desc}</p>

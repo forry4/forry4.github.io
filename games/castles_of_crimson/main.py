@@ -358,8 +358,8 @@ async def _schedule_bot_turn(room_id: str) -> None:
             guard += 1
             bot.play_turn(game, ai_pid, rng)
         _sync_status_from_game(room)
-        save_game(room_id)
     await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
+    save_game(room_id)
 
 
 def _bot_should_act(room: dict) -> bool:
@@ -522,9 +522,12 @@ async def _handle_move(ws, room_id, pid, msg):
             await _send(ws, {"type": "error", "message": err or "illegal move"})
             return
         _sync_status_from_game(room)
-        save_game(room_id)
         bot_turn = _bot_should_act(room)
+    # Broadcast the new state FIRST so the client sees its move immediately, THEN
+    # persist. The save is a remote (Turso) write of several network round-trips and
+    # was the per-move lag — doing it before the broadcast made every move feel slow.
     await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
+    save_game(room_id)
     if bot_turn:
         asyncio.create_task(_schedule_bot_turn(room_id))
 
