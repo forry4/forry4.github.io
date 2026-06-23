@@ -293,6 +293,12 @@ const css = baseCss + `
 .ai-val{position:absolute;bottom:5px;right:5px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;font-weight:600;color:#e8c86a;background:rgba(0,0,0,.4);border-radius:4px;padding:0 4px;line-height:1.4;pointer-events:none}
 .ai-vals{position:absolute;bottom:3px;right:3px;display:grid;grid-template-columns:auto auto;gap:0 5px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.5rem;font-weight:600;color:#e8c86a;background:rgba(0,0,0,.5);border-radius:4px;padding:2px 4px;line-height:1.4;pointer-events:none}
 .ai-vals b{color:#9a8fb0;font-weight:700;margin-right:1px}
+/* "mine" = overlay computed for the player on the move (your turn) — tinted green to
+   distinguish from the AI's own values (gold), since the overlay flips with the turn. */
+.ai-vals.mine,.ai-val.mine{color:#8fdca0;box-shadow:0 0 0 1px rgba(143,220,160,.55)}
+/* The "Show AI values" toggle sits at the far LEFT of the actions box (Take/Buy stay
+   to its right); same gold styling as the action buttons via .btn.btn-gold. */
+.ai-vals-toggle{margin-right:auto}
 .card:hover{border-color:rgba(201,168,76,.5);transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.4)}
 .card.selected{border-color:var(--gold-light);box-shadow:0 0 0 2px var(--gold-light)}
 .card.affordable{border-color:var(--green-gem)}
@@ -637,7 +643,9 @@ function GemToken({ color, size = 42 }) {
 	);
 }
 
-function CardView({ card, selected, affordable, needsGold, disabled, onClick, aiValue, dataPos }) {
+function CardView({ card, selected, affordable, needsGold, disabled, onClick, aiValue, valsMine, dataPos }) {
+	// The AI-values overlay is computed for whoever's turn it is, so label whose values these are.
+	const who = valsMine ? "Your values" : "AI's values";
 	// An opponent's blind deck-top reserve is hidden info — show a face-down back, not the card.
 	if (card.hidden) {
 		return (
@@ -665,18 +673,18 @@ function CardView({ card, selected, affordable, needsGold, disabled, onClick, ai
 				))}
 			</div>
 			{aiValue != null && (typeof aiValue === "object" ? (
-				<div className="ai-vals" title={aiValue._s
-					? "S — take / engine / point / cost"
+				<div className={`ai-vals${valsMine ? " mine" : ""}`} title={`${who} — ${aiValue._s
+					? "S"
 					: aiValue.pot != null
-					? "H3 — take / engine / point / cost"
-					: "H2 — take / engine / point / cost"}>
+					? "H3"
+					: "H2"} — take / engine / point / cost`}>
 					<span><b>T</b>{aiValue.t}</span>
 					<span><b>E</b>{aiValue.e}</span>
 					<span><b>P</b>{aiValue.p}</span>
 					<span><b>C</b>{aiValue.c}</span>
 				</div>
 			) : (
-				<span className="ai-val" title="AI card value (variant H)">{aiValue}</span>
+				<span className={`ai-val${valsMine ? " mine" : ""}`} title={`${who} (variant H)`}>{aiValue}</span>
 			))}
 		</div>
 	);
@@ -1308,7 +1316,7 @@ export default function SpenderApp() {
 			});
 			const data = await res.json();
 			if (data.ok) {
-				const user = { id: data.user.id, name: data.user.name, session_token: data.session_token || null };
+				const user = { id: data.user.id, name: data.user.name, is_admin: !!data.user.is_admin, session_token: data.session_token || null };
 				try { localStorage.setItem("spender_user", JSON.stringify(user)); localStorage.setItem("spender_myId", user.id); } catch {}
 				setAuthUser(user);
 				setMyId(user.id);
@@ -1486,6 +1494,7 @@ export default function SpenderApp() {
 				needsGold={needsGold && myTurn}
 				dataPos={opts.dataPos}
 				aiValue={(authUser?.is_admin && showAiVals) ? roomData?.ai_card_values?.[card.id] : null}
+				valsMine={roomData?.ai_values_pid === myId}
 				disabled={opts.disabled}
 				onClick={() => {
 					if (opts.readonly || !myTurn) return;
@@ -1606,6 +1615,24 @@ export default function SpenderApp() {
 			);
 		}
 		return null;
+	}
+
+	// Admin-only gold button (styled like Take) that toggles the per-card AI value
+	// overlay. Lives at the far-left of the actions box; rendered on either turn so the
+	// overlay (computed for whoever's turn it is) can be toggled any time.
+	function renderAiValsToggle() {
+		if (game.phase === "over" || !authUser?.is_admin || !roomData?.ai_card_values) return null;
+		return (
+			<button className="btn btn-gold ai-vals-toggle"
+				title="Show/hide the per-card AI value overlay (computed for whoever's turn it is)"
+				onClick={() => setShowAiVals(v => {
+					const n = !v;
+					try { localStorage.setItem("spender_show_ai_vals", n ? "1" : "0"); } catch {}
+					return n;
+				})}>
+				{showAiVals ? "Hide AI values" : "Show AI values"}
+			</button>
+		);
 	}
 
 	function getHint() {
@@ -2164,17 +2191,8 @@ export default function SpenderApp() {
 							{game.phase !== "over" && (
 								<div className="board-actions">
 									<span className="target-label">Target: {game.win_points || 15}</span>
-									{authUser?.is_admin && roomData?.ai_card_values && (
-										<button className="btn btn-ghost btn-sm ai-vals-toggle" title="Admin: show/hide the AI's per-card value overlay"
-											onClick={() => setShowAiVals(v => {
-												const n = !v;
-												try { localStorage.setItem("spender_show_ai_vals", n ? "1" : "0"); } catch {}
-												return n;
-											})}>
-											{showAiVals ? "Hide AI values" : "Show AI values"}
-										</button>
-									)}
 									<div className="board-actions-btns">
+										{renderAiValsToggle()}
 										{aiThinking
 											? <span className="ai-thinking"><span className="think-dot"/><span className="think-dot"/><span className="think-dot"/> thinking…</span>
 											: renderActionButtons()}
@@ -2192,19 +2210,10 @@ export default function SpenderApp() {
 							{game.phase !== "over" && (
 								<div className="actions-panel-top">
 									<span className="target-label">Target: {game.win_points || 15}</span>
-									{authUser?.is_admin && roomData?.ai_card_values && (
-										<button className="btn btn-ghost btn-sm ai-vals-toggle" title="Admin: show/hide the AI's per-card value overlay"
-											onClick={() => setShowAiVals(v => {
-												const n = !v;
-												try { localStorage.setItem("spender_show_ai_vals", n ? "1" : "0"); } catch {}
-												return n;
-											})}>
-											{showAiVals ? "Hide AI values" : "Show AI values"}
-										</button>
-									)}
 								</div>
 							)}
 							<div className="actions-panel-btns">
+								{renderAiValsToggle()}
 								{aiThinking
 									? <span className="ai-thinking"><span className="think-dot"/><span className="think-dot"/><span className="think-dot"/> thinking…</span>
 									: renderActionButtons()}

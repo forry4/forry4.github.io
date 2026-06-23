@@ -585,15 +585,22 @@ def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]
         game = room.get("game")
         if room["ai_variant"] in ("H", "H2", "H3", "S") and game and game.get("ai_player") \
                 and game.get("phase") != "over":
+            # Compute the overlay from the perspective of WHOEVER'S TURN IT IS, so a human
+            # sees "what should I take" on their own turn and "what should the AI take" on
+            # the AI's turn (cards + that seat's own reserves are valued from that seat).
+            persp = game.get("turn")
+            if persp not in game.get("order", ()):
+                persp = game["ai_player"]
+            state["ai_values_pid"] = persp
             try:
                 if room["ai_variant"] == "H2":
-                    state["ai_card_values"] = _h2_card_values(game, game["ai_player"])
+                    state["ai_card_values"] = _h2_card_values(game, persp)
                 elif room["ai_variant"] == "H3":
-                    state["ai_card_values"] = _h3_card_values(game, game["ai_player"])
+                    state["ai_card_values"] = _h3_card_values(game, persp)
                 elif room["ai_variant"] == "S":
-                    state["ai_card_values"] = _s_card_values(game, game["ai_player"])
+                    state["ai_card_values"] = _s_card_values(game, persp)
                 else:
-                    state["ai_card_values"] = _v4_card_values(game, game["ai_player"])
+                    state["ai_card_values"] = _v4_card_values(game, persp)
             except Exception:
                 pass
     return state
@@ -852,10 +859,11 @@ def _v4_choose_move(game: dict, ai_pid: str) -> dict:
     return _aza.action_to_move(s, a)
 
 
-def _v4_card_values(game: dict, ai_pid: str) -> dict:
-    """The v4 heuristic's card_value for every visible board card + the AI's own
-    reserved cards, from the AI's seat — a transparency overlay for variant-H games
-    (so a human can see what the bot thinks each card is worth). Keyed by card id
+def _v4_card_values(game: dict, seat_pid: str) -> dict:
+    """The v4 heuristic's card_value for every visible board card + that seat's own
+    reserved cards, from seat_pid's perspective (whoever's turn it is) — a transparency
+    overlay for variant-H games (so a human can see what each card is worth to the player
+    on the move: their own values on their turn, the bot's on its turn). Keyed by card id
     (CARD_NAME[ci]) so the frontend can show it per card. Cheap; recomputed per
     broadcast. Wrapped by callers in try/except so it can never break a room update."""
     from games.spender.ai.az import engine as _aze
@@ -863,7 +871,7 @@ def _v4_card_values(game: dict, ai_pid: str) -> dict:
     from games.spender.ai.az import heuristic as _azh
 
     try:
-        seat = game["order"].index(ai_pid)
+        seat = game["order"].index(seat_pid)
     except (KeyError, ValueError):
         return {}
     s = _aze.from_game_dict(game)
@@ -890,16 +898,17 @@ def _h2_choose_move(game: dict, ai_pid: str) -> dict:
     return _aza.action_to_move(s, a)
 
 
-def _h2_card_values(game: dict, ai_pid: str) -> dict:
-    """Variant-H2 transparency overlay: per visible board card + the AI's reserved
-    cards, the four take_value pieces {t: take, e: engine, p: point, c: cost} from the
-    AI's seat. Keyed by card id (CARD_NAME[ci]). Wrapped by callers in try/except."""
+def _h2_card_values(game: dict, seat_pid: str) -> dict:
+    """Variant-H2 transparency overlay: per visible board card + seat_pid's reserved
+    cards, the four take_value pieces {t: take, e: engine, p: point, c: cost} from
+    seat_pid's seat (whoever's turn it is). Keyed by card id (CARD_NAME[ci]). Wrapped
+    by callers in try/except."""
     from games.spender.ai.az import engine as _aze
     from games.spender.ai.az import valuation2 as _azv2
     from games.spender.ai.az import heuristic2 as _azh2
 
     try:
-        seat = game["order"].index(ai_pid)
+        seat = game["order"].index(seat_pid)
     except (KeyError, ValueError):
         return {}
     s = _aze.from_game_dict(game)
@@ -933,17 +942,18 @@ def _h3_choose_move(game: dict, ai_pid: str) -> dict:
     return _aza.action_to_move(s, a)
 
 
-def _h3_card_values(game: dict, ai_pid: str) -> dict:
+def _h3_card_values(game: dict, seat_pid: str) -> dict:
     """Variant-H3 transparency overlay: H2's four pieces {t: take, e: engine, p: point,
     c: cost} PLUS H3's distinctive {pot: potential} (valuation3.potential_value — a card's
     worth as a DESTINATION, distinct from its immediate take value), per visible board card
-    + the AI's reserved cards. Keyed by card id. Wrapped by callers in try/except."""
+    + seat_pid's reserved cards, from seat_pid's seat (whoever's turn it is). Keyed by card
+    id. Wrapped by callers in try/except."""
     from games.spender.ai.az import engine as _aze
     from games.spender.ai.az import valuation3 as _azv3
     from games.spender.ai.az import heuristic3 as _azh3
 
     try:
-        seat = game["order"].index(ai_pid)
+        seat = game["order"].index(seat_pid)
     except (KeyError, ValueError):
         return {}
     s = _aze.from_game_dict(game)
@@ -964,15 +974,16 @@ def _h3_card_values(game: dict, ai_pid: str) -> dict:
     return out
 
 
-def _s_card_values(game: dict, ai_pid: str) -> dict:
+def _s_card_values(game: dict, seat_pid: str) -> dict:
     """Variant-S transparency overlay: H3's four take components {t,e,p,c} per visible board
-    card + the AI's reserved cards. No potential term. Keyed by card id."""
+    card + seat_pid's reserved cards, from seat_pid's seat (whoever's turn it is). No
+    potential term. Keyed by card id."""
     from games.spender.ai.az import engine as _aze
     from games.spender.ai.az import valuation3 as _azv3
     from games.spender.ai.az import heuristic3 as _azh3
 
     try:
-        seat = game["order"].index(ai_pid)
+        seat = game["order"].index(seat_pid)
     except (KeyError, ValueError):
         return {}
     s = _aze.from_game_dict(game)
