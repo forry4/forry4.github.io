@@ -828,6 +828,17 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     const d = game?.dice?.[myId];
     if (selDie != null && d && d.used[selDie]) setSelDie(null);
   }, [game, selDie, myId]);
+  // Drop a stale storage selection so the "Click a glowing hex to place" hint never
+  // lingers: clear it once the tile leaves storage (placed/discarded) or there's no
+  // longer a way to place it (no die / extra-action value / town-hall placement).
+  useEffect(() => {
+    if (selStorage == null) return;
+    const inStorage = (me?.storage || []).some((t) => t.id === selStorage);
+    const placeCtx = pendingMine
+      ? (game?.pending_kind === "townhall_place" || (game?.pending_kind === "extra_action" && extraValue != null))
+      : (selDie != null);
+    if (!inStorage || !placeCtx) setSelStorage(null);
+  }, [me, selDie, selStorage, pendingMine, game?.pending_kind, extraValue]);
 
   // ── actions ──
   const startCreate = (vsAi, difficulty = "hard") => {
