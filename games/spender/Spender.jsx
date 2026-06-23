@@ -318,8 +318,9 @@ const css = baseCss + `
 .noble-req{display:flex;flex-direction:column;gap:2px;width:100%}
 .noble-req-row{display:flex;gap:3px;align-items:center;font-size:.65rem;color:var(--text-dim);font-family:'Cinzel','Cinzel Fallback',serif}
 .noble-req-dot{width:8px;height:8px;border-radius:2px;border:1px solid rgba(255,255,255,.12);flex-shrink:0}
-/* blank placeholder kept in a claimed noble's slot so positions never shift */
-.noble-empty{background:transparent;border:1px dashed var(--border)}
+/* claimer name on a taken noble — absolutely pinned to the bottom so it sits at the
+   same height no matter how many requirement rows the noble has (4/4 vs 3/3/3) */
+.noble-claimer{position:absolute;left:3px;right:3px;bottom:4px;text-align:center;font-size:.55rem;color:var(--gold);font-family:'Cinzel','Cinzel Fallback',serif;letter-spacing:.04em;line-height:1.05;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* ─── Action bar ────────────────────────────────────────────────────────── */
 /* The turn/action bar is removed on all sizes now — the Take/Buy/✕ controls live
@@ -505,6 +506,7 @@ const css = baseCss + `
   .noble-points{font-size:1.5rem}
   .noble-req-row{font-size:.95rem;gap:4px}
   .noble-req-dot{width:12px;height:12px}
+  .noble-claimer{font-size:.72rem;bottom:6px}
 
   /* Actions box: hint takes the left, bigger buttons pinned to the right. */
   /* hint at the bottom, full box width, wraps freely (flex:0 so space-between pins it
@@ -676,8 +678,11 @@ function CardView({ card, selected, affordable, needsGold, disabled, onClick, ai
 }
 
 function NobleView({ noble, claimedBy, dimmed }) {
+	// A claimed noble is faded; its claimer name is absolutely pinned to the bottom
+	// (and the points/reqs top-aligned) so the name sits at the same height on a
+	// 2-row (4/4) noble as on a 3-row (3/3/3) one.
 	return (
-		<div className="noble" style={(claimedBy || dimmed) ? { opacity: 0.5, position: "relative" } : undefined}>
+		<div className="noble" style={(claimedBy || dimmed) ? { opacity: 0.5, position: "relative", justifyContent: "flex-start" } : undefined}>
 			<span className="noble-points">{noble.points}</span>
 			<div className="noble-req">
 				{Object.entries(noble.req).map(([c, n]) => (
@@ -688,9 +693,7 @@ function NobleView({ noble, claimedBy, dimmed }) {
 				))}
 			</div>
 			{claimedBy && (
-				<div style={{ fontSize: ".55rem", color: "var(--gold)", fontFamily: "'Cinzel',serif", letterSpacing: ".04em", marginTop: 2 }}>
-					★ {claimedBy}
-				</div>
+				<div className="noble-claimer">★ {claimedBy}</div>
 			)}
 		</div>
 	);
@@ -2142,8 +2145,8 @@ export default function SpenderApp() {
 							<div className="nobles-row">
 								{(() => {
 									// Render the FULL original noble set in a stable id-sorted order so
-									// nobles NEVER move when one is claimed. A claimed noble shows as a
-									// blank slot during play (and dimmed + claimer's name in review).
+									// nobles NEVER move when one is claimed. A claimed noble shows
+									// faded + the claimer's name (same look during play and in review).
 									const claimerOf = {};
 									(game.order || []).forEach(pid =>
 										(game.players?.[pid]?.nobles || []).forEach(n => {
@@ -2155,9 +2158,7 @@ export default function SpenderApp() {
 									return all.map(n =>
 										unclaimed.has(n.id)
 											? <NobleView key={n.id} noble={n} />
-											: game.phase === "over"
-												? <NobleView key={n.id} noble={n} dimmed claimedBy={claimerOf[n.id]} />
-												: <div key={n.id} className="noble noble-empty" />
+											: <NobleView key={n.id} noble={n} dimmed claimedBy={claimerOf[n.id]} />
 									);
 								})()}
 							</div>
