@@ -1124,6 +1124,23 @@ A from-scratch greedy heuristic, **served as website variant "H2"**, separate fr
   action bar (AI games only; persisted in `localStorage.spender_show_ai_vals`). Frontend gating in
   `Spender.jsx` — the data is still in the WS payload (non-sensitive AI valuations), just not shown to
   non-admins; a backend per-recipient gate was deemed not worth it for this non-sensitive overlay.
+- **Overlay follows WHOEVER'S TURN IT IS (June 2026, `82120c8`):** `mk_room_state` computes
+  `ai_card_values` from `game["turn"]`'s seat (not always the AI's) and sends `ai_values_pid`. So on
+  YOUR turn the box shows what each card is worth to YOU ("what should I take" — tinted **green**,
+  tooltip "Your values"; your own reserved cards get values too), and on the AI's turn it shows the
+  AI's perspective (**gold**, "AI's values"). The `_s/_h3/_h2/_v4_card_values(game, seat_pid)` helpers
+  take the perspective seat (param renamed `ai_pid`→`seat_pid`); reserved cards follow that seat
+  (so blind opponent reserves never leak — they're redacted and keyed by a non-real id anyway).
+  Frontend (`Spender.jsx`): `valsMine = roomData.ai_values_pid === myId` drives a `.mine` tint on the
+  `.ai-vals`/`.ai-val` box; the **Show/Hide AI values** toggle moved OUT of `.actions-panel-top` INTO
+  the actions buttons box (desktop `.actions-panel-btns` + mobile `.board-actions-btns`) via
+  `renderAiValsToggle()`, **far-left** (`.ai-vals-toggle{margin-right:auto}`) and styled like the Take
+  button (`btn btn-gold`), rendered on EITHER turn so the overlay is toggleable any time.
+- **Admin-button login bug fixed (same commit):** `handleAuth` rebuilt the user object as
+  `{id, name, session_token}`, **dropping `is_admin`** from the `/auth/login`/`/auth/register` response,
+  so the admin-gated overlay button only appeared after a page reload (the on-load `/auth/session` path
+  at `Spender.jsx` repopulates `is_admin`). `handleAuth` now preserves `is_admin: !!data.user.is_admin`,
+  matching the on-load path — admin features light up immediately on login, no reload.
 
 ### Variant H3 (`ai/az/heuristic3.py` + `valuation3.py`) — turns-remaining engine horizon (DEPLOYED)
 A sandbox fork of H2, **served as website variant "H3"** (a playable opponent + a per-card potential overlay,
@@ -1211,7 +1228,8 @@ interleave and corrupt — happened once); confirm gains on DISJOINT seeds; re-m
 model changes (it's mildly self-referential). `h3_*.out`/`h3_best.json` are gitignored scratch.
 - **Serving + overlay specifics:** `_h3_choose_move` (1-ply `choose_action`) + `_h3_card_values` are wired
   into `_ai_variant_valid` + `mk_room_state` + the move scheduler (same path as H/H2; `mk_room_state`
-  includes `ai_card_values` only for in-progress H/H2/H3 games). The admin overlay shows H2's T/E/P/C
+  includes `ai_card_values` only for in-progress H/H2/H3/S games, **now from whoever's-turn-it-is's seat**
+  — see the "Overlay follows WHOEVER'S TURN IT IS" bullet under Variant H2). The admin overlay shows H2's T/E/P/C
   **plus a 5th `Po` (potential)** — gated in `Spender.jsx` by `aiValue.pot != null`, leaving H2's 4-value
   box unchanged. (Aside: an `az_vs_h2.py` arena measured H2/H3 **beating the deployed AZ net
   `az_model.npz` ~0.75 @ 300 sims** — the greedy heuristics currently out-play variant Z.)
