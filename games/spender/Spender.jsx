@@ -2059,16 +2059,6 @@ export default function SpenderApp() {
 							{roomData?.ai_variant && (
 								<span className="ai-variant-badge">{aiPersona(roomData.ai_variant)}</span>
 							)}
-							{authUser?.is_admin && roomData?.ai_variant && roomData?.ai_card_values && (
-								<button className="btn btn-ghost btn-sm ai-vals-toggle" title="Admin: show/hide the AI's per-card value overlay"
-									onClick={() => setShowAiVals(v => {
-										const n = !v;
-										try { localStorage.setItem("spender_show_ai_vals", n ? "1" : "0"); } catch {}
-										return n;
-									})}>
-									{showAiVals ? "Hide AI values" : "Show AI values"}
-								</button>
-							)}
 							{game.phase === "over"
 								? <span className="action-hint">Final board &amp; game log</span>
 								: aiThinking
@@ -2171,6 +2161,16 @@ export default function SpenderApp() {
 							{game.phase !== "over" && (
 								<div className="board-actions">
 									<span className="target-label">Target: {game.win_points || 15}</span>
+									{authUser?.is_admin && roomData?.ai_card_values && (
+										<button className="btn btn-ghost btn-sm ai-vals-toggle" title="Admin: show/hide the AI's per-card value overlay"
+											onClick={() => setShowAiVals(v => {
+												const n = !v;
+												try { localStorage.setItem("spender_show_ai_vals", n ? "1" : "0"); } catch {}
+												return n;
+											})}>
+											{showAiVals ? "Hide AI values" : "Show AI values"}
+										</button>
+									)}
 									<div className="board-actions-btns">
 										{aiThinking
 											? <span className="ai-thinking"><span className="think-dot"/><span className="think-dot"/><span className="think-dot"/> thinking…</span>
@@ -2187,6 +2187,16 @@ export default function SpenderApp() {
 						    nobles row, shrinking this column) never squishes the hint beside the buttons. */}
 						<div className="panel actions-panel">
 							{game.phase !== "over" && <span className="target-label">Target: {game.win_points || 15}</span>}
+							{game.phase !== "over" && authUser?.is_admin && roomData?.ai_card_values && (
+								<button className="btn btn-ghost btn-sm ai-vals-toggle" title="Admin: show/hide the AI's per-card value overlay"
+									onClick={() => setShowAiVals(v => {
+										const n = !v;
+										try { localStorage.setItem("spender_show_ai_vals", n ? "1" : "0"); } catch {}
+										return n;
+									})}>
+									{showAiVals ? "Hide AI values" : "Show AI values"}
+								</button>
+							)}
 							<div className="actions-panel-btns">
 								{aiThinking
 									? <span className="ai-thinking"><span className="think-dot"/><span className="think-dot"/><span className="think-dot"/> thinking…</span>
