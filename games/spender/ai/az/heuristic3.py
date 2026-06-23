@@ -151,6 +151,11 @@ TAKE2_MIN_STEEP = 2              # min remaining need in the bottleneck color to
 USE_OPP_SNIPE = False
 SNIPE_REQUIRE_OPP_TOP = True
 
+# 2-turn endgame denial: deny a board card the opponent can't afford NOW but could after
+# getting 1 gold from reserving it, when buying it next turn would win the game.
+# Exactly the IYGWJQ blind spot (opponent reserves then buys a winning card in 2 turns).
+USE_DENY2 = True
+
 # ─── slot-pressure reserve finisher ──────────────────────────────────────────────────────────
 # Near the token cap the spread take-1/take-3 path can STALL: it grabs 1 gem/turn toward a single-
 # color bottleneck, climbs to 8-10 tokens, then take-and-discard churns without ever finishing the
@@ -350,6 +355,29 @@ def _opp_best_buy(s, opp, val):
             gain = E.PTS[ci] + val.noble_completion_pts(ci, opp)
             if gain > best_gain:
                 best_gain, best_ci, best_slot = gain, ci, -1
+    return best_gain, best_ci, best_slot
+
+
+def _opp_best_reserve_buy(s, opp, val):
+    """Opponent's best 2-turn sequence: reserve a board card now (gaining 1 gold) then buy it
+    next turn to win. Only fires when the card is unaffordable NOW but affordable after +1 gold,
+    the opponent has a free reserve slot, and the bank has gold. Returns (gain, ci, slot) where
+    slot >= 0 is deniable, or (0, -1, -1) if no such 2-turn threat exists."""
+    if s.bank[5] <= 0 or len(s.reserved[opp]) >= 3:
+        return 0, -1, -1
+    opp_gold = s.tokens[opp][5]
+    best_gain, best_ci, best_slot = 0, -1, -1
+    for slot in range(12):
+        ci = s.board[slot]
+        if ci < 0:
+            continue
+        if val.affordable_now(ci, opp):
+            continue                                    # already a 1-turn threat, caught by _opp_best_buy
+        if val.gold_needed(ci, opp) != opp_gold + 1:   # exactly 1 gold short (reserve gives exactly that)
+            continue
+        gain = E.PTS[ci] + val.noble_completion_pts(ci, opp)
+        if gain > best_gain:
+            best_gain, best_ci, best_slot = gain, ci, slot
     return best_gain, best_ci, best_slot
 
 
@@ -576,6 +604,14 @@ def choose_action(s: E.State, seat: int | None = None, *, val: V.Valuation | Non
         da = _deny(s, seat, oslot, oci, val, legal_set)
         if da is not None:
             return da
+
+    # 2b) 2-turn endgame denial — opponent can't buy now but could reserve then buy to win.
+    if USE_DENY2:
+        og2, oci2, oslot2 = _opp_best_reserve_buy(s, opp, val)
+        if oslot2 >= 0 and s.points[opp] + og2 >= s.win_points:
+            da2 = _deny(s, seat, oslot2, oci2, val, legal_set)
+            if da2 is not None:
+                return da2
 
     # Take-path target list: drop leading cards the opponent will likely snipe (the pivot). No-op
     # unless USE_OPP_SNIPE. Winning/denial above still use the full `targets`/`buys`.

@@ -35,7 +35,7 @@ from . import vsearch
 from .vsearch_camp import OPP, play_one
 from .h3_vs_h2 import wilson_ci
 
-PANEL = ["H3", "H2", "H2N", "H2R"]
+PANEL = ["H3", "H3N", "H3R"]   # STRONG sanity checks only (user directive: never H2/H2N/H2R). H3R = racer proxy.
 _MODS = (vsearch, v_state, H3, V3)
 
 # every knob any config may touch — frozen pins these to their committed defaults, captured at import.
@@ -43,8 +43,10 @@ _MODS = (vsearch, v_state, H3, V3)
 #  silently breaking the A/B.)
 _PROBE_KEYS = ["PRIOR_UNIFORM", "POLICY_TEMP", "C_PUCT", "BACKUP_LAMBDA",
                "H3_PICK_W", "RESERVE_PRIOR_W", "TAKE_PRIOR_W",
-               "ENDGAME_TIEBREAK_W", "NOBLE_MULTI_W",            # v_state (Gap A + multi-noble)
-               "ENDGAME_SIM_MULT", "ENDGAME_SERVE_TIME", "ENDGAME_NEAR"]  # vsearch (Gap B)
+               "ENDGAME_TIEBREAK_W", "NOBLE_MULTI_W", "W_NOBLE",  # v_state (Gap A + multi-noble + its magnitude)
+               "NOBLE_SCALE", "NOBLE_COUNT_W",                    # heuristic3/valuation3 (noble weight + overlap shape)
+               "ENDGAME_SIM_MULT", "ENDGAME_SERVE_TIME", "ENDGAME_NEAR",  # vsearch (Gap B)
+               "USE_DENY2"]  # heuristic3 (2-turn endgame denial)
 FROZEN: dict = {}
 
 
