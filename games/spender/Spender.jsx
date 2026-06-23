@@ -512,6 +512,9 @@ const css = baseCss + `
   /* hint at the bottom, full box width, wraps freely (flex:0 so space-between pins it
      to the bottom instead of it growing to fill; override base nowrap/ellipsis/flex:1). */
   .actions-panel .action-hint{flex:0 0 auto;font-size:.95rem;white-space:normal;overflow:visible;text-overflow:clip;color:var(--text-dim);font-style:italic}
+  /* target + optional AI-values toggle grouped as ONE space-between item so adding/removing
+     the toggle never shifts the action buttons. */
+  .actions-panel-top{display:flex;flex-direction:column;gap:4px;align-items:stretch}
   /* target pinned to the top, full width. */
   .actions-panel .target-label{align-self:stretch}
   /* buttons centered between target and hint (no margin-left:auto — that was for the old row layout). */
@@ -2186,16 +2189,20 @@ export default function SpenderApp() {
 						    buttons centered between them — so a NARROW box (4-player games widen the
 						    nobles row, shrinking this column) never squishes the hint beside the buttons. */}
 						<div className="panel actions-panel">
-							{game.phase !== "over" && <span className="target-label">Target: {game.win_points || 15}</span>}
-							{game.phase !== "over" && authUser?.is_admin && roomData?.ai_card_values && (
-								<button className="btn btn-ghost btn-sm ai-vals-toggle" title="Admin: show/hide the AI's per-card value overlay"
-									onClick={() => setShowAiVals(v => {
-										const n = !v;
-										try { localStorage.setItem("spender_show_ai_vals", n ? "1" : "0"); } catch {}
-										return n;
-									})}>
-									{showAiVals ? "Hide AI values" : "Show AI values"}
-								</button>
+							{game.phase !== "over" && (
+								<div className="actions-panel-top">
+									<span className="target-label">Target: {game.win_points || 15}</span>
+									{authUser?.is_admin && roomData?.ai_card_values && (
+										<button className="btn btn-ghost btn-sm ai-vals-toggle" title="Admin: show/hide the AI's per-card value overlay"
+											onClick={() => setShowAiVals(v => {
+												const n = !v;
+												try { localStorage.setItem("spender_show_ai_vals", n ? "1" : "0"); } catch {}
+												return n;
+											})}>
+											{showAiVals ? "Hide AI values" : "Show AI values"}
+										</button>
+									)}
+								</div>
 							)}
 							<div className="actions-panel-btns">
 								{aiThinking
