@@ -525,9 +525,12 @@ const css = baseCss + `
   /* align-self:stretch so the hint box matches the nobles box height in row 1;
      hint on the left, buttons pushed to the right edge of the box. */
   .actions-panel{grid-column:2;grid-row:1;align-self:stretch;display:flex;flex-direction:column;justify-content:space-between;align-items:stretch;gap:8px}
-  /* Fill row 2 and space the three card rows out so the bottom row is flush with
-     the bottom of the screen. */
-  .game-main>.levels{grid-column:1 / 3;grid-row:2;align-self:stretch;justify-content:space-between}
+  /* Pack the three card rows at the top of row 2 with a fixed, comfortable gap
+     (NOT justify-content:space-between — on a tall viewport that spread the rows out
+     into big gaps, and the gaps GREW when the cards were shrunk for shorter screens).
+     A fixed gap keeps the rows tight and the spacing independent of card size; any
+     extra height just becomes whitespace below the board. */
+  .game-main>.levels{grid-column:1 / 3;grid-row:2;align-self:stretch;justify-content:flex-start;gap:16px}
   /* Bank spans both rows (explicit span) + stretches, so it runs down to the
      bottom of the card board (gems spread over that height). */
   .bank-panel{grid-column:3;grid-row:1 / span 2;align-self:stretch;display:flex;flex-direction:column}
@@ -597,60 +600,61 @@ const css = baseCss + `
 
 /* SHORTER desktop viewports — the desktop layout above is locked to the viewport
    height (.game-screen{height:100vh;overflow:hidden}) with FIXED-size 144x185 cards.
-   That fits a tall screen (e.g. 2560x1600, or 1080p at 100%) but OVERFLOWS and clips
-   the bottom (Level I) on shorter effective viewports — most commonly a 1920x1080
-   screen at 125-150% Windows display scaling and/or with a bookmarks bar, which drops
-   the CSS viewport to ~720-950px tall. These max-height tiers scale the board (cards,
-   bank tokens, nobles, fonts) down so all three levels always fit without clipping.
-   Keyed on viewport HEIGHT (same metric as 100vh), so wide-but-tall screens are
-   unaffected. Ordered tallest-first so a shorter viewport's (later) tier wins the
-   cascade where several match. */
-@media(min-width:901px) and (max-height:1000px){
-  .game-main{--card-w:132px;--card-h:168px}
-  .noble{width:108px}
-  .noble-points{font-size:1.32rem}
-  .bank-gems .gem-token{width:58px!important;height:58px!important;font-size:1.28rem!important}
-  .level-row .card-points{font-size:1.55rem}
-}
-@media(min-width:901px) and (max-height:920px){
-  .game-main{--card-w:120px;--card-h:154px}
+   With the rows packed (flex-start) the full-size board is ~820px tall, so it fits
+   any viewport >=~820px. Below that — most commonly a 1920x1080 screen at 125-150%
+   Windows display scaling and/or a bookmarks bar, dropping the CSS viewport to
+   ~700-820px — it would overflow and clip the bottom (Level I). These max-height tiers
+   scale the board (cards, bank tokens, nobles, fonts) down so all three levels always
+   fit. The threshold is set just below the ~820px fit point so taller screens (incl.
+   a scaled 2560x1600) keep FULL-SIZE cards. Keyed on viewport HEIGHT (same metric as
+   100vh); ordered tallest-first so a shorter viewport's (later) tier wins the cascade. */
+@media(min-width:901px) and (max-height:815px){
+  .game-main{--card-w:118px;--card-h:150px}
   .noble{width:100px}
   .noble-points{font-size:1.25rem}
-  .bank-gems{gap:13px}
-  .bank-gems .gem-token{width:52px!important;height:52px!important;font-size:1.18rem!important}
+  .bank-gems .gem-token{width:54px!important;height:54px!important;font-size:1.2rem!important}
   .level-row .card-points{font-size:1.45rem}
+}
+@media(min-width:901px) and (max-height:780px){
+  .game-main{--card-w:108px;--card-h:138px}
+  .noble{width:92px}
+  .noble-points{font-size:1.18rem}
+  .bank-gems{gap:12px}
+  .bank-gems .gem-token{width:48px!important;height:48px!important;font-size:1.12rem!important}
+  .level-row .card-points{font-size:1.36rem}
   .level-row .card-bonus{width:26px;height:26px}
 }
-@media(min-width:901px) and (max-height:820px){
-  .game-main{--card-w:108px;--card-h:136px}
-  .noble{width:90px}
-  .noble-points{font-size:1.15rem}
-  .bank-gems{gap:10px}
-  .bank-gems .gem-token{width:46px!important;height:46px!important;font-size:1.08rem!important}
-  .level-row .card-points{font-size:1.32rem}
+@media(min-width:901px) and (max-height:745px){
+  .game-main{--card-w:98px;--card-h:126px}
+  .noble{width:84px}
+  .noble-points{font-size:1.1rem}
+  .nobles-row{gap:7px}
+  .bank-gems{gap:9px}
+  .bank-gems .gem-token{width:44px!important;height:44px!important;font-size:1.06rem!important}
+  .level-row .card-points{font-size:1.26rem}
   .level-row .card-bonus{width:24px;height:24px}
   .level-row .cost-gem{width:13px;height:13px}
 }
-@media(min-width:901px) and (max-height:720px){
-  .game-main{--card-w:96px;--card-h:120px}
-  .noble{width:80px;padding:7px}
-  .noble-points{font-size:1.05rem}
+@media(min-width:901px) and (max-height:710px){
+  .game-main{--card-w:90px;--card-h:116px}
+  .noble{width:78px}
+  .noble-points{font-size:1.04rem}
   .nobles-row{gap:6px}
-  .bank-gems{gap:7px}
+  .bank-gems{gap:8px}
   .bank-gems .gem-token{width:40px!important;height:40px!important;font-size:1rem!important}
   .level-row .card-points{font-size:1.2rem}
   .level-row .card-bonus{width:22px;height:22px}
   .level-row .cost-gem{width:12px;height:12px}
   .level-row .card-cost{gap:3px}
-  .actions-panel-btns .btn{padding:9px 18px;font-size:.95rem}
 }
-@media(min-width:901px) and (max-height:660px){
-  .game-main{--card-w:86px;--card-h:108px}
-  .noble{width:72px;padding:6px}
-  .noble-points{font-size:.95rem}
-  .bank-gems .gem-token{width:36px!important;height:36px!important;font-size:.92rem!important}
-  .level-row .card-points{font-size:1.08rem}
+@media(min-width:901px) and (max-height:675px){
+  .game-main{--card-w:82px;--card-h:106px}
+  .noble{width:70px;padding:6px}
+  .noble-points{font-size:.96rem}
+  .bank-gems .gem-token{width:36px!important;height:36px!important;font-size:.94rem!important}
+  .level-row .card-points{font-size:1.12rem}
   .level-row .card-bonus{width:20px;height:20px}
+  .actions-panel-btns .btn{padding:9px 18px;font-size:.95rem}
 }
 
 @media(max-width:600px){
