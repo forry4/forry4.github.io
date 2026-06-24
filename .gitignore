@@ -10,6 +10,9 @@ __pycache__/
 .vscode/
 .idea/
 
+# Claude Code per-machine local dir (settings.local.json + harness scratch worktrees/builds)
+.claude/
+
 # Env files
 .env
 
@@ -47,3 +50,8 @@ games/spender/ai/az/*.lib
 
 # Cython/setuptools build temp dir
 build/
+
+# Stray local AI-harness run logs at the repo root (config_selfgate / background runs
+# redirected to engine_stk_*.out/.err) — scratch, regenerated per run
+/engine_stk_*.out
+/engine_stk_*.err
