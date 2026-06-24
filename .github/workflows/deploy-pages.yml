@@ -1,5 +1,11 @@
 name: Deploy to GitHub Pages
 
+# Builds the Vite app and publishes it to the `gh-pages` branch (set GitHub Pages
+# source = gh-pages / root). Deliberately does NOT commit the build to `main`: the
+# old "commit docs/ to main [skip ci]" step advanced origin/main on every frontend
+# push and was a constant source of local-main drift. A push to gh-pages does NOT
+# re-trigger this workflow (it only watches `main`), so there's no deploy loop and
+# no [skip ci] needed.
 on:
   push:
     branches: [main]
@@ -11,16 +17,15 @@ on:
       - 'books/**'
       - 'shared/**'
       - '.github/workflows/deploy-pages.yml'
+  workflow_dispatch:   # manual "Run workflow" button (handy for the one-time cutover)
 
 jobs:
   build-deploy:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write          # to push the built site to the gh-pages branch
     steps:
       - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/setup-node@v4
         with:
@@ -47,12 +52,19 @@ jobs:
           VITE_WS_URL: wss://splendid-nelz.onrender.com/ws
         run: npm run build
 
-      - name: Deploy to docs/
+      # Publish dist/ as a fresh single-commit gh-pages branch (force-push). Keeps
+      # gh-pages history-free (it's all generated) and never touches main. .nojekyll
+      # disables Jekyll so files/dirs starting with _ are served as-is.
+      - name: Publish to gh-pages branch
+        working-directory: webapp/dist
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          rm -rf docs/
-          cp -r webapp/dist/ docs/
+          touch .nojekyll
+          git init -q
+          git checkout -q -b gh-pages
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add docs/
-          git diff --cached --quiet || git commit -m "deploy: update GitHub Pages from Vite build [skip ci]"
-          git push
+          git add -A
+          git commit -q -m "deploy: ${GITHUB_SHA::7} from ${GITHUB_REF_NAME}"
+          git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages:gh-pages
