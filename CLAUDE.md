@@ -1792,6 +1792,32 @@ degrades safely if `/auth/session` isn't deployed yet (404 → stay logged in).
   so the workflow is a browser console snippet that reads `spender_roomId`+`spender_user.session_token`
   from localStorage, fetches the endpoint, and downloads the JSON (clipboard `copy()`/chat-paste choke on
   the ~20-30KB blob → download-to-file + Read is the reliable path). Used to analyse real vs-S games.
+- **Game reconstruction + per-turn S re-scoring (`games/spender/ai/az/replay.py`; June 2026).** A finished
+  game can be replayed move-by-move offline and re-scored with variant S at every turn. Two additive,
+  default-safe captures made this possible (without them the per-turn board — S's biggest eval input — was
+  unrecoverable, because the deck is shuffled in place and popped with NO seed stored):
+  1. **`main._capture_setup(g)`** snapshots the dealt **initial board / deck-order / nobles (ids only)** into
+     `g["setup"]`, called in BOTH create paths (vs-AI + multiplayer start) right after the nobles are dealt.
+     ids-only → compact; resolved via `card_catalog()`. **Kept off the wire** — `mk_room_state` strips
+     `setup` from the broadcast (static, client-unused, ~75 ids), but `save_game` persists it and the `/full`
+     dump serves it. (No new info leak: `game["decks"]` — the remaining draw order — is already broadcast.)
+  2. **Discards are now logged** (`_log_move(... "discard", color=...)`): the human handler logs on COMMIT
+     (an `undo_discard` restores the pre-take snapshot, so the entries correctly vanish), and the AI path
+     logs each `_ai_discard_one` — which now **returns the discarded colour** (the MCTS-sim applier ignores
+     it). The primary `take_gems`/`reserve` is logged BEFORE its discard loop so the newest-first log
+     reverses to correct chronological order. (Buys never overfill; payment/spends stay derivable.)
+  - **`replay.py`** rebuilds the initial game dict from `setup`, re-applies the logged moves (payment via
+    `calc_spend`; turn advancement reuses `main._finish_turn`; nobles applied straight from the log, single
+    auto-claims included), converts each turn-start to an AZ `State` via `engine.from_game_dict`, and emits
+    `v_state.value` + the 5-component breakdown. CLI:
+    `python -m games.spender.ai.az.replay dump.json [--seat ai|mover|0|1] [--csv out] [--json out]` (loads a
+    `/full` dump, a `state_json` row, or a bare game dict). **2-player only** (v_state is). A game created
+    BEFORE the snapshot (LBBMRC, all pre-deploy prod games) has no `setup` → `evaluate` raises a clear error;
+    only the points+noble proxy is available for those. Every game created after deploy is fully replayable.
+  - **Test** `games/spender/tests/test_replay.py`: a **differential round-trip** — play random AZ games, emit
+    the log in main's EXACT persisted format (synthesizing the silent single-noble auto-claims + deck-reserve
+    `card_id`/`from_deck`), reconstruct from `setup` alone, assert the replayed state matches the engine at
+    every turn with **deck order compared exactly** (60 games) + direct guards on each `main.py` change.
 - **Loading screen**: 250ms fast-path — AbortController fetch with 250ms timeout;
   if server responds in time → skip loading screen entirely; if not → show spinner
   + progress polling. `showLoading` state gates the spinner so a blank flash never

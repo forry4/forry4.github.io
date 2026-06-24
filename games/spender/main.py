@@ -572,12 +572,19 @@ def _redact_blind_reserves(game: dict | None, viewer_pid: str | None) -> dict | 
 
 def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]:
     room = ROOMS.get(room_id, {})
+    game_view = _redact_blind_reserves(room.get("game"), viewer_pid)
+    if isinstance(game_view, dict) and "setup" in game_view:
+        # `setup` is static replay metadata (the dealt deck order) — persisted by save_game
+        # and served by the admin /full dump, but kept OFF the wire: the client never uses it
+        # and it would re-send a fixed ~75-id blob on every room_update. Shallow-copy so the
+        # live/redacted dict is untouched (nested values are about to be JSON-serialized).
+        game_view = {k: v for k, v in game_view.items() if k != "setup"}
     state = {
         "room_id": room_id,
         "players": room.get("players", {}),
         "host": room.get("host"),
         "status": room.get("status", "open"),
-        "game": _redact_blind_reserves(room.get("game"), viewer_pid),
+        "game": game_view,
         "reconnect_tokens": {p: info.get("token") for p, info in room.get("meta", {}).items()} if room.get("meta") else {},
     }
     if room.get("ai_variant"):
@@ -608,6 +615,19 @@ def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]
 
 def _deal_board(decks: dict) -> dict:
     return {lk: [decks[lk].pop() if decks[lk] else None for _ in range(4)] for lk in ["L1", "L2", "L3"]}
+
+
+def _capture_setup(g: dict) -> None:
+    """Snapshot the dealt initial board / deck-order / nobles (ids only) so a finished game can
+    be replayed move-by-move offline (games/spender/ai/az/replay.py). The deck is shuffled in
+    place and popped during play with no seed stored, so without this the per-turn 12-card board
+    (the biggest input to the S evaluator) is unrecoverable. Captured ONCE right after the board
+    and nobles are dealt, before any move. ids only -> compact; resolve via card_catalog()."""
+    g["setup"] = {
+        "board": {lk: [c["id"] if c else None for c in g["board"][lk]] for lk in g["board"]},
+        "decks": {lk: [c["id"] for c in g["decks"][lk]] for lk in g["decks"]},
+        "nobles": [n["id"] for n in g["nobles"]],
+    }
 
 
 def _check_nobles(game: dict, pid: str) -> list:
@@ -1377,7 +1397,10 @@ def _lose_prevention_move(game: dict, ai_pid: str) -> dict | None:
     return None
 
 
-def _ai_discard_one(game: dict, ai_pid: str) -> None:
+def _ai_discard_one(game: dict, ai_pid: str) -> str | None:
+    """Discard the AI's least-needed token (gold kept for last). Returns the colour discarded
+    (or None if it held nothing) so the real-move applier can log it; the MCTS-simulation
+    applier ignores the return."""
     ps = game["players"][ai_pid]
     bonuses = bonuses_from(ps["purchased"])
     need: dict[str, float] = {c: 0.0 for c in GEM_COLORS}
@@ -1391,11 +1414,12 @@ def _ai_discard_one(game: dict, ai_pid: str) -> None:
                     need[color] += max(0, effective - ps["tokens"].get(color, 0))
     held = [(c, ps["tokens"].get(c, 0)) for c in GEM_COLORS + ["gold"] if ps["tokens"].get(c, 0) > 0]
     if not held:
-        return
+        return None
     # Non-gold least-needed first; keep gold for last
     worst = min(held, key=lambda x: (1 if x[0] == "gold" else 0, need.get(x[0], 0.0)))
     ps["tokens"][worst[0]] -= 1
     game["bank"][worst[0]] = game["bank"].get(worst[0], 0) + 1
+    return worst[0]
 
 
 def _opp_noble_progress(game: dict, opp_pid: str, noble: dict) -> float:
@@ -2026,9 +2050,11 @@ def _run_ai_turn(game: dict, ai_pid: str, mv: dict | None = None) -> None:
             if game["bank"].get(c, 0) > 0:
                 game["bank"][c] -= 1
                 ps["tokens"][c] = ps["tokens"].get(c, 0) + 1
-        while sum(ps["tokens"].values()) > 10:
-            _ai_discard_one(game, ai_pid)
         _log_move(game, ai_pid, "take_gems", colors=mv["colors"])
+        while sum(ps["tokens"].values()) > 10:
+            dc = _ai_discard_one(game, ai_pid)
+            if dc:
+                _log_move(game, ai_pid, "discard", color=dc)
 
     elif mv["type"] == "reserve":
         card_id = mv.get("card_id")
@@ -2047,9 +2073,11 @@ def _run_ai_turn(game: dict, ai_pid: str, mv: dict | None = None) -> None:
             if game["bank"].get("gold", 0) > 0:
                 game["bank"]["gold"] -= 1
                 ps["tokens"]["gold"] = ps["tokens"].get("gold", 0) + 1
-            while sum(ps["tokens"].values()) > 10:
-                _ai_discard_one(game, ai_pid)
             _log_move(game, ai_pid, "reserve", card_id=card["id"])
+            while sum(ps["tokens"].values()) > 10:
+                dc = _ai_discard_one(game, ai_pid)
+                if dc:
+                    _log_move(game, ai_pid, "discard", color=dc)
 
     _finish_turn(game, ai_pid)
 
@@ -2198,6 +2226,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                         nobles_pool = list(ALL_NOBLES)
                         random.shuffle(nobles_pool)
                         g["nobles"] = nobles_pool[:3]
+                        _capture_setup(g)   # snapshot dealt state for offline replay/eval
                         r["status"] = "playing"
                 save_game(room_id)
                 await websocket.send_text(json.dumps({"type": "created", "room_id": room_id, "room": mk_room_state(room_id, viewer_pid=pid)}))
@@ -2296,6 +2325,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                         nobles_pool = list(ALL_NOBLES)
                         random.shuffle(nobles_pool)
                         g["nobles"] = nobles_pool[:len(order) + 1]
+                        _capture_setup(g)   # snapshot dealt state for offline replay/eval
                 if _err:
                     await websocket.send_text(json.dumps({"type": "error", "message": _err}))
                 else:
@@ -2375,6 +2405,10 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                 else:
                                     ps["tokens"][color] -= 1
                                     g["bank"][color] = g["bank"].get(color, 0) + 1
+                                    # Log on commit; an undo_discard restores the pre-action
+                                    # snapshot (taken before the take/reserve was logged), which
+                                    # drops these discard entries too — so the log stays faithful.
+                                    _log_move(g, pid, "discard", color=color)
                                     _did_change = True
                                     if sum(ps["tokens"].values()) > 10:
                                         _discard_pid = pid
