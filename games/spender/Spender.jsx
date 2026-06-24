@@ -595,6 +595,64 @@ const css = baseCss + `
   .level-row .deck-remaining{font-size:1.7rem}
 }
 
+/* SHORTER desktop viewports — the desktop layout above is locked to the viewport
+   height (.game-screen{height:100vh;overflow:hidden}) with FIXED-size 144x185 cards.
+   That fits a tall screen (e.g. 2560x1600, or 1080p at 100%) but OVERFLOWS and clips
+   the bottom (Level I) on shorter effective viewports — most commonly a 1920x1080
+   screen at 125-150% Windows display scaling and/or with a bookmarks bar, which drops
+   the CSS viewport to ~720-950px tall. These max-height tiers scale the board (cards,
+   bank tokens, nobles, fonts) down so all three levels always fit without clipping.
+   Keyed on viewport HEIGHT (same metric as 100vh), so wide-but-tall screens are
+   unaffected. Ordered tallest-first so a shorter viewport's (later) tier wins the
+   cascade where several match. */
+@media(min-width:901px) and (max-height:1000px){
+  .game-main{--card-w:132px;--card-h:168px}
+  .noble{width:108px}
+  .noble-points{font-size:1.32rem}
+  .bank-gems .gem-token{width:58px!important;height:58px!important;font-size:1.28rem!important}
+  .level-row .card-points{font-size:1.55rem}
+}
+@media(min-width:901px) and (max-height:920px){
+  .game-main{--card-w:120px;--card-h:154px}
+  .noble{width:100px}
+  .noble-points{font-size:1.25rem}
+  .bank-gems{gap:13px}
+  .bank-gems .gem-token{width:52px!important;height:52px!important;font-size:1.18rem!important}
+  .level-row .card-points{font-size:1.45rem}
+  .level-row .card-bonus{width:26px;height:26px}
+}
+@media(min-width:901px) and (max-height:820px){
+  .game-main{--card-w:108px;--card-h:136px}
+  .noble{width:90px}
+  .noble-points{font-size:1.15rem}
+  .bank-gems{gap:10px}
+  .bank-gems .gem-token{width:46px!important;height:46px!important;font-size:1.08rem!important}
+  .level-row .card-points{font-size:1.32rem}
+  .level-row .card-bonus{width:24px;height:24px}
+  .level-row .cost-gem{width:13px;height:13px}
+}
+@media(min-width:901px) and (max-height:720px){
+  .game-main{--card-w:96px;--card-h:120px}
+  .noble{width:80px;padding:7px}
+  .noble-points{font-size:1.05rem}
+  .nobles-row{gap:6px}
+  .bank-gems{gap:7px}
+  .bank-gems .gem-token{width:40px!important;height:40px!important;font-size:1rem!important}
+  .level-row .card-points{font-size:1.2rem}
+  .level-row .card-bonus{width:22px;height:22px}
+  .level-row .cost-gem{width:12px;height:12px}
+  .level-row .card-cost{gap:3px}
+  .actions-panel-btns .btn{padding:9px 18px;font-size:.95rem}
+}
+@media(min-width:901px) and (max-height:660px){
+  .game-main{--card-w:86px;--card-h:108px}
+  .noble{width:72px;padding:6px}
+  .noble-points{font-size:.95rem}
+  .bank-gems .gem-token{width:36px!important;height:36px!important;font-size:.92rem!important}
+  .level-row .card-points{font-size:1.08rem}
+  .level-row .card-bonus{width:20px;height:20px}
+}
+
 @media(max-width:600px){
   .browser{padding:20px 14px 40px}
   .browser-title{font-size:1.4rem}
