@@ -65,7 +65,7 @@ into `games/spender/ai/` by default.
 ### Serving
 - Backend: `uvicorn games.spender.main:app --reload` (port 8000)
 - Dev frontend: `cd webapp && npm run dev` (port 5173, proxies /ws to 8000) — repo-root, neutral
-- Production: GitHub Pages serves `docs/`, which is **built and committed by CI** (`deploy-pages.yml`) on every push to `games/spender/**`. **Never hand-build/commit `docs/`** — commit source only and let CI deploy (see "Build + deploy steps" below).
+- Production: GitHub Pages serves the **`gh-pages` branch** (since 2026-06-24; was `main`/`docs`), which CI (`deploy-pages.yml`) **builds + force-pushes** on every frontend push to `main`. **Never hand-build/commit the bundle** — commit source only and let CI deploy. CI no longer commits to `main` (that was the local-main drift source); `docs/` is now vestigial. See "Build + deploy steps" below.
 
 ---
 
@@ -233,7 +233,7 @@ The real bot. Pure Python, no new prod deps; reuses the engine contract.
 - **Deploy flow (per user preference — see memory):** land changes on `main` directly, don't hand
   over a PR. `gh` is not installed and `main` is checked out in the `forrestm_projects-ai` worktree,
   so from the primary worktree: branch off `origin/main`, make the change, then
-  `git push origin <branch>:main` (fast-forwards `origin/main`); CI rebuilds `docs/` + redeploys.
+  `git push origin <branch>:main` (fast-forwards `origin/main`); CI builds + publishes to the `gh-pages` branch + redeploys.
 
 ---
 
@@ -2113,29 +2113,39 @@ From a strong human player; drives the structural features (not just weights —
 
 ## Build + deploy steps (production)
 
-**`docs/` is CI-owned — NEVER build or commit it by hand.** The
-`.github/workflows/deploy-pages.yml` Action fires on every push touching the
-frontend (`webapp/**`, `games/spender/**`, `games/castles_of_crimson/**`,
-`books/**`, `shared/**`): it `rm -rf docs/`, rebuilds the **top-level `webapp/`**
-(relocated there from `games/spender/webapp/` — neutral, not owned by a game) from
-source (with `VITE_WS_URL=wss://splendid-nelz.onrender.com/ws` baked in), and
-commits/pushes `deploy: update GitHub Pages from Vite build [skip ci]`. So a hand-built `docs/`
-bundle is (a) overwritten by CI within ~1 min anyway, (b) the *sole cause* of
-the recurring push-rejected → rebase → minified-bundle conflict loop, and (c) a
-latent wrong-WS-URL bug (local builds don't set `VITE_WS_URL`).
+**The build is CI-owned and published to the `gh-pages` branch — NEVER build or commit it by hand.**
+As of **2026-06-24** the Pages source is **`gh-pages` / root** (repo Settings → Pages), NOT the
+old `main` / `/docs`. The `.github/workflows/deploy-pages.yml` Action fires on every push to `main`
+touching the frontend (`webapp/**`, `games/spender/**`, `games/castles_of_crimson/**`,
+`games/wherewolf/**`, `books/**`, `shared/**`): it builds the **top-level `webapp/`** (with
+`VITE_WS_URL=wss://splendid-nelz.onrender.com/ws` baked in) and **force-pushes `webapp/dist/` to the
+`gh-pages` branch** (single-commit, `.nojekyll`). It does **NOT commit anything to `main`** — the old
+"`rm -rf docs/` + commit `docs/` to main `[skip ci]`" step was removed because those deploy commits
+advanced `origin/main` on every frontend push and were a constant source of local-`main` drift (and
+the push-rejected → rebase → minified-bundle conflict loop). A push to `gh-pages` does NOT re-trigger
+the workflow (it only watches `main`), so there's no deploy loop and no `[skip ci]` needed.
+
+**`docs/` is now VESTIGIAL** — kept on `main` only as a rollback safety net (flip Pages source back to
+`main` / `/docs` to revert). Once the gh-pages flow is trusted, `git rm -r docs/` it (+ gitignore).
 
 **Frontend deploy = commit source only:**
 ```bash
-# edit games/spender/Spender.jsx (do NOT npm run build, do NOT git add docs/)
-git pull --rebase origin main      # if behind; always clean since you never touch docs/
+# edit games/spender/Spender.jsx (do NOT npm run build, do NOT touch docs/)
+git sync-main                      # ff the main worktree to origin/main first (global alias)
 git add games/spender/Spender.jsx
 git commit -m "feat(ui): ..."
-git push                           # CI rebuilds docs/ + deploys (~1-2 min)
+git push                           # CI builds + publishes to gh-pages (~2-3 min)
 ```
-The two deploy workflows: **deploy-pages.yml** (frontend → GitHub Pages `docs/`)
-and **deploy-render.yml** (backend → Render). Backend (`main.py` etc.) also
-deploys on push to main. `npm run build` locally is only for *verifying a build
-compiles* — discard the `dist/`, never copy it into `docs/`.
+The two deploy workflows: **deploy-pages.yml** (frontend → builds + publishes to the `gh-pages`
+branch → GitHub Pages) and **deploy-render.yml** (backend → Render). Backend (`main.py` etc.) also
+deploys on push to main. `npm run build` locally is only for *verifying a build compiles* — discard
+the `dist/`, never copy it into `docs/`.
+
+**`git sync-main` (global alias)** ff's the primary main worktree to `origin/main` from anywhere
+(`git -C "<main-worktree>" fetch origin && merge --ff-only origin/main`). Local `main` carries no
+unique commits, so it's always a clean ff — but it drifts because feature branches push straight to
+`main` from sibling worktrees. When branching, branch off `origin/main` after a `fetch`, not stale
+local `main`.
 
 ### Staging environment (Cloudflare — test frontend changes live before prod)
 A live staging site mirrors the front end so UI changes (esp. mobile/desktop layout)
@@ -2155,7 +2165,7 @@ can be tested on a real URL before shipping to prod:
 - **Workflow:** work in a `staging` worktree → `git push` → test at the workers.dev
   URL → to ship, integrate with main: `git rebase origin/main` (UI vs backend work
   usually touch disjoint files), `git push origin staging:main` (fast-forward), then
-  `git push -f origin staging` to resync. CI then rebuilds `docs/` + redeploys prod.
+  `git push -f origin staging` to resync. CI then builds + publishes to `gh-pages` + redeploys prod.
 - **⚠️ `staging` has DIVERGED — NEVER blind-push `staging:main` (do not regress).**
   As of 2026-06-21 `staging` is a long-lived branch that is **behind `main` on the
   backend** (it lacks main's wherewolf engine/role fixes, Spender move-log/card-catalog,
