@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
   <defs>
     <linearGradient id="trunkGrad" gradientUnits="userSpaceOnUse" x1="50" y1="50" x2="50" y2="90">
-      <stop offset="0" stop-color="#357A2A"/>
-      <stop offset="0.4" stop-color="#47591F"/>
-      <stop offset="1" stop-color="#5E3517"/>
+      <stop offset="0" stop-color="#163C11"/>
+      <stop offset="0.4" stop-color="#20290C"/>
+      <stop offset="1" stop-color="#2A1608"/>
     </linearGradient>
     <filter id="olGreen" x="-20%" y="-20%" width="140%" height="140%">
       <feMorphology in="SourceAlpha" operator="dilate" radius="2" result="d"/>
@@ -29,13 +29,14 @@
 
   <g transform="translate(50 50) scale(0.88) translate(-50 -50)">
   <g filter="url(#olBrown)">
-    <path d="M47 46 C46 62 45 74 32 94 C40 86 46 85 50 85 C54 85 60 86 68 94 C55 74 54 62 53 46 Z" fill="url(#trunkGrad)"/>
+    <path d="M45 49 C44.5 64 45 76 32 94 C40 89 46 89 50 89 C54 89 60 89 68 94 C55 76 55.5 64 55 49 Z" fill="url(#trunkGrad)"/>
   </g>
 
   <g filter="url(#olGreen)">
-    <circle cx="50" cy="28" r="20" fill="#357A2A"/>
-    <circle cx="28" cy="50" r="20" fill="#357A2A"/>
-    <circle cx="72" cy="50" r="20" fill="#357A2A"/>
+    <circle cx="50" cy="29" r="21" fill="#163C11"/>
+    <circle cx="50" cy="48" r="14" fill="#163C11"/>
+    <circle cx="30" cy="53" r="19.5" fill="#163C11"/>
+    <circle cx="70" cy="53" r="19.5" fill="#163C11"/>
   </g>
   </g>
 </svg>
