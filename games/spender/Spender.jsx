@@ -126,6 +126,9 @@ const css = baseCss + `
 .browser-username{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.8rem;color:var(--text-dim);letter-spacing:.06em;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .browser-guest-badge{font-size:.65rem;letter-spacing:.1em;color:var(--text-muted);border:1px solid var(--border);padding:2px 7px;border-radius:10px;font-family:'Cinzel','Cinzel Fallback',serif;text-transform:uppercase}
 .browser-create{margin-bottom:36px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:center}
+/* Keep the length toggle and the Create Game button on the same line (they never
+   wrap apart); the refresh button may wrap below them on narrow phones. */
+.create-controls{display:inline-flex;align-items:center;gap:10px;flex-wrap:nowrap;max-width:100%}
 /* game-length toggle: selected state changes ONLY background+color (fixed border/padding)
    so selecting never changes the element's size / shifts the layout */
 .length-toggle{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;flex-shrink:0}
@@ -134,8 +137,10 @@ const css = baseCss + `
 .len-btn.sel{background:var(--gold);color:#1c1710}
 .btn-outline.active{background:var(--gold);color:#0f0e0c}
 .ai-picker-wrap{position:relative;display:inline-flex}
-.ai-picker{position:absolute;top:calc(100% + 8px);left:0;z-index:30;display:flex;gap:8px;align-items:center;flex-wrap:wrap;max-width:min(92vw,420px);padding:12px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:0 10px 28px rgba(0,0,0,.5)}
-.ai-picker-label{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;letter-spacing:.06em;color:var(--text-dim);text-transform:uppercase;margin-right:4px}
+/* Create-game dropdown: vs Friend on top, then the AI opponents, stacked as a menu. */
+.ai-picker{position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%);z-index:30;display:flex;flex-direction:column;gap:6px;align-items:stretch;min-width:200px;max-width:min(92vw,300px);padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:0 10px 28px rgba(0,0,0,.5)}
+.ai-picker .btn{white-space:nowrap}
+.ai-picker-label{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;letter-spacing:.06em;color:var(--text-dim);text-transform:uppercase;text-align:center;margin-top:4px;padding-top:8px;border-top:1px solid var(--border)}
 .browser-section{margin-bottom:32px}
 .section-hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
 .section-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;letter-spacing:.18em;color:var(--gold);text-transform:uppercase}
@@ -168,6 +173,14 @@ const css = baseCss + `
 .lobby-grid>.open-section{grid-column:1;grid-row:1}
 .lobby-grid>.active-section{grid-column:2;grid-row:1}
 .lobby-grid>.history-section{grid-column:3;grid-row:1}
+/* Mobile-only tabbed lobby: a segmented bar that picks one section to show in the
+   single-column layout (see the max-width:780px block). Hidden on desktop, where all
+   three sections show side by side. */
+.lobby-tabs{display:none;gap:6px;margin-bottom:18px;background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:4px}
+.lobby-tab{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:7px;background:transparent;border:none;color:var(--text-dim);cursor:pointer;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;letter-spacing:.04em;padding:9px 4px;border-radius:9px;transition:background .15s,color .15s}
+.lobby-tab.sel{background:var(--gold);color:#0f0e0c;font-weight:700}
+.lobby-tab-count{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:rgba(0,0,0,.18);color:inherit;font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-size:.72rem;font-weight:600;letter-spacing:0}
+.lobby-tab:not(.sel) .lobby-tab-count{background:var(--surface);color:var(--text-muted)}
 /* Each column's card list behaves like the in-game move log: capped to the viewport
    and scrolls INTERNALLY instead of growing the page (the long History list otherwise
    made the page very tall). Desktop 3-col only — tablet/phone stack and scroll the
@@ -185,11 +198,21 @@ const css = baseCss + `
   .lobby-grid>.history-section{grid-column:1 / span 2;grid-row:2}
 }
 @media(max-width:780px){
-  .lobby-grid{grid-template-columns:1fr}
-  .lobby-grid>.open-section{grid-column:1;grid-row:1}
-  .lobby-grid>.active-section{grid-column:1;grid-row:2}
-  .lobby-grid>.history-section{grid-column:1;grid-row:3}
-  .lobby-grid>.browser-section{margin-bottom:24px}
+  /* Single column, one section at a time selected by the tab bar above. */
+  .lobby-tabs{display:flex}
+  .lobby-grid{grid-template-columns:1fr;gap:0}
+  .lobby-grid>.browser-section{grid-column:1;grid-row:auto;margin-bottom:0}
+  /* Show only the active tab's section. */
+  .lobby-grid.tab-open>.active-section,
+  .lobby-grid.tab-open>.history-section,
+  .lobby-grid.tab-active>.open-section,
+  .lobby-grid.tab-active>.history-section,
+  .lobby-grid.tab-history>.open-section,
+  .lobby-grid.tab-history>.active-section{display:none}
+  /* The tab already labels the section — drop the big redundant heading, keep the
+     muted context line on its own. */
+  .lobby-grid .section-hd .section-title{display:none}
+  .lobby-grid .section-hd{margin-bottom:10px}
 }
 /* History cards: Won/Lost badge + the final scores (winner brighter), wraps freely. */
 .history-card .game-card-title{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;white-space:normal;overflow:visible}
@@ -572,6 +595,10 @@ const css = baseCss + `
   .browser{padding:20px 14px 40px}
   .browser-title{font-size:1.4rem}
   .browser-header{padding-left:14px;padding-right:14px}
+  /* Compact the toggle + Create Game so the pair fits side by side on phones. */
+  .create-controls{gap:8px}
+  .create-controls .len-btn{padding:8px 10px;font-size:.74rem}
+  .create-controls .ai-picker-wrap>.btn{padding:10px 14px;font-size:.82rem}
   .game{padding:6px}
   .game-card{padding:10px 12px}
 
@@ -857,8 +884,9 @@ export default function SpenderApp() {
 	const [activeGames, setActiveGames] = useState([]);   // ALL in-progress games (yours + others')
 	const [historyGames, setHistoryGames] = useState([]); // your FINISHED games (vs AI or humans)
 	const [browserLoading, setBrowserLoading] = useState(false);
-	const [showAiPicker, setShowAiPicker] = useState(false);
+	const [showCreateMenu, setShowCreateMenu] = useState(false);
 	const [winPoints, setWinPoints] = useState(15);   // 15 = Classic, 21 = Long mode
+	const [lobbyTab, setLobbyTab] = useState("open");  // mobile-only: which lobby section is shown (open|active|history)
 
 	const playerName = authUser?.name || "";
 
@@ -1804,39 +1832,58 @@ export default function SpenderApp() {
 				</div>
 				<div className="browser">
 					<div className="browser-create">
+						<div className="create-controls">
 						<div className="length-toggle" title="Game length (Classic = race to 15, Long = race to 21) — also filters the open games below">
 							{[[15, "Classic 15"], [21, "Long 21"]].map(([wp, label]) => (
 								<button key={wp} type="button" className={`len-btn${winPoints === wp ? " sel" : ""}`}
 									onClick={() => setWinPoints(wp)}>{label}</button>
 							))}
 						</div>
-						<button className="btn btn-gold" title="Create a game for 2-4 players — friends join from Open Games (or your room code)"
-							onClick={() => handleCreate(false, "A", winPoints)}>
-							+ Create Game
-						</button>
 						<div className="ai-picker-wrap">
-							<button className={`btn btn-outline${showAiPicker ? " active" : ""}`}
-								onClick={() => setShowAiPicker(v => !v)}>
-								Play vs AI {showAiPicker ? "▴" : "▾"}
+							<button className={`btn btn-gold${showCreateMenu ? " active" : ""}`}
+								title="Create a game — play a friend or one of the AI opponents"
+								onClick={() => setShowCreateMenu(v => !v)}>
+								+ Create Game {showCreateMenu ? "▴" : "▾"}
 							</button>
-							{showAiPicker && (
+							{showCreateMenu && (
 								<div className="ai-picker">
-									<span className="ai-picker-label">Choose AI opponent</span>
+									<button className="btn btn-gold btn-sm"
+										title="Create a game for 2-4 players — friends join from Open Games (or your room code)"
+										onClick={() => { setShowCreateMenu(false); handleCreate(false, "A", winPoints); }}>
+										vs Friend
+									</button>
+									<span className="ai-picker-label">vs AI</span>
 									{["H2", "H3", "S"].map(v => (
 										<button key={v} className="btn btn-outline btn-sm"
-											onClick={() => { setShowAiPicker(false); handleCreate(true, v, winPoints); }}>
+											onClick={() => { setShowCreateMenu(false); handleCreate(true, v, winPoints); }}>
 											{aiPersona(v)} ({AI_TIERS[v]})
 										</button>
 									))}
 								</div>
 							)}
 						</div>
+						</div>
 						<button className="refresh-btn" title="Refresh" onClick={() => fetchGames(authUser)}>
 							{browserLoading ? <span className="spinner" /> : "↻"}
 						</button>
 					</div>
 
-					<div className="lobby-grid">
+					{/* Mobile-only tab bar: pick one section to show in the single-column layout. */}
+					<div className="lobby-tabs" role="tablist">
+						{[
+							["open", "Open", openGames.filter(g => (g.win_points || 15) === winPoints).length],
+							["active", "Active", activeGames.filter(g => (g.win_points || 15) === winPoints).length],
+							["history", "History", historyGames.filter(g => (g.win_points || 15) === winPoints).length],
+						].map(([key, label, count]) => (
+							<button key={key} type="button" role="tab" aria-selected={lobbyTab === key}
+								className={`lobby-tab${lobbyTab === key ? " sel" : ""}`}
+								onClick={() => setLobbyTab(key)}>
+								{label}{count > 0 ? <span className="lobby-tab-count">{count}</span> : null}
+							</button>
+						))}
+					</div>
+
+					<div className={`lobby-grid tab-${lobbyTab}`}>
 					<div className="browser-section open-section">
 						<div className="section-hd">
 							<span className="section-title">Open Games</span>
@@ -1883,11 +1930,11 @@ export default function SpenderApp() {
 						</div>
 						{(!authUser || authUser.guest) ? (
 							<div className="empty-state">Log in to see your game history.</div>
-						) : historyGames.length === 0 ? (
-							<div className="empty-state">No finished games yet.</div>
+						) : historyGames.filter(g => (g.win_points || 15) === winPoints).length === 0 ? (
+							<div className="empty-state">No finished {winPoints === 21 ? "Long (21)" : "Classic (15)"} games yet.</div>
 						) : (
 							<div className="game-cards">
-								{historyGames.map(g => {
+								{historyGames.filter(g => (g.win_points || 15) === winPoints).map(g => {
 									// History is always YOUR games, so drop the repeated "you" —
 									// just show Won/Lost vs the opponent(s) and the score (yours-theirs).
 									const me = g.players.find(p => p.is_you);
@@ -1915,14 +1962,15 @@ export default function SpenderApp() {
 						// All in-progress games (yours + others'). Yours pinned to the top;
 						// each sub-list is already updated_at-desc from the backend.
 						const hasMe = g => [g.player1_id, g.player2_id, g.player3_id, g.player4_id].includes(myId);
-						const mine = activeGames.filter(hasMe);
-						const others = activeGames.filter(g => !hasMe(g));
+						const lenGames = activeGames.filter(g => (g.win_points || 15) === winPoints);
+						const mine = lenGames.filter(hasMe);
+						const others = lenGames.filter(g => !hasMe(g));
 						const ordered = [...mine, ...others];
 						return (
 							<div className="browser-section active-section">
 								<div className="section-hd">
 									<span className="section-title">Active Games</span>
-									<span className="small-muted">{activeGames.length} in progress</span>
+									<span className="small-muted">{ordered.length} in progress</span>
 								</div>
 								{ordered.length === 0 ? (
 									<div className="empty-state">No games in progress.</div>
