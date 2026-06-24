@@ -607,6 +607,7 @@ def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]
                     state["ai_card_values"] = _h3_card_values(game, persp)
                 elif room["ai_variant"] == "S":
                     state["ai_card_values"] = _s_card_values(game, persp)
+                    state["ai_position_eval"] = _s_position_eval(game, persp)
                 else:
                     state["ai_card_values"] = _v4_card_values(game, persp)
             except Exception:
@@ -1022,6 +1023,24 @@ def _s_card_values(game: dict, seat_pid: str) -> dict:
     for ci in s.reserved[seat]:
         out[_aze.CARD_NAME[ci]] = rec(ci)
     return out
+
+
+def _s_position_eval(game: dict, seat_pid: str):
+    """Variant-S whole-POSITION evaluation (v_state.value) from seat_pid's perspective (whoever's
+    turn it is, matching the per-card overlay), in [-1, 1]: +1 = that seat winning, -1 = losing.
+    This is the static leaf S's search is built on — instant, no search — surfaced alongside the
+    per-card values for the admin AI-values button. Returns None if the seat can't be resolved.
+    Wrapped by callers in try/except. (Uses base 15-point weights even on a 21-point game, mirroring
+    _s_card_values; the S21 overrides are transient to the search only.)"""
+    from games.spender.ai.az import engine as _aze
+    from games.spender.ai.az import v_state as _azvs
+
+    try:
+        seat = game["order"].index(seat_pid)
+    except (KeyError, ValueError):
+        return None
+    s = _aze.from_game_dict(game)
+    return round(_azvs.value(s, seat), 3)
 
 
 # ─── S21: 21-point specialization of variant S ──────────────────────────────────

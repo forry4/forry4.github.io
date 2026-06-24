@@ -322,6 +322,10 @@ const css = baseCss + `
 /* The "Show AI values" toggle sits at the far LEFT of the actions box (Take/Buy stay
    to its right); same gold styling as the action buttons via .btn.btn-gold. */
 .ai-vals-toggle{margin-right:auto}
+/* S's whole-position eval chip, shown beside the toggle when the overlay is on (S games only). */
+.ai-pos-eval{display:inline-flex;align-items:center;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;font-weight:600;color:#e8c86a;background:rgba(0,0,0,.4);border:1px solid rgba(201,168,76,.4);border-radius:5px;padding:1px 7px;white-space:nowrap}
+.ai-pos-eval.mine{color:#8fdca0;border-color:rgba(143,220,160,.5)}
+.ai-pos-eval b{color:#9a8fb0;font-weight:700;margin-right:3px}
 .card:hover{border-color:rgba(201,168,76,.5);transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.4)}
 .card.selected{border-color:var(--gold-light);box-shadow:0 0 0 2px var(--gold-light)}
 .card.affordable{border-color:var(--green-gem)}
@@ -1650,16 +1654,26 @@ export default function SpenderApp() {
 	// overlay (computed for whoever's turn it is) can be toggled any time.
 	function renderAiValsToggle() {
 		if (game.phase === "over" || !authUser?.is_admin || !roomData?.ai_card_values) return null;
+		const ev = roomData?.ai_position_eval;   // S only: whole-position eval from the mover's seat
+		const mine = roomData?.ai_values_pid === myId;
 		return (
-			<button className="btn btn-gold ai-vals-toggle"
-				title="Show/hide the per-card AI value overlay (computed for whoever's turn it is)"
-				onClick={() => setShowAiVals(v => {
-					const n = !v;
-					try { localStorage.setItem("spender_show_ai_vals", n ? "1" : "0"); } catch {}
-					return n;
-				})}>
-				{showAiVals ? "Hide AI values" : "Show AI values"}
-			</button>
+			<>
+				<button className="btn btn-gold ai-vals-toggle"
+					title="Show/hide the per-card AI value overlay (computed for whoever's turn it is)"
+					onClick={() => setShowAiVals(v => {
+						const n = !v;
+						try { localStorage.setItem("spender_show_ai_vals", n ? "1" : "0"); } catch {}
+						return n;
+					})}>
+					{showAiVals ? "Hide AI values" : "Show AI values"}
+				</button>
+				{showAiVals && ev != null && (
+					<span className={`ai-pos-eval${mine ? " mine" : ""}`}
+						title={`S's evaluation of the whole position from ${mine ? "your" : "the AI's"} perspective (+1 = ${mine ? "you" : "AI"} winning, −1 = losing)`}>
+						<b>S</b>{ev >= 0 ? "+" : ""}{ev.toFixed(2)}
+					</span>
+				)}
+			</>
 		);
 	}
 
