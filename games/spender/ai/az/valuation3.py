@@ -282,6 +282,21 @@ GOLD_BANK_CAP = 2   # gems of the bottleneck color assumed pullable from the ban
 ENG_DIV = 8.0       # engine_value: PTS divisor (higher = flatter; values broad colors over point-heavy ones)
 ENG_FLOOR = 0.2     # engine_value: zero-point floor in each card's weight
 ENG_DECK_W = 3.5    # engine_value: weight on the forward-looking deck-demand term
+# EXPERIMENT (default OFF): stage-conditional reweighting of the deck-demand term ACROSS LEVELS.
+# The base term equal-weights every undealt card, but the large L1 pile is mostly never bought (esp.
+# late) while L3 is what you realize late -> the realized future demand shifts L1->L3 over the game.
+# This tilts the per-level weight toward higher levels as turns_remaining shrinks, RENORMALIZED so the
+# overall deck-term magnitude is unchanged (we test redistribution, NOT a lower ENG_DECK_W). Per level:
+# stage = clamp((T0 - turns_remaining)/T0, 0, 1); L1 *= (1 - TILT*stage), L2 *= 1, L3 *= (1 + TILT*stage).
+DECK_STAGE_TILT = 0.0  # 0.0 = OFF (byte-identical). >0 fades L1 / ramps L3 as the game progresses.
+DECK_STAGE_T0 = 22.0   # turns_remaining at/above which stage=0 (no tilt; early-game horizon)
+# EXPERIMENT (default OFF): make the deck-demand term SEAT-AWARE / bonus-discounted. The base term sums
+# RAW undealt-card cost (seat-blind), so it over-credits piling another bonus into a color you've already
+# built (no diminishing returns) -- inconsistent with the board-uplift term, which IS post-bonus. With
+# this on, each undealt card's per-color cost is reduced by the seat's existing bonuses (max(0, cost-bon))
+# before summing, then RENORMALIZED to sum 1 (magnitude preserved, like DECK_STAGE_TILT -- isolates the
+# redistribution-toward-unbuilt-colors from any overall ENG_DECK_W change). False = OFF (byte-identical).
+DECK_BONUS_DISCOUNT = True   # ADOPTED 2026-06-23: un-renormalized form won S-vs-frozen-S (fresh 0.5425)
 # Per-card weight model for engine_value. The +1 bcol bonus's value to card cj is the actual cost
 # it saves cj: 1 gem (always, since cj needs bcol to be in this sum) + 1 turn if it lowers cj's
 # steepest-remaining color (reduces_tempo). This REPLACED the old w_scarcity = COST[bcol]/sum(COST)
@@ -900,7 +915,7 @@ class Valuation:
                  "w_tempo", "w_gem", "w_gold", "_take0_cache", "_pot_cache", "_fp_cache",
                  "_turns_cache", "_build_fp", "_dt_cache", "_comp_cache",
                  "_noble_terms_cache", "_noble_comp_cache", "_rtempo_cache",
-                 "_tempo_cache", "_cost_cache", "_cards_real_cache")
+                 "_tempo_cache", "_cost_cache", "_cards_real_cache", "_deck_demand_cache")
 
     def __init__(self, s: E.State, w_tempo: float = 0.5, w_gem: float = 0.2,
                  w_gold: float = 0.4):
@@ -933,12 +948,13 @@ class Valuation:
         self._tempo_cache = {}        # (ci, seat) -> tempo (recomputed per card across noble/cost paths)
         self._cost_cache = {}         # (ci, seat, extra_bcol) -> _cost_scalar (take_value cost)
         self._cards_real_cache = {}   # seat -> all board+reserved cards < 90 (gates the C engine_value)
+        self._deck_demand_cache = {}  # seat -> bonus-discounted renormalized deck demand (DECK_BONUS_DISCOUNT)
         self._fp_cache = {}   # seat -> {card_id: converged engine value} (ENG_FIXEDPOINT path)
         self._turns_cache = None   # estimated game turns_remaining (state-level, cached)
         # Permanent-bonus future value: share of remaining (undealt) deck cost
         # that is each color. A bonus in a deck-heavy color keeps paying off on
         # cards not yet revealed, not just the 12 on the board.
-        if cython.compiled:
+        if cython.compiled and not DECK_STAGE_TILT:
             # C accumulation over all undealt deck cards (the big per-Valuation inner loop). Deck cards
             # are always real (< 90); a stray synthetic card falls back to E.COST per-card for safety.
             demand_c = cython.declare(cython.int[5])
@@ -965,6 +981,24 @@ class Valuation:
                                           1.0 * demand_c[4] / total_c]
             else:
                 self.deck_color_demand = [0.0] * 5
+        elif DECK_STAGE_TILT:
+            # stage-conditional per-level reweight, RENORMALIZED (preserves overall magnitude):
+            # the realized future demand shifts L1->L3 as the game ends. Pure-Python path (the flag
+            # also routes the compiled build here via the guard above).
+            tr = self.estimated_turns_remaining()
+            stage = (DECK_STAGE_T0 - tr) / DECK_STAGE_T0
+            stage = 0.0 if stage < 0.0 else (1.0 if stage > 1.0 else stage)
+            lvl_w = (max(0.0, 1.0 - DECK_STAGE_TILT * stage), 1.0, 1.0 + DECK_STAGE_TILT * stage)
+            demand = [0.0, 0.0, 0.0, 0.0, 0.0]
+            total = 0.0
+            for lvl in range(3):
+                w = lvl_w[lvl]
+                for ci in s.decks[lvl]:
+                    cost = E.COST[ci]
+                    for i in range(5):
+                        demand[i] += w * cost[i]
+                        total += w * cost[i]
+            self.deck_color_demand = [d / total for d in demand] if total else [0.0] * 5
         else:
             demand = [0, 0, 0, 0, 0]
             total = 0
@@ -1060,7 +1094,10 @@ class Valuation:
                     continue
                 if E.COST[cj][bcol] - bon_b > 0:
                     ev += RESERVED_ENGINE_W * self._delta_take(cj, seat, bcol)
-            ev += self.deck_color_demand[bcol] * ENG_DECK_W
+            if DECK_BONUS_DISCOUNT:                          # seat-aware bonus-discounted deck demand
+                ev += self._deck_demand_seat(seat)[bcol] * ENG_DECK_W
+            else:
+                ev += self.deck_color_demand[bcol] * ENG_DECK_W
         return ev
 
     def _cards_real(self, seat: int) -> bool:
@@ -1074,6 +1111,36 @@ class Valuation:
             v = all(c < _N_CARDS_C for c in s.board) and all(c < _N_CARDS_C for c in s.reserved[seat])
             self._cards_real_cache[seat] = v
         return v
+
+    def _deck_demand_seat(self, seat: int):
+        """Seat-aware deck-demand (DECK_BONUS_DISCOUNT): per color, the undealt-deck cost NOT already
+        covered by `seat`'s bonuses -- sum over undealt cards of max(0, cost[c] - bonus[c]) -- normalized
+        by the RAW deck total (NOT the discounted total). This is the ACCURATE form: a color you've fully
+        covered -> 0, every OTHER color keeps its TRUE demand (no renormalization inflating them), and the
+        overall magnitude legitimately SHRINKS as you cover colors (you've genuinely consumed future deck
+        value). Compensate the magnitude drop via ENG_DECK_W if needed -- do NOT renormalize it away (an
+        earlier renormalized variant inflated the un-built colors and lost ~0.46 vs frozen-S).
+        Cached per seat (the undealt deck + bonuses are fixed for this Valuation)."""
+        cached = self._deck_demand_cache.get(seat)
+        if cached is not None:
+            return cached
+        s = self.s
+        bon = s.bonuses[seat]
+        demand = [0.0, 0.0, 0.0, 0.0, 0.0]
+        raw_total = 0.0
+        for lvl in range(3):
+            for ci in s.decks[lvl]:
+                cost = E.COST[ci]
+                for c in range(5):
+                    cc = cost[c]
+                    if cc > 0:
+                        raw_total += cc
+                        rem = cc - bon[c]
+                        if rem > 0:
+                            demand[c] += rem
+        out = [d / raw_total for d in demand] if raw_total else [0.0] * 5
+        self._deck_demand_cache[seat] = out
+        return out
 
     def _engine_value_h3_c(self, ci, seat):
         """Compiled C twin of engine_value's H3 path for the deployed flag config (USE_POTENTIAL_ENGINE,
@@ -1089,19 +1156,24 @@ class Valuation:
         bank_l = s.bank
         board_l = s.board
         res_l = s.reserved[seat]
-        dcd_l = self.deck_color_demand
+        dcd_l = self.deck_color_demand                  # seat-blind: feeds the inner eng_base (matches Python path)
+        # seat-aware bonus-discounted deck demand (#4) for the TOP-LEVEL deck term ONLY; eng_base keeps
+        # the seat-blind vector. Cached per seat (_deck_demand_cache) -> a cache hit after the first card.
+        dcd_top_l = self._deck_demand_seat(seat) if DECK_BONUS_DISCOUNT else self.deck_color_demand
         bon = cython.declare(cython.int[5])
         tok = cython.declare(cython.int[5])
         bank = cython.declare(cython.int[5])
         board = cython.declare(cython.int[12])
         res = cython.declare(cython.int[3])
         dcd = cython.declare(cython.double[5])
+        dcd_top = cython.declare(cython.double[5])
         k = cython.declare(cython.int)
         for k in range(5):
             bon[k] = bon_l[k]
             tok[k] = tok_l[k]
             bank[k] = bank_l[k]
             dcd[k] = dcd_l[k]
+            dcd_top[k] = dcd_top_l[k]
         for k in range(12):
             board[k] = board_l[k]
         nres = cython.declare(cython.int, cython.cast(cython.int, len(res_l)))   # reserved <= 3
@@ -1159,7 +1231,7 @@ class Valuation:
                 pot = PTS_C[cj] + pot_w * eb_val
                 delta = pot * gap
                 ev += res_w * delta
-        ev += dcd[bcol] * deck_w
+        ev += dcd_top[bcol] * deck_w
         return ev
 
     def _engine_value_legacy(self, ci: int, seat: int, _recurse: bool = True) -> float:

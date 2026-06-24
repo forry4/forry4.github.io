@@ -1675,6 +1675,70 @@ local gitignored file `C:\Users\Forrest\.spender_turso`; query via `curl` POST t
 libSQL HTTP API) — no libsql Python wheel needed. Note `list_user_games` excludes `status='over'`, so finished
 games aren't listable via the API — query the DB directly for them.
 
+### Session (June 23 2026, `evaluations` worktree — SHIPPED to main with the k6 push, June 24)
+**Tuning metric HARDENED + harness trimmed.** Judge AI tuning by **S-vs-frozen-S ONLY** — the H3/H3N/H3R panel is now **opt-in** behind `config_selfgate --panel` (default = sanity + screen + fresh holdout, nothing else; never run the panel unless explicitly asked). `--sanity-n` (default 10 PAIRS = 20 games): frozen-vs-frozen is *deterministically* 0.5 under paired CRN, so a handful confirms the harness is unbiased — don't spend the full `--n` on it. Ported the `_AggrH3` H3N/H3R opponents (were uncommitted on `heuristics`) into the evaluations `h3_vs_h2.py` + `vsearch_camp.py` `OPP` so `--panel` doesn't `KeyError`.
+
+**#4 — seat-aware / bonus-discounted deck demand (`valuation3.DECK_BONUS_DISCOUNT`) — ADOPTED (default True).** `engine_value`'s deck term was seat-BLIND (raw undealt-deck color cost, same for all players). Now seat-AWARE (`_deck_demand_seat`): per undealt card subtract the seat's bonuses (`max(0, cost[c]-bonus[c])`), **normalized by the RAW deck total** — so a color you've fully covered → ~0, the OTHER colors keep their TRUE value, and overall magnitude legitimately SHRINKS as your engine fills in. WON: **fresh 0.5425 vs frozen-S (SHIP)**. The first cut RENORMALIZED (÷ discounted total → sum 1) and LOST (fresh 0.4775): **DO NOT renormalize a bonus-discount** — it inflates the un-built colors (fabricated demand); let magnitude drop, compensate via `ENG_DECK_W` if needed. Only the TOP-LEVEL deck term is seat-aware; `eng_base` (legacy level-0, inside `potential`/`_delta_take`) STILL uses the seat-blind `deck_color_demand` — matches the validated Python path.
+
+**Dev-box Cython + the #4 monolith fix.** Compiled `valuation3` on the dev box (cython 3.2.5 / Py3.14 → `valuation3.cp314-win_amd64.pyd`) so the offline gates run the compiled leaf, not pure Python. **The `.pyd` SHADOWS the `.py` — recompile (`cythonize -i -3 games/spender/ai/az/valuation3.py`) after EVERY `valuation3` edit or workers silently use STALE code** (verify byte-identical via the build-gate tests + a differential `engine_value` signature hash). **Extended the C monolith `_engine_value_h3_c` to handle #4** (it was gated `not DECK_BONUS_DISCOUNT`, routing #4 to the slow Python path). FOOTGUN: the monolith fed ONE `dcd` vector into BOTH the inner `_eng_base_c` AND the top-level deck term; a naive single-vector swap to seat-aware broke byte-identity (**0.077 error**) because `eng_base` must stay seat-blind. Fix = TWO vectors — `dcd` (seat-blind → `_eng_base_c`) + `dcd_top` (seat-aware → the top-level `ev += dcd_top[bcol]*deck_w` only). Byte-identical confirmed (sig match + max-diff 0.000 + 32 tests).
+
+**REJECTED this session (all S-vs-frozen-S; flags default-off / byte-identical):**
+- **`heuristic3.TEMPO_TURNS_SCALE`** (late-game tempo-weight scaling off measured turns_remaining): WASH (fresh 0.5012). Time is already carried by the `compound_turns` engine horizon; re-penalizing tempo in the cost denominator is redundant.
+- **Progress breadth — PARTLY SUPERSEDED, see the June 24 "k6" block below.** `v_state` gained `PROGRESS_TOPK`/`PROGRESS_DECAY` (cascade-weighted progress over the top-K take_values; `W_PROGRESS` now a probe key) — `_progress` was a top-2 mean, blind to ~10 reachable cards. The cascade "winner" (top-5, W=3.4, fresh 0.5275) was a **CONFOUND**: the true magnitude-match for flat top-5 is **W=2.92, not 3.4** (measured take_value means: top-2 ≈1.93, top-5 ≈1.65, top-8 ≈1.48), so it ran ~16% extra progress weight. At TRULY matched magnitude, **k=8 WASHED** (flat W=3.26 fresh 0.5038) — so breadth *at matched magnitude* is NOT a lever, and *pure* magnitude (top-2 + W∈{2.7,2.9}) also went sub-0.5. **The June-24 follow-up found the real effect is the INTERACTION** — breadth (K≈4–6) AND over-magnitude (~1.16–1.3×) *together* give ~+4pp; neither alone does. (Magnitude-compensation is MULTIPLICATIVE: progress contribution = `W_PROGRESS × mean(top-k)`; match the PRODUCT — `W = 2.5 × baseline_mean / new_mean` — not the mean.)
+- Built-but-unrun: `valuation3.DECK_STAGE_TILT`/`DECK_STAGE_T0` (level-realization tilt of the deck term — the "L1 over-counted, never shifts to L3" idea) and an asymmetric-progress idea (top-1 for the side-to-move, top-2 for the waiter — bakes denial/tempo into the leaf).
+
+**Game-replay limitation (found analyzing a real loss — LBBMRC, lost 14–20 to S: led on points but ignored the noble race; S swept 3 nobles).** Per-turn `v_state` CANNOT be reconstructed for EXISTING games: the saved game stores only the FINAL board/deck + an id-only move log — NOT per-turn board snapshots NOR the initial deck order/seed — and `progress` needs the board each turn. **To make FUTURE games replayable** (and re-scorable under any eval variant): in `main.py` store an initial `setup` snapshot (shuffled deck order + board + nobles) at game creation (`_deal_board` mutates `decks` in place; no seed is saved), AND **log `discard` moves** (the human `discard` path + `_ai_discard_one` aren't logged → token counts drift on replay). Then replay = rebuild from `setup` → re-apply the log → `from_game_dict` → `v_state.value` per ply. NOT yet implemented.
+
+**Ops — gates kept dying with exit 127 = OOM.** Root cause: an ORPHAN PILEUP — a failed `mp.Pool` run leaves worker processes alive that eat RAM → the next gate OOMs → more orphans (vicious cycle). **Reap `C:\Python314\python.exe` procs before each gate.** Run gates with **`SPENDER_AZ_MODEL=none`** (the self-gate uses S/H3, NOT variant Z — skips the per-worker `az_model.npz` load, a big memory saver). The box is ~16GB but often <1GB free (VS Code + Firefox) and **CPU-bound at ~10 of 12 cores** (more workers don't help). **Don't edit `az/` modules while a gate runs** (Windows `mp` spawn re-imports → BrokenPipe crash). Remaining speed levers (diminishing — leaf already compiled): naive-cythonize `mcts.py`+`engine.py` (~10–15%), then `@cython.cclass` Valuation (~1.3–1.4×, large rewrite); past that, a bigger box (CPU-bound).
+
+### Session (June 24 2026) — k6 progress adoption + past-S checkpoints (SHIPPED to main)
+**k6 — `v_state` PROGRESS_TOPK 2→6 + W_PROGRESS 2.5→3.54 — ADOPTED + DEPLOYED.** This REVERSES the
+June-23 "breadth is not a lever" conclusion: breadth IS a small lever, but **only paired with an
+over-matched magnitude** — the INTERACTION the prior session missed by testing each axis alone. An
+overnight K×magnitude grid (sims=500) then a **fresh disjoint-seed confirmation** found a coherent
+ridge peaking at **K≈4–6, magnitude ~1.16–1.3×M0**: k4@1.30× and k6@1.16× both held ~0.54 across
+seed bases; k3 (too little breadth) and k5@1.30× (too much magnitude) fell off. `PROGRESS_DECAY`
+stayed **1.0** (plain mean) — the cascade/decay shape was a confound, not the lever. Evidence (all
+S-vs-frozen-S unless noted): self-gate **0.543 / 0.545 / 0.531 across THREE disjoint seed bases**
+(pooled ~0.540, the third-seed pullback says the true effect is the LOW end, ~+4pp); **H3/H3N/H3R RPS
+panel PASS** (worst matchup +0.018, no exploitation — slight −0.017 vs racer H3R, +0.033 vs noble
+H3N, the documented progress-helps-vs-noble pattern); **past-selves panel ≥0.5 vs all** (0.579 vs
+frozen, 0.591 vs s_original, 0.574 vs s_pre_progress, **0.500 vs s_noble_heavy**, avg 0.561 — never
+loses to a style, worst case a tie vs the noble-lean). A real, robust, SMALL gain — eval-weight
+tuning remains otherwise saturated; this snuck through as a structure (breadth)×magnitude combo.
+
+**Past-S checkpoint system — NEW offline tooling (`s_checkpoints.py` + `s_vs_checkpoints.py`).** S has
+no weight file; its "weights" are module constants. A **checkpoint** = a JSON snapshot of all **90
+strategy constants, PER-MODULE** (so dup names like `NOBLE_TURN_W` in both v_state & valuation3 are
+unambiguous) across v_state/vsearch/heuristic3/valuation3; serving/infra (`SIMS`/`SERVE_*`/caps) are
+excluded. Small, **committed** JSON in `games/spender/ai/az/s_checkpoints/` (NOT gitignored, unlike AZ
+weights); each stamps git commit + timestamp.
+- **`s_checkpoints.py`**: `snapshot`/`save`/`load`/`apply_config` + **`reconstruct <commit>`** (overlay
+  a past commit's constant values on today's full snapshot — keys absent then keep today's default) +
+  **`derive --set K=V`** (today + targeted overrides) + CLI (`save`/`list`/`show`/`reconstruct`/`derive`).
+- **KEY semantic (do not misread):** a checkpoint reproduces "that era's WEIGHTS on TODAY's code" — a
+  reproducible **STYLE**, NOT a bit-exact old S. So every newer feature (#4, the Cython leaf, structural
+  fixes) is present and ON in all past selves; they differ only in the weight LEVERS that existed and
+  were set differently. Intentional: we want strong, same-strength, style-DIVERSE sparring partners
+  (resurrecting old code would just give a weaker S). Confirmed e.g. `s_original` carries pre-maximin
+  `W_ENGINE_STK=0.8`/`C_PUCT=2.0` but `DECK_BONUS_DISCOUNT=True` (too new to exist at da18bab).
+- **`s_vs_checkpoints.py`**: panel-of-past-selves runner — protagonist (live ± `--set`) vs a set of
+  checkpoints via the **per-turn config swap** (the ONLY safe way to run S-vs-S with two configs sharing
+  module globals: re-assert each side's full config before its move). Paired CRN, parallel. Validated:
+  `live vs its-own-checkpoint = 0.5000 EXACTLY`.
+- **Purpose + CAVEAT:** a same-strength, diverse **RPS guard** the H3 panel can't be (S beats the
+  heuristics ~80% regardless, so 75-vs-80 is saturated) + a progress tracker. It does **NOT** probe a
+  brand-new knob's OWN axis (every checkpoint has `PROGRESS_TOPK=2` — topk is newer than every commit),
+  so it tests a candidate vs diverse *other-lever* styles, not vs topk variety; k6's real validation was
+  the self-gate + H3 panel, the past-selves run a bonus robustness check. **Value compounds — save a
+  checkpoint on every adoption.** 5 committed: `s_2026-06-24` (pre-k6 baseline), `s_2026-06-24_k6`
+  (ADOPTED/deployed), `s_original` (da18bab), `s_pre_progress` (fb813cf^), `s_noble_heavy` (today+NOBLE 5.0).
+
+**Forward direction the user raised: build the panel from S-strength diverse opponents** (past-S
+checkpoints + future "S-rusher"/"S-nobler" derived variants), and consider an **"S-lite" playable tier**
+(depth-2 or tiny-sim search) as a strong-but-instant opponent given the heuristics are too weak and the
+deployed S is sims-starved on Render's 0.1 CPU.
+
 ### Hard-won conclusions — DO NOT relitigate
 These cost many self-play/training cycles to establish:
 - **Eval-weight tuning is saturated.** One gain (0.725 vs original), nothing since. The first run captured it.

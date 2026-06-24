@@ -46,7 +46,11 @@ _PROBE_KEYS = ["PRIOR_UNIFORM", "POLICY_TEMP", "C_PUCT", "BACKUP_LAMBDA",
                "ENDGAME_TIEBREAK_W", "NOBLE_MULTI_W", "W_NOBLE",  # v_state (Gap A + multi-noble + its magnitude)
                "NOBLE_SCALE", "NOBLE_COUNT_W",                    # heuristic3/valuation3 (noble weight + overlap shape)
                "ENDGAME_SIM_MULT", "ENDGAME_SERVE_TIME", "ENDGAME_NEAR",  # vsearch (Gap B)
-               "USE_DENY2"]  # heuristic3 (2-turn endgame denial)
+               "USE_DENY2",  # heuristic3 (2-turn endgame denial)
+               "TEMPO_TURNS_SCALE", "TEMPO_TURNS_T0",  # heuristic3 (late-game tempo-weight scaling)
+               "ENG_DECK_W", "DECK_STAGE_TILT", "DECK_STAGE_T0",  # valuation3 (deck-demand weight + level tilt)
+               "DECK_BONUS_DISCOUNT",  # valuation3 (seat-aware bonus-discounted deck demand)
+               "PROGRESS_TOPK", "PROGRESS_DECAY", "W_PROGRESS"]  # v_state (cascade-weighted progress over top-K targets + its weight)
 FROZEN: dict = {}
 
 
@@ -136,6 +140,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sims", type=int, default=160)
     ap.add_argument("--n", type=int, default=140)
+    ap.add_argument("--sanity-n", type=int, default=10,
+                    help="seed-PAIRS for the frozen-vs-frozen sanity (each pair = 2 games, so default "
+                         "10 = 20 games). Deterministically 0.5 under paired CRN, so a small count "
+                         "confirms the harness is unbiased; no need to spend the full --n.")
     ap.add_argument("--panel-n", type=int, default=140)
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 1))
     ap.add_argument("--configs", nargs="+", required=True)
@@ -143,6 +151,9 @@ def main():
     ap.add_argument("--hold-seed", type=int, default=3_000_000)
     ap.add_argument("--panel-seed", type=int, default=130_000_000)
     ap.add_argument("--step", type=int, default=100_000)
+    ap.add_argument("--panel", action="store_true",
+                    help="ALSO run the H3/H3N/H3R sanity panel. OFF by default: tuning is judged "
+                         "ONLY by S-vs-frozen-S (screen + fresh) unless this is explicitly passed.")
     args = ap.parse_args()
 
     global FROZEN
@@ -154,8 +165,8 @@ def main():
     print(f"[config-selfgate] sims={args.sims} n={args.n} (={2*args.n} g/cfg) workers={workers}", flush=True)
     print(f"[frozen] {FROZEN}", flush=True)
     try:
-        s0 = selfgate(dict(FROZEN), args.n, args.screen_seed, args.sims, pool, workers)
-        print(f"[sanity] frozen-vs-frozen = {s0:.4f} (expect ~0.5)", flush=True)
+        s0 = selfgate(dict(FROZEN), args.sanity_n, args.screen_seed, args.sims, pool, workers)
+        print(f"[sanity] frozen-vs-frozen = {s0:.4f} (expect 0.5; n={args.sanity_n})", flush=True)
         scored = []
         for c, spec in zip(cfgs, args.configs):
             r = selfgate(c, args.n, args.screen_seed, args.sims, pool, workers)
@@ -169,14 +180,18 @@ def main():
         flo, fhi = wilson_ci(fresh, 2 * args.n)
         print(f"[fresh]  {best_spec} vs frozen (disjoint) = {fresh:.4f} (95% CI {flo:.3f}-{fhi:.3f})",
               flush=True)
-        cp = panel(best, args.panel_n, args.panel_seed, args.step, args.sims, pool, workers)
-        fp = panel(dict(FROZEN), args.panel_n, args.panel_seed, args.step, args.sims, pool, workers)
-        cmin, fmin = min(cp.values()), min(fp.values())
-        print(f"[panel] cand   avg {sum(cp.values())/len(cp):.4f} min {cmin:.3f}  {cp}", flush=True)
-        print(f"[panel] frozen avg {sum(fp.values())/len(fp):.4f} min {fmin:.3f}  {fp}", flush=True)
-        verdict = "SHIP" if (fresh > 0.52 and cmin >= fmin - 0.02) else "REJECT/WASH"
-        print(f"[verdict] {best_spec}: fresh {fresh:.4f}, panel-min {cmin-fmin:+.3f} -> {verdict}",
-              flush=True)
+        if args.panel:  # opt-in ONLY; default is S-vs-frozen-S exclusively
+            cp = panel(best, args.panel_n, args.panel_seed, args.step, args.sims, pool, workers)
+            fp = panel(dict(FROZEN), args.panel_n, args.panel_seed, args.step, args.sims, pool, workers)
+            cmin, fmin = min(cp.values()), min(fp.values())
+            print(f"[panel] cand   avg {sum(cp.values())/len(cp):.4f} min {cmin:.3f}  {cp}", flush=True)
+            print(f"[panel] frozen avg {sum(fp.values())/len(fp):.4f} min {fmin:.3f}  {fp}", flush=True)
+            verdict = "SHIP" if (fresh > 0.52 and cmin >= fmin - 0.02) else "REJECT/WASH"
+            print(f"[verdict] {best_spec}: fresh {fresh:.4f}, panel-min {cmin-fmin:+.3f} -> {verdict}",
+                  flush=True)
+        else:
+            verdict = "SHIP" if fresh > 0.52 else "REJECT/WASH"
+            print(f"[verdict] {best_spec}: fresh {fresh:.4f} -> {verdict}", flush=True)
     finally:
         if pool is not None:
             pool.close()

@@ -26,9 +26,9 @@ from . import heuristic3 as H3
 from . import v_state
 from . import vsearch
 from . import valuation3 as V3
-from .h3_vs_h2 import OPPONENTS, wilson_ci
+from .h3_vs_h2 import OPPONENTS, wilson_ci, H3N, H3R
 
-OPP = {**OPPONENTS, "H3": H3}   # fast-engine panel: {H, H2, H2N, H2R} + greedy H3
+OPP = {**OPPONENTS, "H3": H3, "H3N": H3N, "H3R": H3R}   # + the strong H3 style variants (sanity panel)
 
 
 def _apply_overrides(overrides: dict):

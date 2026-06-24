@@ -48,9 +48,13 @@ from . import valuation3 as V
 # ─── tunable weights (panel-tuned later by vsearch_autotune) ─────────────────────────────────
 W_POINTS = 1.0        # realized victory points (the hard currency)
 W_ENGINE_STK = 0.4    # forward value of bonuses already held (future-deck coverage); maximin-tuned (was 0.8)
-W_PROGRESS = 2.5      # imminent scoring strength: take_value of the best reachable targets. 1.5->2.5
+W_PROGRESS = 3.54     # imminent scoring strength: take_value of the best reachable targets. 1.5->2.5
                       # found by the self-gate (vs frozen-S) + confirmed at sims=400 (panel avg
                       # 0.8125->0.8262, min not worse); the weak panel's maximin tune had missed it.
+                      # 2.5->3.54 (June 2026, "k6"): a BREADTH+magnitude change paired with PROGRESS_TOPK
+                      # 2->6 -- the magnitude is over-matched to the wider mean. Real ~+4pp vs frozen-S,
+                      # replicated on 3 disjoint seed bases (0.543/0.545/0.531); passed the H3 RPS panel
+                      # (worst matchup +0.018) and the past-selves panel (>=0.5 vs all, min 0.500).
 W_NOBLE = 0.6         # progress toward the closest completable noble (time-gated)
 W_ECON = 0.3          # token economy: useful gold minus hoard pressure
 SCALE = 8.0           # points-equivalent margin that maps to tanh(1) ≈ 0.76
@@ -63,7 +67,13 @@ NOBLE_MULTI_W = 0.0   # credit toward SECONDARY nobles at the POSITION level. _n
                       # one toward 1 (you may claim several; breadth is also more robust to denial).
                       # Default 0 = max-only = byte-identical. (Per-card noble_progress already rewards
                       # multi-noble cards via its n-normalized sum; this is the position-eval counterpart.)
-PROGRESS_TOPK = 2     # average the top-K target take_values for the progress term
+PROGRESS_TOPK = 6     # how many top targets feed the progress term. 2->6 ("k6", June 2026): a wider
+                      # mean of reachable targets (rewards optionality/denial-robustness), paired with
+                      # W_PROGRESS 2.5->3.54 to over-match the magnitude. See W_PROGRESS for the evidence.
+PROGRESS_DECAY = 1.0  # geometric decay across the top-K take_values: weight_i = DECAY**i. 1.0 = equal
+                      # weight -> plain mean (byte-identical at TOPK=2). <1 emphasizes the best target
+                      # and tapers down the bench. NORMALIZED by the weight sum so progress stays a
+                      # weighted MEAN (same scale) -- tests breadth/shape, NOT a stealth W_PROGRESS bump.
 TURNS_REF = 12.0      # horizon normalizer (estimated_turns_remaining ~ 1..12)
 ENGINE_DR_EXP = 0.5   # diminishing-returns exponent on held bonuses per color (sqrt by default)
 ECON_HOARD = 0.15     # penalty per token held above 8 (discourage hoarding / over-reserving)
@@ -130,11 +140,24 @@ def _seat_targets(val: V.Valuation, seat: int, hide_blind: bool):
 
 
 def _progress(targets) -> float:
-    """Imminent scoring strength: mean take_value of the top-`PROGRESS_TOPK` targets."""
+    """Imminent scoring strength: cascade-weighted mean of the top-`PROGRESS_TOPK` target take_values.
+    Weights decay geometrically (weight_i = PROGRESS_DECAY**i) and are normalized by their sum, so the
+    result stays a weighted MEAN on the same scale as the old top-2 mean (DECAY=1.0, TOPK=2 reproduces
+    it exactly). DECAY<1 emphasizes the best target while letting the bench contribute a little —
+    rewarding optionality/denial-robustness without inflating progress's magnitude."""
     if not targets:
         return 0.0
     k = min(PROGRESS_TOPK, len(targets))
-    return sum(targets[i][0] for i in range(k)) / k
+    if PROGRESS_DECAY == 1.0:
+        return sum(targets[i][0] for i in range(k)) / k
+    num = 0.0
+    den = 0.0
+    w = 1.0
+    for i in range(k):
+        num += w * targets[i][0]
+        den += w
+        w *= PROGRESS_DECAY
+    return num / den
 
 
 def _noble_stand(val: V.Valuation, seat: int) -> float:

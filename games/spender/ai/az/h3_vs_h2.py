@@ -50,6 +50,28 @@ H2N = _AggrH2(2.0)   # noble variant (NOBLE_AGGR_H2N from feat)
 H2R = _AggrH2(0.4)   # rusher variant (NOBLE_AGGR_H2R from feat)
 OPPONENTS = {"H": H1, "H2": H2, "H2N": H2N, "H2R": H2R}
 
+# H3-based style variants -- STRONG sanity opponents (H3 is far closer to S than H2). H3N is
+# noble-heavy, H3R a rusher/racer (a good proxy for a human racing style). They wrap H3's
+# choose_action at a NOBLE_SCALE multiplier off the COMMITTED base (captured at import) -- NOT the
+# live H3.NOBLE_SCALE, because candidate configs mutate H3.NOBLE_SCALE, which would otherwise make
+# these opponents drift with the candidate and break the A/B. They restore whatever was set.
+_H3_BASE_NOBLE = H3.NOBLE_SCALE   # committed default at import, before any candidate override
+class _AggrH3:
+    def __init__(self, aggr: float):
+        self.aggr = aggr
+
+    def choose_action(self, s, seat=None):
+        saved = H3.NOBLE_SCALE
+        H3.NOBLE_SCALE = _H3_BASE_NOBLE * self.aggr   # FIXED reference, independent of the candidate
+        try:
+            return H3.choose_action(s, seat)
+        finally:
+            H3.NOBLE_SCALE = saved
+
+
+H3N = _AggrH3(2.0)   # noble-heavy strong opponent
+H3R = _AggrH3(0.4)   # rusher/racer strong opponent (proxies the human racing style)
+
 
 def wilson_ci(score: float, n: int, z: float = 1.96) -> tuple[float, float]:
     if n == 0:

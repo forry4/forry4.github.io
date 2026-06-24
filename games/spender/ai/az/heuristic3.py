@@ -56,6 +56,14 @@ W_SHORTFALL = 0.0  # cost: gems the bank CANNOT supply across ALL needed colors 
                    # ranking pivots to an attainable card. TESTED at 0.2: cuts stalls 14.9%->11.6%
                    # and leans +0.006 win rate (6/8 disjoint seeds positive) but below significance
                    # -- a marginal correctness fix, left OFF (0.0). Flip to ~0.2 to re-enable.
+# late-game tempo scaling (EXPERIMENT, default OFF). A turn is more precious late (few turns left),
+# so the tempo COST weight should rise as the MEASURED turns_remaining shrinks. The crude ply/cards
+# "stage" form of this was tested and hurt (-0.02); this uses turns_remaining (board-conditional)
+# and only the cost denominator (the engine term already discounts by turns_remaining). Effective:
+#     W_TEMPO_eff = W_TEMPO * (1 + TEMPO_TURNS_SCALE * max(0, 1 - turns_remaining / TEMPO_TURNS_T0))
+# 0.0 = OFF (byte-identical). Feeds H3 take_value -> S's policy prior + leaf progress term.
+TEMPO_TURNS_SCALE = 0.0  # strength k: late W_TEMPO peaks at W_TEMPO*(1+k) as turns_remaining -> 0
+TEMPO_TURNS_T0 = 20.0    # horizon at/above which no scaling applies (early-game turns_remaining ~26)
 NOBLE_SCALE = 3.0  # noble-progress contribution, scaled toward a noble's VP. Retuned 5.0->3.5->3.0
                    # (June 2026). Affects BOTH H3 and S (S reads it via prior + leaf).
                    # (Prior note: 3.0->5.0 was +0.0073 avg(H2,H2R), now superseded.)
@@ -180,7 +188,12 @@ def components(val: V.Valuation, ci: int, seat: int):
     if hit is not None:
         val.estimated_turns_remaining()   # fire the freshness guard (+ catch stale reuse) on cache hits
         return hit
-    cost = (W_TEMPO * val.tempo(ci, seat)
+    w_tempo = W_TEMPO
+    if TEMPO_TURNS_SCALE:  # late-game tempo weight rises as measured turns_remaining shrinks
+        tr = val.estimated_turns_remaining()
+        if tr < TEMPO_TURNS_T0:
+            w_tempo = W_TEMPO * (1.0 + TEMPO_TURNS_SCALE * (1.0 - tr / TEMPO_TURNS_T0))
+    cost = (w_tempo * val.tempo(ci, seat)
             + W_GEM * val.gem_cost(ci, seat)
             + W_GOLD * val.gold_cost(ci, seat))
     if W_SHORTFALL:  # penalize bank-uncollectable gems (all colors) -> demote un-completable cards
