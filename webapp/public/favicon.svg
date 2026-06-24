@@ -29,14 +29,14 @@
 
   <g transform="translate(50 50) scale(0.88) translate(-50 -50)">
   <g filter="url(#olBrown)">
-    <path d="M45 49 C44.5 64 45 76 32 94 C40 89 46 89 50 89 C54 89 60 89 68 94 C55 76 55.5 64 55 49 Z" fill="url(#trunkGrad)"/>
+    <path d="M46 48 C45.5 62 45 77 34 92 C40 88 46 88 50 88 C54 88 60 88 66 92 C55 77 54.5 62 54 48 Z" fill="url(#trunkGrad)"/>
   </g>
 
   <g filter="url(#olGreen)">
-    <circle cx="50" cy="29" r="21" fill="#163C11"/>
-    <circle cx="50" cy="48" r="14" fill="#163C11"/>
-    <circle cx="30" cy="53" r="19.5" fill="#163C11"/>
-    <circle cx="70" cy="53" r="19.5" fill="#163C11"/>
+    <circle cx="50" cy="25" r="20.5" fill="#163C11"/>
+    <circle cx="50" cy="43" r="14" fill="#163C11"/>
+    <circle cx="31" cy="47" r="19" fill="#163C11"/>
+    <circle cx="69" cy="47" r="19" fill="#163C11"/>
   </g>
   </g>
 </svg>
