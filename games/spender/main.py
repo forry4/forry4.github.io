@@ -420,6 +420,7 @@ def list_active_games() -> list[dict]:
             "player4_id": r["player4_id"], "player4_name": r["player4_name"],
             "player_names": player_names,   # full seated list (2-4) for display
             "turn": g.get("turn") if isinstance(g, dict) else None,
+            "win_points": int(g.get("win_points", 15)) if isinstance(g, dict) else 15,  # Classic 15 / Long 21 — lets the lobby filter Active by length
             "created_at": r["created_at"], "updated_at": r["updated_at"],
         })
     return out
