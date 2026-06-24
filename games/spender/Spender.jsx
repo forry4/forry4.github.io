@@ -1391,6 +1391,13 @@ export default function SpenderApp() {
 				: null;
 			return { name, action: <span>reserved{dot}card</span>, card: mvCard?.cost ? mvCard : null };
 		}
+		if (mv.type === "discard") {
+			// Each over-10 discard is logged with its gem color; show exactly which gem.
+			const dot = mv.color
+				? <span style={{ width: 8, height: 8, borderRadius: "50%", background: GEM_HEX[mv.color], border: "1px solid rgba(255,255,255,.12)", display: "inline-block", marginLeft: 2, marginRight: 2, verticalAlign: "middle" }} />
+				: null;
+			return { name, action: <span>discarded{dot}gem</span> };
+		}
 		if (mv.type === "noble") return { name, action: `claimed noble +${mv.pts}pts` };
 		return { name, action: mv.type };
 	}
