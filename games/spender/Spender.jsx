@@ -592,10 +592,12 @@ const css = baseCss + `
   .noble-claimer{font-size:calc(var(--noble-w) * 0.11);bottom:calc(var(--noble-w) * 0.04)}
 
   /* Actions box: target pinned top, buttons centered, hint at the bottom. */
-  /* One line, clipped — the hint now only ever shows a short "Waiting for X…" (empty on
-     your turn), and nowrap+ellipsis guarantees even a long name can't wrap tall and grow
-     the actions row (which shrank the card board in 3-4p lobbies). */
-  .actions-panel .action-hint{flex:0 0 auto;font-size:calc(var(--card-h) * 0.082);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;max-width:100%;color:var(--text-dim);font-style:italic}
+  /* The hint now only ever shows a short "Waiting for X…" (empty on your turn), so let it
+     WRAP to the next line when the name is long (no ellipsis — show the full name).
+     overflow-wrap:anywhere breaks a long unbroken name so it can never force the column
+     wider (keeps the width guarantee); a 2-3 line wrap stays within the nobles' height, so
+     it still doesn't grow the actions row that shrank the card board in 3-4p lobbies. */
+  .actions-panel .action-hint{flex:0 0 auto;font-size:calc(var(--card-h) * 0.082);white-space:normal;overflow-wrap:anywhere;min-width:0;max-width:100%;color:var(--text-dim);font-style:italic}
   .actions-panel-top{display:flex;flex-direction:column;gap:calc(var(--card-h) * 0.022);align-items:stretch}
   .actions-panel .target-label{align-self:stretch}
   /* min-width:0 + max-width:100% keep the buttons WITHIN this 1fr column: the actions

@@ -2228,6 +2228,17 @@ standing scratchpad for these one-off UI fixes.
   space-derived. Verified: with `min-width:0` the grid width is STABLE regardless of button width (the old code
   overflowed its container by ~220px with a wide button). The `.action-bar-spacer ✕` (in the legacy
   `visibility:hidden` action-bar paths) is a height placeholder, not a real button — left alone.
+- **Minimal actions-box hint (the follow-up height fix).** Even after the width fix, the hint (`getHint()` →
+  `.action-hint`) was still bloating the box: the verbose per-action guidance (e.g. *"Take gems, or click a card
+  then the gold coin to reserve"*, *"Reserve armed — …"*) wrapped to several lines in the squeezed 3-4p column,
+  growing the actions row (row 1) and shrinking the card board (row 2). Per the user, **`getHint()` now returns
+  ONLY `Waiting for {name}…` (opponent's turn) and `""` on YOUR turn** — the Take/Buy buttons, the card
+  affordability highlight, and the discard/noble modals already convey everything else (the per-action hints were
+  deliberately dropped). On your turn the empty hint collapses to 0 height, so the box is just Target + buttons.
+  The desktop `.actions-panel .action-hint` is **`white-space:normal` + `overflow-wrap:anywhere`** so the short
+  waiting text WRAPS to the next line for a long name (no ellipsis — show the full name) while `overflow-wrap:
+  anywhere` breaks a long unbroken name so it still can't force the column wider (keeps the width guarantee); a
+  2-3 line wrap of that short string stays within the nobles' height, so it doesn't regrow the actions row.
 
 ### Player box + nobles details (desktop; do not regress)
 - **Indicator sizing uses `zoom`, not font/padding math.** The desktop player box scales
