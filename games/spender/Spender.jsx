@@ -37,6 +37,32 @@ function uid() { return Math.random().toString(36).slice(2, 10); }
 function roomCode() { return Array.from({ length: 6 }, () => "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[Math.floor(Math.random() * 26)]).join(""); }
 function emptyGems() { return { white: 0, blue: 0, green: 0, red: 0, black: 0, gold: 0 }; }
 function gemTotal(tokens) { return Object.values(tokens).reduce((a, b) => a + b, 0); }
+// Short rising two-tone "ping" via WebAudio — no asset to load. One shared, lazily
+// created AudioContext (unlocked by the click gesture on the sender; the recipient's
+// was already unlocked by their own in-game interactions). Best-effort: any failure
+// (no WebAudio / suspended context) is swallowed silently.
+let _pingCtx = null;
+function playPing() {
+	try {
+		const AC = window.AudioContext || window.webkitAudioContext;
+		if (!AC) return;
+		if (!_pingCtx) _pingCtx = new AC();
+		const ctx = _pingCtx;
+		if (ctx.state === "suspended") ctx.resume();
+		const now = ctx.currentTime;
+		const osc = ctx.createOscillator();
+		const gain = ctx.createGain();
+		osc.type = "sine";
+		osc.frequency.setValueAtTime(880, now);
+		osc.frequency.setValueAtTime(1320, now + 0.08);
+		gain.gain.setValueAtTime(0.0001, now);
+		gain.gain.exponentialRampToValueAtTime(0.25, now + 0.012);
+		gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.32);
+		osc.connect(gain).connect(ctx.destination);
+		osc.start(now);
+		osc.stop(now + 0.34);
+	} catch {}
+}
 function timeAgo(ts) {
 	if (!ts) return "";
 	const diff = Math.floor(Date.now() / 1000) - ts;
@@ -382,6 +408,9 @@ const css = baseCss + `
 /* the active player's box gets a clean gold rounded border (the only highlight);
    your own box is identified by the active dot + "(you)" label, no extra accent. */
 .player-panel.active-turn{border-color:var(--gold);background:var(--surface3)}
+/* an opponent's box is tappable to ping them — signal it (your own box has no click). */
+.player-panel.pingable{cursor:pointer}
+.player-panel.pingable:active{border-color:var(--gold)}
 .player-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
 .player-name-row{display:flex;align-items:center;gap:6px}
 .player-name{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.8rem;letter-spacing:.06em}
@@ -1039,6 +1068,9 @@ export default function SpenderApp() {
 		} else if (msg.type === "room_update") {
 			setRoomData(msg.room);
 			if (inGame(msg.room.status) && screen !== "game") setScreen("game");
+		} else if (msg.type === "ping") {
+			// Another player tapped your player box (or you tapped theirs) → chime.
+			playPing();
 		} else if (msg.type === "error") {
 			// A join into a cancelled/gone game (the backend rejects it now instead of
 			// fabricating a hostless room): clear the stale pointer + refresh the list
@@ -1708,8 +1740,13 @@ export default function SpenderApp() {
 		const expanded = playerExpanded[pid] ?? isMe;
 		const toggleExpand = () => setPlayerExpanded(m => ({ ...m, [pid]: !(m[pid] ?? isMe) }));
 		const noblePts = p.nobles.reduce((s, n) => s + n.points, 0);
+		// Tapping another player's box pings them (and you) — a quick "poke" chime.
+		const canPing = !isMe && !reviewing;
+		const pingPlayer = () => { playPing(); send({ action: "ping", target: pid }); };
 		return (
-			<div key={pid} data-pid={pid} className={`player-panel${isMe ? " me" : ""}${isActive ? " active-turn" : ""}${expanded ? " expanded" : ""}`}>
+			<div key={pid} data-pid={pid}
+				className={`player-panel${isMe ? " me" : ""}${isActive ? " active-turn" : ""}${expanded ? " expanded" : ""}${canPing ? " pingable" : ""}`}
+				onClick={canPing ? pingPlayer : undefined}>
 				<div className="player-header" onClick={p.reserved?.length > 0 ? toggleExpand : undefined}>
 					<div className="player-name-row">
 						{isActive && <span className="active-dot" />}
