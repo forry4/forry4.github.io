@@ -592,7 +592,10 @@ const css = baseCss + `
   .noble-claimer{font-size:calc(var(--noble-w) * 0.11);bottom:calc(var(--noble-w) * 0.04)}
 
   /* Actions box: target pinned top, buttons centered, hint at the bottom. */
-  .actions-panel .action-hint{flex:0 0 auto;font-size:calc(var(--card-h) * 0.082);white-space:normal;overflow:visible;text-overflow:clip;color:var(--text-dim);font-style:italic}
+  /* One line, clipped — the hint now only ever shows a short "Waiting for X…" (empty on
+     your turn), and nowrap+ellipsis guarantees even a long name can't wrap tall and grow
+     the actions row (which shrank the card board in 3-4p lobbies). */
+  .actions-panel .action-hint{flex:0 0 auto;font-size:calc(var(--card-h) * 0.082);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;max-width:100%;color:var(--text-dim);font-style:italic}
   .actions-panel-top{display:flex;flex-direction:column;gap:calc(var(--card-h) * 0.022);align-items:stretch}
   .actions-panel .target-label{align-self:stretch}
   /* min-width:0 + max-width:100% keep the buttons WITHIN this 1fr column: the actions
@@ -1963,19 +1966,13 @@ export default function SpenderApp() {
 	}
 
 	function getHint() {
+		// Minimal by design: the actions-box hint shows ONLY who we're waiting on (when it's
+		// not your turn). On your turn it's empty — the Take/Buy buttons + the discard/noble
+		// modals already convey everything. The old verbose per-action hints were removed
+		// because in a squeezed 3-4p actions column they wrapped to several lines, growing the
+		// actions row and shrinking the card board below it.
 		if (!myTurn) return `Waiting for ${displayName(roomData?.players?.[game?.turn] || "opponent")}…`;
-		const slotsFull = (me?.reserved?.length || 0) >= 3;
-		if (reserveArmed) return "Reserve armed — click a card or deck to reserve it (or the gold coin to cancel)";
-		if (selectedCard?.source === "deck")
-			return slotsFull ? "Reserved slots full (3/3)" : `Click the gold coin to reserve blind from Level ${selectedCard.deckLevel} deck`;
-		if (selectedCard) {
-			const affordable = canAfford(selectedCard.card.cost, me?.tokens || emptyGems(), myBonuses);
-			const canReserve = selectedCard.source !== "reserved" && !slotsFull;
-			if (affordable) return canReserve ? "Buy this card, or click the gold coin to reserve" : "Buy this card";
-			return canReserve ? "Click the gold coin to reserve this card" : "Can't afford yet";
-		}
-		if (selectedGems.length > 0) return `${selectedGems.length} gem(s) selected — confirm to take`;
-		return "Take gems, or click a card then the gold coin to reserve";
+		return "";
 	}
 
 	// ── Screens ────────────────────────────────────────────────────────────
