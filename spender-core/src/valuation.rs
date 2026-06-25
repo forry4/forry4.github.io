@@ -318,6 +318,7 @@ pub struct Valuation<'a> {
     t_cache: RefCell<Vec<i32>>,  // tempo keyed (ci,seat); -1 = unfilled (tempo is always >= 0)
     dds_cache: RefCell<[Option<[f64; 5]>; 2]>, // seat-aware deck demand, keyed by seat
     ev_cache: RefCell<Vec<f64>>, // engine_value keyed (ci,seat)
+    comp_cache: RefCell<Vec<Option<(f64, f64, f64, f64)>>>, // heuristic::components (take,engine,point,cost) keyed (ci,seat)
 }
 
 impl<'a> Valuation<'a> {
@@ -356,6 +357,22 @@ impl<'a> Valuation<'a> {
             t_cache: RefCell::new(vec![-1i32; N_CARDS * 2]),
             dds_cache: RefCell::new([None; 2]),
             ev_cache: RefCell::new(vec![f64::NAN; N_CARDS * 2]),
+            comp_cache: RefCell::new(vec![None; N_CARDS * 2]),
+        }
+    }
+
+    /// Per-Valuation memo of `heuristic::components` (take_value's source) — managed by heuristic
+    /// since `components` lives there (Valuation can't call it without a cycle). Keyed (ci,seat).
+    pub fn comp_get(&self, ci: i32, seat: usize) -> Option<(f64, f64, f64, f64)> {
+        if (ci as usize) < N_CARDS && seat < 2 {
+            self.comp_cache.borrow()[(ci as usize) * 2 + seat]
+        } else {
+            None
+        }
+    }
+    pub fn comp_put(&self, ci: i32, seat: usize, v: (f64, f64, f64, f64)) {
+        if (ci as usize) < N_CARDS && seat < 2 {
+            self.comp_cache.borrow_mut()[(ci as usize) * 2 + seat] = Some(v);
         }
     }
 

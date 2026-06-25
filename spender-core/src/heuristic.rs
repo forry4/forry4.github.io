@@ -26,7 +26,17 @@ pub const CAP8_BUY_ABOVE: f64 = 0.8;
 pub const WIN_RESERVE_MAX_TEMPO: i32 = 4;
 
 /// (take, engine, point, cost) for card ci from seat — one source of truth for policy + overlay.
+/// Memoized per-Valuation (the policy + value compute take_value for the same cards many times/leaf).
 pub fn components(val: &Valuation, ci: i32, seat: usize) -> (f64, f64, f64, f64) {
+    if let Some(c) = val.comp_get(ci, seat) {
+        return c;
+    }
+    let c = components_compute(val, ci, seat);
+    val.comp_put(ci, seat, c);
+    c
+}
+
+fn components_compute(val: &Valuation, ci: i32, seat: usize) -> (f64, f64, f64, f64) {
     let s = val.s;
     let cost = W_TEMPO * val.tempo(ci, seat) as f64
         + W_GEM * valuation::gem_cost(s, ci, seat) as f64
