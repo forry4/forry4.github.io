@@ -270,7 +270,7 @@ const css = baseCss + `
   .nobles-panel .nobles-row{flex:0 0 auto;align-content:center;gap:6px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:8px}
   /* justify-content:flex-start pins the Target to the TOP so it doesn't shift up
      when the Take/Buy/✕ buttons appear below it. */
-  .nobles-panel .board-actions{flex:1 1 auto;min-width:118px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:8px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:8px}
+  .nobles-panel .board-actions{flex:1 1 auto;min-width:118px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:8px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:8px;position:relative}
   .board-actions .target-label{font-size:1rem}
   .board-actions-btns{display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:center}
   .board-actions-btns:empty{display:none}
@@ -327,7 +327,9 @@ const css = baseCss + `
 .ai-pos-eval.mine{color:#8fdca0;border-color:rgba(143,220,160,.5)}
 .ai-pos-eval b{color:#9a8fb0;font-weight:700;margin-right:3px}
 .ai-pos-eval-srch{margin-left:7px;padding-left:7px;border-left:1px solid rgba(201,168,76,.3)}
-.ai-pos-eval-row{display:flex;justify-content:center;margin-bottom:4px}
+/* Pinned to the top-right of the actions box (absolute) so it never displaces the
+   Target / buttons / hint. The box is position:relative (.actions-panel / .board-actions). */
+.ai-pos-eval-row{position:absolute;top:7px;right:9px;display:flex;z-index:2}
 .card:hover{border-color:rgba(201,168,76,.5);transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.4)}
 .card.selected{border-color:var(--gold-light);box-shadow:0 0 0 2px var(--gold-light)}
 .card.affordable{border-color:var(--green-gem)}
@@ -529,7 +531,7 @@ const css = baseCss + `
   /* Bottom-align the (shorter) nobles to row 1's baseline so the gap from the nobles
      down to Level III == --gap too (the taller actions panel sets row 1's height). */
   .game-main>.nobles-panel{grid-column:1;grid-row:1;align-self:end}
-  .actions-panel{grid-column:2;grid-row:1;align-self:stretch;display:flex;flex-direction:column;justify-content:space-between;align-items:stretch;gap:calc(var(--card-h) * 0.043)}
+  .actions-panel{grid-column:2;grid-row:1;align-self:stretch;display:flex;flex-direction:column;justify-content:space-between;align-items:stretch;gap:calc(var(--card-h) * 0.043);position:relative}
   /* The card levels FILL row 2 with a uniform --gap between them: each .level-panel is
      flex:1 (so the panels — the real flex children of .levels — divide row 2 equally
      and L1 reaches the bottom), the .level-row inside fills the panel, and the cards
