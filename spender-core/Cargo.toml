@@ -1,0 +1,37 @@
+[package]
+name = "spender-core"
+version = "0.1.0"
+edition = "2021"
+description = "Variant-S Splendor search core (engine + determinized PUCT + v_state leaf), ported from games/spender/ai/az for max sims/s. Compiles native (dev/test/offline) and WASM (browser serving)."
+
+[lib]
+# rlib for native tests/benches + cdylib for wasm-pack (Phase 2).
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+
+# WASM-only deps (cfg-gated so native builds / cargo test never pull them).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+# native-only cross-impl bridge (the move_server bin); keeps serde out of the native lib otherwise.
+bridge = ["dep:serde", "dep:serde_json"]
+
+[[bin]]
+name = "move_server"
+required-features = ["bridge"]
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

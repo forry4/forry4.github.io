@@ -1,0 +1,5 @@
+/target
+/pkg
+bench_wasm.cjs
+Cargo.lock
+tests/*_fixtures.json
