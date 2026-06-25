@@ -35,9 +35,42 @@ export function choose_move(state_json, seat, sims, seed) {
         wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
     }
 }
+
+/**
+ * Time-budgeted serving entry: keep running simulations until `budget_ms` wall-clock has elapsed,
+ * then pick the move. This makes the AI "think" for the full budget (far more sims than a fixed
+ * count) instead of finishing in ~0.2s. `Date.now()` (valid in workers) is checked every 64 sims so
+ * the JS-boundary overhead stays negligible.
+ * @param {string} state_json
+ * @param {number} seat
+ * @param {number} budget_ms
+ * @param {bigint} seed
+ * @returns {string}
+ */
+export function choose_move_timed(state_json, seat, budget_ms, seed) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(state_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.choose_move_timed(ptr0, len0, seat, budget_ms, seed);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
+        __wbg___wbindgen_throw_344f42d3211c4765: function(arg0, arg1) {
+            throw new Error(getStringFromWasm0(arg0, arg1));
+        },
+        __wbg_now_86c0d4ba3fa605b8: function() {
+            const ret = Date.now();
+            return ret;
+        },
         __wbindgen_init_externref_table: function() {
             const table = wasm.__wbindgen_externrefs;
             const offset = table.grow(4);

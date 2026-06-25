@@ -1222,7 +1222,8 @@ export default function SpenderApp() {
 				id: as.ply,
 				state: JSON.stringify(as.state),
 				seat: as.seat,
-				sims: as.sims || 2000,
+				budget: 4500,                  // ms — think for the full ~4.5s (like the old server budget),
+				sims: as.sims || 2000,         // doing thousands of sims instead of finishing instantly
 				seed: (as.ply * 2654435761) >>> 0,
 			});
 		} catch {}
