@@ -1226,6 +1226,16 @@ screen→disjoint-holdout), `h3_measure_turns.py` (rebuild `turns_table.json`), 
 probes), `h3_stage_sweep.py`. **Methodology: a UNIQUE output file per run** (two runs writing the same `>` file
 interleave and corrupt — happened once); confirm gains on DISJOINT seeds; re-measure `turns_table.json` after big
 model changes (it's mildly self-referential). `h3_*.out`/`h3_best.json` are gitignored scratch.
+- **Cross-worktree import gotcha — `python -m` runs the CWD's code, NOT `PYTHONPATH`'s (DO NOT regress).**
+  `python -m games.spender.ai.az.<tool>` puts the **current working directory's** worktree FIRST on
+  `sys.path`; `PYTHONPATH=<other-worktree>` does **not** override CWD for `-m`. So launching a self-gate /
+  arena / autotune from the **primary (main) worktree** silently runs **main's** `v_state`/`config_selfgate`/
+  etc. — NOT your experiment branch's. The candidate's `--set`/config `setattr`s then land on a module
+  lacking the new code (no error), and `config_selfgate`'s `[frozen]` dict / `_PROBE_KEYS` silently **omit
+  the new knob** (that absence is the tell). **ALWAYS `cd <experiment-worktree> &&` before `python -m`** (cwd
+  wins), and sanity-check that `[frozen]` contains your new knob before trusting the run. (A plain
+  `python path/to/script.py` is fine — `sys.path[0]` is the script's own dir, then `PYTHONPATH`.) This cost a
+  wasted `W_RESERVE_SLOTS` self-gate that ran main's code with the knob absent from `[frozen]`.
 - **Serving + overlay specifics:** `_h3_choose_move` (1-ply `choose_action`) + `_h3_card_values` are wired
   into `_ai_variant_valid` + `mk_room_state` + the move scheduler (same path as H/H2; `mk_room_state`
   includes `ai_card_values` only for in-progress H/H2/H3/S games, **now from whoever's-turn-it-is's seat**
