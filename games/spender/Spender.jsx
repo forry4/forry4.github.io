@@ -1162,6 +1162,72 @@ export default function SpenderApp() {
 		return () => document.removeEventListener("visibilitychange", handleVisibility);
 	}, [myId, connect, getReadyState]); // eslint-disable-line react-hooks/exhaustive-deps
 
+	// ── Client-side AI: run variant S's WASM search in a Web Worker ──────────
+	// For a vs-S game we offload the AI's move to the player's own CPU (WASM in a worker → far more
+	// sims than Render's shared core). The server stays authoritative: it validates the submitted
+	// move and falls back to its own search if the client doesn't answer. Entirely graceful — if the
+	// worker/wasm won't load we simply never announce capability and the server computes as before.
+	const wasmWorkerRef = useRef(null);
+	const [wasmReady, setWasmReady] = useState(false);
+	const clientAiArmedRef = useRef(null);   // room_id we've announced capability for
+	const aiDispatchPlyRef = useRef(-1);     // ply we've already handed to the worker
+	const aiDispatchTimeRef = useRef(0);     // perf timestamp of the last dispatch (for the latency log)
+
+	useEffect(() => {
+		if (roomData?.ai_variant !== "S" || wasmWorkerRef.current || typeof Worker === "undefined") return;
+		let w;
+		try {
+			w = new Worker(`${import.meta.env.BASE_URL}wasm/s-worker.js`, { type: "module" });
+		} catch {
+			return; // no module-worker support → server AI (graceful)
+		}
+		w.onmessage = (e) => {
+			const d = e.data || {};
+			if (d.ready === true) { setWasmReady(true); console.info("[client-AI] WASM search worker ready"); return; }
+			if (d.ready === false) { console.warn("[client-AI] WASM failed to load → server AI:", d.error); return; }
+			if (d.move) {
+				try {
+					const mv = JSON.parse(d.move);
+					if (mv && !mv.error) {
+						const ms = Math.round(performance.now() - aiDispatchTimeRef.current);
+						console.info(`[client-AI] computed AI move in ${ms}ms`, mv);
+						send({ action: "ai_move", move: mv });
+					}
+				} catch {}
+			}
+		};
+		w.onerror = () => {};
+		wasmWorkerRef.current = w;
+		return () => { try { w.terminate(); } catch {} wasmWorkerRef.current = null; setWasmReady(false); };
+	}, [roomData?.ai_variant, send]);
+
+	// Announce capability once per room → the server then ships `ai_search` on the AI's turn.
+	useEffect(() => {
+		if (wasmReady && roomData?.ai_variant === "S" && roomData?.room_id
+			&& clientAiArmedRef.current !== roomData.room_id) {
+			clientAiArmedRef.current = roomData.room_id;
+			send({ action: "client_ai_ready" });
+		}
+	}, [wasmReady, roomData?.room_id, roomData?.ai_variant, send]);
+
+	// On the AI's turn the server ships `ai_search` (AI-perspective state) → search it in the worker.
+	useEffect(() => {
+		const as = roomData?.ai_search;
+		if (!as || !wasmWorkerRef.current || !wasmReady) return;
+		if (aiDispatchPlyRef.current === as.ply) return; // one dispatch per ply
+		aiDispatchPlyRef.current = as.ply;
+		aiDispatchTimeRef.current = performance.now();
+		try {
+			wasmWorkerRef.current.postMessage({
+				id: as.ply,
+				state: JSON.stringify(as.state),
+				seat: as.seat,
+				sims: as.sims || 2000,
+				seed: (as.ply * 2654435761) >>> 0,
+			});
+		} catch {}
+	}, [roomData, wasmReady]);
+
 	// ── "Someone's waiting for you" tab indicator (permission-free) ─────────
 	// When the tab is HIDDEN and it's your turn OR a ping arrived, flash the page
 	// title and swap in the alert favicon so an unfocused tab shows someone's waiting.
