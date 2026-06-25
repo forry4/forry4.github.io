@@ -574,12 +574,13 @@ def _redact_blind_reserves(game: dict | None, viewer_pid: str | None) -> dict | 
 def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]:
     room = ROOMS.get(room_id, {})
     game_view = _redact_blind_reserves(room.get("game"), viewer_pid)
-    if isinstance(game_view, dict) and "setup" in game_view:
+    _STRIP = ("setup", "s_searched", "_s_eval_running")
+    if isinstance(game_view, dict) and any(k in game_view for k in _STRIP):
         # `setup` is static replay metadata (the dealt deck order) — persisted by save_game
-        # and served by the admin /full dump, but kept OFF the wire: the client never uses it
-        # and it would re-send a fixed ~75-id blob on every room_update. Shallow-copy so the
-        # live/redacted dict is untouched (nested values are about to be JSON-serialized).
-        game_view = {k: v for k, v in game_view.items() if k != "setup"}
+        # and served by the admin /full dump, but kept OFF the wire. `s_searched`/`_s_eval_running`
+        # are S searched-eval overlay metadata (surfaced separately as ai_position_eval_searched).
+        # Shallow-copy so the live/redacted dict is untouched (about to be JSON-serialized).
+        game_view = {k: v for k, v in game_view.items() if k not in _STRIP}
     state = {
         "room_id": room_id,
         "players": room.get("players", {}),
@@ -608,6 +609,11 @@ def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]
                 elif room["ai_variant"] == "S":
                     state["ai_card_values"] = _s_card_values(game, persp)
                     state["ai_position_eval"] = _s_position_eval(game, persp)
+                    # the SEARCHED eval (post-PUCT root value), only if it's for THIS position
+                    # (ply match): reused from the AI's move on its turn, freshly searched on yours.
+                    sr = game.get("s_searched")
+                    if sr is not None and sr.get("ply") == len(game.get("moves", [])):
+                        state["ai_position_eval_searched"] = sr.get("value")
                 else:
                     state["ai_card_values"] = _v4_card_values(game, persp)
             except Exception:
@@ -1043,6 +1049,19 @@ def _s_position_eval(game: dict, seat_pid: str):
     return round(_azvs.value(s, seat), 3)
 
 
+def _s_searched_value(game: dict):
+    """Variant-S SEARCHED whole-position eval: run S's PUCT search on the position and return the
+    post-search root value (sum(W)/sum(N), [-1,1], from the side-to-move's perspective) — the
+    searched counterpart to the static _s_position_eval. EXPENSIVE (~SERVE_TIME) — must run in a
+    thread pool, never on the event loop. None for forced/non-PLAY positions. Base 15-pt weights
+    (mirrors _s_position_eval)."""
+    from games.spender.ai.az import engine as _aze
+    from games.spender.ai.az import vsearch as _azvs
+    s = _aze.from_game_dict(game)
+    v = _azvs.searched_value(s, s.turn, time_limit=_azvs.SERVE_TIME)
+    return None if v is None else round(v, 3)
+
+
 # ─── S21: 21-point specialization of variant S ──────────────────────────────────
 # When a game is win_points==21, variant S applies a config tuned for the longer game (weights that
 # the offline 21-point retune found differ from the 15-point S) on top of the per-game win_points the
@@ -1090,7 +1109,8 @@ def _s_choose_move(game: dict, ai_pid: str) -> dict:
 
     s = _aze.from_game_dict(game)
     if not S21_CONFIG:                                    # no overrides exist -> no lock, no swap
-        a = _azvs.choose_action(s, s.turn, time_limit=_azvs.SERVE_TIME)
+        a, val = _azvs.choose_action_value(s, s.turn, time_limit=_azvs.SERVE_TIME)
+        game["_s_searched_eval"] = val                    # reuse this move's search as the AI-turn searched eval
         return _aza.action_to_move(s, a)
     with _S21_LOCK:
         apply21 = _win_points(game) == 21
@@ -1102,10 +1122,11 @@ def _s_choose_move(game: dict, ai_pid: str) -> dict:
                     saved[(mod, k)] = getattr(mod, k)
                     setattr(mod, k, v)
         try:
-            a = _azvs.choose_action(s, s.turn, time_limit=_azvs.SERVE_TIME)
+            a, val = _azvs.choose_action_value(s, s.turn, time_limit=_azvs.SERVE_TIME)
         finally:
             for (mod, k), v in saved.items():
                 setattr(mod, k, v)
+    game["_s_searched_eval"] = val
     return _aza.action_to_move(s, a)
 
 
@@ -2129,6 +2150,9 @@ def _ai_think(variant: str, game: dict, ai_pid: str) -> dict:
 async def _schedule_ai_turn(room_id: str) -> None:
     """Broadcast the post-human-move state immediately, then run MCTS in a thread pool
     (non-blocking) and broadcast the AI's move when it finishes."""
+    # If it's the HUMAN's turn in an S game (human-first start / reconnect, where no AI move
+    # fires below), kick the searched-eval search. Fully guarded, so a no-op otherwise.
+    asyncio.create_task(_schedule_s_searched_eval(room_id))
     async with ROOM_LOCK:
         r = ROOMS.get(room_id)
         if not r:
@@ -2158,6 +2182,18 @@ async def _schedule_ai_turn(room_id: str) -> None:
             LOG.exception("AI fallback move failed (room=%s); passing the turn", room_id)
             mv = {"type": "take_gems", "colors": []}
 
+    # Variant S: the AI's move search ALSO gives the searched position eval (reuse, no extra
+    # compute). Store + broadcast it while it's still the AI's turn (before applying the move) so
+    # the admin overlay shows the searched value for the AI's position.
+    s_eval = game_snapshot.get("_s_searched_eval") if variant == "S" else None
+    if s_eval is not None:
+        async with ROOM_LOCK:
+            r = ROOMS.get(room_id)
+            g = r.get("game") if r else None
+            if g and g.get("turn") == ai_pid and g.get("phase") == "playing":
+                g["s_searched"] = {"value": round(s_eval, 3), "ply": len(g.get("moves", []))}
+        await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
+
     async with ROOM_LOCK:
         r = ROOMS.get(room_id)
         if not r:
@@ -2176,6 +2212,52 @@ async def _schedule_ai_turn(room_id: str) -> None:
             r["status"] = "over"
 
     save_game(room_id)
+    await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
+    # It's the human's turn now — kick off a fresh searched-eval search for the human's position
+    # (background thread; pushes a follow-up update when done). No-op for non-S / non-human turns.
+    asyncio.create_task(_schedule_s_searched_eval(room_id))
+
+
+async def _schedule_s_searched_eval(room_id: str) -> None:
+    """For a variant-S game on the HUMAN's turn, run S's search on the CURRENT position in a thread
+    pool (non-blocking) and broadcast the searched eval when done — the searched counterpart to the
+    instant static eval in the admin overlay. (The AI's turn reuses its move search instead.)
+    Guarded by an in-progress ply marker + a post-search ply re-check so it never double-runs or
+    applies a stale result. Keyed by ply = len(moves), so a changed position invalidates it."""
+    async with ROOM_LOCK:
+        r = ROOMS.get(room_id)
+        if not r or r.get("ai_variant") != "S":
+            return
+        g = r.get("game")
+        if not g or g.get("phase") != "playing":
+            return
+        ai_pid = g.get("ai_player")
+        if not ai_pid or g.get("turn") == ai_pid:
+            return  # only the human's turn (the AI's searched eval comes from its move search)
+        ply = len(g.get("moves", []))
+        sr = g.get("s_searched")
+        if (sr is not None and sr.get("ply") == ply) or g.get("_s_eval_running") == ply:
+            return  # already have it / already computing for this exact position
+        g["_s_eval_running"] = ply
+        snap = copy.deepcopy(g)
+
+    loop = asyncio.get_running_loop()
+    try:
+        val = await loop.run_in_executor(None, _s_searched_value, snap)
+    except Exception:
+        LOG.exception("S searched-eval failed (room=%s)", room_id)
+        val = None
+
+    async with ROOM_LOCK:
+        r = ROOMS.get(room_id)
+        g = r.get("game") if r else None
+        if not g:
+            return
+        if g.get("_s_eval_running") == ply:
+            g.pop("_s_eval_running", None)
+        if g.get("phase") != "playing" or len(g.get("moves", [])) != ply or val is None:
+            return  # position moved on while searching, or game ended, or forced position
+        g["s_searched"] = {"value": val, "ply": ply}
     await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
 
 

@@ -233,6 +233,50 @@ def choose_action(s: E.State, seat: int | None = None, *, sims: int | None = Non
     return max(legal, key=lambda a: visits[a])
 
 
+def _root_value(search) -> float | None:
+    """Post-search ROOT value = sum(W)/sum(N) over the root's edges, from the side-to-move's
+    perspective, in [-1,1] (the SEARCHED counterpart to the static v_state.value leaf). None
+    if the root got no visits."""
+    totN = sum(search.root.N)
+    return (sum(search.root.W) / totN) if totN > 0 else None
+
+
+def choose_action_value(s: E.State, seat: int | None = None, *, sims: int | None = None,
+                        time_limit: float | None = None):
+    """Like choose_action but ALSO returns the post-search root value (the searched position
+    eval) from ONE search — so the AI's move and its searched eval come from the same compute.
+    Returns (action, value|None). value is None for forced / non-PLAY positions (no search runs)."""
+    if seat is None:
+        seat = s.turn
+    legal = E.legal_actions(s)
+    if not legal:
+        return E.A_PASS, None
+    if s.phase != E.PLAY or len(legal) == 1:
+        return H3.choose_action(s, seat), None
+    search = Search(s, _RNG, c_puct=C_PUCT, add_noise=False, leaf_state=True, backup_lambda=BACKUP_LAMBDA)
+    if time_limit is not None:
+        if ENDGAME_SERVE_TIME > time_limit and _is_endgame(s):
+            time_limit = ENDGAME_SERVE_TIME
+        t0 = time.time(); deadline = t0 + time_limit; done = 0
+        while done < SERVE_MAX_SIMS:
+            _expand(search); done += 1
+            if done >= SERVE_MIN_SIMS and time.time() >= deadline:
+                break
+    else:
+        n = SIMS if sims is None else sims
+        if ENDGAME_SIM_MULT != 1.0 and _is_endgame(s):
+            n = int(round(n * ENDGAME_SIM_MULT))
+        for _ in range(n):
+            _expand(search)
+    return max(legal, key=lambda a: search.root.N[a]), _root_value(search)
+
+
+def searched_value(s: E.State, seat: int | None = None, *, sims: int | None = None,
+                   time_limit: float | None = None):
+    """Run S's search on s and return ONLY the searched root value (None for forced positions)."""
+    return choose_action_value(s, seat, sims=sims, time_limit=time_limit)[1]
+
+
 def card_values(s: E.State, seat: int | None = None) -> dict:
     """Admin-overlay per-card components, delegating to H3 (the variant's eval basis). Keyed by board
     slot and reserved index; each value is H3's (take, engine, point, cost). Plus the position value."""
