@@ -421,6 +421,16 @@ const css = baseCss + `
 .log-entry:first-child{color:var(--text)}
 .log-entry.clickable{cursor:pointer}
 .log-entry.clickable:hover{background:rgba(201,168,76,.08);border-radius:4px}
+/* Review: the turn currently shown on the board is highlighted in the log. */
+.log-entry.log-selected{background:rgba(201,168,76,.2);border-radius:4px;box-shadow:inset 2px 0 0 var(--gold)}
+/* "X won the game" marker at the top of a finished game's log. */
+.log-entry.log-win .log-action{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.74rem;letter-spacing:.04em;color:var(--gold-light);font-weight:600}
+/* "Game started" anchor at the bottom of the log (jumps to the initial board). */
+.log-entry.log-start .log-action{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;letter-spacing:.04em;color:var(--text-dim)}
+/* Review controls in the action bar: Prev / where / Next / Latest. */
+.replay-nav{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.replay-where{font-size:.78rem;color:var(--text-dim);white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis}
+.replay-move{color:var(--text-muted)}
 .log-name{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;color:var(--gold-light);flex-shrink:0}
 .log-action{flex:1}
 @keyframes log-in{from{opacity:0;transform:translateX(6px)}to{opacity:1;transform:none}}
@@ -891,41 +901,78 @@ export default function SpenderApp() {
 	const [modalCard, setModalCard] = useState(null);
 	const [roomId, setRoomId] = useState("");
 	const [roomData, setRoomData] = useState(null);
+	// ── Game review / replay (read-only rewind of a finished game) ──
+	const [reviewing, setReviewing] = useState(false);            // viewing a finished game's board + log
+	const [replaySnapshots, setReplaySnapshots] = useState(null); // [{turn,mover,move,game}], or null = no turn-by-turn
+	const [replayTurn, setReplayTurn] = useState(null);           // which past turn drives the board; null = final
 
 	// ── Derived game state (must be before useEffect hooks that use `game`) ──
-	const game = roomData?.game;
+	const liveGame = roomData?.game;
+	// In review you can rewind to any past turn: that snapshot drives the BOARD, while the
+	// move log + card catalog stay sourced from the final game so every turn stays clickable.
+	const reviewBoardGame = (replayTurn != null && replaySnapshots && replaySnapshots[replayTurn])
+		? replaySnapshots[replayTurn].game : null;
+	const game = reviewBoardGame || liveGame;
 	const me = game?.players?.[myId];
-	const myTurn = game?.turn === myId && game?.phase === "playing";
+	// No move is ever possible in review — force not-your-turn regardless of the rewound snapshot's phase.
+	const myTurn = !reviewing && game?.turn === myId && game?.phase === "playing";
 	const myBonuses = me ? bonusesFrom(me.purchased) : emptyGems();
-	const aiThinking = game?.ai_player && game?.turn === game?.ai_player && game?.phase === "playing";
+	const aiThinking = !reviewing && game?.ai_player && game?.turn === game?.ai_player && game?.phase === "playing";
 	// Derived from game state (not a transient message) so a later room_update
 	// can't clear an unmet requirement — the server keeps these set until resolved.
-	const needsDiscard = game?.pending_discard_pid === myId;
-	const needsNobleChoice = game?.pending_noble_pid === myId;
+	const needsDiscard = !reviewing && game?.pending_discard_pid === myId;
+	const needsNobleChoice = !reviewing && game?.pending_noble_pid === myId;
+	// Show the finished-game chrome (Back-to-Results / no Abandon) whenever we're looking at
+	// a finished game — based on the LIVE game's phase, so a rewound snapshot's "playing"
+	// phase never leaks live-game controls into review.
+	const reviewChrome = reviewing || liveGame?.phase === "over";
+	// Turn-by-turn navigation is available once snapshots loaded (a game predating the
+	// setup snapshot has none — review still shows the final board).
+	const replayNav = reviewing && Array.isArray(replaySnapshots) && replaySnapshots.length > 1;
+	const replayIdx = replayTurn == null
+		? (replaySnapshots ? replaySnapshots.length - 1 : 0)
+		: replayTurn;
 	// Catalog of every card currently visible in state (board + both players'
 	// purchased/reserved), keyed by id. The move log stores only card_id (the server
 	// log is id-only); this resolves those ids back to full cards for display + the
 	// inspect modal. Complete by construction: a logged buy/reserve card is always
 	// present somewhere in the live state (purchased/reserved/board).
+	// Built from the FINAL game (liveGame), not the rewound snapshot, so every logged
+	// card resolves even while the board is showing an earlier turn.
 	const cardsById = useMemo(() => {
 		const m = {};
-		if (!game) return m;
+		if (!liveGame) return m;
 		const add = (c) => { if (c && c.id && c.cost) m[c.id] = c; };
-		const b = game.board || {};
+		const b = liveGame.board || {};
 		for (const lk of ["L1", "L2", "L3"]) (b[lk] || []).forEach(add);
-		for (const p of Object.values(game.players || {})) {
+		for (const p of Object.values(liveGame.players || {})) {
 			(p.purchased || []).forEach(add);
 			(p.reserved || []).forEach(add);
 		}
 		return m;
-	}, [game]);
+	}, [liveGame]);
+
+	// Map each move-log entry (newest-first) to its 0-based turn index, so a click in the
+	// log jumps the review board to that turn. A turn = one primary move (take/buy/reserve)
+	// plus its trailing discard/noble sub-entries.
+	const moveTurns = useMemo(() => {
+		const moves = liveGame?.moves || [];
+		const n = moves.length;
+		const res = new Array(n).fill(0);
+		const PRIMARY = new Set(["take_gems", "buy", "reserve"]);
+		let t = -1;
+		for (let i = n - 1; i >= 0; i--) {            // walk oldest-first
+			if (PRIMARY.has(moves[i].type)) t++;
+			res[i] = Math.max(0, t);
+		}
+		return res;
+	}, [liveGame]);
 
 	const [selectedGems, setSelectedGems] = useState([]);
 	const [selectedCard, setSelectedCard] = useState(null);
 	const [reserveArmed, setReserveArmed] = useState(false);  // gold-first reserve: click gold, then a card
 	const [toast, setToast] = useState("");
 	const [confirmAbandon, setConfirmAbandon] = useState(false);
-	const [reviewing, setReviewing] = useState(false);  // end-game: viewing final board + log
 	const [resultReady, setResultReady] = useState(false);  // gate the win/loss screen until 2s after game ends
 	// Mobile-only: per-player expand toggle (compact one-line summaries) + log collapse.
 	// No effect on desktop, where CSS always shows full panels + the move log.
@@ -1060,12 +1107,16 @@ export default function SpenderApp() {
 	roomIdRef.current = roomId;
 	const screenRef = useRef(screen);
 	screenRef.current = screen;
+	const reviewingRef = useRef(reviewing);
+	reviewingRef.current = reviewing;
 	useEffect(() => {
 		const handleVisibility = () => {
 			// Only auto-reconnect when actively on the game screen — otherwise tabbing
-			// back would dump a lobby/waiting user into a stale waiting room.
+			// back would dump a lobby/waiting user into a stale waiting room. Never while
+			// reviewing a finished game (no live socket — a reconnect would be spurious).
 			if (document.visibilityState === "visible"
 				&& screenRef.current === "game"
+				&& !reviewingRef.current
 				&& roomIdRef.current
 				&& getReadyState() !== WebSocket.OPEN) {
 				connect(`${WS_BASE}/${roomIdRef.current}/${myId}`);
@@ -1220,7 +1271,7 @@ export default function SpenderApp() {
 	const prevBankRef = useRef(null);
 	const [flashGems, setFlashGems] = useState(new Set());
 	useEffect(() => {
-		if (!game?.bank) return;
+		if (reviewing || !game?.bank) return;   // no flashes while rewinding a finished game
 		const prev = prevBankRef.current;
 		if (prev) {
 			const flashing = new Set(
@@ -1246,6 +1297,7 @@ export default function SpenderApp() {
 	const prevMovesLenRef = useRef(0);
 	const flyIdRef = useRef(0);
 	useEffect(() => {
+		if (reviewing) return;   // no flying gems/cards while rewinding a finished game
 		const players = game?.players;
 		if (!players) return;
 		const prev = prevPlayersRef.current;
@@ -1501,6 +1553,50 @@ export default function SpenderApp() {
 		connect(`${WS_BASE}/${gameId}/${myId}`);
 	};
 
+	// ── Read-only review of a finished game (rewind any turn; no moves possible) ──
+	// Fetches the final board + a per-turn snapshot list. Entered from a History card
+	// (no WebSocket) or from the in-game post-game screen (live socket left untouched).
+	const enterReview = async (gameId) => {
+		const haveLive = !!(roomData?.game) && roomId === gameId;   // already on this finished game
+		try {
+			const headers = authUser?.session_token ? { Authorization: `Bearer ${authUser.session_token}` } : {};
+			const res = await fetch(`${HTTP_BASE}/games/${gameId}/review`, { headers });
+			const data = await res.json();
+			if (!data.ok) {
+				if (haveLive) { setReplaySnapshots(null); setReplayTurn(null); setReviewing(true); return; }
+				setToast(data.message || "Couldn't load that game"); return;
+			}
+			const snaps = Array.isArray(data.snapshots) ? data.snapshots : null;
+			if (!haveLive) {
+				// History entry: no socket — synthesize the room state from the fetched final board.
+				disconnect();   // ensure no stray socket can overwrite the synthetic review state
+				setRoomId(gameId);
+				setRoomData({
+					room_id: data.room_id,
+					players: data.players || {},
+					status: data.status || "over",
+					game: data.final,
+					ai_variant: data.ai_variant,
+				});
+				setResultReady(true);
+				setScreen("game");
+			}
+			setReplaySnapshots(snaps);
+			setReplayTurn(null);
+			setReviewing(true);
+		} catch {
+			if (haveLive) { setReplaySnapshots(null); setReplayTurn(null); setReviewing(true); return; }
+			setToast("Couldn't reach the server");
+		}
+	};
+
+	// Jump the review board to a turn (0-based; the last snapshot is the final position).
+	const goToTurn = (idx) => {
+		if (!replaySnapshots) return;
+		setReplayTurn(Math.max(0, Math.min(replaySnapshots.length - 1, idx)));
+	};
+	const goToFinal = () => setReplayTurn(null);
+
 	const goToMenu = () => {
 		disconnect();
 		setScreen("browser");
@@ -1509,6 +1605,8 @@ export default function SpenderApp() {
 		setSelectedCard(null);
 		setConfirmAbandon(false);
 		setReviewing(false);
+		setReplaySnapshots(null);
+		setReplayTurn(null);
 		fetchGames(authUser);
 	};
 
@@ -1687,6 +1785,53 @@ export default function SpenderApp() {
 					</div>
 				)}
 			</div>
+		);
+	}
+
+	// Replay controls shown in the action bar while reviewing a finished game: a turn
+	// indicator + Prev/Next/Latest. Turn-by-turn nav needs the snapshot list (older games
+	// predating the setup snapshot have none — then we just show the final board).
+	// Snapshot[idx] is the board AFTER move (idx-1): idx 0 = the start (before any move),
+	// idx N = the final position (after the last move).
+	function renderReplayBar() {
+		const total = replaySnapshots ? replaySnapshots.length : 0;   // N+1 snapshots
+		const turns = Math.max(0, total - 1);                         // N moves/turns
+		const idx = replayIdx;
+		const atStart = idx <= 0;
+		const atFinal = replayTurn == null || idx >= turns;
+		// The move that PRODUCED the board on screen (snapshot[idx] = state after that move).
+		const producedBy = (!atStart && replaySnapshots) ? replaySnapshots[idx - 1] : null;
+		const moverName = producedBy ? displayName(roomData?.players?.[producedBy.mover] || producedBy.mover) : null;
+		return (
+			<>
+				<span className="turn-badge theirs">
+					{atStart ? "Game start" : atFinal ? "Final position" : `Turn ${idx} / ${turns}`}
+				</span>
+				{roomData?.ai_variant && (
+					<span className="ai-variant-badge">{aiPersona(roomData.ai_variant)}</span>
+				)}
+				{replayNav ? (
+					<div className="replay-nav">
+						<button className="btn btn-ghost btn-sm" disabled={idx <= 0}
+							onClick={() => goToTurn(idx - 1)}>◀ Prev</button>
+						<span className="replay-where">
+							{atStart
+								? "Before any moves"
+								: <>{moverName}{producedBy?.move ? <span className="replay-move"> · {producedBy.move}</span> : null}</>}
+						</span>
+						<button className="btn btn-ghost btn-sm" disabled={idx >= turns}
+							onClick={() => goToTurn(idx + 1)}>Next ▶</button>
+						<button className="btn btn-outline btn-sm" disabled={atFinal} onClick={goToFinal}>Latest</button>
+					</div>
+				) : (
+					<span className="action-hint">
+						Final board &amp; game log{replaySnapshots === null ? " · turn-by-turn replay isn’t available for this game" : " · click a move in the log to rewind"}
+					</span>
+				)}
+				<div className="action-bar-btns">
+					<button className="btn btn-ghost action-bar-spacer" aria-hidden="true" tabIndex={-1}>{"✕"}</button>
+				</div>
+			</>
 		);
 	}
 
@@ -2034,6 +2179,9 @@ export default function SpenderApp() {
 											</div>
 											<div className="game-card-meta">{timeAgo(g.finished_at)}{g.win_points === 21 ? " · Long (21)" : ""}</div>
 										</div>
+										<div className="game-card-actions">
+											<button className="btn btn-outline btn-sm" onClick={() => enterReview(g.id)}>Review</button>
+										</div>
 									</div>
 									);
 								})}
@@ -2177,12 +2325,13 @@ export default function SpenderApp() {
 							})}
 						</div>
 						<div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
-							<button className="btn btn-gold" onClick={() => setReviewing(true)}>
+							<button className="btn btn-gold" onClick={() => enterReview(roomId)}>
 								Review Board & Log
 							</button>
 							<button className="btn btn-outline" onClick={() => {
 								try { localStorage.removeItem("spender_roomId"); } catch {}
 								setReviewing(false);
+								setReplaySnapshots(null); setReplayTurn(null);
 								setScreen("browser"); setRoomData(null); setRoomId(""); disconnect();
 								fetchGames(authUser);
 							}}>
@@ -2201,11 +2350,11 @@ export default function SpenderApp() {
 			<style>{css}</style>
 			<div className="app game-screen">
 				<div className="game-nav">
-					{game.phase === "over"
-						? <button className="btn btn-ghost btn-sm" onClick={() => setReviewing(false)}>← Back to Results</button>
+					{reviewChrome
+						? <button className="btn btn-ghost btn-sm" onClick={() => { setReplayTurn(null); setReviewing(false); setResultReady(true); }}>← Back to Results</button>
 						: <button className="btn btn-ghost btn-sm" onClick={goToMenu}>← Menu</button>}
-					<span className="game-nav-title">Spender{game.phase === "over" ? " — Review" : ""}</span>
-					{game.phase === "over"
+					<span className="game-nav-title">Spender{reviewChrome ? " — Review" : ""}</span>
+					{reviewChrome
 						? <span style={{ width: 64 }} />
 						: <button className="btn btn-danger btn-sm" onClick={() => setConfirmAbandon(true)}>Abandon</button>}
 				</div>
@@ -2214,6 +2363,7 @@ export default function SpenderApp() {
 					<div className="game-main">
 
 						<div className="action-bar">
+								{reviewing ? renderReplayBar() : (<>
 							<span className={`turn-badge ${game.phase === "over" ? "theirs" : myTurn ? "mine" : "theirs"}`}>
 								{game.phase === "over" ? "Game Over" : myTurn ? "Your Turn" : `${displayName(roomData?.players?.[game.turn])}'s Turn`}
 							</span>
@@ -2229,6 +2379,7 @@ export default function SpenderApp() {
 							<div className="action-bar-btns">
 								{renderActionButtons() || <button className="btn btn-ghost action-bar-spacer" aria-hidden="true" tabIndex={-1}>{"✕"}</button>}
 							</div>
+								</>)}
 						</div>
 
 						<div className="panel bank-panel">
@@ -2360,17 +2511,53 @@ export default function SpenderApp() {
 									Log <span className="log-caret">{logOpen ? "▾" : "▸"}</span>
 								</div>
 								<div className="move-log">
-									{(game.moves || []).length === 0 && <div className="log-empty">No moves yet</div>}
-									{(game.moves || []).map((mv, i) => {
-										const { name, action, card } = formatLogMove(mv);
+									{liveGame?.phase === "over" && (() => {
+										// "X won the game" — a plain (unclickable) marker at the top of the log,
+										// derived from game.winner so it needs no persisted entry and works for
+										// every finished game (incl. ones predating the setup snapshot).
+										const winners = Array.isArray(liveGame.winner)
+											? liveGame.winner : (liveGame.winner != null ? [liveGame.winner] : []);
+										const names = winners.map(w => displayName(roomData?.players?.[w] || (typeof w === "string" ? w.slice(0, 6) : w)));
+										const label = names.length === 0 ? "Game over"
+											: names.length > 1 ? `${names.join(" & ")} tied the game`
+											: `${names[0]} won the game`;
 										return (
-											<div key={i} className={`log-entry${card ? " clickable" : ""}`}
-												onClick={card ? () => setModalCard(card) : undefined}>
+											<div className="log-entry log-win">
+												<span className="log-action">🏆 {label}</span>
+											</div>
+										);
+									})()}
+									{((liveGame?.moves) || []).length === 0 && <div className="log-empty">No moves yet</div>}
+									{((liveGame?.moves) || []).map((mv, i) => {
+										const { name, action, card } = formatLogMove(mv);
+										// Each move row jumps to the board AFTER that move: snapshot[turn+1]. In a
+										// live (non-review) game a click instead inspects the move's card.
+										const turnIdx = moveTurns[i];
+										// A turn spans several rows (a buy + its noble claim, a take + a discard);
+										// highlight only its PRIMARY row so exactly one row marks the shown state.
+										const isPrimary = mv.type === "take_gems" || mv.type === "buy" || mv.type === "reserve";
+										const selectedTurn = replayNav && replayIdx === turnIdx + 1 && isPrimary;
+										const handleClick = replayNav
+											? () => goToTurn(turnIdx + 1)
+											: (card ? () => setModalCard(card) : undefined);
+										const clickable = replayNav || !!card;
+										return (
+											<div key={i}
+												className={`log-entry${clickable ? " clickable" : ""}${selectedTurn ? " log-selected" : ""}`}
+												onClick={handleClick}>
 												<span className="log-name">{name}</span>
 												<span className="log-action">{action}</span>
 											</div>
 										);
 									})}
+									{liveGame && (liveGame.moves || []).length > 0 && (
+										// "Game started" — the oldest entry (bottom). Clicking shows the initial
+										// board (snapshot[0], before anyone has moved).
+										<div className={`log-entry log-start${replayNav ? " clickable" : ""}${replayNav && replayIdx === 0 ? " log-selected" : ""}`}
+											onClick={replayNav ? () => goToTurn(0) : undefined}>
+											<span className="log-action">▶ Game started</span>
+										</div>
+									)}
 								</div>
 							</div>
 						)}

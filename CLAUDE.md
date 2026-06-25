@@ -1892,6 +1892,39 @@ degrades safely if `/auth/session` isn't deployed yet (404 → stay logged in).
     the log in main's EXACT persisted format (synthesizing the silent single-noble auto-claims + deck-reserve
     `card_id`/`from_deck`), reconstruct from `setup` alone, assert the replayed state matches the engine at
     every turn with **deck order compared exactly** (60 games) + direct guards on each `main.py` change.
+- **In-game review + turn-by-turn replay (the game-review feature; June 2026).** Every game in the lobby
+  **History** column has a **Review** button (right of the score) that opens a READ-ONLY review of that game
+  where you can rewind to any turn. Builds directly on `replay.py` (above).
+  - **Backend — `GET /games/{id}/review`** (`main.py`; session-gated AND restricted to a player who was in
+    the game — `viewer in game["order"]`). Returns `final` (the end board, redacted-from-the-viewer +
+    `setup`-stripped via `_review_view`) + `snapshots` (one renderable game dict per turn, from
+    `replay.reconstruct` → `replay.turn_snapshots`, each redacted via `_review_view`). `snapshots` is **null**
+    for a game created before the `setup` snapshot (review still shows the final board, just no turn nav) or on
+    any reconstruction glitch — `_build_review_snapshots` swallows `ReplayError`/anything. Loads in-memory
+    first, else the DB row (mirrors `/full`). **Player-count-agnostic** (only `replay.evaluate`/v_state is
+    2-player; reconstruction isn't), so multiplayer games review too. Does NOT need numpy/AZ. Test
+    `games/spender/tests/test_review.py` (pure helpers + an endpoint e2e is in scratchpad, not committed).
+  - **Frontend — read-only replay mode (`Spender.jsx`).** `enterReview(id)` does an HTTP fetch (NO WebSocket;
+    synthesizes `roomData` from `final`) for a History entry; the end-game "Review Board & Log" button also
+    calls `enterReview(roomId)` (the `haveLive` path keeps the live socket, just adds snapshots). State
+    `reviewing`/`replaySnapshots`/`replayTurn` is declared **BEFORE the derived `game` block** (TDZ — same
+    hard rule as the other derived state). `liveGame = roomData.game`; the **BOARD** renders
+    `replaySnapshots[replayTurn].game` (or liveGame), but the **move log + `cardsById` stay sourced from
+    liveGame** so every turn stays clickable and logged cards resolve even on an early board.
+  - **Read-only is enforced, do not regress:** `myTurn`/`aiThinking`/`needsDiscard`/`needsNobleChoice` are all
+    gated `!reviewing`, and the fly/flash `useEffect`s early-return on `reviewing` (no spurious animations
+    while rewinding). Nav chrome uses **`reviewChrome = reviewing || liveGame.phase==="over"`** (the LIVE
+    game's phase, NOT the rewound snapshot's) so a historical `"playing"` snapshot can't leak the live
+    Abandon/Menu chrome. The visibility/tab-back reconnect is also gated `!reviewing` (a History review has no
+    socket to reconnect).
+  - **Snapshot semantics (the load-bearing index rule): `snapshots[idx]` is the board AFTER move `idx-1`** —
+    idx 0 = the initial board (before anyone moved), idx N = the final position. The log (newest-first) renders:
+    an **unclickable** `🏆 X won the game` label at the top (derived from `game.winner`; ties → "A & B tied"),
+    each **move row** jumping to `goToTurn(turnIdx + 1)` (the board AFTER that move) and highlighting **only its
+    PRIMARY row** (`take_gems`/`buy`/`reserve`) so a buy-plus-noble turn lights ONE row, and a clickable
+    `▶ Game started` at the bottom → `goToTurn(0)` (the initial board). The action-bar banner
+    (`renderReplayBar`) describes the move that PRODUCED the shown board (`snapshots[idx-1]`): `Game start` /
+    `Turn k / N · {mover} · {move}` / `Final position`, with Prev/Next/Latest.
 - **Loading screen**: 250ms fast-path — AbortController fetch with 250ms timeout;
   if server responds in time → skip loading screen entirely; if not → show spinner
   + progress polling. `showLoading` state gates the spinner so a blank flash never

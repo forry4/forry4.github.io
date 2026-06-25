@@ -2801,6 +2801,96 @@ async def get_game_full(game_id: str, token: str | None = Depends(bearer_token))
     return payload
 
 
+def _review_view(game: dict, viewer_pid: str) -> dict:
+    """A renderable game dict for the review screen: blind opponent reserves redacted from
+    the reviewer's perspective (a finished/over snapshot reveals everything — see
+    _redact_blind_reserves) and the static `setup` blob stripped (client never uses it)."""
+    g = _redact_blind_reserves(game, viewer_pid) or game
+    if isinstance(g, dict) and "setup" in g:
+        g = {k: v for k, v in g.items() if k != "setup"}
+    return g
+
+
+def _build_review_snapshots(game: dict, viewer_pid: str) -> list[dict] | None:
+    """Reconstruct one renderable board per turn (plus the final position) so the review
+    screen can jump to any point in the game. Returns None when the game predates the
+    `setup` snapshot (its deck order is unrecoverable) or can't be reconstructed — the
+    caller still serves the final board, just without turn-by-turn navigation."""
+    try:
+        from games.spender.ai.az import replay
+    except Exception:
+        return None
+    try:
+        g0, chrono = replay.reconstruct(game)
+        snaps: list[dict] = []
+        for turn, mover, primary, gsnap in replay.turn_snapshots(g0, chrono):
+            snaps.append({
+                "turn": turn,
+                "mover": mover,
+                "move": replay._describe(primary) if primary else None,
+                "game": _review_view(gsnap, viewer_pid),
+            })
+        return snaps
+    except replay.ReplayError:
+        return None
+    except Exception:
+        # Reconstruction is best-effort; never break the review over a replay glitch.
+        return None
+
+
+@router.get("/games/{game_id}/review")
+async def get_game_review(game_id: str, token: str | None = Depends(bearer_token)):
+    """A participant's read-only review of one of their games: the final board (redacted
+    from their perspective) plus a per-turn snapshot list so the client can rewind to any
+    turn. Session-gated AND restricted to a player who was in the game. Snapshots are null
+    for games created before the `setup` snapshot (no turn-by-turn, final board only)."""
+    user = get_user_by_session(token)
+    if not user:
+        return {"ok": False, "message": "unauthenticated"}
+    room_id = normalize_room(game_id)
+    payload = None
+    async with ROOM_LOCK:
+        room = ROOMS.get(room_id)
+        if room and room.get("game"):
+            payload = {"game": copy.deepcopy(room["game"]),
+                       "players": dict(room.get("players", {})),
+                       "ai_variant": room.get("ai_variant"),
+                       "status": room.get("status")}
+    if payload is None:  # not in memory — read the persisted row (read-only, no ROOMS mutation)
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT state_json, status FROM games WHERE id=?", (room_id,))
+        row = cur.fetchone()
+        conn.close()
+        if not row or not row["state_json"]:
+            return {"ok": False, "message": "game not found"}
+        try:
+            state = json.loads(row["state_json"])
+        except Exception:
+            return {"ok": False, "message": "corrupt game state"}
+        if not state.get("game"):
+            return {"ok": False, "message": "game not found"}
+        payload = {"game": state.get("game"),
+                   "players": state.get("players", {}),
+                   "ai_variant": state.get("ai_variant"),
+                   "status": row["status"]}
+    game = payload["game"]
+    viewer = user["id"]
+    if viewer not in (game.get("order") or []):
+        return {"ok": False, "message": "you were not a player in this game"}
+    return {
+        "ok": True,
+        "room_id": room_id,
+        "players": payload.get("players", {}),
+        "ai_variant": payload.get("ai_variant"),
+        "status": payload.get("status", "over"),
+        "win_points": game.get("win_points", 15),
+        "viewer_pid": viewer,
+        "final": _review_view(game, viewer),
+        "snapshots": _build_review_snapshots(game, viewer),
+    }
+
+
 @router.post("/games/{game_id}/cancel")
 async def cancel_open_game(game_id: str, token: str | None = Depends(bearer_token),
                            player_id: str | None = None):
