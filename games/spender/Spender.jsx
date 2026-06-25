@@ -560,7 +560,7 @@ const css = baseCss + `
   /* Bottom-align the (shorter) nobles to row 1's baseline so the gap from the nobles
      down to Level III == --gap too (the taller actions panel sets row 1's height). */
   .game-main>.nobles-panel{grid-column:1;grid-row:1;align-self:end}
-  .actions-panel{grid-column:2;grid-row:1;align-self:stretch;display:flex;flex-direction:column;justify-content:space-between;align-items:stretch;gap:calc(var(--card-h) * 0.043);position:relative}
+  .actions-panel{grid-column:2;grid-row:1;align-self:stretch;display:flex;flex-direction:column;justify-content:space-between;align-items:stretch;gap:calc(var(--card-h) * 0.043);position:relative;min-width:0}
   /* The card levels FILL row 2 with a uniform --gap between them: each .level-panel is
      flex:1 (so the panels — the real flex children of .levels — divide row 2 equally
      and L1 reaches the bottom), the .level-row inside fills the panel, and the cards
@@ -595,8 +595,11 @@ const css = baseCss + `
   .actions-panel .action-hint{flex:0 0 auto;font-size:calc(var(--card-h) * 0.082);white-space:normal;overflow:visible;text-overflow:clip;color:var(--text-dim);font-style:italic}
   .actions-panel-top{display:flex;flex-direction:column;gap:calc(var(--card-h) * 0.022);align-items:stretch}
   .actions-panel .target-label{align-self:stretch}
-  .actions-panel-btns{display:flex;flex-wrap:wrap;gap:calc(var(--card-h) * 0.054);align-items:center;justify-content:center;flex-shrink:0}
-  .actions-panel-btns .btn{padding:calc(var(--card-h) * 0.076) calc(var(--card-h) * 0.162);font-size:calc(var(--card-h) * 0.097)}
+  /* min-width:0 + max-width:100% keep the buttons WITHIN this 1fr column: the actions
+     box can never grow its own grid track and shove the board/sidebar around (the 3-4p
+     bug — a wide nobles row shrinks this column, and a too-wide button forced it back). */
+  .actions-panel-btns{display:flex;flex-wrap:wrap;gap:calc(var(--card-h) * 0.054);align-items:center;justify-content:center;flex-shrink:0;min-width:0}
+  .actions-panel-btns .btn{padding:calc(var(--card-h) * 0.076) calc(var(--card-h) * 0.08);font-size:calc(var(--card-h) * 0.097);max-width:100%}
   /* The admin "Vals" toggle is compact (much less wide than the Take/Buy buttons). */
   .actions-panel-btns .ai-vals-toggle,.board-actions-btns .ai-vals-toggle{padding:calc(var(--card-h) * 0.045) calc(var(--card-h) * 0.05);font-size:calc(var(--card-h) * 0.062)}
 
@@ -1904,27 +1907,18 @@ export default function SpenderApp() {
 	// The Take/Buy/✕ controls. Rendered in the desktop action bar AND (on mobile)
 	// inline with the gem bank — shared so the logic lives in one place.
 	function renderActionButtons() {
+		// No ✕/cancel button — clicking a selected gem or card again toggles it off
+		// (handleGemClick / the card onClick), so the cancel control is redundant and
+		// its width was bloating the actions box + shifting the layout in 3-4p lobbies.
 		if (game.phase === "over" || !myTurn) return null;
 		if (selectedGems.length > 0) return (
-			<>
-				<button className="btn btn-gold" onClick={handleTakeGems}>Take <span style={{ display: "inline-block", width: "0.62em", textAlign: "center", fontVariantNumeric: "tabular-nums" }}>{selectedGems.length}</span></button>
-				<button className="btn btn-ghost" onClick={() => setSelectedGems([])}>✕</button>
-			</>
+			<button className="btn btn-gold" onClick={handleTakeGems}>Take <span style={{ display: "inline-block", width: "0.62em", textAlign: "center", fontVariantNumeric: "tabular-nums" }}>{selectedGems.length}</span></button>
 		);
-		if (selectedCard?.source === "deck") return (
-			<>
-				{me?.reserved?.length >= 3 && <span style={{ color: "var(--text-muted)", fontSize: ".82rem" }}>Reserved slots full</span>}
-				<button className="btn btn-ghost" onClick={() => setSelectedCard(null)}>✕</button>
-			</>
-		);
+		if (selectedCard?.source === "deck")
+			return me?.reserved?.length >= 3 ? <span style={{ color: "var(--text-muted)", fontSize: ".82rem" }}>Reserved slots full</span> : null;
 		if (selectedCard && selectedCard.source !== "deck") {
 			const affordable = canAfford(selectedCard.card.cost, me?.tokens || emptyGems(), myBonuses);
-			return (
-				<>
-					{affordable && <button className="btn btn-gold" onClick={() => handleBuy(selectedCard.card)}>Buy</button>}
-					<button className="btn btn-ghost" onClick={() => setSelectedCard(null)}>✕</button>
-				</>
-			);
+			return affordable ? <button className="btn btn-gold" onClick={() => handleBuy(selectedCard.card)}>Buy</button> : null;
 		}
 		return null;
 	}
