@@ -26,7 +26,8 @@ self.onmessage = async (e) => {
   try {
     if (msg.kind === "search") {
       const seed = BigInt(msg.seed >>> 0);
-      const visits = search_visits_timed(String(msg.state), msg.seat >>> 0, Number(msg.budget), seed);
+      const maxSims = (msg.maxSims >>> 0) || 0; // 0 = no cap
+      const visits = search_visits_timed(String(msg.state), msg.seat >>> 0, Number(msg.budget), maxSims, seed);
       self.postMessage({ id: msg.id, visits: Array.from(visits) });
     } else if (msg.kind === "convert") {
       const move = action_to_move_for(String(msg.state), msg.action >>> 0);

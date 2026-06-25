@@ -1169,7 +1169,10 @@ export default function SpenderApp() {
 	// validates the submitted move and falls back to its own search if the client doesn't answer.
 	// Graceful — if no worker loads we never announce capability and the server computes as before.
 	// Pool capped (each worker builds a large search tree at the budget → bounded memory across devices).
-	const CLIENT_AI_BUDGET_MS = 4500;
+	const CLIENT_AI_BUDGET_MS = 4500;   // slow-device time ceiling
+	const CLIENT_AI_MAX_SIMS = 100000;  // per-worker sims cap (~1 node/sim → bounds tree memory; fast
+	                                    // devices hit this in ~2s, snappy; 0 = no cap). ~400k aggregate
+	                                    // across the pool — far past saturation, no strength cost.
 	const wasmPoolRef = useRef(null);          // [{ ready, request, terminate }] — RPC-wrapped workers
 	const [wasmReady, setWasmReady] = useState(false);
 	const clientAiArmedRef = useRef(null);     // room_id we've announced capability for
@@ -1238,7 +1241,8 @@ export default function SpenderApp() {
 			try {
 				const visitsArrays = await Promise.all(pool.map((wk, i) =>
 					wk.request({
-						kind: "search", state: stateStr, seat: as.seat, budget: CLIENT_AI_BUDGET_MS,
+						kind: "search", state: stateStr, seat: as.seat,
+						budget: CLIENT_AI_BUDGET_MS, maxSims: CLIENT_AI_MAX_SIMS,
 						seed: ((as.ply * 2654435761) ^ (i * 40503 + 1)) >>> 0,
 					}).then((d) => d.visits).catch(() => null)));
 				const total = new Int32Array(70);

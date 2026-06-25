@@ -93,12 +93,14 @@ pub fn choose_move_timed(state_json: &str, seat: usize, budget_ms: f64, seed: u6
     crate::actions::action_to_move_json(&s, a)
 }
 
-/// ROOT-PARALLEL piece: run a time-budgeted determinized search and return the ROOT VISIT COUNTS
-/// (length N_ACTIONS=70). Each worker calls this with a distinct seed; the main thread SUMS the
-/// vectors across workers and argmaxes — standard root parallelization (no shared memory). Empty vec
-/// on a parse error (the caller drops that worker's contribution).
+/// ROOT-PARALLEL piece: run a determinized search bounded by `budget_ms` OR `max_sims` (whichever
+/// comes first) and return the ROOT VISIT COUNTS (length N_ACTIONS=70). Each worker calls this with a
+/// distinct seed; the main thread SUMS the vectors across workers and argmaxes — standard root
+/// parallelization (no shared memory). The `max_sims` cap bounds the per-worker tree size (≈ one node
+/// per sim) so a fast device can't build a multi-hundred-MB tree (and finishes snappily). `max_sims=0`
+/// = no cap. Empty vec on a parse error (the caller drops that worker's contribution).
 #[wasm_bindgen]
-pub fn search_visits_timed(state_json: &str, seat: usize, budget_ms: f64, seed: u64) -> Vec<i32> {
+pub fn search_visits_timed(state_json: &str, seat: usize, budget_ms: f64, max_sims: usize, seed: u64) -> Vec<i32> {
     let dump: Dump = match serde_json::from_str(state_json) {
         Ok(d) => d,
         Err(_) => return Vec::new(),
@@ -106,8 +108,9 @@ pub fn search_visits_timed(state_json: &str, seat: usize, budget_ms: f64, seed: 
     let s = dump.into_state();
     let mut rng = Rng::new(seed);
     let start = js_sys::Date::now();
+    let cap = if max_sims == 0 { usize::MAX } else { max_sims };
     vsearch::root_visits_until(&s, seat, &mut rng, |n| {
-        n % 64 != 0 || (js_sys::Date::now() - start) < budget_ms
+        n < cap && (n % 64 != 0 || (js_sys::Date::now() - start) < budget_ms)
     })
 }
 

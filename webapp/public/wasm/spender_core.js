@@ -85,20 +85,23 @@ export function choose_move_timed(state_json, seat, budget_ms, seed) {
 }
 
 /**
- * ROOT-PARALLEL piece: run a time-budgeted determinized search and return the ROOT VISIT COUNTS
- * (length N_ACTIONS=70). Each worker calls this with a distinct seed; the main thread SUMS the
- * vectors across workers and argmaxes — standard root parallelization (no shared memory). Empty vec
- * on a parse error (the caller drops that worker's contribution).
+ * ROOT-PARALLEL piece: run a determinized search bounded by `budget_ms` OR `max_sims` (whichever
+ * comes first) and return the ROOT VISIT COUNTS (length N_ACTIONS=70). Each worker calls this with a
+ * distinct seed; the main thread SUMS the vectors across workers and argmaxes — standard root
+ * parallelization (no shared memory). The `max_sims` cap bounds the per-worker tree size (≈ one node
+ * per sim) so a fast device can't build a multi-hundred-MB tree (and finishes snappily). `max_sims=0`
+ * = no cap. Empty vec on a parse error (the caller drops that worker's contribution).
  * @param {string} state_json
  * @param {number} seat
  * @param {number} budget_ms
+ * @param {number} max_sims
  * @param {bigint} seed
  * @returns {Int32Array}
  */
-export function search_visits_timed(state_json, seat, budget_ms, seed) {
+export function search_visits_timed(state_json, seat, budget_ms, max_sims, seed) {
     const ptr0 = passStringToWasm0(state_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.search_visits_timed(ptr0, len0, seat, budget_ms, seed);
+    const ret = wasm.search_visits_timed(ptr0, len0, seat, budget_ms, max_sims, seed);
     var v2 = getArrayI32FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
     return v2;
