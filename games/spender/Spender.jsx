@@ -920,6 +920,7 @@ export default function SpenderApp() {
 	const [reviewing, setReviewing] = useState(false);            // viewing a finished game's board + log
 	const [replaySnapshots, setReplaySnapshots] = useState(null); // [{turn,mover,move,game}], or null = no turn-by-turn
 	const [replayTurn, setReplayTurn] = useState(null);           // which past turn drives the board; null = final
+	const [pinged, setPinged] = useState(false);                  // a ping arrived while the tab was hidden (drives the "waiting for you" tab alert)
 
 	// ── Derived game state (must be before useEffect hooks that use `game`) ──
 	const liveGame = roomData?.game;
@@ -1080,6 +1081,8 @@ export default function SpenderApp() {
 		} else if (msg.type === "ping") {
 			// Another player tapped your player box (or you tapped theirs) → chime.
 			playPing();
+			// If you're on another tab, also raise the "waiting for you" tab indicator.
+			if (document.hidden) setPinged(true);
 		} else if (msg.type === "error") {
 			// A join into a cancelled/gone game (the backend rejects it now instead of
 			// fabricating a hostless room): clear the stale pointer + refresh the list
@@ -1150,6 +1153,39 @@ export default function SpenderApp() {
 		document.addEventListener("visibilitychange", handleVisibility);
 		return () => document.removeEventListener("visibilitychange", handleVisibility);
 	}, [myId, connect, getReadyState]); // eslint-disable-line react-hooks/exhaustive-deps
+
+	// ── "Someone's waiting for you" tab indicator (permission-free) ─────────
+	// When the tab is HIDDEN and it's your turn OR a ping arrived, flash the page
+	// title and swap in the alert favicon so an unfocused tab shows someone's waiting.
+	// Cleared the moment you return (visibilitychange → visible). No Notifications API.
+	useEffect(() => {
+		const BASE_TITLE = "Forrest Games";
+		const icon = document.querySelector('link[rel~="icon"][type="image/svg+xml"]');
+		const baseIcon = icon ? icon.href : null;
+		const alertIcon = baseIcon ? baseIcon.replace("favicon.svg", "favicon-alert.svg") : null;
+		const alertText = () => (myTurn ? "🔔 Your turn!" : "👋 Someone's waiting!");
+		let timer = null, flip = false;
+		const stop = () => {
+			if (timer) { clearInterval(timer); timer = null; }
+			document.title = BASE_TITLE;
+			if (icon && baseIcon) icon.href = baseIcon;
+		};
+		const flash = () => {
+			if (icon && alertIcon) icon.href = alertIcon;
+			document.title = alertText();
+			if (!timer) timer = setInterval(() => {
+				flip = !flip;
+				document.title = flip ? BASE_TITLE : alertText();
+			}, 1100);
+		};
+		const evaluate = () => {
+			if (!document.hidden) { stop(); if (pinged) setPinged(false); return; }
+			if (myTurn || pinged) flash(); else stop();
+		};
+		evaluate();
+		document.addEventListener("visibilitychange", evaluate);
+		return () => { document.removeEventListener("visibilitychange", evaluate); stop(); };
+	}, [myTurn, pinged]);
 
 	useEffect(() => {
 		if (screen === "browser" && authUser) fetchGames(authUser);
