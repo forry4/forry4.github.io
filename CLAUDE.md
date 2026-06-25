@@ -2188,6 +2188,47 @@ value + now works in game review. All frontend in `Spender.jsx`; backend in `mai
   TDZ rule) that read the rewound snapshot when `reviewing`, else live `roomData`; the Vals
   toggle no longer hides on a finished game (so it shows while rewound to a playing turn).
 
+### Session (June 25 2026) — tap-to-ping, "waiting for you" tab alert, reserved-card + actions-box sizing (SHIPPED to main; do not regress)
+Four small Spender UI changes, all frontend-only except the ping relay (one backend WS action). Built in the
+`forrestm_projects-sound` worktree (branch `sound`), pushed straight to `main`. The `sound` worktree is the
+standing scratchpad for these one-off UI fixes.
+- **Tap-to-ping a player (chime for you + them).** Clicking ANOTHER player's box (`.player-panel.pingable`,
+  gated `!isMe && !reviewing`) plays a short rising two-tone WebAudio chime locally and sends
+  `{action:"ping", target: pid}`. **Backend (`main.py` WS loop): the `ping` action relays
+  `{type:"ping", from: pid}` to ONLY the target player's socket** (`tws = ROOMS[room]["sockets"][target]`,
+  guarded `target != pid`); the clicker already played locally, so there's no echo-back. **VERIFIED with a
+  4-client integration test: a ping reaches only the tapped player + the clicker — the other 2-3 players hear
+  NOTHING** (do not "broadcast to the room" — that would leak to everyone). `playPing()` is a module-level
+  helper (one lazily-created shared `AudioContext`, no audio asset) used by both the click handler and the
+  `msg.type==="ping"` message branch.
+- **"Someone's waiting for you" tab indicator (permission-free).** A `useEffect([myTurn, pinged])` gated on the
+  Page Visibility API: while the tab is HIDDEN and (it's your turn OR a ping arrived), it FLASHES
+  `document.title` between `Forrest Games` and `🔔 Your turn!` / `👋 Someone's waiting!` (~1.1s) and swaps the
+  favicon to **`webapp/public/favicon-alert.svg`** (the tree + a red badge). Cleared the instant you return
+  (`visibilitychange`→visible restores title/favicon + clears `pinged`). New `pinged` state set only when a ping
+  arrives AND `document.hidden` (so a stale ping doesn't fire later). NO Notifications API (no permission prompt,
+  by user choice). Spender-only so far; CoC/Where Wolf? would need the same small addition.
+- **Reserved-card content sized via container query (cqw), NOT `--card-h`.** The reserved-card cost/points/color
+  were sized off `--card-h` assuming a reserved card was ~0.58× a board card; it's actually ~0.8-1.0× (and the
+  ratio drifts with the sidebar/`--card-h` clamps), so the text rendered ~half-size. Fix: `.player-reserved .card`
+  is now `container-type:inline-size` and its content (`.card-points`/`.card-bonus`/`.cost-gem`/`.cost-num`/
+  `.card-cost` gap/`.card-header` margin) uses **cqw** so each reserved card is a faithful MINI board card
+  (content = same fraction of the card as on the board cards, ≈ board's `--card-h` multiple ÷ 0.72). **GOTCHA
+  (do not regress): cqw on the card's OWN padding resolves against an ANCESTOR container/viewport, not itself —
+  so the card's padding STAYS `--card-h`-based; only DESCENDANTS use cqw.** Verified within ±2.7% across
+  resolutions by a headless measurement harness.
+- **Slimmer actions box (the 3-4p layout-shift fix).** The Take/✕ buttons were too wide and, in 3-4p lobbies
+  (the wider nobles row squeezes the actions `1fr` column), forced that grid track wider and shoved the
+  board/sidebar around. (1) **Removed the ✕/cancel button entirely** from `renderActionButtons` (all states) —
+  clicking a selected gem or card again already toggles it off (`handleGemClick` / the card `onClick`), so it was
+  redundant. (2) Tightened the Take/Buy horizontal padding (`.actions-panel-btns .btn` `0.162→0.08 × --card-h`).
+  (3) **`min-width:0` on `.actions-panel` + `.actions-panel-btns` (and `max-width:100%` on the button) is the
+  structural guarantee** the box can never grow its own grid track — a grid item defaults to `min-width:auto`
+  (=min-content), which is what let a wide button expand the `1fr` track; `min-width:0` makes the track purely
+  space-derived. Verified: with `min-width:0` the grid width is STABLE regardless of button width (the old code
+  overflowed its container by ~220px with a wide button). The `.action-bar-spacer ✕` (in the legacy
+  `visibility:hidden` action-bar paths) is a height placeholder, not a real button — left alone.
+
 ### Player box + nobles details (desktop; do not regress)
 - **Indicator sizing uses `zoom`, not font/padding math.** The desktop player box scales
   its indicators with `zoom` (scales box + text + the inline gem dots together, WITH
