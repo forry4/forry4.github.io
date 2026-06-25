@@ -2057,6 +2057,10 @@ state before confirming the delete.
   shared by the desktop `.hint-col` and the mobile action-bar placements.
 
 ### Responsive game layout (June 2026 — the big UI overhaul; do not regress)
+**The DESKTOP portion below is SUPERSEDED by the June 25 2026 proportional rewrite (next
+section): the fixed `1fr 560px` grid, the `132px` bank, the `≈144×185` cards, and the
+max-height breakpoints described here are GONE — desktop now scales from one `--card-h`
+anchor. The TABLET/PHONE parts (`max-width:900px` / `600px`) still apply unchanged.**
 The game screen has THREE layouts driven by width; all CSS lives in the one `css`
 string in `Spender.jsx`. **The base styles are the small/compact foundation; the
 DESKTOP look is added in `@media(min-width:901px)`** (an inversion worth knowing —
@@ -2110,6 +2114,79 @@ editing base affects phone/tablet, not desktop):
   refuses to backtrack and drops it to a new row → a diagonal staircase. **Fix: pin
   every grid child to an explicit `grid-row`.** Relatedly, `grid-row:1/-1` needs an
   explicit `grid-template-rows` or `-1` collapses to line 1 (item spans only row 1).
+
+### Proportional desktop layout rewrite + searched-eval / review overlay (June 25 2026 — do not regress)
+The desktop game layout was rewritten to be fully PROPORTIONAL (supersedes the desktop part
+of "Responsive game layout" above), and the admin S position-eval overlay gained a SEARCHED
+value + now works in game review. All frontend in `Spender.jsx`; backend in `main.py` /
+`ai/az/vsearch.py`. Live on staging AND prod.
+
+**Proportional desktop (`@media(min-width:901px)`):**
+- **One anchor drives everything: `--card-h:clamp(104px, 17vh, 205px)` on `.game`**, with
+  `--card-w:calc(var(--card-h)*0.778)` (the prod 144:185 card aspect). EVERY desktop
+  dimension is a `calc()` ratio of `--card-h` (ratios = old-full-size-px / 185), so the
+  whole board scales as ONE unit and looks identical at 1280×720 / 1920×1080 / 2560×1600
+  (clamp only floors/caps on extremes). This REPLACED the old fixed `1fr 560px` grid +
+  `132px` bank + `≈144×185` cards + FIVE max-height breakpoints that STEPPED the board in
+  discrete jumps (so it looked different per resolution).
+- Grids: `.game` = `minmax(0,1fr) clamp(440px,32vw,560px)` (board | sidebar); `.game-main`
+  = cols `auto 1fr calc(var(--card-h)*0.714)` (nobles | cards | vertical bank), rows
+  `auto 1fr`; sidebar = `1.6fr 1fr` (players | log). The definite-height + `minmax(0,1fr)`
+  chain on `.game` AND `.game-sidebar` (+ the move-log `max-height` belt) from the old
+  section STILL applies — keep it (same clipping footgun).
+- **Per-level card boxes:** each level row is wrapped in a `.level-panel` (a `.panel`,
+  `flex:1`) so the three levels are individually boxed AND fill the column height; `.levels`
+  packs them at the TOP with a fixed proportional gap (`justify-content:flex-start`), so
+  spare viewport height becomes whitespace BELOW — NOT bigger inter-level gaps (uniform gaps
+  were a hard request). Board cards hold a strict 0.778 aspect via a container query on
+  `.level-row` (`container-type:size`, `width:min(slot, 100cqh*0.72)`) — true contain, no
+  overflow. **Gotcha (do not regress): container-query units (`cqw`) on the RESERVED cards
+  blew up the flex-basis circularly** (309px-wide cards); reserved cards use a plain
+  `flex:0 0 calc((100% - …)/3)` + `--card-h`-relative content + `width:100%` on
+  `.player-reserved`/`.reserved-row`, NOT a container query.
+- **Player pills (the hard rules the user enforced):** gems (`.token-pill`) AND card
+  indicators (`.bonus-pill`) are each fixed at **1/6 of the row** (`flex:0 1 calc((100% -
+  …)/6)`) so a full set of 6 fills the row edge-to-edge; capsule-shaped
+  (`border-radius:999px`), prod-shaped but BIGGER (height + dot/count, NOT just wider); the
+  "N gems" total (`.gem-total`) is centered between the two rows. **Reserved cards are fixed
+  1/3 of the row** (3 fill it, fewer left-aligned NOT stretched), 0.778 aspect, cost/pts/
+  color sized to match the board cards' ratio.
+- **Eval pill top-right:** the S position-eval pill (`.ai-pos-eval-row`, rendered by
+  `renderAiEval` — split out of `renderAiValsToggle`, which is now just the Hide/Vals
+  button) is `position:absolute` at the top-right of the actions box (the box is
+  `position:relative`: `.actions-panel` desktop / `.nobles-panel .board-actions` mobile) so
+  it never displaces the Target / buttons / hint. "Show vals" button label is just "Vals".
+- **Layout-verify harness** (`webapp/_harness.mjs`, gitignored scratch — NOT committed): a
+  Playwright script that extracts `baseCss` + the game `css` from the two backtick template
+  literals, builds a MOCK game DOM (must include the `.level-panel` wrapper or per-level
+  boxing/gaps measure wrong — a real bug this caught), renders at the target viewports, and
+  measures + screenshots proportions / row-fit. The fast way to verify a layout change
+  without a live game; row-fit must be measured by element CENTER, not `top` (buttons of
+  different heights on one row have different tops). `npm run smoke` still gates blank-page
+  / CLS on every push (run it in `webapp/` before pushing).
+
+**Admin S overlay — searched eval + game review (`main.py` / `vsearch.py`):**
+- The admin position-eval pill shows BOTH **`leaf`** (static `v_state.value`) AND **`srch`**
+  (S's PUCT search ROOT value `sum(W)/sum(N)`, side-to-move perspective). `vsearch` gained
+  `_root_value(search)`, `choose_action_value(s, seat, …)→(action, root_value|None)`, and
+  `searched_value(…)`.
+- The searched value costs NOTHING extra on the AI's turn and is fresh on yours: (1) the
+  AI's move already searches → `_s_choose_move` uses `choose_action_value` and stores the
+  root value; (2) on the HUMAN's turn `_schedule_s_searched_eval` runs a fresh `SERVE_TIME`
+  (~4.5s) async search in the thread pool (guarded ONCE-per-ply via a `_s_eval_running`
+  marker) and broadcasts. Both stamp `game["s_searched"]={value, ply}`; `mk_room_state` only
+  emits `ai_position_eval_searched` when `s_searched["ply"] == len(game["moves"])` (a stale
+  eval is never shown — the ply fingerprint validates the position). `s_searched` / `setup`
+  / `_s_eval_running` are stripped from the broadcast game view.
+- **Vals work in game review:** `_compute_overlay(game, persp, variant)` was EXTRACTED (per-
+  card values + the static `ai_position_eval`, dispatching H/H2/H3/S; `{}` on exception) and
+  is reused by BOTH `mk_room_state` (live) and `_build_review_snapshots` (per PLAYING past
+  snapshot, computed from THAT turn's mover's seat) — so rewinding a finished AI game shows
+  each turn's per-card values + static eval. STATIC only (no per-snapshot search → `srch` is
+  hidden in review; one search per snapshot would be far too slow). Frontend:
+  `aiCardValues` / `aiValuesPid` / `aiPositionEval` are derived state (hoisted above hooks,
+  TDZ rule) that read the rewound snapshot when `reviewing`, else live `roomData`; the Vals
+  toggle no longer hides on a finished game (so it shows while rewound to a playing turn).
 
 ### Player box + nobles details (desktop; do not regress)
 - **Indicator sizing uses `zoom`, not font/padding math.** The desktop player box scales
