@@ -326,6 +326,7 @@ const css = baseCss + `
 .ai-pos-eval{display:inline-flex;align-items:center;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;font-weight:600;color:#e8c86a;background:rgba(0,0,0,.4);border:1px solid rgba(201,168,76,.4);border-radius:5px;padding:1px 7px;white-space:nowrap}
 .ai-pos-eval.mine{color:#8fdca0;border-color:rgba(143,220,160,.5)}
 .ai-pos-eval b{color:#9a8fb0;font-weight:700;margin-right:3px}
+.ai-pos-eval-srch{margin-left:7px;padding-left:7px;border-left:1px solid rgba(201,168,76,.3)}
 .card:hover{border-color:rgba(201,168,76,.5);transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.4)}
 .card.selected{border-color:var(--gold-light);box-shadow:0 0 0 2px var(--gold-light)}
 .card.affordable{border-color:var(--green-gem)}
@@ -490,181 +491,154 @@ const css = baseCss + `
    player sidebar). The Take/Buy/✕ controls move to the top of the gem bank, and
    cards get much larger (--card-w/--card-h). */
 @media(min-width:901px){
-  /* Top row = nobles box + an actions box (hint + Take/Buy/✕) side by side, on
-     top of the card board; a vertical gem bank spans to their right; the player
-     sidebar is the outer grid's wide 2nd column. L-to-R: nobles/cards, bank, players. */
-  /* Lock the game screen to the viewport so nothing (esp. the recent-moves list)
-     grows the page past the window; the board fills naturally and the move log
-     scrolls internally instead. */
-  .game-screen{height:100vh;overflow:hidden}
-  /* .game needs an EXPLICIT definite height (not flex:1 — flex-basis:0% isn't a
-     definite height the grid fr/minmax can resolve against, so the row would
-     grow to its tallest content = the recent-moves list, pushing past the screen
-     and resizing the player boxes). flex:none + height:calc + minmax(0,1fr) BOUNDS
-     the single row to the viewport, so the sidebar is a fixed height: the move log
-     scrolls internally and the player boxes never resize.
+  /* PROPORTIONAL desktop layout. The prod look (nobles+actions on top of the card
+     board, vertical gem bank on the right, players+log sidebar) is preserved EXACTLY
+     — only the sizing model changed: instead of fixed 144x185 cards + five max-height
+     breakpoints that STEP the board down in discrete jumps (so it looked different at
+     each resolution), there is now ONE viewport-driven anchor, --card-h, and EVERY
+     desktop dimension below is a calc() ratio of it. So the whole board scales as one
+     unit and looks identical at 1280x720 / 1920x1080 / 2560x1600 (clamp() only
+     floors/caps it on extreme screens). Ratios = the old full-size px / 185.
      NOTE: never put backticks in this CSS string — it's a JS template literal. */
-  .game{grid-template-columns:1fr 560px;grid-template-rows:minmax(0,1fr);flex:none;height:calc(100vh - 48px);overflow:hidden}
-  /* Sidebar = two full-height columns: players (left, wider so 6 tokens fit one
-     row) + recent moves (far right). min-height:0 lets the move log scroll. */
-  /* grid-template-rows:minmax(0,1fr) bounds the sidebar's row to its (definite)
-     height too — without it the inner row grows to the moves content and the log
-     gets clipped instead of scrolling (same trap as the outer .game grid). */
-  .game-sidebar{display:grid;grid-template-columns:1.6fr 1fr;grid-template-rows:minmax(0,1fr);column-gap:14px;align-items:stretch;min-height:0}
-  /* Both pinned to row 1 — without an explicit row the descending DOM-order vs
-     column-order (log-panel first=col2, players second=col1) made grid's sparse
-     flow drop the players to row 2 (moves top-right, players bottom-left). */
-  /* Players column: the two boxes each take half the height — box 1 flush to the
-     top down to the middle, box 2 flush to the bottom up to the middle. */
+  .game-screen{height:100vh;overflow:hidden}
+  /* --card-h drives everything; --card-w keeps the prod 144:185 (0.778) aspect.
+     17vh scales the board with the window; clamp floors/caps it. Defined on .game so
+     BOTH the board (.game-main) and the sidebar inherit the same anchor. */
+  .game{
+    --card-h:clamp(150px, 23vh, 330px);
+    --card-w:calc(var(--card-h) * 0.72);
+    /* Nobles get their OWN capped anchor so they don't bloat (and wrap) when --card-h
+       grows to fill a tall screen — they stay ~prod-sized (120px) on big screens. */
+    --noble-w:min(calc(var(--card-h) * 0.6), 128px);
+    /* ONE gap token used for EVERY gap (board padding, board<->sidebar, between the
+       nobles/actions row and the cards, between card levels, between cards, sidebar
+       columns) so all spacing is identical at any resolution. */
+    --gap:calc(var(--card-h) * 0.05);
+    grid-template-columns:minmax(0,1fr) clamp(520px, 40vw, 720px);
+    grid-template-rows:minmax(0,1fr);flex:none;height:calc(100vh - 48px);overflow:hidden;
+    max-width:2050px;margin-inline:auto;width:100%;
+    gap:var(--gap);padding:var(--gap)}
+  .game-sidebar{display:grid;grid-template-columns:1.55fr 1fr;grid-template-rows:minmax(0,1fr);column-gap:var(--gap);align-items:stretch;min-height:0}
   .game-sidebar>.players-area{grid-column:1;grid-row:1;height:100%}
-  /* flex:1 splits the column evenly across 2-4 player boxes; overflow-y:auto lets a
-     cramped 3-4 player box scroll internally instead of overflowing the grid. */
   .game-sidebar .player-panel{flex:1;min-height:0;overflow-y:auto}
-  /* Moves column fills the full height (flush to the bottom of the screen). */
   .game-sidebar>.log-panel{grid-column:2;grid-row:1;height:100%;display:flex;flex-direction:column}
-  /* align-content:start keeps the rows packed at the top — without it grid's
-     default stretches the auto rows to fill a tall viewport, inflating the top
-     row into a big gap above the cards. */
-  /* Explicit grid-template-rows is REQUIRED: with auto/implicit rows, the bank's
-     grid-row:1/-1 resolved to a single row (-1 == line 1) so it never spanned
-     down to the cards, and the cards got pushed into a separate band (the gap). */
-  /* Row 2 is 1fr so the card board fills the remaining viewport height; the card
-     rows then spread to reach the bottom of the screen. */
-  .game-main{display:grid;grid-template-columns:auto 1fr 132px;grid-template-rows:auto 1fr;column-gap:16px;row-gap:10px;align-items:start;--card-w:144px;--card-h:185px}
-  .game-main>.nobles-panel{grid-column:1;grid-row:1}
-  /* align-self:stretch so the hint box matches the nobles box height in row 1;
-     hint on the left, buttons pushed to the right edge of the box. */
-  .actions-panel{grid-column:2;grid-row:1;align-self:stretch;display:flex;flex-direction:column;justify-content:space-between;align-items:stretch;gap:8px}
-  /* Pack the three card rows at the top of row 2 with a fixed, comfortable gap
-     (NOT justify-content:space-between — on a tall viewport that spread the rows out
-     into big gaps, and the gaps GREW when the cards were shrunk for shorter screens).
-     A fixed gap keeps the rows tight and the spacing independent of card size; any
-     extra height just becomes whitespace below the board. */
-  .game-main>.levels{grid-column:1 / 3;grid-row:2;align-self:stretch;justify-content:flex-start;gap:16px}
-  /* Bank spans both rows (explicit span) + stretches, so it runs down to the
-     bottom of the card board (gems spread over that height). */
+  /* Board grid: col1 nobles (auto) | col2 cards (1fr) | col3 vertical bank.
+     Row1 = nobles + actions; Row2 (1fr) = the three card rows. */
+  .game-main{display:grid;grid-template-columns:auto 1fr calc(var(--card-h) * 0.55);grid-template-rows:auto 1fr;column-gap:var(--gap);row-gap:var(--gap);align-items:start}
+  /* Bottom-align the (shorter) nobles to row 1's baseline so the gap from the nobles
+     down to Level III == --gap too (the taller actions panel sets row 1's height). */
+  .game-main>.nobles-panel{grid-column:1;grid-row:1;align-self:end}
+  .actions-panel{grid-column:2;grid-row:1;align-self:stretch;display:flex;flex-direction:column;justify-content:space-between;align-items:stretch;gap:calc(var(--card-h) * 0.043)}
+  /* The card levels FILL row 2 with a uniform --gap between them: each .level-panel is
+     flex:1 (so the panels — the real flex children of .levels — divide row 2 equally
+     and L1 reaches the bottom), the .level-row inside fills the panel, and the cards
+     stretch to the row height. The gap between levels then == the grid row-gap above
+     Level III == the board padding below Level I == --gap (all identical). Each level keeps
+     its OWN box (the .level-panel gets the panel border/background/radius + --gap padding);
+     because the panels are flex:1 they still fill row 2 with a uniform --gap between boxes
+     (not the big space-between gaps from before). */
+  .game-main>.levels{grid-column:1 / 3;grid-row:2;align-self:stretch;justify-content:flex-start;gap:var(--gap)}
+  .game-main .level-panel{flex:1 1 0;min-height:0;display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--gap)}
+  .game-main .level-panel>.level-row{flex:1 1 0;min-height:0;margin:0;padding:0}
   .bank-panel{grid-column:3;grid-row:1 / span 2;align-self:stretch;display:flex;flex-direction:column}
 
-  /* Nobles: horizontal row on top of the cards, 1.5x larger; no title. */
+  /* Nobles: horizontal row on top of the cards, square, no title. Sized off the capped
+     --noble-w (NOT --card-h) so they stay compact + never wrap on tall screens. */
   .nobles-panel .panel-title{display:none}
-  /* exactly square: aspect-ratio:1 makes height track the (wider) width */
-  .noble{width:120px;aspect-ratio:1;padding:9px;gap:6px;justify-content:center}
-  .noble-points{font-size:1.5rem}
-  .noble-req-row{font-size:.95rem;gap:4px}
-  .noble-req-dot{width:12px;height:12px}
-  .noble-claimer{font-size:.72rem;bottom:6px}
+  .nobles-row{gap:calc(var(--noble-w) * 0.12);flex-wrap:nowrap}
+  /* Point value pinned at the TOP (justify-content:flex-start, so it never shifts with
+     the number of requirements); requirements fill the rest and sit centered on the LEFT
+     (flex:1 + justify-content:center vertically + align-items:flex-start horizontally). */
+  .noble{width:var(--noble-w);aspect-ratio:1;padding:calc(var(--noble-w) * 0.08);justify-content:center;align-items:flex-start;position:relative}
+  /* points absolutely pinned near the top (so they never shift with req count);
+     reqs are the only flow child, so justify-content:center on the noble centers them
+     around the box's vertical middle, align-items:flex-start keeps them on the left. */
+  .noble-points{font-size:calc(var(--noble-w) * 0.28);position:absolute;top:calc(var(--noble-w) * 0.05);left:0;right:0;text-align:center;line-height:1}
+  .noble-req{gap:calc(var(--noble-w) * 0.03);flex:0 0 auto;justify-content:center;align-items:flex-start}
+  .noble-req-row{font-size:calc(var(--noble-w) * 0.14);gap:calc(var(--noble-w) * 0.04)}
+  .noble-req-dot{width:calc(var(--noble-w) * 0.09);height:calc(var(--noble-w) * 0.09)}
+  .noble-claimer{font-size:calc(var(--noble-w) * 0.11);bottom:calc(var(--noble-w) * 0.04)}
 
-  /* Actions box: hint takes the left, bigger buttons pinned to the right. */
-  /* hint at the bottom, full box width, wraps freely (flex:0 so space-between pins it
-     to the bottom instead of it growing to fill; override base nowrap/ellipsis/flex:1). */
-  .actions-panel .action-hint{flex:0 0 auto;font-size:.95rem;white-space:normal;overflow:visible;text-overflow:clip;color:var(--text-dim);font-style:italic}
-  /* target + optional AI-values toggle grouped as ONE space-between item so adding/removing
-     the toggle never shifts the action buttons. */
-  .actions-panel-top{display:flex;flex-direction:column;gap:4px;align-items:stretch}
-  /* target pinned to the top, full width. */
+  /* Actions box: target pinned top, buttons centered, hint at the bottom. */
+  .actions-panel .action-hint{flex:0 0 auto;font-size:calc(var(--card-h) * 0.082);white-space:normal;overflow:visible;text-overflow:clip;color:var(--text-dim);font-style:italic}
+  .actions-panel-top{display:flex;flex-direction:column;gap:calc(var(--card-h) * 0.022);align-items:stretch}
   .actions-panel .target-label{align-self:stretch}
-  /* buttons centered between target and hint (no margin-left:auto — that was for the old row layout). */
-  .actions-panel-btns{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;flex-shrink:0}
-  .actions-panel-btns .btn{padding:14px 30px;font-size:1.12rem}
+  .actions-panel-btns{display:flex;flex-wrap:wrap;gap:calc(var(--card-h) * 0.054);align-items:center;justify-content:center;flex-shrink:0}
+  .actions-panel-btns .btn{padding:calc(var(--card-h) * 0.076) calc(var(--card-h) * 0.162);font-size:calc(var(--card-h) * 0.097)}
+  /* The admin "Vals" toggle is compact (much less wide than the Take/Buy buttons). */
+  .actions-panel-btns .ai-vals-toggle,.board-actions-btns .ai-vals-toggle{padding:calc(var(--card-h) * 0.045) calc(var(--card-h) * 0.05);font-size:calc(var(--card-h) * 0.062)}
 
-  /* Vertical gem bank; gems clustered toward the vertical center, closer together. */
-  .bank-gems{flex-direction:column;align-items:center;flex:1;justify-content:center;gap:18px}
-  .bank-gems .gem-token{width:64px!important;height:64px!important;font-size:1.4rem!important}
-  .bank-gems .gem-count{font-size:1.05rem}
+  /* Vertical gem bank, gems clustered toward the vertical center. */
+  .bank-gems{flex-direction:column;align-items:center;flex:1;justify-content:center;gap:calc(var(--card-h) * 0.097)}
+  .bank-gems .gem-token{width:calc(var(--card-h) * 0.346)!important;height:calc(var(--card-h) * 0.346)!important;font-size:calc(var(--card-h) * 0.121)!important}
+  .bank-gems .gem-count{font-size:calc(var(--card-h) * 0.091)}
 
   /* Drop the Gem Bank + Players labels on desktop (the Log label stays). */
   .bank-panel .panel-title{display:none}
   .game-sidebar>.panel-title{display:none}
 
-  /* Bigger recent-moves + player boxes in the wider sidebar. */
-  .player-panel{padding:16px}
-  .player-name{font-size:1rem}
-  .player-score{font-size:1.4rem}
-  /* gem + card (bonus) indicators +20% via zoom (scales box+content+inline dots, with reflow) */
-  .token-pill,.bonus-pill{font-size:.82rem;padding:3px 9px;zoom:1.2}
-  .bonus-pill{padding:3px 9.5px}      /* card bonus indicator width +1px net (9->9.5 each side) */
-  .gem-total{zoom:1.2}                /* "N gems" counter +20% */
-  .player-reserved .card{zoom:1.1;width:89px}    /* reserved cards +10%, width 89px */
-  /* reserve the token-row height so 0 gems doesn't shift the bonus pills up;
-     align-items:flex-start so the row's min-height doesn't STRETCH the pills taller */
-  .player-tokens{min-height:28px;align-items:flex-start}
-  /* Cap the move log to ~viewport height (explicit, so it bounds even if the
-     nested-grid height chain doesn't propagate) — it scrolls within and never
-     pushes the page past the window. */
+  /* Sidebar player + move-log boxes scale from the same --card-h anchor. Name/score are
+     kept modest so the head doesn't wrap in the (narrower) sidebar. */
+  .player-panel{padding:calc(var(--card-h) * 0.06)}
+  .player-name{font-size:calc(var(--card-h) * 0.062)}
+  .player-score{font-size:calc(var(--card-h) * 0.085)}
+  /* Gems (up to 6: 5 colours + gold) and the card/bonus indicators must ALWAYS fit one
+     row: nowrap + flex-shrink + compact padding so they scale to the panel width. */
+  /* Small gap between pills so each pill is as WIDE as possible (≈1/6 of the row). */
+  .player-tokens,.player-bonuses{flex-wrap:nowrap;min-width:0;gap:calc(var(--card-h) * 0.008)}
+  /* small separation between the gems row and the card-indicator (bonus) row. */
+  .player-bonuses{margin-top:calc(var(--card-h) * 0.035)}
+  /* FIXED 1/6 (gems) / 1/5 (card indicators) so a full set fills the row EXACTLY, edge to
+     edge — the prod capsule shape (wide), just BIG: big dot + big count, snug height. */
+  .token-pill,.bonus-pill{min-width:0;justify-content:center;font-size:calc(var(--card-h) * 0.082);padding:calc(var(--card-h) * 0.018) calc(var(--card-h) * 0.006);gap:calc(var(--card-h) * 0.014);border-radius:999px;zoom:1;white-space:nowrap;overflow:hidden}
+  .player-tokens .token-pill>span{width:calc(var(--card-h) * 0.078)!important;height:calc(var(--card-h) * 0.078)!important}
+  .token-pill{flex:0 1 calc((100% - var(--card-h) * 0.04) / 6)}
+  /* card indicators are the SAME 1/6 width as a gem pill (5 of them take 5/6, left-aligned). */
+  .bonus-pill{flex:0 1 calc((100% - var(--card-h) * 0.04) / 6)}
+  /* Centre the "N gems" counter equidistant between the gems row and the bonus row:
+     gap above (its margin-top) == gap below (the bonus row's margin-top). */
+  .gem-total{zoom:1;font-size:calc(var(--card-h) * 0.052);margin-top:calc(var(--card-h) * 0.035);margin-bottom:0}
+  /* Each reserved card is a FIXED 1/3 of the row (3 fill it; fewer are left-aligned at
+     that same size, NOT stretched). flex-grow:0 = no stretch, basis = 1/3 of the row.
+     Content (points / bonus colour / cost) is sized to match the board cards' content-to-
+     card-WIDTH ratio (board content ÷ card-w=0.72·card-h, e.g. points 0.147/0.72≈0.20×;
+     a reserved card ≈0.58× a board card, so ≈0.58× the board content sizes). */
+  .player-reserved{width:100%;min-width:0}
+  .player-reserved .reserved-row{flex-wrap:nowrap;gap:calc(var(--card-h) * 0.02);width:100%}
+  .player-reserved .card{zoom:1;flex:0 0 calc((100% - var(--card-h) * 0.04) / 3);min-width:0;width:auto;aspect-ratio:0.72;height:auto;min-height:0;padding:calc(var(--card-h) * 0.04) calc(var(--card-h) * 0.035)}
+  .player-reserved .card-header{margin-bottom:calc(var(--card-h) * 0.035)}
+  .player-reserved .card-points{font-size:calc(var(--card-h) * 0.085);min-width:0}
+  .player-reserved .card-bonus{width:calc(var(--card-h) * 0.091);height:calc(var(--card-h) * 0.091)}
+  .player-reserved .card-cost{gap:calc(var(--card-h) * 0.022)}
+  .player-reserved .cost-gem{width:calc(var(--card-h) * 0.047);height:calc(var(--card-h) * 0.047)}
+  .player-reserved .cost-num{font-size:calc(var(--card-h) * 0.046)}
+  .player-tokens{min-height:calc(var(--card-h) * 0.151);align-items:flex-start;flex-wrap:nowrap;margin-bottom:0}
   .move-log{max-height:calc(100vh - 140px);flex:1;min-height:0}
-  .log-entry{font-size:.92rem;padding:6px 0}
-  .log-name{font-size:.84rem}
+  .log-entry{font-size:calc(var(--card-h) * 0.095);padding:calc(var(--card-h) * 0.034) 0}
+  .log-name{font-size:calc(var(--card-h) * 0.058)}
 
-  /* Board cards: scale the box (via --card-*) and the inner content. */
-  .level-row{overflow-x:visible;gap:10px;justify-content:center}
-  .level-row .card{padding:9px 8px 8px}
-  .level-row .card-header{margin-bottom:8px}
-  .level-row .card-points{font-size:1.7rem}
-  .level-row .card-bonus{width:29px;height:29px}
-  .level-row .cost-gem{width:15px;height:15px}
-  .level-row .cost-num{font-size:.92rem}
-  .level-row .card-cost{gap:5px}
-  .level-row .deck-pile{font-size:.78rem;gap:6px}
-  .level-row .deck-remaining{font-size:1.7rem}
-}
-
-/* SHORTER desktop viewports — the desktop layout above is locked to the viewport
-   height (.game-screen{height:100vh;overflow:hidden}) with FIXED-size 144x185 cards.
-   With the rows packed (flex-start) the full-size board is ~820px tall, so it fits
-   any viewport >=~820px. Below that — most commonly a 1920x1080 screen at 125-150%
-   Windows display scaling and/or a bookmarks bar, dropping the CSS viewport to
-   ~700-820px — it would overflow and clip the bottom (Level I). These max-height tiers
-   scale the board (cards, bank tokens, nobles, fonts) down so all three levels always
-   fit. The threshold is set just below the ~820px fit point so taller screens (incl.
-   a scaled 2560x1600) keep FULL-SIZE cards. Keyed on viewport HEIGHT (same metric as
-   100vh); ordered tallest-first so a shorter viewport's (later) tier wins the cascade. */
-@media(min-width:901px) and (max-height:815px){
-  .game-main{--card-w:118px;--card-h:150px}
-  .noble{width:100px}
-  .noble-points{font-size:1.25rem}
-  .bank-gems .gem-token{width:54px!important;height:54px!important;font-size:1.2rem!important}
-  .level-row .card-points{font-size:1.45rem}
-}
-@media(min-width:901px) and (max-height:780px){
-  .game-main{--card-w:108px;--card-h:138px}
-  .noble{width:92px}
-  .noble-points{font-size:1.18rem}
-  .bank-gems{gap:12px}
-  .bank-gems .gem-token{width:48px!important;height:48px!important;font-size:1.12rem!important}
-  .level-row .card-points{font-size:1.36rem}
-  .level-row .card-bonus{width:26px;height:26px}
-}
-@media(min-width:901px) and (max-height:745px){
-  .game-main{--card-w:98px;--card-h:126px}
-  .noble{width:84px}
-  .noble-points{font-size:1.1rem}
-  .nobles-row{gap:7px}
-  .bank-gems{gap:9px}
-  .bank-gems .gem-token{width:44px!important;height:44px!important;font-size:1.06rem!important}
-  .level-row .card-points{font-size:1.26rem}
-  .level-row .card-bonus{width:24px;height:24px}
-  .level-row .cost-gem{width:13px;height:13px}
-}
-@media(min-width:901px) and (max-height:710px){
-  .game-main{--card-w:90px;--card-h:116px}
-  .noble{width:78px}
-  .noble-points{font-size:1.04rem}
-  .nobles-row{gap:6px}
-  .bank-gems{gap:8px}
-  .bank-gems .gem-token{width:40px!important;height:40px!important;font-size:1rem!important}
-  .level-row .card-points{font-size:1.2rem}
-  .level-row .card-bonus{width:22px;height:22px}
-  .level-row .cost-gem{width:12px;height:12px}
-  .level-row .card-cost{gap:3px}
-}
-@media(min-width:901px) and (max-height:675px){
-  .game-main{--card-w:82px;--card-h:106px}
-  .noble{width:70px;padding:6px}
-  .noble-points{font-size:.96rem}
-  .bank-gems .gem-token{width:36px!important;height:36px!important;font-size:.94rem!important}
-  .level-row .card-points{font-size:1.12rem}
-  .level-row .card-bonus{width:20px;height:20px}
-  .actions-panel-btns .btn{padding:9px 18px;font-size:.95rem}
+  /* Board cards: box comes from --card-w/--card-h (base .card rules); scale the
+     inner content with the same anchor. */
+  /* flex:1 makes each row take an equal share of row 2's height (so the three rows
+     fill it and Level I is flush to the bottom); align-items:stretch makes the cards
+     fill that row height (min-height:0 below lets stretch control it, not --card-h). */
+  /* container-type:size makes the row a query container so each card can be sized as a
+     TRUE contain box below (needs a definite size, which flex:1 + the grid give it). */
+  .level-row{overflow-x:visible;gap:var(--gap);justify-content:center;flex:1 1 0;align-items:center;container-type:size}
+  /* STRICT 0.72 (exactly the reserved-card proportion), NEVER wider: the width is the
+     min of the per-card row slot ((100cqw - 4 gaps)/5) and 0.72 x the box height
+     (100cqh) — i.e. the largest 0.72 box that fits BOTH dimensions — so a short box
+     makes the card height-bound (still 0.72), never stretched wide. */
+  .game-main .level-row>*{flex:0 0 auto;width:min(calc((100cqw - 4 * var(--gap)) / 5), calc(100cqh * 0.72));aspect-ratio:0.72;height:auto;min-height:0;min-width:0;max-width:none}
+  .level-row .card{padding:calc(var(--card-h) * 0.049) calc(var(--card-h) * 0.043) calc(var(--card-h) * 0.043);justify-content:space-between}
+  .level-row .card-header{margin-bottom:calc(var(--card-h) * 0.043)}
+  .level-row .card-points{font-size:calc(var(--card-h) * 0.147)}
+  .level-row .card-bonus{width:calc(var(--card-h) * 0.157);height:calc(var(--card-h) * 0.157)}
+  .level-row .cost-gem{width:calc(var(--card-h) * 0.081);height:calc(var(--card-h) * 0.081)}
+  .level-row .cost-num{font-size:calc(var(--card-h) * 0.08)}
+  .level-row .card-cost{gap:calc(var(--card-h) * 0.027)}
+  .level-row .deck-pile{font-size:calc(var(--card-h) * 0.068);gap:calc(var(--card-h) * 0.032)}
+  .level-row .deck-remaining{font-size:calc(var(--card-h) * 0.147)}
 }
 
 @media(max-width:600px){
@@ -913,6 +887,13 @@ export default function SpenderApp() {
 	const reviewBoardGame = (replayTurn != null && replaySnapshots && replaySnapshots[replayTurn])
 		? replaySnapshots[replayTurn].game : null;
 	const game = reviewBoardGame || liveGame;
+	// Admin AI-values overlay source: in review it rides on the rewound snapshot (static-only,
+	// no searched eval); live it comes from roomData (which also carries the searched eval).
+	const reviewSnap = reviewBoardGame ? replaySnapshots[replayTurn] : null;
+	const aiCardValues = reviewSnap ? reviewSnap.ai_card_values : roomData?.ai_card_values;
+	const aiValuesPid = reviewSnap ? reviewSnap.ai_values_pid : roomData?.ai_values_pid;
+	const aiPositionEval = reviewSnap ? reviewSnap.ai_position_eval : roomData?.ai_position_eval;
+	const aiPositionEvalSearched = reviewSnap ? null : roomData?.ai_position_eval_searched;
 	const me = game?.players?.[myId];
 	// No move is ever possible in review — force not-your-turn regardless of the rewound snapshot's phase.
 	const myTurn = !reviewing && game?.turn === myId && game?.phase === "playing";
@@ -1692,8 +1673,8 @@ export default function SpenderApp() {
 				affordable={affordable && myTurn}
 				needsGold={needsGold && myTurn}
 				dataPos={opts.dataPos}
-				aiValue={(authUser?.is_admin && showAiVals) ? roomData?.ai_card_values?.[card.id] : null}
-				valsMine={roomData?.ai_values_pid === myId}
+				aiValue={(authUser?.is_admin && showAiVals) ? aiCardValues?.[card.id] : null}
+				valsMine={aiValuesPid === myId}
 				disabled={opts.disabled}
 				onClick={() => {
 					if (opts.readonly || !myTurn) return;
@@ -1841,7 +1822,7 @@ export default function SpenderApp() {
 		if (game.phase === "over" || !myTurn) return null;
 		if (selectedGems.length > 0) return (
 			<>
-				<button className="btn btn-gold" onClick={handleTakeGems}>Take {selectedGems.length}</button>
+				<button className="btn btn-gold" onClick={handleTakeGems}>Take <span style={{ display: "inline-block", width: "0.62em", textAlign: "center", fontVariantNumeric: "tabular-nums" }}>{selectedGems.length}</span></button>
 				<button className="btn btn-ghost" onClick={() => setSelectedGems([])}>✕</button>
 			</>
 		);
@@ -1867,9 +1848,13 @@ export default function SpenderApp() {
 	// overlay. Lives at the far-left of the actions box; rendered on either turn so the
 	// overlay (computed for whoever's turn it is) can be toggled any time.
 	function renderAiValsToggle() {
-		if (game.phase === "over" || !authUser?.is_admin || !roomData?.ai_card_values) return null;
-		const ev = roomData?.ai_position_eval;   // S only: whole-position eval from the mover's seat
-		const mine = roomData?.ai_values_pid === myId;
+		// Works live AND in review (the overlay rides on the rewound snapshot). Gated only on
+		// admin + the presence of overlay data for the shown position (null on an over / no-AI board).
+		if (!authUser?.is_admin || !aiCardValues) return null;
+		const evL = aiPositionEval;            // S only: STATIC leaf eval (instant)
+		const evS = aiPositionEvalSearched;    // SEARCHED eval (live only — null in review)
+		const mine = aiValuesPid === myId;
+		const fmt = (v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}`;
 		return (
 			<>
 				<button className="btn btn-gold ai-vals-toggle"
@@ -1879,12 +1864,12 @@ export default function SpenderApp() {
 						try { localStorage.setItem("spender_show_ai_vals", n ? "1" : "0"); } catch {}
 						return n;
 					})}>
-					{showAiVals ? "Hide AI values" : "Show AI values"}
+					{showAiVals ? "Hide" : "Vals"}
 				</button>
-				{showAiVals && ev != null && (
+				{showAiVals && evL != null && (
 					<span className={`ai-pos-eval${mine ? " mine" : ""}`}
-						title={`S's evaluation of the whole position from ${mine ? "your" : "the AI's"} perspective (+1 = ${mine ? "you" : "AI"} winning, −1 = losing)`}>
-						<b>S</b>{ev >= 0 ? "+" : ""}{ev.toFixed(2)}
+						title={`S's whole-position eval from ${mine ? "your" : "the AI's"} perspective (+1 = ${mine ? "you" : "AI"} winning). leaf = static v(state); srch = after S's PUCT search (reused from the AI's move on its turn, freshly searched on yours)`}>
+						<b>leaf</b>{fmt(evL)}{!reviewing && <span className="ai-pos-eval-srch"><b>srch</b>{evS != null ? fmt(evS) : "…"}</span>}
 					</span>
 				)}
 			</>
@@ -2527,7 +2512,6 @@ export default function SpenderApp() {
 											</div>
 										);
 									})()}
-									{((liveGame?.moves) || []).length === 0 && <div className="log-empty">No moves yet</div>}
 									{((liveGame?.moves) || []).map((mv, i) => {
 										const { name, action, card } = formatLogMove(mv);
 										// Each move row jumps to the board AFTER that move: snapshot[turn+1]. In a
@@ -2550,9 +2534,10 @@ export default function SpenderApp() {
 											</div>
 										);
 									})}
-									{liveGame && (liveGame.moves || []).length > 0 && (
-										// "Game started" — the oldest entry (bottom). Clicking shows the initial
-										// board (snapshot[0], before anyone has moved).
+									{liveGame && (
+										// "Game started" — the oldest entry (bottom), shown from the moment you
+										// load in (even before any move). Clicking shows the initial board
+										// (snapshot[0], before anyone has moved).
 										<div className={`log-entry log-start${replayNav ? " clickable" : ""}${replayNav && replayIdx === 0 ? " log-selected" : ""}`}
 											onClick={replayNav ? () => goToTurn(0) : undefined}>
 											<span className="log-action">▶ Game started</span>
