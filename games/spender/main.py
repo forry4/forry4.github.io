@@ -571,6 +571,41 @@ def _redact_blind_reserves(game: dict | None, viewer_pid: str | None) -> dict | 
     return g
 
 
+# ─── client-side AI (variant S in the player's browser via WASM) ────────────────
+# When a vs-S client announces it can run the WASM search (`client_ai_ready`), the room is flagged
+# and the AI's turn is offloaded to that client: mk_room_state ships the AI-perspective compact state
+# in `ai_search`, the client searches + submits the move via `ai_move`, and the server validates +
+# applies it (the cheap discard/noble finishing stays server-side via _run_ai_turn). _schedule_ai_turn
+# waits CLIENT_AI_TIMEOUT for the client, then computes server-side as the fallback. All gated on the
+# per-room `client_ai` flag, so absent a WASM client the behavior is byte-identical to before.
+CLIENT_AI_TIMEOUT = 6.0   # seconds to wait for the client's move before the server falls back
+CLIENT_AI_SIMS = 4000     # suggested search budget for the client (≫ Render's sims-starved ~380/move)
+
+
+def _compact_state_dict(game: dict) -> dict:
+    """Serialize the AI-perspective compact engine State (from_game_dict) to the JSON shape the WASM
+    `choose_move` expects. For a vs-AI game this is the AI's full view; the client only ever uses it on
+    the AI's turn, and a curious human seeing the AI's own reserves only weakens their own opponent."""
+    from games.spender.ai.az import engine as _aze
+    s = _aze.from_game_dict(game)
+    return {
+        "bank": list(s.bank),
+        "tokens": [list(s.tokens[0]), list(s.tokens[1])],
+        "bonuses": [list(s.bonuses[0]), list(s.bonuses[1])],
+        "points": list(s.points),
+        "purchased_n": list(s.purchased_n),
+        "purchased": [list(s.purchased[0]), list(s.purchased[1])],
+        "reserved": [list(s.reserved[0]), list(s.reserved[1])],
+        "reserved_blind": [[bool(x) for x in s.reserved_blind[0]], [bool(x) for x in s.reserved_blind[1]]],
+        "nobles_won": [list(s.nobles_won[0]), list(s.nobles_won[1])],
+        "board": list(s.board),
+        "decks": [list(s.decks[0]), list(s.decks[1]), list(s.decks[2])],
+        "nobles": list(s.nobles),
+        "turn": s.turn, "phase": s.phase, "pending_nobles": list(s.pending_nobles),
+        "final_trigger": s.final_trigger, "winner": s.winner, "ply": s.ply, "win_points": s.win_points,
+    }
+
+
 def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]:
     room = ROOMS.get(room_id, {})
     game_view = _redact_blind_reserves(room.get("game"), viewer_pid)
@@ -609,6 +644,21 @@ def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]
                 sr = game.get("s_searched")
                 if sr is not None and sr.get("ply") == len(game.get("moves", [])):
                     state["ai_position_eval_searched"] = sr.get("value")
+    # Client-side AI offload (variant S only — the WASM port): on the AI's turn, hand the client the
+    # AI-perspective compact state to search. Gated on the room's `client_ai` opt-in.
+    if room.get("client_ai") and room.get("ai_variant") == "S":
+        game = room.get("game")
+        if game and game.get("ai_player") and game.get("turn") == game.get("ai_player") \
+                and game.get("phase") == "playing":
+            try:
+                state["ai_search"] = {
+                    "state": _compact_state_dict(game),
+                    "seat": game["order"].index(game["ai_player"]),
+                    "sims": CLIENT_AI_SIMS,
+                    "ply": len(game.get("moves", [])),
+                }
+            except Exception:
+                LOG.exception("ai_search payload build failed (room=%s)", room_id)
     return state
 
 
@@ -2165,6 +2215,31 @@ async def _schedule_ai_turn(room_id: str) -> None:
     # If it's the HUMAN's turn in an S game (human-first start / reconnect, where no AI move
     # fires below), kick the searched-eval search. Fully guarded, so a no-op otherwise.
     asyncio.create_task(_schedule_s_searched_eval(room_id))
+
+    # Client-side AI offload: if this room runs the AI in the player's browser (WASM), give the client
+    # a window to submit its move (via `ai_move`) before the server computes a fallback. If the client
+    # submits in time, the AI turn advances and the re-check below bails (no wasted server compute).
+    async with ROOM_LOCK:
+        r = ROOMS.get(room_id)
+        g = r.get("game") if r else None
+        if not r or not g:
+            return
+        ai_pid = g.get("ai_player")
+        if not ai_pid or g.get("turn") != ai_pid or g.get("phase") != "playing":
+            return
+        client_ai = bool(r.get("client_ai"))
+        wait_ply = len(g.get("moves", []))
+    if client_ai:
+        await asyncio.sleep(CLIENT_AI_TIMEOUT)
+        async with ROOM_LOCK:
+            r = ROOMS.get(room_id)
+            g = r.get("game") if r else None
+            if not r or not g:
+                return
+            if g.get("turn") != ai_pid or g.get("phase") != "playing" \
+                    or len(g.get("moves", [])) != wait_ply:
+                return  # the client submitted in time (turn/ply advanced) — nothing to do
+
     async with ROOM_LOCK:
         r = ROOMS.get(room_id)
         if not r:
@@ -2670,6 +2745,67 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                     # If no pending human action remains, check whether it's now the AI's turn
                     if not _discard_pid and not _noble_choice_pid:
                         asyncio.create_task(_schedule_ai_turn(room_id))
+
+            # ── client_ai_ready (the browser can run the WASM variant-S search) ──
+            elif action == "client_ai_ready":
+                async with ROOM_LOCK:
+                    r = ROOMS.get(room_id)
+                    if r is not None:
+                        r["client_ai"] = True
+                # Push a fresh state so that if it's already the AI's turn the client gets ai_search now.
+                await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
+
+            # ── ai_move (client-computed AI move in a vs-S game) ──────────────
+            elif action == "ai_move":
+                mv = msg.get("move") or {}
+                _err = None
+                _did_change = False
+                async with ROOM_LOCK:
+                    r = ROOMS.get(room_id)
+                    if not r or r.get("status") != "playing":
+                        _err = "no active game"
+                    elif r.get("ai_variant") != "S":
+                        _err = "not a client-AI game"
+                    else:
+                        g = r["game"]
+                        ai_pid = g.get("ai_player")
+                        if not ai_pid or g.get("phase") != "playing" or g.get("turn") != ai_pid:
+                            _err = "not the AI's turn"
+                        elif pid not in g.get("order", ()) or pid == ai_pid:
+                            _err = "not a player in this game"
+                        else:
+                            # Validate the move is LEGAL for the AI (never trust the client to mutate
+                            # state directly): map to an engine action and check the legal set.
+                            legal = False
+                            try:
+                                from games.spender.ai.az import actions as _aza
+                                from games.spender.ai.az import engine as _aze
+                                s = _aze.from_game_dict(g)
+                                act = _aza.move_to_action(s, mv)
+                                legal = act in _aze.legal_actions(s)
+                            except Exception:
+                                legal = False
+                            if not legal:
+                                _err = "illegal AI move"
+                            else:
+                                try:
+                                    _run_ai_turn(g, ai_pid, mv)  # applies primary + discard/noble finish
+                                    if g.get("phase") == "over":
+                                        r["status"] = "over"
+                                    _did_change = True
+                                except Exception:
+                                    LOG.exception("Applying client AI move failed (room=%s); ending the AI turn", room_id)
+                                    _finish_turn(g, ai_pid)
+                                    if g.get("phase") == "over":
+                                        r["status"] = "over"
+                                    _did_change = True
+                if _err:
+                    await websocket.send_text(json.dumps({"type": "error", "message": _err}))
+                elif _did_change:
+                    save_game(room_id)
+                    await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
+                    # It's the human's turn now — kick a fresh searched-eval search for the admin overlay.
+                    asyncio.create_task(_schedule_s_searched_eval(room_id))
 
             # ── abandon ─────────────────────────────────────────────────────
             elif action == "abandon":
