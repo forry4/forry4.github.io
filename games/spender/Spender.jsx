@@ -632,18 +632,27 @@ const css = baseCss + `
   .gem-total{zoom:1;font-size:calc(var(--card-h) * 0.052);margin-top:calc(var(--card-h) * 0.035);margin-bottom:0}
   /* Each reserved card is a FIXED 1/3 of the row (3 fill it; fewer are left-aligned at
      that same size, NOT stretched). flex-grow:0 = no stretch, basis = 1/3 of the row.
-     Content (points / bonus colour / cost) is sized to match the board cards' content-to-
-     card-WIDTH ratio (board content ÷ card-w=0.72·card-h, e.g. points 0.147/0.72≈0.20×;
-     a reserved card ≈0.58× a board card, so ≈0.58× the board content sizes). */
+     Content (points / bonus colour / cost) is sized off the card's OWN width via a
+     container query (cqw), NOT --card-h: the reserved-card width depends on the sidebar
+     (which clamps differently from --card-h across resolutions), so a fixed --card-h
+     multiple under/over-shoots — a reserved card is ~0.8-1.0x a board card, not the 0.58x
+     once assumed (that left the text ~half-size). Each content cqw = the board card's
+     content-to-card-WIDTH ratio (board's --card-h multiple ÷ card-w=0.72·card-h), so the
+     reserved content matches the board cards' proportions at every resolution.
+     container-type:inline-size only contains the inline axis, so aspect-ratio:0.72 still
+     derives the height, and the flex-basis (parent-driven) can't blow up circularly. */
   .player-reserved{width:100%;min-width:0}
   .player-reserved .reserved-row{flex-wrap:nowrap;gap:calc(var(--card-h) * 0.02);width:100%}
-  .player-reserved .card{zoom:1;flex:0 0 calc((100% - var(--card-h) * 0.04) / 3);min-width:0;width:auto;aspect-ratio:0.72;height:auto;min-height:0;padding:calc(var(--card-h) * 0.04) calc(var(--card-h) * 0.035)}
-  .player-reserved .card-header{margin-bottom:calc(var(--card-h) * 0.035)}
-  .player-reserved .card-points{font-size:calc(var(--card-h) * 0.085);min-width:0}
-  .player-reserved .card-bonus{width:calc(var(--card-h) * 0.091);height:calc(var(--card-h) * 0.091)}
-  .player-reserved .card-cost{gap:calc(var(--card-h) * 0.022)}
-  .player-reserved .cost-gem{width:calc(var(--card-h) * 0.047);height:calc(var(--card-h) * 0.047)}
-  .player-reserved .cost-num{font-size:calc(var(--card-h) * 0.046)}
+  /* cqw is used ONLY on the card's DESCENDANTS (they resolve it against this card);
+     the card's OWN padding must NOT be cqw — on the container element itself cqw resolves
+     against an ANCESTOR container/viewport, not the card — so padding stays --card-h-based. */
+  .player-reserved .card{zoom:1;flex:0 0 calc((100% - var(--card-h) * 0.04) / 3);min-width:0;width:auto;aspect-ratio:0.72;height:auto;min-height:0;container-type:inline-size;padding:calc(var(--card-h) * 0.04) calc(var(--card-h) * 0.035)}
+  .player-reserved .card-header{margin-bottom:7cqw}
+  .player-reserved .card-points{font-size:23.8cqw;min-width:0}
+  .player-reserved .card-bonus{width:25.4cqw;height:25.4cqw}
+  .player-reserved .card-cost{gap:4.4cqw}
+  .player-reserved .cost-gem{width:13.1cqw;height:13.1cqw}
+  .player-reserved .cost-num{font-size:13cqw}
   .player-tokens{min-height:calc(var(--card-h) * 0.151);align-items:flex-start;flex-wrap:nowrap;margin-bottom:0}
   .move-log{max-height:calc(100vh - 140px);flex:1;min-height:0}
   .log-entry{font-size:calc(var(--card-h) * 0.095);padding:calc(var(--card-h) * 0.034) 0}
