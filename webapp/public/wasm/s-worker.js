@@ -1,41 +1,37 @@
-// Variant-S search worker: runs the WASM determinized-PUCT search off the UI thread.
-// Loaded as a MODULE worker; the wasm-pack (--target web) glue + .wasm sit beside this file.
+// Variant-S search worker (ROOT-PARALLEL). Loaded as a MODULE worker; the wasm-pack (--target web)
+// glue + .wasm sit beside this file. One of N identical workers — the main thread fans a seeded search
+// to each, SUMS their root visit vectors, argmaxes, and asks one worker to convert the winner to a move.
 //
-// Protocol (main thread -> worker):  { id, state, seat, seed, budget?, sims? }  (state = compact-state JSON)
-//   budget (ms) → time-budgeted search (keep doing sims until the clock runs out); else fixed `sims`.
-//          (worker -> main thread):  { ready: true } once init succeeds, then { id, move } | { id, error }
-//                                     { ready: false, error } if the wasm fails to load (main thread falls
-//                                     back to the server AI by simply never sending client_ai_ready).
+// Protocol (main -> worker):
+//   { id, kind:"search",  state, seat, budget, seed }  -> { id, visits:[70 ints] }
+//   { id, kind:"convert", state, action }              -> { id, move }            (compact dict-move JSON)
+// Lifecycle: { ready:true } once init succeeds, or { ready:false, error } if the wasm won't load
+//   (the main thread then drops this worker; if none are ready it never announces client_ai_ready and
+//   the server computes the move).
 
-import init, { choose_move, choose_move_timed } from "./spender_core.js";
+import init, { search_visits_timed, action_to_move_for } from "./spender_core.js";
 
 let readyResolve;
 const readyP = new Promise((res) => (readyResolve = res));
 
 init()
-  .then(() => {
-    readyResolve(true);
-    self.postMessage({ ready: true });
-  })
-  .catch((err) => {
-    readyResolve(false);
-    self.postMessage({ ready: false, error: String(err) });
-  });
+  .then(() => { readyResolve(true); self.postMessage({ ready: true }); })
+  .catch((err) => { readyResolve(false); self.postMessage({ ready: false, error: String(err) }); });
 
 self.onmessage = async (e) => {
   const msg = e.data || {};
-  if (msg.state == null) return; // not a search request
+  if (!msg.kind) return;
   const ok = await readyP;
-  if (!ok) {
-    self.postMessage({ id: msg.id, error: "wasm not loaded" });
-    return;
-  }
+  if (!ok) { self.postMessage({ id: msg.id, error: "wasm not loaded" }); return; }
   try {
-    const seed = BigInt(msg.seed >>> 0);
-    const move = msg.budget
-      ? choose_move_timed(String(msg.state), msg.seat >>> 0, Number(msg.budget), seed)
-      : choose_move(String(msg.state), msg.seat >>> 0, msg.sims >>> 0, seed);
-    self.postMessage({ id: msg.id, move });
+    if (msg.kind === "search") {
+      const seed = BigInt(msg.seed >>> 0);
+      const visits = search_visits_timed(String(msg.state), msg.seat >>> 0, Number(msg.budget), seed);
+      self.postMessage({ id: msg.id, visits: Array.from(visits) });
+    } else if (msg.kind === "convert") {
+      const move = action_to_move_for(String(msg.state), msg.action >>> 0);
+      self.postMessage({ id: msg.id, move });
+    }
   } catch (err) {
     self.postMessage({ id: msg.id, error: String(err) });
   }

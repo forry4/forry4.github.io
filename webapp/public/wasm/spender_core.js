@@ -1,4 +1,26 @@
 /**
+ * Convert the aggregate-winning action index to a dict-move JSON for the given state (the main thread
+ * resolves it once, after summing visits across the worker pool). `{"error":...}` on a parse failure.
+ * @param {string} state_json
+ * @param {number} action
+ * @returns {string}
+ */
+export function action_to_move_for(state_json, action) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(state_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.action_to_move_for(ptr0, len0, action);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
  * Benchmark: run the search on a deterministic mid-game position; return the chosen action (JS times it).
  * @param {bigint} setup_seed
  * @param {number} setup_moves
@@ -61,6 +83,26 @@ export function choose_move_timed(state_json, seat, budget_ms, seed) {
         wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
     }
 }
+
+/**
+ * ROOT-PARALLEL piece: run a time-budgeted determinized search and return the ROOT VISIT COUNTS
+ * (length N_ACTIONS=70). Each worker calls this with a distinct seed; the main thread SUMS the
+ * vectors across workers and argmaxes — standard root parallelization (no shared memory). Empty vec
+ * on a parse error (the caller drops that worker's contribution).
+ * @param {string} state_json
+ * @param {number} seat
+ * @param {number} budget_ms
+ * @param {bigint} seed
+ * @returns {Int32Array}
+ */
+export function search_visits_timed(state_json, seat, budget_ms, seed) {
+    const ptr0 = passStringToWasm0(state_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.search_visits_timed(ptr0, len0, seat, budget_ms, seed);
+    var v2 = getArrayI32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v2;
+}
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
@@ -85,6 +127,19 @@ function __wbg_get_imports() {
         __proto__: null,
         "./spender_core_bg.js": import0,
     };
+}
+
+function getArrayI32FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getInt32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
+}
+
+let cachedInt32ArrayMemory0 = null;
+function getInt32ArrayMemory0() {
+    if (cachedInt32ArrayMemory0 === null || cachedInt32ArrayMemory0.byteLength === 0) {
+        cachedInt32ArrayMemory0 = new Int32Array(wasm.memory.buffer);
+    }
+    return cachedInt32ArrayMemory0;
 }
 
 function getStringFromWasm0(ptr, len) {
@@ -170,6 +225,7 @@ function __wbg_finalize_init(instance, module) {
     wasmInstance = instance;
     wasm = instance.exports;
     wasmModule = module;
+    cachedInt32ArrayMemory0 = null;
     cachedUint8ArrayMemory0 = null;
     wasm.__wbindgen_start();
     return wasm;

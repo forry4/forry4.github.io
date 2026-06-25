@@ -1162,44 +1162,58 @@ export default function SpenderApp() {
 		return () => document.removeEventListener("visibilitychange", handleVisibility);
 	}, [myId, connect, getReadyState]); // eslint-disable-line react-hooks/exhaustive-deps
 
-	// ── Client-side AI: run variant S's WASM search in a Web Worker ──────────
-	// For a vs-S game we offload the AI's move to the player's own CPU (WASM in a worker → far more
-	// sims than Render's shared core). The server stays authoritative: it validates the submitted
-	// move and falls back to its own search if the client doesn't answer. Entirely graceful — if the
-	// worker/wasm won't load we simply never announce capability and the server computes as before.
-	const wasmWorkerRef = useRef(null);
+	// ── Client-side AI: ROOT-PARALLEL variant-S search across the player's CPU cores ─────────
+	// For a vs-S game we offload the AI's move to a POOL of WASM workers. Each runs an independent
+	// determinized search for the budget; we SUM their root visit counts and pick the argmax (standard
+	// root parallelization — no shared memory, no COOP/COEP). The server stays authoritative: it
+	// validates the submitted move and falls back to its own search if the client doesn't answer.
+	// Graceful — if no worker loads we never announce capability and the server computes as before.
+	// Pool capped (each worker builds a large search tree at the budget → bounded memory across devices).
+	const CLIENT_AI_BUDGET_MS = 4500;
+	const wasmPoolRef = useRef(null);          // [{ ready, request, terminate }] — RPC-wrapped workers
 	const [wasmReady, setWasmReady] = useState(false);
-	const clientAiArmedRef = useRef(null);   // room_id we've announced capability for
-	const aiDispatchPlyRef = useRef(-1);     // ply we've already handed to the worker
-	const aiDispatchTimeRef = useRef(0);     // perf timestamp of the last dispatch (for the latency log)
+	const clientAiArmedRef = useRef(null);     // room_id we've announced capability for
+	const aiDispatchPlyRef = useRef(-1);       // ply we've already dispatched a search for
 
 	useEffect(() => {
-		if (roomData?.ai_variant !== "S" || wasmWorkerRef.current || typeof Worker === "undefined") return;
-		let w;
-		try {
-			w = new Worker(`${import.meta.env.BASE_URL}wasm/s-worker.js`, { type: "module" });
-		} catch {
-			return; // no module-worker support → server AI (graceful)
-		}
-		w.onmessage = (e) => {
-			const d = e.data || {};
-			if (d.ready === true) { setWasmReady(true); console.info("[client-AI] WASM search worker ready"); return; }
-			if (d.ready === false) { console.warn("[client-AI] WASM failed to load → server AI:", d.error); return; }
-			if (d.move) {
-				try {
-					const mv = JSON.parse(d.move);
-					if (mv && !mv.error) {
-						const ms = Math.round(performance.now() - aiDispatchTimeRef.current);
-						console.info(`[client-AI] computed AI move in ${ms}ms`, mv);
-						send({ action: "ai_move", move: mv });
-					}
-				} catch {}
-			}
+		if (roomData?.ai_variant !== "S" || wasmPoolRef.current || typeof Worker === "undefined") return;
+		const url = `${import.meta.env.BASE_URL}wasm/s-worker.js`;
+		const cores = Math.max(1, Math.min(navigator.hardwareConcurrency || 4, 4));
+		const makeWorker = () => {
+			let w;
+			try { w = new Worker(url, { type: "module" }); } catch { return null; }
+			const pending = new Map();
+			let resolveReady, nextId = 1;
+			const ready = new Promise((res) => (resolveReady = res));
+			w.onmessage = (e) => {
+				const d = e.data || {};
+				if (d.ready !== undefined) { resolveReady(!!d.ready); return; }
+				if (d.id != null && pending.has(d.id)) { pending.get(d.id)(d); pending.delete(d.id); }
+			};
+			w.onerror = () => resolveReady(false);
+			return {
+				ready,
+				request(payload) {
+					const id = nextId++;
+					return new Promise((res) => { pending.set(id, res); w.postMessage({ ...payload, id }); });
+				},
+				terminate() { try { w.terminate(); } catch {} },
+			};
 		};
-		w.onerror = () => {};
-		wasmWorkerRef.current = w;
-		return () => { try { w.terminate(); } catch {} wasmWorkerRef.current = null; setWasmReady(false); };
-	}, [roomData?.ai_variant, send]);
+		const pool = Array.from({ length: cores }, makeWorker).filter(Boolean);
+		wasmPoolRef.current = pool;
+		Promise.all(pool.map((wk) => wk.ready)).then((flags) => {
+			const live = pool.filter((_, i) => flags[i]);
+			if (live.length > 0) {
+				wasmPoolRef.current = live;
+				setWasmReady(true);
+				console.info(`[client-AI] ${live.length}/${cores} WASM search workers ready`);
+			} else {
+				console.warn("[client-AI] no WASM workers loaded → server AI");
+			}
+		});
+		return () => { pool.forEach((wk) => wk.terminate()); wasmPoolRef.current = null; setWasmReady(false); };
+	}, [roomData?.ai_variant]);
 
 	// Announce capability once per room → the server then ships `ai_search` on the AI's turn.
 	useEffect(() => {
@@ -1210,24 +1224,43 @@ export default function SpenderApp() {
 		}
 	}, [wasmReady, roomData?.room_id, roomData?.ai_variant, send]);
 
-	// On the AI's turn the server ships `ai_search` (AI-perspective state) → search it in the worker.
+	// On the AI's turn the server ships `ai_search` → fan a seeded search to every worker, SUM their
+	// root visit vectors, argmax, convert the winner to a move, and submit it.
 	useEffect(() => {
 		const as = roomData?.ai_search;
-		if (!as || !wasmWorkerRef.current || !wasmReady) return;
+		const pool = wasmPoolRef.current;
+		if (!as || !wasmReady || !pool || pool.length === 0) return;
 		if (aiDispatchPlyRef.current === as.ply) return; // one dispatch per ply
 		aiDispatchPlyRef.current = as.ply;
-		aiDispatchTimeRef.current = performance.now();
-		try {
-			wasmWorkerRef.current.postMessage({
-				id: as.ply,
-				state: JSON.stringify(as.state),
-				seat: as.seat,
-				budget: 4500,                  // ms — think for the full ~4.5s (like the old server budget),
-				sims: as.sims || 2000,         // doing thousands of sims instead of finishing instantly
-				seed: (as.ply * 2654435761) >>> 0,
-			});
-		} catch {}
-	}, [roomData, wasmReady]);
+		const stateStr = JSON.stringify(as.state);
+		const t0 = performance.now();
+		(async () => {
+			try {
+				const visitsArrays = await Promise.all(pool.map((wk, i) =>
+					wk.request({
+						kind: "search", state: stateStr, seat: as.seat, budget: CLIENT_AI_BUDGET_MS,
+						seed: ((as.ply * 2654435761) ^ (i * 40503 + 1)) >>> 0,
+					}).then((d) => d.visits).catch(() => null)));
+				const total = new Int32Array(70);
+				let sims = 0, contrib = 0;
+				for (const v of visitsArrays) {
+					if (!v || v.length < 70) continue;
+					contrib++;
+					for (let a = 0; a < 70; a++) { total[a] += v[a]; sims += v[a]; }
+				}
+				if (contrib === 0) return; // every worker failed → the server fallback covers it
+				let best = 0, bv = -1;
+				for (let a = 0; a < 70; a++) if (total[a] > bv) { bv = total[a]; best = a; }
+				const conv = await pool[0].request({ kind: "convert", state: stateStr, action: best });
+				const mv = JSON.parse(conv.move);
+				if (mv && !mv.error) {
+					const ms = Math.round(performance.now() - t0);
+					console.info(`[client-AI] ${contrib} workers, ${sims} sims in ${ms}ms ->`, mv);
+					send({ action: "ai_move", move: mv });
+				}
+			} catch {}
+		})();
+	}, [roomData, wasmReady, send]);
 
 	// ── "Someone's waiting for you" tab indicator (permission-free) ─────────
 	// When the tab is HIDDEN and it's your turn OR a ping arrived, flash the page
