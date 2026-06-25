@@ -1749,6 +1749,47 @@ checkpoints + future "S-rusher"/"S-nobler" derived variants), and consider an **
 (depth-2 or tiny-sim search) as a strong-but-instant opponent given the heuristics are too weak and the
 deployed S is sims-starved on Render's 0.1 CPU.
 
+### Session (June 24 2026) — over-reserve deep-dive + game-loss trace-back (DIAGNOSIS, nothing shipped)
+Investigated one real game a strong human WON vs deployed S (`YINAIM`, dumped from Turso). Three durable
+conclusions; DO NOT relitigate:
+- **Over-reserve "fix" — TWO mechanisms TESTED & REJECTED (neither converts through search).** Symptom:
+  S over-reserves, filling all 3 slots with cards it never converts → at YINAIM turn 50 it had 3/3
+  reserves and could NOT reserve-deny the human's winning L3-6 (a public, affordable board card). Built
+  on a local **`reserve-slots` worktree branch (default-off, byte-identical, NOT merged):** (1)
+  `v_state.W_RESERVE_SLOTS` — a position-leaf free-slot **optionality** term (concave `O(eff_free)`,
+  `eff_free = 3 − Σ deadness(held reserves)`; deadness from **`valuation3.tempo`** = the STEEPEST
+  single-color remaining need so 6-of-a-color reads far / 2+2+2 near — a raw gem-SUM misses steepness;
+  NEAR_T=1/FAR_T=6 turns; horizon-faded; symmetric). (2) `vsearch.RESERVE_DISCOUNT_W` — discounts a
+  reserve ACTION's prior by `deadness(card) × load` (far reserves already held) so the 1st speculative
+  reserve is free and the cost escalates as you stack far ones. **Both wash:** W_RESERVE_SLOTS self-gate
+  ≈0.5 and the move never flips even at high W; `RESERVE_DISCOUNT_W=8` self-gate **0.455** (sims=500,
+  n=100) and even a ~90% prior cut does NOT flip the reserve move. **Why: the reserve's Q (denial +
+  acquisition of a 4-pt L3) is genuinely high — a modified static leaf OR prior can't beat it through
+  search** (re-confirms the documented "doesn't convert through search" wall). Also the self-gate MIRROR
+  is structurally blind to a slot-lock cost (both copies over-reserve; neither races to exploit the
+  other's full slots — only a human/exploiter would). Knobs parked default-off on the branch as
+  NET-feature candidates; not merged. (NB H3 itself has `USE_SPECULATIVE_RESERVE=False` — the
+  over-reserving is the SEARCH PRIOR's `RESERVE_PRIOR_W*take_value`, not H3 greedy.)
+- **MCTS mean-backup is blind to a sharp 1-ply opponent threat until more sims / the opponent commits
+  (quantified).** YINAIM's winning L3-6 was public + affordable + exactly 1 ply ahead, yet S's searched
+  value the turn before was **+0.033 at 600 sims, −0.552 at 3000 sims** (true ≈ −0.45). Not hidden-info
+  / not horizon — the root value is a visit-weighted MEAN that dilutes the single sharp reply among the
+  opponent's explored weaker replies; depth (or the opponent actually playing it next ply) converges it.
+  Reinforces the rejected mixmax/`BACKUP_LAMBDA` and that **search THROUGHPUT (faster leaf → more sims)
+  is the lever, not a backup tweak.**
+- **Trace-back self-play diagnostic → real games are lost in the EARLY-MIDGAME, not at the visible late
+  symptom.** Reusable diagnostic (scratch `trace.py`, built on `replay.py`): for each historical turn T,
+  play N self-play games (both seats frozen-S, remaining deck reshuffled per game) from that position to
+  the end, record seat-0 win-rate, walk T back to where it was last ~0.5. **Validated unbiased** (fresh
+  `new_game` seat-0 = 0.53 first-player edge; 5/5 distinct lines from a position = real variance, not one
+  deterministic game — so the win-rate is meaningful, addressing the "they play the same game every time"
+  worry). On YINAIM (N=80, sims=256): S started **even/slightly-favored** (turn 0 = 0.53), held ~0.5
+  through **turn 8**, then slid **0.48 → 0.16 over turns 9–14** (early-midgame engine race), bleeding from
+  there to the turn-50 corpse. **No single blunder — a gradual out-building.** The over-reserve /
+  slot-lock / can't-deny-L3-6 at turn 50 were all DOWNSTREAM symptoms of a position already lost ~13 plies
+  earlier. **Conclusion: the lever is early-midgame DEVELOPMENT TEMPO (build a faster/more-efficient
+  engine) — not reserves, denial, or the endgame.** That's the hard eval/search lever, not a knob.
+
 ### Hard-won conclusions — DO NOT relitigate
 These cost many self-play/training cycles to establish:
 - **Eval-weight tuning is saturated.** One gain (0.725 vs original), nothing since. The first run captured it.
