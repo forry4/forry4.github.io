@@ -2,6 +2,7 @@
 //! tables (port of valuation3's _lookup_turns + estimated_turns_remaining, mode "table").
 
 use crate::turns_table::{TURNS_ROWS, TURNS_ROWS_21};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
@@ -56,18 +57,32 @@ fn t21() -> &'static Table {
     T.get_or_init(|| build(&TURNS_ROWS_21))
 }
 
+// Per-thread memo of the (deterministic) NN lookup, keyed (is21, cards, points, gems). The on-miss
+// path is a ~2335-row linear scan run twice per leaf; the distinct (c,p,g) tuples in a game are few,
+// so this amortizes the scan to ~once each. Returns the exact same f64 → byte-identical.
+thread_local! {
+    static MEMO: RefCell<HashMap<(bool, i32, i32, i32), f64>> = RefCell::new(HashMap::new());
+}
+
+fn memo_lookup(is21: bool, cards: i32, points: i32, gems: i32) -> f64 {
+    let key = (is21, cards, points, gems);
+    if let Some(v) = MEMO.with(|m| m.borrow().get(&key).copied()) {
+        return v;
+    }
+    let tbl = if is21 { t21() } else { t15() };
+    let v = tbl.lookup(cards, points, gems);
+    MEMO.with(|m| m.borrow_mut().insert(key, v));
+    v
+}
+
 /// min over both seats of the table lookup, floored at TURNS_FLOOR.
 pub fn estimate(
     win_points: i32,
     c0: i32, p0: i32, g0: i32,
     c1: i32, p1: i32, g1: i32,
 ) -> f64 {
-    let tbl = if win_points == 21 && !TURNS_ROWS_21.is_empty() {
-        t21()
-    } else {
-        t15()
-    };
-    let tr = tbl.lookup(c0, p0, g0).min(tbl.lookup(c1, p1, g1));
+    let is21 = win_points == 21 && !TURNS_ROWS_21.is_empty();
+    let tr = memo_lookup(is21, c0, p0, g0).min(memo_lookup(is21, c1, p1, g1));
     if tr > TURNS_FLOOR {
         tr
     } else {

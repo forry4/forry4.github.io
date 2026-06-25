@@ -14,9 +14,11 @@ const EPS_PRIOR: f64 = 1e-3; // actions legal in a determinization but unseen at
 struct Node {
     to_play: usize,
     expanded: bool,
-    p: Vec<f64>,
-    n: Vec<i32>,
-    w: Vec<f64>,
+    // Fixed inline arrays (not Vec) — avoids 3 heap allocations per expanded node (~hundreds of
+    // thousands per move) and keeps the per-node data contiguous. Same f64 values → identical search.
+    p: [f64; N_ACTIONS],
+    n: [i32; N_ACTIONS],
+    w: [f64; N_ACTIONS],
     children: HashMap<usize, usize>,
 }
 
@@ -25,9 +27,9 @@ impl Node {
         Node {
             to_play,
             expanded: false,
-            p: vec![0.0; N_ACTIONS],
-            n: vec![0; N_ACTIONS],
-            w: vec![0.0; N_ACTIONS],
+            p: [0.0; N_ACTIONS],
+            n: [0; N_ACTIONS],
+            w: [0.0; N_ACTIONS],
             children: HashMap::new(),
         }
     }
@@ -142,7 +144,7 @@ impl Search {
         let legal = engine::legal_actions(&s);
         let (probs, value) = eval(&s, s.turn, &legal);
         self.nodes[idx].expanded = true;
-        self.nodes[idx].p = probs;
+        self.nodes[idx].p.copy_from_slice(&probs);
         self.backup(&path, value, s.turn);
     }
 

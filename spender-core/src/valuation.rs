@@ -9,9 +9,10 @@
 //! Built in validated layers: A = stateless per-card scalars (this section); B = the `Valuation`
 //! context + engine_value chain; (heuristic3 take_value + v_state STAND terms come next).
 
-use crate::cards::{BONUS, COST, NOBLE_PTS, NOBLE_REQ, PTS};
+use crate::cards::{BONUS, COST, N_CARDS, NOBLE_PTS, NOBLE_REQ, PTS};
 use crate::engine::{self, State};
 use crate::turns;
+use std::cell::RefCell;
 
 // ─── Tuned constants (deployed) ───────────────────────────────────────────────
 pub const GOLD_BANK_CAP: i32 = 2;
@@ -308,6 +309,15 @@ pub struct Valuation<'a> {
     pub w_gem: f64,
     pub w_gold: f64,
     turns: f64, // estimated_turns_remaining, precomputed (state-level)
+    // Per-Valuation memo of the two hottest leaf primitives (the cross-card engine_value chain
+    // recomputes them O(cards^2)×). NaN = unfilled; the stored f64 is returned verbatim (byte-identical).
+    // eng_base keyed (cj,seat); cost_scalar keyed (ci,seat,extra_bcol∈{None,0..4}).
+    eb_cache: RefCell<Vec<f64>>,
+    cs_cache: RefCell<Vec<f64>>,
+    dt_cache: RefCell<Vec<f64>>, // delta_take keyed (ci,seat,bcol)
+    t_cache: RefCell<Vec<i32>>,  // tempo keyed (ci,seat); -1 = unfilled (tempo is always >= 0)
+    dds_cache: RefCell<[Option<[f64; 5]>; 2]>, // seat-aware deck demand, keyed by seat
+    ev_cache: RefCell<Vec<f64>>, // engine_value keyed (ci,seat)
 }
 
 impl<'a> Valuation<'a> {
@@ -338,7 +348,31 @@ impl<'a> Valuation<'a> {
             s.purchased_n[0], s.points[0], s.tokens[0].iter().sum(),
             s.purchased_n[1], s.points[1], s.tokens[1].iter().sum(),
         );
-        Valuation { s, deck_color_demand: dcd, w_tempo, w_gem, w_gold, turns }
+        Valuation {
+            s, deck_color_demand: dcd, w_tempo, w_gem, w_gold, turns,
+            eb_cache: RefCell::new(vec![f64::NAN; N_CARDS * 2]),
+            cs_cache: RefCell::new(vec![f64::NAN; N_CARDS * 2 * 6]),
+            dt_cache: RefCell::new(vec![f64::NAN; N_CARDS * 2 * 5]),
+            t_cache: RefCell::new(vec![-1i32; N_CARDS * 2]),
+            dds_cache: RefCell::new([None; 2]),
+            ev_cache: RefCell::new(vec![f64::NAN; N_CARDS * 2]),
+        }
+    }
+
+    /// Cached `tempo(ci, seat)` (per-Valuation) — recomputed many times per leaf (twice per
+    /// `components`, plus `noble_progress`); the value is integer + state-fixed so the cache is exact.
+    pub fn tempo(&self, ci: i32, seat: usize) -> i32 {
+        if (ci as usize) < N_CARDS && seat < 2 {
+            let idx = (ci as usize) * 2 + seat;
+            let hit = self.t_cache.borrow()[idx];
+            if hit >= 0 {
+                return hit;
+            }
+            let v = tempo(self.s, ci, seat);
+            self.t_cache.borrow_mut()[idx] = v;
+            return v;
+        }
+        tempo(self.s, ci, seat)
     }
 
     #[inline]
@@ -349,6 +383,18 @@ impl<'a> Valuation<'a> {
     /// Seat-aware bonus-discounted deck demand (DECK_BONUS_DISCOUNT): per color, undealt-deck cost not
     /// covered by `seat`'s bonuses, normalized by the RAW deck total (magnitude legitimately shrinks).
     pub fn deck_demand_seat(&self, seat: usize) -> [f64; 5] {
+        if seat < 2 {
+            if let Some(v) = self.dds_cache.borrow()[seat] {
+                return v;
+            }
+            let v = self.deck_demand_seat_compute(seat);
+            self.dds_cache.borrow_mut()[seat] = Some(v);
+            return v;
+        }
+        self.deck_demand_seat_compute(seat)
+    }
+
+    fn deck_demand_seat_compute(&self, seat: usize) -> [f64; 5] {
         let bon = &self.s.bonuses[seat];
         let mut demand = [0.0f64; 5];
         let mut raw_total = 0.0f64;
@@ -381,6 +427,20 @@ impl<'a> Valuation<'a> {
     /// take_value's total_cost = W_TEMPO*tempo + W_GEM*gem + W_GOLD*gold for ci, optionally with one
     /// extra bonus in `extra_bcol`. First-argmax tie-break on `color`.
     pub fn cost_scalar(&self, ci: i32, seat: usize, extra_bcol: Option<usize>) -> f64 {
+        if (ci as usize) < N_CARDS && seat < 2 {
+            let idx = ((ci as usize) * 2 + seat) * 6 + extra_bcol.map_or(0, |c| c + 1);
+            let hit = self.cs_cache.borrow()[idx];
+            if !hit.is_nan() {
+                return hit;
+            }
+            let v = self.cost_scalar_compute(ci, seat, extra_bcol);
+            self.cs_cache.borrow_mut()[idx] = v;
+            return v;
+        }
+        self.cost_scalar_compute(ci, seat, extra_bcol)
+    }
+
+    fn cost_scalar_compute(&self, ci: i32, seat: usize, extra_bcol: Option<usize>) -> f64 {
         let bon = &self.s.bonuses[seat];
         let tok = &self.s.tokens[seat];
         let bank = &self.s.bank;
@@ -417,6 +477,20 @@ impl<'a> Valuation<'a> {
 
     /// cj's LEVEL-0 (legacy, non-recursive) engine value; uses the SEAT-BLIND deck_color_demand.
     pub fn eng_base(&self, cj: i32, seat: usize) -> f64 {
+        if (cj as usize) < N_CARDS && seat < 2 {
+            let idx = (cj as usize) * 2 + seat;
+            let hit = self.eb_cache.borrow()[idx];
+            if !hit.is_nan() {
+                return hit;
+            }
+            let v = self.eng_base_compute(cj, seat);
+            self.eb_cache.borrow_mut()[idx] = v;
+            return v;
+        }
+        self.eng_base_compute(cj, seat)
+    }
+
+    fn eng_base_compute(&self, cj: i32, seat: usize) -> f64 {
         let s = self.s;
         let bcol = BONUS[cj as usize];
         let bon = &s.bonuses[seat];
@@ -452,6 +526,20 @@ impl<'a> Valuation<'a> {
 
     /// take-value uplift a +1 `bcol` bonus gives ci (BUILD_FLOOR_W=0 -> pure convexity gap).
     pub fn delta_take(&self, ci: i32, seat: usize, bcol: usize) -> f64 {
+        if (ci as usize) < N_CARDS && seat < 2 && bcol < 5 {
+            let idx = ((ci as usize) * 2 + seat) * 5 + bcol;
+            let hit = self.dt_cache.borrow()[idx];
+            if !hit.is_nan() {
+                return hit;
+            }
+            let v = self.delta_take_compute(ci, seat, bcol);
+            self.dt_cache.borrow_mut()[idx] = v;
+            return v;
+        }
+        self.delta_take_compute(ci, seat, bcol)
+    }
+
+    fn delta_take_compute(&self, ci: i32, seat: usize, bcol: usize) -> f64 {
         let c0 = self.cost_scalar(ci, seat, None);
         let c1 = self.cost_scalar(ci, seat, Some(bcol));
         let gap = 1.0 / (1.0 + c1) - 1.0 / (1.0 + c0);
@@ -461,6 +549,20 @@ impl<'a> Valuation<'a> {
     /// Value of the permanent +1 bonus ci grants (H3 Delta-take model). Top-level deck term is
     /// SEAT-AWARE; the inner eng_base (inside potential) stays seat-blind.
     pub fn engine_value(&self, ci: i32, seat: usize) -> f64 {
+        if (ci as usize) < N_CARDS && seat < 2 {
+            let idx = (ci as usize) * 2 + seat;
+            let hit = self.ev_cache.borrow()[idx];
+            if !hit.is_nan() {
+                return hit;
+            }
+            let v = self.engine_value_compute(ci, seat);
+            self.ev_cache.borrow_mut()[idx] = v;
+            return v;
+        }
+        self.engine_value_compute(ci, seat)
+    }
+
+    fn engine_value_compute(&self, ci: i32, seat: usize) -> f64 {
         let s = self.s;
         let bcol = BONUS[ci as usize];
         let bon_b = s.bonuses[seat][bcol];
@@ -525,7 +627,7 @@ impl<'a> Valuation<'a> {
         if n == 0 {
             return 0.0;
         }
-        let mut eff = self.turns - tempo(s, ci, seat) as f64;
+        let mut eff = self.turns - self.tempo(ci, seat) as f64;
         if eff < 0.0 {
             eff = 0.0;
         }

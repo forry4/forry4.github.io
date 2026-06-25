@@ -28,11 +28,11 @@ pub const WIN_RESERVE_MAX_TEMPO: i32 = 4;
 /// (take, engine, point, cost) for card ci from seat — one source of truth for policy + overlay.
 pub fn components(val: &Valuation, ci: i32, seat: usize) -> (f64, f64, f64, f64) {
     let s = val.s;
-    let cost = W_TEMPO * valuation::tempo(s, ci, seat) as f64
+    let cost = W_TEMPO * val.tempo(ci, seat) as f64
         + W_GEM * valuation::gem_cost(s, ci, seat) as f64
         + W_GOLD * valuation::gold_cost(s, ci, seat) as f64;
     let mut engine = val.engine_value(ci, seat);
-    let compound = val.estimated_turns_remaining() - valuation::tempo(s, ci, seat) as f64;
+    let compound = val.estimated_turns_remaining() - val.tempo(ci, seat) as f64;
     engine *= W_ENGINE * if compound > 0.0 { compound } else { 0.0 };
     let point = PTS[ci as usize] as f64
         + NOBLE_SCALE * val.noble_progress(ci, seat)
