@@ -205,9 +205,12 @@ def components(val: V.Valuation, ci: int, seat: int):
     compound_turns = val.estimated_turns_remaining() - val.tempo(ci, seat)
     engine *= W_ENGINE * (compound_turns if compound_turns > 0.0 else 0.0)
     # points are NOT staged -- full value always.
-    noble_scale = NOBLE_SCALE
-    if NOBLE_SCARCITY:  # board-conditional: weight nobles more when efficient point cards are scarce
-        noble_scale *= 1.0 + NOBLE_SCARCITY * val.board_scarcity(seat)
+    if V.NOBLE_RACE_W:  # marginal win-probability model -> noble_progress returns dP_win; NOBLE_RACE_W weights it
+        noble_scale = V.NOBLE_RACE_W
+    else:
+        noble_scale = NOBLE_SCALE
+        if NOBLE_SCARCITY:  # board-conditional: weight nobles more when efficient point cards are scarce
+            noble_scale *= 1.0 + NOBLE_SCARCITY * val.board_scarcity(seat)
     point = E.PTS[ci] + noble_scale * val.noble_progress(ci, seat) + val.noble_completion_pts(ci, seat)
     take = (engine + point) / (1.0 + cost)
     result = (take, engine, point, cost)

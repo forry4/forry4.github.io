@@ -319,6 +319,31 @@ NOBLE_TIME_GATE = True    # discount noble_progress by how plausibly the noble c
                           # toward 0 for a far/late noble -- NO hard cliff. So a 0-pt card advancing a noble that
                           # can't realistically be finished stops looking good. False = legacy (no time awareness).
 NOBLE_TURN_W = 1.0        # turns-per-bonus weight in the noble time discount (higher = fade faster with deficit)
+
+# ─── noble RACE gate: MARGINAL win-probability model (NOBLE_RACE_W; default 0 == OFF == byte-identical) ─
+# By default noble_progress / v_state._noble_stand score a noble only by the SEAT's OWN closeness + the
+# absolute turns horizon -- BLIND to the OPPONENT's progress toward the SAME noble. Only one player can
+# claim a given noble, so a card advancing a noble the opponent will finish first is nearly worthless.
+# When NOBLE_RACE_W > 0 the noble term is REPLACED by a win-probability model:
+#     P_win(noble, seat) = sigmoid( (deficit_opp - deficit_seat) / NOBLE_RACE_SCALE )   # beat the opponent
+#                          * eff / (eff + NOBLE_TURN_W * deficit_seat)                  # finish in time
+#   * PER CARD (noble_progress -> _noble_winprob_gain): the card's noble value = how much buying it RAISES
+#     P_win, summed over the nobles its color advances:  sum_noble [ P_win(deficit-1) - P_win(deficit) ].
+#     A card advancing a noble you're hopelessly behind on, OR already certain to win, adds ~0 (the sigmoid
+#     is flat there); a card that swings a CONTESTABLE noble adds the most. heuristic3.components weights it
+#     by NOBLE_RACE_W (the marginal magnitude differs from the closeness base, so this is its own weight).
+#   * POSITION (v_state._noble_stand): the standing becomes the expected noble VP = VP * P_win (best noble
+#     + NOBLE_MULTI_W * the rest), so the search backup sees the realistic claim, not raw closeness.
+# 2-player only (opponent = 1 - seat). W == 0 -> the original closeness path (byte-identical, C-twin intact).
+#
+# CALIBRATION (noble-race-probe.py, AUC of the race factor vs the ACTUAL noble claimant over real H3 games):
+# the OPPONENT-DEFICIT race predicts the claimant well (AUC 0.76 overall, 0.95 supply-asymmetric); a
+# board/deck-SUPPLY adjustment did NOT add value (0.500->0.516 where deficits are equal, and it degraded
+# the deficit signal elsewhere -- the board refills every buy, so transient color scarcity rarely decides
+# a race). So T == raw bonus deficit (no supply term).
+NOBLE_RACE_W = 0.0         # 0 = OFF/byte-identical; >0 = weight on the marginal win-probability noble term
+NOBLE_RACE_SCALE = 3.0     # deficit-difference (deficit_opp - deficit_seat) that maps to a strong sigmoid swing
+
 EFF_REF = 0.45            # board_scarcity: reference points-per-effective-gem. If the board offers an
                           # L2/L3 deal at/above this, nobles are noise (scarcity 0); a poor board
                           # (best deal well below this) -> high scarcity -> go wide for nobles.
@@ -1600,15 +1625,68 @@ class Valuation:
     def turns_to_afford(self, ci: int, seat: int) -> int:
         return turns_to_afford(self.s, ci, seat)
 
+    def _noble_winprob(self, d_me: float, d_opp: float, eff: float) -> float:
+        """P(`seat` eventually CLAIMS a noble), folding the two race factors into ONE probability:
+        P(beat the single opponent there) * P(finish it in time). d_me/d_opp are the two seats' remaining
+        bonus DEFICITS for the noble; eff = turns left. Used only by the marginal model (NOBLE_RACE_W>0).
+          beat-opponent = sigmoid((d_opp - d_me) / NOBLE_RACE_SCALE)   (favored when you need fewer)
+          finish-in-time = eff / (eff + NOBLE_TURN_W * d_me)           (the existing horizon feasibility)
+        Calibration (noble-race-probe) found the opponent-DEFICIT race predicts the actual claimant well
+        (AUC 0.76) while board/deck supply did not add value -> T == raw deficit (no supply term)."""
+        x = (d_opp - d_me) / NOBLE_RACE_SCALE
+        if x >= 60.0:
+            race = 1.0
+        elif x <= -60.0:
+            race = 0.0
+        else:
+            race = 1.0 / (1.0 + math.exp(-x))
+        denom = eff + NOBLE_TURN_W * d_me
+        return race * (eff / denom) if denom > 0.0 else 0.0
+
+    def _noble_winprob_gain(self, ci: int, seat: int) -> float:
+        """The MARGINAL noble model (NOBLE_RACE_W>0): how much buying ci RAISES `seat`'s probability of
+        CLAIMING each visible noble, summed = the expected noble-VP-fraction this card adds. For each noble
+        whose color ci advances (but does NOT complete -- completion is scored by noble_completion_pts):
+            dP = P_win(deficit - 1) - P_win(deficit)
+        with P_win = _noble_winprob (beat-opponent * finish-in-time) at the post-acquisition horizon
+        eff = max(0, turns_remaining - tempo(ci)). A card advancing a noble you're hopelessly behind on, OR
+        one you're already certain to win, contributes ~0 (the sigmoid is flat there); a card that swings a
+        CONTESTABLE noble contributes most. Opponent = 1 - seat (2-player). Summed (independent claims)."""
+        s = self.s
+        bcol = E.BONUS[ci]
+        bon = s.bonuses[seat]
+        opp = s.bonuses[1 - seat]
+        eff = self.estimated_turns_remaining() - self.tempo(ci, seat)
+        if eff < 0.0:
+            eff = 0.0
+        score = 0.0
+        for slot in range(3):
+            ni = s.nobles[slot]
+            if ni < 0:
+                continue
+            req = E.NOBLE_REQ[ni]
+            if not sum(req):
+                continue
+            if all(bon[c] + (1 if c == bcol else 0) >= req[c] for c in range(5)):
+                continue  # this buy COMPLETES the noble -> scored by noble_completion_pts (not here)
+            if req[bcol] <= bon[bcol]:
+                continue  # ci's color does not advance this (still-incomplete) noble
+            d_me = sum(req[c] - bon[c] for c in range(5) if req[c] > bon[c])
+            d_op = sum(req[c] - opp[c] for c in range(5) if req[c] > opp[c])
+            score += self._noble_winprob(d_me - 1, d_op, eff) - self._noble_winprob(d_me, d_op, eff)
+        return score
+
     def noble_progress(self, ci: int, seat: int) -> float:
-        """How much ci's +1 bonus advances visible nobles (relevance x closeness, per noble), but
-        -- when NOBLE_TIME_GATE -- smoothly discounted by how plausibly each noble can be completed
-        in the turns left AFTER acquiring this card. eff = turns_remaining - tempo(ci) (the turns you
-        still have once you've spent tempo getting this card, mirroring the engine's max(0, T-tempo)),
-        then per noble factor = eff / (eff + NOBLE_TURN_W * deficit), deficit = bonuses still needed.
-        A far/late noble fades toward 0 -- a smooth fade (turns_remaining is an estimate), no cliff."""
+        """How much ci's +1 bonus advances visible nobles. By DEFAULT (NOBLE_RACE_W == 0): relevance x
+        closeness per noble, smoothly discounted -- when NOBLE_TIME_GATE -- by how plausibly each noble can
+        be completed in the turns left AFTER acquiring this card (eff = max(0, turns_remaining - tempo(ci));
+        factor eff/(eff + NOBLE_TURN_W * deficit)). When NOBLE_RACE_W > 0 the noble term is REPLACED by the
+        MARGINAL win-probability model (_noble_winprob_gain): the card's value = how much it raises P(you
+        CLAIM each noble), race- and horizon-aware. See the NOBLE_RACE_W block at module top."""
         if not NOBLE_TIME_GATE:
             return noble_progress(self.s, ci, seat)
+        if NOBLE_RACE_W:
+            return self._noble_winprob_gain(ci, seat)   # marginal model (pure Python; C twin is closeness-only)
         if cython.compiled and ci < _N_CARDS_C:
             return self._noble_progress_c(ci, seat)
         bcol = E.BONUS[ci]

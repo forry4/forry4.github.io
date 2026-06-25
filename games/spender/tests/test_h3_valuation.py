@@ -450,3 +450,104 @@ def test_g_noble_progress_still_counts_other_nobles():
         assert val.noble_progress(X, 0) > 0.0               # B and C (uncompleted, need white) still count
     finally:
         E.NOBLE_REQ, E.NOBLE_PTS = orig
+
+
+# ─── (h) noble RACE gate: marginal win-probability model (NOBLE_RACE_W) ───────────────────────
+RED = 3
+
+
+def _noble_card_state(noble_req, me_bon, opp_bon):
+    """A 1-noble state (slot 0 = `noble_req`) with both seats' bonuses set and a 0-pt WHITE card on the
+    board (slot 0). No tokens. Both seats' cards/points are 0, so estimated_turns_remaining is identical
+    across opp-bonus variations -> a fair within-state comparison of the marginal gain."""
+    s = _blank_state()
+    s.points = [0, 0]
+    s.purchased_n = [0, 0]
+    s.bonuses = [list(me_bon), list(opp_bon)]
+    s.tokens = [[0] * 6, [0] * 6]
+    white = next(c for c in range(len(E.COST)) if E.BONUS[c] == WHITE and E.PTS[c] == 0)
+    s.board = [-1] * 12
+    s.board[0] = white
+    s.nobles = [0, -1, -1]
+    return s, white
+
+
+def test_h_winprob_monotone():
+    """P_win rises as your OWN deficit falls (closer) and as the OPPONENT's deficit rises (further)."""
+    val = _val(_blank_state())
+    eff = 10.0
+    assert val._noble_winprob(2, 3, eff) > val._noble_winprob(3, 3, eff)   # closer for me -> higher
+    assert val._noble_winprob(3, 4, eff) > val._noble_winprob(3, 2, eff)   # opp further -> higher
+    assert val._noble_winprob(3, 3, eff) == pytest.approx(0.5 * eff / (eff + V3.NOBLE_TURN_W * 3))
+
+
+def test_h_marginal_gain_peaks_at_even_race():
+    """The MARGINAL win-prob gain of a card (P_win(d-1) - P_win(d)) is LARGEST for a CONTESTED (even)
+    race and smaller when you're clearly BEHIND or clearly AHEAD -- the sigmoid is steepest at even."""
+    val = _val(_blank_state())
+    eff = 10.0
+    d = 3
+    def gain(d_op):
+        return val._noble_winprob(d - 1, d_op, eff) - val._noble_winprob(d, d_op, eff)
+    even = gain(3)        # opponent equally far
+    behind = gain(0)      # opponent essentially done -> I'm losing the race
+    ahead = gain(9)       # opponent hopeless -> I've all but won it
+    assert even > behind
+    assert even > ahead
+    assert behind > 0 and ahead > 0   # still a (small) positive marginal
+
+
+def test_h_marginal_off_is_opponent_blind():
+    """NOBLE_RACE_W == 0 (default) keeps the CLOSENESS model, which ignores the opponent: noble_progress
+    is unchanged when the opponent's bonuses change. Turning the gate ON makes it opponent-AWARE."""
+    orig = (E.NOBLE_REQ, E.NOBLE_PTS, V3.NOBLE_RACE_W)
+    try:
+        E.NOBLE_REQ = ((3, 3, 0, 3, 0), (0, 0, 0, 0, 0), (0, 0, 0, 0, 0))
+        E.NOBLE_PTS = (3, 3, 3)
+        s_close, white = _noble_card_state((3, 3, 0, 3, 0), (1, 3, 0, 2, 0), (1, 3, 0, 2, 0))  # even
+        s_ahead, _ = _noble_card_state((3, 3, 0, 3, 0), (1, 3, 0, 2, 0), (0, 0, 0, 0, 0))       # opp hopeless
+
+        V3.NOBLE_RACE_W = 0.0   # closeness: opp-blind -> identical
+        assert _val(s_close).noble_progress(white, 0) == pytest.approx(_val(s_ahead).noble_progress(white, 0))
+
+        V3.NOBLE_RACE_W = 1.0   # marginal: opp-aware -> winning-the-race-already is worth LESS marginally
+        even = _val(s_close).noble_progress(white, 0)
+        ahead = _val(s_ahead).noble_progress(white, 0)
+        assert even > ahead
+    finally:
+        E.NOBLE_REQ, E.NOBLE_PTS, V3.NOBLE_RACE_W = orig
+
+
+def test_h_marginal_behind_worth_less_than_even():
+    """User example 1, end to end through noble_progress: a white card toward a 3/3/3 noble is worth
+    LESS (marginally) when I'm clearly behind the opponent than when the race is even."""
+    orig = (E.NOBLE_REQ, E.NOBLE_PTS, V3.NOBLE_RACE_W)
+    try:
+        E.NOBLE_REQ = ((3, 3, 0, 3, 0), (0, 0, 0, 0, 0), (0, 0, 0, 0, 0))
+        E.NOBLE_PTS = (3, 3, 3)
+        V3.NOBLE_RACE_W = 1.0
+        s_even, white = _noble_card_state((3, 3, 0, 3, 0), (1, 3, 0, 2, 0), (1, 3, 0, 2, 0))
+        s_behind, _ = _noble_card_state((3, 3, 0, 3, 0), (1, 3, 0, 2, 0), (3, 3, 0, 2, 0))  # opp 2 ahead in white
+        assert _val(s_behind).noble_progress(white, 0) < _val(s_even).noble_progress(white, 0)
+    finally:
+        E.NOBLE_REQ, E.NOBLE_PTS, V3.NOBLE_RACE_W = orig
+
+
+def test_h_marginal_zero_when_no_advance_or_completes():
+    """The marginal model credits ZERO when the card's color doesn't advance the noble, and ZERO for a
+    card that COMPLETES it (completion is scored separately by noble_completion_pts -- no double count)."""
+    orig = (E.NOBLE_REQ, E.NOBLE_PTS, V3.NOBLE_RACE_W)
+    try:
+        E.NOBLE_PTS = (3, 3, 3)
+        V3.NOBLE_RACE_W = 1.0
+        # (i) white card, noble needs NO white -> no advance -> 0
+        E.NOBLE_REQ = ((0, 3, 0, 3, 0), (0, 0, 0, 0, 0), (0, 0, 0, 0, 0))
+        s, white = _noble_card_state((0, 3, 0, 3, 0), (0, 2, 0, 2, 0), (0, 1, 0, 1, 0))
+        assert _val(s).noble_progress(white, 0) == 0.0
+        # (ii) white card that COMPLETES the noble (need exactly 1 more white) -> 0 in progress
+        E.NOBLE_REQ = ((3, 0, 0, 0, 0), (0, 0, 0, 0, 0), (0, 0, 0, 0, 0))
+        s2, white2 = _noble_card_state((3, 0, 0, 0, 0), (2, 0, 0, 0, 0), (0, 0, 0, 0, 0))
+        assert _val(s2).noble_progress(white2, 0) == 0.0
+        assert _val(s2).noble_completion_pts(white2, 0) == 3   # ...scored as completion instead
+    finally:
+        E.NOBLE_REQ, E.NOBLE_PTS, V3.NOBLE_RACE_W = orig

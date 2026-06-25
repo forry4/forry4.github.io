@@ -164,10 +164,17 @@ def _noble_stand(val: V.Valuation, seat: int) -> float:
     """Closest completable visible noble for `seat`, time-gated. Per noble: VP * closeness *
     eff/(eff + NOBLE_TURN_W*deficit), eff = turns remaining, deficit = bonuses still needed — the
     same smooth fade as valuation3.noble_progress, but at the seat (position) level, taking the best
-    noble. A far/unfinishable noble fades toward 0."""
+    noble. A far/unfinishable noble fades toward 0.
+
+    When NOBLE_RACE_W > 0 the per-noble standing becomes the EXPECTED noble VP = VP * P_win, where
+    P_win = P(beat the opponent) * P(finish in time) (valuation3._noble_winprob) — so a noble the
+    opponent will claim first contributes little even when this seat is close. Best noble + the
+    NOBLE_MULTI_W tail, as before."""
     s = val.s
     bon = s.bonuses[seat]
     horizon = val.estimated_turns_remaining()
+    race_on = V.NOBLE_RACE_W != 0.0            # standing = expected noble VP (claim odds vs the opponent)
+    opp = s.bonuses[1 - seat] if race_on else None
     vals = []
     for slot in range(3):
         ni = s.nobles[slot]
@@ -181,9 +188,13 @@ def _noble_stand(val: V.Valuation, seat: int) -> float:
         if deficit == 0:                       # already qualifies (engine normally auto-claims)
             vals.append(float(E.NOBLE_PTS[ni]))
             continue
-        close = 1.0 - deficit / total
-        time_factor = horizon / (horizon + NOBLE_TURN_W * deficit)
-        vals.append(E.NOBLE_PTS[ni] * close * time_factor)
+        if race_on:                            # expected VP = VP * P_win (beat-opponent * finish-in-time)
+            d_op = sum(req[c] - opp[c] for c in range(5) if req[c] > opp[c])
+            vals.append(E.NOBLE_PTS[ni] * val._noble_winprob(deficit, d_op, horizon))
+        else:
+            close = 1.0 - deficit / total
+            time_factor = horizon / (horizon + NOBLE_TURN_W * deficit)
+            vals.append(E.NOBLE_PTS[ni] * close * time_factor)
     if not vals:
         return 0.0
     best = max(vals)
