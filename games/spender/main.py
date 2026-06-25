@@ -601,23 +601,14 @@ def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]
             if persp not in game.get("order", ()):
                 persp = game["ai_player"]
             state["ai_values_pid"] = persp
-            try:
-                if room["ai_variant"] == "H2":
-                    state["ai_card_values"] = _h2_card_values(game, persp)
-                elif room["ai_variant"] == "H3":
-                    state["ai_card_values"] = _h3_card_values(game, persp)
-                elif room["ai_variant"] == "S":
-                    state["ai_card_values"] = _s_card_values(game, persp)
-                    state["ai_position_eval"] = _s_position_eval(game, persp)
-                    # the SEARCHED eval (post-PUCT root value), only if it's for THIS position
-                    # (ply match): reused from the AI's move on its turn, freshly searched on yours.
-                    sr = game.get("s_searched")
-                    if sr is not None and sr.get("ply") == len(game.get("moves", [])):
-                        state["ai_position_eval_searched"] = sr.get("value")
-                else:
-                    state["ai_card_values"] = _v4_card_values(game, persp)
-            except Exception:
-                pass
+            ov = _compute_overlay(game, persp, room["ai_variant"])
+            state.update(ov)
+            if room["ai_variant"] == "S" and "ai_card_values" in ov:
+                # the SEARCHED eval (post-PUCT root value), only if it's for THIS position
+                # (ply match): reused from the AI's move on its turn, freshly searched on yours.
+                sr = game.get("s_searched")
+                if sr is not None and sr.get("ply") == len(game.get("moves", [])):
+                    state["ai_position_eval_searched"] = sr.get("value")
     return state
 
 
@@ -1060,6 +1051,27 @@ def _s_searched_value(game: dict):
     s = _aze.from_game_dict(game)
     v = _azvs.searched_value(s, s.turn, time_limit=_azvs.SERVE_TIME)
     return None if v is None else round(v, 3)
+
+
+def _compute_overlay(game: dict, persp: str, variant: str) -> dict:
+    """Static admin AI-values overlay for `game` from `persp`'s perspective: per-card values
+    (H/H2/H3/S) + the S static position eval. Returns {} on failure / unsupported variant. No
+    SEARCHED eval here (that needs a real search) — mk_room_state adds it for the live game; the
+    review path (which calls this per past snapshot) omits it. Shared so both paths agree."""
+    out: dict = {}
+    try:
+        if variant == "H2":
+            out["ai_card_values"] = _h2_card_values(game, persp)
+        elif variant == "H3":
+            out["ai_card_values"] = _h3_card_values(game, persp)
+        elif variant == "S":
+            out["ai_card_values"] = _s_card_values(game, persp)
+            out["ai_position_eval"] = _s_position_eval(game, persp)
+        elif variant == "H":
+            out["ai_card_values"] = _v4_card_values(game, persp)
+    except Exception:
+        return {}
+    return out
 
 
 # ─── S21: 21-point specialization of variant S ──────────────────────────────────
@@ -2893,11 +2905,13 @@ def _review_view(game: dict, viewer_pid: str) -> dict:
     return g
 
 
-def _build_review_snapshots(game: dict, viewer_pid: str) -> list[dict] | None:
+def _build_review_snapshots(game: dict, viewer_pid: str, ai_variant: str | None = None) -> list[dict] | None:
     """Reconstruct one renderable board per turn (plus the final position) so the review
     screen can jump to any point in the game. Returns None when the game predates the
     `setup` snapshot (its deck order is unrecoverable) or can't be reconstructed — the
-    caller still serves the final board, just without turn-by-turn navigation."""
+    caller still serves the final board, just without turn-by-turn navigation. For an
+    AI game, each PLAYING snapshot also carries the static AI-values overlay (from the
+    mover's seat) so the admin Vals button works while rewinding."""
     try:
         from games.spender.ai.az import replay
     except Exception:
@@ -2906,12 +2920,19 @@ def _build_review_snapshots(game: dict, viewer_pid: str) -> list[dict] | None:
         g0, chrono = replay.reconstruct(game)
         snaps: list[dict] = []
         for turn, mover, primary, gsnap in replay.turn_snapshots(g0, chrono):
-            snaps.append({
+            snap = {
                 "turn": turn,
                 "mover": mover,
                 "move": replay._describe(primary) if primary else None,
                 "game": _review_view(gsnap, viewer_pid),
-            })
+            }
+            if ai_variant in ("H", "H2", "H3", "S") and gsnap.get("phase") == "playing" \
+                    and gsnap.get("ai_player") and mover in (gsnap.get("order") or ()):
+                ov = _compute_overlay(gsnap, mover, ai_variant)   # static only (no per-snapshot search)
+                if ov:
+                    snap.update(ov)
+                    snap["ai_values_pid"] = mover
+            snaps.append(snap)
         return snaps
     except replay.ReplayError:
         return None
@@ -2969,7 +2990,7 @@ async def get_game_review(game_id: str, token: str | None = Depends(bearer_token
         "win_points": game.get("win_points", 15),
         "viewer_pid": viewer,
         "final": _review_view(game, viewer),
-        "snapshots": _build_review_snapshots(game, viewer),
+        "snapshots": _build_review_snapshots(game, viewer, payload.get("ai_variant")),
     }
 
 
