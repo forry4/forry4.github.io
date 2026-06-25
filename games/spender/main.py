@@ -2698,6 +2698,18 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                     save_game(room_id)
                     await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
 
+            # ── ping (a player tapped another's box → a chime for the tapped one) ──
+            elif action == "ping":
+                target = msg.get("target")
+                async with ROOM_LOCK:
+                    rr = ROOMS.get(room_id)
+                    tws = rr.get("sockets", {}).get(target) if rr else None
+                if tws is not None and target != pid:
+                    try:
+                        await tws.send_text(json.dumps({"type": "ping", "from": pid}))
+                    except Exception:
+                        pass
+
             else:
                 await websocket.send_text(json.dumps({"type": "error", "message": "unknown action"}))
 
