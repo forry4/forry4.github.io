@@ -83,6 +83,16 @@ app.include_router(spender_router)
 # Authorization: Bearer header (with ?token= fallback) as the Spender routes.
 setup_books(app, get_db_conn, get_user_by_session, bearer_token)
 
+# Puzzle mode — static, scripted Spender endgame puzzles. Public read-only content
+# (the bank is committed JSON with embedded snapshots); no DB/auth/engine at serve
+# time. Defensive: an import error must not take down the rest of the backend.
+try:
+    from games.spender.puzzle.serve import setup_puzzles
+    setup_puzzles(app)
+    LOG.info("wired Puzzle mode routes (/puzzles)")
+except Exception as _puz_err:  # pragma: no cover - optional package
+    LOG.warning("Puzzle mode not wired: %s", _puz_err)
+
 # Castles of Crimson — its self-contained sub-app mounted under /coc. Defensive:
 # a CoC import error must NOT take down the core backend (an earlier unconditional
 # import once crashed prod when the package was absent — reverted in fc6a2fa).
