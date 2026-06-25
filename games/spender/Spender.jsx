@@ -327,6 +327,7 @@ const css = baseCss + `
 .ai-pos-eval.mine{color:#8fdca0;border-color:rgba(143,220,160,.5)}
 .ai-pos-eval b{color:#9a8fb0;font-weight:700;margin-right:3px}
 .ai-pos-eval-srch{margin-left:7px;padding-left:7px;border-left:1px solid rgba(201,168,76,.3)}
+.ai-pos-eval-row{display:flex;justify-content:center;margin-bottom:4px}
 .card:hover{border-color:rgba(201,168,76,.5);transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.4)}
 .card.selected{border-color:var(--gold-light);box-shadow:0 0 0 2px var(--gold-light)}
 .card.affordable{border-color:var(--green-gem)}
@@ -1848,31 +1849,38 @@ export default function SpenderApp() {
 	// overlay. Lives at the far-left of the actions box; rendered on either turn so the
 	// overlay (computed for whoever's turn it is) can be toggled any time.
 	function renderAiValsToggle() {
-		// Works live AND in review (the overlay rides on the rewound snapshot). Gated only on
-		// admin + the presence of overlay data for the shown position (null on an over / no-AI board).
+		// Just the toggle button now (the eval pill is renderAiEval, placed on its own row ABOVE
+		// the buttons so it doesn't push Take/✕ to a second row). Works live AND in review; gated
+		// on admin + overlay data for the shown position.
 		if (!authUser?.is_admin || !aiCardValues) return null;
+		return (
+			<button className="btn btn-gold ai-vals-toggle"
+				title="Show/hide the per-card AI value overlay (computed for whoever's turn it is)"
+				onClick={() => setShowAiVals(v => {
+					const n = !v;
+					try { localStorage.setItem("spender_show_ai_vals", n ? "1" : "0"); } catch {}
+					return n;
+				})}>
+				{showAiVals ? "Hide" : "Vals"}
+			</button>
+		);
+	}
+
+	// The S position eval pill — rendered on its OWN row above the action buttons.
+	function renderAiEval() {
+		if (!showAiVals || !authUser?.is_admin || !aiCardValues) return null;
 		const evL = aiPositionEval;            // S only: STATIC leaf eval (instant)
+		if (evL == null) return null;
 		const evS = aiPositionEvalSearched;    // SEARCHED eval (live only — null in review)
 		const mine = aiValuesPid === myId;
 		const fmt = (v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}`;
 		return (
-			<>
-				<button className="btn btn-gold ai-vals-toggle"
-					title="Show/hide the per-card AI value overlay (computed for whoever's turn it is)"
-					onClick={() => setShowAiVals(v => {
-						const n = !v;
-						try { localStorage.setItem("spender_show_ai_vals", n ? "1" : "0"); } catch {}
-						return n;
-					})}>
-					{showAiVals ? "Hide" : "Vals"}
-				</button>
-				{showAiVals && evL != null && (
-					<span className={`ai-pos-eval${mine ? " mine" : ""}`}
-						title={`S's whole-position eval from ${mine ? "your" : "the AI's"} perspective (+1 = ${mine ? "you" : "AI"} winning). leaf = static v(state); srch = after S's PUCT search (reused from the AI's move on its turn, freshly searched on yours)`}>
-						<b>leaf</b>{fmt(evL)}{!reviewing && <span className="ai-pos-eval-srch"><b>srch</b>{evS != null ? fmt(evS) : "…"}</span>}
-					</span>
-				)}
-			</>
+			<div className="ai-pos-eval-row">
+				<span className={`ai-pos-eval${mine ? " mine" : ""}`}
+					title={`S's whole-position eval from ${mine ? "your" : "the AI's"} perspective (+1 = ${mine ? "you" : "AI"} winning). leaf = static v(state); srch = after S's PUCT search (reused from the AI's move on its turn, freshly searched on yours)`}>
+					<b>leaf</b>{fmt(evL)}{!reviewing && <span className="ai-pos-eval-srch"><b>srch</b>{evS != null ? fmt(evS) : "…"}</span>}
+				</span>
+			</div>
 		);
 	}
 
@@ -2458,6 +2466,7 @@ export default function SpenderApp() {
 							{game.phase !== "over" && (
 								<div className="board-actions">
 									<span className="target-label">Target: {game.win_points || 15}</span>
+									{renderAiEval()}
 									<div className="board-actions-btns">
 										{renderAiValsToggle()}
 										{aiThinking
@@ -2479,6 +2488,7 @@ export default function SpenderApp() {
 									<span className="target-label">Target: {game.win_points || 15}</span>
 								</div>
 							)}
+							{renderAiEval()}
 							<div className="actions-panel-btns">
 								{renderAiValsToggle()}
 								{aiThinking
