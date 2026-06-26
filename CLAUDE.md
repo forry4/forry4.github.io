@@ -1858,8 +1858,44 @@ methodology or the saturation findings without reading it.
   deploy from the crate). Backend-before-frontend ordering when both change (else a new client hits an
   old backend → transient "unknown action"). **LIVE + user-confirmed working on forry4.github.io.**
 
+### Session (June 25 2026) — value-first ladder: variant N (learned value leaf) BEATS S (VERIFIED)
+**The learnable path is not just OPEN — it produced a concrete win.** A learned **value leaf** used
+inside variant-S's determinized search (+ the H3 prior) **beats the hand v_state leaf**, verified 5
+independent ways. New variant **N** (Neural), a SEPARATE option alongside S. Built in the
+`forrestm_projects-rust/spender-core` crate (the Rust→WASM search core); full write-ups in memory
+`spender-N-learned-leaf-beats-S` + `spender-az-retrain-plan`, plan `.claude-plans/az-retrain-rust-scale.md`.
+- **The recipe that beat the documented wall:** **outcome-trained** value (target 2·win−1 from self-play
+  game OUTCOMES, NOT V_search) on an **enriched 101-feature** encoder (`spender-core/src/feats.rs` = raw
+  state + v_state components + per-card derived + deck), a 256-hidden MLP (GPU/torch), used as the MCTS
+  **LEAF**. Why it works where the documented "distilled leaf washes by 1200 sims" did not: that wash was
+  for leaves distilled toward **V_search** (redundant with search); an **outcome-trained** leaf carries
+  **beyond-search-horizon** signal search can't recover, so it converts AND holds at depth.
+- **The 5 guards (harness `spender-core/src/bin/rung2.rs`, 80 games each, SE~0.05):** (1) CONTROL
+  v_state-vs-v_state via the same path = **0.5000 exactly** (harness unbiased); (2) N-vs-S holds across
+  depth **0.69/0.71/0.69** @ 400/800/1200 sims; (3) OUT-OF-SAMPLE on fresh decks (seed≥1M, outside the
+  harvest's 0–5999) **0.64/0.71**; (4) **EQUAL-TIME** N@600 vs v_state@1200 = **0.66** (wins at a 2×
+  handicap — the calibrated-leaf's killer, beaten); (5) PANEL N-vs-H3 **0.94** > baseline S-vs-H3 **0.84**
+  (generally stronger, NOT RPS-vs-S).
+- **The ladder (do not re-derive):** Rung 0/Phase 0 — Rust value-net inference is NOT a binding constraint
+  (`bin/net_bench`: all candidate nets feasible for self-play; export-path numpy-parity verified
+  `bin/net_export_check`). Rung 1 — a learned value at **1-ply** LOSES (vs H3 .12, vs v_state@1ply .07),
+  but that's expected: **1-ply is unkind to position-values** (even v_state@1ply loses to H3 at .37);
+  search is what makes a position-value strong. Rung 2 — the value as the **search leaf** is where it
+  shines (the 5 guards above).
+- **simgate (1M vs 1.2k sims, both v_state-S) = 0.5100 (a TIE, ±0.098, 100 games):** search **SATURATES
+  ~1.2k sims** for the current eval. So the lever is **eval/policy quality, NOT more sims** — re-tuning
+  sims is dead, and the WASM push *beyond* ~1.2k gave little serving strength (its real value is the fast
+  offline self-play that enables value-learning + N's equal-time win, since N@600 is already near-saturated).
+- **NEXT:** (a) ship N as a served variant (Rust→WASM leaf-mode + backend variant + lobby) alongside S;
+  (b) un-anchored **self-play** (N-vs-N, value bootstraps on its own improving play beyond S's
+  distribution) — N's supervised net is the proven FLOOR. Training: torch/GPU (the `python` with cu128,
+  NOT `/c/Python314` which lacks torch + numpy there is ~1.5 GFLOPS / 17-min fits); reap orphaned-python.
+
 ### Hard-won conclusions — DO NOT relitigate
-These cost many self-play/training cycles to establish:
+These cost many self-play/training cycles to establish (NOTE: the "evaluation quality is not the
+bottleneck / no learned eval beats the hand value" line below is SUPERSEDED for the SEARCH-LEAF case —
+see the June 25 2026 session above: an outcome-trained leaf in search beats v_state, verified 5 ways.
+The plateau finding still holds for STATIC/1-ply use and for V_search-distilled leaves):
 - **Eval-weight tuning is saturated.** One gain (0.725 vs original), nothing since. The first run captured it.
 - **Evaluation quality is NOT the bottleneck.** Static-eval accuracy plateaus ~0.65 *regardless of model class or features*: an **MLP** (more capacity) and **Stage 1c richer features** (per-colour bonuses/tokens, reachability/threat) both gave the same ~0.64–0.66 and were reverted. The missing information (future deck draws, deep lines) isn't in any static snapshot — it needs **lookahead**. **The remaining lever is SEARCH, not evaluation.**
 - **Self-play is blind to blocking/contested tactics** — its opponent never threatens coherently, so denial never pays off and those features (`contested_weight`, `block_urgency_gate`) train toward off. A scripted `strategist.py` opponent is competent (~greedy strength) but **MCTS saturates it 12–0**, so it can't measure improvements above current strength either. **The only reliable judge of the human-exploitable weakness is a human playtest.**
