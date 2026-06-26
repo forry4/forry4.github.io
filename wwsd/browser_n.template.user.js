@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.8.2
+// @version      0.8.3
 // @description  Runs Splendor variant N (the learned-leaf AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows N's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -398,6 +398,8 @@
       gold: [0.334, 0.250], white: [0.334, 0.357], blue: [0.335, 0.455], green: [0.334, 0.552], red: [0.335, 0.656], black: [0.336, 0.756],
     },
     discardReturn: [0.389, 0.847],
+    // The 3 board noble slots (left→right) — clicked to resolve a 2+ noble choice after a buy.
+    nobles: [[0.618, 0.198], [0.720, 0.198], [0.822, 0.195]],
   };
   function cardSlotFrac(slot) { return UI.cardFrac[slot]; }   // engine board slot → exact canvas fraction
   const _gpause = () => sleep(CONFIG.STEP_MS + Math.floor(Math.random() * 160));   // jittered gap between clicks
@@ -458,6 +460,12 @@
     await sleep(CONFIG.OPEN_MS);
     synthClickCanvas(...UI.buyReserved[ri]);
     console.log('[WWSD] uiBuyReserved index', ri, 'seat', seat || 0);
+  }
+  // Claim a noble (only when a buy made you eligible for 2+): click each board noble slot; the
+  // eligible one claims and resolves the choice, so the other clicks become harmless no-ops.
+  async function uiClaimNoble() {
+    for (const p of UI.nobles) { synthClickCanvas(...p); await _gpause(); }
+    console.log('[WWSD] uiClaimNoble: clicked all noble slots');
   }
   // Pass: click Pass → confirm modal → confirm.
   async function uiPass() {
@@ -557,9 +565,11 @@
       await sleep(1600);
       const af = findMyActiveGame();
       const s2 = af ? ((af.game.data && af.game.data.state) || {}) : {};
-      const committed = !af || s2.currentPlayerIndex !== af.seat ||
-        (s2.currentJob && s2.currentJob !== CONFIG.REGULAR_JOB) || turnKey(af.game) !== key;
-      if (committed) { lastKey = key; _retries = {}; }
+      const subDecision = af && s2.currentPlayerIndex === af.seat && s2.currentJob && s2.currentJob !== CONFIG.REGULAR_JOB;
+      const wasBuy = r.action.kind === 'buy_board' || r.action.kind === 'buy_reserved';
+      const committed = !af || s2.currentPlayerIndex !== af.seat || subDecision || turnKey(af.game) !== key;
+      if (subDecision && wasBuy) { setStatus('claiming noble…'); await uiClaimNoble(); lastKey = key; _retries = {}; }
+      else if (committed) { lastKey = key; _retries = {}; }
       else {
         _retries[key] = (_retries[key] || 0) + 1;
         synthClickCanvas(...UI.cardCancel); await sleep(250); synthClickCanvas(...UI.takeCancel);
@@ -626,7 +636,7 @@
     buildPanel();
     loadWasm().then(() => setStatus('ready')).catch(e => setStatus('WASM failed: ' + e.message + ' (CSP?)'));
     setInterval(tick, CONFIG.POLL_MS);
-    window.WWSD_N = { analyzePosition, findMyActiveGame, listMethods, toggleRecord, toggleDomRecord, synthClickCanvas, synthHoldCanvas, boardCanvas, uiTakeGems, uiBuyBoard, uiReserveBoard, uiReserveDeck, uiBuyReserved, uiPass, uiDiscard, playMove, cardSlotFrac, UI, toDump, CONFIG };
+    window.WWSD_N = { analyzePosition, findMyActiveGame, listMethods, toggleRecord, toggleDomRecord, synthClickCanvas, synthHoldCanvas, boardCanvas, uiTakeGems, uiBuyBoard, uiReserveBoard, uiReserveDeck, uiBuyReserved, uiPass, uiDiscard, uiClaimNoble, playMove, cardSlotFrac, UI, toDump, CONFIG };
     console.log('[WWSD] browser-N loaded. window.WWSD_N available.');
   }
   boot();
