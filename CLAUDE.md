@@ -1556,24 +1556,38 @@ website variant **"S"**.
     **Gold weighting is NOT supported either** — controlling for reserves, gold advances you LESS per token than
     a colored gem (coef −0.20 vs −0.41); its raw effect was just reserve-correlation. **Keep `RESERVE_TURN_ADJ=0`.**
     Net lesson: R² gain ≠ strength; the turns horizon is not a strength lever for S (3 independent washes).
-  - **Net retrain / learnable-leaf path — EXHAUSTED, beats nothing (DO NOT relitigate).** A pre-retrain
-    derisking sweep (offline scripts: `distill_features.py`/`distill_fit.py`/`leaf_ab.py`, `bootstrap_harvest.py`/
-    `bootstrap_train.py`/`net_vs_s.py`, `policy_arch_test.py`) tested every lever a learned net could give S.
-    **Six converging negatives:** (a) **leaf-swap** — an enriched ridge leaf distilled toward V_search (held-out
-    AUC 0.718 vs the static leaf's 0.670) made S only **0.534** vs frozen-S (n.s.), panel wash → a sharper static
-    leaf does NOT convert through search. (b) **base-feature bootstrap** — a net distilled from S (value+policy)
-    scored **0.042** vs S (near-uniform policy CE 2.67). (c) **enriched bootstrap** — value sharp (MSE 0.027),
-    policy lifted to 0.52 top-1 but still **0.315** vs S. (d) **structured/per-card policy head** — 0.554 top-1 ≈
-    flat 0.535, both ≪ the H3 prior's **0.86**. The wall is NOT features or architecture: **S's search move ≈
-    H3's greedy move 86%, and predicting it essentially requires recomputing H3** — any net is a lossy
-    approximation (~0.55). So the best static policy IS the H3 prior, which **S already uses**; "H3 prior + net
-    value" just rebuilds ≈ S. Combined with "better value doesn't convert," **no net configuration beats S.**
-    The only untested path is self-play discovering a >H3 policy from the 0.315 enriched bootstrap, but the net
-    represents policies at ~0.55 fidelity and base-feature self-play already capped sub-S (variant Z) → low odds,
-    not pursued. **Conclusion: S is at the ceiling of the heuristic+search approach; the learnable-net path can't
-    surpass it.** (Reusable byproduct kept on main: `league.py`/`train_az.py` now accept **`S` as a league/gate
-    opponent** via `--heur-variants S` + `--opp-s-sims`; `vsearch.LEAF_MODE`/`net.SpenderNet(in_features=)` are
-    byte-identical-default. `*cache*.npz`/`leaf_model.npz`/`checkpoints_bootstrap*` are gitignored scratch.)
+  - **Net retrain / learnable-leaf path — OPEN, NOT exhausted (prior results are INCONCLUSIVE, not a
+    ceiling — reclassified 2026-06-25).** Earlier this was written up as "EXHAUSTED, beats nothing"; that
+    over-read the evidence. A pre-retrain derisking sweep (offline scripts: `distill_features.py`/
+    `distill_fit.py`/`leaf_ab.py`, `bootstrap_harvest.py`/`bootstrap_train.py`/`net_vs_s.py`,
+    `policy_arch_test.py`) produced real measurements — kept here for reference — but **every one was either
+    ANCHORED to S/H3 (distill / imitate) or a flat-feature/small/short self-play run, so none of them tests
+    the actual question "can a net EXCEED S."** The data: (a) **leaf-swap** — an enriched ridge leaf distilled
+    toward V_search (held-out AUC 0.718 vs static 0.670) made S only **0.534** vs frozen-S (n.s.) → a sharper
+    *static* leaf doesn't convert through search. (b) **base-feature bootstrap** (trained to *imitate* S) —
+    **0.042** vs S. (c) **enriched bootstrap** (imitate S) — value sharp (MSE 0.027), policy 0.52 top-1,
+    **0.315** vs S. (d) **structured/per-card policy head** trained to *predict H3* — 0.554 top-1 ≈ flat 0.535,
+    ≪ H3's **0.86**. **Read correctly, (a)-(d) only show that IMITATING S/H3 rebuilds ≈S — which is true by
+    construction (a student capped at its teacher) and says NOTHING about a net trained to win.** The framing
+    "no net configuration beats S / S is at the ceiling" does not follow from these and is RETRACTED.
+    - **Two reasons the negatives are inconclusive, not a wall:** (1) the **decisive experiment was never run** —
+      UN-ANCHORED self-play discovering a >H3 policy; it was deprioritized "low odds, not pursued" *because
+      Python-slow self-play made it infeasible* — the exact blocker the Rust rewrite removed. (2) The
+      self-play runs that COULD exceed (variant Z, the curriculum runs) used flat/lossy features + a tiny
+      (~600k) MLP and **may simply be UNDERTRAINED** — too few iterations/games to converge, not a proven cap
+      (user's point, 2026-06-25: a sub-S result after limited iterations is just as consistent with
+      undertraining as with a ceiling).
+    - **Fresh evidence it's headroom, not a wall (the #3 premise test, 2026-06-25):** early-game outcomes are
+      ~**0.54**-predictable from a static snapshot for *everyone* (v_state, linear, AND a nonlinear MLP on 95
+      enriched features). A learned leaf's gain is all mid/late (search-redundant), which explains the
+      calibrated-leaf wash — but it also means **S plays the decisive early phase on a coin-flip static eval**,
+      an unevaluated phase no heuristic has touched. That's located headroom, not a ceiling.
+    - **So this path is OPEN.** The real test = **un-anchored + enriched features + relational/attention net +
+      Rust-scale volume + ENOUGH iterations**, with explicit kill-criteria to bound the effort. Full scope:
+      `.claude-plans/az-retrain-rust-scale.md`. (Reusable byproduct on main: `league.py`/`train_az.py` accept
+      **`S` as a league/gate opponent** via `--heur-variants S` + `--opp-s-sims`; `vsearch.LEAF_MODE`/
+      `net.SpenderNet(in_features=)` byte-identical-default. `*cache*.npz`/`leaf_model.npz`/
+      `checkpoints_bootstrap*` are gitignored scratch.)
 - **21-point "Long" mode — LIVE + specialized.** Per-game `win_points` (default 15) is wired through the
   engine, production rules (`main._win_points`), and the AI stack (v_state convex zone, `victory_closeness`,
   heuristic3 win-checks all read `s.win_points`); the lobby has a **Classic 15 / Long 21** toggle threading
