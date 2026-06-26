@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.8.0
+// @version      0.8.1
 // @description  Runs Splendor variant N (the learned-leaf AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows N's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -28,7 +28,7 @@
     SPEED:      'fast', // auto-created game timer: 'fast' | 'normal' | 'slow'
     TARGET:     '15',   // auto-created game target score: '15' | '21'
     POLL_MS:    1500,
-    OPEN_MS:    700,    // wait after a click that OPENS a modal, before clicking inside it (site animation)
+    OPEN_MS:    900,    // wait after a click that OPENS a modal, before clicking inside it (site animation)
     STEP_MS:    420,    // base gap between in-modal clicks (a little jitter is added) — raise if the site lags
     HOLD_MS:    1600,   // press-and-hold duration for the Reserve button — raise if a reserve doesn't register
     MIN_DELAY_MS: 2000, // autoplay pacing: each turn takes a RANDOM MIN..MAX ms total (compute counts toward it),
@@ -909,7 +909,7 @@
   // ─────────────────────────────────────────────────────────────────────────
   // The loop
   // ─────────────────────────────────────────────────────────────────────────
-  let lastKey = null, busy = false;
+  let lastKey = null, busy = false, _retries = {};
   // A key that CHANGES on every move. spendee's state has no reliable ply counter, so we hash the
   // parts of `data` that change when anyone moves (each player's card counts + chips + the bank) plus
   // whose turn it is. Without this the key was constant across your turns (only currentPlayerIndex,
@@ -943,15 +943,27 @@
       const t0 = Date.now();
       const r = await analyzePosition(g, seat);
       renderResult(r);
-      lastKey = key;
-      if (CONFIG.AUTO_PLAY) {
-        // human-like pacing: make the whole turn take a RANDOM 2-4s. The capped search (~2-3s) counts
-        // toward it, so a fast result waits out the remainder rather than slamming the move instantly.
-        const target = CONFIG.MIN_DELAY_MS + Math.random() * (CONFIG.MAX_DELAY_MS - CONFIG.MIN_DELAY_MS);
-        const wait = target - (Date.now() - t0);
-        if (wait > 0) { setStatus('playing in ' + (wait / 1000).toFixed(1) + 's…'); await sleep(wait); }
-        await playMove(r.action, r.dump);          // execute via the canvas UI (synthetic clicks)
-        setStatus('played: ' + r.recommendation);
+      if (!CONFIG.AUTO_PLAY) { lastKey = key; return; }
+      // human-like pacing: make the whole turn take a RANDOM 2-4s. The capped search (~2-3s) counts
+      // toward it, so a fast result waits out the remainder rather than slamming the move instantly.
+      const target = CONFIG.MIN_DELAY_MS + Math.random() * (CONFIG.MAX_DELAY_MS - CONFIG.MIN_DELAY_MS);
+      const wait = target - (Date.now() - t0);
+      if (wait > 0) { setStatus('playing in ' + (wait / 1000).toFixed(1) + 's…'); await sleep(wait); }
+      await playMove(r.action, r.dump);            // execute via the canvas UI (synthetic clicks)
+      setStatus('played: ' + r.recommendation);
+      // Verify the move COMMITTED. If a click missed, the turn won't advance and a modal is left open →
+      // close any stray modal and retry (capped), instead of hard-freezing.
+      await sleep(1600);
+      const af = findMyActiveGame();
+      const s2 = af ? ((af.game.data && af.game.data.state) || {}) : {};
+      const committed = !af || s2.currentPlayerIndex !== af.seat ||
+        (s2.currentJob && s2.currentJob !== CONFIG.REGULAR_JOB) || turnKey(af.game) !== key;
+      if (committed) { lastKey = key; _retries = {}; }
+      else {
+        _retries[key] = (_retries[key] || 0) + 1;
+        synthClickCanvas(...UI.cardCancel); await sleep(250); synthClickCanvas(...UI.takeCancel);
+        if (_retries[key] <= 2) { lastKey = null; setStatus('move missed — retrying (' + _retries[key] + ')…'); }
+        else { lastKey = key; setStatus('autoplay stuck — finish this move manually; it resumes after'); }
       }
     } catch (e) {
       const wired = String(e && e.message).indexOf(ADAPTER_TODO) < 0;
