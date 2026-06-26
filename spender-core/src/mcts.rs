@@ -151,4 +151,11 @@ impl Search {
     pub fn root_visits(&self) -> &[i32] {
         &self.nodes[0].n
     }
+
+    /// Root per-edge WIN sums (W[a]); paired with `root_visits` gives the searched position value
+    /// (sum W / sum N) and per-move Q (W[a]/N[a]) for the WWSD eval overlay. From the root's
+    /// to_play (= side-to-move) perspective, in [-1, 1].
+    pub fn root_wins(&self) -> &[f64] {
+        &self.nodes[0].w
+    }
 }

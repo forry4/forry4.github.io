@@ -231,6 +231,43 @@ pub fn root_visits_until_leaf<F: FnMut(usize) -> bool>(
     search.root_visits().to_vec()
 }
 
+/// Like `root_visits_until_leaf` but ALSO returns the root per-edge WIN sums, so a caller can surface
+/// the searched position value (sum W / sum N) and per-move Q (W[a]/N[a]). Used by the WWSD browser
+/// overlay's eval display; the play path uses the visits-only variant. Degenerate (no-search) phases
+/// return one-hot visits and all-zero wins.
+pub fn root_nw_until_leaf<F: FnMut(usize) -> bool>(
+    s: &State,
+    seat: usize,
+    rng: &mut Rng,
+    mut keep_going: F,
+    leaf_value: &dyn Fn(&State, usize) -> f64,
+) -> (Vec<i32>, Vec<f64>) {
+    let legal = engine::legal_actions(s);
+    if legal.is_empty() {
+        let mut n = vec![0i32; N_ACTIONS];
+        n[A_PASS] = 1;
+        return (n, vec![0.0; N_ACTIONS]);
+    }
+    if s.phase != PLAY || legal.len() == 1 {
+        let mut n = vec![0i32; N_ACTIONS];
+        n[heuristic::choose_action(s, seat)] = 1;
+        return (n, vec![0.0; N_ACTIONS]);
+    }
+    let mut search = Search::new(s.clone(), C_PUCT);
+    let eval = |ls: &State, lseat: usize, ll: &[usize]| -> (Vec<f64>, f64) {
+        let val = Valuation::new(ls, W_TEMPO, W_GEM, W_GOLD);
+        let probs = policy_prior(&val, lseat, ll);
+        let value = leaf_value(ls, lseat);
+        (probs, value)
+    };
+    let mut i = 0usize;
+    while keep_going(i) {
+        search.sim(rng, &eval);
+        i += 1;
+    }
+    (search.root_visits().to_vec(), search.root_wins().to_vec())
+}
+
 /// Return a legal engine action for `seat`, running simulations while `keep_going(n_done)` is true.
 /// Lets the caller use a sims count OR a wall-clock budget. = argmax (first-max over legal) of the
 /// root visits.

@@ -162,6 +162,49 @@ pub fn search_visits_n_timed(state_json: &str, seat: usize, budget_ms: f64, max_
     )
 }
 
+#[derive(serde::Serialize)]
+struct NFull {
+    visits: Vec<i32>,
+    value: f64,
+    q: Vec<Option<f64>>,
+}
+
+/// Variant N search returning visits + the searched POSITION VALUE + per-edge Q — for the WWSD
+/// overlay's eval display (the visits-only `search_visits_n_timed` is enough to PICK a move but
+/// carries no eval). JSON: `{"visits":[..70..],"value":<f64 in [-1,1], side-to-move>,"q":[..70..]}`
+/// where `q[a]` is null for an unvisited action. `{"error":...}` on a parse failure. Single-threaded
+/// (no worker aggregation): the friend's CPU runs the whole budget on the userscript's main thread.
+#[wasm_bindgen]
+pub fn search_n_full_timed(state_json: &str, seat: usize, budget_ms: f64, max_sims: usize, seed: u64) -> String {
+    let dump: Dump = match serde_json::from_str(state_json) {
+        Ok(d) => d,
+        Err(_) => return "{\"error\":\"parse\"}".to_string(),
+    };
+    let s = dump.into_state();
+    let net = build_n_net();
+    let leaf = |st: &State, sd: usize| -> f64 {
+        let raw: Vec<f32> = crate::feats::features(st, sd).iter().map(|&x| x as f32).collect();
+        net.forward_raw(&raw) as f64
+    };
+    let mut rng = Rng::new(seed);
+    let start = js_sys::Date::now();
+    let cap = if max_sims == 0 { usize::MAX } else { max_sims };
+    let (n, w) = vsearch::root_nw_until_leaf(
+        &s,
+        seat,
+        &mut rng,
+        |i| i < cap && (i % 64 != 0 || (js_sys::Date::now() - start) < budget_ms),
+        &leaf,
+    );
+    let tot: i32 = n.iter().sum();
+    let value = if tot > 0 { w.iter().sum::<f64>() / tot as f64 } else { 0.0 };
+    let q: Vec<Option<f64>> = (0..n.len())
+        .map(|a| if n[a] > 0 { Some(w[a] / n[a] as f64) } else { None })
+        .collect();
+    serde_json::to_string(&NFull { visits: n, value, q })
+        .unwrap_or_else(|_| "{\"error\":\"ser\"}".to_string())
+}
+
 /// ENDGAME REFINEMENT (#1): given the aggregate PUCT action (argmax of the summed worker visits), run
 /// the exact endgame solver on the TRUE state and return the (possibly overridden) move as dict-move
 /// JSON. Runs ONCE per decision on the main thread (via one worker), after visit aggregation — cheap,
