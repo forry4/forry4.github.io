@@ -3206,7 +3206,7 @@ def _build_review_snapshots(game: dict, viewer_pid: str, ai_variant: str | None 
                 "move": replay._describe(primary) if primary else None,
                 "game": _review_view(gsnap, viewer_pid),
             }
-            if ai_variant in ("H", "H2", "H3", "S") and gsnap.get("phase") == "playing" \
+            if ai_variant in ("H", "H2", "H3", "S", "N") and gsnap.get("phase") == "playing" \
                     and gsnap.get("ai_player") and mover in (gsnap.get("order") or ()):
                 ov = _compute_overlay(gsnap, mover, ai_variant)   # static only (no per-snapshot search)
                 if ov:
