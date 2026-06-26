@@ -114,6 +114,26 @@ export function endgame_refine_move(state_json, seat, puct_action, seed) {
 }
 
 /**
+ * Variant N root-parallel search: identical to `search_visits_timed` but uses the LEARNED value as
+ * the MCTS leaf (+ the H3 prior). The net is parsed once per call (once per move per worker —
+ * negligible vs the thousands of sims it then runs). Same SUM-then-argmax aggregation as S.
+ * @param {string} state_json
+ * @param {number} seat
+ * @param {number} budget_ms
+ * @param {number} max_sims
+ * @param {bigint} seed
+ * @returns {Int32Array}
+ */
+export function search_visits_n_timed(state_json, seat, budget_ms, max_sims, seed) {
+    const ptr0 = passStringToWasm0(state_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.search_visits_n_timed(ptr0, len0, seat, budget_ms, max_sims, seed);
+    var v2 = getArrayI32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v2;
+}
+
+/**
  * ROOT-PARALLEL piece: run a determinized search bounded by `budget_ms` OR `max_sims` (whichever
  * comes first) and return the ROOT VISIT COUNTS (length N_ACTIONS=70). Each worker calls this with a
  * distinct seed; the main thread SUMS the vectors across workers and argmaxes — standard root

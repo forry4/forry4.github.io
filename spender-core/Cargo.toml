@@ -27,6 +27,18 @@ bridge = ["dep:serde", "dep:serde_json"]
 name = "move_server"
 required-features = ["bridge"]
 
+[[bin]]
+name = "rung1"
+required-features = ["bridge"]
+
+[[bin]]
+name = "rung2"
+required-features = ["bridge"]
+
+[[bin]]
+name = "harvest_n"
+required-features = ["bridge"]
+
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

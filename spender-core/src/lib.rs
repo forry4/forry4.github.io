@@ -10,6 +10,7 @@
 pub mod actions;
 pub mod cards;
 pub mod endgame;
+pub mod feats;
 pub mod engine;
 pub mod heuristic;
 pub mod mcts;
@@ -17,6 +18,7 @@ pub mod rng;
 pub mod turns;
 mod turns_table;
 pub mod v_state;
+pub mod valuenet;
 pub mod valuation;
 pub mod vsearch;
 

@@ -120,6 +120,48 @@ pub fn choose_action_refined(
     crate::endgame::refine(s, seat, puct, eg_rng)
 }
 
+/// Like `choose_action` but with a CUSTOM leaf VALUE function (keeps the H3 policy prior + the
+/// determinized PUCT). For the value-first ladder rung 2: swap v_state for a learned value as the MCTS
+/// leaf and test whether it converts through search (where 1-ply's fine-grained-noise penalty washes
+/// out). `leaf_value(state, seat)` returns the value in [-1,1] from `seat`'s perspective.
+pub fn choose_action_leaf(
+    s: &State,
+    seat: usize,
+    sims: usize,
+    rng: &mut Rng,
+    leaf_value: &dyn Fn(&State, usize) -> f64,
+) -> usize {
+    let legal = engine::legal_actions(s);
+    if legal.is_empty() {
+        return A_PASS;
+    }
+    if s.phase != PLAY || legal.len() == 1 {
+        return heuristic::choose_action(s, seat);
+    }
+    let mut search = Search::new(s.clone(), C_PUCT);
+    let eval = |ls: &State, lseat: usize, ll: &[usize]| -> (Vec<f64>, f64) {
+        let val = Valuation::new(ls, W_TEMPO, W_GEM, W_GOLD);
+        let probs = policy_prior(&val, lseat, ll);
+        let value = leaf_value(ls, lseat);
+        (probs, value)
+    };
+    let mut n = 0usize;
+    while n < sims {
+        search.sim(rng, &eval);
+        n += 1;
+    }
+    let visits = search.root_visits();
+    let mut best = legal[0];
+    let mut bv = visits[legal[0]];
+    for &a in &legal[1..] {
+        if visits[a] > bv {
+            bv = visits[a];
+            best = a;
+        }
+    }
+    best
+}
+
 /// Root visit counts (length N_ACTIONS) after running simulations while `keep_going(n_done)` is true.
 /// PLAY decisions are searched (determinized PUCT, V leaf); DISCARD/NOBLE and single-legal positions
 /// one-hot the greedy-H3 pick (so argmax/aggregation still selects it). This is the unit ROOT-PARALLEL
@@ -145,6 +187,40 @@ pub fn root_visits_until<F: FnMut(usize) -> bool>(
         let val = Valuation::new(ls, W_TEMPO, W_GEM, W_GOLD);
         let value = v_state::value_with(&val, lseat);
         let probs = policy_prior(&val, lseat, ll);
+        (probs, value)
+    };
+    let mut n = 0usize;
+    while keep_going(n) {
+        search.sim(rng, &eval);
+        n += 1;
+    }
+    search.root_visits().to_vec()
+}
+
+/// Root visit counts with a CUSTOM leaf VALUE function (keeps the H3 prior) — the root-parallel
+/// serving unit for variant N (learned value leaf). Mirrors `root_visits_until` but swaps the leaf.
+pub fn root_visits_until_leaf<F: FnMut(usize) -> bool>(
+    s: &State,
+    seat: usize,
+    rng: &mut Rng,
+    mut keep_going: F,
+    leaf_value: &dyn Fn(&State, usize) -> f64,
+) -> Vec<i32> {
+    let mut out = vec![0i32; N_ACTIONS];
+    let legal = engine::legal_actions(s);
+    if legal.is_empty() {
+        out[A_PASS] = 1;
+        return out;
+    }
+    if s.phase != PLAY || legal.len() == 1 {
+        out[heuristic::choose_action(s, seat)] = 1;
+        return out;
+    }
+    let mut search = Search::new(s.clone(), C_PUCT);
+    let eval = |ls: &State, lseat: usize, ll: &[usize]| -> (Vec<f64>, f64) {
+        let val = Valuation::new(ls, W_TEMPO, W_GEM, W_GOLD);
+        let probs = policy_prior(&val, lseat, ll);
+        let value = leaf_value(ls, lseat);
         (probs, value)
     };
     let mut n = 0usize;

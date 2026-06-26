@@ -114,6 +114,54 @@ pub fn search_visits_timed(state_json: &str, seat: usize, budget_ms: f64, max_si
     })
 }
 
+// ─── Variant N: learned value leaf (embedded weights) ─────────────────────────
+#[derive(Deserialize)]
+struct NModel {
+    dims: Vec<usize>,
+    w: Vec<Vec<f32>>,
+    b: Vec<Vec<f32>>,
+    mu: Vec<f32>,
+    sd: Vec<f32>,
+}
+/// N's value net, embedded at build time (the verified learned leaf).
+static N_MODEL_JSON: &str = include_str!("n_model.json");
+
+fn build_n_net() -> crate::valuenet::StandardizedMlp {
+    let m: NModel = serde_json::from_str(N_MODEL_JSON).expect("embedded n_model.json");
+    crate::valuenet::StandardizedMlp::new(
+        crate::valuenet::Mlp::from_parts(m.dims, m.w, m.b),
+        m.mu,
+        m.sd,
+    )
+}
+
+/// Variant N root-parallel search: identical to `search_visits_timed` but uses the LEARNED value as
+/// the MCTS leaf (+ the H3 prior). The net is parsed once per call (once per move per worker —
+/// negligible vs the thousands of sims it then runs). Same SUM-then-argmax aggregation as S.
+#[wasm_bindgen]
+pub fn search_visits_n_timed(state_json: &str, seat: usize, budget_ms: f64, max_sims: usize, seed: u64) -> Vec<i32> {
+    let dump: Dump = match serde_json::from_str(state_json) {
+        Ok(d) => d,
+        Err(_) => return Vec::new(),
+    };
+    let s = dump.into_state();
+    let net = build_n_net();
+    let leaf = |st: &State, sd: usize| -> f64 {
+        let raw: Vec<f32> = crate::feats::features(st, sd).iter().map(|&x| x as f32).collect();
+        net.forward_raw(&raw) as f64
+    };
+    let mut rng = Rng::new(seed);
+    let start = js_sys::Date::now();
+    let cap = if max_sims == 0 { usize::MAX } else { max_sims };
+    vsearch::root_visits_until_leaf(
+        &s,
+        seat,
+        &mut rng,
+        |n| n < cap && (n % 64 != 0 || (js_sys::Date::now() - start) < budget_ms),
+        &leaf,
+    )
+}
+
 /// ENDGAME REFINEMENT (#1): given the aggregate PUCT action (argmax of the summed worker visits), run
 /// the exact endgame solver on the TRUE state and return the (possibly overridden) move as dict-move
 /// JSON. Runs ONCE per decision on the main thread (via one worker), after visit aggregation — cheap,
