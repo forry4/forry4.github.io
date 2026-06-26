@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.8.3
+// @version      0.8.4
 // @description  Runs Splendor variant N (the learned-leaf AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows N's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -892,8 +892,19 @@
     return out;
   }
 
+  // A reserve grants a gold; if you were AT the 10-cap and the bank has gold, that overfills to 11 →
+  // spendee shows the normal discard modal. Return one gem (keeps the new gold; drops a surplus colour).
+  async function reserveDiscard(dump, seat) {
+    const tok = dump.tokens[seat];
+    if (tok.reduce((a, b) => a + b, 0) === 10 && (dump.bank[5] || 0) > 0) {
+      await sleep(CONFIG.OPEN_MS + 350);
+      const post = tok.slice(); post[5] = (post[5] || 0) + 1;     // +1 gold from the reserve
+      await uiDiscard(chooseDiscards(post, 1));
+    }
+  }
+
   // Master dispatcher: execute N's structured action via the canvas UI. `dump` is the friend-space
-  // dump (for the seat's tokens, to pre-compute any forced discard after an over-10 take).
+  // dump (for the seat's tokens, to pre-compute any forced discard after an over-10 take/reserve).
   async function playMove(action, dump) {
     const seat = dump.turn;
     switch (action.kind) {
@@ -908,8 +919,8 @@
       }
       case 'buy_board': return uiBuyBoard(action.slot);
       case 'buy_reserved': return uiBuyReserved(action.reserved_index, seat);
-      case 'reserve_board': return uiReserveBoard(action.slot);
-      case 'reserve_deck': return uiReserveDeck(action.level);
+      case 'reserve_board': await uiReserveBoard(action.slot); await reserveDiscard(dump, seat); return;
+      case 'reserve_deck': await uiReserveDeck(action.level); await reserveDiscard(dump, seat); return;
       case 'pass': return uiPass();
       default: throw new Error('playMove: unhandled action kind ' + action.kind);
     }
