@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.7.0
+// @version      0.7.1
 // @description  Runs Splendor variant N (the learned-leaf AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows N's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -772,22 +772,19 @@
     },
     takePick: [0.392, 0.823],    // "pick" button that finalizes the take
     takeCancel: [0.464, 0.112],  // ✕ on the select-chips modal
-    // Face-up card grid corners (top row = L3, bottom = L1; cols left→right). Inner 8 interpolated.
-    cardTL: [0.581, 0.375], cardTR: [0.939, 0.358], cardBL: [0.578, 0.873], cardBR: [0.935, 0.886],
+    // Exact face-up card positions, indexed by engine slot (0-3 L1 bottom, 4-7 L2 mid, 8-11 L3 top;
+    // col = slot%4 left→right). Recorded directly (rows are slightly tilted, so exact beats interpolation).
+    cardFrac: [
+      [0.582, 0.865], [0.696, 0.884], [0.805, 0.898], [0.932, 0.886],   // L1  (slots 0-3)
+      [0.587, 0.618], [0.697, 0.619], [0.815, 0.627], [0.925, 0.629],   // L2  (slots 4-7)
+      [0.581, 0.379], [0.696, 0.381], [0.817, 0.372], [0.936, 0.368],   // L3  (slots 8-11)
+    ],
     buyBtn: [0.867, 0.450],      // "Buy" in the card modal (plain click)
     reserveBtn: [0.867, 0.829],  // "Reserve" in the card modal (PRESS-AND-HOLD)
     cardCancel: [0.964, 0.286],  // ✕ on the card modal
     // (deck-pile reserve / reserved-card buy / discard coords get added once recorded)
   };
-  // Engine board slot (0-3 L1, 4-7 L2, 8-11 L3; col = slot%4) → canvas fraction, bilinear over corners.
-  // Visual row: L3 top, L1 bottom, so visual_row_from_top = 2 - (slot/4).
-  function cardSlotFrac(slot) {
-    const lvl = Math.floor(slot / 4), col = slot % 4, vrow = 2 - lvl;
-    const u = col / 3, v = vrow / 2, lerp = (a, b, t) => a + (b - a) * t;
-    const tx = lerp(UI.cardTL[0], UI.cardTR[0], u), ty = lerp(UI.cardTL[1], UI.cardTR[1], u);
-    const bx = lerp(UI.cardBL[0], UI.cardBR[0], u), by = lerp(UI.cardBL[1], UI.cardBR[1], u);
-    return [lerp(tx, bx, v), lerp(ty, by, v)];
-  }
+  function cardSlotFrac(slot) { return UI.cardFrac[slot]; }   // engine board slot → exact canvas fraction
   const _gpause = () => sleep(CONFIG.STEP_MS + Math.floor(Math.random() * 160));   // jittered gap between clicks
 
   // Take gems: open the modal, click each wanted colour in the modal, confirm. `colors` = engine
