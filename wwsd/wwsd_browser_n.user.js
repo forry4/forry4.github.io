@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.7.2
+// @version      0.7.3
 // @description  Runs Splendor variant N (the learned-leaf AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows N's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -789,7 +789,10 @@
     reservePile: [0.020, 0.241],
     buyReserved: [[0.522, 0.477], [0.524, 0.702], [0.522, 0.925]],
     reservedCancel: [0.551, 0.061],
-    // (discard / pass coords get added once recorded)
+    // Pass: click the green Pass button → confirm modal → confirm.
+    passBtn: [0.323, 0.196], passConfirm: [0.741, 0.605],
+    // Discard modal (over 10 tokens) — same "select chips" layout + gold; "return" finalizes.
+    // discardGem (incl. gold) + discardReturn filled once recorded.
   };
   function cardSlotFrac(slot) { return UI.cardFrac[slot]; }   // engine board slot → exact canvas fraction
   const _gpause = () => sleep(CONFIG.STEP_MS + Math.floor(Math.random() * 160));   // jittered gap between clicks
@@ -850,6 +853,13 @@
     await sleep(CONFIG.OPEN_MS);
     synthClickCanvas(...UI.buyReserved[ri]);
     console.log('[WWSD] uiBuyReserved index', ri);
+  }
+  // Pass: click Pass → confirm modal → confirm.
+  async function uiPass() {
+    synthClickCanvas(...UI.passBtn);
+    await sleep(CONFIG.OPEN_MS);
+    synthClickCanvas(...UI.passConfirm);
+    console.log('[WWSD] uiPass');
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -959,7 +969,7 @@
     buildPanel();
     loadWasm().then(() => setStatus('ready')).catch(e => setStatus('WASM failed: ' + e.message + ' (CSP?)'));
     setInterval(tick, CONFIG.POLL_MS);
-    window.WWSD_N = { analyzePosition, findMyActiveGame, listMethods, toggleRecord, toggleDomRecord, synthClickCanvas, synthHoldCanvas, boardCanvas, uiTakeGems, uiBuyBoard, uiReserveBoard, uiReserveDeck, uiBuyReserved, cardSlotFrac, UI, toDump, CONFIG };
+    window.WWSD_N = { analyzePosition, findMyActiveGame, listMethods, toggleRecord, toggleDomRecord, synthClickCanvas, synthHoldCanvas, boardCanvas, uiTakeGems, uiBuyBoard, uiReserveBoard, uiReserveDeck, uiBuyReserved, uiPass, cardSlotFrac, UI, toDump, CONFIG };
     console.log('[WWSD] browser-N loaded. window.WWSD_N available.');
   }
   boot();
