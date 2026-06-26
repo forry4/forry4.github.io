@@ -250,6 +250,42 @@ pub fn search_visits_pv_timed(state_json: &str, seat: usize, budget_ms: f64, max
     )
 }
 
+/// Variant PV search returning visits + the searched POSITION VALUE + per-edge Q — the PV analog of
+/// `search_n_full_timed`, for the WWSD browser overlay's eval display (the visits-only
+/// `search_visits_pv_timed` is enough to PICK a move but carries no eval). Same `{"visits","value",
+/// "q"}` JSON shape as N. The net supplies both the leaf value and the policy prior.
+#[wasm_bindgen]
+pub fn search_pv_full_timed(state_json: &str, seat: usize, budget_ms: f64, max_sims: usize, seed: u64) -> String {
+    let dump: Dump = match serde_json::from_str(state_json) {
+        Ok(d) => d,
+        Err(_) => return "{\"error\":\"parse\"}".to_string(),
+    };
+    let s = dump.into_state();
+    let net = build_pv_net();
+    let pv = |st: &State, sd: usize| -> (f64, Vec<f64>) {
+        let raw: Vec<f32> = crate::feats::features_az(st, sd).iter().map(|&x| x as f32).collect();
+        let (v, logits) = net.forward_raw(&raw);
+        (v as f64, logits.iter().map(|&x| x as f64).collect())
+    };
+    let mut rng = Rng::new(seed);
+    let start = js_sys::Date::now();
+    let cap = if max_sims == 0 { usize::MAX } else { max_sims };
+    let (n, w) = vsearch::root_nw_until_pv(
+        &s,
+        seat,
+        &mut rng,
+        |i| i < cap && (i % 64 != 0 || (js_sys::Date::now() - start) < budget_ms),
+        &pv,
+    );
+    let tot: i32 = n.iter().sum();
+    let value = if tot > 0 { w.iter().sum::<f64>() / tot as f64 } else { 0.0 };
+    let q: Vec<Option<f64>> = (0..n.len())
+        .map(|a| if n[a] > 0 { Some(w[a] / n[a] as f64) } else { None })
+        .collect();
+    serde_json::to_string(&NFull { visits: n, value, q })
+        .unwrap_or_else(|_| "{\"error\":\"ser\"}".to_string())
+}
+
 /// ENDGAME REFINEMENT (#1): given the aggregate PUCT action (argmax of the summed worker visits), run
 /// the exact endgame solver on the TRUE state and return the (possibly overridden) move as dict-move
 /// JSON. Runs ONCE per decision on the main thread (via one worker), after visit aggregation — cheap,

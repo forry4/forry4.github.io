@@ -323,6 +323,60 @@ pub fn root_nw_until_leaf<F: FnMut(usize) -> bool>(
     (search.root_visits().to_vec(), search.root_wins().to_vec())
 }
 
+/// Like `root_visits_until_pv` (net supplies BOTH leaf value and policy prior) but ALSO returns the
+/// root per-edge WIN sums, so the WWSD browser overlay can show the searched position value
+/// (sum W / sum N) and per-move Q. DISCARD/NOBLE fall back to the H3 prior, same as the visits-only
+/// PV search. Degenerate (no-search) phases return one-hot visits and all-zero wins.
+pub fn root_nw_until_pv<F: FnMut(usize) -> bool>(
+    s: &State,
+    seat: usize,
+    rng: &mut Rng,
+    mut keep_going: F,
+    pv: &dyn Fn(&State, usize) -> (f64, Vec<f64>),
+) -> (Vec<i32>, Vec<f64>) {
+    let legal = engine::legal_actions(s);
+    if legal.is_empty() {
+        let mut n = vec![0i32; N_ACTIONS];
+        n[A_PASS] = 1;
+        return (n, vec![0.0; N_ACTIONS]);
+    }
+    if s.phase != PLAY || legal.len() == 1 {
+        let mut n = vec![0i32; N_ACTIONS];
+        n[heuristic::choose_action(s, seat)] = 1;
+        return (n, vec![0.0; N_ACTIONS]);
+    }
+    let mut search = Search::new(s.clone(), C_PUCT);
+    let eval = |ls: &State, lseat: usize, ll: &[usize]| -> (Vec<f64>, f64) {
+        let (value, logits) = pv(ls, lseat);
+        let mut probs = vec![0.0f64; N_ACTIONS];
+        if ls.phase == PLAY {
+            // legal-masked softmax of the net policy logits (mirrors `root_visits_until_pv`)
+            let mx = ll.iter().map(|&a| logits[a]).fold(f64::NEG_INFINITY, f64::max);
+            let mut tot = 0.0;
+            for &a in ll {
+                let e = (logits[a] - mx).exp();
+                probs[a] = e;
+                tot += e;
+            }
+            if tot > 0.0 {
+                for &a in ll {
+                    probs[a] /= tot;
+                }
+            }
+        } else {
+            let val = Valuation::new(ls, W_TEMPO, W_GEM, W_GOLD);
+            probs = policy_prior(&val, lseat, ll);
+        }
+        (probs, value)
+    };
+    let mut i = 0usize;
+    while keep_going(i) {
+        search.sim(rng, &eval);
+        i += 1;
+    }
+    (search.root_visits().to_vec(), search.root_wins().to_vec())
+}
+
 /// Return a legal engine action for `seat`, running simulations while `keep_going(n_done)` is true.
 /// Lets the caller use a sims count OR a wall-clock budget. = argmax (first-max over legal) of the
 /// root visits.
