@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.5.1
+// @version      0.6.0
 // @description  Runs Splendor variant N (the learned-leaf AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows N's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -759,6 +759,29 @@
     return { x, y };
   }
 
+  // ── UI click-adapter coordinates (canvas fractions, recorded on spendee) ────────────────────────
+  // Drive the canvas game by synthetic clicks. All values are fractions of the board canvas so they
+  // survive resize (assuming the engine scales proportionally). Re-record if spendee's layout changes.
+  const UI = {
+    openTake: [0.410, 0.452],    // click a board bank gem → opens the "select chips" modal
+    takeGem: {                   // gem positions INSIDE the select-chips modal (top→bottom)
+      white: [0.420, 0.278], blue: [0.422, 0.401], green: [0.422, 0.506], red: [0.423, 0.624], black: [0.419, 0.735],
+    },
+    takePick: [0.392, 0.823],    // "pick" button that finalizes the take
+    // (buy / reserve / discard / board-card / reserved-card coords get added once recorded)
+  };
+  const _gpause = () => sleep(280 + Math.floor(Math.random() * 120));   // small human-ish gap between clicks
+
+  // Take gems: open the modal, click each wanted colour in the modal, confirm. `colors` = engine
+  // colour NAMES from the structured action (e.g. ['white','green','black'] or ['red','red']).
+  async function uiTakeGems(colors) {
+    synthClickCanvas(...UI.openTake);
+    await sleep(450);                                  // let the modal open/animate
+    for (const c of colors) { synthClickCanvas(...UI.takeGem[c]); await _gpause(); }
+    synthClickCanvas(...UI.takePick);
+    console.log('[WWSD] uiTakeGems', colors, '→ pick');
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // The loop
   // ─────────────────────────────────────────────────────────────────────────
@@ -866,7 +889,7 @@
     buildPanel();
     loadWasm().then(() => setStatus('ready')).catch(e => setStatus('WASM failed: ' + e.message + ' (CSP?)'));
     setInterval(tick, CONFIG.POLL_MS);
-    window.WWSD_N = { analyzePosition, findMyActiveGame, listMethods, toggleRecord, toggleDomRecord, synthClickCanvas, boardCanvas, toDump, CONFIG };
+    window.WWSD_N = { analyzePosition, findMyActiveGame, listMethods, toggleRecord, toggleDomRecord, synthClickCanvas, boardCanvas, uiTakeGems, UI, toDump, CONFIG };
     console.log('[WWSD] browser-N loaded. window.WWSD_N available.');
   }
   boot();
