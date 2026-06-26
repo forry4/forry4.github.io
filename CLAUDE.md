@@ -579,7 +579,7 @@ or the bookmarklet's `SECS` (`?t=`) to climb toward the local strength (capped b
 or a cheap dedicated-core VPS beats the free tier. `turns_table.json` (H3-vs-H2-measured, 15-pt) feeds
 S's leaf eval → 15-pt games exact, 21-pt approximate.
 
-### Browser-N userscript — run variant N in the friend's browser via WASM (BUILT + Node-validated, NOT yet browser-tested / committed; June 2026)
+### Browser-N userscript — run variant N in the friend's browser via WASM (DEPLOYED to main June 2026; browser-CSP confirmation still pending)
 The user's directive: move WWSD's COMPUTE off Render and into the friend's browser (like the main
 Spender site's WASM AI), using the stronger learned-leaf variant **N**. This **supersedes the
 bookmarklet+Render-S path** — N > S, and a real CPU runs ~2,500+ sims/move vs Render's ~300
@@ -630,7 +630,11 @@ so it's preserved unchanged.
   + the FIRST userscript `wwsd/autoplay.user.js` were the OLD Render+S autoplay path; browser-N builds the
   structured move client-side, so both are superseded (harmless, backward-compatible). Once browser-N is
   browser-confirmed → retire the bookmarklet + `autoplay.user.js` + the `/move action` field, and
-  optionally decommission the Render service (browser-N needs no backend). **NOTHING is committed yet.**
+  optionally decommission the Render service (browser-N needs no backend). **DEPLOYED to main:** the
+  userscript+tooling+docs+`/move action` field in one commit, and `search_n_full_timed` folded into
+  main's `spender-core` as a separate ADDITIVE commit (main's spender-core was byte-identical to the
+  `0bcf0a8` base, so it applied cleanly). The eval-export source also lives on the `wwsd-wasm` worktree.
+  Only the browser-CSP confirmation + the autoplay Meteor method names remain.
 
 ---
 
