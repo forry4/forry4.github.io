@@ -637,13 +637,35 @@ so it's preserved unchanged.
   the remapped path + guard never does, and a symmetric opening evaluates ~0.00 (was a false +0.10).
   **Regenerate F2S/F2S_NOBLE/COST_F if either deck changes** (compare `wwsd_defs.json` vs
   `engine._build_tables()` by `(cost,bonus,pts,level)`).
-- **Two residual items:** (1) **Browser CSP** — instantiating WASM needs `script-src 'wasm-unsafe-eval'`;
-  only confirmable by installing on spendee (the panel shows "WASM failed (CSP?)" if blocked). The
-  bookmarklet (needs no WASM) is the fallback until confirmed. (2) **Autoplay EXECUTION** still needs
-  spendee's Meteor method names — the `SITE ADAPTER` `playAction` is a placeholder; the panel's
-  **List methods** (`Object.keys(Meteor.connection._methodHandlers)`) + **Record** (wraps
-  `Meteor.connection.apply` to log `name`+params on a manual move) discover them. The advisor overlay
-  works WITHOUT this; only move-execution needs it.
+- **Browser CSP** — instantiating WASM needs `script-src 'wasm-unsafe-eval'`; confirmed working on
+  spendee in practice (the panel shows "WASM failed (CSP?)" if ever blocked).
+- **UI AUTOPLAY — WORKING (canvas synthetic clicks; the Meteor path is DEAD). DO NOT try to revive
+  `/gameActions/insert`.** spendee's server **403s ("Access denied")** ANY programmatic Meteor insert
+  (Meteor.call, raw `_send`, even stub-bypassed) — confirmed un-bypassable; it's a server-side allow gate.
+  So autoplay drives the **real UI** instead: the whole game is ONE `<canvas>` (`div.board > canvas`), and
+  the engine **accepts synthetic events** (`isTrusted` is NOT checked — the make-or-break finding). The
+  adapter (`browser_n.template.user.js`) dispatches pointer/mouse events at **canvas-fraction coordinates**
+  (resize-tolerant; recorded via the panel's **Rec DOM** button which logs each click's `canvasFrac`):
+  - `synthClickCanvas(fx,fy)` (full pointer+mouse+click sequence) and `synthHoldCanvas(fx,fy,ms)` (press-
+    and-hold, for **Reserve** which is a hold button). All coords live in the `UI` map; `CONFIG.OPEN_MS`
+    (post-modal-open wait) / `STEP_MS` (between in-modal clicks) / `HOLD_MS` (reserve hold) tune timing.
+  - Flows (each `ui*` fn): **take** = open select-chips modal → click each gem in-modal → "pick" (+ auto
+    **discard** via the gold-topped discard column + "return" if the take overfills 10); **buy board** =
+    click card (exact 12-slot `cardFrac` table) → "Buy"; **reserve board/deck** = click card/pile → hold
+    "Reserve" (+ auto-discard if the granted gold overfills 10); **buy reserved** = click your reserve pile
+    (**seat-aware**: P1 top / P2 bottom) → click the card row in the modal (oldest at top = engine index 0);
+    **pass** = Pass → confirm; **noble choice** (2+ eligible after a buy) = click all 3 board noble slots
+    (the eligible one claims). Discard choice is a heuristic (drop most-abundant colour, keep gold).
+  - `playMove(action, dump)` dispatches N's structured action to the right flow. The autoplay loop adds
+    human pacing (2–4s) then **verifies the move committed** (turn advanced / sub-decision arose); if a
+    click missed (turn stuck, modal open) it closes the modal and retries ≤2× before asking the user to
+    finish that one move manually — so a single misfire never hard-freezes.
+  - **GOTCHA — record & play at the SAME window size.** Coords are canvas FRACTIONS; if the game
+    pillarboxes, right-edge targets (the **Buy** button) drift when the canvas aspect changes. Recording at
+    a 1335px-wide canvas then playing maximized made Buy miss. Play maximized, record maximized.
+  - Toggle from the panel: **Autoplay on/off** (default off; turning on plays the current turn
+    immediately). `AUTO_PLAY=false` default = advisor-only. `WWSD_N.*` exposes every `ui*`/`synth*` fn for
+    console testing.
 - **Now-vestigial / superseded:** the `/move` `action` field added to `analyze.py` (`_structured_move`)
   + the FIRST userscript `wwsd/autoplay.user.js` were the OLD Render+S autoplay path; browser-N builds the
   structured move client-side, so both are superseded (harmless, backward-compatible). Once browser-N is
