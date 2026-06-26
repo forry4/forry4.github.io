@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.8.4
+// @version      0.8.5
 // @description  Runs Splendor variant N (the learned-leaf AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows N's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -28,8 +28,11 @@
     SPEED:      'fast', // auto-created game timer: 'fast' | 'normal' | 'slow'
     TARGET:     '15',   // auto-created game target score: '15' | '21'
     POLL_MS:    1500,
-    OPEN_MS:    900,    // wait after a click that OPENS a modal, before clicking inside it (site animation)
-    STEP_MS:    420,    // base gap between in-modal clicks (a little jitter is added) — raise if the site lags
+    SETTLE_MS:  750,    // wait at the START of our turn (after the opponent's move) before the first click,
+                        //   so the board has finished animating/re-rendering before we touch it
+    OPEN_MS:    1200,   // wait after a click that OPENS a modal, before clicking inside it (site animation)
+    TAKE_OPEN_MS: 1500, // the take-gems modal specifically is slow to become interactive — give it extra
+    STEP_MS:    480,    // base gap between in-modal clicks (a little jitter is added) — raise if the site lags
     HOLD_MS:    1600,   // press-and-hold duration for the Reserve button — raise if a reserve doesn't register
     MIN_DELAY_MS: 2000, // autoplay pacing: each turn takes a RANDOM MIN..MAX ms total (compute counts toward it),
     MAX_DELAY_MS: 4000, // so it never plays instantly — looks like a person thinking 2-4s
@@ -408,7 +411,7 @@
   // colour NAMES from the structured action (e.g. ['white','green','black'] or ['red','red']).
   async function uiTakeGems(colors) {
     synthClickCanvas(...UI.openTake);
-    await sleep(CONFIG.OPEN_MS);                        // let the modal open/animate
+    await sleep(CONFIG.TAKE_OPEN_MS);                   // let the modal fully open/become interactive
     for (const c of colors) { synthClickCanvas(...UI.takeGem[c]); await _gpause(); }
     synthClickCanvas(...UI.takePick);
     console.log('[WWSD] uiTakeGems', colors, '→ pick');
@@ -507,6 +510,7 @@
   // dump (for the seat's tokens, to pre-compute any forced discard after an over-10 take/reserve).
   async function playMove(action, dump) {
     const seat = dump.turn;
+    await sleep(CONFIG.SETTLE_MS);                      // let the board settle after the opponent's move
     switch (action.kind) {
       case 'take3': case 'take2_diff': case 'take2_same': case 'take1': {
         const colors = action.colors.map(i => G[i]);
