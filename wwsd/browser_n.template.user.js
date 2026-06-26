@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.7.3
+// @version      0.8.0
 // @description  Runs Splendor variant N (the learned-leaf AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows N's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -391,8 +391,12 @@
     reservedCancel: [0.551, 0.061],
     // Pass: click the green Pass button → confirm modal → confirm.
     passBtn: [0.323, 0.196], passConfirm: [0.741, 0.605],
-    // Discard modal (over 10 tokens) — same "select chips" layout + gold; "return" finalizes.
-    // discardGem (incl. gold) + discardReturn filled once recorded.
+    // Discard modal (over 10 tokens): fixed vertical column, gold above white; click selects one;
+    // "return" finalizes. Positions are fixed (missing token types don't shift the others).
+    discardGem: {
+      gold: [0.334, 0.250], white: [0.334, 0.357], blue: [0.335, 0.455], green: [0.334, 0.552], red: [0.335, 0.656], black: [0.336, 0.756],
+    },
+    discardReturn: [0.389, 0.847],
   };
   function cardSlotFrac(slot) { return UI.cardFrac[slot]; }   // engine board slot → exact canvas fraction
   const _gpause = () => sleep(CONFIG.STEP_MS + Math.floor(Math.random() * 160));   // jittered gap between clicks
@@ -461,6 +465,46 @@
     synthClickCanvas(...UI.passConfirm);
     console.log('[WWSD] uiPass');
   }
+  // Discard: click each token to return (one per click; repeat a colour to return 2), then "return".
+  async function uiDiscard(colors) {
+    for (const c of colors) { synthClickCanvas(...UI.discardGem[c]); await _gpause(); }
+    synthClickCanvas(...UI.discardReturn);
+    console.log('[WWSD] uiDiscard', colors, '→ return');
+  }
+  // Heuristic: which `n` gems to return when a take overfills past 10. Discard the most-abundant
+  // COLOURED gems first (keeps a balanced hand; never throws away flexible gold unless nothing else).
+  function chooseDiscards(tok, n) {
+    const c = tok.slice(), out = [];
+    for (let k = 0; k < n; k++) {
+      let best = -1, bestv = 0;
+      for (let i = 0; i < 5; i++) if (c[i] > bestv) { bestv = c[i]; best = i; }
+      if (best >= 0) { out.push(G[best]); c[best]--; } else { out.push('gold'); c[5]--; }
+    }
+    return out;
+  }
+
+  // Master dispatcher: execute N's structured action via the canvas UI. `dump` is the friend-space
+  // dump (for the seat's tokens, to pre-compute any forced discard after an over-10 take).
+  async function playMove(action, dump) {
+    const seat = dump.turn;
+    switch (action.kind) {
+      case 'take3': case 'take2_diff': case 'take2_same': case 'take1': {
+        const colors = action.colors.map(i => G[i]);
+        const tok = dump.tokens[seat].slice();           // predict post-take tokens for discard
+        for (const i of action.colors) tok[i]++;
+        const nDiscard = Math.max(0, tok.reduce((a, b) => a + b, 0) - 10);
+        await uiTakeGems(colors);
+        if (nDiscard > 0) { await sleep(CONFIG.OPEN_MS + 350); await uiDiscard(chooseDiscards(tok, nDiscard)); }
+        return;
+      }
+      case 'buy_board': return uiBuyBoard(action.slot);
+      case 'buy_reserved': return uiBuyReserved(action.reserved_index);
+      case 'reserve_board': return uiReserveBoard(action.slot);
+      case 'reserve_deck': return uiReserveDeck(action.level);
+      case 'pass': return uiPass();
+      default: throw new Error('playMove: unhandled action kind ' + action.kind);
+    }
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
   // The loop
@@ -506,7 +550,7 @@
         const target = CONFIG.MIN_DELAY_MS + Math.random() * (CONFIG.MAX_DELAY_MS - CONFIG.MIN_DELAY_MS);
         const wait = target - (Date.now() - t0);
         if (wait > 0) { setStatus('playing in ' + (wait / 1000).toFixed(1) + 's…'); await sleep(wait); }
-        await playAction(g, r.action);
+        await playMove(r.action, r.dump);          // execute via the canvas UI (synthetic clicks)
         setStatus('played: ' + r.recommendation);
       }
     } catch (e) {
@@ -569,7 +613,7 @@
     buildPanel();
     loadWasm().then(() => setStatus('ready')).catch(e => setStatus('WASM failed: ' + e.message + ' (CSP?)'));
     setInterval(tick, CONFIG.POLL_MS);
-    window.WWSD_N = { analyzePosition, findMyActiveGame, listMethods, toggleRecord, toggleDomRecord, synthClickCanvas, synthHoldCanvas, boardCanvas, uiTakeGems, uiBuyBoard, uiReserveBoard, uiReserveDeck, uiBuyReserved, uiPass, cardSlotFrac, UI, toDump, CONFIG };
+    window.WWSD_N = { analyzePosition, findMyActiveGame, listMethods, toggleRecord, toggleDomRecord, synthClickCanvas, synthHoldCanvas, boardCanvas, uiTakeGems, uiBuyBoard, uiReserveBoard, uiReserveDeck, uiBuyReserved, uiPass, uiDiscard, playMove, cardSlotFrac, UI, toDump, CONFIG };
     console.log('[WWSD] browser-N loaded. window.WWSD_N available.');
   }
   boot();
