@@ -536,11 +536,15 @@ a stronger CLIENT-SIDE path runs variant N entirely in the browser via WASM — 
 ### The deck (`wwsd/wwsd_defs.json`)
 The friend's 90-card + 10-noble deck, **extracted from THEIR site's client** (their Meteor module
 `games/spendee/imports/api/utils/constants.js`, read via the browser console — no server request).
-It's the canonical Splendor deck in the SAME colour order as ours (identity matches **89/90**; our
-Spender deck deviates on one card). `analyze.override_engine()` rebuilds the engine's card/noble
-tables from THEIRS so S analyses their EXACT game (their card index = our engine card id; 0-39 L1 /
-40-69 L2 / 70-89 L3). Validated against a finished-game dump (90-card partition + token conservation
-+ noble satisfaction).
+It's the canonical Splendor deck in the same colour order as ours **as a MULTISET** (89/90 cards match
+exactly; friend card #3 [2 blue/2 black, white bonus] has no exact twin → its nearest is Spender #36
+[2 blue/2 green]). **⚠️ The two decks are ORDERED COMPLETELY DIFFERENTLY — friend card index ≠ our
+engine card index** (e.g. friend #0 is a white-bonus card, our #0 is black-bonus). This matters per
+serving path: `analyze.override_engine()` (the Python/Render-S path) **rebuilds** the engine's
+card/noble tables from THEIRS by index, so S analyses their EXACT game with no remap needed. **The
+WASM browser-N path CANNOT override** the compiled Spender deck, so it MUST remap friend ids ↔ Spender
+ids (see "Browser-N userscript" → deck remap below). Validated against a finished-game dump (90-card
+partition + token conservation + noble satisfaction).
 
 ### Files + API
 - `wwsd/analyze.py` — `analyze(doc, time_limit)` (a dumped `{games:[...]}` doc → engine State →
@@ -615,10 +619,24 @@ so it's preserved unchanged.
 - **Validated end-to-end in Node** (scratchpad `verify_n.mjs` + `verify_browser.mjs`): `toDump` of the
   real spendee-format LIVE fixture is byte-identical to the known-good dump, and the full path returns a
   sane move + eval (~1,200 sims/s single-threaded; opening favours Take3).
-- **Deck = OUR deck (1-of-90 approximation).** The WASM embeds our Spender deck at compile time (consts);
-  it CANNOT do the Python WWSD's runtime `override_engine` (friend's deck). Since our deck deviates on
-  exactly 1/90 cards, browser-N is a negligible approximation for move advice (note it; an exact
-  friend-deck WASM build is a deferred option).
+- **Deck remap — friend ids ↔ Spender ids (the load-bearing fix; June 2026).** The WASM embeds OUR
+  Spender deck at compile time and CANNOT do the Python WWSD's runtime `override_engine`. **The two decks
+  are the same MULTISET but ordered COMPLETELY differently** (NOT "1/90 different" — that earlier note was
+  wrong and shipped a real bug: the advisor recommended buying cards the user couldn't afford, because the
+  WASM looked up `COST[friendId]` = a totally different card's cost). Fix in `browser_n.template.user.js`:
+  `F2S[90]` (friend→Spender id, a verified bijection: 89 exact matches + friend #3→Spender #36, the one
+  inexact card) and `F2S_NOBLE[10]` (nobles are reordered too). `toEngineDump(dump)` remaps **every** card
+  id (board/decks/purchased/reserved) + noble id (board nobles + nobles_won) friend→Spender BEFORE the WASM
+  call, so the engine's compiled COST/BONUS/PTS describe the SAME physical cards. The **original
+  friend-space `dump` is kept for display + execution** — action indices are positional/by-slot so they
+  line up across both spaces (a buy of slot s → `dump.board[s]` is the friend id for the label + spendee
+  `cardIndex`). Belt-and-suspenders: `actionAffordable(dump,a)` checks the recommendation against the
+  friend's TRUE costs (`COST_F[90]` from `wwsd_defs.json`) and **filters out any unaffordable buy** before
+  selecting the top move (covers the one inexact card #3 + any future deck drift). Validated end-to-end in
+  Node against the real WASM: the un-remapped path recommends an unaffordable buy on a crafted position;
+  the remapped path + guard never does, and a symmetric opening evaluates ~0.00 (was a false +0.10).
+  **Regenerate F2S/F2S_NOBLE/COST_F if either deck changes** (compare `wwsd_defs.json` vs
+  `engine._build_tables()` by `(cost,bonus,pts,level)`).
 - **Two residual items:** (1) **Browser CSP** — instantiating WASM needs `script-src 'wasm-unsafe-eval'`;
   only confirmable by installing on spendee (the panel shows "WASM failed (CSP?)" if blocked). The
   bookmarklet (needs no WASM) is the fallback until confirmed. (2) **Autoplay EXECUTION** still needs

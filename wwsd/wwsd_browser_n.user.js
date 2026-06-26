@@ -24,6 +24,9 @@
     MAX_SIMS:   3000,   // hard sim cap per move — keeps each search short (~2-3s) so the page can't freeze
     MY_NAME:    '',     // your spendee display name; blank = auto via Meteor.userId()
     AUTO_PLAY:  false,  // execute the move (needs the SITE ADAPTER wired); false = advisor overlay only
+    AUTO_START: false,  // when no game is active, auto-create a fresh vs-CPU game (full hands-off loop)
+    SPEED:      'fast', // auto-created game timer: 'fast' | 'normal' | 'slow'
+    TARGET:     '15',   // auto-created game target score: '15' | '21'
     POLL_MS:    1500,
     MIN_DELAY_MS: 2000, // autoplay pacing: each turn takes a RANDOM MIN..MAX ms total (compute counts toward it),
     MAX_DELAY_MS: 4000, // so it never plays instantly — looks like a person thinking 2-4s
@@ -38,6 +41,34 @@
   const BONUS = [0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,0,0,0,0,0,0,1,1,1,1,1,1,2,2,2,2,2,2,3,3,3,3,3,3,4,4,4,4,4,4,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4];
   const PTS   = [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,2,3,1,2,1,2,2,3,1,2,1,2,2,3,1,1,2,2,2,3,1,2,1,2,2,3,1,2,1,2,4,5,4,3,4,5,4,3,4,5,4,3,4,5,4,3,4,5,4,3];
   const NOBLE_PTS = [3,3,3,3,3,3,3,3,3,3];
+
+  // CRITICAL: the friend's spendee deck and OUR compiled WASM (Spender) deck contain the same 90
+  // cards but in COMPLETELY DIFFERENT index order — only the multiset matches (89 cards map exactly;
+  // friend #3 [2 blue/2 black, white bonus] has no exact twin → mapped to its nearest, Spender #36
+  // [2 blue/2 green]). The WASM looks up card COST/BONUS/PTS by index from ITS deck, so we MUST
+  // translate every friend card id → Spender id before handing the dump to the engine (the Python
+  // WWSD did this by override_engine(); the WASM can't be overridden). F2S[friendId] = spenderId.
+  const F2S = [35,33,34,36,39,37,32,38,8,12,10,14,15,9,13,11,16,22,19,17,23,20,21,18,26,24,29,30,31,28,27,25,1,4,0,2,7,5,6,3,67,69,64,66,65,68,49,51,46,50,47,48,55,57,53,52,54,56,62,63,59,60,58,61,43,45,40,42,41,44,87,89,88,86,75,77,76,74,80,81,79,78,83,85,84,82,71,73,72,70];
+  const F2S_NOBLE = [7,9,8,5,6,3,2,1,0,4];   // nobles are reordered too; engine NOBLE_REQ is looked up by id
+  const remapId = ci => (ci == null || ci < 0) ? ci : F2S[ci];   // friend → Spender (engine) space
+  const remapNoble = ni => (ni == null || ni < 0) ? ni : F2S_NOBLE[ni];
+  // Friend's TRUE per-card costs (wwsd_defs.json), friend-index space — for the affordability guard
+  // that closes the one inexact (#3) card and any future deck drift.
+  const COST_F = [[0,3,0,0,0],[0,0,0,2,1],[0,1,1,1,1],[0,2,0,0,2],[0,0,4,0,0],[0,1,2,1,1],[0,2,2,0,1],[3,1,0,0,1],[1,0,0,0,2],[0,0,0,0,3],[1,0,1,1,1],[0,0,2,0,2],[0,0,0,4,0],[1,0,1,2,1],[1,0,2,2,0],[0,1,3,1,0],[2,1,0,0,0],[0,0,0,3,0],[1,1,0,1,1],[0,2,0,2,0],[0,0,0,0,4],[1,1,0,1,2],[0,1,0,2,2],[1,3,1,0,0],[0,2,1,0,0],[3,0,0,0,0],[1,1,1,0,1],[2,0,0,2,0],[4,0,0,0,0],[2,1,1,0,1],[2,0,1,0,2],[1,0,0,1,3],[0,0,2,1,0],[0,0,3,0,0],[1,1,1,1,0],[2,0,2,0,0],[0,4,0,0,0],[1,2,1,1,0],[2,2,0,1,0],[0,0,1,3,1],[0,0,0,5,0],[6,0,0,0,0],[0,0,3,2,2],[0,0,1,4,2],[2,3,0,3,0],[0,0,0,5,3],[0,5,0,0,0],[0,6,0,0,0],[0,2,2,3,0],[2,0,0,1,4],[0,2,3,0,3],[5,3,0,0,0],[0,0,5,0,0],[0,0,6,0,0],[2,3,0,0,2],[3,0,2,3,0],[4,2,0,0,1],[0,5,3,0,0],[0,0,0,0,5],[0,0,0,6,0],[2,0,0,2,3],[1,4,2,0,0],[0,3,0,2,3],[3,0,0,0,5],[5,0,0,0,0],[0,0,0,0,6],[3,2,2,0,0],[0,1,4,2,0],[3,0,3,0,2],[0,0,5,3,0],[0,0,0,0,7],[3,0,0,0,7],[3,0,0,3,6],[0,3,3,5,3],[7,0,0,0,0],[7,3,0,0,0],[6,3,0,0,3],[3,0,3,3,5],[0,7,0,0,0],[0,7,3,0,0],[3,6,3,0,0],[5,3,0,3,3],[0,0,7,0,0],[0,0,7,3,0],[0,3,6,3,0],[3,5,3,0,3],[0,0,0,7,0],[0,0,0,7,3],[0,0,3,6,3],[3,3,5,3,0]];
+  // Can `seat` afford friend card `ci` from its tokens+bonuses+gold? (true Splendor rule.)
+  function affordFriend(dump, seat, ci) {
+    if (ci == null || ci < 0) return false;
+    const tok = dump.tokens[seat], bon = dump.bonuses[seat], cost = COST_F[ci];
+    let need = 0;
+    for (let c = 0; c < 5; c++) need += Math.max(0, cost[c] - (bon[c] || 0) - (tok[c] || 0));
+    return need <= (tok[5] || 0);
+  }
+  // Is action `a` actually affordable in the REAL (friend) game? Non-buys are always "affordable".
+  function actionAffordable(dump, a) {
+    if (a >= 46 && a < 58) return affordFriend(dump, dump.turn, dump.board[a - 46]);
+    if (a >= 58) return affordFriend(dump, dump.turn, (dump.reserved[dump.turn] || [])[a - 58]);
+    return true;
+  }
 
   // Engine constants (mirror games/spender/ai/az/engine.py + the Rust engine)
   const PLAY = 0, WIN_NONE = -1, A_PASS = 30;
@@ -498,6 +529,21 @@
     return d;
   }
 
+  // Translate a friend-space dump → Spender(engine)-space for the WASM: remap every card id so the
+  // engine's compiled COST/BONUS/PTS tables describe the SAME physical cards. Seats/tokens/points are
+  // unchanged (card identity is preserved by the bijection). The original (friend-space) dump is kept
+  // for display + execution — action indices are positional/by-slot, so they line up across both spaces.
+  function toEngineDump(dump) {
+    const e = JSON.parse(JSON.stringify(dump));
+    e.board = dump.board.map(remapId);
+    e.decks = dump.decks.map(lvl => lvl.map(remapId));
+    e.purchased = dump.purchased.map(seat => seat.map(remapId));
+    e.reserved = dump.reserved.map(seat => seat.map(remapId));
+    e.nobles = dump.nobles.map(remapNoble);                 // board nobles: friend → Spender id
+    e.nobles_won = dump.nobles_won.map(seat => seat.map(remapNoble));
+    return e;
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // action index → human text + machine move (ports of _describe_move / _structured_move)
   // ─────────────────────────────────────────────────────────────────────────
@@ -561,14 +607,18 @@
   async function analyzePosition(game, seat) {
     const data = game.data;
     const winPoints = parseInt((game.settings || {}).targetScore) || 15;
-    const dump = toDump(data, winPoints);
+    const dump = toDump(data, winPoints);           // friend-space (for display + execution)
+    const engineDump = toEngineDump(dump);           // Spender-space (correct costs for the WASM)
     const wb = await loadWasm();
     const seed = BigInt(((Date.now() >>> 0) ^ (seat << 28)) >>> 0);
-    const raw = wb.search_n_full_timed(JSON.stringify(dump), seat >>> 0, CONFIG.THINK_SECS * 1000, CONFIG.MAX_SIMS >>> 0, seed);
+    const raw = wb.search_n_full_timed(JSON.stringify(engineDump), seat >>> 0, CONFIG.THINK_SECS * 1000, CONFIG.MAX_SIMS >>> 0, seed);
     const d = JSON.parse(raw);
     if (d.error) throw new Error('N error: ' + d.error);
     const tot = d.visits.reduce((a, b) => a + b, 0);
-    const order = d.visits.map((v, a) => [a, v]).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]);
+    // Drop any buy the engine liked that isn't actually affordable in the REAL game (guards the one
+    // inexact remap card + any deck drift) — never recommend a move you can't pay for.
+    const order = d.visits.map((v, a) => [a, v]).filter(x => x[1] > 0 && actionAffordable(dump, x[0]))
+      .sort((a, b) => b[1] - a[1]);
     const top = order.length ? order[0][0] : A_PASS;
     const denom = tot || 1;
     return {
