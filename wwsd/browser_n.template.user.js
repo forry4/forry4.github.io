@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.8.5
-// @description  Runs Splendor variant N (the learned-leaf AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows N's recommended move, position eval, and top alternatives; optional autoplay.
+// @version      0.9.0
+// @description  Runs Splendor variant PV (the AlphaZero policy+value net, strongest AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows PV's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
 // @run-at       document-idle
@@ -208,7 +208,7 @@
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Run variant N locally and shape the result like WWSD's /move response.
+  // Run variant PV locally and shape the result like WWSD's /move response.
   // ─────────────────────────────────────────────────────────────────────────
   async function analyzePosition(game, seat) {
     const data = game.data;
@@ -217,9 +217,9 @@
     const engineDump = toEngineDump(dump);           // Spender-space (correct costs for the WASM)
     const wb = await loadWasm();
     const seed = BigInt(((Date.now() >>> 0) ^ (seat << 28)) >>> 0);
-    const raw = wb.search_n_full_timed(JSON.stringify(engineDump), seat >>> 0, CONFIG.THINK_SECS * 1000, CONFIG.MAX_SIMS >>> 0, seed);
+    const raw = wb.search_pv_full_timed(JSON.stringify(engineDump), seat >>> 0, CONFIG.THINK_SECS * 1000, CONFIG.MAX_SIMS >>> 0, seed);
     const d = JSON.parse(raw);
-    if (d.error) throw new Error('N error: ' + d.error);
+    if (d.error) throw new Error('PV error: ' + d.error);
     const tot = d.visits.reduce((a, b) => a + b, 0);
     // Drop any buy the engine liked that isn't actually affordable in the REAL game (guards the one
     // inexact remap card + any deck drift) — never recommend a move you can't pay for.
@@ -563,7 +563,7 @@
     busy = true;
     try {
       if (job && job !== CONFIG.REGULAR_JOB) { setStatus('sub-decision (' + job + ') — resolve manually'); lastKey = key; return; }
-      setStatus('N thinking…');
+      setStatus('PV thinking…');
       const t0 = Date.now();
       const r = await analyzePosition(g, seat);
       renderResult(r);
@@ -625,7 +625,7 @@
     box.style.cssText = 'position:fixed;top:12px;right:12px;z-index:2147483647;width:280px;background:#241a10;color:#f0e6d8;' +
       'border:1px solid #b5852f;border-radius:10px;padding:10px 12px;font:13px system-ui,sans-serif;box-shadow:0 6px 24px rgba(0,0,0,.5)';
     const mk = (t) => { const b = document.createElement('button'); b.textContent = t; b.style.cssText = 'background:#b5852f;color:#1b140d;border:0;border-radius:7px;padding:6px 10px;font-weight:700;cursor:pointer;margin:4px 4px 0 0'; return b; };
-    box.innerHTML = '<b style="color:#e8c170">WWSD · N (browser)</b>';
+    box.innerHTML = '<b style="color:#e8c170">WWSD · PV (browser)</b>';
     const toggle = mk(CONFIG.ENABLED ? 'Disable' : 'Enable');
     const setTog = () => { toggle.textContent = CONFIG.ENABLED ? 'Disable' : 'Enable'; toggle.style.background = CONFIG.ENABLED ? '#4a8f4a' : '#b5852f'; };
     toggle.onclick = () => { CONFIG.ENABLED = !CONFIG.ENABLED; lastKey = null; setTog(); setStatus(CONFIG.ENABLED ? 'enabled' : 'disabled'); };
@@ -638,7 +638,7 @@
     const record = mk('Record'); record.onclick = () => { const on = toggleRecord(); record.style.background = on ? '#4a8f4a' : '#b5852f'; };
     const domrec = mk('Rec DOM'); domrec.onclick = () => { const on = toggleDomRecord(); domrec.style.background = on ? '#4a8f4a' : '#b5852f'; setStatus(on ? 'DOM-record ON — make moves; check console' : 'DOM-record off'); };
     statusEl = document.createElement('div'); statusEl.style.cssText = 'margin-top:8px;color:#cdbfa8;font-size:12px;min-height:16px';
-    statusEl.textContent = 'loading N…';
+    statusEl.textContent = 'loading PV…';
     resultEl = document.createElement('div'); resultEl.style.cssText = 'margin-top:6px';
     for (const el of [toggle, once, auto, methods, record, domrec, statusEl, resultEl]) box.appendChild(el);
     document.body.appendChild(box);
