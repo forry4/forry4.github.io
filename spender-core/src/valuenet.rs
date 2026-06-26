@@ -119,6 +119,63 @@ impl StandardizedMlp {
     }
 }
 
+// ─── Policy + Value net (AZ retrain, Plan A) ─────────────────────────────────
+// Shared trunk (Linear+ReLU layers) -> a value head (->1, tanh) and a policy head (->n_act logits).
+// `forward_raw` takes the RAW `feats::features` vector, standardizes (z-score), and returns
+// (value in [-1,1], policy logits over the action space). The Python trainer exports this JSON layout.
+pub struct PolicyValueNet {
+    mu: Vec<f32>,
+    sd: Vec<f32>,
+    tdims: Vec<usize>, // trunk dims: [in, h1, ..., H]
+    tw: Vec<Vec<f32>>, // trunk weights per layer (row-major out x in)
+    tb: Vec<Vec<f32>>,
+    vw: Vec<f32>, // value head  H x 1 (row-major: 1 x H)
+    vb: Vec<f32>,
+    pw: Vec<f32>, // policy head n_act x H
+    pb: Vec<f32>,
+    n_act: usize,
+}
+
+impl PolicyValueNet {
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_parts(
+        mu: Vec<f32>, sd: Vec<f32>, tdims: Vec<usize>, tw: Vec<Vec<f32>>, tb: Vec<Vec<f32>>,
+        vw: Vec<f32>, vb: Vec<f32>, pw: Vec<f32>, pb: Vec<f32>, n_act: usize,
+    ) -> Self {
+        assert_eq!(tw.len(), tdims.len() - 1);
+        assert_eq!(tb.len(), tdims.len() - 1);
+        PolicyValueNet { mu, sd, tdims, tw, tb, vw, vb, pw, pb, n_act }
+    }
+    pub fn in_dim(&self) -> usize {
+        self.mu.len()
+    }
+    pub fn n_act(&self) -> usize {
+        self.n_act
+    }
+    /// (value in [-1,1], policy logits[n_act]) from the raw feature vector.
+    pub fn forward_raw(&self, raw: &[f32]) -> (f32, Vec<f32>) {
+        let n = self.mu.len();
+        let mut cur = vec![0.0f32; n];
+        for i in 0..n {
+            let s = if self.sd[i] != 0.0 { self.sd[i] } else { 1.0 };
+            cur[i] = (raw[i] - self.mu[i]) / s;
+        }
+        for l in 0..self.tw.len() {
+            let (i, o) = (self.tdims[l], self.tdims[l + 1]);
+            let mut next = vec![0.0f32; o];
+            linear(&self.tw[l], &self.tb[l], &cur, o, i, &mut next);
+            relu_inplace(&mut next);
+            cur = next;
+        }
+        let hd = *self.tdims.last().unwrap();
+        let mut vo = [0.0f32; 1];
+        linear(&self.vw, &self.vb, &cur, 1, hd, &mut vo);
+        let mut po = vec![0.0f32; self.n_act];
+        linear(&self.pw, &self.pb, &cur, self.n_act, hd, &mut po);
+        (vo[0].tanh(), po)
+    }
+}
+
 // ─── Single-block self-attention over entity tokens ──────────────────────────
 // tokens: T x d → linear Q,K,V (d x d) → softmax(QKᵀ/√d) V → residual+meanpool → MLP head → scalar.
 pub struct AttnNet {

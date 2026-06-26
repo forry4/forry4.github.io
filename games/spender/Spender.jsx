@@ -24,8 +24,8 @@ const GEM_COLORS = ["white", "blue", "green", "red", "black"];
 const GEM_LABELS = { white: "Diamond", blue: "Sapphire", green: "Emerald", red: "Ruby", black: "Onyx", gold: "Gold" };
 const GEM_HEX = { white: "#ddd4be", blue: "#4257ff", green: "#3f9c2e", red: "#dc4040", black: "#15151a", gold: "#f5c842" };
 // Frontend-only display names for the AI variants (wire codes stay H2/H3/S).
-const AI_PERSONAS = { H2: "Henry", H3: "Herald", S: "Steve", N: "Nina" };
-const AI_TIERS = { H2: "easy", H3: "medium", S: "hard", N: "expert" };
+const AI_PERSONAS = { H2: "Henry", H3: "Herald", S: "Steve", N: "Nina", PV: "Percy" };
+const AI_TIERS = { H2: "easy", H3: "medium", S: "hard", N: "expert", PV: "master" };
 const aiPersona = (v) => AI_PERSONAS[v] || `AI ${v}`;         // variant code -> persona name (retired codes -> "AI <code>")
 const displayName = (name) => {                                // backend "AI (H2)" -> "Henry (AI)"; humans unchanged
 	const m = typeof name === "string" && name.match(/^AI \((.+)\)$/);
@@ -1242,7 +1242,7 @@ export default function SpenderApp() {
 			try {
 				const visitsArrays = await Promise.all(pool.map((wk, i) =>
 					wk.request({
-						kind: roomData?.ai_variant === "N" ? "searchN" : "search", state: stateStr, seat: as.seat,
+						kind: roomData?.ai_variant === "PV" ? "searchPV" : roomData?.ai_variant === "N" ? "searchN" : "search", state: stateStr, seat: as.seat,
 						budget: CLIENT_AI_BUDGET_MS, maxSims: CLIENT_AI_MAX_SIMS,
 						seed: ((as.ply * 2654435761) ^ (i * 40503 + 1)) >>> 0,
 					}).then((d) => d.visits).catch(() => null)));
@@ -2268,7 +2268,7 @@ export default function SpenderApp() {
 										vs Friend
 									</button>
 									<span className="ai-picker-label">vs AI</span>
-									{["H2", "H3", "S", "N"].map(v => (
+									{["H2", "H3", "S", "N", "PV"].map(v => (
 										<button key={v} className="btn btn-outline btn-sm"
 											onClick={() => { setShowCreateMenu(false); handleCreate(true, v, winPoints); }}>
 											{aiPersona(v)} ({AI_TIERS[v]})

@@ -205,6 +205,51 @@ pub fn search_n_full_timed(state_json: &str, seat: usize, budget_ms: f64, max_si
         .unwrap_or_else(|_| "{\"error\":\"ser\"}".to_string())
 }
 
+// ─── Variant PV: AlphaZero policy+value net (embedded weights) ─────────────────
+#[derive(Deserialize)]
+struct PVModel {
+    mu: Vec<f32>, sd: Vec<f32>, tdims: Vec<usize>,
+    tw: Vec<Vec<f32>>, tb: Vec<Vec<f32>>,
+    vw: Vec<f32>, vb: Vec<f32>, pw: Vec<f32>, pb: Vec<f32>, n_act: usize,
+}
+/// The Plan-A AZ champion: a policy+value net (125-feat, via `feats::features_az`) that beats N and S.
+static PV_MODEL_JSON: &str = include_str!("pv_model.json");
+
+fn build_pv_net() -> crate::valuenet::PolicyValueNet {
+    let m: PVModel = serde_json::from_str(PV_MODEL_JSON).expect("embedded pv_model.json");
+    crate::valuenet::PolicyValueNet::from_parts(
+        m.mu, m.sd, m.tdims, m.tw, m.tb, m.vw, m.vb, m.pw, m.pb, m.n_act,
+    )
+}
+
+/// Variant PV root-parallel search: like `search_visits_n_timed`, but the net supplies BOTH the MCTS
+/// leaf VALUE and the POLICY PRIOR (`root_visits_until_pv`) over the 125-feat `features_az` encoder —
+/// the learned AlphaZero policy+value head. Same SUM-then-argmax root-parallel aggregation as S/N.
+#[wasm_bindgen]
+pub fn search_visits_pv_timed(state_json: &str, seat: usize, budget_ms: f64, max_sims: usize, seed: u64) -> Vec<i32> {
+    let dump: Dump = match serde_json::from_str(state_json) {
+        Ok(d) => d,
+        Err(_) => return Vec::new(),
+    };
+    let s = dump.into_state();
+    let net = build_pv_net();
+    let pv = |st: &State, sd: usize| -> (f64, Vec<f64>) {
+        let raw: Vec<f32> = crate::feats::features_az(st, sd).iter().map(|&x| x as f32).collect();
+        let (v, logits) = net.forward_raw(&raw);
+        (v as f64, logits.iter().map(|&x| x as f64).collect())
+    };
+    let mut rng = Rng::new(seed);
+    let start = js_sys::Date::now();
+    let cap = if max_sims == 0 { usize::MAX } else { max_sims };
+    vsearch::root_visits_until_pv(
+        &s,
+        seat,
+        &mut rng,
+        |n| n < cap && (n % 64 != 0 || (js_sys::Date::now() - start) < budget_ms),
+        &pv,
+    )
+}
+
 /// ENDGAME REFINEMENT (#1): given the aggregate PUCT action (argmax of the summed worker visits), run
 /// the exact endgame solver on the TRUE state and return the (possibly overridden) move as dict-move
 /// JSON. Runs ONCE per decision on the main thread (via one worker), after visit aggregation — cheap,

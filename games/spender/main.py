@@ -651,9 +651,9 @@ def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]
                 sr = game.get("s_searched")
                 if sr is not None and sr.get("ply") == len(game.get("moves", [])):
                     state["ai_position_eval_searched"] = sr.get("value")
-    # Client-side AI offload (variant S only — the WASM port): on the AI's turn, hand the client the
+    # Client-side AI offload (variants S/N/PV — the WASM port): on the AI's turn, hand the client the
     # AI-perspective compact state to search. Gated on the room's `client_ai` opt-in.
-    if room.get("client_ai") and room.get("ai_variant") in ("S", "N"):
+    if room.get("client_ai") and room.get("ai_variant") in ("S", "N", "PV"):
         game = room.get("game")
         if game and game.get("ai_player") and game.get("turn") == game.get("ai_player") \
                 and game.get("phase") == "playing":
@@ -892,7 +892,7 @@ load_az_model()  # loads ai/az_model.npz → variant Z
 def _ai_variant_valid(variant: str) -> bool:
     return (variant in WEIGHT_VARIANTS
             or (variant == "Z" and AZ_EVALUATE is not None)
-            or variant in ("H", "H2", "H3", "S", "N"))  # H/H2/H3 = greedy heuristics; S = H3-eval+PUCT; N = learned-value leaf + PUCT (client-WASM; server falls back to S)
+            or variant in ("H", "H2", "H3", "S", "N", "PV"))  # H/H2/H3 = greedy heuristics; S = H3-eval+PUCT; N = learned-value leaf + PUCT; PV = learned value+POLICY net + PUCT (N/PV client-WASM; server falls back to S)
 
 
 def _az_choose_move(game: dict, ai_pid: str, time_limit: float = 5.0) -> dict:
@@ -2328,9 +2328,10 @@ def _ai_think(variant: str, game: dict, ai_pid: str) -> dict:
         return _h2_choose_move(game, ai_pid)
     if variant == "H3":
         return _h3_choose_move(game, ai_pid)
-    if variant in ("S", "N"):
-        # N's learned-value search is CLIENT-side (WASM); when computed server-side (no WASM client
-        # submitted a move in time) it falls back to S's v_state search — a legal, strong degradation.
+    if variant in ("S", "N", "PV"):
+        # N's learned-value and PV's learned value+policy searches are CLIENT-side (WASM); when computed
+        # server-side (no WASM client submitted a move in time) they fall back to S's v_state search — a
+        # legal, strong degradation.
         return _s_choose_move(game, ai_pid)
     ai_weights = WEIGHT_VARIANTS.get(variant, WEIGHTS)
     return _mcts_choose_move(game, ai_pid, 5.0, None, ai_weights)
@@ -2440,7 +2441,7 @@ async def _schedule_s_searched_eval(room_id: str) -> None:
     applies a stale result. Keyed by ply = len(moves), so a changed position invalidates it."""
     async with ROOM_LOCK:
         r = ROOMS.get(room_id)
-        if not r or r.get("ai_variant") not in ("S", "N"):
+        if not r or r.get("ai_variant") not in ("S", "N", "PV"):
             return
         g = r.get("game")
         if not g or g.get("phase") != "playing":
@@ -2891,7 +2892,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                     r = ROOMS.get(room_id)
                     if not r or r.get("status") != "playing":
                         _err = "no active game"
-                    elif r.get("ai_variant") not in ("S", "N"):
+                    elif r.get("ai_variant") not in ("S", "N", "PV"):
                         _err = "not a client-AI game"
                     else:
                         g = r["game"]

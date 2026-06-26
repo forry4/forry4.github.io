@@ -5,13 +5,14 @@
 // Protocol (main -> worker):
 //   { id, kind:"search",  state, seat, budget, seed }  -> { id, visits:[70 ints] }  (variant S: v_state leaf)
 //   { id, kind:"searchN", state, seat, budget, seed }  -> { id, visits:[70 ints] }  (variant N: learned leaf)
+//   { id, kind:"searchPV",state, seat, budget, seed }  -> { id, visits:[70 ints] }  (variant PV: learned value+policy)
 //   { id, kind:"refine",  state, seat, action, seed }  -> { id, move }   (endgame solver #1; dict-move JSON)
 //   { id, kind:"convert", state, action }              -> { id, move }   (compact dict-move JSON)
 // Lifecycle: { ready:true } once init succeeds, or { ready:false, error } if the wasm won't load
 //   (the main thread then drops this worker; if none are ready it never announces client_ai_ready and
 //   the server computes the move).
 
-import init, { search_visits_timed, search_visits_n_timed, action_to_move_for, endgame_refine_move } from "./spender_core.js";
+import init, { search_visits_timed, search_visits_n_timed, search_visits_pv_timed, action_to_move_for, endgame_refine_move } from "./spender_core.js";
 
 let readyResolve;
 const readyP = new Promise((res) => (readyResolve = res));
@@ -26,10 +27,12 @@ self.onmessage = async (e) => {
   const ok = await readyP;
   if (!ok) { self.postMessage({ id: msg.id, error: "wasm not loaded" }); return; }
   try {
-    if (msg.kind === "search" || msg.kind === "searchN") {
+    if (msg.kind === "search" || msg.kind === "searchN" || msg.kind === "searchPV") {
       const seed = BigInt(msg.seed >>> 0);
       const maxSims = (msg.maxSims >>> 0) || 0; // 0 = no cap
-      const fn = msg.kind === "searchN" ? search_visits_n_timed : search_visits_timed; // N = learned leaf
+      const fn = msg.kind === "searchPV" ? search_visits_pv_timed     // PV = learned value+policy
+               : msg.kind === "searchN" ? search_visits_n_timed       // N  = learned value leaf
+               : search_visits_timed;                                  // S  = v_state leaf
       const visits = fn(String(msg.state), msg.seat >>> 0, Number(msg.budget), maxSims, seed);
       self.postMessage({ id: msg.id, visits: Array.from(visits) });
     } else if (msg.kind === "refine") {

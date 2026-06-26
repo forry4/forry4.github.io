@@ -114,6 +114,34 @@ export function endgame_refine_move(state_json, seat, puct_action, seed) {
 }
 
 /**
+ * Variant N search returning visits + the searched POSITION VALUE + per-edge Q — for the WWSD
+ * overlay's eval display (the visits-only `search_visits_n_timed` is enough to PICK a move but
+ * carries no eval). JSON: `{"visits":[..70..],"value":<f64 in [-1,1], side-to-move>,"q":[..70..]}`
+ * where `q[a]` is null for an unvisited action. `{"error":...}` on a parse failure. Single-threaded
+ * (no worker aggregation): the friend's CPU runs the whole budget on the userscript's main thread.
+ * @param {string} state_json
+ * @param {number} seat
+ * @param {number} budget_ms
+ * @param {number} max_sims
+ * @param {bigint} seed
+ * @returns {string}
+ */
+export function search_n_full_timed(state_json, seat, budget_ms, max_sims, seed) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(state_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.search_n_full_timed(ptr0, len0, seat, budget_ms, max_sims, seed);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
  * Variant N root-parallel search: identical to `search_visits_timed` but uses the LEARNED value as
  * the MCTS leaf (+ the H3 prior). The net is parsed once per call (once per move per worker —
  * negligible vs the thousands of sims it then runs). Same SUM-then-argmax aggregation as S.
@@ -128,6 +156,26 @@ export function search_visits_n_timed(state_json, seat, budget_ms, max_sims, see
     const ptr0 = passStringToWasm0(state_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
     const ret = wasm.search_visits_n_timed(ptr0, len0, seat, budget_ms, max_sims, seed);
+    var v2 = getArrayI32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v2;
+}
+
+/**
+ * Variant PV root-parallel search: like `search_visits_n_timed`, but the net supplies BOTH the MCTS
+ * leaf VALUE and the POLICY PRIOR (`root_visits_until_pv`) over the 125-feat `features_az` encoder —
+ * the learned AlphaZero policy+value head. Same SUM-then-argmax root-parallel aggregation as S/N.
+ * @param {string} state_json
+ * @param {number} seat
+ * @param {number} budget_ms
+ * @param {number} max_sims
+ * @param {bigint} seed
+ * @returns {Int32Array}
+ */
+export function search_visits_pv_timed(state_json, seat, budget_ms, max_sims, seed) {
+    const ptr0 = passStringToWasm0(state_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.search_visits_pv_timed(ptr0, len0, seat, budget_ms, max_sims, seed);
     var v2 = getArrayI32FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
     return v2;

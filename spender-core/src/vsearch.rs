@@ -231,6 +231,61 @@ pub fn root_visits_until_leaf<F: FnMut(usize) -> bool>(
     search.root_visits().to_vec()
 }
 
+/// AZ retrain (variant PV): determinized PUCT with a LEARNED policy+value net. `pv(state, seat) ->
+/// (value in [-1,1], logits over N_ACTIONS)`. The prior is the legal-masked softmax of the net logits at
+/// PLAY leaves (the decisions the net is trained on); at the rare DISCARD/NOBLE leaves it falls back to
+/// the H3 prior (the net is untrained there). The leaf value is always the net value. Returns the root
+/// visit counts (the move = argmax). Same SUM-then-argmax root-parallel unit as S/N.
+pub fn root_visits_until_pv<F: FnMut(usize) -> bool>(
+    s: &State,
+    seat: usize,
+    rng: &mut Rng,
+    mut keep_going: F,
+    pv: &dyn Fn(&State, usize) -> (f64, Vec<f64>),
+) -> Vec<i32> {
+    let mut out = vec![0i32; N_ACTIONS];
+    let legal = engine::legal_actions(s);
+    if legal.is_empty() {
+        out[A_PASS] = 1;
+        return out;
+    }
+    if s.phase != PLAY || legal.len() == 1 {
+        out[heuristic::choose_action(s, seat)] = 1;
+        return out;
+    }
+    let mut search = Search::new(s.clone(), C_PUCT);
+    let eval = |ls: &State, lseat: usize, ll: &[usize]| -> (Vec<f64>, f64) {
+        let (value, logits) = pv(ls, lseat);
+        let mut probs = vec![0.0f64; N_ACTIONS];
+        if ls.phase == PLAY {
+            // legal-masked softmax of the net policy logits
+            let mx = ll.iter().map(|&a| logits[a]).fold(f64::NEG_INFINITY, f64::max);
+            let mut tot = 0.0;
+            for &a in ll {
+                let e = (logits[a] - mx).exp();
+                probs[a] = e;
+                tot += e;
+            }
+            if tot > 0.0 {
+                for &a in ll {
+                    probs[a] /= tot;
+                }
+            }
+        } else {
+            // DISCARD/NOBLE: net untrained here -> H3 prior
+            let val = Valuation::new(ls, W_TEMPO, W_GEM, W_GOLD);
+            probs = policy_prior(&val, lseat, ll);
+        }
+        (probs, value)
+    };
+    let mut n = 0usize;
+    while keep_going(n) {
+        search.sim(rng, &eval);
+        n += 1;
+    }
+    search.root_visits().to_vec()
+}
+
 /// Like `root_visits_until_leaf` but ALSO returns the root per-edge WIN sums, so a caller can surface
 /// the searched position value (sum W / sum N) and per-move Q (W[a]/N[a]). Used by the WWSD browser
 /// overlay's eval display; the play path uses the visits-only variant. Degenerate (no-search) phases
