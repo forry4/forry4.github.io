@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.8.1
+// @version      0.8.2
 // @description  Runs Splendor variant N (the learned-leaf AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows N's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -785,8 +785,9 @@
     // Reserve-from-deck: click the face-down pile (L1/L2/L3) → same hold-reserve button.
     deckFrac: [[0.492, 0.818], [0.494, 0.572], [0.495, 0.320]],
     // Buy-from-reserve: click your stacked reserve pile → modal lists reserved cards (oldest at TOP);
-    // click that card's row to buy it. Index matches engine reserved[] order (0 = oldest).
-    reservePile: [0.020, 0.241],
+    // click that card's row to buy it. Index matches engine reserved[] order (0 = oldest). The PILE
+    // location depends on YOUR seat (player 1 sits high, player 2 low); the modal itself is centered.
+    reservePile: [[0.020, 0.241], [0.020, 0.465]],   // [seat 0 (first player), seat 1 (second player)]
     buyReserved: [[0.522, 0.477], [0.524, 0.702], [0.522, 0.925]],
     reservedCancel: [0.551, 0.061],
     // Pass: click the green Pass button → confirm modal → confirm.
@@ -852,11 +853,11 @@
     console.log('[WWSD] uiReserveDeck level', level);
   }
   // Buy one of your reserved cards by engine reserved index (0 = oldest): open the reserve pile → click its row.
-  async function uiBuyReserved(ri) {
-    synthClickCanvas(...UI.reservePile);
+  async function uiBuyReserved(ri, seat) {
+    synthClickCanvas(...UI.reservePile[seat || 0]);
     await sleep(CONFIG.OPEN_MS);
     synthClickCanvas(...UI.buyReserved[ri]);
-    console.log('[WWSD] uiBuyReserved index', ri);
+    console.log('[WWSD] uiBuyReserved index', ri, 'seat', seat || 0);
   }
   // Pass: click Pass → confirm modal → confirm.
   async function uiPass() {
@@ -898,7 +899,7 @@
         return;
       }
       case 'buy_board': return uiBuyBoard(action.slot);
-      case 'buy_reserved': return uiBuyReserved(action.reserved_index);
+      case 'buy_reserved': return uiBuyReserved(action.reserved_index, seat);
       case 'reserve_board': return uiReserveBoard(action.slot);
       case 'reserve_deck': return uiReserveDeck(action.level);
       case 'pass': return uiPass();
@@ -1007,7 +1008,7 @@
     const once = mk('Analyze now');
     once.onclick = async () => { lastKey = null; const w = CONFIG.ENABLED; CONFIG.ENABLED = true; await tick(); CONFIG.ENABLED = w; };
     const auto = mk('Autoplay: off');
-    auto.onclick = () => { CONFIG.AUTO_PLAY = !CONFIG.AUTO_PLAY; auto.textContent = 'Autoplay: ' + (CONFIG.AUTO_PLAY ? 'on' : 'off'); auto.style.background = CONFIG.AUTO_PLAY ? '#4a8f4a' : '#b5852f'; };
+    auto.onclick = () => { CONFIG.AUTO_PLAY = !CONFIG.AUTO_PLAY; auto.textContent = 'Autoplay: ' + (CONFIG.AUTO_PLAY ? 'on' : 'off'); auto.style.background = CONFIG.AUTO_PLAY ? '#4a8f4a' : '#b5852f'; if (CONFIG.AUTO_PLAY) { lastKey = null; tick(); } };
     const methods = mk('List methods'); methods.onclick = () => { listMethods(); setStatus('methods → console'); };
     const record = mk('Record'); record.onclick = () => { const on = toggleRecord(); record.style.background = on ? '#4a8f4a' : '#b5852f'; };
     const domrec = mk('Rec DOM'); domrec.onclick = () => { const on = toggleDomRecord(); domrec.style.background = on ? '#4a8f4a' : '#b5852f'; setStatus(on ? 'DOM-record ON — make moves; check console' : 'DOM-record off'); };
