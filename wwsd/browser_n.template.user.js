@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.6.0
+// @version      0.6.1
 // @description  Runs Splendor variant N (the learned-leaf AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows N's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -28,6 +28,8 @@
     SPEED:      'fast', // auto-created game timer: 'fast' | 'normal' | 'slow'
     TARGET:     '15',   // auto-created game target score: '15' | '21'
     POLL_MS:    1500,
+    OPEN_MS:    700,    // wait after a click that OPENS a modal, before clicking inside it (site animation)
+    STEP_MS:    420,    // base gap between in-modal clicks (a little jitter is added) — raise if the site lags
     MIN_DELAY_MS: 2000, // autoplay pacing: each turn takes a RANDOM MIN..MAX ms total (compute counts toward it),
     MAX_DELAY_MS: 4000, // so it never plays instantly — looks like a person thinking 2-4s
     ENABLED:    true,   // master switch (auto-analyzes on your turn) — toggle from the panel
@@ -370,13 +372,13 @@
     takePick: [0.392, 0.823],    // "pick" button that finalizes the take
     // (buy / reserve / discard / board-card / reserved-card coords get added once recorded)
   };
-  const _gpause = () => sleep(280 + Math.floor(Math.random() * 120));   // small human-ish gap between clicks
+  const _gpause = () => sleep(CONFIG.STEP_MS + Math.floor(Math.random() * 160));   // jittered gap between clicks
 
   // Take gems: open the modal, click each wanted colour in the modal, confirm. `colors` = engine
   // colour NAMES from the structured action (e.g. ['white','green','black'] or ['red','red']).
   async function uiTakeGems(colors) {
     synthClickCanvas(...UI.openTake);
-    await sleep(450);                                  // let the modal open/animate
+    await sleep(CONFIG.OPEN_MS);                        // let the modal open/animate
     for (const c of colors) { synthClickCanvas(...UI.takeGem[c]); await _gpause(); }
     synthClickCanvas(...UI.takePick);
     console.log('[WWSD] uiTakeGems', colors, '→ pick');
