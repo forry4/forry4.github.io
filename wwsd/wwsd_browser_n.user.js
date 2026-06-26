@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.7.1
+// @version      0.7.2
 // @description  Runs Splendor variant N (the learned-leaf AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows N's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -780,9 +780,16 @@
       [0.581, 0.379], [0.696, 0.381], [0.817, 0.372], [0.936, 0.368],   // L3  (slots 8-11)
     ],
     buyBtn: [0.867, 0.450],      // "Buy" in the card modal (plain click)
-    reserveBtn: [0.867, 0.829],  // "Reserve" in the card modal (PRESS-AND-HOLD)
+    reserveBtn: [0.867, 0.829],  // "Reserve" in the card AND deck modal (PRESS-AND-HOLD)
     cardCancel: [0.964, 0.286],  // ✕ on the card modal
-    // (deck-pile reserve / reserved-card buy / discard coords get added once recorded)
+    // Reserve-from-deck: click the face-down pile (L1/L2/L3) → same hold-reserve button.
+    deckFrac: [[0.492, 0.818], [0.494, 0.572], [0.495, 0.320]],
+    // Buy-from-reserve: click your stacked reserve pile → modal lists reserved cards (oldest at TOP);
+    // click that card's row to buy it. Index matches engine reserved[] order (0 = oldest).
+    reservePile: [0.020, 0.241],
+    buyReserved: [[0.522, 0.477], [0.524, 0.702], [0.522, 0.925]],
+    reservedCancel: [0.551, 0.061],
+    // (discard / pass coords get added once recorded)
   };
   function cardSlotFrac(slot) { return UI.cardFrac[slot]; }   // engine board slot → exact canvas fraction
   const _gpause = () => sleep(CONFIG.STEP_MS + Math.floor(Math.random() * 160));   // jittered gap between clicks
@@ -829,6 +836,20 @@
     await sleep(CONFIG.OPEN_MS);
     await synthHoldCanvas(UI.reserveBtn[0], UI.reserveBtn[1], CONFIG.HOLD_MS);
     console.log('[WWSD] uiReserveBoard slot', slot, '@frac', [fx.toFixed(3), fy.toFixed(3)]);
+  }
+  // Reserve the top of a face-down deck: click the pile (level 1-3) → modal → hold Reserve.
+  async function uiReserveDeck(level) {
+    synthClickCanvas(...UI.deckFrac[level - 1]);
+    await sleep(CONFIG.OPEN_MS);
+    await synthHoldCanvas(UI.reserveBtn[0], UI.reserveBtn[1], CONFIG.HOLD_MS);
+    console.log('[WWSD] uiReserveDeck level', level);
+  }
+  // Buy one of your reserved cards by engine reserved index (0 = oldest): open the reserve pile → click its row.
+  async function uiBuyReserved(ri) {
+    synthClickCanvas(...UI.reservePile);
+    await sleep(CONFIG.OPEN_MS);
+    synthClickCanvas(...UI.buyReserved[ri]);
+    console.log('[WWSD] uiBuyReserved index', ri);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -938,7 +959,7 @@
     buildPanel();
     loadWasm().then(() => setStatus('ready')).catch(e => setStatus('WASM failed: ' + e.message + ' (CSP?)'));
     setInterval(tick, CONFIG.POLL_MS);
-    window.WWSD_N = { analyzePosition, findMyActiveGame, listMethods, toggleRecord, toggleDomRecord, synthClickCanvas, synthHoldCanvas, boardCanvas, uiTakeGems, uiBuyBoard, uiReserveBoard, cardSlotFrac, UI, toDump, CONFIG };
+    window.WWSD_N = { analyzePosition, findMyActiveGame, listMethods, toggleRecord, toggleDomRecord, synthClickCanvas, synthHoldCanvas, boardCanvas, uiTakeGems, uiBuyBoard, uiReserveBoard, uiReserveDeck, uiBuyReserved, cardSlotFrac, UI, toDump, CONFIG };
     console.log('[WWSD] browser-N loaded. window.WWSD_N available.');
   }
   boot();
