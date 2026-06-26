@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.2.0
+// @version      0.3.0
 // @description  Runs Splendor variant N (the learned-leaf AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows N's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -591,7 +591,13 @@
 
   // Spendee move = insert into the `gameActions` collection (the method its own UI fires:
   // /gameActions/insert). The envelope is constant; only `action` varies.
-  function gameActionsColl() { return window.Meteor.connection._mongo_livedata_collections['gameActions']; }
+  // Meteor-style 17-char client id (the UI generates one for each insert; the method needs it).
+  function _meteorId() {
+    try { if (window.Random && window.Random.id) return window.Random.id(); } catch (e) {}
+    const cs = '23456789ABCDEFGHJKLMNPQRSTWXYZabcdefghijkmnopqrstuvwxyz';
+    let s = ''; for (let i = 0; i < 17; i++) s += cs[Math.floor(Math.random() * cs.length)];
+    return s;
+  }
   function spendeeAction(seat, action) {
     switch (action.kind) {
       case 'take3': case 'take2_diff': case 'take2_same': case 'take1': {
@@ -610,18 +616,20 @@
       default: throw new Error('unmapped action: ' + action.kind);
     }
   }
-  let _lastIds = null;   // {gameId, gameManagerId} learned from any observed gameActions insert (most reliable)
+  let _lastIds = null;   // {gameId, gameManagerId} from the last observed insert (fallback only)
   async function playAction(g, action) {
     const seat = ((g.data && g.data.state) || {}).currentPlayerIndex;
     const ids = _lastIds || {};
-    const gameId = ids.gameId || g.gameId || g._id;
-    const gameManagerId = ids.gameManagerId || g.gameManagerId || (g.data && g.data.gameManagerId);
-    if (gameId == null || gameManagerId == null) throw new Error('no gameId/gameManagerId yet (make one manual move first)');
+    const gameId = g.gameId || g._id || ids.gameId;                                   // the CURRENT game first
+    const gameManagerId = g.gameManagerId || (g.data && g.data.gameManagerId) || ids.gameManagerId;
+    if (gameId == null || gameManagerId == null) throw new Error('no gameId/gameManagerId');
     const doc = {
-      gameId, gameManagerId, playerIndex: seat, isFromPlayer: true,
+      _id: _meteorId(), gameId, gameManagerId, playerIndex: seat, isFromPlayer: true,
       action: spendeeAction(seat, action), isDummy: false, createdAt: Date.now(),
     };
-    return new Promise((res, rej) => gameActionsColl().insert(doc, (e, r) => (e ? rej(e) : res(r))));
+    // CRITICAL: call the server METHOD the UI fires. collection.insert on the raw minimongo store
+    // (_mongo_livedata_collections) is LOCAL-ONLY and never reaches the server — that was the bug.
+    return new Promise((res, rej) => window.Meteor.call('/gameActions/insert', doc, (e, r) => (e ? rej(e) : res(r))));
   }
   function listMethods() {
     try { const n = Object.keys(window.Meteor.connection._methodHandlers).sort(); console.log('[WWSD] methods', n); return n; }
