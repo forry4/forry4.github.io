@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.4.0
+// @version      0.4.1
 // @description  Runs Splendor variant N (the learned-leaf AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows N's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -30,7 +30,7 @@
     POLL_MS:    1500,
     MIN_DELAY_MS: 2000, // autoplay pacing: each turn takes a RANDOM MIN..MAX ms total (compute counts toward it),
     MAX_DELAY_MS: 4000, // so it never plays instantly — looks like a person thinking 2-4s
-    ENABLED:    false,  // master switch — toggle from the panel
+    ENABLED:    true,   // master switch (auto-analyzes on your turn) — toggle from the panel
     REGULAR_JOB: 'SPENDEE_REGULAR',
   };
 
@@ -765,7 +765,7 @@
   function buildPanel() {
     const box = document.createElement('div');
     box.id = 'wwsd-n';
-    box.style.cssText = 'position:fixed;top:12px;left:12px;z-index:2147483647;width:280px;background:#241a10;color:#f0e6d8;' +
+    box.style.cssText = 'position:fixed;top:12px;right:12px;z-index:2147483647;width:280px;background:#241a10;color:#f0e6d8;' +
       'border:1px solid #b5852f;border-radius:10px;padding:10px 12px;font:13px system-ui,sans-serif;box-shadow:0 6px 24px rgba(0,0,0,.5)';
     const mk = (t) => { const b = document.createElement('button'); b.textContent = t; b.style.cssText = 'background:#b5852f;color:#1b140d;border:0;border-radius:7px;padding:6px 10px;font-weight:700;cursor:pointer;margin:4px 4px 0 0'; return b; };
     box.innerHTML = '<b style="color:#e8c170">WWSD · N (browser)</b>';
