@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.6.1
+// @version      0.7.0
 // @description  Runs Splendor variant N (the learned-leaf AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows N's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -30,6 +30,7 @@
     POLL_MS:    1500,
     OPEN_MS:    700,    // wait after a click that OPENS a modal, before clicking inside it (site animation)
     STEP_MS:    420,    // base gap between in-modal clicks (a little jitter is added) — raise if the site lags
+    HOLD_MS:    1600,   // press-and-hold duration for the Reserve button — raise if a reserve doesn't register
     MIN_DELAY_MS: 2000, // autoplay pacing: each turn takes a RANDOM MIN..MAX ms total (compute counts toward it),
     MAX_DELAY_MS: 4000, // so it never plays instantly — looks like a person thinking 2-4s
     ENABLED:    true,   // master switch (auto-analyzes on your turn) — toggle from the panel
@@ -370,8 +371,23 @@
       white: [0.420, 0.278], blue: [0.422, 0.401], green: [0.422, 0.506], red: [0.423, 0.624], black: [0.419, 0.735],
     },
     takePick: [0.392, 0.823],    // "pick" button that finalizes the take
-    // (buy / reserve / discard / board-card / reserved-card coords get added once recorded)
+    takeCancel: [0.464, 0.112],  // ✕ on the select-chips modal
+    // Face-up card grid corners (top row = L3, bottom = L1; cols left→right). Inner 8 interpolated.
+    cardTL: [0.581, 0.375], cardTR: [0.939, 0.358], cardBL: [0.578, 0.873], cardBR: [0.935, 0.886],
+    buyBtn: [0.867, 0.450],      // "Buy" in the card modal (plain click)
+    reserveBtn: [0.867, 0.829],  // "Reserve" in the card modal (PRESS-AND-HOLD)
+    cardCancel: [0.964, 0.286],  // ✕ on the card modal
+    // (deck-pile reserve / reserved-card buy / discard coords get added once recorded)
   };
+  // Engine board slot (0-3 L1, 4-7 L2, 8-11 L3; col = slot%4) → canvas fraction, bilinear over corners.
+  // Visual row: L3 top, L1 bottom, so visual_row_from_top = 2 - (slot/4).
+  function cardSlotFrac(slot) {
+    const lvl = Math.floor(slot / 4), col = slot % 4, vrow = 2 - lvl;
+    const u = col / 3, v = vrow / 2, lerp = (a, b, t) => a + (b - a) * t;
+    const tx = lerp(UI.cardTL[0], UI.cardTR[0], u), ty = lerp(UI.cardTL[1], UI.cardTR[1], u);
+    const bx = lerp(UI.cardBL[0], UI.cardBR[0], u), by = lerp(UI.cardBL[1], UI.cardBR[1], u);
+    return [lerp(tx, bx, v), lerp(ty, by, v)];
+  }
   const _gpause = () => sleep(CONFIG.STEP_MS + Math.floor(Math.random() * 160));   // jittered gap between clicks
 
   // Take gems: open the modal, click each wanted colour in the modal, confirm. `colors` = engine
@@ -382,6 +398,40 @@
     for (const c of colors) { synthClickCanvas(...UI.takeGem[c]); await _gpause(); }
     synthClickCanvas(...UI.takePick);
     console.log('[WWSD] uiTakeGems', colors, '→ pick');
+  }
+
+  // Press-and-hold at a canvas fraction for `ms` (pointer/mouse DOWN, wait, UP+click) — for Reserve.
+  async function synthHoldCanvas(fx, fy, ms) {
+    const cv = boardCanvas();
+    if (!cv) { console.warn('[WWSD] no board canvas'); return; }
+    const r = cv.getBoundingClientRect();
+    const x = r.left + fx * r.width, y = r.top + fy * r.height;
+    const down = { bubbles: true, cancelable: true, composed: true, view: window, clientX: x, clientY: y,
+      screenX: x, screenY: y, button: 0, buttons: 1, pointerId: 1, pointerType: 'mouse', isPrimary: true };
+    try { cv.dispatchEvent(new PointerEvent('pointerover', down)); cv.dispatchEvent(new PointerEvent('pointerdown', down)); } catch (e) {}
+    cv.dispatchEvent(new MouseEvent('mousedown', down));
+    await sleep(ms);
+    const up = Object.assign({}, down, { buttons: 0 });
+    try { cv.dispatchEvent(new PointerEvent('pointerup', up)); } catch (e) {}
+    cv.dispatchEvent(new MouseEvent('mouseup', up));
+    cv.dispatchEvent(new MouseEvent('click', up));
+    console.log(`[WWSD] synthHold @frac(${fx},${fy}) ${ms}ms → client(${Math.round(x)},${Math.round(y)})`);
+  }
+
+  // Buy / reserve a face-up board card by engine slot: click the card → modal → Buy (click) / Reserve (hold).
+  async function uiBuyBoard(slot) {
+    const [fx, fy] = cardSlotFrac(slot);
+    synthClickCanvas(fx, fy);
+    await sleep(CONFIG.OPEN_MS);
+    synthClickCanvas(...UI.buyBtn);
+    console.log('[WWSD] uiBuyBoard slot', slot, '@frac', [fx.toFixed(3), fy.toFixed(3)]);
+  }
+  async function uiReserveBoard(slot) {
+    const [fx, fy] = cardSlotFrac(slot);
+    synthClickCanvas(fx, fy);
+    await sleep(CONFIG.OPEN_MS);
+    await synthHoldCanvas(UI.reserveBtn[0], UI.reserveBtn[1], CONFIG.HOLD_MS);
+    console.log('[WWSD] uiReserveBoard slot', slot, '@frac', [fx.toFixed(3), fy.toFixed(3)]);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -491,7 +541,7 @@
     buildPanel();
     loadWasm().then(() => setStatus('ready')).catch(e => setStatus('WASM failed: ' + e.message + ' (CSP?)'));
     setInterval(tick, CONFIG.POLL_MS);
-    window.WWSD_N = { analyzePosition, findMyActiveGame, listMethods, toggleRecord, toggleDomRecord, synthClickCanvas, boardCanvas, uiTakeGems, UI, toDump, CONFIG };
+    window.WWSD_N = { analyzePosition, findMyActiveGame, listMethods, toggleRecord, toggleDomRecord, synthClickCanvas, synthHoldCanvas, boardCanvas, uiTakeGems, uiBuyBoard, uiReserveBoard, cardSlotFrac, UI, toDump, CONFIG };
     console.log('[WWSD] browser-N loaded. window.WWSD_N available.');
   }
   boot();
