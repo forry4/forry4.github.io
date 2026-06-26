@@ -138,6 +138,42 @@ def _describe_move(s, a) -> str:
     ri = a - E.A_BUY_RESV; return f"BUY your reserved card: {card(s.reserved[s.turn][ri])}"
 
 
+def _structured_move(s, a) -> dict:
+    """Machine-readable decomposition of an engine action, for the autoplay userscript to map onto
+    the site's own Meteor method calls. `card_id` is the spendee card INDEX (their index == our
+    engine card id == the id in the live `games` doc's showed/reserved/hidden card arrays), and gem
+    `colors` are spendee colour indices (their colour order == ours: white,blue,green,red,black).
+    `slot` is the engine board slot; the matching live-doc card is showedCards[slot//4][slot%4]."""
+    G = CLR
+    if a < E.A_TAKE2D:
+        cols = list(E.TAKE3[a - E.A_TAKE3])
+        return {"kind": "take3", "colors": cols, "color_names": [G[i] for i in cols]}
+    if a < E.A_TAKE1:
+        cols = list(E.TAKE2D[a - E.A_TAKE2D])
+        return {"kind": "take2_diff", "colors": cols, "color_names": [G[i] for i in cols]}
+    if a < E.A_TAKE2S:
+        c = a - E.A_TAKE1
+        return {"kind": "take1", "colors": [c], "color_names": [G[c]]}
+    if a < E.A_PASS:
+        c = a - E.A_TAKE2S
+        return {"kind": "take2_same", "color": c, "colors": [c, c], "color_names": [G[c]]}
+    if a == E.A_PASS:
+        return {"kind": "pass"}
+    if a < E.A_RES_DECK:
+        slot = a - E.A_RES_BOARD
+        return {"kind": "reserve_board", "level": slot // 4 + 1, "slot": slot,
+                "col": slot % 4, "card_id": s.board[slot]}
+    if a < E.A_BUY_BOARD:
+        lvl = a - E.A_RES_DECK
+        return {"kind": "reserve_deck", "level": lvl + 1}
+    if a < E.A_BUY_RESV:
+        slot = a - E.A_BUY_BOARD
+        return {"kind": "buy_board", "level": slot // 4 + 1, "slot": slot,
+                "col": slot % 4, "card_id": s.board[slot]}
+    ri = a - E.A_BUY_RESV
+    return {"kind": "buy_reserved", "reserved_index": ri, "card_id": s.reserved[s.turn][ri]}
+
+
 def _search_with_eval(s, seat, time_limit):
     """Run variant S's search and return (root visit counts, root value in [-1,1] for the side to
     move). Mirrors vsearch._run_search_timed but also reads the root's averaged value (sum W / sum N)
@@ -190,8 +226,9 @@ def analyze(doc, time_limit=None) -> dict:
         return round(qvals[a], 3) if qvals[a] is not None else None
     out.update(ok=True, sims=int(sum(visits)), eval=round(root_val, 3),
                recommendation=_describe_move(s, order[0]), rec_eval=_mv_eval(order[0]),
+               action=_structured_move(s, order[0]),
                alternatives=[{"pct": round(100 * visits[a] / tv, 1), "text": _describe_move(s, a),
-                              "eval": _mv_eval(a)} for a in order[1:6]])
+                              "eval": _mv_eval(a), "action": _structured_move(s, a)} for a in order[1:6]])
     if job not in ("SPENDEE_REGULAR", None):
         out["note"] = ("Pending '%s' sub-decision — S gives the main move; "
                        "noble/discard sub-decisions fall back to greedy H3." % job)

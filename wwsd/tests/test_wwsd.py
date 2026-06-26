@@ -75,6 +75,18 @@ def test_analyze_live_position_returns_a_move():
     assert all("eval" in a for a in r["alternatives"])        # each alternative carries its eval
 
 
+def test_analyze_returns_structured_action():
+    """Each recommendation carries a machine-readable `action` (for the autoplay userscript): a valid
+    kind, gem colours in 0..4, and any card_id a real id in the live doc (0..89)."""
+    r = W.analyze(LIVE, time_limit=0.4)
+    valid_kinds = {"take3", "take2_diff", "take2_same", "take1", "pass",
+                   "reserve_board", "reserve_deck", "buy_board", "buy_reserved"}
+    for act in [r["action"]] + [a["action"] for a in r["alternatives"]]:
+        assert act["kind"] in valid_kinds
+        assert all(0 <= c < 5 for c in act.get("colors", []))
+        assert "card_id" not in act or 0 <= act["card_id"] < 90
+
+
 def test_detect_target_autodetects_15_and_21():
     """Auto-detection reads settings.targetScore (string), falls back to data.targetScore, else 15."""
     assert W._detect_target({"settings": {"targetScore": "15"}}, {}) == 15

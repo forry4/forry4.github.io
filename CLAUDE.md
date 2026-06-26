@@ -512,7 +512,9 @@ from a **friend's external site** — mattle's "spendee" (`spendee.mattle.online
 NOT the user's own Spender game. A browser **bookmarklet** on the friend's page reads the live game
 state out of the Meteor client cache (`Meteor.connection._mongo_livedata_collections['games'].find()
 .fetch()` — a request-free LOCAL read of already-synced Minimongo), POSTs it to a public endpoint,
-and renders variant **S**'s move (+ position eval) in an injected overlay panel.
+and renders variant **S**'s move (+ position eval) in an injected overlay panel. **NEW (June 2026):
+a stronger CLIENT-SIDE path runs variant N entirely in the browser via WASM — no server compute. See
+"Browser-N userscript" below; it supersedes the bookmarklet+Render-S advisor (kept only as a fallback).**
 
 ### Deployed as a SECOND Render service (process isolation is the whole point)
 - Its own Render web service **`wwsd`** → `https://wwsd.onrender.com`, a **separate process** from
@@ -576,6 +578,59 @@ or the bookmarklet's `SECS` (`?t=`) to climb toward the local strength (capped b
 `SERVE_MAX_SIMS`). For full local strength without the wait, a tunnel (Tailscale Funnel / Cloudflare)
 or a cheap dedicated-core VPS beats the free tier. `turns_table.json` (H3-vs-H2-measured, 15-pt) feeds
 S's leaf eval → 15-pt games exact, 21-pt approximate.
+
+### Browser-N userscript — run variant N in the friend's browser via WASM (BUILT + Node-validated, NOT yet browser-tested / committed; June 2026)
+The user's directive: move WWSD's COMPUTE off Render and into the friend's browser (like the main
+Spender site's WASM AI), using the stronger learned-leaf variant **N**. This **supersedes the
+bookmarklet+Render-S path** — N > S, and a real CPU runs ~2,500+ sims/move vs Render's ~300
+(sims-starved 0.1-core). The advisor overlay (top move + position eval + alternatives) is leaf-agnostic,
+so it's preserved unchanged.
+- **N is Rust/WASM-ONLY — there is NO Python N.** The verified, smoke-passed N is the **committed
+  `0bcf0a8` on the `rust-search` worktree**: a self-consistent **101-feature `feats.rs` (board×3) +
+  101-dim `n_model.json`** MLP (standardize → 256-ReLU → tanh). **GOTCHA (do not regress):** the
+  rust-search WORKING TREE has an uncommitted `feats.rs` extended to **149 cols (board×7, "candidate"
+  features for the next experiment)** that would BREAK the 101 net — so **build browser-N from the
+  COMMITTED `0bcf0a8`, never the working tree** (we use an isolated worktree for exactly this).
+- **WASM eval export — 3 ADDITIVE edits on worktree `forrestm_projects-wwsd-wasm` (branch `wwsd-wasm`
+  off `rust-search@0bcf0a8`); none touch the webapp's existing N path:** `mcts.rs` `root_wins()` (root
+  per-edge W accessor), `vsearch.rs` `root_nw_until_leaf()` (returns visits + W), `wasm.rs`
+  `search_n_full_timed(state_json, seat, budget_ms, max_sims, seed) -> JSON {visits,value,q}`. The
+  shipped `search_visits_n_timed` returns **visits ONLY** (enough to pick a move, no eval) — the new
+  export adds the searched position value (`sum W / sum N`, side-to-move, [-1,1]) + per-edge Q (`W[a]/N[a]`,
+  null if unvisited) so the overlay keeps its eval. Built `wasm-pack build --release --target
+  no-modules --out-dir pkg-nomod` (defines a global `wasm_bindgen` for inlining) AND `--target web`
+  (`pkg/`, for the Node verify). Toolchain: `cargo`/`wasm-pack` in `C:\Users\Forrest\.cargo\bin` (off-PATH;
+  `export PATH=$PATH:/c/Users/Forrest/.cargo/bin`).
+- **Userscript — worktree `forrestm_projects-wwsd` (branch `wwsd-autoplay`):** `wwsd/browser_n.template.user.js`
+  (editable LOGIC) + `wwsd/build_browser_n.py` (assembler) → **`wwsd/wwsd_browser_n.user.js`** (~1.28MB,
+  **SELF-CONTAINED**: inlines the no-modules glue + the wasm as **base64** → NO hosting/CORS/fetch/Render
+  dependency; re-run the assembler after any wasm rebuild). Ports `analyze.to_state` → the `wasm.rs::Dump`
+  JSON (`toDump`; card ids/colours are identity; **Node-validated byte-identical** to a hand-built dump)
+  and the action index → text/machine move (`describeMove`/`structuredMove`, ports of
+  `_describe_move`/`_structured_move`). Tampermonkey **`@grant none`** (runs in PAGE context → the page's
+  `Meteor` global is reachable). Loader call: `await wasm_bindgen({module_or_path: base64Bytes})` then
+  `wasm_bindgen.search_n_full_timed(JSON.stringify(dump), seat, THINK_SECS*1000, MAX_SIMS, seedBigInt)`.
+  Embeds `BONUS[90]/PTS[90]/NOBLE_PTS[10]` (from `wwsd_defs.json`) to compute the Dump's bonuses+score.
+  Engine consts for the Dump: `PLAY=0, WIN_NONE=-1, A_PASS=30, N_ACTIONS=70`.
+- **Validated end-to-end in Node** (scratchpad `verify_n.mjs` + `verify_browser.mjs`): `toDump` of the
+  real spendee-format LIVE fixture is byte-identical to the known-good dump, and the full path returns a
+  sane move + eval (~1,200 sims/s single-threaded; opening favours Take3).
+- **Deck = OUR deck (1-of-90 approximation).** The WASM embeds our Spender deck at compile time (consts);
+  it CANNOT do the Python WWSD's runtime `override_engine` (friend's deck). Since our deck deviates on
+  exactly 1/90 cards, browser-N is a negligible approximation for move advice (note it; an exact
+  friend-deck WASM build is a deferred option).
+- **Two residual items:** (1) **Browser CSP** — instantiating WASM needs `script-src 'wasm-unsafe-eval'`;
+  only confirmable by installing on spendee (the panel shows "WASM failed (CSP?)" if blocked). The
+  bookmarklet (needs no WASM) is the fallback until confirmed. (2) **Autoplay EXECUTION** still needs
+  spendee's Meteor method names — the `SITE ADAPTER` `playAction` is a placeholder; the panel's
+  **List methods** (`Object.keys(Meteor.connection._methodHandlers)`) + **Record** (wraps
+  `Meteor.connection.apply` to log `name`+params on a manual move) discover them. The advisor overlay
+  works WITHOUT this; only move-execution needs it.
+- **Now-vestigial / superseded:** the `/move` `action` field added to `analyze.py` (`_structured_move`)
+  + the FIRST userscript `wwsd/autoplay.user.js` were the OLD Render+S autoplay path; browser-N builds the
+  structured move client-side, so both are superseded (harmless, backward-compatible). Once browser-N is
+  browser-confirmed → retire the bookmarklet + `autoplay.user.js` + the `/move action` field, and
+  optionally decommission the Render service (browser-N needs no backend). **NOTHING is committed yet.**
 
 ---
 
