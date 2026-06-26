@@ -513,8 +513,9 @@ NOT the user's own Spender game. A browser **bookmarklet** on the friend's page 
 state out of the Meteor client cache (`Meteor.connection._mongo_livedata_collections['games'].find()
 .fetch()` — a request-free LOCAL read of already-synced Minimongo), POSTs it to a public endpoint,
 and renders variant **S**'s move (+ position eval) in an injected overlay panel. **NEW (June 2026):
-a stronger CLIENT-SIDE path runs variant N entirely in the browser via WASM — no server compute. See
-"Browser-N userscript" below; it supersedes the bookmarklet+Render-S advisor (kept only as a fallback).**
+a stronger CLIENT-SIDE path runs variant PV (the strongest AI; upgraded from variant N) entirely in the
+browser via WASM — no server compute. See "Browser-PV userscript" below; it supersedes the
+bookmarklet+Render-S advisor (kept only as a fallback).**
 
 ### Deployed as a SECOND Render service (process isolation is the whole point)
 - Its own Render web service **`wwsd`** → `https://wwsd.onrender.com`, a **separate process** from
@@ -583,36 +584,46 @@ or the bookmarklet's `SECS` (`?t=`) to climb toward the local strength (capped b
 or a cheap dedicated-core VPS beats the free tier. `turns_table.json` (H3-vs-H2-measured, 15-pt) feeds
 S's leaf eval → 15-pt games exact, 21-pt approximate.
 
-### Browser-N userscript — run variant N in the friend's browser via WASM (LIVE June 2026; CSP confirmed working; FULL UI AUTOPLAY working as of v0.8.4)
+### Browser-PV userscript — run variant PV (strongest AI) in the friend's browser via WASM (LIVE June 2026; CSP confirmed; FULL UI AUTOPLAY working)
 **Status:** the advisor overlay AND fully hands-off **UI autoplay** both work on spendee (WASM CSP is
-fine). Current userscript **v0.8.4**. The build is `wwsd/build_browser_n.py` (assembles the editable
-`browser_n.template.user.js` + inlined WASM → `wwsd/wwsd_browser_n.user.js`, ~1.3MB self-contained); the
-user installs the assembled file in Tampermonkey and **must reinstall after each version bump** (the
-`@version` header is the tell — Tampermonkey doesn't auto-update a local file). Deploy = commit both files
-to `main` (push from the `forrestm_projects-wwsd` worktree). The two big build-it findings — the deck
-**id-remap** (cost-correctness) and the **canvas synthetic-click autoplay** (Meteor 403 dead-end) — are
-documented in the deck section above and the "UI AUTOPLAY" bullet below.
+fine). Current userscript **v0.9.0**, which **now runs variant PV (Percy — the AlphaZero policy+value
+net, the strongest AI), upgraded from variant N** (the script + files are still named `browser_n`/
+`wwsd_browser_n.user.js` for continuity). The build is `wwsd/build_browser_n.py` (assembles the editable
+`browser_n.template.user.js` + inlined WASM → `wwsd/wwsd_browser_n.user.js`, **~2.8MB** self-contained
+now that the PV model is embedded); the user installs the assembled file in Tampermonkey and **must
+reinstall after each version bump** (the `@version` header is the tell — Tampermonkey doesn't auto-update
+a local file). Deploy = commit both files to `main` (push from the `forrestm_projects-wwsd` worktree). The
+two big build-it findings — the deck **id-remap** (cost-correctness) and the **canvas synthetic-click
+autoplay** (Meteor 403 dead-end) — are documented in the deck section above and the "UI AUTOPLAY" bullet
+below; both are leaf-agnostic so they carried over from N to PV unchanged (same engine Dump, same remap,
+same flows — only the search/eval *function* changed).
 The user's directive: move WWSD's COMPUTE off Render and into the friend's browser (like the main
-Spender site's WASM AI), using the stronger learned-leaf variant **N**. This **supersedes the
-bookmarklet+Render-S path** — N > S, and a real CPU runs ~2,500+ sims/move vs Render's ~300
-(sims-starved 0.1-core). The advisor overlay (top move + position eval + alternatives) is leaf-agnostic,
-so it's preserved unchanged.
-- **N is Rust/WASM-ONLY — there is NO Python N.** The verified, smoke-passed N is the **committed
-  `0bcf0a8` on the `rust-search` worktree**: a self-consistent **101-feature `feats.rs` (board×3) +
-  101-dim `n_model.json`** MLP (standardize → 256-ReLU → tanh). **GOTCHA (do not regress):** the
-  rust-search WORKING TREE has an uncommitted `feats.rs` extended to **149 cols (board×7, "candidate"
-  features for the next experiment)** that would BREAK the 101 net — so **build browser-N from the
-  COMMITTED `0bcf0a8`, never the working tree** (we use an isolated worktree for exactly this).
-- **WASM eval export — 3 ADDITIVE edits on worktree `forrestm_projects-wwsd-wasm` (branch `wwsd-wasm`
-  off `rust-search@0bcf0a8`); none touch the webapp's existing N path:** `mcts.rs` `root_wins()` (root
-  per-edge W accessor), `vsearch.rs` `root_nw_until_leaf()` (returns visits + W), `wasm.rs`
-  `search_n_full_timed(state_json, seat, budget_ms, max_sims, seed) -> JSON {visits,value,q}`. The
-  shipped `search_visits_n_timed` returns **visits ONLY** (enough to pick a move, no eval) — the new
-  export adds the searched position value (`sum W / sum N`, side-to-move, [-1,1]) + per-edge Q (`W[a]/N[a]`,
-  null if unvisited) so the overlay keeps its eval. Built `wasm-pack build --release --target
-  no-modules --out-dir pkg-nomod` (defines a global `wasm_bindgen` for inlining) AND `--target web`
-  (`pkg/`, for the Node verify). Toolchain: `cargo`/`wasm-pack` in `C:\Users\Forrest\.cargo\bin` (off-PATH;
-  `export PATH=$PATH:/c/Users/Forrest/.cargo/bin`).
+Spender site's WASM AI), using the strongest variant. This **supersedes the bookmarklet+Render-S path**
+— PV > N > S, and a real CPU runs thousands of sims/move vs Render's ~300 (sims-starved 0.1-core). The
+advisor overlay (top move + position eval + alternatives) is leaf-agnostic, so it's preserved unchanged.
+- **PV (and N) are Rust/WASM-ONLY — there is NO Python PV/N; server-side both fall back to S.** PV is the
+  **AlphaZero policy+value net** in main's `spender-core`: a **125-feature `feats::features_az` encoder**
+  (separate from N's 101-feat `feats::features`) + the embedded **`src/pv_model.json`** (`PolicyValueNet`,
+  value+policy forward). The net supplies BOTH the MCTS **leaf value** AND the **policy prior** (legal-masked
+  softmax of the policy logits; H3 fallback at discard/noble). Beats N (0.60–0.67 across 160–800 sims) and
+  S (0.758) in paired-CRN eval.
+- **Build from `main`, NOT a pinned rust-search commit (CHANGED with the PV switch — do not regress).**
+  The build worktree **`forrestm_projects-wwsd-wasm`** (branch `wwsd-wasm`) is now **synced to `origin/main`**
+  (was pinned to `rust-search@0bcf0a8` for the N era; old tip saved as tag `wwsd-wasm-prePV-backup`). main's
+  `spender-core` already carries PV, so the build worktree just needs to track main. The old 101-feat-net
+  hazard (an uncommitted 149-col `feats.rs` on rust-search) no longer applies — main is the source of truth.
+- **WASM eval export — 2 ADDITIVE edits, committed to `main` (`550525c`), none touch the webapp's PV/N
+  paths:** `vsearch.rs` `root_nw_until_pv()` (PV analog of `root_nw_until_leaf` — net supplies leaf value +
+  policy prior, returns root visits + per-edge W) and `wasm.rs` **`search_pv_full_timed(state_json, seat,
+  budget_ms, max_sims, seed) -> JSON {visits,value,q}`** (the PV analog of the N-era `search_n_full_timed`,
+  which stays for reference). The shipped `search_visits_pv_timed` returns **visits ONLY** (enough to PICK a
+  move, no eval); the new full export adds the searched position value (`sum W / sum N`, side-to-move,
+  [-1,1]) + per-edge Q (`W[a]/N[a]`, null if unvisited) so the overlay keeps its eval. Built `wasm-pack
+  build --release --target no-modules --out-dir pkg-nomod` (defines a global `wasm_bindgen` for inlining;
+  the no-modules WASM grew 928KB→2.07MB with the PV model). Toolchain: `cargo`/`wasm-pack` in
+  `C:\Users\Forrest\.cargo\bin` (off-PATH; `export PATH=$PATH:/c/Users/Forrest/.cargo/bin`). Smoke-tested
+  the no-modules build in **Node** (a small vm harness loads the glue, inits with the `_bg.wasm`
+  ArrayBuffer, calls `search_pv_full_timed` on a fresh-game Dump → valid `{visits,value,q}`).
 - **Userscript — worktree `forrestm_projects-wwsd` (branch `wwsd-autoplay`):** `wwsd/browser_n.template.user.js`
   (editable LOGIC) + `wwsd/build_browser_n.py` (assembler) → **`wwsd/wwsd_browser_n.user.js`** (~1.28MB,
   **SELF-CONTAINED**: inlines the no-modules glue + the wasm as **base64** → NO hosting/CORS/fetch/Render
@@ -621,7 +632,8 @@ so it's preserved unchanged.
   and the action index → text/machine move (`describeMove`/`structuredMove`, ports of
   `_describe_move`/`_structured_move`). Tampermonkey **`@grant none`** (runs in PAGE context → the page's
   `Meteor` global is reachable). Loader call: `await wasm_bindgen({module_or_path: base64Bytes})` then
-  `wasm_bindgen.search_n_full_timed(JSON.stringify(dump), seat, THINK_SECS*1000, MAX_SIMS, seedBigInt)`.
+  `wasm_bindgen.search_pv_full_timed(JSON.stringify(dump), seat, THINK_SECS*1000, MAX_SIMS, seedBigInt)`
+  (was `search_n_full_timed` in the N era).
   Embeds `BONUS[90]/PTS[90]/NOBLE_PTS[10]` (from `wwsd_defs.json`) to compute the Dump's bonuses+score.
   Engine consts for the Dump: `PLAY=0, WIN_NONE=-1, A_PASS=30, N_ACTIONS=70`.
 - **Validated end-to-end in Node** (scratchpad `verify_n.mjs` + `verify_browser.mjs`): `toDump` of the
@@ -655,8 +667,14 @@ so it's preserved unchanged.
   adapter (`browser_n.template.user.js`) dispatches pointer/mouse events at **canvas-fraction coordinates**
   (resize-tolerant; recorded via the panel's **Rec DOM** button which logs each click's `canvasFrac`):
   - `synthClickCanvas(fx,fy)` (full pointer+mouse+click sequence) and `synthHoldCanvas(fx,fy,ms)` (press-
-    and-hold, for **Reserve** which is a hold button). All coords live in the `UI` map; `CONFIG.OPEN_MS`
-    (post-modal-open wait) / `STEP_MS` (between in-modal clicks) / `HOLD_MS` (reserve hold) tune timing.
+    and-hold, for **Reserve** which is a hold button). All coords live in the `UI` map; timing knobs in
+    `CONFIG`: **`SETTLE_MS`** (pause at the START of our turn, after the opponent's move, so the board
+    finishes animating before the first click), **`OPEN_MS`** (post-modal-open wait), **`TAKE_OPEN_MS`**
+    (the take-gems modal specifically is slow to become interactive — its own longer wait), `STEP_MS`
+    (between in-modal clicks), `HOLD_MS` (reserve hold). **Why SETTLE_MS/TAKE_OPEN_MS exist (v0.8.5 fix):**
+    playing instantly after the opponent moved sometimes clicked before the UI re-rendered — most visibly
+    a take "red green black" landing only the LAST gem because the pick-chips modal wasn't interactive when
+    the first clicks fired. Raise `TAKE_OPEN_MS` first if a take still drops gems.
   - Flows (each `ui*` fn): **take** = open select-chips modal → click each gem in-modal → "pick" (+ auto
     **discard** via the gold-topped discard column + "return" if the take overfills 10); **buy board** =
     click card (exact 12-slot `cardFrac` table) → "Buy"; **reserve board/deck** = click card/pile → hold
@@ -678,10 +696,10 @@ so it's preserved unchanged.
   + the FIRST userscript `wwsd/autoplay.user.js` were the OLD Render+S autoplay path; browser-N builds the
   structured move client-side, so both are superseded (harmless, backward-compatible). Once browser-N is
   browser-confirmed → retire the bookmarklet + `autoplay.user.js` + the `/move action` field, and
-  optionally decommission the Render service (browser-N needs no backend). **DEPLOYED to main:** the
-  userscript+tooling+docs+`/move action` field in one commit, and `search_n_full_timed` folded into
-  main's `spender-core` as a separate ADDITIVE commit (main's spender-core was byte-identical to the
-  `0bcf0a8` base, so it applied cleanly). The eval-export source also lives on the `wwsd-wasm` worktree.
+  optionally decommission the Render service (browser-N/PV needs no backend). **DEPLOYED to main:** the
+  userscript+tooling+docs, the N-era `search_n_full_timed`, and (with the PV upgrade) `search_pv_full_timed`
+  — each an ADDITIVE commit to main's `spender-core`, applied cleanly. The eval-export source also lives on
+  the `wwsd-wasm` build worktree (now synced to main, see the build bullet above).
   **RESOLVED since:** browser-CSP works; autoplay does NOT use Meteor methods at all (server 403s them) —
   it drives the canvas via synthetic clicks (see "UI AUTOPLAY" above). The bookmarklet + `autoplay.user.js`
   + `/move action` field can now be retired, and the Render WWSD service is decommissionable (browser-N
