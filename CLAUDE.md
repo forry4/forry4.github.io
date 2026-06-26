@@ -2455,6 +2455,63 @@ value + now works in game review. All frontend in `Spender.jsx`; backend in `mai
   TDZ rule) that read the rewound snapshot when `reviewing`, else live `roomData`; the Vals
   toggle no longer hides on a finished game (so it shows while rewound to a playing turn).
 
+### Session (June 26 2026) — Plan-A AZ retrain → variant PV (policy+VALUE net) SHIPPED as "N"; league run launched
+**The learnable-net path is REALIZED (this UPDATES the "learnable-leaf path" question above):** a
+warm-started **policy+value** net ("PV", `net_pv_4`) BEATS both old-N and S in search. Prior learnable
+attempts lost because they distilled-S / trained from-scratch on flat features; PV wins because it pairs
+the **enriched 125-feat encoder** + a **warm start from the N value-leaf bootstrap** + AZ self-play.
+
+- **The PV stack (Rust, `rust-search` worktree + `C:\Users\Forrest\az_run`):** `PolicyValueNet`
+  (valuenet.rs — trunk + value head + 70-action policy head), `feats::features_az` (125 = base 101 +
+  per-card `engine_value`+`noble_progress`; the per-card adds earned their slot in a policy pre-check,
+  +0.024/+0.017; engfwd/turns/oppdem DROPPED as no-lift), `vsearch::root_visits_until_pv` (determinized
+  PUCT, legal-masked softmax of net policy logits at PLAY, H3-prior fallback at discard/noble, net value
+  leaf). Bins: `selfplay_pv` (self-play harvest), `train_pv.py` (GPU value+policy trainer, value MSE +
+  policy CE, reward-shaped `(1-a)(2y-1)+a·tanh(margin/6)`), `eval_pv` (vs S), `eval_vs_n` (vs old-N via
+  `features_n101`, the 101 encoder lifted from HEAD), `harvest_az` (S-vs-S bootstrap → `boot125.csv`,
+  2.26M rows). `azloop.sh` ran it.
+- **Self-play PLATEAUED (do not relitigate):** vs-S FLAT ~0.735 across 12 iters while value-AUC kept
+  RISING — the documented self-play-diverges-from-the-external-opponent signature (the net got better at
+  beating its own clones, not S). The per-iter "peaks" (0.80) were **n=160 eval noise**; a 600-game
+  fresh-decks re-eval regressed them to ~0.73–0.76 (net_pv_4/8/12 statistically tied). One-time gain
+  over N, did NOT compound. **net_pv_4 = champion.**
+- **PV champion validated:** vs old-N **0.60 / 0.66 / 0.67 @ 160 / 400 / 800 sims** (robust, edge GROWS
+  with sims — a good policy compounds with depth), replicated on net_pv_8/12 (0.63/0.68); vs S **0.758**.
+  The learned POLICY adds **+0.58 over the H3 prior** at a matched value head (control bin
+  `eval_policy_ctrl`: full-PV vs PV-value+H3-prior). So both the richer value head AND the policy head
+  pull their weight.
+- **SHIPPED, served AS variant "N" (Nina, the top tier):** first as a separate "PV"/Percy variant (commit
+  `2a50b5a`), then **folded INTO "N"** (commit `12fc540`) per the user — `Spender.jsx` routes
+  `ai_variant==="N"` → `searchPV`, and the Percy/PV lobby option + persona were removed. **Old value-leaf
+  N is KEPT AS A RECORD** (`n_model.json` + `search_visits_n_timed`/`searchN`/`build_n_net` all stay in
+  code, just not routed to). **Upgrade path: swap `spender-core/src/pv_model.json` → rebuild wasm → push;
+  "N" instantly plays the stronger net, no UI change.** (The WWSD browser autoplayer also adopted PV —
+  `search_pv_full_timed`, v0.9.0; see the WWSD section.) See memory [[spender-variant-pv-shipped]].
+- **DEPLOY GOTCHA (do not relitigate):** the AZ/WASM work was built on **stale `rust-search` (49 behind
+  origin/main)**; production = main ALREADY had the WASM client-AI + variant-N foundation via a different
+  history, but NOT the Plan-A additions. So deploy = **PORT onto main** (fresh worktree off `origin/main`,
+  add-only edits, `push origin <branch>:main`) — **NEVER push `rust-search:main`** (non-ff wipes 49
+  commits). **Dual-encoder split (load-bearing):** main's `features()` stays **101 (old-N's net)**;
+  `features_az()` is the NEW **125 (PV)** — kept separate so old-N isn't fed the wrong dims (on rust-search
+  `features()` had been redefined to 125, which BREAKS old-N — that working tree isn't deployable as-is).
+  All Rust diffs onto main verified **purely additive (0 deletions)** → N byte-unchanged. The built
+  `spender_core_bg.wasm` is a COMMITTED artifact (Pages CI does NOT rebuild Rust→wasm); wasm grew to
+  ~2.07MB (embeds the net) — candidate for external-load later.
+- **Discard-search = WASH (do not relitigate):** `selfgate_discard.rs` found **93/93 multi-option discards
+  where the searched pick == greedy H3 `choose_discard` (0% divergence)** → the greedy discard is already
+  search-optimal; searching it just burns sims. `root_visits_until_leaf_ds` parked on the branch.
+- **LEAGUE run (IN PROGRESS, `az_run/league_loop.sh`) — escape the plateau via opponent diversity (the
+  documented cure for self-play tunneling):** `league_pv.rs` (the BEST net records ONLY its own moves vs a
+  FIXED opponent — S / old-N / a rotating past-PV checkpoint — shaped by margin; learn to BEAT them, not
+  imitate) + `pv_vs_pv.rs` (gate PRIMARY: candidate vs frozen best, paired-CRN, =0.5000 for identical
+  nets). Mix **self .4 / past-PV .25 / S .2 / old-N .15** — **H3 DROPPED** (PV crushes it ~95% → saturated
+  targets, near-zero margin gradient; its share went to past-PV, the closest/most-informative opponent).
+  Buffer ~**50/50** (subsampled `boot125_sub.csv` anchor, 600k rows, so the league signal isn't drowned —
+  the self-play loop's 87% bootstrap anchor was part of why it stalled). **Gate = beat frozen best ≥0.52
+  AND RPS guard (vs-S ≥0.72, vs-old-N ≥0.60 — net_pv_4's scores minus noise).** **Verdict to watch: the
+  per-promotion `best vs SHIPPED net_pv_4` line — >~0.55 = the league broke the plateau (swap
+  `pv_model.json` + ship); ~0.5 across many iters = the architecture ceiling, net_pv_4 stands.**
+
 ### Session (June 25 2026) — tap-to-ping, "waiting for you" tab alert, reserved-card + actions-box sizing (SHIPPED to main; do not regress)
 Four small Spender UI changes, all frontend-only except the ping relay (one backend WS action). Built in the
 `forrestm_projects-sound` worktree (branch `sound`), pushed straight to `main`. The `sound` worktree is the
