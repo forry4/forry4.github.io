@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.4.1
+// @version      0.4.2
 // @description  Runs Splendor variant N (the learned-leaf AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows N's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -304,7 +304,20 @@
   // The loop
   // ─────────────────────────────────────────────────────────────────────────
   let lastKey = null, busy = false;
-  function turnKey(g) { const st = (g.data && g.data.state) || {}; return g._id + ':' + (st.ply != null ? st.ply : '') + ':' + st.currentPlayerIndex; }
+  // A key that CHANGES on every move. spendee's state has no reliable ply counter, so we hash the
+  // parts of `data` that change when anyone moves (each player's card counts + chips + the bank) plus
+  // whose turn it is. Without this the key was constant across your turns (only currentPlayerIndex,
+  // which doesn't change on YOUR turns) → the "already analyzed" guard skipped every auto-analysis.
+  function turnKey(g) {
+    const data = g.data || {}, st = data.state || {}, players = data.players || [], bank = data.bank || {};
+    let sig = '';
+    for (const p of players) {
+      sig += (p.purchasedCards || []).length + '/' + (p.reservedCards || []).length + '/' +
+             (p.chips || []).join(',') + '/' + (p.goldChips || 0) + '|';
+    }
+    sig += 'B' + (bank.chips || []).join(',') + '/' + (bank.goldChips || 0);
+    return g._id + ':' + st.currentPlayerIndex + ':' + sig;
+  }
   function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
   async function tick() {
