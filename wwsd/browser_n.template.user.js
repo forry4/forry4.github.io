@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.5.0
+// @version      0.5.1
 // @description  Runs Splendor variant N (the learned-leaf AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows N's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -315,18 +315,49 @@
     const r = el.getBoundingClientRect();
     return `${tag}${id}${cls}${data}${bg ? ' bg=' + bg : ''}${txt ? ' "' + txt + '"' : ''} @${Math.round(r.left)},${Math.round(r.top)} ${Math.round(r.width)}x${Math.round(r.height)}`;
   }
+  // The whole game is drawn on ONE <canvas> (div.board > canvas) — clicks are hit-tested internally by
+  // pixel position. So we record click COORDINATES as a FRACTION of the canvas (resize-independent) and
+  // replay moves by dispatching synthetic pointer/mouse events at those fractions.
+  function boardCanvas() {
+    return document.querySelector('.board canvas') || document.querySelector('canvas');
+  }
   let _domRecording = false, _domHooked = false;
   function installClickRecorder() {
     if (_domHooked) return;
     _domHooked = true;
     document.addEventListener('click', (ev) => {
       if (!_domRecording) return;
-      const path = (ev.composedPath ? ev.composedPath() : []).filter(n => n && n.nodeType === 1).slice(0, 5);
-      console.log('[WWSD-DOM] CLICK ' + _elDesc(ev.target));
-      path.forEach((n, i) => console.log('   path[' + i + '] ' + _elDesc(n)));
+      const cv = boardCanvas();
+      let frac = '';
+      if (cv) {
+        const r = cv.getBoundingClientRect();
+        frac = ` canvasFrac=(${((ev.clientX - r.left) / r.width).toFixed(4)},${((ev.clientY - r.top) / r.height).toFixed(4)})` +
+               ` cv=${Math.round(r.width)}x${Math.round(r.height)}@${Math.round(r.left)},${Math.round(r.top)}`;
+      }
+      console.log(`[WWSD-DOM] CLICK @client(${ev.clientX},${ev.clientY})${frac}  ${_elDesc(ev.target)}`);
     }, true);
   }
-  function toggleDomRecord() { _domRecording = !_domRecording; console.log('[WWSD-DOM] click-record', _domRecording ? 'ON — make ONE of each move (take gems+confirm, buy a card, reserve a card)' : 'OFF'); return _domRecording; }
+  function toggleDomRecord() { _domRecording = !_domRecording; console.log('[WWSD-DOM] click-record', _domRecording ? 'ON — click each gem/card/button; canvasFrac is what matters' : 'OFF'); return _domRecording; }
+
+  // Dispatch a synthetic click at a canvas FRACTION (fx,fy in 0..1). Returns the client coords used.
+  // We fire the full pointer+mouse sequence because canvas engines listen on various ones. NOTE: synthetic
+  // events have isTrusted=false; if the engine ignores them, UI-autoplay is impossible (test this FIRST).
+  function synthClickCanvas(fx, fy) {
+    const cv = boardCanvas();
+    if (!cv) { console.warn('[WWSD] no board canvas'); return null; }
+    const r = cv.getBoundingClientRect();
+    const x = r.left + fx * r.width, y = r.top + fy * r.height;
+    const base = { bubbles: true, cancelable: true, composed: true, view: window, clientX: x, clientY: y,
+      screenX: x, screenY: y, button: 0, buttons: 1, pointerId: 1, pointerType: 'mouse', isPrimary: true };
+    const fire = (type, Ctor) => cv.dispatchEvent(new Ctor(type, type.startsWith('pointer') ? base : base));
+    try { fire('pointerover', PointerEvent); fire('pointerenter', PointerEvent); fire('pointerdown', PointerEvent); } catch (e) {}
+    fire('mousedown', MouseEvent);
+    try { fire('pointerup', PointerEvent); } catch (e) {}
+    fire('mouseup', MouseEvent);
+    fire('click', MouseEvent);
+    console.log(`[WWSD] synthClick @frac(${fx},${fy}) → client(${Math.round(x)},${Math.round(y)})`);
+    return { x, y };
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
   // The loop
@@ -435,7 +466,7 @@
     buildPanel();
     loadWasm().then(() => setStatus('ready')).catch(e => setStatus('WASM failed: ' + e.message + ' (CSP?)'));
     setInterval(tick, CONFIG.POLL_MS);
-    window.WWSD_N = { analyzePosition, findMyActiveGame, listMethods, toggleRecord, toggleDomRecord, toDump, CONFIG };
+    window.WWSD_N = { analyzePosition, findMyActiveGame, listMethods, toggleRecord, toggleDomRecord, synthClickCanvas, boardCanvas, toDump, CONFIG };
     console.log('[WWSD] browser-N loaded. window.WWSD_N available.');
   }
   boot();
