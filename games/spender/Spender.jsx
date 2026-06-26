@@ -452,6 +452,7 @@ const css = baseCss + `
 .log-entry{display:flex;gap:6px;align-items:baseline;font-size:.76rem;color:var(--text-dim);padding:4px 0;line-height:1.4;animation:log-in .2s ease}
 .log-entry+.log-entry{border-top:1px solid rgba(58,52,42,.4)}
 .log-entry:first-child{color:var(--text)}
+.log-turn{flex:0 0 auto;min-width:1.6em;text-align:right;color:var(--text-muted);font-variant-numeric:tabular-nums;font-size:.92em}
 .log-entry.clickable{cursor:pointer}
 .log-entry.clickable:hover{background:rgba(201,168,76,.08);border-radius:4px}
 /* Review: the turn currently shown on the board is highlighted in the log. */
@@ -2731,6 +2732,7 @@ export default function SpenderApp() {
 											<div key={i}
 												className={`log-entry${clickable ? " clickable" : ""}${selectedTurn ? " log-selected" : ""}`}
 												onClick={handleClick}>
+												<span className="log-turn">{isPrimary ? turnIdx + 1 : ""}</span>
 												<span className="log-name">{name}</span>
 												<span className="log-action">{action}</span>
 											</div>
