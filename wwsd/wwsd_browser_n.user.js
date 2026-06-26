@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.4.2
+// @version      0.5.0
 // @description  Runs Splendor variant N (the learned-leaf AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows N's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -700,6 +700,34 @@
   }
   function toggleRecord() { _recording = !_recording; console.log('[WWSD] record', _recording ? 'ON' : 'OFF'); return _recording; }
 
+  // ── DOM-click recorder (discovery for UI autoplay) ──────────────────────────
+  // Logs a compact descriptor of every element you click, so we can learn spendee's selectors for
+  // tokens / cards / buy / reserve / confirm and write the click adapter from real evidence.
+  function _elDesc(el) {
+    if (!el || el.nodeType !== 1) return String(el);
+    const tag = el.tagName.toLowerCase();
+    const id = el.id ? '#' + el.id : '';
+    const cls = (typeof el.className === 'string' && el.className.trim()) ? '.' + el.className.trim().split(/\s+/).join('.') : '';
+    const data = [...el.attributes].filter(a => a.name.startsWith('data-') || ['role', 'aria-label', 'title', 'alt', 'name', 'value'].includes(a.name))
+      .map(a => `[${a.name}=${JSON.stringify(a.value)}]`).join('');
+    const txt = (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 32);
+    const bg = (el.style && el.style.backgroundColor) || '';
+    const r = el.getBoundingClientRect();
+    return `${tag}${id}${cls}${data}${bg ? ' bg=' + bg : ''}${txt ? ' "' + txt + '"' : ''} @${Math.round(r.left)},${Math.round(r.top)} ${Math.round(r.width)}x${Math.round(r.height)}`;
+  }
+  let _domRecording = false, _domHooked = false;
+  function installClickRecorder() {
+    if (_domHooked) return;
+    _domHooked = true;
+    document.addEventListener('click', (ev) => {
+      if (!_domRecording) return;
+      const path = (ev.composedPath ? ev.composedPath() : []).filter(n => n && n.nodeType === 1).slice(0, 5);
+      console.log('[WWSD-DOM] CLICK ' + _elDesc(ev.target));
+      path.forEach((n, i) => console.log('   path[' + i + '] ' + _elDesc(n)));
+    }, true);
+  }
+  function toggleDomRecord() { _domRecording = !_domRecording; console.log('[WWSD-DOM] click-record', _domRecording ? 'ON — make ONE of each move (take gems+confirm, buy a card, reserve a card)' : 'OFF'); return _domRecording; }
+
   // ─────────────────────────────────────────────────────────────────────────
   // The loop
   // ─────────────────────────────────────────────────────────────────────────
@@ -792,20 +820,22 @@
     auto.onclick = () => { CONFIG.AUTO_PLAY = !CONFIG.AUTO_PLAY; auto.textContent = 'Autoplay: ' + (CONFIG.AUTO_PLAY ? 'on' : 'off'); auto.style.background = CONFIG.AUTO_PLAY ? '#4a8f4a' : '#b5852f'; };
     const methods = mk('List methods'); methods.onclick = () => { listMethods(); setStatus('methods → console'); };
     const record = mk('Record'); record.onclick = () => { const on = toggleRecord(); record.style.background = on ? '#4a8f4a' : '#b5852f'; };
+    const domrec = mk('Rec DOM'); domrec.onclick = () => { const on = toggleDomRecord(); domrec.style.background = on ? '#4a8f4a' : '#b5852f'; setStatus(on ? 'DOM-record ON — make moves; check console' : 'DOM-record off'); };
     statusEl = document.createElement('div'); statusEl.style.cssText = 'margin-top:8px;color:#cdbfa8;font-size:12px;min-height:16px';
     statusEl.textContent = 'loading N…';
     resultEl = document.createElement('div'); resultEl.style.cssText = 'margin-top:6px';
-    for (const el of [toggle, once, auto, methods, record, statusEl, resultEl]) box.appendChild(el);
+    for (const el of [toggle, once, auto, methods, record, domrec, statusEl, resultEl]) box.appendChild(el);
     document.body.appendChild(box);
   }
 
   function boot() {
     if (!meteorReady()) { setTimeout(boot, 1000); return; }
     installApplyHook();
+    installClickRecorder();
     buildPanel();
     loadWasm().then(() => setStatus('ready')).catch(e => setStatus('WASM failed: ' + e.message + ' (CSP?)'));
     setInterval(tick, CONFIG.POLL_MS);
-    window.WWSD_N = { analyzePosition, findMyActiveGame, listMethods, toggleRecord, toDump, CONFIG };
+    window.WWSD_N = { analyzePosition, findMyActiveGame, listMethods, toggleRecord, toggleDomRecord, toDump, CONFIG };
     console.log('[WWSD] browser-N loaded. window.WWSD_N available.');
   }
   boot();
