@@ -20,13 +20,14 @@
   // CONFIG
   // ─────────────────────────────────────────────────────────────────────────
   const CONFIG = {
-    THINK_SECS: 3.0,   // wall-clock budget N thinks per move (your CPU; more = stronger)
-    MAX_SIMS:   0,     // 0 = no cap (budget-limited)
-    MY_NAME:    '',    // your spendee display name; blank = auto via Meteor.userId()
-    AUTO_PLAY:  false, // execute the move (needs the SITE ADAPTER wired); false = advisor overlay only
+    THINK_SECS: 3.0,    // wall-clock budget (NB: ignored inside the wasm — MAX_SIMS is the real cap)
+    MAX_SIMS:   3000,   // hard sim cap per move — keeps each search short (~2-3s) so the page can't freeze
+    MY_NAME:    '',     // your spendee display name; blank = auto via Meteor.userId()
+    AUTO_PLAY:  false,  // execute the move (needs the SITE ADAPTER wired); false = advisor overlay only
     POLL_MS:    1500,
-    ACT_DELAY_MS: 700,
-    ENABLED:    false, // master switch — toggle from the panel
+    MIN_DELAY_MS: 2000, // autoplay pacing: each turn takes a RANDOM MIN..MAX ms total (compute counts toward it),
+    MAX_DELAY_MS: 4000, // so it never plays instantly — looks like a person thinking 2-4s
+    ENABLED:    false,  // master switch — toggle from the panel
     REGULAR_JOB: 'SPENDEE_REGULAR',
   };
 
@@ -187,33 +188,59 @@
     return new Promise((resolve, reject) => window.Meteor.call(name, ...args, (e, r) => (e ? reject(e) : resolve(r))));
   }
   const ADAPTER_TODO = '__WWSD_ADAPTER_NOT_WIRED__';
+
+  // Spendee move = insert into the `gameActions` collection (the method its own UI fires:
+  // /gameActions/insert). The envelope is constant; only `action` varies.
+  function gameActionsColl() { return window.Meteor.connection._mongo_livedata_collections['gameActions']; }
+  function spendeeAction(seat, action) {
+    switch (action.kind) {
+      case 'take3': case 'take2_diff': case 'take2_same': case 'take1': {
+        const chips = [0, 0, 0, 0, 0];             // per-colour COUNT, our colour order (white..black)
+        for (const c of action.colors) chips[c]++;
+        return { type: 'pickChips', playerIndex: seat, chips };
+      }
+      case 'buy_board': case 'buy_reserved':
+        return { type: 'buyCard', playerIndex: seat, cardIndex: action.card_id };       // cardIndex = spendee card id
+      case 'reserve_board':
+        return { type: 'reserveShowedCard', playerIndex: seat, cardIndex: action.card_id };
+      case 'reserve_deck':
+        return { type: 'reserveHiddenCard', playerIndex: seat, level: action.level - 1 }; // confirmed: 0-indexed level
+      case 'pass':
+        return { type: 'pass', playerIndex: seat };                                     // (unconfirmed shape)
+      default: throw new Error('unmapped action: ' + action.kind);
+    }
+  }
+  let _lastIds = null;   // {gameId, gameManagerId} learned from any observed gameActions insert (most reliable)
   async function playAction(g, action) {
-    // EXAMPLE (replace names/params with what the recorder shows):
-    //   switch (action.kind) {
-    //     case 'take3': case 'take2_diff': case 'take2_same': case 'take1':
-    //       return callMeteor('games.takeChips', { gameId: g._id, chips: action.colors });
-    //     case 'buy_board': case 'buy_reserved':
-    //       return callMeteor('games.buyCard', { gameId: g._id, cardId: action.card_id });
-    //     case 'reserve_board':
-    //       return callMeteor('games.reserveCard', { gameId: g._id, cardId: action.card_id });
-    //     case 'reserve_deck':
-    //       return callMeteor('games.reserveFromDeck', { gameId: g._id, level: action.level - 1 });
-    //   }
-    console.warn('[WWSD] playAction', action.kind, action, g._id);
-    throw new Error(ADAPTER_TODO + ' playAction(' + action.kind + ')');
+    const seat = ((g.data && g.data.state) || {}).currentPlayerIndex;
+    const ids = _lastIds || {};
+    const gameId = ids.gameId || g.gameId || g._id;
+    const gameManagerId = ids.gameManagerId || g.gameManagerId || (g.data && g.data.gameManagerId);
+    if (gameId == null || gameManagerId == null) throw new Error('no gameId/gameManagerId yet (make one manual move first)');
+    const doc = {
+      gameId, gameManagerId, playerIndex: seat, isFromPlayer: true,
+      action: spendeeAction(seat, action), isDummy: false, createdAt: Date.now(),
+    };
+    return new Promise((res, rej) => gameActionsColl().insert(doc, (e, r) => (e ? rej(e) : res(r))));
   }
   function listMethods() {
     try { const n = Object.keys(window.Meteor.connection._methodHandlers).sort(); console.log('[WWSD] methods', n); return n; }
     catch (e) { return []; }
   }
-  let _recOrig = null;
-  function toggleRecord() {
-    const c = window.Meteor.connection;
-    if (_recOrig) { c.apply = _recOrig; _recOrig = null; console.log('[WWSD] record OFF'); return false; }
-    _recOrig = c.apply.bind(c);
-    c.apply = function (n, a, o, cb) { try { console.log('[WWSD] call →', n, JSON.parse(JSON.stringify(a))); } catch (e) {} return _recOrig(n, a, o, cb); };
-    console.log('[WWSD] record ON — make one manual move of each type'); return true;
+  // One permanent hook on Meteor's method send: always caches gameId/gameManagerId from any
+  // gameActions insert (yours, the opponent's, or the CPU's), and logs everything while recording.
+  let _recording = false, _applyHooked = false;
+  function installApplyHook() {
+    if (_applyHooked || !meteorReady()) return;
+    _applyHooked = true;
+    const c = window.Meteor.connection, orig = c.apply.bind(c);
+    c.apply = function (n, a, o, cb) {
+      if (n === '/gameActions/insert' && a && a[0] && a[0].gameId != null) _lastIds = { gameId: a[0].gameId, gameManagerId: a[0].gameManagerId };
+      if (_recording) { try { console.log('[WWSD] call →', n, JSON.parse(JSON.stringify(a))); } catch (e) {} }
+      return orig(n, a, o, cb);
+    };
   }
+  function toggleRecord() { _recording = !_recording; console.log('[WWSD] record', _recording ? 'ON' : 'OFF'); return _recording; }
 
   // ─────────────────────────────────────────────────────────────────────────
   // The loop
@@ -236,10 +263,19 @@
     try {
       if (job && job !== CONFIG.REGULAR_JOB) { setStatus('sub-decision (' + job + ') — resolve manually'); lastKey = key; return; }
       setStatus('N thinking…');
+      const t0 = Date.now();
       const r = await analyzePosition(g, seat);
       renderResult(r);
       lastKey = key;
-      if (CONFIG.AUTO_PLAY) { await sleep(CONFIG.ACT_DELAY_MS); await playAction(g, r.action); }
+      if (CONFIG.AUTO_PLAY) {
+        // human-like pacing: make the whole turn take a RANDOM 2-4s. The capped search (~2-3s) counts
+        // toward it, so a fast result waits out the remainder rather than slamming the move instantly.
+        const target = CONFIG.MIN_DELAY_MS + Math.random() * (CONFIG.MAX_DELAY_MS - CONFIG.MIN_DELAY_MS);
+        const wait = target - (Date.now() - t0);
+        if (wait > 0) { setStatus('playing in ' + (wait / 1000).toFixed(1) + 's…'); await sleep(wait); }
+        await playAction(g, r.action);
+        setStatus('played: ' + r.recommendation);
+      }
     } catch (e) {
       const wired = String(e && e.message).indexOf(ADAPTER_TODO) < 0;
       setStatus((wired ? 'error: ' : 'autoplay needs SITE ADAPTER — ') + (e && e.message));
@@ -294,6 +330,7 @@
 
   function boot() {
     if (!meteorReady()) { setTimeout(boot, 1000); return; }
+    installApplyHook();
     buildPanel();
     loadWasm().then(() => setStatus('ready')).catch(e => setStatus('WASM failed: ' + e.message + ' (CSP?)'));
     setInterval(tick, CONFIG.POLL_MS);
