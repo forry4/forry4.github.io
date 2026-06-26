@@ -1,3 +1,5 @@
+/* @ts-self-types="./spender_core.d.ts" */
+
 /**
  * Convert the aggregate-winning action index to a dict-move JSON for the given state (the main thread
  * resolves it once, after summing visits across the worker pool). `{"error":...}` on a parse failure.
@@ -76,6 +78,33 @@ export function choose_move_timed(state_json, seat, budget_ms, seed) {
         const ptr0 = passStringToWasm0(state_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
         const ret = wasm.choose_move_timed(ptr0, len0, seat, budget_ms, seed);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
+ * ENDGAME REFINEMENT (#1): given the aggregate PUCT action (argmax of the summed worker visits), run
+ * the exact endgame solver on the TRUE state and return the (possibly overridden) move as dict-move
+ * JSON. Runs ONCE per decision on the main thread (via one worker), after visit aggregation — cheap,
+ * and a no-op outside endgame positions (returns the PUCT move's dict-move unchanged). `{"error":...}`
+ * on a parse failure (caller falls back to the unrefined move / server AI).
+ * @param {string} state_json
+ * @param {number} seat
+ * @param {number} puct_action
+ * @param {bigint} seed
+ * @returns {string}
+ */
+export function endgame_refine_move(state_json, seat, puct_action, seed) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(state_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.endgame_refine_move(ptr0, len0, seat, puct_action, seed);
         deferred2_0 = ret[0];
         deferred2_1 = ret[1];
         return getStringFromWasm0(ret[0], ret[1]);

@@ -4,12 +4,13 @@
 //
 // Protocol (main -> worker):
 //   { id, kind:"search",  state, seat, budget, seed }  -> { id, visits:[70 ints] }
-//   { id, kind:"convert", state, action }              -> { id, move }            (compact dict-move JSON)
+//   { id, kind:"refine",  state, seat, action, seed }  -> { id, move }   (endgame solver #1; dict-move JSON)
+//   { id, kind:"convert", state, action }              -> { id, move }   (compact dict-move JSON)
 // Lifecycle: { ready:true } once init succeeds, or { ready:false, error } if the wasm won't load
 //   (the main thread then drops this worker; if none are ready it never announces client_ai_ready and
 //   the server computes the move).
 
-import init, { search_visits_timed, action_to_move_for } from "./spender_core.js";
+import init, { search_visits_timed, action_to_move_for, endgame_refine_move } from "./spender_core.js";
 
 let readyResolve;
 const readyP = new Promise((res) => (readyResolve = res));
@@ -29,6 +30,10 @@ self.onmessage = async (e) => {
       const maxSims = (msg.maxSims >>> 0) || 0; // 0 = no cap
       const visits = search_visits_timed(String(msg.state), msg.seat >>> 0, Number(msg.budget), maxSims, seed);
       self.postMessage({ id: msg.id, visits: Array.from(visits) });
+    } else if (msg.kind === "refine") {
+      const seed = BigInt(msg.seed >>> 0);
+      const move = endgame_refine_move(String(msg.state), msg.seat >>> 0, msg.action >>> 0, seed);
+      self.postMessage({ id: msg.id, move });
     } else if (msg.kind === "convert") {
       const move = action_to_move_for(String(msg.state), msg.action >>> 0);
       self.postMessage({ id: msg.id, move });

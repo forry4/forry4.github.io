@@ -106,6 +106,20 @@ pub fn choose_action(s: &State, seat: usize, sims: usize, rng: &mut Rng) -> usiz
     choose_action_until(s, seat, rng, |n| n < sims)
 }
 
+/// PUCT pick, then refined by the exact endgame solver (#1). `eg_rng` is SEPARATE from the search rng
+/// so the PUCT decision stream is unaffected by whether refinement runs — a clean A/B (the self-gate
+/// relies on this). Falls through to the plain PUCT move outside endgame positions.
+pub fn choose_action_refined(
+    s: &State,
+    seat: usize,
+    sims: usize,
+    search_rng: &mut Rng,
+    eg_rng: &mut Rng,
+) -> usize {
+    let puct = choose_action(s, seat, sims, search_rng);
+    crate::endgame::refine(s, seat, puct, eg_rng)
+}
+
 /// Root visit counts (length N_ACTIONS) after running simulations while `keep_going(n_done)` is true.
 /// PLAY decisions are searched (determinized PUCT, V leaf); DISCARD/NOBLE and single-legal positions
 /// one-hot the greedy-H3 pick (so argmax/aggregation still selects it). This is the unit ROOT-PARALLEL

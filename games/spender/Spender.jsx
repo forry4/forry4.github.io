@@ -1255,7 +1255,13 @@ export default function SpenderApp() {
 				if (contrib === 0) return; // every worker failed → the server fallback covers it
 				let best = 0, bv = -1;
 				for (let a = 0; a < 70; a++) if (total[a] > bv) { bv = total[a]; best = a; }
-				const conv = await pool[0].request({ kind: "convert", state: stateStr, action: best });
+				// Endgame solver (#1): refine the aggregate PUCT pick on the TRUE state (exact negamax;
+				// overrides only on a sound forced win/loss). Returns the dict-move directly (refine+convert
+				// in one), and is a no-op outside endgame positions.
+				const conv = await pool[0].request({
+					kind: "refine", state: stateStr, seat: as.seat, action: best,
+					seed: ((as.ply * 2246822519) ^ 0x9e3779b1) >>> 0,
+				});
 				const mv = JSON.parse(conv.move);
 				if (mv && !mv.error) {
 					const ms = Math.round(performance.now() - t0);

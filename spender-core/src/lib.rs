@@ -9,6 +9,7 @@
 
 pub mod actions;
 pub mod cards;
+pub mod endgame;
 pub mod engine;
 pub mod heuristic;
 pub mod mcts;

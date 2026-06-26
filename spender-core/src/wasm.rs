@@ -114,6 +114,23 @@ pub fn search_visits_timed(state_json: &str, seat: usize, budget_ms: f64, max_si
     })
 }
 
+/// ENDGAME REFINEMENT (#1): given the aggregate PUCT action (argmax of the summed worker visits), run
+/// the exact endgame solver on the TRUE state and return the (possibly overridden) move as dict-move
+/// JSON. Runs ONCE per decision on the main thread (via one worker), after visit aggregation — cheap,
+/// and a no-op outside endgame positions (returns the PUCT move's dict-move unchanged). `{"error":...}`
+/// on a parse failure (caller falls back to the unrefined move / server AI).
+#[wasm_bindgen]
+pub fn endgame_refine_move(state_json: &str, seat: usize, puct_action: usize, seed: u64) -> String {
+    let dump: Dump = match serde_json::from_str(state_json) {
+        Ok(d) => d,
+        Err(_) => return "{\"error\":\"parse\"}".to_string(),
+    };
+    let s = dump.into_state();
+    let mut rng = Rng::new(seed);
+    let a = crate::endgame::refine(&s, seat, puct_action, &mut rng);
+    crate::actions::action_to_move_json(&s, a)
+}
+
 /// Convert the aggregate-winning action index to a dict-move JSON for the given state (the main thread
 /// resolves it once, after summing visits across the worker pool). `{"error":...}` on a parse failure.
 #[wasm_bindgen]
