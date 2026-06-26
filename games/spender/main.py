@@ -578,7 +578,14 @@ def _redact_blind_reserves(game: dict | None, viewer_pid: str | None) -> dict | 
 # applies it (the cheap discard/noble finishing stays server-side via _run_ai_turn). _schedule_ai_turn
 # waits CLIENT_AI_TIMEOUT for the client, then computes server-side as the fallback. All gated on the
 # per-room `client_ai` flag, so absent a WASM client the behavior is byte-identical to before.
-CLIENT_AI_TIMEOUT = 6.0   # seconds to wait for the client's move before the server falls back
+CLIENT_AI_TIMEOUT = 8.0   # seconds to wait for the client's move before the server falls back.
+                          # Variant N's WASM worker parses its embedded ~600KB value-net JSON ONCE
+                          # per move (before its own search budget even starts), so N's wall-clock
+                          # runs ~1-2s longer than S's; 6.0 left N losing the race on slower devices
+                          # (its late ai_move then hit "not the AI's turn"). 8.0 lets N reliably win —
+                          # and when the client wins, the move applies the instant it's submitted, so
+                          # the human never actually waits the full timeout (it only bounds the
+                          # truly-can't-compute fallback).
 CLIENT_AI_SIMS = 4000     # suggested search budget for the client (≫ Render's sims-starved ~380/move)
 
 
@@ -627,7 +634,7 @@ def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]
     if room.get("ai_variant"):
         state["ai_variant"] = room["ai_variant"]
         game = room.get("game")
-        if room["ai_variant"] in ("H", "H2", "H3", "S") and game and game.get("ai_player") \
+        if room["ai_variant"] in ("H", "H2", "H3", "S", "N") and game and game.get("ai_player") \
                 and game.get("phase") != "over":
             # Compute the overlay from the perspective of WHOEVER'S TURN IT IS, so a human
             # sees "what should I take" on their own turn and "what should the AI take" on
@@ -1103,9 +1110,124 @@ def _s_searched_value(game: dict):
     return None if v is None else round(v, 3)
 
 
+# ─── Variant N: learned-value-leaf position eval (Python mirror of the WASM net) ──────────────
+# N's strength comes from a learned value net (an MLP over the 101-feature `feats::features` vector)
+# used as the MCTS leaf. That net runs CLIENT-side (embedded in the WASM), but for the admin
+# transparency overlay we evaluate the CURRENT position server-side with a faithful Python port of
+# the same net + features. There are no per-card values for N (the user wants "only the position
+# eval"), so the overlay carries just `ai_position_eval` (N's leaf value of the live position).
+# Single source of truth: the net JSON is the SAME file the WASM embeds, so the two never drift.
+_N_MODEL_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(_AI_DIR))), "spender-core", "src", "n_model.json")
+_N_MODEL = None  # (w0, b0, w1, b1, mu, sd) lazily loaded numpy arrays, or False if unavailable
+
+
+def _load_n_model():
+    """Lazily load + cache N's value net from n_model.json (dims/w/b/mu/sd). Returns the parameter
+    tuple, or None if the file is missing/malformed (overlay then silently omits N's eval)."""
+    global _N_MODEL
+    if _N_MODEL is None:
+        try:
+            import numpy as _np
+            with open(_N_MODEL_PATH) as f:
+                d = json.load(f)
+            dims = d["dims"]  # [in, hidden, 1]
+            w0 = _np.array(d["w"][0], dtype=_np.float64).reshape(dims[1], dims[0])  # (h, in) row-major
+            b0 = _np.array(d["b"][0], dtype=_np.float64)
+            w1 = _np.array(d["w"][1], dtype=_np.float64).reshape(dims[2], dims[1])  # (1, h)
+            b1 = _np.array(d["b"][1], dtype=_np.float64)
+            mu = _np.array(d["mu"], dtype=_np.float64)
+            sd = _np.array(d["sd"], dtype=_np.float64)
+            _N_MODEL = (w0, b0, w1, b1, mu, sd)
+        except Exception as e:
+            LOG.warning("variant-N value net unavailable (%s): %s", _N_MODEL_PATH, e)
+            _N_MODEL = False
+    return _N_MODEL or None
+
+
+def _n_features(s, seat: int) -> list[float]:
+    """The 101-dim feature vector for `seat` to move in state `s` — a faithful port of
+    spender-core/src/feats.rs::features (same order). Reuses the Python v_state/valuation3 helpers
+    the Rust was ported from, so the served features match the net's trained inputs."""
+    from games.spender.ai.az import engine as _aze
+    from games.spender.ai.az import v_state as _vs
+    from games.spender.ai.az import valuation3 as _v3
+    from games.spender.ai.az import heuristic3 as _h3
+
+    opp = 1 - seat
+    val = _v3.Valuation(s, _h3.W_TEMPO, _h3.W_GEM, _h3.W_GOLD)
+    f: list[float] = []
+    # meta
+    f += [float(s.ply), float(seat), float(s.final_trigger), float(s.win_points)]
+    # v_state baseline (the hand-value the net refines), from the mover's perspective
+    f.append(float(_vs.value_with(val, seat)))
+    # per-seat raw state (me then opp)
+    for p in (seat, opp):
+        f += [float(s.points[p]), float(s.purchased_n[p]), float(len(s.reserved[p])),
+              float(sum(s.tokens[p])), float(s.tokens[p][5])]
+        f += [float(s.bonuses[p][c]) for c in range(5)]
+        f += [float(s.tokens[p][c]) for c in range(5)]
+    # bank
+    f += [float(s.bank[c]) for c in range(6)]
+    # v_state components (me, opp)
+    for p in (seat, opp):
+        tg = _vs._seat_targets(val, p, False)
+        f += [float(_vs._points_term(val, p)), float(_vs._engine_stock(val, p)),
+              float(_vs._progress(tg)), float(_vs._noble_stand(val, p)), float(_vs._econ(val, p, tg))]
+    # board cards: points + affordability gap for me/opp (-1 sentinels for empty slots)
+    for slot in range(12):
+        ci = s.board[slot]
+        if ci >= 0:
+            f += [float(_aze.PTS[ci]), float(_v3.gold_needed(s, ci, seat)), float(_v3.gold_needed(s, ci, opp))]
+        else:
+            f += [-1.0, -1.0, -1.0]
+    # nobles: bonus deficit for me/opp (-1 for empty slots)
+    for slot in range(3):
+        ni = s.nobles[slot]
+        if ni >= 0:
+            req = _aze.NOBLE_REQ[ni]
+            f.append(float(sum(max(0, req[c] - s.bonuses[seat][c]) for c in range(5))))
+            f.append(float(sum(max(0, req[c] - s.bonuses[opp][c]) for c in range(5))))
+        else:
+            f += [-1.0, -1.0]
+    # undealt deck remaining per level + per-color undealt cost
+    lvl_rem = [0.0, 0.0, 0.0]
+    color_cost = [0.0] * 5
+    for lvl in range(3):
+        lvl_rem[lvl] = float(len(s.decks[lvl]))
+        for ci in s.decks[lvl]:
+            for c in range(5):
+                color_cost[c] += _aze.COST[ci][c]
+    f += lvl_rem
+    f += [float(x) for x in color_cost]
+    return f
+
+
+def _n_position_eval(game: dict, seat_pid: str):
+    """Variant-N whole-position eval from seat_pid's perspective (whoever's turn it is), in [-1, 1]
+    (+1 = that seat winning) — N's learned value leaf of the live position, the counterpart to S's
+    _s_position_eval. Returns None if the net/seat is unavailable. Wrapped by callers in try/except."""
+    model = _load_n_model()
+    if model is None:
+        return None
+    from games.spender.ai.az import engine as _aze
+    import numpy as _np
+    try:
+        seat = game["order"].index(seat_pid)
+    except (KeyError, ValueError):
+        return None
+    w0, b0, w1, b1, mu, sd = model
+    s = _aze.from_game_dict(game)
+    raw = _np.array(_n_features(s, seat), dtype=_np.float64)
+    z = (raw - mu) / _np.where(sd != 0.0, sd, 1.0)   # z-score; sd==0 -> divide by 1 (matches Rust)
+    h = _np.maximum(w0 @ z + b0, 0.0)                # dense -> ReLU
+    out = float(_np.tanh((w1 @ h + b1)[0]))          # dense -> tanh squash to [-1, 1]
+    return round(out, 3)
+
+
 def _compute_overlay(game: dict, persp: str, variant: str) -> dict:
     """Static admin AI-values overlay for `game` from `persp`'s perspective: per-card values
-    (H/H2/H3/S) + the S static position eval. Returns {} on failure / unsupported variant. No
+    (H/H2/H3/S) + the S/N static position eval. Returns {} on failure / unsupported variant. No
     SEARCHED eval here (that needs a real search) — mk_room_state adds it for the live game; the
     review path (which calls this per past snapshot) omits it. Shared so both paths agree."""
     out: dict = {}
@@ -1117,6 +1239,9 @@ def _compute_overlay(game: dict, persp: str, variant: str) -> dict:
         elif variant == "S":
             out["ai_card_values"] = _s_card_values(game, persp)
             out["ai_position_eval"] = _s_position_eval(game, persp)
+        elif variant == "N":
+            # N: position eval ONLY (its learned value leaf) — no per-card overlay.
+            out["ai_position_eval"] = _n_position_eval(game, persp)
         elif variant == "H":
             out["ai_card_values"] = _v4_card_values(game, persp)
     except Exception:
@@ -2802,7 +2927,12 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                         r["status"] = "over"
                                     _did_change = True
                 if _err:
-                    await websocket.send_text(json.dumps({"type": "error", "message": _err}))
+                    # A client-AI submission that arrives stale (the server already fell back and
+                    # moved, or it's no longer the AI's turn) is a NORMAL part of the client/server
+                    # race — never the human's fault and never actionable, so it must NOT surface as
+                    # an error toast (the "not the AI's turn" the user saw on N). Just log it; the
+                    # server fallback guarantees the turn still advances.
+                    LOG.debug("ai_move ignored (room=%s): %s", room_id, _err)
                 elif _did_change:
                     save_game(room_id)
                     await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})

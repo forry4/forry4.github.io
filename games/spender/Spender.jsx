@@ -298,7 +298,7 @@ const css = baseCss + `
      when the Take/Buy/✕ buttons appear below it. */
   .nobles-panel .board-actions{flex:1 1 auto;min-width:118px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:8px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:8px;position:relative}
   .board-actions .target-label{font-size:1rem}
-  .board-actions-btns{display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:center}
+  .board-actions-btns{display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:flex-end}
   .board-actions-btns:empty{display:none}
   .board-actions .btn{padding:9px 14px}
 }
@@ -603,7 +603,7 @@ const css = baseCss + `
   /* min-width:0 + max-width:100% keep the buttons WITHIN this 1fr column: the actions
      box can never grow its own grid track and shove the board/sidebar around (the 3-4p
      bug — a wide nobles row shrinks this column, and a too-wide button forced it back). */
-  .actions-panel-btns{display:flex;flex-wrap:wrap;gap:calc(var(--card-h) * 0.054);align-items:center;justify-content:center;flex-shrink:0;min-width:0}
+  .actions-panel-btns{display:flex;flex-wrap:wrap;gap:calc(var(--card-h) * 0.054);align-items:center;justify-content:flex-end;flex-shrink:0;min-width:0}
   .actions-panel-btns .btn{padding:calc(var(--card-h) * 0.076) calc(var(--card-h) * 0.08);font-size:calc(var(--card-h) * 0.097);max-width:100%}
   /* The admin "Vals" toggle is compact (much less wide than the Take/Buy buttons). */
   .actions-panel-btns .ai-vals-toggle,.board-actions-btns .ai-vals-toggle{padding:calc(var(--card-h) * 0.045) calc(var(--card-h) * 0.05);font-size:calc(var(--card-h) * 0.062)}
@@ -2044,8 +2044,9 @@ export default function SpenderApp() {
 	function renderAiValsToggle() {
 		// Just the toggle button now (the eval pill is renderAiEval, placed on its own row ABOVE
 		// the buttons so it doesn't push Take/✕ to a second row). Works live AND in review; gated
-		// on admin + overlay data for the shown position.
-		if (!authUser?.is_admin || !aiCardValues) return null;
+		// on admin + overlay data for the shown position. Variant N has NO per-card overlay (only a
+		// position eval), so accept either the per-card values OR a position eval.
+		if (!authUser?.is_admin || (!aiCardValues && aiPositionEval == null)) return null;
 		return (
 			<button className="btn btn-gold ai-vals-toggle"
 				title="Show/hide the per-card AI value overlay (computed for whoever's turn it is)"
@@ -2059,19 +2060,23 @@ export default function SpenderApp() {
 		);
 	}
 
-	// The S position eval pill — rendered on its OWN row above the action buttons.
+	// The position eval pill — rendered on its OWN row above the action buttons. S shows leaf+srch;
+	// N shows just its learned-value eval of the current position (no static/searched split).
 	function renderAiEval() {
-		if (!showAiVals || !authUser?.is_admin || !aiCardValues) return null;
-		const evL = aiPositionEval;            // S only: STATIC leaf eval (instant)
+		if (!showAiVals || !authUser?.is_admin || (!aiCardValues && aiPositionEval == null)) return null;
+		const evL = aiPositionEval;            // S = STATIC leaf eval; N = learned-value eval (both instant)
 		if (evL == null) return null;
-		const evS = aiPositionEvalSearched;    // SEARCHED eval (live only — null in review)
+		const isN = roomData?.ai_variant === "N";
+		const evS = aiPositionEvalSearched;    // S only: SEARCHED eval (live only — null in review)
 		const mine = aiValuesPid === myId;
 		const fmt = (v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}`;
 		return (
 			<div className="ai-pos-eval-row">
 				<span className={`ai-pos-eval${mine ? " mine" : ""}`}
-					title={`S's whole-position eval from ${mine ? "your" : "the AI's"} perspective (+1 = ${mine ? "you" : "AI"} winning). leaf = static v(state); srch = after S's PUCT search (reused from the AI's move on its turn, freshly searched on yours)`}>
-					<b>leaf</b>{fmt(evL)}{!reviewing && <span className="ai-pos-eval-srch"><b>srch</b>{evS != null ? fmt(evS) : "…"}</span>}
+					title={isN
+						? `N's learned-value eval of the current position from ${mine ? "your" : "the AI's"} perspective (+1 = ${mine ? "you" : "AI"} winning)`
+						: `S's whole-position eval from ${mine ? "your" : "the AI's"} perspective (+1 = ${mine ? "you" : "AI"} winning). leaf = static v(state); srch = after S's PUCT search (reused from the AI's move on its turn, freshly searched on yours)`}>
+					<b>{isN ? "eval" : "leaf"}</b>{fmt(evL)}{!reviewing && !isN && <span className="ai-pos-eval-srch"><b>srch</b>{evS != null ? fmt(evS) : "…"}</span>}
 				</span>
 			</div>
 		);
