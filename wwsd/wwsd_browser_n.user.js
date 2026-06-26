@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.9.0
+// @version      0.9.1
 // @description  Runs Splendor variant PV (the AlphaZero policy+value net, strongest AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows PV's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -33,6 +33,8 @@
     OPEN_MS:    1200,   // wait after a click that OPENS a modal, before clicking inside it (site animation)
     TAKE_OPEN_MS: 1500, // the take-gems modal specifically is slow to become interactive — give it extra
     STEP_MS:    480,    // base gap between in-modal clicks (a little jitter is added) — raise if the site lags
+    HOVER_MS:   160,    // pause after a priming hover (pointermove) before the click — lets the canvas engine
+                        //   process the new hover target on its next frame so the click isn't dropped (1st-gem fix)
     HOLD_MS:    1600,   // press-and-hold duration for the Reserve button — raise if a reserve doesn't register
     MIN_DELAY_MS: 2000, // autoplay pacing: each turn takes a RANDOM MIN..MAX ms total (compute counts toward it),
     MAX_DELAY_MS: 4000, // so it never plays instantly — looks like a person thinking 2-4s
@@ -814,11 +816,33 @@
     return { x, y };
   }
 
+  // Prime a canvas hit-target by moving the synthetic pointer onto it (pointermove/mousemove only, no
+  // click). Canvas game engines hit-test a click against the LAST pointermove target; a click fired in
+  // the same tick as its own pointerover can resolve against a stale target and get dropped (the "first
+  // gem missing" bug). Call this, await one frame, THEN synthClickCanvas the same point.
+  function synthMoveCanvas(fx, fy) {
+    const cv = boardCanvas();
+    if (!cv) return null;
+    const r = cv.getBoundingClientRect();
+    const x = r.left + fx * r.width, y = r.top + fy * r.height;
+    const base = { bubbles: true, cancelable: true, composed: true, view: window, clientX: x, clientY: y,
+      screenX: x, screenY: y, button: 0, buttons: 0, pointerId: 1, pointerType: 'mouse', isPrimary: true };
+    try { cv.dispatchEvent(new PointerEvent('pointerover', base)); cv.dispatchEvent(new PointerEvent('pointermove', base)); } catch (e) {}
+    cv.dispatchEvent(new MouseEvent('mousemove', base));
+    return { x, y };
+  }
+
   // ── UI click-adapter coordinates (canvas fractions, recorded on spendee) ────────────────────────
   // Drive the canvas game by synthetic clicks. All values are fractions of the board canvas so they
   // survive resize (assuming the engine scales proportionally). Re-record if spendee's layout changes.
   const UI = {
-    openTake: [0.410, 0.452],    // click a board bank gem → opens the "select chips" modal
+    openTake: [0.410, 0.452],    // FALLBACK board bank gem → opens the "select chips" modal (one fixed pile)
+    // Per-colour BOARD bank gem positions. The picker opens by clicking a bank gem, but a pile depleted
+    // to 0 isn't clickable — so we open by clicking a colour we're actually taking (always non-empty),
+    // not the single fixed `openTake` (which is the BLUE pile — recorded from spendee, white→black).
+    bankGem: {
+      white: [0.4099, 0.3173], blue: [0.4084, 0.4613], green: [0.4129, 0.6141], red: [0.4114, 0.7632], black: [0.4129, 0.9161],
+    },
     takeGem: {                   // gem positions INSIDE the select-chips modal (top→bottom)
       white: [0.420, 0.278], blue: [0.422, 0.401], green: [0.422, 0.506], red: [0.423, 0.624], black: [0.419, 0.735],
     },
@@ -858,12 +882,23 @@
 
   // Take gems: open the modal, click each wanted colour in the modal, confirm. `colors` = engine
   // colour NAMES from the structured action (e.g. ['white','green','black'] or ['red','red']).
-  async function uiTakeGems(colors) {
-    synthClickCanvas(...UI.openTake);
+  async function uiTakeGems(colors, bank) {
+    const COLN = ['white', 'blue', 'green', 'red', 'black'];
+    // Open the picker by clicking a NON-EMPTY board bank gem. The fixed `openTake` pile may be depleted
+    // to 0 (not clickable → modal never opens → gem clicks hit the board as garbage), so prefer a colour
+    // we're taking (non-empty by the rules of the take), then any non-empty colour, then `openTake`.
+    const has = (c) => UI.bankGem[c] && (!bank || (bank[COLN.indexOf(c)] || 0) > 0);
+    const openCol = colors.find(has) || COLN.find(has);
+    const openPt = openCol ? UI.bankGem[openCol] : UI.openTake;
+    synthMoveCanvas(...openPt); await sleep(CONFIG.HOVER_MS);   // prime the hit-target, then click (1st-click fix)
+    synthClickCanvas(...openPt);
     await sleep(CONFIG.TAKE_OPEN_MS);                   // let the modal fully open/become interactive
-    for (const c of colors) { synthClickCanvas(...UI.takeGem[c]); await _gpause(); }
+    for (const c of colors) {
+      synthMoveCanvas(...UI.takeGem[c]); await sleep(CONFIG.HOVER_MS);   // hover the gem one frame BEFORE clicking
+      synthClickCanvas(...UI.takeGem[c]); await _gpause();
+    }
     synthClickCanvas(...UI.takePick);
-    console.log('[WWSD] uiTakeGems', colors, '→ pick');
+    console.log('[WWSD] uiTakeGems', colors, 'open via', openCol || 'openTake', '→ pick');
   }
 
   // Press-and-hold at a canvas fraction for `ms` (pointer/mouse DOWN, wait, UP+click) — for Reserve.
@@ -966,7 +1001,7 @@
         const tok = dump.tokens[seat].slice();           // predict post-take tokens for discard
         for (const i of action.colors) tok[i]++;
         const nDiscard = Math.max(0, tok.reduce((a, b) => a + b, 0) - 10);
-        await uiTakeGems(colors);
+        await uiTakeGems(colors, dump.bank);
         if (nDiscard > 0) { await sleep(CONFIG.OPEN_MS + 350); await uiDiscard(chooseDiscards(tok, nDiscard)); }
         return;
       }
