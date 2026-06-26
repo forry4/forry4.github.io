@@ -1905,7 +1905,8 @@ export default function SpenderApp() {
 		const toggleExpand = () => setPlayerExpanded(m => ({ ...m, [pid]: !(m[pid] ?? isMe) }));
 		const noblePts = p.nobles.reduce((s, n) => s + n.points, 0);
 		// Tapping another player's box pings them (and you) — a quick "poke" chime.
-		const canPing = !isMe && !reviewing;
+		// The AI has no client to notify, so pinging it is pointless: keep its box inert.
+		const canPing = !isMe && !reviewing && pid !== game?.ai_player;
 		const pingPlayer = () => { playPing(); send({ action: "ping", target: pid }); };
 		return (
 			<div key={pid} data-pid={pid}
