@@ -1886,9 +1886,9 @@ methodology or the saturation findings without reading it.
   `{state, seat, sims, ply}` (the AI-perspective compact state via `_compact_state_dict`); WS actions
   **`client_ai_ready`** (arms the room) + **`ai_move {move}`** (validates the move is LEGAL via
   `actions.move_to_action`∈`legal_actions`, then `_run_ai_turn` — which does the cheap discard/noble
-  FINISH server-side); `_schedule_ai_turn` waits `CLIENT_AI_TIMEOUT`=6s for the client, else computes
-  the FALLBACK itself. Absent a WASM client it's byte-identical to before. Only variant **S** is ported
-  (other variants stay server-side). Frontend (`Spender.jsx`): a pool of module Web Workers
+  FINISH server-side); `_schedule_ai_turn` waits `CLIENT_AI_TIMEOUT`=**8s** for the client, else computes
+  the FALLBACK itself. Absent a WASM client it's byte-identical to before. Variants **S and N** are ported
+  (other variants stay server-side; N's worker uses the `searchN` kind = learned leaf). Frontend (`Spender.jsx`): a pool of module Web Workers
   (`webapp/public/wasm/s-worker.js` + the wasm-pack `--target web` glue + `.wasm`, all in
   `webapp/public/wasm/`), root-parallel — each worker runs an independent determinized search (distinct
   seed), the main thread SUMS root visit vectors → argmax → `action_to_move_for` → submits `ai_move`.
@@ -1945,10 +1945,45 @@ independent ways. New variant **N** (Neural), a SEPARATE option alongside S. Bui
   ~1.2k sims** for the current eval. So the lever is **eval/policy quality, NOT more sims** — re-tuning
   sims is dead, and the WASM push *beyond* ~1.2k gave little serving strength (its real value is the fast
   offline self-play that enables value-learning + N's equal-time win, since N@600 is already near-saturated).
-- **NEXT:** (a) ship N as a served variant (Rust→WASM leaf-mode + backend variant + lobby) alongside S;
-  (b) un-anchored **self-play** (N-vs-N, value bootstraps on its own improving play beyond S's
-  distribution) — N's supervised net is the proven FLOOR. Training: torch/GPU (the `python` with cu128,
+- **NEXT:** (a) ~~ship N as a served variant~~ DONE (`c96e3fd`, "Nina"/expert in the lobby; see the next
+  session note); (b) un-anchored **self-play** (N-vs-N, value bootstraps on its own improving play beyond
+  S's distribution) — N's supervised net is the proven FLOOR. Training: torch/GPU (the `python` with cu128,
   NOT `/c/Python314` which lacks torch + numpy there is ~1.5 GFLOPS / 17-min fits); reap orphaned-python.
+
+### Session (June 26 2026) — N served-variant bug fixes (deployed `da60406`)
+N shipped as the website "Nina" (expert) option (`c96e3fd`) but three serving issues showed up in real
+play; all fixed on `main`. **N's leaf runs CLIENT-side (WASM, `searchN`), with the server falling back to
+S's v_state search if the client doesn't submit in time.**
+- **"not the AI's turn" error toast (the headline bug).** N's WASM worker `build_n_net()` parses its
+  **embedded ~600KB `n_model.json` ONCE PER MOVE, BEFORE its search budget timer even starts** (see
+  `spender-core/src/wasm.rs::search_visits_n_timed`), so N's wall-clock runs ~1-2s longer than S's and was
+  **losing the 6s client/server race** on slower devices — its late `ai_move` then hit the `ai_move`
+  handler's `g.turn != ai_pid` guard, which sent `{type:"error","message":"not the AI's turn"}` → a toast.
+  **Two-part fix:** (1) `CLIENT_AI_TIMEOUT` 6.0→**8.0** so N reliably WINS the race (and when the client
+  wins, the move applies the instant it's submitted — the human never waits the full timeout; it only
+  bounds the truly-can't-compute fallback); (2) the `ai_move` handler now **LOGS stale submissions instead
+  of toasting** — a late client move is a normal race artifact, never the user's fault, and the server
+  fallback already guarantees the turn advances (so silently dropping it is safe; never re-add the toast).
+- **Admin "Vals" overlay now works for N (position eval ONLY, by request).** N had no overlay (the per-card
+  block only handled H/H2/H3/S), so the gold Vals button never rendered. Added a **faithful Python port of
+  N's value net** in `main.py`: `_load_n_model` (loads the **SAME `spender-core/src/n_model.json` the WASM
+  embeds** — single source, no drift; path = repo-root/spender-core/src; shipped by the Dockerfile `COPY .`),
+  `_n_features` (a line-for-line port of `spender-core/src/feats.rs::features` — the 101-feature vector,
+  reusing the Python `v_state`/`valuation3` helpers the Rust was ported from), and `_n_position_eval`
+  (z-score → dense→ReLU→dense→tanh, [-1,1] from the mover's seat). Wired into `_compute_overlay` (N →
+  **`ai_position_eval` only, NO `ai_card_values`**) + the `mk_room_state` overlay gate. Frontend
+  (`Spender.jsx`): the Vals toggle + eval pill now gate on **(card values OR a position eval)** so they
+  appear for N; the pill is N-aware (label **`eval`**, NO never-resolving "srch …" — that's S-only). Cost is
+  one tiny MLP forward per broadcast (~same as S's `_s_position_eval`). Gracefully omits if numpy/the file
+  is unavailable. (It IS admin-only, same as every variant's overlay.)
+- **Take button right-aligned.** The action-button rows (`.actions-panel-btns`/`.board-actions-btns`) were
+  `justify-content:center`, so with no Vals button (N before the fix) Take floated to the MIDDLE. Changed to
+  **`flex-end`**; the Vals toggle's `margin-right:auto` keeps it on the LEFT when present, so **Take is now
+  always against the right edge** for every variant (no regression — with the toggle present the auto-margin
+  already pinned Take right under `center` too).
+- Validated: backend review/replay/game-logic tests pass (119); N eval verified in [-1,1] with correct
+  mover-perspective; `npm run smoke` clean (CLS 0). The WASM was UNCHANGED (already shipped `searchN` in
+  `c96e3fd`); this was a Python-timeout + JS-gating + CSS fix only.
 
 ### Hard-won conclusions — DO NOT relitigate
 These cost many self-play/training cycles to establish (NOTE: the "evaluation quality is not the
