@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.9.8
+// @version      0.9.9
 // @description  Runs Splendor variant PV (the AlphaZero policy+value net, strongest AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows PV's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -1169,15 +1169,24 @@
     return true;
   }
   // One step of the hands-off loop, run when there is no in-progress game of mine.
+  let _leftAt = 0;
   async function autoLobbyStep() {
     const room = findMyWaitingRoom();
     if (room) {
       const have = humanCount(room), need = CONFIG.ROOM_PLAYERS;
+      console.log('[WWSD] auto-lobby: my waiting room', room._id, 'status', room.status, 'players', have + '/' + need, JSON.stringify((room.players || []).map(p => p && p.name)));
       if (have >= need) { setStatus('players ready (' + have + '/' + need + ') — starting…'); await startGame(room); }
       else setStatus('waiting for players (' + have + '/' + need + ')…');
       return;
     }
-    if (!onLobbyPage()) { setStatus('back to lobby to create a game…'); gotoLobby(); return; }
+    if (!onLobbyPage()) {
+      // A game of mine just ended (we're still on the board). Settle, then return to the lobby — prefer the
+      // Leave/back button (SPA nav keeps CONFIG in memory) and fall back to a hard navigation.
+      setStatus('game over — returning to lobby…');
+      await sleep(2500);
+      if (!leaveLobby()) gotoLobby();
+      return;
+    }
     setStatus('creating new lobby…');
     await createLobby();
   }
@@ -1277,9 +1286,13 @@
     const once = mk('Analyze now');
     once.onclick = async () => { lastKey = null; const w = CONFIG.ENABLED; CONFIG.ENABLED = true; await tick(); CONFIG.ENABLED = w; };
     const auto = mk('Autoplay: off');
-    auto.onclick = () => { CONFIG.AUTO_PLAY = !CONFIG.AUTO_PLAY; auto.textContent = 'Autoplay: ' + (CONFIG.AUTO_PLAY ? 'on' : 'off'); auto.style.background = CONFIG.AUTO_PLAY ? '#4a8f4a' : '#b5852f'; if (CONFIG.AUTO_PLAY) { lastKey = null; tick(); } };
+    const setAuto = () => { auto.textContent = 'Autoplay: ' + (CONFIG.AUTO_PLAY ? 'on' : 'off'); auto.style.background = CONFIG.AUTO_PLAY ? '#4a8f4a' : '#b5852f'; };
+    auto.onclick = () => { CONFIG.AUTO_PLAY = !CONFIG.AUTO_PLAY; setAuto(); saveCfg(); if (CONFIG.AUTO_PLAY) { lastKey = null; tick(); } };
+    setAuto();
     const loop = mk('Auto-lobby: off');
-    loop.onclick = () => { CONFIG.AUTO_LOBBY = !CONFIG.AUTO_LOBBY; loop.textContent = 'Auto-lobby: ' + (CONFIG.AUTO_LOBBY ? 'on' : 'off'); loop.style.background = CONFIG.AUTO_LOBBY ? '#4a8f4a' : '#b5852f'; if (CONFIG.AUTO_LOBBY) { CONFIG.AUTO_PLAY = true; auto.textContent = 'Autoplay: on'; auto.style.background = '#4a8f4a'; lastKey = null; tick(); } };
+    const setLoop = () => { loop.textContent = 'Auto-lobby: ' + (CONFIG.AUTO_LOBBY ? 'on' : 'off'); loop.style.background = CONFIG.AUTO_LOBBY ? '#4a8f4a' : '#b5852f'; };
+    loop.onclick = () => { CONFIG.AUTO_LOBBY = !CONFIG.AUTO_LOBBY; if (CONFIG.AUTO_LOBBY) CONFIG.AUTO_PLAY = true; setAuto(); setLoop(); saveCfg(); if (CONFIG.AUTO_LOBBY) { lastKey = null; tick(); } };
+    setLoop();
     const methods = mk('List methods'); methods.onclick = () => { listMethods(); setStatus('methods → console'); };
     const record = mk('Record'); record.onclick = () => { const on = toggleRecord(); record.style.background = on ? '#4a8f4a' : '#b5852f'; };
     const domrec = mk('Rec DOM'); domrec.onclick = () => { const on = toggleDomRecord(); domrec.style.background = on ? '#4a8f4a' : '#b5852f'; setStatus(on ? 'DOM-record ON — make moves; check console' : 'DOM-record off'); };
@@ -1290,8 +1303,15 @@
     document.body.appendChild(box);
   }
 
+  // Persist the loop toggles across page reloads — navigating between lobby/board reloads the page and
+  // re-inits the script, which would otherwise reset AUTO_PLAY/AUTO_LOBBY to off and stop the loop.
+  const _LS_CFG = 'wwsd_cfg';
+  function saveCfg() { try { localStorage.setItem(_LS_CFG, JSON.stringify({ AUTO_PLAY: CONFIG.AUTO_PLAY, AUTO_LOBBY: CONFIG.AUTO_LOBBY })); } catch (e) {} }
+  function loadCfg() { try { const o = JSON.parse(localStorage.getItem(_LS_CFG) || '{}'); if (typeof o.AUTO_PLAY === 'boolean') CONFIG.AUTO_PLAY = o.AUTO_PLAY; if (typeof o.AUTO_LOBBY === 'boolean') CONFIG.AUTO_LOBBY = o.AUTO_LOBBY; } catch (e) {} }
+
   function boot() {
     if (!meteorReady()) { setTimeout(boot, 1000); return; }
+    loadCfg();
     installApplyHook();
     installClickRecorder();
     buildPanel();
