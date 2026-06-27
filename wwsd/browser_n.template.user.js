@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.9.3
+// @version      0.9.4
 // @description  Runs Splendor variant PV (the AlphaZero policy+value net, strongest AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows PV's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -49,6 +49,10 @@
   const BONUS = [0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,0,0,0,0,0,0,1,1,1,1,1,1,2,2,2,2,2,2,3,3,3,3,3,3,4,4,4,4,4,4,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4];
   const PTS   = [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,2,3,1,2,1,2,2,3,1,2,1,2,2,3,1,1,2,2,2,3,1,2,1,2,2,3,1,2,1,2,4,5,4,3,4,5,4,3,4,5,4,3,4,5,4,3,4,5,4,3];
   const NOBLE_PTS = [3,3,3,3,3,3,3,3,3,3];
+  // Friend noble requirements (bonus counts per colour white..black) by friend noble id (wwsd_defs.json).
+  // Used to pick WHICH noble to claim when a buy completes one — `pickNoble` takes the noble's GLOBAL id
+  // (like buyCard's cardIndex), not a board slot, and nobles never relocate.
+  const NOBLE_REQ_F = [[3,3,0,0,3],[3,3,3,0,0],[0,3,3,3,0],[0,0,3,3,3],[3,0,0,3,3],[4,0,0,0,4],[4,4,0,0,0],[0,4,4,0,0],[0,0,4,4,0],[0,0,0,4,4]];
 
   // CRITICAL: the friend's spendee deck and OUR compiled WASM (Spender) deck contain the same 90
   // cards but in COMPLETELY DIFFERENT index order — only the multiset matches (89 cards map exactly;
@@ -271,6 +275,8 @@
         return { type: 'reserveHiddenCard', playerIndex: seat, level: action.level - 1 }; // confirmed: 0-indexed level
       case 'pass':
         return { type: 'pass', playerIndex: seat };                                     // (unconfirmed shape)
+      case 'pick_noble':
+        return { type: 'pickNoble', playerIndex: seat, nobleIndex: action.noble_id };   // nobleIndex = noble GLOBAL id
       default: throw new Error('unmapped action: ' + action.kind);
     }
   }
@@ -426,7 +432,7 @@
     },
     discardReturn: [0.389, 0.847],
     // The 3 board noble slots (left→right) — clicked to resolve a 2+ noble choice after a buy.
-    nobles: [[0.618, 0.198], [0.720, 0.198], [0.822, 0.195]],
+    nobles: [[0.620, 0.200], [0.720, 0.200], [0.820, 0.200]],   // 3 board noble slots, left→right (recorded)
   };
   function cardSlotFrac(slot) { return UI.cardFrac[slot]; }   // engine board slot → exact canvas fraction
   const _gpause = () => sleep(CONFIG.STEP_MS + Math.floor(Math.random() * 160));   // jittered gap between clicks
@@ -501,9 +507,43 @@
   }
   // Claim a noble (only when a buy made you eligible for 2+): click each board noble slot; the
   // eligible one claims and resolves the choice, so the other clicks become harmless no-ops.
-  async function uiClaimNoble() {
-    for (const p of UI.nobles) { synthClickCanvas(...p); await _gpause(); }
-    console.log('[WWSD] uiClaimNoble: clicked all noble slots');
+  // Which board noble (by FRIEND noble id, the value pickNoble wants) does `seat` now qualify for? -1 if none.
+  function qualifyingNobleId(dump, seat) {
+    const bon = (dump.bonuses && dump.bonuses[seat]) || [];
+    for (const ni of (dump.nobles || [])) {
+      if (ni == null || ni < 0) continue;
+      const req = NOBLE_REQ_F[ni];
+      if (req && req.every((r, c) => (bon[c] || 0) >= r)) return ni;
+    }
+    return -1;
+  }
+  // Claim the completed noble via the Meteor METHOD (reliable: no modal, no timing/coords). The buy has
+  // already committed (bonuses updated), so we just resolve the pending pickNoble. Falls back to clicking
+  // the qualifying board slot if the id can't be resolved.
+  async function claimNoble(g, seat) {
+    const dump = toDump(g.data, parseInt((g.settings || {}).targetScore) || 15);
+    if (seat == null) seat = ((g.data && g.data.state) || {}).currentPlayerIndex;
+    const ni = qualifyingNobleId(dump, seat);
+    if (ni >= 0) {
+      await playAction(g, { kind: 'pick_noble', noble_id: ni });
+      console.log('[WWSD] claimNoble → pickNoble nobleIndex', ni);
+      return true;
+    }
+    console.warn('[WWSD] claimNoble: no qualifying noble id; falling back to canvas click');
+    await uiClaimNoble(dump, seat);
+    return false;
+  }
+  // Canvas fallback: wait out the modal, then click ONLY the qualifying slot (not all three — extra clicks
+  // after the claim land on the board behind the closed modal). Sprays all slots only if the slot is unknown.
+  async function uiClaimNoble(dump, seat) {
+    await sleep(CONFIG.OPEN_MS + 400);                 // the noble modal takes ~a second to become clickable
+    let slots = UI.nobles.map((_, i) => i);
+    if (dump && seat != null) {
+      const idx = (dump.nobles || []).findIndex(ni => { const req = ni >= 0 && NOBLE_REQ_F[ni]; return req && req.every((r, c) => ((dump.bonuses[seat] || [])[c] || 0) >= r); });
+      if (idx >= 0 && UI.nobles[idx]) slots = [idx];
+    }
+    for (const i of slots) { synthMoveCanvas(...UI.nobles[i]); await sleep(CONFIG.HOVER_MS); synthClickCanvas(...UI.nobles[i]); await _gpause(); }
+    console.log('[WWSD] uiClaimNoble: clicked slots', slots);
   }
   // Pass: click Pass → confirm modal → confirm.
   async function uiPass() {
@@ -684,7 +724,7 @@
       const subDecision = af && s2.currentPlayerIndex === af.seat && s2.currentJob && s2.currentJob !== CONFIG.REGULAR_JOB;
       const wasBuy = r.action.kind === 'buy_board' || r.action.kind === 'buy_reserved';
       const committed = !af || s2.currentPlayerIndex !== af.seat || subDecision || turnKey(af.game) !== key;
-      if (subDecision && wasBuy) { setStatus('claiming noble…'); await uiClaimNoble(); lastKey = key; _retries = {}; }
+      if (subDecision && wasBuy) { setStatus('claiming noble…'); await claimNoble(af.game, af.seat); lastKey = key; _retries = {}; }
       else if (committed) { lastKey = key; _retries = {}; }
       else {
         _retries[key] = (_retries[key] || 0) + 1;
@@ -752,7 +792,7 @@
     buildPanel();
     loadWasm().then(() => setStatus('ready')).catch(e => setStatus('WASM failed: ' + e.message + ' (CSP?)'));
     setInterval(tick, CONFIG.POLL_MS);
-    window.WWSD_N = { analyzePosition, findMyActiveGame, listMethods, toggleRecord, toggleDomRecord, synthClickCanvas, synthHoldCanvas, boardCanvas, uiTakeGems, uiBuyBoard, uiReserveBoard, uiReserveDeck, uiBuyReserved, uiPass, uiDiscard, uiClaimNoble, playMove, cardSlotFrac, UI, toDump, CONFIG, createLobby, leaveLobby };
+    window.WWSD_N = { analyzePosition, findMyActiveGame, listMethods, toggleRecord, toggleDomRecord, synthClickCanvas, synthHoldCanvas, boardCanvas, uiTakeGems, uiBuyBoard, uiReserveBoard, uiReserveDeck, uiBuyReserved, uiPass, uiDiscard, uiClaimNoble, claimNoble, qualifyingNobleId, playMove, cardSlotFrac, UI, toDump, CONFIG, createLobby, leaveLobby };
     console.log('[WWSD] browser-N loaded. window.WWSD_N available.');
   }
   boot();
