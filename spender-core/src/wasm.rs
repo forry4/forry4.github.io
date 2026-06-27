@@ -212,10 +212,11 @@ struct PVModel {
     tw: Vec<Vec<f32>>, tb: Vec<Vec<f32>>,
     vw: Vec<f32>, vb: Vec<f32>, pw: Vec<f32>, pb: Vec<f32>, n_act: usize,
 }
-/// The Plan-A AZ champion served as N: the ENRICHED policy+value net `net_ext_19` (178-feat, via
-/// `feats::features_ext`) — beats the prior 125-feat champion net_pv_4 ~0.59-0.60 (depth-robust,
-/// 256-3200 sims). (net_pv_4 + the 125-feat `features_az` path remain in the tree; rollback = revert this
-/// commit's pv_model.json + the two `features_ext`->`features_az` swaps in this file.)
+/// The Plan-A AZ champion served as N: `net_night_14` (178-feat, via `feats::features_ext`) — a
+/// higher-sims (512) self-play continuation that beats the prior champion net_ext_19 ~0.55-0.58
+/// (depth-robust, 256-3200 sims) and S 0.827 @400. PURE net swap (encoder unchanged from net_ext_19).
+/// Rollback = revert this commit's pv_model.json (restores net_ext_19); net_pv_4 + the 125-feat
+/// `features_az` path also remain in the tree.
 static PV_MODEL_JSON: &str = include_str!("pv_model.json");
 
 fn build_pv_net() -> crate::valuenet::PolicyValueNet {
