@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.9.1
+// @version      0.9.2
 // @description  Runs Splendor variant PV (the AlphaZero policy+value net, strongest AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows PV's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -585,6 +585,72 @@
   }
   function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // LOBBY ADAPTER (plain DOM, on /lobby/rooms) — create a room, leave, start.
+  // Unlike the in-game canvas (synthetic clicks) and moves (Meteor method), the lobby is a
+  // Semantic-UI form, so we drive real <button>/<select> elements. Recorded create flow:
+  //   button.new-room-button "+ Create" → select[name=numPlayers]=2 → select[name=speed]=fast
+  //   → button "Create" (the modal confirm, NOT the opener).  Leave = button "Leave".
+  // ─────────────────────────────────────────────────────────────────────────
+  function _btnByText(txt, root) {
+    const t = String(txt).trim().toLowerCase();
+    return Array.from((root || document).querySelectorAll('button')).find(b => b.textContent.trim().toLowerCase() === t) || null;
+  }
+  function _waitFor(sel, ms) {
+    return new Promise((res, rej) => {
+      const t0 = Date.now();
+      (function poll() {
+        const el = document.querySelector(sel);
+        if (el) return res(el);
+        if (Date.now() - t0 > ms) return rej(new Error('timeout waiting for ' + sel));
+        setTimeout(poll, 100);
+      })();
+    });
+  }
+  // Set a <select> robustly across native + Semantic-UI dropdowns: native value+change, the
+  // jQuery dropdown API if present, AND clicking the rendered `.menu .item[data-value]` as a fallback.
+  function _setSelect(sel, value) {
+    if (typeof sel === 'string') sel = document.querySelector(`select[name="${sel}"]`);
+    if (!sel) return false;
+    const v = String(value);
+    sel.value = v;
+    sel.dispatchEvent(new Event('input', { bubbles: true }));
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    try { if (window.jQuery && window.jQuery(sel).dropdown) window.jQuery(sel).dropdown('set selected', v); } catch (e) {}
+    const wrap = sel.closest('.ui.dropdown') || (sel.parentElement && sel.parentElement.querySelector('.ui.dropdown'));
+    if (wrap) { const item = wrap.querySelector(`.menu .item[data-value="${v}"]`); if (item) item.click(); }
+    return sel.value === v;
+  }
+  // Target score isn't a named field we've confirmed — find the select whose options include 15 AND 21.
+  function _setTargetScore(value) {
+    for (const sel of document.querySelectorAll('select')) {
+      const vals = Array.from(sel.options || []).map(o => o.value);
+      if (vals.includes('15') && vals.includes('21')) { _setSelect(sel, value); console.log('[WWSD] target set via select[name=' + (sel.name || '?') + '] =', value); return true; }
+    }
+    console.warn('[WWSD] no 15/21 target select found — using site default (may be 21!)');
+    return false;
+  }
+  // Create a fresh room on /lobby/rooms. Defaults: 2 players, CONFIG speed, target 15 (21 is broken).
+  async function createLobby(opts) {
+    opts = opts || {};
+    const players = String(opts.players || 2), speed = opts.speed || CONFIG.SPEED || 'fast', target = String(opts.target || CONFIG.TARGET || '15');
+    const opener = document.querySelector('button.new-room-button') || _btnByText('+ Create');
+    if (!opener) throw new Error('no "+ Create" opener — navigate to /lobby/rooms first');
+    opener.click();
+    await _waitFor('select[name="numPlayers"]', 4000);
+    await sleep(250);
+    _setSelect('numPlayers', players);
+    _setSelect('speed', speed);
+    _setTargetScore(target);
+    await sleep(250);
+    const confirm = _btnByText('Create');           // exact "create" — won't match the "+ Create" opener
+    if (!confirm) throw new Error('no modal "Create" button');
+    confirm.click();
+    console.log('[WWSD] createLobby → players', players, 'speed', speed, 'target', target);
+    return true;
+  }
+  function leaveLobby() { const b = _btnByText('Leave'); if (b) { b.click(); return true; } return false; }
+
   async function tick() {
     if (!CONFIG.ENABLED || busy || !meteorReady()) return;
     const found = findMyActiveGame();
@@ -686,7 +752,7 @@
     buildPanel();
     loadWasm().then(() => setStatus('ready')).catch(e => setStatus('WASM failed: ' + e.message + ' (CSP?)'));
     setInterval(tick, CONFIG.POLL_MS);
-    window.WWSD_N = { analyzePosition, findMyActiveGame, listMethods, toggleRecord, toggleDomRecord, synthClickCanvas, synthHoldCanvas, boardCanvas, uiTakeGems, uiBuyBoard, uiReserveBoard, uiReserveDeck, uiBuyReserved, uiPass, uiDiscard, uiClaimNoble, playMove, cardSlotFrac, UI, toDump, CONFIG };
+    window.WWSD_N = { analyzePosition, findMyActiveGame, listMethods, toggleRecord, toggleDomRecord, synthClickCanvas, synthHoldCanvas, boardCanvas, uiTakeGems, uiBuyBoard, uiReserveBoard, uiReserveDeck, uiBuyReserved, uiPass, uiDiscard, uiClaimNoble, playMove, cardSlotFrac, UI, toDump, CONFIG, createLobby, leaveLobby };
     console.log('[WWSD] browser-N loaded. window.WWSD_N available.');
   }
   boot();
