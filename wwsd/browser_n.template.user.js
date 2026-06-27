@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.9.7
+// @version      0.9.8
 // @description  Runs Splendor variant PV (the AlphaZero policy+value net, strongest AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows PV's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -24,7 +24,9 @@
     MAX_SIMS:   3000,   // hard sim cap per move — keeps each search short (~2-3s) so the page can't freeze
     MY_NAME:    '',     // your spendee display name; blank = auto via Meteor.userId()
     AUTO_PLAY:  false,  // execute the move (needs the SITE ADAPTER wired); false = advisor overlay only
+    AUTO_LOBBY: false,  // full hands-off loop: when no game is active, create a lobby + start it when someone joins
     AUTO_START: false,  // when no game is active, auto-create a fresh vs-CPU game (full hands-off loop)
+    ROOM_PLAYERS: 2,    // size of auto-created lobbies (start once this many humans are present)
     SPEED:      'fast', // auto-created game timer: 'fast' | 'normal' | 'slow'
     TARGET:     '15',   // auto-created game target score: '15' | '21'
     POLL_MS:    1500,
@@ -694,10 +696,50 @@
   }
   function leaveLobby() { const b = _btnByText('Leave'); if (b) { b.click(); return true; } return false; }
 
+  // ── AUTO-LOBBY state machine ───────────────────────────────────────────────
+  // A game I'm in that is NOT in-progress and NOT finished = my waiting room (so we don't need to know the
+  // exact 'waiting' status string). Players join into g.players; once ROOM_PLAYERS humans are present, start.
+  function onLobbyPage() { return /\/lobby/.test(location.pathname); }
+  function gotoLobby() { try { location.href = '/lobby/rooms'; } catch (e) {} }
+  function humanCount(g) { return (g.players || []).filter(p => p && p.isHuman !== false).length; }
+  function findMyWaitingRoom() {
+    for (const g of fetchGames()) {
+      if (g.status === 'INPROGRESS' || g.status === 'FINISHED') continue;
+      if (findMySeat(g) >= 0) return g;
+    }
+    return null;
+  }
+  // Start a waiting room I host. The host's start control is a DOM button — best guess by text until recorded.
+  let _startedAt = 0;
+  async function startGame(g) {
+    const btn = _btnByText('Start') || _btnByText('Start game') || _btnByText('Begin') || document.querySelector('button.start-game-button, button[class*="start"]');
+    if (!btn) { setStatus('joined — click Start manually (start button not found)'); return false; }
+    btn.click();
+    _startedAt = Date.now();
+    console.log('[WWSD] startGame: clicked', btn.textContent.trim());
+    return true;
+  }
+  // One step of the hands-off loop, run when there is no in-progress game of mine.
+  async function autoLobbyStep() {
+    const room = findMyWaitingRoom();
+    if (room) {
+      const have = humanCount(room), need = CONFIG.ROOM_PLAYERS;
+      if (have >= need) { setStatus('players ready (' + have + '/' + need + ') — starting…'); await startGame(room); }
+      else setStatus('waiting for players (' + have + '/' + need + ')…');
+      return;
+    }
+    if (!onLobbyPage()) { setStatus('back to lobby to create a game…'); gotoLobby(); return; }
+    setStatus('creating new lobby…');
+    await createLobby();
+  }
+
   async function tick() {
     if (!CONFIG.ENABLED || busy || !meteorReady()) return;
     const found = findMyActiveGame();
-    if (!found) { setStatus('idle — no active game' + (CONFIG.MY_NAME ? '' : ' (set MY_NAME if not detected)')); return; }
+    if (!found) {
+      if (CONFIG.AUTO_LOBBY) { busy = true; try { await autoLobbyStep(); } catch (e) { setStatus('auto-lobby: ' + (e && e.message)); console.error('[WWSD] autoLobbyStep', e); } finally { busy = false; } return; }
+      setStatus('idle — no active game' + (CONFIG.MY_NAME ? '' : ' (set MY_NAME if not detected)')); return;
+    }
     const { game: g, seat } = found;
     const st = (g.data && g.data.state) || {};
     if (st.currentPlayerIndex !== seat) { setStatus('waiting for opponent…'); return; }
@@ -787,13 +829,15 @@
     once.onclick = async () => { lastKey = null; const w = CONFIG.ENABLED; CONFIG.ENABLED = true; await tick(); CONFIG.ENABLED = w; };
     const auto = mk('Autoplay: off');
     auto.onclick = () => { CONFIG.AUTO_PLAY = !CONFIG.AUTO_PLAY; auto.textContent = 'Autoplay: ' + (CONFIG.AUTO_PLAY ? 'on' : 'off'); auto.style.background = CONFIG.AUTO_PLAY ? '#4a8f4a' : '#b5852f'; if (CONFIG.AUTO_PLAY) { lastKey = null; tick(); } };
+    const loop = mk('Auto-lobby: off');
+    loop.onclick = () => { CONFIG.AUTO_LOBBY = !CONFIG.AUTO_LOBBY; loop.textContent = 'Auto-lobby: ' + (CONFIG.AUTO_LOBBY ? 'on' : 'off'); loop.style.background = CONFIG.AUTO_LOBBY ? '#4a8f4a' : '#b5852f'; if (CONFIG.AUTO_LOBBY) { CONFIG.AUTO_PLAY = true; auto.textContent = 'Autoplay: on'; auto.style.background = '#4a8f4a'; lastKey = null; tick(); } };
     const methods = mk('List methods'); methods.onclick = () => { listMethods(); setStatus('methods → console'); };
     const record = mk('Record'); record.onclick = () => { const on = toggleRecord(); record.style.background = on ? '#4a8f4a' : '#b5852f'; };
     const domrec = mk('Rec DOM'); domrec.onclick = () => { const on = toggleDomRecord(); domrec.style.background = on ? '#4a8f4a' : '#b5852f'; setStatus(on ? 'DOM-record ON — make moves; check console' : 'DOM-record off'); };
     statusEl = document.createElement('div'); statusEl.style.cssText = 'margin-top:8px;color:#cdbfa8;font-size:12px;min-height:16px';
     statusEl.textContent = 'loading PV…';
     resultEl = document.createElement('div'); resultEl.style.cssText = 'margin-top:6px';
-    for (const el of [toggle, once, auto, methods, record, domrec, statusEl, resultEl]) box.appendChild(el);
+    for (const el of [toggle, once, auto, loop, methods, record, domrec, statusEl, resultEl]) box.appendChild(el);
     document.body.appendChild(box);
   }
 
@@ -804,7 +848,7 @@
     buildPanel();
     loadWasm().then(() => setStatus('ready')).catch(e => setStatus('WASM failed: ' + e.message + ' (CSP?)'));
     setInterval(tick, CONFIG.POLL_MS);
-    window.WWSD_N = { analyzePosition, findMyActiveGame, listMethods, toggleRecord, toggleDomRecord, synthClickCanvas, synthHoldCanvas, boardCanvas, uiTakeGems, uiBuyBoard, uiReserveBoard, uiReserveDeck, uiBuyReserved, uiPass, uiDiscard, uiClaimNoble, claimNoble, qualifyingNobleId, playMove, cardSlotFrac, UI, toDump, CONFIG, createLobby, leaveLobby };
+    window.WWSD_N = { analyzePosition, findMyActiveGame, listMethods, toggleRecord, toggleDomRecord, synthClickCanvas, synthHoldCanvas, boardCanvas, uiTakeGems, uiBuyBoard, uiReserveBoard, uiReserveDeck, uiBuyReserved, uiPass, uiDiscard, uiClaimNoble, claimNoble, qualifyingNobleId, playMove, cardSlotFrac, UI, toDump, CONFIG, createLobby, leaveLobby, startGame, autoLobbyStep, findMyWaitingRoom };
     console.log('[WWSD] browser-N loaded. window.WWSD_N available.');
   }
   boot();
