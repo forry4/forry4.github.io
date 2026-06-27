@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.9.6
+// @version      0.9.7
 // @description  Runs Splendor variant PV (the AlphaZero policy+value net, strongest AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows PV's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -977,17 +977,25 @@
     await uiClaimNoble(dump, seat);
     return ni >= 0;
   }
-  // Canvas fallback: wait out the modal, then click ONLY the qualifying slot (not all three — extra clicks
-  // after the claim land on the board behind the closed modal). Sprays all slots only if the slot is unknown.
+  // Board nobles RE-CENTER as they're claimed, so the click position depends on how many REMAIN, not a
+  // fixed slot. Recorded layouts (canvasFrac), left→right: 3 → 0.62/0.72/0.82, 2 → 0.669/0.774, 1 → centre.
+  function nobleLayout(n) {
+    if (n >= 3) return [[0.620, 0.200], [0.720, 0.200], [0.820, 0.200]];
+    if (n === 2) return [[0.669, 0.196], [0.774, 0.196]];
+    return [[0.720, 0.197]];
+  }
+  // Canvas claim: wait out the modal, then click the qualifying noble at its CURRENT position. We map the
+  // qualifying noble to its index among the nobles STILL on the board (dump.nobles compacts as claimed), and
+  // pick that index from the count-based layout. Sprays the current positions only if the qualifier is unknown.
   async function uiClaimNoble(dump, seat) {
     await sleep(CONFIG.OPEN_MS + 400);                 // the noble modal takes ~a second to become clickable
-    let slots = UI.nobles.map((_, i) => i);
-    if (dump && seat != null) {
-      const idx = (dump.nobles || []).findIndex(ni => { const req = ni >= 0 && NOBLE_REQ_F[ni]; return req && req.every((r, c) => ((dump.bonuses[seat] || [])[c] || 0) >= r); });
-      if (idx >= 0 && UI.nobles[idx]) slots = [idx];
-    }
-    for (const i of slots) { synthMoveCanvas(...UI.nobles[i]); await sleep(CONFIG.HOVER_MS); synthClickCanvas(...UI.nobles[i]); await _gpause(); }
-    console.log('[WWSD] uiClaimNoble: clicked slots', slots);
+    const real = ((dump && dump.nobles) || []).filter(ni => ni != null && ni >= 0);  // current board nobles, L→R
+    const layout = nobleLayout(real.length || 3);
+    let idx = -1;
+    if (seat != null) idx = real.findIndex(ni => { const req = NOBLE_REQ_F[ni]; return req && req.every((r, c) => ((dump.bonuses[seat] || [])[c] || 0) >= r); });
+    const targets = (idx >= 0 && layout[idx]) ? [layout[idx]] : layout;
+    for (const p of targets) { synthMoveCanvas(...p); await sleep(CONFIG.HOVER_MS); synthClickCanvas(...p); await _gpause(); }
+    console.log('[WWSD] uiClaimNoble: N=' + real.length + ' idx=' + idx + ' clicked', JSON.stringify(targets));
   }
   // Pass: click Pass → confirm modal → confirm.
   async function uiPass() {
