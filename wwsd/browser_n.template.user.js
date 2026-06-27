@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.9.9
+// @version      0.9.10
 // @description  Runs Splendor variant PV (the AlphaZero policy+value net, strongest AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows PV's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -697,35 +697,41 @@
   function leaveLobby() { const b = _btnByText('Leave'); if (b) { b.click(); return true; } return false; }
 
   // ── AUTO-LOBBY state machine ───────────────────────────────────────────────
-  // A game I'm in that is NOT in-progress and NOT finished = my waiting room (so we don't need to know the
-  // exact 'waiting' status string). Players join into g.players; once ROOM_PLAYERS humans are present, start.
+  // Waiting lobbies live in the `rooms` collection (NOT `games`, which only holds started games). A room:
+  //   { _id, numPlayers, state:"WaitingFill", spots:[{state:1,player:{userId,name,...}},{state:0}], ... }
+  // My room = one whose spots contain my userId; a join flips an empty spot (state:0) to a filled one.
   function onLobbyPage() { return /\/lobby/.test(location.pathname); }
   function gotoLobby() { try { location.href = '/lobby/rooms'; } catch (e) {} }
-  function humanCount(g) { return (g.players || []).filter(p => p && p.isHuman !== false).length; }
+  function myUserId() { try { return window.Meteor.userId(); } catch (e) { return null; } }
+  function fetchRooms() { try { return window.Meteor.connection._mongo_livedata_collections['rooms'].find().fetch(); } catch (e) { return []; } }
+  function roomPlayers(room) { return ((room && room.spots) || []).filter(s => s && s.player).map(s => s.player); }
   function findMyWaitingRoom() {
-    for (const g of fetchGames()) {
-      if (g.status === 'INPROGRESS' || g.status === 'FINISHED') continue;
-      if (findMySeat(g) >= 0) return g;
+    const uid = myUserId();
+    if (!uid) return null;
+    for (const r of fetchRooms()) {
+      if ((r.spots || []).some(s => s && s.player && s.player.userId === uid)) return r;
     }
     return null;
   }
-  // Start a waiting room I host. The host's start control is a DOM button — best guess by text until recorded.
+  // Once the room is full: many lobbies auto-start, others need a host click. Try a Start/Ready button if one
+  // exists (and we're on the room screen); otherwise just wait — the started game appears in `games` and the
+  // main tick takes over. The _startedAt guard keeps us from re-clicking every poll while it settles.
   let _startedAt = 0;
-  async function startGame(g) {
-    const btn = _btnByText('Start') || _btnByText('Start game') || _btnByText('Begin') || document.querySelector('button.start-game-button, button[class*="start"]');
-    if (!btn) { setStatus('joined — click Start manually (start button not found)'); return false; }
-    btn.click();
+  async function startGame(room) {
+    if (Date.now() - _startedAt < 8000) return false;
     _startedAt = Date.now();
-    console.log('[WWSD] startGame: clicked', btn.textContent.trim());
-    return true;
+    const btn = _btnByText('Start') || _btnByText('Start game') || _btnByText('Begin') || _btnByText('Ready') || document.querySelector('button.start-game-button, button[class*="start" i]');
+    if (btn) { btn.click(); console.log('[WWSD] startGame: clicked', JSON.stringify(btn.textContent.trim())); return true; }
+    console.log('[WWSD] startGame: no Start/Ready button — assuming auto-start; waiting for game in `games`…');
+    setStatus('room full — waiting for game to start…');
+    return false;
   }
   // One step of the hands-off loop, run when there is no in-progress game of mine.
-  let _leftAt = 0;
   async function autoLobbyStep() {
     const room = findMyWaitingRoom();
     if (room) {
-      const have = humanCount(room), need = CONFIG.ROOM_PLAYERS;
-      console.log('[WWSD] auto-lobby: my waiting room', room._id, 'status', room.status, 'players', have + '/' + need, JSON.stringify((room.players || []).map(p => p && p.name)));
+      const players = roomPlayers(room), have = players.length, need = room.numPlayers || CONFIG.ROOM_PLAYERS;
+      console.log('[WWSD] auto-lobby: room', room._id, 'state', room.state, have + '/' + need, JSON.stringify(players.map(p => p.name)));
       if (have >= need) { setStatus('players ready (' + have + '/' + need + ') — starting…'); await startGame(room); }
       else setStatus('waiting for players (' + have + '/' + need + ')…');
       return;
