@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.9.10
+// @version      0.9.11
 // @description  Runs Splendor variant PV (the AlphaZero policy+value net, strongest AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows PV's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -1158,6 +1158,7 @@
     const uid = myUserId();
     if (!uid) return null;
     for (const r of fetchRooms()) {
+      if (!/^Waiting/.test(r.state || '')) continue;   // only rooms still accepting players (NOT Playing/Finished)
       if ((r.spots || []).some(s => s && s.player && s.player.userId === uid)) return r;
     }
     return null;
@@ -1185,6 +1186,9 @@
       else setStatus('waiting for players (' + have + '/' + need + ')…');
       return;
     }
+    // No waiting room of mine. If we JUST kicked off a start, the game is spinning up — wait for it to appear
+    // in `games` instead of creating a second lobby in the transition gap.
+    if (Date.now() - _startedAt < 10000) { setStatus('game starting…'); return; }
     if (!onLobbyPage()) {
       // A game of mine just ended (we're still on the board). Settle, then return to the lobby — prefer the
       // Leave/back button (SPA nav keeps CONFIG in memory) and fall back to a hard navigation.
