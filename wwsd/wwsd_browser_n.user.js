@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.9.4
+// @version      0.9.5
 // @description  Runs Splendor variant PV (the AlphaZero policy+value net, strongest AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows PV's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -1152,7 +1152,16 @@
     const job = st.currentJob;
     busy = true;
     try {
-      if (job && job !== CONFIG.REGULAR_JOB) { setStatus('sub-decision (' + job + ') — resolve manually'); lastKey = key; return; }
+      if (job && job !== CONFIG.REGULAR_JOB) {
+        // The noble pick lands in its OWN tick (the job transitions async, after the buy's tick ends),
+        // so claim it here too — not only in the post-buy fast path below.
+        if (CONFIG.AUTO_PLAY && job === 'SPENDEE_PICK_NOBLE') {
+          setStatus('claiming noble…');
+          try { await claimNoble(g, seat); } catch (e) { setStatus('noble claim failed: ' + (e && e.message)); console.error('[WWSD] claimNoble', e); }
+          lastKey = key; return;
+        }
+        setStatus('sub-decision (' + job + ') — resolve manually'); lastKey = key; return;
+      }
       setStatus('PV thinking…');
       const t0 = Date.now();
       const r = await analyzePosition(g, seat);
