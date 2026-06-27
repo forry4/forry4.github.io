@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.9.5
+// @version      0.9.6
 // @description  Runs Splendor variant PV (the AlphaZero policy+value net, strongest AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows PV's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -517,21 +517,16 @@
     }
     return -1;
   }
-  // Claim the completed noble via the Meteor METHOD (reliable: no modal, no timing/coords). The buy has
-  // already committed (bonuses updated), so we just resolve the pending pickNoble. Falls back to clicking
-  // the qualifying board slot if the id can't be resolved.
+  // Claim the completed noble. NOTE: spendee 403s Meteor `/gameActions/insert` (that's why every move
+  // goes through the canvas, not the method) — so we claim by CLICKING the qualifying noble in the modal,
+  // same as all other moves. The buy has already committed (bonuses updated), so we just resolve the pick.
   async function claimNoble(g, seat) {
     const dump = toDump(g.data, parseInt((g.settings || {}).targetScore) || 15);
     if (seat == null) seat = ((g.data && g.data.state) || {}).currentPlayerIndex;
     const ni = qualifyingNobleId(dump, seat);
-    if (ni >= 0) {
-      await playAction(g, { kind: 'pick_noble', noble_id: ni });
-      console.log('[WWSD] claimNoble → pickNoble nobleIndex', ni);
-      return true;
-    }
-    console.warn('[WWSD] claimNoble: no qualifying noble id; falling back to canvas click');
+    console.log('[WWSD] claimNoble: qualifying noble id', ni, '→ canvas click');
     await uiClaimNoble(dump, seat);
-    return false;
+    return ni >= 0;
   }
   // Canvas fallback: wait out the modal, then click ONLY the qualifying slot (not all three — extra clicks
   // after the claim land on the board behind the closed modal). Sprays all slots only if the slot is unknown.
