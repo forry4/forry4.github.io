@@ -212,7 +212,10 @@ struct PVModel {
     tw: Vec<Vec<f32>>, tb: Vec<Vec<f32>>,
     vw: Vec<f32>, vb: Vec<f32>, pw: Vec<f32>, pb: Vec<f32>, n_act: usize,
 }
-/// The Plan-A AZ champion: a policy+value net (125-feat, via `feats::features_az`) that beats N and S.
+/// The Plan-A AZ champion served as N: the ENRICHED policy+value net `net_ext_19` (178-feat, via
+/// `feats::features_ext`) — beats the prior 125-feat champion net_pv_4 ~0.59-0.60 (depth-robust,
+/// 256-3200 sims). (net_pv_4 + the 125-feat `features_az` path remain in the tree; rollback = revert this
+/// commit's pv_model.json + the two `features_ext`->`features_az` swaps in this file.)
 static PV_MODEL_JSON: &str = include_str!("pv_model.json");
 
 fn build_pv_net() -> crate::valuenet::PolicyValueNet {
@@ -223,7 +226,7 @@ fn build_pv_net() -> crate::valuenet::PolicyValueNet {
 }
 
 /// Variant PV root-parallel search: like `search_visits_n_timed`, but the net supplies BOTH the MCTS
-/// leaf VALUE and the POLICY PRIOR (`root_visits_until_pv`) over the 125-feat `features_az` encoder —
+/// leaf VALUE and the POLICY PRIOR (`root_visits_until_pv`) over the 178-feat `features_ext` encoder —
 /// the learned AlphaZero policy+value head. Same SUM-then-argmax root-parallel aggregation as S/N.
 #[wasm_bindgen]
 pub fn search_visits_pv_timed(state_json: &str, seat: usize, budget_ms: f64, max_sims: usize, seed: u64) -> Vec<i32> {
@@ -234,7 +237,7 @@ pub fn search_visits_pv_timed(state_json: &str, seat: usize, budget_ms: f64, max
     let s = dump.into_state();
     let net = build_pv_net();
     let pv = |st: &State, sd: usize| -> (f64, Vec<f64>) {
-        let raw: Vec<f32> = crate::feats::features_az(st, sd).iter().map(|&x| x as f32).collect();
+        let raw: Vec<f32> = crate::feats::features_ext(st, sd).iter().map(|&x| x as f32).collect();
         let (v, logits) = net.forward_raw(&raw);
         (v as f64, logits.iter().map(|&x| x as f64).collect())
     };
@@ -263,7 +266,7 @@ pub fn search_pv_full_timed(state_json: &str, seat: usize, budget_ms: f64, max_s
     let s = dump.into_state();
     let net = build_pv_net();
     let pv = |st: &State, sd: usize| -> (f64, Vec<f64>) {
-        let raw: Vec<f32> = crate::feats::features_az(st, sd).iter().map(|&x| x as f32).collect();
+        let raw: Vec<f32> = crate::feats::features_ext(st, sd).iter().map(|&x| x as f32).collect();
         let (v, logits) = net.forward_raw(&raw);
         (v as f64, logits.iter().map(|&x| x as f64).collect())
     };

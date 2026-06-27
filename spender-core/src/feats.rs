@@ -187,6 +187,79 @@ pub fn features_az(s: &State, seat: usize) -> Vec<f64> {
     f
 }
 
+/// ENRICHED 178-feat encoder for the deployed PV champion `net_ext_19`: the deployed base 125
+/// (`features_az`, byte-identical to rust-search's `features()`) + 5 groups appended in A,B,C,D,E order:
+///   A) per-color self-need (5) — summed color deficits over the top-6 v_state targets.
+///   B) opponent FACE-UP reserve content (3x4 = pts/need/eng/nob); blind/empty -> -1 (hidden deck-reserves
+///      stay hidden).
+///   C) own reserve content (3x4); empty -> -1.
+///   D) per-board-card take_value (12) — H3 acquisition score; empty -> -1.
+///   E) per-board-card turns-to-afford (12) — H3 tempo; empty -> -1.
+/// Total 125 + 5 + 12 + 12 + 12 + 12 = 178. PORTED VERBATIM from rust-search `feats::features_ext` (the
+/// encoder net_ext_19 trained on); every helper below is byte-identical across the branches
+/// (engine/valuation/v_state/heuristic), so the served features byte-match the trained ones by construction.
+pub fn features_ext(s: &State, seat: usize) -> Vec<f64> {
+    let opp = 1 - seat;
+    let val = Valuation::new(s, W_TEMPO, W_GEM, W_GOLD);
+    let mut f = features_az(s, seat); // deployed base 125
+
+    // A) per-color self-need (5)
+    let tg = v_state::seat_targets(&val, seat, false);
+    let k = tg.len().min(6);
+    let mut need = [0.0f64; 5];
+    for &(_, ci) in &tg[..k] {
+        let d = valuation::color_deficits(s, ci, seat);
+        for c in 0..5 {
+            need[c] += d[c] as f64;
+        }
+    }
+    f.extend_from_slice(&need);
+
+    // B) opponent face-up reserve content (3 slots x 4); blind/empty -> -1 (hidden info stays hidden)
+    for slot in 0..3 {
+        if slot < s.reserved[opp].len() && !s.reserved_blind[opp][slot] {
+            let ci = s.reserved[opp][slot];
+            f.push(PTS[ci as usize] as f64);
+            f.push(valuation::gold_needed(s, ci, opp) as f64);
+            f.push(val.engine_value(ci, opp));
+            f.push(val.noble_progress(ci, opp));
+        } else {
+            for _ in 0..4 {
+                f.push(-1.0);
+            }
+        }
+    }
+
+    // C) own reserve content (3 slots x 4); empty -> -1
+    for slot in 0..3 {
+        if slot < s.reserved[seat].len() {
+            let ci = s.reserved[seat][slot];
+            f.push(PTS[ci as usize] as f64);
+            f.push(valuation::gold_needed(s, ci, seat) as f64);
+            f.push(val.engine_value(ci, seat));
+            f.push(val.noble_progress(ci, seat));
+        } else {
+            for _ in 0..4 {
+                f.push(-1.0);
+            }
+        }
+    }
+
+    // D) per-board-card take_value (12) — H3 acquisition score; empty -> -1
+    for slot in 0..12 {
+        let ci = s.board[slot];
+        f.push(if ci >= 0 { crate::heuristic::take_value(&val, ci, seat) } else { -1.0 });
+    }
+
+    // E) per-board-card turns-to-afford (12) = H3 tempo (take-turns to cover the deficit); empty -> -1
+    for slot in 0..12 {
+        let ci = s.board[slot];
+        f.push(if ci >= 0 { valuation::tempo(s, ci, seat) as f64 } else { -1.0 });
+    }
+
+    f
+}
+
 /// CSV header — column order matches `features()` exactly, plus the appended `label`.
 pub fn header() -> String {
     let mut h: Vec<String> = vec![

@@ -1,5 +1,3 @@
-/* @ts-self-types="./spender_core.d.ts" */
-
 /**
  * Convert the aggregate-winning action index to a dict-move JSON for the given state (the main thread
  * resolves it once, after summing visits across the worker pool). `{"error":...}` on a parse failure.
@@ -142,6 +140,33 @@ export function search_n_full_timed(state_json, seat, budget_ms, max_sims, seed)
 }
 
 /**
+ * Variant PV search returning visits + the searched POSITION VALUE + per-edge Q — the PV analog of
+ * `search_n_full_timed`, for the WWSD browser overlay's eval display (the visits-only
+ * `search_visits_pv_timed` is enough to PICK a move but carries no eval). Same `{"visits","value",
+ * "q"}` JSON shape as N. The net supplies both the leaf value and the policy prior.
+ * @param {string} state_json
+ * @param {number} seat
+ * @param {number} budget_ms
+ * @param {number} max_sims
+ * @param {bigint} seed
+ * @returns {string}
+ */
+export function search_pv_full_timed(state_json, seat, budget_ms, max_sims, seed) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(state_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.search_pv_full_timed(ptr0, len0, seat, budget_ms, max_sims, seed);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
  * Variant N root-parallel search: identical to `search_visits_timed` but uses the LEARNED value as
  * the MCTS leaf (+ the H3 prior). The net is parsed once per call (once per move per worker —
  * negligible vs the thousands of sims it then runs). Same SUM-then-argmax aggregation as S.
@@ -163,7 +188,7 @@ export function search_visits_n_timed(state_json, seat, budget_ms, max_sims, see
 
 /**
  * Variant PV root-parallel search: like `search_visits_n_timed`, but the net supplies BOTH the MCTS
- * leaf VALUE and the POLICY PRIOR (`root_visits_until_pv`) over the 125-feat `features_az` encoder —
+ * leaf VALUE and the POLICY PRIOR (`root_visits_until_pv`) over the 178-feat `features_ext` encoder —
  * the learned AlphaZero policy+value head. Same SUM-then-argmax root-parallel aggregation as S/N.
  * @param {string} state_json
  * @param {number} seat
