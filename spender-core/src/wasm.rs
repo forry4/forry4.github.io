@@ -226,6 +226,20 @@ fn build_pv_net() -> crate::valuenet::PolicyValueNet {
     )
 }
 
+/// LONG-MODE (21-point) specialization: `net_ext21_13` (178-feat, SAME `features_ext` encoder as the
+/// 15-point net). Trained by 21-point self-play warm-started from net_night_14; beats net_night_14 AT
+/// 21 points 0.6325 on fresh decks (600g), holds 0.58-0.65 across the 256-2048 sims-ladder. Served only
+/// when `win_points == 21` (see the branch in the PV search fns); 15-point games are byte-identical to
+/// before. Rollback = revert this commit (drops pv_model_21.json + the branch -> net_night_14 for all).
+static PV_MODEL_JSON_21: &str = include_str!("pv_model_21.json");
+
+fn build_pv_net_21() -> crate::valuenet::PolicyValueNet {
+    let m: PVModel = serde_json::from_str(PV_MODEL_JSON_21).expect("embedded pv_model_21.json");
+    crate::valuenet::PolicyValueNet::from_parts(
+        m.mu, m.sd, m.tdims, m.tw, m.tb, m.vw, m.vb, m.pw, m.pb, m.n_act,
+    )
+}
+
 /// Variant PV root-parallel search: like `search_visits_n_timed`, but the net supplies BOTH the MCTS
 /// leaf VALUE and the POLICY PRIOR (`root_visits_until_pv`) over the 178-feat `features_ext` encoder —
 /// the learned AlphaZero policy+value head. Same SUM-then-argmax root-parallel aggregation as S/N.
@@ -236,7 +250,8 @@ pub fn search_visits_pv_timed(state_json: &str, seat: usize, budget_ms: f64, max
         Err(_) => return Vec::new(),
     };
     let s = dump.into_state();
-    let net = build_pv_net();
+    // Long mode (21) gets the specialized net; Classic (15) stays net_night_14 (byte-identical to before).
+    let net = if s.win_points == 21 { build_pv_net_21() } else { build_pv_net() };
     let pv = |st: &State, sd: usize| -> (f64, Vec<f64>) {
         let raw: Vec<f32> = crate::feats::features_ext(st, sd).iter().map(|&x| x as f32).collect();
         let (v, logits) = net.forward_raw(&raw);
@@ -265,7 +280,8 @@ pub fn search_pv_full_timed(state_json: &str, seat: usize, budget_ms: f64, max_s
         Err(_) => return "{\"error\":\"parse\"}".to_string(),
     };
     let s = dump.into_state();
-    let net = build_pv_net();
+    // Long mode (21) gets the specialized net; Classic (15) stays net_night_14 (byte-identical to before).
+    let net = if s.win_points == 21 { build_pv_net_21() } else { build_pv_net() };
     let pv = |st: &State, sd: usize| -> (f64, Vec<f64>) {
         let raw: Vec<f32> = crate::feats::features_ext(st, sd).iter().map(|&x| x as f32).collect();
         let (v, logits) = net.forward_raw(&raw);
