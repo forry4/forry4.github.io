@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.9.15
+// @version      0.9.16
 // @description  Runs Splendor variant PV (the AlphaZero policy+value net, strongest AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows PV's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
