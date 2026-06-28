@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.9.13
+// @version      0.9.14
 // @description  Runs Splendor variant PV (the AlphaZero policy+value net, strongest AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows PV's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -1013,14 +1013,29 @@
     synthClickCanvas(...UI.discardReturn);
     console.log('[WWSD] uiDiscard', colors, '→ return');
   }
-  // Heuristic: which `n` gems to return when a take overfills past 10. Discard the most-abundant
-  // COLOURED gems first (keeps a balanced hand; never throws away flexible gold unless nothing else).
-  function chooseDiscards(tok, n) {
+  // Which `n` gems to return when over 10. PLAN-AWARE: the search often takes gems intending to buy a
+  // RESERVED card next turn, so never discard a gem that breaks a reserved card's affordability if avoidable.
+  // Per discard, pick the token whose removal keeps the most-affordable reserved card closest to buyable
+  // (shortfall = gold still needed after gold-on-hand); tie-break: drop the most-abundant COLOURED gem, gold
+  // last. With no reserved cards this reduces to the old most-abundant-colour heuristic.
+  function chooseDiscards(tok, n, dump, seat) {
     const c = tok.slice(), out = [];
+    const reserved = (dump && seat != null && dump.reserved[seat]) || [];
+    const bon = (dump && seat != null && dump.bonuses[seat]) || [0, 0, 0, 0, 0];
+    const goldNeed = (ci, t) => { const cost = COST_F[ci]; if (!cost) return 0; let nd = 0; for (let i = 0; i < 5; i++) nd += Math.max(0, cost[i] - (bon[i] || 0) - (t[i] || 0)); return nd; };
+    const shortfall = (t) => { let m = Infinity; for (const ci of reserved) { if (ci == null || ci < 0) continue; m = Math.min(m, Math.max(0, goldNeed(ci, t) - (t[5] || 0))); } return m === Infinity ? 0 : m; };
     for (let k = 0; k < n; k++) {
-      let best = -1, bestv = 0;
-      for (let i = 0; i < 5; i++) if (c[i] > bestv) { bestv = c[i]; best = i; }
-      if (best >= 0) { out.push(G[best]); c[best]--; } else { out.push('gold'); c[5]--; }
+      let best = -1, bestSf = Infinity, bestColored = -1, bestAbund = -1;
+      for (let i = 0; i < 6; i++) {
+        if (c[i] <= 0) continue;
+        const t = c.slice(); t[i]--;
+        const sf = shortfall(t), colored = i < 5 ? 1 : 0, abund = c[i];
+        if (sf < bestSf || (sf === bestSf && colored > bestColored) || (sf === bestSf && colored === bestColored && abund > bestAbund)) {
+          best = i; bestSf = sf; bestColored = colored; bestAbund = abund;
+        }
+      }
+      if (best < 0) break;
+      out.push(best < 5 ? G[best] : 'gold'); c[best]--;
     }
     return out;
   }
@@ -1032,7 +1047,7 @@
     if (tok.reduce((a, b) => a + b, 0) === 10 && (dump.bank[5] || 0) > 0) {
       await sleep(CONFIG.OPEN_MS + 350);
       const post = tok.slice(); post[5] = (post[5] || 0) + 1;     // +1 gold from the reserve
-      await uiDiscard(chooseDiscards(post, 1));
+      await uiDiscard(chooseDiscards(post, 1, dump, seat));
     }
   }
 
@@ -1048,7 +1063,7 @@
         for (const i of action.colors) tok[i]++;
         const nDiscard = Math.max(0, tok.reduce((a, b) => a + b, 0) - 10);
         await uiTakeGems(colors, dump.bank);
-        if (nDiscard > 0) { await sleep(CONFIG.OPEN_MS + 350); await uiDiscard(chooseDiscards(tok, nDiscard)); }
+        if (nDiscard > 0) { await sleep(CONFIG.OPEN_MS + 350); await uiDiscard(chooseDiscards(tok, nDiscard, dump, seat)); }
         return;
       }
       case 'buy_board': return uiBuyBoard(action.slot);
