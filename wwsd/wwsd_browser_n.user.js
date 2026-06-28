@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.9.14
+// @version      0.9.15
 // @description  Runs Splendor variant PV (the AlphaZero policy+value net, strongest AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows PV's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -1040,14 +1040,46 @@
     return out;
   }
 
+  // Ask H3 (the engine eval) which gems to discard — strictly better than chooseDiscards (it weighs the
+  // whole position: reserved AND board cards, engine value, noble progress). The PV search returns H3's
+  // pick at any non-PLAY phase, so we build the post-take DISCARD state (Spender-space, phase=1) and read
+  // the top action: A_DISCARD(61)+colour. Loops per gem. Returns colour NAMES, or null on any failure
+  // (caller falls back to chooseDiscards). `addTokens` = engine colour indices added by the take (or [5]=gold).
+  const A_DISCARD = 61;
+  async function decideDiscards(dump, seat, addTokens, n) {
+    try {
+      const wb = await loadWasm();
+      const s = toEngineDump(dump);                 // Spender-space: H3 reads card costs by engine id
+      for (const ci of addTokens) s.tokens[seat][ci]++;
+      s.phase = 1; s.turn = seat;                   // DISCARD
+      const out = [];
+      for (let k = 0; k < n; k++) {
+        const raw = wb.search_pv_full_timed(JSON.stringify(s), seat >>> 0, 200, 1, BigInt(0));
+        const d = JSON.parse(raw);
+        if (d.error) throw new Error(d.error);
+        let a = 0; for (let i = 1; i < d.visits.length; i++) if (d.visits[i] > d.visits[a]) a = i;
+        const col = a - A_DISCARD;
+        if (col < 0 || col > 5 || (s.tokens[seat][col] || 0) <= 0) throw new Error('bad discard action ' + a);
+        s.tokens[seat][col]--;
+        out.push(col < 5 ? G[col] : 'gold');
+      }
+      console.log('[WWSD] H3 discard →', JSON.stringify(out));
+      return out;
+    } catch (e) {
+      console.warn('[WWSD] H3 discard failed → chooseDiscards fallback:', e && e.message);
+      return null;
+    }
+  }
+
   // A reserve grants a gold; if you were AT the 10-cap and the bank has gold, that overfills to 11 →
-  // spendee shows the normal discard modal. Return one gem (keeps the new gold; drops a surplus colour).
+  // spendee shows the normal discard modal. Drop one gem (H3-chosen; chooseDiscards fallback).
   async function reserveDiscard(dump, seat) {
     const tok = dump.tokens[seat];
     if (tok.reduce((a, b) => a + b, 0) === 10 && (dump.bank[5] || 0) > 0) {
       await sleep(CONFIG.OPEN_MS + 350);
       const post = tok.slice(); post[5] = (post[5] || 0) + 1;     // +1 gold from the reserve
-      await uiDiscard(chooseDiscards(post, 1, dump, seat));
+      const h3 = await decideDiscards(dump, seat, [5], 1);
+      await uiDiscard(h3 || chooseDiscards(post, 1, dump, seat));
     }
   }
 
@@ -1063,7 +1095,7 @@
         for (const i of action.colors) tok[i]++;
         const nDiscard = Math.max(0, tok.reduce((a, b) => a + b, 0) - 10);
         await uiTakeGems(colors, dump.bank);
-        if (nDiscard > 0) { await sleep(CONFIG.OPEN_MS + 350); await uiDiscard(chooseDiscards(tok, nDiscard, dump, seat)); }
+        if (nDiscard > 0) { await sleep(CONFIG.OPEN_MS + 350); const h3 = await decideDiscards(dump, seat, action.colors, nDiscard); await uiDiscard(h3 || chooseDiscards(tok, nDiscard, dump, seat)); }
         return;
       }
       case 'buy_board': return uiBuyBoard(action.slot);
