@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.9.11
+// @version      0.9.12
 // @description  Runs Splendor variant PV (the AlphaZero policy+value net, strongest AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows PV's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -20,8 +20,8 @@
   // CONFIG
   // ─────────────────────────────────────────────────────────────────────────
   const CONFIG = {
-    THINK_SECS: 3.0,    // wall-clock budget (NB: ignored inside the wasm — MAX_SIMS is the real cap)
-    MAX_SIMS:   3000,   // hard sim cap per move — keeps each search short (~2-3s) so the page can't freeze
+    THINK_SECS: 4.0,    // wall-clock budget per move — the real cap on most hardware (search blocks the page while it runs)
+    MAX_SIMS:   10000,  // hard sim ceiling per move — only binds if the machine reaches it within THINK_SECS
     MY_NAME:    '',     // your spendee display name; blank = auto via Meteor.userId()
     AUTO_PLAY:  false,  // execute the move (needs the SITE ADAPTER wired); false = advisor overlay only
     AUTO_LOBBY: false,  // full hands-off loop: when no game is active, create a lobby + start it when someone joins
