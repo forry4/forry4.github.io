@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.9.18
+// @version      0.9.19
 // @description  Runs Splendor variant PV (the AlphaZero policy+value net, strongest AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows PV's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -21,7 +21,9 @@
   // ─────────────────────────────────────────────────────────────────────────
   const CONFIG = {
     THINK_SECS: 4.0,    // wall-clock budget per move (search blocks the page while it runs)
-    MAX_SIMS:   50000,  // sim cap per move — stops at this OR THINK_SECS, whichever first. The WASM does ~100k
+    POOL_SIZE:  0,      // root-parallel Web Workers (0 = auto: cores-1, capped 12). Each fans the SAME search
+                        //   with its own seed; visits are summed → ~N× sims/move (matches the website's fan-out).
+    MAX_SIMS:   50000,  // sim cap PER WORKER — stops at this OR THINK_SECS, whichever first. The WASM does ~100k
                         //   sims/s, so the old 3000 cap stopped in ~0.03s; 50000 is ~0.5s of search (well under 4s).
     MY_NAME:    '',     // your spendee display name; blank = auto via Meteor.userId()
     AUTO_PLAY:  false,  // execute the move (needs the SITE ADAPTER wired); false = advisor overlay only
@@ -96,6 +98,7 @@
   // ─────────────────────────────────────────────────────────────────────────
   //__GLUE__
   const WASM_B64 = "__WASM_B64__";
+  const WORKER_GLUE = "__GLUE_STR__";   // the same glue as a string, for building worker source
   let _wasmReady = null;
   function _b64bytes(b64) {
     const bin = atob(b64);
@@ -106,6 +109,93 @@
   function loadWasm() {
     if (!_wasmReady) _wasmReady = wasm_bindgen({ module_or_path: _b64bytes(WASM_B64) }).then(() => wasm_bindgen);
     return _wasmReady;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // ROOT-PARALLEL worker pool (mirrors the website's s-worker fan-out). The WASM does one search per
+  // thread; the page is single-threaded, so we fan the SAME position across N Web Workers with distinct
+  // seeds and SUM their visit counts (root-parallel MCTS) → ~N× the sims in the same wall-clock. The
+  // module is compiled ONCE on the main thread and the compiled WebAssembly.Module is shared to every
+  // worker (no per-worker recompile of the 5.9 MB blob). Falls back to a single main-thread search if
+  // Workers are blocked (CSP) or fail.
+  // ─────────────────────────────────────────────────────────────────────────
+  const _WORKER_HARNESS = `
+    let __ready=false;
+    self.onmessage=async(e)=>{const m=e.data;
+      if(m.t==='init'){try{await wasm_bindgen({module_or_path:m.mod});__ready=true;self.postMessage({t:'ready'});}catch(err){self.postMessage({t:'ready',err:String(err&&err.message||err)});}return;}
+      if(m.t==='search'){if(!__ready){self.postMessage({id:m.id,err:'not ready'});return;}
+        try{const raw=wasm_bindgen.search_pv_full_timed(m.state,m.seat,m.budget,m.maxSims,BigInt(m.seed>>>0));self.postMessage({id:m.id,raw});}
+        catch(err){self.postMessage({id:m.id,err:String(err&&err.message||err)});}}
+    };`;
+  let _pool = null, _poolPromise = null, _searchId = 1;
+  function _poolSize() {
+    if (CONFIG.POOL_SIZE > 0) return CONFIG.POOL_SIZE;
+    const cores = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4;
+    return Math.max(1, Math.min(cores - 1, 12));   // leave a core for the UI; cap memory
+  }
+  async function ensurePool() {
+    if (_pool) return _pool;
+    if (_poolPromise) return _poolPromise;
+    _poolPromise = (async () => {
+      const want = _poolSize();
+      const mod = await WebAssembly.compile(_b64bytes(WASM_B64));     // compile once, share to workers
+      const url = URL.createObjectURL(new Blob([WORKER_GLUE + "\n;\n" + _WORKER_HARNESS], { type: 'application/javascript' }));
+      const entries = [];
+      for (let i = 0; i < want; i++) {
+        const w = new Worker(url);
+        const ready = new Promise((res, rej) => {
+          const onMsg = (e) => { if (e.data && e.data.t === 'ready') { w.removeEventListener('message', onMsg); e.data.err ? rej(new Error(e.data.err)) : res(); } };
+          w.addEventListener('message', onMsg);
+          setTimeout(() => rej(new Error('worker init timeout')), 20000);
+        });
+        w.postMessage({ t: 'init', mod });
+        entries.push({ w, ready });
+      }
+      await Promise.all(entries.map(x => x.ready));
+      URL.revokeObjectURL(url);
+      _pool = { workers: entries.map(x => x.w), n: entries.length };
+      console.log('[WWSD] worker pool ready:', _pool.n, 'workers');
+      return _pool;
+    })().catch(e => { console.warn('[WWSD] worker pool unavailable → single-thread:', e && e.message); _pool = { workers: [], n: 0 }; return _pool; });
+    return _poolPromise;
+  }
+  function _workerSearch(w, state, seat, budget, maxSims, seed) {
+    return new Promise((res) => {
+      const id = _searchId++;
+      const onMsg = (e) => { if (e.data && e.data.id === id) { w.removeEventListener('message', onMsg); res(e.data.raw || null); } };
+      w.addEventListener('message', onMsg);
+      w.postMessage({ t: 'search', id, state, seat, budget, maxSims, seed });
+    });
+  }
+  // Sum visits and W (=q·N) across the per-worker {visits,value,q} results → one aggregate {visits,value,q}.
+  function _aggregate(raws) {
+    let visits = null, wins = null;
+    for (const raw of raws) {
+      if (!raw) continue;
+      let d; try { d = JSON.parse(raw); } catch (e) { continue; }
+      if (!d || d.error || !d.visits) continue;
+      if (!visits) { visits = new Array(d.visits.length).fill(0); wins = new Array(d.visits.length).fill(0); }
+      for (let a = 0; a < visits.length; a++) {
+        const v = d.visits[a] || 0; visits[a] += v;
+        const q = d.q && d.q[a]; if (q != null) wins[a] += q * v;
+      }
+    }
+    if (!visits) return null;
+    const tot = visits.reduce((a, b) => a + b, 0), totW = wins.reduce((a, b) => a + b, 0);
+    return { visits, value: tot > 0 ? totW / tot : 0, q: visits.map((v, a) => v > 0 ? wins[a] / v : null) };
+  }
+  // Root-parallel PV search; returns the SAME {visits,value,q} shape as a single search_pv_full_timed.
+  async function searchPV(state, seat, budget, maxSims, baseSeed) {
+    const pool = await ensurePool();
+    if (pool.n > 0) {
+      const raws = await Promise.all(pool.workers.map((w, i) =>
+        _workerSearch(w, state, seat >>> 0, budget, maxSims, ((baseSeed >>> 0) + Math.imul(i, 2654435761)) >>> 0)));
+      const agg = _aggregate(raws);
+      if (agg) return agg;
+      console.warn('[WWSD] pool returned no results → single-thread');
+    }
+    const wb = await loadWasm();
+    return JSON.parse(wb.search_pv_full_timed(state, seat >>> 0, budget, maxSims, BigInt(baseSeed >>> 0)));
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -224,11 +314,9 @@
     const winPoints = parseInt((game.settings || {}).targetScore) || 15;
     const dump = toDump(data, winPoints);           // friend-space (for display + execution)
     const engineDump = toEngineDump(dump);           // Spender-space (correct costs for the WASM)
-    const wb = await loadWasm();
-    const seed = BigInt(((Date.now() >>> 0) ^ (seat << 28)) >>> 0);
-    const raw = wb.search_pv_full_timed(JSON.stringify(engineDump), seat >>> 0, CONFIG.THINK_SECS * 1000, CONFIG.MAX_SIMS >>> 0, seed);
-    const d = JSON.parse(raw);
-    if (d.error) throw new Error('PV error: ' + d.error);
+    const baseSeed = ((Date.now() >>> 0) ^ (seat << 28)) >>> 0;
+    const d = await searchPV(JSON.stringify(engineDump), seat >>> 0, CONFIG.THINK_SECS * 1000, CONFIG.MAX_SIMS >>> 0, baseSeed);
+    if (!d || d.error) throw new Error('PV error: ' + (d && d.error));
     const tot = d.visits.reduce((a, b) => a + b, 0);
     // Drop any buy the engine liked that isn't actually affordable in the REAL game (guards the one
     // inexact remap card + any deck drift) — never recommend a move you can't pay for.
@@ -926,7 +1014,7 @@
     buildPanel();
     loadWasm().then(() => setStatus('ready')).catch(e => setStatus('WASM failed: ' + e.message + ' (CSP?)'));
     setInterval(tick, CONFIG.POLL_MS);
-    window.WWSD_N = { analyzePosition, findMyActiveGame, listMethods, toggleRecord, toggleDomRecord, synthClickCanvas, synthHoldCanvas, boardCanvas, uiTakeGems, uiBuyBoard, uiReserveBoard, uiReserveDeck, uiBuyReserved, uiPass, uiDiscard, uiClaimNoble, claimNoble, qualifyingNobleId, playMove, cardSlotFrac, UI, toDump, CONFIG, createLobby, leaveLobby, startGame, autoLobbyStep, findMyWaitingRoom };
+    window.WWSD_N = { analyzePosition, findMyActiveGame, listMethods, toggleRecord, toggleDomRecord, synthClickCanvas, synthHoldCanvas, boardCanvas, uiTakeGems, uiBuyBoard, uiReserveBoard, uiReserveDeck, uiBuyReserved, uiPass, uiDiscard, uiClaimNoble, claimNoble, qualifyingNobleId, playMove, cardSlotFrac, UI, toDump, CONFIG, createLobby, leaveLobby, startGame, autoLobbyStep, findMyWaitingRoom, ensurePool, searchPV };
     console.log('[WWSD] browser-N loaded. window.WWSD_N available.');
   }
   boot();

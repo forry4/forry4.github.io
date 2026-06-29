@@ -7,6 +7,7 @@ Tampermonkey. No hosting / CORS / fetch: the WASM is embedded. Re-run after rebu
 """
 from __future__ import annotations
 import base64
+import json
 import pathlib
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -16,10 +17,14 @@ glue = (PKG / "spender_core.js").read_text(encoding="utf-8")
 wasm_b64 = base64.b64encode((PKG / "spender_core_bg.wasm").read_bytes()).decode("ascii")
 tpl = (HERE / "browser_n.template.user.js").read_text(encoding="utf-8")
 
-if "//__GLUE__" not in tpl or "__WASM_B64__" not in tpl:
-    raise SystemExit("template missing //__GLUE__ or __WASM_B64__ placeholder")
+if "//__GLUE__" not in tpl or "__WASM_B64__" not in tpl or '"__GLUE_STR__"' not in tpl:
+    raise SystemExit("template missing //__GLUE__, __WASM_B64__, or __GLUE_STR__ placeholder")
 
-out = tpl.replace("//__GLUE__", glue).replace('"__WASM_B64__"', '"' + wasm_b64 + '"')
+# __GLUE_STR__ = the same no-modules glue as a JS string literal, so the worker pool can build worker
+# source from it (the workers need wasm_bindgen but not the inlined WASM — they get a compiled Module).
+out = (tpl.replace("//__GLUE__", glue)
+          .replace('"__GLUE_STR__"', json.dumps(glue))
+          .replace('"__WASM_B64__"', '"' + wasm_b64 + '"'))
 dst = HERE / "wwsd_browser_n.user.js"
 dst.write_text(out, encoding="utf-8")
 print(f"wrote {dst}  ({len(out):,} bytes; wasm {len(wasm_b64):,} b64 chars)")
