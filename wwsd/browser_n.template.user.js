@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.9.19
+// @version      0.9.20
 // @description  Runs Splendor variant PV (the AlphaZero policy+value net, strongest AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows PV's recommended move, position eval, and top alternatives; optional autoplay.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -326,6 +326,7 @@
     const denom = tot || 1;
     return {
       dump, seat, sims: tot, value: d.value,
+      rec_pct: order.length ? +(100 * order[0][1] / denom).toFixed(1) : 0,
       recommendation: describeMove(dump, top), rec_eval: d.q[top], action: structuredMove(dump, top),
       alternatives: order.slice(1, 6).map(([a, v]) => ({
         pct: +(100 * v / denom).toFixed(1), text: describeMove(dump, a), eval: d.q[a], action: structuredMove(dump, a),
@@ -958,7 +959,7 @@
     setStatus(`${r.sims} sims · target ${(r.dump.win_points)}`);
     if (!resultEl) return;
     const lbl = r.value > 0.15 ? 'favored' : r.value < -0.15 ? 'behind' : 'even';
-    let h = `<div style="font-weight:700;color:#e8c170">${r.recommendation}`;
+    let h = `<div style="font-weight:700;color:#e8c170">${r.rec_pct != null ? r.rec_pct + '% ' : ''}${r.recommendation}`;
     if (r.rec_eval != null) h += ` <span style="color:#b8a888;font-weight:400;font-size:12px">(${sev(r.rec_eval)})</span>`;
     h += `</div><div style="margin-top:3px;color:#cdbfa8;font-size:12px">position: ${sev(r.value)} (${lbl})</div>`;
     if (r.alternatives.length) {
