@@ -82,7 +82,7 @@ LEVEL1: list[tuple] = [
     (0,"red",{"white":2,"red":2}),(1,"red",{"white":4}),
     (0,"white",{"blue":2,"green":2,"black":1}),(0,"white",{"red":2,"black":1}),
     (0,"white",{"blue":1,"green":1,"red":1,"black":1}),(0,"white",{"blue":3}),
-    (0,"white",{"blue":2,"green":2}),(0,"white",{"blue":1,"green":2,"red":1,"black":1}),
+    (0,"white",{"blue":2,"black":2}),(0,"white",{"blue":1,"green":2,"red":1,"black":1}),
     (0,"white",{"white":3,"blue":1,"black":1}),(1,"white",{"green":4}),
 ]
 
