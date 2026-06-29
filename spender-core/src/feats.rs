@@ -3,7 +3,7 @@
 //! trained ones. `features(s, seat)` returns the vector in the SAME order as `header()` (the CSV
 //! columns, minus the appended `label`). Keep them in lock-step.
 
-use crate::cards::{COST, NOBLE_REQ, PTS};
+use crate::cards::{BONUS, COST, LEVEL_OF, NOBLE_PTS, NOBLE_REQ, PTS};
 use crate::engine::State;
 use crate::heuristic::{W_GEM, W_GOLD, W_TEMPO};
 use crate::v_state;
@@ -306,4 +306,91 @@ pub fn header() -> String {
 /// Number of features (excludes the label column).
 pub fn n_features() -> usize {
     header().split(',').count() - 1
+}
+
+// ── CARD-SET ATTENTION tokenizer (ported from rust-search for variant-N attention serving) ──
+// 18 tokens (12 board + 3 own-reserved + 3 nobles, empties masked) x 24 feats; + 28 state feats.
+// One unified per-token schema; nobles encode their REQUIREMENTS in the cost slot (a noble is "acquired"
+// by having those bonuses). Mover = seat; OPP reserves are NOT tokenized (no hidden-info leak).
+pub const TOK_N: usize = 18;
+pub const TOK_F: usize = 24;
+pub const TOK_STATE: usize = 28;
+
+fn card_token(s: &State, val: &Valuation, ci: i32, seat: usize, opp: usize, ttype: usize, out: &mut Vec<f64>) {
+    let c = ci as usize;
+    for k in 0..5 { out.push(COST[c][k] as f64); }                                   // 0-4 cost
+    for k in 0..5 { out.push(if BONUS[c] == k { 1.0 } else { 0.0 }); }               // 5-9 bonus 1-hot
+    out.push(PTS[c] as f64);                                                          // 10 points
+    out.push(LEVEL_OF[c] as f64 / 3.0);                                               // 11 level
+    out.push(crate::heuristic::take_value(val, ci, seat));                            // 12 take_value (me)
+    out.push(valuation::tempo(s, ci, seat) as f64);                                   // 13 turns-to-afford
+    out.push(val.engine_value(ci, seat));                                             // 14 engine
+    out.push(val.noble_progress(ci, seat));                                           // 15 noble progress
+    out.push(valuation::gold_needed(s, ci, seat) as f64);                             // 16 gold needed
+    out.push(if valuation::affordable_now(s, ci, seat) { 1.0 } else { 0.0 });         // 17 affordable now (me)
+    out.push(crate::heuristic::take_value(val, ci, opp));                             // 18 opp take_value
+    out.push(if valuation::affordable_now(s, ci, opp) { 1.0 } else { 0.0 });          // 19 opp affordable now
+    out.push((s.points[seat] + PTS[c] + valuation::noble_completion_pts(s, ci, seat)) as f64 / s.win_points as f64); // 20 closing
+    for t in 0..3 { out.push(if t == ttype { 1.0 } else { 0.0 }); }                   // 21-23 type 1-hot
+}
+
+fn noble_token(s: &State, ni: i32, seat: usize, opp: usize, out: &mut Vec<f64>) {
+    let n = ni as usize;
+    let req = &NOBLE_REQ[n];
+    for k in 0..5 { out.push(req[k] as f64); }                                         // 0-4 cost = requirements
+    for _ in 0..5 { out.push(0.0); }                                                   // 5-9 bonus 1-hot = none
+    out.push(NOBLE_PTS[n] as f64);                                                     // 10 points
+    out.push(0.0);                                                                     // 11 level (n/a)
+    out.push(0.0); out.push(0.0); out.push(0.0);                                       // 12-14 take/tempo/engine n/a
+    let (mut met_s, mut met_o, mut tot, mut def_s, mut def_o) = (0i32, 0i32, 0i32, 0i32, 0i32);
+    for c in 0..5 {
+        let r = req[c];
+        tot += r;
+        met_s += s.bonuses[seat][c].min(r);
+        met_o += s.bonuses[opp][c].min(r);
+        def_s += (r - s.bonuses[seat][c]).max(0);
+        def_o += (r - s.bonuses[opp][c]).max(0);
+    }
+    out.push(if tot > 0 { met_s as f64 / tot as f64 } else { 0.0 });                   // 15 my progress
+    out.push(def_s as f64);                                                            // 16 my deficit
+    out.push(if def_s == 0 { 1.0 } else { 0.0 });                                      // 17 I qualify
+    out.push(if tot > 0 { met_o as f64 / tot as f64 } else { 0.0 });                   // 18 opp progress
+    out.push(if def_o == 0 { 1.0 } else { 0.0 });                                      // 19 opp qualifies
+    out.push((s.points[seat] + NOBLE_PTS[n]) as f64 / s.win_points as f64);            // 20 closing
+    out.push(0.0); out.push(0.0); out.push(1.0);                                       // 21-23 type = noble
+}
+
+/// Tokenize a state from `seat`'s view -> (tokens [18*24], mask [18], state [28]).
+pub fn features_tokens(s: &State, seat: usize) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    let opp = 1 - seat;
+    let val = Valuation::new(s, W_TEMPO, W_GEM, W_GOLD);
+    let mut toks = Vec::with_capacity(TOK_N * TOK_F);
+    let mut mask = vec![0.0f64; TOK_N];
+    for i in 0..12 {
+        let ci = s.board[i];
+        if ci >= 0 { card_token(s, &val, ci, seat, opp, 0, &mut toks); mask[i] = 1.0; }
+        else { for _ in 0..TOK_F { toks.push(0.0); } }
+    }
+    for i in 0..3 {
+        if i < s.reserved[seat].len() {
+            card_token(s, &val, s.reserved[seat][i], seat, opp, 1, &mut toks); mask[12 + i] = 1.0;
+        } else { for _ in 0..TOK_F { toks.push(0.0); } }
+    }
+    for i in 0..3 {
+        let ni = s.nobles[i];
+        if ni >= 0 { noble_token(s, ni, seat, opp, &mut toks); mask[15 + i] = 1.0; }
+        else { for _ in 0..TOK_F { toks.push(0.0); } }
+    }
+    let mut st = Vec::with_capacity(TOK_STATE);
+    for c in 0..5 { st.push(s.bonuses[seat][c] as f64); }
+    for c in 0..5 { st.push(s.bonuses[opp][c] as f64); }
+    for c in 0..6 { st.push(s.tokens[seat][c] as f64); }
+    for c in 0..6 { st.push(s.tokens[opp][c] as f64); }
+    st.push(s.points[seat] as f64);
+    st.push(s.points[opp] as f64);
+    st.push(s.win_points as f64);
+    st.push(s.ply as f64 / 50.0);
+    st.push(s.reserved[seat].len() as f64);
+    st.push(s.reserved[opp].len() as f64);
+    (toks, mask, st)
 }

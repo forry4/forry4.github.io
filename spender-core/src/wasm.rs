@@ -240,6 +240,29 @@ fn build_pv_net_21() -> crate::valuenet::PolicyValueNet {
     )
 }
 
+// ─── Variant N (Classic/15-pt): card-set ATTENTION net (net_attn_3), embedded ───
+// Beats net_night_14 ~0.567 on fresh decks at depth (512/1024 sims). Per-card tokens (features_tokens)
+// + attention leaf VALUE + per-token POLICY prior. 21-pt stays on net_ext21_13 (MLP). Rollback =
+// revert this commit (drops attn_model.json + the 15-pt branch -> net_night_14 for Classic).
+#[derive(Deserialize)]
+struct AttnModel {
+    emb_w: Vec<f32>, emb_b: Vec<f32>,
+    wq: Vec<Vec<f32>>, wk: Vec<Vec<f32>>, wv: Vec<Vec<f32>>, wo: Vec<Vec<f32>>,
+    f1w: Vec<Vec<f32>>, f1b: Vec<Vec<f32>>, f2w: Vec<Vec<f32>>, f2b: Vec<Vec<f32>>,
+    sw: Vec<f32>, sb: Vec<f32>, tw: Vec<f32>, tb: Vec<f32>,
+    vw: Vec<f32>, vb: Vec<f32>, pg_w: Vec<f32>, pg_b: Vec<f32>, ptok_w: Vec<f32>, ptok_b: Vec<f32>,
+}
+static ATTN_MODEL_JSON: &str = include_str!("attn_model.json");
+fn build_attn_net() -> crate::attn::AttnNet {
+    let m: AttnModel = serde_json::from_str(ATTN_MODEL_JSON).expect("embedded attn_model.json");
+    crate::attn::AttnNet {
+        emb_w: m.emb_w, emb_b: m.emb_b, wq: m.wq, wk: m.wk, wv: m.wv, wo: m.wo,
+        f1w: m.f1w, f1b: m.f1b, f2w: m.f2w, f2b: m.f2b,
+        sw: m.sw, sb: m.sb, tw: m.tw, tb: m.tb, vw: m.vw, vb: m.vb,
+        pg_w: m.pg_w, pg_b: m.pg_b, ptok_w: m.ptok_w, ptok_b: m.ptok_b,
+    }
+}
+
 /// Variant PV root-parallel search: like `search_visits_n_timed`, but the net supplies BOTH the MCTS
 /// leaf VALUE and the POLICY PRIOR (`root_visits_until_pv`) over the 178-feat `features_ext` encoder —
 /// the learned AlphaZero policy+value head. Same SUM-then-argmax root-parallel aggregation as S/N.
@@ -250,23 +273,29 @@ pub fn search_visits_pv_timed(state_json: &str, seat: usize, budget_ms: f64, max
         Err(_) => return Vec::new(),
     };
     let s = dump.into_state();
-    // Long mode (21) gets the specialized net; Classic (15) stays net_night_14 (byte-identical to before).
-    let net = if s.win_points == 21 { build_pv_net_21() } else { build_pv_net() };
-    let pv = |st: &State, sd: usize| -> (f64, Vec<f64>) {
-        let raw: Vec<f32> = crate::feats::features_ext(st, sd).iter().map(|&x| x as f32).collect();
-        let (v, logits) = net.forward_raw(&raw);
-        (v as f64, logits.iter().map(|&x| x as f64).collect())
-    };
     let mut rng = Rng::new(seed);
     let start = js_sys::Date::now();
     let cap = if max_sims == 0 { usize::MAX } else { max_sims };
-    vsearch::root_visits_until_pv(
-        &s,
-        seat,
-        &mut rng,
-        |n| n < cap && (n % 64 != 0 || (js_sys::Date::now() - start) < budget_ms),
-        &pv,
-    )
+    if s.win_points == 21 {
+        // Long mode: net_ext21_13 (MLP, features_ext) — unchanged.
+        let net = build_pv_net_21();
+        let pv = |st: &State, sd: usize| -> (f64, Vec<f64>) {
+            let raw: Vec<f32> = crate::feats::features_ext(st, sd).iter().map(|&x| x as f32).collect();
+            let (v, logits) = net.forward_raw(&raw);
+            (v as f64, logits.iter().map(|&x| x as f64).collect())
+        };
+        vsearch::root_visits_until_pv(&s, seat, &mut rng,
+            |n| n < cap && (n % 64 != 0 || (js_sys::Date::now() - start) < budget_ms), &pv)
+    } else {
+        // Classic (15): card-set ATTENTION net (net_attn_3) — features_tokens leaf value + per-token policy.
+        let net = build_attn_net();
+        let pv = |st: &State, sd: usize| -> (f64, Vec<f64>) {
+            let (t, msk, st2) = crate::feats::features_tokens(st, sd);
+            net.forward(&t, &msk, &st2)
+        };
+        vsearch::root_visits_until_pv(&s, seat, &mut rng,
+            |n| n < cap && (n % 64 != 0 || (js_sys::Date::now() - start) < budget_ms), &pv)
+    }
 }
 
 /// Variant PV search returning visits + the searched POSITION VALUE + per-edge Q — the PV analog of
@@ -280,23 +309,29 @@ pub fn search_pv_full_timed(state_json: &str, seat: usize, budget_ms: f64, max_s
         Err(_) => return "{\"error\":\"parse\"}".to_string(),
     };
     let s = dump.into_state();
-    // Long mode (21) gets the specialized net; Classic (15) stays net_night_14 (byte-identical to before).
-    let net = if s.win_points == 21 { build_pv_net_21() } else { build_pv_net() };
-    let pv = |st: &State, sd: usize| -> (f64, Vec<f64>) {
-        let raw: Vec<f32> = crate::feats::features_ext(st, sd).iter().map(|&x| x as f32).collect();
-        let (v, logits) = net.forward_raw(&raw);
-        (v as f64, logits.iter().map(|&x| x as f64).collect())
-    };
     let mut rng = Rng::new(seed);
     let start = js_sys::Date::now();
     let cap = if max_sims == 0 { usize::MAX } else { max_sims };
-    let (n, w) = vsearch::root_nw_until_pv(
-        &s,
-        seat,
-        &mut rng,
-        |i| i < cap && (i % 64 != 0 || (js_sys::Date::now() - start) < budget_ms),
-        &pv,
-    );
+    let (n, w) = if s.win_points == 21 {
+        // Long mode: net_ext21_13 (MLP, features_ext) — unchanged.
+        let net = build_pv_net_21();
+        let pv = |st: &State, sd: usize| -> (f64, Vec<f64>) {
+            let raw: Vec<f32> = crate::feats::features_ext(st, sd).iter().map(|&x| x as f32).collect();
+            let (v, logits) = net.forward_raw(&raw);
+            (v as f64, logits.iter().map(|&x| x as f64).collect())
+        };
+        vsearch::root_nw_until_pv(&s, seat, &mut rng,
+            |i| i < cap && (i % 64 != 0 || (js_sys::Date::now() - start) < budget_ms), &pv)
+    } else {
+        // Classic (15): card-set ATTENTION net (net_attn_3) — features_tokens leaf value + per-token policy.
+        let net = build_attn_net();
+        let pv = |st: &State, sd: usize| -> (f64, Vec<f64>) {
+            let (t, msk, st2) = crate::feats::features_tokens(st, sd);
+            net.forward(&t, &msk, &st2)
+        };
+        vsearch::root_nw_until_pv(&s, seat, &mut rng,
+            |i| i < cap && (i % 64 != 0 || (js_sys::Date::now() - start) < budget_ms), &pv)
+    };
     let tot: i32 = n.iter().sum();
     let value = if tot > 0 { w.iter().sum::<f64>() / tot as f64 } else { 0.0 };
     let q: Vec<Option<f64>> = (0..n.len())

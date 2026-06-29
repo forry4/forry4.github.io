@@ -8,6 +8,7 @@
 //! Card ids are global ints: 0..39 = L1, 40..69 = L2, 70..89 = L3. 2-player only; seats 0 and 1.
 
 pub mod actions;
+pub mod attn;
 pub mod cards;
 pub mod endgame;
 pub mod feats;
