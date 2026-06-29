@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.9.20
-// @description  Runs Splendor variant PV (the AlphaZero policy+value net, strongest AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows PV's recommended move, position eval, and top alternatives; optional autoplay.
+// @version      0.9.21
+// @description  Runs Splendor variant PV (the AlphaZero policy+value net, strongest AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows PV's recommended move, position eval, and top alternatives; optional autoplay. Logs every game (board + search per ply + outcome) to IndexedDB; export from the panel for offline analysis.
 // @match        https://spendee.mattle.online/*
 // @grant        none
 // @run-at       document-idle
@@ -60,11 +60,12 @@
   const NOBLE_REQ_F = [[3,3,0,0,3],[3,3,3,0,0],[0,3,3,3,0],[0,0,3,3,3],[3,0,0,3,3],[4,0,0,0,4],[4,4,0,0,0],[0,4,4,0,0],[0,0,4,4,0],[0,0,0,4,4]];
 
   // CRITICAL: the friend's spendee deck and OUR compiled WASM (Spender) deck contain the same 90
-  // cards but in COMPLETELY DIFFERENT index order — only the multiset matches (89 cards map exactly;
-  // friend #3 [2 blue/2 black, white bonus] has no exact twin → mapped to its nearest, Spender #36
-  // [2 blue/2 green]). The WASM looks up card COST/BONUS/PTS by index from ITS deck, so we MUST
-  // translate every friend card id → Spender id before handing the dump to the engine (the Python
-  // WWSD did this by override_engine(); the WASM can't be overridden). F2S[friendId] = spenderId.
+  // cards but in COMPLETELY DIFFERENT index order — only the index order differs; the multiset is now
+  // IDENTICAL (all 90 map exactly, incl. friend #3 [2 blue/2 black, white bonus] → Spender #36, after
+  // the engine deck's card-36 cost was corrected from 2 blue/2 green to 2 blue/2 black). The WASM looks
+  // up card COST/BONUS/PTS by index from ITS deck, so we MUST translate every friend card id → Spender
+  // id before handing the dump to the engine (the Python WWSD did this by override_engine(); the WASM
+  // can't be overridden). F2S[friendId] = spenderId.
   const F2S = [35,33,34,36,39,37,32,38,8,12,10,14,15,9,13,11,16,22,19,17,23,20,21,18,26,24,29,30,31,28,27,25,1,4,0,2,7,5,6,3,67,69,64,66,65,68,49,51,46,50,47,48,55,57,53,52,54,56,62,63,59,60,58,61,43,45,40,42,41,44,87,89,88,86,75,77,76,74,80,81,79,78,83,85,84,82,71,73,72,70];
   const F2S_NOBLE = [7,9,8,5,6,3,2,1,0,4];   // nobles are reordered too; engine NOBLE_REQ is looked up by id
   const remapId = ci => (ci == null || ci < 0) ? ci : F2S[ci];   // friend → Spender (engine) space
@@ -318,14 +319,14 @@
     const d = await searchPV(JSON.stringify(engineDump), seat >>> 0, CONFIG.THINK_SECS * 1000, CONFIG.MAX_SIMS >>> 0, baseSeed);
     if (!d || d.error) throw new Error('PV error: ' + (d && d.error));
     const tot = d.visits.reduce((a, b) => a + b, 0);
-    // Drop any buy the engine liked that isn't actually affordable in the REAL game (guards the one
-    // inexact remap card + any deck drift) — never recommend a move you can't pay for.
+    // Drop any buy the engine liked that isn't actually affordable in the REAL game (a defensive guard
+    // against any deck drift; the deck now matches exactly) — never recommend a move you can't pay for.
     const order = d.visits.map((v, a) => [a, v]).filter(x => x[1] > 0 && actionAffordable(dump, x[0]))
       .sort((a, b) => b[1] - a[1]);
     const top = order.length ? order[0][0] : A_PASS;
     const denom = tot || 1;
     return {
-      dump, seat, sims: tot, value: d.value,
+      dump, seat, sims: tot, value: d.value, visits: d.visits, q: d.q,   // visits/q: raw arrays for the game logger
       rec_pct: order.length ? +(100 * order[0][1] / denom).toFixed(1) : 0,
       recommendation: describeMove(dump, top), rec_eval: d.q[top], action: structuredMove(dump, top),
       alternatives: order.slice(1, 6).map(([a, v]) => ({
@@ -889,15 +890,123 @@
     await createLobby();
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // GAME LOGGER — record every ply's board (BOTH seats) + the bot's search output +
+  // the final outcome into IndexedDB, so the games the bot plays (especially losses
+  // vs strong humans) can be exported and analysed offline. Each ply's `dump` is the
+  // engine-space State the WASM searched, so a logged game is directly re-scorable
+  // under any eval variant (v_state/replay) with NO reconstruction. Export from the panel.
+  // ─────────────────────────────────────────────────────────────────────────
+  const _IDB_NAME = 'wwsd_logs', _IDB_STORE = 'games';
+  function _idb() {
+    return new Promise((res, rej) => {
+      const rq = indexedDB.open(_IDB_NAME, 1);
+      rq.onupgradeneeded = () => { const db = rq.result; if (!db.objectStoreNames.contains(_IDB_STORE)) db.createObjectStore(_IDB_STORE, { keyPath: 'id' }); };
+      rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error);
+    });
+  }
+  function _idbDo(mode, fn) {
+    return _idb().then(db => new Promise((res, rej) => {
+      const tx = db.transaction(_IDB_STORE, mode), st = tx.objectStore(_IDB_STORE);
+      let out; try { out = fn(st); } catch (e) { rej(e); return; }
+      tx.oncomplete = () => res(out && out.result !== undefined ? out.result : out);
+      tx.onerror = () => rej(tx.error);
+    }));
+  }
+  const _idbPut = rec => _idbDo('readwrite', st => st.put(rec));
+  const _idbAll = () => _idbDo('readonly', st => st.getAll());
+  const _idbClear = () => _idbDo('readwrite', st => st.clear());
+  async function logCount() { try { return (await _idbAll()).length; } catch (e) { return 0; } }
+
+  let _logGame = null, _loggedKey = null, _logBtn = null;
+  function updateLogBtn(n) { if (_logBtn) _logBtn.textContent = '⤓ Logs (' + n + ')'; }
+  function _myUid() { try { return window.Meteor.userId(); } catch (e) { return null; } }
+  function logStartGame(g, seat) {
+    _logGame = {
+      id: g._id + '@' + Date.now(), gameId: g._id, startedAt: Date.now(),
+      winPoints: parseInt((g.settings || {}).targetScore) || 15,
+      mySeat: seat, myUid: _myUid(), names: (g.players || []).map(p => (p || {}).name || null),
+      plies: [], partial: false,
+    };
+    _loggedKey = null;
+  }
+  function logMaybeNewGame(g, seat) {
+    if (!CONFIG.ENABLED) return;
+    if (_logGame && _logGame.gameId !== g._id) logFinalize();   // a different game appeared → close the old one
+    if (!_logGame) logStartGame(g, seat);
+  }
+  function logSnapshot(g) {
+    if (!_logGame || !CONFIG.ENABLED) return;
+    const key = turnKey(g);
+    if (key === _loggedKey) return;
+    _loggedKey = key;
+    let dump; try { dump = toEngineDump(toDump(g.data, _logGame.winPoints)); } catch (e) { return; }
+    if (_logGame.plies.length === 0 && (dump.purchased_n || [0, 0]).reduce((a, b) => a + b, 0) > 0) _logGame.partial = true;
+    _logGame.plies.push({ ply: _logGame.plies.length, mover: ((g.data || {}).state || {}).currentPlayerIndex | 0, dump });
+  }
+  function logAttachSearch(r) {
+    if (!_logGame || !CONFIG.ENABLED || !r) return;
+    const last = _logGame.plies[_logGame.plies.length - 1];
+    if (!last) return;
+    const r3 = x => (x == null ? null : +x.toFixed(3));
+    last.search = {
+      seat: r.seat, sims: r.sims, value: r3(r.value), rec: r.recommendation, rec_action: r.action,
+      rec_pct: r.rec_pct, rec_eval: r3(r.rec_eval),
+      visits: (r.visits || []).slice(), q: (r.q || []).map(r3),
+    };
+  }
+  function _finalScores(doc) {
+    return ((doc && doc.players) || []).map(p => {
+      let pts = 0; for (const ci of (p.purchasedCards || [])) pts += PTS[ci];
+      for (const ni of (p.nobles || [])) pts += NOBLE_PTS[ni];
+      return { points: pts, cards: (p.purchasedCards || []).length, nobles: (p.nobles || []).slice() };
+    });
+  }
+  async function logFinalize() {
+    const game = _logGame; _logGame = null; _loggedKey = null;
+    if (!game || !game.plies.length) return;
+    try {
+      const doc = fetchGames().find(x => x._id === game.gameId);
+      const sc = doc ? _finalScores(doc) : null;
+      if (sc && sc.length >= 2) {
+        const a = sc[0], b = sc[1];
+        const win = (b.points > a.points || (b.points === a.points && b.cards < a.cards)) ? 1 : 0;
+        const tie = a.points === b.points && a.cards === b.cards;
+        game.finalScores = sc; game.tie = tie; game.winner = tie ? -1 : win;
+        game.iWon = !tie && win === game.mySeat;
+        game.result = tie ? 'tie' : (win === game.mySeat ? 'win' : 'loss');
+      }
+      game.endedAt = Date.now();
+      await _idbPut(game);
+      const n = await logCount();
+      updateLogBtn(n);
+      console.log('[WWSD] logged game', game.gameId, game.result || '(no final)', game.plies.length + ' plies →', n, 'stored');
+    } catch (e) { console.error('[WWSD] logFinalize', e); }
+  }
+  async function exportLogs() {
+    let all; try { all = await _idbAll(); } catch (e) { setStatus('export failed: ' + (e && e.message)); return; }
+    if (!all || !all.length) { setStatus('no games logged yet'); return; }
+    const blob = new Blob([JSON.stringify({ schema: 'wwsd-gamelog/1', exportedAt: Date.now(), games: all })], { type: 'application/json' });
+    const url = URL.createObjectURL(blob), a = document.createElement('a');
+    a.href = url; a.download = 'wwsd_games_' + all.length + '_' + new Date().toISOString().slice(0, 10) + '.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    setStatus('exported ' + all.length + ' games');
+  }
+  async function clearLogs() { try { await _idbClear(); updateLogBtn(0); setStatus('logs cleared'); } catch (e) { setStatus('clear failed'); } }
+
   async function tick() {
     if (!CONFIG.ENABLED || busy || !meteorReady()) return;
     const found = findMyActiveGame();
     if (!found) {
+      if (_logGame) logFinalize();             // a game of ours just ended → persist it
       if (CONFIG.AUTO_LOBBY) { busy = true; try { await autoLobbyStep(); } catch (e) { setStatus('auto-lobby: ' + (e && e.message)); console.error('[WWSD] autoLobbyStep', e); } finally { busy = false; } return; }
       setStatus('idle — no active game' + (CONFIG.MY_NAME ? '' : ' (set MY_NAME if not detected)')); return;
     }
     const { game: g, seat } = found;
     const st = (g.data && g.data.state) || {};
+    logMaybeNewGame(g, seat);                  // open a log on a fresh game / close a stale one
+    logSnapshot(g);                            // record this ply's board (runs for BOTH seats' turns)
     if (st.currentPlayerIndex !== seat) { setStatus('waiting for opponent…'); return; }
     const key = turnKey(g);
     if (key === lastKey) return;
@@ -918,6 +1027,7 @@
       const t0 = Date.now();
       const r = await analyzePosition(g, seat);
       renderResult(r);
+      logAttachSearch(r);                      // attach the bot's search output to this ply's log record
       if (!CONFIG.AUTO_PLAY) { lastKey = key; return; }
       // human-like pacing: make the whole turn take a RANDOM 2-4s. The capped search (~2-3s) counts
       // toward it, so a fast result waits out the remainder rather than slamming the move instantly.
@@ -994,11 +1104,14 @@
     const methods = mk('List methods'); methods.onclick = () => { listMethods(); setStatus('methods → console'); };
     const record = mk('Record'); record.onclick = () => { const on = toggleRecord(); record.style.background = on ? '#4a8f4a' : '#b5852f'; };
     const domrec = mk('Rec DOM'); domrec.onclick = () => { const on = toggleDomRecord(); domrec.style.background = on ? '#4a8f4a' : '#b5852f'; setStatus(on ? 'DOM-record ON — make moves; check console' : 'DOM-record off'); };
+    const logbtn = mk('⤓ Logs'); _logBtn = logbtn; logbtn.onclick = exportLogs;
+    const logclr = mk('Clear logs'); logclr.onclick = async () => { if (window.confirm('Delete ALL logged games from this browser?')) await clearLogs(); };
     statusEl = document.createElement('div'); statusEl.style.cssText = 'margin-top:8px;color:#cdbfa8;font-size:12px;min-height:16px';
     statusEl.textContent = 'loading PV…';
     resultEl = document.createElement('div'); resultEl.style.cssText = 'margin-top:6px';
-    for (const el of [toggle, once, auto, loop, methods, record, domrec, statusEl, resultEl]) box.appendChild(el);
+    for (const el of [toggle, once, auto, loop, methods, record, domrec, logbtn, logclr, statusEl, resultEl]) box.appendChild(el);
     document.body.appendChild(box);
+    logCount().then(updateLogBtn);
   }
 
   // Persist the loop toggles across page reloads — navigating between lobby/board reloads the page and
@@ -1015,7 +1128,7 @@
     buildPanel();
     loadWasm().then(() => setStatus('ready')).catch(e => setStatus('WASM failed: ' + e.message + ' (CSP?)'));
     setInterval(tick, CONFIG.POLL_MS);
-    window.WWSD_N = { analyzePosition, findMyActiveGame, listMethods, toggleRecord, toggleDomRecord, synthClickCanvas, synthHoldCanvas, boardCanvas, uiTakeGems, uiBuyBoard, uiReserveBoard, uiReserveDeck, uiBuyReserved, uiPass, uiDiscard, uiClaimNoble, claimNoble, qualifyingNobleId, playMove, cardSlotFrac, UI, toDump, CONFIG, createLobby, leaveLobby, startGame, autoLobbyStep, findMyWaitingRoom, ensurePool, searchPV };
+    window.WWSD_N = { analyzePosition, findMyActiveGame, listMethods, toggleRecord, toggleDomRecord, synthClickCanvas, synthHoldCanvas, boardCanvas, uiTakeGems, uiBuyBoard, uiReserveBoard, uiReserveDeck, uiBuyReserved, uiPass, uiDiscard, uiClaimNoble, claimNoble, qualifyingNobleId, playMove, cardSlotFrac, UI, toDump, CONFIG, createLobby, leaveLobby, startGame, autoLobbyStep, findMyWaitingRoom, ensurePool, searchPV, exportLogs, clearLogs, logCount };
     console.log('[WWSD] browser-N loaded. window.WWSD_N available.');
   }
   boot();
