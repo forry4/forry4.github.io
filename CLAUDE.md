@@ -2533,6 +2533,31 @@ the **enriched 125-feat encoder** + a **warm start from the N value-leaf bootstr
 - **RACER ROUTE REFUTED (DO NOT relitigate the heuristic-racer form).** Hypothesis: N is blind to a pure-efficient-L2 racer that ignores nobles (the human's winning style). Built `heuristic::choose_action_racer` (H3 with a `Valuation.noble_scale` field, default `heuristic::NOBLE_SCALE`=3.0, lowered to de-emphasize noble-CHASING; `noble_completion_pts` untouched so it still grabs free nobles) + `racer_probe.rs`. **N CRUSHES the racer 0.92-0.95 at every noble weight {3.0,1.2,0.5,0.0}, and win-rate RISES as nobles drop** (a low-noble H3 is just a weaker H3). N out-searches ANY 1-ply heuristic regardless of style → a heuristic racer can't expose the weakness (the documented "MCTS saturates a competent heuristic"). The human's exploit is value-CALIBRATION (N read +0.8 in a 15-13 coin-flip), not "N loses to racers" (it doesn't). A search-based racer is the only untested racer form (low odds; S already loses 0.24 to N).
 - **BIG BET STARTED (user-chosen): CARD-SET ATTENTION net.** The deployed net is a tiny single-hidden-layer MLP over a flat 178-vector; untested whether a better INDUCTIVE BIAS (attention over per-card tokens) breaks the ~0.65 plateau via the same self-play (the earlier ~0.66 cap was a feature-limited DISTILL test, not a self-play policy net). **Arch locked:** 18 tokens (12 board + 3 own-reserved + 3 nobles, masked) × ~24 feats → embed D=64 → 2×[4-head MHA + FFN128] (residual+LN) → mean-pool + state-embed(28) → trunk128 → value(tanh)+70-policy. **Phase 0 throughput gate PASS** (`attn_bench.rs`): attention forward 2041 eval/s vs MLP 49055 = **24× slower** → ~17k aggregate sims/move, but the deployed MLP is ~400k sims/move (~500-1000× past the ~400-800 sim diminishing-returns knee) so 17k is still ~20-40× past it → **servable client-side** (WASM ~1.5-2× + per-call allocs ~2-3× recoverable → ~8-12k real, still fine). **Next = Phase 0 PARITY**: `features_tokens(s,seat)→(tokens,mask,state)` + the attention forward in BOTH Rust lib (`attn.rs`, for self-play+serving) AND PyTorch (training), parity ±1e-4 (self-play infers in Rust, trains in PyTorch — MUST match), then Phase 1 self-play→train→gate vs net_night_14. Memory `spender-variant-pv-shipped` + `spender-racer-blindspot-confirmed`.
 
+### Session (June 30 2026) — EXPLOITER net vs champion N = NO EXPLOIT (clean mirror; DO NOT relitigate)
+The greenlit research bet from `spender-racer-league-deadend` (train a net whose SOLE objective is to BEAT the
+deployed attention-net champion **N**, AlphaStar-style, to DISCOVER the human's racing exploit) was run
+(`az_run/loop_exploit.sh`, Rust `selfplay_attn_exploit.exe` + `gate_attn_attn.exe`, 10 iters). **Result: no
+exploit found — N is unexploitable by a same-arch warm-start mirror.**
+- **Setup:** the exploiter is a **byte copy of ship N** (`cp net_attn3_ship.json exploit_best.json`) — SAME
+  card-set-attention architecture, SAME 24-feat tokens, SAME initial weights. The ONLY differences are the
+  training *distribution* and *target*: each iter the best exploiter plays **1500 games vs the FIXED ship**
+  (`self_frac=0`, recording ONLY its own moves + search root value), heavy early-ply exploration (`temp=15`),
+  warm-from-ship fine-tune (LR 5e-4, value-target β=0.3, rolling 2-iter window, MAXROWS 100k), gate 300g@256
+  vs ship, promote iff `cand_vs_ship > best`.
+- **All 10 gated results bounced in 0.45–0.51 with NO upward trend:** 0.491 / 0.481 / 0.478 / 0.471 /
+  **0.5083 (iter 5, the only "promotion", within noise of 0.50)** / 0.489 / 0.505 / 0.449 / (iter 9) / **0.456
+  (iter 10)**. best_wr ended at **0.5083** — a dead-even mirror. (Train-time win-rate ~0.36–0.39 is just the
+  temp-15 exploration depressing play; the clean gate is the truth and it says EVEN.)
+- **Diagnosis (exactly the pre-flagged risk):** a net with N's architecture, N's features, initialized to N's
+  weights, taking small gradient steps on games against N has **no structural asymmetry to exploit** — gradient
+  just walks around N's own policy basin and the gate sits at ~0.50. This is the "same-arch exploiter mirrors
+  to ~0.5 without asymmetry" failure mode called out in `spender-racer-league-deadend`.
+- **Conclusion:** a real exploiter REQUIRES injected asymmetry the mirror loop deliberately omitted — enriched/
+  racer-aware features, a racer-biased reward or opponent track, a **cold (from-scratch) init** so it can't fall
+  back into N's basin, or a different head/arch. As configured this is a clean NEGATIVE control proving N is not
+  exploitable by a mirror of itself. Reusable harness kept: `loop_exploit.sh` + `selfplay_attn_exploit.exe` +
+  `gate_attn_attn.exe`. Memory `spender-racer-league-deadend` (updated with this outcome).
+
 ### Session (June 25 2026) — tap-to-ping, "waiting for you" tab alert, reserved-card + actions-box sizing (SHIPPED to main; do not regress)
 Four small Spender UI changes, all frontend-only except the ping relay (one backend WS action). Built in the
 `forrestm_projects-sound` worktree (branch `sound`), pushed straight to `main`. The `sound` worktree is the
