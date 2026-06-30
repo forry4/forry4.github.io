@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.9.23
+// @version      0.9.24
 // @description  Runs Splendor variant PV (the AlphaZero policy+value net, strongest AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows PV's recommended move, position eval, and top alternatives; optional autoplay. Logs every game (board + search per ply + outcome) to IndexedDB; export from the panel for offline analysis.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -1002,6 +1002,16 @@
         game.finalScores = sc; game.tie = tie; game.winner = tie ? -1 : win;
         game.iWon = !tie && win === game.mySeat;
         game.result = tie ? 'tie' : (win === game.mySeat ? 'win' : 'loss');
+      }
+      // End-metadata for filtering out forfeits/timeouts (e.g. the bot ran out of move time). spendee's
+      // own end fields if present (status + the small state obj), plus a derived `completed`: a legitimate
+      // game ends ONLY when the winner reaches the target, so winner-below-target ⇒ forfeit/timeout/abandon.
+      game.docStatus = doc ? (doc.status || null) : null;
+      game.endState = fdata && fdata.state ? fdata.state : null;
+      game.finalFromDoc = !!fdata;
+      if (game.finalScores && game.finalScores.length >= 2) {
+        const top = Math.max(game.finalScores[0].points, game.finalScores[1].points);
+        game.completed = top >= game.winPoints;   // false ⇒ discard from the analysis sample
       }
       game.endedAt = Date.now();
       await _idbPut(game);
