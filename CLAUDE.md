@@ -535,10 +535,11 @@ human-game corpus). See memory `wwsd-deployed`.
 ### The deck (`wwsd/wwsd_defs.json`)
 The friend's 90-card + 10-noble deck, **extracted from THEIR site's client** (their Meteor module
 `games/spendee/imports/api/utils/constants.js`, read via the browser console — no server request).
-It's the canonical Splendor deck in the same colour order as ours **as a MULTISET** (89/90 cards match
-exactly; friend card #3 [2 blue/2 black, white bonus] has no exact twin → its nearest is Spender #36
-[2 blue/2 green]). **⚠️ The two decks are ORDERED COMPLETELY DIFFERENTLY — friend card index ≠ our
-engine card index** (e.g. friend #0 is a white-bonus card, our #0 is black-bonus). This matters per
+It's the **exact same canonical Splendor deck as ours** — a verified **90/90 one-to-one bijection** by
+(level, points, bonus, cost), including friend #3 → Spender #36 (both `white bonus, cost 2+2`, exactly
+equal; the old "89/90, one inexact card" note was wrong — that's what the *card-36 fix* corrected). The
+ONLY difference is **ORDER: friend card index ≠ our engine card index** (only ~5/90 happen to share an
+index; e.g. friend #0 is white-bonus, our #0 is black-bonus). This matters per
 serving path: `analyze.override_engine()` (the Python/Render-S path) **rebuilds** the engine's
 card/noble tables from THEIRS by index, so S analyses their EXACT game with no remap needed. **The
 WASM browser-N path CANNOT override** the compiled Spender deck, so it MUST remap friend ids ↔ Spender
@@ -642,15 +643,15 @@ advisor overlay (top move + position eval + alternatives) is leaf-agnostic, so i
   are the same MULTISET but ordered COMPLETELY differently** (NOT "1/90 different" — that earlier note was
   wrong and shipped a real bug: the advisor recommended buying cards the user couldn't afford, because the
   WASM looked up `COST[friendId]` = a totally different card's cost). Fix in `browser_n.template.user.js`:
-  `F2S[90]` (friend→Spender id, a verified bijection: 89 exact matches + friend #3→Spender #36, the one
-  inexact card) and `F2S_NOBLE[10]` (nobles are reordered too). `toEngineDump(dump)` remaps **every** card
+  `F2S[90]` (friend→Spender id, a verified **exact** 90/90 bijection — friend #3→Spender #36 is exact too,
+  post card-36 fix) and `F2S_NOBLE[10]` (nobles are reordered too). `toEngineDump(dump)` remaps **every** card
   id (board/decks/purchased/reserved) + noble id (board nobles + nobles_won) friend→Spender BEFORE the WASM
   call, so the engine's compiled COST/BONUS/PTS describe the SAME physical cards. The **original
   friend-space `dump` is kept for display + execution** — action indices are positional/by-slot so they
   line up across both spaces (a buy of slot s → `dump.board[s]` is the friend id for the label + spendee
   `cardIndex`). Belt-and-suspenders: `actionAffordable(dump,a)` checks the recommendation against the
   friend's TRUE costs (`COST_F[90]` from `wwsd_defs.json`) and **filters out any unaffordable buy** before
-  selecting the top move (covers the one inexact card #3 + any future deck drift). Validated end-to-end in
+  selecting the top move (a safety net for any future deck drift). Validated end-to-end in
   Node against the real WASM: the un-remapped path recommends an unaffordable buy on a crafted position;
   the remapped path + guard never does, and a symmetric opening evaluates ~0.00 (was a false +0.10).
   **Regenerate F2S/F2S_NOBLE/COST_F if either deck changes** (compare `wwsd_defs.json` vs
