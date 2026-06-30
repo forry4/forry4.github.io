@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.9.21
+// @version      0.9.22
 // @description  Runs Splendor variant PV (the AlphaZero policy+value net, strongest AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows PV's recommended move, position eval, and top alternatives; optional autoplay. Logs every game (board + search per ply + outcome) to IndexedDB; export from the panel for offline analysis.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -955,8 +955,8 @@
       visits: (r.visits || []).slice(), q: (r.q || []).map(r3),
     };
   }
-  function _finalScores(doc) {
-    return ((doc && doc.players) || []).map(p => {
+  function _scoreFrom(players) {
+    return (players || []).map(p => {
       let pts = 0; for (const ci of (p.purchasedCards || [])) pts += PTS[ci];
       for (const ni of (p.nobles || [])) pts += NOBLE_PTS[ni];
       return { points: pts, cards: (p.purchasedCards || []).length, nobles: (p.nobles || []).slice() };
@@ -966,8 +966,18 @@
     const game = _logGame; _logGame = null; _loggedKey = null;
     if (!game || !game.plies.length) return;
     try {
+      // The finished doc's LIVE state (chips/cards/nobles) is g.DATA.players — NOT g.players, which is
+      // only seat identity (userId/name). Scoring the wrong array makes every game read 0-0 / tie.
       const doc = fetchGames().find(x => x._id === game.gameId);
-      const sc = doc ? _finalScores(doc) : null;
+      const fdata = (doc && doc.data && (doc.data.players || []).length >= 2) ? doc.data : null;
+      let sc = fdata ? _scoreFrom(fdata.players) : null;
+      if (fdata) {   // capture the TRUE final board (after the last move) as a terminal ply, same source
+        try { game.plies.push({ ply: game.plies.length, mover: ((fdata.state || {}).currentPlayerIndex) | 0, dump: toEngineDump(toDump(fdata, game.winPoints)), terminal: true }); } catch (e) {}
+      }
+      if (!sc || sc.length < 2) {   // doc gone — approximate from the last logged ply (pre-final-move)
+        const dp = (game.plies[game.plies.length - 1] || {}).dump;
+        if (dp) sc = [0, 1].map(s => ({ points: (dp.points || [])[s] || 0, cards: (dp.purchased_n || [])[s] || 0, nobles: (dp.nobles_won || [])[s] || [], approx: true }));
+      }
       if (sc && sc.length >= 2) {
         const a = sc[0], b = sc[1];
         const win = (b.points > a.points || (b.points === a.points && b.cards < a.cards)) ? 1 : 0;
