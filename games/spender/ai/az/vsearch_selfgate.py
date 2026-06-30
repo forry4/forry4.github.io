@@ -81,7 +81,7 @@ _WP = 15            # win_points for the games (15 default; 21 for the S21 retun
 FROZEN: dict = {}
 
 
-def _set(cfg_mod_attr, k, v):
+def _set(k, v):
     for mod in _MODS:
         if hasattr(mod, k):
             setattr(mod, k, v)
@@ -91,7 +91,7 @@ def _set(cfg_mod_attr, k, v):
 
 def set_config(cfg: dict) -> None:
     for k, v in cfg.items():
-        _set(None, k, v)
+        _set(k, v)
 
 
 def read_current() -> dict:
