@@ -96,7 +96,7 @@ def watch(evaluate, weights: dict, *, az_sims: int, opp_iters: int,
         print(f"\n{'-'*60}")
         print(f"Ply {s.ply+1}  [{actor}]  phase={phase_label}  "
               f"score: AZ {s.points[az_seat]}  C2 {s.points[1-az_seat]}"
-              + (f"  <- FINAL ROUND" if s.final_trigger >= 0 else ""))
+              + ("  <- FINAL ROUND" if s.final_trigger >= 0 else ""))
 
         # -- board (play phase only) ------------------------------------------
         if s.phase == E.PLAY:

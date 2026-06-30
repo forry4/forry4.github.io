@@ -111,10 +111,10 @@ def main():
     total_gems = colored + gold
     print(f"[feat-diag] {args.games} S-vs-S games @ sims={args.sims} -> {len(data)} positions  "
           f"({time.time()-t0:.0f}s)", flush=True)
-    print(f"   reserved-count distribution: " +
+    print("   reserved-count distribution: " +
           "  ".join(f"{v}:{int((np.minimum(reserved,3)==v).sum())}" for v in range(4)) +
           f"   (mean {reserved.mean():.2f})", flush=True)
-    print(f"   gold distribution: " +
+    print("   gold distribution: " +
           "  ".join(f"{v}:{int((np.minimum(gold,3)==v).sum())}" for v in range(4)) +
           f"   (mean {gold.mean():.2f})", flush=True)
 

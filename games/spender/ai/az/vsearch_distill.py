@@ -44,9 +44,7 @@ logging.getLogger("games.spender").setLevel(logging.ERROR)
 
 from . import engine as E          # noqa: E402
 from . import features as F        # noqa: E402
-from . import heuristic3 as H3     # noqa: E402
 from . import v_state              # noqa: E402
-from . import valuation3 as V3     # noqa: E402
 from . import vsearch              # noqa: E402
 from .mcts import Search           # noqa: E402
 

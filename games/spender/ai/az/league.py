@@ -18,7 +18,6 @@ pool workers rather than through selfplay's lockstep batched driver.
 """
 from __future__ import annotations
 
-import math
 import random
 import time
 
@@ -26,7 +25,6 @@ import numpy as np
 
 from games.spender import main as inc
 
-from . import actions as A
 from . import engine as E
 from . import features as F
 from . import vsearch

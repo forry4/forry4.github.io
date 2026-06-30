@@ -17,7 +17,6 @@ best-available-card take_value (imminent scoring strength) + noble proximity. We
 """
 from __future__ import annotations
 
-import math
 import random
 
 from . import engine as E

@@ -2,7 +2,7 @@
 import copy
 
 from games.castles_of_crimson import engine, board, tiles
-from .conftest import complete_setup, DEFAULT_CASTLE
+from .conftest import complete_setup
 
 
 def _strip_ids(game):

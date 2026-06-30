@@ -1,4 +1,3 @@
-import pytest
 
 from games.spender import main
 

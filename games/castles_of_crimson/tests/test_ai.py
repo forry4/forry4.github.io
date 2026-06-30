@@ -7,7 +7,7 @@ import random
 
 import pytest
 
-from games.castles_of_crimson import engine, ai, bot, board
+from games.castles_of_crimson import engine, ai, board
 from games.castles_of_crimson import ai_selfplay
 from .conftest import complete_setup
 

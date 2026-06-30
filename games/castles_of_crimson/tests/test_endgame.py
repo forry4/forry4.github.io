@@ -1,5 +1,5 @@
 """M8: end-of-game scoring and tiebreak chain."""
-from games.castles_of_crimson import engine, board
+from games.castles_of_crimson import engine
 from .conftest import complete_setup
 
 

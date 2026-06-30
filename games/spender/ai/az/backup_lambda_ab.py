@@ -30,7 +30,7 @@ import time
 
 from . import engine as E
 from . import vsearch
-from .vsearch_camp import OPP, play_one, _apply_overrides
+from .vsearch_camp import OPP, play_one
 from .h3_vs_h2 import wilson_ci
 
 PANEL = ["H3", "H2", "H2N", "H2R"]

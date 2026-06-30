@@ -27,7 +27,7 @@ import time
 from . import engine as E
 from . import h3_lookahead as H3L
 from . import heuristic3 as H3
-from .h3_vs_h2 import H2N, H2R, OPPONENTS, wilson_ci
+from .h3_vs_h2 import OPPONENTS, wilson_ci
 
 # Panel: greedy H3 (the base H3L must beat) + the H2 family. Reuse h3_vs_h2's instances.
 OPP = {**OPPONENTS, "H3": H3}   # OPPONENTS = {H, H2, H2N, H2R}; add greedy H3

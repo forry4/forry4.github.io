@@ -1,8 +1,6 @@
 """Comprehensive unit tests for Spender game logic."""
-import copy
 import random
 
-import pytest
 
 from games.spender import main
 
@@ -732,7 +730,6 @@ def test_sim_rollout_terminates():
 
 def test_sim_rollout_returns_winner_string_or_list():
     """If game ends during rollout, winner is a string (solo) or list (tie)."""
-    import time
     for _ in range(5):
         g = make_game_state("p1", "p2")
         result = main._sim_rollout(g, max_turns=200)

@@ -130,13 +130,13 @@ def main():
     print(f"  FLAT       top-1 {f1:.3f}  CE {fce:.3f}", flush=True)
     s1, sce = _train(StructuredPolicy(366), Xtr, PItr, Mtr, Xva, PIva, Mva, args.epochs, args.lr, args.batch)
     print(f"  STRUCTURED top-1 {s1:.3f}  CE {sce:.3f}", flush=True)
-    print(f"  (H3 prior matches S ~0.86; flat enriched net earlier ~0.52)", flush=True)
+    print("  (H3 prior matches S ~0.86; flat enriched net earlier ~0.52)", flush=True)
     if s1 >= 0.80:
         print(f"  VERDICT: structured BREAKS the wall ({s1:.3f}) -> worth the full structured-net build.", flush=True)
     elif s1 >= f1 + 0.10:
         print(f"  VERDICT: structured clearly helps (+{s1-f1:.3f}) but short of H3 -> partial; weigh effort.", flush=True)
     else:
-        print(f"  VERDICT: structured ~= flat -> architecture isn't the fix; net path is dead.", flush=True)
+        print("  VERDICT: structured ~= flat -> architecture isn't the fix; net path is dead.", flush=True)
 
 
 if __name__ == "__main__":

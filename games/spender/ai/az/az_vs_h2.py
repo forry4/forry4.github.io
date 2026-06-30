@@ -99,7 +99,7 @@ def main():
     if args.overrides:
         for k, v in (_parse_kv(t) for t in args.overrides):
             setattr(H2, k, v)
-        print(f"[az-vs-h2] H2 overrides: " +
+        print("[az-vs-h2] H2 overrides: " +
               ", ".join(f"{k}={getattr(H2, k)}" for k, _ in (_parse_kv(t) for t in args.overrides)))
 
     evaluate = _load_evaluator(args.az, args.device)

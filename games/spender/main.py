@@ -5,19 +5,15 @@ import copy
 import json
 import math
 import random
-import string
 from itertools import combinations
 from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Request, Depends, Header, Query
 from pydantic import BaseModel
 import logging
-import sqlite3
 import os
 import threading
 import time
-import hashlib
-import hmac
 
 from core.db import get_db_conn, init_core_schema, cleanup_stale_games, maybe_cleanup_games
 from core.auth import (

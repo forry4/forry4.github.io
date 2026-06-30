@@ -1,7 +1,6 @@
 """M3: accept/reject matrix for the core die-actions."""
-import pytest
 
-from games.castles_of_crimson import engine, board, tiles
+from games.castles_of_crimson import engine, board
 
 
 def fresh(seed=1):
