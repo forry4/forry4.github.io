@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.9.22
+// @version      0.9.23
 // @description  Runs Splendor variant PV (the AlphaZero policy+value net, strongest AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows PV's recommended move, position eval, and top alternatives; optional autoplay. Logs every game (board + search per ply + outcome) to IndexedDB; export from the panel for offline analysis.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -712,6 +712,23 @@
     }
   }
 
+  // Standalone discard sub-decision: spendee sometimes surfaces an over-10 discard as its OWN job (a later
+  // tick) rather than the inline modal playMove handles — the job name varies across flows, so we detect it
+  // by the seat being OVER the 10-token cap and drop the surplus (H3-chosen; chooseDiscards fallback). The
+  // tokens are ALREADY over 10 in g.data here (the take/reserve applied), so addTokens=[] — nothing to add.
+  // Returns false (not a discard) if the seat is at/under the cap.
+  async function discardSubDecision(g, seat) {
+    const wp = parseInt((g.settings || {}).targetScore) || 15;
+    const dump = toDump(g.data, wp);
+    const tok = dump.tokens[seat];
+    const n = Math.max(0, tok.reduce((a, b) => a + b, 0) - 10);
+    if (n <= 0) return false;
+    await sleep(CONFIG.OPEN_MS);                      // let the discard modal become interactive
+    const h3 = await decideDiscards(dump, seat, [], n);
+    await uiDiscard(h3 || chooseDiscards(tok.slice(), n, dump, seat));
+    return true;
+  }
+
   // A reserve grants a gold; if you were AT the 10-cap and the bank has gold, that overfills to 11 →
   // spendee shows the normal discard modal. Drop one gem (H3-chosen; chooseDiscards fallback).
   async function reserveDiscard(dump, seat) {
@@ -1030,6 +1047,24 @@
           setStatus('claiming noble…');
           try { await claimNoble(g, seat); } catch (e) { setStatus('noble claim failed: ' + (e && e.message)); console.error('[WWSD] claimNoble', e); }
           lastKey = key; return;
+        }
+        // A standalone over-10 discard surfaced as its own job (name varies) — resolve it with H3 instead of
+        // bailing to manual. Detect by the seat being over the token cap; verify + bounded-retry so a missed
+        // click self-heals rather than stalling.
+        const wpJob = parseInt((g.settings || {}).targetScore) || 15;
+        const overCap = pid => toDump(g.data, wpJob).tokens[pid].reduce((a, b) => a + b, 0) > 10;
+        if (CONFIG.AUTO_PLAY && overCap(seat)) {
+          setStatus('discarding…');
+          try { await discardSubDecision(g, seat); } catch (e) { setStatus('discard failed: ' + (e && e.message)); console.error('[WWSD] discardSubDecision', e); }
+          await sleep(1200);
+          const af = findMyActiveGame();
+          const stillOver = af && af.seat === seat && toDump(af.game.data, wpJob).tokens[seat].reduce((a, b) => a + b, 0) > 10;
+          if (stillOver) {
+            _retries[key] = (_retries[key] || 0) + 1;
+            if (_retries[key] <= 2) { lastKey = null; setStatus('discard missed — retrying (' + _retries[key] + ')…'); }
+            else { lastKey = key; setStatus('discard stuck — finish this one manually; it resumes after'); }
+          } else { lastKey = key; _retries = {}; }
+          return;
         }
         setStatus('sub-decision (' + job + ') — resolve manually'); lastKey = key; return;
       }
