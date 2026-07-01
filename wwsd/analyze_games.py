@@ -150,15 +150,69 @@ def build_benchmark(comp, close_margin):
                      "value; label=eventual outcome from bot POV (+1/-1/0); hard=value head confidently wrong.",
                 n_games=len(out_games), n_positions=n_pos, n_hard=n_hard, games=out_games)
 
+CN = ["wht", "blu", "grn", "red", "blk"]
+
+def decode_cases(comp, cards, n):
+    """Decode the N hardest LOSS positions (bot most over-confident) into readable Splendor states —
+    the concrete spec for what the winning racer does that N misjudges."""
+    if not cards:
+        print("\n(cases need spender-core/src/cards.rs for card tables — skipped)"); return
+    COST, BONUS, PTS = cards["COST"], cards["BONUS"], cards["PTS"]
+    # gather (value, game, ply-dump) for loss positions where the bot was over-confident
+    cand = []
+    for g in comp:
+        if g["result"] != "loss":
+            continue
+        for p in bot_plies(g):
+            if p["search"]["value"] >= 0.35:
+                cand.append((p["search"]["value"], g, p))
+    cand.sort(key=lambda x: -x[0])
+    seen = set(); picks = []
+    for v, g, p in cand:                      # one (the peak) per game
+        if g["gameId"] in seen: continue
+        seen.add(g["gameId"]); picks.append((v, g, p))
+        if len(picks) >= n: break
+    print(f"\n==== {len(picks)} HARDEST LOSS POSITIONS DECODED (bot rated itself winning, then lost) ====")
+    for v, g, p in picks:
+        d = p["dump"]; me = g["mySeat"]; op = 1 - me
+        def eng(s):
+            b = d["bonuses"][s]; return "+".join(f"{b[i]}{CN[i]}" for i in range(5) if b[i]) or "none"
+        # board point-cards the opponent can (nearly) afford
+        opp_bon = d["bonuses"][op]; opp_tok = d["tokens"][op]
+        threats = []
+        for ci in d["board"]:
+            if ci < 0 or PTS[ci] < 1: continue
+            need = sum(max(0, COST[ci][i] - opp_bon[i] - opp_tok[i]) for i in range(5))
+            if need <= (opp_tok[5] or 0) + 2:               # affordable now or ~1 turn away
+                threats.append((PTS[ci], need, ci))
+        threats.sort(key=lambda t: (t[1], -t[0]))
+        # noble proximity
+        nob = []
+        for ni in d.get("nobles", []):
+            if ni < 0: continue
+            # NOBLE_REQ not loaded here; skip detail, count is enough
+        print(f"\n  {g['gameId'][:6]} vs {g['opp'] if 'opp' in g else g['names'][op]}: rated V={v:+.2f}, FINAL LOSS "
+              f"{g['finalScores'][me]['points']}-{g['finalScores'][op]['points']}")
+        print(f"    BOT (rated winning): {d['points'][me]}pt  {d['purchased_n'][me]}cards  engine[{eng(me)}]  "
+              f"reserves {len(d['reserved'][me])}  gold {d['tokens'][me][5]}  tokens {sum(d['tokens'][me])}")
+        print(f"    OPP (racing):        {d['points'][op]}pt  {d['purchased_n'][op]}cards  engine[{eng(op)}]  "
+              f"tokens {sum(d['tokens'][op])}")
+        if threats:
+            tt = ", ".join(f"L{1 if ci<40 else 2 if ci<70 else 3}:{pt}pt(need {nd})" for pt, nd, ci in threats[:4])
+            print(f"    board point-cards in opp's reach: {tt}")
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("export")
     ap.add_argument("--benchmark", metavar="OUT.json", help="also write the racer benchmark set")
     ap.add_argument("--close", type=int, default=2, help="close-game margin threshold (default 2)")
+    ap.add_argument("--cases", type=int, default=0, metavar="N", help="decode the N hardest loss positions")
     a = ap.parse_args()
     D = json.load(open(a.export, encoding="utf-8"))["games"]
     games = [g for g in D if keep(g)]
     comp, W, L, T = report(games)
+    if a.cases:
+        decode_cases(comp, load_cards(), a.cases)
     if a.benchmark:
         bm = build_benchmark(comp, a.close)
         json.dump(bm, open(a.benchmark, "w"), separators=(",", ":"))
