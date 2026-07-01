@@ -15,6 +15,8 @@ on:
       - 'games/spender/ai/az/**/*.py'   # serving imports: heuristic, valuation, engine, actions, mcts, infer_np
       - 'games/spender/ai/weights*.json'   # variants A/B/C/C2 — loaded at import (main.load_weights)
       - 'games/spender/ai/value_model.json'   # value-leaf model — loaded at import (main.load_value_model)
+      - 'games/spender/puzzle/**/*.py'   # puzzle-mode serve code
+      - 'games/spender/puzzle/puzzles/*.json'   # the puzzle bank — served as static content by serve.py
       - 'games/castles_of_crimson/**/*.py'
       - 'games/wherewolf/**/*.py'
   workflow_dispatch:

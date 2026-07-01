@@ -86,6 +86,7 @@ setup_books(app, get_db_conn, get_user_by_session, bearer_token)
 # Puzzle mode — static, scripted Spender endgame puzzles. Public read-only content
 # (the bank is committed JSON with embedded snapshots); no DB/auth/engine at serve
 # time. Defensive: an import error must not take down the rest of the backend.
+# (Bank: 6 generated + 3 affordability-chain Ladders + Red Ladder + N-verified Gold Reserve.)
 try:
     from games.spender.puzzle.serve import setup_puzzles
     setup_puzzles(app)
