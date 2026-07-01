@@ -94,9 +94,33 @@ def build_state(*, win_points: int = 15, bank, hero: dict, opp: dict,
             s.purchased_n[seat] += 1
         for ni in s.nobles_won[seat]:
             s.points[seat] += E.NOBLE_PTS[ni]
-    s.board = [(-1 if x in (None, -1) else _cid(x)) for x in board]
-    while len(s.board) < 12:
-        s.board.append(-1)
+    # Board: place the caller's cards into their OWN level's row (L1=slots 0-3,
+    # L2=4-7, L3=8-11), then fill each row's remaining slots with cards UNAFFORDABLE
+    # to BOTH players — so the board looks like a real Splendor board (right level per
+    # row) without introducing any alternative buy line. (Filler in a wrong-level slot
+    # was the "L1 cards in every section" bug.)
+    placed = [_cid(x) for x in (board or []) if x not in (None, -1)]
+    owned = set(s.purchased[0] + s.purchased[1] + s.reserved[0] + s.reserved[1] + placed)
+    rows = {1: [], 2: [], 3: []}
+    for ci in placed:
+        rows[E.LEVEL_OF[ci]].append(ci)
+
+    def _affordable(ci, seat):
+        return E._gold_needed(E.COST[ci], s.tokens[seat], s.bonuses[seat]) <= s.tokens[seat][5]
+
+    for lvl in (1, 2, 3):
+        cands = sorted((ci for ci in range(E.N_CARDS)
+                        if E.LEVEL_OF[ci] == lvl and ci not in owned
+                        and not _affordable(ci, 0) and not _affordable(ci, 1)),
+                       key=lambda ci: E.PTS[ci])   # dullest (low-point) filler first
+        for ci in cands:
+            if len(rows[lvl]) >= 4:
+                break
+            rows[lvl].append(ci)
+            owned.add(ci)
+    s.board = []
+    for lvl in (1, 2, 3):
+        s.board += (rows[lvl] + [-1, -1, -1, -1])[:4]
     s.nobles = [_nid(x) for x in nobles]
     while len(s.nobles) < 3:
         s.nobles.append(-1)
