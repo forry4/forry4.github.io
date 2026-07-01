@@ -71,7 +71,8 @@ def harvest(n_games: int, win_points: int, eps: float, rng: random.Random,
 
 
 def screen(positions: list, K: int, opp, opp_name: str, verbose: bool = False,
-           require_exact: bool = False, require_strict: bool = False, out_dir: str = "") -> list:
+           require_exact: bool = False, require_strict: bool = False,
+           require_fair: bool = False, out_dir: str = "") -> list:
     """Return built puzzles for positions that are unique forced wins the greedy line
     does not solve. With require_exact, also demand NO forced win in fewer than K moves
     (a true K-mover). With require_strict, also demand EVERY deviation loses — at each
@@ -87,9 +88,14 @@ def screen(positions: list, K: int, opp, opp_name: str, verbose: bool = False,
             continue                                   # obvious move already wins
         if require_exact and K > 1 and solver.solve(s, hero, K - 1, opp) is not None:
             continue                                   # a shorter forced win exists
-        sol = solver.solve(s, hero, K, opp)
-        if sol is None or not sol.unique:
-            continue
+        if require_fair:
+            fair, sol = solver.refill_fair(s, hero, K, opp)   # unique AND deck-invariant
+            if not fair:
+                continue
+        else:
+            sol = solver.solve(s, hero, K, opp)
+            if sol is None or not sol.unique:
+                continue
         if require_strict and not solver.every_deviation_loses(s, hero, sol.line, opp):
             continue                                   # some deviation doesn't lose
         meta = {
@@ -132,6 +138,8 @@ def main():
                     help="require NO forced win in fewer than K moves (a true K-mover)")
     ap.add_argument("--strict", action="store_true",
                     help="require EVERY deviation to lose (the only non-losing line is the answer)")
+    ap.add_argument("--refill-fair", action="store_true",
+                    help="reject puzzles whose solution depends on hidden card reveals (deck-invariant)")
     args = ap.parse_args()
 
     rng = random.Random(args.seed)
@@ -144,10 +152,12 @@ def main():
                         args.near_lo, args.near_hi, args.max_positions, opp_near=args.opp_near)
     print(f"  {len(positions)} candidate positions")
 
-    flags = (", exact" if args.require_exact else "") + (", strict" if args.strict else "")
+    flags = (", exact" if args.require_exact else "") + (", strict" if args.strict else "") \
+        + (", fair" if args.refill_fair else "")
     print(f"screening vs {opp_name} (K={args.K}{flags})...")
     puzzles = screen(positions, args.K, opp, opp_name, verbose=True,
-                     require_exact=args.require_exact, require_strict=args.strict, out_dir=args.out)
+                     require_exact=args.require_exact, require_strict=args.strict,
+                     require_fair=args.refill_fair, out_dir=args.out)
     print(f"  {len(puzzles)} puzzles "
           f"({100*len(puzzles)/max(1,len(positions)):.1f}% of candidates)"
           + (f" — written to {args.out}" if args.out else ""))

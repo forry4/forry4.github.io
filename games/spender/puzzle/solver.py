@@ -19,6 +19,7 @@ Offline, pure-Python. Reuses the engine for rules/state.
 """
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass
 
 from games.spender.ai.az import engine as E
@@ -154,6 +155,59 @@ def solve(s: E.State, hero: int, K: int, opp) -> Solution | None:
     if line is None:
         return None
     return Solution(hero=hero, K=K, line=line, unique=unique, opp_calls=srch.opp_calls)
+
+
+# ─── refill-fairness (the solution must not depend on hidden card reveals) ────
+
+def _card_id_of_action(s: E.State, seat: int, a: int) -> int:
+    """Engine card id a buy / reserve-from-board action targets, else -1."""
+    if E.A_BUY_BOARD <= a < E.A_BUY_BOARD + 12:
+        return s.board[a - E.A_BUY_BOARD]
+    if E.A_BUY_RESV <= a < E.A_BUY_RESV + 3:
+        ri = a - E.A_BUY_RESV
+        return s.reserved[seat][ri] if ri < len(s.reserved[seat]) else -1
+    if E.A_RES_BOARD <= a < E.A_RES_BOARD + 12:
+        return s.board[a - E.A_RES_BOARD]
+    return -1
+
+
+def _hero_signature(s: E.State, hero: int, line: list) -> tuple:
+    """A deck-order-INDEPENDENT signature of the hero's moves: buys / board-reserves
+    keyed by the CARD they touch, other moves by action index. If a hero move touches
+    a card that only exists because of a refill, a different deck changes this."""
+    sig = []
+    sim = s.clone()
+    for (seat, a, phase) in line:
+        if seat == hero and phase == E.PLAY:
+            ci = _card_id_of_action(sim, seat, a)
+            sig.append(("card", ci) if ci >= 0 else ("act", a))
+        E.apply(sim, a)
+    return tuple(sig)
+
+
+def refill_fair(s: E.State, hero: int, K: int, opp, shuffles: int = 6):
+    """True iff the position is a unique forced win whose solution does NOT depend on
+    the hidden deck order — reshuffling the undrawn decks (which changes what each
+    buy/reserve REVEALS) must leave the SAME unique hero line, and the hero must never
+    act on a card that wasn't visible at the start. This rejects puzzles whose 'right'
+    move only works because of an unforeseeable card reveal. Returns (fair, base_sol)."""
+    base = solve(s, hero, K, opp)
+    if base is None or not base.unique:
+        return False, base
+    base_sig = _hero_signature(s, hero, base.line)
+    start_vis = {c for c in s.board if c >= 0} | set(s.reserved[hero])
+    for kind, val in base_sig:
+        if kind == "card" and val not in start_vis:
+            return False, base          # hero touches a card revealed by a refill
+    for i in range(shuffles):
+        s2 = s.clone()
+        rng = random.Random(0xD00D * (i + 1))
+        for lvl in range(3):
+            rng.shuffle(s2.decks[lvl])
+        sol2 = solve(s2, hero, K, opp)
+        if sol2 is None or not sol2.unique or _hero_signature(s2, hero, sol2.line) != base_sig:
+            return False, base          # a different deck -> a different (or no) unique line
+    return True, base
 
 
 # ─── triviality filter (the "obvious move must FAIL") ─────────────────────────
