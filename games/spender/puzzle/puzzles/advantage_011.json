@@ -3510,7 +3510,8 @@
     "name": "buy_reserved:#2",
     "eval": -1.0
    }
-  ]
+  ],
+  "eval_seeds": 8
  },
  "kind": "advantage",
  "id": "advantage_011"

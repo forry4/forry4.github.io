@@ -3124,8 +3124,8 @@
   "source": "n_selfplay_single",
   "floor": 0.1,
   "gap": 0.25,
-  "best_eval": 0.9516,
-  "second_eval": 0.6786,
+  "best_eval": 0.9533,
+  "second_eval": 0.685,
   "alts": [
    [
     "buy:L2#3",
@@ -3151,7 +3151,7 @@
      "card_id": "L2-11"
     },
     "name": "buy:L2#3",
-    "eval": 0.9529
+    "eval": 0.9533
    },
    {
     "move": {
@@ -3159,15 +3159,7 @@
      "card_id": "L3-19"
     },
     "name": "buy:L3#2",
-    "eval": 0.6869
-   },
-   {
-    "move": {
-     "type": "reserve",
-     "deck_level": 3
-    },
-    "name": "reserve_deck:L3",
-    "eval": 0.6623
+    "eval": 0.685
    },
    {
     "move": {
@@ -3175,7 +3167,7 @@
      "card_id": "L2-11"
     },
     "name": "reserve:L2#3",
-    "eval": 0.6112
+    "eval": 0.6076
    },
    {
     "move": {
@@ -3183,31 +3175,7 @@
      "card_id": "L3-17"
     },
     "name": "reserve:L3#1",
-    "eval": 0.5308
-   },
-   {
-    "move": {
-     "type": "reserve",
-     "card_id": "L3-12"
-    },
-    "name": "reserve:L3#3",
-    "eval": 0.5073
-   },
-   {
-    "move": {
-     "type": "reserve",
-     "deck_level": 1
-    },
-    "name": "reserve_deck:L1",
-    "eval": 0.4927
-   },
-   {
-    "move": {
-     "type": "reserve",
-     "card_id": "L2-4"
-    },
-    "name": "reserve:L2#0",
-    "eval": 0.4913
+    "eval": 0.5614
    },
    {
     "move": {
@@ -3215,33 +3183,71 @@
      "card_id": "L3-19"
     },
     "name": "reserve:L3#2",
-    "eval": 0.4532
-   },
-   {
-    "move": {
-     "type": "take_gems",
-     "colors": [
-      "blue"
-     ]
-    },
-    "name": "take1:b",
-    "eval": 0.4034
+    "eval": 0.5269
    },
    {
     "move": {
      "type": "reserve",
-     "card_id": "L1-3"
+     "deck_level": 3
     },
-    "name": "reserve:L1#2",
-    "eval": 0.3973
+    "name": "reserve_deck:L3",
+    "eval": 0.523
    },
    {
     "move": {
      "type": "reserve",
-     "card_id": "L1-28"
+     "deck_level": 1
     },
-    "name": "reserve:L1#3",
-    "eval": 0.3937
+    "name": "reserve_deck:L1",
+    "eval": 0.5185
+   },
+   {
+    "move": {
+     "type": "reserve",
+     "deck_level": 2
+    },
+    "name": "reserve_deck:L2",
+    "eval": 0.4708
+   },
+   {
+    "move": {
+     "type": "reserve",
+     "card_id": "L2-4"
+    },
+    "name": "reserve:L2#0",
+    "eval": 0.4571
+   },
+   {
+    "move": {
+     "type": "reserve",
+     "card_id": "L3-15"
+    },
+    "name": "reserve:L3#0",
+    "eval": 0.4551
+   },
+   {
+    "move": {
+     "type": "reserve",
+     "card_id": "L2-22"
+    },
+    "name": "reserve:L2#1",
+    "eval": 0.4547
+   },
+   {
+    "move": {
+     "type": "reserve",
+     "card_id": "L3-12"
+    },
+    "name": "reserve:L3#3",
+    "eval": 0.4486
+   },
+   {
+    "move": {
+     "type": "reserve",
+     "card_id": "L2-29"
+    },
+    "name": "reserve:L2#2",
+    "eval": 0.4425
    },
    {
     "move": {
@@ -3251,7 +3257,7 @@
      ]
     },
     "name": "take1:w",
-    "eval": 0.3877
+    "eval": 0.4242
    },
    {
     "move": {
@@ -3259,15 +3265,25 @@
      "card_id": "L3-17"
     },
     "name": "buy:L3#1",
-    "eval": 0.3828
+    "eval": 0.3874
    },
    {
     "move": {
-     "type": "reserve",
-     "deck_level": 2
+     "type": "take_gems",
+     "colors": [
+      "blue"
+     ]
     },
-    "name": "reserve_deck:L2",
-    "eval": 0.3815
+    "name": "take1:b",
+    "eval": 0.3869
+   },
+   {
+    "move": {
+     "type": "buy",
+     "card_id": "L1-24"
+    },
+    "name": "buy_reserved:#0",
+    "eval": 0.3867
    },
    {
     "move": {
@@ -3277,23 +3293,7 @@
      ]
     },
     "name": "take1:g",
-    "eval": 0.3663
-   },
-   {
-    "move": {
-     "type": "reserve",
-     "card_id": "L1-16"
-    },
-    "name": "reserve:L1#1",
-    "eval": 0.3493
-   },
-   {
-    "move": {
-     "type": "reserve",
-     "card_id": "L2-22"
-    },
-    "name": "reserve:L2#1",
-    "eval": 0.3448
+    "eval": 0.3793
    },
    {
     "move": {
@@ -3303,15 +3303,7 @@
      ]
     },
     "name": "take1:r",
-    "eval": 0.3325
-   },
-   {
-    "move": {
-     "type": "reserve",
-     "card_id": "L3-15"
-    },
-    "name": "reserve:L3#0",
-    "eval": 0.3284
+    "eval": 0.3293
    },
    {
     "move": {
@@ -3319,23 +3311,23 @@
      "card_id": "L1-31"
     },
     "name": "reserve:L1#0",
-    "eval": 0.3257
-   },
-   {
-    "move": {
-     "type": "buy",
-     "card_id": "L1-3"
-    },
-    "name": "buy:L1#2",
-    "eval": 0.309
+    "eval": 0.3271
    },
    {
     "move": {
      "type": "reserve",
-     "card_id": "L2-29"
+     "card_id": "L1-3"
     },
-    "name": "reserve:L2#2",
-    "eval": 0.3089
+    "name": "reserve:L1#2",
+    "eval": 0.3217
+   },
+   {
+    "move": {
+     "type": "reserve",
+     "card_id": "L1-16"
+    },
+    "name": "reserve:L1#1",
+    "eval": 0.3126
    },
    {
     "move": {
@@ -3343,15 +3335,7 @@
      "card_id": "L2-14"
     },
     "name": "buy_reserved:#1",
-    "eval": 0.3059
-   },
-   {
-    "move": {
-     "type": "buy",
-     "card_id": "L1-24"
-    },
-    "name": "buy_reserved:#0",
-    "eval": 0.303
+    "eval": 0.3019
    },
    {
     "move": {
@@ -3359,7 +3343,23 @@
      "card_id": "L2-22"
     },
     "name": "buy:L2#1",
-    "eval": 0.2992
+    "eval": 0.3002
+   },
+   {
+    "move": {
+     "type": "reserve",
+     "card_id": "L1-28"
+    },
+    "name": "reserve:L1#3",
+    "eval": 0.2929
+   },
+   {
+    "move": {
+     "type": "buy",
+     "card_id": "L1-3"
+    },
+    "name": "buy:L1#2",
+    "eval": 0.2649
    },
    {
     "move": {
@@ -3367,15 +3367,7 @@
      "card_id": "L3-12"
     },
     "name": "buy:L3#3",
-    "eval": 0.1294
-   },
-   {
-    "move": {
-     "type": "buy",
-     "card_id": "L2-4"
-    },
-    "name": "buy:L2#0",
-    "eval": 0.0065
+    "eval": 0.164
    },
    {
     "move": {
@@ -3494,10 +3486,18 @@
    {
     "move": {
      "type": "buy",
+     "card_id": "L2-4"
+    },
+    "name": "buy:L2#0",
+    "eval": -0.0103
+   },
+   {
+    "move": {
+     "type": "buy",
      "card_id": "L1-16"
     },
     "name": "buy:L1#1",
-    "eval": -0.0575
+    "eval": -0.1029
    },
    {
     "move": {
@@ -3505,7 +3505,7 @@
      "card_id": "L1-28"
     },
     "name": "buy:L1#3",
-    "eval": -0.0629
+    "eval": -0.14
    },
    {
     "move": {
@@ -3513,9 +3513,10 @@
      "card_id": "L1-31"
     },
     "name": "buy:L1#0",
-    "eval": -0.2508
+    "eval": -0.2394
    }
-  ]
+  ],
+  "eval_seeds": 8
  },
  "kind": "advantage",
  "id": "advantage_008"

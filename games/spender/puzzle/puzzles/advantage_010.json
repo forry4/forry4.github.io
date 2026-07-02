@@ -3117,8 +3117,8 @@
   "source": "n_selfplay_single",
   "floor": 0.1,
   "gap": 0.25,
-  "best_eval": 0.7441,
-  "second_eval": 0.4922,
+  "best_eval": 0.7464,
+  "second_eval": 0.4761,
   "alts": [
    [
     "buy:L3#0",
@@ -3144,7 +3144,7 @@
      "card_id": "L3-6"
     },
     "name": "buy:L3#0",
-    "eval": 0.7489
+    "eval": 0.7464
    },
    {
     "move": {
@@ -3152,7 +3152,7 @@
      "card_id": "L2-11"
     },
     "name": "buy:L2#2",
-    "eval": 0.4614
+    "eval": 0.4761
    },
    {
     "move": {
@@ -3160,7 +3160,7 @@
      "card_id": "L1-33"
     },
     "name": "buy:L1#2",
-    "eval": 0.3998
+    "eval": 0.4073
    },
    {
     "move": {
@@ -3168,15 +3168,7 @@
      "card_id": "L2-29"
     },
     "name": "buy:L2#1",
-    "eval": 0.3813
-   },
-   {
-    "move": {
-     "type": "buy",
-     "card_id": "L1-11"
-    },
-    "name": "buy:L1#0",
-    "eval": 0.3787
+    "eval": 0.3685
    },
    {
     "move": {
@@ -3184,7 +3176,7 @@
      "card_id": "L2-26"
     },
     "name": "buy_reserved:#0",
-    "eval": 0.3166
+    "eval": 0.3327
    },
    {
     "move": {
@@ -3192,7 +3184,7 @@
      "card_id": "L1-38"
     },
     "name": "buy:L1#1",
-    "eval": 0.2857
+    "eval": 0.2698
    },
    {
     "move": {
@@ -3200,23 +3192,15 @@
      "card_id": "L3-9"
     },
     "name": "buy:L3#2",
-    "eval": 0.2478
+    "eval": 0.2406
    },
    {
     "move": {
      "type": "buy",
-     "card_id": "L2-18"
+     "card_id": "L1-11"
     },
-    "name": "buy:L2#3",
-    "eval": 0.2087
-   },
-   {
-    "move": {
-     "type": "buy",
-     "card_id": "L2-16"
-    },
-    "name": "buy:L2#0",
-    "eval": 0.1383
+    "name": "buy:L1#0",
+    "eval": 0.2376
    },
    {
     "move": {
@@ -3224,7 +3208,23 @@
      "card_id": "L3-8"
     },
     "name": "buy:L3#1",
-    "eval": 0.1206
+    "eval": 0.2222
+   },
+   {
+    "move": {
+     "type": "buy",
+     "card_id": "L2-18"
+    },
+    "name": "buy:L2#3",
+    "eval": 0.2046
+   },
+   {
+    "move": {
+     "type": "buy",
+     "card_id": "L2-16"
+    },
+    "name": "buy:L2#0",
+    "eval": 0.1139
    },
    {
     "move": {
@@ -3362,9 +3362,10 @@
      "card_id": "L1-31"
     },
     "name": "buy:L1#3",
-    "eval": -0.0682
+    "eval": -0.0275
    }
-  ]
+  ],
+  "eval_seeds": 8
  },
  "kind": "advantage",
  "id": "advantage_010"

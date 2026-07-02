@@ -3116,7 +3116,7 @@
   "floor": 0.1,
   "gap": 0.25,
   "best_eval": 1.0,
-  "second_eval": 0.6247,
+  "second_eval": 0.6368,
   "alts": [
    [
     "buy:L1#3",
@@ -3154,7 +3154,7 @@
      ]
     },
     "name": "take3:wbg",
-    "eval": 0.6367
+    "eval": 0.6368
    },
    {
     "move": {
@@ -3166,7 +3166,7 @@
      ]
     },
     "name": "take3:bgk",
-    "eval": 0.635
+    "eval": 0.6362
    },
    {
     "move": {
@@ -3178,7 +3178,7 @@
      ]
     },
     "name": "take3:wgk",
-    "eval": 0.6189
+    "eval": 0.6187
    },
    {
     "move": {
@@ -3189,7 +3189,7 @@
      ]
     },
     "name": "take2:bg",
-    "eval": 0.5968
+    "eval": 0.5967
    },
    {
     "move": {
@@ -3211,7 +3211,7 @@
      ]
     },
     "name": "take2:gk",
-    "eval": 0.5801
+    "eval": 0.5807
    },
    {
     "move": {
@@ -3219,7 +3219,7 @@
      "card_id": "L1-22"
     },
     "name": "buy:L1#2",
-    "eval": 0.5771
+    "eval": 0.5766
    },
    {
     "move": {
@@ -3227,7 +3227,7 @@
      "card_id": "L1-17"
     },
     "name": "buy:L1#1",
-    "eval": 0.5754
+    "eval": 0.5752
    },
    {
     "move": {
@@ -3237,7 +3237,7 @@
      ]
     },
     "name": "take1:g",
-    "eval": 0.555
+    "eval": 0.5553
    },
    {
     "move": {
@@ -3249,7 +3249,7 @@
      ]
     },
     "name": "take3:wbk",
-    "eval": 0.5356
+    "eval": 0.5337
    },
    {
     "move": {
@@ -3260,18 +3260,7 @@
      ]
     },
     "name": "take2:bk",
-    "eval": 0.5001
-   },
-   {
-    "move": {
-     "type": "take_gems",
-     "colors": [
-      "white",
-      "blue"
-     ]
-    },
-    "name": "take2:wb",
-    "eval": 0.469
+    "eval": 0.4996
    },
    {
     "move": {
@@ -3288,11 +3277,22 @@
     "move": {
      "type": "take_gems",
      "colors": [
+      "white",
+      "blue"
+     ]
+    },
+    "name": "take2:wb",
+    "eval": 0.4676
+   },
+   {
+    "move": {
+     "type": "take_gems",
+     "colors": [
       "black"
      ]
     },
     "name": "take1:k",
-    "eval": 0.4512
+    "eval": 0.4517
    },
    {
     "move": {
@@ -3302,7 +3302,7 @@
      ]
     },
     "name": "take1:w",
-    "eval": 0.4373
+    "eval": 0.437
    },
    {
     "move": {
@@ -3312,9 +3312,10 @@
      ]
     },
     "name": "take1:b",
-    "eval": 0.4292
+    "eval": 0.4298
    }
-  ]
+  ],
+  "eval_seeds": 8
  },
  "kind": "advantage",
  "id": "advantage_020"

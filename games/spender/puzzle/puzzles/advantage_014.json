@@ -3117,7 +3117,7 @@
   "source": "n_selfplay_single",
   "floor": 0.1,
   "gap": 0.25,
-  "best_eval": 0.3415,
+  "best_eval": 0.3177,
   "second_eval": 0.0,
   "alts": [
    [
@@ -3144,7 +3144,7 @@
      "card_id": "L1-13"
     },
     "name": "buy:L1#0",
-    "eval": 0.3073
+    "eval": 0.3177
    },
    {
     "move": {
@@ -3279,20 +3279,21 @@
    {
     "move": {
      "type": "buy",
-     "card_id": "L1-32"
+     "card_id": "L1-35"
     },
-    "name": "buy:L1#2",
-    "eval": -0.0797
+    "name": "buy:L1#3",
+    "eval": -0.0831
    },
    {
     "move": {
      "type": "buy",
-     "card_id": "L1-35"
+     "card_id": "L1-32"
     },
-    "name": "buy:L1#3",
-    "eval": -0.0943
+    "name": "buy:L1#2",
+    "eval": -0.1016
    }
-  ]
+  ],
+  "eval_seeds": 8
  },
  "kind": "advantage",
  "id": "advantage_014"

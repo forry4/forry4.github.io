@@ -3120,7 +3120,7 @@
   "source": "n_selfplay_single",
   "floor": 0.1,
   "gap": 0.25,
-  "best_eval": 0.4235,
+  "best_eval": 0.4175,
   "second_eval": 0.0,
   "alts": [
    [
@@ -3147,7 +3147,7 @@
      "card_id": "L1-19"
     },
     "name": "buy:L1#0",
-    "eval": 0.3997
+    "eval": 0.4175
    },
    {
     "move": {
@@ -3300,7 +3300,8 @@
     "name": "reserve_deck:L3",
     "eval": 0.0
    }
-  ]
+  ],
+  "eval_seeds": 8
  },
  "kind": "advantage",
  "id": "advantage_024"
