@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <!-- favicon / bookmark icon. / expands to the Vite build base (/ for the
+         forry4.github.io root site; overridable via VITE_BASE), so the path stays
+         correct under any base. Files live in webapp/public/. -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!-- Preload the self-hosted fonts (same-origin, in webapp/public/fonts/) so they're
+         ready at first paint and the app's font-load gate resolves instantly — no external
+         Google Fonts round-trip. @font-face lives in baseCss (display:optional); metric-
+         matched Georgia fallbacks (in baseCss) keep layout stable if a font isn't ready.
+         crossorigin is required even same-origin (fonts fetch in CORS mode). The inline
+         dark bg avoids a white flash before the JS CSS loads. -->
+    <link rel="preload" as="font" type="font/woff2" href="/fonts/cinzel.latin.woff2" crossorigin />
+    <link rel="preload" as="font" type="font/woff2" href="/fonts/crimsonpro.latin.woff2" crossorigin />
+    <style>html,body{margin:0;background:#0f0e0c}</style>
+    <title>Forrest Games</title>
+    <script type="module" crossorigin src="/assets/index-HvtvohcD.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
