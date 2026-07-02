@@ -2478,7 +2478,7 @@ export default function SpenderApp() {
 
 					<div style={{ textAlign: "center", marginTop: 24, display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
 						<button type="button" className="btn btn-ghost" onClick={enterPuzzles}>
-							🧩 Puzzles
+							🧩 Spender Puzzles
 						</button>
 						<button type="button" className="btn btn-ghost" onClick={() => setScreen("books")}>
 							📚 Books
@@ -2512,7 +2512,7 @@ export default function SpenderApp() {
 			<div className="app">
 				<div className="puzzle-top">
 					<button className="btn btn-ghost btn-sm" onClick={() => setScreen("home")}>← Back</button>
-					<span className="puzzle-top-title">Puzzles</span>
+					<span className="puzzle-top-title">Spender Puzzles</span>
 					<span style={{ width: 56 }} />
 				</div>
 				<div className="puzzle-picker">
