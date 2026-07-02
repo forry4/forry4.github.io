@@ -44,6 +44,7 @@ def _meta(puz: dict) -> dict:
     return {
         "id": puz["id"],
         "title": m.get("title"),   # null -> the frontend names it "Puzzle N"
+        "kind": puz.get("kind", "win"),   # "win" | "advantage" (single best move)
         "win_points": puz["win_points"],
         "K": puz["K"],
         "n_hero_moves": sum(1 for st in puz["steps"] if st.get("is_hero")),
