@@ -755,6 +755,38 @@ const css = baseCss + `
   /* Tighter nobles so the row stays one screen-width. */
   .noble{width:62px;min-height:62px;padding:5px}
 }
+
+  /* ── Puzzle mode ─────────────────────────────────────────────── */
+  .puzzle-top{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border)}
+  .puzzle-top-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.2rem;color:var(--gold)}
+  .puzzle-picker{max-width:760px;margin:0 auto;padding:22px 16px}
+  .puzzle-intro{text-align:center;opacity:.82;margin:0 0 20px;line-height:1.5}
+  .puzzle-empty{text-align:center;opacity:.6;padding:40px 0}
+  .puzzle-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+  .puzzle-card{text-align:left;font-family:inherit;color:inherit;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px 18px;cursor:pointer;transition:border-color .15s,transform .15s,background .15s}
+  .puzzle-card:hover{border-color:var(--gold);transform:translateY(-2px);background:var(--surface2)}
+  .puzzle-card-title{font-weight:700;margin-bottom:5px}
+  .puzzle-card-meta{font-size:.84rem;opacity:.7}
+  .action-hint.puzzle-wrong{color:#e0696b;font-weight:600}
+  .puzzle-won{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(8,6,7,.72);z-index:60}
+  .puzzle-won-card{background:var(--surface);border:1px solid var(--gold);border-radius:var(--radius-lg);padding:30px 36px;text-align:center;max-width:340px}
+  .puzzle-won-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:2rem;color:var(--gold);margin-bottom:8px}
+  .puzzle-won-sub{opacity:.85;margin-bottom:20px}
+  .puzzle-won-btns{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+  .puzzle-fail{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(30,6,8,.74);z-index:60;animation:puzfailin .18s ease}
+  @keyframes puzfailin{from{opacity:0}to{opacity:1}}
+  .puzzle-fail-card{background:var(--surface);border:1px solid #e0696b;border-radius:var(--radius-lg);padding:30px 36px;text-align:center;max-width:360px}
+  .puzzle-fail-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:2rem;color:#e0696b;margin-bottom:8px}
+  .puzzle-fail-sub{opacity:.85;margin-bottom:20px;line-height:1.45}
+  .puzzle-nav-aids{display:flex;gap:6px;align-items:center}
+  .action-hint.puzzle-hint{color:var(--gold);font-weight:600;white-space:normal;overflow:visible;text-overflow:clip}
+  .puzzle-answer-list{margin:6px 0 10px;padding-left:22px;line-height:1.7}
+  .puzzle-answer-note{font-size:.8rem;opacity:.7;margin:0 0 14px}
+  .puzzle-card-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px}
+  .puzzle-diff{font-size:.66rem;letter-spacing:.06em;text-transform:uppercase;padding:2px 7px;border-radius:10px;border:1px solid var(--border);opacity:.9;white-space:nowrap}
+  .diff-easy{color:#7fc08a;border-color:#3f6a48}
+  .diff-tricky{color:#d8b25a;border-color:#6a5a2f}
+  .diff-hard{color:#e0696b;border-color:#6a3536}
 `;
 
 // ─── Sub-components ───────────────────────────────────────────────────────
@@ -929,6 +961,21 @@ export default function SpenderApp() {
 	const [reviewing, setReviewing] = useState(false);            // viewing a finished game's board + log
 	const [replaySnapshots, setReplaySnapshots] = useState(null); // [{turn,mover,move,game}], or null = no turn-by-turn
 	const [replayTurn, setReplayTurn] = useState(null);           // which past turn drives the board; null = final
+	// ── Puzzle mode (scripted endgame: find the unique winning line vs S) ──
+	const [puzzling, setPuzzling] = useState(false);     // in a puzzle (drives the game screen, no socket)
+	const [puzzle, setPuzzle] = useState(null);          // the loaded puzzle file
+	const [puzHeroPid, setPuzHeroPid] = useState(null);  // the hero's pid in the puzzle's own labeling
+	const [puzStep, setPuzStep] = useState(0);           // index of the next step to resolve
+	const [puzAttempts, setPuzAttempts] = useState(1);   // 1-based attempt counter
+	const [puzFeedback, setPuzFeedback] = useState("");  // "S: ..." reply line / wrong-move message
+	const [puzWrong, setPuzWrong] = useState(false);     // last move was wrong (just restarted)
+	const [puzSolved, setPuzSolved] = useState(false);   // reached the winning final position
+	const [puzList, setPuzList] = useState(null);        // the /puzzles listing for the picker (null = not loaded)
+	const [puzHintLevel, setPuzHintLevel] = useState(0); // 0 none, 1 category, 2 exact (per current step)
+	const [puzAnswerOpen, setPuzAnswerOpen] = useState(false); // the "show the full solution" modal
+	const [puzFailed, setPuzFailed] = useState(false);   // a wrong move was made -> explicit FAIL overlay
+	const [puzHideOverlay, setPuzHideOverlay] = useState(false); // Return -> view the board, hide the result overlay
+	const [puzFailMove, setPuzFailMove] = useState(null);          // the wrong move the player just tried
 	const [pinged, setPinged] = useState(false);                  // a ping arrived while the tab was hidden (drives the "waiting for you" tab alert)
 
 	// ── Derived game state (must be before useEffect hooks that use `game`) ──
@@ -1454,7 +1501,7 @@ export default function SpenderApp() {
 	const prevBankRef = useRef(null);
 	const [flashGems, setFlashGems] = useState(new Set());
 	useEffect(() => {
-		if (reviewing || !game?.bank) return;   // no flashes while rewinding a finished game
+		if (reviewing || !game?.bank) return;   // no flashes while rewinding (puzzle steps DO animate)
 		const prev = prevBankRef.current;
 		if (prev) {
 			const flashing = new Set(
@@ -1480,7 +1527,7 @@ export default function SpenderApp() {
 	const prevMovesLenRef = useRef(0);
 	const flyIdRef = useRef(0);
 	useEffect(() => {
-		if (reviewing) return;   // no flying gems/cards while rewinding a finished game
+		if (reviewing) return;   // no flying gems/cards while rewinding (puzzle steps DO animate)
 		const players = game?.players;
 		if (!players) return;
 		const prev = prevPlayersRef.current;
@@ -1780,6 +1827,206 @@ export default function SpenderApp() {
 	};
 	const goToFinal = () => setReplayTurn(null);
 
+	// ── Puzzle mode ────────────────────────────────────────────────────────
+	// A puzzle is a fully-scripted line: the player reproduces the hero moves; a
+	// wrong move restarts; the opponent's (S's) frozen replies auto-play. We reuse
+	// the whole game screen by RELABELING each step's snapshot so the hero is `myId`
+	// (which activates the normal take/buy/reserve UI) and intercepting the single
+	// sendMove to compare the player's move to the canonical one. No socket.
+	const PUZ_OPP = "puzzle_opp";
+
+	const relabelGame = (gd, heroPid) => {
+		if (!gd) return gd;
+		const order0 = gd.order || [];
+		const oppPid = order0.find(p => p !== heroPid);
+		const map = (p) => (p === heroPid ? myId : p === oppPid ? PUZ_OPP : p);
+		const g = { ...gd, order: order0.map(map), players: {} };
+		for (const p of order0) g.players[map(p)] = gd.players[p];
+		if (gd.turn != null) g.turn = map(gd.turn);
+		for (const k of ["pending_discard_pid", "pending_noble_pid", "final_round_trigger"])
+			if (gd[k]) g[k] = map(gd[k]);
+		if (typeof gd.winner === "string") g.winner = map(gd.winner);
+		else if (Array.isArray(gd.winner)) g.winner = gd.winner.map(map);
+		return g;
+	};
+
+	const movesEqual = (a, b) => {
+		if (!a || !b || a.type !== b.type) return false;
+		if (a.type === "take_gems")
+			return [...(a.colors || [])].sort().join(",") === [...(b.colors || [])].sort().join(",");
+		if (a.type === "buy") return a.card_id === b.card_id;
+		if (a.type === "reserve")
+			return (a.card_id || null) === (b.card_id || null) && (a.deck_level || null) === (b.deck_level || null);
+		if (a.type === "discard") return a.color === b.color;
+		if (a.type === "pick_noble") return a.noble_id === b.noble_id;
+		return JSON.stringify(a) === JSON.stringify(b);
+	};
+
+	const fmtEval = (v) => (v == null ? "?" : (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(2));
+	const puzMoveEval = (m) => { const list = puzzle?.meta?.move_evals || []; const hit = list.find(e => e.move && movesEqual(m, e.move)); return hit ? hit.eval : null; };
+	const moveLabel = (m) => {
+		if (!m) return "";
+		if (m.type === "take_gems") return m.colors?.length ? "take " + m.colors.map(c => GEM_LABELS[c] || c).join(", ") : "pass";
+		if (m.type === "buy") return "buy " + m.card_id;
+		if (m.type === "reserve") return "reserve " + (m.card_id || ("deck L" + m.deck_level));
+		if (m.type === "discard") return "discard " + (GEM_LABELS[m.color] || m.color);
+		if (m.type === "pick_noble") return "claim a noble";
+		return m.type;
+	};
+
+	// A vaguer one-line hint (the move CATEGORY, not the exact card).
+	const moveCategory = (m) => {
+		if (!m) return "";
+		if (m.type === "take_gems") return m.colors?.length ? "take gems" : "pass";
+		if (m.type === "buy") return "buy a card";
+		if (m.type === "reserve") return "reserve a card";
+		if (m.type === "discard") return "discard a gem";
+		if (m.type === "pick_noble") return "claim a noble";
+		return m.type;
+	};
+
+	const PUZ_OPP_DELAY = 850;   // beat before/between the opponent's scripted replies
+
+	// Newest-first move log for the moves played THROUGH step `idx` (so the game log
+	// and the fly animations light up during a puzzle, just like a real game).
+	const puzMovesThrough = (puz, idx) => {
+		const out = [];
+		for (let k = 0; k < Math.min(idx, puz.steps.length); k++) {
+			const st = puz.steps[k];
+			out.unshift({ ...st.move, pid: st.seat === puz.hero_seat ? myId : PUZ_OPP });
+		}
+		return out;
+	};
+
+	// Show the board at snapshot `idx` (idx >= len -> the final position), carrying the
+	// accumulated move log. Stepping one idx at a time makes moves grow by exactly one,
+	// which is what the fly-animation + log rendering key off.
+	const showPuzzleAt = (puz, heroPid, idx) => {
+		const snap = idx >= puz.steps.length ? puz.final : puz.steps[idx].snapshot;
+		const g = { ...relabelGame(snap, heroPid), moves: puzMovesThrough(puz, idx) };
+		setRoomData(rd => ({ ...(rd || {}), game: g }));
+	};
+
+	const loadPuzzles = async () => {
+		try {
+			const res = await fetch(`${HTTP_BASE}/puzzles`);
+			const data = await res.json();
+			const _list = Array.isArray(data.puzzles) ? data.puzzles : [];
+			setPuzList(_list);
+			return _list;
+		} catch { setPuzList([]); return []; }
+	};
+
+	const PUZ_SEEN_KEY = "spender_puzzle_seen";
+	const getSeen = () => { try { return new Set(JSON.parse(localStorage.getItem(PUZ_SEEN_KEY) || "[]")); } catch { return new Set(); } };
+	const markSeen = (id) => { try { const s = getSeen(); s.add(id); localStorage.setItem(PUZ_SEEN_KEY, JSON.stringify([...s].slice(-2000))); } catch {} };
+	const pickPuzzleId = (list) => {
+		const bank = (list || []).filter(p => p.kind === "advantage");   // one-at-a-time mode = single 'only-move' puzzles
+		if (!bank.length) return null;
+		let pool = bank.filter(p => !getSeen().has(p.id));
+		if (!pool.length) { try { localStorage.removeItem(PUZ_SEEN_KEY); } catch {} pool = bank; }   // exhausted -> reshuffle
+		return pool[Math.floor(Math.random() * pool.length)].id;
+	};
+	const enterPuzzles = async () => {
+		setScreen("puzzles"); setPuzList(null);          // brief loading screen
+		const list = await loadPuzzles();
+		const id = pickPuzzleId(list);
+		if (id) startPuzzle(id);
+	};
+
+	const startPuzzle = async (id) => {
+		try {
+			const res = await fetch(`${HTTP_BASE}/puzzles/${id}`);
+			const puz = await res.json();
+			if (!puz || !Array.isArray(puz.steps) || !puz.steps.length) { setToast("Couldn't load that puzzle"); return; }
+			const heroPid = (puz.position.order || [])[puz.hero_seat];
+			disconnect();
+			setReviewing(false); setReplaySnapshots(null); setReplayTurn(null);
+			setPuzzle(puz); setPuzHeroPid(heroPid); markSeen(id);
+			setPuzStep(0); setPuzAttempts(1); setPuzFeedback(""); setPuzWrong(false); setPuzSolved(false);
+			setPuzHintLevel(0); setPuzAnswerOpen(false); setPuzFailed(false); setPuzHideOverlay(false); setPuzFailMove(null);
+			// reset the animation baselines so the opening board doesn't spuriously animate
+			prevBankRef.current = null; prevPlayersRef.current = null; prevBoardRef.current = null; prevMovesLenRef.current = 0;
+			setSelectedGems([]); setSelectedCard(null); setReserveArmed(false);
+			setRoomId(id);
+			setRoomData({
+				room_id: id,
+				players: { [myId]: (authUser?.name || "You"), [PUZ_OPP]: puz.opponent || "S" },
+				status: "playing",
+				game: { ...relabelGame(puz.steps[0].snapshot, heroPid), moves: [] },
+			});
+			setPuzzling(true);
+			setScreen("game");
+		} catch { setToast("Couldn't reach the server"); }
+	};
+
+	// Intercepts sendMove while in a puzzle: compare the move to the current hero
+	// step. Correct -> advance + auto-play the frozen opponent replies; wrong -> restart.
+	const submitPuzzleMove = (move) => {
+		const puz = puzzle;
+		if (!puz || puzFailed || puzSolved) return;
+		const cur = puz.steps[puzStep];
+		setSelectedGems([]); setSelectedCard(null); setReserveArmed(false);
+		setPuzHintLevel(0);   // each step gets a fresh hint
+		if (!cur || !cur.is_hero) return;
+		if (!movesEqual(move, cur.move)) {
+			// WRONG — an explicit FAIL. The board stays put; the fail overlay makes it
+			// unmistakable (vs the old silent reset). "Try again" restarts the puzzle.
+			setPuzFailMove(move);
+			setPuzWrong(true);
+			setPuzFailed(true);
+			setPuzFeedback("");
+			return;
+		}
+		// CORRECT — show the board after the hero's move (this animates it + logs it),
+		// then play the frozen opponent replies one at a time with a beat, so the
+		// opponent visibly moves, until it's the hero's turn again (or the puzzle is won).
+		setPuzWrong(false); setPuzFeedback("");
+		showPuzzleAt(puz, puzHeroPid, puzStep + 1);
+		let idx = puzStep + 1;
+		if (idx >= puz.steps.length) { setPuzStep(idx); setPuzSolved(true); return; }  // hero's move ended it
+		if (puz.steps[idx].is_hero) { setPuzStep(idx); return; }   // consecutive hero decision (no opp between)
+		const playOpp = () => {
+			if (idx < puz.steps.length && !puz.steps[idx].is_hero) {
+				const st = puz.steps[idx];
+				idx += 1;
+				showPuzzleAt(puz, puzHeroPid, idx);          // after the opponent's move (animates it)
+				setPuzFeedback("S played " + moveLabel(st.move));
+				setTimeout(playOpp, PUZ_OPP_DELAY);
+			} else {
+				setPuzStep(idx);
+				if (idx >= puz.steps.length) { setPuzSolved(true); setPuzFeedback(""); }
+				else setPuzFeedback("");                      // hero's turn again
+			}
+		};
+		setTimeout(playOpp, PUZ_OPP_DELAY);
+	};
+
+	const restartPuzzle = () => {
+		if (!puzzle) return;
+		if (puzFailed) setPuzAttempts(a => a + 1);   // retry after a fail counts as a new attempt
+		setPuzStep(0); setPuzWrong(false); setPuzSolved(false); setPuzFailed(false); setPuzFeedback(""); setPuzHideOverlay(false); setPuzFailMove(null);
+		setPuzHintLevel(0);
+		prevBankRef.current = null; prevPlayersRef.current = null; prevBoardRef.current = null; prevMovesLenRef.current = 0;
+		setSelectedGems([]); setSelectedCard(null); setReserveArmed(false);
+		showPuzzleAt(puzzle, puzHeroPid, 0);
+	};
+
+	const exitPuzzle = () => {
+		setPuzzling(false); setPuzzle(null); setPuzSolved(false); setPuzWrong(false); setPuzFailed(false);
+		setPuzFeedback(""); setRoomData(null); setRoomId("");
+		setPuzHintLevel(0); setPuzAnswerOpen(false);
+		setSelectedGems([]); setSelectedCard(null); setReserveArmed(false);
+		setScreen("home");
+	};
+
+	const nextPuzzle = () => {
+		if (puzzle?.id) markSeen(puzzle.id);
+		const id = pickPuzzleId(puzList || []);
+		if (id) startPuzzle(id);
+		else exitPuzzle();
+	};
+
 	const goToMenu = () => {
 		disconnect();
 		setScreen("browser");
@@ -1800,7 +2047,10 @@ export default function SpenderApp() {
 
 	const handleStart = () => send({ action: "start" });
 
-	const sendMove = (move) => send({ action: "move", move });
+	const sendMove = (move) => {
+		if (puzzling) { submitPuzzleMove(move); return; }   // puzzle: compare to canonical, don't send
+		send({ action: "move", move });
+	};
 
 	const handleTakeGems = () => {
 		if (!myTurn || selectedGems.length === 0) return;
@@ -1863,6 +2113,27 @@ export default function SpenderApp() {
 	};
 
 	// ── Render helpers ─────────────────────────────────────────────────────
+	// The puzzle status line that replaces the normal action bar (turn badge + hint +
+	// the Take/Buy controls, which still funnel through sendMove -> submitPuzzleMove).
+	function renderPuzzleBar() {
+		const steps = puzzle?.steps || [];
+		const total = steps.filter(s => s.is_hero).length;
+		const done = steps.slice(0, puzStep).filter(s => s.is_hero).length;
+		const cur = steps[puzStep];
+		const hintText = (!puzSolved && cur && puzHintLevel >= 2) ? `Hint: ${moveLabel(cur.move)}`
+			: (!puzSolved && cur && puzHintLevel === 1) ? `Hint: ${moveCategory(cur.move)}` : "";
+		return (<>
+			<span className="turn-badge mine">{puzSolved ? "Solved!" : "Your Move"}</span>
+			<span className="target-label" style={{ marginRight: 6 }}>Target: {game.win_points || 15}</span>
+			<span className={`action-hint${puzWrong ? " puzzle-wrong" : ""}${hintText ? " puzzle-hint" : ""}`}>
+				{puzSolved ? (puzzle?.kind === "advantage" ? "You found the only move!" : "You found the win!") : (hintText || puzFeedback || `Move ${Math.min(done + 1, total)} of ${total}`)}
+			</span>
+			<div className="action-bar-btns">
+				{renderActionButtons() || <button className="btn btn-ghost action-bar-spacer" aria-hidden="true" tabIndex={-1}>{"✕"}</button>}
+			</div>
+		</>);
+	}
+
 	function renderCard(card, opts = {}) {
 		if (!card) return <div className="card-slot" />;
 		// readonly: opponent's reserved cards — visible but not selectable/affordable.
@@ -2205,7 +2476,10 @@ export default function SpenderApp() {
 						))}
 					</div>
 
-					<div style={{ textAlign: "center", marginTop: 24 }}>
+					<div style={{ textAlign: "center", marginTop: 24, display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
+						<button type="button" className="btn btn-ghost" onClick={enterPuzzles}>
+							🧩 Puzzles
+						</button>
 						<button type="button" className="btn btn-ghost" onClick={() => setScreen("books")}>
 							📚 Books
 						</button>
@@ -2230,6 +2504,25 @@ export default function SpenderApp() {
 	if (screen === "werewolf") {
 		return <WhereWolf myId={myId} authUser={authUser} onExit={() => setScreen("home")} />;
 	}
+
+	// Puzzle picker — pick a scripted endgame puzzle to solve vs S.
+	if (screen === "puzzles") return (
+		<>
+			<style>{css}</style>
+			<div className="app">
+				<div className="puzzle-top">
+					<button className="btn btn-ghost btn-sm" onClick={() => setScreen("home")}>← Back</button>
+					<span className="puzzle-top-title">Puzzles</span>
+					<span style={{ width: 56 }} />
+				</div>
+				<div className="puzzle-picker">
+						{(puzList == null) && <div className="puzzle-empty">Loading puzzle…</div>}
+						{(puzList != null && puzList.length === 0) && <div className="puzzle-empty">No puzzles available yet.</div>}
+					</div>
+					{toast && <div className="toast">{toast}</div>}
+			</div>
+		</>
+	);
 
 	// Game browser screen
 	if (screen === "browser") return (
@@ -2490,7 +2783,7 @@ export default function SpenderApp() {
 
 	// Winner screen (held back 2s after the game ends — see the resultReady effect —
 	// so the final board is visible for a beat before the result is revealed).
-	if (screen === "game" && game?.phase === "over" && !reviewing && resultReady) {
+	if (screen === "game" && game?.phase === "over" && !reviewing && !puzzling && resultReady) {
 		const winners = Array.isArray(game.winner) ? game.winner : [game.winner];
 		const isTie = winners.length > 1;
 		const iWon = winners.includes(myId);
@@ -2540,11 +2833,20 @@ export default function SpenderApp() {
 			<style>{css}</style>
 			<div className="app game-screen">
 				<div className="game-nav">
-					{reviewChrome
+					{puzzling
+						? <button className="btn btn-ghost btn-sm" onClick={exitPuzzle}>← Puzzles</button>
+						: reviewChrome
 						? <button className="btn btn-ghost btn-sm" onClick={() => { setReplayTurn(null); setReviewing(false); setResultReady(true); }}>← Back to Results</button>
 						: <button className="btn btn-ghost btn-sm" onClick={goToMenu}>← Menu</button>}
-					<span className="game-nav-title">Spender{reviewChrome ? " — Review" : ""}</span>
-					{reviewChrome
+					<span className="game-nav-title">Spender{puzzling ? " — Puzzle" : reviewChrome ? " — Review" : ""}</span>
+					{puzzling
+						? <div className="puzzle-nav-aids">
+								<button className="btn btn-ghost btn-sm" onClick={() => setPuzHintLevel(l => Math.min(2, l + 1))} disabled={puzSolved || puzHintLevel >= 2}>💡 Hint</button>
+								<button className="btn btn-ghost btn-sm" onClick={() => setPuzAnswerOpen(true)} disabled={puzSolved}>Answer</button>
+								<button className="btn btn-ghost btn-sm" onClick={restartPuzzle} title="Restart puzzle">↻</button>
+									<button className="btn btn-ghost btn-sm" onClick={nextPuzzle} title="Skip to next puzzle">Next ▸</button>
+							</div>
+						: reviewChrome
 						? <span style={{ width: 64 }} />
 						: <button className="btn btn-danger btn-sm" onClick={() => setConfirmAbandon(true)}>Abandon</button>}
 				</div>
@@ -2553,7 +2855,7 @@ export default function SpenderApp() {
 					<div className="game-main">
 
 						<div className="action-bar">
-								{reviewing ? renderReplayBar() : (<>
+								{reviewing ? renderReplayBar() : puzzling ? renderPuzzleBar() : (<>
 							<span className={`turn-badge ${game.phase === "over" ? "theirs" : myTurn ? "mine" : "theirs"}`}>
 								{game.phase === "over" ? "Game Over" : myTurn ? "Your Turn" : `${displayName(roomData?.players?.[game.turn])}'s Turn`}
 							</span>
@@ -2760,6 +3062,58 @@ export default function SpenderApp() {
 						</div>
 					</div>
 				</div>
+
+				{puzzling && puzAnswerOpen && (
+					<div className="modal-backdrop" onClick={() => setPuzAnswerOpen(false)}>
+						<div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 320 }}>
+							<h3 style={{ marginTop: 0 }}>Solution</h3>
+							<ol className="puzzle-answer-list">
+								{(puzzle?.steps || []).filter(s => s.is_hero).map((s, i) => (
+									<li key={i}>{moveLabel(s.move)}</li>
+								))}
+							</ol>
+							<p className="puzzle-answer-note">S's replies in between are forced. Close this and play the line, or restart.</p>
+							<button className="btn btn-ghost btn-sm" style={{ width: "100%" }} onClick={() => setPuzAnswerOpen(false)}>Close</button>
+						</div>
+					</div>
+				)}
+
+				{puzzling && puzSolved && !puzHideOverlay && (
+					<div className="puzzle-won">
+						<div className="puzzle-won-card">
+							<div className="puzzle-won-title">Solved!</div>
+							<div className="puzzle-won-sub">
+								{puzzle?.kind === "advantage"
+									? <>The only move: <b>{moveLabel(puzzle.steps[0].move)}</b> · N eval <b>{fmtEval(puzMoveEval(puzzle.steps[0].move) ?? puzzle?.meta?.best_eval)}</b></>
+									: <>You beat S, {game.players?.[myId] ? totalPoints(game.players[myId].purchased, game.players[myId].nobles) : 0}{" – "}{game.players?.[PUZ_OPP] ? totalPoints(game.players[PUZ_OPP].purchased, game.players[PUZ_OPP].nobles) : 0}</>}
+								{puzAttempts > 1 ? `  ·  ${puzAttempts} attempts` : ""}
+							</div>
+							<div className="puzzle-won-btns">
+								<button className="btn btn-gold" onClick={nextPuzzle}>Next ▸</button>
+								<button className="btn btn-outline" onClick={() => setPuzHideOverlay(true)}>Return</button>
+								<button className="btn btn-outline" onClick={exitPuzzle}>Exit</button>
+							</div>
+						</div>
+					</div>
+				)}
+
+				{puzzling && puzFailed && !puzHideOverlay && (
+					<div className="puzzle-fail">
+						<div className="puzzle-fail-card">
+							<div className="puzzle-fail-title">✗ Wrong Move</div>
+							<div className="puzzle-fail-sub">
+								{puzzle?.kind === "advantage"
+									? <>You played <b>{moveLabel(puzFailMove)}</b> · N eval <b>{fmtEval(puzMoveEval(puzFailMove))}</b> — not the move that holds the advantage. Try again.</>
+									: <>That isn't the solution — puzzle failed. There's exactly one winning line.</>}
+							</div>
+							<div className="puzzle-won-btns">
+								<button className="btn btn-gold" onClick={restartPuzzle}>↻ Try again</button>
+								<button className="btn btn-outline" onClick={() => setPuzHideOverlay(true)}>Return</button>
+								<button className="btn btn-outline" onClick={exitPuzzle}>Exit</button>
+							</div>
+						</div>
+					</div>
+				)}
 
 				{flyers.length > 0 && (
 					<div className="fly-layer">
