@@ -3137,6 +3137,134 @@
     "buy:L1#0",
     -0.995
    ]
+  ],
+  "move_evals": [
+   {
+    "move": {
+     "type": "buy",
+     "card_id": "L2-14"
+    },
+    "name": "buy_reserved:#0",
+    "eval": 1.0
+   },
+   {
+    "move": {
+     "type": "take_gems",
+     "colors": [
+      "blue",
+      "red"
+     ]
+    },
+    "name": "take2:br",
+    "eval": -0.9405
+   },
+   {
+    "move": {
+     "type": "buy",
+     "card_id": "L1-35"
+    },
+    "name": "buy:L1#0",
+    "eval": -0.9952
+   },
+   {
+    "move": {
+     "type": "buy",
+     "card_id": "L1-13"
+    },
+    "name": "buy:L1#3",
+    "eval": -0.9971
+   },
+   {
+    "move": {
+     "type": "buy",
+     "card_id": "L2-12"
+    },
+    "name": "buy:L2#1",
+    "eval": -0.9978
+   },
+   {
+    "move": {
+     "type": "take_gems",
+     "colors": [
+      "black",
+      "black"
+     ]
+    },
+    "name": "take2same:k",
+    "eval": -0.999
+   },
+   {
+    "move": {
+     "type": "take_gems",
+     "colors": [
+      "red",
+      "black"
+     ]
+    },
+    "name": "take2:rk",
+    "eval": -0.999
+   },
+   {
+    "move": {
+     "type": "take_gems",
+     "colors": [
+      "blue",
+      "red",
+      "black"
+     ]
+    },
+    "name": "take3:brk",
+    "eval": -0.9994
+   },
+   {
+    "move": {
+     "type": "buy",
+     "card_id": "L1-30"
+    },
+    "name": "buy:L1#2",
+    "eval": -0.9996
+   },
+   {
+    "move": {
+     "type": "take_gems",
+     "colors": [
+      "blue",
+      "black"
+     ]
+    },
+    "name": "take2:bk",
+    "eval": -0.9996
+   },
+   {
+    "move": {
+     "type": "take_gems",
+     "colors": [
+      "blue"
+     ]
+    },
+    "name": "take1:b",
+    "eval": -0.9997
+   },
+   {
+    "move": {
+     "type": "take_gems",
+     "colors": [
+      "red"
+     ]
+    },
+    "name": "take1:r",
+    "eval": -0.9997
+   },
+   {
+    "move": {
+     "type": "take_gems",
+     "colors": [
+      "black"
+     ]
+    },
+    "name": "take1:k",
+    "eval": -0.9998
+   }
   ]
  },
  "kind": "advantage",

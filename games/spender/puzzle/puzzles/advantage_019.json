@@ -3130,6 +3130,139 @@
     "take2:wg",
     0.0
    ]
+  ],
+  "move_evals": [
+   {
+    "move": {
+     "type": "buy",
+     "card_id": "L3-14"
+    },
+    "name": "buy:L3#0",
+    "eval": 0.305
+   },
+   {
+    "move": {
+     "type": "take_gems",
+     "colors": [
+      "white",
+      "blue",
+      "green"
+     ]
+    },
+    "name": "take3:wbg",
+    "eval": 0.0
+   },
+   {
+    "move": {
+     "type": "take_gems",
+     "colors": [
+      "white",
+      "blue"
+     ]
+    },
+    "name": "take2:wb",
+    "eval": 0.0
+   },
+   {
+    "move": {
+     "type": "take_gems",
+     "colors": [
+      "white",
+      "green"
+     ]
+    },
+    "name": "take2:wg",
+    "eval": 0.0
+   },
+   {
+    "move": {
+     "type": "take_gems",
+     "colors": [
+      "blue",
+      "green"
+     ]
+    },
+    "name": "take2:bg",
+    "eval": 0.0
+   },
+   {
+    "move": {
+     "type": "take_gems",
+     "colors": [
+      "white"
+     ]
+    },
+    "name": "take1:w",
+    "eval": 0.0
+   },
+   {
+    "move": {
+     "type": "take_gems",
+     "colors": [
+      "blue"
+     ]
+    },
+    "name": "take1:b",
+    "eval": 0.0
+   },
+   {
+    "move": {
+     "type": "take_gems",
+     "colors": [
+      "green"
+     ]
+    },
+    "name": "take1:g",
+    "eval": 0.0
+   },
+   {
+    "move": {
+     "type": "buy",
+     "card_id": "L1-37"
+    },
+    "name": "buy:L1#1",
+    "eval": -0.0969
+   },
+   {
+    "move": {
+     "type": "buy",
+     "card_id": "L1-0"
+    },
+    "name": "buy_reserved:#0",
+    "eval": -0.2028
+   },
+   {
+    "move": {
+     "type": "buy",
+     "card_id": "L2-18"
+    },
+    "name": "buy:L2#0",
+    "eval": -0.3537
+   },
+   {
+    "move": {
+     "type": "buy",
+     "card_id": "L1-6"
+    },
+    "name": "buy:L1#0",
+    "eval": -0.4208
+   },
+   {
+    "move": {
+     "type": "buy",
+     "card_id": "L2-6"
+    },
+    "name": "buy:L2#2",
+    "eval": -0.4795
+   },
+   {
+    "move": {
+     "type": "buy",
+     "card_id": "L1-22"
+    },
+    "name": "buy:L1#2",
+    "eval": -0.6361
+   }
   ]
  },
  "kind": "advantage",
