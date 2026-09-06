@@ -1,0 +1,41 @@
+{
+  // The keepalive Worker — a SECOND scheduler for the Render backend, independent of
+  // GitHub Actions. See src/index.js for why, and for the Render instance-hour budget
+  // that decides the warm window.
+  //
+  // This is DELIBERATELY ITS OWN WORKER, not a cron bolted onto the staging one
+  // (`webapp/wrangler.jsonc`, name "webprojectsstaging"). That config lives on the
+  // `staging` branch, which has DIVERGED from main — the repo's standing rule is never
+  // to blind-push between them — and an assets-only Worker would have to grow a script
+  // entry point to carry a handler. A separate Worker shares nothing and can be
+  // deployed from main without touching staging at all.
+  //
+  // DEPLOY (once; nothing in CI touches this — Workers Builds is not wired to it, and
+  // this path is in neither deploy-pages.yml's nor deploy-render.yml's filter):
+  //
+  //     npx wrangler deploy --config keepalive-worker/wrangler.jsonc
+  //
+  // Then VERIFY rather than assume, the same way a Pages deploy is verified by content:
+  //
+  //     curl -s https://forrestgames-keepalive.<your-subdomain>.workers.dev/?force=1
+  //
+  // which returns the attempt log and the HTTP status it got back from /health. The
+  // cron itself is visible in the dashboard under Workers → this Worker → Settings →
+  // Triggers, and each firing logs a JSON line to `npx wrangler tail`.
+  "name": "forrestgames-keepalive",
+  "main": "src/index.js",
+  "compatibility_date": "2025-01-01",
+
+  // Every 5 minutes. Render spins a free service down after 15 minutes idle, so this is
+  // three chances before the timeout — a missed beat costs nothing. The 13:00-06:59 UTC
+  // warm window is enforced IN CODE rather than here, because the reason for it (the
+  // 750 instance-hours/month cap) belongs next to the logic, and because the free plan
+  // allows only 3 triggers per Worker — spending them on hour ranges would leave none.
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
+
+  "observability": {
+    "enabled": true
+  }
+}

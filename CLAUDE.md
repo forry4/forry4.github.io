@@ -715,13 +715,30 @@ git push                      # deploy-pages.yml builds + publishes (~2-3 min)
   (`rust-cores/dissonance-core/**` does trigger `rust-dissonance.yml` — a test job that deploys
   nothing). CoC is the
   exception where a *model* swap needs no rebuild (the `.bin` is fetched); Spender and Duel embed nets.
-- **Render keep-alive** (free tier spins down ~15min idle, ~30-50s cold start): `keepalive.yml`
-  (GitHub Actions) is the SOLE mechanism — several INDEPENDENT long-lived (~90min) pre-7am runs, each
-  HOLDING the connection open and retrying through the spin-up 503s (`curl --retry-all-errors` + long
-  `--max-time`, like a browser) so any firing completes the wake (~7s). **Key lesson (do not regress):**
-  a SHORT 30s pinger is worse than nothing — it disconnects mid-spin-up and ABORTS the wake, which was
-  the actual cause of the 7-9am outages (not "GitHub fired late"). The only *guaranteed* fix is the
-  $7/mo Starter tier.
+- **Render keep-alive** (free tier spins down ~15min idle, ~30-50s cold start): **TWO pingers on TWO
+  providers, and the split is the design.** `keepalive-worker/` is a Cloudflare Worker cron firing
+  every 5 min — reliable, so the box should never reach the 15-minute idle timeout at all;
+  `keepalive.yml` (GitHub Actions) runs long-lived (~90min) jobs HOLDING the connection open and
+  retrying through the spin-up 503s (`curl --retry-all-errors` + long `--max-time`, like a browser),
+  which is what completes a wake (~7s) once the box IS cold. **Key lesson (do not regress):** a SHORT
+  30s pinger is worse than nothing — it disconnects mid-spin-up and ABORTS the wake, which was the
+  actual cause of the 7-9am outages (not "GitHub fired late").
+  **The SECOND lesson, and the reason there are two providers: the ping was never the weak part — the
+  SCHEDULER was.** GitHub drops over half of all scheduled firings and whole hour-bands go dead for
+  weeks; UTC 13 and 14, which held every pre-7am warm-up, fired ZERO times from 2026-08-27 to 09-06,
+  a re-registration push did not revive them, and measured warm coverage was **39%** with the box cold
+  every morning 06:00-~09:30 local. Redundancy inside one scheduler cannot fix that, which is what the
+  three "INDEPENDENT" attempts (all inside 13:00-14:59) proved by failing together.
+- ⚠ **The warm window is an INSTANCE-HOUR BUDGET, not a preference — never make it 24/7.** Render's
+  free tier gives **750 instance-hours/month per workspace, shared across every free service**, and
+  exhausting them SUSPENDS the service until the next month. A month is ~730h, so round-the-clock
+  warming spends the whole allowance and takes the site down outright if a second free service exists.
+  Both pingers therefore warm ~13:00-06:59 UTC (~18h/day ≈ 548h/month); overlapping them costs nothing
+  extra (hours are counted on the service being up, not on who woke it), but widening either does.
+  `core/tests/test_keepalive_budget.py` guards it, and also pins that both pingers point at the SAME
+  backend URL — a URL changed in one and not the other is a green workflow warming nothing.
+- **The $7/mo Starter tier remains the only *guaranteed* fix**, and is explicitly declined (user
+  directive, 2026-09-06). Don't propose it again; propose another free scheduler instead.
 - **Staging** (Cloudflare Worker `webprojectsstaging.forry4.workers.dev`, tracks the `staging` branch,
   reuses the prod backend) — test frontend/layout changes on a real URL first. Local↔Cloudflare bundle
   hashes differ; verify by served content. Use vs-AI games so test data stays private.

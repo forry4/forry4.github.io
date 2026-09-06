@@ -1,8 +1,22 @@
 name: Keep backend warm
 
 # Keeps the Render free-tier backend warm during play hours so its cold start (~50s;
-# spins down after ~15 min idle) doesn't hit real users. GitHub Actions is the SOLE
-# mechanism here (no dependency on any always-on machine). Public repo => free minutes.
+# spins down after ~15 min idle) doesn't hit real users. Public repo => free minutes.
+#
+# THIS IS NO LONGER THE SOLE MECHANISM, and that is the point — see the 2026-09-06
+# measurement below for why one scheduler was never enough. `keepalive-worker/` is a
+# Cloudflare Worker cron doing the same job on a different provider, and the two cover
+# opposite halves: it fires reliably every 5 minutes, so the box should never reach the
+# 15-minute idle timeout at all; this one fires unreliably but HOLDS a retrying curl for
+# ~90 min, which is what actually completes a wake once the box is already cold. Neither
+# depends on an always-on machine. Keep both — dropping either leaves the failure the
+# other one covers.
+#
+# ⚠ BOTH PINGERS SPEND THE SAME BUDGET: Render's free tier allows 750 INSTANCE-HOURS per
+# month per workspace, shared across every free service, and running out SUSPENDS the
+# service until the next month. Overlapping pingers cost nothing extra (the hours are
+# counted on the service being up, not on who woke it), but WIDENING either one's window
+# does. `core/tests/test_keepalive_budget.py` guards the Worker's side of that.
 #
 # THE ACTUAL FIX IS THE WAKE, NOT THE TIMING. The 7-9am outages were NOT "GitHub fired
 # late" — they were a 30s pinger (cron-job.org) that could not hold a connection through
