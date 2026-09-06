@@ -15,14 +15,18 @@ name: Keep backend warm
 #
 # RELIABILITY STRATEGY for GitHub's flaky scheduler (it delays/drops individual starts,
 # worst at :00):
-#   1. Several INDEPENDENT pre-7am starts at off-peak minutes -> at least one lands.
+#   1. Several pre-7am starts at off-peak minutes -> at least one lands. They must be in
+#      DIFFERENT HOURS to be independent of the failure that actually happens; see the
+#      2026-09-06 measurement below for what "independent" cost when they were not.
 #   2. Each run is LONG-LIVED (~90 min) so a single firing bridges 7am, and with
 #      cancel-in-progress:false the runs chain back-to-back for continuous coverage.
-#   3. Hourly starts through the day re-trigger the chain so it stays warm to ~10pm.
+#   3. Twice-hourly starts through the day re-trigger the chain so it stays warm to ~10pm.
+#   4. The `warm-window-watchdog` job below FAILS if the morning ramp went dark, because
+#      every previous instance of this bug was found by a player, not by the workflow.
 #
 # DST: 7am LOCAL = 14:00 UTC in summer (PDT) / 15:00 UTC in winter (PST). The early
-# starts at 13:0x-14:0x UTC + the ~90-min run length bridge 7am in BOTH seasons. The
-# hourly window 14:00-05:59 UTC covers 7am-10pm PDT (and PST with <=1h overhang).
+# starts at 11:41-15:09 UTC + the ~90-min run length bridge 7am in BOTH seasons. The
+# stay-warm window 14:00-05:59 UTC covers 7am-10pm PDT (and PST with <=1h overhang).
 #
 # A GITHUB-SIDE INCIDENT CAN SILENTLY DE-REGISTER THIS SCHEDULE, AND THE SYMPTOM IS
 # HOUR-SHAPED, NOT A UNIFORM SLOWDOWN. On 2026-08-26 an Actions incident ("Actions jobs
@@ -37,22 +41,64 @@ name: Keep backend warm
 # DIAGNOSE IT BY START HOUR, NEVER BY RUN COUNT OR CONCLUSION: histogram
 # run_started_at from /actions/workflows/keepalive.yml/runs and compare against the cron
 # hours below. A whole dead BAND is this bug; uniformly fewer runs is ordinary GitHub
-# scheduler drift. Re-registered 2026-09-04.
+# scheduler drift.
+#
+# ...AND RE-REGISTERING IS NOT A FIX — IT WAS TRIED (2026-09-04, 72bd097) AND THE BAND
+# STAYED DEAD. Measured 2026-09-06 over the 100 runs back to 08-25: UTC hours 13 and 14
+# fired **0 times in the 11 days since 08-27**, against 2 and 4 firings in the two days
+# before it, while hours 17 and 23 fired 20 and 14 times. The two mornings AFTER the
+# re-registration push were still dead (first daytime firing 16:48 and 15:54 UTC, i.e.
+# 09:48 and 08:54 local). Simulating the concurrency queue over those runs puts real warm
+# coverage at **39%** (112h of 287h), with a cold window EVERY morning from 06:00 local
+# until ~09:00-10:00 — which is exactly the "slow startup" a player reports.
+#
+# So the schedule below no longer assumes any particular cron will be honoured. Two
+# changes, and the reasoning is what matters if this ever needs revisiting:
+#   1. THE MORNING RAMP IS SPREAD ACROSS FIVE UTC HOURS (11,12,12,13,14,15), because the
+#      observed failure is HOUR-shaped. The old three "independent" attempts were all
+#      inside 13:00-14:59, so they were independent of GitHub dropping ANY SINGLE start
+#      and perfectly correlated with the failure that actually happens. A run holds ~90
+#      min, so ANY ONE of 12:53 / 13:29 / 14:11 bridges 7am PDT (14:00 UTC) on its own,
+#      and any one of 14:11 / 15:09 / 15:13 bridges 7am PST (15:00 UTC).
+#   2. THE STAY-WARM BAND FIRES TWICE AN HOUR (:13 and :47) instead of once. Roughly half
+#      of all scheduled firings are dropped, so one start per hour makes a 90-minute
+#      chain break on about one window in eight; three chances per window makes it one in
+#      a hundred. A firing that lands while a run is in progress costs nothing — it queues
+#      behind it and extends coverage, or is cancelled as pending in seconds.
+# Both minutes stay off :00, which is GitHub's own advice (the scheduler is worst at the
+# top of the hour). The quiet window is 06:00-11:40 UTC = 23:00-04:40 local, which is the
+# only stretch with no play in it.
 
 on:
   schedule:
-    - cron: "7 13 * * *"           # pre-7am warm-up attempt #1 (6:07 PDT / 5:07 PST)
-    - cron: "37 13 * * *"          # attempt #2 (GitHub often drops any single start)
-    - cron: "7 14 * * *"           # attempt #3 — also covers PST 7am via the long run
-    - cron: "23 14-23,0-5 * * *"   # hourly stay-warm through the play window
+    # ── the pre-7am ramp: six starts, five different UTC hours ──────────────────
+    - cron: "41 11 * * *"          # 04:41 PDT — first warm-up, holds to 13:11 UTC
+    - cron: "19 12 * * *"          # 05:19 PDT
+    - cron: "53 12 * * *"          # 05:53 PDT — holds past 14:00 UTC, so it alone makes 7am PDT
+    - cron: "29 13 * * *"          # 06:29 PDT — likewise
+    - cron: "11 14 * * *"          # 07:11 PDT / 06:11 PST
+    - cron: "9 15 * * *"           # 08:09 PDT / 07:09 PST — the PST 7am warm-up
+    # ── stay warm through the play window (7am-10pm local), twice an hour ───────
+    # Two of these hours are carved out into entries of their own so the watchdog job
+    # below can be gated on them: `github.event.schedule` reports the cron EXPRESSION
+    # that fired, never the time, so nothing inside a `14-23` range can tell 17:47
+    # from 18:47. Gating on the range instead would start the watchdog on all twenty
+    # firings a day; splitting the hour out costs one line and starts it on one.
+    - cron: "13 15-20,22-23,0-4 * * *"
+    - cron: "13 21 * * *"          # ...and wakes the watchdog
+    - cron: "47 14-16,18-23,0-4 * * *"
+    - cron: "47 17 * * *"          # ...and wakes the watchdog
   workflow_dispatch: {}
-
-concurrency:
-  group: keepalive
-  cancel-in-progress: false
 
 jobs:
   ping:
+    # CONCURRENCY IS PER-JOB, NOT PER-WORKFLOW, and that is deliberate: at workflow level
+    # it also serialises the watchdog below, so the one job whose whole purpose is to
+    # report on the schedule would sit pending behind a 90-minute ping — or be cancelled
+    # as a superseded pending run — and report nothing.
+    concurrency:
+      group: keepalive
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 95
     steps:
@@ -72,3 +118,59 @@ jobs:
             # Warm -> relax to a 4-min stay-warm cadence; still cold -> retry fast.
             if [ "$code" = "200" ]; then sleep 240; else sleep 15; fi
           done
+
+  # THE ALARM FOR THE FAILURE ABOVE. A dead cron band is SILENT — the later hours keep
+  # firing, every run is green, and only the morning is cold — so it went unnoticed for
+  # nine days in August and eleven more in September. This is the header's "diagnose it by
+  # start hour" written down as a job: once a day it asks whether the pre-7am ramp actually
+  # fired, and FAILS if it did not. It pings nothing and deploys nothing.
+  #
+  # It runs on TWO crons in different hours for the same reason the ramp is spread: a
+  # watchdog that can only be woken by one hour is silenced by exactly the outage it
+  # watches for. Both are OUTSIDE the 11:00-13:59 window they inspect — gate it on a cron
+  # inside that window and the run doing the checking satisfies the check, which passes
+  # forever while proving nothing.
+  #
+  # THE WINDOW IS 11:00-13:59 UTC, AND ITS END IS THE WHOLE POINT: a run holds ~90 min, so
+  # only a firing before 14:00 can leave the box warm AT 7am PDT. Checking "did the morning
+  # fire at all" over a looser 11:00-15:59 would have passed on 2026-09-05, whose earliest
+  # daytime firing was 15:54 UTC — 08:54 local, an hour and a half after the player hit a
+  # cold start. The check has to be the property that matters, not the presence of a run.
+  warm-window-watchdog:
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.event.schedule == '47 17 * * *'
+      || github.event.schedule == '13 21 * * *'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    steps:
+      - name: The pre-7am ramp must have fired in the last 24h
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          since=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+          # created_at, not run_started_at: a run held pending by the ping job's
+          # concurrency group reports the queue wait in one and not the other, and what
+          # is being audited here is whether the CRON fired at all.
+          fired=$(curl -sS --fail --retry 3 --retry-all-errors \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$REPO/actions/workflows/keepalive.yml/runs?per_page=100&event=schedule" \
+            | jq -r --arg since "$since" \
+                '.workflow_runs[] | select(.created_at >= $since) | .created_at')
+          echo "scheduled firings in the last 24h:"
+          echo "$fired" | sort | sed 's/^/  /'
+          ramp=$(printf '%s\n' "$fired" | awk -F'T' 'NF>1 { h = substr($2,1,2) + 0; if (h >= 11 && h <= 13) n++ } END { print n + 0 }')
+          total=$(printf '%s\n' "$fired" | grep -c . || true)
+          echo "total: $total    inside the 11:00-13:59 UTC morning ramp: $ramp"
+          if [ "$ramp" -eq 0 ]; then
+            echo "::error::The pre-7am warm-up band (11:00-13:59 UTC) fired ZERO times in the last 24h."
+            echo "::error::The backend is cold every morning. See this file's header — a push that"
+            echo "::error::touches it re-registers the cron, and if that does not take, move the ramp"
+            echo "::error::to different hours rather than re-registering the same ones again."
+            exit 1
+          fi

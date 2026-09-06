@@ -1507,6 +1507,64 @@ try {
 			check("...truncated with an ellipsis iff the full rule can't fit at the floor",
 				bodyTxt.mismatch.length === 0 && bodyTxt.floorOff.length === 0,
 				JSON.stringify({ mismatch: bodyTxt.mismatch, floorOff: bodyTxt.floorOff }));
+
+			// A BODY BOX CAN LOSE HEIGHT WITHOUT LOSING WIDTH, and FitBodyText used to skip
+			// the refit when it did — its ResizeObserver guard was width-only while its fit
+			// criterion (scrollHeight <= clientHeight) is a HEIGHT test. The box is `flex:1`
+			// between the name and the foot, so its height is the card minus the NAME, and
+			// FitText sizes that name independently.
+			//
+			// NONE OF THE CHECKS ABOVE CAN SEE THAT, and neither can `settleFits`: a fitter
+			// that wrongly declines to refit is indistinguishable from one that has
+			// converged, so the font size is stable and the text overflows anyway. It
+			// reached CI as an intermittently red gate (run #779, on a commit touching only
+			// Orbit files) rather than as a bug report. So drive the one input a viewport
+			// resize never varies on its own: change the NAMES' size, leave every width
+			// alone, and assert the bodies actually re-fit.
+			// Verified non-vacuous against the unfixed component: 17 boxes changed height,
+			// 0 changed width, 0 re-fitted, 8 piles left overflowing (Cellar, Harbinger,
+			// Bandit and Witch among them).
+			const heightOnly = await page.evaluate(async () => {
+				const settled = () => new Promise((r) =>
+					requestAnimationFrame(() => requestAnimationFrame(r)));
+				const read = () => [...document.querySelectorAll(".dm-supply .dm-card")]
+					.map((c) => {
+						const el = c.querySelector(".dm-card-body");
+						return el && {
+							px: +parseFloat(getComputedStyle(el).fontSize).toFixed(2),
+							txt: el.textContent, h: el.clientHeight,
+							w: +el.getBoundingClientRect().width.toFixed(2),
+							over: +(el.scrollHeight - el.clientHeight).toFixed(1),
+							name: c.querySelector(".dm-fitspan")?.textContent,
+						};
+					}).filter(Boolean);
+				const before = read();
+				const names = [...document.querySelectorAll(".dm-supply .dm-card .dm-card-name")];
+				const restore = names.map((n) => n.style.fontSize);
+				// FitText writes the size onto .dm-card-name, so this is the same input it
+				// produces — just larger than any width would ask for, which makes the
+				// squeeze on the body below it unambiguous.
+				for (const n of names) {
+					n.style.fontSize = (parseFloat(getComputedStyle(n).fontSize) * 2.2) + "px";
+				}
+				await settled(); await new Promise((r) => setTimeout(r, 400)); await settled();
+				const after = read();
+				const out = {
+					cards: after.length,
+					widthMoved: after.filter((a, i) => Math.abs(a.w - before[i].w) > 0.5).length,
+					heightMoved: after.filter((a, i) => a.h !== before[i].h).length,
+					refitted: after.filter((a, i) => a.px !== before[i].px || a.txt !== before[i].txt).length,
+					overflowing: after.filter((a) => a.over > 1).map((a) => a.name),
+				};
+				names.forEach((n, i) => { n.style.fontSize = restore[i]; });
+				await settled(); await new Promise((r) => setTimeout(r, 400));
+				return out;
+			});
+			check("a body box that loses HEIGHT but keeps its width still re-fits",
+				heightOnly.heightMoved > 0 && heightOnly.widthMoved === 0
+				&& heightOnly.refitted > 0 && heightOnly.overflowing.length === 0,
+				JSON.stringify(heightOnly));
+
 			await page.setViewportSize({ width: 1280, height: 900 });
 			await settleFits(page);
 

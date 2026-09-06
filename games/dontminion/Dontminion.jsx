@@ -438,10 +438,26 @@ function FitBodyText({ text, min = BODY_MIN_PX, max = BODY_MAX_PX, hasPotion = f
     fit();
     let ro;
     if (typeof ResizeObserver !== "undefined") {
-      ro = new ResizeObserver((entries) => {              // re-fit on WIDTH changes only
-        const w = entries[0].contentRect.width;
-        if (Math.abs(w - lastW) < 0.5) return;
-        lastW = w; fit();
+      // RE-FIT ON EITHER DIMENSION. This guard was width-only, and the fit criterion
+      // is `scrollHeight <= clientHeight` — a HEIGHT test against a box that is
+      // `flex:1` between the name and the foot, so its height is the card minus the
+      // NAME. FitText sizes that name independently, and when it does, this box
+      // changes height with its width untouched: the refit was skipped and the text
+      // was left spilling out of the card, permanently. Measured on a real board:
+      // resizing the names alone moved all 17 body boxes' heights, changed no width,
+      // triggered ZERO refits and left 8 piles overflowing.
+      // It is also invisible to a settle-until-stable harness — a fitter that wrongly
+      // declines to refit is indistinguishable from one that has converged — which is
+      // how it reached CI as an intermittently red gate rather than a bug report.
+      // NOTE the asymmetry with FitText above, which is width-only and CORRECT: its
+      // box's height is driven by its own font-size, so observing height there would
+      // feed back on itself. This box's height is set by the flex parent and cannot
+      // be changed by anything `fit()` does, so there is no loop to guard against.
+      let lastH = -1;
+      ro = new ResizeObserver((entries) => {
+        const { width: w, height: h } = entries[0].contentRect;
+        if (Math.abs(w - lastW) < 0.5 && Math.abs(h - lastH) < 0.5) return;
+        lastW = w; lastH = h; fit();
       });
       ro.observe(el);
     }

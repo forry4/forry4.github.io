@@ -553,6 +553,23 @@ covers the logic; each game's wiring is one line).
   and fails if either count is zero — steering you cannot trust without the assertion, which was
   verified non-vacuous by dropping the preference and watching it go red. Check the same thing before
   seeding any other game's block: what was "sampled over many runs" becomes "fixed forever".
+- **…but "red on a commit that cannot have caused it" is NOT automatically a seeding problem — check
+  whether the gate is reporting a REAL bug it merely reaches intermittently.** Pages run #779
+  (2026-09-05) went red on `dmCardFace`'s "nothing overflows" against a commit touching only Orbit
+  files, which is the exact signature the seeding lesson above describes, and Dontminion's kingdom is
+  indeed one of the last unseeded deals. Seeding it would have been the wrong fix twice over: it would
+  have hidden a live product bug, and it would have broken `dmInfoModal`, whose re-deal loop needs the
+  deal to actually vary (it re-deals up to 8 times for a board with both a landscape and an Artifact
+  bearer, and FAILS rather than skipping). The real cause was `FitBodyText`'s ResizeObserver guard
+  being **width-only while its fit criterion is a HEIGHT test** — its box is `flex:1` between the name
+  and the foot, so `FitText` resizing the NAME changes the body's height with its width untouched, the
+  refit is skipped, and the rules text is left spilling out of the card for good. Measured on a real
+  board: 17 boxes changed height, 0 changed width, **0 re-fitted**, 8 piles overflowing.
+  **`settleFits` is structurally blind to this** — a fitter that wrongly declines to refit is
+  indistinguishable from one that has converged, so the font size is stable and the text overflows
+  anyway. That is the transferable half: a settle-until-stable helper proves the page STOPPED, never
+  that it is RIGHT, so a "did it settle" gate needs a companion that drives the input the resize path
+  never varies on its own (here: change the names, hold every width, assert the bodies re-fit).
 - **The gates hand their build to each other: `SCREENS_REUSE_BUILD=1` (set by CI and `.githooks/pre-push`)
   lets `screens` reuse the bundle `smoke` just built** — the same `vite build` was running twice. It is
   **verified, not trusted**: `runBuild()` rebuilds anyway unless `dist/` is newer than every source file
