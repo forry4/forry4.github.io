@@ -30,12 +30,11 @@ export default function OrbitRules() {
     </RulesSection>
 
     <RulesSection title="Turn overview">
-      <p>On your turn, you must:</p>
       <p>Play 1 card from your hand to take 1 of the three following actions:</p>
       <RulesDefs items={[
-        { t: "A. Recruit the Agent", d: "Put the Agent in its planet column, pay its cost minus the cards already there, gain 1 matching influence, then resolve its text left to right." },
+        { t: "A. Recruit the Agent", d: "Put the Agent in its planet column, pay its cost in Credits minus the cards already there, gain 1 matching influence, then resolve its text." },
         { t: "B. Develop Technology", d: "Discard the Agent, pay the next technology level in Zenithium (1–5), advance its faction, then resolve that level and every lower level from top to bottom." },
-        { t: "C. Become the Leader", d: "Discard the Agent. Robot takes the Leader badge and gains 1 Zenithium; Human takes the Leader badge and gains 3 Credits; Animod takes the Leader badge and mobilizes 2. Taking the badge from elsewhere gives the Silver side and a hand limit of 5. Taking your own Silver badge upgrades it to Gold and a limit of 6." },
+        { t: "C. Become the Leader", d: "Discard the Agent to take the Leader badge. Robot gains 1 Zenithium; Human gains 3 Credits; Animod mobilizes 2. If the other player had it, your hand limit is 5. If you already held Silver, it upgrades to Gold and your limit becomes 6." },
       ]} />
       <RulesTip>A recruited Agent reduces the future cost of its column, and it is
         already the top card when its own effects resolve.</RulesTip>
