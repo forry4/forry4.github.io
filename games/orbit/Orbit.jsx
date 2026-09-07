@@ -919,7 +919,7 @@ export default function Orbit({ myId, authUser, onExit }) {
         : isMyTurn ? "Choose an Agent" : null;
   return <div className="app orbit or-game" style={{ "--lby-accent": GAME_ACCENTS.orbit }}>
     <style>{styles}</style>
-    <LobbyHeader title={`Orbit · ${roomId}`} user={<span className={`or-connection${connected ? "" : " lost"}`}>{connected ? (authUser?.name || "Connected") : "Reconnecting…"}</span>}
+    <LobbyHeader title="Orbit" user={<span className={`or-connection${connected ? "" : " lost"}`}>{connected ? (authUser?.name || "Connected") : "Reconnecting…"}</span>}
       menu={<GameMenu onLeave={leaveToLobby} onRules={() => setShowRules(true)}
         onAbandon={over ? null : () => setConfirmAbandon(true)} />} />
     <main className="or-table">

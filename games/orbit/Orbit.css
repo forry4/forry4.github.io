@@ -626,7 +626,7 @@
   .or-tech-summary-row > span.mine i { background: var(--or-me); }
   .or-tech-summary-row > span.theirs i { background: var(--or-them); }
   .or-tech-summary-row > span b { color: var(--or-ink); font-size: .72rem; }
-  .or-sideboards > .or-log { order: 7; }
+  .or-sideboards > .or-log { order: 7; height: 200px; }
   /* Keep the same five-rung geometry when expanded; only the surrounding chrome tightens. */
   .or-tech-col { padding: .42rem .3rem; }
   .or-tech-col h3 { font-size: .65rem; }

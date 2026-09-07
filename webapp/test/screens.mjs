@@ -5589,6 +5589,8 @@ try {
 		check("the five-planet and three-track boards render", board
 			&& await page.locator(".or-track").count() === 5
 			&& await page.locator(".or-tech-col").count() === 3);
+		check("the Orbit banner shows the game name without the room id",
+			(await page.locator(".or-game .lby-title").textContent().catch(() => "")).trim() === "Orbit");
 		const influenceCopy = await page.locator(".or-influence").textContent();
 		check("the influence board omits the redundant planet control heading",
 			!influenceCopy.includes("Planet control") && await page.locator(".or-influence-head").count() === 0,
@@ -6063,6 +6065,7 @@ try {
 				levels: summaries.map((row) => [...row.querySelectorAll(":scope > span > b")]
 					.map((el) => el.textContent.trim())),
 				logAfterHand: logBox.top >= hand.bottom - 1,
+				logHeight: Math.round(logBox.height),
 			};
 		});
 		check("technology collapses on a phone to both players' level on all three tracks",
@@ -6071,6 +6074,8 @@ try {
 				&& levels.every((level) => /^\d+$/.test(level))), JSON.stringify(collapsedTech));
 		check("the Log is the final board section on a phone",
 			collapsedTech.logAfterHand, JSON.stringify(collapsedTech));
+		check("the mobile Log has the taller reading viewport",
+			collapsedTech.logHeight >= 195, JSON.stringify(collapsedTech));
 		if (process.env.ORBIT_SHOTS) {
 			await page.screenshot({ path: "test-results/orbit-390x844-after.png", fullPage: true });
 		}
