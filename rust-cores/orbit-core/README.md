@@ -1,9 +1,12 @@
-# Orbit simulator — Phase 1
+# Orbit simulator — Phase 1 mechanical core
 
 A typed native simulation core for Orbit's 90-card base game. The live Python
 engine remains authoritative. The generated data is a transcription shared with
 Python; transitions and decision ownership are independently implemented in Rust.
-This package does not yet contain search, a neural network or a browser bot.
+The offline Python package in `games/orbit/ai/` contains the Phase 2/3 search,
+belief, arena and training harness. This Rust crate remains the mechanical
+simulator and future WASM transition boundary; browser bot serving is still a
+later phase.
 
 ## Run the gates
 
@@ -85,5 +88,6 @@ cargo run --locked --release --manifest-path rust-cores/orbit-core/Cargo.toml --
 The benchmark's 2,000-decision cap is reported as censored, never scored a draw.
 The `bridge` JSONL binary is a diagnostic tool, not a fast training transport.
 
-The complete campaign is in `games/orbit/AI_PLAN.md`. Next: baseline opposition,
-arena, history-conditioned beliefs and the first search comparison.
+The complete campaign is in `games/orbit/AI_PLAN.md`. Next: promotion gates,
+native/WASM search profiling and browser serving. No model is promoted by the
+offline tools automatically.

@@ -23,6 +23,12 @@ The agreed campaign is in `AI_PLAN.md`. Phase 1 is implemented locally in
 - The user authorized Phase 1 after verifying gameplay. Existing BGA audits are
   bounded evidence, not full replay parity; Python/Rust agreement does not extend
   their coverage. No BGA game is used as a training example.
+- Phases 2/3 are offline in `ai/search.py`, `ai/neural.py`, `ai/selfplay.py`,
+  and `ai/league.py`. Search and guides must use only `observation()` plus a
+  seat-local history; `determinize()` is the only place a privileged offline
+  game can seed a hidden-world sample. Arenas are CRN paired, swap assignments,
+  cover the eight technology boards, and treat capped games as censored. Do not
+  promote a learner or wire it into `bot.py` before the Phase 4 gates.
 
 ## Rules and serving
 

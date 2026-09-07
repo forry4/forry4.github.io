@@ -1,17 +1,50 @@
 # Orbit AI campaign
 
-Agreed 2026-09-05. Status: **Phase 1 complete locally**. No neural training has begun.
+Agreed 2026-09-05. Status: **Phases 1–3 implemented offline**. The current
+campaign has a heuristic information-set PUCT baseline, a versioned 128-wide
+policy/value guide, paired all-board arenas, sequential particle beliefs, and
+an outcome-only population trainer. No browser serving or champion promotion
+has happened yet.
 
 Delivered: typed Rust simulator, generated source fingerprint, per-decision
 Python/native state/legal-move/observation parity, strict shuffle tapes,
 seat-local offline histories and restore, a current-observation hidden-state
-prior, and CI gates. 11,955 transitions and 331 shuffles matched across targeted
-effect/boundary cases and 64 complete games on all boards. Native tests and WASM
-compilation passed. See `rust-cores/orbit-core/README.md` for commands and limits.
+prior, CI gates, information-set PUCT, sequential particles, a 128-wide guide,
+paired arenas and population training. 11,955 transitions and 331 shuffles
+matched across targeted effect/boundary cases and 64 complete games on all
+boards. Native tests and WASM compilation passed. See
+`rust-cores/orbit-core/README.md` for commands and limits.
 
-Phase 2 is next. The current sampler is intentionally not a full-history posterior;
-sequential conditioning is required before the search can claim history-consistent
-beliefs. Live history persistence and browser bot integration remain Phase 5.
+Phase 2 is implemented offline. The current sampler is intentionally not an
+exact Bayesian posterior: sequential conditioning is represented by a finite
+`HistoryBelief` particle population, with hard public-card constraints and
+optional audited action likelihoods. Live history persistence and browser bot
+integration remain Phase 5.
+
+**2026-09-06 implementation note:** Phase 2 lives in `ai/search.py`,
+`ai/belief.py`, and `ai/neural.py`. `InformationSetSearch` uses PUCT over
+observation-plus-public-trace information states, samples hidden hands/decks
+from a sequential `HistoryBelief`, and gives opponent nodes a policy that sees
+only that opponent's simulated observation/history. `SearchConfig` records the
+equal-time budget knobs; `Decision.stats` are the Phase 3 policy targets. The
+dependency-free guide has a fixed observation/action encoder plus a short
+seat-local recurrent trace, a 128-wide shared trunk, policy head, value head,
+JSON shape checks and terminal-outcome SGD.
+`action_score` remains an audited one-ply diagnostic; tree expansions use its
+allocation-free public prior so the Python harness can measure real simulations
+within a turn budget.
+
+**2026-09-06 Phase 3 implementation note:** `ai/selfplay.py` records JSONL
+episodes with fingerprints, board sides, per-seat observations and search visit
+targets. `run_arena` uses common-random-number paired games with assignments
+swapped and reports pair confidence intervals, per-board scores, censored games,
+and the exact mirror test. `ai/league.py` trains a tabular guide and the neural
+guide from completed episodes only, retains typed historical members, and samples
+opponents with the 50% empirical-game-theoretic / 25% diverse / 25% exploiter
+mixture (renormalizing unavailable buckets). `tools/ai_campaign.py` exposes
+`arena`, `bootstrap`, `train-neural`, and `cycle`; all artifacts carry the rules
+fingerprint. These are training/evaluation tools only: Phase 4 still decides
+whether a candidate beats the incumbent, and Phase 5 is the WASM boundary.
 
 ## Objective and constraints
 
