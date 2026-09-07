@@ -18,13 +18,15 @@ Two things here are load-bearing and were expensive to learn elsewhere:
   both deck orders, RNG state, and private decisions never reach the wrong wire.
 
 Orbit alternates turns after the simultaneous opening mulligan. The random bot
-uses the exact same ``legal_moves`` / ``apply_move`` boundary as a browser.
+and browser-served Hard tier use the exact same ``legal_moves`` /
+``apply_move`` boundary; a missing browser answer always falls back server-side.
 """
 
 from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import copy
 import hashlib
 import json
 import logging
@@ -41,12 +43,30 @@ from core.config import cors_allowed_origins
 from core.db import cleanup_stale_games, get_db_conn, maybe_cleanup_games
 
 from . import bot, engine, persist
+from .ai import serving
+from .ai.state import TASK_FIELDS, observation
 from .cards import BONUS_TYPES, CARDS, FACTIONS, PLANETS, public_card
 
 LOG = logging.getLogger("orbit")
 
 TABLE = "orbit_games"
 AI_PID = "bot"
+
+# The random opponent remains available as the baseline.  ``hard`` is the
+# browser-served tier; every client answer is still checked by the Python
+# engine and a silent/old/slow browser falls back to the server path.
+AI_DIFFICULTIES = ("random", "hard")
+CLIENT_AI_TIERS = ("hard",)
+DEFAULT_DIFFICULTY = "random"
+CLIENT_AI_WIRE = serving.SERVING_ABI_VERSION
+CLIENT_AI_MODEL_VERSION = serving.MODEL_VERSION
+CLIENT_AI_ENCODER = serving.ENCODER_VERSION
+CLIENT_AI_SCHEMA = serving.SCHEMA_VERSION
+CLIENT_AI_RULES = serving.rules_fingerprint()
+CLIENT_AI_TIMEOUT = 6.25
+CLIENT_AI_TURN_BUDGET_MS = serving.TURN_BUDGET_MS
+CLIENT_AI_MAIN_ACTION_MS = serving.MAIN_ACTION_BUDGET_MS
+CLIENT_AI_FOLLOWUP_RESERVE_MS = serving.FOLLOWUP_RESERVE_MS
 
 #: A floor on how fast the bot answers. Without it a vs-bot game resolves the
 #: whole simultaneous submission the instant you click, which reads as a bug.
@@ -106,6 +126,310 @@ _DB_WRITE_EXEC = concurrent.futures.ThreadPoolExecutor(
 _save_conn = None  # only ever touched by the write-executor thread
 
 
+def _valid_difficulty(value) -> str:
+    value = str(value or DEFAULT_DIFFICULTY).lower()
+    return value if value in AI_DIFFICULTIES else DEFAULT_DIFFICULTY
+
+
+def _loaded_ai_memory(raw, players) -> dict[str, dict]:
+    """Restore only bounded, versioned serving memory for known seats."""
+
+    if not isinstance(raw, dict):
+        return {}
+    result = {}
+    for pid in players or []:
+        value = raw.get(pid)
+        if isinstance(value, dict):
+            result[pid] = serving.normalise_memory(value)
+    return result
+
+
+def _loaded_budget(value) -> int | None:
+    if value is None:
+        return None
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+_OBS_KEYS = frozenset((
+    "schema", "phase", "turn_pid", "turn_number", "influence",
+    "captured_this_turn", "leader", "board_sides", "planet_bonus",
+    "technology_bonus", "agent_discard", "bonus_discard", "mulligan_done",
+    "pending_pid", "winner", "seat", "players", "agent_deck_count",
+    "bonus_deck_count", "pending", "legal_moves",
+))
+_OBS_PLAYER_KEYS = frozenset((
+    "credits", "zenithium", "columns", "technology", "row_bonuses",
+    "captured", "hand_count", "hand",
+))
+_HISTORY_MOVE_KEYS = frozenset((
+    "action", "card_id", "card_ids", "planet", "planets", "faction",
+    "tier", "cost", "amount", "count", "accept", "branch", "bonus_area", "slot",
+))
+
+
+def _history_action_valid(value) -> bool:
+    """Validate a recorded action without accepting arbitrary nested data."""
+
+    return (isinstance(value, dict)
+            and not (set(value) - _HISTORY_MOVE_KEYS)
+            and isinstance(value.get("action"), str)
+            and all(not isinstance(item, (dict, list))
+                    for key, item in value.items()
+                    if key not in {"card_ids", "planets"})
+            and isinstance(value.get("card_ids", []), list)
+            and isinstance(value.get("planets", []), list)
+            and all(not isinstance(item, (dict, list))
+                    and isinstance(item, int) and not isinstance(item, bool)
+                    for item in value.get("card_ids", []))
+            and all(not isinstance(item, (dict, list))
+                    and isinstance(item, str)
+                    for item in value.get("planets", [])))
+
+
+def _history_task_valid(value) -> bool:
+    if not isinstance(value, dict) or set(value) - TASK_FIELDS:
+        return False
+    options = value.get("options")
+    if options is not None and (
+            not isinstance(options, list)
+            or any(not _history_action_valid(move) for move in options)):
+        return False
+    return True
+
+
+def _history_players_valid(players, seat: int) -> bool:
+    if not isinstance(players, list) or len(players) != 2:
+        return False
+    for index, player in enumerate(players):
+        if not isinstance(player, dict) or set(player) - _OBS_PLAYER_KEYS:
+            return False
+        if index == seat:
+            if "hand" not in player or not isinstance(player["hand"], list):
+                return False
+        elif "hand" in player:
+            return False
+        columns = player.get("columns")
+        tech = player.get("technology")
+        if (not isinstance(columns, list) or len(columns) != 5
+                or any(not isinstance(column, list) for column in columns)
+                or not isinstance(tech, list) or len(tech) != 3):
+            return False
+        for field in ("credits", "zenithium", "hand_count"):
+            if (field in player
+                    and (isinstance(player[field], bool)
+                         or not isinstance(player[field], int))):
+                return False
+        if any(isinstance(card, bool) or not isinstance(card, int)
+               for column in columns for card in column):
+            return False
+        if any(isinstance(level, bool) or not isinstance(level, int)
+               for level in tech):
+            return False
+        for field in ("row_bonuses", "captured"):
+            if field in player and (
+                    not isinstance(player[field], list)
+                    or any(isinstance(item, bool) or not isinstance(item, int)
+                           for item in player[field])):
+                return False
+        if "hand" in player and any(
+                isinstance(card, bool) or not isinstance(card, int)
+                for card in player["hand"]):
+            return False
+    return True
+
+
+def _history_pending_valid(pending) -> bool:
+    if pending is None:
+        return True
+    if not isinstance(pending, dict) or set(pending) - {"source", "task", "waiting", "last_planet"}:
+        return False
+    if "source" in pending and not isinstance(pending["source"], str):
+        return False
+    if "waiting" in pending and not isinstance(pending["waiting"], bool):
+        return False
+    if "last_planet" in pending and pending["last_planet"] is not None \
+            and not isinstance(pending["last_planet"], str):
+        return False
+    task = pending.get("task")
+    return task is None or _history_task_valid(task)
+
+
+def _history_observation_valid(value, seat: int) -> bool:
+    """Check the structural allowlist without requiring the old position."""
+
+    if not isinstance(value, dict) or set(value) != _OBS_KEYS:
+        return False
+    if value.get("schema") != serving.SCHEMA_VERSION or value.get("seat") != seat:
+        return False
+    if not _history_players_valid(value.get("players"), seat):
+        return False
+    if not _history_pending_valid(value.get("pending")):
+        return False
+    return all(_history_action_valid(move) for move in value.get("legal_moves", []))
+
+
+def _history_changes_valid(value, seat: int) -> bool:
+    """Validate event deltas so a hand-edited row cannot smuggle hidden data."""
+
+    if not isinstance(value, dict) or set(value) - _OBS_KEYS:
+        return False
+    list_fields = {"influence", "captured_this_turn", "board_sides",
+                   "planet_bonus", "technology_bonus", "mulligan_done",
+                   "legal_moves"}
+    for key, item in value.items():
+        if key == "players" and not _history_players_valid(item, seat):
+            return False
+        if key == "pending" and not _history_pending_valid(item):
+            return False
+        if key == "legal_moves" and (
+                not isinstance(item, list)
+                or any(not _history_action_valid(move) for move in item)):
+            return False
+        if key == "leader" and (
+                not isinstance(item, dict) or set(item) - {"owner", "level"}):
+            return False
+        if key in list_fields and not isinstance(item, list):
+            return False
+        if key in list_fields - {"legal_moves"} and any(
+                isinstance(value, (dict, list)) for value in item):
+            return False
+        if key not in {"players", "pending", "legal_moves", "leader"} | list_fields \
+                and isinstance(item, (dict, list)):
+            return False
+    return True
+
+
+def _new_live_histories(game: dict) -> dict[str, dict]:
+    """Create seat-local policy histories without consulting the display log."""
+
+    return {
+        pid: {
+            "schema": serving.SCHEMA_VERSION,
+            "rules": serving.rules_fingerprint(),
+            "initial": observation(game, pid),
+            "latest": observation(game, pid),
+            "events": [],
+        }
+        for pid in game.get("order", [])
+    }
+
+
+def _loaded_histories(game: dict | None, raw) -> dict[str, dict]:
+    """Restore structured histories, handling pre-Phase-5 saves conservatively.
+
+    A legacy blob has no trustworthy policy history.  Start a fresh history at
+    its current allowlisted observation; never rebuild private events from the
+    raw game or display log.
+    """
+
+    if not isinstance(game, dict) or not game.get("order"):
+        return {}
+    if not isinstance(raw, dict) or set(raw) != set(game["order"]):
+        return _new_live_histories(game)
+    result = {}
+    try:
+        for pid in game["order"]:
+            item = raw[pid]
+            if (not isinstance(item, dict)
+                    or item.get("schema") != serving.SCHEMA_VERSION
+                    or item.get("rules") != serving.rules_fingerprint()):
+                raise ValueError("history rules")
+            initial = item.get("initial")
+            events = item.get("events")
+            if not isinstance(initial, dict) or not isinstance(events, list):
+                raise ValueError("history shape")
+            seat_index = game["order"].index(pid)
+            if not _history_observation_valid(initial, seat_index):
+                raise ValueError("history observation")
+            for event in events:
+                if not isinstance(event, dict):
+                    raise ValueError("history event")
+                if event.get("actor") not in (0, 1):
+                    raise ValueError("history actor")
+                changes = event.get("changes", {})
+                if not _history_changes_valid(changes, seat_index):
+                    raise ValueError("history changes")
+                for field in ("public_action", "own_action"):
+                    action = event.get(field)
+                    if action is not None and not _history_action_valid(action):
+                        raise ValueError("history action")
+            latest = item.get("latest")
+            if not isinstance(latest, dict):
+                latest = copy.deepcopy(initial)
+                for event in events:
+                    if isinstance(event, dict) and isinstance(event.get("changes"), dict):
+                        latest.update(copy.deepcopy(event["changes"]))
+            # A history is seat-local and must still describe this seat's
+            # current public view.  If an old schema is encountered, reset it
+            # rather than attempting to infer hidden events.
+            if int(latest.get("schema", -1)) != serving.SCHEMA_VERSION:
+                raise ValueError("history schema")
+            if not _history_observation_valid(latest, seat_index):
+                raise ValueError("history latest")
+            if latest != observation(game, pid):
+                raise ValueError("history current observation")
+            result[pid] = {
+                "schema": serving.SCHEMA_VERSION,
+                "rules": serving.rules_fingerprint(),
+                "initial": copy.deepcopy(initial),
+                "latest": copy.deepcopy(latest),
+                # A legacy or hand-edited row must not make policy memory grow
+                # without bound.  Events are already redacted on write;
+                # retain only the bounded tail on restore as well.
+                "events": copy.deepcopy(events[-512:]),
+            }
+    except (KeyError, TypeError, ValueError):
+        return _new_live_histories(game)
+    return result
+
+
+def _live_observations(game: dict) -> dict[str, dict]:
+    return {pid: observation(game, pid) for pid in game.get("order", [])}
+
+
+def _record_history(room: dict, actor_pid: str, move: dict,
+                    before: dict[str, dict] | None = None) -> None:
+    """Append one redacted event per seat after a validated live move."""
+
+    game = room.get("game")
+    if not isinstance(game, dict):
+        return
+    histories = room.setdefault("seat_histories", _new_live_histories(game))
+    if set(histories) != set(game.get("order", [])):
+        histories.clear()
+        histories.update(_new_live_histories(game))
+    before = before or {pid: item.get("latest") for pid, item in histories.items()}
+    for viewer in game.get("order", []):
+        after = observation(game, viewer)
+        previous = before.get(viewer) or histories[viewer].get("latest") or {}
+        event = {
+            "actor": game["order"].index(actor_pid),
+            "changes": {
+                key: copy.deepcopy(value)
+                for key, value in after.items()
+                if value != previous.get(key)
+            },
+        }
+        action = move.get("action") if isinstance(move, dict) else None
+        if action in ("recruit", "technology", "leader"):
+            event["public_action"] = copy.deepcopy(move)
+        elif action == "mulligan":
+            event["public_action"] = {
+                "action": "mulligan",
+                "count": len(move.get("card_ids", [])),
+            }
+        if viewer == actor_pid:
+            event["own_action"] = copy.deepcopy(move)
+        histories[viewer].setdefault("events", []).append(event)
+        histories[viewer]["latest"] = after
+        # Keep persistent policy memory bounded independently of the display log.
+        if len(histories[viewer]["events"]) > 512:
+            histories[viewer]["events"] = histories[viewer]["events"][-512:]
+
+
 def _persist_row(room_id, status, p1id, p1name, p2id, p2name, host,
                  state_json, now, created_at) -> None:
     global _save_conn
@@ -163,6 +487,14 @@ def save_game(room_id: str) -> None:
         "meta": room.get("meta", {}),
         "vs_ai": room.get("vs_ai", False),
         "ai_player": room.get("ai_player"),
+        "ai_difficulty": _valid_difficulty(room.get("ai_difficulty")),
+        "seat_histories": room.get("seat_histories", {}),
+        "ai_memory": room.get("ai_memory", {}),
+        # Wall-clock time survives a reconnect or a process reload.  It is
+        # cleared at the next turn boundary; no private game state is encoded.
+        "ai_turn_started_at": room.get("ai_turn_started_at"),
+        "ai_budget_remaining_ms": room.get("ai_budget_remaining_ms"),
+        "ai_decisions_this_turn": room.get("ai_decisions_this_turn", 0),
         "configuration": room.get("configuration", "sun"),
     }
     now = int(time.time())
@@ -192,14 +524,26 @@ def load_game_to_memory(room_id: str) -> bool:
     state = load_game_state(room_id)
     if not state:
         return False
+    game = state.get("game")
+    histories = _loaded_histories(game, state.get("seat_histories"))
     ROOMS[room_id] = {
         "players": state.get("players", {}),
         "host": state.get("host"),
         "status": state.get("status", "open"),
-        "game": state.get("game"),
+        "game": game,
         "meta": state.get("meta", {}),
         "vs_ai": state.get("vs_ai", False),
         "ai_player": state.get("ai_player"),
+        "ai_difficulty": _valid_difficulty(state.get("ai_difficulty")),
+        "seat_histories": histories,
+        "ai_memory": _loaded_ai_memory(state.get("ai_memory"), (game or {}).get("order", [])),
+        "ai_turn_started_at": state.get("ai_turn_started_at"),
+        "ai_budget_remaining_ms": _loaded_budget(state.get("ai_budget_remaining_ms")),
+        "ai_decisions_this_turn": _loaded_budget(state.get("ai_decisions_this_turn", 0)) or 0,
+        "client_ai": False,
+        "_ai_search": None,
+        "_ai_pending_move": None,
+        "_ai_pending_sent_at": None,
         "configuration": state.get("configuration", "sun"),
         "sockets": {},
     }
@@ -296,7 +640,7 @@ def delete_open_game(game_id: str, user_id: str) -> bool:
 def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]:
     room = ROOMS.get(room_id, {})
     g = room.get("game")
-    return {
+    state = {
         "room_id": room_id,
         "players": room.get("players", {}),
         "host": room.get("host"),
@@ -305,6 +649,7 @@ def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]
         "game": engine.player_view(g, viewer_pid) if g else None,
         "vs_ai": room.get("vs_ai", False),
         "ai_player": room.get("ai_player"),
+        "ai_difficulty": _valid_difficulty(room.get("ai_difficulty")),
         # Scoped to the recipient: a room-wide token map would hand every socket
         # the other seat's reconnect credential.
         "reconnect_tokens": (
@@ -312,6 +657,15 @@ def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]
             if viewer_pid and room.get("meta", {}).get(viewer_pid) else {}
         ),
     }
+    # The armed request is scoped to the human opponent.  It contains the bot
+    # seat's policy observation (including that seat's hand), so it must never
+    # be copied into a room-wide public payload or sent to another human seat.
+    armed = room.get("_ai_search")
+    if (armed and viewer_pid in room.get("players", {})
+            and viewer_pid != room.get("ai_player")
+            and room.get("client_ai") and room.get("ai_player")):
+        state["ai_search"] = copy.deepcopy(armed)
+    return state
 
 
 async def broadcast_state(room_id: str, mtype: str = "room_update") -> None:
@@ -329,6 +683,10 @@ async def broadcast_state(room_id: str, mtype: str = "room_update") -> None:
 def _sync_status_from_game(room: dict) -> None:
     if engine.is_over(room.get("game")):
         room["status"] = "over"
+        room["ai_turn_started_at"] = None
+        room["_ai_search"] = None
+        room["_ai_pending_move"] = None
+        room["_ai_pending_sent_at"] = None
 
 
 def _bot_should_act(room: dict) -> bool:
@@ -360,51 +718,245 @@ def _position_key(g: dict) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _bot_move_sync(g: dict, pid: str, seed: int):
-    return bot.choose_move(g, pid, seed)
+def _bot_move_sync(g: dict, pid: str, seed: int, strongest: bool = False):
+    return (bot.choose_fallback_move(g, pid, seed) if strongest
+            else bot.choose_move(g, pid, seed))
+
+
+def _bot_turn_active(room: dict) -> bool:
+    """Whether the current turn still belongs to the bot (possibly awaiting a
+    human's resolution of an effect).  Waiting on the human must not burn the
+    five-second search budget."""
+
+    game = room.get("game")
+    ai = room.get("ai_player")
+    return bool(game and ai and not engine.is_over(game)
+                and game.get("turn_pid") == ai)
+
+
+def _ai_memory_for(room: dict, ai: str) -> dict:
+    memory = serving.normalise_memory(room.setdefault("ai_memory", {}).get(ai))
+    history = room.get("seat_histories", {}).get(ai)
+    if isinstance(history, dict):
+        memory["history"] = copy.deepcopy(history)
+    # Attaching the seat-local trace can push an otherwise small branch cache
+    # over the wire/persistence cap.  Normalize a second time so a long game
+    # cannot grow the armed request beyond the same bound as client replies.
+    return serving.normalise_memory(memory)
+
+
+def _apply_live_move(room: dict, pid: str, move: dict) -> tuple[bool, str | None]:
+    """Apply a validated move and append redacted per-seat policy history."""
+
+    game = room.get("game")
+    if not isinstance(game, dict):
+        return False, "no game"
+    before = _live_observations(game)
+    ok, error = engine.apply_move(game, pid, move)
+    if ok:
+        _record_history(room, pid, move, before)
+        _sync_status_from_game(room)
+    return ok, error
+
+
+async def _client_bot_turn(room_id: str) -> bool:
+    """Serve a hard bot turn through the human's browser, one decision at a time.
+
+    Returns ``True`` when the bot no longer owes a move and ``False`` when the
+    caller should continue with its server fallback.  The request is stored in
+    room state so a re-broadcast/reconnect can ship it again; a socket drop
+    clears it and wakes the waiter through ``_release_orbit_socket``.
+    """
+
+    for _ in range(96):
+        async with ROOM_LOCK:
+            room = ROOMS.get(room_id)
+            if not room or not _bot_should_act(room):
+                return not (room and _bot_turn_active(room))
+            if not room.get("client_ai"):
+                return False
+            ai = room["ai_player"]
+            remaining = int(max(0, room.get("ai_budget_remaining_ms")
+                                if room.get("ai_budget_remaining_ms") is not None
+                                else CLIENT_AI_TURN_BUDGET_MS))
+            if remaining <= 0:
+                room["_ai_search"] = None
+                room["_ai_pending_move"] = None
+                room["_ai_pending_sent_at"] = None
+                return False
+            game = room["game"]
+            legal = engine.legal_moves(game, ai)
+            if not legal:
+                return False
+            if len(legal) == 1:
+                forced, event = legal[0], None
+            else:
+                forced = None
+                decision = room["_ai_decision_seq"] = room.get("_ai_decision_seq", 0) + 1
+                request_budget = min(
+                    remaining,
+                    CLIENT_AI_MAIN_ACTION_MS
+                    if int(room.get("ai_decisions_this_turn", 0)) == 0
+                    else CLIENT_AI_FOLLOWUP_RESERVE_MS,
+                )
+                obs = observation(game, ai)
+                memory = _ai_memory_for(room, ai)
+                position = serving.position_key(obs, legal)
+                room["_ai_search"] = {
+                    "protocol": CLIENT_AI_WIRE,
+                    "decision": decision,
+                    "position": position,
+                    "seat": ai,
+                    "schema": serving.SCHEMA_VERSION,
+                    "encoder": serving.ENCODER_VERSION,
+                    "rules": CLIENT_AI_RULES,
+                    "observation": obs,
+                    "legal_moves": copy.deepcopy(legal),
+                    "memory": memory,
+                    "remaining_turn_budget": remaining,
+                    "budget_ms": request_budget,
+                    "main_action_budget_ms": CLIENT_AI_MAIN_ACTION_MS,
+                    "followup_reserve_ms": CLIENT_AI_FOLLOWUP_RESERVE_MS,
+                    "model_version": CLIENT_AI_MODEL_VERSION,
+                    "turn_started_at": room.get("ai_turn_started_at"),
+                }
+                room["_ai_search"]["sent_at"] = time.time()
+                room["_ai_pending_move"] = None
+                room["_ai_pending_sent_at"] = None
+                event = room["_ai_move_evt"] = asyncio.Event()
+
+        if event is None:
+            move = forced
+            sent_at = None
+        else:
+            await broadcast_state(room_id)
+            try:
+                await asyncio.wait_for(event.wait(), CLIENT_AI_TIMEOUT)
+            except asyncio.TimeoutError:
+                async with ROOM_LOCK:
+                    current = ROOMS.get(room_id)
+                    if current:
+                        current["ai_budget_remaining_ms"] = 0
+                        current["_ai_search"] = None
+                        current["_ai_pending_move"] = None
+                        current["_ai_pending_sent_at"] = None
+                LOG.info("orbit client AI timed out; server fallback (%s)", room_id)
+                return False
+            async with ROOM_LOCK:
+                current = ROOMS.get(room_id)
+                move = current.pop("_ai_pending_move", None) if current else None
+                sent_at = current.pop("_ai_pending_sent_at", None) if current else None
+            if move is None:
+                # A simultaneous human action (the opening mulligan is the
+                # normal case) can invalidate the armed position.  Re-arm a
+                # fresh request while the browser is still eligible; a socket
+                # drop or an explicit disarm takes the server fallback path.
+                if current and current.get("client_ai") and _bot_should_act(current):
+                    continue
+                return False
+
+        async with ROOM_LOCK:
+            room = ROOMS.get(room_id)
+            if not room or not _bot_should_act(room):
+                return not (room and _bot_turn_active(room))
+            ok, error = _apply_live_move(room, room["ai_player"], move)
+            if not ok:
+                LOG.info("orbit client move no longer legal (%s): %s", room_id, error)
+                return False
+            if sent_at is not None:
+                spent = max(0, int((time.time() - sent_at) * 1000))
+                room["ai_budget_remaining_ms"] = max(
+                    0, int(room.get("ai_budget_remaining_ms", CLIENT_AI_TURN_BUDGET_MS)) - spent)
+            room["ai_decisions_this_turn"] = int(room.get("ai_decisions_this_turn", 0)) + 1
+            room["_ai_search"] = None
+            more = _bot_should_act(room)
+            if not more and not _bot_turn_active(room):
+                room["ai_budget_remaining_ms"] = None
+                room["ai_turn_started_at"] = None
+                room["ai_decisions_this_turn"] = 0
+        await asyncio.sleep(max(0, BOT_FLOOR_SECONDS))
+        await broadcast_state(room_id)
+        save_game(room_id)
+        if not more:
+            return not _bot_turn_active(ROOMS.get(room_id, {}))
+    return False
 
 
 async def _schedule_bot_turn(room_id: str) -> None:
-    """Safe to call at any time; no-ops when the bot owes nothing."""
+    """Drive a bot turn without holding ``ROOM_LOCK`` across search work."""
     loop = asyncio.get_running_loop()
-    while True:
-        async with ROOM_LOCK:
-            room = ROOMS.get(room_id)
-            if not room or not _bot_should_act(room):
-                return
-            g = room["game"]
-            ai = room["ai_player"]
-            snapshot = json.loads(json.dumps(g))
-            position_before = _position_key(g)
-
-        t0 = time.monotonic()
-        try:
-            move = await loop.run_in_executor(
-                _BOT_EXEC, _bot_move_sync, snapshot, ai,
-                _rooms.bot_seed(position_before, ai))
-        except Exception:
-            LOG.warning("orbit bot failed in %s", room_id, exc_info=True)
+    async with ROOM_LOCK:
+        room = ROOMS.get(room_id)
+        if not room or room.get("_bot_running") or not _bot_should_act(room):
             return
-        if move is None:
-            return
-        delay = BOT_FLOOR_SECONDS - (time.monotonic() - t0)
-        if delay > 0:
-            await asyncio.sleep(delay)
+        room["_bot_running"] = True
+        difficulty = _valid_difficulty(room.get("ai_difficulty"))
+        use_client = difficulty in CLIENT_AI_TIERS and bool(room.get("client_ai"))
+        if room.get("ai_budget_remaining_ms") is None:
+            room["ai_budget_remaining_ms"] = CLIENT_AI_TURN_BUDGET_MS
+            room["ai_turn_started_at"] = time.time()
+            room["ai_decisions_this_turn"] = 0
+    try:
+        if use_client:
+            await _client_bot_turn(room_id)
 
-        async with ROOM_LOCK:
-            room = ROOMS.get(room_id)
-            if not room or not _bot_should_act(room):
+        # The server fallback is deliberately cheap and validated.  Search is
+        # performed on a detached snapshot in the executor, never under the
+        # event-loop lock; a changed position simply causes a fresh decision.
+        while True:
+            async with ROOM_LOCK:
+                room = ROOMS.get(room_id)
+                if not room or not _bot_should_act(room):
+                    return
+                game = room["game"]
+                ai = room["ai_player"]
+                snapshot = json.loads(json.dumps(game))
+                position_before = _position_key(game)
+                strongest = difficulty == "hard"
+            started = time.monotonic()
+            try:
+                move = await loop.run_in_executor(
+                    _BOT_EXEC, _bot_move_sync, snapshot, ai,
+                    _rooms.bot_seed(position_before, ai), strongest)
+            except Exception:
+                LOG.warning("orbit bot failed in %s", room_id, exc_info=True)
                 return
-            g = room["game"]
-            if _position_key(g) != position_before:
-                continue                       # the human moved; think again
-            ok, _error = engine.apply_move(g, ai, move)
-            if not ok:
-                LOG.warning("orbit bot produced an illegal move in %s", room_id)
+            if move is None:
                 return
-            _sync_status_from_game(room)
+            delay = BOT_FLOOR_SECONDS - (time.monotonic() - started)
+            if delay > 0:
+                await asyncio.sleep(delay)
+            async with ROOM_LOCK:
+                room = ROOMS.get(room_id)
+                if not room or not _bot_should_act(room):
+                    return
+                if _position_key(room["game"]) != position_before:
+                    continue
+                ok, error = _apply_live_move(room, ai, move)
+                if not ok:
+                    LOG.warning("orbit bot produced an illegal move in %s: %s", room_id, error)
+                    return
+                more = _bot_should_act(room)
+                if not more and not _bot_turn_active(room):
+                    room["ai_budget_remaining_ms"] = None
+                    room["ai_turn_started_at"] = None
+                    room["ai_decisions_this_turn"] = 0
+            await broadcast_state(room_id)
             save_game(room_id)
-        await broadcast_state(room_id)
+            if not more:
+                return
+    finally:
+        async with ROOM_LOCK:
+            room = ROOMS.get(room_id)
+            if room:
+                room["_bot_running"] = False
+                room["_ai_search"] = None
+                room["_ai_pending_move"] = None
+                room["_ai_pending_sent_at"] = None
+                if not _bot_turn_active(room):
+                    room["ai_budget_remaining_ms"] = None
+                    room["ai_turn_started_at"] = None
+                    room["ai_decisions_this_turn"] = 0
 
 
 def _start_new_game(room: dict, room_id: str) -> None:
@@ -417,6 +969,37 @@ def _start_new_game(room: dict, room_id: str) -> None:
         configuration=room.get("configuration", "sun"),
     )
     room["status"] = "playing"
+    room["seat_histories"] = _new_live_histories(room["game"])
+    room["ai_memory"] = {}
+    room["ai_turn_started_at"] = None
+    room["_ai_search"] = None
+    room["_ai_pending_move"] = None
+    room["_ai_pending_sent_at"] = None
+
+
+def _release_orbit_socket(room_id: str, pid: str, websocket) -> None:
+    """Release a socket and invalidate any in-flight browser decision.
+
+    The identity check mirrors ``core.rooms.release_socket``.  A stale handler
+    from an old connection must never clear the live socket's client-AI opt-in
+    or its request.
+    """
+
+    room = ROOMS.get(room_id)
+    owned = bool(room and room.get("sockets", {}).get(pid) is websocket)
+    _rooms.release_socket(ROOMS, room_id, pid, websocket, disarm_client_ai=True)
+    # `release_socket` is synchronous, so no event-loop task can interleave
+    # between this re-check and the cleanup.  A reconnect that won the race is
+    # visible as a different socket and must retain its live request/opt-in.
+    still_ours = bool(room and room.get("sockets", {}).get(pid) is websocket)
+    socket_gone = bool(room and room.get("sockets", {}).get(pid) is None)
+    if owned and room and (still_ours or socket_gone):
+        room["_ai_search"] = None
+        room["_ai_pending_move"] = None
+        room["_ai_pending_sent_at"] = None
+        event = room.get("_ai_move_evt")
+        if event:
+            event.set()
 
 
 # ── WebSocket ────────────────────────────────────────────────────────────────
@@ -453,7 +1036,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                 authed = await _handle_reconnect(websocket, room_id, pid, msg) or authed
             elif action == "auth_reconnect":
                 authed = await _handle_auth_reconnect(websocket, room_id, pid, msg) or authed
-            elif action in ("start", "move", "abandon"):
+            elif action in ("start", "move", "abandon", "client_ai_ready", "ai_move"):
                 if not authed:
                     await _send(websocket, {
                         "type": "error",
@@ -463,19 +1046,24 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                     await _handle_start(websocket, room_id, pid)
                 elif action == "move":
                     await _handle_move(websocket, room_id, pid, msg)
-                else:
+                elif action == "abandon":
                     await _handle_abandon(websocket, room_id, pid)
+                elif action == "client_ai_ready":
+                    await _handle_client_ai_ready(websocket, room_id, pid, msg)
+                else:
+                    await _handle_ai_move(websocket, room_id, pid, msg)
             else:
                 await _send(websocket, {"type": "error", "message": "unknown action"})
     except WebSocketDisconnect:
         pass
     finally:
-        _rooms.release_socket(ROOMS, room_id, pid, websocket)
+        _release_orbit_socket(room_id, pid, websocket)
 
 
 async def _handle_create(ws, room_id, pid, msg):
     name = (msg.get("name") or "Player").strip()[:24] or "Player"
     vs_ai = bool(msg.get("vs_ai"))
+    difficulty = _valid_difficulty(msg.get("ai_difficulty"))
     configuration = msg.get("configuration")
     if configuration not in ("sun", "random"):
         configuration = "sun"
@@ -492,6 +1080,16 @@ async def _handle_create(ws, room_id, pid, msg):
             "meta": {pid: {"token": _gen_token()}},
             "vs_ai": vs_ai,
             "ai_player": None,
+            "ai_difficulty": difficulty,
+            "seat_histories": {},
+            "ai_memory": {},
+            "ai_budget_remaining_ms": None,
+            "ai_turn_started_at": None,
+            "ai_decisions_this_turn": 0,
+            "client_ai": False,
+            "_ai_search": None,
+            "_ai_pending_move": None,
+            "_ai_pending_sent_at": None,
             "configuration": configuration,
         }
         ROOMS[room_id] = room
@@ -571,16 +1169,157 @@ async def _handle_move(ws, room_id, pid, msg):
         if engine.is_over(g):
             await _send(ws, {"type": "error", "message": "the game is over"})
             return
-        ok, error = engine.apply_move(g, pid, msg.get("move") or {})
+        move = msg.get("move") or {}
+        ok, error = _apply_live_move(room, pid, move)
         if not ok:
             await _send(ws, {"type": "error", "message": error or "illegal move"})
             return
-        _sync_status_from_game(room)
         save_game(room_id)
         bot_turn = _bot_should_act(room)
     await broadcast_state(room_id)
     if bot_turn:
         asyncio.create_task(_schedule_bot_turn(room_id))
+
+
+async def _handle_client_ai_ready(ws, room_id, pid, msg):
+    """Arm the browser worker for a hard vs-AI room.
+
+    Compatibility metadata is checked before the room ever ships a bot
+    observation.  A cached legacy bundle has no complete version declaration
+    and therefore stays on the server path; a declared mismatch is rejected so
+    a cached worker cannot silently search a different rules build.
+    """
+
+    bot_turn = False
+    async with ROOM_LOCK:
+        room = _ensure_room_loaded(room_id)
+        if (not room or pid not in room.get("players", {})
+                or pid == room.get("ai_player")):
+            return
+        if msg.get("ready") is False:
+            room["client_ai"] = False
+            room["_ai_search"] = None
+            room["_ai_pending_move"] = None
+            room["_ai_pending_sent_at"] = None
+            event = room.get("_ai_move_evt")
+            if event:
+                event.set()
+            return
+        if not room.get("ai_player") or _valid_difficulty(room.get("ai_difficulty")) not in CLIENT_AI_TIERS:
+            return
+        wire = msg.get("wire", msg.get("abi_version"))
+        model = msg.get("model_version")
+        schema = msg.get("schema")
+        encoder = msg.get("encoder")
+        rules = msg.get("rules")
+        try:
+            wire_value = None if wire is None else int(wire)
+            model_value = None if model is None else int(model)
+            schema_value = None if schema is None else int(schema)
+        except (TypeError, ValueError):
+            return
+        # This is the compatibility boundary.  Do not arm a worker that cannot
+        # prove which protocol/model it implements.
+        if (wire_value is None or model_value is None or schema_value is None
+                or encoder is None or rules is None):
+            return
+        if wire_value is not None and wire_value != CLIENT_AI_WIRE:
+            LOG.info("orbit client AI wire mismatch in %s", room_id)
+            return
+        if model_value is not None and model_value != CLIENT_AI_MODEL_VERSION:
+            LOG.info("orbit client AI model mismatch in %s", room_id)
+            return
+        if schema_value != CLIENT_AI_SCHEMA:
+            LOG.info("orbit client AI schema mismatch in %s", room_id)
+            return
+        if encoder != CLIENT_AI_ENCODER:
+            LOG.info("orbit client AI encoder mismatch in %s", room_id)
+            return
+        if rules != CLIENT_AI_RULES:
+            LOG.info("orbit client AI rules mismatch in %s", room_id)
+            return
+        room["client_ai"] = True
+        bot_turn = _bot_should_act(room) and not room.get("_bot_running")
+    if bot_turn:
+        asyncio.create_task(_schedule_bot_turn(room_id))
+
+
+async def _handle_ai_move(ws, room_id, pid, msg):
+    """Accept one browser decision only when it matches the armed position."""
+
+    async with ROOM_LOCK:
+        room = _ensure_room_loaded(room_id)
+        if (not room or pid not in room.get("players", {})
+                or pid == room.get("ai_player")):
+            return
+        game = room.get("game")
+        armed = room.get("_ai_search")
+        if not (game and room.get("ai_player") and room.get("client_ai") and armed):
+            return
+        if msg.get("decision") != armed.get("decision"):
+            LOG.info("orbit stale client AI decision ignored (%s)", room_id)
+            return
+        if msg.get("position") != armed.get("position"):
+            LOG.info("orbit stale client AI position ignored (%s)", room_id)
+            return
+        live_legal = engine.legal_moves(game, room["ai_player"])
+        live_position = serving.position_key(observation(game, room["ai_player"]), live_legal)
+        if live_position != armed.get("position"):
+            LOG.info("orbit client AI position changed before reply (%s)", room_id)
+            room["_ai_search"] = None
+            room["_ai_pending_move"] = None
+            room["_ai_pending_sent_at"] = None
+            event = room.get("_ai_move_evt")
+            # Wake the serving loop so it can arm the current position instead
+            # of waiting out a request that can no longer be correct.
+            if event:
+                event.set()
+            return
+        try:
+            protocol = int(msg.get("protocol", CLIENT_AI_WIRE))
+        except (TypeError, ValueError):
+            return
+        if protocol != CLIENT_AI_WIRE:
+            return
+        # A ready worker is required to advertise the full compatibility
+        # envelope.  Replies from an older cached bundle may omit these fields,
+        # so they remain optional for wire compatibility; whenever present they
+        # must agree with the armed request and current rules build.
+        try:
+            reply_wire = msg.get("wire")
+            if reply_wire is not None and int(reply_wire) != CLIENT_AI_WIRE:
+                return
+            reply_model = msg.get("model_version")
+            if reply_model is not None and int(reply_model) != armed.get("model_version"):
+                return
+            reply_schema = msg.get("schema")
+            if reply_schema is not None and int(reply_schema) != armed.get("schema"):
+                return
+        except (TypeError, ValueError, OverflowError):
+            return
+        for field in ("encoder", "rules"):
+            if msg.get(field) is not None and msg.get(field) != armed.get(field):
+                return
+        raw = msg.get("move")
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except (TypeError, ValueError):
+                raw = None
+        if not isinstance(raw, dict) or raw not in live_legal:
+            # Keep the request armed so the watchdog, rather than a malformed
+            # client reply, owns the fallback transition.
+            LOG.info("orbit illegal client AI move dropped (%s)", room_id)
+            return
+        room["_ai_pending_move"] = copy.deepcopy(raw)
+        room["_ai_pending_sent_at"] = armed.get("sent_at")
+        room["_ai_search"] = None
+        previous_memory = room.setdefault("ai_memory", {}).get(room["ai_player"])
+        room["ai_memory"][room["ai_player"]] = serving.normalise_memory(
+            msg["memory"] if "memory" in msg else previous_memory)
+        event = room.get("_ai_move_evt")
+    if event:
+        event.set()
 
 
 async def _handle_reconnect(ws, room_id, pid, msg):

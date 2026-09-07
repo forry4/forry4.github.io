@@ -72,6 +72,16 @@
 .orbit .hist-result.draw { color: #c9cee1; }
 .orbit .hist-result.lost { color: #f58b95; }
 
+.orbit .or-ai-select {
+  min-width: 13rem;
+  padding: .55rem .7rem;
+  border: 1px solid var(--or-line);
+  border-radius: 8px;
+  background: rgba(9, 11, 24, .8);
+  color: var(--or-ink);
+  font: inherit;
+}
+
 .or-toast {
   position: fixed;
   z-index: 1000;

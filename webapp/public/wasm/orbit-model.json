@@ -1,0 +1,463 @@
+{
+  "abi_version": 1,
+  "cards": {
+    "101": {
+      "cost": 1,
+      "faction": "human",
+      "planet": "mercury"
+    },
+    "102": {
+      "cost": 1,
+      "faction": "animod",
+      "planet": "mercury"
+    },
+    "103": {
+      "cost": 2,
+      "faction": "robot",
+      "planet": "mercury"
+    },
+    "104": {
+      "cost": 6,
+      "faction": "human",
+      "planet": "mercury"
+    },
+    "105": {
+      "cost": 5,
+      "faction": "robot",
+      "planet": "mercury"
+    },
+    "106": {
+      "cost": 7,
+      "faction": "animod",
+      "planet": "mercury"
+    },
+    "107": {
+      "cost": 1,
+      "faction": "robot",
+      "planet": "mercury"
+    },
+    "108": {
+      "cost": 3,
+      "faction": "human",
+      "planet": "mercury"
+    },
+    "109": {
+      "cost": 9,
+      "faction": "robot",
+      "planet": "mercury"
+    },
+    "110": {
+      "cost": 10,
+      "faction": "animod",
+      "planet": "mercury"
+    },
+    "111": {
+      "cost": 5,
+      "faction": "human",
+      "planet": "mercury"
+    },
+    "112": {
+      "cost": 9,
+      "faction": "animod",
+      "planet": "mercury"
+    },
+    "113": {
+      "cost": 2,
+      "faction": "robot",
+      "planet": "mercury"
+    },
+    "114": {
+      "cost": 2,
+      "faction": "human",
+      "planet": "mercury"
+    },
+    "115": {
+      "cost": 3,
+      "faction": "animod",
+      "planet": "mercury"
+    },
+    "116": {
+      "cost": 4,
+      "faction": "robot",
+      "planet": "mercury"
+    },
+    "117": {
+      "cost": 3,
+      "faction": "animod",
+      "planet": "mercury"
+    },
+    "118": {
+      "cost": 7,
+      "faction": "human",
+      "planet": "mercury"
+    },
+    "201": {
+      "cost": 1,
+      "faction": "human",
+      "planet": "venus"
+    },
+    "202": {
+      "cost": 1,
+      "faction": "human",
+      "planet": "venus"
+    },
+    "203": {
+      "cost": 2,
+      "faction": "robot",
+      "planet": "venus"
+    },
+    "204": {
+      "cost": 6,
+      "faction": "human",
+      "planet": "venus"
+    },
+    "205": {
+      "cost": 6,
+      "faction": "robot",
+      "planet": "venus"
+    },
+    "206": {
+      "cost": 3,
+      "faction": "animod",
+      "planet": "venus"
+    },
+    "207": {
+      "cost": 9,
+      "faction": "human",
+      "planet": "venus"
+    },
+    "208": {
+      "cost": 10,
+      "faction": "robot",
+      "planet": "venus"
+    },
+    "209": {
+      "cost": 1,
+      "faction": "animod",
+      "planet": "venus"
+    },
+    "210": {
+      "cost": 6,
+      "faction": "human",
+      "planet": "venus"
+    },
+    "211": {
+      "cost": 6,
+      "faction": "robot",
+      "planet": "venus"
+    },
+    "212": {
+      "cost": 6,
+      "faction": "animod",
+      "planet": "venus"
+    },
+    "213": {
+      "cost": 2,
+      "faction": "animod",
+      "planet": "venus"
+    },
+    "214": {
+      "cost": 7,
+      "faction": "robot",
+      "planet": "venus"
+    },
+    "215": {
+      "cost": 3,
+      "faction": "animod",
+      "planet": "venus"
+    },
+    "216": {
+      "cost": 4,
+      "faction": "robot",
+      "planet": "venus"
+    },
+    "217": {
+      "cost": 2,
+      "faction": "animod",
+      "planet": "venus"
+    },
+    "218": {
+      "cost": 3,
+      "faction": "human",
+      "planet": "venus"
+    },
+    "301": {
+      "cost": 1,
+      "faction": "human",
+      "planet": "terra"
+    },
+    "302": {
+      "cost": 1,
+      "faction": "animod",
+      "planet": "terra"
+    },
+    "303": {
+      "cost": 2,
+      "faction": "robot",
+      "planet": "terra"
+    },
+    "304": {
+      "cost": 5,
+      "faction": "human",
+      "planet": "terra"
+    },
+    "305": {
+      "cost": 2,
+      "faction": "animod",
+      "planet": "terra"
+    },
+    "306": {
+      "cost": 1,
+      "faction": "robot",
+      "planet": "terra"
+    },
+    "307": {
+      "cost": 4,
+      "faction": "human",
+      "planet": "terra"
+    },
+    "308": {
+      "cost": 7,
+      "faction": "human",
+      "planet": "terra"
+    },
+    "309": {
+      "cost": 8,
+      "faction": "animod",
+      "planet": "terra"
+    },
+    "310": {
+      "cost": 6,
+      "faction": "robot",
+      "planet": "terra"
+    },
+    "311": {
+      "cost": 6,
+      "faction": "human",
+      "planet": "terra"
+    },
+    "312": {
+      "cost": 9,
+      "faction": "animod",
+      "planet": "terra"
+    },
+    "313": {
+      "cost": 6,
+      "faction": "robot",
+      "planet": "terra"
+    },
+    "314": {
+      "cost": 10,
+      "faction": "animod",
+      "planet": "terra"
+    },
+    "315": {
+      "cost": 3,
+      "faction": "animod",
+      "planet": "terra"
+    },
+    "316": {
+      "cost": 4,
+      "faction": "robot",
+      "planet": "terra"
+    },
+    "317": {
+      "cost": 5,
+      "faction": "robot",
+      "planet": "terra"
+    },
+    "318": {
+      "cost": 4,
+      "faction": "human",
+      "planet": "terra"
+    },
+    "401": {
+      "cost": 1,
+      "faction": "human",
+      "planet": "mars"
+    },
+    "402": {
+      "cost": 1,
+      "faction": "animod",
+      "planet": "mars"
+    },
+    "403": {
+      "cost": 2,
+      "faction": "robot",
+      "planet": "mars"
+    },
+    "404": {
+      "cost": 6,
+      "faction": "human",
+      "planet": "mars"
+    },
+    "405": {
+      "cost": 2,
+      "faction": "animod",
+      "planet": "mars"
+    },
+    "406": {
+      "cost": 4,
+      "faction": "robot",
+      "planet": "mars"
+    },
+    "407": {
+      "cost": 2,
+      "faction": "robot",
+      "planet": "mars"
+    },
+    "408": {
+      "cost": 3,
+      "faction": "animod",
+      "planet": "mars"
+    },
+    "409": {
+      "cost": 6,
+      "faction": "robot",
+      "planet": "mars"
+    },
+    "410": {
+      "cost": 1,
+      "faction": "robot",
+      "planet": "mars"
+    },
+    "411": {
+      "cost": 5,
+      "faction": "animod",
+      "planet": "mars"
+    },
+    "412": {
+      "cost": 4,
+      "faction": "human",
+      "planet": "mars"
+    },
+    "413": {
+      "cost": 10,
+      "faction": "human",
+      "planet": "mars"
+    },
+    "414": {
+      "cost": 3,
+      "faction": "human",
+      "planet": "mars"
+    },
+    "415": {
+      "cost": 3,
+      "faction": "animod",
+      "planet": "mars"
+    },
+    "416": {
+      "cost": 4,
+      "faction": "robot",
+      "planet": "mars"
+    },
+    "417": {
+      "cost": 4,
+      "faction": "human",
+      "planet": "mars"
+    },
+    "418": {
+      "cost": 9,
+      "faction": "animod",
+      "planet": "mars"
+    },
+    "501": {
+      "cost": 1,
+      "faction": "human",
+      "planet": "jupiter"
+    },
+    "502": {
+      "cost": 10,
+      "faction": "human",
+      "planet": "jupiter"
+    },
+    "503": {
+      "cost": 2,
+      "faction": "robot",
+      "planet": "jupiter"
+    },
+    "504": {
+      "cost": 3,
+      "faction": "animod",
+      "planet": "jupiter"
+    },
+    "505": {
+      "cost": 4,
+      "faction": "human",
+      "planet": "jupiter"
+    },
+    "506": {
+      "cost": 2,
+      "faction": "human",
+      "planet": "jupiter"
+    },
+    "507": {
+      "cost": 6,
+      "faction": "human",
+      "planet": "jupiter"
+    },
+    "508": {
+      "cost": 5,
+      "faction": "robot",
+      "planet": "jupiter"
+    },
+    "509": {
+      "cost": 8,
+      "faction": "robot",
+      "planet": "jupiter"
+    },
+    "510": {
+      "cost": 3,
+      "faction": "animod",
+      "planet": "jupiter"
+    },
+    "511": {
+      "cost": 8,
+      "faction": "robot",
+      "planet": "jupiter"
+    },
+    "512": {
+      "cost": 1,
+      "faction": "animod",
+      "planet": "jupiter"
+    },
+    "513": {
+      "cost": 1,
+      "faction": "animod",
+      "planet": "jupiter"
+    },
+    "514": {
+      "cost": 4,
+      "faction": "robot",
+      "planet": "jupiter"
+    },
+    "515": {
+      "cost": 3,
+      "faction": "animod",
+      "planet": "jupiter"
+    },
+    "516": {
+      "cost": 4,
+      "faction": "robot",
+      "planet": "jupiter"
+    },
+    "517": {
+      "cost": 2,
+      "faction": "human",
+      "planet": "jupiter"
+    },
+    "518": {
+      "cost": 1,
+      "faction": "animod",
+      "planet": "jupiter"
+    }
+  },
+  "encoder": "orbit-observation-v1",
+  "followup_reserve_ms": 2000,
+  "main_action_budget_ms": 3000,
+  "model_id": "orbit-hard-v1",
+  "model_version": 1,
+  "rules": "15166a4fa64e212c842e9555b65f24c5d219afea291c8567feff370f88f59835",
+  "schema": 1,
+  "turn_budget_ms": 5000
+}

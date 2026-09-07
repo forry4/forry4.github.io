@@ -158,6 +158,7 @@ def play_game(
         for index, pid in enumerate(session.game["order"])
     } if needs_belief else {}
     steps: list[EpisodeStep] = []
+    fallback_moves = 0
     censored = True
     for _ in range(max(0, int(max_decisions))):
         if engine.is_over(session.game):
@@ -186,6 +187,7 @@ def play_game(
             # policy cannot create a training transition; record the legal
             # deterministic fallback and continue so the episode is useful for
             # diagnosing that policy.
+            fallback_moves += 1
             move = legal[0] if legal else None
         if move is None:
             break
@@ -240,6 +242,7 @@ def play_game(
             "max_decisions": int(max_decisions),
             "turn_budget": turn_budget,
             "belief_particles": 32,
+            "fallback_moves": fallback_moves,
         },
     )
 
@@ -298,6 +301,11 @@ class ArenaResult:
     rules: str = field(default_factory=rules_fingerprint)
     schema: int = SCHEMA_VERSION
     settings: dict = field(default_factory=dict)
+    # One entry per scheduled pair.  ``None`` marks a pair with at least one
+    # censored game.  The public ``pair_scores`` list remains the compact list
+    # of complete pairs used by existing callers; this aligned form lets the
+    # Phase 4 gate resample CRN candidate/incumbent differences correctly.
+    pair_scores_by_index: list[float | None] = field(default_factory=list)
 
     @property
     def score(self) -> float:
@@ -328,6 +336,7 @@ class ArenaResult:
             "games": self.games,
             "scored_games": self.wins + self.losses + self.draws,
             "pairs": self.pairs,
+            "complete_pairs": len(self.pair_scores),
             "wins": self.wins,
             "losses": self.losses,
             "draws": self.draws,
@@ -361,6 +370,7 @@ def run_arena(
     wins = losses = draws = censored = 0
     score_sum = 0.0
     pair_scores: list[float] = []
+    pair_scores_by_index: list[float | None] = []
     by_board: dict[str, dict] = {
         board_key(config): {"pairs": 0, "wins": 0, "losses": 0, "draws": 0, "censored": 0, "score": 0.0}
         for config in boards
@@ -403,6 +413,9 @@ def run_arena(
         by_board[key]["pairs"] += 1
         if pair_valid:
             pair_scores.append(pair / 2.0)
+            pair_scores_by_index.append(pair / 2.0)
+        else:
+            pair_scores_by_index.append(None)
     games = wins + losses + draws + censored
     for stats in by_board.values():
         denominator = 2 * stats["pairs"] - stats["censored"]
@@ -420,6 +433,7 @@ def run_arena(
         score_sum=score_sum,
         pair_scores=pair_scores,
         by_board=by_board,
+        pair_scores_by_index=pair_scores_by_index,
         settings={
             "pairs": pairs,
             "seed": seed,
@@ -438,10 +452,18 @@ def mirror_sanity(
     pairs: int = 16,
     seed: int = 0,
     max_decisions: int = 1600,
+    turn_budget: float | None = None,
 ) -> dict:
     """Run a policy against itself; a deterministic paired harness should read 0.5."""
 
-    result = run_arena(policy, policy, pairs=pairs, seed=seed, max_decisions=max_decisions)
+    result = run_arena(
+        policy,
+        policy,
+        pairs=pairs,
+        seed=seed,
+        max_decisions=max_decisions,
+        turn_budget=turn_budget,
+    )
     return {
         "score": result.pair_score,
         "games": result.games,
@@ -506,7 +528,16 @@ def compare_algorithms(
                 "rules": report["rules"],
                 "settings": report["settings"],
             }
-    mirrors = {name: mirror_sanity(policies[name], pairs=max(1, min(8, pairs // 2 or 1)), seed=seed, max_decisions=max_decisions) for name in names}
+    mirrors = {
+        name: mirror_sanity(
+            policies[name],
+            pairs=max(1, min(8, pairs // 2 or 1)),
+            seed=seed,
+            max_decisions=max_decisions,
+            turn_budget=turn_budget,
+        )
+        for name in names
+    }
     return {"rules": rules_fingerprint(), "pairs": pairs, "seed": seed, "matrix": matrix, "mirrors": mirrors}
 
 

@@ -1,10 +1,15 @@
 # Orbit AI campaign
 
-Agreed 2026-09-05. Status: **Phases 1–3 implemented offline**. The current
+Agreed 2026-09-05. Status: **Phases 1–5 implemented**. The current
 campaign has a heuristic information-set PUCT baseline, a versioned 128-wide
 policy/value guide, paired all-board arenas, sequential particle beliefs, and
-an outcome-only population trainer. No browser serving or champion promotion
-has happened yet.
+an outcome-only population trainer. Phase 4 has a sealed-pool promotion
+reporter with paired confidence intervals, holdout checks, regression gates and
+correctness/information/timing checks. Phase 5 now has the versioned browser
+worker boundary, live seat-local histories, reconnect-safe turn budgets,
+whole-payload redaction and validated server fallback. No Phase 4 champion has
+been promoted; the shipped Hard asset is the cheap observation-only fallback
+until a candidate passes the serving gates.
 
 Delivered: typed Rust simulator, generated source fingerprint, per-decision
 Python/native state/legal-move/observation parity, strict shuffle tapes,
@@ -19,7 +24,7 @@ Phase 2 is implemented offline. The current sampler is intentionally not an
 exact Bayesian posterior: sequential conditioning is represented by a finite
 `HistoryBelief` particle population, with hard public-card constraints and
 optional audited action likelihoods. Live history persistence and browser bot
-integration remain Phase 5.
+integration are now in Phase 5.
 
 **2026-09-06 implementation note:** Phase 2 lives in `ai/search.py`,
 `ai/belief.py`, and `ai/neural.py`. `InformationSetSearch` uses PUCT over
@@ -42,9 +47,24 @@ and the exact mirror test. `ai/league.py` trains a tabular guide and the neural
 guide from completed episodes only, retains typed historical members, and samples
 opponents with the 50% empirical-game-theoretic / 25% diverse / 25% exploiter
 mixture (renormalizing unavailable buckets). `tools/ai_campaign.py` exposes
-`arena`, `bootstrap`, `train-neural`, and `cycle`; all artifacts carry the rules
-fingerprint. These are training/evaluation tools only: Phase 4 still decides
-whether a candidate beats the incumbent, and Phase 5 is the WASM boundary.
+`arena`, `bootstrap`, `train-neural`, `cycle`, and `gate`; all artifacts carry
+the rules fingerprint. `ai/promotion.py` keeps development and sealed
+confirmation pools in separate namespaces, balances board and opponent-family
+weights, resamples complete CRN pairs for intervals, and reports every
+matrix/cycle before an explicit promote/reject/inconclusive decision. A gate
+does not wire a candidate into serving; Phase 5 is the serving boundary and
+does not promote a candidate.
+
+**2026-09-07 Phase 4 implementation note:** `ai/promotion.py` is the offline
+promotion arbiter. It records reproducible pool namespaces, accepts a training
+episode/manifest holdout, and runs the candidate/incumbent matrix against
+named opponent families over all eight boards. Candidate deltas are bootstrapped
+from aligned complete CRN pairs (including board/family/opponent regression
+intervals); censored pairs remain explicitly censored. The gate also reruns
+mirror/correctness and hidden-world invariance checks, validates rules/schema
+metadata, and requires an external WASM timing manifest with a worker profile
+before it can report `promote`. The CLI can emit a JSON artifact and optionally
+return a failing process status, but it never changes the live bot.
 
 ## Objective and constraints
 
@@ -213,6 +233,19 @@ Test whole-payload redaction, hidden-world permutations, enumerable sampler
 cases, Python/native/WASM parity, model export, total-turn timing, stale replies,
 reconnect, failed workers and responsive browser play. Version model/WASM assets
 together; preserve client compatibility and a rollback champion.
+
+**2026-09-07 implementation note:** Orbit now has the versioned Python serving
+contract, an optional Rust/wasm-bindgen export, and a module worker that loads a
+rules-fingerprinted model manifest. The browser uses a capped root-parallel
+pool and sends one validated decision at a time; a missing, stale, illegal or
+slow reply falls back to the server ranker outside `ROOM_LOCK`. Per-seat
+observation histories and the remaining five-second turn budget survive saves
+and reconnects. The current manifest contains the validated card encoder and
+cheap policy fallback; promotion remains an explicit Phase 4 decision, so a
+future champion can replace the asset without changing the room protocol. The
+deterministic asset is regenerated with
+`python -m games.orbit.tools.export_serving`; the wasm-pack output beside it is
+rebuilt from the same Rust source version.
 
 ## Research references
 

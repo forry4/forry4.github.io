@@ -1,12 +1,13 @@
-# Orbit simulator — Phase 1 mechanical core
+# Orbit simulator — mechanical core and Phase 5 serving boundary
 
 A typed native simulation core for Orbit's 90-card base game. The live Python
 engine remains authoritative. The generated data is a transcription shared with
 Python; transitions and decision ownership are independently implemented in Rust.
-The offline Python package in `games/orbit/ai/` contains the Phase 2/3 search,
-belief, arena and training harness. This Rust crate remains the mechanical
-simulator and future WASM transition boundary; browser bot serving is still a
-later phase.
+The offline Python package in `games/orbit/ai/` contains the Phase 2–4 search,
+belief, arena, training and promotion-gate harnesses. The crate also exposes a
+small versioned serving helper and optional wasm-bindgen JSON export. It accepts
+only the allowlisted observation and legal actions; the Python room remains the
+rules and authorization authority.
 
 ## Run the gates
 
@@ -54,6 +55,12 @@ After a deliberate rules change regenerate using `export_native` without `--chec
 - `sample_hidden`: a conservation-correct **current-observation prior**. It is
   not a posterior conditioned on the entire observed history. Phase 2 must add
   sequential belief tracking before claiming information-set search correctness.
+- `serving`: the Phase 5 boundary (`observation`, legal actions, bounded memory,
+  remaining milliseconds and seed → existing legal action plus diagnostics).
+  `src/wasm.rs` exports `orbit_choose_move_json` and
+  `orbit_serving_manifest_json` for an optional wasm-pack worker bundle. A
+  missing glue/model asset is expected to use the worker's observation-only JS
+  fallback; it never weakens server validation.
 
 The rules fingerprint includes normalized engine, effects, card, board and BGA
 reference sources. Artifacts must carry that fingerprint plus the observation
@@ -72,8 +79,10 @@ schema version. Keep raw BGA evidence out of self-play training datasets.
 - Initial native throughput: about 179k decisions/s including one state clone
   per decision on this laptop. This excludes observation serialization, neural
   inference and tree search; it is not a browser or strength measurement.
-- WASM target compilation passes. Browser ABI/worker integration and real browser
-  performance verification belong to Phase 5.
+- WASM target compilation covers the optional serving export. The browser worker
+  validates the adjacent rules-fingerprinted manifest, caps root-parallel
+  workers, and falls back safely when generated glue is unavailable. Real
+  timing evidence is still an explicit promotion-gate input.
 
 These gates establish Python/native agreement. They do **not** prove the Python
 rules match every BGA situation. The user authorized Phase 1 after verification;
@@ -88,6 +97,8 @@ cargo run --locked --release --manifest-path rust-cores/orbit-core/Cargo.toml --
 The benchmark's 2,000-decision cap is reported as censored, never scored a draw.
 The `bridge` JSONL binary is a diagnostic tool, not a fast training transport.
 
-The complete campaign is in `games/orbit/AI_PLAN.md`. Next: promotion gates,
-native/WASM search profiling and browser serving. No model is promoted by the
-offline tools automatically.
+The complete campaign is in `games/orbit/AI_PLAN.md`. `python -m
+games.orbit.tools.ai_campaign gate` writes an explicit Phase 4 report but no
+model is promoted by the offline tools automatically. A promoted model must be
+exported with matching ABI/model/schema/rules metadata before it can replace the
+current fallback asset.

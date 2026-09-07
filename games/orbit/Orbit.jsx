@@ -5,7 +5,7 @@ import {
   LobbyAction, LobbyTabs, notWaiting, GameMenu, gameMenuCss,
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss, useProgressiveList, LobbyHero, LobbyUser, useListFade,
-  readLobbyCache, writeLobbyCache, timeAgo,
+  readLobbyCache, writeLobbyCache, timeAgo, useLastDifficulty,
 } from "../../shared/lobby.jsx";
 import { GAME_ACCENTS } from "../../shared/accents.js";
 import { buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
@@ -19,6 +19,13 @@ const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
 const WS_BASE = WS_RAW.replace(/\/ws$/, "");
 const ORBIT_WS = `${WS_BASE}/orbit/ws`;
 const ORBIT_HTTP = WS_RAW.replace(/^ws/, "http").replace(/\/ws$/, "/orbit");
+const ORBIT_AI_TIERS = ["random", "hard"];
+const ORBIT_AI_WIRE = 1;
+const ORBIT_AI_MODEL_VERSION = 1;
+const ORBIT_AI_ENCODER = "orbit-observation-v1";
+const ORBIT_AI_SCHEMA = 1;
+const ORBIT_AI_TURN_BUDGET_MS = 5000;
+const ORBIT_AI_WORKER_CAP = 4;
 const styles = baseCss + lobbyCss + gameMenuCss + createModalCss
   + lobbyCreateRowCss + rulesModalCss + orbitCssText;
 
@@ -221,6 +228,16 @@ function HandCount({ held, limit }) {
       : `${held} of a ${limit}-card hand limit, refilled at the end of that player’s turn.`}>
     <b>{held}</b> / {limit} cards
   </span>;
+}
+
+function orbitMoveKey(move) {
+  if (!move || typeof move !== "object") return "";
+  const stable = (value) => Array.isArray(value)
+    ? `[${value.map(stable).join(",")}]`
+    : value && typeof value === "object"
+      ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stable(value[key])}`).join(",")}}`
+      : JSON.stringify(value);
+  try { return stable(move); } catch { return ""; }
 }
 
 
@@ -634,7 +651,8 @@ function DecisionPanel({ game, catalog, sendMove }) {
 function Lobby({ authUser, myId, onExit, openGames, myGames, history, historyShown,
   historyMore, refreshing, fetchGames, joinGame, resumeGame, cancelGame,
   showCreate, setShowCreate, createOpp, setCreateOpp, createSetup, setCreateSetup,
-  createGame, lobbyTab, setLobbyTab, showRules, setShowRules, toast }) {
+  createDifficulty, setCreateDifficulty, createGame, lobbyTab, setLobbyTab,
+  showRules, setShowRules, toast }) {
   const active = notWaiting(myGames);
   return <div className="app orbit" style={{ "--lby-accent": GAME_ACCENTS.orbit }}>
     <style>{styles}</style>
@@ -688,15 +706,20 @@ function Lobby({ authUser, myId, onExit, openGames, myGames, history, historySho
     </div></div>
     {showCreate && <CreateModal title="New Orbit game" onClose={() => setShowCreate(false)}>
       <CmRow label="Opponent"><CmSeg value={createOpp} onChange={setCreateOpp} options={[
-        { value: "friend", label: "VS Friend" }, { value: "ai", label: "VS Random AI" },
+        { value: "friend", label: "VS Friend" }, { value: "ai", label: "VS AI" },
       ]} /></CmRow>
       <CmRow label="Technology board"><CmSeg value={createSetup} onChange={setCreateSetup} options={[
         { value: "sun", label: "S.U.N.", title: "The recommended first-game board" },
         { value: "random", label: "Random", title: "Flip all three faction strips independently" },
       ]} /></CmRow>
-      <span className="cm-hint">Complete 1v1 rules and all 90 base-game Agents. The first AI deliberately chooses random legal moves.</span>
-      <div className="cm-footer"><span className="cm-summary">Creating: <b>{createOpp === "ai" ? "vs Random AI" : "vs Friend"}</b></span>
-        <button type="button" className="cm-create" onClick={() => createGame(createOpp === "ai", createSetup)}>Create Game</button></div>
+      {createOpp === "ai" && <CmRow label="AI strength"><select className="or-ai-select" value={createDifficulty}
+        onChange={(event) => setCreateDifficulty(event.target.value)}>
+        <option value="hard">Hard · browser search</option>
+        <option value="random">Random · baseline</option>
+      </select></CmRow>}
+      <span className="cm-hint">Complete 1v1 rules and all 90 base-game Agents. Hard AI searches in your browser and falls back safely if it is unavailable.</span>
+      <div className="cm-footer"><span className="cm-summary">Creating: <b>{createOpp === "ai" ? `vs ${createDifficulty === "hard" ? "Hard" : "Random"} AI` : "vs Friend"}</b></span>
+        <button type="button" className="cm-create" onClick={() => createGame(createOpp === "ai", createSetup, createDifficulty)}>Create Game</button></div>
     </CreateModal>}
     {showRules && <RulesModal title="How to play — Orbit" onClose={() => setShowRules(false)}><OrbitRules /></RulesModal>}
     {toast && <div className="or-toast">{toast}</div>}
@@ -720,6 +743,8 @@ export default function Orbit({ myId, authUser, onExit }) {
   const [showRules, setShowRules] = useState(false);
   const [createOpp, setCreateOpp] = useState("ai");
   const [createSetup, setCreateSetup] = useState("sun");
+  const [createDifficulty, setCreateDifficulty, rememberDifficulty] =
+    useLastDifficulty("orbit", myId, ORBIT_AI_TIERS, "hard");
   const [confirmAbandon, setConfirmAbandon] = useState(false);
   const [selectedCard, setSelectedCard] = useState(null);
   // ONE descriptor, one modal, one gesture. `info` is {kind:"card"|"bonus"|
@@ -728,6 +753,12 @@ export default function Orbit({ myId, authUser, onExit }) {
   const [info, setInfo] = useState(null);
   const [mulligan, setMulligan] = useState([]);
   const urlAttempt = useRef(null);
+  const wasmPoolRef = useRef(null);
+  const wasmMetaRef = useRef(null);
+  const clientAiArmedRef = useRef(null);
+  const aiDispatchRef = useRef(null);
+  const aiGenerationRef = useRef(0);
+  const [wasmReady, setWasmReady] = useState(false);
   const [historyShown, historyMore] = useProgressiveList(history);
   useListFade();
 
@@ -769,6 +800,142 @@ export default function Orbit({ myId, authUser, onExit }) {
   const { connected, connect, send, socketReady, disconnect } = useSocket(handleMessage);
   const sendMove = useCallback((move) => send({ action: "move", move }), [send]);
 
+  // Hard Orbit is a per-decision browser tier.  Root-parallel workers leave one
+  // hardware thread for the compositor, matching the serving rule used by the
+  // other games.  A missing/failed worker simply leaves the room unarmed and
+  // the server watchdog plays the validated fallback.
+  useEffect(() => {
+    const enabled = roomData?.vs_ai && roomData?.ai_difficulty === "hard";
+    if (!enabled || typeof Worker === "undefined") {
+      wasmPoolRef.current = null;
+      wasmMetaRef.current = null;
+      setWasmReady(false);
+      return undefined;
+    }
+    const hardware = Math.max(1, Number(navigator.hardwareConcurrency) || 1);
+    const count = Math.max(1, Math.min(hardware - 1, ORBIT_AI_WORKER_CAP));
+    const url = `${import.meta.env.BASE_URL}wasm/orbit-worker.js`;
+    const generation = ++aiGenerationRef.current;
+    const workers = [];
+    const makeWorker = () => {
+      let worker;
+      try { worker = new Worker(url, { type: "module" }); } catch { return null; }
+      const pending = new Map();
+      let nextId = 1;
+      let resolveReady;
+      const ready = new Promise((resolve) => { resolveReady = resolve; });
+      worker.onmessage = (event) => {
+        const data = event.data || {};
+        if (data.ready !== undefined) { resolveReady(data.ready ? data : null); return; }
+        const callback = pending.get(data.id);
+        if (callback) { pending.delete(data.id); callback(data); }
+      };
+      worker.onerror = () => resolveReady(null);
+      return {
+        ready,
+        request(payload) {
+          const id = nextId++;
+          return new Promise((resolve) => {
+            pending.set(id, resolve);
+            try { worker.postMessage({ ...payload, id }); } catch { pending.delete(id); resolve(null); }
+          });
+        },
+        terminate() { try { worker.terminate(); } catch {} },
+      };
+    };
+    for (let i = 0; i < count; i += 1) {
+      const worker = makeWorker();
+      if (worker) workers.push(worker);
+    }
+    wasmPoolRef.current = workers;
+    wasmMetaRef.current = null;
+    setWasmReady(false);
+    Promise.all(workers.map((worker) => worker.ready)).then((metas) => {
+      if (generation !== aiGenerationRef.current) return;
+      const live = workers.filter((_, index) => metas[index]);
+      if (!live.length) return;
+      wasmPoolRef.current = live;
+      wasmMetaRef.current = metas.find(Boolean) || null;
+      setWasmReady(true);
+      console.info(`[orbit client-AI] ${live.length}/${count} workers ready`);
+    });
+    return () => {
+      aiGenerationRef.current += 1;
+      workers.forEach((worker) => worker.terminate());
+      wasmPoolRef.current = null;
+      wasmMetaRef.current = null;
+      setWasmReady(false);
+    };
+  }, [roomData?.vs_ai, roomData?.ai_difficulty]);
+
+  useEffect(() => {
+    if (!connected) {
+      clientAiArmedRef.current = null;
+      aiDispatchRef.current = null;
+    }
+  }, [connected]);
+
+  useEffect(() => {
+    if (wasmReady && connected && roomData?.room_id
+      && roomData?.ai_difficulty === "hard"
+      && clientAiArmedRef.current !== roomData.room_id) {
+      const meta = wasmMetaRef.current;
+      if (!meta?.rules) return;
+      clientAiArmedRef.current = roomData.room_id;
+      send({ action: "client_ai_ready", wire: meta.abi_version || ORBIT_AI_WIRE,
+        abi_version: meta.abi_version || ORBIT_AI_WIRE,
+        model_version: meta.model_version || ORBIT_AI_MODEL_VERSION,
+        encoder: meta.encoder || ORBIT_AI_ENCODER, schema: meta.schema || ORBIT_AI_SCHEMA,
+        rules: meta.rules });
+    }
+  }, [wasmReady, connected, roomData?.room_id, roomData?.ai_difficulty, send]);
+
+  useEffect(() => {
+    const request = roomData?.ai_search;
+    const pool = wasmPoolRef.current;
+    if (!request || !wasmReady || !pool?.length || !connected) return;
+    const key = `${roomData.room_id}:${request.decision}:${request.position}`;
+    if (aiDispatchRef.current === key) return;
+    aiDispatchRef.current = key;
+    const generation = aiGenerationRef.current;
+    const legal = request.legal_moves || request.observation?.legal_moves || [];
+    const payload = {
+      kind: "choose",
+      observation: request.observation,
+      legal_moves: legal,
+      memory: request.memory || {},
+      remaining_turn_budget: request.remaining_turn_budget ?? ORBIT_AI_TURN_BUDGET_MS,
+    };
+    (async () => {
+      try {
+        const results = await Promise.all(pool.map((worker, index) => worker.request({
+          ...payload,
+          seed: ((Number(request.decision) * 2654435761) ^ (index * 40503 + 1)) >>> 0,
+        }).catch(() => null)));
+        if (generation !== aiGenerationRef.current || aiDispatchRef.current !== key) return;
+        const allowed = new Map(legal.map((move) => [orbitMoveKey(move), move]));
+        const votes = new Map();
+        for (const result of results) {
+          const move = result?.move;
+          const canonical = orbitMoveKey(move);
+          if (!allowed.has(canonical)) continue;
+          const item = votes.get(canonical) || { count: 0, move: allowed.get(canonical) };
+          item.count += 1; votes.set(canonical, item);
+        }
+        if (!votes.size) return; // watchdog fallback owns a failed pool
+        const chosen = [...votes.values()].sort((a, b) => b.count - a.count
+          || orbitMoveKey(a.move).localeCompare(orbitMoveKey(b.move)))[0];
+        const memory = results.find((result) => orbitMoveKey(result?.move) === orbitMoveKey(chosen.move))?.memory
+          || request.memory || {};
+        send({ action: "ai_move", protocol: ORBIT_AI_WIRE,
+          decision: request.decision, position: request.position,
+          wire: ORBIT_AI_WIRE, model_version: ORBIT_AI_MODEL_VERSION,
+          encoder: ORBIT_AI_ENCODER, schema: ORBIT_AI_SCHEMA,
+          rules: request.rules, move: chosen.move, memory });
+      } catch { /* the server watchdog owns this decision */ }
+    })();
+  }, [roomData, wasmReady, connected, send]);
+
   useEffect(() => {
     try {
       const cached = localStorage.getItem("orbit_catalog");
@@ -807,13 +974,15 @@ export default function Orbit({ myId, authUser, onExit }) {
     return () => clearTimeout(timer);
   }, [toast]);
 
-  const createGame = useCallback((vsAi, configuration) => {
+  const createGame = useCallback((vsAi, configuration, difficulty = createDifficulty) => {
     const rid = Math.random().toString(36).slice(2, 7).toUpperCase();
     setConnecting(true); setRoomId(rid); setShowCreate(false);
+    if (vsAi) rememberDifficulty(difficulty);
     connect(`${ORBIT_WS}/${rid}/${myId}`, {
       action: "create", name: authUser?.name || "Player", vs_ai: vsAi, configuration,
+      ai_difficulty: difficulty,
     });
-  }, [connect, myId, authUser]);
+  }, [connect, myId, authUser, createDifficulty, rememberDifficulty]);
 
   const joinGame = useCallback((raw) => {
     const rid = String(raw || "").trim().toUpperCase();
@@ -886,7 +1055,8 @@ export default function Orbit({ myId, authUser, onExit }) {
   if (screen === "lobby") return <Lobby {...{
     authUser, myId, onExit, openGames, myGames, history, historyShown, historyMore,
     refreshing, fetchGames, joinGame, resumeGame, cancelGame, showCreate, setShowCreate,
-    createOpp, setCreateOpp, createSetup, setCreateSetup, createGame, lobbyTab, setLobbyTab,
+    createOpp, setCreateOpp, createSetup, setCreateSetup, createDifficulty, setCreateDifficulty,
+    createGame, lobbyTab, setLobbyTab,
     showRules, setShowRules, toast,
   }} />;
 

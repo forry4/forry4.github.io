@@ -5,6 +5,11 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::OnceLock;
 
+pub mod serving;
+
+#[cfg(target_arch = "wasm32")]
+mod wasm;
+
 pub const PLANETS: [&str; 5] = ["mercury", "venus", "terra", "mars", "jupiter"];
 pub const FACTIONS: [&str; 3] = ["robot", "human", "animod"];
 fn s<'a>(v: &'a Value, k: &str) -> &'a str {

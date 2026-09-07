@@ -17,7 +17,8 @@ The agreed campaign is in `AI_PLAN.md`. Phase 1 is implemented locally in
   Rust observation method go into policies. Opposing terminal hands remain hidden.
 - Offline `Session` holds separate observation histories. Public played-card
   identity must survive same-action discard/reshuffle/draw, and the display log
-  cannot be used as recurrent memory. Live integration is a later phase.
+  cannot be used as recurrent memory. Live serving keeps this history boundary
+  and never reconstructs it from the display log.
 - `sample_hidden` is a current-observation prior, NOT a history-conditioned belief.
   Do not use its label or conservation tests to claim full-history consistency.
 - The user authorized Phase 1 after verifying gameplay. Existing BGA audits are
@@ -29,6 +30,15 @@ The agreed campaign is in `AI_PLAN.md`. Phase 1 is implemented locally in
   game can seed a hidden-world sample. Arenas are CRN paired, swap assignments,
   cover the eight technology boards, and treat capped games as censored. Do not
   promote a learner or wire it into `bot.py` before the Phase 4 gates.
+- Phase 4 is offline in `ai/promotion.py` and the `gate` subcommand of
+  `tools/ai_campaign.py`. It keeps development and sealed confirmation pools
+  disjoint, checks held-out opponent families and training seeds, reports the
+  full board/family/opponent matrix, and uses paired bootstrap intervals for
+  improvement and regression decisions. Timing is inconclusive until a real
+  WASM/serving calibration is supplied; a passing report still never changes
+  the serving bot automatically. Phase 5 wires only the versioned Hard serving
+  boundary; the current browser asset is a cheap observation-only fallback
+  until a gated champion is explicitly exported.
 
 ## Rules and serving
 
@@ -47,8 +57,15 @@ must never calculate resources, influence, captures, or card outcomes itself.
   turn and returns to 0 at end of turn.
 - Board-side value 1 is the rulebook's S.U.N. learning configuration. The
   engine also supports independently random sides.
-- The first opponent is intentionally random and runs server-side. There is no
-  difficulty field or picker until a real stronger tier exists.
+- The random opponent remains the correctness baseline and runs server-side.
+  The Hard tier uses the versioned browser worker when its manifest matches the
+  current rules; missing or stale workers use the validated server fallback.
+  The shared lobby remembers the last tier per game and identity.
+- Phase 5 serving accepts only `observation`, the server legal-move list,
+  bounded serializable memory and the remaining turn budget. It never receives
+  `native_state`, hidden deck order or RNG. The request is armed in room state,
+  scoped to the human seat, position-checked on reply, and watchdog-falls back
+  outside `ROOM_LOCK` when the browser fails.
 - Hidden fields are both hands, Agent deck order, bonus reserve order, RNG, and
   private pending choices. Add whole-real-game serialization tests for any new
   state field.
