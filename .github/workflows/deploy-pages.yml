@@ -26,6 +26,7 @@ on:
       - 'games/dontminion/**'
       - 'games/dissonance/**'
       - 'games/rag_tag/**'
+      - 'games/orbit/**'
       - 'books/**'
       - 'bggfilter/**'
       - 'shared/**'
