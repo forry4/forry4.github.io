@@ -1,13 +1,7 @@
-import { RulesDefs, RulesFacts, RulesSection, RulesTip } from "../../shared/lobby.jsx";
+import { RulesDefs, RulesSection, RulesTip } from "../../shared/lobby.jsx";
 
 export default function OrbitRules() {
   return <>
-    <RulesFacts items={[
-      { k: "Players", v: "2" },
-      { k: "Time", v: "about 30 min" },
-      { k: "Goal", v: "control the solar system" },
-    ]} />
-
     <RulesSection title="Goal of the Game">
       <p>Players will struggle to gain Influence on the 5 planets: Mercury, Venus,
         Terra, Mars, and Jupiter. This Influence is represented by discs in different
