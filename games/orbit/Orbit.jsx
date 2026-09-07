@@ -654,6 +654,15 @@ function Lobby({ authUser, myId, onExit, openGames, myGames, history, historySho
   createDifficulty, setCreateDifficulty, createGame, lobbyTab, setLobbyTab,
   showRules, setShowRules, toast }) {
   const active = notWaiting(myGames);
+  const selectedOpponent = createOpp === "friend" ? "friend" : createDifficulty;
+  const chooseOpponent = (value) => {
+    if (value === "friend") {
+      setCreateOpp("friend");
+      return;
+    }
+    setCreateOpp("ai");
+    setCreateDifficulty(value);
+  };
   return <div className="app orbit" style={{ "--lby-accent": GAME_ACCENTS.orbit }}>
     <style>{styles}</style>
     <LobbyHeader onBack={onExit} user={<LobbyUser user={authUser} />} />
@@ -705,20 +714,17 @@ function Lobby({ authUser, myId, onExit, openGames, myGames, history, historySho
       </div>
     </div></div>
     {showCreate && <CreateModal title="New Orbit game" onClose={() => setShowCreate(false)}>
-      <CmRow label="Opponent"><CmSeg value={createOpp} onChange={setCreateOpp} options={[
-        { value: "friend", label: "VS Friend" }, { value: "ai", label: "VS AI" },
-      ]} /></CmRow>
+      <CmRow label="Opponent"><CmSeg value={selectedOpponent} onChange={chooseOpponent} options={[
+        { value: "friend", label: "VS Friend" },
+        { value: "random", label: "VS Random AI" },
+        { value: "hard", label: "VS Strong AI", title: "Browser search with a validated server fallback" },
+      ]} wrap /></CmRow>
       <CmRow label="Technology board"><CmSeg value={createSetup} onChange={setCreateSetup} options={[
         { value: "sun", label: "S.U.N.", title: "The recommended first-game board" },
         { value: "random", label: "Random", title: "Flip all three faction strips independently" },
       ]} /></CmRow>
-      {createOpp === "ai" && <CmRow label="AI strength"><select className="or-ai-select" value={createDifficulty}
-        onChange={(event) => setCreateDifficulty(event.target.value)}>
-        <option value="hard">Hard · browser search</option>
-        <option value="random">Random · baseline</option>
-      </select></CmRow>}
-      <span className="cm-hint">Complete 1v1 rules and all 90 base-game Agents. Hard AI searches in your browser and falls back safely if it is unavailable.</span>
-      <div className="cm-footer"><span className="cm-summary">Creating: <b>{createOpp === "ai" ? `vs ${createDifficulty === "hard" ? "Hard" : "Random"} AI` : "vs Friend"}</b></span>
+      <span className="cm-hint">Complete 1v1 rules and all 90 base-game Agents. Strong AI searches in your browser and falls back safely if it is unavailable.</span>
+      <div className="cm-footer"><span className="cm-summary">Creating: <b>{selectedOpponent === "friend" ? "vs Friend" : selectedOpponent === "hard" ? "vs Strong AI" : "vs Random AI"}</b></span>
         <button type="button" className="cm-create" onClick={() => createGame(createOpp === "ai", createSetup, createDifficulty)}>Create Game</button></div>
     </CreateModal>}
     {showRules && <RulesModal title="How to play — Orbit" onClose={() => setShowRules(false)}><OrbitRules /></RulesModal>}

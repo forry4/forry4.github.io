@@ -5575,8 +5575,19 @@ try {
 		await page.locator(".lby-cta").click({ timeout: 10_000 }).catch(() => {});
 		const modal = await page.waitForSelector(".cm-panel", { timeout: 10_000 })
 			.then(() => true).catch(() => false);
-		check("Orbit offers friend/AI and S.U.N./random setup", modal
-			&& await page.locator(".cm-seg-btn").count() === 4);
+		const opponentLabels = await page.locator(".cm-row").first().locator(".cm-seg-btn").allTextContents().catch(() => []);
+		check("Orbit offers friend/random/strong AI and S.U.N./random setup", modal
+			&& await page.locator(".cm-seg-btn").count() === 5
+			&& JSON.stringify(opponentLabels) === JSON.stringify(["VS Friend", "VS Random AI", "VS Strong AI"]),
+			JSON.stringify(opponentLabels));
+		const randomOpponent = page.locator(".cm-seg-btn", { hasText: "VS Random AI" });
+		const strongOpponent = page.locator(".cm-seg-btn", { hasText: "VS Strong AI" });
+		await randomOpponent.click({ timeout: 10_000 }).catch(() => {});
+		check("Orbit can select the random AI tier",
+			await page.locator(".cm-summary b").textContent().catch(() => "") === "vs Random AI");
+		await strongOpponent.click({ timeout: 10_000 }).catch(() => {});
+		check("Orbit can select the strong AI tier",
+			await page.locator(".cm-summary b").textContent().catch(() => "") === "vs Strong AI");
 		await page.locator(".cm-create").click({ timeout: 10_000 }).catch(() => {});
 
 		const mulligan = await page.waitForSelector(".or-mulligan", { timeout: 30_000 })
