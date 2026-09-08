@@ -6259,6 +6259,28 @@ try {
 				if (process.env.ORBIT_SHOTS) await page.screenshot({ path: `test-results/orbit-decision-${kind}-${width}.png` });
 			}
 		}
+		// The bot's wait state belongs in its seat rail. A full-width status slab
+		// makes the board feel like it is jumping between unrelated screens.
+		const botSeat = Object.keys(gameView.players).find((id) => id !== "orbit-harness");
+		fixture.room.ai_player = botSeat;
+		gameView.phase = "playing";
+		gameView.pending = null;
+		gameView.pending_pid = null;
+		gameView.turn_pid = botSeat;
+		gameView.legal_moves = [];
+		socket.send(JSON.stringify(fixture));
+		await page.waitForFunction(() => document.querySelector(".or-player.theirs .or-player-hint")?.textContent.includes("Thinking"));
+		check("bot thinking stays in the opponent rail", await page.locator(".or-status").count() === 0
+			&& (await page.locator(".or-player.theirs .or-player-hint").innerText()).includes("Thinking"));
+		gameView.pending_pid = botSeat;
+		gameView.pending = { source: "Bot effect", task: { type: "influence", amount: 1 } };
+		gameView.turn_pid = botSeat;
+		socket.send(JSON.stringify(fixture));
+		await page.waitForFunction(() => document.querySelector(".or-player.theirs .or-player-hint")?.textContent.includes("Resolving"));
+		check("bot effect resolution stays in the opponent rail", await page.locator(".or-status").count() === 0
+			&& (await page.locator(".or-player.theirs .or-player-hint").innerText()).includes("Resolving"));
+		gameView.pending_pid = "orbit-harness";
+		gameView.turn_pid = "orbit-harness";
 		gameView.pending.task = { type: "optional_exile_each", planets: ["venus", "jupiter"], index: 0, reward: "zenithium" };
 		gameView.legal_moves = [{ action: "choose", accept: false }];
 		const repliesBefore = fixtureReplies.length;

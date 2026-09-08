@@ -65,6 +65,10 @@ def _room(seed=3):
     }
 
 
+def test_bot_decisions_leave_time_for_board_feedback():
+    assert m.BOT_FLOOR_SECONDS == pytest.approx(0.70)
+
+
 def test_serving_manifest_and_choice_are_versioned_and_legal():
     game = _game()
     obs = observation(game, "human")

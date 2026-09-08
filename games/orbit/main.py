@@ -68,9 +68,9 @@ CLIENT_AI_TURN_BUDGET_MS = serving.TURN_BUDGET_MS
 CLIENT_AI_MAIN_ACTION_MS = serving.MAIN_ACTION_BUDGET_MS
 CLIENT_AI_FOLLOWUP_RESERVE_MS = serving.FOLLOWUP_RESERVE_MS
 
-#: A floor on how fast the bot answers. Without it a vs-bot game resolves the
-#: whole simultaneous submission the instant you click, which reads as a bug.
-BOT_FLOOR_SECONDS = 0.18
+#: A floor on how fast the bot answers. Orbit's board needs time to show the
+#: last move and let its disc/resource cues finish before the next decision.
+BOT_FLOOR_SECONDS = 0.70
 
 orbit_app = FastAPI(title="Orbit API")
 orbit_app.add_middleware(
@@ -874,11 +874,13 @@ async def _client_bot_turn(room_id: str) -> bool:
                 room["ai_budget_remaining_ms"] = None
                 room["ai_turn_started_at"] = None
                 room["ai_decisions_this_turn"] = 0
-        await asyncio.sleep(max(0, BOT_FLOOR_SECONDS))
         await broadcast_state(room_id)
         save_game(room_id)
         if not more:
             return not _bot_turn_active(ROOMS.get(room_id, {}))
+        # Show the resolved move first; the pacing pause belongs between
+        # decisions so the player can read the log and watch the board cues.
+        await asyncio.sleep(max(0, BOT_FLOOR_SECONDS))
     return False
 
 

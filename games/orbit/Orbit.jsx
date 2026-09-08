@@ -1161,14 +1161,20 @@ export default function Orbit({ myId, authUser, onExit }) {
     ? (me.technology?.[selectedAgent.faction] || 0) + 1
     : null;
   const winnerName = game.winner ? names[game.winner] : null;
+  const botIsOpponent = roomData?.ai_player === otherId;
   const myHint = over ? null
     : game.phase === "mulligan" && isMyTurn ? "Choose replacements"
       : game.pending_pid === myId ? (legal.length > 1 ? "Your turn" : "Resolving…")
         : isMyTurn ? "Choose an Agent" : null;
+  const otherHint = !over && botIsOpponent
+    ? game.pending_pid === otherId ? "Resolving…"
+      : game.phase === "mulligan" && !isMyTurn ? "Thinking…"
+        : !game.pending && game.turn_pid === otherId ? "Thinking…" : null
+    : null;
   const playerRails = (
       <div className="or-score-rail">
         <PlayerRail player={{ ...other, __pid: otherId }} name={names[otherId]} active={!over && (game.pending_pid || game.turn_pid) === otherId}
-          leader={game.leader} connected={connected} onInfo={setInfo} />
+          leader={game.leader} connected={connected} hint={otherHint} onInfo={setInfo} />
         <PlayerRail player={{ ...me, __pid: myId }} name={names[myId]} active={!over && (game.pending_pid || game.turn_pid) === myId}
           me leader={game.leader} connected={connected} hint={myHint} onInfo={setInfo} />
       </div>
@@ -1195,7 +1201,7 @@ export default function Orbit({ myId, authUser, onExit }) {
           {mulligan.length ? `Replace ${mulligan.length} card${mulligan.length === 1 ? "" : "s"}` : "Keep this hand"}
         </button>
       </section>}
-      {game.phase === "mulligan" && !isMyTurn && <section className="or-status"><span className="or-spinner" /> Waiting for the other mulligan…</section>}
+      {game.phase === "mulligan" && !isMyTurn && !botIsOpponent && <section className="or-status"><span className="or-spinner" /> Waiting for the other mulligan…</section>}
 
       {game.phase !== "mulligan" && <div className="or-board-layout">
         <div className="or-board-main">
@@ -1204,8 +1210,8 @@ export default function Orbit({ myId, authUser, onExit }) {
           <Columns game={game} pid={otherId} name={names[otherId]} onInfo={setInfo} />
           <Columns game={game} pid={myId} name={names[myId]} mine onInfo={setInfo} />
           {!over && game.pending && game.pending_pid === myId && <DecisionPanel game={game} catalog={catalog} sendMove={sendMove} onInfo={setInfo} />}
-          {!over && game.pending && game.pending_pid !== myId && <section className="or-status"><span className="or-spinner" /> {names[game.pending_pid] || "Opponent"} is resolving {game.pending.source}…</section>}
-          {!over && !game.pending && !isMyTurn && <section className="or-status"><span className="or-spinner" /> {names[game.turn_pid] || "Opponent"} is choosing an action…</section>}
+          {!over && game.pending && game.pending_pid !== myId && !botIsOpponent && <section className="or-status"><span className="or-spinner" /> {names[game.pending_pid] || "Opponent"} is resolving {game.pending.source}…</section>}
+          {!over && !game.pending && !isMyTurn && !botIsOpponent && <section className="or-status"><span className="or-spinner" /> {names[game.turn_pid] || "Opponent"} is choosing an action…</section>}
 
           <section className="or-hand-zone">
             <div className="or-hand-head"><span className="or-eyebrow">Your hand</span>
