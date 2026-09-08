@@ -709,19 +709,11 @@ function DecisionPanel({ game, catalog, sendMove, onInfo }) {
 
 function Lobby({ authUser, myId, onExit, openGames, myGames, history, historyShown,
   historyMore, refreshing, fetchGames, joinGame, resumeGame, cancelGame,
-  showCreate, setShowCreate, createOpp, setCreateOpp, createSetup, setCreateSetup,
+  showCreate, setShowCreate, createOpp, setCreateOpp,
   createDifficulty, setCreateDifficulty, createGame, lobbyTab, setLobbyTab,
   showRules, setShowRules, toast }) {
   const active = notWaiting(myGames);
   const selectedOpponent = createOpp === "friend" ? "friend" : createDifficulty;
-  const chooseOpponent = (value) => {
-    if (value === "friend") {
-      setCreateOpp("friend");
-      return;
-    }
-    setCreateOpp("ai");
-    setCreateDifficulty(value);
-  };
   return <div className="app orbit" style={{ "--lby-accent": GAME_ACCENTS.orbit }}>
     <style>{styles}</style>
     <LobbyHeader onBack={onExit} user={<LobbyUser user={authUser} />} />
@@ -773,18 +765,16 @@ function Lobby({ authUser, myId, onExit, openGames, myGames, history, historySho
       </div>
     </div></div>
     {showCreate && <CreateModal title="New Orbit game" onClose={() => setShowCreate(false)}>
-      <CmRow label="Opponent"><CmSeg value={selectedOpponent} onChange={chooseOpponent} options={[
+      <CmRow label="Opponent"><CmSeg value={createOpp} onChange={setCreateOpp} options={[
         { value: "friend", label: "VS Friend" },
-        { value: "random", label: "VS Random AI" },
-        { value: "hard", label: "VS Strong AI", title: "Browser search with a validated server fallback" },
-      ]} wrap /></CmRow>
-      <CmRow label="Technology board"><CmSeg value={createSetup} onChange={setCreateSetup} options={[
-        { value: "sun", label: "S.U.N.", title: "The recommended first-game board" },
-        { value: "random", label: "Random", title: "Flip all three faction strips independently" },
+        { value: "ai", label: "VS AI" },
       ]} /></CmRow>
-      <span className="cm-hint">Complete 1v1 rules and all 90 base-game Agents. Strong AI searches in your browser and falls back safely if it is unavailable.</span>
-      <div className="cm-footer"><span className="cm-summary">Creating: <b>{selectedOpponent === "friend" ? "vs Friend" : selectedOpponent === "hard" ? "vs Strong AI" : "vs Random AI"}</b></span>
-        <button type="button" className="cm-create" onClick={() => createGame(createOpp === "ai", createSetup, createDifficulty)}>Create Game</button></div>
+      {createOpp === "ai" && <CmRow label="AI difficulty"><CmSeg value={createDifficulty} onChange={setCreateDifficulty} options={[
+        { value: "random", label: "Easy" },
+        { value: "hard", label: "Normal" },
+      ]} /></CmRow>}
+      <div className="cm-footer"><span className="cm-summary">Creating: <b>{selectedOpponent === "friend" ? "vs Friend" : selectedOpponent === "hard" ? "vs Normal AI" : "vs Easy AI"}</b></span>
+        <button type="button" className="cm-create" onClick={() => createGame(createOpp === "ai", createDifficulty)}>Create Game</button></div>
     </CreateModal>}
     {showRules && <RulesModal title="How to play — Orbit" onClose={() => setShowRules(false)}><OrbitRules /></RulesModal>}
     {toast && <div className="or-toast">{toast}</div>}
@@ -807,7 +797,6 @@ export default function Orbit({ myId, authUser, onExit }) {
   const [showCreate, setShowCreate] = useState(false);
   const [showRules, setShowRules] = useState(false);
   const [createOpp, setCreateOpp] = useState("ai");
-  const [createSetup, setCreateSetup] = useState("sun");
   const [createDifficulty, setCreateDifficulty, rememberDifficulty] =
     useLastDifficulty("orbit", myId, ORBIT_AI_TIERS, "hard");
   const [confirmAbandon, setConfirmAbandon] = useState(false);
@@ -1039,12 +1028,12 @@ export default function Orbit({ myId, authUser, onExit }) {
     return () => clearTimeout(timer);
   }, [toast]);
 
-  const createGame = useCallback((vsAi, configuration, difficulty = createDifficulty) => {
+  const createGame = useCallback((vsAi, difficulty = createDifficulty) => {
     const rid = Math.random().toString(36).slice(2, 7).toUpperCase();
     setConnecting(true); setRoomId(rid); setShowCreate(false);
     if (vsAi) rememberDifficulty(difficulty);
     connect(`${ORBIT_WS}/${rid}/${myId}`, {
-      action: "create", name: authUser?.name || "Player", vs_ai: vsAi, configuration,
+      action: "create", name: authUser?.name || "Player", vs_ai: vsAi, configuration: "random",
       ai_difficulty: difficulty,
     });
   }, [connect, myId, authUser, createDifficulty, rememberDifficulty]);
@@ -1133,7 +1122,7 @@ export default function Orbit({ myId, authUser, onExit }) {
   if (screen === "lobby") return <Lobby {...{
     authUser, myId, onExit, openGames, myGames, history, historyShown, historyMore,
     refreshing, fetchGames, joinGame, resumeGame, cancelGame, showCreate, setShowCreate,
-    createOpp, setCreateOpp, createSetup, setCreateSetup, createDifficulty, setCreateDifficulty,
+    createOpp, setCreateOpp, createDifficulty, setCreateDifficulty,
     createGame, lobbyTab, setLobbyTab,
     showRules, setShowRules, toast,
   }} />;

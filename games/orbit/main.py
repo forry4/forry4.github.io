@@ -70,7 +70,7 @@ CLIENT_AI_FOLLOWUP_RESERVE_MS = serving.FOLLOWUP_RESERVE_MS
 
 #: A floor on how fast the bot answers. Orbit's board needs time to show the
 #: last move and let its disc/resource cues finish before the next decision.
-BOT_FLOOR_SECONDS = 0.70
+BOT_FLOOR_SECONDS = 1.00
 
 orbit_app = FastAPI(title="Orbit API")
 orbit_app.add_middleware(
@@ -1066,9 +1066,9 @@ async def _handle_create(ws, room_id, pid, msg):
     name = (msg.get("name") or "Player").strip()[:24] or "Player"
     vs_ai = bool(msg.get("vs_ai"))
     difficulty = _valid_difficulty(msg.get("ai_difficulty"))
-    configuration = msg.get("configuration")
-    if configuration not in ("sun", "random"):
-        configuration = "sun"
+    # New rooms always use a random technology board.  Keep this server-side so
+    # an older cached client cannot quietly create the retired S.U.N. variant.
+    configuration = "random"
     async with ROOM_LOCK:
         if room_id in ROOMS or _ensure_room_loaded(room_id):
             await _send(ws, {"type": "error", "message": "room already exists"})

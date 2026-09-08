@@ -893,12 +893,12 @@
 }
 
 /* Physical pieces, quiet motion, and decisions that explain their purpose. */
-.or-disc { background: currentColor; border: 2px solid #eee9d9; box-shadow: 0 1px 2px #0008; transition: top .32s ease-out, left .32s ease-out, opacity .12s; }
-.or-disc.captured { transition: top .28s ease-out, left .28s ease-out, opacity .1s .24s; }
+.or-disc { background: currentColor; border: 2px solid #eee9d9; box-shadow: 0 1px 2px #0008; transition: top .62s cubic-bezier(.2,.75,.25,1), left .62s cubic-bezier(.2,.75,.25,1), opacity .18s; }
+.or-disc.captured { transition: top .56s cubic-bezier(.2,.75,.25,1), left .56s cubic-bezier(.2,.75,.25,1), opacity .16s .38s; }
 .or-disc.returning { transition: none; }
 .or-turn-label, .or-hand > .or-agent, .or-info { animation: none; }
 .or-resource:has(.or-resource-delta) > span { visibility: visible; }
-.or-resource-delta { top: -10px; right: 0; min-width: 0; padding: 0 3px; font-size: 10px; line-height: 11px; border: 0; animation: or-delta-fade 1.8s both; }
+.or-resource-delta { top: -10px; right: 0; min-width: 0; padding: 0 3px; font-size: 10px; line-height: 11px; border: 0; animation: or-delta-fade 2.2s both; }
 @keyframes or-delta-fade { 0%, 80% { opacity: 1; } 100% { opacity: 0; } }
 .or-activity .or-turn-label { color: var(--or-dim); font-size: .65rem; font-weight: 700; }
 .or-activity-detail { color: #c2cadb; }

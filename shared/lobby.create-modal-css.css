@@ -1,16 +1,17 @@
 .cm-backdrop{position:fixed;inset:0;background:rgba(6,5,4,.72);display:flex;align-items:center;justify-content:center;z-index:400;padding:16px}
-.cm-panel{background:var(--surface,#1b1712);border:1px solid var(--border,#3a3226);border-radius:var(--radius-lg,14px);box-shadow:0 18px 48px rgba(0,0,0,.6);padding:17px 17px 15px;width:min(94vw,372px);max-height:88vh;overflow-y:auto;display:flex;flex-direction:column;gap:14px}
+.cm-panel{background:linear-gradient(145deg,color-mix(in srgb,var(--surface,#1b1712) 92%,#fff 8%),var(--surface,#1b1712));border:1px solid color-mix(in srgb,var(--border,#3a3226) 88%,#fff 12%);border-radius:var(--radius-lg,14px);box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 24px 64px rgba(0,0,0,.68),0 6px 18px rgba(0,0,0,.25);padding:17px 17px 15px;width:min(94vw,372px);max-height:88vh;overflow-y:auto;display:flex;flex-direction:column;gap:14px}
 .cm-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .cm-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.02rem;font-weight:700;letter-spacing:.05em;color:var(--text,#e8dfce)}
-.cm-x{background:none;border:none;color:var(--text-muted,#6a604e);font-size:1.05rem;line-height:1;padding:2px 5px;border-radius:6px;cursor:pointer}
-.cm-x:hover{color:var(--text,#e8dfce)}
+.cm-x{background:transparent;border:1px solid transparent;color:var(--text-muted,#6a604e);font-size:1.05rem;line-height:1;padding:4px 7px;border-radius:6px;cursor:pointer;transition:background .18s,color .18s,border-color .18s,transform .18s}
+.cm-x:hover{border-color:var(--border,#3a3226);background:rgba(255,255,255,.06);color:var(--text,#e8dfce);transform:translateY(-1px)}
 .cm-row{display:flex;flex-direction:column;gap:7px;min-width:0}
 .cm-label{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.64rem;letter-spacing:.13em;text-transform:uppercase;color:var(--text-dim,#b8ab90)}
-.cm-seg{display:flex;border:1px solid var(--border,#3a3226);border-radius:8px;overflow:hidden}
-.cm-seg-btn{flex:1;padding:9px 12px;background:transparent;border:none;color:var(--text-dim,#b8ab90);font-family:'Cinzel','Cinzel Fallback',serif;font-size:.78rem;letter-spacing:.05em;font-weight:600;cursor:pointer;white-space:nowrap;transition:background .12s,color .12s}
+.cm-seg{display:flex;border:1px solid var(--border,#3a3226);border-radius:8px;overflow:hidden;background:rgba(0,0,0,.16);box-shadow:inset 0 1px 3px rgba(0,0,0,.32),0 1px 0 rgba(255,255,255,.04)}
+.cm-seg-btn{flex:1;padding:9px 12px;background:transparent;border:none;color:var(--text-dim,#b8ab90);font-family:'Cinzel','Cinzel Fallback',serif;font-size:.78rem;letter-spacing:.05em;font-weight:600;cursor:pointer;white-space:nowrap;transition:background .18s,color .18s,box-shadow .18s,transform .18s}
 .cm-seg-btn+.cm-seg-btn{border-left:1px solid var(--border,#3a3226)}
-.cm-seg-btn:hover{color:var(--text,#e8dfce)}
-.cm-seg-btn.sel{background:var(--lby-accent,var(--gold,#d4a84c));color:#171310}
+.cm-seg-btn:hover{background:rgba(255,255,255,.06);color:var(--text,#e8dfce)}
+.cm-seg-btn.sel{background:linear-gradient(180deg,color-mix(in srgb,var(--lby-accent,var(--gold,#d4a84c)) 88%,#fff5dc),var(--lby-accent,var(--gold,#d4a84c)));color:#171310;box-shadow:inset 0 1px 0 rgba(255,255,255,.28),0 3px 8px -6px color-mix(in srgb,var(--lby-accent,var(--gold,#d4a84c)) 70%,transparent)}
+.cm-seg-btn:active{transform:translateY(1px);box-shadow:inset 0 2px 4px rgba(0,0,0,.28)}
 /* WRAPPING VARIANT (`<CmSeg wrap>`), for a picker whose options outgrow one
    phone row. The base control is `overflow:hidden` + `nowrap`, so an option
    past the fold is UNREACHABLE rather than merely off-screen -- measured on the
@@ -47,6 +48,7 @@
 .cm-info-line{display:flex;gap:9px;align-items:baseline;font-size:.9rem;color:var(--text-dim,#b8ab90)}
 .cm-info-line::before{content:"◆";color:var(--lby-accent,var(--gold,#d4a84c));font-size:.72rem;flex:none}
 .cm-footer{display:flex;flex-direction:column;gap:7px;margin-top:2px}
-.cm-create{width:100%;padding:11px 20px;border:none;border-radius:8px;background:var(--lby-accent,var(--gold,#d4a84c));color:#171310;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.88rem;letter-spacing:.06em;font-weight:700;cursor:pointer;transition:filter .15s}
-.cm-create:hover{filter:brightness(1.12)}
-.cm-create:disabled{opacity:.4;cursor:not-allowed}
+.cm-create{width:100%;padding:11px 20px;border:1px solid color-mix(in srgb,var(--lby-accent,var(--gold,#d4a84c)) 72%,#000);border-radius:8px;background:linear-gradient(180deg,color-mix(in srgb,var(--lby-accent,var(--gold,#d4a84c)) 84%,#fff5dc),var(--lby-accent,var(--gold,#d4a84c)));color:#171310;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.88rem;letter-spacing:.06em;font-weight:700;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.26),0 3px 9px -7px color-mix(in srgb,var(--lby-accent,var(--gold,#d4a84c)) 55%,transparent);transition:filter .18s,box-shadow .18s,transform .18s}
+.cm-create:hover{filter:brightness(1.08);transform:translateY(-1px);box-shadow:inset 0 1px 0 rgba(255,255,255,.3),0 6px 14px -8px color-mix(in srgb,var(--lby-accent,var(--gold,#d4a84c)) 68%,transparent)}
+.cm-create:active:not(:disabled){transform:translateY(1px);box-shadow:inset 0 2px 5px rgba(0,0,0,.3)}
+.cm-create:disabled{opacity:.4;cursor:not-allowed;filter:none;transform:none;box-shadow:none}
