@@ -812,7 +812,16 @@
   .or-tech-key { gap: .3rem; }
   .or-tech-key b { max-width: 2.7rem; }
   .or-tech-summary-row strong i { display: none; }
-  .or-tech-summary-row { gap: .2rem; padding-inline: .35rem; }
+  .or-tech-summary-row { gap: .14rem; padding-inline: .25rem; }
+  /* At 320px the faction name is the ONLY flexible track, and a wider system
+     font (Segoe UI here, DejaVu on the CI runner) squeezes it from BOTH sides:
+     the label grows while the two numeric columns push the 1fr track narrower.
+     Tuned on one font it fit in exactly 0px of slack and clipped on the other,
+     so buy the headroom back from the numeric chrome rather than the word. */
+  .or-tech-summary-row strong { font-size: .56rem; letter-spacing: -.01em; }
+  .or-tech-summary-row > span { gap: .12rem; }
+  .or-tech-summary-row > span i { width: .4rem; height: .4rem; }
+  .or-tech-summary-row > span b { font-size: .72rem; }
 }
 .motion-paused .or-disc { transition: none; }
 /* Desktop follows the phone's physical table: their side above, yours below.
