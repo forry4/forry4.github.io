@@ -12,6 +12,7 @@ import { buildPath, pushPath, replacePath, subscribe } from "../../shared/router
 import { useAutoReconnect } from "../../shared/useAutoReconnect.js";
 import { useCardInfoGesture } from "../../shared/gestures.js";
 import OrbitRules from "./rules.jsx";
+import { Resource, ResourceIcon, useBoardMotion } from "./presentation.jsx";
 import orbitCssText from "./Orbit.css?inline";
 
 
@@ -61,15 +62,21 @@ function useSocket(onMessage) {
   onMsg.current = onMessage;
   const connect = useCallback((url, firstMessage) => {
     try { wsRef.current?.close(); } catch {}
+    setConnected(false);
     const ws = new WebSocket(url);
     wsRef.current = ws;
     ws.onopen = () => {
-      setConnected(true);
       if (firstMessage) ws.send(JSON.stringify(firstMessage));
     };
-    ws.onclose = () => setConnected(false);
+    ws.onclose = () => { if (wsRef.current === ws) setConnected(false); };
     ws.onmessage = (event) => {
-      try { onMsg.current(JSON.parse(event.data)); } catch {}
+      if (wsRef.current !== ws) return;
+      try {
+        onMsg.current(JSON.parse(event.data));
+        // Establish the first restored frame and the connection together, so
+        // motion starts from this snapshot rather than replaying the outage.
+        setConnected(true);
+      } catch {}
     };
   }, []);
   const send = useCallback((message) => {
@@ -209,7 +216,7 @@ function handLimit(leader, pid) {
 function LeaderBadge({ leader, pid }) {
   const level = leader?.owner === pid ? (leader.level || 0) : 0;
   const side = LEADER_SIDES[level];
-  return <b className={`or-leader lv-${level}`}
+  return <b data-motion-key={`leader-${pid}`} data-motion-value={level} className={`or-leader lv-${level}`}
     title={side ? `${side} Leader badge — hand limit ${handLimit(leader, pid)}`
       : `No Leader badge — hand limit ${handLimit(leader, pid)}`}>
     <i className="or-leader-medal" aria-hidden="true" />
@@ -241,10 +248,10 @@ function orbitMoveKey(move) {
 }
 
 
-function PlayerRail({ player, name, active, me, leader, hint, onInfo }) {
+function PlayerRail({ player, name, active, me, leader, hint, onInfo, connected }) {
   if (!player) return null;
   const owner = me ? "Your" : `${name || "Opponent"}’s`;
-  return <section className={`or-player${active ? " active" : ""}${me ? " mine" : " theirs"}`}>
+  return <section data-motion-key={`seat-${player.__pid}`} data-motion-value={String(active)} className={`or-player${active ? " active" : ""}${me ? " mine" : " theirs"}`}>
     <div className="or-player-name">
       <i className="or-seat-dot" aria-hidden="true" />
       <span>{name || "Player"}</span>
@@ -253,8 +260,8 @@ function PlayerRail({ player, name, active, me, leader, hint, onInfo }) {
       <LeaderBadge leader={leader} pid={player.__pid} />
     </div>
     <div className="or-resources">
-      <span><b>{player.credits}</b> Credits</span>
-      <span><b>{player.zenithium}</b> Zenithium</span>
+      <Resource key={`credits-${connected}`} kind="credits" value={player.credits} animate={connected} />
+      <Resource key={`zenithium-${connected}`} kind="zenithium" value={player.zenithium} animate={connected} />
       <span className="or-resource-cards">
         <HandCount held={player.hand?.length || 0} limit={handLimit(leader, player.__pid)} />
         {!!player.captured?.length && <span className="or-captures" aria-label="Captured planets">
@@ -267,6 +274,7 @@ function PlayerRail({ player, name, active, me, leader, hint, onInfo }) {
       <div>{PLANETS.map((planet) => {
         const cards = player.columns?.[planet] || [];
         return <button type="button" key={planet} className={`or-played-agent or-${planet}`}
+          data-motion-key={`column-${player.__pid}-${planet}`} data-motion-value={cards.map((card) => card.id).join(",")}
           disabled={!cards.length} title={`${cards.length} ${planet} Agent${cards.length === 1 ? "" : "s"}. ${cards.length ? "Open details" : "None played"}`}
           aria-label={`${cards.length} ${planet} Agent${cards.length === 1 ? "" : "s"}${cards.length ? ". Open details" : ""}`}
           {...detailClick(() => cards.length && onInfo?.({ kind: "column", planet, cards, owner }))}>
@@ -301,9 +309,14 @@ function Bonus({ token, catalog, onInfo, compact = false, className = "" }) {
 }
 
 
-function InfluenceBoard({ game, myId, catalog, onInfo }) {
+function InfluenceBoard({ game, myId, catalog, onInfo, names, connected }) {
   const mineIsPositive = game.order?.[0] === myId;
   const spaces = [-4, -3, -2, -1, 0, 1, 2, 3, 4];
+  const recent = [...(game.log || [])].reverse();
+  const latest = recent.find((entry) => !entry.turn_start && !/draws? .*Agents?|ends? (the |their )?turn/i.test(logText(entry)))
+    || recent.find((entry) => !entry.turn_start);
+  const recentTurn = latest ? (game.log || []).filter((entry) => entry.turn === latest.turn) : [];
+  const actor = game.pending_pid || game.turn_pid;
   return <section className="or-influence" aria-label="Planet influence board">
     {PLANETS.map((planet) => {
       const raw = game.influence?.[planet];
@@ -311,13 +324,20 @@ function InfluenceBoard({ game, myId, catalog, onInfo }) {
       return <div className={`or-track or-${planet}`} key={planet}>
         <div className="or-track-name"><PlanetName planet={planet} /></div>
         <div className="or-track-spaces">
-          {spaces.map((space) => <span className={`or-space${Math.abs(space) === 4 ? " goal" : ""}${space === 0 ? " middle" : ""}`} key={space}>
-            {position === space && <i className="or-disc" />}
-          </span>)}
+          {spaces.map((space) => <span className={`or-space${Math.abs(space) === 4 ? " goal" : ""}${space === 0 ? " middle" : ""}`} key={space} />)}
+          <i className={`or-disc${position == null ? " captured" : ""}`} style={{ "--or-position": ((position ?? 0) + 4.5) / 9 * 100 + "%" }}
+            aria-label={`${planet}: ${position == null ? "captured" : position === 0 ? "neutral" : `${Math.abs(position)} toward ${position > 0 ? "you" : "opponent"}`}`} />
         </div>
         <Bonus token={game.planet_bonus?.[planet]} catalog={catalog} onInfo={onInfo} />
       </div>;
     })}
+    <div className={`or-activity ${actor === myId ? "mine" : "theirs"}`} role="status" aria-live="polite" aria-atomic="true">
+      <b key={`${game.turn_number}-${actor}-${game.phase}`} className="or-turn-label">{!connected ? "Reconnecting…" : game.phase === "over" ? "Game over" : actor === myId ? "Your turn" : `${names[actor] || "Opponent"}’s turn`}</b>
+      <button type="button" className="or-activity-detail" disabled={!latest}
+        aria-label="Read the latest turn" onClick={() => onInfo({ kind: "activity", entries: recentTurn })}>
+        {latest ? logText(latest) : "Influence moves toward the player who gains it."}
+      </button>
+    </div>
   </section>;
 }
 
@@ -346,10 +366,10 @@ function TechBoard({ game, myId, otherId, myName, theirName, catalog, onInfo }) 
       {FACTIONS.map((faction) => <div className={`or-tech-summary-row or-${faction}`} key={faction}>
         <strong><i aria-hidden="true">{FACTION_GLYPH[faction]}</i>{faction}</strong>
         <span className="mine" title={`${myName || "You"} — level ${me?.technology?.[faction] || 0}`}>
-          <i aria-hidden="true" /><b>{me?.technology?.[faction] || 0}</b>
+          <i aria-hidden="true" /><b data-motion-key={`tech-${myId}-${faction}`} data-motion-value={me?.technology?.[faction] || 0}>{me?.technology?.[faction] || 0}</b>
         </span>
         <span className="theirs" title={`${theirName || "Opponent"} — level ${them?.technology?.[faction] || 0}`}>
-          <i aria-hidden="true" /><b>{them?.technology?.[faction] || 0}</b>
+          <i aria-hidden="true" /><b data-motion-key={`tech-${otherId}-${faction}`} data-motion-value={them?.technology?.[faction] || 0}>{them?.technology?.[faction] || 0}</b>
         </span>
       </div>)}
     </div>
@@ -367,6 +387,7 @@ function TechBoard({ game, myId, otherId, myName, theirName, catalog, onInfo }) 
           <h3><i>{FACTION_GLYPH[faction]}</i>{faction}<em title="Board strip in play">{BOARD_LETTER[faction][game.board_sides?.[faction]]}</em></h3>
           {rows.map((space) => <div className={`or-tech-row${space.level === 2 ? " has-token" : ""}`} key={space.level}>
             <button type="button"
+              data-motion-key={`tech-rung-${faction}-${space.level}`} data-motion-value={`${mineLevel === space.level}-${theirLevel === space.level}`}
               className={`or-tech-space${mineLevel === space.level ? " mine" : ""}${theirLevel === space.level ? " theirs" : ""}`}
               title={`Level ${space.level}: ${space.description}`}
               {...detailClick(() => onInfo({ kind: "tech", faction, level: space.level, description: space.description }))}>
@@ -402,7 +423,7 @@ function AgentCard({ card, selected, onClick, onInfo, hidden = false }) {
   return <button type="button" className={`or-agent or-${card.planet} or-${card.faction}${selected ? " selected" : ""}${onClick ? " playable" : ""}`}
     onClick={onClick || (onInfo ? () => onInfo({ kind: "card", card }) : undefined)}
     disabled={!onClick && !onInfo} title={card.description} {...info}>
-    <span className="or-agent-top"><b>{card.cost}</b><i>{FACTION_GLYPH[card.faction]}</i></span>
+    <span className="or-agent-top"><span className="or-card-price"><ResourceIcon kind="credits" /><b>{card.cost}</b></span><i>{FACTION_GLYPH[card.faction]}</i></span>
     <strong>{card.name}</strong>
     <span className="or-agent-text">{card.description}</span>
     <span className="or-agent-foot"><PlanetName planet={card.planet} /> · {card.faction}</span>
@@ -430,7 +451,7 @@ function Columns({ game, pid, name, mine, onInfo }) {
           ? { kind: "column", planet, cards, owner: mine ? "Your" : `${name || "Opponent"}’s` }
           : { kind: "card", card: top };
         return <div className={`or-column or-${planet}`} key={planet}>
-          <span className="or-column-head"><PlanetName planet={planet} /><b className="or-column-count" aria-label={`${cards.length} Agents`}>{cards.length}</b></span>
+          <span className="or-column-head"><PlanetName planet={planet} /><b data-motion-key={`stack-${pid}-${planet}`} data-motion-value={cards.map((card) => card.id).join(",")} className="or-column-count" aria-label={`${cards.length} Agents`}>{cards.length}</b></span>
           {top ? <button type="button" className={`or-slot${cards.length > 1 ? " stacked" : ""}`}
             title={`${cards.length} Agent${cards.length === 1 ? "" : "s"} — ${top.name} on top`}
             {...detailClick(() => onInfo(stackInfo))}>
@@ -544,11 +565,15 @@ function InfoModal({ info, catalog, onClose, onInfo }) {
       <p className="or-info-tags">
         <PlanetName planet={card.planet} />
         <span className="or-info-faction"><i>{FACTION_GLYPH[card.faction]}</i>{card.faction}</span>
-        <span className="or-info-cost"><b>{card.cost}</b> Credits</span>
+        <span className="or-info-cost"><ResourceIcon kind="credits" /><b>{card.cost}</b> Credits</span>
       </p>
       <p className="or-info-text">{card.description}</p>
       <Glossary terms={glossaryFor(card.description)} />
     </>;
+  } else if (info.kind === "activity") {
+    eyebrow = "Turn recap";
+    title = "Latest action";
+    body = <div className="or-recap">{info.entries.map((entry, index) => <p className="or-info-text" key={index}>{logText(entry)}</p>)}</div>;
   } else if (info.kind === "bonus") {
     const bonus = catalog?.bonuses?.[String(info.token)] || catalog?.bonuses?.[info.token];
     eyebrow = "Bonus token";
@@ -1044,6 +1069,7 @@ export default function Orbit({ myId, authUser, onExit }) {
   }), [resumeGame, leaveToLobby]);
 
   const game = roomData?.game;
+  const motionSurface = useBoardMotion(game, connected, roomId);
   const names = roomData?.players || {};
   const otherId = game?.order?.find((pid) => pid !== myId);
   const me = game?.players?.[myId];
@@ -1093,18 +1119,21 @@ export default function Orbit({ myId, authUser, onExit }) {
     : game.phase === "mulligan" && isMyTurn ? "Choose replacements"
       : game.pending_pid === myId ? (game.pending?.task?.label || "Resolve effect")
         : isMyTurn ? "Choose an Agent" : null;
+  const playerRails = (
+      <div className="or-score-rail">
+        <PlayerRail player={{ ...other, __pid: otherId }} name={names[otherId]} active={!over && (game.pending_pid || game.turn_pid) === otherId}
+          leader={game.leader} connected={connected} onInfo={setInfo} />
+        <PlayerRail player={{ ...me, __pid: myId }} name={names[myId]} active={!over && (game.pending_pid || game.turn_pid) === myId}
+          me leader={game.leader} connected={connected} hint={myHint} onInfo={setInfo} />
+      </div>
+  );
   return <div className="app orbit or-game" style={{ "--lby-accent": GAME_ACCENTS.orbit }}>
     <style>{styles}</style>
     <LobbyHeader title="Orbit" user={<span className={`or-connection${connected ? "" : " lost"}`}>{connected ? (authUser?.name || "Connected") : "Reconnecting…"}</span>}
       menu={<GameMenu onLeave={leaveToLobby} onRules={() => setShowRules(true)}
         onAbandon={over ? null : () => setConfirmAbandon(true)} />} />
-    <main className="or-table">
-      <div className="or-score-rail">
-        <PlayerRail player={{ ...other, __pid: otherId }} name={names[otherId]} active={!over && game.turn_pid === otherId}
-          leader={game.leader} onInfo={setInfo} />
-        <PlayerRail player={{ ...me, __pid: myId }} name={names[myId]} active={!over && game.turn_pid === myId}
-          me leader={game.leader} hint={myHint} onInfo={setInfo} />
-      </div>
+    <main className={`or-table${connected ? "" : " motion-paused"}`} ref={motionSurface}>
+      {game.phase === "mulligan" && playerRails}
 
       {over && <section className="or-result">
         <span>{game.winner === myId ? "Victory" : game.winner ? "Game over" : "Draw"}</span>
@@ -1125,7 +1154,8 @@ export default function Orbit({ myId, authUser, onExit }) {
 
       {game.phase !== "mulligan" && <div className="or-board-layout">
         <div className="or-board-main">
-          <InfluenceBoard game={game} myId={myId} catalog={catalog} onInfo={setInfo} />
+          {playerRails}
+          <InfluenceBoard key={`${roomId}-${connected}`} game={game} myId={myId} catalog={catalog} names={names} connected={connected} onInfo={setInfo} />
           <Columns game={game} pid={otherId} name={names[otherId]} onInfo={setInfo} />
           <Columns game={game} pid={myId} name={names[myId]} mine onInfo={setInfo} />
           {!over && game.pending && game.pending_pid === myId && <DecisionPanel game={game} catalog={catalog} sendMove={sendMove} />}

@@ -418,13 +418,12 @@ were each a real misread on the table, so they are worth not undoing:
   it looked unrelated to the card it counted. The shorter face shows only the
   top Agent's name; cost, faction and rules belong in the modal. A press opens the
   full column when its count is above 1.
-- **The rail counts are the PHONE treatment of those panels, and only that.**
+- **The rail counts are the COMPACT treatment of those panels.**
   Each rail carries five planet-coloured counts under Credits/Zenithium/cards;
-  `.or-played-agents` is `display: none` until 760px and `.or-columns` is hidden
-  from 760px down, so exactly one of the two is ever on screen. Pressing a count
-  opens the same column list the panel face opens. Do not promote the counts to
-  desktop or keep both: two live copies of one fact is what `screens.mjs` checks
-  at 1280px and at 390px, from both directions.
+  Phones and tablets up to 980px and desktop viewports at most 900px tall show
+  `.or-played-agents` instead of `.or-columns`, so exactly one is ever on screen. Pressing a count
+  opens the same column list the panel face opens. Do not keep both treatments visible: two live copies of one fact is what `screens.mjs` checks
+  at 1280×960 and at 390px, from both directions.
 - **Agent faces carry their own text.** Name, effect sentence and the
   planet · faction footer are the table read, next to the price and faction
   glyph. An icon vocabulary derived from that sentence was tried and reverted:
@@ -432,8 +431,8 @@ were each a real misread on the table, so they are worth not undoing:
   is a lossy second one.
 - **Desktop board columns size independently.** `.or-board-main` owns influence
   and both Agent panels, decisions and the hand; `.or-sideboards` owns technology
-  and the log. `.or-board-layout` fills the remaining viewport; only the log
-  absorbs spare height. The left grid uses `minmax(0, 1fr)` so a six-card hand
+  and the log. The board's content sets the table height; the log ends alongside
+  the hand instead of growing into a screen-height pillar. The left column uses `minmax(0, 1fr)` so a six-card hand
   cannot force it over the right column. Hand cards scale uniformly to fit six
   on desktop. Do not stretch the influence panel into blank space below Jupiter.
   At one column the wrappers become `display: contents`; on phones the order is
@@ -442,7 +441,7 @@ were each a real misread on the table, so they are worth not undoing:
 - **The desktop targets are 2560×1600 and 1920×1080.** Orbit's in-game header
   is full-bleed with the menu/name 20px from the viewport edges; unlike lobby
   headers, it must not inherit the centred page measure. The table may grow to
-  2200px, and the full live state (including a decision panel and the hand)
+  1880px, and the full live state (including a decision panel and the hand)
   must fit either target without page-level horizontal or vertical scrolling.
   `screens.mjs` measures both targets so future content-height changes cannot
   quietly spend that fit.
@@ -511,3 +510,40 @@ were each a real misread on the table, so they are worth not undoing:
   gesture a board cannot advertise. `screens.mjs` asserts the inner boxes are
   not scrollers — the older "section is inside the viewport" check passes while
   a section hides content inside itself, which is exactly how this shipped.
+
+
+## Visual direction — 2026-09-08
+
+The user explicitly prefers the mobile composition and rejected the old desktop
+board, especially horizontal planet tracks. **Mobile is the reference for all
+screen sizes.** Preserve these choices in future work:
+
+- Five VERTICAL influence tracks, opponent above and you below. Both goals sit
+  on the track line; the disc glides along it. Desktop places the two player
+  rails on their own sides of that board, rather than side by side above it.
+- Compact, dark layered surfaces; restrained metallic bonus/Leader pieces;
+  planet colours stay attached to planet names and borders, never extra glyphs.
+  Credit coins and faceted Zenithium crystals are lightweight SVGs in
+  `presentation.jsx`, with labels retained beside rail amounts.
+- Mobile/tablet order (≤980px) is opponent → influence → you → collapsed technology → decision
+  → hand → log. Placed-Agent counts stay in the two rails. At short desktop
+  heights (≤900px), those counts also replace the separate Agent-stack panels.
+  Taller desktops keep detailed five-column stacks adjacent to each player's
+  rail. Never display both representations together.
+- The desktop table has a bounded measure (1680px, 1880px on large monitors), a
+  dominant play area and a narrower technology/log sidebar. It follows the
+  phone's spatial logic rather than stretching horizontal rails across a screen.
+- One crisp selected-card edge with an inset accent; a separate external ring
+  is reserved for keyboard focus. Cards retain their actual effect sentences.
+- The influence footer names the current decision maker and opens a full turn
+  recap. Public log entries provide its words. Server snapshots drive resource
+  deltas, disc travel, and changed Agent/technology cues for BOTH seats; no
+  optimistic rules, private-state inference, or animation-delayed input.
+- Reduced motion keeps the signed resource cue and final positions without
+  moving pieces. Equal broadcasts must not replay the resource effect.
+
+`npm run screens:orbit` checks real play before steering public presentation
+fixtures. `ORBIT_SHOTS=1` captures phone widths 320/360/390/430, desktop sizes,
+and frozen mid-transition frames for a separate visual critique. A screenshot
+alone is not evidence of smooth animation; the gate also checks the live
+transition and reduced-motion behavior.

@@ -602,7 +602,7 @@
   .or-track { grid-template-columns: 6.5rem minmax(180px, 1fr) 2rem; }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 980px) {
   /* The rail counts replace both placed-Agent panels here, not supplement them. */
   .or-played-agents { display: flex; }
   .or-columns { display: none; }
@@ -663,7 +663,7 @@
    grid items so the influence board can sit between them. Each planet track is
    vertical here: the opponent's goal is at the top and your goal is at the
    bottom, matching the low/high reading of the physical track. */
-@media (max-width: 760px) {
+@media (max-width: 980px) {
   .or-score-rail { display: contents; }
   .or-score-rail .or-player {
     grid-column: 1;
@@ -727,4 +727,158 @@
 
 @media (prefers-reduced-motion: reduce) {
   .or-agent, .or-spinner { animation: none; transition: none; }
+}
+
+/* Crafted surfaces and state-driven motion, shared by both seats. */
+.or-game { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.or-game .or-table { --or-panel: linear-gradient(145deg, #1b2035f5, #101426f5); }
+.or-game::before { opacity: .14; }
+.or-resource { position: relative; display: inline-flex; align-items: center; gap: .3rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.or-resource-icon { display: inline-block; flex: none; width: 19px; height: 19px; vertical-align: middle; filter: drop-shadow(0 2px 2px #0005); }
+.or-resource.credits > b { color: #ffe1a1; }
+.or-resource.zenithium > b { color: #b0efff; }
+.or-resource-delta { position: absolute; z-index: 5; right: 0; top: 0; min-width: 26px; padding: 2px 5px; border-radius: 5px; background: #1c3542; border: 1px solid #8de7d7; color: #c6fff0; font: 800 12px/1.2 ui-sans-serif, sans-serif; text-align: center; pointer-events: none; animation: or-resource-change 1.8s both; }
+.or-resource:has(.or-resource-delta) > span { visibility: hidden; }
+.or-resource-delta.spent { color: #ffe0b7; background: #422e29; border-color: #bd9271; }
+@keyframes or-resource-change { 0% { opacity: 1; transform: translateY(4px); } 15%, 75% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; transform: translateY(-5px); } }
+.or-player { transition: background .3s, border-color .3s; }
+.or-player-name { min-width: 0; }
+.or-player-name > span:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.or-player.active .or-seat-dot { box-shadow: 0 0 0 3px color-mix(in srgb, var(--or-seat) 15%, transparent), 0 0 12px color-mix(in srgb, var(--or-seat) 35%, transparent); }
+.or-leader.lv-2 { background: linear-gradient(140deg, #fff0bb, #dcb75e); border-color: #ffe0a0; }
+.or-leader.lv-1 { background: linear-gradient(140deg, #edf4ff, #9faec8); }
+.or-leader.lv-0 { color: #9ba4be; }
+.or-disc { left: var(--or-position); top: -9px; transition: left .65s cubic-bezier(.2,.75,.25,1), top .65s cubic-bezier(.2,.75,.25,1), opacity .25s; background: radial-gradient(circle at 33% 23%, #ffffffaa, transparent 48%), currentColor; box-shadow: 0 2px 5px #000a, 0 0 12px color-mix(in srgb, currentColor 25%, transparent); }
+.or-disc.captured { opacity: 0; }
+.or-activity { --or-seat: var(--or-them); display: flex; align-items: center; gap: .7rem; grid-column: 1 / -1; min-width: 0; padding: .48rem .2rem 0; margin-top: .4rem; border-top: 1px solid var(--or-line); color: var(--or-dim); font-size: .7rem; line-height: 1.4; }
+.or-activity.mine { --or-seat: var(--or-me); }
+.or-turn-label { flex: none; max-width: 45%; color: var(--or-seat); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; animation: or-turn-arrive .45s ease-out; }
+.or-activity > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.or-activity-detail { min-width: 0; flex: 1; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.or-activity-detail:hover { color: var(--or-ink); }
+.or-activity-detail:disabled { cursor: default; }
+.or-hand > .or-agent { animation: or-turn-arrive .3s ease-out; }
+.or-recap .or-info-text { padding-bottom: .55rem; border-bottom: 1px solid var(--or-line); font-size: .8rem; }
+@keyframes or-turn-arrive { from { opacity: .8; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
+.or-influence { background: radial-gradient(ellipse at 50% 0, #32405c26, transparent 75%), linear-gradient(145deg, #171c30, #101426) !important; }
+.or-bonus { background: radial-gradient(circle at 35% 25%, #967b34, #3a3019 50%, #18191d 72%); box-shadow: inset 0 0 0 2px #12151f, inset 0 0 0 3px #d6b24b66, 0 2px 4px #0009; }
+.or-bonus i { text-shadow: 0 1px 2px #000; }
+.or-card-price { display: inline-flex; align-items: center; gap: .28rem; }
+.or-agent-top .or-card-price b { width: auto; height: auto; background: none; color: #ffe1a1; font-variant-numeric: tabular-nums; }
+.or-agent { background: radial-gradient(ellipse at 100% 0, color-mix(in srgb, currentColor 14%, transparent), transparent 68%), linear-gradient(155deg, #20253b, #0e1222 70%); }
+.or-agent strong { line-height: 1.18; overflow-wrap: anywhere; }
+.or-agent.selected, .or-agent.selected:focus, .or-agent.selected:hover { outline: 0 solid var(--or-card-tint, currentColor); outline-offset: 2px; box-shadow: inset 0 3px currentColor, 0 6px 12px #0007; transform: none; }
+.or-agent.selected:focus-visible { outline: 2px solid var(--or-card-tint, currentColor); }
+.or-hand { padding: .35rem .25rem .45rem; scroll-snap-type: x proximity; scrollbar-width: thin; scrollbar-color: #59617f #121629; }
+.or-hand > .or-agent { scroll-snap-align: start; }
+.or-action-bar button { min-height: 44px; transition: background .18s, box-shadow .18s, transform .18s; }
+.or-action-bar button:not(:disabled) { background: linear-gradient(160deg, color-mix(in srgb, var(--lby-accent) 25%, #182336), #19313e); box-shadow: inset 0 1px #ffffff18, 0 3px 8px #0003; }
+.or-action-bar button:disabled { color: #8b93ad; background: #15192b; }
+.or-action-bar button:active:not(:disabled), .or-choice-grid button:active { transform: translateY(1px); box-shadow: inset 0 2px 6px #0005; }
+.orbit button:focus-visible { outline: 2px solid #b5f6ee; outline-offset: 3px; }
+.or-info { animation: or-turn-arrive .18s ease-out; }
+.or-info-x { width: 44px; height: 44px; }
+@media (max-width: 980px) {
+  .or-score-rail .or-player { padding: .62rem .7rem; }
+  .or-resources { gap: .25rem .65rem; margin-top: .35rem; font-size: .7rem; }
+  .or-resources b { font-size: .88rem; }
+  .or-leader { padding: .2rem .4rem; font-size: .54rem; letter-spacing: .025em; }
+  .or-player-hint { font-size: .59rem; }
+  .or-influence { height: 236px; grid-template-rows: minmax(0, 1fr) auto; }
+  .or-influence .or-disc { left: 50%; top: var(--or-position); transform: translate(-50%, -50%); }
+  .or-influence .or-track-name { grid-column: 1; justify-self: center; font-size: .6rem; }
+  .or-activity { font-size: .67rem; padding-top: .45rem; gap: .5rem; }
+  .or-played-agents > div { grid-template-columns: repeat(5, 34px); gap: .3rem; }
+  .or-played-agent { width: 34px; height: 28px; font-size: .75rem; }
+  .or-tech > header { grid-template-columns: auto 1fr auto; padding: .35rem .6rem; }
+  .or-tech-toggle { min-height: 32px; }
+  .or-tech-key b { max-width: 4.7rem; }
+  .or-tech-summary-row { grid-template-columns: 1fr auto auto; padding: .65rem .45rem; gap: .24rem; }
+  .or-tech-summary-row strong { font-size: .62rem; letter-spacing: 0; }
+  .or-tech-summary-row > span b { font-size: .8rem; }
+  .or-agent { width: 145px; min-width: 145px; height: 190px; }
+  .or-agent strong { font-size: .94rem; }
+  .or-agent-text { font-size: .72rem; line-height: 1.35; }
+  .or-hand-zone { padding: .65rem .7rem .75rem; }
+  .or-hand-head { margin-bottom: .2rem; }
+  .or-action-bar { margin-top: .6rem; padding-top: .6rem; }
+  .or-log p { font-size: .72rem; line-height: 1.5; }
+}
+@media (max-width: 360px) {
+  .or-resource > span { font-size: .64rem; }
+  .or-resources { gap: .3rem .5rem; }
+  .or-resource { gap: .2rem; }
+  .or-resource-icon { width: 17px; height: 17px; }
+  .or-tech-key { gap: .3rem; }
+  .or-tech-key b { max-width: 2.7rem; }
+  .or-tech-summary-row strong i { display: none; }
+  .or-tech-summary-row { gap: .2rem; padding-inline: .35rem; }
+}
+.motion-paused .or-disc { transition: none; }
+/* Desktop follows the phone's physical table: their side above, yours below.
+   A bounded measure keeps the board dominant over technology and history. */
+@media (min-width: 981px) {
+  .or-table { width: min(1680px, calc(100% - 48px)); }
+  .or-board-layout { grid-template-columns: minmax(0, 2.15fr) minmax(310px, 1fr); gap: 16px; flex: none; }
+  .or-board-main { display: flex; flex-direction: column; gap: 8px; }
+  .or-board-main > .or-score-rail { display: contents; }
+  .or-score-rail .or-player { border: 1px solid var(--or-line); border-left: 3px solid var(--or-seat); border-radius: 13px; background: var(--or-panel); padding: .48rem .75rem; }
+  .or-score-rail .or-player.active { background: linear-gradient(100deg, color-mix(in srgb, var(--or-seat) 12%, #192035), #12172a); }
+  .or-score-rail .or-player.theirs { order: 1; }
+  .or-board-main > .or-columns:not(.mine) { order: 2; }
+  .or-board-main > .or-influence { order: 3; }
+  .or-score-rail .or-player.mine { order: 4; }
+  .or-board-main > .or-columns.mine { order: 5; }
+  .or-board-main > .or-decision, .or-board-main > .or-status { order: 6; }
+  .or-board-main > .or-hand-zone { order: 7; }
+  .or-columns { padding: .3rem .6rem .45rem; }
+  .or-columns h3 { margin-bottom: .2rem; font-size: .6rem; }
+  .or-column { padding-block: .1rem .16rem; }
+  .or-column-head { min-height: 1.1rem; font-size: .62rem; }
+  .or-slot, .or-column-empty { height: 1.85rem; }
+  .or-influence { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); grid-template-rows: minmax(0, 1fr) auto; gap: 0 .4rem; height: 266px; padding: .6rem; flex: none; }
+  .or-influence .or-track { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: 1.15rem minmax(0, 1fr); gap: .2rem 0; min-width: 0; padding: .15rem .6rem; border: 0; border-left: 1px solid #ffffff0c; }
+  .or-influence .or-track:first-of-type { border-left: 0; }
+  .or-influence .or-track-name { grid-column: 1; grid-row: 1; justify-self: center; font-size: .72rem; }
+  .or-influence .or-track-spaces { display: grid; grid-column: 1; grid-row: 2; grid-template-columns: 1fr; grid-template-rows: repeat(9, 1fr); width: 24px; justify-self: center; height: auto; min-height: 0; align-self: stretch; }
+  .or-influence .or-track-spaces::before { left: 50%; right: auto; top: calc(100% / 18); bottom: calc(100% / 18); width: 0; height: auto; transform: translateX(-50%); border-top: 0; border-left: 2px solid currentColor; }
+  .or-influence .or-space { width: 100%; height: auto; border: 0; }
+  .or-influence .or-space::before { left: 50%; top: 50%; transform: translate(-50%, -50%); }
+  .or-influence .or-disc { left: 50%; top: var(--or-position); transform: translate(-50%, -50%); width: 23px; height: 23px; }
+  .or-influence .or-track > .or-bonus { grid-column: 1; grid-row: 2; align-self: center; justify-self: center; transform: translateX(38px); }
+  .or-activity { margin-top: .3rem; padding-top: .3rem; }
+  .or-hand { justify-content: center; }
+  .or-hand-zone { padding: .45rem .6rem; }
+  .or-action-bar { margin-top: .4rem; padding-top: .4rem; gap: .5rem; }
+  .or-action-bar > span { font-size: .7rem; }
+  .or-action-bar button { padding: .45rem .65rem; font-size: .72rem; }
+  .or-sideboards { gap: 14px; }
+  .or-log > div { padding: .6rem .7rem; }
+}
+@media (min-width: 2200px) {
+  .or-table { width: min(1880px, calc(100% - 80px)); }
+  .or-board-main { gap: 12px; }
+  .or-influence { height: 340px; }
+}
+@media (min-width: 981px) and (max-height: 800px) {
+  .or-track { min-height: 24px; }
+  .or-track > .or-bonus { width: 1.4rem; height: 1.4rem; }
+  .or-activity { padding-top: .25rem; margin-top: .2rem; }
+}
+@media (min-width: 981px) and (max-height: 900px) {
+  .or-columns { display: none; }
+  .or-played-agents { display: flex; justify-content: space-between; }
+  .or-influence { height: 222px; }
+  .or-score-rail .or-player { padding: .4rem .65rem; }
+  .or-board-main { gap: 6px; }
+  .or-action-bar { display: block; }
+  .or-action-bar > span { display: block; margin-bottom: .3rem; }
+  .or-action-bar > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .or-action-bar button { padding: .35rem .4rem; line-height: 1.3; }
+}
+@media (min-width: 981px) and (max-height: 800px) {
+  .or-influence { height: 202px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .orbit *, .orbit *::before, .orbit *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }

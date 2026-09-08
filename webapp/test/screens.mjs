@@ -104,7 +104,7 @@ function runBuild() {
 			: "  no dist/ to reuse — building");
 	}
 	return new Promise((res, rej) => {
-		const b = spawn("npx", ["vite", "build"], { cwd: webappDir, stdio: "ignore", shell: true });
+		const b = spawn("npx", ["vite", "build"], { cwd: webappDir, stdio: ["ignore", "ignore", "inherit"], shell: true });
 		b.on("exit", (code) => (code === 0 ? res() : rej(new Error(`vite build exited ${code}`))));
 	});
 }
@@ -5547,7 +5547,7 @@ try {
 
 	// ── Orbit: real room, mulligan, one complete player action ────────────────
 	async function orbitPlay(log) {
-		const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+		const ctx = await browser.newContext({ viewport: { width: 1280, height: 960 } });
 		await ctx.addInitScript(() => localStorage.setItem("spender_user",
 			JSON.stringify({ id: "orbit-harness", name: "Orbiter", guest: true })));
 		const page = await ctx.newPage();
@@ -5768,7 +5768,7 @@ try {
 		}
 		const geometry = await page.evaluate(() => {
 			const influence = document.querySelector(".or-influence").getBoundingClientRect();
-			const jupiter = [...document.querySelectorAll(".or-track")].at(-1).getBoundingClientRect();
+			const jupiter = document.querySelector(".or-activity").getBoundingClientRect();
 			return {
 				wide: document.documentElement.scrollWidth > window.innerWidth + 1,
 				cards: document.querySelectorAll(".or-hand-zone .or-agent").length,
@@ -5782,7 +5782,7 @@ try {
 		check("the complete public table and private hand remain on the page",
 			!geometry.wide && geometry.cards > 0 && geometry.columns === 10,
 			JSON.stringify(geometry));
-		check("the planet panel ends cleanly after Jupiter",
+		check("the planet panel ends cleanly after its turn narration",
 			geometry.jupiterGap >= 0 && geometry.jupiterGap <= 24, JSON.stringify(geometry));
 		check("placed Agents use one card-stack face, not a detached stack control",
 			geometry.detachedStackControls === 0, JSON.stringify(geometry));
@@ -5943,7 +5943,16 @@ try {
 					.map((el) => Math.round(el.getBoundingClientRect().height));
 				const slotHeights = [...document.querySelectorAll(".or-slot, .or-column-empty")]
 					.map((el) => Math.round(el.getBoundingClientRect().height));
+				const influence = document.querySelector(".or-influence").getBoundingClientRect();
+				const other = document.querySelector(".or-player.theirs").getBoundingClientRect();
+				const mine = document.querySelector(".or-player.mine").getBoundingClientRect();
+				const verticalTracks = [...document.querySelectorAll(".or-track")].every((row) => {
+					const track = row.querySelector(".or-track-spaces").getBoundingClientRect();
+					const token = row.querySelector(".or-bonus").getBoundingClientRect();
+					return track.height > track.width && token.left > track.right && token.left - track.right < 35;
+				});
 				return {
+					verticalTable: verticalTracks && other.bottom <= influence.top && mine.top >= influence.bottom,
 					wide: document.documentElement.scrollWidth > innerWidth + 1,
 					tall: document.documentElement.scrollHeight > innerHeight + 1,
 					scrollHeight: document.documentElement.scrollHeight,
@@ -5953,6 +5962,7 @@ try {
 					techHeights: [...new Set(techHeights)],
 					maxSlotHeight: Math.max(...slotHeights),
 					logBottom: logBox.bottom,
+					handBottom: hand.bottom,
 					logBesideHand: logBox.left >= hand.right,
 					sixFit: cards.length === 6 && cards.every((r) => r.left >= hand.left && r.right <= hand.right),
 					uniformCards: Math.max(...cards.map((r) => r.width)) - Math.min(...cards.map((r) => r.width)) < 1,
@@ -5962,8 +5972,9 @@ try {
 			});
 			check(`Orbit fills ${viewport.width}x${viewport.height} without page scrolling`,
 				!desktop.wide && !desktop.tall, JSON.stringify(desktop));
-			check(`the log reaches the bottom beside six equal cards at ${viewport.width}px`,
-				desktop.logBesideHand && Math.abs(desktop.logBottom - viewport.height) <= 12
+			check(`desktop ${viewport.width}px follows the phone's vertical table with nearby bonuses`, desktop.verticalTable, JSON.stringify(desktop));
+			check(`the log ends with the play area beside six equal cards at ${viewport.width}px`,
+				desktop.logBesideHand && Math.abs(desktop.logBottom - desktop.handBottom) <= 2
 				&& desktop.sixFit && desktop.uniformCards, JSON.stringify(desktop));
 			check(`the ${viewport.width}px game header reaches both screen edges`,
 				desktop.menuLeft <= 22 && desktop.userRight >= desktop.viewportWidth - 22,
@@ -6058,8 +6069,8 @@ try {
 		check("bonus tokens are uniformly compact and clear of every planet track",
 			inner.bonuses.every(({ w, h }) => Math.abs(w - h) <= 1 && w <= 30)
 			&& inner.tokenOverlaps === 0 && inner.bonusRight && inner.trackCentered, JSON.stringify(inner));
-		check("phone influence rails use the panel height without growing the panel",
-			inner.trackHeights.length === 5 && Math.min(...inner.trackHeights) > 160 && inner.influenceHeight <= 212,
+		check("phone influence rails retain their height with a compact turn narration footer",
+			inner.trackHeights.length === 5 && Math.min(...inner.trackHeights) > 160 && inner.influenceHeight <= 250,
 			JSON.stringify(inner));
 
 		// PHONE HIERARCHY. Technology starts as three tiny progress summaries,
@@ -6125,6 +6136,75 @@ try {
 			check("pressing a placed Agent opens its full card text", false,
 				"the turn played produced no recruited Agent to press");
 		}
+		// Public room frames drive motion for BOTH seats; duplicate broadcasts must
+		// not replay it. Pin transition time rather than racing the screenshot clock.
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.evaluate(() => window.scrollTo(0, 0));
+		const opponentId = Object.keys(gameView.players).find((id) => id !== "orbit-harness");
+		gameView.influence.mercury = 0;
+		socket.send(JSON.stringify(fixture));
+		await sleep(750);
+		for (const [pid, seat] of [["orbit-harness", "mine"], [opponentId, "theirs"]]) {
+			gameView.turn_pid = pid;
+			gameView.legal_moves = pid === "orbit-harness" ? [{ action: "recruit", card_id: self.hand[0].id }] : [];
+			gameView.players[pid].credits += 3;
+			gameView.players[pid].zenithium += 2;
+			gameView.influence.mercury = seat === "mine" ? 2 : -2;
+			gameView.log.push({ turn: ++gameView.turn_number, pid, message: `${fixture.room.players[pid]} gains 3 Credits and 2 Zenithium; Mercury moves toward them.` });
+			socket.send(JSON.stringify(fixture));
+			await page.waitForFunction((seat) => document.querySelectorAll(`.or-player.${seat} .or-resource-delta`).length === 2, seat);
+			const moving = await page.locator(".or-mercury .or-disc").evaluate((el) => {
+				const motion = el.getAnimations().find((a) => a.transitionProperty === "top");
+				if (!motion) return false;
+				motion.pause(); motion.currentTime = 220;
+				return motion.effect.getTiming().duration >= 400;
+			});
+			check(`${seat}: influence slides between authoritative positions`, moving);
+			check(`${seat}: resource gains and current actor are visible`, await page.locator(`.or-player.${seat} .or-resource-delta.gain`).count() === 2
+				&& await page.locator(`.or-activity.${seat}`).count() === 1);
+			if (process.env.ORBIT_SHOTS) await page.screenshot({ path: `test-results/orbit-motion-${seat}.png`, fullPage: true });
+			await page.locator(".or-mercury .or-disc").evaluate((el) => el.getAnimations().forEach((a) => a.finish()));
+			await sleep(1900);
+			socket.send(JSON.stringify(fixture));
+			await sleep(100);
+			check(`${seat}: duplicate broadcast does not replay resource effects`, await page.locator(".or-resource-delta").count() === 0);
+		}
+		await page.locator(".or-activity-detail").click();
+		check("turn narration opens the full readable recap", /Mercury moves/.test(await page.locator(".or-recap").innerText()));
+		await page.keyboard.press("Escape");
+		for (const width of [320, 360, 390, 430, 768, 900]) {
+			await page.setViewportSize({ width, height: 844 });
+			const fit = await page.evaluate(() => ({
+				page: document.documentElement.scrollWidth <= innerWidth,
+				resources: [...document.querySelectorAll(".or-resource")].every((el) => el.getBoundingClientRect().right <= innerWidth),
+				icons: document.querySelectorAll(".or-resources .or-resource-icon").length === 4,
+				tech: [...document.querySelectorAll(".or-tech-summary-row strong")].every((el) => el.scrollWidth <= el.clientWidth + 1),
+			}));
+			check(`${width}px: resources, faction names and custom icons fit`, fit.page && fit.resources && fit.icons && fit.tech, JSON.stringify(fit));
+			if (process.env.ORBIT_SHOTS) await page.screenshot({ path: `test-results/orbit-polish-${width}.png`, fullPage: true });
+		}
+		await page.emulateMedia({ reducedMotion: "reduce" });
+		gameView.influence.mercury = 0;
+		gameView.players[opponentId].credits -= 2;
+		socket.send(JSON.stringify(fixture));
+		await page.waitForSelector(".or-resource-delta.spent");
+		check("reduced motion preserves the signed resource cue without moving the board", await page.evaluate(() =>
+			getComputedStyle(document.querySelector(".or-disc")).transitionDuration === "0s"
+			&& document.querySelector(".or-resource-delta.spent").getAnimations().length === 0));
+		await page.emulateMedia({ reducedMotion: "no-preference" });
+		const oldSocket = socket;
+		await socket.close({ code: 1001, reason: "visual reconnect check" });
+		await page.waitForSelector(".or-connection.lost");
+		const reconnectDeadline = Date.now() + 15000;
+		while (socket === oldSocket && Date.now() < reconnectDeadline) await sleep(100);
+		check("Orbit retries its dropped connection", socket !== oldSocket);
+		gameView.players[opponentId].credits += 9;
+		gameView.influence.mercury = 3;
+		socket.send(JSON.stringify(fixture));
+		await page.waitForSelector(".or-connection:not(.lost)");
+		check("the restored snapshot does not animate outage changes as new moves", await page.evaluate(() =>
+			document.querySelectorAll(".or-resource-delta").length === 0
+			&& document.querySelector(".or-mercury .or-disc").getAnimations().length === 0));
 		check("no page errors while playing Orbit", errors.length === 0,
 			errors[0]?.slice(0, 200) || "");
 		await ctx.close();
