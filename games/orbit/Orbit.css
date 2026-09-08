@@ -891,3 +891,46 @@
 @media (prefers-reduced-motion: reduce) {
   .orbit *, .orbit *::before, .orbit *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* Physical pieces, quiet motion, and decisions that explain their purpose. */
+.or-disc { background: currentColor; border: 2px solid #eee9d9; box-shadow: 0 1px 2px #0008; transition: top .32s ease-out, left .32s ease-out, opacity .12s; }
+.or-disc.captured { transition: top .28s ease-out, left .28s ease-out, opacity .1s .24s; }
+.or-disc.returning { transition: none; }
+.or-turn-label, .or-hand > .or-agent, .or-info { animation: none; }
+.or-resource:has(.or-resource-delta) > span { visibility: visible; }
+.or-resource-delta { top: -10px; right: 0; min-width: 0; padding: 0 3px; font-size: 10px; line-height: 11px; border: 0; animation: or-delta-fade 1.8s both; }
+@keyframes or-delta-fade { 0%, 80% { opacity: 1; } 100% { opacity: 0; } }
+.or-activity .or-turn-label { color: var(--or-dim); font-size: .65rem; font-weight: 700; }
+.or-activity-detail { color: #c2cadb; }
+.or-decision { background: #172331 !important; border-color: #5baba780 !important; padding: .8rem !important; }
+.or-decision-source { display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem .5rem; margin-bottom: .4rem; font-size: .72rem; }
+.or-decision-source > span { color: #9cabbc; }
+.or-decision-source > b { color: #dfeae9; }
+.or-decision h2 { margin: 0 0 .6rem; color: #eff7f4; font-family: inherit; font-size: .94rem; font-weight: 650; line-height: 1.4; }
+.or-decision-detail { margin: -.15rem 0 .65rem; color: #b6c4cd; font-size: .75rem; line-height: 1.45; }
+.or-decision .or-choice-grid { gap: .4rem; }
+.or-decision .or-choice-grid button { min-height: 44px; border-color: #657f8b; background: #223544; color: #e0ebed; font-family: inherit; font-size: .76rem; font-weight: 600; line-height: 1.4; }
+.or-decision .planet-choices { display: grid; grid-template-columns: repeat(var(--or-choice-count, 5), minmax(0, 1fr)); gap: 4px; }
+.or-decision .planet-choices button { padding: .45rem 1px; min-width: 0; }
+.or-decision .planet-choices .or-pl { font-family: ui-sans-serif, system-ui, sans-serif; font-size: .66rem; font-weight: 700; text-transform: capitalize; letter-spacing: 0; }
+.or-decision .or-choice-grid button:hover { border-color: #a2dcd4; background: #2b4552; }
+.or-decision .or-choice-grid button:active { background: #365762; }
+.or-decision .planet-choices button,
+.or-decision .planet-choices button:hover,
+.or-decision .planet-choices button:active { background: #101c28; }
+.or-choice-agent { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; margin-top: .25rem; color: #d1dce0; font-size: .62rem; font-weight: 500; text-transform: capitalize; }
+.or-decision-help { margin: .55rem 0 0; color: #aebec8; font-size: .68rem; }
+.or-activity-detail { display: flex; align-items: center; gap: 5px; }
+.or-activity-detail > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.or-activity-detail::after { content: "›"; flex: none; margin-left: auto; }
+@media (min-width: 981px) {
+  .or-resource { padding-right: 22px; }
+  .or-resource-delta { top: 50%; transform: translateY(-50%); }
+}
+@media (min-width: 761px) and (max-width: 980px) {
+  .or-influence .or-track { grid-template-columns: minmax(0, 1fr); }
+  .or-influence .or-track > .or-bonus { grid-column: 1; transform: translateX(38px); }
+}
+@media (max-width: 980px) {
+  .or-track-name .or-pl { text-transform: capitalize; letter-spacing: 0; font-weight: 700; }
+}

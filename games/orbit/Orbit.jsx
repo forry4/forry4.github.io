@@ -12,7 +12,7 @@ import { buildPath, pushPath, replacePath, subscribe } from "../../shared/router
 import { useAutoReconnect } from "../../shared/useAutoReconnect.js";
 import { useCardInfoGesture } from "../../shared/gestures.js";
 import OrbitRules from "./rules.jsx";
-import { Resource, ResourceIcon, useBoardMotion } from "./presentation.jsx";
+import { Resource, ResourceIcon, decisionCopy, victoryCondition, InfluenceDisc } from "./presentation.jsx";
 import orbitCssText from "./Orbit.css?inline";
 
 
@@ -316,7 +316,7 @@ function InfluenceBoard({ game, myId, catalog, onInfo, names, connected }) {
   const latest = recent.find((entry) => !entry.turn_start && !/draws? .*Agents?|ends? (the |their )?turn/i.test(logText(entry)))
     || recent.find((entry) => !entry.turn_start);
   const recentTurn = latest ? (game.log || []).filter((entry) => entry.turn === latest.turn) : [];
-  const actor = game.pending_pid || game.turn_pid;
+  const actor = latest?.pid;
   return <section className="or-influence" aria-label="Planet influence board">
     {PLANETS.map((planet) => {
       const raw = game.influence?.[planet];
@@ -325,17 +325,16 @@ function InfluenceBoard({ game, myId, catalog, onInfo, names, connected }) {
         <div className="or-track-name"><PlanetName planet={planet} /></div>
         <div className="or-track-spaces">
           {spaces.map((space) => <span className={`or-space${Math.abs(space) === 4 ? " goal" : ""}${space === 0 ? " middle" : ""}`} key={space} />)}
-          <i className={`or-disc${position == null ? " captured" : ""}`} style={{ "--or-position": ((position ?? 0) + 4.5) / 9 * 100 + "%" }}
-            aria-label={`${planet}: ${position == null ? "captured" : position === 0 ? "neutral" : `${Math.abs(position)} toward ${position > 0 ? "you" : "opponent"}`}`} />
+          <InfluenceDisc position={position} planet={planet} game={game} myId={myId} />
         </div>
         <Bonus token={game.planet_bonus?.[planet]} catalog={catalog} onInfo={onInfo} />
       </div>;
     })}
     <div className={`or-activity ${actor === myId ? "mine" : "theirs"}`} role="status" aria-live="polite" aria-atomic="true">
-      <b key={`${game.turn_number}-${actor}-${game.phase}`} className="or-turn-label">{!connected ? "Reconnecting…" : game.phase === "over" ? "Game over" : actor === myId ? "Your turn" : `${names[actor] || "Opponent"}’s turn`}</b>
+      <b key={`${game.turn_number}-${actor}-${game.phase}`} className="or-turn-label">Turn recap</b>
       <button type="button" className="or-activity-detail" disabled={!latest}
         aria-label="Read the latest turn" onClick={() => onInfo({ kind: "activity", entries: recentTurn })}>
-        {latest ? logText(latest) : "Influence moves toward the player who gains it."}
+        <span>{latest ? logText(latest) : "Influence moves toward the player who gains it."}</span>
       </button>
     </div>
   </section>;
@@ -544,7 +543,9 @@ function Glossary({ terms }) {
    whole column. Every readable thing on the table opens it, so no piece of
    rules text on this page is a dead end. */
 function InfoModal({ info, catalog, onClose, onInfo }) {
+  const backdropPress = useRef(false);
   useEffect(() => {
+    backdropPress.current = false;
     if (!info) return undefined;
     const onKey = (event) => { if (event.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
@@ -618,7 +619,14 @@ function InfoModal({ info, catalog, onClose, onInfo }) {
     </>;
   }
 
-  return <div className="or-info-back" onClick={onClose}>
+  return <div className="or-info-back"
+    onPointerDown={(event) => { backdropPress.current = event.target === event.currentTarget; }}
+    onClick={(event) => {
+      // A long press can open this backdrop before the opening finger lifts.
+      // Only dismiss when a new gesture actually began on the backdrop.
+      if (backdropPress.current && event.target === event.currentTarget) onClose();
+      backdropPress.current = false;
+    }}>
     <div className={`or-info ${tint}`} role="dialog" aria-modal="true" aria-label={title}
       onClick={(event) => event.stopPropagation()}>
       <button type="button" className="or-info-x" onClick={onClose} aria-label="Close">×</button>
@@ -637,13 +645,16 @@ function choiceLabel(move, pending, game, catalog) {
       {index ? " + " : ""}<PlanetName planet={planet} />
     </span>)}</>;
   }
-  if ("accept" in move) return move.accept ? "Do it" : "Skip";
-  if ("faction" in move) return `${FACTION_GLYPH[move.faction]} ${move.faction}`;
-  if ("tier" in move) return move.tier ? `Exile ${move.tier} cards` : "Skip";
-  if ("cost" in move) return move.cost ? `Spend ${move.cost} → gain ${move.amount} influence` : "Skip";
+  if ("accept" in move) return move.accept ? (pending.type === "optional_exile_each" ? "Exile Agent" : "Accept effect") : (pending.type === "optional_exile_each" ? "Keep Agent" : "Decline");
+  if ("faction" in move) {
+    const level = game.players?.[game.pending_pid]?.technology?.[move.faction] || 0;
+    return `${FACTION_GLYPH[move.faction]} ${move.faction} · ${level} → ${level + 1} · ${Math.max(0, level + 1 - (pending.discount || 0))} Zenithium`;
+  }
+  if ("tier" in move) return move.tier ? `Exile ${move.tier} → gain ${pending.reward === "zenithium" ? move.tier : { 2: 1, 4: 2, 7: 3 }[move.tier]} ${pending.reward === "zenithium" ? "Zenithium" : `${pending.planet} influence`}` : "No Agents can be exiled";
+  if ("cost" in move) return move.cost ? `Spend ${move.cost} ${pending.resource === "credits" ? "Credits" : "Zenithium"} → gain ${move.amount} influence` : "Skip";
   if ("card_id" in move) {
     const card = game.players && Object.values(game.players).flatMap((p) => p.hand || []).find((c) => c.id === move.card_id);
-    return card?.name || `Card ${move.card_id}`;
+    return card?.name || catalog?.cards?.[String(move.card_id)]?.name || `Agent ${move.card_id}`;
   }
   if ("bonus_area" in move) {
     const board = move.bonus_area === "planet" ? game.planet_bonus : game.technology_bonus;
@@ -656,19 +667,42 @@ function choiceLabel(move, pending, game, catalog) {
 }
 
 
-function DecisionPanel({ game, catalog, sendMove }) {
+function DecisionChoice({ move, task, game, catalog, sendMove, onInfo }) {
+  const pid = game.pending_pid;
+  const otherId = game.order.find((id) => id !== pid);
+  const owner = task.type === "transfer" || (task.type === "exile" && task.owner !== "self") ? otherId : pid;
+  const isAgentChoice = ["exile", "exile_for_matching", "transfer"].includes(task.type);
+  const card = isAgentChoice ? game.players?.[owner]?.columns?.[move.planet]?.at(-1)
+    : move.card_id != null ? game.players?.[pid]?.hand?.find((c) => c.id === move.card_id) : null;
+  const info = useCardInfoGesture(card ? () => onInfo({ kind: "card", card }) : null);
+  const adjacent = task.type === "adjacent_three" && move.planet;
+  const index = PLANETS.indexOf(move.planet);
+  return <button type="button" title={card?.description} onClick={() => sendMove(move)} {...info}>
+    {choiceLabel(move, task, game, catalog)}
+    {card && move.planet && <span className="or-choice-agent">{card.name}</span>}
+    {adjacent && <span className="or-choice-agent">{PLANETS[index - 1]} + {PLANETS[index + 1]}</span>}
+  </button>;
+}
+
+function DecisionPanel({ game, catalog, sendMove, onInfo }) {
   const pending = game.pending?.task;
   const moves = game.legal_moves || [];
-  if (!pending || !moves.length) return null;
-  const title = pending.label || game.pending?.source || "Resolve effect";
+  if (!pending || moves.length === 1) return null;
+  const optionalPlanet = pending.planets?.[pending.index || 0];
+  const optionalAgent = game.players?.[game.pending_pid]?.columns?.[optionalPlanet]?.at(-1);
+  const { title, detail } = decisionCopy(pending, optionalAgent?.name);
+  const planetChoices = moves.every((move) => "planet" in move) && moves.length <= 5;
+  const action = [...(game.log || [])].reverse().find((entry) => entry.action)?.action;
+  const context = action === "technology" ? "Technology" : action === "leader" ? "Leader action" : "Agent effect";
   return <section className="or-decision" aria-live="polite">
-    <span className="or-eyebrow">Decision required</span>
+    <div className="or-decision-source"><span>{context}</span><b>{game.pending.source}</b></div>
     <h2>{title}</h2>
-    <div className="or-choice-grid">
-      {moves.map((move, index) => <button type="button" key={index} onClick={() => sendMove(move)}>
-        {choiceLabel(move, pending, game, catalog)}
-      </button>)}
+    {detail && <p className="or-decision-detail">{detail}</p>}
+    {!moves.length && <p className="or-decision-detail">Waiting for the server to resolve this effect…</p>}
+    <div className={`or-choice-grid${planetChoices ? " planet-choices" : ""}`} style={{ "--or-choice-count": Math.min(5, moves.length) }}>
+      {moves.map((move, index) => <DecisionChoice key={index} {...{ move, task: pending, game, catalog, sendMove, onInfo }} />)}
     </div>
+    {["exile", "exile_for_matching", "transfer", "discard_hand"].includes(pending.type) && <p className="or-decision-help">Hold an Agent to read its card.</p>}
   </section>;
 }
 
@@ -1069,7 +1103,7 @@ export default function Orbit({ myId, authUser, onExit }) {
   }), [resumeGame, leaveToLobby]);
 
   const game = roomData?.game;
-  const motionSurface = useBoardMotion(game, connected, roomId);
+  const motionSurface = useRef(null);
   const names = roomData?.players || {};
   const otherId = game?.order?.find((pid) => pid !== myId);
   const me = game?.players?.[myId];
@@ -1082,6 +1116,18 @@ export default function Orbit({ myId, authUser, onExit }) {
     if (!me?.hand?.some((card) => card.id === selectedCard)) setSelectedCard(null);
   }, [me?.hand, selectedCard]);
   useEffect(() => { if (game?.phase !== "mulligan") setMulligan([]); }, [game?.phase]);
+  const forcedChoice = useRef(null);
+  useEffect(() => {
+    if (!connected || !game?.pending || game.pending_pid !== myId || legal.length !== 1 || legal[0].action !== "choose") {
+      forcedChoice.current = null;
+      return;
+    }
+    const key = orbitMoveKey({ roomId, turn: game.turn_number, pending: game.pending, move: legal[0], log: game.log?.slice(-2) });
+    if (forcedChoice.current === key) return;
+    forcedChoice.current = key;
+    sendMove(legal[0]);
+  }, [game, connected, myId, roomId, sendMove]);
+
 
   if (connecting && screen === "lobby") return <div className="app orbit" style={{ "--lby-accent": GAME_ACCENTS.orbit }}><style>{styles}</style><LobbyLoading label="Connecting…" /></div>;
   if (screen === "lobby") return <Lobby {...{
@@ -1117,7 +1163,7 @@ export default function Orbit({ myId, authUser, onExit }) {
   const winnerName = game.winner ? names[game.winner] : null;
   const myHint = over ? null
     : game.phase === "mulligan" && isMyTurn ? "Choose replacements"
-      : game.pending_pid === myId ? (game.pending?.task?.label || "Resolve effect")
+      : game.pending_pid === myId ? (legal.length > 1 ? "Your turn" : "Resolving…")
         : isMyTurn ? "Choose an Agent" : null;
   const playerRails = (
       <div className="or-score-rail">
@@ -1136,8 +1182,7 @@ export default function Orbit({ myId, authUser, onExit }) {
       {game.phase === "mulligan" && playerRails}
 
       {over && <section className="or-result">
-        <span>{game.winner === myId ? "Victory" : game.winner ? "Game over" : "Draw"}</span>
-        <h1>{winnerName ? `${winnerName} controls the senate` : "The Agent supply was exhausted"}</h1>
+        <h1>{winnerName ? `${winnerName} wins${victoryCondition(game) ? ` by ${victoryCondition(game)}` : ""}` : "The Agent supply was exhausted"}</h1>
         <button type="button" onClick={leaveToLobby}>Return to lobby</button>
       </section>}
 
@@ -1158,7 +1203,7 @@ export default function Orbit({ myId, authUser, onExit }) {
           <InfluenceBoard key={`${roomId}-${connected}`} game={game} myId={myId} catalog={catalog} names={names} connected={connected} onInfo={setInfo} />
           <Columns game={game} pid={otherId} name={names[otherId]} onInfo={setInfo} />
           <Columns game={game} pid={myId} name={names[myId]} mine onInfo={setInfo} />
-          {!over && game.pending && game.pending_pid === myId && <DecisionPanel game={game} catalog={catalog} sendMove={sendMove} />}
+          {!over && game.pending && game.pending_pid === myId && <DecisionPanel game={game} catalog={catalog} sendMove={sendMove} onInfo={setInfo} />}
           {!over && game.pending && game.pending_pid !== myId && <section className="or-status"><span className="or-spinner" /> {names[game.pending_pid] || "Opponent"} is resolving {game.pending.source}…</section>}
           {!over && !game.pending && !isMyTurn && <section className="or-status"><span className="or-spinner" /> {names[game.turn_pid] || "Opponent"} is choosing an action…</section>}
 

@@ -5552,9 +5552,14 @@ try {
 			JSON.stringify({ id: "orbit-harness", name: "Orbiter", guest: true })));
 		const page = await ctx.newPage();
 		let socket, latestFrame, fixtureMode = false;
+		const fixtureReplies = [];
 		await page.routeWebSocket("**/orbit/ws/**", (ws) => {
 			socket = ws;
 			const server = ws.connectToServer();
+			ws.onMessage((message) => {
+				if (fixtureMode) fixtureReplies.push(JSON.parse(String(message)));
+				else server.send(message);
+			});
 			server.onMessage((message) => {
 				const data = JSON.parse(String(message));
 				if (data.room?.game) latestFrame = data;
@@ -6157,7 +6162,7 @@ try {
 				const motion = el.getAnimations().find((a) => a.transitionProperty === "top");
 				if (!motion) return false;
 				motion.pause(); motion.currentTime = 220;
-				return motion.effect.getTiming().duration >= 400;
+				return motion.effect.getTiming().duration >= 200;
 			});
 			check(`${seat}: influence slides between authoritative positions`, moving);
 			check(`${seat}: resource gains and current actor are visible`, await page.locator(`.or-player.${seat} .or-resource-delta.gain`).count() === 2
@@ -6183,6 +6188,103 @@ try {
 			check(`${width}px: resources, faction names and custom icons fit`, fit.page && fit.resources && fit.icons && fit.tech, JSON.stringify(fit));
 			if (process.env.ORBIT_SHOTS) await page.screenshot({ path: `test-results/orbit-polish-${width}.png`, fullPage: true });
 		}
+		await page.setViewportSize({ width: 390, height: 844 });
+		gameView.influence.mercury = gameView.order[0] === "orbit-harness" ? 3 : -3;
+		socket.send(JSON.stringify(fixture));
+		await sleep(400);
+		if (process.env.ORBIT_SHOTS) await page.locator(".or-influence").screenshot({ path: "test-results/orbit-capture-before.png" });
+		self.captured.push("mercury"); gameView.influence.mercury = null;
+		socket.send(JSON.stringify(fixture));
+		await page.waitForSelector(".or-mercury .or-disc.captured");
+		check("capture exits toward your goal rather than sliding back to centre", await page.locator(".or-mercury .or-disc").evaluate((el) => {
+			el.getAnimations().forEach((a) => { a.pause(); a.currentTime = 140; });
+			return parseFloat(el.style.getPropertyValue("--or-position")) > 90;
+		}));
+		if (process.env.ORBIT_SHOTS) await page.locator(".or-influence").screenshot({ path: "test-results/orbit-capture-middle.png" });
+		await page.locator(".or-mercury .or-disc").evaluate((el) => el.getAnimations().forEach((a) => a.finish()));
+		if (process.env.ORBIT_SHOTS) await page.locator(".or-influence").screenshot({ path: "test-results/orbit-capture-end.png" });
+		gameView.influence.mercury = 0;
+		socket.send(JSON.stringify(fixture));
+		await page.waitForSelector(".or-mercury .or-disc.returning");
+		check("replacement disc appears at centre without a reverse-movement animation", await page.locator(".or-mercury .or-disc").evaluate((el) => el.getAnimations().length === 0 && el.style.getPropertyValue("--or-position") === "50%"));
+		// Decision fixtures use the real catalog names and task metadata. Test the
+		// instruction and the available responses, not merely that a box appeared.
+		const orbitCatalog = await page.evaluate(() => JSON.parse(localStorage.getItem("orbit_catalog")));
+		const planetNames = ["mercury", "venus", "terra", "mars", "jupiter"];
+		const planetMoves = planetNames.map((planet) => ({ action: "choose", planet }));
+		const decisions = [
+			["influence", 109, { type: "influence", amount: 2 }, planetMoves, "gain 2 influence"],
+			["split", 110, { type: "split_influence", amounts: [1, 1], selected: ["mercury"] }, planetMoves.slice(1), "Planet 2 of 2"],
+			["own-exile", 102, { type: "exile", owner: "self", count: 2, done: 1, reward: { resource: "credits", amount: 10 } }, planetMoves.slice(1), "your top Agent"],
+			["enemy-exile", 510, { type: "exile", owner: "opponent", count: 1 }, planetMoves, "opponent’s top Agent"],
+			["optional-exile", 310, { type: "optional_exile_each", planets: ["mercury", "venus", "mars", "jupiter"], index: 0, reward: "influence" }, [{ action: "choose", accept: true }, { action: "choose", accept: false }], "Gain 1 Mercury influence"],
+			["spend", 218, { type: "spend_tier", resource: "zenithium", exclude: "venus" }, [{ action: "choose", cost: 1, amount: 1 }, { action: "choose", cost: 2, amount: 2 }, { action: "choose", cost: 0, amount: 0 }], "Spend Zenithium"],
+			["adjacent", 314, { type: "adjacent_three", center: 2, neighbor: 1 }, planetMoves.slice(1, 4), "2 influence there and 1 on each neighbour"],
+		];
+		for (const width of [320, 390]) {
+			await page.setViewportSize({ width, height: 844 });
+			for (const [kind, cardId, task, moves, expected] of decisions) {
+				gameView.turn_pid = "orbit-harness";
+				gameView.pending_pid = "orbit-harness";
+				gameView.pending = { source: orbitCatalog.cards[String(cardId)].name, task };
+				gameView.legal_moves = moves;
+                // Every offered column has a real public Agent to choose.
+                for (const player of [self, opponent]) for (const planet of planetNames) {
+                    player.columns[planet] = [Object.values(orbitCatalog.cards).find((card) => card.planet === planet)];
+                }
+
+				socket.send(JSON.stringify(fixture));
+				await page.waitForFunction((expected) => document.querySelector(".or-decision")?.textContent.includes(expected), expected);
+				check(`${width}px ${kind}: instruction names the action and source`, (await page.locator(".or-decision").innerText()).includes(gameView.pending.source));
+				if (kind === "own-exile" && width === 390) {
+					const beforeHold = fixtureReplies.length;
+					const choice = page.locator(".or-decision button").first();
+					await choice.scrollIntoViewIfNeeded();
+					const box = await choice.boundingBox();
+					const touch = await ctx.newCDPSession(page);
+					await touch.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }] });
+					await sleep(800);
+					const openedDuringHold = await page.locator(".or-info").count();
+					await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+					await touch.detach();
+					check("holding a decision Agent opens its card without submitting the choice", fixtureReplies.length === beforeHold && await page.locator(".or-info-cost").count() === 1, JSON.stringify({ box, openedDuringHold, replies: fixtureReplies.slice(beforeHold) }));
+					await page.mouse.click(5, 5);
+					check("a fresh backdrop press dismisses the inspected card", await page.locator(".or-info").count() === 0);
+				}
+				if (kind === "influence") {
+					const rects = await page.locator(".or-decision button").evaluateAll((nodes) => nodes.map((node) => { const r = node.getBoundingClientRect(); return { y: r.y, left: r.left, right: r.right }; }));
+					check(`${width}px: all five planet choices fit in one row`, rects.length === 5 && rects.every((r) => r.y === rects[0].y && r.left >= 0 && r.right <= width));
+				}
+				await page.locator(".or-decision").scrollIntoViewIfNeeded();
+				if (process.env.ORBIT_SHOTS) await page.screenshot({ path: `test-results/orbit-decision-${kind}-${width}.png` });
+			}
+		}
+		gameView.pending.task = { type: "optional_exile_each", planets: ["venus", "jupiter"], index: 0, reward: "zenithium" };
+		gameView.legal_moves = [{ action: "choose", accept: false }];
+		const repliesBefore = fixtureReplies.length;
+		socket.send(JSON.stringify(fixture));
+		await sleep(150);
+		check("an empty column advances the sole legal response without a fake choice", await page.locator(".or-decision").count() === 0 && fixtureReplies.slice(repliesBefore).some((r) => r.move?.action === "choose" && r.move.accept === false));
+		socket.send(JSON.stringify(fixture));
+		await sleep(100);
+		check("a duplicate forced-choice frame is submitted only once", fixtureReplies.length === repliesBefore + 1);
+		gameView.pending = null;
+		gameView.pending_pid = null;
+		gameView.legal_moves = [];
+		for (const [condition, captured] of [["Absolute", ["mars", "mars", "mars"]], ["Democratic", planetNames.slice(0, 4)], ["Popular", ["mars", "mars", "terra", "terra", "venus"]]]) {
+			gameView.phase = "over"; gameView.winner = "orbit-harness"; self.captured = captured;
+			socket.send(JSON.stringify(fixture));
+			await page.waitForFunction((condition) => document.querySelector(".or-result h1")?.textContent.includes(condition), condition);
+			check(`${condition}: result names the actual victory condition`, !(await page.locator(".or-result").innerText()).includes("senate"));
+			await page.locator(".or-result").scrollIntoViewIfNeeded();
+			if (process.env.ORBIT_SHOTS) await page.screenshot({ path: `test-results/orbit-result-${condition}.png` });
+		}
+		gameView.winner = opponentId; opponent.captured = ["mars", "mars", "mars"];
+		socket.send(JSON.stringify(fixture));
+		await page.waitForFunction((name) => document.querySelector(".or-result h1")?.textContent === `${name} wins by Absolute victory`, fixture.room.players[opponentId]);
+		check("the losing player sees the opponent named as winner", !(await page.locator(".or-result").innerText()).includes("controls the senate"));
+		gameView.phase = "playing"; gameView.winner = null;
+		socket.send(JSON.stringify(fixture));
 		await page.emulateMedia({ reducedMotion: "reduce" });
 		gameView.influence.mercury = 0;
 		gameView.players[opponentId].credits -= 2;

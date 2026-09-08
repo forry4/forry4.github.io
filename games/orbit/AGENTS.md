@@ -547,3 +547,33 @@ fixtures. `ORBIT_SHOTS=1` captures phone widths 320/360/390/430, desktop sizes,
 and frozen mid-transition frames for a separate visual critique. A screenshot
 alone is not evidence of smooth animation; the gate also checks the live
 transition and reduced-motion behavior.
+
+
+### Follow-up correction from user review
+
+The initial visual sign-off missed actual play problems. Do not repeat that:
+
+- Influence pieces are flat, clean discs. No glass highlights, glowing orbs,
+  whole-panel brightness flashes, or entrance animations on every rebroadcast.
+  Only disc travel and quiet resource-change cues explain the update. Resource
+  labels remain visible during those cues. A captured disc departs toward its
+  goal; a replacement appears at centre without reverse movement.
+- The footer explicitly says **Turn recap** and reads the last action, rather
+  than substituting the next player's turn status for its label.
+- Decisions explain the operation, quantity, target owner, progress and reward,
+  alongside the originating card/action. Exile/transfer choices name the actual
+  public top Agent and support hold/right-click to inspect it without choosing.
+  Five planet choices must fit ONE row even at 320px; fewer choices fill the row.
+- A single server-legal `choose` response is forced, not a player decision. The
+  client submits exactly that response once per pending frame, including empty
+  optional-exile columns; duplicate broadcasts must not resubmit it. Real
+  optional accept/decline choices remain explicit. The server still validates
+  and applies every response.
+- Results say **[player] wins by Absolute/Democratic/Popular victory** using the
+  winning player's public captured discs to describe the server's declared win.
+  Do not restore “controls the senate.” A concession without that capture
+  pattern names the winner without inventing one of the three conditions.
+- Visual review requires populated decision states and capture start/middle/end
+  frames, not merely the default board. Fake fixtures offering exiles from empty
+  columns cannot establish choice clarity. Verify inspection does not also
+  submit a move, and verify the losing player's result.
