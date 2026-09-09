@@ -471,6 +471,67 @@ Experimental WASM artifacts stay outside the shipped assets. Full five-second
 search, history-conditioned determinization, league self-play, auxiliary heads,
 quantization and sealed promotion gates remain outstanding.
 
+### 2026-09-09 leaf attribution and the serving-shape budget
+
+The native development arena now reports the shared paired `ArenaResult`, so a
+native probe carries pair scores, a paired bootstrap interval and the per-board
+breakdown instead of a bare win count. Re-reading the earlier 16-game scouts
+through it shows they established nothing: 0.625 with a 95% interval of
+[0.500, 0.812] and 0.688 with [0.438, 0.938]. Folding the rows also fixed a
+scoring error: a `winner` of `null` is the deck-exhaustion draw and had been
+counted as a candidate loss in both seat-swapped games.
+
+A `heuristic` sentinel checkpoint runs the identical search with no network,
+which is the control the campaign lacked; without it a win over Hard v2 cannot
+be attributed to the value model rather than to search. Six arms of 64 balanced
+pairs each, all against Hard v2 on identical deals:
+
+| leaf | condition | score | 95% interval |
+|---|---|---|---|
+| indexed v3 | 250 ms/turn | 0.648 | [0.570, 0.727] |
+| heuristic | 250 ms/turn | 0.578 | [0.500, 0.656] |
+| indexed v3 | 24 fixed simulations | 0.508 | [0.422, 0.586] |
+| heuristic | 24 fixed simulations | 0.469 | [0.383, 0.555] |
+| indexed v3 | 96 fixed simulations | 0.586 | [0.492, 0.672] |
+| heuristic | 96 fixed simulations | 0.609 | [0.531, 0.688] |
+
+Paired network-minus-heuristic differences on the same deals are +0.070
+[-0.039, +0.180] at equal time, +0.039 [-0.063, +0.141] at 24 simulations and
+-0.023 [-0.141, +0.094] at 96. Every interval spans zero and the sign changes
+with simulation count, so **the indexed v3 value model has no measured advantage
+over the free heuristic leaf**, while costing 18.3x more per simulation. Search
+itself is the gain: both leaves beat Hard v2 given enough simulations. Equal-time
+remains the ship criterion, but it cannot attribute a win, because the cheaper
+leaf silently compensates with more simulations; report both regimes or neither.
+
+Two harness faults surfaced from the same data. Fixed 96 simulations on every
+decision (0.609) beat a timed arm averaging 383 (0.578), because the arena gave
+each turn one pot and let the first decision drain it: every follow-up then ran
+zero simulations and played the highest prior, which is Hard v2's own move. And
+both fixed-24 arms sit at or below 0.5, so **a search under roughly 24
+simulations is weaker than its own prior**. The arena now mirrors serving —
+forced moves are played without search, per-decision allowance is
+`min(remaining, main_action_ms | followup_ms)`, and `--workers` runs the
+root-summed pool the browser actually serves, verified at exactly N x sims per
+call and reproducible across runs.
+
+At the serving shape (3.5 s/turn, 2100/1400, four workers) the heuristic leaf
+reaches 18,874 simulations per decision, a 49x increase, and scored 0.750
+[0.625, 0.875] on a 16-pair scout. A larger run on fresh deals was stopped early
+at 32 balanced pairs and read **0.625 [0.500, 0.750]**; the scout was optimistic
+and the honest estimate is the mid-to-high 0.6 range. This is a development
+probe, not a promotion, and it is measured against an opponent the search models
+exactly, since `serving::choose_move` is deterministic and is both the arena's
+Hard v2 and the search's internal opponent model.
+
+None of this is servable today. `wasm.rs` exports the Hard v2 ranker only;
+`search::choose` takes a privileged `State` as its determinization template, and
+Phase 5 forbids sending one to a browser. The observation already carries every
+mechanical field except `agent_deck`, `bonus_deck` and the opponent hand, which
+are exactly the pools `sample()` resamples, so an Expert tier needs
+`State::from_observation` with a public-field parity test, a search wasm export,
+the tier wired through both ends, and a rebuilt asset.
+
 ### Research-log audit: borrow mechanisms, preserve their conditions
 
 Reviewed `docs/ai-research-log.md` Duel sessions July 22–30 and the actual
