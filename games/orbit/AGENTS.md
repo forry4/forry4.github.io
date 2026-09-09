@@ -101,6 +101,10 @@ game-server logs (`$ZENITH_CORPUS`, filled by `zenith_live.py` on `cob-mining`).
 important fact about it.** `cob_daily.bat` runs an unmetered live harvest and then the
 original metered downloader.
 
+**Counts below are a dated snapshot, not a target.** The cron adds ~40 logs a day, so
+re-run the tools rather than trusting a number here; what does not move is the shape of
+each check and the reason it is built that way.
+
 - **The live source is the lobby's own table list** —
   `/tablemanager/tablemanager/tableinfos.html?status=active_now&games=2082`, the call the
   site's `ly_metasite.js` makes. **One request returns every active table** (1110 for
@@ -123,6 +127,15 @@ original metered downloader.
   real, and cost seven-eighths of the available games to avoid ten opaque segments per
   log. `scrape_target.table_filter` remains as an unused opt-in hook; reach for it only
   for a table that is genuinely unreadable, never one that is merely partly opaque.
+- **THE ACTIVE LIST CANNOT FINISH A GAME**, and a re-fetch keyed on `progression` can
+  never notice. A table leaves the list the moment it ends, so the progression of anything
+  still visible is capped around 80 — measured, 128 of 128 live captures sat at *exactly*
+  80, none held a `gameover`, and their median was 112 packets against 277 for a finished
+  game. Under half of each game, and the missing half is the ENDGAME. `zenith_live.py`
+  therefore triggers its refresh on **the log's own missing `gameover`**, not on
+  progression moving, and runs that pass BEFORE taking anything new: new games are always
+  available (~1100 in progress), while a partial game's remaining half expires in about a
+  day. First run: 20 completed, 15 advanced, 25 already archived out of reach.
 - **Live logs carry `wakeupPlayers` packets with `move_id: null`.** They hold no game
   state, and a bare `int()` on them is what stopped all three readers from opening an
   in-progress game at all. Skip them; do not assume a packet has a move id.
@@ -148,16 +161,15 @@ Three findings worth keeping:
   the 90 we implement or the boards they are played on. **The exclusion is now per
   SEGMENT** — only the segment in which a goodies card is *played* is opaque — and the
   corpus went 3 logs → 11 at zero quota cost, taking cleanly-attributable cards from 56
-  to 78 and segments from 85 to 328 (and on to 83 cards / 465 segments once the live
-  source below landed).
+  to 78 and segments from 85 to 328, and on again once the live source below landed.
   Two checks back the reasoning rather than assuming it: the audits see **98 distinct
   card ids, 88 ours + exactly the 10 goodies and nothing else**, and splitting the corpus
   base-only vs expansion-only gives **identical clean results** for the 90 (0 findings on
   every axis either way; opening influence 243/243 within the expansion games alone).
 
 `tools/bga_effect_audit.py` is the companion that checks what a card DOES, not what it
-costs. Result on 19 logs: **every one of the 90 cards has now been played**, 83 could be
-cleanly attributed, and **all 83 produced nothing our data cannot account for**.
+costs. **Every one of the 90 cards has been played**; snapshot at 189 logs (2026-09-09):
+87 cleanly attributed, and **all 87 produced nothing our data cannot account for**.
 
 Four things make that number mean something, and each was a wrong answer first:
 
@@ -194,13 +206,13 @@ audit duly reported as unaccounted effects — the parser accusing the data of i
 
 `tools/bga_magnitude_audit.py` is the third and sharpest: not what kind of effect, but
 **how much, and onto which planet**. It reuses the effect audit's segmenter, so only the
-comparison is new. On 19 logs: **649 grants that could have contradicted our data, none
-did**, and the opening influence held 465/465.
+comparison is new. Snapshot at 189 logs: **5,152 grants that could have contradicted our
+data, none did**, and the opening influence held 4,153 of 4,153.
 
 - **It measures what the kinds audit ASSUMED.** That audit treats `influence` as ambient
   because "every card advances its own planet when played" — a load-bearing assumption
   carried on nothing. Here it is checked: the first `movePlanet` of a segment is the
-  played card's own planet at +1, in 465 of 465 segments.
+  played card's own planet at +1, in every one of 4,153 segments.
 - **What a card can grant is a SET, not a number**, because half the deck's payouts are
   computed: `exile_tier` pays 2/4/7, `card_cost` pays the cost of some card, `per_nonempty`
   pays per track (and BGA emits one event per track where our engine adds the lump sum —
@@ -233,13 +245,13 @@ checked at all.
   declaring agreement would be circular, so the two readings — ours and "only level L
   fires" — are made to *compete* on the same evidence, where a side counts as possible
   only if it explains every advance of that faction in that game, both players'.
-  Result: **our reading is contradicted nowhere and pins the side uniquely in 50 of 52
-  game-factions; the rival is impossible in 37 of 52.** One bit of freedom against up to
+  Result: **our reading is contradicted nowhere and pins the side uniquely in 497 of 515
+  game-factions; the rival is impossible in 318 of 515.** One bit of freedom against up to
   five levels of consequence is a real constraint.
 - **`influence` is ambient here too, and that cost a wrong answer first.** Counting it as
   evidence made robot and animod impossible on *every* log, while a hand check of those
   same logs matched the ladder step for step. The cause is the rule the magnitude audit
-  measured 465/465: a card entering a column advances that column's planet, and `mobilize`
+  measured on every segment: a card entering a column advances its planet, and `mobilize`
   puts cards into columns — so any ladder step that mobilizes drags influence behind it
   whatever its own `influence_each` says. What still discriminates is mobilize, transfer,
   discard, zenithium, credits and leader.
