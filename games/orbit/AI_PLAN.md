@@ -7,9 +7,14 @@ an outcome-only population trainer. Phase 4 has a sealed-pool promotion
 reporter with paired confidence intervals, holdout checks, regression gates and
 correctness/information/timing checks. Phase 5 now has the versioned browser
 worker boundary, live seat-local histories, reconnect-safe turn budgets,
-whole-payload redaction and validated server fallback. No Phase 4 champion has
-been promoted; the shipped Hard asset is the cheap observation-only fallback
-until a candidate passes the serving gates.
+whole-payload redaction and validated server fallback. No Phase 4 learned
+champion has been promoted; the shipped Hard asset is an observation-only
+effect-aware policy that remains replaceable by a gated champion.
+
+The 2026-09-08 Hard v2 serving policy scores each public Agent effect program,
+capture tempo, column discounts and pending choices. In a fresh 512-game arena
+against the incumbent Hard v1 ranker, it scored 386–126 (75.39%) across all
+eight technology boards with seat-swapped common-random-number pairs.
 
 Delivered: typed Rust simulator, generated source fingerprint, per-decision
 Python/native state/legal-move/observation parity, strict shuffle tapes,
@@ -240,8 +245,8 @@ rules-fingerprinted model manifest. The browser uses a capped root-parallel
 pool and sends one validated decision at a time; a missing, stale, illegal or
 slow reply falls back to the server ranker outside `ROOM_LOCK`. Per-seat
 observation histories and the remaining five-second turn budget survive saves
-and reconnects. The current manifest contains the validated card encoder and
-cheap policy fallback; promotion remains an explicit Phase 4 decision, so a
+and reconnects. The v2 manifest contains the validated card encoder and
+effect-aware Hard policy; promotion remains an explicit Phase 4 decision, so a
 future champion can replace the asset without changing the room protocol. The
 deterministic asset is regenerated with
 `python -m games.orbit.tools.export_serving`; the wasm-pack output beside it is

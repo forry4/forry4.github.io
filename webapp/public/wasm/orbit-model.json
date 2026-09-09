@@ -1,5 +1,1164 @@
 {
   "abi_version": 1,
+  "bonus_policy_values": {
+    "1": 1.0,
+    "2": 1.2,
+    "3": 4.0,
+    "4": 2.0,
+    "5": 1.5,
+    "6": 2.0,
+    "7": 2.0,
+    "8": 2.0
+  },
+  "card_effects": {
+    "101": [
+      {
+        "amount": 4,
+        "target": "self",
+        "type": "credits"
+      },
+      {
+        "cost": {
+          "amount": 1,
+          "resource": "zenithium_to_opponent"
+        },
+        "label": "Give 1 Zenithium for +2 Terra influence",
+        "then": [
+          {
+            "amount": 2,
+            "planet": "terra",
+            "target": "self",
+            "type": "influence"
+          }
+        ],
+        "type": "optional"
+      }
+    ],
+    "102": [
+      {
+        "count": 2,
+        "exclude": "mercury",
+        "owner": "self",
+        "require_full": true,
+        "reward": {
+          "amount": 10,
+          "resource": "credits"
+        },
+        "type": "exile"
+      }
+    ],
+    "103": [
+      {
+        "planet": "mercury",
+        "reward": "zenithium",
+        "type": "exile_tier"
+      }
+    ],
+    "104": [
+      {
+        "amount": 1,
+        "planet": "mars",
+        "target": "self",
+        "type": "influence"
+      },
+      {
+        "level": 1,
+        "type": "leader"
+      }
+    ],
+    "105": [
+      {
+        "amount": 1,
+        "target": "self",
+        "type": "influence"
+      },
+      {
+        "then": [
+          {
+            "amount": 3,
+            "target": "self",
+            "type": "credits"
+          }
+        ],
+        "type": "if_leader"
+      }
+    ],
+    "106": [
+      {
+        "amount": 3,
+        "target": "self",
+        "type": "zenithium"
+      }
+    ],
+    "107": [
+      {
+        "type": "draw_bonus"
+      },
+      {
+        "cost": {
+          "amount": 1,
+          "resource": "leader"
+        },
+        "label": "Give the Leader for 7 Credits",
+        "then": [
+          {
+            "amount": 7,
+            "target": "self",
+            "type": "credits"
+          }
+        ],
+        "type": "optional"
+      }
+    ],
+    "108": [
+      {
+        "amount": 5,
+        "target": "self",
+        "type": "credits"
+      },
+      {
+        "then": [
+          {
+            "type": "draw_bonus"
+          }
+        ],
+        "type": "if_leader"
+      }
+    ],
+    "109": [
+      {
+        "amount": 2,
+        "target": "self",
+        "type": "influence"
+      },
+      {
+        "cost": {
+          "amount": 1,
+          "resource": "zenithium_to_opponent"
+        },
+        "label": "Give 1 Zenithium for +2 on a different planet",
+        "then": [
+          {
+            "amount": 2,
+            "type": "influence_other"
+          }
+        ],
+        "type": "optional"
+      }
+    ],
+    "110": [
+      {
+        "amounts": [
+          1,
+          1
+        ],
+        "type": "split_influence"
+      },
+      {
+        "planets": [
+          "mercury",
+          "venus",
+          "terra",
+          "mars",
+          "jupiter"
+        ],
+        "type": "transfer_each"
+      }
+    ],
+    "111": [
+      {
+        "amount": 2,
+        "target": "self",
+        "type": "zenithium"
+      },
+      {
+        "cost": {
+          "amount": 1,
+          "resource": "leader"
+        },
+        "label": "Give the Leader for 2 Zenithium",
+        "then": [
+          {
+            "amount": 2,
+            "target": "self",
+            "type": "zenithium"
+          }
+        ],
+        "type": "optional"
+      }
+    ],
+    "112": [
+      {
+        "amount": 2,
+        "target": "self",
+        "type": "influence"
+      },
+      {
+        "cost": {
+          "amount": 1,
+          "resource": "leader"
+        },
+        "label": "Give the Leader for +2 on a different planet",
+        "then": [
+          {
+            "amount": 2,
+            "type": "influence_other"
+          }
+        ],
+        "type": "optional"
+      }
+    ],
+    "113": [
+      {
+        "count": 2,
+        "influence_each": false,
+        "type": "mobilize"
+      },
+      {
+        "cost": {
+          "amount": 1,
+          "resource": "leader"
+        },
+        "label": "Give the Leader to mobilize 3 more cards",
+        "then": [
+          {
+            "count": 3,
+            "influence_each": false,
+            "type": "mobilize"
+          }
+        ],
+        "type": "optional"
+      }
+    ],
+    "114": [
+      {
+        "cost": {
+          "amount": 3,
+          "resource": "credits_to_opponent"
+        },
+        "label": "Give 3 Credits for +2 influence",
+        "then": [
+          {
+            "amount": 2,
+            "exclude": "mercury",
+            "target": "self",
+            "type": "influence"
+          }
+        ],
+        "type": "optional"
+      }
+    ],
+    "115": [
+      {
+        "planet": "mercury",
+        "reward": "influence",
+        "type": "exile_tier"
+      }
+    ],
+    "116": [
+      {
+        "then": [
+          {
+            "amount": 1,
+            "planet": "mercury",
+            "target": "self",
+            "type": "influence"
+          }
+        ],
+        "type": "if_leader"
+      }
+    ],
+    "117": [
+      {
+        "count": 1,
+        "reward": null,
+        "type": "discard_hand"
+      },
+      {
+        "level": 1,
+        "type": "leader"
+      }
+    ],
+    "118": [
+      {
+        "count": "all",
+        "reward": null,
+        "type": "discard_hand"
+      },
+      {
+        "amount": 2,
+        "target": "self",
+        "type": "influence"
+      }
+    ],
+    "201": [
+      {
+        "amount": 4,
+        "target": "self",
+        "type": "credits"
+      },
+      {
+        "cost": {
+          "amount": 1,
+          "resource": "zenithium_to_opponent"
+        },
+        "label": "Give 1 Zenithium for +2 Mars influence",
+        "then": [
+          {
+            "amount": 2,
+            "planet": "mars",
+            "target": "self",
+            "type": "influence"
+          }
+        ],
+        "type": "optional"
+      }
+    ],
+    "202": [
+      {
+        "amount": 1,
+        "resource": "zenithium",
+        "type": "per_tech_first"
+      }
+    ],
+    "203": [
+      {
+        "planet": "venus",
+        "reward": "zenithium",
+        "type": "exile_tier"
+      }
+    ],
+    "204": [
+      {
+        "amount": 1,
+        "planet": "jupiter",
+        "target": "self",
+        "type": "influence"
+      },
+      {
+        "level": 1,
+        "type": "leader"
+      }
+    ],
+    "205": [
+      {
+        "count": 2,
+        "owner": "opponent",
+        "type": "exile"
+      },
+      {
+        "amount": 2,
+        "target": "self",
+        "type": "zenithium"
+      }
+    ],
+    "206": [
+      {
+        "amount": 1,
+        "target": "opponent",
+        "type": "zenithium"
+      },
+      {
+        "amount": 3,
+        "target": "self",
+        "type": "zenithium"
+      }
+    ],
+    "207": [
+      {
+        "amount": 4,
+        "target": "self",
+        "type": "zenithium"
+      }
+    ],
+    "208": [
+      {
+        "discount": 2,
+        "faction": null,
+        "lowest": false,
+        "type": "develop"
+      }
+    ],
+    "209": [
+      {
+        "amount": 6,
+        "target": "self",
+        "type": "credits"
+      }
+    ],
+    "210": [
+      {
+        "discount": 1,
+        "faction": "human",
+        "lowest": false,
+        "type": "develop"
+      }
+    ],
+    "211": [
+      {
+        "discount": 1,
+        "faction": "robot",
+        "lowest": false,
+        "type": "develop"
+      }
+    ],
+    "212": [
+      {
+        "discount": 1,
+        "faction": "animod",
+        "lowest": false,
+        "type": "develop"
+      }
+    ],
+    "213": [
+      {
+        "amount": 4,
+        "resource": "credits",
+        "type": "per_tech_first"
+      }
+    ],
+    "214": [
+      {
+        "discount": 99,
+        "faction": null,
+        "lowest": true,
+        "type": "develop"
+      }
+    ],
+    "215": [
+      {
+        "planet": "venus",
+        "reward": "influence",
+        "type": "exile_tier"
+      }
+    ],
+    "216": [
+      {
+        "then": [
+          {
+            "amount": 1,
+            "planet": "venus",
+            "target": "self",
+            "type": "influence"
+          }
+        ],
+        "type": "if_leader"
+      }
+    ],
+    "217": [
+      {
+        "amount": 2,
+        "owner": "self",
+        "type": "per_nonempty"
+      }
+    ],
+    "218": [
+      {
+        "exclude": "venus",
+        "resource": "zenithium",
+        "tiers": [
+          [
+            1,
+            1
+          ],
+          [
+            2,
+            2
+          ],
+          [
+            4,
+            3
+          ]
+        ],
+        "type": "spend_tier"
+      }
+    ],
+    "301": [
+      {
+        "amount": 4,
+        "target": "self",
+        "type": "credits"
+      },
+      {
+        "cost": {
+          "amount": 1,
+          "resource": "zenithium_to_opponent"
+        },
+        "label": "Give 1 Zenithium for +2 influence on a middle track",
+        "then": [
+          {
+            "amount": 2,
+            "restriction": "middle",
+            "target": "self",
+            "type": "influence"
+          }
+        ],
+        "type": "optional"
+      }
+    ],
+    "302": [
+      {
+        "amount": 2,
+        "target": "opponent",
+        "type": "credits"
+      },
+      {
+        "amount": 8,
+        "target": "self",
+        "type": "credits"
+      }
+    ],
+    "303": [
+      {
+        "planet": "terra",
+        "reward": "zenithium",
+        "type": "exile_tier"
+      }
+    ],
+    "304": [
+      {
+        "amount": 1,
+        "restriction": "dominated",
+        "target": "self",
+        "type": "influence"
+      },
+      {
+        "level": 1,
+        "type": "leader"
+      }
+    ],
+    "305": [
+      {
+        "count": 1,
+        "reward": null,
+        "type": "discard_hand"
+      },
+      {
+        "amount": 1,
+        "target": "self",
+        "type": "zenithium"
+      }
+    ],
+    "306": [
+      {
+        "amount": 1,
+        "target": "self",
+        "type": "zenithium"
+      }
+    ],
+    "307": [
+      {
+        "amount": 1,
+        "exclude": "terra",
+        "target": "opponent",
+        "type": "influence"
+      },
+      {
+        "amount": 3,
+        "target": "self",
+        "type": "zenithium"
+      }
+    ],
+    "308": [
+      {
+        "type": "reset_planet"
+      }
+    ],
+    "309": [
+      {
+        "amounts": [
+          1,
+          1,
+          1
+        ],
+        "type": "split_influence"
+      }
+    ],
+    "310": [
+      {
+        "planets": [
+          "mercury",
+          "venus",
+          "mars",
+          "jupiter"
+        ],
+        "reward": "influence",
+        "type": "optional_exile_each"
+      }
+    ],
+    "311": [
+      {
+        "amount": 2,
+        "exclude": "terra",
+        "target": "self",
+        "type": "influence"
+      }
+    ],
+    "312": [
+      {
+        "amount": 2,
+        "target": "self",
+        "type": "influence"
+      },
+      {
+        "amount": 2,
+        "restriction": "opponent_side",
+        "target": "self",
+        "type": "influence"
+      }
+    ],
+    "313": [
+      {
+        "amounts": [
+          1,
+          1
+        ],
+        "type": "split_influence"
+      }
+    ],
+    "314": [
+      {
+        "center": 2,
+        "neighbor": 1,
+        "type": "adjacent_three"
+      }
+    ],
+    "315": [
+      {
+        "planet": "terra",
+        "reward": "influence",
+        "type": "exile_tier"
+      }
+    ],
+    "316": [
+      {
+        "then": [
+          {
+            "amount": 1,
+            "planet": "terra",
+            "target": "self",
+            "type": "influence"
+          }
+        ],
+        "type": "if_leader"
+      }
+    ],
+    "317": [
+      {
+        "planets": [
+          "mercury",
+          "venus",
+          "mars",
+          "jupiter"
+        ],
+        "reward": "zenithium",
+        "type": "optional_exile_each"
+      }
+    ],
+    "318": [
+      {
+        "count": 1,
+        "reward": "matching_influence",
+        "type": "discard_hand"
+      }
+    ],
+    "401": [
+      {
+        "amount": 4,
+        "target": "self",
+        "type": "credits"
+      },
+      {
+        "cost": {
+          "amount": 1,
+          "resource": "zenithium_to_opponent"
+        },
+        "label": "Give 1 Zenithium for +2 Mercury influence",
+        "then": [
+          {
+            "amount": 2,
+            "planet": "mercury",
+            "target": "self",
+            "type": "influence"
+          }
+        ],
+        "type": "optional"
+      }
+    ],
+    "402": [
+      {
+        "amount": 1,
+        "exclude": "mars",
+        "target": "opponent",
+        "type": "influence"
+      },
+      {
+        "amount": 10,
+        "target": "self",
+        "type": "credits"
+      }
+    ],
+    "403": [
+      {
+        "planet": "mars",
+        "reward": "zenithium",
+        "type": "exile_tier"
+      }
+    ],
+    "404": [
+      {
+        "amount": 1,
+        "planet": "venus",
+        "target": "self",
+        "type": "influence"
+      },
+      {
+        "level": 1,
+        "type": "leader"
+      }
+    ],
+    "405": [
+      {
+        "branches": [
+          {
+            "label": "Gain 1 Zenithium",
+            "tasks": [
+              {
+                "amount": 1,
+                "target": "self",
+                "type": "zenithium"
+              }
+            ]
+          },
+          {
+            "label": "Gain 7 Credits",
+            "tasks": [
+              {
+                "amount": 7,
+                "target": "self",
+                "type": "credits"
+              }
+            ]
+          }
+        ],
+        "label": "Choose Caesar's reward",
+        "type": "choose_branch"
+      }
+    ],
+    "406": [
+      {
+        "amount": 2,
+        "target": "self",
+        "type": "zenithium"
+      }
+    ],
+    "407": [
+      {
+        "branches": [
+          {
+            "label": "Transfer 1 card",
+            "tasks": [
+              {
+                "count": 1,
+                "type": "transfer"
+              }
+            ]
+          },
+          {
+            "label": "Gain 1 Zenithium",
+            "tasks": [
+              {
+                "amount": 1,
+                "target": "self",
+                "type": "zenithium"
+              }
+            ]
+          }
+        ],
+        "label": "Choose V4NC3's effect",
+        "type": "choose_branch"
+      }
+    ],
+    "408": [
+      {
+        "branches": [
+          {
+            "label": "Transfer 2 cards",
+            "tasks": [
+              {
+                "count": 2,
+                "type": "transfer"
+              }
+            ]
+          },
+          {
+            "label": "Gain 8 Credits",
+            "tasks": [
+              {
+                "amount": 8,
+                "target": "self",
+                "type": "credits"
+              }
+            ]
+          }
+        ],
+        "label": "Choose Ramses's effect",
+        "type": "choose_branch"
+      }
+    ],
+    "409": [
+      {
+        "amount": 2,
+        "restriction": "middle",
+        "target": "self",
+        "type": "influence"
+      }
+    ],
+    "410": [
+      {
+        "count": 1,
+        "influence_each": false,
+        "type": "mobilize"
+      },
+      {
+        "amount": 5,
+        "target": "self",
+        "type": "credits"
+      }
+    ],
+    "411": [
+      {
+        "count": 1,
+        "reward": "matching_influence",
+        "type": "transfer"
+      }
+    ],
+    "412": [
+      {
+        "count": 1,
+        "influence_each": false,
+        "type": "mobilize"
+      },
+      {
+        "count": 1,
+        "type": "transfer"
+      },
+      {
+        "count": 1,
+        "owner": "opponent",
+        "type": "exile"
+      }
+    ],
+    "413": [
+      {
+        "count": 3,
+        "one_at_a_time": true,
+        "owner": "opponent",
+        "reward": "matching_influence",
+        "type": "exile"
+      }
+    ],
+    "414": [
+      {
+        "amount": 1,
+        "exclude": "mars",
+        "target": "self",
+        "type": "influence"
+      }
+    ],
+    "415": [
+      {
+        "planet": "mars",
+        "reward": "influence",
+        "type": "exile_tier"
+      }
+    ],
+    "416": [
+      {
+        "then": [
+          {
+            "amount": 1,
+            "planet": "mars",
+            "target": "self",
+            "type": "influence"
+          }
+        ],
+        "type": "if_leader"
+      }
+    ],
+    "417": [
+      {
+        "type": "take_board_bonus"
+      }
+    ],
+    "418": [
+      {
+        "count": 3,
+        "influence_each": true,
+        "type": "mobilize"
+      }
+    ],
+    "501": [
+      {
+        "amount": 4,
+        "target": "self",
+        "type": "credits"
+      },
+      {
+        "cost": {
+          "amount": 1,
+          "resource": "zenithium_to_opponent"
+        },
+        "label": "Give 1 Zenithium for +2 Venus influence",
+        "then": [
+          {
+            "amount": 2,
+            "planet": "venus",
+            "target": "self",
+            "type": "influence"
+          }
+        ],
+        "type": "optional"
+      }
+    ],
+    "502": [
+      {
+        "amount": 2,
+        "target": "self",
+        "type": "influence"
+      },
+      {
+        "amount": 2,
+        "target": "self",
+        "type": "zenithium"
+      },
+      {
+        "level": 2,
+        "type": "leader"
+      }
+    ],
+    "503": [
+      {
+        "planet": "jupiter",
+        "reward": "zenithium",
+        "type": "exile_tier"
+      }
+    ],
+    "504": [
+      {
+        "branches": [
+          {
+            "label": "Take the gold Leader",
+            "tasks": [
+              {
+                "level": 2,
+                "type": "leader"
+              }
+            ]
+          },
+          {
+            "label": "Gain 8 Credits",
+            "tasks": [
+              {
+                "amount": 8,
+                "target": "self",
+                "type": "credits"
+              }
+            ]
+          }
+        ],
+        "label": "Choose Geta's reward",
+        "type": "choose_branch"
+      }
+    ],
+    "505": [
+      {
+        "count": 1,
+        "reward": "card_cost",
+        "type": "transfer"
+      }
+    ],
+    "506": [
+      {
+        "amount": 3,
+        "target": "opponent",
+        "type": "credits"
+      },
+      {
+        "amount": 2,
+        "target": "self",
+        "type": "zenithium"
+      }
+    ],
+    "507": [
+      {
+        "amount": 1,
+        "planet": "terra",
+        "target": "self",
+        "type": "influence"
+      },
+      {
+        "level": 1,
+        "type": "leader"
+      }
+    ],
+    "508": [
+      {
+        "amount": 1,
+        "target": "self",
+        "type": "influence"
+      },
+      {
+        "then": [
+          {
+            "amount": 1,
+            "target": "self",
+            "type": "zenithium"
+          }
+        ],
+        "type": "if_leader"
+      }
+    ],
+    "509": [
+      {
+        "amount": 3,
+        "target": "self",
+        "type": "zenithium"
+      },
+      {
+        "then": [
+          {
+            "amount": 1,
+            "target": "self",
+            "type": "zenithium"
+          }
+        ],
+        "type": "if_leader"
+      }
+    ],
+    "510": [
+      {
+        "count": 1,
+        "owner": "opponent",
+        "reward": "card_cost",
+        "type": "exile"
+      }
+    ],
+    "511": [
+      {
+        "amount": 2,
+        "target": "self",
+        "type": "influence"
+      },
+      {
+        "amount": 6,
+        "then": [
+          {
+            "amount": 1,
+            "type": "influence_other"
+          }
+        ],
+        "type": "if_credits"
+      }
+    ],
+    "512": [
+      {
+        "amount": 5,
+        "target": "self",
+        "type": "credits"
+      },
+      {
+        "cost": {
+          "amount": 1,
+          "resource": "leader"
+        },
+        "label": "Give the Leader for 7 Credits",
+        "then": [
+          {
+            "amount": 7,
+            "target": "self",
+            "type": "credits"
+          }
+        ],
+        "type": "optional"
+      }
+    ],
+    "513": [
+      {
+        "amount": 2,
+        "owner": "opponent",
+        "type": "per_nonempty"
+      }
+    ],
+    "514": [
+      {
+        "count": 2,
+        "type": "transfer"
+      },
+      {
+        "cost": {
+          "amount": 1,
+          "resource": "leader"
+        },
+        "label": "Give the Leader to transfer 2 more cards",
+        "then": [
+          {
+            "count": 2,
+            "type": "transfer"
+          }
+        ],
+        "type": "optional"
+      }
+    ],
+    "515": [
+      {
+        "planet": "jupiter",
+        "reward": "influence",
+        "type": "exile_tier"
+      }
+    ],
+    "516": [
+      {
+        "then": [
+          {
+            "amount": 1,
+            "planet": "jupiter",
+            "target": "self",
+            "type": "influence"
+          }
+        ],
+        "type": "if_leader"
+      }
+    ],
+    "517": [
+      {
+        "count": 1,
+        "reward": "card_cost",
+        "type": "discard_hand"
+      }
+    ],
+    "518": [
+      {
+        "exclude": "jupiter",
+        "resource": "credits",
+        "tiers": [
+          [
+            3,
+            1
+          ],
+          [
+            7,
+            2
+          ],
+          [
+            12,
+            3
+          ]
+        ],
+        "type": "spend_tier"
+      }
+    ]
+  },
   "cards": {
     "101": {
       "cost": 1,
@@ -455,8 +1614,35 @@
   "encoder": "orbit-observation-v1",
   "followup_reserve_ms": 2000,
   "main_action_budget_ms": 3000,
-  "model_id": "orbit-hard-v1",
-  "model_version": 1,
+  "model_id": "orbit-hard-v2",
+  "model_version": 2,
+  "policy": {
+    "accept": 0.2,
+    "bonus": 0.1,
+    "branch_influence": 0.2,
+    "branch_resource": 0.1,
+    "capture": 2.0,
+    "choice": 0.4,
+    "choice_capture": 2.0,
+    "choice_opponent": 0.1,
+    "column": 0.03,
+    "cost": 0.0749,
+    "decline": -0.02,
+    "deny": 0.2,
+    "discard": 0.02,
+    "effect": 0.6941,
+    "faction": 0.1,
+    "leader": 0.0457,
+    "leader_animod": 0.05,
+    "leader_owned": 0.1,
+    "mulligan": 0.01,
+    "near_capture": 0.2,
+    "progress": 0.08,
+    "recruit": 0.55,
+    "technology": 0.1945,
+    "technology_level": 0.0016,
+    "tier": 0.059
+  },
   "rules": "15166a4fa64e212c842e9555b65f24c5d219afea291c8567feff370f88f59835",
   "schema": 1,
   "turn_budget_ms": 5000

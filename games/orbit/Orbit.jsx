@@ -22,7 +22,7 @@ const ORBIT_WS = `${WS_BASE}/orbit/ws`;
 const ORBIT_HTTP = WS_RAW.replace(/^ws/, "http").replace(/\/ws$/, "/orbit");
 const ORBIT_AI_TIERS = ["random", "hard"];
 const ORBIT_AI_WIRE = 1;
-const ORBIT_AI_MODEL_VERSION = 1;
+const ORBIT_AI_MODEL_VERSION = 2;
 const ORBIT_AI_ENCODER = "orbit-observation-v1";
 const ORBIT_AI_SCHEMA = 1;
 const ORBIT_AI_TURN_BUDGET_MS = 5000;
@@ -714,6 +714,14 @@ function Lobby({ authUser, myId, onExit, openGames, myGames, history, historySho
   showRules, setShowRules, toast }) {
   const active = notWaiting(myGames);
   const selectedOpponent = createOpp === "friend" ? "friend" : createDifficulty;
+  const chooseOpponent = (value) => {
+    if (value === "friend") {
+      setCreateOpp("friend");
+      return;
+    }
+    setCreateOpp("ai");
+    setCreateDifficulty(value);
+  };
   return <div className="app orbit" style={{ "--lby-accent": GAME_ACCENTS.orbit }}>
     <style>{styles}</style>
     <LobbyHeader onBack={onExit} user={<LobbyUser user={authUser} />} />
@@ -765,15 +773,12 @@ function Lobby({ authUser, myId, onExit, openGames, myGames, history, historySho
       </div>
     </div></div>
     {showCreate && <CreateModal title="New Orbit game" onClose={() => setShowCreate(false)}>
-      <CmRow label="Opponent"><CmSeg value={createOpp} onChange={setCreateOpp} options={[
+      <CmRow label="Opponent"><CmSeg value={selectedOpponent} onChange={chooseOpponent} options={[
         { value: "friend", label: "VS Friend" },
-        { value: "ai", label: "VS AI" },
-      ]} /></CmRow>
-      {createOpp === "ai" && <CmRow label="AI difficulty"><CmSeg value={createDifficulty} onChange={setCreateDifficulty} options={[
-        { value: "random", label: "Easy" },
-        { value: "hard", label: "Normal" },
-      ]} /></CmRow>}
-      <div className="cm-footer"><span className="cm-summary">Creating: <b>{selectedOpponent === "friend" ? "vs Friend" : selectedOpponent === "hard" ? "vs Normal AI" : "vs Easy AI"}</b></span>
+        { value: "random", label: "VS Random AI" },
+        { value: "hard", label: "VS Hard AI", title: "Observation-only browser policy with a validated server fallback" },
+      ]} wrap /></CmRow>
+      <div className="cm-footer"><span className="cm-summary">Creating: <b>{selectedOpponent === "friend" ? "vs Friend" : selectedOpponent === "hard" ? "vs Hard AI" : "vs Random AI"}</b></span>
         <button type="button" className="cm-create" onClick={() => createGame(createOpp === "ai", createDifficulty)}>Create Game</button></div>
     </CreateModal>}
     {showRules && <RulesModal title="How to play — Orbit" onClose={() => setShowRules(false)}><OrbitRules /></RulesModal>}

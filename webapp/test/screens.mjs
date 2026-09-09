@@ -5581,29 +5581,26 @@ try {
 		const modal = await page.waitForSelector(".cm-panel", { timeout: 10_000 })
 			.then(() => true).catch(() => false);
 		const opponentLabels = await page.locator(".cm-row").first().locator(".cm-seg-btn").allTextContents().catch(() => []);
-		const difficultyLabels = await page.locator(".cm-row").nth(1).locator(".cm-seg-btn").allTextContents().catch(() => []);
-		check("Orbit offers friend or AI with easy/normal difficulty", modal
-			&& await page.locator(".cm-seg-btn").count() === 4
-			&& JSON.stringify(opponentLabels) === JSON.stringify(["VS Friend", "VS AI"])
-			&& JSON.stringify(difficultyLabels) === JSON.stringify(["Easy", "Normal"])
+		check("Orbit offers friend/random/hard AI", modal
+			&& await page.locator(".cm-seg-btn").count() === 3
+			&& JSON.stringify(opponentLabels) === JSON.stringify(["VS Friend", "VS Random AI", "VS Hard AI"])
 			&& await page.locator(".cm-hint").count() === 0
 			&& !(await page.locator(".cm-panel").textContent()).includes("Technology board"),
-			JSON.stringify({ opponentLabels, difficultyLabels }));
+			JSON.stringify({ opponentLabels }));
 		const friendOpponent = page.locator(".cm-seg-btn", { hasText: "VS Friend" });
-		const aiOpponent = page.locator(".cm-seg-btn", { hasText: "VS AI" });
-		const easyDifficulty = page.locator(".cm-seg-btn", { hasText: "Easy" });
-		const normalDifficulty = page.locator(".cm-seg-btn", { hasText: "Normal" });
-		await easyDifficulty.click({ timeout: 10_000 }).catch(() => {});
-		check("Orbit can select the easy AI tier",
-			await page.locator(".cm-summary b").textContent().catch(() => "") === "vs Easy AI");
-		await normalDifficulty.click({ timeout: 10_000 }).catch(() => {});
-		check("Orbit can select the normal AI tier",
-			await page.locator(".cm-summary b").textContent().catch(() => "") === "vs Normal AI");
+		const randomOpponent = page.locator(".cm-seg-btn", { hasText: "VS Random AI" });
+		const hardOpponent = page.locator(".cm-seg-btn", { hasText: "VS Hard AI" });
+		await randomOpponent.click({ timeout: 10_000 }).catch(() => {});
+		check("Orbit can select the random AI tier",
+			await page.locator(".cm-summary b").textContent().catch(() => "") === "vs Random AI");
+		await hardOpponent.click({ timeout: 10_000 }).catch(() => {});
+		check("Orbit can select the Hard AI tier",
+			await page.locator(".cm-summary b").textContent().catch(() => "") === "vs Hard AI");
 		await friendOpponent.click({ timeout: 10_000 }).catch(() => {});
 		check("Orbit can switch to a friend game",
 			await page.locator(".cm-summary b").textContent().catch(() => "") === "vs Friend"
 			&& await page.locator(".cm-row").count() === 1);
-		await aiOpponent.click({ timeout: 10_000 }).catch(() => {});
+		await hardOpponent.click({ timeout: 10_000 }).catch(() => {});
 		await page.locator(".cm-create").click({ timeout: 10_000 }).catch(() => {});
 
 		const mulligan = await page.waitForSelector(".or-mulligan", { timeout: 30_000 })

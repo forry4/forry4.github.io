@@ -81,6 +81,15 @@ def test_serving_manifest_and_choice_are_versioned_and_legal():
     assert serving.validate_manifest(serving.serving_manifest())["rules"] == serving.rules_fingerprint()
 
 
+def test_hard_ties_are_stable_for_parallel_browser_workers():
+    game = _game(11)
+    obs = observation(game, "human")
+    legal = engine.legal_moves(game, "human")
+    choices = [serving.choose_move(obs, legal, None, 5000, seed).move
+               for seed in (1, 2, 3, 4)]
+    assert choices and all(choice == choices[0] for choice in choices)
+
+
 def test_shipped_model_and_wasm_assets_match_the_python_manifest():
     root = Path(__file__).resolve().parents[3]
     asset = json.loads((root / "webapp/public/wasm/orbit-model.json").read_text(encoding="utf-8"))
@@ -91,6 +100,9 @@ def test_shipped_model_and_wasm_assets_match_the_python_manifest():
     for card_id, card in CARDS.items():
         assert asset["cards"][str(card_id)] == {
             "cost": card["cost"], "planet": card["planet"], "faction": card["faction"]}
+    assert len(asset["card_effects"]) == len(CARDS) == 90
+    assert asset["policy"]["effect"] > 0
+    assert asset["bonus_policy_values"]["3"] == 4.0
     assert (root / "webapp/public/wasm/orbit-worker.js").is_file()
     assert (root / "webapp/public/wasm/orbit_core.js").is_file()
     assert (root / "webapp/public/wasm/orbit_core_bg.wasm").stat().st_size > 0

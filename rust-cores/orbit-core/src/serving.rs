@@ -11,10 +11,10 @@ use serde_json::{json, Map, Value};
 use crate::{FACTIONS, PLANETS};
 
 pub const ABI_VERSION: u32 = 1;
-pub const MODEL_VERSION: u32 = 1;
+pub const MODEL_VERSION: u32 = 2;
 pub const SCHEMA_VERSION: u32 = 1;
 pub const ENCODER_VERSION: &str = "orbit-observation-v1";
-pub const MODEL_ID: &str = "orbit-hard-v1";
+pub const MODEL_ID: &str = "orbit-hard-v2";
 pub const TURN_BUDGET_MS: u32 = 5_000;
 pub const MAIN_ACTION_BUDGET_MS: u32 = 3_000;
 pub const FOLLOWUP_RESERVE_MS: u32 = 2_000;
@@ -148,6 +148,179 @@ fn index_of(values: &[&str], value: Option<&Value>) -> Option<usize> {
         .and_then(|needle| values.iter().position(|item| *item == needle))
 }
 
+fn position(observation: &Value, planet: Option<&Value>, seat: usize) -> f64 {
+    let Some(index) = index_of(&PLANETS, planet) else {
+        return 0.0;
+    };
+    let Some(value) = observation
+        .get("influence")
+        .and_then(Value::as_array)
+        .and_then(|values| values.get(index))
+        .filter(|value| !value.is_null())
+    else {
+        return 0.0;
+    };
+    number(Some(value)) * if seat == 0 { 1.0 } else { -1.0 }
+}
+
+fn effect_value(
+    tasks: Option<&Value>,
+    observation: &Value,
+    me: &Value,
+    them: &Value,
+    seat: usize,
+) -> f64 {
+    let Some(tasks) = tasks.and_then(Value::as_array) else {
+        return 0.0;
+    };
+    let leader_owner = observation
+        .get("leader")
+        .and_then(|leader| leader.get("owner"))
+        .and_then(Value::as_u64)
+        .map(|owner| owner as usize);
+    let mut total = 0.0;
+    for task in tasks {
+        let Some(task) = task.as_object() else {
+            continue;
+        };
+        let kind = task.get("type").and_then(Value::as_str).unwrap_or("");
+        let amount = number(task.get("amount"));
+        match kind {
+            "influence" => {
+                total += if task.get("planet").and_then(Value::as_str).is_some() {
+                    0.42 * amount * (1.0 + 0.14 * position(observation, task.get("planet"), seat))
+                } else {
+                    0.48 * amount
+                };
+            }
+            "influence_other" => total += 0.45 * amount,
+            "split_influence" => {
+                let sum = task
+                    .get("amounts")
+                    .and_then(Value::as_array)
+                    .map(|values| values.iter().map(|value| number(Some(value))).sum::<f64>())
+                    .unwrap_or(0.0);
+                total += 0.44 * sum;
+            }
+            "adjacent_three" => {
+                total += 0.42 * (number(task.get("center")) + 2.0 * number(task.get("neighbor")));
+            }
+            "two_adjacent" => total += 0.42 * 2.0 * amount,
+            "all_planets" => total += 0.38 * 5.0 * amount,
+            "credits" => total += 0.028 * amount,
+            "zenithium" => total += 0.09 * amount,
+            "per_tech_first" => {
+                let developed = me
+                    .get("technology")
+                    .and_then(Value::as_array)
+                    .map(|values| {
+                        values
+                            .iter()
+                            .filter(|value| number(Some(value)) >= 1.0)
+                            .count()
+                    })
+                    .unwrap_or(0);
+                total += 0.055 * developed as f64 * amount;
+            }
+            "per_nonempty" => {
+                let owner = if task.get("owner").and_then(Value::as_str) == Some("self") {
+                    me
+                } else {
+                    them
+                };
+                let count = owner
+                    .get("columns")
+                    .and_then(Value::as_array)
+                    .map(|columns| {
+                        columns
+                            .iter()
+                            .filter(|column| {
+                                column.as_array().is_some_and(|cards| !cards.is_empty())
+                            })
+                            .count()
+                    })
+                    .unwrap_or(0);
+                total += 0.025 * count as f64 * amount;
+            }
+            "mobilize" => total += 0.10 * number(task.get("count")),
+            "transfer" => total += 0.25 * number(task.get("count")),
+            "exile" => total += 0.20 * number(task.get("count")),
+            "exile_tier" => total += 0.28,
+            "exile_for_matching" => {
+                total += 0.28 * task.get("count").map_or(1.0, |value| number(Some(value)));
+            }
+            "optional_exile_each" => {
+                total += 0.15
+                    * task
+                        .get("planets")
+                        .and_then(Value::as_array)
+                        .map_or(0, Vec::len) as f64;
+            }
+            "draw_bonus" => total += 0.16,
+            "develop" => total += 0.18,
+            "leader" => {
+                total += 0.28
+                    + if number(task.get("level")).max(1.0) >= 2.0 {
+                        0.08
+                    } else {
+                        0.0
+                    }
+            }
+            "take_board_bonus" => total += 0.20,
+            "spend_tier" => total += 0.50,
+            "discard_hand" => total += 0.08,
+            "reset_planet" => total += 0.20,
+            "choose_branch" => {
+                let best = task
+                    .get("branches")
+                    .and_then(Value::as_array)
+                    .map(|branches| {
+                        branches
+                            .iter()
+                            .map(|branch| {
+                                effect_value(branch.get("tasks"), observation, me, them, seat)
+                            })
+                            .fold(0.0, f64::max)
+                    })
+                    .unwrap_or(0.0);
+                total += best;
+            }
+            "optional" => {
+                total += 0.75 * effect_value(task.get("then"), observation, me, them, seat)
+            }
+            "if_leader" => {
+                let factor = if leader_owner == Some(seat) { 1.0 } else { 0.2 };
+                total += factor * effect_value(task.get("then"), observation, me, them, seat);
+            }
+            "if_credits" => {
+                let factor = if number(me.get("credits")) >= amount {
+                    1.0
+                } else {
+                    0.0
+                };
+                total += factor * effect_value(task.get("then"), observation, me, them, seat);
+            }
+            "transfer_each" => {
+                let count = them
+                    .get("columns")
+                    .and_then(Value::as_array)
+                    .map(|columns| {
+                        columns
+                            .iter()
+                            .filter(|column| {
+                                column.as_array().is_some_and(|cards| !cards.is_empty())
+                            })
+                            .count()
+                    })
+                    .unwrap_or(0);
+                total += 0.25 * count as f64;
+            }
+            _ => {}
+        }
+    }
+    total
+}
+
 fn score(observation: &Value, action: &Value) -> f64 {
     let action_name = action.get("action").and_then(Value::as_str).unwrap_or("");
     let seat = observation.get("seat").and_then(Value::as_u64).unwrap_or(0) as usize;
@@ -155,37 +328,47 @@ fn score(observation: &Value, action: &Value) -> f64 {
     let me = players
         .and_then(|items| items.get(seat))
         .unwrap_or(&Value::Null);
-    let card = action
-        .get("card_id")
-        .and_then(Value::as_u64)
-        .and_then(|id| crate::rules().cards.get(&(id as u16)));
+    let them = players
+        .and_then(|items| items.get(1 - seat))
+        .unwrap_or(&Value::Null);
+    let card_id = action.get("card_id").and_then(Value::as_u64);
+    let card = card_id.and_then(|id| crate::rules().cards.get(&(id as u16)));
+    let pending_task = observation
+        .get("pending")
+        .and_then(|pending| pending.get("task"))
+        .unwrap_or(&Value::Null);
+    let task_type = pending_task
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("");
     let mut result = 0.0;
     if let Some(card) = card {
-        let planet = PLANETS
+        let planet_index = PLANETS
             .iter()
             .position(|value| *value == card.planet)
             .unwrap_or(0);
         let column_len = me
             .get("columns")
             .and_then(Value::as_array)
-            .and_then(|columns| columns.get(planet))
+            .and_then(|columns| columns.get(planet_index))
             .and_then(Value::as_array)
             .map_or(0, Vec::len) as f64;
+        let progress = position(observation, Some(&Value::String(card.planet.clone())), seat);
         match action_name {
             "recruit" => {
                 let cost = (card.cost as f64 - column_len).max(0.0);
-                result += 0.42 * (1.0 - cost / 10.0);
-                if let Some(position) = observation
-                    .get("influence")
-                    .and_then(Value::as_array)
-                    .and_then(|values| values.get(planet))
-                    .filter(|value| !value.is_null())
-                {
-                    let direction = if seat == 0 { 1.0 } else { -1.0 };
-                    result += 0.16 * number(Some(position)) * direction / 4.0;
-                }
-                if column_len > 0.0 {
-                    result += 0.04;
+                result += 0.55 + 0.08 * progress - 0.0749 * cost
+                    + if column_len > 0.0 { 0.03 } else { 0.0 };
+                let card_tasks = crate::rules()
+                    .card_effects
+                    .get(&card.id)
+                    .cloned()
+                    .map(Value::Array);
+                result += 0.6941 * effect_value(card_tasks.as_ref(), observation, me, them, seat);
+                if progress >= 3.0 {
+                    result += 2.0;
+                } else if progress >= 2.0 {
+                    result += 0.2;
                 }
             }
             "technology" => {
@@ -197,18 +380,16 @@ fn score(observation: &Value, action: &Value) -> f64 {
                     .get("technology")
                     .and_then(Value::as_array)
                     .and_then(|values| values.get(faction))
-                    .and_then(Value::as_i64)
-                    .unwrap_or(0) as f64;
-                result += 0.25 + 0.035 * (5.0 - level);
+                    .map_or(0.0, |value| number(Some(value)));
+                result += 0.1945 + 0.0016 * (5.0 - level);
             }
             "leader" => {
-                result += 0.13;
-                result += match card.faction.as_str() {
-                    "robot" => 0.05,
-                    "human" => 0.04,
-                    "animod" => 0.045,
-                    _ => 0.0,
-                };
+                result += 0.0457 + 0.05 * (card.faction == "animod") as i32 as f64;
+                let owner = observation
+                    .get("leader")
+                    .and_then(|leader| leader.get("owner"))
+                    .and_then(Value::as_u64);
+                result += 0.1 * (owner == Some(seat as u64)) as i32 as f64;
             }
             _ => {}
         }
@@ -219,41 +400,109 @@ fn score(observation: &Value, action: &Value) -> f64 {
                     .as_u64()
                     .and_then(|value| crate::rules().cards.get(&(value as u16)))
                     .map_or(5.0, |card| card.cost as f64);
-                result += 0.012 * (5.0 - cost);
+                result += 0.01 * (5.0 - cost);
             }
         }
     }
-    let direction = if seat == 0 { 1.0 } else { -1.0 };
-    if let Some(planet) = index_of(&PLANETS, action.get("planet")) {
-        if let Some(position) = observation
-            .get("influence")
-            .and_then(Value::as_array)
-            .and_then(|values| values.get(planet))
-            .filter(|value| !value.is_null())
+    if let Some(planet) = action.get("planet").and_then(Value::as_str) {
+        let planet_value = position(observation, Some(&Value::String(planet.to_owned())), seat);
+        result += 0.4 * planet_value;
+        if matches!(task_type, "transfer" | "exile" | "exile_for_matching") {
+            let index = PLANETS
+                .iter()
+                .position(|value| *value == planet)
+                .unwrap_or(0);
+            let opponent_column = them
+                .get("columns")
+                .and_then(Value::as_array)
+                .and_then(|columns| columns.get(index))
+                .and_then(Value::as_array)
+                .map_or(0, Vec::len) as f64;
+            result += 0.2 * opponent_column - 0.1 * planet_value;
+        }
+        if matches!(
+            task_type,
+            "influence" | "influence_other" | "split_influence"
+        ) && planet_value + number(pending_task.get("amount")).max(1.0) >= 4.0
         {
-            result += 0.18 * number(Some(position)) * direction / 4.0;
+            result += 2.0;
         }
     }
     if let Some(planets) = action.get("planets").and_then(Value::as_array) {
-        for planet in planets {
-            if let Some(index) = index_of(&PLANETS, Some(planet)) {
-                if let Some(position) = observation
-                    .get("influence")
-                    .and_then(Value::as_array)
-                    .and_then(|values| values.get(index))
-                    .filter(|value| !value.is_null())
-                {
-                    result += 0.08 * number(Some(position)) * direction / 4.0;
-                }
-            }
-        }
+        result += 0.4
+            * planets
+                .iter()
+                .map(|planet| position(observation, Some(planet), seat))
+                .sum::<f64>();
     }
     if action.get("accept").and_then(Value::as_bool) == Some(true) {
-        result += 0.025;
+        result += 0.2;
     }
-    result += 0.018 * number(action.get("tier"));
-    result += 0.01 * number(action.get("cost"));
-    result -= 0.0005 * number(action.get("branch"));
+    if action.get("accept").and_then(Value::as_bool) == Some(false) {
+        result -= 0.02;
+    }
+    result += 0.059 * number(action.get("tier"));
+    if let Some(faction) = action.get("faction").and_then(Value::as_str) {
+        if let Some(index) = FACTIONS.iter().position(|value| *value == faction) {
+            let level = me
+                .get("technology")
+                .and_then(Value::as_array)
+                .and_then(|values| values.get(index))
+                .map_or(0.0, |value| number(Some(value)));
+            result += 0.1 * (5.0 - level);
+        }
+    }
+    if let Some(branch) = action.get("branch").and_then(Value::as_u64) {
+        let label = pending_task
+            .get("branch_labels")
+            .and_then(Value::as_array)
+            .and_then(|labels| labels.get(branch as usize))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        result += if label.contains("influence") || label.contains("transfer") {
+            0.2
+        } else {
+            0.1
+        };
+    }
+    if let Some(area) = action.get("bonus_area").and_then(Value::as_str) {
+        let (values, labels): (Option<&Vec<Value>>, &[&str]) = if area == "planet" {
+            (
+                observation.get("planet_bonus").and_then(Value::as_array),
+                &PLANETS,
+            )
+        } else {
+            (
+                observation
+                    .get("technology_bonus")
+                    .and_then(Value::as_array),
+                &FACTIONS,
+            )
+        };
+        if let (Some(values), Some(index)) = (values, index_of(labels, action.get("slot"))) {
+            let token = values.get(index).and_then(Value::as_u64).unwrap_or(0);
+            let bonus = match token {
+                1 => 1.0,
+                2 => 1.2,
+                3 => 4.0,
+                4 => 2.0,
+                5 => 1.5,
+                6..=8 => 2.0,
+                _ => 0.0,
+            };
+            result += 0.1 * bonus;
+        }
+    }
+    if action_name == "choose" {
+        if let Some(id) = card_id {
+            let cost = crate::rules()
+                .cards
+                .get(&(id as u16))
+                .map_or(0.0, |card| card.cost as f64);
+            result -= 0.02 * cost;
+        }
+    }
     result
 }
 
@@ -404,9 +653,10 @@ pub fn choose_move(
             .filter(|item| (item.0 - best).abs() <= 1e-12)
             .collect::<Vec<_>>();
         ties.sort_by(|left, right| left.1.cmp(&right.1));
-        let mut state = (seed as u32) ^ 0x9e37_79b9;
-        state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        index = Some(ties[(state as usize) % ties.len()].2);
+        // Root-parallel workers all see the same public position.  Keep their
+        // decision stable so voting reinforces a tactical tie instead of
+        // randomly splitting it between equivalent branches.
+        index = ties.last().map(|item| item.2);
     }
     if let Some(chosen) = index {
         if let Some(branches) = next_memory

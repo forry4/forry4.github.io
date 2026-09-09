@@ -30,6 +30,10 @@ def choose_fallback_move(game: dict, pid: str, seed: int | None = None) -> dict 
     if not moves:
         return None
     try:
+        # Keep the server watchdog on the exact same versioned policy as the
+        # browser worker.  This is also the normal path for old browsers and
+        # failed workers, so a Hard room never silently changes strategy just
+        # because client-side inference was unavailable.
         result = choose_serving_move(
             observation(game, pid), moves, None, 0, int(seed or 0))
         if result.move in moves:

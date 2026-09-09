@@ -24,13 +24,14 @@ import time
 from typing import Any, Iterable
 
 from ..cards import CARDS, FACTIONS, PLANETS
+from ..effects import CARD_EFFECTS
 from .state import TASK_FIELDS, SCHEMA_VERSION, action_key, rules_fingerprint
 
 
 SERVING_ABI_VERSION = 1
-MODEL_VERSION = 1
+MODEL_VERSION = 2
 ENCODER_VERSION = "orbit-observation-v1"
-MODEL_ID = "orbit-hard-v1"
+MODEL_ID = "orbit-hard-v2"
 TURN_BUDGET_MS = 5_000
 MAIN_ACTION_BUDGET_MS = 3_000
 FOLLOWUP_RESERVE_MS = TURN_BUDGET_MS - MAIN_ACTION_BUDGET_MS
@@ -43,6 +44,40 @@ OBSERVATION_KEYS = frozenset((
     "pending_pid", "winner", "seat", "players", "agent_deck_count",
     "bonus_deck_count", "pending", "legal_moves",
 ))
+
+# The shipped Hard policy is intentionally a small, auditable ranker rather
+# than a hidden-state model.  These values were selected offline with paired
+# self-play and are kept in one map so the Python fallback, browser worker and
+# native serving export can be checked against the same policy version.
+POLICY_WEIGHTS = {
+    "recruit": 0.55,
+    "progress": 0.08,
+    "cost": 0.0749,
+    "column": 0.03,
+    "effect": 0.6941,
+    "capture": 2.0,
+    "near_capture": 0.2,
+    "technology": 0.1945,
+    "technology_level": 0.0016,
+    "leader": 0.0457,
+    "leader_animod": 0.05,
+    "leader_owned": 0.1,
+    "mulligan": 0.01,
+    "choice": 0.4,
+    "choice_opponent": 0.1,
+    "deny": 0.2,
+    "choice_capture": 2.0,
+    "accept": 0.2,
+    "decline": -0.02,
+    "tier": 0.059,
+    "faction": 0.1,
+    "branch_influence": 0.2,
+    "branch_resource": 0.1,
+    "bonus": 0.1,
+    "discard": 0.02,
+}
+BONUS_POLICY_VALUES = {1: 1.0, 2: 1.2, 3: 4.0, 4: 2.0,
+                       5: 1.5, 6: 2.0, 7: 2.0, 8: 2.0}
 OBSERVATION_PLAYER_KEYS = frozenset((
     "credits", "zenithium", "columns", "technology", "row_bonuses",
     "captured", "hand_count", "hand",
@@ -107,6 +142,17 @@ def model_asset() -> dict[str, Any]:
             "faction": card["faction"],
         }
         for card_id, card in sorted(CARDS.items())
+    }
+    # Effect programs are public card text in structured form.  Shipping them
+    # beside the attributes lets the JS fallback rank a card's actual tempo
+    # instead of pretending every recruit is interchangeable.
+    payload["card_effects"] = {
+        str(card_id): copy.deepcopy(CARD_EFFECTS[card_id])
+        for card_id in sorted(CARD_EFFECTS)
+    }
+    payload["policy"] = copy.deepcopy(POLICY_WEIGHTS)
+    payload["bonus_policy_values"] = {
+        str(token): value for token, value in sorted(BONUS_POLICY_VALUES.items())
     }
     return payload
 
@@ -258,20 +304,165 @@ def _card(observation: dict, move: dict) -> tuple[dict | None, dict | None]:
     return card, {"player": player, "columns": columns}
 
 
-def _score(observation: dict, move: dict) -> float:
-    """A deterministic, public-observation-only fallback score.
+def _position(observation: dict, planet: str) -> float:
+    """Return public progress toward this seat's side of a planet track."""
 
-    This is intentionally cheap enough to run when a model or worker fails. It
-    values conversion into influence/technology above raw resource hoarding and
-    keeps card identity/planet adjacency visible to the eventual learned guide.
+    try:
+        value = observation.get("influence", [])[PLANETS.index(planet)]
+    except (IndexError, TypeError, ValueError):
+        return 0.0
+    if value is None:
+        return 0.0
+    try:
+        return float(value) * (1.0 if int(observation.get("seat", 0)) == 0 else -1.0)
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
+
+
+def _effect_value(tasks: Any, observation: dict, me: dict, them: dict) -> float:
+    """Estimate the public tempo of a declarative card effect.
+
+    This is a policy feature, not an engine interpreter.  It deliberately
+    reads only public columns/resources and the current seat's own state; the
+    server still applies the real effect and validates every follow-up choice.
+    Keeping the recursive shape aligned with ``CARD_EFFECTS`` lets a single
+    exported card program drive the Python and browser fallbacks.
     """
 
+    if not isinstance(tasks, list):
+        return 0.0
+    total = 0.0
+    leader_owner = (observation.get("leader") or {}).get("owner")
+    seat = observation.get("seat")
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+        kind = task.get("type")
+        try:
+            amount = float(task.get("amount", 0) or 0)
+        except (TypeError, ValueError, OverflowError):
+            amount = 0.0
+        if kind == "influence":
+            planet = task.get("planet")
+            total += (0.42 * amount * (1.0 + 0.14 * _position(observation, planet))
+                      if planet in PLANETS else 0.48 * amount)
+        elif kind == "influence_other":
+            total += 0.45 * amount
+        elif kind == "split_influence":
+            try:
+                total += 0.44 * sum(float(value) for value in task.get("amounts", []))
+            except (TypeError, ValueError, OverflowError):
+                pass
+        elif kind == "adjacent_three":
+            try:
+                total += 0.42 * (
+                    float(task.get("center", 0) or 0)
+                    + 2.0 * float(task.get("neighbor", 0) or 0)
+                )
+            except (TypeError, ValueError, OverflowError):
+                pass
+        elif kind == "two_adjacent":
+            total += 0.42 * 2.0 * amount
+        elif kind == "all_planets":
+            total += 0.38 * 5.0 * amount
+        elif kind in {"credits", "zenithium"}:
+            total += (0.028 if kind == "credits" else 0.09) * amount
+        elif kind == "per_tech_first":
+            try:
+                developed = sum(int(value) >= 1 for value in me.get("technology", []))
+                total += 0.055 * developed * amount
+            except (TypeError, ValueError, OverflowError):
+                pass
+        elif kind == "per_nonempty":
+            owner = me if task.get("owner") == "self" else them
+            total += 0.025 * sum(bool(column) for column in owner.get("columns", [])) * amount
+        elif kind == "mobilize":
+            try:
+                total += 0.10 * float(task.get("count", 0) or 0)
+            except (TypeError, ValueError, OverflowError):
+                pass
+        elif kind == "transfer":
+            try:
+                total += 0.25 * float(task.get("count", 0) or 0)
+            except (TypeError, ValueError, OverflowError):
+                pass
+        elif kind == "exile":
+            try:
+                total += 0.20 * float(task.get("count", 0) or 0)
+            except (TypeError, ValueError, OverflowError):
+                pass
+        elif kind == "exile_tier":
+            total += 0.28
+        elif kind == "exile_for_matching":
+            try:
+                total += 0.28 * float(task.get("count", 1) or 1)
+            except (TypeError, ValueError, OverflowError):
+                pass
+        elif kind == "optional_exile_each":
+            total += 0.15 * len(task.get("planets", []))
+        elif kind == "draw_bonus":
+            total += 0.16
+        elif kind == "develop":
+            total += 0.18
+        elif kind == "leader":
+            total += 0.28 + (0.08 if (task.get("level", 1) or 1) >= 2 else 0.0)
+        elif kind == "take_board_bonus":
+            total += 0.20
+        elif kind == "spend_tier":
+            total += 0.50
+        elif kind == "discard_hand":
+            total += 0.08
+        elif kind == "reset_planet":
+            # Resetting a disc creates a fresh race on that planet.  It is a
+            # smaller tempo swing than direct influence, but it is still a
+            # meaningful card effect and is part of the public card program.
+            total += 0.20
+        elif kind == "choose_branch":
+            branches = task.get("branches", [])
+            values = [
+                _effect_value(branch.get("tasks", []), observation, me, them)
+                for branch in branches if isinstance(branch, dict)
+            ]
+            total += max(values, default=0.0)
+        elif kind == "optional":
+            total += 0.75 * _effect_value(task.get("then", []), observation, me, them)
+        elif kind == "if_leader":
+            factor = 1.0 if leader_owner == seat else 0.2
+            total += factor * _effect_value(task.get("then", []), observation, me, them)
+        elif kind == "if_credits":
+            try:
+                factor = 1.0 if float(me.get("credits", 0) or 0) >= float(task.get("amount", 0) or 0) else 0.0
+            except (TypeError, ValueError, OverflowError):
+                factor = 0.0
+            total += factor * _effect_value(task.get("then", []), observation, me, them)
+        elif kind == "transfer_each":
+            total += 0.25 * sum(bool(column) for column in them.get("columns", []))
+    return total
+
+
+def _effect_score(observation: dict, card_id: int, me: dict, them: dict) -> float:
+    try:
+        tasks = CARD_EFFECTS.get(int(card_id), [])
+    except (TypeError, ValueError, OverflowError):
+        tasks = []
+    return _effect_value(tasks, observation, me, them)
+
+
+def _score(observation: dict, move: dict) -> float:
+    """A deterministic, public-observation-only Hard policy score."""
+
     action = move.get("action")
+    weights = POLICY_WEIGHTS
     score = 0.0
     seat = int(observation.get("seat", 0))
     players = observation.get("players", [{}, {}])
     me = players[seat] if seat < len(players) else {}
+    them = players[1 - seat] if len(players) == 2 else {}
     card, ctx = _card(observation, move)
+    pending = observation.get("pending") or {}
+    task = pending.get("task") or {}
+    task_type = task.get("type")
+
     if card and ctx:
         columns = ctx["columns"]
         planet = card["planet"]
@@ -281,57 +472,99 @@ def _score(observation: dict, move: dict) -> float:
         except (ValueError, IndexError, TypeError):
             column_len = 0
             planet_index = 0
+        progress = _position(observation, planet)
         if action == "recruit":
             cost = max(0, int(card["cost"]) - column_len)
-            score += 0.42 * (1.0 - cost / 10.0)
-            influence = observation.get("influence", [None] * len(PLANETS))
-            position = influence[planet_index] if planet_index < len(influence) else None
-            if position is not None:
-                direction = 1 if seat == 0 else -1
-                score += 0.16 * (float(position) * direction / 4.0)
-            score += 0.04 * (column_len > 0)
+            score += (
+                weights["recruit"]
+                + weights["progress"] * progress
+                - weights["cost"] * cost
+                + weights["column"] * bool(column_len)
+                + weights["effect"] * _effect_score(observation, card["id"], me, them)
+            )
+            if progress >= 3:
+                score += weights["capture"]
+            elif progress >= 2:
+                score += weights["near_capture"]
         elif action == "technology":
-            tech = me.get("technology", [])
             try:
-                level = int(tech[FACTIONS.index(card["faction"])])
-            except (ValueError, IndexError, TypeError):
+                level = int(me.get("technology", [0, 0, 0])[FACTIONS.index(card["faction"])])
+            except (ValueError, IndexError, TypeError, OverflowError):
                 level = 0
-            score += 0.25 + 0.035 * (5 - level)
+            score += weights["technology"] + weights["technology_level"] * (5 - level)
         elif action == "leader":
-            score += 0.13
-            score += {"robot": 0.05, "human": 0.04, "animod": 0.045}.get(card["faction"], 0.0)
+            score += weights["leader"]
+            score += weights["leader_animod"] * (card["faction"] == "animod")
+            score += weights["leader_owned"] * ((observation.get("leader") or {}).get("owner") == seat)
     elif action == "mulligan":
-        # Keep expensive cards: exchanging a low-cost card is the safer opening.
-        score += 0.012 * sum(5 - int(CARDS.get(int(card_id), {}).get("cost", 5))
-                              for card_id in move.get("card_ids", []))
+        try:
+            score += weights["mulligan"] * sum(
+                5 - int(CARDS.get(int(card_id), {}).get("cost", 5))
+                for card_id in move.get("card_ids", [])
+            )
+        except (TypeError, ValueError, OverflowError):
+            pass
 
-    if "planet" in move:
-        try:
-            position = observation.get("influence", [None] * len(PLANETS))[PLANETS.index(move["planet"])]
-            if position is not None:
-                score += 0.18 * (float(position) * (1 if seat == 0 else -1) / 4.0)
-        except (ValueError, IndexError, TypeError):
-            pass
-    for planet in move.get("planets", []):
-        try:
-            position = observation.get("influence", [None] * len(PLANETS))[PLANETS.index(planet)]
-            if position is not None:
-                score += 0.08 * (float(position) * (1 if seat == 0 else -1) / 4.0)
-        except (ValueError, IndexError, TypeError):
-            pass
+    if move.get("planet") in PLANETS:
+        progress = _position(observation, move["planet"])
+        score += weights["choice"] * progress
+        if task_type in {"transfer", "exile", "exile_for_matching"}:
+            try:
+                opponent_column = len(them.get("columns", [])[PLANETS.index(move["planet"])])
+            except (IndexError, TypeError, ValueError):
+                opponent_column = 0
+            score += weights["deny"] * opponent_column - weights["choice_opponent"] * progress
+        if task_type in {"influence", "influence_other", "split_influence"}:
+            try:
+                amount = float(task.get("amount", 1) or 1)
+            except (TypeError, ValueError, OverflowError):
+                amount = 1.0
+            if progress + amount >= 4:
+                score += weights["choice_capture"]
+    if isinstance(move.get("planets"), list):
+        score += weights["choice"] * sum(_position(observation, planet) for planet in move["planets"])
     if move.get("accept") is True:
-        score += 0.025
+        score += weights["accept"]
+    elif move.get("accept") is False:
+        score += weights["decline"]
     if "tier" in move:
-        score += 0.018 * int(move.get("tier") or 0)
-    if move.get("cost"):
-        score += 0.01 * int(move["cost"])
-    if move.get("branch") is not None:
-        score -= 0.0005 * int(move.get("branch") or 0)
+        try:
+            score += weights["tier"] * int(move.get("tier") or 0)
+        except (TypeError, ValueError, OverflowError):
+            pass
+    if move.get("faction") in FACTIONS:
+        try:
+            score += weights["faction"] * (5 - int(me.get("technology", [0, 0, 0])[FACTIONS.index(move["faction"])]))
+        except (IndexError, TypeError, ValueError, OverflowError):
+            pass
+    if "branch" in move:
+        try:
+            branch = int(move.get("branch") or 0)
+        except (TypeError, ValueError, OverflowError):
+            branch = 0
+        labels = task.get("branch_labels", []) if isinstance(task, dict) else []
+        label = str(labels[branch]).lower() if 0 <= branch < len(labels) else ""
+        score += weights["branch_influence"] if any(
+            word in label for word in ("influence", "transfer")
+        ) else weights["branch_resource"]
+    if "bonus_area" in move:
+        values = observation.get("planet_bonus", []) if move.get("bonus_area") == "planet" else observation.get("technology_bonus", [])
+        labels = PLANETS if move.get("bonus_area") == "planet" else FACTIONS
+        try:
+            token = values[labels.index(move.get("slot"))]
+            score += weights["bonus"] * BONUS_POLICY_VALUES.get(int(token), 0.0)
+        except (IndexError, TypeError, ValueError, OverflowError):
+            pass
+    if "card_id" in move and action == "choose":
+        try:
+            score -= weights["discard"] * int(CARDS[int(move["card_id"])] ["cost"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            pass
     return float(score)
 
 
 def _seeded_tie_index(seed: int, count: int) -> int:
-    """Small cross-runtime tie breaker shared by Python, JS and Rust."""
+    """Reproduce the incumbent v1 tie stream in offline arena tooling."""
 
     state = ((int(seed) & 0xFFFFFFFF) ^ 0x9E3779B9) & 0xFFFFFFFF
     state = (state * 1_664_525 + 1_013_904_223) & 0xFFFFFFFF
@@ -373,10 +606,11 @@ def choose_move(
         scores = [(float(_score(observation, move)), action_key(move), move) for move in moves]
         best = max(item[0] for item in scores)
         ties = [item for item in scores if math.isclose(item[0], best, rel_tol=0.0, abs_tol=1e-12)]
-        # Seeded tie choice gives independent workers different exploration while
-        # preserving exact reproducibility across Python, JS and Rust workers.
+        # All browser workers see the same public position.  A stable final
+        # tie-break keeps their vote from turning a tactical tie into a random
+        # move, while the seed remains in diagnostics for replay accounting.
         ordered = [item[2] for item in sorted(ties, key=lambda item: item[1])]
-        chosen = ordered[_seeded_tie_index(seed, len(ordered))]
+        chosen = ordered[-1]
 
     if chosen is not None:
         branches = result_memory.setdefault("branches", {})

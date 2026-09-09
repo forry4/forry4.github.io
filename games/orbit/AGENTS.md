@@ -37,8 +37,8 @@ The agreed campaign is in `AI_PLAN.md`. Phase 1 is implemented locally in
   improvement and regression decisions. Timing is inconclusive until a real
   WASM/serving calibration is supplied; a passing report still never changes
   the serving bot automatically. Phase 5 wires only the versioned Hard serving
-  boundary; the current browser asset is a cheap observation-only fallback
-  until a gated champion is explicitly exported.
+  boundary; the current browser asset is an observation-only effect-aware
+  policy, while a learned champion still requires the explicit serving gates.
 
 ## Rules and serving
 

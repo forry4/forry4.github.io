@@ -195,32 +195,35 @@ def state_value(game: dict, pid: str) -> float:
     them = game["players"][other]
     direction = 1 if game["order"][0] == pid else -1
 
-    value = 0.0
-    value += 0.72 * (_progress(me["captured"]) - _progress(them["captured"]))
-    own_influence = sum(
-        (position * direction) / 4.0
-        for position in game["influence"].values()
-        if position is not None
+    # Capture progress is nonlinear: two discs from one planet are much more
+    # useful than two scattered discs because the third step ends the game.
+    # Influence receives the same urgency treatment, while terminal outcomes
+    # remain the only hard reward.  Every term is public or seat-local.
+    value = 1.4 * (_progress(me["captured"]) - _progress(them["captured"]))
+    for position in game["influence"].values():
+        if position is None:
+            continue
+        progress = position * direction
+        value += 0.11 * progress + 0.06 * (progress ** 3) / 27.0
+        if progress >= 2:
+            value += 0.18
+        elif progress <= -2:
+            value -= 0.18
+    value += 0.05 * (len(me["captured"]) - len(them["captured"]))
+    value += 0.018 * (
+        sum(me["technology"].get(faction, 0) for faction in FACTIONS)
+        - sum(them["technology"].get(faction, 0) for faction in FACTIONS)
     )
-    value += 0.08 * own_influence
-    value += 0.035 * (len(me["captured"]) - len(them["captured"]))
-    value += 0.016 * (me["technology"].get("robot", 0) + me["technology"].get("human", 0) + me["technology"].get("animod", 0))
-    value -= 0.016 * (them["technology"].get("robot", 0) + them["technology"].get("human", 0) + them["technology"].get("animod", 0))
-    value += 0.045 * (len(me["row_bonuses"]) - len(them["row_bonuses"]))
+    value += 0.03 * (len(me["row_bonuses"]) - len(them["row_bonuses"]))
     if game["leader"]["owner"] == pid:
         value += 0.09 + 0.035 * game["leader"]["level"]
     elif game["leader"]["owner"] == other:
         value -= 0.09 + 0.035 * game["leader"]["level"]
-    value += 0.012 * (me["credits"] - them["credits"])
-    value += 0.025 * (me["zenithium"] - them["zenithium"])
-
-    # Own hand and public columns are safe card identity features.  A modest
-    # value rewards affordable tempo without allowing a resource hoard to beat
-    # a conversion into influence.
+    value += 0.025 * (me["credits"] - them["credits"])
+    value += 0.04 * (me["zenithium"] - them["zenithium"])
     own_cards = sum(CARDS[c]["cost"] for c in me["hand"])
-    own_cards += sum(CARDS[c]["cost"] * 0.45 for column in me["columns"].values() for c in column)
-    public_opp_cards = sum(CARDS[c]["cost"] * 0.28 for column in them["columns"].values() for c in column)
-    value += 0.003 * (own_cards - public_opp_cards)
+    public_opp_cards = sum(CARDS[c]["cost"] for column in them["columns"].values() for c in column)
+    value += 0.005 * (own_cards - public_opp_cards)
     return math.tanh(value)
 
 
@@ -281,40 +284,42 @@ def _fast_action_score(game: dict, pid: str, move: dict) -> float:
     action = move.get("action")
     direction = 1 if game["order"][0] == pid else -1
     score = 0.0
+    player = game["players"][pid]
     if action in {"recruit", "technology", "leader"} and "card_id" in move:
         card = CARDS[int(move["card_id"])]
-        player = game["players"][pid]
+        position = game["influence"].get(card["planet"])
+        progress = 0.0 if position is None else position * direction
         if action == "recruit":
             column = player["columns"][card["planet"]]
             cost = max(0, card["cost"] - len(column))
-            position = game["influence"].get(card["planet"])
-            distance = 4 if position is None else 4 - position * direction
-            score += 0.16 * (1.0 - cost / 10.0) + 0.025 * (1.0 - distance / 8.0)
-            score += 0.01 * (len(column) > 0)
+            score += 0.20 + 0.08 * progress - 0.01 * cost
+            if progress >= 2:
+                score += 0.30
+            if progress >= 3:
+                score += 1.50
         elif action == "technology":
             level = player["technology"][card["faction"]]
-            score += 0.11 + 0.015 * (5 - level)
+            score += 0.12 + 0.02 * (5 - level)
         else:
-            score += 0.055 + 0.012 * (card["faction"] == "animod")
+            score += 0.05
     if action == "mulligan":
-        # A low printed-cost card is the safer exchange.  The engine draws the
-        # replacement; no hidden identity is consulted here.
         score += 0.01 * sum(5 - CARDS[int(card)]["cost"] for card in move.get("card_ids", []))
     planet = move.get("planet")
     if planet in game["influence"]:
         position = game["influence"][planet]
-        if position is not None:
-            score += 0.12 * position * direction / 4.0
+        progress = 0.0 if position is None else position * direction
+        score += 0.25 * progress
+        if progress >= 3:
+            score += 1.20
     for planet in move.get("planets", []):
         position = game["influence"].get(planet)
-        if position is not None:
-            score += 0.07 * position * direction / 4.0
+        score += 0.20 * (0.0 if position is None else position * direction)
     if "tier" in move:
-        score += 0.02 * int(move["tier"])
+        score += 0.05 * int(move["tier"])
     if move.get("accept") is True:
-        score += 0.012
+        score += 0.10
     if "branch" in move:
-        score -= 0.001 * int(move["branch"])
+        score += 0.02 * (1 - int(move["branch"]))
     return score
 
 
