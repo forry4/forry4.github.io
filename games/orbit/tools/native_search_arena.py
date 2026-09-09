@@ -1,7 +1,6 @@
 """Run the native development search probe on fresh, paired all-board games."""
 import argparse,json,subprocess,time
 from pathlib import Path
-from ..ai.attention import load_checkpoint,export_model
 from ..ai.selfplay import ArenaResult,board_configurations,board_key
 from ..cards import FACTIONS
 from .value_campaign import game_seed
@@ -43,6 +42,11 @@ def summarise(results,*,pairs,boards,candidate,opponent,settings):
 
 
 def main():
+    # Checkpoint loading needs the optional training environment (torch); the
+    # row folding above must not, or importing this module for `summarise`
+    # drags torch into test collection, where CI has only the server's
+    # requirements. Keep this import inside main().
+    from ..ai.attention import load_checkpoint,export_model
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("checkpoint",type=Path,help="Checkpoint, or the literal 'heuristic' for the no-network leaf ablation")
     p.add_argument("output",type=Path)
@@ -50,6 +54,8 @@ def main():
     p.add_argument("--main-action-ms",type=int,help="Cap on the turn's main action; default is the whole turn")
     p.add_argument("--followup-ms",type=int,help="Cap on each follow-up decision; default is the whole turn")
     p.add_argument("--workers",type=int,default=1,help="Root-parallel worker pool, as the browser serves it")
+    p.add_argument("--via-observation",action="store_true",
+                   help="Search a world rebuilt from the observation and rank pending chains, as the browser must")
     p.add_argument("--pool",default="development-native-search-v1")
     p.add_argument("--opponent",type=Path,help="Frozen neural opponent; otherwise Hard v2")
     p.add_argument("--simulations",type=int,help="Deterministic control only; overrides time budget")
@@ -69,6 +75,7 @@ def main():
     request={"model":None if heuristic else export_model(model),"jobs":jobs,"budget_ms":args.budget_ms}
     if not 1<=args.workers<=8:p.error("workers must be 1..8")
     if args.workers>1:request["pool"]=args.workers
+    if args.via_observation:request["via_observation"]=True
     for key,value in (("main_action_ms",args.main_action_ms),("followup_ms",args.followup_ms)):
         if value is not None:
             if not 1<=value<=args.budget_ms:p.error(f"{key} must be within the whole-turn budget")
@@ -89,7 +96,7 @@ def main():
     finally:process.stdout.close();process.wait(timeout=10)
     opponent_name=str(args.opponent) if args.opponent else "hard-v2"
     report={"purpose":"development, not promotion","pool":args.pool,"budget_ms":args.budget_ms,
-            "main_action_ms":args.main_action_ms,"followup_ms":args.followup_ms,"workers":args.workers,
+            "main_action_ms":args.main_action_ms,"followup_ms":args.followup_ms,"workers":args.workers,"via_observation":args.via_observation,
             "fixed_simulations":args.simulations,"checkpoint":str(args.checkpoint),
             "opponent":opponent_name,
             "games":results,"seconds":time.perf_counter()-started,

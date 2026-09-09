@@ -18,8 +18,15 @@ Two things here are load-bearing and were expensive to learn elsewhere:
   both deck orders, RNG state, and private decisions never reach the wrong wire.
 
 Orbit alternates turns after the simultaneous opening mulligan. The random bot
-and browser-served Hard tier use the exact same ``legal_moves`` /
+and the two browser-served tiers use the exact same ``legal_moves`` /
 ``apply_move`` boundary; a missing browser answer always falls back server-side.
+
+Hard RANKS the position; Expert SEARCHES it, rebuilding a world from the seat's
+own observation because the worker never receives privileged state. Expert
+cannot rebuild a pending chain -- the observation redacts the queue to its first
+task -- so it ranks those decisions instead, and a room degrades per DECISION
+rather than per game. Both tiers spend a per-decision ``budget_ms`` split from
+the whole turn, and every reply is re-validated here before it is applied.
 """
 
 from __future__ import annotations
