@@ -9,7 +9,8 @@
     "preview": "vite preview --port 5173",
     "smoke": "node test/smoke.mjs",
     "screens": "node test/screens.mjs",
-    "screens:orbit": "node test/screens.mjs --only=orbitPlay"
+    "screens:orbit": "node test/screens.mjs --only=orbitPlay",
+    "expert-search": "node test/orbit-expert-search.mjs public/wasm test/fixtures/orbit-expert-search.json"
   },
   "dependencies": {
     "react": "^18.2.0",

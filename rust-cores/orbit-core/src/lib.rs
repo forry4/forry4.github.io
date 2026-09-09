@@ -2,7 +2,7 @@
 //! State is privileged. Policies must use the separate observation contract.
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::OnceLock;
 
 pub mod serving;
@@ -10,6 +10,7 @@ pub mod tensors;
 pub mod attention;
 pub mod features;
 pub mod search;
+pub(crate) mod clock;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
@@ -1305,5 +1306,214 @@ impl State {
             return Err("pending ownership".into());
         }
         Ok(())
+    }
+}
+
+impl State {
+    /// Rebuild a simulatable world from one seat's observation.
+    ///
+    /// This is the browser's entry point: Phase 5 hands a worker an observation,
+    /// never a privileged `State`, so a search that needs a simulator has to
+    /// reconstruct one. Every mechanical field is public in the observation
+    /// except the agent deck, the bonus reserve and the opposing hand, and those
+    /// three are dealt here from the unseen multiset so the conservation the
+    /// search's own determinizer checks already holds. The result is therefore
+    /// ONE sample from the seat's information set, not the true world; the
+    /// search resamples it per simulation.
+    ///
+    /// A pending chain is refused rather than guessed. The observation exposes
+    /// only `queue[0]` through a key whitelist, so the rest of the chain and its
+    /// context cannot be rebuilt, and a search over an invented continuation
+    /// would be searching a game that does not exist. Callers fall back to the
+    /// ranker for those decisions.
+    pub fn from_observation(observation: &Value, seed: u64) -> Result<Self, String> {
+        let seat = observation["seat"].as_u64().ok_or("Observation has no seat")? as usize;
+        if seat > 1 {
+            return Err("Observation seat is out of range".into());
+        }
+        if !observation["pending"].is_null() {
+            return Err("Pending chains are not reconstructable from an observation".into());
+        }
+        let mut value = json!({});
+        for key in [
+            "schema","phase","turn_pid","turn_number","influence","captured_this_turn","leader",
+            "board_sides","planet_bonus","technology_bonus","agent_discard","bonus_discard",
+            "mulligan_done","pending_pid","winner",
+        ] {
+            value[key] = observation
+                .get(key)
+                .ok_or_else(|| format!("Observation is missing {key}"))?
+                .clone();
+        }
+        value["pending"] = Value::Null;
+        let observed = observation["players"]
+            .as_array()
+            .ok_or("Observation has no players")?;
+        if observed.len() != 2 {
+            return Err("Observation must carry both seats".into());
+        }
+        let mut players = vec![];
+        for (index, source) in observed.iter().enumerate() {
+            let mut player = json!({});
+            for key in ["credits", "zenithium", "columns", "technology", "row_bonuses", "captured"] {
+                player[key] = source
+                    .get(key)
+                    .ok_or_else(|| format!("Observation player is missing {key}"))?
+                    .clone();
+            }
+            player["hand"] = if index == seat {
+Value::Array(source["hand"].as_array().ok_or("Observation hides the observer's own hand")?.clone())
+            } else {
+                json!([])
+            };
+            players.push(player);
+        }
+        value["players"] = json!(players);
+        value["agent_deck"] = json!([]);
+        value["bonus_deck"] = json!([]);
+        let mut state: State = serde_json::from_value(value).map_err(|err| format!("Observation does not describe a state: {err}"))?;
+
+        // Deal the three hidden pools from what this seat provably cannot see.
+        let mut known: BTreeSet<u16> = state.players[seat].hand.iter().copied().collect();
+        known.extend(state.agent_discard.iter().copied());
+        for player in &state.players {
+            for column in &player.columns {
+                known.extend(column.iter().copied());
+            }
+        }
+        let mut unseen: Vec<u16> = rules().cards.keys().filter(|id| !known.contains(id)).copied().collect();
+        let hand = observation["players"][1 - seat]["hand_count"].as_u64().ok_or("Observation has no opposing hand count")? as usize;
+        let deck = observation["agent_deck_count"].as_u64().ok_or("Observation has no agent deck count")? as usize;
+        if unseen.len() != hand + deck {
+            return Err("Observation agent conservation mismatch".into());
+        }
+        let mut chance = Chance::seeded(seed);
+        chance.shuffle(&mut unseen);
+        state.players[1 - seat].hand = unseen.drain(..hand).collect();
+        state.agent_deck = unseen;
+
+        let mut bonuses = rules().bonus_pool.clone();
+        bonuses.sort();
+        for id in state
+            .bonus_discard
+            .iter()
+            .copied()
+            .chain(state.planet_bonus.iter().chain(state.technology_bonus.iter()).filter_map(|x| *x))
+        {
+            let index = bonuses.iter().position(|b| *b == id).ok_or("Observation bonus conservation mismatch")?;
+            bonuses.remove(index);
+        }
+        if bonuses.len() != observation["bonus_deck_count"].as_u64().ok_or("Observation has no bonus reserve count")? as usize {
+            return Err("Observation bonus reserve mismatch".into());
+        }
+        chance.shuffle(&mut bonuses);
+        state.bonus_deck = bonuses;
+        Ok(state)
+    }
+}
+
+
+#[cfg(test)]
+mod observation_reconstruction {
+    use super::*;
+    #[test]
+    fn rebuilt_world_matches_every_public_field_and_the_legal_moves() {
+        let (mut state, mut chance) = State::new(404, [1, 2, 1]);
+        let mut checked = 0;
+        for step in 0..160 {
+            let Some(seat) = state.actor() else { break };
+            for view in 0..2 {
+                let obs = state.observation(view);
+                match State::from_observation(&obs, 77 + step) {
+                    Err(error) => {
+                        // The only sanctioned refusal is a pending chain, which
+                        // the observation redacts down to its first task.
+                        assert!(!obs["pending"].is_null(), "unexpected refusal: {error}");
+                    }
+                    Ok(world) => {
+                        assert!(obs["pending"].is_null());
+                        // Public mechanics must survive verbatim.
+                        assert_eq!(world.phase, state.phase);
+                        assert_eq!(world.turn_pid, state.turn_pid);
+                        assert_eq!(world.turn_number, state.turn_number);
+                        assert_eq!(world.influence, state.influence);
+                        assert_eq!(world.captured_this_turn, state.captured_this_turn);
+                        assert_eq!(world.leader, state.leader);
+                        assert_eq!(world.board_sides, state.board_sides);
+                        assert_eq!(world.planet_bonus, state.planet_bonus);
+                        assert_eq!(world.technology_bonus, state.technology_bonus);
+                        assert_eq!(world.agent_discard, state.agent_discard);
+                        assert_eq!(world.bonus_discard, state.bonus_discard);
+                        assert_eq!(world.mulligan_done, state.mulligan_done);
+                        assert_eq!(world.winner, state.winner);
+                        for index in 0..2 {
+                            assert_eq!(world.players[index].credits, state.players[index].credits);
+                            assert_eq!(world.players[index].zenithium, state.players[index].zenithium);
+                            assert_eq!(world.players[index].columns, state.players[index].columns);
+                            assert_eq!(world.players[index].technology, state.players[index].technology);
+                            assert_eq!(world.players[index].row_bonuses, state.players[index].row_bonuses);
+                            assert_eq!(world.players[index].captured, state.players[index].captured);
+                            // Counts are public even where identity is not.
+                            assert_eq!(world.players[index].hand.len(), state.players[index].hand.len());
+                        }
+                        assert_eq!(world.agent_deck.len(), state.agent_deck.len());
+                        assert_eq!(world.bonus_deck.len(), state.bonus_deck.len());
+                        // The observer's own hand is known exactly; the opponent's is not.
+                        let mut mine = world.players[view].hand.clone();
+                        let mut real = state.players[view].hand.clone();
+                        mine.sort();
+                        real.sort();
+                        assert_eq!(mine, real);
+                        // The search branches on this list, so the same options
+                        // must be offered. Order cannot match and must not be
+                        // asserted: the observation sorts the observer's hand,
+                        // so draw order is not recoverable -- and is not public
+                        // either. The search sorts moves before expanding them.
+                        let key = |mut m: Vec<Value>| {
+                            m.sort_by_key(|v| serde_json::to_string(v).unwrap());
+                            m
+                        };
+                        assert_eq!(key(world.legal_moves(view)), key(state.legal_moves(view)));
+                        // No card exists twice across the rebuilt world.
+                        let mut seen = BTreeSet::new();
+                        for id in world.players.iter().flat_map(|p| p.hand.iter().chain(p.columns.iter().flatten()))
+                            .chain(world.agent_deck.iter()).chain(world.agent_discard.iter()) {
+                            assert!(seen.insert(*id), "card {id} duplicated by reconstruction");
+                        }
+                        checked += 1;
+                    }
+                }
+            }
+            let moves = state.legal_moves(seat);
+            let mv = moves[chance.index(moves.len())].clone();
+            state.apply(seat, &mv, &mut chance).unwrap();
+        }
+        assert!(checked > 40, "too few reconstructable positions exercised: {checked}");
+    }
+
+    #[test]
+    fn reconstruction_cannot_see_the_opposing_hand() {
+        let (mut state, mut chance) = State::new(91, [2, 1, 2]);
+        for _ in 0..12 {
+            let Some(seat) = state.actor() else { break };
+            let moves = state.legal_moves(seat);
+            let mv = moves[chance.index(moves.len())].clone();
+            state.apply(seat, &mv, &mut chance).unwrap();
+        }
+        let seat = 0;
+        let obs = state.observation(seat);
+        if obs["pending"].is_null() {
+            let mut swapped = state.clone();
+            // Permute everything this seat cannot legally see.
+            swapped.agent_deck.reverse();
+            swapped.bonus_deck.reverse();
+            let card = swapped.agent_deck.pop().unwrap();
+            let old = std::mem::replace(&mut swapped.players[1].hand[0], card);
+            swapped.agent_deck.push(old);
+            assert_eq!(swapped.observation(seat), obs, "hidden change altered the observation");
+            let a = State::from_observation(&obs, 5).unwrap();
+            let b = State::from_observation(&swapped.observation(seat), 5).unwrap();
+            assert_eq!(a, b, "reconstruction depends on unseen state");
+        }
     }
 }

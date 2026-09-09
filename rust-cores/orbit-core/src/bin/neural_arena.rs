@@ -57,6 +57,11 @@ fn main() {
     let fixed_sims=request.get("simulations").and_then(Value::as_u64);
     assert!(fixed_sims.is_none_or(|n|n>0 && n<=10000),"Invalid fixed simulation count");
     let pool=request["pool"].as_u64().unwrap_or(1).max(1) as usize;
+    // Drive the candidate through the browser's own boundary: rebuild the world
+    // from the seat's observation instead of searching the privileged state, and
+    // fall back to the ranker wherever that reconstruction is refused. This is
+    // the shipped bot, so it is the one worth measuring.
+    let via_observation=request["via_observation"].as_bool().unwrap_or(false);
     assert!(pool<=8,"Worker pool is capped at eight");
     let jobs=request["jobs"].as_array().unwrap();
     let mut out=io::BufWriter::new(io::stdout().lock());
@@ -77,12 +82,20 @@ fn main() {
             if state.turn_number!=turn {turn=state.turn_number;remaining=[budget;2];acted=[0;2];}
             let legal=state.legal_moves(seat);
             let evaluator=if seat==candidate {model.as_ref()}else{opponent.as_ref()};
+            let rebuilt=if via_observation&&seat==candidate&&legal.len()>1 {
+                match State::from_observation(&state.observation(seat),seed.wrapping_add(decisions)) {
+                    Ok(world)=>Some(world),
+                    Err(_)=>None,
+                }
+            }else{None};
+            let searchable=if via_observation&&seat==candidate {rebuilt.is_some()} else {seat==candidate||opponent.is_some()};
             let mv=if legal.len()==1 {legal[0].clone()}
-            else if seat==candidate||opponent.is_some() {
+            else if searchable {
+                let source=rebuilt.as_ref().unwrap_or(&state);
                 let allowance=remaining[seat].min(if acted[seat]==0 {main_ms}else{followup_ms});
                 let config=Config{simulations:fixed_sims.unwrap_or(100000) as usize,max_depth:96,
                     budget_ms:if fixed_sims.is_some(){60000}else{allowance}};
-                match choose_pooled(&state,seat,seed.wrapping_add(decisions),config,evaluator,if seat==candidate {pool} else {1}) {
+                match choose_pooled(source,seat,seed.wrapping_add(decisions),config,evaluator,if seat==candidate {pool} else {1}) {
                     Ok(result)=> {
                         let quota=fixed_sims.map(|n|n*if seat==candidate {pool as u64} else {1});
                         if quota.is_some_and(|n|result["simulations"].as_u64()!=Some(n)) {

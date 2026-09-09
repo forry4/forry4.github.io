@@ -27,6 +27,9 @@ const ORBIT_AI_ENCODER = "orbit-observation-v1";
 const ORBIT_AI_SCHEMA = 1;
 const ORBIT_AI_TURN_BUDGET_MS = 5000;
 const ORBIT_AI_WORKER_CAP = 4;
+// The tiers served by the browser worker. Mirrors CLIENT_AI_TIERS in main.py:
+// both speak the same boundary, and Expert additionally asks it to search.
+const CLIENT_AI_TIERS = ["hard", "expert"];
 const styles = baseCss + lobbyCss + gameMenuCss + createModalCss
   + lobbyCreateRowCss + rulesModalCss + orbitCssText;
 
@@ -714,7 +717,7 @@ function Lobby({ authUser, myId, onExit, openGames, myGames, history, historySho
   showRules, setShowRules, toast }) {
   const active = notWaiting(myGames);
   const selectedOpponent = createOpp === "friend" ? "friend" : createDifficulty;
-  const difficultyName = { easy: "Easy", normal: "Normal", hard: "Hard" };
+  const difficultyName = { easy: "Easy", normal: "Normal", hard: "Hard", expert: "Expert" };
   return <div className="app orbit" style={{ "--lby-accent": GAME_ACCENTS.orbit }}>
     <style>{styles}</style>
     <LobbyHeader onBack={onExit} user={<LobbyUser user={authUser} />} />
@@ -774,6 +777,7 @@ function Lobby({ authUser, myId, onExit, openGames, myGames, history, historySho
         { value: "easy", label: "Easy", title: "Random legal moves" },
         { value: "normal", label: "Normal", title: "Public-information ranker" },
         { value: "hard", label: "Hard", title: "Effect-aware browser policy with a validated server fallback" },
+        { value: "expert", label: "Expert", title: "Searches its main action in your browser; ranks follow-up choices" },
       ]} wrap /></CmRow>}
       <div className="cm-footer"><span className="cm-summary">Creating: <b>{selectedOpponent === "friend" ? "vs Friend" : `vs ${difficultyName[selectedOpponent] || "Hard"} AI`}</b></span>
         <button type="button" className="cm-create" onClick={() => createGame(createOpp === "ai", createDifficulty)}>Create Game</button></div>
@@ -861,7 +865,7 @@ export default function Orbit({ myId, authUser, onExit }) {
   // other games.  A missing/failed worker simply leaves the room unarmed and
   // the server watchdog plays the validated fallback.
   useEffect(() => {
-    const enabled = roomData?.vs_ai && roomData?.ai_difficulty === "hard";
+    const enabled = roomData?.vs_ai && CLIENT_AI_TIERS.includes(roomData?.ai_difficulty);
     if (!enabled || typeof Worker === "undefined") {
       wasmPoolRef.current = null;
       wasmMetaRef.current = null;
@@ -933,7 +937,7 @@ export default function Orbit({ myId, authUser, onExit }) {
 
   useEffect(() => {
     if (wasmReady && connected && roomData?.room_id
-      && roomData?.ai_difficulty === "hard"
+      && CLIENT_AI_TIERS.includes(roomData?.ai_difficulty)
       && clientAiArmedRef.current !== roomData.room_id) {
       const meta = wasmMetaRef.current;
       if (!meta?.rules) return;
@@ -961,6 +965,10 @@ export default function Orbit({ myId, authUser, onExit }) {
       legal_moves: legal,
       memory: request.memory || {},
       remaining_turn_budget: request.remaining_turn_budget ?? ORBIT_AI_TURN_BUDGET_MS,
+      // Expert searches; budget_ms is THIS decision's slice of the turn, which
+      // the server already split into a main action and a follow-up reserve.
+      tier: request.tier || roomData?.ai_difficulty || "hard",
+      budget_ms: request.budget_ms ?? request.remaining_turn_budget ?? ORBIT_AI_TURN_BUDGET_MS,
     };
     (async () => {
       try {
@@ -970,6 +978,10 @@ export default function Orbit({ myId, authUser, onExit }) {
         }).catch(() => null)));
         if (generation !== aiGenerationRef.current || aiDispatchRef.current !== key) return;
         const allowed = new Map(legal.map((move) => [orbitMoveKey(move), move]));
+        // A searching worker reports root visits, and independent trees are
+        // combined by SUMMING them -- the arena measured that aggregation, and
+        // it keeps how sure each tree was.  A ranking worker (Hard) reports no
+        // stats, so each answer is worth one vote, exactly as before.
         const votes = new Map();
         for (const result of results) {
           const move = result?.move;
@@ -978,6 +990,18 @@ export default function Orbit({ myId, authUser, onExit }) {
           const item = votes.get(canonical) || { count: 0, move: allowed.get(canonical) };
           item.count += 1; votes.set(canonical, item);
         }
+        let summed = new Map();
+        for (const result of results) {
+          for (const entry of Array.isArray(result?.stats) ? result.stats : []) {
+            const canonical = orbitMoveKey(entry?.move);
+            if (!allowed.has(canonical)) continue;
+            const visits = Number(entry?.visits);
+            if (!Number.isFinite(visits) || visits <= 0) continue;
+            const item = summed.get(canonical) || { count: 0, move: allowed.get(canonical) };
+            item.count += visits; summed.set(canonical, item);
+          }
+        }
+        if (summed.size) votes.clear(), summed.forEach((v, k) => votes.set(k, v));
         if (!votes.size) return; // watchdog fallback owns a failed pool
         const chosen = [...votes.values()].sort((a, b) => b.count - a.count
           || orbitMoveKey(a.move).localeCompare(orbitMoveKey(b.move)))[0];

@@ -6,7 +6,6 @@ use crate::{State,Chance,attention::Model};
 use serde_json::{json,Value};
 use std::collections::{HashMap,BTreeSet};
 use std::hash::{Hash,Hasher};
-use std::time::Instant;
 
 #[derive(Clone,Copy)]
 pub struct Config {pub simulations:usize,pub max_depth:usize,pub budget_ms:u64}
@@ -76,7 +75,7 @@ pub fn choose(source:&State,seat:usize,seed:u64,config:Config,model:Option<&Mode
 }
 fn choose_cached(source:&State,seat:usize,seed:u64,config:Config,model:Option<&Model>,cache_enabled:bool)->Result<Value,String> {
     if seat>1 || source.actor()!=Some(seat) {return Err("Not this seat's decision".into());}
-    let started=Instant::now();let obs=source.observation(seat);
+    let started=crate::clock::Clock::start();let obs=source.observation(seat);
     let mut nodes:HashMap<(u64,String),Node>=HashMap::new();
     let root=(0,"root".to_owned());nodes.insert(root.clone(),Node::new(&obs));
     let mut rng=Chance::seeded(seed);let mut sims=0;let mut evals=0;
@@ -84,7 +83,7 @@ fn choose_cached(source:&State,seat:usize,seed:u64,config:Config,model:Option<&M
     // history-dependent estimates. Lifetime is one call with one fixed model.
     let mut values:HashMap<String,f64>=HashMap::new();let mut cache_hits=0;
     for _ in 0..config.simulations {
-        if started.elapsed().as_millis()>=config.budget_ms as u128 {break;}
+        if started.elapsed_ms()>=config.budget_ms as f64 {break;}
         let mut world=sample(source,seat,&mut rng)?;
         let mut chance=Chance::seeded(rng.next());
         let mut path=Vec::new();let mut trace=0u64;
@@ -109,7 +108,7 @@ fn choose_cached(source:&State,seat:usize,seed:u64,config:Config,model:Option<&M
                 mv["card_ids"].as_array().map_or(0,Vec::len).hash(&mut hash);
             }
             trace=hash.finish();
-            if unvisited || started.elapsed().as_millis()>=config.budget_ms as u128 {break;}
+            if unvisited || started.elapsed_ms()>=config.budget_ms as f64 {break;}
         }
         let value=if let Some(v)=terminal(&world,seat) {v}else{
             let view=world.observation(seat);
@@ -136,7 +135,7 @@ fn choose_cached(source:&State,seat:usize,seed:u64,config:Config,model:Option<&M
         "value":if e.visits==0{0.0}else{e.sum/e.visits as f64},"prior":e.prior})).collect();
     Ok(json!({"move":node.moves[best],"simulations":sims,"evaluations":evals,"nodes":nodes.len(),
         "value_cache_hits":cache_hits,
-        "elapsed_ms":started.elapsed().as_secs_f64()*1000.0,"stats":stats,"belief":"current-observation prior"}))
+        "elapsed_ms":started.elapsed_ms(),"stats":stats,"belief":"current-observation prior"}))
 }
 
 #[cfg(test)]

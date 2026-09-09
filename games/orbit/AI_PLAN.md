@@ -532,6 +532,57 @@ are exactly the pools `sample()` resamples, so an Expert tier needs
 `State::from_observation` with a public-field parity test, a search wasm export,
 the tier wired through both ends, and a rebuilt asset.
 
+### 2026-09-09 the Expert tier: searching from an observation
+
+Expert ships the heuristic-leaf PUCT search into the browser. The obstacle was
+never the search: `wasm.rs` exported only the ranker, and `search::choose` takes
+a privileged `State` as its determinization template, which Phase 5 forbids
+sending to a browser. `State::from_observation` closes that gap. Every
+mechanical field is public in the observation except the agent deck, the bonus
+reserve and the opposing hand, and those are exactly the pools the search's own
+determinizer already resamples, so the rebuilt world is ONE sample of the seat's
+information set and the search resamples it per simulation. A test walks a real
+game and checks every public field, both hand counts, the deck lengths, the
+legal-move SET and card conservation, plus that permuting everything the seat
+cannot see leaves the reconstruction unchanged.
+
+Move ORDER cannot match and the test asserts sets: the observation sorts the
+observer's own hand while the live state keeps draw order. Hand order is not
+public, so the browser could never recover it, and the search sorts moves anyway.
+
+A pending chain is REFUSED rather than guessed, because the observation redacts
+the queue to its first task through a key whitelist; a search over an invented
+continuation would be searching a game that does not exist. Expert therefore
+searches its main action and RANKS its follow-ups, which is a real cost, not a
+rounding error: only 20 of 75.9 decisions per game are searched, and at a fixed
+96 simulations the reconstruction path scores 0.531 [0.453, 0.617] against the
+privileged path's 0.609, a paired -0.078 [-0.188, +0.031].
+
+Measured as shipped -- rebuilt worlds, ranked pending chains, 3.5 s per turn
+split 2100/1400, four root-summed workers -- Expert scores **0.719 (23-9),
+95% interval [0.5625, 0.875]** over 16 balanced pairs against Hard v2 at 8,350
+simulations per searched decision. Two caveats travel with that number. The
+browser is about 2.7x slower than native (measured: ~0.83 simulations per
+millisecond in a headless worker against ~2.25 native), so a real player's
+Expert searches roughly a third as much. And the opponent is one the search
+models exactly, since `serving::choose_move` is deterministic and is both the
+arena's Hard v2 and the search's internal opponent model.
+
+Three harness faults had to be fixed before any of this could be measured
+honestly, and each was worth more than the tuning it replaced: a `winner` of
+`null` scored as a loss rather than a draw; the turn's first decision drained
+the whole budget so every follow-up ran zero simulations and played the
+opponent's own top move; and the browser pool aggregated by plurality VOTE while
+the arena root-summed visits. The client now sums visits when a worker reports
+them, so the shipped aggregation is the measured one, and Hard is unaffected
+because a ranking worker reports none.
+
+`npm run expert-search` is the artifact gate: it drives the committed wasm in a
+real browser worker and requires a legal move, non-zero simulations inside the
+budget, root visits to sum, and a refusal on pending chains. It found a real bug
+in itself first -- two seats mulligan on turn 0 and shared a label, so a
+label keyed lookup checked one position against another's legal list.
+
 ### Research-log audit: borrow mechanisms, preserve their conditions
 
 Reviewed `docs/ai-research-log.md` Duel sessions July 22–30 and the actual

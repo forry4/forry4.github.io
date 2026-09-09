@@ -305,9 +305,22 @@ self.onmessage = async (event) => {
     const observation = typeof message.observation === "string" ? JSON.parse(message.observation) : message.observation;
     const legal = typeof message.legal_moves === "string" ? JSON.parse(message.legal_moves) : (message.legal_moves || observation?.legal_moves || []);
     let answer = null;
-    if (optionalWasm && typeof optionalWasm.orbit_choose_move_json === "function") {
-      const raw = optionalWasm.orbit_choose_move_json(JSON.stringify(observation), JSON.stringify(legal), JSON.stringify(message.memory || {}), Number(message.remaining_turn_budget) || 0, Number(message.seed) || 0);
+    // Expert searches THIS decision inside its own allowance (budget_ms, already
+    // split from the whole turn by the server) and rebuilds a world from the
+    // observation to do it.  It refuses pending chains, which the observation
+    // redacts, and says so via fell_back -- so an Expert room degrades to the
+    // Hard ranker per decision rather than per game.  A build without the export
+    // (a cached asset, a js-fallback worker) takes the ranker path unchanged.
+    if (message.tier === "expert" && optionalWasm && typeof optionalWasm.orbit_search_move_json === "function") {
+      const allowance = Number(message.budget_ms) || Number(message.remaining_turn_budget) || 0;
+      const raw = optionalWasm.orbit_search_move_json(JSON.stringify(observation), JSON.stringify(legal), JSON.stringify(message.memory || {}), allowance, Number(message.seed) || 0);
       answer = typeof raw === "string" ? JSON.parse(raw) : raw;
+    }
+    if (!answer || !answer.move) {
+      if (optionalWasm && typeof optionalWasm.orbit_choose_move_json === "function") {
+        const raw = optionalWasm.orbit_choose_move_json(JSON.stringify(observation), JSON.stringify(legal), JSON.stringify(message.memory || {}), Number(message.remaining_turn_budget) || 0, Number(message.seed) || 0);
+        answer = typeof raw === "string" ? JSON.parse(raw) : raw;
+      }
     }
     if (!answer || !answer.move) answer = chooseFallback(observation, legal, message.memory, message.remaining_turn_budget, message.seed);
     self.postMessage({ id: message.id, ...answer, abi_version: ABI_VERSION, model_version: MODEL_VERSION });

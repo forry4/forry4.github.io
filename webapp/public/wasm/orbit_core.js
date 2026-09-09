@@ -27,6 +27,86 @@ export function orbit_choose_move_json(observation_json, legal_moves_json, memor
 }
 
 /**
+ * Experimental value evaluator; does not arm or replace the serving bot.
+ * @param {string} raw
+ * @returns {string}
+ */
+export function orbit_neural_load_json(raw) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(raw, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.orbit_neural_load_json(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
+ * @param {string} raw
+ * @returns {string}
+ */
+export function orbit_neural_value_json(raw) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(raw, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.orbit_neural_value_json(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
+ * Search one decision through the Phase 5 boundary, for the Expert tier.
+ *
+ * The worker holds no privileged state, so the world is rebuilt from the seat's
+ * own observation and the hidden pools are dealt from public conservation. Two
+ * consequences are deliberate and must not be papered over by a caller:
+ *
+ *   * a pending chain is REFUSED, because the observation redacts the queue to
+ *     its first task -- the caller falls back to `orbit_choose_move_json`, and
+ *     the returned object says `fell_back` so a room can tell the difference;
+ *   * the search is one sample of the seat's information set per simulation, a
+ *     current-observation prior rather than a full-history posterior.
+ *
+ * `budget_ms` is this decision's allowance, already split from the whole-turn
+ * budget by the server. The returned move is still validated by the room.
+ * @param {string} observation_json
+ * @param {string} legal_moves_json
+ * @param {string} memory_json
+ * @param {number} budget_ms
+ * @param {number} seed
+ * @returns {string}
+ */
+export function orbit_search_move_json(observation_json, legal_moves_json, memory_json, budget_ms, seed) {
+    let deferred4_0;
+    let deferred4_1;
+    try {
+        const ptr0 = passStringToWasm0(observation_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(legal_moves_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(memory_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.orbit_search_move_json(ptr0, len0, ptr1, len1, ptr2, len2, budget_ms, seed);
+        deferred4_0 = ret[0];
+        deferred4_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+    }
+}
+
+/**
  * Export the compatibility manifest so a generated glue bundle can be
  * checked against the adjacent model asset before it arms a room.
  * @returns {string}
@@ -46,6 +126,10 @@ export function orbit_serving_manifest_json() {
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
+        __wbg_now_67691fa3cc049681: function() {
+            const ret = Date.now();
+            return ret;
+        },
         __wbindgen_init_externref_table: function() {
             const table = wasm.__wbindgen_externrefs;
             const offset = table.grow(4);

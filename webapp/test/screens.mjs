@@ -5582,10 +5582,10 @@ try {
 			.then(() => true).catch(() => false);
 		const opponentLabels = await page.locator(".cm-row").first().locator(".cm-seg-btn").allTextContents().catch(() => []);
 		const difficultyLabels = await page.locator(".cm-row").nth(1).locator(".cm-seg-btn").allTextContents().catch(() => []);
-		check("Orbit offers friend or AI with easy/normal/hard difficulty", modal
-			&& await page.locator(".cm-seg-btn").count() === 5
+		check("Orbit offers friend or AI with easy/normal/hard/expert difficulty", modal
+			&& await page.locator(".cm-seg-btn").count() === 6
 			&& JSON.stringify(opponentLabels) === JSON.stringify(["VS Friend", "VS AI"])
-			&& JSON.stringify(difficultyLabels) === JSON.stringify(["Easy", "Normal", "Hard"])
+			&& JSON.stringify(difficultyLabels) === JSON.stringify(["Easy", "Normal", "Hard", "Expert"])
 			&& await page.locator(".cm-hint").count() === 0
 			&& !(await page.locator(".cm-panel").textContent()).includes("Technology board"),
 			JSON.stringify({ opponentLabels, difficultyLabels }));
