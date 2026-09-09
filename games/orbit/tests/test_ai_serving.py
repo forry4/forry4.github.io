@@ -86,12 +86,36 @@ def test_easy_normal_and_hard_tiers_are_valid_and_legal():
     obs = observation(game, "human")
     legal = engine.legal_moves(game, "human")
     assert m._valid_difficulty("random") == "easy"
-    assert [m._valid_difficulty(value) for value in ("easy", "normal", "hard")] == [
-        "easy", "normal", "hard"]
+    assert [m._valid_difficulty(value) for value in ("easy", "normal", "hard", "expert")] == [
+        "easy", "normal", "hard", "expert"]
     assert serving.choose_normal_move(obs, legal, 23) in legal
     assert m._bot_move_sync(game, "human", 23, "easy") in legal
     assert m._bot_move_sync(game, "human", 23, "normal") in legal
     assert m._bot_move_sync(game, "human", 23, "hard") in legal
+    # Expert searches in the browser; the SERVER's fallback for it is the Hard
+    # ranker, because the fallback exists to answer fast and legally.
+    assert m._bot_move_sync(game, "human", 23, "expert") in legal
+    assert m._bot_move_sync(game, "human", 23, "expert") == m._bot_move_sync(game, "human", 23, "hard")
+
+
+def test_expert_is_a_browser_tier_carrying_its_own_per_decision_allowance():
+    """Expert reaches the worker as a tier, with the turn already split.
+
+    The worker searches ``budget_ms``, not the whole-turn remainder: without the
+    split the turn's first decision would spend everything and every follow-up
+    would run zero simulations.
+    """
+    assert "expert" in m.CLIENT_AI_TIERS and "hard" in m.CLIENT_AI_TIERS
+    assert m.CLIENT_AI_MAIN_ACTION_MS < m.CLIENT_AI_TURN_BUDGET_MS
+    assert m.CLIENT_AI_FOLLOWUP_RESERVE_MS == m.CLIENT_AI_TURN_BUDGET_MS - m.CLIENT_AI_MAIN_ACTION_MS
+    # The create modal must offer exactly the tiers the server accepts.
+    picker = Path(__file__).resolve().parents[1] / "Orbit.jsx"
+    source = picker.read_text(encoding="utf-8")
+    for tier in m.AI_DIFFICULTIES:
+        assert f'value: "{tier}"' in source, f"{tier} is accepted but not offered"
+    for tier in m.CLIENT_AI_TIERS:
+        assert f'"{tier}"' in source.split("const CLIENT_AI_TIERS")[1][:120], (
+            f"{tier} is a browser tier but the client never arms a pool for it")
 
 
 def test_hard_ties_are_stable_for_parallel_browser_workers():

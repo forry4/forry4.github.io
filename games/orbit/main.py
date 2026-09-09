@@ -56,8 +56,11 @@ AI_PID = "bot"
 # ranker, and Hard is the effect-aware browser-served tier. Every client
 # answer is still checked by the Python engine and a silent/old/slow browser
 # falls back to the matching server path.
-AI_DIFFICULTIES = ("easy", "normal", "hard")
-CLIENT_AI_TIERS = ("hard",)
+AI_DIFFICULTIES = ("easy", "normal", "hard", "expert")
+# Both browser tiers use the same versioned boundary and the same validated
+# server fallback; Expert asks the worker to SEARCH the decision rather than
+# rank it, which is why it carries a tier on the wire.
+CLIENT_AI_TIERS = ("hard", "expert")
 DEFAULT_DIFFICULTY = "easy"
 CLIENT_AI_WIRE = serving.SERVING_ABI_VERSION
 CLIENT_AI_MODEL_VERSION = serving.MODEL_VERSION
@@ -724,7 +727,9 @@ def _position_key(g: dict) -> str:
 
 
 def _bot_move_sync(g: dict, pid: str, seed: int, difficulty: str = "easy"):
-    if difficulty == "hard":
+    # Expert falls back to the Hard ranker server-side: the search lives in the
+    # browser worker, and the server's job here is a fast validated answer.
+    if difficulty in ("hard", "expert"):
         return bot.choose_fallback_move(g, pid, seed)
     if difficulty == "normal":
         return bot.choose_normal_fallback_move(g, pid, seed)
@@ -826,6 +831,7 @@ async def _client_bot_turn(room_id: str) -> bool:
                     "main_action_budget_ms": CLIENT_AI_MAIN_ACTION_MS,
                     "followup_reserve_ms": CLIENT_AI_FOLLOWUP_RESERVE_MS,
                     "model_version": CLIENT_AI_MODEL_VERSION,
+                    "tier": difficulty,
                     "turn_started_at": room.get("ai_turn_started_at"),
                 }
                 room["_ai_search"]["sent_at"] = time.time()
