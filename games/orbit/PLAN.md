@@ -149,8 +149,8 @@ half-added:
   coverage in `webapp/test/screens.mjs`;
 - include Orbit in the non-gating lobby screenshot/probe harnesses.
 
-Do not add Orbit to the offline hub in v1. Do not add `ai_difficulty` or a difficulty
-picker while there is only one random opponent.
+Do not add Orbit to the offline hub in v1. The original single-opponent launch had no
+difficulty picker; the current lobby exposes Easy, Normal and Hard tiers.
 
 ---
 
@@ -306,8 +306,9 @@ pending choice; it never bypasses the engine.
 ## Frontend
 
 Use the shared lobby, create modal, rules modal, header, history paging, and reconnect
-hook. The create modal needs only **Friend** and **Computer**; label the sole computer
-opponent honestly as random, without presenting a meaningless difficulty selector.
+hook. The create modal offers **Friend** or **Computer**, with Easy, Normal and Hard
+computer tiers. Easy is random, Normal is the original public ranker, and Hard is the
+effect-aware browser policy with a validated server fallback.
 
 The supplied starting-position screenshot is the layout reference, not an art source:
 

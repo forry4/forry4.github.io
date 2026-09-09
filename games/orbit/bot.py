@@ -6,6 +6,7 @@ import random
 
 from . import engine
 from .ai.serving import choose_move as choose_serving_move
+from .ai.serving import choose_normal_move
 from .ai.state import observation
 
 
@@ -17,7 +18,7 @@ def choose_move(game: dict, pid: str, seed: int | None = None) -> dict | None:
 
 
 def choose_fallback_move(game: dict, pid: str, seed: int | None = None) -> dict | None:
-    """Use the strongest cheap, policy-safe fallback available on the server.
+    """Use the Hard policy-safe fallback available on the server.
 
     Hard rooms normally answer through the browser worker.  If that worker is
     unavailable or times out, the room must still finish the turn.  This path
@@ -38,6 +39,21 @@ def choose_fallback_move(game: dict, pid: str, seed: int | None = None) -> dict 
             observation(game, pid), moves, None, 0, int(seed or 0))
         if result.move in moves:
             return result.move
+    except Exception:  # pragma: no cover - defensive legacy-save fallback
+        pass
+    return random.Random(seed).choice(moves)
+
+
+def choose_normal_fallback_move(game: dict, pid: str, seed: int | None = None) -> dict | None:
+    """Choose the intermediate public ranker used by Orbit's Normal tier."""
+
+    moves = engine.legal_moves(game, pid)
+    if not moves:
+        return None
+    try:
+        result = choose_normal_move(observation(game, pid), moves, int(seed or 0))
+        if result in moves:
+            return result
     except Exception:  # pragma: no cover - defensive legacy-save fallback
         pass
     return random.Random(seed).choice(moves)

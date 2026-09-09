@@ -85,7 +85,8 @@ unexploitability or optimal play.
 - Local training: RTX 4050 Laptop, 6 GB VRAM; 12 logical CPU cores observed.
 - No fixed campaign endpoint. Continue while fresh evaluations justify the work;
   diagnose three unsuccessful promotion cycles before extending the same recipe.
-- Keep one Hard tier plus the existing random bot. No separate adaptive product.
+- Keep three explicit tiers: Easy (random), Normal (the original public
+  ranker), and Hard (the effect-aware serving policy). No adaptive product.
 
 ## Phase 0 — verify the game before learning it
 
@@ -237,7 +238,9 @@ the strongest cheap validated fallback and difficulty memory via the shared lobb
 Test whole-payload redaction, hidden-world permutations, enumerable sampler
 cases, Python/native/WASM parity, model export, total-turn timing, stale replies,
 reconnect, failed workers and responsive browser play. Version model/WASM assets
-together; preserve client compatibility and a rollback champion.
+together; preserve client compatibility and a rollback champion. Keep Easy,
+Normal and Hard selectable in the create modal while only Hard uses the browser
+serving boundary.
 
 **2026-09-07 implementation note:** Orbit now has the versioned Python serving
 contract, an optional Rust/wasm-bindgen export, and a module worker that loads a

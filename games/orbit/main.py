@@ -52,12 +52,13 @@ LOG = logging.getLogger("orbit")
 TABLE = "orbit_games"
 AI_PID = "bot"
 
-# The random opponent remains available as the baseline.  ``hard`` is the
-# browser-served tier; every client answer is still checked by the Python
-# engine and a silent/old/slow browser falls back to the server path.
-AI_DIFFICULTIES = ("random", "hard")
+# Easy keeps the original random opponent, Normal keeps the original public
+# ranker, and Hard is the effect-aware browser-served tier. Every client
+# answer is still checked by the Python engine and a silent/old/slow browser
+# falls back to the matching server path.
+AI_DIFFICULTIES = ("easy", "normal", "hard")
 CLIENT_AI_TIERS = ("hard",)
-DEFAULT_DIFFICULTY = "random"
+DEFAULT_DIFFICULTY = "easy"
 CLIENT_AI_WIRE = serving.SERVING_ABI_VERSION
 CLIENT_AI_MODEL_VERSION = serving.MODEL_VERSION
 CLIENT_AI_ENCODER = serving.ENCODER_VERSION
@@ -128,6 +129,10 @@ _save_conn = None  # only ever touched by the write-executor thread
 
 def _valid_difficulty(value) -> str:
     value = str(value or DEFAULT_DIFFICULTY).lower()
+    # ``random`` was the old wire value for Easy. Normalize it as rooms are
+    # loaded so persisted games remain playable after the tier rename.
+    if value == "random":
+        return "easy"
     return value if value in AI_DIFFICULTIES else DEFAULT_DIFFICULTY
 
 
@@ -718,9 +723,12 @@ def _position_key(g: dict) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _bot_move_sync(g: dict, pid: str, seed: int, strongest: bool = False):
-    return (bot.choose_fallback_move(g, pid, seed) if strongest
-            else bot.choose_move(g, pid, seed))
+def _bot_move_sync(g: dict, pid: str, seed: int, difficulty: str = "easy"):
+    if difficulty == "hard":
+        return bot.choose_fallback_move(g, pid, seed)
+    if difficulty == "normal":
+        return bot.choose_normal_fallback_move(g, pid, seed)
+    return bot.choose_move(g, pid, seed)
 
 
 def _bot_turn_active(room: dict) -> bool:
@@ -914,12 +922,11 @@ async def _schedule_bot_turn(room_id: str) -> None:
                 ai = room["ai_player"]
                 snapshot = json.loads(json.dumps(game))
                 position_before = _position_key(game)
-                strongest = difficulty == "hard"
             started = time.monotonic()
             try:
                 move = await loop.run_in_executor(
                     _BOT_EXEC, _bot_move_sync, snapshot, ai,
-                    _rooms.bot_seed(position_before, ai), strongest)
+                    _rooms.bot_seed(position_before, ai), difficulty)
             except Exception:
                 LOG.warning("orbit bot failed in %s", room_id, exc_info=True)
                 return

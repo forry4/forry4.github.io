@@ -39,6 +39,7 @@ The agreed campaign is in `AI_PLAN.md`. Phase 1 is implemented locally in
   the serving bot automatically. Phase 5 wires only the versioned Hard serving
   boundary; the current browser asset is an observation-only effect-aware
   policy, while a learned champion still requires the explicit serving gates.
+  Easy and Normal remain available as server-side practice tiers.
 
 ## Rules and serving
 
@@ -57,10 +58,11 @@ must never calculate resources, influence, captures, or card outcomes itself.
   turn and returns to 0 at end of turn.
 - Board-side value 1 is the rulebook's S.U.N. learning configuration. The
   engine also supports independently random sides.
-- The random opponent remains the correctness baseline and runs server-side.
-  The Hard tier uses the versioned browser worker when its manifest matches the
-  current rules; missing or stale workers use the validated server fallback.
-  The shared lobby remembers the last tier per game and identity.
+- Easy is the random correctness baseline and runs server-side. Normal uses the
+  original public ranker. The Hard tier uses the versioned browser worker when
+  its manifest matches the current rules; missing or stale workers use the
+  validated server fallback. The shared lobby remembers the last tier per game
+  and identity.
 - Phase 5 serving accepts only `observation`, the server legal-move list,
   bounded serializable memory and the remaining turn budget. It never receives
   `native_state`, hidden deck order or RNG. The request is armed in room state,

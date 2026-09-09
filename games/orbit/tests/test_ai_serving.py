@@ -81,6 +81,19 @@ def test_serving_manifest_and_choice_are_versioned_and_legal():
     assert serving.validate_manifest(serving.serving_manifest())["rules"] == serving.rules_fingerprint()
 
 
+def test_easy_normal_and_hard_tiers_are_valid_and_legal():
+    game = _game(19)
+    obs = observation(game, "human")
+    legal = engine.legal_moves(game, "human")
+    assert m._valid_difficulty("random") == "easy"
+    assert [m._valid_difficulty(value) for value in ("easy", "normal", "hard")] == [
+        "easy", "normal", "hard"]
+    assert serving.choose_normal_move(obs, legal, 23) in legal
+    assert m._bot_move_sync(game, "human", 23, "easy") in legal
+    assert m._bot_move_sync(game, "human", 23, "normal") in legal
+    assert m._bot_move_sync(game, "human", 23, "hard") in legal
+
+
 def test_hard_ties_are_stable_for_parallel_browser_workers():
     game = _game(11)
     obs = observation(game, "human")

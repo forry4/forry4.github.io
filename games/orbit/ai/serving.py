@@ -4,8 +4,8 @@ The offline search stack has access to a privileged simulator so it can sample
 hidden worlds.  A serving policy never does: this module accepts only the
 allowlisted seat observation, the server's legal-move list, and a small
 serializable memory object.  The same contract is mirrored by
-``webapp/public/wasm/orbit-worker.js``.  A trained guide can replace the cheap
-ranker later without changing the room protocol.
+``webapp/public/wasm/orbit-worker.js``.  A trained guide can replace the
+effect-aware ranker later without changing the room protocol.
 
 The function deliberately returns a legal move from the supplied list.  The
 server still validates that move against the live engine; the return contract
@@ -446,6 +446,94 @@ def _effect_score(observation: dict, card_id: int, me: dict, them: dict) -> floa
     except (TypeError, ValueError, OverflowError):
         tasks = []
     return _effect_value(tasks, observation, me, them)
+
+
+def _normal_score(observation: dict, move: dict) -> float:
+    """The intermediate public ranker used by Orbit's Normal tier.
+
+    Normal preserves the original non-random Orbit opponent while Hard uses
+    the effect-aware v2 policy below.  Keeping this ranker separate makes the
+    three lobby choices meaningful and lets existing ``random`` saves map to
+    Easy without changing the Hard serving contract.
+    """
+
+    action = move.get("action")
+    score = 0.0
+    seat = int(observation.get("seat", 0))
+    players = observation.get("players", [{}, {}])
+    me = players[seat] if seat < len(players) else {}
+    card, ctx = _card(observation, move)
+    if card and ctx:
+        columns = ctx["columns"]
+        planet = card["planet"]
+        try:
+            planet_index = PLANETS.index(planet)
+            column_len = len(columns[planet_index])
+        except (ValueError, IndexError, TypeError):
+            column_len = 0
+            planet_index = 0
+        if action == "recruit":
+            cost = max(0, int(card["cost"]) - column_len)
+            score += 0.42 * (1.0 - cost / 10.0)
+            influence = observation.get("influence", [None] * len(PLANETS))
+            position = influence[planet_index] if planet_index < len(influence) else None
+            if position is not None:
+                direction = 1 if seat == 0 else -1
+                score += 0.16 * (float(position) * direction / 4.0)
+            score += 0.04 * bool(column_len)
+        elif action == "technology":
+            tech = me.get("technology", [])
+            try:
+                level = int(tech[FACTIONS.index(card["faction"])])
+            except (ValueError, IndexError, TypeError):
+                level = 0
+            score += 0.25 + 0.035 * (5 - level)
+        elif action == "leader":
+            score += 0.13
+            score += {"robot": 0.05, "human": 0.04, "animod": 0.045}.get(card["faction"], 0.0)
+    elif action == "mulligan":
+        score += 0.012 * sum(
+            5 - int(CARDS.get(int(card_id), {}).get("cost", 5))
+            for card_id in move.get("card_ids", [])
+        )
+
+    if move.get("planet") in PLANETS:
+        try:
+            position = observation.get("influence", [None] * len(PLANETS))[PLANETS.index(move["planet"])]
+            if position is not None:
+                score += 0.18 * (float(position) * (1 if seat == 0 else -1) / 4.0)
+        except (ValueError, IndexError, TypeError):
+            pass
+    for planet in move.get("planets", []):
+        try:
+            position = observation.get("influence", [None] * len(PLANETS))[PLANETS.index(planet)]
+            if position is not None:
+                score += 0.08 * (float(position) * (1 if seat == 0 else -1) / 4.0)
+        except (ValueError, IndexError, TypeError):
+            pass
+    if move.get("accept") is True:
+        score += 0.025
+    if "tier" in move:
+        score += 0.018 * int(move.get("tier") or 0)
+    if move.get("cost"):
+        score += 0.01 * int(move["cost"])
+    if move.get("branch") is not None:
+        score -= 0.0005 * int(move.get("branch") or 0)
+    return float(score)
+
+
+def choose_normal_move(observation: dict, legal_moves: list[dict], seed: int) -> dict | None:
+    """Choose a legal move for the intermediate Normal server tier."""
+
+    moves = [copy.deepcopy(move) for move in (legal_moves or [])]
+    _validate_observation(observation, moves)
+    if not moves:
+        return None
+    scores = [(float(_normal_score(observation, move)), action_key(move), move) for move in moves]
+    best = max(item[0] for item in scores)
+    ties = [item for item in scores if math.isclose(item[0], best, rel_tol=0.0, abs_tol=1e-12)]
+    ordered = [item[2] for item in sorted(ties, key=lambda item: item[1])]
+    return ordered[_seeded_tie_index(seed, len(ordered))]
 
 
 def _score(observation: dict, move: dict) -> float:
