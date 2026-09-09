@@ -6,6 +6,10 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::OnceLock;
 
 pub mod serving;
+pub mod tensors;
+pub mod attention;
+pub mod features;
+pub mod search;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;

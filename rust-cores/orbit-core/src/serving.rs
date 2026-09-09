@@ -321,7 +321,7 @@ fn effect_value(
     total
 }
 
-fn score(observation: &Value, action: &Value) -> f64 {
+pub(crate) fn score(observation: &Value, action: &Value) -> f64 {
     let action_name = action.get("action").and_then(Value::as_str).unwrap_or("");
     let seat = observation.get("seat").and_then(Value::as_u64).unwrap_or(0) as usize;
     let players = observation.get("players").and_then(Value::as_array);

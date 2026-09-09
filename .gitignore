@@ -80,3 +80,7 @@ rust-cores/duel-core/*.out
 
 # Playwright/screens debug output (screenshots are ORBIT_SHOTS-gated local artifacts)
 webapp/test-results/
+
+# Local Orbit neural campaign data, checkpoints, tools and benchmark artifacts.
+.orbit-*/
+.pytest-orbit-*/

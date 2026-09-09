@@ -10,6 +10,32 @@ use wasm_bindgen::prelude::*;
 
 use crate::serving;
 
+thread_local! {
+    static NEURAL: std::cell::RefCell<Option<crate::attention::Model>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Experimental value evaluator; does not arm or replace the serving bot.
+#[wasm_bindgen]
+pub fn orbit_neural_load_json(raw: &str) -> String {
+    let result = parse_object(raw,"model").and_then(|v|crate::attention::Model::load(&v));
+    match result {
+        Ok(model) => { NEURAL.with(|slot| *slot.borrow_mut()=Some(model)); json!({"loaded":true}).to_string() },
+        Err(error) => json!({"error":error}).to_string(),
+    }
+}
+
+#[wasm_bindgen]
+pub fn orbit_neural_value_json(raw: &str) -> String {
+    let result = parse_object(raw,"observation").and_then(|obs| NEURAL.with(|slot| {
+        let slot=slot.borrow();
+        let model=slot.as_ref().ok_or("Neural model not loaded")?;
+        let tokens=crate::features::encode(&obs,None)?;
+        let rows=crate::tensors::encode_parts(&model.vocabulary,&tokens)?;
+        model.logit(&rows)
+    }));
+    match result { Ok(logit)=>json!({"logit":logit}).to_string(), Err(error)=>json!({"error":error}).to_string() }
+}
+
 fn parse_object(raw: &str, label: &str) -> Result<Value, String> {
     let value: Value = serde_json::from_str(raw).map_err(|err| format!("{label}: {err}"))?;
     if !value.is_object() {

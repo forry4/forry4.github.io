@@ -1,6 +1,7 @@
 # Orbit AI campaign
 
-Agreed 2026-09-05. Status: **Phases 1–5 implemented**. The current
+Agreed 2026-09-05. Status: **Phases 1–5 prototype foundations implemented;
+neural strength campaign authorized 2026-09-08 and now starting**. The current
 campaign has a heuristic information-set PUCT baseline, a versioned 128-wide
 policy/value guide, paired all-board arenas, sequential particle beliefs, and
 an outcome-only population trainer. Phase 4 has a sealed-pool promotion
@@ -72,6 +73,186 @@ before it can report `promote`. The CLI can emit a JSON artifact and optionally
 return a failing process status, but it never changes the live bot.
 
 ## Objective and constraints
+
+### Authorized neural strength campaign (2026-09-08)
+
+This extends the prototype phases below. Their implementation status does not
+mean a trained neural search exists in production. The objective is the strongest
+demonstrated broad-opponent bot within five seconds of computation per WHOLE
+turn, including pending choices. No optimality or unexploitable-play claim.
+Local first on the RTX 4050 laptop; price cloud scaling only after measuring a
+CPU self-play or GPU learning bottleneck. Paid compute requires a priced proposal.
+
+1. Freeze Hard v2 and independent training/development/sealed seed namespaces.
+   Port information-set PUCT and sequential beliefs into Rust, shared by native
+   self-play, WASM and the eventual server worker. Require Python/Rust rules,
+   observation, legal-action and outcome parity first. Profile native and real
+   browser inference/search before committing training volumes or dates.
+2. Audit and implement the feature contract described below. Start with a
+   two-block attention encoder, width 64, four heads, FFN 128; compare a pooled
+   token MLP on identical information, and width 96 only with timing headroom.
+   The first milestone is terminal-outcome value training inside search with
+   existing priors. Preserve actual decision ownership through pending chains;
+   detect immediate victories and never flip value merely because an action ran.
+3. Train in PyTorch using streamed replay, resumable optimizer/RNG state, whole
+   game/seed-family splits, and three independent seeds for finalists. Bootstrap
+   completed games from Hard v2, heuristic search and diverse exploratory bots.
+   Weight games so long episodes and pending chains cannot dominate training.
+   Add auxiliary observable future capture/technology/bonus progress and remaining
+   turns, with censored labels masked; terminal outcomes remain the objective.
+   Auxiliary heads are not hand-weighted terms in search value.
+4. Cycle self-play, training and development arenas with equal board/seat coverage.
+   Retain the 50% empirical-game / 25% diverse / 25% exploiter league mixture,
+   including frozen Hard v2 and historical/independent opponents. Start replay
+   at 50% recent / 25% historical / 25% rare-win and difficult-choice coverage,
+   recording sampling weights. Reserve opponent families for evaluation.
+5. Add legal-action embeddings with separate main/pending scoring heads, trained
+   on root visits. Define low-search target handling explicitly. Keep learned
+   priors only after equal-time gains over value-only search. Try selective
+   higher-budget teacher games and observation-only reanalysis before simply
+   increasing model size; outcomes anchor any search-value bootstrapping ablation.
+6. Export float inference with PyTorch/native/WASM parity, then test int8 linear
+   weights with float accumulation/normalization. Quantization-aware training is
+   conditional on measured degradation. Version weights, encoder, rules, search
+   and memory together. Benchmark 1/2/4 workers within the existing core clamp;
+   preserve the 3s main + 2s follow-up starting allocation and reconnect budget.
+   Native fallback uses the same model/search outside ROOM_LOCK. Hard v2 remains
+   the emergency fallback and rollback artifact until the full promotion gate.
+7. Screen at 128 pairs; confirm frozen candidates at 512 fresh pairs, balanced
+   over eight boards, with a predeclared procedure for expansion to 2,048 pairs.
+   Require >=75% observed score against frozen Hard v2 and paired 95% interval
+   excluding 50%, broad-opponent improvement, existing five-percentage-point
+   regression gates, exact 0.5000 mirror sanity, and no unresolved censoring.
+   Retire opened confirmation pools. Later champions retain the Hard v2 threshold
+   and demonstrate improvement over the incumbent, not 75% against every successor.
+   Gate the actual exported WASM artifact at equal time with actual worker shape,
+   including constrained devices, cold loads, long chains and deadline compliance.
+8. After three unsuccessful promotion cycles diagnose tactics, target quality,
+   belief/history failures and opponent coverage. Test stronger teachers,
+   counterstrategies and belief improvements according to the diagnosis. A
+   regret-based belief-search pilot starts on enumerable subgames only if
+   information-related counterstrategies persist. Record rejected experiments.
+
+### Feature selection: rules coverage first, measured strength second
+
+Trace every engine rule/effect input and classify whether it changes legality,
+cost, effect outcome, victory, or the acting player's knowledge. Maintain this
+coverage matrix against the observation contract; unknown new fields fail closed
+until reviewed. Sampled hidden hands/decks, RNG, future outcomes, display logs,
+and private opposing pending/history fields never enter the learner.
+
+| Feature group | Required distinctions | Why retained initially |
+|---|---|---|
+| Own hand | Card ID, cost, faction, planet, multiplicity | Legal plays and effects |
+| Tableau | Exact visible IDs, owner, planet, column order | Discounts, top targets, chains |
+| Captures | Per-planet identities/counts, influence, temporary captured flags | All three immediate victory patterns |
+| Technology | Both levels and all board sides | Cumulative effects and bonus races |
+| Bonuses | Identities, positions, availability, public discard/counts | Different payouts must not collapse |
+| Resources/leader | Amounts, owner and level | Costs, hand development and choices |
+| Pending/actions | Owner, source, visible task/context and every legal payload | Dynamic multi-step action sets |
+| Public cards/history | Discards/counts and structured seat-local events | Conservation, remembered reveals and beliefs |
+| Turn | Phase, actor, mulligan status, turn count, terminal status | Decision interpretation and outcomes |
+
+Start from complete compact observations rather than hand-authored strategic
+scores. Card identities distinguish effects; mechanical attributes support
+transfer across cards. Keep planet identity/adjacency and exact column order;
+do not invent planet permutation symmetries. Preserve meaningful numeric
+distinctions with non-clipping scaling in the tensor adapter. Encode unknowns
+explicitly and never silently truncate cards, histories or legal choices.
+
+The prototype loses bonus identity, clips resources, aggregates tableau cards,
+hashes eight history events and compares numeric captured-this-turn indices to
+planet names. Add collision regressions before training. The new semantic
+contract is separate from the legacy model and serving ABI so existing artifacts
+cannot silently acquire different feature meanings.
+
+Run controlled named group ablations on matched data and multiple training seeds.
+Report fresh equal-time wins, board/opponent breakdowns, tactical failures and
+inference cost; prediction loss/importance are diagnostic only. Group omission
+is a representation ablation, not proof the information is absent: legal moves
+and history may reveal the same fact. Test auxiliary heads separately from input
+features, and select their inclusion by downstream playing strength.
+
+Implementation started: `ai/features.py` provides a strict, versioned semantic
+input contract, structured history validation and group omissions. It is an
+audit/reference representation, NOT yet the compact tensor encoder, trained
+attention model or native search. Tests preserve distinctions the legacy guide
+collapses and enforce the observation boundary. Next: implement the tensor
+adapter and native feature parity, then benchmark model/search before training.
+
+First audit: `python -m games.orbit.tools.audit_features --games 8 --seed 9100`
+completed all eight games (one per board), 1,470 decisions, 17 pending task types,
+and at most 631 semantic observation tokens. Found 18 distinct sets of legal
+actions colliding in the legacy action encoder, including mulligan selections,
+technology factions and bonus locations. This is random-play coverage evidence,
+not a strength result or an exhaustive feature audit. History sizing is still
+unmeasured; semantic tokens are not the eventual attention-token count.
+
+Numeric adapter milestone: `ai/tensors.py` adds frozen/exportable vocabulary,
+unclipped float32 numeric values, separate sequence indices, and explicit batch
+and position masks. Unknown paths/categories, incompatible fingerprints and
+inexact float32 values fail explicitly. Vocabulary fitting belongs exclusively
+to training inputs (the parity harness fits a fixture vocabulary, not a model).
+The Rust `tensors` module independently implements the numeric conversion.
+`python -m games.orbit.tools.tensor_parity` matched 2,910 observations from eight
+complete games exactly (127 path templates, 149 categorical strings, seed 9200).
+This establishes SEMANTIC-TO-TENSOR parity only: Python still supplies semantic
+tokens. Native observation extraction, full-history parity, compact card/state
+pooling, attention inference and training remain to implement. The adapter is a
+reference input interface, not proof of serving speed. The complete Orbit suite
+passed 94 tests after this milestone, and native core tests also passed.
+
+Attention model milestone: `ai/attention.py` now implements the planned
+64-wide/two-block/four-head value network, masked variable-length inputs,
+terminal-outcome updates and model/vocabulary/optimizer/Torch RNG checkpoints.
+The optional tests live in `ai/tests` and require the training environment,
+not the production dependencies. `ai/TRAINING.md` documents reproducible smoke
+commands and the remaining native-inference, compact-pooling and full-training
+gates. This model currently attends to all semantic tokens and has no history
+memory, policy or auxiliary heads. The observation-only GPU smoke is a plumbing
+test on random-game outcomes, not a learned champion or a promotion candidate.
+
+### Current implementation status (2026-09-09)
+
+- Tensor/model v2 groups semantic fields into card/action/state entities with
+  learned nonlinear pooling before attention. Every semantic field still enters
+  the model; this is an architectural candidate, not an established strength gain.
+- Rust independently extracts observations and histories, encodes tensors and
+  runs float attention. 2,942 observation/history views matched tensor outputs
+  exactly; trained float predictions matched within 1e-4 (observed max <5e-7).
+- Experimental WASM is built outside shipped assets. Headless Chromium's complete
+  observation-to-value path measured 8.8ms median/16.8ms p95 with one worker;
+  four workers handled 4x the work in similar wall time, with parity passing.
+  This is inference calibration, not a full-turn or promotion measurement.
+- Immutable per-game tensor batches are cached under a bounded memory budget,
+  preserving sample order and update count. The small-run epoch fell from ~5.7s
+  to ~1.7-2.2s. CPU cached/uncached updates match exactly; GPU reductions can have
+  small floating-point variation. Native weight-lookup hoisting also preserves
+  float parity. The direct vocabulary collector exactly matches the semantic
+  reference and measured ~2.9x faster on a 16-game fixture.
+- Native parallel baseline generation produced 1,536 games in 6.9s with zero
+  censoring. Before use, 11,955 transitions/331 shuffles passed Python/Rust parity,
+  and 144 sampled Hard v2 actions matched the Python ranker. Native RNG namespaces
+  are explicit and separate from Python pools; these are not identical seeded games.
+- First real baseline: 1,536 training games, 192 disjoint development games,
+  Hard v2/exploratory v2/random opponents, 5 epochs, cached GPU batches. Final
+  development Brier 0.2256 is diagnostic only; playing strength remains unknown.
+- Search integration then found an input-distribution bug: actor-only training
+  never included `pending.waiting`, while search evaluates the nonacting seat.
+  Generation now records BOTH separately redacted observer views every decision;
+  outcome labels use observer identity. Fresh `*-native-v2` pools are retraining.
+  The old actor-only model is not a promotion candidate.
+- NativeValueGuide plugs the native evaluator into the existing offline PUCT,
+  retains heuristic priors and fingerprints the actual checkpoint. Unknown
+  features fail explicitly. The development integration probe must pass before
+  any strength assertion; no serving manifest or live bot has changed.
+
+Performance is now a campaign requirement: profile preprocessing, data generation,
+GPU update time, native/WASM inference and search separately. Keep mathematically
+equivalent caching/layout/allocation improvements behind equivalence gates. Mixed
+precision, bigger batches, changed architectures, reduced simulations/features
+or changed targets require fresh equal-time strength comparisons. Do not trade
+away information or search correctness to report higher throughput.
 
 Build one bot with the strongest measured broad-opponent win rate, using fresh
 counterstrategies to expose weaknesses. A league win is evidence, not proof of
@@ -254,6 +435,71 @@ future champion can replace the asset without changing the room protocol. The
 deterministic asset is regenerated with
 `python -m games.orbit.tools.export_serving`; the wasm-pack output beside it is
 rebuilt from the same Rust source version.
+
+### 2026-09-09 indexed features and performance follow-up
+
+The v3 experiment preserves every audited v2 input and adds explicit categorical
+card identity and neutral/self/opponent role embeddings. This tests a concrete
+representation hypothesis: a numeric card ID and a seat index force the value
+network to learn identity and ownership indirectly. Both adapters implement the
+same mapping, and v2 checkpoints remain readable. Select features using controlled
+ablations, held-out calibration, tactical fixtures and paired playing strength;
+never infer strength from training loss alone.
+
+On the same 1,536 training / 192 development games, the indexed epoch-4 model
+reached development Brier 0.16871, compared with the non-indexed control's best
+0.19764. Both checkpoints scored 10/16 against Hard v2 on the same fresh eight-board
+paired development pool at 250 ms per whole turn. This scout establishes neither
+an improvement between checkpoints nor a promotion. The indexed model passed
+4,464 complete observation-to-native-value checks (maximum logit error 7.75e-6).
+Tensor parity additionally covered 2,942 observations, including 32 history views.
+The value model itself still omits history as an explicit ablation.
+
+Performance work now includes CPU-side validation of CPU training labels,
+exact observation-keyed leaf caching within each native search call, binary
+lookup of sorted vocabulary entries, borrowed vocabulary/token encoding, and
+reuse of identical positional transforms within a native evaluation. The
+`benchmark_search` tool compares two binaries on fixed simulations and rejects
+any change in moves, node counts or edge statistics. Retain timing scope and
+cache-hit counts: small timing differences alone do not prove an optimization.
+
+Fused FP32 AdamW remains opt-in. A matched five-epoch indexed run reached Brier
+0.16707, but concurrent work confounded its wall-clock comparison and rounding
+changes prevent claiming identical optimization trajectories. Measure isolated
+throughput and multiple training seeds before adopting it as the default.
+Experimental WASM artifacts stay outside the shipped assets. Full five-second
+search, history-conditioned determinization, league self-play, auxiliary heads,
+quantization and sealed promotion gates remain outstanding.
+
+### Research-log audit: borrow mechanisms, preserve their conditions
+
+Reviewed `docs/ai-research-log.md` Duel sessions July 22–30 and the actual
+`duel-core/src/attn.rs` and `tools/train_attn*.py` implementations. Priority changes:
+
+- Benchmark chunked dot products as an opt-in native/WASM build. Duel measured
+  1.9x faster forward inference, but it reassociates FP32 sums. Orbit needs its own
+  parity, tactical and equal-time gates. Scratch-buffer reuse comes after profiling;
+  Duel measured only about 4% from that optimization in its July 22 workload.
+- When policy priors arrive, compute them on first descent, not for unrevisited
+  expansions. Duel's lazy-prior implementation saved 1.55x with unchanged decisions.
+  The current Orbit value-only search cannot claim this saving.
+- GPU-resident inputs are already used. Test larger, length-bucketed batches as a
+  separate training recipe, not an equivalent optimization: batch size changes
+  update counts and optimization dynamics. Keep whole-game/paired-seed holdouts.
+- Before repeated neural self-play, run a no-learning self-gate and measure the
+  teacher-versus-student gap. Reject a consistently negative improvement loop;
+  more data and better Brier/AUC are not evidence of stronger play. Maintain
+  current-checkpoint anchor data when fine-tuning. Policy/auxiliary gradients can
+  damage the value trunk, so compare frozen-trunk and co-training explicitly.
+- Audit the opponent model and sampling before harvesting large search datasets.
+  Orbit currently searches against fixed Hard v2 replies. Test adversarial replies
+  and current-observation sampling versus coherent independent-world trees; do not
+  transfer Duel's near-perfect-information justification to Orbit's hidden hands.
+- Test short rollout versus static leaves in Orbit's actual serving shape. The
+  July 29/30 Duel result supersedes the older static-leaf claim: a 0.61 single-tree
+  screen became 0.40 with four workers. Match independent trees, per-worker depth,
+  move aggregation, and whole-turn timing. Weak-bot wins are only a competence floor;
+  include near-peer checkpoints, fresh seeds, mirror controls and targeted tactics.
 
 ## Research references
 

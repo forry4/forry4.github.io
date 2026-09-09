@@ -672,6 +672,8 @@ def policy_fingerprint(policy: Policy) -> str:
     if isinstance(policy, SearchPolicy):
         payload["search"] = policy.search.config.as_dict()
         payload["guide"] = policy.search.guide.__class__.__name__ if policy.search.guide else None
+        if policy.search.guide is not None and hasattr(policy.search.guide,"as_dict"):
+            payload["guide_digest"] = hashlib.sha256(_sig(policy.search.guide.as_dict()).encode()).hexdigest()
     if isinstance(policy, HeuristicPolicy):
         payload["temperature"] = policy.temperature
     for attribute in ("model", "guide"):
