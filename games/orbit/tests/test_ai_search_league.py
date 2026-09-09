@@ -207,3 +207,29 @@ def test_league_mix_redistributes_missing_exploiters_and_roundtrips():
     restored = League.from_dict(json.loads(json.dumps(league.as_dict())))
     assert set(restored.members) == set(league.members)
     assert restored.rules == league.rules
+
+
+def test_native_arena_rows_pair_by_seat_and_score_draws_as_half():
+    from games.orbit.ai.selfplay import board_configurations
+    from games.orbit.tools.native_search_arena import summarise
+
+    boards = board_configurations()
+
+    def row(candidate, winner, *, censored=False, error=None):
+        return {"candidate": candidate, "winner": winner, "censored": censored, "error": error}
+
+    # Pair 0: candidate wins from both seats.  Pair 1: a deck-exhaustion draw
+    # from each seat, which is 0.5 for the candidate rather than a loss.
+    # Pair 2: one censored game invalidates the whole pair.
+    rows = [
+        row(0, 0), row(1, 1),
+        row(0, None), row(1, None),
+        row(0, 0), row(1, 0, censored=True),
+    ]
+    result = summarise(rows, pairs=3, boards=boards, candidate="c", opponent="o", settings={})
+    assert result.pair_scores == [1.0, 0.5]
+    assert result.pair_scores_by_index == [1.0, 0.5, None]
+    assert (result.wins, result.losses, result.draws, result.censored) == (3, 0, 2, 1)
+    assert result.score == 4.0 / 5.0
+    assert result.pair_score == 0.75
+    assert [result.by_board[k]["pairs"] for k in sorted(result.by_board)].count(1) == 3
