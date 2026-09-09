@@ -69,19 +69,29 @@ name: Keep backend warm
 # So the schedule below no longer assumes any particular cron will be honoured. Two
 # changes, and the reasoning is what matters if this ever needs revisiting:
 #   1. THE MORNING RAMP IS SPREAD ACROSS FIVE UTC HOURS (11,12,12,13,14,15), because the
-#      observed failure is HOUR-shaped. The old three "independent" attempts were all
+#      observed failure looked HOUR-shaped. The old three "independent" attempts were all
 #      inside 13:00-14:59, so they were independent of GitHub dropping ANY SINGLE start
-#      and perfectly correlated with the failure that actually happens. A run holds ~90
-#      min, so ANY ONE of 12:53 / 13:29 / 14:11 bridges 7am PDT (14:00 UTC) on its own,
-#      and any one of 14:11 / 15:09 / 15:13 bridges 7am PST (15:00 UTC).
-#   2. THE STAY-WARM BAND FIRES TWICE AN HOUR (:13 and :47) instead of once. Roughly half
-#      of all scheduled firings are dropped, so one start per hour makes a 90-minute
-#      chain break on about one window in eight; three chances per window makes it one in
-#      a hundred. A firing that lands while a run is in progress costs nothing — it queues
-#      behind it and extends coverage, or is cancelled as pending in seconds.
+#      and perfectly correlated with the failure that actually happens.
+#   2. THE STAY-WARM BAND FIRES TWICE AN HOUR (:13 and :47) instead of once, so a 90-min
+#      window gets three chances to keep the chain alive instead of one.
 # Both minutes stay off :00, which is GitHub's own advice (the scheduler is worst at the
-# top of the hour). The quiet window is 06:00-11:40 UTC = 23:00-04:40 local, which is the
-# only stretch with no play in it.
+# top of the hour).
+#
+# ⚠ MEASURED 2026-09-09, AND HALF OF THAT REASONING WAS WRONG. Over the 41h after the new
+# schedule landed: firings went 8-9/day -> **19.2/day** and coverage 39% -> **67%**, so the
+# DENSITY half worked. The RAMP half did not — UTC hours 11, 12, 13 and 14 fired **zero**
+# times, i.e. every one of the six morning crons, and 7am local was COLD on both mornings.
+#
+# THE MECHANISM IS NOT A DEAD BAND, IT IS A SYSTEMATIC MULTI-HOUR DELAY, and that is why
+# spreading the ramp could not have worked. The watchdog below is gated on the crons at
+# 17:47 and 21:13 UTC; its four runs were created at 20:46, 23:27, 20:17 and 23:21 — every
+# one **2-3 hours late**. The crons fire; GitHub delivers them hours after the fact. So a
+# "pre-7am warm-up" is unreachable on GitHub Actions AT ANY CRON TIME: by the time the run
+# lands it is mid-morning. **Density is the only lever this scheduler actually offers** —
+# which is exactly the half that improved.
+# The ramp crons are KEPT because their late deliveries still add density, but do not read
+# them as covering the morning: nothing on GitHub does. `keepalive-worker/` is the only
+# mechanism that fires on time, and it is therefore the only thing covering 7am.
 
 on:
   schedule:
@@ -116,7 +126,30 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 95
     steps:
+      # THE DELAY SPENDS BUDGET AT 1AM. Because GitHub delivers these runs 2-3 hours after
+      # their cron time, a stay-warm start meant for the evening lands in the small hours:
+      # measured 2026-09-07, two runs were created at 08:16 and 08:38 UTC — 01:16 and 01:38
+      # LOCAL — and each held the backend up for 92 minutes for nobody. That is not free.
+      # Render's free tier allows 750 instance-hours a month per workspace and running out
+      # SUSPENDS the service until the next month, so hours burned at 1am are hours the
+      # evening might not have. The cron cannot control when a run lands; the run itself
+      # can, so the window is enforced HERE, on the wall clock, the same way the Worker
+      # does it. 07:00-11:59 UTC is 00:00-04:59 local — the one stretch with no play in it.
+      # 12:xx is deliberately allowed through: its 92-minute hold reaches past 13:30 UTC,
+      # which is real pre-7am coverage.
+      - name: Skip if this run landed in the small hours
+        id: window
+        run: |
+          h=$(date -u +%H)
+          if [ "$((10#$h))" -ge 7 ] && [ "$((10#$h))" -le 11 ]; then
+            echo "delivered at ${h}:xx UTC ($(( (10#$h - 7 + 24) % 24 )):xx local) — inside the"
+            echo "quiet window, so warming now would spend instance-hours nobody is playing in."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Warm + hold the backend for ~90 min
+        if: steps.window.outputs.skip != 'true'
         run: |
           url="https://splendid-nelz.onrender.com/health"
           end=$(( $(date +%s) + 5400 ))   # ~90 min
@@ -133,23 +166,28 @@ jobs:
             if [ "$code" = "200" ]; then sleep 240; else sleep 15; fi
           done
 
-  # THE ALARM FOR THE FAILURE ABOVE. A dead cron band is SILENT — the later hours keep
-  # firing, every run is green, and only the morning is cold — so it went unnoticed for
-  # nine days in August and eleven more in September. This is the header's "diagnose it by
-  # start hour" written down as a job: once a day it asks whether the pre-7am ramp actually
-  # fired, and FAILS if it did not. It pings nothing and deploys nothing.
+
+  # THE ALARM. A morning with no warm-up is SILENT — the later hours keep firing, every run
+  # is green, and only the 7am player notices — so it went unnoticed for nine days in August
+  # and eleven more in September.
   #
-  # It runs on TWO crons in different hours for the same reason the ramp is spread: a
-  # watchdog that can only be woken by one hour is silenced by exactly the outage it
-  # watches for. Both are OUTSIDE the 11:00-13:59 window they inspect — gate it on a cron
-  # inside that window and the run doing the checking satisfies the check, which passes
-  # forever while proving nothing.
+  # ⚠ IT USED TO AUDIT THE WRONG THING, AND THAT IS THE LESSON WORTH KEEPING. The first
+  # version asked "did a cron fire in 11:00-13:59 UTC?". Under the 2-3 hour delivery delay
+  # measured above, that can essentially never be true whatever crons this file declares, so
+  # it was a **permanently-red alarm** — and an alarm that cannot go green is worse than none,
+  # because it trains the reader to ignore it. It also audited the wrong MECHANISM: with two
+  # pingers by design, GitHub's cron timing does not determine whether the morning was warm.
+  # Only `keepalive-worker/` fires on time, so only the Worker can cover 7am.
   #
-  # THE WINDOW IS 11:00-13:59 UTC, AND ITS END IS THE WHOLE POINT: a run holds ~90 min, so
-  # only a firing before 14:00 can leave the box warm AT 7am PDT. Checking "did the morning
-  # fire at all" over a looser 11:00-15:59 would have passed on 2026-09-05, whose earliest
-  # daytime firing was 15:54 UTC — 08:54 local, an hour and a half after the player hit a
-  # cold start. The check has to be the property that matters, not the presence of a run.
+  # So this asks the one question that decides the morning and that CAN go green: **is the
+  # Cloudflare Worker deployed and answering?** Red means the morning is uncovered and names
+  # the one command that fixes it; green means the mechanism that covers 7am is alive.
+  # It deliberately does NOT try to confirm the box was warm AT 7am — nothing on GitHub runs
+  # then to observe it, and inventing a proxy for that is how the previous version went wrong.
+  #
+  # It runs on TWO crons in different hours so one delayed or dropped delivery does not
+  # silence it, and it pings the backend not at all: the Worker's own status endpoint answers
+  # without warming anything outside its window.
   warm-window-watchdog:
     if: >-
       github.event_name == 'workflow_dispatch'
@@ -157,34 +195,32 @@ jobs:
       || github.event.schedule == '13 21 * * *'
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions:
-      actions: read
     steps:
-      - name: The pre-7am ramp must have fired in the last 24h
+      - name: The Cloudflare keepalive Worker must be deployed and answering
         env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
+          # Override in repo Settings -> Secrets and variables -> Actions -> Variables if the
+          # Worker is ever renamed or moved to a custom domain. The default is this account's
+          # workers.dev subdomain, the same one the staging mirror uses.
+          WORKER_URL: ${{ vars.KEEPALIVE_WORKER_URL || 'https://forrestgames-keepalive.forry4.workers.dev/' }}
         run: |
-          set -euo pipefail
-          since=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
-          # created_at, not run_started_at: a run held pending by the ping job's
-          # concurrency group reports the queue wait in one and not the other, and what
-          # is being audited here is whether the CRON fired at all.
-          fired=$(curl -sS --fail --retry 3 --retry-all-errors \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/$REPO/actions/workflows/keepalive.yml/runs?per_page=100&event=schedule" \
-            | jq -r --arg since "$since" \
-                '.workflow_runs[] | select(.created_at >= $since) | .created_at')
-          echo "scheduled firings in the last 24h:"
-          echo "$fired" | sort | sed 's/^/  /'
-          ramp=$(printf '%s\n' "$fired" | awk -F'T' 'NF>1 { h = substr($2,1,2) + 0; if (h >= 11 && h <= 13) n++ } END { print n + 0 }')
-          total=$(printf '%s\n' "$fired" | grep -c . || true)
-          echo "total: $total    inside the 11:00-13:59 UTC morning ramp: $ramp"
-          if [ "$ramp" -eq 0 ]; then
-            echo "::error::The pre-7am warm-up band (11:00-13:59 UTC) fired ZERO times in the last 24h."
-            echo "::error::The backend is cold every morning. See this file's header — a push that"
-            echo "::error::touches it re-registers the cron, and if that does not take, move the ramp"
-            echo "::error::to different hours rather than re-registering the same ones again."
-            exit 1
+          set -uo pipefail
+          echo "probing $WORKER_URL"
+          body=$(curl -sS --max-time 30 --retry 2 --retry-all-errors -w '\n%{http_code}' "$WORKER_URL" 2>&1) || true
+          code=$(printf '%s' "$body" | tail -n1)
+          payload=$(printf '%s' "$body" | sed '$d')
+          echo "HTTP $code"
+          echo "$payload" | head -c 800
+          echo
+          # The Worker answers JSON carrying `warming` in both branches (inside its warm
+          # window and outside it). Requiring that key, not just a 200, is what tells OUR
+          # Worker apart from a parked page or someone else's route on the same subdomain.
+          if [ "$code" = "200" ] && printf '%s' "$payload" | jq -e 'has("warming")' >/dev/null 2>&1; then
+            echo "Worker is live — the 7am window has a mechanism covering it."
+            exit 0
           fi
+          echo "::error::The Cloudflare keepalive Worker is not answering at $WORKER_URL (HTTP $code)."
+          echo "::error::GitHub Actions CANNOT cover the morning — its scheduled runs are delivered"
+          echo "::error::2-3 hours late (see this file's header), so 7am is uncovered without the Worker."
+          echo "::error::Deploy it:  npx wrangler deploy --config keepalive-worker/wrangler.jsonc"
+          echo "::error::If it moved, set the KEEPALIVE_WORKER_URL repo variable to its new URL."
+          exit 1

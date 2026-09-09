@@ -724,11 +724,30 @@ git push                      # deploy-pages.yml builds + publishes (~2-3 min)
   30s pinger is worse than nothing — it disconnects mid-spin-up and ABORTS the wake, which was the
   actual cause of the 7-9am outages (not "GitHub fired late").
   **The SECOND lesson, and the reason there are two providers: the ping was never the weak part — the
-  SCHEDULER was.** GitHub drops over half of all scheduled firings and whole hour-bands go dead for
-  weeks; UTC 13 and 14, which held every pre-7am warm-up, fired ZERO times from 2026-08-27 to 09-06,
-  a re-registration push did not revive them, and measured warm coverage was **39%** with the box cold
-  every morning 06:00-~09:30 local. Redundancy inside one scheduler cannot fix that, which is what the
-  three "INDEPENDENT" attempts (all inside 13:00-14:59) proved by failing together.
+  SCHEDULER was.** Measured warm coverage was **39%** with the box cold every morning 06:00-~09:30
+  local, and a re-registration push did not help. Redundancy inside one scheduler cannot fix that,
+  which is what the three "INDEPENDENT" attempts (all inside 13:00-14:59) proved by failing together.
+- ⚠ **GITHUB ACTIONS CANNOT COVER A WALL-CLOCK WINDOW AT ALL — do not try again with different cron
+  times.** The first fix read the outage as HOUR-shaped and spread the pre-7am ramp across five UTC
+  hours. Measured over the 41h after it landed: firings went 8-9/day -> **19.2/day** and coverage
+  39% -> **67%** (the density half worked), but UTC 11, 12, 13 and 14 fired **zero** times — every one
+  of the six morning crons — and 7am local was COLD on both mornings. The mechanism is not a dead
+  band, it is a **systematic 2-3 hour delivery delay**: the watchdog is gated on the 17:47 and 21:13
+  UTC crons and its four runs were created at 20:46, 23:27, 20:17 and 23:21. The crons fire; GitHub
+  delivers them hours late, so a "pre-7am warm-up" is unreachable at any cron time. **Density is the
+  only lever this scheduler offers**, and `keepalive-worker/` is the only mechanism that fires on
+  time — therefore the only thing covering 7am. The delay also spends budget the wrong way round
+  (two runs landed at 08:16 and 08:38 UTC = 01:16 and 01:38 LOCAL, holding the box up for nobody),
+  so the `ping` job gates on the WALL CLOCK and skips 07:00-11:59 UTC; a cron cannot control when a
+  run lands, but the run can.
+- **An alarm that cannot go green is worse than none.** The watchdog's first version asked "did a
+  cron fire in 11:00-13:59 UTC?" — which under that delay can essentially never be true whatever
+  crons the file declares, so it was permanently red and would have trained the reader to ignore it.
+  It also audited the wrong MECHANISM: with two pingers, GitHub's cron timing does not determine
+  whether the morning was warm. It now probes the **Worker's** status endpoint instead — red (naming
+  the one deploy command) when the thing that actually covers 7am is missing, green when it is alive.
+  It deliberately does not try to prove the box was warm AT 7am: nothing on GitHub runs then to
+  observe it, and inventing a proxy for that is exactly how the first version went wrong.
 - ⚠ **The warm window is an INSTANCE-HOUR BUDGET, not a preference — never make it 24/7.** Render's
   free tier gives **750 instance-hours/month per workspace, shared across every free service**, and
   exhausting them SUSPENDS the service until the next month. A month is ~730h, so round-the-clock

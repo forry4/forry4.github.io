@@ -85,3 +85,52 @@ def test_the_worker_still_has_a_cron_trigger():
     assert crons and re.search(r'"[\d*/, \-]+"', crons.group(1)), (
         "keepalive-worker/wrangler.jsonc declares no cron trigger"
     )
+
+
+def test_the_watchdog_probes_the_worker_this_repo_actually_deploys():
+    """The watchdog's default URL and the Worker's name are ONE value, two ends.
+
+    The alarm is only useful if it fails for the RIGHT reason. Rename the Worker in
+    `wrangler.jsonc` and the watchdog keeps probing the old hostname: it goes red every
+    day while the Worker is perfectly healthy, which is the "permanently red alarm"
+    failure the previous version already taught us — this time wearing a green Worker.
+    Nothing at runtime notices, because a missing Worker and a renamed one produce the
+    same 404.
+    """
+    wrangler = WRANGLER.read_text(encoding="utf-8")
+    name = re.search(r'"name"\s*:\s*"([^"]+)"', wrangler)
+    assert name, "keepalive-worker/wrangler.jsonc declares no Worker name"
+
+    wf = WORKFLOW.read_text(encoding="utf-8")
+    default_url = re.search(r"vars\.KEEPALIVE_WORKER_URL\s*\|\|\s*'([^']+)'", wf)
+    assert default_url, (
+        "the watchdog no longer carries a default Worker URL — if that is deliberate, the "
+        "repo variable KEEPALIVE_WORKER_URL is now REQUIRED and this test should say so"
+    )
+    host = default_url.group(1).split("//", 1)[-1].split("/", 1)[0]
+    assert host.split(".")[0] == name.group(1), (
+        f"the watchdog probes {host!r} but wrangler deploys a Worker named "
+        f"{name.group(1)!r}. One of them was renamed without the other, so the alarm "
+        f"would go red every day against a Worker that is actually fine."
+    )
+
+
+def test_the_ping_job_refuses_to_warm_in_the_quiet_window():
+    """GitHub delivers these runs 2-3h late, so a run can land at 1am local.
+
+    Render bills instance-hours for the service being UP, not for who woke it, so a
+    92-minute hold at 01:16 local is budget the evening might need. The cron cannot
+    control when a run lands; the wall-clock gate in the job can. Pinned because
+    deleting it looks harmless — coverage even goes UP — and the cost lands a month
+    later as a suspended service.
+    """
+    wf = WORKFLOW.read_text(encoding="utf-8")
+    assert "steps.window.outputs.skip != 'true'" in wf, (
+        "the ping step no longer honours the quiet-window gate"
+    )
+    lo, hi = re.search(r'-ge (\d+) \] && \[ "\$\(\(10#\$h\)\)" -le (\d+) \]', wf).groups()
+    assert (int(lo), int(hi)) == (7, 11), (
+        f"the quiet window moved to {lo}:00-{hi}:59 UTC. It must stay inside the hours with "
+        f"no play in them (07:00-11:59 UTC = 00:00-04:59 local); widening it drops real "
+        f"coverage, narrowing it spends budget at 1am."
+    )
