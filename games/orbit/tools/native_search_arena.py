@@ -1,5 +1,5 @@
 """Run the native development search probe on fresh, paired all-board games."""
-import argparse,json,subprocess,time
+import argparse,json,os,subprocess,time
 from pathlib import Path
 from ..ai.selfplay import ArenaResult,board_configurations,board_key
 from ..cards import FACTIONS
@@ -42,11 +42,6 @@ def summarise(results,*,pairs,boards,candidate,opponent,settings):
 
 
 def main():
-    # Checkpoint loading needs the optional training environment (torch); the
-    # row folding above must not, or importing this module for `summarise`
-    # drags torch into test collection, where CI has only the server's
-    # requirements. Keep this import inside main().
-    from ..ai.attention import load_checkpoint,export_model
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("checkpoint",type=Path,help="Checkpoint, or the literal 'heuristic' for the no-network leaf ablation")
     p.add_argument("output",type=Path)
@@ -59,7 +54,8 @@ def main():
     p.add_argument("--pool",default="development-native-search-v1")
     p.add_argument("--opponent",type=Path,help="Frozen neural opponent; otherwise Hard v2")
     p.add_argument("--simulations",type=int,help="Deterministic control only; overrides time budget")
-    p.add_argument("--binary",type=Path,default=Path(__file__).resolve().parents[3]/"rust-cores/orbit-core/target/release/neural_arena.exe")
+    # Cargo emits `neural_arena.exe` on Windows and `neural_arena` everywhere else.
+    p.add_argument("--binary",type=Path,default=Path(__file__).resolve().parents[3]/"rust-cores/orbit-core/target/release"/("neural_arena.exe" if os.name=="nt" else "neural_arena"))
     args=p.parse_args()
     if args.pairs<8 or args.pairs%8:p.error("pairs must balance all eight boards")
     if not args.pool.startswith("development-"):p.error("Development namespace required")
@@ -67,6 +63,15 @@ def main():
     # The heuristic leaf runs the identical search with no network, which is the
     # control that separates search strength from the value model.
     heuristic=str(args.checkpoint)=="heuristic"
+    # Only a checkpoint needs the optional training environment (torch), so import
+    # it only when one is actually being loaded: the heuristic arm HAS no network,
+    # and it is the arm that attributes a win to search rather than to the model.
+    # Requiring the training environment to measure "no network" gates the control
+    # on the thing it controls for. `summarise` above must stay importable too, or
+    # it drags torch into test collection, where CI has only the server's
+    # requirements -- same reason, one level down.
+    if not heuristic or args.opponent:
+        from ..ai.attention import load_checkpoint,export_model
     model=None if heuristic else load_checkpoint(args.checkpoint)[0]
     boards=board_configurations();jobs=[]
     for pair in range(args.pairs):
