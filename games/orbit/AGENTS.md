@@ -356,11 +356,55 @@ Rust parity gate, smoke and screens and would never have reached the server.
   fires. `/health` and `/orbit/health` report the running commit — check them
   against `git log` rather than assuming a green push deployed anything.
 - `games/orbit/**/*.py` is the trigger now, with `ai/**` and `tools/**` negated:
-  `main.py` imports only `bot`/`engine`/`persist`/`cards`/`boards`/`effects`, and
+  `ai/` is mostly the Phase 1 simulator and `tools/` the BGA audit stack, and
   eight of those 22 commits touched `tools/` alone — each would have rebuilt the
   image and restarted prod for an offline audit script.
+- **Three `ai/` modules ARE the server's, and the blanket negation re-opened the
+  gap this entry was written to close.** It carried the claim "`main.py` imports
+  only `bot`/`engine`/`persist`/`cards`/`boards`/`effects`", which was never
+  true: `main.py` imports `ai.serving` and `ai.state` directly, and `bot.py`'s
+  Hard/Expert watchdog fallback and Normal ranker are both `ai.serving`. The
+  sharper edge is not a stale bot — `serving.MODEL_VERSION` and
+  `rules_fingerprint()` are what `client_ai_ready` matches the browser worker
+  against, so bumping either without a backend deploy leaves prod rejecting every
+  worker as a version mismatch and quietly serving the fallback while Pages ships
+  the new one. `ai/__init__.py`, `ai/serving.py` and `ai/state.py` are re-included
+  after the negation (later patterns win). **Do not re-derive that list by
+  reading — a comment is what got this wrong twice.**
+  `core/tests/test_deploy_filter_covers_the_server.py` walks the real import graph
+  from every game's `main.py` and fails on anything the filter would not ship, and
+  on offline code it would needlessly restart prod for.
 - The workflow also triggers on ITSELF, because a fix to the list of things that
   deploy otherwise cannot deploy.
+
+## The bot scheduler must not lose a wake-up
+
+`_bot_running` makes every other `_schedule_bot_turn` call a no-op, so **the
+moment the running scheduler decides to stop is the moment a concurrent wake-up
+can vanish** — and it used to decide that from a reading taken BEFORE an await.
+`more = _bot_should_act(room)` was computed under the lock and then acted on after
+`await broadcast_state(...)`; the executor hop and the `BOT_FLOOR_SECONDS` pacing
+sleep are the same shape. **The human's seat is live inside every one of those
+windows**: both players mulligan at once, `Orbit.jsx` auto-sends a forced
+single-option choice the instant it arrives, and cards 307/402 hand the opponent a
+choice on the bot's own turn. A human move landing there hands the turn back to the
+bot and schedules a wake-up the still-set flag swallows, and the drive then exits
+on its stale reading — leaving the room on "Resolving…" with the bot owing a move
+and nothing driving it, until someone reconnected.
+
+- The work is `_drive_bot_turn`; `_schedule_bot_turn` owns the flag and **clears it
+  and decides to stop under ONE lock acquisition**, re-driving when the bot still
+  owes a move. Re-checking is what turns a lost wake-up into another pass.
+- It re-drives only while the POSITION keeps changing, so a pass that cannot act
+  (the search raised, the engine rejected the move) retries once and stops rather
+  than spinning the event loop on an unplayable room.
+- `_drive_bot_turn` re-reads the tier and `client_ai` per pass, so a
+  `client_ai_ready` that landed mid-pass takes effect on the next one.
+- Regression cover is `games/orbit/tests/test_bot_scheduler.py`, which parks the
+  scheduler in its own broadcast and lets the human's move — and the wake-up task
+  it creates — actually run there. **A test that awaits the human move inline
+  cannot see this**: the wake-up is a task, and unless it gets to RUN before the
+  scheduler resumes, the flag is already clear and the bug hides.
 
 ## Client display contract
 

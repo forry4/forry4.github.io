@@ -925,68 +925,113 @@ async def _client_bot_turn(room_id: str) -> bool:
     return False
 
 
-async def _schedule_bot_turn(room_id: str) -> None:
-    """Drive a bot turn without holding ``ROOM_LOCK`` across search work."""
+async def _drive_bot_turn(room_id: str) -> None:
+    """Play out everything the bot currently owes, without holding ``ROOM_LOCK``
+    across search work.  ``_schedule_bot_turn`` owns the ``_bot_running`` flag and
+    decides whether this has to run again."""
+
     loop = asyncio.get_running_loop()
     async with ROOM_LOCK:
         room = ROOMS.get(room_id)
-        if not room or room.get("_bot_running") or not _bot_should_act(room):
+        if not room or not _bot_should_act(room):
             return
-        room["_bot_running"] = True
+        # Re-read per pass: a `client_ai_ready` that landed while the previous
+        # pass was in flight has to be able to take effect.
         difficulty = _valid_difficulty(room.get("ai_difficulty"))
         use_client = difficulty in CLIENT_AI_TIERS and bool(room.get("client_ai"))
         if room.get("ai_budget_remaining_ms") is None:
             room["ai_budget_remaining_ms"] = CLIENT_AI_TURN_BUDGET_MS
             room["ai_turn_started_at"] = time.time()
             room["ai_decisions_this_turn"] = 0
-    try:
-        if use_client:
-            await _client_bot_turn(room_id)
+    if use_client:
+        await _client_bot_turn(room_id)
 
-        # The server fallback is deliberately cheap and validated.  Search is
-        # performed on a detached snapshot in the executor, never under the
-        # event-loop lock; a changed position simply causes a fresh decision.
+    # The server fallback is deliberately cheap and validated.  Search is
+    # performed on a detached snapshot in the executor, never under the
+    # event-loop lock; a changed position simply causes a fresh decision.
+    while True:
+        async with ROOM_LOCK:
+            room = ROOMS.get(room_id)
+            if not room or not _bot_should_act(room):
+                return
+            game = room["game"]
+            ai = room["ai_player"]
+            snapshot = json.loads(json.dumps(game))
+            position_before = _position_key(game)
+        started = time.monotonic()
+        try:
+            move = await loop.run_in_executor(
+                _BOT_EXEC, _bot_move_sync, snapshot, ai,
+                _rooms.bot_seed(position_before, ai), difficulty)
+        except Exception:
+            LOG.warning("orbit bot failed in %s", room_id, exc_info=True)
+            return
+        if move is None:
+            return
+        delay = BOT_FLOOR_SECONDS - (time.monotonic() - started)
+        if delay > 0:
+            await asyncio.sleep(delay)
+        async with ROOM_LOCK:
+            room = ROOMS.get(room_id)
+            if not room or not _bot_should_act(room):
+                return
+            if _position_key(room["game"]) != position_before:
+                continue
+            ok, error = _apply_live_move(room, ai, move)
+            if not ok:
+                LOG.warning("orbit bot produced an illegal move in %s: %s", room_id, error)
+                return
+            more = _bot_should_act(room)
+            if not more and not _bot_turn_active(room):
+                room["ai_budget_remaining_ms"] = None
+                room["ai_turn_started_at"] = None
+                room["ai_decisions_this_turn"] = 0
+        await broadcast_state(room_id)
+        save_game(room_id)
+        if not more:
+            return
+
+
+async def _schedule_bot_turn(room_id: str) -> None:
+    """Drive the bot, and STOP only when it is verifiably out of work.
+
+    ``_bot_running`` makes every other wake-up a no-op, so the decision to stop
+    has to be made under the same lock acquisition that clears it.  It used not to
+    be: each `return` inside the drive tested a condition read BEFORE an await —
+    the post-move broadcast, the executor hop, the pacing sleep — and the human's
+    seat is live inside every one of them (both seats mulligan at once, the client
+    auto-sends a forced single choice the instant it arrives, and two cards hand
+    the opponent a choice on the bot's own turn).  A human move landing in that
+    window handed the turn back to the bot and scheduled a wake-up that the
+    still-set flag swallowed, and the drive then exited on its stale reading.
+    Nothing was left driving the room: the bot sat owing a move, "Resolving…"
+    forever, until someone reconnected.  Re-checking here turns that lost wake-up
+    into another pass.
+    """
+
+    async with ROOM_LOCK:
+        room = ROOMS.get(room_id)
+        if not room or room.get("_bot_running") or not _bot_should_act(room):
+            return
+        room["_bot_running"] = True
+    try:
+        stalled_at = None
         while True:
+            await _drive_bot_turn(room_id)
             async with ROOM_LOCK:
                 room = ROOMS.get(room_id)
                 if not room or not _bot_should_act(room):
                     return
-                game = room["game"]
-                ai = room["ai_player"]
-                snapshot = json.loads(json.dumps(game))
-                position_before = _position_key(game)
-            started = time.monotonic()
-            try:
-                move = await loop.run_in_executor(
-                    _BOT_EXEC, _bot_move_sync, snapshot, ai,
-                    _rooms.bot_seed(position_before, ai), difficulty)
-            except Exception:
-                LOG.warning("orbit bot failed in %s", room_id, exc_info=True)
-                return
-            if move is None:
-                return
-            delay = BOT_FLOOR_SECONDS - (time.monotonic() - started)
-            if delay > 0:
-                await asyncio.sleep(delay)
-            async with ROOM_LOCK:
-                room = ROOMS.get(room_id)
-                if not room or not _bot_should_act(room):
+                # The bot still owes a move, so something moved under the pass
+                # that just gave up.  Re-drive — but only while the position
+                # keeps changing, so a pass that cannot act (a bot exception, a
+                # move the engine rejects) retries once and then stops instead
+                # of spinning the event loop on an unplayable position.
+                position = _position_key(room["game"])
+                if position == stalled_at:
+                    LOG.warning("orbit bot could not act in %s; leaving the turn", room_id)
                     return
-                if _position_key(room["game"]) != position_before:
-                    continue
-                ok, error = _apply_live_move(room, ai, move)
-                if not ok:
-                    LOG.warning("orbit bot produced an illegal move in %s: %s", room_id, error)
-                    return
-                more = _bot_should_act(room)
-                if not more and not _bot_turn_active(room):
-                    room["ai_budget_remaining_ms"] = None
-                    room["ai_turn_started_at"] = None
-                    room["ai_decisions_this_turn"] = 0
-            await broadcast_state(room_id)
-            save_game(room_id)
-            if not more:
-                return
+                stalled_at = position
     finally:
         async with ROOM_LOCK:
             room = ROOMS.get(room_id)

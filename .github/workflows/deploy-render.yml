@@ -43,13 +43,27 @@ on:
       # push; the symptom is silence, not a red run.
       - 'games/orbit/**/*.py'
       # ...but NOT its offline halves, for the same reason ai/offline is excluded
-      # above: main.py imports only bot/engine/persist/cards/boards/effects, while
-      # ai/ is the Phase 1 simulator and tools/ is the BGA audit stack. Eight of
-      # those 22 commits touched tools/ alone and would each have rebuilt the image
-      # and restarted prod — the ~3 minutes of downtime the tests exclusion below
-      # exists to stop. Negations must stay AFTER the pattern they narrow.
+      # above: ai/ is mostly the Phase 1 simulator and tools/ is the BGA audit
+      # stack. Eight of those 22 commits touched tools/ alone and would each have
+      # rebuilt the image and restarted prod — the ~3 minutes of downtime the
+      # tests exclusion below exists to stop. Negations must stay AFTER the
+      # pattern they narrow.
       - '!games/orbit/ai/**'
       - '!games/orbit/tools/**'
+      # ...and THREE ai/ modules are the server's, so the blanket negation above
+      # re-opened the very gap this block was written to close. The claim it used
+      # to carry — "main.py imports only bot/engine/persist/cards/boards/effects"
+      # — was simply false: main.py imports `ai.serving` and `ai.state` directly,
+      # and bot.py's Hard/Expert watchdog fallback and Normal ranker are both
+      # `ai.serving`. Worse than a stale bot: `serving.MODEL_VERSION` and
+      # `rules_fingerprint()` are the constants `client_ai_ready` matches the
+      # browser worker against, so bumping them without a backend deploy leaves
+      # prod rejecting every worker as a version mismatch and silently serving
+      # the fallback. Derived by import, not by reading — and asserted that way
+      # too, by core/tests/test_deploy_filter_covers_the_server.py.
+      - 'games/orbit/ai/__init__.py'
+      - 'games/orbit/ai/serving.py'
+      - 'games/orbit/ai/state.py'
       # Every trigger above is *.py-scoped except `books/**` and `ai/models/**`, so
       # books/CLAUDE.md alone would restart prod for a docs edit (a real cold start for
       # no code change). Trailing negative rather than `paths-ignore`: GitHub rejects
