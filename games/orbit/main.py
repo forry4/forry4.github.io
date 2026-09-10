@@ -858,7 +858,7 @@ async def _client_bot_turn(room_id: str) -> bool:
                     "main_action_budget_ms": CLIENT_AI_MAIN_ACTION_MS,
                     "followup_reserve_ms": CLIENT_AI_FOLLOWUP_RESERVE_MS,
                     "model_version": CLIENT_AI_MODEL_VERSION,
-                    "tier": difficulty,
+                    "tier": _valid_difficulty(room.get("ai_difficulty")),
                     "turn_started_at": room.get("ai_turn_started_at"),
                 }
                 room["_ai_search"]["sent_at"] = time.time()

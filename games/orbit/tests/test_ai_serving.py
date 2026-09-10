@@ -98,6 +98,44 @@ def test_easy_normal_and_hard_tiers_are_valid_and_legal():
     assert m._bot_move_sync(game, "human", 23, "expert") == m._bot_move_sync(game, "human", 23, "hard")
 
 
+def test_arming_a_browser_turn_carries_the_tier_and_its_split_budget():
+    """Actually ARM a decision for each browser tier.
+
+    Nothing exercised `_client_bot_turn`'s arming path, so `"tier": difficulty`
+    -- a name that lives in a different function -- raised NameError on every
+    browser AI turn and shipped. The bot armed nothing, answered nothing, and
+    sat on "Thinking..." forever, for Hard as much as Expert. Every other test
+    here builds `_ai_search` by hand, which is exactly how a hand-built fixture
+    can agree with a request the server can no longer construct.
+    """
+
+    async def arm(difficulty):
+        room = _room()
+        room["ai_difficulty"] = difficulty
+        room["client_ai"] = True
+        m.ROOMS["armed-room"] = room
+        task = asyncio.ensure_future(m._client_bot_turn("armed-room"))
+        try:
+            for _ in range(80):
+                if room.get("_ai_search"):
+                    return dict(room["_ai_search"])
+                await asyncio.sleep(0.05)
+            return None
+        finally:
+            task.cancel()
+            m.ROOMS.pop("armed-room", None)
+
+    loop = asyncio.get_event_loop()
+    for difficulty in m.CLIENT_AI_TIERS:
+        armed = loop.run_until_complete(arm(difficulty))
+        assert armed is not None, f"{difficulty} never armed a request"
+        assert armed["tier"] == difficulty
+        # The worker searches THIS decision's slice, not the whole turn.
+        assert armed["budget_ms"] == m.CLIENT_AI_MAIN_ACTION_MS
+        assert armed["remaining_turn_budget"] == m.CLIENT_AI_TURN_BUDGET_MS
+        assert armed["legal_moves"] and armed["observation"]["seat"] in (0, 1)
+
+
 def test_an_unknown_tier_from_a_newer_bundle_clamps_up_not_down():
     """A newer client must never be silently handed the random bot.
 
