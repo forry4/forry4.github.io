@@ -509,7 +509,10 @@ decision (0.609) beat a timed arm averaging 383 (0.578), because the arena gave
 each turn one pot and let the first decision drain it: every follow-up then ran
 zero simulations and played the highest prior, which is Hard v2's own move. And
 both fixed-24 arms sit at or below 0.5, so **a search under roughly 24
-simulations is weaker than its own prior**. The arena now mirrors serving —
+simulations is weaker than its own prior**. (Superseded for the heuristic leaf:
+see 2026-09-10 below. Neither this rung nor the 96 one reproduces on the tree
+that documents them, and re-measured across three deal sets the 24-simulation
+heuristic search reads 0.539-0.578, never at or below 0.5.) The arena now mirrors serving —
 forced moves are played without search, per-decision allowance is
 `min(remaining, main_action_ms | followup_ms)`, and `--workers` runs the
 root-summed pool the browser actually serves, verified at exactly N x sims per
@@ -612,6 +615,93 @@ Reviewed `docs/ai-research-log.md` Duel sessions July 22–30 and the actual
   screen became 0.40 with four workers. Match independent trees, per-worker depth,
   move aggregation, and whole-turn timing. Weak-bot wins are only a competence floor;
   include near-peer checkpoints, fresh seeds, mirror controls and targeted tactics.
+
+### 2026-09-10 the fixed-simulation ladder: search saturates by 192
+
+Five heuristic-leaf rungs against Hard v2, 64 balanced pairs each, all on the
+`development-native-search-v1` deals, folded through `summarise` and the shared
+paired bootstrap. The 192/384/768 rungs are new; the 24 and 96 rungs are
+re-measurements of the six-arm table above.
+
+| fixed simulations | score | 95% interval | W-L-D | core-seconds |
+|---|---|---|---|---|
+| 24 | 0.570 | [0.492, 0.656] | 73-55-0 | 37 |
+| 96 | 0.656 | [0.563, 0.742] | 84-44-0 | 215 |
+| 192 | 0.664 | [0.578, 0.750] | 85-43-0 | 468 |
+| 384 | 0.656 | [0.578, 0.734] | 84-44-0 | 1006 |
+| 768 | 0.664 | [0.586, 0.742] | 85-43-0 | 2188 |
+
+The deals are common across rungs, so the differences pair. 384 minus 192 is
+-0.008 [-0.125, +0.102], 768 minus 384 is +0.008 [-0.094, +0.102], and 768 minus
+192 is **+0.000 [-0.117, +0.109]**. **The heuristic-leaf search saturates by
+roughly 192 simulations**: quadrupling the budget to 768 costs 4.7x the compute
+and buys nothing measurable against this opponent.
+
+That is saturation, not a stuck knob, and the distinction was checked rather
+than assumed. Between the 192 and 768 rungs 54 of 128 games end with a different
+winner and 127 of 128 run a different number of decisions, on identical seeds
+and identical sides. The deeper search plays substantially different games; it
+just wins them at the same rate. Games also lengthen with search (87.3 decisions
+per game at 192, 92.3 at 768), so the extra simulations are being spent, not
+discarded.
+
+**This is why the ladder cannot settle neural-versus-heuristic, and running its
+upper rungs was the wrong direction.** Above about 192 simulations the search is
+past the point where more of it changes the outcome rate, so an arm run there
+compares two saturated searches and a null result carries no information about
+the leaves. The network costs 18.3x more per simulation, which at equal
+simulations only buys a slower route to the same plateau. The discriminating
+regime is *below* 96 simulations, where the ladder is still climbing, or against
+an opponent stronger than Hard v2 -- which `serving::choose_move` makes the
+search's own internal opponent model, so the arena currently measures a search
+against a player it models exactly.
+
+**The 24 and 96 rungs in the six-arm table do not reproduce, and one conclusion
+drawn from them does not survive.** Re-measured here they read 0.570 and 0.656
+against the recorded 0.469 and 0.609. This is not tree drift: `65a9360` was
+checked out into a worktree and built, and its arena returns 0.5703 and 0.6562,
+bit-identical to HEAD. Nothing between them can move a fixed-simulation run --
+`search.rs` only swapped `Instant` for `crate::clock::Clock`, whose budget is
+60 s and never reached under fixed simulations; `neural_arena.rs` only added the
+`via_observation` branch, which is inert when the flag is off; `lib.rs` dropped
+one unused import; and the deals, boards and both engines are untouched. A
+fixed-simulation run is deterministic, so identical settings give identical
+results and there is no sampling noise to absorb the gap. The recorded numbers
+therefore came from settings the document does not capture.
+
+The specific casualty is the claim that **both fixed-24 arms sit at or below 0.5,
+so a search under roughly 24 simulations is weaker than its own prior**. The
+heuristic leaf at 24 simulations scores 0.570 on the campaign deals, and on two
+further independent 64-pair deal sets 0.539 [0.453, 0.625] and 0.578 [0.484,
+0.664]. Three deal sets, none at or below 0.5. Whatever produced 0.469, a
+24-simulation heuristic search is measurably stronger than the prior it starts
+from, not weaker. The neural half of that claim is untested here and stands or
+falls separately.
+
+Between-deal-set spread is worth carrying forward as a number: three 64-pair
+samples of the same configuration at 24 simulations span 0.539 to 0.578. A
+64-pair rung resolves about +/-0.08, so it can separate 24 from 96 but cannot
+separate 192 from 768, and it could never have resolved the leaf differences the
+six-arm table reports, all of which are smaller than that.
+
+**The neural arm was not run.** Orbit's checkpoints live under the gitignored
+`.orbit-*/`, the net has never been committed the way Duel's `value_net.json` and
+CoC's `.bin` are, and `webapp/public/wasm/orbit-model.json` is the Hard v2
+serving asset from `export_serving.py`, not an `export_model` weight dump. A
+freshly trained net would not be the indexed v3 net the existing rungs were
+measured with, so the ladder would not join up. The rungs above are on the fixed
+pool and pair exactly with a neural arm run later:
+
+```
+python -m games.orbit.tools.native_search_arena <checkpoint> out.json \
+    --pairs 64 --simulations 192   # and 384, 768
+```
+
+Running the control arm no longer needs the training environment: the torch
+import in `native_search_arena.py` moved behind the checkpoint that needs it, so
+`heuristic` runs on a machine with neither torch nor numpy installed. Requiring
+the training environment to measure "no network" gated the control on the thing
+it controls for.
 
 ## Research references
 
