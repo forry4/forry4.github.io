@@ -511,8 +511,8 @@ zero simulations and played the highest prior, which is Hard v2's own move. And
 both fixed-24 arms sit at or below 0.5, so **a search under roughly 24
 simulations is weaker than its own prior**. (Superseded for the heuristic leaf:
 see 2026-09-10 below. Neither this rung nor the 96 one reproduces on the tree
-that documents them, and re-measured across three deal sets the 24-simulation
-heuristic search reads 0.539-0.578, never at or below 0.5.) The arena now mirrors serving —
+that documents them, and at 328 pairs the 24-simulation heuristic search reads
+0.550 [0.511, 0.588] -- above parity, not below it.) The arena now mirrors serving —
 forced moves are played without search, per-decision allowance is
 `min(remaining, main_action_ms | followup_ms)`, and `--workers` runs the
 root-summed pool the browser actually serves, verified at exactly N x sims per
@@ -616,61 +616,67 @@ Reviewed `docs/ai-research-log.md` Duel sessions July 22–30 and the actual
   move aggregation, and whole-turn timing. Weak-bot wins are only a competence floor;
   include near-peer checkpoints, fresh seeds, mirror controls and targeted tactics.
 
-### 2026-09-10 the fixed-simulation ladder: 64 pairs cannot see a knee
+### 2026-09-10 the fixed-simulation ladder: an elbow at ~192, not a plateau
 
-**A first pass at 64 pairs per rung concluded that the heuristic-leaf search
-"saturates by 192 simulations". That conclusion was wrong, and how it was reached
-is the more useful half of this entry.** It is left described rather than deleted
-because the failure is reproducible from the numbers and is a trap the next ladder
-would fall into too.
+Seven heuristic-leaf rungs against Hard v2, **328 balanced pairs each** (4,592
+games, 6.2 core-hours), all on the `development-native-search-v1` deals through
+`summarise` and the shared paired bootstrap.
 
-That run measured 192 -> 0.664, 384 -> 0.656, 768 -> 0.664 and read the flatness as
-a plateau. Two things were wrong with it:
+| fixed simulations | score | 95% interval | W-L-D | core-seconds | decisions/game |
+|---|---|---|---|---|---|
+| 24 | 0.550 | [0.511, 0.588] | 361-295-0 | 192 | 80.8 |
+| 48 | 0.584 | [0.549, 0.619] | 383-273-0 | 473 | 83.6 |
+| 96 | 0.648 | [0.613, 0.681] | 425-231-0 | 1,082 | 84.6 |
+| 144 | 0.672 | [0.636, 0.709] | 441-215-0 | 1,743 | 86.4 |
+| 192 | 0.688 | [0.651, 0.724] | 451-205-0 | 2,448 | 88.8 |
+| 384 | 0.695 | [0.660, 0.730] | 456-200-0 | 5,237 | 89.5 |
+| 768 | 0.704 | [0.669, 0.741] | 462-194-0 | 11,120 | 92.1 |
+
+**The curve never plateaus.** It rises monotonically across the whole 32x range:
+`768 - 24` is `+0.154 [+0.104, +0.206]`, and 768 (0.704) is above 384 (0.695) is
+above 192 (0.688). Every rung clears parity, 24 included.
+
+**What breaks at ~192 is the RATE, not the climb.** Two doublings below the elbow
+(`48 -> 192`) buy `+0.104 [+0.055, +0.154]`; the two doublings above it
+(`192 -> 768`) buy `+0.017 [-0.034, +0.066]`. The difference between those two
+equal-width spans, paired on the same deals, is `+0.087 [+0.002, +0.175]` -- clear
+of zero, but *only just*, and that margin is the honest strength of the claim.
+Above the elbow each doubling costs ~2.1x compute for under a point of score:
+192 -> 384 is +0.008 for +2,789 core-seconds, 384 -> 768 is +0.009 for +5,883.
+So the elbow is a **cost-effectiveness** boundary, not a strength ceiling -- more
+search still helps, it just stops being worth buying.
+
+Only two adjacent steps are individually resolvable even at 328 pairs (`48 -> 96`
+at `+0.064 [+0.017, +0.111]`, and nothing above it). Adjacent doublings are simply
+smaller than what a paired arena of this width can see; the elbow is established
+by comparing equal-width SPANS, not neighbours, which is the analysis that makes
+the question answerable at affordable cost.
+
+**Two earlier conclusions from this same ladder were wrong, and the failure mode is
+the point.** A 64-pair version measured 192 -> 0.664, 384 -> 0.656, 768 -> 0.664 and
+called it saturation. Both faults were in the arithmetic, not the engine:
 
 - **The plateau's left edge was never measured.** Paired deltas were computed only
-  among the three NEW rungs, so 192 became the plateau's start by construction. The
-  96 rung sat right there in the same table: `768 - 96` is `+0.008 [-0.117, +0.125]`,
-  exactly as flat as `768 - 192`.
-- **Nothing in that ladder was resolvable in the first place.** Paired per-pair
-  differences have SD ~0.46, so 64 pairs resolves only +/-0.11 and EVERY rung-to-rung
-  difference was smaller than that -- `768 - 24` included, at `+0.094 [-0.023, +0.203]`.
-  A flat reading was the only reading 64 pairs could have produced. Saturation was
-  inferred from three numbers that were statistically indistinguishable from each
-  other *and* from the bottom of the ladder.
+  among the three new rungs, so 192 became the plateau's start by construction. The
+  96 rung was in the same table: `768 - 96` read `+0.008 [-0.117, +0.125]`, exactly
+  as flat. The follow-up guess that the knee was therefore "at 96 or below" repeated
+  the identical error on a different rung.
+- **Nothing in that ladder was resolvable at all.** Paired per-pair differences have
+  SD ~0.45, so 64 pairs resolves only +/-0.11, and EVERY rung-to-rung difference was
+  smaller than that -- `768 - 24` included, at `+0.094 [-0.023, +0.203]`. Flat was
+  the only reading 64 pairs could have produced.
 
-Re-run at **328 balanced pairs** (+/-0.049), with rungs added at 48 and 144 to bracket
-the supposed knee:
+The 64-pair run put 768 at 0.664; at 328 pairs 768 is 0.704 and even 192 alone is
+0.688. The flat top was noise, and it happened to look exactly like the finding one
+hopes for.
 
-| fixed simulations | score | 95% interval | W-L-D | core-seconds |
-|---|---|---|---|---|
-| 24 | 0.550 | [0.511, 0.588] | 361-295-0 | 192 |
-| 48 | 0.584 | [0.549, 0.619] | 383-273-0 | 473 |
-| 96 | 0.648 | [0.613, 0.681] | 425-231-0 | 1082 |
-| 144 | 0.672 | [0.636, 0.709] | 441-215-0 | 1743 |
-| 192 | 0.688 | [0.651, 0.724] | 451-205-0 | 2448 |
-
-**There is no knee at 192 -- the curve is still climbing there.** `192 - 24` is
-`+0.137 [+0.088, +0.186]`, `192 - 48` is `+0.104 [+0.055, +0.152]` and `96 - 48` is
-`+0.064 [+0.017, +0.111]`, all clear of zero. Increments do decelerate
-(+0.034, +0.064, +0.024, +0.015 across the five rungs) but no adjacent pair
-establishes a plateau. And **192 at 328 pairs reads 0.688, ABOVE what the 64-pair run
-measured at 768** (0.664) -- which is the cleanest possible demonstration that the
-first ladder's flat top was noise, not a ceiling.
-
-Every rung now clears parity, 24 included (0.550 [0.511, 0.588]). The earlier
-worry that a search under ~24 simulations is weaker than its own prior is settled
-for the heuristic leaf in the opposite direction: 24 simulations already beats
-Hard v2, just barely.
-
-**The transferable rule: a paired arena's resolution must be computed BEFORE its
-rungs are read, not after a conclusion is drawn from them.** With per-pair SD ~0.46
-the pair count needed for a given resolution is `(1.96 * 0.46 / d)^2` -- about 88
-pairs for +/-0.10, 328 for +/-0.05, 912 for +/-0.03 and 2,040 for +/-0.02. The whole
-five-rung ladder at 328 pairs costs about 1.7 core-hours, so the 64-pair version
-saved roughly an hour and bought a false conclusion with it. Any arena reporting
-differences smaller than its own half-width is reporting noise, and a *flat* series
-of such differences is the shape noise takes -- it looks exactly like the finding
-one hopes for.
+**The rule to carry: compute a paired arena's resolution BEFORE reading its rungs,
+and size the run to the effect you intend to detect.** With per-pair SD ~0.45 the
+pair count is `(1.96 * 0.45 / d)^2` -- about 88 pairs for +/-0.10, 328 for +/-0.05,
+912 for +/-0.03, 2,040 for +/-0.02. A series of differences smaller than the
+half-width is noise, and a FLAT such series is the shape noise takes. When the
+effect of interest is smaller than any affordable half-width, compare wider spans
+instead of neighbours rather than reporting the neighbours as zero.
 
 ## Research references
 
