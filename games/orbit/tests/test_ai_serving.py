@@ -98,6 +98,23 @@ def test_easy_normal_and_hard_tiers_are_valid_and_legal():
     assert m._bot_move_sync(game, "human", 23, "expert") == m._bot_move_sync(game, "human", 23, "hard")
 
 
+def test_an_unknown_tier_from_a_newer_bundle_clamps_up_not_down():
+    """A newer client must never be silently handed the random bot.
+
+    Pages and Render deploy independently, so a bundle offering a tier this build
+    has not got is a normal release window, not corruption. Loading a persisted
+    room keeps the old reading: there, an unknown tier is a RETIRED one.
+    """
+    assert m.AI_DIFFICULTIES[-1] == "expert", "the roster is ordered weakest to strongest"
+    assert m._requested_difficulty("some-future-tier") == m.AI_DIFFICULTIES[-1]
+    assert m._requested_difficulty("expert") == "expert"
+    assert m._requested_difficulty("easy") == "easy"
+    assert m._requested_difficulty("random") == "easy"
+    assert m._requested_difficulty(None) == m.DEFAULT_DIFFICULTY
+    # Persisted rooms keep coercing DOWN; an unknown tier there is retired.
+    assert m._valid_difficulty("some-future-tier") == m.DEFAULT_DIFFICULTY
+
+
 def test_expert_is_a_browser_tier_carrying_its_own_per_decision_allowance():
     """Expert reaches the worker as a tier, with the turn already split.
 

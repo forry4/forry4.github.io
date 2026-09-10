@@ -146,6 +146,26 @@ def _valid_difficulty(value) -> str:
     return value if value in AI_DIFFICULTIES else DEFAULT_DIFFICULTY
 
 
+def _requested_difficulty(value) -> str:
+    """A tier this build does not know means a NEWER client, not a bad one.
+
+    ``_valid_difficulty`` coerces the unknown to ``DEFAULT_DIFFICULTY`` because it
+    also loads PERSISTED rooms, where an unrecognised value is a retired tier and
+    the weakest bot is a safe reading. At room CREATION the same value means the
+    opposite: the bundle is ahead of this server. That is not exotic -- Pages and
+    Render deploy independently, so every coupled release has a window where it is
+    true, and Orbit shipped exactly that window: the picker offered Expert while
+    this file had never heard of it, and every Expert game silently got the RANDOM
+    bot. Someone asking for the strongest tier should never be handed the weakest,
+    so clamp UP to the strongest tier this build actually has.
+    """
+
+    raw = str(value or "").lower()
+    if raw and raw != "random" and raw not in AI_DIFFICULTIES:
+        return AI_DIFFICULTIES[-1]
+    return _valid_difficulty(value)
+
+
 def _loaded_ai_memory(raw, players) -> dict[str, dict]:
     """Restore only bounded, versioned serving memory for known seats."""
 
@@ -1085,7 +1105,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
 async def _handle_create(ws, room_id, pid, msg):
     name = (msg.get("name") or "Player").strip()[:24] or "Player"
     vs_ai = bool(msg.get("vs_ai"))
-    difficulty = _valid_difficulty(msg.get("ai_difficulty"))
+    difficulty = _requested_difficulty(msg.get("ai_difficulty"))
     # New rooms always use a random technology board.  Keep this server-side so
     # an older cached client cannot quietly create the retired S.U.N. variant.
     configuration = "random"
