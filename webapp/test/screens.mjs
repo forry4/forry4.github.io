@@ -4751,6 +4751,39 @@ try {
 				.then(() => true).catch(() => false);
 			check("the game reaches round 1 and our turn (bot played offline)", badge);
 
+			// THE GAME SCREEN FITS THE WINDOW. The board's aesthetic height floor is
+			// `38vw` — a HEIGHT taken from the viewport's WIDTH — so a wide window used to
+			// ask for board room the window did not have and the page grew a scrollbar for
+			// space nothing needed: at 2560 it wanted 973px of board to hold the same
+			// 619px-wide ring it draws at 1800 (the wrap's max-width), and a 2560x1600
+			// panel at 150% OS scaling — 1707x~940 CSS px — overflowed by a few dozen px.
+			// Both bounds are measured at runtime (`--coc-board-cap`, and the log's floor),
+			// so they are asserted here at the sizes that drove them. 1366x768-class windows
+			// are NOT listed: there the duchy row alone is taller than the window and the
+			// page correctly scrolls. The depot ring must still fit INSIDE the board at
+			// every one of them — that is the invariant the cap is not allowed to break,
+			// and the reason it is a ceiling on the floor rather than a height.
+			const wasViewport = page.viewportSize();
+			for (const vp of [{ width: 2560, height: 1600 }, { width: 2560, height: 1000 },
+				{ width: 1920, height: 1080 }, { width: 1707, height: 948 }]) {
+				await page.setViewportSize(vp);
+				await sleep(400);
+				const fit = await page.evaluate(() => {
+					const de = document.documentElement;
+					const bh = document.querySelector(".coc-board-hex").getBoundingClientRect();
+					const spill = [...document.querySelectorAll(".coc-board-hex [data-depot]")]
+						.map((el) => el.getBoundingClientRect())
+						.filter((r) => r.top < bh.top - 1 || r.bottom > bh.bottom + 1).length;
+					return { over: de.scrollHeight - innerHeight, wide: de.scrollWidth - innerWidth,
+						board: Math.round(bh.height), spill };
+				});
+				check(`the Castles game fits a ${vp.width}x${vp.height} window`,
+					fit.over <= 0 && fit.wide <= 0, JSON.stringify(fit));
+				check(`...with every depot inside the board at ${vp.width}x${vp.height}`,
+					fit.spill === 0, JSON.stringify(fit));
+			}
+			if (wasViewport) await page.setViewportSize(wasViewport);
+
 			await ctx.setOffline(false);   // assets for a reload (no SW on localhost)
 			await page.reload({ waitUntil: "load" }).catch(() => {});
 			const resumed = await page.waitForSelector(".coc", { timeout: 20_000 })

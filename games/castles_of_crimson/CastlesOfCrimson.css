@@ -526,10 +526,21 @@ html,body{margin:0;padding:0;background:#120c0d}
      inner list is what lets it scroll instead of growing the area / the board). */
   .coc-log-panel{flex:1 1 0;min-height:0;display:flex;flex-direction:column}
   .coc-log-panel .coc-log{flex:1;max-height:none;min-height:0}
-  /* min-height floor is max(38vw, --coc-board-minh): the JS measures the depot ring and
+  /* min-height floor is max(WANT, --coc-board-minh): the JS measures the depot ring and
      raises --coc-board-minh so 3-4p (taller depot stacks) always fit without overflow.
-     flex:1 fills the board column; zoom scales the fixed-px tiles/kite/mini-dice. */
-  .coc-col-board .coc-board-hex{zoom:.85;width:100%;max-width:none;aspect-ratio:auto;flex:1 1 auto;min-height:max(38vw, var(--coc-board-minh, 0px))}
+     flex:1 fills the board column; zoom scales the fixed-px tiles/kite/mini-dice.
+     WANT is the AESTHETIC size (spread the depot ring out when there's room) and it is
+     bounded on BOTH axes, because it is a HEIGHT derived from the viewport's WIDTH:
+       - 684px = 38% of the wrap's 1800px max-width. Past 1800 the board column stops
+         getting wider, so 38vw only stretches the ring vertically into empty gaps —
+         at 2560 it asked for 973px of board to hold the same 619px-wide content.
+       - --coc-board-cap is the height actually LEFT for the board in this window (JS,
+         measured; see CastlesOfCrimson.jsx). Without it a wide-but-short window — a
+         2560x1600 panel at 150% OS scaling is 1707x~940 CSS px — wants 649px of board
+         under ~300px of bars, and the page scrolls for room nothing asked for.
+     --coc-board-minh still wins through the max(), so a ring that genuinely needs the
+     height still gets it (and then the page scrolls, correctly). */
+  .coc-col-board .coc-board-hex{zoom:.85;width:100%;max-width:none;aspect-ratio:auto;flex:1 1 auto;min-height:max(min(38vw, 684px, var(--coc-board-cap, 100vh)), var(--coc-board-minh, 0px))}
 }
 @media (min-width:1600px){
   .coc-col-board .coc-board-hex{zoom:1}

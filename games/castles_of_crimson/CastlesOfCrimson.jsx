@@ -956,12 +956,35 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
       const area0 = document.querySelector(".coc-duchy-area");
       if (window.innerWidth < 1280) {
         bh.style.removeProperty("--coc-board-minh");
+        bh.style.removeProperty("--coc-board-cap");
         if (col0) col0.style.height = "";   // clear the desktop height-sync below 1280
         if (area0) area0.style.height = "";
         document.querySelectorAll(".coc-storage").forEach((s) => { s.style.zoom = ""; });
         return;
       }
       const zoom = parseFloat(getComputedStyle(bh).zoom) || 1;
+      // How much height this WINDOW actually has for the two columns — so the CSS floor
+      // (38vw, a HEIGHT derived from the viewport's WIDTH) can't ask for room the window
+      // hasn't got and scroll the page for it.  Everything else is stacked above the
+      // columns (top bar, status bar) or is the wrap's bottom padding, and NONE of it
+      // moves when the columns resize, so measuring it is board-independent and one pass
+      // converges — the same property the depot measure below relies on.  Measured, not
+      // assumed: a hand-totalled constant was 6px short here, which is exactly the size
+      // of scrollbar this whole measure exists to avoid.
+      const wrapEl = bh.closest(".coc-wrap-game");
+      const colsEl = bh.closest(".coc-game-cols");
+      let availCols = Infinity, header = 0;
+      if (wrapEl && colsEl && col0) {
+        const wr = wrapEl.getBoundingClientRect(), cr = colsEl.getBoundingClientRect();
+        availCols = window.innerHeight - (cr.top - wr.top) - (wr.bottom - cr.bottom) - 2;
+        header = col0.getBoundingClientRect().height - bh.getBoundingClientRect().height;
+        // The board's share of that: the column minus its phase/turn-order header. A
+        // CEILING on the aesthetic size only — `--coc-board-minh` beats it through the
+        // CSS max(), so a depot ring that genuinely needs more height still gets it (and
+        // then the page scrolls, correctly).
+        bh.style.setProperty("--coc-board-cap",
+          `${Math.max(0, Math.floor((availCols - header) / zoom))}px`);
+      }
       // The central black depot is centered (f=0.5) and grows with player count (2/3/4 rows).
       // At 4p it's tall enough to collide with the top/bottom depots' mini-dice (which point
       // inward toward the center), so it becomes a real height constraint — measure it.
@@ -1007,7 +1030,15 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
         col0.style.height = ""; area0.style.height = "";
         const boardNat = col0.getBoundingClientRect().height;
         const rowH = row.getBoundingClientRect().height;
-        const target = Math.max(Math.round(boardNat), Math.ceil(rowH) + 130 + 16);
+        // The LOG's floor is what's left of the window, not a constant. 130px of log is
+        // what we WANT under the duchies; on a short window (a 2560x1600 panel at 150% OS
+        // scaling is ~940 CSS px tall) demanding it unconditionally is what pushed the
+        // page past the viewport by a few dozen px — a page scrollbar to protect log rows
+        // that scroll internally anyway. So the log gives its space back down to 60px
+        // before the page starts scrolling; below that the duchy row itself is the floor
+        // and the page scrolls, correctly.
+        const logH = Math.max(60, Math.min(130, Math.round(availCols - rowH - 16)));
+        const target = Math.max(Math.round(boardNat), Math.ceil(rowH) + logH + 16);
         col0.style.height = `${target}px`;
         area0.style.height = `${target}px`;
       }

@@ -107,6 +107,19 @@ shared zlib layer in `core/rooms.py`).
   can't zero its padding.
 - **Board-column `zoom`** (`.coc-board-hex` zoom .85 @≥1280 / 1 @≥1600): percentages inside a zoomed
   element already resolve in zoomed units — `width:100%` fills; `width:calc(100%/zoom)` double-compensates.
+- **The board's height floor is a height taken from the viewport's WIDTH (`38vw`), so it is bounded on
+  BOTH axes or the game screen grows a scrollbar for room nothing asked for.** Two bounds, both in
+  `max(min(38vw, 684px, var(--coc-board-cap)), var(--coc-board-minh))`: `684px` is 38% of the wrap's
+  1800px max-width — past 1800 the board column stops getting WIDER, so `38vw` only stretched the depot
+  ring vertically into empty gaps (at 2560 it asked 973px to hold the same 619px-wide ring it draws at
+  1800) — and `--coc-board-cap` is the height this window actually has left, measured in the layout
+  effect. The chrome it subtracts is MEASURED (`wrap - cols` rects), not totalled by hand: the hand
+  total was 6px short, which is exactly the scrollbar it exists to avoid. Same lesson in the column
+  sync — the log's 130px floor gives way to 60px before the PAGE scrolls, because those rows scroll
+  internally anyway. `--coc-board-minh` beats both through the `max()`, so a ring that genuinely needs
+  the height still gets it and the page scrolls, correctly (a 4p ring wants ~935px). Regression-gated
+  in `screens.mjs`'s `offlineCoc` at 2560x1600/2560x1000/1920x1080/1707x948 — the last is a 2560x1600
+  panel at 150% OS scaling, i.e. the size a user reports as "2560x1600".
 - **Mobile media-query ordering**: mobile `@media` blocks sit BEFORE the base rules, so every mobile
   override must be higher-specificity (`.coc `-prefixed) or a later base rule wins.
 
