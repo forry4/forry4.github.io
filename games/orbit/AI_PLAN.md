@@ -616,92 +616,61 @@ Reviewed `docs/ai-research-log.md` Duel sessions July 22–30 and the actual
   move aggregation, and whole-turn timing. Weak-bot wins are only a competence floor;
   include near-peer checkpoints, fresh seeds, mirror controls and targeted tactics.
 
-### 2026-09-10 the fixed-simulation ladder: search saturates by 192
+### 2026-09-10 the fixed-simulation ladder: 64 pairs cannot see a knee
 
-Five heuristic-leaf rungs against Hard v2, 64 balanced pairs each, all on the
-`development-native-search-v1` deals, folded through `summarise` and the shared
-paired bootstrap. The 192/384/768 rungs are new; the 24 and 96 rungs are
-re-measurements of the six-arm table above.
+**A first pass at 64 pairs per rung concluded that the heuristic-leaf search
+"saturates by 192 simulations". That conclusion was wrong, and how it was reached
+is the more useful half of this entry.** It is left described rather than deleted
+because the failure is reproducible from the numbers and is a trap the next ladder
+would fall into too.
+
+That run measured 192 -> 0.664, 384 -> 0.656, 768 -> 0.664 and read the flatness as
+a plateau. Two things were wrong with it:
+
+- **The plateau's left edge was never measured.** Paired deltas were computed only
+  among the three NEW rungs, so 192 became the plateau's start by construction. The
+  96 rung sat right there in the same table: `768 - 96` is `+0.008 [-0.117, +0.125]`,
+  exactly as flat as `768 - 192`.
+- **Nothing in that ladder was resolvable in the first place.** Paired per-pair
+  differences have SD ~0.46, so 64 pairs resolves only +/-0.11 and EVERY rung-to-rung
+  difference was smaller than that -- `768 - 24` included, at `+0.094 [-0.023, +0.203]`.
+  A flat reading was the only reading 64 pairs could have produced. Saturation was
+  inferred from three numbers that were statistically indistinguishable from each
+  other *and* from the bottom of the ladder.
+
+Re-run at **328 balanced pairs** (+/-0.049), with rungs added at 48 and 144 to bracket
+the supposed knee:
 
 | fixed simulations | score | 95% interval | W-L-D | core-seconds |
 |---|---|---|---|---|
-| 24 | 0.570 | [0.492, 0.656] | 73-55-0 | 37 |
-| 96 | 0.656 | [0.563, 0.742] | 84-44-0 | 215 |
-| 192 | 0.664 | [0.578, 0.750] | 85-43-0 | 468 |
-| 384 | 0.656 | [0.578, 0.734] | 84-44-0 | 1006 |
-| 768 | 0.664 | [0.586, 0.742] | 85-43-0 | 2188 |
+| 24 | 0.550 | [0.511, 0.588] | 361-295-0 | 192 |
+| 48 | 0.584 | [0.549, 0.619] | 383-273-0 | 473 |
+| 96 | 0.648 | [0.613, 0.681] | 425-231-0 | 1082 |
+| 144 | 0.672 | [0.636, 0.709] | 441-215-0 | 1743 |
+| 192 | 0.688 | [0.651, 0.724] | 451-205-0 | 2448 |
 
-The deals are common across rungs, so the differences pair. 384 minus 192 is
--0.008 [-0.125, +0.102], 768 minus 384 is +0.008 [-0.094, +0.102], and 768 minus
-192 is **+0.000 [-0.117, +0.109]**. **The heuristic-leaf search saturates by
-roughly 192 simulations**: quadrupling the budget to 768 costs 4.7x the compute
-and buys nothing measurable against this opponent.
+**There is no knee at 192 -- the curve is still climbing there.** `192 - 24` is
+`+0.137 [+0.088, +0.186]`, `192 - 48` is `+0.104 [+0.055, +0.152]` and `96 - 48` is
+`+0.064 [+0.017, +0.111]`, all clear of zero. Increments do decelerate
+(+0.034, +0.064, +0.024, +0.015 across the five rungs) but no adjacent pair
+establishes a plateau. And **192 at 328 pairs reads 0.688, ABOVE what the 64-pair run
+measured at 768** (0.664) -- which is the cleanest possible demonstration that the
+first ladder's flat top was noise, not a ceiling.
 
-That is saturation, not a stuck knob, and the distinction was checked rather
-than assumed. Between the 192 and 768 rungs 54 of 128 games end with a different
-winner and 127 of 128 run a different number of decisions, on identical seeds
-and identical sides. The deeper search plays substantially different games; it
-just wins them at the same rate. Games also lengthen with search (87.3 decisions
-per game at 192, 92.3 at 768), so the extra simulations are being spent, not
-discarded.
+Every rung now clears parity, 24 included (0.550 [0.511, 0.588]). The earlier
+worry that a search under ~24 simulations is weaker than its own prior is settled
+for the heuristic leaf in the opposite direction: 24 simulations already beats
+Hard v2, just barely.
 
-**This is why the ladder cannot settle neural-versus-heuristic, and running its
-upper rungs was the wrong direction.** Above about 192 simulations the search is
-past the point where more of it changes the outcome rate, so an arm run there
-compares two saturated searches and a null result carries no information about
-the leaves. The network costs 18.3x more per simulation, which at equal
-simulations only buys a slower route to the same plateau. The discriminating
-regime is *below* 96 simulations, where the ladder is still climbing, or against
-an opponent stronger than Hard v2 -- which `serving::choose_move` makes the
-search's own internal opponent model, so the arena currently measures a search
-against a player it models exactly.
-
-**The 24 and 96 rungs in the six-arm table do not reproduce, and one conclusion
-drawn from them does not survive.** Re-measured here they read 0.570 and 0.656
-against the recorded 0.469 and 0.609. This is not tree drift: `65a9360` was
-checked out into a worktree and built, and its arena returns 0.5703 and 0.6562,
-bit-identical to HEAD. Nothing between them can move a fixed-simulation run --
-`search.rs` only swapped `Instant` for `crate::clock::Clock`, whose budget is
-60 s and never reached under fixed simulations; `neural_arena.rs` only added the
-`via_observation` branch, which is inert when the flag is off; `lib.rs` dropped
-one unused import; and the deals, boards and both engines are untouched. A
-fixed-simulation run is deterministic, so identical settings give identical
-results and there is no sampling noise to absorb the gap. The recorded numbers
-therefore came from settings the document does not capture.
-
-The specific casualty is the claim that **both fixed-24 arms sit at or below 0.5,
-so a search under roughly 24 simulations is weaker than its own prior**. The
-heuristic leaf at 24 simulations scores 0.570 on the campaign deals, and on two
-further independent 64-pair deal sets 0.539 [0.453, 0.625] and 0.578 [0.484,
-0.664]. Three deal sets, none at or below 0.5. Whatever produced 0.469, a
-24-simulation heuristic search is measurably stronger than the prior it starts
-from, not weaker. The neural half of that claim is untested here and stands or
-falls separately.
-
-Between-deal-set spread is worth carrying forward as a number: three 64-pair
-samples of the same configuration at 24 simulations span 0.539 to 0.578. A
-64-pair rung resolves about +/-0.08, so it can separate 24 from 96 but cannot
-separate 192 from 768, and it could never have resolved the leaf differences the
-six-arm table reports, all of which are smaller than that.
-
-**The neural arm was not run.** Orbit's checkpoints live under the gitignored
-`.orbit-*/`, the net has never been committed the way Duel's `value_net.json` and
-CoC's `.bin` are, and `webapp/public/wasm/orbit-model.json` is the Hard v2
-serving asset from `export_serving.py`, not an `export_model` weight dump. A
-freshly trained net would not be the indexed v3 net the existing rungs were
-measured with, so the ladder would not join up. The rungs above are on the fixed
-pool and pair exactly with a neural arm run later:
-
-```
-python -m games.orbit.tools.native_search_arena <checkpoint> out.json \
-    --pairs 64 --simulations 192   # and 384, 768
-```
-
-Running the control arm no longer needs the training environment: the torch
-import in `native_search_arena.py` moved behind the checkpoint that needs it, so
-`heuristic` runs on a machine with neither torch nor numpy installed. Requiring
-the training environment to measure "no network" gated the control on the thing
-it controls for.
+**The transferable rule: a paired arena's resolution must be computed BEFORE its
+rungs are read, not after a conclusion is drawn from them.** With per-pair SD ~0.46
+the pair count needed for a given resolution is `(1.96 * 0.46 / d)^2` -- about 88
+pairs for +/-0.10, 328 for +/-0.05, 912 for +/-0.03 and 2,040 for +/-0.02. The whole
+five-rung ladder at 328 pairs costs about 1.7 core-hours, so the 64-pair version
+saved roughly an hour and bought a false conclusion with it. Any arena reporting
+differences smaller than its own half-width is reporting noise, and a *flat* series
+of such differences is the shape noise takes -- it looks exactly like the finding
+one hopes for.
 
 ## Research references
 
