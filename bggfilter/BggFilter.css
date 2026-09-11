@@ -28,7 +28,10 @@
 	letter-spacing:.04em;margin:0 0 4px;}
 .bgf-knob .bgf-v,.bgf-mrow .bgf-v{float:right;color:var(--gold);font-weight:700;}
 .bgf-knob input[type=range],.bgf-mrow input[type=range]{width:100%;display:block;margin:0;
-	height:20px;accent-color:var(--gold);cursor:pointer;}
+	height:20px;accent-color:var(--gold);cursor:pointer;
+	/* a horizontal drag belongs to the slider; a vertical one still scrolls the page. Without
+	   this the scroller can claim a drag that is a few degrees off true. */
+	touch-action:pan-y;}
 .bgf-knob input[type=range]:focus-visible,.bgf-mrow input[type=range]:focus-visible{
 	outline:2px solid var(--gold);outline-offset:3px;}
 
@@ -133,4 +136,11 @@
 	.bgf-hero{padding:26px 16px 18px;}
 	.bgf-wrap{padding:0 12px;}
 	.bgf-panel{padding:14px 14px;}
+}
+
+/* A fingertip covers ~40px and the slider drew a 20px row. The visual stays slim — the native
+   control centres itself in the box — but the whole height is grabbable, and every press inside
+   it moves the dial (see rangePointer in the JSX). */
+@media(pointer:coarse){
+	.bgf-knob input[type=range],.bgf-mrow input[type=range]{height:40px;}
 }
