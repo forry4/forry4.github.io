@@ -182,7 +182,8 @@ impl Chance {
 impl State {
     /// Allowlisted policy input, matching Python ai.state.observation. Never
     /// expose a serialized State to a policy, including after game over.
-    pub fn observation(&self, seat: usize) -> Value {
+    #[cfg(test)]
+    fn observation_serde(&self, seat: usize) -> Value {
         assert!(seat < 2);
         let state = serde_json::to_value(self).unwrap();
         let mut result = json!({});
@@ -289,6 +290,118 @@ impl State {
         result["legal_moves"] = json!(moves);
         result
     }
+
+    /// Build the allowlisted observation directly from the privileged state.
+    /// This deliberately mirrors `observation_serde` field-for-field, but
+    /// avoids serializing the hidden deck, hands and pending queues before
+    /// copying the public projection back out.  Keep the two implementations
+    /// in parity tests below whenever this contract changes.
+    pub fn observation(&self, seat: usize) -> Value {
+        assert!(seat < 2);
+        let mut result = json!({
+            "schema": self.schema,
+            "phase": self.phase,
+            "turn_pid": self.turn_pid,
+            "turn_number": self.turn_number,
+            "influence": self.influence,
+            "captured_this_turn": self.captured_this_turn,
+            "leader": {"owner": self.leader.owner, "level": self.leader.level},
+            "board_sides": self.board_sides,
+            "planet_bonus": self.planet_bonus,
+            "technology_bonus": self.technology_bonus,
+            "agent_discard": self.agent_discard,
+            "bonus_discard": self.bonus_discard,
+            "mulligan_done": self.mulligan_done,
+            "pending_pid": self.pending_pid,
+            "winner": self.winner,
+            "seat": seat,
+        });
+        let mut players = Vec::with_capacity(2);
+        for index in 0..2 {
+            let source = &self.players[index];
+            let mut player = json!({
+                "credits": source.credits,
+                "zenithium": source.zenithium,
+                "columns": source.columns,
+                "technology": source.technology,
+                "row_bonuses": source.row_bonuses,
+                "captured": source.captured,
+                "hand_count": source.hand.len(),
+            });
+            if index == seat {
+                let mut hand = source.hand.clone();
+                hand.sort();
+                player["hand"] = json!(hand);
+            }
+            players.push(player);
+        }
+        result["players"] = json!(players);
+        result["agent_deck_count"] = json!(self.agent_deck.len());
+        result["bonus_deck_count"] = json!(self.bonus_deck.len());
+        result["pending"] = Value::Null;
+        if let Some(pending) = &self.pending {
+            if self.pending_pid == Some(seat) {
+                let current = &pending.queue[0];
+                let mut task = json!({});
+                for key in [
+                    "type",
+                    "amount",
+                    "target",
+                    "planet",
+                    "exclude",
+                    "restriction",
+                    "distinct_from",
+                    "selected",
+                    "amounts",
+                    "label",
+                    "cost",
+                    "count",
+                    "done",
+                    "used",
+                    "owner",
+                    "distinct",
+                    "reward",
+                    "faction",
+                    "discount",
+                    "lowest",
+                    "tiers",
+                    "planets",
+                    "index",
+                    "center",
+                    "neighbor",
+                    "influence_each",
+                    "require_full",
+                    "one_at_a_time",
+                    "options",
+                    "branch_labels",
+                ] {
+                    if let Some(v) = current.get(key) {
+                        task[key] = v.clone();
+                    }
+                }
+                if let Some(branches) = current["branches"].as_array() {
+                    if !branches.is_empty() {
+                        task["branch_labels"] = json!(branches
+                            .iter()
+                            .map(|v| v["label"].clone())
+                            .collect::<Vec<_>>());
+                    }
+                }
+                result["pending"] = json!({
+                    "source": pending.source,
+                    "task": task,
+                    "last_planet": pending.context["last_planet"]
+                });
+            } else {
+                result["pending"] = json!({"source": pending.source, "waiting": true});
+            }
+        }
+        let mut moves = self.legal_moves(seat);
+        moves.sort_by_key(|v| serde_json::to_string(v).unwrap());
+        result["legal_moves"] = json!(moves);
+        result
+    }
+
     pub fn new(seed: u64, board_sides: [i32; 3]) -> (Self, Chance) {
         assert!(board_sides.iter().all(|s| (1..=2).contains(s)));
         let p = Player {
@@ -805,7 +918,29 @@ impl State {
     /// Invalid legal-move requests do not mutate either state or chance.
     /// Only trusted, validated states enter this simulator (not the live server).
     pub fn apply(&mut self, pid: usize, mv: &Value, chance: &mut Chance) -> Result<(), String> {
-        if !self.legal_moves(pid).contains(mv) {
+        self.apply_inner(pid, mv, chance, true)
+    }
+
+    /// Apply a move selected from this state's legal-move list. Search already
+    /// owns that list, so repeating the full JSON legal-move construction here
+    /// only burns CPU; the public `apply` path above remains validating.
+    pub(crate) fn apply_search(
+        &mut self,
+        pid: usize,
+        mv: &Value,
+        chance: &mut Chance,
+    ) -> Result<(), String> {
+        self.apply_inner(pid, mv, chance, false)
+    }
+
+    fn apply_inner(
+        &mut self,
+        pid: usize,
+        mv: &Value,
+        chance: &mut Chance,
+        validate: bool,
+    ) -> Result<(), String> {
+        if validate && !self.legal_moves(pid).contains(mv) {
             return Err("Illegal move".into());
         }
         if self.phase == "mulligan" {
@@ -1416,6 +1551,25 @@ Value::Array(source["hand"].as_array().ok_or("Observation hides the observer's o
 #[cfg(test)]
 mod observation_reconstruction {
     use super::*;
+
+    #[test]
+    fn direct_observation_matches_serialized_projection() {
+        let (mut state, mut chance) = State::new(808, [2, 1, 2]);
+        for step in 0..160 {
+            for view in 0..2 {
+                assert_eq!(
+                    state.observation(view),
+                    state.observation_serde(view),
+                    "observation drift at step {step}, seat {view}"
+                );
+            }
+            let Some(seat) = state.actor() else { break };
+            let moves = state.legal_moves(seat);
+            let mv = moves[chance.index(moves.len())].clone();
+            state.apply(seat, &mv, &mut chance).unwrap();
+        }
+    }
+
     #[test]
     fn rebuilt_world_matches_every_public_field_and_the_legal_moves() {
         let (mut state, mut chance) = State::new(404, [1, 2, 1]);

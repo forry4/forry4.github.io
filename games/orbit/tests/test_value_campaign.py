@@ -21,6 +21,18 @@ def test_censored_game_never_creates_a_value_label():
     assert samples({"censored":True})==([],[])
 
 
+def test_samples_root_value_blend_is_optional_and_actor_only():
+    game=engine.new_game(["A","B"],seed=31)
+    steps=[{"observation":observation(game,pid),
+            "search_value":-1.0 if seat==0 else None}
+           for seat,pid in enumerate(game["order"])]
+    record={"steps":steps,"censored":False,"winner":0}
+    _,outcome=samples(record,per_seat=1)
+    _,blended=samples(record,per_seat=1,root_value_beta=0.25)
+    assert outcome==[1.0,0.0]
+    assert blended==[0.75,0.0]
+
+
 def test_partitions_do_not_overlap_and_seed_is_repeatable():
     a={game_seed("train-native-v2",i) for i in range(100)}
     b={game_seed("development-native-v2",i) for i in range(100)}

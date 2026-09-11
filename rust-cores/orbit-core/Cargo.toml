@@ -6,6 +6,8 @@ edition = "2021"
 [features]
 # Research-log candidate: changes reduction rounding, so stays opt-in.
 chunked-dot = []
+# Offline-only phase timing; deliberately absent from serving builds.
+profile-search = []
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

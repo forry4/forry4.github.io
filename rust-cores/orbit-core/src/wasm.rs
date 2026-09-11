@@ -30,8 +30,8 @@ pub fn orbit_neural_value_json(raw: &str) -> String {
         let slot=slot.borrow();
         let model=slot.as_ref().ok_or("Neural model not loaded")?;
         let tokens=crate::features::encode(&obs,None)?;
-        let rows=crate::tensors::encode_parts(&model.vocabulary,&tokens)?;
-        model.logit(&rows)
+        let rows=model.encode_tokens(&tokens)?;
+        model.logit_typed(&rows)
     }));
     match result { Ok(logit)=>json!({"logit":logit}).to_string(), Err(error)=>json!({"error":error}).to_string() }
 }

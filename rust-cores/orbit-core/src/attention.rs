@@ -1,6 +1,19 @@
 //! Portable float inference reference, sharing the Python export contract.
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::cell::RefCell;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use crate::tensors::{Encoder, TensorRow};
+
+// Position features are deterministic functions of the integer sequence
+// position and nesting depth.  Orbit observations use small bounded indices
+// (cards, moves, players and columns), so caching the common range removes a
+// pair of matrix multiplies from every token on every leaf.  Inputs outside
+// this range still use the exact old path below; the cache is an optimization,
+// never a truncation of the feature contract.
+const POSITION_CACHE_MAX: usize = 1024;
+const POSITION_CACHE_DEPTH: usize = 8;
+static NEXT_MODEL_TAG: AtomicUsize = AtomicUsize::new(1);
 
 pub struct Model {
     pub vocabulary: Value,
@@ -9,12 +22,130 @@ pub struct Model {
     layers: usize,
     weights: BTreeMap<String, Vec<f32>>,
     indexed: bool,
+    position_cache: Vec<f32>,
+    encoder: Encoder,
+    cache_tag: usize,
+}
+
+/// Cache key for the exact result of the token pooling affine/GELU block.
+/// Entity identity is intentionally absent: pooling is applied per token and
+/// the same semantic row can be added to any entity.  The f32 bit pattern is
+/// used so the cache never conflates distinct numeric observations.
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+struct PoolKey {
+    group: usize,
+    kind: usize,
+    path: usize,
+    positions: Vec<usize>,
+    number: u32,
+    role: usize,
+    card: usize,
+    category: usize,
+}
+
+impl PoolKey {
+    fn from_row(row: &TensorRow) -> Self {
+        Self {
+            group: row.group,
+            kind: row.kind,
+            path: row.path,
+            positions: row.positions.clone(),
+            number: row.number.to_bits(),
+            role: row.role,
+            card: row.card,
+            category: row.category,
+        }
+    }
+}
+
+/// Reusable workspace for the variable-length Orbit forward.
+///
+/// Duel can use compile-time token dimensions; Orbit's semantic encoder has a
+/// dynamic number of rows/entities.  Keeping the outer vectors reusable gives
+/// us the same allocation property without imposing a truncation or a hidden
+/// maximum on the observation contract.  The first call on a thread grows the
+/// buffers; subsequent leaves reuse them.
+struct LogitScratch {
+    x: Vec<Vec<f32>>,
+    qkv: Vec<Vec<f32>>,
+    attended: Vec<Vec<f32>>,
+    counts: Vec<usize>,
+    scores: Vec<f32>,
+    token: Vec<f32>,
+    norm: Vec<f32>,
+    out: Vec<f32>,
+    hidden: Vec<f32>,
+    active_entities: usize,
+    model_id: usize,
+    pool_cache: HashMap<PoolKey, Vec<f32>>,
+}
+
+impl LogitScratch {
+    fn new() -> Self {
+        Self {
+            x: Vec::new(),
+            qkv: Vec::new(),
+            attended: Vec::new(),
+            counts: Vec::new(),
+            scores: Vec::new(),
+            token: Vec::new(),
+            norm: Vec::new(),
+            out: Vec::new(),
+            hidden: Vec::new(),
+            active_entities: 0,
+            model_id: 0,
+            pool_cache: HashMap::new(),
+        }
+    }
+
+    fn ensure(&mut self, entities: usize, width: usize, feedforward: usize) {
+        while self.x.len() < entities {
+            self.x.push(vec![0.0; width]);
+        }
+        while self.qkv.len() < entities {
+            self.qkv.push(vec![0.0; width * 3]);
+        }
+        while self.attended.len() < entities {
+            self.attended.push(vec![0.0; width]);
+        }
+        self.counts.resize(entities, 0);
+        self.scores.resize(entities, 0.0);
+        self.token.resize(width, 0.0);
+        self.norm.resize(width, 0.0);
+        self.out.resize(width, 0.0);
+        self.hidden.resize(feedforward, 0.0);
+    }
+}
+
+thread_local! {
+    static LOGIT_SCRATCH: RefCell<LogitScratch> = RefCell::new(LogitScratch::new());
+}
+
+#[inline]
+fn affine_into(weight: &[f32], bias: &[f32], x: &[f32], out: &mut [f32]) {
+    for (i, row) in weight.chunks_exact(x.len()).enumerate() {
+        out[i] = dot(row, x) + if bias.is_empty() { 0.0 } else { bias[i] };
+    }
+}
+
+#[inline]
+fn norm_into(weight: &[f32], bias: &[f32], x: &[f32], out: &mut [f32]) {
+    let mean = x.iter().sum::<f32>() / x.len() as f32;
+    let variance = x
+        .iter()
+        .map(|v| (v - mean) * (v - mean))
+        .sum::<f32>()
+        / x.len() as f32;
+    let inv = (variance + 1e-5).sqrt().recip();
+    for (i, v) in x.iter().enumerate() {
+        out[i] = (v - mean) * inv * weight[i] + bias[i];
+    }
 }
 
 impl Model {
     pub fn load(v: &Value) -> Result<Self, String> {
         if v["version"] != "orbit-attention-value-v2" && v["version"] != "orbit-attention-value-v3" { return Err("Model version mismatch".into()); }
-        crate::tensors::encode(&serde_json::json!({"vocabulary":v["vocabulary"], "tokens":[]}))?;
+        let encoder = Encoder::new(&v["vocabulary"])?;
         let dim = |key: &str| -> Result<usize, String> {
             let n = v["config"][key].as_u64().ok_or("Missing model dimension")? as usize;
             if n == 0 || n > 4096 { return Err("Invalid model dimension".into()); }
@@ -59,7 +190,22 @@ impl Model {
             if data.len() != shape.iter().product::<usize>() { return Err(format!("Weight length: {key}")); }
             weights.insert(key,data);
         }
-        Ok(Self{vocabulary:v["vocabulary"].clone(),width:d,heads:h,layers:l,weights,indexed})
+        let mut model=Self{vocabulary:v["vocabulary"].clone(),width:d,heads:h,layers:l,weights,indexed,
+            position_cache:Vec::new(), encoder,
+            cache_tag:NEXT_MODEL_TAG.fetch_add(1, Ordering::Relaxed)};
+        // The position MLP is independent of the observation.  Build it once
+        // while loading instead of rebuilding it for every row of every leaf.
+        model.position_cache=vec![0.0;POSITION_CACHE_MAX*POSITION_CACHE_DEPTH*d];
+        for position in 0..POSITION_CACHE_MAX {
+            for depth in 0..POSITION_CACHE_DEPTH {
+                let mut value=model.linear("position.0",&[position as f32/32.0,depth as f32/8.0]);
+                value.iter_mut().for_each(|n|*n=gelu(*n));
+                let value=model.linear("position.2",&value);
+                let start=(position*POSITION_CACHE_DEPTH+depth)*d;
+                model.position_cache[start..start+d].copy_from_slice(&value);
+            }
+        }
+        Ok(model)
     }
     fn linear(&self, key: &str, x: &[f32]) -> Vec<f32> {
         self.affine(&format!("{key}.weight"), &format!("{key}.bias"), x)
@@ -69,89 +215,290 @@ impl Model {
             dot(row,x) + self.weights.get(bias).map_or(0.0,|b| b[i])
         }).collect()
     }
-    fn norm(&self,key:&str,x:&[f32]) -> Vec<f32> {
-        let mean = x.iter().sum::<f32>() / x.len() as f32;
-        let variance = x.iter().map(|v| (v-mean)*(v-mean)).sum::<f32>() / x.len() as f32;
-        let inv = (variance+1e-5).sqrt().recip();
-        let weight=&self.weights[&format!("{key}.weight")];
-        let bias=&self.weights[&format!("{key}.bias")];
-        x.iter().enumerate().map(|(i,v)| (v-mean)*inv*weight[i] + bias[i]).collect()
-    }
+    /// Evaluate one encoded observation using a thread-local reusable workspace.
+    /// The arithmetic and traversal order mirrors the original allocating path;
+    /// only buffer ownership and weight-key lookups move out of the inner loops.
     pub fn logit(&self, rows: &Value) -> Result<f32,String> {
-        let rows = rows.as_array().ok_or("Expected tensor rows")?;
+        let rows = crate::tensors::decode_rows(rows)?;
+        self.logit_typed(&rows)
+    }
+
+    /// Convert semantic tokens with the model's validated, cached vocabulary.
+    pub fn encode_tokens(&self, tokens: &Value) -> Result<Vec<TensorRow>, String> {
+        self.encoder.encode_typed(tokens)
+    }
+
+    /// Evaluate typed rows without a JSON allocation on the search leaf path.
+    pub fn logit_typed(&self, rows: &[TensorRow]) -> Result<f32,String> {
         if rows.is_empty() { return Err("Empty position".into()); }
+        LOGIT_SCRATCH.with(|cell| {
+            let mut scratch = cell.borrow_mut();
+            self.logit_into(rows, &mut scratch)
+        })
+    }
+
+    fn logit_into(&self, rows: &[TensorRow], scratch: &mut LogitScratch) -> Result<f32,String> {
         let d = self.width;
-        let mut x = vec![self.weights["summary"].clone()];
-        let mut counts = vec![0usize];
-        let mut embedding_keys=vec!["group","kind","path","category"];
-        if self.indexed {embedding_keys.extend(["card","role"]);}
-        let embeddings:Vec<(&str,&Vec<f32>)> = embedding_keys.iter()
-            .map(|key|(*key,&self.weights[&format!("embeddings.{key}.weight")])).collect();
-        let numeric=&self.weights["number.weight"];
+        // A scratch workspace is shared by all Model values on one worker
+        // thread.  Pooled vectors depend on weights, so invalidate them when
+        // the model changes (the pointer is stable for the lifetime of a
+        // loaded model and is never exposed to the wire).
+        let model_id = self.cache_tag;
+        if scratch.model_id != model_id {
+            scratch.pool_cache.clear();
+            scratch.model_id = model_id;
+        }
+        let ff = self
+            .weights["blocks.0.linear1.weight"]
+            .len()
+            .checked_div(d)
+            .ok_or("Invalid feedforward shape")?;
+        // A thread-local workspace outlives this forward.  Clear every row
+        // used by the previous observation before accumulating the new one;
+        // otherwise a shorter next observation would inherit stale entities.
+        let previous_entities = scratch.active_entities.max(1);
+        scratch.ensure(previous_entities, d, ff);
+        let previous_entities = previous_entities.min(scratch.x.len());
+        for row in &mut scratch.x[..previous_entities] {
+            row[..d].fill(0.0);
+        }
+        scratch.counts[..previous_entities].fill(0);
+        scratch.x[0].copy_from_slice(&self.weights["summary"]);
+        let mut entity_count = 1usize;
+        scratch.counts[0] = 0;
+        let group_embedding = self.weights["embeddings.group.weight"].as_slice();
+        let kind_embedding = self.weights["embeddings.kind.weight"].as_slice();
+        let path_embedding = self.weights["embeddings.path.weight"].as_slice();
+        let category_embedding = self.weights["embeddings.category.weight"].as_slice();
+        let mut embedding_weights: [&[f32]; 6] = [
+            group_embedding,
+            kind_embedding,
+            path_embedding,
+            category_embedding,
+            &[],
+            &[],
+        ];
+        let embedding_count = if self.indexed {
+            embedding_weights[4] = self.weights["embeddings.card.weight"].as_slice();
+            embedding_weights[5] = self.weights["embeddings.role.weight"].as_slice();
+            6
+        } else {
+            4
+        };
+        let numeric = self.weights["number.weight"].as_slice();
+        let pool_weight = self.weights["pool.0.weight"].as_slice();
+        let pool_bias = self.weights["pool.0.bias"].as_slice();
+
         // Position transforms depend only on (index, nesting depth) and these
         // fixed weights. Reuse them across fields without changing summation.
-        let mut position_values=BTreeMap::new();
         for row in rows {
-            let mut token = vec![0.0;d];
-            for (key,w) in &embeddings {
-                let id = row[*key].as_u64().ok_or("Missing embedding index")? as usize;
+            scratch.token[..d].fill(0.0);
+            for index in 0..embedding_count {
+                let id = match index {
+                    0 => row.group,
+                    1 => row.kind,
+                    2 => row.path,
+                    3 => row.category,
+                    4 => row.card,
+                    5 => row.role,
+                    _ => return Err("Invalid embedding index".into()),
+                };
                 let start = id.checked_mul(d).ok_or("Embedding overflow")?;
-                let values = w.get(start..start.checked_add(d).ok_or("Embedding overflow")?).ok_or("Embedding out of range")?;
-                for i in 0..d { token[i] += values[i]; }
+                let end = start.checked_add(d).ok_or("Embedding overflow")?;
+                let values = embedding_weights[index]
+                    .get(start..end)
+                    .ok_or("Embedding out of range")?;
+                for i in 0..d {
+                    scratch.token[i] += values[i];
+                }
             }
-            let n = row["number"].as_f64().ok_or("Missing numeric feature")? as f32;
-            if !n.is_finite() { return Err("Non-finite input".into()); }
-            for i in 0..d { token[i] += n*numeric[i]; }
-            for (depth,p) in row["positions"].as_array().ok_or("Missing positions")?.iter().enumerate() {
-                let p = p.as_u64().ok_or("Invalid position")?;
-                let v = position_values.entry((p,depth)).or_insert_with(|| {
-                    let mut v = self.linear("position.0", &[p as f32/32.0,depth as f32/8.0]);
-                    v.iter_mut().for_each(|n| *n = gelu(*n));
-                    self.linear("position.2", &v)
-                });
-                for i in 0..d { token[i] += v[i]; }
+            let n = row.number;
+            if !n.is_finite() {
+                return Err("Non-finite input".into());
             }
-            let entity = row["entity"].as_u64().ok_or("Missing entity")? as usize;
-            if entity == 0 || entity > rows.len() { return Err("Invalid entity".into()); }
-            while x.len() <= entity { x.push(vec![0.0;d]); counts.push(0); }
-            let v = self.linear("pool.0", &token);
-            for i in 0..d { x[entity][i] += gelu(v[i]); }
-            counts[entity] += 1;
-        }
-        for entity in 1..x.len() {
-            if counts[entity] == 0 { return Err("Noncontiguous entities".into()); }
-            let count = counts[entity] as f32;
-            for i in 0..d { x[entity][i] = x[entity][i]/count.sqrt()+self.weights["pool_count.weight"][i]*count/32.0; }
-        }
-        for layer in 0..self.layers {
-            let prefix = format!("blocks.{layer}");
-            let qkv:Vec<Vec<f32>> = x.iter().map(|v| self.affine(&format!("{prefix}.self_attn.in_proj_weight"),
-                &format!("{prefix}.self_attn.in_proj_bias"),&self.norm(&format!("{prefix}.norm1"),v))).collect();
-            let hd = d/self.heads;
-            let mut attended = vec![vec![0.0;d];x.len()];
-            for i in 0..x.len() {
-                for head in 0..self.heads {
-                    let off = head*hd;
-                    let mut scores:Vec<f32> = qkv.iter().map(|other| (0..hd).map(|k| qkv[i][off+k]*other[d+off+k]).sum::<f32>()/(hd as f32).sqrt()).collect();
-                    let max = scores.iter().copied().fold(f32::NEG_INFINITY,f32::max);
-                    scores.iter_mut().for_each(|v| *v = (*v-max).exp());
-                    let sum = scores.iter().sum::<f32>();
-                    for (j,score) in scores.iter().enumerate() {
-                        for k in 0..hd { attended[i][off+k] += score/sum*qkv[j][2*d+off+k]; }
+            for i in 0..d {
+                scratch.token[i] += n * numeric[i];
+            }
+            for (depth, &p) in row.positions.iter().enumerate() {
+                if p < POSITION_CACHE_MAX && depth < POSITION_CACHE_DEPTH {
+                    let start = (p * POSITION_CACHE_DEPTH + depth) * d;
+                    for i in 0..d {
+                        scratch.token[i] += self.position_cache[start + i];
+                    }
+                } else {
+                    // Preserve the previous unbounded behavior for any future
+                    // observation whose positions exceed the common cache.
+                    let mut value =
+                        self.linear("position.0", &[p as f32 / 32.0, depth as f32 / 8.0]);
+                    value.iter_mut().for_each(|n| *n = gelu(*n));
+                    let value = self.linear("position.2", &value);
+                    for i in 0..d {
+                        scratch.token[i] += value[i];
                     }
                 }
             }
-            for (i,v) in x.iter_mut().enumerate() {
-                let out = self.linear(&format!("{prefix}.self_attn.out_proj"), &attended[i]);
-                for k in 0..d { v[k] += out[k]; }
-                let mut hidden = self.linear(&format!("{prefix}.linear1"), &self.norm(&format!("{prefix}.norm2"),v));
-                hidden.iter_mut().for_each(|v| *v=gelu(*v));
-                let out = self.linear(&format!("{prefix}.linear2"), &hidden);
-                for k in 0..d { v[k] += out[k]; }
+            let entity = row.entity;
+            if entity == 0 || entity > rows.len() {
+                return Err("Invalid entity".into());
+            }
+            if entity + 1 > entity_count {
+                entity_count = entity + 1;
+                scratch.ensure(entity_count, d, ff);
+            }
+            let entity_row = &mut scratch.x[entity];
+            let key = PoolKey::from_row(row);
+            if let Some(pooled) = scratch.pool_cache.get(&key) {
+                for i in 0..d {
+                    entity_row[i] += pooled[i];
+                }
+            } else {
+                affine_into(pool_weight, pool_bias, &scratch.token[..d], &mut scratch.out[..d]);
+                for i in 0..d {
+                    scratch.out[i] = gelu(scratch.out[i]);
+                    entity_row[i] += scratch.out[i];
+                }
+                // Bound the per-thread cache.  Clearing at the bound keeps
+                // memory predictable while preserving exact arithmetic for
+                // every hit; a future miss simply recomputes the same row.
+                if scratch.pool_cache.len() >= 16384 {
+                    scratch.pool_cache.clear();
+                }
+                scratch.pool_cache.insert(key, scratch.out[..d].to_vec());
+            }
+            scratch.counts[entity] += 1;
+        }
+        for entity in 1..entity_count {
+            if scratch.counts[entity] == 0 {
+                return Err("Noncontiguous entities".into());
+            }
+            let count = scratch.counts[entity] as f32;
+            for i in 0..d {
+                scratch.x[entity][i] = scratch.x[entity][i] / count.sqrt()
+                    + self.weights["pool_count.weight"][i] * count / 32.0;
             }
         }
-        let result = self.linear("head", &self.norm("norm",&x[0]))[0];
-        if !result.is_finite() { return Err("Non-finite model result".into()); }
+
+        for layer in 0..self.layers {
+            let prefix = format!("blocks.{layer}");
+            let qkv_weight = self.weights[&format!("{prefix}.self_attn.in_proj_weight")].as_slice();
+            let qkv_bias = self.weights[&format!("{prefix}.self_attn.in_proj_bias")].as_slice();
+            let norm1_weight = self.weights[&format!("{prefix}.norm1.weight")].as_slice();
+            let norm1_bias = self.weights[&format!("{prefix}.norm1.bias")].as_slice();
+            for entity in 0..entity_count {
+                norm_into(
+                    norm1_weight,
+                    norm1_bias,
+                    &scratch.x[entity][..d],
+                    &mut scratch.norm[..d],
+                );
+                affine_into(
+                    qkv_weight,
+                    qkv_bias,
+                    &scratch.norm[..d],
+                    &mut scratch.qkv[entity][..3 * d],
+                );
+            }
+            for entity in 0..entity_count {
+                scratch.attended[entity][..d].fill(0.0);
+            }
+            let hd = d / self.heads;
+            let scale = 1.0 / (hd as f32).sqrt();
+            for i in 0..entity_count {
+                for head in 0..self.heads {
+                    let off = head * hd;
+                    let mut max = f32::NEG_INFINITY;
+                    for j in 0..entity_count {
+                        let mut score = 0.0;
+                        for k in 0..hd {
+                            score += scratch.qkv[i][off + k]
+                                * scratch.qkv[j][d + off + k];
+                        }
+                        let score = score * scale;
+                        scratch.scores[j] = score;
+                        if score > max {
+                            max = score;
+                        }
+                    }
+                    for j in 0..entity_count {
+                        scratch.scores[j] = (scratch.scores[j] - max).exp();
+                    }
+                    let sum = scratch.scores[..entity_count].iter().sum::<f32>();
+                    for j in 0..entity_count {
+                        let score = scratch.scores[j];
+                        for k in 0..hd {
+                            scratch.attended[i][off + k] += score / sum
+                                * scratch.qkv[j][2 * d + off + k];
+                        }
+                    }
+                }
+            }
+
+            let out_weight = self.weights[&format!("{prefix}.self_attn.out_proj.weight")].as_slice();
+            let out_bias = self.weights[&format!("{prefix}.self_attn.out_proj.bias")].as_slice();
+            let f1_weight = self.weights[&format!("{prefix}.linear1.weight")].as_slice();
+            let f1_bias = self.weights[&format!("{prefix}.linear1.bias")].as_slice();
+            let f2_weight = self.weights[&format!("{prefix}.linear2.weight")].as_slice();
+            let f2_bias = self.weights[&format!("{prefix}.linear2.bias")].as_slice();
+            let norm2_weight = self.weights[&format!("{prefix}.norm2.weight")].as_slice();
+            let norm2_bias = self.weights[&format!("{prefix}.norm2.bias")].as_slice();
+            for entity in 0..entity_count {
+                affine_into(
+                    out_weight,
+                    out_bias,
+                    &scratch.attended[entity][..d],
+                    &mut scratch.out[..d],
+                );
+                for i in 0..d {
+                    scratch.x[entity][i] += scratch.out[i];
+                }
+                norm_into(
+                    norm2_weight,
+                    norm2_bias,
+                    &scratch.x[entity][..d],
+                    &mut scratch.norm[..d],
+                );
+                affine_into(
+                    f1_weight,
+                    f1_bias,
+                    &scratch.norm[..d],
+                    &mut scratch.hidden[..ff],
+                );
+                scratch.hidden[..ff]
+                    .iter_mut()
+                    .for_each(|value| *value = gelu(*value));
+                affine_into(
+                    f2_weight,
+                    f2_bias,
+                    &scratch.hidden[..ff],
+                    &mut scratch.out[..d],
+                );
+                for i in 0..d {
+                    scratch.x[entity][i] += scratch.out[i];
+                }
+            }
+        }
+
+        let head_weight = self.weights["head.weight"].as_slice();
+        let head_bias = self.weights["head.bias"].as_slice();
+        let norm_weight = self.weights["norm.weight"].as_slice();
+        let norm_bias = self.weights["norm.bias"].as_slice();
+        norm_into(
+            norm_weight,
+            norm_bias,
+            &scratch.x[0][..d],
+            &mut scratch.norm[..d],
+        );
+        affine_into(
+            head_weight,
+            head_bias,
+            &scratch.norm[..d],
+            &mut scratch.out[..1],
+        );
+        let result = scratch.out[0];
+        if !result.is_finite() {
+            return Err("Non-finite model result".into());
+        }
+        scratch.active_entities = entity_count;
         Ok(result)
     }
 }

@@ -100,7 +100,10 @@ CPU self-play or GPU learning bottleneck. Paid compute requires a priced proposa
    Weight games so long episodes and pending chains cannot dominate training.
    Add auxiliary observable future capture/technology/bonus progress and remaining
    turns, with censored labels masked; terminal outcomes remain the objective.
-   Auxiliary heads are not hand-weighted terms in search value.
+   Auxiliary heads are not hand-weighted terms in search value. New search rows
+   may carry a separately gated root-value bootstrap; terminal outcomes remain
+   the zero-beta control so a self-consistent teacher cannot silently become the
+   target.
 4. Cycle self-play, training and development arenas with equal board/seat coverage.
    Retain the 50% empirical-game / 25% diverse / 25% exploiter league mixture,
    including frozen Hard v2 and historical/independent opponents. Start replay
@@ -114,19 +117,45 @@ CPU self-play or GPU learning bottleneck. Paid compute requires a priced proposa
 6. Export float inference with PyTorch/native/WASM parity, then test int8 linear
    weights with float accumulation/normalization. Quantization-aware training is
    conditional on measured degradation. Version weights, encoder, rules, search
-   and memory together. Benchmark 1/2/4 workers within the existing core clamp;
-   preserve the 3s main + 2s follow-up starting allocation and reconnect budget.
-   Native fallback uses the same model/search outside ROOM_LOCK. Hard v2 remains
-   the emergency fallback and rollback artifact until the full promotion gate.
-7. Screen at 128 pairs; confirm frozen candidates at 512 fresh pairs, balanced
-   over eight boards, with a predeclared procedure for expansion to 2,048 pairs.
-   Require >=75% observed score against frozen Hard v2 and paired 95% interval
-   excluding 50%, broad-opponent improvement, existing five-percentage-point
-   regression gates, exact 0.5000 mirror sanity, and no unresolved censoring.
-   Retire opened confirmation pools. Later champions retain the Hard v2 threshold
-   and demonstrate improvement over the incumbent, not 75% against every successor.
-   Gate the actual exported WASM artifact at equal time with actual worker shape,
-   including constrained devices, cold loads, long chains and deadline compliance.
+   and memory together. Native value generation uses the host's available
+   workers (leaving one thread free, with a 16-worker safety ceiling). The
+   native arena also runs independent paired games concurrently: its fast proxy
+   keeps the four-tree serving root ensemble per game and fills the host with
+   game workers, so a 12-thread host runs three games at once. This is
+   independent of the browser pool cap, which exists for compositor
+   responsiveness; `--proxy-workers` and `--proxy-game-workers` record the
+   product explicitly, while `--workers` remains available for wider fixed-sim
+   offline searches. Preserve the 3s main + 2s follow-up serving allocation and
+   reconnect budget. Native fallback uses the same model/search outside
+   ROOM_LOCK. Hard v2 remains the emergency fallback and rollback artifact until
+   the full promotion gate.
+7. Use a multi-fidelity gate ladder: screen cheaply at 32 simulations over 16
+   paired matches, then use a **calibrated fast equal-time proxy** for contender
+   screens and the 32 → 128 → 512 fresh-pair confirmation ladder. The default
+   proxy is 250 ms split 150/100 with a four-tree per-game root ensemble and
+   concurrent native game workers; its budget, split, root width and game
+   concurrency are recorded in every report. The calibration
+   The cheap fixed screen defaults to one root tree with many concurrent games;
+   it is only a directional filter and never a strength claim. The calibration
+   utility (`tools/arena_calibrate.py`) runs the same CRN deals at several
+   budgets and worker counts, so a proxy can rank candidates only after its
+   ordering and throughput are measured against the serving profile. A score
+   from one budget is never numerically extrapolated into a claim at another.
+   The actual 5,000 ms / 3,000+2,000 browser profile is a rare final
+   compatibility check, run only after the fast 512-pair gate. The strength
+   target is **75% against the frozen current Expert**, and the paired 95%
+   lower confidence bound must also be at least 75% on the registered fast
+   confirmation regime; the serving check must be complete, uncensored and
+   clear its compatibility floor. A raw score near 75% is therefore not enough
+   at confirmation size. Keep broad-opponent improvement, existing
+   five-percentage-point regression gates, exact 0.5000 mirror sanity, and no
+   unresolved censoring. Retire opened confirmation pools. Once this higher bar
+   passes, the release transition is explicit: delete Easy, relabel Normal as
+   Easy, Hard as Normal, Expert as Hard, and install the new champion as
+   Expert. Until then the shipped Expert and its rollback artifact remain
+   unchanged. The final exported WASM artifact still receives an equal-time
+   check with the actual browser worker shape, including constrained devices,
+   cold starts, board/family groups and confidence intervals, not Elo alone.
 8. After three unsuccessful promotion cycles diagnose tactics, target quality,
    belief/history failures and opponent coverage. Test stronger teachers,
    counterstrategies and belief improvements according to the diagnosis. A
@@ -246,6 +275,29 @@ test on random-game outcomes, not a learned champion or a promotion candidate.
   retains heuristic priors and fingerprints the actual checkpoint. Unknown
   features fail explicitly. The development integration probe must pass before
   any strength assertion; no serving manifest or live bot has changed.
+
+### Strength-campaign correction (2026-09-11)
+
+The first value-only league plateaued below the new 75% target. The result is
+not a reason to discard the observation contract or the determinized search:
+the network gives a measurable advantage over the free heuristic leaf on paired
+timed deals. It is a reason to stop treating development loss,
+fixed-simulation screens, or the last training epoch as strength proxies. A
+targeted Expert-primary data arm improved a fixed screen but regressed at equal
+time; its earlier checkpoint was stronger than its final checkpoint. The
+campaign runner now scans every epoch at a short equal-time screen, records the
+chosen checkpoint, supports explicit counterstrategy primaries, and will only
+spend a long confirmation ladder on a candidate that beats both the incumbent
+and the near-peer floor. The frozen Expert remains the fallback.
+
+The next arm keeps value search as the first milestone but changes the
+selection curriculum: current-parent anchors plus Expert-primary
+counterexamples, timed checkpoint selection, and fresh paired arenas. If that
+does not produce a durable equal-time gain, the next architectural work is a
+measured action/policy head (with separate pending-choice scoring) and
+auxiliary capture/technology/bonus/endgame targets. Those heads must earn a
+strength gain at the serving shape before they are exported to Rust/WASM; they
+are not justified by lower Brier or log loss alone.
 
 Performance is now a campaign requirement: profile preprocessing, data generation,
 GPU update time, native/WASM inference and search separately. Keep mathematically
@@ -388,15 +440,37 @@ training, replace that test. Report full matchup matrices and cycles, balanced
 overall score, board/family groups and confidence intervals, not Elo alone.
 
 - Paired deals with swapped agent assignments, retaining initial seat advantages.
-- Equal board and opponent-family weights; actual serving worker arrangement.
-- 128 paired matches for screening; 512 fresh pairs for confirmation, expanding
-  to 2,048 if uncertain. Confidence calculations resample complete pairs.
+- Equal board and opponent-family weights; the proxy uses one recorded native
+  worker profile and the final check uses the actual serving profile.
+- Use a multi-fidelity gate ladder. The default fixed screen is 32 simulations
+  over 16 paired matches (two pairs per technology board); the self and
+  near-peer controls use eight pairs. A candidate that clears the fixed trigger
+  earns an eight-pair **fast proxy** scout. Fresh proxy confirmation then
+  proceeds through 32, 128 and finally 512 pairs, stopping only at
+  pre-registered directional failures. Only the 512-pair rung can satisfy the
+  statistical target. A rare 16-pair serving-shaped check follows a passing
+  512-pair proxy rung and is a compatibility gate, not a substitute for the
+  high-N confidence interval.
 - Require supported balanced-pool improvement, a positive incumbent matchup,
   no confirmed board/family regression greater than five percentage points,
   and all correctness/information/timing gates. Inconclusive candidates stay
   experimental. Native timing must be calibrated against actual WASM throughput.
 - Re-run targeted tactics and fresh counterstrategy attacks for each proposed
   champion. Lower training loss or random-bot wins cannot promote a model.
+
+The fixed and equal-time regimes are intentionally both retained, but they
+answer different questions. Fixed simulations are a cheap, reproducible
+filter and a diagnostic for search/value changes; they are not extrapolated to
+serving strength. The fast equal-time proxy is the high-N development arbiter
+after calibration. The 5-second browser profile is reserved for a rare final
+compatibility check. Orbit's generation-3 audit made the risk concrete: the
+same candidate read 87.5% in the eight-pair fixed screen and 43.75% in the
+eight-pair old 3.5-second arena. The research log records the same failure mode
+in Spender Duel, where a single-tree screen inverted sign at the
+four-worker serving shape. A cached proxy baseline is measured once per
+profile; it is not re-run for every generation. The calibration utility keeps
+the profile change explicit instead of treating a score at one budget as a
+portable numerical estimate at another.
 
 ## Phase 5 — browser serving
 
@@ -459,14 +533,53 @@ Performance work now includes CPU-side validation of CPU training labels,
 exact observation-keyed leaf caching within each native search call, binary
 lookup of sorted vocabulary entries, borrowed vocabulary/token encoding, and
 reuse of identical positional transforms within a native evaluation. The
+native model also precomputes the deterministic position MLP for the common
+index range at checkpoint load and falls back to the unbounded calculation for
+larger indices. A 148-position parity pass stayed within 1.55e-6 logit error;
+the same fixed-64 16-game pool produced identical outcomes and was 1.045x
+faster in the CPU-native build. Rust observation extraction now builds the
+allowlisted projection directly instead of serializing the hidden state first;
+the old projection remains a test-only reference, and a representative parity
+walk matched it exactly. The same fixed-64 one-game probe kept the winner,
+150 steps and 4,632 evaluations and improved 29.7s to 28.4s (1.046x). Search
+also reuses the post-move observation already built for its trace as the
+nonterminal leaf view; four alternating probes had identical canonical game
+hashes and averaged 1.046x faster. The
+Internal rollout moves now use a private apply path that skips a duplicate
+legal-list build; the public engine API remains validating. Two canonical-hash
+probes matched exactly and averaged another 1.013x speedup. The
 `benchmark_search` tool compares two binaries on fixed simulations and rejects
 any change in moves, node counts or edge statistics. Retain timing scope and
 cache-hit counts: small timing differences alone do not prove an optimization.
 
-Fused FP32 AdamW remains opt-in. A matched five-epoch indexed run reached Brier
-0.16707, but concurrent work confounded its wall-clock comparison and rounding
-changes prevent claiming identical optimization trajectories. Measure isolated
-throughput and multiple training seeds before adopting it as the default.
+The next measured hot-path pass keeps the hidden universe intact. One fixed
+search profile attributed roughly 78% of leaf time to attention, 10% to tensor
+conversion, 5% to feature extraction and less than 1% to hidden-pool sampling.
+The native model now caches a validated vocabulary/card-ID encoder and passes
+typed tensor rows into a thread-local variable-length attention workspace.
+Repeated leaves clear only the prior active entity range, with no stale-row
+reuse. A 5,594-position observation/native parity walk had maximum logit error
+3.70e-6; a fixed-search comparison kept moves, edge statistics and node counts
+identical while running 1.71x faster at 32 simulations. The broader bridge
+benchmark measured 1.46x end-to-end speedup and maximum error 1.91e-6. The
+same path is used by the WASM value boundary. A chunked Q·K reduction was
+discarded: its extra ~1.10x forward speed changed fixed-search statistics.
+
+The follow-up exact pooled-row cache stores the existing affine/GELU result
+per semantic row and invalidates it with a model-load tag, so replacing a WASM
+checkpoint cannot reuse old weights. It passed the same 5,594-position parity
+walk and two fixed-search probes with identical moves, edge statistics, node
+counts and simulations; measured speed was 1.04–1.07x for search and 1.03x for
+the observation bridge. It is suitable for the next campaign binary, subject
+to a clean-boundary switch and a fresh WASM timing check.
+
+Fused FP32 AdamW remains opt-in. An isolated 24-update probe on the same
+prepared FP32 batch measured 12.44 ms/update versus 20.07 ms/update for the
+regular implementation (1.61x), with a maximum parameter difference of
+5.8e-4 after the probe. A matched five-epoch indexed run reached Brier 0.16707,
+but concurrent work confounded its wall-clock comparison and rounding changes
+prevent claiming identical optimization trajectories. The speedup is worth an
+A/B league check across independent seeds before adopting it as the default.
 Experimental WASM artifacts stay outside the shipped assets. Full five-second
 search, history-conditioned determinization, league self-play, auxiliary heads,
 quantization and sealed promotion gates remain outstanding.
@@ -585,8 +698,11 @@ label keyed lookup checked one position against another's legal list.
 
 ### Research-log audit: borrow mechanisms, preserve their conditions
 
-Reviewed `docs/ai-research-log.md` Duel sessions July 22–30 and the actual
-`duel-core/src/attn.rs` and `tools/train_attn*.py` implementations. Priority changes:
+Reviewed `docs/ai-research-log.md` across the Duel, Spender, Castles of Crimson
+and Dissonance campaigns, plus the corresponding search/training code. The
+important lesson is conditional: a mechanism only transfers with the search
+shape, target distribution and measurement instrument that made it work.
+Priority changes:
 
 - Benchmark chunked dot products as an opt-in native/WASM build. Duel measured
   1.9x faster forward inference, but it reassociates FP32 sums. Orbit needs its own
@@ -603,6 +719,25 @@ Reviewed `docs/ai-research-log.md` Duel sessions July 22–30 and the actual
   more data and better Brier/AUC are not evidence of stronger play. Maintain
   current-checkpoint anchor data when fine-tuning. Policy/auxiliary gradients can
   damage the value trunk, so compare frozen-trunk and co-training explicitly.
+  Orbit's resumable league now generates a fresh self-play anchor from each
+  parent and records a same-checkpoint mirror before selection.
+- Borrow the Spender/CoC training signal, not their labels blindly: search-
+  improved rows are useful only when the leaf and opponent model match serving;
+  CoC's rollout value mattered because payoffs were delayed, while Spender's
+  static leaf won only after its value representation was strong. Orbit therefore
+  treats static and rollout teachers as separate, equal-time experiments to run,
+  and does not infer strength from a lower validation loss.
+- Borrow the Spender league's targeted diversity and CoC's depth re-gates. A
+  generic co-evolution league can tunnel into a shared blind spot; Orbit keeps
+  frozen Expert/Hard anchors, a soft-tempo racer curriculum, developer/denier
+  specialists and a near-peer parent panel. Candidate screens are cheap fixed
+  simulations, with the expensive equal-time screen delayed until a candidate
+  earns a fixed-score trigger. Any apparent winner is re-read on fresh seeds.
+- Borrow Dissonance's attribution discipline: correct a measured defect before
+  changing policy, and separate coverage holes from a bad leaf or sampler. Orbit
+  records board/family/seat outcomes and retains censored pairs instead of
+  silently labeling them; after three failed cycles the next experiment must be
+  tied to a diagnosed tactic, target, belief or coverage failure.
 - Audit the opponent model and sampling before harvesting large search datasets.
   Orbit currently searches against fixed Hard v2 replies. Test adversarial replies
   and current-observation sampling versus coherent independent-world trees; do not
@@ -612,6 +747,9 @@ Reviewed `docs/ai-research-log.md` Duel sessions July 22–30 and the actual
   screen became 0.40 with four workers. Match independent trees, per-worker depth,
   move aggregation, and whole-turn timing. Weak-bot wins are only a competence floor;
   include near-peer checkpoints, fresh seeds, mirror controls and targeted tactics.
+  CoC also showed that fixed low-simulation screens can be winner's-curse readings,
+  while a depth trend that survives a fresh-seed re-gate transfers; Orbit therefore
+  keeps fixed and equal-time reports side by side.
 
 ## Research references
 

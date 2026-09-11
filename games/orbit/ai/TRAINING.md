@@ -29,6 +29,48 @@ small nonlinear position encoder. The model preserves variable token lengths;
 v2 now pools fields through a nonlinear encoder into card/action/state entities
 before attention. Recurrent history updates remain unimplemented.
 
+The native float evaluator precomputes the deterministic position MLP for the
+common card/move/column index range when a checkpoint loads, while retaining an
+unbounded fallback for larger future indices. This changes no features or
+search choices: a real 148-position parity pass stayed within 1.55e-6 logit
+error, and a same-seed fixed-64 probe had identical winners, step counts and
+evaluation counts. The CPU-native build reduced that probe from 163.9 s to
+156.9 s. Native observation extraction now constructs the allowlisted public
+projection directly; a parity walk matched the serializer and a fixed-64
+one-game probe stayed at the same winner, 150 steps and 4,632 evaluations while
+falling from 29.7 s to 28.4 s. Keep the portable browser/WASM path separate
+from this offline build. Search reuses that post-move observation for the
+nonterminal leaf instead of rebuilding it; four alternating probes had the
+same canonical game hash and averaged another 1.046x speedup.
+Internal rollouts also use a private apply path that skips a duplicate
+legal-list build; the public engine API remains validating. Two canonical-hash
+probes matched exactly and averaged another 1.013x speedup.
+
+The leaf profiler attributes the remaining cost to the value path: about 78%
+attention, 10% tensor conversion, 5% feature extraction and under 1% hidden
+inventory sampling. Native search therefore caches the validated vocabulary
+and card-ID map at model load and sends typed rows through a reusable,
+variable-length attention workspace. A 5,594-position observation/native pass
+kept maximum logit error below 3.70e-6; fixed-search moves, edge statistics and
+node counts were identical with a 1.71x timing improvement at 32 simulations.
+The observation-to-value bridge measured 1.46x end-to-end speedup at 1.91e-6
+maximum error. WASM uses the same typed path. A separately gated chunked Q·K
+kernel changed search statistics despite only ~1.10x extra speed, so it remains
+rejected for the strength campaign.
+
+The pooled-row cache reuses the exact affine/GELU result for repeated semantic
+rows across leaves. It is keyed by all row inputs and a monotonic model-load tag
+to prevent stale values after a browser checkpoint reload. The 5,594-position
+parity walk and fixed-search probes stayed exact; measured speed was 1.04–1.07x
+for search and 1.03x for the bridge. The cache is staged for a clean-boundary
+campaign binary and still needs a browser/WASM timing check.
+
+Fused FP32 AdamW is available as an opt-in training flag. An isolated 24-update
+probe on one prepared batch measured 12.44 ms/update versus 20.07 ms/update for
+regular AdamW (1.61x); the maximum parameter difference after the probe was
+5.8e-4. It changes floating-point update order, so it needs a matched multi-seed
+strength A/B before becoming the campaign default.
+
 `train_batch` uses weighted binary cross entropy on terminal outcomes, finite
 target/gradient checks and gradient clipping. The checkpoint includes model,
 vocabulary/rules/config, AdamW state, step, metadata and Torch CPU/CUDA RNG state.
@@ -40,7 +82,7 @@ Tests verify batch padding invariance, real parameter updates, exact continuatio
 of the next CPU update after checkpoint restoration, and rejection of invalid
 targets before parameter mutation. GPU smoke checks checkpoint prediction parity.
 
-Next gates: native observation extraction; compact entity/history representation;
+Next gates: compact entity/history representation;
 Rust float inference parity; real browser timing; streaming outcome trainer with
 whole-game seed splits; observation-only value guide integration into audited
 search. A lower smoke loss or fast CUDA forward pass is not playing strength.
@@ -80,3 +122,86 @@ WASM into a separate local output directory; do not overwrite shipped assets.
 
 Before rebuilding all native binaries, let arenas using those executables finish
 or use a separate cargo target directory: Windows cannot replace a running EXE.
+For a local CPU campaign, an isolated native-instruction build is safe and
+usually faster; pass both resulting binaries to the league so the portable
+browser/WASM build is untouched:
+
+```powershell
+$env:RUSTFLAGS='-C target-cpu=native'
+C:/Users/Forrest/.cargo/bin/cargo.exe build --release --locked --features chunked-dot `
+  --manifest-path rust-cores/orbit-core/Cargo.toml --target-dir .orbit-target-native `
+  --bin neural_arena --bin value_generate
+```
+
+## Resumable Expert league
+
+The long strength campaign keeps the current Expert frozen, trains neural
+learners against Expert/Hard/exploratory/random mixtures plus targeted
+developer, denier and soft-tempo racer opponents. Each generation also records
+a self-play anchor from its current parent. This follows the other games'
+research findings: a generic self-play league can share a blind spot, a full
+racer can create a fitness valley, and a fixed old anchor allows basin drift.
+The native-v2 corpus remains a foundation anchor:
+
+```powershell
+.venv/Scripts/python.exe -m games.orbit.tools.neural_league --iterations 1
+```
+
+The state and logs are written under `.orbit-neural-league/`. Re-running the
+command resumes after completed generations; interrupted native datasets retain
+verified shards and regenerate only missing jobs. Every parent and candidate first
+passes a same-checkpoint mirror (a cheap 24-simulation exact control by default)
+and a near-peer parent arena. The default fixed filter now uses one root tree
+and concurrent game workers, with 32 simulations over 16 paired matches and
+two pairs per technology board; it is deliberately a screen, not a strength
+claim. Candidates below the fixed trigger skip timed
+work. A candidate above it gets an eight-pair scout at the fast 250 ms proxy
+budget (150 ms main action + 100 ms follow-up). Each proxy game keeps the
+four-tree serving root ensemble, while independent paired games run concurrently
+(`--proxy-game-workers`; three on a 12-thread host), so the native arena uses
+the host instead of serializing complete games. Promising scouts are re-read on
+fresh proxy rungs of 32, 128 and 512 pairs (`--confirm-ladder`); the first two
+rungs are directional filters and only
+the final 512-pair rung can promote statistically. The actual browser profile is
+measured only by the rare 16-pair serving check after a passing 512-pair rung.
+`--always-timed` restores timed proxy work for every candidate, while
+`--serving-check-pairs 0` intentionally leaves promotion unconfirmed. A
+candidate is only promotion ready after the proxy reaches both a 0.75 score and
+a 0.75 paired-bootstrap lower bound with no censored games and the serving
+check is complete and above its compatibility floor; the script records the
+planned roster shift but does not alter serving assets. Use `--iterations N` for
+a longer league, `--baseline-timed` to measure the initial proxy reference, and
+keep the native arena executable idle before rebuilding it on Windows.
+
+When more than one candidate clears the timed trigger, confirmation re-gates
+the promising checkpoints in descending screen order on independent fresh
+seeds. This avoids selecting a lucky in-loop winner, a failure mode seen in the
+Spender and Castles of Crimson campaigns.
+
+The fixed screen is a filter, not a strength claim. If a candidate clears
+`--timed-trigger` (0.62 by default), the runner lazily measures the fast proxy
+and only then considers confirmation. Reports retain board/family/seat
+breakdowns, censored pairs, worker/budget profiles and the exact model
+stride/weight/temperature controls. Intermediate confirmation rungs may stop a
+clearly weak candidate, but their intervals are never a promotion result; the
+final rung is a fixed sample rather than an optional stopping rule. Before
+starting a long campaign, calibrate the proxy on identical paired deals:
+
+```powershell
+.venv/Scripts/python.exe -m games.orbit.tools.arena_calibrate `
+  .orbit-calibration `
+  .orbit-value-fit-indexed-v3/epoch-004.pt `
+  .orbit-neural-league-v2/g003/model/epoch-006.pt `
+  --pairs 8 --budgets 250,500,1000 --workers 1,4,8,11 --game-workers auto
+```
+
+The calibration report is an ordering/throughput diagnostic. A score at one
+budget is never numerically extrapolated into a score at another; only the
+serving-shaped check can validate the final transfer.
+
+New search shards also retain the root value on the acting seat's observation.
+The league defaults to a gentle `--root-value-beta 0.25` blend with the
+terminal result, following the measured value-bootstrap signal in the Spender
+and Castles of Crimson campaigns. Set it to zero for the matched
+outcome-only control; observer rows and the old foundation anchor always stay
+terminal-labelled.

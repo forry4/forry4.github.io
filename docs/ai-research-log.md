@@ -8,6 +8,174 @@ Content down to the ARCHIVE blocks is preserved **verbatim** from the pre-split 
 
 ---
 
+### Session (2026-09-10) — Orbit arena throughput corrected to the Spender shape
+
+The first Orbit neural league runner measured a complete paired game serially.
+That made an eight-pair timed probe look like a many-minute experiment even
+though Spender's campaign runs independent games concurrently. The correction
+is now in the native `neural_arena` path: immutable decoded models are shared by
+scoped workers, independent jobs use a queue, and results retain their original
+indices so CRN pairing and board order are unchanged. A same-pool fixed-sim
+smoke (16 games, one root, four simulations) went from **6.71s serialized to
+1.55s with 11 concurrent game workers**, with identical outcomes. A four-root
+per-game smoke also preserved outcomes while filling three games concurrently.
+
+The campaign now has three explicit regimes. Cheap fixed screens and mirror
+controls use one root tree plus many games in flight; the fast 250ms proxy uses
+the four-tree serving ensemble per game plus host-level game workers; the actual
+5s/3s+2s serving shape remains a rare final check. Offline value-data generation
+and fixed searches may use up to sixteen native workers (the current host uses
+eleven for data); the browser's smaller pool remains a UI-responsiveness
+constraint. Worker width, game concurrency, budgets and splits are recorded in
+every report, and calibration can compare the regimes on one CRN pool without
+pretending that a low-budget score numerically extrapolates to serving.
+
+The first semantics-preserving native inference optimization is also banked:
+the attention model now precomputes its deterministic position MLP for the
+common card/move/column index range at checkpoint load, with an unbounded
+fallback for future positions. A 148-position Python/Rust parity pass stayed
+within **1.55e-6** logit error. On a same-namespace 16-game fixed-64 probe,
+the optimized CPU-native build produced identical winners, step counts and
+evaluation counts and reduced wall time from **163.9 s to 156.9 s (1.045x)**.
+The league resumed with that binary; no simulation, feature, or search rule
+was changed for the speedup.
+
+The observation hot path now has a second accepted optimization. Rust builds
+the allowlisted public projection directly instead of serializing the complete
+privileged state and copying fields back out. A parity test compares the direct
+projection with the old serializer while a fixed-64 one-game probe kept the
+same winner, 150 steps and 4,632 neural evaluations; wall time fell from
+**29.7 s to 28.4 s (1.046x)**. The campaign resumes with this binary, while
+the old serializer remains in a test-only reference implementation.
+
+The search also reuses the post-move observation that it already builds for
+the information-set trace as the nonterminal leaf view. Four alternating
+fixed-64 probes had identical canonical game hashes (winner 0, 150 steps,
+4,632 evaluations); paired old/new means were **30.71 s versus 29.36 s
+(1.046x)**. This is now included in the campaign binary; no simulations,
+features or search choices changed.
+
+Finally, the search now has a private `apply_search` path for moves selected
+from the legal list it just built. The public engine API still performs its
+full legality check; only internal rollouts skip rebuilding that list. Two
+alternating fixed-64 probes kept the same canonical game hash and averaged
+**24.20 s versus 24.51 s (1.013x)**. The campaign resumes with this binary.
+
+A second evaluator rewrite was measured and rejected: flattening every entity
+and reusing scratch buffers kept the same fixed-search results but ran **1.59x
+slower** than the existing small-vector implementation on the same pool. It
+was removed rather than retained on code-style grounds; this leaves the
+position-cache/native, direct observation and leaf/apply paths as the accepted
+semantics-preserving speedups.
+
+A determinization setup cache was also measured and rejected. It moved the
+unchanged unseen-card/bonus inventory construction outside the simulation loop,
+but the one-game fixed-64 parity probe stayed exact while wall time rose from
+**29.7 s to 36.7 s** on the same native host. The extra template cloning costs
+more than the small set-building work, so the live search keeps the original
+path and the campaign binary was not changed.
+
+The next safe optimization attacks the measured hot path rather than the hidden
+card universe. A profile of one fixed-search game attributed about 78% of leaf
+time to the attention forward, 10% to semantic-to-tensor conversion and 5% to
+feature extraction; hidden-pool sampling was below 1%. The native model now
+keeps a validated vocabulary encoder (including a card-ID map) in the loaded
+checkpoint and converts leaves into typed rows. A thread-local attention
+workspace clears only the entities used by the preceding leaf, so variable
+length observations do not allocate or retain stale rows. This is an
+observation-only change: a 5,594-position Python/native pass stayed below
+3.70e-6 maximum logit error, and the fixed-search comparison reported identical
+move/stats/node results with a 1.71x timing ratio (32 simulations over the
+same 16 varied positions). The broader observation-to-value bridge measured
+1.46x end-to-end speedup over the pre-cache native build at 1.91e-6 maximum
+logit error. Browser/WASM uses the same typed path; no hidden state is exposed.
+
+A chunked Q·K reduction was tested separately. It improved the small bridge
+benchmark by only about 1.10x and changed fixed-search edge statistics, so it is
+rejected for the strength-preserving campaign. The existing chunked affine
+dot build remains the previously gated native optimization; no new numerical
+reassociation is enabled by the typed-row change.
+
+An isolated training probe measured fused FP32 AdamW at 12.44 ms/update versus
+20.07 ms/update for regular AdamW on the same prepared batch (1.61x). After 24
+timed updates following five warmups, the maximum parameter difference was
+5.8e-4. This is a throughput candidate, not a strength result: floating-point
+update order differs, so adoption remains gated on matched multi-seed arenas.
+
+The next exact hot-path candidate caches the pooled affine/GELU vector for each
+semantic row across leaves. A monotonic model-load tag clears the per-thread
+cache when a WASM checkpoint is replaced. It passed the 5,594-position parity
+walk and two fixed-search probes with identical moves, edge statistics, node
+counts and simulations. Measured speed was 1.04–1.07x for search and 1.03x for
+the observation bridge. The native league switched to this build at the g009
+boundary; the g009 champion-anchor harvest completed in **1,503.97 s**, versus
+**1,699.18 s** for the preceding typed build, with the same search semantics.
+The browser/WASM build has also passed its compile and parity checks; a serving
+timing check remains a release measurement, not a strength claim.
+
+The first nine value-only league generations now have a useful warning about
+screen variance. g009 scored **0.7500 on 16 timed pairs** (CI [0.5000,
+0.9375]) after an exact 0.5000 mirror, but the fresh 32-pair confirmation was
+0.65625 and the 128-pair confirmation settled at **0.609375** (CI
+[0.55078, 0.66797]); its near-peer screen was 0.25. It was rejected and the
+g004 epoch-006 checkpoint remains the incumbent. The staged confirmation
+ladder stopped at 128 because its interval no longer reached the 75% target,
+avoiding the 512-pair final rung. This is why the campaign treats small timed
+screens as directional filters and makes no promotion claim from them.
+
+g010 and g011 provide the same warning from two more directions. g010 reached
+0.6875 fixed but only 0.5000 timed, while g011 reached **0.8125 fixed** (and
+passed its mirror and 0.50 near-peer floor) before falling to **0.3125 timed**.
+Both were rejected and neither changed the incumbent. The equal-time proxy is
+therefore doing useful work: fixed-simulation wins identify candidates worth a
+short timed screen, but they are not a substitute for the serving-shaped
+strength measurement.
+
+### Session (2026-09-11) — value-only plateau audit and checkpoint-selection fix
+
+The g012 value-only arm did not move the campaign: its best epoch scored
+**0.5703** on a 64-pair fixed screen and **0.5625** on an eight-pair timed
+screen, while the frozen g004 epoch-006 incumbent measured **0.5664** on a
+fresh 128-pair timed proxy. A small 16-pair timed result near 0.30 is therefore
+not a reliable estimate by itself (its paired interval spans roughly 0.06–0.56),
+but it correctly triggered an audit rather than another blind generation.
+
+The audit separated the network from the search and the measurement. Against a
+free heuristic leaf on the same 64 paired timed deals, g004 improved the
+candidate-minus-control score by **+0.1094**, so the value model contributes
+real information. Sparse network evaluation at every second leaf produced no
+throughput gain and lost about eight paired points, so attention cost is not a
+safe strength-free shortcut. Temperature 1.0 was worse than the calibrated
+temperature 2.0. A root-value-beta-zero control was slightly better on one
+fixed screen but lost on the timed probe; it is not a replacement for the
+existing beta 0.25 setting.
+
+The targeted Expert-primary data probe exposed the larger problem. Its epoch-8
+model reached **0.6328** on the identical 64-pair fixed screen, but only
+**0.5313** on 16 timed pairs; the same pool gave frozen g004 **0.6875**. Its
+epoch-7 checkpoint was **0.5859 fixed** and **0.6563 timed**, showing that the
+latest checkpoint is not a safe strength selector even when its development
+Brier score is lower. A 0.5 neural/heuristic blend recovered epoch 8 to
+0.5938, but still did not beat epoch 7. The Expert-primary arm is rejected as a
+latest-checkpoint promotion path, while its data distribution remains useful
+for the next controlled arm.
+
+The league runner now performs a short equal-time scan of every numeric epoch
+checkpoint, records the scan beside the generation, and evaluates the strongest
+checkpoint rather than always taking the last one. Fresh data can select an
+explicit primary policy (`--train-primary expert` for the counterstrategy arm),
+and confirmation ladders now consider only candidates that actually beat the
+incumbent and clear the near-peer floor. These changes reduce winner's-curse
+and wasted confirmation time; they do not alter search semantics or serving.
+
+The next strength experiment is therefore data/target focused: retain the
+current-parent anchor, mix Expert-primary counterexamples with the standard
+league, select by the timed checkpoint scan, and only then test a policy/action
+head or auxiliary progress heads. Prediction loss remains diagnostic; the
+serving-shaped equal-time result is the selection signal, with the frozen g004
+Expert fallback unchanged.
+
+
 
 
 <!-- ===================================================================== -->

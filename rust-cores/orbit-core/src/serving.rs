@@ -321,7 +321,10 @@ fn effect_value(
     total
 }
 
-pub(crate) fn score(observation: &Value, action: &Value) -> f64 {
+/// The audited public ranker's scalar action score.  Offline opponent
+/// specialists may add a deliberately named strategic pressure to this base;
+/// the score itself still reads only the allowlisted observation.
+pub fn action_score(observation: &Value, action: &Value) -> f64 {
     let action_name = action.get("action").and_then(Value::as_str).unwrap_or("");
     let seat = observation.get("seat").and_then(Value::as_u64).unwrap_or(0) as usize;
     let players = observation.get("players").and_then(Value::as_array);
@@ -504,6 +507,12 @@ pub(crate) fn score(observation: &Value, action: &Value) -> f64 {
         }
     }
     result
+}
+
+// Keep the internal call sites terse while exposing the same implementation to
+// the offline value-data generator.
+fn score(observation: &Value, action: &Value) -> f64 {
+    action_score(observation, action)
 }
 
 /// Return the JSON contract used by `games/orbit/ai/serving.py`.

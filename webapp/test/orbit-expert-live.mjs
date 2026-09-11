@@ -91,7 +91,22 @@ await action.click({ timeout: 10000 });
 console.log('human action played — the bot now owes a move');
 
 for (let i = 0; i < 24; i++) {
-  await wait(5000);
+  await wait(2500);
+  // Keep answering our OWN prompts. Two earlier readings of "the bot is stuck"
+  // were this probe sitting on its own unanswered pending choice.
+  try {
+    const mine = await page.evaluate(() => {
+      const r = window.__orbit.last;
+      return r && (r.pend ? r.pend === 'expert-probe' : r.turn === 'expert-probe');
+    });
+    if (mine) {
+      const card = page.locator('.or-hand-zone .or-agent.playable').first();
+      if (await card.count()) await card.click({ timeout: 2000 }).catch(() => {});
+      const btn = page.locator('.or-action-bar button:not(:disabled), .or-choice button:not(:disabled), .or-primary:not(:disabled)').first();
+      if (await btn.count()) await btn.click({ timeout: 2000 }).catch(() => {});
+    }
+  } catch {}
+  await wait(2500);
   const st = await page.evaluate(() => ({
     ...window.__orbit,
     backend: window.__orbitBackend || null,

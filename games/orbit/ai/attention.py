@@ -147,15 +147,32 @@ def save_checkpoint(path, model, optimizer, *, step, metadata=None):
                 "cuda_rng": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else []}, path)
 
 
-def load_checkpoint(path, *, device="cpu"):
+def load_checkpoint(path, *, device="cpu", fused_adam=False):
     checkpoint = torch.load(path, map_location="cpu", weights_only=True)
     if checkpoint["version"] not in ("orbit-attention-value-v2",MODEL_VERSION):
         raise ValueError("Attention checkpoint version mismatch")
     model = AttentionValue(Vocabulary.from_dict(checkpoint["vocabulary"]),
                            ModelConfig(**checkpoint["config"])).to(device)
     model.load_state_dict(checkpoint["model"], strict=True)
-    optimizer = torch.optim.AdamW(model.parameters())
+    # Keep the historical unfused default for exact checkpoint continuation;
+    # callers may opt into the faster fused kernel after a strength A/B.
+    optimizer = torch.optim.AdamW(model.parameters(), fused=fused_adam)
     optimizer.load_state_dict(checkpoint["optimizer"])
+    # ``load_state_dict`` restores the serialized param-group options too.  A
+    # checkpoint made by an unfused run therefore silently turns a requested
+    # fused resume back off (and vice versa).  Re-apply the explicit caller
+    # choice after loading the moments; the model/RNG state is unchanged.
+    for group in optimizer.param_groups:
+        group["fused"] = bool(fused_adam)
+    if fused_adam:
+        # Fused CUDA AdamW requires its scalar step tensors on the same
+        # device as the parameters; the portable checkpoint stores optimizer
+        # state on CPU.  Move only this opt-in path so the historical regular
+        # resume remains byte-for-byte compatible.
+        for state in optimizer.state.values():
+            for key, value in list(state.items()):
+                if torch.is_tensor(value):
+                    state[key] = value.to(device)
     torch.set_rng_state(checkpoint["torch_rng"])
     if checkpoint["cuda_rng"] and torch.cuda.is_available():
         torch.cuda.set_rng_state_all(checkpoint["cuda_rng"])

@@ -50,7 +50,7 @@ html,body{margin:0;padding:0;background:#120c0d}
    gutter for every game, and a second 22px here put CoC's wordmark 22px right of its
    own Back button. Only the GAME wrap (.coc-wrap-game) keeps a width of its own. */
 .coc-wrap:not(.coc-wrap-game){max-width:none;margin:0}
-.coc-top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:18px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+.coc-top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border)}
 .coc-top-left{display:flex;align-items:center;gap:12px;min-width:0}
 .coc-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.5rem;font-weight:700;color:var(--crimson-l);letter-spacing:.03em;white-space:nowrap}
 .coc-user{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.78rem;color:var(--text-dim);letter-spacing:.05em}
@@ -80,7 +80,7 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-lost{color:#d98a8a;font-weight:700}
 .coc-section-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;letter-spacing:.18em;color:var(--gold);text-transform:uppercase;margin:18px 0 8px;border-bottom:1px solid var(--border);padding-bottom:6px}
 .coc-card-meta{font-size:.78rem;color:var(--text-dim)}
-.coc-waiting{max-width:420px;margin:60px auto;text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px}
+.coc-waiting{max-width:min(420px,100% - 28px);margin:60px auto;text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px}
 .coc-waiting-players{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:10px}
 .coc-waiting-player{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;color:var(--text);background:var(--surface2);border:1px solid var(--border);border-radius:999px;padding:4px 12px}
 .coc-code{font-family:'Cinzel','Cinzel Fallback',serif;font-size:2rem;letter-spacing:.3em;color:var(--gold);background:var(--surface2);border:1px dashed var(--border);border-radius:var(--radius);padding:12px;margin:14px 0;cursor:pointer}
@@ -104,7 +104,7 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-res{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.92rem;letter-spacing:.04em;color:var(--text-dim);display:inline-flex;align-items:center;gap:5px}
 .coc-res b{color:var(--text)}
 .coc-res-ic{font-size:1.15rem;line-height:1}
-.coc-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px}
+.coc-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px}
 .coc-panel h3{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;letter-spacing:.16em;color:var(--gold);text-transform:uppercase;margin-bottom:10px}
 .coc-depots{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
 .coc-depot{border:1px solid var(--border);border-radius:var(--radius);padding:6px;min-height:78px;background:var(--surface2)}
@@ -373,7 +373,7 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-winner{max-width:460px;margin:50px auto;text-align:center;background:var(--surface);border:1px solid var(--gold);border-radius:var(--radius-lg);padding:30px}
 .coc-winner h2{font-family:'Cinzel','Cinzel Fallback',serif;font-size:2rem;color:var(--gold)}
 /* End-of-game VP review: itemized breakdown per player (turn-stamped + end-of-game). */
-.coc-review{max-width:820px;margin:34px auto;text-align:center;background:var(--surface);border:1px solid var(--gold);border-radius:var(--radius-lg);padding:24px}
+.coc-review{max-width:min(820px,100% - 28px);margin:34px auto;text-align:center;background:var(--surface);border:1px solid var(--gold);border-radius:var(--radius-lg);padding:24px}
 .coc-review h2{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.9rem;color:var(--gold);margin-bottom:2px}
 .coc-review-hint{color:var(--text-dim);font-size:.78rem;margin:0 0 14px}
 .coc-review-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;text-align:left}
@@ -440,7 +440,15 @@ html,body{margin:0;padding:0;background:#120c0d}
    (board | your duchy | opponent duchy — everything on screen at once, like the
    physical table). NOTE: this section is LAST in the sheet so its rules win
    equal-specificity ties against the base rules above. */
-.coc-wrap-game{max-width:1800px;padding-bottom:16px}
+/* THE GAME SCREEN GETS A GUTTER, and it is centred. It had neither: no side padding
+   and no auto margin, so on a wide monitor the Menu button sat in the very corner of
+   the glass and the board ran flush to both edges, while every other game keeps a
+   small buffer (Duel's game screens 14px, the shared `.lby-page-in` 24px). The space
+   is paid for rather than added — the panel padding and the column gaps below each
+   give back a couple of px — because the board column is the tight one. The phone
+   override (8px, in the max-width:600px block ABOVE) is `.coc`-prefixed and still
+   wins. `margin-inline:auto` matters past 1800px only, where the cap starts to bite. */
+.coc-wrap-game{max-width:1800px;margin-inline:auto;padding:10px 14px 16px}
 /* grid items STRETCH (no align-items:start) so all three panels share the row's
    height — the board panel then flex-fills its spare height with the depot ring.
    The bottom margin is the buffer between the board/duchies and the move log. */
@@ -450,7 +458,7 @@ html,body{margin:0;padding:0;background:#120c0d}
    bonusbar (siblings, not inside this grid) stayed at container width. minmax(0,...) lets
    the track shrink so the board reflows instead of spilling (the documented grid
    min-content footgun). NOTE: no backticks in this comment — it lives in the css string. */
-.coc-game-cols{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;margin-bottom:0}
+.coc-game-cols{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;margin-bottom:0}
 /* opponent panel: dice + resources row, then storage/goods, then their board */
 .coc-oppbar{display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-bottom:12px}
 .coc-opp-sections{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;margin-bottom:12px}
@@ -514,12 +522,12 @@ html,body{margin:0;padding:0;background:#120c0d}
      board, so the log fills the space the duchies don't use and SCROLLS — the board's
      height is driven only by its depot ring, never by the log's length. 12 : 22 flex ratio
      reproduces the old 12fr : 11fr : 11fr columns (2 duchies split the 22). */
-  .coc-game-cols{display:flex;align-items:flex-start;gap:16px}
+  .coc-game-cols{display:flex;align-items:flex-start;gap:14px}
   .coc-col-board{flex:12 1 0;min-width:360px;display:flex;flex-direction:column}
-  .coc-duchy-area{display:flex;flex-direction:column;flex:22 1 0;min-width:0;gap:16px;overflow:hidden}
+  .coc-duchy-area{display:flex;flex-direction:column;flex:22 1 0;min-width:0;gap:14px;overflow:hidden}
   /* duchy row keeps its natural height (flex:none ⇒ never shrinks/clips); the log takes
      the leftover with flex-basis 0 so its (long) content can't claim space as its basis. */
-  .coc-duchy-row{display:flex;flex-direction:row;gap:16px;align-items:stretch;flex:none;min-height:0}
+  .coc-duchy-row{display:flex;flex-direction:row;gap:14px;align-items:stretch;flex:none;min-height:0}
   .coc-duchy-row > .coc-panel{flex:1 1 0;min-width:0;display:flex;flex-direction:column}
   .coc-duchy-row > .coc-panel .coc-duchy-layout{flex:1 1 auto;justify-content:flex-start}
   /* Log fills the leftover height, scrolling internally (basis 0 + min-height:0 on the

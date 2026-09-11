@@ -23,11 +23,13 @@ fn main() {
                             v["seed"].as_u64().unwrap_or(0),config,if v["heuristic"]==true {None}else{Some(m)});
                     }
                     let started = std::time::Instant::now();
-                    let rows = if let Some(obs) = v.get("observation") {
+                    let value = if let Some(obs) = v.get("observation") {
                         let tokens = orbit_core::features::encode(obs,v.get("history"))?;
-                        orbit_core::tensors::encode_parts(&m.vocabulary,&tokens)?
-                    } else { v["rows"].clone() };
-                    let value = m.logit(&rows)?;
+                        let rows = m.encode_tokens(&tokens)?;
+                        m.logit_typed(&rows)?
+                    } else {
+                        m.logit(&v["rows"])?
+                    };
                     Ok(json!({"logit":value,"elapsed_ms":started.elapsed().as_secs_f64()*1000.0}))
                 }
             });
