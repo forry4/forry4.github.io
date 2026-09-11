@@ -85,8 +85,10 @@
 .bgf-rank{display:block;font-size:.68rem;color:var(--text-muted);margin-top:2px;}
 .bgf-geek{width:84px;}
 .bgf-geek b{font-size:1.05rem;font-weight:700;color:var(--gold);}
-.bgf-avg,.bgf-v,.bgf-pv{width:78px;color:var(--text-dim);font-size:.82rem;}
-.bgf-pv.bgf-thin{color:#c98a3c;}
+.bgf-avg,.bgf-v{width:78px;color:var(--text-dim);font-size:.82rem;}
+/* F average sits between the two ratings it blends, and reads between them too:
+   the Geek column's weight without its gold. */
+.bgf-f{width:78px;color:var(--text);font-size:.9rem;font-weight:600;}
 .bgf-wt{width:108px;}
 .bgf-scale{display:flex;align-items:center;gap:8px;}
 .bgf-seg{position:relative;flex:1;height:7px;border-radius:2px;overflow:hidden;
@@ -104,6 +106,10 @@
 .bgf-pcnum{margin-top:4px;font-size:.78rem;color:var(--text);font-weight:600;}
 .bgf-pcnum span{color:var(--text-muted);font-weight:400;}
 .bgf-pcnum.bgf-none{color:var(--text-muted);font-weight:400;}
+/* a count with under 100 votes behind it: the percentage itself is amber, since the
+   poll size no longer has a column of its own to be flagged in */
+.bgf-pc.bgf-thin .bgf-pcnum{color:#c98a3c;}
+.bgf-pc.bgf-thin .bgf-pcnum span{color:#c98a3c;opacity:.7;}
 
 .bgf-empty{padding:44px 16px;text-align:center;color:var(--text-dim);}
 .bgf-empty b{display:block;color:var(--text);font-size:1rem;margin-bottom:6px;}

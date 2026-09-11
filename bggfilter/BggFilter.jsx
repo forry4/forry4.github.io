@@ -12,17 +12,19 @@ const css = _cssText;
 // CDN like any other static asset. Regenerate with bggfilter/tools/make_data.py.
 const DATA_URL = `${import.meta.env.BASE_URL || "/"}data/bgg-filter.json`;
 
-const RATINGS = [500, 1000, 2000, 3000, 5000, 10000, 20000, 50000, 100000];
+const RATINGS = [100, 250, 500, 1000, 2000, 3000, 5000, 10000, 20000, 50000, 100000];
 const COUNTS = ["2", "3", "4"];
 const PAGE = 50;
-const STORE = "bgg_filter_dials_v1";
+// v2: the ratings dial is an INDEX into RATINGS, and RATINGS grew a 100/250 floor at the
+// front — a v1 value would silently mean a different threshold than the one it was saved at.
+const STORE = "bgg_filter_dials_v2";
 
 // The oldest entries are ancient abstracts (year 1000 up) and the median is 2015, so a
 // linear slider from the true minimum would bury 99% of the data in its last few pixels.
 // The dial floors here and that position means "any year" — nothing is excluded there.
 const YMIN = 1970;
 
-const DEFAULTS = { wmin: 1.5, wmax: 3.5, rat: 1, yr: YMIN, b2: 60, b3: 0, b4: 0, r2: 0, r3: 0, r4: 0 };
+const DEFAULTS = { wmin: 1.5, wmax: 3.5, rat: RATINGS.indexOf(1000), yr: YMIN, b2: 60, b3: 0, b4: 0, r2: 0, r3: 0, r4: 0 };
 const fmt = (n) => n.toLocaleString("en-US");
 
 function loadDials() {
@@ -50,10 +52,17 @@ function derive(games) {
 			g["r" + k] = tot ? ((row[0] + row[1]) / tot) * 100 : -1;
 		}
 		if (!g.pt) g.pt = Math.max(g.t2 || 0, g.t3 || 0, g.t4 || 0);
+		// F average — the midpoint of the two ratings either side of it in the table. The
+		// Geek rating drags an unproven game towards the mean and the raw average lets forty
+		// devotees crown one, so the blend sits between the pessimist and the optimist.
+		g.f = (g.geek + g.avg) / 2;
 	}
 	return games;
 }
 
+// The poll size rides ALONG WITH the percentage it is the denominator of, rather than in a
+// column of its own: one number per row could only ever describe the biggest poll, and it is
+// the count-by-count denominator that decides whether that count's bar means anything.
 function Bar({ g, k }) {
 	const tot = g["t" + k];
 	if (!tot) return (
@@ -62,7 +71,7 @@ function Bar({ g, k }) {
 	const row = g.p[k];
 	const b = (row[0] / tot) * 100, r = (row[1] / tot) * 100;
 	return (
-		<td className="bgf-pc">
+		<td className={`bgf-pc${tot < 100 ? " bgf-thin" : ""}`} title={`${fmt(tot)} poll votes at ${k} players`}>
 			<div className="bgf-bar" role="img"
 				aria-label={`${b.toFixed(0)}% best, ${(b + r).toFixed(0)}% best or recommended at ${k} players`}>
 				<span className="bgf-b" style={{ width: `${b}%` }} />
@@ -180,14 +189,14 @@ export default function BggFilter({ onExit }) {
 				<div className="bgf-hero">
 					<div className="bgf-logo">BGG Filter</div>
 					<p className="bgf-tagline">
-						Every ranked game on BoardGameGeek with 500 or more ratings. Dial in complexity,
+						Every ranked game on BoardGameGeek with 100 or more ratings. Dial in complexity,
 						ratings, year, and how strongly players vouch for the game at two, three or four.
 					</p>
 				</div>
 
 				<div className="bgf-wrap">
 					{err && <div className="bgf-loading">Couldn’t load the game data ({err}).</div>}
-					{!err && !games && <div className="bgf-loading">Loading 6,900+ games…</div>}
+					{!err && !games && <div className="bgf-loading">Loading the ranked list…</div>}
 
 					{games && (
 						<>
@@ -251,12 +260,12 @@ export default function BggFilter({ onExit }) {
 											<th className="bgf-pos">#</th>
 											{th("n", "Game")}
 											{th("geek", "Geek rating")}
+											{th("f", "F average")}
 											{th("avg", "Average")}
 											{th("w", "Complexity")}
 											{th("b2", "2 players")}
 											{th("b3", "3 players")}
 											{th("b4", "4 players")}
-											{th("pt", "Poll votes")}
 											{th("v", "Ratings")}
 										</tr>
 									</thead>
@@ -276,6 +285,7 @@ export default function BggFilter({ onExit }) {
 													<span className="bgf-rank">BGG rank #{g.rk}</span>
 												</td>
 												<td className="bgf-geek bgf-num"><b>{g.geek.toFixed(3)}</b></td>
+												<td className="bgf-f bgf-num">{g.f.toFixed(2)}</td>
 												<td className="bgf-avg bgf-num">{g.avg.toFixed(2)}</td>
 												<td className="bgf-wt">
 													<div className="bgf-scale">
@@ -286,7 +296,6 @@ export default function BggFilter({ onExit }) {
 													</div>
 												</td>
 												<Bar g={g} k="2" /><Bar g={g} k="3" /><Bar g={g} k="4" />
-												<td className={`bgf-pv bgf-num${g.pt < 100 ? " bgf-thin" : ""}`}>{fmt(g.pt)}</td>
 												<td className="bgf-v bgf-num">{fmt(g.v)}</td>
 											</tr>
 										))}
@@ -312,15 +321,17 @@ export default function BggFilter({ onExit }) {
 								<div>
 									<h3>Watch the poll size</h3>
 									<p>Far fewer people answer the poll than rate the game, and a thin poll produces loud
-										percentages — 100% off 40 voters is much weaker than 97% off 1,500. Polls under
-										100 votes are flagged in amber.</p>
-									<p>A 60% bar also means different things at different counts: votes at three and four
-										spread across neighbouring counts, so Best-at-4 is a far harsher filter than
-										Best-at-2.</p>
+										percentages — 100% off 40 voters is much weaker than 97% off 1,500. A count with
+										fewer than 100 votes behind it is printed in amber; hover any bar for its vote
+										count.</p>
+									<p>A 60% bar also means different things at different counts, and the middle one is the
+										harsh one: votes at three spread onto its neighbours, while two and four sit at the
+										ends of the usual range and collect concentrated ones. Asking 80% Best finds
+										hundreds of games at two or four players, and a few dozen at three.</p>
 								</div>
 								<div>
 									<h3>Scope</h3>
-									<p><b>{fmt(games.length)}</b> ranked games with 500+ ratings. Alternate editions and
+									<p><b>{fmt(games.length)}</b> ranked games with 100+ ratings. Alternate editions and
 										big boxes are excluded — BGG leaves them out of its ranking, so their Geek ratings
 										aren’t comparable.</p>
 									<p>The year dial floors at 1970, where it means <em>any year</em>; older games and

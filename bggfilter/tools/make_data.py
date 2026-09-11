@@ -5,14 +5,15 @@ re-hitting BGG. Only the fields the UI reads survive, and each player-count row
 is [best, recommended, not_recommended]; rows with no votes are dropped so the
 component can treat "missing" as "nobody voted".
 """
-import json, os, sys
+import datetime, json, os, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 src = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "results_all.json")
 dst = os.path.join(ROOT, "webapp", "public", "data", "bgg-filter.json")
 
-games = json.load(open(src, encoding="utf-8"))["games"]
+raw = json.load(open(src, encoding="utf-8"))
+games = raw["games"]
 out = []
 for g in games:
     p = g.get("p") or {}
@@ -24,6 +25,9 @@ for g in games:
     })
 out.sort(key=lambda g: -g["geek"])
 os.makedirs(os.path.dirname(dst), exist_ok=True)
-json.dump({"collected": "2026-08-29", "min_ratings": 500, "games": out},
+# Both header fields are READ OFF THE HARVEST, never typed: the UI prints the
+# collection date and the ratings floor, and a hand-set pair goes stale silently.
+json.dump({"collected": datetime.date.today().isoformat(),
+           "min_ratings": raw.get("min_ratings", 100), "games": out},
           open(dst, "w", encoding="utf-8"), separators=(",", ":"), ensure_ascii=False)
 print(f"{len(out)} games -> {dst} ({os.path.getsize(dst):,} bytes)")

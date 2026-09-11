@@ -84,3 +84,7 @@ webapp/test-results/
 # Local Orbit neural campaign data, checkpoints, tools and benchmark artifacts.
 .orbit-*/
 .pytest-orbit-*/
+
+# BGG Filter harvest scratch (regenerable; only the trimmed payload is committed)
+bggfilter/tools/cache/
+bggfilter/tools/results_all.json
