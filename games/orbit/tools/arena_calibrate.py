@@ -18,8 +18,12 @@ import time
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+# Campaign artifacts live under the game, like every other game's AI data
+# (`games/spender/ai/offline/...`). They used to be ~40 `.orbit-*` directories in
+# the REPO ROOT holding 5.8 GB, most of it dead cargo build output.
+ORBIT_RUNS = REPO_ROOT / "games" / "orbit" / "ai" / "runs"
 _PORTABLE_BINARY = REPO_ROOT / "rust-cores" / "orbit-core" / "target" / "release" / "neural_arena.exe"
-_NATIVE_BINARY = REPO_ROOT / ".orbit-target-native" / "release" / "neural_arena.exe"
+_NATIVE_BINARY = ORBIT_RUNS / "target-native" / "release" / "neural_arena.exe"
 DEFAULT_BINARY = _NATIVE_BINARY if _NATIVE_BINARY.is_file() else _PORTABLE_BINARY
 
 

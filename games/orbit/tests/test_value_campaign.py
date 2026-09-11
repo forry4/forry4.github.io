@@ -61,3 +61,47 @@ def test_direct_vocabulary_matches_semantic_reference(tmp_path):
     raw=json.dumps(record);(tmp_path/"game.json").write_text(raw,encoding="utf-8")
     manifest={"games":[{"file":"game.json","sha256":hashlib.sha256(raw.encode()).hexdigest()}]}
     assert fit_vocabulary(tmp_path,manifest)==Vocabulary.fit([encode_features(obs)])
+
+
+# --- 2026-09-11 audit: cross-game batching -----------------------------------
+
+
+def _fake_game(index, winner):
+    """One censorship-free game with the shape `samples()` expects."""
+    steps = []
+    for turn in range(6):
+        for seat in (0, 1):
+            steps.append({"actor_seat": seat, "observer_seat": seat,
+                          "observation": {"seat": seat, "turn": turn, "game": index},
+                          "search_value": None})
+    return {"censored": False, "winner": winner, "steps": steps}
+
+
+def test_a_single_games_rows_carry_one_outcome_per_seat(monkeypatch):
+    # The defect, stated directly: batching by game means every batch is eight
+    # rows labelled 1 and eight labelled 0, all from one trajectory.
+    from games.orbit.tools import value_campaign
+
+    monkeypatch.setattr(value_campaign, "encode_features", lambda obs: obs)
+    inputs, labels = value_campaign.samples(_fake_game(0, 0), per_seat=4)
+    assert len(inputs) == 8
+    assert sorted(set(labels)) == [0.0, 1.0]
+    assert labels.count(1.0) == labels.count(0.0) == 4
+    assert {row["game"] for row in inputs} == {0}, "one game per batch is the defect"
+
+
+def test_cross_game_batches_mix_many_games_and_both_labels(monkeypatch):
+    from games.orbit.tools import value_campaign
+
+    monkeypatch.setattr(value_campaign, "encode_features", lambda obs: obs)
+    rows = []
+    for index in range(16):
+        inputs, labels = value_campaign.samples(_fake_game(index, index % 2), per_seat=4)
+        rows.extend(zip(inputs, labels))
+    import random as _random
+    _random.Random(9400).shuffle(rows)
+    batch = rows[:64]
+    games = {row["game"] for row, _ in batch}
+    assert len(games) >= 8, f"a 64-row batch should span many games, spanned {len(games)}"
+    labels = [label for _, label in batch]
+    assert 0.0 in labels and 1.0 in labels

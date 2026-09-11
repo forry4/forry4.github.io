@@ -159,7 +159,7 @@ def fit_vocabulary(directory,manifest):
 
 
 def train(directory,development,output,epochs,device,resume=None,indexed_features=False,fused_adam=False,training_seed=9400,
-          extra_data=None,allow_data_change=False,per_seat=4,root_value_beta=0.0):
+          extra_data=None,allow_data_change=False,per_seat=4,root_value_beta=0.0,batch_rows=0):
     import torch
     from ..ai.attention import AttentionValue,ModelConfig,train_prepared,save_checkpoint,load_checkpoint
     if fused_adam and device != "cuda":
@@ -212,6 +212,17 @@ def train(directory,development,output,epochs,device,resume=None,indexed_feature
         if cache_bytes+size<=cache_limit:
             cache[key]=(batch,labels);cache_bytes+=size
         return batch,labels
+    # Row cache for cross-game batching.  Keyed like the tensor cache, but holds
+    # the SEMANTIC rows so a batch can mix games; tensorization then happens per
+    # mixed batch.  It is a second cache rather than a replacement so the
+    # per-game control arm keeps its original speed exactly.
+    row_cache={}
+    def prepared_rows(root,item):
+        key=(str(root),item["sha256"])
+        if key not in row_cache:
+            row_cache[key]=samples(read_game(root,item),per_seat=per_seat,
+                                   root_value_beta=root_value_beta)
+        return row_cache[key]
     # Preflight both partitions once, including all vocabulary coverage, before updates.
     for root,manifest in [*train_sources,(development,dev_manifest)]:
         for item in manifest["games"]:prepared(root,item)
@@ -220,10 +231,31 @@ def train(directory,development,output,epochs,device,resume=None,indexed_feature
         order=[(root,item) for root,manifest in train_sources for item in manifest["games"]]
         random.Random(training_seed+epoch).shuffle(order)
         losses=[];started=time.perf_counter()
-        for root,item in order:
-            batch,labels=prepared(root,item)
-            if batch is not None:
-                losses.append(train_prepared(model,optimizer,batch,labels));step+=1
+        if batch_rows:
+            # CROSS-GAME BATCHING.  One update per game was the pre-2026-09-11
+            # behaviour, and its batch was that game's sixteen rows: eight
+            # labelled 1 and eight labelled 0, every one of them the SAME game's
+            # outcome.  A gradient estimated from a single trajectory is mostly
+            # that trajectory, which is the likeliest cause of the epoch-to-epoch
+            # instability that motivated the checkpoint scan in the first place.
+            # Rows are shuffled across every training source before batching, so
+            # a batch sees many games, both seats and both labels.
+            rows=[]
+            for root,item in order:
+                inputs,labels=prepared_rows(root,item)
+                rows.extend(zip(inputs,labels))
+            random.Random(training_seed*7919+epoch).shuffle(rows)
+            for start in range(0,len(rows),batch_rows):
+                chunk=rows[start:start+batch_rows]
+                if not chunk:continue
+                inputs=[row for row,_ in chunk];labels=[label for _,label in chunk]
+                losses.append(train_prepared(model,optimizer,model.tensor_batch(inputs),labels))
+                step+=1
+        else:
+            for root,item in order:
+                batch,labels=prepared(root,item)
+                if batch is not None:
+                    losses.append(train_prepared(model,optimizer,batch,labels));step+=1
         squared=[];logloss=[]
         import math
         for item in dev_manifest["games"]:
@@ -243,7 +275,8 @@ def train(directory,development,output,epochs,device,resume=None,indexed_feature
                 "history":"omitted-ablation","strength":"not evaluated","training_seed":training_seed,
                 "indexed_features":model.config.indexed_features,"fused_adam":optimizer.param_groups[0].get("fused",False),
                 "per_seat":per_seat,"training_sources":[str(root) for root,_ in train_sources],
-                "root_value_beta":root_value_beta,
+                "root_value_beta":root_value_beta,"batch_rows":batch_rows,
+                "updates_this_epoch":len(losses),
                 "parent_checkpoint":str(resume) if resume else None}
         save_checkpoint(output/f"epoch-{epoch:03d}.pt",model,optimizer,step=step,
                         metadata={"epoch":epoch,"datasets":fingerprints,"history":"omitted-ablation","training_seed":training_seed,
@@ -275,15 +308,20 @@ def main():
                    help="Stratified positions sampled from each seat per game")
     t.add_argument("--root-value-beta",type=float,default=0.0,
                    help="Optional blend of search root values into terminal targets (0 keeps outcome-only control)")
+    t.add_argument("--batch-rows",type=int,default=0,
+                   help="Rows per optimizer update, shuffled ACROSS games. Zero keeps the "
+                        "historical one-update-per-game control, whose batch is a single "
+                        "game's sixteen perfectly correlated rows")
     args=p.parse_args()
     if args.command=="generate":generate(args.output,args.games,args.namespace)
     else:
         if args.epochs<1: p.error("epochs must be positive")
         if args.per_seat<1: p.error("per-seat must be positive")
         if not 0.0<=args.root_value_beta<=1.0: p.error("root-value-beta must be between 0 and 1")
+        if args.batch_rows<0: p.error("batch-rows must be zero or positive")
         train(args.data,args.development,args.output,args.epochs,args.device,args.resume,args.indexed_features,args.fused_adam,args.training_seed,
               extra_data=args.extra_data,allow_data_change=args.allow_data_change,per_seat=args.per_seat,
-              root_value_beta=args.root_value_beta)
+              root_value_beta=args.root_value_beta,batch_rows=args.batch_rows)
 
 
 if __name__=="__main__":main()

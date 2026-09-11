@@ -82,8 +82,21 @@ rust-cores/duel-core/*.out
 webapp/test-results/
 
 # Local Orbit neural campaign data, checkpoints, tools and benchmark artifacts.
-.orbit-*/
-.pytest-orbit-*/
+# These now live UNDER THE GAME, like every other game's AI artifacts
+# (`games/spender/ai/offline/...`). They used to be ~40 `.orbit-*` directories in
+# the repo root holding 5.8 GB, of which 3.1 GB was dead cargo build output from
+# one-off `--target-dir` experiments.
+games/orbit/ai/runs/
+# The old root location, kept so a stale checkout or an older tool cannot start
+# re-littering the root. NOTE the missing trailing slash on the second pattern:
+# `.orbit-*/` matched DIRECTORIES only, so the root `.orbit-*.json` arena reports
+# were left untracked and visible in `git status` forever.
+.orbit-*
+# pytest --basetemp scratch. Was `.pytest-orbit-*/` only, which missed the
+# `.pytest-tmp*`, `.pytest-final-run` and `.pytest-*-run` dirs the same commands
+# create; they end up unreadable on Windows and then noise up `git status` with
+# "could not open directory" warnings on every invocation.
+.pytest-*
 
 # BGG Filter harvest scratch (regenerable; only the trimmed payload is committed)
 bggfilter/tools/cache/

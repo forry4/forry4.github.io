@@ -211,19 +211,136 @@ fn terminal(world: &State, seat: usize) -> Option<f64> {
         )
     }
 }
-fn heuristic(obs: &Value) -> f64 {
+/// Which leaf evaluator a search uses for nonterminal positions.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Leaf {
+    /// The full public-state evaluator ported from `ai/search.py::state_value`.
+    #[default]
+    StateValue,
+    /// Capture progress only. This is what the Rust port actually shipped from
+    /// its first commit until 2026-09-11, and it is retained ONLY as the
+    /// explicit control arm for the A/B that replaced it. It is not a tier.
+    CaptureProgressOnly,
+}
+
+fn progress(obs: &Value, seat: usize) -> f64 {
+    let captured = obs["players"][seat]["captured"].as_array().unwrap();
+    let mut counts = [0usize; 5];
+    for c in captured {
+        counts[c.as_u64().unwrap() as usize] += 1;
+    }
+    (captured.len() as f64 / 5.0)
+        .max(counts.iter().filter(|n| **n > 0).count() as f64 / 4.0)
+        .max(*counts.iter().max().unwrap() as f64 / 3.0)
+}
+
+/// Capture progress only: the pre-2026-09-11 Rust leaf, kept as a control.
+///
+/// Measured over 19,034 real positions this takes **25 distinct values in an
+/// entire game**, is exactly 0.0 on 35% of positions, and is flat for the first
+/// 26% of every game. A tree cannot convert depth into strength over an
+/// evaluator this coarse, which is why the simulation ladder stops paying at
+/// ~192 and why "beats the free heuristic leaf" was never a real bar.
+pub fn capture_progress_only(obs: &Value) -> f64 {
     let me = obs["seat"].as_u64().unwrap() as usize;
-    let progress = |seat: usize| {
-        let captured = obs["players"][seat]["captured"].as_array().unwrap();
-        let mut counts = [0usize; 5];
-        for c in captured {
-            counts[c.as_u64().unwrap() as usize] += 1;
-        }
-        (captured.len() as f64 / 5.0)
-            .max(counts.iter().filter(|n| **n > 0).count() as f64 / 4.0)
-            .max(*counts.iter().max().unwrap() as f64 / 3.0)
+    (progress(obs, me) - progress(obs, 1 - me)).tanh()
+}
+
+/// Public-state leaf value from the viewing seat's perspective.
+///
+/// This is a faithful port of `games/orbit/ai/search.py::state_value`, which the
+/// original Rust port silently reduced to its first term. Everything here is
+/// read from the seat's OWN observation — opponent hands and both deck orders
+/// are structurally absent, so a determinized world cannot leak through the
+/// leaf. `tools/leaf_parity.py` holds Python and Rust to each other.
+///
+/// The weights are the Python reference's and are deliberately NOT retuned
+/// here: eval-weight tuning is the documented saturated lever in three sibling
+/// campaigns, and the point of this change is that the search had no state
+/// evaluator at all, not that it had the wrong one.
+pub fn state_value(obs: &Value) -> f64 {
+    let seat = obs["seat"].as_u64().unwrap() as usize;
+    let other = 1 - seat;
+    if obs["phase"] == "over" {
+        return match obs["winner"].as_u64() {
+            None => 0.0,
+            Some(w) => {
+                if w as usize == seat {
+                    1.0
+                } else {
+                    -1.0
+                }
+            }
+        };
+    }
+    let me = &obs["players"][seat];
+    let them = &obs["players"][other];
+    let num = |v: &Value| v.as_f64().unwrap_or(0.0);
+    let sum_array = |v: &Value| {
+        v.as_array()
+            .map_or(0.0, |items| items.iter().map(num).sum::<f64>())
     };
-    (progress(me) - progress(1 - me)).tanh()
+    let len_array = |v: &Value| v.as_array().map_or(0.0, |items| items.len() as f64);
+
+    // Capture progress is nonlinear: two discs from one planet are much more
+    // useful than two scattered discs, because the third ends the game.
+    let mut value = 1.4 * (progress(obs, seat) - progress(obs, other));
+
+    // Influence proximity — the single largest thing the old leaf could not
+    // see. A disc three steps into your zone is one influence from a capture,
+    // and the cubic term is what makes that urgency legible to the search.
+    // Seat 0 pushes the disc positive, seat 1 negative (`gain_influence`).
+    let direction = if seat == 0 { 1.0 } else { -1.0 };
+    if let Some(track) = obs["influence"].as_array() {
+        for position in track {
+            let Some(position) = position.as_f64() else {
+                continue; // captured this turn; the disc resets at turn end
+            };
+            let toward = position * direction;
+            value += 0.11 * toward + 0.06 * toward.powi(3) / 27.0;
+            if toward >= 2.0 {
+                value += 0.18;
+            } else if toward <= -2.0 {
+                value -= 0.18;
+            }
+        }
+    }
+    value += 0.05 * (len_array(&me["captured"]) - len_array(&them["captured"]));
+    value += 0.018 * (sum_array(&me["technology"]) - sum_array(&them["technology"]));
+    value += 0.03 * (len_array(&me["row_bonuses"]) - len_array(&them["row_bonuses"]));
+    let leader_level = num(&obs["leader"]["level"]);
+    match obs["leader"]["owner"].as_u64() {
+        Some(owner) if owner as usize == seat => value += 0.09 + 0.035 * leader_level,
+        Some(_) => value -= 0.09 + 0.035 * leader_level,
+        None => {}
+    }
+    value += 0.025 * (num(&me["credits"]) - num(&them["credits"]));
+    value += 0.04 * (num(&me["zenithium"]) - num(&them["zenithium"]));
+    // Own hand against the opponent's PUBLIC columns: both are visible to this
+    // seat, and the asymmetry is the reference's, not an oversight.
+    let cost_of = |cards: &Value| {
+        cards.as_array().map_or(0.0, |items| {
+            items
+                .iter()
+                .filter_map(|c| c.as_u64())
+                .filter_map(|id| crate::rules().cards.get(&(id as u16)))
+                .map(|card| card.cost as f64)
+                .sum()
+        })
+    };
+    let own_cards = cost_of(&me["hand"]);
+    let public_opponent_cards: f64 = them["columns"]
+        .as_array()
+        .map_or(0.0, |columns| columns.iter().map(cost_of).sum());
+    value += 0.005 * (own_cards - public_opponent_cards);
+    value.tanh()
+}
+
+fn leaf_value(obs: &Value, leaf: Leaf) -> f64 {
+    match leaf {
+        Leaf::StateValue => state_value(obs),
+        Leaf::CaptureProgressOnly => capture_progress_only(obs),
+    }
 }
 pub fn choose(
     source: &State,
@@ -278,17 +395,101 @@ pub fn choose_with_controls(
     model_weight: f64,
     model_temperature: f64,
 ) -> Result<Value, String> {
-    choose_cached_options(
+    choose_with_leaf(
         source,
         seat,
         seed,
         config,
         model,
-        model_stride.max(1),
-        model_weight.clamp(0.0, 1.0),
-        model_temperature.max(0.1),
-        true,
+        model_stride,
+        model_weight,
+        model_temperature,
+        Leaf::default(),
     )
+}
+
+/// Every experimental knob in one place.
+///
+/// `Default` reproduces the historical search exactly, so an existing entry
+/// point that does not mention `Controls` is byte-identical to what it was.
+#[derive(Clone, Copy, Debug)]
+pub struct Controls {
+    pub model_stride: usize,
+    pub model_weight: f64,
+    pub model_temperature: f64,
+    pub leaf: Leaf,
+    /// How many consecutive simulations share one sampled world and one frozen
+    /// chance stream.
+    ///
+    /// `1` is the historical behaviour: a fresh determinization EVERY
+    /// simulation. Because a node's key embeds the observation that follows
+    /// from that world, resampling per simulation means almost no node is ever
+    /// visited twice -- measured 2026-09-11 at 19 of 232 nodes per search, mean
+    /// depth 2.4 plies, with the exact leaf cache hitting 0.3% of the time.
+    /// `usize::MAX` is one coherent world for the whole call, which restores
+    /// the tree (63% multi-visit nodes, depth 4.2) at the cost of PIMC-style
+    /// strategy fusion. Duel shipped the coherent form; Orbit's hidden
+    /// information is about half of Duel's (perfect-information cheat 0.6094
+    /// against 0.7250), so the trade is its own measurement, not an inheritance.
+    pub determinization_period: usize,
+}
+
+impl Default for Controls {
+    fn default() -> Self {
+        Self {
+            model_stride: 1,
+            model_weight: 1.0,
+            model_temperature: 2.0,
+            leaf: Leaf::default(),
+            determinization_period: 1,
+        }
+    }
+}
+
+impl Controls {
+    fn sanitized(self) -> Self {
+        Self {
+            model_stride: self.model_stride.max(1),
+            model_weight: self.model_weight.clamp(0.0, 1.0),
+            model_temperature: self.model_temperature.max(0.1),
+            determinization_period: self.determinization_period.max(1),
+            ..self
+        }
+    }
+}
+
+/// Same as [`choose_with_controls`] with an explicit leaf evaluator.
+#[allow(clippy::too_many_arguments)]
+pub fn choose_with_leaf(
+    source: &State,
+    seat: usize,
+    seed: u64,
+    config: Config,
+    model: Option<&Model>,
+    model_stride: usize,
+    model_weight: f64,
+    model_temperature: f64,
+    leaf: Leaf,
+) -> Result<Value, String> {
+    choose_with(source, seat, seed, config, model, Controls {
+        model_stride,
+        model_weight,
+        model_temperature,
+        leaf,
+        ..Controls::default()
+    })
+}
+
+/// The full-control entry point.
+pub fn choose_with(
+    source: &State,
+    seat: usize,
+    seed: u64,
+    config: Config,
+    model: Option<&Model>,
+    controls: Controls,
+) -> Result<Value, String> {
+    choose_cached_options(source, seat, seed, config, model, controls.sanitized(), true)
 }
 fn choose_cached(
     source: &State,
@@ -298,17 +499,7 @@ fn choose_cached(
     model: Option<&Model>,
     cache_enabled: bool,
 ) -> Result<Value, String> {
-    choose_cached_options(
-        source,
-        seat,
-        seed,
-        config,
-        model,
-        1,
-        1.0,
-        2.0,
-        cache_enabled,
-    )
+    choose_cached_options(source, seat, seed, config, model, Controls::default(), cache_enabled)
 }
 fn choose_cached_options(
     source: &State,
@@ -316,11 +507,16 @@ fn choose_cached_options(
     seed: u64,
     config: Config,
     model: Option<&Model>,
-    model_stride: usize,
-    model_weight: f64,
-    model_temperature: f64,
+    controls: Controls,
     cache_enabled: bool,
 ) -> Result<Value, String> {
+    let Controls {
+        model_stride,
+        model_weight,
+        model_temperature,
+        leaf,
+        determinization_period,
+    } = controls;
     if seat > 1 || source.actor() != Some(seat) {
         return Err("Not this seat's decision".into());
     }
@@ -341,14 +537,21 @@ fn choose_cached_options(
     // history-dependent estimates. Lifetime is one call with one fixed model.
     let mut values: HashMap<String, f64> = HashMap::new();
     let mut cache_hits = 0;
+    let mut determinization: Option<State> = None;
+    let mut frozen_chance_seed: u64 = 0;
     for simulation in 0..config.simulations {
         if started.elapsed_ms() >= config.budget_ms as f64 {
             break;
         }
         let sample_started = profile_start(profiling);
-        let mut world = sample(source, seat, &mut rng)?;
+        if simulation % determinization_period == 0 {
+            determinization = Some(sample(source, seat, &mut rng)?);
+            frozen_chance_seed = rng.next();
+        }
+        // `expect` cannot fire: simulation 0 always takes the branch above.
+        let mut world = determinization.clone().expect("determinization sampled");
         profile.sample_ns += profile_elapsed(sample_started);
-        let mut chance = Chance::seeded(rng.next());
+        let mut chance = Chance::seeded(frozen_chance_seed);
         let mut path = Vec::new();
         let mut trace = 0u64;
         let mut leaf_observation: Option<Value> = None;
@@ -430,7 +633,9 @@ fn choose_cached_options(
             // evaluator modes only when a stride is active.
             let evaluate_model = model.is_some() && simulation % model_stride == 0;
             let key = if cache_enabled {
-                if model.is_some() && model_stride > 1 {
+                if leaf != Leaf::default() || determinization_period != 1 {
+                    format!("{:?}:{}:{}", leaf, determinization_period, view)
+                } else if model.is_some() && model_stride > 1 {
                     format!(
                         "{}:{}",
                         if evaluate_model {
@@ -461,10 +666,10 @@ fn choose_cached_options(
                     evals += 1;
                     let learned = (model.logit_typed(&rows)? as f64 / model_temperature).tanh();
                     profile.model_ns += profile_elapsed(model_started);
-                    model_weight * learned + (1.0 - model_weight) * heuristic(&view)
+                    model_weight * learned + (1.0 - model_weight) * leaf_value(&view, leaf)
                 } else {
                     let heuristic_started = profile_start(profiling);
-                    let value = heuristic(&view);
+                    let value = leaf_value(&view, leaf);
                     profile.heuristic_ns += profile_elapsed(heuristic_started);
                     value
                 };
@@ -529,7 +734,8 @@ fn choose_cached_options(
     profile.total_ns = profile_elapsed(profile_started);
     let mut result = json!({"move":node.moves[best],"simulations":sims,"evaluations":evals,"nodes":nodes.len(),"root_value":root_value,
         "value_cache_hits":cache_hits,
-        "elapsed_ms":started.elapsed_ms(),"stats":stats,"belief":"current-observation prior"});
+        "elapsed_ms":started.elapsed_ms(),"stats":stats,"belief":"current-observation prior",
+        "determinization_period":determinization_period,"leaf":format!("{leaf:?}")});
     if profiling {
         result["profile"] = profile.as_value();
     }
@@ -539,6 +745,58 @@ fn choose_cached_options(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The historical search must stay reachable without naming any knob.
+    /// A silent default flip would rewrite every past campaign number's meaning.
+    #[test]
+    fn defaults_are_the_historical_search() {
+        let controls = Controls::default();
+        assert_eq!(controls.determinization_period, 1, "per-simulation resampling");
+        assert_eq!(controls.model_stride, 1);
+        assert_eq!(controls.model_weight, 1.0);
+        assert_eq!(controls.model_temperature, 2.0);
+        assert_eq!(controls.leaf, Leaf::StateValue);
+    }
+
+    /// The mechanism behind the 2026-09-11 coherent result, asserted rather than
+    /// described: resampling the hidden world every simulation makes node keys
+    /// unique, so the tree is rebuilt instead of reused. Holding one
+    /// determinization for the call must therefore produce FEWER nodes for the
+    /// same simulation count -- the same work, shared.
+    #[test]
+    fn coherent_determinization_reuses_the_tree() {
+        let (state, _) = State::new(22, [1, 2, 1]);
+        let config = Config { simulations: 192, max_depth: 96, budget_ms: 600_000 };
+        let per_sim = choose_with(&state, 0, 33, config, None, Controls::default()).unwrap();
+        let coherent = choose_with(&state, 0, 33, config, None, Controls {
+            determinization_period: usize::MAX,
+            ..Controls::default()
+        })
+        .unwrap();
+        let nodes = |v: &Value| v["nodes"].as_u64().unwrap();
+        assert_eq!(per_sim["simulations"], coherent["simulations"]);
+        assert!(
+            nodes(&coherent) < nodes(&per_sim),
+            "coherent {} should reuse more of the tree than per-sim {}",
+            nodes(&coherent),
+            nodes(&per_sim)
+        );
+        assert_eq!(coherent["determinization_period"], json!(usize::MAX));
+    }
+
+    /// The leaf the Rust port shipped until 2026-09-11 is retained only as a
+    /// control, and it is a strict subset of the reference: capture progress
+    /// alone. Pin the difference so neither can be quietly swapped for the other.
+    #[test]
+    fn the_control_leaf_is_blind_where_the_reference_is_not() {
+        let (state, _) = State::new(22, [1, 2, 1]);
+        let observation = state.observation(0);
+        let reference = state_value(&observation);
+        let control = capture_progress_only(&observation);
+        assert_eq!(control, 0.0, "no captures yet, so the old leaf sees nothing");
+        assert!(reference != 0.0, "the reference reads influence, economy and tempo");
+    }
+
     #[test]
     fn exact_leaf_cache_preserves_fixed_simulation_statistics() {
         let (state, _) = State::new(22, [1, 2, 1]);
@@ -582,12 +840,19 @@ mod tests {
             max_depth: 8,
             budget_ms: 60000,
         };
-        let mut x = choose(&a, 0, 33, config, None).unwrap();
-        let mut y = choose(&b, 0, 33, config, None).unwrap();
-        x.as_object_mut().unwrap().remove("elapsed_ms");
-        y.as_object_mut().unwrap().remove("elapsed_ms");
-        assert_eq!(x, y);
-        assert!(a.legal_moves(0).contains(&x["move"]));
+        // The guarantee must hold under EVERY determinization regime, not just
+        // the historical one. Coherent search commits to a single sampled world
+        // for the whole call, which is the change most likely to let privileged
+        // state reach a leaf if `sample` were ever bypassed.
+        for period in [1usize, 8, usize::MAX] {
+            let controls = Controls { determinization_period: period, ..Controls::default() };
+            let mut x = choose_with(&a, 0, 33, config, None, controls).unwrap();
+            let mut y = choose_with(&b, 0, 33, config, None, controls).unwrap();
+            x.as_object_mut().unwrap().remove("elapsed_ms");
+            y.as_object_mut().unwrap().remove("elapsed_ms");
+            assert_eq!(x, y, "hidden state reached the search at period {period}");
+            assert!(a.legal_moves(0).contains(&x["move"]));
+        }
     }
     #[test]
     fn immediate_alternate_win_is_resolved_by_engine_not_leaf() {

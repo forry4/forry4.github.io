@@ -1,7 +1,10 @@
 # Orbit AI campaign
 
 Agreed 2026-09-05. Status: **Phases 1–5 prototype foundations implemented;
-neural strength campaign authorized 2026-09-08 and now starting**. The current
+the value-only league ran twelve generations, promoted nothing, and was audited
+on 2026-09-11 — see "Instrumented audit and the adopted order of work" below,
+which supersedes the earlier correction and sets the current plan of record.**
+The current
 campaign has a heuristic information-set PUCT baseline, a versioned 128-wide
 policy/value guide, paired all-board arenas, sequential particle beliefs, and
 an outcome-only population trainer. Phase 4 has a sealed-pool promotion
@@ -142,12 +145,18 @@ CPU self-play or GPU learning bottleneck. Paid compute requires a priced proposa
    ordering and throughput are measured against the serving profile. A score
    from one budget is never numerically extrapolated into a claim at another.
    The actual 5,000 ms / 3,000+2,000 browser profile is a rare final
-   compatibility check, run only after the fast 512-pair gate. The strength
+   compatibility check, run only after the fast 512-pair gate. The **RELEASE**
    target is **75% against the frozen current Expert**, and the paired 95%
    lower confidence bound must also be at least 75% on the registered fast
    confirmation regime; the serving check must be complete, uncensored and
    clear its compatibility floor. A raw score near 75% is therefore not enough
-   at confirmation size. Keep broad-opponent improvement, existing
+   at confirmation size. **This is the release bar ONLY — since 2026-09-11 the
+   ACCUMULATION bar that moves the incumbent is separate** (beat the current
+   incumbent head-to-head on shared CRN deals, 128 pairs, paired lower bound
+   above 0.5). Holding every generation to the release bar is what kept all
+   twelve league generations fine-tuning the same g004 parent; 75% also exceeds
+   every shipped step in repo history except Spender's PV at 0.758, which
+   replaced an architecture. Keep broad-opponent improvement, existing
    five-percentage-point regression gates, exact 0.5000 mirror sanity, and no
    unresolved censoring. Retire opened confirmation pools. Once this higher bar
    passes, the release transition is explicit: delete Easy, relabel Normal as
@@ -298,6 +307,160 @@ measured action/policy head (with separate pending-choice scoring) and
 auxiliary capture/technology/bonus/endgame targets. Those heads must earn a
 strength gain at the serving shape before they are exported to Rust/WASM; they
 are not justified by lower Brier or log loss alone.
+
+### Instrumented audit and the adopted order of work (2026-09-11, supersedes the correction above)
+
+The plateau was then diagnosed by instrumenting the search rather than running
+another generation. The full numbers are in the research log; the campaign
+decisions they force are here. **This section supersedes the arm proposed
+immediately above**: the next arm is not a data/curriculum change.
+
+Four measured causes, in the order they must be fixed:
+
+1. **The search has no tree.** `sample()` runs inside the simulation loop and
+   node keys embed the resulting observation, so **19 of 232 nodes per search
+   ever get a second visit** and mean depth is 2.4 plies. The leaf-value cache
+   hits **0.3%** of the time, for the same reason. The `c0da3924` elbow at ~192
+   simulations is a root bandit converging its ~6.7 arms at ~29 samples each,
+   not the game saturating.
+2. **The shipped Expert has no state evaluator.** `search::heuristic` reads only
+   captured discs: **25 distinct values in a whole game, exactly 0.0 on 35% of
+   positions, flat for the first 26%**. `serving::action_score` next to it is 213
+   lines of tuned judgement. The search has an excellent action ranker and
+   nothing to propagate at depth.
+3. **The trainer takes one optimizer step per game** on 16 perfectly correlated
+   rows (8 label-1, 8 label-0 from one game), ~2,500 updates per epoch, LR 3e-4
+   flat, grad-clipped at 1.0. The teacher searches 64 simulations and always
+   plays the visit argmax — no temperature sampling of the played move.
+4. **The screens cannot see a generation.** Near-peer pair SD is **0.31**: 8
+   pairs is +/-0.21 and +0.03 needs ~400 pairs. The epoch scan runs 8 pairs per
+   epoch **on a different deal set per epoch** and takes the argmax, which
+   manufactures 0.66-0.75 winners from identical checkpoints.
+
+How much a generation changes the policy depends on the trajectory, and the
+difference matters. On a search-versus-random trajectory the incumbent and a
+rejected candidate agree on **77.9%** of decisions; on a **self-play** trajectory
+— the distribution an arena actually samples — they agree on **63.4%** (60.7%
+where more than one move is legal), with the frozen prior deciding **50.5%**.
+`tools/policy_diff.py` produces the self-play figure and its identity control
+reads exactly 100.0%. A generation therefore moves about two decisions in five,
+which an adequately sized arena could see: **the binding constraint is the
+measurement width, not a lack of signal.**
+
+#### Now answered — remove from the open-questions list
+
+- **Hidden information is a SMALL lever.** Perfect-information cheat **0.6094
+  [0.5040, 0.7147]** (32 CRN pairs, 256 sims, heuristic leaf, mirror 0.5000)
+  against Duel's 0.7250, and that is the full penalty including the
+  unrecoverable part. The "current-observation sampling versus coherent
+  independent-world trees" question in the research-log audit section below is
+  closed: **do not build beliefs or ISMCTS for Orbit.**
+- **Coherent determinization alone does not pay on the current leaf**: 0.5313
+  [0.4240, 0.6385] at 256 sims heuristic, 0.5625 [0.3650, 0.7600] at 96 sims
+  with the g004 net. Both unresolvable. Its cost, which does transfer: **1.31x
+  with a heuristic leaf, 0.98x with a net leaf** — free once the leaf dominates.
+  Re-test it after step 1 and step 2 below, never before.
+- **The game is neither complex nor luck-heavy**: mean root branching 6.7 (median
+  6, max 18), ~95 decisions per game, and Hard v2 beats random 0.998 over 256
+  pairs. Nothing structural explains the stall, and the 0.31 pair SD is two
+  near-equal bots rather than deal variance.
+- **Search time attribution** (256 sims, heuristic leaf): opponent_rank **43.1%**,
+  observations ~28%, determinization 5.5%, **evaluation ~0%**. The neural path is
+  85.7% model. The optimization work in `64b947e2` was correct for the neural
+  build and irrelevant to the tier that ships; its ~1.8x compounds to **under
+  +0.01** on this campaign's own 328-pair ladder.
+
+#### The target is split into two numbers
+
+The single 75% bar (with a 75% paired lower bound) **exceeds every shipped step
+in this repo's history** except Spender's PV at 0.758, which replaced an
+architecture. Duel shipped v2 at 0.63 and champion-1 at 0.559; CoC's 0.60 goal is
+UNMET. Holding incremental generations to it is why all twelve restarted from the
+same g004 parent and nothing accumulated. From here:
+
+- **Accumulation bar** (moves the incumbent): beats the current incumbent
+  **head-to-head on shared CRN deals**, 128 pairs, paired lower bound above 0.5.
+- **Release bar** (swaps the serving tiers): unchanged at 0.75 score and 0.75
+  paired lower bound versus the frozen current Expert, plus the serving-shaped
+  compatibility check.
+
+#### Adopted order of work
+
+0. **Instrument.** Size every screen from the measured pair SD; scan all epochs on
+   ONE CRN pool; compare candidate against incumbent head-to-head instead of via
+   the Expert; refuse to spend an arena on a candidate that plays the incumbent's
+   moves.
+1. **Give the search something to propagate.** A real `state_score` from the
+   knowledge already in `action_score`; batch training across games; sample the
+   played move by visit count for the opening plies. (Spender's log records that
+   Dirichlet root noise WASHED — "exploration is not the bottleneck" — but Spender
+   does sample by visit count for ~30 plies; Orbit does neither.)
+2. **Add a policy head and serve it as the prior.** Spender's learned prior is
+   worth +0.58 over its heuristic prior at a matched value head. Orbit is the case
+   where it should matter most, because its prior currently *is* the bot. This is
+   the milestone the release bar is sized for.
+3. Only then revisit determinization, minimax opponent nodes, and the 43%
+   opponent-model cost.
+
+**Features remain out of scope.** The semantic contract is the most rigorous part
+of the stack and feature/eval-weight work is the documented saturated lever in
+three sibling campaigns. It stays untouched while the leaf is a capture counter
+and the trainer takes one step per game.
+
+#### Results of acting on that order (2026-09-11)
+
+Steps 0 and 1 are done and two of their results overturned the expectation that
+set them. Full detail and every interval is in the research log.
+
+- **Step 0 shipped.** The epoch scan runs on ONE shared CRN pool (it was a
+  different deal set per epoch) at 32 pairs, and declines to pick when the top
+  two are not separated. The incumbent now moves only on a head-to-head
+  `--accept-pairs` (128) arena whose paired lower bound clears `--accept-lower`
+  (0.50); cheap screens may veto it but never accept. Every report carries
+  `pair_sd`/`pair_se`/`pairs_needed_for_0.03`. `tools/policy_diff.py` answers
+  "is there anything here to measure" in seconds.
+- **Step 1's leaf was a PORT DEFECT, and fixing it is a WASH.** `search.rs`
+  evaluated leaves with capture progress alone; `ai/search.py::state_value` — the
+  reference it was ported from — is that term times 1.4 plus influence
+  proximity, technology, leader, bonuses, economy and hand. Ported faithfully
+  (`tools/leaf_parity.py`: 2,728 positions, max delta **exactly 0.0**; the same
+  walk reports 1.448 against the old leaf). Measured at **0.5000 [0.4570,
+  0.5410]** over 256 pairs. Kept anyway — it removes a silent divergence from the
+  documented reference and is a prerequisite for the tree work — but recorded as
+  strength-neutral. It does not reach players: the WASM is a committed artifact
+  and no CI job builds Rust.
+- **Step 3 moved up, because the leaf result reframed it. Coherent
+  determinization PAYS once there is something to propagate**: 0.5449 [0.5039,
+  0.5879] and, on fresh deals, 0.5605 [0.5195, 0.5996] — combined **0.553 [0.524,
+  0.582]** over 512 pairs at 192 simulations. The earlier "deepening a tree over a
+  null evaluator buys nothing" reading was half an experiment; neither arm had
+  been run with a real evaluator and a real tree together. **It survives equal
+  time**: at the 250 ms proxy, K=1, two independent pools give 0.5371 [0.4941,
+  0.5820] and 0.5703 [0.5273, 0.6152], pooling to **0.5537 [0.5234, 0.5840]** over
+  512 pairs — within a point of the fixed-simulation figure, so the deeper tree's
+  extra per-simulation cost is not eating the gain. Cost is leaf-dependent and
+  measured: 1.31x with the heuristic leaf, **0.98x with a neural leaf**. **At
+  pool=4 — the shipped ensemble width — the gain GROWS** rather than collapsing
+  as Duel's did: 0.6348 [0.5938, 0.6758] (all eight boards above 0.5) and 0.5703
+  [0.5293, 0.6133] fresh, pooling to **0.6025 [0.5732, 0.6318]**. Four
+  independent determinizations root-summed is textbook PIMC ensembling; Orbit had
+  the ensemble all along and never had a tree to put in it. **The magnitude is
+  not settled**: the two pool=4 pools differ by z = 2.13, while the
+  fixed-simulation pools differ by 0.016 — an equal-time arena is load-sensitive,
+  and both pool=4 runs shared the host with a four-hour job. Direction is
+  unambiguous across all seven arms; magnitude is +0.05 to +0.13. Before shipping:
+  a clean pool=4 run on an idle host, plus the serving-shape check at 3,000+2,000
+  ms. Shipping itself is one line in `wasm.rs` — the frontend already fans out
+  distinct seeds and sums root visits, both now pinned by tests.
+- **Step 1's trainer changes are in**: `--batch-rows` (256) shuffles rows across
+  games instead of one update per game on sixteen correlated rows, and
+  `--sample-plies` samples the opening played moves from root visits instead of
+  a deterministic argmax teacher. Both keep the historical behaviour as an
+  explicit control arm (`0`), and the control path is verified byte-identical.
+
+**The revised reading**: the leaf was not the binding constraint, the tree was.
+Step 2 (the policy head) is unchanged in priority and is now the main untested
+lever, with the 43% opponent-model cost behind it.
 
 Performance is now a campaign requirement: profile preprocessing, data generation,
 GPU update time, native/WASM inference and search separately. Keep mathematically
@@ -742,6 +905,15 @@ Priority changes:
   Orbit currently searches against fixed Hard v2 replies. Test adversarial replies
   and current-observation sampling versus coherent independent-world trees; do not
   transfer Duel's near-perfect-information justification to Orbit's hidden hands.
+  **ANSWERED 2026-09-11 — the sampling half is closed.** The perfect-information
+  cheat is **0.6094 [0.5040, 0.7147]** against Duel's 0.7250, and that is the full
+  penalty including the unrecoverable part, so hidden information is a small lever
+  here and Duel's justification does not need transferring in either direction.
+  Coherent independent-world trees measured 0.5313 [0.4240, 0.6385] (heuristic
+  leaf) and 0.5625 [0.3650, 0.7600] (net leaf) — unresolvable, because deepening a
+  tree over a 25-value evaluator buys nothing. Do not build beliefs or ISMCTS. The
+  opponent-model half is still open and is now known to cost **43.1% of search
+  time**; it is step 3 of the adopted order, after the leaf and the prior.
 - Test short rollout versus static leaves in Orbit's actual serving shape. The
   July 29/30 Duel result supersedes the older static-leaf claim: a 0.61 single-tree
   screen became 0.40 with four workers. Match independent trees, per-worker depth,

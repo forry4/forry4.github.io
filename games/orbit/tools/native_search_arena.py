@@ -71,9 +71,22 @@ def main():
                    help="Blend weight for the neural value on evaluated leaves (0..1)")
     p.add_argument("--model-temperature",type=float,default=2.0,
                    help="Positive logit temperature for neural leaf values")
+    # The 2026-09-11 leaf port is the default on both sides; the control arm is
+    # the capture-only leaf the Rust search shipped before it.
+    leaves=("state-value","capture-progress-only")
+    p.add_argument("--leaf",choices=leaves,default="state-value",
+                   help="Candidate seat's nonterminal leaf evaluator")
+    p.add_argument("--opponent-leaf",choices=leaves,default="state-value",
+                   help="Opponent seat's nonterminal leaf evaluator")
+    # Simulations sharing one determinization: 1 is the historical per-simulation
+    # resampling, 0 is one coherent world per call (PIMC), N is N-sim groups.
+    p.add_argument("--determinization-period",type=int,default=1,
+                   help="Candidate seat: simulations per determinization; 0 = coherent")
+    p.add_argument("--opponent-determinization-period",type=int,default=1,
+                   help="Opponent seat: simulations per determinization; 0 = coherent")
     repo_root=Path(__file__).resolve().parents[3]
     portable_binary=repo_root/"rust-cores/orbit-core/target/release/neural_arena.exe"
-    native_binary=repo_root/".orbit-target-native/release/neural_arena.exe"
+    native_binary=repo_root/"games/orbit/ai/runs/target-native/release/neural_arena.exe"
     p.add_argument("--binary",type=Path,default=native_binary if native_binary.is_file() else portable_binary)
     args=p.parse_args()
     if args.pairs<8 or args.pairs%8:p.error("pairs must balance all eight boards")
@@ -82,6 +95,8 @@ def main():
     if args.model_stride<1:p.error("model-stride must be positive")
     if not 0.0<=args.model_weight<=1.0:p.error("model-weight must be between 0 and 1")
     if args.model_temperature<=0:p.error("model-temperature must be positive")
+    for name in ("determinization_period","opponent_determinization_period"):
+        if getattr(args,name)<0:p.error(f"--{name.replace('_','-')} must be zero or positive")
     # The heuristic leaf runs the identical search with no network, which is the
     # control that separates search strength from the value model.
     heuristic=str(args.checkpoint)=="heuristic"
@@ -107,6 +122,10 @@ def main():
         request["opponent_model"]=export_model(other)
     if args.opponent_expert:request["opponent_expert"]=True
     if args.simulations is not None:request["simulations"]=args.simulations
+    request["leaf"]=args.leaf
+    request["opponent_leaf"]=args.opponent_leaf
+    request["determinization_period"]=args.determinization_period
+    request["opponent_determinization_period"]=args.opponent_determinization_period
     request["model_stride"]=args.model_stride
     request["model_weight"]=args.model_weight
     request["model_temperature"]=args.model_temperature
@@ -133,6 +152,9 @@ def main():
             "opponent":opponent_name,
             "model_stride":args.model_stride,"model_weight":args.model_weight,
             "model_temperature":args.model_temperature,
+            "leaf":args.leaf,"opponent_leaf":args.opponent_leaf,
+            "determinization_period":args.determinization_period,
+            "opponent_determinization_period":args.opponent_determinization_period,
             "games":results,"seconds":time.perf_counter()-started,
             "mirror_control":mirror,
             "complete":process.returncode==0 and len(results)==len(jobs) and not any(r["error"] or r["censored"] for r in results)}
@@ -143,6 +165,10 @@ def main():
                                             "fixed_simulations":args.simulations,
                                             "turn_budget":args.budget_ms/1000.0,
                                             "workers":args.workers,
+                                            "leaf":args.leaf,
+                                            "opponent_leaf":args.opponent_leaf,
+                                            "determinization_period":args.determinization_period,
+                                            "opponent_determinization_period":args.opponent_determinization_period,
                                             "game_workers":args.game_workers}).as_dict()
     if mirror:
         report["mirror_passed"]=report["complete"] and all(

@@ -31,10 +31,14 @@ from ..ai.state import SCHEMA_VERSION, rules_fingerprint
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_PARENT = REPO_ROOT / ".orbit-value-fit-indexed-v3" / "epoch-004.pt"
-DEFAULT_ANCHOR = REPO_ROOT / ".orbit-value-train-native-v2"
+# Campaign artifacts live under the game, like every other game's AI data
+# (`games/spender/ai/offline/...`). They used to be ~40 `.orbit-*` directories in
+# the REPO ROOT holding 5.8 GB, most of it dead cargo build output.
+ORBIT_RUNS = REPO_ROOT / "games" / "orbit" / "ai" / "runs"
+DEFAULT_PARENT = ORBIT_RUNS / "value-fit-indexed-v3" / "epoch-004.pt"
+DEFAULT_ANCHOR = ORBIT_RUNS / "value-train-native-v2"
 _PORTABLE_BINARY_ROOT = REPO_ROOT / "rust-cores" / "orbit-core" / "target" / "release"
-_NATIVE_BINARY_ROOT = REPO_ROOT / ".orbit-target-native" / "release"
+_NATIVE_BINARY_ROOT = ORBIT_RUNS / "target-native" / "release"
 # Prefer the isolated CPU-native build for an offline local campaign when it
 # exists, while keeping a fresh checkout's portable release path as the
 # fallback.  The WASM/browser build never uses these defaults.
@@ -44,6 +48,9 @@ DEFAULT_VALUE_BINARY = (_NATIVE_BINARY_ROOT / "value_generate.exe"
 DEFAULT_ARENA_BINARY = (_NATIVE_BINARY_ROOT / "neural_arena.exe"
                         if (_NATIVE_BINARY_ROOT / "neural_arena.exe").is_file()
                         else _PORTABLE_BINARY_ROOT / "neural_arena.exe")
+DEFAULT_POLICY_DIFF_BINARY = (_NATIVE_BINARY_ROOT / "policy_diff.exe"
+                              if (_NATIVE_BINARY_ROOT / "policy_diff.exe").is_file()
+                              else _PORTABLE_BINARY_ROOT / "policy_diff.exe")
 STATE_VERSION = 1
 TARGET_SCORE = 0.75
 TARGET_LOWER = 0.75
@@ -167,6 +174,11 @@ def _arena_summary(path: Path) -> dict[str, Any]:
         "score": float(arena.get("score", 0.5)),
         "pair_score": float(arena.get("pair_score", 0.5)),
         "pair_ci95": list(arena.get("pair_ci95", [0.5, 0.5])),
+        # Carried so a reader can tell a resolvable result from a coin flip
+        # without re-deriving the variance.  Older reports predate these keys.
+        "pair_sd": float(arena.get("pair_sd", 0.0)),
+        "pair_se": float(arena.get("pair_se", 0.0)),
+        "pairs_needed_for_0.03": int(arena.get("pairs_needed_for_0.03", 0)),
         "pairs": int(arena.get("pairs", 0)),
         "complete_pairs": int(arena.get("complete_pairs", 0)),
         "wins": int(arena.get("wins", 0)),
@@ -294,6 +306,14 @@ def _arena_command(
         str(args.model_weight),
         "--model-temperature",
         str(args.model_temperature),
+        "--leaf",
+        str(getattr(args, "search_leaf", "state-value")),
+        "--opponent-leaf",
+        str(getattr(args, "search_leaf", "state-value")),
+        "--determinization-period",
+        str(getattr(args, "search_determinization_period", 1)),
+        "--opponent-determinization-period",
+        str(getattr(args, "search_determinization_period", 1)),
     ]
     if arena_game_workers > 1:
         command.extend(["--game-workers", str(arena_game_workers)])
@@ -333,14 +353,25 @@ def _evaluation_profile(args: argparse.Namespace) -> dict[str, Any]:
                           getattr(args, "workers", 1)))
     game_workers = int(getattr(args, "proxy_game_workers",
                                getattr(args, "game_workers", 1)))
+    # The SEARCH regime belongs in the identity too, not just the budget. The
+    # incumbent and the frozen Expert are both searches, so changing the leaf or
+    # the determinization changes what every recorded score was measured
+    # AGAINST. This bit was missing on 2026-09-11 when the leaf was corrected
+    # from capture-progress-only to the full state-value port: a wash in
+    # strength, but not the same opponent, and nothing in the profile said so.
+    leaf = str(getattr(args, "search_leaf", "state-value"))
+    period = int(getattr(args, "search_determinization_period", 1))
+    regime = "coherent" if period == 0 else f"det{period}"
     return {
-        "id": f"proxy-{budget}-{main}-{followup}-w{workers}-g{game_workers}",
+        "id": f"proxy-{budget}-{main}-{followup}-w{workers}-g{game_workers}-{leaf}-{regime}",
         "kind": "fast-equal-time-proxy",
         "budget_ms": budget,
         "main_action_ms": main,
         "followup_ms": followup,
         "workers": workers,
         "game_workers": game_workers,
+        "leaf": leaf,
+        "determinization_period": period,
         "serving_check": {
             "budget_ms": int(getattr(args, "serving_budget_ms", DEFAULT_SERVING_BUDGET_MS)),
             "main_action_ms": int(getattr(args, "serving_main_action_ms", DEFAULT_SERVING_MAIN_ACTION_MS)),
@@ -492,6 +523,87 @@ def _confirmation_ladder(args: argparse.Namespace) -> tuple[int, ...]:
     return tuple(values)
 
 
+def _select_checkpoint(scan: list[dict[str, Any]], last: Path, *,
+                       margin: float) -> tuple[Path, dict[str, Any]]:
+    """Pick an epoch from a CRN-paired scan, or decline to pick.
+
+    Taking the argmax of a noisy scan is a winner's curse: the selected epoch's
+    score is biased upward by roughly ``E[max of k draws]``, which at an
+    eight-pair standard error is most of the way from 0.5 to the campaign's own
+    0.75 target.  The fix is not only more pairs (though the scan is now paired
+    on one deal set, which is what makes the comparison sensitive at all) but
+    admitting when the scan cannot separate its top two.  When the best epoch
+    does not beat the runner-up by ``margin``, the LAST epoch is used: it is the
+    deterministic no-information default and carries no selection bias.
+    """
+
+    if not scan:
+        return last.resolve(), {"kind": "last-epoch", "reason": "empty scan"}
+
+    def rank(item: dict[str, Any]) -> tuple[float, float, int]:
+        timed = item["timed"]
+        return (float(timed["pair_score"]),
+                float(timed.get("pair_ci95", [0.0])[0]),
+                int(item["epoch"]) if str(item["epoch"]).isdigit() else -1)
+
+    ordered = sorted(scan, key=rank, reverse=True)
+    best = ordered[0]
+    separation = float(best["timed"]["pair_score"]) - (
+        float(ordered[1]["timed"]["pair_score"]) if len(ordered) > 1 else 0.0)
+    resolvable = len(ordered) < 2 or separation >= margin
+    selection = {
+        "kind": "scan-argmax" if resolvable else "last-epoch",
+        "best_epoch": best["epoch"],
+        "best_score": float(best["timed"]["pair_score"]),
+        "runner_up_epoch": ordered[1]["epoch"] if len(ordered) > 1 else None,
+        "separation": separation,
+        "required_margin": margin,
+        "resolvable": resolvable,
+        "scan_pairs": int(best["timed"].get("complete_pairs", 0)),
+        "crn_paired": True,
+    }
+    if resolvable:
+        return Path(best["checkpoint"]), selection
+    selection["fell_back_to"] = str(last.resolve())
+    return last.resolve(), selection
+
+
+def _cheap_screens_justify_acceptance(fixed: dict[str, Any], timed: dict[str, Any] | None,
+                                      args: argparse.Namespace) -> bool:
+    """Gate the expensive head-to-head arena on the cheap screens.
+
+    The accept arena is the campaign's most expensive routine measurement, so a
+    learner that is visibly worse should not buy one.  The screens are only
+    allowed to VETO here; they never accept anything on their own, which is the
+    asymmetry the audit asked for.
+    """
+
+    if getattr(args, "always_accept_arena", False):
+        return True
+    if timed is not None:
+        return timed["pair_score"] >= args.accept_screen_floor
+    return fixed["pair_score"] >= args.timed_trigger
+
+
+def _accepted_head_to_head(summary: dict[str, Any] | None, *, lower: float) -> bool:
+    """Accept a candidate only on a resolvable head-to-head win.
+
+    The pre-2026-09-11 rule compared the candidate's score against the Expert
+    with the incumbent's score against the Expert, each measured on its own
+    eight-pair pool.  The difference of two such numbers has roughly sqrt(2)
+    times an already-useless standard error, so the ``best`` pointer performed a
+    random walk and in practice never moved.  Playing the two directly on shared
+    CRN deals removes the third party and most of the variance; requiring the
+    paired lower bound to clear ``lower`` removes the coin flip.
+    """
+
+    if summary is None:
+        return False
+    if summary["censored"] or summary["complete_pairs"] < summary["pairs"]:
+        return False
+    return float(summary["pair_ci95"][0]) > lower
+
+
 def _confirmation_stage_passed(summary: dict[str, Any], *, pairs: int,
                                final_pairs: int, stage_trigger: float) -> bool:
     """Decide whether a non-final confirmation rung is worth extending.
@@ -540,6 +652,8 @@ def _run_generation(args: argparse.Namespace, state_path: Path, state: dict[str,
             "--simulations", str(args.teacher_simulations), "--threads", str(args.threads),
             "--model-stride", str(args.model_stride), "--model-weight", str(args.model_weight),
             "--model-temperature", str(args.model_temperature),
+            "--leaf", str(args.search_leaf),
+            "--determinization-period", str(args.search_determinization_period),
             "--binary", str(_absolute(args.value_binary)),
         ], log_path=logs / "champion-anchor.log", label=f"{tag}-champion-anchor")
     if not (train_dir / "manifest.json").exists():
@@ -550,6 +664,8 @@ def _run_generation(args: argparse.Namespace, state_path: Path, state: dict[str,
             "--simulations", str(args.teacher_simulations), "--threads", str(args.threads),
             "--model-stride", str(args.model_stride), "--model-weight", str(args.model_weight),
             "--model-temperature", str(args.model_temperature),
+            "--leaf", str(args.search_leaf),
+            "--determinization-period", str(args.search_determinization_period),
             "--binary", str(_absolute(args.value_binary)),
         ]
         train_primary = str(getattr(args, "train_primary", "neural-0"))
@@ -566,6 +682,8 @@ def _run_generation(args: argparse.Namespace, state_path: Path, state: dict[str,
             "--simulations", str(args.teacher_simulations), "--threads", str(args.threads),
             "--model-stride", str(args.model_stride), "--model-weight", str(args.model_weight),
             "--model-temperature", str(args.model_temperature),
+            "--leaf", str(args.search_leaf),
+            "--determinization-period", str(args.search_determinization_period),
             "--binary", str(_absolute(args.value_binary)),
         ], log_path=logs / "development-data.log", label=f"{tag}-development-data")
 
@@ -575,6 +693,7 @@ def _run_generation(args: argparse.Namespace, state_path: Path, state: dict[str,
             str(train_dir), str(dev_dir), str(model_dir), "--epochs", str(args.epochs),
             "--device", args.device, "--resume", str(parent), "--allow-data-change",
             "--per-seat", str(args.per_seat), "--root-value-beta", str(args.root_value_beta),
+            "--batch-rows", str(args.batch_rows),
         ]
         if getattr(args, "fused_adam", False):
             command.append("--fused-adam")
@@ -602,11 +721,23 @@ def _run_generation(args: argparse.Namespace, state_path: Path, state: dict[str,
     if not checkpoint_candidates:
         raise FileNotFoundError(f"No epoch checkpoint in {model_dir}")
     scan_pairs = int(getattr(args, "checkpoint_scan_pairs", 0))
+    checkpoint_selection: dict[str, Any] = {"kind": "last-epoch"}
     if scan_pairs:
         _ensure_timed_baseline(args, state_path, state, root)
         scan_root = evaluation_root / "checkpoint-scan"
         scan_root.mkdir(parents=True, exist_ok=True)
-        for candidate in checkpoint_candidates:
+        # ONE pool for every epoch, so the scan is common-random-number PAIRED
+        # across checkpoints.  Before 2026-09-11 the pool name embedded the
+        # epoch, and `game_seed` hashes the pool name, so every epoch played a
+        # DIFFERENT deal set and the argmax below was over independent noise:
+        # max-of-eight at an eight-pair standard error returns ~0.66-0.75 from
+        # checkpoints of identical strength, which is precisely the
+        # g009/g010/g011 pattern.  Same deals means the epochs can actually be
+        # ranked against each other.
+        scan_pool = f"development-neural-league-{tag}-checkpoint-scan"
+        window = int(getattr(args, "checkpoint_scan_epochs", 0) or len(checkpoint_candidates))
+        scanned = checkpoint_candidates[-window:]
+        for candidate in scanned:
             epoch = candidate.stem.split("-", 1)[-1]
             scan_report = scan_root / f"epoch-{epoch}-timed.json"
             if not scan_report.exists():
@@ -616,7 +747,7 @@ def _run_generation(args: argparse.Namespace, state_path: Path, state: dict[str,
                         candidate,
                         scan_report,
                         pairs=scan_pairs,
-                        pool=f"development-neural-league-{tag}-checkpoint-{epoch}",
+                        pool=scan_pool,
                         timed=True,
                     ),
                     log_path=logs / "arena.log",
@@ -628,15 +759,8 @@ def _run_generation(args: argparse.Namespace, state_path: Path, state: dict[str,
                 "checkpoint": str(candidate.resolve()),
                 "timed": summary,
             })
-        selected = max(
-            checkpoint_scan,
-            key=lambda item: (
-                float(item["timed"]["pair_score"]),
-                float(item["timed"].get("pair_ci95", [0.0])[0]),
-                int(item["epoch"]) if str(item["epoch"]).isdigit() else -1,
-            ),
-        )
-        checkpoint = Path(selected["checkpoint"])
+        checkpoint, checkpoint_selection = _select_checkpoint(
+            checkpoint_scan, scanned[-1], margin=args.checkpoint_scan_margin)
     else:
         checkpoint = checkpoint_candidates[-1].resolve()
 
@@ -696,25 +820,53 @@ def _run_generation(args: argparse.Namespace, state_path: Path, state: dict[str,
             )
         timed = _arena_summary(timed_report)
 
+    # THE ACCUMULATION GATE.  The candidate plays the incumbent directly on
+    # shared CRN deals at the serving-shaped proxy, and is accepted only when
+    # the paired lower bound clears `--accept-lower`.  This is a different
+    # decision from the release gate (`TARGET_SCORE` versus the frozen Expert),
+    # and keeping them separate is the point: holding every generation to 0.75
+    # is why twelve of them all fine-tuned the same parent.  The cheap fixed
+    # screen still gates whether this expensive arena runs at all.
+    # Before buying the arena, ask whether there is anything in it to see. Two
+    # checkpoints that play the same moves produce the same games, and no width
+    # separates them; this costs seconds against the arena's hour.
+    policy_diff = None
+    if args.agreement_games and checkpoint.resolve() != parent.resolve():
+        diff_report = evaluation_root / "candidate-vs-incumbent-agreement.json"
+        if not diff_report.exists():
+            _run(
+                [sys.executable, "-m", "games.orbit.tools.policy_diff",
+                 str(parent), str(checkpoint),
+                 "--games", str(args.agreement_games),
+                 "--simulations", str(args.screen_simulations),
+                 "--agreement-ceiling", str(args.agreement_ceiling),
+                 "--binary", str(_absolute(args.policy_diff_binary)),
+                 "--output", str(diff_report)],
+                log_path=logs / "arena.log", label=f"{tag}-agreement",
+            )
+        policy_diff = _read_json(diff_report)
+
+    head_to_head = None
+    if (policy_diff is None or policy_diff.get("worth_an_arena", True)) \
+            and _cheap_screens_justify_acceptance(fixed, timed, args):
+        accept_report = evaluation_root / "candidate-vs-incumbent-timed.json"
+        if not accept_report.exists():
+            _run(
+                _arena_command(args, checkpoint, accept_report, pairs=args.accept_pairs,
+                               pool=f"development-neural-league-{tag}-accept", timed=True,
+                               opponent=parent),
+                log_path=logs / "arena.log", label=f"{tag}-accept",
+            )
+        head_to_head = _arena_summary(accept_report)
+
     state["champion_anchors"].append(str(champion_anchor_dir.resolve()))
     state["training_sources"].append(str(train_dir.resolve()))
-    if timed is not None:
-        selection = timed["pair_score"]
-        baseline = _baseline_profile(state, args)
-        incumbent_timed = state["best"].get("timed_score")
-        if state["best"].get("evaluation_id") != profile_id:
-            incumbent_timed = None
-        best_selection = float(incumbent_timed if incumbent_timed is not None
-                               else baseline["timed"]["pair_score"])
-        selection_kind = "timed"
-    else:
-        selection = fixed["pair_score"]
-        incumbent_fixed = state["best"].get("fixed_score")
-        if state["best"].get("evaluation_id") != profile_id:
-            incumbent_fixed = None
-        best_selection = float(incumbent_fixed if incumbent_fixed is not None else 0.5)
-        selection_kind = "fixed"
-    accepted = selection > best_selection and peer["pair_score"] >= args.peer_floor
+    selection = (head_to_head or timed or fixed)["pair_score"]
+    selection_kind = ("head-to-head" if head_to_head is not None
+                      else "timed" if timed is not None else "fixed")
+    best_selection = args.accept_lower
+    accepted = (_accepted_head_to_head(head_to_head, lower=args.accept_lower)
+                and peer["pair_score"] >= args.peer_floor)
     if accepted:
         state["best"] = {
             "checkpoint": str(checkpoint),
@@ -739,12 +891,25 @@ def _run_generation(args: argparse.Namespace, state_path: Path, state: dict[str,
         "mirror": mirror,
         "near_peer": peer,
         "timed": timed,
+        "head_to_head": head_to_head,
+        "policy_diff": policy_diff,
+        "checkpoint_selection": checkpoint_selection,
         "evaluation": _evaluation_profile(args),
         "evaluation_id": profile_id,
-        "selection": {"kind": selection_kind, "score": selection, "best_before": best_selection,
-                       "near_peer_floor": args.peer_floor},
+        "selection": {"kind": selection_kind, "score": selection,
+                      "accept_lower": best_selection,
+                      "near_peer_floor": args.peer_floor},
         "accepted_as_best": accepted,
-        "target": {"score": TARGET_SCORE, "paired_lower_ci95": TARGET_LOWER},
+        # The two bars are different decisions and are recorded as such: the
+        # accumulation bar moves the incumbent, the release bar swaps the
+        # serving tiers.  See AI_PLAN.md "The target is split into two numbers".
+        "bars": {
+            "accumulation": {"kind": "head-to-head vs incumbent",
+                             "pairs": args.accept_pairs,
+                             "paired_lower_ci95": args.accept_lower},
+            "release": {"kind": "vs frozen current Expert",
+                        "score": TARGET_SCORE, "paired_lower_ci95": TARGET_LOWER},
+        },
     }
     state["generations"].append(record)
     # Keep the state useful even when a later command is interrupted.  The
@@ -917,7 +1082,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", type=Path, default=Path(".orbit-neural-league"))
+    parser.add_argument("--root", type=Path, default=ORBIT_RUNS / "neural-league")
     parser.add_argument("--parent", type=Path, default=DEFAULT_PARENT)
     parser.add_argument("--anchor-data", type=Path, default=DEFAULT_ANCHOR)
     parser.add_argument("--value-binary", type=Path, default=DEFAULT_VALUE_BINARY)
@@ -969,10 +1134,34 @@ def main() -> None:
                         help="Minimum point score for the rare serving-shaped compatibility check")
     parser.add_argument("--screen-pairs", type=int, default=16)
     parser.add_argument("--timed-pairs", type=int, default=8)
-    parser.add_argument("--checkpoint-scan-pairs", type=int, default=8,
-                        help="Fast timed pairs per epoch checkpoint; zero disables checkpoint selection")
+    parser.add_argument("--checkpoint-scan-pairs", type=int, default=32,
+                        help="Timed pairs per epoch checkpoint on ONE shared CRN pool; "
+                             "zero disables checkpoint selection. Eight was the pre-audit "
+                             "default and could not separate any two epochs")
+    parser.add_argument("--checkpoint-scan-epochs", type=int, default=3,
+                        help="Scan only the newest N epoch checkpoints; zero scans all")
+    parser.add_argument("--checkpoint-scan-margin", type=float, default=0.08,
+                        help="Paired margin the best epoch must beat the runner-up by; "
+                             "below it the scan declines to pick and the last epoch is used")
     parser.add_argument("--mirror-pairs", type=int, default=8)
     parser.add_argument("--peer-pairs", type=int, default=8)
+    parser.add_argument("--accept-pairs", type=int, default=128,
+                        help="Head-to-head candidate-vs-incumbent pairs; this is the "
+                             "accumulation bar that moves the incumbent")
+    parser.add_argument("--accept-lower", type=float, default=0.50,
+                        help="Paired 95%% lower bound the head-to-head must clear to accept")
+    parser.add_argument("--accept-screen-floor", type=float, default=0.45,
+                        help="Timed screen floor below which the head-to-head is not bought")
+    parser.add_argument("--always-accept-arena", action="store_true",
+                        help="Always buy the head-to-head arena (slow diagnostic mode)")
+    parser.add_argument("--agreement-games", type=int, default=8,
+                        help="Self-play games for the candidate-vs-incumbent move-agreement "
+                             "pre-check; zero disables it")
+    parser.add_argument("--agreement-ceiling", type=float, default=97.0,
+                        help="Agreement percentage above which the candidate is treated as "
+                             "a no-op and no arena is bought")
+    parser.add_argument("--policy-diff-binary", type=Path,
+                        default=DEFAULT_POLICY_DIFF_BINARY)
     parser.add_argument("--confirm-pairs", type=int, default=512)
     parser.add_argument("--confirm-ladder", default="32,128,512",
                         help="Fresh timed confirmation rungs, ending at --confirm-pairs")
@@ -990,7 +1179,19 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=2)
     parser.add_argument("--fused-adam", action="store_true",
                         help="Use fused FP32 AdamW; requires a separate strength A/B before campaign adoption")
+    parser.add_argument("--search-leaf", choices=("state-value", "capture-progress-only"),
+                        default="state-value",
+                        help="Leaf evaluator for BOTH seats of every arena and for the "
+                             "teacher; part of the evaluation profile id")
+    parser.add_argument("--search-determinization-period", type=int, default=1,
+                        help="Simulations per determinization for every arena and the "
+                             "teacher; 0 is coherent. Part of the evaluation profile id, "
+                             "because it changes what a score was measured against")
     parser.add_argument("--per-seat", type=int, default=8)
+    parser.add_argument("--batch-rows", type=int, default=256,
+                        help="Rows per optimizer update, shuffled across games. Zero is the "
+                             "historical one-update-per-game behaviour, whose every batch was "
+                             "a single game's sixteen perfectly correlated rows")
     parser.add_argument("--root-value-beta", type=float, default=0.25,
                         help="Blend searched root values into new rows (0 keeps outcome-only control)")
     parser.add_argument("--history-window", type=int, default=4)
@@ -1000,12 +1201,23 @@ def main() -> None:
         args.screen_game_workers = _default_proxy_game_workers(args.screen_workers)
     if args.proxy_game_workers is None:
         args.proxy_game_workers = _default_proxy_game_workers(args.proxy_workers)
-    for name in ("screen_pairs", "timed_pairs", "mirror_pairs", "peer_pairs", "confirm_pairs"):
+    for name in ("screen_pairs", "timed_pairs", "mirror_pairs", "peer_pairs", "confirm_pairs",
+                 "accept_pairs"):
         value = int(getattr(args, name))
         if value < 8 or value % 8:
             parser.error(f"--{name.replace('_', '-')} must be a positive multiple of eight")
     if args.checkpoint_scan_pairs < 0 or args.checkpoint_scan_pairs % 8:
         parser.error("--checkpoint-scan-pairs must be zero or a multiple of eight")
+    if args.search_determinization_period < 0:
+        parser.error("--search-determinization-period must be zero or positive")
+    if args.checkpoint_scan_epochs < 0:
+        parser.error("--checkpoint-scan-epochs must be zero or positive")
+    if not 0.0 <= args.checkpoint_scan_margin <= 1.0:
+        parser.error("--checkpoint-scan-margin must be between 0 and 1")
+    if not 0.5 <= args.accept_lower < 1.0:
+        parser.error("--accept-lower must be at least 0.5 and below 1")
+    if not 0.0 <= args.accept_screen_floor <= 1.0:
+        parser.error("--accept-screen-floor must be between 0 and 1")
     try:
         args.confirm_ladder = _confirmation_ladder(args)
     except (TypeError, ValueError) as error:

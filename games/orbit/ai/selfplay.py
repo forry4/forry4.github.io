@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import copy
 import json
+import math
 import random
 import statistics
 from typing import Iterable, Sequence
@@ -326,8 +327,28 @@ class ArenaResult:
         means.sort()
         return means[int(0.025 * (len(means) - 1))], means[int(0.975 * (len(means) - 1))]
 
+    @property
+    def pair_sd(self) -> float:
+        """Standard deviation of the complete pair scores.
+
+        This is the number that sizes every future screen, so it is recorded
+        with the result rather than re-derived later.  The 2026-09-11 audit
+        measured ~0.31 between near-peer Orbit bots, which makes an eight-pair
+        screen +/-0.21 and puts a +0.03 effect ~400 pairs away.  A report that
+        does not carry its own variance invites exactly the argmax-over-noise
+        selection that stalled the first twelve league generations.
+        """
+        return statistics.stdev(self.pair_scores) if len(self.pair_scores) > 1 else 0.0
+
+    def pairs_needed(self, effect: float) -> int:
+        """Complete pairs needed to resolve ``effect`` at 95% on this variance."""
+        if effect <= 0 or self.pair_sd <= 0:
+            return 0
+        return math.ceil((1.96 * self.pair_sd / effect) ** 2)
+
     def as_dict(self) -> dict:
         low, high = self.bootstrap_ci()
+        complete = len(self.pair_scores)
         return {
             "schema": self.schema,
             "rules": self.rules,
@@ -344,6 +365,10 @@ class ArenaResult:
             "score": self.score,
             "pair_score": self.pair_score,
             "pair_ci95": [low, high],
+            "pair_sd": self.pair_sd,
+            "pair_se": self.pair_sd / math.sqrt(complete) if complete else 0.0,
+            "pairs_needed_for_0.03": self.pairs_needed(0.03),
+            "pairs_needed_for_0.05": self.pairs_needed(0.05),
             "by_board": copy.deepcopy(self.by_board),
             "balanced_boards": bool(self.settings.get("balanced_boards", False)),
             "settings": copy.deepcopy(self.settings),

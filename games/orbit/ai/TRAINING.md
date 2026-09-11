@@ -7,8 +7,8 @@ PyTorch. Tested locally with PyTorch 2.11.0+cu128, CUDA and NumPy 2.4.6.
 From the repository root, using the existing training virtual environment:
 
 ```powershell
-.venv/Scripts/python.exe -m pytest games/orbit/ai/tests -q -n 0 -p no:cacheprovider --basetemp=.pytest-attention-new-run
-.venv/Scripts/python.exe -m games.orbit.tools.attention_smoke --output .orbit-attention-new-run --steps 8
+.venv/Scripts/python.exe -m pytest games/orbit/ai/tests -q -n 0 -p no:cacheprovider --basetemp=games/orbit/ai/runs/pytest-attention-new-run
+.venv/Scripts/python.exe -m games.orbit.tools.attention_smoke --output games/orbit/ai/runs/attention-new-run --steps 8
 ```
 
 Use a new output directory each time; the smoke command refuses to overwrite one.
@@ -129,9 +129,51 @@ browser/WASM build is untouched:
 ```powershell
 $env:RUSTFLAGS='-C target-cpu=native'
 C:/Users/Forrest/.cargo/bin/cargo.exe build --release --locked --features chunked-dot `
-  --manifest-path rust-cores/orbit-core/Cargo.toml --target-dir .orbit-target-native `
-  --bin neural_arena --bin value_generate
+  --manifest-path rust-cores/orbit-core/Cargo.toml --target-dir games/orbit/ai/runs/target-native `
+  --bin neural_arena --bin value_generate --bin bridge --bin policy_diff
 ```
+
+⚠ **Rebuild `games/orbit/ai/runs/target-native` after ANY change to `rust-cores/orbit-core`,
+and rebuild ALL FOUR binaries.** Every campaign tool prefers that directory when
+it exists, so a stale copy silently runs the old search while the portable build
+runs the new one. The failure is not an error: it is an arena that reads exactly
+0.5000 with zero variance, because both arms are the same old code. That
+signature — a perfect 0.5 where the two arms should differ — means a stale
+binary, not a null result. It cost two wasted runs on 2026-09-11.
+
+## Leaf parity (Python reference vs Rust port)
+
+```powershell
+python -m games.orbit.tools.leaf_parity --games 8
+```
+
+Walks real games and compares `rust-cores/orbit-core/src/search.rs::state_value`
+against `games/orbit/ai/search.py::state_value` position by position; 2,728
+positions currently match at a maximum absolute delta of **0.0**. This harness
+exists because the original Rust port silently kept only the FIRST TERM of the
+reference — capture progress, without the 1.4 weight or any of the influence,
+technology, leader, bonus, economy or hand terms — and a leaf that drops terms
+still returns a plausible number. Deliberately uses the PORTABLE build, since it
+is checking the arithmetic that ships rather than a `target-cpu=native
+--features chunked-dot` binary built to reassociate float reductions.
+
+`games/orbit/tests/test_ai_leaf.py` pins the Python reference's sensitivity to
+each term in CI, where no Rust binary exists.
+
+## Is there anything to measure? (`policy_diff`)
+
+```powershell
+python -m games.orbit.tools.policy_diff <incumbent.pt> <candidate.pt> --games 8 --simulations 32
+```
+
+Reports how often two checkpoints choose a different move on a self-play
+trajectory, in seconds rather than the hours an arena costs. Above
+`--agreement-ceiling` (97%) the candidate is a no-op and the league skips its
+arena. Use the SELF-PLAY number: against a random opponent the same pair of
+checkpoints reads 77.9% agreement, because a random opponent manufactures
+positions where most moves are obvious; in self-play — the distribution an arena
+actually samples — they read 63.4%. The identity control (a checkpoint against
+itself) must read exactly 100.0%.
 
 ## Resumable Expert league
 
@@ -147,7 +189,7 @@ The native-v2 corpus remains a foundation anchor:
 .venv/Scripts/python.exe -m games.orbit.tools.neural_league --iterations 1
 ```
 
-The state and logs are written under `.orbit-neural-league/`. Re-running the
+The state and logs are written under `games/orbit/ai/runs/neural-league/`. Re-running the
 command resumes after completed generations; interrupted native datasets retain
 verified shards and regenerate only missing jobs. Every parent and candidate first
 passes a same-checkpoint mirror (a cheap 24-simulation exact control by default)
@@ -189,9 +231,9 @@ starting a long campaign, calibrate the proxy on identical paired deals:
 
 ```powershell
 .venv/Scripts/python.exe -m games.orbit.tools.arena_calibrate `
-  .orbit-calibration `
-  .orbit-value-fit-indexed-v3/epoch-004.pt `
-  .orbit-neural-league-v2/g003/model/epoch-006.pt `
+  games/orbit/ai/runs/calibration `
+  games/orbit/ai/runs/value-fit-indexed-v3/epoch-004.pt `
+  games/orbit/ai/runs/neural-league-v2/g003/model/epoch-006.pt `
   --pairs 8 --budgets 250,500,1000 --workers 1,4,8,11 --game-workers auto
 ```
 

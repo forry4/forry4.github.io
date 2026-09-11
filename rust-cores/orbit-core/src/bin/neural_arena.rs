@@ -1,5 +1,5 @@
 //! Development arena for native search versus frozen Hard v2. Not a ship gate.
-use orbit_core::{attention::Model, search::Config, State};
+use orbit_core::{attention::Model, search::Config, search::Controls, search::Leaf, State};
 use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
 /// Run `pool` independent trees on one decision and sum their root visits.
@@ -16,37 +16,17 @@ fn choose_pooled(
     config: Config,
     model: Option<&Model>,
     pool: usize,
-    model_stride: usize,
-    model_weight: f64,
-    model_temperature: f64,
+    controls: Controls,
 ) -> Result<Value, String> {
     if pool <= 1 {
-        return orbit_core::search::choose_with_controls(
-            state,
-            seat,
-            seed,
-            config,
-            model,
-            model_stride,
-            model_weight,
-            model_temperature,
-        );
+        return orbit_core::search::choose_with(state, seat, seed, config, model, controls);
     }
     let trees: Vec<Result<Value, String>> = std::thread::scope(|scope| {
         let handles: Vec<_> = (0..pool)
             .map(|k| {
                 let seed = seed.wrapping_add((k as u64).wrapping_mul(0x9E3779B97F4A7C15));
                 scope.spawn(move || {
-                    orbit_core::search::choose_with_controls(
-                        state,
-                        seat,
-                        seed,
-                        config,
-                        model,
-                        model_stride,
-                        model_weight,
-                        model_temperature,
-                    )
+                    orbit_core::search::choose_with(state, seat, seed, config, model, controls)
                 })
             })
             .collect();
@@ -156,6 +136,33 @@ fn main() {
         .and_then(Value::as_f64)
         .unwrap_or(2.0)
         .max(0.1);
+    // Per-seat leaf evaluator. The default on both sides is the full
+    // state-value port; `capture-progress-only` is the pre-2026-09-11 Rust leaf
+    // and exists so the port could be A/B'd against what it replaced on
+    // identical CRN deals.
+    let parse_leaf = |key: &str| match request.get(key).and_then(Value::as_str) {
+        None | Some("state-value") => Leaf::StateValue,
+        Some("capture-progress-only") => Leaf::CaptureProgressOnly,
+        Some(other) => panic!("unknown leaf {other}"),
+    };
+    let leaf = parse_leaf("leaf");
+    let opponent_leaf = parse_leaf("opponent_leaf");
+    // Simulations sharing one determinization. 1 is the historical per-simulation
+    // resampling; 0 means "one coherent world for the whole call".
+    let parse_period = |key: &str| match request.get(key).and_then(Value::as_u64) {
+        None | Some(1) => 1usize,
+        Some(0) => usize::MAX,
+        Some(n) => n as usize,
+    };
+    let determinization_period = parse_period("determinization_period");
+    let opponent_determinization_period = parse_period("opponent_determinization_period");
+    let controls_for = |seat_leaf: Leaf, period: usize| Controls {
+        model_stride,
+        model_weight,
+        model_temperature,
+        leaf: seat_leaf,
+        determinization_period: period,
+    };
     // Drive the candidate through the browser's own boundary: rebuild the world
     // from the seat's observation instead of searching the privileged state, and
     // fall back to the ranker wherever that reconstruction is refused. This is
@@ -236,6 +243,11 @@ fn main() {
                         acted = [0; 2];
                     }
                     let legal = state.legal_moves(seat);
+                    let seat_controls = if seat == candidate {
+                        controls_for(leaf, determinization_period)
+                    } else {
+                        controls_for(opponent_leaf, opponent_determinization_period)
+                    };
                     let evaluator = if seat == candidate {
                         model
                     } else if opponent_expert {
@@ -287,15 +299,13 @@ fn main() {
                         };
                         let actor_pool = if observation_search { pool } else { 1 };
                         match if actor_pool <= 1 {
-                            orbit_core::search::choose_with_controls(
+                            orbit_core::search::choose_with(
                                 source,
                                 seat,
                                 seed.wrapping_add(decisions),
                                 config,
                                 evaluator,
-                                model_stride,
-                                model_weight,
-                                model_temperature,
+                                seat_controls,
                             )
                         } else {
                             choose_pooled(
@@ -305,9 +315,7 @@ fn main() {
                                 config,
                                 evaluator,
                                 actor_pool,
-                                model_stride,
-                                model_weight,
-                                model_temperature,
+                                seat_controls,
                             )
                         } {
                             Ok(result) => {

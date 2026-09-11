@@ -25,10 +25,26 @@ def main():
     p.add_argument("--model-stride",type=int,default=1)
     p.add_argument("--model-weight",type=float,default=1.0)
     p.add_argument("--model-temperature",type=float,default=2.0)
+    # Opening plies whose PLAYED move is sampled from root visit counts. Zero is
+    # the historical deterministic argmax teacher, which gave the value network
+    # no counterfactual coverage of the moves its own policy declined.
+    p.add_argument("--sample-plies",type=int,default=0,
+                   help="Opening decisions whose played move is sampled from root visits")
+    p.add_argument("--sample-temperature",type=float,default=1.0,
+                   help="Visit-count temperature; 1.0 samples proportional to visits")
+    # A policy head cannot be trained without a policy target, and the campaign
+    # has never recorded one. Off by default because it grows every shard.
+    p.add_argument("--record-policy",action="store_true",
+                   help="Record the root visit distribution on searched actor rows")
+    leaves=("state-value","capture-progress-only")
+    p.add_argument("--leaf",choices=leaves,default="state-value",
+                   help="Teacher search leaf evaluator")
+    p.add_argument("--determinization-period",type=int,default=1,
+                   help="Teacher simulations per determinization; 0 = coherent")
     p.add_argument("--threads",type=int,default=max(1,min((os.cpu_count() or 1)-1,16)))
     repo_root=Path(__file__).resolve().parents[3]
     portable_binary=repo_root/"rust-cores/orbit-core/target/release/value_generate.exe"
-    native_binary=repo_root/".orbit-target-native/release/value_generate.exe"
+    native_binary=repo_root/"games/orbit/ai/runs/target-native/release/value_generate.exe"
     p.add_argument("--binary",type=Path,default=native_binary if native_binary.is_file() else portable_binary)
     args=p.parse_args()
     if not (args.namespace.startswith("train-") or args.namespace.startswith("development-")):
@@ -55,6 +71,9 @@ def main():
         p.error("--primary must be expert, hard-v2, exploratory-v2, random, racer, developer, denier, or neural-N")
     if not 1<=args.simulations<=10000:p.error("simulations must be 1..10000")
     if args.model_stride<1:p.error("model-stride must be positive")
+    if args.sample_plies<0:p.error("sample-plies must be zero or positive")
+    if args.determinization_period<0:p.error("determinization-period must be zero or positive")
+    if args.sample_temperature<=0:p.error("sample-temperature must be positive")
     if not 0.0<=args.model_weight<=1.0:p.error("model-weight must be between 0 and 1")
     if args.model_temperature<=0:p.error("model-temperature must be positive")
     models=[];teachers=[]
@@ -115,6 +134,9 @@ def main():
     if search_pool:
         manifest.update({"simulations":args.simulations,"model_stride":args.model_stride,"model_weight":args.model_weight,
                          "model_temperature":args.model_temperature,
+                         "sample_plies":args.sample_plies,"sample_temperature":args.sample_temperature,
+                         "record_policy":args.record_policy,"leaf":args.leaf,
+                         "determinization_period":args.determinization_period,
                          "belief":"current-observation prior","search_opponent":"mixed",
                          "search_opponents":families,
                          "purpose":"bounded observation-only search teacher; improvement operator unproven",
@@ -128,7 +150,12 @@ def main():
         try:
             process.stdin.write(json.dumps({"jobs":pending_jobs,"threads":args.threads,"models":models,
                                             "simulations":args.simulations,"model_stride":args.model_stride,
-                                            "model_weight":args.model_weight,"model_temperature":args.model_temperature})+"\n");process.stdin.close()
+                                            "model_weight":args.model_weight,"model_temperature":args.model_temperature,
+                                            "sample_plies":args.sample_plies,
+                                            "sample_temperature":args.sample_temperature,
+                                            "record_policy":args.record_policy,
+                                            "leaf":args.leaf,
+                                            "determinization_period":args.determinization_period})+"\n");process.stdin.close()
             for line in process.stdout:
                 result=json.loads(line)
                 if "error" in result:raise RuntimeError(result["error"])
