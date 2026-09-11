@@ -130,6 +130,15 @@ const AI_TIERS = { H2: "easy", H3: "medium", S: "hard", N: "expert" };
 // from this, and it is what a remembered last-played variant is validated
 // against (a retired code must not restore as a live selection).
 const AI_VARIANTS = ["H2", "H3", "S", "N"];
+// The offline hub offers a SUBSET — only the tiers whose search runs in the
+// browser can play with no server. Both lists are ordered EASIEST FIRST, so
+// `[0]` is what a player who has never played this game vs the AI is given.
+const OFFLINE_AI_VARIANTS = ["S", "N"];
+const OFFLINE_CLIENT_TIERS = [
+	{ value: "hard", label: "Hard" },
+	{ value: "expert", label: "Expert" },
+];
+const OFFLINE_CLIENT_TIER_IDS = OFFLINE_CLIENT_TIERS.map((t) => t.value);
 const aiPersona = (v) => AI_PERSONAS[v] || `AI ${v}`;         // variant code -> persona name (retired codes -> "AI <code>")
 const aiTierLabel = (v) => (AI_TIERS[v] || "").replace(/^./, (c) => c.toUpperCase());  // "expert" -> "Expert"
 const displayName = (name) => {                                // backend "AI (H2)" -> "Henry (AI)"; humans unchanged
@@ -792,12 +801,22 @@ export default function SpenderApp() {
 	const [offlineRecord, setOfflineRecord] = useState(null);   // the saved-game record (offline.js shape)
 	const [offlineGames, setOfflineGames] = useState(null);     // hub list (null = loading)
 	const [offlineGameSel, setOfflineGameSel] = useState("spender"); // hub New Game: which game
-	const [offlineVariant, setOfflineVariant] = useState("N");  // Spender tier — only the
-	const [offlineWin, setOfflineWin] = useState(15);           //   client-WASM tiers exist offline
-	const [offlineCocTier, setOfflineCocTier] = useState("expert"); // CoC tier (hard|expert)
+	// The offline hub's tiers remember under the SAME per-game namespace as each
+	// game's own create modal: it is one question ("how hard do you like this
+	// game?"), asked on two screens, and a player who has been playing CoC at
+	// Expert online should not be handed the bottom rung the first time they go
+	// offline. The offered list is the narrower one here, so an online-only tier
+	// (Easy, which has no browser search) falls back rather than restoring a
+	// selection this hub cannot start.
+	const [offlineVariant, setOfflineVariant, rememberOfflineVariant] =
+		useLastDifficulty("spender", myId, OFFLINE_AI_VARIANTS, OFFLINE_AI_VARIANTS[0]);
+	const [offlineWin, setOfflineWin] = useState(15);
+	const [offlineCocTier, setOfflineCocTier, rememberOfflineCocTier] =
+		useLastDifficulty("coc", myId, OFFLINE_CLIENT_TIER_IDS, OFFLINE_CLIENT_TIER_IDS[0]);
 	const [offlineCocMyBoard, setOfflineCocMyBoard] = useState("1");  // CoC board picks
 	const [offlineCocOppBoard, setOfflineCocOppBoard] = useState("1");
-	const [offlineDuelTier, setOfflineDuelTier] = useState("expert"); // Duel tier (hard|expert)
+	const [offlineDuelTier, setOfflineDuelTier, rememberOfflineDuelTier] =
+		useLastDifficulty("duel", myId, OFFLINE_CLIENT_TIER_IDS, OFFLINE_CLIENT_TIER_IDS[0]);
 	// A CoC/Duel offline game in play: the shell mounts that game's component with this
 	// record (they own their whole screen, unlike Spender whose game screen lives here).
 	const [offlinePlay, setOfflinePlay] = useState(null);
@@ -909,9 +928,11 @@ export default function SpenderApp() {
 	const [showCreateModal, setShowCreateModal] = useState(false);  // the New Game options modal
 	const [createOpp, setCreateOpp] = useState("ai");        // "friend" | "ai"
 	// AI difficulty (wire code) — defaults to the last variant this player
-	// actually started a game against, falling back to Nina for a first game.
+	// actually started a game against, falling back to the EASIEST (Henry) for a
+	// first game: a player with no history has told us nothing, and meeting Nina
+	// first is how a new player concludes the game is unwinnable.
 	const [createVariant, setCreateVariant, rememberVariant] =
-		useLastDifficulty("spender", myId, AI_VARIANTS, "N");
+		useLastDifficulty("spender", myId, AI_VARIANTS, AI_VARIANTS[0]);
 	const [createSeats, setCreateSeats] = useState(2);       // friend-lobby seat cap (2-4)
 	const [showRules, setShowRules] = useState(false);  // lobby "How to Play" modal
 	const [winPoints, setWinPoints] = useState(15);   // 15 = Classic, 21 = Long mode
@@ -2141,6 +2162,7 @@ export default function SpenderApp() {
 	const createAndEnterOffline = async () => {
 		try {
 			if (offlineGameSel === "coc") {
+				rememberOfflineCocTier(offlineCocTier);
 				const rec = await createOfflineCocGame({
 					myBoard: offlineCocMyBoard, oppBoard: offlineCocOppBoard, tier: offlineCocTier,
 				});
@@ -2149,6 +2171,7 @@ export default function SpenderApp() {
 				return;
 			}
 			if (offlineGameSel === "duel") {
+				rememberOfflineDuelTier(offlineDuelTier);
 				const rec = await createOfflineDuelGame({ tier: offlineDuelTier });
 				pushPath(buildPath("offline", rec.id));
 				await enterOfflineRecord(rec);
@@ -2160,6 +2183,7 @@ export default function SpenderApp() {
 				await enterOfflineRecord(rec);
 				return;
 			}
+			rememberOfflineVariant(offlineVariant);
 			const rec = await createOfflineGame({ aiVariant: offlineVariant, winPoints: offlineWin });
 			pushPath(buildPath("offline", rec.id));
 			await enterOfflineGame(rec);
@@ -2995,16 +3019,14 @@ export default function SpenderApp() {
 						</CmRow>
 						{offlineGameSel === "duel" && (
 							<CmRow label="Difficulty">
-								<CmSeg value={offlineDuelTier} onChange={setOfflineDuelTier} options={[
-									{ value: "hard", label: "Hard" }, { value: "expert", label: "Expert" },
-								]} />
+								<CmSeg value={offlineDuelTier} onChange={setOfflineDuelTier} options={OFFLINE_CLIENT_TIERS} />
 								<span className="cm-hint">The client-WASM tiers — the same nets that play online.</span>
 							</CmRow>
 						)}
 						{offlineGameSel === "spender" && (<>
 							<CmRow label="Opponent">
 								<div className="cm-pills">
-									{["S", "N"].map(v => (
+									{OFFLINE_AI_VARIANTS.map(v => (
 										<button key={v} type="button" className={`cm-pill${offlineVariant === v ? " sel" : ""}`}
 											onClick={() => setOfflineVariant(v)}>
 											<span className="cm-pill-name">{aiPersona(v)}</span>
@@ -3022,9 +3044,7 @@ export default function SpenderApp() {
 						</>)}
 						{offlineGameSel === "coc" && (<>
 							<CmRow label="Difficulty">
-								<CmSeg value={offlineCocTier} onChange={setOfflineCocTier} options={[
-									{ value: "hard", label: "Hard" }, { value: "expert", label: "Expert" },
-								]} />
+								<CmSeg value={offlineCocTier} onChange={setOfflineCocTier} options={OFFLINE_CLIENT_TIERS} />
 								<span className="cm-hint">The client-WASM tiers — the same nets that play online.</span>
 							</CmRow>
 							<CmRow label="Your Board">

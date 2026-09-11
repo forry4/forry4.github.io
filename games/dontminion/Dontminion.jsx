@@ -986,12 +986,12 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createOpp, setCreateOpp] = useState("ai");
   const [createBots, setCreateBots] = useState(1);
-  // The bot style this player last actually played. Big Money+ until they have
-  // one: the strongest tier that still answers instantly, and the one that
-  // plays a recognisable game of Dominion (it reads the board for a terminal
-  // and knows how the game ends).
+  // The bot style this player last actually played, the EASIEST (Random) until
+  // they have one. Money+ is the tier that plays a recognisable game of
+  // Dominion, so it is the one most players will settle on — but they get there
+  // by picking it, not by meeting it before they know the rules.
   const [createBotKind, setCreateBotKind, rememberBotKind] =
-    useLastDifficulty("dontminion", myId, BOT_IDS, "bmplus");
+    useLastDifficulty("dontminion", myId, BOT_IDS, BOT_IDS[0]);
   // Kingdom requirements — none by default, so a plain Create still deals the
   // fully random 10 the game has always dealt.
   const [createReqs, setCreateReqs] = useState([]);

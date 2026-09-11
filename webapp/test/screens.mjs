@@ -873,6 +873,12 @@ try {
 		check("Spender lobby reachable by URL", await has(".lby-create-row"));
 
 		// New Game -> the modal defaults to a vs-AI opponent, so accept and create.
+		// The tier it accepts is Henry, the easiest: a first-time player's default.
+		// It used to be Nina, which armed a four-worker WASM pool in LANE B — the
+		// lane that is meant to hold the blocks that arm none. Henry is a
+		// server-side heuristic, so this block now takes no workers; Spender's
+		// client search is covered by `offlineSpender`, in lane A, which asks for
+		// Steve by name rather than inheriting whatever the default happens to be.
 		await page.locator(".lby-cta").click({ timeout: 15_000 }).catch(() => {});
 		check("the create-game modal opens", await has(".cm-panel"));
 		await page.locator(".cm-create").click({ timeout: 15_000 }).catch(() => {});
@@ -1177,9 +1183,12 @@ try {
 				`list=${p.listScrolls} panel=${p.panelScrolls} of ${p.total}`);
 
 			// The bot tier is the one create option that changes who you PLAY —
-			// it must be pickable, and must default to the bot that plays a real
-			// game (main.py coerces an unknown tier away silently, so a typo'd
-			// id here would look fine and quietly seat the random bot).
+			// it must be pickable, and it must default to the EASIEST bot for a
+			// player with no history here. The `sel.length === 1` half is what
+			// the old "defaults to the strongest" check was really buying: an id
+			// the picker does not offer lights NO button, and main.py coerces it
+			// away silently, so a typo'd id would look fine in the diff and seat
+			// whichever bot the server likes.
 			const bots = await page.evaluate(() => {
 				const row = document.querySelector(".dm-cm-botstyle");
 				if (!row) return null;
@@ -1194,15 +1203,15 @@ try {
 							.every((b) => b.getBoundingClientRect().height < 44),
 				};
 			});
-			// Defaults to the STRONGEST tier (main.DEFAULT_DIFFICULTY = bmplus,
-			// labelled "Money+"). Asserted on the label rather than the id
-			// because the id never reaches the DOM; the full tier names ride
-			// as button titles, since a longer label would be clipped by the
-			// seg track's overflow:hidden — which is what the one-line check
-			// below guards.
-			check("...the bot style is pickable, defaulting to the strongest tier",
+			// Asserted on the LABEL rather than the id because the id never
+			// reaches the DOM; the full tier names ride as button titles, since
+			// a longer label would be clipped by the seg track's overflow:hidden
+			// — which is what the one-line check below guards. "Random" is the
+			// easiest bot's label, and it is first in the row.
+			check("...the bot style is pickable, defaulting to the easiest tier",
 				!!bots && bots.labels.length >= 2 && bots.sel.length === 1
-				&& /money\+/i.test(bots.sel[0]), JSON.stringify(bots));
+				&& bots.sel[0] === bots.labels[0] && /random/i.test(bots.sel[0]),
+				JSON.stringify(bots));
 			check("...sharing one line with the bot count, without wrapping",
 				!!bots && bots.oneLine, JSON.stringify(bots));
 
@@ -4640,9 +4649,17 @@ try {
 	// ── The create modal opens on the tier you last PLAYED ───────────────────
 	// One game covers the behaviour (`useLastDifficulty` is shared, and each
 	// game's wiring is one line that `shared/tests/test_ai_difficulty_memory.py`
-	// checks statically). Duel, because its default is Hard and its Easy tier
-	// starts a game instantly, so the assertion is over two DIFFERENT tiers
-	// rather than over the default agreeing with itself.
+	// checks statically). Duel, because it has four tiers, so every assertion
+	// here is over two DIFFERENT ones rather than over the default agreeing with
+	// itself — the failure mode a one-tier-apart test cannot tell from a win.
+	//
+	// A player with NO history gets the EASIEST tier, and that half is worth a
+	// browser rather than the static check alone: the id is validated against
+	// what the picker offers before it reaches the DOM, so "the modal opens with
+	// this tier LIT" and "this string was passed as the fallback" are different
+	// claims. The tier this block PLAYS is therefore Normal, one rung up — if it
+	// played Easy, every later assertion would hold on a modal that had simply
+	// never remembered anything.
 	async function lastDifficulty(log) {
 		const ctx = await browser.newContext();
 		await ctx.addInitScript(() => localStorage.setItem("spender_user",
@@ -4664,13 +4681,16 @@ try {
 				[...document.querySelectorAll(".cm-seg .cm-seg-btn.sel")].map((b) => b.textContent.trim()));
 		};
 
-		// A first-time player gets the game's own default.
+		// A first-time player gets the EASIEST tier the game offers — the one
+		// thing the modal can pick for someone who has told it nothing.
 		const first = await openModal();
-		check("a player with no history gets the game's default tier",
-			first.includes("Hard") && !first.includes("Easy"), JSON.stringify(first));
+		check("a player with no history gets the easiest tier",
+			first.includes("Easy") && !first.includes("Normal")
+			&& !first.includes("Hard") && !first.includes("Expert"),
+			JSON.stringify(first));
 
 		// Play one game against a DIFFERENT tier…
-		for (const label of [/^VS AI$/, /^Easy$/]) {
+		for (const label of [/^VS AI$/, /^Normal$/]) {
 			await page.locator(".cm-seg .cm-seg-btn", { hasText: label }).first()
 				.click({ timeout: 10_000 }).catch(() => {});
 		}
@@ -4680,14 +4700,14 @@ try {
 		// …and the next modal, on a FRESH page load, opens on it.
 		const again = await openModal();
 		check("the create modal reopens on the tier that was actually played",
-			again.includes("Easy") && !again.includes("Hard"), JSON.stringify(again));
+			again.includes("Normal") && !again.includes("Easy"), JSON.stringify(again));
 
 		// Browsing the picker is not playing: a tier merely clicked must not stick.
 		await page.locator(".cm-seg .cm-seg-btn", { hasText: /^Expert$/ }).first()
 			.click({ timeout: 10_000 }).catch(() => {});
 		const afterBrowsing = await openModal();
 		check("a tier only clicked, never played, does not become the default",
-			afterBrowsing.includes("Easy") && !afterBrowsing.includes("Expert"),
+			afterBrowsing.includes("Normal") && !afterBrowsing.includes("Expert"),
 			JSON.stringify(afterBrowsing));
 
 		check("no page errors remembering the difficulty", errors.length === 0,

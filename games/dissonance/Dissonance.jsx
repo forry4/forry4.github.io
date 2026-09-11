@@ -1540,10 +1540,10 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
   // Create-modal selections. Deferred until "Create Game" rather than firing on
   // the option click — the shape every other game's modal uses.
   const [createOpp, setCreateOpp] = useState("ai");
-  // Difficulty defaults to the tier this player last actually played, Normal
-  // until they have one.
+  // Difficulty defaults to the tier this player last actually played, the
+  // EASIEST until they have one.
   const [createDiff, setCreateDiff, rememberDiff] =
-    useLastDifficulty("dissonance", myId, BOT_TIER_IDS, "normal");
+    useLastDifficulty("dissonance", myId, BOT_TIER_IDS, BOT_TIER_IDS[0]);
   // Skat mode's half-built moves: the number, then the declaration.
   const [bidValue, setBidValue] = useState(null);
   const [declDenom, setDeclDenom] = useState(null);

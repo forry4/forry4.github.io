@@ -415,6 +415,21 @@ covers the logic; each game's wiring is one line).
   picker currently offers. A new game with an AI opts in with one line;
   `shared/tests/test_ai_difficulty_memory.py` derives its roster from the tree and fails the one
   that doesn't, because forgetting compiles and renders a perfectly normal-looking picker.
+  **…and with NO history it is the EASIEST tier that game offers**, spelled `OFFERED[0]` at every
+  call site so it cannot drift from the list the picker renders. All six defaulted to their
+  strongest or near-strongest rung (Nina, Expert, Hard, Money+, Normal) — each a defensible choice
+  for the person who wrote it, who already knew the game, and collectively a first-time player
+  losing to a neural net before they know the rules. A first-time default answers a question the
+  player has not been asked, so it answers with the bottom rung; the moment they answer it by
+  PLAYING, their answer wins forever.
+  **The tiers a remembered id is validated against must be the picker's own list, not a copy** —
+  Orbit kept a bare `["easy","normal","hard"]` beside a picker offering four, so Expert was the one
+  tier a player had to go out of their way to choose and the only one the modal refused to remember.
+  Both are now `ORBIT_AI_TIER_OPTIONS.map(...)`, which is the shape the test resolves.
+  **A second create screen for the same game REUSES that game's key** (the shell's `/offline` hub,
+  which starts local games for four of them) — a second key would split one player's answer in two
+  and hand a CoC regular the bottom rung the first time they play on a plane. The test counts
+  namespaces against games, so a shared key and an invented one both fail as the same count.
 - **Benchmark offline only** (per-game `ai_selfplay` / arena / gate bins) — never in a serving path.
   Judge with CRN paired arenas + a mirror sanity that must read exactly 0.5000; the ship criterion is
   EQUAL-TIME, not equal-sims.

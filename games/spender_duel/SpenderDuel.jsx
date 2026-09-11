@@ -373,9 +373,9 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
   const [showCreateModal, setShowCreateModal] = useState(false);  // the New Game options modal
   const [createOpp, setCreateOpp] = useState("ai");               // "friend" | "ai"
   // AI difficulty (easy|normal|hard|expert) — starts on the tier this player
-  // last actually played, Hard until they have one.
+  // last actually played, the EASIEST until they have one.
   const [createDiff, setCreateDiff, rememberDiff] =
-    useLastDifficulty("duel", myId, BOT_TIER_IDS, "hard");
+    useLastDifficulty("duel", myId, BOT_TIER_IDS, BOT_TIER_IDS[0]);
   const [confirmAbandon, setConfirmAbandon] = useState(false);
   // review mode: an HTTP-loaded finished game (no WebSocket). replaySnapshots is the
   // per-move board list from /review; replayTurn is which one is on screen.

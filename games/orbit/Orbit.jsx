@@ -20,7 +20,19 @@ const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
 const WS_BASE = WS_RAW.replace(/\/ws$/, "");
 const ORBIT_WS = `${WS_BASE}/orbit/ws`;
 const ORBIT_HTTP = WS_RAW.replace(/^ws/, "http").replace(/\/ws$/, "/orbit");
-const ORBIT_AI_TIERS = ["easy", "normal", "hard"];
+// ONE list, read three ways: the picker renders it, the create summary names the
+// selection from it, and a remembered last-played tier is validated against it.
+// It used to be a bare id list sitting apart from the picker's own options, and
+// it had already drifted — Expert was pickable but absent here, so the one tier
+// a player had to go out of their way to choose was the one the modal refused to
+// remember. Ordered EASIEST FIRST: `[0]` is what a player with no history gets.
+const ORBIT_AI_TIER_OPTIONS = [
+  { value: "easy", label: "Easy", title: "Random legal moves" },
+  { value: "normal", label: "Normal", title: "Public-information ranker" },
+  { value: "hard", label: "Hard", title: "Effect-aware browser policy with a validated server fallback" },
+  { value: "expert", label: "Expert", title: "Searches its main action in your browser; ranks follow-up choices" },
+];
+const ORBIT_AI_TIERS = ORBIT_AI_TIER_OPTIONS.map((t) => t.value);
 const ORBIT_AI_WIRE = 1;
 const ORBIT_AI_MODEL_VERSION = 2;
 const ORBIT_AI_ENCODER = "orbit-observation-v1";
@@ -717,7 +729,8 @@ function Lobby({ authUser, myId, onExit, openGames, myGames, history, historySho
   showRules, setShowRules, toast }) {
   const active = notWaiting(myGames);
   const selectedOpponent = createOpp === "friend" ? "friend" : createDifficulty;
-  const difficultyName = { easy: "Easy", normal: "Normal", hard: "Hard", expert: "Expert" };
+  const difficultyName = Object.fromEntries(
+    ORBIT_AI_TIER_OPTIONS.map((t) => [t.value, t.label]));
   return <div className="app orbit" style={{ "--lby-accent": GAME_ACCENTS.orbit }}>
     <style>{styles}</style>
     <LobbyHeader onBack={onExit} user={<LobbyUser user={authUser} />} />
@@ -773,13 +786,9 @@ function Lobby({ authUser, myId, onExit, openGames, myGames, history, historySho
         { value: "friend", label: "VS Friend" },
         { value: "ai", label: "VS AI" },
       ]} /></CmRow>
-      {createOpp === "ai" && <CmRow label="AI difficulty"><CmSeg value={createDifficulty} onChange={setCreateDifficulty} options={[
-        { value: "easy", label: "Easy", title: "Random legal moves" },
-        { value: "normal", label: "Normal", title: "Public-information ranker" },
-        { value: "hard", label: "Hard", title: "Effect-aware browser policy with a validated server fallback" },
-        { value: "expert", label: "Expert", title: "Searches its main action in your browser; ranks follow-up choices" },
-      ]} wrap /></CmRow>}
-      <div className="cm-footer"><span className="cm-summary">Creating: <b>{selectedOpponent === "friend" ? "vs Friend" : `vs ${difficultyName[selectedOpponent] || "Hard"} AI`}</b></span>
+      {createOpp === "ai" && <CmRow label="AI difficulty"><CmSeg value={createDifficulty}
+        onChange={setCreateDifficulty} options={ORBIT_AI_TIER_OPTIONS} wrap /></CmRow>}
+      <div className="cm-footer"><span className="cm-summary">Creating: <b>{selectedOpponent === "friend" ? "vs Friend" : `vs ${difficultyName[selectedOpponent] || difficultyName[ORBIT_AI_TIERS[0]]} AI`}</b></span>
         <button type="button" className="cm-create" onClick={() => createGame(createOpp === "ai", createDifficulty)}>Create Game</button></div>
     </CreateModal>}
     {showRules && <RulesModal title="How to play — Orbit" onClose={() => setShowRules(false)}><OrbitRules /></RulesModal>}
@@ -803,8 +812,9 @@ export default function Orbit({ myId, authUser, onExit }) {
   const [showCreate, setShowCreate] = useState(false);
   const [showRules, setShowRules] = useState(false);
   const [createOpp, setCreateOpp] = useState("ai");
+  // The tier this player last actually played, the EASIEST until they have one.
   const [createDifficulty, setCreateDifficulty, rememberDifficulty] =
-    useLastDifficulty("orbit", myId, ORBIT_AI_TIERS, "hard");
+    useLastDifficulty("orbit", myId, ORBIT_AI_TIERS, ORBIT_AI_TIERS[0]);
   const [confirmAbandon, setConfirmAbandon] = useState(false);
   const [selectedCard, setSelectedCard] = useState(null);
   // ONE descriptor, one modal, one gesture. `info` is {kind:"card"|"bonus"|

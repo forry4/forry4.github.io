@@ -844,9 +844,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
   const [showCreateModal, setShowCreateModal] = useState(false);  // the New Game options modal
   const [createOpp, setCreateOpp] = useState("ai");               // "friend" | "ai"
   // AI difficulty (easy|hard|expert) — the tier this player last actually
-  // played, Expert until they have one.
+  // played, the EASIEST until they have one.
   const [createDiff, setCreateDiff, rememberDiff] =
-    useLastDifficulty("coc", myId, AI_TIER_IDS, "expert");
+    useLastDifficulty("coc", myId, AI_TIER_IDS, AI_TIER_IDS[0]);
   const [createSeats, setCreateSeats] = useState(2);              // VS-Friend seat cap (2-4)
   const [createSameBoard, setCreateSameBoard] = useState(false);  // VS-Friend: force everyone onto the host's board
   const [joinBoardFor, setJoinBoardFor] = useState(null);         // room id pending a board pick before join
