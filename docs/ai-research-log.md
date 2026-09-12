@@ -644,9 +644,50 @@ strong. It says this model loses; it cannot say a neural leaf must. The
 disambiguation — the LEAGUE's own incumbent `g004/epoch-006`, which `state.json`
 records at fixed 0.75 / timed 0.8125 under the `proxy-250-150-100-w4-g3`
 profile, run against the same Expert at serving shape — was launched
-immediately and was still running at write time. It answers two things at once:
-whether a campaign-scale neural model clears the shipped bot, and whether the
-league's headline number survives a budget twenty times the proxy's.
+immediately, and **it answered both questions at once**:
+
+```
+g004/epoch-006 vs the shipped Expert, equal time, serving shape, both coherent
+0.4375 over 64 pairs, 95% CI [0.352, 0.523]
+20 losses / 32 splits / 12 wins
+```
+
+**The league recorded that same checkpoint at `timed_score: 0.8125`.** At the
+budget players actually get it reads 0.4375 — a 0.375 swing, and if anything
+slightly BEHIND the heuristic Expert it was built to replace. So the overnight
+model was not merely small: **twelve generations produced nothing that clears
+the bot Orbit already ships**, and the campaign's headline number was an
+artifact of its measurement budget.
+
+**8. The budget is a VALIDITY parameter, not a precision one.** The mechanism is
+the repo's own leaf-speed trap, one level up: budget decides whether LEAF
+QUALITY or SEARCH DEPTH dominates. A neural leaf is expensive but better per
+simulation, so at 250 ms — where neither side searches deep — leaf quality wins;
+by 3000 ms the Expert is doing ~10,900 simulations per decision and depth
+compensates for its weaker leaf. The two strength-versus-simulations curves
+cross, and `proxy-250-150-100-w4-g3` sat on the wrong side of the crossing.
+
+This does NOT condemn cheap screens generally, and the distinction is the useful
+part:
+
+- Across a change in LEAF COST (neural vs heuristic, or any architecture change
+  that alters the per-simulation price), the arms' curves cross and a cheap
+  budget can invert the ordering.
+- At EQUAL leaf cost (checkpoint A vs checkpoint B, same architecture) both arms
+  pay the same per simulation, the curves have the same shape, and a proxy is
+  plausibly order-preserving. Most of the league's twelve generations were this
+  kind; the number that escaped into `state.json` as a strength claim was not.
+
+**And the deeper error is how the proxy was USED. A cheap screen can be a filter;
+it cannot be a judge.** A filter rejects obvious losers and a false positive is
+tolerable because the expensive gate catches it. The league used the proxy to
+SELECT — argmax over generations — which is exactly where a false positive is
+fatal, compounded by 8-pair screens resolving +/-0.21. Winner's curse on top of
+an invalid operating point.
+
+A budget ladder (250/500/1000/2000 against the 3000 ms run already on disk, 64
+pairs each, identical deals so the rungs are paired) is running to locate the
+crossing, which converts "250 was too low" into a measured screening floor.
 
 **Where this leaves the campaign.** Coherent determinization is the shipped
 search (`Controls::serving()`; `Default` stays historical so past numbers
