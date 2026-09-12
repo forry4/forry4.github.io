@@ -622,14 +622,40 @@ been indistinguishable from noise.
   different binaries; `arena_equivalence` required byte-identical deterministic
   results before they were pooled.
 
+**7. THE GAP SCREEN CAME BACK NEGATIVE, and it reframes items 3 and 5.** The
+neural model with its learned prior, against the SHIPPED heuristic-leaf Expert,
+equal time, both seats coherent:
+
+```
+0.2812 over 64 pairs, 95% CI [0.211, 0.359]
+32 losses / 28 splits / 4 wins — all four pools 0.2188 to 0.3125
+```
+
+**The learned prior's 0.6641 was a comparison between two players that are both
+far below the shipped bot.** It is a real, correctly measured, well-powered
+result about a weak family, and it does not follow that the prior helps a strong
+one. This is the same shape as the repo's standing warning that bot-vs-bot gates
+hide absolute weakness when both arms share a blind spot — here the shared
+weakness is the value leaf itself.
+
+The caveat that runs the other way, and it is mine: **this model is ONE 8-epoch
+run on 1536 games**, sized overnight to validate a pipeline rather than to be
+strong. It says this model loses; it cannot say a neural leaf must. The
+disambiguation — the LEAGUE's own incumbent `g004/epoch-006`, which `state.json`
+records at fixed 0.75 / timed 0.8125 under the `proxy-250-150-100-w4-g3`
+profile, run against the same Expert at serving shape — was launched
+immediately and was still running at write time. It answers two things at once:
+whether a campaign-scale neural model clears the shipped bot, and whether the
+league's headline number survives a budget twenty times the proxy's.
+
 **Where this leaves the campaign.** Coherent determinization is the shipped
 search (`Controls::serving()`; `Default` stays historical so past numbers
-reproduce). The wasm is verified to build but **deliberately not deployed** —
-that is a player-facing decision. The learned prior is measured but cannot reach
-a player yet: both prior results were measured BETWEEN NEURAL ARMS, and Orbit
-serves a heuristic-leaf Expert. The screen closing that gap — neural model plus
-learned prior against the shipped Expert, equal time, both coherent — was
-running at write time.
+reproduce) — that result was measured heuristic-arm against heuristic-arm and is
+unaffected by any of the above. The wasm is verified to build but **deliberately
+not deployed**; that is a player-facing decision. Everything on the NEURAL line
+is now gated behind one question: can any Orbit neural model beat the
+hand-written `state_value` leaf at serving shape? Until that is yes, the policy
+head is an improvement to something that is not in contention.
 
 
 
