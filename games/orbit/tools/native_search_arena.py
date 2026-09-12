@@ -123,8 +123,12 @@ def main():
     # search time. "minimax" gives the opponent its own nodes. Per request, not
     # per seat: one side searching its opponent and the other not is two
     # different algorithms.
-    p.add_argument("--opponent-search",choices=("ranker","minimax"),default="ranker",
-                   help="How opponent decisions are answered inside the tree")
+    p.add_argument("--minimax",action="store_true",
+                   help="Candidate seat: give the opponent its own nodes instead of "
+                        "answering its decisions with the 1-ply ranker")
+    p.add_argument("--opponent-minimax",action="store_true",
+                   help="Opponent seat: the same. PER SEAT on purpose -- the comparison "
+                        "worth running needs exactly one side to search its opponent")
     p.add_argument("--determinization-period",type=int,default=1,
                    help="Candidate seat: simulations per determinization; 0 = coherent")
     p.add_argument("--opponent-determinization-period",type=int,default=1,
@@ -175,7 +179,8 @@ def main():
     if args.opponent_simulations is not None:request["opponent_simulations"]=args.opponent_simulations
     request["leaf"]=args.leaf
     request["opponent_leaf"]=args.opponent_leaf
-    request["opponent_search"]=args.opponent_search
+    request["minimax"]=args.minimax
+    request["opponent_minimax"]=args.opponent_minimax
     request["policy_prior_weight"]=args.policy_prior_weight
     request["opponent_policy_prior_weight"]=args.opponent_policy_prior_weight
     request["determinization_period"]=args.determinization_period
@@ -221,7 +226,7 @@ def main():
             "opponent_determinization_period":args.opponent_determinization_period,
             "policy_prior_weight":args.policy_prior_weight,
             "opponent_policy_prior_weight":args.opponent_policy_prior_weight,
-            "opponent_search":args.opponent_search,
+            "minimax":args.minimax,"opponent_minimax":args.opponent_minimax,
             "games":results,"seconds":time.perf_counter()-started,
             "mirror_control":mirror,
             "complete":process.returncode==0 and len(results)==len(jobs) and not any(r["error"] or r["censored"] for r in results)}

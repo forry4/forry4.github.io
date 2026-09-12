@@ -195,21 +195,27 @@ fn main() {
         .and_then(Value::as_f64)
         .unwrap_or(0.0)
         .clamp(0.0, 1.0);
-    // The opponent model is a per-REQUEST choice, not per seat: an arena where
-    // one side searches its opponent and the other does not is two different
-    // algorithms, which is a comparison worth making deliberately rather than
-    // by forgetting a flag.
-    // NOT `opponent_model`: that key is already the opponent's model ARTIFACT,
-    // and reusing it made the arena try to load the string "ranker" as a neural
-    // net. It panicked in 0.084s, and because the run script sent stderr to
-    // /dev/null the failure arrived as three pools that produced "no usable
-    // report" in milliseconds.
-    let opponent_model = if request["opponent_search"] == "minimax" {
-        OpponentModel::Minimax
-    } else {
-        OpponentModel::Ranker
+    // PER SEAT, like every other knob here (`leaf`/`opponent_leaf`,
+    // `determinization_period`/`opponent_...`). It was briefly per-request,
+    // which would have made the only comparison worth running impossible:
+    // "does searching the opponent beat not searching it" needs exactly one
+    // side to do it.
+    //
+    // Named `minimax`, NOT `opponent_model` -- that key already carries the
+    // opponent's model ARTIFACT, and reusing it made the arena try to load the
+    // string "ranker" as a neural net. It panicked in 0.084s, and because the
+    // run script sent stderr to /dev/null the failure surfaced as three pools
+    // producing "no usable report" in milliseconds.
+    let adversarial = |flag: &str| {
+        if request[flag] == true {
+            OpponentModel::Minimax
+        } else {
+            OpponentModel::Ranker
+        }
     };
-    let controls_for = |seat_leaf: Leaf, period: usize, prior: f64| Controls {
+    let minimax = adversarial("minimax");
+    let opponent_minimax = adversarial("opponent_minimax");
+    let controls_for = |seat_leaf: Leaf, period: usize, prior: f64, opponent_model: OpponentModel| Controls {
         model_stride,
         model_weight,
         model_temperature,
@@ -304,10 +310,10 @@ fn main() {
                     }
                     let legal = state.legal_moves(seat);
                     let seat_controls = if seat == candidate {
-                        controls_for(leaf, determinization_period, policy_prior_weight)
+                        controls_for(leaf, determinization_period, policy_prior_weight, minimax)
                     } else {
                         controls_for(opponent_leaf, opponent_determinization_period,
-                                     opponent_policy_prior_weight)
+                                     opponent_policy_prior_weight, opponent_minimax)
                     };
                     let evaluator = if seat == candidate {
                         model
