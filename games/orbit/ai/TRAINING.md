@@ -247,3 +247,79 @@ terminal result, following the measured value-bootstrap signal in the Spender
 and Castles of Crimson campaigns. Set it to zero for the matched
 outcome-only control; observer rows and the old foundation anchor always stay
 terminal-labelled.
+
+## An equal-time arena is load-dependent, and it will not tell you
+
+The ship criterion is equal TIME, so `native_search_arena` gives each decision a
+wall-clock slice (`--main-action-ms` / `--followup-ms`). That has a consequence
+worth stating plainly, because it is the opposite of the intuition carried over
+from a fixed-simulation run:
+
+**Extra load on the machine does not make an equal-time arena slower. It makes
+every decision weaker.** The wall clock is set by `decisions x budget`, which is
+a property of the games, not of the CPU. Load is absorbed entirely as lost
+simulations, and nothing in the report announces it.
+
+Measured on 2026-09-11: two 4-worker arenas were accidentally left running
+together on a 6-physical-core box. The contended pool still completed 32 games,
+still reported `"complete": true`, still produced a plausible pair score — at
+**6,482 simulations per decision against the clean run's 8,082**, a quarter of
+its search silently deleted. Since coherent determinization's advantage GROWS
+with simulations, that pool understated the very effect it was measuring.
+
+Diagnostics, in the order they are worth reaching for:
+
+* Check the process table, not a wall-clock estimate. `Get-CimInstance
+  Win32_Process -Filter "Name='neural_arena.exe'"` should show **exactly one**
+  row, and its parent chain should be the script you think you started.
+* Sample CPU: `(Get-Process -Id N).CPU` over a 20-second window should read
+  ~20 x `--workers` seconds. Materially less means something else is on the box.
+* Compare simulations per decision against a known-clean run. It is the only
+  number in the report that moves under contention.
+
+**Killing the job is not killing the loop.** Stopping a background task can
+leave the `bash` loop that spawned the arena alive; it then proceeds to the next
+pool and starts a *second* arena. Worse, the python parent of the arena you did
+kill survives long enough to run its `finally` and write a report with
+`"games": []` and `"complete": false` — a file that is non-empty, so a
+`[ -s "$report" ]` resume guard treats that pool as finished forever. A resume
+guard must test for `"complete": true` AND a matching shape, never for a
+non-empty file; `games/orbit/ai/runs/serving-check/run.sh` is the worked example.
+
+## Calibrated fixed-simulation screens (`calibrate_fixed_sims`)
+
+```powershell
+python -m games.orbit.tools.calibrate_fixed_sims games/orbit/ai/runs/serving-check/pool-*.json
+python -m games.orbit.tools.native_search_arena heuristic out.json --pairs 16 `
+  --simulations 200 --opponent-simulations 145 --workers 4 --game-workers 4 --via-observation
+```
+
+A fixed-simulation arena is deterministic and load-independent, so it can be
+parallelised across `--game-workers` and run beside other work without the
+contamination above. It is the right instrument for a SCREEN. Three things make
+it correct rather than merely fast:
+
+1. **The counts must be asymmetric.** Handing both seats the same count measures
+   equal-SIMS, a question this campaign already answered yes. The coherent
+   search plus its opponent-reply cache buys 1.38–1.66x more simulations inside
+   the same turn budget, and that speed *is* the advantage; a symmetric count
+   deletes it. `--opponent-simulations` exists for exactly this.
+2. **Calibrate per ROLE, not per seat.** The candidate swaps seats every other
+   game for common random numbers, so pooling `simulations_by_seat` by seat
+   averages the two players together and yields two identical, meaningless
+   numbers. The tool pools by role and refuses reports that predate the per-seat
+   counters rather than splitting a blended total it cannot split.
+3. **`--simulations` is PER WORKER.** The arena asserts the realised total equals
+   `n * actor_pool`, and `actor_pool` is the worker pool only under
+   `--via-observation` — otherwise it is 1 however many workers were requested.
+
+The honest limit: the throughput ratio is not constant across a game (the
+opponent-reply cache's hit rate grows with the tree — 1.40x at 192 simulations,
+1.66x at 768), so a single count per side APPROXIMATES equal time rather than
+being it. Screen with this; gate with a real equal-time run.
+
+**The mirror sanity control only exists here.** `mirror_control` requires fixed
+simulations, because an equal-time arena cannot reproduce itself exactly. It
+also requires every per-seat control to match — count, leaf and determinization
+regime — since a mirror is held to reading exactly 0.5000 and claiming one
+across differing seats asserts something untrue.

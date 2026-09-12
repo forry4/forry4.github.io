@@ -120,6 +120,26 @@ fn main() {
         fixed_sims.is_none_or(|n| n > 0 && n <= 10000),
         "Invalid fixed simulation count"
     );
+    // Equal-TIME is the ship criterion, so a fixed-simulation screen that hands
+    // both seats the same count deletes the very effect it is measuring: the
+    // coherent search plus its opponent-reply cache buys 1.38-1.66x more
+    // simulations inside the same turn budget, and that speed IS the advantage.
+    // Calibrating each seat to what it actually achieves at serving shape keeps
+    // the equal-time semantics while making the work deterministic and
+    // load-independent.  Defaults to `simulations`, so a symmetric control stays
+    // a single flag and every existing request is unchanged.
+    let opponent_fixed_sims = request
+        .get("opponent_simulations")
+        .and_then(Value::as_u64)
+        .or(fixed_sims);
+    assert!(
+        opponent_fixed_sims.is_none_or(|n| n > 0 && n <= 10000),
+        "Invalid opponent fixed simulation count"
+    );
+    assert!(
+        fixed_sims.is_some() == opponent_fixed_sims.is_some(),
+        "Fixed simulations must be set for both seats or for neither"
+    );
     let pool = request["pool"].as_u64().unwrap_or(1).max(1) as usize;
     let model_stride = request
         .get("model_stride")
@@ -230,6 +250,11 @@ fn main() {
                 let mut remaining = [budget; 2];
                 let mut acted = [0u32; 2];
                 let mut sims = 0u64;
+                // One counter per SEAT.  The totals alone cannot separate the
+                // two searches' throughput, which is precisely the number a
+                // fixed-simulation screen has to be calibrated from.
+                let mut sims_by_seat = [0u64; 2];
+                let mut searches_by_seat = [0u64; 2];
                 let mut calls = 0;
                 let mut decisions = 0;
                 let mut failure = None;
@@ -288,10 +313,15 @@ fn main() {
                         } else {
                             followup_ms
                         });
+                        let seat_sims = if seat == candidate {
+                            fixed_sims
+                        } else {
+                            opponent_fixed_sims
+                        };
                         let config = Config {
-                            simulations: fixed_sims.unwrap_or(100000) as usize,
+                            simulations: seat_sims.unwrap_or(100000) as usize,
                             max_depth: 96,
-                            budget_ms: if fixed_sims.is_some() {
+                            budget_ms: if seat_sims.is_some() {
                                 60000
                             } else {
                                 allowance
@@ -319,7 +349,7 @@ fn main() {
                             )
                         } {
                             Ok(result) => {
-                                let quota = fixed_sims.map(|n| n * actor_pool as u64);
+                                let quota = seat_sims.map(|n| n * actor_pool as u64);
                                 if quota.is_some_and(|n| result["simulations"].as_u64() != Some(n))
                                 {
                                     failure = Some(
@@ -331,7 +361,10 @@ fn main() {
                                     result["elapsed_ms"].as_f64().unwrap().ceil() as u64,
                                 );
                                 acted[seat] += 1;
-                                sims += result["simulations"].as_u64().unwrap();
+                                let performed = result["simulations"].as_u64().unwrap();
+                                sims += performed;
+                                sims_by_seat[seat] += performed;
+                                searches_by_seat[seat] += 1;
                                 calls += 1;
                                 result["move"].clone()
                             }
@@ -361,7 +394,8 @@ fn main() {
                 tx.send(
                     json!({"index":index,"seed":seed,"candidate":candidate,"sides":sides,
             "winner":state.winner,"censored":state.phase!="over","error":failure,
-            "simulations":sims,"calls":calls,"decisions":decisions}),
+            "simulations":sims,"calls":calls,"decisions":decisions,
+            "simulations_by_seat":sims_by_seat,"searches_by_seat":searches_by_seat}),
                 )
                 .unwrap();
                 if failure.is_some() {

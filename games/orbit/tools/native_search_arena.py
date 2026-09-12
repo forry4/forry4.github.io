@@ -42,6 +42,25 @@ def summarise(results,*,pairs,boards,candidate,opponent,settings):
                                  "boards":[dict(c) for c in boards]})
 
 
+def mirror_control(*,simulations,opponent_simulations,heuristic,models_match,
+                   leaf,opponent_leaf,determinization_period,opponent_determinization_period):
+    """Are both seats provably the SAME player?
+
+    A mirror is held to reading exactly 0.5000, so claiming one when the seats
+    differ turns a sanity check into a false assertion. Every per-seat control
+    is compared: before asymmetric simulations existed this could be read off
+    the models alone, but a differing count, leaf or determinization regime is
+    just as much a different player. Fixed simulations are required because an
+    equal-time arena is load-dependent and cannot reproduce itself exactly.
+    """
+
+    if simulations is None or heuristic or not models_match:
+        return False
+    effective=opponent_simulations if opponent_simulations is not None else simulations
+    return (effective==simulations and opponent_leaf==leaf
+            and opponent_determinization_period==determinization_period)
+
+
 def main():
     # Checkpoint loading needs the optional training environment (torch); the
     # row folding above must not, or importing this module for `summarise`
@@ -65,6 +84,13 @@ def main():
     p.add_argument("--opponent",type=Path,help="Frozen neural opponent; otherwise Hard v2")
     p.add_argument("--opponent-expert",action="store_true",help="Use the current heuristic-leaf Expert search as the opponent")
     p.add_argument("--simulations",type=int,help="Deterministic control only; overrides time budget")
+    # Equal-time is the ship criterion; a fixed-simulation screen that gives both
+    # seats the same count measures equal-SIMS, a question this campaign already
+    # answered. Calibrate each seat to what it actually achieves at serving shape
+    # (see tools/calibrate_fixed_sims.py) to keep the equal-time meaning while
+    # making the arena deterministic and load-independent.
+    p.add_argument("--opponent-simulations",type=int,
+                   help="Opponent seat's fixed count; defaults to --simulations")
     p.add_argument("--model-stride",type=int,default=1,
                    help="Evaluate a neural leaf every Nth simulation; intervening leaves use the heuristic")
     p.add_argument("--model-weight",type=float,default=1.0,
@@ -92,6 +118,9 @@ def main():
     if args.pairs<8 or args.pairs%8:p.error("pairs must balance all eight boards")
     if not args.pool.startswith("development-"):p.error("Development namespace required")
     if args.simulations is not None and not 1<=args.simulations<=10000:p.error("simulations must be 1..10000")
+    if args.opponent_simulations is not None:
+        if not 1<=args.opponent_simulations<=10000:p.error("opponent-simulations must be 1..10000")
+        if args.simulations is None:p.error("--opponent-simulations requires --simulations")
     if args.model_stride<1:p.error("model-stride must be positive")
     if not 0.0<=args.model_weight<=1.0:p.error("model-weight must be between 0 and 1")
     if args.model_temperature<=0:p.error("model-temperature must be positive")
@@ -122,6 +151,7 @@ def main():
         request["opponent_model"]=export_model(other)
     if args.opponent_expert:request["opponent_expert"]=True
     if args.simulations is not None:request["simulations"]=args.simulations
+    if args.opponent_simulations is not None:request["opponent_simulations"]=args.opponent_simulations
     request["leaf"]=args.leaf
     request["opponent_leaf"]=args.opponent_leaf
     request["determinization_period"]=args.determinization_period
@@ -129,7 +159,15 @@ def main():
     request["model_stride"]=args.model_stride
     request["model_weight"]=args.model_weight
     request["model_temperature"]=args.model_temperature
-    mirror=args.simulations is not None and not heuristic and request.get("opponent_model")==request["model"]
+    effective_opponent_simulations=(args.opponent_simulations
+                                    if args.opponent_simulations is not None else args.simulations)
+    mirror=mirror_control(simulations=args.simulations,
+                          opponent_simulations=args.opponent_simulations,
+                          heuristic=heuristic,
+                          models_match=request.get("opponent_model")==request["model"],
+                          leaf=args.leaf,opponent_leaf=args.opponent_leaf,
+                          determinization_period=args.determinization_period,
+                          opponent_determinization_period=args.opponent_determinization_period)
     process=subprocess.Popen([str(args.binary.resolve())],stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True,encoding="utf-8")
     results=[];started=time.perf_counter()
     try:
@@ -148,7 +186,9 @@ def main():
     report={"purpose":"development, not promotion","pool":args.pool,"budget_ms":args.budget_ms,
             "main_action_ms":args.main_action_ms,"followup_ms":args.followup_ms,"workers":args.workers,
             "game_workers":args.game_workers,"via_observation":args.via_observation,
-            "fixed_simulations":args.simulations,"checkpoint":str(args.checkpoint),
+            "fixed_simulations":args.simulations,
+            "fixed_opponent_simulations":effective_opponent_simulations,
+            "checkpoint":str(args.checkpoint),
             "opponent":opponent_name,
             "model_stride":args.model_stride,"model_weight":args.model_weight,
             "model_temperature":args.model_temperature,
@@ -163,6 +203,7 @@ def main():
                                   candidate=str(args.checkpoint),opponent=opponent_name,
                                   settings={"pool":args.pool,"budget_ms":args.budget_ms,
                                             "fixed_simulations":args.simulations,
+                                            "fixed_opponent_simulations":effective_opponent_simulations,
                                             "turn_budget":args.budget_ms/1000.0,
                                             "workers":args.workers,
                                             "leaf":args.leaf,

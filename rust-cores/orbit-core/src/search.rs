@@ -491,6 +491,14 @@ pub fn choose_with(
 ) -> Result<Value, String> {
     choose_cached_options(source, seat, seed, config, model, controls.sanitized(), true)
 }
+/// The cache-equivalence control arm: same search, cache switchable.
+///
+/// Test-only. The cache must not change a single chosen move -- it exists to
+/// buy simulations, not to alter them -- so every regime is asserted against
+/// this with `cache_enabled` false. Nothing in a serving or offline path
+/// reaches it, hence `cfg(test)` rather than an `allow(dead_code)` that would
+/// also hide a genuinely abandoned function.
+#[cfg(test)]
 fn choose_cached(
     source: &State,
     seat: usize,
@@ -539,6 +547,8 @@ fn choose_cached_options(
     let mut cache_hits = 0;
     let mut determinization: Option<State> = None;
     let mut frozen_chance_seed: u64 = 0;
+    let mut opponent_replies: HashMap<String, Value> = HashMap::new();
+    let mut opponent_cache_hits = 0usize;
     for simulation in 0..config.simulations {
         if started.elapsed_ms() >= config.budget_ms as f64 {
             break;
@@ -579,13 +589,56 @@ fn choose_cached_options(
             } else {
                 let moves = actor_obs["legal_moves"].as_array().unwrap();
                 let opponent_started = profile_start(profiling);
-                let selected = crate::serving::choose_move(
-                    &actor_obs,
-                    moves,
-                    &Value::Null,
-                    5000,
-                    seed,
-                );
+                // THE OPPONENT MODEL IS 43% OF THIS SEARCH'S TIME, and the
+                // evaluator is ~0% of it (measured 2026-09-11 at 256 simulations
+                // with the heuristic leaf). Every accepted speedup in the
+                // preceding campaign targeted the neural leaf, which is correct
+                // for that build and irrelevant to the tier that actually ships.
+                //
+                // The reply is a PURE FUNCTION of the acting seat's observation
+                // here: `memory` is always Null, the budget is a constant, and
+                // `seed` is fixed for the whole call, while `moves` is just
+                // `actor_obs["legal_moves"]`. So keying on the serialized
+                // observation is exact, not approximate -- the same equivalence
+                // gate as the leaf cache, and it shares its flag so
+                // `choose_cached(.., false)` still reproduces the uncached search.
+                //
+                // It only pays under a COHERENT tree: with a fresh
+                // determinization per simulation almost no position recurs,
+                // which is why the leaf cache hit 0.3% of the time.
+                // Gated on the determinization regime, not just `cache_enabled`.
+                // With a fresh world every simulation NO opponent position ever
+                // recurs: measured 0 hits and a 0.93x SLOWDOWN at 192
+                // simulations, because the key still costs a serialization.
+                // Under coherence the same cache is 1.40x at 192 and 1.66x at
+                // 768, growing with simulations as the tree deepens.
+                let selected = if cache_enabled && determinization_period > 1 {
+                    let key = actor_obs.to_string();
+                    if let Some(hit) = opponent_replies.get(&key) {
+                        opponent_cache_hits += 1;
+                        hit.clone()
+                    } else {
+                        let computed = crate::serving::choose_move(
+                            &actor_obs,
+                            moves,
+                            &Value::Null,
+                            5000,
+                            seed,
+                        );
+                        if opponent_replies.len() < 4096 {
+                            opponent_replies.insert(key, computed.clone());
+                        }
+                        computed
+                    }
+                } else {
+                    crate::serving::choose_move(
+                        &actor_obs,
+                        moves,
+                        &Value::Null,
+                        5000,
+                        seed,
+                    )
+                };
                 profile.opponent_rank_ns += profile_elapsed(opponent_started);
                 (
                     selected["move"].clone(),
@@ -733,7 +786,7 @@ fn choose_cached_options(
     profile.cache_hits = cache_hits as u64;
     profile.total_ns = profile_elapsed(profile_started);
     let mut result = json!({"move":node.moves[best],"simulations":sims,"evaluations":evals,"nodes":nodes.len(),"root_value":root_value,
-        "value_cache_hits":cache_hits,
+        "value_cache_hits":cache_hits,"opponent_cache_hits":opponent_cache_hits,
         "elapsed_ms":started.elapsed_ms(),"stats":stats,"belief":"current-observation prior",
         "determinization_period":determinization_period,"leaf":format!("{leaf:?}")});
     if profiling {
@@ -795,6 +848,51 @@ mod tests {
         let control = capture_progress_only(&observation);
         assert_eq!(control, 0.0, "no captures yet, so the old leaf sees nothing");
         assert!(reference != 0.0, "the reference reads influence, economy and tempo");
+    }
+
+    /// Both caches are exact, so the cached and uncached searches must agree
+    /// BIT FOR BIT at every determinization period -- including the coherent
+    /// one, which is the only regime where the opponent cache actually hits.
+    #[test]
+    fn caches_are_exact_under_every_determinization_regime() {
+        let (state, _) = State::new(22, [1, 2, 1]);
+        let config = Config { simulations: 96, max_depth: 12, budget_ms: 600_000 };
+        for period in [1usize, 8, usize::MAX] {
+            let controls = Controls { determinization_period: period, ..Controls::default() };
+            let mut cached =
+                choose_cached_options(&state, 0, 33, config, None, controls, true).unwrap();
+            let mut plain =
+                choose_cached_options(&state, 0, 33, config, None, controls, false).unwrap();
+            for value in [&mut cached, &mut plain] {
+                let object = value.as_object_mut().unwrap();
+                object.remove("elapsed_ms");
+                object.remove("value_cache_hits");
+                object.remove("opponent_cache_hits");
+            }
+            assert_eq!(cached, plain, "caching changed the search at period {period}");
+        }
+    }
+
+    /// ...and the opponent cache must actually DO something under coherence,
+    /// or it is 43% of the search time left on the table with extra bookkeeping.
+    #[test]
+    fn the_opponent_cache_hits_once_the_tree_is_coherent() {
+        let (state, _) = State::new(22, [1, 2, 1]);
+        let config = Config { simulations: 192, max_depth: 96, budget_ms: 600_000 };
+        let hits = |period: usize| {
+            let controls = Controls { determinization_period: period, ..Controls::default() };
+            choose_with(&state, 0, 33, config, None, controls).unwrap()["opponent_cache_hits"]
+                .as_u64()
+                .unwrap()
+        };
+        let coherent = hits(usize::MAX);
+        assert!(coherent > 0, "coherent search reused no opponent reply");
+        assert!(
+            coherent > hits(1),
+            "coherent {} should reuse more opponent replies than per-sim {}",
+            coherent,
+            hits(1)
+        );
     }
 
     #[test]
