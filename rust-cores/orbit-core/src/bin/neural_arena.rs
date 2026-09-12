@@ -1,5 +1,5 @@
 //! Development arena for native search versus frozen Hard v2. Not a ship gate.
-use orbit_core::{attention::Model, search::Config, search::Controls, search::Leaf, State};
+use orbit_core::{attention::Model, search::Config, search::Controls, search::Leaf, search::OpponentModel, State};
 use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
 /// Run `pool` independent trees on one decision and sum their root visits.
@@ -195,12 +195,22 @@ fn main() {
         .and_then(Value::as_f64)
         .unwrap_or(0.0)
         .clamp(0.0, 1.0);
+    // The opponent model is a per-REQUEST choice, not per seat: an arena where
+    // one side searches its opponent and the other does not is two different
+    // algorithms, which is a comparison worth making deliberately rather than
+    // by forgetting a flag.
+    let opponent_model = if request["opponent_model"] == "minimax" {
+        OpponentModel::Minimax
+    } else {
+        OpponentModel::Ranker
+    };
     let controls_for = |seat_leaf: Leaf, period: usize, prior: f64| Controls {
         model_stride,
         model_weight,
         model_temperature,
         leaf: seat_leaf,
         determinization_period: period,
+        opponent_model,
         policy_prior_weight: prior,
     };
     // Drive the candidate through the browser's own boundary: rebuild the world

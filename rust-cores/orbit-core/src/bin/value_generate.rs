@@ -1,5 +1,5 @@
 //! Parallel offline baseline generation. Policies only receive observations.
-use orbit_core::{search::Controls, Chance, State};
+use orbit_core::{search::Controls, search::OpponentModel, Chance, State};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::io::{self, BufRead, Write};
@@ -426,6 +426,7 @@ fn main() {
         model_temperature,
         leaf,
         determinization_period,
+        opponent_model: OpponentModel::Ranker,
         policy_prior_weight: 0.0,
     };
     let record_policy = request["record_policy"].as_bool().unwrap_or(false);

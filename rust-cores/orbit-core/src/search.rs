@@ -167,14 +167,17 @@ impl Node {
             visits: 0,
         }
     }
-    fn select(&self) -> usize {
+    /// `minimizing` is true at an OPPONENT node: values are kept in the root
+    /// seat's frame, so the opponent maximises their negation.
+    fn select(&self, minimizing: bool) -> usize {
         let mut best = 0;
         let mut score = f64::NEG_INFINITY;
         for (i, e) in self.edges.iter().enumerate() {
             let mean = if e.visits == 0 {
                 0.0
             } else {
-                e.sum / e.visits as f64
+                let average = e.sum / e.visits as f64;
+                if minimizing { -average } else { average }
             };
             let s =
                 mean + 1.35 * e.prior * (self.visits.max(1) as f64).sqrt() / (1 + e.visits) as f64;
@@ -246,6 +249,35 @@ fn terminal(world: &State, seat: usize) -> Option<f64> {
         )
     }
 }
+/// How the search answers the OPPONENT's decisions.
+///
+/// This is the single most structural thing about Orbit's search, and until
+/// 2026-09-12 there was only one option. `Ranker` builds nodes for the
+/// searching seat ONLY: every opponent decision is answered by an external call
+/// to the 1-ply `serving::choose_move` heuristic. That is not an adversarial
+/// search at all -- it optimises a line against a fixed environment policy that
+/// plays greedily, so it can neither find a move the opponent has no answer to
+/// nor avoid one it does. It also costs 43% of search time (measured 2026-09-11
+/// at 256 simulations with the heuristic leaf) to consult that strawman.
+///
+/// Duel had the same defect in a different flavour -- `select()` was MAX-MAX,
+/// modelling the opponent as cooperating -- and the minimax fix was worth
+/// 0.62 at c=1.0 and 0.67 at c=0.3 there (research log, 2026-07-26).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum OpponentModel {
+    /// Historical: the 1-ply ranker, called from outside the tree.
+    #[default]
+    Ranker,
+    /// The opponent gets its OWN nodes and minimises the root seat's value.
+    ///
+    /// Values are stored from the root seat's perspective and backed up
+    /// unchanged along the whole path, so this needs a sign flip in SELECTION
+    /// only -- an opponent node maximises `-mean`. Within a determinized world
+    /// both seats are assumed to know it, which is ordinary PIMC and the same
+    /// strategy-fusion trade coherent determinization already accepted.
+    Minimax,
+}
+
 /// Which leaf evaluator a search uses for nonterminal positions.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Leaf {
@@ -467,6 +499,12 @@ pub struct Controls {
     /// information is about half of Duel's (perfect-information cheat 0.6094
     /// against 0.7250), so the trade is its own measurement, not an inheritance.
     pub determinization_period: usize,
+    /// How the opponent's decisions are answered inside the tree.
+    ///
+    /// `Ranker` is the historical search. `Minimax` gives the opponent its own
+    /// nodes, which is both the adversarial fix and a way to DELETE the 43% the
+    /// external ranker call costs, rather than paying it twice over.
+    pub opponent_model: OpponentModel,
     /// How much of the PUCT prior comes from the network's policy head.
     ///
     /// `0.0` is the historical search: the prior is entirely the frozen
@@ -487,6 +525,7 @@ impl Default for Controls {
             model_temperature: 2.0,
             leaf: Leaf::default(),
             determinization_period: 1,
+            opponent_model: OpponentModel::Ranker,
             policy_prior_weight: 0.0,
         }
     }
@@ -600,6 +639,7 @@ fn choose_cached_options(
         model_temperature,
         leaf,
         determinization_period,
+        opponent_model,
         policy_prior_weight,
     } = controls;
     if seat > 1 || source.actor() != Some(seat) {
@@ -625,6 +665,12 @@ fn choose_cached_options(
     // separately from leaf evaluations so its cost is visible rather than
     // folded into `evaluations`.
     let mut policy_evaluations = 0usize;
+    // Nodes created for the OPPONENT's decisions. Zero under `Ranker` by
+    // construction, and the only direct evidence that the adversarial half of
+    // the tree is actually being built -- node TOTALS cannot show it, because
+    // expanding an opponent node ends that simulation's descent and so trades
+    // against nodes on our own side.
+    let mut opponent_nodes = 0usize;
     let learned_prior = |observation: &Value| -> Result<Option<Vec<f32>>, String> {
         if policy_prior_weight <= 0.0 {
             return Ok(None);
@@ -684,12 +730,17 @@ fn choose_cached_options(
             let actor_observation_started = profile_start(profiling);
             let actor_obs = world.observation(actor);
             profile.actor_observation_ns += profile_elapsed(actor_observation_started);
-            let (mv, unvisited) = if actor == seat {
+            let searched_here = actor == seat || opponent_model == OpponentModel::Minimax;
+            let minimizing = actor != seat;
+            let (mv, unvisited) = if searched_here {
                 let key = if depth == 0 {
                     root.clone()
                 } else {
                     (trace, actor_obs.to_string())
                 };
+                // One extra lookup, and only for opponent decisions, which
+                // exist at all only under `Minimax`.
+                let fresh_opponent_node = minimizing && !nodes.contains_key(&key);
                 let node_started = profile_start(profiling);
                 // The default path keeps its single hash lookup; only a
                 // learned prior pays for the miss check, because computing it
@@ -711,8 +762,11 @@ fn choose_cached_options(
                         .entry(key.clone())
                         .or_insert_with(|| Node::new(&actor_obs))
                 };
+                if minimizing && fresh_opponent_node {
+                    opponent_nodes += 1;
+                }
                 profile.node_ns += profile_elapsed(node_started);
-                let action = node.select();
+                let action = node.select(minimizing);
                 let unvisited = node.edges[action].visits == 0;
                 let mv = node.moves[action].clone();
                 path.push((key, action));
@@ -815,7 +869,15 @@ fn choose_cached_options(
             // simulation that is scheduled to run the network (or vice
             // versa).  Keep the exact view key while separating the two
             // evaluator modes only when a stride is active.
-            let evaluate_model = model.is_some() && simulation % model_stride == 0;
+            // A zero model weight means the LEAF is the hand-written evaluator, so
+            // the forward would be computed and then multiplied by zero -- and
+            // with a net leaf that forward is ~86% of search time. Skipping it
+            // is value-preserving (w*x + (1-w)*leaf is exactly leaf at w=0) and
+            // is what makes the hybrid measurable at equal TIME: hand-written
+            // leaf, learned PRIOR, which is the half of the search the frozen
+            // `action_score` was losing.
+            let evaluate_model =
+                model.is_some() && model_weight > 0.0 && simulation % model_stride == 0;
             let key = if cache_enabled {
                 if leaf != Leaf::default() || determinization_period != 1 {
                     format!("{:?}:{}:{}", leaf, determinization_period, view)
@@ -919,6 +981,7 @@ fn choose_cached_options(
     let mut result = json!({"move":node.moves[best],"simulations":sims,"evaluations":evals,"nodes":nodes.len(),"root_value":root_value,
         "value_cache_hits":cache_hits,"opponent_cache_hits":opponent_cache_hits,
         "policy_evaluations":policy_evaluations,"policy_prior_weight":policy_prior_weight,
+        "opponent_nodes":opponent_nodes,"opponent_model":format!("{opponent_model:?}"),
         "elapsed_ms":started.elapsed_ms(),"stats":stats,"belief":"current-observation prior",
         "determinization_period":determinization_period,"leaf":format!("{leaf:?}")});
     if profiling {
@@ -942,6 +1005,62 @@ mod tests {
         assert_eq!(controls.model_temperature, 2.0);
         assert_eq!(controls.leaf, Leaf::StateValue);
         assert_eq!(controls.policy_prior_weight, 0.0, "the hand-written action_score prior");
+        assert_eq!(controls.opponent_model, OpponentModel::Ranker,
+                   "the 1-ply ranker, called from outside the tree");
+    }
+
+    /// The whole correctness claim of `Minimax` in one assertion: values are
+    /// kept in the ROOT SEAT's frame, so an opponent node must prefer the move
+    /// that makes that value SMALLER. Getting this backwards would build a
+    /// search that helps its opponent -- which is exactly the max-max defect
+    /// Duel shipped for months before measuring it.
+    #[test]
+    fn an_opponent_node_minimises_the_root_seats_value() {
+        let observation = an_observation_whose_moves_need_reordering();
+        let mut node = Node::new(&observation);
+        assert!(node.edges.len() > 2, "fixture needs a real choice");
+        // Equal visits so the exploration term is identical across edges and
+        // only the mean can decide.
+        node.visits = 30;
+        for (index, edge) in node.edges.iter_mut().enumerate() {
+            edge.visits = 10;
+            edge.sum = 10.0 * (index as f64 / 10.0);
+        }
+        let best_for_us = node.edges.len() - 1;
+        assert_eq!(node.select(false), best_for_us, "our seat takes the highest value");
+        assert_eq!(node.select(true), 0, "the opponent takes the lowest");
+    }
+
+    /// Minimax must actually BUILD the opponent's half of the tree, and the two
+    /// seats' keys must not collide -- an observation embeds its own seat, so
+    /// they cannot, and this pins that rather than trusting it.
+    #[test]
+    fn minimax_gives_the_opponent_its_own_nodes() {
+        let (state, _) = State::new(22, [1, 2, 1]);
+        // Enough simulations to get PAST our own turn: an Orbit turn is several
+        // decisions by the same seat, so a small tree never reaches the
+        // opponent at all and the two models are trivially identical.
+        let config = Config { simulations: 512, max_depth: 64, budget_ms: 60000 };
+        // COHERENT, because minimax is meaningless without a tree: under
+        // per-simulation determinization every opponent node is fresh, so the
+        // descent breaks at the first one and the opponent half is never
+        // revisited. The two fixes are complementary, not independent.
+        let coherent = Controls { determinization_period: usize::MAX, ..Controls::default() };
+        let ranker = choose_with(&state, 0, 33, config, None, coherent).unwrap();
+        let minimax = choose_with(&state, 0, 33, config, None,
+                                  Controls { opponent_model: OpponentModel::Minimax,
+                                             ..coherent }).unwrap();
+        // Node TOTALS cannot show this: expanding an opponent node ends that
+        // simulation's descent, so it trades against nodes on our own side and
+        // the totals can move either way. Count the opponent's nodes directly.
+        assert_eq!(ranker["opponent_nodes"], json!(0),
+                   "the ranker never puts the opponent in the tree");
+        assert!(minimax["opponent_nodes"].as_u64().unwrap() > 0,
+                "minimax built no opponent nodes at all");
+        assert_ne!(ranker["nodes"], minimax["nodes"], "the trees must differ in shape");
+        assert_eq!(minimax["simulations"], json!(512), "same simulation budget");
+        // Seat 0 and seat 1 observe different things, so their node keys differ.
+        assert_ne!(state.observation(0).to_string(), state.observation(1).to_string());
     }
 
     /// What ships is stated separately from what reproduces. If these two ever

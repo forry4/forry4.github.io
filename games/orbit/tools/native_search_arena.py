@@ -114,6 +114,14 @@ def main():
                    help="Candidate seat: share of the PUCT prior taken from the policy head")
     p.add_argument("--opponent-policy-prior-weight",type=float,default=0.0,
                    help="Opponent seat: same, defaults to the hand-written prior")
+    # How the opponent's decisions are answered INSIDE the tree. "ranker" is the
+    # historical search: nodes for the searching seat only, every opponent
+    # decision answered by an external 1-ply heuristic call that costs 43% of
+    # search time. "minimax" gives the opponent its own nodes. Per request, not
+    # per seat: one side searching its opponent and the other not is two
+    # different algorithms.
+    p.add_argument("--opponent-model",choices=("ranker","minimax"),default="ranker",
+                   help="How opponent decisions are answered inside the tree")
     p.add_argument("--determinization-period",type=int,default=1,
                    help="Candidate seat: simulations per determinization; 0 = coherent")
     p.add_argument("--opponent-determinization-period",type=int,default=1,
@@ -164,6 +172,7 @@ def main():
     if args.opponent_simulations is not None:request["opponent_simulations"]=args.opponent_simulations
     request["leaf"]=args.leaf
     request["opponent_leaf"]=args.opponent_leaf
+    request["opponent_model"]=args.opponent_model
     request["policy_prior_weight"]=args.policy_prior_weight
     request["opponent_policy_prior_weight"]=args.opponent_policy_prior_weight
     request["determinization_period"]=args.determinization_period
@@ -209,6 +218,7 @@ def main():
             "opponent_determinization_period":args.opponent_determinization_period,
             "policy_prior_weight":args.policy_prior_weight,
             "opponent_policy_prior_weight":args.opponent_policy_prior_weight,
+            "opponent_model":args.opponent_model,
             "games":results,"seconds":time.perf_counter()-started,
             "mirror_control":mirror,
             "complete":process.returncode==0 and len(results)==len(jobs) and not any(r["error"] or r["censored"] for r in results)}
