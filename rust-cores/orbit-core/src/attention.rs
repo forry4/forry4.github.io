@@ -22,6 +22,7 @@ pub struct Model {
     layers: usize,
     weights: BTreeMap<String, Vec<f32>>,
     indexed: bool,
+    has_policy: bool,
     position_cache: Vec<f32>,
     encoder: Encoder,
     cache_tag: usize,
@@ -143,7 +144,28 @@ fn norm_into(weight: &[f32], bias: &[f32], x: &[f32], out: &mut [f32]) {
 }
 
 impl Model {
+    /// Load a model for a SEARCH. Fails closed on a policy head.
+    ///
+    /// The search still primes PUCT from the hand-written `action_score`, so a
+    /// policy model loaded here would train a prior that is then silently
+    /// ignored -- precisely the difference that reads as a failed training run
+    /// rather than as a wiring bug. `load_any` is the deliberate opt-in for
+    /// paths that evaluate the head instead of searching with it; delete this
+    /// wrapper once `Node::new` consumes the prior.
     pub fn load(v: &Value) -> Result<Self, String> {
+        let model = Self::load_any(v)?;
+        if model.has_policy {
+            return Err("Policy-head models need the native policy prior; not implemented".into());
+        }
+        Ok(model)
+    }
+
+    /// Whether this artifact carries a trained policy head.
+    pub fn has_policy(&self) -> bool {
+        self.has_policy
+    }
+
+    pub fn load_any(v: &Value) -> Result<Self, String> {
         // v4 adds an OPTIONAL policy head. A v4 artifact without one is
         // structurally identical to v3, so it loads unchanged.
         if !matches!(
@@ -151,14 +173,6 @@ impl Model {
             Some("orbit-attention-value-v2" | "orbit-attention-value-v3" | "orbit-attention-value-v4")
         ) {
             return Err("Model version mismatch".into());
-        }
-        // ...but a model that HAS a policy head must not load silently here:
-        // this search would keep using the hand-written `action_score` prior and
-        // quietly ignore the learned one, which is precisely the kind of
-        // difference that looks like a failed training run. Fail closed until
-        // the native prior is implemented.
-        if v["config"]["policy_head"] == true {
-            return Err("Policy-head models need the native policy prior; not implemented".into());
         }
         let encoder = Encoder::new(&v["vocabulary"])?;
         let dim = |key: &str| -> Result<usize, String> {
@@ -184,6 +198,11 @@ impl Model {
             ("summary",vec![1,1,d]),("pool.0.weight",vec![d,d]),("pool.0.bias",vec![d]),
             ("pool_count.weight",vec![d,1]),("norm.weight",vec![d]),("norm.bias",vec![d]),
             ("head.weight",vec![1,d]),("head.bias",vec![1])] { shapes.insert(key.into(),shape); }
+        let has_policy = v["config"]["policy_head"] == true;
+        if has_policy {
+            shapes.insert("policy.weight".into(), vec![1, d]);
+            shapes.insert("policy.bias".into(), vec![1]);
+        }
         for i in 0..l {
             for (key,shape) in [("self_attn.in_proj_weight",vec![3*d,d]),("self_attn.in_proj_bias",vec![3*d]),
                 ("self_attn.out_proj.weight",vec![d,d]),("self_attn.out_proj.bias",vec![d]),
@@ -206,7 +225,7 @@ impl Model {
             weights.insert(key,data);
         }
         let mut model=Self{vocabulary:v["vocabulary"].clone(),width:d,heads:h,layers:l,weights,indexed,
-            position_cache:Vec::new(), encoder,
+            has_policy, position_cache:Vec::new(), encoder,
             cache_tag:NEXT_MODEL_TAG.fetch_add(1, Ordering::Relaxed)};
         // The position MLP is independent of the observation.  Build it once
         // while loading instead of rebuilding it for every row of every leaf.
@@ -243,16 +262,44 @@ impl Model {
         self.encoder.encode_typed(tokens)
     }
 
+    /// Tokens to rows, plus the `legal move index -> entity id` map the policy
+    /// head is gathered at. Both come from one pass so they cannot disagree.
+    pub fn encode_tokens_with_actions(&self, tokens: &Value)
+        -> Result<(Vec<TensorRow>, Vec<usize>), String> {
+        self.encoder.encode_with_actions(tokens)
+    }
+
     /// Evaluate typed rows without a JSON allocation on the search leaf path.
     pub fn logit_typed(&self, rows: &[TensorRow]) -> Result<f32,String> {
         if rows.is_empty() { return Err("Empty position".into()); }
         LOGIT_SCRATCH.with(|cell| {
             let mut scratch = cell.borrow_mut();
-            self.logit_into(rows, &mut scratch)
+            let mut unused = Vec::new();
+            self.logit_into(rows, &mut scratch, &[], &mut unused)
         })
     }
 
-    fn logit_into(&self, rows: &[TensorRow], scratch: &mut LogitScratch) -> Result<f32,String> {
+    /// The value logit AND one policy logit per legal move, in the
+    /// observation's own move order.
+    ///
+    /// `actions` comes from `Encoder::encode_with_actions`; the two must be
+    /// produced from the SAME tokens or the logits line up with the wrong
+    /// moves, which trains and serves a quietly misaligned prior.
+    pub fn value_and_policy(&self, rows: &[TensorRow], actions: &[usize])
+        -> Result<(f32, Vec<f32>), String> {
+        if rows.is_empty() { return Err("Empty position".into()); }
+        if !self.has_policy { return Err("Model has no policy head".into()); }
+        if actions.is_empty() { return Err("No legal moves to score".into()); }
+        LOGIT_SCRATCH.with(|cell| {
+            let mut scratch = cell.borrow_mut();
+            let mut policy = Vec::with_capacity(actions.len());
+            let value = self.logit_into(rows, &mut scratch, actions, &mut policy)?;
+            Ok((value, policy))
+        })
+    }
+
+    fn logit_into(&self, rows: &[TensorRow], scratch: &mut LogitScratch,
+                  actions: &[usize], policy: &mut Vec<f32>) -> Result<f32,String> {
         let d = self.width;
         // A scratch workspace is shared by all Model values on one worker
         // thread.  Pooled vectors depend on weights, so invalidate them when
@@ -512,6 +559,28 @@ impl Model {
         let result = scratch.out[0];
         if !result.is_finite() {
             return Err("Non-finite model result".into());
+        }
+        if !actions.is_empty() {
+            // Entity `e` sits at row `e` of the post-block workspace, exactly as
+            // the Python head gathers at `action_entity`: `pooled` is scatter
+            // indexed by entity id and the summary token occupies row 0.
+            let policy_weight = self.weights.get("policy.weight")
+                .ok_or("Model has no policy head")?.as_slice();
+            let policy_bias = self.weights.get("policy.bias")
+                .ok_or("Model has no policy head")?[0];
+            policy.clear();
+            for &entity in actions {
+                if entity == 0 || entity >= entity_count {
+                    return Err("Action entity is outside the encoded observation".into());
+                }
+                norm_into(norm_weight, norm_bias, &scratch.x[entity][..d],
+                          &mut scratch.norm[..d]);
+                let logit = dot(policy_weight, &scratch.norm[..d]) + policy_bias;
+                if !logit.is_finite() {
+                    return Err("Non-finite policy logit".into());
+                }
+                policy.push(logit);
+            }
         }
         scratch.active_entities = entity_count;
         Ok(result)

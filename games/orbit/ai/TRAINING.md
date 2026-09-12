@@ -323,3 +323,41 @@ simulations, because an equal-time arena cannot reproduce itself exactly. It
 also requires every per-seat control to match — count, leaf and determinization
 regime — since a mirror is held to reading exactly 0.5000 and claiming one
 across differing seats asserts something untrue.
+
+## Policy-head parity (`policy_parity`)
+
+```powershell
+cargo build --release --bin attention_bridge
+python -m games.orbit.tools.policy_parity --fresh --games 4
+python -m games.orbit.tools.policy_parity <checkpoint.pt> --games 4
+```
+
+Holds the native policy head to the PyTorch head it was ported from. 709
+positions currently agree to a maximum absolute logit delta of **6.6e-07**
+against a 1e-4 tolerance (the same bound `attention_parity` uses for the value
+logit), and the resulting PRIOR to 1.1e-07.
+
+The head is a **gather**: each logit is read out of the row belonging to that
+move's entity, and entity ids are handed out in token order by two independent
+implementations — `tensors.py` and `tensors.rs`. A mismatch does not crash and
+does not look wrong. It scores move 3 with move 5's logit and then trains and
+serves a prior that is merely shuffled, which reads downstream as a training run
+that did not work.
+
+So the harness compares the softmax as well as the logits. A constant shift
+leaves the prior identical and is not a defect; a permutation leaves neither
+identical, and it is the distribution check that actually catches a bad gather.
+**Verified non-vacuous** by reversing the action map in the bridge and rebuilding:
+the logit delta went to 1.93 and the prior moved 0.175.
+
+`--fresh` fits an untrained head on exactly the positions it will then be
+compared on, so the port can be checked before any policy model exists. Fitting
+on a different or shorter line hits an unseen category part-way through the walk
+— a harness failure wearing a parity failure's costume, which is what the first
+version of this tool did.
+
+**The search still fails closed on a policy model.** `Model::load` refuses one,
+because `Node::new` primes PUCT from the hand-written `action_score` and would
+silently ignore a trained prior. `Model::load_any` is the deliberate opt-in for
+paths that evaluate the head instead of searching with it; delete the wrapper
+once the prior is consumed.

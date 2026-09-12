@@ -8,11 +8,17 @@ fn main() {
         let result = line.map_err(|e|e.to_string()).and_then(|s|serde_json::from_str::<Value>(&s).map_err(|e|e.to_string()))
             .and_then(|v| {
                 if let Some(artifact) = v.get("model") {
-                    model = Some(orbit_core::attention::Model::load(artifact)?);
+                    // `load_any` so this process can EVALUATE a policy head.
+                    // Searching with one is still refused below, because the
+                    // search has not been wired to consume the prior yet.
+                    model = Some(orbit_core::attention::Model::load_any(artifact)?);
                     Ok(json!({"loaded":true}))
                 } else {
                     let m = model.as_ref().ok_or("Model not loaded")?;
                     if let Some(state)=v.get("search_state") {
+                        if m.has_policy() {
+                            return Err("Policy-head models need the native policy prior; not implemented".into());
+                        }
                         let state:orbit_core::State=serde_json::from_value(state.clone()).map_err(|e|e.to_string())?;
                         state.validate()?;
                         let config=orbit_core::search::Config{
@@ -23,6 +29,14 @@ fn main() {
                             v["seed"].as_u64().unwrap_or(0),config,if v["heuristic"]==true {None}else{Some(m)});
                     }
                     let started = std::time::Instant::now();
+                    if v["policy"] == true {
+                        let obs = v.get("observation").ok_or("Policy parity needs an observation")?;
+                        let tokens = orbit_core::features::encode(obs,v.get("history"))?;
+                        let (rows, actions) = m.encode_tokens_with_actions(&tokens)?;
+                        let (value, policy) = m.value_and_policy(&rows, &actions)?;
+                        return Ok(json!({"logit":value,"policy":policy,"actions":actions,
+                            "elapsed_ms":started.elapsed().as_secs_f64()*1000.0}));
+                    }
                     let value = if let Some(obs) = v.get("observation") {
                         let tokens = orbit_core::features::encode(obs,v.get("history"))?;
                         let rows = m.encode_tokens(&tokens)?;

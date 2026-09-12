@@ -83,6 +83,27 @@ impl Encoder {
     }
 
     pub fn encode_typed(&self, tokens: &Value) -> Result<Vec<TensorRow>, String> {
+        let mut actions = Vec::new();
+        self.encode_collect(tokens, &mut actions)
+    }
+
+    /// Rows plus `legal move index -> entity id`.
+    ///
+    /// A policy head needs its logits lined up with the observation's OWN move
+    /// order, and entity ids are handed out in token order, so the map cannot be
+    /// reconstructed afterwards. Collected here rather than recomputed by a
+    /// caller so it cannot drift from the entity key that produced it -- the
+    /// same reason `tensors.py` grew `action_entities`.
+    pub fn encode_with_actions(&self, tokens: &Value) -> Result<(Vec<TensorRow>, Vec<usize>), String> {
+        let mut actions = Vec::new();
+        let rows = self.encode_collect(tokens, &mut actions)?;
+        if actions.iter().any(|&entity| entity == 0) {
+            return Err("A legal move produced no tokens, so it has no entity".into());
+        }
+        Ok((rows, actions))
+    }
+
+    fn encode_collect(&self, tokens: &Value, actions: &mut Vec<usize>) -> Result<Vec<TensorRow>, String> {
         let tokens = tokens.as_array().ok_or("Missing tokens")?;
         let observer = tokens.iter().find_map(|token| {
             let path = token["path"].as_array()?;
@@ -116,6 +137,21 @@ impl Encoder {
             let key_string = serde_json::to_string(&entity_key).map_err(|e| e.to_string())?;
             let next = entities.len() + 1;
             let entity = *entities.entry(key_string).or_insert(next);
+            if first == Some("legal_moves") {
+                if let Some(index) = parts.get(1).and_then(Value::as_u64) {
+                    let index = index as usize;
+                    if index > 4096 {
+                        return Err("Legal move index out of range".into());
+                    }
+                    if actions.len() <= index {
+                        actions.resize(index + 1, 0);
+                    }
+                    // First token wins, matching `action_entities.setdefault`.
+                    if actions[index] == 0 {
+                        actions[index] = entity;
+                    }
+                }
+            }
 
             let mut template = Vec::with_capacity(parts.len());
             let mut positions = Vec::new();
@@ -307,6 +343,68 @@ mod tests {
         let typed = encoder.encode_typed(&request["tokens"]).unwrap();
         assert_eq!(json!(typed.iter().map(TensorRow::as_value).collect::<Vec<_>>()), encode(&request).unwrap());
     }
+    /// Tokens for two legal moves, each carrying two fields, plus an unrelated
+    /// token so entity ids are not trivially 1 and 2.
+    fn action_fixture() -> Value {
+        let mut request = fixture();
+        // The vocabulary is required to be sorted and unique.
+        request["vocabulary"]["paths"] = json!(["[\"legal_moves\",null,\"count\"]",
+                                                "[\"legal_moves\",null,\"kind\"]",
+                                                "[\"players\",null,\"credits\"]"]);
+        request["tokens"] = json!([
+            {"group":"resources","kind":"number","path":["players",0,"credits"],"value":40},
+            {"group":"legal_actions","kind":"number","path":["legal_moves",0,"count"],"value":1},
+            {"group":"legal_actions","kind":"number","path":["legal_moves",1,"count"],"value":2},
+            {"group":"legal_actions","kind":"number","path":["legal_moves",0,"kind"],"value":3},
+        ]);
+        request
+    }
+
+    #[test]
+    fn the_action_map_names_the_entity_each_move_actually_owns() {
+        // The policy head GATHERS at these ids. A wrong one does not crash and
+        // does not look wrong -- it scores a move with another move's logit.
+        let request = action_fixture();
+        let encoder = Encoder::new(&request["vocabulary"]).unwrap();
+        let (rows, actions) = encoder.encode_with_actions(&request["tokens"]).unwrap();
+        assert_eq!(actions.len(), 2, "one slot per legal move");
+        assert_ne!(actions[0], actions[1], "moves must not share an entity");
+        // Row 1 is move 0's `count`, row 2 is move 1's `count`.
+        assert_eq!(actions[0], rows[1].entity);
+        assert_eq!(actions[1], rows[2].entity);
+        // Row 3 is move 0's SECOND field and must land in the same entity, or
+        // the head would be reading a per-field row rather than a per-move one.
+        assert_eq!(rows[3].entity, actions[0]);
+        assert!(!actions.contains(&0), "zero is the padding entity");
+    }
+
+    #[test]
+    fn the_action_map_is_indexed_by_move_not_by_arrival_order() {
+        // Move 1's token arrives before move 0's here; the map must still be
+        // keyed on the move's own index.
+        let mut request = action_fixture();
+        request["tokens"] = json!([
+            {"group":"legal_actions","kind":"number","path":["legal_moves",1,"count"],"value":2},
+            {"group":"legal_actions","kind":"number","path":["legal_moves",0,"count"],"value":1},
+        ]);
+        let encoder = Encoder::new(&request["vocabulary"]).unwrap();
+        let (rows, actions) = encoder.encode_with_actions(&request["tokens"]).unwrap();
+        assert_eq!(actions[1], rows[0].entity);
+        assert_eq!(actions[0], rows[1].entity);
+    }
+
+    #[test]
+    fn a_move_with_no_tokens_is_an_error_not_a_padding_entity() {
+        // Silently leaving a zero here would gather the SUMMARY token's row for
+        // that move, which is a plausible-looking logit for an arbitrary action.
+        let mut request = action_fixture();
+        request["tokens"] = json!([
+            {"group":"legal_actions","kind":"number","path":["legal_moves",1,"count"],"value":2},
+        ]);
+        let encoder = Encoder::new(&request["vocabulary"]).unwrap();
+        assert!(encoder.encode_with_actions(&request["tokens"]).is_err());
+    }
+
     #[test]
     fn rejects_stale_unknown_and_inexact_inputs() {
         let mut request = fixture();
