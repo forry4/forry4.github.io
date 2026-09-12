@@ -59,15 +59,34 @@ LOG = logging.getLogger("orbit")
 TABLE = "orbit_games"
 AI_PID = "bot"
 
-# Easy keeps the original random opponent, Normal keeps the original public
-# ranker, and Hard is the effect-aware browser-served tier. Every client
-# answer is still checked by the Python engine and a silent/old/slow browser
-# falls back to the matching server path.
+# The ladder shifted down a peg on 2026-09-11 to make room at the top for the
+# coherent-determinization search. Each NAME now points one rung stronger than
+# it used to, and the random opponent left the product ladder entirely:
+#
+#   easy    the original public-information ranker   (was normal)
+#   normal  the effect-aware ranker                  (was hard)
+#   hard    the search, per-simulation worlds        (was expert)
+#   expert  the search, one COHERENT world           (new)
+#
+# `bot.choose_move` -- the random opponent -- is deliberately kept even though
+# no tier serves it: it is the correctness baseline the offline arenas and the
+# engine tests measure against, not just the weakest menu row.
 AI_DIFFICULTIES = ("easy", "normal", "hard", "expert")
-# Both browser tiers use the same versioned boundary and the same validated
-# server fallback; Expert asks the worker to SEARCH the decision rather than
-# rank it, which is why it carries a tier on the wire.
+# Rooms persist this name, so a room saved BEFORE the shift means one rung
+# weaker than the same name means now. `AI_TIER_GENERATION` stamps rooms saved
+# after it; a room without the stamp is remapped on load so a game in progress
+# keeps the opponent it was actually started against.
+AI_TIER_GENERATION = 2
+_PRE_SHIFT_DIFFICULTY = {"easy": "easy", "normal": "easy", "hard": "normal", "expert": "hard"}
+# Both browser tiers SEARCH through the same versioned boundary and share the
+# same validated server fallback. They differ only in how often the search
+# resamples the hidden world: Hard draws a fresh one every simulation, Expert
+# holds one coherent world for the whole call. That is why the tier travels on
+# the wire -- the worker needs it to pick the regime.
 CLIENT_AI_TIERS = ("hard", "expert")
+# Simulations per determinization, sent to the worker. 0 asks for one coherent
+# world for the whole decision.
+CLIENT_AI_DETERMINIZATION = {"hard": 1, "expert": 0}
 DEFAULT_DIFFICULTY = "easy"
 CLIENT_AI_WIRE = serving.SERVING_ABI_VERSION
 CLIENT_AI_MODEL_VERSION = serving.MODEL_VERSION
@@ -144,6 +163,23 @@ def _valid_difficulty(value) -> str:
     if value == "random":
         return "easy"
     return value if value in AI_DIFFICULTIES else DEFAULT_DIFFICULTY
+
+
+def _loaded_difficulty(state) -> str:
+    """Read a persisted tier, remapping rooms saved before the ladder shifted.
+
+    The 2026-09-11 shift moved every NAME one rung stronger. A room saved before
+    it therefore means something weaker by the same name, and reading it
+    literally would hand a game in progress a stronger opponent than the one it
+    was started against -- mid-game, without the player choosing it. Rooms saved
+    since carry `ai_tier_generation`; anything without it is pre-shift and is
+    mapped back to the tier that plays the same bot.
+    """
+
+    difficulty = _valid_difficulty(state.get("ai_difficulty"))
+    if int(state.get("ai_tier_generation") or 0) >= AI_TIER_GENERATION:
+        return difficulty
+    return _PRE_SHIFT_DIFFICULTY.get(difficulty, difficulty)
 
 
 def _requested_difficulty(value) -> str:
@@ -523,6 +559,9 @@ def save_game(room_id: str) -> None:
         "vs_ai": room.get("vs_ai", False),
         "ai_player": room.get("ai_player"),
         "ai_difficulty": _valid_difficulty(room.get("ai_difficulty")),
+        # Stamp which ladder these tier names belong to, so a room saved before
+        # the 2026-09-11 shift stays readable as the bot it was started against.
+        "ai_tier_generation": AI_TIER_GENERATION,
         "seat_histories": room.get("seat_histories", {}),
         "ai_memory": room.get("ai_memory", {}),
         # Wall-clock time survives a reconnect or a process reload.  It is
@@ -569,7 +608,7 @@ def load_game_to_memory(room_id: str) -> bool:
         "meta": state.get("meta", {}),
         "vs_ai": state.get("vs_ai", False),
         "ai_player": state.get("ai_player"),
-        "ai_difficulty": _valid_difficulty(state.get("ai_difficulty")),
+        "ai_difficulty": _loaded_difficulty(state),
         "seat_histories": histories,
         "ai_memory": _loaded_ai_memory(state.get("ai_memory"), (game or {}).get("order", [])),
         "ai_turn_started_at": state.get("ai_turn_started_at"),
@@ -754,13 +793,14 @@ def _position_key(g: dict) -> str:
 
 
 def _bot_move_sync(g: dict, pid: str, seed: int, difficulty: str = "easy"):
-    # Expert falls back to the Hard ranker server-side: the search lives in the
-    # browser worker, and the server's job here is a fast validated answer.
-    if difficulty in ("hard", "expert"):
+    # Both search tiers fall back to the effect-aware ranker server-side: the
+    # search lives in the browser worker, and the server's job here is a fast
+    # validated answer, not a second search on the event loop.
+    if difficulty in ("hard", "expert", "normal"):
         return bot.choose_fallback_move(g, pid, seed)
-    if difficulty == "normal":
-        return bot.choose_normal_fallback_move(g, pid, seed)
-    return bot.choose_move(g, pid, seed)
+    # Easy is now the original public-information ranker. The random opponent
+    # is no longer served; it remains in `bot` as the offline baseline.
+    return bot.choose_normal_fallback_move(g, pid, seed)
 
 
 def _bot_turn_active(room: dict) -> bool:

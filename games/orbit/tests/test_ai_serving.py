@@ -136,6 +136,65 @@ def test_arming_a_browser_turn_carries_the_tier_and_its_split_budget():
         assert armed["legal_moves"] and armed["observation"]["seat"] in (0, 1)
 
 
+def test_each_tier_serves_the_bot_the_shifted_ladder_promises():
+    """Pin the tier -> bot mapping after the 2026-09-11 shift.
+
+    The whole suite passed while this mapping moved a rung, so nothing covered
+    it. Easy is now the public-information ranker and the random opponent is off
+    the product ladder entirely; both search tiers fall back to the effect-aware
+    ranker server-side, because the search lives in the browser and the server
+    owes a fast validated answer rather than a second search on the event loop.
+    """
+    game = _game(5)
+    for pid in list(game["order"]):
+        m.engine.apply_move(game, pid, {"action": "mulligan", "card_ids": []})
+    pid = game["turn_pid"]
+    served = {tier: m._bot_move_sync(copy.deepcopy(game), pid, 11, tier)
+              for tier in m.AI_DIFFICULTIES}
+    public = m.bot.choose_normal_fallback_move(copy.deepcopy(game), pid, 11)
+    effect = m.bot.choose_fallback_move(copy.deepcopy(game), pid, 11)
+    assert served["easy"] == public
+    for tier in ("normal", "hard", "expert"):
+        assert served[tier] == effect, f"{tier} served the wrong bot"
+    # Non-vacuous only if the two rankers actually disagree on this position;
+    # otherwise the assertions above would hold for any wiring at all.
+    assert public != effect, "fixture cannot tell the two rankers apart"
+
+
+def test_a_room_saved_before_the_shift_keeps_the_bot_it_started_against():
+    """Rooms persist a tier NAME, and every name moved one rung stronger.
+
+    Read literally, a game in progress would silently face a stronger opponent
+    than the one it was started against. Rooms saved since the shift carry
+    `ai_tier_generation`; anything without it is pre-shift and maps back.
+    """
+    for before, after in (("expert", "hard"), ("hard", "normal"),
+                          ("normal", "easy"), ("easy", "easy")):
+        assert m._loaded_difficulty({"ai_difficulty": before}) == after
+    for tier in m.AI_DIFFICULTIES:
+        stamped = {"ai_difficulty": tier, "ai_tier_generation": m.AI_TIER_GENERATION}
+        assert m._loaded_difficulty(stamped) == tier
+    # The remap is only safe because saving stamps the generation; without that
+    # write every room would be demoted one rung on its next load, forever. The
+    # persisted dict is built inline in `save_game`, so this reads the source.
+    source = (Path(__file__).resolve().parents[1] / "main.py").read_text(encoding="utf-8")
+    assert '"ai_tier_generation": AI_TIER_GENERATION,' in source, "saving no longer stamps the ladder"
+
+
+def test_both_browser_tiers_search_and_only_expert_holds_one_world():
+    """The worker must serve TWO searches, differing only in determinization.
+
+    Hard resamples the hidden hand every simulation; Expert holds one coherent
+    world for the whole call, which is the change that restores the tree. The
+    worker is a shipped artifact rather than an import, so this reads it as text.
+    """
+    worker = (Path(__file__).resolve().parents[3] / "webapp/public/wasm/orbit-worker.js").read_text(encoding="utf-8")
+    assert 'message.tier === "expert" ? 0 : 1' in worker, "the tier no longer picks a determinization period"
+    assert '(message.tier === "expert" || message.tier === "hard")' in worker, "Hard must search too"
+    assert m.CLIENT_AI_DETERMINIZATION == {"hard": 1, "expert": 0}
+    assert set(m.CLIENT_AI_DETERMINIZATION) == set(m.CLIENT_AI_TIERS)
+
+
 def test_an_unknown_tier_from_a_newer_bundle_clamps_up_not_down():
     """A newer client must never be silently handed the random bot.
 

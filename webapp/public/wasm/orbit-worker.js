@@ -305,15 +305,21 @@ self.onmessage = async (event) => {
     const observation = typeof message.observation === "string" ? JSON.parse(message.observation) : message.observation;
     const legal = typeof message.legal_moves === "string" ? JSON.parse(message.legal_moves) : (message.legal_moves || observation?.legal_moves || []);
     let answer = null;
-    // Expert searches THIS decision inside its own allowance (budget_ms, already
-    // split from the whole turn by the server) and rebuilds a world from the
-    // observation to do it.  It refuses pending chains, which the observation
-    // redacts, and says so via fell_back -- so an Expert room degrades to the
-    // Hard ranker per decision rather than per game.  A build without the export
-    // (a cached asset, a js-fallback worker) takes the ranker path unchanged.
-    if (message.tier === "expert" && optionalWasm && typeof optionalWasm.orbit_search_move_json === "function") {
+    // BOTH search tiers search THIS decision inside its own allowance
+    // (budget_ms, already split from the whole turn by the server), rebuilding a
+    // world from the observation to do it.  They differ only in how often that
+    // world is resampled: Hard draws a fresh one per simulation, Expert holds
+    // ONE coherent world for the whole call, which is what restores the tree.
+    // Both refuse pending chains, which the observation redacts, and say so via
+    // fell_back -- so a room degrades to the ranker per decision, not per game.
+    // A build without the export (a cached asset, a js-fallback worker) takes
+    // the ranker path unchanged, and an older wasm that ignores the extra
+    // argument simply searches per-simulation, which is today's behaviour.
+    const period = message.tier === "expert" ? 0 : 1;
+    if ((message.tier === "expert" || message.tier === "hard")
+      && optionalWasm && typeof optionalWasm.orbit_search_move_json === "function") {
       const allowance = Number(message.budget_ms) || Number(message.remaining_turn_budget) || 0;
-      const raw = optionalWasm.orbit_search_move_json(JSON.stringify(observation), JSON.stringify(legal), JSON.stringify(message.memory || {}), allowance, Number(message.seed) || 0);
+      const raw = optionalWasm.orbit_search_move_json(JSON.stringify(observation), JSON.stringify(legal), JSON.stringify(message.memory || {}), allowance, Number(message.seed) || 0, period);
       answer = typeof raw === "string" ? JSON.parse(raw) : raw;
     }
     if (!answer || !answer.move) {

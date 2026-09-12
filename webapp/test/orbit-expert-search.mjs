@@ -43,14 +43,23 @@ try {
           for (let index = 0; index < fixture.positions.length; index += 1) {
             const item = fixture.positions[index];
             const started = performance.now();
+            // Hard and Expert differ ONLY in this argument, so the gate runs
+            // both: 1 resamples the hidden world every simulation, 0 holds one
+            // coherent world for the whole call.
             const raw = orbit_search_move_json(
               JSON.stringify(item.observation), JSON.stringify(item.legal_moves),
-              JSON.stringify({}), item.budget_ms, 12345);
+              JSON.stringify({}), item.budget_ms, 12345, 1);
+            const coherentStarted = performance.now();
+            const coherentRaw = orbit_search_move_json(
+              JSON.stringify(item.observation), JSON.stringify(item.legal_moves),
+              JSON.stringify({}), item.budget_ms, 12345, 0);
             // Identity is the INDEX, not the label: two seats can legitimately
             // share a label (both mulligan on turn 0), and matching by label
             // silently checked one position against another's legal list.
-            results.push({ index, label: item.label, elapsed: performance.now()-started,
-                           answer: JSON.parse(raw), legal: item.legal_moves.length });
+            results.push({ index, label: item.label, elapsed: coherentStarted-started,
+                           answer: JSON.parse(raw), coherent: JSON.parse(coherentRaw),
+                           coherentElapsed: performance.now()-coherentStarted,
+                           legal: item.legal_moves.length });
           }
           postMessage({ results });
         } catch (error) { postMessage({ error: String(error && error.stack || error) }); }
@@ -82,7 +91,27 @@ try {
       else if (!(answer.simulations > 0)) failures.push(`${where}: reported ${answer.simulations} simulations`);
       else if (!Array.isArray(answer.stats) || !answer.stats.length) failures.push(`${where}: no root visits to sum across the pool`);
       else if (result.elapsed > item.budget_ms * 3 + 500) failures.push(`${where}: took ${Math.round(result.elapsed)}ms against a ${item.budget_ms}ms budget`);
-      else console.log(`  ok  ${where}: ${answer.simulations} simulations in ${Math.round(result.elapsed)}ms of ${item.budget_ms}ms`);
+      else {
+        // The coherent world is the whole point of the Expert tier, so assert
+        // the MECHANISM, not just that it ran. Holding one world lets a node be
+        // reached twice; resampling every simulation means almost none is, so
+        // the per-simulation arm expands close to one new node per simulation
+        // and the coherent arm must expand meaningfully fewer.
+        const co = result.coherent;
+        const perSimNodes = answer.nodes / Math.max(1, answer.simulations);
+        const coherentNodes = co.nodes / Math.max(1, co.simulations);
+        if (co.error || !co.move || !allowed.has(key(co.move))) {
+          failures.push(`${where}: coherent search returned ${co.error || 'an illegal move'}`);
+        } else if (co.fell_back || !(co.simulations > 0)) {
+          failures.push(`${where}: coherent search fell back instead of searching`);
+        } else if (!(coherentNodes < perSimNodes)) {
+          failures.push(`${where}: coherent built no more tree than per-simulation `
+            + `(${coherentNodes.toFixed(2)} vs ${perSimNodes.toFixed(2)} new nodes/simulation)`);
+        } else {
+          console.log(`  ok  ${where}: ${answer.simulations} sims in ${Math.round(result.elapsed)}ms`
+            + ` | new nodes/sim per-sim ${perSimNodes.toFixed(2)} -> coherent ${coherentNodes.toFixed(2)}`);
+        }
+      }
     }
     if (item.expect === 'fallback') {
       if (!answer.fell_back) failures.push(`${where}: searched a position it cannot reconstruct`);

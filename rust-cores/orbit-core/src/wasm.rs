@@ -102,6 +102,7 @@ pub fn orbit_search_move_json(
     memory_json: &str,
     budget_ms: f64,
     seed: u32,
+    determinization_period: f64,
 ) -> String {
     let result: Result<Value, String> = (|| {
         let observation = parse_object(observation_json, "observation")?;
@@ -121,7 +122,27 @@ pub fn orbit_search_move_json(
                     max_depth: 96,
                     budget_ms: budget,
                 };
-                let mut result = crate::search::choose(&world, seat, seed as u64, config, None)?;
+                // The wasm and the worker are separate cached artifacts on the
+                // same filename, so a browser can hold one without the other.
+                // An absent argument arrives as NaN, and both NaN and 1 mean the
+                // historical per-simulation determinization -- so an old worker
+                // against this build still gets exactly today's search, and a
+                // new worker against an old build loses the argument and gets
+                // the same. Only 0 asks for the coherent world.
+                let period = if determinization_period.is_finite() && determinization_period >= 0.0 {
+                    match determinization_period.round() as u64 {
+                        0 => usize::MAX,
+                        n => n as usize,
+                    }
+                } else {
+                    1
+                };
+                let controls = crate::search::Controls {
+                    determinization_period: period,
+                    ..Default::default()
+                };
+                let mut result =
+                    crate::search::choose_with(&world, seat, seed as u64, config, None, controls)?;
                 let result_stats = result["stats"].as_array().cloned().unwrap_or_default();
                 // A search that ran no simulations has decided nothing; the
                 // ranker is the better answer, not a random prior.

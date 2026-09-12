@@ -85,9 +85,10 @@ export function orbit_neural_value_json(raw) {
  * @param {string} memory_json
  * @param {number} budget_ms
  * @param {number} seed
+ * @param {number} determinization_period
  * @returns {string}
  */
-export function orbit_search_move_json(observation_json, legal_moves_json, memory_json, budget_ms, seed) {
+export function orbit_search_move_json(observation_json, legal_moves_json, memory_json, budget_ms, seed, determinization_period) {
     let deferred4_0;
     let deferred4_1;
     try {
@@ -97,7 +98,7 @@ export function orbit_search_move_json(observation_json, legal_moves_json, memor
         const len1 = WASM_VECTOR_LEN;
         const ptr2 = passStringToWasm0(memory_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len2 = WASM_VECTOR_LEN;
-        const ret = wasm.orbit_search_move_json(ptr0, len0, ptr1, len1, ptr2, len2, budget_ms, seed);
+        const ret = wasm.orbit_search_move_json(ptr0, len0, ptr1, len1, ptr2, len2, budget_ms, seed, determinization_period);
         deferred4_0 = ret[0];
         deferred4_1 = ret[1];
         return getStringFromWasm0(ret[0], ret[1]);

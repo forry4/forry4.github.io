@@ -774,10 +774,10 @@ function Lobby({ authUser, myId, onExit, openGames, myGames, history, historySho
         { value: "ai", label: "VS AI" },
       ]} /></CmRow>
       {createOpp === "ai" && <CmRow label="AI difficulty"><CmSeg value={createDifficulty} onChange={setCreateDifficulty} options={[
-        { value: "easy", label: "Easy", title: "Random legal moves" },
-        { value: "normal", label: "Normal", title: "Public-information ranker" },
-        { value: "hard", label: "Hard", title: "Effect-aware browser policy with a validated server fallback" },
-        { value: "expert", label: "Expert", title: "Searches its main action in your browser; ranks follow-up choices" },
+        { value: "easy", label: "Easy", title: "Public-information ranker" },
+        { value: "normal", label: "Normal", title: "Effect-aware ranker with a validated server fallback" },
+        { value: "hard", label: "Hard", title: "Searches its main action in your browser, resampling the hidden hand every simulation" },
+        { value: "expert", label: "Expert", title: "Searches its main action against one coherent hidden world; the strongest tier" },
       ]} wrap /></CmRow>}
       <div className="cm-footer"><span className="cm-summary">Creating: <b>{selectedOpponent === "friend" ? "vs Friend" : `vs ${difficultyName[selectedOpponent] || "Hard"} AI`}</b></span>
         <button type="button" className="cm-create" onClick={() => createGame(createOpp === "ai", createDifficulty)}>Create Game</button></div>
