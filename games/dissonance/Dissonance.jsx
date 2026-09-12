@@ -2,7 +2,7 @@ import { Fragment, useState, useEffect, useLayoutEffect, useRef, useCallback, us
 import { baseCss } from "../../shared/theme.js";
 import {
   lobbyCss, LobbyHeader, LobbySectionHd, LobbyEmpty, TurnBadge, LobbyMatchup, LobbyLoading,
-  LobbyTabs, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
+  LobbyTabs, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame,
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss,
   useProgressiveList, notWaiting, LobbyAction, useLastDifficulty, LobbyHero,
@@ -1754,6 +1754,12 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
   }, []);
 
   useEffect(() => { if (screen === "lobby") fetchGames(); }, [screen, fetchGames]);
+  // The game you just finished leaves Active and joins History the moment it
+  // ENDS, not when the lobby next loads — see useFinishedGameSync (shared kit).
+  useFinishedGameSync(roomData?.status === "over", roomData?.room_id, (rid) => {
+    dropLobbyGame("dissonance", myId, "mine", rid, setMyGames);
+    fetchGames();
+  });
   useEffect(() => () => disconnect(), []); // eslint-disable-line
 
   // ── client-side (WASM) bot search ──────────────────────────────────────────

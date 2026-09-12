@@ -3,7 +3,7 @@ import { baseCss } from "../../shared/theme.js";
 import { useCardInfoGesture } from "../../shared/gestures.js";
 import {
   lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyMatchup, LobbyLoading, GameMenu, gameMenuCss,
-  readLobbyCache, writeLobbyCache, createModalCss, CreateModal, CmRow, CmSeg,
+  readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame, createModalCss, CreateModal, CmRow, CmSeg,
   notWaiting, LobbyAction,
   LobbyCreateRow, lobbyCreateRowCss, useProgressiveList, LobbyTabs, useLastDifficulty,
   LobbyHero, LobbyUser, useListFade,
@@ -1302,6 +1302,12 @@ export default function Dontminion({ myId, authUser, onExit }) {
   }, [authUser, myId]);
 
   useEffect(() => { if (screen === "lobby") fetchGames(); }, [screen, fetchGames]);
+  // The game you just finished leaves Active and joins History the moment it
+  // ENDS, not when the lobby next loads — see useFinishedGameSync (shared kit).
+  useFinishedGameSync(roomData?.status === "over", roomData?.room_id, (rid) => {
+    dropLobbyGame("dontminion", myId, "mine", rid, setMyGames);
+    fetchGames();
+  });
   useEffect(() => { return () => disconnect(); }, []); // eslint-disable-line
 
   // ── URL deep entry + popstate ──

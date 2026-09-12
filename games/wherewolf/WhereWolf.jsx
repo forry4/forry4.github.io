@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { baseCss } from "../../shared/theme.js";
-import { lobbyCss, LobbyHeader, LobbySectionHd, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
+import { lobbyCss, LobbyHeader, LobbySectionHd, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame,
   createModalCss, CreateModal, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss, LobbyHero, LobbyAction, LobbyTabs, timeAgo,
   notWaiting, LobbyUser, useListFade } from "../../shared/lobby.jsx";
@@ -353,6 +353,12 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   }, [authUser, myId]);
 
   useEffect(() => { if (screen === "lobby") fetchGames(); }, [screen, fetchGames]);
+  // The game you just finished leaves Active and joins History the moment it
+  // ENDS, not when the lobby next loads — see useFinishedGameSync (shared kit).
+  useFinishedGameSync(roomData?.status === "over", roomData?.room_id, (rid) => {
+    dropLobbyGame("ww", myId, "mine", rid, setMyGames);
+    fetchGames();
+  });
 
   // Mount: do NOT auto-resume a saved game — it snapped you from the lobby into the game
   // on load (jarring). Resume is EXPLICIT via the lobby's Rejoin button. Keep only the

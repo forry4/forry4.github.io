@@ -281,6 +281,23 @@ because each was a per-game decision that looked reasonable in its own file):
   treatments of one row, decided by which endpoint a game happened to have. Where Wolf? is the one
   exemption and it is in the test: its `/games/mine` carries no names at all.
 
+**A FINISHED game leaves Active and joins History at the moment it ENDS, not when the lobby
+next loads — `useFinishedGameSync` in `shared/lobby.jsx`, wired into all eight lobbies.** The
+columns paint from the `readLobbyCache` stale-while-revalidate copy, and that copy was last
+written the last time the LOBBY was open — i.e. *before* this game started — so the game you just
+finished sat under Active, and stayed out of History, until the lobby's own fetch landed (tens of
+seconds on a cold backend). The hook fires once per room off `status === "over"`, drops the room
+from the Active list (state AND cache, via `dropLobbyGame`) and re-fetches every list while the
+player is still on the result screen. Two details are load-bearing: the re-fetch **waits ~700ms**
+because not every game saves before it broadcasts, so a fetch fired straight off the "over" message
+can beat the row's own `status='over'` write and read the game back as still active (the lobby's
+on-entry fetch stays the backstop); and the History row is the **server's**, never synthesized on
+the client — eight games, eight bespoke row shapes, each a fresh chance to show a wrong score.
+`shared/tests/test_finished_game_sync.py` derives its roster from the tree and fails the lobby that
+doesn't wire it (forgetting renders a perfectly normal lobby), and `screens.mjs`'s `lobbyFinishSync`
+finishes a real Orbit room and asserts the CACHE while still on the result screen — reading it
+before going back is the only thing that tells the fix apart from the on-entry fetch that masks it.
+
 **The lobby History list pages, and the cap is ONE number seen from two ends.**
 `core.rooms.HISTORY_LIMIT` (50) is the SQL row cap in every game's `list_user_history`;
 `HISTORY_MAX` in `shared/lobby.jsx` is where `useProgressiveList` stops revealing. They must be equal

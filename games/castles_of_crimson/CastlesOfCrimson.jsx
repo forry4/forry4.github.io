@@ -1,5 +1,5 @@
 import { Fragment, useState, useEffect, useLayoutEffect, useRef, useCallback, useId } from "react";
-import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyMatchup, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
+import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyMatchup, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame,
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss,
   useProgressiveList, LobbyTabs, useLastDifficulty, LobbyHero,
@@ -1207,6 +1207,12 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
   };
 
   useEffect(() => { if (screen === "lobby") fetchGames(); }, [screen, fetchGames]);
+  // The game you just finished leaves Active and joins History the moment it
+  // ENDS, not when the lobby next loads — see useFinishedGameSync (shared kit).
+  useFinishedGameSync(roomData?.status === "over", roomData?.room_id, (rid) => {
+    dropLobbyGame("coc", myId, "active", rid, setActiveGames);
+    fetchGames();
+  });
 
   // Mount: do NOT auto-resume a saved game — it snapped you from the lobby into the game
   // on load (jarring). Resume is EXPLICIT via the lobby's Resume button. Keep only the

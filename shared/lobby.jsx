@@ -355,6 +355,50 @@ export function writeLobbyCache(ns, scope, key, val) {
 	try { localStorage.setItem(`lbyc.${ns}.${scope}.${key}`, JSON.stringify(val)); } catch {}
 }
 
+// ─── Finish-time lobby refresh ──────────────────────────────────────────────
+// A game you just finished must not still be sitting under Active when you get
+// back to the lobby. The lists above render from the cache, and that cache was
+// last written the last time the LOBBY was open — BEFORE this game ended — so
+// the finished row stayed under Active, and out of History, until the lobby's
+// own fetch landed. On a cold backend that is tens of seconds of a lobby that
+// is simply wrong.
+//
+// So refresh at the moment the game ENDS, while the player is still reading the
+// result screen: drop the room from the Active list (state AND cache) right
+// away, then re-fetch every list so History holds the real server-built row by
+// the time they navigate back. Synthesizing that history row on the client was
+// the alternative and is worse — eight games, eight bespoke row shapes, each a
+// fresh chance to show a wrong score for a moment.
+//
+// The re-fetch waits a beat on purpose: not every game saves before it
+// broadcasts, so a fetch fired straight off the "over" message can beat the
+// row's own status='over' write and read the game back as still active. The
+// lobby's on-entry fetch stays the backstop in either case.
+//
+// Fires ONCE per room — "over" re-broadcasts for the whole review afterwards.
+export function useFinishedGameSync(over, roomId, onFinished, delayMs = 700) {
+	const doneRef = useRef(null);
+	const cbRef = useRef(onFinished);
+	cbRef.current = onFinished;
+	useEffect(() => {
+		if (!over || !roomId || doneRef.current === roomId) return;
+		doneRef.current = roomId;
+		const t = setTimeout(() => cbRef.current(roomId), delayMs);
+		return () => clearTimeout(t);
+	}, [over, roomId, delayMs]);
+}
+
+// Drop one game from a cached lobby list — state and cache together, so the
+// removal survives the trip back to the lobby instead of being undone by the
+// cached copy on the next render.
+export function dropLobbyGame(ns, scope, key, gameId, setList) {
+	setList((prev) => {
+		const next = (prev || []).filter((g) => g && g.id !== gameId);
+		writeLobbyCache(ns, scope, key, next);
+		return next;
+	});
+}
+
 // ─── Last-played AI difficulty (every game that has an AI opponent) ──────────
 // The create modal's difficulty row starts on whatever this player last STARTED
 // a game against — per game, per identity — instead of one hardcoded tier for

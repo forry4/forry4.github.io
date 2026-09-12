@@ -7,7 +7,7 @@ import {
   LobbyAction, LobbyTabs, notWaiting, GameMenu, gameMenuCss,
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss, useProgressiveList, LobbyHero, LobbyUser, useListFade,
-  readLobbyCache, writeLobbyCache,
+  readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame,
 } from "../../shared/lobby.jsx";
 import { buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 import {
@@ -1393,6 +1393,12 @@ export default function RagTag({ myId, authUser, onExit }) {
   }, [authUser, myId]);
 
   useEffect(() => { if (screen === "lobby") fetchGames(); }, [screen, fetchGames]);
+  // The game you just finished leaves Active and joins History the moment it
+  // ENDS, not when the lobby next loads — see useFinishedGameSync (shared kit).
+  useFinishedGameSync(roomData?.status === "over", roomData?.room_id, (rid) => {
+    dropLobbyGame("ragtag", myId, "mine", rid, setMyGames);
+    fetchGames();
+  });
   useEffect(() => () => disconnect(), []); // eslint-disable-line
   useEffect(() => {
     if (!toast) return undefined;

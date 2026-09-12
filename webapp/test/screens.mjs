@@ -6395,6 +6395,140 @@ try {
 	// `dissonanceBeat` specifically so beat's dwell window is unchanged -- beat
 	// still runs at the same point in the run, with the same company, and the new
 	// work lands behind it.
+	// ─── A finished game leaves Active and joins History right away ──────────
+	// The lobby columns render from the localStorage cache first, and that cache
+	// was last written the last time the LOBBY was open — before this game
+	// started. So without `useFinishedGameSync` the game you just finished is
+	// still sitting under Active when you walk back in, and still missing from
+	// History, until the lobby's own fetch lands (tens of seconds on a cold
+	// backend).
+	//
+	// Asserted on the CACHE while still on the result screen: that is the copy
+	// the lobby paints first, and reading it BEFORE going back is the only thing
+	// that tells the fix apart from the on-entry fetch that would mask it. The
+	// walk back in is then done with both endpoints dead, so the columns can
+	// only be coming from what the finish wrote.
+	async function lobbyFinishSync(log) {
+		const ctx = await browser.newContext({ viewport: { width: 1280, height: 960 } });
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "finish-harness", name: "Finny", session_token: "stub" })));
+		const page = await ctx.newPage();
+		let socket, latestFrame, fixtureMode = false;
+		await page.routeWebSocket("**/orbit/ws/**", (ws) => {
+			socket = ws;
+			const server = ws.connectToServer();
+			ws.onMessage((message) => { if (!fixtureMode) server.send(message); });
+			server.onMessage((message) => {
+				const data = JSON.parse(String(message));
+				if (data.room?.game) latestFrame = data;
+				if (!fixtureMode) ws.send(message);
+			});
+		});
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		const check = (name, cond, detail = "") => {
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
+		};
+
+		// A login the shell will not clear: it validates the stored session on
+		// load, and a NETWORK error deliberately leaves the user alone where a
+		// dead token would log them out. Without it this is a guest, and a guest
+		// is short-circuited to an empty History.
+		await page.route("**/auth/session*", (r) => r.abort());
+		// The server's OWN view once the game is over — gone from Active, in
+		// History. This is what the refresh under test has to go and fetch.
+		let finishedId = null;
+		const json = (body) => ({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+		await page.route("**/orbit/games/mine*", (r) => r.fulfill(json({ ok: true, games: [] })));
+		await page.route("**/orbit/games/history*", (r) => r.fulfill(json({
+			ok: true,
+			games: finishedId ? [{
+				id: finishedId, player1_name: "Finny", player2_name: "Bot",
+				you_are_p1: true, outcome: "won", turns: 7, updated_at: 1750000000,
+			}] : [],
+		})));
+
+		await page.goto(`http://localhost:${PORT}/orbit`, { waitUntil: "networkidle" });
+		await page.waitForSelector(".orbit .lby-create-row", { timeout: 25_000 }).catch(() => {});
+		await page.locator(".lby-cta").click({ timeout: 10_000 }).catch(() => {});
+		await page.waitForSelector(".cm-panel", { timeout: 10_000 }).catch(() => {});
+		await page.locator(".cm-seg-btn", { hasText: "VS AI" }).click({ timeout: 10_000 }).catch(() => {});
+		await page.locator(".cm-seg-btn", { hasText: "Easy" }).click({ timeout: 10_000 }).catch(() => {});
+		await page.locator(".cm-create").click({ timeout: 10_000 }).catch(() => {});
+		await page.waitForSelector(".or-mulligan", { timeout: 30_000 }).catch(() => {});
+		await page.locator(".or-mulligan .or-primary").click({ timeout: 10_000 }).catch(() => {});
+		const playing = await page.waitForSelector(".or-influence", { timeout: 30_000 })
+			.then(() => true).catch(() => false);
+		const rid = latestFrame?.room?.room_id;
+		check("a real Orbit room is in progress to finish", playing && !!rid, String(rid));
+		if (!playing || !rid) { await ctx.close(); return; }
+
+		// The Active row the lobby cached WHILE this game was in progress — the
+		// row whose survival is the bug.
+		const keys = () => page.evaluate(() => {
+			const find = (suffix) => Object.keys(localStorage)
+				.find((k) => k.startsWith("lbyc.orbit.") && k.endsWith(suffix)) || null;
+			return { mine: find(".mine"), history: find(".history") };
+		});
+		const cacheKeys = await keys();
+		check("the lobby cached its lists under a namespaced key",
+			!!cacheKeys.mine && !!cacheKeys.history, JSON.stringify(cacheKeys));
+		await page.evaluate(([key, id]) => localStorage.setItem(key, JSON.stringify([{
+			id, player1_name: "Finny", player2_name: "Bot", you_are_p1: true,
+			your_turn: true, turn: 4, updated_at: 1750000000,
+		}])), [cacheKeys.mine, rid]);
+
+		// Finish it.
+		finishedId = rid;
+		fixtureMode = true;
+		const fixture = structuredClone(latestFrame);
+		fixture.type = "room_update";
+		fixture.room.status = "over";
+		fixture.room.game.phase = "over";
+		fixture.room.game.winner = Object.keys(fixture.room.game.players)[0];
+		socket.send(JSON.stringify(fixture));
+		const result = await page.waitForSelector(".or-result", { timeout: 15_000 })
+			.then(() => true).catch(() => false);
+		check("the finished game shows its result screen", result);
+
+		const read = () => page.evaluate(([mineKey, histKey]) => ({
+			mine: JSON.parse(localStorage.getItem(mineKey) || "[]"),
+			history: JSON.parse(localStorage.getItem(histKey) || "[]"),
+		}), [cacheKeys.mine, cacheKeys.history]);
+		await page.waitForFunction(([mineKey, histKey, id]) => {
+			const mine = JSON.parse(localStorage.getItem(mineKey) || "[]");
+			const hist = JSON.parse(localStorage.getItem(histKey) || "[]");
+			return !mine.some((g) => g.id === id) && hist.some((g) => g.id === id);
+		}, [cacheKeys.mine, cacheKeys.history, rid], { timeout: 15_000 }).catch(() => {});
+		const cached = await read();
+		check("finishing drops the game from the cached Active list",
+			!cached.mine.some((g) => g.id === rid), JSON.stringify(cached.mine));
+		check("...and refreshes History with the server's row for it",
+			cached.history.some((g) => g.id === rid), JSON.stringify(cached.history));
+
+		// Back to the lobby with both endpoints DEAD, so the columns can only be
+		// coming from what the finish wrote.
+		await page.unroute("**/orbit/games/mine*");
+		await page.unroute("**/orbit/games/history*");
+		await page.route("**/orbit/games/mine*", (r) => r.abort());
+		await page.route("**/orbit/games/history*", (r) => r.abort());
+		await page.goto(`http://localhost:${PORT}/orbit`, { waitUntil: "networkidle" });
+		await page.waitForSelector(".orbit .lby-col-history", { timeout: 25_000 }).catch(() => {});
+		const columns = await page.evaluate(() => ({
+			active: document.querySelectorAll(".lby-col-active .lby-card").length,
+			history: [...document.querySelectorAll(".lby-col-history .lby-card")]
+				.map((el) => el.textContent.replace(/\s+/g, " ").trim()),
+		}));
+		check("the lobby you return to files it under History, not Active",
+			columns.active === 0 && columns.history.length === 1
+			&& columns.history[0].includes("Won") && columns.history[0].includes("Bot"),
+			JSON.stringify(columns));
+		check("no page errors finishing a game and returning to the lobby",
+			errors.length === 0, errors[0] || "");
+		await ctx.close();
+	}
+
 	const laneA = [offlineSpender, offlineCoc, offlineDuel, offlineDissonance,
 		dissonanceSkat, dissonanceHard, dissonanceBeat, ragtagFight];
 	// `dissonanceQuartet` is lane B: it plays a whole game but arms NO worker
@@ -6403,7 +6537,7 @@ try {
 	const laneB = [routeMounts, shellNav, authScreen, homeScreen, spenderPlayTurn, spenderWaitingRoom,
 		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, dmAdventures,
 		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, lastDifficulty,
-		dissonanceQuartet, orbitPlay];
+		dissonanceQuartet, orbitPlay, lobbyFinishSync];
 
 	// EVERY BLOCK MUST BE IN A LANE. Before the lanes existed, adding a block meant
 	// writing it — it then ran because it was simply the next statement. Now it has

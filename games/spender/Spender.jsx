@@ -56,7 +56,7 @@ const GameChunkLoading = () => (
 	<div style={{ minHeight: "100vh", background: "#120c0d" }} />
 );
 import { baseCss } from "../../shared/theme.js";
-import { lobbyCss, LobbyHeader, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
+import { lobbyCss, LobbyHeader, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame,
 	useLastDifficulty,
 	createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss, LobbyHero, LobbyUser,
 	RulesModal, rulesModalCss,
@@ -1309,6 +1309,13 @@ export default function SpenderApp() {
 	useEffect(() => {
 		if (screen === "spender" && spenderScreen === "browser" && authUser) fetchGames(authUser);
 	}, [screen]); // eslint-disable-line react-hooks/exhaustive-deps
+
+	// The game you just finished leaves Active and joins History the moment it
+	// ENDS, not when the lobby next loads — see useFinishedGameSync (shared kit).
+	useFinishedGameSync(roomData?.status === "over", roomData?.room_id, (rid) => {
+		dropLobbyGame("spender", myId, "active", rid, setActiveGames);
+		if (authUser) fetchGames(authUser);
+	});
 
 	useEffect(() => {
 		if (toast) { const t = setTimeout(() => setToast(""), 2500); return () => clearTimeout(t); }
