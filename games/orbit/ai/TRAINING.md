@@ -300,10 +300,9 @@ contamination above. It is the right instrument for a SCREEN. Three things make
 it correct rather than merely fast:
 
 1. **The counts must be asymmetric.** Handing both seats the same count measures
-   equal-SIMS, a question this campaign already answered yes. The coherent
-   search plus its opponent-reply cache buys 1.38–1.66x more simulations inside
-   the same turn budget, and that speed *is* the advantage; a symmetric count
-   deletes it. `--opponent-simulations` exists for exactly this.
+   equal-SIMS, a question this campaign already answered yes. At equal TIME the
+   two sides do markedly different amounts of work, so a symmetric count deletes
+   the effect. `--opponent-simulations` exists for exactly this.
 2. **Calibrate per ROLE, not per seat.** The candidate swaps seats every other
    game for common random numbers, so pooling `simulations_by_seat` by seat
    averages the two players together and yields two identical, meaningless
@@ -317,6 +316,35 @@ The honest limit: the throughput ratio is not constant across a game (the
 opponent-reply cache's hit rate grows with the tree — 1.40x at 192 simulations,
 1.66x at 768), so a single count per side APPROXIMATES equal time rather than
 being it. Screen with this; gate with a real equal-time run.
+
+### Coherence is SLOWER per decision, and wins anyway
+
+An earlier version of this section asserted the opposite, so it is worth stating
+plainly. Measured in situ at serving shape over pools 5–6 of the 2026-09-11
+check:
+
+```
+coherent + opponent cache   10,873 simulations/decision
+per-simulation (historical) 14,173 simulations/decision   ratio 0.767
+```
+
+Consistent at 0.769 and 0.765 in the two pools separately. Coherence is about a
+**quarter slower per decision**, because reusing the tree means descending it —
+the audit measured mean depth 4.2 plies under coherence against 2.4 under
+resampling, and a deeper descent costs more node lookups and more applied moves
+per simulation. The opponent-reply cache offsets part of that cost; it does not
+reverse it.
+
+So the equal-time win (0.6198 over 96 pairs) is a **stronger** result than it
+first appeared: coherent wins while doing fewer simulations. The lever is the
+quality of the search, not its quantity — which is the same conclusion the
+repo's cross-game note already records, that the strength lever is search
+SOUNDNESS rather than raw throughput.
+
+The corollary is that the old reasoning for screening at the short 3000 ms
+budget — "coherence's edge grows with simulations, so a short budget is the
+harder test" — is unsupported. Whether the advantage grows or shrinks with the
+budget is simply not measured.
 
 **The mirror sanity control only exists here.** `mirror_control` requires fixed
 simulations, because an equal-time arena cannot reproduce itself exactly. It

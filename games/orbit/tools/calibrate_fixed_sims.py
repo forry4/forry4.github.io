@@ -8,11 +8,25 @@ anything in the report saying so, and it is why a screen wants the deterministic
 form instead.
 
 The naive deterministic form is wrong for this question. Giving both seats the
-same count measures equal-SIMS, which the campaign already settled; the coherent
-search plus its opponent-reply cache buys 1.38-1.66x MORE simulations inside the
-same turn budget, and that speed is the whole advantage. So each seat is
+same count measures equal-SIMS, which the campaign already settled. At equal
+TIME the two sides do markedly different amounts of work, so each seat is
 calibrated to what it actually achieved at serving shape and the counts come out
-ASYMMETRIC by design. The result approximates equal time rather than being it --
+ASYMMETRIC by design.
+
+The direction of that asymmetry was a surprise, and it is worth stating because
+an earlier draft of this file asserted the opposite. Measured over pools 5-6 of
+the 2026-09-11 serving check, the COHERENT search completes about 10,900
+simulations per decision against per-simulation determinization's 14,200 -- a
+ratio of 0.767, consistently 0.765-0.769 across pools. Coherence is roughly a
+QUARTER SLOWER per decision, because reusing the tree means descending it: the
+audit measured mean depth 4.2 plies under coherence against 2.4 under
+resampling, and a deeper descent costs more node lookups and more applied moves
+per simulation. The opponent-reply cache (1.38-1.66x) offsets part of that cost;
+it does not reverse it.
+
+Which makes the arena result stronger than it first looked: coherent wins 0.62
+while doing fewer simulations. The advantage is the quality of the search, not
+its quantity. The result approximates equal time rather than being it --
 the cache's hit rate grows with tree size, so the ratio is not constant across a
 game -- which makes this an excellent screen and a poor final ship gate.
 

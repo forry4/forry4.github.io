@@ -121,13 +121,17 @@ fn main() {
         "Invalid fixed simulation count"
     );
     // Equal-TIME is the ship criterion, so a fixed-simulation screen that hands
-    // both seats the same count deletes the very effect it is measuring: the
-    // coherent search plus its opponent-reply cache buys 1.38-1.66x more
-    // simulations inside the same turn budget, and that speed IS the advantage.
-    // Calibrating each seat to what it actually achieves at serving shape keeps
-    // the equal-time semantics while making the work deterministic and
-    // load-independent.  Defaults to `simulations`, so a symmetric control stays
-    // a single flag and every existing request is unchanged.
+    // both seats the same count deletes the very effect it is measuring: at
+    // equal time the two sides do markedly different amounts of work.  Measured
+    // at serving shape, the COHERENT search completes ~10,900 simulations per
+    // decision against per-simulation determinization's ~14,200 -- coherence is
+    // about a quarter SLOWER, because reusing the tree means descending it
+    // (depth 4.2 plies against 2.4).  It wins anyway, which makes the advantage
+    // the quality of the search rather than its quantity.  Calibrating each seat
+    // to what it actually achieves keeps the equal-time semantics while making
+    // the work deterministic and load-independent.  Defaults to `simulations`,
+    // so a symmetric control stays a single flag and every existing request is
+    // unchanged.
     let opponent_fixed_sims = request
         .get("opponent_simulations")
         .and_then(Value::as_u64)
