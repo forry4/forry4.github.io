@@ -540,6 +540,98 @@ The leaf is correct and neutral; the tree is now the measured lever. The order
 from here is unchanged except that step 2 has a head start: confirm coherent at
 equal time and at pool=4, then the policy head, then the 43% opponent-model cost.
 
+### Session (2026-09-12) — the tree lever PAYS TWICE: coherent determinization SHIPPED at 128 pairs, and the first learned PUCT prior beats the hand-written one
+
+**Bottom line: both halves of "the tree is the lever" measured positive at real
+serving shape, and each was accepted at a pre-registered bar rather than at the
+point the number first looked good.**
+
+| Question | Result | Pairs |
+|---|---|---|
+| Coherent determinization vs per-simulation | **0.6094** [0.550, 0.669] | 128 |
+| Learned PUCT prior vs hand-written `action_score` | **0.6641** [0.586, 0.734] | 64 |
+| Policy loss's cost to the value head | Brier 0.20253 vs 0.20335 — no measurable cost | — |
+
+**1. 16-pair pools are not verdicts, and I had to be shown this twice.** The
+eight coherent pools ranged **0.4375 to 0.7188**; one of them sits below 0.5. At
+two pools I wrote that the result was "trending toward a wash" — the pooled
+answer was 0.6094. The measured pair SD is 0.3471, which says 45 pairs resolve
+an effect this size and 8-pair screens resolve +/-0.21. *A pool is a sample, and
+reading one as an answer is the winner's-curse mistake in a new costume.*
+
+**2. Coherence is SLOWER per decision and wins anyway — I had the mechanism
+backwards and shipped the wrong explanation first.** The per-seat counters
+measured coherent at **10,873 simulations/decision against per-simulation's
+14,173** (ratio 0.767, stable at 0.769/0.765 across pools). The prior night I
+wrote, into TRAINING.md and a commit message, that coherence "buys 1.38-1.66x
+more simulations inside the same turn budget, and that speed IS the advantage."
+That microbenchmark compared coherent-with-cache against coherent-WITHOUT-cache;
+extrapolating it across the coherent-versus-resampling boundary was the error.
+The real mechanism was already in the audit: reusing the tree means DESCENDING
+it, mean depth 4.2 plies against 2.4, so each simulation costs more. **The result
+is stronger for it — coherent wins while doing a quarter fewer simulations, so
+the lever is search SOUNDNESS, not throughput.** It also retires the stated
+reason for screening at a 3000 ms budget; whether the edge grows with the budget
+is simply unmeasured.
+
+**3. The learned prior wins, and it is FASTER, which I also predicted wrong.**
+Orbit's PUCT prior has always been the frozen `action_score`, which the audit
+measured deciding 50.5% of moves outright — the network could only ever move the
+leaf. At serving shape the learned prior reads **0.6641** [0.586, 0.734] over 64
+pairs, all four pools positive, 5 losing pairs out of 64. I predicted the extra
+forward per NEW node would cost throughput; it did the opposite — **3,882
+simulations/decision against 3,643, a ratio of 1.065** — because a better prior
+concentrates the search and expands fewer nodes than it pays for.
+
+**4. A fixed-simulation smoke of the same comparison read 0.875, and that number
+is worthless.** It ran at 48 simulations/decision. A fixed-sim screen flatters a
+prior twice: it hides the prior's cost entirely, and it maximises the prior's
+grip by running few simulations. *This is the repo's leaf-speed trap wearing a
+new hat, and the equal-time rule catches it in exactly the same way.*
+
+**5. The policy loss costs the value head nothing.** Two models, identical data
+and seed, differing only in `--policy-weight`: development Brier 0.20253 with
+the head against 0.20335 without. Read as a wash rather than a gain. The control
+arm existed only to answer this, and without it a worse value head would have
+been indistinguishable from noise.
+
+**6. Method lessons, all of which cost something tonight:**
+
+- *Killing a job is not killing its loop.* Stopping a background task left the
+  `bash` loop alive; it started a SECOND arena, and the two ran together for 70
+  minutes. An equal-time arena does not run slower under contention — **it
+  silently starves every decision of simulations** (6,482 against a clean
+  8,082). Nothing in the report says so. The diagnostic is simulations per
+  decision, not wall time.
+- *A non-empty report is not a finished one.* The killed arena's python parent
+  survived long enough to write `"games": []` with `"complete": false` — a file
+  a `[ -s ]` resume guard treats as done forever. Guards now require
+  completeness AND a matching shape.
+- *A parity test that cannot fail proves nothing.* The policy head's
+  order-reconciliation test PASSED with the mapping deliberately broken, because
+  `State::observation` already sorts `legal_moves` by the exact key the tree
+  sorts by, making the permutation the identity on real data. Fixed by reversing
+  a real move list on purpose and ASSERTING the inversion. Every parity claim
+  this session was re-verified by injecting the defect it guards against.
+- *Run the pipeline before believing it.* Training with a policy head died
+  immediately on `model(batch).sigmoid()` — a tuple. Two other call sites wrote
+  `model(batch)[0]` and worked by luck: for a policy model that is the value
+  TENSOR, for a value-only model the first ROW. Identical code, two meanings,
+  and the second silently drops every row but the first once a batch grows.
+- *Prove a mid-campaign rebuild is the same experiment.* Pools 1-4 and 5-8 ran on
+  different binaries; `arena_equivalence` required byte-identical deterministic
+  results before they were pooled.
+
+**Where this leaves the campaign.** Coherent determinization is the shipped
+search (`Controls::serving()`; `Default` stays historical so past numbers
+reproduce). The wasm is verified to build but **deliberately not deployed** —
+that is a player-facing decision. The learned prior is measured but cannot reach
+a player yet: both prior results were measured BETWEEN NEURAL ARMS, and Orbit
+serves a heuristic-leaf Expert. The screen closing that gap — neural model plus
+learned prior against the shipped Expert, equal time, both coherent — was
+running at write time.
+
+
 
 
 

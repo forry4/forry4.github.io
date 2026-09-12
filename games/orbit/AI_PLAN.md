@@ -308,6 +308,51 @@ auxiliary capture/technology/bonus/endgame targets. Those heads must earn a
 strength gain at the serving shape before they are exported to Rust/WASM; they
 are not justified by lower Brier or log loss alone.
 
+### Results of that order of work (2026-09-12)
+
+The audit's order was (1) the leaf, (2) the tree, (3) the policy head. All three
+are now measured, at real serving shape — a 3000 ms turn split 1800/1200 and a
+four-worker root ensemble, which is what `ORBIT_AI_WORKER_CAP` gives every
+client with five or more threads.
+
+| Step | Result | Pairs | Status |
+|---|---|---|---|
+| Leaf port defect fixed | 0.5000 [0.457, 0.541] | 256 | Kept, strength-neutral |
+| Coherent determinization | **0.6094** [0.550, 0.669] | 128 | **Shipped in code** |
+| Learned PUCT prior | **0.6641** [0.586, 0.734] | 64 | Measured, not shippable yet |
+| Policy loss's cost to the value head | Brier 0.20253 vs 0.20335 | — | No measurable cost |
+
+**Coherent determinization is now `Controls::serving()`.** `Controls::default()`
+deliberately remains the historical search so every past campaign number
+reproduces without archaeology; a test pins that the two differ in the
+determinization period and in nothing else. The wasm treats an absent
+determinization argument as serving, so this ships as one artifact rather than a
+coupled expand/contract. **The artifact is verified to build and is NOT
+deployed** — that is a player-facing decision.
+
+**Two predictions in the audit's plan were wrong in the same direction**, and
+both corrections make the results stronger rather than weaker:
+
+- Coherence was expected to cost throughput and be worth it anyway. It does cost
+  throughput — 10,873 simulations/decision against per-simulation's 14,173 — but
+  the earlier claim that its cache "buys more simulations" extrapolated a
+  coherent-with-cache-vs-without benchmark across a boundary it never measured.
+  Reusing a tree means descending it (depth 4.2 plies against 2.4).
+- The learned prior was expected to cost one forward per new node and therefore
+  throughput. It is FASTER — 3,882 against 3,643 — because concentrating the
+  search expands fewer nodes than the forwards cost.
+
+**The remaining gap to a player.** Both prior results were measured between arms
+that are themselves neural, and Orbit serves a heuristic-leaf Expert. Neither
+can reach a player until the neural model with its learned prior is shown to
+beat the shipped Expert at equal time. That screen is the decisive one and was
+running when this was written.
+
+**The open question this closes.** "Is the policy head worth building?" — yes,
+and it is the largest single measured gain in the campaign. The audit's reading
+that "the leaf was not the binding constraint, the TREE was" is confirmed twice
+over: both wins are tree-shape wins, neither is an evaluation win.
+
 ### Instrumented audit and the adopted order of work (2026-09-11, supersedes the correction above)
 
 The plateau was then diagnosed by instrumenting the search rather than running
