@@ -493,6 +493,35 @@ impl Default for Controls {
 }
 
 impl Controls {
+    /// What Orbit actually SERVES, as one named thing.
+    ///
+    /// `Default` is deliberately the HISTORICAL search, so every past campaign
+    /// number reproduces without archaeology; this is the separate, explicit
+    /// statement of what ships, and the two are expected to diverge.
+    ///
+    /// Coherent determinization, measured 2026-09-12 at real serving shape --
+    /// a 3000ms turn split 1800/1200 and a four-worker root ensemble, which is
+    /// what `ORBIT_AI_WORKER_CAP` hands every client with five or more threads:
+    ///
+    /// ```text
+    /// 0.6094 over 128 CRN pairs, 95% CI [0.550, 0.669]
+    /// 19 losses / 62 splits / 47 wins
+    /// ```
+    ///
+    /// Individual 16-pair pools ranged 0.4375 to 0.7188, which is why the bar
+    /// is 128 pairs and why no single pool is a verdict.
+    ///
+    /// It wins while doing FEWER simulations -- about 10,900 per decision
+    /// against per-simulation determinization's 14,200 -- because reusing the
+    /// tree means descending it (mean depth 4.2 plies against 2.4). The lever
+    /// is the soundness of the search, not its throughput.
+    pub fn serving() -> Self {
+        Self {
+            determinization_period: usize::MAX,
+            ..Self::default()
+        }
+    }
+
     fn sanitized(self) -> Self {
         Self {
             model_stride: self.model_stride.max(1),
@@ -913,6 +942,23 @@ mod tests {
         assert_eq!(controls.model_temperature, 2.0);
         assert_eq!(controls.leaf, Leaf::StateValue);
         assert_eq!(controls.policy_prior_weight, 0.0, "the hand-written action_score prior");
+    }
+
+    /// What ships is stated separately from what reproduces. If these two ever
+    /// coincide it should be because someone decided so, not because a default
+    /// drifted: `Default` is load-bearing for every past campaign number.
+    #[test]
+    fn serving_is_coherent_and_default_is_not() {
+        assert_eq!(Controls::serving().determinization_period, usize::MAX);
+        assert_eq!(Controls::default().determinization_period, 1);
+        // Everything else about the shipped search is the historical search.
+        let serving = Controls::serving();
+        let historical = Controls::default();
+        assert_eq!(serving.model_stride, historical.model_stride);
+        assert_eq!(serving.model_weight, historical.model_weight);
+        assert_eq!(serving.model_temperature, historical.model_temperature);
+        assert_eq!(serving.leaf, historical.leaf);
+        assert_eq!(serving.policy_prior_weight, historical.policy_prior_weight);
     }
 
     /// A real observation with its legal moves deliberately REVERSED.

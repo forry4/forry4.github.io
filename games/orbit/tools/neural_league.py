@@ -1183,7 +1183,7 @@ def main() -> None:
                         default="state-value",
                         help="Leaf evaluator for BOTH seats of every arena and for the "
                              "teacher; part of the evaluation profile id")
-    parser.add_argument("--search-determinization-period", type=int, default=1,
+    parser.add_argument("--search-determinization-period", type=int, default=0,
                         help="Simulations per determinization for every arena and the "
                              "teacher; 0 is coherent. Part of the evaluation profile id, "
                              "because it changes what a score was measured against")
