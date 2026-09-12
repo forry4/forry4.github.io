@@ -257,6 +257,28 @@ function HandCount({ held, limit }) {
   </span>;
 }
 
+/* THE HAND IS SORTED, NOT DEALT-ORDER — by planet, then by printed cost.
+   Server order is draw order, so a card's place in the row meant nothing and
+   moved every turn: the end-of-turn draw appends, and an effect that hands you
+   an Agent mid-turn inserts wherever the engine put it. Every question a player
+   asks of their own hand is grouped by one of these two keys — "can I still
+   push Mars?" is the planet, "what can I afford after paying 4 Credits?" is the
+   cost — and the planet comes first because it is also the order of the five
+   influence tracks beside the hand, so the hand reads down the board.
+   `id` is the final tie-break so two same-planet, same-cost Agents hold a
+   stable order across re-renders rather than depending on the sort's stability
+   for input the engine may have reordered.
+   It is presentation ONLY: every move still carries `card_id`, so nothing about
+   which card a click plays depends on where it sits. */
+const PLANET_ORDER = Object.fromEntries(PLANETS.map((planet, i) => [planet, i]));
+function sortedHand(hand) {
+  return [...(hand || [])].sort((a, b) =>
+    (PLANET_ORDER[a?.planet] ?? PLANETS.length) - (PLANET_ORDER[b?.planet] ?? PLANETS.length)
+    || (a?.cost ?? 0) - (b?.cost ?? 0)
+    || (a?.id ?? 0) - (b?.id ?? 0));
+}
+
+
 function orbitMoveKey(move) {
   if (!move || typeof move !== "object") return "";
   const stable = (value) => Array.isArray(value)
@@ -291,14 +313,24 @@ function PlayerRail({ player, name, active, me, leader, hint, onInfo, connected 
     </div>
     <div className="or-played-agents" aria-label={`${owner} played Agents`}>
       <span>Played</span>
+      {/* THE COMPACT TREATMENT CARRIES THE TOP COST TOO, because it is the ONLY
+          treatment on a phone and at short desktop heights — `.or-columns` is
+          display:none there, so a fact that lives only on the panel face does
+          not exist at those sizes. The count keeps the left of the cell and its
+          original reading (it is the recruit discount, and it is what the
+          aria-label led with before); the cost follows it behind a hairline.
+          BESIDE, not stacked — see the CSS: stacking grew the cell 2px, and two
+          of them pushed the 1366x768 table past the viewport. */}
       <div>{PLANETS.map((planet) => {
         const cards = player.columns?.[planet] || [];
+        const top = cards[cards.length - 1];
         return <button type="button" key={planet} className={`or-played-agent or-${planet}`}
           data-motion-key={`column-${player.__pid}-${planet}`} data-motion-value={cards.map((card) => card.id).join(",")}
-          disabled={!cards.length} title={`${cards.length} ${planet} Agent${cards.length === 1 ? "" : "s"}. ${cards.length ? "Open details" : "None played"}`}
-          aria-label={`${cards.length} ${planet} Agent${cards.length === 1 ? "" : "s"}${cards.length ? ". Open details" : ""}`}
+          disabled={!cards.length} title={`${cards.length} ${planet} Agent${cards.length === 1 ? "" : "s"}${top ? `. ${top.name} on top, cost ${top.cost} Credits` : ""}. ${cards.length ? "Open details" : "None played"}`}
+          aria-label={`${cards.length} ${planet} Agent${cards.length === 1 ? "" : "s"}${top ? `, top Agent costs ${top.cost} Credits` : ""}${cards.length ? ". Open details" : ""}`}
           {...detailClick(() => cards.length && onInfo?.({ kind: "column", planet, cards, owner }))}>
-          {cards.length}
+          <b>{cards.length}</b>
+          {top && <i className="or-played-cost" aria-hidden="true">{top.cost}</i>}
         </button>;
       })}</div>
     </div>
@@ -433,15 +465,26 @@ function TechBoard({ game, myId, otherId, myName, theirName, catalog, onInfo }) 
    thing a player does. `playable` — not the `disabled` attribute — is now what
    says the click will PLAY it, which is also the signal `screens.mjs` waits on
    for "this seat has legal moves". Click plays when it can and otherwise reads;
-   press-and-hold / right-click always reads (see shared/gestures.js). */
-function AgentCard({ card, selected, onClick, onInfo, hidden = false }) {
+   press-and-hold / right-click always reads (see shared/gestures.js).
+
+   TWO MARKED STATES, AND THEY MEAN OPPOSITE THINGS. `selected` is "this is the
+   card I am about to play" — lifted, ringed in its planet colour, the brightest
+   thing in the hand. `discarding` is the mulligan's "this one is going away",
+   and it used the SAME treatment: picking three cards to throw away lit them up
+   as the three you had chosen to keep, and the mulligan is the first screen of
+   a player's first game. It now reads as removal — faded, desaturated, pushed
+   DOWN rather than lifted, with the word on it — so the two are not merely
+   different shades of emphasis but opposite directions. */
+function AgentCard({ card, selected, discarding = false, onClick, onInfo, hidden = false }) {
   const info = useCardInfoGesture(onInfo && card && !card.hidden
     ? () => onInfo({ kind: "card", card }) : null);
   if (hidden || card?.hidden) return <div className="or-agent hidden" aria-label="Hidden Agent"><span>ORBIT</span></div>;
   if (!card) return null;
-  return <button type="button" className={`or-agent or-${card.planet} or-${card.faction}${selected ? " selected" : ""}${onClick ? " playable" : ""}`}
+  return <button type="button" aria-pressed={discarding ? true : undefined}
+    className={`or-agent or-${card.planet} or-${card.faction}${selected ? " selected" : ""}${discarding ? " discarding" : ""}${onClick ? " playable" : ""}`}
     onClick={onClick || (onInfo ? () => onInfo({ kind: "card", card }) : undefined)}
-    disabled={!onClick && !onInfo} title={card.description} {...info}>
+    disabled={!onClick && !onInfo} title={discarding ? `${card.name} — marked for replacement` : card.description} {...info}>
+    {discarding && <span className="or-discard-tag" aria-hidden="true">Replacing</span>}
     <span className="or-agent-top"><span className="or-card-price"><ResourceIcon kind="credits" /><b>{card.cost}</b></span><i>{FACTION_GLYPH[card.faction]}</i></span>
     <strong>{card.name}</strong>
     <span className="or-agent-text">{card.description}</span>
@@ -457,7 +500,18 @@ function AgentCard({ card, selected, onClick, onInfo, hidden = false }) {
    The section names its OWNER unambiguously — "Your agents" with a seat dot,
    never a bare possessive a player has to match against a half-read name.
    Reading your own recruit into the opponent's panel is the exact mistake the
-   old pair of identical panels invited. */
+   old pair of identical panels invited.
+
+   THE TOP AGENT'S COST IS ON THE FACE, and it is the one thing that came back
+   after "name only, everything else in the modal". It is not detail about the
+   card — it is a NUMBER THE RULES READ: `card_cost` pays Credits equal to the
+   printed cost of the Agent an effect exiles, transfers or discards (cards 505,
+   510, 517), and both columns' top Agents are the public pool those effects
+   choose from. So "what does exiling their Mars top pay me?" was a question
+   that needed a modal per column, for both seats, mid-decision. The faction
+   glyph and the rules sentence stay in the modal: they are read once, this is
+   read every turn. `screens.mjs` asserts the face carries exactly the name and
+   the cost, so neither half can drift back. */
 function Columns({ game, pid, name, mine, onInfo }) {
   const player = game.players?.[pid];
   return <section className={`or-columns${mine ? " mine" : " theirs"}`}>
@@ -472,9 +526,12 @@ function Columns({ game, pid, name, mine, onInfo }) {
         return <div className={`or-column or-${planet}`} key={planet}>
           <span className="or-column-head"><PlanetName planet={planet} /><b data-motion-key={`stack-${pid}-${planet}`} data-motion-value={cards.map((card) => card.id).join(",")} className="or-column-count" aria-label={`${cards.length} Agents`}>{cards.length}</b></span>
           {top ? <button type="button" className={`or-slot${cards.length > 1 ? " stacked" : ""}`}
-            title={`${cards.length} Agent${cards.length === 1 ? "" : "s"} — ${top.name} on top`}
+            title={`${cards.length} Agent${cards.length === 1 ? "" : "s"} — ${top.name} on top, cost ${top.cost} Credits`}
             {...detailClick(() => onInfo(stackInfo))}>
             <strong>{top.name}</strong>
+            <span className="or-slot-cost" aria-label={`Costs ${top.cost} Credits`}>
+              <ResourceIcon kind="credits" /><b>{top.cost}</b>
+            </span>
           </button> : <span className="or-column-empty">empty</span>}
         </div>;
       })}
@@ -1227,8 +1284,12 @@ export default function Orbit({ myId, authUser, onExit }) {
 
       {game.phase === "mulligan" && isMyTurn && <section className="or-mulligan">
         <span className="or-eyebrow">Opening hand</span><h2>Replace any Agents?</h2>
-        <p>Select any cards you want to discard, then confirm. You draw back to four.</p>
-        <div className="or-hand">{me.hand.map((card) => <AgentCard card={card} key={card.id} selected={mulligan.includes(card.id)} onInfo={setInfo}
+        {/* The copy names the CUE, not the gesture. "Select the cards you want to
+            discard" describes a click and leaves the reader to work out which of
+            two marked states they are looking at; naming the fade means the
+            picture and the sentence say the same thing. */}
+        <p>Tap the Agents you want to replace — they fade out. You draw back to four.</p>
+        <div className="or-hand">{sortedHand(me.hand).map((card) => <AgentCard card={card} key={card.id} discarding={mulligan.includes(card.id)} onInfo={setInfo}
           onClick={() => setMulligan((old) => old.includes(card.id) ? old.filter((id) => id !== card.id) : [...old, card.id])} />)}</div>
         <button type="button" className="or-primary" onClick={() => sendMove({ action: "mulligan", card_ids: [...mulligan].sort((a, b) => a - b) })}>
           {mulligan.length ? `Replace ${mulligan.length} card${mulligan.length === 1 ? "" : "s"}` : "Keep this hand"}
@@ -1249,7 +1310,7 @@ export default function Orbit({ myId, authUser, onExit }) {
           <section className="or-hand-zone">
             <div className="or-hand-head"><span className="or-eyebrow">Your hand</span>
               <HandCount held={me.hand.length} limit={handLimit(game.leader, myId)} /></div>
-            <Hand>{me.hand.map((card) => <AgentCard card={card} key={card.id} selected={selectedCard === card.id} onInfo={setInfo}
+            <Hand>{sortedHand(me.hand).map((card) => <AgentCard card={card} key={card.id} selected={selectedCard === card.id} onInfo={setInfo}
               onClick={isMyTurn && !game.pending ? () => setSelectedCard(card.id) : null} />)}</Hand>
             {selectedCard != null && isMyTurn && !game.pending && <div className="or-action-bar">
               <span>Play <b>{me.hand.find((card) => card.id === selectedCard)?.name}</b> as:</span>

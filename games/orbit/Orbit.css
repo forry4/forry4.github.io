@@ -247,10 +247,27 @@
    the same information must never be on screen twice. */
 .or-played-agents { display: none; align-items: center; gap: .38rem; margin-top: .35rem; padding-top: .32rem; border-top: 1px solid var(--or-line); }
 .or-played-agents > span { color: var(--or-dim); font-size: .56rem; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
-.or-played-agents > div { display: grid; grid-template-columns: repeat(5, 1.5rem); gap: .28rem; }
-.or-played-agent { display: grid; place-items: center; width: 1.5rem; height: 1.25rem; padding: 0; border: 1px solid currentColor; border-radius: 5px; background: color-mix(in srgb, currentColor 18%, #15182d); color: inherit; font: 800 .7rem/1 ui-monospace, monospace; cursor: pointer; }
+.or-played-agents > div { display: grid; grid-template-columns: repeat(5, 2.35rem); gap: .28rem; }
+.or-played-agent { display: flex; align-items: center; justify-content: center; gap: .2rem; width: 2.35rem; height: 1.25rem; padding: 0 .12rem; border: 1px solid currentColor; border-radius: 5px; background: color-mix(in srgb, currentColor 18%, #15182d); color: inherit; font: 800 .7rem/1 ui-monospace, monospace; cursor: pointer; }
 .or-played-agent:hover:not(:disabled) { box-shadow: 0 0 0 2px var(--or-seat); transform: translateY(-1px); }
 .or-played-agent:disabled { opacity: .36; cursor: default; }
+/* THE TOP AGENT'S PRINTED COST, BESIDE the count, in the one placed-Agent
+   treatment a phone or a short desktop has — `.or-columns` is display:none at
+   both, so a fact that lives only on the panel face does not exist there.
+   BESIDE, not under, and the reason is measured rather than aesthetic: stacking
+   it took the cell from 20px to ~22px, and two of those (one rail per seat)
+   pushed the 1366x768 table 7px past the viewport, which is a gate this game
+   already owns. The cell grew sideways instead, where a short desktop has room.
+   Gold like every other Credit price on the table (`.or-card-price`) and
+   deliberately NOT `currentColor` — the cell is painted in its planet's colour,
+   so a second number in that colour would read as more of the count — with a
+   hairline rule between them, because two adjacent digits in one box need to
+   say they are two different quantities. No coin glyph: at this size the SVG
+   would be most of the cell. `aria-hidden`, because the button's own label
+   already says "top Agent costs N Credits" and a bare "3" after the count is
+   worse than silence. */
+.or-played-cost { padding-left: .2rem; border-left: 1px solid color-mix(in srgb, currentColor 45%, transparent); color: #ffe1a1; font-size: .58rem; font-style: normal; line-height: 1; }
+.or-played-agent:disabled .or-played-cost { display: none; }
 
 /* ── Influence board ─────────────────────────────────────────────────────── */
 .or-influence { padding: .62rem .8rem .68rem; }
@@ -426,6 +443,16 @@
 .or-slot:hover { box-shadow: 0 0 0 2px var(--lby-accent); }
 .or-slot.stacked:hover { box-shadow: 3px 3px 0 -1px #171a31, 3px 3px 0 0 color-mix(in srgb, currentColor 62%, #171a31), 6px 6px 0 -1px #171a31, 6px 6px 0 0 color-mix(in srgb, currentColor 38%, #171a31), 0 0 0 2px var(--lby-accent); }
 .or-slot strong { display: -webkit-box; align-self: center; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--or-ink); font-family: Georgia, serif; font-size: .7rem; line-height: 1.08; }
+/* THE PRICE SITS IN ITS OWN GRID COLUMN, not in the text flow and not overlaid.
+   The face is short (1.85rem on desktop) and the name is a two-line clamp, so
+   an absolutely-positioned chip would land on the second line of every long
+   name; a real column makes the clamp measure the space that is left instead.
+   The single row above stays, so the two sit side by side. */
+.or-slot { grid-template-columns: minmax(0, 1fr) auto; }
+.or-slot-cost { display: inline-flex; align-self: center; align-items: center; gap: .12rem; color: #ffe1a1; font-size: .62rem; font-variant-numeric: tabular-nums; }
+/* 19px is the rail's coin and it is taller than this whole face. */
+.or-slot-cost .or-resource-icon { width: 11px; height: 11px; filter: none; }
+.or-slot-cost b { font-weight: 800; }
 .or-column-empty { display: grid; place-items: center; height: 2.65rem; border: 1px dashed color-mix(in srgb, currentColor, transparent 66%); border-radius: 7px; color: #646d8c; font-size: .56rem; letter-spacing: .05em; text-transform: uppercase; }
 
 /* ── Hand ───────────────────────────────────────────────────────────────── */
@@ -457,6 +484,31 @@
   .or-agent:hover { box-shadow: 0 9px 22px #0009, 0 0 0 1px var(--or-line); }
   .or-agent.playable:hover { transform: translateY(-5px); box-shadow: 0 10px 24px #0009, 0 0 0 2px var(--lby-accent); }
 }
+/* MARKED FOR REPLACEMENT, AT THE OPENING MULLIGAN. It is the inverse of
+   `.selected` on purpose, because it used to BE `.selected`: the cards you had
+   chosen to throw away were the lit, lifted, planet-ringed ones, which says
+   "these are my three" in the same visual language every other screen uses for
+   "this is the card I am playing". Faded and slightly desaturated so the ones
+   you are KEEPING are the ones that read; pushed 3px down, against `.selected`
+   lifting 5px up, so the direction alone distinguishes them; the border drops
+   to a dashed neutral so the planet colour — the whole card's identity — goes
+   quiet with it. It stays perfectly legible: this is a decision you are still
+   making, and the card has to be readable to un-mark it. */
+.or-agent.discarding,
+.or-agent.discarding:hover,
+.or-agent.discarding:focus {
+  position: relative;
+  transform: translateY(3px);
+  border-style: dashed;
+  border-color: color-mix(in srgb, currentColor 45%, transparent);
+  opacity: .46;
+  filter: saturate(.55);
+  box-shadow: none;
+}
+/* The word, because opacity alone is a state you have to have seen the other
+   half of to read — and on a phone the row is scrolled, so "the faded ones"
+   may be the only ones on screen. */
+.or-discard-tag { position: absolute; top: .42rem; right: .42rem; padding: 1px 6px; border-radius: 999px; background: #0d0f1fcc; color: var(--or-ink); font-size: .52rem; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; }
 .or-agent:disabled { cursor: default; }
 /* A card you cannot play is still a card you can read, so it stays enabled and
    only loses the lifted "this click plays it" affordance. */
@@ -769,6 +821,13 @@
 .or-agent strong { line-height: 1.18; overflow-wrap: anywhere; }
 .or-agent.selected, .or-agent.selected:focus, .or-agent.selected:hover { outline: 0 solid var(--or-card-tint, currentColor); outline-offset: 2px; box-shadow: inset 0 3px currentColor, 0 6px 12px #0007; transform: none; }
 .or-agent.selected:focus-visible { outline: 2px solid var(--or-card-tint, currentColor); }
+/* Re-stated at THIS depth, not only up in the Hand block. The rule above is
+   what makes `.selected` an inset accent along the card's TOP edge rather than
+   a lift, and it is the reason the mulligan's marked cards read as "chosen" —
+   so the replacement treatment has to out-order the same rule, or a dashed
+   faded card still wears a bright bar across its top. */
+.or-agent.discarding, .or-agent.discarding:focus, .or-agent.discarding:hover { outline: 0; box-shadow: none; transform: translateY(3px); }
+.or-agent.discarding:focus-visible { outline: 2px solid var(--or-card-tint, currentColor); }
 .or-hand { padding: .35rem .25rem .45rem; scroll-snap-type: x proximity; scrollbar-width: thin; scrollbar-color: #59617f #121629; }
 .or-hand > .or-agent { scroll-snap-align: start; }
 .or-action-bar button { min-height: 44px; transition: background .18s, box-shadow .18s, transform .18s; }
@@ -788,8 +847,9 @@
   .or-influence .or-disc { left: 50%; top: var(--or-position); transform: translate(-50%, -50%); }
   .or-influence .or-track-name { grid-column: 1; justify-self: center; font-size: .6rem; }
   .or-activity { font-size: .67rem; padding-top: .45rem; gap: .5rem; }
-  .or-played-agents > div { grid-template-columns: repeat(5, 34px); gap: .3rem; }
-  .or-played-agent { width: 34px; height: 28px; font-size: .75rem; }
+  .or-played-agents > div { grid-template-columns: repeat(5, 44px); gap: .26rem; }
+  .or-played-agent { width: 44px; height: 28px; font-size: .75rem; }
+  .or-played-cost { font-size: .62rem; }
   .or-tech > header { grid-template-columns: auto 1fr auto; padding: .35rem .6rem; }
   .or-tech-toggle { min-height: 32px; }
   .or-tech-key b { max-width: 4.7rem; }

@@ -429,15 +429,61 @@ were each a real misread on the table, so they are worth not undoing:
 - **Placed Agents are one mini-card stack, not two controls.** The top Agent is
   the face, up to two subdued offset outlines show depth, and the count sits to
   the right of the planet name. Do not bring back a detached `+N below` button:
-  it looked unrelated to the card it counted. The shorter face shows only the
-  top Agent's name; cost, faction and rules belong in the modal. A press opens the
-  full column when its count is above 1.
-- **The rail counts are the COMPACT treatment of those panels.**
+  it looked unrelated to the card it counted. A press opens the full column when
+  its count is above 1.
+  **The face carries the top Agent's NAME and its printed COST, and nothing
+  else.** The cost is not detail about the card, it is a number the rules read:
+  `card_cost` pays Credits equal to the printed cost of the Agent an effect
+  exiles, transfers or discards (cards 505, 510, 517), and both seats' column
+  tops are the public pool those effects choose from — so "what does taking
+  their Mars top pay me?" was a modal per column, for both seats, mid-decision.
+  The faction glyph and the rules sentence stay in the modal: they are read once,
+  this is read every turn. It sits in its own grid column rather than overlaid,
+  because the name is a two-line clamp in a fixed-height box and an absolute
+  chip lands on the second line of every long name. `screens.mjs` bounds it from
+  both sides — the face must carry the cost AND must not grow back into a full
+  card face.
+- **The rail counts are the COMPACT treatment of those panels, and they carry
+  the top Agent's cost too** — `count | cost`, side by side with a hairline
+  between them and the cost in the Credit gold used everywhere else, never in
+  the cell's own planet colour (a second number in that colour reads as more of
+  the count). BESIDE, not stacked, and the reason is measured: stacking took the
+  cell from 20px to ~22px and two of them (one rail per seat) pushed the
+  1366x768 table 7px past the viewport, which is a gate this game already owns.
+  The cell grew sideways instead, where a short desktop has room. It has to be
+  here at all because `.or-columns` is `display:none` at both the phone tier and
+  short desktops, so a fact that lives only on the panel face does not exist at
+  those sizes.
   Each rail carries five planet-coloured counts under Credits/Zenithium/cards;
   Phones and tablets up to 980px and desktop viewports at most 900px tall show
   `.or-played-agents` instead of `.or-columns`, so exactly one is ever on screen. Pressing a count
   opens the same column list the panel face opens. Do not keep both treatments visible: two live copies of one fact is what `screens.mjs` checks
   at 1280×960 and at 390px, from both directions.
+- **THE HAND IS SORTED BY PLANET, THEN BY PRINTED COST — presentation only.**
+  Server order is draw order, so a card's place in the row meant nothing and
+  moved every turn: the end-of-turn draw appends and a mid-turn effect inserts
+  wherever the engine put it. Both questions a player asks of their own hand are
+  grouped by one of these keys, and the planet comes first because it is also
+  the order of the five influence tracks beside it, so the hand reads down the
+  board. `id` is the final tie-break so equal cards hold a stable order. Every
+  move still carries `card_id`, so nothing about which card a click plays
+  depends on where it sits. `screens.mjs` asserts sortedness off the rendered
+  faces rather than against a fixed hand — Orbit's deal is not seeded, so the
+  only assertion it can carry is one that holds for ANY deal.
+- **THE OPENING MULLIGAN MARKS FOR REMOVAL, NOT FOR KEEPING.** It reused the
+  hand's `.selected` treatment — lit, ringed in the planet colour, an accent bar
+  along the top edge — so the cards a first-time player had chosen to throw away
+  were the brightest things on the first screen of their first game, in the same
+  language every other screen uses for "this is the card I am about to play".
+  `.discarding` is the inverse and must stay the inverse: faded and desaturated
+  so the ones you are KEEPING are the ones that read, pushed 3px DOWN against
+  `.selected`'s lift, a dashed neutral border so the planet colour goes quiet
+  with it, and the word "Replacing" on it — opacity alone is a state you have to
+  have seen the other half of to read, and on a phone the row is scrolled so the
+  faded ones may be the only ones on screen. It must be re-stated at the depth of
+  the 2026-09-08 visual-direction block, not only in the Hand block, or the inset
+  accent bar wins and a faded card still wears a bright top edge. The copy names
+  the CUE ("they fade out"), not the gesture.
 - **Agent faces carry their own text.** Name, effect sentence and the
   planet · faction footer are the table read, next to the price and faction
   glyph. An icon vocabulary derived from that sentence was tried and reverted:

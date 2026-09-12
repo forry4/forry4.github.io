@@ -5604,6 +5604,28 @@ try {
 		await ctx.close();
 	}
 
+	// Orbit's hand is presentation-sorted by planet then printed cost, and the
+	// deal is NOT seeded, so this is read off whatever was dealt rather than
+	// compared against a fixed hand. Both keys come from the rendered face — the
+	// planet from the card's own `or-<planet>` class (the colour IS the planet
+	// here) and the cost from the price chip — so it checks what a player sees
+	// rather than the array the component was handed.
+	const OR_PLANETS = ["mercury", "venus", "terra", "mars", "jupiter"];
+	async function orbitHandIsSorted(page, scope) {
+		const cards = await page.evaluate(({ scope, planets }) =>
+			[...document.querySelectorAll(`${scope} .or-agent`)].map((el) => ({
+				planet: planets.findIndex((p) => el.classList.contains(`or-${p}`)),
+				cost: Number(el.querySelector(".or-card-price b")?.textContent),
+			})), { scope, planets: OR_PLANETS });
+		// An EMPTY read is a failure (wrong scope, or a hand that did not render);
+		// a one-card hand is trivially ordered and must not be reported as one.
+		if (!cards.length) return false;
+		if (cards.some((c) => c.planet < 0 || !Number.isFinite(c.cost))) return false;
+		return cards.every((c, i) => i === 0
+			|| c.planet > cards[i - 1].planet
+			|| (c.planet === cards[i - 1].planet && c.cost >= cards[i - 1].cost));
+	}
+
 	// ── Orbit: real room, mulligan, one complete player action ────────────────
 	async function orbitPlay(log) {
 		const ctx = await browser.newContext({ viewport: { width: 1280, height: 960 } });
@@ -5674,6 +5696,52 @@ try {
 			.then(() => true).catch(() => false);
 		check("a vs-AI room deals a four-card opening hand", mulligan
 			&& await page.locator(".or-mulligan .or-agent").count() === 4);
+		// THE OPENING MULLIGAN MARKS FOR REMOVAL, NOT FOR KEEPING. It reused the
+		// hand's `.selected` treatment — lit, ringed, an accent bar along the top
+		// edge — so the cards a first-time player had chosen to throw away were
+		// the four brightest things on the first screen of their first game, in
+		// the same language every other screen uses for "this is the card I am
+		// playing". Assert the DIRECTION, not just the class: faded, pushed DOWN
+		// (`.selected` lifts), and carrying neither the class nor the lit bar.
+		const mulliganPick = page.locator(".or-mulligan .or-agent").first();
+		await mulliganPick.click({ timeout: 10_000 }).catch(() => {});
+		// `.or-agent` transitions transform and box-shadow over 140ms, and a
+		// computed style read inside that window is a MIDPOINT — the first cut of
+		// this check read dy 0 and a half-faded shadow and reported the rule as
+		// not applying at all.
+		await sleep(300);
+		const marked = await page.evaluate(() => {
+			const el = document.querySelector(".or-mulligan .or-agent.discarding");
+			if (!el) return null;
+			const cs = getComputedStyle(el);
+			const dy = Number((cs.transform.match(/matrix\(([^)]*)\)/)?.[1] || "").split(",")[5]);
+			return {
+				opacity: Number(cs.opacity), dy, boxShadow: cs.boxShadow,
+				alsoSelected: el.classList.contains("selected"),
+				tagged: !!el.querySelector(".or-discard-tag"),
+				discarding: document.querySelectorAll(".or-mulligan .or-agent.discarding").length,
+				highlighted: document.querySelectorAll(".or-mulligan .or-agent.selected").length,
+			};
+		});
+		check("a mulligan pick reads as removal — faded and pushed down, never lit and lifted",
+			!!marked && marked.opacity < 0.75 && marked.dy > 0 && !marked.alsoSelected
+			&& marked.boxShadow === "none" && marked.tagged
+			&& marked.discarding === 1 && marked.highlighted === 0, JSON.stringify(marked));
+		if (process.env.ORBIT_SHOTS) {
+			// The opening mulligan with one card marked — the frame a visual review
+			// has to see, because "faded" is a comparison against the cards beside
+			// it and a default board shows neither state.
+			await page.screenshot({ path: "test-results/orbit-mulligan-marked.png", fullPage: true });
+		}
+		await mulliganPick.click({ timeout: 10_000 }).catch(() => {});
+		await sleep(300);
+		check("un-marking a mulligan pick puts it back",
+			await page.locator(".or-mulligan .or-agent.discarding").count() === 0
+			&& Number(await mulliganPick.evaluate((el) => getComputedStyle(el).opacity)) === 1);
+		// The hand is SORTED, so this holds for whatever four Agents were dealt —
+		// which is the only kind of assertion Orbit's unseeded deal can carry.
+		check("the opening hand is ordered by planet, then by cost",
+			await orbitHandIsSorted(page, ".or-mulligan"));
 		await page.locator(".or-mulligan .or-primary").click({ timeout: 10_000 }).catch(() => {});
 		const board = await page.waitForSelector(".or-influence", { timeout: 30_000 })
 			.then(() => true).catch(() => false);
@@ -5871,19 +5939,44 @@ try {
 		// two live copies of one fact is the state this check exists to forbid.
 		check("a desktop shows the placed-Agent panels and not the rail counts",
 			geometry.columns === 10 && geometry.railCounts === 0, JSON.stringify(geometry));
+		// THE FACE IS THE NAME, THE COUNT AND THE TOP AGENT'S COST — and nothing
+		// else. The cost is there because the RULES read it: `card_cost` pays
+		// Credits equal to the printed cost of the Agent an effect exiles,
+		// transfers or discards, and both seats' column tops are the pool those
+		// effects draw from, so answering "what does taking their Mars top pay?"
+		// used to mean opening a modal per column mid-decision. The faction glyph
+		// and the rules sentence stay OUT: a full card face in a 30px box is the
+		// treatment this panel replaced, so the check bounds it from both sides.
 		const placedFaces = await page.evaluate(() => {
 			const slots = [...document.querySelectorAll(".or-slot")];
+			const box = (el) => el.getBoundingClientRect();
 			return {
 				slots: slots.length,
-				extraFacts: document.querySelectorAll(".or-slot .or-slot-top").length,
+				extraFacts: document.querySelectorAll(".or-slot .or-slot-top, .or-slot .or-agent-text, .or-slot .or-agent-foot").length,
 				complete: slots.every((slot) => !!slot.querySelector("strong")?.textContent.trim()
 					&& /^\d+$/.test(slot.closest(".or-column").querySelector(".or-column-count")?.textContent.trim() || "")
 					&& !slot.querySelector(".or-slot-count")),
+				costs: slots.map((slot) => slot.querySelector(".or-slot-cost b")?.textContent.trim()),
+				// The price takes its width out of the NAME's, so the thing to
+				// guard is what is left for the name — a face reduced to two
+				// letters per line is not a name, and the fixed face height
+				// means it fails silently rather than growing.
+				nameWidth: Math.min(...slots.map((slot) => Math.round(box(slot.querySelector("strong")).width))),
+				// A price that overflows its own face is worse than no price: it
+				// is the one addition to this box that can push the name out.
+				spills: slots.filter((slot) => {
+					const cost = slot.querySelector(".or-slot-cost");
+					return !cost || box(cost).right > box(slot).right + 1
+						|| box(cost).bottom > box(slot).bottom + 1;
+				}).length,
 			};
 		});
-		check("a played Agent shows its name with the count beside its planet",
-			placedFaces.slots > 0 && placedFaces.extraFacts === 0 && placedFaces.complete,
+		check("a played Agent shows its name and top cost with the count beside its planet",
+			placedFaces.slots > 0 && placedFaces.extraFacts === 0 && placedFaces.complete
+			&& placedFaces.costs.every((c) => /^\d+$/.test(c || "")) && placedFaces.spills === 0,
 			JSON.stringify(placedFaces));
+		check("your hand is ordered by planet, then by cost",
+			await orbitHandIsSorted(page, ".or-hand-zone"));
 		// Stress the presentation through a room update, after the real action.
 		// Fixture moves are never sent to the server.
 		fixtureMode = true;
@@ -6112,6 +6205,24 @@ try {
 				const r = cell.getBoundingClientRect();
 				return r.left < -1 || r.right > window.innerWidth + 1 || r.width < 8;
 			}).length;
+			// The rail count is the ONLY placed-Agent treatment on a phone (the
+			// panels above are display:none), so the top Agent's cost has to be
+			// here too or it does not exist at this size. An occupied cell shows
+			// both numbers; an empty one is disabled and shows only the zero.
+			const occupied = cells.filter((cell) => !cell.disabled);
+			const railCosts = {
+				occupied: occupied.length,
+				priced: occupied.filter((cell) => /^\d+$/.test(
+					cell.querySelector(".or-played-cost")?.textContent.trim() || "")).length,
+				emptyPriced: cells.filter((cell) => cell.disabled
+					&& cell.querySelector(".or-played-cost")
+					&& getComputedStyle(cell.querySelector(".or-played-cost")).display !== "none").length,
+				// Two numbers in a 34px cell is the whole risk here.
+				spills: cells.filter((cell) => [...cell.children].some((kid) => {
+					const k = kid.getBoundingClientRect(), c = cell.getBoundingClientRect();
+					return k.right > c.right + 1 || k.bottom > c.bottom + 1 || k.left < c.left - 1;
+				})).length,
+			};
 			const bonuses = [...document.querySelectorAll(".or-bonus")].map((el) => {
 				const r = el.getBoundingClientRect();
 				return { w: Math.round(r.width), h: Math.round(r.height) };
@@ -6137,7 +6248,7 @@ try {
 			const influence = document.querySelector(".or-influence").getBoundingClientRect();
 			const trackHeights = [...document.querySelectorAll(".or-influence .or-track-spaces")]
 				.map((el) => Math.round(el.getBoundingClientRect().height));
-			return { scrollers, cells: cells.length, panels, offscreen, bonuses, tokenOverlaps, bonusRight,
+			return { scrollers, cells: cells.length, panels, offscreen, railCosts, bonuses, tokenOverlaps, bonusRight,
 				trackCentered, trackHeights, influenceHeight: Math.round(influence.height) };
 		});
 		check("no board on a phone hides content behind a sideways scroll",
@@ -6146,6 +6257,11 @@ try {
 			inner.cells === 10 && inner.offscreen === 0, JSON.stringify(inner));
 		check("a phone folds the placed-Agent panels into the two player rails",
 			inner.panels === 0, JSON.stringify(inner));
+		check("the phone rail count carries the top Agent's cost without spilling its cell",
+			inner.railCosts.occupied > 0
+			&& inner.railCosts.priced === inner.railCosts.occupied
+			&& inner.railCosts.emptyPriced === 0 && inner.railCosts.spills === 0,
+			JSON.stringify(inner.railCosts));
 		check("bonus tokens are uniformly compact and clear of every planet track",
 			inner.bonuses.every(({ w, h }) => Math.abs(w - h) <= 1 && w <= 30)
 			&& inner.tokenOverlaps === 0 && inner.bonusRight && inner.trackCentered, JSON.stringify(inner));
