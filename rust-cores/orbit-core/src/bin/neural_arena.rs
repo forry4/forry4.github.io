@@ -199,7 +199,12 @@ fn main() {
     // one side searches its opponent and the other does not is two different
     // algorithms, which is a comparison worth making deliberately rather than
     // by forgetting a flag.
-    let opponent_model = if request["opponent_model"] == "minimax" {
+    // NOT `opponent_model`: that key is already the opponent's model ARTIFACT,
+    // and reusing it made the arena try to load the string "ranker" as a neural
+    // net. It panicked in 0.084s, and because the run script sent stderr to
+    // /dev/null the failure arrived as three pools that produced "no usable
+    // report" in milliseconds.
+    let opponent_model = if request["opponent_search"] == "minimax" {
         OpponentModel::Minimax
     } else {
         OpponentModel::Ranker
