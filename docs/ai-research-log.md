@@ -644,50 +644,59 @@ strong. It says this model loses; it cannot say a neural leaf must. The
 disambiguation — the LEAGUE's own incumbent `g004/epoch-006`, which `state.json`
 records at fixed 0.75 / timed 0.8125 under the `proxy-250-150-100-w4-g3`
 profile, run against the same Expert at serving shape — was launched
-immediately, and **it answered both questions at once**:
+immediately:
 
 ```
 g004/epoch-006 vs the shipped Expert, equal time, serving shape, both coherent
 0.4375 over 64 pairs, 95% CI [0.352, 0.523]
-20 losses / 32 splits / 12 wins
 ```
 
-**The league recorded that same checkpoint at `timed_score: 0.8125`.** At the
-budget players actually get it reads 0.4375 — a 0.375 swing, and if anything
-slightly BEHIND the heuristic Expert it was built to replace. So the overnight
-model was not merely small: **twelve generations produced nothing that clears
-the bot Orbit already ships**, and the campaign's headline number was an
-artifact of its measurement budget.
+So the overnight model was not merely small. **No Orbit neural artifact has ever
+cleared the heuristic Expert it was built to replace** — g004 is at parity or
+slightly behind.
 
-**8. The budget is a VALIDITY parameter, not a precision one.** The mechanism is
-the repo's own leaf-speed trap, one level up: budget decides whether LEAF
-QUALITY or SEARCH DEPTH dominates. A neural leaf is expensive but better per
-simulation, so at 250 ms — where neither side searches deep — leaf quality wins;
-by 3000 ms the Expert is doing ~10,900 simulations per decision and depth
-compensates for its weaker leaf. The two strength-versus-simulations curves
-cross, and `proxy-250-150-100-w4-g3` sat on the wrong side of the crossing.
+**8. CORRECTION — I claimed this contradicted the league's own 0.8125, and it
+does not. I misread `state.json`.** `best.timed_score: 0.8125` is g004 against
+the previous BASELINE CHECKPOINT, the league's generation-over-generation
+promotion metric. It was never an Expert comparison. The league's actual
+expert-anchored confirmation for the same checkpoint is on disk at
+`g004/confirmation/proxy-250-150-100-w4-g3/expert-confirm-32.json` and reads
+**0.5156 [0.391, 0.641] over 32 pairs** — entirely consistent with the 0.4375
+measured here.
 
-This does NOT condemn cheap screens generally, and the distinction is the useful
-part:
+I then built a mechanism for the non-existent gap ("leaf quality versus search
+depth cross as the budget rises, so the 250 ms proxy sat on the wrong side"),
+wrote it into this log, the campaign memory and two commit messages, and spent
+three hours of compute testing it. **The budget ladder refuted it flatly**, the
+same comparison at five budgets on identical paired deals:
 
-- Across a change in LEAF COST (neural vs heuristic, or any architecture change
-  that alters the per-simulation price), the arms' curves cross and a cheap
-  budget can invert the ordering.
-- At EQUAL leaf cost (checkpoint A vs checkpoint B, same architecture) both arms
-  pay the same per simulation, the curves have the same shape, and a proxy is
-  plausibly order-preserving. Most of the league's twelve generations were this
-  kind; the number that escaped into `state.json` as a strength claim was not.
+```
+  250ms  0.4922 [0.414, 0.570]      2000ms  0.5078 [0.430, 0.586]
+  500ms  0.4453 [0.359, 0.531]      3000ms  0.4375 [0.352, 0.523]
+ 1000ms  0.4609 [0.367, 0.555]
+```
 
-**And the deeper error is how the proxy was USED. A cheap screen can be a filter;
-it cannot be a judge.** A filter rejects obvious losers and a false positive is
-tolerable because the expensive gate catches it. The league used the proxy to
-SELECT — argmax over generations — which is exactly where a false positive is
-fatal, compounded by 8-pair screens resolving +/-0.21. Winner's curse on top of
-an invalid operating point.
+Flat across a 12x range, every rung overlapping every other. **There is no
+budget effect in this comparison**, and the two lessons are worth separating:
 
-A budget ladder (250/500/1000/2000 against the 3000 ms run already on disk, 64
-pairs each, identical deals so the rungs are paired) is running to locate the
-crossing, which converts "250 was too low" into a measured screening floor.
+- *Method:* a number read out of a state file is not a measurement until you
+  know what it was measured AGAINST. The report filename
+  (`parent-vs-current-expert-*` for the baseline, `expert-confirm-32` for the
+  confirmation) said so all along.
+- *What the ladder is still worth:* it is a real, 320-pair, five-budget
+  demonstration that a cheap screen PRESERVES THE ORDERING here. That licenses
+  cheap screening for this comparison class, which is the opposite of the
+  conclusion I was reaching for and more useful than it.
+
+**9. What actually went wrong in the league, stated correctly.** The promotion
+metric was candidate-versus-parent, and it kept showing progress — g004 beat its
+baseline 0.8125. The expert anchor was run too, at 32 pairs, and stayed at
+parity generation after generation. **The league optimised a RELATIVE metric
+while the ABSOLUTE anchor never moved.** That is precisely the failure the
+repo already records for Duel — bot-versus-bot gates hide absolute weakness when
+both arms share a blind spot — and here the shared weakness is the value leaf.
+The instrument was not missing; its anchor was underpowered (32 pairs resolves
++/-0.17) and nothing was gated on it.
 
 **Where this leaves the campaign.** Coherent determinization is the shipped
 search (`Controls::serving()`; `Default` stays historical so past numbers
