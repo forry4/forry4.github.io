@@ -106,6 +106,14 @@ def main():
                    help="Opponent seat's nonterminal leaf evaluator")
     # Simulations sharing one determinization: 1 is the historical per-simulation
     # resampling, 0 is one coherent world per call (PIMC), N is N-sim groups.
+    # The learned PUCT prior. Zero is the frozen hand-written action_score the
+    # campaign has always used, and is what every number before 2026-09-12 was
+    # measured with. A model that carries a policy head and is given zero weight
+    # is refused by the search rather than silently searched with the old prior.
+    p.add_argument("--policy-prior-weight",type=float,default=0.0,
+                   help="Candidate seat: share of the PUCT prior taken from the policy head")
+    p.add_argument("--opponent-policy-prior-weight",type=float,default=0.0,
+                   help="Opponent seat: same, defaults to the hand-written prior")
     p.add_argument("--determinization-period",type=int,default=1,
                    help="Candidate seat: simulations per determinization; 0 = coherent")
     p.add_argument("--opponent-determinization-period",type=int,default=1,
@@ -126,6 +134,8 @@ def main():
     if args.model_temperature<=0:p.error("model-temperature must be positive")
     for name in ("determinization_period","opponent_determinization_period"):
         if getattr(args,name)<0:p.error(f"--{name.replace('_','-')} must be zero or positive")
+    for name in ("policy_prior_weight","opponent_policy_prior_weight"):
+        if not 0.0<=getattr(args,name)<=1.0:p.error(f"--{name.replace('_','-')} must be between 0 and 1")
     # The heuristic leaf runs the identical search with no network, which is the
     # control that separates search strength from the value model.
     heuristic=str(args.checkpoint)=="heuristic"
@@ -154,6 +164,8 @@ def main():
     if args.opponent_simulations is not None:request["opponent_simulations"]=args.opponent_simulations
     request["leaf"]=args.leaf
     request["opponent_leaf"]=args.opponent_leaf
+    request["policy_prior_weight"]=args.policy_prior_weight
+    request["opponent_policy_prior_weight"]=args.opponent_policy_prior_weight
     request["determinization_period"]=args.determinization_period
     request["opponent_determinization_period"]=args.opponent_determinization_period
     request["model_stride"]=args.model_stride
@@ -195,6 +207,8 @@ def main():
             "leaf":args.leaf,"opponent_leaf":args.opponent_leaf,
             "determinization_period":args.determinization_period,
             "opponent_determinization_period":args.opponent_determinization_period,
+            "policy_prior_weight":args.policy_prior_weight,
+            "opponent_policy_prior_weight":args.opponent_policy_prior_weight,
             "games":results,"seconds":time.perf_counter()-started,
             "mirror_control":mirror,
             "complete":process.returncode==0 and len(results)==len(jobs) and not any(r["error"] or r["censored"] for r in results)}

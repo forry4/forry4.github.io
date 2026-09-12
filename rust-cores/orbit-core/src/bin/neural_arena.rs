@@ -103,11 +103,11 @@ fn main() {
     let model = if request["model"].is_null() {
         None
     } else {
-        Some(Model::load(&request["model"]).expect("valid model"))
+        Some(Model::load_any(&request["model"]).expect("valid model"))
     };
     let opponent = request
         .get("opponent_model")
-        .map(|v| Model::load(v).expect("valid opponent model"));
+        .map(|v| Model::load_any(v).expect("valid opponent model"));
     let opponent_expert = request
         .get("opponent_expert")
         .and_then(Value::as_bool)
@@ -180,13 +180,28 @@ fn main() {
     };
     let determinization_period = parse_period("determinization_period");
     let opponent_determinization_period = parse_period("opponent_determinization_period");
-    let controls_for = |seat_leaf: Leaf, period: usize| Controls {
+    // How much of each seat's PUCT prior comes from its network's policy head.
+    // Zero is the frozen hand-written `action_score` the campaign has always
+    // used. A screen of the learned prior must be equal-TIME eventually: the
+    // prior costs one extra forward per NEW node, and a fixed-simulation screen
+    // cannot see that cost at all -- the leaf-speed trap, in a new place.
+    let policy_prior_weight = request
+        .get("policy_prior_weight")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0)
+        .clamp(0.0, 1.0);
+    let opponent_policy_prior_weight = request
+        .get("opponent_policy_prior_weight")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0)
+        .clamp(0.0, 1.0);
+    let controls_for = |seat_leaf: Leaf, period: usize, prior: f64| Controls {
         model_stride,
         model_weight,
         model_temperature,
         leaf: seat_leaf,
         determinization_period: period,
-        policy_prior_weight: 0.0,
+        policy_prior_weight: prior,
     };
     // Drive the candidate through the browser's own boundary: rebuild the world
     // from the seat's observation instead of searching the privileged state, and
@@ -274,9 +289,10 @@ fn main() {
                     }
                     let legal = state.legal_moves(seat);
                     let seat_controls = if seat == candidate {
-                        controls_for(leaf, determinization_period)
+                        controls_for(leaf, determinization_period, policy_prior_weight)
                     } else {
-                        controls_for(opponent_leaf, opponent_determinization_period)
+                        controls_for(opponent_leaf, opponent_determinization_period,
+                                     opponent_policy_prior_weight)
                     };
                     let evaluator = if seat == candidate {
                         model
