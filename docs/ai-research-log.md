@@ -698,6 +698,69 @@ both arms share a blind spot — and here the shared weakness is the value leaf.
 The instrument was not missing; its anchor was underpowered (32 pairs resolves
 +/-0.17) and nothing was gated on it.
 
+**10. THE NEURAL LINE DECOMPOSED, and it is dead as constituted.** Three
+measurements against the shipped heuristic Expert, equal time, serving shape,
+both seats coherent, 64 CRN pairs each:
+
+```
+neural leaf + learned prior          0.2812  [0.211, 0.359]
+hand-written leaf + learned prior    0.4922  [0.414, 0.570]   14L / 37 split / 13W
+the Expert itself                    0.5     by definition
+```
+
+The middle row is the same model and the same deals as the top one, with ONLY
+the leaf swapped. So:
+
+- **The learned value head costs ~0.21.** It is not marginally behind the
+  hand-written `state_value`; it is the single largest negative in the campaign.
+- **The learned prior is worth ~0.00 on top of a good leaf.** Dead parity, and
+  unusually symmetric (14 losses, 37 splits, 13 wins).
+
+That last line reframes the 0.6641 from item 3 without contradicting it. A
+better prior helps a great deal when it is COMPENSATING for a bad leaf, and
+almost nothing when the leaf is already strong enough to find good moves on its
+own. Both numbers are correct; they describe different regimes. The general form
+is worth carrying: the value of a search-guidance improvement depends on what it
+is guiding, so a component measured inside a weak family carries no transferable
+magnitude.
+
+**Conclusion: stop trying to replace `state_value` with a learned evaluator.**
+Twelve league generations, one overnight retrain, and a hybrid all say the same
+thing. The policy head is retained -- it is built, parity-checked, and is the
+natural move-ordering input if the search becomes alpha-beta -- but it is not a
+strength lever on the current architecture.
+
+**11. What the campaign's evidence actually points at.** Every Orbit gain has
+been a SEARCH fix and every EVALUATION attempt has been a wash or worse:
+
+| Change | Kind | Result |
+|---|---|---|
+| Coherent determinization | search | **+0.61** |
+| Learned prior (weak-leaf family) | search shape | +0.66 |
+| Leaf port defect fixed | evaluation | 0.50 |
+| Learned prior (strong leaf) | search shape | 0.49 |
+| Learned value head | evaluation | **0.28** |
+
+`CLAUDE.md` already said it: the strength lever is SEARCH (throughput and search
+soundness), not eval re-weighting.
+
+And Orbit's game profile says it a second way. Branching is ~10-18, hidden
+information is small (perfect-information cheat 0.6094), and a strong
+hand-written evaluation already exists. That is the Chess/Checkers/Othello
+profile, where alpha-beta with a good evaluation dominated for forty years --
+not the Go profile, where MCTS won precisely BECAUSE branching was enormous and
+no good evaluation existed. This repo already serves the right pattern for the
+class in Dissonance: PIMC plus a perfect-information solver, not MCTS with a
+net.
+
+So the order of work from here is search architecture: (a) give the search an
+opponent at all -- it currently answers every opponent decision with a 1-ply
+ranker and no minimax, at 43% of search time; (b) alpha-beta with iterative
+deepening, `state_value` at the leaf, `action_score` for move ordering and a
+transposition table, determinized over K frozen worlds. De-risk (b)
+perfect-information first: if depth does not win there it will not win
+determinized.
+
 **Where this leaves the campaign.** Coherent determinization is the shipped
 search (`Controls::serving()`; `Default` stays historical so past numbers
 reproduce) — that result was measured heuristic-arm against heuristic-arm and is
