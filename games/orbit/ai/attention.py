@@ -138,6 +138,22 @@ class AttentionValue(nn.Module):
             self.train(was_training)
 
 
+def value_logits(model, batch):
+    """The value head's output, whether or not the model carries a policy head.
+
+    `forward` returns a bare tensor without a policy head and a `(value,
+    policy)` tuple with one, so every caller that wants the value has to say so.
+    Two call sites happened to keep working by writing `model(batch)[0]`: for a
+    policy model that is the value TENSOR, and for a value-only model it is the
+    first ROW's value. Identical-looking code, two different meanings, and the
+    value-only reading silently drops every row but the first as soon as the
+    batch grows. This is the one spelling that means the same thing for both.
+    """
+
+    output = model(batch)
+    return output[0] if isinstance(output, tuple) else output
+
+
 def policy_loss(logits, mask, policies):
     """Cross-entropy against the root visit distribution, over LEGAL actions only.
 

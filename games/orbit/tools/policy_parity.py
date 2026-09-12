@@ -65,8 +65,27 @@ def positions(games, seed):
             moves = engine.legal_moves(game, pid)
             if not moves:
                 break
-            yield index, game, observation(game, pid)
+            yield index, game["turn_number"], observation(game, pid)
             engine.apply_move(game, pid, moves[0])
+
+
+def dataset_positions(pool):
+    """Observations from a generated pool, for checking a TRAINED checkpoint.
+
+    A checkpoint's vocabulary covers the data it was fitted on and nothing else,
+    so walking freshly generated games raises on the first unseen category --
+    which is a coverage gap, not a parity failure. Mirrors
+    `attention_parity --development`.
+    """
+
+    from .value_campaign import load_manifest, read_game
+
+    manifest = load_manifest(pool)
+    for item in manifest["games"][:32]:
+        for step in read_game(pool, item)["steps"]:
+            observation = step["observation"]
+            if len(observation.get("legal_moves") or []) > 1:
+                yield pool.name, observation.get("turn", 0), observation
 
 
 def softmax(values):
@@ -76,7 +95,7 @@ def softmax(values):
     return [weight / total for weight in weights]
 
 
-def walk(model, games, seed, binary):
+def walk(model, source, binary):
     import torch
 
     from ..ai.attention import export_model
@@ -103,7 +122,7 @@ def walk(model, games, seed, binary):
             raise RuntimeError("bridge refused the model")
         model.eval()
         with torch.no_grad():
-            for index, game, obs in positions(games, seed):
+            for index, turn, obs in source:
                 value, logits = model(model.tensor_batch([encode_features(obs)]))
                 width = len(obs["legal_moves"])
                 widest = max(widest, width)
@@ -120,7 +139,7 @@ def walk(model, games, seed, binary):
                 delta = max(abs(a - b) for a, b in zip(actual, expected))
                 if delta > worst_logit:
                     worst_logit = delta
-                    worst_at = {"game": index, "turn": game["turn_number"],
+                    worst_at = {"game": index, "turn": turn,
                                 "moves": width, "python": expected, "rust": actual}
                 # The PRIOR is checked as well as the logits. A constant shift
                 # leaves the softmax identical and is not a defect; a
@@ -167,6 +186,11 @@ def main():
     parser.add_argument("--fresh", action="store_true",
                         help="Build an untrained policy head instead of loading one")
     parser.add_argument("--games", type=int, default=4)
+    parser.add_argument("--development", type=Path,
+                        help="Walk a generated pool instead of fresh games. Give the pool "
+                             "the model's vocabulary was FITTED on (the training pool): a "
+                             "vocabulary is training-only by design, so a development pool "
+                             "can legitimately contain categories it has never seen")
     parser.add_argument("--seed", type=int, default=9300)
     parser.add_argument("--binary", type=Path, default=DEFAULT_BINARY)
     args = parser.parse_args()
@@ -185,7 +209,17 @@ def main():
         model, _, _, _ = load_checkpoint(args.checkpoint)
         if model.policy is None:
             raise SystemExit("That checkpoint has no policy head")
-    report = walk(model, args.games, args.seed, args.binary)
+    source = (dataset_positions(args.development) if args.development
+              else positions(args.games, args.seed))
+    try:
+        report = walk(model, source, args.binary)
+    except ValueError as error:
+        # A checkpoint's vocabulary covers only the data it was fitted on.
+        raise SystemExit(
+            f"{error}\n\nIf that names an unseen token, the checkpoint's vocabulary "
+            "does not cover these positions, which is a coverage gap rather than a "
+            "parity failure. Pass --development pointing at the pool the model was "
+            "TRAINED on, or use --fresh, which fits on exactly what it walks.") from None
     json.dump(report, sys.stdout, indent=1)
     sys.stdout.write("\n")
     if not report["passed"]:

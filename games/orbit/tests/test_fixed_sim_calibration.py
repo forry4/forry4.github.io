@@ -121,3 +121,63 @@ def test_identical_seats_are_a_mirror():
 def test_any_per_seat_difference_is_not_a_mirror(difference):
     """A mirror is held to exactly 0.5000, so a false one asserts something untrue."""
     assert not mirror_control(**{**MIRROR, **difference})
+
+
+# --- the binary equivalence gate ---------------------------------------------
+# Pools measured on an old binary and pools measured on a new one are two
+# experiments wearing one name, and nothing in either report says so.
+
+from ..tools.arena_equivalence import compare
+
+
+def _run(games, **settings):
+    body = {"pool": "development-x", "fixed_simulations": 64,
+            "fixed_opponent_simulations": 64, "workers": 2, "game_workers": 1,
+            "via_observation": True, "leaf": "state-value", "opponent_leaf": "state-value",
+            "determinization_period": 0, "opponent_determinization_period": 1,
+            "checkpoint": "heuristic", "opponent": "expert", "games": games}
+    body.update(settings)
+    return body
+
+
+def _game(index, winner, simulations=256, decisions=40):
+    return {"index": index, "seed": 100 + index, "candidate": index % 2, "winner": winner,
+            "simulations": simulations, "decisions": decisions, "censored": False,
+            "error": None, "elapsed_ms": 12.5 * index}
+
+
+def test_identical_runs_compare_equal_despite_differing_wall_clock():
+    """Timing fields MUST be excluded or the gate cries wolf and gets ignored."""
+    left = _run([_game(0, 0), _game(1, 1)])
+    right = _run([dict(_game(0, 0), elapsed_ms=999.0), dict(_game(1, 1), elapsed_ms=0.1)])
+    assert compare(left, right)["identical"]
+
+
+@pytest.mark.parametrize("field,value", [
+    ("winner", 1), ("simulations", 257), ("decisions", 41), ("censored", True),
+    ("seed", 999), ("error", "boom"),
+])
+def test_any_deterministic_difference_is_caught(field, value):
+    left = _run([_game(0, 0), _game(1, 1)])
+    changed = dict(_game(0, 0))
+    changed[field] = value
+    report = compare(left, _run([changed, _game(1, 1)]))
+    assert not report["identical"]
+    assert report["differences"][0]["field"] == field
+
+
+def test_a_different_game_count_is_a_difference_not_a_crash():
+    report = compare(_run([_game(0, 0), _game(1, 1)]), _run([_game(0, 0)]))
+    assert not report["identical"]
+
+
+def test_runs_with_different_settings_are_refused_rather_than_compared():
+    """Agreement between two different experiments would be luck, not evidence."""
+    with pytest.raises(ValueError, match="not the same experiment"):
+        compare(_run([_game(0, 0)]), _run([_game(0, 0)], workers=4))
+
+
+def test_an_equal_time_run_cannot_prove_equivalence():
+    """It does not reproduce itself even on one binary, so it can prove nothing."""
+    with pytest.raises(ValueError, match="fixed simulations"):
+        compare(_run([_game(0, 0)], fixed_simulations=None), _run([_game(0, 0)]))

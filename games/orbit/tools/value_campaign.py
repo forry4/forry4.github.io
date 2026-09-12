@@ -197,7 +197,7 @@ def train(directory,development,output,epochs,device,resume=None,indexed_feature
           extra_data=None,allow_data_change=False,per_seat=4,root_value_beta=0.0,batch_rows=0,
           policy_weight=0.0):
     import torch
-    from ..ai.attention import AttentionValue,ModelConfig,train_prepared,save_checkpoint,load_checkpoint
+    from ..ai.attention import AttentionValue,ModelConfig,train_prepared,save_checkpoint,load_checkpoint,value_logits
     if fused_adam and device != "cuda":
         raise ValueError("--fused-adam requires --device cuda")
     if policy_weight < 0:
@@ -324,7 +324,7 @@ def train(directory,development,output,epochs,device,resume=None,indexed_feature
             if batch is None:
                 continue
             model.eval()
-            with torch.no_grad():predictions=model(batch).sigmoid().cpu().tolist()
+            with torch.no_grad():predictions=value_logits(model,batch).sigmoid().cpu().tolist()
             for p,y in zip(predictions,labels):
                 squared.append((p-y)**2)
                 p=max(1e-7,min(1-1e-7,p));logloss.append(-y*math.log(p)-(1-y)*math.log(1-p))

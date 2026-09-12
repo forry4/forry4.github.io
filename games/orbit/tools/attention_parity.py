@@ -7,7 +7,7 @@ import subprocess
 
 import torch
 
-from ..ai.attention import export_model, load_checkpoint
+from ..ai.attention import export_model, load_checkpoint, value_logits
 from ..ai.tensors import TensorEncoder
 from .attention_smoke import collect_examples
 
@@ -50,7 +50,7 @@ def main():
         assert call({"model": export_model(model)})["loaded"]
         with torch.no_grad():
             for index, tokens in enumerate(data):
-                expected = float(model(model.tensor_batch([tokens]))[0])
+                expected = float(value_logits(model, model.tensor_batch([tokens]))[0])
                 actual = call({"observation": observations[index]} if observations is not None
                               else {"rows": encoder.encode(tokens)})
                 error = abs(actual["logit"] - expected)

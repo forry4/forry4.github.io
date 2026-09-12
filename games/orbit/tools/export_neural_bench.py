@@ -5,7 +5,7 @@ from pathlib import Path
 
 import torch
 
-from ..ai.attention import load_checkpoint,export_model
+from ..ai.attention import load_checkpoint,export_model,value_logits
 from ..ai.features import encode_features
 from .value_campaign import load_manifest,read_game
 
@@ -24,7 +24,7 @@ def main():
         game=read_game(args.development,item)
         for step in (game["steps"][0],game["steps"][-1]):
             obs=step["observation"]
-            with torch.no_grad():logit=float(model(model.tensor_batch([encode_features(obs)]))[0])
+            with torch.no_grad():logit=float(value_logits(model,model.tensor_batch([encode_features(obs)]))[0])
             fixtures.append({"observation":obs,"logit":logit})
     args.output.write_text(json.dumps({"model":export_model(model),"fixtures":fixtures}),encoding="utf-8")
     print(json.dumps({"fixtures":len(fixtures),"output":str(args.output)}))
