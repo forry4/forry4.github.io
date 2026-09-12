@@ -90,13 +90,27 @@ class TensorEncoder:
         self.paths = {key: i + 1 for i, key in enumerate(vocabulary.paths)}
         self.categories = {key: i + 1 for i, key in enumerate(vocabulary.categories)}
 
-    def encode(self, tokens):
+    def encode(self, tokens, *, action_entities=None):
+        """Encode tokens to rows.
+
+        ``action_entities`` optionally receives ``{move index: entity id}`` for
+        the legal-move entities. ``entity_key`` already gives every legal move
+        its OWN entity, so a policy head needs no new pooling -- only the map
+        from a move's position in ``observation['legal_moves']`` to the row the
+        model produces for it. Without this the head could not be aligned to a
+        visit-count target, because entity ids are assigned in token order.
+        """
         tokens=tuple(tokens)
         observer=next((t.value for t in tokens if t.path==("seat",)),None)
         rows = []
         entities = {}
         for token in tokens:
-            entity = entities.setdefault(entity_key(token), len(entities) + 1)
+            key = entity_key(token)
+            entity = entities.setdefault(key, len(entities) + 1)
+            if action_entities is not None and len(key) >= 3 and key[1] == "legal_moves":
+                index = key[2]
+                if type(index) is int:
+                    action_entities.setdefault(index, entity)
             try:
                 path = self.paths[path_key(token.path)]
                 group = GROUPS.index(token.group) + 1
@@ -137,7 +151,9 @@ class TensorEncoder:
         """Return NumPy arrays with explicit token and path-position masks."""
         import numpy as np
 
-        rows = [self.encode(tokens) for tokens in examples]
+        action_maps = [{} for _ in examples]
+        rows = [self.encode(tokens, action_entities=action_maps[i])
+                for i, tokens in enumerate(examples)]
         width = max((len(example) for example in rows), default=0)
         depth = max((len(row["positions"]) for example in rows for row in example), default=0)
         result = {key: np.zeros((len(rows), width), dtype=np.int64)
@@ -154,6 +170,23 @@ class TensorEncoder:
                 n = len(row["positions"])
                 result["positions"][b, t, :n] = row["positions"]
                 result["position_mask"][b, t, :n] = True
+        # Legal-action entity ids, in the observation's own move order, so a
+        # policy head's logits line up with a visit-count target without the
+        # trainer reconstructing the move ordering. Zero is padding, matching
+        # every other index array here; `action_mask` says which slots are real.
+        # Width is the highest move INDEX present, not the COUNT of mapped
+        # moves: if a legal move ever produced no tokens its index is absent
+        # from the map, and sizing by count would silently drop every later
+        # move off the end of the array -- a policy head trained against a
+        # target it can never express.
+        actions = max((max(m) + 1 if m else 0 for m in action_maps), default=0)
+        result["action_entity"] = np.zeros((len(rows), actions), dtype=np.int64)
+        result["action_mask"] = np.zeros((len(rows), actions), dtype=bool)
+        for b, mapping in enumerate(action_maps):
+            for index in sorted(mapping):
+                if index < actions:
+                    result["action_entity"][b, index] = mapping[index]
+                    result["action_mask"][b, index] = True
         return result
 
 

@@ -5,6 +5,7 @@ This first model attends to all semantic tokens; compact entity pooling and
 native inference must earn their place through profiling and parity checks.
 """
 from dataclasses import asdict, dataclass
+import math
 
 import torch
 from torch import nn
@@ -12,7 +13,7 @@ from torch.nn import functional as F
 
 from .tensors import GROUPS, KINDS, TensorEncoder, Vocabulary
 
-MODEL_VERSION = "orbit-attention-value-v3"
+MODEL_VERSION = "orbit-attention-value-v4"
 
 
 @dataclass(frozen=True)
@@ -22,6 +23,10 @@ class ModelConfig:
     layers: int = 2
     feedforward: int = 128
     indexed_features: bool = False
+    # OFF by default so every existing checkpoint keeps loading strict=True:
+    # a model saved without the head has no `policy.*` parameters, and
+    # `ModelConfig(**checkpoint["config"])` defaults this back to False.
+    policy_head: bool = False
 
     def __post_init__(self):
         if min(self.width, self.heads, self.layers, self.feedforward) < 1 or self.width % self.heads:
@@ -60,6 +65,17 @@ class AttentionValue(nn.Module):
         ])
         self.norm = nn.LayerNorm(d)
         self.head = nn.Linear(d, 1)
+        # One logit per LEGAL-ACTION entity. `tensors.entity_key` already gives
+        # every legal move its own entity, so this needs no new pooling -- the
+        # transformer has been building a row per action all along and only the
+        # value head ever read anything (the summary token).
+        #
+        # This is the lever the campaign never had: Orbit's PUCT prior is the
+        # frozen hand-written `action_score`, which the search then agrees with
+        # a majority of the time, so the network could only ever influence the
+        # leaf. Spender measured its learned prior at +0.58 over its heuristic
+        # prior at a matched value head.
+        self.policy = nn.Linear(d, 1) if config.policy_head else None
 
     def forward(self, batch):
         mask = batch["mask"]
@@ -88,7 +104,17 @@ class AttentionValue(nn.Module):
                                         device=mask.device), ~mask), dim=1)
         for block in self.blocks:
             x = block(x, src_key_padding_mask=padding)
-        return self.head(self.norm(x[:, 0])).squeeze(-1)
+        normed = self.norm(x)
+        value = self.head(normed[:, 0]).squeeze(-1)
+        if self.policy is None:
+            return value
+        # Row `e` of `normed` is entity id `e`: `pooled` is scatter-indexed by
+        # entity id, `pooled[:, 1:]` drops the padding id, and the summary token
+        # is prepended, which puts entity `e` back at position `e`.
+        logits = self.policy(normed).squeeze(-1)
+        index = batch["action_entity"]
+        policy = logits.gather(1, index.clamp(min=0))
+        return value, policy.masked_fill(~batch["action_mask"], float("-inf"))
 
     def tensor_batch(self, examples):
         device = next(self.parameters()).device
@@ -105,19 +131,67 @@ class AttentionValue(nn.Module):
         was_training = self.training
         self.eval()
         try:
-            return self(self.tensor_batch(examples)).sigmoid().cpu().tolist()
+            output = self(self.tensor_batch(examples))
+            value = output[0] if isinstance(output, tuple) else output
+            return value.sigmoid().cpu().tolist()
         finally:
             self.train(was_training)
 
 
-def train_batch(model, optimizer, examples, outcomes, weights=None):
+def policy_loss(logits, mask, policies):
+    """Cross-entropy against the root visit distribution, over LEGAL actions only.
+
+    ``policies`` carries one entry per row: a distribution aligned to that row's
+    legal moves, or None where the row has no recorded search -- observer views,
+    non-searching opponent families, and every shard generated before
+    2026-09-11. An unsupervised row contributes nothing, rather than being
+    taught a uniform target nothing ever demonstrated.
+
+    The alignment is checked rather than assumed. A target is accepted only if
+    the row's real action slots are exactly its first ``len(distribution)``
+    entries, because a hole in the mask would silently place visit mass on an
+    action the model is forbidden to predict -- a misaligned prior that trains
+    quietly and reads as a plain accuracy loss.
+    """
+
+    target = torch.zeros_like(logits)
+    supervised = torch.zeros(logits.shape[0], dtype=torch.bool, device=logits.device)
+    for row, distribution in enumerate(policies):
+        if distribution is None:
+            continue
+        width = len(distribution)
+        if width == 0 or width > logits.shape[1]:
+            raise ValueError("Policy target is wider than the batch's action slots")
+        if int(mask[row, :width].sum()) != width or bool(mask[row, width:].any()):
+            raise ValueError("Policy target is not aligned to the row's legal moves")
+        total = float(sum(distribution))
+        if not math.isfinite(total) or abs(total - 1.0) > 1e-5 or any(p < 0 for p in distribution):
+            raise ValueError("Policy target must be a distribution over the legal moves")
+        target[row, :width] = torch.as_tensor(distribution, dtype=logits.dtype,
+                                              device=logits.device)
+        supervised[row] = True
+    if not bool(supervised.any()):
+        return None
+    log_probs = F.log_softmax(logits, dim=-1)
+    # Masked slots hold -inf and their target is exactly zero; replace them
+    # before the multiply so 0 * -inf cannot produce a NaN.
+    per_row = -(target * log_probs.masked_fill(~mask, 0.0)).sum(dim=-1)
+    return per_row[supervised].mean()
+
+
+def train_batch(model, optimizer, examples, outcomes, weights=None, policies=None, policy_weight=0.0):
     """One terminal-outcome update. Caller excludes censored trajectories."""
     batch = model.tensor_batch(examples)
-    return train_prepared(model,optimizer,batch,outcomes,weights)
+    return train_prepared(model,optimizer,batch,outcomes,weights,policies,policy_weight)
 
 
-def train_prepared(model,optimizer,batch,outcomes,weights=None):
-    """Same update on an immutable pre-encoded batch; no sampling change."""
+def train_prepared(model,optimizer,batch,outcomes,weights=None,policies=None,policy_weight=0.0):
+    """Same update on an immutable pre-encoded batch; no sampling change.
+
+    Returns the TOTAL loss. ``policy_weight`` defaults to zero so the value-only
+    campaign stays an exact control: with no policy targets this is the update
+    it always was.
+    """
     model.train()
     # Dataset labels originate on the CPU. Validate there before transfer so
     # each small predicate does not force a CUDA stream synchronization.
@@ -129,8 +203,18 @@ def train_prepared(model,optimizer,batch,outcomes,weights=None):
         raise ValueError("Invalid example weights")
     targets = targets.to(batch["number"].device)
     w = w.to(batch["number"].device)
+    if policies is not None and len(policies) != targets.shape[0]:
+        raise ValueError("Expected one policy target slot per row")
     optimizer.zero_grad(set_to_none=True)
-    loss = (F.binary_cross_entropy_with_logits(model(batch), targets, reduction="none") * w).sum() / w.sum()
+    output = model(batch)
+    predictions, logits = output if isinstance(output, tuple) else (output, None)
+    if policies is not None and logits is None:
+        raise ValueError("Policy targets supplied to a model with no policy head")
+    loss = (F.binary_cross_entropy_with_logits(predictions, targets, reduction="none") * w).sum() / w.sum()
+    if policies is not None and policy_weight:
+        component = policy_loss(logits, batch["action_mask"], policies)
+        if component is not None:
+            loss = loss + policy_weight * component
     if not bool(torch.isfinite(loss)):
         raise ValueError("Non-finite training loss")
     loss.backward()
@@ -149,7 +233,8 @@ def save_checkpoint(path, model, optimizer, *, step, metadata=None):
 
 def load_checkpoint(path, *, device="cpu", fused_adam=False):
     checkpoint = torch.load(path, map_location="cpu", weights_only=True)
-    if checkpoint["version"] not in ("orbit-attention-value-v2",MODEL_VERSION):
+    if checkpoint["version"] not in ("orbit-attention-value-v2",
+                                    "orbit-attention-value-v3", MODEL_VERSION):
         raise ValueError("Attention checkpoint version mismatch")
     model = AttentionValue(Vocabulary.from_dict(checkpoint["vocabulary"]),
                            ModelConfig(**checkpoint["config"])).to(device)

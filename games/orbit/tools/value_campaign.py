@@ -88,12 +88,45 @@ def read_game(directory,item):
     return json.loads(raw)
 
 
-def samples(game, *, per_seat=4, root_value_beta=0.0):
+def policy_target(step, observation):
+    """Normalized root visit counts, aligned to ``observation['legal_moves']``.
+
+    AlphaZero's policy target. Orbit recorded no policy target at all before
+    2026-09-11, which is why it has no policy head and why its PUCT prior is
+    still the frozen hand-written ``action_score``. Rows without a recorded
+    search (observer views, non-searching families, older shards) return None
+    and are simply not supervised for policy.
+
+    Alignment is by MOVE IDENTITY rather than index: the recorded stats come
+    from the search's own deterministic move sort, and nothing guarantees that
+    is the observation's order. Comparing the moves themselves cannot drift.
+    """
+
+    stats = step.get("visits")
+    if not isinstance(stats, list) or not stats:
+        return None
+    visits = {}
+    for entry in stats:
+        if not isinstance(entry, dict):
+            return None
+        count = entry.get("visits")
+        if not isinstance(count, (int, float)) or isinstance(count, bool) or count < 0:
+            return None
+        visits[json.dumps(entry.get("move"), sort_keys=True)] = float(count)
+    legal = observation.get("legal_moves") or []
+    target = [visits.get(json.dumps(move, sort_keys=True), 0.0) for move in legal]
+    total = sum(target)
+    if total <= 0 or len(target) != len(legal):
+        return None
+    return [value / total for value in target]
+
+
+def samples(game, *, per_seat=4, root_value_beta=0.0, with_policy=False):
     if game["censored"]:
-        return [],[]
+        return ([],[],[]) if with_policy else ([],[])
     if not 0.0 <= root_value_beta <= 1.0:
         raise ValueError("root_value_beta must be between 0 and 1")
-    inputs,labels=[],[]
+    inputs,labels,policies=[],[],[]
     for seat in (0,1):
         steps=[s for s in game["steps"] if s["observation"]["seat"]==seat]
         if not steps:
@@ -113,7 +146,9 @@ def samples(game, *, per_seat=4, root_value_beta=0.0):
                     teacher_target=(float(teacher)+1.0)/2.0
                     outcome=(1.0-root_value_beta)*outcome+root_value_beta*teacher_target
             labels.append(outcome)
-    return inputs,labels
+            if with_policy:
+                policies.append(policy_target(step, step["observation"]))
+    return (inputs,labels,policies) if with_policy else (inputs,labels)
 
 
 def _fit_vocabulary_sources(sources):
@@ -159,11 +194,17 @@ def fit_vocabulary(directory,manifest):
 
 
 def train(directory,development,output,epochs,device,resume=None,indexed_features=False,fused_adam=False,training_seed=9400,
-          extra_data=None,allow_data_change=False,per_seat=4,root_value_beta=0.0,batch_rows=0):
+          extra_data=None,allow_data_change=False,per_seat=4,root_value_beta=0.0,batch_rows=0,
+          policy_weight=0.0):
     import torch
     from ..ai.attention import AttentionValue,ModelConfig,train_prepared,save_checkpoint,load_checkpoint
     if fused_adam and device != "cuda":
         raise ValueError("--fused-adam requires --device cuda")
+    if policy_weight < 0:
+        raise ValueError("policy-weight must be zero or positive")
+    # Zero keeps the value-only campaign as an exact control: no policy head is
+    # built, no target is computed, and the update is the one it always was.
+    need_policy = policy_weight > 0
     train_sources=[(directory,load_manifest(directory))]
     for extra in extra_data or []:
         train_sources.append((extra,load_manifest(extra)))
@@ -188,30 +229,45 @@ def train(directory,development,output,epochs,device,resume=None,indexed_feature
             candidate_vocab=_fit_vocabulary_sources(train_sources)
             if candidate_vocab.as_dict()!=model.vocabulary.as_dict():
                 raise ValueError("Changed training data requires an identical vocabulary")
+        if need_policy and model.policy is None:
+            raise ValueError("Resumed checkpoint has no policy head; start a fresh run to train one")
         first_epoch=meta["epoch"]+1
         training_seed=meta.get("training_seed",9400)
         output.mkdir(parents=True,exist_ok=True)
     else:
         output.mkdir(parents=True,exist_ok=False)
         print("Building training-only vocabulary",flush=True)
-        model=AttentionValue(_fit_vocabulary_sources(train_sources),ModelConfig(indexed_features=indexed_features)).to(device)
+        model=AttentionValue(_fit_vocabulary_sources(train_sources),
+                             ModelConfig(indexed_features=indexed_features,
+                                         policy_head=need_policy)).to(device)
         optimizer=torch.optim.AdamW(model.parameters(),lr=0.0003,weight_decay=0.0001,fused=fused_adam)
         step=0;first_epoch=0
     # Immutable batches are cached without changing sample order, counts or math.
     # Bound memory rather than loading an unbounded full campaign onto the GPU.
+    def _rows(game):
+        """Semantic rows plus a policy slot per row, always the same arity.
+
+        A uniform three-tuple keeps the batched and per-game paths identical and
+        lets a mixed batch be built with one ``zip``; with the head off the slots
+        are None and ``policy_target`` is never computed.
+        """
+        if need_policy:
+            return samples(game,per_seat=per_seat,root_value_beta=root_value_beta,with_policy=True)
+        inputs,labels=samples(game,per_seat=per_seat,root_value_beta=root_value_beta)
+        return inputs,labels,[None]*len(inputs)
     cache={};cache_bytes=0
     cache_limit=min(1024*1024*1024,torch.cuda.mem_get_info()[0]//4) if device=="cuda" else 256*1024*1024
     def prepared(root,item):
         nonlocal cache_bytes
         key=(str(root),item["sha256"])
         if key in cache:return cache[key]
-        inputs,labels=samples(read_game(root,item),per_seat=per_seat,root_value_beta=root_value_beta)
-        if not inputs:return None,labels
+        inputs,labels,policies=_rows(read_game(root,item))
+        if not inputs:return None,labels,policies
         batch=model.tensor_batch(inputs)
         size=sum(v.numel()*v.element_size() for v in batch.values() if torch.is_tensor(v))
         if cache_bytes+size<=cache_limit:
-            cache[key]=(batch,labels);cache_bytes+=size
-        return batch,labels
+            cache[key]=(batch,labels,policies);cache_bytes+=size
+        return batch,labels,policies
     # Row cache for cross-game batching.  Keyed like the tensor cache, but holds
     # the SEMANTIC rows so a batch can mix games; tensorization then happens per
     # mixed batch.  It is a second cache rather than a replacement so the
@@ -220,8 +276,7 @@ def train(directory,development,output,epochs,device,resume=None,indexed_feature
     def prepared_rows(root,item):
         key=(str(root),item["sha256"])
         if key not in row_cache:
-            row_cache[key]=samples(read_game(root,item),per_seat=per_seat,
-                                   root_value_beta=root_value_beta)
+            row_cache[key]=_rows(read_game(root,item))
         return row_cache[key]
     # Preflight both partitions once, including all vocabulary coverage, before updates.
     for root,manifest in [*train_sources,(development,dev_manifest)]:
@@ -230,7 +285,7 @@ def train(directory,development,output,epochs,device,resume=None,indexed_feature
     for epoch in range(first_epoch,first_epoch+epochs):
         order=[(root,item) for root,manifest in train_sources for item in manifest["games"]]
         random.Random(training_seed+epoch).shuffle(order)
-        losses=[];started=time.perf_counter()
+        losses=[];supervised=0;started=time.perf_counter()
         if batch_rows:
             # CROSS-GAME BATCHING.  One update per game was the pre-2026-09-11
             # behaviour, and its batch was that game's sixteen rows: eight
@@ -242,24 +297,30 @@ def train(directory,development,output,epochs,device,resume=None,indexed_feature
             # a batch sees many games, both seats and both labels.
             rows=[]
             for root,item in order:
-                inputs,labels=prepared_rows(root,item)
-                rows.extend(zip(inputs,labels))
+                inputs,labels,policies=prepared_rows(root,item)
+                rows.extend(zip(inputs,labels,policies))
             random.Random(training_seed*7919+epoch).shuffle(rows)
             for start in range(0,len(rows),batch_rows):
                 chunk=rows[start:start+batch_rows]
                 if not chunk:continue
-                inputs=[row for row,_ in chunk];labels=[label for _,label in chunk]
-                losses.append(train_prepared(model,optimizer,model.tensor_batch(inputs),labels))
+                inputs=[row for row,_,_ in chunk];labels=[label for _,label,_ in chunk]
+                targets=[policy for _,_,policy in chunk]
+                supervised+=sum(policy is not None for policy in targets)
+                losses.append(train_prepared(model,optimizer,model.tensor_batch(inputs),labels,
+                                             None,targets if need_policy else None,policy_weight))
                 step+=1
         else:
             for root,item in order:
-                batch,labels=prepared(root,item)
+                batch,labels,targets=prepared(root,item)
                 if batch is not None:
-                    losses.append(train_prepared(model,optimizer,batch,labels));step+=1
+                    supervised+=sum(policy is not None for policy in targets)
+                    losses.append(train_prepared(model,optimizer,batch,labels,
+                                                 None,targets if need_policy else None,policy_weight))
+                    step+=1
         squared=[];logloss=[]
         import math
         for item in dev_manifest["games"]:
-            batch,labels=prepared(development,item)
+            batch,labels,_=prepared(development,item)
             if batch is None:
                 continue
             model.eval()
@@ -276,6 +337,7 @@ def train(directory,development,output,epochs,device,resume=None,indexed_feature
                 "indexed_features":model.config.indexed_features,"fused_adam":optimizer.param_groups[0].get("fused",False),
                 "per_seat":per_seat,"training_sources":[str(root) for root,_ in train_sources],
                 "root_value_beta":root_value_beta,"batch_rows":batch_rows,
+                "policy_weight":policy_weight,"policy_supervised_rows":supervised,
                 "updates_this_epoch":len(losses),
                 "parent_checkpoint":str(resume) if resume else None}
         save_checkpoint(output/f"epoch-{epoch:03d}.pt",model,optimizer,step=step,
@@ -312,6 +374,10 @@ def main():
                    help="Rows per optimizer update, shuffled ACROSS games. Zero keeps the "
                         "historical one-update-per-game control, whose batch is a single "
                         "game's sixteen perfectly correlated rows")
+    t.add_argument("--policy-weight",type=float,default=0.0,
+                   help="Weight on the root-visit policy loss. Zero builds no policy head at "
+                        "all and keeps the value-only campaign as an exact control; the head "
+                        "needs shards generated with --record-policy")
     args=p.parse_args()
     if args.command=="generate":generate(args.output,args.games,args.namespace)
     else:
@@ -319,9 +385,11 @@ def main():
         if args.per_seat<1: p.error("per-seat must be positive")
         if not 0.0<=args.root_value_beta<=1.0: p.error("root-value-beta must be between 0 and 1")
         if args.batch_rows<0: p.error("batch-rows must be zero or positive")
+        if args.policy_weight<0: p.error("policy-weight must be zero or positive")
         train(args.data,args.development,args.output,args.epochs,args.device,args.resume,args.indexed_features,args.fused_adam,args.training_seed,
               extra_data=args.extra_data,allow_data_change=args.allow_data_change,per_seat=args.per_seat,
-              root_value_beta=args.root_value_beta,batch_rows=args.batch_rows)
+              root_value_beta=args.root_value_beta,batch_rows=args.batch_rows,
+              policy_weight=args.policy_weight)
 
 
 if __name__=="__main__":main()

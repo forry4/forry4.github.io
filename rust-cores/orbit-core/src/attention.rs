@@ -144,7 +144,22 @@ fn norm_into(weight: &[f32], bias: &[f32], x: &[f32], out: &mut [f32]) {
 
 impl Model {
     pub fn load(v: &Value) -> Result<Self, String> {
-        if v["version"] != "orbit-attention-value-v2" && v["version"] != "orbit-attention-value-v3" { return Err("Model version mismatch".into()); }
+        // v4 adds an OPTIONAL policy head. A v4 artifact without one is
+        // structurally identical to v3, so it loads unchanged.
+        if !matches!(
+            v["version"].as_str(),
+            Some("orbit-attention-value-v2" | "orbit-attention-value-v3" | "orbit-attention-value-v4")
+        ) {
+            return Err("Model version mismatch".into());
+        }
+        // ...but a model that HAS a policy head must not load silently here:
+        // this search would keep using the hand-written `action_score` prior and
+        // quietly ignore the learned one, which is precisely the kind of
+        // difference that looks like a failed training run. Fail closed until
+        // the native prior is implemented.
+        if v["config"]["policy_head"] == true {
+            return Err("Policy-head models need the native policy prior; not implemented".into());
+        }
         let encoder = Encoder::new(&v["vocabulary"])?;
         let dim = |key: &str| -> Result<usize, String> {
             let n = v["config"][key].as_u64().ok_or("Missing model dimension")? as usize;
