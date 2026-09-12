@@ -3,7 +3,7 @@ import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyMatchup, LobbyLo
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss,
   useProgressiveList, LobbyTabs, useLastDifficulty, LobbyHero,
-  LobbyAction, LobbyUser, useListFade } from "../../shared/lobby.jsx";
+  LobbyAction, LobbyUser, useListFade, LobbyBotTier } from "../../shared/lobby.jsx";
 import CocRules from "./rules.jsx";
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 // Offline vs-AI: the local game driver (wasm engine + IndexedDB saves) — see offline.js.
@@ -808,6 +808,11 @@ const AI_TIER_OPTIONS = [
   { value: "expert", label: "Expert", title: "The strongest neural net, searched in your browser" },
 ];
 const AI_TIER_IDS = AI_TIER_OPTIONS.map((t) => t.value);
+// id -> the words a player sees, off the same list the picker renders — what
+// `LobbyBotTier` prints on the Active and History rows. A retired tier still
+// sitting on an old saved game falls through to its raw id rather than to a
+// blank, which is the honest read: the row is reporting what was played.
+const AI_TIER_LABELS = Object.fromEntries(AI_TIER_OPTIONS.map((t) => [t.value, t.label]));
 
 export default function CastlesOfCrimson({ myId, authUser, onExit, offline = null }) {
   const [board, setBoard] = useState(() => {           // {spaces, colors, castle, ...} — hydrated from cache
@@ -2196,7 +2201,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
                     <div className="lby-card" key={g.id}>
                       <div className="lby-card-info">
                         <LobbyMatchup seats={seats} />
-                        <div className="lby-card-meta">{g.id} · {timeAgo(g.updated_at)}</div>
+                        <div className="lby-card-meta">{g.id} · {timeAgo(g.updated_at)}<LobbyBotTier tier={g.ai_difficulty} labels={AI_TIER_LABELS} /></div>
                       </div>
                       <div className="lby-card-actions">
                         {isMine ? (
@@ -2231,7 +2236,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
                         <span className={`hist-result ${g.tie ? "tie" : (g.you_won ? "won" : "lost")}`}>{g.tie ? "Tie" : (g.you_won ? "Won" : "Lost")}</span>
                         <span className="hist-scores"> vs {g.opp_name}{g.your_score != null && g.opp_score != null ? <> <span className="hist-score-num">{g.your_score}–{g.opp_score}</span></> : null}</span>
                       </div>
-                      <div className="lby-card-meta">{timeAgo(g.updated_at)}</div>
+                      <div className="lby-card-meta">{timeAgo(g.updated_at)}<LobbyBotTier tier={g.ai_difficulty} labels={AI_TIER_LABELS} /></div>
                     </div>
                     <div className="lby-card-actions">
                       <LobbyAction kind="secondary" onClick={() => enterCocReview(g.id)}>Review</LobbyAction>

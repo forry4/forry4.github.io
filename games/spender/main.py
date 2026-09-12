@@ -323,6 +323,7 @@ def list_user_games(user_id: str) -> list[dict]:
             "player_names": player_names,        # full seated list (2-4), for the multiplayer matchup
             "you_are_p1": is_p1,
             "your_turn": your_turn,
+            "ai_difficulty": _rooms.state_ai_tier(state),
             "created_at": r["created_at"],
             "updated_at": r["updated_at"],
         })
@@ -361,6 +362,7 @@ def list_active_games() -> list[dict]:
             "player_names": player_names,   # full seated list (2-4) for display
             "turn": g.get("turn") if isinstance(g, dict) else None,
             "win_points": int(g.get("win_points", 15)) if isinstance(g, dict) else 15,  # Classic 15 / Long 21 — lets the lobby filter Active by length
+            "ai_difficulty": _rooms.state_ai_tier(state),
             "created_at": r["created_at"], "updated_at": r["updated_at"],
         })
     return out
@@ -409,6 +411,7 @@ def list_user_history(user_id: str, limit: int = _rooms.HISTORY_LIMIT) -> list[d
             "finished_at": r["updated_at"],
             "win_points": g.get("win_points", 15),
             "players": players,
+            "ai_difficulty": _rooms.state_ai_tier(state),
             "you_won": any(p["is_you"] and p["won"] for p in players),
         })
     return out

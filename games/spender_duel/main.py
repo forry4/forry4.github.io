@@ -291,6 +291,7 @@ def list_user_games(user_id: str) -> list[dict]:
             "id": r["id"], "status": r["status"],
             "player1_name": r["player1_name"], "player2_name": r["player2_name"],
             "you_are_p1": r["player1_id"] == user_id, "your_turn": your_turn,
+            "ai_difficulty": _rooms.state_ai_tier(state),
             "created_at": r["created_at"], "updated_at": r["updated_at"],
         })
     return out
@@ -310,9 +311,10 @@ def list_user_history(user_id: str) -> list[dict]:
     out = []
     for r in rows:
         try:
-            g = (_decode_state(r["state_json"]).get("game") or {})
+            state = _decode_state(r["state_json"])
         except Exception:
-            g = {}
+            state = {}
+        g = state.get("game") or {}
         if not isinstance(g, dict) or not g.get("players"):
             continue
         is_p1 = r["player1_id"] == user_id
@@ -327,6 +329,7 @@ def list_user_history(user_id: str) -> list[dict]:
             "id": r["id"], "opp_name": opp_name,
             "your_score": your_score, "opp_score": opp_score,
             "you_won": g.get("winner") == user_id,
+            "ai_difficulty": _rooms.state_ai_tier(state),
             "win_condition": g.get("win_condition"),
             "updated_at": r["updated_at"],
         })

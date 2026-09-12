@@ -361,6 +361,7 @@ def list_user_games(user_id: str) -> list[dict]:
             # ADDITIVE: a bundle cached before this shipped ignores the field, and
             # the frontend falls back to `opponents` against a backend without it.
             "seats": [{"name": n, "you": p == user_id} for p, n in players.items()],
+            "ai_difficulty": _rooms.state_ai_tier(state),
             "your_turn": your_turn,
             "created_at": r["created_at"], "updated_at": r["updated_at"],
         })
@@ -407,6 +408,7 @@ def list_user_history(user_id: str) -> list[dict]:
                   "you": p == user_id, "won": p in winners}
                  for p in g["players"]),
                 key=lambda s: not s["you"]),
+            "ai_difficulty": _rooms.state_ai_tier(state),
             "you_won": user_id in winners,
             "winners": [players.get(p, p) for p in winners],
             "updated_at": r["updated_at"],

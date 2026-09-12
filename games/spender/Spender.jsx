@@ -58,6 +58,7 @@ const GameChunkLoading = () => (
 import { baseCss } from "../../shared/theme.js";
 import { lobbyCss, LobbyHeader, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame,
 	useLastDifficulty,
+	LobbyBotTier,
 	createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss, LobbyHero, LobbyUser,
 	RulesModal, rulesModalCss,
 	useProgressiveList, LobbySectionHd, LobbyTabs, TurnBadge, LobbyMatchup, LobbyAction, useListFade } from "../../shared/lobby.jsx";
@@ -132,6 +133,12 @@ const AI_TIERS = { H2: "easy", H3: "medium", S: "hard", N: "expert" };
 const AI_VARIANTS = ["H2", "H3", "S", "N"];
 const aiPersona = (v) => AI_PERSONAS[v] || `AI ${v}`;         // variant code -> persona name (retired codes -> "AI <code>")
 const aiTierLabel = (v) => (AI_TIERS[v] || "").replace(/^./, (c) => c.toUpperCase());  // "expert" -> "Expert"
+// variant code -> the TIER the lobby rows print (`LobbyBotTier`). The persona is
+// the bot's name and is already in the matchup ("Nina (AI)"); what the row was
+// missing is the strength, and a retired code keeps its raw letter rather than
+// rendering an empty chip beside a game that really was played against it.
+const AI_TIER_LABELS = Object.fromEntries(
+	Object.keys(AI_TIERS).map((v) => [v, aiTierLabel(v)]));
 const displayName = (name) => {                                // backend "AI (H2)" -> "Henry (AI)"; humans unchanged
 	const m = typeof name === "string" && name.match(/^AI \((.+)\)$/);
 	return m ? aiPersona(m[1]) + " (AI)" : name;                // tag AI names so a same-named human isn't confused for the bot
@@ -3283,7 +3290,7 @@ export default function SpenderApp() {
 												<span className={`hist-result ${g.you_won ? "won" : "lost"}`}>{g.you_won ? "Won" : "Lost"}</span>
 												<span className="hist-scores">vs {oppNames} <span className="hist-score-num">{myScore}–{oppScore}</span></span>
 											</div>
-											<div className="lby-card-meta">{timeAgo(g.finished_at)}{g.win_points === 21 ? " · Long (21)" : ""}</div>
+											<div className="lby-card-meta">{timeAgo(g.finished_at)}{g.win_points === 21 ? " · Long (21)" : ""}<LobbyBotTier tier={g.ai_difficulty} labels={AI_TIER_LABELS} /></div>
 										</div>
 										<div className="lby-card-actions">
 											<LobbyAction kind="secondary" onClick={() => enterReview(g.id)}>Review</LobbyAction>
@@ -3324,7 +3331,7 @@ export default function SpenderApp() {
 												<div className="lby-card-info">
 													<LobbyMatchup seats={seats.map(([id, nm]) => (
 														{ name: displayName(nm), you: id === myId }))} />
-													<div className="lby-card-meta">{g.id} · {timeAgo(g.updated_at)}</div>
+													<div className="lby-card-meta">{g.id} · {timeAgo(g.updated_at)}<LobbyBotTier tier={g.ai_difficulty} labels={AI_TIER_LABELS} /></div>
 												</div>
 												<div className="lby-card-actions">
 													{isMine ? (

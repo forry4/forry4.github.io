@@ -6,7 +6,7 @@ import {
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss,
   useProgressiveList, notWaiting, LobbyAction, useLastDifficulty, LobbyHero,
-  SCORECARD_GLYPH, LobbyUser, useListFade,
+  SCORECARD_GLYPH, LobbyUser, useListFade, LobbyBotTier,
 } from "../../shared/lobby.jsx";
 import DissonanceRules from "./rules.jsx";
 import DissonanceScorecard from "./scorecard.jsx";
@@ -143,6 +143,9 @@ const BOT_TIERS = [
   { id: "expert", name: "Expert", desc: "Hard, and reads the bidding without assuming it can see your hand" },
 ];
 const BOT_TIER_IDS = BOT_TIERS.map((t) => t.id);   // what a remembered tier is validated against
+// id -> the words a player sees, off the same list the picker renders — what
+// `LobbyBotTier` prints on the Active and History rows.
+const BOT_TIER_NAMES = Object.fromEntries(BOT_TIERS.map((t) => [t.id, t.name]));
 
 // The Hard tier's card play is searched HERE, on the player's CPU. It is an
 // exact double-dummy solve per sampled deal — ~70ms for one deal at trick 1 —
@@ -2211,7 +2214,7 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
                   { name: g.player1_name, you: g.you_are_p1 },
                   { name: g.player2_name, you: !g.you_are_p1 },
                 ]} />
-                <div className="lby-card-meta">{g.id} · {timeAgo(g.updated_at)}<ModeBadge mode={g.mode} /></div>
+                <div className="lby-card-meta">{g.id} · {timeAgo(g.updated_at)}<ModeBadge mode={g.mode} /><LobbyBotTier tier={g.ai_difficulty} labels={BOT_TIER_NAMES} /></div>
               </div>
               {/* THE TURN PILL LIVES ON THE ACTIONS RAIL, beside Resume, which is
                   where the other six put it. Inline after the title it floated in
@@ -2267,6 +2270,7 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
                       which read as the headline and was never true. */}
                   <div className="lby-card-meta">
                     {line}{line ? " · " : ""}{timeAgo(g.updated_at)}
+                    <LobbyBotTier tier={g.ai_difficulty} labels={BOT_TIER_NAMES} />
                   </div>
                 </div>
               </div>

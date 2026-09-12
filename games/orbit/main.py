@@ -651,13 +651,15 @@ def list_user_games(user_id: str) -> list[dict]:
     out = []
     for r in rows:
         try:
-            g = (_decode_state(r["state_json"]).get("game") or {})
+            state = _decode_state(r["state_json"])
         except Exception:
-            g = {}
+            state = {}
+        g = state.get("game") or {}
         out.append({
             "id": r["id"], "status": r["status"],
             "player1_name": r["player1_name"], "player2_name": r["player2_name"],
             "you_are_p1": r["player1_id"] == user_id,
+            "ai_difficulty": _rooms.state_ai_tier(state),
             "your_turn": bool(g) and bool(engine.legal_moves(g, user_id)),
             "turn": g.get("turn_number") if g else None,
             "created_at": r["created_at"], "updated_at": r["updated_at"],
@@ -679,15 +681,17 @@ def list_user_history(user_id: str) -> list[dict]:
     out = []
     for r in rows:
         try:
-            g = (_decode_state(r["state_json"]).get("game") or {})
+            state = _decode_state(r["state_json"])
         except Exception:
-            g = {}
+            state = {}
+        g = state.get("game") or {}
         winner = g.get("winner")
         outcome = "draw" if winner is None else ("won" if winner == user_id else "lost")
         out.append({
             "id": r["id"],
             "player1_name": r["player1_name"], "player2_name": r["player2_name"],
             "you_are_p1": r["player1_id"] == user_id,
+            "ai_difficulty": _rooms.state_ai_tier(state),
             "outcome": outcome,
             "turns": g.get("turn_number"),
             "updated_at": r["updated_at"],

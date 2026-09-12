@@ -385,3 +385,35 @@ class MessageThrottle:
             return False
         self._hits.append(now)
         return True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WHICH BOT A SAVED ROOM WAS PLAYING
+# ─────────────────────────────────────────────────────────────────────────────
+def state_ai_tier(state) -> str | None:
+    """The bot tier a saved room was playing against, or ``None`` for a human table.
+
+    Reads only the blob every game's ``save_game`` already writes, so it is
+    usable from the `list_user_games` / `list_user_history` / `list_active_games`
+    family without loading the room or the engine.
+
+    IT IS TWO FACTS, NOT ONE, and conflating them is the bug this exists to
+    make unwriteable: a tier is stored on EVERY room, bot or not (each game
+    writes ``room.get("ai_difficulty", DEFAULT_DIFFICULTY)``, which defaults),
+    so the seat is what decides whether a bot is at the table and the tier only
+    says which one. Reading the tier alone labels every human game "Normal AI".
+
+    Both spellings of each are accepted because both exist in the tree, and
+    neither is a legacy shape to migrate: ``ai_players`` is Dontminion's
+    multi-bot LIST (one tier, several seats), and ``ai_variant`` is Spender's
+    variant code, whose seat lives inside ``game`` rather than beside it.
+    """
+    if not isinstance(state, dict):
+        return None
+    game = state.get("game") if isinstance(state.get("game"), dict) else {}
+    seated = (state.get("ai_player") or state.get("ai_players")
+              or game.get("ai_player") or game.get("ai_players"))
+    if not seated:
+        return None
+    tier = state.get("ai_difficulty") or state.get("ai_variant")
+    return str(tier) if tier else None

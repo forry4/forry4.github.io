@@ -392,6 +392,7 @@ def list_user_games(user_id: str) -> list[dict]:
             "players": [{**p, "is_you": p["id"] == user_id} for p in players],
             "player1_name": r["player1_name"], "player2_name": r["player2_name"],  # legacy 2p fields
             "you_are_p1": is_p1, "your_turn": your_turn,
+            "ai_difficulty": _rooms.state_ai_tier(state),
             "created_at": r["created_at"], "updated_at": r["updated_at"],
         })
     return out
@@ -420,6 +421,7 @@ def list_active_games() -> list[dict]:
             "player1_id": r["player1_id"], "player1_name": r["player1_name"],  # legacy 2p fields
             "player2_id": r["player2_id"], "player2_name": r["player2_name"],
             "turn": g.get("turn") if isinstance(g, dict) else None,
+            "ai_difficulty": _rooms.state_ai_tier(state),
             "created_at": r["created_at"], "updated_at": r["updated_at"],
         })
     return out
@@ -461,6 +463,7 @@ def list_user_history(user_id: str) -> list[dict]:
             "your_score": scores.get(user_id),
             "opp_score": scores.get(top_opp["id"]) if top_opp else None,
             "you_won": you_won, "tie": isinstance(win, list),
+            "ai_difficulty": _rooms.state_ai_tier(state),
             "updated_at": r["updated_at"],
         })
     return out

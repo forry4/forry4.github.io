@@ -7,7 +7,7 @@ import {
   notWaiting, LobbyAction,
   LobbyCreateRow, lobbyCreateRowCss, useProgressiveList, LobbyTabs, useLastDifficulty,
   LobbyHero, LobbyUser, useListFade,
-  RulesModal, rulesModalCss,
+  RulesModal, rulesModalCss, LobbyBotTier,
 } from "../../shared/lobby.jsx";
 // Only the shared CARD FRAME (sizing vars + .card chrome). Dontminion's card face
 // is its own markup — no gems here, but the frame keeps all five games' cards the
@@ -50,6 +50,10 @@ const BOTS = [
 // server, and a retired id must fall back to the default rather than restore as
 // a selection whose label no longer names the bot the server would seat.
 const BOT_IDS = BOTS.map((b) => b.id);
+// id -> the words a player sees, off the same list the picker renders. These are
+// bot NAMES, not difficulty rungs — "Random" and "Money+" — which is exactly why
+// `LobbyBotTier` takes a map instead of title-casing the wire id into "Bmplus".
+const BOT_NAMES = Object.fromEntries(BOTS.map((b) => [b.id, b.name]));
 // Display NAMES only. The SERVER decides which expansions exist (/catalog
 // "expansions", from main.KNOWN_EXPANSIONS) and the picker is built from that,
 // so a set the server ships without a label here still appears (under a
@@ -2326,7 +2330,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
                       `opponents` fallback is for a bundle that loads against a
                       backend from before it, and drops out at the contract step. */}
                   <LobbyMatchup seats={g.seats || (g.opponents || []).map((n) => ({ name: n }))} />
-                  <div className="lby-card-meta">{g.id} · {timeAgo(g.updated_at)}</div>
+                  <div className="lby-card-meta">{g.id} · {timeAgo(g.updated_at)}<LobbyBotTier tier={g.ai_difficulty} labels={BOT_NAMES} /></div>
                 </div>
                 {/* THE TURN PILL BELONGS ON THE ACTIONS RAIL, beside Resume, which is
                     where the other five games put it. It sat inline in the META line
@@ -2362,7 +2366,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
                         {line ? <> <span className="hist-score-num">{line}</span></> : null}
                       </span>
                     </div>
-                    <div className="lby-card-meta">{timeAgo(g.updated_at)}</div>
+                    <div className="lby-card-meta">{timeAgo(g.updated_at)}<LobbyBotTier tier={g.ai_difficulty} labels={BOT_NAMES} /></div>
                   </div>
                   <div className="lby-card-actions">
                     <LobbyAction kind="secondary" onClick={() => enterReview(g.id)}>

@@ -514,9 +514,10 @@ def list_user_games(user_id: str) -> list[dict]:
     out = []
     for r in rows:
         try:
-            g = (_decode_state(r["state_json"]).get("game") or {})
+            state = _decode_state(r["state_json"])
         except Exception:
-            g = {}
+            state = {}
+        g = state.get("game") or {}
         # `may_act`, not `turn_pid`: a match sitting between rounds has nobody on
         # turn and is waiting on EITHER player to deal the next one. Keyed on the
         # turn alone it would sit in Active with no prompt on either side, which
@@ -536,6 +537,7 @@ def list_user_games(user_id: str) -> list[dict]:
             "id": r["id"], "status": r["status"],
             "player1_name": r["player1_name"], "player2_name": r["player2_name"],
             "you_are_p1": r["player1_id"] == user_id, "your_turn": your_turn,
+            "ai_difficulty": _rooms.state_ai_tier(state),
             "mode": _valid_mode(g.get("mode")) if g else _row_mode(r["state_json"]),
             "created_at": r["created_at"], "updated_at": r["updated_at"],
         })
@@ -556,9 +558,10 @@ def list_user_history(user_id: str) -> list[dict]:
     out = []
     for r in rows:
         try:
-            g = (_decode_state(r["state_json"]).get("game") or {})
+            state = _decode_state(r["state_json"])
         except Exception:
-            g = {}
+            state = {}
+        g = state.get("game") or {}
         res = (g or {}).get("result")
         if not res:
             continue
@@ -590,6 +593,7 @@ def list_user_history(user_id: str) -> list[dict]:
             "your_score": scores[seat], "opp_score": scores[1 - seat],
             "you_won": won,
             "tie": tie,
+            "ai_difficulty": _rooms.state_ai_tier(state),
             "mode": engine.mode_of(g),
             # How many deals it took, and what it was played to -- the two
             # numbers that make the score above legible.

@@ -281,6 +281,39 @@ because each was a per-game decision that looked reasonable in its own file):
   treatments of one row, decided by which endpoint a game happened to have. Where Wolf? is the one
   exemption and it is in the test: its `/games/mine` carries no names at all.
 
+**AN ACTIVE OR HISTORY ROW SAYS WHICH BOT IT WAS PLAYED AGAINST — `LobbyBotTier`
+in `shared/lobby.jsx`, fed by `core.rooms.state_ai_tier` on the server.** Every
+lobby named the SEAT ("Aurelia (you) vs Nina (AI)") and never the STRENGTH, which
+is the half History exists to record and the half that makes two vs-bot rows in
+Active two different games. Every game's `save_game` has stored the tier beside
+the seat since the day it got a bot; no lobby printed it anywhere but the create
+modal that chose it.
+- **It is TWO facts, and conflating them is the bug the shared reader exists to
+  make unwriteable.** A tier is on EVERY blob, bot or not — each game writes
+  `room.get("ai_difficulty", DEFAULT_DIFFICULTY)`, which defaults — so the SEAT
+  decides whether a bot was at the table and the tier only says which. Reading
+  the tier alone labels every human-vs-human row "Normal AI", which reads as a
+  real fact and is unfalsifiable from the row. `state_ai_tier` also absorbs the
+  two shapes that are not legacy and will not go away: Dontminion's `ai_players`
+  LIST (one tier, several seats) and Spender's `ai_variant`, whose seat lives
+  inside `game` rather than beside it.
+- **The id is the server's, the words are the game's.** The component takes a
+  wire id plus the game's own id→label map, because they are genuinely different
+  words: Spender's four variant codes read Easy/Medium/Hard/Expert, and
+  Dontminion's two bots are not difficulties at all but NAMES (Random, Money+) —
+  a component that title-cased the id would print "Bmplus". That map must be
+  DERIVED from the option list the create modal renders, never typed a second
+  time; three lobbies kept a hand-written copy for their create summary, which
+  is how a new tier arrives named in one place and unnamed in the other.
+- The chip renders **nothing** without a tier, which is what makes it safe on
+  every row unconditionally, and it owns its own ` · ` separator so six lobbies
+  cannot each spell it. `shared/tests/test_lobby_bot_tier.py` derives its roster
+  from the tree and fails the lobby (or the list endpoint) that does not carry
+  it; `screens.mjs` covers the wire→words path end to end in `lobbyHistory` and
+  `lobbyFinishSync`. **Where Wolf? has no bot and Rag Tag has one bot and no
+  ladder, so both drop out of that roster on their own** — there is no difficulty
+  to print. A game that later gains tiers joins the roster automatically.
+
 **A FINISHED game leaves Active and joins History at the moment it ENDS, not when the lobby
 next loads — `useFinishedGameSync` in `shared/lobby.jsx`, wired into all eight lobbies.** The
 columns paint from the `readLobbyCache` stale-while-revalidate copy, and that copy was last

@@ -1949,6 +1949,12 @@ try {
 					standings: [{ name: "Histy", vp: 30, you: true, won: true },
 						{ name: "Bot 1", vp: 10, you: false, won: false }],
 					you_won: true, winners: ["Histy"], updated_at: 1750000000 - i * 60,
+					// EVERY OTHER ROW IS A HUMAN GAME, with no tier at all. The
+					// bot chip is only correct if it renders for one and not the
+					// other: a version that printed the game's DEFAULT difficulty
+					// (which every save blob carries, bot or not) labels every
+					// vs-friend row too, and reads exactly as right.
+					...(i % 2 ? {} : { ai_difficulty: "bmplus" }),
 				})),
 			}),
 		}));
@@ -1962,6 +1968,26 @@ try {
 		const first = await rows();
 		check("History shows the first page only, not every finished game",
 			first === 10, JSON.stringify({ first, of: TOTAL }));
+
+		// WHICH BOT THE ROW WAS PLAYED AGAINST, end to end: the wire id the
+		// server sends -> `LobbyBotTier` -> this game's own words for it.
+		// Dontminion is the one whose tiers are NAMES rather than difficulty
+		// rungs, so it is also the case that proves the label comes from the
+		// game's map and not from title-casing the id ("Bmplus").
+		const tiers = await page.evaluate(() => {
+			const rows = [...document.querySelectorAll(".lby-col-history .lby-card")];
+			return {
+				rows: rows.length,
+				chips: rows.filter((el) => el.querySelector(".lby-bot-tier")).length,
+				words: [...new Set(rows.map((el) =>
+					el.querySelector(".lby-bot-tier")?.textContent.replace(/\s+/g, " ").trim())
+					.filter(Boolean))],
+			};
+		});
+		check("a History row names the bot it was played against, and a human game names none",
+			tiers.rows === 10 && tiers.chips === 5
+			&& JSON.stringify(tiers.words) === JSON.stringify(["· Money+ AI"]),
+			JSON.stringify(tiers));
 
 		// scrolling the end of the list into view reveals the next page
 		await page.locator(".lby-col-history .lby-more").scrollIntoViewIfNeeded()
@@ -6446,6 +6472,9 @@ try {
 			games: finishedId ? [{
 				id: finishedId, player1_name: "Finny", player2_name: "Bot",
 				you_are_p1: true, outcome: "won", turns: 7, updated_at: 1750000000,
+				// The tier this room was actually created at, below — the row the
+				// server writes carries it, and the History line is the server's.
+				ai_difficulty: "easy",
 			}] : [],
 		})));
 
@@ -6524,6 +6553,11 @@ try {
 			columns.active === 0 && columns.history.length === 1
 			&& columns.history[0].includes("Won") && columns.history[0].includes("Bot"),
 			JSON.stringify(columns));
+		// The room was created at Easy and the row says so. It is the same path
+		// the `lobbyHistory` block covers for Dontminion, run here against a row
+		// that came through the finished-game refresh rather than a page load.
+		check("...and the row says which bot it was",
+			columns.history[0].includes("Easy AI"), JSON.stringify(columns));
 		check("no page errors finishing a game and returning to the lobby",
 			errors.length === 0, errors[0] || "");
 		await ctx.close();

@@ -6,6 +6,7 @@ import {
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss, useProgressiveList, LobbyHero, LobbyUser, useListFade,
   readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame, timeAgo, useLastDifficulty,
+  LobbyBotTier,
 } from "../../shared/lobby.jsx";
 import { GAME_ACCENTS } from "../../shared/accents.js";
 import { buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
@@ -32,6 +33,11 @@ const ORBIT_AI_TIER_OPTIONS = [
   { value: "expert", label: "Expert", title: "Searches its main action against one coherent hidden world; the strongest tier" },
 ];
 const ORBIT_AI_TIERS = ORBIT_AI_TIER_OPTIONS.map((t) => t.value);
+// id -> the words a player sees, off the SAME list the picker renders. The
+// create summary used to carry its own hand-written copy of these four labels,
+// which is the shape that let the tier list and the label list disagree once
+// already (see the comment above `ORBIT_AI_TIER_OPTIONS`).
+const ORBIT_AI_LABELS = Object.fromEntries(ORBIT_AI_TIER_OPTIONS.map((t) => [t.value, t.label]));
 const ORBIT_AI_WIRE = 1;
 const ORBIT_AI_MODEL_VERSION = 2;
 const ORBIT_AI_ENCODER = "orbit-observation-v1";
@@ -728,7 +734,6 @@ function Lobby({ authUser, myId, onExit, openGames, myGames, history, historySho
   showRules, setShowRules, toast }) {
   const active = notWaiting(myGames);
   const selectedOpponent = createOpp === "friend" ? "friend" : createDifficulty;
-  const difficultyName = { easy: "Easy", normal: "Normal", hard: "Hard", expert: "Expert" };
   return <div className="app orbit" style={{ "--lby-accent": GAME_ACCENTS.orbit }}>
     <style>{styles}</style>
     <LobbyHeader onBack={onExit} user={<LobbyUser user={authUser} />} />
@@ -763,7 +768,7 @@ function Lobby({ authUser, myId, onExit, openGames, myGames, history, historySho
             <div className="lby-card-info"><LobbyMatchup placeholder="Opponent" seats={[
               { name: g.player1_name, you: g.you_are_p1 }, { name: g.player2_name, you: !g.you_are_p1 },
             ]} />
-              <div className="lby-card-meta">{g.turn ? `turn ${g.turn} · ` : ""}{timeAgo(g.updated_at)}</div></div>
+              <div className="lby-card-meta">{g.turn ? `turn ${g.turn} · ` : ""}{timeAgo(g.updated_at)}<LobbyBotTier tier={g.ai_difficulty} labels={ORBIT_AI_LABELS} /></div></div>
             <div className="lby-card-actions"><TurnBadge mine={g.your_turn}>{g.your_turn ? "Your turn" : "Their turn"}</TurnBadge>
               <LobbyAction onClick={() => resumeGame(g.id)}>Resume</LobbyAction></div>
           </div>)}</div>
@@ -774,7 +779,7 @@ function Lobby({ authUser, myId, onExit, openGames, myGames, history, historySho
           <div className="lby-list">{historyShown.map((g) => <div className="lby-card lby-card-hist" key={g.id}>
             <div className="lby-card-info"><div className="lby-card-title"><span className={`hist-result ${g.outcome}`}>{g.outcome === "won" ? "Won" : g.outcome === "draw" ? "Draw" : "Lost"}</span>
               <span className="hist-scores"> vs {g.you_are_p1 ? g.player2_name : g.player1_name}</span></div>
-              <div className="lby-card-meta">{g.turns ? `${g.turns} turns · ` : ""}{timeAgo(g.updated_at)}</div></div>
+              <div className="lby-card-meta">{g.turns ? `${g.turns} turns · ` : ""}{timeAgo(g.updated_at)}<LobbyBotTier tier={g.ai_difficulty} labels={ORBIT_AI_LABELS} /></div></div>
           </div>)}{historyMore}</div>
         </div>
       </div>
@@ -786,7 +791,7 @@ function Lobby({ authUser, myId, onExit, openGames, myGames, history, historySho
       ]} /></CmRow>
       {createOpp === "ai" && <CmRow label="AI difficulty"><CmSeg value={createDifficulty} onChange={setCreateDifficulty}
         options={ORBIT_AI_TIER_OPTIONS} wrap /></CmRow>}
-      <div className="cm-footer"><span className="cm-summary">Creating: <b>{selectedOpponent === "friend" ? "vs Friend" : `vs ${difficultyName[selectedOpponent] || "Hard"} AI`}</b></span>
+      <div className="cm-footer"><span className="cm-summary">Creating: <b>{selectedOpponent === "friend" ? "vs Friend" : `vs ${ORBIT_AI_LABELS[selectedOpponent] || "Hard"} AI`}</b></span>
         <button type="button" className="cm-create" onClick={() => createGame(createOpp === "ai", createDifficulty)}>Create Game</button></div>
     </CreateModal>}
     {showRules && <RulesModal title="How to play — Orbit" onClose={() => setShowRules(false)}><OrbitRules /></RulesModal>}

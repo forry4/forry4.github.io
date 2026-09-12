@@ -263,6 +263,43 @@ export function LobbyMatchup({ seats, placeholder = "…" }) {
 	);
 }
 
+// WHICH BOT IT WAS — on the Active row and on the History row, in every lobby.
+//
+// A row that says "Aurelia (you) vs Nina (AI)" names the seat and not the
+// STRENGTH, and the strength is what the reader actually wants back: History is
+// a record of who you can beat, and an Active list with two vs-bot games in it
+// is two different games. Every lobby already had the fact — each game's
+// `save_game` has stored the tier beside the seat since the day it got a bot —
+// and no lobby printed it anywhere but the create modal that chose it.
+//
+// `tier` is the WIRE id (`state_ai_tier` on the server: the tier a saved room
+// actually played, `null` for a human table) and `labels` is the game's own
+// id -> display-name map. The split is deliberate and is the same split the
+// create modal already lives with: the id is the server's, the words are the
+// game's, and they are genuinely different words — Spender's four variant codes
+// read Easy/Medium/Hard/Expert, and Dontminion's two bots are not difficulties
+// at all but NAMES (Random, Money+). A shared component that title-cased the id
+// would print "Bmplus". Title-casing is only the FALLBACK, for an id the map
+// does not have — a tier the game has since retired, which is still what an old
+// saved row was genuinely played at (Castles of Crimson's server keeps a
+// `normal` its picker has never shown). Printing the raw id there is honest;
+// printing it lowercase in a row of proper nouns is just untidy.
+//
+// It renders NOTHING for a human game, which is what makes it safe to put on
+// every row unconditionally rather than behind a per-game `g.ai_player &&`.
+// The separator is the component's, not the caller's: six lobbies appending
+// `" · "` by hand is six chances to leave one out, and a leading separator on
+// an absent chip is a meta line that ends in a dangling middot.
+export function LobbyBotTier({ tier, labels }) {
+	if (!tier) return null;
+	const label = labels?.[tier] || String(tier).replace(/^./, (c) => c.toUpperCase());
+	return (
+		<span className="lby-bot-tier" title={`Played against the ${label} bot`}>
+			{" · "}{label} AI
+		</span>
+	);
+}
+
 // A room you have joined but which has NOT started is waiting, not active. It
 // already appears in Open — with a Cancel if you host it — so listing it again
 // as in-progress offers a Resume that just drops you back in the waiting room.

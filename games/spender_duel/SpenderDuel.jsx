@@ -4,7 +4,7 @@ import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyMatchup, LobbyLo
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss,
   useProgressiveList, LobbyTabs, notWaiting, LobbyAction, useLastDifficulty,
-  LobbyHero, LobbyUser, useListFade } from "../../shared/lobby.jsx";
+  LobbyHero, LobbyUser, useListFade, LobbyBotTier } from "../../shared/lobby.jsx";
 // The gems, jewel cards and move log are SHARED with Spender (same game family, so
 // they must look the same). Duel adds only what Splendor Duel needs on top: pearls,
 // crowns, wild bonuses and ability glyphs — all optional props on the same CardView.
@@ -82,7 +82,11 @@ const BOT_TIERS = [
   { id: "hard", name: "Hard", desc: "Searches properly — a real fight" },
   { id: "expert", name: "Expert", desc: "Hard, retrained to punish impatience" },
 ];
-const TIER_NAME = { easy: "Easy", normal: "Normal", hard: "Hard", expert: "Expert" };
+// id -> the words a player sees, DERIVED from the list above rather than a second
+// hand-written copy of the same four names: this map is read by the in-game
+// header, the create summary and `LobbyBotTier` on the Active/History rows, so a
+// tier added to `BOT_TIERS` alone would have gone unnamed in three places.
+const TIER_NAME = Object.fromEntries(BOT_TIERS.map((t) => [t.id, t.name]));
 const BOT_TIER_IDS = BOT_TIERS.map((t) => t.id);   // what a remembered tier is validated against
 
 function uid() { return Math.random().toString(36).slice(2, 10); }
@@ -1678,7 +1682,7 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
                     { name: g.player1_name, you: g.you_are_p1 },
                     { name: g.player2_name, you: !g.you_are_p1 },
                   ]} />
-                  <div className="lby-card-meta">{g.id} · {timeAgo(g.updated_at)}</div>
+                  <div className="lby-card-meta">{g.id} · {timeAgo(g.updated_at)}<LobbyBotTier tier={g.ai_difficulty} labels={TIER_NAME} /></div>
                 </div>
                 <div className="lby-card-actions">
                   {g.your_turn ? <TurnBadge mine>Your turn</TurnBadge> : <TurnBadge>Their turn</TurnBadge>}
@@ -1699,7 +1703,7 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
                     <span className={`hist-result ${g.you_won ? "won" : "lost"}`}>{g.you_won ? "Won" : "Lost"}</span>
                     <span className="hist-scores"> vs {g.opp_name} <span className="hist-score-num">{g.your_score ?? "?"}–{g.opp_score ?? "?"}</span></span>
                   </div>
-                  <div className="lby-card-meta">{WIN_DESC[g.win_condition] ? WIN_DESC[g.win_condition] + " · " : ""}{timeAgo(g.updated_at)}</div>
+                  <div className="lby-card-meta">{WIN_DESC[g.win_condition] ? WIN_DESC[g.win_condition] + " · " : ""}{timeAgo(g.updated_at)}<LobbyBotTier tier={g.ai_difficulty} labels={TIER_NAME} /></div>
                 </div>
                 <div className="lby-card-actions"><LobbyAction kind="secondary" onClick={() => enterReview(g.id)}>Review</LobbyAction></div>
               </div>
