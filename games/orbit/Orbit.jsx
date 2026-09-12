@@ -20,7 +20,18 @@ const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
 const WS_BASE = WS_RAW.replace(/\/ws$/, "");
 const ORBIT_WS = `${WS_BASE}/orbit/ws`;
 const ORBIT_HTTP = WS_RAW.replace(/^ws/, "http").replace(/\/ws$/, "/orbit");
-const ORBIT_AI_TIERS = ["easy", "normal", "hard"];
+// The tiers the create modal offers, and — mapped to ids — the list a
+// remembered tier is validated against. ONE list, because a hand-written copy
+// drifts: when Expert landed the id list still read easy/normal/hard, so
+// picking Expert was stored and then rejected on the next open, and the modal
+// silently came back on Hard.
+const ORBIT_AI_TIER_OPTIONS = [
+  { value: "easy", label: "Easy", title: "Public-information ranker" },
+  { value: "normal", label: "Normal", title: "Effect-aware ranker with a validated server fallback" },
+  { value: "hard", label: "Hard", title: "Searches its main action in your browser, resampling the hidden hand every simulation" },
+  { value: "expert", label: "Expert", title: "Searches its main action against one coherent hidden world; the strongest tier" },
+];
+const ORBIT_AI_TIERS = ORBIT_AI_TIER_OPTIONS.map((t) => t.value);
 const ORBIT_AI_WIRE = 1;
 const ORBIT_AI_MODEL_VERSION = 2;
 const ORBIT_AI_ENCODER = "orbit-observation-v1";
@@ -773,12 +784,8 @@ function Lobby({ authUser, myId, onExit, openGames, myGames, history, historySho
         { value: "friend", label: "VS Friend" },
         { value: "ai", label: "VS AI" },
       ]} /></CmRow>
-      {createOpp === "ai" && <CmRow label="AI difficulty"><CmSeg value={createDifficulty} onChange={setCreateDifficulty} options={[
-        { value: "easy", label: "Easy", title: "Public-information ranker" },
-        { value: "normal", label: "Normal", title: "Effect-aware ranker with a validated server fallback" },
-        { value: "hard", label: "Hard", title: "Searches its main action in your browser, resampling the hidden hand every simulation" },
-        { value: "expert", label: "Expert", title: "Searches its main action against one coherent hidden world; the strongest tier" },
-      ]} wrap /></CmRow>}
+      {createOpp === "ai" && <CmRow label="AI difficulty"><CmSeg value={createDifficulty} onChange={setCreateDifficulty}
+        options={ORBIT_AI_TIER_OPTIONS} wrap /></CmRow>}
       <div className="cm-footer"><span className="cm-summary">Creating: <b>{selectedOpponent === "friend" ? "vs Friend" : `vs ${difficultyName[selectedOpponent] || "Hard"} AI`}</b></span>
         <button type="button" className="cm-create" onClick={() => createGame(createOpp === "ai", createDifficulty)}>Create Game</button></div>
     </CreateModal>}
@@ -804,7 +811,7 @@ export default function Orbit({ myId, authUser, onExit }) {
   const [showRules, setShowRules] = useState(false);
   const [createOpp, setCreateOpp] = useState("ai");
   const [createDifficulty, setCreateDifficulty, rememberDifficulty] =
-    useLastDifficulty("orbit", myId, ORBIT_AI_TIERS, "hard");
+    useLastDifficulty("orbit", myId, ORBIT_AI_TIERS, "expert");
   const [confirmAbandon, setConfirmAbandon] = useState(false);
   const [selectedCard, setSelectedCard] = useState(null);
   // ONE descriptor, one modal, one gesture. `info` is {kind:"card"|"bonus"|

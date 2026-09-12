@@ -150,3 +150,28 @@ def test_the_first_game_default_is_a_tier_the_picker_offers():
         assert fallback in offered, (
             f"{jsx.name} defaults to '{fallback}', which its picker does not "
             f"offer: {offered}")
+
+
+def test_the_validated_list_is_the_list_the_picker_renders():
+    """The offered ids and the modal's options must be ONE list, not two that
+    agree today.
+
+    This is the failure it catches, from Orbit: the picker gained an Expert
+    row and the hand-written id list beside it stayed `easy/normal/hard`, so
+    choosing Expert was stored, failed validation on the next open, and the
+    modal came back on Hard — a difficulty that silently forgets only the
+    newest tier, which is the one most likely to be picked.
+
+    Two shapes count as one list: the offered const is `.map`ped off the option
+    objects the picker renders (most games), or it IS the const the picker maps
+    over (Spender's variant codes).
+    """
+    for jsx in _ai_games():
+        text = jsx.read_text(encoding="utf-8")
+        name = CALL.search(text).group(6)
+        derived = re.search(rf"const {name} = (\w+)\.map\(", text)
+        source = derived.group(1) if derived else name
+        assert re.search(rf"options=\{{{source}\}}|\b{source}\.map\(", text), (
+            f"{jsx.name} validates remembered tiers against `{name}`, but its "
+            f"picker does not render from `{source}` — the two lists will drift "
+            "and a tier in only one of them cannot be remembered")
