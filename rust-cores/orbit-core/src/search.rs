@@ -110,8 +110,24 @@ struct Node {
 }
 impl Node {
     fn new(obs: &Value) -> Self {
-        let mut moves = obs["legal_moves"].as_array().unwrap().clone();
-        moves.sort_by_key(|m| m.to_string());
+        Self::new_with_prior(obs, None, 0.0)
+    }
+
+    /// `learned` is one logit per legal move in the OBSERVATION's order.
+    ///
+    /// The tree works in SORTED move order, so the two orders are reconciled
+    /// explicitly here. This is the same gather that `policy_parity` exists to
+    /// protect: a mismatch does not crash and does not look wrong -- it primes
+    /// one move's search with another move's prior, which reads downstream as
+    /// a policy head that failed to learn anything.
+    ///
+    /// At `weight == 0` this is bit-for-bit the historical prior, whether or
+    /// not logits were supplied.
+    fn new_with_prior(obs: &Value, learned: Option<&[f32]>, weight: f64) -> Self {
+        let original = obs["legal_moves"].as_array().unwrap();
+        let mut order: Vec<usize> = (0..original.len()).collect();
+        order.sort_by_key(|&i| original[i].to_string());
+        let moves: Vec<Value> = order.iter().map(|&i| original[i].clone()).collect();
         let scores: Vec<f64> = moves
             .iter()
             .map(|m| crate::serving::action_score(obs, m))
@@ -119,11 +135,30 @@ impl Node {
         let max = scores.iter().copied().fold(f64::NEG_INFINITY, f64::max);
         let weights: Vec<f64> = scores.iter().map(|s| ((s - max) / 4.0).exp()).collect();
         let sum = weights.iter().sum::<f64>();
-        let edges = weights
-            .iter()
-            .map(|w| Edge {
-                prior: 0.97 * w / sum + 0.03 / weights.len() as f64,
-                ..Default::default()
+        // Softmax the learned logits over the same moves, permuted into the
+        // tree's order. The caller guarantees the length; falling back silently
+        // on a mismatch would hide exactly the defect worth catching.
+        let learned_prior: Option<Vec<f64>> = learned.filter(|_| weight > 0.0).map(|logits| {
+            let top = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max) as f64;
+            let exponentials: Vec<f64> = order
+                .iter()
+                .map(|&i| ((logits[i] as f64) - top).exp())
+                .collect();
+            let total: f64 = exponentials.iter().sum();
+            exponentials.into_iter().map(|e| e / total).collect()
+        });
+        let count = weights.len() as f64;
+        let edges = (0..weights.len())
+            .map(|i| {
+                let heuristic = weights[i] / sum;
+                let blended = match &learned_prior {
+                    Some(prior) => (1.0 - weight) * heuristic + weight * prior[i],
+                    None => heuristic,
+                };
+                Edge {
+                    prior: 0.97 * blended + 0.03 / count,
+                    ..Default::default()
+                }
             })
             .collect();
         Self {
@@ -432,6 +467,16 @@ pub struct Controls {
     /// information is about half of Duel's (perfect-information cheat 0.6094
     /// against 0.7250), so the trade is its own measurement, not an inheritance.
     pub determinization_period: usize,
+    /// How much of the PUCT prior comes from the network's policy head.
+    ///
+    /// `0.0` is the historical search: the prior is entirely the frozen
+    /// hand-written `action_score`, which the 2026-09-11 audit measured
+    /// deciding 50.5% of moves outright. Above zero the model must carry a
+    /// policy head, and one extra forward runs per NEW node -- Orbit expands
+    /// far more nodes than it revisits (19 of 232 under per-simulation
+    /// determinization), so that cost is real and is the first thing to
+    /// measure, not assume.
+    pub policy_prior_weight: f64,
 }
 
 impl Default for Controls {
@@ -442,6 +487,7 @@ impl Default for Controls {
             model_temperature: 2.0,
             leaf: Leaf::default(),
             determinization_period: 1,
+            policy_prior_weight: 0.0,
         }
     }
 }
@@ -453,6 +499,7 @@ impl Controls {
             model_weight: self.model_weight.clamp(0.0, 1.0),
             model_temperature: self.model_temperature.max(0.1),
             determinization_period: self.determinization_period.max(1),
+            policy_prior_weight: self.policy_prior_weight.clamp(0.0, 1.0),
             ..self
         }
     }
@@ -524,9 +571,18 @@ fn choose_cached_options(
         model_temperature,
         leaf,
         determinization_period,
+        policy_prior_weight,
     } = controls;
     if seat > 1 || source.actor() != Some(seat) {
         return Err("Not this seat's decision".into());
+    }
+    // A model that carries a policy head must have it USED. Silently searching
+    // with the hand-written prior instead is the failure that reads as a policy
+    // head which learned nothing, so it fails loudly here rather than producing
+    // a number. `Model::load` refuses policy artifacts for the same reason;
+    // this is the second gate, for anything that got in through `load_any`.
+    if model.is_some_and(Model::has_policy) && policy_prior_weight <= 0.0 {
+        return Err("A policy-head model needs a positive policy prior weight".into());
     }
     let started = crate::clock::Clock::start();
     let profiling = profile_enabled();
@@ -536,7 +592,36 @@ fn choose_cached_options(
     let mut nodes: HashMap<(u64, String), Node> = HashMap::new();
     let root = (0, "root".to_owned());
     let node_started = profile_start(profiling);
-    nodes.insert(root.clone(), Node::new(&obs));
+    // One forward per NEW node when a learned prior is asked for. Counted
+    // separately from leaf evaluations so its cost is visible rather than
+    // folded into `evaluations`.
+    let mut policy_evaluations = 0usize;
+    let learned_prior = |observation: &Value| -> Result<Option<Vec<f32>>, String> {
+        if policy_prior_weight <= 0.0 {
+            return Ok(None);
+        }
+        let model = model.ok_or("A policy prior weight needs a model")?;
+        if !model.has_policy() {
+            return Err("A policy prior weight needs a policy-head model".into());
+        }
+        let tokens = crate::features::encode(observation, None)?;
+        let (rows, actions) = model.encode_tokens_with_actions(&tokens)?;
+        // The length is checked HERE, where it can still be an error. `Node`
+        // indexes the logits by move, so a short list would otherwise either
+        // panic or, worse, be silently truncated into a shuffled prior.
+        if actions.len() != observation["legal_moves"].as_array().map_or(0, Vec::len) {
+            return Err("Policy logits do not cover every legal move".into());
+        }
+        Ok(Some(model.value_and_policy(&rows, &actions)?.1))
+    };
+    let root_prior = learned_prior(&obs)?;
+    if root_prior.is_some() {
+        policy_evaluations += 1;
+    }
+    nodes.insert(
+        root.clone(),
+        Node::new_with_prior(&obs, root_prior.as_deref(), policy_prior_weight),
+    );
     profile.node_ns += profile_elapsed(node_started);
     let mut rng = Chance::seeded(seed);
     let mut sims = 0;
@@ -577,9 +662,26 @@ fn choose_cached_options(
                     (trace, actor_obs.to_string())
                 };
                 let node_started = profile_start(profiling);
-                let node = nodes
-                    .entry(key.clone())
-                    .or_insert_with(|| Node::new(&actor_obs));
+                // The default path keeps its single hash lookup; only a
+                // learned prior pays for the miss check, because computing it
+                // returns a Result that `or_insert_with` cannot carry.
+                let node = if policy_prior_weight > 0.0 {
+                    if !nodes.contains_key(&key) {
+                        let prior = learned_prior(&actor_obs)?;
+                        if prior.is_some() {
+                            policy_evaluations += 1;
+                        }
+                        nodes.insert(
+                            key.clone(),
+                            Node::new_with_prior(&actor_obs, prior.as_deref(), policy_prior_weight),
+                        );
+                    }
+                    nodes.get_mut(&key).expect("inserted above")
+                } else {
+                    nodes
+                        .entry(key.clone())
+                        .or_insert_with(|| Node::new(&actor_obs))
+                };
                 profile.node_ns += profile_elapsed(node_started);
                 let action = node.select();
                 let unvisited = node.edges[action].visits == 0;
@@ -787,6 +889,7 @@ fn choose_cached_options(
     profile.total_ns = profile_elapsed(profile_started);
     let mut result = json!({"move":node.moves[best],"simulations":sims,"evaluations":evals,"nodes":nodes.len(),"root_value":root_value,
         "value_cache_hits":cache_hits,"opponent_cache_hits":opponent_cache_hits,
+        "policy_evaluations":policy_evaluations,"policy_prior_weight":policy_prior_weight,
         "elapsed_ms":started.elapsed_ms(),"stats":stats,"belief":"current-observation prior",
         "determinization_period":determinization_period,"leaf":format!("{leaf:?}")});
     if profiling {
@@ -809,6 +912,97 @@ mod tests {
         assert_eq!(controls.model_weight, 1.0);
         assert_eq!(controls.model_temperature, 2.0);
         assert_eq!(controls.leaf, Leaf::StateValue);
+        assert_eq!(controls.policy_prior_weight, 0.0, "the hand-written action_score prior");
+    }
+
+    /// A real observation with its legal moves deliberately REVERSED.
+    ///
+    /// `State::observation` sorts `legal_moves` with `serde_json::to_string`
+    /// (lib.rs), which is the very key `Node` sorts by -- so for every
+    /// observation the search actually sees, the permutation is the identity
+    /// and a slot-versus-move bug is invisible. The first version of the test
+    /// below used the opening position and PASSED with the mapping deliberately
+    /// broken.
+    ///
+    /// That makes the reconciliation untestable on real data and worth keeping
+    /// anyway: it is what holds the contract ("logits in the observation's
+    /// order") if any caller ever hands the node an unsorted observation, and
+    /// it costs one index. So the order is inverted here on purpose, and the
+    /// inversion is asserted rather than assumed.
+    fn an_observation_whose_moves_need_reordering() -> Value {
+        let (state, _) = State::new(22, [1, 2, 1]);
+        let mut observation = state.observation(0);
+        let mut legal = observation["legal_moves"].as_array().unwrap().clone();
+        assert!(legal.len() > 2, "fixture needs a real choice");
+        legal.reverse();
+        let keys: Vec<String> = legal.iter().map(|m| m.to_string()).collect();
+        let mut sorted = keys.clone();
+        sorted.sort();
+        assert_ne!(keys, sorted, "the fixture must actually need reordering");
+        observation["legal_moves"] = Value::Array(legal);
+        observation
+    }
+
+    /// The learned prior arrives in the OBSERVATION's move order; the tree
+    /// works in sorted order. This is the gather that fails silently -- a
+    /// wrong mapping primes one move's search with another move's prior and
+    /// reads downstream as a policy head that learned nothing.
+    #[test]
+    fn a_learned_prior_follows_the_move_not_the_slot() {
+        let observation = an_observation_whose_moves_need_reordering();
+        let legal = observation["legal_moves"].as_array().unwrap().clone();
+        assert!(legal.len() > 2, "fixture needs a real choice");
+        for target in [0usize, legal.len() / 2, legal.len() - 1] {
+            let mut logits = vec![0.0f32; legal.len()];
+            logits[target] = 20.0;
+            let node = Node::new_with_prior(&observation, Some(&logits), 1.0);
+            let best = (0..node.edges.len())
+                .max_by(|&a, &b| node.edges[a].prior.total_cmp(&node.edges[b].prior))
+                .unwrap();
+            assert_eq!(node.moves[best], legal[target],
+                       "the peak followed the slot rather than the move");
+        }
+    }
+
+    /// Zero weight must be the historical prior to the BIT, even when logits
+    /// are supplied, or no past campaign number reproduces.
+    #[test]
+    fn a_zero_weight_policy_prior_is_the_historical_prior() {
+        let observation = an_observation_whose_moves_need_reordering();
+        let count = observation["legal_moves"].as_array().unwrap().len();
+        let logits: Vec<f32> = (0..count).map(|i| i as f32 * 3.0).collect();
+        let plain = Node::new(&observation);
+        let zero = Node::new_with_prior(&observation, Some(&logits), 0.0);
+        assert_eq!(plain.moves, zero.moves);
+        for (a, b) in plain.edges.iter().zip(&zero.edges) {
+            assert_eq!(a.prior.to_bits(), b.prior.to_bits());
+        }
+    }
+
+    /// A prior that does not sum to one is not a prior; PUCT would silently
+    /// rescale exploration with it.
+    #[test]
+    fn every_blend_is_still_a_distribution() {
+        let observation = an_observation_whose_moves_need_reordering();
+        let count = observation["legal_moves"].as_array().unwrap().len();
+        let logits: Vec<f32> = (0..count).map(|i| (i % 5) as f32).collect();
+        for weight in [0.0, 0.25, 0.5, 1.0] {
+            let node = Node::new_with_prior(&observation, Some(&logits), weight);
+            let total: f64 = node.edges.iter().map(|e| e.prior).sum();
+            assert!((total - 1.0).abs() < 1e-9, "weight {weight} summed to {total}");
+            assert!(node.edges.iter().all(|e| e.prior > 0.0), "no move may be unreachable");
+        }
+    }
+
+    /// Asking for a learned prior without a head must FAIL, never fall back to
+    /// the hand-written prior: a silent fallback is a measurement that reports
+    /// the policy head doing nothing when it was never consulted.
+    #[test]
+    fn a_policy_prior_without_a_policy_model_is_refused() {
+        let (state, _) = State::new(22, [1, 2, 1]);
+        let config = Config { simulations: 8, max_depth: 8, budget_ms: 5000 };
+        let controls = Controls { policy_prior_weight: 0.5, ..Controls::default() };
+        assert!(choose_with(&state, 0, 33, config, None, controls).is_err());
     }
 
     /// The mechanism behind the 2026-09-11 coherent result, asserted rather than

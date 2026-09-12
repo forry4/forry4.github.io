@@ -426,6 +426,7 @@ fn main() {
         model_temperature,
         leaf,
         determinization_period,
+        policy_prior_weight: 0.0,
     };
     let record_policy = request["record_policy"].as_bool().unwrap_or(false);
     let sample_temperature = request["sample_temperature"]

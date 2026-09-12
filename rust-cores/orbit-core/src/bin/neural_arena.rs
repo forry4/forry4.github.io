@@ -182,6 +182,7 @@ fn main() {
         model_temperature,
         leaf: seat_leaf,
         determinization_period: period,
+        policy_prior_weight: 0.0,
     };
     // Drive the candidate through the browser's own boundary: rebuild the world
     // from the seat's observation instead of searching the privileged state, and
