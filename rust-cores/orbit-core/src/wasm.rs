@@ -192,6 +192,93 @@ pub fn orbit_search_move_json(
     }
 }
 
+/// The Expert tier: iterative-deepening alpha-beta over THIS worker's world.
+///
+/// PIMC IS THE WORKER POOL. Each of the four workers reconstructs its own world
+/// from the same observation with its own seed, searches it depth-first, and
+/// returns one vote; the page sums those. So the browser is running K=4 PIMC
+/// with every world getting the WHOLE turn budget, which is the arrangement
+/// measured natively -- 0.6172 against the coherent MCTS Expert at serving
+/// shape, 64 CRN pairs, mean depth 7.77 against the MCTS's 4.2.
+///
+/// THE VOTE IS VALUE-WEIGHTED, and the fraction is load-bearing rather than
+/// decoration. The page's aggregation sums `visits` and takes the maximum, so a
+/// plain integer vote would leave a 2-2 split to be broken by move key. The
+/// native implementation breaks vote ties by the summed VALUE of the votes
+/// cast, and shipping a different tie-break from the one that was measured is
+/// exactly how a campaign ends up serving a player it never tested. A vote of
+/// `1 + value/2000` reproduces it: four workers contribute at most 0.002, so
+/// the integer part always decides first and the fraction only ever separates
+/// an exact tie.
+#[wasm_bindgen]
+pub fn orbit_alphabeta_move_json(
+    observation_json: &str,
+    legal_moves_json: &str,
+    memory_json: &str,
+    budget_ms: f64,
+    seed: u32,
+) -> String {
+    let result: Result<Value, String> = (|| {
+        let observation = parse_object(observation_json, "observation")?;
+        let legal_moves = parse_array(legal_moves_json, "legal_moves")?;
+        let memory: Value =
+            serde_json::from_str(memory_json).map_err(|err| format!("memory: {err}"))?;
+        let budget = budget_ms.max(0.0).round() as u64;
+        let seat = observation["seat"].as_u64().ok_or("observation has no seat")? as usize;
+        if legal_moves.len() == 1 {
+            return Ok(json!({"move": legal_moves[0].clone(), "fell_back": false, "simulations": 0}));
+        }
+        let ranker = |reason: &str| {
+            let mut fallback =
+                serving::choose_move(&observation, &legal_moves, &memory, budget as i64, seed as u64);
+            fallback["fell_back"] = json!(true);
+            fallback["reason"] = json!(reason);
+            fallback
+        };
+        // A pending chain is not reconstructable from an observation, which is
+        // the same boundary the MCTS tier meets and answers the same way.
+        let world = match crate::State::from_observation(&observation, seed as u64) {
+            Ok(world) => world,
+            Err(reason) => return Ok(ranker(&reason)),
+        };
+        let config = crate::alphabeta::AbConfig {
+            budget_ms: budget,
+            max_depth: 64,
+            // Orbit barely transposes -- 1.4% table hits at depth 4, 1.3-5.4%
+            // at depth 8-9, because the deck order advances with every path and
+            // most moves are irreversible -- but the table costs only a
+            // structural hash and the native measurement ran with it on, so it
+            // stays on here to serve what was measured.
+            use_table: true,
+        };
+        match crate::alphabeta::choose(&world, seat, seed as u64, config) {
+            Ok(result) => {
+                // Depth 0 means the budget did not finish a single iteration, so
+                // the search has decided nothing and the ranker is the better
+                // answer than an unexamined prior.
+                if result["depth"].as_i64().unwrap_or(0) <= 0 {
+                    return Ok(ranker("no iteration completed"));
+                }
+                let value = result["value"].as_f64().unwrap_or(0.0).clamp(-1.0, 1.0);
+                Ok(json!({
+                    "move": result["move"].clone(),
+                    "stats": [{"move": result["move"].clone(), "visits": 1.0 + value / 2000.0}],
+                    "depth": result["depth"].clone(),
+                    "nodes": result["nodes"].clone(),
+                    "simulations": result["nodes"].clone(),
+                    "fell_back": false,
+                }))
+            }
+            Err(reason) => Ok(ranker(&reason)),
+        }
+    })();
+    match result {
+        Ok(value) => serde_json::to_string(&value)
+            .unwrap_or_else(|err| json!({"error": format!("encode result: {err}")}).to_string()),
+        Err(error) => json!({"error": error}).to_string(),
+    }
+}
+
 /// Export the compatibility manifest so a generated glue bundle can be
 /// checked against the adjacent model asset before it arms a room.
 #[wasm_bindgen]

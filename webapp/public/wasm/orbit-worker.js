@@ -316,9 +316,33 @@ self.onmessage = async (event) => {
     // the ranker path unchanged, and an older wasm that ignores the extra
     // argument simply searches per-simulation, which is today's behaviour.
     const period = message.tier === "expert" ? 0 : 1;
-    if ((message.tier === "expert" || message.tier === "hard")
+    const allowance = Number(message.budget_ms) || Number(message.remaining_turn_budget) || 0;
+    // EXPERT IS DEPTH-FIRST as of 2026-09-13: iterative-deepening alpha-beta
+    // over this worker's own reconstructed world, with `state_value` at the leaf
+    // and `action_score` ordering the moves.
+    //
+    // THE POOL IS THE PIMC. Each of the four workers gets its own seed, so each
+    // reconstructs a DIFFERENT world from the same observation, searches it, and
+    // returns one (value-weighted) vote; the page sums those. That is K=4
+    // perfect-information Monte Carlo with every world getting the WHOLE turn
+    // budget -- the arrangement measured natively at 0.6172 against the coherent
+    // MCTS Expert over 64 CRN pairs, at mean depth 7.77 against the MCTS's 4.2.
+    // No page change was needed for it, because the pool already knew how to sum
+    // per-worker answers.
+    //
+    // Feature-detected, so the mixed-artifact case degrades rather than breaks:
+    // this worker against an older cached wasm finds no export and falls through
+    // to `orbit_search_move_json`, which is the coherent MCTS -- the PREVIOUS
+    // Expert, not a broken room. The two files are cached separately on the same
+    // filenames, so that combination is ordinary, not hypothetical.
+    if (message.tier === "expert"
+      && optionalWasm && typeof optionalWasm.orbit_alphabeta_move_json === "function") {
+      const raw = optionalWasm.orbit_alphabeta_move_json(JSON.stringify(observation), JSON.stringify(legal), JSON.stringify(message.memory || {}), allowance, Number(message.seed) || 0);
+      answer = typeof raw === "string" ? JSON.parse(raw) : raw;
+    }
+    if ((!answer || !answer.move)
+      && (message.tier === "expert" || message.tier === "hard")
       && optionalWasm && typeof optionalWasm.orbit_search_move_json === "function") {
-      const allowance = Number(message.budget_ms) || Number(message.remaining_turn_budget) || 0;
       const raw = optionalWasm.orbit_search_move_json(JSON.stringify(observation), JSON.stringify(legal), JSON.stringify(message.memory || {}), allowance, Number(message.seed) || 0, period);
       answer = typeof raw === "string" ? JSON.parse(raw) : raw;
     }

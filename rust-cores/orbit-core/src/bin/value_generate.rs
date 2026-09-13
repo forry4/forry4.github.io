@@ -427,6 +427,11 @@ fn main() {
         leaf,
         determinization_period,
         opponent_model: OpponentModel::Ranker,
+        // Training data is generated from what a SERVED search sees, so hidden
+        // information is resampled here as it always has been. The
+        // perfect-information mode exists for one architecture comparison and
+        // would poison a value target with knowledge the server never has.
+        determinize: true,
         policy_prior_weight: 0.0,
     };
     let record_policy = request["record_policy"].as_bool().unwrap_or(false);

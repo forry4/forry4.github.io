@@ -10,6 +10,7 @@ pub mod tensors;
 pub mod attention;
 pub mod features;
 pub mod search;
+pub mod alphabeta;
 pub(crate) mod clock;
 
 #[cfg(target_arch = "wasm32")]
@@ -116,6 +117,7 @@ pub struct State {
 
 /// RNG belongs to the simulation, never the observation. Scripted shuffles are
 /// complete post-shuffle piles (top at the end), checked against the input multiset.
+#[derive(Clone)]
 pub struct Chance {
     rng: u64,
     tape: VecDeque<Vec<u16>>,

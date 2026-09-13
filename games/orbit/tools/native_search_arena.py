@@ -129,6 +129,35 @@ def main():
     p.add_argument("--opponent-minimax",action="store_true",
                    help="Opponent seat: the same. PER SEAT on purpose -- the comparison "
                         "worth running needs exactly one side to search its opponent")
+    # DEPTH instead of width. Per seat, for the same reason minimax is: the
+    # comparison worth running is one side depth-first against one side MCTS.
+    # A root ensemble is refused by the arena when either seat is alpha-beta --
+    # it is one deterministic tree, so four workers of it is four workers of
+    # nothing, and allowing it would quietly measure one thread against four.
+    # PER REQUEST on purpose. The MCTS ALWAYS resamples hidden information from
+    # the seat's observation, so handing it the true state changes nothing --
+    # which means comparing a perfect-information alpha-beta against a normal
+    # MCTS measures the hidden-information cheat (0.6094 on its own) and reads
+    # as a depth result. This flag turns resampling off for BOTH seats so the
+    # only remaining difference is the search architecture.
+    p.add_argument("--perfect-information",action="store_true",
+                   help="Both seats search the TRUE world with no resampling. "
+                        "Contradicts --via-observation and is refused with it")
+    p.add_argument("--alphabeta",action="store_true",
+                   help="Candidate seat: iterative-deepening alpha-beta instead of MCTS")
+    p.add_argument("--opponent-alphabeta",action="store_true",
+                   help="Opponent seat: the same")
+    p.add_argument("--ab-no-table",action="store_true",
+                   help="Alpha-beta: disable the transposition table. Orbit barely "
+                        "transposes (1.4%% hit rate at depth 4), so whether the table "
+                        "pays is a measurement, not a default")
+    p.add_argument("--ab-worlds",type=int,default=1,
+                   help="Alpha-beta PIMC: vote over this many sampled worlds, each "
+                        "at budget/K. K=1 measured 0.5625 against the Expert while "
+                        "the same search at perfect information measured 0.9609 -- "
+                        "the gap is strategy fusion and this is the lever")
+    p.add_argument("--ab-max-depth",type=int,default=64,
+                   help="Alpha-beta: iterative-deepening cap in decisions")
     p.add_argument("--determinization-period",type=int,default=1,
                    help="Candidate seat: simulations per determinization; 0 = coherent")
     p.add_argument("--opponent-determinization-period",type=int,default=1,
@@ -153,6 +182,14 @@ def main():
         if not 0.0<=getattr(args,name)<=1.0:p.error(f"--{name.replace('_','-')} must be between 0 and 1")
     # The heuristic leaf runs the identical search with no network, which is the
     # control that separates search strength from the value model.
+    if args.perfect_information and args.via_observation:
+        p.error("--perfect-information and --via-observation are contradictory")
+    if args.ab_worlds<1: p.error("--ab-worlds must be positive")
+    if args.ab_worlds>1 and not args.via_observation:
+        p.error("--ab-worlds needs --via-observation: nothing is hidden to sample otherwise")
+    if args.alphabeta and args.workers>1 and args.ab_worlds<=1:
+        p.error("a single-world alpha-beta cannot use a root ensemble: raise --ab-worlds "
+                "or run --workers 1")
     heuristic=str(args.checkpoint)=="heuristic"
     model=None if heuristic else load_checkpoint(args.checkpoint)[0]
     boards=board_configurations();jobs=[]
@@ -181,6 +218,12 @@ def main():
     request["opponent_leaf"]=args.opponent_leaf
     request["minimax"]=args.minimax
     request["opponent_minimax"]=args.opponent_minimax
+    request["perfect_information"]=args.perfect_information
+    request["alphabeta"]=args.alphabeta
+    request["opponent_alphabeta"]=args.opponent_alphabeta
+    request["ab_table"]=not args.ab_no_table
+    request["ab_max_depth"]=args.ab_max_depth
+    request["ab_worlds"]=args.ab_worlds
     request["policy_prior_weight"]=args.policy_prior_weight
     request["opponent_policy_prior_weight"]=args.opponent_policy_prior_weight
     request["determinization_period"]=args.determinization_period
@@ -227,6 +270,10 @@ def main():
             "policy_prior_weight":args.policy_prior_weight,
             "opponent_policy_prior_weight":args.opponent_policy_prior_weight,
             "minimax":args.minimax,"opponent_minimax":args.opponent_minimax,
+            "perfect_information":args.perfect_information,
+            "alphabeta":args.alphabeta,"opponent_alphabeta":args.opponent_alphabeta,
+            "ab_table":not args.ab_no_table,"ab_max_depth":args.ab_max_depth,
+            "ab_worlds":args.ab_worlds,
             "games":results,"seconds":time.perf_counter()-started,
             "mirror_control":mirror,
             "complete":process.returncode==0 and len(results)==len(jobs) and not any(r["error"] or r["censored"] for r in results)}

@@ -79,10 +79,22 @@ AI_DIFFICULTIES = ("easy", "normal", "hard", "expert")
 AI_TIER_GENERATION = 2
 _PRE_SHIFT_DIFFICULTY = {"easy": "easy", "normal": "easy", "hard": "normal", "expert": "hard"}
 # Both browser tiers SEARCH through the same versioned boundary and share the
-# same validated server fallback. They differ only in how often the search
-# resamples the hidden world: Hard draws a fresh one every simulation, Expert
-# holds one coherent world for the whole call. That is why the tier travels on
-# the wire -- the worker needs it to pick the regime.
+# same validated server fallback, and the tier travels on the wire because the
+# worker needs it to pick which search to run.
+#
+# HARD is determinized MCTS, drawing a fresh world every simulation.
+#
+# EXPERT IS DEPTH-FIRST as of 2026-09-13: iterative-deepening alpha-beta with
+# `state_value` at the leaf and `action_score` ordering the moves. The four
+# browser workers each reconstruct their OWN world from the same observation and
+# vote, which makes the pool a K=4 PIMC with every world getting the whole turn
+# budget. Measured natively at 0.6172 against the coherent MCTS it replaces
+# (64 CRN pairs, serving shape, mean depth 7.77 against the MCTS's 4.2), and the
+# same depth is reached in wasm.
+#
+# `CLIENT_AI_DETERMINIZATION` below is still sent and still means what it says --
+# it is what Hard uses, and it is what an OLDER cached wasm falls back to for
+# Expert, which is the coherent MCTS: the previous Expert, not a broken room.
 CLIENT_AI_TIERS = ("hard", "expert")
 # Simulations per determinization, sent to the worker. 0 asks for one coherent
 # world for the whole decision.

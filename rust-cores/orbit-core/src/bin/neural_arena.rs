@@ -1,4 +1,5 @@
 //! Development arena for native search versus frozen Hard v2. Not a ship gate.
+use orbit_core::alphabeta::AbConfig;
 use orbit_core::{attention::Model, search::Config, search::Controls, search::Leaf, search::OpponentModel, State};
 use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
@@ -215,6 +216,43 @@ fn main() {
     };
     let minimax = adversarial("minimax");
     let opponent_minimax = adversarial("opponent_minimax");
+    // PER SEAT for the same reason minimax is: the only comparison worth
+    // running is depth against width, which needs exactly one side to be
+    // depth-first.
+    let alphabeta = request["alphabeta"] == true;
+    let opponent_alphabeta = request["opponent_alphabeta"] == true;
+    let ab_table = request["ab_table"] != false;
+    let ab_max_depth = request["ab_max_depth"].as_u64().unwrap_or(64) as usize;
+    // PIMC: how many sampled worlds alpha-beta votes over. 1 is a single
+    // determinization, which measured 0.5625 against the MCTS Expert while the
+    // same search at PERFECT information measured 0.9609 -- the gap is strategy
+    // fusion, and K is the lever aimed at it. Each world gets budget/K, so
+    // depth falls as K rises and the trade is the whole experiment.
+    let ab_worlds = request["ab_worlds"].as_u64().unwrap_or(1).max(1) as usize;
+    // A SINGLE-world alpha-beta is one deterministic tree, so a root ensemble of
+    // it is the same search summed with itself -- four workers of nothing --
+    // and allowing it would quietly measure one thread against the MCTS's four
+    // and call the difference "depth".
+    //
+    // PIMC is the opposite case and is why this is a guard rather than a ban:
+    // K worlds are INDEPENDENT searches, exactly the shape of the root-summed
+    // ensemble the browser already runs, so four workers give four worlds a
+    // whole turn budget each instead of a quarter each.
+    assert!(
+        !(alphabeta || opponent_alphabeta) || pool <= 1 || ab_worlds > 1,
+        "a single-world alpha-beta cannot use a root ensemble: raise ab_worlds or          run at one worker per seat"
+    );
+    // "Simulations" is not alpha-beta's unit, and the quota check downstream
+    // asserts an exact count that a node-based search can never report.
+    assert!(
+        !(alphabeta || opponent_alphabeta) || fixed_sims.is_none(),
+        "alpha-beta has no simulation count: use a time budget"
+    );
+    // PER REQUEST, not per seat, and that is the point: an information
+    // asymmetry is exactly what this flag exists to AVOID. Giving one seat the
+    // true world and the other a resampled one measures the hidden-information
+    // cheat (0.6094 on its own) and would read as a search-architecture result.
+    let perfect_information = request["perfect_information"] == true;
     let controls_for = |seat_leaf: Leaf, period: usize, prior: f64, opponent_model: OpponentModel| Controls {
         model_stride,
         model_weight,
@@ -222,6 +260,7 @@ fn main() {
         leaf: seat_leaf,
         determinization_period: period,
         opponent_model,
+        determinize: !perfect_information,
         policy_prior_weight: prior,
     };
     // Drive the candidate through the browser's own boundary: rebuild the world
@@ -229,6 +268,16 @@ fn main() {
     // fall back to the ranker wherever that reconstruction is refused. This is
     // the shipped bot, so it is the one worth measuring.
     let via_observation = request["via_observation"].as_bool().unwrap_or(false);
+    // Sampling K worlds is meaningless when nothing is hidden from the search,
+    // and would quietly search the same world K times at budget/K.
+    assert!(
+        ab_worlds == 1 || via_observation,
+        "alpha-beta over several worlds needs via_observation: there is nothing          to sample when the search is handed the true state"
+    );
+    assert!(
+        !perfect_information || !via_observation,
+        "perfect information and via_observation are contradictory: one hands the          search the true state, the other rebuilds a world from an observation"
+    );
     // This is an offline native arena.  Unlike the browser pool it may use
     // all but one host thread, up to the generous safety ceiling below.
     assert!(pool <= 16, "Native worker pool is capped at sixteen");
@@ -299,6 +348,9 @@ fn main() {
                 let mut calls = 0;
                 let mut decisions = 0;
                 let mut failure = None;
+                let mut ab_nodes = [0u64; 2];
+                let mut ab_depth = [0u64; 2];
+                let mut ab_searches = [0u64; 2];
                 while let Some(seat) = state.actor() {
                     if decisions >= 1600 {
                         break;
@@ -370,7 +422,75 @@ fn main() {
                             },
                         };
                         let actor_pool = if observation_search { pool } else { 1 };
-                        match if actor_pool <= 1 {
+                        let seat_alphabeta = if seat == candidate {
+                            alphabeta
+                        } else {
+                            opponent_alphabeta
+                        };
+                        let ab_config = AbConfig {
+                            budget_ms: allowance,
+                            max_depth: ab_max_depth,
+                            use_table: ab_table,
+                        };
+                        match if seat_alphabeta {
+                            if ab_worlds > 1 {
+                                // Rebuild K INDEPENDENT worlds from this seat's
+                                // own observation. `rebuilt` above is one such
+                                // world; PIMC needs its own family, and a
+                                // reconstruction that is refused (pending chains
+                                // are not reconstructable) falls back to the
+                                // single-world search rather than voting over a
+                                // short list that would silently weight the
+                                // worlds that happened to succeed.
+                                let obs = state.observation(seat);
+                                let mut worlds = Vec::with_capacity(ab_worlds);
+                                for k in 0..ab_worlds {
+                                    let world_seed = seed
+                                        .wrapping_add(decisions)
+                                        .wrapping_add((k as u64).wrapping_mul(0x9e3779b97f4a7c15));
+                                    match State::from_observation(&obs, world_seed) {
+                                        Ok(world) => worlds.push(world),
+                                        Err(_) => break,
+                                    }
+                                }
+                                if worlds.len() == ab_worlds {
+                                    orbit_core::alphabeta::choose_over_worlds_with_threads(
+                                        &worlds,
+                                        seat,
+                                        seed.wrapping_add(decisions),
+                                        ab_config,
+                                        actor_pool,
+                                    )
+                                } else {
+                                    orbit_core::alphabeta::choose(
+                                        source,
+                                        seat,
+                                        seed.wrapping_add(decisions),
+                                        ab_config,
+                                    )
+                                }
+                            } else {
+                                orbit_core::alphabeta::choose(
+                                    source,
+                                    seat,
+                                    seed.wrapping_add(decisions),
+                                    ab_config,
+                                )
+                            }
+                            .map(|mut result| {
+                                // The loop below speaks MCTS. Nodes are not
+                                // simulations and depth is not a visit count, so
+                                // they are accumulated under their own names and
+                                // only the two fields the loop consumes are
+                                // translated.
+                                ab_nodes[seat] += result["nodes"].as_u64().unwrap_or(0);
+                                ab_depth[seat] += result["depth"].as_u64().unwrap_or(0);
+                                ab_searches[seat] += 1;
+                                result["elapsed_ms"] = result["ms"].clone();
+                                result["simulations"] = json!(0);
+                                result
+                            })
+                        } else if actor_pool <= 1 {
                             orbit_core::search::choose_with(
                                 source,
                                 seat,
@@ -437,7 +557,9 @@ fn main() {
                     json!({"index":index,"seed":seed,"candidate":candidate,"sides":sides,
             "winner":state.winner,"censored":state.phase!="over","error":failure,
             "simulations":sims,"calls":calls,"decisions":decisions,
-            "simulations_by_seat":sims_by_seat,"searches_by_seat":searches_by_seat}),
+            "simulations_by_seat":sims_by_seat,"searches_by_seat":searches_by_seat,
+            "ab_nodes_by_seat":ab_nodes,"ab_depth_by_seat":ab_depth,
+            "ab_searches_by_seat":ab_searches}),
                 )
                 .unwrap();
                 if failure.is_some() {

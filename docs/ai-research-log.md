@@ -761,6 +761,169 @@ transposition table, determinized over K frozen worlds. De-risk (b)
 perfect-information first: if depth does not win there it will not win
 determinized.
 
+**12. THE SEARCH NOW HAS AN OPPONENT, and the pair of improvements is worth
+about +0.04 -- not separated at 128 pairs.** Orbit's search had never been
+adversarial. It built nodes for the searching seat ONLY and answered every
+opponent decision with an external call to the 1-ply `serving::choose_move`
+ranker, which is optimising a line against a fixed greedy environment policy,
+at a cost of 43% of search time. `OpponentModel::Minimax` builds opponent nodes
+in-tree and negates the mean at them.
+
+Removing that external call nearly DOUBLES throughput: **32,760 simulations per
+decision against the ranker's 16,737**, a ratio of 1.957. So minimax delivers
+two large changes at once -- twice the search AND the first adversarial
+opponent model this game has ever had.
+
+Against the shipped Expert, equal time, serving shape (3000 ms, 4 workers, both
+arms the hand-written leaf with no network anywhere, both coherent, the ONLY
+difference being `--minimax` on the candidate):
+
+```
+ 64 pairs   0.5469  [0.4531, 0.6406]
+128 pairs   0.5430  [0.4766, 0.6094]   31 L / 55 split / 42 W
+```
+
+Doubling the sample moved the point estimate by 0.004 and narrowed the interval
+to about two-thirds of its width, and it still crosses 0.5. The pooled report's
+own power calculation says **296 pairs** to establish an effect of this size and
+**606** to resolve +/-0.03 -- roughly five and eleven more hours. This is
+therefore not an "extend it a little further" situation; it is a real decision
+about whether a +0.04 is worth eleven hours of box time.
+
+**What it bounds is the useful part.** Two large changes together are worth
+about +0.04, so neither one can be worth much more than that on this
+architecture. The contrast with Duel is the point: the analogous minimax fix
+there (its `select()` was MAX-MAX, modelling the opponent as cooperating) was
+worth 0.62 at c=1.0 and 0.67 at c=0.3. Same class of defect, an order of
+magnitude less payoff -- which says the defect was never what was holding Orbit
+back.
+
+Two method notes, both of which should change how earlier numbers in this
+campaign are read:
+
+- **The harness sanity passed at exactly 0.5000** over 16 pairs at fixed
+  simulations, with both arms' minimax off -- i.e. the same player twice. The
+  measurement instrument is sound; the effect really is this small.
+- **The eight 16-pair pools of one identical comparison ran 0.4062, 0.4375,
+  0.4688, 0.5312, 0.5312, 0.5625, 0.6562, 0.7500.** That is a 0.34 spread on a
+  comparison whose true value is near 0.54. A 16-pair screen cannot see an
+  effect of this size at all, and any single-pool number reported earlier in
+  this campaign should be re-read with that spread in mind.
+
+Minimax is **built, tested and default-off** (`Controls::serving()` is
+unchanged). It is not shipped: the equal-time ship criterion requires the
+interval's lower bound to clear 0.5 and it does not.
+
+**13. THE SEARCH IS SATURATED. Doubling the simulations at the real operating
+point buys nothing.** Minimax raised an awkward question: it delivers 1.96x the
+simulations AND the first adversarial opponent model, together worth +0.04.
+Either more simulations are worth something and minimax is cancelling its own
+gain, or more simulations are worth nothing. Those point opposite ways, and the
+axis had never been measured at serving shape.
+
+The shipped Expert against ITSELF, identical in every respect except that one
+side gets twice the simulations -- **2,724 per worker across four workers =
+10,896 per decision, which is what the Expert actually achieves at serving
+shape, against exactly half that**. FIXED simulations rather than equal time, so
+the arena is deterministic and load-independent, which is also what let four
+games run at once without the contention that silently starves an equal-time
+arm.
+
+```
+control (equal simulations, the same player twice)   0.5000 EXACT over 32 pairs
+twice the simulations                                0.4609  [0.4062, 0.5156]
+                                                     9 L / 51 splits / 4 W
+```
+
+**Fifty-one of sixty-four pairs split outright.** Doubling the search does not
+merely fail to win; it usually does not change the game's outcome at all. The
+point estimate sits below 0.5 and the interval only just covers it.
+
+The control deserves its own note: at fixed simulations the arena is exactly
+deterministic, so 0.5000 is not "close to a half", it is every pair splitting.
+That is what makes the asymmetric number trustworthy. The one defect that could
+forge this exact signature is a swapped assignment, which an equal-simulation
+control CANNOT catch -- both arms are equal in it -- so the wiring was read
+directly: `simulations` goes to the candidate seat, `opponent_simulations` to
+the other, and the reported score is the candidate's.
+
+**THROUGHPUT IS A DEAD AXIS IN ORBIT, and this resolves item 12 as well**: since
+twice the simulations is worth nothing, minimax's 1.96x contributed nothing, and
+its +0.04 is the SOUNDNESS of searching the opponent, in isolation. Three
+independent measurements now say the same thing -- coherent determinization won
+while doing FEWER simulations (10,900 against 14,200), minimax's doubling paid
+nothing, and an explicit doubling pays nothing. The remaining lever inside the
+search is DEPTH.
+
+**14. ALPHA-BETA CRUSHES THE MCTS AT EQUAL INFORMATION, AND BELIEFS EAT ALMOST
+ALL OF IT.** With width dead (item 13), depth was the remaining lever. The
+prototype is `rust-cores/orbit-core/src/alphabeta.rs`: iterative-deepening
+alpha-beta, `state_value` at the leaf, `action_score` for move ordering, a
+transposition table, and root-seat-relative min/max rather than negamax --
+Orbit's pending sub-decisions mean the same seat often acts several plies
+running, so strict alternation would flip the sign in the wrong places.
+
+Against the shipped MCTS Expert, equal time, ONE THREAD PER SEAT, 64 CRN pairs
+each, each arm preceded by its own identical-players control that read **exactly
+0.5000**:
+
+```
+perfect information   0.9609  [0.9219, 0.9922]   depth 7.2 vs the MCTS's 4.2
+determinized (K=1)    0.5625  [0.4688, 0.6484]   depth 8.2
+```
+
+The perfect-information pools were 0.9375 / 0.9688 / 1.0000 / 0.9375 -- a spread
+of 0.06, against the 0.34 spread this campaign measures on marginal effects. A
+large effect showing a small spread is the consistency signature that a real one
+has.
+
+**So the architecture is right and the information handling is what costs it.**
+The gap is STRATEGY FUSION: a minimax over one sampled world plays as though it
+knows the opponent's hand and commits to lines that only work in that world. An
+MCTS over one world is softer -- its values are means over many simulations --
+which is why the identical trade costs it far less. That is an argument for PIMC
+over K worlds (which Dissonance already serves for this class), not against
+depth, and **K is now the whole experiment**: each world gets budget/K, so depth
+falls as K rises.
+
+**THE TRAP THAT INVALIDATED THE FIRST DESIGN, because it will recur.** The MCTS
+ALWAYS resamples hidden information: `sample()` rebuilds the opponent's hand and
+the deck order from the seat's observation on every determinization, so handing
+it a privileged state changes NOTHING. The first attempt at this comparison gave
+alpha-beta the true world and the MCTS a resampled one, and read **16-0**. That
+was the perfect-information cheat (worth 0.6094 on its own) wearing a depth
+costume. The arena's `via_observation` flag decides which state is handed IN, not
+what the search then knows -- those are different things, and the whole de-risk
+rationale had rested on conflating them. `Controls::determinize` now turns
+resampling off for BOTH seats, and each arm's control must read ~0.5 or the arm
+is refused.
+
+**ORBIT BARELY TRANSPOSES, so the transposition table is near-dead weight.**
+Measured at depth 4: **710 nodes with the table against 657 without, on 10
+hits** -- a 1.4% hit rate, and the stale move it suggests orders slightly WORSE
+than the prior alone. At depth 8-9 the rate is 1.3-5.4%. The cause is
+structural: the deck order advances with every path and most moves are
+irreversible, so almost every line reaches a distinct world. This is the same
+shape the 2026-09-11 MCTS audit found (19 of 232 nodes revisited). The table is
+therefore a MEASURED knob (`AbConfig::use_table`, `ab_probe --compare-table`),
+not a default inherited from chess, and the unit test asserts only what is true
+-- that the control arm is genuinely a control -- rather than the node-saving
+claim that is simply false here.
+
+**Two process notes, both of which caught real damage:**
+
+- **`set -u` turned a silent wrong answer into a crash.** The run script had
+  `local name="$1" flag="$2" dir="$OUT/$name"`. Bash expands EVERY word in a
+  `local` statement before performing ANY of its assignments, so `$name` was
+  unbound at expansion time. Without `set -u`, `dir` would have been `"$OUT/"`
+  and both arms would have written to the same directory, overwriting each
+  other -- a plausible-looking number instead of an error.
+- **Build every binary, not the one being changed.** Adding a field to
+  `Controls` compiled fine under `--lib` and `--bin neural_arena` and broke
+  `value_generate`, which constructs it exhaustively. The run script builds all
+  bins, which is the only reason it surfaced before an overnight run rather
+  than during one.
+
 **Where this leaves the campaign.** Coherent determinization is the shipped
 search (`Controls::serving()`; `Default` stays historical so past numbers
 reproduce) — that result was measured heuristic-arm against heuristic-arm and is

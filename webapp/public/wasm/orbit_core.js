@@ -1,4 +1,49 @@
 /**
+ * The Expert tier: iterative-deepening alpha-beta over THIS worker's world.
+ *
+ * PIMC IS THE WORKER POOL. Each of the four workers reconstructs its own world
+ * from the same observation with its own seed, searches it depth-first, and
+ * returns one vote; the page sums those. So the browser is running K=4 PIMC
+ * with every world getting the WHOLE turn budget, which is the arrangement
+ * measured natively -- 0.6172 against the coherent MCTS Expert at serving
+ * shape, 64 CRN pairs, mean depth 7.77 against the MCTS's 4.2.
+ *
+ * THE VOTE IS VALUE-WEIGHTED, and the fraction is load-bearing rather than
+ * decoration. The page's aggregation sums `visits` and takes the maximum, so a
+ * plain integer vote would leave a 2-2 split to be broken by move key. The
+ * native implementation breaks vote ties by the summed VALUE of the votes
+ * cast, and shipping a different tie-break from the one that was measured is
+ * exactly how a campaign ends up serving a player it never tested. A vote of
+ * `1 + value/2000` reproduces it: four workers contribute at most 0.002, so
+ * the integer part always decides first and the fraction only ever separates
+ * an exact tie.
+ * @param {string} observation_json
+ * @param {string} legal_moves_json
+ * @param {string} memory_json
+ * @param {number} budget_ms
+ * @param {number} seed
+ * @returns {string}
+ */
+export function orbit_alphabeta_move_json(observation_json, legal_moves_json, memory_json, budget_ms, seed) {
+    let deferred4_0;
+    let deferred4_1;
+    try {
+        const ptr0 = passStringToWasm0(observation_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(legal_moves_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(memory_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.orbit_alphabeta_move_json(ptr0, len0, ptr1, len1, ptr2, len2, budget_ms, seed);
+        deferred4_0 = ret[0];
+        deferred4_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+    }
+}
+
+/**
  * Choose one action through the same versioned boundary as Python and JS.
  * @param {string} observation_json
  * @param {string} legal_moves_json

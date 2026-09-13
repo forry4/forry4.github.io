@@ -505,6 +505,21 @@ pub struct Controls {
     /// nodes, which is both the adversarial fix and a way to DELETE the 43% the
     /// external ranker call costs, rather than paying it twice over.
     pub opponent_model: OpponentModel,
+    /// Whether hidden information is resampled at all.
+    ///
+    /// `true` is every search this campaign has ever run: `sample()` rebuilds
+    /// the opponent's hand and the deck order from the seat's observation, so
+    /// handing the search a privileged state changes NOTHING -- it throws the
+    /// real hands away and resamples. That is correct for serving and it is why
+    /// the arena's `via_observation` flag is about which state is handed IN,
+    /// not about what the search then knows.
+    ///
+    /// `false` searches the world exactly as given, which is only meaningful
+    /// when the caller passes the true state. It exists for one measurement:
+    /// comparing search ARCHITECTURES at equal information. Without it, giving
+    /// alpha-beta the true state and the MCTS a resampled one measures the
+    /// hidden-information cheat (worth 0.6094 on its own) and calls it depth.
+    pub determinize: bool,
     /// How much of the PUCT prior comes from the network's policy head.
     ///
     /// `0.0` is the historical search: the prior is entirely the frozen
@@ -526,6 +541,7 @@ impl Default for Controls {
             leaf: Leaf::default(),
             determinization_period: 1,
             opponent_model: OpponentModel::Ranker,
+            determinize: true,
             policy_prior_weight: 0.0,
         }
     }
@@ -640,6 +656,7 @@ fn choose_cached_options(
         leaf,
         determinization_period,
         opponent_model,
+        determinize,
         policy_prior_weight,
     } = controls;
     if seat > 1 || source.actor() != Some(seat) {
@@ -715,7 +732,11 @@ fn choose_cached_options(
         }
         let sample_started = profile_start(profiling);
         if simulation % determinization_period == 0 {
-            determinization = Some(sample(source, seat, &mut rng)?);
+            determinization = Some(if determinize {
+                sample(source, seat, &mut rng)?
+            } else {
+                source.clone()
+            });
             frozen_chance_seed = rng.next();
         }
         // `expect` cannot fire: simulation 0 always takes the branch above.
