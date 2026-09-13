@@ -324,7 +324,7 @@
 .or-sideboards { grid-column: 2; display: grid; grid-template-rows: auto minmax(170px, 1fr); gap: 10px; min-width: 0; min-height: 0; }
 .or-tech { overflow: hidden; }
 .or-tech > header { display: flex; justify-content: space-between; align-items: center; gap: .5rem; padding: .56rem .75rem; border-bottom: 1px solid var(--or-line); }
-.or-tech h2, .or-log h2, .or-hand-head h2 { margin: 0; font-size: 1rem; }
+.or-tech h2, .or-log h2 { margin: 0; font-size: 1rem; }
 .or-tech-toggle, .or-tech-summary { display: none; }
 /* The NAMED key. Two dots in one accent colour said "somebody is here"; this
    says who, in the same two colours the rail and the markers use. */
@@ -523,8 +523,6 @@
 .or-agent.hidden { align-items: center; justify-content: center; border-color: #697296; background: repeating-linear-gradient(135deg, #161a38 0 8px, #222850 8px 16px); color: #9ba7d7; letter-spacing: .22em; }
 
 .or-hand-zone { grid-column: 1 / -1; padding: .6rem .8rem .7rem; }
-.or-hand-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: .18rem; }
-.or-hand-head > span { color: var(--or-dim); font-size: .76rem; }
 .or-hand { display: flex; gap: .58rem; padding: .22rem .18rem .32rem; overflow-x: auto; }
 .or-action-bar { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-top: .8rem; padding-top: .8rem; border-top: 1px solid var(--or-line); }
 .or-action-bar > span { color: var(--or-dim); font-size: .78rem; }
@@ -614,9 +612,7 @@
    instead. The hand keeps its scroll on purpose: it is a hand of cards, its
    size changes with the Leader badge, and its cards are the one thing that must
    stay readable at full size. */
-@media (min-width: 981px) {
-  .or-hand-zone .or-agent { zoom: var(--or-hand-scale, 1); flex-shrink: 0; }
-}
+/* Card typography never scales with the available hand width. */
 
 @media (min-width: 981px) and (max-height: 900px) {
   .or-table { gap: 8px; padding-block: 6px; }
@@ -860,7 +856,6 @@
   .or-agent strong { font-size: .94rem; }
   .or-agent-text { font-size: .72rem; line-height: 1.35; }
   .or-hand-zone { padding: .65rem .7rem .75rem; }
-  .or-hand-head { margin-bottom: .2rem; }
   .or-action-bar { margin-top: .6rem; padding-top: .6rem; }
   .or-log p { font-size: .72rem; line-height: 1.5; }
 }
@@ -993,4 +988,99 @@
 }
 @media (max-width: 980px) {
   .or-track-name .or-pl { text-transform: capitalize; letter-spacing: 0; font-weight: 700; }
+}
+
+/* The hand and its control strip are one steady workspace. Decisions use the
+   reserved strip, so neither a selected card nor a multi-step effect moves the
+   planet board. All cards keep their complete printed sentence at full size. */
+.or-agent { width: 146px; min-width: 146px; height: 166px; padding: 6px 7px; gap: 7px; }
+.or-agent-top { min-height: 29px; gap: 5px; align-items: start; }
+.or-agent-top strong { flex: 1; min-width: 0; margin: 0; padding-top: 1px; font-size: .82rem; line-height: 1.13; }
+.or-agent-top > i { font-size: .86rem; line-height: 1.3; }
+.or-agent-top .or-card-price { flex: none; gap: 2px; align-items: center; }
+.or-agent-top .or-resource-icon { width: 13px; height: 13px; }
+.or-agent-top .or-card-price b { font-size: .84rem; }
+.or-agent-text { flex: 1 0 auto; font-size: .72rem; line-height: 1.32; }
+.or-agent-foot { flex: none; gap: 3px; font-size: .6rem; letter-spacing: .02em; white-space: nowrap; }
+.or-agent-foot .or-pl { letter-spacing: .02em; }
+.or-hand-row { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 10px; align-items: center; }
+.or-hand { justify-content: safe center; gap: 8px; padding: 6px 4px 8px; }
+.or-draw-pile { display: grid; justify-items: center; gap: 10px; color: #8d99b3; font-size: 8px; line-height: 1.4; text-align: center; text-transform: uppercase; letter-spacing: .08em; }
+.or-draw-pile > i { display: grid; place-items: center; width: 27px; height: 40px; border: 1px solid #8398b8; border-radius: 4px; background: repeating-linear-gradient(135deg, #1a243b 0 4px, #202e48 4px 5px); box-shadow: 2px 2px #0b1325, 3px 3px #61718b, 4px 4px #0b1325, 5px 5px #43516c; color: #cad9ec; font: 16px Georgia, serif; }
+.or-controls { border-top: 1px solid var(--or-line); margin-top: 4px; }
+.or-control-hint { margin: 0; padding: 16px 8px; text-align: center; color: var(--or-dim); font-size: .74rem; line-height: 1.5; }
+.or-controls .or-action-bar { border: 0; margin: 0; padding: 10px 2px; }
+.or-controls .or-decision { padding: 9px 12px !important; border: 1px solid #5baba780; border-radius: 10px; margin-top: 6px; }
+.or-decision-source { margin-bottom: 3px; }
+.or-decision h2 { margin-bottom: 5px; }
+.or-decision-detail { margin: 0 0 7px; }
+.or-decision-help { margin-top: 5px; }
+.or-controls .or-status { font-size: .75rem; }
+.or-card-flight { position: fixed !important; z-index: 110; margin: 0 !important; pointer-events: none !important; transform-origin: center; will-change: transform, opacity; }
+.or-card-flight.or-agent { min-width: 0; box-sizing: border-box; }
+.or-card-flight > strong { margin: 0; }
+
+@media (min-width: 981px) {
+  .or-live { height: 100dvh; min-height: 0; }
+  .or-live .lby-header { flex: none; }
+  .or-live .or-table { min-height: 0; box-sizing: border-box; }
+  .or-live .or-board-layout { flex: 1; min-height: 0; }
+  .or-live .or-board-main { min-height: 0; }
+  .or-live .or-board-main > * { flex-shrink: 0; }
+  .or-live .or-influence { flex: 1 1 0; height: auto; min-height: 240px; }
+  .or-live .or-hand-zone { height: 336px; box-sizing: border-box; }
+  .or-hand-zone { padding: 6px 10px; }
+  .or-hand-zone .or-agent { flex: 0 0 146px; }
+  .or-controls .or-action-bar { display: grid; grid-template-columns: 1fr; gap: 8px; }
+  .or-controls .or-decision { padding-block: 7px !important; }
+  .or-decision-help { display: none; }
+  .or-columns { padding: 3px 8px 4px; }
+  .or-columns h3 { line-height: 1.1; margin-bottom: 2px; }
+  .or-column { padding-block: 1px 2px; }
+  .or-column-head { min-height: 14px; line-height: 1.1; margin-bottom: 3px; }
+  .or-slot, .or-column-empty { height: 27px; }
+  .or-action-bar > span { text-align: center; }
+  .or-action-bar > div { display: grid; grid-template-columns: 1fr 1fr 1.3fr; gap: 7px; }
+  .or-action-bar button { min-width: 0; padding: 8px 6px; line-height: 1.4; }
+  .or-sideboards { grid-template-rows: minmax(0, 1fr) 220px; }
+  .or-tech { display: flex; flex-direction: column; }
+  .or-tech > header, .or-row-bonus { flex: none; }
+  .or-tech-body { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  .or-tech-grid { flex: 1; min-height: 0; }
+  .or-tech-col { display: grid; grid-template-rows: 22px repeat(5, minmax(0, 1fr)); gap: 5px; padding: 8px; }
+  .or-tech-col h3 { align-self: center; margin: 0; }
+  .or-tech-space { height: 100%; margin: 0; padding: 7px 5px; }
+  .or-tech-text { display: block; overflow: visible; font-size: .8rem; line-height: 1.35; align-self: center; }
+  .or-tech-row.has-token .or-tech-space { padding-right: 5px; }
+  .or-tech-row.has-token .or-tech-rail { padding-top: 22px; }
+  .or-tech-token { left: 6px; right: auto; top: 5px; }
+  .or-tech-lv { font-size: .85rem; }
+  .or-row-bonus { font-size: .65rem; line-height: 1.5; }
+  .or-log p { font-size: .74rem; line-height: 1.45; }
+}
+@media (min-width: 1500px) {
+  .or-hand-zone .or-agent { flex-basis: 154px; width: 154px; min-width: 154px; }
+  .or-influence .or-space::before { width: 9px; height: 9px; border-width: 1.5px; }
+  .or-influence .or-space.goal::before { width: 16px; height: 16px; border-width: 2px; }
+  .or-influence .or-space.middle::before { width: 13px; height: 13px; border-width: 2px; }
+}
+@media (min-width: 2200px) {
+  .or-live .or-table { max-height: 1420px; margin-block: auto; flex: 1; }
+  .or-live .or-hand-zone { height: 352px; }
+  .or-sideboards { grid-template-rows: minmax(0, 1fr) 260px; }
+  .or-tech-text { font-size: .88rem; }
+}
+@media (min-width: 981px) and (max-height: 900px) {
+  .or-live .or-hand-zone { height: 330px; }
+  .or-live .or-influence { min-height: 150px; }
+  .or-sideboards { grid-template-rows: minmax(0, 1fr) 170px; }
+  .or-tech-col { padding: 5px; gap: 3px; }
+  .or-tech-text { font-size: .7rem; line-height: 1.25; }
+}
+@media (max-width: 980px) {
+  .or-hand-row { grid-template-columns: minmax(0, 1fr); }
+  .or-draw-pile { display: none; }
+  .or-hand-zone { display: flex; flex-direction: column; }
+  .or-hand-zone:has(.deciding) .or-controls { order: -1; margin: 0 0 6px; border-top: 0; }
+  .or-agent { height: 180px; }
 }

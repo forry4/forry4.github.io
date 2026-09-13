@@ -14,6 +14,7 @@ import { useAutoReconnect } from "../../shared/useAutoReconnect.js";
 import { useCardInfoGesture } from "../../shared/gestures.js";
 import OrbitRules from "./rules.jsx";
 import { Resource, ResourceIcon, decisionCopy, victoryCondition, InfluenceDisc } from "./presentation.jsx";
+import { useCardMotion } from "./cardMotion.js";
 import orbitCssText from "./Orbit.css?inline";
 
 
@@ -196,19 +197,7 @@ function MoveLog({ entries = [], game, catalog, myId, onInfo }) {
 }
 
 function Hand({ children }) {
-  const viewport = useRef(null);
-  useEffect(() => {
-    const node = viewport.current;
-    const fit = () => {
-      const css = getComputedStyle(node);
-      const available = node.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight);
-      node.style.setProperty("--or-hand-scale", Math.min(1, (available - 5 * parseFloat(css.columnGap)) / (6 * 145)));
-    };
-    const observer = new ResizeObserver(fit);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, []);
-  return <div className="or-hand" ref={viewport}>{children}</div>;
+  return <div className="or-hand" aria-label="Your hand">{children}</div>;
 }
 
 
@@ -480,13 +469,12 @@ function AgentCard({ card, selected, discarding = false, onClick, onInfo, hidden
     ? () => onInfo({ kind: "card", card }) : null);
   if (hidden || card?.hidden) return <div className="or-agent hidden" aria-label="Hidden Agent"><span>ORBIT</span></div>;
   if (!card) return null;
-  return <button type="button" aria-pressed={discarding ? true : undefined}
+  return <button type="button" data-card-id={card.id} aria-pressed={discarding ? true : undefined}
     className={`or-agent or-${card.planet} or-${card.faction}${selected ? " selected" : ""}${discarding ? " discarding" : ""}${onClick ? " playable" : ""}`}
     onClick={onClick || (onInfo ? () => onInfo({ kind: "card", card }) : undefined)}
     disabled={!onClick && !onInfo} title={discarding ? `${card.name} — marked for replacement` : card.description} {...info}>
     {discarding && <span className="or-discard-tag" aria-hidden="true">Replacing</span>}
-    <span className="or-agent-top"><span className="or-card-price"><ResourceIcon kind="credits" /><b>{card.cost}</b></span><i>{FACTION_GLYPH[card.faction]}</i></span>
-    <strong>{card.name}</strong>
+    <span className="or-agent-top"><span className="or-card-price"><ResourceIcon kind="credits" /><b>{card.cost}</b></span><strong>{card.name}</strong><i>{FACTION_GLYPH[card.faction]}</i></span>
     <span className="or-agent-text">{card.description}</span>
     <span className="or-agent-foot"><PlanetName planet={card.planet} /> · {card.faction}</span>
   </button>;
@@ -771,7 +759,7 @@ function DecisionPanel({ game, catalog, sendMove, onInfo }) {
   const planetChoices = moves.every((move) => "planet" in move) && moves.length <= 5;
   const action = [...(game.log || [])].reverse().find((entry) => entry.action)?.action;
   const context = action === "technology" ? "Technology" : action === "leader" ? "Leader action" : "Agent effect";
-  return <section className="or-decision" aria-live="polite">
+  return <section className="or-decision" aria-live="polite" aria-label="Current decision">
     <div className="or-decision-source"><span>{context}</span><b>{game.pending.source}</b></div>
     <h2>{title}</h2>
     {detail && <p className="or-decision-detail">{detail}</p>}
@@ -1201,6 +1189,7 @@ export default function Orbit({ myId, authUser, onExit }) {
   const legal = game?.legal_moves || [];
   const isMyTurn = legal.length > 0;
   const over = game?.phase === "over";
+  useCardMotion({ game, catalog, myId, roomId, connected, surface: motionSurface });
 
   useEffect(() => {
     if (!me?.hand?.some((card) => card.id === selectedCard)) setSelectedCard(null);
@@ -1269,7 +1258,7 @@ export default function Orbit({ myId, authUser, onExit }) {
           me leader={game.leader} connected={connected} hint={myHint} onInfo={setInfo} />
       </div>
   );
-  return <div className="app orbit or-game" style={{ "--lby-accent": GAME_ACCENTS.orbit }}>
+  return <div className={`app orbit or-game${!over && game.phase !== "mulligan" ? " or-live" : ""}`} style={{ "--lby-accent": GAME_ACCENTS.orbit }}>
     <style>{styles}</style>
     <LobbyHeader title="Orbit" user={<span className={`or-connection${connected ? "" : " lost"}`}>{connected ? (authUser?.name || "Connected") : "Reconnecting…"}</span>}
       menu={<GameMenu onLeave={leaveToLobby} onRules={() => setShowRules(true)}
@@ -1303,15 +1292,16 @@ export default function Orbit({ myId, authUser, onExit }) {
           <InfluenceBoard key={`${roomId}-${connected}`} game={game} myId={myId} catalog={catalog} names={names} connected={connected} onInfo={setInfo} />
           <Columns game={game} pid={otherId} name={names[otherId]} onInfo={setInfo} />
           <Columns game={game} pid={myId} name={names[myId]} mine onInfo={setInfo} />
-          {!over && game.pending && game.pending_pid === myId && <DecisionPanel game={game} catalog={catalog} sendMove={sendMove} onInfo={setInfo} />}
-          {!over && game.pending && game.pending_pid !== myId && !botIsOpponent && <section className="or-status"><span className="or-spinner" /> {names[game.pending_pid] || "Opponent"} is resolving {game.pending.source}…</section>}
-          {!over && !game.pending && !isMyTurn && !botIsOpponent && <section className="or-status"><span className="or-spinner" /> {names[game.turn_pid] || "Opponent"} is choosing an action…</section>}
-
           <section className="or-hand-zone">
-            <div className="or-hand-head"><span className="or-eyebrow">Your hand</span>
-              <HandCount held={me.hand.length} limit={handLimit(game.leader, myId)} /></div>
+            <div className="or-hand-row">
+            <span className="or-draw-pile" aria-label="Agent deck"><i aria-hidden="true">O</i><span>Agent<br />deck</span></span>
             <Hand>{sortedHand(me.hand).map((card) => <AgentCard card={card} key={card.id} selected={selectedCard === card.id} onInfo={setInfo}
               onClick={isMyTurn && !game.pending ? () => setSelectedCard(card.id) : null} />)}</Hand>
+            </div>
+            <div className={`or-controls${game.pending_pid === myId && legal.length > 1 ? " deciding" : ""}`}>
+            {!over && game.pending && game.pending_pid === myId && <DecisionPanel game={game} catalog={catalog} sendMove={sendMove} onInfo={setInfo} />}
+            {!over && game.pending && game.pending_pid !== myId && !botIsOpponent && <section className="or-status"><span className="or-spinner" /> {names[game.pending_pid] || "Opponent"} is resolving {game.pending.source}…</section>}
+            {!over && !game.pending && !isMyTurn && !botIsOpponent && <section className="or-status"><span className="or-spinner" /> {names[game.turn_pid] || "Opponent"} is choosing an action…</section>}
             {selectedCard != null && isMyTurn && !game.pending && <div className="or-action-bar">
               <span>Play <b>{me.hand.find((card) => card.id === selectedCard)?.name}</b> as:</span>
               <div>{["recruit", "technology", "leader"].map((action) => {
@@ -1325,6 +1315,8 @@ export default function Orbit({ myId, authUser, onExit }) {
                 return <button type="button" key={action} disabled={!move} onClick={() => move && sendMove(move)}>{label}</button>;
               })}</div>
             </div>}
+            {!over && !game.pending && isMyTurn && selectedCard == null && <p className="or-control-hint">Choose a card to recruit an Agent, develop technology, or become Leader.</p>}
+            </div>
           </section>
         </div>
         <div className="or-sideboards"><TechBoard game={game} myId={myId} otherId={otherId} catalog={catalog}

@@ -388,12 +388,13 @@ were each a real misread on the table, so they are worth not undoing:
   outright: two identically styled panels, distinguished only by a half-read
   possessive, is what made a player read their own recruit into the opponent's
   board.
-- **Technology is five compact, equal rungs.** The level has one narrow rail and
-  the effect is one top-aligned block with room for three lines; never indent
-  only its first line.
+- **Technology is five equal rungs.** The level has one narrow rail. Desktop
+  gives the ladder the sidebar height above a shorter log, with larger,
+  unclamped descriptions. Phones retain the compact three-line treatment;
+  never indent only the first line.
   Player tokens live on that rail at the level they are AT, while level 0 is
-  simply no token. All fifteen spaces have one fixed height and readable copy;
-  the modal carries whatever a long effect cannot show. The level-2 bonus is a
+  simply no token. All fifteen spaces have the same height and readable copy;
+  the modal adds detail. The level-2 bonus is a
   fixed-size token on that rung, not variable-length text or another section.
   On a phone the board starts collapsed into three faction cells, each showing
   only both seats' current levels; expanding restores the full ladder. The
@@ -491,10 +492,12 @@ were each a real misread on the table, so they are worth not undoing:
   is a lossy second one.
 - **Desktop board columns size independently.** `.or-board-main` owns influence
   and both Agent panels, decisions and the hand; `.or-sideboards` owns technology
-  and the log. The board's content sets the table height; the log ends alongside
-  the hand instead of growing into a screen-height pillar. The left column uses `minmax(0, 1fr)` so a six-card hand
-  cannot force it over the right column. Hand cards scale uniformly to fit six
-  on desktop. Do not stretch the influence panel into blank space below Jupiter.
+  and the log. The live desktop table fits the viewport; influence absorbs the
+  available height above a fixed hand/control area. The log ends alongside
+  the hand. The left column uses `minmax(0, 1fr)` so a six-card hand
+  cannot force it over the right column. Hand cards retain their full text size;
+  six fit at the target desktop resolutions, and narrower windows scroll the
+  hand instead of scaling its text. Do not add empty space below the turn recap.
   At one column the wrappers become `display: contents`; on phones the order is
   opponent rail → vertical influence tracks → your rail → technology → decision
   → hand → log.
@@ -548,8 +551,9 @@ were each a real misread on the table, so they are worth not undoing:
   `test_client_glossary.py` reads the JSX AS TEXT and fails if any of the 128
   printed strings matches no term, because an unmatched one renders an empty
   heading and leaves the reader where they started.
-- **One `handLimit()` decides the hand counter, and both rails plus the hand head
-  read it.** The limit moves MID-TURN with the badge, and a second hand-rolled
+- **One `handLimit()` decides the hand counter, and both player rails
+  read it.** The duplicate hand heading/counter was removed on 2026-09-13.
+  The limit moves MID-TURN with the badge, and a second hand-rolled
   expression is how a counter ends up disagreeing with the badge printed beside
   it. Every counter always shows `N / N cards`, including when a hand is exactly
   at its limit; an over-limit hand remains legal and is tinted, without adding a
@@ -615,7 +619,7 @@ The initial visual sign-off missed actual play problems. Do not repeat that:
 
 - Influence pieces are flat, clean discs. No glass highlights, glowing orbs,
   whole-panel brightness flashes, or entrance animations on every rebroadcast.
-  Only disc travel and quiet resource-change cues explain the update. Resource
+  Disc travel, confirmed card travel, and quiet resource-change cues explain the update. Resource
   labels remain visible during those cues. A captured disc departs toward its
   goal; a replacement appears at centre without reverse movement.
 - The footer explicitly says **Turn recap** and reads the last action, rather
@@ -637,3 +641,22 @@ The initial visual sign-off missed actual play problems. Do not repeat that:
   frames, not merely the default board. Fake fixtures offering exiles from empty
   columns cannot establish choice clarity. Verify inspection does not also
   submit a move, and verify the losing player's result.
+
+### Desktop fit and card travel — 2026-09-13
+
+- Decisions live in `.or-controls` below the hand, inside its reserved desktop
+  height. Selecting a card or advancing a pending choice must not move or shrink
+  the planet board. On phones the active decision moves above the hand.
+- Compact faces put cost, title and faction on one line group. Body text stays
+  at `.72rem`, with no zoom, line clamp or required expansion. The screen gate
+  renders all 90 cards at both desktop targets and on a phone to check this.
+- `cardMotion.js` follows new public `log` actions for recruit/technology/leader
+  and new IDs in the viewer's own hand for drawing. It never starts from an
+  outgoing request or infers the opponent's hidden hand. Flights are temporary,
+  inert copies; server state and input do not wait for them.
+- Duplicate frames, reconnect baselines and reduced motion must not replay
+  flights. Resizing or scrolling the page/hand cancels obsolete geometry;
+  the log's automatic scroll must NOT cancel a just-started card animation.
+- `screens:orbit` checks populated desktop decisions, stable board geometry,
+  all card sentences, actual flight endpoints, duplicate suppression and reduced
+  motion. `ORBIT_SHOTS=1` includes card-flight frames for visual inspection.

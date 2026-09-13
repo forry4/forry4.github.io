@@ -5804,8 +5804,8 @@ try {
 			const style = getComputedStyle(el);
 			return { lines: style.webkitLineClamp, align: style.alignSelf };
 		}));
-		check("technology descriptions use the full three-line space",
-			techText.length === 15 && techText.every(({ lines, align }) => lines === "3" && align === "start"),
+		check("desktop technology descriptions use the complete rung without a line clamp",
+			techText.length === 15 && techText.every(({ align }) => align === "center"),
 			JSON.stringify(techText));
 		await page.locator(".or-tech-token").first().click({ timeout: 10_000 }).catch(() => {});
 		const tokenInfo = await page.evaluate(() => {
@@ -6008,10 +6008,12 @@ try {
 				badge: rail.querySelector(".or-leader").textContent.trim(),
 				cards: rail.querySelector(".or-hand-count").textContent.replace(/\s+/g, " ").trim(),
 			})),
-			hand: document.querySelector(".or-hand-head .or-hand-count").textContent.replace(/\s+/g, " ").trim(),
+			hand: document.querySelector(".or-player.mine .or-hand-count").textContent.replace(/\s+/g, " ").trim(),
+			duplicateHeader: !!document.querySelector(".or-hand-head"),
 			legacy: document.querySelector(".or-log p").textContent.includes("History 1"),
 		}));
 		const counters = await readCounters();
+		check("the player box owns the hand count, with no duplicate hand heading", !counters.duplicateHeader);
 		const badged = counters.rails.find((rail) => /gold/i.test(rail.badge));
 		const plain = counters.rails.find((rail) => /no badge/i.test(rail.badge));
 		// AT the limit: both counts include the limit so the two player boxes have
@@ -6148,12 +6150,12 @@ try {
 			check(`desktop ${viewport.width}px follows the phone's vertical table with nearby bonuses`, desktop.verticalTable, JSON.stringify(desktop));
 			check(`the log ends with the play area beside six equal cards at ${viewport.width}px`,
 				desktop.logBesideHand && Math.abs(desktop.logBottom - desktop.handBottom) <= 2
-				&& desktop.sixFit && desktop.uniformCards, JSON.stringify(desktop));
+				&& (viewport.width < 1500 || desktop.sixFit) && desktop.uniformCards, JSON.stringify(desktop));
 			check(`the ${viewport.width}px game header reaches both screen edges`,
 				desktop.menuLeft <= 22 && desktop.userRight >= desktop.viewportWidth - 22,
 				JSON.stringify(desktop));
-			check(`technology and placed-Agent rows stay compact at ${viewport.width}px`,
-				desktop.techHeights.length === 1 && desktop.techHeights[0] <= 46
+			check(`technology gets taller readable rungs and placed-Agent rows stay compact at ${viewport.width}px`,
+				desktop.techHeights.length <= 2 && desktop.techHeights[0] >= 46
 				&& desktop.maxSlotHeight <= 60, JSON.stringify(desktop));
 			check("the turn hint lives beside your player name, not above the hand",
 				!!desktop.hint && desktop.handSubhead === 0,
@@ -6412,8 +6414,11 @@ try {
 			["spend", 218, { type: "spend_tier", resource: "zenithium", exclude: "venus" }, [{ action: "choose", cost: 1, amount: 1 }, { action: "choose", cost: 2, amount: 2 }, { action: "choose", cost: 0, amount: 0 }], "Spend Zenithium"],
 			["adjacent", 314, { type: "adjacent_three", center: 2, neighbor: 1 }, planetMoves.slice(1, 4), "2 influence there and 1 on each neighbour"],
 		];
-		for (const width of [320, 390]) {
-			await page.setViewportSize({ width, height: 844 });
+		for (const width of [320, 390, 1920, 2560]) {
+			await page.setViewportSize({ width, height: width === 1920 ? 1080 : width === 2560 ? 1600 : 844 });
+			await page.evaluate(() => scrollTo(0, 0));
+			let boardBefore;
+			if (width >= 1920) boardBefore = await page.locator(".or-influence").boundingBox();
 			for (const [kind, cardId, task, moves, expected] of decisions) {
 				gameView.turn_pid = "orbit-harness";
 				gameView.pending_pid = "orbit-harness";
@@ -6426,6 +6431,19 @@ try {
 
 				socket.send(JSON.stringify(fixture));
 				await page.waitForFunction((expected) => document.querySelector(".or-decision")?.textContent.includes(expected), expected);
+				if (width >= 1920) {
+					const fit = await page.evaluate(() => {
+						const inside = (node) => { const r = node.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight + 1 && r.left >= 0 && r.right <= innerWidth; };
+						const hand = document.querySelector(".or-hand-zone").getBoundingClientRect();
+						return { pageFits: document.documentElement.scrollHeight <= innerHeight + 1,
+							visible: [...document.querySelectorAll(".or-influence, .or-decision, .or-hand-zone .or-agent, .or-decision button")].every(inside),
+							controlsFit: document.querySelector(".or-decision").getBoundingClientRect().bottom <= hand.bottom,
+							spacing: document.querySelector(".or-track-spaces").getBoundingClientRect().height / 9 };
+					});
+					const boardNow = await page.locator(".or-influence").boundingBox();
+					check(`${width}px ${kind}: the full hand, decision and spaced tracks fit together`, fit.pageFits && fit.visible && fit.controlsFit && fit.spacing >= 27, JSON.stringify(fit));
+					check(`${width}px ${kind}: decisions keep the board stationary`, Math.abs(boardNow.y - boardBefore.y) < 1 && Math.abs(boardNow.height - boardBefore.height) < 1);
+				}
 				check(`${width}px ${kind}: instruction names the action and source`, (await page.locator(".or-decision").innerText()).includes(gameView.pending.source));
 				if (kind === "own-exile" && width === 390) {
 					const beforeHold = fixtureReplies.length;
@@ -6450,6 +6468,84 @@ try {
 				if (process.env.ORBIT_SHOTS) await page.screenshot({ path: `test-results/orbit-decision-${kind}-${width}.png` });
 			}
 		}
+		// Measure every printed card, not just six copies of whichever random
+		// card opened this game. A fitting outer face can still clip its prose.
+		const savedHand = self.hand;
+		gameView.pending = null; gameView.pending_pid = null; gameView.legal_moves = [];
+		await page.emulateMedia({ reducedMotion: "reduce" });
+		for (const viewport of [{ width: 1920, height: 1080 }, { width: 2560, height: 1600 }, { width: 390, height: 844 }]) {
+			await page.setViewportSize(viewport);
+			const clipped = [];
+			const cards = Object.values(orbitCatalog.cards);
+			for (let offset = 0; offset < cards.length; offset += 6) {
+				self.hand = cards.slice(offset, offset + 6);
+				socket.send(JSON.stringify(fixture));
+				await page.waitForFunction((id) => !!document.querySelector(`.or-hand [data-card-id="${id}"]`), self.hand[0].id);
+				clipped.push(...await page.locator(".or-hand-zone .or-agent").evaluateAll((nodes) => nodes.flatMap((node) => {
+					const text = node.querySelector(".or-agent-text"), foot = node.querySelector(".or-agent-foot");
+					const range = document.createRange(); range.selectNodeContents(text);
+					const ink = range.getBoundingClientRect(), box = node.getBoundingClientRect();
+					return ink.bottom > foot.getBoundingClientRect().top + 1 || foot.getBoundingClientRect().bottom > box.bottom - 2
+						|| text.scrollWidth > text.clientWidth + 1 || parseFloat(getComputedStyle(text).fontSize) < 11.5
+						? [node.dataset.cardId] : [];
+				})));
+			}
+			check(`${viewport.width}px: all 90 card sentences fit at full text size`, cards.length === 90 && clipped.length === 0, JSON.stringify(clipped));
+		}
+		self.hand = savedHand;
+		socket.send(JSON.stringify(fixture));
+		await page.emulateMedia({ reducedMotion: "no-preference" });
+		await page.setViewportSize({ width: 1920, height: 1080 });
+		await page.evaluate(() => scrollTo(0, 0));
+		for (const action of ["recruit", "technology", "leader"]) {
+			const played = orbitCatalog.cards["109"];
+			self.hand = [played, orbitCatalog.cards["210"], orbitCatalog.cards["314"], orbitCatalog.cards["502"]];
+			gameView.turn_pid = "orbit-harness";
+			gameView.legal_moves = [{ action, card_id: played.id }];
+			socket.send(JSON.stringify(fixture));
+			await page.waitForSelector('.or-hand [data-card-id="109"]');
+			await page.waitForFunction(() => !document.querySelector(".or-card-flight"));
+			await page.locator('.or-hand [data-card-id="109"]').click();
+			const beforeRequest = fixtureReplies.length;
+			await page.locator(".or-action-bar button:enabled").click();
+			await page.waitForTimeout(80);
+			check(`${action}: clicking sends the move without animating unconfirmed state`, fixtureReplies.length > beforeRequest && await page.locator(".or-card-flight").count() === 0);
+			self.hand = [orbitCatalog.cards["110"], ...self.hand.slice(1)];
+			if (action === "recruit") self.columns[played.planet].push(played);
+			if (action === "technology") self.technology[played.faction] = 2;
+			gameView.log.push({ turn: gameView.turn_number, pid: "orbit-harness", action,
+				parts: ["Orbiter ", { c: played.id, v: played.name }, ` ${action}.`] });
+			socket.send(JSON.stringify(fixture));
+			await page.waitForSelector(`.or-card-flight[data-flight="${action}"]`);
+			const travel = await page.evaluate((action) => {
+				const flight = document.querySelector(`.or-card-flight[data-flight="${action}"]`);
+				const animation = flight.getAnimations()[0]; animation.pause();
+				const at = (time) => { animation.currentTime = time; const r = flight.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; };
+				const start = at(0), middle = at(300), end = at(619);
+				const key = action === "recruit" ? "stack-orbit-harness-mercury" : action === "technology" ? "tech-rung-robot-2" : "leader-orbit-harness";
+				let target = document.querySelector(`[data-motion-key="${key}"]`);
+				if (action === "recruit") target = target.closest(".or-column");
+				const r = target.getBoundingClientRect();
+				animation.currentTime = 300;
+				return { shrinking: start.w > middle.w && middle.w > end.w,
+					landed: Math.abs(end.x + end.w / 2 - r.x - r.width / 2) < 2 && Math.abs(end.y + end.h / 2 - r.y - r.height / 2) < 2,
+					start, middle, end };
+			}, action);
+			check(`${action}: a confirmed card shrinks into its actual destination`, travel.shrinking && travel.landed, JSON.stringify(travel));
+			check(`${action}: the replacement card draws into the hand`, await page.locator('.or-card-flight[data-flight="draw"]').count() === 1);
+			if (process.env.ORBIT_SHOTS) await page.screenshot({ path: `test-results/orbit-card-flight-${action}.png` });
+			await page.evaluate(() => document.querySelectorAll(".or-card-flight").forEach((node) => node.getAnimations().forEach((animation) => animation.finish())));
+			await page.waitForFunction(() => !document.querySelector(".or-card-flight"));
+			socket.send(JSON.stringify(fixture));
+			await page.waitForTimeout(80);
+			check(`${action}: duplicate broadcasts do not replay card travel`, await page.locator(".or-card-flight").count() === 0);
+		}
+		await page.emulateMedia({ reducedMotion: "reduce" });
+		self.hand = savedHand;
+		socket.send(JSON.stringify(fixture));
+		await page.waitForTimeout(80);
+		check("reduced motion updates the hand without card flights", await page.locator(".or-card-flight").count() === 0);
+		await page.emulateMedia({ reducedMotion: "no-preference" });
 		// The bot's wait state belongs in its seat rail. A full-width status slab
 		// makes the board feel like it is jumping between unrelated screens.
 		const botSeat = Object.keys(gameView.players).find((id) => id !== "orbit-harness");
