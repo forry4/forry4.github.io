@@ -98,6 +98,15 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro','Crimson F
 .btn-gold:focus-visible{outline-color:var(--gold-light)}
 .btn:disabled{opacity:.35;cursor:not-allowed}
 .btn-full{width:100%}
+/* A busy button's spinner sits OUT OF FLOW, scoped with :has so no other button
+   on the site gains a containing block it did not ask for. In flow it would eat
+   a `gap: 8px` slot and shove the centred label sideways for the length of the
+   request -- the shift the sign-in screen shipped with for as long as its
+   spinner class did not exist. Dark on the gold plate: `.lby-spinner` paints its
+   leading edge in `--lby-accent`, which on this face is gold on gold. */
+.btn:has(.btn-spin){position:relative}
+.btn-spin{position:absolute;left:14px;top:50%;margin:0;transform:translateY(-50%)}
+.btn-gold .btn-spin{border-color:rgba(15,14,12,.28);border-top-color:#0f0e0c}
 .btn-sm{padding:7px 14px;font-size:.78rem}
 .input{width:100%;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'Cinzel','Cinzel Fallback',serif;font-size:1rem;letter-spacing:.1em;outline:none}
 .input:focus{border-color:var(--gold)}

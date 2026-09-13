@@ -185,8 +185,19 @@ export default function AuthScreen({ siteName, httpBase, css, myId, onAuthentica
 										<span className="auth-note-sub">Names are not case-sensitive.</span>
 									)}
 								</p>
+								{/* THE BUSY SPINNER IS ABSOLUTELY POSITIONED, AND IT IS A CLASS THAT
+								    EXISTS. It used to be `<span className="spinner" />`, and nothing has
+								    defined `.spinner` since the site's three hand-rolled spinners were
+								    consolidated into `.lby-spinner` — so the front door's one piece of
+								    "working on it" feedback drew NOTHING. What it did do was occupy a
+								    flex slot in a `.btn` with `gap: 8px`, which slid the centred label
+								    4px right for the length of the request and then slid it back: a
+								    label that jumps, at low opacity, mid-repaint, on a phone, with no
+								    spinner to explain it. Out of flow it contributes no gap, so the
+								    label does not move at all and the spinner is the only thing that
+								    changes. */}
 								<button className="btn btn-gold btn-full" onClick={submit} disabled={loading}>
-									{loading && <span className="spinner" />}
+									{loading && <span className="btn-spin lby-spinner lby-spinner-sm" aria-hidden="true" />}
 									{tab === "login" ? "Sign In" : "Create Account"}
 								</button>
 							</>
