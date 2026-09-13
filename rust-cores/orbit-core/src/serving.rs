@@ -324,7 +324,88 @@ fn effect_value(
 /// The audited public ranker's scalar action score.  Offline opponent
 /// specialists may add a deliberately named strategic pressure to this base;
 /// the score itself still reads only the allowlisted observation.
+/// How much an INFLUENCE task's planet choice is worth to `seat`.
+///
+/// THE BUG THIS REPLACES. The ranker scored a planet at `choice * position`,
+/// where `position` is the seat's OWN signed progress -- so a planet the
+/// opponent led by two scored 0.4 * -2 = -0.8 and ranked BELOW every neutral
+/// planet on the board. It was not merely blind to the opponent's victory
+/// condition: it was REPELLED by it, in proportion to how dangerous it was, and
+/// the repulsion was strongest at the moment of maximum danger. That is the
+/// 2026-09-13 playtest report mechanically -- "it ignored mars despite that
+/// being by far my fastest path to victory".
+///
+/// It matters far more than a prior usually would, because the ranker is not
+/// just a prior here: the served Expert refuses any position with a pending
+/// chain, and **43.9% of real decisions are inside one**, of which planet
+/// choices are 30.3% of all decisions. Measured over 60 ranker-vs-ranker games:
+/// of the 757 planet choices where a planet the opponent led by two or more was
+/// legal, the ranker took a different planet 565 times (74.6%), 271 of them
+/// with the opponent one influence from the capture.
+///
+/// WHAT IT IS NOW: what the planet is worth to this seat, which is either its
+/// own advance or the denial of the opponent's -- never a penalty for the
+/// planet being contested. Denial is priced with `capture_gain`, the SAME
+/// function the leaf uses, so the ordering prior and the evaluator cannot
+/// disagree about what a capture is worth. Closeness is linear in distance
+/// travelled and reaches 1.0 at the opponent's match point, which is the
+/// reachable maximum: the disc is removed on arrival, so |position| never
+/// exceeds 3.
+///
+/// Only INFLUENCE tasks take the denial branch. `transfer`/`exile` name a
+/// COLUMN rather than push a disc, so the track position is a weak proxy there
+/// and denial through them is already priced by the opponent-column term.
+fn planet_choice_value(
+    observation: &Value,
+    planet: &str,
+    seat: usize,
+    task_type: &str,
+    planet_value: f64,
+    victory_aware: bool,
+) -> f64 {
+    let influence_task = matches!(
+        task_type,
+        "influence" | "influence_other" | "split_influence"
+    );
+    if !victory_aware || !influence_task || planet_value >= 0.0 {
+        return CHOICE * planet_value;
+    }
+    let Some(index) = PLANETS.iter().position(|value| *value == planet) else {
+        return CHOICE * planet_value;
+    };
+    // What THEIR capture would be worth to THEM -- marginal victory progress,
+    // or the game itself if it completes a condition.
+    let gain = crate::search::capture_gain(observation, 1 - seat, index);
+    let closeness = (-planet_value / CONTEST_REACH).min(1.0);
+    THREAT * gain * closeness
+}
+
+/// Weight on a planet's own advance (the historical `choice` weight).
+const CHOICE: f64 = 0.4;
+/// Weight on a capture this seat can take, scaled by what it is worth.
+const CAPTURE: f64 = 1.0;
+/// Weight on denying the opponent's advance. Below the 2.0 the seat's own
+/// winning capture scores, so taking the win still outranks blocking theirs.
+const THREAT: f64 = 0.8;
+/// The furthest a disc is ever seen from centre. Capture fires at 4 and removes
+/// the disc, so 3 is the opponent's match point and the top of this scale.
+const CONTEST_REACH: f64 = 3.0;
+
+/// The frozen ranker, victory-aware. See [`action_score_with`] for the switch
+/// that lets an arena run the pre-2026-09-13 policy as a control arm.
 pub fn action_score(observation: &Value, action: &Value) -> f64 {
+    action_score_with(observation, action, true)
+}
+
+/// `victory_aware` false restores the policy exactly as it shipped before
+/// 2026-09-13: a planet worth its own signed progress (so a contested one was a
+/// PENALTY) and a flat bonus for any capture at all.
+///
+/// This exists so both arms of an A/B can live in ONE binary. The arena drives
+/// both seats from a single process for common random numbers, so a global or
+/// an environment variable could not separate them -- it would measure a player
+/// against itself and report an honest-looking 0.5.
+pub fn action_score_with(observation: &Value, action: &Value, victory_aware: bool) -> f64 {
     let action_name = action.get("action").and_then(Value::as_str).unwrap_or("");
     let seat = observation.get("seat").and_then(Value::as_u64).unwrap_or(0) as usize;
     let players = observation.get("players").and_then(Value::as_array);
@@ -409,12 +490,11 @@ pub fn action_score(observation: &Value, action: &Value) -> f64 {
     }
     if let Some(planet) = action.get("planet").and_then(Value::as_str) {
         let planet_value = position(observation, Some(&Value::String(planet.to_owned())), seat);
-        result += 0.4 * planet_value;
+        result += planet_choice_value(
+            observation, planet, seat, task_type, planet_value, victory_aware,
+        );
+        let index = PLANETS.iter().position(|value| *value == planet).unwrap_or(0);
         if matches!(task_type, "transfer" | "exile" | "exile_for_matching") {
-            let index = PLANETS
-                .iter()
-                .position(|value| *value == planet)
-                .unwrap_or(0);
             let opponent_column = them
                 .get("columns")
                 .and_then(Value::as_array)
@@ -428,7 +508,18 @@ pub fn action_score(observation: &Value, action: &Value) -> f64 {
             "influence" | "influence_other" | "split_influence"
         ) && planet_value + number(pending_task.get("amount")).max(1.0) >= 4.0
         {
-            result += 2.0;
+            // NOT a flat bonus. This paid 2.0 for ANY capture, so the bot would
+            // take a worthless planet of its own over blocking a capture that
+            // ended the game -- the same victory-blindness as the term above,
+            // one line down, and measurably: with only the denial branch fixed
+            // the ranker still played elsewhere in 32 of 41 match-point
+            // positions. Priced by what the capture is actually worth, a
+            // marginal one no longer outranks stopping a loss.
+            result += if victory_aware {
+                CAPTURE * crate::search::capture_gain(observation, seat, index)
+            } else {
+                2.0
+            };
         }
     }
     if let Some(planets) = action.get("planets").and_then(Value::as_array) {
@@ -511,8 +602,8 @@ pub fn action_score(observation: &Value, action: &Value) -> f64 {
 
 // Keep the internal call sites terse while exposing the same implementation to
 // the offline value-data generator.
-fn score(observation: &Value, action: &Value) -> f64 {
-    action_score(observation, action)
+fn score_with(observation: &Value, action: &Value, victory_aware: bool) -> f64 {
+    action_score_with(observation, action, victory_aware)
 }
 
 /// Return the JSON contract used by `games/orbit/ai/serving.py`.
@@ -542,6 +633,20 @@ pub fn choose_move(
     memory: &Value,
     remaining_turn_budget: i64,
     seed: u64,
+) -> Value {
+    choose_move_with(observation, legal_moves, memory, remaining_turn_budget, seed, true)
+}
+
+/// The ranker with the victory-awareness switch exposed, so an arena can run
+/// the pre-2026-09-13 policy as a control arm in the same process. See
+/// [`action_score_with`].
+pub fn choose_move_with(
+    observation: &Value,
+    legal_moves: &[Value],
+    memory: &Value,
+    remaining_turn_budget: i64,
+    seed: u64,
+    victory_aware: bool,
 ) -> Value {
     const OBSERVATION_KEYS: [&str; 21] = [
         "schema",
@@ -651,7 +756,9 @@ pub fn choose_move(
         let scored = legal_moves
             .iter()
             .enumerate()
-            .map(|(index, action)| (score(observation, action), canonical(action), index))
+            .map(|(index, action)| {
+                (score_with(observation, action, victory_aware), canonical(action), index)
+            })
             .collect::<Vec<_>>();
         let best = scored
             .iter()

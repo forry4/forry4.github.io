@@ -1033,6 +1033,10 @@ export default function Orbit({ myId, authUser, onExit }) {
     const payload = {
       kind: "choose",
       observation: request.observation,
+      // The effect queue, which the observation redacts to its first task.
+      // Without it the Expert cannot rebuild an effect-resolution position and
+      // hands 45% of its decisions to the 1-ply ranker instead of searching.
+      pending_chain: request.pending_chain ?? null,
       legal_moves: legal,
       memory: request.memory || {},
       remaining_turn_budget: request.remaining_turn_budget ?? ORBIT_AI_TURN_BUDGET_MS,

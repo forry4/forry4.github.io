@@ -218,6 +218,57 @@ pub fn orbit_alphabeta_move_json(
     budget_ms: f64,
     seed: u32,
 ) -> String {
+    alphabeta_move(observation_json, legal_moves_json, memory_json, "null", budget_ms, seed)
+}
+
+/// The same search, with the pending chain supplied so sub-decisions can be
+/// SEARCHED rather than handed to the ranker.
+///
+/// WHY A SECOND EXPORT RATHER THAN AN EXTRA ARGUMENT OR A MERGED OBSERVATION.
+/// The wasm and the worker are separately cached artifacts on the same
+/// filenames, so a browser can hold either one without the other -- that
+/// combination is ordinary here, not hypothetical. A new argument on the
+/// existing export would reach an old wasm as a missing parameter. Merging the
+/// chain into the observation is worse: `serving::choose_move` validates the
+/// observation's key set EXACTLY, so an old wasm would refuse the chain as
+/// before and then fail its own ranker fallback on the unexpected key, turning
+/// a graceful degrade into a broken one. A separate export is feature-detected
+/// by name, so an old wasm is simply not offered the chain and behaves exactly
+/// as it does today.
+///
+/// WHAT IT BUYS. `State::from_observation` refused any position with a pending
+/// chain, so the Expert handed every effect-resolution choice to the 1-ply
+/// ranker instead of searching it -- 45.0% of all decisions with a real choice
+/// (10,537 of 23,394 over 300 games). The plan the search formed when it played
+/// the card was then discarded by a different policy two plies later in the
+/// same turn.
+#[wasm_bindgen]
+pub fn orbit_alphabeta_chain_move_json(
+    observation_json: &str,
+    legal_moves_json: &str,
+    memory_json: &str,
+    pending_chain_json: &str,
+    budget_ms: f64,
+    seed: u32,
+) -> String {
+    alphabeta_move(
+        observation_json,
+        legal_moves_json,
+        memory_json,
+        pending_chain_json,
+        budget_ms,
+        seed,
+    )
+}
+
+fn alphabeta_move(
+    observation_json: &str,
+    legal_moves_json: &str,
+    memory_json: &str,
+    pending_chain_json: &str,
+    budget_ms: f64,
+    seed: u32,
+) -> String {
     let result: Result<Value, String> = (|| {
         let observation = parse_object(observation_json, "observation")?;
         let legal_moves = parse_array(legal_moves_json, "legal_moves")?;
@@ -235,9 +286,19 @@ pub fn orbit_alphabeta_move_json(
             fallback["reason"] = json!(reason);
             fallback
         };
-        // A pending chain is not reconstructable from an observation, which is
-        // the same boundary the MCTS tier meets and answers the same way.
-        let world = match crate::State::from_observation(&observation, seed as u64) {
+        // The chain rides ALONGSIDE the observation and is merged only for the
+        // reconstruction. `observation` itself stays untouched, because the
+        // ranker fallback above validates its key set exactly and would refuse
+        // an extra field.
+        let chain: Value = serde_json::from_str(pending_chain_json).unwrap_or(Value::Null);
+        let world = if chain.is_null() {
+            crate::State::from_observation(&observation, seed as u64)
+        } else {
+            let mut merged = observation.clone();
+            merged["pending_full"] = chain;
+            crate::State::from_observation(&merged, seed as u64)
+        };
+        let world = match world {
             Ok(world) => world,
             Err(reason) => return Ok(ranker(&reason)),
         };
@@ -258,6 +319,7 @@ pub fn orbit_alphabeta_move_json(
             // changes the player without changing anything a gate can see.
             leaf: crate::search::Leaf::StateValue,
             quiescence: false,
+            victory_aware_ranker: true,
         };
         match crate::alphabeta::choose(&world, seat, seed as u64, config) {
             Ok(result) => {

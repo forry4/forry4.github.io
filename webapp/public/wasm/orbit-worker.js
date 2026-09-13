@@ -75,8 +75,8 @@ const DEFAULT_POLICY = {
   recruit: 0.55, progress: 0.08, cost: 0.0749, column: 0.03, effect: 0.6941,
   capture: 2.0, near_capture: 0.2, technology: 0.1945,
   technology_level: 0.0016, leader: 0.0457, leader_animod: 0.05,
-  leader_owned: 0.1, mulligan: 0.01, choice: 0.4, choice_opponent: 0.1,
-  deny: 0.2, choice_capture: 2.0, accept: 0.2, decline: -0.02, tier: 0.059,
+  leader_owned: 0.1, mulligan: 0.01, choice: 0.4, threat: 0.8, choice_opponent: 0.1,
+  deny: 0.2, choice_capture: 1.0, accept: 0.2, decline: -0.02, tier: 0.059,
   faction: 0.1, branch_influence: 0.2, branch_resource: 0.1, bonus: 0.1,
   discard: 0.02,
 };
@@ -90,6 +90,43 @@ function position(observation, planet) {
   if (raw == null) return 0;
   const value = Number(raw);
   return Number.isFinite(value) ? value * (Number(observation?.seat) === 0 ? 1 : -1) : 0;
+}
+
+// WHAT CAPTURING THIS PLANET WOULD BE WORTH TO `who`. Orbit has three victory
+// conditions -- three discs of one planet, four different, five in all -- so the
+// same disc can be decisive or nearly worthless. Mirrors capture_gain in
+// orbit_core::search and _capture_gain in ai/serving.py; held to both by
+// games/orbit/tests/test_ranker_parity.py.
+const WINNING_CAPTURE = 2.2;
+const CONTEST_REACH = 3.0;
+const INFLUENCE_TASKS = ["influence", "influence_other", "split_influence"];
+
+function captureGain(observation, who, planetIndex) {
+  const captured = observation?.players?.[who]?.captured;
+  if (!Array.isArray(captured)) return 0;
+  const counts = [0, 0, 0, 0, 0];
+  for (const value of captured) {
+    const index = Number(value);
+    if (!Number.isInteger(index) || index < 0 || index > 4) return 0;
+    counts[index] += 1;
+  }
+  const progress = (list, total) => Math.max(
+    total / 5, list.filter((n) => n > 0).length / 4, Math.max(...list) / 3);
+  const before = progress(counts, captured.length);
+  counts[planetIndex] += 1;
+  const after = progress(counts, captured.length + 1);
+  return after >= 1 ? WINNING_CAPTURE : 1.4 * (after - before);
+}
+
+// A planet is worth its own advance OR the denial of the opponent's -- never a
+// PENALTY for being contested, which is what `choice * position` made it. See
+// the long note on planet_choice_value in orbit_core::serving.
+function planetChoiceValue(observation, planet, seat, taskType, progress, weights) {
+  if (!INFLUENCE_TASKS.includes(taskType) || progress >= 0) return weights.choice * progress;
+  const index = PLANETS.indexOf(planet);
+  if (index < 0) return weights.choice * progress;
+  const gain = captureGain(observation, 1 - seat, index);
+  return (weights.threat ?? 0.8) * gain * Math.min(-progress / CONTEST_REACH, 1);
 }
 
 function effectValue(tasks, observation, me, them) {
@@ -183,14 +220,18 @@ function score(observation, move) {
   }
   if (PLANETS.includes(move?.planet)) {
     const progress = position(observation, move.planet);
-    value += weights.choice * progress;
+    value += planetChoiceValue(observation, move.planet, seat, taskType, progress, weights);
     if (["transfer", "exile", "exile_for_matching"].includes(taskType)) {
       const pi = PLANETS.indexOf(move.planet);
       const opponentColumn = Array.isArray(them.columns?.[pi]) ? them.columns[pi].length : 0;
       value += weights.deny * opponentColumn - weights.choice_opponent * progress;
     }
     if (["influence", "influence_other", "split_influence"].includes(taskType)
-      && progress + Number(task.amount || 1) >= 4) value += weights.choice_capture;
+      && progress + Number(task.amount || 1) >= 4) {
+      // Scaled, not flat: a flat bonus made a worthless capture of our own
+      // outrank blocking one that ends the game. See orbit_core::serving.
+      value += weights.choice_capture * captureGain(observation, seat, PLANETS.indexOf(move.planet));
+    }
   }
   if (Array.isArray(move?.planets)) value += weights.choice * move.planets.reduce((sum, planet) => sum + position(observation, planet), 0);
   if (move?.accept === true) value += weights.accept;
@@ -335,7 +376,19 @@ self.onmessage = async (event) => {
     // to `orbit_search_move_json`, which is the coherent MCTS -- the PREVIOUS
     // Expert, not a broken room. The two files are cached separately on the same
     // filenames, so that combination is ordinary, not hypothetical.
-    if (message.tier === "expert"
+    // THE CHAIN EXPORT FIRST, when both the wasm and the server offer it. An
+    // observation redacts the effect queue to its first task, so without the
+    // chain the search REFUSES every effect-resolution decision and the 1-ply
+    // ranker answers it -- 45% of all decisions with a real choice. Feature
+    // detected by NAME rather than by an extra argument, because the wasm and
+    // this file are separately cached on the same filenames: an older wasm
+    // simply does not offer the export and behaves exactly as it does today.
+    if (message.tier === "expert" && message.pending_chain
+      && optionalWasm && typeof optionalWasm.orbit_alphabeta_chain_move_json === "function") {
+      const raw = optionalWasm.orbit_alphabeta_chain_move_json(JSON.stringify(observation), JSON.stringify(legal), JSON.stringify(message.memory || {}), JSON.stringify(message.pending_chain), allowance, Number(message.seed) || 0);
+      answer = typeof raw === "string" ? JSON.parse(raw) : raw;
+    }
+    if ((!answer || !answer.move) && message.tier === "expert"
       && optionalWasm && typeof optionalWasm.orbit_alphabeta_move_json === "function") {
       const raw = optionalWasm.orbit_alphabeta_move_json(JSON.stringify(observation), JSON.stringify(legal), JSON.stringify(message.memory || {}), allowance, Number(message.seed) || 0);
       answer = typeof raw === "string" ? JSON.parse(raw) : raw;

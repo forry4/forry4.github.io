@@ -31,6 +31,58 @@ def rules_fingerprint() -> str:
     return digest.hexdigest()
 
 
+def _with_seat_actors(value, order: list[str]):
+    """Rewrite every ``actor`` pid to its seat index, recursively.
+
+    Shared by `native_state` and `pending_chain` deliberately: they describe the
+    same structure to the same Rust reader, and a second copy of this walk is a
+    second thing to keep in step.
+    """
+
+    if isinstance(value, list):
+        return [_with_seat_actors(item, order) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: (order.index(item) if item is not None else None) if key == "actor"
+            else _with_seat_actors(item, order)
+            for key, item in value.items()
+        }
+    return value
+
+
+def pending_chain(game: dict) -> dict | None:
+    """The whole pending chain, as data a client-side search can rebuild from.
+
+    WHY THIS IS SENT AT ALL.  `State::from_observation` refuses any position with
+    a pending chain, because `observation()` redacts the effect queue to its
+    FIRST task -- so the served Expert could not rebuild an effect-resolution
+    position and handed every one of them to the 1-ply ranker instead of
+    searching it.  That is 45.0% of all decisions with a real choice (10,537 of
+    23,394 over 300 games).  This is the missing half.
+
+    WHY IT IS NOT A LEAK.  Every task is generated from the played card's STATIC
+    effect program, which is public card text in structured form and already
+    ships to the browser inside `orbit-model.json`.  The only fields a task
+    accumulates while resolving are planets (`selected`, `used`), counters
+    (`done`, `index`, `count`) and `options`, which is the legal-move list the
+    client is handed anyway; `context` holds exactly one key, `last_planet`,
+    which the redacted observation already exposes.  The Rust gate
+    `the_pending_chain_carries_no_hidden_cards` holds that to real positions
+    rather than to this docstring.
+
+    WHY IT IS SEPARATE FROM `observation`.  That projection is the frozen policy
+    input: its key set is asserted in `main._OBS_KEYS` and `serving`, it is
+    stored in game history and compared for equality, and it feeds the encoder.
+    Adding a key there is a schema change with a migration.  This rides
+    ALONGSIDE the observation instead, and a client that ignores it gets exactly
+    today's behaviour -- so the two sides can deploy in either order.
+    """
+
+    if not game.get("pending"):
+        return None
+    return copy.deepcopy(_with_seat_actors(game["pending"], game["order"]))
+
+
 def native_state(game: dict) -> dict:
     """Lossless mechanical state except presentation and implementation-specific RNG.
 
@@ -39,13 +91,7 @@ def native_state(game: dict) -> dict:
     """
     order = game["order"]
     seat = lambda pid: order.index(pid) if pid is not None else None
-
-    def actors(value):
-        if isinstance(value, list):
-            return [actors(v) for v in value]
-        if isinstance(value, dict):
-            return {k: seat(v) if k == "actor" else actors(v) for k, v in value.items()}
-        return value
+    actors = lambda value: _with_seat_actors(value, order)
 
     players = []
     for pid in order:

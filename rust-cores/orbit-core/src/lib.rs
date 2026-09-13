@@ -298,6 +298,36 @@ impl State {
     /// This deliberately mirrors `observation_serde` field-for-field, but
     /// avoids serializing the hidden deck, hands and pending queues before
     /// copying the public projection back out.  Keep the two implementations
+    /// The whole pending chain, as data a search can rebuild a position from.
+    ///
+    /// WHY THIS IS NOT A LEAK, which is the only question that matters about a
+    /// function handing private-looking state to a client. Every task in the
+    /// queue is generated from the played card's STATIC effect program, which is
+    /// public card text in structured form and already ships to the browser in
+    /// `orbit-model.json`. The only fields tasks accumulate during resolution
+    /// are planets (`selected`, `used`), counters (`done`, `index`, `count`) and
+    /// `options`, which is the legal-move list the client is handed anyway. The
+    /// context holds exactly one key, `last_planet`, which the redacted
+    /// observation already exposes. `the_pending_chain_carries_no_hidden_cards`
+    /// holds that to real positions rather than to this paragraph.
+    ///
+    /// WHY IT IS SEPARATE FROM `observation`. The observation is the frozen
+    /// policy input: its key set is asserted in three places, it is stored in
+    /// game history and compared for equality, and it feeds the encoder. Adding
+    /// a key there is a schema change with a migration. This is handed to the
+    /// search ALONGSIDE the observation instead, so the reconstructing caller
+    /// merges the two and nothing else moves.
+    pub fn pending_chain(&self) -> Value {
+        match &self.pending {
+            None => Value::Null,
+            Some(pending) => json!({
+                "source": pending.source,
+                "queue": pending.queue,
+                "context": pending.context,
+            }),
+        }
+    }
+
     /// in parity tests below whenever this contract changes.
     pub fn observation(&self, seat: usize) -> Value {
         assert!(seat < 2);
@@ -1576,7 +1606,23 @@ impl State {
         if seat > 1 {
             return Err("Observation seat is out of range".into());
         }
-        if !observation["pending"].is_null() {
+        // A PENDING CHAIN IS RECONSTRUCTABLE WHEN THE CALLER SUPPLIES IT.
+        //
+        // Until 2026-09-13 this was an unconditional refusal, and it was the
+        // single largest hole in the served bot: the observation redacts the
+        // queue to its first task, so the Expert could not rebuild the position
+        // and handed every effect-resolution choice to the 1-ply ranker instead
+        // of searching it. That is **45.0% of all decisions with a real choice**
+        // (10,537 of 23,394 over 300 games). The search never saw them, and the
+        // plan it formed when it played the card was discarded by a different
+        // policy two plies later in the same turn.
+        //
+        // `pending_chain()` is the missing half, and a caller that does not pass
+        // it gets the old refusal -- so an old worker against a new build, or a
+        // new worker against an old build, both degrade to exactly today's
+        // behaviour rather than breaking.
+        let pending_full = observation.get("pending_full").unwrap_or(&Value::Null);
+        if !observation["pending"].is_null() && pending_full.is_null() {
             return Err("Pending chains are not reconstructable from an observation".into());
         }
         let mut value = json!({});
@@ -1590,7 +1636,7 @@ impl State {
                 .ok_or_else(|| format!("Observation is missing {key}"))?
                 .clone();
         }
-        value["pending"] = Value::Null;
+        value["pending"] = pending_full.clone();
         let observed = observation["players"]
             .as_array()
             .ok_or("Observation has no players")?;
@@ -1779,5 +1825,197 @@ mod observation_reconstruction {
             let b = State::from_observation(&swapped.observation(seat), 5).unwrap();
             assert_eq!(a, b, "reconstruction depends on unseen state");
         }
+    }
+}
+
+#[cfg(test)]
+mod pending_reconstruction {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    /// Walk a real game with the shipped ranker and hand each position to `f`.
+    fn walk(seed: u64, steps: usize, mut f: impl FnMut(&State, usize)) {
+        let sides = [1 + ((seed >> 3) & 1) as i32, 2, 1];
+        let (mut state, mut chance) = State::new(seed, sides);
+        for _ in 0..steps {
+            let Some(actor) = state.actor() else { return };
+            let legal = state.legal_moves(actor);
+            if legal.is_empty() {
+                return;
+            }
+            f(&state, actor);
+            let observation = state.observation(actor);
+            let best = (0..legal.len())
+                .max_by(|&a, &b| {
+                    crate::serving::action_score(&observation, &legal[a])
+                        .partial_cmp(&crate::serving::action_score(&observation, &legal[b]))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .unwrap();
+            if state.apply(actor, &legal[best], &mut chance).is_err() {
+                return;
+            }
+        }
+    }
+
+    /// The observation as the search receives it: the frozen policy input with
+    /// the chain alongside, merged by the caller. This mirrors exactly what the
+    /// browser worker and the arena do.
+    fn searchable_observation(state: &State, seat: usize) -> Value {
+        let mut observation = state.observation(seat);
+        observation["pending_full"] = state.pending_chain();
+        observation
+    }
+
+    #[test]
+    fn a_pending_chain_round_trips_and_offers_the_same_moves() {
+        let mut reconstructed = 0;
+        for seed in [7u64, 77, 404, 1234, 99_991] {
+            walk(seed, 400, |state, actor| {
+                if state.pending.is_none() {
+                    return;
+                }
+                let world = State::from_observation(&searchable_observation(state, actor), 5)
+                    .expect("a chain supplied alongside the observation must rebuild");
+                // THE INVARIANT THAT MATTERS. A world whose pending chain came
+                // back subtly different would still search, still return a move,
+                // and still be validated by the room -- it would just be
+                // answering a different question. Legal-move identity is what
+                // makes the reconstruction usable rather than merely present.
+                assert_eq!(
+                    world.legal_moves(actor),
+                    state.legal_moves(actor),
+                    "seed {seed}: the rebuilt chain offers different moves"
+                );
+                assert_eq!(
+                    world.pending.as_ref().map(|p| &p.queue),
+                    state.pending.as_ref().map(|p| &p.queue),
+                    "seed {seed}: the queue did not survive the round trip"
+                );
+                assert_eq!(world.pending_pid, state.pending_pid);
+                reconstructed += 1;
+            });
+        }
+        assert!(
+            reconstructed > 50,
+            "only {reconstructed} pending positions reached; this test would prove little"
+        );
+    }
+
+    /// THE LEAK GATE. The chain is public card text plus planets and counters --
+    /// that is the whole argument for sending it, and an argument is not a
+    /// guard. A future effect that embedded a DRAWN card id in its task would
+    /// hand the opponent's hand or the deck order to the client, silently, and
+    /// every other test here would still pass.
+    #[test]
+    fn the_pending_chain_carries_no_hidden_cards() {
+        fn scan(value: &Value, out: &mut Vec<u64>) {
+            match value {
+                Value::Number(number) => {
+                    if let Some(found) = number.as_u64() {
+                        out.push(found);
+                    }
+                }
+                Value::Array(items) => items.iter().for_each(|item| scan(item, out)),
+                Value::Object(map) => map.values().for_each(|item| scan(item, out)),
+                Value::String(text) => {
+                    if let Ok(found) = text.parse::<u64>() {
+                        out.push(found);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let mut checked = 0;
+        for seed in [7u64, 77, 404, 1234, 99_991] {
+            walk(seed, 400, |state, actor| {
+                let chain = state.pending_chain();
+                if chain.is_null() {
+                    return;
+                }
+                // Everything this seat provably cannot see.
+                let mut hidden: BTreeSet<u16> =
+                    state.players[1 - actor].hand.iter().copied().collect();
+                hidden.extend(state.agent_deck.iter().copied());
+                hidden.extend(state.bonus_deck.iter().copied());
+
+                let mut found: Vec<u64> = Vec::new();
+                scan(&chain, &mut found);
+                for value in found {
+                    if value > u16::MAX as u64 {
+                        continue;
+                    }
+                    let id = value as u16;
+                    // AGENT CARDS ONLY, and the exclusion is forced rather than
+                    // convenient. Bonus token ids are 1..=8, which is the same
+                    // value space as a task's `amount`, `index` and planet
+                    // indices -- the first cut of this gate flagged a literal
+                    // `3` in a chain as "bonus token 3 is in the hidden deck",
+                    // which is unfalsifiable by value alone. Agent ids are
+                    // 101..=518 and share their space with nothing, so a hit
+                    // there is a real leak. Bonus tokens cannot leak through a
+                    // chain by construction: a token enters the queue as its
+                    // EFFECT PROGRAM, never as its id, and the two face-up rows
+                    // are already public.
+                    if !rules().cards.contains_key(&id) {
+                        continue;
+                    }
+                    assert!(
+                        !hidden.contains(&id),
+                        "seed {seed}: the pending chain names card {id}, which is hidden from \
+                         seat {actor} -- sending it would leak the deck or the opposing hand"
+                    );
+                }
+                checked += 1;
+            });
+        }
+        assert!(checked > 50, "only {checked} chains inspected; this gate would prove little");
+    }
+
+    /// A caller that does not supply the chain must get the OLD refusal, which
+    /// is what lets a new build and an old worker meet in either order without
+    /// a coupled deploy.
+    #[test]
+    fn an_observation_without_the_chain_is_still_refused() {
+        let mut refused = 0;
+        for seed in [77u64, 404, 1234] {
+            walk(seed, 400, |state, actor| {
+                if state.pending.is_none() {
+                    return;
+                }
+                assert!(
+                    State::from_observation(&state.observation(actor), 5).is_err(),
+                    "a bare observation must not silently rebuild a chain"
+                );
+                refused += 1;
+            });
+        }
+        assert!(refused > 20, "only {refused} positions exercised the refusal");
+    }
+
+    /// A position with no chain must be unaffected -- the merge adds a null and
+    /// nothing else changes.
+    #[test]
+    fn a_position_without_a_chain_rebuilds_exactly_as_before() {
+        let mut checked = 0;
+        for seed in [77u64, 404] {
+            walk(seed, 300, |state, actor| {
+                if state.pending.is_some() {
+                    return;
+                }
+                let with = State::from_observation(&searchable_observation(state, actor), 11);
+                let without = State::from_observation(&state.observation(actor), 11);
+                match (with, without) {
+                    (Ok(left), Ok(right)) => {
+                        assert_eq!(left, right, "the merged null changed the rebuild")
+                    }
+                    (Err(_), Err(_)) => {}
+                    _ => panic!("the merge changed whether the rebuild succeeds"),
+                }
+                checked += 1;
+            });
+        }
+        assert!(checked > 50);
     }
 }

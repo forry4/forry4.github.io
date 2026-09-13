@@ -72,7 +72,7 @@ fn main() {
                 &state,
                 actor,
                 seed.wrapping_add(step as u64),
-                AbConfig { budget_ms: budget, max_depth: 64, use_table: true, leaf: orbit_core::search::Leaf::StateValue, quiescence: false },
+                AbConfig { budget_ms: budget, max_depth: 64, use_table: true, leaf: orbit_core::search::Leaf::StateValue, quiescence: false, victory_aware_ranker: true },
             )
             .expect("alpha-beta failed on a position with several legal moves");
             let nodes = result["nodes"].as_u64().unwrap();
@@ -144,7 +144,7 @@ fn compare(seed: u64, sides: [i32; 3], budget: u64, decisions: usize) {
                     &state,
                     actor,
                     seed.wrapping_add(step as u64),
-                    AbConfig { budget_ms: budget, max_depth: 64, use_table: table, leaf: orbit_core::search::Leaf::StateValue, quiescence: false },
+                    AbConfig { budget_ms: budget, max_depth: 64, use_table: table, leaf: orbit_core::search::Leaf::StateValue, quiescence: false, victory_aware_ranker: true },
                 )
                 .expect("alpha-beta failed");
                 depth_sum += result["depth"].as_i64().unwrap();
