@@ -85,18 +85,27 @@ export function useCardMotion({ game, catalog, myId, roomId, connected, surface 
       const dy = to.top + to.height / 2 - from.top - height / 2;
       const draw = kind === "draw";
       const size = Math.min(.3, Math.max(.12, to.width / width));
+      // A DRAW IS TWO MOVEMENTS, NOT ONE. `to` for a draw is the LEFTMOST slot in
+      // the hand — the card is dealt there, at full size, and only then slides
+      // right into the place the sort order gives it. One straight flight from
+      // wherever the card happens to belong looked like it materialised in the
+      // middle of the fan; dealing to a fixed edge and then re-ordering is what
+      // the hands actually do, and it also reads correctly when several cards
+      // arrive at once, because each one is dealt to the same spot in turn.
+      const duration = draw ? 760 : 620;
       const animation = ghost.animate(draw ? [
-        { transform: `translate(${dx}px, ${dy}px) scale(.2) rotate(-8deg)`, opacity: 0 },
-        { opacity: 1, offset: .15 },
+        { transform: `translate(${dx - 54}px, ${dy + 16}px) scale(.62) rotate(-9deg)`, opacity: 0 },
+        { transform: `translate(${dx}px, ${dy}px) scale(1) rotate(0deg)`, opacity: 1, offset: .26 },
+        { transform: `translate(${dx}px, ${dy}px) scale(1) rotate(0deg)`, opacity: 1, offset: .46 },
         { transform: "translate(0, 0) scale(1) rotate(0deg)", opacity: 1 },
       ] : [
         { transform: "translate(0, 0) scale(1)", opacity: 1 },
         { transform: `translate(${dx * .45}px, ${dy * .45 - 28}px) scale(.68) rotate(-4deg)`, opacity: 1, offset: .45 },
         { opacity: .95, offset: .82 },
         { transform: `translate(${dx}px, ${dy}px) scale(${size}) rotate(0deg)`, opacity: 0 },
-      ], { duration: 620, delay, easing: "cubic-bezier(.4,0,.2,1)", fill: "both" });
-      const arrival = reveal?.animate([{ opacity: 0 }, { opacity: 0, offset: .75 }, { opacity: 1 }],
-        { duration: 620, delay, fill: "both" });
+      ], { duration, delay, easing: "cubic-bezier(.4,0,.2,1)", fill: "both" });
+      const arrival = reveal?.animate([{ opacity: 0 }, { opacity: 0, offset: .88 }, { opacity: 1 }],
+        { duration, delay, fill: "both" });
       const finish = () => {
         running.current.delete(finish);
         animation.cancel(); arrival?.cancel(); ghost.remove();
@@ -123,20 +132,27 @@ export function useCardMotion({ game, catalog, myId, roomId, connected, surface 
         source = { face, rect: { left: rect.left + rect.width / 2 - 73, top: rect.top, width: 146, height: 166 } };
       }
       const level = game.players?.[entry.pid]?.technology?.[card.faction];
+      // `column-<pid>-<planet>` is the played-Agent cell in that seat's player
+      // box — the ONE place a recruited Agent lands now that the separate
+      // placed-Agent panels are gone.
       const target = entry.action === "recruit"
-        ? byKey(`column-${entry.pid}-${card.planet}`) || byKey(`stack-${entry.pid}-${card.planet}`)?.closest(".or-column")
+        ? byKey(`column-${entry.pid}-${card.planet}`)
         : entry.action === "leader" ? byKey(`leader-${entry.pid}`)
           : byKey(`tech-rung-${card.faction}-${level}`) || byKey(`tech-${entry.pid}-${card.faction}`);
       if (visible(target)) fly(source.face, source.rect, bounds(target), entry.action);
     }
-    const deck = root.querySelector(".or-draw-pile");
-    const fallback = byKey(`seat-${myId}`)?.querySelector(".or-resource-cards");
-    const origin = visible(deck) ? deck : fallback;
-    if (visible(origin)) {
+    // THE HAND HAS NO DECK BESIDE IT ANY MORE, so a drawn card is dealt to the
+    // hand's own left edge. The landing spot is the LEFTMOST card's box — the
+    // first slot, whatever card ends up occupying it once the hand is re-sorted
+    // — and every new card is dealt there before travelling to its own place.
+    const drawn = nodes.filter((node) => !old.hand.has(node.dataset.cardId) && visible(node));
+    const slot = nodes.find(visible);
+    if (drawn.length && slot) {
+      const first = bounds(slot);
       let index = 0;
-      for (const node of nodes.filter((node) => !old.hand.has(node.dataset.cardId) && visible(node))) {
+      for (const node of drawn) {
         const card = faces.current.get(node.dataset.cardId);
-        fly(card.face, card.rect, bounds(origin), "draw", index++ * 65, node);
+        fly(card.face, card.rect, { ...first, top: card.rect.top }, "draw", index++ * 110, node);
       }
     }
   }, [game, connected, roomId, myId, catalog, surface]);

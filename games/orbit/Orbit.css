@@ -135,6 +135,13 @@
 .or-connection { color: #9be2b5; font-size: .78rem; }
 .or-connection.lost { color: #ffc47e; }
 .or-table {
+  /* THE PLANET BOARD'S HORIZONTAL GEOMETRY, IN TWO NUMBERS. `.or-influence` and
+     the `.or-played-agents` row inside each player box both lay five equal
+     columns across panels of identical width, so these are the only values that
+     have to agree for a planet's played stack to sit directly under (or over)
+     its own track. Restate BOTH at any tier that changes either. */
+  --or-board-pad: .8rem;
+  --or-board-gap: .18rem;
   position: relative;
   z-index: 1;
   display: flex;
@@ -181,8 +188,8 @@
    paints its stripe, its dot and its active glow from that. `.mine` is the
    opt-in and the default is the opponent, so a panel that forgets to say is
    never mistaken for yours. */
-.or-player, .or-columns { --or-seat: var(--or-them); }
-.or-player.mine, .or-columns.mine { --or-seat: var(--or-me); }
+.or-player { --or-seat: var(--or-them); }
+.or-player.mine { --or-seat: var(--or-me); }
 .or-seat-dot {
   flex: none;
   width: .62rem;
@@ -198,7 +205,7 @@
   grid-template-columns: 1fr 1fr;
   overflow: hidden;
 }
-.or-player { padding: .52rem .8rem; border-left: 3px solid transparent; }
+.or-player { padding: .52rem var(--or-board-pad); border-left: 3px solid transparent; }
 .or-player + .or-player { border-left: 1px solid var(--or-line); }
 .or-player.active { background: linear-gradient(90deg, color-mix(in srgb, var(--or-seat) 14%, transparent), transparent); border-left-color: var(--or-seat); }
 .or-player-name { display: flex; align-items: center; gap: .42rem; min-width: 0; font-weight: 850; }
@@ -240,37 +247,74 @@
 .or-captures { display: inline-flex; align-items: center; gap: .18rem; margin-left: .22rem; padding-left: .42rem; border-left: 1px solid var(--or-line); }
 .or-capture-disc { width: .7rem; height: .7rem; border: 1px solid rgba(255,255,255,.72); border-radius: 50%; background: currentColor; box-shadow: 0 1px 4px #0008; }
 
-/* PHONES ONLY. On a phone the two full placed-Agent panels are two more
-   full-width slabs to scroll past, so there the five counts fold into their
-   owner's rail and the cards stay one press away. Above the phone tier the
-   panels below the influence board are the real read and these are hidden —
-   the same information must never be on screen twice. */
-.or-played-agents { display: none; align-items: center; gap: .38rem; margin-top: .35rem; padding-top: .32rem; border-top: 1px solid var(--or-line); }
-.or-played-agents > span { color: var(--or-dim); font-size: .56rem; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
-.or-played-agents > div { display: grid; grid-template-columns: repeat(5, 2.35rem); gap: .28rem; }
-.or-played-agent { display: flex; align-items: center; justify-content: center; gap: .2rem; width: 2.35rem; height: 1.25rem; padding: 0 .12rem; border: 1px solid currentColor; border-radius: 5px; background: color-mix(in srgb, currentColor 18%, #15182d); color: inherit; font: 800 .7rem/1 ui-monospace, monospace; cursor: pointer; }
-.or-played-agent:hover:not(:disabled) { box-shadow: 0 0 0 2px var(--or-seat); transform: translateY(-1px); }
-.or-played-agent:disabled { opacity: .36; cursor: default; }
-/* THE TOP AGENT'S PRINTED COST, BESIDE the count, in the one placed-Agent
-   treatment a phone or a short desktop has — `.or-columns` is display:none at
-   both, so a fact that lives only on the panel face does not exist there.
-   BESIDE, not under, and the reason is measured rather than aesthetic: stacking
-   it took the cell from 20px to ~22px, and two of those (one rail per seat)
-   pushed the 1366x768 table 7px past the viewport, which is a gate this game
-   already owns. The cell grew sideways instead, where a short desktop has room.
-   Gold like every other Credit price on the table (`.or-card-price`) and
-   deliberately NOT `currentColor` — the cell is painted in its planet's colour,
-   so a second number in that colour would read as more of the count — with a
-   hairline rule between them, because two adjacent digits in one box need to
-   say they are two different quantities. No coin glyph: at this size the SVG
-   would be most of the cell. `aria-hidden`, because the button's own label
-   already says "top Agent costs N Credits" and a bare "3" after the count is
-   worse than silence. */
-.or-played-cost { padding-left: .2rem; border-left: 1px solid color-mix(in srgb, currentColor 45%, transparent); color: #ffe1a1; font-size: .58rem; font-style: normal; line-height: 1; }
-.or-played-agent:disabled .or-played-cost { display: none; }
+/* ── Played Agents: the planet board's edge row ────────────────────────────
+   FIVE CELLS ON THE PLANET BOARD'S OWN GRID. The row lives inside the player
+   box — one treatment at every width, phone and desktop alike — and it is laid
+   out on the same five columns, the same inline padding and the same gutter as
+   `.or-influence`, which is what `--or-board-pad` / `--or-board-gap` exist for.
+   Both panels are siblings of equal width in `.or-board-main`, so matching
+   those three numbers is all it takes for a planet's stack to sit directly
+   under its track (yours, below the board) or over it (theirs, above it).
+   Change either panel's inline padding or gutter and change the token, never
+   the one rule: a 6px drift is invisible at the first column and half a cell
+   wide by the fifth.
+   THE ROW HAS NO HEADING of its own for the same reason: the five words
+   naming these cells are already printed one row away, in the planet colours
+   the cells are painted in. A "PLAYED" eyebrow bought nothing and cost a line
+   of height on the one panel whose height the influence board is competing
+   for. The container keeps its aria-label, so the row is still named where
+   naming matters. */
+.or-played-agents { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--or-board-gap); margin-top: .4rem; padding-top: .36rem; border-top: 1px solid var(--or-line); }
+.or-played-agent {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: .3rem;
+  min-width: 0;
+  padding: .2rem .34rem;
+  border: 1px solid color-mix(in srgb, currentColor 42%, transparent);
+  border-top: 2px solid currentColor;
+  border-radius: 6px;
+  background: linear-gradient(170deg, color-mix(in srgb, currentColor 17%, #161a30), #12162a 75%);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.or-played-agent:hover:not(:disabled) { border-color: var(--lby-accent); box-shadow: 0 0 0 1px var(--lby-accent); }
+/* An empty planet is still a planet, so the cell stays in the grid and only
+   stops pretending to be a stack — no top rule, no fill, a dashed outline and
+   the word. Collapsing it would break the one thing this row is for. */
+.or-played-agent.empty { grid-template-columns: minmax(0, 1fr); justify-items: center; border: 1px dashed color-mix(in srgb, currentColor 30%, transparent); background: none; cursor: default; }
+/* An empty column renders no count at all (not a hidden one): a zero discount
+   is not a fact worth a plate, the dashed cell and the word already say the
+   column is empty, and the "0" only competed with the counts that mean
+   something. */
+.or-played-agent:disabled { cursor: default; }
+/* The count is the RECRUIT DISCOUNT — one fewer Credit per Agent already in the
+   column — which is why it is the half that survives at every width while the
+   name is the half that drops. Painted in the planet's own colour and set as a
+   plate, so it cannot be misread as the gold price two cells to its right. */
+.or-played-count { flex: none; display: grid; place-items: center; min-width: 1.05rem; height: 1.05rem; padding: 0 .18rem; border-radius: 4px; background: color-mix(in srgb, currentColor 30%, #0d0f1f); color: var(--or-ink); font-size: .68rem; font-weight: 850; font-variant-numeric: tabular-nums; }
+/* The top Agent's NAME, which is what a placed column actually is to a player
+   — and, together with the cost, what the retired `.or-columns` panels carried
+   that this row previously did not. One line, clipped: the full stack is one
+   press away in the same modal it has always been. */
+.or-played-name { min-width: 0; overflow: hidden; color: var(--or-ink); font-family: Georgia, serif; font-size: .72rem; line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; }
+.or-played-agent.empty .or-played-name { color: #5d6684; font-family: inherit; font-size: .56rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+/* THE TOP AGENT'S PRINTED COST. It is a NUMBER THE RULES READ, not detail about
+   a card: `card_cost` pays Credits equal to the printed cost of the Agent an
+   effect exiles, transfers or discards (cards 505, 510, 517), and both seats'
+   top Agents are the public pool those effects choose from. Gold like every
+   other Credit price on the table and deliberately NOT `currentColor`, which
+   would read as more of the planet-coloured count. No coin glyph: at this size
+   the SVG would be most of the cell. `aria-hidden`, because the button's label
+   already says "…on top costing N Credits" and a bare trailing digit is worse
+   than silence. */
+.or-played-cost { flex: none; color: #ffe1a1; font-size: .62rem; font-style: normal; font-variant-numeric: tabular-nums; font-weight: 800; line-height: 1; }
 
 /* ── Influence board ─────────────────────────────────────────────────────── */
-.or-influence { padding: .62rem .8rem .68rem; }
+.or-influence { padding: .62rem var(--or-board-pad) .68rem; }
 .or-track { display: grid; grid-template-columns: 7rem minmax(240px, 1fr) 2rem; gap: .7rem; align-items: center; min-height: 40px; padding: .18rem 0; border-top: 1px solid rgba(255,255,255,.065); }
 .or-track-name { min-width: 0; font-size: .84rem; }
 .or-track-name .or-pl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -407,61 +451,13 @@
 .or-log-tech { color: var(--or-fac, var(--or-ink)); }
 .or-log-bonus { color: #ecd9a4; }
 
-/* ── Placed Agents ───────────────────────────────────────────────────────────
-   Five planets, always all five, at every width. The face is a chip; the text
-   lives in the modal. */
-.or-columns { padding: .52rem; }
-/* `.or-table > section` sets the panel border, so the seat stripe has to be
-   written from the same depth to win rather than reaching for !important. */
-.or-table > .or-columns { border-left: 3px solid var(--or-seat); }
-.or-columns h3 { display: flex; align-items: center; gap: .4rem; margin: 0 0 .34rem; color: var(--or-dim); font-size: .68rem; letter-spacing: .08em; text-transform: uppercase; }
-.or-columns.mine h3 { color: var(--or-ink); }
-.or-column-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .4rem; }
-.or-column { min-width: 0; padding: .22rem .3rem .34rem; border-top: 3px solid currentColor; border-radius: 8px; background: linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.018)); }
-.or-column-head { display: flex; justify-content: center; align-items: center; gap: .4rem; min-height: 1.4rem; margin-bottom: .22rem; font-size: .74rem; }
-.or-column-head .or-pl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.or-column-count { flex: none; font-size: .85rem; font-variant-numeric: tabular-nums; }
-.or-slot {
-  position: relative;
-  isolation: isolate;
-  display: grid;
-  grid-template-rows: minmax(0, 1fr);
-  gap: .12rem;
-  width: 100%;
-  height: 2.65rem;
-  margin: 0 .22rem .22rem 0;
-  padding: .28rem .32rem;
-  border: 1px solid currentColor;
-  border-radius: 7px;
-  background: linear-gradient(160deg, rgba(255,255,255,.14), rgba(13,15,31,.97) 62%);
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.or-slot.stacked { box-shadow: 3px 3px 0 -1px #171a31, 3px 3px 0 0 color-mix(in srgb, currentColor 62%, #171a31), 6px 6px 0 -1px #171a31, 6px 6px 0 0 color-mix(in srgb, currentColor 38%, #171a31); }
-.or-slot:hover { box-shadow: 0 0 0 2px var(--lby-accent); }
-.or-slot.stacked:hover { box-shadow: 3px 3px 0 -1px #171a31, 3px 3px 0 0 color-mix(in srgb, currentColor 62%, #171a31), 6px 6px 0 -1px #171a31, 6px 6px 0 0 color-mix(in srgb, currentColor 38%, #171a31), 0 0 0 2px var(--lby-accent); }
-.or-slot strong { display: -webkit-box; align-self: center; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--or-ink); font-family: Georgia, serif; font-size: .7rem; line-height: 1.08; }
-/* THE PRICE SITS IN ITS OWN GRID COLUMN, not in the text flow and not overlaid.
-   The face is short (1.85rem on desktop) and the name is a two-line clamp, so
-   an absolutely-positioned chip would land on the second line of every long
-   name; a real column makes the clamp measure the space that is left instead.
-   The single row above stays, so the two sit side by side. */
-.or-slot { grid-template-columns: minmax(0, 1fr) auto; }
-.or-slot-cost { display: inline-flex; align-self: center; align-items: center; gap: .12rem; color: #ffe1a1; font-size: .62rem; font-variant-numeric: tabular-nums; }
-/* 19px is the rail's coin and it is taller than this whole face. */
-.or-slot-cost .or-resource-icon { width: 11px; height: 11px; filter: none; }
-.or-slot-cost b { font-weight: 800; }
-.or-column-empty { display: grid; place-items: center; height: 2.65rem; border: 1px dashed color-mix(in srgb, currentColor, transparent 66%); border-radius: 7px; color: #646d8c; font-size: .56rem; letter-spacing: .05em; text-transform: uppercase; }
-
 /* ── Hand ───────────────────────────────────────────────────────────────── */
 /* THE WHOLE CARD IS OUTLINED IN ITS PLANET'S COLOUR, which is what replaced the
    planet glyph. It already said `border: 2px solid currentColor` and still came
    out cream: a `color` declared in the SAME block is what `currentColor` in that
    block resolves to, so `color: var(--or-ink)` was quietly repainting the border
    over the `or-<planet>` class. The ink now lives on the children that need it.
-   (`.or-column-head`'s count badge had the identical bug.) */
+   (the retired placed-Agent panel's count badge had the identical bug.) */
 .or-agent { display: flex; flex-direction: column; width: 145px; min-width: 145px; height: 184px; padding: .48rem; overflow: hidden; border: 2px solid currentColor; border-radius: 11px; background: linear-gradient(160deg, rgba(255,255,255,.13), rgba(13,15,31,.98) 36%); text-align: left; box-shadow: 0 7px 17px #0005; cursor: pointer; transition: transform .14s, box-shadow .14s; -webkit-tap-highlight-color: transparent; }
 .or-agent:focus { outline: none; }
 .or-agent:focus-visible { outline: 2px solid var(--or-card-tint, currentColor); outline-offset: 2px; }
@@ -620,11 +616,6 @@
   .or-influence { padding-block: .4rem; }
   .or-track { min-height: 28px; padding-block: 0; }
   .or-track > .or-bonus { width: 1.6rem; height: 1.6rem; }
-  .or-columns { padding: .25rem .5rem; }
-  .or-columns h3 { margin-bottom: .2rem; line-height: 1.1; }
-  .or-column { padding-block: .1rem .18rem; }
-  .or-column-head { min-height: 1.2rem; }
-  .or-slot, .or-column-empty { height: 1.85rem; }
   .or-hand-zone { padding: .4rem .6rem; }
   .or-action-bar { gap: .5rem; margin-top: .4rem; padding-top: .4rem; }
   .or-action-bar button { padding: .45rem .5rem; font-size: .72rem; }
@@ -642,8 +633,6 @@
   .or-board-main > .or-influence { order: 1; }
   .or-sideboards { display: contents; }
   .or-sideboards > .or-tech, .or-sideboards > .or-log { grid-column: 1; order: 2; }
-  .or-board-main > .or-columns { order: 3; }
-  .or-board-main > .or-columns.mine { order: 4; }
   .or-decision, .or-status, .or-result { order: 5; }
   .or-hand-zone { order: 6; }
   .or-board-main, .or-sideboards, .or-hand-zone, .or-decision, .or-status, .or-result, .or-mulligan { grid-column: 1; }
@@ -651,9 +640,6 @@
 }
 
 @media (max-width: 980px) {
-  /* The rail counts replace both placed-Agent panels here, not supplement them. */
-  .or-played-agents { display: flex; }
-  .or-columns { display: none; }
   /* Technology starts as a compact scoreboard on phones. Its two seat dots
      use the same named key as the full ladder; expanding restores every equal
      rung and its level-2 token. */
@@ -684,15 +670,15 @@
 }
 
 @media (max-width: 650px) {
-  .or-table { width: calc(100% - 12px); max-width: 1540px; gap: 8px; padding-top: 8px; }
+  .or-table { width: calc(100% - 12px); max-width: 1540px; gap: 8px; padding-top: 8px; --or-board-pad: .6rem; }
   .or-score-rail { grid-template-columns: 1fr; }
   .or-player + .or-player { border-left: 0; border-top: 1px solid var(--or-line); }
-  .or-player { padding: .55rem .65rem; }
+  .or-player { padding: .55rem var(--or-board-pad); }
   .or-resource-cards { white-space: nowrap; }
   .or-captures { flex-wrap: nowrap; gap: .12rem; margin-left: .14rem; padding-left: .28rem; }
   .or-capture-disc { width: .62rem; height: .62rem; }
   .or-board-main { gap: 8px; }
-  .or-influence { padding: .55rem .6rem .7rem; }
+  .or-influence { padding: .55rem var(--or-board-pad) .7rem; }
   /* The planet name stays above its vertical track; the fixed-size bonus gets
      its own narrow column beside the track midpoint. No absolute positioning
      and no shared cell means the token cannot overlap a disc, even at 320px. */
@@ -700,7 +686,6 @@
   .or-influence .or-track-name { grid-column: 1; grid-row: 1; align-self: center; font-size: .72rem; }
   .or-influence .or-track > .or-bonus { grid-column: 2; grid-row: 1; }
   .or-influence .or-track-spaces { grid-column: 1 / -1; grid-row: 2; align-self: end; }
-  .or-played-agents { justify-content: space-between; }
   .or-agent { width: 132px; min-width: 132px; height: 176px; }
   .or-action-bar { align-items: stretch; flex-direction: column; }
   .or-action-bar > div { display: grid; grid-template-columns: 1fr; }
@@ -727,7 +712,7 @@
   .or-score-rail .or-player + .or-player { border-left: 1px solid var(--or-line); border-top: 1px solid var(--or-line); }
   .or-score-rail .or-player.active { border-left-color: var(--or-seat); }
 
-  .or-influence { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); column-gap: .18rem; }
+  .or-influence { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); column-gap: var(--or-board-gap); }
   .or-influence { grid-template-rows: minmax(0, 1fr); align-items: stretch; height: 212px; box-sizing: border-box; }
   .or-influence .or-track {
     display: grid;
@@ -834,7 +819,7 @@
 .or-info { animation: or-turn-arrive .18s ease-out; }
 .or-info-x { width: 44px; height: 44px; }
 @media (max-width: 980px) {
-  .or-score-rail .or-player { padding: .62rem .7rem; }
+  .or-score-rail .or-player { padding: .62rem var(--or-board-pad); }
   .or-resources { gap: .25rem .65rem; margin-top: .35rem; font-size: .7rem; }
   .or-resources b { font-size: .88rem; }
   .or-leader { padding: .2rem .4rem; font-size: .54rem; letter-spacing: .025em; }
@@ -843,9 +828,14 @@
   .or-influence .or-disc { left: 50%; top: var(--or-position); transform: translate(-50%, -50%); }
   .or-influence .or-track-name { grid-column: 1; justify-self: center; font-size: .6rem; }
   .or-activity { font-size: .67rem; padding-top: .45rem; gap: .5rem; }
-  .or-played-agents > div { grid-template-columns: repeat(5, 44px); gap: .26rem; }
-  .or-played-agent { width: 44px; height: 28px; font-size: .75rem; }
-  .or-played-cost { font-size: .62rem; }
+  /* A phone column is ~70px wide, which is a count and a price and nothing
+     else — the name needs ~150px before it is a name rather than two letters
+     and an ellipsis. The cell keeps the grid position that makes it readable
+     as "this planet's stack". */
+  .or-played-agent { justify-content: center; grid-template-columns: auto auto; gap: .22rem; padding: .22rem .12rem; }
+  .or-played-name { display: none; }
+  .or-played-count { min-width: .95rem; height: 1rem; font-size: .66rem; }
+  .or-played-cost { font-size: .6rem; }
   .or-tech > header { grid-template-columns: auto 1fr auto; padding: .35rem .6rem; }
   .or-tech-toggle { min-height: 32px; }
   .or-tech-key b { max-width: 4.7rem; }
@@ -882,25 +872,18 @@
 /* Desktop follows the phone's physical table: their side above, yours below.
    A bounded measure keeps the board dominant over technology and history. */
 @media (min-width: 981px) {
-  .or-table { width: min(1680px, calc(100% - 48px)); }
+  .or-table { width: min(1680px, calc(100% - 48px)); --or-board-pad: .6rem; --or-board-gap: .4rem; }
   .or-board-layout { grid-template-columns: minmax(0, 2.15fr) minmax(310px, 1fr); gap: 16px; flex: none; }
   .or-board-main { display: flex; flex-direction: column; gap: 8px; }
   .or-board-main > .or-score-rail { display: contents; }
-  .or-score-rail .or-player { border: 1px solid var(--or-line); border-left: 3px solid var(--or-seat); border-radius: 13px; background: var(--or-panel); padding: .48rem .75rem; }
+  .or-score-rail .or-player { border: 1px solid var(--or-line); border-left: 3px solid var(--or-seat); border-radius: 13px; background: var(--or-panel); padding: .48rem var(--or-board-pad); }
   .or-score-rail .or-player.active { background: linear-gradient(100deg, color-mix(in srgb, var(--or-seat) 12%, #192035), #12172a); }
   .or-score-rail .or-player.theirs { order: 1; }
-  .or-board-main > .or-columns:not(.mine) { order: 2; }
   .or-board-main > .or-influence { order: 3; }
   .or-score-rail .or-player.mine { order: 4; }
-  .or-board-main > .or-columns.mine { order: 5; }
   .or-board-main > .or-decision, .or-board-main > .or-status { order: 6; }
   .or-board-main > .or-hand-zone { order: 7; }
-  .or-columns { padding: .3rem .6rem .45rem; }
-  .or-columns h3 { margin-bottom: .2rem; font-size: .6rem; }
-  .or-column { padding-block: .1rem .16rem; }
-  .or-column-head { min-height: 1.1rem; font-size: .62rem; }
-  .or-slot, .or-column-empty { height: 1.85rem; }
-  .or-influence { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); grid-template-rows: minmax(0, 1fr) auto; gap: 0 .4rem; height: 266px; padding: .6rem; flex: none; }
+  .or-influence { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); grid-template-rows: minmax(0, 1fr) auto; gap: 0 var(--or-board-gap); height: 266px; padding: var(--or-board-pad); flex: none; }
   .or-influence .or-track { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: 1.15rem minmax(0, 1fr); gap: .2rem 0; min-width: 0; padding: .15rem .6rem; border: 0; border-left: 1px solid #ffffff0c; }
   .or-influence .or-track:first-of-type { border-left: 0; }
   .or-influence .or-track-name { grid-column: 1; grid-row: 1; justify-self: center; font-size: .72rem; }
@@ -930,8 +913,6 @@
   .or-activity { padding-top: .25rem; margin-top: .2rem; }
 }
 @media (min-width: 981px) and (max-height: 900px) {
-  .or-columns { display: none; }
-  .or-played-agents { display: flex; justify-content: space-between; }
   .or-influence { height: 222px; }
   .or-score-rail .or-player { padding: .4rem .65rem; }
   .or-board-main { gap: 6px; }
@@ -1003,12 +984,12 @@
 .or-agent-text { flex: 1 0 auto; font-size: .72rem; line-height: 1.32; }
 .or-agent-foot { flex: none; gap: 3px; font-size: .6rem; letter-spacing: .02em; white-space: nowrap; }
 .or-agent-foot .or-pl { letter-spacing: .02em; }
-.or-hand-row { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 10px; align-items: center; }
+/* No deck stands beside the hand. A drawn card is dealt to the hand's own left
+   edge and slides into the sorted order from there (games/orbit/cardMotion.js),
+   which is the whole of the deck the player ever needed to see. */
 .or-hand { justify-content: safe center; gap: 8px; padding: 6px 4px 8px; }
-.or-draw-pile { display: grid; justify-items: center; gap: 10px; color: #8d99b3; font-size: 8px; line-height: 1.4; text-align: center; text-transform: uppercase; letter-spacing: .08em; }
-.or-draw-pile > i { display: grid; place-items: center; width: 27px; height: 40px; border: 1px solid #8398b8; border-radius: 4px; background: repeating-linear-gradient(135deg, #1a243b 0 4px, #202e48 4px 5px); box-shadow: 2px 2px #0b1325, 3px 3px #61718b, 4px 4px #0b1325, 5px 5px #43516c; color: #cad9ec; font: 16px Georgia, serif; }
 .or-controls { border-top: 1px solid var(--or-line); margin-top: 4px; }
-.or-control-hint { margin: 0; padding: 16px 8px; text-align: center; color: var(--or-dim); font-size: .74rem; line-height: 1.5; }
+.or-control-hint { margin: 0; padding: 12px 8px; text-align: center; color: var(--or-dim); font-size: .74rem; line-height: 1.5; }
 .or-controls .or-action-bar { border: 0; margin: 0; padding: 10px 2px; }
 .or-controls .or-decision { padding: 9px 12px !important; border: 1px solid #5baba780; border-radius: 10px; margin-top: 6px; }
 .or-decision-source { margin-bottom: 3px; }
@@ -1027,36 +1008,89 @@
   .or-live .or-board-layout { flex: 1; min-height: 0; }
   .or-live .or-board-main { min-height: 0; }
   .or-live .or-board-main > * { flex-shrink: 0; }
-  .or-live .or-influence { flex: 1 1 0; height: auto; min-height: 240px; }
-  .or-live .or-hand-zone { height: 336px; box-sizing: border-box; }
+  /* THE PLANET BOARD TAKES WHAT IS LEFT, and there is a great deal more of it
+     now that the two placed-Agent panels have folded into the player boxes: at
+     1920x937 that is ~150px of slab returned to a track that was pinned at its
+     240px floor. It is the one panel on this screen whose job is spatial — nine
+     spaces a disc has to be readable ON — so it gets the give and everything
+     else is sized to its content. */
+  .or-live .or-influence { flex: 1 1 0; height: auto; min-height: 200px; }
+  /* THE STRIP UNDER THE CARDS IS RESERVED, so neither selecting a card nor a
+     multi-step effect moves the planet board underneath it — and the reserve is
+     a MINIMUM, not a fixed height. Fixed, a decision taller than the reserve
+     simply drew outside the panel, which is invisible until someone plays the
+     one effect that does it: the reserve was cut to the tallest decision at two
+     tested viewports and the ladder of shorter ones was never measured. As a
+     floor, a decision that needs more takes it from the influence board — the
+     one panel here with give (`flex: 1 1 0`, floored at 200px) — so the failure
+     mode is a slightly shorter board for one turn instead of text over the
+     table edge. 320px is the hand row (192) plus the tallest decision Orbit can
+     raise, measured: `enemy-exile` at 1920 wants 113 of strip. */
+  .or-live .or-hand-zone { min-height: 320px; box-sizing: border-box; }
   .or-hand-zone { padding: 6px 10px; }
   .or-hand-zone .or-agent { flex: 0 0 146px; }
+  /* The strip is a fixed reserve, so its contents are CENTRED in it rather than
+     hanging off the rule at the top: with only the one-line hint showing, a
+     top-aligned strip reads as a panel that failed to fill rather than as space
+     held for the decision that is about to land in it. */
+  .or-controls { display: flex; flex-direction: column; justify-content: center; }
   .or-controls .or-action-bar { display: grid; grid-template-columns: 1fr; gap: 8px; }
-  .or-controls .or-decision { padding-block: 7px !important; }
+  .or-controls .or-decision { padding-block: 6px !important; margin-top: 3px; }
   .or-decision-help { display: none; }
-  .or-columns { padding: 3px 8px 4px; }
-  .or-columns h3 { line-height: 1.1; margin-bottom: 2px; }
-  .or-column { padding-block: 1px 2px; }
-  .or-column-head { min-height: 14px; line-height: 1.1; margin-bottom: 3px; }
-  .or-slot, .or-column-empty { height: 27px; }
+  .or-decision-detail { margin-bottom: 4px; }
+  .or-decision h2 { margin-bottom: 4px; }
+  /* A PLANET CHOICE IS ONE LINE ON A DESKTOP. The planet and the Agent standing
+     on it were stacked, which is right in a 70px phone button and is 20px of
+     dead height in a 220px desktop one — and that 20px came straight out of the
+     reserved strip, which comes straight out of the planet board. Same two
+     facts, same order, side by side. */
+  .or-decision .planet-choices button { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: center; gap: .3rem; padding-block: .4rem; }
+  .or-decision .planet-choices .or-choice-agent { margin-top: 0; -webkit-line-clamp: 1; }
   .or-action-bar > span { text-align: center; }
   .or-action-bar > div { display: grid; grid-template-columns: 1fr 1fr 1.3fr; gap: 7px; }
   .or-action-bar button { min-width: 0; padding: 8px 6px; line-height: 1.4; }
-  .or-sideboards { grid-template-rows: minmax(0, 1fr) 220px; }
-  .or-tech { display: flex; flex-direction: column; }
+  /* TECHNOLOGY IS SIZED BY ITS CONTENT; THE LOG TAKES EVERYTHING LEFT OVER.
+     The other way round — technology stretched to 1fr with the log pinned at a
+     fixed 220px — is what cropped the bottom of the ladder. `.or-tech-col` lays
+     its rungs out as `repeat(5, minmax(0, 1fr))`, so a stretched column happily
+     shrinks its rows below the text inside them; the text does not shrink with
+     them, `.or-tech` is `overflow: hidden`, and the rows are drawn 5-at-the-top
+     so what falls off the bottom is LEVEL 1 AND 2 — the two rungs every game
+     passes through. Measured at 1536x750: three columns, level 1 clipped in all
+     three. Letting the row be `auto` makes the ladder's own height the floor,
+     and the log — which is a scroller and has always been able to give — is
+     what flexes instead. It also roughly doubles at the sizes that were worst
+     (170px at 1536x750, ~280px after).
+     `minmax(0, auto)` rather than plain `auto`: on a viewport too short for
+     even the compact ladder the row may still shrink, and `.or-tech-body`
+     scrolls rather than clipping. Never `overflow: hidden` on that path again. */
+  .or-sideboards { grid-template-rows: minmax(0, auto) minmax(150px, 1fr); }
+  .or-tech { display: flex; flex-direction: column; min-height: 0; }
   .or-tech > header, .or-row-bonus { flex: none; }
-  .or-tech-body { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-  .or-tech-grid { flex: 1; min-height: 0; }
+  .or-tech-body { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: auto; }
+  .or-tech-grid { flex: none; }
   .or-tech-col { display: grid; grid-template-rows: 22px repeat(5, minmax(0, 1fr)); gap: 5px; padding: 8px; }
   .or-tech-col h3 { align-self: center; margin: 0; }
   .or-tech-space { height: 100%; margin: 0; padding: 7px 5px; }
-  .or-tech-text { display: block; overflow: visible; font-size: .8rem; line-height: 1.35; align-self: center; }
+  /* CLAMPED, and the clamp is what the log's height is bought with. Rungs are
+     `repeat(5, minmax(0, 1fr))` — equal by design — so ONE five-line
+     description sets all five rows in its column and the ladder grows by 5x
+     whatever the worst sentence needs. Unclamped that was 105px a rung at
+     1920x937, a 647px ladder and a seven-line log. Four lines covers every
+     space on every board but the two longest, and the full sentence has always
+     been one press away in the modal. */
+  .or-tech-text { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; font-size: .78rem; line-height: 1.3; align-self: center; }
   .or-tech-row.has-token .or-tech-space { padding-right: 5px; }
   .or-tech-row.has-token .or-tech-rail { padding-top: 22px; }
   .or-tech-token { left: 6px; right: auto; top: 5px; }
   .or-tech-lv { font-size: .85rem; }
   .or-row-bonus { font-size: .65rem; line-height: 1.5; }
   .or-log p { font-size: .74rem; line-height: 1.45; }
+}
+@media (min-width: 981px) and (hover: hover) and (pointer: fine) {
+  /* 44px is a TOUCH target. On a pointer that can hit 20px it is 6px of reserve
+     per choice row, and these grids run to three rows. */
+  .or-decision .or-choice-grid button { min-height: 38px; }
 }
 @media (min-width: 1500px) {
   .or-hand-zone .or-agent { flex-basis: 154px; width: 154px; min-width: 154px; }
@@ -1066,20 +1100,25 @@
 }
 @media (min-width: 2200px) {
   .or-live .or-table { max-height: 1420px; margin-block: auto; flex: 1; }
-  .or-live .or-hand-zone { height: 352px; }
-  .or-sideboards { grid-template-rows: minmax(0, 1fr) 260px; }
+  .or-live .or-hand-zone { min-height: 330px; }
   .or-tech-text { font-size: .88rem; }
 }
 @media (min-width: 981px) and (max-height: 900px) {
-  .or-live .or-hand-zone { height: 330px; }
+  .or-live .or-hand-zone { min-height: 300px; }
   .or-live .or-influence { min-height: 150px; }
-  .or-sideboards { grid-template-rows: minmax(0, 1fr) 170px; }
+  .or-sideboards { grid-template-rows: minmax(0, auto) minmax(120px, 1fr); }
   .or-tech-col { padding: 5px; gap: 3px; }
-  .or-tech-text { font-size: .7rem; line-height: 1.25; }
+  .or-tech-space { padding: 5px; }
+  .or-tech-text { -webkit-line-clamp: 3; font-size: .7rem; line-height: 1.25; }
+  .or-control-hint { padding: 8px; }
+  /* Every row of the player box gives a little at short heights; the played
+     strip is the newest and the easiest to tighten without losing a fact. */
+  .or-played-agents { margin-top: .26rem; padding-top: .24rem; }
+  .or-played-agent { padding: .12rem .3rem; }
+  .or-played-count { min-width: .95rem; height: .95rem; font-size: .64rem; }
+  .or-played-name { font-size: .68rem; }
 }
 @media (max-width: 980px) {
-  .or-hand-row { grid-template-columns: minmax(0, 1fr); }
-  .or-draw-pile { display: none; }
   .or-hand-zone { display: flex; flex-direction: column; }
   .or-hand-zone:has(.deciding) .or-controls { order: -1; margin: 0 0 6px; border-top: 0; }
   .or-agent { height: 180px; }

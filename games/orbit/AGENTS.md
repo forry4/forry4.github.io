@@ -427,39 +427,47 @@ were each a real misread on the table, so they are worth not undoing:
   slightly larger so the zero position is easy to identify.
   A technology bonus sits on its LEVEL-2 space, which is the space that pays it,
   not above the whole column.
-- **Placed Agents are one mini-card stack, not two controls.** The top Agent is
-  the face, up to two subdued offset outlines show depth, and the count sits to
-  the right of the planet name. Do not bring back a detached `+N below` button:
-  it looked unrelated to the card it counted. A press opens the full column when
-  its count is above 1.
-  **The face carries the top Agent's NAME and its printed COST, and nothing
-  else.** The cost is not detail about the card, it is a number the rules read:
-  `card_cost` pays Credits equal to the printed cost of the Agent an effect
-  exiles, transfers or discards (cards 505, 510, 517), and both seats' column
-  tops are the public pool those effects choose from — so "what does taking
-  their Mars top pay me?" was a modal per column, for both seats, mid-decision.
-  The faction glyph and the rules sentence stay in the modal: they are read once,
-  this is read every turn. It sits in its own grid column rather than overlaid,
-  because the name is a two-line clamp in a fixed-height box and an absolute
-  chip lands on the second line of every long name. `screens.mjs` bounds it from
-  both sides — the face must carry the cost AND must not grow back into a full
-  card face.
-- **The rail counts are the COMPACT treatment of those panels, and they carry
-  the top Agent's cost too** — `count | cost`, side by side with a hairline
-  between them and the cost in the Credit gold used everywhere else, never in
-  the cell's own planet colour (a second number in that colour reads as more of
-  the count). BESIDE, not stacked, and the reason is measured: stacking took the
-  cell from 20px to ~22px and two of them (one rail per seat) pushed the
-  1366x768 table 7px past the viewport, which is a gate this game already owns.
-  The cell grew sideways instead, where a short desktop has room. It has to be
-  here at all because `.or-columns` is `display:none` at both the phone tier and
-  short desktops, so a fact that lives only on the panel face does not exist at
-  those sizes.
-  Each rail carries five planet-coloured counts under Credits/Zenithium/cards;
-  Phones and tablets up to 980px and desktop viewports at most 900px tall show
-  `.or-played-agents` instead of `.or-columns`, so exactly one is ever on screen. Pressing a count
-  opens the same column list the panel face opens. Do not keep both treatments visible: two live copies of one fact is what `screens.mjs` checks
-  at 1280×960 and at 390px, from both directions.
+- **PLAYED AGENTS ARE THE PLANET BOARD'S OWN EDGE ROW, and there is exactly ONE
+  treatment of them at every width.** Five cells per seat, inside the player box,
+  laid out on the SAME five columns as `.or-influence` — so a planet's stack sits
+  directly under its track in your box (below the board) and directly over it in
+  the opponent's (above it). That adjacency is the only label the row has, which
+  is why it carries no heading: the five words naming the cells are printed one
+  row away, in the colours the cells are painted in.
+  **The alignment is a contract between two panels and it lives in two custom
+  properties** — `--or-board-pad` (inline padding) and `--or-board-gap` (gutter),
+  set on `.or-table` and restated at each tier. Both panels are siblings of equal
+  width in `.or-board-main`, so matching those two numbers is the whole of it.
+  Restate one without the other and the row reads fine at Mercury and is half a
+  cell out by Jupiter; `screens.mjs` measures the drift against each track
+  COLUMN's centre (≤4px) rather than the disc's, because on a phone the bonus
+  token takes a sub-column beside the track and the disc is deliberately
+  off-centre within it.
+  **The cell carries the count, the top Agent's NAME and its printed COST.** The
+  count is the recruit discount — one fewer Credit per Agent already in the
+  column — so it is the half that survives at every width, painted as a plate in
+  the planet's colour; the name is the half that drops below 761px, where a
+  column is ~70px and a name would be two letters and an ellipsis. The cost is
+  not detail about a card, it is a number the rules read: `card_cost` pays
+  Credits equal to the printed cost of the Agent an effect exiles, transfers or
+  discards (cards 505, 510, 517), and both seats' column tops are the public pool
+  those effects choose from — so "what does taking their Mars top pay me?" used
+  to be a modal per column, for both seats, mid-decision. It is Credit gold and
+  never the cell's own planet colour, because a second number in that colour
+  reads as more of the count. The faction glyph and the rules sentence stay in
+  the modal: they are read once, this is read every turn. An EMPTY planet keeps
+  its cell — collapsing it would break the column alignment the row exists for —
+  as a dashed outline with the word and no zero. Pressing a cell opens the same
+  column list it always did. `screens.mjs` bounds the face from both sides: it
+  must carry the cost AND must not grow back into a full card face.
+  **This replaced a pair of full-width `.or-columns` panels below the influence
+  board** (retired 2026-09-13, with the `.or-slot` mini-card stack that lived in
+  them). They cost ~150px of vertical slab at exactly the sizes the planet board
+  was starving at, and they were a SECOND treatment of one fact: `display:none`
+  on phones and at short desktop heights, where the player-box counts took over,
+  which is why this gate used to need a "never both at once" check. Do not bring
+  either back, and do not bring back a detached `+N below` button: it looked
+  unrelated to the card it counted.
 - **THE HAND IS SORTED BY PLANET, THEN BY PRINTED COST — presentation only.**
   Server order is draw order, so a card's place in the row meant nothing and
   moved every turn: the end-of-turn draw appends and a mid-turn effect inserts
@@ -490,17 +498,50 @@ were each a real misread on the table, so they are worth not undoing:
   glyph. An icon vocabulary derived from that sentence was tried and reverted:
   the source payload's prose is the authority, and a regex-summarised glyph row
   is a lossy second one.
-- **Desktop board columns size independently.** `.or-board-main` owns influence
-  and both Agent panels, decisions and the hand; `.or-sideboards` owns technology
-  and the log. The live desktop table fits the viewport; influence absorbs the
-  available height above a fixed hand/control area. The log ends alongside
-  the hand. The left column uses `minmax(0, 1fr)` so a six-card hand
-  cannot force it over the right column. Hand cards retain their full text size;
-  six fit at the target desktop resolutions, and narrower windows scroll the
-  hand instead of scaling its text. Do not add empty space below the turn recap.
-  At one column the wrappers become `display: contents`; on phones the order is
-  opponent rail → vertical influence tracks → your rail → technology → decision
-  → hand → log.
+- **Desktop board columns size independently.** `.or-board-main` owns the two
+  player boxes, influence, decisions and the hand; `.or-sideboards` owns
+  technology and the log. The live desktop table fits the viewport; influence
+  absorbs the available height above the hand and its control strip. The log
+  ends alongside the hand. The left column uses `minmax(0, 1fr)` so a six-card
+  hand cannot force it over the right column. Hand cards retain their full text
+  size; six fit at the target desktop resolutions, and narrower windows scroll
+  the hand instead of scaling its text. Do not add empty space below the turn
+  recap. At one column the wrappers become `display: contents`; on phones the
+  order is opponent rail → vertical influence tracks → your rail → technology →
+  decision → hand → log.
+- **THE HEIGHT BUDGET IS ONE BUDGET, and the three panels that share it are
+  sized in a fixed order: technology by its CONTENT, the hand by a MINIMUM, the
+  log and the planet board by what is left.** Getting that order wrong is not a
+  matter of taste, it produced three separate visible faults at once (found
+  2026-09-13, all three fixed together):
+  - `.or-sideboards` gave technology `1fr` and pinned the log at 220px. The
+    ladder's rungs are `repeat(5, minmax(0, 1fr))` — equal by design — so a
+    stretched column shrinks its rows below the text inside them, the text does
+    not shrink with them, and `.or-tech` is `overflow: hidden`. The rows are
+    drawn 5-at-the-top, so what fell off the bottom was **levels 1 and 2**, the
+    two rungs every game passes through. Measured at 1536×750: level 1 clipped
+    in all three tracks. The row is `minmax(0, auto)` now and the LOG takes the
+    remainder; `.or-tech-body` scrolls rather than clipping if a viewport is
+    short enough to defeat even the compact ladder.
+  - `.or-tech-text` was unclamped on desktop, so ONE five-line description set
+    all five rows in its column and the ladder grew 5× the worst sentence — a
+    647px ladder and a seven-line log at 1920×937. Clamped to four lines (three
+    at ≤900px tall); the full sentence has always been one press away.
+  - the reserved control strip under the hand is a **`min-height`, never a fixed
+    `height`**. Fixed, a decision taller than the reserve simply drew outside the
+    panel, which is invisible until someone plays the one effect that does it —
+    the reserve had been cut to the tallest decision at the two viewports the
+    gate measures and the ladder of shorter ones was never checked. As a floor,
+    an over-tall decision takes its height from the influence board, the one
+    panel here with give (`flex: 1 1 0`, floored at 200px), so the failure mode
+    is a slightly shorter board for one turn rather than text over the table
+    edge. The strip exists so that neither selecting a card nor a multi-step
+    effect moves the planet board; `screens.mjs` asserts the board does not move
+    across all seven decision shapes and prints the OVERSHOOT when it does, which
+    is the number to re-cut the reserve by.
+  Net at 1920×1080: influence 354 → 479px, log 220 → 450px, nothing clipped.
+  `screens.mjs` checks all three at five desktop sizes with tiered floors — the
+  floors are what the layout can actually deliver, not an ideal nothing reaches.
 - **The desktop targets are 2560×1600 and 1920×1080.** Orbit's in-game header
   is full-bleed with the menu/name 20px from the viewport edges; unlike lobby
   headers, it must not inherit the centred page measure. The table may grow to
@@ -568,9 +609,9 @@ were each a real misread on the table, so they are worth not undoing:
   dots identify the occupied level; do not add blue/orange borders or side glows
   to it.
 - **Nothing on the table scrolls sideways except the hand.** The influence rows,
-  the technology grid and both placed-Agent grids reflow instead: on a phone a
-  planet's name moves above its track, and the placed-Agent columns are chips so
-  all five fit. A horizontal drag inside a vertically scrolling page is the one
+  the technology grid and both played-Agent rows reflow instead: on a phone a
+  planet's name moves above its track, and a played-Agent cell drops its name so
+  all five still fit on the board's own five columns. A horizontal drag inside a vertically scrolling page is the one
   gesture a board cannot advertise. `screens.mjs` asserts the inner boxes are
   not scrollers — the older "section is inside the viewport" check passes while
   a section hides content inside itself, which is exactly how this shipped.
@@ -590,10 +631,11 @@ screen sizes.** Preserve these choices in future work:
   Credit coins and faceted Zenithium crystals are lightweight SVGs in
   `presentation.jsx`, with labels retained beside rail amounts.
 - Mobile/tablet order (≤980px) is opponent → influence → you → collapsed technology → decision
-  → hand → log. Placed-Agent counts stay in the two rails. At short desktop
-  heights (≤900px), those counts also replace the separate Agent-stack panels.
-  Taller desktops keep detailed five-column stacks adjacent to each player's
-  rail. Never display both representations together.
+  → hand → log. Played Agents live in the two player boxes at EVERY width, on
+  the planet board's own five columns — see "PLAYED AGENTS ARE THE PLANET
+  BOARD'S OWN EDGE ROW" above. The separate five-column stack panels that tall
+  desktops used to show below the board were retired 2026-09-13, along with the
+  rule about never displaying both: there is only one representation now.
 - The desktop table has a bounded measure (1680px, 1880px on large monitors), a
   dominant play area and a narrower technology/log sidebar. It follows the
   phone's spatial logic rather than stretching horizontal rails across a screen.
@@ -654,6 +696,19 @@ The initial visual sign-off missed actual play problems. Do not repeat that:
   and new IDs in the viewer's own hand for drawing. It never starts from an
   outgoing request or infers the opponent's hidden hand. Flights are temporary,
   inert copies; server state and input do not wait for them.
+- **A DRAW IS DEALT TO THE HAND'S LEFT EDGE AND THEN SLIDES INTO ORDER — two
+  movements, not one — and there is no deck beside the hand to fly out of.** The
+  `.or-draw-pile` face was retired 2026-09-13: it was a picture of a deck that
+  did nothing, in the one place the desktop layout could least afford the width.
+  Cards now arrive from the left of the hand. The two stages are needed because
+  the hand is PRESENTATION-SORTED by planet then cost, so a card that flew
+  straight to its sorted place appeared to materialise in the middle of the fan;
+  dealing to a fixed edge and then re-ordering is what a hand of cards actually
+  does, and it stays readable when several arrive at once because each is dealt
+  to the same spot in turn (staggered 110ms). The landing spot is the LEFTMOST
+  card's box, so it holds whichever card the sort happens to put first.
+  A recruit's destination is `column-<pid>-<planet>` — the played-Agent cell in
+  that seat's player box, the one place a recruited Agent lands now.
 - Duplicate frames, reconnect baselines and reduced motion must not replay
   flights. Resizing or scrolling the page/hand cancels obsolete geometry;
   the log's automatic scroll must NOT cancel a just-started card animation.

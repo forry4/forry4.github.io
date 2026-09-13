@@ -151,7 +151,7 @@ function LogPart({ part, game, catalog, onInfo }) {
     const bonus = catalog?.bonuses?.[String(part.b)] || catalog?.bonuses?.[part.b];
     const text = bonus?.description || part.v;
     if (!onInfo) return <b className="or-log-name">{text}</b>;
-    return <button type="button" className="or-log-ref or-log-bonus" title={`${text} — tap to read`}
+    return <button type="button" className="or-log-ref or-log-bonus" title={text}
       {...detailClick(open({ kind: "bonus", token: part.b }))}>{text}</button>;
   }
   if (part.f) {
@@ -300,28 +300,33 @@ function PlayerRail({ player, name, active, me, leader, hint, onInfo, connected 
         </span>}
       </span>
     </div>
+    {/* THE PLAYED AGENTS ARE THE PLANET BOARD'S OWN BOTTOM (or top) ROW — five
+        cells on the SAME five-column grid as `.or-influence`, sharing its inline
+        padding and its gutter through `--or-board-pad` / `--or-board-gap`, so a
+        planet's stack sits directly under (yours) or over (theirs) that planet's
+        track. That adjacency IS the label, which is why the row no longer
+        carries a heading of its own: the word naming each cell is printed one
+        row away, in the planet's own colour.
+        It is also the ONLY treatment at every width now — the separate
+        `.or-columns` panels are gone — so the cell has to carry the two facts
+        that used to live on the panel face: the top Agent's NAME and its cost.
+        The name is the half that drops first (it wants ~150px and a phone
+        column is ~70px); the count is the half that never does, because it is
+        the recruit discount and not decoration. */}
     <div className="or-played-agents" aria-label={`${owner} played Agents`}>
-      <span>Played</span>
-      {/* THE COMPACT TREATMENT CARRIES THE TOP COST TOO, because it is the ONLY
-          treatment on a phone and at short desktop heights — `.or-columns` is
-          display:none there, so a fact that lives only on the panel face does
-          not exist at those sizes. The count keeps the left of the cell and its
-          original reading (it is the recruit discount, and it is what the
-          aria-label led with before); the cost follows it behind a hairline.
-          BESIDE, not stacked — see the CSS: stacking grew the cell 2px, and two
-          of them pushed the 1366x768 table past the viewport. */}
-      <div>{PLANETS.map((planet) => {
+      {PLANETS.map((planet) => {
         const cards = player.columns?.[planet] || [];
         const top = cards[cards.length - 1];
-        return <button type="button" key={planet} className={`or-played-agent or-${planet}`}
+        return <button type="button" key={planet} className={`or-played-agent or-${planet}${cards.length ? "" : " empty"}`}
           data-motion-key={`column-${player.__pid}-${planet}`} data-motion-value={cards.map((card) => card.id).join(",")}
           disabled={!cards.length} title={`${cards.length} ${planet} Agent${cards.length === 1 ? "" : "s"}${top ? `. ${top.name} on top, cost ${top.cost} Credits` : ""}. ${cards.length ? "Open details" : "None played"}`}
-          aria-label={`${cards.length} ${planet} Agent${cards.length === 1 ? "" : "s"}${top ? `, top Agent costs ${top.cost} Credits` : ""}${cards.length ? ". Open details" : ""}`}
+          aria-label={`${cards.length} ${planet} Agent${cards.length === 1 ? "" : "s"}${top ? `, ${top.name} on top costing ${top.cost} Credits` : ""}${cards.length ? ". Open details" : ""}`}
           {...detailClick(() => cards.length && onInfo?.({ kind: "column", planet, cards, owner }))}>
-          <b>{cards.length}</b>
+          {!!cards.length && <b className="or-played-count">{cards.length}</b>}
+          <span className="or-played-name">{top ? top.name : "empty"}</span>
           {top && <i className="or-played-cost" aria-hidden="true">{top.cost}</i>}
         </button>;
-      })}</div>
+      })}
     </div>
   </section>;
 }
@@ -343,7 +348,7 @@ function Bonus({ token, catalog, onInfo, compact = false, className = "" }) {
   const text = bonus?.description || `Bonus token ${token}`;
   return <button type="button"
     className={`or-bonus${compact ? " compact" : ""}${className ? ` ${className}` : ""}`}
-    aria-label={`${text}. Open bonus details`} title={`${text} — tap to read`}
+    aria-label={`${text}. Open bonus details`} title={text}
     {...(onInfo ? detailClick((event) => { event.stopPropagation(); onInfo({ kind: "bonus", token }); }) : {})}>
     <i aria-hidden="true">✦</i><span className="or-sr-only">{text}</span>
   </button>;
@@ -478,53 +483,6 @@ function AgentCard({ card, selected, discarding = false, onClick, onInfo, hidden
     <span className="or-agent-text">{card.description}</span>
     <span className="or-agent-foot"><PlanetName planet={card.planet} /> · {card.faction}</span>
   </button>;
-}
-
-
-/* THE PLACED-AGENT COLUMNS, CONDENSED SO ALL FIVE PLANETS FIT. Each occupied
-   column is one recognisable mini-card with up to two offset layers behind it;
-   the count sits beside the planet name. That reads as a stack without the old
-   detached "+N below" button looking like a second unrelated control.
-   The section names its OWNER unambiguously — "Your agents" with a seat dot,
-   never a bare possessive a player has to match against a half-read name.
-   Reading your own recruit into the opponent's panel is the exact mistake the
-   old pair of identical panels invited.
-
-   THE TOP AGENT'S COST IS ON THE FACE, and it is the one thing that came back
-   after "name only, everything else in the modal". It is not detail about the
-   card — it is a NUMBER THE RULES READ: `card_cost` pays Credits equal to the
-   printed cost of the Agent an effect exiles, transfers or discards (cards 505,
-   510, 517), and both columns' top Agents are the public pool those effects
-   choose from. So "what does exiling their Mars top pay me?" was a question
-   that needed a modal per column, for both seats, mid-decision. The faction
-   glyph and the rules sentence stay in the modal: they are read once, this is
-   read every turn. `screens.mjs` asserts the face carries exactly the name and
-   the cost, so neither half can drift back. */
-function Columns({ game, pid, name, mine, onInfo }) {
-  const player = game.players?.[pid];
-  return <section className={`or-columns${mine ? " mine" : " theirs"}`}>
-    <h3><i className="or-seat-dot" aria-hidden="true" />{mine ? "Your agents" : `${name || "Opponent"} · agents`}</h3>
-    <div className="or-column-grid">
-      {PLANETS.map((planet) => {
-        const cards = player?.columns?.[planet] || [];
-        const top = cards[cards.length - 1];
-        const stackInfo = cards.length > 1
-          ? { kind: "column", planet, cards, owner: mine ? "Your" : `${name || "Opponent"}’s` }
-          : { kind: "card", card: top };
-        return <div className={`or-column or-${planet}`} key={planet}>
-          <span className="or-column-head"><PlanetName planet={planet} /><b data-motion-key={`stack-${pid}-${planet}`} data-motion-value={cards.map((card) => card.id).join(",")} className="or-column-count" aria-label={`${cards.length} Agents`}>{cards.length}</b></span>
-          {top ? <button type="button" className={`or-slot${cards.length > 1 ? " stacked" : ""}`}
-            title={`${cards.length} Agent${cards.length === 1 ? "" : "s"} — ${top.name} on top, cost ${top.cost} Credits`}
-            {...detailClick(() => onInfo(stackInfo))}>
-            <strong>{top.name}</strong>
-            <span className="or-slot-cost" aria-label={`Costs ${top.cost} Credits`}>
-              <ResourceIcon kind="credits" /><b>{top.cost}</b>
-            </span>
-          </button> : <span className="or-column-empty">empty</span>}
-        </div>;
-      })}
-    </div>
-  </section>;
 }
 
 
@@ -845,9 +803,23 @@ function Lobby({ authUser, myId, onExit, openGames, myGames, history, historySho
 }
 
 
+// The room id a deep link is asking for, read at MOUNT rather than in an effect.
+// `useEffect` runs after paint, so seeding `connecting` from it left the very
+// first frame as `screen:"lobby"` + `connecting:false` — the full lobby, painted
+// for one frame on top of a game you were already in, which is what a player
+// coming back through the sign-in screen sees as "a flash of another screen
+// before it reconnects". The URL is known before React renders anything; reading
+// it here makes the first paint the "Connecting…" panel it was always meant to be.
+const deepLinkRoom = () => {
+  try {
+    const match = /\/orbit\/([A-Za-z0-9_-]{1,24})\/?$/.exec(window.location.pathname);
+    return match ? match[1].toUpperCase() : null;
+  } catch { return null; }
+};
+
 export default function Orbit({ myId, authUser, onExit }) {
   const [screen, setScreen] = useState("lobby");
-  const [connecting, setConnecting] = useState(false);
+  const [connecting, setConnecting] = useState(() => !!deepLinkRoom());
   const [roomId, setRoomId] = useState("");
   const [roomData, setRoomData] = useState(null);
   const [catalog, setCatalog] = useState(null);
@@ -1103,7 +1075,7 @@ export default function Orbit({ myId, authUser, onExit }) {
     }
   }, [authUser, myId]);
 
-  useEffect(() => { if (screen === "lobby") fetchGames(); }, [screen, fetchGames]);
+  useEffect(() => { if (screen === "lobby" && !connecting) fetchGames(); }, [screen, connecting, fetchGames]);
   // The game you just finished leaves Active and joins History the moment it
   // ENDS, not when the lobby next loads — see useFinishedGameSync (shared kit).
   useFinishedGameSync(roomData?.status === "over", roomData?.room_id, (rid) => {
@@ -1169,10 +1141,8 @@ export default function Orbit({ myId, authUser, onExit }) {
   }, [disconnect]);
 
   useEffect(() => {
-    const match = /\/orbit\/([A-Za-z0-9_-]{1,24})\/?$/.exec(window.location.pathname);
-    if (match) {
-      const rid = match[1].toUpperCase(); urlAttempt.current = rid; resumeGame(rid);
-    }
+    const rid = deepLinkRoom();
+    if (rid) { urlAttempt.current = rid; resumeGame(rid); }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => subscribe((route) => {
     if (route.game !== "orbit") return;
@@ -1290,14 +1260,9 @@ export default function Orbit({ myId, authUser, onExit }) {
         <div className="or-board-main">
           {playerRails}
           <InfluenceBoard key={`${roomId}-${connected}`} game={game} myId={myId} catalog={catalog} names={names} connected={connected} onInfo={setInfo} />
-          <Columns game={game} pid={otherId} name={names[otherId]} onInfo={setInfo} />
-          <Columns game={game} pid={myId} name={names[myId]} mine onInfo={setInfo} />
           <section className="or-hand-zone">
-            <div className="or-hand-row">
-            <span className="or-draw-pile" aria-label="Agent deck"><i aria-hidden="true">O</i><span>Agent<br />deck</span></span>
             <Hand>{sortedHand(me.hand).map((card) => <AgentCard card={card} key={card.id} selected={selectedCard === card.id} onInfo={setInfo}
               onClick={isMyTurn && !game.pending ? () => setSelectedCard(card.id) : null} />)}</Hand>
-            </div>
             <div className={`or-controls${game.pending_pid === myId && legal.length > 1 ? " deciding" : ""}`}>
             {!over && game.pending && game.pending_pid === myId && <DecisionPanel game={game} catalog={catalog} sendMove={sendMove} onInfo={setInfo} />}
             {!over && game.pending && game.pending_pid !== myId && !botIsOpponent && <section className="or-status"><span className="or-spinner" /> {names[game.pending_pid] || "Opponent"} is resolving {game.pending.source}…</section>}

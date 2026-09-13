@@ -507,6 +507,47 @@ try {
 		check("every piece of text on the sign-in screen clears its AA floor",
 			thin.length === 0, thin.join(" | ").slice(0, 400));
 
+		// THE BUSY BUTTON DRAWS A SPINNER AND DOES NOT MOVE ITS LABEL. Both halves
+		// were broken at once and by the same line: the pending state rendered
+		// `<span className="spinner" />`, a class no stylesheet has defined since
+		// the site's three hand-rolled spinners were folded into `.lby-spinner`.
+		// It therefore painted a 0x0 box — no feedback at all on the one control
+		// the whole front door hangs on — while still taking a flex slot in a
+		// `.btn` with `gap: 8px`, which slid the centred label 4px right for the
+		// length of the request and back again when it resolved. Measured: 4.00px
+		// on iPhone-sized viewports, held for as long as the login took. Neither
+		// half shows up in a screenshot of the resting screen, so both are
+		// asserted here: the spinner has a real box and a running animation, and
+		// the label's own text range does not move between the two states.
+		await page.goto(`http://localhost:${PORT}/`, { waitUntil: "networkidle" });
+		await page.waitForSelector(".auth-screen", { timeout: 20_000 }).catch(() => {});
+		// Hold the request open so the pending state can be measured at leisure.
+		await page.route("**/auth/login", async (route) => { await sleep(1500); await route.continue(); });
+		await page.locator(".auth-tab").first().click().catch(() => {});
+		await page.locator("#auth-name").fill("screensgate").catch(() => {});
+		await page.locator("#auth-pass").fill("screensgate").catch(() => {});
+		const labelX = () => page.evaluate(() => {
+			const button = document.querySelector(".auth-panel .btn");
+			const text = [...button.childNodes].find((node) => node.nodeType === 3);
+			const range = document.createRange();
+			range.selectNodeContents(text);
+			const spin = button.querySelector(".btn-spin");
+			return {
+				x: Math.round(range.getBoundingClientRect().x * 100) / 100,
+				spinner: spin && { w: Math.round(spin.getBoundingClientRect().width),
+					animating: spin.getAnimations().length > 0 },
+			};
+		}).catch(() => null);
+		const resting = await labelX();
+		await page.locator(".auth-panel .btn").click().catch(() => {});
+		await page.waitForTimeout(320);
+		const busy = await labelX();
+		check("the busy sign-in button shows a real spinner without moving its label",
+			!!resting && !!busy && !resting.spinner && !!busy.spinner
+			&& busy.spinner.w >= 8 && busy.spinner.animating && busy.x === resting.x,
+			JSON.stringify({ resting, busy }));
+		await page.unroute("**/auth/login");
+
 		check("no page errors during auth", errors.length === 0, errors[0]?.slice(0, 160) || "");
 		await ctx.close();
 	}
@@ -5631,6 +5672,29 @@ try {
 		const ctx = await browser.newContext({ viewport: { width: 1280, height: 960 } });
 		await ctx.addInitScript(() => localStorage.setItem("spender_user",
 			JSON.stringify({ id: "orbit-harness", name: "Orbiter", guest: true })));
+		// EVERY SCREEN ORBIT PAINTS, IN ORDER, FROM THE FIRST FRAME. A one-frame
+		// wrong screen is invisible to a `waitForSelector` — by the time anything
+		// can be queried it is already gone — so the deep-link check below needs a
+		// record kept as it happens rather than a state read afterwards.
+		await ctx.addInitScript(() => {
+			window.__orbitFrames = [];
+			const tick = () => {
+				const root = document.querySelector(".orbit");
+				let painted = "none";
+				if (root) {
+					if (root.querySelector(".lby-cols, .lby-create-row")) painted = "LOBBY";
+					else if (root.querySelector(".lby-loading")) painted = "connecting";
+					else if (root.querySelector(".or-mulligan")) painted = "mulligan";
+					else if (root.querySelector(".or-influence")) painted = "game";
+					else if (root.querySelector(".or-wait")) painted = "waiting";
+					else painted = "other";
+				}
+				const seen = window.__orbitFrames;
+				if (!seen.length || seen[seen.length - 1] !== painted) seen.push(painted);
+				requestAnimationFrame(tick);
+			};
+			requestAnimationFrame(tick);
+		});
 		const page = await ctx.newPage();
 		let socket, latestFrame, fixtureMode = false;
 		const fixtureReplies = [];
@@ -5750,6 +5814,25 @@ try {
 			&& await page.locator(".or-tech-col").count() === 3);
 		check("the Orbit banner shows the game name without the room id",
 			(await page.locator(".or-game .lby-title").textContent().catch(() => "")).trim() === "Orbit");
+
+		// A DEEP LINK NEVER PAINTS THE LOBBY FIRST. Opening /orbit/<room> — which
+		// is what a player gets when a game is already open and they come back
+		// through the sign-in screen — used to render one full frame of the LOBBY
+		// before the resume effect ran: `connecting` started false and was set in
+		// a `useEffect`, which runs AFTER paint, so the first frame satisfied
+		// `screen === "lobby" && !connecting` and drew the whole lobby on top of
+		// a game in progress. Measured at 13ms, which is long enough to see and
+		// far too short for any selector-based check to catch, hence the frame
+		// recorder above. The URL is known before React renders anything, so the
+		// first frame is the "Connecting…" panel it was always meant to be.
+		const roomUrl = page.url();
+		check("a game deep link is a room URL", /\/orbit\/[A-Z0-9]+$/.test(roomUrl), roomUrl);
+		await page.reload({ waitUntil: "domcontentloaded" });
+		await page.waitForSelector(".or-influence", { timeout: 30_000 }).catch(() => {});
+		const painted = await page.evaluate(() => window.__orbitFrames || []);
+		check("a deep link resumes the game without flashing the lobby",
+			painted.length > 0 && !painted.includes("LOBBY") && painted.includes("game"),
+			JSON.stringify(painted));
 		const influenceCopy = await page.locator(".or-influence").textContent();
 		check("the influence board omits the redundant planet control heading",
 			!influenceCopy.includes("Planet control") && await page.locator(".or-influence-head").count() === 0,
@@ -5762,7 +5845,7 @@ try {
 		const seating = await page.evaluate(() => ({
 			badges: [...document.querySelectorAll(".or-player .or-leader")].map((el) => el.textContent.trim()),
 			key: [...document.querySelectorAll(".or-tech-key b")].map((el) => el.textContent.trim()),
-			mine: document.querySelectorAll(".or-columns.mine h3").length,
+			mine: document.querySelectorAll(".or-player.mine .or-played-agents").length,
 			glyphs: /[☿♀⊕♂♃]/.test(document.querySelector(".or-table").textContent),
 		}));
 		check("both seats show a Leader badge state and are named on the tech key",
@@ -5920,25 +6003,28 @@ try {
 			return {
 				wide: document.documentElement.scrollWidth > window.innerWidth + 1,
 				cards: document.querySelectorAll(".or-hand-zone .or-agent").length,
-				columns: document.querySelectorAll(".or-column").length,
-				railCounts: [...document.querySelectorAll(".or-played-agent")]
+				// TEN CELLS, FIVE PER SEAT, AT EVERY WIDTH. There used to be two
+				// treatments of this one fact — a pair of full-width panels below
+				// the influence board on a tall desktop, and five counts folded
+				// into the player boxes everywhere else — which is why this gate
+				// carried a "never both at once" check. There is one treatment now.
+				played: document.querySelectorAll(".or-played-agent").length,
+				visiblePlayed: [...document.querySelectorAll(".or-played-agent")]
 					.filter((el) => el.getBoundingClientRect().width > 0).length,
+				retiredPanels: document.querySelectorAll(".or-columns, .or-slot").length,
 				jupiterGap: Math.round(influence.bottom - jupiter.bottom),
 				detachedStackControls: document.querySelectorAll(".or-stack").length,
 			};
 		});
 		check("the complete public table and private hand remain on the page",
-			!geometry.wide && geometry.cards > 0 && geometry.columns === 10,
+			!geometry.wide && geometry.cards > 0 && geometry.played === 10,
 			JSON.stringify(geometry));
 		check("the planet panel ends cleanly after its turn narration",
 			geometry.jupiterGap >= 0 && geometry.jupiterGap <= 24, JSON.stringify(geometry));
 		check("placed Agents use one card-stack face, not a detached stack control",
 			geometry.detachedStackControls === 0, JSON.stringify(geometry));
-		// The rail counts are the PHONE treatment of the same information. Above
-		// the phone tier the panels are the read and the counts must be absent —
-		// two live copies of one fact is the state this check exists to forbid.
-		check("a desktop shows the placed-Agent panels and not the rail counts",
-			geometry.columns === 10 && geometry.railCounts === 0, JSON.stringify(geometry));
+		check("placed Agents live in the player box at every width, with no second treatment",
+			geometry.visiblePlayed === 10 && geometry.retiredPanels === 0, JSON.stringify(geometry));
 		// THE FACE IS THE NAME, THE COUNT AND THE TOP AGENT'S COST — and nothing
 		// else. The cost is there because the RULES read it: `card_cost` pays
 		// Credits equal to the printed cost of the Agent an effect exiles,
@@ -5946,35 +6032,63 @@ try {
 		// effects draw from, so answering "what does taking their Mars top pay?"
 		// used to mean opening a modal per column mid-decision. The faction glyph
 		// and the rules sentence stay OUT: a full card face in a 30px box is the
-		// treatment this panel replaced, so the check bounds it from both sides.
+		// treatment this row replaced, so the check bounds it from both sides.
+		// An EMPTY planet keeps its cell — collapsing it would break the column
+		// alignment the row exists for — and shows neither a name nor a zero.
 		const placedFaces = await page.evaluate(() => {
-			const slots = [...document.querySelectorAll(".or-slot")];
+			const cells = [...document.querySelectorAll(".or-played-agent")];
+			const filled = cells.filter((cell) => !cell.classList.contains("empty"));
 			const box = (el) => el.getBoundingClientRect();
 			return {
-				slots: slots.length,
-				extraFacts: document.querySelectorAll(".or-slot .or-slot-top, .or-slot .or-agent-text, .or-slot .or-agent-foot").length,
-				complete: slots.every((slot) => !!slot.querySelector("strong")?.textContent.trim()
-					&& /^\d+$/.test(slot.closest(".or-column").querySelector(".or-column-count")?.textContent.trim() || "")
-					&& !slot.querySelector(".or-slot-count")),
-				costs: slots.map((slot) => slot.querySelector(".or-slot-cost b")?.textContent.trim()),
+				cells: cells.length,
+				filled: filled.length,
+				extraFacts: document.querySelectorAll(".or-played-agent .or-agent-text, .or-played-agent .or-agent-foot, .or-played-agent svg").length,
+				complete: filled.every((cell) => !!cell.querySelector(".or-played-name")?.textContent.trim()
+					&& /^[0-9]+$/.test(cell.querySelector(".or-played-count")?.textContent.trim() || "")),
+				costs: filled.map((cell) => cell.querySelector(".or-played-cost")?.textContent.trim()),
+				emptyQuiet: cells.filter((cell) => cell.classList.contains("empty"))
+					.every((cell) => !cell.querySelector(".or-played-count")),
 				// The price takes its width out of the NAME's, so the thing to
 				// guard is what is left for the name — a face reduced to two
-				// letters per line is not a name, and the fixed face height
-				// means it fails silently rather than growing.
-				nameWidth: Math.min(...slots.map((slot) => Math.round(box(slot.querySelector("strong")).width))),
-				// A price that overflows its own face is worse than no price: it
+				// letters and an ellipsis is not a name, and the single clipped
+				// line means it fails silently rather than growing.
+				nameWidth: Math.min(...filled.map((cell) => Math.round(box(cell.querySelector(".or-played-name")).width))),
+				// A price that overflows its own cell is worse than no price: it
 				// is the one addition to this box that can push the name out.
-				spills: slots.filter((slot) => {
-					const cost = slot.querySelector(".or-slot-cost");
-					return !cost || box(cost).right > box(slot).right + 1
-						|| box(cost).bottom > box(slot).bottom + 1;
+				spills: filled.filter((cell) => {
+					const cost = cell.querySelector(".or-played-cost");
+					return !cost || box(cost).right > box(cell).right + 1
+						|| box(cost).bottom > box(cell).bottom + 1;
 				}).length,
 			};
 		});
-		check("a played Agent shows its name and top cost with the count beside its planet",
-			placedFaces.slots > 0 && placedFaces.extraFacts === 0 && placedFaces.complete
-			&& placedFaces.costs.every((c) => /^\d+$/.test(c || "")) && placedFaces.spills === 0,
+		check("a played Agent shows its name and top cost beside its stack count",
+			placedFaces.cells === 10 && placedFaces.filled > 0 && placedFaces.extraFacts === 0
+			&& placedFaces.complete && placedFaces.emptyQuiet && placedFaces.nameWidth >= 44
+			&& placedFaces.costs.every((c) => /^[0-9]+$/.test(c || "")) && placedFaces.spills === 0,
 			JSON.stringify(placedFaces));
+
+		// THE ROW IS THE PLANET BOARD'S OWN EDGE — one cell per planet, on the
+		// same five columns, so a stack sits directly under (yours) or over
+		// (theirs) the track it belongs to. That adjacency is the ONLY label the
+		// row has, which makes it a geometry contract rather than a preference:
+		// `.or-influence` and `.or-played-agents` have to resolve the same inline
+		// padding and the same gutter (`--or-board-pad` / `--or-board-gap`), and
+		// a tier that restates one without the other reads fine at Mercury and
+		// drifts half a cell by Jupiter. Measured against the TRACK COLUMN's
+		// centre, not the disc's: on a phone the bonus token takes a sub-column
+		// beside the track, so the disc is deliberately off-centre within it.
+		const alignment = await page.evaluate(() => {
+			const centre = (el) => { const b = el.getBoundingClientRect(); return b.left + b.width / 2; };
+			const tracks = [...document.querySelectorAll(".or-influence .or-track")].map(centre);
+			return [...document.querySelectorAll(".or-player")].map((rail) => {
+				const cells = [...rail.querySelectorAll(".or-played-agent")].map(centre);
+				return { cells: cells.length, drift: Math.round(Math.max(...cells.map((c, i) => Math.abs(c - tracks[i])))) };
+			});
+		});
+		check("each seat's played Agents sit on the planet board's own five columns",
+			alignment.length === 2 && alignment.every((rail) => rail.cells === 5 && rail.drift <= 4),
+			JSON.stringify(alignment));
 		check("your hand is ordered by planet, then by cost",
 			await orbitHandIsSorted(page, ".or-hand-zone"));
 		// Stress the presentation through a room update, after the real action.
@@ -6049,12 +6163,13 @@ try {
 		check("a selected card is highlighted in its planet color",
 			!!selectedStyle.planet && selectedStyle.color === selectedStyle.outline
 			&& selectedStyle.color === selectedStyle.border, JSON.stringify(selectedStyle));
-		for (const selector of [".or-hand-zone .or-agent", ".or-influence button.or-bonus", ".or-tech-token", ".or-tech-space", ".or-slot.stacked"]) {
+		const stacked = ".or-played-agent:not(.empty)";
+		for (const selector of [".or-hand-zone .or-agent", ".or-influence button.or-bonus", ".or-tech-token", ".or-tech-space", stacked]) {
 			await page.locator(selector).first().click({ button: "right" });
 			check(`right-click opens details for ${selector}`, await page.locator(".or-info").isVisible());
 			await page.keyboard.press("Escape");
 		}
-		await page.locator(".or-slot.stacked").first().click({ button: "right" });
+		await page.locator(stacked).first().click({ button: "right" });
 		await page.locator(".or-info-list button").first().click({ button: "right" });
 		check("right-click opens an Agent within a column", await page.locator(".or-info-cost").count() === 1);
 		await page.keyboard.press("Escape");
@@ -6116,7 +6231,7 @@ try {
 				const user = document.querySelector(".lby-head-right").getBoundingClientRect();
 				const techHeights = [...document.querySelectorAll(".or-tech-space")]
 					.map((el) => Math.round(el.getBoundingClientRect().height));
-				const slotHeights = [...document.querySelectorAll(".or-slot, .or-column-empty")]
+				const slotHeights = [...document.querySelectorAll(".or-played-agent")]
 					.map((el) => Math.round(el.getBoundingClientRect().height));
 				const influence = document.querySelector(".or-influence").getBoundingClientRect();
 				const other = document.querySelector(".or-player.theirs").getBoundingClientRect();
@@ -6143,6 +6258,24 @@ try {
 					uniformCards: Math.max(...cards.map((r) => r.width)) - Math.min(...cards.map((r) => r.width)) < 1,
 					hint: document.querySelector(".or-player.mine .or-player-hint")?.textContent.trim(),
 					handSubhead: document.querySelectorAll(".or-hand-head h2").length,
+					// THE THREE PANELS THAT COMPETE FOR ONE COLUMN OF HEIGHT, and
+					// the reason all three are measured together: the technology
+					// ladder, the log and the planet board were each sized in
+					// isolation and the sum was whatever it came out to. Pinning
+					// the log at a fixed height and stretching technology cropped
+					// LEVELS 1 AND 2 off the bottom of every track (rungs are
+					// `minmax(0, 1fr)`, the text inside them is not, and `.or-tech`
+					// is `overflow: hidden`); the board then took what was left,
+					// which at 1920x937 was its 240px floor. So: nothing clipped,
+					// a log worth reading, and a board that gets the give.
+					techClipped: (() => {
+						const panel = document.querySelector(".or-tech").getBoundingClientRect();
+						return [...document.querySelectorAll(".or-tech-space")]
+							.filter((el) => el.getBoundingClientRect().bottom > panel.bottom + 1)
+							.map((el) => el.querySelector(".or-tech-lv")?.textContent.trim());
+					})(),
+					logHeight: Math.round(logBox.height),
+					influenceHeight: Math.round(document.querySelector(".or-influence").getBoundingClientRect().height),
 				};
 			});
 			check(`Orbit fills ${viewport.width}x${viewport.height} without page scrolling`,
@@ -6156,7 +6289,19 @@ try {
 				JSON.stringify(desktop));
 			check(`technology gets taller readable rungs and placed-Agent rows stay compact at ${viewport.width}px`,
 				desktop.techHeights.length <= 2 && desktop.techHeights[0] >= 46
-				&& desktop.maxSlotHeight <= 60, JSON.stringify(desktop));
+				&& desktop.maxSlotHeight <= 40, JSON.stringify(desktop));
+			check(`every technology rung stays inside its panel at ${viewport.width}px`,
+				desktop.techClipped.length === 0, JSON.stringify(desktop));
+			// The floor is TIERED because the budget is: a 768px-tall window has
+			// ~700px for a header-less table, of which the hand and its reserved
+			// control strip take a fixed 300. The numbers are what the layout can
+			// actually deliver once technology is content-sized and the log takes
+			// the remainder — 203px of track at 1366x768 against 154 before, 479
+			// at 1920x1080 against 354 — so they catch the squeeze coming back
+			// rather than describing an ideal nothing reaches.
+			check(`the log and the planet board both get a readable share at ${viewport.width}px`,
+				desktop.logHeight >= 240 && desktop.influenceHeight >= (viewport.height >= 1000 ? 300 : 195),
+				JSON.stringify(desktop));
 			check("the turn hint lives beside your player name, not above the hand",
 				!!desktop.hint && desktop.handSubhead === 0,
 				JSON.stringify(desktop));
@@ -6201,27 +6346,27 @@ try {
 				.filter((el) => el.scrollWidth > el.clientWidth + 1)
 				.map((el) => `${el.className}:${el.scrollWidth}>${el.clientWidth}`);
 			const cells = [...document.querySelectorAll(".or-played-agent")];
-			const panels = [...document.querySelectorAll(".or-columns")]
-				.filter((el) => el.getBoundingClientRect().width > 0).length;
 			const offscreen = cells.filter((cell) => {
 				const r = cell.getBoundingClientRect();
 				return r.left < -1 || r.right > window.innerWidth + 1 || r.width < 8;
 			}).length;
-			// The rail count is the ONLY placed-Agent treatment on a phone (the
-			// panels above are display:none), so the top Agent's cost has to be
-			// here too or it does not exist at this size. An occupied cell shows
-			// both numbers; an empty one is disabled and shows only the zero.
+			// The player-box row is the only placed-Agent treatment there is, so
+			// the top Agent's cost has to be here or it does not exist at this
+			// size. An occupied cell shows both numbers; an empty one is disabled
+			// and shows neither.
 			const occupied = cells.filter((cell) => !cell.disabled);
 			const railCosts = {
 				occupied: occupied.length,
 				priced: occupied.filter((cell) => /^\d+$/.test(
 					cell.querySelector(".or-played-cost")?.textContent.trim() || "")).length,
-				emptyPriced: cells.filter((cell) => cell.disabled
-					&& cell.querySelector(".or-played-cost")
-					&& getComputedStyle(cell.querySelector(".or-played-cost")).display !== "none").length,
-				// Two numbers in a 34px cell is the whole risk here.
+				emptyPriced: cells.filter((cell) => cell.disabled && cell.querySelector(".or-played-cost")).length,
+				// Two numbers in a 70px cell is the whole risk here. The NAME is
+				// display:none at this width and reports an empty box, so a child
+				// with no box is skipped rather than read as sitting at the page
+				// origin -- which is a spill on every cell, for every seat.
 				spills: cells.filter((cell) => [...cell.children].some((kid) => {
 					const k = kid.getBoundingClientRect(), c = cell.getBoundingClientRect();
+					if (!k.width && !k.height) return false;
 					return k.right > c.right + 1 || k.bottom > c.bottom + 1 || k.left < c.left - 1;
 				})).length,
 			};
@@ -6250,16 +6395,14 @@ try {
 			const influence = document.querySelector(".or-influence").getBoundingClientRect();
 			const trackHeights = [...document.querySelectorAll(".or-influence .or-track-spaces")]
 				.map((el) => Math.round(el.getBoundingClientRect().height));
-			return { scrollers, cells: cells.length, panels, offscreen, railCosts, bonuses, tokenOverlaps, bonusRight,
+			return { scrollers, cells: cells.length, offscreen, railCosts, bonuses, tokenOverlaps, bonusRight,
 				trackCentered, trackHeights, influenceHeight: Math.round(influence.height) };
 		});
 		check("no board on a phone hides content behind a sideways scroll",
 			inner.scrollers.length === 0, JSON.stringify(inner.scrollers));
 		check("all five played-Agent counts are on screen for both seats",
 			inner.cells === 10 && inner.offscreen === 0, JSON.stringify(inner));
-		check("a phone folds the placed-Agent panels into the two player rails",
-			inner.panels === 0, JSON.stringify(inner));
-		check("the phone rail count carries the top Agent's cost without spilling its cell",
+		check("the phone played-Agent cell carries the top Agent's cost without spilling",
 			inner.railCosts.occupied > 0
 			&& inner.railCosts.priced === inner.railCosts.occupied
 			&& inner.railCosts.emptyPriced === 0 && inner.railCosts.spills === 0,
@@ -6438,7 +6581,12 @@ try {
 						return { pageFits: document.documentElement.scrollHeight <= innerHeight + 1,
 							visible: [...document.querySelectorAll(".or-influence, .or-decision, .or-hand-zone .or-agent, .or-decision button")].every(inside),
 							controlsFit: document.querySelector(".or-decision").getBoundingClientRect().bottom <= hand.bottom,
-							spacing: document.querySelector(".or-track-spaces").getBoundingClientRect().height / 9 };
+							// The overshoot, not just the verdict: the hand zone is a FIXED
+							// reserve (see `.or-live .or-hand-zone`), so a failure here is a
+							// number to re-cut that reserve by, and reading it off a screenshot
+							// is how it got mis-cut in the first place.
+							overshoot: Math.round(document.querySelector(".or-decision").getBoundingClientRect().bottom - hand.bottom),
+							spacing: Math.round(document.querySelector(".or-track-spaces").getBoundingClientRect().height / 9) };
 					});
 					const boardNow = await page.locator(".or-influence").boundingBox();
 					check(`${width}px ${kind}: the full hand, decision and spaced tracks fit together`, fit.pageFits && fit.visible && fit.controlsFit && fit.spacing >= 27, JSON.stringify(fit));
@@ -6522,9 +6670,8 @@ try {
 				const animation = flight.getAnimations()[0]; animation.pause();
 				const at = (time) => { animation.currentTime = time; const r = flight.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; };
 				const start = at(0), middle = at(300), end = at(619);
-				const key = action === "recruit" ? "stack-orbit-harness-mercury" : action === "technology" ? "tech-rung-robot-2" : "leader-orbit-harness";
-				let target = document.querySelector(`[data-motion-key="${key}"]`);
-				if (action === "recruit") target = target.closest(".or-column");
+				const key = action === "recruit" ? "column-orbit-harness-mercury" : action === "technology" ? "tech-rung-robot-2" : "leader-orbit-harness";
+				const target = document.querySelector(`[data-motion-key="${key}"]`);
 				const r = target.getBoundingClientRect();
 				animation.currentTime = 300;
 				return { shrinking: start.w > middle.w && middle.w > end.w,
@@ -6533,6 +6680,26 @@ try {
 			}, action);
 			check(`${action}: a confirmed card shrinks into its actual destination`, travel.shrinking && travel.landed, JSON.stringify(travel));
 			check(`${action}: the replacement card draws into the hand`, await page.locator('.or-card-flight[data-flight="draw"]').count() === 1);
+			// A DRAW IS DEALT TO THE LEFT EDGE AND THEN SLIDES INTO ORDER, which
+			// is two movements and not one — there is no deck beside the hand any
+			// more to fly out of, and the hand is sorted, so a card that travelled
+			// straight to its sorted place appeared to materialise in the middle
+			// of the fan. Assert the SHAPE: it starts left of where it ends, is
+			// standing in the leftmost slot at the dwell, and finishes on its own
+			// card. Measured against the leftmost card's box, so this holds
+			// whichever card the sort happens to put first.
+			const dealt = await page.evaluate(() => {
+				const flight = document.querySelector('.or-card-flight[data-flight="draw"]');
+				const animation = flight.getAnimations()[0]; animation.pause();
+				const at = (time) => { animation.currentTime = time; const r = flight.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y) }; };
+				const slot = document.querySelector(".or-hand .or-agent").getBoundingClientRect();
+				const start = at(0), landed = at(280), settled = at(759);
+				animation.currentTime = 0;
+				return { start, landed, settled, slotX: Math.round(slot.x) };
+			});
+			check(`${action}: the drawn card is dealt to the leftmost slot before it slides into order`,
+				dealt.start.x < dealt.landed.x && Math.abs(dealt.landed.x - dealt.slotX) <= 2
+				&& dealt.settled.x >= dealt.landed.x, JSON.stringify(dealt));
 			if (process.env.ORBIT_SHOTS) await page.screenshot({ path: `test-results/orbit-card-flight-${action}.png` });
 			await page.evaluate(() => document.querySelectorAll(".or-card-flight").forEach((node) => node.getAnimations().forEach((animation) => animation.finish())));
 			await page.waitForFunction(() => !document.querySelector(".or-card-flight"));
