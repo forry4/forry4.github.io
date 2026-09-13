@@ -23,7 +23,7 @@
 //! does not win there it cannot win determinized, and the cheap answer is worth
 //! having before building the expensive thing.
 use crate::clock::Clock;
-use crate::search::state_value;
+use crate::search::{state_value, state_value_v2_from_state, Leaf};
 use crate::serving::action_score;
 use crate::{Chance, State};
 use serde_json::{json, Value};
@@ -47,11 +47,30 @@ pub struct AbConfig {
     /// a structural hash on every node, so whether it pays is a MEASUREMENT at
     /// the depth actually searched, not a default to inherit from chess.
     pub use_table: bool,
+    /// Which leaf evaluator scores a nonterminal position.
+    pub leaf: Leaf,
+    /// Keep searching past the depth limit while a turn is half-finished.
+    ///
+    /// An Orbit turn is not one ply. Effects queue sub-decisions, and **39.6%
+    /// of all decision points sit inside a pending chain** (measured over 6,598
+    /// decisions across 40 games). So two times in five, a search that stops at
+    /// its depth limit is scoring a TRANSIENT position -- an effect granted but
+    /// its cost unpaid, a capture queued but not yet applied. The evaluator was
+    /// never meant to read those, and no amount of extra depth fixes it,
+    /// because the horizon just lands in a different half-finished turn.
+    ///
+    /// This is the standard quiescence answer: do not stop in the middle of
+    /// one. Capped, because a chain that somehow never resolved would otherwise
+    /// search forever.
+    pub quiescence: bool,
 }
+
+/// How many extra plies a half-finished turn may borrow.
+const EXTENSION_CAP: i32 = 8;
 
 impl Default for AbConfig {
     fn default() -> Self {
-        Self { budget_ms: 1000, max_depth: 64, use_table: true }
+        Self { budget_ms: 1000, max_depth: 64, use_table: true, leaf: Leaf::StateValue, quiescence: false }
     }
 }
 
@@ -132,6 +151,7 @@ struct Search<'a> {
     leaves: u64,
     cutoffs: u64,
     hits: u64,
+    extended: u64,
     /// Set once the budget is spent. Every frame returns immediately after it,
     /// and the caller discards the whole iteration -- a partially searched
     /// depth can rank a move on a truncated subtree.
@@ -143,6 +163,8 @@ struct Search<'a> {
     /// legitimately return a different one, so asserting that would fail on
     /// correct code.
     table_enabled: bool,
+    leaf_kind: Leaf,
+    quiescence: bool,
 }
 
 impl Search<'_> {
@@ -161,7 +183,14 @@ impl Search<'_> {
 
     fn leaf(&mut self, state: &State) -> f64 {
         self.leaves += 1;
-        state_value(&state.observation(self.root_seat))
+        match self.leaf_kind {
+            // Straight off the State: no JSON observation is built at all. Held
+            // to the observation leaf to 1e-9 over 400+ real positions by
+            // `the_fast_leaf_is_equivalent_to_the_observation_leaf`, so this is
+            // a pure throughput change and node rate is depth.
+            Leaf::StateValueV2 => state_value_v2_from_state(state, self.root_seat),
+            _ => state_value(&state.observation(self.root_seat)),
+        }
     }
 
     /// Values are in ROOT-SEAT terms everywhere, so a node maximises when the
@@ -174,6 +203,7 @@ impl Search<'_> {
         state: &State,
         chance: &Chance,
         depth: i32,
+        extension: i32,
         mut alpha: f64,
         mut beta: f64,
     ) -> f64 {
@@ -184,8 +214,17 @@ impl Search<'_> {
         let Some(actor) = state.actor() else {
             return self.leaf(state);
         };
-        if depth <= 0 {
-            return self.leaf(state);
+        // Past the depth limit the search normally stops. It does NOT stop
+        // inside a half-finished turn when quiescence is on -- see
+        // `AbConfig::quiescence`; the evaluator cannot read a transient
+        // position, and 39.6% of decision points are inside one.
+        let borrowing = depth <= 0;
+        if borrowing {
+            let may_extend = self.quiescence && state.pending.is_some() && extension > 0;
+            if !may_extend {
+                return self.leaf(state);
+            }
+            self.extended += 1;
         }
 
         let key = state_key(state, chance);
@@ -251,7 +290,14 @@ impl Search<'_> {
                 continue;
             }
             applied += 1;
-            let value = self.search(&child, &child_chance, depth - 1, alpha, beta);
+            let value = self.search(
+                &child,
+                &child_chance,
+                depth - 1,
+                if borrowing { extension - 1 } else { EXTENSION_CAP },
+                alpha,
+                beta,
+            );
             if self.out_of_time {
                 return 0.0;
             }
@@ -337,8 +383,11 @@ pub fn choose(source: &State, seat: usize, seed: u64, config: AbConfig) -> Resul
         leaves: 0,
         cutoffs: 0,
         hits: 0,
+        extended: 0,
         out_of_time: false,
         table_enabled: config.use_table,
+        leaf_kind: config.leaf,
+        quiescence: config.quiescence,
     };
 
     // The fallback is the ordering prior's own top move, so a budget too small
@@ -376,7 +425,7 @@ pub fn choose(source: &State, seat: usize, seed: u64, config: AbConfig) -> Resul
             if child.apply(seat, &legal[index], &mut child_chance).is_err() {
                 continue;
             }
-            let value = search.search(&child, &child_chance, depth - 1, alpha, beta);
+            let value = search.search(&child, &child_chance, depth - 1, EXTENSION_CAP, alpha, beta);
             if search.out_of_time {
                 break;
             }
@@ -410,6 +459,7 @@ pub fn choose(source: &State, seat: usize, seed: u64, config: AbConfig) -> Resul
         "leaves": search.leaves,
         "cutoffs": search.cutoffs,
         "table_hits": search.hits,
+        "extended": search.extended,
         "table_size": search.table.len(),
         "ms": clock.elapsed_ms(),
     }))
@@ -633,7 +683,7 @@ mod tests {
     /// iteration and these tests are about the SEARCH rather than the machine
     /// they run on. A time-limited test would be flaky by construction.
     fn config(max_depth: usize) -> AbConfig {
-        AbConfig { budget_ms: 600_000, max_depth, use_table: true }
+        AbConfig { budget_ms: 600_000, max_depth, use_table: true, leaf: Leaf::StateValue, quiescence: false }
     }
 
     fn config_without_table(max_depth: usize) -> AbConfig {
@@ -811,6 +861,40 @@ mod tests {
             result.is_err() || seat == other_seat,
             "worlds with different legal lists must not be voted over"
         );
+    }
+
+    /// Quiescence must actually FIRE, and must actually stop. A flag that
+    /// never extends is a silent no-op that would make its A/B read a clean
+    /// null; one that never stops would hang a serving path.
+    #[test]
+    fn quiescence_extends_through_half_finished_turns_and_terminates() {
+        let (state, seat) = position(404, 2);
+        let quiet = AbConfig { quiescence: false, ..config(3) };
+        let extending = AbConfig { quiescence: true, ..config(3) };
+        let off = choose(&state, seat, 5, quiet).unwrap();
+        let on = choose(&state, seat, 5, extending).unwrap();
+        assert_eq!(
+            off["extended"].as_u64().unwrap(),
+            0,
+            "the control arm must never extend"
+        );
+        assert!(
+            on["extended"].as_u64().unwrap() > 0,
+            "quiescence never fired, so its A/B would measure nothing"
+        );
+        // Terminating at all is the assertion; an unbounded extension would
+        // never return and this test would time out rather than fail.
+        assert!(on["nodes"].as_u64().unwrap() > 0);
+    }
+
+    /// Extending must not change what the search REPORTS about depth: the
+    /// borrowed plies are past the horizon, not part of the iteration that
+    /// completed.
+    #[test]
+    fn extending_does_not_inflate_the_reported_depth() {
+        let (state, seat) = position(77, 3);
+        let on = choose(&state, seat, 5, AbConfig { quiescence: true, ..config(3) }).unwrap();
+        assert_eq!(on["depth"].as_u64().unwrap(), 3);
     }
 
     /// A seat that is not to act must be refused rather than answered. The

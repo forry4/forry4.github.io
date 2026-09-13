@@ -288,6 +288,9 @@ pub enum Leaf {
     /// its first commit until 2026-09-11, and it is retained ONLY as the
     /// explicit control arm for the A/B that replaced it. It is not a tier.
     CaptureProgressOnly,
+    /// The 2026-09-13 leaf: victory-aware influence, and a squash that keeps
+    /// its discrimination in decided positions. See [`state_value_v2`].
+    StateValueV2,
 }
 
 fn progress(obs: &Value, seat: usize) -> f64 {
@@ -326,16 +329,28 @@ pub fn capture_progress_only(obs: &Value) -> f64 {
 /// campaigns, and the point of this change is that the search had no state
 /// evaluator at all, not that it had the wrong one.
 pub fn state_value(obs: &Value) -> f64 {
+    let raw = state_value_raw(obs);
+    if raw.abs() >= TERMINAL {
+        return raw.signum();
+    }
+    raw.tanh()
+}
+
+/// The unbounded heuristic, before it is mapped into (-1, 1).
+pub fn state_value_raw(obs: &Value) -> f64 {
     let seat = obs["seat"].as_u64().unwrap() as usize;
     let other = 1 - seat;
     if obs["phase"] == "over" {
         return match obs["winner"].as_u64() {
             None => 0.0,
+            // The sentinel, not 1.0: `state_value` squashes everything below it,
+            // and a win that came back as 0.95 would be indistinguishable from a
+            // merely winning position.
             Some(w) => {
                 if w as usize == seat {
-                    1.0
+                    TERMINAL
                 } else {
-                    -1.0
+                    -TERMINAL
                 }
             }
         };
@@ -400,13 +415,236 @@ pub fn state_value(obs: &Value) -> f64 {
         .as_array()
         .map_or(0.0, |columns| columns.iter().map(cost_of).sum());
     value += 0.005 * (own_cards - public_opponent_cards);
-    value.tanh()
+    value
+}
+
+/// The distance a disc travels before its planet is captured
+/// (`engine.CONTROL_POSITION`).
+const CONTROL: f64 = 4.0;
+
+/// What capturing `planet` would be worth to `who`, in the same units the
+/// capture-progress term already uses.
+///
+/// A capture is NOT worth a fixed amount. Orbit has three victory conditions --
+/// three discs of one planet, four different planets, five in all -- so the
+/// same disc can be decisive or nearly worthless depending on what is already
+/// banked. `progress` measures how far along the best of the three a player is,
+/// so the marginal progress a capture delivers is exactly what it is worth, and
+/// a capture that completes a condition is worth the game.
+fn capture_gain(obs: &Value, who: usize, planet: usize) -> f64 {
+    let before = progress(obs, who);
+    let mut counts = [0usize; 5];
+    if let Some(captured) = obs["players"][who]["captured"].as_array() {
+        for c in captured {
+            if let Some(index) = c.as_u64() {
+                counts[index as usize] += 1;
+            }
+        }
+    }
+    counts[planet] += 1;
+    let total: usize = counts.iter().sum();
+    let after = (total as f64 / 5.0)
+        .max(counts.iter().filter(|n| **n > 0).count() as f64 / 4.0)
+        .max(*counts.iter().max().unwrap() as f64 / 3.0);
+    if after >= 1.0 {
+        // A capture that ENDS the game. Worth far more than the progress step
+        // that represents it -- this is the term whose absence let the search
+        // treat a match-point threat as an ordinary one.
+        WINNING_CAPTURE
+    } else {
+        1.4 * (after - before)
+    }
+}
+
+const WINNING_CAPTURE: f64 = 2.2;
+const TERMINAL: f64 = 1e9;
+
+/// Chosen so ordinary positions sit in the near-linear part of the curve
+/// (tanh' is 0.80 at 0.48) rather than out in the flat tail.
+const SQUASH_SCALE: f64 = 3.0;
+/// Heuristic readings stay strictly inside a genuine win, so a proven terminal
+/// always outranks a merely excellent position.
+const SQUASH_CEILING: f64 = 0.95;
+
+/// The 2026-09-13 leaf: the same features, with two defects repaired.
+///
+/// Both were found from a PLAYTEST report -- the bot ignoring an opponent two
+/// steps from the capture that was their fastest path to victory -- and both
+/// are structural rather than a matter of weights, which is why they sit
+/// outside the "eval tuning is saturated" verdict the campaign reached twice.
+///
+/// 1. THE INFLUENCE TERM WAS VICTORY-BLIND. Advancing a disc to the brink
+///    scored an identical -0.4178 whether the capture ended the game or was
+///    worthless. It is now the marginal victory progress that capture delivers,
+///    discounted by how far the disc still has to travel, so contesting a
+///    planet is worth what winning it is worth.
+///
+/// 2. `tanh` DESTROYED DISCRIMINATION WHERE THE GAME IS DECIDED. Its derivative
+///    at |x|=1.45 is 0.20, so in a lopsided position -- exactly where threats
+///    matter -- the same threat moved the leaf 0.12 against 0.40 in a quiet
+///    one. A leaf that flattens under pressure cannot be fixed by searching it
+///    deeper, which is a candidate explanation for why the simulation ladder
+///    never paid and why doubling the search measured 0.4609.
+pub fn state_value_v2(obs: &Value) -> f64 {
+    let raw = state_value_raw_v2(obs);
+    if raw.abs() >= TERMINAL {
+        return raw.signum();
+    }
+    (raw / SQUASH_SCALE).tanh() * SQUASH_CEILING
+}
+
+/// `state_value_raw` with the influence term replaced by a victory-aware one.
+pub fn state_value_raw_v2(obs: &Value) -> f64 {
+    let seat = obs["seat"].as_u64().unwrap() as usize;
+    let other = 1 - seat;
+    let base = state_value_raw(obs);
+    if base.abs() >= TERMINAL {
+        return base;
+    }
+    let direction = if seat == 0 { 1.0 } else { -1.0 };
+    let mut adjusted = base;
+    if let Some(track) = obs["influence"].as_array() {
+        for (planet, position) in track.iter().enumerate() {
+            let Some(position) = position.as_f64() else {
+                continue;
+            };
+            let toward = position * direction;
+            // Undo the flat, victory-blind term this replaces.
+            adjusted -= 0.11 * toward + 0.06 * toward.powi(3) / 27.0;
+            if toward >= 2.0 {
+                adjusted -= 0.18;
+            } else if toward <= -2.0 {
+                adjusted += 0.18;
+            }
+            if toward == 0.0 {
+                continue;
+            }
+            // Whoever the disc is travelling towards is the one who would
+            // capture, and the value is theirs.
+            let (capturer, sign) = if toward > 0.0 { (seat, 1.0) } else { (other, -1.0) };
+            let gain = capture_gain(obs, capturer, planet);
+            // Squared, so a disc halfway along is worth a quarter of the
+            // capture rather than half: the last step is the hard one, and a
+            // linear discount over-values idle early pushing.
+            let closeness = (toward.abs() / CONTROL).min(1.0).powi(2);
+            adjusted += sign * gain * closeness;
+        }
+    }
+    adjusted
+}
+
+/// The same leaf, read straight off the `State` instead of through a JSON
+/// observation.
+///
+/// WHY IT IS WORTH A SECOND IMPLEMENTATION. Every node of an alpha-beta search
+/// builds `state.observation(seat)` -- a serde_json `Value` with two nested
+/// player objects, allocating throughout -- and then reads about thirty
+/// string-keyed fields back out of it. In a depth-first search most nodes ARE
+/// leaves, so that JSON round trip is a large share of the entire cost, and
+/// node rate is depth: the serving ladder measured K=4 at depth 7.69 scoring
+/// 0.6172 against K=8 at depth 7.00 scoring 0.5625, so roughly two thirds of a
+/// ply was worth about 0.055.
+///
+/// IT MUST BE EXACTLY EQUIVALENT, and that is not a style preference. The
+/// observation is REDACTED by construction -- opponent hands and both deck
+/// orders are structurally absent -- which is what stops a determinized world
+/// leaking through the leaf. Reading `State` directly has no such guarantee, so
+/// this touches only the fields the observation exposes: both players'
+/// captures, technology, row bonuses, credits and zenithium, the seat's OWN
+/// hand, the OPPONENT's public columns, the influence track and the leader.
+/// `equivalent_to_the_observation_leaf` walks real games and holds the two to
+/// each other, which is the gate that makes the optimisation safe rather than
+/// merely fast.
+fn progress_from_state(state: &State, seat: usize) -> f64 {
+    let captured = &state.players[seat].captured;
+    let mut counts = [0usize; 5];
+    for c in captured {
+        counts[*c] += 1;
+    }
+    (captured.len() as f64 / 5.0)
+        .max(counts.iter().filter(|n| **n > 0).count() as f64 / 4.0)
+        .max(*counts.iter().max().unwrap() as f64 / 3.0)
+}
+
+fn capture_gain_from_state(state: &State, who: usize, planet: usize) -> f64 {
+    let before = progress_from_state(state, who);
+    let mut counts = [0usize; 5];
+    for c in &state.players[who].captured {
+        counts[*c] += 1;
+    }
+    counts[planet] += 1;
+    let total: usize = counts.iter().sum();
+    let after = (total as f64 / 5.0)
+        .max(counts.iter().filter(|n| **n > 0).count() as f64 / 4.0)
+        .max(*counts.iter().max().unwrap() as f64 / 3.0);
+    if after >= 1.0 {
+        WINNING_CAPTURE
+    } else {
+        1.4 * (after - before)
+    }
+}
+
+/// `state_value_v2` without the JSON. See the note above `progress_from_state`.
+pub fn state_value_v2_from_state(state: &State, seat: usize) -> f64 {
+    let other = 1 - seat;
+    if state.phase == "over" {
+        return match state.winner {
+            None => 0.0,
+            Some(w) => {
+                if w == seat {
+                    1.0
+                } else {
+                    -1.0
+                }
+            }
+        };
+    }
+    let me = &state.players[seat];
+    let them = &state.players[other];
+    let mut value = 1.4 * (progress_from_state(state, seat) - progress_from_state(state, other));
+
+    let direction = if seat == 0 { 1.0 } else { -1.0 };
+    for (planet, position) in state.influence.iter().enumerate() {
+        let Some(position) = position else { continue };
+        let toward = *position as f64 * direction;
+        if toward == 0.0 {
+            continue;
+        }
+        let (capturer, sign) = if toward > 0.0 { (seat, 1.0) } else { (other, -1.0) };
+        let gain = capture_gain_from_state(state, capturer, planet);
+        let closeness = (toward.abs() / CONTROL).min(1.0).powi(2);
+        value += sign * gain * closeness;
+    }
+
+    value += 0.05 * (me.captured.len() as f64 - them.captured.len() as f64);
+    value += 0.018
+        * (me.technology.iter().sum::<i32>() as f64 - them.technology.iter().sum::<i32>() as f64);
+    value += 0.03 * (me.row_bonuses.len() as f64 - them.row_bonuses.len() as f64);
+    match state.leader.owner {
+        Some(owner) if owner == seat => value += 0.09 + 0.035 * state.leader.level as f64,
+        Some(_) => value -= 0.09 + 0.035 * state.leader.level as f64,
+        None => {}
+    }
+    value += 0.025 * (me.credits - them.credits) as f64;
+    value += 0.04 * (me.zenithium - them.zenithium) as f64;
+    let cost_of = |ids: &[u16]| -> f64 {
+        ids.iter()
+            .filter_map(|id| crate::rules().cards.get(id))
+            .map(|card| card.cost as f64)
+            .sum()
+    };
+    let own_cards = cost_of(&me.hand);
+    let public_opponent_cards: f64 = them.columns.iter().map(|c| cost_of(c)).sum();
+    value += 0.005 * (own_cards - public_opponent_cards);
+
+    (value / SQUASH_SCALE).tanh() * SQUASH_CEILING
 }
 
 fn leaf_value(obs: &Value, leaf: Leaf) -> f64 {
     match leaf {
         Leaf::StateValue => state_value(obs),
         Leaf::CaptureProgressOnly => capture_progress_only(obs),
+        Leaf::StateValueV2 => state_value_v2(obs),
     }
 }
 pub fn choose(
@@ -1055,6 +1293,129 @@ mod tests {
     /// Minimax must actually BUILD the opponent's half of the tree, and the two
     /// seats' keys must not collide -- an observation embeds its own seat, so
     /// they cannot, and this pins that rather than trusting it.
+    /// THE EQUIVALENCE GATE for the JSON-free leaf. It exists to be fast; it
+    /// must not be a second, subtly different evaluator, and the risk is
+    /// specific rather than theoretical -- the observation is REDACTED, so a
+    /// State-based port that reached for a field the observation hides would
+    /// leak a determinized world into the leaf and still return a plausible
+    /// number.
+    #[test]
+    fn the_fast_leaf_is_equivalent_to_the_observation_leaf() {
+        let mut compared = 0usize;
+        for seed in [7u64, 91, 404, 1234, 5150] {
+            let (mut state, mut chance) = State::new(seed, [1 + (seed % 2) as i32, 2, 1]);
+            let mut steps = 0;
+            while let Some(actor) = state.actor() {
+                if steps > 120 {
+                    break;
+                }
+                for seat in 0..2 {
+                    let through_json = state_value_v2(&state.observation(seat));
+                    let direct = state_value_v2_from_state(&state, seat);
+                    assert!(
+                        (through_json - direct).abs() < 1e-9,
+                        "seed {seed} step {steps} seat {seat}: {through_json} against {direct}"
+                    );
+                    compared += 1;
+                }
+                let legal = state.legal_moves(actor);
+                if legal.is_empty() {
+                    break;
+                }
+                let pick = (steps * 7 + seed as usize) % legal.len();
+                if state.apply(actor, &legal[pick], &mut chance).is_err() {
+                    break;
+                }
+                steps += 1;
+            }
+        }
+        assert!(
+            compared > 400,
+            "only {compared} positions compared; the walk is not exercising the leaf"
+        );
+    }
+
+    /// A position from a real playtest: the opponent's disc part-way up one
+    /// planet and nowhere else, with captures banked that decide whether taking
+    /// that planet ends the game.
+    fn threat_position(their_captured: Vec<u64>, mars: i64) -> Value {
+        let influence: Vec<Value> = (0..5)
+            .map(|p| if p == 3 { json!(mars) } else { json!(0) })
+            .collect();
+        json!({
+            "seat": 1, "phase": "play", "winner": null, "turn_number": 10,
+            "influence": influence,
+            "leader": {"owner": null, "level": 0},
+            "players": [
+                {"credits": 5, "zenithium": 1, "hand": [], "columns": [[],[],[],[],[]],
+                 "technology": [0,0,0], "row_bonuses": [], "captured": their_captured},
+                {"credits": 5, "zenithium": 1, "hand": [], "columns": [[],[],[],[],[]],
+                 "technology": [0,0,0], "row_bonuses": [], "captured": []}
+            ]
+        })
+    }
+
+    /// THE PLAYTEST DEFECT, pinned so it cannot come back. A threat that ENDS
+    /// the game must cost more than the identical threat on a planet worth
+    /// nothing. The shipped leaf had this backwards -- 0.31, i.e. it minded a
+    /// game-losing capture THREE TIMES LESS than a routine one -- because the
+    /// influence term never looked at what the capture was worth and `tanh`
+    /// then compressed the dangerous case hardest.
+    #[test]
+    fn a_capture_that_wins_the_game_is_the_biggest_threat_on_the_board() {
+        let cost = |captured: Vec<u64>| {
+            state_value_v2(&threat_position(captured.clone(), 0))
+                - state_value_v2(&threat_position(captured, 2))
+        };
+        let harmless = cost(vec![]);
+        let absolute = cost(vec![3, 3]);
+        let democratic = cost(vec![0, 1, 2]);
+        assert!(
+            absolute > harmless * 2.0,
+            "a capture completing three-of-a-planet must dominate a routine one:              {absolute:.4} against {harmless:.4}"
+        );
+        assert!(
+            democratic > harmless * 2.0,
+            "a capture completing four-different-planets must too:              {democratic:.4} against {harmless:.4}"
+        );
+    }
+
+    /// ...and the same assertion FAILS on the shipped leaf, which is the whole
+    /// reason v2 exists. Without this the test above could pass for some
+    /// unrelated reason and nobody would learn what was wrong.
+    #[test]
+    fn the_shipped_leaf_really_does_have_the_threat_backwards() {
+        let cost = |captured: Vec<u64>| {
+            state_value(&threat_position(captured.clone(), 0))
+                - state_value(&threat_position(captured, 2))
+        };
+        let harmless = cost(vec![]);
+        let absolute = cost(vec![3, 3]);
+        assert!(
+            absolute < harmless,
+            "the defect this leaf was replaced for: the game-losing threat read              {absolute:.4} against the harmless {harmless:.4}"
+        );
+    }
+
+    /// A proven win must outrank every heuristic reading, or a search cannot
+    /// tell "winning" from "won" -- the squash ceiling is what guarantees it.
+    #[test]
+    fn a_terminal_outranks_every_heuristic_position() {
+        let mut won = threat_position(vec![], 0);
+        won["phase"] = json!("over");
+        won["winner"] = json!(1);
+        assert_eq!(state_value_v2(&won), 1.0);
+        let mut lost = won.clone();
+        lost["winner"] = json!(0);
+        assert_eq!(state_value_v2(&lost), -1.0);
+        for captured in [vec![], vec![3u64, 3], vec![0u64, 1, 2, 4]] {
+            for mars in [-4, -2, 0, 2, 4] {
+                let v = state_value_v2(&threat_position(captured.clone(), mars));
+                assert!(v.abs() < 1.0, "heuristic {v} reached a terminal reading");
+            }
+        }
+    }
+
     #[test]
     fn minimax_gives_the_opponent_its_own_nodes() {
         let (state, _) = State::new(22, [1, 2, 1]);

@@ -250,6 +250,14 @@ pub fn orbit_alphabeta_move_json(
             // structural hash and the native measurement ran with it on, so it
             // stays on here to serve what was measured.
             use_table: true,
+            // BOTH OF THESE PIN THE SERVED PLAYER TO THE ONE THAT WAS MEASURED,
+            // and they are spelled out rather than defaulted for that reason.
+            // The shipped artifact was built before either field existed, so
+            // these values are what the browser is running today; the A/Bs that
+            // would change them are still on the box. Changing a field here
+            // changes the player without changing anything a gate can see.
+            leaf: crate::search::Leaf::StateValue,
+            quiescence: false,
         };
         match crate::alphabeta::choose(&world, seat, seed as u64, config) {
             Ok(result) => {

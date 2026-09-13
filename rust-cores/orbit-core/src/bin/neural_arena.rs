@@ -168,6 +168,7 @@ fn main() {
     let parse_leaf = |key: &str| match request.get(key).and_then(Value::as_str) {
         None | Some("state-value") => Leaf::StateValue,
         Some("capture-progress-only") => Leaf::CaptureProgressOnly,
+        Some("state-value-v2") => Leaf::StateValueV2,
         Some(other) => panic!("unknown leaf {other}"),
     };
     let leaf = parse_leaf("leaf");
@@ -229,6 +230,10 @@ fn main() {
     // fusion, and K is the lever aimed at it. Each world gets budget/K, so
     // depth falls as K rises and the trade is the whole experiment.
     let ab_worlds = request["ab_worlds"].as_u64().unwrap_or(1).max(1) as usize;
+    // Keep searching past the depth limit while a turn is half-finished. 39.6%
+    // of Orbit decision points sit inside a pending chain, so without this the
+    // leaf is scoring a transient position two times in five.
+    let ab_quiescence = request["ab_quiescence"] == true;
     // A SINGLE-world alpha-beta is one deterministic tree, so a root ensemble of
     // it is the same search summed with itself -- four workers of nothing --
     // and allowing it would quietly measure one thread against the MCTS's four
@@ -431,6 +436,13 @@ fn main() {
                             budget_ms: allowance,
                             max_depth: ab_max_depth,
                             use_table: ab_table,
+                            // PER SEAT. `--leaf`/`--opponent-leaf` already mean
+                            // this for the MCTS; alpha-beta ignoring them would
+                            // have made a leaf A/B silently measure nothing.
+                            leaf: if seat == candidate { leaf } else { opponent_leaf },
+                            // Candidate only: the comparison worth running needs
+                            // exactly one side extending.
+                            quiescence: ab_quiescence && seat == candidate,
                         };
                         match if seat_alphabeta {
                             if ab_worlds > 1 {

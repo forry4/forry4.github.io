@@ -99,7 +99,7 @@ def main():
                    help="Positive logit temperature for neural leaf values")
     # The 2026-09-11 leaf port is the default on both sides; the control arm is
     # the capture-only leaf the Rust search shipped before it.
-    leaves=("state-value","capture-progress-only")
+    leaves=("state-value","capture-progress-only","state-value-v2")
     p.add_argument("--leaf",choices=leaves,default="state-value",
                    help="Candidate seat's nonterminal leaf evaluator")
     p.add_argument("--opponent-leaf",choices=leaves,default="state-value",
@@ -156,6 +156,10 @@ def main():
                         "at budget/K. K=1 measured 0.5625 against the Expert while "
                         "the same search at perfect information measured 0.9609 -- "
                         "the gap is strategy fusion and this is the lever")
+    p.add_argument("--ab-quiescence",action="store_true",
+                   help="Candidate seat: do not stop the search inside a half-finished "
+                        "turn. 39.6%% of Orbit decision points are inside a pending "
+                        "chain, so the leaf otherwise scores a transient position")
     p.add_argument("--ab-max-depth",type=int,default=64,
                    help="Alpha-beta: iterative-deepening cap in decisions")
     p.add_argument("--determinization-period",type=int,default=1,
@@ -224,6 +228,7 @@ def main():
     request["ab_table"]=not args.ab_no_table
     request["ab_max_depth"]=args.ab_max_depth
     request["ab_worlds"]=args.ab_worlds
+    request["ab_quiescence"]=args.ab_quiescence
     request["policy_prior_weight"]=args.policy_prior_weight
     request["opponent_policy_prior_weight"]=args.opponent_policy_prior_weight
     request["determinization_period"]=args.determinization_period
@@ -273,7 +278,7 @@ def main():
             "perfect_information":args.perfect_information,
             "alphabeta":args.alphabeta,"opponent_alphabeta":args.opponent_alphabeta,
             "ab_table":not args.ab_no_table,"ab_max_depth":args.ab_max_depth,
-            "ab_worlds":args.ab_worlds,
+            "ab_worlds":args.ab_worlds,"ab_quiescence":args.ab_quiescence,
             "games":results,"seconds":time.perf_counter()-started,
             "mirror_control":mirror,
             "complete":process.returncode==0 and len(results)==len(jobs) and not any(r["error"] or r["censored"] for r in results)}
