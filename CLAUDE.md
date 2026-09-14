@@ -20,6 +20,7 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
 | [`shared/CLAUDE.md`](shared/CLAUDE.md) | Shared frontend kits + URL routing |
 | [`books/CLAUDE.md`](books/CLAUDE.md) | The Books feature |
 | [`bggfilter/CLAUDE.md`](bggfilter/CLAUDE.md) | BGG Filter — the BoardGameGeek harvest + the frontend-only filter page |
+| [`docs/deploy-reliability-log.md`](docs/deploy-reliability-log.md) | **Dated postmortems for RED RUNS** — the deploy gates, the scheduled jobs and the harness itself. Measurements behind the rules below (the CI-vs-dev font spread, the screens gate's failure census, the keepalive watchdog). |
 | [`docs/ai-research-log.md`](docs/ai-research-log.md) | **AI campaign history, dated sessions, rejected-experiment postmortems.** When something here says "see the research log," that's the blow-by-blow + "do not relitigate" detail. |
 
 ---
@@ -596,6 +597,26 @@ covers the logic; each game's wiring is one line).
   answers every identical position identically is one you can learn by rote, and a seat that could pin
   the deal in a hidden-info game would know the deal. `core/tests/test_deal_rng.py` guards both
   directions.
+- **THE RUNNER'S FONTS ARE NOT YOUR FONTS, AND THE GAP IS ~27%, NOT "A HAIR" — measure it before
+  budgeting against it.** Every Pages failure in the 26 days to 2026-09-14 was this gate (8 of 8),
+  and the 09-13/14 cluster was a layout that fitted by 1.69px here and overflowed on CI: the same
+  five glyphs measure 28.4px on Windows and 36.1px on Ubuntu, i.e. **3.85px per side**. An "it fits"
+  assertion with less margin than that is a coin flip that lands green locally every time, and a
+  first fix that trimmed ~6px against a GUESSED difference shipped and failed again at 0.95px.
+  Two rules fall out: prefer a **font-independent lever** (row geometry, dropping a glyph at a
+  breakpoint) over a font-denominated one; and assert the **CLEARANCE, not the absence of overflow**
+  — a 1px tolerance rates "fits by 0.69px" and "fits" identically, which is precisely the
+  distinction that failed the deploy. Detail + the validated glyph model: `docs/deploy-reliability-log.md`.
+- **A FAILING SCREEN CHECK EMITS A GITHUB ANNOTATION** (`runLane`, one site). The Actions logs API
+  needs auth even on a public repo, so before this the reason a deploy went red was readable only by
+  someone who could sign in and unzip a log. Annotations are public. Keep the `detail` argument of
+  every `check` carrying real MEASUREMENTS, not just the ids of the things that failed — that string
+  is now the whole diagnosis.
+- **`NaN` PASSES EVERY `>` COMPARISON, so a geometry check must assert its ROSTER before its
+  geometry.** `getComputedStyle` on a node that has left the DOM returns empty strings, so a card
+  caught mid-rerender measures NaN and sails through every bound while proving nothing. The tell was
+  a measured count drifting 90 -> 89. Same family as the `range(13)` parametrize and the vacuous
+  `importorskip`: a check that cannot fail is worse than no check.
 - **A seeded deal makes a CONDITIONAL check permanently vacuous instead of eventually covered, so it
   has to be steered and then ASSERTED.** Rag Tag's board-panel block has two checks that only fire if
   the drafted four include a ring (Joan) or Characters (the Fey Folk); the random draft used to reach

@@ -133,23 +133,46 @@ jobs:
             if [ "$code" = "200" ]; then sleep 240; else sleep 15; fi
           done
 
-  # THE ALARM FOR THE FAILURE ABOVE. A dead cron band is SILENT — the later hours keep
-  # firing, every run is green, and only the morning is cold — so it went unnoticed for
-  # nine days in August and eleven more in September. This is the header's "diagnose it by
-  # start hour" written down as a job: once a day it asks whether the pre-7am ramp actually
-  # fired, and FAILS if it did not. It pings nothing and deploys nothing.
+  # THE ALARM FOR THE FAILURE ABOVE — AND IT AUDITS THE PROPERTY, NOT THE
+  # MECHANISM. It used to ask "did the 11:00-13:59 UTC cron band fire?" and fail
+  # when it had not, which it has not for at least 14 days: hours 11, 12 and 13
+  # are dead, and spreading the ramp across five hours (the fix above) did not
+  # revive them. So it failed twice a day, every day, from 2026-09-07 onward.
   #
-  # It runs on TWO crons in different hours for the same reason the ramp is spread: a
-  # watchdog that can only be woken by one hour is silenced by exactly the outage it
-  # watches for. Both are OUTSIDE the 11:00-13:59 window they inspect — gate it on a cron
-  # inside that window and the run doing the checking satisfies the check, which passes
-  # forever while proving nothing.
+  # THE ALARM WAS RIGHT, AND THE CHECK WAS STILL WRONG. Measured 2026-09-14 03:59
+  # UTC — inside the 13:00-06:59 warm window — the backend was COLD and a probe
+  # woke it. Both pingers had missed it: GitHub's scheduler had dropped the 03:13
+  # and 03:47 firings (it drops most of them), and the Cloudflare Worker, which is
+  # supposed to make this impossible by firing every 5 minutes, answered 404 at the
+  # URL `keepalive-worker/wrangler.jsonc` documents. A cron-only Worker needs no
+  # route, so that is suggestive rather than proof — but the cold box is not.
+  # CHECK THAT THE WORKER IS ACTUALLY DEPLOYED before trusting anything here.
   #
-  # THE WINDOW IS 11:00-13:59 UTC, AND ITS END IS THE WHOLE POINT: a run holds ~90 min, so
-  # only a firing before 14:00 can leave the box warm AT 7am PDT. Checking "did the morning
-  # fire at all" over a looser 11:00-15:59 would have passed on 2026-09-05, whose earliest
-  # daytime firing was 15:54 UTC — 08:54 local, an hour and a half after the player hit a
-  # cold start. The check has to be the property that matters, not the presence of a run.
+  # What was wrong was the EVIDENCE, not the conclusion: "a GitHub cron did not
+  # fire" stopped implying "the backend was cold" the moment a second, independent
+  # pinger existed. An alarm that reasons from a superseded mechanism cannot be
+  # acted on — you cannot tell a real outage from a scheduler quirk — and it shares
+  # a dashboard with the deploy gates that do matter.
+  #
+  # WHAT IT MEASURES NOW: /health reports `started_at`, the process's own boot
+  # time, so "was the backend already up when the play window opened?" is a fact
+  # the backend will tell you — whichever pinger kept it warm, which is the whole
+  # point now that there are two. A late boot means it cold-started inside play
+  # hours, i.e. a real player waited out a ~50s spin-up.
+  #
+  # A DEPLOY ALSO RESTARTS THE PROCESS and is not a cold start, so a late boot is
+  # forgiven when a backend deploy ran after the window opened. Without that
+  # carve-out this would have failed on 2026-09-13, whose 16:00 UTC boot was
+  # deploy d8ff7259 at 15:57.
+  #
+  # KNOWN BLIND SPOT, stated so nobody reads more into a green tick than is there:
+  # `started_at` is the CURRENT boot only, so a cold start that has since been
+  # recovered is invisible unless it is recent. The two windows below are what the
+  # job can see — since 14:00 UTC (the morning failure this file exists for) and
+  # the last two hours (a cold start during play). The 00:00-07:00 UTC stretch is
+  # NOT covered, because a watchdog can only run when the scheduler runs it, and
+  # that is the same scheduler it is auditing. Closing it needs the Worker to
+  # record what it finds, not another cron here.
   warm-window-watchdog:
     if: >-
       github.event_name == 'workflow_dispatch'
@@ -160,31 +183,60 @@ jobs:
     permissions:
       actions: read
     steps:
-      - name: The pre-7am ramp must have fired in the last 24h
+      - name: The backend must have been warm when the play window opened
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          since=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
-          # created_at, not run_started_at: a run held pending by the ping job's
-          # concurrency group reports the queue wait in one and not the other, and what
-          # is being audited here is whether the CRON fired at all.
-          fired=$(curl -sS --fail --retry 3 --retry-all-errors \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/$REPO/actions/workflows/keepalive.yml/runs?per_page=100&event=schedule" \
-            | jq -r --arg since "$since" \
-                '.workflow_runs[] | select(.created_at >= $since) | .created_at')
-          echo "scheduled firings in the last 24h:"
-          echo "$fired" | sort | sed 's/^/  /'
-          ramp=$(printf '%s\n' "$fired" | awk -F'T' 'NF>1 { h = substr($2,1,2) + 0; if (h >= 11 && h <= 13) n++ } END { print n + 0 }')
-          total=$(printf '%s\n' "$fired" | grep -c . || true)
-          echo "total: $total    inside the 11:00-13:59 UTC morning ramp: $ramp"
-          if [ "$ramp" -eq 0 ]; then
-            echo "::error::The pre-7am warm-up band (11:00-13:59 UTC) fired ZERO times in the last 24h."
-            echo "::error::The backend is cold every morning. See this file's header — a push that"
-            echo "::error::touches it re-registers the cron, and if that does not take, move the ramp"
-            echo "::error::to different hours rather than re-registering the same ones again."
+          # 14:00 UTC = 7am PDT, the hour this whole file exists to protect.
+          open_utc=$(date -u -d "$(date -u +%Y-%m-%d) 14:00:00" +%s)
+          now=$(date -u +%s)
+          if [ "$now" -lt "$open_utc" ]; then
+            echo "The play window has not opened yet today; nothing to audit."
+            exit 0
+          fi
+
+          # A cold box holds this request through its own spin-up, so allow for it
+          # rather than timing out and reporting a failure as a warmth verdict.
+          health=$(curl -sS --fail --retry 5 --retry-delay 10 --retry-all-errors             --max-time 120 "https://splendid-nelz.onrender.com/health")
+          echo "health: $health"
+          started=$(printf '%s' "$health" | jq -r '.started_at // empty')
+          if [ -z "$started" ]; then
+            echo "::error::/health carried no started_at, so warmth cannot be measured."
+            echo "::error::core/build_info.py is what puts it there."
             exit 1
           fi
+          echo "backend booted $(date -u -d "@$started" +%Y-%m-%dT%H:%M:%SZ); window opened $(date -u -d "@$open_utc" +%Y-%m-%dT%H:%M:%SZ)"
+
+          # Two questions, because one boot time can only answer so much: was it up
+          # when play started, and has it gone cold since?
+          recent_cut=$(( now - 7200 ))
+          late_for_window=0; [ "$started" -gt "$open_utc" ] && late_for_window=1
+          booted_recently=0; [ "$started" -gt "$recent_cut" ] && booted_recently=1
+          if [ "$late_for_window" -eq 0 ] && [ "$booted_recently" -eq 0 ]; then
+            echo "Up since before the window opened, and no recent restart — the pingers did their job."
+            exit 0
+          fi
+          # `[ test ] && echo` as a STATEMENT returns the test's status, and under
+          # `set -e` a false test therefore exits the job — red, with no diagnosis
+          # and skipping the deploy carve-out below. Use `if`.
+          if [ "$late_for_window" -eq 1 ]; then echo "LATE: booted after the window opened."; fi
+          if [ "$booted_recently" -eq 1 ]; then echo "RECENT: booted within the last 2h — it went cold during play hours."; fi
+
+          # Late boot. A deploy is the one innocent explanation.
+          deployed=$(curl -sS --fail --retry 3 --retry-all-errors             -H "Authorization: Bearer $GH_TOKEN"             -H "Accept: application/vnd.github+json"             "https://api.github.com/repos/$REPO/actions/workflows/deploy-render.yml/runs?per_page=20"             | jq -r --argjson open "$open_utc"                 '[.workflow_runs[] | select((.created_at | fromdateiso8601) >= ($open - 900))] | length' || echo 0)
+          if [ "${deployed:-0}" -gt 0 ]; then
+            echo "Late boot, but a backend deploy ran after the window opened — that restarts the process. OK."
+            exit 0
+          fi
+
+          echo "--- scheduled keepalive firings in the last 24h (diagnosis, not the verdict) ---"
+          since=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+          curl -sS --fail --retry 3 --retry-all-errors             -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json"             "https://api.github.com/repos/$REPO/actions/workflows/keepalive.yml/runs?per_page=100&event=schedule"             | jq -r --arg since "$since" '.workflow_runs[] | select(.created_at >= $since) | .created_at'             | sort | sed 's/^/  /' || true
+
+          echo "::error::The backend COLD-STARTED at $(date -u -d "@$started" +%H:%M)Z, inside play hours, with no deploy to explain it."
+          echo "::error::A player hitting the site before then waited out a ~50s spin-up. BOTH pingers missed this window:"
+          echo "::error::check the Cloudflare Worker first (npx wrangler tail, or /?force=1) since it is the reliable one,"
+          echo "::error::then the cron histogram printed above. See this file's header."
+          exit 1
