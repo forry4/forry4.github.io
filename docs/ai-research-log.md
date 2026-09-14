@@ -51,6 +51,15 @@ ship candidate. The data is worth carrying into a native policy-head/root-prior
 test, where the current alpha-beta/value search remains the control; the pure-Python
 search probe was too slow to be a useful instrument at this workload.
 
+The follow-on strategic audit is recorded in
+`docs/orbit-strategy-audit-2026-09-14.md` and is reproducible with
+`games/orbit/tools/bga_strategy_audit.py`. Its main signal is temporal: the
+winning seat mulligans more aggressively, develops earlier when a useful
+Technology action is available, and then returns to recruiting. A raw increase
+in total Technology frequency is the wrong intervention. The 40-table rich
+subset is heavily concentrated in one account (Fonnonnn), so these are cheap
+hypotheses for fresh-deal tests, not universal expert priors.
+
 ---
 
 ### Session (2026-09-13) — Orbit: a correct fix that does not convert, the first candidate to hold above 0.5, and three infrastructure failures that cost more than the experiments
