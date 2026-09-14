@@ -110,6 +110,10 @@ def test_taking_and_giving_move_both_seats():
     assert mirror.zenithium["1"] == engine.STARTING_ZENITHIUM - 1
     assert mirror.zenithium["2"] == engine.STARTING_ZENITHIUM + 1
 
+    mirror.consume("giveCredits", {"player_no": "1", "nb": 3})
+    assert mirror.credits["1"] == engine.STARTING_CREDITS + 3 - 3
+    assert mirror.credits["2"] == engine.STARTING_CREDITS
+
 
 def test_columns_are_tracked_so_that_exile_choices_are_visible():
     """Which card is exiled moves nothing else, so without columns every candidate

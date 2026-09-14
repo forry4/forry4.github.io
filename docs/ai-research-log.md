@@ -8,6 +8,39 @@ Content down to the ARCHIVE blocks is preserved **verbatim** from the pre-split 
 
 ---
 
+### Session (2026-09-14) — Orbit BGA co-walk reaches full rich-corpus parity
+
+The Secret Agents replay harness now closes the loop against the local BGA corpus:
+**40 of 40 rich archived tables consume their complete watched event stream and
+reproduce the logged winner**, including all 27 tables with undo batches. The forced
+setup still reproduces both opening hands on 40 of 40. This turns the expert games
+into a usable parity oracle and removes the earlier 2-of-13 undo-free limitation.
+
+The decisive design remains a mirror walk. BGA emits the same event for a selected
+effect and an automatic resolution, so translating menu types directly into moves
+stalls. Each legal engine move is instead tried against a mirror of BGA's public
+state; the candidate that reaches the mirror, with the longest event explanation as
+the tie-break, is committed. The completed pass also handles card-id-ordered draws,
+mobilize draws, hidden one-time bonus occupancy inferred from later payouts, both
+orientations of adjacent choices, BGA's reverse all-planets order, the captured
+planet tier-exile no-op, and undo snapshots that restore the engine plus both scripted
+random streams.
+
+One tempting experiment was rejected: tracking the Leader badge alone reduced reach
+in the old A/B (541 to 515 decisions). The badge is now retained only as part of the
+full mirror, alongside hands and the public update sequence; the old result is a
+model warning, not evidence that the field is irrelevant.
+
+The training implication is now concrete. Export the parity-verified trajectories as
+an offline action-policy dataset, split by whole game, and first test legal-action
+accuracy and move ranking on held-out games. Then use the policy for root ordering or
+a bounded prior while keeping the current alpha-beta/value baseline as the strength
+control. This is the cheapest way to test whether top-player play supplies the
+missing development and complete-turn signal before spending more time on another
+blind self-play generation.
+
+---
+
 ### Session (2026-09-13) — Orbit: a correct fix that does not convert, the first candidate to hold above 0.5, and three infrastructure failures that cost more than the experiments
 
 Two measurements and, unusually, a session where the infrastructure findings are

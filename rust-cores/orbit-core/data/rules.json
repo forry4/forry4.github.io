@@ -203,6 +203,7 @@
         "then": [
           {
             "amount": 2,
+            "different_from_previous": true,
             "type": "influence_other"
           }
         ],
@@ -265,6 +266,7 @@
         "then": [
           {
             "amount": 2,
+            "different_from_previous": true,
             "type": "influence_other"
           }
         ],
@@ -1118,6 +1120,7 @@
         "then": [
           {
             "amount": 1,
+            "different_from_previous": true,
             "type": "influence_other"
           }
         ],
@@ -2034,7 +2037,7 @@
       "rule": "40=46,3>1,-5,1|46,7>1,-5,2|46,12>1,-5,3"
     }
   },
-  "rules": "57e70befe6b4a7edaec9659af70a0c63000a84e9f063ce1d8cad51abf1555371",
+  "rules": "436b0909457ef16b2ab6882616842d7ae5d4edaa6e66f3cb2e59ee295117ed24",
   "tech_effects": {
     "animod/1/1": [
       {

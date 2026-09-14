@@ -1711,6 +1711,12 @@ mod tests {
         state.players[seat].credits = 100;
         state.players[seat].captured = vec![planet, planet];
         state.influence[planet] = Some(if seat == 0 { 3 } else { -3 });
+        // Keep the terminal capture free of a bonus choice so this fixture
+        // isolates the alternate-win boundary. Bonus-bearing captures are
+        // drained through their queued effect before the winner is committed.
+        if let Some(token) = state.planet_bonus[planet].take() {
+            state.bonus_discard.push(token);
+        }
         let result = choose(
             &state,
             seat,
@@ -1724,6 +1730,14 @@ mod tests {
         )
         .unwrap();
         state.apply(seat, &result["move"], &mut chance).unwrap();
+        while state.winner.is_none() && state.pending.is_some() {
+            let actor = state.actor().unwrap();
+            let moves = state.legal_moves(actor);
+            if moves.is_empty() {
+                break;
+            }
+            state.apply(actor, &moves[0], &mut chance).unwrap();
+        }
         assert_eq!(state.winner, Some(seat));
     }
     #[test]

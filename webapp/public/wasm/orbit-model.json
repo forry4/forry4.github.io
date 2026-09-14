@@ -140,6 +140,7 @@
         "then": [
           {
             "amount": 2,
+            "different_from_previous": true,
             "type": "influence_other"
           }
         ],
@@ -202,6 +203,7 @@
         "then": [
           {
             "amount": 2,
+            "different_from_previous": true,
             "type": "influence_other"
           }
         ],
@@ -1055,6 +1057,7 @@
         "then": [
           {
             "amount": 1,
+            "different_from_previous": true,
             "type": "influence_other"
           }
         ],
@@ -1643,7 +1646,7 @@
     "technology_level": 0.0016,
     "tier": 0.059
   },
-  "rules": "57e70befe6b4a7edaec9659af70a0c63000a84e9f063ce1d8cad51abf1555371",
+  "rules": "436b0909457ef16b2ab6882616842d7ae5d4edaa6e66f3cb2e59ee295117ed24",
   "schema": 1,
   "turn_budget_ms": 5000
 }

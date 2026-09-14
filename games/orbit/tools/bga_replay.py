@@ -14,10 +14,12 @@ replays them through the same `drive()` a BGA log will use, asserting the replay
 an identical final state. So when a real log fails, the failure is in the parse or in the
 rules -- not in the driver.
 
-Half 2 is PART-BUILT, and the part that is built is the part the old docstring called the
-hard one: THE SETUP. `bga_table.py` reads a log; `build_game` forces a table's setup and
-`--verify` checks it against every rich archived table. **40 of 40 reproduce both opening
-hands exactly.** The pieces that took the work:
+Half 2 is now COMPLETE for the rich archived corpus. `bga_table.py` reads a log,
+`build_game` forces a table's setup, and `bga_cowalk.py` walks every choice against a
+mirror of BGA's reported state. **40 of 40 tables consume their complete watched event
+stream and reproduce the logged winner, including all 27 tables with undo batches.**
+`--verify` separately checks that **40 of 40 reproduce both opening hands exactly.**
+The pieces that took the work:
 
   * an archived log is one globally ordered stream across all three channels, so first
     appearance in file order IS draw order -- asserted on load rather than assumed,
@@ -33,35 +35,19 @@ Every archived table carrying card identities is a Secret Agents game -- 0 of 40
 expansion-free -- so `build_game` deals the 100-card pool. That is why the expansion
 exists in `effects.py` at all; see `tests/test_secret_agents.py`.
 
-The co-walk itself is `bga_cowalk.py`, and it WORKS, partly: 2 of the 13 undo-free tables
-replay end to end and reproduce the logged winner, and the 13 together reach 541 of their
-1,055 decisions (`--cowalk`). It does not read the log as a list of answers -- it cannot,
-because BGA emits the same event for a chosen effect and an auto-resolved one -- so it
-converges a MIRROR of BGA's state against the engine and picks the move the mirror can
-reach. The face-up bonus tokens and the board sides, neither of which is ever announced,
-are handled there: the tokens are taken from `gainBonus` at award time, and the eight
-configurations are simply searched.
-
-What is left:
-
-  1. **The remaining 11 undo-free tables.** Each stops at a decision no candidate
-     reproduces, which is the honest failure -- it means our rules and BGA's disagree
-     about that position, or the mirror still cannot see what separates two answers.
-     Suspect the harness first: every failure so far has been the harness, and the
-     fixes were mechanisms, not special cases (draws ordered by `card_id`; a mobilize
-     being a draw; trials not eating the scripts; ranking candidates by how much of the
-     log they explain).
-  2. **Undo.** 27 tables contain `undo` batches: reverse-operation records that revert an
-     earlier move, after which the player replays it. Handling them needs an engine
-     snapshot AND a rewind of the draw script, and it is not yet clear whether BGA
-     re-announces cards redrawn after an undo. Worth another 27 tables, separately.
+The co-walk does not read the log as a list of answers -- it cannot, because BGA emits
+the same event for a chosen effect and an auto-resolved one. It converges a MIRROR of
+BGA's state against the engine and picks the move the mirror can reach. The face-up bonus
+tokens and board sides, neither of which is ever announced, are handled there: token
+identities come from `gainBonus` at award time, the eight board configurations are
+searched, and undo restores the engine, deck script, bonus script and mirror snapshot.
 
 Usage::
 
     python -m games.orbit.tools.bga_replay --selftest [--games 50]
     python -m games.orbit.tools.bga_replay --verify          # forced setup vs the corpus
-    python -m games.orbit.tools.bga_replay --cowalk          # how far each table replays
-    python -m games.orbit.tools.bga_replay <table_id>        # once the co-walk exists
+    python -m games.orbit.tools.bga_replay --cowalk          # full parity over all rich tables
+    python -m games.orbit.tools.bga_replay <table_id>        # replay one table
 """
 
 from __future__ import annotations
@@ -415,7 +401,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--verify", action="store_true",
                         help="check the forced setup against every rich archived table")
     parser.add_argument("--cowalk", action="store_true",
-                        help="walk every undo-free table beside the engine and report reach")
+                        help="walk every rich table beside the engine and require full parity")
     parser.add_argument("--configuration", default="sun", choices=("sun", "random"))
     args = parser.parse_args(argv)
 

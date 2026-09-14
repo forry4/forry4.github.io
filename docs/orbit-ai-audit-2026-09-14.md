@@ -12,11 +12,12 @@
 > why its Secret Agents filter was removed.
 >
 > The ten cards were therefore implemented (flag-gated, never served) as a
-> prerequisite, and the replay built on top: the forced setup reproduces both opening
-> hands on 40 of 40 tables, and the co-walk replays 2 of the 13 undo-free tables end
-> to end with the logged winner. See `games/orbit/AGENTS.md` and
-> `games/orbit/tools/bga_replay.py` for the current state; the sections below are
-> unedited otherwise.
+> prerequisite, and the replay built on top. The forced setup reproduces both opening
+> hands on 40 of 40 tables, and the co-walk now consumes the complete watched event
+> stream and reproduces the logged winner on all 40 rich tables, including the 27
+> tables with undo batches. See `games/orbit/AGENTS.md` and
+> `games/orbit/tools/bga_replay.py` for the current implementation; the analysis below
+> remains the dated strategy audit.
 
 
 **Recommendation: pause the existing value-only self-play league. Use the archived expert games to teach a cheap action policy, and use Forrest's games to measure and repair strategic development and complete-turn planning.** Keep alpha-beta as the current baseline. A larger network, another blind generation, or a small search-speed optimization is a lower priority than establishing that the bot can learn the strategies it currently loses to.
@@ -62,9 +63,9 @@ Fresh inventory:
 - Private `gameStateChange` records include opening `hand_ids` and main-action `cards_id` plus `moves` menus.
 - A conservative alignment probe produced **1,751 main actions across all 40 games**. Every chosen card/action matched its preceding private menu, and every hand card ID in those menus was already known from the event stream.
 
-The probe buffers a main action until its end-of-turn `setHandSize`, clears unfinished actions on `undo`, and omits terminal actions that have no refill. This is a coverage result, not full public-state reconstruction or engine legality parity. The recorded menu's cost/availability semantics still need verification before it becomes a training mask.
+The probe buffers a main action until its end-of-turn `setHandSize`, clears unfinished actions on `undo`, and omits terminal actions that have no refill. The later co-walk verifies the engine's legality and public-state parity against the complete rich logs; use the co-walk output as the training-data gate rather than treating the menu probe alone as a mask.
 
-Of the 1,751 aligned actions, **1,155 have no Secret Agent in the acting hand**. That does not make their whole positions expansion-free: an earlier expansion card may have changed the board or the opposing hand. For the first pilot, use verified base-game positions, or mask and explicitly represent unsupported context; never silently treat an expansion game as the base game.
+Of the 1,751 aligned actions, **1,155 have no Secret Agent in the acting hand**. That does not make their whole positions expansion-free: an earlier expansion card may have changed the board or the opposing hand. The co-walk now supports the Secret Agents context behind all 40 trajectories, so a training pilot can keep those games while tagging expansion context instead of silently treating them as base-game positions.
 
 The scraper enumerated top-ranked players' histories. Its manifest preserved player names, game outcome/rank, and end time, **but discarded the fetched Elo**. A game involving a top player is not proof that both seats qualify. Restore/verify seat-strength provenance before calling every demonstration expert, and keep both winning and losing games from qualified demonstrators. The manifest's `ranks` field is finishing position, not ladder strength.
 
@@ -114,7 +115,7 @@ The shipped `AbConfig` also has `quiescence: false`. Search depth counts individ
 
 | Priority | Experiment | Cheap first measurement | Decision it answers |
 |---|---|---|---|
-| 1 | Build a small expert demonstration dataset from the 40 rich archives | Validate 100 diverse decisions end-to-end, including costs, board sides, ownership, and undo; then process the verified subset | Can we learn strategies better than our own weak teachers demonstrate? |
+| 1 | Build a small expert demonstration dataset from the 40 rich archives | Export 100 diverse parity-verified decisions end-to-end, including costs, board sides, ownership, expansion context, and undo; then process the verified subset | Can we learn strategies better than our own weak teachers demonstrate? |
 | 2 | Train a compact action classifier/ranker on that dataset | Whole-game holdout: legal-action accuracy, loss, and error classes versus the existing ranker; compare learning curves at 10/20/40 games | Does expert supervision give an immediately useful policy signal? |
 | 3 | Turn the 14 reconstructed human games into a fixed diagnostic set | Replay 50–100 varied decisions, emphasizing early development and the turns before tactical losses; report alternatives and complete-turn consequences | Which common mistakes can a candidate actually correct? |
 | 4 | Complete-turn planning and pending-choice consistency | Use those same positions to compare current search, searched follow-ups, and turn-boundary leaf evaluation independently | Does the bot execute coherent plans and correctly value multi-step investments? |

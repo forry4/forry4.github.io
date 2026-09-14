@@ -160,7 +160,7 @@ each check and the reason it is built that way.
 
 Three findings worth keeping:
 
-- **The forced setup is DONE and verified; the co-walk is not.** `tools/bga_table.py`
+- **The forced setup and co-walk are DONE and verified.** `tools/bga_table.py`
   reads a log, `bga_replay.build_game` forces a table's setup, and
   `python -m games.orbit.tools.bga_replay --verify` checks it against every rich
   table: **40 of 40 reproduce both opening hands exactly.** Three facts were
@@ -170,32 +170,29 @@ Three findings worth keeping:
   twenty moves later); seat 1 is the first player and **BGA's influence signs are
   inverted** relative to ours (`orbit = -bga`); and draws must be SCRIPTED rather
   than pre-arranged, because BGA issues a new `card_id` for a card that returns
-  through a reshuffle, which 4 of the 40 tables do. What remains is the co-walk
-  itself (a sub-decision is a private state-35 MENU plus a consequence event, so
-  the log must be read beside the engine rather than translated ahead of it), undo
-  (27 tables), and the eight face-up bonus tokens, which are never announced at
-  setup. The co-walk is `tools/bga_cowalk.py` and it partly WORKS: **2 of the 13
-  undo-free tables replay end to end and reproduce the logged winner**, and the 13
-  together reach **541 of their 1,055 decisions** (`bga_replay --cowalk`). It does
-  not read the log as a list of answers — BGA emits the same event for a chosen
-  effect and an auto-resolved one — but converges a MIRROR of BGA's state against
-  the engine and keeps the move the mirror can reach, which makes the replay a
-  parity check rather than a legality check. Four mechanisms were paid for and
-  should not be re-derived: draws are ordered by BGA's `card_id`, not by event
-  order (a turn's refill `newCards` is emitted BEFORE the same turn's `mobilize`,
-  whose cards were drawn first); **a mobilize IS a draw** and is announced only in
-  the `mobilize` event; a trial application must not eat the deck or bonus scripts;
-  and candidates are ranked by how much of the log they EXPLAIN, without which
-  declining an optional (zero events consumed) beats accepting it every time. The
+  through a reshuffle, which 4 of the 40 tables do. The co-walk is
+  `tools/bga_cowalk.py`: it now consumes the complete watched event stream and
+  reproduces the logged winner on **all 40 rich tables, including all 27 tables
+  containing undo batches**. It does not read the log as a list of answers — BGA
+  emits the same event for a chosen effect and an auto-resolved one — but
+  converges a MIRROR of BGA's state against the engine and keeps the move the
+  mirror can reach, which makes the replay a parity check rather than a legality
+  check. Keep the mechanisms that made it complete: draws are ordered by BGA's
+  `card_id`, not by event order (a turn's refill `newCards` is emitted BEFORE the
+  same turn's `mobilize`, whose cards were drawn first); **a mobilize IS a draw**
+  and is announced only in the `mobilize` event; trial applications must not eat
+  the deck or bonus scripts; candidates are ranked by how much of the log they
+  EXPLAIN; hidden one-time bonus occupancy is inferred from later payouts; and
+  undo restores the engine, draw script, bonus script and mirror snapshot. The
   control space is ±4 — `CONTROL_POSITION` — and guessing ±3 halved the reach.
 - **Separate spectator logs from rich archived logs.** The original spectator sample
   had no setup dump or hand reveal, so seeded full replay was not possible from it.
   **The 2026-09-14 corpus audit found 40 complete archived games with both seats'
   `newCards` identities and private hand/move menus.** A chronological probe aligned
   1,751 refill-closed main actions with their menus, with every acting-hand ID known.
-  This establishes an expert-data/replay starting point, not full reconstruction or
-  rules parity: setup, board sides, menu availability, undo and expansion context still
-  need validation. Do not generalize the spectator limitation to the whole corpus.
+  The verified co-walk now closes setup, board sides, menu availability, undo and
+  expansion context for all 40 rich tables. Do not generalize the spectator limitation
+  to the whole corpus.
   See `docs/orbit-ai-audit-2026-09-14.md` for coverage and limitations.
 - **Our cost is a CEILING, not an equality.** Zenith discounts, so what BGA charges on
   the day is at most the printed cost — card 502 has been charged 5, 6, 8, 9 and 10. A first cut of the audit tested equality and reported five "mismatches" and

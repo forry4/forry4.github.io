@@ -142,10 +142,10 @@ _set(105, influence(1), if_leader([credits(3)]))
 _set(106, zenithium(3))
 _set(107, {"type": "draw_bonus"}, give_leader([credits(7)], "Give the Leader for 7 Credits"))
 _set(108, credits(5), if_leader([{"type": "draw_bonus"}]))
-_set(109, influence(2), optional({"resource": "zenithium_to_opponent", "amount": 1}, [{"type": "influence_other", "amount": 2}], "Give 1 Zenithium for +2 on a different planet"))
+_set(109, influence(2), optional({"resource": "zenithium_to_opponent", "amount": 1}, [{"type": "influence_other", "amount": 2, "different_from_previous": True}], "Give 1 Zenithium for +2 on a different planet"))
 _set(110, split_influence(1, 1), {"type": "transfer_each", "planets": list(PLANETS)})
 _set(111, zenithium(2), give_leader([zenithium(2)], "Give the Leader for 2 Zenithium"))
-_set(112, influence(2), give_leader([{"type": "influence_other", "amount": 2}], "Give the Leader for +2 on a different planet"))
+_set(112, influence(2), give_leader([{"type": "influence_other", "amount": 2, "different_from_previous": True}], "Give the Leader for +2 on a different planet"))
 _set(113, mobilize(2), give_leader([mobilize(3)], "Give the Leader to mobilize 3 more cards"))
 _set(114, optional({"resource": "credits_to_opponent", "amount": 3}, [influence(2, exclude="mercury")], "Give 3 Credits for +2 influence"))
 _set(115, exile_tier("mercury", "influence"))
@@ -224,7 +224,7 @@ _set(507, influence(1, "terra"), leader())
 _set(508, influence(1), if_leader([zenithium(1)]))
 _set(509, zenithium(3), if_leader([zenithium(1)]))
 _set(510, exile(1, reward="card_cost"))
-_set(511, influence(2), {"type": "if_credits", "amount": 6, "then": [{"type": "influence_other", "amount": 1}]})
+_set(511, influence(2), {"type": "if_credits", "amount": 6, "then": [{"type": "influence_other", "amount": 1, "different_from_previous": True}]})
 _set(512, credits(5), give_leader([credits(7)], "Give the Leader for 7 Credits"))
 _set(513, {"type": "per_nonempty", "owner": "opponent", "amount": 2})
 _set(514, transfer(2), give_leader([transfer(2)], "Give the Leader to transfer 2 more cards"))
@@ -252,10 +252,10 @@ _set(320, choose("Choose Mungo's pair", [
 ]))
 _set(419, raise_to("zenithium", 2))
 _set(420, influence(2, exclude="mars", target="opponent"),
-          {"type": "influence_other", "amount": 2}, leader(2))
+          {"type": "influence_other", "amount": 2, "different_from_previous": True}, leader(2))
 _set(519, discard_hand("all"), credits(5))
 _set(520, influence(1),
-          if_resource("zenithium", 3, [{"type": "influence_other", "amount": 1}],
+          if_resource("zenithium", 3, [{"type": "influence_other", "amount": 1, "different_from_previous": True}],
                       who="opponent"))
 
 
