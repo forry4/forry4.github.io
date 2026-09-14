@@ -86,7 +86,24 @@ webapp/test-results/
 # (`games/spender/ai/offline/...`). They used to be ~40 `.orbit-*` directories in
 # the repo root holding 5.8 GB, of which 3.1 GB was dead cargo build output from
 # one-off `--target-dir` experiments.
-games/orbit/ai/runs/
+# ...but the RUN SCRIPTS themselves are tracked, and the outputs are not. The
+# scripts are the experimental protocol -- what was compared, at what budget,
+# with which controls and non-vacuity checks -- and on 2026-09-14 all 19 of them
+# existed in no commit at all. A campaign whose method lives only on one disk
+# cannot be audited, reproduced, or recovered.
+#
+# THE DIRECTORY FORM CANNOT EXPRESS THIS. `games/orbit/ai/runs/` excludes the
+# directory, and git does not descend into an excluded directory, so a later
+# `!.../*.sh` would never be consulted. Excluding the CONTENTS instead leaves the
+# directory itself readable, and the negation then works. The `*` still matches
+# every result subdirectory, so the 5.8 GB of checkpoints and arena reports this
+# rule was written for stays out.
+#
+# They only became worth tracking once they stopped hardcoding one machine's
+# path: `REPO` now derives from ${BASH_SOURCE[0]}, so a script runs in whichever
+# worktree it sits in.
+games/orbit/ai/runs/*
+!games/orbit/ai/runs/*.sh
 # The old root location, kept so a stale checkout or an older tool cannot start
 # re-littering the root. NOTE the missing trailing slash on the second pattern:
 # `.orbit-*/` matched DIRECTORIES only, so the root `.orbit-*.json` arena reports
