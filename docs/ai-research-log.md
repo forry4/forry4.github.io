@@ -8,6 +8,171 @@ Content down to the ARCHIVE blocks is preserved **verbatim** from the pre-split 
 
 ---
 
+### Session (2026-09-13) — Orbit: a correct fix that does not convert, the first candidate to hold above 0.5, and three infrastructure failures that cost more than the experiments
+
+Two measurements and, unusually, a session where the infrastructure findings are
+the more valuable half. Both experiments ran at serving shape: alpha-beta PIMC
+K=4, 3000ms turn budget, the shipped `state_value` leaf, 16-pair CRN pools.
+
+### 1. `ranker-threat` — the blunder fix is right and it does not pay
+
+**0.5156 [0.4062, 0.625] over 48 pairs**, stopped three pools in.
+
+The fix itself is not in question: on 97 paired positions where the shipped
+1-ply ranker blocked a game-ending capture, the old ranker blundered 97 of 97
+and the victory-aware one blundered 0 of 97. What the arena says is that the
+*class* is too rare to move a game — roughly one position every three games.
+
+Stopped early, and the arithmetic is the reason rather than the trend: with 23.0
+pair-points banked of 48, pool 4 would have had to score **0.882** (14.1 of 16)
+for the pooled lower bound to clear 0.5. The pooled report put
+`pairs_needed_for_this_effect` at **844** — about 68 hours of box time to
+characterise an effect pointing the wrong way.
+
+**It needs no independent ship decision**, which is the tidy part. `search-pending`
+runs the victory-aware ranker in *both* arms by design — a better ranker makes
+not-searching those decisions less harmful, so it measures the smallest version
+of that gain. The ranker therefore ships with `search-pending` or not at all.
+The interaction runs one way only: if pending chains get searched, the ranker
+answers materially fewer than 45% of decisions, so it can only become *less*
+valuable than it just measured.
+
+### 2. `search-pending` — 45% of decisions were never searched, and now are
+
+**0.5781 [0.4922, 0.6641] over 64 pairs. 22 wins / 30 splits / 12 losses.**
+Misses its gate by **0.0078**. Pools: 0.625, 0.625, 0.5312, 0.5312.
+
+An Orbit turn is not one ply: playing a card queues effects, and each effect
+offering a choice returns as its own decision. The observation redacted that
+queue to its first task, so the served Expert refused the position outright and
+handed it to the 1-ply ranker — **10,537 of 23,394 decisions over 300 games,
+45.0%**.
+
+**The mechanism is confirmed and is not what is in doubt.** Four independent
+pre-flights counted refusals at **21.5%, 22.4%, 23.8%, 21.9%** against a
+**22.5%** prediction — the value expected if the candidate now searches
+essentially every pending chain while the baseline still refuses 45%, with each
+supplying half the decisions (seats are not separable; the candidate alternates
+across paired games). A null here is a statement about how much those decisions
+MATTER, not about wiring.
+
+**Why this is not leaf-v2, and the distinction is the PATTERN rather than the
+mean.** leaf-v2 pooled to 0.4766 off 0.594, 0.281, 0.594, 0.438 — two of four
+pools *below* 0.5. `search-pending` has none below. Its opening pool was also
+numerically identical to leaf-v2's (0.5938), which is exactly why one pool
+proves nothing; what separates them is that pools 2-4 did not collapse. A
+consistent small edge and a coin-flip average pool to similar-looking means and
+are different shapes.
+
+A free repeatability measurement fell out of the crash below: pool 1 was run
+**twice in the identical configuration** and read 0.5938 and 0.625 — a 0.031
+difference against a per-pool standard error of ~0.078. The instrument is
+repeatable *within* a deal set; variation *across* deal sets is the term that
+decides these runs.
+
+Extended to 96 pairs; result to follow.
+
+### 3. WHETHER TO EXTEND A NULL IS A QUANTITATIVE QUESTION, AND THE ANSWER IS ALREADY IN THE REPORT
+
+Both scripts print the same advice on an unseparated result — *"extend to 128
+before concluding"* — and this session obeyed it once and overrode it once,
+twelve hours apart. The number that decides it is `pairs_needed_for_this_effect`:
+
+| run | score | needs | box time | call |
+|---|---|---|---|---|
+| `ranker-threat` | 0.5156 | **844 pairs** | ~68 h | override — unreachable |
+| `search-pending` | 0.5781 | **82 pairs** | ~2 h | extend — two pools reach it |
+
+Fixed "extend to N" advice is wrong roughly half the time. Extending is worth it
+only when the instrument can actually reach the effect.
+
+### 4. Instrument findings
+
+- **A control must run at the configuration it validates, and ours does not.**
+  `ranker-threat` controlled at **600ms** while every pool ran at **3000ms**;
+  `pimc-serving` and `saturation` controlled at **250ms**. At 250ms identical
+  players read **exactly 0.5000 with sd 0.0** — the arena is still deterministic
+  there. At 600ms the same control reads 0.5312 and 0.6250 with se ~0.072. So
+  the ±0.15 control gate has been calibrated on a quieter instrument than the
+  one producing the verdicts, and the 0.6250 that looked alarming is a 1.73σ
+  draw on 16 pairs. Run controls at the pools' budget.
+- **Between-pool variance is NOT inflated** — the obvious suspect, checked and
+  cleared. Observed sd of pool scores against the sd predicted by pair noise:
+  leaf-v2 1.87x, `ranker-threat` 0.82x, `saturation` 0.83x. leaf-v2's excess is a
+  four-pool draw, not a finding. The pooled CIs are about right; the floor is
+  simply that pair_sd ≈ 0.32.
+- **Depth drift is external load, not thermal accumulation — do not build a
+  story on it.** A monotone within-run decline looked real (leaf-v2 7.42 → 6.70;
+  `ranker-threat` 7.87 → 7.48) and **did not reproduce**: `search-pending` went
+  6.8 → 6.19 → 6.62 → 7.07, with pool 2 both the shallowest *and* the slowest in
+  wall-clock. A slower, shallower pool followed by a faster, deeper one is load,
+  not heat.
+- **Depth changes cost resolution, not fairness.** Both arms share the box at
+  equal time, so a busy box lowers both symmetrically. leaf-v2 bears this out:
+  no relationship between a pool's depth and its score (lowest-depth pool 0.4375,
+  second-lowest 0.594).
+
+### 5. The infrastructure failures, which cost more than either experiment
+
+- **The served Orbit policy was excluded from its own deploy path.** The
+  `!games/orbit/ai/**` negation added 2026-09-05 — to stop training commits
+  restarting prod — also excluded `ai/serving.py` and `ai/state.py`, which
+  `main.py` and `bot.py` both import. A commit touching only the served policy
+  passed every gate and never reached the server: the same silence as the gap
+  that negation was written to fix, one level further in. It survived because
+  the negation carried a comment asserting `main.py` imports only
+  bot/engine/persist/cards/boards/effects, and the package docstring called `ai/`
+  offline-only — both true when written, both false once the Expert shipped.
+  **A stale comment that reads as a checked fact is worse than no comment.**
+  Now mechanically derived: `core/tests/test_deploy_filter_covers_serving.py`
+  implements the GitHub path-filter glob semantics, walks what `app.py`
+  transitively imports, and fails on anything the filter would not deploy. It
+  reaches 104 modules and found exactly 3 undeployed — and `games/spender/ai/offline/**`
+  is never reached, so that exclusion needed no carve-out and the test is a clean
+  "must be empty" assertion.
+- **A branch switch in a shared worktree killed a run mid-flight, and the script
+  reported a verdict anyway.** `main` landed in the shared checkout at 17:39:57;
+  pools 2-4 then invoked *main's* arena, which has no `--search-pending`, and each
+  died in three seconds. The script noticed only that three pools were "not
+  usable" and printed a confident *"Not separated at 64 pairs"* off the single
+  surviving pool. Cost: ~3 hours. Four fixes, and only the first is the obvious
+  one: a dedicated worktree; `HEAD` pinned at claim and re-checked before every
+  pool; a `--help` pre-flight proving the flag parses before an hour is spent
+  (verified non-vacuous — it passes in the AI worktree and correctly rejects on
+  main); and **a refusal to emit any verdict unless every pool produced a usable
+  report.**
+- **The worktree split would have silently undone itself.** Every run script
+  hardcoded `REPO="C:/Users/Forrest/forrestm_projects"`, so launching from the new
+  worktree would have `cd`'d straight back into the shared one; and `BOX_LOCK` was
+  a repo-relative path, so two worktrees would have held two separate locks on one
+  physical box — reintroducing the contention race `box-lock.sh` exists to remove,
+  in a form no single script could observe. `REPO` is now derived from
+  `${BASH_SOURCE[0]}` and the lock is `$HOME/.orbit-box-lock` in **both**
+  worktrees.
+- **A laptop bugcheck killed a pool** — `0x0000010E VIDEO_MEMORY_MANAGEMENT_INTERNAL`,
+  a display-driver fault. The arena is CPU-only and touches no GPU, so this was
+  not the workload and not thermal. Exposure is bounded by design: `usable()`
+  resumes per pool, so a crash costs the pool in flight rather than the run.
+
+### 6. The method lessons this session paid for
+
+1. **A verdict printed off a partial run reads exactly like a measurement.** Three
+   pools failed in three seconds each and the output was a calm, well-worded null.
+   Refuse to conclude instead of concluding from what survived.
+2. **Fixed "extend to N" advice is wrong about half the time** — the report already
+   carries the number that decides it.
+3. **A control must run at the configuration it validates**, or it measures a
+   quieter instrument than the one being trusted.
+4. **Three clean tactical fixes in a row failing to convert is a statement about
+   the frequency of what they fix, not about the fixes.** The ranker blunder was
+   repaired 97/97 and still moved nothing, because the class is one position every
+   three games.
+5. **`games/orbit/ai/runs/` is gitignored**, so every run script — and all of this
+   session's hardening — is untracked and exists in no commit. Worth knowing before
+   relying on it.
+
+---
+
 ### Session (2026-09-10) — Orbit arena throughput corrected to the Spender shape
 
 The first Orbit neural league runner measured a complete paired game serially.
