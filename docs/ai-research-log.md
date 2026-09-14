@@ -44,11 +44,12 @@ all 40 complete walks (4,092 decision rows, including the 27 undo tables) and he
 out eight whole tables. A two-epoch 128-wide legal-action guide reached **32.67% top-1,
 65.00% top-3 and MRR 0.5303** on the 860 held-out rows, versus Hard v2's **30.93%,
 61.63% and 0.5105**. The result is a useful directional signal, not a promotion
-claim: an eight-pair fresh-deal CRN screen against the current Hard v2 ranker scored
-**0.625 [0.500, 0.750]**, with no censored games. The experiment remains offline and
-does not replace the Expert asset; the next test is a larger fresh-deal screen with
-the learned policy used as the Expert root ordering/prior, preserving the current
-value leaf and full legal-action validation.
+claim: the first eight-pair fresh-deal CRN screen against the current Hard v2 ranker
+scored **0.625 [0.500, 0.750]**, but the larger 32-pair screen settled at **0.5156
+[0.4219, 0.6094]**, with no censored games. Direct imitation is therefore not a
+ship candidate. The data is worth carrying into a native policy-head/root-prior
+test, where the current alpha-beta/value search remains the control; the pure-Python
+search probe was too slow to be a useful instrument at this workload.
 
 ---
 
