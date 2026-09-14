@@ -62,11 +62,10 @@ def mirror_control(*,simulations,opponent_simulations,heuristic,models_match,
 
 
 def main():
-    # Checkpoint loading needs the optional training environment (torch); the
-    # row folding above must not, or importing this module for `summarise`
-    # drags torch into test collection, where CI has only the server's
-    # requirements. Keep this import inside main().
-    from ..ai.attention import load_checkpoint,export_model
+    # Checkpoint loading needs the optional training environment (torch). Keep
+    # it out of the heuristic arena path as well: the leaf ablation and its
+    # parity controls only need the native binary, so they must run in the
+    # server-only environment used by the rules gate.
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("checkpoint",type=Path,help="Checkpoint, or the literal 'heuristic' for the no-network leaf ablation")
     p.add_argument("output",type=Path)
@@ -99,7 +98,7 @@ def main():
                    help="Positive logit temperature for neural leaf values")
     # The 2026-09-11 leaf port is the default on both sides; the control arm is
     # the capture-only leaf the Rust search shipped before it.
-    leaves=("state-value","capture-progress-only","state-value-v2")
+    leaves=("state-value","capture-progress-only","state-value-v2","state-value-v3")
     p.add_argument("--leaf",choices=leaves,default="state-value",
                    help="Candidate seat's nonterminal leaf evaluator")
     p.add_argument("--opponent-leaf",choices=leaves,default="state-value",
@@ -160,6 +159,24 @@ def main():
                    help="Candidate seat: do not stop the search inside a half-finished "
                         "turn. 39.6%% of Orbit decision points are inside a pending "
                         "chain, so the leaf otherwise scores a transient position")
+    p.add_argument("--ranker-v1",action="store_true",
+                   help="Candidate seat: the PRE-2026-09-13 ranker, as a control arm. "
+                        "That policy scored a planet by the seat's OWN progress, so a "
+                        "contested one was a PENALTY, and paid a flat bonus for any "
+                        "capture. Paired over 300 games it blocked a game-ending "
+                        "capture in 0 of 97 positions where blocking was legal")
+    p.add_argument("--opponent-ranker-v1",action="store_true",
+                   help="Opponent seat: the same control arm. PER SEAT because the "
+                        "arena drives both from one process for common random numbers")
+    p.add_argument("--search-pending",action="store_true",
+                   help="Candidate seat: SEARCH effect-resolution sub-decisions instead "
+                        "of handing them to the 1-ply ranker. An observation redacts the "
+                        "effect queue to its first task, so a rebuilt world could not "
+                        "carry a pending chain -- and 45.0%% of all decisions with a real "
+                        "choice are inside one (10,537 of 23,394 over 300 games)")
+    p.add_argument("--opponent-search-pending",action="store_true",
+                   help="Opponent seat: the same. PER SEAT, in one binary, because the "
+                        "arena drives both seats from one process for common random numbers")
     p.add_argument("--ab-max-depth",type=int,default=64,
                    help="Alpha-beta: iterative-deepening cap in decisions")
     p.add_argument("--determinization-period",type=int,default=1,
@@ -189,12 +206,19 @@ def main():
     if args.perfect_information and args.via_observation:
         p.error("--perfect-information and --via-observation are contradictory")
     if args.ab_worlds<1: p.error("--ab-worlds must be positive")
+    if (args.search_pending or args.opponent_search_pending) and not args.via_observation:
+        p.error("--search-pending needs --via-observation: a pending chain is only "
+                "reconstructed when the world is rebuilt from an observation at all")
     if args.ab_worlds>1 and not args.via_observation:
         p.error("--ab-worlds needs --via-observation: nothing is hidden to sample otherwise")
     if args.alphabeta and args.workers>1 and args.ab_worlds<=1:
         p.error("a single-world alpha-beta cannot use a root ensemble: raise --ab-worlds "
                 "or run --workers 1")
     heuristic=str(args.checkpoint)=="heuristic"
+    load_checkpoint=export_model=None
+    if not heuristic or args.opponent:
+        from ..ai.attention import load_checkpoint as _load_checkpoint, export_model as _export_model
+        load_checkpoint,export_model=_load_checkpoint,_export_model
     model=None if heuristic else load_checkpoint(args.checkpoint)[0]
     boards=board_configurations();jobs=[]
     for pair in range(args.pairs):
@@ -229,6 +253,10 @@ def main():
     request["ab_max_depth"]=args.ab_max_depth
     request["ab_worlds"]=args.ab_worlds
     request["ab_quiescence"]=args.ab_quiescence
+    request["search_pending"]=args.search_pending
+    request["opponent_search_pending"]=args.opponent_search_pending
+    request["ranker_v1"]=args.ranker_v1
+    request["opponent_ranker_v1"]=args.opponent_ranker_v1
     request["policy_prior_weight"]=args.policy_prior_weight
     request["opponent_policy_prior_weight"]=args.opponent_policy_prior_weight
     request["determinization_period"]=args.determinization_period
@@ -279,6 +307,9 @@ def main():
             "alphabeta":args.alphabeta,"opponent_alphabeta":args.opponent_alphabeta,
             "ab_table":not args.ab_no_table,"ab_max_depth":args.ab_max_depth,
             "ab_worlds":args.ab_worlds,"ab_quiescence":args.ab_quiescence,
+            "ranker_v1":args.ranker_v1,"opponent_ranker_v1":args.opponent_ranker_v1,
+            "search_pending":args.search_pending,
+            "opponent_search_pending":args.opponent_search_pending,
             "games":results,"seconds":time.perf_counter()-started,
             "mirror_control":mirror,
             "complete":process.returncode==0 and len(results)==len(jobs) and not any(r["error"] or r["censored"] for r in results)}

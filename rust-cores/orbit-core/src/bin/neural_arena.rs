@@ -169,6 +169,7 @@ fn main() {
         None | Some("state-value") => Leaf::StateValue,
         Some("capture-progress-only") => Leaf::CaptureProgressOnly,
         Some("state-value-v2") => Leaf::StateValueV2,
+        Some("state-value-v3") => Leaf::StateValueV3,
         Some(other) => panic!("unknown leaf {other}"),
     };
     let leaf = parse_leaf("leaf");
@@ -234,6 +235,33 @@ fn main() {
     // of Orbit decision points sit inside a pending chain, so without this the
     // leaf is scoring a transient position two times in five.
     let ab_quiescence = request["ab_quiescence"] == true;
+    // THE RANKER, PER SEAT. `ranker_v1` restores the pre-2026-09-13 policy: a
+    // planet worth the seat's OWN signed progress, so a contested one scored as
+    // a PENALTY, plus a flat bonus for any capture at all. Measured paired over
+    // 300 games, that policy blocked a game-ending capture in 0 of 97 positions
+    // where blocking was legal and it had no win of its own; the victory-aware
+    // one blocks in 97 of 97.
+    //
+    // It has to be per seat and it has to live in one binary, because the arena
+    // drives both seats from a single process for common random numbers -- an
+    // environment variable would set it for both and report a player against
+    // itself as an honest-looking 0.5.
+    //
+    // It reaches TWO places, and both matter: alpha-beta's move ORDERING, and
+    // the answer the arena gives on any decision the search refuses. The second
+    // is the one under test -- a pending chain is not reconstructable from an
+    // observation, so 45% of real decisions are the ranker's alone.
+    let ranker_v1 = request["ranker_v1"] == true;
+    let opponent_ranker_v1 = request["opponent_ranker_v1"] == true;
+    // SEARCH THE SUB-DECISIONS, PER SEAT. An observation redacts the effect
+    // queue to its first task, so a rebuilt world could not carry a pending
+    // chain and the served Expert handed every effect-resolution choice to the
+    // 1-ply ranker -- 45.0% of all decisions with a real choice. `pending_chain`
+    // is the missing half; passing it alongside the observation lets the search
+    // answer those itself. Per seat, and in one binary, for the same reason the
+    // ranker switch is: the arena drives both seats from one process.
+    let search_pending = request["search_pending"] == true;
+    let opponent_search_pending = request["opponent_search_pending"] == true;
     // A SINGLE-world alpha-beta is one deterministic tree, so a root ensemble of
     // it is the same search summed with itself -- four workers of nothing --
     // and allowing it would quietly measure one thread against the MCTS's four
@@ -356,6 +384,12 @@ fn main() {
                 let mut ab_nodes = [0u64; 2];
                 let mut ab_depth = [0u64; 2];
                 let mut ab_searches = [0u64; 2];
+                // Decisions the search REFUSED, answered by the 1-ply ranker
+                // instead. Without `--search-pending` this is every
+                // effect-resolution choice; it is the number the pending
+                // work exists to drive down, and the non-vacuity check for
+                // the flag.
+                let mut ranker_decisions = [0u64; 2];
                 while let Some(seat) = state.actor() {
                     if decisions >= 1600 {
                         break;
@@ -387,9 +421,28 @@ fn main() {
                     let observation_search =
                         seat == candidate || opponent_expert || opponent.is_some();
                     let rebuild = via_observation && legal.len() > 1 && observation_search;
+                    // The observation as the SEARCH receives it. The chain is
+                    // merged by the caller rather than emitted by
+                    // `observation()`, because that projection is the frozen
+                    // policy input -- its key set is asserted in three places
+                    // and stored in game history. The browser worker performs
+                    // exactly this merge, so the arena and the serving path
+                    // rebuild from identical input.
+                    let seat_search_pending = if seat == candidate {
+                        search_pending
+                    } else {
+                        opponent_search_pending
+                    };
+                    let searchable_observation = |seat: usize| -> Value {
+                        let mut observation = state.observation(seat);
+                        if seat_search_pending {
+                            observation["pending_full"] = state.pending_chain();
+                        }
+                        observation
+                    };
                     let rebuilt = if rebuild {
                         match State::from_observation(
-                            &state.observation(seat),
+                            &searchable_observation(seat),
                             seed.wrapping_add(decisions),
                         ) {
                             Ok(world) => Some(world),
@@ -443,6 +496,11 @@ fn main() {
                             // Candidate only: the comparison worth running needs
                             // exactly one side extending.
                             quiescence: ab_quiescence && seat == candidate,
+                            victory_aware_ranker: !if seat == candidate {
+                                ranker_v1
+                            } else {
+                                opponent_ranker_v1
+                            },
                         };
                         match if seat_alphabeta {
                             if ab_worlds > 1 {
@@ -454,7 +512,7 @@ fn main() {
                                 // single-world search rather than voting over a
                                 // short list that would silently weight the
                                 // worlds that happened to succeed.
-                                let obs = state.observation(seat);
+                                let obs = searchable_observation(seat);
                                 let mut worlds = Vec::with_capacity(ab_worlds);
                                 for k in 0..ab_worlds {
                                     let world_seed = seed
@@ -548,13 +606,17 @@ fn main() {
                             }
                         }
                     } else {
+                        ranker_decisions[seat] += 1;
                         let obs = state.observation(seat);
-                        orbit_core::serving::choose_move(
+                        // THE PATH UNDER TEST for the ranker A/B. Every decision
+                        // the search refuses lands here, and that is 45% of them.
+                        orbit_core::serving::choose_move_with(
                             &obs,
                             obs["legal_moves"].as_array().unwrap(),
                             &Value::Null,
                             budget as i64,
                             seed,
+                            !if seat == candidate { ranker_v1 } else { opponent_ranker_v1 },
                         )["move"]
                             .clone()
                     };
@@ -571,7 +633,8 @@ fn main() {
             "simulations":sims,"calls":calls,"decisions":decisions,
             "simulations_by_seat":sims_by_seat,"searches_by_seat":searches_by_seat,
             "ab_nodes_by_seat":ab_nodes,"ab_depth_by_seat":ab_depth,
-            "ab_searches_by_seat":ab_searches}),
+            "ab_searches_by_seat":ab_searches,
+            "ranker_decisions_by_seat":ranker_decisions}),
                 )
                 .unwrap();
                 if failure.is_some() {

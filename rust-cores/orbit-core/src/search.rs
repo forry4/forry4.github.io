@@ -290,7 +290,53 @@ pub enum Leaf {
     CaptureProgressOnly,
     /// The 2026-09-13 leaf: victory-aware influence, and a squash that keeps
     /// its discrimination in decided positions. See [`state_value_v2`].
+    ///
+    /// MEASURED 0.4766 [0.3984, 0.5625] over 64 pairs against the shipped leaf:
+    /// a wash, slightly below. Kept as the control arm for [`Leaf::StateValueV3`].
     StateValueV2,
+    /// v2 with ONE variable changed: how a threat is discounted by distance.
+    ///
+    /// v2 bundled two things and they appear to have cancelled. Pricing a
+    /// threat by what the capture is worth is right and reproduces the playtest
+    /// report exactly; discounting it by the SQUARE of distance travelled,
+    /// measured against a reach of 4, is the half that may not be. Two defects
+    /// in that discount, and they compound:
+    ///
+    ///  * A disc at 4 is captured and REMOVED, so the largest distance the leaf
+    ///    ever sees is 3. Dividing by 4 priced the opponent's match point at
+    ///    (3/4)^2 = 0.5625 of what the capture is worth, and left the clamp to
+    ///    1.0 as dead code.
+    ///  * Squaring then crushed everything short of that: a disc one step out
+    ///    scored 1/16 of the capture, so early board presence was worth almost
+    ///    nothing and v2 valued it far below the leaf it replaced.
+    ///
+    /// v3 is linear over the REACHABLE range, so match point is the full value
+    /// of the capture and a first step is a third of it. Everything else --
+    /// `capture_gain`, the squash, every other term -- is v2's, so a difference
+    /// between them is attributable to this and nothing else.
+    StateValueV3,
+}
+
+/// How a threat is discounted by how far the disc still has to travel.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Closeness {
+    /// v2: squared, against the rule's capture distance of 4.
+    SquaredOverControl,
+    /// v3: linear, against the furthest a disc is ever actually seen.
+    LinearOverReach,
+}
+
+/// The furthest a disc is ever seen from centre. Capture fires at
+/// [`CONTROL`] and removes the disc, so 3 is the opponent's match point.
+const CONTEST_REACH: f64 = 3.0;
+
+impl Closeness {
+    fn of(self, toward: f64) -> f64 {
+        match self {
+            Closeness::SquaredOverControl => (toward.abs() / CONTROL).min(1.0).powi(2),
+            Closeness::LinearOverReach => (toward.abs() / CONTEST_REACH).min(1.0),
+        }
+    }
 }
 
 fn progress(obs: &Value, seat: usize) -> f64 {
@@ -431,7 +477,7 @@ const CONTROL: f64 = 4.0;
 /// banked. `progress` measures how far along the best of the three a player is,
 /// so the marginal progress a capture delivers is exactly what it is worth, and
 /// a capture that completes a condition is worth the game.
-fn capture_gain(obs: &Value, who: usize, planet: usize) -> f64 {
+pub fn capture_gain(obs: &Value, who: usize, planet: usize) -> f64 {
     let before = progress(obs, who);
     let mut counts = [0usize; 5];
     if let Some(captured) = obs["players"][who]["captured"].as_array() {
@@ -486,7 +532,16 @@ const SQUASH_CEILING: f64 = 0.95;
 ///    deeper, which is a candidate explanation for why the simulation ladder
 ///    never paid and why doubling the search measured 0.4609.
 pub fn state_value_v2(obs: &Value) -> f64 {
-    let raw = state_value_raw_v2(obs);
+    squash(state_value_raw_v2(obs))
+}
+
+/// [`Leaf::StateValueV3`]: v2 with a linear distance discount over the
+/// reachable range.
+pub fn state_value_v3(obs: &Value) -> f64 {
+    squash(state_value_victory(obs, Closeness::LinearOverReach))
+}
+
+fn squash(raw: f64) -> f64 {
     if raw.abs() >= TERMINAL {
         return raw.signum();
     }
@@ -495,10 +550,21 @@ pub fn state_value_v2(obs: &Value) -> f64 {
 
 /// `state_value_raw` with the influence term replaced by a victory-aware one.
 pub fn state_value_raw_v2(obs: &Value) -> f64 {
+    state_value_victory(obs, Closeness::SquaredOverControl)
+}
+
+fn state_value_victory(obs: &Value, closeness_of: Closeness) -> f64 {
     let seat = obs["seat"].as_u64().unwrap() as usize;
     let other = 1 - seat;
     let base = state_value_raw(obs);
-    if base.abs() >= TERMINAL {
+    // A FINISHED GAME IS ITS RESULT, full stop. This tested `base.abs() >=
+    // TERMINAL`, which catches a win and a loss but NOT a draw: Orbit ends with
+    // no winner when a hand is empty and both the deck and discard are gone,
+    // `state_value_raw` returns 0.0 for that, and the check fell through and
+    // scored the drawn position by its influence track. The State-native leaf
+    // returned 0.0 correctly, so the two were not equivalent on draws -- and
+    // the 1e-9 gate over 400+ positions never sampled one.
+    if obs["phase"] == "over" {
         return base;
     }
     let direction = if seat == 0 { 1.0 } else { -1.0 };
@@ -526,8 +592,7 @@ pub fn state_value_raw_v2(obs: &Value) -> f64 {
             // Squared, so a disc halfway along is worth a quarter of the
             // capture rather than half: the last step is the hard one, and a
             // linear discount over-values idle early pushing.
-            let closeness = (toward.abs() / CONTROL).min(1.0).powi(2);
-            adjusted += sign * gain * closeness;
+            adjusted += sign * gain * closeness_of.of(toward);
         }
     }
     adjusted
@@ -586,6 +651,16 @@ fn capture_gain_from_state(state: &State, who: usize, planet: usize) -> f64 {
 
 /// `state_value_v2` without the JSON. See the note above `progress_from_state`.
 pub fn state_value_v2_from_state(state: &State, seat: usize) -> f64 {
+    state_value_victory_from_state(state, seat, Closeness::SquaredOverControl)
+}
+
+/// [`Leaf::StateValueV3`], read straight off the `State`. Held to
+/// [`state_value_v3`] by the same equivalence gate that covers v2.
+pub fn state_value_v3_from_state(state: &State, seat: usize) -> f64 {
+    state_value_victory_from_state(state, seat, Closeness::LinearOverReach)
+}
+
+fn state_value_victory_from_state(state: &State, seat: usize, closeness_of: Closeness) -> f64 {
     let other = 1 - seat;
     if state.phase == "over" {
         return match state.winner {
@@ -612,8 +687,7 @@ pub fn state_value_v2_from_state(state: &State, seat: usize) -> f64 {
         }
         let (capturer, sign) = if toward > 0.0 { (seat, 1.0) } else { (other, -1.0) };
         let gain = capture_gain_from_state(state, capturer, planet);
-        let closeness = (toward.abs() / CONTROL).min(1.0).powi(2);
-        value += sign * gain * closeness;
+        value += sign * gain * closeness_of.of(toward);
     }
 
     value += 0.05 * (me.captured.len() as f64 - them.captured.len() as f64);
@@ -645,6 +719,7 @@ fn leaf_value(obs: &Value, leaf: Leaf) -> f64 {
         Leaf::StateValue => state_value(obs),
         Leaf::CaptureProgressOnly => capture_progress_only(obs),
         Leaf::StateValueV2 => state_value_v2(obs),
+        Leaf::StateValueV3 => state_value_v3(obs),
     }
 }
 pub fn choose(
@@ -1300,6 +1375,70 @@ mod tests {
     /// leak a determinized world into the leaf and still return a plausible
     /// number.
     #[test]
+    /// A DRAWN game is worth zero, and the influence track must not speak.
+    ///
+    /// Orbit ends with no winner when a player's hand is empty and both the
+    /// agent deck and discard are gone. The victory-aware leaf checked only for
+    /// the terminal SENTINEL, which a draw does not carry, so it fell through
+    /// and scored the finished position by its discs -- strongly positive or
+    /// negative depending where they sat. The State-native leaf returned zero,
+    /// so the two disagreed, and the 1e-9 equivalence walk above never sampled
+    /// a draw to notice.
+    #[test]
+    fn a_drawn_game_is_worth_zero_however_the_discs_sit() {
+        let (mut state, _) = State::new(31, [1, 2, 1]);
+        state.phase = "over".into();
+        state.winner = None;
+        // Discs as lopsided as the board allows, in both directions.
+        state.influence = [Some(3), Some(3), Some(-3), Some(-3), Some(0)];
+        for seat in 0..2 {
+            let through_json = state_value_v2(&state.observation(seat));
+            let direct = state_value_v2_from_state(&state, seat);
+            assert_eq!(direct, 0.0, "seat {seat}: the fast leaf broke on a draw");
+            assert_eq!(
+                through_json, 0.0,
+                "seat {seat}: a drawn game scored {through_json} off the influence track"
+            );
+            assert_eq!(state_value_v3(&state.observation(seat)), 0.0);
+            assert_eq!(state_value_v3_from_state(&state, seat), 0.0);
+            // The shipped leaf always had this right; it is the control.
+            assert_eq!(state_value(&state.observation(seat)), 0.0);
+        }
+    }
+
+    /// v3 must differ from v2 exactly where the discount does, and nowhere else.
+    #[test]
+    fn v3_prices_the_opponents_match_point_at_the_full_capture() {
+        let (mut state, _) = State::new(31, [1, 2, 1]);
+        state.phase = "play".into();
+        state.winner = None;
+        state.influence = [Some(0); 5];
+        // Seat 1 is one influence from a third terra, which ends the game.
+        let terra = crate::PLANETS.iter().position(|p| *p == "terra").unwrap();
+        state.influence[terra] = Some(-3);
+        state.players[1].captured = vec![terra, terra];
+
+        let v2 = state_value_raw_v2(&state.observation(0));
+        let v3 = state_value_victory(&state.observation(0), Closeness::LinearOverReach);
+        // Both see the threat; v3 sees all of it. v2 discounts a disc that is
+        // as close as a disc can get to (3/4)^2 of the capture's worth.
+        assert!(v3 < v2, "v3 must price the threat MORE heavily: {v3} against {v2}");
+        let quiet = state_value_victory(
+            &{
+                let mut calm = state.clone();
+                calm.influence[terra] = Some(0);
+                calm
+            }
+            .observation(0),
+            Closeness::LinearOverReach,
+        );
+        assert!(
+            (quiet - v3) - WINNING_CAPTURE < 1e-9 && (quiet - v3) > WINNING_CAPTURE - 1e-9,
+            "at match point the discount must be exactly 1.0: {}",
+            quiet - v3
+        );
+    }
+
     fn the_fast_leaf_is_equivalent_to_the_observation_leaf() {
         let mut compared = 0usize;
         for seed in [7u64, 91, 404, 1234, 5150] {
@@ -1310,13 +1449,28 @@ mod tests {
                     break;
                 }
                 for seat in 0..2 {
-                    let through_json = state_value_v2(&state.observation(seat));
-                    let direct = state_value_v2_from_state(&state, seat);
-                    assert!(
-                        (through_json - direct).abs() < 1e-9,
-                        "seed {seed} step {steps} seat {seat}: {through_json} against {direct}"
-                    );
-                    compared += 1;
+                    // BOTH victory-aware leaves. The fast path exists to buy
+                    // depth and must never buy a different answer, so each
+                    // variant needs its own gate -- v3 sharing v2's plumbing is
+                    // exactly why a shared bug would go unnoticed.
+                    for (label, through_json, direct) in [
+                        (
+                            "v2",
+                            state_value_v2(&state.observation(seat)),
+                            state_value_v2_from_state(&state, seat),
+                        ),
+                        (
+                            "v3",
+                            state_value_v3(&state.observation(seat)),
+                            state_value_v3_from_state(&state, seat),
+                        ),
+                    ] {
+                        assert!(
+                            (through_json - direct).abs() < 1e-9,
+                            "{label} seed {seed} step {steps} seat {seat}:                              {through_json} against {direct}"
+                        );
+                        compared += 1;
+                    }
                 }
                 let legal = state.legal_moves(actor);
                 if legal.is_empty() {

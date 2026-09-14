@@ -23,8 +23,8 @@
 //! does not win there it cannot win determinized, and the cheap answer is worth
 //! having before building the expensive thing.
 use crate::clock::Clock;
-use crate::search::{state_value, state_value_v2_from_state, Leaf};
-use crate::serving::action_score;
+use crate::search::{state_value, state_value_v2_from_state, state_value_v3_from_state, Leaf};
+use crate::serving::action_score_with;
 use crate::{Chance, State};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -63,6 +63,13 @@ pub struct AbConfig {
     /// one. Capped, because a chain that somehow never resolved would otherwise
     /// search forever.
     pub quiescence: bool,
+    /// Whether the move-ordering prior knows about victory conditions.
+    ///
+    /// Ordering cannot change what alpha-beta CONCLUDES, only how fast it gets
+    /// there -- but the same prior is the Expert's answer on every decision the
+    /// search refuses, which is 45% of them, so an A/B has to be able to run
+    /// both versions in one process. See `serving::action_score_with`.
+    pub victory_aware_ranker: bool,
 }
 
 /// How many extra plies a half-finished turn may borrow.
@@ -70,7 +77,14 @@ const EXTENSION_CAP: i32 = 8;
 
 impl Default for AbConfig {
     fn default() -> Self {
-        Self { budget_ms: 1000, max_depth: 64, use_table: true, leaf: Leaf::StateValue, quiescence: false }
+        Self {
+            budget_ms: 1000,
+            max_depth: 64,
+            use_table: true,
+            leaf: Leaf::StateValue,
+            quiescence: false,
+            victory_aware_ranker: true,
+        }
     }
 }
 
@@ -165,6 +179,7 @@ struct Search<'a> {
     table_enabled: bool,
     leaf_kind: Leaf,
     quiescence: bool,
+    victory_aware_ranker: bool,
 }
 
 impl Search<'_> {
@@ -189,6 +204,7 @@ impl Search<'_> {
             // `the_fast_leaf_is_equivalent_to_the_observation_leaf`, so this is
             // a pure throughput change and node rate is depth.
             Leaf::StateValueV2 => state_value_v2_from_state(state, self.root_seat),
+            Leaf::StateValueV3 => state_value_v3_from_state(state, self.root_seat),
             _ => state_value(&state.observation(self.root_seat)),
         }
     }
@@ -263,7 +279,10 @@ impl Search<'_> {
         // iterative deepening cheaper than searching the final depth directly.
         let observation = state.observation(actor);
         let mut order: Vec<usize> = (0..legal.len()).collect();
-        let scores: Vec<f64> = legal.iter().map(|mv| action_score(&observation, mv)).collect();
+        let scores: Vec<f64> = legal
+            .iter()
+            .map(|mv| action_score_with(&observation, mv, self.victory_aware_ranker))
+            .collect();
         order.sort_by(|&a, &b| {
             scores[b].partial_cmp(&scores[a]).unwrap_or(std::cmp::Ordering::Equal)
         });
@@ -388,15 +407,17 @@ pub fn choose(source: &State, seat: usize, seed: u64, config: AbConfig) -> Resul
         table_enabled: config.use_table,
         leaf_kind: config.leaf,
         quiescence: config.quiescence,
+        victory_aware_ranker: config.victory_aware_ranker,
     };
 
     // The fallback is the ordering prior's own top move, so a budget too small
     // to finish depth 1 still returns what the 1-ply ranker would have played
     // rather than an arbitrary index.
+    let aware = config.victory_aware_ranker;
     let mut best_index = (0..legal.len())
         .max_by(|&a, &b| {
-            action_score(&observation, &legal[a])
-                .partial_cmp(&action_score(&observation, &legal[b]))
+            action_score_with(&observation, &legal[a], aware)
+                .partial_cmp(&action_score_with(&observation, &legal[b], aware))
                 .unwrap_or(std::cmp::Ordering::Equal)
         })
         .unwrap();
@@ -412,7 +433,10 @@ pub fn choose(source: &State, seat: usize, seed: u64, config: AbConfig) -> Resul
         // position, because the chosen MOVE is what is wanted here and a cutoff
         // inside a single call would discard it.
         let mut order: Vec<usize> = (0..legal.len()).collect();
-        let scores: Vec<f64> = legal.iter().map(|mv| action_score(&observation, mv)).collect();
+        let scores: Vec<f64> = legal
+            .iter()
+            .map(|mv| action_score_with(&observation, mv, aware))
+            .collect();
         order.sort_by(|&a, &b| {
             scores[b].partial_cmp(&scores[a]).unwrap_or(std::cmp::Ordering::Equal)
         });
@@ -669,8 +693,8 @@ mod tests {
             let observation = state.observation(actor);
             let best = (0..legal.len())
                 .max_by(|&a, &b| {
-                    action_score(&observation, &legal[a])
-                        .partial_cmp(&action_score(&observation, &legal[b]))
+                    action_score_with(&observation, &legal[a], true)
+                        .partial_cmp(&action_score_with(&observation, &legal[b], true))
                         .unwrap_or(std::cmp::Ordering::Equal)
                 })
                 .unwrap();
@@ -683,7 +707,14 @@ mod tests {
     /// iteration and these tests are about the SEARCH rather than the machine
     /// they run on. A time-limited test would be flaky by construction.
     fn config(max_depth: usize) -> AbConfig {
-        AbConfig { budget_ms: 600_000, max_depth, use_table: true, leaf: Leaf::StateValue, quiescence: false }
+        AbConfig {
+        budget_ms: 600_000,
+        max_depth,
+        use_table: true,
+        leaf: Leaf::StateValue,
+        quiescence: false,
+        victory_aware_ranker: true,
+    }
     }
 
     fn config_without_table(max_depth: usize) -> AbConfig {

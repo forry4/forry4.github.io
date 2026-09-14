@@ -64,9 +64,15 @@ POLICY_WEIGHTS = {
     "leader_owned": 0.1,
     "mulligan": 0.01,
     "choice": 0.4,
+    # Denying the opponent's advance on a contested planet.  Below the 2.0 that
+    # the seat's own winning capture scores, so taking the win still outranks
+    # blocking theirs.  See `_planet_choice_value`.
+    "threat": 0.8,
     "choice_opponent": 0.1,
     "deny": 0.2,
-    "choice_capture": 2.0,
+    # Scales `_capture_gain`, so a game-ending capture is worth 1.0 * 2.2 and a
+    # marginal one a fraction of that.  Was a flat 2.0 for any capture at all.
+    "choice_capture": 1.0,
     "accept": 0.2,
     "decline": -0.02,
     "tier": 0.059,
@@ -76,6 +82,13 @@ POLICY_WEIGHTS = {
     "bonus": 0.1,
     "discard": 0.02,
 }
+# A capture that completes a victory condition, in the same units capture
+# progress already uses.  Mirrors `orbit_core::search::WINNING_CAPTURE`.
+WINNING_CAPTURE = 2.2
+# The furthest a disc is ever seen from centre: capture fires at 4 and removes
+# the disc, so 3 is the opponent's match point and the top of the denial scale.
+CONTEST_REACH = 3.0
+INFLUENCE_TASKS = frozenset(("influence", "influence_other", "split_influence"))
 BONUS_POLICY_VALUES = {1: 1.0, 2: 1.2, 3: 4.0, 4: 2.0,
                        5: 1.5, 6: 2.0, 7: 2.0, 8: 2.0}
 OBSERVATION_PLAYER_KEYS = frozenset((
@@ -305,6 +318,79 @@ def _card(observation: dict, move: dict) -> tuple[dict | None, dict | None]:
     player = observation.get("players", [])[int(observation.get("seat", 0))]
     columns = player.get("columns", [])
     return card, {"player": player, "columns": columns}
+
+
+def _capture_gain(observation: dict, who: int, planet_index: int) -> float:
+    """What capturing this planet would be worth to `who`.
+
+    Mirrors `orbit_core::search::capture_gain` exactly: Orbit has three victory
+    conditions -- three discs of one planet, four different, five in all -- so
+    the same disc can be decisive or nearly worthless, and a capture is worth
+    the marginal victory progress it delivers, or the game if it completes a
+    condition.
+    """
+
+    def progress(counts: list[int], total: int) -> float:
+        return max(total / 5.0, sum(1 for n in counts if n) / 4.0, max(counts) / 3.0)
+
+    try:
+        captured = list(observation.get("players", [])[who].get("captured", []))
+    except (IndexError, TypeError, AttributeError):
+        return 0.0
+    counts = [0] * 5
+    for value in captured:
+        try:
+            counts[int(value)] += 1
+        except (TypeError, ValueError, IndexError):
+            return 0.0
+    before = progress(counts, len(captured))
+    counts[planet_index] += 1
+    after = progress(counts, len(captured) + 1)
+    if after >= 1.0:
+        return WINNING_CAPTURE
+    return 1.4 * (after - before)
+
+
+def _planet_choice_value(
+    observation: dict, planet: str, seat: int, task_type: str, planet_value: float, weights: dict
+) -> float:
+    """How much an INFLUENCE task's planet choice is worth to `seat`.
+
+    THE BUG THIS REPLACES.  The ranker scored a planet at ``choice * position``,
+    where ``position`` is the seat's OWN signed progress -- so a planet the
+    opponent led by two scored 0.4 * -2 = -0.8 and ranked BELOW every neutral
+    planet.  It was not merely blind to the opponent's victory condition, it was
+    REPELLED by it in proportion to the danger, most strongly at the moment of
+    greatest danger.  That is the 2026-09-13 playtest report mechanically.
+
+    It matters more than a prior usually would, because the served Expert
+    refuses any position with a pending chain and 43.9% of real decisions are
+    inside one.  Measured over 60 ranker-vs-ranker games: of the 757 planet
+    choices where a planet the opponent led by two or more was legal, the ranker
+    took a different planet 565 times, 271 of them with the opponent one
+    influence from the capture.
+
+    It is now what the planet is worth to this seat -- its own advance, or the
+    denial of the opponent's -- never a penalty for being contested.  Denial is
+    priced with the same `_capture_gain` the leaf uses, so the ordering prior and
+    the evaluator cannot disagree about what a capture is worth.  Closeness is
+    linear and reaches 1.0 at the opponent's match point, which is the reachable
+    maximum: the disc is removed on arrival, so |position| never exceeds 3.
+
+    Only INFLUENCE tasks take the denial branch.  `transfer`/`exile` name a
+    COLUMN rather than push a disc, so the track position is a weak proxy and
+    denial through them is already priced by the opponent-column term.
+    """
+
+    if task_type not in INFLUENCE_TASKS or planet_value >= 0.0:
+        return weights["choice"] * planet_value
+    try:
+        index = PLANETS.index(planet)
+    except ValueError:
+        return weights["choice"] * planet_value
+    gain = _capture_gain(observation, 1 - seat, index)
+    closeness = min(-planet_value / CONTEST_REACH, 1.0)
+    return weights["threat"] * gain * closeness
 
 
 def _position(observation: dict, planet: str) -> float:
@@ -598,7 +684,9 @@ def _score(observation: dict, move: dict) -> float:
 
     if move.get("planet") in PLANETS:
         progress = _position(observation, move["planet"])
-        score += weights["choice"] * progress
+        score += _planet_choice_value(
+            observation, move["planet"], seat, task_type, progress, weights
+        )
         if task_type in {"transfer", "exile", "exile_for_matching"}:
             try:
                 opponent_column = len(them.get("columns", [])[PLANETS.index(move["planet"])])
@@ -611,7 +699,13 @@ def _score(observation: dict, move: dict) -> float:
             except (TypeError, ValueError, OverflowError):
                 amount = 1.0
             if progress + amount >= 4:
-                score += weights["choice_capture"]
+                # NOT flat.  A flat bonus paid the same for a worthless capture
+                # as for one that ends the game, so the bot took its own
+                # meaningless planet over blocking a loss -- measured at 32 of
+                # 41 match-point positions with only the denial branch fixed.
+                score += weights["choice_capture"] * _capture_gain(
+                    observation, seat, PLANETS.index(move["planet"])
+                )
     if isinstance(move.get("planets"), list):
         score += weights["choice"] * sum(_position(observation, planet) for planet in move["planets"])
     if move.get("accept") is True:

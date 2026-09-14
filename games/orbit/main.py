@@ -51,7 +51,7 @@ from core.db import cleanup_stale_games, get_db_conn, maybe_cleanup_games
 
 from . import bot, engine, persist
 from .ai import serving
-from .ai.state import TASK_FIELDS, observation
+from .ai.state import TASK_FIELDS, observation, pending_chain
 from .cards import BONUS_TYPES, CARDS, FACTIONS, PLANETS, public_card
 
 LOG = logging.getLogger("orbit")
@@ -907,6 +907,16 @@ async def _client_bot_turn(room_id: str) -> bool:
                     "encoder": serving.ENCODER_VERSION,
                     "rules": CLIENT_AI_RULES,
                     "observation": obs,
+                    # ALONGSIDE the observation, never inside it. `obs` is the
+                    # frozen policy input -- its key set is asserted in
+                    # `_OBS_KEYS` and in `serving`, it is stored in game history
+                    # and compared for equality, and it feeds the encoder.
+                    # Without this the client search REFUSES every
+                    # effect-resolution decision and falls back to the 1-ply
+                    # ranker, which is 45.0% of all decisions with a real
+                    # choice. A client that ignores the field gets exactly that
+                    # old behaviour, so the two sides deploy in either order.
+                    "pending_chain": pending_chain(game),
                     "legal_moves": copy.deepcopy(legal),
                     "memory": memory,
                     "remaining_turn_budget": remaining,
