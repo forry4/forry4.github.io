@@ -39,6 +39,27 @@ Two calibrations cost real time and are worth keeping written down:
     events and beat accepting it every time. Ranking by events consumed fixed
     about a hundred and thirty decisions in one change.
 
+MEASURED AND REJECTED -- DO NOT RE-ADD WITHOUT FIXING THE MODEL
+---------------------------------------------------------------
+Tracking the **Leader badge** looks like an obvious next field and is currently a
+REGRESSION: 541 decisions without it, 515 with. It should help twice over -- a
+branch like Geta's "take the gold Leader OR gain 8 Credits" is otherwise
+invisible, and a wrong badge means a wrong hand limit, which refills the wrong
+NUMBER of cards and drifts the draw script. So the idea is right and the model is
+wrong.
+
+What is known: `updateLeader` reports a seat's HAND LIMIT, not a badge -- its
+`leader` value is 4, 5 or 6, i.e. no badge, silver, gold -- and a badge changing
+hands emits TWO events, the taker and the loser. Tracking both seats' limits
+therefore passes through a state the engine never holds; tracking the badge as
+(owner, level) off the event naming a limit above the base is atomic and still
+scored worse. Find out why before trying a third encoding, and A/B it: the reach
+number is the only thing that settled this.
+
+A known live example to debug against: in table 904694222 the engine declines a
+`give_leader` optional ("Give the Leader for 7 Credits") that BGA accepted, with
+every tracked fact in agreement at that point.
+
 STATUS
 ------
 Not finished. Run `bga_replay --cowalk` for the current reach; at the time of
