@@ -461,6 +461,15 @@ were each a real misread on the table, so they are worth not undoing:
   the same 26px height, including before the first recruit. The quantity plate
   reads `×N`; the top cost carries the same small Credit coin as the hand, so
   the two numbers remain distinct when the name is hidden on phones.
+  **WHERE the two numbers sit is part of the design, not a side effect of the
+  grid.** On a phone the name is gone and the count and price go to OPPOSITE
+  EDGES, so the five cells read as two aligned columns down the row and you can
+  compare planets at a glance; centred, they read as one compound value and the
+  eye has to separate them. At pointer widths the name rejoins and sits AGAINST
+  THE PRICE (right-aligned), keeping the two facts about the top card together
+  and leaving the count — which is about the column, not the card — alone at the
+  left. Both are one `justify-content` / `text-align` away from being undone and
+  neither would fail any other check, so `screens.mjs` asserts the geometry.
   Pressing a cell opens the same
   column list it always did. `screens.mjs` bounds the face from both sides: it
   must carry the cost AND must not grow back into a full card face.
@@ -718,8 +727,22 @@ The initial visual sign-off missed actual play problems. Do not repeat that:
 - Compact faces put cost, title and faction on one line group. Body text stays
   at `.72rem`, with no zoom, line clamp or required expansion. The screen gate
   renders all 90 cards at both desktop targets and on a phone to check this.
-  Card height follows the longest complete face: 152px at the 154px-wide
-  desktop size, 164px at the 146px-wide size. The title uses its natural height
+  **A CARD TITLE IS ONE LINE, ALWAYS — `FitName` shrinks it rather than wrapping
+  it** (floor 8px; the longest name lands at ~9.4px on the narrow face, so the
+  floor is a net and not the usual answer). A wrapped title was charged to EVERY
+  card, because the hand reserves ONE height for all 90 faces — so the longest
+  name set the height of the shortest card — and it pushed the rules sentence
+  down on exactly the cards whose sentence was already longest. Fit by WIDTH,
+  which is what "one line" means: unlike a body-text fitter, whose criterion is
+  height and which must therefore watch height too (Dontminion's `FitBodyText`,
+  where a width-only observer was the bug), here width is both the criterion and
+  the trigger, so a width-only ResizeObserver is correct and cannot feed itself.
+  Card height follows the longest complete face: 150px at the 154px-wide
+  desktop size, 152px at the 146px-wide size — down from 152/164, which the
+  one-line title paid for (the longest face went ~160px -> ~144px) together with
+  body leading at the base sheet's own 1.28. The rules sentence is ~92px of a
+  ~148px card, so it is the only term big enough to move the height; the .72rem
+  body size itself is fixed by an explicit product decision. The title uses its natural height
   with a 4px gap before the description. **The gate bounds that "follows" to the
   nearest LINE, not to a fixed pixel count.** `needed` is a natural height, so it
   moves in whole wrapped lines, and which word a sentence breaks on belongs to

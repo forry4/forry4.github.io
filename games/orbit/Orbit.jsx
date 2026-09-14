@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { baseCss } from "../../shared/theme.js";
 import {
   lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyMatchup, LobbyLoading, LobbyEmpty,
@@ -457,6 +457,64 @@ function TechBoard({ game, myId, otherId, myName, theirName, catalog, onInfo }) 
    a player's first game. It now reads as removal — faded, desaturated, pushed
    DOWN rather than lifted, with the word on it — so the two are not merely
    different shades of emphasis but opposite directions. */
+// A CARD NAME IS ONE LINE, ALWAYS — it shrinks to fit rather than wrapping.
+// The name shares its row with the price and the faction glyph, so a long one
+// ("Interplanetary Logistics Board") used to take a second line, and that line
+// was charged to EVERY card: the hand reserves one height for all 90 faces, so
+// the longest name set the height of the shortest card. Wrapping also moved the
+// rules sentence down on exactly the cards whose sentence was already longest.
+//
+// Fit by WIDTH, which is what "one line" actually means — unlike a body-text
+// fitter, whose criterion is height and which must therefore watch height too
+// (see Dontminion's FitBodyText, where a width-only observer was the bug). Here
+// width is both the criterion and the trigger, so a width-only ResizeObserver
+// is right, and it cannot feed itself: shrinking the font never changes the box.
+//
+// The scale is measured, not stepped through: one pass of avail/natural lands
+// within a pixel because glyph advance is linear in font-size, and a second
+// pass corrects the rounding. A floor stops a pathological name becoming
+// unreadable — it would rather clip than shrink past legibility.
+const NAME_MIN_PX = 8;
+
+function FitName({ text }) {
+  const box = useRef(null);
+  const span = useRef(null);
+  useLayoutEffect(() => {
+    const b = box.current, s = span.current;
+    if (!b || !s) return;
+    let lastW = -1;
+    const fit = () => {
+      b.style.fontSize = "";
+      // Fit to the CONTENT box: clientWidth is the padding box, and measuring
+      // against that lets the name grow into its own inset.
+      const cs = getComputedStyle(b);
+      const avail = b.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - 1;
+      if (avail <= 0) return;
+      for (let pass = 0; pass < 2; pass++) {
+        const natural = s.scrollWidth;
+        if (natural <= avail) break;
+        const base = parseFloat(getComputedStyle(b).fontSize) || 14;
+        const next = Math.max(NAME_MIN_PX, base * (avail / natural));
+        if (next >= base - 0.05) break;
+        b.style.fontSize = next + "px";
+      }
+    };
+    fit();
+    let ro;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver((entries) => {
+        const w = entries[0].contentRect.width;
+        if (Math.abs(w - lastW) < 0.5) return;
+        lastW = w;
+        fit();
+      });
+      ro.observe(b);
+    }
+    return () => { if (ro) ro.disconnect(); };
+  }, [text]);
+  return <strong ref={box}><span ref={span}>{text}</span></strong>;
+}
+
 function AgentCard({ card, selected, discarding = false, onClick, onInfo, hidden = false }) {
   const info = useCardInfoGesture(onInfo && card && !card.hidden
     ? () => onInfo({ kind: "card", card }) : null);
@@ -467,7 +525,7 @@ function AgentCard({ card, selected, discarding = false, onClick, onInfo, hidden
     onClick={onClick || (onInfo ? () => onInfo({ kind: "card", card }) : undefined)}
     disabled={!onClick && !onInfo} title={discarding ? `${card.name} — marked for replacement` : card.description} {...info}>
     {discarding && <span className="or-discard-tag" aria-hidden="true">Replacing</span>}
-    <span className="or-agent-top"><span className="or-card-price"><ResourceIcon kind="credits" /><b>{card.cost}</b></span><strong>{card.name}</strong><i>{FACTION_GLYPH[card.faction]}</i></span>
+    <span className="or-agent-top"><span className="or-card-price"><ResourceIcon kind="credits" /><b>{card.cost}</b></span><FitName text={card.name} /><i>{FACTION_GLYPH[card.faction]}</i></span>
     <span className="or-agent-text">{card.description}</span>
     <span className="or-agent-foot"><PlanetName planet={card.planet} /> · {card.faction}</span>
   </button>;
