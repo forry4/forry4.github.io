@@ -47,6 +47,13 @@ BUDGET=3000; MAIN=1800; FOLLOWUP=1200; WORKERS=4; K=4
 export PATH="$HOME/.cargo/bin:$PATH"
 mkdir -p "$OUT"
 
+# Reports carry the rules fingerprint inside ``arena``.  A pool produced by a
+# previous checkout must never be accepted merely because its search settings
+# match: the parity fixes change the reachable state graph and therefore the
+# meaning of a win.  Keep the expected value beside the pinned commit so a
+# resumed campaign cannot silently pool old-rule results with new-rule ones.
+RULES_AT_START="$(python -c 'from games.orbit.ai.state import rules_fingerprint; print(rules_fingerprint())')"
+
 say() { echo "[$(date '+%H:%M:%S')] $*"; }
 
 usable() {
@@ -61,8 +68,9 @@ sys.exit(0 if (d.get('complete') is True and d.get('arena')
   and d.get('leaf')=='state-value-v3'
   and d.get('opponent_leaf')=='state-value'
   and d.get('search_pending') is True
-  and d.get('opponent_search_pending') is True) else 1)" \
-  "$1" "$BUDGET" "$WORKERS" "$K" 2>/dev/null
+  and d.get('opponent_search_pending') is True
+  and d.get('arena',{}).get('rules')==sys.argv[5]) else 1)" \
+  "$1" "$BUDGET" "$WORKERS" "$K" "$RULES_AT_START" 2>/dev/null
 }
 
 claim_box "leaf-v3" 600 || { say "ABORT: could not claim the box"; exit 1; }
