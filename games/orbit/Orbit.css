@@ -830,17 +830,20 @@
      else — the name needs ~150px before it is a name rather than two letters
      and an ellipsis. The cell keeps the grid position that makes it readable
      as "this planet's stack". */
+  .or-played-agents { gap: 2px; margin-inline: -.38rem; }
   .or-played-agent { justify-content: center; grid-template-columns: auto auto; gap: .14rem; padding: .22rem .12rem; }
   .or-played-name { display: none; }
   /* THE WIDEST REAL CELL IS A TWO-DIGIT COUNT BESIDE A TWO-DIGIT PRICE, and at
      320px the five columns leave it ~51px of content box. At the desktop
-     spacing that pair does not fit: it cleared the border box by 1.69px here
-     and overflowed on CI's fonts, because two digits are not the same width in
-     every face and the cell had no room to absorb the difference. Every gap on
-     this row is therefore cut to the minimum that still reads as separation —
-     the plate's own fill separates the count from the price, so the space
-     between them is doing less work than it looks. Buys ~6px, which is several
-     times any credible metric difference rather than a hair over. */
+     spacing that pair does not fit, and the gap between platforms is much
+     larger than it looks: the same five glyphs measure 28.4px on this box and
+     36.1px on CI's Linux fonts — 27% wider, or 3.85px per side. A cell that
+     cleared its border box by 1.69px here was therefore ~2px OVER there. Every
+     gap on this row is cut to the minimum that still reads as separation (the
+     plate's own fill separates the count from the price, so the space between
+     them does less work than it looks), and the row is pulled into the player
+     box's padding for the rest. Both are pure geometry, identical everywhere —
+     which the glyph budget is not, and that is the whole lesson. */
   .or-played-quantity { gap: 0; padding: 0 .12rem; }
   .or-played-count { font-size: .66rem; }
   .or-played-cost { gap: 1px; font-size: .6rem; }
@@ -1126,4 +1129,21 @@
 @media (max-width: 980px) {
   .or-hand-zone { display: flex; flex-direction: column; }
   .or-hand-zone:has(.deciding) .or-controls { order: -1; margin: 0 0 6px; border-top: 0; }
+}
+
+/* AT 320px THE COLUMN IS 55px, NOT THE ~70px THE RULE ABOVE IS WRITTEN FOR, and
+   two numbers plus their marks do not fit it on every font. This tier therefore
+   drops one more mark, exactly as 980px drops the name: the `×`. It is the most
+   expensive glyph in the cell (8px — wider than either number's digits) and the
+   least load-bearing, because the count is ALREADY marked as a count by the
+   filled, planet-coloured plate it sits in, while the price is marked as a price
+   by the Credit coin, which stays. So the two numbers remain distinguishable by
+   the same two cues they use at every other width; only the redundant one goes.
+   Dropping it buys 4px PER SIDE — more than the whole cross-platform spread —
+   where trimming font sizes would have bought a third of that and cost
+   legibility on the two numbers this row exists to show. Both are `aria-hidden`
+   and the button's label carries the real sentence, so nothing is lost to a
+   screen reader. */
+@media (max-width: 360px) {
+  .or-played-quantity > span { display: none; }
 }

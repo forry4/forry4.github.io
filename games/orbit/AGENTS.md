@@ -469,12 +469,22 @@ were each a real misread on the table, so they are worth not undoing:
   content box, and an 18-Agent count next to a two-digit top cost is the widest
   thing that ever goes in one. At the desktop gaps it cleared its border box by
   1.69px on Windows and overflowed on CI's Linux fonts — it was never fitting,
-  it was passing on whose fonts drew it. The plate padding, both gaps and the
-  Credit coin are therefore all cut on phones (~6px of content width, roughly
-  three times any credible metric difference). The gate asserts the narrowest
-  CLEARANCE, not merely the absence of a spill: an overflow check with a 1px
-  tolerance rates "fits by 0.69px" and "fits" identically, and that is precisely
-  the distinction that failed the deploy.
+  it was passing on whose fonts drew it.
+  **MEASURE THE PLATFORM SPREAD BEFORE BUDGETING AGAINST IT.** The first fix
+  trimmed ~6px of gaps on the assumption that font metrics differ by "a hair",
+  shipped, and failed again at 0.95px — because the same five glyphs are 28.4px
+  here and 36.1px on Linux, 27% wider, or 3.85px PER SIDE. The eventual fix
+  came from a validated model (DejaVu Sans Bold: digits 0.696em, `×` 0.838em —
+  predicted the measured width to 0.04px) rather than a third guess. Prefer
+  levers that are identical on every platform: the row's gap and its negative
+  inline margin are pure geometry, and at ≤360px the `×` goes, which is 8px of
+  the most expensive and least load-bearing glyph in the cell. Result is 9.6px
+  of clearance here and ~5.8px on Linux — 1.5 spreads — with both numbers still
+  at full size.
+  The gate asserts the narrowest horizontal CLEARANCE, not merely the absence of
+  a spill: an overflow check with a 1px tolerance rates "fits by 0.69px" and
+  "fits" identically, and that is precisely the distinction that failed the
+  deploy. **It was a green tick over a coin flip.**
   **This replaced a pair of full-width `.or-columns` panels below the influence
   board** (retired 2026-09-13, with the `.or-slot` mini-card stack that lived in
   them). They cost ~150px of vertical slab at exactly the sizes the planet board
