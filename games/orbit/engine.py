@@ -13,7 +13,8 @@ import random
 from typing import Iterable
 
 from .boards import SUN_CONFIGURATION, board_reference, random_configuration
-from .cards import BONUS_POOL, BONUS_TYPES, CARDS, FACTIONS, PLANETS, public_card
+from .cards import (ALL_CARDS, BONUS_POOL, BONUS_TYPES, CARDS, EXPANSION_CARDS,
+                    FACTIONS, PLANETS, public_card)
 from .effects import bonus_effects, card_effects, technology_effects
 
 
@@ -89,7 +90,7 @@ def _resource_label(resource: str, amount: int) -> str:
 
 
 def _tok_card(card_id: int) -> dict:
-    return {"c": int(card_id), "v": CARDS[int(card_id)]["name"]}
+    return {"c": int(card_id), "v": ALL_CARDS[int(card_id)]["name"]}
 
 
 def _tok_planet(planet: str) -> dict:
@@ -640,7 +641,7 @@ def _apply_task_choice(game: dict, task: dict, move: dict) -> None:
         if reward == "matching_influence" or kind == "exile_for_matching":
             _queue_tasks(game, [{"type": "influence", "planet": planet, "amount": task.get("amount", 1)}], pid)
         elif reward == "card_cost":
-            _queue_tasks(game, [{"type": "credits", "amount": CARDS[card_id]["cost"], "target": "self"}], pid)
+            _queue_tasks(game, [{"type": "credits", "amount": ALL_CARDS[card_id]["cost"], "target": "self"}], pid)
         target = task.get("count", 1)
         if task["done"] >= target:
             queue.remove(task)
@@ -654,7 +655,7 @@ def _apply_task_choice(game: dict, task: dict, move: dict) -> None:
         if reward == "matching_influence":
             _queue_tasks(game, [influence_task(planet, 1)], pid)
         elif reward == "card_cost":
-            _queue_tasks(game, [{"type": "credits", "amount": CARDS[card_id]["cost"], "target": "self"}], pid)
+            _queue_tasks(game, [{"type": "credits", "amount": ALL_CARDS[card_id]["cost"], "target": "self"}], pid)
         if task["done"] >= task["count"]:
             queue.remove(task)
     elif kind == "discard_hand":
@@ -666,9 +667,9 @@ def _apply_task_choice(game: dict, task: dict, move: dict) -> None:
              f" from hand ({len(hand)} card{'' if len(hand) == 1 else 's'} left).", pid=pid)
         reward = task.get("reward")
         if reward == "matching_influence":
-            _queue_tasks(game, [influence_task(CARDS[card_id]["planet"], 1)], pid)
+            _queue_tasks(game, [influence_task(ALL_CARDS[card_id]["planet"], 1)], pid)
         elif reward == "card_cost":
-            _queue_tasks(game, [{"type": "credits", "amount": CARDS[card_id]["cost"], "target": "self"}], pid)
+            _queue_tasks(game, [{"type": "credits", "amount": ALL_CARDS[card_id]["cost"], "target": "self"}], pid)
         if task["count"] == "all":
             if not _player(game, pid)["hand"]:
                 queue.remove(task)
@@ -830,17 +831,36 @@ def _drain_pending(game: dict) -> None:
         elif kind == "leader":
             _gain_leader(game, pid, task.get("level", 1))
         elif kind == "if_leader":
-            if game["leader"]["owner"] == pid:
+            # `who` is absent on every base-game program, and absent means self.
+            who = pid if task.get("who", "self") == "self" else _opponent(game, pid)
+            if game["leader"]["owner"] == who:
                 _queue_tasks(game, task["then"], pid)
             else:
-                _log(game, f"{_who(game, pid)} does not hold the Leader badge, "
+                _log(game, f"{_who(game, who)} does not hold the Leader badge, "
                            f"so the conditional part of this effect is skipped.", pid=pid)
         elif kind == "if_credits":
-            if player["credits"] >= task["amount"]:
+            # Named for the only resource and the only holder it could once check.
+            resource = task.get("resource", "credits")
+            who = pid if task.get("who", "self") == "self" else _opponent(game, pid)
+            held = _player(game, who)[resource]
+            if held >= task["amount"]:
                 _queue_tasks(game, task["then"], pid)
             else:
-                _log(game, f"{_who(game, pid)} holds {player['credits']} Credits, short of "
-                           f"the {task['amount']} this effect needs — it is skipped.", pid=pid)
+                _log(game, f"{_who(game, who)} holds {held} "
+                           f"{_resource_label(resource, held)}, short of the "
+                           f"{task['amount']} this effect needs — it is skipped.", pid=pid)
+        elif kind == "raise_to":
+            # "The 2 players go UP TO n": a floor for both, never a reduction.
+            resource, floor = task.get("resource", "credits"), int(task["amount"])
+            for target_pid in game["order"]:
+                short = floor - _player(game, target_pid)[resource]
+                if short > 0:
+                    _gain_resource(game, target_pid, resource, short)
+                else:
+                    _log(game, f"{_who(game, target_pid)} already holds "
+                               f"{_player(game, target_pid)[resource]} "
+                               f"{_resource_label(resource, floor)}, so this effect "
+                               f"adds nothing for them.", pid=target_pid)
         elif kind == "draw_bonus":
             token = _draw_bonus_type(game)
             if token is not None:
@@ -859,7 +879,7 @@ def _drain_pending(game: dict) -> None:
                 if card_id is None:
                     _log(game, "The Agent deck is empty, so nothing is mobilized.", pid=pid)
                     break
-                planet = CARDS[card_id]["planet"]
+                planet = ALL_CARDS[card_id]["planet"]
                 _columns(game, pid)[planet].append(card_id)
                 _log(game, f"{_who(game, pid)} mobilizes ", _tok_card(card_id),
                      " off the deck into their ", _tok_planet(planet),
@@ -978,7 +998,7 @@ def _begin_resolution(game: dict, pid: str, tasks: list[dict], source: str) -> N
 def _play_card_action(game: dict, pid: str, move: dict) -> tuple[bool, str | None]:
     player = _player(game, pid)
     card_id = int(move["card_id"])
-    card = CARDS[card_id]
+    card = ALL_CARDS[card_id]
     player["hand"].remove(card_id)
     action = move["action"]
     if action == "recruit":
@@ -1018,18 +1038,34 @@ def _play_card_action(game: dict, pid: str, move: dict) -> tuple[bool, str | Non
     return True, None
 
 
+def deck_composition(game: dict) -> tuple[int, ...]:
+    """The card ids this game was dealt from.
+
+    Read it from the game rather than from ``CARDS`` so that conservation checks
+    the deck a table actually has. ``expansion`` is absent from every save
+    written before Secret Agents existed, and absent means the base 90.
+    """
+
+    if game.get("expansion"):
+        return tuple(ALL_CARDS)
+    return tuple(CARDS)
+
+
 def new_game(
     player_ids: list[str],
     names: dict[str, str] | None = None,
     seed: int | None = None,
     configuration: str | dict[str, int] = "sun",
+    secret_agents: bool = False,
 ) -> dict:
     if len(player_ids) != 2 or len(set(player_ids)) != 2:
         raise ValueError("Orbit requires exactly two distinct players")
     rng = random.Random(seed)
     order = list(player_ids)
     rng.shuffle(order)
-    deck = list(CARDS)
+    # OFF for every served game. It exists so that real BGA tables -- 88 of every
+    # 100 of which run Secret Agents -- can be replayed at all.
+    deck = list(ALL_CARDS) if secret_agents else list(CARDS)
     rng.shuffle(deck)
     bonuses = list(BONUS_POOL)
     rng.shuffle(bonuses)
@@ -1044,6 +1080,7 @@ def new_game(
     game = {
         "version": 1,
         "phase": "mulligan",
+        "expansion": bool(secret_agents),
         "order": order,
         "names": names or {pid: pid for pid in player_ids},
         "players": {
@@ -1115,7 +1152,7 @@ def legal_moves(game: dict, pid: str) -> list[dict]:
     player = _player(game, pid)
     moves: list[dict] = []
     for card_id in player["hand"]:
-        card = CARDS[card_id]
+        card = ALL_CARDS[card_id]
         recruit_cost = max(0, card["cost"] - len(player["columns"][card["planet"]]))
         if player["credits"] >= recruit_cost:
             moves.append({"action": "recruit", "card_id": card_id})
@@ -1225,7 +1262,7 @@ def validate_state(game: dict) -> None:
             raise AssertionError("Resources cannot be negative")
         if any(level < 0 or level > 5 for level in player["technology"].values()):
             raise AssertionError("Technology level out of range")
-    if sorted(all_cards) != sorted(CARDS):
+    if sorted(all_cards) != sorted(deck_composition(game)):
         raise AssertionError("Agent card conservation failed")
     all_bonuses = list(game["bonus_deck"]) + list(game["bonus_discard"])
     all_bonuses += [token for token in game["planet_bonus"].values() if token is not None]

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from .cards import CARDS, FACTIONS, PLANETS
+from .cards import ALL_CARDS, CARDS, EXPANSION_CARDS, FACTIONS, PLANETS
 
 
 def credits(amount: int, target: str = "self") -> dict:
@@ -46,8 +46,34 @@ def optional(cost: dict, then: list[dict], label: str) -> dict:
     return {"type": "optional", "cost": cost, "then": then, "label": label}
 
 
-def if_leader(then: list[dict]) -> dict:
-    return {"type": "if_leader", "then": then}
+def if_leader(then: list[dict], who: str = "self") -> dict:
+    """Run ``then`` if ``who`` holds the Leader badge. ``who`` is "self" or "opponent"."""
+
+    task = {"type": "if_leader", "then": then}
+    if who != "self":
+        task["who"] = who
+    return task
+
+
+def if_resource(resource: str, amount: int, then: list[dict], who: str = "self") -> dict:
+    """Run ``then`` if ``who`` holds at least ``amount`` of ``resource``.
+
+    The task type stays ``if_credits`` so that every save written before Zenithium
+    and the opponent were reachable still decodes to the same program.
+    """
+
+    task = {"type": "if_credits", "amount": amount, "then": then}
+    if resource != "credits":
+        task["resource"] = resource
+    if who != "self":
+        task["who"] = who
+    return task
+
+
+def raise_to(resource: str, amount: int) -> dict:
+    """Bring BOTH players up to ``amount`` of ``resource``. It never takes any away."""
+
+    return {"type": "raise_to", "resource": resource, "amount": amount}
 
 
 def give_leader(then: list[dict], label: str) -> dict:
@@ -100,7 +126,7 @@ def choose(label: str, branches: list[tuple[str, list[dict]]]) -> dict:
     }
 
 
-CARD_EFFECTS: dict[int, list[dict]] = {card_id: [] for card_id in CARDS}
+CARD_EFFECTS: dict[int, list[dict]] = {card_id: [] for card_id in ALL_CARDS}
 
 
 def _set(card_id: int, *tasks: dict) -> None:
@@ -207,6 +233,31 @@ _set(516, if_leader([influence(1, "jupiter")]))
 _set(517, discard_hand(1, "card_cost"))
 _set(518, {"type": "spend_tier", "resource": "credits", "tiers": [[3, 1], [7, 2], [12, 3]], "exclude": "jupiter"})
 
+# ── Secret Agents ────────────────────────────────────────────────────────────
+# The mini-expansion, transcribed from the same `rule`/`desc` rows in
+# data/bga_reference.json as everything above. These are only ever dealt when a
+# game is built with `secret_agents=True`; serving never does. Seven of the ten
+# needed no new vocabulary at all -- 219 is the `opponent_side` restriction card
+# 312 already uses, 319 is the `lowest=True` develop of card 214, 519 is the
+# discard-hand of card 118 -- which is the check that they belong to the same
+# game rather than a bolted-on subsystem.
+_set(119, raise_to("credits", 8))
+_set(120, if_leader([{"type": "two_adjacent", "amount": 1}], who="opponent"))
+_set(219, influence(1, restriction="opponent_side"))
+_set(220, influence(1), if_resource("credits", 15, [influence(1)], who="opponent"))
+_set(319, develop(lowest=True))
+_set(320, choose("Choose Mungo's pair", [
+    ("Mercury and Venus", [influence(1, "mercury"), influence(1, "venus")]),
+    ("Mars and Jupiter", [influence(1, "mars"), influence(1, "jupiter")]),
+]))
+_set(419, raise_to("zenithium", 2))
+_set(420, influence(2, exclude="mars", target="opponent"),
+          {"type": "influence_other", "amount": 2}, leader(2))
+_set(519, discard_hand("all"), credits(5))
+_set(520, influence(1),
+          if_resource("zenithium", 3, [{"type": "influence_other", "amount": 1}],
+                      who="opponent"))
+
 
 TECH_EFFECTS: dict[tuple[str, int, int], list[dict]] = {
     ("robot", 1, 1): [transfer(1)],
@@ -266,7 +317,9 @@ def bonus_effects(token_type: int) -> list[dict]:
     return deepcopy(BONUS_EFFECTS[int(token_type)])
 
 
-if set(CARD_EFFECTS) != set(CARDS):
-    raise ValueError("Every Orbit base card must have an effect program")
+if set(CARD_EFFECTS) != set(ALL_CARDS):
+    raise ValueError("Every Orbit card must have an effect program")
+if any(not CARD_EFFECTS[card_id] for card_id in EXPANSION_CARDS):
+    raise ValueError("Every Secret Agents card must have a non-empty effect program")
 if len(TECH_EFFECTS) != len(FACTIONS) * 2 * 5:
     raise ValueError("Every Orbit technology space must have an effect program")

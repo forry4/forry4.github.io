@@ -146,9 +146,12 @@ def model_asset() -> dict[str, Any]:
     # Effect programs are public card text in structured form.  Shipping them
     # beside the attributes lets the JS fallback rank a card's actual tempo
     # instead of pretending every recruit is interchangeable.
+    # Keyed on CARDS, not on CARD_EFFECTS: the served game is the base 90, and
+    # CARD_EFFECTS also carries the Secret Agents programs, which no browser can
+    # ever be dealt and which must not silently enlarge a shipped asset.
     payload["card_effects"] = {
         str(card_id): copy.deepcopy(CARD_EFFECTS[card_id])
-        for card_id in sorted(CARD_EFFECTS)
+        for card_id in sorted(CARDS)
     }
     payload["policy"] = copy.deepcopy(POLICY_WEIGHTS)
     payload["bonus_policy_values"] = {

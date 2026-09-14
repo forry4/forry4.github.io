@@ -14,8 +14,14 @@ OUTPUT = Path(__file__).resolve().parents[3] / "rust-cores/orbit-core/data/rules
 
 
 def render() -> str:
+    # Keyed on CARDS so the native core stays the BASE 90. CARD_EFFECTS also holds
+    # the Secret Agents programs, which exist only so that real BGA tables can be
+    # replayed in Python; the Rust core implements neither those ten cards nor the
+    # `raise_to` / `who: opponent` vocabulary they introduced, and `new_game` never
+    # deals them unless a caller asks for `secret_agents=True`.
+    base_effects = {card_id: CARD_EFFECTS[card_id] for card_id in sorted(CARDS)}
     payload = {"rules": rules_fingerprint(), "cards": CARDS, "bonus_pool": BONUS_POOL,
-               "card_effects": CARD_EFFECTS, "bonus_effects": BONUS_EFFECTS,
+               "card_effects": base_effects, "bonus_effects": BONUS_EFFECTS,
                "tech_effects": {f"{f}/{s}/{l}": v for (f, s, l), v in TECH_EFFECTS.items()}}
     return json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
 
