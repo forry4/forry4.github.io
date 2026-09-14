@@ -1,4 +1,55 @@
 /**
+ * The same search, with the pending chain supplied so sub-decisions can be
+ * SEARCHED rather than handed to the ranker.
+ *
+ * WHY A SECOND EXPORT RATHER THAN AN EXTRA ARGUMENT OR A MERGED OBSERVATION.
+ * The wasm and the worker are separately cached artifacts on the same
+ * filenames, so a browser can hold either one without the other -- that
+ * combination is ordinary here, not hypothetical. A new argument on the
+ * existing export would reach an old wasm as a missing parameter. Merging the
+ * chain into the observation is worse: `serving::choose_move` validates the
+ * observation's key set EXACTLY, so an old wasm would refuse the chain as
+ * before and then fail its own ranker fallback on the unexpected key, turning
+ * a graceful degrade into a broken one. A separate export is feature-detected
+ * by name, so an old wasm is simply not offered the chain and behaves exactly
+ * as it does today.
+ *
+ * WHAT IT BUYS. `State::from_observation` refused any position with a pending
+ * chain, so the Expert handed every effect-resolution choice to the 1-ply
+ * ranker instead of searching it -- 45.0% of all decisions with a real choice
+ * (10,537 of 23,394 over 300 games). The plan the search formed when it played
+ * the card was then discarded by a different policy two plies later in the
+ * same turn.
+ * @param {string} observation_json
+ * @param {string} legal_moves_json
+ * @param {string} memory_json
+ * @param {string} pending_chain_json
+ * @param {number} budget_ms
+ * @param {number} seed
+ * @returns {string}
+ */
+export function orbit_alphabeta_chain_move_json(observation_json, legal_moves_json, memory_json, pending_chain_json, budget_ms, seed) {
+    let deferred5_0;
+    let deferred5_1;
+    try {
+        const ptr0 = passStringToWasm0(observation_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(legal_moves_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(memory_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passStringToWasm0(pending_chain_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len3 = WASM_VECTOR_LEN;
+        const ret = wasm.orbit_alphabeta_chain_move_json(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, budget_ms, seed);
+        deferred5_0 = ret[0];
+        deferred5_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
+    }
+}
+
+/**
  * The Expert tier: iterative-deepening alpha-beta over THIS worker's world.
  *
  * PIMC IS THE WORKER POOL. Each of the four workers reconstructs its own world
