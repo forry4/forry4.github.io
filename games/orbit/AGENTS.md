@@ -174,8 +174,20 @@ Three findings worth keeping:
   itself (a sub-decision is a private state-35 MENU plus a consequence event, so
   the log must be read beside the engine rather than translated ahead of it), undo
   (27 tables), and the eight face-up bonus tokens, which are never announced at
-  setup. Build the co-walk on the **13 undo-free tables first** — they hold 1,055
-  of the corpus's 4,078 logged decisions, ten times what is needed to validate it.
+  setup. The co-walk is `tools/bga_cowalk.py` and it partly WORKS: **2 of the 13
+  undo-free tables replay end to end and reproduce the logged winner**, and the 13
+  together reach **541 of their 1,055 decisions** (`bga_replay --cowalk`). It does
+  not read the log as a list of answers — BGA emits the same event for a chosen
+  effect and an auto-resolved one — but converges a MIRROR of BGA's state against
+  the engine and keeps the move the mirror can reach, which makes the replay a
+  parity check rather than a legality check. Four mechanisms were paid for and
+  should not be re-derived: draws are ordered by BGA's `card_id`, not by event
+  order (a turn's refill `newCards` is emitted BEFORE the same turn's `mobilize`,
+  whose cards were drawn first); **a mobilize IS a draw** and is announced only in
+  the `mobilize` event; a trial application must not eat the deck or bonus scripts;
+  and candidates are ranked by how much of the log they EXPLAIN, without which
+  declining an optional (zero events consumed) beats accepting it every time. The
+  control space is ±4 — `CONTROL_POSITION` — and guessing ±3 halved the reach.
 - **Separate spectator logs from rich archived logs.** The original spectator sample
   had no setup dump or hand reveal, so seeded full replay was not possible from it.
   **The 2026-09-14 corpus audit found 40 complete archived games with both seats'

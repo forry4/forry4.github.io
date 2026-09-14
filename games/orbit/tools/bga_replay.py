@@ -33,35 +33,41 @@ Every archived table carrying card identities is a Secret Agents game -- 0 of 40
 expansion-free -- so `build_game` deals the 100-card pool. That is why the expansion
 exists in `effects.py` at all; see `tests/test_secret_agents.py`.
 
-Three things still stand between here and a replayed game:
+The co-walk itself is `bga_cowalk.py`, and it WORKS, partly: 2 of the 13 undo-free tables
+replay end to end and reproduce the logged winner, and the 13 together reach 541 of their
+1,055 decisions (`--cowalk`). It does not read the log as a list of answers -- it cannot,
+because BGA emits the same event for a chosen effect and an auto-resolved one -- so it
+converges a MIRROR of BGA's state against the engine and picks the move the mirror can
+reach. The face-up bonus tokens and the board sides, neither of which is ever announced,
+are handled there: the tokens are taken from `gainBonus` at award time, and the eight
+configurations are simply searched.
 
-  1. **The co-walk.** A log has no move list to translate ahead of time: a sub-decision is
-     a private menu (`gameStateChange` state 35) plus a consequence event, and which
-     sub-decision is being answered depends on where the engine has got to. So the log
-     must be read BESIDE the engine. `DECISION_PROMPTS` lists the eight menu types; the
-     corpus holds 4,078 logged decisions, 1,055 of them in the 13 undo-free tables --
-     ten times what is needed to validate the approach, which makes those 13 the target.
+What is left:
+
+  1. **The remaining 11 undo-free tables.** Each stops at a decision no candidate
+     reproduces, which is the honest failure -- it means our rules and BGA's disagree
+     about that position, or the mirror still cannot see what separates two answers.
+     Suspect the harness first: every failure so far has been the harness, and the
+     fixes were mechanisms, not special cases (draws ordered by `card_id`; a mobilize
+     being a draw; trials not eating the scripts; ranking candidates by how much of the
+     log they explain).
   2. **Undo.** 27 tables contain `undo` batches: reverse-operation records that revert an
      earlier move, after which the player replays it. Handling them needs an engine
      snapshot AND a rewind of the draw script, and it is not yet clear whether BGA
-     re-announces cards redrawn after an undo. Build the co-walk on the undo-free 13
-     first; undo is worth another 27 tables, separately.
-  3. **The eight face-up bonus tokens.** Never announced at setup -- only when claimed,
-     via `gainBonus`. They will have to be patched in lazily, or searched.
-
-Board sides are not announced either, but there are only eight configurations and a wrong
-one diverges loudly, so they can simply be searched over.
+     re-announces cards redrawn after an undo. Worth another 27 tables, separately.
 
 Usage::
 
     python -m games.orbit.tools.bga_replay --selftest [--games 50]
     python -m games.orbit.tools.bga_replay --verify          # forced setup vs the corpus
+    python -m games.orbit.tools.bga_replay --cowalk          # how far each table replays
     python -m games.orbit.tools.bga_replay <table_id>        # once the co-walk exists
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import random
@@ -260,6 +266,25 @@ class ScriptedDeck:
 _real_draw_agent = engine._draw_agent
 
 
+@contextlib.contextmanager
+def scripted(deck: "ScriptedDeck"):
+    """Install `deck` as the engine's draw for the duration.
+
+    It has to cover the WHOLE replay, not just the opening deal: the mulligan
+    refill, every end-of-turn refill and every `mobilize` draw are also draws the
+    log recorded. Leaving it installed only for setup deals the right four cards
+    and then diverges on the very next refill -- which is exactly how this was
+    found.
+    """
+
+    previous = engine._draw_agent
+    engine._draw_agent = deck
+    try:
+        yield deck
+    finally:
+        engine._draw_agent = previous
+
+
 def build_game(table, board_sides: dict[str, int]) -> tuple[dict, ScriptedDeck]:
     """A game whose SETUP is the table's, not a seed's.
 
@@ -283,12 +308,9 @@ def build_game(table, board_sides: dict[str, int]) -> tuple[dict, ScriptedDeck]:
         player["hand"] = []
     game["agent_deck"] = list(ALL_CARDS)
     game["agent_discard"] = []
-    engine._draw_agent = deck
-    try:
+    with scripted(deck):
         for pid in game["order"]:
             engine._draw_to(game, pid, 4)
-    finally:
-        engine._draw_agent = _real_draw_agent
     engine.validate_state(game)
     return game, deck
 
@@ -318,7 +340,7 @@ def rich_tables(corpus: str = bga_table.CORPUS) -> list[str]:
         if not name.endswith(".json"):
             continue
         table = bga_table.load(name[:-5], corpus)
-        if table.card_num and table.winner_seat is not None:
+        if table.rich:
             found.append(table.table_id)
     return found
 
@@ -344,9 +366,12 @@ def verify(corpus: str = bga_table.CORPUS) -> int:
             for card in (raw.values() if isinstance(raw, dict) else raw):
                 owner.setdefault(str(card["card_id"]), str(card["card_player_no"]))
 
+        # Only the opening deal, which is all `newCards`; a mobilize reveal has no
+        # owning HAND and is skipped rather than guessed at.
         expected: dict[str, list[int]] = {}
         for card_id in table.reveal_order[:8]:
-            expected.setdefault(owner[card_id], []).append(table.card_num[card_id])
+            if card_id in owner:
+                expected.setdefault(owner[card_id], []).append(table.card_num[card_id])
 
         game, _deck = build_game(table, {"robot": 1, "human": 1, "animod": 1})
         dealt = {pid: sorted(game["players"][pid]["hand"]) for pid in game["order"]}
@@ -389,11 +414,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--games", type=int, default=25)
     parser.add_argument("--verify", action="store_true",
                         help="check the forced setup against every rich archived table")
+    parser.add_argument("--cowalk", action="store_true",
+                        help="walk every undo-free table beside the engine and report reach")
     parser.add_argument("--configuration", default="sun", choices=("sun", "random"))
     args = parser.parse_args(argv)
 
     if args.verify:
         return verify()
+    if args.cowalk:
+        from games.orbit.tools import bga_cowalk
+        return bga_cowalk.report()
     if args.selftest or not args.table_id:
         if not args.table_id:
             have = len(os.listdir(LOGS)) if os.path.isdir(LOGS) else 0

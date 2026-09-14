@@ -93,12 +93,35 @@ class Table:
     seat_of_player: dict[str, int] = field(default_factory=dict)
     winner_seat: int | None = None
     undos: int = 0
+    #: Card ids revealed by `newCards`, i.e. dealt to a HAND. Kept apart from
+    #: `card_num` because a mobilize also reveals a card, and a log that only ever
+    #: reveals mobilized cards is a spectator log with no hands in it -- the very
+    #: thing the rich subset is defined to exclude.
+    dealt: set = field(default_factory=set)
+
+    @property
+    def rich(self) -> bool:
+        """Does this log show both seats' hands?"""
+
+        return bool(self.dealt) and self.winner_seat is not None
 
     @property
     def deck_ids(self) -> list[int]:
-        """The drawn cards, as card NUMBERS, in draw order."""
+        """The drawn cards, as card NUMBERS, in draw order.
 
-        return [self.card_num[card_id] for card_id in self.reveal_order]
+        Ordered by BGA's own `card_id`, NOT by the order the events arrive.
+        BGA allocates a card id when the card leaves the deck, so the ids are the
+        draw order -- but it emits a turn's end-of-turn `newCards` refill BEFORE
+        the `mobilize` events of the same turn, whose cards were drawn first and
+        carry LOWER ids. Trusting event order there deals a turn's cards in the
+        wrong sequence from the first mobilize onward.
+
+        A card recycled through a reshuffle gets a fresh, higher id, so the
+        ordering still holds across one.
+        """
+
+        return [self.card_num[card_id]
+                for card_id in sorted(self.reveal_order, key=int)]
 
     def events(self):
         """(move_id, packet_index, type, args) in global order."""
@@ -140,6 +163,19 @@ def load(table_id: str, corpus: str = CORPUS) -> Table:
                     table.card_num[card_id] = int(card["card_num"])
                     table.reveal_order.append(card_id)
                     table.seat_of_player.setdefault(str(card["card_player_no"]), 0)
+                table.dealt.add(card_id)
+        elif kind == "mobilize":
+            # A MOBILIZE IS ALSO A DRAW, and it is announced differently: the card
+            # goes from the deck straight into a column, which is public, so BGA
+            # names it in the `mobilize` event and never emits `newCards` for it.
+            # Leaving these out drops them from the draw order, and the deck then
+            # deals the wrong cards from the first mobilize onward -- which
+            # presents as an effect doing nothing, or as a capture that never
+            # happened in the real game.
+            card_id = str(args["card_id"])
+            if card_id not in table.card_num:
+                table.card_num[card_id] = int(args["card_num"])
+                table.reveal_order.append(card_id)
         elif kind == "undo":
             table.undos += 1
         elif kind == "gameover":
