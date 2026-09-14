@@ -49,12 +49,37 @@ def _card(raw: dict) -> dict:
 
 
 # The ten ``goodies`` cards are the Secret Agents mini-expansion.  Orbit v1 is
-# deliberately the 90-card base game requested by the user.
+# deliberately the 90-card base game requested by the user, and ``CARDS`` stays
+# exactly those 90 so that the served feature spaces, the native export and the
+# AI modules keyed on it are untouched by the expansion existing.
 CARDS: Final[dict[int, dict]] = {
     int(key): _card(value)
     for key, value in _RAW["card_ref"].items()
     if not int(value.get("goodies", 0))
 }
+
+#: The Secret Agents mini-expansion, kept SEPARATE from ``CARDS`` on purpose.
+#:
+#: It exists because every archived BGA table we can read is a Secret Agents
+#: table -- measured: 88 of every 100 Zenith tables run it, and 0 of the 40
+#: archived logs carrying card identities are expansion-free.  Without these ten
+#: cards a replay of a real game stalls at the first one drawn, which is action
+#: 0 in 32 of those 40 games.
+#:
+#: It is reachable ONLY through ``engine.new_game(secret_agents=True)``, which
+#: serving never passes.  Anything indexing ``CARDS`` (``ai/tensors.py``'s
+#: ``CARD_IDS``, ``ai/neural.py``'s hand vector, ``ai/belief.py``'s unseen pool)
+#: therefore keeps its base-game shape and raises loudly on an expansion card
+#: rather than silently scoring one as absent.
+EXPANSION_CARDS: Final[dict[int, dict]] = {
+    int(key): _card(value)
+    for key, value in _RAW["card_ref"].items()
+    if int(value.get("goodies", 0))
+}
+
+#: Metadata lookup for any card id in either pool.  Use this to ASK ABOUT a
+#: card; use ``CARDS``/``EXPANSION_CARDS`` to say which cards are in a deck.
+ALL_CARDS: Final[dict[int, dict]] = {**CARDS, **EXPANSION_CARDS}
 
 
 def _technology(raw: dict) -> dict:
@@ -91,9 +116,9 @@ BONUS_POOL: Final[tuple[int, ...]] = tuple(
 
 
 def card(card_id: int) -> dict:
-    """Return the immutable reference record for ``card_id``."""
+    """Return the immutable reference record for ``card_id``, base or expansion."""
 
-    return CARDS[int(card_id)]
+    return ALL_CARDS[int(card_id)]
 
 
 def technology(faction: str, side: int, level: int) -> dict:
@@ -121,6 +146,11 @@ def validate_reference() -> None:
 
     if len(CARDS) != 90:
         raise ValueError(f"Orbit must contain 90 base cards, found {len(CARDS)}")
+    if len(EXPANSION_CARDS) != 10:
+        raise ValueError(
+            f"Secret Agents must contain 10 cards, found {len(EXPANSION_CARDS)}")
+    if set(CARDS) & set(EXPANSION_CARDS):
+        raise ValueError("A card id cannot be both base and expansion")
     for planet in PLANETS:
         for faction in FACTIONS:
             found = sum(

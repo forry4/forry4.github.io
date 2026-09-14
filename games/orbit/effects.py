@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from .cards import CARDS, FACTIONS, PLANETS
+from .cards import ALL_CARDS, CARDS, EXPANSION_CARDS, FACTIONS, PLANETS
 
 
 def credits(amount: int, target: str = "self") -> dict:
@@ -46,8 +46,34 @@ def optional(cost: dict, then: list[dict], label: str) -> dict:
     return {"type": "optional", "cost": cost, "then": then, "label": label}
 
 
-def if_leader(then: list[dict]) -> dict:
-    return {"type": "if_leader", "then": then}
+def if_leader(then: list[dict], who: str = "self") -> dict:
+    """Run ``then`` if ``who`` holds the Leader badge. ``who`` is "self" or "opponent"."""
+
+    task = {"type": "if_leader", "then": then}
+    if who != "self":
+        task["who"] = who
+    return task
+
+
+def if_resource(resource: str, amount: int, then: list[dict], who: str = "self") -> dict:
+    """Run ``then`` if ``who`` holds at least ``amount`` of ``resource``.
+
+    The task type stays ``if_credits`` so that every save written before Zenithium
+    and the opponent were reachable still decodes to the same program.
+    """
+
+    task = {"type": "if_credits", "amount": amount, "then": then}
+    if resource != "credits":
+        task["resource"] = resource
+    if who != "self":
+        task["who"] = who
+    return task
+
+
+def raise_to(resource: str, amount: int) -> dict:
+    """Bring BOTH players up to ``amount`` of ``resource``. It never takes any away."""
+
+    return {"type": "raise_to", "resource": resource, "amount": amount}
 
 
 def give_leader(then: list[dict], label: str) -> dict:
@@ -100,7 +126,7 @@ def choose(label: str, branches: list[tuple[str, list[dict]]]) -> dict:
     }
 
 
-CARD_EFFECTS: dict[int, list[dict]] = {card_id: [] for card_id in CARDS}
+CARD_EFFECTS: dict[int, list[dict]] = {card_id: [] for card_id in ALL_CARDS}
 
 
 def _set(card_id: int, *tasks: dict) -> None:
@@ -116,10 +142,10 @@ _set(105, influence(1), if_leader([credits(3)]))
 _set(106, zenithium(3))
 _set(107, {"type": "draw_bonus"}, give_leader([credits(7)], "Give the Leader for 7 Credits"))
 _set(108, credits(5), if_leader([{"type": "draw_bonus"}]))
-_set(109, influence(2), optional({"resource": "zenithium_to_opponent", "amount": 1}, [{"type": "influence_other", "amount": 2}], "Give 1 Zenithium for +2 on a different planet"))
+_set(109, influence(2), optional({"resource": "zenithium_to_opponent", "amount": 1}, [{"type": "influence_other", "amount": 2, "different_from_previous": True}], "Give 1 Zenithium for +2 on a different planet"))
 _set(110, split_influence(1, 1), {"type": "transfer_each", "planets": list(PLANETS)})
 _set(111, zenithium(2), give_leader([zenithium(2)], "Give the Leader for 2 Zenithium"))
-_set(112, influence(2), give_leader([{"type": "influence_other", "amount": 2}], "Give the Leader for +2 on a different planet"))
+_set(112, influence(2), give_leader([{"type": "influence_other", "amount": 2, "different_from_previous": True}], "Give the Leader for +2 on a different planet"))
 _set(113, mobilize(2), give_leader([mobilize(3)], "Give the Leader to mobilize 3 more cards"))
 _set(114, optional({"resource": "credits_to_opponent", "amount": 3}, [influence(2, exclude="mercury")], "Give 3 Credits for +2 influence"))
 _set(115, exile_tier("mercury", "influence"))
@@ -198,7 +224,7 @@ _set(507, influence(1, "terra"), leader())
 _set(508, influence(1), if_leader([zenithium(1)]))
 _set(509, zenithium(3), if_leader([zenithium(1)]))
 _set(510, exile(1, reward="card_cost"))
-_set(511, influence(2), {"type": "if_credits", "amount": 6, "then": [{"type": "influence_other", "amount": 1}]})
+_set(511, influence(2), {"type": "if_credits", "amount": 6, "then": [{"type": "influence_other", "amount": 1, "different_from_previous": True}]})
 _set(512, credits(5), give_leader([credits(7)], "Give the Leader for 7 Credits"))
 _set(513, {"type": "per_nonempty", "owner": "opponent", "amount": 2})
 _set(514, transfer(2), give_leader([transfer(2)], "Give the Leader to transfer 2 more cards"))
@@ -206,6 +232,31 @@ _set(515, exile_tier("jupiter", "influence"))
 _set(516, if_leader([influence(1, "jupiter")]))
 _set(517, discard_hand(1, "card_cost"))
 _set(518, {"type": "spend_tier", "resource": "credits", "tiers": [[3, 1], [7, 2], [12, 3]], "exclude": "jupiter"})
+
+# ── Secret Agents ────────────────────────────────────────────────────────────
+# The mini-expansion, transcribed from the same `rule`/`desc` rows in
+# data/bga_reference.json as everything above. These are only ever dealt when a
+# game is built with `secret_agents=True`; serving never does. Seven of the ten
+# needed no new vocabulary at all -- 219 is the `opponent_side` restriction card
+# 312 already uses, 319 is the `lowest=True` develop of card 214, 519 is the
+# discard-hand of card 118 -- which is the check that they belong to the same
+# game rather than a bolted-on subsystem.
+_set(119, raise_to("credits", 8))
+_set(120, if_leader([{"type": "two_adjacent", "amount": 1}], who="opponent"))
+_set(219, influence(1, restriction="opponent_side"))
+_set(220, influence(1), if_resource("credits", 15, [influence(1)], who="opponent"))
+_set(319, develop(lowest=True))
+_set(320, choose("Choose Mungo's pair", [
+    ("Mercury and Venus", [influence(1, "mercury"), influence(1, "venus")]),
+    ("Mars and Jupiter", [influence(1, "mars"), influence(1, "jupiter")]),
+]))
+_set(419, raise_to("zenithium", 2))
+_set(420, influence(2, exclude="mars", target="opponent"),
+          {"type": "influence_other", "amount": 2, "different_from_previous": True}, leader(2))
+_set(519, discard_hand("all"), credits(5))
+_set(520, influence(1),
+          if_resource("zenithium", 3, [{"type": "influence_other", "amount": 1, "different_from_previous": True}],
+                      who="opponent"))
 
 
 TECH_EFFECTS: dict[tuple[str, int, int], list[dict]] = {
@@ -266,7 +317,9 @@ def bonus_effects(token_type: int) -> list[dict]:
     return deepcopy(BONUS_EFFECTS[int(token_type)])
 
 
-if set(CARD_EFFECTS) != set(CARDS):
-    raise ValueError("Every Orbit base card must have an effect program")
+if set(CARD_EFFECTS) != set(ALL_CARDS):
+    raise ValueError("Every Orbit card must have an effect program")
+if any(not CARD_EFFECTS[card_id] for card_id in EXPANSION_CARDS):
+    raise ValueError("Every Secret Agents card must have a non-empty effect program")
 if len(TECH_EFFECTS) != len(FACTIONS) * 2 * 5:
     raise ValueError("Every Orbit technology space must have an effect program")

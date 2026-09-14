@@ -14,38 +14,54 @@ replays them through the same `drive()` a BGA log will use, asserting the replay
 an identical final state. So when a real log fails, the failure is in the parse or in the
 rules -- not in the driver.
 
-Half 2 (`parse_actions`) is DELIBERATELY UNIMPLEMENTED. There are no Zenith logs on disk
-yet; the `cob-mining` cron fills `C:/Users/Forrest/Zenith_corpus/logs`. Guessing BGA's
-event names is how you get a parser that silently matches nothing -- the replay stalls and
-it presents as a rules bug. Dump what is actually there first:
+Half 2 is now COMPLETE for the rich archived corpus. `bga_table.py` reads a log,
+`build_game` forces a table's setup, and `bga_cowalk.py` walks every choice against a
+mirror of BGA's reported state. **40 of 40 tables consume their complete watched event
+stream and reproduce the logged winner, including all 27 tables with undo batches.**
+`--verify` separately checks that **40 of 40 reproduce both opening hands exactly.**
+The pieces that took the work:
 
-    python log_inspect.py                      # in the cob-mining worktree
-    python log_inspect.py <table_id>
+  * an archived log is one globally ordered stream across all three channels, so first
+    appearance in file order IS draw order -- asserted on load rather than assumed,
+    because a per-channel grouping would scramble the deck and present as a rules
+    divergence twenty moves later;
+  * seat 1 is the first player, and BGA's influence signs are INVERTED relative to ours;
+  * draws are SCRIPTED, not pre-arranged, because BGA issues a new `card_id` for a card
+    that returns through a reshuffle (4 of the 40 tables do this).
 
-THE HARD PART, WHEN YOU GET THERE
----------------------------------
-Not the moves -- the SETUP. `new_game` shuffles the card deck, the bonus pool, the agent
-deck, the seating order and (on "random") the board sides. A real table had a specific
-one of each, so a replay must FORCE the setup to the log's rather than seed its way there.
-On Rag Tag this was most of the harness bugs, and every one of them looked like an engine
-bug: reversed insert positions, a de-dup key that needed two fields, forced choices BGA
-never logged. Expect the same here and suspect the harness first.
+WHAT IS LEFT, AND WHY THE CORPUS IS ALL EXPANSION
+-------------------------------------------------
+Every archived table carrying card identities is a Secret Agents game -- 0 of 40 are
+expansion-free -- so `build_game` deals the 100-card pool. That is why the expansion
+exists in `effects.py` at all; see `tests/test_secret_agents.py`.
+
+The co-walk does not read the log as a list of answers -- it cannot, because BGA emits
+the same event for a chosen effect and an auto-resolved one. It converges a MIRROR of
+BGA's state against the engine and picks the move the mirror can reach. The face-up bonus
+tokens and board sides, neither of which is ever announced, are handled there: token
+identities come from `gainBonus` at award time, the eight board configurations are
+searched, and undo restores the engine, deck script, bonus script and mirror snapshot.
 
 Usage::
 
     python -m games.orbit.tools.bga_replay --selftest [--games 50]
-    python -m games.orbit.tools.bga_replay <table_id>        # once half 2 exists
+    python -m games.orbit.tools.bga_replay --verify          # forced setup vs the corpus
+    python -m games.orbit.tools.bga_replay --cowalk          # full parity over all rich tables
+    python -m games.orbit.tools.bga_replay <table_id>        # replay one table
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import random
 import sys
 
 from games.orbit import engine
+from games.orbit.cards import ALL_CARDS
+from games.orbit.tools import bga_table
 
 #: Where the cob-mining cron drops Zenith logs. Same env-var-with-a-default shape the Rag
 #: Tag tools use, so the corpus can move without editing code.
@@ -60,6 +76,14 @@ LOGS = CORP + "/logs"
 #: selftest caught it inside one game: two pending choices both matched `planet: null`.
 #: So a move's identity is the WHOLE dict, not a chosen subset of it.
 ACTIONS = ("mulligan", "leader", "recruit", "technology", "choose")
+
+#: The `_private` prompt types BGA publishes for a sub-decision, each carrying its
+#: own option list. Their existence is what makes a co-walk tractable: a decision
+#: is a MENU plus a consequence, not a consequence to be reverse-engineered alone.
+#: `confirm` is excluded -- it is the "you cannot Restart after this" dialog, a UI
+#: step rather than a game choice.
+DECISION_PROMPTS = frozenset(
+    {"planets", "cards", "techs", "bonus", "discardcards", "choice", "apply", "yesno"})
 
 
 def whose_move(game: dict) -> str:
@@ -182,18 +206,179 @@ def selftest(games: int, configuration: str = "sun") -> int:
     return 0
 
 
-def parse_actions(log: list) -> list[dict]:
-    """BGA log -> intents. NOT YET WRITTEN, and not to be guessed.
+#: Seat ids used as Orbit player ids. Seat 1 moves first, so it is `order[0]`.
+SEATS = ("1", "2")
 
-    See the module docstring: dump the real event stream with `log_inspect.py` and write
-    this against what is actually in it. Every field it needs -- card ids, planet names --
-    has a public mechanical name in `data/bga_reference.json`, which is the mapping table
-    to translate through, not to reinvent.
+
+class ScriptedDeck:
+    """Draws the cards the log says were drawn, in the order it says.
+
+    A pre-arranged deck is not enough, and the reason is worth writing down: BGA
+    issues a NEW `card_id` for a card that comes back through a reshuffle, so a
+    log can reveal the same card NUMBER twice (measured: 4 of the 40 archived
+    tables do). Arranging one fixed deck cannot express "and then these cards
+    were shuffled back in", but a scripted draw can -- it simply takes the next
+    card the log names, from wherever the engine is currently keeping it.
+
+    Conservation is preserved because the card is REMOVED from the deck or the
+    discard rather than conjured, so `validate_state` still means something.
+
+    When the script runs out -- a game that ends mid-deck, which is most of them
+    -- it falls back to the engine's own draw, so the tail of a game is never
+    fabricated.
+    """
+
+    def __init__(self, script: list[int]):
+        self.script = list(script)
+        self.taken = 0
+        self.overrun = 0
+
+    def __call__(self, game: dict) -> int | None:
+        if not self.script:
+            self.overrun += 1
+            return _real_draw_agent(game)
+        card = self.script.pop(0)
+        for pile in ("agent_deck", "agent_discard"):
+            if card in game[pile]:
+                game[pile].remove(card)
+                self.taken += 1
+                return card
+        raise AssertionError(
+            f"the log draws card {card} but the engine has it in neither the deck "
+            f"nor the discard -- it is already in play, so the draw order is wrong")
+
+
+#: Captured before any patching so the fallback is the genuine article.
+_real_draw_agent = engine._draw_agent
+
+
+@contextlib.contextmanager
+def scripted(deck: "ScriptedDeck"):
+    """Install `deck` as the engine's draw for the duration.
+
+    It has to cover the WHOLE replay, not just the opening deal: the mulligan
+    refill, every end-of-turn refill and every `mobilize` draw are also draws the
+    log recorded. Leaving it installed only for setup deals the right four cards
+    and then diverges on the very next refill -- which is exactly how this was
+    found.
+    """
+
+    previous = engine._draw_agent
+    engine._draw_agent = deck
+    try:
+        yield deck
+    finally:
+        engine._draw_agent = previous
+
+
+def build_game(table, board_sides: dict[str, int]) -> tuple[dict, ScriptedDeck]:
+    """A game whose SETUP is the table's, not a seed's.
+
+    The opening deal is done by the engine's own `_draw_to` through the scripted
+    deck, which is the point: if the script were wrong, the very first hand would
+    disagree with the log rather than something subtle going wrong twenty moves
+    later. Measured across all 40 archived tables, the first eight reveals are
+    seat 1's four then seat 2's four -- exactly `new_game`'s deal order.
+
+    NOT forced here, because the log never announces them: the eight face-up
+    bonus tokens, and the board sides, which the caller supplies.
+    """
+
+    game = engine.new_game(list(SEATS), seed=0, configuration=board_sides,
+                           secret_agents=True)
+    game["order"] = list(SEATS)
+    deck = ScriptedDeck(table.deck_ids)
+
+    # Put every card back, then deal through the script.
+    for player in game["players"].values():
+        player["hand"] = []
+    game["agent_deck"] = list(ALL_CARDS)
+    game["agent_discard"] = []
+    with scripted(deck):
+        for pid in game["order"]:
+            engine._draw_to(game, pid, 4)
+    engine.validate_state(game)
+    return game, deck
+
+
+def parse_actions(log: list) -> list[dict]:
+    """Superseded by the co-walk in `replay_table`.
+
+    Kept raising on purpose. A BGA log does not contain a move list that can be
+    translated ONCE and then applied -- a sub-decision is a menu plus a
+    consequence, and which sub-decision is being answered depends on where the
+    engine has got to. So the log is read BESIDE the engine, not ahead of it.
     """
     raise NotImplementedError(
-        "no Zenith logs have been parsed yet. Run `python log_inspect.py` in the "
-        "cob-mining worktree against " + LOGS + " and write this against the real "
-        "event names -- guessing them yields a parser that silently matches nothing.")
+        "intents are resolved against engine state; see replay_table's co-walk")
+
+
+def rich_tables(corpus: str = bga_table.CORPUS) -> list[str]:
+    """Archived tables carrying both seats' card identities.
+
+    Derived by READING the logs, never from a hand-written roster: a fixed list
+    only guards the corpus shrinking, and the cron adds to it.
+    """
+
+    found = []
+    directory = os.path.join(corpus, "logs")
+    for name in sorted(os.listdir(directory)):
+        if not name.endswith(".json"):
+            continue
+        table = bga_table.load(name[:-5], corpus)
+        if table.rich:
+            found.append(table.table_id)
+    return found
+
+
+def verify(corpus: str = bga_table.CORPUS) -> int:
+    """Check the FORCED SETUP against every rich table, and report what remains.
+
+    This lives in the tool rather than in pytest on purpose. The corpus is a
+    gitignored local directory, so a test needing it would either fail on a fresh
+    clone or -- worse -- opt out with the conditional skip the repo bans, which
+    is a green tick over a check that never ran. `tests/test_bga_replay.py` covers
+    everything that does not need a corpus.
+    """
+
+    tables, reproduced, undo_free, decisions = rich_tables(corpus), 0, 0, 0
+    for table_id in tables:
+        table = bga_table.load(table_id, corpus)
+        owner = {}
+        for _move_id, _index, kind, args in table.events():
+            if kind != "newCards":
+                continue
+            raw = args.get("cards", {})
+            for card in (raw.values() if isinstance(raw, dict) else raw):
+                owner.setdefault(str(card["card_id"]), str(card["card_player_no"]))
+
+        # Only the opening deal, which is all `newCards`; a mobilize reveal has no
+        # owning HAND and is skipped rather than guessed at.
+        expected: dict[str, list[int]] = {}
+        for card_id in table.reveal_order[:8]:
+            if card_id in owner:
+                expected.setdefault(owner[card_id], []).append(table.card_num[card_id])
+
+        game, _deck = build_game(table, {"robot": 1, "human": 1, "animod": 1})
+        dealt = {pid: sorted(game["players"][pid]["hand"]) for pid in game["order"]}
+        if dealt == {seat: sorted(cards) for seat, cards in expected.items()}:
+            reproduced += 1
+        else:
+            print(f"  {table_id}: dealt {dealt}, log says {expected}")
+        if not table.undos:
+            undo_free += 1
+        for _move_id, _index, kind, args in table.events():
+            if kind == "playCardDiploTech" or (kind == "moveCard"
+                                               and args.get("location") == "play"):
+                decisions += 1
+            elif kind == "gameStateChange":
+                _pid, payload = bga_table.private(args)
+                if payload and payload.get("type") in DECISION_PROMPTS:
+                    decisions += 1
+    print(f"{len(tables)} rich tables; opening deal reproduced from the forced setup "
+          f"in {reproduced}/{len(tables)}")
+    print(f"{undo_free} carry no undo, and the corpus holds {decisions} logged decisions")
+    return 0 if reproduced == len(tables) else 1
 
 
 def replay_table(table_id: str) -> int:
@@ -213,9 +398,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--selftest", action="store_true",
                         help="prove the driver against engine-generated games")
     parser.add_argument("--games", type=int, default=25)
+    parser.add_argument("--verify", action="store_true",
+                        help="check the forced setup against every rich archived table")
+    parser.add_argument("--cowalk", action="store_true",
+                        help="walk every rich table beside the engine and require full parity")
     parser.add_argument("--configuration", default="sun", choices=("sun", "random"))
     args = parser.parse_args(argv)
 
+    if args.verify:
+        return verify()
+    if args.cowalk:
+        from games.orbit.tools import bga_cowalk
+        return bga_cowalk.report()
     if args.selftest or not args.table_id:
         if not args.table_id:
             have = len(os.listdir(LOGS)) if os.path.isdir(LOGS) else 0

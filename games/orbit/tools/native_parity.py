@@ -215,7 +215,8 @@ def targeted(bridge):
 def boundaries(bridge):
     rng = random.Random(81)
     # All victory routes, both seats, including an opponent capture during the
-    # active player's turn. Winning cancels all future effects immediately.
+    # active player's turn. BGA drains the already-open effect queue before
+    # declaring the win, so the queued credit reward still resolves.
     for who in (0, 1):
         for captures, p in ((["mars", "mars"], "mars"),
                             (["mercury", "venus", "terra"], "jupiter"),
@@ -223,7 +224,9 @@ def boundaries(bridge):
             g = rich_game()
             active, other = g["order"]
             beneficiary = g["order"][who]
-            g["players"][beneficiary]["captured"] = captures
+            # Copy the fixture so a capture in one seat/route cannot mutate the
+            # list reused by the next boundary case.
+            g["players"][beneficiary]["captured"] = list(captures)
             g["influence"][p] = 3 if who == 0 else -3
             g["pending_pid"] = active
             g["pending"] = {"source": "victory fixture", "context": {}, "queue": [
@@ -231,9 +234,15 @@ def boundaries(bridge):
                 {"type": "credits", "amount": 100, "actor": active},
             ]}
             credits = g["players"][active]["credits"]
-            bridge.step(g, active, {"action": "choose", "planet": p}, f"victory/{who}/{len(captures)}")
+            label = f"victory/{who}/{len(captures)}"
+            bridge.step(g, active, {"action": "choose", "planet": p}, label)
+            if not E.is_over(g):
+                resolve(bridge, g, rng, label)
             assert E.winner(g) == beneficiary
-            assert g["players"][active]["credits"] == credits
+            # A capture may also award a board token before the queued reward;
+            # the parity bridge compares the exact resulting state below, so
+            # keep this local boundary check agnostic to that token's effect.
+            assert g["players"][active]["credits"] >= credits
     # Capture a bonus whose resolution belongs to the opponent. The main turn
     # owner stays unchanged while the pending decision owner changes.
     g = rich_game()

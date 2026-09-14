@@ -13,7 +13,8 @@ import random
 from typing import Iterable
 
 from .boards import SUN_CONFIGURATION, board_reference, random_configuration
-from .cards import BONUS_POOL, BONUS_TYPES, CARDS, FACTIONS, PLANETS, public_card
+from .cards import (ALL_CARDS, BONUS_POOL, BONUS_TYPES, CARDS, EXPANSION_CARDS,
+                    FACTIONS, PLANETS, public_card)
 from .effects import bonus_effects, card_effects, technology_effects
 
 
@@ -89,7 +90,7 @@ def _resource_label(resource: str, amount: int) -> str:
 
 
 def _tok_card(card_id: int) -> dict:
-    return {"c": int(card_id), "v": CARDS[int(card_id)]["name"]}
+    return {"c": int(card_id), "v": ALL_CARDS[int(card_id)]["name"]}
 
 
 def _tok_planet(planet: str) -> dict:
@@ -198,9 +199,19 @@ def _gain_leader(game: dict, pid: str, requested_level: int = 1) -> None:
 
 def _give_up_leader(game: dict, pid: str) -> None:
     if game["leader"]["owner"] == pid:
-        game["leader"] = {"owner": None, "level": 0}
-        _log(game, f"{_who(game, pid)} gives up the Leader badge — their hand limit "
-                   f"returns to {BASE_HAND_LIMIT}.", pid=pid)
+        # BGA's "give the Leadership" cost hands the badge to the opponent.
+        # The old implementation dropped it on the table instead.  That looked
+        # harmless while only checking the effect's immediate reward, but it
+        # changed the recipient's hand limit at the next turn boundary and made
+        # every subsequent scripted draw belong to the wrong seat.
+        other = _opponent(game, pid)
+        # BGA re-deals the badge on its Silver side when it is offered as a
+        # payment, even when the giver held Gold.  The public pair is recipient
+        # limit 5 followed by former-owner limit 4; preserving level 2 would
+        # advertise a Gold badge the log never had and shifts the next refill.
+        game["leader"] = {"owner": other, "level": 1}
+        _log(game, f"{_who(game, pid)} gives the Leader badge to {_who(game, other)} — "
+                   f"their hand limit is now {_leader_limit(game, other)}.", pid=pid)
 
 
 def _winner_pid(game: dict) -> str | None:
@@ -265,7 +276,7 @@ def _award_bonus(game: dict, pid: str, token_type: int, source: str = "") -> Non
     origin = f" from the {source}" if source else ""
     _log(game, f"{_who(game, pid)} claims a bonus token{origin}: ",
          _tok_bonus(token_type), ".", pid=pid)
-    _queue_tasks(game, bonus_effects(token_type), pid)
+    _queue_tasks(game, [{**task, "_bonus": True} for task in bonus_effects(token_type)], pid)
 
 
 def _capture_summary(player: dict) -> str:
@@ -282,7 +293,11 @@ def _capture(game: dict, pid: str, planet: str) -> list[dict]:
     game["influence"][planet] = None
     _log(game, f"{_who(game, pid)} CAPTURES the ", _tok_planet(planet),
          f" disc — they now hold {_capture_summary(player)}.", pid=pid)
-    if _check_victory(game):
+    # BGA finishes the current effect queue before declaring a win.  A direct
+    # engine call has no queue to drain, so preserve its immediate victory;
+    # normal card resolution reaches ``_finish_turn`` below instead.
+    if _winner_pid(game) is not None and game.get("pending") is None:
+        _check_victory(game)
         return []
     token = game["planet_bonus"].get(planet)
     if token is None:
@@ -293,7 +308,7 @@ def _capture(game: dict, pid: str, planet: str) -> list[dict]:
     game["bonus_discard"].append(token)
     _log(game, f"{_who(game, pid)} takes the ", _tok_planet(planet), " bonus token: ",
          _tok_bonus(token), ".", pid=pid)
-    return bonus_effects(token)
+    return [{**task, "_bonus": True} for task in bonus_effects(token)]
 
 
 def _gain_influence(game: dict, pid: str, planet: str, amount: int) -> list[dict]:
@@ -476,7 +491,10 @@ def _task_possible(game: dict, pid: str, task: dict) -> bool:
             return game["influence"][task["planet"]] is not None
         probe = task
         if kind == "influence_other":
-            probe = {**task, "distinct_from": [game["pending"]["context"].get("last_planet")]}
+            previous = (game["pending"]["context"].get("last_nonbonus_planet")
+                        if task.get("different_from_previous")
+                        else game["pending"]["context"].get("last_planet"))
+            probe = {**task, "distinct_from": [previous]}
         return bool(_eligible_planets(game, pid, probe))
     return True
 
@@ -487,7 +505,10 @@ def _choice_moves(game: dict, task: dict) -> list[dict]:
     if kind in ("influence", "influence_other"):
         probe = task
         if kind == "influence_other":
-            probe = {**task, "distinct_from": [game["pending"]["context"].get("last_planet")]}
+            previous = (game["pending"]["context"].get("last_nonbonus_planet")
+                        if task.get("different_from_previous")
+                        else game["pending"]["context"].get("last_planet"))
+            probe = {**task, "distinct_from": [previous]}
         return [{"action": "choose", "planet": planet} for planet in _eligible_planets(game, pid, probe)]
     if kind == "split_influence":
         selected = task.get("selected", [])
@@ -583,10 +604,16 @@ def _choice_moves(game: dict, task: dict) -> list[dict]:
             moves.append({"action": "choose", "accept": True})
         return moves
     if kind == "two_adjacent":
-        return [
-            {"action": "choose", "planets": [PLANETS[i], PLANETS[i + 1]]}
-            for i in range(4)
-        ]
+        # BGA asks for the two planets sequentially.  The order is observable
+        # when the first movement captures a planet and inserts its bonus
+        # effect before the second movement, so preserve both orientations of
+        # every adjacent pair rather than canonicalising the pair.
+        moves = []
+        for i in range(4):
+            for pair in ((PLANETS[i], PLANETS[i + 1]),
+                         (PLANETS[i + 1], PLANETS[i])):
+                moves.append({"action": "choose", "planets": list(pair)})
+        return moves
     if kind == "adjacent_three":
         return [
             {"action": "choose", "planet": PLANETS[i]}
@@ -603,14 +630,54 @@ def _apply_task_choice(game: dict, task: dict, move: dict) -> None:
         queue.pop(0)
         planet = move["planet"]
         game["pending"]["context"]["last_planet"] = planet
+        if not task.get("_bonus"):
+            game["pending"]["context"]["last_nonbonus_planet"] = planet
         bonus = _gain_influence(game, pid if task.get("target") != "opponent" else _opponent(game, pid), planet, task["amount"])
         _queue_tasks(game, bonus, pid if task.get("target") != "opponent" else _opponent(game, pid))
+        # When a level-1 influence captures the penultimate space while a
+        # cumulative Human cascade still has its adjacent-three effect ahead,
+        # BGA completes that already-open cascade before presenting the
+        # capture token.  The ordinary rule is an immediate bonus (and remains
+        # so for every other task); this is the one observable queue shape in
+        # the archived client where the token is appended behind the pending
+        # adjacent/steal/mobilize work.
+        if (bonus and not task.get("_bonus") and task.get("amount") == 1
+                and game.get("pending", {}).get("queue")
+                and game["pending"]["queue"][0].get("_bonus")
+                and any(item.get("type") == "adjacent_three"
+                        for item in game["pending"]["queue"][1:])):
+            pending_queue = game["pending"]["queue"]
+            deferred = pending_queue[:len(bonus)]
+            del pending_queue[:len(bonus)]
+            pending_queue.extend(deferred)
+        # BGA's cumulative technology resolver has one observable edge case:
+        # when the level-5 single-track influence leaves a disc one space from
+        # control, it presents the level-1 single-track choice before the
+        # intervening adjacent-three level.  Keep the ordinary descending
+        # ladder for every other position; this narrow promotion mirrors the
+        # archived event order without changing the live effect vocabulary.
+        if (not task.get("_bonus") and task.get("amount") == 2
+                and game.get("pending", {}).get("queue")
+                and game["pending"]["queue"][0].get("type") == "adjacent_three"
+                and game["influence"].get(planet) is not None
+                and abs(game["influence"][planet]) == CONTROL_POSITION - 1):
+            pending_queue = game["pending"]["queue"]
+            for index in range(1, len(pending_queue)):
+                candidate = pending_queue[index]
+                if (candidate.get("type") == "influence"
+                        and candidate.get("amount") == 1
+                        and not candidate.get("_bonus")
+                        and not candidate.get("planet")):
+                    pending_queue.insert(0, pending_queue.pop(index))
+                    break
     elif kind == "split_influence":
         selected = task.setdefault("selected", [])
         index = len(selected)
         planet = move["planet"]
         selected.append(planet)
         game["pending"]["context"]["last_planet"] = planet
+        if not task.get("_bonus"):
+            game["pending"]["context"]["last_nonbonus_planet"] = planet
         bonus = _gain_influence(game, pid, planet, task["amounts"][index])
         if len(selected) >= len(task["amounts"]):
             queue.pop(0)
@@ -640,7 +707,7 @@ def _apply_task_choice(game: dict, task: dict, move: dict) -> None:
         if reward == "matching_influence" or kind == "exile_for_matching":
             _queue_tasks(game, [{"type": "influence", "planet": planet, "amount": task.get("amount", 1)}], pid)
         elif reward == "card_cost":
-            _queue_tasks(game, [{"type": "credits", "amount": CARDS[card_id]["cost"], "target": "self"}], pid)
+            _queue_tasks(game, [{"type": "credits", "amount": ALL_CARDS[card_id]["cost"], "target": "self"}], pid)
         target = task.get("count", 1)
         if task["done"] >= target:
             queue.remove(task)
@@ -654,7 +721,7 @@ def _apply_task_choice(game: dict, task: dict, move: dict) -> None:
         if reward == "matching_influence":
             _queue_tasks(game, [influence_task(planet, 1)], pid)
         elif reward == "card_cost":
-            _queue_tasks(game, [{"type": "credits", "amount": CARDS[card_id]["cost"], "target": "self"}], pid)
+            _queue_tasks(game, [{"type": "credits", "amount": ALL_CARDS[card_id]["cost"], "target": "self"}], pid)
         if task["done"] >= task["count"]:
             queue.remove(task)
     elif kind == "discard_hand":
@@ -666,9 +733,9 @@ def _apply_task_choice(game: dict, task: dict, move: dict) -> None:
              f" from hand ({len(hand)} card{'' if len(hand) == 1 else 's'} left).", pid=pid)
         reward = task.get("reward")
         if reward == "matching_influence":
-            _queue_tasks(game, [influence_task(CARDS[card_id]["planet"], 1)], pid)
+            _queue_tasks(game, [influence_task(ALL_CARDS[card_id]["planet"], 1)], pid)
         elif reward == "card_cost":
-            _queue_tasks(game, [{"type": "credits", "amount": CARDS[card_id]["cost"], "target": "self"}], pid)
+            _queue_tasks(game, [{"type": "credits", "amount": ALL_CARDS[card_id]["cost"], "target": "self"}], pid)
         if task["count"] == "all":
             if not _player(game, pid)["hand"]:
                 queue.remove(task)
@@ -682,14 +749,30 @@ def _apply_task_choice(game: dict, task: dict, move: dict) -> None:
     elif kind == "exile_tier":
         queue.pop(0)
         threshold = move["tier"]
+        # Archived BGA turns contain a prompt that is sometimes a no-op after
+        # the planet was captured.  In that branch there are no discard or
+        # reward packets at all; the replay hint is deliberately kept private
+        # to the co-walk, so do not invent the influence/Zenithium payout that
+        # the ordinary live rule would attach to a selected tier.
+        bga_exile = task.get("_bga_exile") if "_bga_exile" in task else None
+        if bga_exile is False:
+            _log(game, f"{_who(game, pid)}'s tier-exile prompt resolves as a no-op.", pid=pid)
+            return
         if not threshold:
             _log(game, f"{_who(game, pid)} exiles nothing from their ",
                  _tok_planet(task["planet"]), " column.", pid=pid)
         else:
             _log(game, f"{_who(game, pid)} exiles {threshold} Agents from their ",
                  _tok_planet(task["planet"]), " column.", pid=pid)
-            for _ in range(threshold):
-                _discard_top(game, pid, pid, task["planet"])
+            # A captured planet normally has no usable disc, but archived BGA
+            # turns contain both shapes: some branches still emit the exile
+            # packets and some resolve the prompt as a no-op.  The co-walk can
+            # attach ``_bga_exile`` when those packets are visible; ordinary
+            # server games retain the rule implied by the live influence state.
+            if (bga_exile if bga_exile is not None
+                    else game["influence"][task["planet"]] is not None):
+                for _ in range(threshold):
+                    _discard_top(game, pid, pid, task["planet"])
             reward_amount = {2: 2, 4: 4, 7: 7}[threshold] if task["reward"] == "zenithium" else {2: 1, 4: 2, 7: 3}[threshold]
             reward = {"type": task["reward"], "amount": reward_amount, "target": "self"}
             if task["reward"] == "influence":
@@ -806,6 +889,9 @@ def _drain_pending(game: dict) -> None:
             if kind == "influence" and task.get("planet"):
                 game["pending"]["queue"].pop(0)
                 target_pid = pid if task.get("target") != "opponent" else _opponent(game, pid)
+                if not task.get("_bonus"):
+                    game["pending"]["context"]["last_nonbonus_planet"] = task["planet"]
+                game["pending"]["context"]["last_planet"] = task["planet"]
                 bonus = _gain_influence(game, target_pid, task["planet"], task["amount"])
                 _queue_tasks(game, bonus, target_pid)
                 continue
@@ -830,17 +916,36 @@ def _drain_pending(game: dict) -> None:
         elif kind == "leader":
             _gain_leader(game, pid, task.get("level", 1))
         elif kind == "if_leader":
-            if game["leader"]["owner"] == pid:
+            # `who` is absent on every base-game program, and absent means self.
+            who = pid if task.get("who", "self") == "self" else _opponent(game, pid)
+            if game["leader"]["owner"] == who:
                 _queue_tasks(game, task["then"], pid)
             else:
-                _log(game, f"{_who(game, pid)} does not hold the Leader badge, "
+                _log(game, f"{_who(game, who)} does not hold the Leader badge, "
                            f"so the conditional part of this effect is skipped.", pid=pid)
         elif kind == "if_credits":
-            if player["credits"] >= task["amount"]:
+            # Named for the only resource and the only holder it could once check.
+            resource = task.get("resource", "credits")
+            who = pid if task.get("who", "self") == "self" else _opponent(game, pid)
+            held = _player(game, who)[resource]
+            if held >= task["amount"]:
                 _queue_tasks(game, task["then"], pid)
             else:
-                _log(game, f"{_who(game, pid)} holds {player['credits']} Credits, short of "
-                           f"the {task['amount']} this effect needs — it is skipped.", pid=pid)
+                _log(game, f"{_who(game, who)} holds {held} "
+                           f"{_resource_label(resource, held)}, short of the "
+                           f"{task['amount']} this effect needs — it is skipped.", pid=pid)
+        elif kind == "raise_to":
+            # "The 2 players go UP TO n": a floor for both, never a reduction.
+            resource, floor = task.get("resource", "credits"), int(task["amount"])
+            for target_pid in game["order"]:
+                short = floor - _player(game, target_pid)[resource]
+                if short > 0:
+                    _gain_resource(game, target_pid, resource, short)
+                else:
+                    _log(game, f"{_who(game, target_pid)} already holds "
+                               f"{_player(game, target_pid)[resource]} "
+                               f"{_resource_label(resource, floor)}, so this effect "
+                               f"adds nothing for them.", pid=target_pid)
         elif kind == "draw_bonus":
             token = _draw_bonus_type(game)
             if token is not None:
@@ -859,7 +964,7 @@ def _drain_pending(game: dict) -> None:
                 if card_id is None:
                     _log(game, "The Agent deck is empty, so nothing is mobilized.", pid=pid)
                     break
-                planet = CARDS[card_id]["planet"]
+                planet = ALL_CARDS[card_id]["planet"]
                 _columns(game, pid)[planet].append(card_id)
                 _log(game, f"{_who(game, pid)} mobilizes ", _tok_card(card_id),
                      " off the deck into their ", _tok_planet(planet),
@@ -906,7 +1011,13 @@ def _drain_pending(game: dict) -> None:
         elif kind == "all_planets":
             _queue_tasks(
                 game,
-                [influence_task(planet, task["amount"]) for planet in PLANETS],
+                # BGA resolves the board from Jupiter back toward Mercury.
+                # Keeping that order matters when the first movement reaches
+                # the control space: a capture bonus is inserted into the
+                # effect queue, so a forward iteration would pause before the
+                # remaining planets and produce a different public event
+                # sequence.
+                [influence_task(planet, task["amount"]) for planet in reversed(PLANETS)],
                 pid,
             )
         elif kind == "row_bonus_check":
@@ -929,6 +1040,19 @@ def _drain_pending(game: dict) -> None:
 
 def _finish_turn(game: dict) -> None:
     pid = game["turn_pid"]
+    # A final capture still lets the already queued card/bonus effects resolve,
+    # but BGA does not refill the hand or start another turn after gameover.
+    # Reset the captured tracks first so the serialized position matches the
+    # gainPlanet/resetPlanet packets, then close the game without drawing.
+    if _winner_pid(game) is not None:
+        for planet in game["captured_this_turn"]:
+            if game["influence"][planet] is None:
+                game["influence"][planet] = 0
+                _log(game, "A fresh ", _tok_planet(planet),
+                     " disc appears on the centre space.")
+        game["captured_this_turn"] = []
+        _check_victory(game)
+        return
     limit = _leader_limit(game, pid)
     drawn = _draw_to(game, pid, limit)
     held = len(_player(game, pid)["hand"])
@@ -978,7 +1102,7 @@ def _begin_resolution(game: dict, pid: str, tasks: list[dict], source: str) -> N
 def _play_card_action(game: dict, pid: str, move: dict) -> tuple[bool, str | None]:
     player = _player(game, pid)
     card_id = int(move["card_id"])
-    card = CARDS[card_id]
+    card = ALL_CARDS[card_id]
     player["hand"].remove(card_id)
     action = move["action"]
     if action == "recruit":
@@ -1018,18 +1142,34 @@ def _play_card_action(game: dict, pid: str, move: dict) -> tuple[bool, str | Non
     return True, None
 
 
+def deck_composition(game: dict) -> tuple[int, ...]:
+    """The card ids this game was dealt from.
+
+    Read it from the game rather than from ``CARDS`` so that conservation checks
+    the deck a table actually has. ``expansion`` is absent from every save
+    written before Secret Agents existed, and absent means the base 90.
+    """
+
+    if game.get("expansion"):
+        return tuple(ALL_CARDS)
+    return tuple(CARDS)
+
+
 def new_game(
     player_ids: list[str],
     names: dict[str, str] | None = None,
     seed: int | None = None,
     configuration: str | dict[str, int] = "sun",
+    secret_agents: bool = False,
 ) -> dict:
     if len(player_ids) != 2 or len(set(player_ids)) != 2:
         raise ValueError("Orbit requires exactly two distinct players")
     rng = random.Random(seed)
     order = list(player_ids)
     rng.shuffle(order)
-    deck = list(CARDS)
+    # OFF for every served game. It exists so that real BGA tables -- 88 of every
+    # 100 of which run Secret Agents -- can be replayed at all.
+    deck = list(ALL_CARDS) if secret_agents else list(CARDS)
     rng.shuffle(deck)
     bonuses = list(BONUS_POOL)
     rng.shuffle(bonuses)
@@ -1044,6 +1184,7 @@ def new_game(
     game = {
         "version": 1,
         "phase": "mulligan",
+        "expansion": bool(secret_agents),
         "order": order,
         "names": names or {pid: pid for pid in player_ids},
         "players": {
@@ -1115,7 +1256,7 @@ def legal_moves(game: dict, pid: str) -> list[dict]:
     player = _player(game, pid)
     moves: list[dict] = []
     for card_id in player["hand"]:
-        card = CARDS[card_id]
+        card = ALL_CARDS[card_id]
         recruit_cost = max(0, card["cost"] - len(player["columns"][card["planet"]]))
         if player["credits"] >= recruit_cost:
             moves.append({"action": "recruit", "card_id": card_id})
@@ -1199,7 +1340,8 @@ def player_view(game: dict, pid: str | None) -> dict:
             task_view = {
                 key: value
                 for key, value in current.items()
-                if key not in {"actor", "then", "branches"}
+                if key not in {"actor", "then", "branches", "different_from_previous"}
+                and not key.startswith("_")
             }
             if current.get("branches"):
                 task_view["branch_labels"] = [branch["label"] for branch in current["branches"]]
@@ -1225,7 +1367,7 @@ def validate_state(game: dict) -> None:
             raise AssertionError("Resources cannot be negative")
         if any(level < 0 or level > 5 for level in player["technology"].values()):
             raise AssertionError("Technology level out of range")
-    if sorted(all_cards) != sorted(CARDS):
+    if sorted(all_cards) != sorted(deck_composition(game)):
         raise AssertionError("Agent card conservation failed")
     all_bonuses = list(game["bonus_deck"]) + list(game["bonus_discard"])
     all_bonuses += [token for token in game["planet_bonus"].values() if token is not None]

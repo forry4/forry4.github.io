@@ -4,7 +4,16 @@
   --or-line: rgba(177, 188, 255, .18);
   --or-ink: #f5f2e9;
   --or-dim: #aeb6d0;
-  --or-agent-height: 164px;
+  /* CARD HEIGHT IS THE LONGEST COMPLETE FACE PLUS ONE PLATFORM'S WORTH OF
+     HEADROOM, and both halves are measured rather than chosen. Since the title
+     stopped wrapping, the longest face needs ~144px instead of ~160, so this
+     came down 164 -> 152. The headroom left (~8px) is deliberately a little
+     MORE than the ~5px the wide tier below has survived CI on for weeks, which
+     is the only evidence available that prose wraps closely enough across the
+     dev box's fonts and the runner's for a fixed height to be safe at all.
+     Do not cut below that without re-measuring on Linux — the card clips, and
+     a clipped card is what the screen gate's card-fit check exists to catch. */
+  --or-agent-height: 152px;
   /* THE TWO SEAT COLOURS. Yours is the game accent; theirs is a warm contrast
      that survives both a teal-blind and a red-blind reading of the pair, and
      never appears as a planet on the influence board. Everything that has to
@@ -306,7 +315,13 @@
    — and, together with the cost, what the retired `.or-columns` panels carried
    that this row previously did not. One line, clipped: the full stack is one
    press away in the same modal it has always been. */
-.or-played-name { min-width: 0; overflow: hidden; color: var(--or-ink); font-family: Georgia, serif; font-size: .72rem; line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; }
+/* THE NAME SITS AGAINST THE COST, NOT AGAINST THE COUNT. The row reads
+   count · … · name cost — the two facts about the TOP card kept together at the
+   right, and the count, which is about the column, alone at the left. Left-
+   aligning the name (the old behaviour) put a ragged gap between it and the
+   price it belongs with, and made the pair's distance from each other depend on
+   how long the name happened to be. */
+.or-played-name { min-width: 0; overflow: hidden; color: var(--or-ink); font-family: Georgia, serif; font-size: .72rem; line-height: 1.15; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .or-played-agent.empty .or-played-name { color: #5d6684; font-family: inherit; font-size: .56rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
 /* THE TOP AGENT'S PRINTED COST. It is a NUMBER THE RULES READ, not detail about
    a card: `card_cost` pays Credits equal to the printed cost of the Agent an
@@ -517,10 +532,18 @@
 /* A card you cannot play is still a card you can read, so it stays enabled and
    only loses the lifted "this click plays it" affordance. */
 .or-agent:not(.playable) { cursor: zoom-in; }
-.or-agent-top { display: flex; justify-content: space-between; align-items: center; color: currentColor; }
+.or-agent-top { display: flex; justify-content: space-between; align-items: center; gap: 2px; color: currentColor; }
 .or-agent-top i { color: var(--or-fac, currentColor); font-size: 1.05rem; font-style: normal; }
 .or-agent-top b { display: grid; place-items: center; width: 1.55rem; height: 1.55rem; border-radius: 50%; background: #f2f0e8; color: #121526; font-size: .84rem; }
-.or-agent strong { margin: .48rem 0 .3rem; color: var(--or-ink); font-family: Georgia, serif; font-size: .92rem; }
+/* ONE LINE, ALWAYS — `FitName` shrinks the text instead of wrapping it. The
+   flex sizing is what makes that possible: `min-width:0` lets the item shrink
+   below its own content (a flex item will not, by default), and `flex:1` gives
+   it the whole leftover row so the fitter has a real width to measure rather
+   than the max-content width it would otherwise report. `nowrap` is what turns
+   the overflow into a WIDTH the fitter can see; without it the browser solves
+   the overflow itself, by wrapping, and the fitter has nothing to correct. */
+.or-agent strong { flex: 1; min-width: 0; margin: .48rem 0 .3rem; color: var(--or-ink); font-family: Georgia, serif; font-size: .92rem; text-align: center; white-space: nowrap; }
+.or-agent strong > span { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; white-space: nowrap; }
 .or-agent-text { flex: 1; color: #cbd0e2; font-size: .68rem; line-height: 1.28; }
 .or-agent-foot { display: flex; align-items: center; gap: .3rem; color: var(--or-dim); font-size: .6rem; font-weight: 850; letter-spacing: .07em; text-transform: uppercase; }
 .or-agent-foot .or-pl { letter-spacing: .07em; }
@@ -799,7 +822,7 @@
 .or-card-price { display: inline-flex; align-items: center; gap: .28rem; }
 .or-agent-top .or-card-price b { width: auto; height: auto; background: none; color: #ffe1a1; font-variant-numeric: tabular-nums; }
 .or-agent { background: radial-gradient(ellipse at 100% 0, color-mix(in srgb, currentColor 14%, transparent), transparent 68%), linear-gradient(155deg, #20253b, #0e1222 70%); }
-.or-agent strong { line-height: 1.18; overflow-wrap: anywhere; }
+.or-agent strong { line-height: 1.18; }
 .or-agent.selected:focus-visible { outline: 2px solid var(--or-card-tint, currentColor); }
 /* Re-stated at THIS depth, not only up in the Hand block. The rule above is
    what makes `.selected` an inset accent along the card's TOP edge rather than
@@ -830,10 +853,29 @@
      else — the name needs ~150px before it is a name rather than two letters
      and an ellipsis. The cell keeps the grid position that makes it readable
      as "this planet's stack". */
-  .or-played-agent { justify-content: center; grid-template-columns: auto auto; gap: .22rem; padding: .22rem .12rem; }
+  .or-played-agents { gap: 2px; margin-inline: -.38rem; }
+  /* THE TWO NUMBERS GO TO OPPOSITE EDGES rather than huddling in the middle.
+     Centred, they read as one compound value and the eye has to separate them;
+     pinned to the edges, the count lines up down the row of five cells and so
+     does the price, which is how you compare columns at a glance. It also puts
+     the whole cell's slack BETWEEN them, where it does the most work. */
+  .or-played-agent { justify-content: space-between; grid-template-columns: auto auto; gap: .14rem; padding: .22rem .12rem; }
   .or-played-name { display: none; }
+  /* THE WIDEST REAL CELL IS A TWO-DIGIT COUNT BESIDE A TWO-DIGIT PRICE, and at
+     320px the five columns leave it ~51px of content box. At the desktop
+     spacing that pair does not fit, and the gap between platforms is much
+     larger than it looks: the same five glyphs measure 28.4px on this box and
+     36.1px on CI's Linux fonts — 27% wider, or 3.85px per side. A cell that
+     cleared its border box by 1.69px here was therefore ~2px OVER there. Every
+     gap on this row is cut to the minimum that still reads as separation (the
+     plate's own fill separates the count from the price, so the space between
+     them does less work than it looks), and the row is pulled into the player
+     box's padding for the rest. Both are pure geometry, identical everywhere —
+     which the glyph budget is not, and that is the whole lesson. */
+  .or-played-quantity { gap: 0; padding: 0 .12rem; }
   .or-played-count { font-size: .66rem; }
-  .or-played-cost { font-size: .6rem; }
+  .or-played-cost { gap: 1px; font-size: .6rem; }
+  .or-played-cost .or-resource-icon { width: 10px; height: 10px; }
   .or-tech > header { grid-template-columns: auto 1fr auto; padding: .35rem .6rem; }
   .or-tech-toggle { min-height: 32px; }
   .or-tech-key b { max-width: 4.7rem; }
@@ -871,7 +913,11 @@
    A bounded measure keeps the board dominant over technology and history. */
 @media (min-width: 981px) {
   .or-table { width: min(1680px, calc(100% - 48px)); --or-board-pad: .6rem; --or-board-gap: .4rem; }
-  .or-board-layout { grid-template-columns: minmax(0, 2.15fr) minmax(310px, 1fr); gap: 16px; flex: none; }
+  /* The right column carries the technology track and the log, both of which
+     are TEXT and were wrapping early — the track's rules lines and the log's
+     sentences are the two things on the page you actually read, against a board
+     that is mostly geometry and had the slack to give. */
+  .or-board-layout { grid-template-columns: minmax(0, 1.95fr) minmax(340px, 1fr); gap: 16px; flex: none; }
   .or-board-main { display: flex; flex-direction: column; gap: 8px; }
   .or-board-main > .or-score-rail { display: contents; }
   .or-score-rail .or-player { border: 1px solid var(--or-line); border-left: 3px solid var(--or-seat); border-radius: 13px; background: var(--or-panel); padding: .48rem var(--or-board-pad); }
@@ -974,7 +1020,11 @@
 .or-agent-top .or-card-price { flex: none; gap: 2px; align-items: center; }
 .or-agent-top .or-resource-icon { width: 13px; height: 13px; }
 .or-agent-top .or-card-price b { font-size: .84rem; }
-.or-agent-text { flex: 1 0 auto; font-size: .72rem; line-height: 1.32; }
+/* 1.28 is the base sheet's own body leading, not a new number. The rules
+   sentence is SIX lines on the longest card and ~92px of a ~148px face, so it
+   is the only term big enough to move the card height; the font size itself is
+   fixed at .72rem by an explicit product decision (no zoom, no clamp). */
+.or-agent-text { flex: 1 0 auto; font-size: .72rem; line-height: 1.28; }
 .or-agent-foot { flex: none; gap: 3px; font-size: .6rem; letter-spacing: .02em; white-space: nowrap; }
 .or-agent-foot .or-pl { letter-spacing: .02em; }
 /* No deck stands beside the hand. A drawn card is dealt to the hand's own left
@@ -1086,7 +1136,7 @@
   .or-decision .or-choice-grid button { min-height: 38px; }
 }
 @media (min-width: 1500px) {
-  .orbit { --or-agent-height: 152px; }
+  .orbit { --or-agent-height: 150px; }   /* ~6px of headroom -- see :root */
   .or-hand-zone .or-agent { flex-basis: 154px; width: 154px; min-width: 154px; }
   .or-influence .or-space::before { width: 9px; height: 9px; border-width: 1.5px; }
   .or-influence .or-space.goal::before { width: 16px; height: 16px; border-width: 2px; }
@@ -1115,4 +1165,21 @@
 @media (max-width: 980px) {
   .or-hand-zone { display: flex; flex-direction: column; }
   .or-hand-zone:has(.deciding) .or-controls { order: -1; margin: 0 0 6px; border-top: 0; }
+}
+
+/* AT 320px THE COLUMN IS 55px, NOT THE ~70px THE RULE ABOVE IS WRITTEN FOR, and
+   two numbers plus their marks do not fit it on every font. This tier therefore
+   drops one more mark, exactly as 980px drops the name: the `×`. It is the most
+   expensive glyph in the cell (8px — wider than either number's digits) and the
+   least load-bearing, because the count is ALREADY marked as a count by the
+   filled, planet-coloured plate it sits in, while the price is marked as a price
+   by the Credit coin, which stays. So the two numbers remain distinguishable by
+   the same two cues they use at every other width; only the redundant one goes.
+   Dropping it buys 4px PER SIDE — more than the whole cross-platform spread —
+   where trimming font sizes would have bought a third of that and cost
+   legibility on the two numbers this row exists to show. Both are `aria-hidden`
+   and the button's label carries the real sentence, so nothing is lost to a
+   screen reader. */
+@media (max-width: 360px) {
+  .or-played-quantity > span { display: none; }
 }

@@ -107,6 +107,45 @@ def test_capture_bonus_and_all_three_victory_conditions():
         assert E.is_over(game) and E.winner(game) == pid
 
 
+def test_all_planets_technology_resolves_from_jupiter_back_to_mercury(monkeypatch):
+    game = E.new_game(["A", "B"], seed=19, secret_agents=True)
+    game["order"] = ["A", "B"]
+    game["phase"] = "play"
+    game["turn_pid"] = "A"
+    game["pending"] = {
+        "source": "test",
+        "queue": [{"type": "all_planets", "amount": 1, "actor": "A"}],
+        "context": {},
+    }
+    seen = []
+    monkeypatch.setattr(E, "_gain_influence",
+                        lambda _game, _pid, planet, _amount:
+                        seen.append(planet) or [])
+    E._drain_pending(game)
+    assert seen == list(reversed(E.PLANETS))
+
+
+def test_capture_bonus_can_wait_behind_the_remaining_cascade():
+    game = E.new_game(["A", "B"], seed=23, secret_agents=True)
+    game["order"] = ["A", "B"]
+    game["phase"] = "play"
+    game["turn_pid"] = "B"
+    game["influence"]["mercury"] = -3
+    game["planet_bonus"]["mercury"] = 3
+    first = {"type": "influence", "amount": 1, "target": "self", "actor": "B"}
+    adjacent = {"type": "adjacent_three", "center": 1, "neighbor": 1, "actor": "B"}
+    game["pending"] = {
+        "source": "test",
+        "queue": [first, adjacent,
+                  {"type": "steal", "resource": "credits", "amount": 3, "actor": "B"}],
+        "context": {},
+    }
+    E._apply_task_choice(game, first, {"action": "choose", "planet": "mercury"})
+    queue = game["pending"]["queue"]
+    assert queue[0]["type"] == "adjacent_three"
+    assert queue[-1].get("_bonus") is True
+
+
 def test_hidden_information_is_redacted_from_a_real_pending_game():
     game = E.new_game(["A", "B"], seed=4)
     finish_mulligan(game)

@@ -17,6 +17,7 @@ pub(crate) mod clock;
 mod wasm;
 
 pub const PLANETS: [&str; 5] = ["mercury", "venus", "terra", "mars", "jupiter"];
+const CONTROL_POSITION: i32 = 4;
 pub const FACTIONS: [&str; 3] = ["robot", "human", "animod"];
 fn s<'a>(v: &'a Value, k: &str) -> &'a str {
     v[k].as_str().unwrap_or("")
@@ -490,6 +491,62 @@ impl State {
         });
         pending.queue.splice(0..0, prepared);
     }
+
+    /// Bonus effects are internal tasks.  The Python authority keeps that
+    /// marker so a later ``different_from_previous`` choice can distinguish a
+    /// bonus movement from the card/technology movement that caused it.
+    fn mark_bonus(tasks: Vec<Value>) -> Vec<Value> {
+        tasks
+            .into_iter()
+            .map(|mut task| {
+                task["_bonus"] = json!(true);
+                task
+            })
+            .collect()
+    }
+
+    /// Match the two queue-shape corrections observed in the BGA co-walk.
+    /// They are deliberately narrow: ordinary bonus insertion remains the
+    /// normal front-of-queue operation.
+    fn adjust_influence_queue(&mut self, task: &Value, planet_name: &str, amount: i32, bonus_len: usize) {
+        let nonbonus = !b(task, "_bonus");
+        if nonbonus
+            && amount == 1
+            && bonus_len > 0
+            && self
+                .pending
+                .as_ref()
+                .is_some_and(|p| p.queue.first().is_some_and(|t| b(t, "_bonus")))
+            && self.pending.as_ref().is_some_and(|p| {
+                p.queue[1..].iter().any(|t| s(t, "type") == "adjacent_three")
+            })
+        {
+            let pending = self.pending.as_mut().expect("pending queue");
+            let moved: Vec<_> = pending.queue.drain(..bonus_len).collect();
+            pending.queue.extend(moved);
+        }
+        if nonbonus
+            && amount == 2
+            && self.pending.as_ref().is_some_and(|p| {
+                p.queue.first().is_some_and(|t| s(t, "type") == "adjacent_three")
+                    && self.influence[planet(planet_name)].is_some_and(|v| v.abs() == CONTROL_POSITION - 1)
+            })
+        {
+            let pending = self.pending.as_mut().expect("pending queue");
+            for index in 1..pending.queue.len() {
+                let candidate = &pending.queue[index];
+                if s(candidate, "type") == "influence"
+                    && n(candidate, "amount") == 1
+                    && !b(candidate, "_bonus")
+                    && s(candidate, "planet").is_empty()
+                {
+                    let candidate = pending.queue.remove(index);
+                    pending.queue.insert(0, candidate);
+                    break;
+                }
+            }
+        }
+    }
     fn draw_agent(&mut self, chance: &mut Chance) -> Option<u16> {
         if self.agent_deck.is_empty() {
             if self.agent_discard.is_empty() {
@@ -521,7 +578,7 @@ impl State {
     }
     fn award_bonus(&mut self, pid: usize, token: u16) {
         self.bonus_discard.push(token);
-        self.queue(rules().bonus_effects[&token].clone(), pid);
+        self.queue(Self::mark_bonus(rules().bonus_effects[&token].clone()), pid);
     }
     fn gain_leader(&mut self, pid: usize, level: i32) {
         self.leader.level = if level >= 2 {
@@ -565,12 +622,12 @@ impl State {
                 self.players[pid].captured.push(p);
                 self.captured_this_turn.push(p);
                 self.influence[p] = None;
-                if self.check_victory() {
+                if self.pending.is_none() && self.check_victory() {
                     return vec![];
                 }
                 if let Some(token) = self.planet_bonus[p].take() {
                     self.bonus_discard.push(token);
-                    return rules().bonus_effects[&token].clone();
+                    return Self::mark_bonus(rules().bonus_effects[&token].clone());
                 }
                 break;
             }
@@ -592,7 +649,13 @@ impl State {
         let last = self
             .pending
             .as_ref()
-            .map(|v| s(&v.context, "last_planet"))
+            .map(|v| {
+                if b(task, "different_from_previous") {
+                    s(&v.context, "last_nonbonus_planet")
+                } else {
+                    s(&v.context, "last_planet")
+                }
+            })
             .unwrap_or("");
         (0..5)
             .filter(|p| {
@@ -625,10 +688,7 @@ impl State {
         }
         let r = s(cost, "resource");
         if r == "leader" {
-            self.leader = Leader {
-                owner: None,
-                level: 0,
-            };
+            self.leader = Leader { owner: Some(1 - pid), level: 1 };
             return true;
         }
         let base = r.strip_suffix("_to_opponent").unwrap_or(r);
@@ -806,7 +866,12 @@ impl State {
                 opts
             }
             "two_adjacent" => (0..4)
-                .map(|p| json!({"action":"choose","planets":[PLANETS[p],PLANETS[p+1]]}))
+                .flat_map(|p| {
+                    [
+                        json!({"action":"choose","planets":[PLANETS[p],PLANETS[p+1]]}),
+                        json!({"action":"choose","planets":[PLANETS[p+1],PLANETS[p]]}),
+                    ]
+                })
                 .collect(),
             "adjacent_three" => planets((1..4).collect()),
             _ => panic!("unknown choice {kind}"),
@@ -870,6 +935,30 @@ impl State {
     }
     fn finish_turn(&mut self, c: &mut Chance) {
         let pid = self.turn_pid.unwrap();
+        // BGA drains the already-open effect chain and resets captured discs
+        // before declaring a win.  Do not refill the hand or start the next
+        // turn after that terminal boundary.
+        let victory_pending = (0..2).any(|seat| {
+            let captured = &self.players[seat].captured;
+            let mut counts = [0; 5];
+            for p in captured {
+                counts[*p] += 1;
+            }
+            captured.len() >= 5
+                || counts.iter().any(|count| *count >= 3)
+                || counts.iter().filter(|count| **count > 0).count() >= 4
+        });
+        if victory_pending {
+            for p in self.captured_this_turn.drain(..) {
+                if self.influence[p].is_none() {
+                    self.influence[p] = Some(0);
+                }
+            }
+            self.pending = None;
+            self.pending_pid = None;
+            self.check_victory();
+            return;
+        }
         let limit = if self.leader.owner == Some(pid) {
             if self.leader.level >= 2 {
                 6
@@ -1020,13 +1109,18 @@ impl State {
             "influence" | "influence_other" => {
                 let p = s(mv, "planet");
                 self.pending.as_mut().unwrap().context["last_planet"] = json!(p);
+                if !b(&task, "_bonus") {
+                    self.pending.as_mut().unwrap().context["last_nonbonus_planet"] = json!(p);
+                }
                 let who = if s(&task, "target") == "opponent" {
                     1 - pid
                 } else {
                     pid
                 };
                 let bonus = self.gain_influence(who, planet(p), n(&task, "amount"));
+                let bonus_len = bonus.len();
                 self.queue(bonus, who);
+                self.adjust_influence_queue(&task, p, n(&task, "amount"), bonus_len);
             }
             "split_influence" => {
                 let mut selected = arr(&task, "selected");
@@ -1035,6 +1129,9 @@ impl State {
                 selected.push(json!(p));
                 task["selected"] = json!(selected);
                 self.pending.as_mut().unwrap().context["last_planet"] = json!(p);
+                if !b(&task, "_bonus") {
+                    self.pending.as_mut().unwrap().context["last_nonbonus_planet"] = json!(p);
+                }
                 rewards = self.gain_influence(
                     pid,
                     planet(p),
@@ -1123,8 +1220,13 @@ impl State {
                 let tier = n(mv, "tier");
                 if tier > 0 {
                     let p = planet(s(&task, "planet"));
-                    for _ in 0..tier {
-                        self.discard_top(pid, p);
+                    // BGA can leave a stale tier prompt after the planet has
+                    // already been captured.  The prompt still awards its
+                    // printed reward, but emits no discard packets.
+                    if self.influence[p].is_some() {
+                        for _ in 0..tier {
+                            self.discard_top(pid, p);
+                        }
                     }
                     let amount = if s(&task, "reward") == "zenithium" {
                         tier
@@ -1251,8 +1353,13 @@ impl State {
                     } else {
                         pid
                     };
+                    let p = s(&task, "planet");
+                    if !b(&task, "_bonus") {
+                        self.pending.as_mut().unwrap().context["last_nonbonus_planet"] = json!(p);
+                    }
+                    self.pending.as_mut().unwrap().context["last_planet"] = json!(p);
                     let bonus =
-                        self.gain_influence(who, planet(s(&task, "planet")), n(&task, "amount"));
+                        self.gain_influence(who, planet(p), n(&task, "amount"));
                     self.queue(bonus, who);
                     continue;
                 }
@@ -1357,6 +1464,7 @@ impl State {
                 "all_planets" => self.queue(
                     PLANETS
                         .iter()
+                        .rev()
                         .map(|p| influence(p, n(&task, "amount")))
                         .collect(),
                     pid,

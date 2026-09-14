@@ -519,8 +519,11 @@ counterstrategies to expose weaknesses. A league win is evidence, not proof of
 unexploitability or optimal play.
 
 - All eight base-game technology configurations receive equal coverage.
-- Training uses generated bot games only. BGA games are correctness evidence,
-  never policy/value training examples.
+- Parity-verified BGA games may supply supervised action-policy demonstrations
+  now that the complete rich corpus is a state oracle (the user authorized this
+  on 2026-09-14). Generated bot games remain the source for value targets,
+  fresh-deal strength gates and promotion; a demonstration fit is diagnostic
+  until it survives those gates.
 - Serve through browser WASM, desktop first with phones supported, within **3–5
   seconds of computation per entire turn**, including follow-up decisions.
 - Local training: RTX 4050 Laptop, 6 GB VRAM; 12 logical CPU cores observed.

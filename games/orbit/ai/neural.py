@@ -21,11 +21,14 @@ import math
 import random
 from typing import Iterable
 
-from ..cards import CARDS, FACTIONS, PLANETS
+from ..cards import ALL_CARDS, CARDS, FACTIONS, PLANETS
 from .state import SCHEMA_VERSION, action_key, observation, rules_fingerprint
 
 
-ENCODER_VERSION = "orbit-observation-v1"
+# v2 keeps the fixed-width observation contract but reads ALL_CARDS metadata
+# for public columns/legal actions, so parity-verified Secret Agents examples
+# can be audited without treating expansion cards as malformed input.
+ENCODER_VERSION = "orbit-observation-v2"
 MODEL_VERSION = 1
 OBS_SIZE = 288
 ACTION_SIZE = 40
@@ -98,9 +101,9 @@ def encode_observation(obs: dict, history: dict | None = None) -> list[float]:
     # the full card IDs remain available through the hand and legal action.
     for player in players[:2]:
         for column in player.get("columns", []):
-            result.append(min(1.0, float(sum(CARDS[c]["cost"] for c in column)) / 30.0))
+            result.append(min(1.0, float(sum(ALL_CARDS[c]["cost"] for c in column)) / 30.0))
             for faction in FACTIONS:
-                result.append(min(1.0, float(sum(CARDS[c]["faction"] == faction for c in column)) / 8.0))
+                result.append(min(1.0, float(sum(ALL_CARDS[c]["faction"] == faction for c in column)) / 8.0))
 
     pending = obs.get("pending") or {}
     task = pending.get("task") or {}
@@ -129,8 +132,8 @@ def encode_action(obs: dict, move: dict) -> list[float]:
     _one_hot(result, actions.index(move.get("action")) if move.get("action") in actions else None, len(actions) + 1)
     card_id = move.get("card_id")
     result.append(float(int(card_id)) / 600.0 if card_id is not None else 0.0)
-    if card_id is not None and int(card_id) in CARDS:
-        card = CARDS[int(card_id)]
+    if card_id is not None and int(card_id) in ALL_CARDS:
+        card = ALL_CARDS[int(card_id)]
         result.append(float(card["cost"]) / 10.0)
         _one_hot(result, PLANETS.index(card["planet"]), len(PLANETS))
         _one_hot(result, FACTIONS.index(card["faction"]), len(FACTIONS))

@@ -5171,6 +5171,23 @@ try {
 			} finally {
 				console.log([`── ${fn.name} (${((Date.now() - t0) / 1000).toFixed(1)}s)`,
 					...buf].join("\n"));
+				// ON CI, ALSO EMIT EACH FAILURE AS A WORKFLOW ANNOTATION. The run log
+				// needs an authenticated download; annotations are readable by anyone who
+				// can see the repo. When this gate fails the Pages deploy, the one line
+				// saying what broke is otherwise visible only to whoever can sign in and
+				// unzip a log, which is a poor place for it. Every check already carries
+				// its measurements in `detail`; this only puts them where they can be
+				// read. One site, because every block's `check` funnels failures here.
+				if (process.env.GITHUB_ACTIONS) {
+					for (const line of buf.filter((l) => l.startsWith("  FAIL "))) {
+						const [, name, detail] = line.slice(7).match(/^(.*?)(?:  (.*))?$/s);
+						// `%` is the escape character in a workflow command, so a raw one
+						// in a measurement would corrupt the annotation it appears in.
+						const flat = (t) => String(t).replace(/%/g, "%25").replace(/\s+/g, " ").trim();
+						console.log(`::error title=${flat(fn.name + ": " + name).replace(/[:,]/g, " ").slice(0, 180)}`
+							+ `::${flat(detail || "no detail").slice(0, 900)}`);
+					}
+				}
 			}
 		}
 	};
@@ -6062,13 +6079,22 @@ try {
 					return !cost || box(cost).right > box(cell).right + 1
 						|| box(cost).bottom > box(cell).bottom + 1;
 				}).length,
+				// ...AND BY HOW MUCH IT FITS. A 1px tolerance rates "fits by
+				// 0.69px" and "fits" the same, and that is exactly how the 320px
+				// cell shipped: green here, 2px over on the runner's wider fonts.
+				// The margin has to clear a real font difference, not a hair.
+				costClear: Math.min(...filled.map((cell) => {
+					const cost = cell.querySelector(".or-played-cost");
+					return cost ? box(cell).right - box(cost).right : Infinity;
+				})),
 			};
 		});
 		check("a played Agent shows its name and top cost beside its stack count",
 			placedFaces.cells === 10 && placedFaces.filled > 0 && placedFaces.extraFacts === 0
 			&& placedFaces.coins === placedFaces.filled && placedFaces.quantities === placedFaces.filled
 			&& placedFaces.complete && placedFaces.emptyQuiet && placedFaces.nameWidth >= 44
-			&& placedFaces.costs.every((c) => /^[0-9]+$/.test(c || "")) && placedFaces.spills === 0,
+			&& placedFaces.costs.every((c) => /^[0-9]+$/.test(c || ""))
+			&& placedFaces.spills === 0 && placedFaces.costClear >= 2,
 			JSON.stringify(placedFaces));
 
 		// THE ROW IS THE PLANET BOARD'S OWN EDGE — one cell per planet, on the
@@ -6372,6 +6398,14 @@ try {
 					if (!k.width && !k.height) return false;
 					return k.right > c.right + 1 || k.bottom > c.bottom + 1 || k.left < c.left - 1;
 				})).length,
+				// The same margin, for the same reason, on the narrowest cell in
+				// the game. See the note beside `costClear` above.
+				clearance: Math.min(...cells.flatMap((cell) => {
+					const c = cell.getBoundingClientRect();
+					return [...cell.children].map((kid) => kid.getBoundingClientRect())
+						.filter((k) => k.width > 0)
+						.flatMap((k) => [k.left - c.left, c.right - k.right]);
+				}), Infinity),
 			};
 			const bonuses = [...document.querySelectorAll(".or-bonus")].map((el) => {
 				const r = el.getBoundingClientRect();
@@ -6408,7 +6442,8 @@ try {
 		check("the phone played-Agent cell carries the top Agent's cost without spilling",
 			inner.railCosts.occupied > 0
 			&& inner.railCosts.priced === inner.railCosts.occupied
-			&& inner.railCosts.emptyPriced === 0 && inner.railCosts.spills === 0,
+			&& inner.railCosts.emptyPriced === 0 && inner.railCosts.spills === 0
+			&& inner.railCosts.clearance >= 2,
 			JSON.stringify(inner.railCosts));
 		check("bonus tokens are uniformly compact and clear of every planet track",
 			inner.bonuses.every(({ w, h }) => Math.abs(w - h) <= 1 && w <= 30)
@@ -6521,6 +6556,12 @@ try {
 		const orbitCatalog = await page.evaluate(() => JSON.parse(localStorage.getItem("orbit_catalog")));
 		const savedColumns = Object.fromEntries(Object.entries(gameView.players)
 			.map(([pid, player]) => [pid, structuredClone(player.columns)]));
+		// `spills` answers "did it overflow"; `clearance` answers "by how much did
+		// it fit", and only the second tells a sound layout from one sitting a
+		// hair inside the edge. The 320px cell cleared its border box by 1.69px,
+		// i.e. 0.69px past the 1px tolerance below, and duly overflowed on CI's fonts -- a
+		// pass that was really a coin flip on font metrics, and unreadable as one
+		// from a green tick. Reporting the narrowest margin makes it assertable.
 		const slotGeometry = () => page.evaluate(() => ({
 			rows: [...document.querySelectorAll(".or-played-agents")].map((el) => el.getBoundingClientRect().height),
 			cells: [...document.querySelectorAll(".or-played-agent")].map((el) => el.getBoundingClientRect().height),
@@ -6531,6 +6572,16 @@ try {
 					return r.width > 0 && (r.left < box.left + 1 || r.right > box.right - 1 || r.bottom > box.bottom - 1);
 				});
 			}).length,
+			// HORIZONTAL ONLY, deliberately. Width is the axis that overflowed and the
+			// axis a two-digit pair actually contends for; the vertical box is fixed
+			// at 26px and stays covered by `spills` above. Asserting a margin on an
+			// axis whose slack has not been measured across platforms is how a gate
+			// starts failing for a reason that is not the bug.
+			clearance: [...document.querySelectorAll(".or-played-agent")].flatMap((el) => {
+				const box = el.getBoundingClientRect();
+				return [...el.children].map((child) => child.getBoundingClientRect()).filter((r) => r.width > 0)
+					.flatMap((r) => [r.left - box.left, box.right - r.right]);
+			}).reduce((a, b) => Math.min(a, b), Infinity),
 		}));
 		for (const viewport of [{ width: 320, height: 844 }, { width: 390, height: 844 },
 			{ width: 768, height: 1024 }, { width: 1366, height: 768 }, { width: 1920, height: 1080 }]) {
@@ -6549,9 +6600,46 @@ try {
 				await page.waitForFunction((count) => [...document.querySelectorAll(".or-played-count")]
 					.filter((el) => Number(el.textContent) === count).length === 2, count);
 				const filled = await slotGeometry();
+				// WHERE the two numbers sit, not just that they fit. On a phone the
+				// name is gone and the count and price go to OPPOSITE EDGES, so the
+				// five cells read as two aligned columns down the row; on a pointer
+				// width the name rejoins and sits against the PRICE, keeping the two
+				// facts about the top card together and leaving the count — which is
+				// about the column, not the card — alone on the left. Both are easy
+				// to undo with a `justify-content` or a `text-align` and neither
+				// would fail any other check in this file.
+				const order = await page.evaluate(() => {
+					const cell = [...document.querySelectorAll(".or-played-agent")]
+						.find((el) => el.querySelector(".or-played-quantity") && el.querySelector(".or-played-cost"));
+					if (!cell) return null;
+					const c = cell.getBoundingClientRect();
+					const q = cell.querySelector(".or-played-quantity").getBoundingClientRect();
+					const p = cell.querySelector(".or-played-cost").getBoundingClientRect();
+					const nameEl = cell.querySelector(".or-played-name");
+					const nameShown = nameEl && getComputedStyle(nameEl).display !== "none";
+					const n = nameShown ? nameEl.getBoundingClientRect() : null;
+					return {
+						countFirst: q.left < p.left, nameShown,
+						countInset: q.left - c.left, priceInset: c.right - p.right,
+						// how far the name's INK sits from the price it belongs with
+						nameGap: n ? p.left - n.right : null,
+						width: c.width,
+					};
+				});
+				if (count === 18) {
+					const phone = viewport.width <= 980;
+					check(`${viewport.width}px: the count leads and the price trails${phone ? ", pinned to opposite edges" : ", with the name against the price"}`,
+						!!order && order.countFirst && order.nameShown === !phone
+						// edge-pinned on a phone: both insets are just the cell padding
+						&& (!phone || (order.countInset <= 4 && order.priceInset <= 4))
+						// ...and on a pointer width the name closes up to the price
+						&& (phone || (order.nameGap !== null && order.nameGap >= 0 && order.nameGap <= 6)),
+						JSON.stringify(order));
+				}
 				check(`${viewport.width}px: ${count} played Agents keep the empty row's size and all numbers fit`,
 					JSON.stringify(empty.rows) === JSON.stringify(filled.rows)
-					&& JSON.stringify(empty.cells) === JSON.stringify(filled.cells) && filled.spills === 0,
+					&& JSON.stringify(empty.cells) === JSON.stringify(filled.cells)
+					&& filled.spills === 0 && filled.clearance >= 2,
 					JSON.stringify({ empty, filled }));
 			}
 		}
@@ -6673,7 +6761,15 @@ try {
 			for (let offset = 0; offset < cards.length; offset += 6) {
 				self.hand = cards.slice(offset, offset + 6);
 				socket.send(JSON.stringify(fixture));
-				await page.waitForFunction((id) => !!document.querySelector(`.or-hand [data-card-id="${id}"]`), self.hand[0].id);
+				// WAIT FOR THE WHOLE BATCH, NOT ITS FIRST CARD. Waiting on hand[0]
+				// returns the moment React commits the first face, and the other
+				// five are then measured mid-render: they report empty computed
+				// styles (NaN) or a pre-fit geometry. It reproduced as a rare
+				// failure naming cards 201/301/401/501 -- every one of them the
+				// FIRST id of its own batch, which is the tell that the wait, not
+				// the layout, was what moved.
+				await page.waitForFunction((ids) => ids.every((id) =>
+					!!document.querySelector(`.or-hand [data-card-id="${id}"]`)), self.hand.map((c) => c.id));
 				measurements.push(...await page.locator(".or-hand-zone .or-agent").evaluateAll((nodes) => nodes.map((node) => {
 					const text = node.querySelector(".or-agent-text");
 					const height = node.getBoundingClientRect().height;
@@ -6682,22 +6778,82 @@ try {
 					node.style.height = "auto"; node.style.alignSelf = "start"; text.style.flex = "none";
 					const needed = node.getBoundingClientRect().height;
 					node.style.height = ""; node.style.alignSelf = ""; text.style.flex = "";
-					return { id: node.dataset.cardId, height, needed, gap };
+					// ONE LINE, MEASURED AS ONE LINE. A title that wrapped would be
+					// ~2x its own line-height, so comparing the rendered height
+					// against the line box catches a wrap whatever caused it --
+					// a name longer than the fitter's floor, a font whose glyphs
+					// are wider here than on the dev box, or the fitter simply
+					// not running. `scrollWidth` then catches the other failure
+					// in the same place: fitted down but still overflowing.
+					const name = node.querySelector("strong");
+					const nameSpan = name.querySelector("span");
+					const nameCs = getComputedStyle(name);
+					return { id: node.dataset.cardId, height, needed, gap, line: parseFloat(getComputedStyle(text).lineHeight),
+						nameH: name.getBoundingClientRect().height,
+						nameLine: parseFloat(nameCs.lineHeight) || parseFloat(nameCs.fontSize) * 1.18,
+						nameFs: parseFloat(nameCs.fontSize),
+						nameOver: nameSpan ? nameSpan.scrollWidth - nameSpan.clientWidth : 0 };
 				})));
 				clipped.push(...await page.locator(".or-hand-zone .or-agent").evaluateAll((nodes) => nodes.flatMap((node) => {
 					const text = node.querySelector(".or-agent-text"), foot = node.querySelector(".or-agent-foot");
 					const range = document.createRange(); range.selectNodeContents(text);
 					const ink = range.getBoundingClientRect(), box = node.getBoundingClientRect();
-					return ink.bottom > foot.getBoundingClientRect().top + 1 || foot.getBoundingClientRect().bottom > box.bottom - 2
-						|| text.scrollWidth > text.clientWidth + 1 || parseFloat(getComputedStyle(text).fontSize) < 11.5
-						? [node.dataset.cardId] : [];
+					// SAY WHICH BOUND BROKE AND BY HOW MUCH. A bare list of card ids
+					// names the cards and not the defect, which leaves the reader to
+					// re-derive it -- and on CI, where these numbers are the only
+					// evidence and the run log needs a sign-in to read, that is the
+					// difference between a fixable failure and a rerun. `transform` is
+					// here because these are BOUNDING rects: a card measured mid-flight
+					// reports a scaled box against unscaled tolerances, so a non-`none`
+					// transform means the measurement, not the layout, is what is wrong.
+					const footBox = foot.getBoundingClientRect(), why = [];
+					if (ink.bottom > footBox.top + 1) why.push(`text over foot by ${(ink.bottom - footBox.top).toFixed(2)}`);
+					if (footBox.bottom > box.bottom - 2) why.push(`foot past card by ${(footBox.bottom - box.bottom).toFixed(2)}`);
+					if (text.scrollWidth > text.clientWidth + 1) why.push(`text ${text.scrollWidth - text.clientWidth}px too wide`);
+					if (parseFloat(getComputedStyle(text).fontSize) < 11.5) why.push(`font shrank to ${getComputedStyle(text).fontSize}`);
+					return why.length
+						? [`${node.dataset.cardId}: ${why.join(", ")} (transform ${getComputedStyle(node).transform})`]
+						: [];
 				})));
 			}
 			check(`${viewport.width}px: all 90 card sentences fit at full text size`, cards.length === 90 && clipped.length === 0, JSON.stringify(clipped));
+			// A WRAPPED TITLE IS CHARGED TO EVERY CARD, because the hand reserves
+			// one height for all 90 faces — so this is a check about the whole
+			// hand's height, not about one long name. The floor is asserted from
+			// the other side too: shrinking is only an acceptable answer to a long
+			// name while the result is still readable.
+			// A NON-FINITE MEASUREMENT MUST FAIL, NOT VANISH. `getComputedStyle` on a
+			// node that has left the DOM returns empty strings, so a card caught
+			// mid-rerender reports NaN -- and every test below is a `>` comparison,
+			// which NaN answers `false`. Those rows sailed through all three checks
+			// while proving nothing, and the count drifting 90 -> 89 was the only
+			// outward sign. Assert the roster, then the geometry.
+			const unmeasured = measurements.filter((m) => !Number.isFinite(m.nameFs) || !Number.isFinite(m.nameH));
+			const seen = new Set(measurements.map((m) => m.id));
+			const wrapped = measurements.filter((m) => m.nameH > m.nameLine * 1.5);
+			const overflowed = measurements.filter((m) => m.nameOver > 1);
+			const tiniest = measurements.reduce((a, b) => a.nameFs < b.nameFs ? a : b, { nameFs: Infinity });
+			check(`${viewport.width}px: every card title is one line, shrunk to fit if need be`,
+				unmeasured.length === 0 && seen.size === cards.length
+				&& wrapped.length === 0 && overflowed.length === 0 && tiniest.nameFs >= 8,
+				JSON.stringify({ unmeasured: unmeasured.length, seen: seen.size, of: cards.length,
+					wrapped: wrapped.slice(0, 4), overflowed: overflowed.slice(0, 4), tiniest }));
 			const tallest = measurements.reduce((a, b) => a.needed > b.needed ? a : b);
+			// The reserved height must be EARNED by the longest face rather than
+			// guessed high, but the slack it leaves can only be judged to the
+			// nearest LINE: `needed` moves in whole wrapped lines, and which word
+			// a sentence breaks on is the font's decision, not the layout's. This
+			// bound was a flat 14px against ~4-5px of real slack, so a face that
+			// wrapped one line shorter on CI's fonts than on a dev box read as
+			// ~19px of waste and failed a layout that was in fact correct --
+			// a platform difference reported as a regression. Allowing one line
+			// plus the measured slack still catches what the check is for (a
+			// height padded out by a line or more of dead space); it only stops
+			// asserting that two font stacks break the same sentence alike.
 			check(`${viewport.width}px: compact cards fit the longest face with tight title spacing`,
 				measurements.every((m) => m.needed <= m.height + 1 && m.gap <= 5)
-				&& tallest.height - tallest.needed <= 14, JSON.stringify(tallest));
+				&& tallest.height - tallest.needed <= tallest.line + 6,
+				JSON.stringify({ ...tallest, slack: +(tallest.height - tallest.needed).toFixed(2) }));
 			// Review the longest face beside four other planets, with an actual
 			// pointer selection. Its hover shadow must retain the selected edge.
 			self.hand = [orbitCatalog.cards[tallest.id], ...OR_PLANETS.filter((planet) => planet !== orbitCatalog.cards[tallest.id].planet)
