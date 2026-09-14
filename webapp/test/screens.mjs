@@ -5171,6 +5171,23 @@ try {
 			} finally {
 				console.log([`── ${fn.name} (${((Date.now() - t0) / 1000).toFixed(1)}s)`,
 					...buf].join("\n"));
+				// ON CI, ALSO EMIT EACH FAILURE AS A WORKFLOW ANNOTATION. The run log
+				// needs an authenticated download; annotations are readable by anyone who
+				// can see the repo. When this gate fails the Pages deploy, the one line
+				// saying what broke is otherwise visible only to whoever can sign in and
+				// unzip a log, which is a poor place for it. Every check already carries
+				// its measurements in `detail`; this only puts them where they can be
+				// read. One site, because every block's `check` funnels failures here.
+				if (process.env.GITHUB_ACTIONS) {
+					for (const line of buf.filter((l) => l.startsWith("  FAIL "))) {
+						const [, name, detail] = line.slice(7).match(/^(.*?)(?:  (.*))?$/s);
+						// `%` is the escape character in a workflow command, so a raw one
+						// in a measurement would corrupt the annotation it appears in.
+						const flat = (t) => String(t).replace(/%/g, "%25").replace(/\s+/g, " ").trim();
+						console.log(`::error title=${flat(fn.name + ": " + name).replace(/[:,]/g, " ").slice(0, 180)}`
+							+ `::${flat(detail || "no detail").slice(0, 900)}`);
+					}
+				}
 			}
 		}
 	};
@@ -6537,10 +6554,15 @@ try {
 					return r.width > 0 && (r.left < box.left + 1 || r.right > box.right - 1 || r.bottom > box.bottom - 1);
 				});
 			}).length,
+			// HORIZONTAL ONLY, deliberately. Width is the axis that overflowed and the
+			// axis a two-digit pair actually contends for; the vertical box is fixed
+			// at 26px and stays covered by `spills` above. Asserting a margin on an
+			// axis whose slack has not been measured across platforms is how a gate
+			// starts failing for a reason that is not the bug.
 			clearance: [...document.querySelectorAll(".or-played-agent")].flatMap((el) => {
 				const box = el.getBoundingClientRect();
 				return [...el.children].map((child) => child.getBoundingClientRect()).filter((r) => r.width > 0)
-					.flatMap((r) => [r.left - box.left, box.right - r.right, box.bottom - r.bottom]);
+					.flatMap((r) => [r.left - box.left, box.right - r.right]);
 			}).reduce((a, b) => Math.min(a, b), Infinity),
 		}));
 		for (const viewport of [{ width: 320, height: 844 }, { width: 390, height: 844 },
@@ -6700,9 +6722,22 @@ try {
 					const text = node.querySelector(".or-agent-text"), foot = node.querySelector(".or-agent-foot");
 					const range = document.createRange(); range.selectNodeContents(text);
 					const ink = range.getBoundingClientRect(), box = node.getBoundingClientRect();
-					return ink.bottom > foot.getBoundingClientRect().top + 1 || foot.getBoundingClientRect().bottom > box.bottom - 2
-						|| text.scrollWidth > text.clientWidth + 1 || parseFloat(getComputedStyle(text).fontSize) < 11.5
-						? [node.dataset.cardId] : [];
+					// SAY WHICH BOUND BROKE AND BY HOW MUCH. A bare list of card ids
+					// names the cards and not the defect, which leaves the reader to
+					// re-derive it -- and on CI, where these numbers are the only
+					// evidence and the run log needs a sign-in to read, that is the
+					// difference between a fixable failure and a rerun. `transform` is
+					// here because these are BOUNDING rects: a card measured mid-flight
+					// reports a scaled box against unscaled tolerances, so a non-`none`
+					// transform means the measurement, not the layout, is what is wrong.
+					const footBox = foot.getBoundingClientRect(), why = [];
+					if (ink.bottom > footBox.top + 1) why.push(`text over foot by ${(ink.bottom - footBox.top).toFixed(2)}`);
+					if (footBox.bottom > box.bottom - 2) why.push(`foot past card by ${(footBox.bottom - box.bottom).toFixed(2)}`);
+					if (text.scrollWidth > text.clientWidth + 1) why.push(`text ${text.scrollWidth - text.clientWidth}px too wide`);
+					if (parseFloat(getComputedStyle(text).fontSize) < 11.5) why.push(`font shrank to ${getComputedStyle(text).fontSize}`);
+					return why.length
+						? [`${node.dataset.cardId}: ${why.join(", ")} (transform ${getComputedStyle(node).transform})`]
+						: [];
 				})));
 			}
 			check(`${viewport.width}px: all 90 card sentences fit at full text size`, cards.length === 90 && clipped.length === 0, JSON.stringify(clipped));
