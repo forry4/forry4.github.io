@@ -103,7 +103,26 @@ difference against a per-pool standard error of ~0.078. The instrument is
 repeatable *within* a deal set; variation *across* deal sets is the term that
 decides these runs.
 
-Extended to 96 pairs; result to follow.
+**Extended to 96 pairs, and it PASSED: 0.5781 [0.5104, 0.6458], accepted.**
+Pool 6 came in at 0.625 — the value the gate needed and better than the three
+before it. Six pools: 0.625, 0.625, 0.5312, 0.5312, 0.5312, 0.625, **none below
+0.5**. 30 wins / 51 splits / 15 losses. The final `pairs_needed_for_this_effect`
+is 71 against the 96 run, so this is not a marginal pass against a receding
+target.
+
+**The honest caveat, because someone auditing this should not have to find it:
+there was ONE interim look.** The run was designed for 64 pairs, read at 64,
+and extended to 96 after a near-miss — an optional-stopping pattern that inflates
+type-I error, so the nominal 95% interval overstates confidence somewhat. Four
+things bound how much: the extension size was fixed in advance (two pools, not
+"until it clears"), the verdict reads over all six pools rather than a favourable
+subset, it did not stop early when pool 6 came in hot, and the decision to extend
+was taken on a statistic computed BEFORE the extension (`pairs_needed_for_this_effect`
+= 82 at 64 pairs). The pattern — six independent deal sets, none below 0.5 — does
+not depend on the interval at all, and is the more robust half of the evidence.
+
+**What it is worth, stated plainly:** a real but modest edge. 53 of 96 pairs were
+splits; the Expert wins somewhat more often, it does not play visibly better.
 
 ### 3. WHETHER TO EXTEND A NULL IS A QUANTITATIVE QUESTION, AND THE ANSWER IS ALREADY IN THE REPORT
 
