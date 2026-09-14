@@ -2,10 +2,15 @@
 
 WHY NOT A FULL REPLAY
 ---------------------
-A move-by-move replay needs the deck order, and the spectator log does not contain it:
-there is no setup dump and no hand reveal anywhere in a Zenith log (checked -- the largest
-single payload in a whole game is 318 bytes). Seeding our engine would deal a different
-deck, so a replay would diverge on move one for reasons that say nothing about the rules.
+A seeded move-by-move replay needs setup/chance information absent from the original
+spectator sample. Seeding our engine would deal a different deck, so divergence alone
+would say nothing about the rules. Do not generalize that sample to every Zenith log:
+the 2026-09-14 corpus audit found 40 complete archived logs with both seats' card
+identities and private move menus (see docs/orbit-ai-audit-2026-09-14.md). That
+reconstruction now EXISTS -- tools/bga_table.py + bga_replay.build_game force a real
+table's setup and tools/bga_cowalk.py walks it beside the engine. This tool remains an
+alignment-free rules audit, which is still the right shape for it: it scores every table,
+including the ones the replay cannot yet finish.
 
 But the thing worth checking does not need the deck. Every card play is logged with the
 effects it produced, grouped under one `move_id`:
