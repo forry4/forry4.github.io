@@ -62,11 +62,10 @@ def mirror_control(*,simulations,opponent_simulations,heuristic,models_match,
 
 
 def main():
-    # Checkpoint loading needs the optional training environment (torch); the
-    # row folding above must not, or importing this module for `summarise`
-    # drags torch into test collection, where CI has only the server's
-    # requirements. Keep this import inside main().
-    from ..ai.attention import load_checkpoint,export_model
+    # Checkpoint loading needs the optional training environment (torch). Keep
+    # it out of the heuristic arena path as well: the leaf ablation and its
+    # parity controls only need the native binary, so they must run in the
+    # server-only environment used by the rules gate.
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("checkpoint",type=Path,help="Checkpoint, or the literal 'heuristic' for the no-network leaf ablation")
     p.add_argument("output",type=Path)
@@ -216,6 +215,10 @@ def main():
         p.error("a single-world alpha-beta cannot use a root ensemble: raise --ab-worlds "
                 "or run --workers 1")
     heuristic=str(args.checkpoint)=="heuristic"
+    load_checkpoint=export_model=None
+    if not heuristic or args.opponent:
+        from ..ai.attention import load_checkpoint as _load_checkpoint, export_model as _export_model
+        load_checkpoint,export_model=_load_checkpoint,_export_model
     model=None if heuristic else load_checkpoint(args.checkpoint)[0]
     boards=board_configurations();jobs=[]
     for pair in range(args.pairs):
