@@ -6521,6 +6521,12 @@ try {
 		const orbitCatalog = await page.evaluate(() => JSON.parse(localStorage.getItem("orbit_catalog")));
 		const savedColumns = Object.fromEntries(Object.entries(gameView.players)
 			.map(([pid, player]) => [pid, structuredClone(player.columns)]));
+		// `spills` answers "did it overflow"; `clearance` answers "by how much did
+		// it fit", and only the second tells a sound layout from one sitting a
+		// hair inside the edge. The 320px cell cleared its border box by 1.69px,
+		// i.e. 0.69px past the 1px tolerance below, and duly overflowed on CI's fonts -- a
+		// pass that was really a coin flip on font metrics, and unreadable as one
+		// from a green tick. Reporting the narrowest margin makes it assertable.
 		const slotGeometry = () => page.evaluate(() => ({
 			rows: [...document.querySelectorAll(".or-played-agents")].map((el) => el.getBoundingClientRect().height),
 			cells: [...document.querySelectorAll(".or-played-agent")].map((el) => el.getBoundingClientRect().height),
@@ -6531,6 +6537,11 @@ try {
 					return r.width > 0 && (r.left < box.left + 1 || r.right > box.right - 1 || r.bottom > box.bottom - 1);
 				});
 			}).length,
+			clearance: [...document.querySelectorAll(".or-played-agent")].flatMap((el) => {
+				const box = el.getBoundingClientRect();
+				return [...el.children].map((child) => child.getBoundingClientRect()).filter((r) => r.width > 0)
+					.flatMap((r) => [r.left - box.left, box.right - r.right, box.bottom - r.bottom]);
+			}).reduce((a, b) => Math.min(a, b), Infinity),
 		}));
 		for (const viewport of [{ width: 320, height: 844 }, { width: 390, height: 844 },
 			{ width: 768, height: 1024 }, { width: 1366, height: 768 }, { width: 1920, height: 1080 }]) {
@@ -6551,7 +6562,8 @@ try {
 				const filled = await slotGeometry();
 				check(`${viewport.width}px: ${count} played Agents keep the empty row's size and all numbers fit`,
 					JSON.stringify(empty.rows) === JSON.stringify(filled.rows)
-					&& JSON.stringify(empty.cells) === JSON.stringify(filled.cells) && filled.spills === 0,
+					&& JSON.stringify(empty.cells) === JSON.stringify(filled.cells)
+					&& filled.spills === 0 && filled.clearance >= 2,
 					JSON.stringify({ empty, filled }));
 			}
 		}
@@ -6682,7 +6694,7 @@ try {
 					node.style.height = "auto"; node.style.alignSelf = "start"; text.style.flex = "none";
 					const needed = node.getBoundingClientRect().height;
 					node.style.height = ""; node.style.alignSelf = ""; text.style.flex = "";
-					return { id: node.dataset.cardId, height, needed, gap };
+					return { id: node.dataset.cardId, height, needed, gap, line: parseFloat(getComputedStyle(text).lineHeight) };
 				})));
 				clipped.push(...await page.locator(".or-hand-zone .or-agent").evaluateAll((nodes) => nodes.flatMap((node) => {
 					const text = node.querySelector(".or-agent-text"), foot = node.querySelector(".or-agent-foot");
@@ -6695,9 +6707,21 @@ try {
 			}
 			check(`${viewport.width}px: all 90 card sentences fit at full text size`, cards.length === 90 && clipped.length === 0, JSON.stringify(clipped));
 			const tallest = measurements.reduce((a, b) => a.needed > b.needed ? a : b);
+			// The reserved height must be EARNED by the longest face rather than
+			// guessed high, but the slack it leaves can only be judged to the
+			// nearest LINE: `needed` moves in whole wrapped lines, and which word
+			// a sentence breaks on is the font's decision, not the layout's. This
+			// bound was a flat 14px against ~4-5px of real slack, so a face that
+			// wrapped one line shorter on CI's fonts than on a dev box read as
+			// ~19px of waste and failed a layout that was in fact correct --
+			// a platform difference reported as a regression. Allowing one line
+			// plus the measured slack still catches what the check is for (a
+			// height padded out by a line or more of dead space); it only stops
+			// asserting that two font stacks break the same sentence alike.
 			check(`${viewport.width}px: compact cards fit the longest face with tight title spacing`,
 				measurements.every((m) => m.needed <= m.height + 1 && m.gap <= 5)
-				&& tallest.height - tallest.needed <= 14, JSON.stringify(tallest));
+				&& tallest.height - tallest.needed <= tallest.line + 6,
+				JSON.stringify({ ...tallest, slack: +(tallest.height - tallest.needed).toFixed(2) }));
 			// Review the longest face beside four other planets, with an actual
 			// pointer selection. Its hover shadow must retain the selected edge.
 			self.hand = [orbitCatalog.cards[tallest.id], ...OR_PLANETS.filter((planet) => planet !== orbitCatalog.cards[tallest.id].planet)

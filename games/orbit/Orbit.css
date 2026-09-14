@@ -830,10 +830,21 @@
      else — the name needs ~150px before it is a name rather than two letters
      and an ellipsis. The cell keeps the grid position that makes it readable
      as "this planet's stack". */
-  .or-played-agent { justify-content: center; grid-template-columns: auto auto; gap: .22rem; padding: .22rem .12rem; }
+  .or-played-agent { justify-content: center; grid-template-columns: auto auto; gap: .14rem; padding: .22rem .12rem; }
   .or-played-name { display: none; }
+  /* THE WIDEST REAL CELL IS A TWO-DIGIT COUNT BESIDE A TWO-DIGIT PRICE, and at
+     320px the five columns leave it ~51px of content box. At the desktop
+     spacing that pair does not fit: it cleared the border box by 1.69px here
+     and overflowed on CI's fonts, because two digits are not the same width in
+     every face and the cell had no room to absorb the difference. Every gap on
+     this row is therefore cut to the minimum that still reads as separation —
+     the plate's own fill separates the count from the price, so the space
+     between them is doing less work than it looks. Buys ~6px, which is several
+     times any credible metric difference rather than a hair over. */
+  .or-played-quantity { gap: 0; padding: 0 .12rem; }
   .or-played-count { font-size: .66rem; }
-  .or-played-cost { font-size: .6rem; }
+  .or-played-cost { gap: 1px; font-size: .6rem; }
+  .or-played-cost .or-resource-icon { width: 10px; height: 10px; }
   .or-tech > header { grid-template-columns: auto 1fr auto; padding: .35rem .6rem; }
   .or-tech-toggle { min-height: 32px; }
   .or-tech-key b { max-width: 4.7rem; }

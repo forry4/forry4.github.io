@@ -464,6 +464,17 @@ were each a real misread on the table, so they are worth not undoing:
   Pressing a cell opens the same
   column list it always did. `screens.mjs` bounds the face from both sides: it
   must carry the cost AND must not grow back into a full card face.
+  **THE PHONE CELL'S SPACING IS SIZED FOR TWO DIGITS BESIDE TWO DIGITS, WHICH IS
+  THE ONLY CASE THAT IS TIGHT.** At 320px the five columns leave a cell ~51px of
+  content box, and an 18-Agent count next to a two-digit top cost is the widest
+  thing that ever goes in one. At the desktop gaps it cleared its border box by
+  1.69px on Windows and overflowed on CI's Linux fonts — it was never fitting,
+  it was passing on whose fonts drew it. The plate padding, both gaps and the
+  Credit coin are therefore all cut on phones (~6px of content width, roughly
+  three times any credible metric difference). The gate asserts the narrowest
+  CLEARANCE, not merely the absence of a spill: an overflow check with a 1px
+  tolerance rates "fits by 0.69px" and "fits" identically, and that is precisely
+  the distinction that failed the deploy.
   **This replaced a pair of full-width `.or-columns` panels below the influence
   board** (retired 2026-09-13, with the `.or-slot` mini-card stack that lived in
   them). They cost ~150px of vertical slab at exactly the sizes the planet board
@@ -699,7 +710,15 @@ The initial visual sign-off missed actual play problems. Do not repeat that:
   renders all 90 cards at both desktop targets and on a phone to check this.
   Card height follows the longest complete face: 152px at the 154px-wide
   desktop size, 164px at the 146px-wide size. The title uses its natural height
-  with a 4px gap before the description. `--or-agent-height` also sizes the
+  with a 4px gap before the description. **The gate bounds that "follows" to the
+  nearest LINE, not to a fixed pixel count.** `needed` is a natural height, so it
+  moves in whole wrapped lines, and which word a sentence breaks on belongs to
+  the font rather than to the layout: a flat 14px bound against ~4px of real
+  slack meant a face wrapping one line shorter on CI than on a dev box read as
+  ~19px of waste and failed a correct layout. The bound is one measured
+  `line-height` plus the real slack, which still catches a height padded out by
+  a line or more of dead space — verified by inflating the card 22px and
+  watching it go red. `--or-agent-height` also sizes the
   desktop hand reserve so shorter cards return space to the influence board.
   Pointer hover must preserve the selected card's planet-colored inset edge;
   the site accent must never replace it. The screen gate checks both states.
