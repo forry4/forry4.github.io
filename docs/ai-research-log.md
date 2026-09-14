@@ -39,6 +39,17 @@ control. This is the cheapest way to test whether top-player play supplies the
 missing development and complete-turn signal before spending more time on another
 blind self-play generation.
 
+That probe is now implemented in `games/orbit/tools/bga_policy_probe.py`. It exported
+all 40 complete walks (4,092 decision rows, including the 27 undo tables) and held
+out eight whole tables. A two-epoch 128-wide legal-action guide reached **32.67% top-1,
+65.00% top-3 and MRR 0.5303** on the 860 held-out rows, versus Hard v2's **30.93%,
+61.63% and 0.5105**. The result is a useful directional signal, not a promotion
+claim: an eight-pair fresh-deal CRN screen against the current Hard v2 ranker scored
+**0.625 [0.500, 0.750]**, with no censored games. The experiment remains offline and
+does not replace the Expert asset; the next test is a larger fresh-deal screen with
+the learned policy used as the Expert root ordering/prior, preserving the current
+value leaf and full legal-action validation.
+
 ---
 
 ### Session (2026-09-13) — Orbit: a correct fix that does not convert, the first candidate to hold above 0.5, and three infrastructure failures that cost more than the experiments

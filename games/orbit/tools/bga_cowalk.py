@@ -77,6 +77,7 @@ import itertools
 import json
 
 from games.orbit import engine
+from games.orbit.ai.state import observation
 from games.orbit.cards import ALL_CARDS, FACTIONS, PLANETS
 from games.orbit.tools import bga_replay as R
 from games.orbit.tools import bga_table as T
@@ -338,6 +339,10 @@ class Walk:
         self.pos = 0
         self.mirror = Mirror(self.table)
         self.decisions = 0
+        # Policy-safe, seat-local records captured only after a candidate has
+        # converged to BGA's mirror.  The replay remains the source of truth;
+        # this is an optional offline export seam for strength experiments.
+        self.trajectory = []
         self.resolved = collections.Counter()
         # A BGA undo retracts the complete current turn segment.  Keep the
         # pre-main-action state and the two scripted streams so the replacement
@@ -346,6 +351,26 @@ class Walk:
         self.bonus = ScriptedBonus([int(a['bonus_num'])
                                     for _mv, _i, k, a in self.table.events()
                                     if k == 'gainBonus'])
+
+    def record_decision(self, game, pid, legal, move, *, event_pos_before=None,
+                        event_pos_after=None):
+        """Record one legal, parity-verified decision for offline consumers.
+
+        Only the acting seat's allowlisted observation and the legal action set
+        are retained.  In particular, no opponent hand, deck order, RNG state,
+        or mirror internals enter the trajectory.  Keeping this on ``Walk``
+        makes every downstream dataset use exactly the same candidate that the
+        parity driver committed.
+        """
+
+        self.trajectory.append({
+            "actor_seat": int(game["order"].index(pid)),
+            "observation": observation(game, pid),
+            "legal_moves": copy.deepcopy(legal),
+            "action": copy.deepcopy(move),
+            "event_pos_before": event_pos_before,
+            "event_pos_after": event_pos_after,
+        })
 
     def _force_board_token_occupancy(self):
         """Recover one-time board-token availability from BGA's public events.
@@ -689,6 +714,10 @@ class Walk:
         self.deck.script = list(snap['deck'])
         self.bonus.i = base
         self.mirror = snap['mirror'].clone()
+        # The records after the main action describe the branch BGA retracted
+        # (including any pending follow-ups).  They are not training examples
+        # from the final game and must disappear with the engine snapshot.
+        del self.trajectory[int(snap.get('trajectory_len', len(self.trajectory))):]
         j = undo_index
         while j < len(self.events) and self.events[j][1] == 'undo':
             j += 1
@@ -795,6 +824,7 @@ class Walk:
                 'mirror': self.mirror.clone(),
                 'turn_pid': self.game.get('turn_pid'),
                 'event_pos': self.pos,
+                'trajectory_len': len(self.trajectory),
             }
             self.resolved['main'] += 1
         else:
@@ -817,6 +847,12 @@ class Walk:
         if len(hits) > 1 and hits[0][1][1] == hits[1][1][1] and hits[0][2] == hits[1][2]:
             self.resolved['ambiguous'] += 1
         move, (mirror, pos), _lookahead = hits[0]
+        event_pos_before = self.pos
+        # Capture before commit: the observation and legal set describe the
+        # position in which BGA asked the question, not its consequence.
+        self.record_decision(game, pid, moves, move,
+                             event_pos_before=event_pos_before,
+                             event_pos_after=pos)
         self.commit(move)
         self.mirror, self.pos = mirror, pos
         self.decisions += 1
@@ -853,26 +889,33 @@ def run(table_id, sides, cap=3000, corpus=T.CORPUS):
     w.events = keep
     engine.bonus_effects = w.bonus
     try:
-      with R.scripted(w.deck):
-        for pid in w.game['order']:
-            intent = {'action': 'mulligan', 'card_ids': sorted(tossed.get(pid, []))}
-            ok, err = engine.apply_move(w.game, pid, intent)
-            if not ok:
-                return dict(status=f'mulligan:{err}', walk=w)
-            w.decisions += 1
-        # `newCards` in the opening deal are already represented by build_game
-        # and by the forced mulligan above.  Start the hand mirror after setup,
-        # then consume only draws announced during play.
-        w.mirror.hands = {
-            pid: set(w.game['players'][pid]['hand']) for pid in w.game['order']
-        }
-        w.mirror.track_hands = True
-        for _ in range(cap):
-            if engine.is_over(w.game):
-                return dict(status='done', walk=w, winner=engine.winner(w.game))
-            bad = w.step()
-            if bad:
-                return dict(status=bad, walk=w)
+        with R.scripted(w.deck):
+            for pid in w.game['order']:
+                intent = {'action': 'mulligan', 'card_ids': sorted(tossed.get(pid, []))}
+                legal = engine.legal_moves(w.game, pid)
+                if intent not in legal:
+                    return dict(status=f'mulligan-not-offered:{pid}', walk=w)
+                w.record_decision(w.game, pid, legal, intent,
+                                  event_pos_before=w.pos, event_pos_after=w.pos)
+                ok, err = engine.apply_move(w.game, pid, intent)
+                if not ok:
+                    return dict(status=f'mulligan:{err}', walk=w)
+                w.decisions += 1
+            # `newCards` in the opening deal are already represented by build_game
+            # and by the forced mulligan above.  Start the hand mirror after setup,
+            # then consume only draws announced during play.  Keep this entire
+            # walk inside the scripted-deck context: every candidate trial and
+            # the committed move must consume the same draw stream.
+            w.mirror.hands = {
+                pid: set(w.game['players'][pid]['hand']) for pid in w.game['order']
+            }
+            w.mirror.track_hands = True
+            for _ in range(cap):
+                if engine.is_over(w.game):
+                    return dict(status='done', walk=w, winner=engine.winner(w.game))
+                bad = w.step()
+                if bad:
+                    return dict(status=bad, walk=w)
     finally:
         engine.bonus_effects = _real_bonus_effects
     return dict(status='cap', walk=w)
