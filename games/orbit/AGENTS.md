@@ -457,7 +457,11 @@ were each a real misread on the table, so they are worth not undoing:
   reads as more of the count. The faction glyph and the rules sentence stay in
   the modal: they are read once, this is read every turn. An EMPTY planet keeps
   its cell — collapsing it would break the column alignment the row exists for —
-  as a dashed outline with the word and no zero. Pressing a cell opens the same
+  as a dashed outline with the word and no zero. Empty and populated cells keep
+  the same 26px height, including before the first recruit. The quantity plate
+  reads `×N`; the top cost carries the same small Credit coin as the hand, so
+  the two numbers remain distinct when the name is hidden on phones.
+  Pressing a cell opens the same
   column list it always did. `screens.mjs` bounds the face from both sides: it
   must carry the cost AND must not grow back into a full card face.
   **This replaced a pair of full-width `.or-columns` panels below the influence
@@ -641,8 +645,9 @@ screen sizes.** Preserve these choices in future work:
   phone's spatial logic rather than stretching horizontal rails across a screen.
 - One crisp selected-card edge with an inset accent; a separate external ring
   is reserved for keyboard focus. Cards retain their actual effect sentences.
-- The influence footer names the current decision maker and opens a full turn
-  recap. Public log entries provide its words. Server snapshots drive resource
+- The influence board ends at its tracks; the turn recap was removed at the
+  user's request on 2026-09-13. The player rails name the decision maker and the
+  full Log retains the public action history. Server snapshots drive resource
   deltas, disc travel, and changed Agent/technology cues for BOTH seats; no
   optimistic rules, private-state inference, or animation-delayed input.
 - Reduced motion keeps the signed resource cue and final positions without
@@ -664,8 +669,8 @@ The initial visual sign-off missed actual play problems. Do not repeat that:
   Disc travel, confirmed card travel, and quiet resource-change cues explain the update. Resource
   labels remain visible during those cues. A captured disc departs toward its
   goal; a replacement appears at centre without reverse movement.
-- The footer explicitly says **Turn recap** and reads the last action, rather
-  than substituting the next player's turn status for its label.
+- The former **Turn recap** footer and modal were retired on 2026-09-13;
+  keep action history in the Log.
 - Decisions explain the operation, quantity, target owner, progress and reward,
   alongside the originating card/action. Exile/transfer choices name the actual
   public top Agent and support hold/right-click to inspect it without choosing.
@@ -692,6 +697,12 @@ The initial visual sign-off missed actual play problems. Do not repeat that:
 - Compact faces put cost, title and faction on one line group. Body text stays
   at `.72rem`, with no zoom, line clamp or required expansion. The screen gate
   renders all 90 cards at both desktop targets and on a phone to check this.
+  Card height follows the longest complete face: 152px at the 154px-wide
+  desktop size, 164px at the 146px-wide size. The title uses its natural height
+  with a 4px gap before the description. `--or-agent-height` also sizes the
+  desktop hand reserve so shorter cards return space to the influence board.
+  Pointer hover must preserve the selected card's planet-colored inset edge;
+  the site accent must never replace it. The screen gate checks both states.
 - `cardMotion.js` follows new public `log` actions for recruit/technology/leader
   and new IDs in the viewer's own hand for drawing. It never starts from an
   outgoing request or infers the opponent's hidden hand. Flights are temporary,

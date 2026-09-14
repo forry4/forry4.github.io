@@ -4,6 +4,7 @@
   --or-line: rgba(177, 188, 255, .18);
   --or-ink: #f5f2e9;
   --or-dim: #aeb6d0;
+  --or-agent-height: 164px;
   /* THE TWO SEAT COLOURS. Yours is the game accent; theirs is a warm contrast
      that survives both a teal-blind and a red-blind reading of the pair, and
      never appears as a planet on the influence board. Everything that has to
@@ -271,6 +272,9 @@
   align-items: center;
   gap: .3rem;
   min-width: 0;
+  /* Reserve the populated cell's height even before either seat recruits. */
+  height: 26px;
+  box-sizing: border-box;
   padding: .2rem .34rem;
   border: 1px solid color-mix(in srgb, currentColor 42%, transparent);
   border-top: 2px solid currentColor;
@@ -281,7 +285,7 @@
   text-align: left;
   cursor: pointer;
 }
-.or-played-agent:hover:not(:disabled) { border-color: var(--lby-accent); box-shadow: 0 0 0 1px var(--lby-accent); }
+.or-played-agent:hover:not(:disabled) { border-color: currentColor; box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 35%, transparent); }
 /* An empty planet is still a planet, so the cell stays in the grid and only
    stops pretending to be a stack — no top rule, no fill, a dashed outline and
    the word. Collapsing it would break the one thing this row is for. */
@@ -295,7 +299,9 @@
    column — which is why it is the half that survives at every width while the
    name is the half that drops. Painted in the planet's own colour and set as a
    plate, so it cannot be misread as the gold price two cells to its right. */
-.or-played-count { flex: none; display: grid; place-items: center; min-width: 1.05rem; height: 1.05rem; padding: 0 .18rem; border-radius: 4px; background: color-mix(in srgb, currentColor 30%, #0d0f1f); color: var(--or-ink); font-size: .68rem; font-weight: 850; font-variant-numeric: tabular-nums; }
+.or-played-quantity { display: inline-flex; align-items: center; justify-content: center; gap: 1px; height: 1.05rem; padding: 0 .18rem; border-radius: 4px; background: color-mix(in srgb, currentColor 24%, #0d0f1f); font-variant-numeric: tabular-nums; }
+.or-played-quantity > span { color: #bdc5db; font-size: .6rem; line-height: 1; }
+.or-played-count { color: var(--or-ink); font-size: .68rem; font-weight: 850; line-height: 1; }
 /* The top Agent's NAME, which is what a placed column actually is to a player
    — and, together with the cost, what the retired `.or-columns` panels carried
    that this row previously did not. One line, clipped: the full stack is one
@@ -307,11 +313,13 @@
    effect exiles, transfers or discards (cards 505, 510, 517), and both seats'
    top Agents are the public pool those effects choose from. Gold like every
    other Credit price on the table and deliberately NOT `currentColor`, which
-   would read as more of the planet-coloured count. No coin glyph: at this size
-   the SVG would be most of the cell. `aria-hidden`, because the button's label
+   would read as more of the planet-coloured count. The same Credit coin as the
+   hand distinguishes it from the quantity even on phones. `aria-hidden`,
+   because the button's label
    already says "…on top costing N Credits" and a bare trailing digit is worse
    than silence. */
-.or-played-cost { flex: none; color: #ffe1a1; font-size: .62rem; font-style: normal; font-variant-numeric: tabular-nums; font-weight: 800; line-height: 1; }
+.or-played-cost { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; color: #ffe1a1; font-size: .62rem; font-variant-numeric: tabular-nums; font-weight: 800; line-height: 1; }
+.or-played-cost .or-resource-icon { flex: none; width: 11px; height: 11px; }
 
 /* ── Influence board ─────────────────────────────────────────────────────── */
 .or-influence { padding: .62rem var(--or-board-pad) .68rem; }
@@ -470,15 +478,15 @@
 .or-agent.selected:hover,
 .or-agent.selected:focus,
 .or-agent.selected:focus-visible {
-  transform: translateY(-5px);
+  transform: none;
   border-color: var(--or-card-tint, currentColor);
-  outline: 3px solid var(--or-card-tint, currentColor);
+  outline: 0 solid var(--or-card-tint, currentColor);
   outline-offset: 2px;
-  box-shadow: 0 10px 24px #0009, 0 0 0 3px var(--or-card-tint, currentColor), 0 0 0 5px color-mix(in srgb, var(--or-card-tint, currentColor) 34%, transparent);
+  box-shadow: inset 0 3px currentColor, 0 6px 12px #0007;
 }
 @media (hover: hover) and (pointer: fine) {
   .or-agent:hover { box-shadow: 0 9px 22px #0009, 0 0 0 1px var(--or-line); }
-  .or-agent.playable:hover { transform: translateY(-5px); box-shadow: 0 10px 24px #0009, 0 0 0 2px var(--lby-accent); }
+  .or-agent.playable:not(.selected, .discarding):hover { transform: translateY(-2px); box-shadow: inset 0 0 0 1px currentColor, 0 8px 18px #0007; }
 }
 /* MARKED FOR REPLACEMENT, AT THE OPENING MULLIGAN. It is the inverse of
    `.selected` on purpose, because it used to BE `.selected`: the cards you had
@@ -783,15 +791,7 @@
 .or-leader.lv-0 { color: #9ba4be; }
 .or-disc { left: var(--or-position); top: -9px; transition: left .65s cubic-bezier(.2,.75,.25,1), top .65s cubic-bezier(.2,.75,.25,1), opacity .25s; background: radial-gradient(circle at 33% 23%, #ffffffaa, transparent 48%), currentColor; box-shadow: 0 2px 5px #000a, 0 0 12px color-mix(in srgb, currentColor 25%, transparent); }
 .or-disc.captured { opacity: 0; }
-.or-activity { --or-seat: var(--or-them); display: flex; align-items: center; gap: .7rem; grid-column: 1 / -1; min-width: 0; padding: .48rem .2rem 0; margin-top: .4rem; border-top: 1px solid var(--or-line); color: var(--or-dim); font-size: .7rem; line-height: 1.4; }
-.or-activity.mine { --or-seat: var(--or-me); }
-.or-turn-label { flex: none; max-width: 45%; color: var(--or-seat); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; animation: or-turn-arrive .45s ease-out; }
-.or-activity > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.or-activity-detail { min-width: 0; flex: 1; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
-.or-activity-detail:hover { color: var(--or-ink); }
-.or-activity-detail:disabled { cursor: default; }
 .or-hand > .or-agent { animation: or-turn-arrive .3s ease-out; }
-.or-recap .or-info-text { padding-bottom: .55rem; border-bottom: 1px solid var(--or-line); font-size: .8rem; }
 @keyframes or-turn-arrive { from { opacity: .8; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
 .or-influence { background: radial-gradient(ellipse at 50% 0, #32405c26, transparent 75%), linear-gradient(145deg, #171c30, #101426) !important; }
 .or-bonus { background: radial-gradient(circle at 35% 25%, #967b34, #3a3019 50%, #18191d 72%); box-shadow: inset 0 0 0 2px #12151f, inset 0 0 0 3px #d6b24b66, 0 2px 4px #0009; }
@@ -800,7 +800,6 @@
 .or-agent-top .or-card-price b { width: auto; height: auto; background: none; color: #ffe1a1; font-variant-numeric: tabular-nums; }
 .or-agent { background: radial-gradient(ellipse at 100% 0, color-mix(in srgb, currentColor 14%, transparent), transparent 68%), linear-gradient(155deg, #20253b, #0e1222 70%); }
 .or-agent strong { line-height: 1.18; overflow-wrap: anywhere; }
-.or-agent.selected, .or-agent.selected:focus, .or-agent.selected:hover { outline: 0 solid var(--or-card-tint, currentColor); outline-offset: 2px; box-shadow: inset 0 3px currentColor, 0 6px 12px #0007; transform: none; }
 .or-agent.selected:focus-visible { outline: 2px solid var(--or-card-tint, currentColor); }
 /* Re-stated at THIS depth, not only up in the Hand block. The rule above is
    what makes `.selected` an inset accent along the card's TOP edge rather than
@@ -824,17 +823,16 @@
   .or-resources b { font-size: .88rem; }
   .or-leader { padding: .2rem .4rem; font-size: .54rem; letter-spacing: .025em; }
   .or-player-hint { font-size: .59rem; }
-  .or-influence { height: 236px; grid-template-rows: minmax(0, 1fr) auto; }
+  .or-influence { height: 236px; grid-template-rows: minmax(0, 1fr); }
   .or-influence .or-disc { left: 50%; top: var(--or-position); transform: translate(-50%, -50%); }
   .or-influence .or-track-name { grid-column: 1; justify-self: center; font-size: .6rem; }
-  .or-activity { font-size: .67rem; padding-top: .45rem; gap: .5rem; }
   /* A phone column is ~70px wide, which is a count and a price and nothing
      else — the name needs ~150px before it is a name rather than two letters
      and an ellipsis. The cell keeps the grid position that makes it readable
      as "this planet's stack". */
   .or-played-agent { justify-content: center; grid-template-columns: auto auto; gap: .22rem; padding: .22rem .12rem; }
   .or-played-name { display: none; }
-  .or-played-count { min-width: .95rem; height: 1rem; font-size: .66rem; }
+  .or-played-count { font-size: .66rem; }
   .or-played-cost { font-size: .6rem; }
   .or-tech > header { grid-template-columns: auto 1fr auto; padding: .35rem .6rem; }
   .or-tech-toggle { min-height: 32px; }
@@ -883,7 +881,7 @@
   .or-score-rail .or-player.mine { order: 4; }
   .or-board-main > .or-decision, .or-board-main > .or-status { order: 6; }
   .or-board-main > .or-hand-zone { order: 7; }
-  .or-influence { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); grid-template-rows: minmax(0, 1fr) auto; gap: 0 var(--or-board-gap); height: 266px; padding: var(--or-board-pad); flex: none; }
+  .or-influence { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); grid-template-rows: minmax(0, 1fr); gap: 0 var(--or-board-gap); height: 266px; padding: var(--or-board-pad); flex: none; }
   .or-influence .or-track { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: 1.15rem minmax(0, 1fr); gap: .2rem 0; min-width: 0; padding: .15rem .6rem; border: 0; border-left: 1px solid #ffffff0c; }
   .or-influence .or-track:first-of-type { border-left: 0; }
   .or-influence .or-track-name { grid-column: 1; grid-row: 1; justify-self: center; font-size: .72rem; }
@@ -893,7 +891,6 @@
   .or-influence .or-space::before { left: 50%; top: 50%; transform: translate(-50%, -50%); }
   .or-influence .or-disc { left: 50%; top: var(--or-position); transform: translate(-50%, -50%); width: 23px; height: 23px; }
   .or-influence .or-track > .or-bonus { grid-column: 1; grid-row: 2; align-self: center; justify-self: center; transform: translateX(38px); }
-  .or-activity { margin-top: .3rem; padding-top: .3rem; }
   .or-hand { justify-content: center; }
   .or-hand-zone { padding: .45rem .6rem; }
   .or-action-bar { margin-top: .4rem; padding-top: .4rem; gap: .5rem; }
@@ -910,7 +907,6 @@
 @media (min-width: 981px) and (max-height: 800px) {
   .or-track { min-height: 24px; }
   .or-track > .or-bonus { width: 1.4rem; height: 1.4rem; }
-  .or-activity { padding-top: .25rem; margin-top: .2rem; }
 }
 @media (min-width: 981px) and (max-height: 900px) {
   .or-influence { height: 222px; }
@@ -932,12 +928,10 @@
 .or-disc { background: currentColor; border: 2px solid #eee9d9; box-shadow: 0 1px 2px #0008; transition: top .62s cubic-bezier(.2,.75,.25,1), left .62s cubic-bezier(.2,.75,.25,1), opacity .18s; }
 .or-disc.captured { transition: top .56s cubic-bezier(.2,.75,.25,1), left .56s cubic-bezier(.2,.75,.25,1), opacity .16s .38s; }
 .or-disc.returning { transition: none; }
-.or-turn-label, .or-hand > .or-agent, .or-info { animation: none; }
+.or-hand > .or-agent, .or-info { animation: none; }
 .or-resource:has(.or-resource-delta) > span { visibility: visible; }
 .or-resource-delta { top: -10px; right: 0; min-width: 0; padding: 0 3px; font-size: 10px; line-height: 11px; border: 0; animation: or-delta-fade 2.2s both; }
 @keyframes or-delta-fade { 0%, 80% { opacity: 1; } 100% { opacity: 0; } }
-.or-activity .or-turn-label { color: var(--or-dim); font-size: .65rem; font-weight: 700; }
-.or-activity-detail { color: #c2cadb; }
 .or-decision { background: #172331 !important; border-color: #5baba780 !important; padding: .8rem !important; }
 .or-decision-source { display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem .5rem; margin-bottom: .4rem; font-size: .72rem; }
 .or-decision-source > span { color: #9cabbc; }
@@ -956,9 +950,6 @@
 .or-decision .planet-choices button:active { background: #101c28; }
 .or-choice-agent { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; margin-top: .25rem; color: #d1dce0; font-size: .62rem; font-weight: 500; text-transform: capitalize; }
 .or-decision-help { margin: .55rem 0 0; color: #aebec8; font-size: .68rem; }
-.or-activity-detail { display: flex; align-items: center; gap: 5px; }
-.or-activity-detail > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.or-activity-detail::after { content: "›"; flex: none; margin-left: auto; }
 @media (min-width: 981px) {
   .or-resource { padding-right: 22px; }
   .or-resource-delta { top: 50%; transform: translateY(-50%); }
@@ -973,9 +964,11 @@
 
 /* The hand and its control strip are one steady workspace. Decisions use the
    reserved strip, so neither a selected card nor a multi-step effect moves the
-   planet board. All cards keep their complete printed sentence at full size. */
-.or-agent { width: 146px; min-width: 146px; height: 166px; padding: 6px 7px; gap: 7px; }
-.or-agent-top { min-height: 29px; gap: 5px; align-items: start; }
+   planet board. All cards keep their complete printed sentence at full size.
+   Heights follow the tallest of all 90 faces: 152px at the wider desktop card
+   width, 164px otherwise. The screen gate measures their natural heights. */
+.or-agent { width: 146px; min-width: 146px; height: var(--or-agent-height); padding: 6px 7px; gap: 4px; }
+.or-agent-top { flex: none; gap: 5px; align-items: start; }
 .or-agent-top strong { flex: 1; min-width: 0; margin: 0; padding-top: 1px; font-size: .82rem; line-height: 1.13; }
 .or-agent-top > i { font-size: .86rem; line-height: 1.3; }
 .or-agent-top .or-card-price { flex: none; gap: 2px; align-items: center; }
@@ -1024,9 +1017,9 @@
      floor, a decision that needs more takes it from the influence board — the
      one panel here with give (`flex: 1 1 0`, floored at 200px) — so the failure
      mode is a slightly shorter board for one turn instead of text over the
-     table edge. 320px is the hand row (192) plus the tallest decision Orbit can
+     table edge. 306px is the hand row (178) plus the tallest decision Orbit can
      raise, measured: `enemy-exile` at 1920 wants 113 of strip. */
-  .or-live .or-hand-zone { min-height: 320px; box-sizing: border-box; }
+  .or-live .or-hand-zone { min-height: calc(var(--or-agent-height) + 154px); box-sizing: border-box; }
   .or-hand-zone { padding: 6px 10px; }
   .or-hand-zone .or-agent { flex: 0 0 146px; }
   /* The strip is a fixed reserve, so its contents are CENTRED in it rather than
@@ -1093,6 +1086,7 @@
   .or-decision .or-choice-grid button { min-height: 38px; }
 }
 @media (min-width: 1500px) {
+  .orbit { --or-agent-height: 152px; }
   .or-hand-zone .or-agent { flex-basis: 154px; width: 154px; min-width: 154px; }
   .or-influence .or-space::before { width: 9px; height: 9px; border-width: 1.5px; }
   .or-influence .or-space.goal::before { width: 16px; height: 16px; border-width: 2px; }
@@ -1100,11 +1094,11 @@
 }
 @media (min-width: 2200px) {
   .or-live .or-table { max-height: 1420px; margin-block: auto; flex: 1; }
-  .or-live .or-hand-zone { min-height: 330px; }
+  .or-live .or-hand-zone { min-height: calc(var(--or-agent-height) + 164px); }
   .or-tech-text { font-size: .88rem; }
 }
 @media (min-width: 981px) and (max-height: 900px) {
-  .or-live .or-hand-zone { min-height: 300px; }
+  .or-live .or-hand-zone { min-height: calc(var(--or-agent-height) + 134px); }
   .or-live .or-influence { min-height: 150px; }
   .or-sideboards { grid-template-rows: minmax(0, auto) minmax(120px, 1fr); }
   .or-tech-col { padding: 5px; gap: 3px; }
@@ -1115,11 +1109,10 @@
      strip is the newest and the easiest to tighten without losing a fact. */
   .or-played-agents { margin-top: .26rem; padding-top: .24rem; }
   .or-played-agent { padding: .12rem .3rem; }
-  .or-played-count { min-width: .95rem; height: .95rem; font-size: .64rem; }
+  .or-played-count { font-size: .64rem; }
   .or-played-name { font-size: .68rem; }
 }
 @media (max-width: 980px) {
   .or-hand-zone { display: flex; flex-direction: column; }
   .or-hand-zone:has(.deciding) .or-controls { order: -1; margin: 0 0 6px; border-top: 0; }
-  .or-agent { height: 180px; }
 }

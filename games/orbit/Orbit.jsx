@@ -322,9 +322,9 @@ function PlayerRail({ player, name, active, me, leader, hint, onInfo, connected 
           disabled={!cards.length} title={`${cards.length} ${planet} Agent${cards.length === 1 ? "" : "s"}${top ? `. ${top.name} on top, cost ${top.cost} Credits` : ""}. ${cards.length ? "Open details" : "None played"}`}
           aria-label={`${cards.length} ${planet} Agent${cards.length === 1 ? "" : "s"}${top ? `, ${top.name} on top costing ${top.cost} Credits` : ""}${cards.length ? ". Open details" : ""}`}
           {...detailClick(() => cards.length && onInfo?.({ kind: "column", planet, cards, owner }))}>
-          {!!cards.length && <b className="or-played-count">{cards.length}</b>}
+          {!!cards.length && <span className="or-played-quantity" aria-hidden="true"><span>×</span><b className="or-played-count">{cards.length}</b></span>}
           <span className="or-played-name">{top ? top.name : "empty"}</span>
-          {top && <i className="or-played-cost" aria-hidden="true">{top.cost}</i>}
+          {top && <span className="or-played-cost" aria-hidden="true"><ResourceIcon kind="credits" />{top.cost}</span>}
         </button>;
       })}
     </div>
@@ -355,14 +355,9 @@ function Bonus({ token, catalog, onInfo, compact = false, className = "" }) {
 }
 
 
-function InfluenceBoard({ game, myId, catalog, onInfo, names, connected }) {
+function InfluenceBoard({ game, myId, catalog, onInfo }) {
   const mineIsPositive = game.order?.[0] === myId;
   const spaces = [-4, -3, -2, -1, 0, 1, 2, 3, 4];
-  const recent = [...(game.log || [])].reverse();
-  const latest = recent.find((entry) => !entry.turn_start && !/draws? .*Agents?|ends? (the |their )?turn/i.test(logText(entry)))
-    || recent.find((entry) => !entry.turn_start);
-  const recentTurn = latest ? (game.log || []).filter((entry) => entry.turn === latest.turn) : [];
-  const actor = latest?.pid;
   return <section className="or-influence" aria-label="Planet influence board">
     {PLANETS.map((planet) => {
       const raw = game.influence?.[planet];
@@ -376,13 +371,6 @@ function InfluenceBoard({ game, myId, catalog, onInfo, names, connected }) {
         <Bonus token={game.planet_bonus?.[planet]} catalog={catalog} onInfo={onInfo} />
       </div>;
     })}
-    <div className={`or-activity ${actor === myId ? "mine" : "theirs"}`} role="status" aria-live="polite" aria-atomic="true">
-      <b key={`${game.turn_number}-${actor}-${game.phase}`} className="or-turn-label">Turn recap</b>
-      <button type="button" className="or-activity-detail" disabled={!latest}
-        aria-label="Read the latest turn" onClick={() => onInfo({ kind: "activity", entries: recentTurn })}>
-        <span>{latest ? logText(latest) : "Influence moves toward the player who gains it."}</span>
-      </button>
-    </div>
   </section>;
 }
 
@@ -594,10 +582,6 @@ function InfoModal({ info, catalog, onClose, onInfo }) {
       <p className="or-info-text">{card.description}</p>
       <Glossary terms={glossaryFor(card.description)} />
     </>;
-  } else if (info.kind === "activity") {
-    eyebrow = "Turn recap";
-    title = "Latest action";
-    body = <div className="or-recap">{info.entries.map((entry, index) => <p className="or-info-text" key={index}>{logText(entry)}</p>)}</div>;
   } else if (info.kind === "bonus") {
     const bonus = catalog?.bonuses?.[String(info.token)] || catalog?.bonuses?.[info.token];
     eyebrow = "Bonus token";
@@ -1259,7 +1243,7 @@ export default function Orbit({ myId, authUser, onExit }) {
       {game.phase !== "mulligan" && <div className="or-board-layout">
         <div className="or-board-main">
           {playerRails}
-          <InfluenceBoard key={`${roomId}-${connected}`} game={game} myId={myId} catalog={catalog} names={names} connected={connected} onInfo={setInfo} />
+          <InfluenceBoard key={`${roomId}-${connected}`} game={game} myId={myId} catalog={catalog} onInfo={setInfo} />
           <section className="or-hand-zone">
             <Hand>{sortedHand(me.hand).map((card) => <AgentCard card={card} key={card.id} selected={selectedCard === card.id} onInfo={setInfo}
               onClick={isMyTurn && !game.pending ? () => setSelectedCard(card.id) : null} />)}</Hand>

@@ -5999,7 +5999,7 @@ try {
 		}
 		const geometry = await page.evaluate(() => {
 			const influence = document.querySelector(".or-influence").getBoundingClientRect();
-			const jupiter = document.querySelector(".or-activity").getBoundingClientRect();
+			const jupiter = document.querySelector(".or-track.or-jupiter").getBoundingClientRect();
 			return {
 				wide: document.documentElement.scrollWidth > window.innerWidth + 1,
 				cards: document.querySelectorAll(".or-hand-zone .or-agent").length,
@@ -6019,7 +6019,7 @@ try {
 		check("the complete public table and private hand remain on the page",
 			!geometry.wide && geometry.cards > 0 && geometry.played === 10,
 			JSON.stringify(geometry));
-		check("the planet panel ends cleanly after its turn narration",
+		check("the planet panel ends cleanly after its tracks",
 			geometry.jupiterGap >= 0 && geometry.jupiterGap <= 24, JSON.stringify(geometry));
 		check("placed Agents use one card-stack face, not a detached stack control",
 			geometry.detachedStackControls === 0, JSON.stringify(geometry));
@@ -6042,7 +6042,9 @@ try {
 			return {
 				cells: cells.length,
 				filled: filled.length,
-				extraFacts: document.querySelectorAll(".or-played-agent .or-agent-text, .or-played-agent .or-agent-foot, .or-played-agent svg").length,
+				extraFacts: document.querySelectorAll(".or-played-agent .or-agent-text, .or-played-agent .or-agent-foot").length,
+				coins: filled.filter((cell) => cell.querySelector(".or-played-cost .or-resource-icon.credits")).length,
+				quantities: filled.filter((cell) => /^×[0-9]+$/.test(cell.querySelector(".or-played-quantity")?.textContent || "")).length,
 				complete: filled.every((cell) => !!cell.querySelector(".or-played-name")?.textContent.trim()
 					&& /^[0-9]+$/.test(cell.querySelector(".or-played-count")?.textContent.trim() || "")),
 				costs: filled.map((cell) => cell.querySelector(".or-played-cost")?.textContent.trim()),
@@ -6064,6 +6066,7 @@ try {
 		});
 		check("a played Agent shows its name and top cost beside its stack count",
 			placedFaces.cells === 10 && placedFaces.filled > 0 && placedFaces.extraFacts === 0
+			&& placedFaces.coins === placedFaces.filled && placedFaces.quantities === placedFaces.filled
 			&& placedFaces.complete && placedFaces.emptyQuiet && placedFaces.nameWidth >= 44
 			&& placedFaces.costs.every((c) => /^[0-9]+$/.test(c || "")) && placedFaces.spills === 0,
 			JSON.stringify(placedFaces));
@@ -6502,7 +6505,7 @@ try {
 			});
 			check(`${seat}: influence slides between authoritative positions`, moving);
 			check(`${seat}: resource gains and current actor are visible`, await page.locator(`.or-player.${seat} .or-resource-delta.gain`).count() === 2
-				&& await page.locator(`.or-activity.${seat}`).count() === 1);
+				&& await page.locator(`.or-player.${seat}.active`).count() === 1);
 			if (process.env.ORBIT_SHOTS) await page.screenshot({ path: `test-results/orbit-motion-${seat}.png`, fullPage: true });
 			await page.locator(".or-mercury .or-disc").evaluate((el) => el.getAnimations().forEach((a) => a.finish()));
 			await sleep(1900);
@@ -6510,9 +6513,50 @@ try {
 			await sleep(100);
 			check(`${seat}: duplicate broadcast does not replay resource effects`, await page.locator(".or-resource-delta").count() === 0);
 		}
-		await page.locator(".or-activity-detail").click();
-		check("turn narration opens the full readable recap", /Mercury moves/.test(await page.locator(".or-recap").innerText()));
-		await page.keyboard.press("Escape");
+		check("turn recap is removed and the full log remains readable",
+			await page.locator(".or-activity, .or-recap").count() === 0
+			&& /Mercury moves/.test(await page.locator(".or-log").innerText()));
+		// A first recruit must not resize either player's row. Also exercise the
+		// widest real column (18 Agents) with a two-digit top cost at phone widths.
+		const orbitCatalog = await page.evaluate(() => JSON.parse(localStorage.getItem("orbit_catalog")));
+		const savedColumns = Object.fromEntries(Object.entries(gameView.players)
+			.map(([pid, player]) => [pid, structuredClone(player.columns)]));
+		const slotGeometry = () => page.evaluate(() => ({
+			rows: [...document.querySelectorAll(".or-played-agents")].map((el) => el.getBoundingClientRect().height),
+			cells: [...document.querySelectorAll(".or-played-agent")].map((el) => el.getBoundingClientRect().height),
+			spills: [...document.querySelectorAll(".or-played-agent")].filter((el) => {
+				const box = el.getBoundingClientRect();
+				return [...el.children].some((child) => {
+					const r = child.getBoundingClientRect();
+					return r.width > 0 && (r.left < box.left + 1 || r.right > box.right - 1 || r.bottom > box.bottom - 1);
+				});
+			}).length,
+		}));
+		for (const viewport of [{ width: 320, height: 844 }, { width: 390, height: 844 },
+			{ width: 768, height: 1024 }, { width: 1366, height: 768 }, { width: 1920, height: 1080 }]) {
+			await page.setViewportSize(viewport);
+			for (const player of Object.values(gameView.players)) player.columns = Object.fromEntries(OR_PLANETS.map((p) => [p, []]));
+			socket.send(JSON.stringify(fixture));
+			await page.waitForFunction(() => document.querySelectorAll(".or-played-agent.empty").length === 10);
+			const empty = await slotGeometry();
+			for (const count of [1, 18]) {
+				for (const player of Object.values(gameView.players)) {
+					const column = Object.values(orbitCatalog.cards).filter((card) => card.planet === "jupiter");
+					column.sort((a, b) => a.cost - b.cost);
+					player.columns.jupiter = column.slice(-count);
+				}
+				socket.send(JSON.stringify(fixture));
+				await page.waitForFunction((count) => [...document.querySelectorAll(".or-played-count")]
+					.filter((el) => Number(el.textContent) === count).length === 2, count);
+				const filled = await slotGeometry();
+				check(`${viewport.width}px: ${count} played Agents keep the empty row's size and all numbers fit`,
+					JSON.stringify(empty.rows) === JSON.stringify(filled.rows)
+					&& JSON.stringify(empty.cells) === JSON.stringify(filled.cells) && filled.spills === 0,
+					JSON.stringify({ empty, filled }));
+			}
+		}
+		for (const [pid, columns] of Object.entries(savedColumns)) gameView.players[pid].columns = columns;
+		socket.send(JSON.stringify(fixture));
 		for (const width of [320, 360, 390, 430, 768, 900]) {
 			await page.setViewportSize({ width, height: 844 });
 			const fit = await page.evaluate(() => ({
@@ -6545,7 +6589,6 @@ try {
 		check("replacement disc appears at centre without a reverse-movement animation", await page.locator(".or-mercury .or-disc").evaluate((el) => el.getAnimations().length === 0 && el.style.getPropertyValue("--or-position") === "50%"));
 		// Decision fixtures use the real catalog names and task metadata. Test the
 		// instruction and the available responses, not merely that a box appeared.
-		const orbitCatalog = await page.evaluate(() => JSON.parse(localStorage.getItem("orbit_catalog")));
 		const planetNames = ["mercury", "venus", "terra", "mars", "jupiter"];
 		const planetMoves = planetNames.map((planet) => ({ action: "choose", planet }));
 		const decisions = [
@@ -6621,14 +6664,26 @@ try {
 		const savedHand = self.hand;
 		gameView.pending = null; gameView.pending_pid = null; gameView.legal_moves = [];
 		await page.emulateMedia({ reducedMotion: "reduce" });
-		for (const viewport of [{ width: 1920, height: 1080 }, { width: 2560, height: 1600 }, { width: 390, height: 844 }]) {
+		for (const viewport of [{ width: 1920, height: 1080 }, { width: 2560, height: 1600 },
+			{ width: 1366, height: 768 }, { width: 320, height: 844 }, { width: 390, height: 844 }, { width: 768, height: 1024 }]) {
 			await page.setViewportSize(viewport);
 			const clipped = [];
+			const measurements = [];
 			const cards = Object.values(orbitCatalog.cards);
 			for (let offset = 0; offset < cards.length; offset += 6) {
 				self.hand = cards.slice(offset, offset + 6);
 				socket.send(JSON.stringify(fixture));
 				await page.waitForFunction((id) => !!document.querySelector(`.or-hand [data-card-id="${id}"]`), self.hand[0].id);
+				measurements.push(...await page.locator(".or-hand-zone .or-agent").evaluateAll((nodes) => nodes.map((node) => {
+					const text = node.querySelector(".or-agent-text");
+					const height = node.getBoundingClientRect().height;
+					const head = node.querySelector(".or-agent-top").getBoundingClientRect();
+					const gap = text.getBoundingClientRect().top - head.bottom;
+					node.style.height = "auto"; node.style.alignSelf = "start"; text.style.flex = "none";
+					const needed = node.getBoundingClientRect().height;
+					node.style.height = ""; node.style.alignSelf = ""; text.style.flex = "";
+					return { id: node.dataset.cardId, height, needed, gap };
+				})));
 				clipped.push(...await page.locator(".or-hand-zone .or-agent").evaluateAll((nodes) => nodes.flatMap((node) => {
 					const text = node.querySelector(".or-agent-text"), foot = node.querySelector(".or-agent-foot");
 					const range = document.createRange(); range.selectNodeContents(text);
@@ -6639,6 +6694,37 @@ try {
 				})));
 			}
 			check(`${viewport.width}px: all 90 card sentences fit at full text size`, cards.length === 90 && clipped.length === 0, JSON.stringify(clipped));
+			const tallest = measurements.reduce((a, b) => a.needed > b.needed ? a : b);
+			check(`${viewport.width}px: compact cards fit the longest face with tight title spacing`,
+				measurements.every((m) => m.needed <= m.height + 1 && m.gap <= 5)
+				&& tallest.height - tallest.needed <= 14, JSON.stringify(tallest));
+			// Review the longest face beside four other planets, with an actual
+			// pointer selection. Its hover shadow must retain the selected edge.
+			self.hand = [orbitCatalog.cards[tallest.id], ...OR_PLANETS.filter((planet) => planet !== orbitCatalog.cards[tallest.id].planet)
+				.map((planet) => cards.find((card) => card.planet === planet))];
+			gameView.turn_pid = "orbit-harness";
+			gameView.legal_moves = self.hand.map((card) => ({ action: "recruit", card_id: card.id }));
+			socket.send(JSON.stringify(fixture));
+			await page.waitForFunction((id) => !!document.querySelector(`.or-hand [data-card-id="${id}"]`), tallest.id);
+			const selected = page.locator(`.or-hand [data-card-id="${tallest.id}"]`);
+			await selected.click();
+			const hovered = await selected.evaluate((el) => {
+				const s = getComputedStyle(el);
+				return { shadow: s.boxShadow, color: s.color, border: s.borderTopColor, outline: s.outlineWidth, transform: s.transform };
+			});
+			await page.mouse.move(0, 0);
+			const idleShadow = await selected.evaluate((el) => getComputedStyle(el).boxShadow);
+			check(`${viewport.width}px: selection keeps its planet-colored inset edge under the pointer`,
+				hovered.shadow === idleShadow && hovered.shadow.includes("inset") && hovered.shadow.includes(hovered.color)
+				&& hovered.border === hovered.color && hovered.outline === "0px" && hovered.transform === "none", JSON.stringify(hovered));
+			if (process.env.ORBIT_SHOTS) await page.screenshot({ path: `test-results/orbit-cards-${viewport.width}.png`, fullPage: true });
+			await page.keyboard.press("Tab");
+			await page.keyboard.press("Shift+Tab");
+			await selected.hover();
+			check(`${viewport.width}px: keyboard focus keeps a separate visible ring even under the pointer`,
+				await selected.evaluate((el) => document.activeElement === el && getComputedStyle(el).outlineWidth === "2px"
+					&& getComputedStyle(el).outlineColor === getComputedStyle(el).color));
+			await selected.click();
 		}
 		self.hand = savedHand;
 		socket.send(JSON.stringify(fixture));
