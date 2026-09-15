@@ -19,9 +19,9 @@ export function decisionCopy(task, agentName) {
     influence: `Choose a planet to ${task.target === "opponent" ? "give your opponent" : "gain"} ${task.amount} influence`,
     influence_other: `Choose a different planet to gain ${task.amount} influence`,
     split_influence: `Gain ${task.amounts?.[selected]} influence on ${selected ? "a different" : "a"} planet`,
-    exile: `Exile ${owner} top Agent`,
+    exile: `Exile ${owner} top Agent${task.reward === "matching_influence" ? ` and gain ${task.amount || 1} influence on its planet` : ""}`,
     exile_for_matching: "Exile your top Agent to gain matching influence",
-    transfer: "Take your opponent’s top Agent",
+    transfer: `Take your opponent’s top Agent${task.reward === "matching_influence" ? " and gain 1 influence on its planet" : ""}`,
     discard_hand: "Choose an Agent to discard from your hand",
     develop: `Choose ${task.lowest ? "one of your lowest technologies" : "a technology"} to develop`,
     exile_tier: `Exile Agents from your ${task.planet} column`,
@@ -42,7 +42,7 @@ export function decisionCopy(task, agentName) {
   if (task.exclude) notes.push(`${task.exclude[0].toUpperCase() + task.exclude.slice(1)} is excluded.`);
   if (task.type === "optional_exile_each") notes.push(`Gain 1 ${task.reward === "influence" ? `${planet} influence` : "Zenithium"}, or keep the Agent.`);
   else if (task.reward === "card_cost") notes.push("Gain Credits equal to the selected Agent’s printed cost.");
-  else if (task.reward === "matching_influence") notes.push(`Gain ${task.amount || 1} influence on that Agent’s planet.`);
+  else if (task.reward === "matching_influence" && !["exile", "transfer"].includes(task.type)) notes.push(`Gain ${task.amount || 1} influence on that Agent’s planet.`);
   else if (task.reward && typeof task.reward === "object") notes.push(`After completing the exile, gain ${task.reward.amount} ${resourceName(task.reward.resource)}.`);
   if (task.type === "develop" && task.discount) notes.push(`Pay the next level’s cost, reduced by ${task.discount} Zenithium.`);
   return { title: titles[task.type] || task.label || "Choose how to resolve this effect", detail: notes.join(" ") };
@@ -72,12 +72,17 @@ export function Resource({ kind, value, animate }) {
     const delta = value - previous.current;
     previous.current = value;
     if (!animate || !Number.isFinite(delta) || !delta) { setChange(null); return; }
-    setChange({ delta, id: performance.now() });
-    const timer = setTimeout(() => setChange(null), 1800);
+    const stagger = delta > 1 ? Math.min(150, 1800 / (delta - 1)) : 0;
+    setChange({ delta, stagger, id: performance.now() });
+    const timer = setTimeout(() => setChange(null), Math.max(2800, 1250 + stagger * (delta - 1)));
     return () => clearTimeout(timer);
   }, [value, animate]);
   return <span className={`or-resource ${kind}`}>
     <ResourceIcon kind={kind} /><b>{value}</b><span>{kind === "credits" ? "Credits" : "Zenithium"}</span>
+    {change?.delta > 0 && <span key={`pieces-${change.id}`} className="or-resource-pieces" aria-hidden="true">
+      {Array.from({ length: change.delta }, (_, index) => <i key={index} className="or-resource-piece"
+        style={{ "--or-piece-delay": `${index * change.stagger}ms`, "--or-piece-x": `${-28 - (index % 3) * 7}px` }}><ResourceIcon kind={kind} /></i>)}
+    </span>}
     {change && <em key={change.id} className={`or-resource-delta ${change.delta > 0 ? "gain" : "spent"}`}>
       {change.delta > 0 ? "+" : "−"}{Math.abs(change.delta)}
     </em>}

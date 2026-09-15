@@ -5947,16 +5947,17 @@ try {
 			.then(() => true).catch(() => false);
 		check("a selected Agent offers a server-legal action", actionReady);
 		const logBefore = await page.locator(".or-log p").count().catch(() => 0);
+        const playedTurn = latestFrame.room.game.turn_number;
 		if (actionReady) await action.click().catch(() => {});
 
-		// Some Agent/technology programs ask several questions. Answer every one
-		// until the turn passes; this is the reconnect-safe generic decision path.
-		for (let i = 0; i < 12; i++) {
-			const choice = page.locator(".or-decision button").first();
-			if (!await choice.count().catch(() => 0)) break;
-			await choice.click().catch(() => {});
-			await sleep(120);
-		}
+        // Automatic responses can leave a brief gap with no decision buttons.
+        // Wait for the authoritative end of the turn, including its hand refill.
+        for (let i = 0; i < 80 && latestFrame.room.game.turn_number === playedTurn; i++) {
+            const choice = page.locator(".or-decision button").first();
+            if (await choice.count()) await choice.click();
+            await sleep(100);
+        }
+        check("the real action finishes its full decision chain", latestFrame.room.game.turn_number > playedTurn);
 		await page.waitForFunction((n) => document.querySelectorAll(".or-log p").length > n,
 			logBefore, { timeout: 20_000 }).catch(() => {});
 		const logAfter = await page.locator(".or-log p").count().catch(() => 0);
@@ -6536,14 +6537,25 @@ try {
 				const motion = el.getAnimations().find((a) => a.transitionProperty === "top");
 				if (!motion) return false;
 				motion.pause(); motion.currentTime = 220;
-				return motion.effect.getTiming().duration >= 200;
+				return motion.effect.getTiming().duration >= 1000;
 			});
 			check(`${seat}: influence slides between authoritative positions`, moving);
 			check(`${seat}: resource gains and current actor are visible`, await page.locator(`.or-player.${seat} .or-resource-delta.gain`).count() === 2
 				&& await page.locator(`.or-player.${seat}.active`).count() === 1);
+            check(`${seat}: each gained resource unit flies into its pile`,
+                await page.locator(`.or-player.${seat} .or-resource.credits .or-resource-piece`).count() === 3
+                && await page.locator(`.or-player.${seat} .or-resource.zenithium .or-resource-piece`).count() === 2);
+            const stack = await page.locator(`.or-player.${seat} .or-resource-piece`).first().evaluate((node) => {
+                const a = node.getAnimations()[0]; a.pause(); const d = a.effect.getTiming().duration;
+                const at = (t) => { a.currentTime = t; const r = node.getBoundingClientRect(); return {x:r.x,y:r.y}; };
+                const start = at(0), end = at(d * .8);
+                const base = node.closest('.or-resource').querySelector(':scope > .or-resource-icon').getBoundingClientRect();
+                a.finish(); return start.y < end.y && Math.abs(end.x-base.x)<2 && Math.abs(end.y-base.y)<2;
+            });
+            check(`${seat}: resource pieces land on the existing icon`, stack);
 			if (process.env.ORBIT_SHOTS) await page.screenshot({ path: `test-results/orbit-motion-${seat}.png`, fullPage: true });
 			await page.locator(".or-mercury .or-disc").evaluate((el) => el.getAnimations().forEach((a) => a.finish()));
-			await sleep(1900);
+			await sleep(3100);
 			socket.send(JSON.stringify(fixture));
 			await sleep(100);
 			check(`${seat}: duplicate broadcast does not replay resource effects`, await page.locator(".or-resource-delta").count() === 0);
@@ -6894,6 +6906,7 @@ try {
 			gameView.legal_moves = [{ action, card_id: played.id }];
 			socket.send(JSON.stringify(fixture));
 			await page.waitForSelector('.or-hand [data-card-id="109"]');
+            await page.waitForTimeout(100);
 			await page.waitForFunction(() => !document.querySelector(".or-card-flight"));
 			await page.locator('.or-hand [data-card-id="109"]').click();
 			const beforeRequest = fixtureReplies.length;
@@ -6911,11 +6924,12 @@ try {
 				const flight = document.querySelector(`.or-card-flight[data-flight="${action}"]`);
 				const animation = flight.getAnimations()[0]; animation.pause();
 				const at = (time) => { animation.currentTime = time; const r = flight.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; };
-				const start = at(0), middle = at(300), end = at(619);
+				const duration = animation.effect.getTiming().duration;
+				const start = at(0), middle = at(duration * .5), end = at(duration - 1);
 				const key = action === "recruit" ? "column-orbit-harness-mercury" : action === "technology" ? "tech-rung-robot-2" : "leader-orbit-harness";
 				const target = document.querySelector(`[data-motion-key="${key}"]`);
 				const r = target.getBoundingClientRect();
-				animation.currentTime = 300;
+				animation.currentTime = duration * .5;
 				return { shrinking: start.w > middle.w && middle.w > end.w,
 					landed: Math.abs(end.x + end.w / 2 - r.x - r.width / 2) < 2 && Math.abs(end.y + end.h / 2 - r.y - r.height / 2) < 2,
 					start, middle, end };
@@ -6935,7 +6949,8 @@ try {
 				const animation = flight.getAnimations()[0]; animation.pause();
 				const at = (time) => { animation.currentTime = time; const r = flight.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y) }; };
 				const slot = document.querySelector(".or-hand .or-agent").getBoundingClientRect();
-				const start = at(0), landed = at(280), settled = at(759);
+				const duration = animation.effect.getTiming().duration;
+				const start = at(0), landed = at(duration * .37), settled = at(duration - 1);
 				animation.currentTime = 0;
 				return { start, landed, settled, slotX: Math.round(slot.x) };
 			});
@@ -6949,6 +6964,83 @@ try {
 			await page.waitForTimeout(80);
 			check(`${action}: duplicate broadcasts do not replay card travel`, await page.locator(".or-card-flight").count() === 0);
 		}
+
+        // A phone decision sits ABOVE the hand. Removing it and dealing in the
+        // same snapshot used to freeze the flight at the old vertical position.
+        for (const width of [320, 390, 430]) {
+            await page.setViewportSize({width, height:844});
+            gameView.pending_pid = "orbit-harness";
+            gameView.pending = {source:"Draw fixture", task:{type:"influence", amount:1}};
+            gameView.legal_moves = planetMoves;
+            self.hand = [orbitCatalog.cards["210"], orbitCatalog.cards["314"]];
+            socket.send(JSON.stringify(fixture));
+            await page.waitForSelector('.or-decision');
+            await page.locator('.or-hand').scrollIntoViewIfNeeded();
+            await page.waitForTimeout(100);
+            await page.waitForFunction(() => !document.querySelector('.or-card-flight'));
+            gameView.pending = null; gameView.pending_pid = null; gameView.legal_moves = [];
+            self.hand = [orbitCatalog.cards["110"], ...self.hand, orbitCatalog.cards["502"]];
+            socket.send(JSON.stringify(fixture));
+            await page.waitForSelector('.or-card-flight[data-flight="draw"]');
+            const endpoints = await page.evaluate(() => [...document.querySelectorAll('.or-card-flight[data-flight="draw"]')].map((node) => {
+                const a = node.getAnimations()[0]; a.pause();
+                const {duration,delay} = a.effect.getTiming();
+                const target = document.querySelector(`.or-hand [data-card-id="${node.dataset.arrivalCard}"]`);
+                const slot = document.querySelector('.or-hand .or-agent').getBoundingClientRect();
+                const hand = document.querySelector('.or-hand');
+                const slotX = Math.max(slot.x, hand.getBoundingClientRect().x + parseFloat(getComputedStyle(hand).paddingLeft));
+                a.currentTime = delay + duration * .37;
+                const dealt = node.getBoundingClientRect();
+                a.currentTime = delay + duration - 1;
+                const end = node.getBoundingClientRect(), r = target.getBoundingClientRect();
+                return {duration, yError:Math.abs(end.y-r.y), xError:Math.abs(end.x-r.x),
+                    dealtYError:Math.abs(dealt.y-r.y), dealtXError:Math.abs(dealt.x-slotX)};
+            }));
+            check(`${width}px: two drawn cards keep the hand's final height throughout dealing`, endpoints.length === 2
+                && endpoints.every((r) => r.duration >= 1400 && r.yError < 1 && r.xError < 1 && r.dealtYError < 1 && r.dealtXError < 1), JSON.stringify(endpoints));
+            if (process.env.ORBIT_SHOTS) await page.screenshot({path:`test-results/orbit-mobile-draw-${width}.png`});
+            await page.evaluate(() => document.querySelectorAll('.or-card-flight').forEach((node) => node.getAnimations().forEach((a) => a.finish())));
+            socket.send(JSON.stringify(fixture));
+            await page.waitForTimeout(100);
+            check(`${width}px: duplicate draw snapshot does not replay`, await page.locator('.or-card-flight').count() === 0);
+        }
+        // Public column membership drives the three new flight types for both seats.
+        for (const width of [390, 1920]) for (const pid of ["orbit-harness", opponentId]) {
+            await page.setViewportSize({width,height:width===1920?1080:844});
+            await page.evaluate(() => scrollTo(0,0));
+            const other = pid === "orbit-harness" ? opponentId : "orbit-harness";
+            const card = orbitCatalog.cards["410"];
+            for (const player of Object.values(gameView.players)) for (const planet of planetNames) player.columns[planet] = [];
+            socket.send(JSON.stringify(fixture));
+            await page.waitForTimeout(100);
+            await page.waitForFunction(() => !document.querySelector('.or-card-flight'));
+            for (const kind of ["mobilize", "transfer", "exile"]) {
+                if (kind === "mobilize") gameView.players[other].columns.mars.push(card);
+                if (kind === "transfer") { gameView.players[other].columns.mars = []; gameView.players[pid].columns.mars.push(card); }
+                if (kind === "exile") gameView.players[pid].columns.mars = [];
+                socket.send(JSON.stringify(fixture));
+                await page.waitForSelector(`.or-card-flight[data-flight="${kind}"]`);
+                const travel = await page.evaluate(({kind,pid,other}) => {
+                    const node = document.querySelector(`.or-card-flight[data-flight="${kind}"]`);
+                    const a = node.getAnimations()[0]; a.pause();
+                    const d = a.effect.getTiming().duration;
+                    const at = (t) => { a.currentTime=t; const r=node.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; };
+                    const start=at(0), end=at(d-1);
+                    const centre=(key) => { const r=document.querySelector(`[data-motion-key="${key}"]`).getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; };
+                    const source=centre(`column-${kind==='transfer'?other:pid}-mars`);
+                    const target=centre(`column-${kind==='mobilize'?other:pid}-mars`);
+                    const left=document.querySelector('.or-influence').getBoundingClientRect().left;
+                    a.currentTime=d*.5;
+                    return {duration:d, sourceError:Math.hypot(start.x-source.x,start.y-source.y), targetError:Math.hypot(end.x-target.x,end.y-target.y), startsLeft:start.x<left, endsLeft:end.x<left};
+                }, {kind,pid,other});
+                check(`${width}px ${pid} ${kind}: card travels between the correct public locations`, travel.duration>=1100
+                    && (kind==='mobilize'?travel.startsLeft&&travel.targetError<2:kind==='exile'?travel.sourceError<2&&travel.endsLeft:travel.sourceError<2&&travel.targetError<2), JSON.stringify(travel));
+                if(process.env.ORBIT_SHOTS) await page.screenshot({path:`test-results/orbit-${kind}-${pid}-${width}.png`});
+                await page.evaluate(() => document.querySelectorAll('.or-card-flight').forEach((node) => node.getAnimations().forEach((a) => a.finish())));
+                socket.send(JSON.stringify(fixture)); await page.waitForTimeout(80);
+                check(`${kind}: duplicate column snapshot does not replay`, await page.locator('.or-card-flight').count() === 0);
+            }
+        }
 		await page.emulateMedia({ reducedMotion: "reduce" });
 		self.hand = savedHand;
 		socket.send(JSON.stringify(fixture));
@@ -6986,6 +7078,52 @@ try {
 		socket.send(JSON.stringify(fixture));
 		await sleep(100);
 		check("a duplicate forced-choice frame is submitted only once", fixtureReplies.length === repliesBefore + 1);
+
+        self.hand = [orbitCatalog.cards["110"], orbitCatalog.cards["210"], orbitCatalog.cards["314"]];
+        gameView.pending.task = {type:"discard_hand",count:"all",reward:null};
+        let discarded = 0;
+        while (self.hand.length && discarded < 4) {
+            gameView.legal_moves = self.hand.map((card) => ({action:"choose",card_id:card.id}));
+            const before = fixtureReplies.length;
+            socket.send(JSON.stringify(fixture));
+            await page.waitForTimeout(120);
+            const replies = fixtureReplies.slice(before);
+            check(`whole-hand discard ${++discarded}: automatically sends one legal card`, replies.length === 1
+                && gameView.legal_moves.some((move) => move.card_id===replies[0]?.move?.card_id) && await page.locator('.or-decision').count()===0);
+            socket.send(JSON.stringify(fixture)); await page.waitForTimeout(80);
+            check('duplicate whole-hand discard does not resubmit', fixtureReplies.length===before+1);
+            self.hand = self.hand.filter((card) => card.id !== replies[0]?.move?.card_id);
+        }
+        self.hand = savedHand;
+        gameView.pending.task = {type:"discard_hand",count:1,reward:null};
+        gameView.legal_moves = self.hand.map((card) => ({action:"choose",card_id:card.id}));
+        const beforePartial = fixtureReplies.length;
+        socket.send(JSON.stringify(fixture)); await page.waitForTimeout(120);
+        check('discarding only part of the hand remains a choice', await page.locator('.or-decision').count()===1 && fixtureReplies.length===beforePartial);
+        for (const type of ['transfer','exile']) {
+            gameView.pending.task = {type,owner:'opponent',count:1,reward:'matching_influence'};
+            gameView.legal_moves = planetMoves;
+            socket.send(JSON.stringify(fixture));
+            await page.waitForFunction(() => document.querySelector('.or-decision h2')?.textContent.includes('and gain 1 influence'));
+            check(`${type}: title explains both taking the opposing Agent and gaining influence`,
+                (await page.locator('.or-decision h2').innerText()).includes('opponent’s top Agent'));
+        }
+        gameView.pending.task = {type:'two_adjacent',amount:1};
+        gameView.legal_moves = planetNames.slice(0,-1).flatMap((planet,i) => [[planet,planetNames[i+1]],[planetNames[i+1],planet]].map((planets) => ({action:'choose',planets})));
+        for (const planet of planetNames) gameView.influence[planet]=0;
+        socket.send(JSON.stringify(fixture)); await page.waitForTimeout(120);
+        check('adjacent planets appear as four unique pairs', await page.locator('.or-decision .or-choice-grid button').count()===4);
+        const beforePair = fixtureReplies.length;
+        await page.locator('.or-decision .or-choice-grid button').first().click();
+        check('ordinary adjacent pair submits an exact legal choice directly', fixtureReplies.length===beforePair+1
+            && gameView.legal_moves.some((move) => JSON.stringify(move)===JSON.stringify(fixtureReplies.at(-1).move)));
+        gameView.influence.mercury = gameView.order[0]==='orbit-harness'?3:-3;
+        socket.send(JSON.stringify(fixture)); await page.waitForTimeout(120);
+        const beforeOrder = fixtureReplies.length;
+        await page.locator('.or-decision .or-choice-grid button').first().click();
+        check('a capture offers order only after selecting its pair', fixtureReplies.length===beforeOrder && (await page.locator('.or-decision h2').innerText()).includes('first'));
+        await page.locator('.or-decision .or-choice-grid button').last().click();
+        check('capture order preserves the reverse server-legal choice', fixtureReplies.at(-1).move.planets.join(',')==='venus,mercury');
 		gameView.pending = null;
 		gameView.pending_pid = null;
 		gameView.legal_moves = [];
@@ -7010,7 +7148,8 @@ try {
 		await page.waitForSelector(".or-resource-delta.spent");
 		check("reduced motion preserves the signed resource cue without moving the board", await page.evaluate(() =>
 			getComputedStyle(document.querySelector(".or-disc")).transitionDuration === "0s"
-			&& document.querySelector(".or-resource-delta.spent").getAnimations().length === 0));
+			&& document.querySelector(".or-resource-delta.spent").getAnimations().length === 0
+            && [...document.querySelectorAll(".or-resource-pieces")].every((el) => getComputedStyle(el).display === "none")));
 		await page.emulateMedia({ reducedMotion: "no-preference" });
 		const oldSocket = socket;
 		await socket.close({ code: 1001, reason: "visual reconnect check" });

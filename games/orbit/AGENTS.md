@@ -822,7 +822,7 @@ The initial visual sign-off missed actual play problems. Do not repeat that:
   straight to its sorted place appeared to materialise in the middle of the fan;
   dealing to a fixed edge and then re-ordering is what a hand of cards actually
   does, and it stays readable when several arrive at once because each is dealt
-  to the same spot in turn (staggered 110ms). The landing spot is the LEFTMOST
+  to the same spot in turn (staggered 230ms). The landing spot is the LEFTMOST
   card's box, so it holds whichever card the sort happens to put first.
   A recruit's destination is `column-<pid>-<planet>` — the played-Agent cell in
   that seat's player box, the one place a recruited Agent lands now.
@@ -832,3 +832,33 @@ The initial visual sign-off missed actual play problems. Do not repeat that:
 - `screens:orbit` checks populated desktop decisions, stable board geometry,
   all card sentences, actual flight endpoints, duplicate suppression and reduced
   motion. `ORBIT_SHOTS=1` includes card-flight frames for visual inspection.
+
+
+### Slower motion and meaningful choices — 2026-09-15
+
+- Card draws take 1500ms with a real pause at the visible left edge before
+  sliding into sorted order; other card flights take 1200ms. Measure draw
+  destinations after controls and mobile scroll anchoring settle (two animation
+  frames). A selected card that left the hand must not render an empty action
+  bar for one extra frame. Scroll/resize cancels active stale geometry, but a
+  queued flight still measures the new layout. Sideways-scrolled hands use
+  their visible edge for the deal, even when the first sorted card is offscreen.
+- Public column membership changes animate transfers between player rows,
+  mobilizations from the left of the planet board, and exiles back to that
+  edge. Recruit log entries suppress duplicate mobilization flights. No new
+  private fields or rules calculations are needed. Each positive resource
+  delta stacks one coin/crystal per unit; duplicates and reconnects remain
+  baselines, and reduced motion retains the signed cue without moving pieces.
+- `decisions.js` groups adjacent pairs into one button per pair. The engine
+  still accepts both orders: a potential capture opens a second choice of
+  which planet goes first, because its bonus can interrupt the other movement.
+  Do not remove that choice from the engine or native parity contract.
+- Unrewarded whole-hand discards (including a fixed remaining count at least
+  as large as the hand) randomly submit one exact legal response per frame.
+  Optional effects, partial discards and reward-bearing discards remain choices.
+  The pending frame key prevents duplicate broadcasts from submitting again.
+  Transfer/exile instructions with matching influence name BOTH effects.
+- The real-play screen gate waits for the authoritative turn number to advance
+  before inspecting the refilled hand. Absence of decision buttons is no
+  longer a completion signal during automatic discard chains. Mobile flight
+  checks cover two simultaneous draws when a decision above the hand vanishes.

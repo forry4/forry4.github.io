@@ -14,6 +14,7 @@ import { useAutoReconnect } from "../../shared/useAutoReconnect.js";
 import { useCardInfoGesture } from "../../shared/gestures.js";
 import OrbitRules from "./rules.jsx";
 import { Resource, ResourceIcon, decisionCopy, victoryCondition, InfluenceDisc } from "./presentation.jsx";
+import { automaticChoices, adjacentPairs, adjacentOrderMatters } from "./decisions.js";
 import { useCardMotion } from "./cardMotion.js";
 import orbitCssText from "./Orbit.css?inline";
 
@@ -750,9 +751,18 @@ function DecisionChoice({ move, task, game, catalog, sendMove, onInfo }) {
 }
 
 function DecisionPanel({ game, catalog, sendMove, onInfo }) {
+  const [orderedPair, setOrderedPair] = useState(null);
   const pending = game.pending?.task;
   const moves = game.legal_moves || [];
-  if (!pending || moves.length === 1) return null;
+  const frameKey = JSON.stringify([game.turn_number, game.pending, moves, game.log?.slice(-2)]);
+  if (!pending || automaticChoices(game).length) return null;
+  const pairMoves = orderedPair?.key === frameKey ? orderedPair.moves : null;
+  const choices = pending.type === "two_adjacent" ? pairMoves || adjacentPairs(moves).map((pair) => pair[0]) : moves;
+  const choose = (move) => {
+    const pair = pending.type === "two_adjacent" && adjacentPairs(moves).find((pair) => pair.includes(move));
+    if (!pairMoves && pair?.length > 1 && adjacentOrderMatters(game, move)) setOrderedPair({ key: frameKey, moves: pair });
+    else sendMove(move);
+  };
   const optionalPlanet = pending.planets?.[pending.index || 0];
   const optionalAgent = game.players?.[game.pending_pid]?.columns?.[optionalPlanet]?.at(-1);
   const { title, detail } = decisionCopy(pending, optionalAgent?.name);
@@ -761,12 +771,16 @@ function DecisionPanel({ game, catalog, sendMove, onInfo }) {
   const context = action === "technology" ? "Technology" : action === "leader" ? "Leader action" : "Agent effect";
   return <section className="or-decision" aria-live="polite" aria-label="Current decision">
     <div className="or-decision-source"><span>{context}</span><b>{game.pending.source}</b></div>
-    <h2>{title}</h2>
+    <h2>{pairMoves ? "Which planet gains influence first?" : title}</h2>
+    {pairMoves && <p className="or-decision-detail">A capture can resolve its bonus before the second planet moves.</p>}
     {detail && <p className="or-decision-detail">{detail}</p>}
     {!moves.length && <p className="or-decision-detail">Waiting for the server to resolve this effect…</p>}
     <div className={`or-choice-grid${planetChoices ? " planet-choices" : ""}`} style={{ "--or-choice-count": Math.min(5, moves.length) }}>
-      {moves.map((move, index) => <DecisionChoice key={index} {...{ move, task: pending, game, catalog, sendMove, onInfo }} />)}
+      {choices.map((move, index) => pairMoves ? <button type="button" key={index} onClick={() => sendMove(move)}>
+        <PlanetName planet={move.planets[0]} /> first, then <PlanetName planet={move.planets[1]} />
+      </button> : <DecisionChoice key={index} {...{ move, task: pending, game, catalog, onInfo }} sendMove={choose} />)}
     </div>
+    {pairMoves && <button type="button" onClick={() => setOrderedPair(null)}>Back to planet pairs</button>}
     {["exile", "exile_for_matching", "transfer", "discard_hand"].includes(pending.type) && <p className="or-decision-help">Hold an Agent to read its card.</p>}
   </section>;
 }
@@ -1213,14 +1227,15 @@ export default function Orbit({ myId, authUser, onExit }) {
   useEffect(() => { if (game?.phase !== "mulligan") setMulligan([]); }, [game?.phase]);
   const forcedChoice = useRef(null);
   useEffect(() => {
-    if (!connected || !game?.pending || game.pending_pid !== myId || legal.length !== 1 || legal[0].action !== "choose") {
+    const automatic = automaticChoices(game);
+    if (!connected || !game?.pending || game.pending_pid !== myId || !automatic.length) {
       forcedChoice.current = null;
       return;
     }
-    const key = orbitMoveKey({ roomId, turn: game.turn_number, pending: game.pending, move: legal[0], log: game.log?.slice(-2) });
+    const key = orbitMoveKey({ roomId, turn: game.turn_number, pending: game.pending, moves: automatic, log: game.log?.slice(-2) });
     if (forcedChoice.current === key) return;
     forcedChoice.current = key;
-    sendMove(legal[0]);
+    sendMove(automatic[Math.floor(Math.random() * automatic.length)]);
   }, [game, connected, myId, roomId, sendMove]);
 
 
@@ -1309,11 +1324,11 @@ export default function Orbit({ myId, authUser, onExit }) {
           <section className="or-hand-zone">
             <Hand>{sortedHand(me.hand).map((card) => <AgentCard card={card} key={card.id} selected={selectedCard === card.id} onInfo={setInfo}
               onClick={isMyTurn && !game.pending ? () => setSelectedCard(card.id) : null} />)}</Hand>
-            <div className={`or-controls${game.pending_pid === myId && legal.length > 1 ? " deciding" : ""}`}>
+            <div className={`or-controls${game.pending_pid === myId && legal.length > 1 && !automaticChoices(game).length ? " deciding" : ""}`}>
             {!over && game.pending && game.pending_pid === myId && <DecisionPanel game={game} catalog={catalog} sendMove={sendMove} onInfo={setInfo} />}
             {!over && game.pending && game.pending_pid !== myId && !botIsOpponent && <section className="or-status"><span className="or-spinner" /> {names[game.pending_pid] || "Opponent"} is resolving {game.pending.source}…</section>}
             {!over && !game.pending && !isMyTurn && !botIsOpponent && <section className="or-status"><span className="or-spinner" /> {names[game.turn_pid] || "Opponent"} is choosing an action…</section>}
-            {selectedCard != null && isMyTurn && !game.pending && <div className="or-action-bar">
+            {selectedAgent && isMyTurn && !game.pending && <div className="or-action-bar">
               <span>Play <b>{me.hand.find((card) => card.id === selectedCard)?.name}</b> as:</span>
               <div>{["recruit", "technology", "leader"].map((action) => {
                 const move = cardMoves.find((candidate) => candidate.action === action);
@@ -1326,7 +1341,7 @@ export default function Orbit({ myId, authUser, onExit }) {
                 return <button type="button" key={action} disabled={!move} onClick={() => move && sendMove(move)}>{label}</button>;
               })}</div>
             </div>}
-            {!over && !game.pending && isMyTurn && selectedCard == null && <p className="or-control-hint">Choose a card to recruit an Agent, develop technology, or become Leader.</p>}
+            {!over && !game.pending && isMyTurn && !selectedAgent && <p className="or-control-hint">Choose a card to recruit an Agent, develop technology, or become Leader.</p>}
             </div>
           </section>
         </div>

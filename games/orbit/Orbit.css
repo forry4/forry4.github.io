@@ -481,7 +481,7 @@
    block resolves to, so `color: var(--or-ink)` was quietly repainting the border
    over the `or-<planet>` class. The ink now lives on the children that need it.
    (the retired placed-Agent panel's count badge had the identical bug.) */
-.or-agent { display: flex; flex-direction: column; width: 145px; min-width: 145px; height: 184px; padding: .48rem; overflow: hidden; border: 2px solid currentColor; border-radius: 11px; background: linear-gradient(160deg, rgba(255,255,255,.13), rgba(13,15,31,.98) 36%); text-align: left; box-shadow: 0 7px 17px #0005; cursor: pointer; transition: transform .14s, box-shadow .14s; -webkit-tap-highlight-color: transparent; }
+.or-agent { display: flex; flex-direction: column; width: 145px; min-width: 145px; height: 184px; padding: .48rem; overflow: hidden; border: 2px solid currentColor; border-radius: 11px; background: linear-gradient(160deg, rgba(255,255,255,.13), rgba(13,15,31,.98) 36%); text-align: left; box-shadow: 0 7px 17px #0005; cursor: pointer; transition: transform .28s, box-shadow .28s; -webkit-tap-highlight-color: transparent; }
 .or-agent:focus { outline: none; }
 .or-agent:focus-visible { outline: 2px solid var(--or-card-tint, currentColor); outline-offset: 2px; }
 .or-agent.or-mercury { --or-card-tint: #a783cf; }
@@ -575,7 +575,7 @@
 .or-result { text-align: center; }
 .or-result > span { color: var(--lby-accent); font-size: .75rem; font-weight: 900; letter-spacing: .14em; text-transform: uppercase; }
 .or-status { grid-column: 1 / -1; display: flex; justify-content: center; align-items: center; gap: .65rem; padding: 1rem; color: var(--or-dim); }
-.or-spinner { width: 14px; height: 14px; border: 2px solid #ffffff22; border-top-color: var(--lby-accent); border-radius: 50%; animation: or-spin .8s linear infinite; }
+.or-spinner { width: 14px; height: 14px; border: 2px solid #ffffff22; border-top-color: var(--lby-accent); border-radius: 50%; animation: or-spin 1.6s linear infinite; }
 @keyframes or-spin { to { transform: rotate(360deg); } }
 
 /* ── The one detail modal ────────────────────────────────────────────────── */
@@ -678,7 +678,7 @@
   .or-tech-key { flex-wrap: nowrap; justify-content: center; min-width: 0; }
   .or-tech-key b { max-width: 6rem; font-size: .6rem; }
   .or-tech-toggle { display: inline-flex; align-items: center; gap: .28rem; padding: .28rem .4rem; border: 1px solid var(--or-line); border-radius: 6px; background: #202541; color: var(--or-ink); font: inherit; font-size: .6rem; font-weight: 800; cursor: pointer; }
-  .or-tech-toggle i { font-size: .75rem; font-style: normal; transition: transform .15s; }
+  .or-tech-toggle i { font-size: .75rem; font-style: normal; transition: transform .3s; }
   .or-tech:not(.collapsed) .or-tech-toggle i { transform: rotate(180deg); }
   .or-tech.collapsed .or-tech-body { display: none; }
   .or-tech.collapsed .or-tech-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -805,7 +805,7 @@
 .or-resource:has(.or-resource-delta) > span { visibility: hidden; }
 .or-resource-delta.spent { color: #ffe0b7; background: #422e29; border-color: #bd9271; }
 @keyframes or-resource-change { 0% { opacity: 1; transform: translateY(4px); } 15%, 75% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; transform: translateY(-5px); } }
-.or-player { transition: background .3s, border-color .3s; }
+.or-player { transition: background .6s, border-color .6s; }
 .or-player-name { min-width: 0; }
 .or-player-name > span:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .or-player.active .or-seat-dot { box-shadow: 0 0 0 3px color-mix(in srgb, var(--or-seat) 15%, transparent), 0 0 12px color-mix(in srgb, var(--or-seat) 35%, transparent); }
@@ -833,7 +833,7 @@
 .or-agent.discarding:focus-visible { outline: 2px solid var(--or-card-tint, currentColor); }
 .or-hand { padding: .35rem .25rem .45rem; scroll-snap-type: x proximity; scrollbar-width: thin; scrollbar-color: #59617f #121629; }
 .or-hand > .or-agent { scroll-snap-align: start; }
-.or-action-bar button { min-height: 44px; transition: background .18s, box-shadow .18s, transform .18s; }
+.or-action-bar button { min-height: 44px; transition: background .36s, box-shadow .36s, transform .36s; }
 .or-action-bar button:not(:disabled) { background: linear-gradient(160deg, color-mix(in srgb, var(--lby-accent) 25%, #182336), #19313e); box-shadow: inset 0 1px #ffffff18, 0 3px 8px #0003; }
 .or-action-bar button:disabled { color: #8b93ad; background: #15192b; }
 .or-action-bar button:active:not(:disabled), .or-choice-grid button:active { transform: translateY(1px); box-shadow: inset 0 2px 6px #0005; }
@@ -971,12 +971,12 @@
 }
 
 /* Physical pieces, quiet motion, and decisions that explain their purpose. */
-.or-disc { background: currentColor; border: 2px solid #eee9d9; box-shadow: 0 1px 2px #0008; transition: top .62s cubic-bezier(.2,.75,.25,1), left .62s cubic-bezier(.2,.75,.25,1), opacity .18s; }
-.or-disc.captured { transition: top .56s cubic-bezier(.2,.75,.25,1), left .56s cubic-bezier(.2,.75,.25,1), opacity .16s .38s; }
+.or-disc { background: currentColor; border: 2px solid #eee9d9; box-shadow: 0 1px 2px #0008; transition: top 1.15s cubic-bezier(.2,.75,.25,1), left 1.15s cubic-bezier(.2,.75,.25,1), opacity .36s; }
+.or-disc.captured { transition: top 1.05s cubic-bezier(.2,.75,.25,1), left 1.05s cubic-bezier(.2,.75,.25,1), opacity .3s .72s; }
 .or-disc.returning { transition: none; }
 .or-hand > .or-agent, .or-info { animation: none; }
 .or-resource:has(.or-resource-delta) > span { visibility: visible; }
-.or-resource-delta { top: -10px; right: 0; min-width: 0; padding: 0 3px; font-size: 10px; line-height: 11px; border: 0; animation: or-delta-fade 2.2s both; }
+.or-resource-delta { top: -10px; right: 0; min-width: 0; padding: 0 3px; font-size: 10px; line-height: 11px; border: 0; animation: or-delta-fade 2.8s both; }
 @keyframes or-delta-fade { 0%, 80% { opacity: 1; } 100% { opacity: 0; } }
 .or-decision { background: #172331 !important; border-color: #5baba780 !important; padding: .8rem !important; }
 .or-decision-source { display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem .5rem; margin-bottom: .4rem; font-size: .72rem; }
@@ -1183,3 +1183,15 @@
 @media (max-width: 360px) {
   .or-played-quantity > span { display: none; }
 }
+
+/* Each confirmed gain drops one piece per unit onto the existing resource. */
+.or-resource-pieces { position: absolute; left: 0; top: 50%; width: 19px; height: 19px; margin-top: -9.5px; pointer-events: none; z-index: 6; }
+.or-resource-piece { position: absolute; inset: 0; animation: or-piece-stack 1.2s var(--or-piece-delay) cubic-bezier(.22,.7,.3,1) both; }
+@keyframes or-piece-stack {
+  0% { opacity: 0; transform: translate(var(--or-piece-x), -36px) rotate(-18deg) scale(.8); }
+  18% { opacity: 1; }
+  78% { opacity: 1; transform: translate(0, 0) rotate(0deg) scale(1); }
+  100% { opacity: 0; transform: translate(0, 0) rotate(0deg) scale(1); }
+}
+@media (max-width: 640px) { .or-resource-pieces { width: 17px; height: 17px; margin-top: -8.5px; } }
+@media (prefers-reduced-motion: reduce) { .or-resource-pieces { display: none; } }
