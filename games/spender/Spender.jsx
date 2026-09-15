@@ -1,3 +1,4 @@
+import { fetchGameHistory, SESSION_EXPIRED, latestSession } from "../../shared/lobbyHistory.js";
 import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from "react";
 
 // The other games are CODE-SPLIT. Statically importing them put all four games plus
@@ -731,6 +732,7 @@ export default function SpenderApp() {
 		try { const s = localStorage.getItem("spender_user"); if (s) return JSON.parse(s); } catch {}
 		return null;
 	});
+	const [authNotice, setAuthNotice] = useState("");
 	const [myId, setMyId] = useState(() => {
 		try {
 			const s = localStorage.getItem("spender_user");
@@ -936,17 +938,19 @@ export default function SpenderApp() {
 			const activeP = fetch(`${HTTP_BASE}/games/active`).then(r => r.json()).catch(() => ({ games: [] }));
 			// History (your finished games) is session-gated — only fetch for a logged-in user.
 			const histP = user?.session_token
-				? fetch(`${HTTP_BASE}/games/history`, { headers: { Authorization: `Bearer ${user.session_token}` } })
-					.then(r => r.json()).catch(() => ({ games: [] }))
+				? fetchGameHistory(`${HTTP_BASE}/games/history`, user).catch(() => null)
 				: Promise.resolve({ games: [] });
 			const [open, active, hist] = await Promise.all([openP, activeP, histP]);
-			const og = open.games || [], ag = active.games || [], hg = hist.games || [];
-			setOpenGames(og); setActiveGames(ag); setHistoryGames(hg);
+			const og = open.games || [], ag = active.games || [], hg = hist?.games;
+			setOpenGames(og); setActiveGames(ag);
+			if (hg) {
+				setHistoryGames(hg);
+				writeLobbyCache("spender", myId, "history", hg);
+			}
 			writeLobbyCache("spender", myId, "open", og);
 			writeLobbyCache("spender", myId, "active", ag);
-			writeLobbyCache("spender", myId, "history", hg);
 		} catch {
-			setOpenGames([]); setActiveGames([]); setHistoryGames([]);
+			setOpenGames([]); setActiveGames([]);
 		}
 		setBrowserLoading(false);
 	}, [myId]);
@@ -1734,6 +1738,7 @@ export default function SpenderApp() {
 	// registered user's id/token is persisted, a guest's is not (guests keep the
 	// anonymous id they already had, so a game started before signing in stays theirs).
 	const handleAuthenticated = (user) => {
+		setAuthNotice("");
 		if (!user.guest) {
 			try {
 				localStorage.setItem("spender_user", JSON.stringify(user));
@@ -1746,6 +1751,8 @@ export default function SpenderApp() {
 	};
 
 	const handleLogout = () => {
+		setAuthNotice("");
+		setHistoryGames([]);
 		try {
 			localStorage.removeItem("spender_user");
 			localStorage.removeItem("spender_roomId");
@@ -1760,6 +1767,39 @@ export default function SpenderApp() {
 		setRoomId("");
 		disconnect();
 	};
+
+	// Lobby refreshes can discover a session that expired while this tab was
+	// open. Keep the route and cached lists so signing in returns to that lobby.
+	useEffect(() => {
+		const syncLogin = () => {
+			if (!authUser?.session_token) return;
+			try {
+				const latest = latestSession(authUser);
+				if (latest.session_token !== authUser.session_token) setAuthUser(latest);
+			} catch {}
+		};
+		const expired = ({ detail }) => {
+			if (!authUser?.session_token || detail.id !== authUser.id) return;
+			try { if (latestSession(authUser).session_token !== detail.session_token) { syncLogin(); return; } } catch { return; }
+			pendingRouteRef.current = parsePath();
+			try { localStorage.removeItem("spender_user"); localStorage.removeItem("spender_roomId"); } catch {}
+			const newId = uid();
+			try { localStorage.setItem("spender_myId", newId); } catch {}
+			setMyId(newId);
+			setAuthUser(null);
+			setHistoryGames([]);
+			setAuthNotice("Your session expired. Sign in again to load your game history.");
+			setScreen("auth");
+			setRoomData(null); setRoomId(""); disconnect();
+		};
+		const storage = (event) => { if (event.key === "spender_user") syncLogin(); };
+		window.addEventListener(SESSION_EXPIRED, expired);
+		window.addEventListener("storage", storage);
+		return () => {
+			window.removeEventListener(SESSION_EXPIRED, expired);
+			window.removeEventListener("storage", storage);
+		};
+	}, [authUser, disconnect]);
 
 	// ── Room / game actions ────────────────────────────────────────────────
 	const handleCreate = (vsAI = false, aiVariant = "A", wp = 15, maxPlayers = 4) => {
@@ -2860,7 +2900,7 @@ export default function SpenderApp() {
 		// heroRule is the home menu's ornament, handed over rather than re-drawn:
 		// the front door and the menu behind it are one title plate.
 		<AuthScreen siteName={SITE_NAME} httpBase={HTTP_BASE} css={css} myId={myId}
-			heroRule={HERO_RULE} onAuthenticated={handleAuthenticated} />
+			heroRule={HERO_RULE} notice={authNotice} onAuthenticated={handleAuthenticated} />
 	);
 
 	// Home menu — pick a game (Forrest Games landing)

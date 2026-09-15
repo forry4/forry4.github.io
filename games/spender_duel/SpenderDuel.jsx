@@ -1,3 +1,4 @@
+import { fetchGameHistory } from "../../shared/lobbyHistory.js";
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { baseCss } from "../../shared/theme.js";
 import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyMatchup, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame,
@@ -605,7 +606,7 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
     if (authUser?.session_token) {
       const headers = { Authorization: `Bearer ${authUser.session_token}` };
       fetch(`${DUEL_HTTP}/games/mine`, { headers }).then((r) => r.json()).then((d) => { const g = d.games || []; setMyGames(g); writeLobbyCache("duel", myId, "mine", g); }).catch(() => {});
-      fetch(`${DUEL_HTTP}/games/history`, { headers }).then((r) => r.json()).then((d) => { const g = d.games || []; setHistory(g); writeLobbyCache("duel", myId, "history", g); }).catch(() => {});
+      fetchGameHistory(`${DUEL_HTTP}/games/history`, authUser).then((d) => { const g = d.games || []; setHistory(g); writeLobbyCache("duel", myId, "history", g); }).catch(() => {});
     } else { setMyGames([]); setHistory([]); writeLobbyCache("duel", myId, "mine", []); writeLobbyCache("duel", myId, "history", []); }
   }, [authUser, myId]);
 

@@ -1,3 +1,4 @@
+import { fetchGameHistory } from "../../shared/lobbyHistory.js";
 import { Fragment, useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { baseCss } from "../../shared/theme.js";
 import {
@@ -1715,7 +1716,7 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
       const headers = { Authorization: `Bearer ${authUser.session_token}` };
       fetch(`${OT_HTTP}/games/mine`, { headers }).then((r) => r.json())
         .then((d) => { const g = d.games || []; setMyGames(g); writeLobbyCache("dissonance", myId, "mine", g); }).catch(() => {});
-      fetch(`${OT_HTTP}/games/history`, { headers }).then((r) => r.json())
+      fetchGameHistory(`${OT_HTTP}/games/history`, authUser)
         .then((d) => { const g = d.games || []; setHistory(g); writeLobbyCache("dissonance", myId, "history", g); }).catch(() => {});
     } else {
       setMyGames([]); setHistory([]);

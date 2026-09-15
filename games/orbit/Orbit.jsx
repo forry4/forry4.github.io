@@ -1,3 +1,4 @@
+import { fetchGameHistory } from "../../shared/lobbyHistory.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { baseCss } from "../../shared/theme.js";
 import {
@@ -280,7 +281,7 @@ function orbitMoveKey(move) {
 }
 
 
-function PlayerRail({ player, name, active, me, leader, hint, onInfo, connected }) {
+function PlayerRail({ player, name, active, me, leader, hint, orderLabel, onInfo, connected }) {
   if (!player) return null;
   const owner = me ? "Your" : `${name || "Opponent"}’s`;
   return <section data-motion-key={`seat-${player.__pid}`} data-motion-value={String(active)} className={`or-player${active ? " active" : ""}${me ? " mine" : " theirs"}`}>
@@ -291,6 +292,7 @@ function PlayerRail({ player, name, active, me, leader, hint, onInfo, connected 
       {hint && <span className="or-player-hint">{hint}</span>}
       <LeaderBadge leader={leader} pid={player.__pid} />
     </div>
+    {orderLabel && <div className="or-player-order">{orderLabel}</div>}
     <div className="or-resources">
       <Resource key={`credits-${connected}`} kind="credits" value={player.credits} animate={connected} />
       <Resource key={`zenithium-${connected}`} kind="zenithium" value={player.zenithium} animate={connected} />
@@ -1127,7 +1129,7 @@ export default function Orbit({ myId, authUser, onExit }) {
       fetch(`${ORBIT_HTTP}/games/mine`, { headers }).then((r) => r.json()).then((data) => {
         const rows = data.games || []; setMyGames(rows); writeLobbyCache("orbit", myId, "mine", rows);
       }).catch(() => {});
-      fetch(`${ORBIT_HTTP}/games/history`, { headers }).then((r) => r.json()).then((data) => {
+      fetchGameHistory(`${ORBIT_HTTP}/games/history`, authUser).then((data) => {
         const rows = data.games || []; setHistory(rows); writeLobbyCache("orbit", myId, "history", rows);
       }).catch(() => {});
     } else {
@@ -1284,9 +1286,9 @@ export default function Orbit({ myId, authUser, onExit }) {
   const playerRails = (
       <div className="or-score-rail">
         <PlayerRail player={{ ...other, __pid: otherId }} name={names[otherId]} active={!over && (game.pending_pid || game.turn_pid) === otherId}
-          leader={game.leader} connected={connected} hint={otherHint} onInfo={setInfo} />
+          leader={game.leader} connected={connected} orderLabel={game.phase === "mulligan" ? (game.order[0] === otherId ? "First player" : "Second player") : null} hint={otherHint} onInfo={setInfo} />
         <PlayerRail player={{ ...me, __pid: myId }} name={names[myId]} active={!over && (game.pending_pid || game.turn_pid) === myId}
-          me leader={game.leader} connected={connected} hint={myHint} onInfo={setInfo} />
+          me leader={game.leader} connected={connected} orderLabel={game.phase === "mulligan" ? (game.order[0] === myId ? "First player" : "Second player") : null} hint={myHint} onInfo={setInfo} />
       </div>
   );
   return <div className={`app orbit or-game${!over && game.phase !== "mulligan" ? " or-live" : ""}`} style={{ "--lby-accent": GAME_ACCENTS.orbit }}>

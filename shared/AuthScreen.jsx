@@ -51,7 +51,7 @@ const GUEST_FACTS = [
 	["no", "Cannot resume on another device"],
 ];
 
-export default function AuthScreen({ siteName, httpBase, css, myId, onAuthenticated, heroRule }) {
+export default function AuthScreen({ siteName, httpBase, css, myId, onAuthenticated, heroRule, notice }) {
 	const [tab, setTab] = useState("login");
 	const [name, setName] = useState("");
 	const [password, setPassword] = useState("");
@@ -147,6 +147,7 @@ export default function AuthScreen({ siteName, httpBase, css, myId, onAuthentica
 					</div>
 
 					<div className="auth-panel">
+						{notice && <p className="auth-notice" role="status">{notice}</p>}
 						{tab !== "guest" ? (
 							<>
 								{/* maxLength mirrors core.auth.validate_credentials: register is

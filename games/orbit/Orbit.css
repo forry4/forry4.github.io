@@ -1195,3 +1195,5 @@
 }
 @media (max-width: 640px) { .or-resource-pieces { width: 17px; height: 17px; margin-top: -8.5px; } }
 @media (prefers-reduced-motion: reduce) { .or-resource-pieces { display: none; } }
+
+.or-player-order { margin-top: .25rem; font-size: .75rem; font-weight: 700; color: var(--or-ink); }

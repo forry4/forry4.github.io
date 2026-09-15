@@ -813,17 +813,9 @@ The initial visual sign-off missed actual play problems. Do not repeat that:
   and new IDs in the viewer's own hand for drawing. It never starts from an
   outgoing request or infers the opponent's hidden hand. Flights are temporary,
   inert copies; server state and input do not wait for them.
-- **A DRAW IS DEALT TO THE HAND'S LEFT EDGE AND THEN SLIDES INTO ORDER — two
-  movements, not one — and there is no deck beside the hand to fly out of.** The
-  `.or-draw-pile` face was retired 2026-09-13: it was a picture of a deck that
-  did nothing, in the one place the desktop layout could least afford the width.
-  Cards now arrive from the left of the hand. The two stages are needed because
-  the hand is PRESENTATION-SORTED by planet then cost, so a card that flew
-  straight to its sorted place appeared to materialise in the middle of the fan;
-  dealing to a fixed edge and then re-ordering is what a hand of cards actually
-  does, and it stays readable when several arrive at once because each is dealt
-  to the same spot in turn (staggered 230ms). The landing spot is the LEFTMOST
-  card's box, so it holds whichever card the sort happens to put first.
+- Draws enter from entirely off-screen left at the final hand height and travel
+  straight to their sorted slot (1500ms, staggered 230ms). The former pause on
+  the leftmost hand card covered an existing card on desktop and was removed.
   A recruit's destination is `column-<pid>-<planet>` — the played-Agent cell in
   that seat's player box, the one place a recruited Agent lands now.
 - Duplicate frames, reconnect baselines and reduced motion must not replay
@@ -836,8 +828,8 @@ The initial visual sign-off missed actual play problems. Do not repeat that:
 
 ### Slower motion and meaningful choices — 2026-09-15
 
-- Card draws take 1500ms with a real pause at the visible left edge before
-  sliding into sorted order; other card flights take 1200ms. Measure draw
+- Card draws take 1500ms from off-screen left into sorted order; other card
+  flights take 1200ms. Measure draw
   destinations after controls and mobile scroll anchoring settle (two animation
   frames). A selected card that left the hand must not render an empty action
   bar for one extra frame. Scroll/resize cancels active stale geometry, but a

@@ -1,3 +1,4 @@
+import { fetchGameHistory } from "../../shared/lobbyHistory.js";
 import { Fragment, useState, useEffect, useLayoutEffect, useRef, useCallback, useId } from "react";
 import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyMatchup, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame,
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
@@ -1187,8 +1188,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
     fetch(`${COC_HTTP}/games/active`).then((r) => r.json()).then((d) => { const g = d.games || []; setActiveGames(g); writeLobbyCache("coc", myId, "active", g); }).catch(() => {});
     // History = your finished games (session-gated). Guests have none.
     if (authUser?.session_token) {
-      fetch(`${COC_HTTP}/games/history`, { headers: { Authorization: `Bearer ${authUser.session_token}` } })
-        .then((r) => r.json()).then((d) => { const g = d.games || []; setHistory(g); writeLobbyCache("coc", myId, "history", g); }).catch(() => {});
+      fetchGameHistory(`${COC_HTTP}/games/history`, authUser).then((d) => { const g = d.games || []; setHistory(g); writeLobbyCache("coc", myId, "history", g); }).catch(() => {});
     } else {
       setHistory([]); writeLobbyCache("coc", myId, "history", []);
     }
@@ -1912,6 +1912,14 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
 
   // Tapping a tile you can't act on yet shows its description (mobile has no hover,
   // so this mirrors the PC title-tooltip — see also clickBlackTile).
+  // Inspection is independent of the armed action: a right-click must never
+  // buy, take, place, or sell the piece under the pointer.
+  const inspect = (event, description) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setToast(description);
+  };
+
   const clickDepotTile = (depot, tile, e) => {
     if (shipPickMine) return;   // clicking anywhere in a depot picks it (handled on the depot div)
     if (buildingPickMine) {
@@ -2395,6 +2403,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
           else { stroke = "rgba(0,0,0,.4)"; strokeWidth = 1; }
           return (
             <g key={sid} data-sid={opp ? undefined : sid} data-oppsid={opp ? sid : undefined} className={`coc-hex${legal ? " legal" : ""}`}
+              onContextMenu={(e) => inspect(e, tile ? tileDesc(tile, board) : `${colorLabel(sp.color)} space (die ${sp.number}).`)}
               onClick={() => { if (interactive && legal) clickHex(sid, legal); else if (tile) setToast(tileDesc(tile, board)); }}>
               <title>{tile ? tileDesc(tile, board)
                 : setupPhase ? (sp.color === "burgundy" ? "Click to place your starting castle here." : `${colorLabel(sp.color)} space (die ${sp.number}).`)
@@ -2616,6 +2625,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
                     <div className={`coc-tiles-inner${(game.num_players || 2) === 3 ? " coc-tiles-tri" : ""}`}>
                     {depotSlots(d, depot.hexes).map((slot, i) => slot.tile ? (
                       <div key={slot.tile.id} className={`coc-tile${buildingPickMine && buildingCands.includes(slot.tile.id) ? " coc-tile-pick" : ""}`} style={{ background: TILE_HEX[slot.tile.color] }}
+                        onContextMenu={(e) => inspect(e, tileDesc(slot.tile, board))}
                         title={tileDesc(slot.tile, board)} onClick={(e) => clickDepotTile(d, slot.tile, e)}>
                         <TileArt tile={slot.tile} px={HEX_W} />
                       </div>
@@ -2631,6 +2641,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
                         const canPickGood = goodsPickMine && d === goodsPickDepot && goodsPickColors.includes(gt.color);
                         return (
                           <div key={gt.id} data-depotgood={gt.id} className={`coc-tile goods${canPickGood ? " coc-tile-pick" : ""}`} style={{ background: GOODS_HEX[gt.color] }}
+                            onContextMenu={(e) => inspect(e, tileDesc(gt, board))}
                             title={canPickGood ? `Take all #${goodsSellNum(gt.color)} goods` : tileDesc(gt, board)}
                             onClick={(e) => { if (canPickGood) { e.stopPropagation(); goodsPick(gt.color); } else if (!shipPickMine) setToast(tileDesc(gt, board)); }}>{goodsSellNum(gt.color)}</div>
                         );
@@ -2647,6 +2658,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
               title="Central black depot — buy one tile per turn for 2 silver">
               {game.black_depot.map((t) => (
                 <div key={t.id} className={`coc-tile${silverArmed ? " coc-tile-pick" : ""}`} style={{ background: TILE_HEX[t.color], opacity: .9 }}
+                  onContextMenu={(e) => inspect(e, `${tileDesc(t, board)}  (Black depot: buy for 2 silver.)`)}
                   title={silverArmed ? `Buy ${tileName(t)} for 2 silver` : `${tileDesc(t, board)}  (Black depot: buy for 2 silver.)`} onClick={() => clickBlackTile(t)}>
                   <TileArt tile={t} px={HEX_W} />
                 </div>
@@ -2733,7 +2745,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
                       return (
                         <div key={t.id} className={`coc-stt-wrap${isSel ? " sel" : ""}`}>
                           <div data-storage-slot={i} className={`coc-stt${isSel ? " sel" : ""}`} style={{ background: TILE_HEX[t.color] }}
-                            title={tileDesc(t, board)}
+                            onContextMenu={(e) => inspect(e, tileDesc(t, board))} title={tileDesc(t, board)}
                             onClick={() => {
                               // Only SELECT a storage tile when there's a way to place it
                               // (a die chosen, or an extra-action value, or a town-hall extra
@@ -2757,6 +2769,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
                       const sellable = canSellGood(c);
                       return (
                         <span key={c} data-goodchip={c} className={`coc-goods-chip${sellable ? " coc-goods-pick" : ""}`}
+                          onContextMenu={(e) => inspect(e, tileDesc({ kind: "goods", color: c }, board))}
                           title={sellable ? `Sell #${goodsSellNum(c)} goods for silver` : tileDesc({ kind: "goods", color: c }, board)}
                           onClick={() => sellable ? sellGood(c) : setToast(tileDesc({ kind: "goods", color: c }, board))}>
                           <span className="coc-tile goods" style={{ background: GOODS_HEX[c] }}>{goodsSellNum(c)}</span>×{n}
@@ -2764,6 +2777,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
                       );
                     })}
                     <span className={`coc-goods-sold${(me?.sold_goods?.length || 0) ? "" : " none"}`}
+                      onContextMenu={(e) => inspect(e, soldGoodsDesc(me?.sold_goods?.length || 0))}
                       title={soldGoodsDesc(me?.sold_goods?.length || 0)}
                       onClick={() => setToast(soldGoodsDesc(me?.sold_goods?.length || 0))}>
                       <span className="coc-goods-back" />×{me?.sold_goods?.length || 0}
@@ -2838,19 +2852,20 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
                     const t = opp.storage?.[i];
                     if (!t) return <div key={i} data-oppstorage-slot={i} className="coc-stt empty" style={{ background: "var(--surface2)" }} />;
                     return <div key={t.id} data-oppstorage-slot={i} className="coc-stt" style={{ background: TILE_HEX[t.color] }}
-                      title={tileDesc(t, board)} onClick={() => setToast(tileDesc(t, board))}><TileArt tile={t} px={70} /></div>;
+                      onContextMenu={(e) => inspect(e, tileDesc(t, board))} title={tileDesc(t, board)} onClick={() => setToast(tileDesc(t, board))}><TileArt tile={t} px={70} /></div>;
                   })}
                 </div>
               </div>
               <div>
                 <div className="coc-goods-row" data-oppgoods="1">
                   {Object.entries(opp.goods || {}).map(([c, n]) => (
-                    <span key={c} data-oppgoodchip={c} className="coc-goods-chip" title={tileDesc({ kind: "goods", color: c }, board)}
+                    <span key={c} data-oppgoodchip={c} className="coc-goods-chip" onContextMenu={(e) => inspect(e, tileDesc({ kind: "goods", color: c }, board))} title={tileDesc({ kind: "goods", color: c }, board)}
                       onClick={() => setToast(tileDesc({ kind: "goods", color: c }, board))}>
                       <span className="coc-tile goods" style={{ background: GOODS_HEX[c] }}>{goodsSellNum(c)}</span>×{n}
                     </span>
                   ))}
                   <span className={`coc-goods-sold${(opp.sold_goods?.length || 0) ? "" : " none"}`}
+                    onContextMenu={(e) => inspect(e, soldGoodsDesc(opp.sold_goods?.length || 0))}
                     title={soldGoodsDesc(opp.sold_goods?.length || 0)}
                     onClick={() => setToast(soldGoodsDesc(opp.sold_goods?.length || 0))}>
                     <span className="coc-goods-back" />×{opp.sold_goods?.length || 0}

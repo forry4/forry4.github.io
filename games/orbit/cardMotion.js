@@ -111,22 +111,15 @@ export function useCardMotion({ game, catalog, myId, roomId, connected, surface 
       const dy = to.top + to.height / 2 - from.top - height / 2;
       const draw = kind === "draw";
       const size = Math.min(.3, Math.max(.12, to.width / width));
-      // A DRAW IS TWO MOVEMENTS, NOT ONE. `to` for a draw is the LEFTMOST slot in
-      // the hand — the card is dealt there, at full size, and only then slides
-      // right into the place the sort order gives it. One straight flight from
-      // wherever the card happens to belong looked like it materialised in the
-      // middle of the fan; dealing to a fixed edge and then re-ordering is what
-      // the hands actually do, and it also reads correctly when several cards
-      // arrive at once, because each one is dealt to the same spot in turn.
+      // Draws enter entirely from off-screen left, at the settled hand height.
+      // No pause on an existing card: travel straight to the final sorted slot.
       const duration = draw ? 1500 : 1200;
       const fromColumn = kind === "transfer" || kind === "exile";
       const startSize = fromColumn ? .3 : 1;
       const endSize = kind === "exile" ? .85 : size;
       const animation = ghost.animate(draw ? [
-        { transform: `translate(${dx - 54}px, ${dy + 16}px) scale(.62) rotate(-9deg)`, opacity: 0, easing: "ease-out" },
-        { transform: `translate(${dx}px, ${dy}px) scale(1) rotate(0deg)`, opacity: 1, offset: .26 },
-        { transform: `translate(${dx}px, ${dy}px) scale(1) rotate(0deg)`, opacity: 1, offset: .46, easing: "ease-in-out" },
-        { transform: "translate(0, 0) scale(1) rotate(0deg)", opacity: 1 },
+        { transform: `translateX(${-from.left - width - 24}px)`, opacity: 1, easing: "ease-in-out" },
+        { transform: "translateX(0)", opacity: 1 },
       ] : [
         { transform: `translate(0, 0) scale(${startSize})`, opacity: 1 },
         { transform: `translate(${dx * .45}px, ${dy * .45 - 28}px) scale(${fromColumn ? .85 : .68}) rotate(-4deg)`, opacity: 1, offset: .45 },
@@ -217,17 +210,7 @@ export function useCardMotion({ game, catalog, myId, roomId, connected, surface 
             if (source) fly(publicFace(before.card), centreFace(bounds(source)), edge(bounds(source)), "exile", step++ * 220);
           }
         }
-        // THE HAND HAS NO DECK BESIDE IT ANY MORE, so a drawn card is dealt to the
-        // hand's own left edge. The landing spot is the LEFTMOST card's box — the
-        // first slot, whatever card ends up occupying it once the hand is re-sorted
-        // — and every new card is dealt there before travelling to its own place.
-        const slot = currentNodes.find(visible);
-        if (drawn.length && slot) {
-          const first = bounds(slot);
-          const handNode = slot.parentElement;
-          // Horizontal scrolling can put the first sorted card off-screen.
-          // Deal at the visible hand edge before sliding to the sorted slot.
-          first.left = Math.max(first.left, bounds(handNode).left + parseFloat(getComputedStyle(handNode).paddingLeft || 0));
+        if (drawn.length) {
           let index = 0;
           for (const node of drawn) {
             // A newer server response can remove a card during the two-frame
@@ -235,7 +218,7 @@ export function useCardMotion({ game, catalog, myId, roomId, connected, surface 
             if (!root.contains(node)) continue;
             const card = faces.current.get(node.dataset.cardId);
             if (!card) continue;
-            fly(card.face, card.rect, { ...first, top: card.rect.top }, "draw", index++ * 230, node);
+            fly(card.face, card.rect, card.rect, "draw", index++ * 230, node);
           }
         }
       });

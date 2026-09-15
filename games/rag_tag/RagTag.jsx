@@ -1,3 +1,4 @@
+import { fetchGameHistory } from "../../shared/lobbyHistory.js";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { baseCss } from "../../shared/theme.js";
 import ragtagCssText from "./RagTag.css?inline";
@@ -1382,7 +1383,7 @@ export default function RagTag({ myId, authUser, onExit }) {
       fetch(`${RT_HTTP}/games/mine`, { headers }).then((r) => r.json()).then((d) => {
         const g = d.games || []; setMyGames(g); writeLobbyCache("ragtag", myId, "mine", g);
       }).catch(() => {});
-      fetch(`${RT_HTTP}/games/history`, { headers }).then((r) => r.json()).then((d) => {
+      fetchGameHistory(`${RT_HTTP}/games/history`, authUser).then((d) => {
         const g = d.games || []; setHistory(g); writeLobbyCache("ragtag", myId, "history", g);
       }).catch(() => {});
     } else {

@@ -1,3 +1,4 @@
+import { fetchGameHistory } from "../../shared/lobbyHistory.js";
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { baseCss } from "../../shared/theme.js";
 import { useCardInfoGesture } from "../../shared/gestures.js";
@@ -1301,7 +1302,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
     if (authUser?.session_token) {
       const headers = { Authorization: `Bearer ${authUser.session_token}` };
       fetch(`${DM_HTTP}/games/mine`, { headers }).then((r) => r.json()).then((d) => { const g = d.games || []; setMyGames(g); writeLobbyCache("dontminion", myId, "mine", g); }).catch(() => {});
-      fetch(`${DM_HTTP}/games/history`, { headers }).then((r) => r.json()).then((d) => { const g = d.games || []; setHistory(g); writeLobbyCache("dontminion", myId, "history", g); }).catch(() => {});
+      fetchGameHistory(`${DM_HTTP}/games/history`, authUser).then((d) => { const g = d.games || []; setHistory(g); writeLobbyCache("dontminion", myId, "history", g); }).catch(() => {});
     } else { setMyGames([]); setHistory([]); writeLobbyCache("dontminion", myId, "mine", []); writeLobbyCache("dontminion", myId, "history", []); }
   }, [authUser, myId]);
 

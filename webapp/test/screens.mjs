@@ -1956,6 +1956,91 @@ try {
 		await ctx.close();
 	}
 
+	async function historyRecovery(log) {
+		const ctx = await browser.newContext({viewport:{width:1440,height:900}});
+		const user = {id:"history-recovery", name:"History", session_token:"initial"};
+		await ctx.addInitScript((user) => {
+			if (!localStorage.getItem("spender_user")) localStorage.setItem("spender_user", JSON.stringify(user));
+		}, user);
+		const page = await ctx.newPage(), errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		const check = (name, cond, detail = "") => {
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
+		};
+		const json = (data, status=200) => ({status, contentType:"application/json", body:JSON.stringify(data)});
+		const game = {id:"PAST01", player1_name:"History",player2_name:"Bot",you_are_p1:true,outcome:"won",turns:8,
+			players:["History","Bot"],opponents:["Bot"],your_vp:30,you_won:true,winners:["History"],
+			standings:[{name:"History",vp:30,you:true,won:true},{name:"Bot",vp:10,you:false,won:false}],updated_at:1750000000};
+		let mode = "populated", session = "valid", historyCalls = 0, lastToken, releaseOld;
+		await page.route("**/auth/session*", (r) => session === "offline" ? r.abort()
+			: r.fulfill(json(session === "expired" ? {ok:false} : {ok:true,user})));
+		await page.route("**/auth/login", (r) => {
+			session="valid"; mode="populated";
+			return r.fulfill(json({ok:true,user,session_token:"renewed"}));
+		});
+		await page.route("**/games/history*", async (r) => {
+			historyCalls++; lastToken=r.request().headers().authorization;
+			if (mode === "offline") return r.abort();
+			if (mode === "server-error") return r.fulfill(json({games:[]},503));
+			if (mode === "malformed") return r.fulfill(json({message:"Try again"}));
+			if (mode === "delayed") {
+				await new Promise(resolve => {releaseOld=resolve;});
+				return r.fulfill(json({games:[]}));
+			}
+			return r.fulfill(json(mode === "populated" ? {games:[game]} : {games:[]}));
+		});
+		const rows = () => page.locator('.lby-col-history .lby-card').count();
+		const cached = (namespace) => page.evaluate(ns => JSON.parse(localStorage.getItem(`lbyc.${ns}.history-recovery.history`) || "null"),namespace);
+		const refresh = async () => {
+			const before = historyCalls;
+			await page.getByRole('button',{name:'Refresh',exact:true}).click();
+			for (let i=0;i<100 && historyCalls===before;i++) await sleep(20);
+			await sleep(100);
+		};
+		await page.goto(`http://localhost:${PORT}/orbit`, {waitUntil:'networkidle'});
+		await page.waitForSelector('.lby-col-history .lby-card');
+		await page.evaluate(() => {window.__historyDocument = "same document";});
+		for (const failure of ['server-error','malformed','offline']) {
+			mode=failure; await refresh();
+			check(`History preserves visible and cached games after ${failure}`, await rows()===1 && (await cached('orbit'))?.length===1);
+		}
+		mode='empty'; session='offline'; await refresh();
+		check("An unverified empty history preserves the list and the login", await rows()===1 && await page.locator('.auth-card').count()===0);
+		mode='delayed'; session='valid'; await refresh();
+		mode='populated'; await refresh();
+		session='expired'; releaseOld(); await sleep(150);
+		check("An older empty response cannot erase a newer result or expire its login", await rows()===1 && await page.locator('.auth-card').count()===0);
+		mode='empty'; await refresh();
+		await page.waitForSelector('.auth-notice');
+		check("Expired history refresh asks for sign-in and preserves the cached history", (await cached('orbit'))?.length===1 && new URL(page.url()).pathname==='/orbit');
+		await page.locator('#auth-name').fill('History'); await page.locator('#auth-pass').fill('testpass');
+		await page.locator('#auth-pass').press('Enter');
+		await page.waitForSelector('.orbit .lby-col-history .lby-card');
+		check("Signing back in restores history at the same route without a page refresh", await rows()===1 && await page.evaluate(() => window.__historyDocument === "same document") && lastToken==='Bearer renewed');
+		// A real storage event from another tab updates the mounted shell as well
+		// as the token used by the next refresh.
+		const sibling = await ctx.newPage();
+		await sibling.route('**/*',r=>r.fulfill({status:200,contentType:'text/html',body:'<title>Session renewal</title>'}));
+		await sibling.goto(`http://localhost:${PORT}/`);
+		await sibling.evaluate(user=>localStorage.setItem('spender_user',JSON.stringify({...user,session_token:'another-tab'})),user);
+		await refresh();
+		check("History reload uses a renewed login from another tab", lastToken==='Bearer another-tab' && await rows()===1);
+		await sibling.close();
+		mode='empty'; await refresh();
+		check("A valid empty history still clears the list and cache", await rows()===0 && (await cached('orbit'))?.length===0);
+		// Each game's existing refresh button must use the same failure policy.
+		for (const [route, namespace] of [['spender','spender'],['coc','coc'],['duel','duel'],['dontminion','dontminion'],['dissonance','dissonance'],['ragtag','ragtag']]) {
+			mode='populated';
+			await page.goto(`http://localhost:${PORT}/${route}`,{waitUntil:'networkidle'});
+			await page.waitForSelector('.lby-col-history .lby-card');
+			mode='server-error'; await refresh();
+			check(`${route} history refresh preserves the last successful list`, await rows()===1 && (await cached(namespace))?.length===1);
+		}
+		check("History recovery produces no page errors", errors.length===0,errors[0]||"");
+		await ctx.close();
+	}
+
 	async function lobbyHistory(log) {
 		const ctx = await browser.newContext();
 		// a session_token so the lobby actually fetches history (a guest is short-
@@ -4818,6 +4903,39 @@ try {
 				.then(() => true).catch(() => false);
 			check("the game reaches round 1 and our turn (bot played offline)", badge);
 
+			// Keep a die and the silver purchase armed: right-click must inspect
+			// even when left-click would spend a die, buy a tile, or sell goods.
+			const goodsDescription = await page.locator('[data-goodchip]').first().getAttribute('title');
+			await page.locator('.coc-duchy-controls .coc-die:not(.used)').first().click();
+			const black = page.locator('[data-blackdepot] .coc-tile').first();
+			const blackDescription = await black.getAttribute('title');
+			await page.locator('[data-silver]').click();
+			const stateBeforeInfo = await page.evaluate(() => ({ dice:[...document.querySelectorAll('.coc-die')].map(e=>e.className),
+					storage:document.querySelector('[data-storage]')?.innerHTML,
+					goods:document.querySelector('[data-mygoods]')?.innerHTML,
+					black:document.querySelector('[data-blackdepot]')?.innerHTML,
+					silver:document.querySelector('[data-silver]')?.parentElement.textContent }));
+			for (const [selector, description] of [
+				['[data-blackdepot] .coc-tile', blackDescription],
+				['[data-depot] .coc-tile:not(.coc-tile-ghost):not(.goods)', null],
+				['[data-depotgood]', null],
+				['[data-goodchip]', goodsDescription],
+				['.coc-goods-sold', null],
+			]) {
+				const piece = page.locator(selector).first();
+				const expected = description || await piece.getAttribute('title');
+				await piece.click({button:'right'});
+				check(`Castles right-click describes ${selector}`, (await page.locator('.coc-toast').textContent()) === expected);
+			}
+			const stateAfterInfo = await page.evaluate(() => ({ dice:[...document.querySelectorAll('.coc-die')].map(e=>e.className),
+				storage:document.querySelector('[data-storage]')?.innerHTML,
+				goods:document.querySelector('[data-mygoods]')?.innerHTML,
+				black:document.querySelector('[data-blackdepot]')?.innerHTML,
+				silver:document.querySelector('[data-silver]')?.parentElement.textContent }));
+			check("Castles inspection leaves armed dice, silver, tiles and goods unchanged", JSON.stringify(stateBeforeInfo) === JSON.stringify(stateAfterInfo));
+			await page.locator('[data-silver]').click();
+			await page.locator('.coc-die.sel').first().click();
+
 			// THE GAME SCREEN FITS THE WINDOW. The board's aesthetic height floor is
 			// `38vw` — a HEIGHT taken from the viewport's WIDTH — so a wide window used to
 			// ask for board room the window did not have and the page grew a scrollbar for
@@ -5784,6 +5902,11 @@ try {
 		// the same language every other screen uses for "this is the card I am
 		// playing". Assert the DIRECTION, not just the class: faded, pushed DOWN
 		// (`.selected` lifts), and carrying neither the class nor the lit bar.
+		const orderLabels = await page.locator('.or-player').evaluateAll((rails) => rails.map((el) => ({
+			pid:el.dataset.motionKey.slice(5), label:el.querySelector('.or-player-order')?.textContent,
+		})));
+		check("opening replacements identify first and second player from turn order",
+			orderLabels.length === 2 && orderLabels.every((r) => r.label === (latestFrame.room.game.order[0] === r.pid ? "First player" : "Second player")), JSON.stringify(orderLabels));
 		const mulliganPick = page.locator(".or-mulligan .or-agent").first();
 		await mulliganPick.click({ timeout: 10_000 }).catch(() => {});
 		// `.or-agent` transitions transform and box-shadow over 140ms, and a
@@ -6936,27 +7059,21 @@ try {
 			}, action);
 			check(`${action}: a confirmed card shrinks into its actual destination`, travel.shrinking && travel.landed, JSON.stringify(travel));
 			check(`${action}: the replacement card draws into the hand`, await page.locator('.or-card-flight[data-flight="draw"]').count() === 1);
-			// A DRAW IS DEALT TO THE LEFT EDGE AND THEN SLIDES INTO ORDER, which
-			// is two movements and not one — there is no deck beside the hand any
-			// more to fly out of, and the hand is sorted, so a card that travelled
-			// straight to its sorted place appeared to materialise in the middle
-			// of the fan. Assert the SHAPE: it starts left of where it ends, is
-			// standing in the leftmost slot at the dwell, and finishes on its own
-			// card. Measured against the leftmost card's box, so this holds
-			// whichever card the sort happens to put first.
+			// A draw begins entirely off-screen, then travels directly into its
+			// sorted slot without materialising on top of an existing hand card.
 			const dealt = await page.evaluate(() => {
 				const flight = document.querySelector('.or-card-flight[data-flight="draw"]');
 				const animation = flight.getAnimations()[0]; animation.pause();
-				const at = (time) => { animation.currentTime = time; const r = flight.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y) }; };
-				const slot = document.querySelector(".or-hand .or-agent").getBoundingClientRect();
+				const at = (time) => { animation.currentTime = time; const r = flight.getBoundingClientRect(); return { x:r.x, y:r.y, right:r.right }; };
+				const slot = document.querySelector(`.or-hand [data-card-id="${flight.dataset.arrivalCard}"]`).getBoundingClientRect();
 				const duration = animation.effect.getTiming().duration;
-				const start = at(0), landed = at(duration * .37), settled = at(duration - 1);
-				animation.currentTime = 0;
-				return { start, landed, settled, slotX: Math.round(slot.x) };
+				const start = at(0), middle = at(duration * .5), end = at(duration - 1);
+				animation.currentTime = duration * .25;
+				return { start, middle, end, slotX:slot.x, slotY:slot.y };
 			});
-			check(`${action}: the drawn card is dealt to the leftmost slot before it slides into order`,
-				dealt.start.x < dealt.landed.x && Math.abs(dealt.landed.x - dealt.slotX) <= 2
-				&& dealt.settled.x >= dealt.landed.x, JSON.stringify(dealt));
+			check(`${action}: the drawn card enters from off-screen left and settles in its own slot`,
+				dealt.start.right < 0 && dealt.start.x < dealt.middle.x && dealt.middle.x < dealt.end.x
+				&& Math.abs(dealt.end.x-dealt.slotX) < 1 && Math.abs(dealt.end.y-dealt.slotY) < 1, JSON.stringify(dealt));
 			if (process.env.ORBIT_SHOTS) await page.screenshot({ path: `test-results/orbit-card-flight-${action}.png` });
 			await page.evaluate(() => document.querySelectorAll(".or-card-flight").forEach((node) => node.getAnimations().forEach((animation) => animation.finish())));
 			await page.waitForFunction(() => !document.querySelector(".or-card-flight"));
@@ -6986,18 +7103,17 @@ try {
                 const a = node.getAnimations()[0]; a.pause();
                 const {duration,delay} = a.effect.getTiming();
                 const target = document.querySelector(`.or-hand [data-card-id="${node.dataset.arrivalCard}"]`);
-                const slot = document.querySelector('.or-hand .or-agent').getBoundingClientRect();
-                const hand = document.querySelector('.or-hand');
-                const slotX = Math.max(slot.x, hand.getBoundingClientRect().x + parseFloat(getComputedStyle(hand).paddingLeft));
+                a.currentTime = delay;
+                const start = node.getBoundingClientRect();
                 a.currentTime = delay + duration * .37;
                 const dealt = node.getBoundingClientRect();
                 a.currentTime = delay + duration - 1;
                 const end = node.getBoundingClientRect(), r = target.getBoundingClientRect();
                 return {duration, yError:Math.abs(end.y-r.y), xError:Math.abs(end.x-r.x),
-                    dealtYError:Math.abs(dealt.y-r.y), dealtXError:Math.abs(dealt.x-slotX)};
+                    dealtYError:Math.abs(dealt.y-r.y), startRight:start.right};
             }));
             check(`${width}px: two drawn cards keep the hand's final height throughout dealing`, endpoints.length === 2
-                && endpoints.every((r) => r.duration >= 1400 && r.yError < 1 && r.xError < 1 && r.dealtYError < 1 && r.dealtXError < 1), JSON.stringify(endpoints));
+                && endpoints.every((r) => r.duration >= 1400 && r.yError < 1 && r.xError < 1 && r.dealtYError < 1 && r.startRight < 0), JSON.stringify(endpoints));
             if (process.env.ORBIT_SHOTS) await page.screenshot({path:`test-results/orbit-mobile-draw-${width}.png`});
             await page.evaluate(() => document.querySelectorAll('.or-card-flight').forEach((node) => node.getAnimations().forEach((a) => a.finish())));
             socket.send(JSON.stringify(fixture));
@@ -7329,7 +7445,7 @@ try {
 	// (`client_searchable` is false for four hands), and it asserts settled
 	// geometry rather than elapsed time -- both of which are what lane B is for.
 	const laneB = [routeMounts, shellNav, authScreen, homeScreen, spenderPlayTurn, spenderWaitingRoom,
-		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, dmAdventures,
+		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, historyRecovery, dmAdventures,
 		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, lastDifficulty,
 		dissonanceQuartet, orbitPlay, lobbyFinishSync];
 

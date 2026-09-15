@@ -14,6 +14,13 @@ Cross-game frontend kits. **Dependency direction is one-way: `games/* → shared
   came out in lowercase Georgia with `cinzel:true` in the same probe. `swap` is safe here
   precisely because of the `size-adjust` metric-matched fallbacks — the worst case is a repaint
   at the same widths, not a reflow.
+- **`lobbyHistory.js`** owns authenticated history refresh for every game. Failed,
+  malformed, superseded, or unverified empty replies must preserve the last successful
+  list and cache. Legacy endpoints return `{games: []}` for expired sessions: verify
+  `/auth/session` before accepting that empty result. Only a confirmed dead token asks
+  the shell for sign-in, keeping the route for recovery without reloading. A same-account
+  login in another tab supplies the fresh token; never borrow another account's token.
+  `screens.mjs`'s `historyRecovery` block covers these paths and every lobby's wiring.
 - **`lobby.jsx`** — shared lobby chrome (`LobbyHeader`/`LobbySectionHd`/`LobbyEmpty`/`LobbyLoading`/
   `TurnBadge`, cache helpers) + `GameMenu` (the in-game ☰ dropdown: Return / View rules / Abandon; falsy
   items filtered; Esc/click-outside close) + `CreateModal`/`LobbyCreateRow` (the unified "New Game" modal
