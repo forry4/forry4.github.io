@@ -1,87 +1,22 @@
 name: Keep backend warm
 
-# Keeps the Render free-tier backend warm during play hours so its cold start (~50s;
-# spins down after ~15 min idle) doesn't hit real users. Public repo => free minutes.
+# GitHub schedule delivery is best-effort. Preserve the existing ramp and 90-minute
+# holds; the independent Cloudflare Worker is configured in keepalive-worker/.
+# Do not widen the warming window: both schedulers spend Render's instance hours.
 #
-# THIS IS NO LONGER THE SOLE MECHANISM, and that is the point — see the 2026-09-06
-# measurement below for why one scheduler was never enough. `keepalive-worker/` is a
-# Cloudflare Worker cron doing the same job on a different provider, and the two cover
-# opposite halves: it fires reliably every 5 minutes, so the box should never reach the
-# 15-minute idle timeout at all; this one fires unreliably but HOLDS a retrying curl for
-# ~90 min, which is what actually completes a wake once the box is already cold. Neither
-# depends on an always-on machine. Keep both — dropping either leaves the failure the
-# other one covers.
-#
-# ⚠ BOTH PINGERS SPEND THE SAME BUDGET: Render's free tier allows 750 INSTANCE-HOURS per
-# month per workspace, shared across every free service, and running out SUSPENDS the
-# service until the next month. Overlapping pingers cost nothing extra (the hours are
-# counted on the service being up, not on who woke it), but WIDENING either one's window
-# does. `core/tests/test_keepalive_budget.py` guards the Worker's side of that.
-#
-# THE ACTUAL FIX IS THE WAKE, NOT THE TIMING. The 7-9am outages were NOT "GitHub fired
-# late" — they were a 30s pinger (cron-job.org) that could not hold a connection through
-# the ~50s spin-up: it disconnected mid-wake, which ABORTS the spin-up (Render logged
-# NOTHING for the 2h; the instance never booted). Each ping below instead HOLDS the
-# connection open and RETRIES through the 503s (curl --retry-all-errors + long --max-time),
-# exactly like a browser — which wakes the box in ~7s. So whenever ANY morning run fires,
-# even 20 min late, it completes the wake. Worst case degrades from "2h dead" to "first
-# player waits one normal ~50s cold start" — never a 2h outage again.
-#
-# RELIABILITY STRATEGY for GitHub's flaky scheduler (it delays/drops individual starts,
-# worst at :00):
-#   1. Several pre-7am starts at off-peak minutes -> at least one lands. They must be in
-#      DIFFERENT HOURS to be independent of the failure that actually happens; see the
-#      2026-09-06 measurement below for what "independent" cost when they were not.
-#   2. Each run is LONG-LIVED (~90 min) so a single firing bridges 7am, and with
-#      cancel-in-progress:false the runs chain back-to-back for continuous coverage.
-#   3. Twice-hourly starts through the day re-trigger the chain so it stays warm to ~10pm.
-#   4. The `warm-window-watchdog` job below FAILS if the morning ramp went dark, because
-#      every previous instance of this bug was found by a player, not by the workflow.
-#
-# DST: 7am LOCAL = 14:00 UTC in summer (PDT) / 15:00 UTC in winter (PST). The early
-# starts at 11:41-15:09 UTC + the ~90-min run length bridge 7am in BOTH seasons. The
-# stay-warm window 14:00-05:59 UTC covers 7am-10pm PDT (and PST with <=1h overhang).
-#
-# A GITHUB-SIDE INCIDENT CAN SILENTLY DE-REGISTER THIS SCHEDULE, AND THE SYMPTOM IS
-# HOUR-SHAPED, NOT A UNIFORM SLOWDOWN. On 2026-08-26 an Actions incident ("Actions jobs
-# failed to start") left the 13:00-16:00 UTC triggers dead while every later hour kept
-# firing and workflow_dispatch stayed fine — so the workflow looked alive (5-8 runs/day,
-# all green) while the band holding ALL THREE pre-7am warm-ups fired ZERO times for nine
-# days. Backend warm coverage went ~23h/day -> ~7h/day and the morning play window was
-# cold every day; the only outward sign was the external monitor's 503s.
-# THE FIX IS A PUSH THAT TOUCHES THIS FILE on the default branch — that re-registers the
-# cron. It does NOT self-heal, and it deploys nothing (this path is in neither
-# deploy-pages.yml's nor deploy-render.yml's filter).
-# DIAGNOSE IT BY START HOUR, NEVER BY RUN COUNT OR CONCLUSION: histogram
-# run_started_at from /actions/workflows/keepalive.yml/runs and compare against the cron
-# hours below. A whole dead BAND is this bug; uniformly fewer runs is ordinary GitHub
-# scheduler drift.
-#
-# ...AND RE-REGISTERING IS NOT A FIX — IT WAS TRIED (2026-09-04, 72bd097) AND THE BAND
-# STAYED DEAD. Measured 2026-09-06 over the 100 runs back to 08-25: UTC hours 13 and 14
-# fired **0 times in the 11 days since 08-27**, against 2 and 4 firings in the two days
-# before it, while hours 17 and 23 fired 20 and 14 times. The two mornings AFTER the
-# re-registration push were still dead (first daytime firing 16:48 and 15:54 UTC, i.e.
-# 09:48 and 08:54 local). Simulating the concurrency queue over those runs puts real warm
-# coverage at **39%** (112h of 287h), with a cold window EVERY morning from 06:00 local
-# until ~09:00-10:00 — which is exactly the "slow startup" a player reports.
-#
-# So the schedule below no longer assumes any particular cron will be honoured. Two
-# changes, and the reasoning is what matters if this ever needs revisiting:
-#   1. THE MORNING RAMP IS SPREAD ACROSS FIVE UTC HOURS (11,12,12,13,14,15), because the
-#      observed failure is HOUR-shaped. The old three "independent" attempts were all
-#      inside 13:00-14:59, so they were independent of GitHub dropping ANY SINGLE start
-#      and perfectly correlated with the failure that actually happens. A run holds ~90
-#      min, so ANY ONE of 12:53 / 13:29 / 14:11 bridges 7am PDT (14:00 UTC) on its own,
-#      and any one of 14:11 / 15:09 / 15:13 bridges 7am PST (15:00 UTC).
-#   2. THE STAY-WARM BAND FIRES TWICE AN HOUR (:13 and :47) instead of once. Roughly half
-#      of all scheduled firings are dropped, so one start per hour makes a 90-minute
-#      chain break on about one window in eight; three chances per window makes it one in
-#      a hundred. A firing that lands while a run is in progress costs nothing — it queues
-#      behind it and extends coverage, or is cancelled as pending in seconds.
-# Both minutes stay off :00, which is GitHub's own advice (the scheduler is worst at the
-# top of the hour). The quiet window is 06:00-11:40 UTC = 23:00-04:40 local, which is the
-# only stretch with no play in it.
+# A successful /health response is a successful keepalive. Missed cron starts and
+# process boot timestamps do not prove an outage: Render can restart free services
+# at any time. The old watchdog failed twice daily over those historical signals
+# even while its own request and the companion ping job returned healthy responses.
+# Keep boot times in the summary, recover transient failures, and fail only when
+# /health stays unhealthy for the full four-minute recovery window.
+# See docs/keepalive-reliability.md for the incident and validation.
+
+permissions:
+  contents: read
+
+env:
+  HEALTH_URL: https://splendid-nelz.onrender.com/health
 
 on:
   schedule:
@@ -106,73 +41,18 @@ on:
 
 jobs:
   ping:
-    # CONCURRENCY IS PER-JOB, NOT PER-WORKFLOW, and that is deliberate: at workflow level
-    # it also serialises the watchdog below, so the one job whose whole purpose is to
-    # report on the schedule would sit pending behind a 90-minute ping — or be cancelled
-    # as a superseded pending run — and report nothing.
+    # Keep concurrency per job so the immediate watchdog never queues behind
+    # a 90-minute hold. Pending holds still bridge delayed scheduler starts.
     concurrency:
       group: keepalive
       cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 95
     steps:
+      - uses: actions/checkout@v4
       - name: Warm + hold the backend for ~90 min
-        run: |
-          url="https://splendid-nelz.onrender.com/health"
-          end=$(( $(date +%s) + 5400 ))   # ~90 min
-          while [ "$(date +%s)" -lt "$end" ]; do
-            # HOLD one connection open through the cold start (Render holds the request
-            # while spinning up, then serves 200) and RETRY through 503s — like a browser.
-            # A held+retrying curl completes the wake that a 30s pinger aborts.
-            # --max-time bounds the whole retrying op; --retry-all-errors treats 503 as
-            # retryable so it hammers a stalled wake instead of giving up.
-            code=$(curl -s -o /dev/null -w '%{http_code}' \
-              --max-time 160 --retry 10 --retry-delay 8 --retry-all-errors "$url" || echo 000)
-            echo "$(date -u +%H:%M:%SZ) -> HTTP $code"
-            # Warm -> relax to a 4-min stay-warm cadence; still cold -> retry fast.
-            if [ "$code" = "200" ]; then sleep 240; else sleep 15; fi
-          done
+        run: python3 .github/scripts/keepalive.py --hold-seconds 5400
 
-  # THE ALARM FOR THE FAILURE ABOVE — AND IT AUDITS THE PROPERTY, NOT THE
-  # MECHANISM. It used to ask "did the 11:00-13:59 UTC cron band fire?" and fail
-  # when it had not, which it has not for at least 14 days: hours 11, 12 and 13
-  # are dead, and spreading the ramp across five hours (the fix above) did not
-  # revive them. So it failed twice a day, every day, from 2026-09-07 onward.
-  #
-  # THE ALARM WAS RIGHT, AND THE CHECK WAS STILL WRONG. Measured 2026-09-14 03:59
-  # UTC — inside the 13:00-06:59 warm window — the backend was COLD and a probe
-  # woke it. Both pingers had missed it: GitHub's scheduler had dropped the 03:13
-  # and 03:47 firings (it drops most of them), and the Cloudflare Worker, which is
-  # supposed to make this impossible by firing every 5 minutes, answered 404 at the
-  # URL `keepalive-worker/wrangler.jsonc` documents. A cron-only Worker needs no
-  # route, so that is suggestive rather than proof — but the cold box is not.
-  # CHECK THAT THE WORKER IS ACTUALLY DEPLOYED before trusting anything here.
-  #
-  # What was wrong was the EVIDENCE, not the conclusion: "a GitHub cron did not
-  # fire" stopped implying "the backend was cold" the moment a second, independent
-  # pinger existed. An alarm that reasons from a superseded mechanism cannot be
-  # acted on — you cannot tell a real outage from a scheduler quirk — and it shares
-  # a dashboard with the deploy gates that do matter.
-  #
-  # WHAT IT MEASURES NOW: /health reports `started_at`, the process's own boot
-  # time, so "was the backend already up when the play window opened?" is a fact
-  # the backend will tell you — whichever pinger kept it warm, which is the whole
-  # point now that there are two. A late boot means it cold-started inside play
-  # hours, i.e. a real player waited out a ~50s spin-up.
-  #
-  # A DEPLOY ALSO RESTARTS THE PROCESS and is not a cold start, so a late boot is
-  # forgiven when a backend deploy ran after the window opened. Without that
-  # carve-out this would have failed on 2026-09-13, whose 16:00 UTC boot was
-  # deploy d8ff7259 at 15:57.
-  #
-  # KNOWN BLIND SPOT, stated so nobody reads more into a green tick than is there:
-  # `started_at` is the CURRENT boot only, so a cold start that has since been
-  # recovered is invisible unless it is recent. The two windows below are what the
-  # job can see — since 14:00 UTC (the morning failure this file exists for) and
-  # the last two hours (a cold start during play). The 00:00-07:00 UTC stretch is
-  # NOT covered, because a watchdog can only run when the scheduler runs it, and
-  # that is the same scheduler it is auditing. Closing it needs the Worker to
-  # record what it finds, not another cron here.
   warm-window-watchdog:
     if: >-
       github.event_name == 'workflow_dispatch'
@@ -180,63 +60,7 @@ jobs:
       || github.event.schedule == '13 21 * * *'
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions:
-      actions: read
     steps:
-      - name: The backend must have been warm when the play window opened
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          # 14:00 UTC = 7am PDT, the hour this whole file exists to protect.
-          open_utc=$(date -u -d "$(date -u +%Y-%m-%d) 14:00:00" +%s)
-          now=$(date -u +%s)
-          if [ "$now" -lt "$open_utc" ]; then
-            echo "The play window has not opened yet today; nothing to audit."
-            exit 0
-          fi
-
-          # A cold box holds this request through its own spin-up, so allow for it
-          # rather than timing out and reporting a failure as a warmth verdict.
-          health=$(curl -sS --fail --retry 5 --retry-delay 10 --retry-all-errors             --max-time 120 "https://splendid-nelz.onrender.com/health")
-          echo "health: $health"
-          started=$(printf '%s' "$health" | jq -r '.started_at // empty')
-          if [ -z "$started" ]; then
-            echo "::error::/health carried no started_at, so warmth cannot be measured."
-            echo "::error::core/build_info.py is what puts it there."
-            exit 1
-          fi
-          echo "backend booted $(date -u -d "@$started" +%Y-%m-%dT%H:%M:%SZ); window opened $(date -u -d "@$open_utc" +%Y-%m-%dT%H:%M:%SZ)"
-
-          # Two questions, because one boot time can only answer so much: was it up
-          # when play started, and has it gone cold since?
-          recent_cut=$(( now - 7200 ))
-          late_for_window=0; [ "$started" -gt "$open_utc" ] && late_for_window=1
-          booted_recently=0; [ "$started" -gt "$recent_cut" ] && booted_recently=1
-          if [ "$late_for_window" -eq 0 ] && [ "$booted_recently" -eq 0 ]; then
-            echo "Up since before the window opened, and no recent restart — the pingers did their job."
-            exit 0
-          fi
-          # `[ test ] && echo` as a STATEMENT returns the test's status, and under
-          # `set -e` a false test therefore exits the job — red, with no diagnosis
-          # and skipping the deploy carve-out below. Use `if`.
-          if [ "$late_for_window" -eq 1 ]; then echo "LATE: booted after the window opened."; fi
-          if [ "$booted_recently" -eq 1 ]; then echo "RECENT: booted within the last 2h — it went cold during play hours."; fi
-
-          # Late boot. A deploy is the one innocent explanation.
-          deployed=$(curl -sS --fail --retry 3 --retry-all-errors             -H "Authorization: Bearer $GH_TOKEN"             -H "Accept: application/vnd.github+json"             "https://api.github.com/repos/$REPO/actions/workflows/deploy-render.yml/runs?per_page=20"             | jq -r --argjson open "$open_utc"                 '[.workflow_runs[] | select((.created_at | fromdateiso8601) >= ($open - 900))] | length' || echo 0)
-          if [ "${deployed:-0}" -gt 0 ]; then
-            echo "Late boot, but a backend deploy ran after the window opened — that restarts the process. OK."
-            exit 0
-          fi
-
-          echo "--- scheduled keepalive firings in the last 24h (diagnosis, not the verdict) ---"
-          since=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
-          curl -sS --fail --retry 3 --retry-all-errors             -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json"             "https://api.github.com/repos/$REPO/actions/workflows/keepalive.yml/runs?per_page=100&event=schedule"             | jq -r --arg since "$since" '.workflow_runs[] | select(.created_at >= $since) | .created_at'             | sort | sed 's/^/  /' || true
-
-          echo "::error::The backend COLD-STARTED at $(date -u -d "@$started" +%H:%M)Z, inside play hours, with no deploy to explain it."
-          echo "::error::A player hitting the site before then waited out a ~50s spin-up. BOTH pingers missed this window:"
-          echo "::error::check the Cloudflare Worker first (npx wrangler tail, or /?force=1) since it is the reliable one,"
-          echo "::error::then the cron histogram printed above. See this file's header."
-          exit 1
+      - uses: actions/checkout@v4
+      - name: Verify backend health and recover if needed
+        run: python3 .github/scripts/keepalive.py
