@@ -1,6 +1,11 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 
 const actionKey = (entry) => JSON.stringify([entry.turn, entry.pid, entry.action, entry.parts]);
+// Keep every card flight and its stagger on the same 15% faster beat. Delays
+// are scaled here at the animation boundary so callers can continue describing
+// the intended choreography in readable milliseconds.
+const MOTION_RATE = 0.85;
+const scaleMs = (ms) => Math.round(ms * MOTION_RATE);
 const visible = (node) => node && node.getBoundingClientRect().width > 0;
 const bounds = (node) => {
   const { left, top, width, height } = node.getBoundingClientRect();
@@ -113,7 +118,8 @@ export function useCardMotion({ game, catalog, myId, roomId, connected, surface 
       const size = Math.min(.3, Math.max(.12, to.width / width));
       // Draws enter entirely from off-screen left, at the settled hand height.
       // No pause on an existing card: travel straight to the final sorted slot.
-      const duration = draw ? 1500 : 1200;
+      const duration = scaleMs(draw ? 1500 : 1200);
+      const travelDelay = scaleMs(delay);
       const fromColumn = kind === "transfer" || kind === "exile";
       const startSize = fromColumn ? .3 : 1;
       const endSize = kind === "exile" ? .85 : size;
@@ -125,9 +131,9 @@ export function useCardMotion({ game, catalog, myId, roomId, connected, surface 
         { transform: `translate(${dx * .45}px, ${dy * .45 - 28}px) scale(${fromColumn ? .85 : .68}) rotate(-4deg)`, opacity: 1, offset: .45 },
         { opacity: .95, offset: .82 },
         { transform: `translate(${dx}px, ${dy}px) scale(${endSize}) rotate(0deg)`, opacity: 0 },
-      ], { duration, delay, easing: draw ? "linear" : "cubic-bezier(.4,0,.2,1)", fill: "both" });
+      ], { duration, delay: travelDelay, easing: draw ? "linear" : "cubic-bezier(.4,0,.2,1)", fill: "both" });
       const arrival = reveal?.animate([{ opacity: 0 }, { opacity: 0, offset: .99 }, { opacity: 1 }],
-        { duration, delay, fill: "both" });
+        { duration, delay: travelDelay, fill: "both" });
       const finish = () => {
         running.current.delete(finish);
         animation.cancel(); arrival?.cancel(); ghost.remove();

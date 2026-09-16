@@ -21,6 +21,13 @@ const SITE_NAME = "Forrest Games";
 // shared/accents.js, which stays the single source for the colour.
 const GAMES = GAME_CATALOG;
 
+// Work-in-progress games stay in the shared catalogue so their lobbies and
+// identity bands keep one source of truth, but the landing menu exposes them
+// only to administrators. Direct routes are intentionally left unchanged.
+const visibleGames = (authUser) => authUser?.is_admin
+	? GAMES
+	: GAMES.filter((game) => !game.adminOnly);
+
 // The three side features, drawn to the same three rules. Emoji were the old labels,
 // and an emoji is the one glyph a hand-set page cannot absorb: it arrives as a
 // different typeface, a different weight and often a different COLOUR SCHEME on every
@@ -122,6 +129,7 @@ export { SITE_NAME, GAMES, GAME_EMBLEM, HERO_RULE };
 
 export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles, onBooks, onBggFilter, onLogout }) {
 	// Built here rather than at module scope because each entry closes over a prop.
+	const games = visibleGames(authUser);
 	const extras = [
 		{ id: "puzzles", label: "Spender Puzzles", onClick: onPuzzles },
 		{ id: "books", label: "Books", onClick: onBooks },
@@ -156,7 +164,7 @@ export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles
 					</header>
 
 					<nav className="home-games" aria-label="Games">
-						{GAMES.map(gm => (
+						{games.map(gm => (
 							<button key={gm.id} className={`home-game-card ${gm.status}`} data-game={gm.id}
 								style={{ "--accent": gm.accent }}
 								onClick={() => onPickGame(gm.screen)}>

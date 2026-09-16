@@ -9,6 +9,10 @@ export function victoryCondition(game) {
 }
 
 const resourceName = (kind) => ({ credits: "Credits", zenithium: "Zenithium", influence: "influence" }[kind] || kind);
+// Resource-piece choreography follows the same 15% faster timing as Orbit's
+// card flights and CSS transitions.
+const MOTION_RATE = 0.85;
+const scaleMs = (ms) => Math.round(ms * MOTION_RATE);
 export function decisionCopy(task, agentName) {
   const remaining = Math.max(1, (Number(task.count) || 1) - (task.done || 0));
   const owner = task.owner === "self" || task.type === "exile_for_matching" ? "your" : "your opponent’s";
@@ -72,9 +76,10 @@ export function Resource({ kind, value, animate }) {
     const delta = value - previous.current;
     previous.current = value;
     if (!animate || !Number.isFinite(delta) || !delta) { setChange(null); return; }
-    const stagger = delta > 1 ? Math.min(150, 1800 / (delta - 1)) : 0;
+    const rawStagger = delta > 1 ? Math.min(150, 1800 / (delta - 1)) : 0;
+    const stagger = scaleMs(rawStagger);
     setChange({ delta, stagger, id: performance.now() });
-    const timer = setTimeout(() => setChange(null), Math.max(2800, 1250 + stagger * (delta - 1)));
+    const timer = setTimeout(() => setChange(null), scaleMs(Math.max(2800, 1250 + rawStagger * (delta - 1))));
     return () => clearTimeout(timer);
   }, [value, animate]);
   return <span className={`or-resource ${kind}`}>

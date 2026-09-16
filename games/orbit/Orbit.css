@@ -481,7 +481,7 @@
    block resolves to, so `color: var(--or-ink)` was quietly repainting the border
    over the `or-<planet>` class. The ink now lives on the children that need it.
    (the retired placed-Agent panel's count badge had the identical bug.) */
-.or-agent { display: flex; flex-direction: column; width: 145px; min-width: 145px; height: 184px; padding: .48rem; overflow: hidden; border: 2px solid currentColor; border-radius: 11px; background: linear-gradient(160deg, rgba(255,255,255,.13), rgba(13,15,31,.98) 36%); text-align: left; box-shadow: 0 7px 17px #0005; cursor: pointer; transition: transform .28s, box-shadow .28s; -webkit-tap-highlight-color: transparent; }
+.or-agent { display: flex; flex-direction: column; width: 145px; min-width: 145px; height: 184px; padding: .48rem; overflow: hidden; border: 2px solid currentColor; border-radius: 11px; background: linear-gradient(160deg, rgba(255,255,255,.13), rgba(13,15,31,.98) 36%); text-align: left; box-shadow: 0 7px 17px #0005; cursor: pointer; transition: transform .238s, box-shadow .238s; -webkit-tap-highlight-color: transparent; }
 .or-agent:focus { outline: none; }
 .or-agent:focus-visible { outline: 2px solid var(--or-card-tint, currentColor); outline-offset: 2px; }
 .or-agent.or-mercury { --or-card-tint: #a783cf; }
@@ -575,7 +575,7 @@
 .or-result { text-align: center; }
 .or-result > span { color: var(--lby-accent); font-size: .75rem; font-weight: 900; letter-spacing: .14em; text-transform: uppercase; }
 .or-status { grid-column: 1 / -1; display: flex; justify-content: center; align-items: center; gap: .65rem; padding: 1rem; color: var(--or-dim); }
-.or-spinner { width: 14px; height: 14px; border: 2px solid #ffffff22; border-top-color: var(--lby-accent); border-radius: 50%; animation: or-spin 1.6s linear infinite; }
+.or-spinner { width: 14px; height: 14px; border: 2px solid #ffffff22; border-top-color: var(--lby-accent); border-radius: 50%; animation: or-spin 1.36s linear infinite; }
 @keyframes or-spin { to { transform: rotate(360deg); } }
 
 /* ── The one detail modal ────────────────────────────────────────────────── */
@@ -678,7 +678,7 @@
   .or-tech-key { flex-wrap: nowrap; justify-content: center; min-width: 0; }
   .or-tech-key b { max-width: 6rem; font-size: .6rem; }
   .or-tech-toggle { display: inline-flex; align-items: center; gap: .28rem; padding: .28rem .4rem; border: 1px solid var(--or-line); border-radius: 6px; background: #202541; color: var(--or-ink); font: inherit; font-size: .6rem; font-weight: 800; cursor: pointer; }
-  .or-tech-toggle i { font-size: .75rem; font-style: normal; transition: transform .3s; }
+  .or-tech-toggle i { font-size: .75rem; font-style: normal; transition: transform .255s; }
   .or-tech:not(.collapsed) .or-tech-toggle i { transform: rotate(180deg); }
   .or-tech.collapsed .or-tech-body { display: none; }
   .or-tech.collapsed .or-tech-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -793,7 +793,9 @@
   .or-agent, .or-spinner { animation: none; transition: none; }
 }
 
-/* Crafted surfaces and state-driven motion, shared by both seats. */
+/* Crafted surfaces and state-driven motion, shared by both seats. Motion
+   durations are 85% of the original beat so the table feels 15% faster while
+   preserving the same easing and choreography. */
 .or-game { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 .or-game .or-table { --or-panel: linear-gradient(145deg, #1b2035f5, #101426f5); }
 .or-game::before { opacity: .14; }
@@ -801,20 +803,20 @@
 .or-resource-icon { display: inline-block; flex: none; width: 19px; height: 19px; vertical-align: middle; filter: drop-shadow(0 2px 2px #0005); }
 .or-resource.credits > b { color: #ffe1a1; }
 .or-resource.zenithium > b { color: #b0efff; }
-.or-resource-delta { position: absolute; z-index: 5; right: 0; top: 0; min-width: 26px; padding: 2px 5px; border-radius: 5px; background: #1c3542; border: 1px solid #8de7d7; color: #c6fff0; font: 800 12px/1.2 ui-sans-serif, sans-serif; text-align: center; pointer-events: none; animation: or-resource-change 1.8s both; }
+.or-resource-delta { position: absolute; z-index: 5; right: 0; top: 0; min-width: 26px; padding: 2px 5px; border-radius: 5px; background: #1c3542; border: 1px solid #8de7d7; color: #c6fff0; font: 800 12px/1.2 ui-sans-serif, sans-serif; text-align: center; pointer-events: none; animation: or-resource-change 1.53s both; }
 .or-resource:has(.or-resource-delta) > span { visibility: hidden; }
 .or-resource-delta.spent { color: #ffe0b7; background: #422e29; border-color: #bd9271; }
 @keyframes or-resource-change { 0% { opacity: 1; transform: translateY(4px); } 15%, 75% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; transform: translateY(-5px); } }
-.or-player { transition: background .6s, border-color .6s; }
+.or-player { transition: background .51s, border-color .51s; }
 .or-player-name { min-width: 0; }
 .or-player-name > span:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .or-player.active .or-seat-dot { box-shadow: 0 0 0 3px color-mix(in srgb, var(--or-seat) 15%, transparent), 0 0 12px color-mix(in srgb, var(--or-seat) 35%, transparent); }
 .or-leader.lv-2 { background: linear-gradient(140deg, #fff0bb, #dcb75e); border-color: #ffe0a0; }
 .or-leader.lv-1 { background: linear-gradient(140deg, #edf4ff, #9faec8); }
 .or-leader.lv-0 { color: #9ba4be; }
-.or-disc { left: var(--or-position); top: -9px; transition: left .65s cubic-bezier(.2,.75,.25,1), top .65s cubic-bezier(.2,.75,.25,1), opacity .25s; background: radial-gradient(circle at 33% 23%, #ffffffaa, transparent 48%), currentColor; box-shadow: 0 2px 5px #000a, 0 0 12px color-mix(in srgb, currentColor 25%, transparent); }
+.or-disc { left: var(--or-position); top: -9px; transition: left .5525s cubic-bezier(.2,.75,.25,1), top .5525s cubic-bezier(.2,.75,.25,1), opacity .2125s; background: radial-gradient(circle at 33% 23%, #ffffffaa, transparent 48%), currentColor; box-shadow: 0 2px 5px #000a, 0 0 12px color-mix(in srgb, currentColor 25%, transparent); }
 .or-disc.captured { opacity: 0; }
-.or-hand > .or-agent { animation: or-turn-arrive .3s ease-out; }
+.or-hand > .or-agent { animation: or-turn-arrive .255s ease-out; }
 @keyframes or-turn-arrive { from { opacity: .8; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
 .or-influence { background: radial-gradient(ellipse at 50% 0, #32405c26, transparent 75%), linear-gradient(145deg, #171c30, #101426) !important; }
 .or-bonus { background: radial-gradient(circle at 35% 25%, #967b34, #3a3019 50%, #18191d 72%); box-shadow: inset 0 0 0 2px #12151f, inset 0 0 0 3px #d6b24b66, 0 2px 4px #0009; }
@@ -833,12 +835,12 @@
 .or-agent.discarding:focus-visible { outline: 2px solid var(--or-card-tint, currentColor); }
 .or-hand { padding: .35rem .25rem .45rem; scroll-snap-type: x proximity; scrollbar-width: thin; scrollbar-color: #59617f #121629; }
 .or-hand > .or-agent { scroll-snap-align: start; }
-.or-action-bar button { min-height: 44px; transition: background .36s, box-shadow .36s, transform .36s; }
+.or-action-bar button { min-height: 44px; transition: background .306s, box-shadow .306s, transform .306s; }
 .or-action-bar button:not(:disabled) { background: linear-gradient(160deg, color-mix(in srgb, var(--lby-accent) 25%, #182336), #19313e); box-shadow: inset 0 1px #ffffff18, 0 3px 8px #0003; }
 .or-action-bar button:disabled { color: #8b93ad; background: #15192b; }
 .or-action-bar button:active:not(:disabled), .or-choice-grid button:active { transform: translateY(1px); box-shadow: inset 0 2px 6px #0005; }
 .orbit button:focus-visible { outline: 2px solid #b5f6ee; outline-offset: 3px; }
-.or-info { animation: or-turn-arrive .18s ease-out; }
+.or-info { animation: or-turn-arrive .153s ease-out; }
 .or-info-x { width: 44px; height: 44px; }
 @media (max-width: 980px) {
   .or-score-rail .or-player { padding: .62rem var(--or-board-pad); }
@@ -971,12 +973,12 @@
 }
 
 /* Physical pieces, quiet motion, and decisions that explain their purpose. */
-.or-disc { background: currentColor; border: 2px solid #eee9d9; box-shadow: 0 1px 2px #0008; transition: top 1.15s cubic-bezier(.2,.75,.25,1), left 1.15s cubic-bezier(.2,.75,.25,1), opacity .36s; }
-.or-disc.captured { transition: top 1.05s cubic-bezier(.2,.75,.25,1), left 1.05s cubic-bezier(.2,.75,.25,1), opacity .3s .72s; }
+.or-disc { background: currentColor; border: 2px solid #eee9d9; box-shadow: 0 1px 2px #0008; transition: top .9775s cubic-bezier(.2,.75,.25,1), left .9775s cubic-bezier(.2,.75,.25,1), opacity .306s; }
+.or-disc.captured { transition: top .8925s cubic-bezier(.2,.75,.25,1), left .8925s cubic-bezier(.2,.75,.25,1), opacity .255s .612s; }
 .or-disc.returning { transition: none; }
 .or-hand > .or-agent, .or-info { animation: none; }
 .or-resource:has(.or-resource-delta) > span { visibility: visible; }
-.or-resource-delta { top: -10px; right: 0; min-width: 0; padding: 0 3px; font-size: 10px; line-height: 11px; border: 0; animation: or-delta-fade 2.8s both; }
+.or-resource-delta { top: -10px; right: 0; min-width: 0; padding: 0 3px; font-size: 10px; line-height: 11px; border: 0; animation: or-delta-fade 2.38s both; }
 @keyframes or-delta-fade { 0%, 80% { opacity: 1; } 100% { opacity: 0; } }
 .or-decision { background: #172331 !important; border-color: #5baba780 !important; padding: .8rem !important; }
 .or-decision-source { display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem .5rem; margin-bottom: .4rem; font-size: .72rem; }
@@ -1186,7 +1188,7 @@
 
 /* Each confirmed gain drops one piece per unit onto the existing resource. */
 .or-resource-pieces { position: absolute; left: 0; top: 50%; width: 19px; height: 19px; margin-top: -9.5px; pointer-events: none; z-index: 6; }
-.or-resource-piece { position: absolute; inset: 0; animation: or-piece-stack 1.2s var(--or-piece-delay) cubic-bezier(.22,.7,.3,1) both; }
+.or-resource-piece { position: absolute; inset: 0; animation: or-piece-stack 1.02s var(--or-piece-delay) cubic-bezier(.22,.7,.3,1) both; }
 @keyframes or-piece-stack {
   0% { opacity: 0; transform: translate(var(--or-piece-x), -36px) rotate(-18deg) scale(.8); }
   18% { opacity: 1; }

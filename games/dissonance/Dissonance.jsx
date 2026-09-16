@@ -176,6 +176,11 @@ const MODES = [
   { id: "quartet", label: "Quartet", title: "Four hands, two players — you play the hand opposite you too, and keep three cards back" },
 ];
 const MODE_LABEL = { classic: "Classic", skat: "Skat", minor: "Minor", dummy: "Dummy", quartet: "Quartet" };
+// Classic and Dummy are public modes. The newer Skat, Minor, and Quartet
+// variants remain in the shared rules/catalogue for admin testing, but should
+// not appear in public lobbies while they are still being validated.
+const ADMIN_ONLY_MODE_IDS = new Set(["skat", "minor", "quartet"]);
+const PUBLIC_MODES = MODES.filter((mode) => !ADMIN_ONLY_MODE_IDS.has(mode.id));
 //: The dummy's index into the seat arrays. Positions are not seats: 0 and 1
 //: are the players, 2 is the hand the declarer also plays.
 const DUMMY_POS = 2;
@@ -1436,7 +1441,7 @@ function NeedsRow({ value, prefix, bases, maxLevel }) {
 // age, Dontminion's expansion sets — and it is set as text there rather than as a
 // second kind of chip. Classic carries no token at all; it is the default.
 function ModeBadge({ mode }) {
-  if (mode !== "skat" && mode !== "minor") return null;
+  if (!ADMIN_ONLY_MODE_IDS.has(mode)) return null;
   return <span className="lby-meta-extra"> · {MODE_LABEL[mode]}</span>;
 }
 
@@ -1520,11 +1525,26 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
   const [openGames, setOpenGames] = useState(() => readLobbyCache("dissonance", myId, "open", []));
   const [myGames, setMyGames] = useState(() => readLobbyCache("dissonance", myId, "mine", []));
   const [history, setHistory] = useState(() => readLobbyCache("dissonance", myId, "history", []));
-  const [historyShown, historyMore] = useProgressiveList(history);
+  const isAdmin = !!authUser?.is_admin;
+  const modeOptions = isAdmin ? MODES : PUBLIC_MODES;
+  const modeVisible = useCallback((mode) => isAdmin || !ADMIN_ONLY_MODE_IDS.has(mode), [isAdmin]);
+  const visibleOpenGames = useMemo(
+    () => openGames.filter((game) => modeVisible(game.mode)),
+    [openGames, modeVisible],
+  );
+  const visibleMyGames = useMemo(
+    () => myGames.filter((game) => modeVisible(game.mode)),
+    [myGames, modeVisible],
+  );
+  const visibleHistory = useMemo(
+    () => history.filter((game) => modeVisible(game.mode)),
+    [history, modeVisible],
+  );
+  const [historyShown, historyMore] = useProgressiveList(visibleHistory);
   // A column that scrolls inside itself must say so — see `useListFade`.
   useListFade();
   // A room still waiting for an opponent belongs in Open, not in progress.
-  const activeMine = notWaiting(myGames);
+  const activeMine = notWaiting(visibleMyGames);
   const [lobbyTab, setLobbyTab] = useState("open");
   const [loadingGames, setLoadingGames] = useState(false);
   const [connecting, setConnecting] = useState(false);
@@ -1541,6 +1561,11 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
   const [bidLevel, setBidLevel] = useState(null);
   const [bidDenom, setBidDenom] = useState(null);
   const [newMode, setNewMode] = useState("classic");
+  // If an admin logs out while this lobby stays mounted, do not leave a
+  // restricted mode selected in the public create modal.
+  useEffect(() => {
+    if (!modeOptions.some((mode) => mode.id === newMode)) setNewMode("classic");
+  }, [modeOptions, newMode]);
   // Create-modal selections. Deferred until "Create Game" rather than firing on
   // the option click — the shape every other game's modal uses.
   const [createOpp, setCreateOpp] = useState("ai");
@@ -2174,10 +2199,10 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
     }
     const openCol = (
       <div className="lby-col-open">
-        <LobbySectionHd title="Open Games" note={`${openGames.length} waiting`} />
+        <LobbySectionHd title="Open Games" note={`${visibleOpenGames.length} waiting`} />
         <div className="lby-list">
-          {openGames.length === 0 && <LobbyEmpty>No open games — create one.</LobbyEmpty>}
-          {openGames.map((g) => (
+          {visibleOpenGames.length === 0 && <LobbyEmpty>No open games — create one.</LobbyEmpty>}
+          {visibleOpenGames.map((g) => (
             <div key={g.id} className="lby-card">
               <div className="lby-card-info">
                 <div className="lby-card-title">
@@ -2233,9 +2258,9 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
     );
     const histCol = (
       <div className="lby-col-history">
-        <LobbySectionHd title="History" note={`${history.length} finished`} />
+        <LobbySectionHd title="History" note={`${visibleHistory.length} finished`} />
         <div className="lby-list" ref={historyMore}>
-          {history.length === 0 && <LobbyEmpty>No finished games yet.</LobbyEmpty>}
+          {visibleHistory.length === 0 && <LobbyEmpty>No finished games yet.</LobbyEmpty>}
           {historyShown.map((g) => {
             const line = histLine(g);
             return (
@@ -2307,9 +2332,9 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
             matched no rule, so the phone lobby showed all three sections at once
             and the bar did nothing at all. */}
         <LobbyTabs value={lobbyTab} onChange={setLobbyTab} tabs={[
-          { key: "open", label: "Open", count: openGames.length || null },
+          { key: "open", label: "Open", count: visibleOpenGames.length || null },
           { key: "active", label: "Active", count: activeMine.length || null },
-          { key: "history", label: "History", count: history.length || null },
+          { key: "history", label: "History", count: visibleHistory.length || null },
         ]} />
         <div className={`lby-cols tab-${lobbyTab}`}>
           {openCol}{activeCol}{histCol}
@@ -2333,7 +2358,7 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
             )}
             <CmRow label="Mode">
               <CmSeg value={newMode} onChange={setNewMode}
-                options={MODES.map((m) => ({ value: m.id, label: m.label, title: m.title }))} />
+                options={modeOptions.map((m) => ({ value: m.id, label: m.label, title: m.title }))} />
               <span className="cm-hint">
                 {newMode === "skat"
                   ? "Bid a number; name the game only after you win it. Then Hand, Sharp, Open — and their Kontra."

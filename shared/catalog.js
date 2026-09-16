@@ -12,6 +12,8 @@
  * The COLOUR is still `shared/accents.js` and is merged in here rather than copied:
  * `screens.mjs` holds a game's rendered `--lby-accent` against its home card, and
  * that gate is only meaningful while there is one source.
+ * `adminOnly` marks work-in-progress entries that remain in the catalogue for
+ * admin testing but are omitted from the public landing menu.
  *
  * ORDER IS THE MENU ORDER AND IS APPEND-ONLY — `webapp/test/screens.mjs` clicks
  * `.home-game-card` by INDEX.
@@ -25,9 +27,9 @@ export const GAME_CATALOG = [
 	{ id: "duel", name: "Spender Duel", status: "ready", screen: "duel", players: "1–2 players" },
 	{ id: "dontminion", name: "Dontminion", status: "ready", screen: "dontminion", players: "1–4 players" },
 	{ id: "dissonance", name: "Dissonance", status: "ready", screen: "dissonance", players: "1–2 players" },
-	{ id: "ragtag", name: "Rag Tag", status: "ready", screen: "ragtag", players: "1–2 players" },
+	{ id: "ragtag", name: "Rag Tag", status: "ready", adminOnly: true, screen: "ragtag", players: "1–2 players" },
 	{ id: "orbit", name: "Orbit", status: "ready", screen: "orbit", players: "1–2 players" },
-	{ id: "blackcastle", name: "Black Castle", status: "ready", screen: "blackcastle", players: "2–4 players" },
+	{ id: "blackcastle", name: "Black Castle", status: "ready", adminOnly: true, screen: "blackcastle", players: "2–4 players" },
 ].map((g) => ({ ...g, accent: GAME_ACCENTS[g.id] }));
 
 // Keyed lookup, for the lobbies — a lobby knows its own id and nothing else.

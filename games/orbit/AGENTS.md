@@ -814,7 +814,8 @@ The initial visual sign-off missed actual play problems. Do not repeat that:
   outgoing request or infers the opponent's hidden hand. Flights are temporary,
   inert copies; server state and input do not wait for them.
 - Draws enter from entirely off-screen left at the final hand height and travel
-  straight to their sorted slot (1500ms, staggered 230ms). The former pause on
+  straight to their sorted slot (1275ms, staggered ~196ms). Other card flights
+  use 1020ms. The former pause on
   the leftmost hand card covered an existing card on desktop and was removed.
   A recruit's destination is `column-<pid>-<planet>` — the played-Agent cell in
   that seat's player box, the one place a recruited Agent lands now.
@@ -826,10 +827,10 @@ The initial visual sign-off missed actual play problems. Do not repeat that:
   motion. `ORBIT_SHOTS=1` includes card-flight frames for visual inspection.
 
 
-### Slower motion and meaningful choices — 2026-09-15
+### Faster motion and meaningful choices — 2026-09-15
 
-- Card draws take 1500ms from off-screen left into sorted order; other card
-  flights take 1200ms. Measure draw
+- Card draws take 1275ms from off-screen left into sorted order; other card
+  flights take 1020ms. Both are 85% of the previous beat. Measure draw
   destinations after controls and mobile scroll anchoring settle (two animation
   frames). A selected card that left the hand must not render an empty action
   bar for one extra frame. Scroll/resize cancels active stale geometry, but a
