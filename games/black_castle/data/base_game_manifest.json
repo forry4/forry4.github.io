@@ -1,0 +1,38 @@
+{
+  "game": "The White Castle",
+  "digital_name": "The Black Castle",
+  "publisher_year": 2023,
+  "ruleset": "base-2023",
+  "expansion": false,
+  "player_count": [2, 4],
+  "rounds": 3,
+  "turns_per_player": 9,
+  "influence_checkpoints": {"6": 1, "10": 2, "11": 3},
+  "bridges": 3,
+  "dice_per_colour": {"2": 3, "3": 4, "4": 5},
+  "components": {
+    "player_aids": 4,
+    "starting_action_cards": 6,
+    "starting_resource_cards": 9,
+    "decree_cards": 3,
+    "steward_cards": 15,
+    "diplomat_cards": 12,
+    "daimyo_cards": 9,
+    "plant_gardens": 5,
+    "stone_gardens": 5,
+    "training_yards": 8,
+    "die_tiles": 15,
+    "yard_tiles": 8
+  },
+  "sources": [
+    "the-white-castle_Official-Rules.pdf (attached rulebook, rendered for review)",
+    "https://devir.world/thewhitecastle/components_ENG.html",
+    "https://www.yucata.de/en/Rules/WhiteCastle",
+    "https://cmonjapan.shop/en/products/the-white-castle"
+  ],
+  "validation": {
+    "status": "initial port",
+    "bga_parity": "planned after launch",
+    "notes": "Illustrations are intentionally original; card effects are data-driven so a BGA fixture diff can replace individual definitions without changing the engine contract."
+  }
+}

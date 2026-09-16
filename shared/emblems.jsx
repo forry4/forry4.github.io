@@ -57,6 +57,8 @@ const GAME_EMBLEM = {
 	// A planet and its tilted orbital path — five worlds moving around one
 	// centre, reduced to the one relationship that survives at menu size.
 	orbit: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><circle cx="12" cy="12" r="3.1" /><ellipse cx="12" cy="12" rx="8.3" ry="4.2" transform="rotate(-24 12 12)" /><circle cx="18.3" cy="7.9" r="1.1" fill="currentColor" stroke="none" /></svg>),
+	// A gate beneath the night moon — Black Castle's wood-and-lantern keep.
+	blackcastle: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><path d="M4.5 19.5V9.8l3.1-2.2 2.2 1.5 2.2-1.5 2.2 1.5 2.2-1.5 3.1 2.2v9.7Z" /><path d="M9 19.5v-4.2h6v4.2M3.5 11.3h17M8 5.3h8" /></svg>),
 };
 
 export { GAME_EMBLEM };

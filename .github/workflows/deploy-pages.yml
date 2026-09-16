@@ -27,6 +27,7 @@ on:
       - 'games/dissonance/**'
       - 'games/rag_tag/**'
       - 'games/orbit/**'
+      - 'games/black_castle/**'
       - 'books/**'
       - 'bggfilter/**'
       - 'shared/**'

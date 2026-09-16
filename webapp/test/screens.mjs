@@ -48,6 +48,7 @@ const SCREENS = [
 	{ path: "/dissonance", chunk: "Dissonance", marker: ".dis" },
 	{ path: "/ragtag", chunk: "RagTag", marker: ".ragtag" },
 	{ path: "/orbit", chunk: "Orbit", marker: ".orbit" },
+	{ path: "/blackcastle", chunk: "BlackCastle", marker: ".blackcastle" },
 	{ path: "/books", chunk: "Books", marker: ".bk-app" },
 	{ path: "/bggfilter", chunk: "BggFilter", marker: ".bgf" },
 ];
@@ -759,6 +760,7 @@ try {
 			{ id: "dissonance", path: "/dissonance", marker: ".dis" },
 			{ id: "ragtag", path: "/ragtag", marker: ".ragtag" },
 			{ id: "orbit", path: "/orbit", marker: ".orbit" },
+			{ id: "blackcastle", path: "/blackcastle", marker: ".blackcastle" },
 		];
 		// Every game in the catalogue must be listed, or a new one joins unmeasured —
 		// the roster is derived, not hand-kept.
@@ -1095,7 +1097,7 @@ try {
 			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
 		};
 
-		for (const route of ["/spender", "/coc", "/werewolf", "/duel", "/dontminion", "/dissonance", "/ragtag", "/orbit"]) {
+		for (const route of ["/spender", "/coc", "/werewolf", "/duel", "/dontminion", "/dissonance", "/ragtag", "/orbit", "/blackcastle"]) {
 			await page.goto(`http://localhost:${PORT}${route}`, { waitUntil: "networkidle" });
 			await page.waitForSelector(".lby-rules", { timeout: 25_000 }).catch(() => {});
 			const hasBtn = await page.locator(".lby-rules").count().catch(() => 0);
@@ -7439,6 +7441,80 @@ try {
 		await ctx.close();
 	}
 
+	// ── Black Castle: create a three-seat table and complete one human turn ────
+	// This is intentionally a short vertical slice. The route mount above catches
+	// lazy-chunk regressions; this block catches the real websocket handshake, the
+	// persisted starting draft, two server Easy bots, die placement, End Turn, and
+	// the responsive board shell. It retries the first visible choice while a bot
+	// is drafting, because the reverse-order opening draft is part of the rules.
+	async function blackCastlePlay(log) {
+		const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "blackcastle-harness", name: "Moon Clan", guest: true })));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		page.on("console", (m) => { if (m.type() === "error") errors.push(`console: ${m.text()}`); });
+		const check = (name, cond, detail = "") => {
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(`blackcastle: ${name}`); log(`  FAIL ${name}  ${detail}`); }
+		};
+		await page.goto(`http://localhost:${PORT}/blackcastle`, { waitUntil: "networkidle" });
+		await page.waitForSelector(".blackcastle .lby-create-row", { timeout: 25_000 }).catch(() => {});
+		check("Black Castle lobby reachable", await page.locator(".blackcastle .lby-create-row").count() > 0);
+		await page.locator(".blackcastle .lby-cta").click().catch(() => {});
+		await page.waitForSelector(".cm-panel", { timeout: 10_000 }).catch(() => {});
+		check("Black Castle create modal opens", await page.locator(".cm-panel").count() > 0);
+		await page.locator(".cm-create").click().catch(() => {});
+		check("three-seat table renders", await page.waitForSelector(".bc-game-hero", { timeout: 30_000 }).then(() => true).catch(() => false));
+		check("two Easy bot seats are visible", await page.locator(".bc-player").count() >= 3, `${await page.locator(".bc-player").count()} panels`);
+		// The host may be second or third in the reverse draft. Re-submit a legal
+		// first option until the server accepts our turn; stale attempts are harmless.
+		for (let i = 0; i < 18 && await page.locator(".bc-draft-grid button").count(); i++) {
+			await page.locator(".bc-draft-grid button").first().click().catch(() => {});
+			await sleep(350);
+		}
+		check("the starting draft resolves", await page.waitForSelector(".bc-board", { timeout: 30_000 }).then(() => true).catch(() => false));
+		let clickedDie = false;
+		for (let i = 0; i < 40 && !clickedDie; i++) {
+			const die = page.locator(".bc-bridge .bc-die:not([disabled])").first();
+			if (await die.count()) { await die.click().catch(() => {}); clickedDie = true; }
+			else await sleep(350);
+		}
+		check("a human turn can take an end die", clickedDie);
+		const choices = await page.waitForSelector(".bc-choice-grid button", { timeout: 15_000 }).then(() => true).catch(() => false);
+		check("die placement choices appear", choices);
+		if (choices) {
+			await page.locator(".bc-choice-grid button").first().click().catch(() => {});
+			await page.locator(".bc-choice-grid button", { hasText: "End Turn" }).click().catch(() => {});
+		}
+		check("the castle has a chronicle", await page.locator(".bc-log p").count() > 0);
+		// The board is designed around the two product desktop targets and a
+		// narrow phone. Check the page shell at each size so a future card or
+		// animation cannot reintroduce document-level horizontal scrolling.
+		for (const viewport of [{ width: 2560, height: 1600 }, { width: 1920, height: 1080 }, { width: 390, height: 844 }]) {
+			await page.setViewportSize(viewport);
+			const geometry = await page.evaluate(() => {
+				const shell = document.querySelector(".bc-game-shell");
+				const board = document.querySelector(".bc-board");
+				const rooms = document.querySelector(".bc-rooms");
+				return {
+					viewport: innerWidth,
+					scrollWidth: document.documentElement.scrollWidth,
+					shellRight: shell?.getBoundingClientRect().right || 0,
+					boardWidth: board?.getBoundingClientRect().width || 0,
+					roomsScroll: rooms ? rooms.scrollWidth > rooms.clientWidth : false,
+				};
+			});
+			check(`${viewport.width}px Black Castle stays inside the viewport`,
+				geometry.scrollWidth <= viewport.width + 1 && geometry.shellRight <= viewport.width + 1,
+				JSON.stringify(geometry));
+			if (viewport.width <= 760) check("phone castle rooms scroll inside the board", geometry.roomsScroll, JSON.stringify(geometry));
+		}
+		check("no page errors in Black Castle play", errors.length === 0, errors[0]?.slice(0, 180) || "");
+		await ctx.close();
+	}
+
 	const laneA = [offlineSpender, offlineCoc, offlineDuel, offlineDissonance,
 		dissonanceSkat, dissonanceHard, dissonanceBeat, ragtagFight];
 	// `dissonanceQuartet` is lane B: it plays a whole game but arms NO worker
@@ -7447,7 +7523,7 @@ try {
 	const laneB = [routeMounts, shellNav, authScreen, homeScreen, spenderPlayTurn, spenderWaitingRoom,
 		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, historyRecovery, dmAdventures,
 		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, lastDifficulty,
-		dissonanceQuartet, orbitPlay, lobbyFinishSync];
+		dissonanceQuartet, orbitPlay, lobbyFinishSync, blackCastlePlay];
 
 	// EVERY BLOCK MUST BE IN A LANE. Before the lanes existed, adding a block meant
 	// writing it — it then ran because it was simply the next statement. Now it has

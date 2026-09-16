@@ -34,6 +34,7 @@ export const GAME_ACCENTS = {
 	dissonance: "#6fe0a0",
 	ragtag: "#e8663c",
 	orbit: "#42d1c7",
+	blackcastle: "#d5ae62",
 };
 
 // Titles that do not clear the 4.5:1 AA floor on the card, and are shipped anyway

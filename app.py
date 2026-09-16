@@ -158,3 +158,12 @@ try:
     LOG.info("mounted Orbit at /orbit")
 except Exception as _orbit_err:  # pragma: no cover - optional package
     LOG.warning("Orbit not mounted: %s", _orbit_err)
+
+# Black Castle — base-game Himeji worker placement, mounted separately so its
+# room protocol and persistence remain isolated from the shared site shell.
+try:
+    from games.black_castle.main import blackcastle_app
+    app.mount("/blackcastle", blackcastle_app)
+    LOG.info("mounted Black Castle at /blackcastle")
+except Exception as _blackcastle_err:  # pragma: no cover - optional package
+    LOG.warning("Black Castle not mounted: %s", _blackcastle_err)

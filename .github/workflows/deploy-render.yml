@@ -42,6 +42,9 @@ on:
       # reached the server. A game added to app.py must be added here in the same
       # push; the symptom is silence, not a red run.
       - 'games/orbit/**/*.py'
+      # Black Castle — server-authoritative engine, room protocol, and base
+      # catalogue. Tools/tests stay excluded by the trailing patterns below.
+      - 'games/black_castle/**/*.py'
       # ...but NOT its offline halves, for the same reason ai/offline is excluded
       # above: tools/ is the BGA audit stack, and most of ai/ is the Phase 1
       # simulator, the league and the training stack. Eight of those 22 commits
