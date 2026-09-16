@@ -21,10 +21,11 @@
  * uses this for a game-only release, while any shared change keeps the full gate.
  */
 import { spawn, spawnSync } from "node:child_process";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { chromium } from "playwright";
+import { linuxNumericFont } from "./font-profiles.mjs";
 // The accent contract lives in ONE place; this gate reads it rather than re-listing it.
 import { GAME_ACCENTS, ACCENT_AA_EXEMPT } from "../../shared/accents.js";
 
@@ -32,6 +33,8 @@ const webappDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 const repoRoot = path.resolve(webappDir, "..");
 const PORT = 5173;            // CORS-allowlisted; see above
 const API_PORT = 8000;
+const resultsDir = path.join(webappDir, "test-results", "screens");
+mkdirSync(resultsDir, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const onlyArg = process.argv.find((arg) => arg.startsWith("--only="));
 const ONLY_BLOCKS = (onlyArg?.slice("--only=".length) || process.env.SCREENS_ONLY || "")
@@ -5298,9 +5301,11 @@ try {
 		for (const fn of blocks) {
 			const buf = [];
 			const t0 = Date.now();
+			let blockError = null;
 			try {
 				await fn((s) => buf.push(s));
 			} catch (e) {
+				blockError = String(e?.stack || e);
 				// A block that throws must not take its LANE down with it: the other
 				// blocks still have findings, and losing them turns one broken selector
 				// into a run that proved nothing. Recorded as a failure, so the gate is
@@ -5308,6 +5313,11 @@ try {
 				buf.push(`  FAIL ${fn.name} threw: ${String(e?.message || e).slice(0, 200)}`);
 				shell.push(`${fn.name} threw`);
 			} finally {
+				writeFileSync(path.join(resultsDir, `${fn.name}.json`), JSON.stringify({
+					block: fn.name, durationMs: Date.now() - t0, platform: process.platform,
+					browser: browser.version(), dealSeed: process.env.GAMES_DEAL_SEED || "screens-1",
+					error: blockError, checks: buf,
+				}, null, 2));
 				console.log([`── ${fn.name} (${((Date.now() - t0) / 1000).toFixed(1)}s)`,
 					...buf].join("\n"));
 				// ON CI, ALSO EMIT EACH FAILURE AS A WORKFLOW ANNOTATION. The run log
@@ -6797,6 +6807,28 @@ try {
 					&& JSON.stringify(empty.cells) === JSON.stringify(filled.cells)
 					&& filled.spills === 0 && filled.clearance >= 2,
 					JSON.stringify({ empty, filled }));
+				if (viewport.width === 320 && count === 18) {
+					// Keep the native-font check above, then exercise the actual Linux
+					// metrics that failed after passing on Windows. No extra backend,
+					// game, or CI rerun: only this settled position changes font.
+					const font = await linuxNumericFont(page, ".or-played-quantity, .or-played-cost");
+					try {
+						const linux = await slotGeometry();
+						const fits = linux.rows.length === 2 && linux.cells.length === 10
+							&& JSON.stringify(empty.rows) === JSON.stringify(linux.rows)
+							&& JSON.stringify(empty.cells) === JSON.stringify(linux.cells)
+							&& linux.spills === 0 && Number.isFinite(linux.clearance) && linux.clearance >= 2;
+						check("320px Linux font: 18 played Agents and two-digit prices fit", fits,
+							JSON.stringify({ empty, native: filled, linux }));
+						writeFileSync(path.join(resultsDir, "orbit-linux-font.json"), JSON.stringify({ empty, native: filled, linux }, null, 2));
+						if (!fits || process.env.ORBIT_SHOTS) {
+							writeFileSync(path.join(resultsDir, "orbit-linux-font.html"), await page.content());
+							await page.screenshot({ path: path.join(resultsDir, "orbit-linux-font.png"), fullPage: true });
+						}
+					} finally {
+						await font.evaluate((el) => el.remove());
+					}
+				}
 			}
 		}
 		for (const [pid, columns] of Object.entries(savedColumns)) gameView.players[pid].columns = columns;

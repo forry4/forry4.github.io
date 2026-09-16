@@ -474,6 +474,12 @@ covers the logic; each game's wiring is one line).
   skip forms plus a comment-only mention.
 - **CI runs `core/tests/` first; Render deploy is gated on tests.** Frontend deploy is gated by
   `npm run smoke` AND `npm run screens`.
+- **Numeric layout checks must cover the Linux font on Windows too.** The Orbit
+  320px/18-Agent check uses the normal font, then the pinned DejaVu Sans Bold fixture
+  via `webapp/test/font-profiles.mjs`. The helper verifies its glyph metrics before
+  measuring, so a failed font load cannot silently pass with a local fallback.
+  Keep the native-font check as well. Failed Pages gates upload per-block JSON
+  reports; the Linux numeric check also saves its HTML and screenshot on failure.
 - **`npm run smoke` NEVER RENDERS A GAME — don't mistake it for render coverage.** The shell pings the
   backend before it routes, and smoke has no backend, so all three of its routes sit on the loading
   screen. It genuinely catches a blank page, a bundle that throws at load, and layout shift. That is all.

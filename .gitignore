@@ -13,6 +13,9 @@ __pycache__/
 # Claude Code per-machine local dir (settings.local.json + harness scratch worktrees/builds)
 .claude/
 
+# Codex local alternate worktrees (registered separately with git worktree)
+.worktrees/
+
 # Env files
 .env
 

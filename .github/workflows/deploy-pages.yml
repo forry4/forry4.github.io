@@ -182,6 +182,15 @@ jobs:
             npm run screens
           fi
 
+      - name: Save failed render-gate measurements
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screens-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: webapp/test-results/screens/
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Validation summary
         if: always()
         run: |

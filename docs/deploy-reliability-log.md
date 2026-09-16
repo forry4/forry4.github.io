@@ -10,6 +10,38 @@ than re-argued.
 
 ---
 
+## 2026-09-14 — reproduce the runner's font before the next push
+
+The latest failed deployment was [Pages #828](https://github.com/forry4/forry4.github.io/actions/runs/34797488411),
+at `baebb007`: Orbit's 320px, 18-Agent check reported two spills and 0.953125px
+clearance. The publish job never ran. `259c2562` fixed the layout; Pages
+#829–#832 and the latest Render deploy (#432) subsequently succeeded. Both live
+`version.json` and backend `/health` reported `9dbc9517` during this investigation.
+
+The remaining prevention gap was local reproduction. A clearance assertion still
+measures only the installed font. `screens.mjs` now measures the same widest
+position again with a pinned, test-only DejaVu Sans Bold font on every platform.
+The helper checks the font's actual digit width before applying it, so a missing
+fixture cannot silently turn into the same Windows fallback that missed the bug.
+The native-font check stays in place; the font adds no production bytes or runtime
+dependency. Each block also writes its measurements, browser version, deal seed,
+and full exception to JSON; Pages uploads those reports on failure. The Linux
+numeric check saves its HTML and screenshot if it fails.
+
+Validation: smoke and the full screen suite passed on Windows. Replaying
+`baebb007`'s stylesheet against the saved 320px position with the pinned font
+reproduced the CI result exactly: **2 spills, 0.953125px clearance**. The current
+stylesheet produced **0 spills, 2.90625px clearance**. This proves the new check
+detects the historical failure without needing an Ubuntu runner.
+
+The newer [keepalive #850](https://github.com/forry4/forry4.github.io/actions/runs/34896541406)
+failure is separate: its watchdog reported a 16:54 UTC backend restart during
+play hours with no matching deployment. The expected Worker URL returned 404
+(Cloudflare error 1042) with a browser user agent. Neither Wrangler nor the
+available browser was signed in to Cloudflare, so the Worker's deployed state
+and cron activity could not be verified. A 404 alone does not establish that a
+cron is absent. This remains an access-dependent follow-up, not a resolved outage.
+
 ## 2026-09-13/14 — every Pages failure is one gate, and the daily keepalive alarm was real
 
 ### The census
