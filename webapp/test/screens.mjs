@@ -1128,6 +1128,18 @@ try {
 			check(`${route} lobby offers a Rules button`, hasBtn === 1, `count ${hasBtn}`);
 			if (!hasBtn) continue;
 
+			// ON ONE ROUTE, OPEN IT WITH requestAnimationFrame DEAD. Focus used to be
+			// taken in a rAF, which is what raced this gate red on CI while passing
+			// here every time — and rAF is throttled to a standstill in a background
+			// tab, so the same defect kept a real keyboard user outside the dialog for
+			// as long as the tab stayed hidden. A timing assertion cannot catch that;
+			// removing the frame entirely can. Stubbed around this one click only, so
+			// nothing else in the run loses its frames.
+			const noFrames = route === "/spender";
+			if (noFrames) await page.evaluate(() => {
+				window.__rAF = window.requestAnimationFrame;
+				window.requestAnimationFrame = () => 0;
+			});
 			await page.locator(".lby-rules").click({ timeout: 10_000 }).catch(() => {});
 			await page.waitForSelector(".rl-body", { timeout: 10_000 }).catch(() => {});
 			const geom = await page.evaluate(() => {
@@ -1151,20 +1163,38 @@ try {
 				`panel ${Math.round(geom.panelH)} view ${geom.viewH} scrolls ${geom.bodyScrolls}`);
 			check(`${route} rules keep the close button on screen`,
 				geom.doneBottom <= geom.viewH, `bottom ${Math.round(geom.doneBottom)}`);
-			const focusEntered = await page.evaluate(() => document.querySelector(".rl-panel")?.contains(document.activeElement));
-			check(`${route} rules receive keyboard focus`, focusEntered);
+			// WAIT for focus, do not SAMPLE it. Reading activeElement once raced the
+			// modal's own focus call and went red on 7 of 9 lobbies on CI while
+			// passing every time here; whether a check like that is green is a
+			// measure of the runner's load, not of the product. The wait is bounded,
+			// so a modal that never takes focus still fails — just not by luck.
+			const focusedIn = () => page.evaluate(() => {
+				const el = document.activeElement;
+				return { inPanel: !!document.querySelector(".rl-panel")?.contains(el),
+					active: el ? `${el.tagName.toLowerCase()}.${el.className || "(none)"}` : "(null)" };
+			});
+			await page.waitForFunction(() => document.querySelector(".rl-panel")?.contains(document.activeElement),
+				null, { timeout: 5_000 }).catch(() => {});
+			const entered = await focusedIn();
+			check(`${route} rules receive keyboard focus${noFrames ? " without an animation frame" : ""}`,
+				entered.inPanel, `active ${entered.active}`);
+			if (noFrames) await page.evaluate(() => { window.requestAnimationFrame = window.__rAF; });
 			await page.locator(".rl-done").focus();
 			await page.keyboard.press("Tab");
-			const focusWrapped = await page.evaluate(() => document.activeElement?.classList.contains("rl-x"));
-			check(`${route} rules trap keyboard focus`, focusWrapped);
+			const wrapped = await focusedIn();
+			check(`${route} rules trap keyboard focus`,
+				wrapped.active.includes("rl-x"), `Tab from .rl-done landed on ${wrapped.active}`);
 
 			await page.keyboard.press("Escape");
 			await page.waitForSelector(".rl-panel", { state: "detached", timeout: 5_000 })
 				.catch(() => {});
 			const stillOpen = await page.locator(".rl-panel").count().catch(() => 1);
 			check(`${route} rules close on Escape`, stillOpen === 0, `count ${stillOpen}`);
-			const focusRestored = await page.evaluate(() => document.activeElement?.classList.contains("lby-rules"));
-			check(`${route} rules restore focus after close`, focusRestored);
+			await page.waitForFunction(() => document.activeElement?.classList.contains("lby-rules"),
+				null, { timeout: 5_000 }).catch(() => {});
+			const restored = await focusedIn();
+			check(`${route} rules restore focus after close`,
+				restored.active.includes("lby-rules"), `focus returned to ${restored.active}`);
 		}
 
 		// PHONES: EVERY CONTROL IS REACHABLE. This replaces a pair of checks that

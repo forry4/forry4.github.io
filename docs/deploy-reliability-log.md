@@ -10,6 +10,59 @@ than re-argued.
 
 ---
 
+## 2026-09-17 — a raced assertion and a test that read one file
+
+`c10733c2` (the Black Castle UI redesign) went red on BOTH gates at once, for two
+unrelated reasons. Neither was a bug in what shipped.
+
+### Python CI #1105 — the menu check measured file layout, not the product
+
+    test_every_game_uses_the_shared_in_game_menu
+    AssertionError: these render a game board without the shared MENU: ['BlackCastle.jsx']
+
+Black Castle renders `<GameMenu` correctly. The redesign extracted its board into a
+sibling `BoardView.jsx`, and the test read exactly one file per game — the one
+holding `lby-cols`, which is the LOBBY. That roster is right for every other check
+in the file (they are all lobby questions by construction) and wrong for the only
+one about the game BOARD, which lives wherever a game puts it. The check now reads
+the game's whole JSX via `_game_frontend`. Verified non-vacuous by renaming the tag
+in `BoardView.jsx` and watching it go red.
+
+The transferable half: **a roster derived from the tree can still be derived at the
+wrong granularity.** This one was correctly not hardcoded, and still silently
+measured how a game chose to split its modules.
+
+### Pages #840 — the focus check sampled a race
+
+Eight annotations, all `rulesModal`: `receive keyboard focus` failed on 7 of the 9
+lobbies and `trap keyboard focus` on `/coc`. It passed here every time.
+
+The new `RulesModal` focus trap took focus inside a `requestAnimationFrame`; the
+gate read `document.activeElement` ONCE, right after the panel appeared. Locally
+the intervening round-trips covered the frame. On a two-lane CI runner they did
+not. Whether that check was green measured the runner's load, not the product.
+
+Fixed on both sides, because they are two different defects:
+- **The modal takes focus synchronously** in its effect. The panel is laid out by
+  then (it has no entry animation), so the frame bought nothing — and rAF is
+  throttled to a standstill in a background tab, which left a real keyboard user
+  outside an open dialog for as long as the tab stayed hidden, with focus still on
+  the Rules trigger behind the backdrop. The frame is kept as a second attempt only.
+- **The gate waits for the condition** instead of sampling it, bounded at 5s, so a
+  modal that never takes focus still fails — just not by luck.
+
+To keep the product half honest, the `/spender` pass now opens the modal with
+`requestAnimationFrame` stubbed dead and restores it straight after. A timing
+assertion cannot catch a frame that is merely late; removing the frame catches it
+outright. Verified by reverting the modal fix: `FAIL /spender rules receive keyboard
+focus without an animation frame — active button.lby-rules`.
+
+That detail string is the other lesson. All eight CI annotations read `no detail`,
+so the public annotation — the whole reason it is public — said only which check
+failed. Every focus check now names the element that actually held focus.
+
+---
+
 ## 2026-09-16 — the guard against the font gap had the font gap
 
 Pages [#837](https://github.com/forry4/forry4.github.io/actions/runs/35117138329)

@@ -610,7 +610,17 @@ export function RulesModal({ title = "How to play", onClose, closeLabel = "Got i
 		const focusable = () => [...(panel?.querySelectorAll(
 			'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 		) || [])].filter((el) => !el.hasAttribute("hidden") && el.getClientRects().length);
-		const focusFrame = requestAnimationFrame(() => focusable()[0]?.focus());
+		// TAKE FOCUS NOW, not on the next animation frame. The panel is already laid
+		// out when this effect runs (it has no entry animation), so deferring bought
+		// nothing and left a window where focus still sat on the Rules button BEHIND
+		// the backdrop — arbitrarily long in a background tab, where rAF is throttled
+		// to a stop. It also raced this modal's own render gate, which read
+		// activeElement once and went red on 7 of 9 lobbies on a loaded CI runner.
+		// The frame is kept only as a SECOND attempt, for a panel whose children
+		// mount a tick late; it no-ops once focus is already inside.
+		const takeFocus = () => { if (!panel?.contains(document.activeElement)) focusable()[0]?.focus(); };
+		takeFocus();
+		const focusFrame = requestAnimationFrame(takeFocus);
 		const onKey = (e) => {
 			if (e.key === "Escape") { e.preventDefault(); onCloseRef.current(); return; }
 			if (e.key !== "Tab") return;

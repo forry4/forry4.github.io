@@ -42,6 +42,20 @@ def _lobby_games() -> list[pathlib.Path]:
     return out
 
 
+def _game_frontend(jsx: pathlib.Path) -> str:
+    """Every JSX file a game ships, not just the one holding its lobby.
+
+    The other checks here are lobby-file questions by construction — the roster
+    IS "the file containing `lby-cols`". A contract about the game BOARD is not:
+    Black Castle's redesign moved its header into a sibling `BoardView.jsx` and
+    the menu check went red on a game that renders the menu correctly. A test
+    that reads one file per game silently measures how a game chose to split its
+    modules rather than what it renders.
+    """
+    return "\n".join(p.read_text(encoding="utf-8")
+                     for p in sorted(jsx.parent.glob("*.jsx")))
+
+
 def test_every_lby_class_a_game_uses_is_one_the_shared_sheet_defines():
     css = _shared_css()
     defined = set(re.findall(r"\.(lby-[a-z0-9-]+)", css))
@@ -144,9 +158,13 @@ def test_every_game_uses_the_shared_in_game_menu():
     without ever rendering it, which is the shape this catches. `LobbyHeader`
     takes a `menu` node for exactly this; `onBack`/`onRules` stay for the lobby,
     where a plain Back is right.
+
+    Read across the game's WHOLE frontend (see `_game_frontend`): a board lives
+    wherever the game puts it, and this asks whether the menu is rendered, not
+    which file renders it.
     """
     missing = [jsx.name for jsx in _lobby_games()
-               if "<GameMenu" not in jsx.read_text(encoding="utf-8")]
+               if "<GameMenu" not in _game_frontend(jsx)]
     assert not missing, (
         "these render a game board without the shared ☰ menu: " f"{missing}")
 

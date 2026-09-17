@@ -489,6 +489,16 @@ covers the logic; each game's wiring is one line).
   exactly like a successful load.
   Keep the native-font check as well. Failed Pages gates upload per-block JSON
   reports; the Linux numeric check also saves its HTML and screenshot on failure.
+- **A browser check must WAIT for its condition, never SAMPLE it once.** The rules-modal
+  focus checks read `document.activeElement` immediately after the panel appeared, against
+  a modal that took focus in a `requestAnimationFrame`: green here every time, red on 7 of
+  9 lobbies on CI (Pages #840). A one-shot read of an async condition measures the runner's
+  load, not the product. Bound the wait so a thing that never happens still fails.
+  **And do not let the product depend on a frame either** — rAF is throttled to a standstill
+  in a background tab, so that same defect kept a keyboard user outside an open dialog with
+  focus on the trigger behind the backdrop. The `/spender` rules pass opens the modal with
+  `requestAnimationFrame` stubbed dead, because a timing assertion cannot tell a frame that
+  is late from one that never comes.
 - **`npm run smoke` NEVER RENDERS A GAME — don't mistake it for render coverage.** The shell pings the
   backend before it routes, and smoke has no backend, so all three of its routes sit on the loading
   screen. It genuinely catches a blank page, a bundle that throws at load, and layout shift. That is all.
