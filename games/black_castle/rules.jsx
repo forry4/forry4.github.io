@@ -8,20 +8,20 @@ export default function BlackCastleRules() {
         most points when the castle closes.</p>
     </RulesSection>
     <RulesSection title="Setup">
-      <p>Each table uses the standard base game: three bridges of coral, black, and
-        white dice; five castle rooms; gardens, training yards, and a Daimyo card.
+      <p>Each table uses the standard base game: three bridges of coral, obsidian (black), and
+        ivory (white) dice; five castle rooms; gardens, training yards, and a Daimyo card.
         Starting resource and action pairs are drafted in reverse Heron order.</p>
       <RulesTip>Black Castle supports any 2–4 seats. A room can be filled with one
         human and up to three Easy random bots.</RulesTip>
     </RulesSection>
     <RulesSection title="Your turn">
       <RulesDefs items={[
-        { t: "1. Take a die", d: "Choose a die from either end of any bridge. The nearest die slides toward the open end." },
-        { t: "2. Place it", d: "Use a castle room, the Well, Outside the Walls, or your personal domain. Compare the die with the printed value: gain the difference when higher, or pay it when lower." },
+        { t: "1. Take a die", d: "Choose a die from either end of any bridge. A low (left) die also activates all your lantern rewards when placed. A high (right) die does not." },
+        { t: "2. Place it", d: "Choose a highlighted castle room, the Well, Outside the Walls, or your domain. The preview shows the active effect and coin cost: gain the difference above the base value, or pay it below. Confirm to place your die." },
         { t: "3. Resolve actions", d: "Activate the room, worker, resource, lantern, or Well benefit shown by the destination. Then press End Turn." },
       ]} />
-      <p>Dice in your personal domain are colour-coded: coral moves Courtiers,
-        black moves Gardeners, and white moves Warriors. Resources are capped at
+      <p>Your domain gives one resource plus the light action of your domain card:
+        coral gives food, obsidian gives iron, and ivory gives pearl. Resources are capped at
         seven; seals are capped at five.</p>
     </RulesSection>
     <RulesSection title="Workers and spaces">

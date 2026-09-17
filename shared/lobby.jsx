@@ -601,15 +601,37 @@ export const rulesModalCss = _rulesModalCssText;
 
 export function RulesModal({ title = "How to play", onClose, closeLabel = "Got it",
 	icon = RULES_GLYPH, children }) {
+	const panelRef = useRef(null);
+	const onCloseRef = useRef(onClose);
+	useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
 	useEffect(() => {
-		const onKey = (e) => { if (e.key === "Escape") onClose(); };
+		const previouslyFocused = document.activeElement;
+		const panel = panelRef.current;
+		const focusable = () => [...(panel?.querySelectorAll(
+			'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+		) || [])].filter((el) => !el.hasAttribute("hidden") && el.getClientRects().length);
+		const focusFrame = requestAnimationFrame(() => focusable()[0]?.focus());
+		const onKey = (e) => {
+			if (e.key === "Escape") { e.preventDefault(); onCloseRef.current(); return; }
+			if (e.key !== "Tab") return;
+			const items = focusable();
+			if (!items.length) { e.preventDefault(); panel?.focus(); return; }
+			const first = items[0];
+			const last = items[items.length - 1];
+			if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+			else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+		};
 		document.addEventListener("keydown", onKey);
-		return () => document.removeEventListener("keydown", onKey);
-	}, [onClose]);
+		return () => {
+			cancelAnimationFrame(focusFrame);
+			document.removeEventListener("keydown", onKey);
+			if (previouslyFocused instanceof HTMLElement && document.contains(previouslyFocused)) previouslyFocused.focus();
+		};
+	}, []);
 	return (
 		<div className="rl-backdrop" onClick={onClose}>
 			<div className="rl-panel" role="dialog" aria-modal="true" aria-label={title}
-				onClick={(e) => e.stopPropagation()}>
+				ref={panelRef} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
 				<div className="rl-head">
 					<div className="rl-title"><span className="rl-title-ic" aria-hidden="true">{icon}</span>{title}</div>
 					<button type="button" className="rl-x" aria-label="Close" onClick={onClose}>✕</button>

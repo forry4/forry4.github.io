@@ -1098,7 +1098,7 @@ try {
 
 	// ── The shared lobby Rules button + how-to-play modal ─────────────────────
 	// One kit, every lobby — so it is worth driving all of them rather than one. The
-	// three contracts that regress silently:
+	// four contracts that regress silently:
 	//   1. every lobby actually PASSES onRules (the button is opt-in, so a game
 	//      that forgets it renders a perfectly fine lobby with no way in);
 	//   2. the BODY is the scroller, not the page — `.rl-body` has min-height:0
@@ -1107,6 +1107,8 @@ try {
 	//      this modal used to have);
 	//   3. on a phone the create row SCROLLS SIDEWAYS instead of wrapping, and
 	//      the page itself must not scroll sideways with it.
+	//   4. keyboard focus enters the dialog, stays trapped there, and returns to
+	//      the Rules trigger after Escape closes it.
 	async function rulesModal(log) {
 		const ctx = await browser.newContext();
 		await ctx.addInitScript(() => localStorage.setItem("spender_user",
@@ -1149,12 +1151,20 @@ try {
 				`panel ${Math.round(geom.panelH)} view ${geom.viewH} scrolls ${geom.bodyScrolls}`);
 			check(`${route} rules keep the close button on screen`,
 				geom.doneBottom <= geom.viewH, `bottom ${Math.round(geom.doneBottom)}`);
+			const focusEntered = await page.evaluate(() => document.querySelector(".rl-panel")?.contains(document.activeElement));
+			check(`${route} rules receive keyboard focus`, focusEntered);
+			await page.locator(".rl-done").focus();
+			await page.keyboard.press("Tab");
+			const focusWrapped = await page.evaluate(() => document.activeElement?.classList.contains("rl-x"));
+			check(`${route} rules trap keyboard focus`, focusWrapped);
 
 			await page.keyboard.press("Escape");
 			await page.waitForSelector(".rl-panel", { state: "detached", timeout: 5_000 })
 				.catch(() => {});
 			const stillOpen = await page.locator(".rl-panel").count().catch(() => 1);
 			check(`${route} rules close on Escape`, stillOpen === 0, `count ${stillOpen}`);
+			const focusRestored = await page.evaluate(() => document.activeElement?.classList.contains("lby-rules"));
+			check(`${route} rules restore focus after close`, focusRestored);
 		}
 
 		// PHONES: EVERY CONTROL IS REACHABLE. This replaces a pair of checks that
@@ -7519,13 +7529,21 @@ try {
 		await page.locator(".cm-create").click().catch(() => {});
 		check("three-seat table renders", await page.waitForSelector(".bc-game-hero", { timeout: 30_000 }).then(() => true).catch(() => false));
 		check("two Easy bot seats are visible", await page.locator(".bc-player").count() >= 3, `${await page.locator(".bc-player").count()} panels`);
-		// The host may be second or third in the reverse draft. Re-submit a legal
-		// first option until the server accepts our turn; stale attempts are harmless.
-		for (let i = 0; i < 18 && await page.locator(".bc-draft-grid button").count(); i++) {
-			await page.locator(".bc-draft-grid button").first().click().catch(() => {});
+		// The host may be second or third in the reverse draft. Select and confirm
+		// the first available pair whenever it is the human seat's turn.
+		for (let i = 0; i < 18 && await page.locator(".bc-draft-grid").count(); i++) {
+			const pair = page.locator(".bc-draft-pair:not([disabled])").first();
+			if (await pair.count()) {
+				await pair.click().catch(() => {});
+				await page.locator(".bc-draft-confirm .bc-primary:not([disabled])").click().catch(() => {});
+			}
 			await sleep(350);
 		}
 		check("the starting draft resolves", await page.waitForSelector(".bc-board", { timeout: 30_000 }).then(() => true).catch(() => false));
+		check("castle cards explain their effects", await page.locator(".bc-card-action .bc-effects li").count() >= 5);
+		check("training yards are visible", await page.locator(".bc-yard").count() === 4);
+		check("influence and turn order are visible", await page.locator(".bc-influence-list > div").count() >= 3);
+		check("the player's lantern rewards are visible", await page.locator(".bc-lantern > div > span").count() > 0);
 		let clickedDie = false;
 		for (let i = 0; i < 40 && !clickedDie; i++) {
 			const die = page.locator(".bc-bridge .bc-die:not([disabled])").first();
@@ -7533,11 +7551,16 @@ try {
 			else await sleep(350);
 		}
 		check("a human turn can take an end die", clickedDie);
-		const choices = await page.waitForSelector(".bc-choice-grid button", { timeout: 15_000 }).then(() => true).catch(() => false);
-		check("die placement choices appear", choices);
+		const choices = await page.waitForSelector(".bc-target.available", { timeout: 15_000 }).then(() => true).catch(() => false);
+		check("legal destinations are highlighted on the board", choices);
 		if (choices) {
-			await page.locator(".bc-choice-grid button").first().click().catch(() => {});
-			await page.locator(".bc-choice-grid button", { hasText: "End Turn" }).click().catch(() => {});
+			const room = page.locator(".bc-room.available").first();
+			await (await room.count() ? room : page.locator(".bc-target.available").first()).click().catch(() => {});
+			check("placement preview shows cost and effect before committing",
+				await page.locator(".bc-placement-preview .bc-price").count() === 1 &&
+				await page.locator(".bc-placement-preview .bc-effects li").count() > 0);
+			await page.locator(".bc-confirm").click().catch(() => {});
+			await page.locator(".bc-end-turn").click().catch(() => {});
 		}
 		check("the castle has a chronicle", await page.locator(".bc-log p").count() > 0);
 		// The board is designed around the two product desktop targets and a
@@ -7549,16 +7572,19 @@ try {
 				const shell = document.querySelector(".bc-game-shell");
 				const board = document.querySelector(".bc-board");
 				const rooms = document.querySelector(".bc-rooms");
+				const decision = document.querySelector(".bc-decision");
 				return {
 					viewport: innerWidth,
 					scrollWidth: document.documentElement.scrollWidth,
 					shellRight: shell?.getBoundingClientRect().right || 0,
 					boardWidth: board?.getBoundingClientRect().width || 0,
+					decisionRight: decision?.getBoundingClientRect().right || 0,
 					roomsScroll: rooms ? rooms.scrollWidth > rooms.clientWidth : false,
 				};
 			});
 			check(`${viewport.width}px Black Castle stays inside the viewport`,
-				geometry.scrollWidth <= viewport.width + 1 && geometry.shellRight <= viewport.width + 1,
+				geometry.scrollWidth <= viewport.width + 1 && geometry.shellRight <= viewport.width + 1 &&
+				geometry.decisionRight <= viewport.width + 1,
 				JSON.stringify(geometry));
 			if (viewport.width <= 760) check("phone castle rooms scroll inside the board", geometry.roomsScroll, JSON.stringify(geometry));
 		}
