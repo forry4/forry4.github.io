@@ -34,7 +34,23 @@ export const GAME_ACCENTS = {
 	dissonance: "#6fe0a0",
 	ragtag: "#e8663c",
 	orbit: "#42d1c7",
-	blackcastle: "#d5ae62",
+	// PALE STONE, NOT A THIRD GOLD. This was #d5ae62, which put Black Castle's card
+	// next to Dontminion's #b08d57 as very nearly the same card — and unlike the
+	// Spender/Dontminion pair above, it had no claim to the site gold: it was simply
+	// the lantern colour of its own board (`--bc-gold` in BlackCastle.css, which stays
+	// gold, because the BOARD is the game and this is the site's handle on it).
+	// Drawn instead from the board's own night-green ground (#101b1a), which is what
+	// keeps it from reading as "no accent assigned": at chroma 10.5 against gold's
+	// 44.3 it is near-neutral, but it is visibly CHOSEN.
+	// Black and mid-gray were measured and are not available, which is worth stating
+	// because both look reasonable as ideas. The accent is not decoration — the kit
+	// paints it as a FILL under #171310 text (.lby-cta, .cm-create, .cm-seg-btn.sel)
+	// and as the only colour of the wordmark on a near-black ground. #000 measures
+	// 1.34:1 on the card and 1.14:1 for that button text (the rendered page loses its
+	// wordmark, its emblem, Join, Rules and every selected control); #808080 measures
+	// 3.97:1 on the card, under the 4.5 floor. The floor for anything neutral is
+	// around #8a9196.
+	blackcastle: "#a8bdb0",
 };
 
 // Titles that do not clear the 4.5:1 AA floor on the card, and are shipped anyway
