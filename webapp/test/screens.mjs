@@ -56,6 +56,32 @@ const SCREENS = [
 	{ path: "/bggfilter", chunk: "BggFilter", marker: ".bgf" },
 ];
 
+// EVERY GAME LOBBY, IN ONE PLACE. Three blocks below drive "each game's lobby" —
+// the accent-fidelity walk, the phone column check and the shared-chrome check —
+// and each of them used to carry its own hand-typed list. They had already
+// drifted: the phone check was missing Black Castle, so the newest game's lobby
+// was the one nothing measured on a phone. A hand-kept roster only ever guards
+// the tree SHRINKING; the completeness check under it derives the answer from
+// shared/accents.js, so a game added to the catalogue and not listed here fails
+// instead of quietly going uncovered.
+//
+// `marker` is the game's own root class (the same one SCREENS uses); `card` is
+// the home-menu tile index for the one game reached by clicking rather than by
+// URL — Spender is the shell, so it has no lazy route of its own.
+const LOBBY_PAGES = [
+	{ id: "spender", path: "/spender", card: 0, marker: ".sp-lobby, .lby-cols" },
+	{ id: "coc", path: "/coc", marker: ".coc" },
+	{ id: "wherewolf", path: "/werewolf", marker: ".ww" },
+	{ id: "duel", path: "/duel", marker: ".duel" },
+	{ id: "dontminion", path: "/dontminion", marker: ".dm" },
+	{ id: "dissonance", path: "/dissonance", marker: ".dis" },
+	{ id: "ragtag", path: "/ragtag", marker: ".ragtag" },
+	{ id: "orbit", path: "/orbit", marker: ".orbit" },
+	{ id: "blackcastle", path: "/blackcastle", marker: ".blackcastle" },
+];
+const LOBBY_PAGES_UNLISTED = Object.keys(GAME_ACCENTS)
+	.filter((k) => !LOBBY_PAGES.some((g) => g.id === k));
+
 // Newest mtime across everything the bundle is built FROM — the same four trees
 // `deploy-pages.yml` filters its build on. Used only to decide whether an existing
 // dist/ may be REUSED (see runBuild): a flag alone would be a promise that some
@@ -757,21 +783,15 @@ try {
 		// holds for the two games that define theirs in CSS and cannot import the shared
 		// module. Comparison is on painted sRGB, not on the token text, so a hex, a
 		// resolved `var()` and an `rgb()` all compare equal.
-		const ACCENT_PAGES = [
-			{ id: "spender", card: 0, marker: ".browser" },
-			{ id: "coc", path: "/coc", marker: ".coc" },
-			{ id: "wherewolf", path: "/werewolf", marker: ".ww" },
-			{ id: "duel", path: "/duel", marker: ".duel" },
-			{ id: "dontminion", path: "/dontminion", marker: ".dm" },
-			{ id: "dissonance", path: "/dissonance", marker: ".dis" },
-			{ id: "ragtag", path: "/ragtag", marker: ".ragtag" },
-			{ id: "orbit", path: "/orbit", marker: ".orbit" },
-			{ id: "blackcastle", path: "/blackcastle", marker: ".blackcastle" },
-		];
+		// The roster is LOBBY_PAGES (top of file), shared with the phone-column and
+		// shared-chrome blocks. Spender is reached by clicking its home card here
+		// rather than by URL, so this walk swaps in the shell's own marker.
+		const ACCENT_PAGES = LOBBY_PAGES.map((g) => g.card != null
+			? { ...g, path: "/", marker: ".browser" } : g);
 		// Every game in the catalogue must be listed, or a new one joins unmeasured —
 		// the roster is derived, not hand-kept.
-		const unlisted = Object.keys(GAME_ACCENTS).filter((k) => !ACCENT_PAGES.some((g) => g.id === k));
-		check("every game in the catalogue is colour-checked", unlisted.length === 0, unlisted.join(", "));
+		check("every game in the catalogue is colour-checked",
+			LOBBY_PAGES_UNLISTED.length === 0, LOBBY_PAGES_UNLISTED.join(", "));
 		const cardInk = Object.fromEntries(m.names.map((n) => [n.id, n.ink.join(",")]));
 		const mismatched = [];
 		// The guest view intentionally omits admin-only cards. Compare only the
@@ -2769,17 +2789,27 @@ try {
 			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
 		};
 
-		// EVERY game that pins columns — kept in step with the Python contract
-		// test, which derives the same roster from the tree. CoC earns its place
-		// specifically: it is the one whose own sheet is concatenated BEFORE the
-		// shared one, so it resolves these ties in the opposite order.
-		for (const [route, marker] of [["/spender", ".sp-lobby, .lby-cols"],
-			["/duel", ".duel"], ["/coc", ".coc"], ["/dontminion", ".dm"],
-			["/dissonance", ".dis"], ["/ragtag", ".ragtag"], ["/orbit", ".orbit"]]) {
+		// EVERY game that pins columns, off the shared LOBBY_PAGES roster — kept in
+		// step with the Python contract test, which derives the same roster from the
+		// tree. This list used to be typed out here and had drifted: Black Castle was
+		// missing, so the newest lobby was the one nothing measured on a phone. CoC
+		// earns its place specifically: it is the one whose own sheet is concatenated
+		// BEFORE the shared one, so it resolves these ties in the opposite order.
+		//
+		// The TABS are read off the page rather than assumed to be the usual three.
+		// Where Wolf has no History (it is a one-night party game), and a hardcoded
+		// "History" click there resolves to nothing, silently re-measuring the
+		// previous tab and passing — a check that cannot fail, which is the shape
+		// this harness has been bitten by before.
+		for (const { path: route, marker } of LOBBY_PAGES) {
 			await page.goto(`http://localhost:${PORT}${route}`, { waitUntil: "networkidle" });
 			await page.waitForSelector(marker, { timeout: 25_000 }).catch(() => {});
 			await page.waitForSelector(".lby-tabs", { timeout: 15_000 }).catch(() => {});
-			for (const tab of ["Open", "Active", "History"]) {
+			const tabs = await page.locator(".lby-tab").allTextContents()
+				.then((xs) => xs.map((s) => s.trim().split(/\s/)[0]).filter(Boolean))
+				.catch(() => []);
+			check(`${route} renders its phone tab bar`, tabs.length >= 2, JSON.stringify(tabs));
+			for (const tab of tabs) {
 				await page.locator(".lby-tab", { hasText: new RegExp(`^${tab}`) }).first()
 					.click({ timeout: 8_000 }).catch(() => {});
 				await sleep(180);
@@ -2820,6 +2850,139 @@ try {
 	// mounted /dissonance screen says nothing about whether picking "Skat" deals a
 	// skat game, so this drives the segment, the deal, and the first bid — the
 	// value ladder is a middle panel that does not exist in classic mode at all.
+	// ── The shared lobby chrome is the SAME chrome in every lobby ──────────────
+	// WHY THIS IS A RENDERED CHECK AND NOT A STATIC ONE. Every game's own sheet is
+	// concatenated AFTER the shared kit (`styles = baseCss + lobbyCss + … + cssText`),
+	// so a game rule that ties or beats a kit rule on specificity silently wins — in
+	// that one game, on that one page, where it reads as a bug in the game rather than
+	// as a stylesheet-ordering accident. `shared/tests/test_lobby_kit.py` reads the
+	// source as TEXT and can catch a game that restyles `.lby-*` by name; it could not
+	// have caught the drift that prompted this block, because the rule doing the damage
+	// never mentioned a kit class:
+	//
+	//     .blackcastle button,.blackcastle input{font-family:inherit}
+	//
+	// (0,1,1) against `.lby-back`/`.lby-act`/`.lby-cta`/`.cm-create` at (0,1,0), so every
+	// shared control in Black Castle lost its Cinzel and rendered in the game's Inter.
+	// Nothing in the source says "lby". Only the painted page does.
+	//
+	// The assertion is EQUALITY ACROSS GAMES, not a table of expected values, and that
+	// is deliberate: the invariant is "one kit, one look", so when the kit changes all
+	// nine move together and this stays true without being edited. A table would need
+	// updating on every design change and would rot into a second source of truth.
+	// COLOUR IS EXCLUDED on purpose — the accent is what a game is *supposed* to change,
+	// and homeScreen already holds each game's accent to its home card. What is compared
+	// is typography and box geometry: the things that make nine lobbies one product.
+	async function lobbyChrome(log) {
+		const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "chrome-harness", name: "Harness", guest: true })));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		const check = (name, cond, detail = "") => {
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
+		};
+
+		// Each entry: the kit element, and the properties that must not vary. Sizes are
+		// read as computed px, so a game that swaps rem for px still compares equal —
+		// what is being asked is what the player sees.
+		const PROBES = {
+			".lby-back": ["fontFamily", "fontSize", "fontWeight", "letterSpacing", "textTransform", "padding", "borderRadius"],
+			".lby-hero-name": ["fontFamily", "fontSize", "fontWeight", "letterSpacing"],
+			".lby-hero-emblem": ["display", "width", "height", "borderRadius"],
+			".lby-hero-seats": ["fontFamily", "fontSize", "letterSpacing", "textTransform"],
+			".lby-section-title": ["fontFamily", "fontSize", "letterSpacing", "textTransform"],
+			".lby-cta": ["fontFamily", "fontSize", "fontWeight", "letterSpacing", "padding", "borderRadius"],
+			".lby-rules": ["fontFamily", "fontSize", "padding"],
+			".lby-rules-ic": ["width", "height"],
+			".lby-empty": ["fontFamily", "fontSize", "borderRadius"],
+		};
+
+		const seen = {};
+		for (const { id, path: route, marker } of LOBBY_PAGES) {
+			await page.goto(`http://localhost:${PORT}${route}`, { waitUntil: "networkidle" });
+			const there = await page.waitForSelector(marker, { timeout: 25_000 })
+				.then(() => true).catch(() => false);
+			await page.waitForSelector(".lby-create-row", { timeout: 15_000 }).catch(() => {});
+			check(`${id}: lobby rendered`, there, marker);
+			if (!there) continue;
+
+			seen[id] = await page.evaluate((probes) => {
+				const out = { style: {} };
+				for (const [sel, props] of Object.entries(probes)) {
+					const el = document.querySelector(sel);
+					// A MISSING ELEMENT IS RECORDED, NOT SKIPPED. `getComputedStyle` on a
+					// node that is not there throws, and a try/catch that quietly moved on
+					// would rate "this game has no identity band" as agreement with the
+					// games that do — the NaN lesson from dmCardFace, arrived at from the
+					// other direction.
+					out.style[sel] = el
+						? props.map((p) => `${p}=${getComputedStyle(el)[p]}`).join(" ")
+						: "MISSING";
+				}
+				// The header bar is BACK + IDENTITY. The wordmark belongs to the band
+				// below it and Rules belongs to the create row, so a lobby passing
+				// `title`/`onRules` to LobbyHeader prints each of them twice.
+				out.headerTitle = (document.querySelector(".lby-title")?.textContent || "").trim();
+				out.headerBtns = document.querySelectorAll(".lby-header .lby-headbtn").length;
+				// Only the kit's own columns may be children of the kit's grid. Black
+				// Castle had added a fourth — a marketing panel spanning 1/-1 — which no
+				// other lobby has and which the phone tab bar cannot show or hide,
+				// because it hides columns by their `lby-col-*` class names.
+				out.strayCols = [...(document.querySelector(".lby-cols")?.children || [])]
+					.filter((c) => !/\blby-col-/.test(c.className))
+					.map((c) => c.className || c.tagName);
+				return out;
+			}, PROBES);
+
+			check(`${id}: the header bar carries no wordmark of its own`,
+				seen[id].headerTitle === "", seen[id].headerTitle);
+			check(`${id}: the header bar carries no Rules button`,
+				seen[id].headerBtns === 0, `${seen[id].headerBtns} found — Rules lives in the create row`);
+			check(`${id}: the column grid holds only kit columns`,
+				seen[id].strayCols.length === 0, seen[id].strayCols.join(" | "));
+
+			// The Rules modal's icon slot, measured against the create row's. They render
+			// the SAME glyph (`RULES_GLYPH`), and the kit sized only one of them: an
+			// inline <svg> with a viewBox and no intrinsic width falls back to the SVG
+			// default of 300x150, so every game's "How to play" opened under a book a
+			// third of the panel tall. One game looked right — because it carried a
+			// private copy of the missing rule in its own sheet, which is exactly how a
+			// kit-level bug hides in plain sight in the other eight at once.
+			await page.locator(".lby-rules").first().click({ timeout: 8_000 }).catch(() => {});
+			const ic = await page.evaluate(() => {
+				const el = document.querySelector(".rl-title-ic");
+				if (!el) return null;
+				const r = el.getBoundingClientRect();
+				return { w: Math.round(r.width), h: Math.round(r.height) };
+			}).catch(() => null);
+			check(`${id}: the Rules modal's icon is a glyph, not a picture`,
+				!!ic && ic.w > 0 && ic.w <= 24 && ic.h <= 24, JSON.stringify(ic));
+			if (ic) seen[id].style[".rl-title-ic"] = `w=${ic.w} h=${ic.h}`;
+			await page.locator(".rl-x").first().click({ timeout: 8_000 }).catch(() => {});
+		}
+
+		// Every game against the first one that rendered. The reference is named in the
+		// failure detail so the diff reads as "orbit differs from spender HERE", which is
+		// the sentence someone fixing it needs.
+		const ids = Object.keys(seen);
+		check("every lobby in the roster rendered", ids.length === LOBBY_PAGES.length,
+			`${ids.length}/${LOBBY_PAGES.length}`);
+		const ref = ids[0];
+		for (const sel of [...Object.keys(PROBES), ".rl-title-ic"]) {
+			const want = seen[ref]?.style[sel];
+			const off = ids.filter((id) => seen[id].style[sel] !== want)
+				.map((id) => `${id}: ${seen[id].style[sel]}`);
+			check(`${sel} is the kit's in every lobby`, !!want && want !== "MISSING" && off.length === 0,
+				off.length ? `${ref}: ${want}  ||  ${off.join("  ||  ")}` : `${ref}: ${want}`);
+		}
+		check("no page errors while walking the lobbies", errors.length === 0,
+			errors[0]?.slice(0, 160) || "");
+		await ctx.close();
+	}
+
 	async function dissonanceSkat(log) {
 		const ctx = await browser.newContext();
 		await ctx.addInitScript(() => localStorage.setItem("spender_user",
@@ -7630,7 +7793,7 @@ try {
 	const laneB = [routeMounts, shellNav, authScreen, homeScreen, spenderPlayTurn, spenderWaitingRoom,
 		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, historyRecovery, dmAdventures,
 		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, lastDifficulty,
-		dissonanceQuartet, orbitPlay, lobbyFinishSync, blackCastlePlay];
+		dissonanceQuartet, orbitPlay, lobbyFinishSync, blackCastlePlay, lobbyChrome];
 
 	// EVERY BLOCK MUST BE IN A LANE. Before the lanes existed, adding a block meant
 	// writing it — it then ran because it was simply the next statement. Now it has

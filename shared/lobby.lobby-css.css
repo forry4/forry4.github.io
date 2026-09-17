@@ -556,8 +556,19 @@
 	   implicit auto-width track for it, and Active/History rendered shrunk to
 	   content and hugging the right edge of a phone instead of spanning it.
 	   Doubling the class matches the base specificity while still selecting any
-	   child, so a column class added later cannot reintroduce the bug. */
-	.lby-cols.lby-cols>*{grid-column:1;grid-row:auto}
+	   child, so a column class added later cannot reintroduce the bug.
+
+	   TRIPLED, NOT DOUBLED, AND THE THIRD ONE IS NOT SUPERSTITION. The note above
+	   guarded against a new class on the CHILD and missed one on the PARENT:
+	   `.lby-cols.lby-cols-2>.lby-col-active` is (0,3,0) and beat the doubled
+	   (0,2,0) reset, so Where Wolf — the one two-column lobby — never un-pinned on
+	   a phone. Its Active tab rendered as a 161px sliver against the right edge of
+	   a 362px grid with 201px of dead space beside it, which is the exact symptom
+	   this comment already describes, in the one lobby the phone check did not
+	   cover. (It did not cover it because that roster was hand-typed; it is derived
+	   from LOBBY_PAGES now, and that is what turned this up.) Three classes match
+	   the widest pin in the sheet and still select any child. */
+	.lby-cols.lby-cols.lby-cols>*{grid-column:1;grid-row:auto}
 	.lby-cols.tab-open>:not(.lby-col-open),
 	.lby-cols.tab-active>:not(.lby-col-active),
 	.lby-cols.tab-history>:not(.lby-col-history){display:none}

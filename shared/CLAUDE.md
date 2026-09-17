@@ -304,6 +304,31 @@ because most of it is now SHARED, so a new game inherits it and a new game can b
   minimum (which made its band 8px taller than five siblings'), four different page
   gutters. **When you fix a shared rule, delete the local override that was working
   around it** — otherwise the two drift in the opposite direction.
+* **THE PROSE ABOVE IS NOW A GATE, because prose in THIS file could never have stopped
+  the drift it describes.** Two of the rules on this page — "a lobby's `LobbyHeader`
+  passes no `title`" and "a shared kit is only shared where nothing overrides it" — were
+  already written when Black Castle shipped a lobby that broke both, along with 20 more
+  overrides. The mechanism is worth naming: `shared/CLAUDE.md` is loaded when you read
+  files in `shared/`, and a new game is written entirely in `games/<new>/`, so nothing
+  ever puts this document in front of the person who most needs it. The rule now lives in
+  the ROOT `CLAUDE.md` (always loaded) and in two tests:
+  `shared/tests/test_lobby_chrome_is_shared.py` refuses an appearance property on any
+  chrome class from a game sheet (self-policing `SANCTIONED` map, non-vacuity test
+  included), and `lobbyChrome` in `webapp/test/screens.mjs` walks all nine lobbies and
+  asserts the kit's COMPUTED typography and geometry are IDENTICAL across them. The
+  second one exists because the most expensive override in that set never mentioned a kit
+  class: `.blackcastle button{font-family:inherit}` out-specifies `.lby-back`/`.lby-cta`/
+  `.cm-create` and took the Cinzel off every shared control in that game. **Equality
+  across games, not a table of expected values** — the invariant is "one kit, one look",
+  so a deliberate change to the kit moves all nine together and the gate needs no edit.
+* **A GAME'S PRIVATE PATCH OF A KIT BUG HIDES THE KIT BUG.** `.rl-title-ic` — the icon
+  slot in the shared Rules modal — had no rule in `shared/` at all. `RULES_GLYPH` is an
+  inline `<svg>` with a viewBox and no intrinsic size, so it fell back to the SVG default
+  of 300x150 and eight of the nine lobbies opened "How to play" under a book glyph a
+  third of the panel tall. It looked like eight separate design mistakes; it was one missing rule, and the
+  create row's `.lby-rules-ic` next door sizes the same glyph correctly. The one game that
+  looked right was the one carrying a private copy in its own sheet. Sized in the kit now,
+  and `lobbyChrome` measures it in all nine.
 * **The harness:** `webapp/test/lobby-shots.mjs` captures all seven lobbies empty and
   populated at four viewports; `webapp/test/lobby-probe.mjs` measures what a shot can only
   suggest (gutters, card widths, truncation, page overflow). Neither is a gate — `npm run

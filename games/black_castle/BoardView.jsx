@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { LobbyHeader, GameMenu, RulesModal } from "../../shared/lobby.jsx";
+import { GAME_ACCENTS } from "../../shared/accents.js";
 import { Icon, effectItems, rewardText } from "./presentation.jsx";
 
 const COLORS = ["coral", "black", "white"];
@@ -200,7 +201,7 @@ export default function BoardView({ roomData, myId, sendMove, onExit, onRules, o
   const act = move => { if (inFlight.current || !connected) return; inFlight.current = true; setBusy(true); sendMove(move); };
   const choose = space => { setSelected(space); if (space) requestAnimationFrame(() => { const el = document.querySelector(".bc-placement-preview"); el?.focus({ preventScroll: true }); el?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth", block: "nearest" }); }); };
   const roundTurn = Math.min(3, Math.floor((game.turn_in_round || 0) / Object.keys(game.players).length) + 1);
-  return <div className="app blackcastle bc-play" style={{ "--lby-accent": "#d5ae62" }}><style>{styles}</style>
+  return <div className="app blackcastle bc-play" style={{ "--lby-accent": GAME_ACCENTS.blackcastle }}><style>{styles}</style>
     <LobbyHeader title="Black Castle" menu={<GameMenu onLeave={onExit} onRules={onRules} onAbandon={game.phase === "over" ? null : onAbandon} />} user={<span className={`bc-connection${connected ? "" : " lost"}`}><i />{connected ? "Live table" : "Reconnecting…"}</span>} />
     <main className="bc-game-shell"><header className="bc-game-hero"><div><span className="bc-kicker">HIMEJI · THE AGE OF THE CLANS</span><h1>The Black Castle<span>.</span></h1><p>{game.phase === "draft" ? "A quiet ambition. A lasting legacy." : game.phase === "over" ? (Object.keys(game.scores || {}).length ? "The final bell has sounded." : "This table has closed.") : `${turn ? "Your turn" : `${names[game.turn_pid] || "Opponent"}’s turn`} · Turn ${roundTurn} of 3 this round`}</p></div><div className="bc-round-mark"><span>{game.phase === "draft" ? "OPENING DRAFT" : "ROUND"}</span><div>{[1, 2, 3].map(n => <b key={n} className={n === game.round ? "current" : n < game.round ? "complete" : ""}>{n}</b>)}</div><small>{Object.keys(game.players).length} clans at the table</small></div></header>
       <div className="bc-players">{Object.entries(game.players).map(([pid, player]) => <PlayerPanel key={pid} {...{ pid, player, game }} name={names[pid] || pid} active={game.phase === "draft" ? game.draft_queue?.[0] === pid : game.turn_pid === pid} mine={pid === myId} onInspect={() => setInspect(pid)} />)}</div>

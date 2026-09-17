@@ -17,6 +17,8 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
 | [`games/dontminion/CLAUDE.md`](games/dontminion/CLAUDE.md) | Dontminion (Dominion) frame-stack engine, the frozen effects API, multi-bot server, decision-prompt frontend |
 | [`games/dissonance/CLAUDE.md`](games/dissonance/CLAUDE.md) | Dissonance — parity trick-taking rules, the Rust reference + parity gate, auction/scoring calibration, the five modes (classic / skat / minor / dummy / quartet), and the browser-served Hard tier |
 | [`games/rag_tag/CLAUDE.md`](games/rag_tag/CLAUDE.md) | Rag Tag (Tag Team) — the simultaneous turn resolution, the generated fighter data and where it came from, the two-pass declaration |
+| [`games/orbit/AGENTS.md`](games/orbit/AGENTS.md) | Orbit — engine, the value-only league and its search |
+| [`games/black_castle/AGENTS.md`](games/black_castle/AGENTS.md) | Black Castle — engine, the BGA-derived card catalogue, `BoardView.jsx` |
 | [`shared/CLAUDE.md`](shared/CLAUDE.md) | Shared frontend kits + URL routing |
 | [`books/CLAUDE.md`](books/CLAUDE.md) | The Books feature |
 | [`bggfilter/CLAUDE.md`](bggfilter/CLAUDE.md) | BGG Filter — the BoardGameGeek harvest + the frontend-only filter page |
@@ -233,6 +235,40 @@ create row scrolls SIDEWAYS rather than wrapping — with five controls it stops
 via `justify-content:safe center`, because plain `center` pushes the overflow off the unreachable
 LEFT edge. `screens.mjs` drives all seven lobbies: the button is optional on the component, so a game
 that forgets to pass `onRules` renders a perfectly fine lobby with no way into the rules.
+
+**A GAME THEMES ITS ROWS, NEVER THE KIT'S CHROME — and this is the rule every new game
+has broken so far, because using the kit's class names and then restyling them from your
+own sheet passes every check that existed.** Black Castle shipped 22 such rules: the
+header bar, the identity band, the wordmark, the section titles, the row actions and both
+shared modals, re-coloured to its own greens and re-set in Georgia. It used `lby-*`
+throughout, pinned every column, wired its tabs and set its accent — so `test_lobby_kit.py`
+was green — and the page still shared nothing with its eight siblings but its markup.
+- **The line is CHROME vs MATERIAL.** Chrome is the furniture the SITE owns and is the
+  same in every lobby: the top bar, the identity band, the section headers, the row
+  actions, the create row, the phone tabs, and the two shared modals' panels. A game's own
+  material is the card ground, the page ground and the WORDS — Orbit paints `.lby-card`
+  over its starfield, CoC tunes `.lby-card-meta`, and every lobby writes its own row
+  vocabulary and empty states. Theme those. If the chrome is wrong, fix it in `shared/`
+  where all nine games get the fix, rather than patching your own copy — Black Castle was
+  the only game whose Rules modal looked right, because it carried a private copy of a
+  sizing rule the kit had simply forgotten, and that private copy is why the kit-level bug
+  (a 300px book glyph in the other eight) went unseen for months.
+- **`LobbyHeader` in a LOBBY takes `onBack` + `user`, and nothing else.** The wordmark is
+  the band's job and Rules is in the create row, so passing `title`/`onRules` prints each
+  of them twice. `title` + `menu` is the IN-GAME shape and stays.
+- **Nothing but the kit's own columns may be a child of `.lby-cols`.** The phone tab bar
+  hides columns by their `lby-col-*` class names, so a fourth child cannot be shown or
+  hidden at all.
+- **TWO GATES, and they cover different halves.**
+  `shared/tests/test_lobby_chrome_is_shared.py` reads the sheets as text and refuses an
+  appearance property on any chrome class, with a self-policing `SANCTIONED` map.
+  `lobbyChrome` in `webapp/test/screens.mjs` walks all nine lobbies and asserts the kit's
+  COMPUTED typography and geometry are identical across them — which is the half that
+  matters, because the worst of this drift never names a kit class at all. Six of the
+  nine sheets are concatenated AFTER the shared one, so
+  `.blackcastle button{font-family:inherit}` — (0,1,1) against `.lby-back`/`.lby-cta`/
+  `.cm-create` at (0,1,0) — stripped the Cinzel off every shared control in that game,
+  and no scan of `.lby-*` selectors can see it. Only a rendered page can.
 
 **THE LOBBY IS ONE SHARED LAYOUT — `shared/lobby.jsx` + its CSS, used by all seven games.**
 The column grid (`.lby-cols`), the card list (`.lby-list`), the rows (`.lby-card*`), the section

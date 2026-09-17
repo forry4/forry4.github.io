@@ -43,13 +43,13 @@ function Lobby({ myId, authUser, openGames, activeGames, history, onRefresh, ref
   const [visibleHistory, historySentinel] = useProgressiveList(history);
   return <div className="app blackcastle" style={{ "--lby-accent": GAME_ACCENTS.blackcastle }}>
     <style>{styles}</style>
-    <LobbyHeader onBack={onExit} title="Black Castle" onRules={onRules} user={<LobbyUser user={authUser} />} />
+    <LobbyHeader onBack={onExit} user={<LobbyUser user={authUser} />} />
     <div className="lby-page"><div className="lby-page-in">
       <LobbyHero game="blackcastle"><LobbyCreateRow onCreate={onCreate} onJoin={onJoin} onRefresh={onRefresh}
         refreshing={refreshing} onRules={onRules} /></LobbyHero>
       <LobbyTabs value={lobbyTab} onChange={setLobbyTab} tabs={[{ key: "open", label: "Open", count: openGames.length || null }, { key: "active", label: "Active", count: activeGames.length || null }, { key: "history", label: "History", count: history.length || null }]} />
-      <div className={`bc-lobby-grid lby-cols tab-${lobbyTab}`}>
-        <section className="bc-lobby-column lby-col-open"><LobbySectionHd title="Open tables" note={`${openGames.length} waiting`} />
+      <div className={`lby-cols tab-${lobbyTab}`}>
+        <section className="lby-col-open"><LobbySectionHd title="Open tables" note={`${openGames.length} waiting`} />
           {!openGames.length && <LobbyEmpty>No open tables. Create a game with friends or computer players.</LobbyEmpty>}
           <div className="lby-list">{openGames.map((g) => <div className="lby-card" key={g.id}>
             <div className="lby-card-info"><div className="lby-card-title">{g.player1_name || "Player"}'s castle <span className="lby-seats">{[g.player1_name, g.player2_name, g.player3_name, g.player4_name].filter(Boolean).length}/{g.max_players || 4}</span></div>
@@ -57,18 +57,14 @@ function Lobby({ myId, authUser, openGames, activeGames, history, onRefresh, ref
             <div className="lby-card-actions"><LobbyAction onClick={() => onJoin(g.id)}>Join</LobbyAction></div>
           </div>)}</div>
         </section>
-        <section className="bc-lobby-column lby-col-active"><LobbySectionHd title="Active tables" note={`${active.length} in progress`} />
+        <section className="lby-col-active"><LobbySectionHd title="Active tables" note={`${active.length} in progress`} />
           {!active.length && <LobbyEmpty>No active castles yet.</LobbyEmpty>}
           <div className="lby-list">{active.map((g) => <div className="lby-card" key={g.id}><div className="lby-card-info"><LobbyMatchup placeholder="Opponent" seats={[{ name: g.player1_name || "Clan", you: true }, { name: g.player2_name || "Opponent", you: false }]} /><div className="lby-card-meta"><LobbyBotTier tier={g.ai_difficulty} labels={BLACK_CASTLE_AI_LABELS} /></div></div><div className="lby-card-actions"><LobbyAction onClick={() => onJoin(g.id)}>Resume</LobbyAction></div></div>)}</div>
         </section>
-        <section className="bc-lobby-column lby-col-history"><LobbySectionHd title="History" note={`${history.length} finished`} />
+        <section className="lby-col-history"><LobbySectionHd title="History" note={`${history.length} finished`} />
           {!history.length && <LobbyEmpty>{authUser && !authUser.guest ? "Your finished games will appear here." : "Log in to keep your game history."}</LobbyEmpty>}
           <div className="lby-list">{visibleHistory.map((g) => <div className="lby-card lby-card-hist" key={g.id}><div className="lby-card-info"><div className="lby-card-title">{g.outcome || "Finished"} · {g.player1_name || "Clan"}</div><div className="lby-card-meta"><LobbyBotTier tier={g.ai_difficulty} labels={BLACK_CASTLE_AI_LABELS} /></div></div></div>)}{historySentinel}</div>
         </section>
-        <aside className="bc-lobby-aside"><span className="bc-kicker">HIMEJI · 1761</span><h2>Build your clan in the lantern light.</h2>
-          <p>Choose a die from a bridge, place it where its value matters, and guide your workers through the castle before the final bell.</p>
-          <div className="bc-aside-rule"><span>2–4</span><small>seats</small><span>3</span><small>rounds</small><span>9</span><small>turns each</small></div>
-        </aside>
       </div>
     </div></div>
   </div>;
