@@ -10,6 +10,46 @@ than re-argued.
 
 ---
 
+## 2026-09-16 — the guard against the font gap had the font gap
+
+Pages [#837](https://github.com/forry4/forry4.github.io/actions/runs/35117138329)
+and [#838](https://github.com/forry4/forry4.github.io/actions/runs/35167446295)
+both failed the render gate on the same annotation, and neither published:
+
+    orbitPlay threw: Linux font fixture did not load with the expected metrics: 70
+
+Nothing was wrong with the layout, the font file, or Orbit. `259c2562` had already
+fixed the overflow and #829-#836 published fine. What failed was the fixture's own
+guard, added the day before to make that overflow reproducible on Windows: it
+measured the digit `0` at 100px and required `69.580078125` to within `0.01`.
+
+`0.6958em` is a property of the FILE and is the same everywhere. The RASTERISED
+width is not: Chrome positions glyphs subpixel on Windows and hints the advance to
+whole pixels on Linux, so 69.580078125px here is 70px on the runner — 0.42px, 42x
+the tolerance. Measured, not assumed: locally the fixture reads 69.580078125 at
+100px and 695.80078125 at 1000px, exactly `0.69580078125em` both times.
+
+This is the CI-vs-dev font rule from 2026-09-14 landing on the check written to
+enforce it. The generalisable half is that **an exact device-pixel equality is the
+same coin flip as a 1px clearance margin** — the axis has to be one the renderer
+cannot move. The guard now asserts the em ratio probed at 2000px with a `0.002em`
+window: integer hinting moves it by at most `0.0005em`, while the nearest font that
+could stand in for a silent fallback (Arial/Liberation Bold digits at `0.556em`,
+Verdana Bold at `0.7139em`) is `0.018em` clear.
+
+Two things kept in the fix. The width check is not what proves the fixture loaded —
+`readFileSync`, `face.load()` and `document.fonts.check` are, and they have to be,
+because the Ubuntu runner's own sans IS DejaVu and a silent fallback there measures
+identically to a successful load. And the tolerance is checked for vacuity on every
+run by pure arithmetic in the module body: a window wide enough to swallow a
+fallback is the green-tick-over-nothing this fixture exists to prevent.
+
+Validated by running `npm run screens:orbit` to completion: the Linux-font check
+passes (0 spills, 2.90625px clearance, identical row and cell geometry to the
+native pass), and the tolerance rejects `0.556em` while accepting the real ratio.
+
+---
+
 ## 2026-09-14 — reproduce the runner's font before the next push
 
 The latest failed deployment was [Pages #828](https://github.com/forry4/forry4.github.io/actions/runs/34797488411),

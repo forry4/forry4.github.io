@@ -478,6 +478,15 @@ covers the logic; each game's wiring is one line).
   320px/18-Agent check uses the normal font, then the pinned DejaVu Sans Bold fixture
   via `webapp/test/font-profiles.mjs`. The helper verifies its glyph metrics before
   measuring, so a failed font load cannot silently pass with a local fallback.
+  **That verification is itself subject to the CI-vs-dev font rule and broke the
+  deploy twice on its first outing** (Pages #837/#838): it demanded an EXACT
+  device-pixel advance, and Chrome hints the advance to whole pixels on Linux while
+  positioning subpixel on Windows, so the same file measures 69.580078125 here and
+  70 there. Assert the font's em RATIO probed at a large size, never a rasterised
+  width — the rounding falls below the tolerance instead of dominating it. The
+  fallback it guards against is caught by `face.load()`/`fonts.check`, not by the
+  width: the Ubuntu runner's own sans IS DejaVu, so a silent fallback there measures
+  exactly like a successful load.
   Keep the native-font check as well. Failed Pages gates upload per-block JSON
   reports; the Linux numeric check also saves its HTML and screenshot on failure.
 - **`npm run smoke` NEVER RENDERS A GAME — don't mistake it for render coverage.** The shell pings the
