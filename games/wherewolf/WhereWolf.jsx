@@ -3,7 +3,7 @@ import { baseCss } from "../../shared/theme.js";
 import { lobbyCss, LobbyHeader, LobbySectionHd, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame,
   createModalCss, CreateModal, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss, LobbyHero, LobbyAction, LobbyTabs, timeAgo,
-  notWaiting, LobbyUser, useListFade,
+  notWaiting, LobbyUser, LobbyOpenTitle, useListFade,
   WaitingRoom, waitingRoomCss } from "../../shared/lobby.jsx";
 import WhereWolfRules from "./rules.jsx";
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
@@ -651,9 +651,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
                 <div className="lby-empty">No open games — create one.</div>
               ) : <div className="lby-list">{openGames.map((g) => (
                 <div className="lby-card" key={g.id}>
-                  <div className="lby-card-info"><div className="lby-card-title">
-                      {g.host_id === myId ? "Your game" : `${g.host_name || "Player"}'s game`}
-                      <span className="lby-seats">{g.players ?? 1}/10</span></div>
+                  <div className="lby-card-info"><LobbyOpenTitle game={g} myId={myId} defaultMaxPlayers={10} />
                     <div className="lby-card-meta">{g.id} · {timeAgo(g.created_at)}</div></div>
                   <div className="lby-card-actions">
                     {/* RETURN, then Cancel — the shape every other lobby uses for a

@@ -265,6 +265,39 @@ export function LobbyMatchup({ seats, placeholder = "…" }) {
 	);
 }
 
+// THE OPEN-ROW TITLE — one treatment for every lobby. The first line answers
+// the two things a player needs before choosing an action: whose table it is
+// and how many seats are occupied. Keep the display vocabulary here so a new
+// game cannot quietly invent "is waiting", "your fight", or a game-specific
+// noun that makes the shared Open Games column read differently.
+//
+// Backends have accumulated three equivalent count shapes over time:
+// `player_count`, `players`, and `player_ids`. Prefer the explicit count, then
+// the ids, then the legacy player-name columns. `max_players` is the source of
+// truth for the cap, with a two-seat default for older two-player payloads.
+export function LobbyOpenTitle({ game, myId, defaultMaxPlayers = 2, fallbackName = "Player" }) {
+	const hostName = game?.host_name || game?.player1_name || fallbackName;
+	const rawCount = game?.player_count ?? game?.players;
+	const explicitCount = typeof rawCount === "number" && Number.isFinite(rawCount)
+		? rawCount
+		: typeof rawCount === "string" && rawCount.trim() && Number.isFinite(Number(rawCount))
+			? Number(rawCount)
+			: null;
+	const idsCount = Array.isArray(game?.player_ids)
+		? game.player_ids.filter(Boolean).length
+		: null;
+	const namedCount = ["player1_name", "player2_name", "player3_name", "player4_name"]
+		.filter((key) => game?.[key]).length;
+	const count = Math.max(1, explicitCount ?? idsCount ?? namedCount ?? 1);
+	const max = Number(game?.max_players) || defaultMaxPlayers;
+	return (
+		<div className="lby-card-title">
+			{game?.host_id === myId ? "Your game" : `${hostName}'s game`}
+			<span className="lby-seats">{count}/{max}</span>
+		</div>
+	);
+}
+
 // WHICH BOT IT WAS — on the Active row and on the History row, in every lobby.
 //
 // A row that says "Aurelia (you) vs Nina (AI)" names the seat and not the

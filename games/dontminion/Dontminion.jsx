@@ -8,7 +8,7 @@ import {
   notWaiting, LobbyAction,
   LobbyCreateRow, lobbyCreateRowCss, useProgressiveList, LobbyTabs, useLastDifficulty,
   LobbyHero, LobbyUser, useListFade,
-  RulesModal, rulesModalCss, LobbyBotTier,
+  RulesModal, rulesModalCss, LobbyBotTier, LobbyOpenTitle,
   WaitingRoom, waitingRoomCss,
 } from "../../shared/lobby.jsx";
 // Only the shared CARD FRAME (sizing vars + .card chrome). Dontminion's card face
@@ -2287,8 +2287,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
             {openGames.map((g) => (
               <div key={g.id} className="lby-card">
                 <div className="lby-card-info">
-                  <div className="lby-card-title">{g.host_id === myId ? "Your game" : `${g.host_name || "Player"}'s game`}
-                    <span className="lby-seats">{g.player_count}/{g.max_players}</span></div>
+                  <LobbyOpenTitle game={g} myId={myId} />
                   {/* The expansion list goes LAST. The meta truncates from the right,
                       so whatever sits at the end is what a narrow column gives up —
                       and the room code and the age are how you identify and rank a

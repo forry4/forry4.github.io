@@ -9,7 +9,7 @@ import {
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss, useProgressiveList, LobbyHero, LobbyUser, useListFade,
   readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame,
-  WaitingRoom, waitingRoomCss,
+  LobbyOpenTitle, WaitingRoom, waitingRoomCss,
 } from "../../shared/lobby.jsx";
 import { buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 import {
@@ -1787,8 +1787,7 @@ export default function RagTag({ myId, authUser, onExit }) {
               {openGames.map((g) => (
                 <div className="lby-card" key={g.id}>
                   <div className="lby-card-info">
-                    <div className="lby-card-title">{g.host_id === myId ? "Your fight" : `${g.host_name || "Player"}'s fight`}
-                      <span className="lby-seats">1/2</span></div>
+                    <LobbyOpenTitle game={g} myId={myId} />
                     <div className="lby-card-meta">{g.id} · {timeAgo(g.created_at)}</div>
                   </div>
                   <div className="lby-card-actions">

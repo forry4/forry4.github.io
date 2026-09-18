@@ -18,7 +18,7 @@ import {
   RulesModal, GameMenu, rulesModalCss, createModalCss, lobbyCreateRowCss, gameMenuCss,
   useProgressiveList, useListFade, notWaiting, timeAgo,
   readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame,
-  WaitingRoom, waitingRoomCss, seatStateOf, LobbyOpenActions,
+  WaitingRoom, waitingRoomCss, seatStateOf, LobbyOpenActions, LobbyOpenTitle,
 } from "../../shared/lobby.jsx";
 import { GAME_ACCENTS } from "../../shared/accents.js";
 import { useAutoReconnect } from "../../shared/useAutoReconnect.js";
@@ -373,7 +373,7 @@ function Lobby({ myId, authUser, openGames, activeGames, history, onRefresh, ref
           {!openGames.length && <LobbyEmpty>No open games — create one.</LobbyEmpty>}
           <div className="lby-list">{openGames.map((g) => <div className="lby-card" key={g.id}>
             <div className="lby-card-info">
-              <div className="lby-card-title">{g.player1_name || "Player"} is waiting</div>
+              <LobbyOpenTitle game={g} myId={myId} />
               <div className="lby-card-meta">{g.id} · {g.turns} turns · {timeAgo(g.updated_at)}</div>
             </div>
             {/* FOUR ANSWERS, NOT TWO. This row used to ask only "do I host it?",

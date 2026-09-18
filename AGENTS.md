@@ -296,6 +296,10 @@ shipped spin keyframes.
   discovering. Per-game tuning goes through `--lby-list-max`, which works from either side.
 - Where Wolf? keeps its own 2-column grid (it has no History column) but uses `.lby-list` like
   everyone else.
+- **`LobbyOpenTitle` owns every Open-row title and seat pill.** It renders `Your game` for the
+  host, `<host>'s game` for other viewers, and the occupied/max seat count from the backend's
+  available count shape. Every lobby must use it; the shared lobby-kit test is the guard for
+  future games, so do not hand-type a game-specific Open-row title.
 
 **The lobby History list pages, and the cap is ONE number seen from two ends.**
 `core.rooms.HISTORY_LIMIT` (50) is the SQL row cap in every game's `list_user_history`;

@@ -4,7 +4,7 @@ import {
   lobbyCss, LobbyHeader, LobbyHero, LobbyCreateRow, LobbyUser, LobbySectionHd,
   LobbyEmpty, LobbyAction, LobbyTabs, CreateModal, CmRow, CmSeg, RulesModal,
   rulesModalCss, createModalCss, lobbyCreateRowCss, gameMenuCss,
-  LobbyBotTier, LobbyMatchup, useLastDifficulty, useProgressiveList, notWaiting,
+  LobbyBotTier, LobbyMatchup, LobbyOpenTitle, useLastDifficulty, useProgressiveList, notWaiting,
   WaitingRoom, waitingRoomCss,
 } from "../../shared/lobby.jsx";
 import { GAME_ACCENTS } from "../../shared/accents.js";
@@ -53,7 +53,7 @@ function Lobby({ myId, authUser, openGames, activeGames, history, onRefresh, ref
         <section className="lby-col-open"><LobbySectionHd title="Open Games" note={`${openGames.length} waiting`} />
           {!openGames.length && <LobbyEmpty>No open games — create one.</LobbyEmpty>}
           <div className="lby-list">{openGames.map((g) => <div className="lby-card" key={g.id}>
-            <div className="lby-card-info"><div className="lby-card-title">{g.player1_name || "Player"}'s castle <span className="lby-seats">{[g.player1_name, g.player2_name, g.player3_name, g.player4_name].filter(Boolean).length}/{g.max_players || 4}</span></div>
+            <div className="lby-card-info"><LobbyOpenTitle game={g} myId={myId} defaultMaxPlayers={4} />
               <div className="lby-card-meta">{g.id} · standard base game</div></div>
             <div className="lby-card-actions"><LobbyAction onClick={() => onJoin(g.id)}>Join</LobbyAction></div>
           </div>)}</div>

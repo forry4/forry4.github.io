@@ -64,7 +64,7 @@ import { lobbyCss, LobbyHeader, LobbyLoading, GameMenu, gameMenuCss, readLobbyCa
 	LobbyBotTier,
 	createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss, LobbyHero, LobbyUser,
 	RulesModal, rulesModalCss,
-	useProgressiveList, LobbySectionHd, LobbyTabs, TurnBadge, LobbyMatchup, LobbyAction, useListFade,
+	useProgressiveList, LobbySectionHd, LobbyOpenTitle, LobbyTabs, TurnBadge, LobbyMatchup, LobbyAction, useListFade,
 	WaitingRoom, waitingRoomCss } from "../../shared/lobby.jsx";
 import SpenderRules from "./rules.jsx";
 import { GemToken, CardView, GEM_COLORS, GEM_LABELS, GEM_HEX,
@@ -3309,10 +3309,7 @@ export default function SpenderApp() {
 								{openGames.map(g => (
 									<div key={g.id} className="lby-card">
 										<div className="lby-card-info">
-											<div className="lby-card-title">
-												{g.host_id === myId ? "Your game" : `${g.host_name}'s game`}
-												<span className="lby-seats">{g.player_count || 1}/{g.max_players || 4}</span>
-											</div>
+											<LobbyOpenTitle game={g} myId={myId} defaultMaxPlayers={4} />
 											<div className="lby-card-meta">{g.id} · {timeAgo(g.created_at)}</div>
 										</div>
 										<div className="lby-card-actions">

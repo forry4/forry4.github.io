@@ -4,7 +4,7 @@ import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyMatchup, LobbyLo
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss,
   useProgressiveList, LobbyTabs, useLastDifficulty, LobbyHero,
-  LobbyAction, LobbyUser, useListFade, LobbyBotTier,
+  LobbyAction, LobbyUser, useListFade, LobbyBotTier, LobbyOpenTitle,
   WaitingRoom, waitingRoomCss } from "../../shared/lobby.jsx";
 import CocRules from "./rules.jsx";
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
@@ -2157,8 +2157,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
                 {openGames.map((g) => (
                   <div className="lby-card" key={g.id}>
                     <div className="lby-card-info">
-                      <div className="lby-card-title">{g.host_id === myId ? "Your game" : `${g.host_name}'s game`}
-                        <span className="lby-seats">{g.player_count || 1}/{g.max_players || 4}</span></div>
+                      <LobbyOpenTitle game={g} myId={myId} defaultMaxPlayers={4} />
                       <div className="lby-card-meta">{g.id} · {timeAgo(g.created_at)}</div>
                     </div>
                     <div className="lby-card-actions">

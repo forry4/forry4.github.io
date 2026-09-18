@@ -7,7 +7,7 @@ import {
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss,
   useProgressiveList, notWaiting, LobbyAction, useLastDifficulty, LobbyHero,
-  SCORECARD_GLYPH, LobbyUser, useListFade, LobbyBotTier,
+  SCORECARD_GLYPH, LobbyUser, useListFade, LobbyBotTier, LobbyOpenTitle,
   WaitingRoom, waitingRoomCss,
 } from "../../shared/lobby.jsx";
 import DissonanceRules from "./rules.jsx";
@@ -2206,10 +2206,7 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
           {visibleOpenGames.map((g) => (
             <div key={g.id} className="lby-card">
               <div className="lby-card-info">
-                <div className="lby-card-title">
-                  {g.host_id === myId ? "Your game" : `${g.host_name || "Player"}'s game`}
-                  <span className="lby-seats">1/2</span>
-                </div>
+                <LobbyOpenTitle game={g} myId={myId} />
                 <div className="lby-card-meta">{g.id} · {timeAgo(g.created_at)}<ModeBadge mode={g.mode} /></div>
               </div>
               <div className="lby-card-actions">

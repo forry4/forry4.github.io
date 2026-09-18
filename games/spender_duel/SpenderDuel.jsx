@@ -5,7 +5,7 @@ import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyMatchup, LobbyLo
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss,
   useProgressiveList, LobbyTabs, notWaiting, LobbyAction, useLastDifficulty,
-  LobbyHero, LobbyUser, useListFade, LobbyBotTier,
+  LobbyHero, LobbyUser, useListFade, LobbyBotTier, LobbyOpenTitle,
   WaitingRoom, waitingRoomCss } from "../../shared/lobby.jsx";
 // The gems, jewel cards and move log are SHARED with Spender (same game family, so
 // they must look the same). Duel adds only what Splendor Duel needs on top: pearls,
@@ -1641,8 +1641,7 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
             {openGames.map((g) => (
               <div className="lby-card" key={g.id}>
                 <div className="lby-card-info">
-                  <div className="lby-card-title">{g.host_id === myId ? "Your game" : `${g.host_name || "Player"}'s game`}
-                    <span className="lby-seats">1/2</span></div>
+                  <LobbyOpenTitle game={g} myId={myId} />
                   <div className="lby-card-meta">{g.id} · {timeAgo(g.created_at)}</div>
                 </div>
                 <div className="lby-card-actions">

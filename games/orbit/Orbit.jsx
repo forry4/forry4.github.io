@@ -7,7 +7,7 @@ import {
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss, useProgressiveList, LobbyHero, LobbyUser, useListFade,
   readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame, timeAgo, useLastDifficulty,
-  LobbyBotTier, WaitingRoom, waitingRoomCss,
+  LobbyBotTier, LobbyOpenTitle, WaitingRoom, waitingRoomCss,
 } from "../../shared/lobby.jsx";
 import { GAME_ACCENTS } from "../../shared/accents.js";
 import { buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
@@ -814,7 +814,7 @@ function Lobby({ authUser, myId, onExit, openGames, myGames, history, historySho
           <LobbySectionHd title="Open Games" note={`${openGames.length} waiting`} />
           {!openGames.length && <LobbyEmpty>No open games — create one.</LobbyEmpty>}
           <div className="lby-list">{openGames.map((g) => <div className="lby-card" key={g.id}>
-            <div className="lby-card-info"><div className="lby-card-title">{g.host_id === myId ? "Your game" : `${g.host_name || "Player"}’s game`}<span className="lby-seats">1/2</span></div>
+            <div className="lby-card-info"><LobbyOpenTitle game={g} myId={myId} />
               <div className="lby-card-meta">{g.id} · {timeAgo(g.created_at)}</div></div>
             <div className="lby-card-actions">{g.host_id === myId ? <>
               <LobbyAction kind="secondary" onClick={() => resumeGame(g.id)}>Return</LobbyAction>

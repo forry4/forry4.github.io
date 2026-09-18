@@ -135,6 +135,33 @@ def test_every_lobby_uses_the_standard_open_and_active_copy():
         f"{missing}")
 
 
+def test_every_lobby_uses_the_shared_open_game_title():
+    """Every Open row uses the same ownership and occupancy treatment.
+
+    The title is more than cosmetic: "Your game" tells a host which row can
+    return them to their waiting room, while the seat pill tells a joiner
+    whether the table still has room. Keep both decisions in `LobbyOpenTitle`
+    so a future lobby cannot reintroduce game-specific copy such as "is
+    waiting", "your fight", or a title that hides the owner.
+    """
+    shared = (SHARED / "lobby.jsx").read_text(encoding="utf-8")
+    assert "export function LobbyOpenTitle" in shared
+    missing = []
+    for jsx in _lobby_games():
+        text = jsx.read_text(encoding="utf-8")
+        open_col = re.search(r'className="[^"]*\blby-col-open\b"', text)
+        active_col = (re.search(r'className="[^"]*\blby-col-active\b"', text[open_col.start():])
+                      if open_col else None)
+        open_source = text[open_col.start():] if open_col else ""
+        if active_col:
+            open_source = open_source[:active_col.start()]
+        if "LobbyOpenTitle" not in open_source:
+            missing.append(jsx.name)
+    assert not missing, (
+        "these lobbies do not use the shared Open-row title and seat pill: "
+        f"{missing}")
+
+
 def test_the_phone_tab_bar_is_wired_to_the_grid():
     """Two halves that must agree, and neither fails loudly on its own.
 
