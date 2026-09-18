@@ -5635,18 +5635,39 @@ try {
 		await page.waitForSelector(".lby-create-row", { timeout: 25_000 }).catch(() => {});
 		check("lobby reachable by URL", await page.locator(".lby-create-row").count() > 0);
 
-		// The rules panel. `RulesFacts` reads {k, v} off each item and Rag Tag was
-		// passing bare strings, so three of its sections rendered as EMPTY boxes --
-		// present, correctly styled, and saying nothing. Assert the boxes have text
-		// in them, not merely that they exist.
+		// The rules panel, and the claim is that NO PART OF IT IS BLANK. Rag Tag
+		// passed bare strings to `RulesFacts`, whose items are read as {k, v}, so
+		// three of its sections rendered as EMPTY boxes -- present, correctly
+		// styled, and saying nothing. That is the failure this check exists for,
+		// and it is a property of every item list in the panel rather than of the
+		// facts strip: `RulesDefs` reads {t, d} and fails the same silent way.
+		//
+		// The check used to read `.rl-fact` alone. The rulesets now open on Goal of
+		// the Game with no facts strip at all (this file's panel has none), so that
+		// selector matches nothing -- and `length > 0` would have failed for the
+		// RIGHT reason on the WRONG claim. It walks the definition lists instead,
+		// which is where the same bug lives and which this panel is mostly made of.
 		await page.locator(".lby-create-row button", { hasText: /rules/i }).first()
 			.click({ timeout: 10_000 }).catch(() => {});
 		await sleep(500);
-		const factText = await page.locator(".rl-fact").allInnerTexts().catch(() => []);
+		const panelText = await page.evaluate(() => {
+			const words = (el) => (el.textContent || "").trim();
+			// Every item list entry, both halves, plus the facts strip if a panel
+			// ever grows one back. A blank one is the bug; an ABSENT one is not.
+			return {
+				secs: document.querySelectorAll(".rl-sec").length,
+				cells: [...document.querySelectorAll(".rl-dl dt, .rl-dl dd, .rl-fact")]
+					.map(words),
+				emptySecs: [...document.querySelectorAll(".rl-sec")]
+					.filter((s) => words(s).length < 20).map((s) => words(s).slice(0, 30)),
+			};
+		});
+		const blank = panelText.cells.filter((t) => t.length < 3);
 		check("the rules panel opens, and no part of it is blank",
-			factText.length > 0 && factText.every((t) => t.trim().length > 4)
-			&& await page.locator(".rl-sec").count() > 5,
-			`${factText.length} fact boxes: ${JSON.stringify(factText.map((t) => t.slice(0, 20)))}`);
+			panelText.secs > 5 && panelText.cells.length > 10
+			&& blank.length === 0 && panelText.emptySecs.length === 0,
+			`${panelText.secs} sections, ${panelText.cells.length} list cells, `
+			+ `${blank.length} blank, empty sections ${JSON.stringify(panelText.emptySecs)}`);
 		await page.keyboard.press("Escape").catch(() => {});
 		await sleep(300);
 

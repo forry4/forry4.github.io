@@ -769,8 +769,19 @@ export function RulesSection({ title, children }) {
 	);
 }
 
-// The "at a glance" strip at the top of every ruleset: players / length / goal.
-// `items` = [{ k, v }] — k is the micro uppercase label, v the value.
+// A summary strip of label/value pairs. `items` = [{ k, v }] — k is the micro
+// uppercase label, v the value.
+//
+// NO RULESET USES IT TODAY, and that is deliberate rather than an oversight: every
+// game's rules panel opens on "Goal of the Game" (Orbit's shape, adopted by all
+// nine), so the player count lives in Setup and the win condition in Goal, where a
+// reader looks for them. It used to head seven of the panels as a players / length
+// / goal strip. It is kept because the panel is reused for things that are not a
+// rulebook — Dissonance's paper scorecard borrows `.rl-lead` already — so a
+// summary strip is a reasonable thing for the kit to be able to draw. Whoever
+// reaches for it should know it is currently drawn nowhere, and that
+// `shared/tests/test_rules_kit_shapes.py` still guards its item SHAPE (a bare
+// string renders an empty box).
 export function RulesFacts({ items }) {
 	return (
 		<div className="rl-facts">

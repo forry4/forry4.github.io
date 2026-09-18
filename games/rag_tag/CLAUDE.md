@@ -485,22 +485,31 @@ word now (`COMPLEXITY_WORD`). Two of the three things a player reads on a board
 were numbers that needed a legend nobody had.
 
 ### The rules panel follows the RULEBOOK's order and vocabulary
-`rules.jsx` is laid out in the printed order — what kind of game, the goal, the
-draft, a Round, Actions, who counts as whom, the icons, how a Fight ends, the
-Golden Rule — so a reader who has the real rules can find the same thing in the
-same place. It uses the rulebook's words (Active Fighter, Partner, Opponents,
-Bonus Action, Success, Direct Damage, Stop, THEN, Power cubes, Fight Deck),
-because a rules panel that renames things makes the CARDS harder to read.
+`rules.jsx` is laid out in the printed order — Goal of the Game, Setup, a Round,
+Actions, who counts as whom, the icons, how a Fight ends, the Golden Rule — so a
+reader who has the real rules can find the same thing in the same place. It uses
+the rulebook's words (Active Fighter, Partner, Opponents, Bonus Action, Success,
+Direct Damage, Stop, THEN, Power cubes, Fight Deck), because a rules panel that
+renames things makes the CARDS harder to read.
 
-**`RulesFacts` takes `{k, v}` and `RulesDefs` takes `{t, d}` — a bare string
-renders an EMPTY BOX.** Rag Tag passed bare strings in three places, so its
-Setup, Health-track and Winning sections were blank strips for as long as the
+**That order is also the SITE's order** (root `CLAUDE.md`, the how-to-play
+section): every game's panel opens on `Goal of the Game` and then `Setup`, and
+this one's printed order happens to agree from there, which is why it needed the
+least moving of the nine. What it lost in the 2026-09-18 pass was the lead
+paragraph and the `RulesFacts` strip — the simultaneous flip and the
+never-shuffled deck are the GOAL, so they are stated there, and the player count
+is in Setup.
+
+**`RulesDefs` takes `{t, d}` PAIRS — a bare string renders an EMPTY BOX**, and so
+does `RulesFacts` with `{k, v}`. Rag Tag passed bare strings in three places, so
+its Setup, Health-track and Winning sections were blank strips for as long as the
 game existed. Nothing could see it: the markup was all present and correctly
 styled, so `screens` found its elements, the Python suite does not render, and
 the CSS token test only looks at tokens. Guarded now by
 `shared/tests/test_rules_kit_shapes.py`, which globs every `games/*/rules.jsx`
-(Rag Tag was the only offender) and by a `screens` check that the fact boxes
-contain TEXT rather than merely existing.
+(Rag Tag was the only offender) and by a `screens` check that asserts no part of
+the panel is blank — it read the fact boxes until the strip went away, and walks
+the definition lists now, which is where the same trap lives.
 
 ### What has to be ON THE CARD, and what the modal is for
 A player reported it exactly: *"Everything I need should be visible, with the modal

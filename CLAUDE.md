@@ -269,6 +269,33 @@ via `justify-content:safe center`, because plain `center` pushes the overflow of
 LEFT edge. `screens.mjs` drives all seven lobbies: the button is optional on the component, so a game
 that forgets to pass `onRules` renders a perfectly fine lobby with no way into the rules.
 
+**AND THE WORDS HAVE A SHARED SHAPE TOO — every ruleset is built on ORBIT's, which is the one
+the site settled on (2026-09-18).** The other eight were written independently and drifted in
+the way independently-written prose does. Counted before the pass: **seven of the nine**
+opened with a chatty lead paragraph AND a players / length / goal `RulesFacts` strip, and
+then no two of those seven agreed on what came next — "What's on the table", "How the game
+is shaped", "Setup", "The three ways to win", "The central twist", "The deck and the deal",
+"Pick your Fighters", one each. Only Orbit and Black Castle opened on the goal. **Six closed
+with an italic `rl-note`**, three of which spent it praising the game's own AI ("Expert runs
+a learned neural-network evaluation in your browser"), which is not a rule. The backbone now,
+in every `games/<game>/rules.jsx`:
+- **`Goal of the Game` → `Setup` → `Turn overview` → the subsystems → `End of turn` / `End of
+  the game`**, with an optional `At the table` last for controls a reader cannot guess
+  (Dontminion's right-click-to-read-a-card, Spender's click-then-Buy). Six to eleven sections;
+  Orbit has seven.
+- **Voice is a rulebook's**: terse, present tense, short paragraphs. `RulesDefs` carries the
+  turn's alternatives (lettered `A.`/`B.`/`C.` where they are choices, numbered where they are
+  steps) and the game's named vocabulary; at most one or two `RulesTip`s for the thing to
+  notice. No `<ul>` prose lists — paragraphs and definition lists only.
+- **No lead paragraph and no `RulesFacts` strip.** A panel opens on Goal, so the win condition
+  is stated there and the player count in Setup — which is where a reader looks, and it is why
+  `RulesFacts` now has no call sites (kept in the kit, annotated; see its comment).
+- **No closing sales note.** Which bot tiers exist is the create modal's job, and a ruleset that
+  ends by praising its own AI is not telling anyone how to play.
+A game with big structural differences does not have to follow it to the letter — Where Wolf?
+runs `The night` / `The day` / `The vote`, Rag Tag keeps its printed rulebook's order — but the
+opening and the closing are the same everywhere.
+
 **A GAME THEMES ITS ROWS, NEVER THE KIT'S CHROME — and this is the rule every new game
 has broken so far, because using the kit's class names and then restyling them from your
 own sheet passes every check that existed.** Black Castle shipped 22 such rules: the
