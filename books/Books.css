@@ -51,11 +51,20 @@
 .bk-handle:active{cursor:grabbing;}
 .bk-fields{flex:1;min-width:0;display:flex;flex-direction:column;gap:7px;}
 .bk-field-line{display:flex;gap:7px;}
+/* 1rem, NOT .92 — the editor's fields are the ones a phone zooms the page on (a focused
+   text control under 16px; see `.lby-code` in shared/lobby.lobby-create-row-css.css for
+   the measurement and why it outlives the tap). `.bk-search-in` below already sets 1rem
+   and is why the search box was never affected. The rating `<select>` is in the same
+   boat — iOS zooms for a select too — and its fixed box grows with the text so it keeps
+   the clearance it had: 64 -> 72px, a little more than the ~9% the type gained. Note this
+   one is NOT render-verified — `/books` shows no field at all to the screen gate (the
+   editor needs `can_edit` from the server), so it is the one surface `formControlZoom`
+   cannot walk. See its SURFACES list. */
 .bk-in{background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:var(--radius);
-	padding:8px 11px;font-size:.92rem;width:100%;box-sizing:border-box;font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;}
+	padding:8px 11px;font-size:1rem;width:100%;box-sizing:border-box;font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;}
 .bk-in:focus{outline:none;border-color:var(--gold);}
 .bk-in-title{flex:1;font-weight:600;}
-.bk-in-rating{flex:none;width:64px;font-family:'Cinzel','Cinzel Fallback',serif;}
+.bk-in-rating{flex:none;width:72px;font-family:'Cinzel','Cinzel Fallback',serif;}
 .bk-in-note{resize:vertical;}
 .bk-del{flex:none;background:transparent;border:1px solid var(--border);color:var(--text-dim);
 	border-radius:var(--radius);width:34px;cursor:pointer;font-size:14px;}

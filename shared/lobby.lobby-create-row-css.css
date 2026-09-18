@@ -20,7 +20,39 @@
 .lby-cta:hover{filter:brightness(1.08);transform:translateY(-1px);
 	box-shadow:inset 0 1px 0 rgba(255,255,255,.3),0 6px 14px -8px color-mix(in srgb,var(--lby-accent,var(--gold,#c9a84c)) 68%,transparent)}
 .lby-join{display:flex;gap:8px}
-.lby-code{padding:10px 12px;width:130px;background:rgba(0,0,0,.28);border:1px solid var(--border,#3a3226);border-radius:var(--radius,8px);color:var(--text,#e8dfce);font-family:'Cinzel','Cinzel Fallback',serif;letter-spacing:.12em;text-transform:uppercase;outline:none;transition:border-color .15s,background .15s,box-shadow .15s}
+/* 1REM IS A FLOOR ON ANYTHING YOU TYPE INTO, NOT A TYPE CHOICE — and this rule carried no
+   `font-size` at all, so the field rendered at the UA default 13.333px and every one of the
+   nine lobbies zoomed ITSELF on a phone. iOS Safari scales the whole PAGE up when a focused
+   text control computes under 16px, and it does not scale back on blur: the page keeps that
+   scale, and Safari restores it on the next load of the same URL. That is why the report was
+   "SOMETIMES when I load in" and not "when I tap the code field" — by the time you see it,
+   the tap that caused it was a previous visit.
+   MEASURED off a user's screenshot (1170x2532, a 390pt phone at 3x) against the live boxes:
+   three independent controls give a page scale of 1.1932 / 1.1917 / 1.1932 — 16/13.333 is
+   1.2000 — with scrollLeft 61.3-63.5 of a 63.1 maximum, i.e. panned to the stop. At that
+   scale a 390px layout no longer fits a 390px screen, so the lobby became pannable, and
+   parked at the right stop it had lost the Back button, the emblem and the "D" of its own
+   wordmark off the LEFT edge. Nothing overflowed and nothing was mis-laid-out; the page was
+   simply bigger than the screen, which is why every geometry check on this row was green.
+   The BUTTONS beside it stay at .82rem deliberately — Safari only zooms for text entry, so a
+   label and a field are different cases and the row is not inconsistent for having two
+   sizes. `maximum-scale`/`user-scalable=no` is the other way to stop it and is not an option:
+   it takes pinch-zoom away from everyone, and iOS has ignored it since 10 anyway.
+   Held site-wide by `formControlZoom` in webapp/test/screens.mjs.
+
+   THE 130px WIDTH WAS SIZED FOR THE OLD 13.333px AND HAD TO GROW WITH IT — 148 is the width
+   that restores the clearance it used to have, not a round number. A room code is six random
+   A-Z (`roomCode()` in each game screen), and the glyph that decides this is Cinzel's W:
+   against the field's content box, the widest possible code cleared 15.9px at 13.333px/130px
+   and would have cleared MINUS 1.8px at 16px/130px. At 148 it clears 16.2px. Over 200k
+   sampled codes nothing overflowed at either size — the mean code clears 26.9px and the
+   99.9th percentile 9.5px — so this is the extreme rather than the common case, and an
+   `<input>` scrolls its own text rather than breaking a layout when it does run out. It is
+   still worth the 18px, because the 18px is free: measured at 18 viewport widths from 320 to
+   1920, the create row keeps the same height, the same number of lines and no overflow at
+   every one of them. The width only applies above 600px anyway — the phone grid overrides it
+   to `width:auto` and the field takes the whole second row. */
+.lby-code{padding:10px 12px;width:148px;background:rgba(0,0,0,.28);border:1px solid var(--border,#3a3226);border-radius:var(--radius,8px);color:var(--text,#e8dfce);font-family:'Cinzel','Cinzel Fallback',serif;font-size:1rem;letter-spacing:.12em;text-transform:uppercase;outline:none;transition:border-color .15s,background .15s,box-shadow .15s}
 .lby-code::placeholder{color:#8d8271}
 .lby-code:focus{border-color:var(--lby-accent,var(--gold,#c9a84c));background:rgba(0,0,0,.42);
 	box-shadow:0 0 0 3px color-mix(in srgb,var(--lby-accent,var(--gold,#c9a84c)) 16%,transparent)}

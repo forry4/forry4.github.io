@@ -53,7 +53,16 @@ Cross-game frontend kits. **Dependency direction is one-way: `games/* → shared
   and Dissonance's Scorecard was entirely off-screen behind it, with nothing on a
   vertically-scrolling page to say either was there. **Its column gaps are MARGINS, not `gap`** —
   the grid keeps a fourth track for the optional sixth control, and a `column-gap` allocates the
-  gutter before that track even when it is empty. Token-driven via a per-game `--lby-accent` with
+  gutter before that track even when it is empty.
+  **`.lby-code` IS 1rem AND MUST NOT GO BACK UNDER 16px.** It carried no `font-size` at all, so
+  it rendered at the UA default 13.333px, and iOS Safari scales the WHOLE PAGE up on focusing a
+  text control under 16px and never scales back — every lobby zoomed itself ~1.2x on a phone and
+  stayed that way across loads, which reads as a render bug rather than as a field. The buttons
+  beside it stay `.82rem` on purpose (Safari only zooms for text ENTRY), and its 148px width is
+  the measured companion to the type size, not a round number. No geometry check in this repo can
+  see this class of bug — a page zoom leaves the layout viewport untouched — so it is held by
+  `formControlZoom` in `webapp/test/screens.mjs`; see the root `CLAUDE.md` footgun for the
+  measurements. Token-driven via a per-game `--lby-accent` with
   **hard fallbacks so it renders in CoC's bare mount** — append its CSS AFTER the `.coc *` reset.
   **THE WHOLE LOBBY LAYOUT IS HERE as of 2026-08-05** — `.lby-cols` (the column grid + the single
   responsive ladder: 3 columns ≥1041px, 2 columns 761–1040 with History spanning below, 1 column +

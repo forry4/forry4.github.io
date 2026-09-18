@@ -785,6 +785,37 @@ covers the logic; each game's wiring is one line).
   higher-specificity (e.g. `.coc `-prefixed).
 - Shared-kit CSS with `var(--token, fallback)` must be appended AFTER a game's `* {margin:0;padding:0}`
   reset (CoC's bare mount) or the reset zeros its padding.
+- **A FORM CONTROL UNDER 16px MAKES iOS ZOOM THE WHOLE PAGE, AND IT DOES NOT ZOOM BACK.** Safari
+  scales the page up on focusing any text-entry control whose COMPUTED font-size is below 16px,
+  keeps that scale after blur, and restores it on the next load of the same URL — so the symptom
+  arrives detached from its cause and reads as a render bug. `.lby-code`, the lobby's room-code
+  field, had no `font-size` at all and so sat at the UA default 13.333px, in all nine lobbies;
+  it was reported as *"sometimes when I load in, the game looks like this on mobile"* with a
+  screenshot of a lobby zoomed ~1.2x and panned to its right stop, missing the Back button, the
+  emblem and the first letter of its own wordmark off the LEFT edge. Measured off that shot
+  against the live boxes: page scale 1.1932/1.1917/1.1932 from three independent controls
+  (16/13.333 = 1.2000), scrollLeft 61.3–63.5 of a 63.1 maximum.
+  **Why every existing check was green, which is the transferable half:** the page was correctly
+  laid out at 390px and then DISPLAYED bigger than 390px. Every geometry assertion in the repo
+  measures CSS pixels inside the layout viewport, and that is the one frame a page zoom does not
+  change — so `rulesModal`'s "the page does not scroll sideways" and `phoneLobbyColumns` could
+  not see it and would not see it come back. A stylesheet scan cannot either: the defect was a
+  rule with no `font-size` property, so there is nothing to read, and what matters is the
+  CASCADED value anyway (`.bgf-search input` is `font:inherit` and lands on 16 only because of
+  what it inherits). Hence ONE gate rather than this repo's usual two —
+  **`formControlZoom` in `webapp/test/screens.mjs`** walks every lobby (roster derived from
+  `LOBBY_PAGES`), the scorecard modal, the auth screen and `/bggfilter` and fails any text-entry
+  control under 16px. It asserts its control COUNT per surface first, because a surface that
+  failed to render contributes zero controls and would otherwise pass loudly.
+  Three rules fall out: **16px is a floor on anything you can type into**, not a size preference;
+  **buttons beside a field are exempt** (Safari only zooms for text entry, so the create row is
+  not inconsistent for having `.82rem` labels next to a 1rem field); and **`maximum-scale` /
+  `user-scalable=no` is not the fix** — it takes pinch-zoom from everyone and iOS has ignored it
+  since 10. Also **a field's width was sized for its old type**: bumping `.lby-code` to 16px took
+  the widest possible six-letter code from +15.9px of clearance to −1.8px, so the box grew
+  130→148px to restore it (free — same row height, line count and overflow at 18 widths from
+  320 to 1920). Books' editor is the one surface the gate cannot reach (`.bk-in` needs a
+  registered session and a seeded shelf); it is fixed but held by reading the sheet alone.
 
 **Backend / DB**
 - **libsql has no `cur.rowcount`** → use SELECT-then-DELETE/UPDATE for any affected-row count (it 500'd

@@ -2905,6 +2905,129 @@ try {
 		await ctx.close();
 	}
 
+	// ── NO FIELD ON THE SITE MAY BE UNDER 16px ────────────────────────────────
+	// iOS Safari scales the WHOLE PAGE up when a focused text control computes under
+	// 16px, and it does not scale back on blur — the page keeps that scale and Safari
+	// restores it on the next load of the same URL. So the symptom arrives detached
+	// from its cause: the lobby's room-code field (`.lby-code`, which carried no
+	// `font-size` at all and so rendered at the UA default 13.333px) was reported as
+	// "sometimes when I load in the game looks like this on mobile", with a screenshot
+	// of a lobby zoomed ~1.2x and panned to its right stop — Back button, emblem and
+	// the first letter of its own wordmark off the left edge.
+	//
+	// WHY NOTHING CAUGHT IT. The page was not overflowing and nothing was mis-laid-out;
+	// it was correctly laid out at 390px and then displayed bigger than 390px. Every
+	// geometry check in this file measures CSS pixels inside the layout viewport, which
+	// is exactly the frame the zoom does not change, so `rulesModal`'s "the page does
+	// not scroll sideways" and `phoneLobbyColumns` were green throughout and would stay
+	// green if it regressed. Nor can a stylesheet scan see it: the defect was a rule
+	// with no `font-size` property, so there was nothing to read, and what matters is
+	// the CASCADED value anyway (`.bgf-search input` is `font:inherit` and lands on 16
+	// only because of what it inherits). A rendered page resolving the cascade is the
+	// only place this is visible — hence one gate rather than this repo's usual two.
+	//
+	// SCOPE: the control types Safari zooms for, which is text ENTRY — so the buttons
+	// next to a field are exempt (they are .82rem in the create row on purpose), and so
+	// are `range`/checkbox/radio/colour inputs, which is why BGG Filter's ten sliders
+	// sitting at the UA default are not a finding.
+	// THE ROSTER IS ASSERTED BEFORE THE SIZES, because a surface that failed to render
+	// contributes zero controls and would otherwise pass this loudly — the same shape as
+	// the `NaN` geometry checks and the hardcoded `range(13)` parametrize elsewhere in
+	// the repo. Verified non-vacuous by reverting `.lby-code`: it fails and names all
+	// nine lobbies plus the scorecard.
+	async function formControlZoom(log) {
+		const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "zoom-harness", name: "Zoomy", guest: true })));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		const check = (name, cond, detail = "") => {
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
+		};
+
+		// Read the live controls and let the browser resolve the cascade. `type` is
+		// read off the element rather than the attribute so a bare <input> reports
+		// the "text" it actually behaves as.
+		const FIELDS = (pg) => pg.evaluate(() => {
+			const NO_ZOOM = new Set(["button", "submit", "reset", "checkbox", "radio",
+				"range", "color", "file", "image", "hidden"]);
+			return [...document.querySelectorAll("input,select,textarea,[contenteditable]:not([contenteditable=false])")]
+				.filter((el) => !NO_ZOOM.has((el.type || "text").toLowerCase()))
+				.map((el) => ({
+					what: `${el.tagName.toLowerCase()}${el.type ? `[${el.type}]` : ""}`
+						+ `.${(typeof el.className === "string" && el.className) || "(no class)"}`,
+					px: Math.round(parseFloat(getComputedStyle(el).fontSize) * 100) / 100,
+				}));
+		});
+
+		// Every surface that HAS a field, and each one's floor. `min` is what makes a
+		// surface that did not render fail here instead of contributing nothing.
+		// The lobby roster is LOBBY_PAGES (top of file) so a tenth game joins on its own.
+		const SURFACES = [
+			...LOBBY_PAGES.map((g) => ({
+				name: `${g.path} lobby`, path: g.path, wait: ".lby-code", min: 1,
+			})),
+			// The scorecard is a modal, and it is the reason this walk is not
+			// lobbies-only: a control behind a click is a control nothing measures.
+			{ name: "/dissonance scorecard", path: "/dissonance", wait: ".lby-extra", min: 3,
+				open: async (pg) => {
+					await pg.locator(".lby-extra").click({ timeout: 10_000 }).catch(() => {});
+					await pg.waitForSelector(".dsc-player input", { timeout: 10_000 }).catch(() => {});
+				} },
+			// A SEPARATE CONTEXT, not a `localStorage.removeItem` before the goto: the
+			// seeded identity comes from `addInitScript`, which re-runs on every new
+			// document, so clearing it and navigating just puts it straight back. That
+			// cost a run — the surface reported zero fields and the roster guard above
+			// is the only reason it was a failure rather than a pass.
+			{ name: "the auth screen", path: "/", wait: ".auth-field", min: 2, anon: true },
+			{ name: "/bggfilter", path: "/bggfilter", wait: ".bgf-search input", min: 1 },
+			// BOOKS IS THE ONE HOLE, AND IT IS THE PAGE'S, NOT THIS WALK'S. `/books`
+			// renders no field at all to this harness — the editor needs `can_edit`
+			// from the server and even the search box is behind a populated list — so
+			// its `.bk-in` fields (fixed alongside `.lby-code`, same defect) are held
+			// by reading the sheet and nothing else. Whoever gives this gate a
+			// registered identity and a seeded shelf should add the surface here; it
+			// is deliberately NOT listed with a min of 0, which would be a green tick
+			// over a page that was never looked at.
+		];
+
+		const seen = [];
+		for (const s of SURFACES) {
+			// `anon` surfaces only exist to a visitor with no stored identity, so they
+			// get a context of their own (see the note on the auth row above).
+			const anonCtx = s.anon
+				? await browser.newContext({ viewport: { width: 390, height: 844 } })
+				: null;
+			const pg = anonCtx ? await anonCtx.newPage() : page;
+			if (anonCtx) pg.on("pageerror", (e) => errors.push(String(e)));
+			await pg.goto(`http://localhost:${PORT}${s.path}`, { waitUntil: "networkidle" });
+			await pg.waitForSelector(s.wait, { timeout: 25_000 }).catch(() => {});
+			if (s.open) await s.open(pg);
+			const fields = await FIELDS(pg);
+			check(`${s.name} presents its fields to be measured`, fields.length >= s.min,
+				`found ${fields.length} of ${s.min} expected: ${JSON.stringify(fields)}`);
+			const small = fields.filter((f) => !(f.px >= 16));   // NaN fails this, as it must
+			check(`${s.name}: no field under 16px`, small.length === 0,
+				small.map((f) => `${f.what} = ${f.px}px`).join(", "));
+			seen.push(...fields);
+			if (anonCtx) await anonCtx.close();
+		}
+
+		// One more roster guard, one level up: if the walk itself broke — a renamed
+		// wait selector, a backend that never answered — every surface above would
+		// report its own failure, but a future edit that trims SURFACES to nothing
+		// would not. The floor is one field per lobby plus the five the other three
+		// surfaces carry between them (2 scorecard names, 2 auth fields, 1 search);
+		// the tree measures 15 against a floor of 14.
+		check("the walk measured a real number of fields across the site",
+			seen.length >= LOBBY_PAGES.length + 5, `measured ${seen.length}`);
+		check("no page errors while measuring fields", errors.length === 0,
+			errors[0]?.slice(0, 160) || "");
+		await ctx.close();
+	}
+
 	// ── Dissonance's skat auction ───────────────────────────────────────────────
 	// Skat mode is a room FLAG chosen in the create modal, which is exactly the
 	// failure class this gate exists for: Dontminion's Renaissance set rendered
@@ -8072,7 +8195,7 @@ try {
 	const laneB = [routeMounts, shellNav, authScreen, homeScreen, spenderPlayTurn, spenderWaitingRoom,
 		waitingRoomKit,
 		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, historyRecovery, dmAdventures,
-		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, lastDifficulty,
+		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, formControlZoom, lastDifficulty,
 		dissonanceQuartet, orbitPlay, lobbyFinishSync, blackCastlePlay, lobbyChrome];
 
 	// EVERY BLOCK MUST BE IN A LANE. Before the lanes existed, adding a block meant

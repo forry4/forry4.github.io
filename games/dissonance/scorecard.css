@@ -30,9 +30,14 @@
   padding: 0.35rem 0.5rem; border: 1px solid var(--border, #3a3226);
   border-radius: 9px; background: rgba(255, 255, 255, 0.03);
 }
+/* 1rem, NOT 0.95 — a phone zooms the page on a focused field under 16px and never
+   zooms back (see `.lby-code` in shared/lobby.lobby-create-row-css.css for the
+   measurement). This card is the one screen on the site whose stated purpose is a
+   game played with real cards at a real table, so the phone is not the edge case
+   here, it is the case. */
 .dsc-player input {
   flex: 1 1 0; min-width: 0; background: transparent; border: 0;
-  color: var(--text); font: inherit; font-size: 0.95rem; padding: 0.15rem 0;
+  color: var(--text); font: inherit; font-size: 1rem; padding: 0.15rem 0;
 }
 .dsc-player input:focus { outline: none; }
 .dsc-total {
