@@ -52,6 +52,7 @@ const SCREENS = [
 	{ path: "/ragtag", chunk: "RagTag", marker: ".ragtag" },
 	{ path: "/orbit", chunk: "Orbit", marker: ".orbit" },
 	{ path: "/blackcastle", chunk: "BlackCastle", marker: ".blackcastle" },
+	{ path: "/secretnames", chunk: "SecretNames", marker: ".secretnames" },
 	{ path: "/books", chunk: "Books", marker: ".bk-app" },
 	{ path: "/bggfilter", chunk: "BggFilter", marker: ".bgf" },
 ];
@@ -78,6 +79,7 @@ const LOBBY_PAGES = [
 	{ id: "ragtag", path: "/ragtag", marker: ".ragtag" },
 	{ id: "orbit", path: "/orbit", marker: ".orbit" },
 	{ id: "blackcastle", path: "/blackcastle", marker: ".blackcastle" },
+	{ id: "secretnames", path: "/secretnames", marker: ".secretnames" },
 ];
 const LOBBY_PAGES_UNLISTED = Object.keys(GAME_ACCENTS)
 	.filter((k) => !LOBBY_PAGES.some((g) => g.id === k));
@@ -668,7 +670,7 @@ try {
 				pillY, cards: cards.length,
 			};
 		});
-		const wipIds = new Set(["ragtag", "blackcastle"]);
+		const wipIds = new Set(["ragtag", "blackcastle", "secretnames"]);
 		check("WIP game cards stay hidden from guests",
 			m.names.every((game) => !wipIds.has(game.id)), JSON.stringify(m.names.map((game) => game.id)));
 
@@ -918,7 +920,7 @@ try {
 		const adminPage = await adminCtx.newPage();
 		await adminPage.goto(`http://localhost:${PORT}/`, { waitUntil: "networkidle" });
 		await adminPage.waitForSelector(".home-game-card", { timeout: 25_000 }).catch(() => {});
-		const adminWip = await adminPage.evaluate(() => ["ragtag", "blackcastle"]
+		const adminWip = await adminPage.evaluate(() => ["ragtag", "blackcastle", "secretnames"]
 			.every((id) => !!document.querySelector(`.home-game-card[data-game="${id}"]`)));
 		await adminCtx.close();
 		check("admins can see the WIP game cards", adminWip);
@@ -1203,7 +1205,7 @@ try {
 			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
 		};
 
-		for (const route of ["/spender", "/coc", "/werewolf", "/duel", "/dontminion", "/dissonance", "/ragtag", "/orbit", "/blackcastle"]) {
+		for (const route of ["/spender", "/coc", "/werewolf", "/duel", "/dontminion", "/dissonance", "/ragtag", "/orbit", "/blackcastle", "/secretnames"]) {
 			await page.goto(`http://localhost:${PORT}${route}`, { waitUntil: "networkidle" });
 			await page.waitForSelector(".lby-rules", { timeout: 25_000 }).catch(() => {});
 			const hasBtn = await page.locator(".lby-rules").count().catch(() => 0);
@@ -8187,6 +8189,224 @@ try {
 		await ctx.close();
 	}
 
+	// ── SecretNames: two real browsers, one table ─────────────────────────────
+	// THE ONLY BLOCK IN THIS FILE THAT DRIVES TWO CLIENTS AT ONCE, and it has to:
+	// SecretNames is a two-player co-op whose entire subject is that each seat
+	// holds a key card the other never sees. A single-context walk can prove the
+	// screen mounts and nothing else — the inversion (a guess is answered by the
+	// OTHER seat's key), the per-recipient broadcast and the hidden half are all
+	// invisible from one seat by construction.
+	//
+	// The harness deliberately CHEATS in the one way a player cannot: it reads
+	// the clue-giver's rendered key to pick an agent, then clicks that word on
+	// the GUESSER's page. If the server ever resolved a guess against the
+	// guesser's own key, that click would land on a bystander or an assassin and
+	// this block goes red — which is the one regression that would otherwise
+	// ship as a game that plays perfectly and is a different game.
+	//
+	// Nothing here is conditional on the deal. The agent it clicks is derived
+	// from the board that was dealt, and the clue-giver is whichever page is
+	// showing the clue input — so pinning the deal (screens runs the backend with
+	// GAMES_DEAL_SEED) cannot park a check at zero the way it did for Rag Tag.
+	async function secretNamesPlay(log) {
+		const errors = [];
+		const check = (name, cond, detail = "") => {
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(`secretnames: ${name}`); log(`  FAIL ${name}  ${detail}`); }
+		};
+		const seat = async (id, name) => {
+			const ctx = await browser.newContext({ viewport: { width: 1440, height: 950 } });
+			await ctx.addInitScript(([i, n]) => localStorage.setItem("spender_user",
+				JSON.stringify({ id: i, name: n, guest: true })), [id, name]);
+			const page = await ctx.newPage();
+			page.on("pageerror", (e) => errors.push(`${name}: ${e}`));
+			page.on("console", (mm) => { if (mm.type() === "error") errors.push(`${name} console: ${mm.text()}`); });
+			return { ctx, page };
+		};
+		const alpha = await seat("secretnames-alpha", "Vega");
+		const beta = await seat("secretnames-beta", "Rook");
+
+		await alpha.page.goto(`http://localhost:${PORT}/secretnames`, { waitUntil: "networkidle" });
+		await alpha.page.waitForSelector(".secretnames .lby-create-row", { timeout: 25_000 }).catch(() => {});
+		check("SecretNames lobby reachable",
+			await alpha.page.locator(".secretnames .lby-create-row").count() > 0);
+		await alpha.page.locator(".secretnames .lby-cta").click().catch(() => {});
+		await alpha.page.waitForSelector(".cm-panel", { timeout: 10_000 }).catch(() => {});
+		check("the create modal opens on the timer-token row",
+			await alpha.page.locator(".cm-panel .cm-seg-btn").count() === 3);
+		await alpha.page.locator(".cm-create").click().catch(() => {});
+
+		// The table waits for a partner, and says so with a code rather than a
+		// Start button — there is no host decision left to make at two seats.
+		const code = await alpha.page.waitForSelector(".sn-code", { timeout: 30_000 })
+			.then((el) => el.textContent()).catch(() => null);
+		check("a waiting table shows its code", !!code && /^[A-Z]{6}$/.test(code.trim()), String(code));
+		check("the empty seat is drawn as empty",
+			await alpha.page.locator(".sn-seat-chip.sn-empty").count() === 1);
+
+		await beta.page.goto(`http://localhost:${PORT}/secretnames/${code.trim()}`, { waitUntil: "networkidle" });
+		const dealt = await Promise.all([alpha, beta].map(({ page }) =>
+			page.waitForSelector(".sn-board .sn-card", { timeout: 30_000 }).then(() => true).catch(() => false)));
+		check("the second seat starts the mission for both clients", dealt.every(Boolean), JSON.stringify(dealt));
+
+		const cardCounts = await Promise.all([alpha, beta].map(({ page }) =>
+			page.locator(".sn-board .sn-card").count()));
+		check("both boards are 25 cards", cardCounts.every((n) => n === 25), JSON.stringify(cardCounts));
+
+		// ── The hidden half, read off the rendered page ──────────────────────
+		// `data-key` is the viewer's OWN side and is the only key any client has.
+		// Two properties matter: each page holds a COMPLETE, legal side (9 agents,
+		// 3 assassins, 13 bystanders) and the two sides are DIFFERENT. A client
+		// that had been handed both would still render one of them, so the
+		// composition check is what makes "different" mean something.
+		const readKey = ({ page }) => page.evaluate(() =>
+			[...document.querySelectorAll(".sn-board .sn-card")]
+				.map((c) => c.dataset.key || "bystander"));
+		const [keyA, keyB] = await Promise.all([readKey(alpha), readKey(beta)]);
+		const tally = (k) => ({ agent: k.filter((r) => r === "agent").length,
+			assassin: k.filter((r) => r === "assassin").length,
+			bystander: k.filter((r) => r === "bystander").length });
+		check("each client holds a complete, legal key side",
+			[keyA, keyB].every((k) => { const t = tally(k); return t.agent === 9 && t.assassin === 3 && t.bystander === 13; }),
+			JSON.stringify([tally(keyA), tally(keyB)]));
+		check("the two seats hold DIFFERENT key sides",
+			keyA.join("") !== keyB.join(""), `${keyA.join("").slice(0, 25)} / ${keyB.join("").slice(0, 25)}`);
+		const shared = keyA.filter((r, i) => r === "agent" && keyB[i] === "agent").length;
+		const union = keyA.filter((r, i) => r === "agent" || keyB[i] === "agent").length;
+		check("15 unique agents with 3 shared, as rendered", union === 15 && shared === 3,
+			`union ${union}, shared ${shared}`);
+
+		// ── One full turn ────────────────────────────────────────────────────
+		// Whichever page shows the clue input is the clue-giver. Read, never
+		// assumed: who opens is drawn at the deal, and a block that guessed would
+		// be a coin flip that happens to land green under a pinned seed.
+		const alphaClues = await alpha.page.locator(".sn-input").count() > 0;
+		const giver = alphaClues ? alpha : beta;
+		const guesserSeat = alphaClues ? beta : alpha;
+		const giverKey = alphaClues ? keyA : keyB;
+		check("exactly one seat is given the clue console",
+			(await alpha.page.locator(".sn-input").count()) + (await beta.page.locator(".sn-input").count()) === 1);
+		check("the guesser is told to wait rather than shown an input",
+			(await guesserSeat.page.locator(".sn-console-k").first().textContent() || "").trim() === "Waiting");
+
+		// A clue that IS an uncovered board word is refused — the one piece of
+		// clue legality that is mechanical rather than semantic.
+		const boardWord = await giver.page.locator(".sn-board .sn-card .sn-word").first().textContent();
+		await giver.page.locator(".sn-input").fill(boardWord.trim());
+		await giver.page.locator(".sn-btn-go").click().catch(() => {});
+		await giver.page.waitForSelector(".sn-err", { timeout: 8_000 }).catch(() => {});
+		check("a clue that is still on the board is refused, in the console",
+			(await giver.page.locator(".sn-err").textContent().catch(() => "") || "").includes("still on the board"),
+			await giver.page.locator(".sn-err").textContent().catch(() => "<none>"));
+
+		await giver.page.locator(".sn-input").fill("SIGNAL");
+		await giver.page.locator(".sn-btn-go").click().catch(() => {});
+		const clueLanded = await guesserSeat.page.waitForSelector(".sn-clue-word", { timeout: 12_000 })
+			.then((el) => el.textContent()).catch(() => null);
+		check("the clue reaches the other client", (clueLanded || "").trim() === "SIGNAL", String(clueLanded));
+
+		const agentIdx = giverKey.findIndex((r) => r === "agent");
+		check("the clue-giver's own key names an agent to aim at", agentIdx >= 0);
+		await guesserSeat.page.locator(".sn-board .sn-card").nth(agentIdx).click().catch(() => {});
+		const flipped = await Promise.all([alpha, beta].map(({ page }) => page
+			.waitForFunction((i) => document.querySelectorAll(".sn-board .sn-card")[i]
+				?.classList.contains("sn-found"), agentIdx, { timeout: 12_000 })
+			.then(() => true).catch(() => false)));
+		check("A GUESS IS ANSWERED BY THE CLUE-GIVER'S KEY, and covers the card for both",
+			flipped.every(Boolean),
+			`flipped ${JSON.stringify(flipped)} at position ${agentIdx} — if only the guesser's `
+			+ "own key were consulted this word would not be an agent at all");
+		check("the agent counter moved on both clients",
+			(await Promise.all([alpha, beta].map(({ page }) =>
+				page.locator(".sn-metric-v b").first().textContent()))).every((v) => v.trim() === "1"));
+
+		// A correct guess does not spend a token; ending the turn spends exactly one.
+		check("a correct guess spends no timer token",
+			await guesserSeat.page.locator(".sn-token.sn-spent").count() === 0);
+		await guesserSeat.page.locator(".sn-btn", { hasText: "End turn" }).click().catch(() => {});
+		await guesserSeat.page.waitForSelector(".sn-token.sn-spent", { timeout: 10_000 }).catch(() => {});
+		const spent = await Promise.all([alpha, beta].map(({ page }) => page.locator(".sn-token.sn-spent").count()));
+		check("ending the turn spends exactly one token, on both clients",
+			spent.every((n) => n === 1), JSON.stringify(spent));
+		check("the clue console has moved to the other seat",
+			await guesserSeat.page.locator(".sn-input").count() === 1
+			&& await giver.page.locator(".sn-input").count() === 0);
+		check("the log records the turn", await guesserSeat.page.locator(".sn-log-line").count() >= 3);
+
+		// ── Geometry, at the three product widths ────────────────────────────
+		// CLEARANCE, not "does it overflow": a 1px tolerance rates "fits by
+		// 0.7px" and "fits" identically, and the runner's fonts are ~27% wider
+		// than a dev box's — the measured cause of every Pages failure in the
+		// 26 days to 2026-09-14. The word box is allowed to WRAP, which is the
+		// font-independent lever; what is asserted is that it still sits inside
+		// its card afterwards, with the worst margin printed either way.
+		for (const vp of [{ width: 2560, height: 1600 }, { width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+			await guesserSeat.page.setViewportSize(vp);
+			await settle(guesserSeat.page, () => guesserSeat.page.evaluate(() =>
+				Math.round(document.querySelector(".sn-board").getBoundingClientRect().width)));
+			const g = await guesserSeat.page.evaluate(() => {
+				const cards = [...document.querySelectorAll(".sn-board .sn-card")];
+				let overX = 0, worstY = Infinity, measured = 0;
+				for (const c of cards) {
+					const face = c.querySelector(".sn-face-front");
+					const w = face?.querySelector(".sn-word");
+					if (!w || !face) continue;
+					const fb = face.getBoundingClientRect(), wb = w.getBoundingClientRect();
+					if (!fb.width || !wb.width) continue;   // mid-rerender: NaN passes every >
+					measured++;
+					// HORIZONTAL IS BY CONSTRUCTION, and is checked as such. The word
+					// box is a centred flex item that may legitimately reach both card
+					// edges, so its side clearance measured 1.0px at 390px — a bound on
+					// THAT is a coin flip under a font 27% wider than this box's. What
+					// cannot happen while `overflow-wrap:anywhere` holds is the TEXT
+					// overflowing its own box, so that is what is asserted; it goes
+					// non-zero the moment someone takes the wrap rule away.
+					overX = Math.max(overX, w.scrollWidth - w.clientWidth);
+					worstY = Math.min(worstY, fb.bottom - wb.bottom, wb.top - fb.top);
+				}
+				const board = document.querySelector(".sn-board").getBoundingClientRect();
+				return { measured, overX, worstY: +worstY.toFixed(2),
+					docW: document.documentElement.scrollWidth, innerW: window.innerWidth,
+					boardW: Math.round(board.width), consoleBottom: Math.round(
+						document.querySelector(".sn-console")?.getBoundingClientRect().bottom || 0) };
+			});
+			// THE ROSTER BEFORE THE GEOMETRY. getComputedStyle/getBoundingClientRect
+			// on a node caught mid-rerender reports zeros, and NaN passes every `>`
+			// comparison — a check that measured 3 cards and passed would look
+			// identical to one that measured 25.
+			check(`${vp.width}px measures all 25 words`, g.measured === 25, JSON.stringify(g));
+			check(`${vp.width}px no word overflows its own box`, g.overX === 0,
+				`${g.overX}px of unbreakable text over ${g.measured} cards`);
+			// VERTICAL IS THE REAL ONE: a longer word takes another LINE, and the
+			// runner's fonts are wider than this box's, so CI genuinely wraps more.
+			// Asserted as CLEARANCE with a bound above the measured 3.85px-per-side
+			// dev/CI glyph spread rather than as "did it overflow" — a 0-tolerance
+			// check rates "fits by 0.7px" and "fits" identically, which is the
+			// distinction that failed eight Pages deploys in a row.
+			check(`${vp.width}px every word clears the bottom of its card`, g.worstY >= 4,
+				`worst vertical clearance ${g.worstY}px over ${g.measured} cards`);
+			check(`${vp.width}px SecretNames does not scroll sideways`,
+				g.docW <= vp.width + 1, JSON.stringify(g));
+		}
+		// The console is the only control a phone player needs to reach, so it is
+		// pinned to the bottom edge rather than parked under a board that is
+		// taller than the viewport.
+		await guesserSeat.page.setViewportSize({ width: 390, height: 844 });
+		const sticky = await guesserSeat.page.evaluate(() => {
+			window.scrollTo(0, 0);
+			const c = document.querySelector(".sn-console");
+			return { pos: getComputedStyle(c).position, bottom: Math.round(c.getBoundingClientRect().bottom),
+				vh: window.innerHeight };
+		});
+		check("the phone console stays on screen", sticky.pos === "sticky" && sticky.bottom <= sticky.vh + 1,
+			JSON.stringify(sticky));
+
+		check("no page errors across a full SecretNames turn", errors.length === 0,
+			errors[0]?.slice(0, 180) || "");
+		await alpha.ctx.close();
+		await beta.ctx.close();
+	}
+
 	const laneA = [offlineSpender, offlineCoc, offlineDuel, offlineDissonance,
 		dissonanceSkat, dissonanceHard, dissonanceBeat, ragtagFight];
 	// `dissonanceQuartet` is lane B: it plays a whole game but arms NO worker
@@ -8196,7 +8416,7 @@ try {
 		waitingRoomKit,
 		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, historyRecovery, dmAdventures,
 		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, formControlZoom, lastDifficulty,
-		dissonanceQuartet, orbitPlay, lobbyFinishSync, blackCastlePlay, lobbyChrome];
+		dissonanceQuartet, orbitPlay, lobbyFinishSync, blackCastlePlay, secretNamesPlay, lobbyChrome];
 
 	// EVERY BLOCK MUST BE IN A LANE. Before the lanes existed, adding a block meant
 	// writing it — it then ran because it was simply the next statement. Now it has

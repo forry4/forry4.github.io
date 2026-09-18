@@ -45,6 +45,12 @@ on:
       # Black Castle — server-authoritative engine, room protocol, and base
       # catalogue. Tools/tests stay excluded by the trailing patterns below.
       - 'games/black_castle/**/*.py'
+      # SecretNames — engine, word deck and room protocol. Added in the SAME
+      # push as its app.py mount, which is the rule the Orbit comment above was
+      # written for: a game mounted here and missing from this list is served in
+      # prod off whatever code an unrelated deploy happened to carry, and the
+      # symptom is silence rather than a red run.
+      - 'games/secretnames/**/*.py'
       # ...but NOT its offline halves, for the same reason ai/offline is excluded
       # above: tools/ is the BGA audit stack, and most of ai/ is the Phase 1
       # simulator, the league and the training stack. Eight of those 22 commits

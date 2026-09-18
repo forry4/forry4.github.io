@@ -51,6 +51,14 @@ export const GAME_ACCENTS = {
 	// 3.97:1 on the card, under the 4.5 floor. The floor for anything neutral is
 	// around #8a9196.
 	blackcastle: "#a8bdb0",
+	// SIGNAL BLUE. SecretNames is the one game on the site whose subject is a
+	// transmission rather than a place or an object, and the palette had no blue
+	// of this kind: Where Wolf's #6f86d6 is a violet-leaning periwinkle (hue 228)
+	// and Orbit's #42d1c7 is green-leaning teal (177), so 201 sits in the gap
+	// between them rather than beside either. It measures 6.67:1 on the home
+	// card's light end (#272319) and 7.87:1 under the #171310 text the kit paints
+	// on top of it as a fill, so it needs no AA exemption.
+	secretnames: "#4fb3e8",
 };
 
 // Titles that do not clear the 4.5:1 AA floor on the card, and are shipped anyway

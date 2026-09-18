@@ -19,6 +19,7 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
 | [`games/rag_tag/CLAUDE.md`](games/rag_tag/CLAUDE.md) | Rag Tag (Tag Team) — the simultaneous turn resolution, the generated fighter data and where it came from, the two-pass declaration |
 | [`games/orbit/AGENTS.md`](games/orbit/AGENTS.md) | Orbit — engine, the value-only league and its search |
 | [`games/black_castle/AGENTS.md`](games/black_castle/AGENTS.md) | Black Castle — engine, the BGA-derived card catalogue, `BoardView.jsx` |
+| [`games/secretnames/CLAUDE.md`](games/secretnames/CLAUDE.md) | SecretNames (Codenames: Duet) — **the key-card inversion**, the two-sided key composition, the public/private split, and why it has no bot |
 | [`shared/CLAUDE.md`](shared/CLAUDE.md) | Shared frontend kits + URL routing |
 | [`books/CLAUDE.md`](books/CLAUDE.md) | The Books feature |
 | [`bggfilter/CLAUDE.md`](bggfilter/CLAUDE.md) | BGG Filter — the BoardGameGeek harvest + the frontend-only filter page |
@@ -48,6 +49,10 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
   per phase).
   Rag Tag (Tag Team — 2 players, 12 fighters, 120 cards; both players reveal and resolve
   at the same time, and the deck is never shuffled).
+  SecretNames (Codenames: Duet — 2 players, COOPERATIVE, no bot; 25 words, two private
+  key cards, 15 unique agents, 9 timer tokens then sudden death. **A player's key says
+  what happens when the OTHER player guesses**, so every guess resolves against
+  `keys[1 - guesser_seat]` — see its CLAUDE.md).
   Plus **Books** (a ranking/suggestions page) and **WWSD** (a browser autoplayer for a friend's
   external Splendor site).
 
@@ -96,6 +101,10 @@ games/
                        #   120 cards, decks that are never shuffled. fighters.py is
                        #   GENERATED from data/*.json by tools/import_bga.py; effects.py
                        #   is the closed op vocabulary that data is held to
+  secretnames/         # SecretNames (Codenames: Duet) — 2p COOPERATIVE word game, NO bot.
+                       #   engine.py is the rules + the two-sided key generator; words.py
+                       #   is the 399-word deck (data). player_view ships ONE key side per
+                       #   socket — that redaction IS the game
   dissonance/          # Dissonance — 2p parity trick-taking. engine.py is a PORT of
                        #   rust-cores/dissonance-core (the solver-validated reference);
                        #   tests/test_rust_parity.py is the drift gate. FIVE modes

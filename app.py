@@ -167,3 +167,12 @@ try:
     LOG.info("mounted Black Castle at /blackcastle")
 except Exception as _blackcastle_err:  # pragma: no cover - optional package
     LOG.warning("Black Castle not mounted: %s", _blackcastle_err)
+
+# SecretNames — the two-player cooperative word game (Codenames: Duet). Same
+# defensive mount: one optional game must never take down the shared backend.
+try:
+    from games.secretnames.main import secretnames_app
+    app.mount("/secretnames", secretnames_app)
+    LOG.info("mounted SecretNames at /secretnames")
+except Exception as _secretnames_err:  # pragma: no cover - optional package
+    LOG.warning("SecretNames not mounted: %s", _secretnames_err)
