@@ -319,6 +319,10 @@ def list_open_games() -> list[dict]:
         out.append({
             "id": r["id"], "host_id": r["player1_id"], "host_name": r["player1_name"],
             "player_count": len(state.get("players", {})) or 1,
+            # Who is already seated — see `state_seat_ids` in core/rooms.py and
+            # `seatStateOf` in shared/lobby.jsx. Without it an Open row can only
+            # say "your table" or "join", and offers Join on a seat you hold.
+            "player_ids": _rooms.state_seat_ids(state),
             "max_players": _valid_max_players(state.get("max_players")),
             "expansions": _valid_expansions(state.get("expansions")),
             "created_at": r["created_at"],
@@ -807,11 +811,17 @@ def _bearer_token(authorization: str | None = Header(default=None),
 
 
 @dontminion_app.get("/games/mine")
-async def games_mine(token: str | None = Depends(_bearer_token)):
-    user = get_user_by_session(token) if token else None
-    if not user:
+async def games_mine(token: str | None = Depends(_bearer_token),
+                     player_id: str | None = None):
+    # A GUEST HAS NO SESSION, and Active is the only list a STARTED game lands
+    # in — so a friend invited by link, who backed out to the lobby to wait,
+    # had no row anywhere once the host dealt. `lobby_viewer_id` in
+    # core/rooms.py carries the reasoning and states exactly what the guest
+    # fallback exposes; a real session always wins over the parameter.
+    viewer = _rooms.lobby_viewer_id(get_user_by_session(token) if token else None, player_id)
+    if not viewer:
         return {"ok": False, "games": [], "message": "unauthenticated"}
-    return {"ok": True, "games": list_user_games(user["id"])}
+    return {"ok": True, "games": list_user_games(viewer)}
 
 
 @dontminion_app.get("/games/history")

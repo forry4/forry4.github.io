@@ -253,11 +253,20 @@ def list_open_games() -> list[dict]:
     out = []
     for r in rows:
         try:
-            n = len(json.loads(r["player_ids"] or "[]"))
+            pids = [str(p) for p in json.loads(r["player_ids"] or "[]") if p]
         except Exception:
-            n = 0
+            pids = []
         out.append({"id": r["id"], "host_id": r["host_id"], "host_name": r["host_name"],
-                    "players": n, "created_at": r["created_at"]})
+                    "players": len(pids),
+                    # THE IDS, not just the count. Where Wolf is the one game that
+                    # already stored them in a column of their own, and the Open row
+                    # still threw them away — so a player who had joined somebody
+                    # else's table and gone back to the lobby was offered Join on
+                    # their own seat, which the WS refuses as a takeover. See
+                    # `seatStateOf` in shared/lobby.jsx.
+                    "player_ids": pids,
+                    "max_players": MAX_PLAYERS,
+                    "created_at": r["created_at"]})
     return out
 
 
@@ -783,11 +792,17 @@ def _bearer_token(authorization: str | None = Header(default=None),
 
 
 @werewolf_app.get("/games/mine")
-async def games_mine(token: str | None = Depends(_bearer_token)):
-    user = get_user_by_session(token) if token else None
-    if not user:
+async def games_mine(token: str | None = Depends(_bearer_token),
+                     player_id: str | None = None):
+    # A GUEST HAS NO SESSION, and Active is the only list a STARTED game lands
+    # in — so a friend invited by link, who backed out to the lobby to wait,
+    # had no row anywhere once the host dealt. `lobby_viewer_id` in
+    # core/rooms.py carries the reasoning and states exactly what the guest
+    # fallback exposes; a real session always wins over the parameter.
+    viewer = _rooms.lobby_viewer_id(get_user_by_session(token) if token else None, player_id)
+    if not viewer:
         return {"ok": False, "games": [], "message": "unauthenticated"}
-    return {"ok": True, "games": list_user_games(user["id"])}
+    return {"ok": True, "games": list_user_games(viewer)}
 
 
 @werewolf_app.post("/games/{game_id}/cancel")

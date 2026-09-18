@@ -282,6 +282,13 @@ def list_open_games() -> list[dict]:
             mp = 0
         out.append({"id": r["id"], "host_id": r["player1_id"], "host_name": r["player1_name"],
                     "win_points": wp, "player_count": player_count,
+                    # WHO IS ALREADY SEATED, so a lobby row can tell "you may join
+                    # this" from "you are already in this". Every lobby asked only
+                    # `host_id == myId`, so a player who joined someone else's
+                    # table and went back to the lobby was offered Join on a seat
+                    # they held — which the WS correctly refuses. See
+                    # `seatStateOf` in shared/lobby.jsx.
+                    "player_ids": _rooms.state_seat_ids(state),
                     "max_players": mp if 2 <= mp <= MAX_PLAYERS else MAX_PLAYERS,
                     "created_at": r["created_at"]})
     return out
@@ -3028,11 +3035,17 @@ async def get_active_games():
 
 
 @router.get("/games/mine")
-async def get_my_games(token: str | None = Depends(bearer_token)):
-    user = get_user_by_session(token)
-    if not user:
+async def get_my_games(token: str | None = Depends(bearer_token),
+                       player_id: str | None = None):
+    # A GUEST HAS NO SESSION, and Active is the only list a STARTED game appears
+    # in — so without the `player_id` fallback a guest who was invited by link,
+    # backed out to the lobby to wait and then had the host deal could not find
+    # the game anywhere, ever. `lobby_viewer_id` always prefers a real session,
+    # so a logged-in player's list is never steerable by a query string.
+    viewer = _rooms.lobby_viewer_id(get_user_by_session(token), player_id)
+    if not viewer:
         return {"ok": False, "games": [], "message": "unauthenticated"}
-    return {"ok": True, "games": list_user_games(user["id"])}
+    return {"ok": True, "games": list_user_games(viewer)}
 
 
 @router.get("/games/history")

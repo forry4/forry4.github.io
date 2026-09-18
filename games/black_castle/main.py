@@ -501,18 +501,35 @@ async def _handle_abandon(room_id: str, pid: str) -> None:
     await broadcast_state(room_id)
 
 
+def _safe_state(blob) -> dict:
+    """A stored room blob, or `{}` — never a raise. The lobby lists are the one
+    place a single corrupt row must not take the whole list down with it."""
+    try:
+        state = _decode_state(blob)
+    except Exception:
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
 def list_open_games() -> list[dict]:
     maybe_cleanup_games(TABLE, background=True)
     conn = _db()
     cur = conn.cursor()
-    cur.execute(f"""SELECT id, player1_name, player2_name, player3_name, player4_name,
-                       max_players, updated_at FROM {TABLE} WHERE status='open'
-                       ORDER BY updated_at DESC LIMIT 50""")
+    cur.execute(f"""SELECT id, host_id, player1_name, player2_name, player3_name,
+                       player4_name, max_players, state_json, updated_at FROM {TABLE}
+                       WHERE status='open' ORDER BY updated_at DESC LIMIT 50""")
     rows = cur.fetchall()
     conn.close()
     return [{"id": row["id"], "player1_name": row["player1_name"],
              "player2_name": row["player2_name"], "player3_name": row["player3_name"],
              "player4_name": row["player4_name"], "max_players": row["max_players"] or 4,
+             # THE HOST AND THE SEATED IDS, which this row never carried: it named
+             # seats and nothing else, so the lobby could not tell a table you own
+             # (or are already sitting at) from one to join, and offered Join on a
+             # seat you held — which the WS refuses as a takeover. `seatStateOf` in
+             # shared/lobby.jsx reads both.
+             "host_id": row["host_id"],
+             "player_ids": _rooms.state_seat_ids(_safe_state(row["state_json"])),
              "updated_at": row["updated_at"]} for row in rows]
 
 
@@ -592,9 +609,15 @@ async def games_open():
 
 
 @blackcastle_app.get("/games/mine")
-async def games_mine(token: str | None = Depends(_bearer_token)):
-    user = get_user_by_session(token) if token else None
-    return {"games": list_user_games(user["id"])} if user else {"games": []}
+async def games_mine(token: str | None = Depends(_bearer_token),
+                     player_id: str | None = None):
+    # A GUEST HAS NO SESSION, and Active is the only list a STARTED game lands
+    # in — so a friend invited by link, who backed out to the lobby to wait,
+    # had no row anywhere once the host dealt. `lobby_viewer_id` in
+    # core/rooms.py carries the reasoning and states exactly what the guest
+    # fallback exposes; a real session always wins over the parameter.
+    viewer = _rooms.lobby_viewer_id(get_user_by_session(token) if token else None, player_id)
+    return {"games": list_user_games(viewer)} if viewer else {"games": []}
 
 
 @blackcastle_app.get("/games/history")

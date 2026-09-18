@@ -207,16 +207,41 @@ def load_game_to_memory(room_id: str) -> bool:
     return True
 
 
+def _safe_state(blob) -> dict:
+    """A stored room blob, or `{}` — never a raise.
+
+    The lobby lists are the one place a single corrupt row must not take the
+    whole list down with it, so every read here wants the same "read what you
+    can" behaviour the rest of this file already open-codes per call site.
+    """
+    try:
+        state = _decode_state(blob)
+    except Exception:
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
 def list_open_games() -> list[dict]:
     maybe_cleanup_games(TABLE, background=True)
     conn = _db()
     cur = conn.cursor()
-    cur.execute(f"""SELECT id, player1_id, player1_name, created_at
+    cur.execute(f"""SELECT id, player1_id, player1_name, state_json, created_at
                     FROM {TABLE}
                     WHERE status='open' ORDER BY created_at DESC LIMIT 20""")
     rows = cur.fetchall()
     conn.close()
     return [{"id": r["id"], "host_id": r["player1_id"],
+             # WHO IS ALREADY SEATED, which is what makes the Open row able to
+             # say "Return" rather than "Join" to somebody who is in this room
+             # already — the state that used to strand a guest who backed out to
+             # the lobby (the WS refuses a `join` onto an occupied seat, rightly).
+             # `state_json` joins the SELECT for this: it is a never-started room,
+             # so the blob is the seat list and almost nothing else.
+             "player_ids": _rooms.state_seat_ids(_safe_state(r["state_json"])),
+             # TWO SEATS, ALWAYS, and it is stated rather than implied: the
+             # frontend's "full" answer needs a cap, and a 2p game that leaves it
+             # out reads as uncapped and offers Join to a third player.
+             "max_players": 2,
              "host_name": r["player1_name"], "created_at": r["created_at"]}
             for r in rows]
 
@@ -733,11 +758,17 @@ def _bearer_token(authorization: str | None = Header(default=None),
 
 
 @ragtag_app.get("/games/mine")
-async def games_mine(token: str | None = Depends(_bearer_token)):
-    user = get_user_by_session(token) if token else None
-    if not user:
+async def games_mine(token: str | None = Depends(_bearer_token),
+                     player_id: str | None = None):
+    # A GUEST HAS NO SESSION, and Active is the only list a STARTED game lands
+    # in — so a friend invited by link, who backed out to the lobby to wait,
+    # had no row anywhere once the host dealt. `lobby_viewer_id` in
+    # core/rooms.py carries the reasoning and states exactly what the guest
+    # fallback exposes; a real session always wins over the parameter.
+    viewer = _rooms.lobby_viewer_id(get_user_by_session(token) if token else None, player_id)
+    if not viewer:
         return {"games": []}
-    return {"games": list_user_games(user["id"])}
+    return {"games": list_user_games(viewer)}
 
 
 @ragtag_app.get("/games/history")

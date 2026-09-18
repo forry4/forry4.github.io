@@ -312,6 +312,79 @@ export function notWaiting(games) {
 	return (games || []).filter((g) => g.status !== "open");
 }
 
+// ─── "Am I already sitting at this table?" ───────────────────────────────────
+// AN OPEN-GAME ROW HAS FOUR MEANINGS AND EVERY LOBBY COULD ONLY TELL TWO APART.
+// Each one asked `g.host_id === myId` and branched Return/Cancel against Join —
+// so a player who had joined somebody else's table and then gone back to the
+// lobby was offered **Join**, on a seat they already held. The server is right to
+// refuse that (a `join` onto an occupied seat with no proof of identity is a seat
+// takeover, so it answers "seat already taken — reconnect to rejoin"), which made
+// the one row that could have carried them back in the one row that could not:
+// reported as "they went back to the menu and now they can't play."
+//
+// The four states, and what each one is FOR:
+//   "host"     — your table. Return, and Cancel to give it back.
+//   "seated"   — someone else's table you are already in. Return, via the
+//                per-seat token (`reconnect`), which is the only thing that
+//                re-enters an occupied seat.
+//   "full"     — every seat taken and not by you. Nothing to offer.
+//   "joinable" — a free seat. Join.
+//
+// `player_ids` is the field the seat test needs and it arrived with this change,
+// so the fallback matters: an OLD bundle against a new server, or a new bundle
+// against a server that has not redeployed, reads no ids and lands on the
+// previous behaviour rather than on a wrong answer. That is the expand half of
+// expand/contract — the server ships the field first, this reads it second.
+export function seatStateOf(g, myId) {
+	if (!g || !myId) return "joinable";
+	if (g.host_id && g.host_id === myId) return "host";
+	const ids = Array.isArray(g.player_ids) ? g.player_ids.filter(Boolean) : [];
+	if (ids.includes(myId)) return "seated";
+	const max = Number(g.max_players) || 0;
+	const seated = Number(g.player_count) || ids.length || 1;
+	if (max && seated >= max) return "full";
+	return "joinable";
+}
+
+// ─── The strip that says you are still seated somewhere ─────────────────────
+// BACKING OUT OF A WAITING ROOM IS NOT LEAVING THE TABLE, and the player is
+// entitled to be told which one it is: "backing out to the lobby shouldn't
+// remove you from the game lobby, it just means you might wanna do other stuff
+// while waiting for the game to start." Their seat does survive it — the server
+// keeps `players[pid]` when a socket goes — but nothing on the lobby said so, and
+// once the host dealt, the room left the Open list and the player had no row to
+// press at all.
+//
+// It sits ABOVE `.lby-cols` and never inside it: the phone tab bar shows and
+// hides columns by their `lby-col-*` class, so a fourth child of that grid can be
+// neither shown nor hidden.
+//
+// `started` is the half that changes the words AND the urgency — a table that has
+// not dealt is a thing to wait for, a table that HAS is a game running without
+// you.
+export function SeatedNotice({ roomId, started = false, connected = true, onReturn }) {
+	if (!roomId) return null;
+	return (
+		<div className={`lby-seated${started ? " lby-seated-live" : ""}`} role="status" aria-live="polite">
+			<span className="lby-seated-text">
+				<span className="lby-seated-lead">
+					{started ? "Your game has started" : "You have a seat at this table"}
+				</span>
+				<span className="lby-seated-sub">
+					{started
+						? `Room ${roomId} — it is running without you.`
+						: connected
+							? `Room ${roomId} — you will be taken in when the host deals.`
+							: `Room ${roomId} — reconnecting, so press Return if the deal beats us to it.`}
+				</span>
+			</span>
+			<button type="button" className="lby-act lby-act-primary lby-seated-go" onClick={onReturn}>
+				{started ? "Rejoin" : "Return to table"}
+			</button>
+		</div>
+	);
+}
+
 // The one action button a lobby row gets. Extracted because the five lobbies had
 // drifted to four different styles for the SAME Resume button (btn / btn-gold /
 // btn-outline / btn-outline btn-sm), and a class name copied per game is a
@@ -332,6 +405,35 @@ export function LobbyAction({ kind = "primary", onClick, children, title }) {
 			{children}
 		</button>
 	);
+}
+
+// ─── An Open row's actions ───────────────────────────────────────────────────
+// THE FOUR ANSWERS, IN ONE PLACE, because every lobby hand-wrote two of them and
+// the two it left out are the ones that strand a player. Nine copies of
+//
+//     {g.host_id === myId ? <>Return Cancel</> : <Join/>}
+//
+// is nine copies of the same wrong branch: a table you are ALREADY SEATED AT is
+// not yours and is not joinable, and the Join it was offered is refused by the
+// server as a seat takeover ("seat already taken — reconnect to rejoin"). Return
+// there goes through the per-seat token (`reconnect`), which is the only action
+// that re-enters an occupied seat.
+//
+// `onCancel` is optional: a game with no cancel endpoint renders the host's row
+// with Return alone rather than a button that cannot work.
+export function LobbyOpenActions({ state, onReturn, onJoin, onCancel }) {
+	if (state === "host") return (
+		<>
+			<LobbyAction kind="secondary" onClick={onReturn}>Return</LobbyAction>
+			{onCancel && <LobbyAction kind="danger" onClick={onCancel}>Cancel</LobbyAction>}
+		</>
+	);
+	// "You are in this room already" — the row that used to say Join.
+	if (state === "seated") return <LobbyAction kind="secondary" onClick={onReturn}>Return</LobbyAction>;
+	// A full table is not an error and not an invitation: say so instead of
+	// offering a Join the server will refuse with "room full".
+	if (state === "full") return <TurnBadge>Table full</TurnBadge>;
+	return <LobbyAction onClick={onJoin}>Join</LobbyAction>;
 }
 
 export function LobbyEmpty({ children }) {
@@ -983,15 +1085,15 @@ export function WaitingRoom({
 	game, roomId, players, hostId, myId,
 	min = 2, max = null, note = null,
 	onStart, startLabel = "Start Game", canStart = true, blockedLabel = null,
-	onLeave, onRules, user, children, banner,
+	onLeave, onRules, user, children, banner, connected = true,
 }) {
 	const info = GAME_INFO[game] || {};
 	const seats = Object.entries(players || {});
 	const seated = seats.length;
 	const short = Math.max(0, min - seated);
 	const isHost = hostId != null && hostId === myId;
-	const label = short
-		? `Waiting for ${short} more player${short === 1 ? "" : "s"}…`
+	const label = !connected ? "Reconnecting…"
+		: short ? `Waiting for ${short} more player${short === 1 ? "" : "s"}…`
 		: (!canStart && blockedLabel) ? blockedLabel : startLabel;
 	return (
 		<div className="lby-page">
@@ -1032,6 +1134,22 @@ export function WaitingRoom({
 						))}
 					</div>
 
+					{/* THE SEAT LIST IS A LIVE FEED, AND A DEAD SOCKET LOOKS EXACTLY
+					    LIKE AN EMPTY TABLE. This screen's whole content arrives over
+					    the WebSocket, so a drop freezes it at whatever it last said —
+					    reported as "I invited a friend, they joined, and it still read
+					    1/2; I had to back out and come back to see them." The host's
+					    Start button goes with it: pressing it on a closed socket sends
+					    nothing and says nothing, which is the same silence one step
+					    later. The retry itself is the game's (`useAutoReconnect`);
+					    this is the part that says so. */}
+					{!connected && (
+						<div className="wr-drop" role="status" aria-live="polite">
+							<span className="lby-spinner lby-spinner-sm" />
+							<span>Reconnecting — the seats above may be out of date.</span>
+						</div>
+					)}
+
 					{children && <div className="wr-extra">{children}</div>}
 
 					{/* The host gets the button; everyone else gets the same sentence
@@ -1042,7 +1160,7 @@ export function WaitingRoom({
 					<div className="wr-go">
 						{isHost
 							? <button type="button" className="wr-start"
-								disabled={!!short || !canStart} onClick={onStart}>{label}</button>
+								disabled={!!short || !canStart || !connected} onClick={onStart}>{label}</button>
 							: <span className="wr-status"><span className="lby-spinner" />
 								Waiting for the host to start…</span>}
 					</div>

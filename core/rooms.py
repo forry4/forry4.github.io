@@ -417,3 +417,69 @@ def state_ai_tier(state) -> str | None:
         return None
     tier = state.get("ai_difficulty") or state.get("ai_variant")
     return str(tier) if tier else None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WHO IS SITTING AT A SAVED ROOM
+# ─────────────────────────────────────────────────────────────────────────────
+def state_seat_ids(state) -> list[str]:
+    """The player ids seated in a persisted room blob, in seat order.
+
+    WHY THE OPEN-GAMES LIST NEEDS THIS. Every lobby's Open row asked one
+    question of a room — ``host_id == myId`` — and branched Return/Cancel
+    against Join. That is two of the four answers a row can have, and the
+    missing one is the one that strands a player: somebody who joined a
+    FRIEND'S table and then went back to the lobby was offered **Join**, on a
+    seat they already held. The server is right to refuse that (a ``join`` onto
+    an occupied seat with no proof of identity is a seat takeover, so it answers
+    "seat already taken — reconnect to rejoin"), so the only row that could have
+    carried them back in was the only row that could not.
+
+    ``state["players"]`` is a ``{pid: name}`` dict in all nine games and JSON
+    preserves its insertion order, so seat order comes for free — and it is the
+    order the four ``playerN_id`` columns are written in, which is what makes
+    this agree with them rather than merely coexist.
+
+    Never raises: an unreadable blob is a lobby row, not a reason to 500 the
+    list. An empty list is exactly what the frontend's fallback expects and
+    lands it on the old host-only behaviour.
+    """
+    if not isinstance(state, dict):
+        return []
+    players = state.get("players")
+    if not isinstance(players, dict):
+        return []
+    return [str(pid) for pid in players.keys() if pid]
+
+
+def lobby_viewer_id(user: dict | None, player_id: str | None) -> str | None:
+    """Whose games ``/games/mine`` should list: the session's user, else a guest.
+
+    A GUEST HAS NO SESSION, so for as long as this endpoint read only the bearer
+    token, every guest's Active column was empty in all nine games — and Active
+    is the only list a started game appears in. The whole failure the invite
+    flow was reported with ends here: a friend joins by link as a guest, backs
+    out to the lobby to wait, the host deals, and the game leaves Open without
+    ever arriving anywhere the guest can see it. It is not recoverable by
+    reloading, because there is nothing to reload.
+
+    A registered session always WINS over the parameter. Otherwise a logged-in
+    player's own list would be steerable by a query string, which is the one way
+    this could become an escalation rather than a lookup.
+
+    WHAT IT EXPOSES, stated plainly. A guest id is a client-generated random
+    (``uid()`` in each game screen, kept in ``localStorage``), and with one in
+    hand this returns that player's in-progress room ids, their opponents' names
+    and whose turn it is. That is the same shape Spender and Castles of Crimson
+    already publish to ANYONE via their public ``/games/active`` lists, and it
+    grants nothing: a WebSocket seat still needs the per-seat room token or a
+    matching session, so knowing a pid does not let you sit in its chair. It is
+    a lookup by an unguessable handle, which is what a guest identity is.
+    """
+    uid = (user or {}).get("id")
+    if uid:
+        return str(uid)
+    pid = (player_id or "").strip()
+    # Bounded on the way in: it lands straight in a SQL parameter, and the seat
+    # columns hold ids of this size. A 4KB query string is not a player.
+    return pid[:64] or None

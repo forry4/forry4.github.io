@@ -362,6 +362,13 @@ def list_open_games() -> list[dict]:
         host_board = (state.get("boards") or {}).get(state.get("host"))
         out.append({"id": r["id"], "host_id": r["player1_id"], "host_name": r["player1_name"],
                     "player_count": len(players) or 1,
+                    # WHO IS ALREADY SEATED. Every lobby's Open row asked only
+                    # `host_id == myId`, so a player who joined someone ELSE'S
+                    # table and then went back to the lobby was offered Join on a
+                    # seat they already held — which the WS correctly refuses as a
+                    # takeover. `seatStateOf` in shared/lobby.jsx turns these ids
+                    # into the fourth answer that row needs: Return.
+                    "player_ids": _rooms.state_seat_ids(state),
                     "max_players": _valid_max_players(state.get("max_players")),
                     "same_board": bool(state.get("same_board")),
                     "host_board": host_board,
@@ -1191,11 +1198,17 @@ def _bearer_token(authorization: str | None = Header(default=None),
 
 
 @coc_app.get("/games/mine")
-async def games_mine(token: str | None = Depends(_bearer_token)):
-    user = get_user_by_session(token) if token else None
-    if not user:
+async def games_mine(token: str | None = Depends(_bearer_token),
+                     player_id: str | None = None):
+    # A GUEST HAS NO SESSION, and Active is the only list a STARTED game lands
+    # in — so a friend invited by link, who backed out to the lobby to wait,
+    # had no row anywhere once the host dealt. `lobby_viewer_id` in
+    # core/rooms.py carries the reasoning and states exactly what the guest
+    # fallback exposes; a real session always wins over the parameter.
+    viewer = _rooms.lobby_viewer_id(get_user_by_session(token) if token else None, player_id)
+    if not viewer:
         return {"ok": False, "games": [], "message": "unauthenticated"}
-    return {"ok": True, "games": list_user_games(user["id"])}
+    return {"ok": True, "games": list_user_games(viewer)}
 
 
 @coc_app.get("/games/active")

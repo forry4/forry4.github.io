@@ -179,3 +179,29 @@
 	.wr-invite-url{font-size:.78rem}
 	.wr-seats{gap:7px}
 }
+
+/* ─── The dropped socket ──────────────────────────────────────────────────────
+ *
+ * THIS SCREEN'S ENTIRE CONTENT ARRIVES OVER THE WEBSOCKET, so a dropped socket
+ * freezes it at whatever it last said and there is nothing on the page to tell
+ * the two apart: "I invited a friend, they joined as a guest, and the screen
+ * still read 1/2 players — I had to back out and come back in to see them." The
+ * seat list is a live feed and a dead feed looks exactly like an empty table.
+ *
+ * It is a NOTICE, not an error: the retry is already running (`useAutoReconnect`,
+ * wired at each game's call site) and a Render cold start alone is 30-50s, so the
+ * words say what is happening rather than asking for an action. The host's Start
+ * button is disabled while it shows, because pressing it on a closed socket sends
+ * nothing and says nothing — the same silence one step later.
+ *
+ * Amber, not red: the accent belongs to the game and red belongs to a game
+ * running without you (`.lby-seated-live` in the page sheet). */
+.wr-drop{display:flex;align-items:center;justify-content:center;gap:9px;width:100%;
+	padding:9px 13px;border-radius:var(--radius,8px);
+	font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-size:.88rem;
+	color:#e8d09a;border:1px solid rgba(214,168,72,.46);background:rgba(214,168,72,.12)}
+/* The spinner is the kit's, and it must not take the accent here — this strip is
+   not about the game's identity. Its own border colour, and no `margin-right`:
+   the flex gap already spaces it (the shared `.lby-spinner-sm` carries one for
+   the inline text case). */
+.wr-drop .lby-spinner-sm{margin-right:0;border-top-color:#e8d09a}
