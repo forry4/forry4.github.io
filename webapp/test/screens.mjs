@@ -3206,9 +3206,20 @@ try {
 				const txt = (mid?.innerText || "").replace(/\s+/g, " ").trim().slice(0, 60);
 				return `${marks || "(no marker)"} :: ${txt}`;
 			};
+			// `__ticks`/`__lastTick` exist so a FAILURE can name which of the two
+			// things went wrong. A recorder driven by rAF stops dead in a tab the
+			// browser stops painting, and "the board never reached RESULT" and
+			// "the recorder stopped watching" produce the byte-identical symptom
+			// of a tail with no RESULT in it. Only the recorder's own last tick
+			// tells them apart, and it is the difference between a product bug
+			// and a harness one.
+			window.__ticks = 0;
+			window.__lastTick = 0;
 			const tick = () => {
+				window.__ticks += 1;
+				window.__lastTick = Math.round(performance.now());
 				const p = panelNow();
-				if (p !== lastPanel) { window.__panels.push([Math.round(performance.now()), p]); lastPanel = p; }
+				if (p !== lastPanel) { window.__panels.push([window.__lastTick, p]); lastPanel = p; }
 				requestAnimationFrame(tick);
 			};
 			requestAnimationFrame(tick);
@@ -3577,10 +3588,62 @@ try {
 			}
 			await sleep(120);
 		}
+		// WHAT THE BOARD IS ACTUALLY DOING when the loop gives up, read from the
+		// live DOM rather than inferred from the recorder's tail. A tail with no
+		// RESULT in it has three quite different causes — the round never
+		// finished, the round finished but the recorder had stopped watching, or
+		// the socket died under us — and the tail alone reads identically for all
+		// three. This string is the whole diagnosis on a CI box nobody can
+		// attach a debugger to, so it carries the state, not just the symptom.
+		const endState = await page.evaluate(() => {
+			const txt = (s) => document.querySelector(s)?.innerText?.replace(/\s+/g, " ").trim() || null;
+			return {
+				ticks: window.__ticks || 0,
+				lastTick: window.__lastTick || 0,
+				now: Math.round(performance.now()),
+				// now - lastTick is the tell: ~0 means the recorder was still
+				// watching and the board really is stuck; seconds mean the
+				// browser stopped painting this tab and the recorder is blind.
+				recorderStaleMs: Math.round(performance.now()) - (window.__lastTick || 0),
+				resultInDom: !!document.querySelector(".dis-result"),
+				trickInfo: txt(".dis-trickinfo"),
+				turnbar: txt(".dis-turnbar"),
+				playable: document.querySelectorAll(".dis-seat .dis-card.play").length,
+				handCards: document.querySelectorAll(".dis-table .dis-seat .dis-hand .dis-card").length,
+				onTable: document.querySelectorAll(".dis-trick .dis-card").length,
+				reconnecting: !!document.querySelector(".banner"),
+			};
+		});
+		// THE RECORDER IS AN ASYNCHRONOUS OBSERVER OF A SYNCHRONOUS FACT, AND
+		// READING IT THE INSTANT THE DOM CHANGES READS IT BEFORE IT HAS LOOKED.
+		// The loop above breaks on a `.dis-result` COUNT, which sees the DOM
+		// React has already committed; the rAF tick that RECORDS that state runs
+		// at the next frame. On this box that is ~16ms and the two are
+		// indistinguishable. On a loaded 4-core CI runner it is not, and reading
+		// `__panels` in between produced a tail that stops on the last board
+		// state and a check that failed with the round having finished
+		// perfectly — Pages run for a547428d, where the gate came in at 178s
+		// against 180-189s on the four passing runs before it, i.e. the loop had
+		// NOT burned its 48s budget waiting for a board that never moved. It was
+		// the observer that was late, not the game.
+		//
+		// So: wait for the recorder to catch up, and ask the DOM — not the
+		// recorder — whether the round actually finished. 5s against a ~16ms
+		// nominal frame is the CLEARANCE this check had none of.
+		const sawResult = await until(page,
+			() => (window.__panels || []).some(([, p]) => p.includes("RESULT")), 5_000);
 		const skatPanels = await page.evaluate(() => window.__panels || []);
 		const sRes = skatPanels.findIndex(([, p]) => p.includes("RESULT"));
-		check("a skat round 1 plays out to its result panel", sRes >= 0,
-			`tail=${JSON.stringify(skatPanels.slice(-6))}`);
+		const detail = `state=${JSON.stringify(endState)} tail=${JSON.stringify(skatPanels.slice(-6))}`;
+		// THE PRODUCT QUESTION, off the DOM, which cannot race.
+		check("a skat round 1 plays out to its result panel",
+			endState.resultInDom === true, detail);
+		// THE INSTRUMENT'S OWN LIVENESS, asserted rather than assumed: the
+		// transition check below is vacuous whenever the recorder never saw
+		// RESULT, and a silently blind recorder is a green tick over coverage
+		// that did not happen. `recorderStaleMs` in the detail says whether it
+		// was still ticking, which is the one thing the old tail could not.
+		check("...and the frame recorder watched it happen", sawResult && sRes >= 0, detail);
 		// The transition assertion, in the configuration the blink was reported
 		// in. It names whatever it finds rather than testing a guess.
 		const sBefore = sRes > 0 ? skatPanels[sRes - 1][1] : null;
@@ -6411,6 +6474,12 @@ try {
 		check("a game deep link is a room URL", /\/orbit\/[A-Z0-9]+$/.test(roomUrl), roomUrl);
 		await page.reload({ waitUntil: "domcontentloaded" });
 		await page.waitForSelector(".or-influence", { timeout: 30_000 }).catch(() => {});
+		// SAME ZERO-CLEARANCE RACE AS dissonanceSkat'S (see the reliability log,
+		// 2026-09-18): `waitForSelector` returns on the DOM React has committed,
+		// and the rAF tick that RECORDS that frame runs afterwards. Reading the
+		// log in between asserts the recorder's latency, not the product. Wait
+		// for the observer, bounded, then read it.
+		await until(page, () => (window.__orbitFrames || []).includes("game"), 5_000);
 		const painted = await page.evaluate(() => window.__orbitFrames || []);
 		check("a deep link resumes the game without flashing the lobby",
 			painted.length > 0 && !painted.includes("LOBBY") && painted.includes("game"),

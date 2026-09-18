@@ -10,6 +10,122 @@ than re-argued.
 
 ---
 
+## 2026-09-18 — the skat check asked the game a question and read the answer off a camera
+
+`a547428d` (SecretNames, the tenth game) went red on Pages with exactly one
+annotation, in a block that touches none of its code:
+
+    dissonanceSkat  a skat round 1 plays out to its result panel
+    tail=[... [16114,"board :: Bot +11 pts – – – ♦ 8 ... ♦ Q ... Skat +1 Tric"]]
+
+Nothing was wrong with Dissonance, and nothing was wrong with SecretNames.
+
+### What the tail actually said
+
+Read forward, the last six entries are a round FINISHING normally: trick 12
+completes at 15696ms, trick 13's first card lands at 15963, the second at 16096,
+and the round settles at 16114. The recorded tail ends on a complete, correct
+final trick. The check then reports that the result panel never came.
+
+### The measurement that settled it
+
+`.dis-result` renders only when `phase === "over" && !heldTrick`, so a stuck
+700ms trick hold would have frozen the board and cost the block its whole
+`400 x 120ms` budget. **It cost nothing.** The render-gate step:
+
+| run | commit | render gate |
+|---|---|---|
+| **failed** | **a547428d** | **178s** |
+| passed | d9b33cf8 | 188s |
+| passed | d035cefc | 189s |
+| passed | ac8e89d4 | 180s |
+| passed | f8dddcfb | 184s |
+
+The red run was the FASTEST of the five. A board that never moved cannot come in
+under a board that did — so the loop broke promptly on seeing `.dis-result`, the
+round finished, and the failure is downstream of the game entirely.
+
+### The defect
+
+The block installs a `requestAnimationFrame` panel recorder to catch a
+one-frame blink, then asserts round-completion out of the recorder's log:
+
+```js
+for (...) { if (await page.locator(".dis-result").count() > 0) break; ... }
+const skatPanels = await page.evaluate(() => window.__panels || []);
+check("a skat round 1 plays out to its result panel", sRes >= 0, ...);
+```
+
+The loop breaks on a `count()`, which sees the DOM React has already committed.
+The rAF tick that RECORDS that state runs at the next frame. Locally that is
+~16ms and the two are indistinguishable; on a loaded 4-core runner it is not, and
+`__panels` gets read in the gap. **The clearance was zero**, which is the same
+shape as the 09-13/14 font cluster and the 09-17 focus race: an assertion whose
+greenness measured the runner's load.
+
+Adding a tenth game is what tipped it — five roster-driven lane B blocks now walk
+10 lobbies instead of 9, several of them early, in dissonanceSkat's window. That
+is load, not a regression, and there is nothing to fix in SecretNames.
+
+### The fix, and why it is three checks
+
+The check was asking a question about the GAME and reading the answer off a
+camera. Split by what each thing actually knows:
+
+- **the product** — `endState.resultInDom`, off the live DOM, which cannot race;
+- **the instrument** — the recorder saw RESULT, after a bounded 5s wait against a
+  ~16ms nominal frame;
+- **the property** — what preceded RESULT was the board, which genuinely needs
+  frames and so genuinely needs the recorder.
+
+Without the middle one the third is vacuous whenever the recorder is blind, which
+is the "green tick over coverage that did not happen" rule. Verified non-vacuous
+by stopping the rAF chain after 120 ticks: the product check stayed **OK**, and
+the instrument check went red naming itself —
+`recorderStaleMs: 14695, resultInDom: true`.
+
+The failure detail now carries the live board state (phase markers, playable
+cards, cards on the table, the reconnect banner) rather than the tail alone. The
+old string could not tell a frozen board from a blind camera, and that ambiguity
+is what made a five-minute diagnosis take an afternoon.
+
+The other two frame recorders were audited in the same pass. `dissonanceBeat`
+reads the same `__panels` and was never at risk: its equivalent check is written
+`iRes <= 0 || ...`, and its dwell maths drops the last entry for want of a
+successor, so a missed final frame weakens it rather than reddening it.
+`orbitPlay`'s deep-link check had the identical zero-clearance read —
+`painted.includes("game")` off `__orbitFrames`, evaluated the instant
+`waitForSelector(".or-influence")` returned — and now waits for its observer
+first. It has not failed, which is the point: the same defect twice in a file
+means the pattern needs the rule, not the one site that happened to lose.
+
+### A measurement worth keeping: the beat block's real headroom
+
+Reproducing CI's 4 cores by pegging 8 of this box's 12 with busy loops did NOT
+reproduce the skat failure (it passed twice), which is itself the evidence that
+the defect is a protocol/frame race rather than a load one. It did move
+`dissonanceBeat`, the other lane A timing block: its shortest per-trick dwell,
+documented at **691-699ms of a 700ms hold** when the machine is nearly to itself,
+measured **545ms against its 550ms floor** on the harsher of the two synthetic
+runs (the block itself ran 36.5s vs 25.3s, so that run was genuinely more
+contended). Under CI's real load it has stayed green across 25+ runs.
+
+Not acted on, deliberately. The synthetic load is far harsher than CI's, the
+documented remedy is a lane move (`dmCardFace` into lane A) rather than a
+threshold change, and that remedy is reserved for the block actually turning
+flaky in CI. Recorded here so that if it ever does, the headroom curve is already
+measured and nobody re-derives it.
+
+### Carry
+
+**A recorder is an asynchronous observer of a synchronous fact.** Reading its log
+the instant the DOM changes reads it before it has looked. If a check can be
+answered from the DOM, answer it from the DOM; use the sampler only for the
+questions that are genuinely about frames, and give it a bounded wait rather than
+a coincidence.
+
+---
+
 ## 2026-09-17 — a raced assertion and a test that read one file
 
 `c10733c2` (the Black Castle UI redesign) went red on BOTH gates at once, for two

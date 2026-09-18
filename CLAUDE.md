@@ -717,6 +717,24 @@ covers the logic; each game's wiring is one line).
   someone who could sign in and unzip a log. Annotations are public. Keep the `detail` argument of
   every `check` carrying real MEASUREMENTS, not just the ids of the things that failed — that string
   is now the whole diagnosis.
+- **A FRAME RECORDER IS AN ASYNCHRONOUS OBSERVER OF A SYNCHRONOUS FACT — never answer a
+  question from it that the DOM can answer.** Two blocks install a `requestAnimationFrame`
+  panel recorder to catch a one-frame blink. `dissonanceSkat` then asserted that a round had
+  FINISHED out of the recorder's log, while its play loop broke on a `.dis-result` `count()` —
+  which sees the DOM React has already committed, whereas the tick that RECORDS it runs at the
+  next frame. Locally that gap is ~16ms and invisible; on a loaded 4-core runner `__panels` gets
+  read inside it, and the deploy goes red with the round having played out perfectly (Pages,
+  `a547428d`). The tell was the render gate coming in at **178s against 180-189s on the four
+  passing runs before it** — a board that never moved cannot be FASTER than one that did, so the
+  loop had not waited at all. Split by what each thing knows: the **product** off the DOM, the
+  **property** that needs frames off the recorder, and the **instrument's own liveness** asserted
+  in between (a tolerant `iRes <= 0 ||` is vacuous exactly when the recorder is blind). Give the
+  sampler a bounded wait, not a coincidence — the clearance here was zero, the same shape as the
+  CI-font cluster and the rules-modal focus race. The other two recorders were audited in the same
+  pass: `dissonanceBeat` was never at risk (its check is already written tolerant, and it drops the
+  last dwell for want of a successor), while `orbitPlay`'s deep-link check had the identical
+  zero-clearance read and now waits for its observer too. Detail + measurements:
+  `docs/deploy-reliability-log.md`.
 - **`NaN` PASSES EVERY `>` COMPARISON, so a geometry check must assert its ROSTER before its
   geometry.** `getComputedStyle` on a node that has left the DOM returns empty strings, so a card
   caught mid-rerender measures NaN and sails through every bound while proving nothing. The tell was
