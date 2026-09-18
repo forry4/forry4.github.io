@@ -645,15 +645,28 @@ export default function SecretNames({ myId, authUser, onExit }) {
     {showCreate && <div className="secretnames sn-overlay-scope" style={ACCENT}>
       <CreateModal title="New SecretNames table" onClose={() => setShowCreate(false)}>
         <CmRow label="Timer tokens">
+          {/* BARE NUMBERS, AND NO `wrap`. The row label already says what they
+              are, and the standard-vs-easier distinction is a sentence, so it
+              belongs in the summary rather than in three chips.
+              Both of the alternatives were measured and rejected:
+              "9 · standard" / "10 · easier" / "11 · easier" needs the kit's
+              wrapping variant, which gives each chip a 10.5rem basis and stacked
+              them into three full-width bars in a 330px panel; "9 turns" fits one
+              row but measured 246px of chips in a 290px track at 360px wide —
+              15% slack, and this control is `overflow:hidden` with `nowrap`
+              chips, so anything past the fold is unreachable rather than merely
+              clipped. Bare numbers measure 102px in that same track — 65% slack
+              at 360px and 70% at desktop, which is clear of any font spread. */}
           <CmSeg value={turns} onChange={setTurns}
             options={TURN_OPTIONS.map((v) => ({
               value: v,
-              label: v === 9 ? "9 · standard" : `${v} · easier`,
+              label: String(v),
               title: v === 9 ? "The published game" : `${v} turns before sudden death`,
-            }))} wrap />
+            }))} />
         </CmRow>
         <div className="cm-footer">
-          <span className="cm-summary">You + one partner, {turns} turns, 15 agents.</span>
+          <span className="cm-summary">You + one partner, 15 agents.
+            {turns === 9 ? " 9 turns is the standard game." : ` ${turns} turns is the easier setting.`}</span>
           <button type="button" className="cm-create" onClick={createGame}>Open table</button>
         </div>
       </CreateModal>
