@@ -18,6 +18,7 @@ import {
   RulesModal, GameMenu, rulesModalCss, createModalCss, lobbyCreateRowCss, gameMenuCss,
   useProgressiveList, useListFade, notWaiting, timeAgo,
   readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame,
+  WaitingRoom, waitingRoomCss, SeatedNotice, seatStateOf, LobbyOpenActions,
 } from "../../shared/lobby.jsx";
 import { GAME_ACCENTS } from "../../shared/accents.js";
 import { useAutoReconnect } from "../../shared/useAutoReconnect.js";
@@ -28,7 +29,8 @@ import cssText from "./SecretNames.css?inline";
 const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
 const WS_BASE = WS_RAW.replace(/\/ws$/, "");
 const HTTP_BASE = WS_RAW.replace(/^ws/, "http").replace(/\/ws$/, "");
-const styles = baseCss + lobbyCss + createModalCss + lobbyCreateRowCss + rulesModalCss + gameMenuCss + cssText;
+const styles = baseCss + lobbyCss + createModalCss + lobbyCreateRowCss + rulesModalCss
+  + gameMenuCss + waitingRoomCss + cssText;
 
 const ACCENT = { "--lby-accent": GAME_ACCENTS.secretnames };
 const TOKEN_PREFIX = "secretnames_token_";
@@ -346,12 +348,11 @@ function Rail({ game }) {
 function Lobby({ myId, authUser, openGames, activeGames, history, onRefresh, refreshing,
   onCreate, onJoin, onCancel, onExit, onRules }) {
   const active = notWaiting(activeGames);
-  // Your own waiting table is in the OPEN column (that is where a room with one
-  // seat filled belongs), so Cancel goes there too. `/games/open` is public and
-  // says nothing about who is asking, so the ownership comes from `/games/mine`,
-  // which is the same list `notWaiting` has just filtered those rooms OUT of.
-  const myOpen = new Set((activeGames || [])
-    .filter((g) => g.status === "open" && g.you_are_host).map((g) => g.id));
+  // The seat you are still holding, if any — the row `SeatedNotice` is about.
+  // `/games/mine` is the only list that knows, because the public Open list says
+  // nothing about who is asking.
+  const seated = (activeGames || []).find((g) => g.status === "open" && !g.you_are_host)
+    || (activeGames || []).find((g) => g.status === "open");
   const [lobbyTab, setLobbyTab] = useState("open");
   const [visibleHistory, historySentinel] = useProgressiveList(history);
   useListFade();
@@ -368,6 +369,10 @@ function Lobby({ myId, authUser, openGames, activeGames, history, onRefresh, ref
         { key: "active", label: "Active", count: active.length || null },
         { key: "history", label: "History", count: history.length || null },
       ]} />
+      {/* ABOVE the column grid, never inside it: the phone tab bar shows and
+          hides columns by their own class names, so a fourth child of that grid
+          could be neither shown nor hidden. */}
+      <SeatedNotice roomId={seated?.id} started={false} onReturn={() => onJoin(seated.id)} />
       <div className={`lby-cols tab-${lobbyTab}`}>
         <section className="lby-col-open">
           <LobbySectionHd title="Waiting for a partner" note={`${openGames.length} open`} />
@@ -377,9 +382,15 @@ function Lobby({ myId, authUser, openGames, activeGames, history, onRefresh, ref
               <div className="lby-card-title">{g.player1_name || "Player"} is waiting</div>
               <div className="lby-card-meta">{g.id} · {g.turns} turns · {timeAgo(g.updated_at)}</div>
             </div>
+            {/* FOUR ANSWERS, NOT TWO. This row used to ask only "do I host it?",
+                so a partner who joined by link and then went back to the lobby
+                was offered Join on a seat they already held — which the server
+                correctly refuses as a takeover, leaving the one row that could
+                have carried them back as the one row that could not. */}
             <div className="lby-card-actions">
-              <LobbyAction onClick={() => onJoin(g.id)}>{myOpen.has(g.id) ? "Return" : "Join"}</LobbyAction>
-              {myOpen.has(g.id) && <LobbyAction kind="danger" onClick={() => onCancel(g.id)}>Cancel</LobbyAction>}
+              <LobbyOpenActions state={seatStateOf(g, myId)}
+                onReturn={() => onJoin(g.id)} onJoin={() => onJoin(g.id)}
+                onCancel={() => onCancel(g.id)} />
             </div>
           </div>)}</div>
         </section>
@@ -451,7 +462,14 @@ export default function SecretNames({ myId, authUser, onExit }) {
       const headers = authUser?.session_token ? { Authorization: `Bearer ${authUser.session_token}` } : {};
       const [open, mine, old] = await Promise.all([
         fetch(`${HTTP_BASE}/secretnames/games`).then((r) => r.ok ? r.json() : { games: [] }).catch(() => ({ games: [] })),
-        fetch(`${HTTP_BASE}/secretnames/games/mine`, { headers }).then((r) => r.ok ? r.json() : { games: [] }).catch(() => ({ games: [] })),
+        // `player_id` is what lets a GUEST see their own Active column, and in a
+        // game invited by link that is most of the table: a partner who joins as
+        // a guest, backs out to the lobby to wait, and then has the host deal
+        // would otherwise have no row anywhere — Active is the only list a
+        // started game lands in. A real session always wins over it server-side
+        // (`core.rooms.lobby_viewer_id`), so it is safe to send unconditionally.
+        fetch(`${HTTP_BASE}/secretnames/games/mine?player_id=${encodeURIComponent(myId)}`, { headers })
+          .then((r) => r.ok ? r.json() : { games: [] }).catch(() => ({ games: [] })),
         fetch(`${HTTP_BASE}/secretnames/games/history`, { headers }).then((r) => r.ok ? r.json() : { games: [] }).catch(() => ({ games: [] })),
       ]);
       setOpenGames(open.games || []); writeLobbyCache("secretnames", myId, "open", open.games || []);
@@ -598,24 +616,21 @@ export default function SecretNames({ myId, authUser, onExit }) {
       </div>
     </div>}
 
+    {/* `WaitingRoom` in shared/lobby.jsx. What this screen used to be was a
+        hand-built panel with a room CODE on it — six letters plus instructions
+        for where to type them, which is the thing the kit replaced with a link
+        across all nine games. The only word SecretNames keeps is its own for
+        the act: "Deal the board" rather than the shared "Start Game". */}
     {waiting && <div className="app secretnames" style={ACCENT}>
       <style>{styles}</style>
-      <LobbyHeader onBack={exit} onRules={() => setShowRules(true)} user={<LobbyUser user={authUser} />} />
-      <div className="sn-waiting">
-        <span className="sn-code-hint">Table code</span>
-        <span className="sn-code">{roomData.room_id}</span>
-        <h1>Waiting for your partner.</h1>
-        <p>SecretNames is played by exactly two. Send this code over — the mission
-          starts by itself the moment they sit down.</p>
-        <div className="sn-seats">
-          {Object.entries(roomData.players || {}).map(([pid, name]) => (
-            <span className="sn-seat-chip" key={pid}><span className="sn-pulse" />{name}</span>
-          ))}
-          {Object.keys(roomData.players || {}).length < 2 && (
-            <span className="sn-seat-chip sn-empty">Empty seat</span>
-          )}
-        </div>
-      </div>
+      <WaitingRoom
+        game="secretnames" roomId={roomData.room_id}
+        players={roomData.players} hostId={roomData.host} myId={myId}
+        min={2} max={2} user={authUser} connected={connected}
+        note="SecretNames is played by exactly two, on the same side. Send the link over — you will each get your own key card, and neither of you ever sees the other's."
+        startLabel="Deal the board"
+        onLeave={exit} onRules={() => setShowRules(true)}
+        onStart={() => send({ action: "start" })} />
     </div>}
 
     {game && <div className="app secretnames sn-game" style={ACCENT}>

@@ -8236,18 +8236,36 @@ try {
 			await alpha.page.locator(".cm-panel .cm-seg-btn").count() === 3);
 		await alpha.page.locator(".cm-create").click().catch(() => {});
 
-		// The table waits for a partner, and says so with a code rather than a
-		// Start button — there is no host decision left to make at two seats.
-		const code = await alpha.page.waitForSelector(".sn-code", { timeout: 30_000 })
-			.then((el) => el.textContent()).catch(() => null);
-		check("a waiting table shows its code", !!code && /^[A-Z]{6}$/.test(code.trim()), String(code));
-		check("the empty seat is drawn as empty",
-			await alpha.page.locator(".sn-seat-chip.sn-empty").count() === 1);
+		// THE WAITING ROOM IS THE SHARED KIT'S, so what this block checks here is
+		// that SecretNames mounts it and that the invite really is a LINK — the
+		// chrome itself is `waitingRoomKit`'s job, three games at a time.
+		await alpha.page.waitForSelector(".wr-panel", { timeout: 30_000 }).catch(() => {});
+		check("the shared waiting room mounts", await alpha.page.locator(".wr-panel").count() === 1);
+		const invite = (await alpha.page.locator(".wr-invite-btn").getAttribute("title").catch(() => null))
+			|| (await alpha.page.locator(".wr-invite-btn").textContent().catch(() => "")) || "";
+		const code = (await alpha.page.locator(".wr-code-btn").textContent().catch(() => "") || "")
+			.replace(/[^A-Z0-9]/g, "");
+		check("the waiting room offers a room code to join by", /^[A-Z]{6}$/.test(code), JSON.stringify({ code, invite }));
+		check("...and one open seat, because SecretNames seats exactly two",
+			await alpha.page.locator(".wr-seat-open").count() === 1);
+		check("the host's deal button is held until the table fills",
+			await alpha.page.locator(".wr-start").isDisabled().catch(() => false));
 
-		await beta.page.goto(`http://localhost:${PORT}/secretnames/${code.trim()}`, { waitUntil: "networkidle" });
+		await beta.page.goto(`http://localhost:${PORT}/secretnames/${code}`, { waitUntil: "networkidle" });
+		await alpha.page.waitForFunction(() =>
+			document.querySelectorAll(".wr-seat:not(.wr-seat-open)").length === 2,
+			null, { timeout: 30_000 }).catch(() => {});
+		check("the second seat appears in the host's waiting room",
+			await alpha.page.locator(".wr-seat:not(.wr-seat-open)").count() === 2);
+		// THE HOST DEALS. SecretNames used to start the moment the table filled,
+		// which dropped whoever was reading the invite straight onto a live board.
+		check("...and the deal button is now live", !(await alpha.page.locator(".wr-start").isDisabled()));
+		check("...wearing this game's own word for the act",
+			((await alpha.page.locator(".wr-start").textContent()) || "").trim() === "Deal the board");
+		await alpha.page.locator(".wr-start").click().catch(() => {});
 		const dealt = await Promise.all([alpha, beta].map(({ page }) =>
 			page.waitForSelector(".sn-board .sn-card", { timeout: 30_000 }).then(() => true).catch(() => false)));
-		check("the second seat starts the mission for both clients", dealt.every(Boolean), JSON.stringify(dealt));
+		check("dealing puts both clients on a board", dealt.every(Boolean), JSON.stringify(dealt));
 
 		const cardCounts = await Promise.all([alpha, beta].map(({ page }) =>
 			page.locator(".sn-board .sn-card").count()));

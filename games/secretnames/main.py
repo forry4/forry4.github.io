@@ -252,12 +252,14 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                 authed = await _handle_reconnect(websocket, room_id, pid, msg) or authed
             elif action == "auth_reconnect":
                 authed = await _handle_auth_reconnect(websocket, room_id, pid, msg) or authed
-            elif action in {"move", "abandon"}:
+            elif action in {"start", "move", "abandon"}:
                 if not authed:
                     await _send(websocket, {"type": "error",
                                             "message": "not authenticated for this seat"})
                     continue
-                if action == "move":
+                if action == "start":
+                    await _handle_start(websocket, room_id, pid)
+                elif action == "move":
                     await _handle_move(websocket, room_id, pid, msg)
                 else:
                     await _handle_abandon(room_id, pid)
@@ -299,7 +301,6 @@ async def _handle_join(ws: WebSocket, room_id: str, pid: str, msg: dict) -> bool
     session_uid = None
     if msg.get("session_token"):
         session_uid = (get_user_by_session(msg.get("session_token")) or {}).get("id")
-    started = False
     async with ROOM_LOCK:
         room = _ensure_room_loaded(room_id)
         if not room:
@@ -319,18 +320,43 @@ async def _handle_join(ws: WebSocket, room_id: str, pid: str, msg: dict) -> bool
                 return False
             room["players"][pid] = name
             room.setdefault("meta", {})[pid] = {"token": _gen_token()}
-            # TWO SEATS IS THE WHOLE TABLE, so the game starts the moment the
-            # second one is filled. There is no host decision left to make, and
-            # a Start button on a two-player co-op is a screen nobody needs.
-            if len(room["players"]) == 2 and not room.get("game"):
-                _start_new_game(room)
-                started = True
         room.setdefault("sockets", {})[pid] = ws
         save_game(room_id)
     await _send(ws, {"type": "joined", "room_id": room_id,
                      "room": mk_room_state(room_id, pid)})
-    await broadcast_state(room_id, "started" if started else "room_update")
+    await broadcast_state(room_id)
     return True
+
+
+async def _handle_start(ws: WebSocket, room_id: str, pid: str) -> None:
+    """THE HOST DEALS, rather than the second seat dealing by arriving.
+
+    The first version auto-started the moment the table filled, on the reasoning
+    that a two-seat co-op has no host decision left to make. It does have one:
+    the shared `WaitingRoom` is where a player reads the invite link, watches
+    their partner actually arrive, and only then commits — and skipping it
+    dropped whoever was already looking at that screen straight onto a live
+    board. It is also the shape every other game on the site has, which is the
+    stronger of the two arguments.
+    """
+    room_id = normalize_room(room_id)
+    async with ROOM_LOCK:
+        room = _ensure_room_loaded(room_id)
+        if not room:
+            await _send(ws, {"type": "error", "message": "no such room"})
+            return
+        if room.get("host") != pid:
+            await _send(ws, {"type": "error", "message": "only the host can start"})
+            return
+        if room.get("game"):
+            await _send(ws, {"type": "error", "message": "already started"})
+            return
+        if len(room.get("players", {})) < 2:
+            await _send(ws, {"type": "error", "message": "SecretNames needs two players"})
+            return
+        _start_new_game(room)
+        save_game(room_id)
+    await broadcast_state(room_id, "started")
 
 
 async def _handle_move(ws: WebSocket, room_id: str, pid: str, msg: dict) -> None:
@@ -398,6 +424,16 @@ async def _handle_abandon(room_id: str, pid: str) -> None:
 
 
 # ─── Lobby lists ─────────────────────────────────────────────────────────────
+def _safe_state(blob) -> dict:
+    """A stored room blob, or `{}` — never a raise. The lobby lists are the one
+    place where a single unreadable row must not 500 the whole list."""
+    try:
+        state = _decode_state(blob)
+    except Exception:
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
 def _row_summary(state: dict) -> dict:
     game = state.get("game") if isinstance(state, dict) else None
     if not isinstance(game, dict):
@@ -417,19 +453,26 @@ def list_open_games() -> list[dict]:
     maybe_cleanup_games(TABLE, background=True)
     conn = _db()
     cur = conn.cursor()
-    cur.execute(f"""SELECT id, player1_name, player2_name, state_json, updated_at
+    cur.execute(f"""SELECT id, player1_id, player1_name, player2_name, state_json, updated_at
                     FROM {TABLE} WHERE status='open'
                     ORDER BY updated_at DESC LIMIT 50""")
     rows = cur.fetchall()
     conn.close()
     out = []
     for row in rows:
-        try:
-            state = _decode_state(row["state_json"])
-        except Exception:
-            state = {}
-        out.append({"id": row["id"], "player1_name": row["player1_name"],
+        state = _safe_state(row["state_json"])
+        out.append({"id": row["id"], "host_id": row["player1_id"],
+                    "player1_name": row["player1_name"],
                     "player2_name": row["player2_name"],
+                    # WHO IS ALREADY SEATED, which is what lets the Open row say
+                    # "Return" to somebody who holds a seat in it rather than
+                    # "Join". A join onto an occupied seat is a takeover and the
+                    # WS rightly refuses it, so that row was otherwise the one
+                    # row that could not carry them back in.
+                    "player_ids": _rooms.state_seat_ids(state),
+                    # TWO SEATS, ALWAYS, stated rather than implied: the
+                    # frontend's "full" answer needs a cap to compare against.
+                    "max_players": 2,
                     "turns": int(state.get("turns") or engine.DEFAULT_TURNS),
                     "updated_at": row["updated_at"]})
     return out
@@ -452,7 +495,7 @@ def list_user_games(user_id: str) -> list[dict]:
             state = {}
         game = state.get("game") if isinstance(state, dict) else None
         out.append({
-            "id": row["id"], "status": row["status"],
+            "id": row["id"], "status": row["status"], "host_id": row["player1_id"],
             "player1_name": row["player1_name"], "player2_name": row["player2_name"],
             "you_are_host": row["player1_id"] == user_id,
             "turns": int(state.get("turns") or engine.DEFAULT_TURNS),
@@ -509,9 +552,15 @@ async def games_open():
 
 
 @secretnames_app.get("/games/mine")
-async def games_mine(token: str | None = Depends(_bearer_token)):
-    user = get_user_by_session(token) if token else None
-    return {"games": list_user_games(user["id"])} if user else {"games": []}
+async def games_mine(token: str | None = Depends(_bearer_token),
+                     player_id: str | None = None):
+    # A GUEST HAS NO SESSION, and Active is the only list a STARTED game lands
+    # in — so a partner invited by link, who backed out to the lobby to wait,
+    # would have no row anywhere once the host dealt. `lobby_viewer_id` carries
+    # the reasoning and states exactly what the guest fallback exposes; a real
+    # session always wins over the parameter.
+    viewer = _rooms.lobby_viewer_id(get_user_by_session(token) if token else None, player_id)
+    return {"games": list_user_games(viewer)} if viewer else {"games": []}
 
 
 @secretnames_app.get("/games/history")

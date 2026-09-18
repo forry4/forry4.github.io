@@ -93,6 +93,21 @@ booby-traps the stdlib RNG and plays a turn, so a future draw fails loudly.
 
 ---
 
+## The table
+
+Two seats, and the HOST deals — the shared `WaitingRoom` (shared/lobby.jsx) is where a
+player reads the invite link and watches their partner arrive. The first version
+auto-started the moment the table filled, on the reasoning that a two-seat co-op has no
+host decision left; it does have one, and skipping it dropped whoever was reading the
+invite straight onto a live board. The only word this game keeps is its own for the act
+("Deal the board" rather than the shared "Start Game").
+
+`list_open_games` publishes `host_id` / `player_ids` / `max_players` so the lobby's
+`seatStateOf` can tell *seated* from *joinable* — without them a partner who joined by
+link and went back to the lobby is offered Join on a seat they already hold, which the
+WebSocket correctly refuses as a takeover. `/games/mine` accepts `player_id` so a GUEST
+sees their own Active column, which in a game invited by link is most of the table.
+
 ## Frontend notes
 
 - **The word's type scale is `100cqw / --len`**, where `--len` is the longest

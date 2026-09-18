@@ -53,11 +53,18 @@ def run(coro):
     return asyncio.run(coro)
 
 
-def _table(room="r1"):
-    """A started two-seat table: alice creates, bob joins, the game deals."""
+def _seated(room="r1"):
+    """Two seats filled and NOT dealt — the waiting room."""
     run(m._handle_create(FakeWS(), room, "alice", {"name": "Alice"}))
     run(m._handle_join(FakeWS(), room, "bob", {"name": "Bob"}))
     return m.ROOMS[m.normalize_room(room)]
+
+
+def _table(room="r1"):
+    """A started two-seat table: both seated, then the HOST deals."""
+    room_obj = _seated(room)
+    run(m._handle_start(FakeWS(), room, "alice"))
+    return room_obj
 
 
 # ── Identity binding ─────────────────────────────────────────────────────────
@@ -70,15 +77,51 @@ def test_creating_binds_the_creator_and_opens_a_table_for_one():
     assert ws.sent[-1]["type"] == "created"
 
 
-def test_the_second_seat_starts_the_game_by_itself():
-    room = _table()
+def test_the_second_seat_fills_the_table_but_does_not_deal():
+    """The host deals. The waiting room is where a player reads the invite link
+    and watches their partner arrive, and auto-starting dropped whoever was
+    already looking at it straight onto a live board."""
+    room = _seated()
     assert set(room["players"]) == {"alice", "bob"}
+    assert room["status"] == "open" and room["game"] is None
+
+
+def test_only_the_host_can_deal_and_only_with_two_seats():
+    run(m._handle_create(FakeWS(), "r1", "alice", {"name": "Alice"}))
+    alone = FakeWS()
+    run(m._handle_start(alone, "r1", "alice"))
+    assert alone.sent[-1]["message"] == "SecretNames needs two players"
+    assert m.ROOMS["R1"]["game"] is None
+    run(m._handle_join(FakeWS(), "r1", "bob", {"name": "Bob"}))
+    guest = FakeWS()
+    run(m._handle_start(guest, "r1", "bob"))
+    assert guest.sent[-1]["message"] == "only the host can start"
+    assert m.ROOMS["R1"]["game"] is None
+    run(m._handle_start(FakeWS(), "r1", "alice"))
+    assert m.ROOMS["R1"]["status"] == "playing"
+    assert m.ROOMS["R1"]["game"]["phase"] == "clue"
+    twice = FakeWS()
+    run(m._handle_start(twice, "r1", "alice"))
+    assert twice.sent[-1]["message"] == "already started"
+
+
+def test_an_unauthenticated_socket_cannot_deal():
+    _seated()
+    ws = FakeWS([json.dumps({"action": "start"})])
+    run(m.ws_room_player(ws, "r1", "alice"))
+    assert ws.sent[-1]["message"] == "not authenticated for this seat"
+    assert m.ROOMS["R1"]["game"] is None
+
+
+def test_a_started_table_is_playing_with_a_dealt_board():
+    room = _table()
     assert room["status"] == "playing"
     assert room["game"]["phase"] == "clue"
+    assert len(room["game"]["words"]) == 25
 
 
 def test_a_third_socket_cannot_take_a_seat_at_a_two_player_table():
-    _table()
+    _seated()
     ws = FakeWS()
     assert run(m._handle_join(ws, "r1", "carol", {"name": "Carol"})) is False
     assert ws.sent[-1]["message"] == "this table is full"
@@ -243,7 +286,71 @@ def test_an_unknown_action_is_refused_without_authenticating_anything():
 def test_a_created_table_persists_its_chosen_turn_count():
     run(m._handle_create(FakeWS(), "r9", "alice", {"name": "Alice", "turns": 11}))
     run(m._handle_join(FakeWS(), "r9", "bob", {"name": "Bob"}))
+    run(m._handle_start(FakeWS(), "r9", "alice"))
     assert m.ROOMS["R9"]["game"]["turns_max"] == 11
+
+
+def test_the_open_list_publishes_who_is_seated_so_a_row_can_say_return(tmp_path, monkeypatch):
+    """`seatStateOf` on the client needs the seat ids; without them every Open
+    row falls back to "do I host it?" and offers Join on a seat you hold.
+
+    Driven through the real SQL against a throwaway file DB rather than a canned
+    row, because the half that broke first is the SELECT: `player1_id` was not in
+    the column list, so `host_id` came back as a KeyError on a query that was
+    otherwise perfectly valid.
+    """
+    import sqlite3
+
+    from core import db as core_db
+    monkeypatch.setattr(core_db, "DB_PATH", str(tmp_path / "t.db"))
+    monkeypatch.setattr(core_db, "_USE_TURSO", False, raising=False)
+    monkeypatch.setattr(m, "maybe_cleanup_games", lambda *_a, **_k: None)
+    conn = m._db()
+    conn.cursor().execute(f"""CREATE TABLE IF NOT EXISTS {m.TABLE} (
+        id TEXT PRIMARY KEY, status TEXT,
+        player1_id TEXT, player1_name TEXT, player2_id TEXT, player2_name TEXT,
+        host_id TEXT, state_json TEXT, created_at INTEGER, updated_at INTEGER)""")
+    conn.commit()
+
+    room = _seated("r7")
+    state = {"players": dict(room["players"]), "host": room["host"], "status": "open",
+             "game": None, "meta": {}, "turns": 9, "created_at": 1}
+    conn.cursor().execute(
+        f"INSERT INTO {m.TABLE} (id,status,player1_id,player1_name,player2_id,"
+        f"player2_name,host_id,state_json,created_at,updated_at) "
+        f"VALUES (?,?,?,?,?,?,?,?,?,?)",
+        ("R7", "open", "alice", "Alice", "bob", "Bob", "alice",
+         m._encode_state(state), 1, 1))
+    conn.commit()
+    conn.close()
+
+    row = next((g for g in m.list_open_games() if g["id"] == "R7"), None)
+    assert row is not None, "the open table is not in the open list"
+    assert row["host_id"] == "alice"
+    assert row["player_ids"] == ["alice", "bob"]
+    assert row["max_players"] == 2
+    assert row["turns"] == 9
+
+
+def test_an_unreadable_row_does_not_take_the_whole_open_list_down(tmp_path, monkeypatch):
+    from core import db as core_db
+    monkeypatch.setattr(core_db, "DB_PATH", str(tmp_path / "t.db"))
+    monkeypatch.setattr(core_db, "_USE_TURSO", False, raising=False)
+    monkeypatch.setattr(m, "maybe_cleanup_games", lambda *_a, **_k: None)
+    conn = m._db()
+    conn.cursor().execute(f"""CREATE TABLE IF NOT EXISTS {m.TABLE} (
+        id TEXT PRIMARY KEY, status TEXT,
+        player1_id TEXT, player1_name TEXT, player2_id TEXT, player2_name TEXT,
+        host_id TEXT, state_json TEXT, created_at INTEGER, updated_at INTEGER)""")
+    conn.cursor().execute(
+        f"INSERT INTO {m.TABLE} (id,status,player1_id,player1_name,state_json,"
+        f"created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
+        ("BAD", "open", "alice", "Alice", "not a blob at all", 1, 1))
+    conn.commit()
+    conn.close()
+    rows = m.list_open_games()
+    assert [r["id"] for r in rows] == ["BAD"]
+    assert rows[0]["player_ids"] == [] and rows[0]["turns"] == m.engine.DEFAULT_TURNS
 
 
 def test_a_bogus_turn_count_falls_back_to_the_standard_game():
