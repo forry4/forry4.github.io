@@ -226,6 +226,39 @@ as you would expect** — back when four games had one, the `list_user_history` 
 independently 20/30/30/30 until 2026-08-05; all six now bind `core.rooms.HISTORY_LIMIT` (see the
 lobby History note below).
 
+**THE WAITING ROOM IS SHARED — `WaitingRoom` in `shared/lobby.jsx`, and the invite is a LINK,
+not a room code.** The screen between "I made a table" and "we are playing" is the one screen whose
+entire job is to get a second person to the same URL, and all nine games built their own. They
+drifted in every direction available: the way out read "← Back to Menu" / "Leave" / "← Back to
+lobby" / "Back to lobby", lived inside a ☰ in two games, was the header's own Back in one — and in
+Black Castle **did not exist at all**. The room code was click-to-copy in two, inert text in six and
+the page's `<h1>` in two. Four printed a static "Waiting for the host to start…" with nothing moving
+on the page.
+- **And the thing all nine were FOR was missing from all nine**: what a host could copy was the
+  room CODE, so an invite was six letters plus instructions for where to type them. Room URLs have
+  worked since `shared/router.js` landed and every game already ENTERS a room from one; `InviteLink`
+  puts that URL on the screen as the primary control and keeps the code under it for what a link
+  cannot do (read aloud across a table, typed into the lobby's Join field).
+- **`inviteUrl` takes the path segment from the catalogue's `screen`, never the catalogue id** —
+  they differ for exactly one game (`wherewolf` → `/werewolf`), which is what makes a hand-built URL
+  right eight times and a 404 the ninth. It goes through `buildPath`, which also owns `VITE_BASE`.
+- **The copy confirms on the button and a FAILED copy says so.** `navigator.clipboard` is undefined
+  outside a secure context and rejects when the document is unfocused, and from the outside that is
+  indistinguishable from success — so there is an `execCommand` floor under it and a live region
+  that names the failure. A game passes no toast wiring; the kit owns the state.
+- **A game brings its accent, its own word for Start only where the ACT differs (`Deal & Start`,
+  `Start the fight`), and its own setup in `children`** (Where Wolf's role picker, Dontminion's
+  expansion line). Re-typing the DEFAULT label is refused — "Start", "Start game" and "Start Game
+  (2 players)" were three spellings of one button, and the seat chips above it already say the count.
+- **Two gates, different halves.** `shared/tests/test_waiting_room_kit.py` reads the JSX as text
+  (every game mounts it, the words live in one file, nobody rolls their own clipboard call or
+  hand-builds a URL); `spenderWaitingRoom`/`waitingRoomKit` in `webapp/test/screens.mjs` copy a real link
+  and paste it into a fresh tab, then walk three games asserting the kit's COMPUTED typography is
+  identical. The second is not optional: six of nine game sheets are concatenated after the shared
+  one, so `.blackcastle button{font-family:inherit}` at (0,1,1) beats `.wr-start` at (0,1,0) and no
+  selector scan can see it. Black Castle's `:not()` list is a prefix allowlist of kit prefixes
+  (`lby-`/`cm-`/`rl-`/`gm-`/`wr-`) and must be widened whenever the kit grows one.
+
 **THE HOW-TO-PLAY MODAL IS SHARED — `RulesModal` in `shared/lobby.jsx`, reached from a Rules button
 in every lobby's create row (right of ↻).** Chrome only: each game's WORDS live in its own
 `games/<game>/rules.jsx`. The panel is capped to the viewport and `.rl-body` is the ONLY scroller

@@ -63,7 +63,8 @@ import { lobbyCss, LobbyHeader, LobbyLoading, GameMenu, gameMenuCss, readLobbyCa
 	LobbyBotTier,
 	createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss, LobbyHero, LobbyUser,
 	RulesModal, rulesModalCss,
-	useProgressiveList, LobbySectionHd, LobbyTabs, TurnBadge, LobbyMatchup, LobbyAction, useListFade } from "../../shared/lobby.jsx";
+	useProgressiveList, LobbySectionHd, LobbyTabs, TurnBadge, LobbyMatchup, LobbyAction, useListFade,
+	WaitingRoom, waitingRoomCss } from "../../shared/lobby.jsx";
 import SpenderRules from "./rules.jsx";
 import { GemToken, CardView, GEM_COLORS, GEM_LABELS, GEM_HEX,
 	splendorPanelCss, splendorCardCss, splendorCardExtraCss, splendorPillCss,
@@ -629,7 +630,7 @@ const css = baseCss + lobbyCss + _cssText
   .diff-easy{color:#7fc08a;border-color:#3f6a48}
   .diff-tricky{color:#d8b25a;border-color:#6a5a2f}
   .diff-hard{color:#e0696b;border-color:#6a3536}
-` + gameMenuCss + createModalCss + lobbyCreateRowCss + rulesModalCss;
+` + gameMenuCss + createModalCss + lobbyCreateRowCss + rulesModalCss + waitingRoomCss;
 
 // ─── Sub-components ───────────────────────────────────────────────────────
 
@@ -3412,51 +3413,29 @@ export default function SpenderApp() {
 		</>
 	);
 
-	// Waiting screen
-	if (screen === "spender" && spenderScreen === "waiting") return (
-		<>
-			<style>{css}</style>
-			<div className="app" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
-				<div className="waiting-screen">
-					<p className="waiting-title">Room Code</p>
-					<p className="waiting-sub">Share this code with your friends — 2 to 4 players</p>
-					<div className="room-code-box" title="Click to copy"
-						onClick={() => { navigator.clipboard?.writeText(roomId); setToast("Copied!"); }}>
-						{roomId}
-					</div>
-					<p className="copy-hint">tap code to copy</p>
-
-					<p className="waiting-sub">{Object.keys(roomData?.players || {}).length}/4 players joined</p>
-					<ul className="player-list">
-						{roomData?.players && Object.entries(roomData.players).map(([id, name]) => (
-							<li key={id} className={id === myId ? "me" : ""}>
-								<span className={`conn-dot ${roomData?.status !== "over" ? "connected" : "disconnected"}`} />
-								{name}{id === myId ? " (you)" : ""}
-								{id === roomData?.host ? " ♔" : ""}
-							</li>
-						))}
-					</ul>
-
-					{roomData?.host === myId ? (
-						<button className="btn btn-gold btn-full"
-							disabled={!roomData?.players || Object.keys(roomData.players).length < 2}
-							onClick={handleStart}>
-							{(Object.keys(roomData?.players || {}).length >= 2)
-								? `Start Game (${Object.keys(roomData.players).length} players)`
-								: "Start Game"}
-						</button>
-					) : (
-						<p className="status-msg">Waiting for the host to start…</p>
-					)}
-
-					<button className="btn btn-ghost btn-full mt-8" onClick={goToMenu}>
-						← Back to Menu
-					</button>
+	// Waiting screen — the SHARED kit (`WaitingRoom` in shared/lobby.jsx). It used to
+	// be a hand-built panel here: a click-to-copy ROOM CODE, a `<ul>` of seats, and a
+	// "← Back to Menu" that no other game spelled the same way.
+	if (screen === "spender" && spenderScreen === "waiting") {
+		return (
+			<>
+				<style>{css}</style>
+				<div className="app" style={{ "--lby-accent": GAME_ACCENTS.spender }}>
+					<WaitingRoom
+						game="spender" roomId={roomId}
+						players={roomData?.players} hostId={roomData?.host} myId={myId}
+						min={2} max={roomData?.max_players || 4}
+						note="The host deals once everyone is in."
+						user={authUser}
+						onLeave={goToMenu}
+						onRules={() => setShowRules(true)}
+						onStart={handleStart} />
+					{rulesModalEl}
+					{toast && <div className="toast">{toast}</div>}
 				</div>
-				{toast && <div className="toast">{toast}</div>}
-			</div>
-		</>
-	);
+			</>
+		);
+	}
 
 	// Winner screen (held back 0.5s after the game ends — see the resultReady effect —
 	// so the final board is visible for a beat before the result is revealed).

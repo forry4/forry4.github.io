@@ -9,6 +9,7 @@ import {
   LobbyCreateRow, lobbyCreateRowCss, useProgressiveList, LobbyTabs, useLastDifficulty,
   LobbyHero, LobbyUser, useListFade,
   RulesModal, rulesModalCss, LobbyBotTier,
+  WaitingRoom, waitingRoomCss,
 } from "../../shared/lobby.jsx";
 // Only the shared CARD FRAME (sizing vars + .card chrome). Dontminion's card face
 // is its own markup — no gems here, but the frame keeps all five games' cards the
@@ -964,7 +965,7 @@ function useSocket(onMessage) {
 
 // ─── Styles (no backticks anywhere in the css string) ───────────────────────
 const dmStyles = baseCss + lobbyCss + splendorCardCss + _cssText
-  + gameMenuCss + createModalCss + lobbyCreateRowCss + rulesModalCss;
+  + gameMenuCss + createModalCss + lobbyCreateRowCss + rulesModalCss + waitingRoomCss;
 
 // ─── Main component ─────────────────────────────────────────────────────────
 export default function Dontminion({ myId, authUser, onExit }) {
@@ -2389,33 +2390,25 @@ export default function Dontminion({ myId, authUser, onExit }) {
     );
   }
 
+  // `WaitingRoom` in shared/lobby.jsx. Dontminion's own line here is the EXPANSION
+  // list — which kingdom you are about to be dealt is the thing a joiner wants to
+  // know, and it is exactly what the children/`note` slot is for.
   if (screen === "waiting") {
-    const count = Object.keys(names).length;
     const cap = roomData?.max_players || 4;
-    const isHost = roomData?.host === myId;
     return (
       <div className="app dm" style={{ "--lby-accent": GAME_ACCENTS.dontminion }}>
         <style>{dmStyles}</style>
-        <LobbyHeader onBack={leaveToLobby} backLabel="← Leave" title="Dontminion" user={authUser?.name ? <span className="lby-head-name">{authUser.name}</span> : "Guest"} />
-        <div className="dm-wait">
-          <h2>Room {roomId}</h2>
-          <p className="dm-wait-note">Share this code — friends join with it from the lobby.</p>
-          <p className="dm-wait-note">{(roomData?.expansions || []).map((e) => EXPANSIONS.find((x) => x.id === e)?.name || e).join(" + ")}</p>
-          <div className="dm-wait-players">
-            Players ({count}/{cap})
-            <ul>
-              {Object.entries(names).map(([p, n]) => (
-                <li key={p}>{n}{p === roomData?.host ? " ♛" : ""}{p === myId ? " (you)" : ""}</li>
-              ))}
-            </ul>
-          </div>
-          {isHost
-            ? <button className="btn btn-gold btn-full" disabled={count < 2}
-                onClick={() => send({ action: "start" })}>
-                {count < 2 ? "Waiting for players…" : `Deal & Start (${count} players)`}
-              </button>
-            : <div className="lby-loading"><span className="lby-spinner" /> Waiting for the host to start…</div>}
-        </div>
+        <WaitingRoom
+          game="dontminion" roomId={roomId}
+          players={names} hostId={roomData?.host} myId={myId}
+          min={2} max={cap}
+          note={(roomData?.expansions || []).map((e) => EXPANSIONS.find((x) => x.id === e)?.name || e).join(" + ")}
+          user={authUser}
+          onLeave={leaveToLobby}
+          onRules={() => setShowRules(true)}
+          onStart={() => send({ action: "start" })}
+          startLabel="Deal & Start" />
+        {showRules && renderRules()}
         {toast && <div className="dm-toast">{toast}</div>}
       </div>
     );

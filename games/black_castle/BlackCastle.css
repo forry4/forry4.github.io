@@ -16,6 +16,10 @@
  *   - `.blackcastle p{margin:0}` ties `.rl-body p{margin:0 0 11px}` on specificity and
  *     wins on order, so the SHARED Rules modal ran its paragraphs together.
  *   - the focus ring replaced the kit's accent outline on those same controls.
+ * The two `:not()` lists below are that fix, and they are a PREFIX ALLOWLIST: every
+ * shared-kit class prefix has to appear in them or the next one added to the kit
+ * loses its typeface here and nowhere else. `wr-` (the shared waiting room) is the
+ * fifth, and it is the reason this is spelled out rather than left as four literals.
  * The ground, the typeface and the resets now live on the GAME SCREENS (`.bc-play`,
  * `.bc-waiting`). The root keeps only the tokens and what is true on every screen.
  *
@@ -29,9 +33,9 @@
 /* The kit's own controls are exempt from every reset below. `lby-`/`cm-`/`rl-`/`gm-`
    is the whole shared class vocabulary (shared/lobby.jsx), so this is the seam
    between "Black Castle's chrome" and "the site's chrome", stated once. */
-.blackcastle button:not([class*="lby-"],[class*="cm-"],[class*="rl-"],[class*="gm-"]),.blackcastle input{font-family:inherit}
+.blackcastle button:not([class*="lby-"],[class*="cm-"],[class*="rl-"],[class*="gm-"],[class*="wr-"]),.blackcastle input{font-family:inherit}
 .blackcastle button{touch-action:manipulation}.blackcastle button:disabled{cursor:default}.blackcastle svg{flex-shrink:0;vertical-align:middle}
-.blackcastle button:not([class*="lby-"],[class*="cm-"],[class*="rl-"],[class*="gm-"]):focus-visible,.blackcastle a:focus-visible,.blackcastle summary:focus-visible{outline:3px solid #f6d896;outline-offset:4px}
+.blackcastle button:not([class*="lby-"],[class*="cm-"],[class*="rl-"],[class*="gm-"],[class*="wr-"]):focus-visible,.blackcastle a:focus-visible,.blackcastle summary:focus-visible{outline:3px solid #f6d896;outline-offset:4px}
 .bc-play h1,.bc-play h2,.bc-play h3,.bc-play p,.bc-waiting h1,.bc-waiting p{margin:0}.bc-kicker{font-size:10px;letter-spacing:.2em;font-weight:650;color:var(--bc-gold)}
 .bc-primary{display:inline-flex;align-items:center;justify-content:center;gap:12px;min-height:46px;border:1px solid #efd292;border-radius:4px;padding:11px 19px;background:linear-gradient(110deg,#ebca89,#d4b071);color:#1b251e;font-weight:700;font-size:13px;cursor:pointer;box-shadow:0 3px 0 #0002;transition:filter .15s,transform .15s}.blackcastle .bc-primary{color:#19251e}.bc-primary:hover:not(:disabled){filter:brightness(1.09);transform:translateY(-1px)}.bc-primary:disabled{background:#33413a;border-color:#4a5548;color:#bdc0b0;box-shadow:none}
 .bc-waiting{min-height:calc(100vh - 60px);display:grid;place-content:center;text-align:center;padding:32px;background:linear-gradient(#101b1a99,#101b1a),url('/blackcastle/castle-moonlight.png') center/cover}.bc-waiting h1{font:42px Georgia,serif;margin:18px 0}.bc-waiting p{max-width:500px;margin:auto;color:#ced0be}.bc-wait-seats{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:25px 0}.bc-wait-seats span{padding:12px 20px;border:1px solid #737954;background:#172623;border-radius:5px}.bc-waiting>.bc-kicker{font-size:23px;letter-spacing:.2em}

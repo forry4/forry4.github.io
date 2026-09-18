@@ -80,10 +80,8 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-lost{color:#d98a8a;font-weight:700}
 .coc-section-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;letter-spacing:.18em;color:var(--gold);text-transform:uppercase;margin:18px 0 8px;border-bottom:1px solid var(--border);padding-bottom:6px}
 .coc-card-meta{font-size:.78rem;color:var(--text-dim)}
-.coc-waiting{max-width:min(420px,100% - 28px);margin:60px auto;text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px}
-.coc-waiting-players{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:10px}
-.coc-waiting-player{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;color:var(--text);background:var(--surface2);border:1px solid var(--border);border-radius:999px;padding:4px 12px}
-.coc-code{font-family:'Cinzel','Cinzel Fallback',serif;font-size:2rem;letter-spacing:.3em;color:var(--gold);background:var(--surface2);border:1px dashed var(--border);border-radius:var(--radius);padding:12px;margin:14px 0;cursor:pointer}
+/* The waiting room is `WaitingRoom` in shared/lobby.jsx; `.coc-waiting*` and
+   `.coc-code` went with it. */
 /* game */
 .coc-statusbar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:10px 14px}
 .coc-status-left{display:flex;align-items:center;gap:14px;flex-wrap:wrap;min-width:0}

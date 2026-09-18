@@ -7,7 +7,7 @@ import {
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss, useProgressiveList, LobbyHero, LobbyUser, useListFade,
   readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame, timeAgo, useLastDifficulty,
-  LobbyBotTier,
+  LobbyBotTier, WaitingRoom, waitingRoomCss,
 } from "../../shared/lobby.jsx";
 import { GAME_ACCENTS } from "../../shared/accents.js";
 import { buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
@@ -51,7 +51,7 @@ const ORBIT_AI_WORKER_CAP = 4;
 // both speak the same boundary, and Expert additionally asks it to search.
 const CLIENT_AI_TIERS = ["hard", "expert"];
 const styles = baseCss + lobbyCss + gameMenuCss + createModalCss
-  + lobbyCreateRowCss + rulesModalCss + orbitCssText;
+  + lobbyCreateRowCss + rulesModalCss + waitingRoomCss + orbitCssText;
 
 const PLANETS = ["mercury", "venus", "terra", "mars", "jupiter"];
 const FACTIONS = ["robot", "human", "animod"];
@@ -1250,15 +1250,20 @@ export default function Orbit({ myId, authUser, onExit }) {
     showRules, setShowRules, toast,
   }} />;
 
+  // `WaitingRoom` in shared/lobby.jsx.
   if (screen === "waiting") {
-    const host = roomData?.host === myId;
     return <div className="app orbit" style={{ "--lby-accent": GAME_ACCENTS.orbit }}><style>{styles}</style>
-      <div className="or-wait"><span className="or-kicker">Orbit · 1 vs 1</span><h1>Room {roomId}</h1>
-        <p>{Object.keys(names).length < 2 ? "Waiting for an opponent…" : "Both players are here."}</p>
-        <div className="or-wait-seats">{Object.values(names).map((name) => <span key={name}>{name}</span>)}</div>
-        {host && Object.keys(names).length >= 2 && <button type="button" className="or-primary" onClick={() => send({ action: "start" })}>Start game</button>}
-        <LobbyAction kind="secondary" onClick={leaveToLobby}>Back to lobby</LobbyAction>
-      </div>{toast && <div className="or-toast">{toast}</div>}
+      <WaitingRoom
+        game="orbit" roomId={roomId}
+        players={names} hostId={roomData?.host} myId={myId}
+        min={2} max={2}
+        note="One vs one, five planets, three factions."
+        user={authUser}
+        onLeave={leaveToLobby}
+        onRules={() => setShowRules(true)}
+        onStart={() => send({ action: "start" })} />
+      {showRules && <RulesModal title="How to play — Orbit" onClose={() => setShowRules(false)}><OrbitRules /></RulesModal>}
+      {toast && <div className="or-toast">{toast}</div>}
     </div>;
   }
 

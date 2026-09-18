@@ -4,7 +4,8 @@ import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyMatchup, LobbyLo
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss,
   useProgressiveList, LobbyTabs, useLastDifficulty, LobbyHero,
-  LobbyAction, LobbyUser, useListFade, LobbyBotTier } from "../../shared/lobby.jsx";
+  LobbyAction, LobbyUser, useListFade, LobbyBotTier,
+  WaitingRoom, waitingRoomCss } from "../../shared/lobby.jsx";
 import CocRules from "./rules.jsx";
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 // Offline vs-AI: the local game driver (wasm engine + IndexedDB saves) — see offline.js.
@@ -721,7 +722,7 @@ function Pips({ n }) {
 // lobbyCss is appended AFTER CoC's own styles (see the close of this template) so the
 // shared .lby-* rules win the specificity TIE against CoC's `.coc *{margin:0;padding:0}`
 // reset (both are one class) — otherwise the reset strips the kit's padding/margins.
-const css = _cssText + lobbyCss + gameMenuCss + createModalCss + lobbyCreateRowCss + rulesModalCss;
+const css = _cssText + lobbyCss + gameMenuCss + createModalCss + lobbyCreateRowCss + rulesModalCss + waitingRoomCss;
 
 // ─── Hex geometry ─────────────────────────────────────────────────────────────
 const HEX_S = 26;
@@ -2264,42 +2265,33 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
     );
   }
 
-  // The waiting/game screens render the board, so they still wait for the layout fetch.
-  if (!board) {
-    return (<div className="coc coc-neutral" style={{ "--lby-accent": GAME_ACCENTS.coc }}><style>{css}</style><LobbyLoading /></div>);
-  }
-
   // ─── Waiting ─────────────────────────────────────────────────────────────
+  // `WaitingRoom` in shared/lobby.jsx — the panel, the invite link, the seats and
+  // the way out are the kit's; CoC brings its accent and its seat cap.
   if (screen === "waiting") {
-    const isHost = roomData?.host === myId;
-    const names = Object.entries(players);           // [pid, name] — up to 4 seats
-    const count = names.length;
     const cap = roomData?.max_players || 4;          // host-chosen seat cap
     return (
-      <div className="coc"><style>{css}</style>
-        <div className="coc-wrap">
-          <div className="coc-waiting">
-            <div className="coc-section-title" style={{ border: "none" }}>Room Code</div>
-            <div className="coc-code" onClick={() => { navigator.clipboard?.writeText(roomId); setToast("Copied!"); }}>{roomId}</div>
-            <p className="coc-card-meta">{count}/{cap} players joined{count < 2 ? " (need at least 2)" : ""}</p>
-            <div className="coc-waiting-players">
-              {names.map(([pid, nm]) => (
-                <span key={pid} className="coc-waiting-player">
-                  {pid === myId ? `${nm} (you)` : nm}{pid === roomData?.host ? " · host" : ""}
-                </span>
-              ))}
-            </div>
-            <div style={{ marginTop: 18, display: "flex", gap: 10, justifyContent: "center" }}>
-              {isHost
-                ? <button className="coc-btn gold" disabled={count < 2} onClick={() => send({ action: "start" })}>Start Game</button>
-                : <span className="coc-card-meta">Waiting for host…</span>}
-              <button className="coc-btn ghost" onClick={leaveToLobby}>Leave</button>
-            </div>
-          </div>
-        </div>
+      <div className="coc" style={{ "--lby-accent": GAME_ACCENTS.coc }}><style>{css}</style>
+        <WaitingRoom
+          game="coc" roomId={roomId}
+          players={players} hostId={roomData?.host} myId={myId}
+          min={2} max={cap}
+          user={authUser}
+          onLeave={leaveToLobby}
+          onRules={() => setShowRules(true)}
+          onStart={() => send({ action: "start" })} />
+        {cocRulesModal}
         {toast && <div className="coc-toast">{toast}</div>}
       </div>
     );
+  }
+
+  // The GAME screens render the board, so they still wait for the layout fetch.
+  // The waiting room above does NOT any more — it is the shared kit, it draws no
+  // tiles, and making an invite screen wait on a board fetch put a spinner in
+  // front of the one thing a host opens the room to do.
+  if (!board) {
+    return (<div className="coc coc-neutral" style={{ "--lby-accent": GAME_ACCENTS.coc }}><style>{css}</style><LobbyLoading /></div>);
   }
 
   // ─── Winner ──────────────────────────────────────────────────────────────

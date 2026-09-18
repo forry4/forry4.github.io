@@ -1,0 +1,181 @@
+/* ─── THE WAITING ROOM ────────────────────────────────────────────────────────
+ *
+ * The screen between "I made a table" and "we are playing": the one page in the
+ * product whose entire job is to get a second person to the same URL. Every game
+ * had built its own, and the nine of them had drifted the way everything in this
+ * repo drifts when nothing is watching — the way out read "← Back to Menu",
+ * "Leave", "← Back to lobby", "Back to lobby" and, in Black Castle, nothing at
+ * all; the room code was a click-to-copy box in two games, inert text in five,
+ * and the page's own heading in two. See `WaitingRoom` in shared/lobby.jsx.
+ *
+ * It is CHROME, in the sense `test_lobby_chrome_is_shared.py` means: the site owns
+ * this furniture and it is the same in all nine games. What a game brings is its
+ * accent, its own words for the Start button, and whatever setup belongs to it
+ * (Where Wolf's role picker, Dontminion's expansion line) — those go in the
+ * children slot and are the game's to style.
+ *
+ * Appended AFTER `lobbyCss`, so `.lby-page`'s ground is already in scope: a
+ * waiting room stands in the same room as the lobby it was created from, lit by
+ * the same accent lamp. That is deliberate and not merely convenient — the two
+ * screens are one step apart and a different ground reads as a different site.
+ */
+
+/* The measure. Narrower than `.lby-page-in`'s 1500px grid measure because there is
+   exactly one column of content here; a 1500px-wide seat list is a spreadsheet. */
+.wr-in{width:100%;max-width:560px;margin-inline:auto;padding:28px 24px 48px}
+@media(max-width:600px){.wr-in{padding:18px 14px 36px}}
+
+.wr-panel{display:flex;flex-direction:column;align-items:center;gap:18px;
+	padding:26px 24px 24px;border-radius:14px;text-align:center;
+	background:linear-gradient(180deg,rgba(38,34,26,.92),rgba(24,21,16,.92));
+	border:1px solid var(--border,#3a342a);
+	box-shadow:inset 0 1px 0 rgba(255,240,215,.06),0 18px 44px -28px #000}
+@media(max-width:600px){.wr-panel{padding:20px 16px 20px;gap:15px}}
+
+/* ── The identity ──────────────────────────────────────────────────────────
+   Same lockup as the lobby's band (emblem plate, foiled wordmark), one size down
+   and centred — the player has already chosen the game, so this names where they
+   are rather than selling it. The kicker above it is the screen's own label, and
+   it is the answer to the question this page exists to raise: nothing is broken,
+   you are waiting on a person. */
+.wr-id{display:flex;flex-direction:column;align-items:center;gap:9px}
+.wr-emblem{display:grid;place-items:center;width:44px;height:44px;border-radius:11px;
+	color:var(--lby-accent,#c9a84c);background:color-mix(in oklab,var(--lby-accent,#c9a84c) 36%,#232019);
+	border:1px solid color-mix(in oklab,var(--lby-accent,#c9a84c) 44%,transparent);
+	box-shadow:inset 0 1px 0 rgba(255,240,215,.08)}
+.wr-emblem svg{width:25px;height:25px;display:block}
+.wr-name{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;
+	font-size:clamp(1.25rem,1.05rem + .8vw,1.6rem);line-height:1.1;letter-spacing:.05em;margin-right:-.05em;
+	color:var(--lby-accent,#c9a84c)}
+@supports ((-webkit-background-clip:text) or (background-clip:text)){
+	.wr-name{background-image:linear-gradient(177deg,
+		color-mix(in oklab,var(--lby-accent,#c9a84c) 48%,#fff4d8) 2%,
+		var(--lby-accent,#c9a84c) 54%,
+		color-mix(in oklab,var(--lby-accent,#c9a84c) 62%,#000) 100%);
+		-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;
+		filter:drop-shadow(0 1px 0 rgba(0,0,0,.5))}
+}
+.wr-kicker{font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-weight:600;
+	font-size:.74rem;letter-spacing:.14em;text-transform:uppercase;color:var(--text-soft,#b3a58b)}
+
+/* ── The invite ────────────────────────────────────────────────────────────
+   THE LINK IS THE CONTROL AND THE CODE IS THE FALLBACK, which is the inversion
+   this whole kit exists for. Every game used to offer the room CODE, so inviting
+   someone meant sending them six letters plus an explanation of where to type
+   them; the link needs no explanation and survives being pasted anywhere.
+
+   One button, full width, and the URL is inside it rather than beside it: a
+   separate "Copy" button next to selectable text gives the player two targets for
+   one intention, and on a phone the small one is the one that is hard to hit. */
+.wr-invite{display:flex;flex-direction:column;align-items:stretch;gap:8px;width:100%}
+/* An explicit family on the BUTTON, although every string inside it already has
+   one: a `<button>` with no `font-family` computes to the UA's Arial, which is a
+   value someone reading a computed-style dump has to stop and rule out. */
+.wr-invite-btn{display:flex;align-items:center;gap:11px;width:100%;min-height:52px;
+	font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;
+	padding:11px 14px;cursor:pointer;text-align:left;border-radius:var(--radius,8px);
+	color:var(--text,#e8dfce);border:1px solid color-mix(in srgb,var(--lby-accent,#c9a84c) 52%,transparent);
+	background:linear-gradient(180deg,color-mix(in oklab,var(--lby-accent,#c9a84c) 22%,#272319),color-mix(in oklab,var(--lby-accent,#c9a84c) 14%,#1d1a15));
+	box-shadow:inset 0 1px 0 rgba(255,240,215,.09);
+	transition:background .15s,border-color .15s,box-shadow .15s}
+.wr-invite-btn:hover{border-color:var(--lby-accent,#c9a84c);
+	background:linear-gradient(180deg,color-mix(in oklab,var(--lby-accent,#c9a84c) 32%,#272319),color-mix(in oklab,var(--lby-accent,#c9a84c) 21%,#1d1a15));
+	box-shadow:inset 0 1px 0 rgba(255,240,215,.12),0 6px 16px -9px var(--lby-accent,#c9a84c)}
+.wr-invite-btn:focus-visible{outline:2px solid var(--lby-accent,#c9a84c);outline-offset:2px}
+.wr-invite-ic{flex:0 0 auto;display:inline-flex;width:20px;height:20px;color:var(--lby-accent,#c9a84c)}
+.wr-invite-ic svg{width:100%;height:100%;display:block}
+.wr-invite-text{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1 1 auto}
+.wr-invite-label{font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-weight:600;
+	font-size:.68rem;letter-spacing:.13em;text-transform:uppercase;color:var(--lby-accent,#c9a84c)}
+/* THE URL IS ELLIPSISED, NOT WRAPPED. It is a handle for a click, not something
+   anyone reads to the end, and letting it wrap made the button two and three lines
+   tall on a phone — the tallest object on the page, for the part of it that
+   carries no information. `direction:rtl` keeps the ROOM CODE visible when the
+   host's origin is long, since that is the only part that differs. */
+.wr-invite-url{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.82rem;
+	color:var(--text,#e8dfce);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+	direction:rtl;text-align:left}
+.wr-invite-hint{flex:0 0 auto;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;
+	letter-spacing:.06em;font-weight:600;color:var(--lby-accent,#c9a84c)}
+/* The one state change in the control: the whole button goes green on success, so
+   the confirmation is where the finger already is rather than in a corner toast
+   the player is not looking at. */
+.wr-invite-btn.ok{border-color:#5fbf7a;
+	background:linear-gradient(180deg,rgba(95,191,122,.26),rgba(95,191,122,.14))}
+.wr-invite-btn.ok .wr-invite-hint,.wr-invite-btn.ok .wr-invite-ic,.wr-invite-btn.ok .wr-invite-label{color:#8fe0a4}
+
+/* ── The code ──────────────────────────────────────────────────────────────
+   Still here, and still click-to-copy, because a link is useless read aloud
+   across a room and the lobby's Join field wants exactly these six characters. */
+.wr-code-row{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap}
+.wr-code-lbl{font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-weight:600;
+	font-size:.7rem;letter-spacing:.13em;text-transform:uppercase;color:var(--text-soft,#b3a58b)}
+.wr-code-btn{display:inline-flex;align-items:center;gap:8px;cursor:pointer;
+	padding:6px 13px;border-radius:var(--radius,8px);background:rgba(0,0,0,.3);
+	border:1px solid var(--border,#3a342a);color:var(--text,#e8dfce);
+	font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.05rem;font-weight:700;letter-spacing:.2em;
+	text-transform:uppercase;transition:border-color .15s,background .15s,color .15s}
+.wr-code-btn:hover{border-color:var(--lby-accent,#c9a84c);background:rgba(0,0,0,.44)}
+.wr-code-btn:focus-visible{outline:2px solid var(--lby-accent,#c9a84c);outline-offset:2px}
+.wr-code-btn.ok{border-color:#5fbf7a;color:#8fe0a4}
+
+/* ── The seats ─────────────────────────────────────────────────────────────
+   One chip per player plus one per EMPTY seat, because "2/4 players" as a number
+   and four boxes of which two are outlines say different things: the outlines are
+   what make it obvious the table is still waiting rather than merely small. */
+.wr-count{font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-size:.86rem;
+	color:var(--text-soft,#b3a58b)}
+.wr-seats{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;width:100%}
+.wr-seat{display:inline-flex;align-items:center;gap:7px;padding:7px 13px;border-radius:999px;
+	font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-size:.92rem;
+	color:var(--text,#e8dfce);background:rgba(0,0,0,.26);border:1px solid var(--border,#3a342a)}
+.wr-seat-me{border-color:color-mix(in srgb,var(--lby-accent,#c9a84c) 62%,transparent);
+	background:color-mix(in srgb,var(--lby-accent,#c9a84c) 13%,transparent)}
+.wr-seat-open{border-style:dashed;color:var(--text-soft,#b3a58b);background:transparent}
+.wr-seat-crown{color:var(--lby-accent,#c9a84c);font-size:.9em}
+.wr-seat-you{color:var(--text-soft,#b3a58b);font-size:.82em}
+
+/* The game's own line (expansions, seat rules, a deck summary). */
+.wr-note{font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-size:.9rem;
+	color:var(--text-soft,#b3a58b);margin:0;max-width:44ch}
+
+/* The children slot. Full width and left-aligned, because what lands here is a
+   form (Where Wolf's role stepper) and a centred form is unreadable. */
+.wr-extra{width:100%;text-align:left}
+
+/* ── The go button ─────────────────────────────────────────────────────────
+   `.lby-cta`'s lit plate, full width: it is the one thing this page is for, the
+   same way Create is the one thing the lobby is for. */
+.wr-go{display:flex;flex-direction:column;align-items:stretch;gap:10px;width:100%}
+.wr-start{width:100%;min-height:46px;padding:11px 18px;cursor:pointer;border-radius:var(--radius,8px);
+	font-family:'Cinzel','Cinzel Fallback',serif;font-size:.9rem;letter-spacing:.05em;font-weight:600;
+	color:#12100c;border:1px solid color-mix(in srgb,var(--lby-accent,#c9a84c) 72%,#000);
+	background:linear-gradient(180deg,color-mix(in srgb,var(--lby-accent,#c9a84c) 84%,#fff5dc),var(--lby-accent,#c9a84c));
+	box-shadow:inset 0 1px 0 rgba(255,255,255,.26),0 3px 9px -7px color-mix(in srgb,var(--lby-accent,#c9a84c) 55%,transparent);
+	transition:filter .15s,box-shadow .15s,transform .15s}
+.wr-start:hover:not(:disabled){filter:brightness(1.08);transform:translateY(-1px)}
+.wr-start:disabled{opacity:.38;cursor:not-allowed;filter:none;box-shadow:none;transform:none}
+.wr-start:focus-visible{outline:2px solid var(--lby-accent,#c9a84c);outline-offset:2px}
+/* The non-host's half of the same row. It carries the kit's spinner so the page
+   has a moving part — the four games that printed a static sentence here were the
+   four that got asked whether the site had frozen. */
+.wr-status{display:inline-flex;align-items:center;justify-content:center;gap:9px;min-height:46px;
+	font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-size:.94rem;color:var(--text-soft,#b3a58b)}
+.wr-status .lby-spinner{width:15px;height:15px;border-width:2px}
+
+/* Visually hidden, still announced. The `clip-path` + 1px box is the form that
+   survives a screen reader's virtual cursor; `display:none` and `visibility:hidden`
+   remove the node from the accessibility tree, which is the opposite of the intent. */
+.lby-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+	clip-path:inset(50%);white-space:nowrap;border:0}
+
+/* ── Phones ────────────────────────────────────────────────────────────────
+   44px IS THE TOUCH MINIMUM AND IT BELONGS TO EVERY CONTROL, which is the same
+   rule the create row learned the hard way (see lobby.lobby-create-row-css.css).
+   The invite button and the Start button clear it on their own; the room code
+   does not — it is sized by its text, and at 6px of padding it measures ~34px. */
+@media(max-width:600px){
+	.wr-code-btn{min-height:44px;padding-inline:15px}
+	.wr-invite-url{font-size:.78rem}
+	.wr-seats{gap:7px}
+}

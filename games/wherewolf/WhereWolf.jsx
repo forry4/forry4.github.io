@@ -3,7 +3,8 @@ import { baseCss } from "../../shared/theme.js";
 import { lobbyCss, LobbyHeader, LobbySectionHd, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame,
   createModalCss, CreateModal, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss, LobbyHero, LobbyAction, LobbyTabs, timeAgo,
-  notWaiting, LobbyUser, useListFade } from "../../shared/lobby.jsx";
+  notWaiting, LobbyUser, useListFade,
+  WaitingRoom, waitingRoomCss } from "../../shared/lobby.jsx";
 import WhereWolfRules from "./rules.jsx";
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 
@@ -213,7 +214,7 @@ function useIsMobile() {
 }
 
 // ─── Styles (baseCss first; NEVER put a backtick inside this template) ───────
-const css = baseCss + lobbyCss + _cssText + gameMenuCss + createModalCss + lobbyCreateRowCss + rulesModalCss;
+const css = baseCss + lobbyCss + _cssText + gameMenuCss + createModalCss + lobbyCreateRowCss + rulesModalCss + waitingRoomCss;
 
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function WhereWolf({ myId, authUser, onExit }) {
@@ -705,11 +706,14 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   }
 
   // ─── Waiting room (+ host role picker) ───────────────────────────────────────
+  // The PANEL is `WaitingRoom` in shared/lobby.jsx; the role picker below is Where
+  // Wolf's own and rides in the children slot. `canStart`/`blockedLabel` carry the
+  // one blocker a seat count cannot express: the deck has to be players + 3.
   if (screen === "waiting") {
     const players = roomData?.players || {};
     const ids = Object.keys(players);
     const need = ids.length + 3;
-    const enough = ids.length >= (roomData?.min_players || 3);
+    const minPlayers = roomData?.min_players || 3;
     // Non-hosts see EXACTLY what the host has picked (room.deck) — no recommended
     // fallback, so before the host picks they see nothing (not a misleading default),
     // and they see over-/under-full selections as-is. The host seeds their own picker
@@ -721,26 +725,23 @@ export default function WhereWolf({ myId, authUser, onExit }) {
     const deckOk = selected === need;
     return (
       <div className="ww" style={{ "--lby-accent": GAME_ACCENTS.wherewolf }}><style>{css}</style>
-        <div className="ww-wrap">
-          <div className="ww-top">
-            <div className="ww-top-left"><GameMenu onLeave={leaveToLobby} onRules={() => setShowRules(true)} />
-              <span className="ww-title">Where Wolf</span></div>
-            <div className="ww-row" style={{ gap: 8 }}>
-              {!connected && <button className="ww-btn sm" onClick={() => reconnectNow()} title="Reconnect">⟳ Reconnecting…</button>}
-              <span className="ww-user">{playerName}</span>
+        <WaitingRoom
+          game="wherewolf" roomId={roomId}
+          players={players} hostId={roomData?.host} myId={myId}
+          min={minPlayers} max={roomData?.max_players || 10}
+          note="Three cards go face-down in the centre, so the deck is always three more than the table."
+          user={authUser}
+          onLeave={leaveToLobby}
+          onRules={() => setShowRules(true)}
+          banner={!connected && (
+            <div className="ww-row" style={{ justifyContent: "center", marginBottom: 10 }}>
+              <button className="ww-btn sm" onClick={() => reconnectNow()} title="Reconnect">⟳ Reconnecting…</button>
             </div>
-          </div>
-          <div className="ww-hero"><p className="ww-card-meta">Share this code</p><div className="ww-code">{roomId}</div></div>
-          <div className="ww-section">Players ({ids.length}/{roomData?.max_players || 10})</div>
-          <div className="ww-players-list">
-            {ids.map((pid) => (
-              <div className="ww-pl" key={pid}>
-                {roomData?.host === pid && <span className="crown">♛</span>}
-                <span>{players[pid]}{pid === myId ? " (you)" : ""}</span>
-              </div>
-            ))}
-          </div>
-
+          )}
+          onStart={startGame}
+          startLabel="Deal & Start"
+          canStart={deckOk}
+          blockedLabel={`Deck ${selected}/${need}`}>
           <div className="ww-section">Roles in the deck
             <span className={`ww-deck-status ${deckOk ? "ok" : "bad"}`}>
               {selected} / {need}{deckOk ? " ✓" : isHost ? (selected < need ? ` · add ${need - selected}` : ` · remove ${selected - need}`) : ""}
@@ -763,7 +764,6 @@ export default function WhereWolf({ myId, authUser, onExit }) {
               </div>
               <div className="ww-row" style={{ gap: 8 }}>
                 <button className="ww-btn sm" onClick={() => pushDeck(roomData?.recommended_deck || [])}>Recommended</button>
-                <span className="ww-card-meta">3 cards are placed face-down in the center.</span>
               </div>
             </>
           ) : (
@@ -778,16 +778,9 @@ export default function WhereWolf({ myId, authUser, onExit }) {
               </div>
             </div>
           )}
-
-          <div className="ww-row" style={{ marginTop: 12 }}>
-            {isHost
-              ? <button className="ww-btn gold" disabled={!enough || !deckOk} onClick={startGame}>
-                  {!enough ? `Need ${roomData?.min_players || 3}+ players` : !deckOk ? `Deck ${selected}/${need}` : "Deal & Start"}</button>
-              : <span className="ww-card-meta">Waiting for the host to start…</span>}
-          </div>
-          {wwRulesModal}
-          {toast && <div className="ww-toast">{toast}</div>}
-        </div>
+        </WaitingRoom>
+        {wwRulesModal}
+        {toast && <div className="ww-toast">{toast}</div>}
       </div>
     );
   }

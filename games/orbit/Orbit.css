@@ -97,18 +97,8 @@
   color: #ffe5ea;
 }
 
-.or-wait {
-  position: relative;
-  z-index: 1;
-  width: min(560px, calc(100vw - 32px));
-  margin: 10vh auto 0;
-  padding: clamp(1.5rem, 4vw, 3rem);
-  text-align: center;
-  border: 1px solid var(--or-line);
-  border-radius: 24px;
-  background: linear-gradient(145deg, rgba(35, 39, 72, .96), rgba(13, 16, 34, .98));
-  box-shadow: 0 30px 80px #0008;
-}
+/* The waiting room is `WaitingRoom` in shared/lobby.jsx now; `.or-wait` and its
+   seat pills went with it. `.or-kicker` stays -- the board uses it too. */
 .or-kicker, .or-eyebrow {
   color: var(--lby-accent);
   font-size: .72rem;
@@ -116,10 +106,6 @@
   letter-spacing: .14em;
   text-transform: uppercase;
 }
-.or-wait h1 { margin: .35rem 0 .7rem; font-size: clamp(2rem, 8vw, 3.5rem); }
-.or-wait p { color: var(--or-dim); }
-.or-wait-seats { display: flex; justify-content: center; gap: .6rem; margin: 1.4rem 0; }
-.or-wait-seats span { padding: .55rem .9rem; border: 1px solid var(--or-line); border-radius: 999px; }
 .or-primary {
   margin: .5rem;
   padding: .72rem 1.1rem;

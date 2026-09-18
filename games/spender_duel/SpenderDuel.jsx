@@ -5,7 +5,8 @@ import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyMatchup, LobbyLo
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss,
   useProgressiveList, LobbyTabs, notWaiting, LobbyAction, useLastDifficulty,
-  LobbyHero, LobbyUser, useListFade, LobbyBotTier } from "../../shared/lobby.jsx";
+  LobbyHero, LobbyUser, useListFade, LobbyBotTier,
+  WaitingRoom, waitingRoomCss } from "../../shared/lobby.jsx";
 // The gems, jewel cards and move log are SHARED with Spender (same game family, so
 // they must look the same). Duel adds only what Splendor Duel needs on top: pearls,
 // crowns, wild bonuses and ability glyphs — all optional props on the same CardView.
@@ -312,7 +313,7 @@ const css = _cssText;
 // Spender's shared card/gem/log rules come FIRST, then Duel's own layout on top.
 const duelStyles = baseCss + lobbyCss + splendorPanelCss + splendorCardCss + splendorCardExtraCss
   + splendorPillCss + splendorLogCss + css + gameMenuCss + createModalCss + lobbyCreateRowCss
-  + rulesModalCss;
+  + rulesModalCss + waitingRoomCss;
 
 // ─── Log formatting ─────────────────────────────────────────────────────────
 // One log record -> {name, action}, matching Spender's formatLogMove shape so the
@@ -1720,23 +1721,25 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
     );
   }
 
+  // `WaitingRoom` in shared/lobby.jsx. What Duel used to have here was a room CODE
+  // and a "Back to lobby" — one of five spellings of the same button across nine games.
   if (screen === "waiting") {
-    const isHost = roomData?.host === myId;
-    const nPlayers = Object.keys(names).length;
     return (
-      <div className="app duel">
+      <div className="app duel" style={{ "--lby-accent": GAME_ACCENTS.duel }}>
         <style>{duelStyles}</style>
-        <div className="duel-waiting">
-          <h1 className="duel-title">Spender Duel</h1>
-          <p>Share this code with a friend:</p>
-          <div className="duel-code">{roomId}</div>
-          <p className="duel-muted">{Object.values(names).join(" · ") || "…"}</p>
-          {isHost && nPlayers >= 2 && <button className="btn btn-gold" onClick={() => send({ action: "start" })}>Start Game</button>}
-          {isHost && nPlayers < 2 && <p className="duel-muted">Waiting for an opponent to join…</p>}
-          <div style={{ marginTop: 18 }}>
-            <button className="btn btn-outline" onClick={leaveToLobby}>{"←"} Back to lobby</button>
-          </div>
-        </div>
+        <WaitingRoom
+          game="duel" roomId={roomId}
+          players={names} hostId={roomData?.host} myId={myId}
+          min={2} max={2}
+          user={authUser}
+          onLeave={leaveToLobby}
+          onRules={() => setShowRules(true)}
+          onStart={() => send({ action: "start" })} />
+        {showRules && (
+          <RulesModal title="How to play — Spender Duel" onClose={() => setShowRules(false)}>
+            <DuelRules />
+          </RulesModal>
+        )}
         {toast && <div className="duel-toast">{toast}</div>}
       </div>
     );

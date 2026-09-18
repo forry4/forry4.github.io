@@ -74,6 +74,15 @@ CHROME = (
     "lby-create-row", "lby-code",
     # the phone tab bar
     "lby-tabs", "lby-tab",
+    # the waiting room — the screen between the lobby and the board, and the one
+    # the whole invite flow happens on. Nine hand-built copies of it is what
+    # `WaitingRoom` replaced; a game repainting these is the same thing again,
+    # one stylesheet further down. `.wr-extra` is deliberately absent: it is the
+    # children slot, and what a game puts in it is the game's.
+    "wr-panel", "wr-id", "wr-emblem", "wr-name", "wr-kicker",
+    "wr-invite", "wr-invite-btn", "wr-invite-label", "wr-invite-url", "wr-invite-hint",
+    "wr-code-row", "wr-code-lbl", "wr-code-btn",
+    "wr-count", "wr-seats", "wr-seat", "wr-start", "wr-status",
     # the two shared modals
     "cm-panel", "cm-title", "cm-create", "cm-seg", "cm-seg-btn", "cm-summary",
     "cm-label", "cm-row", "cm-x",

@@ -1049,7 +1049,11 @@ try {
 	// socket, which the vs-AI walk never touches.
 	async function spenderWaitingRoom(log) {
 		const mk = async (id) => {
-			const c = await browser.newContext();
+			// CLIPBOARD PERMISSIONS, because the invite link is the point of this
+			// screen and "the button went green" is not the same claim as "the URL
+			// is on the clipboard". Chromium auto-grants write to the focused page
+			// and refuses read without this.
+			const c = await browser.newContext({ permissions: ["clipboard-read", "clipboard-write"] });
 			await c.addInitScript((pid) => localStorage.setItem("spender_user",
 				JSON.stringify({ id: pid, name: pid, guest: true })), id);
 			return c;
@@ -1070,46 +1074,104 @@ try {
 		await host.waitForSelector(".lby-create-row", { timeout: 25_000 }).catch(() => {});
 		await host.locator(".lby-cta").click({ timeout: 15_000 }).catch(() => {});
 		await host.waitForSelector(".cm-panel", { timeout: 15_000 }).catch(() => {});
-		// Switch the opponent segment from the default (AI) to "friend".
+		// Switch the opponent segment from the default (AI) to "friend"...
 		await host.locator(".cm-seg button").first().click({ timeout: 10_000 }).catch(() => {});
+		// ...and open FOUR seats, because this block seats three identities before it
+		// is done (host, joiner, and the invited stranger who signs in at the end) and
+		// the default is two. With the default the room is full by the time the
+		// stranger arrives, their join is correctly refused, and the failure reads as
+		// "invite links are broken" rather than "the harness booked too small a table".
+		await host.locator(".cm-row", { hasText: "Players" })
+			.locator(".cm-seg-btn", { hasText: /^4$/ }).first()
+			.click({ timeout: 10_000 }).catch(() => {});
 		await host.locator(".cm-create").click({ timeout: 15_000 }).catch(() => {});
 
-		const gotWaiting = await host.waitForSelector(".room-code-box", { timeout: 30_000 })
+		const gotWaiting = await host.waitForSelector(".wr-panel", { timeout: 30_000 })
 			.then(() => true).catch(() => false);
 		check("a friend game reaches the waiting room", gotWaiting);
-		const code = (await host.locator(".room-code-box").innerText().catch(() => "")).trim();
+		const code = (await host.locator(".wr-code-btn").innerText().catch(() => "")).trim();
 		check("the waiting room shows a join code", /^[A-Z]{4,8}$/.test(code), `got ${JSON.stringify(code)}`);
+
+		// ── THE INVITE LINK, END TO END ────────────────────────────────────────
+		// The whole reason this screen exists, and until the shared kit landed what
+		// it offered was the room CODE: six letters plus an explanation of where to
+		// type them. Three separate claims, and only the third is the feature:
+		//   1. the button RENDERS the room's own URL (not the lobby's, not another
+		//      game's — the catalogue id is not the path segment for Where Wolf);
+		//   2. clicking it puts that URL on the CLIPBOARD (the button turning green
+		//      is a rendering fact, and a failed `navigator.clipboard` looks exactly
+		//      like a successful one from the outside — which is why this reads the
+		//      clipboard rather than the class);
+		//   3. pasting it into a fresh tab lands in the room.
+		const shown = (await host.locator(".wr-invite-url").innerText().catch(() => ""))
+			.replace(/[\u2066\u2069]/g, "").trim();
+		check("the invite control shows this room's own URL", shown.endsWith(`/spender/${code}`),
+			`shown ${JSON.stringify(shown)} for code ${code}`);
+
+		await host.locator(".wr-invite-btn").click({ timeout: 10_000 }).catch(() => {});
+		const copied = await host.evaluate(() => navigator.clipboard.readText()).catch((e) => `ERR ${e}`);
+		check("clicking the invite control copies the link", copied === `http://localhost:${PORT}/spender/${code}`,
+			`clipboard ${JSON.stringify(String(copied).slice(0, 120))}`);
+		check("the copy says so on the button itself",
+			await host.locator(".wr-invite-btn.ok").count().catch(() => 0) === 1);
 
 		if (code) {
 			await joiner.goto(`http://localhost:${PORT}/spender`, { waitUntil: "networkidle" });
 			await joiner.waitForSelector(".lby-code", { timeout: 25_000 }).catch(() => {});
 			await joiner.locator(".lby-code").fill(code).catch(() => {});
 			await joiner.locator(".lby-join-btn").click({ timeout: 15_000 }).catch(() => {});
-			const joined = await joiner.waitForSelector(".room-code-box", { timeout: 30_000 })
+			const joined = await joiner.waitForSelector(".wr-panel", { timeout: 30_000 })
 				.then(() => true).catch(() => false);
 			check("the second client joins that room", joined);
 
 			// The host must LEARN about the joiner — that is the broadcast working.
 			let seats = 0;
 			for (let i = 0; i < 25 && seats < 2; i++) {
-				seats = await host.locator(".player-list li").count().catch(() => 0);
+				seats = await host.locator(".wr-seat:not(.wr-seat-open)").count().catch(() => 0);
 				if (seats < 2) await sleep(400);
 			}
 			check("the host sees the second player arrive", seats >= 2, `saw ${seats} seats`);
 
-			// DEEP LINK into that room by URL — the invite-link path. This is driven by
-			// a separate deep-entry effect that only runs on Spender's LOBBY screen, and
-			// a shipped bug proved nothing was watching it: after the site/Spender screen
-			// split its guard still read `screen !== "browser"`, which can never be true
-			// now, so invite links silently stopped working while every other check
-			// stayed green.
+			// DEEP LINK into that room by the COPIED URL — the invite-link path, driven
+			// by exactly what a recipient would paste rather than by a URL this harness
+			// rebuilt for itself. It is a separate deep-entry effect that only runs on
+			// Spender's LOBBY screen, and a shipped bug proved nothing was watching it:
+			// after the site/Spender screen split its guard still read
+			// `screen !== "browser"`, which can never be true now, so invite links
+			// silently stopped working while every other check stayed green.
 			const deep = await joinCtx.newPage();
-			await deep.goto(`http://localhost:${PORT}/spender/${code}`, { waitUntil: "networkidle" });
-			const landed = await deep.waitForSelector(".room-code-box, .game", { timeout: 30_000 })
+			await deep.goto(typeof copied === "string" && copied.startsWith("http")
+				? copied : `http://localhost:${PORT}/spender/${code}`, { waitUntil: "networkidle" });
+			const landed = await deep.waitForSelector(".wr-panel, .game", { timeout: 30_000 })
 				.then(() => true).catch(() => false);
-			check("a deep link enters the room it names", landed,
+			check("the copied link enters the room it names", landed,
 				`url ${new URL(deep.url()).pathname}`);
 			await deep.close();
+
+			// ...AND IT SURVIVES THE FRONT DOOR. The person a link is sent to is by
+			// definition somebody who was not already in this tab, so the first thing
+			// a real invite hits is the auth screen. The shell stashes the route in
+			// `pendingRouteRef` and consumes it after sign-in, leaving the URL in the
+			// address bar untouched so it survives a reload too — a chain of three
+			// steps (land on auth, keep the URL, replay it) that has no other
+			// coverage, and whose failure mode is a recipient dropped on the home
+			// menu with no idea which room they were invited to.
+			const guestCtx = await browser.newContext();   // deliberately unseeded
+			const guest = await guestCtx.newPage();
+			await guest.goto(`http://localhost:${PORT}/spender/${code}`, { waitUntil: "networkidle" });
+			const atAuth = await guest.waitForSelector(".auth-screen", { timeout: 25_000 })
+				.then(() => true).catch(() => false);
+			check("an invited stranger meets the sign-in screen", atAuth);
+			check("...with the room still in the address bar",
+				new URL(guest.url()).pathname === `/spender/${code}`,
+				`url ${new URL(guest.url()).pathname}`);
+			await guest.locator(".auth-tab").nth(2).click({ timeout: 10_000 }).catch(() => {});
+			await guest.locator("button", { hasText: "Play as Guest" }).click({ timeout: 15_000 }).catch(() => {});
+			const seated = await guest.waitForSelector(".wr-panel, .game", { timeout: 30_000 })
+				.then(() => true).catch(() => false);
+			check("...and signing in lands them in the room, not on the home menu", seated,
+				`url ${new URL(guest.url()).pathname}`);
+			await guestCtx.close();
 		}
 		check("no page errors in the two-client flow", errors.length === 0, errors[0]?.slice(0, 160) || "");
 		await hostCtx.close();
@@ -7785,12 +7847,138 @@ try {
 		await ctx.close();
 	}
 
+	// ── ONE WAITING ROOM, THREE GAMES ─────────────────────────────────────────
+	// `spenderWaitingRoom` above proves the kit WORKS; this proves it is the SAME
+	// kit in games whose stylesheets are in a position to quietly replace it.
+	// Nine games each built this screen by hand and it drifted in every direction
+	// it could — five spellings of the Back button, a room code that was
+	// click-to-copy in two of them and inert text in six, and in Black Castle no
+	// way out of the room at all. `shared/tests/test_waiting_room_kit.py` holds
+	// the markup side of that with no browser; what it structurally cannot see is
+	// the CSS-ordering blind spot that `lobbyChrome` exists for, because six of
+	// the nine game sheets are concatenated AFTER the shared one:
+	//
+	//     .blackcastle button{font-family:inherit}
+	//
+	// is (0,1,1) against `.wr-start` at (0,1,0) and no scan of `.wr-*` selectors
+	// can find it. Only a rendered page can.
+	//
+	// THE THREE ARE CHOSEN, not sampled. Spender is the SHELL (its waiting room is
+	// a screen of the host app rather than a lazy chunk); Where Wolf is the one
+	// game whose catalogue id is not its path segment (`wherewolf` vs
+	// `/werewolf`), which is the exact thing a hand-built invite URL gets wrong in
+	// one game out of nine; Black Castle is the sheet that already had to be
+	// taught to leave the kit's controls alone, and its `:not()` allowlist is a
+	// thing someone has to remember to widen.
+	async function waitingRoomKit(log) {
+		const ctx = await browser.newContext();
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "wrkit-harness", name: "WrKit", guest: true })));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		const check = (name, cond, detail = "") => {
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(`waitingRoom: ${name}`); log(`  FAIL ${name}  ${detail}`); }
+		};
+
+		const ROOMS = [
+			{ id: "spender", route: "spender", friend: async () => {
+				// Opponent segment: the first option is "VS Friend".
+				await page.locator(".cm-seg button").first().click({ timeout: 10_000 }).catch(() => {});
+			} },
+			{ id: "wherewolf", route: "werewolf", friend: async () => {} },
+			{ id: "blackcastle", route: "blackcastle", friend: async () => {
+				// Black Castle defaults to two bots, which deals immediately and never
+				// shows a waiting room. "None" is what a friend table is here.
+				await page.locator(".cm-row", { hasText: "Computer players" })
+					.locator(".cm-seg-btn", { hasText: /^None$/ }).first()
+					.click({ timeout: 10_000 }).catch(() => {});
+			} },
+		];
+
+		// The kit's own typography and geometry, read off each game's rendered page.
+		// Collected first and compared across games afterwards, because the claim is
+		// SAMENESS — a per-game bound would pass three differently-wrong pages.
+		const measured = {};
+		for (const room of ROOMS) {
+			await page.goto(`http://localhost:${PORT}/${room.route}`, { waitUntil: "networkidle" });
+			await page.waitForSelector(".lby-cta", { timeout: 25_000 }).catch(() => {});
+			await page.locator(".lby-cta").click({ timeout: 15_000 }).catch(() => {});
+			await page.waitForSelector(".cm-panel", { timeout: 15_000 }).catch(() => {});
+			await room.friend();
+			await page.locator(".cm-create").click({ timeout: 15_000 }).catch(() => {});
+
+			const reached = await page.waitForSelector(".wr-panel", { timeout: 30_000 })
+				.then(() => true).catch(() => false);
+			check(`${room.id} reaches the shared waiting room`, reached,
+				`url ${new URL(page.url()).pathname}`);
+			if (!reached) continue;
+
+			const code = (await page.locator(".wr-code-btn").innerText().catch(() => "")).trim();
+			const shown = (await page.locator(".wr-invite-url").innerText().catch(() => ""))
+				.replace(/[⁦⁩]/g, "").trim();
+			// THE ROUTE, not the catalogue id. Where Wolf is `wherewolf` in
+			// shared/catalog.js and `/werewolf` in the URL, and an invite link built
+			// from the wrong one of those is a 404 in exactly one game.
+			check(`${room.id}'s invite link names its own route and room`,
+				shown.endsWith(`/${room.route}/${code}`),
+				`shown ${JSON.stringify(shown)} code ${JSON.stringify(code)}`);
+
+			const back = (await page.locator(".lby-back").first().innerText().catch(() => "")).trim();
+			check(`${room.id} offers the one way out, spelled the one way`,
+				back === "← Back to lobby", `says ${JSON.stringify(back)}`);
+
+			measured[room.id] = await page.evaluate(() => {
+				const read = (sel, props) => {
+					const el = document.querySelector(sel);
+					if (!el) return null;
+					const cs = getComputedStyle(el);
+					return Object.fromEntries(props.map((p) => [p, cs[p]]));
+				};
+				return {
+					// NaN passes every `>` comparison and an absent node reads as empty
+					// strings, so the roster is asserted before the values are compared
+					// (the lesson from the card-geometry block).
+					start: read(".wr-start, .wr-status", ["fontFamily", "letterSpacing"]),
+					invite: read(".wr-invite-btn", ["fontFamily", "minHeight"]),
+					codeBtn: read(".wr-code-btn", ["fontFamily", "letterSpacing", "textTransform"]),
+					seat: read(".wr-seat", ["fontFamily", "borderRadius"]),
+					seats: document.querySelectorAll(".wr-seat").length,
+				};
+			}).catch(() => null);
+			check(`${room.id} renders every part of the kit`,
+				!!measured[room.id] && ["start", "invite", "codeBtn", "seat"]
+					.every((k) => measured[room.id][k]) && measured[room.id].seats >= 2,
+				JSON.stringify(measured[room.id]));
+
+			// Leave through the kit's own button, so the next room starts from a lobby.
+			await page.locator(".lby-back").first().click({ timeout: 10_000 }).catch(() => {});
+			await sleep(500);
+		}
+
+		// The half a stylesheet scan cannot see: three rendered pages, one typeface.
+		const ids = Object.keys(measured).filter((id) => measured[id]?.start);
+		check("the waiting room was measured in every game", ids.length === ROOMS.length,
+			`measured ${JSON.stringify(ids)}`);
+		const PART_CLASS = { start: ".wr-start", invite: ".wr-invite-btn", codeBtn: ".wr-code-btn", seat: ".wr-seat" };
+		for (const [part, cls] of Object.entries(PART_CLASS)) {
+			const seen = [...new Set(ids.map((id) => JSON.stringify(measured[id][part])))];
+			check(`${cls} is identical in all three games`, seen.length === 1,
+				JSON.stringify(Object.fromEntries(ids.map((id) => [id, measured[id][part]]))));
+		}
+
+		check("no page errors in the waiting room", errors.length === 0, errors[0]?.slice(0, 180) || "");
+		await ctx.close();
+	}
+
 	const laneA = [offlineSpender, offlineCoc, offlineDuel, offlineDissonance,
 		dissonanceSkat, dissonanceHard, dissonanceBeat, ragtagFight];
 	// `dissonanceQuartet` is lane B: it plays a whole game but arms NO worker
 	// (`client_searchable` is false for four hands), and it asserts settled
 	// geometry rather than elapsed time -- both of which are what lane B is for.
 	const laneB = [routeMounts, shellNav, authScreen, homeScreen, spenderPlayTurn, spenderWaitingRoom,
+		waitingRoomKit,
 		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, historyRecovery, dmAdventures,
 		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, lastDifficulty,
 		dissonanceQuartet, orbitPlay, lobbyFinishSync, blackCastlePlay, lobbyChrome];

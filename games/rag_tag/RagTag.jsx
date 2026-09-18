@@ -9,6 +9,7 @@ import {
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss, useProgressiveList, LobbyHero, LobbyUser, useListFade,
   readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame,
+  WaitingRoom, waitingRoomCss,
 } from "../../shared/lobby.jsx";
 import { buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 import {
@@ -64,7 +65,7 @@ const STEP_DONE = 1e9;
  * Rag Tag shipped without it; the other five games all have it. */
 const ragtagStyles =
   baseCss + lobbyCss + gameMenuCss + createModalCss + lobbyCreateRowCss
-  + rulesModalCss + ragtagCssText;
+  + rulesModalCss + waitingRoomCss + ragtagCssText;
 
 /* There is deliberately NO dwell timer. The fight used to play itself at a
  * fixed 900ms a turn, which meant the one thing worth watching — what the two
@@ -1873,25 +1874,28 @@ export default function RagTag({ myId, authUser, onExit }) {
     );
   }
 
+  // `WaitingRoom` in shared/lobby.jsx. `--lby-accent` is set on `.ragtag` in
+  // RagTag.css (a stylesheet cannot import JS — see shared/accents.js), so the
+  // root here needs no inline style the way the other lobbies' roots do.
   if (screen === "waiting") {
-    const isHost = roomData?.host === myId;
     return (
       <div className="app ragtag">
         <style>{ragtagStyles}</style>
-        <div className="rt-wrap rt-waiting">
-          <h1>Rag Tag</h1>
-          <p>Room code</p>
-          <div className="rt-code">{roomId}</div>
-          <p style={{ marginTop: "1rem" }}>
-            {Object.keys(names).length < 2 ? "Waiting for an opponent…" : "Ready."}
-          </p>
-          {isHost && Object.keys(names).length >= 2 && (
-            <button className="rt-go" onClick={() => send({ action: "start" })}>Start the fight</button>
-          )}
-          <div style={{ marginTop: "1.2rem" }}>
-            <LobbyAction kind="secondary" onClick={leaveToLobby}>Back to lobby</LobbyAction>
-          </div>
-        </div>
+        <WaitingRoom
+          game="ragtag" roomId={roomId}
+          players={names} hostId={roomData?.host} myId={myId}
+          min={2} max={2}
+          note="Two corners, twelve fighters, and a deck that is never shuffled."
+          user={authUser}
+          onLeave={leaveToLobby}
+          onRules={() => setShowRules(true)}
+          onStart={() => send({ action: "start" })}
+          startLabel="Start the fight" />
+        {showRules && (
+          <RulesModal title="How to play — Rag Tag" onClose={() => setShowRules(false)}>
+            <RagTagRules />
+          </RulesModal>
+        )}
         {toast && <div className="rt-toast">{toast}</div>}
       </div>
     );

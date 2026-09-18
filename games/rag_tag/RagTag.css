@@ -1654,16 +1654,8 @@
   animation: rt-rise 260ms ease both;
 }
 
-.ragtag .rt-waiting { text-align: center; padding: clamp(2rem, 6vw, 3.5rem) 1rem; }
-.ragtag .rt-waiting h1 { font-size: clamp(1.5rem, 1.1rem + 2vw, 2.4rem); }
-
-.ragtag .rt-code {
-  font-size: clamp(1.4rem, 1rem + 2.4vw, 2.2rem);
-  letter-spacing: 0.24em;
-  font-weight: 800;
-  color: var(--lby-accent);
-  text-shadow: 0 0 24px color-mix(in srgb, var(--lby-accent) 45%, transparent);
-}
+/* The waiting room is `WaitingRoom` in shared/lobby.jsx now; `.rt-waiting` and
+   `.rt-code` went with it. */
 
 /* ── The detail modal ───────────────────────────────────────────────────
    Reached by right-click or press-and-hold on any fighter or card. It carries

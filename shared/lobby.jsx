@@ -26,8 +26,10 @@ import _createModalCssText from "./lobby.create-modal-css.css?inline";
 import _lobbyCreateRowCssText from "./lobby.lobby-create-row-css.css?inline";
 import _gameMenuCssText from "./lobby.game-menu-css.css?inline";
 import _rulesModalCssText from "./lobby.rules-modal-css.css?inline";
+import _waitingRoomCssText from "./lobby.waiting-room-css.css?inline";
 import { GAME_EMBLEM } from "./emblems.jsx";
 import { GAME_INFO } from "./catalog.js";
+import { buildPath } from "./router.js";
 
 // TWO FILES, ONE STRING. `lobby.lobby-css.css` is the lobby's chrome and layout — the
 // bar, the rows, the column grid, the tab bar — and it is what every game already
@@ -829,6 +831,223 @@ function GameMenuChrome({ items, align, label }) {
 					))}
 				</div>
 			)}
+		</div>
+	);
+}
+
+// ─── The waiting room ────────────────────────────────────────────────────────
+// THE ONE SCREEN WHOSE WHOLE JOB IS TO GET A SECOND PERSON TO THE SAME URL, and
+// the last screen in the product that every game still built by hand. Nine of
+// them, and they had drifted exactly the way the lobby row and the ☰ menu did
+// before this treatment:
+//
+//   * the way out read "← Back to Menu" (Spender), "Leave" (CoC), "← Back to
+//     lobby" (Duel), "Back to lobby" (Rag Tag, Orbit), lived in a ☰ (Where Wolf,
+//     Dissonance), was the header's back button (Dontminion) — and in Black
+//     Castle did not exist at all, so a host who changed their mind had the
+//     browser's Back button and nothing else;
+//   * the room code was click-to-copy in two games, inert text in six, and the
+//     page's own <h1> in Dontminion and Dissonance;
+//   * four games printed a static "Waiting for the host to start…" with nothing
+//     moving on the page, which is indistinguishable from a page that has hung.
+//
+// AND THE THING IT WAS ALL FOR WAS MISSING FROM ALL NINE: what you could copy was
+// the room CODE, so inviting someone meant sending six letters plus instructions
+// for where to type them. The site has had room URLs since the router landed and
+// every game already enters a room from one — `InviteLink` just puts that URL on
+// the screen. A link needs no explanation and survives being pasted anywhere.
+//
+// The component owns the CHROME (identity, invite, seats, the go button, the way
+// out). A game brings its accent, its own word for "start", and whatever setup is
+// genuinely its own — Where Wolf's role picker, Dontminion's expansion line — via
+// `children`, which is the game's to style. `shared/tests/test_waiting_room_kit.py`
+// fails the game that stops using it; `spenderWaitingRoom` in
+// `webapp/test/screens.mjs` drives the real thing with two clients and a copied
+// link, and `waitingRoomKit` beside it holds three games' rendered chrome together.
+export const waitingRoomCss = _waitingRoomCssText;
+
+// The absolute URL of a room. `buildPath` already owns the path grammar (and the
+// VITE_BASE sub-path), so this is only the origin in front of it — which is the
+// whole difference between something a player can send and something they cannot.
+export function inviteUrl(game, roomId) {
+	const route = GAME_INFO[game]?.screen || game;   // catalogue id ≠ path for wherewolf
+	try { return window.location.origin + buildPath(route, roomId); } catch { return ""; }
+}
+
+// CLIPBOARD, WITH THE OLD PATH UNDERNEATH IT. `navigator.clipboard` is undefined
+// outside a secure context and can reject when the document is not focused, and
+// both cases return the same thing to the caller as "no clipboard": nothing
+// copied, no error anyone sees. The execCommand fallback is deprecated and works
+// everywhere, so it is the floor rather than the ceiling.
+async function copyText(text) {
+	try {
+		if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return true; }
+	} catch { /* fall through */ }
+	try {
+		const ta = document.createElement("textarea");
+		ta.value = text;
+		ta.setAttribute("readonly", "");
+		// Off-screen but NOT display:none / visibility:hidden — a hidden element
+		// cannot hold a selection, so the copy silently does nothing.
+		ta.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none";
+		document.body.appendChild(ta);
+		ta.select();
+		ta.setSelectionRange(0, text.length);
+		const ok = document.execCommand("copy");
+		document.body.removeChild(ta);
+		return ok;
+	} catch { return false; }
+}
+
+const LINK_GLYPH = (
+	<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+		<path d="M10.2 13.8a3.6 3.6 0 0 0 5.4.4l2.6-2.6a3.6 3.6 0 0 0-5.1-5.1l-1.5 1.5" />
+		<path d="M13.8 10.2a3.6 3.6 0 0 0-5.4-.4l-2.6 2.6a3.6 3.6 0 0 0 5.1 5.1l1.5-1.5" />
+	</svg>
+);
+
+// The invite control: one full-width button carrying the URL, and the room code
+// under it for the cases a link cannot serve (read aloud across a table, typed
+// into the lobby's own Join field).
+//
+// THE CONFIRMATION IS ON THE BUTTON, not in a toast. Every game that had a copy
+// affordance reported it through its own `setToast`, which is a per-game wiring
+// the next game forgets and, on a phone, puts the confirmation at the far end of
+// the screen from the thumb that just pressed it. This owns the state, so a game
+// passes nothing.
+export function InviteLink({ game, roomId }) {
+	const [copied, setCopied] = useState(null);   // "link" | "code" | null
+	const [failed, setFailed] = useState(false);
+	const timer = useRef(null);
+	useEffect(() => () => clearTimeout(timer.current), []);
+	// NOTHING TO INVITE TO YET. Two games render this screen while the room is
+	// still connecting (Dissonance's branch is `screen === "waiting" || !game`),
+	// and an invite control offering `…/dissonance/` with an empty code beside it
+	// is worse than no control: it is a link a host can copy and send.
+	if (!roomId) return null;
+	const url = inviteUrl(game, roomId);
+	const flash = (what, ok) => {
+		setCopied(ok ? what : null);
+		setFailed(!ok);
+		clearTimeout(timer.current);
+		timer.current = setTimeout(() => { setCopied(null); setFailed(false); }, 2000);
+	};
+	const pretty = url.replace(/^https?:\/\//, "");
+	return (
+		<div className="wr-invite">
+			<button type="button" className={`wr-invite-btn${copied === "link" ? " ok" : ""}`}
+				title={url}
+				aria-label={`Copy the invite link for room ${roomId}`}
+				onClick={async () => flash("link", await copyText(url))}>
+				<span className="wr-invite-ic" aria-hidden="true">{LINK_GLYPH}</span>
+				<span className="wr-invite-text">
+					<span className="wr-invite-label">{copied === "link" ? "Link copied" : "Invite link"}</span>
+					{/* The URL reads right-to-left so the ROOM CODE is the part that
+					    survives the ellipsis — it is the only part that differs. The
+					    bidi isolate keeps a mixed-direction origin from reordering. */}
+					<span className="wr-invite-url">&#x2066;{pretty}&#x2069;</span>
+				</span>
+				<span className="wr-invite-hint">{copied === "link" ? "✓" : "Copy"}</span>
+			</button>
+			<div className="wr-code-row">
+				<span className="wr-code-lbl">Room code</span>
+				<button type="button" className={`wr-code-btn${copied === "code" ? " ok" : ""}`}
+					aria-label={`Copy the room code ${roomId}`}
+					onClick={async () => flash("code", await copyText(roomId))}>
+					{roomId}
+				</button>
+			</div>
+			{/* Announced, not merely coloured: the button's own label changes for
+			    sighted users, and this is the same fact for a screen reader. The
+			    failure case is the one that MUST be said — a browser with no
+			    clipboard permission otherwise looks identical to a successful copy. */}
+			<span className="lby-sr-only" role="status" aria-live="polite">
+				{failed ? "Could not copy — select the link and copy it manually."
+					: copied === "link" ? "Invite link copied to the clipboard."
+					: copied === "code" ? "Room code copied to the clipboard." : ""}
+			</span>
+		</div>
+	);
+}
+
+// The screen. `game` is the catalogue id and is the only identity prop — the
+// emblem, the name and the invite URL all come from that one entry, so a waiting
+// room cannot drift from the card that was tapped to reach it.
+//
+// `min` is the seat count the game needs to deal; it drives BOTH the empty-seat
+// chips and the host's blocked label, which is why it is one number here rather
+// than a message each game writes. `canStart` is for a blocker the seat count
+// cannot express (Where Wolf's deck has to match the player count) and pairs with
+// `blockedLabel` to say why.
+export function WaitingRoom({
+	game, roomId, players, hostId, myId,
+	min = 2, max = null, note = null,
+	onStart, startLabel = "Start Game", canStart = true, blockedLabel = null,
+	onLeave, onRules, user, children, banner,
+}) {
+	const info = GAME_INFO[game] || {};
+	const seats = Object.entries(players || {});
+	const seated = seats.length;
+	const short = Math.max(0, min - seated);
+	const isHost = hostId != null && hostId === myId;
+	const label = short
+		? `Waiting for ${short} more player${short === 1 ? "" : "s"}…`
+		: (!canStart && blockedLabel) ? blockedLabel : startLabel;
+	return (
+		<div className="lby-page">
+			<LobbyHeader onBack={onLeave} backLabel="← Back to lobby" onRules={onRules}
+				user={<LobbyUser user={user} />} />
+			<div className="wr-in">
+				{/* A game's own strip above the panel — Where Wolf's reconnect prompt is
+				    the only one today, and it has to be ABOVE the panel rather than in
+				    it: a dropped socket means the seats below are stale. */}
+				{banner}
+				<div className="wr-panel">
+					<div className="wr-id">
+						{GAME_EMBLEM[game] && <span className="wr-emblem" aria-hidden="true">{GAME_EMBLEM[game]}</span>}
+						<span className="wr-kicker">Waiting room</span>
+						<h1 className="wr-name">{info.name || ""}</h1>
+					</div>
+
+					<InviteLink game={game} roomId={roomId} />
+
+					{note && <p className="wr-note">{note}</p>}
+
+					<div className="wr-count">
+						{seated}{max ? `/${max}` : ""} {seated === 1 ? "player" : "players"} seated
+					</div>
+					<div className="wr-seats">
+						{seats.map(([pid, nm]) => (
+							<span key={pid} className={`wr-seat${pid === myId ? " wr-seat-me" : ""}`}>
+								{pid === hostId && <span className="wr-seat-crown" title="Host" aria-label="host">♛</span>}
+								{nm}
+								{pid === myId && <span className="wr-seat-you">(you)</span>}
+							</span>
+						))}
+						{/* Empty chips only up to the MINIMUM, never to the cap: Where Wolf
+						    seats ten, and seven dashed outlines under a three-player table
+						    reads as six missing people rather than as room for them. */}
+						{Array.from({ length: short }, (_, i) => (
+							<span key={`open-${i}`} className="wr-seat wr-seat-open">Open seat</span>
+						))}
+					</div>
+
+					{children && <div className="wr-extra">{children}</div>}
+
+					{/* The host gets the button; everyone else gets the same sentence
+					    with something MOVING beside it. Four of the nine printed that
+					    sentence as static text, which on a cold backend is
+					    indistinguishable from a page that has hung — and is what the
+					    non-host is staring at for the whole of this screen. */}
+					<div className="wr-go">
+						{isHost
+							? <button type="button" className="wr-start"
+								disabled={!!short || !canStart} onClick={onStart}>{label}</button>
+							: <span className="wr-status"><span className="lby-spinner" />
+								Waiting for the host to start…</span>}
+					</div>
+				</div>
+			</div>
 		</div>
 	);
 }

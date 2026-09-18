@@ -5,6 +5,7 @@ import {
   LobbyEmpty, LobbyAction, LobbyTabs, CreateModal, CmRow, CmSeg, RulesModal,
   rulesModalCss, createModalCss, lobbyCreateRowCss, gameMenuCss,
   LobbyBotTier, LobbyMatchup, useLastDifficulty, useProgressiveList, notWaiting,
+  WaitingRoom, waitingRoomCss,
 } from "../../shared/lobby.jsx";
 import { GAME_ACCENTS } from "../../shared/accents.js";
 import { useAutoReconnect } from "../../shared/useAutoReconnect.js";
@@ -17,7 +18,7 @@ import { Icon } from "./presentation.jsx";
 const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
 const WS_BASE = WS_RAW.replace(/\/ws$/, "");
 const HTTP_BASE = WS_RAW.replace(/^ws/, "http").replace(/\/ws$/, "");
-const styles = baseCss + lobbyCss + createModalCss + lobbyCreateRowCss + rulesModalCss + gameMenuCss + cssText;
+const styles = baseCss + lobbyCss + createModalCss + lobbyCreateRowCss + rulesModalCss + gameMenuCss + waitingRoomCss + cssText;
 
 const TOKEN_PREFIX = "blackcastle_token_";
 const BLACK_CASTLE_AI_TIER_OPTIONS = [
@@ -183,7 +184,24 @@ export default function BlackCastle({ myId, authUser, onExit }) {
   return <>
     {screen === "lobby" && <Lobby {...{ myId, authUser, openGames, activeGames, history, onRefresh: refresh, refreshing, onCreate: () => setShowCreate(true), onJoin: joinRoom, onExit, onRules: () => setShowRules(true) }} />}
     {screen === "game" && !roomData && <div className="app blackcastle"><style>{styles}</style><LobbyHeader title="Black Castle" onBack={exit} /><div className="bc-waiting"><Icon name="castle" size={48} /><h1>{toast ? "The gate is closed." : "Opening the castle…"}</h1><p role="status">{toast || "Connecting to your table. This may take a moment."}</p><button type="button" className="bc-primary" onClick={exit}>Return to lobby</button></div></div>}
-    {showWaiting && <div className="app blackcastle" style={{ "--lby-accent": GAME_ACCENTS.blackcastle }}><style>{styles}</style><LobbyHeader onBack={exit} onRules={() => setShowRules(true)} user={<LobbyUser user={authUser} />} /><div className="bc-waiting"><span className="bc-kicker">{roomData.room_id}</span><h1>Lanterns are being lit.</h1><p>Share this room code with your clan. The host can start when at least two seats are ready.</p><div className="bc-wait-seats">{Object.entries(roomData.players || {}).map(([pid, name]) => <span key={pid}>{name}</span>)}</div>{roomData.host === myId && <button type="button" className="bc-primary" disabled={!connected || Object.keys(roomData.players || {}).length < 2} onClick={start}>Start game</button>}</div></div>}
+    {showWaiting && <div className="app blackcastle" style={{ "--lby-accent": GAME_ACCENTS.blackcastle }}><style>{styles}</style>
+      {/* `WaitingRoom` in shared/lobby.jsx. This was the one waiting room in the
+          product with NO way out at all — the way back was the browser's own Back
+          button — and the shared kit carries one, so it now has the same one the
+          other eight do. `canStart` holds the socket condition Black Castle's own
+          Start had: a table cannot be dealt from a closed socket. */}
+      <WaitingRoom
+        game="blackcastle" roomId={roomData.room_id}
+        players={roomData.players} hostId={roomData.host} myId={myId}
+        min={2} max={roomData.max_players || 4}
+        note="Lanterns are being lit. The host deals once at least two seats are taken."
+        user={authUser}
+        onLeave={exit}
+        onRules={() => setShowRules(true)}
+        onStart={start}
+        canStart={connected}
+        blockedLabel="Reconnecting…" />
+    </div>}
     {roomData?.game && <BoardView {...{ roomData, myId, sendMove, onExit: exit, onAbandon: abandon, onRules: () => setShowRules(true), connected, styles }} />}
     {showCreate && <div className="blackcastle bc-overlay-scope" style={{ "--lby-accent": GAME_ACCENTS.blackcastle }}>
       <CreateModal title="New Black Castle table" onClose={() => setShowCreate(false)}>

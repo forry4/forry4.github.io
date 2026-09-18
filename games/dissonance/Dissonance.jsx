@@ -8,6 +8,7 @@ import {
   RulesModal, rulesModalCss,
   useProgressiveList, notWaiting, LobbyAction, useLastDifficulty, LobbyHero,
   SCORECARD_GLYPH, LobbyUser, useListFade, LobbyBotTier,
+  WaitingRoom, waitingRoomCss,
 } from "../../shared/lobby.jsx";
 import DissonanceRules from "./rules.jsx";
 import DissonanceScorecard from "./scorecard.jsx";
@@ -38,7 +39,7 @@ const OT_WS = WS_RAW.replace(/\/ws$/, "/dissonance/ws");
 const OT_HTTP = WS_RAW.replace(/^ws/, "http").replace(/\/ws$/, "/dissonance");
 
 const styles = baseCss + lobbyCss + gameMenuCss + createModalCss + lobbyCreateRowCss
-  + rulesModalCss + _cssText + _bidpadCss + _scorecardCss;
+  + rulesModalCss + waitingRoomCss + _cssText + _bidpadCss + _scorecardCss;
 
 const SUIT_GLYPH = ["♣", "♦", "♥", "♠"];   // c d h s
 // 32-card deck: 7 low, ace high, eight ranks per suit — ids 0..31, `suit*8 +
@@ -2391,24 +2392,22 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
   }
 
   // ── waiting room ─────────────────────────────────────────────────────────
+  // `WaitingRoom` in shared/lobby.jsx. This screen used to say "Share this code, or
+  // the link in your address bar" — the only game that knew the link was the thing
+  // worth sharing, and it still made the player go and find it themselves.
   if (screen === "waiting" || !game) {
-    const isHost = roomData?.host === myId;
-    const n = Object.keys(players).length;
     return (
       <div className="dis">
         <style>{styles}</style>
-        <LobbyHeader title="Dissonance" menu={<OddMenu onLeave={leaveToLobby}
-          onRules={() => setShowRules(true)} />}
-          user={authUser?.name ? <span className="lby-head-name">{authUser.name}</span> : null} />
-        <div className="panel" style={{ maxWidth: 480, margin: "2rem auto", textAlign: "center" }}>
-          <h3>Room {roomId}</h3>
-          <p className="muted">Share this code, or the link in your address bar.</p>
-          <div style={{ margin: "1rem 0" }}>
-            {Object.values(players).map((nm, i) => <div key={i}>{nm}</div>)}
-          </div>
-          {isHost && n >= 2 && <button className="btn dis-gobtn" onClick={() => send({ action: "start" })}>Start</button>}
-          {n < 2 && <div className="muted">Waiting for an opponent…</div>}
-        </div>
+        <WaitingRoom
+          game="dissonance" roomId={roomId}
+          players={players} hostId={roomData?.host} myId={myId}
+          min={2} max={2}
+          note={`${MODE_LABEL[roomData?.mode] || MODE_LABEL.classic} — two players, one deck.`}
+          user={authUser}
+          onLeave={leaveToLobby}
+          onRules={() => setShowRules(true)}
+          onStart={() => send({ action: "start" })} />
         {showRules && <OddRulesModal onClose={() => setShowRules(false)} />}
         {toast && <div className="toast">{toast}</div>}
       </div>

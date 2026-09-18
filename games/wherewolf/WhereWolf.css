@@ -19,7 +19,6 @@
 .ww-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .ww-top-left{display:flex;align-items:center;gap:10px;min-width:0}
 .ww-title{font-family:Cinzel,serif;font-weight:700;color:var(--gold-light);letter-spacing:.5px}
-.ww-user{color:var(--text-dim);font-size:13px}
 .ww-btn{font-family:Cinzel,serif;font-size:14px;border:1px solid var(--border);background:var(--surface2);color:var(--text);
   padding:9px 16px;border-radius:var(--radius);cursor:pointer;transition:all .15s}
 .ww-btn:hover{border-color:var(--gold);color:var(--gold-light)}
@@ -31,7 +30,6 @@
 .ww-btn:disabled{opacity:.4;cursor:not-allowed}
 .ww-input{font-family:Cinzel,serif;letter-spacing:3px;text-transform:uppercase;background:var(--surface);border:1px solid var(--border);
   color:var(--text);padding:9px 12px;border-radius:var(--radius);width:120px;text-align:center}
-.ww-hero{text-align:center;padding:8px 0 4px}
 /* Where Wolf? has only TWO columns (no History), so it keeps its own grid rather
    than the shared 3-column `.lby-cols` — but its card LISTS are the shared
    `.lby-list`, so the rows space and cap identically to the other four. */
@@ -51,11 +49,9 @@
 /* How-to-play is the SHARED kit now (rulesModalCss / .rl-*) — WW's own
    .ww-modal / .ww-rules* vocabulary went with it (nothing else used them). */
 
-/* waiting room */
-.ww-code{font-family:Cinzel,serif;font-size:40px;letter-spacing:8px;color:var(--gold-light);text-align:center}
-.ww-players-list{display:flex;flex-direction:column;gap:6px}
-.ww-pl{display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:8px 12px}
-.ww-pl .crown{color:var(--gold)}
+/* waiting room — the PANEL is `WaitingRoom` in shared/lobby.jsx now (the code, the
+   seats and the way out came with it); what stays Where Wolf's own is the role
+   picker below, which rides in the kit's children slot. */
 
 /* the table */
 .ww-table-wrap{display:flex;flex-direction:column;align-items:center;gap:8px}

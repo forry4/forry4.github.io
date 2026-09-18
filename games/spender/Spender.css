@@ -615,16 +615,10 @@
    (which carries a margin for its 'Loading…' use) doesn't resize the button and
    shift the centered button row. */
 
-/* ─── Waiting ───────────────────────────────────────────────────────────── */
-.waiting-screen{max-width:480px;margin:0 auto;padding:48px 20px 24px;text-align:center}
-.waiting-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.1rem;color:var(--gold);margin-bottom:6px;letter-spacing:.1em}
-.waiting-sub{color:var(--text-dim);font-size:.85rem;margin-bottom:24px}
-.room-code-box{font-family:'Cinzel','Cinzel Fallback',serif;font-size:2.2rem;letter-spacing:.3em;color:var(--gold-light);text-align:center;padding:18px;background:var(--surface2);border-radius:var(--radius);margin-bottom:20px;border:1px solid var(--border);cursor:pointer;transition:border-color .15s}
-.room-code-box:hover{border-color:var(--gold)}
-.player-list{list-style:none;margin:0 0 20px}
-.player-list li{display:flex;align-items:center;gap:8px;padding:9px 14px;background:var(--surface2);border-radius:var(--radius);margin-bottom:6px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;letter-spacing:.05em}
-.player-list li.me{border:1px solid var(--gold);color:var(--gold)}
-.copy-hint{font-size:.75rem;color:var(--text-muted);font-style:italic;margin-bottom:12px}
+/* ─── Waiting ─────────────────────────────────────────────────────────────
+   The waiting room is `WaitingRoom` in shared/lobby.jsx now, so the whole
+   `.waiting-screen` / `.room-code-box` / `.player-list` vocabulary that used to
+   live here is gone — it was the eighth private spelling of one screen. */
 
 /* ─── Game layout ───────────────────────────────────────────────────────── */
 /* overflow-x:clip (not hidden) keeps stray horizontal overflow contained WITHOUT

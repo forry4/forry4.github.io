@@ -85,13 +85,11 @@
   .dm .btn-gold:hover { filter: none; transform: none; }
 }
 
-/* ── waiting room ── */
-.dm-wait { max-width: 520px; margin: 40px auto; padding: 0 18px; text-align: center; }
-.dm-wait h2 { font-family: 'Cinzel','Cinzel Fallback',serif; letter-spacing: 2px; }
+/* ── waiting room ──
+   The screen itself is `WaitingRoom` in shared/lobby.jsx now; `.dm-wait` and its
+   seat list went with it. `.dm-wait-note` stays — three card/deck panels use it
+   for the same kind of quiet caption line. */
 .dm-wait-note { color: var(--text-dim, #8a7d6a); margin: 6px 0; }
-.dm-wait-players { margin: 22px 0; }
-.dm-wait-players ul { list-style: none; padding: 8px 0 0; margin: 0; }
-.dm-wait-players li { padding: 6px 0; border-bottom: 1px solid var(--border, #3a342a); }
 
 /* ── game frame ── */
 .dm-gamescreen {

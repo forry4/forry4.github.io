@@ -343,7 +343,8 @@
 
 /* waiting screen */
 .duel-waiting{max-width:520px;margin:40px auto;text-align:center}
-.duel-code{font-family:'Cinzel','Cinzel Fallback',serif;font-size:2.2rem;letter-spacing:.35em;margin:14px 0;color:#f5c842}
+/* `.duel-code` went with the hand-built waiting room; it is `WaitingRoom` in
+   shared/lobby.jsx now. `.duel-waiting` stays: the game-loading panel uses it. */
 
 .duel-gameover-badge{font-size:1.05rem;margin:6px 0 2px;color:#f5c842}
 
