@@ -18,7 +18,7 @@ import {
   RulesModal, GameMenu, rulesModalCss, createModalCss, lobbyCreateRowCss, gameMenuCss,
   useProgressiveList, useListFade, notWaiting, timeAgo,
   readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame,
-  WaitingRoom, waitingRoomCss, SeatedNotice, seatStateOf, LobbyOpenActions,
+  WaitingRoom, waitingRoomCss, seatStateOf, LobbyOpenActions,
 } from "../../shared/lobby.jsx";
 import { GAME_ACCENTS } from "../../shared/accents.js";
 import { useAutoReconnect } from "../../shared/useAutoReconnect.js";
@@ -348,11 +348,6 @@ function Rail({ game }) {
 function Lobby({ myId, authUser, openGames, activeGames, history, onRefresh, refreshing,
   onCreate, onJoin, onCancel, onExit, onRules }) {
   const active = notWaiting(activeGames);
-  // The seat you are still holding, if any — the row `SeatedNotice` is about.
-  // `/games/mine` is the only list that knows, because the public Open list says
-  // nothing about who is asking.
-  const seated = (activeGames || []).find((g) => g.status === "open" && !g.you_are_host)
-    || (activeGames || []).find((g) => g.status === "open");
   const [lobbyTab, setLobbyTab] = useState("open");
   const [visibleHistory, historySentinel] = useProgressiveList(history);
   useListFade();
@@ -372,11 +367,10 @@ function Lobby({ myId, authUser, openGames, activeGames, history, onRefresh, ref
       {/* ABOVE the column grid, never inside it: the phone tab bar shows and
           hides columns by their own class names, so a fourth child of that grid
           could be neither shown nor hidden. */}
-      <SeatedNotice roomId={seated?.id} started={false} onReturn={() => onJoin(seated.id)} />
       <div className={`lby-cols tab-${lobbyTab}`}>
         <section className="lby-col-open">
-          <LobbySectionHd title="Waiting for a partner" note={`${openGames.length} open`} />
-          {!openGames.length && <LobbyEmpty>No tables open. Create one and send the code to whoever is playing with you — SecretNames needs two.</LobbyEmpty>}
+          <LobbySectionHd title="Open Games" note={`${openGames.length} waiting`} />
+          {!openGames.length && <LobbyEmpty>No open games — create one.</LobbyEmpty>}
           <div className="lby-list">{openGames.map((g) => <div className="lby-card" key={g.id}>
             <div className="lby-card-info">
               <div className="lby-card-title">{g.player1_name || "Player"} is waiting</div>
@@ -395,8 +389,8 @@ function Lobby({ myId, authUser, openGames, activeGames, history, onRefresh, ref
           </div>)}</div>
         </section>
         <section className="lby-col-active">
-          <LobbySectionHd title="Missions in progress" note={`${active.length} running`} />
-          {!active.length && <LobbyEmpty>Nothing in progress.</LobbyEmpty>}
+          <LobbySectionHd title="Active Games" note={`${active.length} in progress`} />
+          {!active.length && <LobbyEmpty>No games in progress.</LobbyEmpty>}
           <div className="lby-list">{active.map((g) => <div className="lby-card" key={g.id}>
             <div className="lby-card-info">
               <LobbyMatchup placeholder="Partner" seats={[

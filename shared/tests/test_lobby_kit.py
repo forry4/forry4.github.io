@@ -106,6 +106,35 @@ def test_a_lobby_pins_every_column_it_has():
         assert "lby-col-history" in text, f"{jsx.name} renders .lby-cols without .lby-col-history"
 
 
+def test_every_lobby_uses_the_standard_open_and_active_copy():
+    """Open and Active are shared information architecture, not game flavor.
+
+    The section names and their empty states are the anchors players learn while
+    moving between games. SecretNames and the two games before it each themed
+    these four strings, which made the same lobby columns look like different
+    products and made an empty lobby harder to scan. The roster is derived from
+    the tree so the next game is checked on its first commit.
+    """
+    missing: dict[str, list[str]] = {}
+    for jsx in _lobby_games():
+        text = jsx.read_text(encoding="utf-8")
+        checks = {
+            'the "Open Games" section': re.search(
+                r'<LobbySectionHd\b[^>]*title="Open Games"', text),
+            'the "Active Games" section': re.search(
+                r'<LobbySectionHd\b[^>]*title="Active Games"', text),
+            'the open-games empty state': "No open games — create one." in text,
+            'the active-games empty state': "No games in progress." in text,
+            'no copied seated-room banner': "SeatedNotice" not in text,
+        }
+        for label, ok in checks.items():
+            if not ok:
+                missing.setdefault(jsx.name, []).append(label)
+    assert not missing, (
+        "these lobbies drift from the shared Open/Active vocabulary: "
+        f"{missing}")
+
+
 def test_the_phone_tab_bar_is_wired_to_the_grid():
     """Two halves that must agree, and neither fails loudly on its own.
 

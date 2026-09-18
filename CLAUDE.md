@@ -305,6 +305,17 @@ A game with big structural differences does not have to follow it to the letter 
 runs `The night` / `The day` / `The vote`, Rag Tag keeps its printed rulebook's order — but the
 opening and the closing are the same everywhere.
 
+**NEW GAME CHECKLIST — apply the shared lobby and rules shape before writing game-specific copy.**
+Every lobby renders the shared `.lby-cols` with Open, Active and History columns (or the documented
+two-column exception), and the first two columns use the exact section titles **Open Games** and
+**Active Games** plus the exact empty states **“No open games — create one.”** and **“No games in
+progress.”**. Use `WaitingRoom` for the between-seats screen; do not add a separate seated-room
+banner when the Open row and its Return action already provide the path back to the table. A new
+rules file starts with `Goal of the Game` and `Setup`, has no lead paragraph or `RulesFacts` strip,
+and keeps its later headings in the rulebook order. The source-derived checks in
+`shared/tests/test_lobby_kit.py` and `shared/tests/test_rules_kit_shapes.py` are part of the
+first-commit gate for every new game — do not add a per-game exception for a copy difference.
+
 **A GAME THEMES ITS ROWS, NEVER THE KIT'S CHROME — and this is the rule every new game
 has broken so far, because using the kit's class names and then restyling them from your
 own sheet passes every check that existed.** Black Castle shipped 22 such rules: the

@@ -1781,8 +1781,8 @@ export default function RagTag({ myId, authUser, onExit }) {
 
         <div className={`rt-lobby-cols lby-cols tab-${lobbyTab}`}>
           <div className="lby-col-open">
-            <LobbySectionHd title="Open Fights" note={`${openGames.length} waiting`} />
-            {openGames.length === 0 && <LobbyEmpty>No open fights — create one.</LobbyEmpty>}
+            <LobbySectionHd title="Open Games" note={`${openGames.length} waiting`} />
+            {openGames.length === 0 && <LobbyEmpty>No open games — create one.</LobbyEmpty>}
             <div className="lby-list">
               {openGames.map((g) => (
                 <div className="lby-card" key={g.id}>
@@ -1805,8 +1805,8 @@ export default function RagTag({ myId, authUser, onExit }) {
           </div>
 
           <div className="lby-col-active">
-            <LobbySectionHd title="Active Fights" note={`${activeMine.length} in progress`} />
-            {activeMine.length === 0 && <LobbyEmpty>No fights in progress.</LobbyEmpty>}
+            <LobbySectionHd title="Active Games" note={`${activeMine.length} in progress`} />
+            {activeMine.length === 0 && <LobbyEmpty>No games in progress.</LobbyEmpty>}
             <div className="lby-list">
               {activeMine.map((g) => (
                 <div className="lby-card" key={g.id}>

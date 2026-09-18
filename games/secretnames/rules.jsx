@@ -1,59 +1,73 @@
-import { RulesDefs, RulesFacts, RulesSection, RulesTip } from "../../shared/lobby.jsx";
+import { RulesDefs, RulesSection, RulesTip } from "../../shared/lobby.jsx";
 
 export default function SecretNamesRules() {
   return <>
-    <RulesFacts items={[
-      { k: "Players", v: "2, on the same side" },
-      { k: "Length", v: "9 turns (10 or 11 for an easier run)" },
-      { k: "Goal", v: "Find all 15 agents before the timer runs out" },
-    ]} />
-    <RulesSection title="The one rule everything follows from">
-      <p>You each hold your own key card, and <b>your key describes what happens when
-        your partner guesses</b> — not what happens when you do. So the words marked
-        as agents on your card are the words you have to get your partner to say.
-        Your partner's card is different, and you never see it.</p>
-      <RulesTip>Three words are agents on both cards, which is why there are 15
-        agents between you rather than 18. Finding one counts once, for both of you.</RulesTip>
+    <RulesSection title="Goal of the Game">
+      <p>Work together to identify all 15 unique agents before the timer runs out.
+        The team wins as soon as every agent has been found. An assassin loses the
+        mission immediately.</p>
     </RulesSection>
-    <RulesSection title="Your turn">
+
+    <RulesSection title="Setup">
+      <p>SecretNames is a two-player cooperative game. Deal a 5×5 grid of 25
+        words, two private key cards, and nine timer tokens. Each key has nine
+        agents, three assassins and thirteen bystanders. The keys share three
+        agents, so the board contains 15 unique agents.</p>
+      <p>The host chooses nine, ten or eleven timer tokens, then deals the board.
+        One player gives the first clue; the other player guesses. The roles
+        alternate after each normal turn.</p>
+    </RulesSection>
+
+    <RulesSection title="Turn overview">
+      <p>During a normal turn, the clue-giver and guesser take these steps:</p>
       <RulesDefs items={[
-        { t: "Give a clue", d: "One word and a number, related to the agents on YOUR key. The number says how many words you mean; it is not a limit on guesses." },
-        { t: "Your partner guesses", d: "They tap words on the grid. Every correct agent is covered for good, and they may keep going as long as they keep being right — and may use any earlier clue, not just this one." },
-        { t: "The turn ends", d: "Either they choose to stop after at least one guess, or they hit a bystander. Either way it costs exactly one timer token, however many agents they found." },
-        { t: "Then you swap", d: "Your partner gives the next clue and you guess." },
+        { t: "A. Give a clue", d: "Say one word, or a proper name of two words, and a number related to the agents on your key. The number does not limit the number of guesses." },
+        { t: "B. Guess", d: "The other player taps words on the grid. A correct agent is covered permanently, and the guesser may continue while every guess is correct." },
+        { t: "C. End the turn", d: "After at least one correct guess, the guesser may stop. A bystander also ends the turn. Either ending spends exactly one timer token." },
+      ]} />
+      <RulesTip>Your key describes what happens when your partner guesses. You
+        clue the agents on your own key, but the other player's key resolves the
+        guesses.</RulesTip>
+    </RulesSection>
+
+    <RulesSection title="Key cards and word roles">
+      <RulesDefs items={[
+        { t: "Agent", d: "The team needs this word. Cover it permanently when found; it counts for both players." },
+        { t: "Bystander", d: "The turn ends and one timer token is spent for the player who guessed it. Record it for that player; the same position can still be an agent from the other direction." },
+        { t: "Assassin", d: "The mission ends in a loss immediately. A word can be safe on one key and an assassin on the other." },
       ]} />
     </RulesSection>
-    <RulesSection title="What a word can turn out to be">
-      <RulesDefs items={[
-        { t: "Agent", d: "Covered permanently, for both of you. Keep guessing." },
-        { t: "Bystander", d: "The turn ends and a token is spent — but only for the player who guessed it. The same word can still be an agent from the other direction, so it stays on the board." },
-        { t: "Assassin", d: "You both lose, immediately. There are three on each card, and a word that is safe from your side can be an assassin from theirs." },
-      ]} />
-      <p>The board marks a bystander you have already hit, so you do not spend a
-        second turn rediscovering it. Your own key colours stay on the grid the
-        whole game — they are yours to read.</p>
+
+    <RulesSection title="Passing and exhausted sides">
+      <p>When all nine agents on your key are found, you are exhausted and no
+        longer give clues. Your partner gives every remaining clue. You may also
+        pass instead of giving a clue; passing is permanent, costs no timer
+        token, and hands the current turn to your partner.</p>
+      <p>If neither player can give another clue, enter sudden death immediately.
+        Passing does not win the game by itself: all 15 unique agents still have
+        to be found.</p>
     </RulesSection>
-    <RulesSection title="Running out of clues, and passing">
-      <p>Once all nine agents on your key have been found, you have nothing left to
-        clue and your partner gives every remaining clue. You can also <b>pass</b>
-        instead of giving a clue, which hands this turn to your partner and retires
-        you from clue-giving for the rest of the game. Neither of those wins the
-        game on its own — victory is all 15 agents, always.</p>
+
+    <RulesSection title="End of turn">
+      <p>A normal turn costs one timer token, whether it ends on a bystander or
+        because the guesser stops. Finding the last agent wins immediately and
+        spends no token.</p>
+      <p>When the last token is spent, or neither player can clue, the game enters
+        sudden death instead of ending.</p>
     </RulesSection>
-    <RulesSection title="Sudden death">
-      <p>When the last timer token is spent — or when neither of you can clue any
-        more — the game does not end. You get one final run at every agent still
-        hidden, with no new clues: either player may guess, one at a time, using
-        everything said so far. Every guess must be an agent. A bystander or an
-        assassin ends it there.</p>
+
+    <RulesSection title="End of the game">
+      <p>In sudden death there are no new clues. Either player may guess one word
+        at a time, using the clues already given, and every guess must be an
+        agent. A bystander or an assassin ends the mission in a loss. Finding the
+        last remaining agent wins.</p>
     </RulesSection>
-    <RulesSection title="Keeping it fair">
-      <p>A clue relates to the words by meaning. It cannot use a word's position on
-        the grid, its spelling or its letter count, and it cannot be a word still
-        showing on the board (the console rejects that one for you). Everything
-        else is between the two of you — and once you have given your clue, say
-        nothing: no nudges, no reactions, and never a hint about what your own key
-        says.</p>
+
+    <RulesSection title="At the table">
+      <p>A clue must relate to the words by meaning. It cannot use a word's
+        position, spelling or letter count, and it cannot be an uncovered word on
+        the grid. After giving a clue, say nothing else: no nudges, reactions or
+        hints about your key.</p>
     </RulesSection>
   </>;
 }

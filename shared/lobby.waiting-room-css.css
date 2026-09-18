@@ -194,8 +194,8 @@
  * button is disabled while it shows, because pressing it on a closed socket sends
  * nothing and says nothing — the same silence one step later.
  *
- * Amber, not red: the accent belongs to the game and red belongs to a game
- * running without you (`.lby-seated-live` in the page sheet). */
+ * Amber, not red: the accent belongs to the game, and a dropped socket is a
+ * waiting state rather than a game result. */
 .wr-drop{display:flex;align-items:center;justify-content:center;gap:9px;width:100%;
 	padding:9px 13px;border-radius:var(--radius,8px);
 	font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-size:.88rem;

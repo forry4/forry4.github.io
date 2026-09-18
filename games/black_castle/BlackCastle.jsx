@@ -50,16 +50,16 @@ function Lobby({ myId, authUser, openGames, activeGames, history, onRefresh, ref
         refreshing={refreshing} onRules={onRules} /></LobbyHero>
       <LobbyTabs value={lobbyTab} onChange={setLobbyTab} tabs={[{ key: "open", label: "Open", count: openGames.length || null }, { key: "active", label: "Active", count: activeGames.length || null }, { key: "history", label: "History", count: history.length || null }]} />
       <div className={`lby-cols tab-${lobbyTab}`}>
-        <section className="lby-col-open"><LobbySectionHd title="Open tables" note={`${openGames.length} waiting`} />
-          {!openGames.length && <LobbyEmpty>No open tables. Create a game with friends or computer players.</LobbyEmpty>}
+        <section className="lby-col-open"><LobbySectionHd title="Open Games" note={`${openGames.length} waiting`} />
+          {!openGames.length && <LobbyEmpty>No open games — create one.</LobbyEmpty>}
           <div className="lby-list">{openGames.map((g) => <div className="lby-card" key={g.id}>
             <div className="lby-card-info"><div className="lby-card-title">{g.player1_name || "Player"}'s castle <span className="lby-seats">{[g.player1_name, g.player2_name, g.player3_name, g.player4_name].filter(Boolean).length}/{g.max_players || 4}</span></div>
               <div className="lby-card-meta">{g.id} · standard base game</div></div>
             <div className="lby-card-actions"><LobbyAction onClick={() => onJoin(g.id)}>Join</LobbyAction></div>
           </div>)}</div>
         </section>
-        <section className="lby-col-active"><LobbySectionHd title="Active tables" note={`${active.length} in progress`} />
-          {!active.length && <LobbyEmpty>No active castles yet.</LobbyEmpty>}
+        <section className="lby-col-active"><LobbySectionHd title="Active Games" note={`${active.length} in progress`} />
+          {!active.length && <LobbyEmpty>No games in progress.</LobbyEmpty>}
           <div className="lby-list">{active.map((g) => <div className="lby-card" key={g.id}><div className="lby-card-info"><LobbyMatchup placeholder="Opponent" seats={[{ name: g.player1_name || "Clan", you: true }, { name: g.player2_name || "Opponent", you: false }]} /><div className="lby-card-meta"><LobbyBotTier tier={g.ai_difficulty} labels={BLACK_CASTLE_AI_LABELS} /></div></div><div className="lby-card-actions"><LobbyAction onClick={() => onJoin(g.id)}>Resume</LobbyAction></div></div>)}</div>
         </section>
         <section className="lby-col-history"><LobbySectionHd title="History" note={`${history.length} finished`} />

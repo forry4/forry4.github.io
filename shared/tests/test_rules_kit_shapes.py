@@ -78,6 +78,28 @@ def test_the_shape_scan_actually_finds_the_component_in_use():
         f"running over an empty list: {found}")
 
 
+def test_every_ruleset_opens_with_the_shared_goal_and_setup_shape():
+    """A new rules panel starts where a rulebook starts.
+
+    The old facts strip and chatty lead paragraph were easy to copy into a new
+    game and left the actual goal below the fold. Games with unusual turn
+    structures may choose their own later headings, but every ruleset still
+    opens with Goal of the Game, then Setup, and no longer renders RulesFacts.
+    """
+    bad = {}
+    for path in RULES:
+        src = path.read_text(encoding="utf-8")
+        titles = re.findall(r'<RulesSection\s+title="([^"]+)"', src)
+        problems = []
+        if titles[:2] != ["Goal of the Game", "Setup"]:
+            problems.append(f"opening headings are {titles[:2]!r}")
+        if re.search(r"<RulesFacts\b", src):
+            problems.append("renders the retired RulesFacts strip")
+        if problems:
+            bad[path.parent.name] = problems
+    assert not bad, f"rulesets outside the shared opening shape: {bad}"
+
+
 @pytest.mark.parametrize("path", RULES, ids=lambda p: p.parent.name)
 def test_every_rules_item_list_is_shaped_not_a_bare_string(path):
     src = path.read_text(encoding="utf-8")

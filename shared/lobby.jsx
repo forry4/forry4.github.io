@@ -346,45 +346,6 @@ export function seatStateOf(g, myId) {
 	return "joinable";
 }
 
-// ─── The strip that says you are still seated somewhere ─────────────────────
-// BACKING OUT OF A WAITING ROOM IS NOT LEAVING THE TABLE, and the player is
-// entitled to be told which one it is: "backing out to the lobby shouldn't
-// remove you from the game lobby, it just means you might wanna do other stuff
-// while waiting for the game to start." Their seat does survive it — the server
-// keeps `players[pid]` when a socket goes — but nothing on the lobby said so, and
-// once the host dealt, the room left the Open list and the player had no row to
-// press at all.
-//
-// It sits ABOVE `.lby-cols` and never inside it: the phone tab bar shows and
-// hides columns by their `lby-col-*` class, so a fourth child of that grid can be
-// neither shown nor hidden.
-//
-// `started` is the half that changes the words AND the urgency — a table that has
-// not dealt is a thing to wait for, a table that HAS is a game running without
-// you.
-export function SeatedNotice({ roomId, started = false, connected = true, onReturn }) {
-	if (!roomId) return null;
-	return (
-		<div className={`lby-seated${started ? " lby-seated-live" : ""}`} role="status" aria-live="polite">
-			<span className="lby-seated-text">
-				<span className="lby-seated-lead">
-					{started ? "Your game has started" : "You have a seat at this table"}
-				</span>
-				<span className="lby-seated-sub">
-					{started
-						? `Room ${roomId} — it is running without you.`
-						: connected
-							? `Room ${roomId} — you will be taken in when the host deals.`
-							: `Room ${roomId} — reconnecting, so press Return if the deal beats us to it.`}
-				</span>
-			</span>
-			<button type="button" className="lby-act lby-act-primary lby-seated-go" onClick={onReturn}>
-				{started ? "Rejoin" : "Return to table"}
-			</button>
-		</div>
-	);
-}
-
 // The one action button a lobby row gets. Extracted because the five lobbies had
 // drifted to four different styles for the SAME Resume button (btn / btn-gold /
 // btn-outline / btn-outline btn-sm), and a class name copied per game is a
