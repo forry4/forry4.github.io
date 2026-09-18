@@ -50,8 +50,14 @@
    `<input>` scrolls its own text rather than breaking a layout when it does run out. It is
    still worth the 18px, because the 18px is free: measured at 18 viewport widths from 320 to
    1920, the create row keeps the same height, the same number of lines and no overflow at
-   every one of them. The width only applies above 600px anyway — the phone grid overrides it
-   to `width:auto` and the field takes the whole second row. */
+   every one of them. It is also only ever SEEN above 600px: on a phone the field is a flex
+   item with `flex:1 1 auto` inside the grid's full-width row 2, so grow decides its size and
+   any declared width is just the basis it grows from — measured 298px at a 390px viewport,
+   148px at 601. (Note it is NOT this file's `@media` `width:auto` that loses to: `.lby-create-row
+   .lby-code{width:90px}` in lobby.lobby-css.css is (0,2,0) against (0,1,0) and wins the
+   property. That rule is a leftover from the sideways-scroller era — its comment still
+   explains itself as making the row "fit on ONE row on phones" — and grow is why it has been
+   invisible either way.) */
 .lby-code{padding:10px 12px;width:148px;background:rgba(0,0,0,.28);border:1px solid var(--border,#3a3226);border-radius:var(--radius,8px);color:var(--text,#e8dfce);font-family:'Cinzel','Cinzel Fallback',serif;font-size:1rem;letter-spacing:.12em;text-transform:uppercase;outline:none;transition:border-color .15s,background .15s,box-shadow .15s}
 .lby-code::placeholder{color:#8d8271}
 .lby-code:focus{border-color:var(--lby-accent,var(--gold,#c9a84c));background:rgba(0,0,0,.42);
