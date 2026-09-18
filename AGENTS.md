@@ -441,8 +441,10 @@ covers the logic; each game's wiring is one line).
 
 ## Testing
 
-- **The suite is defined ONCE** in `pytest.ini` `testpaths`; both CI workflows run a bare `pytest`.
-  They used to carry two hand-maintained path lists that drifted (Duel's tests ran only at deploy).
+- **The suite is defined ONCE** in `pytest.ini` `testpaths`. Python CI runs the bare `pytest` on
+  every push and pull request; an automatic Render deploy waits for that exact successful run,
+  so the main push no longer runs the 4,651-test suite twice. The manual Render workflow remains
+  self-contained and runs the same bare command as a fallback.
 - **The suite runs PARALLEL by default (`addopts = -n auto`) — 6m41s → ~1m04s, and `pytest-xdist` is
   a required dependency, not an optional one.** Two things were wrong, and they are different
   problems worth telling apart:
@@ -694,15 +696,18 @@ git push                      # deploy-pages.yml builds + publishes (~2-3 min)
   filter — and the suite reads `.jsx`/`.css` as text, so frontend edits genuinely can fail it),
   plus `smoke` + `screens` when the push can change the bundle (~80s for the pair — see Testing:
   screens runs in two lanes and reuses smoke's build; the `deploy-pages.yml` filter:
-  `webapp/**`/`games/**`/`shared/**`/`books/**` minus `*.md` and Python `tests/` dirs). Pushes to
+  `webapp/**`/`games/**`/`shared/**`/`books/**` minus Python files, `*.md`, and Python `tests/` dirs). Pushes to
   other branches and docs-only pushes run nothing. `git push --no-verify` or `SKIP_GATES=1` skips
   it once; `GATES_DRY_RUN=1` prints what would run. It exists because nearly every red run in the
   2026-08-06/07 launch ledger was a gate that would have failed locally in about a minute. Caveat:
   `core.hooksPath` redirects ALL hooks to `.githooks/`, so personal hooks in `.git/hooks` stop
   firing — move them in if you have any.
 
-- **Backend** (`**/*.py`) deploys to Render on push to main. The deploy job **verifies itself**: it
-  polls `/health` until it reports the pushed commit and FAILS if that never happens.
+- **Backend serving code** deploys to Render on push to main through the hand-curated path list in
+  `deploy-render.yml`; tests, docs, and offline tooling are excluded. Automatic deploys first wait
+  for the matching Python CI run, and the deploy job **verifies itself** by polling `/health` until
+  it reports the pushed commit and FAILS if that never happens. Manual Render runs execute the
+  same Python suite locally in the workflow before firing the hook.
 - **The deploy hook returning 200 is NOT a successful deploy** (this cost a real gap): it only means
   Render accepted the request. A failed Docker build — the Dockerfile's Cython parity gate is *designed*
   to fail one — or a boot crash used to leave prod silently on the old code behind a green tick.

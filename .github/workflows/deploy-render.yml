@@ -92,18 +92,95 @@ on:
       - '!**/tests/**'
   workflow_dispatch:
 
+permissions:
+  actions: read
+  contents: read
+
 jobs:
-  # Gate the deploy on the test suite: previously the Render hook fired on push with no
-  # test dependency, so a red suite still deployed. `deploy` now `needs: test`, so the
-  # hook only fires when tests pass on this push.
+  # Python CI is the single authoritative test run for automatic main pushes.
+  # Waiting for its exact SHA removes the duplicate 4,651-test run that used to
+  # happen here, while still refusing to deploy if that run is red or missing.
+  python_gate:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Wait for the matching Python CI run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          WANT_SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+          import time
+          from urllib.parse import urlencode
+          from urllib.request import Request, urlopen
+
+          repo = os.environ["REPOSITORY"]
+          want = os.environ["WANT_SHA"]
+          token = os.environ["GH_TOKEN"]
+          endpoint = f"https://api.github.com/repos/{repo}/actions/workflows/python-app.yml/runs"
+          query = urlencode({"head_sha": want, "event": "push", "per_page": "20"})
+          deadline = time.time() + 1200
+          last = "no matching run yet"
+
+          while time.time() < deadline:
+              try:
+                  request = Request(
+                      f"{endpoint}?{query}",
+                      headers={
+                          "Accept": "application/vnd.github+json",
+                          "Authorization": f"Bearer {token}",
+                          "X-GitHub-Api-Version": "2022-11-28",
+                      },
+                  )
+                  with urlopen(request, timeout=30) as response:
+                      runs = json.load(response).get("workflow_runs", [])
+                  if runs:
+                      run = max(
+                          runs,
+                          key=lambda item: (
+                              item.get("run_attempt", 0),
+                              item.get("created_at", ""),
+                          ),
+                      )
+                      status = run.get("status", "unknown")
+                      conclusion = run.get("conclusion", "")
+                      last = f"run {run.get('run_number', '?')} status={status} conclusion={conclusion or '-'}"
+                      print(f"  ... {last}", flush=True)
+                      if status == "completed":
+                          if conclusion == "success":
+                              print(f"OK  Python CI passed for {want[:7]}")
+                              sys.exit(0)
+                          print(f"::error::Python CI finished {conclusion or 'without a conclusion'} for {want[:7]}")
+                          sys.exit(1)
+                  else:
+                      print(f"  ... waiting for Python CI at {want[:7]}", flush=True)
+              except Exception as exc:
+                  last = f"GitHub API unavailable ({type(exc).__name__})"
+                  print(f"  ... {last}", flush=True)
+              time.sleep(10)
+
+          print(f"::error::Timed out waiting for Python CI at {want[:7]}; last seen: {last}")
+          sys.exit(1)
+          PY
+
+  # Manual Render runs remain self-contained: they run the same bare pytest
+  # command instead of depending on a separate push-triggered workflow.
   test:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: pip
+          cache-dependency-path: games/spender/requirements.txt
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -114,7 +191,11 @@ jobs:
         run: python -m pytest -q
 
   deploy:
-    needs: test
+    needs: [python_gate, test]
+    if: >-
+      always() &&
+      ((github.event_name == 'push' && needs.python_gate.result == 'success') ||
+       (github.event_name == 'workflow_dispatch' && needs.test.result == 'success'))
     runs-on: ubuntu-latest
     steps:
       # Fired BEFORE the hook: the fallback gate below asks "did a process boot

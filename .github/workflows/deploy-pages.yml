@@ -28,6 +28,7 @@ on:
       - 'games/rag_tag/**'
       - 'games/orbit/**'
       - 'games/black_castle/**'
+      - 'games/secretnames/**'
       - 'books/**'
       - 'bggfilter/**'
       - 'shared/**'
@@ -37,6 +38,10 @@ on:
       # docs edit rebuilt and republished a byte-identical site. Must be a trailing
       # negative pattern rather than `paths-ignore`: GitHub rejects both filters on one
       # event, and later patterns override earlier ones.
+      # Python is backend-only and cannot reach the Vite bundle. Excluding it keeps a
+      # backend-only commit from starting the two-to-three-minute browser gate, while
+      # a mixed backend/frontend commit still matches through its frontend path.
+      - '!**/*.py'
       - '!**/*.md'
       # Python test packages don't reach the bundle either, and they live inside the
       # same globs — so a test-only commit republished a byte-identical site. Not

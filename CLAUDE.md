@@ -592,8 +592,10 @@ covers the logic; each game's wiring is one line).
 
 ## Testing
 
-- **The suite is defined ONCE** in `pytest.ini` `testpaths`; both CI workflows run a bare `pytest`.
-  They used to carry two hand-maintained path lists that drifted (Duel's tests ran only at deploy).
+- **The suite is defined ONCE** in `pytest.ini` `testpaths`. Python CI runs the bare `pytest` on
+  every push and pull request; an automatic Render deploy waits for that exact successful run,
+  so the main push no longer runs the 4,651-test suite twice. The manual Render workflow remains
+  self-contained and runs the same bare command as a fallback.
 - **The suite runs PARALLEL by default (`addopts = -n auto`) — 6m41s → ~1m04s, and `pytest-xdist` is
   a required dependency, not an optional one.** Two things were wrong, and they are different
   problems worth telling apart:
@@ -906,22 +908,24 @@ git push                      # deploy-pages.yml builds + publishes (~2-3 min)
   filter — and the suite reads `.jsx`/`.css` as text, so frontend edits genuinely can fail it),
   plus `smoke` + `screens` when the push can change the bundle (~80s for the pair — see Testing:
   screens runs in two lanes and reuses smoke's build; the `deploy-pages.yml` filter:
-  `webapp/**`/`games/**`/`shared/**`/`books/**` minus `*.md` and Python `tests/` dirs). Pushes to
+  `webapp/**`/`games/**`/`shared/**`/`books/**` minus Python files, `*.md`, and Python `tests/` dirs). Pushes to
   other branches and docs-only pushes run nothing. `git push --no-verify` or `SKIP_GATES=1` skips
   it once; `GATES_DRY_RUN=1` prints what would run. It exists because nearly every red run in the
   2026-08-06/07 launch ledger was a gate that would have failed locally in about a minute. Caveat:
   `core.hooksPath` redirects ALL hooks to `.githooks/`, so personal hooks in `.git/hooks` stop
   firing — move them in if you have any.
 
-- **Backend deploys to Render on push to main — but NOT on `**/*.py`.** `deploy-render.yml` carries a
-  hand-curated path list, one entry per game, and **a game that is mounted in `app.py` but missing
-  from that list is served in prod off whatever code an unrelated deploy happened to carry.** Orbit
-  shipped without its entry and was found on 2026-09-05 running a build from the previous day with
-  22 commits since — a rewrite of its server-authoritative `engine.py` passed every gate and would
-  never have reached the server. **The symptom is silence, not a red run**, because no workflow fires
-  at all. Adding a game to `app.py` means adding it here in the same push; the file also triggers on
-  itself, so a fix to the list can actually land. The deploy job **verifies itself**: it
-  polls `/health` until it reports the pushed commit and FAILS if that never happens.
+- **Backend serving code deploys to Render on push to main.** `deploy-render.yml` carries a
+  hand-curated path list, one entry per game; tests, docs, and offline tooling are excluded, and
+  **a game that is mounted in `app.py` but missing from that list is served in prod off whatever
+  code an unrelated deploy happened to carry.** Orbit shipped without its entry and was found on
+  2026-09-05 running a build from the previous day with 22 commits since — a rewrite of its
+  server-authoritative `engine.py` passed every gate and would never have reached the server. **The
+  symptom is silence, not a red run**, because no workflow fires at all. Adding a game to `app.py`
+  means adding it here in the same push; the file also triggers on itself, so a fix to the list can
+  actually land. Automatic deploys wait for the matching successful Python CI run; manual Render
+  runs execute the same suite in the workflow. The deploy job **verifies itself** by polling
+  `/health` until it reports the pushed commit and FAILS if that never happens.
 - **The deploy hook returning 200 is NOT a successful deploy** (this cost a real gap): it only means
   Render accepted the request. A failed Docker build — the Dockerfile's Cython parity gate is *designed*
   to fail one — or a boot crash used to leave prod silently on the old code behind a green tick.
