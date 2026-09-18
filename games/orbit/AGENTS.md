@@ -820,8 +820,10 @@ The initial visual sign-off missed actual play problems. Do not repeat that:
   A recruit's destination is `column-<pid>-<planet>` — the played-Agent cell in
   that seat's player box, the one place a recruited Agent lands now.
 - Duplicate frames, reconnect baselines and reduced motion must not replay
-  flights. Resizing or scrolling the page/hand cancels obsolete geometry;
-  the log's automatic scroll must NOT cancel a just-started card animation.
+  flights. A SCROLL re-anchors a running flight, a RESIZE cancels it (see the
+  2026-09-18 note, which supersedes the "scroll/resize cancels" line in the
+  2026-09-15 one); the log's automatic scroll must do neither to a just-started
+  card animation.
 - `screens:orbit` checks populated desktop decisions, stable board geometry,
   all card sentences, actual flight endpoints, duplicate suppression and reduced
   motion. `ORBIT_SHOTS=1` includes card-flight frames for visual inspection.
@@ -855,3 +857,54 @@ The initial visual sign-off missed actual play problems. Do not repeat that:
   before inspecting the refilled hand. Absence of decision buttons is no
   longer a completion signal during automatic discard chains. Mobile flight
   checks cover two simultaneous draws when a decision above the hand vanishes.
+
+
+### A scroll moves a flight, a resize ends it — 2026-09-18
+
+Reported as "the animations look scuffed on mobile if I scroll while they play",
+and it was not a polish problem: **every card in flight was destroyed outright
+by the first scroll event.** `resize()` finished all running flights and the
+`scroll` handler called it, so a play followed by a flick left the card
+evaporating in mid-air. Measured at 390x844 with one `scrollTo`: `flights: 0`.
+
+- **It is a phone bug for a layout reason, not a touch reason.** At >=981px
+  `.or-live` is `height: 100dvh` and the page does not scroll at all; below it
+  `.or-game` is `min-height: 100dvh` and the whole table IS the document
+  scroller (measured room to scroll at 390x844: 187px). So the handler could
+  only ever fire where the fix was needed, and the desktop gate could not see it.
+- **The cure is re-anchoring, and it works because of what the ghost animates.**
+  A flight is `position: fixed` at viewport coordinates, but its keyframes touch
+  only `transform`/`opacity` — so `left`/`top` stay free, and writing them
+  composes with the animation already in flight instead of restarting it. Each
+  flight now records an ANCHOR: a real element whose movement is the flight's
+  frame of reference (the destination cell for recruit/technology/leader/
+  transfer/mobilize, the source cell for an exile, the arrival slot for a draw).
+  On any scroll the ghost is shifted by however far its anchor moved.
+- **A MOVE and a RESIZE are different facts and this is the whole design.** A
+  scroll translates source and destination together, so the travel vector still
+  holds and the flight can ride it out; a resize re-measures the destination and
+  there is nothing left to follow, so `reanchor()` returns false and the caller
+  drops the flight — the old behaviour, kept. It also replaces the draw-only
+  `isStale()`, which conflated the two by treating any position drift as fatal.
+- **Listen wider, cancel narrower.** Every scroller can carry a destination away
+  (the page, the hand's own `overflow-x`, a panel's inner scroll), so all of them
+  re-anchor; only the ones that can move the HAND re-measure the cached faces,
+  which is what keeps the log's auto-follow — firing on the very same update as
+  a card play — from paying for a recapture it cannot affect.
+- **The same bug has a two-frame window the gate cannot reach.** Destinations are
+  measured two animation frames after the snapshot, and the outgoing card's own
+  rect is read from a pre-update capture — it cannot be re-measured, because the
+  card has already left the DOM. `captureFaces` therefore records the page
+  offset with the rects and `faceAt` re-bases them on use. A scroll landing
+  inside that ~33ms window is not deterministically reproducible, so this half
+  is correct-by-construction rather than gated; do not mistake the green gate
+  for coverage of it.
+- **Both gate checks are non-vacuous and they fail in OPPOSITE directions**
+  (`orbitPlay`, lane B, at 390 and 430px). "Rides the scroll" is red on the old
+  code (`alive: 0`, landing error 273-301px); "a resize still drops a flight" is
+  red when the size guard is removed. Surviving is only half the assertion — a
+  ghost left behind at its original viewport offset is still on screen and still
+  wrong — so the landing is re-checked against the destination's NEW position,
+  and the scroll is asserted to have moved that destination first, since on a
+  table that happened not to overflow every other bound would hold over a page
+  that never scrolled.

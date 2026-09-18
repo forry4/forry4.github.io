@@ -7475,6 +7475,77 @@ try {
                 check(`${kind}: duplicate column snapshot does not replay`, await page.locator('.or-card-flight').count() === 0);
             }
         }
+        // SCROLLING MID-FLIGHT MUST NOT ABANDON THE CARD. A ghost is
+        // `position: fixed`, so its viewport coordinates go stale the moment the
+        // page moves under it — and below 981px the whole table IS the page
+        // scroller, which is why this only ever showed up on a phone. The old
+        // answer was to cancel every running flight on any scroll at all, so a
+        // card played and then scrolled past simply evaporated in mid-air.
+        // SURVIVING IS HALF THE ASSERTION: a ghost left behind at the viewport
+        // offset it was measured in is still on the screen and still wrong, so
+        // the landing is re-checked against the destination's NEW position. And
+        // the scroll is asserted to have moved that destination before either —
+        // on a table that happened not to overflow, every bound below would hold
+        // over a page that never scrolled.
+        for (const width of [390, 430]) {
+            await page.setViewportSize({width, height:844});
+            await page.evaluate(() => scrollTo(0,0));
+            for (const player of Object.values(gameView.players)) for (const planet of planetNames) player.columns[planet] = [];
+            gameView.pending = null; gameView.pending_pid = null; gameView.legal_moves = [];
+            self.hand = [orbitCatalog.cards["210"], orbitCatalog.cards["314"], orbitCatalog.cards["502"]];
+            socket.send(JSON.stringify(fixture));
+            await page.waitForTimeout(120);
+            await page.waitForFunction(() => !document.querySelector('.or-card-flight'));
+            gameView.players[opponentId].columns.mars.push(orbitCatalog.cards["410"]);
+            socket.send(JSON.stringify(fixture));
+            await page.waitForSelector('.or-card-flight[data-flight="mobilize"]');
+            const ridden = await page.evaluate(async (opponentId) => {
+                const node = document.querySelector('.or-card-flight[data-flight="mobilize"]');
+                const a = node.getAnimations()[0]; a.pause(); a.currentTime = a.effect.getTiming().duration - 1;
+                const cell = () => document.querySelector(`[data-motion-key="column-${opponentId}-mars"]`).getBoundingClientRect();
+                const error = () => { const r = node.getBoundingClientRect(), t = cell();
+                    return Math.hypot(r.x + r.width/2 - t.x - t.width/2, r.y + r.height/2 - t.y - t.height/2); };
+                const room = document.documentElement.scrollHeight - innerHeight;
+                const before = {error: error(), cellY: cell().y};
+                scrollTo(0, room);
+                await new Promise((done) => setTimeout(done, 150));
+                return {room, before, after: {error: error(), cellY: cell().y},
+                    scrolled: scrollY, alive: document.querySelectorAll('.or-card-flight').length};
+            }, opponentId);
+            check(`${width}px: a card in flight rides the scroll instead of vanishing`,
+                ridden.room > 120 && ridden.scrolled > 120
+                && Math.abs(ridden.before.cellY - ridden.after.cellY - ridden.scrolled) < 1
+                && ridden.alive === 1 && ridden.before.error < 2 && ridden.after.error < 2, JSON.stringify(ridden));
+            if (process.env.ORBIT_SHOTS) await page.screenshot({path:`test-results/orbit-scrolled-flight-${width}.png`});
+            // A RESIZE IS STILL FATAL, and that split is the whole design: a
+            // scroll only MOVES a destination, so the travel vector still holds
+            // and the flight can ride it out, while a resize RE-MEASURES it and
+            // there is nothing left to follow. Without this the fix would read
+            // identically to having deleted the guard.
+            await page.evaluate(() => document.querySelectorAll('.or-card-flight').forEach((n) => n.getAnimations().forEach((a) => a.finish())));
+            await page.evaluate(() => scrollTo(0,0));
+            gameView.players[opponentId].columns.mars = [];
+            socket.send(JSON.stringify(fixture));
+            await page.waitForTimeout(120);
+            await page.waitForFunction(() => !document.querySelector('.or-card-flight'));
+            gameView.players[opponentId].columns.mars.push(orbitCatalog.cards["410"]);
+            socket.send(JSON.stringify(fixture));
+            await page.waitForSelector('.or-card-flight[data-flight="mobilize"]');
+            const cellWidth = () => page.locator(`[data-motion-key="column-${opponentId}-mars"]`).evaluate((n) => n.getBoundingClientRect().width);
+            const narrow = await cellWidth();
+            await page.setViewportSize({width: width + 200, height: 844});
+            await page.waitForTimeout(150);
+            check(`${width}px: a resize still drops a flight whose destination was re-measured`,
+                await cellWidth() > narrow + 1 && await page.locator('.or-card-flight').count() === 0,
+                JSON.stringify({narrow, wide: await cellWidth()}));
+            for (const player of Object.values(gameView.players)) for (const planet of planetNames) player.columns[planet] = [];
+            socket.send(JSON.stringify(fixture));
+            await page.waitForTimeout(120);
+            await page.evaluate(() => document.querySelectorAll('.or-card-flight').forEach((n) => n.getAnimations().forEach((a) => a.finish())));
+        }
+        await page.setViewportSize({width:1920, height:1080});
+        await page.evaluate(() => scrollTo(0,0));
+        await page.waitForFunction(() => !document.querySelector('.or-card-flight'));
 		await page.emulateMedia({ reducedMotion: "reduce" });
 		self.hand = savedHand;
 		socket.send(JSON.stringify(fixture));

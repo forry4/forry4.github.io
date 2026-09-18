@@ -11,6 +11,21 @@ const bounds = (node) => {
   const { left, top, width, height } = node.getBoundingClientRect();
   return { left, top, width, height };
 };
+// A HAND SNAPSHOT IS READ BACK ONE OR TWO FRAMES AFTER IT IS TAKEN, and the
+// page can scroll in between. These rects are viewport-relative but the cards
+// they describe have already left the DOM, so they cannot be re-measured —
+// record where the page was and re-base them on use instead.
+const captureFaces = (root) => ({
+  at: { x: scrollX, y: scrollY },
+  cards: new Map([...root?.querySelectorAll(".or-hand [data-card-id]") || []].filter(visible).map((node) =>
+    [String(node.dataset.cardId), { rect: bounds(node), face: node.cloneNode(true) }])),
+});
+const faceAt = (snapshot, id) => {
+  const entry = snapshot?.cards.get(String(id));
+  if (!entry) return null;
+  const dx = snapshot.at.x - scrollX, dy = snapshot.at.y - scrollY;
+  return { face: entry.face, rect: { ...entry.rect, left: entry.rect.left + dx, top: entry.rect.top + dy } };
+};
 const columnCards = (game) => new Map(Object.entries(game?.players || {}).flatMap(([pid, player]) =>
   Object.entries(player.columns || {}).flatMap(([planet, cards]) => cards.map((card) =>
     [String(card.id), { card, pid, key: `column-${pid}-${planet}` }]))));
@@ -27,7 +42,7 @@ const publicFace = (card) => {
 // travel. No inferred opponent hand, optimistic move, or animation-gated input.
 export function useCardMotion({ game, catalog, myId, roomId, connected, surface }) {
   const previous = useRef(null);
-  const faces = useRef(new Map());
+  const faces = useRef(null);
   const running = useRef(new Set());
   const reduced = useRef(false);
   const pendingFrame = useRef(null);
@@ -39,23 +54,27 @@ export function useCardMotion({ game, catalog, myId, roomId, connected, surface 
       for (const finish of [...running.current]) finish();
     };
     const preference = () => { reduced.current = media.matches; if (media.matches) stop(); };
-    const capture = () => {
-      faces.current = new Map([...surface.current?.querySelectorAll(".or-hand [data-card-id]") || []]
-        .filter(visible).map((node) => [String(node.dataset.cardId), { rect: bounds(node), face: node.cloneNode(true) }]));
-    };
+    const capture = () => { faces.current = captureFaces(surface.current); };
+    // A FLIGHT FOLLOWS ITS DESTINATION RATHER THAN DYING WITH THE SCROLL. Ghosts
+    // are `position: fixed`, so their viewport coordinates go stale the instant
+    // the page moves under them — and below 981px the whole table IS the page
+    // scroller, so a flight that overlapped a scroll used to be cancelled
+    // outright and the card simply vanished in mid-air. Re-anchoring keeps the
+    // one case that genuinely invalidates a flight — its destination resized or
+    // left the DOM — and lets every other one ride the scroll out.
+    const settle = () => { for (const finish of [...running.current]) if (!finish.reanchor()) finish(); };
     preference();
     media.addEventListener("change", preference);
     // Geometry is refreshed on scroll/resize, not just on a server broadcast.
-    const resize = () => {
-      // A queued flight has not measured its destinations yet. Let it pick up
-      // the new geometry, including scroll anchoring after a mobile decision.
-      for (const finish of [...running.current]) finish();
-      capture();
-    };
+    const resize = () => { settle(); capture(); };
     const scroll = (event) => {
-      // Auto-following the log is unrelated to card geometry and happens on
-      // precisely the same update as a card play. It must not cancel the flight.
-      if (event.target === document || event.target === window || event.target?.classList?.contains("or-hand")) resize();
+      // ANY scroller can carry a destination away — the page, the hand's own
+      // overflow, a panel's inner scroll — so all of them re-anchor. Only the
+      // ones that move the HAND need its cached faces re-measured, and
+      // auto-following the log, which fires on precisely the same update as a
+      // card play, must not pay for a recapture it cannot affect.
+      settle();
+      if (event.target === document || event.target === window || event.target?.classList?.contains("or-hand")) capture();
     };
     window.addEventListener("resize", resize);
     window.addEventListener("scroll", scroll, true);
@@ -82,8 +101,7 @@ export function useCardMotion({ game, catalog, myId, roomId, connected, surface 
     const cached = faces.current;
     const columns = columnCards(game);
     const nodes = [...root?.querySelectorAll(".or-hand [data-card-id]") || []];
-    faces.current = new Map(nodes.filter(visible).map((node) =>
-      [String(node.dataset.cardId), { rect: bounds(node), face: node.cloneNode(true) }]));
+    faces.current = captureFaces(root);
     previous.current = {
       roomId, connected, turn: game?.turn_number, phase: game?.phase,
       hand: new Set(hand.map((card) => String(card.id))),
@@ -99,7 +117,7 @@ export function useCardMotion({ game, catalog, myId, roomId, connected, surface 
     }
     const byKey = (key) => [...root.querySelectorAll("[data-motion-key]")]
       .find((node) => node.dataset.motionKey === key && visible(node));
-    const fly = (face, from, to, kind, delay = 0, reveal) => {
+    const fly = (face, from, to, kind, delay = 0, reveal, anchor = reveal) => {
       const ghost = face.cloneNode(true);
       ghost.classList.remove("selected", "discarding", "playable");
       ghost.classList.add("or-card-flight");
@@ -138,12 +156,24 @@ export function useCardMotion({ game, catalog, myId, roomId, connected, surface 
         running.current.delete(finish);
         animation.cancel(); arrival?.cancel(); ghost.remove();
       };
-      finish.isStale = () => {
-        if (!reveal) return false;
-        if (!root.contains(reveal)) return true;
-        const rect = bounds(reveal);
-        return Math.abs(rect.left - from.left) > 1 || Math.abs(rect.top - from.top) > 1
-          || Math.abs(rect.width - from.width) > 1 || Math.abs(rect.height - from.height) > 1;
+      // THE FLIGHT'S FRAME OF REFERENCE IS A REAL ELEMENT, not the viewport it
+      // happened to be measured in. `left`/`top` are set inline and the
+      // keyframes only touch `transform`/`opacity`, so moving the ghost with its
+      // anchor composes with the animation already in flight instead of
+      // restarting it. A MOVE is re-anchored; a RESIZE or a removal is the one
+      // thing that makes the travel vector itself wrong, and returns false so
+      // the caller can drop the flight.
+      const anchored = anchor && bounds(anchor);
+      finish.reanchor = () => {
+        if (!anchored) return true;
+        if (!root.contains(anchor)) return false;
+        const rect = bounds(anchor);
+        if (Math.abs(rect.width - anchored.width) > 1 || Math.abs(rect.height - anchored.height) > 1) return false;
+        Object.assign(ghost.style, {
+          left: `${from.left + rect.left - anchored.left}px`,
+          top: `${from.top + rect.top - anchored.top}px`,
+        });
+        return true;
       };
       running.current.add(finish);
       animation.onfinish = finish;
@@ -166,10 +196,8 @@ export function useCardMotion({ game, catalog, myId, roomId, connected, surface 
         pendingFrame.current = null;
         holds.forEach((hold) => hold.cancel());
         if (!root.isConnected || reduced.current || document.hidden) return;
-        for (const finish of [...running.current]) if (finish.isStale()) finish();
-        const currentNodes = [...root.querySelectorAll(".or-hand [data-card-id]")];
-        faces.current = new Map(currentNodes.filter(visible).map((node) =>
-          [String(node.dataset.cardId), { rect: bounds(node), face: node.cloneNode(true) }]));
+        for (const finish of [...running.current]) if (!finish.reanchor()) finish();
+        faces.current = captureFaces(root);
         const recruited = new Set();
         for (const entry of actions.filter((entry) => !old.actions.has(actionKey(entry)))) {
           if (!["recruit", "technology", "leader"].includes(entry.action)) continue;
@@ -177,7 +205,7 @@ export function useCardMotion({ game, catalog, myId, roomId, connected, surface 
           const card = catalog?.cards?.[String(id)];
           if (!card) continue;
           if (entry.action === "recruit") recruited.add(String(id));
-          let source = entry.pid === myId ? cached.get(String(id)) : null;
+          let source = entry.pid === myId ? faceAt(cached, id) : null;
           if (!source) {
             const seat = byKey(`seat-${entry.pid}`);
             if (!seat) continue;
@@ -193,7 +221,7 @@ export function useCardMotion({ game, catalog, myId, roomId, connected, surface 
             ? byKey(`column-${entry.pid}-${card.planet}`)
             : entry.action === "leader" ? byKey(`leader-${entry.pid}`)
               : byKey(`tech-rung-${card.faction}-${level}`) || byKey(`tech-${entry.pid}-${card.faction}`);
-          if (visible(target)) fly(source.face, source.rect, bounds(target), entry.action);
+          if (visible(target)) fly(source.face, source.rect, bounds(target), entry.action, 0, null, target);
         }
         // Both columns are public. Membership changes identify transfers, arrivals
         // from the deck, and exiles without ever inspecting an opposing hand.
@@ -208,12 +236,12 @@ export function useCardMotion({ game, catalog, myId, roomId, connected, surface 
             const target = byKey(current.key), source = before && byKey(before.key);
             if (!target || (before && !source)) continue;
             const from = before ? centreFace(bounds(source)) : edge(bounds(target));
-            fly(publicFace(current.card), from, bounds(target), before ? "transfer" : "mobilize", step++ * 220);
+            fly(publicFace(current.card), from, bounds(target), before ? "transfer" : "mobilize", step++ * 220, null, target);
           }
           for (const [id, before] of old.columns || []) {
             if (columns.has(id)) continue;
             const source = byKey(before.key);
-            if (source) fly(publicFace(before.card), centreFace(bounds(source)), edge(bounds(source)), "exile", step++ * 220);
+            if (source) fly(publicFace(before.card), centreFace(bounds(source)), edge(bounds(source)), "exile", step++ * 220, null, source);
           }
         }
         if (drawn.length) {
@@ -222,7 +250,7 @@ export function useCardMotion({ game, catalog, myId, roomId, connected, surface 
             // A newer server response can remove a card during the two-frame
             // layout settle (for example, an automatic discard).
             if (!root.contains(node)) continue;
-            const card = faces.current.get(node.dataset.cardId);
+            const card = faceAt(faces.current, node.dataset.cardId);
             if (!card) continue;
             fly(card.face, card.rect, card.rect, "draw", index++ * 230, node);
           }
