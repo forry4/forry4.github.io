@@ -184,11 +184,11 @@ function Console({ game, mySeat, onClue, onPass, onEndTurn, error }) {
       {!sudden && phase === "clue" && iClue && <>
         <div className="sn-console-lead">
           <span className="sn-console-k">Your clue</span>
-          <span className="sn-console-v">One word, and how many of {partner}'s guesses it is worth.</span>
+          <span className="sn-console-v">One word (up to 16 letters), and how many of {partner}'s guesses it is worth.</span>
         </div>
         <div className="sn-form">
-          <input className="sn-input" value={word} maxLength={24} placeholder="CLUE"
-            aria-label="Clue word" onChange={(e) => setWord(e.target.value)}
+          <input className="sn-input" value={word} maxLength={16} placeholder="CLUE"
+            aria-label="Clue word" onChange={(e) => setWord(e.target.value.replace(/[^A-Za-z]/g, "").slice(0, 16))}
             onKeyDown={(e) => { if (e.key === "Enter") submit(); }} />
           <div className="sn-stepper">
             <button type="button" className="sn-step" aria-label="Fewer" disabled={number <= 0}

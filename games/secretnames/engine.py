@@ -61,7 +61,7 @@ TOTAL_AGENTS = 15
 DEFAULT_TURNS = 9
 TURN_OPTIONS = (9, 10, 11)
 
-CLUE_MAX_LEN = 24
+CLUE_MAX_LEN = 16
 CLUE_NUMBER_MAX = 9
 
 # THE KEY-CARD COMPOSITION (spec §2), written as the pair distribution rather
@@ -249,10 +249,9 @@ def _end_normal_turn(game: dict) -> None:
 
 # ─── Moves ───────────────────────────────────────────────────────────────────
 # Most clue legality is semantic and is left to the players (spec §7); what IS
-# mechanical is checked here. A clue is one token (two are allowed for a proper
-# name, which is the optional rule most groups play), it is short enough to be a
-# word, and it may not simply BE a board word that is still uncovered.
-_CLUE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9'.\-]*(?: [A-Za-z0-9'.\-]+)?$")
+# mechanical is checked here. A clue is one word of letters, at most 16
+# characters, and it may not be a board word that is still uncovered.
+_CLUE_RE = re.compile(r"^[A-Za-z]+$")
 
 
 def _apply_clue(game: dict, seat: int, move: dict) -> tuple[bool, str | None]:
@@ -265,8 +264,8 @@ def _apply_clue(game: dict, seat: int, move: dict) -> tuple[bool, str | None]:
         return False, "a clue needs a word"
     if len(word) > CLUE_MAX_LEN:
         return False, f"a clue is at most {CLUE_MAX_LEN} characters"
-    if not _CLUE_RE.match(word):
-        return False, "a clue is one word (two for a proper name), letters and digits"
+    if not _CLUE_RE.fullmatch(word):
+        return False, "a clue must contain letters only"
     found = set(game["found"])
     uncovered = {game["words"][i].upper() for i in range(BOARD_SIZE) if i not in found}
     if word.upper() in uncovered:

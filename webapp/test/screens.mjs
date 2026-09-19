@@ -8455,11 +8455,19 @@ try {
 			(await alpha.page.locator(".sn-input").count()) + (await beta.page.locator(".sn-input").count()) === 1);
 		check("the guesser is told to wait rather than shown an input",
 			(await guesserSeat.page.locator(".sn-console-k").first().textContent() || "").trim() === "Waiting");
+		const clueInput = giver.page.locator(".sn-input");
+		await clueInput.fill("OCEAN2");
+		check("clue input removes digits", await clueInput.inputValue() === "OCEAN");
+		await clueInput.fill("ABCDEFGHIJKLMNOPQ");
+		check("clue input stops at 16 letters",
+			await clueInput.inputValue() === "ABCDEFGHIJKLMNOP");
 
 		// A clue that IS an uncovered board word is refused — the one piece of
 		// clue legality that is mechanical rather than semantic.
-		const boardWord = await giver.page.locator(".sn-board .sn-card .sn-word").first().textContent();
-		await giver.page.locator(".sn-input").fill(boardWord.trim());
+		const boardWords = await giver.page.locator(".sn-board .sn-card .sn-word").allTextContents();
+		const boardWord = boardWords.map((word) => word.trim()).find((word) => /^[A-Za-z]{1,16}$/.test(word));
+		check("the board has a one-word clue to test", Boolean(boardWord));
+		await clueInput.fill(boardWord);
 		await giver.page.locator(".sn-btn-go").click().catch(() => {});
 		await giver.page.waitForSelector(".sn-err", { timeout: 8_000 }).catch(() => {});
 		check("a clue that is still on the board is refused, in the console",

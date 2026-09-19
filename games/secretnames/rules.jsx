@@ -21,7 +21,7 @@ export default function SecretNamesRules() {
     <RulesSection title="Turn overview">
       <p>During a normal turn, the clue-giver and guesser take these steps:</p>
       <RulesDefs items={[
-        { t: "A. Give a clue", d: "Say one word, or a proper name of two words, and a number related to the agents on your key. The number does not limit the number of guesses." },
+        { t: "A. Give a clue", d: "Say one word of up to 16 letters and a number related to the agents on your key. The number does not limit the number of guesses." },
         { t: "B. Guess", d: "The other player taps words on the grid. A correct agent is covered permanently, and the guesser may continue while every guess is correct." },
         { t: "C. End the turn", d: "After at least one correct guess, the guesser may stop. A bystander also ends the turn. Either ending spends exactly one timer token." },
       ]} />

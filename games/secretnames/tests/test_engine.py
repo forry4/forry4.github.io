@@ -473,9 +473,10 @@ def test_a_covered_board_word_becomes_a_legal_clue():
 
 
 @pytest.mark.parametrize("word,ok", [
-    ("OCEAN", True), ("Loch-Ness", True), ("NEW YORK", True), ("O.K.", True),
-    ("", False), ("   ", False), ("one two three", False), ("a" * 25, False),
-    ("!!", False), ("<script>", False),
+    ("OCEAN", True), ("a" * 16, True),
+    ("", False), ("   ", False), ("a" * 17, False),
+    ("Loch-Ness", False), ("NEW YORK", False), ("O.K.", False),
+    ("OCEAN2", False), ("!!", False), ("<script>", False),
 ])
 def test_only_mechanical_clue_shapes_are_enforced(word, ok):
     game = _rigged(_canonical_pairs(), clue_giver=A)
