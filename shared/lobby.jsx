@@ -414,8 +414,11 @@ export function LobbyAction({ kind = "primary", onClick, children, title }) {
 // that re-enters an occupied seat.
 //
 // `onCancel` is optional: a game with no cancel endpoint renders the host's row
-// with Return alone rather than a button that cannot work.
-export function LobbyOpenActions({ state, onReturn, onJoin, onCancel }) {
+// with Return alone rather than a button that cannot work. A non-host who is
+// already seated gets the same Return path plus an explicit Leave action. Leaving
+// the lobby itself is never destructive; this button is the only thing that
+// releases a pre-start seat.
+export function LobbyOpenActions({ state, onReturn, onJoin, onCancel, onLeave }) {
 	if (state === "host") return (
 		<>
 			<LobbyAction kind="secondary" onClick={onReturn}>Return</LobbyAction>
@@ -423,7 +426,12 @@ export function LobbyOpenActions({ state, onReturn, onJoin, onCancel }) {
 		</>
 	);
 	// "You are in this room already" — the row that used to say Join.
-	if (state === "seated") return <LobbyAction kind="secondary" onClick={onReturn}>Return</LobbyAction>;
+	if (state === "seated") return (
+		<>
+			<LobbyAction kind="secondary" onClick={onReturn}>Return</LobbyAction>
+			{onLeave && <LobbyAction kind="danger" onClick={onLeave}>Leave</LobbyAction>}
+		</>
+	);
 	// A full table is not an error and not an invitation: say so instead of
 	// offering a Join the server will refuse with "room full".
 	if (state === "full") return <TurnBadge>Table full</TurnBadge>;

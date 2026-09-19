@@ -50,7 +50,7 @@ secretnames_app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_allowed_origins(),
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_headers=["Authorization", "Content-Type", "X-Room-Token"],
 )
 
 ROOMS: dict[str, dict] = {}
@@ -569,12 +569,39 @@ async def games_history(token: str | None = Depends(_bearer_token)):
     return {"games": list_user_history(user["id"])} if user else {"games": []}
 
 
-@secretnames_app.delete("/games/{game_id}")
-async def games_cancel(game_id: str, token: str | None = Depends(_bearer_token)):
+@secretnames_app.post("/games/{game_id}/leave")
+async def games_leave(game_id: str, token: str | None = Depends(_bearer_token),
+                      player_id: str | None = None,
+                      room_token: str | None = Header(default=None, alias="X-Room-Token")):
     user = get_user_by_session(token) if token else None
+    room_id = normalize_room(game_id)
+    async with ROOM_LOCK:
+        room = _ensure_room_loaded(room_id)
+        ok, message = _rooms.remove_open_seat(
+            room or {}, player_id or "", room_token=room_token,
+            session_uid=(user or {}).get("id"))
+        if not ok:
+            return {"ok": False, "message": message}
+        save_game(room_id)
+    await broadcast_state(room_id)
+    return {"ok": True}
+
+
+@secretnames_app.delete("/games/{game_id}")
+async def games_cancel(game_id: str, token: str | None = Depends(_bearer_token),
+                       player_id: str | None = None,
+                       room_token: str | None = Header(default=None, alias="X-Room-Token")):
+    user = get_user_by_session(token) if token else None
+    owner = (user or {}).get("id") or player_id
+    if not owner:
+        return {"ok": False, "message": "missing identity"}
+    room_id = normalize_room(game_id)
     if not user:
-        return {"ok": False, "message": "not signed in"}
-    ok = delete_open_game(game_id, user["id"])
+        async with ROOM_LOCK:
+            room = _ensure_room_loaded(room_id)
+            if not _rooms.authorized_open_host(room or {}, owner, room_token=room_token):
+                return {"ok": False, "message": "could not verify this seat"}
+    ok = delete_open_game(room_id, owner)
     if ok:
-        ROOMS.pop(normalize_room(game_id), None)
+        ROOMS.pop(room_id, None)
     return {"ok": ok}

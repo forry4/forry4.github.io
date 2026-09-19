@@ -1,4 +1,5 @@
 import { fetchGameHistory } from "../../shared/lobbyHistory.js";
+import { leaveOpenSeat, readRoomToken } from "../../shared/roomLifecycle.js";
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { baseCss } from "../../shared/theme.js";
 import { useCardInfoGesture } from "../../shared/gestures.js";
@@ -8,7 +9,7 @@ import {
   notWaiting, LobbyAction,
   LobbyCreateRow, lobbyCreateRowCss, useProgressiveList, LobbyTabs, useLastDifficulty,
   LobbyHero, LobbyUser, useListFade,
-  RulesModal, rulesModalCss, LobbyBotTier, LobbyOpenTitle,
+  RulesModal, rulesModalCss, LobbyBotTier, LobbyOpenTitle, LobbyOpenActions, seatStateOf,
   WaitingRoom, waitingRoomCss,
 } from "../../shared/lobby.jsx";
 // Only the shared CARD FRAME (sizing vars + .card chrome). Dontminion's card face
@@ -1535,6 +1536,8 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const cancelGame = (rid) => {
     const headers = { "Content-Type": "application/json" };
     if (authUser?.session_token) headers.Authorization = `Bearer ${authUser.session_token}`;
+    const roomToken = readRoomToken(`dm_token_${rid}_${myId}`);
+    if (roomToken) headers["X-Room-Token"] = roomToken;
     fetch(`${DM_HTTP}/games/${rid}/cancel?player_id=${encodeURIComponent(myId)}`, { method: "POST", headers })
       .then((r) => r.json()).then((d) => {
         if (!d.ok) { setToast(d.message || "Could not cancel"); return; }
@@ -1544,6 +1547,16 @@ export default function Dontminion({ myId, authUser, onExit }) {
         } catch {}
         fetchGames();
       }).catch(() => setToast("Could not cancel"));
+  };
+  const leaveSeat = async (rid) => {
+    try {
+      await leaveOpenSeat({
+        endpoint: `${DM_HTTP}/games`, roomId: rid, playerId: myId,
+        tokenKey: `dm_token_${rid}_${myId}`, sessionToken: authUser?.session_token,
+      });
+      setToast("Seat released");
+      fetchGames();
+    } catch (err) { setToast(err?.message || "Could not leave that table"); }
   };
   const leaveToLobby = () => {
     disconnect();
@@ -2310,12 +2323,9 @@ export default function Dontminion({ myId, authUser, onExit }) {
                   </div>
                 </div>
                 <div className="lby-card-actions">
-                  {g.host_id === myId
-                    ? <>
-                        <LobbyAction kind="secondary" onClick={() => resumeGame(g.id)}>Return</LobbyAction>
-                        <LobbyAction kind="danger" onClick={() => cancelGame(g.id)}>Cancel</LobbyAction>
-                      </>
-                    : <LobbyAction onClick={() => joinGame(g.id)}>Join</LobbyAction>}
+                  <LobbyOpenActions state={seatStateOf(g, myId)}
+                    onReturn={() => resumeGame(g.id)} onJoin={() => joinGame(g.id)}
+                    onLeave={() => leaveSeat(g.id)} onCancel={() => cancelGame(g.id)} />
                 </div>
               </div>
             ))}

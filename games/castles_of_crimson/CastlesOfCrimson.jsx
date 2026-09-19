@@ -4,10 +4,11 @@ import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyMatchup, LobbyLo
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss,
   useProgressiveList, LobbyTabs, useLastDifficulty, LobbyHero,
-  LobbyAction, LobbyUser, useListFade, LobbyBotTier, LobbyOpenTitle,
+  LobbyAction, LobbyUser, useListFade, LobbyBotTier, LobbyOpenTitle, LobbyOpenActions, seatStateOf,
   WaitingRoom, waitingRoomCss } from "../../shared/lobby.jsx";
 import CocRules from "./rules.jsx";
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
+import { leaveOpenSeat, readRoomToken } from "../../shared/roomLifecycle.js";
 // Offline vs-AI: the local game driver (wasm engine + IndexedDB saves) — see offline.js.
 import { applyOfflineCocMove, armCocUndoIfMyTurn, cocOfflineRoomData, runCocBotLoop,
   loadOfflineCocGame } from "./offline.js";
@@ -1807,6 +1808,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
     const params = new URLSearchParams();
     params.set("player_id", myId);
     const headers = authUser?.session_token ? { Authorization: `Bearer ${authUser.session_token}` } : {};
+    const roomToken = readRoomToken(`coc_token_${id}_${myId}`);
+    if (roomToken) headers["X-Room-Token"] = roomToken;
     fetch(`${COC_HTTP}/games/${id}/cancel?${params.toString()}`, { method: "POST", headers })
       .then((r) => r.json())
       .then((d) => {
@@ -1819,6 +1822,16 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
         fetchGames();
       })
       .catch(() => setToast("Could not cancel"));
+  };
+  const leaveSeat = async (id) => {
+    try {
+      await leaveOpenSeat({
+        endpoint: `${COC_HTTP}/games`, roomId: id, playerId: myId,
+        tokenKey: `coc_token_${id}_${myId}`, sessionToken: authUser?.session_token,
+      });
+      setToast("Seat released");
+      fetchGames();
+    } catch (err) { setToast(err?.message || "Could not leave that table"); }
   };
   const mv = (move) => {
     // Any action other than the undo itself means there's now something to undo.
@@ -2161,14 +2174,11 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
                       <div className="lby-card-meta">{g.id} · {timeAgo(g.created_at)}</div>
                     </div>
                     <div className="lby-card-actions">
-                      {g.host_id === myId
-                        ? <>
-                            <LobbyAction kind="secondary" onClick={() => resume(g.id)}>Return</LobbyAction>
-                            <LobbyAction kind="danger" onClick={() => handleCancel(g.id)}>Cancel</LobbyAction>
-                          </>
-                        : ((g.player_count || 1) >= (g.max_players || 4)
-                            ? <TurnBadge>Full</TurnBadge>
-                            : <LobbyAction onClick={() => setJoinBoardFor({ id: g.id, sameBoard: !!g.same_board, hostBoard: g.host_board })}>Join</LobbyAction>)}
+                      <LobbyOpenActions state={seatStateOf(g, myId)}
+                        onReturn={() => resume(g.id)}
+                        onJoin={() => setJoinBoardFor({ id: g.id, sameBoard: !!g.same_board, hostBoard: g.host_board })}
+                        onLeave={() => leaveSeat(g.id)}
+                        onCancel={() => handleCancel(g.id)} />
                     </div>
                   </div>
                 ))}

@@ -1,4 +1,5 @@
 import { fetchGameHistory } from "../../shared/lobbyHistory.js";
+import { leaveOpenSeat, readRoomToken } from "../../shared/roomLifecycle.js";
 import { Fragment, useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { baseCss } from "../../shared/theme.js";
 import {
@@ -7,7 +8,7 @@ import {
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss,
   useProgressiveList, notWaiting, LobbyAction, useLastDifficulty, LobbyHero,
-  SCORECARD_GLYPH, LobbyUser, useListFade, LobbyBotTier, LobbyOpenTitle,
+  SCORECARD_GLYPH, LobbyUser, useListFade, LobbyBotTier, LobbyOpenTitle, LobbyOpenActions, seatStateOf,
   WaitingRoom, waitingRoomCss,
 } from "../../shared/lobby.jsx";
 import DissonanceRules from "./rules.jsx";
@@ -2111,10 +2112,22 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
     } else joinGame(rid);
   };
   const cancelGame = (rid) => {
-    if (!authUser?.session_token) return;
-    fetch(`${OT_HTTP}/games/${rid}`, {
-      method: "DELETE", headers: { Authorization: `Bearer ${authUser.session_token}` },
+    const headers = authUser?.session_token ? { Authorization: `Bearer ${authUser.session_token}` } : {};
+    const roomToken = readRoomToken(`dissonance_token_${rid}_${myId}`);
+    if (roomToken) headers["X-Room-Token"] = roomToken;
+    fetch(`${OT_HTTP}/games/${rid}?player_id=${encodeURIComponent(myId)}`, {
+      method: "DELETE", headers,
     }).then(() => fetchGames()).catch(() => {});
+  };
+  const leaveSeat = async (rid) => {
+    try {
+      await leaveOpenSeat({
+        endpoint: `${OT_HTTP}/games`, roomId: rid, playerId: myId,
+        tokenKey: `dissonance_token_${rid}_${myId}`, sessionToken: authUser?.session_token,
+      });
+      setToast("Seat released");
+      fetchGames();
+    } catch (err) { setToast(err?.message || "Could not leave that table"); }
   };
   const leaveToLobby = () => {
     // OFFLINE THERE IS NO LOBBY TO GO BACK TO -- the shell owns the URL
@@ -2214,12 +2227,9 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
                     host. Cancel alone left a host who navigated away with no way back
                     into their own waiting room, and against six siblings that all show
                     the pair it read as a button that failed to render. */}
-                {g.host_id === myId
-                  ? <>
-                      <LobbyAction kind="secondary" onClick={() => resumeGame(g.id)}>Return</LobbyAction>
-                      <LobbyAction kind="danger" onClick={() => cancelGame(g.id)}>Cancel</LobbyAction>
-                    </>
-                  : <LobbyAction onClick={() => joinGame(g.id)}>Join</LobbyAction>}
+                <LobbyOpenActions state={seatStateOf(g, myId)}
+                  onReturn={() => resumeGame(g.id)} onJoin={() => joinGame(g.id)}
+                  onLeave={() => leaveSeat(g.id)} onCancel={() => cancelGame(g.id)} />
               </div>
             </div>
           ))}

@@ -1,4 +1,5 @@
 import { fetchGameHistory } from "../../shared/lobbyHistory.js";
+import { leaveOpenSeat, readRoomToken } from "../../shared/roomLifecycle.js";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { baseCss } from "../../shared/theme.js";
 import ragtagCssText from "./RagTag.css?inline";
@@ -9,7 +10,7 @@ import {
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss, useProgressiveList, LobbyHero, LobbyUser, useListFade,
   readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame,
-  LobbyOpenTitle, WaitingRoom, waitingRoomCss,
+  LobbyOpenTitle, LobbyOpenActions, seatStateOf, WaitingRoom, waitingRoomCss,
 } from "../../shared/lobby.jsx";
 import { buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 import {
@@ -1439,11 +1440,23 @@ export default function RagTag({ myId, authUser, onExit }) {
   }, [connect, myId, authUser]);
 
   const cancelGame = useCallback((gid) => {
-    if (!authUser?.session_token) return;
-    fetch(`${RT_HTTP}/games/${gid}`, {
-      method: "DELETE", headers: { Authorization: `Bearer ${authUser.session_token}` },
+    const headers = authUser?.session_token ? { Authorization: `Bearer ${authUser.session_token}` } : {};
+    const roomToken = readRoomToken(`ragtag_token_${gid}_${myId}`);
+    if (roomToken) headers["X-Room-Token"] = roomToken;
+    fetch(`${RT_HTTP}/games/${gid}?player_id=${encodeURIComponent(myId)}`, {
+      method: "DELETE", headers,
     }).then(() => fetchGames()).catch(() => {});
-  }, [authUser, fetchGames]);
+  }, [authUser, fetchGames, myId]);
+  const leaveSeat = useCallback(async (gid) => {
+    try {
+      await leaveOpenSeat({
+        endpoint: `${RT_HTTP}/games`, roomId: gid, playerId: myId,
+        tokenKey: `ragtag_token_${gid}_${myId}`, sessionToken: authUser?.session_token,
+      });
+      setToast("Seat released");
+      fetchGames();
+    } catch (err) { setToast(err?.message || "Could not leave that table"); }
+  }, [authUser, myId, fetchGames]);
 
   /* A dropped socket used to render "Reconnecting…" and then do nothing about
      it — the word was the whole of the feature. Worse in a vs-bot fight: the
@@ -1791,12 +1804,9 @@ export default function RagTag({ myId, authUser, onExit }) {
                     <div className="lby-card-meta">{g.id} · {timeAgo(g.created_at)}</div>
                   </div>
                   <div className="lby-card-actions">
-                    {g.host_id === myId ? (
-                      <>
-                        <LobbyAction kind="secondary" onClick={() => resumeGame(g.id)}>Return</LobbyAction>
-                        <LobbyAction kind="danger" onClick={() => cancelGame(g.id)}>Cancel</LobbyAction>
-                      </>
-                    ) : <LobbyAction onClick={() => joinGame(g.id)}>Join</LobbyAction>}
+                    <LobbyOpenActions state={seatStateOf(g, myId)}
+                      onReturn={() => resumeGame(g.id)} onJoin={() => joinGame(g.id)}
+                      onLeave={() => leaveSeat(g.id)} onCancel={() => cancelGame(g.id)} />
                   </div>
                 </div>
               ))}

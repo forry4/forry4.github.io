@@ -65,7 +65,7 @@ import { lobbyCss, LobbyHeader, LobbyLoading, GameMenu, gameMenuCss, readLobbyCa
 	createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss, LobbyHero, LobbyUser,
 	RulesModal, rulesModalCss,
 	useProgressiveList, LobbySectionHd, LobbyOpenTitle, LobbyTabs, TurnBadge, LobbyMatchup, LobbyAction, useListFade,
-	WaitingRoom, waitingRoomCss } from "../../shared/lobby.jsx";
+	WaitingRoom, waitingRoomCss, LobbyOpenActions, seatStateOf } from "../../shared/lobby.jsx";
 import SpenderRules from "./rules.jsx";
 import { GemToken, CardView, GEM_COLORS, GEM_LABELS, GEM_HEX,
 	splendorPanelCss, splendorCardCss, splendorCardExtraCss, splendorPillCss,
@@ -73,6 +73,7 @@ import { GemToken, CardView, GEM_COLORS, GEM_LABELS, GEM_HEX,
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 // Site-shell screens, extracted out of this file (see shared/AuthScreen.jsx).
 import AuthScreen from "../../shared/AuthScreen.jsx";
+import { leaveOpenSeat, readRoomToken } from "../../shared/roomLifecycle.js";
 import HomeScreen, { SITE_NAME, GAMES, HERO_RULE } from "../../shared/HomeScreen.jsx";
 // The home card and Spender's own lobby must be the same colour; see shared/accents.js.
 import { GAME_ACCENTS } from "../../shared/accents.js";
@@ -1830,6 +1831,8 @@ export default function SpenderApp() {
 		try {
 			const params = new URLSearchParams({ player_id: myId });
 			const headers = authUser?.session_token ? { Authorization: `Bearer ${authUser.session_token}` } : {};
+			const roomToken = readRoomToken(`spender_token_${gameId}_${myId}`);
+			if (roomToken) headers["X-Room-Token"] = roomToken;
 			const res = await fetch(`${HTTP_BASE}/games/${gameId}/cancel?${params}`, { method: "POST", headers });
 			const data = await res.json().catch(() => ({}));
 			ok = !!data.ok;
@@ -1843,6 +1846,19 @@ export default function SpenderApp() {
 			localStorage.removeItem(`spender_token_${gameId}_${myId}`);
 		} catch {}
 		fetchGames(authUser);
+	};
+
+	const handleLeaveSeat = async (gameId) => {
+		try {
+			await leaveOpenSeat({
+				endpoint: `${HTTP_BASE}/games`, roomId: gameId, playerId: myId,
+				tokenKey: `spender_token_${gameId}_${myId}`, sessionToken: authUser?.session_token,
+			});
+			setToast("Seat released");
+			fetchGames(authUser);
+		} catch (err) {
+			setToast(err?.message || "Could not leave that table");
+		}
 	};
 
 	const handleContinue = (gameId) => {
@@ -3312,14 +3328,11 @@ export default function SpenderApp() {
 											<LobbyOpenTitle game={g} myId={myId} defaultMaxPlayers={4} />
 											<div className="lby-card-meta">{g.id} · {timeAgo(g.created_at)}</div>
 										</div>
-										<div className="lby-card-actions">
-											{g.host_id === myId
-												? <>
-													<LobbyAction kind="secondary" onClick={() => handleContinue(g.id)}>Return</LobbyAction>
-													<LobbyAction kind="danger" onClick={() => handleCancel(g.id)}>Cancel</LobbyAction>
-												</>
-												: <LobbyAction onClick={() => handleJoinGame(g.id)}>Join</LobbyAction>}
-										</div>
+						<div className="lby-card-actions">
+							<LobbyOpenActions state={seatStateOf(g, myId)}
+								onReturn={() => handleContinue(g.id)} onJoin={() => handleJoinGame(g.id)}
+								onLeave={() => handleLeaveSeat(g.id)} onCancel={() => handleCancel(g.id)} />
+						</div>
 									</div>
 								))}
 							</div>

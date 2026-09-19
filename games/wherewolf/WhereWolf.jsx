@@ -3,10 +3,11 @@ import { baseCss } from "../../shared/theme.js";
 import { lobbyCss, LobbyHeader, LobbySectionHd, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame,
   createModalCss, CreateModal, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss, LobbyHero, LobbyAction, LobbyTabs, timeAgo,
-  notWaiting, LobbyUser, LobbyOpenTitle, useListFade,
+  notWaiting, LobbyUser, LobbyOpenTitle, LobbyOpenActions, seatStateOf, useListFade,
   WaitingRoom, waitingRoomCss } from "../../shared/lobby.jsx";
 import WhereWolfRules from "./rules.jsx";
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
+import { leaveOpenSeat, readRoomToken } from "../../shared/roomLifecycle.js";
 
 // CSS lives in the sibling .css file(s) imported below, NOT in a JS template
 // literal. `?inline` hands us the stylesheet as a STRING, so it is still injected
@@ -497,6 +498,8 @@ export default function WhereWolf({ myId, authUser, onExit }) {
     const params = new URLSearchParams();
     params.set("player_id", myId);
     const headers = authUser?.session_token ? { Authorization: `Bearer ${authUser.session_token}` } : {};
+    const roomToken = readRoomToken(`werewolf_token_${id}_${myId}`);
+    if (roomToken) headers["X-Room-Token"] = roomToken;
     fetch(`${WW_HTTP}/games/${id}/cancel?${params.toString()}`, { method: "POST", headers })
       .then((r) => r.json()).then((d) => {
         if (!d.ok) { setToast(d.message || "Could not cancel"); return; }
@@ -506,6 +509,16 @@ export default function WhereWolf({ myId, authUser, onExit }) {
         } catch {}
         setToast("Game canceled"); fetchGames();
       }).catch(() => setToast("Could not cancel"));
+  };
+  const leaveSeat = async (id) => {
+    try {
+      await leaveOpenSeat({
+        endpoint: `${WW_HTTP}/games`, roomId: id, playerId: myId,
+        tokenKey: `werewolf_token_${id}_${myId}`, sessionToken: authUser?.session_token,
+      });
+      setToast("Seat released");
+      fetchGames();
+    } catch (err) { setToast(err?.message || "Could not leave that table"); }
   };
   const startGame = () => send({ action: "start" });
   const mv = (move) => send({ action: "move", move });
@@ -661,12 +674,9 @@ export default function WhereWolf({ myId, authUser, onExit }) {
                         rooms that had not started. Giving the row its Return is what
                         lets Active mean "in progress" here as it does everywhere
                         else. */}
-                    {g.host_id === myId
-                      ? <>
-                          <LobbyAction kind="secondary" onClick={() => resume(g.id)}>Return</LobbyAction>
-                          <LobbyAction kind="danger" onClick={() => handleCancel(g.id)}>Cancel</LobbyAction>
-                        </>
-                      : <LobbyAction onClick={() => startJoin(g.id)}>Join</LobbyAction>}
+                    <LobbyOpenActions state={seatStateOf(g, myId)}
+                      onReturn={() => resume(g.id)} onJoin={() => startJoin(g.id)}
+                      onLeave={() => leaveSeat(g.id)} onCancel={() => handleCancel(g.id)} />
                   </div>
                 </div>
               ))}</div>}

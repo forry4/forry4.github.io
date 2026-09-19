@@ -1,11 +1,12 @@
 import { fetchGameHistory } from "../../shared/lobbyHistory.js";
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
+import { leaveOpenSeat, readRoomToken } from "../../shared/roomLifecycle.js";
 import { baseCss } from "../../shared/theme.js";
 import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyMatchup, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame,
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss,
   useProgressiveList, LobbyTabs, notWaiting, LobbyAction, useLastDifficulty,
-  LobbyHero, LobbyUser, useListFade, LobbyBotTier, LobbyOpenTitle,
+  LobbyHero, LobbyUser, useListFade, LobbyBotTier, LobbyOpenTitle, LobbyOpenActions, seatStateOf,
   WaitingRoom, waitingRoomCss } from "../../shared/lobby.jsx";
 // The gems, jewel cards and move log are SHARED with Spender (same game family, so
 // they must look the same). Duel adds only what Splendor Duel needs on top: pearls,
@@ -1010,6 +1011,8 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
   const cancelGame = (rid) => {
     const headers = { "Content-Type": "application/json" };
     if (authUser?.session_token) headers.Authorization = `Bearer ${authUser.session_token}`;
+    const roomToken = readRoomToken(`duel_token_${rid}_${myId}`);
+    if (roomToken) headers["X-Room-Token"] = roomToken;
     fetch(`${DUEL_HTTP}/games/${rid}/cancel?player_id=${encodeURIComponent(myId)}`, { method: "POST", headers })
       .then((r) => r.json()).then((d) => {
         if (!d.ok) { setToast(d.message || "Could not cancel"); return; }
@@ -1019,6 +1022,16 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
         } catch {}
         fetchGames();
       }).catch(() => setToast("Could not cancel"));
+  };
+  const leaveSeat = async (rid) => {
+    try {
+      await leaveOpenSeat({
+        endpoint: `${DUEL_HTTP}/games`, roomId: rid, playerId: myId,
+        tokenKey: `duel_token_${rid}_${myId}`, sessionToken: authUser?.session_token,
+      });
+      setToast("Seat released");
+      fetchGames();
+    } catch (err) { setToast(err?.message || "Could not leave that table"); }
   };
   // Load a FINISHED game read-only over HTTP (no WebSocket) and open it for review.
   // Also used by the end-of-game "Review game" button, which already has a live socket
@@ -1645,12 +1658,9 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
                   <div className="lby-card-meta">{g.id} · {timeAgo(g.created_at)}</div>
                 </div>
                 <div className="lby-card-actions">
-                  {g.host_id === myId
-                    ? (<>
-                        <LobbyAction kind="secondary" onClick={() => resumeGame(g.id)}>Return</LobbyAction>
-                        <LobbyAction kind="danger" onClick={() => cancelGame(g.id)}>Cancel</LobbyAction>
-                      </>)
-                    : <LobbyAction onClick={() => joinGame(g.id)}>Join</LobbyAction>}
+                  <LobbyOpenActions state={seatStateOf(g, myId)}
+                    onReturn={() => resumeGame(g.id)} onJoin={() => joinGame(g.id)}
+                    onLeave={() => leaveSeat(g.id)} onCancel={() => cancelGame(g.id)} />
                 </div>
               </div>
             ))}

@@ -21,6 +21,7 @@ import {
   WaitingRoom, waitingRoomCss, seatStateOf, LobbyOpenActions, LobbyOpenTitle,
 } from "../../shared/lobby.jsx";
 import { GAME_ACCENTS } from "../../shared/accents.js";
+import { leaveOpenSeat, readRoomToken } from "../../shared/roomLifecycle.js";
 import { useAutoReconnect } from "../../shared/useAutoReconnect.js";
 import { buildPath, pushPath } from "../../shared/router.js";
 import SecretNamesRules from "./rules.jsx";
@@ -346,7 +347,7 @@ function Rail({ game }) {
 }
 
 function Lobby({ myId, authUser, openGames, activeGames, history, onRefresh, refreshing,
-  onCreate, onJoin, onCancel, onExit, onRules }) {
+  onCreate, onJoin, onLeave, onCancel, onExit, onRules }) {
   const active = notWaiting(activeGames);
   const [lobbyTab, setLobbyTab] = useState("open");
   const [visibleHistory, historySentinel] = useProgressiveList(history);
@@ -384,6 +385,7 @@ function Lobby({ myId, authUser, openGames, activeGames, history, onRefresh, ref
             <div className="lby-card-actions">
               <LobbyOpenActions state={seatStateOf(g, myId)}
                 onReturn={() => onJoin(g.id)} onJoin={() => onJoin(g.id)}
+                onLeave={() => onLeave(g.id)}
                 onCancel={() => onCancel(g.id)} />
             </div>
           </div>)}</div>
@@ -443,12 +445,15 @@ export default function SecretNames({ myId, authUser, onExit }) {
   const [turns, setTurns] = useState(9);
   const [toast, setToast] = useState("");
   const [error, setError] = useState("");
+  const [connectFailed, setConnectFailed] = useState(false);
   const wsRef = useRef(null);
   const roomRef = useRef(roomId);
   const tokenRef = useRef("");
   const intentRef = useRef("join");
   const createPayloadRef = useRef(null);
+  const roomDataRef = useRef(null);
   roomRef.current = roomId;
+  roomDataRef.current = roomData;
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
@@ -481,14 +486,14 @@ export default function SecretNames({ myId, authUser, onExit }) {
     refresh();
   });
 
-  // A ref rather than a dep so `onMessage` stays stable across every room update
-  // (it is wired into the socket exactly once per connection).
-  const roomDataHasGame = useRef(false);
-  roomDataHasGame.current = !!roomData?.game;
+  // Refs keep socket callbacks aware of the current room without reconnecting
+  // every time a waiting-room update or move changes the render state.
 
   const onMessage = useCallback((message) => {
     if (message.room) {
+      setConnectFailed(false);
       intentRef.current = "reconnect";
+      roomDataRef.current = message.room;
       setRoomData(message.room);
       setScreen("game");
       const token = message.room.reconnect_tokens?.[myId];
@@ -501,8 +506,17 @@ export default function SecretNames({ myId, authUser, onExit }) {
       // A rejected MOVE belongs beside the control that made it; a rejected
       // handshake is the whole screen's problem. Two channels, because a clue
       // bounced for being a board word must not look like a lost connection.
-      if (roomRef.current && roomDataHasGame.current) setError(message.message || "Not allowed.");
-      else setToast(message.message || "Headquarters refused that.");
+      if (roomRef.current && roomDataRef.current) setError(message.message || "Not allowed.");
+      else {
+        // A handshake error is terminal for this attempt. Leaving the socket
+        // open with `connected=true` used to clear the toast and strand the
+        // player on an infinite "Opening…" panel; retrying the same `join`
+        // would only repeat the seat-takeover rejection.
+        setConnectFailed(true);
+        setConnected(false);
+        try { wsRef.current?.close(); } catch {}
+        setToast(message.message || "Headquarters refused that.");
+      }
     } else {
       setError(""); setToast("");
     }
@@ -534,7 +548,7 @@ export default function SecretNames({ myId, authUser, onExit }) {
   const send = useCallback((payload) => {
     try { if (wsRef.current?.readyState === 1) wsRef.current.send(JSON.stringify(payload)); } catch {}
   }, []);
-  useAutoReconnect({ enabled: !!roomId && screen === "game", connected, connect, socketReady });
+  useAutoReconnect({ enabled: !!roomId && screen === "game" && !connectFailed, connected, connect, socketReady });
 
   useEffect(() => {
     const rid = deepRoom();
@@ -555,8 +569,17 @@ export default function SecretNames({ myId, authUser, onExit }) {
 
   const openRoom = useCallback((rid, intent, createPayload) => {
     const id = rid.toUpperCase();
-    setRoomData(null); setToast(""); setError(""); setConnected(false);
-    setRoomId(id); roomRef.current = id; intentRef.current = intent; tokenRef.current = "";
+    const storedToken = intent === "join" ? (() => {
+      try { return localStorage.getItem(`${TOKEN_PREFIX}${id}`) || ""; } catch { return ""; }
+    })() : "";
+    roomDataRef.current = null;
+    setRoomData(null); setToast(""); setError(""); setConnectFailed(false); setConnected(false);
+    setRoomId(id); roomRef.current = id;
+    // The Open row can point at a seat we already own. Treat that as Resume even
+    // when it arrived through the generic Join callback; sending `join` again is
+    // precisely what the server must refuse as a seat takeover.
+    intentRef.current = storedToken ? "reconnect" : intent;
+    tokenRef.current = storedToken;
     createPayloadRef.current = createPayload || null; setScreen("game");
     try { pushPath(buildPath("secretnames", id)); } catch {}
     connect();
@@ -570,15 +593,29 @@ export default function SecretNames({ myId, authUser, onExit }) {
   const cancelGame = useCallback(async (gameId) => {
     try {
       const headers = authUser?.session_token ? { Authorization: `Bearer ${authUser.session_token}` } : {};
-      await fetch(`${HTTP_BASE}/secretnames/games/${gameId}`, { method: "DELETE", headers });
+      const roomToken = readRoomToken(`${TOKEN_PREFIX}${gameId}`);
+      if (roomToken) headers["X-Room-Token"] = roomToken;
+      await fetch(`${HTTP_BASE}/secretnames/games/${gameId}?player_id=${encodeURIComponent(myId)}`, { method: "DELETE", headers });
     } catch { /* the refresh below reports the real state either way */ }
     refresh();
-  }, [authUser, refresh]);
+  }, [authUser, myId, refresh]);
+  const leaveSeat = useCallback(async (gameId) => {
+    try {
+      await leaveOpenSeat({
+        endpoint: `${HTTP_BASE}/secretnames/games`, roomId: gameId, playerId: myId,
+        tokenKey: `${TOKEN_PREFIX}${gameId}`, sessionToken: authUser?.session_token,
+      });
+      setToast("Seat released");
+      refresh();
+    } catch (err) {
+      setToast(err?.message || "Could not leave that table");
+    }
+  }, [authUser, myId, refresh]);
 
   const exit = useCallback(() => {
     try { wsRef.current?.close(); } catch {}
     wsRef.current = null;
-    setConnected(false); setRoomData(null); setRoomId(""); setScreen("lobby"); setError("");
+    setConnected(false); setConnectFailed(false); setRoomData(null); setRoomId(""); setScreen("lobby"); setError("");
     try { pushPath(buildPath("secretnames")); } catch {}
     refresh();
   }, [refresh]);
@@ -596,7 +633,7 @@ export default function SecretNames({ myId, authUser, onExit }) {
   return <>
     {screen === "lobby" && <Lobby {...{
       myId, authUser, openGames, activeGames, history, onRefresh: refresh, refreshing,
-      onCreate: () => setShowCreate(true), onJoin: joinRoom, onCancel: cancelGame,
+      onCreate: () => setShowCreate(true), onJoin: joinRoom, onLeave: leaveSeat, onCancel: cancelGame,
       onExit, onRules: () => setShowRules(true),
     }} />}
 

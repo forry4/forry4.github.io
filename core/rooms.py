@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import json
 import os
 import random
@@ -254,6 +255,81 @@ def delete_open_game(table: str, host_col: str, game_id: str, user_id: str) -> b
         return existed
     finally:
         conn.close()
+
+
+def seat_proof_matches(room: Room, pid: str, *, room_token: str | None = None,
+                       session_uid: str | None = None) -> bool:
+    """Return whether a reconnect token or matching account owns ``pid``."""
+    if not room or not pid:
+        return False
+    expected = (room.get("meta") or {}).get(pid, {}).get("token")
+    token_ok = bool(room_token and expected and
+                    hmac.compare_digest(str(room_token), str(expected)))
+    session_ok = bool(session_uid and session_uid == pid)
+    return token_ok or session_ok
+
+
+def authorized_open_host(room: Room, pid: str, *, room_token: str | None = None,
+                         session_uid: str | None = None) -> bool:
+    """Return whether a proof authorizes ``pid`` to cancel its open room."""
+    return bool(room and room.get("status") == "open" and
+                room.get("host") == pid and
+                seat_proof_matches(room, pid, room_token=room_token,
+                                   session_uid=session_uid))
+
+
+def remove_open_seat(room: Room, pid: str, *, room_token: str | None = None,
+                     session_uid: str | None = None) -> tuple[bool, str | None]:
+    """Release a non-host seat from a never-started room.
+
+    Navigation is not abandonment: a disconnected seat remains reserved until its
+    owner explicitly uses the lobby's Leave action.  The room token is the proof
+    for guests; a matching account session is the fallback for registered players
+    who lost local storage.  This is deliberately a pure in-memory mutation so
+    each game can keep its own persistence and broadcast policy while sharing the
+    authorization and seat-lifecycle rules.
+
+    The function accepts ``status='open'`` rather than requiring ``game is None``.
+    Spender creates a waiting-phase placeholder game before the second seat arrives;
+    it is still an open lobby and must obey the same release rule.
+    """
+    if not room:
+        return False, "table not found"
+    if room.get("status") != "open":
+        return False, "the game has already started"
+    players = room.get("players") or {}
+    if pid not in players:
+        return False, "you are not seated at this table"
+    if room.get("host") == pid:
+        return False, "the host must cancel the table"
+
+    if not seat_proof_matches(room, pid, room_token=room_token,
+                              session_uid=session_uid):
+        return False, "could not verify this seat"
+
+    players.pop(pid, None)
+    (room.get("meta") or {}).pop(pid, None)
+    (room.get("sockets") or {}).pop(pid, None)
+
+    # Most games keep optional per-seat setup maps (boards, choices, and similar)
+    # at the room level. They are only relevant before the game starts and must not
+    # leave a stale player's configuration behind after the seat is released.
+    for key, value in room.items():
+        if key in {"players", "meta", "sockets", "game"}:
+            continue
+        if isinstance(value, dict):
+            value.pop(pid, None)
+
+    # Spender's open room carries a waiting-phase game placeholder whose players
+    # map is populated as seats arrive. Other games normally create the game only
+    # at start, so this is harmless for them and keeps the helper game-agnostic.
+    game = room.get("game")
+    if isinstance(game, dict):
+        for key, value in game.items():
+            if isinstance(value, dict):
+                value.pop(pid, None)
+
+    return True, None
 
 
 def release_socket(rooms: Rooms, room_id: str, pid: str, websocket,

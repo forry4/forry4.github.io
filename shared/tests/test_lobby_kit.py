@@ -162,6 +162,44 @@ def test_every_lobby_uses_the_shared_open_game_title():
         f"{missing}")
 
 
+def test_every_lobby_uses_the_shared_open_seat_lifecycle():
+    """Every Open row must distinguish Join, Return, Leave, and Cancel.
+
+    `LobbyOpenTitle` tells a row who is seated; `LobbyOpenActions` is the other
+    half of that contract. Keeping the actions inline was the bug that let a
+    guest who had already joined be offered `join` again, which the server must
+    reject as a seat takeover. A future lobby should inherit this component
+    rather than growing another hand-written host/non-host branch.
+    """
+    shared = (SHARED / "lobby.jsx").read_text(encoding="utf-8")
+    assert "export function LobbyOpenActions" in shared
+    missing = []
+    for jsx in _lobby_games():
+        text = jsx.read_text(encoding="utf-8")
+        open_col = re.search(r'className="[^"]*\blby-col-open\b"', text)
+        active_col = (re.search(r'className="[^"]*\blby-col-active\b"', text[open_col.start():])
+                      if open_col else None)
+        open_source = text[open_col.start():] if open_col else ""
+        if active_col:
+            open_source = open_source[:active_col.start()]
+        if ("LobbyOpenActions" not in open_source or "seatStateOf" not in open_source
+                or "onLeave" not in open_source):
+            missing.append(jsx.name)
+    assert not missing, (
+        "these lobbies do not use the shared occupied-seat actions (Return/Leave/"
+        f"Join/Cancel): {missing}")
+
+
+def test_every_game_exposes_the_open_seat_release_endpoint():
+    """The shared Leave action needs a server contract in every current game."""
+    missing = []
+    for main in sorted((ROOT / "games").glob("*/main.py")):
+        text = main.read_text(encoding="utf-8")
+        if 'post("/games/{game_id}/leave")' not in text:
+            missing.append(main.parent.name)
+    assert not missing, f"these games cannot release a pre-start seat: {missing}"
+
+
 def test_the_phone_tab_bar_is_wired_to_the_grid():
     """Two halves that must agree, and neither fails loudly on its own.
 

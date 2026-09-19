@@ -4,12 +4,13 @@ import {
   lobbyCss, LobbyHeader, LobbyHero, LobbyCreateRow, LobbyUser, LobbySectionHd,
   LobbyEmpty, LobbyAction, LobbyTabs, CreateModal, CmRow, CmSeg, RulesModal,
   rulesModalCss, createModalCss, lobbyCreateRowCss, gameMenuCss,
-  LobbyBotTier, LobbyMatchup, LobbyOpenTitle, useLastDifficulty, useProgressiveList, notWaiting,
+  LobbyBotTier, LobbyMatchup, LobbyOpenTitle, LobbyOpenActions, seatStateOf, useLastDifficulty, useProgressiveList, notWaiting,
   WaitingRoom, waitingRoomCss,
 } from "../../shared/lobby.jsx";
 import { GAME_ACCENTS } from "../../shared/accents.js";
 import { useAutoReconnect } from "../../shared/useAutoReconnect.js";
 import { buildPath, pushPath } from "../../shared/router.js";
+import { leaveOpenSeat, readRoomToken } from "../../shared/roomLifecycle.js";
 import BlackCastleRules from "./rules.jsx";
 import cssText from "./BlackCastle.css?inline";
 import BoardView from "./BoardView.jsx";
@@ -38,7 +39,7 @@ function deepRoom() {
   } catch { return null; }
 }
 
-function Lobby({ myId, authUser, openGames, activeGames, history, onRefresh, refreshing, onCreate, onJoin, onExit, onRules }) {
+function Lobby({ myId, authUser, openGames, activeGames, history, onRefresh, refreshing, onCreate, onJoin, onLeave, onCancel, onExit, onRules }) {
   const active = notWaiting(activeGames);
   const [lobbyTab, setLobbyTab] = useState("open");
   const [visibleHistory, historySentinel] = useProgressiveList(history);
@@ -55,7 +56,9 @@ function Lobby({ myId, authUser, openGames, activeGames, history, onRefresh, ref
           <div className="lby-list">{openGames.map((g) => <div className="lby-card" key={g.id}>
             <div className="lby-card-info"><LobbyOpenTitle game={g} myId={myId} defaultMaxPlayers={4} />
               <div className="lby-card-meta">{g.id} · standard base game</div></div>
-            <div className="lby-card-actions"><LobbyAction onClick={() => onJoin(g.id)}>Join</LobbyAction></div>
+            <div className="lby-card-actions"><LobbyOpenActions state={seatStateOf(g, myId)}
+              onReturn={() => onJoin(g.id)} onJoin={() => onJoin(g.id)}
+              onLeave={() => onLeave(g.id)} onCancel={() => onCancel(g.id)} /></div>
           </div>)}</div>
         </section>
         <section className="lby-col-active"><LobbySectionHd title="Active Games" note={`${active.length} in progress`} />
@@ -165,8 +168,14 @@ export default function BlackCastle({ myId, authUser, onExit }) {
 
   const openRoom = useCallback((rid, intent, createPayload) => {
     const id = rid.toUpperCase();
+    const storedToken = intent === "join" ? (() => {
+      try { return localStorage.getItem(`${TOKEN_PREFIX}${id}`) || ""; } catch { return ""; }
+    })() : "";
     setRoomData(null); setToast(""); setConnected(false);
-    setRoomId(id); roomRef.current = id; intentRef.current = intent; tokenRef.current = ""; createPayloadRef.current = createPayload || null; setScreen("game");
+    setRoomId(id); roomRef.current = id;
+    intentRef.current = storedToken ? "reconnect" : intent;
+    tokenRef.current = storedToken;
+    createPayloadRef.current = createPayload || null; setScreen("game");
     try { pushPath(buildPath("blackcastle", id)); } catch {}
     connect();
   }, [connect]);
@@ -176,13 +185,34 @@ export default function BlackCastle({ myId, authUser, onExit }) {
     openRoom(roomCode(), "create", { name: authUser?.name || "Player", max_players: maxPlayers, num_bots: Math.min(numBots, maxPlayers - 1), ai_difficulty: createDifficulty });
   }, [authUser, createDifficulty, maxPlayers, numBots, openRoom, rememberDifficulty]);
   const joinRoom = useCallback((rid) => { openRoom(rid, "join"); }, [openRoom]);
+  const cancelGame = useCallback(async (id) => {
+    try {
+      const headers = authUser?.session_token ? { Authorization: `Bearer ${authUser.session_token}` } : {};
+      const roomToken = readRoomToken(`${TOKEN_PREFIX}${id}`);
+      if (roomToken) headers["X-Room-Token"] = roomToken;
+      const response = await fetch(`${HTTP_BASE}/blackcastle/games/${id}?player_id=${encodeURIComponent(myId)}`, { method: "DELETE", headers });
+      const data = await response.json().catch(() => ({}));
+      if (!data.ok) { setToast(data.message || "Could not cancel"); return; }
+      refresh();
+    } catch { setToast("Could not cancel"); }
+  }, [authUser, myId, refresh]);
+  const leaveSeat = useCallback(async (id) => {
+    try {
+      await leaveOpenSeat({
+        endpoint: `${HTTP_BASE}/blackcastle/games`, roomId: id, playerId: myId,
+        tokenKey: `${TOKEN_PREFIX}${id}`, sessionToken: authUser?.session_token,
+      });
+      setToast("Seat released");
+      refresh();
+    } catch (err) { setToast(err?.message || "Could not leave that table"); }
+  }, [authUser, myId, refresh]);
   const sendMove = useCallback((move) => send({ action: "move", move }), [send]);
   const abandon = useCallback(() => send({ action: "abandon" }), [send]);
   const exit = useCallback(() => { try { wsRef.current?.close(); } catch {} wsRef.current = null; setConnected(false); setRoomData(null); setRoomId(""); setScreen("lobby"); try { pushPath(buildPath("blackcastle")); } catch {} refresh(); }, [refresh]);
   const start = useCallback(() => send({ action: "start" }), [send]);
   const showWaiting = screen === "game" && roomData && !roomData.game;
   return <>
-    {screen === "lobby" && <Lobby {...{ myId, authUser, openGames, activeGames, history, onRefresh: refresh, refreshing, onCreate: () => setShowCreate(true), onJoin: joinRoom, onExit, onRules: () => setShowRules(true) }} />}
+    {screen === "lobby" && <Lobby {...{ myId, authUser, openGames, activeGames, history, onRefresh: refresh, refreshing, onCreate: () => setShowCreate(true), onJoin: joinRoom, onLeave: leaveSeat, onCancel: cancelGame, onExit, onRules: () => setShowRules(true) }} />}
     {screen === "game" && !roomData && <div className="app blackcastle"><style>{styles}</style><LobbyHeader title="Black Castle" onBack={exit} /><div className="bc-waiting"><Icon name="castle" size={48} /><h1>{toast ? "The gate is closed." : "Opening the castle…"}</h1><p role="status">{toast || "Connecting to your table. This may take a moment."}</p><button type="button" className="bc-primary" onClick={exit}>Return to lobby</button></div></div>}
     {showWaiting && <div className="app blackcastle" style={{ "--lby-accent": GAME_ACCENTS.blackcastle }}><style>{styles}</style>
       {/* `WaitingRoom` in shared/lobby.jsx. This was the one waiting room in the

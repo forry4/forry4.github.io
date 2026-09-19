@@ -7,11 +7,12 @@ import {
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss, useProgressiveList, LobbyHero, LobbyUser, useListFade,
   readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame, timeAgo, useLastDifficulty,
-  LobbyBotTier, LobbyOpenTitle, WaitingRoom, waitingRoomCss,
+  LobbyBotTier, LobbyOpenTitle, LobbyOpenActions, seatStateOf, WaitingRoom, waitingRoomCss,
 } from "../../shared/lobby.jsx";
 import { GAME_ACCENTS } from "../../shared/accents.js";
 import { buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 import { useAutoReconnect } from "../../shared/useAutoReconnect.js";
+import { leaveOpenSeat, readRoomToken } from "../../shared/roomLifecycle.js";
 import { useCardInfoGesture } from "../../shared/gestures.js";
 import OrbitRules from "./rules.jsx";
 import { Resource, ResourceIcon, decisionCopy, victoryCondition, InfluenceDisc } from "./presentation.jsx";
@@ -789,7 +790,7 @@ function DecisionPanel({ game, catalog, sendMove, onInfo }) {
 
 
 function Lobby({ authUser, myId, onExit, openGames, myGames, history, historyShown,
-  historyMore, refreshing, fetchGames, joinGame, resumeGame, cancelGame,
+  historyMore, refreshing, fetchGames, joinGame, resumeGame, cancelGame, leaveSeat,
   showCreate, setShowCreate, createOpp, setCreateOpp,
   createDifficulty, setCreateDifficulty, createGame, lobbyTab, setLobbyTab,
   showRules, setShowRules, toast }) {
@@ -816,10 +817,9 @@ function Lobby({ authUser, myId, onExit, openGames, myGames, history, historySho
           <div className="lby-list">{openGames.map((g) => <div className="lby-card" key={g.id}>
             <div className="lby-card-info"><LobbyOpenTitle game={g} myId={myId} />
               <div className="lby-card-meta">{g.id} · {timeAgo(g.created_at)}</div></div>
-            <div className="lby-card-actions">{g.host_id === myId ? <>
-              <LobbyAction kind="secondary" onClick={() => resumeGame(g.id)}>Return</LobbyAction>
-              <LobbyAction kind="danger" onClick={() => cancelGame(g.id)}>Cancel</LobbyAction>
-            </> : <LobbyAction onClick={() => joinGame(g.id)}>Join</LobbyAction>}</div>
+            <div className="lby-card-actions"><LobbyOpenActions state={seatStateOf(g, myId)}
+              onReturn={() => resumeGame(g.id)} onJoin={() => joinGame(g.id)}
+              onLeave={() => leaveSeat(g.id)} onCancel={() => cancelGame(g.id)} /></div>
           </div>)}</div>
         </div>
         <div className="lby-col-active">
@@ -1181,11 +1181,23 @@ export default function Orbit({ myId, authUser, onExit }) {
   }, [connect, myId, authUser]);
 
   const cancelGame = useCallback((gid) => {
-    if (!authUser?.session_token) return;
-    fetch(`${ORBIT_HTTP}/games/${gid}`, {
-      method: "DELETE", headers: { Authorization: `Bearer ${authUser.session_token}` },
+    const headers = authUser?.session_token ? { Authorization: `Bearer ${authUser.session_token}` } : {};
+    const roomToken = readRoomToken(`orbit_token_${gid}_${myId}`);
+    if (roomToken) headers["X-Room-Token"] = roomToken;
+    fetch(`${ORBIT_HTTP}/games/${gid}?player_id=${encodeURIComponent(myId)}`, {
+      method: "DELETE", headers,
     }).then(fetchGames).catch(() => {});
-  }, [authUser, fetchGames]);
+  }, [authUser, fetchGames, myId]);
+  const leaveSeat = useCallback(async (gid) => {
+    try {
+      await leaveOpenSeat({
+        endpoint: `${ORBIT_HTTP}/games`, roomId: gid, playerId: myId,
+        tokenKey: `orbit_token_${gid}_${myId}`, sessionToken: authUser?.session_token,
+      });
+      setToast("Seat released");
+      fetchGames();
+    } catch (err) { setToast(err?.message || "Could not leave that table"); }
+  }, [authUser, myId, fetchGames]);
 
   const reconnectNow = useCallback(() => {
     let token = null;
@@ -1244,7 +1256,7 @@ export default function Orbit({ myId, authUser, onExit }) {
   if (connecting && screen === "lobby") return <div className="app orbit" style={{ "--lby-accent": GAME_ACCENTS.orbit }}><style>{styles}</style><LobbyLoading label="Connecting…" /></div>;
   if (screen === "lobby") return <Lobby {...{
     authUser, myId, onExit, openGames, myGames, history, historyShown, historyMore,
-    refreshing, fetchGames, joinGame, resumeGame, cancelGame, showCreate, setShowCreate,
+    refreshing, fetchGames, joinGame, resumeGame, cancelGame, leaveSeat, showCreate, setShowCreate,
     createOpp, setCreateOpp, createDifficulty, setCreateDifficulty,
     createGame, lobbyTab, setLobbyTab,
     showRules, setShowRules, toast,

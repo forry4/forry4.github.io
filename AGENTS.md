@@ -300,6 +300,14 @@ shipped spin keyframes.
   host, `<host>'s game` for other viewers, and the occupied/max seat count from the backend's
   available count shape. Every lobby must use it; the shared lobby-kit test is the guard for
   future games, so do not hand-type a game-specific Open-row title.
+- **`LobbyOpenActions` owns every Open-row seat lifecycle.** `seatStateOf` distinguishes the
+  host, an already-seated guest, a full table, and a joinable table. Return/Resume always uses
+  the per-seat reconnect token (or the matching account session); opening a room reserves the
+  seat, and backing out to the lobby only closes the socket. A non-host may explicitly Leave
+  while the room is still open; the host uses Cancel. Every game exposes the same authenticated
+  `/games/{game_id}/leave` endpoint backed by `core.rooms.remove_open_seat`, and its frontend
+  calls `shared/roomLifecycle.js`. A new game must wire these primitives before it can ship —
+  never hand-write a Join/Return branch or release a seat on navigation.
 
 **The lobby History list pages, and the cap is ONE number seen from two ends.**
 `core.rooms.HISTORY_LIMIT` (50) is the SQL row cap in every game's `list_user_history`;

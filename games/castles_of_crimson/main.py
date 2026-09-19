@@ -117,7 +117,7 @@ coc_app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_allowed_origins(),
     allow_methods=["GET", "POST", "PUT", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_headers=["Authorization", "Content-Type", "X-Room-Token"],
 )
 
 # ── In-memory room state ──────────────────────────────────────────────────────
@@ -1225,6 +1225,24 @@ async def games_history(token: str | None = Depends(_bearer_token)):
     return {"ok": True, "games": list_user_history(user["id"])}
 
 
+@coc_app.post("/games/{game_id}/leave")
+async def games_leave(game_id: str, token: str | None = Depends(_bearer_token),
+                      player_id: str | None = None,
+                      room_token: str | None = Header(default=None, alias="X-Room-Token")):
+    user = get_user_by_session(token) if token else None
+    room_id = normalize_room(game_id)
+    async with ROOM_LOCK:
+        room = _ensure_room_loaded(room_id)
+        ok, message = _rooms.remove_open_seat(
+            room or {}, player_id or "", room_token=room_token,
+            session_uid=(user or {}).get("id"))
+        if not ok:
+            return {"ok": False, "message": message}
+        save_game(room_id)
+    await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
+    return {"ok": True}
+
+
 @coc_app.get("/games/{game_id}/review")
 async def games_review(game_id: str, token: str | None = Depends(_bearer_token),
                        player_id: str | None = None):
@@ -1258,7 +1276,8 @@ async def games_review(game_id: str, token: str | None = Depends(_bearer_token),
 
 @coc_app.post("/games/{game_id}/cancel")
 async def games_cancel(game_id: str, token: str | None = Depends(_bearer_token),
-                       player_id: str | None = None):
+                       player_id: str | None = None,
+                       room_token: str | None = Header(default=None, alias="X-Room-Token")):
     game_id = normalize_room(game_id)
     owner = None
     user = get_user_by_session(token) if token else None
@@ -1268,6 +1287,11 @@ async def games_cancel(game_id: str, token: str | None = Depends(_bearer_token),
         owner = player_id
     if not owner:
         return {"ok": False, "message": "unauthenticated"}
+    if not user:
+        async with ROOM_LOCK:
+            room = _ensure_room_loaded(game_id)
+            if not _rooms.authorized_open_host(room or {}, owner, room_token=room_token):
+                return {"ok": False, "message": "could not verify this seat"}
     deleted = delete_open_game(game_id, owner)
     if deleted:
         async with ROOM_LOCK:

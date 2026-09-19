@@ -3202,20 +3202,50 @@ async def get_game_review(game_id: str, token: str | None = Depends(bearer_token
 
 @router.post("/games/{game_id}/cancel")
 async def cancel_open_game(game_id: str, token: str | None = Depends(bearer_token),
-                           player_id: str | None = None):
+                           player_id: str | None = None,
+                           room_token: str | None = Header(default=None, alias="X-Room-Token")):
     # An open game is just a public waiting room (host_id is listed in /games).
-    # Authorize by a live session OR by the host's player_id, so cancelling still
-    # works after the session token expires (which otherwise breaks it silently).
+    # Registered hosts use their live session. Guest hosts use the per-seat room
+    # token below; the public player_id is only an identifier, never proof.
     user = get_user_by_session(token)
     owner = user["id"] if user else (player_id or None)
     if not owner:
         return {"ok": False, "message": "missing identity"}
     room_id = normalize_room(game_id)
+    if not user:
+        async with ROOM_LOCK:
+            room = ROOMS.get(room_id)
+            if room is None:
+                load_game_to_memory(room_id)
+                room = ROOMS.get(room_id)
+            if not _rooms.authorized_open_host(room or {}, owner, room_token=room_token):
+                return {"ok": False, "message": "could not verify this seat"}
     deleted = delete_open_game(room_id, owner)
     if deleted:
         async with ROOM_LOCK:
             ROOMS.pop(room_id, None)
     return {"ok": deleted, "message": None if deleted else "not your open game"}
+
+
+@router.post("/games/{game_id}/leave")
+async def leave_open_seat(game_id: str, token: str | None = Depends(bearer_token),
+                          player_id: str | None = None,
+                          room_token: str | None = Header(default=None, alias="X-Room-Token")):
+    user = get_user_by_session(token)
+    room_id = normalize_room(game_id)
+    async with ROOM_LOCK:
+        room = ROOMS.get(room_id)
+        if room is None:
+            load_game_to_memory(room_id)
+            room = ROOMS.get(room_id)
+        ok, message = _rooms.remove_open_seat(
+            room or {}, player_id or "", room_token=room_token,
+            session_uid=(user or {}).get("id"))
+        if not ok:
+            return {"ok": False, "message": message}
+        save_game(room_id)
+    await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
+    return {"ok": True}
 
 
 @router.post("/me/session-token")
