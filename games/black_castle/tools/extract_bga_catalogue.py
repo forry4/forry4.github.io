@@ -50,6 +50,7 @@ from __future__ import annotations
 import argparse
 import collections
 import glob
+import itertools
 import json
 import os
 import sys
@@ -89,11 +90,23 @@ def _is_tile(node):
     return "id" in node and any(m in node for m in TILE_MARKERS) and "actionBlocks" not in node
 
 
+def _ordinal(raw):
+    """A block's place on its card, with the per-GAME instance prefix stripped off.
+
+    BGA numbers blocks `"<card id>-<n>"`, and that card id is the INSTANCE, not the card --
+    so one printed steward is `13-1` in one game and `2-1` in the next. Keeping the prefix
+    made five byte-identical stewards read as five disagreeing definitions. The suffix is
+    the part that belongs to the card.
+    """
+    text = str(raw)
+    return text.rsplit("-", 1)[-1] if "-" in text else text
+
+
 def _blocks(node):
     """The effect blocks of a card, normalised and ORDER-INDEPENDENT.
 
-    Sorted by block id because the payload's list order is presentation, not identity, and
-    two sightings of one card must compare equal.
+    Sorted by the block's ordinal because the payload's list order is presentation, not
+    identity, and two sightings of one card must compare equal.
     """
     out = []
     for block in node.get("actionBlocks") or ():
@@ -107,13 +120,13 @@ def _blocks(node):
                     "args": _args(desc.get("descriptionArgs")),
                 })
         out.append({
-            "id": block.get("id"),
+            "ordinal": _ordinal(block.get("id")),
             "type": block.get("type"),
             "position": list(block.get("position") or ()),
             "conditional": block.get("conditional"),
             "effects": effects,
         })
-    return sorted(out, key=lambda b: str(b["id"]))
+    return sorted(out, key=lambda b: (len(b["ordinal"]), b["ordinal"]))
 
 
 def _args(raw):
@@ -148,17 +161,30 @@ def definition(node):
             if node.get(extra) is not None:
                 out[extra] = node[extra]
         return out
-    return {
+    # TWO SHAPES WEAR ONE FIELD NAME, and the singular one is a STRING. A yard tile
+    # carries `actionDescription` as a LIST of templates beside a LIST of arg dicts; a
+    # garden card carries ONE template as a bare string beside ONE arg dict. Iterating
+    # the string form yielded its CHARACTERS -- "G", "a", "i", "n" -- which is what the
+    # conflict check surfaced, and the garden's args were dropped on the floor.
+    raw = node.get("actionDescription")
+    templates = [raw] if isinstance(raw, str) else [d for d in (raw or ()) if isinstance(d, str)]
+    raw_args = node.get("actionDescriptionArgs")
+    arg_dicts = [raw_args] if isinstance(raw_args, dict) else [
+        a for a in (raw_args or ()) if isinstance(a, dict)]
+    out = {
         "kind": "tile",
         "type": node.get("type"),
         "typeArg": node.get("typeArg"),
         "side": node.get("side"),
-        "effects": [
-            {"description": d, "args": {}} if isinstance(d, str) else {"description": None, "args": _args(d)}
-            for d in (node.get("actionDescription") or ())
-        ],
-        "args": [_args(a) for a in (node.get("actionDescriptionArgs") or ()) if isinstance(a, dict)],
+        "effects": [{"description": d, "args": _args(a)}
+                    for d, a in itertools.zip_longest(templates, arg_dicts)],
     }
+    # A garden card's price and payout live out here rather than in a block, and they are
+    # exactly the rules data the catalogue exists to carry.
+    for extra in ("foodCost", "pointValue"):
+        if node.get(extra) is not None:
+            out[extra] = node[extra]
+    return out
 
 
 def harvest(paths):
@@ -176,13 +202,20 @@ def harvest(paths):
             if not (_is_card(node) or _is_tile(node)):
                 continue
             body = definition(node)
-            # THE FACE IS PART OF THE IDENTITY, NOT A DISAGREEMENT. A matcha yard tile is
+            # `typeArg` IS THE CARD; `id` is the copy of it dealt into THIS game. One
+            # log could not tell them apart -- every id held one card, so the first probe
+            # read 0 conflicts and looked finished. Ten logs separated them at once: id 13
+            # was a different steward in each game, and keying on it reported 70 of 76
+            # definitions as corrupt. Measured across the corpus, `typeArg` also lands on
+            # the PRINTED counts exactly -- 15 stewards, 12 diplomats, 5 plant and 5 stone
+            # gardens -- which is the independent evidence that it is the identity.
+            #
+            # THE FACE IS PART OF THAT IDENTITY, NOT A DISAGREEMENT. A matcha yard tile is
             # double-sided and its two faces are different cards wearing one id -- front
-            # "Perform 1 yard-tile Action(s)", back "Gain chasen 3", and even a different
-            # `typeArg`. Keying without the side reported that as a corrupted definition;
-            # keying WITH it records both faces and leaves a genuine disagreement still
-            # able to surface, which is the whole point of the check.
-            key = (body["kind"], str(node.get("type")), str(node.get("id")),
+            # "Perform 1 yard-tile Action(s)", back "Gain chasen 3". Keying without the
+            # side reported that as a corrupted definition; keying WITH it records both
+            # faces and leaves a genuine disagreement still able to surface.
+            key = (body["kind"], str(node.get("type")), str(node.get("typeArg")),
                    str(node.get("side") or ""))
             sightings[key] += 1
             blob = json.dumps(body, sort_keys=True)
