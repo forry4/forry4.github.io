@@ -8195,18 +8195,24 @@ try {
 			{ width: 320, height: 568 }, { width: 360, height: 800 },
 			{ width: 390, height: 844 }, { width: 430, height: 932 },
 			{ width: 768, height: 1024 }, { width: 1920, height: 1080 },
-			{ width: 2560, height: 1600 },
+			// A wide monitor can still have a short effective browser viewport after
+			// display scaling or browser chrome; this is where the old SVG max-height
+			// escaped the frame and hid the bottom score rail.
+			{ width: 2560, height: 900 }, { width: 2560, height: 1600 },
 		]) {
 			await page.setViewportSize(viewport);
 			const geometry = await page.evaluate(() => {
 				const board = document.querySelector(".pi-board-svg")?.getBoundingClientRect();
+				const frame = document.querySelector(".pi-board-frame")?.getBoundingClientRect();
 				return { docW: document.documentElement.scrollWidth, innerW: window.innerWidth,
 					left: board?.left, right: board?.right, width: board?.width,
-					docH: document.documentElement.scrollHeight, innerH: window.innerHeight };
+					docH: document.documentElement.scrollHeight, innerH: window.innerHeight,
+					boardBottom: board?.bottom, frameBottom: frame?.bottom };
 			});
 			check(`${viewport.width}x${viewport.height} board is complete and never scrolls sideways`,
 				geometry.docW <= viewport.width + 1 && geometry.left >= -1 &&
-				geometry.right <= viewport.width + 1 && geometry.width > Math.min(250, viewport.width * .7),
+				geometry.right <= viewport.width + 1 && geometry.boardBottom <= geometry.frameBottom + 1 &&
+				geometry.width > Math.min(250, viewport.width * .7),
 				JSON.stringify(geometry));
 			if (viewport.width >= 1200) check(`${viewport.width}x${viewport.height} live state fits vertically`,
 				geometry.docH <= viewport.height + 1, JSON.stringify(geometry));
