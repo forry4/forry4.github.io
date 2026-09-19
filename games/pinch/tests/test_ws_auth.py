@@ -65,6 +65,18 @@ def test_create_join_and_full_room():
     assert mallory.messages() == [{"type": "error", "message": "room is full or already started"}]
 
 
+def test_create_and_join_keep_names_letters_only_and_at_most_16_characters():
+    host = FakeWS()
+    assert run(m._handle_create(host, "room", "alice", {"name": "Alice Smithabcdefghij-123"}))
+    guest = FakeWS()
+    assert run(m._handle_join(guest, "room", "bob", {"name": "Bøb ! 42"}))
+    assert m.ROOMS["room"]["players"] == {
+        "alice": "AliceSmithabcdef",
+        "bob": "Bb",
+    }
+    assert len(m.ROOMS["room"]["players"]["alice"]) == 16
+
+
 def test_existing_seat_needs_account_or_room_proof(monkeypatch):
     open_room()
     run(m._handle_join(FakeWS(), "room", "bob", {"name": "Bob"}))

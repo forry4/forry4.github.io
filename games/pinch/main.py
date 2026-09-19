@@ -7,6 +7,7 @@ import concurrent.futures
 import copy
 import json
 import logging
+import re
 import time
 
 from fastapi import Depends, FastAPI, Header, Query, WebSocket, WebSocketDisconnect
@@ -25,6 +26,12 @@ TABLE = "pinch_games"
 AI_PID = "pinch-easy-bot"
 DEFAULT_DIFFICULTY = "easy"
 AI_DIFFICULTIES = ("easy",)
+NAME_MAX = 16
+
+
+def _player_name(raw: object) -> str:
+    """Keep Pinch seat names within the game's display-name contract."""
+    return re.sub(r"[^A-Za-z]", "", str(raw or "Player"))[:NAME_MAX] or "Player"
 
 pinch_app = FastAPI(title="Pinch API")
 pinch_app.add_middleware(
@@ -317,7 +324,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
 
 
 async def _handle_create(ws: WebSocket, room_id: str, pid: str, msg: dict) -> bool:
-    name = str(msg.get("name") or "Player").strip()[:24] or "Player"
+    name = _player_name(msg.get("name"))
     vs_ai = bool(msg.get("vs_ai"))
     mode = str(msg.get("mode") or "standard").lower()
     if mode not in engine.MODES:
@@ -347,7 +354,7 @@ async def _handle_create(ws: WebSocket, room_id: str, pid: str, msg: dict) -> bo
 
 
 async def _handle_join(ws: WebSocket, room_id: str, pid: str, msg: dict) -> bool:
-    name = str(msg.get("name") or "Player").strip()[:24] or "Player"
+    name = _player_name(msg.get("name"))
     sess = msg.get("session_token")
     session_uid = (get_user_by_session(sess) or {}).get("id") if sess else None
     async with ROOM_LOCK:
