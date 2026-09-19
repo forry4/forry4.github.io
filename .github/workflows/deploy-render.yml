@@ -51,6 +51,7 @@ on:
       # prod off whatever code an unrelated deploy happened to carry, and the
       # symptom is silence rather than a red run.
       - 'games/secretnames/**/*.py'
+      - 'games/pinch/**/*.py'
       # ...but NOT its offline halves, for the same reason ai/offline is excluded
       # above: tools/ is the BGA audit stack, and most of ai/ is the Phase 1
       # simulator, the league and the training stack. Eight of those 22 commits

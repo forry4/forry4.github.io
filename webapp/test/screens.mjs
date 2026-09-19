@@ -33,6 +33,7 @@ const webappDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 const repoRoot = path.resolve(webappDir, "..");
 const PORT = 5173;            // CORS-allowlisted; see above
 const API_PORT = 8000;
+const PYTHON = process.env.SCREENS_PYTHON || "python";
 const resultsDir = path.join(webappDir, "test-results", "screens");
 mkdirSync(resultsDir, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -53,6 +54,7 @@ const SCREENS = [
 	{ path: "/orbit", chunk: "Orbit", marker: ".orbit" },
 	{ path: "/blackcastle", chunk: "BlackCastle", marker: ".blackcastle" },
 	{ path: "/secretnames", chunk: "SecretNames", marker: ".secretnames" },
+	{ path: "/pinch", chunk: "Pinch", marker: ".pinch" },
 	{ path: "/books", chunk: "Books", marker: ".bk-app" },
 	{ path: "/bggfilter", chunk: "BggFilter", marker: ".bgf" },
 ];
@@ -80,6 +82,7 @@ const LOBBY_PAGES = [
 	{ id: "orbit", path: "/orbit", marker: ".orbit" },
 	{ id: "blackcastle", path: "/blackcastle", marker: ".blackcastle" },
 	{ id: "secretnames", path: "/secretnames", marker: ".secretnames" },
+	{ id: "pinch", path: "/pinch", marker: ".pinch" },
 ];
 const LOBBY_PAGES_UNLISTED = Object.keys(GAME_ACCENTS)
 	.filter((k) => !LOBBY_PAGES.some((g) => g.id === k));
@@ -240,7 +243,7 @@ try {
 	// each gets its own fixed deal no matter which LANE it lands in. Override it
 	// to re-roll every hand at once when you want to know a check is not merely
 	// memorising one deal. See core.rooms.deal_rng.
-	api = spawn("python", ["-m", "uvicorn", "app:app", "--port", String(API_PORT)],
+	api = spawn(PYTHON, ["-m", "uvicorn", "app:app", "--port", String(API_PORT)],
 		{ cwd: repoRoot, stdio: "ignore", shell: true,
 			env: { ...process.env, GAMES_DEAL_SEED: process.env.GAMES_DEAL_SEED || "screens-1" } });
 	// The build needs nothing from the backend, so it runs WHILE uvicorn boots
@@ -670,7 +673,7 @@ try {
 				pillY, cards: cards.length,
 			};
 		});
-		const wipIds = new Set(["ragtag", "blackcastle", "secretnames"]);
+		const wipIds = new Set(["ragtag", "blackcastle", "secretnames", "pinch"]);
 		check("WIP game cards stay hidden from guests",
 			m.names.every((game) => !wipIds.has(game.id)), JSON.stringify(m.names.map((game) => game.id)));
 
@@ -920,7 +923,7 @@ try {
 		const adminPage = await adminCtx.newPage();
 		await adminPage.goto(`http://localhost:${PORT}/`, { waitUntil: "networkidle" });
 		await adminPage.waitForSelector(".home-game-card", { timeout: 25_000 }).catch(() => {});
-		const adminWip = await adminPage.evaluate(() => ["ragtag", "blackcastle", "secretnames"]
+		const adminWip = await adminPage.evaluate(() => ["ragtag", "blackcastle", "secretnames", "pinch"]
 			.every((id) => !!document.querySelector(`.home-game-card[data-game="${id}"]`)));
 		await adminCtx.close();
 		check("admins can see the WIP game cards", adminWip);
@@ -1205,7 +1208,7 @@ try {
 			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
 		};
 
-		for (const route of ["/spender", "/coc", "/werewolf", "/duel", "/dontminion", "/dissonance", "/ragtag", "/orbit", "/blackcastle", "/secretnames"]) {
+		for (const route of ["/spender", "/coc", "/werewolf", "/duel", "/dontminion", "/dissonance", "/ragtag", "/orbit", "/blackcastle", "/secretnames", "/pinch"]) {
 			await page.goto(`http://localhost:${PORT}${route}`, { waitUntil: "networkidle" });
 			await page.waitForSelector(".lby-rules", { timeout: 25_000 }).catch(() => {});
 			const hasBtn = await page.locator(".lby-rules").count().catch(() => 0);
@@ -8133,6 +8136,83 @@ try {
 		await ctx.close();
 	}
 
+	// ── Pinch: authoritative setup, first move, motion and target geometry ──────
+	async function pinchPlay(log) {
+		const ctx = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "pinch-harness", name: "Vector", guest: true, is_admin: true })));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		page.on("console", (m) => { if (m.type() === "error") errors.push(`console: ${m.text()}`); });
+		const check = (name, cond, detail = "") => {
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(`pinch: ${name}`); log(`  FAIL ${name}  ${detail}`); }
+		};
+
+		await page.goto(`http://localhost:${PORT}/pinch`, { waitUntil: "networkidle" });
+		await page.waitForSelector(".pinch .lby-create-row", { timeout: 25_000 }).catch(() => {});
+		check("Pinch lobby is reachable", await page.locator(".pinch .lby-create-row").count() === 1);
+		await page.locator(".pinch .lby-cta").click().catch(() => {});
+		await page.waitForSelector(".cm-panel", { timeout: 10_000 }).catch(() => {});
+		const modalText = await page.locator(".cm-panel").innerText().catch(() => "");
+		check("create modal offers Friend, Easy AI, Standard and Blitz",
+			["VS Friend", "VS AI", "Easy", "Standard", "Blitz"].every((word) => modalText.includes(word)), modalText);
+		await page.locator(".cm-create").click().catch(() => {});
+		check("AI room starts on the SVG board",
+			await page.waitForSelector(".pi-board-svg", { timeout: 30_000 }).then(() => true).catch(() => false));
+
+		// A human places five rings. The Easy bot owns every alternate decision and
+		// may have the first colour, so each target wait also exercises its scheduler.
+		let placements = 0;
+		for (; placements < 5; placements++) {
+			const target = page.locator(".pi-target .pi-hit").first();
+			if (!await target.waitFor({ state: "visible", timeout: 30_000 }).then(() => true).catch(() => false)) break;
+			await target.click();
+			await page.waitForTimeout(120);
+		}
+		check("setup accepts all five human ring placements", placements === 5, `${placements}/5`);
+
+		const ring = page.locator(".pi-ring.interactive .pi-hit").first();
+		const hasTurn = await ring.waitFor({ state: "visible", timeout: 30_000 }).then(() => true).catch(() => false);
+		check("the first legal ring can be selected", hasTurn);
+		if (hasTurn) await ring.click();
+		const destination = page.locator(".pi-target .pi-hit").first();
+		const hasDestination = await destination.waitFor({ state: "visible", timeout: 10_000 }).then(() => true).catch(() => false);
+		check("selecting a ring reveals server-advertised destinations", hasDestination);
+		if (hasDestination) await destination.click();
+		const moving = await page.waitForSelector(".pi-moving", { timeout: 4_000 })
+			.then(() => true).catch(() => false);
+		check("an authoritative move drives board-local motion", moving);
+		await page.waitForTimeout(500);
+		check("the completed move reaches the public log",
+			(await page.locator(".pi-log").innerText().catch(() => "")).includes("moves a ring"));
+
+		for (const viewport of [
+			{ width: 320, height: 568 }, { width: 360, height: 800 },
+			{ width: 390, height: 844 }, { width: 430, height: 932 },
+			{ width: 768, height: 1024 }, { width: 1920, height: 1080 },
+			{ width: 2560, height: 1600 },
+		]) {
+			await page.setViewportSize(viewport);
+			const geometry = await page.evaluate(() => {
+				const board = document.querySelector(".pi-board-svg")?.getBoundingClientRect();
+				return { docW: document.documentElement.scrollWidth, innerW: window.innerWidth,
+					left: board?.left, right: board?.right, width: board?.width,
+					docH: document.documentElement.scrollHeight, innerH: window.innerHeight };
+			});
+			check(`${viewport.width}x${viewport.height} board is complete and never scrolls sideways`,
+				geometry.docW <= viewport.width + 1 && geometry.left >= -1 &&
+				geometry.right <= viewport.width + 1 && geometry.width > Math.min(250, viewport.width * .7),
+				JSON.stringify(geometry));
+			if (viewport.width >= 1200) check(`${viewport.width}x${viewport.height} live state fits vertically`,
+				geometry.docH <= viewport.height + 1, JSON.stringify(geometry));
+		}
+
+		check("no page errors in Pinch play", errors.length === 0, errors[0]?.slice(0, 180) || "");
+		await ctx.close();
+	}
+
 	// ── ONE WAITING ROOM, THREE GAMES ─────────────────────────────────────────
 	// `spenderWaitingRoom` above proves the kit WORKS; this proves it is the SAME
 	// kit in games whose stylesheets are in a position to quietly replace it.
@@ -8503,7 +8583,7 @@ try {
 		waitingRoomKit,
 		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, historyRecovery, dmAdventures,
 		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, formControlZoom, lastDifficulty,
-		dissonanceQuartet, orbitPlay, lobbyFinishSync, blackCastlePlay, secretNamesPlay, lobbyChrome];
+		dissonanceQuartet, orbitPlay, lobbyFinishSync, blackCastlePlay, pinchPlay, secretNamesPlay, lobbyChrome];
 
 	// EVERY BLOCK MUST BE IN A LANE. Before the lanes existed, adding a block meant
 	// writing it — it then ran because it was simply the next statement. Now it has

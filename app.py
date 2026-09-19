@@ -168,6 +168,15 @@ try:
 except Exception as _blackcastle_err:  # pragma: no cover - optional package
     LOG.warning("Black Castle not mounted: %s", _blackcastle_err)
 
+# Pinch — two-player ring-and-marker abstract strategy, mounted separately so
+# its room protocol and persistence remain isolated from every other game.
+try:
+    from games.pinch.main import pinch_app
+    app.mount("/pinch", pinch_app)
+    LOG.info("mounted Pinch at /pinch")
+except Exception as _pinch_err:  # pragma: no cover - optional package
+    LOG.warning("Pinch not mounted: %s", _pinch_err)
+
 # SecretNames — the two-player cooperative word game (Codenames: Duet). Same
 # defensive mount: one optional game must never take down the shared backend.
 try:

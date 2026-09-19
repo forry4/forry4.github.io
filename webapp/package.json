@@ -10,6 +10,7 @@
     "smoke": "node test/smoke.mjs",
     "screens": "node test/screens.mjs",
     "screens:orbit": "node test/screens.mjs --only=orbitPlay",
+    "screens:pinch": "node test/screens.mjs --only=pinchPlay",
     "expert-search": "node test/orbit-expert-search.mjs public/wasm test/fixtures/orbit-expert-search.json"
   },
   "dependencies": {

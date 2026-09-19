@@ -15,7 +15,7 @@
 //  - subscribe() fires on POPSTATE ONLY (browser Back/Forward). Programmatic push/replace
 //    never notify, so URL-write + state-write at a call site can't echo back into a loop.
 
-export const MODES = ["spender", "coc", "duel", "werewolf", "dontminion", "dissonance", "ragtag", "orbit", "blackcastle", "secretnames", "books", "puzzles", "bggfilter", "offline"];
+export const MODES = ["spender", "coc", "duel", "werewolf", "dontminion", "dissonance", "ragtag", "orbit", "blackcastle", "secretnames", "pinch", "books", "puzzles", "bggfilter", "offline"];
 
 // Room ids are short alphanumeric codes (normalize_room uppercases server-side).
 const ROOM_RE = /^[A-Za-z0-9_-]{1,24}$/;

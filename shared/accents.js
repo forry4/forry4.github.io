@@ -59,6 +59,10 @@ export const GAME_ACCENTS = {
 	// card's light end (#272319) and 7.87:1 under the #171310 text the kit paints
 	// on top of it as a fill, so it needs no AA exemption.
 	secretnames: "#4fb3e8",
+	// FROSTED CYAN. Pinch's graphite table is almost monochrome; this is the
+	// precise instrument-light used only for legal actions, focus, and its handle
+	// in the site shell. It clears AA both as text and as a filled control.
+	pinch: "#83d6dc",
 };
 
 // Titles that do not clear the 4.5:1 AA floor on the card, and are shipped anyway

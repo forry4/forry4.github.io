@@ -29,6 +29,7 @@ on:
       - 'games/orbit/**'
       - 'games/black_castle/**'
       - 'games/secretnames/**'
+      - 'games/pinch/**'
       - 'books/**'
       - 'bggfilter/**'
       - 'shared/**'

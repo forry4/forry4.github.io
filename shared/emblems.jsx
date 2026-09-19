@@ -68,6 +68,9 @@ const GAME_EMBLEM = {
 	// Dissonance's pair, both castles): the mark is the GRID, and the one solid
 	// cell is what makes it this game rather than a generic layout icon.
 	secretnames: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><rect x="4.6" y="4.6" width="6.4" height="6.4" rx="1.2" /><rect x="13" y="4.6" width="6.4" height="6.4" rx="1.2" /><rect x="4.6" y="13" width="6.4" height="6.4" rx="1.2" /><rect x="13" y="13" width="6.4" height="6.4" rx="1.2" fill="currentColor" stroke="none" /></svg>),
+	// A ring pinching a line of reversible markers — the whole game's action in
+	// the same 24px, 1.5-stroke family as the other home-card emblems.
+	pinch: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><circle cx="7" cy="12" r="3.2" /><circle cx="7" cy="12" r="1.35" /><path d="M10.2 12h8.9" /><circle cx="13" cy="12" r="1.15" fill="currentColor" stroke="none" /><circle cx="16.1" cy="12" r="1.15" fill="currentColor" stroke="none" /><circle cx="19.2" cy="12" r="1.15" fill="currentColor" stroke="none" /></svg>),
 };
 
 export { GAME_EMBLEM };
