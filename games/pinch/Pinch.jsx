@@ -55,10 +55,6 @@ function roomCode() {
   return Array.from({ length: 6 }, () => "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[Math.floor(Math.random() * 26)]).join("");
 }
 
-function playerName(raw) {
-  return String(raw || "Player").replace(/[^A-Za-z]/g, "").slice(0, 16) || "Player";
-}
-
 function deepRoom() {
   try {
     const match = /\/pinch\/([A-Za-z0-9_-]{1,24})\/?$/.exec(window.location.pathname);
@@ -406,9 +402,9 @@ export default function Pinch({ myId, authUser, onExit }) {
       setConnected(true);
       const stored = tokenRef.current || (() => { try { return localStorage.getItem(`${TOKEN_PREFIX}${rid}`) || ""; } catch { return ""; } })();
       const first = intentRef.current === "create"
-        ? { action: "create", name: playerName(authUser?.name), ...(createRef.current || {}) }
+        ? { action: "create", name: authUser?.name || "Player", ...(createRef.current || {}) }
         : stored ? { action: "reconnect", token: stored }
-          : { action: "join", name: playerName(authUser?.name), session_token: authUser?.session_token || null };
+          : { action: "join", name: authUser?.name || "Player", session_token: authUser?.session_token || null };
       ws.send(JSON.stringify(first));
     };
     ws.onmessage = (event) => { if (wsRef.current === ws) { try { handleMessage(JSON.parse(event.data)); } catch {} } };
