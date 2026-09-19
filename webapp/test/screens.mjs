@@ -673,9 +673,12 @@ try {
 				pillY, cards: cards.length,
 			};
 		});
-		const wipIds = new Set(["ragtag", "blackcastle", "secretnames", "pinch"]);
+		const wipIds = new Set(["ragtag", "blackcastle"]);
 		check("WIP game cards stay hidden from guests",
 			m.names.every((game) => !wipIds.has(game.id)), JSON.stringify(m.names.map((game) => game.id)));
+		check("released Pinch and SecretNames cards are visible to guests",
+			["secretnames", "pinch"].every((id) => m.names.some((game) => game.id === id)),
+			JSON.stringify(m.names.map((game) => game.id)));
 
 		check("the home column uses the screen, not fit-content", m.homeW >= m.innerW * 0.7,
 			`.home is ${m.homeW}px inside a ${m.innerW}px viewport — if this collapsed to `
@@ -914,8 +917,8 @@ try {
 			marks.auth && marks.loading && off.length === 0,
 			off.length ? `${off.join(",")} differ: ${JSON.stringify(marks)}` : "a screen did not render");
 		}
-		// Admins retain the WIP cards so they can exercise the unreleased games
-		// from the same catalogue. Seed a separate context so the shell hydrates
+		// Admins retain the remaining WIP cards so they can exercise unreleased
+		// games from the same catalogue. Seed a separate context so the shell hydrates
 		// the administrator identity on its first render, just like a fresh login.
 		const adminCtx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 		await adminCtx.addInitScript(() => localStorage.setItem("spender_user",
@@ -923,7 +926,7 @@ try {
 		const adminPage = await adminCtx.newPage();
 		await adminPage.goto(`http://localhost:${PORT}/`, { waitUntil: "networkidle" });
 		await adminPage.waitForSelector(".home-game-card", { timeout: 25_000 }).catch(() => {});
-		const adminWip = await adminPage.evaluate(() => ["ragtag", "blackcastle", "secretnames", "pinch"]
+		const adminWip = await adminPage.evaluate(() => ["ragtag", "blackcastle"]
 			.every((id) => !!document.querySelector(`.home-game-card[data-game="${id}"]`)));
 		await adminCtx.close();
 		check("admins can see the WIP game cards", adminWip);
