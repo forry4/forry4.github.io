@@ -5,6 +5,12 @@ import { Icon, effectItems, rewardText } from "./presentation.jsx";
 
 const COLORS = ["coral", "black", "white"];
 const CASTLE_ROOM_DICE = 2;
+// Two dice fit on a castle room or an Outside the Walls space -- unless the table is a
+// duel, where dice are never stacked anywhere.
+const dicePerSpace = game => (Object.keys(game.players || {}).length <= 2 ? 1 : CASTLE_ROOM_DICE);
+// Outside the Walls used to hold a single {pid, die}; it holds a list now, and a game
+// saved before that carries the lone object.
+const outsideDice = (game, i) => { const row = game.outside?.[String(i)]; return !row ? [] : Array.isArray(row) ? row : [row]; };
 const COLOR_NAMES = { coral: "Coral", black: "Obsidian", white: "Ivory", gold: "Gold" };
 const WORKERS = { courtiers: "Courtiers", warriors: "Warriors", gardeners: "Gardeners" };
 const FLOORS = { gate: "Castle gate", floor1: "First floor", floor2: "Second floor", daimyo: "Daimyo hall" };
@@ -74,7 +80,7 @@ function placementInfo(game, space) {
   }
   if (area === "domain") return { title: `${COLOR_NAMES[index]} domain`, target: 6, subtitle: "Your personal domain", effects: [{ op: "gain", resource: DOMAIN_RESOURCE[index], amount: 1 }, ...(game.players[game.viewer]?.action_card?.light || [])] };
   if (area === "outside") return { title: "Outside the walls", target: 5, subtitle: `Gate ${Number(index) + 1}`, description: "Choose a worker action next. Deployment costs are paid separately." };
-  return { title: "The well", target: 1, subtitle: "Always available", description: "Gain 1 seal and reveal up to 2 hidden tile rewards. Revealing a reward ends your ability to undo this turn." };
+  return { title: "The well", target: 1, subtitle: "Always available", description: "Gain 1 Daimyo Seal plus the rewards on the well's two tiles. They are face up from setup and pay the same on every visit." };
 }
 
 function Price({ die, target }) {
@@ -87,7 +93,7 @@ function Target({ game, space, onSelect, selected, children, className = "", bus
   const legal = game.legal_moves?.some(m => m.type === "place_die" && m.space === space);
   const info = placementInfo(game, space);
   const domain = space.startsWith("domain") && game.players[game.viewer]?.domain?.[space.split(":")[1]];
-  const occupied = domain ? domain.die || domain.uses : space.startsWith("outside") ? game.outside?.[space.split(":")[1]] : space.startsWith("castle") ? game.castle.rooms.find(r => String(r.id) === space.split(":")[1])?.dice?.length >= CASTLE_ROOM_DICE : false;
+  const occupied = domain ? domain.die || domain.uses : space.startsWith("outside") ? outsideDice(game, space.split(":")[1]).length >= dicePerSpace(game) : space.startsWith("castle") ? game.castle.rooms.find(r => String(r.id) === space.split(":")[1])?.dice?.length >= dicePerSpace(game) : false;
   const reason = occupied ? (domain ? "Used this turn" : "Occupied") : "Not enough coins";
   return <button type="button" className={`bc-target ${className}${legal ? " available" : ""}${selected === space ? " picked" : ""}`} disabled={!legal || busy} onClick={() => onSelect(space)} aria-label={`${info.title}, ${info.subtitle}${choosing ? `, ${legal ? "review placement" : reason}` : ""}`} aria-pressed={selected === space} data-space={space}>
     {children}<span className="bc-target-footer"><span className="bc-value">{info.target}<small>base</small></span>{choosing && game.pending.die ? <><Price die={game.pending.die} target={info.target} /><span className="bc-target-cta">{legal ? (selected === space ? "Selected" : "Choose") : reason}</span></> : <span>{info.subtitle}</span>}</span>
@@ -113,7 +119,7 @@ function Castle({ game, names, onSelect, selected, busy }) {
   return <section className="bc-castle bc-panel" id="bc-castle"><SectionHead icon="castle" title="The keep" note="Place a die to activate a room" />
     <div className="bc-daimyo"><div><span className="bc-kicker">DAIMYO HALL</span><h3>{game.castle?.daimyo?.name}</h3><p>Courtiers here score 10 points each.</p></div><Icon name="castle" /><CourtierRow game={game} names={names} location="daimyo" /></div>
     {[2, 1].map(floor => <div className={`bc-floor bc-floor-${floor}`} key={floor}><div className="bc-floor-label"><span>{floor === 2 ? "02" : "01"}</span><h3>{floor === 2 ? "Second" : "First"} floor</h3><small>{floor === 2 ? "6" : "3"} points per courtier</small></div><div className="bc-rooms">
-      {game.castle?.rooms?.filter(room => room.floor === floor).map(room => <Target key={room.id} {...{ game, onSelect, selected, busy }} space={`castle:${room.id}`} className="bc-room"><CardFace card={room.card} activeSide={game.pending?.die ? (Number(game.pending.die.value) + Number(room.id)) % 2 === 0 ? "light" : "dark" : null} /><div className="bc-room-occupancy">{room.dice?.length ? room.dice.map((die, i) => <Die key={i} die={die} />) : <span>Open room</span>}<small>{room.dice?.length || 0}/{CASTLE_ROOM_DICE} dice</small></div></Target>)}
+      {game.castle?.rooms?.filter(room => room.floor === floor).map(room => <Target key={room.id} {...{ game, onSelect, selected, busy }} space={`castle:${room.id}`} className="bc-room"><CardFace card={room.card} activeSide={game.pending?.die ? (Number(game.pending.die.value) + Number(room.id)) % 2 === 0 ? "light" : "dark" : null} /><div className="bc-room-occupancy">{room.dice?.length ? room.dice.map((die, i) => <Die key={i} die={die} />) : <span>Open room</span>}<small>{room.dice?.length || 0}/{dicePerSpace(game)} dice</small></div></Target>)}
     </div><CourtierRow game={game} names={names} location={`floor${floor}`} /></div>)}
     <CourtierRow game={game} names={names} location="gate" />
   </section>;
@@ -122,9 +128,9 @@ function Castle({ game, names, onSelect, selected, busy }) {
 function Grounds({ game, names, onSelect, selected, busy, sendMove }) {
   const workerMove = (worker, index, kind) => game.legal_moves?.find(m => m.type === "worker_destination" && m.worker === worker && m.index === index && (kind === undefined || m.kind === kind));
   return <>
-    <section className="bc-gates bc-panel" id="bc-grounds"><SectionHead icon="courtiers" title="Beyond the keep" note="Deploy workers or draw a hidden reward" /><div className="bc-gate-grid">
-      {[0, 1].map(i => <Target key={i} {...{ game, onSelect, selected, busy }} space={`outside:${i}`} className="bc-outside"><Icon name="courtiers" /><h3>Outside the walls</h3><p>Send a worker to the gardens, training yards, or castle.</p><div className="bc-space-occupancy">{game.outside?.[String(i)] ? <><Die die={game.outside[String(i)].die} /><span>{names[game.outside[String(i)].pid]}</span></> : <span>Gate {i + 1} · Open</span>}</div></Target>)}
-      <Target {...{ game, onSelect, selected, busy }} space="well" className="bc-well"><Icon name="moon" /><h3>The well</h3><p>1 seal + 2 hidden rewards.<br />Revealing rewards locks undo.</p><div className="bc-space-occupancy"><span>Unlimited visits</span></div></Target>
+    <section className="bc-gates bc-panel" id="bc-grounds"><SectionHead icon="courtiers" title="Beyond the keep" note="Deploy a worker, or draw on the well" /><div className="bc-gate-grid">
+      {[0, 1].map(i => <Target key={i} {...{ game, onSelect, selected, busy }} space={`outside:${i}`} className="bc-outside"><Icon name="courtiers" /><h3>Outside the walls</h3><p>{i === 0 ? "Plant a gardener, or send a courtier to the castle." : "Train a warrior, or send a courtier to the castle."}</p><div className="bc-space-occupancy">{outsideDice(game, i).length ? outsideDice(game, i).map((slot, k) => <span key={k} className="bc-outside-slot"><Die die={slot.die} /><span>{names[slot.pid]}</span></span>) : <span>Gate {i + 1} · Open</span>}<small>{outsideDice(game, i).length}/{dicePerSpace(game)} dice</small></div></Target>)}
+      <Target {...{ game, onSelect, selected, busy }} space="well" className="bc-well"><Icon name="moon" /><h3>The well</h3><p>1 seal + the rewards on its two tiles.<br />Face up, and the same on every visit.</p><div className="bc-space-occupancy"><span>Unlimited visits</span></div></Target>
     </div></section>
     <section className="bc-gardens bc-panel" id="bc-gardens"><SectionHead icon="gardeners" title="The gardens" note="Food to plant · Points at game end" /><div className="bc-garden-grid">{(game.gardens || []).flatMap((garden, i) => ["plant", "stone"].map(kind => { const card = garden[kind]; if (!card) return null; const move = workerMove("gardeners", i, kind); return <button key={`${garden.id}-${kind}`} className={`bc-garden bc-worker-target${move ? " available" : ""}`} disabled={!move || busy} onClick={() => sendMove(move)}><div className="bc-garden-art"><Icon name="gardeners" /><span className={`bc-color-label bc-${garden.bridge}`}>{COLOR_NAMES[garden.bridge]} bridge</span></div><h3>{card.name}</h3><div className="bc-worker-cost"><span><Icon name="food" />{card.cost} food</span><b>{card.vp} points</b></div><Effects effects={card.light} /><p className="bc-card-note">On placement; repeats after rounds 1–2 if this bridge has dice.</p><Occupants pids={gardenOccupants(garden, kind)} names={names} players={game.players} />{move && <span className="bc-worker-cta">Plant a gardener <Icon name="arrow" /></span>}</button>; }))}</div></section>
     <section className="bc-yards bc-panel" id="bc-yards"><SectionHead icon="warriors" title="Training yards" note="Iron to train · Score with your courtiers" /><div className="bc-yard-grid">{(game.yards || []).map((yard, i) => { const move = workerMove("warriors", i); const pids = Object.entries(game.players).flatMap(([pid, p]) => (p.yards || []).filter(y => y.id === yard.id).map(() => pid)); return <button key={yard.id} className={`bc-yard bc-worker-target${move ? " available" : ""}`} disabled={!move || busy} onClick={() => sendMove(move)}><Icon name="warriors" /><h3>{yard.name}</h3><div className="bc-worker-cost"><span><Icon name="iron" />{yard.cost} iron</span><b>{yard.vp} ×</b></div><p className="bc-card-note">Points per courtier inside the castle.</p><Effects effects={yard.effect} /><Occupants pids={pids} names={names} players={game.players} empty="No warriors" />{move && <span className="bc-worker-cta">Train a warrior <Icon name="arrow" /></span>}</button>; })}</div></section>

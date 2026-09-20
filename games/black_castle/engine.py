@@ -13,7 +13,8 @@ from typing import Any
 
 from .cards import (COLORS, DAIMYO, DECREE_CARDS, DIPLOMATS, GARDENS,
                     RESOURCES, STARTING_ACTION_CARDS, STARTING_RESOURCE_CARDS,
-                    STEWARDS, TRAINING_YARDS, WORKERS, clone, make_die_tiles)
+                    STEWARDS, TRAINING_YARDS, WELL_DIE_TILES, WORKERS, clone,
+                    make_die_tiles)
 
 RULESET = "base-2023"
 ROUND_COUNT = 3
@@ -29,8 +30,18 @@ MAX_INFLUENCE = 20
 # dead on 5, 10 or 14 (BGA sends the move with `steps: 0`), and the crossings that did
 # happen paid 1, 2 and 3 seals respectively.
 CHECKPOINT_COSTS = {6: 1, 11: 2, 15: 3}
-#: Dice a single castle room accepts, at every player count.
+#: Dice one castle room or Outside the Walls space accepts, by seat count. A room takes
+#: two at three or four players -- but "in a 1- or 2-player game, dice cannot be stacked
+#: on top of other dice in ANY part of the game", so every such space takes one instead.
+#: The corpus cannot see this (it has no 2-player games) and an earlier pass "fixed" the
+#: seat-count check away on the reasoning that board printing does not shrink. It is not
+#: the printing that shrinks; it is a separate 2-player rule.
 CASTLE_ROOM_DICE = 2
+SOLO_OR_DUEL_DICE = 1
+
+#: Which worker each Outside the Walls space offers, beside the Courtier action both
+#: carry. "Perform 1 of the 2 actions indicated by the space it is placed in."
+OUTSIDE_WORKERS = ("gardeners", "warriors")
 BRIDGE_ORDER = ("coral", "black", "white")
 DOMAIN_WORKER = {"coral": "courtiers", "black": "gardeners", "white": "warriors"}
 RESOURCE_FOR_COLOR = {"coral": "food", "black": "iron", "white": "pearl"}
@@ -278,35 +289,34 @@ def _apply_effects(game: dict, pid: str, effects: list[dict], *, source: str = "
             game["players"][pid]["lantern"].append({"icon": icon, "amount": int(effect.get("amount", 1))})
         elif op == "well_bonus":
             _well_bonus(game, pid)
-            if isinstance(game.get("turn_undo"), dict):
-                game["turn_undo"]["revealed"] = True
 
 
 def _well_bonus(game: dict, pid: str) -> None:
-    hidden = [t for t in game.get("die_tiles", []) if not t.get("revealed")]
-    if not hidden:
-        return
-    rng = _rng(game)
-    # The Well resolves the benefits on the two tiles it covers.  A compact
-    # representation keeps those tiles hidden until this action, while still
-    # making the result deterministic across reconnects and saves.
-    for tile in rng.sample(hidden, min(2, len(hidden))):
-        tile["revealed"] = True
-        tile["location"] = "well"
-        back = tile.get("back")
-        if back == "coin":
+    """Resolve the Well's own two tiles.
+
+    The Well's reward is PUBLIC AND FIXED, not a draw. At setup the two leftover die
+    tiles are laid at the Well dice-side DOWN, so their benefit side faces up and stays
+    face up all game: every visit to the Well pays 1 Daimyo Seal plus those same two
+    benefits. The corpus shows exactly that -- four visits in one game all paid
+    `iron +1, pearl +1, seal +1`, and no game ever paid two different things.
+
+    This used to reveal two random hidden tiles instead, which made the Well a lottery,
+    made the reward secret, consumed the tiles so later visits paid less, and needed an
+    invented "revealing locks undo" rule to stay honest about it. None of that is the
+    game: with nothing hidden there is nothing to lock.
+    """
+    for tile in game.get("well_tiles") or ():
+        reward = tile.get("reward")
+        if reward == "coin":
             _gain(game, pid, coins=2, note="well tile")
-        elif back == "seal":
+        elif reward == "seal":
             _gain(game, pid, seals=1, note="well tile")
-        elif back == "influence":
+        elif reward == "influence":
             _gain(game, pid, influence=1, note="well tile")
-        elif back == "vp":
+        elif reward == "vp":
             _gain(game, pid, points=1, note="well tile")
-        elif back in RESOURCES:
-            _gain(game, pid, resource=back, amount=1, note="well tile")
-        else:
-            _gain(game, pid, coins=1, note="well tile")
-    _save_rng(game, rng)
+        elif reward in RESOURCES:
+            _gain(game, pid, resource=reward, amount=1, note="well tile")
 
 
 def _player_template() -> dict:
@@ -359,9 +369,19 @@ def new_game(players: list[str], *, names: dict[str, str] | None = None,
     bridge_count = len(seats) + 1
     bridges = {color: _rolled_bridge(rng, color, bridge_count) for color in BRIDGE_ORDER}
     tiles = make_die_tiles(rng)
+    # The last two tiles go to the Well dice-side down: their rewards are face up for the
+    # whole game and every visit pays the same thing. The other thirteen belong in the
+    # castle rooms colour-side up, which is the rule the engine does not yet enforce --
+    # see AGENTS.md. They are kept in `die_tiles` until it does.
+    well_tiles = [dict(t, location="well") for t in tiles[-WELL_DIE_TILES:]]
+    tiles = [dict(t, location="castle") for t in tiles[:-WELL_DIE_TILES]]
 
-    steward_deck = [clone(c) for c in STEWARDS]
-    diplomat_deck = [clone(c) for c in DIPLOMATS]
+    # A 2-player game leaves the diamond-marked Steward and Diplomat cards in the box:
+    # 9 of each instead of 15 and 12. Nothing in the corpus shows this -- it has no
+    # 2-player games -- it is the printed 2-player setup.
+    duel = len(seats) <= 2
+    steward_deck = [clone(c) for c in STEWARDS if not (duel and c.get("diamond"))]
+    diplomat_deck = [clone(c) for c in DIPLOMATS if not (duel and c.get("diamond"))]
     daimyo_deck = [clone(c) for c in DAIMYO]
     garden_deck = [clone(c) for c in GARDENS]
     # The three Training Yards are PRINTED ON THE BOARD, all three in play every game, in
@@ -405,7 +425,7 @@ def new_game(players: list[str], *, names: dict[str, str] | None = None,
         "schema": 1, "ruleset": RULESET, "phase": "draft", "round": 1,
         "turn_number": 0, "turn_in_round": 0, "turn_index": 0,
         "turn_pid": None, "turn_order": turn_order, "players": players_state,
-        "names": names, "bridges": bridges, "die_tiles": tiles,
+        "names": names, "bridges": bridges, "die_tiles": tiles, "well_tiles": well_tiles,
         "castle": castle, "outside": {}, "gardens": gardens,
         "yards": yards, "yard_deck": [], "garden_deck": garden_deck,
         "steward_deck": steward_deck, "diplomat_deck": diplomat_deck,
@@ -596,14 +616,12 @@ def _space_moves(game: dict, pid: str, die: dict) -> list[dict]:
         target = _die_value_target(game, space)
         if value >= target or p.get("coins", 0) >= target - value:
             moves.append({"type": "place_die", "space": space})
-    # A castle room holds TWO dice at every player count. It is printed on the board, so
-    # it does not shrink at two players -- what a two-player game removes is cards, not
-    # die slots.
+    capacity = _dice_per_space(game)
     for room in game["castle"]["rooms"]:
-        if len(room.get("dice", [])) < CASTLE_ROOM_DICE:
+        if len(room.get("dice", [])) < capacity:
             add(f"castle:{room['id']}")
     for i in range(2):
-        if not game.get("outside", {}).get(str(i)):
+        if len(_outside_dice(game, i)) < capacity:
             add(f"outside:{i}")
     add("well")
     for color in COLORS:
@@ -682,7 +700,11 @@ def legal_moves(game: dict | None, pid: str) -> list[dict]:
         if kind == "outside_worker":
             p = _player(game, pid)
             choices = []
-            for worker in ("warriors", "gardeners"):
+            # "Perform 1 of the 2 actions indicated by the SPACE it is placed in" -- the
+            # left space offers Gardener or Courtier, the right one Warrior or Courtier.
+            # Offering all three from either space made the two spaces interchangeable and
+            # the die's destination free of consequence.
+            for worker in _outside_offer(game, pending.get("space")):
                 if (p["workers"][worker].get("domain", 0) > 0 and
                         _worker_destination_moves(game, pid, worker)):
                     choices.append({"type": "outside_worker", "worker": worker})
@@ -725,6 +747,33 @@ def _begin_turn(game: dict, pid: str) -> None:
                                 if k not in {"turn_undo", "log"}}),
         "log_pos": int(game.get("log_seq", 0)), "revealed": False,
     }
+
+
+def _outside_offer(game: dict, space: str | None) -> tuple[str, ...]:
+    """The worker an Outside the Walls space offers. Courtiers are on both and are added
+    by the caller; an unknown space falls back to both, which is what a save written
+    before the pending choice carried its space looks like."""
+    try:
+        return (OUTSIDE_WORKERS[int(str(space).split(":")[1])],)
+    except (AttributeError, IndexError, ValueError):
+        return OUTSIDE_WORKERS
+
+
+def _dice_per_space(game: dict) -> int:
+    return SOLO_OR_DUEL_DICE if len(game.get("players", {})) <= 2 else CASTLE_ROOM_DICE
+
+
+def _outside_dice(game: dict, index: str | int) -> list[dict]:
+    """The dice on one Outside the Walls space.
+
+    Stored as a LIST because the space holds two of them at three or four players -- it
+    used to hold a single ``{pid, die}``, which made the second half of a two-die space
+    unreachable all game. A pre-list save carries the lone dict and is read as one die.
+    """
+    row = (game.get("outside") or {}).get(str(index))
+    if row is None:
+        return []
+    return list(row) if isinstance(row, list) else [row]
 
 
 def _die_value_target(game: dict, space: str) -> int:
@@ -815,14 +864,14 @@ def _place_die(game: dict, pid: str, space: str) -> tuple[bool, str | None]:
         game["castle"]["rooms"][idx].setdefault("dice", []).append(die)
         _resolve_castle(game, pid, idx, die)
     elif space.startswith("outside:"):
-        game.setdefault("outside", {})[space.split(":")[1]] = {"pid": pid, "die": die}
+        index = space.split(":")[1]
+        game.setdefault("outside", {})[index] = _outside_dice(game, index) + [{"pid": pid, "die": die}]
         choices = legal_moves({**game, "pending": {"pid": pid, "kind": "outside_worker"}}, pid)
         if choices:
             game["pending"] = {"pid": pid, "kind": "outside_worker", "space": space}
     elif space == "well":
         _gain(game, pid, seals=1, note="well")
         _well_bonus(game, pid)
-        game["turn_undo"]["revealed"] = True
     elif space.startswith("domain:"):
         color = space.split(":")[1]
         _player(game, pid)["domain"][color]["die"] = copy.deepcopy(die)
@@ -1104,17 +1153,13 @@ def player_view(game: dict | None, viewer_pid: str | None) -> dict | None:
     view.pop("daimyo_deck", None)
     view.pop("garden_deck", None)
     view.pop("yard_deck", None)
-    # Die tiles are face-down in the Well until a player resolves that space.
-    # Their backs are a private future reward and must not travel over the
-    # websocket to another seat.
-    view["die_tiles"] = []
-    for tile in game.get("die_tiles", []):
-        public_tile = copy.deepcopy(tile)
-        if not tile.get("revealed"):
-            public_tile["back"] = None
-            public_tile["id"] = None
-            public_tile["number"] = None
-        view["die_tiles"].append(public_tile)
+    # A Die tile is DOUBLE-SIDED and exactly one face is up, so each list redacts the
+    # opposite one. Castle tiles lie colour-side up: their colour is public board state
+    # (it is what decides which dice may enter the room) and their reward is face down.
+    # Well tiles lie the other way round -- reward up, dice side down -- which is why
+    # every visit to the Well pays the same, visible thing.
+    view["die_tiles"] = [dict(t, reward=None) for t in game.get("die_tiles", [])]
+    view["well_tiles"] = [dict(t, color=None) for t in game.get("well_tiles", [])]
     view["decks"] = {
         "steward": len(game.get("steward_deck", [])),
         "diplomat": len(game.get("diplomat_deck", [])),

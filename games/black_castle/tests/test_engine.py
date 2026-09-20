@@ -71,7 +71,7 @@ def test_seeded_random_plans_finish_for_two_three_and_four_seats():
         assert set(game["scores"]) == set(game["players"])
 
 
-def test_undo_restores_the_position_until_a_well_reveals_hidden_benefit():
+def test_undo_restores_the_position_and_the_well_hides_nothing_to_lock_it():
     game = engine.new_game(["a", "b"], seed=2)
     _draft_and_play(game)
     pid = game["turn_pid"]
@@ -83,13 +83,15 @@ def test_undo_restores_the_position_until_a_well_reveals_hidden_benefit():
     assert game["bridges"] == before["bridges"]
     assert game["turn_undo"] is None
 
+    # The Well's two tiles are face up from setup and are not consumed, so a visit
+    # reveals nothing and there is no hidden information for an undo to leak.
     take = next(m for m in engine.legal_moves(game, pid) if m["type"] == "take_die")
     assert engine.apply_move(game, pid, take)[0]
     place = next(m for m in engine.legal_moves(game, pid)
                  if m["space"] == "well")
     assert engine.apply_move(game, pid, place)[0]
-    assert game["turn_undo"]["revealed"] is True
-    assert engine.apply_move(game, pid, {"type": "undo"})[0] is False
+    assert game["turn_undo"]["revealed"] is False
+    assert engine.apply_move(game, pid, {"type": "undo"})[0] is True
 
 
 def test_player_view_redacts_rng_decks_and_other_pending_choices():
@@ -99,11 +101,11 @@ def test_player_view_redacts_rng_decks_and_other_pending_choices():
     view = engine.player_view(game, pid)
     assert "rng_state" not in view and "turn_undo" not in view
     assert "steward_deck" not in view and "diplomat_deck" not in view
-    assert all(tile["back"] is None and tile["id"] is None and tile["number"] is None
-               for tile in view["die_tiles"] if not tile["revealed"])
-    game["die_tiles"][0]["revealed"] = True
-    assert view["die_tiles"][0]["back"] is None
-    assert engine.player_view(game, pid)["die_tiles"][0]["back"] == game["die_tiles"][0]["back"]
+    # A die tile shows one face and hides the other, so each list redacts the opposite
+    # one: castle tiles keep their colour and lose their reward, Well tiles the reverse.
+    assert view["die_tiles"] and view["well_tiles"]
+    assert all(t["reward"] is None and t["color"] for t in view["die_tiles"])
+    assert all(t["color"] is None and t["reward"] for t in view["well_tiles"])
     other = next(x for x in game["players"] if x != pid)
     game["pending"] = {"pid": other, "kind": "end_turn", "secret": "hidden"}
     redacted = engine.player_view(game, pid)
@@ -111,17 +113,22 @@ def test_player_view_redacts_rng_decks_and_other_pending_choices():
     assert redacted["legal_moves"] == []
 
 
-def test_well_uses_only_the_die_difference_when_no_hidden_tiles_remain():
+def test_the_well_pays_one_seal_plus_its_two_face_up_tiles_every_visit():
     game = engine.new_game(["a", "b"], seed=13)
     _draft_and_play(game)
     pid = game["turn_pid"]
     game["bridges"]["coral"][-1]["value"] = 3
     assert engine.apply_move(game, pid, {"type": "take_die", "bridge": "coral", "side": "right"})[0]
-    game["die_tiles"] = []
-    before = game["players"][pid]["coins"]
+    game["well_tiles"] = [{"id": 1, "color": "coral", "reward": "food"}]
+    p = game["players"][pid]
+    coins, seals, food = p["coins"], p["seals"], p["resources"]["food"]
     assert engine.apply_move(game, pid, {"type": "place_die", "space": "well"})[0]
-    assert game["players"][pid]["coins"] - before == 2
-    assert game["players"][pid]["seals"] == 1
+    assert p["coins"] - coins == 2      # die value 3 over a target of 1
+    assert p["seals"] - seals == 1
+    assert p["resources"]["food"] - food == 1
+    # The tile is not consumed: the next visit pays exactly the same.
+    engine._well_bonus(game, pid)
+    assert p["resources"]["food"] - food == 2
 
 
 def test_daimyo_seals_can_be_traded_for_one_resource():

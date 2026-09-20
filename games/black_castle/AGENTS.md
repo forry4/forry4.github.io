@@ -63,6 +63,18 @@ few KB, so those tests run on a fresh clone with no corpus; regenerate with `--w
 | Gardens | 3 plots, only the Plant card reachable | 6 plots; the ladder is cost *c* pays 2*c*−1 |
 | Turn order tie-break | last round's leader stayed ahead | the marker ON TOP leads — 60 of 60 in the corpus |
 | Starting resource cards | 9 | 8 |
+| The Well | 1 seal + two tiles revealed at random from a hidden bag, which locked undo | 1 seal + its own TWO tiles, face up from setup, same payout every visit |
+| Outside the Walls actions | any of the three workers from either space | left = Gardener or Courtier, right = Warrior or Courtier |
+| 2-player deck | all 15 stewards and 12 diplomats | the 6 + 3 diamond-marked cards stay in the box: 9 and 9 |
+
+**And one rule this audit got WRONG before getting it right.** The first pass deleted the
+`1 die at two players, 2 at three or four` check on the reasoning that board printing does
+not shrink. The printing does not -- but "in a 1- or 2-player game, dice cannot be stacked
+on top of other dice in any part of the game" is a separate 2-player rule, and the corpus
+could never have caught the mistake because **it contains no 2-player games at all**. It
+is back, as `SOLO_OR_DUEL_DICE`, with a test that says where it comes from. The lesson is
+the cheap one: a corpus that cannot reach a case is not evidence about that case, and
+"the data does not show this" is not the same as "this is not so".
 
 Confirmed already correct and now pinned by a test: courtier points by floor (1/3/6/10),
 warriors = Σ(yard points) × courtiers INSIDE the castle (the gate does not multiply),
@@ -82,8 +94,9 @@ one job, not three, because they are the same loop:
    (`"Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Gardener Action"`)
    over a vocabulary we have no ops for.
    **That vocabulary is SMALL, and measuring it is the difference between a rewrite and an
-   afternoon: 11 distinct templates across the whole base catalogue, over 19 operand sets,
-   collapsing to 8 ops** — gain (coin/food/iron/pearl/seal/vp/any-resource, 1–5), gain
+   afternoon: 11 distinct templates across the whole base catalogue, over 31 operand sets --
+   19 of which are the amounts on the single `Gain <icon> <n>` template, a table rather
+   than a behaviour -- collapsing to 8 ops** — gain (coin/food/iron/pearl/seal/vp/any-resource, 1–5), gain
    Lantern Rewards, move the Passage of Time 1–2, perform a Courtier / Gardener / Warrior
    action (free or for 1 seal), perform the Well action, and gain a Decree Card. **Every
    base block is `light` or `dark` and every conditional is `and`** — the blue/yellow
@@ -102,11 +115,31 @@ one job, not three, because they are the same loop:
    it. That is how the Lantern Area fills, and the Lantern is what the left end of a bridge
    pays out. Our engine resolves room cards with DICE and never hands the card to anyone.
 
-Also unverified rather than wrong: the Well's reward (ours invents hidden die-tiles), what
-the two Outside the Walls spaces offer (the rules say *one of the 2 actions indicated by
-the space*), the 8 double-sided yard tiles, the 3 Daimyo's Favor cards, and the 2-player
-setup — **the corpus has no 2-player games at all**, so every 2p-specific rule here is
-untested against real play.
+**The Die tiles, now that the setup rule is known.** There are 15, each DOUBLE-SIDED: a
+die colour on one face, a reward on the other. Setup lays 3 of them into the castle spaces
+marked ♦ (one of each colour), fills the numbered castle spaces 1-10 in order — moving a
+tile on to the next room whenever a room would end up all one colour — and puts the last
+two at the Well, dice-side DOWN. That accounts for 13 castle tile spaces across 5 rooms,
+so three rooms carry three tiles and two carry two, which is why a room shows two colours
+81 times and three colours 19 times in the corpus and never more. The Well half is
+implemented; the castle half is the colour rule above, still open.
+**What is still NOT pinned** is the colour composition of the 15-tile bag. No rules text
+we have states it, and the logs rule out a flat 5/5/5 under a 3-tiles-per-room reading —
+one game needs at least 5 black while another allows at most 4 white. `cards.py` models it
+5/5/5 and says so. Deriving each room's per-ROW colour from the effects that actually
+fired would settle it; a first attempt resolved only 28 of 208 placements, because a row
+whose gains carry no `cardId` cannot be attributed.
+
+Also still unverified: the 3 Daimyo Favor cards, and **every 2-player rule beyond the two
+above** — the corpus has no 2-player games, so nothing about a duel is evidence here.
+
+### The yard tiles, for when the tile engine lands
+
+The 8 Training Yard tiles are double-sided too, and **a game puts 4 of them in play — two
+in the blue orientation and two in the yellow — distributed 2/1/1 across the three yards**
+(8 of the 20 logs carry all three yards and every one of them reads 2/1/1). All 16 faces
+are in `data/bga_ground_truth.json`. Our yards still carry one placeholder `effect` each
+instead, which is the same job as the card effects and lands with them.
 
 ### What the logs do and do not carry
 

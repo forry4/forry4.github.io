@@ -96,22 +96,41 @@ def test_a_marker_without_seals_stops_at_the_checkpoint():
     assert (p["influence"], p["seals"]) == (8, 0)
 
 
-def test_a_castle_room_takes_two_dice_at_every_seat_count():
+def test_a_room_and_an_outside_space_stack_two_dice_at_three_or_four_seats():
+    # BGA prints two on every castle room AND on both Outside the Walls spaces. The
+    # corpus shows dice actually reaching two on all of them -- the Outside spaces 114
+    # times, which is how many placements the engine used to refuse for holding one.
     for space, row in TRUTH["action_spaces"].items():
-        if space.startswith(("steward-", "diplomat-")):
+        if space.startswith(("steward-", "diplomat-", "outside-the-walls-")):
             assert row["max_dice"] == engine.CASTLE_ROOM_DICE, space
-    for seats in (2, 3, 4):
+        elif space.startswith("personal-domain:"):
+            assert row["max_dice"] == 1, space
+    for seats, capacity in ((2, 1), (3, 2), (4, 2)):
         game = engine.new_game([f"p{i}" for i in range(seats)], seed=11)
         while game["phase"] == "draft":
             engine.apply_move(game, game["draft_queue"][0], {"type": "draft", "index": 0})
         pid = game["turn_pid"]
-        room = game["castle"]["rooms"][0]
-        game["pending"] = {"pid": pid, "kind": "place_die",
-                           "die": {"color": "coral", "value": 6}}
-        room["dice"] = [{"color": "white", "value": 3}]
-        assert {"type": "place_die", "space": "castle:0"} in engine.legal_moves(game, pid)
-        room["dice"].append({"color": "black", "value": 3})
-        assert {"type": "place_die", "space": "castle:0"} not in engine.legal_moves(game, pid)
+        for space, put in (("castle:0", lambda d: game["castle"]["rooms"][0]
+                            .setdefault("dice", []).append(d)),
+                           ("outside:0", lambda d: game.setdefault("outside", {})
+                            .setdefault("0", []).append({"pid": pid, "die": d}))):
+            for filled in range(capacity + 1):
+                game["pending"] = {"pid": pid, "kind": "place_die",
+                                   "die": {"color": "coral", "value": 6}}
+                offered = {"type": "place_die", "space": space} in engine.legal_moves(game, pid)
+                assert offered == (filled < capacity), (seats, space, filled)
+                put({"color": "white", "value": 3})
+
+
+def test_two_players_cannot_stack_dice_anywhere():
+    # A separate 2-player rule, not a smaller board: "in a 1- or 2-player game, dice
+    # cannot be stacked on top of other dice in any part of the game". The corpus has no
+    # 2-player games at all, so nothing here is derived from it -- and an earlier pass
+    # deleted this very check on the reasoning that board printing does not shrink.
+    assert engine.SOLO_OR_DUEL_DICE == 1
+    two = engine.new_game(["a", "b"], seed=13)
+    four = engine.new_game(["a", "b", "c", "d"], seed=13)
+    assert (engine._dice_per_space(two), engine._dice_per_space(four)) == (1, 2)
 
 
 def test_a_personal_domain_row_only_takes_its_own_colour():
@@ -321,3 +340,82 @@ def test_a_game_saved_before_the_six_plots_still_loads_and_plays():
     game["round"] = 1
     engine._end_round(game)   # must not raise on the missing stack field
     assert set(game["turn_order"]) == set(game["players"])
+
+
+def test_the_well_pays_the_same_thing_every_visit():
+    well = TRUTH["well"]["distinct_payouts_within_one_game"]
+    one, more = well.get("1", 0), sum(v for k, v in well.items() if k != "1")
+    # Fixed, face-up tiles: a game with several visits shows ONE payout signature. Two
+    # games read as two, and both are a card effect landing in the same turn with no
+    # cardId to tell it apart -- so this asserts the weight of the evidence, not purity,
+    # and would still fail outright if the Well were the lottery the port used to run.
+    assert one >= 15 and one > 4 * more, well
+    assert all("seal+1" in sig for sig in TRUTH["well"]["payout_signatures"])
+
+    game = engine.new_game(["a", "b"], seed=41)
+    assert len(game["well_tiles"]) == 2, "two Die tiles are laid at the Well"
+    assert all(tile.get("reward") for tile in game["well_tiles"])
+    # Nothing at the Well is hidden, so visiting it cannot compromise an undo.
+    assert "revealed" not in str(game["well_tiles"])
+
+
+def test_each_outside_the_walls_space_offers_one_worker_and_the_courtier():
+    truth = TRUTH["outside_the_walls"]
+    # Read only from the turns that deployed exactly one kind of worker, so a castle card
+    # granting a second one cannot muddy it. Those separate with nothing in between: no
+    # warrior ever came off the left space, no gardener off the right.
+    assert set(truth["1"]) == {"courtier", "gardener"}
+    assert set(truth["2"]) == {"courtier", "warrior"}
+    assert engine.OUTSIDE_WORKERS == ("gardeners", "warriors")
+    assert engine._outside_offer(None, "outside:0") == ("gardeners",)
+    assert engine._outside_offer(None, "outside:1") == ("warriors",)
+
+    game = engine.new_game(["a", "b", "c"], seed=43)
+    while game["phase"] == "draft":
+        engine.apply_move(game, game["draft_queue"][0], {"type": "draft", "index": 0})
+    pid = game["turn_pid"]
+    p = game["players"][pid]
+    p["resources"] = {"food": 7, "iron": 7, "pearl": 7}
+    p["coins"] = 9
+    for index, worker in enumerate(engine.OUTSIDE_WORKERS):
+        game["pending"] = {"pid": pid, "kind": "outside_worker", "space": f"outside:{index}"}
+        offered = {m["worker"] for m in engine.legal_moves(game, pid)}
+        assert offered == {worker, "courtiers"}, (index, offered)
+
+
+def test_a_two_player_game_leaves_the_diamond_cards_in_the_box():
+    truth = TRUTH["diamond_cards"]
+    assert sorted(truth["steward"]["diamond"]) == list(cards.DIAMOND_STEWARDS)
+    assert sorted(truth["diplomat"]["diamond"]) == list(cards.DIAMOND_DIPLOMATS)
+    duel = engine.new_game(["a", "b"], seed=47)
+    table = engine.new_game(["a", "b", "c"], seed=47)
+
+    def deck(game, kind):
+        rooms = [r["card"] for r in game["castle"]["rooms"] if r["card"]["kind"] == kind]
+        return len(game[f"{kind}_deck"]) + len(rooms)
+    assert (deck(duel, "steward"), deck(duel, "diplomat")) == (9, 9)
+    assert (deck(table, "steward"), deck(table, "diplomat")) == (15, 12)
+    assert not any(c.get("diamond") for c in duel["steward_deck"] + duel["diplomat_deck"])
+
+
+def test_the_effect_vocabulary_left_to_port_is_small_and_enumerated():
+    # The size of the remaining job, kept honest. If a later corpus turns up a twelfth
+    # template or an `or` conditional, this fails and AGENTS.md is wrong about the scope.
+    vocab = TRUTH["effect_vocabulary"]
+    assert set(vocab["block_types"]) == {"light", "dark"}, "curtains are Matcha, not base"
+    assert set(vocab["conditionals"]) == {"and"}, "no `or` in the base box"
+    assert len(vocab["templates"]) == 11, sorted(vocab["templates"])
+    assert sum(len(v) for v in vocab["templates"].values()) == 31
+    # 19 of those 31 are the amounts on one template -- Gain <icon> <n> -- which is a
+    # table, not eleven more behaviours to write.
+    gain = next(v for k, v in vocab["templates"].items()
+                if k.startswith("Gain ${iconPlaceholder} ${numberOfResources}"))
+    assert len(gain) == 19
+
+
+def test_four_of_the_eight_yard_tiles_are_in_play():
+    tiles = TRUTH["yard_tiles"]
+    assert len(tiles["faces"]) == 16, "eight tiles, two faces each"
+    # Partial payloads list only the yards a prompt needed, so the count per game is a
+    # floor; the games that carry all three yards agree on four.
+    assert max(int(k) for k in tiles["tiles_in_play_per_game"]) == 4

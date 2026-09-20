@@ -23,13 +23,23 @@ def _effect(*ops: dict) -> list[dict]:
 def _card(cid: str, kind: str, name: str, *, level: int = 0,
           back: str = "coin", light: list[dict] | None = None,
           dark: list[dict] | None = None, cost: int = 0, vp: int = 0,
-          color: str | None = None, icon: str | None = None) -> dict:
+          color: str | None = None, icon: str | None = None,
+          diamond: bool = False) -> dict:
     return {
         "id": cid, "kind": kind, "name": name, "level": level,
         "back": back, "light": copy.deepcopy(light or []),
         "dark": copy.deepcopy(dark or []), "cost": int(cost), "vp": int(vp),
-        "color": color, "icon": icon,
+        "color": color, "icon": icon, "diamond": bool(diamond),
     }
+
+
+#: Cards marked with a diamond in the lower-left corner, which "stay in the box" in a
+#: 2-player game -- so a duel plays with 9 stewards and 9 diplomats rather than 15 and 12.
+#: These are the printed cards' own numbers, taken from the corpus, where `diamond` is a
+#: stable property of every sighting of a card. They are laid over OUR placeholder cards
+#: by position, so the COUNT a duel removes is right even though the card faces are not.
+DIAMOND_STEWARDS = (1, 3, 6, 8, 11, 14)
+DIAMOND_DIPLOMATS = (1, 9, 12)
 
 
 # Starting resource cards are drafted as one of player-count + 1 face-up
@@ -93,7 +103,8 @@ def _steward_defaults() -> list[dict]:
         if i % 5 == 0:
             dark.append({"op": "influence", "amount": 1})
         out.append(_card(f"steward-{i:02d}", "steward", f"Steward {i}", level=1,
-                         back="coin", light=light, dark=dark))
+                         back="coin", light=light, dark=dark,
+                         diamond=i in DIAMOND_STEWARDS))
     # A few face-up examples from the official/BGA reference are kept explicit
     # so the first games already feel like the printed set.
     out[1]["light"] = _effect({"op": "gain", "resource": "iron", "amount": 2})
@@ -115,7 +126,8 @@ def _diplomat_defaults() -> list[dict]:
         if i % 4 == 0:
             dark = _effect({"op": "gain", "seals": 1}, {"op": "lantern", "icon": "vp", "amount": 1})
         out.append(_card(f"diplomat-{i:02d}", "diplomat", f"Diplomat {i}", level=2,
-                         back="vp", light=light, dark=dark))
+                         back="vp", light=light, dark=dark,
+                         diamond=i in DIAMOND_DIPLOMATS))
     out[1]["light"] = _effect({"op": "influence", "amount": 2})
     out[1]["dark"] = _effect({"op": "move", "worker": "courtiers", "from": "gate", "to": "floor2"})
     out[9]["light"] = _effect({"op": "gain", "coins": 2}, {"op": "lantern", "icon": "coin", "amount": 1})
@@ -232,12 +244,24 @@ def public_catalog() -> dict:
     }
 
 
+#: The 15 Die tiles are DOUBLE-SIDED: a die colour on one face, a reward on the other.
+#: Thirteen go into the castle colour-side up (3 into the diamond-marked spaces, one of
+#: each colour, then the numbered spaces 1-10 in order, with the constraint that no room
+#: may end up all one colour); the last TWO are laid at the Well dice-side DOWN, so their
+#: rewards face up and stay face up all game.
+#:
+#: The split and the double-sidedness are the printed rule. The colour distribution below
+#: is a MODEL -- neither the rulebook text we have nor the BGA logs state the bag, and the
+#: logs rule out a flat 5/5/5 under a 3-tiles-per-room reading. The rewards are ours.
+DIE_TILE_REWARDS = ("coin", "resource", "food", "iron", "pearl", "seal", "influence", "vp")
+CASTLE_DIE_TILES = 13
+WELL_DIE_TILES = 2
+
+
 def make_die_tiles(rng) -> list[dict]:
-    backs = ("coin", "resource", "food", "iron", "pearl", "seal", "influence", "vp")
-    tiles = []
-    for i in range(15):
-        tiles.append({"id": i + 1, "color": COLORS[i % 3], "number": i + 1,
-                      "back": backs[i % len(backs)], "revealed": False,
-                      "location": "bag"})
+    tiles = [{"id": i + 1, "color": COLORS[i % 3], "number": i + 1,
+              "reward": DIE_TILE_REWARDS[i % len(DIE_TILE_REWARDS)],
+              "location": "bag"}
+             for i in range(CASTLE_DIE_TILES + WELL_DIE_TILES)]
     rng.shuffle(tiles)
     return tiles

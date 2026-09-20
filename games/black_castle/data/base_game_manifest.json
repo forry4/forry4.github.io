@@ -33,7 +33,8 @@
     "training_yards": 3,
     "die_tiles": 15,
     "yard_tiles": 8,
-    "daimyo_favour_cards": 3
+    "daimyo_favour_cards": 3,
+    "yard_tiles_in_play": 4
   },
   "sources": [
     "the-white-castle_Official-Rules.pdf (attached rulebook, rendered for review)",
@@ -46,5 +47,29 @@
     "bga_parity": "board, costs and scoring verified; card effects NOT yet ported",
     "notes": "Counts and constants here are derived by tools/bga_parity.py from 20 base-game BGA logs and recorded in data/bga_ground_truth.json, whose scoring formulas reproduce all 70 final scoreboards exactly. See AGENTS.md for what is still divergent -- above all the card effects, which remain placeholder."
   },
-  "influence_track_spaces": 21
+  "influence_track_spaces": 21,
+  "two_player_removes": {
+    "steward_cards": [
+      1,
+      3,
+      6,
+      8,
+      11,
+      14
+    ],
+    "diplomat_cards": [
+      1,
+      9,
+      12
+    ],
+    "dice_stacking": "not allowed at 1-2 players"
+  },
+  "die_tiles_layout": {
+    "total": 15,
+    "double_sided": true,
+    "castle": 13,
+    "well": 2,
+    "diamond_spaces": 3,
+    "note": "colour face up in the castle, reward face up at the Well"
+  }
 }
