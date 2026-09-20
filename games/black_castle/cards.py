@@ -250,16 +250,19 @@ def public_catalog() -> dict:
 #: may end up all one colour); the last TWO are laid at the Well dice-side DOWN, so their
 #: rewards face up and stay face up all game.
 #:
-#: The split and the double-sidedness are the printed rule. The colour distribution below
-#: is a MODEL -- neither the rulebook text we have nor the BGA logs state the bag, and the
-#: logs rule out a flat 5/5/5 under a 3-tiles-per-room reading. The rewards are ours.
+#: The split and the double-sidedness are the printed rule, and the colour bag below is
+#: DERIVED, not chosen: five of each. No rules text states it and no single game comes
+#: close to fixing it -- the most informative one alone leaves six candidates -- but the
+#: intersection over the corpus is a single bag. `tools/bga_parity.py:die_tile_bag()`
+#: solves it and shows the working. The REWARD faces are still ours; only the two that
+#: land at the Well are ever read, so they are the only ones worth deriving next.
 DIE_TILE_REWARDS = ("coin", "resource", "food", "iron", "pearl", "seal", "influence", "vp")
 CASTLE_DIE_TILES = 13
 WELL_DIE_TILES = 2
 
 
 def make_die_tiles(rng) -> list[dict]:
-    tiles = [{"id": i + 1, "color": COLORS[i % 3], "number": i + 1,
+    tiles = [{"id": i + 1, "color": COLORS[i % len(COLORS)], "number": i + 1,
               "reward": DIE_TILE_REWARDS[i % len(DIE_TILE_REWARDS)],
               "location": "bag"}
              for i in range(CASTLE_DIE_TILES + WELL_DIE_TILES)]

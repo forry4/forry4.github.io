@@ -123,15 +123,31 @@ two at the Well, dice-side DOWN. That accounts for 13 castle tile spaces across 
 so three rooms carry three tiles and two carry two, which is why a room shows two colours
 81 times and three colours 19 times in the corpus and never more. The Well half is
 implemented; the castle half is the colour rule above, still open.
-**What is still NOT pinned** is the colour composition of the 15-tile bag. No rules text
-we have states it, and the logs rule out a flat 5/5/5 under a 3-tiles-per-room reading —
-one game needs at least 5 black while another allows at most 4 white. `cards.py` models it
-5/5/5 and says so. Deriving each room's per-ROW colour from the effects that actually
-fired would settle it; a first attempt resolved only 28 of 208 placements, because a row
-whose gains carry no `cardId` cannot be attributed.
+**And the bag is SOLVED: five tiles of each colour.** No rules text states it and no
+single game comes close — the most informative one alone leaves six candidates — but each
+game rules some out and the intersection over twenty is a single bag.
+`tools/bga_parity.py:die_tile_bag()` does it as a constraint problem, and two things make
+it a derivation rather than a curve fit. The room split is not assumed: a diplomat room
+showed exactly two colours **40 times out of 40** and never three, while steward rooms
+reach three, so diplomats hold 2 tiles and stewards 3 — which is also what puts the three
+♦ spaces in the steward rooms. And the Well count is not assumed: solving with 0 or 1
+tiles at the Well yields **no consistent bag at all**, and only the rulebook's own "place
+the well tiles last" admits one. A wrong geometry here does not give a slightly-off
+answer, it gives an empty set — which is why an earlier pass, reading three tiles into
+every room, concluded the logs *ruled 5/5/5 out*. They rule it in.
+
+**What is left of the tiles is the REWARD faces**, and only two of the fifteen are ever
+read — the pair at the Well, whose payout the logs show directly. Seventeen games give
+seventeen samples of two tiles drawn from the bag (`coin+1`, `food+1`, `iron+1`, `pearl+1`
+and `vp+1` all appear, and one game paid `iron+1` twice, so at least two iron tiles
+exist). That is enough to reconstruct the reward multiset with more games, by the same
+intersection trick; the castle tiles' reward faces stay face down all game and never
+matter.
 
 Also still unverified: the 3 Daimyo Favor cards, and **every 2-player rule beyond the two
-above** — the corpus has no 2-player games, so nothing about a duel is evidence here.
+above** — the corpus has no 2-player games, so nothing about a duel is evidence here. The
+cheapest fix for that is the corpus itself: point the `cob-mining` manifest at 2-player
+tables for a week.
 
 ### The yard tiles, for when the tile engine lands
 

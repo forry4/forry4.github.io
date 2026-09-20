@@ -18,8 +18,10 @@ run here means the frame is right, not that the game is finished.
 
 from __future__ import annotations
 
+import collections
 import json
 import os
+import random
 
 from games.black_castle import cards, engine
 
@@ -419,3 +421,24 @@ def test_four_of_the_eight_yard_tiles_are_in_play():
     # Partial payloads list only the yards a prompt needed, so the count per game is a
     # floor; the games that carry all three yards agree on four.
     assert max(int(k) for k in tiles["tiles_in_play_per_game"]) == 4
+
+
+def test_the_die_tile_bag_is_five_of_each_colour():
+    bag = TRUTH["die_tile_bag"]
+    assert bag["bags_consistent_with_every_game"] == [{"red": 5, "black": 5, "white": 5}]
+    assert bag["games_used"] == 20 and bag["games_needed_for_a_unique_bag"] > 1, (
+        "one game cannot fix the bag; if it could, the constraint is not what we think")
+    # The geometry is derived, not assumed, and these two rows are the evidence.
+    # A diplomat room never showed a third colour, which is what makes it a 2-tile room...
+    assert bag["diplomat_rooms_showing_three_colours"] == 0
+    assert bag["tiles_per_room"] == {"steward": 3, "diplomat": 2}
+    assert bag["castle_tiles"] + bag["well_tiles"] == 15
+    # ...and only a 2-tile Well leaves any consistent bag at all, which is the rulebook's
+    # own count. A wrong geometry gives an empty set here, not a slightly wrong answer.
+    assert bag["bags_if_the_well_took_n_tiles"]["0"] == 0
+    assert bag["bags_if_the_well_took_n_tiles"]["1"] == 0
+    assert bag["bags_if_the_well_took_n_tiles"]["2"] == 1
+
+    tiles = cards.make_die_tiles(random.Random(5))
+    assert len(tiles) == cards.CASTLE_DIE_TILES + cards.WELL_DIE_TILES == 15
+    assert collections.Counter(t["color"] for t in tiles) == {c: 5 for c in cards.COLORS}

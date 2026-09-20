@@ -70,6 +70,16 @@
     "castle": 13,
     "well": 2,
     "diamond_spaces": 3,
-    "note": "colour face up in the castle, reward face up at the Well"
+    "note": "colour face up in the castle, reward face up at the Well",
+    "colour_bag": {
+      "red": 5,
+      "black": 5,
+      "white": 5
+    },
+    "derivation": "solved as a constraint problem over 20 base-game logs by tools/bga_parity.py:die_tile_bag(); a 0- or 1-tile Well admits no consistent bag at all",
+    "tiles_per_room": {
+      "steward": 3,
+      "diplomat": 2
+    }
   }
 }

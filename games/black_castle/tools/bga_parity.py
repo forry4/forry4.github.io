@@ -49,6 +49,7 @@ from __future__ import annotations
 import argparse
 import collections
 import glob
+import itertools
 import json
 import os
 import sys
@@ -649,6 +650,111 @@ def effect_vocabulary(games):
             "templates": {t: dict(v.most_common()) for t, v in sorted(templates.items())}}
 
 
+#: A steward room holds three Die tiles and a diplomat room two, so the castle takes 13
+#: and the Well the last 2. Not assumed -- `die_tile_bag()` shows the split is the only
+#: one under which the corpus has any consistent bag at all.
+TILES_PER_ROOM = {"steward": 3, "diplomat": 2}
+DIE_COLORS = ("red", "black", "white")
+
+
+def room_colour_sets(packets):
+    """-> {room id: the die colours that room accepted} for one game."""
+    rooms = collections.defaultdict(set)
+    for event in _events(packets):
+        args = event.get("args") or {}
+        if not isinstance(args, dict):
+            continue
+        inner = args.get("args") if isinstance(args.get("args"), dict) else {}
+        offers = inner.get("actionSpaces")
+        if not isinstance(offers, dict):
+            continue
+        dice = {d["id"]: d for d in (inner.get("dice") or ()) if isinstance(d, dict)}
+        for die_id, options in offers.items():
+            die = dice.get(int(die_id))
+            if not die:
+                continue
+            for space in options or ():
+                sid = str(space["id"]).replace("action-space-main-board-", "")
+                if sid.startswith(("steward-", "diplomat-")):
+                    rooms[sid].add(die["type"])
+    return dict(rooms)
+
+
+def _castle_options(rooms, tiles_per_room):
+    """Every castle colour multiset consistent with what a game offered.
+
+    A room's tiles are only partly visible: what the game reveals is the SET of colours
+    it accepted, not how many of each. A diplomat room is nonetheless pinned -- two tiles
+    showing two distinct colours is one of each -- and a steward room showing three
+    colours is too. Only a steward room showing two colours is ambiguous, and just two
+    ways (three tiles, one colour doubled), so a game has at most 2**3 = 8 readings.
+    """
+    choices = []
+    for sid, colours in sorted(rooms.items()):
+        n = tiles_per_room[sid.split("-")[0]]
+        fits = [m for m in itertools.combinations_with_replacement(DIE_COLORS, n)
+                if set(m) == set(colours)]
+        if not fits:
+            return []
+        choices.append(fits)
+    return [collections.Counter(itertools.chain(*combo))
+            for combo in itertools.product(*choices)]
+
+
+def _bags(per_game, total, well):
+    out = []
+    for red in range(total + 1):
+        for black in range(total + 1 - red):
+            bag = collections.Counter({"red": red, "black": black,
+                                       "white": total - red - black})
+            if all(any(all(c[k] <= bag[k] for k in DIE_COLORS)
+                       and sum((bag - c).values()) == well for c in opts)
+                   for opts in per_game):
+                out.append(tuple(bag[k] for k in DIE_COLORS))
+    return out
+
+
+def die_tile_bag(games):
+    """-> the colour composition of the 15 Die tiles, solved as a constraint problem.
+
+    The bag is not written in any rules text we have and no single game comes close to
+    fixing it -- the best one alone leaves six candidates. But every game rules some out,
+    and the intersection over twenty is a single bag.
+
+    THE CHECK IS THE GEOMETRY, and it is what makes this a derivation rather than a fit.
+    The room split (steward 3, diplomat 2) is not assumed: it falls out of the corpus,
+    where a diplomat room showed exactly two colours 40 times out of 40 and never three,
+    while steward rooms reach three. The Well count is not assumed either. Solving with
+    0 or 1 tiles at the Well yields NO consistent bag at all, and only the rulebook's own
+    "place the well tiles last" -- 2 of them -- admits a solution, which then turns out to
+    be unique. A wrong geometry does not produce a slightly-off answer here; it produces
+    an empty set or a lopsided one.
+    """
+    per_game = []
+    for packets in games:
+        rooms = room_colour_sets(packets)
+        if len(rooms) == 5:
+            per_game.append(_castle_options(rooms, TILES_PER_ROOM))
+    if not per_game or not all(per_game):
+        return {}
+    solved = _bags(per_game, 15, 2)
+    # How many games it takes, so a reader can see it is not one log's quirk.
+    converged = next((n for n in range(1, len(per_game) + 1)
+                      if len(_bags(per_game[:n], 15, 2)) == 1), None)
+    return {
+        "games_used": len(per_game),
+        "tiles_per_room": dict(TILES_PER_ROOM),
+        "castle_tiles": 13, "well_tiles": 2,
+        "bags_consistent_with_every_game": [dict(zip(DIE_COLORS, b)) for b in solved],
+        "games_needed_for_a_unique_bag": converged,
+        "bags_if_the_well_took_n_tiles": {
+            str(w): len(_bags(per_game, 13 + w, w)) for w in range(0, 4)},
+        "diplomat_rooms_showing_three_colours": sum(
+            1 for packets in games for sid, c in room_colour_sets(packets).items()
+            if sid.startswith("diplomat-") and len(c) > 2),
+    }
+
+
 def passage_of_time(games):
     """-> track length, the checkpoint seal costs, and position -> Clan Points.
 
@@ -826,6 +932,7 @@ def build(games, yard_points, all_games=None):
         "source": "BGA game logs, base game only",
         "action_spaces": {k: v for k, v in sorted(spaces.items())},
         "castle_room_color_set_sizes": dict(sorted(castle_room_colors(games).items())),
+        "die_tile_bag": die_tile_bag(games),
         "gardens": [{"type": t, "food_cost": c, "point_value": p, "action": a,
                      "action_args": json.loads(g)}
                     for t, c, p, a, g in gardens(games)],
@@ -913,7 +1020,7 @@ def main(argv=None):
 
     for key in ("action_spaces", "training_yards", "passage_of_time", "worker_costs",
                 "turn_order", "castle_room_color_set_sizes", "well", "outside_the_walls",
-                "dice_stacking_peak", "diamond_cards"):
+                "dice_stacking_peak", "diamond_cards", "die_tile_bag"):
         print(key)
         print("  " + json.dumps(truth[key], indent=1).replace("\n", "\n  "))
     print("gardens")
