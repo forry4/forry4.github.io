@@ -80,9 +80,15 @@ one job, not three, because they are the same loop:
    catalogue IS recoverable — 15 stewards and 12 diplomats at zero conflicts, plus the
    starting, decree and garden cards — but the effects are templates
    (`"Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Gardener Action"`)
-   over a vocabulary we do not have ops for: *perform a Courtier/Gardener/Warrior action*,
-   *gain Lantern Rewards*, *perform the Well action*, *perform any action on the main
-   board*, *gain a Decree Card*, `and`/`or` conditionals, and the blue/yellow curtains.
+   over a vocabulary we have no ops for.
+   **That vocabulary is SMALL, and measuring it is the difference between a rewrite and an
+   afternoon: 11 distinct templates across the whole base catalogue, over 19 operand sets,
+   collapsing to 8 ops** — gain (coin/food/iron/pearl/seal/vp/any-resource, 1–5), gain
+   Lantern Rewards, move the Passage of Time 1–2, perform a Courtier / Gardener / Warrior
+   action (free or for 1 seal), perform the Well action, and gain a Decree Card. **Every
+   base block is `light` or `dark` and every conditional is `and`** — the blue/yellow
+   curtains and `or` belong to Matcha's flower and calligraphy cards, not to this box, so
+   neither is on the critical path.
 2. **The die-colour tiles in the castle rooms.** Each room is filled at setup with one
    colour tile per ROW of the card that will sit there, at least two distinct colours per
    room. A die may only be placed in a room whose tiles include its colour, and **the rows
