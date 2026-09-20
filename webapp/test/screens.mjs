@@ -1099,6 +1099,8 @@ try {
 		check("a friend game reaches the waiting room", gotWaiting);
 		const code = (await host.locator(".wr-code-btn").innerText().catch(() => "")).trim();
 		check("the waiting room shows a join code", /^[A-Z]{4,8}$/.test(code), `got ${JSON.stringify(code)}`);
+		check("a four-seat table shows all three remaining seats",
+			await host.locator(".wr-seat-open").count() === 3);
 
 		// ── THE INVITE LINK, END TO END ────────────────────────────────────────
 		// The whole reason this screen exists, and until the shared kit landed what
@@ -1139,6 +1141,8 @@ try {
 				if (seats < 2) await sleep(400);
 			}
 			check("the host sees the second player arrive", seats >= 2, `saw ${seats} seats`);
+			check("the four-seat table keeps two seats available after the join",
+				await host.locator(".wr-seat-open").count() === 2);
 
 			// DEEP LINK into that room by the COPIED URL — the invite-link path, driven
 			// by exactly what a recipient would paste rather than by a URL this harness

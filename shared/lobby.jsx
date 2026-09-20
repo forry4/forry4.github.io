@@ -1089,11 +1089,11 @@ export function InviteLink({ game, roomId }) {
 // emblem, the name and the invite URL all come from that one entry, so a waiting
 // room cannot drift from the card that was tapped to reach it.
 //
-// `min` is the seat count the game needs to deal; it drives BOTH the empty-seat
-// chips and the host's blocked label, which is why it is one number here rather
-// than a message each game writes. `canStart` is for a blocker the seat count
-// cannot express (Where Wolf's deck has to match the player count) and pairs with
-// `blockedLabel` to say why.
+// `min` is the seat count the game needs to deal; it drives the host's blocked
+// label. `max` is the table capacity and drives the open-seat chips, so a four-
+// seat table shows all three seats still available after its host sits down.
+// `canStart` is for a blocker the seat count cannot express (Where Wolf's deck
+// has to match the player count) and pairs with `blockedLabel` to say why.
 export function WaitingRoom({
 	game, roomId, players, hostId, myId,
 	min = 2, max = null, note = null,
@@ -1104,6 +1104,10 @@ export function WaitingRoom({
 	const seats = Object.entries(players || {});
 	const seated = seats.length;
 	const short = Math.max(0, min - seated);
+	const seatCapacity = Number(max);
+	const openSeats = Number.isFinite(seatCapacity) && seatCapacity > 0
+		? Math.max(0, seatCapacity - seated)
+		: short;
 	const isHost = hostId != null && hostId === myId;
 	const label = !connected ? "Reconnecting…"
 		: short ? `Waiting for ${short} more player${short === 1 ? "" : "s"}…`
@@ -1139,10 +1143,10 @@ export function WaitingRoom({
 								{pid === myId && <span className="wr-seat-you">(you)</span>}
 							</span>
 						))}
-						{/* Empty chips only up to the MINIMUM, never to the cap: Where Wolf
-						    seats ten, and seven dashed outlines under a three-player table
-						    reads as six missing people rather than as room for them. */}
-						{Array.from({ length: short }, (_, i) => (
+						{/* Empty chips show every seat still available at this table. The
+						    start label above still uses `short`, so a four-seat table can
+						    start at two while continuing to advertise its two spare seats. */}
+						{Array.from({ length: openSeats }, (_, i) => (
 							<span key={`open-${i}`} className="wr-seat wr-seat-open">Open seat</span>
 						))}
 					</div>

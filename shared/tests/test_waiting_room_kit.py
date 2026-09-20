@@ -215,6 +215,21 @@ def test_the_kit_still_owns_the_screen():
         assert cls in css, f"{cls} is gone from the shared sheet; the screen is unstyled"
 
 
+def test_open_seat_chips_use_table_capacity_not_start_threshold():
+    """A 4-seat table must advertise all of its remaining seats.
+
+    `min` answers whether the host may deal; `max` answers how many seats are
+    still available. Reusing `min - seated` for both made a four-player room
+    with one host render only one open seat, and the same error affected every
+    other lobby with a capacity above its minimum.
+    """
+    kit = KIT.read_text(encoding="utf-8")
+    assert "const short = Math.max(0, min - seated);" in kit
+    assert "const openSeats =" in kit
+    assert "seatCapacity - seated" in kit
+    assert "Array.from({ length: openSeats }" in kit
+
+
 def test_the_clipboard_has_a_fallback_and_says_when_it_fails():
     """`navigator.clipboard` is undefined outside a secure context and rejects
     when the document is not focused, and both look identical to the caller:
