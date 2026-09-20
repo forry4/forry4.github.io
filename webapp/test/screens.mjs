@@ -8092,7 +8092,15 @@ try {
 		}
 		check("the starting draft resolves", await page.waitForSelector(".bc-board", { timeout: 30_000 }).then(() => true).catch(() => false));
 		check("castle cards explain their effects", await page.locator(".bc-card-action .bc-effects li").count() >= 5);
-		check("training yards are visible", await page.locator(".bc-yard").count() === 4);
+		// THREE yards and SIX garden plots, which is the printed board: all three Training
+		// Yards are in play every game, and each bridge carries a Plant AND a Stone garden.
+		// Both counts are asserted rather than ">= 1" because the bug they replaced was a
+		// board that rendered perfectly well with the wrong number of places to stand.
+		const yardCount = await page.locator(".bc-yard").count();
+		const gardenCount = await page.locator(".bc-garden").count();
+		check("all three training yards are visible", yardCount === 3, `${yardCount} yards`);
+		check("both garden plots on each of the three bridges are visible",
+			gardenCount === 6, `${gardenCount} plots`);
 		check("influence and turn order are visible", await page.locator(".bc-influence-list > div").count() >= 3);
 		check("the player's lantern rewards are visible", await page.locator(".bc-lantern > div > span").count() > 0);
 		let clickedDie = false;

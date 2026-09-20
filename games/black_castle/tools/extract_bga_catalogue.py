@@ -55,6 +55,8 @@ import json
 import os
 import sys
 
+from .bga_parity import classify
+
 DEFAULT_CORPUS = os.environ.get("WHITECASTLE_CORPUS", "C:/Users/Forrest/WhiteCastle_corpus")
 
 #: Printed counts, from the port's own manifest -- the denominator for coverage.
@@ -187,15 +189,26 @@ def definition(node):
     return out
 
 
-def harvest(paths):
-    """-> (catalogue, conflicts, sightings). Keyed (kind, type, id, face)."""
+def harvest(paths, base_only=True):
+    """-> (catalogue, conflicts, sightings, used). Keyed (kind, type, typeArg, face).
+
+    THE CORPUS IS NOT ALL ONE GAME, and mixing it wrecks the coverage report rather than
+    merely padding it. Matcha ships its own stewards, diplomats and gardens in the SAME id
+    and typeArg space as the base box, so a combined harvest reports 18 stewards against a
+    printed 15 and 9 plant gardens against 5 -- numbers that read as "we found more than
+    exist" when what happened is that two different boxes were counted as one.
+    """
     catalogue, conflicts = {}, collections.defaultdict(list)
     sightings = collections.Counter()
+    used = []
     for path in paths:
         try:
             packets = json.load(open(path, encoding="utf-8"))
         except (OSError, ValueError):
             continue
+        if base_only and classify(packets)[0] != "base":
+            continue
+        used.append(path)
         for node in _walk(packets):
             if not isinstance(node, dict):
                 continue
@@ -224,7 +237,7 @@ def harvest(paths):
             elif json.dumps(catalogue[key], sort_keys=True) != blob:
                 if blob not in conflicts[key]:
                     conflicts[key].append(blob)
-    return catalogue, conflicts, sightings
+    return catalogue, conflicts, sightings, used
 
 
 def expected_counts():
@@ -240,6 +253,9 @@ def main(argv=None):
     ap.add_argument("--corpus", default=DEFAULT_CORPUS)
     ap.add_argument("--out", default=None, help="write the catalogue as JSON")
     ap.add_argument("--verbose", action="store_true", help="print every definition found")
+    ap.add_argument("--with-expansions", action="store_true",
+                    help="harvest the Matcha logs too (their cards share the base id space, "
+                         "so the coverage report stops meaning anything)")
     args = ap.parse_args(argv)
 
     paths = sorted(glob.glob(args.corpus + "/logs/*.json"))
@@ -247,11 +263,12 @@ def main(argv=None):
         print(f"no logs in {args.corpus}/logs")
         return 1
 
-    catalogue, conflicts, sightings = harvest(paths)
+    catalogue, conflicts, sightings, used = harvest(paths, base_only=not args.with_expansions)
     by_type = collections.Counter(key[1] for key in catalogue)
 
-    print(f"{len(paths)} logs -> {len(catalogue)} distinct definitions, "
-          f"{sum(sightings.values())} sightings\n")
+    scope = "every" if args.with_expansions else "base-game"
+    print(f"{len(used)} of {len(paths)} logs ({scope}) -> {len(catalogue)} distinct "
+          f"definitions, {sum(sightings.values())} sightings\n")
     print(f"  {'type':<20} {'found':>6} {'sightings':>10}")
     for kind in sorted(by_type):
         seen = sum(n for key, n in sightings.items() if key[1] == kind)

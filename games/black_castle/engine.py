@@ -20,10 +20,17 @@ ROUND_COUNT = 3
 TURNS_PER_ROUND = 3
 MAX_RESOURCE = 7
 MAX_SEALS = 5
-MAX_INFLUENCE = 15
+# The Passage of Time runs 0-20: three seasons of 6/5/4 spaces and then the fourth,
+# whose six spaces are the only ones with a printed score. See `_influence_points`.
+MAX_INFLUENCE = 20
 # The three season gates on the printed Passage of Time track. A marker may
-# cross a gate only after paying the corresponding Daimyo Seal cost.
-CHECKPOINT_COSTS = {6: 1, 10: 2, 11: 3}
+# cross a gate only after paying the corresponding Daimyo Seal cost. The keys are the
+# space being ENTERED. Read straight off the corpus: a marker that does not pay stops
+# dead on 5, 10 or 14 (BGA sends the move with `steps: 0`), and the crossings that did
+# happen paid 1, 2 and 3 seals respectively.
+CHECKPOINT_COSTS = {6: 1, 11: 2, 15: 3}
+#: Dice a single castle room accepts, at every player count.
+CASTLE_ROOM_DICE = 2
 BRIDGE_ORDER = ("coral", "black", "white")
 DOMAIN_WORKER = {"coral": "courtiers", "black": "gardeners", "white": "warriors"}
 RESOURCE_FOR_COLOR = {"coral": "food", "black": "iron", "white": "pearl"}
@@ -65,7 +72,13 @@ def _name(game: dict, pid: str) -> str:
 
 
 def _advance_influence(game: dict, pid: str, amount: int) -> int:
-    """Advance the Passage of Time marker, paying its checkpoint seals."""
+    """Advance the Passage of Time marker, paying its checkpoint seals.
+
+    A marker that moves lands ON TOP of whatever is already on its new space, and that
+    height decides turn order when two clans tie -- so every move stamps a rising counter
+    onto the mover. The counter is game state rather than a derived value because the
+    stack is not recoverable from the positions alone.
+    """
     p = _player(game, pid)
     moved = 0
     for _ in range(max(0, int(amount))):
@@ -77,6 +90,9 @@ def _advance_influence(game: dict, pid: str, amount: int) -> int:
             break
         p["influence"] = current + 1
         moved += 1
+    if moved:
+        game["influence_seq"] = int(game.get("influence_seq", 0)) + 1
+        p["influence_stack"] = game["influence_seq"]
     return moved
 
 
@@ -166,20 +182,51 @@ def _move_worker(game: dict, pid: str, worker: str, destination: str) -> bool:
     return True
 
 
-def _move_courtier(game: dict, pid: str, destination: str, *, cost: int = 0) -> bool:
+#: The castle, bottom to top. The index is the floor, which is what a climb is priced on.
+CASTLE_FLOORS = ("gate", "floor1", "floor2", "daimyo")
+
+#: Mother-of-pearl to move a courtier up, by how many floors it climbs. One printed pair
+#: of costs for the whole castle -- not a per-room price -- so floor2 -> daimyo costs the
+#: same 2 as gate -> floor1, and floor1 -> daimyo costs the same 5 as gate -> floor2.
+CLIMB_COSTS = {1: 2, 2: 5}
+
+
+def _move_courtier(game: dict, pid: str, source: str, destination: str) -> bool:
     p = _player(game, pid)
     c = p["workers"]["courtiers"]
-    order = ("gate", "floor1", "floor2", "daimyo")
-    if destination not in order:
+    if source not in CASTLE_FLOORS or destination not in CASTLE_FLOORS:
         return False
-    target_index = order.index(destination)
-    source = next((place for place in order[:target_index]
-                   if c.get(place, 0) > 0), None)
-    if source is None or (cost and not _pay(game, pid, coins=cost)):
+    if CASTLE_FLOORS.index(destination) <= CASTLE_FLOORS.index(source):
+        return False
+    if c.get(source, 0) <= 0:
         return False
     c[source] -= 1
     c[destination] = c.get(destination, 0) + 1
     return True
+
+
+def _climb_moves(game: dict, pid: str) -> list[dict]:
+    """Every social climb this clan could pay for right now.
+
+    The SOURCE is named in the move rather than inferred, because one destination can be
+    reached from two floors at two different prices -- a courtier at the gate pays 5 to
+    reach the second floor while one already on the first pays 2 -- and picking the lowest
+    occupied floor for the player would quietly spend the wrong courtier and the wrong
+    price.
+    """
+    p = _player(game, pid)
+    c = p["workers"]["courtiers"]
+    pearl = p["resources"].get("pearl", 0)
+    moves = []
+    for i, source in enumerate(CASTLE_FLOORS[:-1]):
+        if c.get(source, 0) <= 0:
+            continue
+        for levels, cost in sorted(CLIMB_COSTS.items()):
+            j = i + levels
+            if j < len(CASTLE_FLOORS) and pearl >= cost:
+                moves.append({"type": "courtier_destination", "from": source,
+                              "to": CASTLE_FLOORS[j], "cost": cost})
+    return moves
 
 
 def _apply_effects(game: dict, pid: str, effects: list[dict], *, source: str = "action") -> None:
@@ -205,8 +252,11 @@ def _apply_effects(game: dict, pid: str, effects: list[dict], *, source: str = "
             moved = False
             if worker in WORKERS and effect.get("from") == "domain" and destination:
                 moved = _move_worker(game, pid, worker, destination)
-            elif worker == "courtiers" and destination in {"gate", "floor1", "floor2", "daimyo"}:
-                moved = _move_courtier(game, pid, destination, cost=0)
+            elif worker == "courtiers" and destination in CASTLE_FLOORS:
+                target = CASTLE_FLOORS.index(destination)
+                source = next((place for place in CASTLE_FLOORS[:target]
+                               if _player(game, pid)["workers"]["courtiers"].get(place, 0) > 0), None)
+                moved = bool(source) and _move_courtier(game, pid, source, destination)
             elif worker in WORKERS and destination:
                 moved = _move_worker(game, pid, worker, destination)
             if moved:
@@ -271,7 +321,9 @@ def _player_template() -> dict:
         },
         "domain": {c: {"die": None, "uses": 0, "card": None} for c in COLORS},
         "lantern": [], "yards": [], "gardens": [],
-        "color": None, "heron_order": 0,
+        # Where this clan's Passage of Time marker sits in its space's pile. Set up so
+        # the starting player is on TOP, which is how the printed setup stacks them.
+        "color": None, "heron_order": 0, "influence_stack": 0,
     }
 
 
@@ -312,8 +364,10 @@ def new_game(players: list[str], *, names: dict[str, str] | None = None,
     diplomat_deck = [clone(c) for c in DIPLOMATS]
     daimyo_deck = [clone(c) for c in DAIMYO]
     garden_deck = [clone(c) for c in GARDENS]
-    yard_deck = copy.deepcopy(TRAINING_YARDS)
-    for deck in (steward_deck, diplomat_deck, daimyo_deck, garden_deck, yard_deck):
+    # The three Training Yards are PRINTED ON THE BOARD, all three in play every game, in
+    # board order -- they are not a deck and they are not dealt, so they are not shuffled.
+    yards = copy.deepcopy(TRAINING_YARDS)
+    for deck in (steward_deck, diplomat_deck, daimyo_deck, garden_deck):
         rng.shuffle(deck)
     castle = {
         "rooms": [{"id": i, "floor": 1 if i < 3 else 2,
@@ -321,15 +375,23 @@ def new_game(players: list[str], *, names: dict[str, str] | None = None,
                    "dice": []} for i in range(5)],
         "daimyo": daimyo_deck.pop(),
     }
+    # Six garden cards are dealt, one Plant AND one Stone beside each bridge, and each is
+    # its own plot with its own gardeners -- hence one occupant list per plot. Dealing off
+    # a single shuffled pile handed some bridges two Plants, which the printed setup never
+    # does: the two halves of the deck are dealt separately.
+    plant_pile = [c for c in garden_deck if c.get("icon") == "plant"]
+    stone_pile = [c for c in garden_deck if c.get("icon") == "stone"]
+    garden_deck = plant_pile[3:] + stone_pile[3:]
     gardens = [{"id": i, "bridge": BRIDGE_ORDER[i],
-                "plant": garden_deck.pop(), "stone": garden_deck.pop(),
-                "occupants": []} for i in range(3)]
+                "plant": plant_pile[i], "stone": stone_pile[i],
+                "occupants": {"plant": [], "stone": []}} for i in range(3)]
     players_state = {}
     clan_colors = ("coral", "black", "white", "gold")
     for i, pid in enumerate(seats):
         p = _player_template()
         p["color"] = clan_colors[i]
         p["heron_order"] = turn_order.index(pid)
+        p["influence_stack"] = len(turn_order) - turn_order.index(pid)
         players_state[pid] = p
 
     resource_options = [clone(c) for c in STARTING_RESOURCE_CARDS]
@@ -345,8 +407,7 @@ def new_game(players: list[str], *, names: dict[str, str] | None = None,
         "turn_pid": None, "turn_order": turn_order, "players": players_state,
         "names": names, "bridges": bridges, "die_tiles": tiles,
         "castle": castle, "outside": {}, "gardens": gardens,
-        "yards": [yard_deck.pop() for _ in range(4)],
-        "yard_deck": yard_deck, "garden_deck": garden_deck,
+        "yards": yards, "yard_deck": [], "garden_deck": garden_deck,
         "steward_deck": steward_deck, "diplomat_deck": diplomat_deck,
         "daimyo_deck": daimyo_deck,
         "common": {"coins": 32, "seals": 20},
@@ -354,6 +415,7 @@ def new_game(players: list[str], *, names: dict[str, str] | None = None,
         "draft_picks": {}, "pending": None, "turn_undo": None,
         "last_move": None, "log": [], "winner": None, "scores": {},
         "log_seq": 0, "rng_state": None, "max_players": max_players or len(seats),
+        "influence_seq": len(turn_order),
     }
     _save_rng(game, rng)
     _log(game, f"The Black Castle opens for {len(seats)} clans.")
@@ -366,15 +428,19 @@ def is_over(game: dict | None) -> bool:
 
 
 def _end_round(game: dict) -> None:
-    # The player furthest along the Passage of Time track leads the next
-    # round; a marker on top of another marker breaks the tie.  Influence is
-    # advanced by card/lantern actions, and checkpoint seals are paid when the
-    # marker crosses a checkpoint rather than automatically at round end.
+    # The player furthest along the Passage of Time track leads the next round, and a tie
+    # is broken by which marker is ON TOP of the pile -- that is, whoever arrived on the
+    # space most recently, which `influence_stack` records. It is NOT the previous round's
+    # order: tying by stepping onto a space someone already occupies OVERTAKES them, and
+    # ranking the old leader first instead reverses the outcome of the one manoeuvre the
+    # tie-break exists to reward. Checked against every turn-order change in the corpus:
+    # 60 of 60, with no other rule fitting all of them.
     order_index = {pid: i for i, pid in enumerate(game["turn_order"])}
     game["turn_order"] = sorted(
         game["turn_order"],
         key=lambda pid: (int(_player(game, pid).get("influence", 0)),
-                         -int(_player(game, pid).get("heron_order", order_index[pid]))),
+                         int(_player(game, pid).get("influence_stack",
+                                                    -order_index[pid]))),
         reverse=True,
     )
     for index, pid in enumerate(game["turn_order"]):
@@ -385,12 +451,14 @@ def _end_round(game: dict) -> None:
     if game["round"] < ROUND_COUNT:
         for occupant in game["turn_order"]:
             for garden in game["gardens"]:
-                if (occupant not in garden.get("occupants", []) or
-                        not game["bridges"].get(garden.get("bridge"))):
+                if not game["bridges"].get(garden.get("bridge")):
                     continue
-                card = garden.get("plant") or garden.get("stone") or {}
-                _apply_effects(game, occupant, card.get("light", []),
-                               source=f"{card.get('name', 'garden')} round action")
+                for kind in ("plant", "stone"):
+                    if occupant not in _garden_occupants(garden, kind):
+                        continue
+                    card = garden.get(kind) or {}
+                    _apply_effects(game, occupant, card.get("light", []),
+                                   source=f"{card.get('name', 'garden')} round action")
     if game["round"] >= ROUND_COUNT:
         _score_game(game)
         return
@@ -408,6 +476,25 @@ def _end_round(game: dict) -> None:
     _log(game, f"Round {game['round']} begins; the bridges are rerolled.")
 
 
+def _influence_points(influence: int) -> int:
+    """Clan Points for a Passage of Time marker resting on ``influence``.
+
+    The four seasons award 0 / 3 / 6, and then the fourth season's spaces carry a printed
+    value running 10 to 15.  The season boundaries are the checkpoints, which is why they
+    are the same numbers as ``CHECKPOINT_COSTS``: a marker only enters 6, 11 or 15 by
+    paying for it.  The corpus pins 0-5 -> 0, 6-10 -> 3, 11-14 -> 6 and 15 -> 10 against
+    real scoreboards; the rest of the fourth season is the rulebook's own "between 10 and
+    15", laid over its six spaces, and is the one row here no logged game reaches.
+    """
+    if influence >= 15:
+        return min(15, 10 + influence - 15)
+    if influence >= 11:
+        return 6
+    if influence >= 6:
+        return 3
+    return 0
+
+
 def _score_game(game: dict) -> None:
     scores = {}
     for pid, p in game["players"].items():
@@ -415,17 +502,7 @@ def _score_game(game: dict) -> None:
         score += (p.get("coins", 0) + p.get("seals", 0)) // 5
         for value in p["resources"].values():
             score += 2 if value >= 7 else (1 if value >= 3 else 0)
-        influence = int(p.get("influence", 0))
-        # The four seasons on the printed track award 0/3/6 points, then the
-        # value printed on the final-season space (10–15).  The digital track
-        # stores the marker position directly, so this remains deterministic
-        # even when a card moves it more than one step.
-        if influence >= 11:
-            score += min(15, influence)
-        elif influence >= 10:
-            score += 6
-        elif influence >= 6:
-            score += 3
+        score += _influence_points(int(p.get("influence", 0)))
         c = p["workers"]["courtiers"]
         score += c.get("gate", 0) + 3 * c.get("floor1", 0) + 6 * c.get("floor2", 0) + 10 * c.get("daimyo", 0)
         castle_courtiers = (c.get("floor1", 0) + c.get("floor2", 0) +
@@ -519,10 +596,11 @@ def _space_moves(game: dict, pid: str, die: dict) -> list[dict]:
         target = _die_value_target(game, space)
         if value >= target or p.get("coins", 0) >= target - value:
             moves.append({"type": "place_die", "space": space})
-    # Castle rooms: one die in 2p, one die plus a stack in 3/4p.
+    # A castle room holds TWO dice at every player count. It is printed on the board, so
+    # it does not shrink at two players -- what a two-player game removes is cards, not
+    # die slots.
     for room in game["castle"]["rooms"]:
-        occupied = room.get("dice", [])
-        if len(occupied) < (1 if len(game["players"]) <= 2 else 2):
+        if len(room.get("dice", [])) < CASTLE_ROOM_DICE:
             add(f"castle:{room['id']}")
     for i in range(2):
         if not game.get("outside", {}).get(str(i)):
@@ -530,6 +608,13 @@ def _space_moves(game: dict, pid: str, die: dict) -> list[dict]:
     add("well")
     for color in COLORS:
         slot = p["domain"][color]
+        # A personal-domain row TAKES ONLY ITS OWN COLOUR: the coral row is the
+        # courtiers', black the gardeners', white the warriors', and a die of the wrong
+        # colour may not be placed there at all. Without this the domain was three
+        # interchangeable 6-value spaces, and the colour of the die you took off a bridge
+        # -- which is half of what makes the choice a choice -- meant nothing.
+        if die.get("color") != color:
+            continue
         if slot.get("die") is None and slot.get("uses", 0) == 0:
             add(f"domain:{color}")
     # Training yards and gardens are reached by their worker actions, not by
@@ -555,12 +640,31 @@ def _worker_destination_moves(game: dict, pid: str, worker: str) -> list[dict]:
                 for i, yard in enumerate(game.get("yards", []))
                 if p["resources"].get("iron", 0) >= int(yard.get("cost", 0))]
     if worker == "gardeners":
-        return [{"type": "worker_destination", "worker": worker, "index": i}
+        # SIX plots, not three. Each bridge carries a Plant garden AND a Stone garden and
+        # they are separate places a gardener can stand, at separate prices for separate
+        # points -- the move therefore names the `kind` as well as the bridge. Offering
+        # only `plant or stone` made half the garden deck unreachable, and made every
+        # Plant garden mandatory over the cheaper Stone one beside it.
+        return [{"type": "worker_destination", "worker": worker, "index": i, "kind": kind}
                 for i, garden in enumerate(game.get("gardens", []))
-                if (garden.get("plant") or garden.get("stone")) and
-                pid not in garden.get("occupants", []) and
-                p["resources"].get("food", 0) >= int((garden.get("plant") or garden.get("stone")).get("cost", 0))]
+                for kind in ("plant", "stone")
+                if garden.get(kind) and
+                pid not in _garden_occupants(garden, kind) and
+                p["resources"].get("food", 0) >= int(garden[kind].get("cost", 0))]
     return []
+
+
+def _garden_occupants(garden: dict, kind: str) -> list[str]:
+    """Who is standing on ONE garden card. A clan may hold at most one gardener per card.
+
+    `occupants` used to be a single list per bridge, which read as "one gardener per
+    bridge" -- two plots away from the rule. Old saves carry that flat list, so it is
+    taken as the Plant plot's, which is the card those saves could actually reach.
+    """
+    seats = garden.get("occupants")
+    if isinstance(seats, dict):
+        return list(seats.get(kind) or ())
+    return list(seats or ()) if kind == "plant" else []
 
 
 def legal_moves(game: dict | None, pid: str) -> list[dict]:
@@ -591,17 +695,7 @@ def legal_moves(game: dict | None, pid: str) -> list[dict]:
         if kind == "worker_destination":
             return _worker_destination_moves(game, pid, pending.get("worker", ""))
         if kind == "courtier_destination":
-            p = _player(game, pid)
-            choices = []
-            if p["workers"]["courtiers"].get("gate", 0) and p["resources"].get("pearl", 0) >= 2:
-                choices.append({"type": "courtier_destination", "to": "floor1", "cost": 2})
-                if p["resources"].get("pearl", 0) >= 5:
-                    choices.append({"type": "courtier_destination", "to": "floor2", "cost": 5})
-            if p["workers"]["courtiers"].get("floor1", 0) and p["resources"].get("pearl", 0) >= 2:
-                choices.append({"type": "courtier_destination", "to": "floor2", "cost": 2})
-            if p["workers"]["courtiers"].get("floor2", 0) and p["resources"].get("pearl", 0) >= 5:
-                choices.append({"type": "courtier_destination", "to": "daimyo", "cost": 5})
-            return choices
+            return _climb_moves(game, pid)
         if kind == "end_turn":
             return [{"type": "end_turn"}] + _convert_moves(game, pid)
         if kind == "convert":
@@ -837,10 +931,40 @@ def _convert(game: dict, pid: str, source: str, target: str = "coin") -> tuple[b
     return True, None
 
 
+def _widen(game: dict, pid: str, move: dict) -> dict:
+    """Accept the pre-six-plots move shapes a CACHED BUNDLE still sends.
+
+    Two moves grew a field on the same push that fixed the rules behind them: a social
+    climb now names the floor it starts from (one destination, two prices), and a gardener
+    now names which of a bridge's two plots it is standing on. Pages caches a bundle for
+    about ten minutes, so for that window a browser will keep posting the old shape, and
+    since every move is checked with `move in legal_moves(...)` the old shape is not
+    slightly wrong -- it is rejected outright, and the player is told their own legal
+    action is illegal. This is the expand half of expand/contract: fill the missing field
+    in with the only thing the old client could have meant, and delete this once no
+    bundle without it is in the wild.
+    """
+    if move.get("type") == "courtier_destination" and "from" not in move:
+        to, cost = str(move.get("to")), int(move.get("cost", 0) or 0)
+        options = [o for o in _climb_moves(game, pid) if o["to"] == to]
+        # The old client's `cost` is the only thing that distinguishes two climbs to one
+        # destination, so prefer it -- but it can also be a price this push corrected
+        # (floor2 -> daimyo was 5 and is 2), and a stale price must not veto the move or
+        # be charged. Fall back to the cheapest way there, which is the one the old
+        # client was offering: it never listed more than one climb per destination.
+        return next((o for o in options if o["cost"] == cost),
+                    min(options, key=lambda o: o["cost"], default=move))
+    if move.get("type") == "worker_destination" and move.get("worker") == "gardeners" \
+            and "kind" not in move:
+        return {**move, "kind": "plant"}
+    return move
+
+
 def apply_move(game: dict, pid: str, move: dict) -> tuple[bool, str | None]:
     """Validate and apply one move. Returns ``(ok, error)``."""
     if not isinstance(move, dict) or pid not in game.get("players", {}):
         return False, "invalid move"
+    move = _widen(game, pid, move)
     kind = move.get("type")
     if kind == "undo":
         return _undo(game, pid)
@@ -913,7 +1037,7 @@ def apply_move(game: dict, pid: str, move: dict) -> tuple[bool, str | None]:
             index = int(move.get("index"))
         except (TypeError, ValueError):
             return False, "invalid worker destination"
-        if {"type": "worker_destination", "worker": worker, "index": index} not in _worker_destination_moves(game, pid, worker):
+        if move not in _worker_destination_moves(game, pid, worker):
             return False, "that worker destination is not legal"
         p = _player(game, pid)
         if worker == "warriors":
@@ -925,11 +1049,16 @@ def apply_move(game: dict, pid: str, move: dict) -> tuple[bool, str | None]:
             _apply_effects(game, pid, yard.get("effect", []), source="training yard")
         elif worker == "gardeners":
             garden = game["gardens"][index]
-            card = garden.get("plant") or garden.get("stone")
+            plot = str(move.get("kind", "plant"))
+            card = garden.get(plot)
             _pay(game, pid, resource="food", amount=int(card.get("cost", 0)))
             p["workers"][worker]["garden_pool"] -= 1
             p["workers"][worker]["garden"] += 1
-            garden.setdefault("occupants", []).append(pid)
+            seats = garden.get("occupants")
+            if not isinstance(seats, dict):
+                seats = {"plant": list(seats or ()), "stone": []}
+                garden["occupants"] = seats
+            seats.setdefault(plot, []).append(pid)
             p["gardens"].append(copy.deepcopy(card))
             _apply_effects(game, pid, card.get("light", []), source=card.get("name", "garden"))
         game["pending"] = {"pid": pid, "kind": "end_turn"}
@@ -938,16 +1067,12 @@ def apply_move(game: dict, pid: str, move: dict) -> tuple[bool, str | None]:
         pending = game.get("pending") or {}
         if pending.get("pid") != pid or pending.get("kind") != "courtier_destination":
             return False, "choose a courtier destination"
-        to = str(move.get("to"))
-        try:
-            cost = int(move.get("cost", 0))
-        except (TypeError, ValueError):
-            return False, "invalid courtier cost"
         if move not in legal_moves(game, pid):
             return False, "that social climb is not legal"
+        source, to, cost = str(move["from"]), str(move["to"]), int(move["cost"])
         if not _pay(game, pid, resource="pearl", amount=cost):
             return False, "not enough mother-of-pearl"
-        if not _move_courtier(game, pid, to):
+        if not _move_courtier(game, pid, source, to):
             return False, "no courtier can make that climb"
         _log(game, f"{_name(game, pid)} climbs to the {to}.", pid=pid)
         game["pending"] = {"pid": pid, "kind": "end_turn"}

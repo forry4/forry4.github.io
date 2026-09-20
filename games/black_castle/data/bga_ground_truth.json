@@ -1,0 +1,326 @@
+{
+ "action_spaces": {
+  "diplomat-1": {
+   "die_colors": [
+    "black",
+    "red",
+    "white"
+   ],
+   "max_dice": 2,
+   "name": "The Castle",
+   "value": 4
+  },
+  "diplomat-2": {
+   "die_colors": [
+    "black",
+    "red",
+    "white"
+   ],
+   "max_dice": 2,
+   "name": "The Castle",
+   "value": 4
+  },
+  "outside-the-walls-1": {
+   "die_colors": [
+    "black",
+    "red",
+    "white"
+   ],
+   "max_dice": 2,
+   "name": "Outside the Walls",
+   "value": 5
+  },
+  "outside-the-walls-2": {
+   "die_colors": [
+    "black",
+    "red",
+    "white"
+   ],
+   "max_dice": 2,
+   "name": "Outside the Walls",
+   "value": 5
+  },
+  "personal-domain:black": {
+   "die_colors": [
+    "black"
+   ],
+   "max_dice": 1,
+   "name": "Gardener Personal Domain",
+   "value": 6
+  },
+  "personal-domain:red": {
+   "die_colors": [
+    "red"
+   ],
+   "max_dice": 1,
+   "name": "Courtier Personal Domain",
+   "value": 6
+  },
+  "personal-domain:white": {
+   "die_colors": [
+    "white"
+   ],
+   "max_dice": 1,
+   "name": "Warrior Personal Domain",
+   "value": 6
+  },
+  "steward-1": {
+   "die_colors": [
+    "black",
+    "red",
+    "white"
+   ],
+   "max_dice": 2,
+   "name": "The Castle",
+   "value": 3
+  },
+  "steward-2": {
+   "die_colors": [
+    "black",
+    "red",
+    "white"
+   ],
+   "max_dice": 2,
+   "name": "The Castle",
+   "value": 3
+  },
+  "steward-3": {
+   "die_colors": [
+    "black",
+    "red",
+    "white"
+   ],
+   "max_dice": 2,
+   "name": "The Castle",
+   "value": 3
+  },
+  "well": {
+   "die_colors": [
+    "black",
+    "red",
+    "white"
+   ],
+   "max_dice": 999,
+   "name": "The Well",
+   "value": 1
+  }
+ },
+ "caps": {
+  "coins": null,
+  "resources": 7,
+  "seals": 5
+ },
+ "castle_room_color_set_sizes": {
+  "2": 81,
+  "3": 19
+ },
+ "gardens": [
+  {
+   "action": "Pay ${iconPlaceholder2} ${qty} to perform Perform ${iconPlaceholder1} Personal Domain Action ${disabledReason}",
+   "action_args": {
+    "iconPlaceholder1": "action-personal-domain",
+    "iconPlaceholder2": "coin",
+    "qty": 4
+   },
+   "food_cost": 3,
+   "point_value": 5,
+   "type": "plant"
+  },
+  {
+   "action": "Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Courtier Actions",
+   "action_args": {
+    "iconPlaceholder1": "action-courtier",
+    "iconPlaceholder2": "coin",
+    "qty": 3
+   },
+   "food_cost": 4,
+   "point_value": 7,
+   "type": "plant"
+  },
+  {
+   "action": "Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Gardener Action ${disabledReason}",
+   "action_args": {
+    "iconPlaceholder1": "action-gardener",
+    "iconPlaceholder2": "coin",
+    "qty": 3
+   },
+   "food_cost": 4,
+   "point_value": 7,
+   "type": "plant"
+  },
+  {
+   "action": "Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Warrior Action ${disabledReason}",
+   "action_args": {
+    "iconPlaceholder1": "action-warrior",
+    "iconPlaceholder2": "coin",
+    "qty": 3
+   },
+   "food_cost": 4,
+   "point_value": 7,
+   "type": "plant"
+  },
+  {
+   "action": "Pay ${iconPlaceholder2} ${qty} to perform any ${iconPlaceholder} Action on the Main Board ${disabledReason}",
+   "action_args": {
+    "iconPlaceholder": "action-any-die-tile",
+    "iconPlaceholder2": "coin",
+    "qty": 4
+   },
+   "food_cost": 5,
+   "point_value": 9,
+   "type": "plant"
+  },
+  {
+   "action": "Gain ${iconPlaceholder} ${numberOfResources}",
+   "action_args": {
+    "iconPlaceholder": "coin",
+    "numberOfResources": 3
+   },
+   "food_cost": 1,
+   "point_value": 1,
+   "type": "rock"
+  },
+  {
+   "action": "Gain ${iconPlaceholder} ${numberOfResources}",
+   "action_args": {
+    "iconPlaceholder": "resource",
+    "numberOfResources": 2
+   },
+   "food_cost": 1,
+   "point_value": 1,
+   "type": "rock"
+  },
+  {
+   "action": "Gain ${iconPlaceholder} ${numberOfResources}",
+   "action_args": {
+    "iconPlaceholder": "seal",
+    "numberOfResources": 2
+   },
+   "food_cost": 2,
+   "point_value": 3,
+   "type": "rock"
+  },
+  {
+   "action": "Perform any ${iconPlaceholder} Action on the Main Board",
+   "action_args": {
+    "iconPlaceholder": "action-light-background",
+    "iconPlaceholder2": "coin",
+    "qty": 0
+   },
+   "food_cost": 2,
+   "point_value": 3,
+   "type": "rock"
+  },
+  {
+   "action": "Perform ${iconPlaceholder} Well Action",
+   "action_args": {
+    "iconPlaceholder": "action-well"
+   },
+   "food_cost": 3,
+   "point_value": 5,
+   "type": "rock"
+  }
+ ],
+ "passage_of_time": {
+  "blocked_at": {
+   "10": 101,
+   "14": 13,
+   "5": 85
+  },
+  "checkpoint_seals": {
+   "11 2": 27,
+   "15 3": 1,
+   "6 1": 116
+  },
+  "highest_seen": 15,
+  "position_to_points": {
+   "10 3": 24,
+   "11 6": 9,
+   "12 6": 3,
+   "13 6": 3,
+   "14 6": 3,
+   "15 10": 1,
+   "4 0": 5,
+   "5 0": 16,
+   "6 3": 8,
+   "7 3": 10,
+   "8 3": 9,
+   "9 3": 6
+  }
+ },
+ "reconstruction": {
+  "base_logs": 20,
+  "seats_exact": 70,
+  "seats_wrong": 0
+ },
+ "scoring": {
+  "coins_and_seals": "(coins + seals) // 5",
+  "courtier_points_by_room": {
+   "daimyo-card": 10,
+   "main-board-daimyo": 10,
+   "main-board-diplomat-1": 6,
+   "main-board-diplomat-2": 6,
+   "main-board-gate": 1,
+   "main-board-steward-1": 3,
+   "main-board-steward-2": 3,
+   "main-board-steward-3": 3
+  },
+  "gardeners": "sum of the point value of every garden card a gardener stands on",
+  "passage_of_time": "0 / 3 / 6 by season, then 10-15 printed in the fourth",
+  "resources": "0 below 3, 1 at 3-6, 2 at 7 (the cap), per resource",
+  "warriors": "sum of the point value of each warrior's yard, times the number of that clan's courtiers INSIDE the castle (the gate does not count)"
+ },
+ "source": "BGA game logs, base game only",
+ "structure": {
+  "bridge_names": [
+   "Coral",
+   "Black",
+   "White"
+  ],
+  "dice_per_color": {
+   "2": 3,
+   "3": 4,
+   "4": 5
+  },
+  "die_colors": [
+   "red",
+   "black",
+   "white"
+  ],
+  "rounds": 3,
+  "turns_per_player_per_round": 3
+ },
+ "training_yards": {
+  "1": {
+   "iron_cost": 5,
+   "point_value": 2
+  },
+  "2": {
+   "iron_cost": 3,
+   "point_value": 1
+  },
+  "3": {
+   "iron_cost": 1,
+   "point_value": 1
+  }
+ },
+ "turn_order": {
+  "mismatches": 0,
+  "stack_top_first": 60
+ },
+ "worker_costs": {
+  "courtier_climb_pearl_by_levels": {
+   "1 2": 416,
+   "1 5": 3,
+   "2 5": 35
+  },
+  "courtier_gate_coins": {
+   "2": 385
+  },
+  "warrior_iron_by_yard": {
+   "1 5": 187,
+   "2 3": 51,
+   "3 1": 47
+  }
+ }
+}

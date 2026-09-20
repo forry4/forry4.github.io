@@ -4,25 +4,36 @@
   "publisher_year": 2023,
   "ruleset": "base-2023",
   "expansion": false,
-  "player_count": [2, 4],
+  "player_count": [
+    2,
+    4
+  ],
   "rounds": 3,
   "turns_per_player": 9,
-  "influence_checkpoints": {"6": 1, "10": 2, "11": 3},
+  "influence_checkpoints": {
+    "6": 1,
+    "11": 2,
+    "15": 3
+  },
   "bridges": 3,
-  "dice_per_colour": {"2": 3, "3": 4, "4": 5},
+  "dice_per_colour": {
+    "2": 3,
+    "3": 4,
+    "4": 5
+  },
   "components": {
     "player_aids": 4,
     "starting_action_cards": 6,
-    "starting_resource_cards": 9,
+    "starting_resource_cards": 8,
     "decree_cards": 3,
     "steward_cards": 15,
     "diplomat_cards": 12,
-    "daimyo_cards": 9,
     "plant_gardens": 5,
     "stone_gardens": 5,
-    "training_yards": 8,
+    "training_yards": 3,
     "die_tiles": 15,
-    "yard_tiles": 8
+    "yard_tiles": 8,
+    "daimyo_favour_cards": 3
   },
   "sources": [
     "the-white-castle_Official-Rules.pdf (attached rulebook, rendered for review)",
@@ -31,8 +42,9 @@
     "https://cmonjapan.shop/en/products/the-white-castle"
   ],
   "validation": {
-    "status": "initial port",
-    "bga_parity": "planned after launch",
-    "notes": "Illustrations are intentionally original; card effects are data-driven so a BGA fixture diff can replace individual definitions without changing the engine contract."
-  }
+    "status": "rules audited against the BGA corpus",
+    "bga_parity": "board, costs and scoring verified; card effects NOT yet ported",
+    "notes": "Counts and constants here are derived by tools/bga_parity.py from 20 base-game BGA logs and recorded in data/bga_ground_truth.json, whose scoring formulas reproduce all 70 final scoreboards exactly. See AGENTS.md for what is still divergent -- above all the card effects, which remain placeholder."
+  },
+  "influence_track_spaces": 21
 }

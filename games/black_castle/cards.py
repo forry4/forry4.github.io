@@ -61,10 +61,6 @@ STARTING_RESOURCE_CARDS = [
           light=_effect({"op": "gain", "resource": "iron", "amount": 1},
                         {"op": "gain", "seals": 1},
                         {"op": "gain", "coins": 2})),
-    _card("resource-09", "starting_resource", "Daimyo stipend", back="pearl",
-          light=_effect({"op": "gain", "resource": "pearl", "amount": 1},
-                        {"op": "gain", "coins": 2},
-                        {"op": "gain", "seals": 1})),
 ]
 
 
@@ -138,17 +134,31 @@ def _daimyo_defaults() -> list[dict]:
     return out
 
 
+# A garden's PRICE AND PAYOUT ARE NOT PLACEHOLDER: they are the printed ladder, read off
+# the BGA corpus by `tools/bga_parity.py` and recorded in `data/bga_ground_truth.json`.
+# Food cost c always pays 2c-1 points, five Stone (rock) gardens run 1/1, 1/1, 2/3, 2/3,
+# 3/5 and five Plant gardens run 3/5, 4/7, 4/7, 4/7, 5/9. Six of the ten are dealt each
+# game, one Plant and one Stone beside each bridge. The ACTIONS below are still ours.
+STONE_GARDEN_PRICES = ((1, 1), (1, 1), (2, 3), (2, 3), (3, 5))
+PLANT_GARDEN_PRICES = ((3, 5), (4, 7), (4, 7), (4, 7), (5, 9))
+
+#: The three Training Yards, in board order. Fixed printing, not a deal: the iron a
+#: warrior costs and the points it is worth are (5 -> 2), (3 -> 1), (1 -> 1), which the
+#: corpus shows without a single exception over 285 warrior placements.
+TRAINING_YARD_PRICES = ((5, 2), (3, 1), (1, 1))
+
+
 def _garden_defaults() -> list[dict]:
     out = []
-    for i in range(1, 6):
+    for i, (cost, vp) in enumerate(PLANT_GARDEN_PRICES, start=1):
         out.append(_card(f"plant-{i:02d}", "garden", f"Plant Garden {i}",
-                         back="food", cost=2 + (i % 3), vp=4 + i,
+                         back="food", cost=cost, vp=vp,
                          icon="plant", color=COLORS[(i - 1) % 3],
                          light=_effect({"op": "gain", "coins": i}),
                          dark=_effect({"op": "gain", "resource": "food", "amount": 1})))
-    for i in range(1, 6):
+    for i, (cost, vp) in enumerate(STONE_GARDEN_PRICES, start=1):
         out.append(_card(f"stone-{i:02d}", "garden", f"Stone Garden {i}",
-                         back="iron", cost=1 + (i % 3), vp=1 + i,
+                         back="iron", cost=cost, vp=vp,
                          icon="stone", color=COLORS[(i - 1) % 3],
                          light=_effect({"op": "gain", "seals": 1}),
                          dark=_effect({"op": "gain", "coins": 2})))
@@ -156,14 +166,12 @@ def _garden_defaults() -> list[dict]:
 
 
 def _yard_defaults() -> list[dict]:
-    out = []
-    for i in range(1, 9):
-        out.append({
-            "id": f"yard-{i:02d}", "name": f"Training Yard {i}",
-            "cost": 1 + (i % 5), "vp": 2 + (i % 4),
-            "effect": _effect({"op": "gain", "resource": "iron", "amount": 1 if i % 2 else 2}),
-        })
-    return out
+    names = ("Outer Training Yard", "Middle Training Yard", "Inner Training Yard")
+    return [{
+        "id": f"yard-{i:02d}", "name": names[i - 1],
+        "cost": cost, "vp": vp,
+        "effect": _effect({"op": "gain", "resource": "iron", "amount": 1 if i % 2 else 2}),
+    } for i, (cost, vp) in enumerate(TRAINING_YARD_PRICES, start=1)]
 
 
 STEWARDS = _steward_defaults()
@@ -179,7 +187,10 @@ DECREE_CARDS = [
 
 CARD_COUNTS = {
     "starting_action": 6,
-    "starting_resource": 9,
+    # EIGHT, not nine. The corpus deals starting-resource card ids 31-38 across 20 games
+    # and never a ninth, and keying on `typeArg` -- the printed card rather than the copy
+    # dealt into this game -- lands on exactly eight distinct definitions.
+    "starting_resource": 8,
     "decree": 3,
     "steward": 15,
     "diplomat": 12,

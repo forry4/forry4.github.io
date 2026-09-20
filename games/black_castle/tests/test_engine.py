@@ -20,13 +20,16 @@ def test_base_catalogue_counts_and_standard_setup():
     assert len(cards.DIPLOMATS) == 12
     assert len(cards.DAIMYO) == 9
     assert len(cards.GARDENS) == 10
-    assert len(cards.TRAINING_YARDS) == 8
+    assert len(cards.TRAINING_YARDS) == 3
     game = engine.new_game(["a", "b", "c"], seed=7)
     assert game["phase"] == "draft"
     assert len(game["bridges"]["coral"]) == 4
     assert len(game["castle"]["rooms"]) == 5
     assert len(game["gardens"]) == 3
-    assert len(game["yards"]) == 4
+    # Three bridges, six plots: one Plant garden and one Stone garden beside each.
+    assert all(garden["plant"]["icon"] == "plant" and garden["stone"]["icon"] == "stone"
+               for garden in game["gardens"])
+    assert len(game["yards"]) == 3
     assert all(len(p["workers"]["courtiers"]) for p in game["players"].values())
     assert all(values == sorted(values) for values in (
         [die["value"] for die in game["bridges"][color]] for color in engine.BRIDGE_ORDER
