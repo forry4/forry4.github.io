@@ -507,3 +507,75 @@ def test_a_die_tiles_reward_vocabulary_is_the_published_one():
     # individual tiles' faces are NOT published and ours are generated.
     assert set(cards.DIE_TILE_REWARDS) == {
         "coin", "resource", "food", "iron", "pearl", "seal", "influence", "vp"}
+
+
+def test_taking_a_room_card_also_performs_one_of_its_light_actions():
+    """Straight from the rulebook, and the engine did not do it at all.
+
+    "Place the card from the room that your Courtier just reached in the now-empty space
+    of your Domain board AND CARRY OUT ONE OF THE LIGHT-BACKGROUND ACTIONS on that card."
+
+    Corroborated before it was built: on climbs where the taken card's light and dark
+    blocks are distinguishable, the gains that follow match a LIGHT block 286 times and a
+    dark one 4 -- 99%.
+    """
+    game, pid = _climber(seed=31)
+    p = engine._player(game, pid)
+    card = game["castle"]["rooms"][0]["card"]
+    lights = [b for b in card["blocks"] if b["type"] == "light"]
+    assert len(lights) > 1, "seed 31 puts a card with a real choice in room 0"
+
+    move = next(m for m in engine._climb_moves(game, pid)
+                if m["to"] == "floor1" and m["room"] == 0)
+    game["pending"] = {"pid": pid, "kind": "courtier_destination"}
+    assert engine.apply_move(game, pid, move)[0]
+
+    # The climb does NOT close the turn -- it stops to ask which light action to perform.
+    assert game["pending"]["kind"] == "card_action"
+    offered = engine.legal_moves(game, pid)
+    assert [m["index"] for m in offered] == list(range(len(lights)))
+
+    before = (dict(p["resources"]), p["coins"], p["seals"], p["points"])
+    assert engine.apply_move(game, pid, {"type": "card_action", "index": 0})[0]
+    after = (dict(p["resources"]), p["coins"], p["seals"], p["points"])
+    assert after != before, "the chosen light action actually resolved"
+    assert game["pending"]["kind"] == "end_turn"
+
+
+def test_a_card_with_one_light_action_performs_it_without_asking():
+    game, pid = _climber(seed=31)
+    p = engine._player(game, pid)
+    room = game["castle"]["rooms"][0]
+    # leave exactly one light block on the card standing there
+    room["card"]["blocks"] = [b for b in room["card"]["blocks"] if b["type"] == "light"][:1]
+    move = next(m for m in engine._climb_moves(game, pid)
+                if m["to"] == "floor1" and m["room"] == 0)
+    game["pending"] = {"pid": pid, "kind": "courtier_destination"}
+    assert engine.apply_move(game, pid, move)[0]
+    assert game["pending"]["kind"] == "end_turn", "no decision worth raising"
+
+
+def test_a_room_whose_card_cannot_be_replaced_is_not_taken():
+    # "If the card cannot be replaced, you still carry out the light-background action but
+    # you do not take the card and the rest of the steps are ignored." Unreachable in
+    # practice -- neither deck emptied across 120 simulated games -- so this is the
+    # rulebook's word rather than the corpus's, and it is written down as such.
+    game, pid = _climber(seed=31)
+    p = engine._player(game, pid)
+    game["steward_deck"] = []
+    room = game["castle"]["rooms"][0]
+    standing = room["card"]
+    held = copy.deepcopy(p["action_card"])
+    lantern_before = len(p["lantern"])
+
+    move = next(m for m in engine._climb_moves(game, pid)
+                if m["to"] == "floor1" and m["room"] == 0)
+    game["pending"] = {"pid": pid, "kind": "courtier_destination"}
+    assert engine.apply_move(game, pid, move)[0]
+    # the light action is still offered/performed...
+    if (game.get("pending") or {}).get("kind") == "card_action":
+        assert engine.apply_move(game, pid, {"type": "card_action", "index": 0})[0]
+    # ...but the card stays in the room and nothing else moved
+    assert room["card"]["id"] == standing["id"], "the card was not taken"
+    assert p["action_card"]["id"] == held["id"], "the domain card did not change"
+    assert len(p["lantern"]) == lantern_before, "and nothing reached the Lantern"

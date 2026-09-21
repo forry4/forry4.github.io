@@ -893,6 +893,8 @@ def legal_moves(game: dict | None, pid: str) -> list[dict]:
             return _worker_destination_moves(game, pid, pending.get("worker", ""))
         if kind == "courtier_destination":
             return _climb_moves(game, pid)
+        if kind == "card_action":
+            return _card_action_moves(game, pid)
         if kind == "end_turn":
             return [{"type": "end_turn"}] + _convert_moves(game, pid)
         if kind == "convert":
@@ -1079,15 +1081,68 @@ def _take_room_card(game: dict, pid: str, room_index: int) -> None:
     if not taken:
         return
     p = _player(game, pid)
+    deck = game.get("diplomat_deck" if room.get("floor") == 2 else "steward_deck") or []
+    if not deck:
+        # "If the card cannot be replaced, you still carry out the light-background action
+        # but you do not take the card and the rest of the steps are ignored." Unreachable
+        # in practice -- neither deck emptied in 120 simulated games -- so this is the
+        # rulebook's word, not the corpus's.
+        _log(game, f"{_name(game, pid)} cannot take {taken.get('name', 'the card')}: "
+                   f"there is none to replace it.", pid=pid)
+        _offer_card_action(game, pid, taken)
+        return
     previous = p.get("action_card")
     entry = _lantern_entry(previous) if previous else None
     if entry:
         p["lantern"].append(entry)
     p["action_card"] = copy.deepcopy(taken)
-    deck = game.get("diplomat_deck" if room.get("floor") == 2 else "steward_deck") or []
-    room["card"] = deck.pop() if deck else None
+    room["card"] = deck.pop()
     _log(game, f"{_name(game, pid)} takes {taken.get('name', 'the room card')} "
                f"into their Domain.", pid=pid)
+    _offer_card_action(game, pid, taken)
+
+
+def _light_blocks(card: dict) -> list[dict]:
+    return [b for b in (card or {}).get("blocks") or () if b.get("type") == "light"]
+
+
+def _offer_card_action(game: dict, pid: str, card: dict) -> None:
+    """Taking a room card also PERFORMS one of its light-background actions.
+
+    Straight from the rulebook -- "Place the card from the room that your Courtier just
+    reached in the now-empty space of your Domain board **and carry out one of the
+    light-background actions on that card**" -- and the engine did not do it at all: it
+    handed the card over and resolved nothing.
+
+    Confirmed against the corpus before being built. On climbs where the taken card's
+    light and dark blocks are distinguishable, the gains that follow match a LIGHT block
+    286 times and a dark one 4, i.e. 99%. The player CHOOSES which light action, so a card
+    with more than one raises a decision rather than picking for them.
+    """
+    blocks = _light_blocks(card)
+    if not blocks:
+        return
+    if len(blocks) == 1:
+        _apply_effects(game, pid, blocks[0].get("effects") or [],
+                       source=f"{card.get('name', 'card')} light action")
+        return
+    game["pending"] = {"pid": pid, "kind": "card_action", "card": card.get("id"),
+                       "name": card.get("name"), "blocks": copy.deepcopy(card.get("blocks") or []),
+                       "options": list(range(len(blocks)))}
+
+
+def _card_action_moves(game: dict, pid: str) -> list[dict]:
+    pending = game.get("pending") or {}
+    if pending.get("kind") != "card_action" or pending.get("pid") != pid:
+        return []
+    # The card just taken IS the player's action card. The one exception is the
+    # deck-empty path, where the card was not taken -- there the pending carries the
+    # blocks it offered so the choice still resolves against the right card.
+    card = _player(game, pid).get("action_card") or {}
+    if card.get("id") != pending.get("card"):
+        card = {"blocks": pending.get("blocks") or []}
+    return [{"type": "card_action", "index": i}
+            for i in range(len(_light_blocks(card)))]
 
 
 def _resolve_lantern(game: dict, pid: str) -> None:
@@ -1159,6 +1214,25 @@ def _finish_draft(game: dict) -> None:
     game["draft_options"] = []
     game["draft_queue"] = []
     _log(game, f"Round 1 begins. {_name(game, game['turn_pid'])} has the first turn.")
+
+
+def _perform_card_action(game: dict, pid: str, index: int) -> tuple[bool, str | None]:
+    """Carry out the light-background action chosen on a newly taken room card."""
+    pending = game.get("pending") or {}
+    if pending.get("kind") != "card_action" or pending.get("pid") != pid:
+        return False, "you have no card action to choose"
+    card = _player(game, pid).get("action_card") or {}
+    if card.get("id") != pending.get("card"):
+        card = {"blocks": pending.get("blocks") or [], "name": pending.get("name", "card")}
+    blocks = _light_blocks(card)
+    if not 0 <= index < len(blocks):
+        return False, "choose one of the card's light actions"
+    game["pending"] = None
+    _apply_effects(game, pid, blocks[index].get("effects") or [],
+                   source=f"{card.get('name', 'card')} light action")
+    if not _promote_choice(game, pid) and game.get("turn_pid") == pid:
+        game["pending"] = {"pid": pid, "kind": "end_turn"}
+    return True, None
 
 
 def _choose_resource(game: dict, pid: str, resource: str) -> tuple[bool, str | None]:
@@ -1438,8 +1512,11 @@ def apply_move(game: dict, pid: str, move: dict) -> tuple[bool, str | None]:
         _log(game, f"{_name(game, pid)} climbs to the {to}.", pid=pid)
         if move.get("room") is not None:
             _take_room_card(game, pid, int(move["room"]))
-        if not _promote_choice(game, pid):
-            game["pending"] = {"pid": pid, "kind": "end_turn"}
+        # `_take_room_card` may have raised its own decision (which light action to
+        # perform), and that outranks closing the turn.
+        if (game.get("pending") or {}).get("kind") != "card_action":
+            if not _promote_choice(game, pid):
+                game["pending"] = {"pid": pid, "kind": "end_turn"}
         return True, None
     if kind == "convert":
         if game.get("pending"):
@@ -1451,6 +1528,8 @@ def apply_move(game: dict, pid: str, move: dict) -> tuple[bool, str | None]:
         elif game.get("turn_pid") != pid:
             return False, "it is not your turn"
         return _convert(game, pid, str(move.get("from")), str(move.get("to", "coin")))
+    if kind == "card_action":
+        return _perform_card_action(game, pid, int(move.get("index", -1)))
     if kind == "choose_resource":
         return _choose_resource(game, pid, str(move.get("resource", "")))
     if kind == "end_turn":

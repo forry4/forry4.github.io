@@ -254,6 +254,34 @@ holding a card. Pages caches a bundle ~10 minutes and every move is validated wi
 `move in legal_moves(...)`, so without the shim an old bundle's climb is not slightly
 wrong — it is refused outright and the player is told their own legal action is illegal.
 
+### The rulebook audit (2026-09-21) — what a read-through found that play did not
+
+Checking the published rules against the engine, rather than only the logs, turned up one
+MISSING MECHANIC and confirmed several things already right.
+
+**Missing: taking a room card also PERFORMS one of its light actions.** "Place the card
+from the room that your Courtier just reached in the now-empty space of your Domain board
+**and carry out one of the light-background actions on that card**." The engine handed the
+card over and resolved nothing. Corroborated before building it: on climbs where the taken
+card's light and dark blocks are distinguishable, the gains that follow match a LIGHT block
+**286 times and a dark one 4** — 99%. The player chooses which, so a card with more than one
+light block raises a `card_action` decision rather than picking for them.
+
+**Also from the rulebook, and unreachable from play:** "If the card cannot be replaced, you
+still carry out the light-background action but you do not take the card and the rest of the
+steps are ignored." Neither deck emptied across 120 simulated games, so no corpus would ever
+have shown this. Implemented on the rulebook's word, and the test says so.
+
+**Confirmed already correct** (worth recording so nobody re-checks them): the seal cap of 5,
+the resource cap of 7, uncapped coins, 2 coins for an audience at the gate, 2/5 pearl to
+climb 1/2 floors, courtier points 1/3/6/10, the three checkpoint costs, 3 rounds x 3 turns,
+the left bridge end paying the Lantern, and the final tie-break — "if there is a tie, whoever
+is higher in the order of turns wins", which our `turn_order` already carries because
+`_end_round` rewrites it every round INCLUDING the last.
+
+**Still unimplemented and minor:** the Lantern resolves "in the order you choose"; we resolve
+in list order. It only matters where a cap or a conversion makes order significant.
+
 ### Where each fact comes from, and a mistake about that
 
 **The corpus is not the only source, and treating it as one produced its own errors.**

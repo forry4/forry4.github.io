@@ -190,6 +190,12 @@ function moveLabel(move, game) {
   // A card that grants "a resource" without naming one. Without this case the three
   // picks fall through to the default below and render as three "End Turn" buttons.
   if (move.type === "choose_resource") return [RESOURCE_NAMES[move.resource] || move.resource, "Take one of this resource", move.resource];
+  // Taking a room card also performs ONE of its light actions, and the player chooses
+  // which. Same trap as above: without a case these render as "End Turn".
+  if (move.type === "card_action") {
+    const lights = (game.pending?.blocks || []).filter(b => b.type === "light");
+    return [`Light action ${move.index + 1}`, effectItems(lights[move.index]?.effects || []).map(x => typeof x === "string" ? x : x.text).join(" · "), "castle"];
+  }
   return ["End Turn", "", "check"];
 }
 
@@ -202,7 +208,7 @@ function DecisionPanel({ game, names, myId, sendMove, selected, onSelect, busy, 
   const ending = moves.some(m => m.type === "end_turn");
   const nextName = names[game.turn_pid] || "The next clan";
   const step = placing ? 2 : taking ? 1 : 3;
-  const title = !connected ? "Reconnecting to the table" : !acting ? `${nextName} is playing` : taking ? "Choose your die" : placing ? "Choose a destination" : ending ? "Your action is complete" : kind === "choose_resource" ? "Choose a resource" : kind === "outside_worker" ? "Deploy a worker" : kind === "courtier_destination" ? "Choose a floor" : "Choose a worker destination";
+  const title = !connected ? "Reconnecting to the table" : !acting ? `${nextName} is playing` : taking ? "Choose your die" : placing ? "Choose a destination" : ending ? "Your action is complete" : kind === "card_action" ? "Choose an action on your new card" : kind === "choose_resource" ? "Choose a resource" : kind === "outside_worker" ? "Deploy a worker" : kind === "courtier_destination" ? "Choose a floor" : "Choose a worker destination";
   const selectedMove = selected && moves.find(m => m.type === "place_die" && m.space === selected);
   const info = selectedMove ? placementInfo(game, selected) : null;
   const choices = moves.filter(m => !["take_die", "place_die", "convert", "end_turn"].includes(m.type));
