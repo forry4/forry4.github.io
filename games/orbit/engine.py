@@ -23,6 +23,18 @@ STARTING_ZENITHIUM = 1
 BASE_HAND_LIMIT = 4
 CONTROL_POSITION = 4
 
+#: Influence discs PER PLANET. The box holds 20, four in each planet's colour, so a
+#: planet can be captured at most four times: the disc at setup, then three refills.
+#:
+#: This is a component count rather than a sentence in the rulebook -- no published rules
+#: text says what happens when a planet's discs run out, because it is treated as not
+#: arising. It does arise. Playing 600 random games, 4 of them wanted a FIFTH disc from
+#: one planet, and in all four the winning capture was that impossible one: a 2-2 split
+#: leaves the planet empty, and the capture that would break the tie has nothing to take.
+#: If a BGA replay ever shows a fifth capture, the replay wins and this comes out -- BGA
+#: is this package's stated oracle.
+DISCS_PER_PLANET = 4
+
 
 def _make_rng(game: dict) -> random.Random:
     rng = random.Random()
@@ -286,10 +298,24 @@ def _capture_summary(player: dict) -> str:
             f"from {planets} planet{'' if planets == 1 else 's'}")
 
 
+def _discs_left(game: dict, planet: str) -> int:
+    """Discs still available for `planet`, tolerating a save made before they were counted.
+
+    An older game has no `discs` map; reconstruct it from what has already been taken so
+    the count is right rather than generous.
+    """
+    discs = game.get("discs")
+    if isinstance(discs, dict) and planet in discs:
+        return int(discs[planet])
+    taken = sum(p["captured"].count(planet) for p in game["players"].values())
+    return max(0, DISCS_PER_PLANET - taken)
+
+
 def _capture(game: dict, pid: str, planet: str) -> list[dict]:
     player = _player(game, pid)
     player["captured"].append(planet)
     game["captured_this_turn"].append(planet)
+    game.setdefault("discs", {})[planet] = max(0, _discs_left(game, planet) - 1)
     game["influence"][planet] = None
     _log(game, f"{_who(game, pid)} CAPTURES the ", _tok_planet(planet),
          f" disc — they now hold {_capture_summary(player)}.", pid=pid)
@@ -317,8 +343,10 @@ def _gain_influence(game: dict, pid: str, planet: str, amount: int) -> list[dict
     if amount <= 0:
         return []
     if game["influence"][planet] is None:
+        why = ("that disc was captured this turn"
+               if _discs_left(game, planet) > 0 else "that planet has no discs left")
         _log(game, f"{_who(game, pid)} gains {amount} influence on ", _tok_planet(planet),
-             ", but that disc was captured this turn — the movement is lost.", pid=pid)
+             f", but {why} — the movement is lost.", pid=pid)
         return []
     direction = 1 if pid == game["order"][0] else -1
     moved = 0
@@ -1046,7 +1074,7 @@ def _finish_turn(game: dict) -> None:
     # gainPlanet/resetPlanet packets, then close the game without drawing.
     if _winner_pid(game) is not None:
         for planet in game["captured_this_turn"]:
-            if game["influence"][planet] is None:
+            if game["influence"][planet] is None and _discs_left(game, planet) > 0:
                 game["influence"][planet] = 0
                 _log(game, "A fresh ", _tok_planet(planet),
                      " disc appears on the centre space.")
@@ -1064,9 +1092,13 @@ def _finish_turn(game: dict) -> None:
                    f"a hand is never discarded down.", pid=pid)
     for planet in game["captured_this_turn"]:
         if game["influence"][planet] is None:
-            game["influence"][planet] = 0
-            _log(game, "A fresh ", _tok_planet(planet),
-                 " disc appears on the centre space.")
+            if _discs_left(game, planet) > 0:
+                game["influence"][planet] = 0
+                _log(game, "A fresh ", _tok_planet(planet),
+                     " disc appears on the centre space.")
+            else:
+                _log(game, "No disc is left for ", _tok_planet(planet),
+                     " — all four are taken and it can no longer be contested.")
     game["captured_this_turn"] = []
     game["pending"] = None
     game["pending_pid"] = None
@@ -1203,6 +1235,7 @@ def new_game(
         "turn_number": 0,
         "influence": {planet: 0 for planet in PLANETS},
         "captured_this_turn": [],
+        "discs": {planet: DISCS_PER_PLANET for planet in PLANETS},
         "leader": {"owner": None, "level": 0},
         "board_sides": board_sides,
         "planet_bonus": {},

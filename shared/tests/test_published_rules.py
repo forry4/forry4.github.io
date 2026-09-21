@@ -10,9 +10,16 @@ caught by reading the rulebook.
 
 So on 2026-09-21 the other nine games were audited the same way -- their setup counts,
 supply sizes and scoring tables checked against the published rules rather than against
-their own tests. **Nothing was found.** That is a real result and it has a cause: these
-were built FROM rulebooks, while Black Castle shipped as an explicit placeholder port
-whose own manifest said `"bga_parity": "planned after launch"`.
+their own tests. Eight came back clean, and that has a cause rather than being luck:
+they were built FROM rulebooks, while Black Castle shipped as an explicit placeholder
+port whose own manifest said `"bga_parity": "planned after launch"`.
+
+**The ninth did not, and it was the one this file had written off.** Orbit was recorded
+here as an original design with no rulebook to check against. It is a port of Zenith.
+Auditing it properly found a real divergence -- a planet could be captured a fifth time
+though the box holds only four of its discs, and in every random game where that came up
+it was the WINNING capture. So the audit's own summary reproduced the bug it was written
+to prevent: "I could not find a source" became "there is no source".
 
 This file is what remains of that audit. Each number below was verified against the source
 named in its test, so the audit does not have to be repeated -- and so a later "tidy-up"
@@ -149,18 +156,43 @@ def test_black_castle_matches_the_publishers_component_list():
     assert components["die_tiles"] == 15
 
 
+def test_orbit_matches_zenith():
+    """Source: Zenith rulebook + BGA's Gamehelpzenith.
+
+    **This entry began as a mistake worth leaving recorded.** The first version of this
+    file asserted Orbit was an ORIGINAL design with no rulebook to check it against. It is
+    a Zenith port, and auditing it properly then found a real rules divergence -- see
+    `DISCS_PER_PLANET`. "I could not find a source" was filed as "there is no source",
+    which is the same error this whole file exists to catch, committed inside the file
+    that catches it.
+    """
+    from games.orbit import cards, engine
+    assert engine.STARTING_CREDITS == 12
+    assert engine.STARTING_ZENITHIUM == 1
+    assert engine.BASE_HAND_LIMIT == 4          # 5 with the silver badge, 6 with gold
+    assert engine.CONTROL_POSITION == 4         # a 9-space track, centred on the planet
+    assert engine.DISCS_PER_PLANET == 4         # 20 discs, four in each planet's colour
+    assert len(cards.CARDS) == 90               # Agent cards
+    assert len(cards.BONUS_POOL) == 16
+    assert len(cards.PLANETS) == 5
+    assert len(cards.FACTIONS) == 3             # Humans, Robots, Animods
+    assert len(cards.TECHNOLOGIES) == 30
+
+
 def test_the_games_with_no_rulebook_are_named_rather_than_forgotten():
-    """Dissonance and Orbit are ORIGINAL designs, not ports.
+    """Dissonance is an ORIGINAL design, not a port.
 
-    There is no published rulebook to audit them against, so their reference is their own
-    Rust core plus its parity gate. Naming them here is the point: a later reader counting
-    the entries above should not conclude the two were simply missed.
+    There is no published rulebook to audit it against, so its reference is its own Rust
+    core plus the parity gate. Naming it here is the point: a later reader counting the
+    entries above should not conclude it was simply missed -- and should be suspicious of
+    that claim, because it was made about Orbit too and was wrong.
 
-    Rag Tag is a port and is absent for the opposite reason -- it has something stronger
+    Rag Tag is a port and is absent for the opposite reason: it has something stronger
     than a rulebook check, a full replay gate against 40 real BGA games at 4103/4103.
+    Orbit has one too, against 189 archived Zenith tables.
     """
     import os
 
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    for game in ("dissonance", "orbit", "rag_tag"):
+    for game in ("dissonance", "rag_tag", "orbit"):
         assert os.path.isdir(os.path.join(root, "games", game)), game

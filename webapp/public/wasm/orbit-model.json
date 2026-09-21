@@ -1626,7 +1626,7 @@
     "branch_resource": 0.1,
     "capture": 2.0,
     "choice": 0.4,
-    "choice_capture": 2.0,
+    "choice_capture": 1.0,
     "choice_opponent": 0.1,
     "column": 0.03,
     "cost": 0.0749,
@@ -1644,9 +1644,10 @@
     "recruit": 0.55,
     "technology": 0.1945,
     "technology_level": 0.0016,
+    "threat": 0.8,
     "tier": 0.059
   },
-  "rules": "436b0909457ef16b2ab6882616842d7ae5d4edaa6e66f3cb2e59ee295117ed24",
+  "rules": "6017c1ebfd14749a587823611f5c309d2a5db31c8ceb9e7e54ee4b2ba8f322e5",
   "schema": 1,
   "turn_budget_ms": 5000
 }

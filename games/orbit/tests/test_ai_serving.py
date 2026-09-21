@@ -247,6 +247,12 @@ def test_shipped_model_and_wasm_assets_match_the_python_manifest():
     expected = serving.serving_manifest()
     for key in ("abi_version", "model_version", "encoder", "schema", "rules"):
         assert asset[key] == expected[key]
+    # THE ENVELOPE IS NOT THE MODEL. Checking only the version fields let the shipped
+    # asset drift from Python for real: between `ac097edf` and `fca6be36` the browser
+    # served `choice_capture: 2.0` while Python had moved to 1.0, so the Expert ranked
+    # every capture at double weight in the one place a player actually meets it. The
+    # envelope matched the whole time, because the weights were never compared.
+    assert asset["policy"] == serving.POLICY_WEIGHTS
     assert len(asset["cards"]) == len(CARDS) == 90
     for card_id, card in CARDS.items():
         assert asset["cards"][str(card_id)] == {

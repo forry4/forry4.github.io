@@ -18,6 +18,12 @@ mod wasm;
 
 pub const PLANETS: [&str; 5] = ["mercury", "venus", "terra", "mars", "jupiter"];
 const CONTROL_POSITION: i32 = 4;
+
+/// Influence discs PER PLANET. The box holds 20, four in each planet's colour, so a
+/// planet can be captured at most four times and the fifth has nothing to take. Mirrors
+/// `engine.DISCS_PER_PLANET`; across 189 archived BGA games the most any planet ever
+/// yielded is exactly four.
+const DISCS_PER_PLANET: u8 = 4;
 pub const FACTIONS: [&str; 3] = ["robot", "human", "animod"];
 fn s<'a>(v: &'a Value, k: &str) -> &'a str {
     v[k].as_str().unwrap_or("")
@@ -329,6 +335,19 @@ impl State {
     }
 
     /// in parity tests below whenever this contract changes.
+    /// Discs still available for `p`, DERIVED from what both seats have taken rather
+    /// than stored. Keeping it out of the struct keeps the observation contract, the
+    /// encoder and the trained model untouched -- and a derived count cannot drift out
+    /// of step with the captures it is computed from.
+    fn discs_left(&self, p: usize) -> u8 {
+        let taken: usize = self
+            .players
+            .iter()
+            .map(|player| player.captured.iter().filter(|c| **c == p).count())
+            .sum();
+        DISCS_PER_PLANET.saturating_sub(taken.min(255) as u8)
+    }
+
     pub fn observation(&self, seat: usize) -> Value {
         assert!(seat < 2);
         let mut result = json!({
@@ -979,8 +998,9 @@ impl State {
                 || counts.iter().filter(|count| **count > 0).count() >= 4
         });
         if victory_pending {
-            for p in self.captured_this_turn.drain(..) {
-                if self.influence[p].is_none() {
+            let refilled: Vec<usize> = std::mem::take(&mut self.captured_this_turn);
+            for p in refilled {
+                if self.influence[p].is_none() && self.discs_left(p) > 0 {
                     self.influence[p] = Some(0);
                 }
             }
@@ -999,8 +1019,9 @@ impl State {
             4
         };
         self.draw_to(pid, limit, c);
-        for p in self.captured_this_turn.drain(..) {
-            if self.influence[p].is_none() {
+        let refilled: Vec<usize> = std::mem::take(&mut self.captured_this_turn);
+        for p in refilled {
+            if self.influence[p].is_none() && self.discs_left(p) > 0 {
                 self.influence[p] = Some(0);
             }
         }

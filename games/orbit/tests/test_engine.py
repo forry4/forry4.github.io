@@ -361,3 +361,53 @@ def test_the_log_never_names_a_card_nobody_can_see():
     finally:
         E._log = original
     assert named > 50, f"fixture must actually name Agents, saw {named}"
+
+
+def test_a_planet_runs_out_of_discs_after_four_captures():
+    """The box holds four discs per planet, so a fifth capture has nothing to take.
+
+    This is a COMPONENT COUNT rather than a sentence of rules text -- no published rules
+    say what happens when a planet empties, because it is treated as not arising. It
+    arises: playing 600 random games, four wanted a fifth disc from one planet, and in all
+    four the winning capture was that impossible one (a 2-2 split empties the planet, and
+    the capture that would break the tie has nothing left to take).
+
+    The corpus agrees and is the reason this is implemented rather than merely suspected:
+    across 189 archived BGA games the most any planet ever yielded is exactly FOUR. A
+    distribution that stops dead on the physical limit is what a hard cap looks like.
+    """
+    game = E.new_game(["a", "b"], seed=3)
+    finish_mulligan(game)
+    planet = PLANETS[0]
+    assert E._discs_left(game, planet) == E.DISCS_PER_PLANET == 4
+
+    for taken in range(1, 5):
+        game["influence"][planet] = 0
+        E._capture(game, "a" if taken % 2 else "b", planet)
+        assert E._discs_left(game, planet) == 4 - taken
+        assert game["influence"][planet] is None
+        # the end-of-turn refill puts a fresh disc out only while one remains
+        for p in list(game["captured_this_turn"]):
+            if game["influence"][p] is None and E._discs_left(game, p) > 0:
+                game["influence"][p] = 0
+        game["captured_this_turn"] = []
+
+    assert E._discs_left(game, planet) == 0
+    assert game["influence"][planet] is None, "the fifth disc does not exist"
+    # ...and influence aimed at an empty planet is wasted rather than crashing or capturing
+    assert E._gain_influence(game, "a", planet, 3) == []
+    assert game["influence"][planet] is None
+
+
+def test_the_disc_count_survives_a_save_made_before_it_was_tracked():
+    # Expand/contract: an older game has no `discs` map. Reconstruct it from what has
+    # already been taken rather than handing the planet a full four again.
+    game = E.new_game(["a", "b"], seed=3)
+    finish_mulligan(game)
+    planet = PLANETS[0]
+    game["influence"][planet] = 0
+    E._capture(game, "a", planet)
+    game["influence"][planet] = 0
+    E._capture(game, "b", planet)
+    del game["discs"]
+    assert E._discs_left(game, planet) == 2, "derived from the captures, not reset to 4"
