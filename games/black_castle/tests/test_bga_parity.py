@@ -137,6 +137,10 @@ def test_a_room_and_an_outside_space_stack_two_dice_at_three_or_four_seats():
         game = engine.new_game([f"p{i}" for i in range(seats)], seed=11)
         _run_draft(game)
         pid = game["turn_pid"]
+        # This test is about CAPACITY, so give room 0 a coral tile and take the colour
+        # rule out of the question -- a die may now only enter a room one of whose Die
+        # tiles shows its colour, and room 0 need not have drawn a coral one.
+        game["castle"]["rooms"][0]["tiles"][0]["color"] = "coral"
         for space, put in (("castle:0", lambda d: game["castle"]["rooms"][0]
                             .setdefault("dice", []).append(d)),
                            ("outside:0", lambda d: game.setdefault("outside", {})

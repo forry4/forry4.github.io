@@ -38,11 +38,31 @@ function SectionHead({ icon, title, note, children }) {
   return <header className="bc-section-label"><div><Icon name={icon} /><h2>{title}</h2>{note && <span>{note}</span>}</div>{children}</header>;
 }
 
-function CardFace({ card, activeSide, onlyLight = false }) {
+// Which action blocks a die resolves: every block whose Die tile matches its colour.
+// Mirrors engine._fired_blocks. A colour on two tiles fires both rows.
+const firedSlots = (room, die) => {
+  const tiles = room?.tiles || [];
+  if (!die || !tiles.length) return null;
+  const hit = new Set();
+  tiles.forEach((tile, i) => { if (tile.color === die.color) hit.add(i); });
+  return hit;
+};
+
+function CardFace({ card, room, die, onlyLight = false }) {
   if (!card) return <div className="bc-card bc-card-empty">Choose a starting pair to receive an action card.</div>;
+  const tiles = room?.tiles || [];
+  const fired = firedSlots(room, die);
+  // The real card: one action block per row, each with a Die tile beside it.
+  if (card.blocks?.length && tiles.length) return <div className="bc-card"><div className="bc-card-heading"><strong>{card.name}</strong>{card.level > 0 && <Icon name={card.level === 3 ? "points" : "castle"} />}</div>
+    {card.blocks.map((block, i) => <div key={i} className={`bc-card-action${block.type === "dark" ? " dark" : ""}${fired ? (fired.has(i) ? " selected" : " inactive") : ""}`}>
+      <span className="bc-card-side"><i className={`bc-tile bc-tile-${tiles[i]?.color}`} aria-hidden="true" />{COLOR_NAMES[tiles[i]?.color] || ""}</span>
+      <Effects effects={block.effects} />
+    </div>)}
+  </div>;
+  // A card without blocks (the Daimyo cards are still ours) or a pre-tile save.
   return <div className="bc-card"><div className="bc-card-heading"><strong>{card.name}</strong>{card.level > 0 && <Icon name={card.level === 3 ? "points" : "castle"} />}</div>
-    <div className={`bc-card-action${activeSide === "light" ? " selected" : ""}${activeSide === "dark" ? " inactive" : ""}`}><span className="bc-card-side">Light</span><Effects effects={card.light} /></div>
-    {!onlyLight && card.dark?.length > 0 && <div className={`bc-card-action dark${activeSide === "dark" ? " selected" : ""}${activeSide === "light" ? " inactive" : ""}`}><span className="bc-card-side">Dark</span><Effects effects={card.dark} /></div>}
+    <div className="bc-card-action"><span className="bc-card-side">Light</span><Effects effects={card.light} /></div>
+    {!onlyLight && card.dark?.length > 0 && <div className="bc-card-action dark"><span className="bc-card-side">Dark</span><Effects effects={card.dark} /></div>}
   </div>;
 }
 
@@ -76,8 +96,13 @@ function placementInfo(game, space) {
   const [area, index] = space.split(":");
   if (area === "castle") {
     const room = game.castle.rooms.find(r => String(r.id) === index);
-    const side = game.pending?.die ? (Number(game.pending.die.value) + Number(room.id)) % 2 === 0 ? "light" : "dark" : null;
-    return { title: room.card.name, target: room.floor === 1 ? 3 : 4, subtitle: `${room.floor === 1 ? "First" : "Second"} floor${side ? ` · ${side} action` : ""}`, effects: room.card[side], side };
+    const die = game.pending?.die;
+    const fired = firedSlots(room, die);
+    // The die's COLOUR decides which rows resolve, not its value.
+    const rows = fired && room.card?.blocks ? room.card.blocks.filter((_, i) => fired.has(i)) : null;
+    const effects = rows ? rows.flatMap(b => b.effects) : null;
+    const note = rows ? (rows.length === 1 ? "1 row resolves" : `${rows.length} rows resolve`) : null;
+    return { title: room.card.name, target: room.floor === 1 ? 3 : 4, subtitle: `${room.floor === 1 ? "First" : "Second"} floor${note ? ` · ${note}` : ""}`, effects, side: null };
   }
   if (area === "domain") return { title: `${COLOR_NAMES[index]} domain`, target: 6, subtitle: "Your personal domain", effects: [{ op: "gain", resource: DOMAIN_RESOURCE[index], amount: 1 }, ...(game.players[game.viewer]?.action_card?.light || [])] };
   if (area === "outside") return { title: "Outside the walls", target: 5, subtitle: `Gate ${Number(index) + 1}`, description: "Choose a worker action next. Deployment costs are paid separately." };
@@ -120,7 +145,7 @@ function Castle({ game, names, onSelect, selected, busy }) {
   return <section className="bc-castle bc-panel" id="bc-castle"><SectionHead icon="castle" title="The keep" note="Place a die to activate a room" />
     <div className="bc-daimyo"><div><span className="bc-kicker">DAIMYO HALL</span><h3>{game.castle?.daimyo?.name}</h3><p>Courtiers here score 10 points each.</p></div><Icon name="castle" /><CourtierRow game={game} names={names} location="daimyo" /></div>
     {[2, 1].map(floor => <div className={`bc-floor bc-floor-${floor}`} key={floor}><div className="bc-floor-label"><span>{floor === 2 ? "02" : "01"}</span><h3>{floor === 2 ? "Second" : "First"} floor</h3><small>{floor === 2 ? "6" : "3"} points per courtier</small></div><div className="bc-rooms">
-      {game.castle?.rooms?.filter(room => room.floor === floor).map(room => <Target key={room.id} {...{ game, onSelect, selected, busy }} space={`castle:${room.id}`} className="bc-room"><CardFace card={room.card} activeSide={game.pending?.die ? (Number(game.pending.die.value) + Number(room.id)) % 2 === 0 ? "light" : "dark" : null} /><div className="bc-room-occupancy">{room.dice?.length ? room.dice.map((die, i) => <Die key={i} die={die} />) : <span>Open room</span>}<small>{room.dice?.length || 0}/{dicePerSpace(game)} dice</small></div></Target>)}
+      {game.castle?.rooms?.filter(room => room.floor === floor).map(room => <Target key={room.id} {...{ game, onSelect, selected, busy }} space={`castle:${room.id}`} className="bc-room"><CardFace card={room.card} room={room} die={game.pending?.die} /><div className="bc-room-occupancy">{room.dice?.length ? room.dice.map((die, i) => <Die key={i} die={die} />) : <span>Open room</span>}<small>{room.dice?.length || 0}/{dicePerSpace(game)} dice</small></div></Target>)}
     </div><CourtierRow game={game} names={names} location={`floor${floor}`} /></div>)}
     <CourtierRow game={game} names={names} location="gate" />
   </section>;

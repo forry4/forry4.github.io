@@ -440,6 +440,50 @@ def _rolled_bridge(rng, color: str, count: int) -> list[dict]:
                   key=lambda die: int(die["value"]))
 
 
+#: How many Die tiles each castle room holds -- which is ONE PER ACTION BLOCK of the card
+#: that stands there. Every printed Steward card has exactly 3 blocks and every Diplomat
+#: exactly 2, and the corpus independently puts 3 tiles in a steward room and 2 in a
+#: diplomat room (see `bga_parity.die_tile_bag`). Two derivations, different evidence,
+#: same geometry: 3*3 + 2*2 = 13 in the castle and the last 2 at the Well.
+ROOM_TILE_COUNT = (3, 3, 3, 2, 2)
+
+
+def _deal_room_tiles(rng, tiles: list[dict], rooms: list[dict]) -> list[dict]:
+    """Lay the 13 castle tiles out, one per action block, NO ROOM ALL ONE COLOUR.
+
+    That constraint is the point, and it earns its keep: a monochrome room would be a
+    DEAD room, because two of the three die colours would resolve nothing in it at all.
+    The printed setup reaches it by moving a tile on to the next room whenever one would
+    end up single-coloured; the corpus shows the consequence exactly -- a diplomat room
+    displayed two distinct colours 40 times out of 40, and a steward room two or three
+    but never one.
+
+    What is reproduced here is that CONSTRAINT, by re-laying the tiles until it holds,
+    rather than the printed shuffling procedure itself. The two differ only in the
+    distribution over layouts, which nothing in the corpus can distinguish -- and a
+    re-lay is checkable at a glance, where the push-a-tile-on version was not: the first
+    draft of it passed a hand-traced example and still produced a monochrome room in 21
+    of 1200 deals, because the repair pass could re-break a room it had already walked.
+    """
+    pool = list(tiles)
+    spread = None
+    for _ in range(200):
+        rng.shuffle(pool)
+        laid, index = [], 0
+        for size in ROOM_TILE_COUNT:
+            laid.append(pool[index:index + size])
+            index += size
+        if all(len({t["color"] for t in group}) > 1 for group in laid):
+            spread = laid
+            break
+    if spread is None:       # pragma: no cover - needs a bag that cannot satisfy it
+        spread = laid
+    for i, room in enumerate(rooms):
+        room["tiles"] = [dict(t, location=f"castle:{room['id']}", slot=n)
+                         for n, t in enumerate(spread[i])]
+    return [t for group in spread for t in group]
+
+
 def new_game(players: list[str], *, names: dict[str, str] | None = None,
              seed: int | None = None, max_players: int | None = None) -> dict:
     """Create a standard base-game table.
@@ -466,7 +510,7 @@ def new_game(players: list[str], *, names: dict[str, str] | None = None,
     # castle rooms colour-side up, which is the rule the engine does not yet enforce --
     # see AGENTS.md. They are kept in `die_tiles` until it does.
     well_tiles = [dict(t, location="well") for t in tiles[-WELL_DIE_TILES:]]
-    tiles = [dict(t, location="castle") for t in tiles[:-WELL_DIE_TILES]]
+    castle_tiles = [dict(t, location="castle") for t in tiles[:-WELL_DIE_TILES]]
 
     # A 2-player game leaves the diamond-marked Steward and Diplomat cards in the box:
     # 9 of each instead of 15 and 12. Nothing in the corpus shows this -- it has no
@@ -487,6 +531,10 @@ def new_game(players: list[str], *, names: dict[str, str] | None = None,
                    "dice": []} for i in range(5)],
         "daimyo": daimyo_deck.pop(),
     }
+    # One tile per action block, colour side up. This is what decides which rows of a
+    # room's card a die resolves.
+    castle_tiles = _deal_room_tiles(rng, castle_tiles, castle["rooms"])
+    tiles = castle_tiles
     # Six garden cards are dealt, one Plant AND one Stone beside each bridge, and each is
     # its own plot with its own gardeners -- hence one occupant list per plot. Dealing off
     # a single shuffled pile handed some bridges two Plants, which the printed setup never
@@ -710,8 +758,15 @@ def _space_moves(game: dict, pid: str, die: dict) -> list[dict]:
             moves.append({"type": "place_die", "space": space})
     capacity = _dice_per_space(game)
     for room in game["castle"]["rooms"]:
-        if len(room.get("dice", [])) < capacity:
-            add(f"castle:{room['id']}")
+        if len(room.get("dice", [])) >= capacity:
+            continue
+        # A die may only enter a room one of whose Die tiles shows its colour. Without
+        # this a die could be placed where it resolves nothing, which is not a move the
+        # printed game offers. Rooms on a pre-tile save have no tiles and stay open.
+        colours = _room_tile_colors(game, room)
+        if colours and die.get("color") not in colours:
+            continue
+        add(f"castle:{room['id']}")
     for i in range(2):
         if len(_outside_dice(game, i)) < capacity:
             add(f"outside:{i}")
@@ -898,12 +953,46 @@ def _settle_die_value(game: dict, pid: str, die: dict, space: str) -> bool:
     return True
 
 
+def _room_tile_colors(game: dict, room: dict) -> list[str]:
+    return [str(t.get("color")) for t in room.get("tiles") or ()]
+
+
+def _fired_blocks(room: dict, die: dict) -> list[dict]:
+    """The action blocks a die resolves: every block whose Die tile matches its colour.
+
+    THIS IS THE RULE, and it is worth stating plainly because the engine used to pick
+    `light` or `dark` from `(die value + room index) % 2`, which is not a rule in this
+    game -- it made the die's COLOUR meaningless in the castle and its VALUE decide the
+    action, when the printed game is the other way round.
+
+    A colour can appear on two tiles in one room, and then a die of that colour performs
+    BOTH of those blocks. That is not a special case bolted on: it falls out of matching
+    every tile, and the corpus shows it happening -- 13 rooms fired two slots for one
+    colour, always a room whose tiles showed only two distinct colours.
+    """
+    blocks = (room.get("card") or {}).get("blocks") or []
+    tiles = room.get("tiles") or []
+    colour = die.get("color")
+    return [block for i, block in enumerate(blocks)
+            if i < len(tiles) and tiles[i].get("color") == colour]
+
+
 def _resolve_castle(game: dict, pid: str, room_index: int, die: dict) -> None:
     room = game["castle"]["rooms"][room_index]
     card = room.get("card") or {}
-    mode = "light" if (int(die.get("value", 0)) + room_index) % 2 == 0 else "dark"
-    effects = card.get(mode, [])
-    _apply_effects(game, pid, effects, source=f"{card.get('name', 'castle')} {mode} action")
+    if room.get("tiles") and card.get("blocks"):
+        fired = _fired_blocks(room, die)
+        for block in fired:
+            _apply_effects(game, pid, block.get("effects") or [],
+                           source=f"{card.get('name', 'castle')} {block.get('type', '')} row")
+        if not fired:
+            _log(game, f"{_name(game, pid)} places a die on a row no tile matches.", pid=pid)
+    else:
+        # A game saved before the tiles existed, or a card without blocks (the Daimyo
+        # cards are still ours). Resolve it the old way rather than doing nothing.
+        mode = "light" if (int(die.get("value", 0)) + room_index) % 2 == 0 else "dark"
+        _apply_effects(game, pid, card.get(mode, []),
+                       source=f"{card.get('name', 'castle')} {mode} action")
     game["last_move"]["card"] = card.get("id")
 
 
@@ -962,9 +1051,13 @@ def _place_die(game: dict, pid: str, space: str) -> tuple[bool, str | None]:
     elif space.startswith("outside:"):
         index = space.split(":")[1]
         game.setdefault("outside", {})[index] = _outside_dice(game, index) + [{"pid": pid, "die": die}]
-        choices = legal_moves({**game, "pending": {"pid": pid, "kind": "outside_worker"}}, pid)
-        if choices:
-            game["pending"] = {"pid": pid, "kind": "outside_worker", "space": space}
+        # THE PROBE MUST NAME THE SPACE. `_outside_offer` keys on it -- the left space
+        # offers Gardener or Courtier, the right one Warrior or Courtier -- so asking
+        # without it reports choices the real pending will not have, and the turn then
+        # stops on a decision with no options. Found by a random-play plan deadlocking.
+        probe = {"pid": pid, "kind": "outside_worker", "space": space}
+        if legal_moves({**game, "pending": probe}, pid):
+            game["pending"] = probe
     elif space == "well":
         _gain(game, pid, seals=1, note="well")
         _well_bonus(game, pid)
@@ -1294,6 +1387,11 @@ def player_view(game: dict | None, viewer_pid: str | None) -> dict | None:
     # every visit to the Well pays the same, visible thing.
     view["die_tiles"] = [dict(t, reward=None) for t in game.get("die_tiles", [])]
     view["well_tiles"] = [dict(t, color=None) for t in game.get("well_tiles", [])]
+    # ...and the SAME tiles are now laid out inside the rooms, where the deep copy above
+    # would ship their face-down reward to every client. A nested copy of hidden state is
+    # exactly how the 2026-07 audit's redaction was defeated once already.
+    for room in view.get("castle", {}).get("rooms", []) or []:
+        room["tiles"] = [dict(t, reward=None) for t in room.get("tiles") or ()]
     view["decks"] = {
         "steward": len(game.get("steward_deck", [])),
         "diplomat": len(game.get("diplomat_deck", [])),

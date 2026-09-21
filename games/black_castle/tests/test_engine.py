@@ -155,11 +155,14 @@ def test_daimyo_seals_can_be_traded_for_one_resource():
     _draft_and_play(game)
     pid = game["turn_pid"]
     game["players"][pid]["seals"] = 2
+    # A DELTA, not an absolute. The drafted starting resource card is real now and hands
+    # out real resources, so this seat does not begin the turn on zero food.
+    before = game["players"][pid]["resources"]["food"]
     move = {"type": "convert", "from": "seals", "to": "food"}
     assert move in engine.legal_moves(game, pid)
     assert engine.apply_move(game, pid, move) == (True, None)
     assert game["players"][pid]["seals"] == 0
-    assert game["players"][pid]["resources"]["food"] == 1
+    assert game["players"][pid]["resources"]["food"] == before + 1
 
 
 def test_compaction_round_trip_packs_rng_in_live_and_undo_snapshot():

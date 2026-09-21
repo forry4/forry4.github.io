@@ -166,23 +166,67 @@ under-sampled observation, which is the deleted-2-player-dice-rule error wearing
 different hat: *the data not showing something is not the thing being absent.* The counts
 are now DERIVED from the catalogue rather than typed beside it.
 
+### The castle Die tiles: SOLVED AND IMPLEMENTED (2026-09-20)
+
+**One Die tile sits beside each action block, and a die resolves every block whose tile
+matches its colour.** The engine used to pick `light` or `dark` from
+`(die value + room index) % 2` — which made the die's COLOUR meaningless in the castle and
+its VALUE decide the action, when the printed game is the other way round.
+
+**The geometry was proved twice, from unrelated evidence.** Every printed Steward card has
+exactly 3 action blocks and every Diplomat exactly 2 (from the card catalogue); a steward
+room holds 3 tiles and a diplomat room 2 (from the colour sets the corpus offers, via
+`die_tile_bag`). 3×3 + 2×2 = 13 in the castle and 2 at the Well. Two derivations, different
+data, same answer.
+
+**How the rule itself was verified.** The logs ship no die-tile object at all, so the rule
+is not readable — it has to be inferred from what happened. For every castle placement,
+the fired block is identifiable from the worker it deployed (56% of 378 placements), and
+the claim under test is that a room's tiles are fixed for the whole game, so the same room
+plus the same die colour must fire the same block slot no matter which card is standing
+there. Results:
+
+- **a slot index beyond the card's block count: 0 occurrences.** That is the sharp
+  falsifier and it never fired.
+- **99 of 100 rooms had no colour collision** — no slot fired by two different colours,
+  which is what "one tile per block" requires.
+- the shape distribution is exactly the prediction, including **13 rooms where one colour
+  fired TWO slots** — always a room whose tiles showed only two distinct colours, i.e. one
+  colour doubled. A colour on two tiles performs both rows; that falls out of matching
+  every tile rather than being bolted on.
+- the single collision is a measurement artifact, not a counterexample: that room showed
+  three colours with red→0 and black→1 already clean, so white must be slot 2. The
+  resolution window runs to the next die placement and so includes the rest of the turn,
+  where a worker deployed from Outside the Walls or the personal domain is attributed to
+  the card by mistake.
+
+**Setup enforces NO ROOM ALL ONE COLOUR**, because a monochrome room would be a dead room
+— two of the three die colours would resolve nothing in it. The corpus shows the
+consequence: a diplomat room displayed two distinct colours 40/40 and a steward room two or
+three, never one. `_deal_room_tiles` reaches that by re-laying until it holds rather than
+by the printed push-a-tile-on procedure; the two differ only in the distribution over
+layouts, which nothing in the corpus can distinguish. **The first version did implement the
+push-on rule and was wrong** — it passed a hand-traced example and still produced a
+monochrome room in 21 of 1200 deals, because its repair pass could re-break a room it had
+already walked. A constraint you can check at a glance beats a procedure you cannot.
+
+**A die may now only enter a room one of whose tiles shows its colour**, and
+`test_a_die_always_has_somewhere_legal_to_go` pins that this can never close every
+destination: the Well takes any colour and never fills up.
+
+**The tiles are per-field redacted.** A castle tile lies colour side UP, so its colour is
+public board state — it is what decides which dice may enter — and its reward face is down.
+The tiles are nested inside `castle.rooms`, and a nested copy of hidden state is exactly
+how this repo's redaction was defeated once before, so the test asserts against the
+serialized castle of a real game.
+
 ### STILL NOT PARITY — do not describe this port as faithful
 
 1. **The Daimyo's Favor cards are still ours.** All 3 of them, and they are the one part of
    the catalogue the corpus **cannot** supply: BGA only ships a Daimyo card's definition
    once a courtier reaches the third floor, and across 26 base games that never happens.
    `cards.py` still generates 9 of them. The rulebook, not the corpus, is the source here.
-2. **The die-colour tiles in the castle rooms.** Each room is filled at setup with one
-   colour tile per ROW of the card that will sit there, at least two distinct colours per
-   room. A die may only be placed in a room whose tiles include its colour, and **the rows
-   whose tile matches are the ones that resolve** — so a colour appearing twice performs
-   two actions. Our engine instead picks light or dark from `(die value + room index) % 2`,
-   which is not a rule in this game. The evidence is unambiguous: a room's colour set is
-   stable for a whole game while the card in it changes repeatedly, and sets of size 3
-   occur (106 rooms of 2 colours, 24 of 3). **The catalogue now carries each block's
-   `position`** — which of the card's three rows it covers — so this rule can be
-   built without re-deriving anything.
-3. **A courtier climbing INTO a room takes that room's card** — `resourcePaid` →
+2. **A courtier climbing INTO a room takes that room's card** — `resourcePaid` →
    `courtierMovedUp` → `lanternCardGained`, 202 times — and a new card is revealed behind
    it. That is how the Lantern Area fills, and the Lantern is what the left end of a bridge
    pays out. Our engine resolves room cards with DICE and never hands the card to anyone.
@@ -193,8 +237,11 @@ marked ♦ (one of each colour), fills the numbered castle spaces 1-10 in order 
 tile on to the next room whenever a room would end up all one colour — and puts the last
 two at the Well, dice-side DOWN. That accounts for 13 castle tile spaces across 5 rooms,
 so three rooms carry three tiles and two carry two, which is why a room shows two colours
-106 times and three colours 24 times in the corpus and never more. The Well half is
-implemented; the castle half is the colour rule above, still open.
+106 times and three colours 24 times in the corpus and never more. **Both halves are
+implemented now** — the Well's two tiles pay their fixed reward every visit, and the
+castle's thirteen decide which rows a die resolves (see the Die tiles section above).
+What is still unknown is the 13 castle tiles' REWARD faces, which stay face down all game
+and are therefore never observable.
 **And the bag is SOLVED: five tiles of each colour.** No rules text states it and no
 single game comes close — the most informative one alone leaves six candidates — but each
 game rules some out and the intersection over the corpus is a single bag. The 6 games
