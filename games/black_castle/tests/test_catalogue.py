@@ -382,3 +382,92 @@ def test_a_rooms_die_tiles_ship_their_colour_and_not_their_reward():
     castle_blob = json.dumps(view["castle"])
     for reward in rewards:
         assert f'"reward": "{reward}"' not in castle_blob
+
+
+# --------------------------------------------------------------------------------------
+# A courtier climbing INTO a room takes that room's card. This is the loop that fills the
+# Lantern Area, and the engine did not have it at all.
+# --------------------------------------------------------------------------------------
+
+def _climber(seats=3, seed=31):
+    game = _played(seats, seed)
+    pid = game["turn_pid"]
+    p = engine._player(game, pid)
+    p["workers"]["courtiers"]["gate"] = 2
+    p["resources"]["pearl"] = 7
+    return game, pid
+
+
+def test_a_climb_names_the_room_it_enters():
+    # The corpus is unambiguous: across 414 climbs where both were observable, the card
+    # gained was the card standing in the room climbed into, every single time.
+    game, pid = _climber()
+    moves = engine._climb_moves(game, pid)
+    first = [m for m in moves if m["to"] == "floor1"]
+    assert {m["room"] for m in first} == set(engine.FLOOR_ROOMS["floor1"])
+    second = [m for m in moves if m["to"] == "floor2"]
+    assert {m["room"] for m in second} == set(engine.FLOOR_ROOMS["floor2"])
+    # The Daimyo hall holds no room card, so a climb there names no room.
+    assert all("room" not in m for m in moves if m["to"] == "daimyo")
+
+
+def test_climbing_into_a_room_takes_its_card_and_refills_the_room():
+    game, pid = _climber()
+    p = engine._player(game, pid)
+    room = game["castle"]["rooms"][0]
+    standing = room["card"]
+    had = copy.deepcopy(p.get("action_card"))
+    before_lantern = len(p["lantern"])
+    deck_before = len(game["steward_deck"])
+
+    move = next(m for m in engine._climb_moves(game, pid)
+                if m["to"] == "floor1" and m["room"] == 0)
+    game["pending"] = {"pid": pid, "kind": "courtier_destination"}
+    ok, err = engine.apply_move(game, pid, move)
+    assert ok, err
+
+    assert p["action_card"]["id"] == standing["id"], "the room's card is now ours"
+    assert room["card"] is not None and room["card"]["id"] != standing["id"], "refilled"
+    assert len(game["steward_deck"]) == deck_before - 1
+    # ...and the card it replaced went to the Lantern Area, which is the whole point:
+    # the Lantern is what the left end of a bridge pays out, and it used to hold only
+    # the card drafted at setup.
+    assert len(p["lantern"]) == before_lantern + 1
+    assert p["lantern"][-1]["card"] == had["id"]
+
+
+def test_the_lantern_reward_is_the_cards_own_printed_one():
+    # Every card carries its own lantern line; the Lantern Area stores the {icon, amount}
+    # shape the resolver already reads, so this maps onto that rather than inventing a
+    # second vocabulary.
+    for card in catalogue.STEWARDS + catalogue.DIPLOMATS + catalogue.DECREE_CARDS:
+        entry = engine._lantern_entry(card)
+        assert entry, card["id"]
+        assert entry["amount"] >= 1
+        assert entry["icon"] in ("coin", "seal", "vp", "influence") or \
+            entry["icon"] in cards.RESOURCES, entry
+    assert engine._lantern_entry({"lantern": None}) is None
+
+
+def test_a_cached_bundle_can_still_climb_during_the_deploy_window():
+    # Pages caches a bundle ~10 minutes, and every move is checked with
+    # `move in legal_moves(...)` -- so a climb without the new `room` field is not
+    # slightly wrong, it is refused outright and the player is told their own legal
+    # action is illegal.
+    game, pid = _climber()
+    room0 = game["castle"]["rooms"][0]["card"]["id"]
+    old_shape = {"type": "courtier_destination", "from": "gate", "to": "floor1", "cost": 2}
+    game["pending"] = {"pid": pid, "kind": "courtier_destination"}
+    ok, err = engine.apply_move(game, pid, dict(old_shape))
+    assert ok, err
+    # it lands in the first room on that floor, which is the only thing a client that did
+    # not know about rooms could have meant
+    assert engine._player(game, pid)["action_card"]["id"] == room0
+
+
+def test_a_room_with_no_card_left_is_not_offered_to_a_climber():
+    game, pid = _climber()
+    for i in engine.FLOOR_ROOMS["floor1"]:
+        game["castle"]["rooms"][i]["card"] = None
+    rooms = {m.get("room") for m in engine._climb_moves(game, pid) if m["to"] == "floor1"}
+    assert rooms == set() or rooms == {None}

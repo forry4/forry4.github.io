@@ -220,16 +220,55 @@ The tiles are nested inside `castle.rooms`, and a nested copy of hidden state is
 how this repo's redaction was defeated once before, so the test asserts against the
 serialized castle of a real game.
 
+### The climb loop: SOLVED AND IMPLEMENTED (2026-09-21)
+
+**A courtier climbing INTO a room takes that room's card.** The card becomes the clan's
+new action card on its personal Domain, the one it replaces goes to the **Lantern Area**,
+and the room is refilled from its deck. That is how the Lantern fills — and the Lantern is
+what the left end of every bridge pays out — so without this loop the Lantern only ever
+held the single card drafted at setup.
+
+The corpus settles it with no room for interpretation:
+
+- `courtierMovedUp` is followed by `lanternCardGained` + `actionCardGained` **506 times**,
+  the dominant pattern by far.
+- the card gained is a **steward** when the climb entered a steward room and a **diplomat**
+  when it entered a diplomat room, never crossed.
+- and it is the card **standing in that room**: 414 of 414 climbs where both were
+  observable, zero mismatches.
+- every room whose card was taken was eventually replaced — 0 climbs left a room that
+  never changed again.
+
+**Our model tracks courtiers by FLOOR, not by room**, and that is kept: the climb move
+simply names the room as well (`{from, to, cost, room}`), since the floor is what a
+courtier's end-game points are priced on and the room is only needed to know which card
+is taken. `FLOOR_ROOMS` maps floor to rooms; the Daimyo hall holds no room card, so a
+climb there names none.
+
+**A card's Lantern reward is its own printed one** — BGA's `lanternDescription`, which the
+catalogue already carries. `_lantern_entry` maps it onto the `{icon, amount}` shape the
+Lantern Area already stored, rather than teaching the resolver a second vocabulary.
+
+Expand/contract: `_widen` fills a missing `room` with the first room on that floor still
+holding a card. Pages caches a bundle ~10 minutes and every move is validated with
+`move in legal_moves(...)`, so without the shim an old bundle's climb is not slightly
+wrong — it is refused outright and the player is told their own legal action is illegal.
+
 ### STILL NOT PARITY — do not describe this port as faithful
 
 1. **The Daimyo's Favor cards are still ours.** All 3 of them, and they are the one part of
    the catalogue the corpus **cannot** supply: BGA only ships a Daimyo card's definition
    once a courtier reaches the third floor, and across 26 base games that never happens.
    `cards.py` still generates 9 of them. The rulebook, not the corpus, is the source here.
-2. **A courtier climbing INTO a room takes that room's card** — `resourcePaid` →
-   `courtierMovedUp` → `lanternCardGained`, 202 times — and a new card is revealed behind
-   it. That is how the Lantern Area fills, and the Lantern is what the left end of a bridge
-   pays out. Our engine resolves room cards with DICE and never hands the card to anyone.
+2. **The 13 castle Die tiles' REWARD faces.** A castle tile lies colour side UP all game,
+   so its reward is never turned over and never appears in any log. This is a genuine
+   CEILING, not a "not yet": no amount of extra corpus can close it. Only the two at the
+   Well are ever read, and those are already right. The rewards our tiles carry are
+   generated, and nothing in play currently reads them.
+3. **The yard tiles are DATA ONLY.** All 16 faces are in `catalogue.YARD_TILE_FACES` with
+   their effects translated, but the engine has no tile-action system to resolve them, so
+   `domain_action` and `main_board_action` are carried and not executed. Wiring them is a
+   self-contained next job.
 
 **The Die tiles, now that the setup rule is known.** There are 15, each DOUBLE-SIDED: a
 die colour on one face, a reward on the other. Setup lays 3 of them into the castle spaces

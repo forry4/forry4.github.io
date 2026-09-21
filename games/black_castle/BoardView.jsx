@@ -177,7 +177,14 @@ function Domain({ game, pid, names, onSelect, selected, busy, inspect = false })
 
 function moveLabel(move, game) {
   if (move.type === "outside_worker") return move.action === "audience" ? ["Request an audience", "Pay 2 coins · Move a courtier to the gate", "courtiers"] : move.action === "climb" ? ["Climb the castle", "Choose a floor and pay pearls", "courtiers"] : move.worker === "warriors" ? ["Train a warrior", "Choose a training yard · Pay iron", "warriors"] : ["Plant a gardener", "Choose a garden · Pay food", "gardeners"];
-  if (move.type === "courtier_destination") return [FLOORS[move.to], `Pay ${move.cost} pearls`, "courtiers"];
+  // A climb now names the ROOM it enters, because entering one takes that room's card
+  // into your Domain. Several rooms share a floor, so the floor alone no longer tells
+  // two choices apart -- name the card you would be taking.
+  if (move.type === "courtier_destination") {
+    const room = move.room !== undefined ? game.castle?.rooms?.[move.room] : null;
+    const card = room?.card?.name;
+    return [card ? `${FLOORS[move.to]} · take ${card}` : FLOORS[move.to], `Pay ${move.cost} pearls`, "courtiers"];
+  }
   if (move.type === "worker_destination") { const card = gardenCard(game, move); return [card.name, `Pay ${card.cost} ${move.worker === "warriors" ? "iron" : "food"}`, move.worker]; }
   if (move.type === "convert") return [move.from === "seals" ? `2 seals → 1 ${move.to}` : move.from === "seal" ? "1 seal → 1 coin" : `2 ${move.from} → 1 coin`, "", "seals"];
   // A card that grants "a resource" without naming one. Without this case the three

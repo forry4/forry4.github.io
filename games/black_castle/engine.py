@@ -216,6 +216,17 @@ def _move_courtier(game: dict, pid: str, source: str, destination: str) -> bool:
     return True
 
 
+#: Which castle rooms stand on which floor. Rooms 0-2 are the Steward rooms on the first
+#: floor and 3-4 the Diplomat rooms on the second; the Daimyo hall has no room card.
+FLOOR_ROOMS = {"floor1": (0, 1, 2), "floor2": (3, 4)}
+
+
+def _rooms_on(game: dict, floor: str) -> list[int]:
+    return [i for i in FLOOR_ROOMS.get(floor, ())
+            if i < len(game.get("castle", {}).get("rooms", []))
+            and (game["castle"]["rooms"][i] or {}).get("card")]
+
+
 def _climb_moves(game: dict, pid: str) -> list[dict]:
     """Every social climb this clan could pay for right now.
 
@@ -224,6 +235,10 @@ def _climb_moves(game: dict, pid: str) -> list[dict]:
     reach the second floor while one already on the first pays 2 -- and picking the lowest
     occupied floor for the player would quietly spend the wrong courtier and the wrong
     price.
+
+    The ROOM is named too, because climbing INTO a room takes that room's card. The
+    corpus is unambiguous about it: across 414 climbs where both were observable, the card
+    gained was the card standing in the room climbed into, every single time.
     """
     p = _player(game, pid)
     c = p["workers"]["courtiers"]
@@ -234,9 +249,18 @@ def _climb_moves(game: dict, pid: str) -> list[dict]:
             continue
         for levels, cost in sorted(CLIMB_COSTS.items()):
             j = i + levels
-            if j < len(CASTLE_FLOORS) and pearl >= cost:
+            if j >= len(CASTLE_FLOORS) or pearl < cost:
+                continue
+            destination = CASTLE_FLOORS[j]
+            rooms = _rooms_on(game, destination)
+            if rooms:
+                moves.extend({"type": "courtier_destination", "from": source,
+                              "to": destination, "cost": cost, "room": room}
+                             for room in rooms)
+            else:
+                # The Daimyo hall is a floor without room cards.
                 moves.append({"type": "courtier_destination", "from": source,
-                              "to": CASTLE_FLOORS[j], "cost": cost})
+                              "to": destination, "cost": cost})
     return moves
 
 
@@ -1011,6 +1035,61 @@ def _resolve_domain(game: dict, pid: str, color: str) -> None:
     _log(game, f"{_name(game, pid)} activates the {color} domain row.", pid=pid)
 
 
+def _lantern_entry(card: dict) -> dict | None:
+    """The Lantern reward a card contributes once it reaches the Lantern Area.
+
+    Every card carries its own `lantern` line -- BGA's `lanternDescription` -- which the
+    catalogue already translates into one of our ops. The Lantern Area stores the older
+    `{icon, amount}` shape that `_resolve_lantern` reads, so map onto that rather than
+    teach the resolver a second vocabulary.
+    """
+    lantern = (card or {}).get("lantern")
+    if not isinstance(lantern, dict):
+        return None
+    if lantern.get("op") == "gain":
+        for field, icon in (("coins", "coin"), ("seals", "seal"),
+                            ("points", "vp"), ("influence", "influence")):
+            if lantern.get(field):
+                return {"icon": icon, "amount": int(lantern[field]), "card": card.get("id")}
+        resource = lantern.get("resource")
+        if resource and resource != ANY_RESOURCE:
+            return {"icon": resource, "amount": int(lantern.get("amount", 1)),
+                    "card": card.get("id")}
+    if lantern.get("op") == "passage":
+        return {"icon": "influence", "amount": int(lantern.get("steps", 1)),
+                "card": card.get("id")}
+    return None
+
+
+def _take_room_card(game: dict, pid: str, room_index: int) -> None:
+    """A courtier climbing INTO a room takes that room's card.
+
+    This is the loop that fills the Lantern Area, and the engine did not have it at all:
+    room cards were resolved by DICE and never handed to anyone, so the Lantern -- which
+    the left end of every bridge pays out -- only ever held the card drafted at setup.
+
+    The card becomes the clan's new action card on its personal Domain, the one it
+    replaces goes to the Lantern Area, and the room is refilled from its deck.
+    """
+    rooms = game.get("castle", {}).get("rooms", [])
+    if not 0 <= room_index < len(rooms):
+        return
+    room = rooms[room_index]
+    taken = room.get("card")
+    if not taken:
+        return
+    p = _player(game, pid)
+    previous = p.get("action_card")
+    entry = _lantern_entry(previous) if previous else None
+    if entry:
+        p["lantern"].append(entry)
+    p["action_card"] = copy.deepcopy(taken)
+    deck = game.get("diplomat_deck" if room.get("floor") == 2 else "steward_deck") or []
+    room["card"] = deck.pop() if deck else None
+    _log(game, f"{_name(game, pid)} takes {taken.get('name', 'the room card')} "
+               f"into their Domain.", pid=pid)
+
+
 def _resolve_lantern(game: dict, pid: str) -> None:
     p = _player(game, pid)
     if not p.get("lantern"):
@@ -1223,6 +1302,14 @@ def _widen(game: dict, pid: str, move: dict) -> dict:
         # client was offering: it never listed more than one climb per destination.
         return next((o for o in options if o["cost"] == cost),
                     min(options, key=lambda o: o["cost"], default=move))
+    if move.get("type") == "courtier_destination" and "room" not in move:
+        # A climb now names the ROOM it enters, because entering one takes its card. An
+        # old bundle cannot name it, so give it the first room on that floor that still
+        # has a card -- the only thing a client that did not know about rooms could have
+        # meant. A floor with no room cards (the Daimyo hall) is left alone.
+        rooms = _rooms_on(game, str(move.get("to")))
+        if rooms:
+            return {**move, "room": rooms[0]}
     if move.get("type") == "worker_destination" and move.get("worker") == "gardeners" \
             and "kind" not in move:
         return {**move, "kind": "plant"}
@@ -1349,7 +1436,10 @@ def apply_move(game: dict, pid: str, move: dict) -> tuple[bool, str | None]:
         if not _move_courtier(game, pid, source, to):
             return False, "no courtier can make that climb"
         _log(game, f"{_name(game, pid)} climbs to the {to}.", pid=pid)
-        game["pending"] = {"pid": pid, "kind": "end_turn"}
+        if move.get("room") is not None:
+            _take_room_card(game, pid, int(move["room"]))
+        if not _promote_choice(game, pid):
+            game["pending"] = {"pid": pid, "kind": "end_turn"}
         return True, None
     if kind == "convert":
         if game.get("pending"):
