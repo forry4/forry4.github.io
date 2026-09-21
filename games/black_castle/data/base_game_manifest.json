@@ -23,7 +23,7 @@
   },
   "components": {
     "player_aids": 4,
-    "starting_action_cards": 3,
+    "starting_action_cards": 6,
     "starting_resource_cards": 9,
     "decree_cards": 3,
     "steward_cards": 15,
@@ -33,7 +33,7 @@
     "training_yards": 3,
     "die_tiles": 15,
     "yard_tiles": 8,
-    "daimyo_favour_cards": 3,
+    "daimyo_cards": 9,
     "yard_tiles_in_play": 4
   },
   "sources": [

@@ -471,3 +471,39 @@ def test_a_room_with_no_card_left_is_not_offered_to_a_climber():
         game["castle"]["rooms"][i]["card"] = None
     rooms = {m.get("room") for m in engine._climb_moves(game, pid) if m["to"] == "floor1"}
     assert rooms == set() or rooms == {None}
+
+
+def test_the_manifest_matches_the_publishers_own_component_list():
+    """Pin the box's printed counts to Devir's published component list.
+
+    Source: devir.world/thewhitecastle/components_ENG.html (the publisher's own page).
+    Two of these were wrong and both were wrong in the same direction -- inferred from
+    what the corpus happened to show rather than looked up:
+
+      * `starting_action_cards` is 6 PRINTED CARDS over 3 DESIGNS. The corpus shows 3
+        distinct `typeArg`s and 7 distinct `id`s, which is the copy-vs-design split this
+        package already documents -- 2 copies of each design. Reading 3 off the corpus and
+        writing it into the box count conflated the two.
+      * `daimyo_cards` is 9, not 3. `cards.py` had 9 all along; only the manifest said 3.
+    """
+    manifest = json.load(open(os.path.join(_PKG, "data", "base_game_manifest.json"),
+                              encoding="utf-8"))["components"]
+    published = {
+        "player_aids": 4, "starting_action_cards": 6, "starting_resource_cards": 9,
+        "decree_cards": 3, "steward_cards": 15, "diplomat_cards": 12, "daimyo_cards": 9,
+        "plant_gardens": 5, "stone_gardens": 5, "yard_tiles": 8, "die_tiles": 15,
+    }
+    for key, count in published.items():
+        assert manifest[key] == count, key
+    # The catalogue carries DESIGNS, which is what the engine deals from.
+    assert len(catalogue.STARTING_ACTION_CARDS) == 3, "three designs, six cards"
+    assert len(cards.DAIMYO) == manifest["daimyo_cards"]
+
+
+def test_a_die_tiles_reward_vocabulary_is_the_published_one():
+    # Devir's rules list what a Die tile's benefit side can show: resources (food, iron,
+    # mother-of-pearl), coins, Clan Points, Daimyo Seals, Influence advancement, and a
+    # resource of your choice. Ours is that set -- which is worth pinning because the
+    # individual tiles' faces are NOT published and ours are generated.
+    assert set(cards.DIE_TILE_REWARDS) == {
+        "coin", "resource", "food", "iron", "pearl", "seal", "influence", "vp"}

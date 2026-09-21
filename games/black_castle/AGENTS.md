@@ -254,17 +254,46 @@ holding a card. Pages caches a bundle ~10 minutes and every move is validated wi
 `move in legal_moves(...)`, so without the shim an old bundle's climb is not slightly
 wrong — it is refused outright and the player is told their own legal action is illegal.
 
+### Where each fact comes from, and a mistake about that
+
+**The corpus is not the only source, and treating it as one produced its own errors.**
+Two printed counts were inferred from what the logs happened to show and were simply
+wrong against the publisher's own component list: `starting_action_cards` is **6 printed
+cards over 3 designs** (the corpus shows 3 `typeArg`s and 7 `id`s — the copy-vs-design
+split this file already documents, conflated anyway), and there are **9 Daimyo cards, not
+3**. `test_the_manifest_matches_the_publishers_own_component_list` pins the whole list to
+devir.world/thewhitecastle/components_ENG.html so they cannot drift back.
+
+The published rules also **confirm, word for word, two things derived here the hard way**:
+the tile setup rule ("each room must have at least 2 different dice colors, and when
+placing tiles in positions 6 to 10, if all tiles in a room would be the same color, the
+last tile is placed in the next available space") and both duel rules. Deriving them was
+not wasted — it is what made them testable — but the rulebook would have been quicker.
+
+So: use the corpus for what only play reveals (which rows resolve, what a space costs, how
+scoring composes), and use the rulebook and the components page for what the box simply
+states. Reaching for the corpus first is why "the data does not show it" kept turning into
+"it is not there".
+
 ### STILL NOT PARITY — do not describe this port as faithful
 
-1. **The Daimyo's Favor cards are still ours.** All 3 of them, and they are the one part of
-   the catalogue the corpus **cannot** supply: BGA only ships a Daimyo card's definition
-   once a courtier reaches the third floor, and across 26 base games that never happens.
-   `cards.py` still generates 9 of them. The rulebook, not the corpus, is the source here.
-2. **The 13 castle Die tiles' REWARD faces.** A castle tile lies colour side UP all game,
-   so its reward is never turned over and never appears in any log. This is a genuine
-   CEILING, not a "not yet": no amount of extra corpus can close it. Only the two at the
-   Well are ever read, and those are already right. The rewards our tiles carry are
-   generated, and nothing in play currently reads them.
+1. **The 9 Daimyo cards are still ours.** They are the one part of the catalogue the
+   corpus cannot supply: BGA ships a Daimyo card's definition only once a courtier reaches
+   the third floor, which never happens across 26 base games. `cards.py` generates 9,
+   which the publisher's component list confirms is the right COUNT — what is invented is
+   their faces. **The rulebook and the components page, not the corpus, are the source
+   here**, and they have not been mined yet beyond the counts.
+2. **The 15 Die tiles' individual REWARD faces.** A castle tile lies colour side UP all
+   game, so its reward never turns over and never appears in any log — the corpus is
+   genuinely exhausted here, and only the two at the Well are ever read. **That is a limit
+   of the corpus, NOT of what is knowable**: the faces are printed in the box and shown in
+   the rulebook's component artwork. What the publisher's rules do give, and what is now
+   pinned by a test, is the VOCABULARY — resources, coins, Clan Points, Daimyo Seals,
+   Influence advancement, and a resource of your choice — plus three anchors: **3 tiles
+   grant "a resource of your choice"** (the Matcha expansion replaces exactly those three),
+   and the recommended first-game Well holds **a Mother-of-Pearl tile whose reverse is a
+   coral die** and **an Iron tile whose reverse is a black die**. The remaining work is
+   reading the component artwork, not gathering more games.
 3. **The yard tiles are DATA ONLY.** All 16 faces are in `catalogue.YARD_TILE_FACES` with
    their effects translated, but the engine has no tile-action system to resolve them, so
    `domain_action` and `main_board_action` are carried and not executed. Wiring them is a
