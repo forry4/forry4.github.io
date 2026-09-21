@@ -473,183 +473,6 @@ def effect_vocabulary(games):
             "templates": {t: dict(v.most_common()) for t, v in sorted(templates.items())}}
 
 
-def _cards(node, out):
-    if isinstance(node, dict):
-        if "actionBlocks" in node and "id" in node:
-            out.append(node)
-        for value in node.values():
-            _cards(value, out)
-    elif isinstance(node, list):
-        for value in node:
-            _cards(value, out)
-
-
-def well_rewards(games):
-    """-> how many DISTINCT payouts the Well gave within one game.
-
-    The Well is not a draw. Its two Die tiles are laid at setup dice-side DOWN, so their
-    rewards face up and stay face up: "1 Daimyo Seal is gained along with the benefits
-    indicated on the tiles there", the same benefits on every visit. If that is right, a
-    game with several visits must show ONE payout signature -- which is what this counts,
-    and a lottery would show as many signatures as visits.
-    """
-    per_game = collections.Counter()
-    payouts = collections.Counter()
-    for packets in games:
-        seen = collections.Counter()
-        for packet in packets:
-            events = [e for e in (packet.get("data") or ()) if isinstance(e, dict)]
-            for i, event in enumerate(events):
-                args = event.get("args") or {}
-                if event.get("type") != "diePlaced" or not isinstance(args, dict):
-                    continue
-                if args.get("isUndo") or not str(args["actionSpace"]["id"]).endswith("well"):
-                    continue
-                pid, got = str(args["playerId"]), []
-                for later in events[i + 1:]:
-                    kind, more = later.get("type"), later.get("args") or {}
-                    if not isinstance(more, dict) or str(more.get("playerId", "")) != pid:
-                        continue
-                    # A gain carrying a cardId came from a card, not from the Well.
-                    if more.get("isUndo") or more.get("cardId"):
-                        continue
-                    if kind == "resourceGained":
-                        got.append("%s+%s" % (more["resource"], more["numberOfResources"]))
-                    elif kind == "sealGained":
-                        got.append("seal+%s" % more["numberOfSeals"])
-                    elif kind == "coinGained" and more.get("dieId") is None:
-                        got.append("coin+%s" % more["numberOfCoins"])
-                    elif kind == "scoreUpdated":
-                        got.append("vp+%s" % more["numberOfVp"])
-                if got:
-                    seen[tuple(sorted(got))] += 1
-                    payouts[tuple(sorted(got))] += 1
-        if seen:
-            per_game[len(seen)] += 1
-    return {"distinct_payouts_within_one_game": dict(sorted(per_game.items())),
-            "payout_signatures": {" ".join(k): v for k, v in payouts.most_common()}}
-
-
-def outside_the_walls(games):
-    """-> which worker each Outside the Walls space let a player deploy.
-
-    A turn can deploy more than one worker because a castle card may grant another, so
-    only the turns that deployed EXACTLY ONE kind say anything about the space itself.
-    Those are unambiguous, and they separate cleanly.
-    """
-    solo = collections.defaultdict(collections.Counter)
-    for packets in games:
-        pending = None
-        for packet in packets:
-            for event in (packet.get("data") or ()):
-                if not isinstance(event, dict):
-                    continue
-                kind, args = event.get("type"), event.get("args") or {}
-                if not isinstance(args, dict):
-                    continue
-                if kind == "diePlaced":
-                    sid = str(args["actionSpace"]["id"])
-                    pending = ([sid[-1], []] if ("outside-the-walls" in sid
-                                                 and not args.get("isUndo")) else None)
-                    continue
-                if pending is None or args.get("isUndo"):
-                    continue
-                if kind in ("gardenerAssigned", "warriorAssigned"):
-                    pending[1].append(kind.replace("Assigned", ""))
-                elif kind in ("courtierAssigned", "courtierMovedUp"):
-                    pending[1].append("courtier")
-                elif kind == "gameLog" and "confirms his turn" in str(event.get("log")):
-                    if len(set(pending[1])) == 1:
-                        solo[pending[0]][pending[1][0]] += 1
-                    pending = None
-    return {space: dict(c.most_common()) for space, c in sorted(solo.items())}
-
-
-def dice_stacking(games):
-    """-> the most dice ever seen on one space of each kind, between rerolls."""
-    peak = collections.defaultdict(int)
-    for packets in games:
-        live = collections.Counter()
-        for event in _events(packets):
-            args = event.get("args") or {}
-            if event.get("type") == "diceRolled":
-                live.clear()
-                continue
-            if event.get("type") != "diePlaced" or not isinstance(args, dict):
-                continue
-            sid = str(args["actionSpace"]["id"])
-            family = ("personal-domain" if "action-space-player-" in sid
-                      else "".join(c for c in sid.replace("action-space-main-board-", "")
-                                   if not c.isdigit()).rstrip("-"))
-            live[sid] += -1 if args.get("isUndo") else 1
-            peak[family] = max(peak[family], live[sid])
-    return dict(sorted(peak.items()))
-
-
-def diamond_cards(games):
-    """-> the printed cards marked with a diamond, which a 2-player game leaves out."""
-    flags = collections.defaultdict(dict)
-    for packets in games:
-        out = []
-        for packet in packets:
-            _cards(packet, out)
-        for card in out:
-            if card.get("type") in ("steward", "diplomat"):
-                flags[card["type"]][int(card["typeArg"])] = bool(card.get("diamond"))
-    return {kind: {"diamond": sorted(k for k, v in rows.items() if v),
-                   "plain": sorted(k for k, v in rows.items() if not v)}
-            for kind, rows in sorted(flags.items())}
-
-
-def yard_tiles(games):
-    """-> the 8 double-sided yard tiles, and how many a game puts in play."""
-    faces, in_play = {}, collections.Counter()
-    for packets in games:
-        latest = None
-        for event in _events(packets):
-            extra = _action_args(event)
-            yards = (extra or {}).get("trainingYards")
-            if not yards:
-                continue
-            latest = yards
-            for yard in yards:
-                for tile in yard.get("yardTiles") or ():
-                    faces["%s %s" % (tile["typeArg"], tile.get("side"))] = {
-                        "yard": yard["id"],
-                        "action": list(tile.get("actionDescription") or ()),
-                        "args": tile.get("actionDescriptionArgs"),
-                    }
-        if latest:
-            in_play[sum(len(y.get("yardTiles") or ()) for y in latest)] += 1
-    return {"faces": dict(sorted(faces.items())), "tiles_in_play_per_game": dict(in_play)}
-
-
-def effect_vocabulary(games):
-    """-> every distinct effect template on a base card, with its operands.
-
-    This is the whole job that remains. Counting it is what tells a reader whether
-    porting the catalogue is a rewrite or an afternoon.
-    """
-    templates = collections.defaultdict(collections.Counter)
-    blocks = collections.Counter()
-    conditionals = collections.Counter()
-    for packets in games:
-        out = []
-        for packet in packets:
-            _cards(packet, out)
-        for card in out:
-            for block in card["actionBlocks"]:
-                blocks[block["type"]] += 1
-                conditionals[block.get("conditional")] += 1
-                for desc in block["actionDescriptions"]:
-                    text = desc["description"].replace(" ${disabledReason}", "")
-                    args = {k: v for k, v in (desc.get("descriptionArgs") or {}).items()
-                            if k not in ("i18n", "disabledReason")}
-                    templates[text][json.dumps(args, sort_keys=True)] += 1
-    return {"block_types": dict(blocks), "conditionals": dict(conditionals),
-            "templates": {t: dict(v.most_common()) for t, v in sorted(templates.items())}}
-
-
 #: A steward room holds three Die tiles and a diplomat room two, so the castle takes 13
 #: and the Well the last 2. Not assumed -- `die_tile_bag()` shows the split is the only
 #: one under which the corpus has any consistent bag at all.
@@ -752,6 +575,75 @@ def die_tile_bag(games):
         "diplomat_rooms_showing_three_colours": sum(
             1 for packets in games for sid, c in room_colour_sets(packets).items()
             if sid.startswith("diplomat-") and len(c) > 2),
+    }
+
+
+def two_player(games):
+    """-> what a DUEL does differently, MEASURED rather than taken from the rulebook.
+
+    This is the derivation the corpus could not make before 2026-09-20: every log was a
+    3- or 4-player table, so nothing here was evidence about a duel at all. A single
+    2-player game arrived with the second batch and it settles both known duel rules.
+
+    **Dice do not stack.** Counting peak occupancy alone would be weak -- a short game
+    simply may not have crowded a space -- so the real test is what the game OFFERED. In
+    the "choose a die" state BGA lists every legal destination for every takeable die, and
+    at two players a space already holding a die is offered ZERO times out of hundreds,
+    while at three and four it is offered constantly. That is a rule being enforced, not a
+    coincidence of play.
+
+    **The diamond cards are boxed.** The duel log shows no diamond-marked card at all. On
+    its own that is only suggestive, so the fixture also records how many DISTINCT cards
+    were seen: 8 stewards drawn from a 15-card deck without once hitting one of the 6
+    diamonds happens with probability C(9,8)/C(15,8) = 0.0014.
+    """
+    peak = collections.defaultdict(lambda: collections.defaultdict(int))
+    offers = collections.defaultdict(lambda: collections.Counter())
+    diamonds = collections.Counter()
+    distinct = collections.defaultdict(set)
+    for packets in games:
+        ruleset, seats = classify(packets)
+        if ruleset != "base":
+            continue
+        bucket = "2" if seats <= 2 else "3-4"
+        live = collections.Counter()
+        for event in _events(packets):
+            args = event.get("args") or {}
+            if event.get("type") == "diceRolled":
+                live.clear()
+                continue
+            if not isinstance(args, dict):
+                continue
+            inner = args.get("args") if isinstance(args.get("args"), dict) else {}
+            listed = inner.get("actionSpaces")
+            if isinstance(listed, dict):
+                for options in listed.values():
+                    for space in options or ():
+                        sid = str(space["id"])
+                        if "well" in sid or "player-" in sid:
+                            continue  # the Well is uncapped; a domain row is private
+                        offers[bucket]["occupied" if live[sid] else "empty"] += 1
+            if event.get("type") != "diePlaced":
+                continue
+            sid = str(args["actionSpace"]["id"])
+            family = ("personal-domain" if "action-space-player-" in sid
+                      else "".join(c for c in sid.replace("action-space-main-board-", "")
+                                   if not c.isdigit()).rstrip("-"))
+            live[sid] += -1 if args.get("isUndo") else 1
+            peak[bucket][family] = max(peak[bucket][family], live[sid])
+        cards = []
+        for packet in packets:
+            _cards(packet, cards)
+        for card in cards:
+            if card.get("type") in ("steward", "diplomat"):
+                distinct[bucket + " " + card["type"]].add(int(card["typeArg"]))
+                if card.get("diamond"):
+                    diamonds[bucket] += 1
+    return {
+        "peak_dice_per_space": {k: dict(sorted(v.items())) for k, v in sorted(peak.items())},
+        "offers_by_occupancy": {k: dict(v) for k, v in sorted(offers.items())},
+        "diamond_cards_seen": {k: diamonds.get(k, 0) for k in ("2", "3-4")},
+        "distinct_cards_seen": {k: len(v) for k, v in sorted(distinct.items())},
     }
 
 
@@ -943,15 +835,10 @@ def build(games, yard_points, all_games=None):
         "dice_stacking_peak": dice_stacking(games),
         "diamond_cards": diamond_cards(games),
         "effect_vocabulary": effect_vocabulary(games),
-        "yard_tiles": yard_tiles(games),
-        "well": well_rewards(games),
-        "outside_the_walls": outside_the_walls(games),
-        "dice_stacking_peak": dice_stacking(games),
-        "diamond_cards": diamond_cards(games),
-        "effect_vocabulary": effect_vocabulary(games),
         "worker_costs": worker_costs(games),
         "passage_of_time": passage_of_time(all_games or games),
         "turn_order": turn_order(games),
+        "two_player": two_player(games),
         "scoring": {
             "courtier_points_by_room": COURTIER_POINTS,
             "warriors": "sum of the point value of each warrior's yard, times the number "

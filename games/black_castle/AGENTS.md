@@ -18,11 +18,17 @@ redaction test and a persistence round trip before shipping.
 ## BGA parity: what the corpus proved, and what it proved WRONG
 
 The corpus is `$WHITECASTLE_CORPUS` (default `C:/Users/Forrest/WhiteCastle_corpus`), filled
-by the `cob-mining` cron. **29 logs today, and only 20 of them are base game** — the other
-nine are Matcha, which adds green dice, a fourth personal-domain row, geishas, chasen, the
+by the `cob-mining` cron. **39 logs today, and only 26 of them are base game** — the other
+13 are Matcha, which adds green dice, a fourth personal-domain row, geishas, chasen, the
 Tea Fields and the Outskirts of Himeji, and whose cards share the base id space. Derive
 from the whole pile and the base board grows two action spaces that are not in our box, so
-`tools/bga_parity.py` splits them and works on the 20.
+`tools/bga_parity.py` splits them and works on the 26.
+
+**The corpus grew 20 → 26 base games on 2026-09-20 and not one derived rule moved.** The 6
+new games contributed 20 scoreboards the formulas had never been fitted to and reproduced
+all 20, which is the strongest evidence the board half is right that we have: a fitted
+formula does not generalise to unseen games for free. Two things did change, and neither
+is a rule — see *Reading a log: the two eras* below.
 
 **The audit ran. It is `tools/bga_parity.py`, its output is `data/bga_ground_truth.json`,
 and `tests/test_bga_parity.py` holds the engine to it.** The fixture is committed and is a
@@ -31,8 +37,8 @@ few KB, so those tests run on a fresh clone with no corpus; regenerate with `--w
 - **The instrument checks itself, and nothing here should be trusted further than that
   check.** BGA ships a per-player `scoreBreakdown` it computed independently, so the tool
   reconstructs each final board out of the event stream and recomputes all nine categories
-  with the formulas it is about to write down. **70 of 70 seats, exact.** A scoring rule
-  that is wrong does not produce a subtly odd fixture; it fails to reproduce 70 real
+  with the formulas it is about to write down. **90 of 90 seats, exact.** A scoring rule
+  that is wrong does not produce a subtly odd fixture; it fails to reproduce 90 real
   scoreboards and the tool exits 1.
 - **`isUndo` events are STATE, not chatter.** BGA replays a rolled-back action as the same
   notification with `isUndo: true` carrying the RESTORED value, and players undo constantly
@@ -61,7 +67,7 @@ few KB, so those tests run on a fresh clone with no corpus; regenerate with `--w
 | Castle room capacity | 1 die at 2 players, 2 at 3–4 | 2 at every player count |
 | Training yards | 8 generated yards, 4 dealt | the printed 3, always all 3: 5 iron→2 pts, 3→1, 1→1 |
 | Gardens | 3 plots, only the Plant card reachable | 6 plots; the ladder is cost *c* pays 2*c*−1 |
-| Turn order tie-break | last round's leader stayed ahead | the marker ON TOP leads — 60 of 60 in the corpus |
+| Turn order tie-break | last round's leader stayed ahead | the marker ON TOP leads — 78 of 78 in the corpus |
 | Starting resource cards | 9 | 8 |
 | The Well | 1 seal + two tiles revealed at random from a hidden bag, which locked undo | 1 seal + its own TWO tiles, face up from setup, same payout every visit |
 | Outside the Walls actions | any of the three workers from either space | left = Gardener or Courtier, right = Warrior or Courtier |
@@ -70,11 +76,47 @@ few KB, so those tests run on a fresh clone with no corpus; regenerate with `--w
 **And one rule this audit got WRONG before getting it right.** The first pass deleted the
 `1 die at two players, 2 at three or four` check on the reasoning that board printing does
 not shrink. The printing does not -- but "in a 1- or 2-player game, dice cannot be stacked
-on top of other dice in any part of the game" is a separate 2-player rule, and the corpus
-could never have caught the mistake because **it contains no 2-player games at all**. It
-is back, as `SOLO_OR_DUEL_DICE`, with a test that says where it comes from. The lesson is
-the cheap one: a corpus that cannot reach a case is not evidence about that case, and
-"the data does not show this" is not the same as "this is not so".
+on top of other dice in any part of the game" is a separate 2-player rule, and at the time
+the corpus could not have caught the mistake because **it contained no 2-player games at
+all**. It went back in as `SOLO_OR_DUEL_DICE`, on the rulebook's authority alone.
+
+**The second batch brought the first 2-player table, and it confirms the restored rule.**
+Peak occupancy alone would be weak — a short game may simply never crowd a space — so the
+test is what the game OFFERED. In BGA's "choose a die" state every legal destination is
+listed for every takeable die, and at two players **a space already holding a die was
+offered zero times out of 552**, against 6,831 times at three and four players. That is a
+rule being enforced; a coincidence of play does not look like that. The same log carries
+**no diamond-marked card at all**, and it drew 8 distinct stewards from a 15-card deck
+without once hitting one of the 6 diamonds — C(9,8)/C(15,8) = 0.0014 if they were still in
+the box. Both duel rules are now measurements rather than quotations, pinned in the
+fixture's `two_player` block.
+
+The lesson survives being confirmed, and is the cheap one: a corpus that cannot reach a
+case is not evidence about that case, and "the data does not show this" is not the same as
+"this is not so". The fix was to go and get the case, which took six games.
+
+**The Well is the one space that never fills up** — the corpus shows THREE dice on it at
+four players, more than any room ever holds. The engine already offers it unconditionally;
+what the test guards is a future blanket capacity rule sweeping the Well up with the rooms.
+
+### Reading a log: the two eras
+
+**The newest logs are the OLDEST tables, and they use an older payload.** The second batch
+has lower table ids (731–775M against 858–904M), so anything "new" in them may be BGA's
+schema changing rather than the game's rules. Two such differences turned up, and both
+split *perfectly cleanly by log*, which is what tells drift apart from a rule:
+
+- **`conditional` is absent on the older payload.** All 6 new logs report no conditional on
+  any block; all 20 older ones report `and`. This is not a new kind of conditional and it
+  is certainly not an `or` — the fixture records it as `None` only because
+  `block.get("conditional")` returns that for a missing key.
+- **A free action is spelled two ways.** The older payload writes `qty: 0` with a coin icon
+  where the newer one omits the cost entirely, so `Perform Gardener Action` and `Perform
+  Warrior Action` each gained a second operand set that is the same behaviour.
+
+Net of that drift the remaining job grew by exactly **one** operand set — `Gain seal Decree
+Card`, which is real — and no new template. When a bigger corpus seems to add vocabulary,
+check the era split before believing it.
 
 Confirmed already correct and now pinned by a test: courtier points by floor (1/3/6/10),
 warriors = Σ(yard points) × courtiers INSIDE the castle (the gate does not multiply),
@@ -94,9 +136,10 @@ one job, not three, because they are the same loop:
    (`"Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Gardener Action"`)
    over a vocabulary we have no ops for.
    **That vocabulary is SMALL, and measuring it is the difference between a rewrite and an
-   afternoon: 11 distinct templates across the whole base catalogue, over 31 operand sets --
+   afternoon: 11 distinct templates across the whole base catalogue, over 34 operand sets --
    19 of which are the amounts on the single `Gain <icon> <n>` template, a table rather
-   than a behaviour -- collapsing to 8 ops** — gain (coin/food/iron/pearl/seal/vp/any-resource, 1–5), gain
+   than a behaviour, and 2 of which are one older-payload spelling of a free action --
+   collapsing to 8 ops** — gain (coin/food/iron/pearl/seal/vp/any-resource, 1–5), gain
    Lantern Rewards, move the Passage of Time 1–2, perform a Courtier / Gardener / Warrior
    action (free or for 1 seal), perform the Well action, and gain a Decree Card. **Every
    base block is `light` or `dark` and every conditional is `and`** — the blue/yellow
@@ -121,11 +164,12 @@ marked ♦ (one of each colour), fills the numbered castle spaces 1-10 in order 
 tile on to the next room whenever a room would end up all one colour — and puts the last
 two at the Well, dice-side DOWN. That accounts for 13 castle tile spaces across 5 rooms,
 so three rooms carry three tiles and two carry two, which is why a room shows two colours
-81 times and three colours 19 times in the corpus and never more. The Well half is
+106 times and three colours 24 times in the corpus and never more. The Well half is
 implemented; the castle half is the colour rule above, still open.
 **And the bag is SOLVED: five tiles of each colour.** No rules text states it and no
 single game comes close — the most informative one alone leaves six candidates — but each
-game rules some out and the intersection over twenty is a single bag.
+game rules some out and the intersection over the corpus is a single bag. The 6 games
+added on 2026-09-20 did not disturb it: the answer is still uniquely 5/5/5.
 `tools/bga_parity.py:die_tile_bag()` does it as a constraint problem, and two things make
 it a derivation rather than a curve fit. The room split is not assumed: a diplomat room
 showed exactly two colours **40 times out of 40** and never three, while steward rooms
@@ -145,9 +189,11 @@ intersection trick; the castle tiles' reward faces stay face down all game and n
 matter.
 
 Also still unverified: the 3 Daimyo Favor cards, and **every 2-player rule beyond the two
-above** — the corpus has no 2-player games, so nothing about a duel is evidence here. The
-cheapest fix for that is the corpus itself: point the `cob-mining` manifest at 2-player
-tables for a week.
+above** — which are now confirmed, but on the strength of a SINGLE duel log. One game is
+enough to settle a rule the game enforces on every offer (no stacking: 552 chances, 0
+violations) and enough to make the diamond removal unlikely to be chance (p ≈ 0.0008); it
+is not enough to turn up a duel rule nobody has thought to look for. More 2-player tables
+remain the cheapest thing the corpus could gain.
 
 ### The yard tiles, for when the tile engine lands
 

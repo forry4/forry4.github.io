@@ -111,8 +111,8 @@
   "seals": 5
  },
  "castle_room_color_set_sizes": {
-  "2": 81,
-  "3": 19
+  "2": 106,
+  "3": 24
  },
  "diamond_cards": {
   "diplomat": {
@@ -178,8 +178,8 @@
   },
   "castle_tiles": 13,
   "diplomat_rooms_showing_three_colours": 0,
-  "games_needed_for_a_unique_bag": 6,
-  "games_used": 20,
+  "games_needed_for_a_unique_bag": 12,
+  "games_used": 26,
   "tiles_per_room": {
    "diplomat": 2,
    "steward": 3
@@ -188,69 +188,84 @@
  },
  "effect_vocabulary": {
   "block_types": {
-   "dark": 3362,
-   "light": 6279
+   "dark": 4206,
+   "light": 7837
   },
   "conditionals": {
+   "None": 2402,
    "and": 9641
   },
   "templates": {
    "Gain ${iconPlaceholder} ${numberOfResources}": {
-    "{\"iconPlaceholder\": \"coin\", \"numberOfResources\": 1}": 452,
-    "{\"iconPlaceholder\": \"coin\", \"numberOfResources\": 2}": 117,
-    "{\"iconPlaceholder\": \"coin\", \"numberOfResources\": 3}": 44,
-    "{\"iconPlaceholder\": \"coin\", \"numberOfResources\": 4}": 54,
+    "{\"iconPlaceholder\": \"coin\", \"numberOfResources\": 1}": 583,
+    "{\"iconPlaceholder\": \"coin\", \"numberOfResources\": 2}": 167,
+    "{\"iconPlaceholder\": \"coin\", \"numberOfResources\": 3}": 54,
+    "{\"iconPlaceholder\": \"coin\", \"numberOfResources\": 4}": 74,
     "{\"iconPlaceholder\": \"coin\", \"numberOfResources\": 5}": 8,
-    "{\"iconPlaceholder\": \"food\", \"numberOfResources\": 1}": 491,
-    "{\"iconPlaceholder\": \"food\", \"numberOfResources\": 2}": 315,
-    "{\"iconPlaceholder\": \"food\", \"numberOfResources\": 4}": 26,
-    "{\"iconPlaceholder\": \"iron\", \"numberOfResources\": 1}": 484,
-    "{\"iconPlaceholder\": \"iron\", \"numberOfResources\": 2}": 432,
-    "{\"iconPlaceholder\": \"pearl\", \"numberOfResources\": 1}": 393,
-    "{\"iconPlaceholder\": \"pearl\", \"numberOfResources\": 2}": 338,
-    "{\"iconPlaceholder\": \"resource\", \"numberOfResources\": 1}": 348,
-    "{\"iconPlaceholder\": \"resource\", \"numberOfResources\": 2}": 388,
-    "{\"iconPlaceholder\": \"resource\", \"numberOfResources\": 3}": 286,
-    "{\"iconPlaceholder\": \"seal\", \"numberOfResources\": 1}": 882,
-    "{\"iconPlaceholder\": \"seal\", \"numberOfResources\": 2}": 54,
-    "{\"iconPlaceholder\": \"vp\", \"numberOfResources\": 1}": 360,
-    "{\"iconPlaceholder\": \"vp\", \"numberOfResources\": 2}": 580
+    "{\"iconPlaceholder\": \"food\", \"numberOfResources\": 1}": 595,
+    "{\"iconPlaceholder\": \"food\", \"numberOfResources\": 2}": 405,
+    "{\"iconPlaceholder\": \"food\", \"numberOfResources\": 4}": 30,
+    "{\"iconPlaceholder\": \"iron\", \"numberOfResources\": 1}": 609,
+    "{\"iconPlaceholder\": \"iron\", \"numberOfResources\": 2}": 515,
+    "{\"iconPlaceholder\": \"pearl\", \"numberOfResources\": 1}": 468,
+    "{\"iconPlaceholder\": \"pearl\", \"numberOfResources\": 2}": 449,
+    "{\"iconPlaceholder\": \"resource\", \"numberOfResources\": 1}": 413,
+    "{\"iconPlaceholder\": \"resource\", \"numberOfResources\": 2}": 451,
+    "{\"iconPlaceholder\": \"resource\", \"numberOfResources\": 3}": 337,
+    "{\"iconPlaceholder\": \"seal\", \"numberOfResources\": 1}": 1055,
+    "{\"iconPlaceholder\": \"seal\", \"numberOfResources\": 2}": 66,
+    "{\"iconPlaceholder\": \"vp\", \"numberOfResources\": 1}": 437,
+    "{\"iconPlaceholder\": \"vp\", \"numberOfResources\": 2}": 756
    },
    "Gain ${iconPlaceholder} Decree Card": {
-    "{\"iconPlaceholder\": \"coin\"}": 28,
-    "{\"iconPlaceholder\": \"vp\"}": 14
+    "{\"iconPlaceholder\": \"coin\"}": 34,
+    "{\"iconPlaceholder\": \"seal\"}": 10,
+    "{\"iconPlaceholder\": \"vp\"}": 18
    },
    "Gain ${iconPlaceholder} Lantern Rewards": {
-    "{\"iconPlaceholder\": \"action-lantern\"}": 1443
+    "{\"iconPlaceholder\": \"action-lantern\"}": 1819
    },
    "Move ${iconPlaceholder} ${numberOfSteps} Passage of Time": {
-    "{\"iconPlaceholder\": \"action-passage-of-time\", \"numberOfSteps\": 1}": 653,
-    "{\"iconPlaceholder\": \"action-passage-of-time\", \"numberOfSteps\": 2}": 159
+    "{\"iconPlaceholder\": \"action-passage-of-time\", \"numberOfSteps\": 1}": 828,
+    "{\"iconPlaceholder\": \"action-passage-of-time\", \"numberOfSteps\": 2}": 197
    },
    "Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Courtier Actions": {
-    "{\"iconPlaceholder1\": \"action-courtier\", \"iconPlaceholder2\": \"seal\", \"qty\": 1}": 821
+    "{\"iconPlaceholder1\": \"action-courtier\", \"iconPlaceholder2\": \"seal\", \"qty\": 1}": 1006
    },
    "Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Gardener Action": {
-    "{\"iconPlaceholder1\": \"action-gardener\", \"iconPlaceholder2\": \"seal\", \"qty\": 1}": 760
+    "{\"iconPlaceholder1\": \"action-gardener\", \"iconPlaceholder2\": \"seal\", \"qty\": 1}": 972
    },
    "Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Warrior Action": {
-    "{\"iconPlaceholder1\": \"action-warrior\", \"iconPlaceholder2\": \"seal\", \"qty\": 1}": 832
+    "{\"iconPlaceholder1\": \"action-warrior\", \"iconPlaceholder2\": \"seal\", \"qty\": 1}": 1021
    },
    "Perform ${iconPlaceholder1} Courtier Actions": {
-    "{\"iconPlaceholder1\": \"action-courtier\", \"iconPlaceholder2\": \"coin\", \"qty\": 0}": 462
+    "{\"iconPlaceholder1\": \"action-courtier\", \"iconPlaceholder2\": \"coin\", \"qty\": 0}": 572
    },
    "Perform ${iconPlaceholder1} Gardener Action": {
+    "{\"iconPlaceholder1\": \"action-gardener\", \"iconPlaceholder2\": \"coin\", \"qty\": 0}": 130,
     "{\"iconPlaceholder1\": \"action-gardener\"}": 439
    },
    "Perform ${iconPlaceholder1} Warrior Action": {
+    "{\"iconPlaceholder1\": \"action-warrior\", \"iconPlaceholder2\": \"coin\", \"qty\": 0}": 106,
     "{\"iconPlaceholder1\": \"action-warrior\"}": 404
    },
    "Perform ${iconPlaceholder} Well Action": {
-    "{\"iconPlaceholder\": \"action-well\"}": 706
+    "{\"iconPlaceholder\": \"action-well\"}": 917
    }
   }
  },
  "gardens": [
+  {
+   "action": "Pay ${iconPlaceholder2} ${qty} to perform Perform ${iconPlaceholder1} Personal Domain Action",
+   "action_args": {
+    "iconPlaceholder1": "action-personal-domain",
+    "iconPlaceholder2": "coin",
+    "qty": 4
+   },
+   "food_cost": 3,
+   "point_value": 5,
+   "type": "plant"
+  },
   {
    "action": "Pay ${iconPlaceholder2} ${qty} to perform Perform ${iconPlaceholder1} Personal Domain Action ${disabledReason}",
    "action_args": {
@@ -285,6 +300,17 @@
    "type": "plant"
   },
   {
+   "action": "Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Warrior Action",
+   "action_args": {
+    "iconPlaceholder1": "action-warrior",
+    "iconPlaceholder2": "coin",
+    "qty": 3
+   },
+   "food_cost": 4,
+   "point_value": 7,
+   "type": "plant"
+  },
+  {
    "action": "Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Warrior Action ${disabledReason}",
    "action_args": {
     "iconPlaceholder1": "action-warrior",
@@ -293,6 +319,17 @@
    },
    "food_cost": 4,
    "point_value": 7,
+   "type": "plant"
+  },
+  {
+   "action": "Pay ${iconPlaceholder2} ${qty} to perform any ${iconPlaceholder} Action on the Main Board",
+   "action_args": {
+    "iconPlaceholder": "action-any-die-tile",
+    "iconPlaceholder2": "coin",
+    "qty": 4
+   },
+   "food_cost": 5,
+   "point_value": 9,
    "type": "plant"
   },
   {
@@ -359,44 +396,44 @@
  ],
  "outside_the_walls": {
   "1": {
-   "courtier": 46,
-   "gardener": 33
+   "courtier": 60,
+   "gardener": 41
   },
   "2": {
-   "courtier": 47,
-   "warrior": 13
+   "courtier": 64,
+   "warrior": 17
   }
  },
  "passage_of_time": {
   "blocked_at": {
-   "10": 101,
-   "14": 13,
-   "5": 85
+   "10": 132,
+   "14": 14,
+   "5": 113
   },
   "checkpoint_seals": {
-   "11 2": 27,
+   "11 2": 34,
    "15 3": 1,
-   "6 1": 116
+   "6 1": 156
   },
   "highest_seen": 15,
   "position_to_points": {
-   "10 3": 24,
-   "11 6": 9,
-   "12 6": 3,
-   "13 6": 3,
-   "14 6": 3,
+   "10 3": 34,
+   "11 6": 12,
+   "12 6": 5,
+   "13 6": 4,
+   "14 6": 4,
    "15 10": 1,
    "4 0": 5,
-   "5 0": 16,
-   "6 3": 8,
-   "7 3": 10,
-   "8 3": 9,
-   "9 3": 6
+   "5 0": 18,
+   "6 3": 10,
+   "7 3": 15,
+   "8 3": 13,
+   "9 3": 8
   }
  },
  "reconstruction": {
-  "base_logs": 20,
-  "seats_exact": 70,
+  "base_logs": 26,
+  "seats_exact": 90,
   "seats_wrong": 0
  },
  "scoring": {
@@ -452,12 +489,49 @@
  },
  "turn_order": {
   "mismatches": 0,
-  "stack_top_first": 60
+  "stack_top_first": 78
+ },
+ "two_player": {
+  "diamond_cards_seen": {
+   "2": 0,
+   "3-4": 1557
+  },
+  "distinct_cards_seen": {
+   "2 diplomat": 2,
+   "2 steward": 8,
+   "3-4 diplomat": 12,
+   "3-4 steward": 15
+  },
+  "offers_by_occupancy": {
+   "2": {
+    "empty": 552
+   },
+   "3-4": {
+    "empty": 19681,
+    "occupied": 6831
+   }
+  },
+  "peak_dice_per_space": {
+   "2": {
+    "diplomat": 1,
+    "outside-the-walls": 1,
+    "personal-domain": 1,
+    "steward": 1,
+    "well": 1
+   },
+   "3-4": {
+    "diplomat": 2,
+    "outside-the-walls": 2,
+    "personal-domain": 1,
+    "steward": 2,
+    "well": 3
+   }
+  }
  },
  "well": {
   "distinct_payouts_within_one_game": {
-   "1": 15,
-   "2": 2
+   "1": 16,
+   "2": 3
   },
   "payout_signatures": {
    "coin+1 food+1 seal+1": 7,
@@ -466,9 +540,11 @@
    "coin+1 pearl+1 seal+1": 2,
    "coin+1 pearl+1 seal+1 vp+1": 2,
    "coin+1 seal+1": 1,
+   "food+1 iron+1 seal+1": 1,
    "food+1 seal+1": 5,
    "iron+1 iron+1 seal+1": 3,
-   "iron+1 pearl+1 seal+1": 6,
+   "iron+1 pearl+1 seal+1": 8,
+   "iron+1 pearl+1 seal+1 vp+1": 1,
    "iron+1 seal+1": 3,
    "pearl+1 pearl+1 seal+1 vp+1 vp+1": 1,
    "pearl+1 seal+1": 2,
@@ -478,17 +554,17 @@
  },
  "worker_costs": {
   "courtier_climb_pearl_by_levels": {
-   "1 2": 416,
+   "1 2": 513,
    "1 5": 3,
-   "2 5": 35
+   "2 5": 47
   },
   "courtier_gate_coins": {
-   "2": 385
+   "2": 478
   },
   "warrior_iron_by_yard": {
-   "1 5": 187,
-   "2 3": 51,
-   "3 1": 47
+   "1 5": 227,
+   "2 3": 69,
+   "3 1": 73
   }
  },
  "yard_tiles": {
@@ -698,9 +774,9 @@
    }
   },
   "tiles_in_play_per_game": {
-   "1": 5,
-   "2": 7,
-   "4": 8
+   "1": 8,
+   "2": 8,
+   "4": 10
   }
  }
 }

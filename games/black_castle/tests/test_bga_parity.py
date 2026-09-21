@@ -1,9 +1,15 @@
 """Hold the engine to The White Castle as Board Game Arena actually plays it.
 
 The fixture these read, `data/bga_ground_truth.json`, is DERIVED rather than typed:
-`tools/bga_parity.py` reads 20 base-game BGA logs and, before writing anything, recomputes
-all 70 final scoreboards from the formulas it is about to record. So a row here is not "we
-believe the rule is X" -- it is "X reproduced real scoreboards, exactly, 70 times".
+`tools/bga_parity.py` reads 26 base-game BGA logs and, before writing anything, recomputes
+all 90 final scoreboards from the formulas it is about to record. So a row here is not "we
+believe the rule is X" -- it is "X reproduced real scoreboards, exactly, 90 times".
+
+The corpus grew from 20 base logs to 26 on 2026-09-20 and **not one derived rule moved** --
+the 6 new games contributed 20 scoreboards the formulas had never been fitted to and
+reproduced all 20. One of those games matters more than the rest: it is the first 2-PLAYER
+table the corpus has ever held, and it turns both duel rules below from rulebook
+quotations into measurements.
 
 WHAT THESE TESTS DO NOT COVER, AND WHY THAT MATTERS
 ---------------------------------------------------
@@ -38,7 +44,7 @@ def _pairs(mapping):
 def test_the_fixture_is_the_verified_one():
     # If the reconstruction ever stops being exact the fixture is a set of guesses, and
     # every assertion below becomes a test of those guesses rather than of the game.
-    assert TRUTH["reconstruction"] == {"base_logs": 20, "seats_exact": 70, "seats_wrong": 0}
+    assert TRUTH["reconstruction"] == {"base_logs": 26, "seats_exact": 90, "seats_wrong": 0}
 
 
 def test_final_scoring_matches_every_category_bga_reports():
@@ -126,13 +132,58 @@ def test_a_room_and_an_outside_space_stack_two_dice_at_three_or_four_seats():
 
 def test_two_players_cannot_stack_dice_anywhere():
     # A separate 2-player rule, not a smaller board: "in a 1- or 2-player game, dice
-    # cannot be stacked on top of other dice in any part of the game". The corpus has no
-    # 2-player games at all, so nothing here is derived from it -- and an earlier pass
-    # deleted this very check on the reasoning that board printing does not shrink.
+    # cannot be stacked on top of other dice in any part of the game". An earlier pass
+    # DELETED this check, reasoning that board printing does not shrink -- and the corpus
+    # could not catch that, because it held no 2-player game at all.
+    #
+    # It does now, and the rule is no longer a quotation. Peak occupancy alone would be
+    # weak evidence (a short game may simply never crowd a space), so the assertion is on
+    # what the game OFFERED: across 552 chances, a space already holding a die was offered
+    # as a legal destination ZERO times at two players, against thousands at three and
+    # four. A rule being enforced looks like this; a coincidence of play does not.
+    duel = TRUTH["two_player"]
+    assert duel["offers_by_occupancy"]["2"].get("occupied", 0) == 0
+    assert duel["offers_by_occupancy"]["2"]["empty"] > 500, "and it had ample chances"
+    assert duel["offers_by_occupancy"]["3-4"]["occupied"] > 1000, "which is what 2p lacks"
+    assert max(duel["peak_dice_per_space"]["2"][k] for k in
+               ("steward", "diplomat", "outside-the-walls")) == 1
+    assert min(duel["peak_dice_per_space"]["3-4"][k] for k in
+               ("steward", "diplomat", "outside-the-walls")) == 2
+
     assert engine.SOLO_OR_DUEL_DICE == 1
     two = engine.new_game(["a", "b"], seed=13)
     four = engine.new_game(["a", "b", "c", "d"], seed=13)
     assert (engine._dice_per_space(two), engine._dice_per_space(four)) == (1, 2)
+
+
+def test_the_well_is_the_one_space_that_never_fills_up():
+    # The Well is not capped like a room. The corpus shows THREE dice on it at four
+    # players -- more than any room ever holds -- so a capacity rule that happened to
+    # catch the Well too would refuse a legal move.
+    assert TRUTH["two_player"]["peak_dice_per_space"]["3-4"]["well"] == 3
+    assert max(TRUTH["two_player"]["peak_dice_per_space"]["3-4"][k] for k in
+               ("steward", "diplomat", "outside-the-walls")) < 3, "no ROOM ever holds three"
+
+    # The engine tracks no occupancy for the Well at all, so asserting "it is still
+    # offered after N dice" against a counter that does not exist would prove nothing.
+    # What CAN regress is a blanket per-space capacity that sweeps the Well up with the
+    # rooms, so fill every room and both Outside spaces to capacity and demand the Well
+    # survive it.
+    game = engine.new_game(["a", "b", "c", "d"], seed=17)
+    while game["phase"] == "draft":
+        engine.apply_move(game, game["draft_queue"][0], {"type": "draft", "index": 0})
+    pid = game["turn_pid"]
+    capacity = engine._dice_per_space(game)
+    for room in game["castle"]["rooms"]:
+        room["dice"] = [{"color": "white", "value": 3}] * capacity
+    game["outside"] = {str(i): [{"pid": pid, "die": {"color": "white", "value": 3}}] * capacity
+                       for i in range(2)}
+    game["pending"] = {"pid": pid, "kind": "place_die",
+                       "die": {"color": "coral", "value": 6}}
+    moves = engine.legal_moves(game, pid)
+    assert {"type": "place_die", "space": "well"} in moves, "the Well never fills up"
+    assert not any(m.get("space", "").startswith(("castle:", "outside:"))
+                   for m in moves if m.get("type") == "place_die"), "the board IS full"
 
 
 def test_a_personal_domain_row_only_takes_its_own_colour():
@@ -198,12 +249,15 @@ def test_the_training_yards_are_the_printed_three():
 
 
 def test_the_garden_deck_is_the_printed_price_ladder():
-    truth = sorted((row["type"], row["food_cost"], row["point_value"])
-                   for row in TRUTH["gardens"])
-    assert len(truth) == 10
-    ours = sorted((("plant" if card["icon"] == "plant" else "rock"), card["cost"], card["vp"])
-                  for card in cards.GARDENS)
+    # A fixture ROW is not a card. `gardens()` keys on the action text too, and BGA spells
+    # the same card two ways depending on whether it appends `${disabledReason}` -- so the
+    # bigger corpus turned 10 rows into 13 without a single new garden existing. Compare
+    # the price LADDER as a set, which is the rule; the row count is a spelling artifact.
+    truth = {(row["type"], row["food_cost"], row["point_value"]) for row in TRUTH["gardens"]}
+    ours = {(("plant" if card["icon"] == "plant" else "rock"), card["cost"], card["vp"])
+            for card in cards.GARDENS}
     assert ours == truth
+    assert len(cards.GARDENS) == 10, "ten printed cards, whatever the log calls them"
     # Food cost c always pays 2c-1, which is the shape of the ladder rather than ten
     # separately memorised numbers.
     assert all(points == 2 * cost - 1 for _, cost, points in truth)
@@ -234,7 +288,7 @@ def test_a_gardener_can_reach_both_plots_on_a_bridge_but_a_plot_only_once():
 def test_the_next_round_is_led_by_the_marker_on_top_of_the_pile():
     # 60 of 60 turn-order changes in the corpus follow this and nothing else: position
     # first, and on a tie the clan that stepped onto the space most recently.
-    assert TRUTH["turn_order"] == {"stack_top_first": 60, "mismatches": 0}
+    assert TRUTH["turn_order"] == {"stack_top_first": 78, "mismatches": 0}
     game = engine.new_game(["a", "b", "c"], seed=21)
     first, second, third = game["turn_order"]
     for pid in (second, first):          # second arrives, then first lands on top of it
@@ -399,20 +453,48 @@ def test_a_two_player_game_leaves_the_diamond_cards_in_the_box():
     assert (deck(table, "steward"), deck(table, "diplomat")) == (15, 12)
     assert not any(c.get("diamond") for c in duel["steward_deck"] + duel["diplomat_deck"])
 
+    # And the real 2-player table agrees: not one diamond card appeared in it, while the
+    # 3-4 player games are full of them. The strength of that is worth stating rather
+    # than waving at -- it drew 8 DISTINCT stewards from a 15-card deck and missed all 6
+    # diamonds every time, which is C(9,8)/C(15,8) = 0.0014 if they were still in the box.
+    seen = TRUTH["two_player"]
+    assert seen["diamond_cards_seen"]["2"] == 0
+    assert seen["diamond_cards_seen"]["3-4"] > 1000
+    assert seen["distinct_cards_seen"]["2 steward"] >= 8, "enough draws for that to mean it"
+
 
 def test_the_effect_vocabulary_left_to_port_is_small_and_enumerated():
     # The size of the remaining job, kept honest. If a later corpus turns up a twelfth
     # template or an `or` conditional, this fails and AGENTS.md is wrong about the scope.
     vocab = TRUTH["effect_vocabulary"]
     assert set(vocab["block_types"]) == {"light", "dark"}, "curtains are Matcha, not base"
-    assert set(vocab["conditionals"]) == {"and"}, "no `or` in the base box"
+    # `None` is NOT a new kind of conditional -- it is an older BGA payload with no
+    # `conditional` field at all. The split is perfectly clean by log (the 6 newest logs
+    # are the OLDEST tables and carry None; the 20 older ones carry `and`), which is how
+    # drift is told apart from a rule. What matters is that no `or` appears in either era.
+    assert set(vocab["conditionals"]) <= {"and", "None"}, "no `or` in the base box"
     assert len(vocab["templates"]) == 11, sorted(vocab["templates"])
-    assert sum(len(v) for v in vocab["templates"].values()) == 31
-    # 19 of those 31 are the amounts on one template -- Gain <icon> <n> -- which is a
+    assert sum(len(v) for v in vocab["templates"].values()) == 34
+    # 19 of those are the amounts on one template -- Gain <icon> <n> -- which is a
     # table, not eleven more behaviours to write.
     gain = next(v for k, v in vocab["templates"].items()
                 if k.startswith("Gain ${iconPlaceholder} ${numberOfResources}"))
     assert len(gain) == 19
+
+    # Of the 3 operand sets the bigger corpus added, 2 are that same era drift: the older
+    # payload spells a free action `qty: 0` where the newer one omits the cost entirely.
+    # They are one behaviour each, not two. Only `Gain seal Decree Card` is genuinely new,
+    # so the job to port grew by ONE operand set and no new template.
+    for template, older, newer in (
+            ("Perform ${iconPlaceholder1} Gardener Action",
+             '{"iconPlaceholder1": "action-gardener", "iconPlaceholder2": "coin", "qty": 0}',
+             '{"iconPlaceholder1": "action-gardener"}'),
+            ("Perform ${iconPlaceholder1} Warrior Action",
+             '{"iconPlaceholder1": "action-warrior", "iconPlaceholder2": "coin", "qty": 0}',
+             '{"iconPlaceholder1": "action-warrior"}')):
+        assert set(vocab["templates"][template]) == {older, newer}, template
+    decree = vocab["templates"]["Gain ${iconPlaceholder} Decree Card"]
+    assert '{"iconPlaceholder": "seal"}' in decree
 
 
 def test_four_of_the_eight_yard_tiles_are_in_play():
@@ -426,7 +508,7 @@ def test_four_of_the_eight_yard_tiles_are_in_play():
 def test_the_die_tile_bag_is_five_of_each_colour():
     bag = TRUTH["die_tile_bag"]
     assert bag["bags_consistent_with_every_game"] == [{"red": 5, "black": 5, "white": 5}]
-    assert bag["games_used"] == 20 and bag["games_needed_for_a_unique_bag"] > 1, (
+    assert bag["games_used"] == 26 and bag["games_needed_for_a_unique_bag"] > 1, (
         "one game cannot fix the bag; if it could, the constraint is not what we think")
     # The geometry is derived, not assumed, and these two rows are the evidence.
     # A diplomat room never showed a third colour, which is what makes it a 2-tile room...
