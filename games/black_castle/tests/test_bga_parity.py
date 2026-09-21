@@ -41,6 +41,26 @@ def _pairs(mapping):
     return {tuple(int(part) for part in key.split()): value for key, value in mapping.items()}
 
 
+def _run_draft(game, index=0, resource="food"):
+    """Drive the draft to its end, answering any resource choice a card grants.
+
+    Three of the nine starting resource cards say "gain a resource" without naming one,
+    so the draft can now stop and ask. A loop that only sends `draft` moves hangs on that
+    -- `draft_queue` empties while the phase is still "draft" -- which is what the plain
+    `while phase == draft` loops here used to do.
+    """
+    while game["phase"] == "draft":
+        pending = game.get("pending") or {}
+        if pending.get("kind") == "choose_resource":
+            ok, err = engine.apply_move(game, pending["pid"],
+                                        {"type": "choose_resource", "resource": resource})
+            assert ok, err
+            continue
+        ok, err = engine.apply_move(game, game["draft_queue"][0],
+                                    {"type": "draft", "index": index})
+        assert ok, err
+
+
 def test_the_fixture_is_the_verified_one():
     # If the reconstruction ever stops being exact the fixture is a set of guesses, and
     # every assertion below becomes a test of those guesses rather than of the game.
@@ -115,8 +135,7 @@ def test_a_room_and_an_outside_space_stack_two_dice_at_three_or_four_seats():
             assert row["max_dice"] == 1, space
     for seats, capacity in ((2, 1), (3, 2), (4, 2)):
         game = engine.new_game([f"p{i}" for i in range(seats)], seed=11)
-        while game["phase"] == "draft":
-            engine.apply_move(game, game["draft_queue"][0], {"type": "draft", "index": 0})
+        _run_draft(game)
         pid = game["turn_pid"]
         for space, put in (("castle:0", lambda d: game["castle"]["rooms"][0]
                             .setdefault("dice", []).append(d)),
@@ -170,8 +189,7 @@ def test_the_well_is_the_one_space_that_never_fills_up():
     # rooms, so fill every room and both Outside spaces to capacity and demand the Well
     # survive it.
     game = engine.new_game(["a", "b", "c", "d"], seed=17)
-    while game["phase"] == "draft":
-        engine.apply_move(game, game["draft_queue"][0], {"type": "draft", "index": 0})
+    _run_draft(game)
     pid = game["turn_pid"]
     capacity = engine._dice_per_space(game)
     for room in game["castle"]["rooms"]:
@@ -196,8 +214,7 @@ def test_a_personal_domain_row_only_takes_its_own_colour():
     assert {truth["red"][0], truth["black"][0], truth["white"][0]} == {"red", "black", "white"}
 
     game = engine.new_game(["a", "b"], seed=12)
-    while game["phase"] == "draft":
-        engine.apply_move(game, game["draft_queue"][0], {"type": "draft", "index": 0})
+    _run_draft(game)
     pid = game["turn_pid"]
     for color in engine.BRIDGE_ORDER:
         game["pending"] = {"pid": pid, "kind": "place_die",
@@ -216,8 +233,7 @@ def test_a_social_climb_costs_two_pearls_a_floor_and_five_for_two():
         assert max(rows, key=rows.get) == engine.CLIMB_COSTS[levels], (levels, rows)
 
     game = engine.new_game(["a", "b"], seed=15)
-    while game["phase"] == "draft":
-        engine.apply_move(game, game["draft_queue"][0], {"type": "draft", "index": 0})
+    _run_draft(game)
     pid = game["turn_pid"]
     p = game["players"][pid]
     p["resources"]["pearl"] = 7
@@ -265,8 +281,7 @@ def test_the_garden_deck_is_the_printed_price_ladder():
 
 def test_a_gardener_can_reach_both_plots_on_a_bridge_but_a_plot_only_once():
     game = engine.new_game(["a", "b"], seed=17)
-    while game["phase"] == "draft":
-        engine.apply_move(game, game["draft_queue"][0], {"type": "draft", "index": 0})
+    _run_draft(game)
     pid = game["turn_pid"]
     p = game["players"][pid]
     p["resources"]["food"] = 7
@@ -312,8 +327,7 @@ def test_the_board_offers_exactly_the_base_games_action_spaces():
     assert not any("tea-fields" in k or "outskirts" in k for k in TRUTH["action_spaces"])
 
     game = engine.new_game(["a", "b"], seed=23)
-    while game["phase"] == "draft":
-        engine.apply_move(game, game["draft_queue"][0], {"type": "draft", "index": 0})
+    _run_draft(game)
     for space, row in TRUTH["action_spaces"].items():
         if space.startswith("personal-domain:"):
             continue
@@ -351,8 +365,7 @@ def test_a_cached_bundle_can_still_climb_and_plant_during_the_deploy_window():
     # not degraded for that window, it is refused. Both of the shapes that grew one on
     # this change must still resolve to the right action.
     game = engine.new_game(["a", "b"], seed=31)
-    while game["phase"] == "draft":
-        engine.apply_move(game, game["draft_queue"][0], {"type": "draft", "index": 0})
+    _run_draft(game)
     pid = game["turn_pid"]
     p = game["players"][pid]
 
@@ -375,8 +388,7 @@ def test_a_cached_bundle_can_still_climb_and_plant_during_the_deploy_window():
 
 def test_a_game_saved_before_the_six_plots_still_loads_and_plays():
     game = engine.new_game(["a", "b"], seed=33)
-    while game["phase"] == "draft":
-        engine.apply_move(game, game["draft_queue"][0], {"type": "draft", "index": 0})
+    _run_draft(game)
     pid = game["turn_pid"]
     p = game["players"][pid]
     # What a blob written by the previous build looks like: one flat occupant list per
@@ -427,8 +439,7 @@ def test_each_outside_the_walls_space_offers_one_worker_and_the_courtier():
     assert engine._outside_offer(None, "outside:1") == ("warriors",)
 
     game = engine.new_game(["a", "b", "c"], seed=43)
-    while game["phase"] == "draft":
-        engine.apply_move(game, game["draft_queue"][0], {"type": "draft", "index": 0})
+    _run_draft(game)
     pid = game["turn_pid"]
     p = game["players"][pid]
     p["resources"] = {"food": 7, "iron": 7, "pearl": 7}

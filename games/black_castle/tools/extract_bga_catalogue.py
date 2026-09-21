@@ -104,6 +104,44 @@ def _ordinal(raw):
     return text.rsplit("-", 1)[-1] if "-" in text else text
 
 
+#: BGA HAS CHANGED ITS PAYLOAD, AND A LOG'S AGE IS NOT ITS DOWNLOAD DATE.
+#: The batch mined on 2026-09-20 has LOWER table ids (731-775M) than the batch before it
+#: (858-904M), so the "new" logs are the OLDEST games and speak an older dialect. Left
+#: alone that reads as 46 cards disagreeing with themselves -- the extractor's own
+#: corruption alarm firing on a schema change. Every difference below was confirmed to
+#: split perfectly cleanly BY LOG, which is what tells a dialect apart from a rule.
+#:
+#: These normalisations are deliberately NARROW. Each rewrites one spelling into another
+#: spelling of the SAME effect; none of them merges two effects that differ.
+_DISABLED = " ${disabledReason}"
+
+#: The older payload counts a single action explicitly where the newer one says "any".
+_RENAMED_TEMPLATES = {
+    "Perform ${nrOfActions} ${iconPlaceholder} Action(s) on the Main Board":
+        "Perform any ${iconPlaceholder} Action on the Main Board",
+}
+
+
+def _normalise_effect(effect):
+    """One effect, in whichever dialect, rendered in the canonical one."""
+    args = dict(effect.get("args") or {})
+    # A FREE action is spelled `qty: 0` beside a coin icon in the older payload and simply
+    # has no cost in the newer one. `qty: 0` is not a price of nothing, it is no price.
+    if args.get("qty") == 0:
+        args.pop("qty", None)
+        args.pop("iconPlaceholder2", None)
+    # ...and a single action is counted in the older payload and implied in the newer.
+    if args.get("nrOfActions") == 1:
+        args.pop("nrOfActions", None)
+    text = effect.get("description")
+    if isinstance(text, str):
+        # `${disabledReason}` is appended when the action is unavailable RIGHT NOW. That
+        # is board state, not the card, and `definition()` exists to exclude board state.
+        text = text.replace(_DISABLED, "")
+        text = _RENAMED_TEMPLATES.get(text, text)
+    return {"description": text, "args": args}
+
+
 def _blocks(node):
     """The effect blocks of a card, normalised and ORDER-INDEPENDENT.
 
@@ -117,15 +155,18 @@ def _blocks(node):
         effects = []
         for desc in block.get("actionDescriptions") or ():
             if isinstance(desc, dict):
-                effects.append({
+                effects.append(_normalise_effect({
                     "description": desc.get("description"),
                     "args": _args(desc.get("descriptionArgs")),
-                })
+                }))
         out.append({
             "ordinal": _ordinal(block.get("id")),
             "type": block.get("type"),
             "position": list(block.get("position") or ()),
-            "conditional": block.get("conditional"),
+            # The older payload carries no `conditional` at all. That is an absent field,
+            # not a third kind of conditional -- and emphatically not an `or`, which
+            # belongs to Matcha. Every base block that states one states `and`.
+            "conditional": block.get("conditional") or "and",
             "effects": effects,
         })
     return sorted(out, key=lambda b: (len(b["ordinal"]), b["ordinal"]))
@@ -154,10 +195,10 @@ def definition(node):
             "typeArg": node.get("typeArg"),
             "diamond": node.get("diamond"),
             "blocks": _blocks(node),
-            "lantern": {
+            "lantern": _normalise_effect({
                 "description": node.get("lanternDescription"),
                 "args": _args(node.get("lanternDescriptionArgs")),
-            } if node.get("lanternDescription") else None,
+            }) if node.get("lanternDescription") else None,
         }
         for extra in ("foodCost", "pointValue"):
             if node.get(extra) is not None:
@@ -178,7 +219,7 @@ def definition(node):
         "type": node.get("type"),
         "typeArg": node.get("typeArg"),
         "side": node.get("side"),
-        "effects": [{"description": d, "args": _args(a)}
+        "effects": [_normalise_effect({"description": d, "args": _args(a)})
                     for d, a in itertools.zip_longest(templates, arg_dicts)],
     }
     # A garden card's price and payout live out here rather than in a block, and they are

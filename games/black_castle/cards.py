@@ -1,15 +1,35 @@
 """Base-game card and tile catalogue for The Black Castle.
 
-The physical game has a deliberately small vocabulary of effects.  Definitions
-live here as data rather than being scattered through the engine, which makes
-the later BGA validation pass a catalogue diff instead of a rules rewrite.
-The numeric card ids and counts mirror the 2023 base box; the illustrations are
-owned by the publisher and are not bundled in this open-source client.
+**The castle cards, the starting cards and the decrees are the REAL ones**, generated
+into `catalogue.py` from 26 BGA games by `tools/build_catalogue.py` and re-exported here.
+They were placeholder until 2026-09-20 -- stewards and diplomats built in loops keyed on
+`i % 3`, with invented effects -- which meant the port diverged from the printed game in
+the one place that decides every turn: what a card DOES when a die lands on it.
+
+What is still ours rather than the printed game's, and says so below:
+
+* **DAIMYO** -- the 3 Daimyo's Favor cards appear NOWHERE in the corpus (a courtier has to
+  reach the third floor for BGA to ship one), so these 9 are still generated.
+* **The die tiles' reward faces** -- 13 of the 15 stay face-down all game and are never
+  observable. Their COLOUR bag is solved (5/5/5); the rewards are not.
+
+What was never placeholder: a garden's price and payout, which are the printed ladder
+read off the corpus, and the training yards.
+
+The illustrations are owned by the publisher and are not bundled in this open-source
+client.
 """
 
 from __future__ import annotations
 
 import copy
+
+from .catalogue import DECREE_CARDS as _REAL_DECREES
+from .catalogue import DIPLOMATS as _REAL_DIPLOMATS
+from .catalogue import STARTING_ACTION_CARDS as _REAL_ACTIONS
+from .catalogue import STARTING_RESOURCE_CARDS as _REAL_RESOURCES
+from .catalogue import STEWARDS as _REAL_STEWARDS
+from .catalogue import YARD_TILE_FACES  # noqa: F401  (data for the tile pass)
 
 COLORS = ("coral", "black", "white")
 RESOURCES = ("food", "iron", "pearl")
@@ -35,103 +55,39 @@ def _card(cid: str, kind: str, name: str, *, level: int = 0,
 
 #: Cards marked with a diamond in the lower-left corner, which "stay in the box" in a
 #: 2-player game -- so a duel plays with 9 stewards and 9 diplomats rather than 15 and 12.
-#: These are the printed cards' own numbers, taken from the corpus, where `diamond` is a
-#: stable property of every sighting of a card. They are laid over OUR placeholder cards
-#: by position, so the COUNT a duel removes is right even though the card faces are not.
-DIAMOND_STEWARDS = (1, 3, 6, 8, 11, 14)
-DIAMOND_DIPLOMATS = (1, 9, 12)
+#: DERIVED from the real cards now rather than listed beside them: `diamond` is a stable
+#: property of every sighting in the corpus, and the card carries its own. Typing the
+#: numbers a second time is how the list and the cards drift apart.
+DIAMOND_STEWARDS = tuple(int(c["id"].split("-")[1]) for c in _REAL_STEWARDS if c["diamond"])
+DIAMOND_DIPLOMATS = tuple(int(c["id"].split("-")[1]) for c in _REAL_DIPLOMATS if c["diamond"])
 
 
-# Starting resource cards are drafted as one of player-count + 1 face-up
-# options. The printed backs are represented by the resource they award.
-STARTING_RESOURCE_CARDS = [
-    _card("resource-01", "starting_resource", "Rice stores", back="iron",
-          light=_effect({"op": "gain", "resource": "food", "amount": 2},
-                        {"op": "gain", "coins": 3})),
-    _card("resource-02", "starting_resource", "Forge allotment", back="food",
-          light=_effect({"op": "gain", "resource": "iron", "amount": 2},
-                        {"op": "gain", "coins": 2})),
-    _card("resource-03", "starting_resource", "Pearl tribute", back="pearl",
-          light=_effect({"op": "gain", "resource": "pearl", "amount": 2},
-                        {"op": "gain", "coins": 1})),
-    _card("resource-04", "starting_resource", "Market charter", back="coin",
-          light=_effect({"op": "gain", "coins": 5},
-                        {"op": "gain", "resource": "food", "amount": 1})),
-    _card("resource-05", "starting_resource", "Storehouse key", back="resource",
-          light=_effect({"op": "gain", "resource": "food", "amount": 1},
-                        {"op": "gain", "resource": "iron", "amount": 1},
-                        {"op": "gain", "resource": "pearl", "amount": 1})),
-    _card("resource-06", "starting_resource", "Harbor toll", back="coin",
-          light=_effect({"op": "gain", "coins": 3},
-                        {"op": "gain", "seals": 1})),
-    _card("resource-07", "starting_resource", "Clan treasury", back="coin",
-          light=_effect({"op": "gain", "coins": 4},
-                        {"op": "gain", "resource": "food", "amount": 1})),
-    _card("resource-08", "starting_resource", "Foundry contract", back="iron",
-          light=_effect({"op": "gain", "resource": "iron", "amount": 1},
-                        {"op": "gain", "seals": 1},
-                        {"op": "gain", "coins": 2})),
-]
+#: THE NINE starting resource cards, three backed with each of pearl / iron / food. One
+#: is drafted per player from player-count + 1 face-up options.
+#:
+#: It was EIGHT here until 2026-09-20, and the reasoning for that is worth keeping because
+#: it was the same mistake twice: the 20-log corpus showed eight distinct cards and never a
+#: ninth, so the ninth was deleted. It exists -- typeArg 3 is simply the rarest, at 8
+#: sightings against the commonest's 34, and six more games turned it up. "The data does
+#: not show it" is not "it is not there", which is exactly what the deleted 2-player dice
+#: rule taught, and this code did not learn it.
+STARTING_RESOURCE_CARDS = [copy.deepcopy(c) for c in _REAL_RESOURCES]
+
+#: THE THREE starting action cards -- one per worker (courtier / warrior / gardener),
+#: each carrying a Passage of Time step as its lantern reward. Six were generated here
+#: before; the corpus shows three, across 444 sightings in 26 games.
+STARTING_ACTION_CARDS = [copy.deepcopy(c) for c in _REAL_ACTIONS]
 
 
-STARTING_ACTION_CARDS = [
-    _card("action-01", "starting_action", "Morning audience", back="lantern",
-          light=_effect({"op": "move", "worker": "courtiers", "from": "domain", "to": "gate"})),
-    _card("action-02", "starting_action", "Drill the guard", back="warrior",
-          light=_effect({"op": "move", "worker": "warriors", "from": "domain", "to": "yard"})),
-    _card("action-03", "starting_action", "Tend the moss", back="garden",
-          light=_effect({"op": "move", "worker": "gardeners", "from": "domain", "to": "garden"})),
-    _card("action-04", "starting_action", "Lantern maker", back="coin",
-          light=_effect({"op": "gain", "coins": 2}, {"op": "lantern", "icon": "coin", "amount": 1})),
-    _card("action-05", "starting_action", "Seal the decree", back="seal",
-          light=_effect({"op": "gain", "seals": 1}, {"op": "lantern", "icon": "vp", "amount": 1})),
-    _card("action-06", "starting_action", "Pearl etiquette", back="pearl",
-          light=_effect({"op": "gain", "resource": "pearl", "amount": 1},
-                        {"op": "lantern", "icon": "influence", "amount": 1})),
-]
-
-
+#: The fifteen stewards and twelve diplomats as BGA deals them, each carrying its
+#: `blocks` (light/dark, and WHICH ROWS each covers) beside the flattened `light`/`dark`
+#: the engine resolves today.
 def _steward_defaults() -> list[dict]:
-    out = []
-    resources = ("food", "iron", "pearl")
-    for i in range(1, 16):
-        resource = resources[(i - 1) % len(resources)]
-        light = _effect({"op": "gain", "resource": resource, "amount": 1 + (i % 2)})
-        dark = _effect({"op": "gain", "coins": 1 + (i % 3)})
-        if i % 4 == 0:
-            light.append({"op": "gain", "seals": 1})
-        if i % 5 == 0:
-            dark.append({"op": "influence", "amount": 1})
-        out.append(_card(f"steward-{i:02d}", "steward", f"Steward {i}", level=1,
-                         back="coin", light=light, dark=dark,
-                         diamond=i in DIAMOND_STEWARDS))
-    # A few face-up examples from the official/BGA reference are kept explicit
-    # so the first games already feel like the printed set.
-    out[1]["light"] = _effect({"op": "gain", "resource": "iron", "amount": 2})
-    out[1]["dark"] = _effect({"op": "pay_seal_for_worker", "worker": "courtiers"})
-    out[3]["light"] = _effect({"op": "pay_seal_for_worker", "worker": "warriors"})
-    out[3]["dark"] = _effect({"op": "gain", "coins": 1}, {"op": "well_bonus"})
-    out[9]["light"] = _effect({"op": "gain", "seals": 1}, {"op": "gain", "resource": "food", "amount": 1})
-    out[9]["dark"] = _effect({"op": "pay_seal_for_worker", "worker": "courtiers"})
-    return out
+    return [copy.deepcopy(c) for c in _REAL_STEWARDS]
 
 
 def _diplomat_defaults() -> list[dict]:
-    out = []
-    for i in range(1, 13):
-        light = _effect({"op": "gain", "coins": 2}, {"op": "lantern", "icon": "coin", "amount": 1})
-        dark = _effect({"op": "move", "worker": "courtiers", "from": "gate", "to": "floor2"})
-        if i % 3 == 0:
-            light.append({"op": "influence", "amount": 1})
-        if i % 4 == 0:
-            dark = _effect({"op": "gain", "seals": 1}, {"op": "lantern", "icon": "vp", "amount": 1})
-        out.append(_card(f"diplomat-{i:02d}", "diplomat", f"Diplomat {i}", level=2,
-                         back="vp", light=light, dark=dark,
-                         diamond=i in DIAMOND_DIPLOMATS))
-    out[1]["light"] = _effect({"op": "influence", "amount": 2})
-    out[1]["dark"] = _effect({"op": "move", "worker": "courtiers", "from": "gate", "to": "floor2"})
-    out[9]["light"] = _effect({"op": "gain", "coins": 2}, {"op": "lantern", "icon": "coin", "amount": 1})
-    return out
+    return [copy.deepcopy(c) for c in _REAL_DIPLOMATS]
 
 
 def _daimyo_defaults() -> list[dict]:
@@ -191,22 +147,21 @@ DIPLOMATS = _diplomat_defaults()
 DAIMYO = _daimyo_defaults()
 GARDENS = _garden_defaults()
 TRAINING_YARDS = _yard_defaults()
-DECREE_CARDS = [
-    _card("decree-01", "decree", "Rice decree", back="food", light=_effect({"op": "gain", "resource": "food", "amount": 2})),
-    _card("decree-02", "decree", "Iron decree", back="iron", light=_effect({"op": "gain", "resource": "iron", "amount": 2})),
-    _card("decree-03", "decree", "Pearl decree", back="pearl", light=_effect({"op": "gain", "resource": "pearl", "amount": 2})),
-]
+#: The three decrees. They carry NO action blocks at all -- a decree is a pure Lantern
+#: reward, one each of coin / seal / vp, which is also why the catalogue's three
+#: `Gain <icon> Decree Card` operands are exactly those three icons.
+DECREE_CARDS = [copy.deepcopy(c) for c in _REAL_DECREES]
 
+#: DERIVED from the catalogue, not typed beside it -- a count that is written twice is a
+#: count that eventually disagrees with itself, which is how `starting_resource` sat at 8
+#: while nine cards existed.
 CARD_COUNTS = {
-    "starting_action": 6,
-    # EIGHT, not nine. The corpus deals starting-resource card ids 31-38 across 20 games
-    # and never a ninth, and keying on `typeArg` -- the printed card rather than the copy
-    # dealt into this game -- lands on exactly eight distinct definitions.
-    "starting_resource": 8,
-    "decree": 3,
-    "steward": 15,
-    "diplomat": 12,
-    "daimyo": 9,
+    "starting_action": len(STARTING_ACTION_CARDS),
+    "starting_resource": len(STARTING_RESOURCE_CARDS),
+    "decree": len(DECREE_CARDS),
+    "steward": len(STEWARDS),
+    "diplomat": len(DIPLOMATS),
+    "daimyo": len(DAIMYO),
     "plant_garden": 5,
     "stone_garden": 5,
 }

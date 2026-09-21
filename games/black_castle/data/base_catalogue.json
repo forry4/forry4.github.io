@@ -1,0 +1,2797 @@
+{
+ "card:decree:1": {
+  "back": "coin",
+  "blocks": [],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "coin",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "decree",
+  "typeArg": 1
+ },
+ "card:decree:2": {
+  "back": "seal",
+  "blocks": [],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "seal",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "decree",
+  "typeArg": 2
+ },
+ "card:decree:3": {
+  "back": "vp",
+  "blocks": [],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "vp",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "decree",
+  "typeArg": 3
+ },
+ "card:diplomat:1": {
+  "back": "vp",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder1": "action-courtier"
+      },
+      "description": "Perform ${iconPlaceholder1} Courtier Actions"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top"
+    ],
+    "type": "dark"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "resource",
+       "numberOfResources": 3
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     }
+    ],
+    "ordinal": "2",
+    "position": [
+     "middle",
+     "bottom"
+    ],
+    "type": "light"
+   }
+  ],
+  "diamond": true,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "vp",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "diplomat",
+  "typeArg": 1
+ },
+ "card:diplomat:10": {
+  "back": "vp",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "coin",
+       "numberOfResources": 2
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "action-lantern"
+      },
+      "description": "Gain ${iconPlaceholder} Lantern Rewards"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top",
+     "middle"
+    ],
+    "type": "light"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder1": "action-warrior"
+      },
+      "description": "Perform ${iconPlaceholder1} Warrior Action"
+     }
+    ],
+    "ordinal": "2",
+    "position": [
+     "bottom"
+    ],
+    "type": "dark"
+   }
+  ],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "vp",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "diplomat",
+  "typeArg": 10
+ },
+ "card:diplomat:11": {
+  "back": "vp",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "action-passage-of-time",
+       "numberOfSteps": 1
+      },
+      "description": "Move ${iconPlaceholder} ${numberOfSteps} Passage of Time"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "action-lantern"
+      },
+      "description": "Gain ${iconPlaceholder} Lantern Rewards"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top",
+     "middle"
+    ],
+    "type": "light"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder1": "action-gardener"
+      },
+      "description": "Perform ${iconPlaceholder1} Gardener Action"
+     }
+    ],
+    "ordinal": "2",
+    "position": [
+     "bottom"
+    ],
+    "type": "dark"
+   }
+  ],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "vp",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "diplomat",
+  "typeArg": 11
+ },
+ "card:diplomat:12": {
+  "back": "vp",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "resource",
+       "numberOfResources": 3
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top",
+     "middle"
+    ],
+    "type": "light"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder1": "action-gardener"
+      },
+      "description": "Perform ${iconPlaceholder1} Gardener Action"
+     }
+    ],
+    "ordinal": "2",
+    "position": [
+     "bottom"
+    ],
+    "type": "dark"
+   }
+  ],
+  "diamond": true,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "vp",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "diplomat",
+  "typeArg": 12
+ },
+ "card:diplomat:2": {
+  "back": "vp",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder1": "action-courtier"
+      },
+      "description": "Perform ${iconPlaceholder1} Courtier Actions"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top"
+    ],
+    "type": "dark"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "action-passage-of-time",
+       "numberOfSteps": 2
+      },
+      "description": "Move ${iconPlaceholder} ${numberOfSteps} Passage of Time"
+     }
+    ],
+    "ordinal": "2",
+    "position": [
+     "middle",
+     "bottom"
+    ],
+    "type": "light"
+   }
+  ],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "vp",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "diplomat",
+  "typeArg": 2
+ },
+ "card:diplomat:3": {
+  "back": "vp",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder1": "action-courtier"
+      },
+      "description": "Perform ${iconPlaceholder1} Courtier Actions"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top"
+    ],
+    "type": "dark"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "vp",
+       "numberOfResources": 2
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "action-well"
+      },
+      "description": "Perform ${iconPlaceholder} Well Action"
+     }
+    ],
+    "ordinal": "2",
+    "position": [
+     "middle",
+     "bottom"
+    ],
+    "type": "light"
+   }
+  ],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "vp",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "diplomat",
+  "typeArg": 3
+ },
+ "card:diplomat:4": {
+  "back": "vp",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder1": "action-courtier"
+      },
+      "description": "Perform ${iconPlaceholder1} Courtier Actions"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top"
+    ],
+    "type": "dark"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "seal",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "action-lantern"
+      },
+      "description": "Gain ${iconPlaceholder} Lantern Rewards"
+     }
+    ],
+    "ordinal": "2",
+    "position": [
+     "middle",
+     "bottom"
+    ],
+    "type": "light"
+   }
+  ],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "vp",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "diplomat",
+  "typeArg": 4
+ },
+ "card:diplomat:5": {
+  "back": "vp",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder1": "action-warrior"
+      },
+      "description": "Perform ${iconPlaceholder1} Warrior Action"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top"
+    ],
+    "type": "dark"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "resource",
+       "numberOfResources": 3
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     }
+    ],
+    "ordinal": "2",
+    "position": [
+     "middle",
+     "bottom"
+    ],
+    "type": "light"
+   }
+  ],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "vp",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "diplomat",
+  "typeArg": 5
+ },
+ "card:diplomat:6": {
+  "back": "vp",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder1": "action-warrior"
+      },
+      "description": "Perform ${iconPlaceholder1} Warrior Action"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top"
+    ],
+    "type": "dark"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "action-passage-of-time",
+       "numberOfSteps": 2
+      },
+      "description": "Move ${iconPlaceholder} ${numberOfSteps} Passage of Time"
+     }
+    ],
+    "ordinal": "2",
+    "position": [
+     "middle",
+     "bottom"
+    ],
+    "type": "light"
+   }
+  ],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "vp",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "diplomat",
+  "typeArg": 6
+ },
+ "card:diplomat:7": {
+  "back": "vp",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "action-passage-of-time",
+       "numberOfSteps": 2
+      },
+      "description": "Move ${iconPlaceholder} ${numberOfSteps} Passage of Time"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top"
+    ],
+    "type": "light"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder1": "action-gardener"
+      },
+      "description": "Perform ${iconPlaceholder1} Gardener Action"
+     }
+    ],
+    "ordinal": "2",
+    "position": [
+     "middle",
+     "bottom"
+    ],
+    "type": "dark"
+   }
+  ],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "vp",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "diplomat",
+  "typeArg": 7
+ },
+ "card:diplomat:8": {
+  "back": "vp",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "vp",
+       "numberOfResources": 2
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "action-well"
+      },
+      "description": "Perform ${iconPlaceholder} Well Action"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top"
+    ],
+    "type": "light"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder1": "action-gardener"
+      },
+      "description": "Perform ${iconPlaceholder1} Gardener Action"
+     }
+    ],
+    "ordinal": "2",
+    "position": [
+     "middle",
+     "bottom"
+    ],
+    "type": "dark"
+   }
+  ],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "vp",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "diplomat",
+  "typeArg": 8
+ },
+ "card:diplomat:9": {
+  "back": "vp",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "vp",
+       "numberOfResources": 2
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "action-well"
+      },
+      "description": "Perform ${iconPlaceholder} Well Action"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top",
+     "middle"
+    ],
+    "type": "light"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder1": "action-warrior"
+      },
+      "description": "Perform ${iconPlaceholder1} Warrior Action"
+     }
+    ],
+    "ordinal": "2",
+    "position": [
+     "bottom"
+    ],
+    "type": "dark"
+   }
+  ],
+  "diamond": true,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "vp",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "diplomat",
+  "typeArg": 9
+ },
+ "card:starting-action:1": {
+  "back": "heron",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder1": "action-courtier"
+      },
+      "description": "Perform ${iconPlaceholder1} Courtier Actions"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top",
+     "middle",
+     "bottom"
+    ],
+    "type": "light"
+   }
+  ],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "action-passage-of-time",
+    "numberOfSteps": 1
+   },
+   "description": "Move ${iconPlaceholder} ${numberOfSteps} Passage of Time"
+  },
+  "type": "starting-action",
+  "typeArg": 1
+ },
+ "card:starting-action:2": {
+  "back": "heron",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder1": "action-warrior"
+      },
+      "description": "Perform ${iconPlaceholder1} Warrior Action"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top",
+     "middle",
+     "bottom"
+    ],
+    "type": "light"
+   }
+  ],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "action-passage-of-time",
+    "numberOfSteps": 1
+   },
+   "description": "Move ${iconPlaceholder} ${numberOfSteps} Passage of Time"
+  },
+  "type": "starting-action",
+  "typeArg": 2
+ },
+ "card:starting-action:3": {
+  "back": "heron",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder1": "action-gardener"
+      },
+      "description": "Perform ${iconPlaceholder1} Gardener Action"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top",
+     "middle",
+     "bottom"
+    ],
+    "type": "light"
+   }
+  ],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "action-passage-of-time",
+    "numberOfSteps": 1
+   },
+   "description": "Move ${iconPlaceholder} ${numberOfSteps} Passage of Time"
+  },
+  "type": "starting-action",
+  "typeArg": 3
+ },
+ "card:starting-resources:1": {
+  "back": "pearl",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "coin"
+      },
+      "description": "Gain ${iconPlaceholder} Decree Card"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "food",
+       "numberOfResources": 2
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "iron",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "coin",
+       "numberOfResources": 2
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "seal",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top",
+     "middle",
+     "bottom"
+    ],
+    "type": "light"
+   }
+  ],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "pearl",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "starting-resources",
+  "typeArg": 1
+ },
+ "card:starting-resources:2": {
+  "back": "pearl",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "resource",
+       "numberOfResources": 2
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "coin",
+       "numberOfResources": 4
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "seal",
+       "numberOfResources": 2
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top",
+     "middle",
+     "bottom"
+    ],
+    "type": "light"
+   }
+  ],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "pearl",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "starting-resources",
+  "typeArg": 2
+ },
+ "card:starting-resources:3": {
+  "back": "pearl",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "iron",
+       "numberOfResources": 2
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "pearl",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "coin",
+       "numberOfResources": 5
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "seal",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top",
+     "middle",
+     "bottom"
+    ],
+    "type": "light"
+   }
+  ],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "pearl",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "starting-resources",
+  "typeArg": 3
+ },
+ "card:starting-resources:4": {
+  "back": "iron",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "seal"
+      },
+      "description": "Gain ${iconPlaceholder} Decree Card"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "pearl",
+       "numberOfResources": 2
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "iron",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "coin",
+       "numberOfResources": 4
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top",
+     "middle",
+     "bottom"
+    ],
+    "type": "light"
+   }
+  ],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "iron",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "starting-resources",
+  "typeArg": 4
+ },
+ "card:starting-resources:5": {
+  "back": "iron",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "resource",
+       "numberOfResources": 3
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "coin",
+       "numberOfResources": 4
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "seal",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top",
+     "middle",
+     "bottom"
+    ],
+    "type": "light"
+   }
+  ],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "iron",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "starting-resources",
+  "typeArg": 5
+ },
+ "card:starting-resources:6": {
+  "back": "iron",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "food",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "iron",
+       "numberOfResources": 2
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "pearl",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "coin",
+       "numberOfResources": 3
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "seal",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top",
+     "middle",
+     "bottom"
+    ],
+    "type": "light"
+   }
+  ],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "iron",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "starting-resources",
+  "typeArg": 6
+ },
+ "card:starting-resources:7": {
+  "back": "food",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "vp"
+      },
+      "description": "Gain ${iconPlaceholder} Decree Card"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "resource",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "coin",
+       "numberOfResources": 2
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "seal",
+       "numberOfResources": 2
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top",
+     "middle",
+     "bottom"
+    ],
+    "type": "light"
+   }
+  ],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "food",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "starting-resources",
+  "typeArg": 7
+ },
+ "card:starting-resources:8": {
+  "back": "food",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "food",
+       "numberOfResources": 2
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "iron",
+       "numberOfResources": 2
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "pearl",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "coin",
+       "numberOfResources": 4
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "seal",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top",
+     "middle",
+     "bottom"
+    ],
+    "type": "light"
+   }
+  ],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "food",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "starting-resources",
+  "typeArg": 8
+ },
+ "card:starting-resources:9": {
+  "back": "food",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "food",
+       "numberOfResources": 4
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "iron",
+       "numberOfResources": 2
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "coin",
+       "numberOfResources": 3
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "seal",
+       "numberOfResources": 2
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top",
+     "middle",
+     "bottom"
+    ],
+    "type": "light"
+   }
+  ],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "food",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "starting-resources",
+  "typeArg": 9
+ },
+ "card:steward:1": {
+  "back": "coin",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder1": "action-courtier",
+       "iconPlaceholder2": "seal",
+       "qty": 1
+      },
+      "description": "Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Courtier Actions"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top"
+    ],
+    "type": "dark"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "seal",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "vp",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     }
+    ],
+    "ordinal": "2",
+    "position": [
+     "middle"
+    ],
+    "type": "light"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "food",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "action-lantern"
+      },
+      "description": "Gain ${iconPlaceholder} Lantern Rewards"
+     }
+    ],
+    "ordinal": "3",
+    "position": [
+     "bottom"
+    ],
+    "type": "light"
+   }
+  ],
+  "diamond": true,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "coin",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "steward",
+  "typeArg": 1
+ },
+ "card:steward:10": {
+  "back": "coin",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "seal",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "resource",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top"
+    ],
+    "type": "light"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder1": "action-courtier",
+       "iconPlaceholder2": "seal",
+       "qty": 1
+      },
+      "description": "Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Courtier Actions"
+     }
+    ],
+    "ordinal": "2",
+    "position": [
+     "middle"
+    ],
+    "type": "dark"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "iron",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "food",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     }
+    ],
+    "ordinal": "3",
+    "position": [
+     "bottom"
+    ],
+    "type": "light"
+   }
+  ],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "coin",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "steward",
+  "typeArg": 10
+ },
+ "card:steward:11": {
+  "back": "coin",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "resource",
+       "numberOfResources": 2
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top"
+    ],
+    "type": "light"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "pearl",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "action-lantern"
+      },
+      "description": "Gain ${iconPlaceholder} Lantern Rewards"
+     }
+    ],
+    "ordinal": "2",
+    "position": [
+     "middle"
+    ],
+    "type": "light"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder1": "action-warrior",
+       "iconPlaceholder2": "seal",
+       "qty": 1
+      },
+      "description": "Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Warrior Action"
+     }
+    ],
+    "ordinal": "3",
+    "position": [
+     "bottom"
+    ],
+    "type": "dark"
+   }
+  ],
+  "diamond": true,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "coin",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "steward",
+  "typeArg": 11
+ },
+ "card:steward:12": {
+  "back": "coin",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "pearl",
+       "numberOfResources": 2
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top"
+    ],
+    "type": "light"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "seal",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "vp",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     }
+    ],
+    "ordinal": "2",
+    "position": [
+     "middle"
+    ],
+    "type": "light"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder1": "action-gardener",
+       "iconPlaceholder2": "seal",
+       "qty": 1
+      },
+      "description": "Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Gardener Action"
+     }
+    ],
+    "ordinal": "3",
+    "position": [
+     "bottom"
+    ],
+    "type": "dark"
+   }
+  ],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "coin",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "steward",
+  "typeArg": 12
+ },
+ "card:steward:13": {
+  "back": "coin",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "iron",
+       "numberOfResources": 2
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top"
+    ],
+    "type": "light"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "action-lantern"
+      },
+      "description": "Gain ${iconPlaceholder} Lantern Rewards"
+     }
+    ],
+    "ordinal": "2",
+    "position": [
+     "middle"
+    ],
+    "type": "light"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder1": "action-gardener",
+       "iconPlaceholder2": "seal",
+       "qty": 1
+      },
+      "description": "Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Gardener Action"
+     }
+    ],
+    "ordinal": "3",
+    "position": [
+     "bottom"
+    ],
+    "type": "dark"
+   }
+  ],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "coin",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "steward",
+  "typeArg": 13
+ },
+ "card:steward:14": {
+  "back": "coin",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "vp",
+       "numberOfResources": 2
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top"
+    ],
+    "type": "light"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "seal",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "resource",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     }
+    ],
+    "ordinal": "2",
+    "position": [
+     "middle"
+    ],
+    "type": "light"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder1": "action-warrior",
+       "iconPlaceholder2": "seal",
+       "qty": 1
+      },
+      "description": "Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Warrior Action"
+     }
+    ],
+    "ordinal": "3",
+    "position": [
+     "bottom"
+    ],
+    "type": "dark"
+   }
+  ],
+  "diamond": true,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "coin",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "steward",
+  "typeArg": 14
+ },
+ "card:steward:15": {
+  "back": "coin",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "action-passage-of-time",
+       "numberOfSteps": 1
+      },
+      "description": "Move ${iconPlaceholder} ${numberOfSteps} Passage of Time"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top"
+    ],
+    "type": "light"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "pearl",
+       "numberOfResources": 2
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     }
+    ],
+    "ordinal": "2",
+    "position": [
+     "middle"
+    ],
+    "type": "light"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder1": "action-warrior",
+       "iconPlaceholder2": "seal",
+       "qty": 1
+      },
+      "description": "Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Warrior Action"
+     }
+    ],
+    "ordinal": "3",
+    "position": [
+     "bottom"
+    ],
+    "type": "dark"
+   }
+  ],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "coin",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "steward",
+  "typeArg": 15
+ },
+ "card:steward:2": {
+  "back": "coin",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder1": "action-courtier",
+       "iconPlaceholder2": "seal",
+       "qty": 1
+      },
+      "description": "Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Courtier Actions"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top"
+    ],
+    "type": "dark"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "action-passage-of-time",
+       "numberOfSteps": 1
+      },
+      "description": "Move ${iconPlaceholder} ${numberOfSteps} Passage of Time"
+     }
+    ],
+    "ordinal": "2",
+    "position": [
+     "middle"
+    ],
+    "type": "light"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "iron",
+       "numberOfResources": 2
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     }
+    ],
+    "ordinal": "3",
+    "position": [
+     "bottom"
+    ],
+    "type": "light"
+   }
+  ],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "coin",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "steward",
+  "typeArg": 2
+ },
+ "card:steward:3": {
+  "back": "coin",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder1": "action-courtier",
+       "iconPlaceholder2": "seal",
+       "qty": 1
+      },
+      "description": "Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Courtier Actions"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top"
+    ],
+    "type": "dark"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "action-lantern"
+      },
+      "description": "Gain ${iconPlaceholder} Lantern Rewards"
+     }
+    ],
+    "ordinal": "2",
+    "position": [
+     "middle"
+    ],
+    "type": "light"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "vp",
+       "numberOfResources": 2
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     }
+    ],
+    "ordinal": "3",
+    "position": [
+     "bottom"
+    ],
+    "type": "light"
+   }
+  ],
+  "diamond": true,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "coin",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "steward",
+  "typeArg": 3
+ },
+ "card:steward:4": {
+  "back": "coin",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder1": "action-warrior",
+       "iconPlaceholder2": "seal",
+       "qty": 1
+      },
+      "description": "Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Warrior Action"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top"
+    ],
+    "type": "dark"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "coin",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "action-well"
+      },
+      "description": "Perform ${iconPlaceholder} Well Action"
+     }
+    ],
+    "ordinal": "2",
+    "position": [
+     "middle"
+    ],
+    "type": "light"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "action-lantern"
+      },
+      "description": "Gain ${iconPlaceholder} Lantern Rewards"
+     }
+    ],
+    "ordinal": "3",
+    "position": [
+     "bottom"
+    ],
+    "type": "light"
+   }
+  ],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "coin",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "steward",
+  "typeArg": 4
+ },
+ "card:steward:5": {
+  "back": "coin",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder1": "action-warrior",
+       "iconPlaceholder2": "seal",
+       "qty": 1
+      },
+      "description": "Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Warrior Action"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top"
+    ],
+    "type": "dark"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "food",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "pearl",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     }
+    ],
+    "ordinal": "2",
+    "position": [
+     "middle"
+    ],
+    "type": "light"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "iron",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "action-lantern"
+      },
+      "description": "Gain ${iconPlaceholder} Lantern Rewards"
+     }
+    ],
+    "ordinal": "3",
+    "position": [
+     "bottom"
+    ],
+    "type": "light"
+   }
+  ],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "coin",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "steward",
+  "typeArg": 5
+ },
+ "card:steward:6": {
+  "back": "coin",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "iron",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "action-lantern"
+      },
+      "description": "Gain ${iconPlaceholder} Lantern Rewards"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top"
+    ],
+    "type": "light"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder1": "action-gardener",
+       "iconPlaceholder2": "seal",
+       "qty": 1
+      },
+      "description": "Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Gardener Action"
+     }
+    ],
+    "ordinal": "2",
+    "position": [
+     "middle"
+    ],
+    "type": "dark"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "resource",
+       "numberOfResources": 2
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     }
+    ],
+    "ordinal": "3",
+    "position": [
+     "bottom"
+    ],
+    "type": "light"
+   }
+  ],
+  "diamond": true,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "coin",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "steward",
+  "typeArg": 6
+ },
+ "card:steward:7": {
+  "back": "coin",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "action-passage-of-time",
+       "numberOfSteps": 1
+      },
+      "description": "Move ${iconPlaceholder} ${numberOfSteps} Passage of Time"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top"
+    ],
+    "type": "light"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder1": "action-gardener",
+       "iconPlaceholder2": "seal",
+       "qty": 1
+      },
+      "description": "Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Gardener Action"
+     }
+    ],
+    "ordinal": "2",
+    "position": [
+     "middle"
+    ],
+    "type": "dark"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "food",
+       "numberOfResources": 2
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     }
+    ],
+    "ordinal": "3",
+    "position": [
+     "bottom"
+    ],
+    "type": "light"
+   }
+  ],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "coin",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "steward",
+  "typeArg": 7
+ },
+ "card:steward:8": {
+  "back": "coin",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "coin",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "action-well"
+      },
+      "description": "Perform ${iconPlaceholder} Well Action"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top"
+    ],
+    "type": "light"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder1": "action-gardener",
+       "iconPlaceholder2": "seal",
+       "qty": 1
+      },
+      "description": "Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Gardener Action"
+     }
+    ],
+    "ordinal": "2",
+    "position": [
+     "middle"
+    ],
+    "type": "dark"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "action-passage-of-time",
+       "numberOfSteps": 1
+      },
+      "description": "Move ${iconPlaceholder} ${numberOfSteps} Passage of Time"
+     }
+    ],
+    "ordinal": "3",
+    "position": [
+     "bottom"
+    ],
+    "type": "light"
+   }
+  ],
+  "diamond": true,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "coin",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "steward",
+  "typeArg": 8
+ },
+ "card:steward:9": {
+  "back": "coin",
+  "blocks": [
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "coin",
+       "numberOfResources": 1
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     },
+     {
+      "args": {
+       "iconPlaceholder": "action-well"
+      },
+      "description": "Perform ${iconPlaceholder} Well Action"
+     }
+    ],
+    "ordinal": "1",
+    "position": [
+     "top"
+    ],
+    "type": "light"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder1": "action-courtier",
+       "iconPlaceholder2": "seal",
+       "qty": 1
+      },
+      "description": "Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Courtier Actions"
+     }
+    ],
+    "ordinal": "2",
+    "position": [
+     "middle"
+    ],
+    "type": "dark"
+   },
+   {
+    "conditional": "and",
+    "effects": [
+     {
+      "args": {
+       "iconPlaceholder": "food",
+       "numberOfResources": 2
+      },
+      "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+     }
+    ],
+    "ordinal": "3",
+    "position": [
+     "bottom"
+    ],
+    "type": "light"
+   }
+  ],
+  "diamond": false,
+  "kind": "card",
+  "lantern": {
+   "args": {
+    "iconPlaceholder": "coin",
+    "numberOfResources": 1
+   },
+   "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+  },
+  "type": "steward",
+  "typeArg": 9
+ },
+ "tile:base:1:back": {
+  "effects": [
+   {
+    "args": {
+     "iconPlaceholder": "pearl",
+     "numberOfResources": 3
+    },
+    "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+   }
+  ],
+  "kind": "tile",
+  "side": "back",
+  "type": "base",
+  "typeArg": 1
+ },
+ "tile:base:1:front": {
+  "effects": [
+   {
+    "args": {
+     "iconPlaceholder1": "action-courtier"
+    },
+    "description": "Perform ${iconPlaceholder1} Courtier Actions"
+   }
+  ],
+  "kind": "tile",
+  "side": "front",
+  "type": "base",
+  "typeArg": 1
+ },
+ "tile:base:2:back": {
+  "effects": [
+   {
+    "args": {
+     "iconPlaceholder": "action-passage-of-time",
+     "numberOfSteps": 2
+    },
+    "description": "Move ${iconPlaceholder} ${numberOfSteps} Passage of Time"
+   }
+  ],
+  "kind": "tile",
+  "side": "back",
+  "type": "base",
+  "typeArg": 2
+ },
+ "tile:base:2:front": {
+  "effects": [
+   {
+    "args": {
+     "iconPlaceholder1": "action-warrior"
+    },
+    "description": "Perform ${iconPlaceholder1} Warrior Action"
+   }
+  ],
+  "kind": "tile",
+  "side": "front",
+  "type": "base",
+  "typeArg": 2
+ },
+ "tile:base:3:back": {
+  "effects": [
+   {
+    "args": {
+     "iconPlaceholder": "food",
+     "numberOfResources": 3
+    },
+    "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+   }
+  ],
+  "kind": "tile",
+  "side": "back",
+  "type": "base",
+  "typeArg": 3
+ },
+ "tile:base:3:front": {
+  "effects": [
+   {
+    "args": {
+     "iconPlaceholder1": "action-gardener"
+    },
+    "description": "Perform ${iconPlaceholder1} Gardener Action"
+   }
+  ],
+  "kind": "tile",
+  "side": "front",
+  "type": "base",
+  "typeArg": 3
+ },
+ "tile:base:4:back": {
+  "effects": [
+   {
+    "args": {
+     "iconPlaceholder": "action-well"
+    },
+    "description": "Perform ${iconPlaceholder} Well Action"
+   }
+  ],
+  "kind": "tile",
+  "side": "back",
+  "type": "base",
+  "typeArg": 4
+ },
+ "tile:base:4:front": {
+  "effects": [
+   {
+    "args": {
+     "iconPlaceholder": "action-red-die-tile"
+    },
+    "description": "Perform any ${iconPlaceholder} Action on the Main Board"
+   }
+  ],
+  "kind": "tile",
+  "side": "front",
+  "type": "base",
+  "typeArg": 4
+ },
+ "tile:base:5:back": {
+  "effects": [
+   {
+    "args": {
+     "iconPlaceholder": "seal",
+     "numberOfResources": 2
+    },
+    "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+   }
+  ],
+  "kind": "tile",
+  "side": "back",
+  "type": "base",
+  "typeArg": 5
+ },
+ "tile:base:5:front": {
+  "effects": [
+   {
+    "args": {
+     "iconPlaceholder": "action-white-die-tile"
+    },
+    "description": "Perform any ${iconPlaceholder} Action on the Main Board"
+   }
+  ],
+  "kind": "tile",
+  "side": "front",
+  "type": "base",
+  "typeArg": 5
+ },
+ "tile:base:6:back": {
+  "effects": [
+   {
+    "args": {
+     "iconPlaceholder": "coin",
+     "numberOfResources": 5
+    },
+    "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+   }
+  ],
+  "kind": "tile",
+  "side": "back",
+  "type": "base",
+  "typeArg": 6
+ },
+ "tile:base:6:front": {
+  "effects": [
+   {
+    "args": {
+     "iconPlaceholder": "action-black-die-tile"
+    },
+    "description": "Perform any ${iconPlaceholder} Action on the Main Board"
+   }
+  ],
+  "kind": "tile",
+  "side": "front",
+  "type": "base",
+  "typeArg": 6
+ },
+ "tile:base:7:back": {
+  "effects": [
+   {
+    "args": {
+     "iconPlaceholder": "action-light-background"
+    },
+    "description": "Perform any ${iconPlaceholder} Action on the Main Board"
+   }
+  ],
+  "kind": "tile",
+  "side": "back",
+  "type": "base",
+  "typeArg": 7
+ },
+ "tile:base:7:front": {
+  "effects": [
+   {
+    "args": {
+     "iconPlaceholder": "action-any-die-tile"
+    },
+    "description": "Perform any ${iconPlaceholder} Action on the Main Board"
+   }
+  ],
+  "kind": "tile",
+  "side": "front",
+  "type": "base",
+  "typeArg": 7
+ },
+ "tile:base:8:back": {
+  "effects": [
+   {
+    "args": {
+     "iconPlaceholder": "vp",
+     "numberOfResources": 2
+    },
+    "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+   }
+  ],
+  "kind": "tile",
+  "side": "back",
+  "type": "base",
+  "typeArg": 8
+ },
+ "tile:base:8:front": {
+  "effects": [
+   {
+    "args": {
+     "iconPlaceholder1": "action-personal-domain"
+    },
+    "description": "Perform ${iconPlaceholder1} Personal Domain Action"
+   }
+  ],
+  "kind": "tile",
+  "side": "front",
+  "type": "base",
+  "typeArg": 8
+ },
+ "tile:plant:1": {
+  "effects": [
+   {
+    "args": {
+     "iconPlaceholder": "action-any-die-tile",
+     "iconPlaceholder2": "coin",
+     "qty": 4
+    },
+    "description": "Pay ${iconPlaceholder2} ${qty} to perform any ${iconPlaceholder} Action on the Main Board"
+   }
+  ],
+  "foodCost": 5,
+  "kind": "tile",
+  "pointValue": 9,
+  "side": null,
+  "type": "plant",
+  "typeArg": 1
+ },
+ "tile:plant:2": {
+  "effects": [
+   {
+    "args": {
+     "iconPlaceholder1": "action-gardener",
+     "iconPlaceholder2": "coin",
+     "qty": 3
+    },
+    "description": "Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Gardener Action"
+   }
+  ],
+  "foodCost": 4,
+  "kind": "tile",
+  "pointValue": 7,
+  "side": null,
+  "type": "plant",
+  "typeArg": 2
+ },
+ "tile:plant:3": {
+  "effects": [
+   {
+    "args": {
+     "iconPlaceholder1": "action-courtier",
+     "iconPlaceholder2": "coin",
+     "qty": 3
+    },
+    "description": "Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Courtier Actions"
+   }
+  ],
+  "foodCost": 4,
+  "kind": "tile",
+  "pointValue": 7,
+  "side": null,
+  "type": "plant",
+  "typeArg": 3
+ },
+ "tile:plant:4": {
+  "effects": [
+   {
+    "args": {
+     "iconPlaceholder1": "action-warrior",
+     "iconPlaceholder2": "coin",
+     "qty": 3
+    },
+    "description": "Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Warrior Action"
+   }
+  ],
+  "foodCost": 4,
+  "kind": "tile",
+  "pointValue": 7,
+  "side": null,
+  "type": "plant",
+  "typeArg": 4
+ },
+ "tile:plant:5": {
+  "effects": [
+   {
+    "args": {
+     "iconPlaceholder1": "action-personal-domain",
+     "iconPlaceholder2": "coin",
+     "qty": 4
+    },
+    "description": "Pay ${iconPlaceholder2} ${qty} to perform Perform ${iconPlaceholder1} Personal Domain Action"
+   }
+  ],
+  "foodCost": 3,
+  "kind": "tile",
+  "pointValue": 5,
+  "side": null,
+  "type": "plant",
+  "typeArg": 5
+ },
+ "tile:rock:10": {
+  "effects": [
+   {
+    "args": {
+     "iconPlaceholder": "action-well"
+    },
+    "description": "Perform ${iconPlaceholder} Well Action"
+   }
+  ],
+  "foodCost": 3,
+  "kind": "tile",
+  "pointValue": 5,
+  "side": null,
+  "type": "rock",
+  "typeArg": 10
+ },
+ "tile:rock:6": {
+  "effects": [
+   {
+    "args": {
+     "iconPlaceholder": "resource",
+     "numberOfResources": 2
+    },
+    "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+   }
+  ],
+  "foodCost": 1,
+  "kind": "tile",
+  "pointValue": 1,
+  "side": null,
+  "type": "rock",
+  "typeArg": 6
+ },
+ "tile:rock:7": {
+  "effects": [
+   {
+    "args": {
+     "iconPlaceholder": "coin",
+     "numberOfResources": 3
+    },
+    "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+   }
+  ],
+  "foodCost": 1,
+  "kind": "tile",
+  "pointValue": 1,
+  "side": null,
+  "type": "rock",
+  "typeArg": 7
+ },
+ "tile:rock:8": {
+  "effects": [
+   {
+    "args": {
+     "iconPlaceholder": "seal",
+     "numberOfResources": 2
+    },
+    "description": "Gain ${iconPlaceholder} ${numberOfResources}"
+   }
+  ],
+  "foodCost": 2,
+  "kind": "tile",
+  "pointValue": 3,
+  "side": null,
+  "type": "rock",
+  "typeArg": 8
+ },
+ "tile:rock:9": {
+  "effects": [
+   {
+    "args": {
+     "iconPlaceholder": "action-light-background"
+    },
+    "description": "Perform any ${iconPlaceholder} Action on the Main Board"
+   }
+  ],
+  "foodCost": 2,
+  "kind": "tile",
+  "pointValue": 3,
+  "side": null,
+  "type": "rock",
+  "typeArg": 9
+ }
+}

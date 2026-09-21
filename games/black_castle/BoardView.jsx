@@ -13,6 +13,7 @@ const dicePerSpace = game => (Object.keys(game.players || {}).length <= 2 ? 1 : 
 const outsideDice = (game, i) => { const row = game.outside?.[String(i)]; return !row ? [] : Array.isArray(row) ? row : [row]; };
 const COLOR_NAMES = { coral: "Coral", black: "Obsidian", white: "Ivory", gold: "Gold" };
 const WORKERS = { courtiers: "Courtiers", warriors: "Warriors", gardeners: "Gardeners" };
+const RESOURCE_NAMES = { food: "Rice", iron: "Iron", pearl: "Pearl" };
 const FLOORS = { gate: "Castle gate", floor1: "First floor", floor2: "Second floor", daimyo: "Daimyo hall" };
 const DOMAIN_RESOURCE = { coral: "food", black: "iron", white: "pearl" };
 const PIPS = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
@@ -154,6 +155,9 @@ function moveLabel(move, game) {
   if (move.type === "courtier_destination") return [FLOORS[move.to], `Pay ${move.cost} pearls`, "courtiers"];
   if (move.type === "worker_destination") { const card = gardenCard(game, move); return [card.name, `Pay ${card.cost} ${move.worker === "warriors" ? "iron" : "food"}`, move.worker]; }
   if (move.type === "convert") return [move.from === "seals" ? `2 seals → 1 ${move.to}` : move.from === "seal" ? "1 seal → 1 coin" : `2 ${move.from} → 1 coin`, "", "seals"];
+  // A card that grants "a resource" without naming one. Without this case the three
+  // picks fall through to the default below and render as three "End Turn" buttons.
+  if (move.type === "choose_resource") return [RESOURCE_NAMES[move.resource] || move.resource, "Take one of this resource", move.resource];
   return ["End Turn", "", "check"];
 }
 
@@ -166,7 +170,7 @@ function DecisionPanel({ game, names, myId, sendMove, selected, onSelect, busy, 
   const ending = moves.some(m => m.type === "end_turn");
   const nextName = names[game.turn_pid] || "The next clan";
   const step = placing ? 2 : taking ? 1 : 3;
-  const title = !connected ? "Reconnecting to the table" : !acting ? `${nextName} is playing` : taking ? "Choose your die" : placing ? "Choose a destination" : ending ? "Your action is complete" : kind === "outside_worker" ? "Deploy a worker" : kind === "courtier_destination" ? "Choose a floor" : "Choose a worker destination";
+  const title = !connected ? "Reconnecting to the table" : !acting ? `${nextName} is playing` : taking ? "Choose your die" : placing ? "Choose a destination" : ending ? "Your action is complete" : kind === "choose_resource" ? "Choose a resource" : kind === "outside_worker" ? "Deploy a worker" : kind === "courtier_destination" ? "Choose a floor" : "Choose a worker destination";
   const selectedMove = selected && moves.find(m => m.type === "place_die" && m.space === selected);
   const info = selectedMove ? placementInfo(game, selected) : null;
   const choices = moves.filter(m => !["take_die", "place_die", "convert", "end_turn"].includes(m.type));
@@ -186,12 +190,24 @@ function DecisionPanel({ game, names, myId, sendMove, selected, onSelect, busy, 
   </section>;
 }
 
+function ResourceChoice({ moves, sendMove, busy, connected }) {
+  return <div className="bc-resource-choice"><span className="bc-kicker">YOUR CARD GRANTS A RESOURCE</span>
+    <h3>Choose one.</h3>
+    <div className="bc-choice-grid">{moves.map((move, i) => <button type="button" key={i} disabled={busy || !connected} onClick={() => sendMove(move)}><Icon name={move.resource} /><span><strong>{RESOURCE_NAMES[move.resource] || move.resource}</strong><small>Take one</small></span><Icon name="arrow" /></button>)}</div>
+  </div>;
+}
+
 function Draft({ game, names, sendMove, busy, connected }) {
   const available = game.legal_moves || [];
   const active = available.some(m => m.type === "draft");
+  // A drafted card can stop the draft to ask for a resource. The draft is held open for
+  // that pick, so it has to be answerable from this screen -- the decision panel is not
+  // mounted during the draft phase.
+  const picks = available.filter(m => m.type === "choose_resource");
   const [selection, setSelection] = useState(null);
   useEffect(() => setSelection(null), [game.draft_options]);
   const chosen = game.draft_options?.find(o => o.resource.id === selection);
+  if (picks.length) return <section className="bc-draft"><ResourceChoice moves={picks} {...{ sendMove, busy, connected }} /></section>;
   return <section className="bc-draft"><div className="bc-draft-intro"><span className="bc-kicker">THE OPENING DRAFT</span><h2>{active ? "Every great clan begins with a choice." : `${names[game.draft_queue?.[0]] || "Another clan"} is choosing.`}</h2><p>Choose a pair. Take its starting resources now, keep the action card for your domain, and add the lantern reward.</p></div>
     <div className="bc-draft-grid">{(game.draft_options || []).map((option, i) => <button type="button" key={option.resource.id} className={`bc-draft-pair${selection === option.resource.id ? " selected" : ""}`} disabled={!active || busy || !connected} onClick={() => setSelection(option.resource.id)} aria-pressed={selection === option.resource.id}><span className="bc-draft-number">PAIR {String(i + 1).padStart(2, "0")}<Icon name={selection === option.resource.id ? "check" : "castle"} /></span><div className="bc-draft-resource"><span className="bc-kicker">START WITH</span><h3>{option.resource.name}</h3><Effects effects={option.resource.light} /></div><div className="bc-draft-action"><span className="bc-kicker">YOUR DOMAIN ACTION</span><h3>{option.action.name}</h3><Effects effects={option.action.light} /></div><div className="bc-draft-lantern"><Icon name="lantern" /><span>Lantern<small>{rewardText({ icon: ["food", "iron", "pearl", "coin", "seal", "influence", "vp"].includes(option.resource.back) ? option.resource.back : "coin", amount: 1 })}</small></span></div><span className="bc-draft-select">{selection === option.resource.id ? "Selected" : active ? "Select pair" : "Waiting for your turn"}<Icon name="arrow" /></span></button>)}</div>
     <div className="bc-draft-confirm"><span>{chosen ? `${chosen.resource.name} + ${chosen.action.name}` : active ? "Select a pair to see your choice here." : "The remaining pairs will be yours to choose from."}</span><button className="bc-primary" disabled={!chosen || !active || busy || !connected} onClick={() => sendMove({ type: "draft", index: game.draft_options.findIndex(o => o.resource.id === selection) })}>Begin with this pair <Icon name="arrow" /></button></div>

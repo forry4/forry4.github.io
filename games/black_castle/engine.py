@@ -240,15 +240,78 @@ def _climb_moves(game: dict, pid: str) -> list[dict]:
     return moves
 
 
+#: The resource a player may pick when a card says "gain a resource" without naming one.
+ANY_RESOURCE = "any"
+
+
+def _queue_resource_choice(game: dict, pid: str, amount: int, source: str) -> None:
+    """A card that grants ANY resource asks the player, it does not pick for them.
+
+    Ten of the sixty-eight cards say `Gain <resource> N` with no resource named, and the
+    generator keeps that as `resource: "any"` precisely so it cannot be quietly resolved
+    into food every time. Each unit is queued as its own choice: "gain 3 resources" is
+    three separate picks, because nothing says they have to match.
+    """
+    queue = game.setdefault("choice_queue", [])
+    for _ in range(max(0, int(amount))):
+        queue.append({"pid": pid, "source": source})
+
+
+def _promote_choice(game: dict, pid: str) -> bool:
+    """Turn the next queued resource choice into the live pending, if there is one.
+
+    Called wherever an action finishes. A queued choice outranks `end_turn` -- a player
+    must spend what a card gave them before the turn can close -- but it never displaces
+    a pending that is already mid-decision.
+    """
+    queue = game.get("choice_queue") or []
+    if not queue:
+        return False
+    pending = game.get("pending")
+    if pending and pending.get("kind") not in ("end_turn", "choose_resource"):
+        return False
+    head = queue[0]
+    game["pending"] = {"pid": head.get("pid", pid), "kind": "choose_resource",
+                       "source": head.get("source", "action")}
+    return True
+
+
 def _apply_effects(game: dict, pid: str, effects: list[dict], *, source: str = "action") -> None:
     for effect in effects or []:
         op = effect.get("op")
         if op == "gain":
-            _gain(game, pid, resource=effect.get("resource"),
-                  amount=int(effect.get("amount", 1)) if effect.get("resource") else 0,
+            resource = effect.get("resource")
+            if resource == ANY_RESOURCE:
+                _queue_resource_choice(game, pid, int(effect.get("amount", 1)), source)
+                continue
+            _gain(game, pid, resource=resource,
+                  amount=int(effect.get("amount", 1)) if resource else 0,
                   coins=int(effect.get("coins", 0)), seals=int(effect.get("seals", 0)),
                   points=int(effect.get("points", 0)), influence=int(effect.get("influence", 0)),
                   note=source)
+        elif op == "passage":
+            # BGA's "Passage of Time" IS our influence track -- one name for one track.
+            _gain(game, pid, influence=int(effect.get("steps", 1)), note=source)
+        elif op == "lantern_rewards":
+            _resolve_lantern(game, pid)
+        elif op == "well_action":
+            _gain(game, pid, seals=1, note=source)
+            _well_bonus(game, pid)
+        elif op == "decree":
+            # A decree card carries no action block at all: it is a pure Lantern reward,
+            # one each of coin / seal / vp, which is exactly the three icons the printed
+            # `Gain <icon> Decree Card` texts name.
+            icon = str(effect.get("icon", "coin"))
+            game["players"][pid]["lantern"].append({"icon": icon, "amount": 1, "card": "decree"})
+            _log(game, f"{_name(game, pid)} takes the {icon} Decree card.", pid=pid)
+        elif op == "worker_action":
+            _perform_worker_action(game, pid, effect, source)
+        elif op in ("domain_action", "main_board_action"):
+            # Yard-tile vocabulary. No tile resolves through here yet, so reaching this
+            # branch means a tile action was wired up without its implementation -- say so
+            # rather than silently doing nothing.
+            _log(game, f"{_name(game, pid)} has a tile action that is not implemented "
+                       f"({op}).", pid=pid)
         elif op == "coins":
             _gain(game, pid, coins=int(effect.get("amount", 0)), note=source)
         elif op == "seals":
@@ -273,22 +336,51 @@ def _apply_effects(game: dict, pid: str, effects: list[dict], *, source: str = "
             if moved:
                 _log(game, f"{_name(game, pid)} moves a {worker[:-1]} to {destination}.", pid=pid)
         elif op == "pay_seal_for_worker":
-            worker = effect.get("worker", "courtiers")
-            destination = "gate" if worker == "courtiers" else (
-                "yard_pool" if worker == "warriors" else "garden_pool")
-            if p := game.get("players", {}).get(pid):
-                can_move = p.get("workers", {}).get(worker, {}).get("domain", 0) > 0
-            else:
-                can_move = False
-            if can_move and _pay(game, pid, seals=1) and _move_worker(game, pid, worker, destination):
-                _log(game, f"{_name(game, pid)} spends a seal to deploy a {worker[:-1]}.", pid=pid)
-            elif can_move:
-                _log(game, f"{_name(game, pid)} cannot afford the seal action.", pid=pid)
+            # The pre-catalogue spelling, kept so a game saved before 2026-09-20 still
+            # resolves its cards. New data never emits it.
+            _perform_worker_action(
+                game, pid, {"worker": effect.get("worker", "courtiers"),
+                            "cost": {"seals": 1}}, source)
         elif op == "lantern":
             icon = effect.get("icon", "coin")
             game["players"][pid]["lantern"].append({"icon": icon, "amount": int(effect.get("amount", 1))})
         elif op == "well_bonus":
             _well_bonus(game, pid)
+
+
+#: Where each worker goes when its action is performed. Warriors and gardeners land in a
+#: short-lived pool until the player picks the actual yard or garden card.
+_WORKER_DESTINATION = {"courtiers": "gate", "warriors": "yard_pool",
+                       "gardeners": "garden_pool"}
+
+
+def _perform_worker_action(game: dict, pid: str, effect: dict, source: str) -> None:
+    """Deploy one worker, paying the card's price first if it names one.
+
+    THE PRICE IS A CURRENCY, NOT A NUMBER. A castle card charges SEALS to repeat a worker
+    action and a yard tile charges COINS, and both arrive in BGA's payload as the same
+    `qty` beside an icon -- so the catalogue keeps `cost` as {currency: amount} and this
+    pays whatever it names. Flattening the two would bill a tile's 3 coins to the seal
+    track, which a player would feel and no test would obviously catch.
+    """
+    worker = effect.get("worker", "courtiers")
+    destination = _WORKER_DESTINATION.get(worker, "gate")
+    p = game.get("players", {}).get(pid)
+    if not p or p.get("workers", {}).get(worker, {}).get("domain", 0) <= 0:
+        return
+    cost = effect.get("cost") or {}
+    coins, seals = int(cost.get("coins", 0)), int(cost.get("seals", 0))
+    if (coins or seals) and not _pay(game, pid, coins=coins, seals=seals):
+        _log(game, f"{_name(game, pid)} cannot afford the {worker[:-1]} action.", pid=pid)
+        return
+    if not _move_worker(game, pid, worker, destination):
+        return
+    price = " for ".join(
+        bit for bit in (
+            f"{coins} coin" + ("s" if coins != 1 else "") if coins else "",
+            f"{seals} seal" + ("s" if seals != 1 else "") if seals else "") if bit)
+    _log(game, f"{_name(game, pid)} deploys a {worker[:-1]}"
+               + (f" for {price}" if price else "") + ".", pid=pid)
 
 
 def _well_bonus(game: dict, pid: str) -> None:
@@ -689,6 +781,10 @@ def legal_moves(game: dict | None, pid: str) -> list[dict]:
     if not game or pid not in game.get("players", {}) or is_over(game):
         return []
     pending = game.get("pending")
+    if pending and pending.get("kind") == "choose_resource":
+        if pending.get("pid") != pid:
+            return []
+        return [{"type": "choose_resource", "resource": r} for r in RESOURCES]
     if game.get("phase") == "draft":
         return _draft_moves(game, pid)
     if pending:
@@ -876,7 +972,7 @@ def _place_die(game: dict, pid: str, space: str) -> tuple[bool, str | None]:
         color = space.split(":")[1]
         _player(game, pid)["domain"][color]["die"] = copy.deepcopy(die)
         _resolve_domain(game, pid, color)
-    if not game.get("pending"):
+    if not _promote_choice(game, pid) and not game.get("pending"):
         game["pending"] = {"pid": pid, "kind": "end_turn"}
     return True, None
 
@@ -891,6 +987,34 @@ def _finish_draft(game: dict) -> None:
     game["draft_options"] = []
     game["draft_queue"] = []
     _log(game, f"Round 1 begins. {_name(game, game['turn_pid'])} has the first turn.")
+
+
+def _choose_resource(game: dict, pid: str, resource: str) -> tuple[bool, str | None]:
+    """Take one of the three resources a card left to the player's choice."""
+    pending = game.get("pending") or {}
+    if pending.get("kind") != "choose_resource" or pending.get("pid") != pid:
+        return False, "you have no resource to choose"
+    if resource not in RESOURCES:
+        return False, "choose food, iron or pearl"
+    queue = game.get("choice_queue") or []
+    head = queue.pop(0) if queue else {}
+    _gain(game, pid, resource=resource, amount=1,
+          note=head.get("source", "card"))
+    game["pending"] = None
+    if _promote_choice(game, pid):
+        return True, None
+    if game.get("phase") == "draft":
+        # The draft was held open for this choice; close it now if nobody else is owed
+        # a pick. Otherwise the next seat simply drafts.
+        if not game.get("draft_queue"):
+            _finish_draft(game)
+        return True, None
+    # Back to whatever the turn was doing -- but ONLY for the seat whose turn it is. A
+    # choice can outlive the action that granted it, and handing `end_turn` to a seat
+    # that is not mid-turn lets it end a turn it never took.
+    if game.get("turn_pid") == pid:
+        game["pending"] = {"pid": pid, "kind": "end_turn"}
+    return True, None
 
 
 def _apply_draft(game: dict, pid: str, index: int) -> tuple[bool, str | None]:
@@ -911,6 +1035,9 @@ def _apply_draft(game: dict, pid: str, index: int) -> tuple[bool, str | None]:
         p["lantern"].append({"icon": back, "amount": 1, "card": option["resource"]["id"]})
     else:
         p["lantern"].append({"icon": "coin", "amount": 1, "card": option["resource"]["id"]})
+    # A drafted card can itself grant "any resource", and that choice belongs to this
+    # seat before the next one drafts.
+    _promote_choice(game, pid)
     game["draft_picks"][pid] = index
     # A starting pair is drafted from the shared face-up row. Remove it before
     # the next seat acts so two clans can never take the same pair. The final
@@ -918,7 +1045,7 @@ def _apply_draft(game: dict, pid: str, index: int) -> tuple[bool, str | None]:
     game["draft_options"].pop(index)
     game["draft_queue"].pop(0)
     _log(game, f"{_name(game, pid)} drafts {option['resource']['name']} + {option['action']['name']}.", pid=pid)
-    if not game["draft_queue"]:
+    if not game["draft_queue"] and not game.get("choice_queue"):
         _finish_draft(game)
     return True, None
 
@@ -1018,6 +1145,11 @@ def apply_move(game: dict, pid: str, move: dict) -> tuple[bool, str | None]:
     if kind == "undo":
         return _undo(game, pid)
     if game.get("phase") == "draft":
+        # A drafted card can grant "any resource", and that pick has to be made DURING
+        # the draft -- the draft is held open for it. So it is the one non-draft move the
+        # draft accepts.
+        if kind == "choose_resource":
+            return _choose_resource(game, pid, str(move.get("resource", "")))
         if kind != "draft":
             return False, "choose a starting pair first"
         try:
@@ -1136,6 +1268,8 @@ def apply_move(game: dict, pid: str, move: dict) -> tuple[bool, str | None]:
         elif game.get("turn_pid") != pid:
             return False, "it is not your turn"
         return _convert(game, pid, str(move.get("from")), str(move.get("to", "coin")))
+    if kind == "choose_resource":
+        return _choose_resource(game, pid, str(move.get("resource", "")))
     if kind == "end_turn":
         return _end_turn(game, pid)
     return False, "unknown move"

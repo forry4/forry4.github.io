@@ -8,11 +8,21 @@ from core import rooms
 
 
 def _draft_and_play(game):
-    for _ in range(20):
+    """Take the game through the draft, answering any resource choice it raises.
+
+    Three of the nine starting resource cards grant "a resource" without naming it, so
+    the draft can pause for a pick -- and when it does, `draft_queue` is already empty
+    while the phase is still "draft".
+    """
+    for _ in range(40):
         if game["phase"] != "draft":
             return
-        pid = game["draft_queue"][0]
-        assert engine.apply_move(game, pid, {"type": "draft", "index": 0})[0]
+        pending = game.get("pending") or {}
+        if pending.get("kind") == "choose_resource":
+            assert engine.apply_move(
+                game, pending["pid"], {"type": "choose_resource", "resource": "food"})[0]
+            continue
+        assert engine.apply_move(game, game["draft_queue"][0], {"type": "draft", "index": 0})[0]
 
 
 def test_base_catalogue_counts_and_standard_setup():
@@ -58,8 +68,17 @@ def test_seeded_random_plans_finish_for_two_three_and_four_seats():
         game = engine.new_game([f"p{i}" for i in range(seat_count)], seed=41)
         steps = 0
         while not engine.is_over(game):
-            pid = game["draft_queue"][0] if game["phase"] == "draft" else (
-                game["pending"]["pid"] if game.get("pending") else game["turn_pid"])
+            # A PENDING OUTRANKS THE PHASE. A resource choice granted by a drafted card
+            # belongs to the seat that drafted it, which has already left `draft_queue`,
+            # so reading the queue first asks the wrong seat and the plan stalls with no
+            # legal move.
+            pending = game.get("pending")
+            if pending:
+                pid = pending["pid"]
+            elif game["phase"] == "draft":
+                pid = game["draft_queue"][0]
+            else:
+                pid = game["turn_pid"]
             move = bot.choose_move(game, pid, seed=steps)
             assert move is not None
             ok, error = engine.apply_move(game, pid, move)

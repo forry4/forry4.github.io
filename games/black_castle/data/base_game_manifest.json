@@ -23,8 +23,8 @@
   },
   "components": {
     "player_aids": 4,
-    "starting_action_cards": 6,
-    "starting_resource_cards": 8,
+    "starting_action_cards": 3,
+    "starting_resource_cards": 9,
     "decree_cards": 3,
     "steward_cards": 15,
     "diplomat_cards": 12,
