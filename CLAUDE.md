@@ -1,6 +1,6 @@
 # Forrest Games — Claude Context
 
-A seven-game multiplayer board-game website (+ a Books feature) sharing one backend, auth
+An eleven-game multiplayer board-game website (+ a Books feature) sharing one backend, auth
 layer, and frontend shell. Real-time play over WebSockets, server-authoritative game state,
 and per-game AI opponents that range from simple heuristics to client-side neural nets
 compiled to WASM.
@@ -20,6 +20,7 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
 | [`games/orbit/AGENTS.md`](games/orbit/AGENTS.md) | Orbit — engine, the value-only league and its search |
 | [`games/black_castle/AGENTS.md`](games/black_castle/AGENTS.md) | Black Castle — engine, the BGA-derived card catalogue, `BoardView.jsx` |
 | [`games/secretnames/CLAUDE.md`](games/secretnames/CLAUDE.md) | SecretNames (Codenames: Duet) — **the key-card inversion**, the two-sided key composition, the public/private split, and why it has no bot |
+| [`games/pinch/AGENTS.md`](games/pinch/AGENTS.md) | Pinch (YINSH) — node ids, durable row/ring-removal sub-decisions, the persist boundary |
 | [`shared/CLAUDE.md`](shared/CLAUDE.md) | Shared frontend kits + URL routing |
 | [`books/CLAUDE.md`](books/CLAUDE.md) | The Books feature |
 | [`bggfilter/CLAUDE.md`](bggfilter/CLAUDE.md) | BGG Filter — the BoardGameGeek harvest + the frontend-only filter page |
@@ -53,6 +54,8 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
   key cards, 15 unique agents, 9 timer tokens then sudden death. **A player's key says
   what happens when the OTHER player guesses**, so every guess resolves against
   `keys[1 - guesser_seat]` — see its CLAUDE.md).
+  Orbit (Zenith), Black Castle (The White Castle) and Pinch (YINSH — 2 players, 85
+  intersections, Standard ends at three removed rings and Blitz at one).
   Plus **Books** (a ranking/suggestions page) and **WWSD** (a browser autoplayer for a friend's
   external Splendor site).
 
@@ -105,6 +108,8 @@ games/
                        #   engine.py is the rules + the two-sided key generator; words.py
                        #   is the 399-word deck (data). player_view ships ONE key side per
                        #   socket — that redaction IS the game
+  pinch/               # Pinch (YINSH) — 2p abstract, engine.py + bot.py + main.py
+                       #   (pinch_app @ /pinch); see its AGENTS.md
   dissonance/          # Dissonance — 2p parity trick-taking. engine.py is a PORT of
                        #   rust-cores/dissonance-core (the solver-validated reference);
                        #   tests/test_rust_parity.py is the drift gate. FIVE modes
@@ -530,9 +535,16 @@ covers the logic; each game's wiring is one line).
   the `reconnect` action (not `join`), back off (2s, 4s, … capped at 8s) and never give up —
   a Render cold start alone is 30–50s — and must also fire on `visibilitychange`, because
   iOS kills a backgrounded socket WITHOUT firing `onclose`, leaving `connected` a stale
-  `true` that no backoff loop will ever notice. One implementation:
-  **`shared/useAutoReconnect.js`**, extracted from CoC (which had it inline) and wired into
-  Rag Tag. **Duel, Dontminion and Dissonance still have the gap.**
+  `true` that no backoff loop will ever notice. **So the focus nudge must read the socket's
+  readyState, never `connected`** — every copy (the hook included) used to return early on
+  `connected`, which made it a no-op in exactly that case. One implementation:
+  **`shared/useAutoReconnect.js`**, used by every socket game except Spender (its socket hook
+  reconnects from `onclose` and on focus by readyState) and Where Wolf? (a bounded retry,
+  then a manual button; no bot waits on it). CoC, Duel, Dontminion and Dissonance carried
+  drifted inline copies until 2026-09-22 — Dissonance's had no focus nudge at all. Every
+  socket's `onclose` must also check `wsRef.current === ws`: `connect()` closes the old socket
+  first, and its late `onclose` otherwise flips `connected` false over a live replacement.
+  `shared/tests/test_auto_reconnect.py` derives the roster and enforces all three.
 - **Stale-socket disconnect guard**: the WS `finally` only removes a socket / deletes a room if
   `r["sockets"].get(pid) is websocket` (the exact object for this handler) — prevents a reconnect race
   (WS1→WS2) from deleting the live room.
@@ -783,7 +795,9 @@ covers the logic; each game's wiring is one line).
   under `webapp`/`games`/`shared`/`books`, so the build-first invariant survives a stale flag, a bailed
   smoke run, or an edit made between the two gates. Never replace that check with the flag alone.
 - **The six non-shell games + Books are CODE-SPLIT** (`React.lazy` in Spender.jsx) — Spender itself is
-  the shell, so it is not lazy. The entry chunk is ~310KB instead of ~600KB. Adding a game screen means
+  the shell, so it is not lazy. The entry chunk was ~310KB at the split; it is ~520KB raw / ~167KB
+  gzipped as of 2026-09-22, deliberately — the offline hub eagerly carries CoC/Duel/Dissonance's
+  offline drivers and the Dissonance scorecard so they are cached for play without signal. Adding a game screen means
   a `lazy()` + `<Suspense>` branch, and a `SCREENS` entry in `webapp/test/screens.mjs`.
 - **The WS throttle is process-global and keyed on client IP** (`core.rooms`, 60 connects/min,
   300 msgs/min). Test fake sockets all report `"unknown"`, so they share ONE budget: any test module
