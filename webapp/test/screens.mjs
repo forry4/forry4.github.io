@@ -6705,7 +6705,16 @@ try {
 				cells: cells.length,
 				filled: filled.length,
 				extraFacts: document.querySelectorAll(".or-played-agent .or-agent-text, .or-played-agent .or-agent-foot").length,
-				coins: filled.filter((cell) => cell.querySelector(".or-played-cost .or-resource-icon.credits")).length,
+				// The price is the hand card's struck coin — a round gold disc with
+				// the number ON it — never the Credit icon beside a digit, which is
+				// how the player's own purse is written one line up and is what
+				// made the column read as "costs N".
+				coins: filled.filter((cell) => {
+					const cost = cell.querySelector(".or-played-cost");
+					if (!cost || cost.querySelector(".or-resource-icon")) return false;
+					const style = getComputedStyle(cost);
+					return /radial-gradient/.test(style.backgroundImage) && parseFloat(style.borderTopLeftRadius) >= box(cost).height / 2;
+				}).length,
 				quantities: filled.filter((cell) => /^×[0-9]+$/.test(cell.querySelector(".or-played-quantity")?.textContent || "")).length,
 				complete: filled.every((cell) => !!cell.querySelector(".or-played-name")?.textContent.trim()
 					&& /^[0-9]+$/.test(cell.querySelector(".or-played-count")?.textContent.trim() || "")),
@@ -7253,6 +7262,25 @@ try {
 					.flatMap((r) => [r.left - box.left, box.right - r.right]);
 			}).reduce((a, b) => Math.min(a, b), Infinity),
 		}));
+		// THE CELL IS THE TOP CARD OF A PILE: every Agent under it shows as a
+		// card edge above the cell, one per Agent up to two. The edges are
+		// pseudo-elements, so no child-box check here can see them — read the
+		// computed style instead. The loop below sets Jupiter to ONE Agent and
+		// then to EIGHTEEN, so both directions are proven at every width (a lone
+		// Agent draws no pile, a deep column draws exactly two) and a rule that
+		// paints edges on every cell, or on none, cannot pass. The topmost edge
+		// must also clear the row's own rule: the row reserves that room, which
+		// is why the row heights above do not move, and an edge that pokes
+		// through it reads as a stray line across the panel.
+		const pileOf = () => page.evaluate(() => [...document.querySelectorAll(".or-played-agent:not(.empty)")].map((cell) => {
+			const count = Number(cell.querySelector(".or-played-count")?.textContent);
+			const drawn = ["::before", "::after"].map((p) => getComputedStyle(cell, p))
+				.filter((s) => s.content !== "none" && s.display !== "none" && parseFloat(s.height) > 0);
+			const c = cell.getBoundingClientRect();
+			const rule = cell.parentElement.getBoundingClientRect().top + parseFloat(getComputedStyle(cell.parentElement).borderTopWidth);
+			const topmost = Math.min(Infinity, ...drawn.map((s) => c.top + parseFloat(getComputedStyle(cell).borderTopWidth) + parseFloat(s.top)));
+			return { count, edges: drawn.length, clear: drawn.length ? Math.round((topmost - rule) * 10) / 10 : null };
+		}));
 		for (const viewport of [{ width: 320, height: 844 }, { width: 390, height: 844 },
 			{ width: 768, height: 1024 }, { width: 1366, height: 768 }, { width: 1920, height: 1080 }]) {
 			await page.setViewportSize(viewport);
@@ -7270,14 +7298,21 @@ try {
 				await page.waitForFunction((count) => [...document.querySelectorAll(".or-played-count")]
 					.filter((el) => Number(el.textContent) === count).length === 2, count);
 				const filled = await slotGeometry();
-				// WHERE the two numbers sit, not just that they fit. On a phone the
-				// name is gone and the count and price go to OPPOSITE EDGES, so the
-				// five cells read as two aligned columns down the row; on a pointer
-				// width the name rejoins and sits against the PRICE, keeping the two
-				// facts about the top card together and leaving the count — which is
-				// about the column, not the card — alone on the left. Both are easy
-				// to undo with a `justify-content` or a `text-align` and neither
-				// would fail any other check in this file.
+				const pile = await pileOf();
+				check(`${viewport.width}px: ${count} played Agent${count === 1 ? "" : "s"} show${count === 1 ? " no pile" : " as two card edges"} above the top card, inside the row`,
+					pile.length >= 2 && pile.some((p) => p.count === count)
+					&& pile.every((p) => Number.isFinite(p.count) && p.edges === Math.min(p.count - 1, 2)
+						&& (p.clear === null || p.clear >= 1)),
+					JSON.stringify(pile));
+				// WHERE the two numbers sit, not just that they fit. The cell is the
+				// top card of a pile, so the PRICE leads, in the corner where every
+				// hand card carries it, and the count — which is about the pile, not
+				// the card — trails at the far edge. On a phone the name is gone and
+				// the two go to OPPOSITE EDGES, so the five cells read as two aligned
+				// columns down the row; on a pointer width the name rejoins and sits
+				// against the price, keeping the two facts about the top card
+				// together. Both are easy to undo with a `justify-content` or a
+				// `text-align` and neither would fail any other check in this file.
 				const order = await page.evaluate(() => {
 					const cell = [...document.querySelectorAll(".or-played-agent")]
 						.find((el) => el.querySelector(".or-played-quantity") && el.querySelector(".or-played-cost"));
@@ -7289,17 +7324,17 @@ try {
 					const nameShown = nameEl && getComputedStyle(nameEl).display !== "none";
 					const n = nameShown ? nameEl.getBoundingClientRect() : null;
 					return {
-						countFirst: q.left < p.left, nameShown,
-						countInset: q.left - c.left, priceInset: c.right - p.right,
+						priceFirst: p.right <= q.left, nameShown,
+						priceInset: p.left - c.left, countInset: c.right - q.right,
 						// how far the name's INK sits from the price it belongs with
-						nameGap: n ? p.left - n.right : null,
+						nameGap: n ? n.left - p.right : null,
 						width: c.width,
 					};
 				});
 				if (count === 18) {
 					const phone = viewport.width <= 980;
-					check(`${viewport.width}px: the count leads and the price trails${phone ? ", pinned to opposite edges" : ", with the name against the price"}`,
-						!!order && order.countFirst && order.nameShown === !phone
+					check(`${viewport.width}px: the price leads and the count trails${phone ? ", pinned to opposite edges" : ", with the name against the price"}`,
+						!!order && order.priceFirst && order.nameShown === !phone
 						// edge-pinned on a phone: both insets are just the cell padding
 						&& (!phone || (order.countInset <= 4 && order.priceInset <= 4))
 						// ...and on a pointer width the name closes up to the price

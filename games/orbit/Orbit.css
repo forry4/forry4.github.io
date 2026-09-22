@@ -263,8 +263,13 @@
    of height on the one panel whose height the influence board is competing
    for. The container keeps its aria-label, so the row is still named where
    naming matters. */
-.or-played-agents { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--or-board-gap); margin-top: .4rem; padding-top: .36rem; border-top: 1px solid var(--or-line); }
+/* The extra 3px of top padding is the pile's room: a cell with Agents under
+   its top card draws their edges up to 6px above itself (see `.depth-1`), and
+   the row reserves that space whether or not any column has a pile yet, so a
+   second recruit never changes the row's height. */
+.or-played-agents { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--or-board-gap); margin-top: .4rem; padding-top: calc(.36rem + 3px); border-top: 1px solid var(--or-line); }
 .or-played-agent {
+  position: relative;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
@@ -293,37 +298,79 @@
    column is empty, and the "0" only competed with the counts that mean
    something. */
 .or-played-agent:disabled { cursor: default; }
+/* THE PILE UNDER THE TOP CARD. Each Agent beneath the top one shows as a card
+   edge above the cell, inset a little further per layer, up to two layers
+   (`depth-2` is "two or more underneath"). The edges sit wholly OUTSIDE the
+   cell's box rather than tucked behind it: a negative z-index would paint
+   them under the player panel's own background, and they would vanish. Top
+   is -2px, not 0, because an absolute box is placed against the padding edge
+   and the cell's top border is 2px. `::after` paints last, so it is the
+   nearer card. */
+.or-played-agent.depth-1::after,
+.or-played-agent.depth-2::after,
+.or-played-agent.depth-2::before {
+  content: "";
+  position: absolute;
+  box-sizing: border-box;
+  height: 3px;
+  border: 1px solid color-mix(in srgb, currentColor 40%, transparent);
+  border-top: 2px solid color-mix(in srgb, currentColor 70%, transparent);
+  border-bottom: 0;
+  border-radius: 3px 3px 0 0;
+  background: #10132a;
+  pointer-events: none;
+}
+.or-played-agent.depth-1::after, .or-played-agent.depth-2::after { top: -5px; left: 3px; right: 3px; }
+.or-played-agent.depth-2::before { top: -8px; left: 6px; right: 6px; opacity: .7; }
 /* The count is the RECRUIT DISCOUNT — one fewer Credit per Agent already in the
    column — which is why it is the half that survives at every width while the
-   name is the half that drops. Painted in the planet's own colour and set as a
-   plate, so it cannot be misread as the gold price two cells to its right. */
-.or-played-quantity { display: inline-flex; align-items: center; justify-content: center; gap: 1px; height: 1.05rem; padding: 0 .18rem; border-radius: 4px; background: color-mix(in srgb, currentColor 24%, #0d0f1f); font-variant-numeric: tabular-nums; }
+   name is the half that drops. It is about the PILE, not the top card, so it
+   trails at the far edge, away from the price and the name. The pile edges
+   above the cell already mark it as a count, so it needs no plate of its own. */
+.or-played-quantity { display: inline-flex; align-items: center; justify-content: center; gap: 1px; height: 1.05rem; font-variant-numeric: tabular-nums; }
 .or-played-quantity > span { color: #bdc5db; font-size: .6rem; line-height: 1; }
-.or-played-count { color: var(--or-ink); font-size: .68rem; font-weight: 850; line-height: 1; }
+.or-played-count { color: var(--or-dim); font-size: .68rem; font-weight: 850; line-height: 1; }
 /* The top Agent's NAME, which is what a placed column actually is to a player
    — and, together with the cost, what the retired `.or-columns` panels carried
    that this row previously did not. One line, clipped: the full stack is one
    press away in the same modal it has always been. */
-/* THE NAME SITS AGAINST THE COST, NOT AGAINST THE COUNT. The row reads
-   count · … · name cost — the two facts about the TOP card kept together at the
-   right, and the count, which is about the column, alone at the left. Left-
-   aligning the name (the old behaviour) put a ragged gap between it and the
-   price it belongs with, and made the pair's distance from each other depend on
-   how long the name happened to be. */
-.or-played-name { min-width: 0; overflow: hidden; color: var(--or-ink); font-family: Georgia, serif; font-size: .72rem; line-height: 1.15; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+/* THE NAME SITS AGAINST THE COST, NOT AGAINST THE COUNT. The cell reads
+   cost name · … · count, like the header of a hand card: the two facts about
+   the TOP card kept together on the left, and the count, which is about the
+   pile, alone at the right. Left-aligned, so the gap between the name and the
+   price it belongs with never depends on how long the name happens to be. */
+.or-played-name { min-width: 0; overflow: hidden; color: var(--or-ink); font-family: Georgia, serif; font-size: .72rem; line-height: 1.15; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 .or-played-agent.empty .or-played-name { color: #5d6684; font-family: inherit; font-size: .56rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
 /* THE TOP AGENT'S PRINTED COST. It is a NUMBER THE RULES READ, not detail about
    a card: `card_cost` pays Credits equal to the printed cost of the Agent an
    effect exiles, transfers or discards (cards 505, 510, 517), and both seats'
-   top Agents are the public pool those effects choose from. Gold like every
-   other Credit price on the table and deliberately NOT `currentColor`, which
-   would read as more of the planet-coloured count. The same Credit coin as the
-   hand distinguishes it from the quantity even on phones. `aria-hidden`,
-   because the button's label
-   already says "…on top costing N Credits" and a bare trailing digit is worse
+   top Agents are the public pool those effects choose from.
+   IT IS THE HAND CARD'S OWN PRICE COIN — a gold disc with the number struck on
+   it — and NOT the Credit icon beside a digit. The icon-and-digit is how the
+   player's own Credits are written one line up, so a column wearing one read
+   as "this column costs N". The disc is how a CARD shows its price, in every
+   hand, all game. It is a pill rather than a circle so the two-digit top cost
+   (10) keeps its round ends. `aria-hidden`, because the button's label already
+   says "…on top with a printed cost of N Credits" and a bare digit is worse
    than silence. */
-.or-played-cost { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; color: #ffe1a1; font-size: .62rem; font-variant-numeric: tabular-nums; font-weight: 800; line-height: 1; }
-.or-played-cost .or-resource-icon { flex: none; width: 11px; height: 11px; }
+.or-played-cost {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  box-sizing: border-box;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: radial-gradient(circle at 35% 30%, #fff1c4, #dca957 50%, #725025);
+  box-shadow: 0 0 0 1px #ffe1a1, 0 1px 3px #0009;
+  color: #2c1c05;
+  font-size: .66rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
 
 /* ── Influence board ─────────────────────────────────────────────────────── */
 .or-influence { padding: .62rem var(--or-board-pad) .68rem; }
@@ -865,8 +912,7 @@
      which the glyph budget is not, and that is the whole lesson. */
   .or-played-quantity { gap: 0; padding: 0 .12rem; }
   .or-played-count { font-size: .66rem; }
-  .or-played-cost { gap: 1px; font-size: .6rem; }
-  .or-played-cost .or-resource-icon { width: 10px; height: 10px; }
+  .or-played-cost { min-width: 15px; height: 15px; padding: 0 2px; font-size: .6rem; }
   .or-tech > header { grid-template-columns: auto 1fr auto; padding: .35rem .6rem; }
   .or-tech-toggle { min-height: 32px; }
   .or-tech-key b { max-width: 4.7rem; }
@@ -1148,7 +1194,9 @@
   .or-control-hint { padding: 8px; }
   /* Every row of the player box gives a little at short heights; the played
      strip is the newest and the easiest to tighten without losing a fact. */
-  .or-played-agents { margin-top: .26rem; padding-top: .24rem; }
+  /* +4px, not the base tier's +3: the pile is 6px tall, and on this tier's
+     tighter padding +3 left its back edge 0.8px under the row's rule. */
+  .or-played-agents { margin-top: .26rem; padding-top: calc(.24rem + 4px); }
   .or-played-agent { padding: .12rem .3rem; }
   .or-played-count { font-size: .64rem; }
   .or-played-name { font-size: .68rem; }
@@ -1162,10 +1210,10 @@
    two numbers plus their marks do not fit it on every font. This tier therefore
    drops one more mark, exactly as 980px drops the name: the `×`. It is the most
    expensive glyph in the cell (8px — wider than either number's digits) and the
-   least load-bearing, because the count is ALREADY marked as a count by the
-   filled, planet-coloured plate it sits in, while the price is marked as a price
-   by the Credit coin, which stays. So the two numbers remain distinguishable by
-   the same two cues they use at every other width; only the redundant one goes.
+   least load-bearing, because the price is ALREADY marked as a price by the
+   gold coin it is struck on, at the opposite edge, and the count is the only
+   bare number left in the cell. So the two numbers remain distinguishable by
+   the same cue they use at every other width; only the redundant one goes.
    Dropping it buys 4px PER SIDE — more than the whole cross-platform spread —
    where trimming font sizes would have bought a third of that and cost
    legibility on the two numbers this row exists to show. Both are `aria-hidden`
@@ -1216,6 +1264,7 @@
 .or-game .or-agent-foot { font-family: var(--or-instrument); font-weight: 600; letter-spacing: .08em; }
 .or-game .or-agent-foot .or-pl { font-weight: 700; letter-spacing: .08em; }
 .or-game .or-played-name { font-family: var(--or-agent-face); font-size: .86rem; font-weight: 700; }
+.or-game .or-played-cost { font-family: var(--or-instrument); font-weight: 700; }
 .or-game .or-info h2, .or-game .or-info-li-head strong { font-family: var(--or-agent-face); font-weight: 700; }
 .or-game .or-info h2 { font-size: 1.55rem; }
 .or-game .or-info-li-head strong { font-size: .98rem; }

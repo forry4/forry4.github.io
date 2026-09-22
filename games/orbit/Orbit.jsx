@@ -326,19 +326,26 @@ function PlayerRail({ player, name, active, me, leader, hint, orderLabel, onInfo
         that used to live on the panel face: the top Agent's NAME and its cost.
         The name is the half that drops first (it wants ~150px and a phone
         column is ~70px); the count is the half that never does, because it is
-        the recruit discount and not decoration. */}
+        the recruit discount and not decoration.
+        THE CELL IS DRAWN AS THE TOP CARD OF A PILE. The price is that card's
+        own price, and a gold number on a column read as "this column costs N" —
+        so it sits where every hand card carries it (a struck coin in the top-
+        left corner, beside the name) and the Agents underneath show as one or
+        two card edges above the cell (`depth-1`/`depth-2`, capped at two). The
+        count, which is about the pile and not the card, trails on the right. */}
     <div className="or-played-agents" aria-label={`${owner} played Agents`}>
       {PLANETS.map((planet) => {
         const cards = player.columns?.[planet] || [];
         const top = cards[cards.length - 1];
-        return <button type="button" key={planet} className={`or-played-agent or-${planet}${cards.length ? "" : " empty"}`}
+        const depth = Math.min(cards.length - 1, 2);
+        return <button type="button" key={planet} className={`or-played-agent or-${planet}${cards.length ? "" : " empty"}${depth > 0 ? ` depth-${depth}` : ""}`}
           data-motion-key={`column-${player.__pid}-${planet}`} data-motion-value={cards.map((card) => card.id).join(",")}
-          disabled={!cards.length} title={`${cards.length} ${planet} Agent${cards.length === 1 ? "" : "s"}${top ? `. ${top.name} on top, cost ${top.cost} Credits` : ""}. ${cards.length ? "Open details" : "None played"}`}
-          aria-label={`${cards.length} ${planet} Agent${cards.length === 1 ? "" : "s"}${top ? `, ${top.name} on top costing ${top.cost} Credits` : ""}${cards.length ? ". Open details" : ""}`}
+          disabled={!cards.length} title={`${cards.length} ${planet} Agent${cards.length === 1 ? "" : "s"}${top ? `. ${top.name} on top, printed cost ${top.cost} Credits` : ""}. ${cards.length ? "Open details" : "None played"}`}
+          aria-label={`${cards.length} ${planet} Agent${cards.length === 1 ? "" : "s"}${top ? `, ${top.name} on top with a printed cost of ${top.cost} Credits` : ""}${cards.length ? ". Open details" : ""}`}
           {...detailClick(() => cards.length && onInfo?.({ kind: "column", planet, cards, owner }))}>
-          {!!cards.length && <span className="or-played-quantity" aria-hidden="true"><span>×</span><b className="or-played-count">{cards.length}</b></span>}
+          {top && <span className="or-played-cost" aria-hidden="true">{top.cost}</span>}
           <span className="or-played-name">{top ? top.name : "empty"}</span>
-          {top && <span className="or-played-cost" aria-hidden="true"><ResourceIcon kind="credits" />{top.cost}</span>}
+          {!!cards.length && <span className="or-played-quantity" aria-hidden="true"><span>×</span><b className="or-played-count">{cards.length}</b></span>}
         </button>;
       })}
     </div>
