@@ -913,14 +913,17 @@ evaporating in mid-air. Measured at 390x844 with one `scrollTo`: `flights: 0`.
 
 The user picked these from rendered prototypes (desktop + phone screenshots of
 the live table) and they landed together. All of it is in-game only; the lobby
-keeps the shared kit's chrome.
+keeps the shared kit's chrome. **No fading anywhere** — the first ship dimmed
+the track rails, unreached rungs, the waiting seat and the panels, and the
+user found the whole table washed out; emphasis must ADD light, not dim the rest.
 
 - **Sky** — `OrbitSky` (presentation.jsx) replaces the tiled dot starfield on the
   table. It is painted ONCE per viewport size (quarter-resolution nebula canvas,
   one star canvas, ~34 twinkle elements); drift and twinkle are compositor-only
   CSS animations. Never move it to a per-frame rAF loop: the Hard/Expert tiers
-  run a WASM search pool in the same tab. Panels are translucent (`--or-panel`
-  at .8); at .7 a star behind a label read as a stray full stop.
+  run a WASM search pool in the same tab. Panels are only just translucent
+  (`--or-panel` at .93). At .7-.8 the user found the table faded, and a star
+  behind a label read as a stray full stop.
 - **Typefaces** — Chakra Petch (labels, headings, numbers) and Cormorant
   Garamond (Agent names), SELF-HOSTED in `webapp/public/fonts/` like Cinzel, so
   they work offline and measure the same on CI as on a dev box. `FitName`
@@ -938,9 +941,9 @@ keeps the shared kit's chrome.
   key stops a reconnect replaying them. Every motion piece rests at opacity 0,
   so reduced motion leaves nothing behind.
 - **Technology** — only YOUR ladder lights (`.reached` rows up to your level, the
-  next rung dashed). The opponent stays a dot. No glow on a space; the gate
+  next rung dashed). Nothing is faded: light is added, never subtracted. The opponent stays a dot. No glow on a space; the gate
   asserts both.
 - **Turn lighting** — `.or-acting-mine` / `.or-acting-theirs` on `.or-table`:
   the actor's seat glows (an opacity-animated `::after`, not a repainting
-  box-shadow), the waiting seat dims, your hand is lit on your turn and the
+  box-shadow), your hand is lit on your turn and the
   hint becomes a pill. The hint element must stay (the gate reads it).

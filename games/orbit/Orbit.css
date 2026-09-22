@@ -1241,18 +1241,19 @@
 @keyframes or-twinkle { 0%, 100% { opacity: .2; } 50% { opacity: 1; } }
 
 /* ── Instrument-panel surfaces ──────────────────────────────────────────────
-   The panels go translucent so the sky reads through them — enough for the
-   nebula's colour, not so much that a star behind a label reads as a stray
-   full stop (at .7 one did, before a planet name) — pick up a faint
+   The panels are only just translucent (.93) — the sky shows at the edges and
+   tints the grounds, but nothing on the table is washed out by it. .7 read as
+   faded to the user and let a star behind a label pass for a full stop. They
+   pick up a faint
    accent wash from the top and square their corners. No blur behind them: a
    backdrop-filter over a drifting layer re-blurs every frame. */
 .orbit.or-game .or-table {
   --or-panel:
     linear-gradient(180deg, rgba(66, 209, 199, .065), transparent 44%),
     repeating-linear-gradient(0deg, rgba(255, 255, 255, .012) 0 1px, transparent 1px 3px),
-    linear-gradient(145deg, rgba(25, 30, 54, .8), rgba(12, 15, 31, .8));
+    linear-gradient(145deg, rgba(25, 30, 54, .93), rgba(12, 15, 31, .93));
 }
-.orbit.or-game .or-influence { background: radial-gradient(ellipse at 50% 0, rgba(66, 209, 199, .07), transparent 70%), rgba(12, 15, 31, .72) !important; }
+.orbit.or-game .or-influence { background: radial-gradient(ellipse at 50% 0, rgba(66, 209, 199, .07), transparent 70%), rgba(12, 15, 31, .9) !important; }
 .or-game .or-table > section,
 .or-game .or-board-main > section,
 .or-game .or-sideboards > section,
@@ -1308,11 +1309,10 @@
 /* ── Tug-of-war channels ────────────────────────────────────────────────────
    The fill runs from the centre to the disc in the colour of the seat it leans
    toward, and each goal wears its owner's dashed ring, so a glance says who is
-   winning each planet and whose capture each end is. The rail and the plain
-   spots step back to let the fill read. Timing matches the disc's own. */
-.or-influence .or-track-spaces::before { opacity: .4; }
-.or-influence .or-space:not(.goal):not(.middle)::before { opacity: .65; }
-.or-influence .or-space.goal::after { content: ""; position: absolute; left: 50%; top: 50%; width: 25px; height: 25px; transform: translate(-50%, -50%); border: 2px dashed; border-radius: 50%; opacity: .75; pointer-events: none; }
+   winning each planet and whose capture each end is. The rail and spots stay
+   at full strength (dimmed, the whole board read as faded). Timing matches
+   the disc's own. */
+.or-influence .or-space.goal::after { content: ""; position: absolute; left: 50%; top: 50%; width: 25px; height: 25px; transform: translate(-50%, -50%); border: 2px dashed; border-radius: 50%; pointer-events: none; }
 .or-influence .or-space.goal.mine::after { border-color: var(--or-me); }
 .or-influence .or-space.goal.theirs::after { border-color: var(--or-them); }
 .or-track-fill { position: absolute; z-index: 1; left: 50%; width: 8px; margin-left: -4px; border-radius: 999px; pointer-events: none; transition: top .9775s cubic-bezier(.2,.75,.25,1), height .9775s cubic-bezier(.2,.75,.25,1), opacity .306s; }
@@ -1358,7 +1358,8 @@
 
 /* ── Lit technology ladders ─────────────────────────────────────────────────
    YOUR ladder lights from level 1 up to where you are, beside a conduit in
-   the faction's colour; the next rung is outlined; the rest step back. The
+   the faction's colour; the next rung is outlined. Unreached rungs keep full
+   text strength — the light ADDS to your rungs, it never fades theirs. The
    opponent's position stays a dot and lights nothing. No glow on the space
    itself — the light is the fill, the border and the conduit. */
 .or-game .or-tech-col { position: relative; padding-left: 16px; }
@@ -1367,8 +1368,6 @@
 .or-game .or-tech-row.reached .or-tech-space { border-color: color-mix(in srgb, var(--or-fac) 50%, transparent); background: color-mix(in srgb, var(--or-fac) 11%, transparent); }
 .or-game .or-tech-row.reached .or-tech-lv { color: var(--or-fac); }
 .or-game .or-tech-row.next .or-tech-space { border-style: dashed; border-color: color-mix(in srgb, var(--or-fac) 45%, transparent); }
-.or-game .or-tech-row:not(.reached) .or-tech-text, .or-game .or-tech-row:not(.reached) .or-tech-lv { opacity: .5; }
-.or-game .or-tech-row.next .or-tech-text, .or-game .or-tech-row.next .or-tech-lv { opacity: .8; }
 @media (max-width: 980px) {
   .or-game .or-tech-col { padding-left: .9rem; }
   .or-game .or-tech-row::before { left: -9px; }
@@ -1377,9 +1376,9 @@
 /* ── Turn lighting ──────────────────────────────────────────────────────────
    Whoever is acting glows in their seat colour — the breathing is a
    compositor-only opacity animation on a glow layer, not a box-shadow that
-   repaints — and the waiting seat steps back. On your turn your hand sits in
+   repaints. The waiting seat is NOT dimmed: it was, and read as faded. On your turn your hand sits in
    a pool of your light and the hint becomes the pill beside your name. */
-.or-game .or-score-rail .or-player { position: relative; transition: opacity .51s, filter .51s, background .51s, border-color .51s; }
+.or-game .or-score-rail .or-player { position: relative; transition: background .51s, border-color .51s; }
 .or-game .or-score-rail .or-player.active { background: linear-gradient(100deg, color-mix(in srgb, var(--or-seat) 16%, transparent), transparent 70%), var(--or-panel); }
 .or-acting-mine .or-player.mine.active, .or-acting-theirs .or-player.theirs.active {
   border-top-color: var(--or-seat); border-right-color: var(--or-seat); border-bottom-color: var(--or-seat);
@@ -1390,7 +1389,6 @@
   animation: or-seat-breathe 3.2s ease-in-out infinite;
 }
 @keyframes or-seat-breathe { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
-.or-acting-mine .or-player.theirs, .or-acting-theirs .or-player.mine { opacity: .62; filter: saturate(.7); }
 .or-acting-mine .or-hand-zone {
   border-color: color-mix(in srgb, var(--or-me) 45%, transparent);
   background: radial-gradient(ellipse 70% 90% at 50% 115%, color-mix(in srgb, var(--or-me) 24%, transparent), transparent 70%), var(--or-panel);
