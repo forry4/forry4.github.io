@@ -908,3 +908,39 @@ evaporating in mid-air. Measured at 390x844 with one `scrollTo`: `flights: 0`.
   and the scroll is asserted to have moved that destination first, since on a
   table that happened not to overflow every other bound would hold over a page
   that never scrolled.
+
+## Visual pass — 2026-09-22
+
+The user picked these from rendered prototypes (desktop + phone screenshots of
+the live table) and they landed together. All of it is in-game only; the lobby
+keeps the shared kit's chrome.
+
+- **Sky** — `OrbitSky` (presentation.jsx) replaces the tiled dot starfield on the
+  table. It is painted ONCE per viewport size (quarter-resolution nebula canvas,
+  one star canvas, ~34 twinkle elements); drift and twinkle are compositor-only
+  CSS animations. Never move it to a per-frame rAF loop: the Hard/Expert tiers
+  run a WASM search pool in the same tab. Panels are translucent (`--or-panel`
+  at .8); at .7 a star behind a label read as a stray full stop.
+- **Typefaces** — Chakra Petch (labels, headings, numbers) and Cormorant
+  Garamond (Agent names), SELF-HOSTED in `webapp/public/fonts/` like Cinzel, so
+  they work offline and measure the same on CI as on a dev box. `FitName`
+  refits on `document.fonts` `loadingdone`, because a font swap changes a
+  name's width without changing its box.
+- **Card faces** — a planet-coloured title band with a gold cost coin. The band
+  cost ~2px on the tallest face, so `--or-agent-height` went 152→154 (150→152
+  at ≥1500px) to keep the headroom CI has proven. The band hides the card's
+  inset "selected" edge, so `.selected` re-draws it on the band.
+- **Tug-of-war + capture motion** — the fill, the move trail and the capture
+  burst are SIBLINGS of `.or-disc`, never children and never `.or-disc`: the
+  gate reads the disc's own animations (a returning disc must have none) and
+  locates it with a strict single-element locator. Trail and burst are motion,
+  so they come only from changes seen while mounted; the board's `connected`
+  key stops a reconnect replaying them. Every motion piece rests at opacity 0,
+  so reduced motion leaves nothing behind.
+- **Technology** — only YOUR ladder lights (`.reached` rows up to your level, the
+  next rung dashed). The opponent stays a dot. No glow on a space; the gate
+  asserts both.
+- **Turn lighting** — `.or-acting-mine` / `.or-acting-theirs` on `.or-table`:
+  the actor's seat glows (an opacity-animated `::after`, not a repainting
+  box-shadow), the waiting seat dims, your hand is lit on your turn and the
+  hint becomes a pill. The hint element must stay (the gate reads it).

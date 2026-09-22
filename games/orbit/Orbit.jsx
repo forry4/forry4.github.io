@@ -15,7 +15,7 @@ import { useAutoReconnect } from "../../shared/useAutoReconnect.js";
 import { leaveOpenSeat, readRoomToken } from "../../shared/roomLifecycle.js";
 import { useCardInfoGesture } from "../../shared/gestures.js";
 import OrbitRules from "./rules.jsx";
-import { Resource, ResourceIcon, decisionCopy, victoryCondition, InfluenceDisc } from "./presentation.jsx";
+import { Resource, ResourceIcon, decisionCopy, victoryCondition, InfluenceDisc, OrbitSky } from "./presentation.jsx";
 import { automaticChoices, adjacentPairs, adjacentOrderMatters } from "./decisions.js";
 import { useCardMotion } from "./cardMotion.js";
 import orbitCssText from "./Orbit.css?inline";
@@ -204,11 +204,23 @@ function Hand({ children }) {
 }
 
 
-function captureSummary(captured = []) {
-  return captured.map((planet, index) => (
-    <i className={`or-capture-disc or-${planet}`} key={`${planet}-${index}`}
-      title={`Captured ${planet}`} aria-label={`Captured ${planet}`} />
-  ));
+/* The captured-disc tally. A disc that ARRIVES while you watch lands with a
+   pulse, timed to the board's own capture (the disc reaches the goal, bursts,
+   and then turns up here). "Arrives" means added after mount: the caller keys
+   this on the connection, like `Resource`, so a reconnect's snapshot mounts
+   quietly instead of pulsing every disc it already had. */
+function Captures({ captured = [] }) {
+  const seen = useRef({ count: captured.length, from: captured.length });
+  if (captured.length !== seen.current.count) {
+    seen.current = { count: captured.length, from: Math.min(seen.current.count, captured.length) };
+  }
+  if (!captured.length) return null;
+  return <span className="or-captures" aria-label="Captured planets">
+    {captured.map((planet, index) => (
+      <i className={`or-capture-disc or-${planet}${index >= seen.current.from ? " arrived" : ""}`} key={`${planet}-${index}`}
+        title={`Captured ${planet}`} aria-label={`Captured ${planet}`} />
+    ))}
+  </span>;
 }
 
 
@@ -299,9 +311,7 @@ function PlayerRail({ player, name, active, me, leader, hint, orderLabel, onInfo
       <Resource key={`zenithium-${connected}`} kind="zenithium" value={player.zenithium} animate={connected} />
       <span className="or-resource-cards">
         <HandCount held={player.hand?.length || 0} limit={handLimit(leader, player.__pid)} />
-        {!!player.captured?.length && <span className="or-captures" aria-label="Captured planets">
-          {captureSummary(player.captured)}
-        </span>}
+        <Captures key={`captures-${connected}`} captured={player.captured} />
       </span>
     </div>
     {/* THE PLAYED AGENTS ARE THE PLANET BOARD'S OWN BOTTOM (or top) ROW — five
@@ -369,7 +379,7 @@ function InfluenceBoard({ game, myId, catalog, onInfo }) {
       return <div className={`or-track or-${planet}`} key={planet}>
         <div className="or-track-name"><PlanetName planet={planet} /></div>
         <div className="or-track-spaces">
-          {spaces.map((space) => <span className={`or-space${Math.abs(space) === 4 ? " goal" : ""}${space === 0 ? " middle" : ""}`} key={space} />)}
+          {spaces.map((space) => <span className={`or-space${Math.abs(space) === 4 ? ` goal ${space > 0 ? "mine" : "theirs"}` : ""}${space === 0 ? " middle" : ""}`} key={space} />)}
           <InfluenceDisc position={position} planet={planet} game={game} myId={myId} />
         </div>
         <Bonus token={game.planet_bonus?.[planet]} catalog={catalog} onInfo={onInfo} />
@@ -422,7 +432,12 @@ function TechBoard({ game, myId, otherId, myName, theirName, catalog, onInfo }) 
         </span>;
         return <div className={`or-tech-col or-${faction}`} key={faction}>
           <h3><i>{FACTION_GLYPH[faction]}</i>{faction}<em title="Board strip in play">{BOARD_LETTER[faction][game.board_sides?.[faction]]}</em></h3>
-          {rows.map((space) => <div className={`or-tech-row${space.level === 2 ? " has-token" : ""}`} key={space.level}>
+          {/* YOUR LADDER LIGHTS, THEIRS DOES NOT. Every rung you have reached is
+              lit and the conduit beside it runs up to your level; the next rung
+              up is outlined as the one to develop. The opponent's position stays
+              the dot it has always been — lighting both seats' progress on one
+              ladder would say nothing about whose it is. */}
+          {rows.map((space) => <div className={`or-tech-row${space.level === 2 ? " has-token" : ""}${space.level <= mineLevel ? " reached" : space.level === mineLevel + 1 ? " next" : ""}`} key={space.level}>
             <button type="button"
               data-motion-key={`tech-rung-${faction}-${space.level}`} data-motion-value={`${mineLevel === space.level}-${theirLevel === space.level}`}
               className={`or-tech-space${mineLevel === space.level ? " mine" : ""}${theirLevel === space.level ? " theirs" : ""}`}
@@ -514,7 +529,16 @@ function FitName({ text }) {
       });
       ro.observe(b);
     }
-    return () => { if (ro) ro.disconnect(); };
+    // THE ONE INPUT THE WIDTH OBSERVER NEVER SEES: the title's web font landing.
+    // Names are set in a self-hosted face, and a name fitted against the
+    // fallback's glyphs keeps that size when the real (wider or narrower) glyphs
+    // swap in — the box never changes width, so nothing above refits it.
+    const fonts = typeof document !== "undefined" ? document.fonts : null;
+    let live = true;
+    const refit = () => { if (live) fit(); };
+    fonts?.ready?.then(refit);
+    fonts?.addEventListener?.("loadingdone", refit);
+    return () => { live = false; if (ro) ro.disconnect(); fonts?.removeEventListener?.("loadingdone", refit); };
   }, [text]);
   return <strong ref={box}><span ref={span}>{text}</span></strong>;
 }
@@ -1300,6 +1324,10 @@ export default function Orbit({ myId, authUser, onExit }) {
       : game.phase === "mulligan" && !isMyTurn ? "Thinking…"
         : !game.pending && game.turn_pid === otherId ? "Thinking…" : null
     : null;
+  // WHO IS ACTING lights the table (seat glow, the hand's pool of light) and
+  // dims the seat that is waiting. Nobody, once the game is over.
+  const actor = over ? null : game.pending_pid || game.turn_pid;
+  const acting = actor === myId ? " or-acting-mine" : actor && actor === otherId ? " or-acting-theirs" : "";
   const playerRails = (
       <div className="or-score-rail">
         <PlayerRail player={{ ...other, __pid: otherId }} name={names[otherId]} active={!over && (game.pending_pid || game.turn_pid) === otherId}
@@ -1313,7 +1341,8 @@ export default function Orbit({ myId, authUser, onExit }) {
     <LobbyHeader title="Orbit" user={<span className={`or-connection${connected ? "" : " lost"}`}>{connected ? (authUser?.name || "Connected") : "Reconnecting…"}</span>}
       menu={<GameMenu onLeave={leaveToLobby} onRules={() => setShowRules(true)}
         onAbandon={over ? null : () => setConfirmAbandon(true)} />} />
-    <main className={`or-table${connected ? "" : " motion-paused"}`} ref={motionSurface}>
+    <OrbitSky />
+    <main className={`or-table${connected ? "" : " motion-paused"}${acting}`} ref={motionSurface}>
       {game.phase === "mulligan" && playerRails}
 
       {over && <section className="or-result">

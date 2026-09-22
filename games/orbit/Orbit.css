@@ -12,8 +12,11 @@
      is the only evidence available that prose wraps closely enough across the
      dev box's fonts and the runner's for a fixed height to be safe at all.
      Do not cut below that without re-measuring on Linux — the card clips, and
-     a clipped card is what the screen gate's card-fit check exists to catch. */
-  --or-agent-height: 152px;
+     a clipped card is what the screen gate's card-fit check exists to catch.
+     152 -> 154 (2026-09-22): the planet-coloured title band costs ~2px on the
+     longest face (145.4px needed, measured over all 90), and the height paid
+     for it so the headroom above stayed exactly what CI had proven. */
+  --or-agent-height: 154px;
   /* THE TWO SEAT COLOURS. Yours is the game accent; theirs is a warm contrast
      that survives both a teal-blind and a red-blind reading of the pair, and
      never appears as a planet on the influence board. Everything that has to
@@ -1000,7 +1003,7 @@
    reserved strip, so neither a selected card nor a multi-step effect moves the
    planet board. All cards keep their complete printed sentence at full size.
    Heights follow the tallest of all 90 faces: 152px at the wider desktop card
-   width, 164px otherwise. The screen gate measures their natural heights. */
+   width, 154px otherwise. The screen gate measures their natural heights. */
 .or-agent { width: 146px; min-width: 146px; height: var(--or-agent-height); padding: 6px 7px; gap: 4px; }
 .or-agent-top { flex: none; gap: 5px; align-items: start; }
 .or-agent-top strong { flex: 1; min-width: 0; margin: 0; padding-top: 1px; font-size: .82rem; line-height: 1.13; }
@@ -1124,7 +1127,7 @@
   .or-decision .or-choice-grid button { min-height: 38px; }
 }
 @media (min-width: 1500px) {
-  .orbit { --or-agent-height: 150px; }   /* ~6px of headroom -- see :root */
+  .orbit { --or-agent-height: 152px; }   /* ~6.6px of headroom -- see :root */
   .or-hand-zone .or-agent { flex-basis: 154px; width: 154px; min-width: 154px; }
   .or-influence .or-space::before { width: 9px; height: 9px; border-width: 1.5px; }
   .or-influence .or-space.goal::before { width: 16px; height: 16px; border-width: 2px; }
@@ -1185,3 +1188,216 @@
 @media (prefers-reduced-motion: reduce) { .or-resource-pieces { display: none; } }
 
 .or-player-order { margin-top: .25rem; font-size: .75rem; font-weight: 700; color: var(--or-ink); }
+
+/* ══ THE TABLE'S LOOK (2026-09-22 visual pass) ═══════════════════════════════
+   Seven directions picked from rendered prototypes and landed together: the
+   sky, the typefaces, instrument-panel surfaces, planet card faces, tug-of-war
+   channels with capture motion, lit technology ladders and turn lighting. All
+   of it is IN-GAME ONLY (`.or-game` / the table's own classes): the lobby keeps
+   the shared kit's chrome, which `lobbyChrome` asserts is identical across
+   every game, and nothing below names a `.lby-*` class. */
+
+/* ── Typefaces ──────────────────────────────────────────────────────────────
+   SELF-HOSTED, like Cinzel and Crimson Pro, for the same two reasons: the
+   offline hub has no network to fetch them from, and a web font renders with
+   the SAME metrics on the CI runner as on a dev box, which the system stack
+   pointedly does not (~27% wider on Linux). Chakra Petch is the instrument
+   voice (labels, headings, numbers); Cormorant Garamond names the Agents. */
+@font-face { font-family: "Chakra Petch"; font-style: normal; font-weight: 600; font-display: swap; src: url(/fonts/chakrapetch-600.latin.woff2) format("woff2"); }
+@font-face { font-family: "Chakra Petch"; font-style: normal; font-weight: 700; font-display: swap; src: url(/fonts/chakrapetch-700.latin.woff2) format("woff2"); }
+@font-face { font-family: "Cormorant Garamond"; font-style: normal; font-weight: 600 700; font-display: swap; src: url(/fonts/cormorantgaramond.latin.woff2) format("woff2"); }
+.orbit.or-game {
+  --or-instrument: "Chakra Petch", ui-sans-serif, system-ui, sans-serif;
+  --or-agent-face: "Cormorant Garamond", Georgia, serif;
+}
+.or-game .or-player-name > span:first-of-type { font-family: var(--or-instrument); font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.or-game .or-resources b, .or-game .or-tech-lv, .or-game .or-log p > b { font-family: var(--or-instrument); font-weight: 700; }
+.or-game .or-tech-col h3 { font-family: var(--or-instrument); font-weight: 600; letter-spacing: .12em; }
+.or-game .or-agent-foot { font-family: var(--or-instrument); font-weight: 600; letter-spacing: .08em; }
+.or-game .or-agent-foot .or-pl { font-weight: 700; letter-spacing: .08em; }
+.or-game .or-played-name { font-family: var(--or-agent-face); font-size: .86rem; font-weight: 700; }
+.or-game .or-info h2, .or-game .or-info-li-head strong { font-family: var(--or-agent-face); font-weight: 700; }
+.or-game .or-info h2 { font-size: 1.55rem; }
+.or-game .or-info-li-head strong { font-size: .98rem; }
+.or-game .or-track-name .or-pl { font-family: var(--or-instrument); font-weight: 700; }
+@media (min-width: 981px) {
+  .or-game .or-track-name .or-pl { font-weight: 600; letter-spacing: .2em; }
+}
+@media (min-width: 981px) and (max-height: 900px) {
+  .or-game .or-played-name { font-size: .8rem; }
+}
+
+/* ── The sky ────────────────────────────────────────────────────────────────
+   `OrbitSky` in presentation.jsx replaces the lobby's tiled dot starfield on
+   the table only. It sits fixed behind everything; the table is z-index 1. */
+.orbit.or-game { background: #060812; }
+.orbit.or-game::before { display: none; }
+.or-sky { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+.or-sky canvas { position: absolute; display: block; }
+.or-sky-nebula { inset: -6%; width: 112%; height: 112%; animation: or-sky-drift 140s ease-in-out infinite alternate; }
+.or-sky-stars { inset: 0; width: 100%; height: 100%; }
+.or-sky-twinkle { position: absolute; width: var(--or-twinkle-size); height: var(--or-twinkle-size); border-radius: 50%; background: #fff; box-shadow: 0 0 4px rgba(160, 220, 255, .6); opacity: .35; animation: or-twinkle var(--or-twinkle-time) ease-in-out var(--or-twinkle-delay) infinite; }
+@keyframes or-sky-drift { from { transform: translate3d(0, 0, 0) scale(1); } to { transform: translate3d(-2.5%, 1.5%, 0) scale(1.05); } }
+@keyframes or-twinkle { 0%, 100% { opacity: .2; } 50% { opacity: 1; } }
+
+/* ── Instrument-panel surfaces ──────────────────────────────────────────────
+   The panels go translucent so the sky reads through them — enough for the
+   nebula's colour, not so much that a star behind a label reads as a stray
+   full stop (at .7 one did, before a planet name) — pick up a faint
+   accent wash from the top and square their corners. No blur behind them: a
+   backdrop-filter over a drifting layer re-blurs every frame. */
+.orbit.or-game .or-table {
+  --or-panel:
+    linear-gradient(180deg, rgba(66, 209, 199, .065), transparent 44%),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, .012) 0 1px, transparent 1px 3px),
+    linear-gradient(145deg, rgba(25, 30, 54, .8), rgba(12, 15, 31, .8));
+}
+.orbit.or-game .or-influence { background: radial-gradient(ellipse at 50% 0, rgba(66, 209, 199, .07), transparent 70%), rgba(12, 15, 31, .72) !important; }
+.or-game .or-table > section,
+.or-game .or-board-main > section,
+.or-game .or-sideboards > section,
+.or-game .or-score-rail .or-player { border-radius: 4px; }
+.or-game .or-board-main > section,
+.or-game .or-sideboards > section {
+  border-color: rgba(66, 209, 199, .24);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07), inset 0 0 28px rgba(66, 209, 199, .045), 0 10px 26px rgba(0, 0, 0, .45);
+}
+/* A seat keeps its own stripe on the left, so only the other three edges take
+   the panel tint — and theirs takes theirs. */
+.or-game .or-score-rail .or-player {
+  border-top-color: color-mix(in srgb, var(--or-seat) 30%, transparent);
+  border-right-color: color-mix(in srgb, var(--or-seat) 30%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--or-seat) 30%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07), 0 10px 26px rgba(0, 0, 0, .4);
+}
+.or-game .or-tech > header h2, .or-game .or-log h2 { font-family: var(--or-instrument); font-size: .8rem; font-weight: 600; letter-spacing: .24em; text-transform: uppercase; color: var(--or-me); }
+.or-game .or-tech > header, .or-game .or-log h2 { border-bottom-color: rgba(66, 209, 199, .22); }
+.or-game .or-tech-space { border-radius: 3px; }
+.or-game .or-played-agent { border-radius: 3px; }
+@media (max-width: 360px) {
+  .or-game .or-tech > header h2, .or-game .or-log h2 { letter-spacing: .12em; }
+}
+
+/* ── Planet card faces ──────────────────────────────────────────────────────
+   A band in the planet's colour carries the cost coin, the name and the
+   faction; a faint planet rises out of the bottom corner. THE BAND COSTS
+   HEIGHT, and the hand reserves one height for all 90 faces: it bleeds into
+   the card's own top padding (so the top costs nothing) and adds only its
+   bottom padding and rule, which `--or-agent-height` pays for — re-measured
+   against the screen gate's tallest-face check, never guessed. */
+.or-game .or-agent:not(.hidden) { position: relative; isolation: isolate; background: linear-gradient(170deg, #171b34, #0d1022 75%); }
+.or-game .or-agent:not(.hidden)::before {
+  content: ""; position: absolute; z-index: -1; right: -52px; bottom: -64px; width: 150px; height: 150px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, color-mix(in srgb, currentColor 70%, #fff), currentColor 40%, transparent 72%);
+  opacity: .2; pointer-events: none;
+}
+.or-game .or-agent .or-agent-top {
+  align-items: center; margin: -6px -7px 0; padding: 4px 7px 3px;
+  background: linear-gradient(100deg, color-mix(in srgb, currentColor 56%, #05060d), color-mix(in srgb, currentColor 18%, #111429));
+  border-bottom: 1px solid color-mix(in srgb, currentColor 55%, transparent);
+}
+.or-game .or-agent.selected .or-agent-top { box-shadow: inset 0 3px currentColor; background: linear-gradient(100deg, color-mix(in srgb, currentColor 72%, #05060d), color-mix(in srgb, currentColor 28%, #111429)); }
+.or-game .or-agent .or-agent-top strong { padding-top: 0; font-family: var(--or-agent-face); font-size: .98rem; font-weight: 700; line-height: 1.1; color: #fff8ec; }
+.or-game .or-agent .or-agent-top .or-card-price { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff1c4, #dca957 50%, #725025); box-shadow: 0 0 0 1px #ffe1a1, 0 1px 3px #0009; }
+.or-game .or-agent .or-agent-top .or-card-price .or-resource-icon { display: none; }
+.or-game .or-agent .or-agent-top .or-card-price b { color: #2c1c05; font-family: var(--or-instrument); font-size: .72rem; font-weight: 700; line-height: 1; }
+.or-game .or-agent .or-agent-top > i { color: #fff; opacity: .9; }
+.or-game .or-agent .or-agent-text { text-align: center; color: #d3d8e8; }
+.or-game .or-agent .or-agent-foot { justify-content: center; background: linear-gradient(90deg, transparent, color-mix(in srgb, currentColor 40%, transparent), transparent) top / 100% 1px no-repeat; }
+
+/* ── Tug-of-war channels ────────────────────────────────────────────────────
+   The fill runs from the centre to the disc in the colour of the seat it leans
+   toward, and each goal wears its owner's dashed ring, so a glance says who is
+   winning each planet and whose capture each end is. The rail and the plain
+   spots step back to let the fill read. Timing matches the disc's own. */
+.or-influence .or-track-spaces::before { opacity: .4; }
+.or-influence .or-space:not(.goal):not(.middle)::before { opacity: .65; }
+.or-influence .or-space.goal::after { content: ""; position: absolute; left: 50%; top: 50%; width: 25px; height: 25px; transform: translate(-50%, -50%); border: 2px dashed; border-radius: 50%; opacity: .75; pointer-events: none; }
+.or-influence .or-space.goal.mine::after { border-color: var(--or-me); }
+.or-influence .or-space.goal.theirs::after { border-color: var(--or-them); }
+.or-track-fill { position: absolute; z-index: 1; left: 50%; width: 8px; margin-left: -4px; border-radius: 999px; pointer-events: none; transition: top .9775s cubic-bezier(.2,.75,.25,1), height .9775s cubic-bezier(.2,.75,.25,1), opacity .306s; }
+.or-track-fill.mine { background: linear-gradient(180deg, transparent, var(--or-me)); box-shadow: 0 0 12px color-mix(in srgb, var(--or-me) 55%, transparent); }
+.or-track-fill.theirs { background: linear-gradient(0deg, transparent, var(--or-them)); box-shadow: 0 0 12px color-mix(in srgb, var(--or-them) 55%, transparent); }
+.or-track-fill.captured { opacity: 0; transition: top .8925s cubic-bezier(.2,.75,.25,1), height .8925s cubic-bezier(.2,.75,.25,1), opacity .255s .612s; }
+.or-track-fill.returning, .motion-paused .or-track-fill { transition: none; }
+
+/* ── Capture choreography ───────────────────────────────────────────────────
+   Every piece rests INVISIBLE and only an animation shows it, so the global
+   reduced-motion rule (which removes animations) leaves nothing behind. */
+.or-disc-trail { position: absolute; z-index: 1; left: 50%; width: 10px; margin-left: -5px; border-radius: 999px; opacity: 0; pointer-events: none; filter: blur(.5px); }
+.or-disc-trail.mine { background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--or-me) 30%, transparent) 30%, var(--or-me)); }
+.or-disc-trail.theirs { background: linear-gradient(0deg, transparent, color-mix(in srgb, var(--or-them) 30%, transparent) 30%, var(--or-them)); }
+.or-disc-trail.down { animation: or-trail-down 1.5s ease-out both; }
+.or-disc-trail.up { animation: or-trail-up 1.5s ease-out both; }
+@keyframes or-trail-down { 0% { opacity: 1; clip-path: inset(0 0 100% 0); } 55% { opacity: 1; clip-path: inset(0 0 0 0); } 100% { opacity: 0; clip-path: inset(0 0 0 0); } }
+@keyframes or-trail-up { 0% { opacity: 1; clip-path: inset(100% 0 0 0); } 55% { opacity: 1; clip-path: inset(0 0 0 0); } 100% { opacity: 0; clip-path: inset(0 0 0 0); } }
+.or-capture-burst { position: absolute; z-index: 3; left: 50%; width: 0; height: 0; pointer-events: none; --or-burst: var(--or-me); }
+.or-capture-burst.theirs { --or-burst: var(--or-them); }
+.or-capture-burst .ring { position: absolute; left: -15px; top: -15px; width: 30px; height: 30px; border: 2px solid var(--or-burst); border-radius: 50%; opacity: 0; animation: or-burst 1.1s ease-out .55s both; }
+.or-capture-burst .ring.outer { border-width: 1px; animation-delay: .7s; }
+.or-capture-burst .spark { position: absolute; left: -2px; top: -2px; width: 4px; height: 4px; border-radius: 50%; background: #e6fffb; box-shadow: 0 0 6px var(--or-burst); opacity: 0; animation: or-spark .9s ease-out .6s both; }
+.or-capture-tag { position: absolute; left: 0; top: -46px; translate: -50% 0; padding: 3px 8px; border: 1px solid var(--or-burst); border-radius: 5px; background: #10202a; color: #e6fffb; font: 700 .7rem/1.2 var(--or-instrument); letter-spacing: .04em; white-space: nowrap; box-shadow: 0 4px 14px #000a; opacity: 0; animation: or-capture-tag 2.2s ease-out .6s both; }
+.or-capture-tag::first-letter { text-transform: uppercase; }
+.or-capture-burst.theirs .or-capture-tag { top: 24px; }
+.or-mercury .or-capture-tag { translate: -18px 0; }
+.or-jupiter .or-capture-tag { translate: calc(18px - 100%) 0; }
+@keyframes or-burst { 0% { opacity: .95; transform: scale(.5); } 100% { opacity: 0; transform: scale(2.6); } }
+@keyframes or-spark {
+  0% { opacity: 0; transform: rotate(calc(var(--or-spark) * 51.43deg)) translateY(-6px); }
+  15% { opacity: 1; }
+  100% { opacity: 0; transform: rotate(calc(var(--or-spark) * 51.43deg)) translateY(-34px); }
+}
+@keyframes or-capture-tag { 0% { opacity: 0; transform: translateY(4px); } 12%, 80% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; transform: translateY(0); } }
+/* The disc lands in its captor's tally after it has left the board. */
+.or-capture-disc.arrived { animation: or-capture-arrive 1.2s cubic-bezier(.2,.8,.3,1) .85s both; }
+@keyframes or-capture-arrive {
+  0% { opacity: 0; transform: scale(0); }
+  40% { opacity: 1; transform: scale(1.6); box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 45%, transparent), 0 0 14px currentColor; }
+  100% { opacity: 1; transform: scale(1); box-shadow: 0 1px 4px #0008; }
+}
+
+/* ── Lit technology ladders ─────────────────────────────────────────────────
+   YOUR ladder lights from level 1 up to where you are, beside a conduit in
+   the faction's colour; the next rung is outlined; the rest step back. The
+   opponent's position stays a dot and lights nothing. No glow on the space
+   itself — the light is the fill, the border and the conduit. */
+.or-game .or-tech-col { position: relative; padding-left: 16px; }
+.or-game .or-tech-row::before { content: ""; position: absolute; left: -10px; top: -3px; bottom: -3px; width: 4px; background: #1a1e3a; pointer-events: none; }
+.or-game .or-tech-row.reached::before { background: linear-gradient(0deg, var(--or-fac), color-mix(in srgb, var(--or-fac) 55%, #fff)); box-shadow: 0 0 8px color-mix(in srgb, var(--or-fac) 70%, transparent); }
+.or-game .or-tech-row.reached .or-tech-space { border-color: color-mix(in srgb, var(--or-fac) 50%, transparent); background: color-mix(in srgb, var(--or-fac) 11%, transparent); }
+.or-game .or-tech-row.reached .or-tech-lv { color: var(--or-fac); }
+.or-game .or-tech-row.next .or-tech-space { border-style: dashed; border-color: color-mix(in srgb, var(--or-fac) 45%, transparent); }
+.or-game .or-tech-row:not(.reached) .or-tech-text, .or-game .or-tech-row:not(.reached) .or-tech-lv { opacity: .5; }
+.or-game .or-tech-row.next .or-tech-text, .or-game .or-tech-row.next .or-tech-lv { opacity: .8; }
+@media (max-width: 980px) {
+  .or-game .or-tech-col { padding-left: .9rem; }
+  .or-game .or-tech-row::before { left: -9px; }
+}
+
+/* ── Turn lighting ──────────────────────────────────────────────────────────
+   Whoever is acting glows in their seat colour — the breathing is a
+   compositor-only opacity animation on a glow layer, not a box-shadow that
+   repaints — and the waiting seat steps back. On your turn your hand sits in
+   a pool of your light and the hint becomes the pill beside your name. */
+.or-game .or-score-rail .or-player { position: relative; transition: opacity .51s, filter .51s, background .51s, border-color .51s; }
+.or-game .or-score-rail .or-player.active { background: linear-gradient(100deg, color-mix(in srgb, var(--or-seat) 16%, transparent), transparent 70%), var(--or-panel); }
+.or-acting-mine .or-player.mine.active, .or-acting-theirs .or-player.theirs.active {
+  border-top-color: var(--or-seat); border-right-color: var(--or-seat); border-bottom-color: var(--or-seat);
+}
+.or-acting-mine .or-player.mine.active::after, .or-acting-theirs .or-player.theirs.active::after {
+  content: ""; position: absolute; inset: -1px; border-radius: inherit; pointer-events: none;
+  box-shadow: 0 0 26px -4px var(--or-seat), inset 0 0 22px color-mix(in srgb, var(--or-seat) 14%, transparent);
+  animation: or-seat-breathe 3.2s ease-in-out infinite;
+}
+@keyframes or-seat-breathe { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+.or-acting-mine .or-player.theirs, .or-acting-theirs .or-player.mine { opacity: .62; filter: saturate(.7); }
+.or-acting-mine .or-hand-zone {
+  border-color: color-mix(in srgb, var(--or-me) 45%, transparent);
+  background: radial-gradient(ellipse 70% 90% at 50% 115%, color-mix(in srgb, var(--or-me) 24%, transparent), transparent 70%), var(--or-panel);
+}
+.or-acting-mine .or-hand .or-agent.playable:not(.selected):not(.discarding):not(:hover) { box-shadow: 0 0 16px -5px currentColor, 0 7px 17px #0005; }
+.or-game .or-player .or-player-hint { font-family: var(--or-instrument); letter-spacing: .05em; }
+.or-acting-mine .or-player.mine .or-player-hint,
+.or-acting-theirs .or-player.theirs .or-player-hint { padding: 2px 8px; border: 1px solid var(--or-seat); border-radius: 999px; line-height: 1.3; }
+.or-acting-mine .or-player.mine .or-player-hint { background: var(--or-seat); color: #062624; box-shadow: 0 0 12px color-mix(in srgb, var(--or-seat) 60%, transparent); }
+.or-acting-theirs .or-player.theirs .or-player-hint { color: var(--or-seat); }

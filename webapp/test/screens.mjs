@@ -6874,7 +6874,20 @@ try {
 							: centers[0].x <= lineBox.start + 3 && centers[1].x >= lineBox.end - 3);
 				});
 				const occupied = document.querySelector(".or-tech-space.mine.theirs");
-				const vacant = document.querySelector(".or-tech-space:not(.mine):not(.theirs)");
+				// YOUR LADDER IS LIT, THEIRS IS NOT (2026-09-22; this used to assert
+				// no lighting at all). Every rung at or below your level carries
+				// `.reached`, none above it does — whatever the opponent's dot says —
+				// and a lit rung has to LOOK different from an unlit one, or the class
+				// is decoration nobody sees. Glow stays banned on every space.
+				const ladders = [...document.querySelectorAll(".or-tech-col")].map((col) => {
+					const rows = [...col.querySelectorAll(".or-tech-row")];
+					const level = (row) => Number(row.querySelector(".or-tech-lv").textContent);
+					const mine = rows.find((row) => row.querySelector(".or-tech-seats i.mine"));
+					const myLevel = mine ? level(mine) : 0;
+					return rows.length === 5 && rows.every((row) => row.classList.contains("reached") === (level(row) <= myLevel));
+				});
+				const reachedSpace = document.querySelector(".or-tech-row.reached .or-tech-space");
+				const unreachedSpace = document.querySelector(".or-tech-row:not(.reached) .or-tech-space");
 				const middle = [...document.querySelectorAll(".or-space.middle")]
 					.map((el) => getComputedStyle(el, "::before"))
 					.map((style) => ({ width: parseFloat(style.width), height: parseFloat(style.height) }));
@@ -6882,12 +6895,13 @@ try {
 					.map((el) => getComputedStyle(el, "::before"))
 					.map((style) => ({ width: parseFloat(style.width), height: parseFloat(style.height) }));
 				return { goalsExtend, dots: occupied.querySelectorAll(".or-tech-seats i").length,
-					noGlow: getComputedStyle(occupied).boxShadow === "none"
-						&& getComputedStyle(occupied).borderColor === getComputedStyle(vacant).borderColor,
+					noGlow: [...document.querySelectorAll(".or-tech-space")].every((el) => getComputedStyle(el).boxShadow === "none"),
+					yourLadderLit: ladders.length === 3 && ladders.every(Boolean) && !!reachedSpace && !!unreachedSpace
+						&& getComputedStyle(reachedSpace).borderTopColor !== getComputedStyle(unreachedSpace).borderTopColor,
 					middle: middle.length === 5 && middle.every(({ width, height }) => width > regular[0].width && height > regular[0].height) };
 			});
-			check(`${label}: track lines stop at both goal spots and technology uses dots without side lighting`,
-				trackStyle.goalsExtend && trackStyle.dots === 2 && trackStyle.noGlow && trackStyle.middle, JSON.stringify(trackStyle));
+			check(`${label}: track lines stop at both goal spots and technology lights only your own ladder, without glow`,
+				trackStyle.goalsExtend && trackStyle.dots === 2 && trackStyle.noGlow && trackStyle.yourLadderLit && trackStyle.middle, JSON.stringify(trackStyle));
 		};
 		await checkTrackPresentation("Desktop");
 		// The desktop targets are product sizes, not incidental screenshots.
