@@ -18,6 +18,7 @@ import {
 import { splendorCardCss } from "../../shared/splendor.jsx";
 import DontminionRules from "./rules.jsx";
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
+import { useAutoReconnect } from "../../shared/useAutoReconnect.js";
 
 // CSS lives in the sibling .css file, imported `?inline` (a string injected by this
 // component's own <style> tag) — NEVER a JS template literal (the documented
@@ -955,7 +956,7 @@ function useSocket(onMessage) {
     const ws = new WebSocket(url);
     wsRef.current = ws;
     ws.onopen = () => { setConnected(true); if (firstMsg) ws.send(JSON.stringify(firstMsg)); };
-    ws.onclose = () => setConnected(false);
+    ws.onclose = () => { if (wsRef.current === ws) setConnected(false); };
     ws.onmessage = (e) => { try { onMsg.current(JSON.parse(e.data)); } catch {} };
   }, []);
   const send = useCallback((obj) => { try { wsRef.current?.send(JSON.stringify(obj)); } catch {} }, []);
@@ -1034,8 +1035,6 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const urlAttemptRef = useRef(null);
   const didInitRef = useRef(false);
   const popHandlerRef = useRef(() => {});
-  const reconnTimer = useRef(null);
-  const reconnTries = useRef(0);
   const logRef = useRef(null);
 
   const playerName = authUser?.name || "Player";
@@ -1342,37 +1341,16 @@ export default function Dontminion({ myId, authUser, onExit }) {
 
   // ── auto-reconnect while in a live game (re-kicks the bot scheduler server-side) ──
   const inLiveGame = !!roomId && !reviewOnly && (screen === "game" || screen === "waiting") && roomData?.status !== "over";
-  const attemptReconnect = useCallback(() => {
-    if (reconnTimer.current) { clearTimeout(reconnTimer.current); reconnTimer.current = null; }
-    const rs = socketReady();
-    if (rs === 0 || rs === 1) { reconnTimer.current = setTimeout(attemptReconnect, 3000); return; }
+  const reconnectNow = useCallback(() => {
     let tok = null;
     try { tok = localStorage.getItem(`dm_token_${roomId}_${myId}`); } catch {}
-    if (tok) { setReconnecting(true); connect(`${DM_WS}/${roomId}/${myId}`, { action: "reconnect", token: tok }); }
-    reconnTries.current += 1;
-    reconnTimer.current = setTimeout(attemptReconnect, Math.min(2000 * reconnTries.current, 8000));
-  }, [roomId, myId, connect, socketReady]);
-
-  useEffect(() => {
-    const clear = () => { if (reconnTimer.current) { clearTimeout(reconnTimer.current); reconnTimer.current = null; } };
-    if (connected || !inLiveGame) {
-      clear(); reconnTries.current = 0;
-      if (connected) setReconnecting(false);
-      return;
-    }
-    if (!reconnTimer.current) attemptReconnect();
-    return clear;
-  }, [connected, inLiveGame, attemptReconnect]);
-
-  useEffect(() => {
-    const onVis = () => {
-      if (document.visibilityState !== "visible" || connected || !inLiveGame) return;
-      reconnTries.current = 0;
-      attemptReconnect();
-    };
-    document.addEventListener("visibilitychange", onVis);
-    return () => document.removeEventListener("visibilitychange", onVis);
-  }, [connected, inLiveGame, attemptReconnect]);
+    if (tok) connect(`${DM_WS}/${roomId}/${myId}`, { action: "reconnect", token: tok });
+  }, [roomId, myId, connect]);
+  useAutoReconnect({
+    enabled: inLiveGame, connected, connect: reconnectNow, socketReady,
+    onAttempt: () => setReconnecting(true),
+  });
+  useEffect(() => { if (connected) setReconnecting(false); }, [connected]);
 
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(""), 2600); return () => clearTimeout(t); } }, [toast]);
 

@@ -8,6 +8,7 @@ import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyMatchup, LobbyLo
   WaitingRoom, waitingRoomCss } from "../../shared/lobby.jsx";
 import CocRules from "./rules.jsx";
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
+import { useAutoReconnect } from "../../shared/useAutoReconnect.js";
 import { leaveOpenSeat, readRoomToken } from "../../shared/roomLifecycle.js";
 // Offline vs-AI: the local game driver (wasm engine + IndexedDB saves) — see offline.js.
 import { applyOfflineCocMove, armCocUndoIfMyTurn, cocOfflineRoomData, runCocBotLoop,
@@ -682,7 +683,7 @@ function useSocket(onMessage) {
     const ws = new WebSocket(url);
     wsRef.current = ws;
     ws.onopen = () => { setConnected(true); if (firstMsg) ws.send(JSON.stringify(firstMsg)); };
-    ws.onclose = () => setConnected(false);
+    ws.onclose = () => { if (wsRef.current === ws) setConnected(false); };
     ws.onmessage = (e) => { try { onMsg.current(JSON.parse(e.data)); } catch {} };
   }, []);
   const send = useCallback((obj) => { try { wsRef.current?.send(JSON.stringify(obj)); } catch {} }, []);
@@ -875,8 +876,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
   const [phasePop, setPhasePop] = useState(null);       // {from,to,silver,workers} — the between-phase overlay
   const animSnap = useRef(null);                        // prev snapshot for diffing my tile moves
   const flyerSeq = useRef(0);
-  const reconnTimer = useRef(null);                     // auto-reconnect backoff timer
-  const reconnTries = useRef(0);
   const turnSimsRef = useRef(0);                         // client-AI sims accumulated across the bot's turn
   const prevAiSimRef = useRef(false);                    // edge-detect the bot turn for the per-turn sim log
   const prevPhaseRef = useRef(null);                    // last phase_letter seen (detect a phase advance)
@@ -1276,46 +1275,16 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
   // the `reconnect` action (NOT `join`) so the backend actually resumes the bot.
   const inLiveGame = !offline && !!roomId && !reviewOnly
     && (screen === "game" || screen === "waiting") && roomData?.status !== "over";
-  // One reconnect attempt that reschedules itself — shared by the backoff loop AND the
-  // tab-focus nudge, so neither can leave the loop dead by clearing the other's timer.
-  const attemptReconnect = useCallback(() => {
-    if (reconnTimer.current) { clearTimeout(reconnTimer.current); reconnTimer.current = null; }
-    const rs = socketReady();
-    if (rs === 0 || rs === 1) {                          // CONNECTING/OPEN — don't abort it, re-check
-      reconnTimer.current = setTimeout(attemptReconnect, 3000);
-      return;
-    }
+  const reconnectNow = useCallback(() => {
     let tok = null;
     try { tok = localStorage.getItem(`coc_token_${roomId}_${myId}`); } catch {}
-    if (tok) { setReconnecting(true); connect(`${COC_WS}/${roomId}/${myId}`, { action: "reconnect", token: tok }); }
-    reconnTries.current += 1;
-    // 2s, 4s, 6s … capped at 8s — retries indefinitely until connected (or we leave).
-    reconnTimer.current = setTimeout(attemptReconnect, Math.min(2000 * reconnTries.current, 8000));
-  }, [roomId, myId, connect, socketReady]);
-
-  useEffect(() => {
-    const clear = () => { if (reconnTimer.current) { clearTimeout(reconnTimer.current); reconnTimer.current = null; } };
-    if (connected || !inLiveGame) {
-      clear();
-      reconnTries.current = 0;
-      if (connected) setReconnecting(false);             // no-op re-render if already false
-      return;
-    }
-    if (!reconnTimer.current) attemptReconnect();        // start the loop if it isn't running
-    return clear;
-  }, [connected, inLiveGame, attemptReconnect]);
-
-  // Tab back into focus (iOS often kills a backgrounded socket without firing onclose):
-  // fire an immediate attempt instead of waiting out the backoff.
-  useEffect(() => {
-    const onVis = () => {
-      if (document.visibilityState !== "visible" || connected || !inLiveGame) return;
-      reconnTries.current = 0;
-      attemptReconnect();
-    };
-    document.addEventListener("visibilitychange", onVis);
-    return () => document.removeEventListener("visibilitychange", onVis);
-  }, [connected, inLiveGame, attemptReconnect]);
+    if (tok) connect(`${COC_WS}/${roomId}/${myId}`, { action: "reconnect", token: tok });
+  }, [roomId, myId, connect]);
+  useAutoReconnect({
+    enabled: inLiveGame, connected, connect: reconnectNow, socketReady,
+    onAttempt: () => setReconnecting(true),
+  });
+  useEffect(() => { if (connected) setReconnecting(false); }, [connected]);
 
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(""), 2400); return () => clearTimeout(t); } }, [toast]);
 

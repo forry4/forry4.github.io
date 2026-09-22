@@ -18,6 +18,7 @@ import {
 } from "../../shared/splendor.jsx";
 import DuelRules from "./rules.jsx";
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
+import { useAutoReconnect } from "../../shared/useAutoReconnect.js";
 // Offline vs-AI: the local game driver (wasm engine + IndexedDB saves) — see offline.js.
 import { applyOfflineDuelMove, armDuelUndoIfMyTurn, duelOfflineRoomData, runDuelBotLoop,
   loadOfflineDuelGame } from "./offline.js";
@@ -298,7 +299,7 @@ function useSocket(onMessage) {
     const ws = new WebSocket(url);
     wsRef.current = ws;
     ws.onopen = () => { setConnected(true); if (firstMsg) ws.send(JSON.stringify(firstMsg)); };
-    ws.onclose = () => setConnected(false);
+    ws.onclose = () => { if (wsRef.current === ws) setConnected(false); };
     ws.onmessage = (e) => { try { onMsg.current(JSON.parse(e.data)); } catch {} };
   }, []);
   const send = useCallback((obj) => { try { wsRef.current?.send(JSON.stringify(obj)); } catch {} }, []);
@@ -420,8 +421,6 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
   const prevBoardRef = useRef(null);
   const refillRoomRef = useRef(null);
   const flyerRoomRef = useRef(null);   // which room prevLogLen is synced to (first-sight guard)
-  const reconnTimer = useRef(null);
-  const reconnTries = useRef(0);
   // client-side (WASM) bot search — see the effects below
   const wasmPoolRef = useRef(null);          // [{ ready, request, terminate }] — RPC-wrapped workers
   const [wasmReady, setWasmReady] = useState(false);
@@ -667,37 +666,16 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
   // A review is HTTP-loaded and has no socket — never try to reconnect one.
   const inLiveGame = !offline && !!roomId && !reviewOnly
     && (screen === "game" || screen === "waiting") && roomData?.status !== "over";
-  const attemptReconnect = useCallback(() => {
-    if (reconnTimer.current) { clearTimeout(reconnTimer.current); reconnTimer.current = null; }
-    const rs = socketReady();
-    if (rs === 0 || rs === 1) { reconnTimer.current = setTimeout(attemptReconnect, 3000); return; }
+  const reconnectNow = useCallback(() => {
     let tok = null;
     try { tok = localStorage.getItem(`duel_token_${roomId}_${myId}`); } catch {}
-    if (tok) { setReconnecting(true); connect(`${DUEL_WS}/${roomId}/${myId}`, { action: "reconnect", token: tok }); }
-    reconnTries.current += 1;
-    reconnTimer.current = setTimeout(attemptReconnect, Math.min(2000 * reconnTries.current, 8000));
-  }, [roomId, myId, connect, socketReady]);
-
-  useEffect(() => {
-    const clear = () => { if (reconnTimer.current) { clearTimeout(reconnTimer.current); reconnTimer.current = null; } };
-    if (connected || !inLiveGame) {
-      clear(); reconnTries.current = 0;
-      if (connected) setReconnecting(false);
-      return;
-    }
-    if (!reconnTimer.current) attemptReconnect();
-    return clear;
-  }, [connected, inLiveGame, attemptReconnect]);
-
-  useEffect(() => {
-    const onVis = () => {
-      if (document.visibilityState !== "visible" || connected || !inLiveGame) return;
-      reconnTries.current = 0;
-      attemptReconnect();
-    };
-    document.addEventListener("visibilitychange", onVis);
-    return () => document.removeEventListener("visibilitychange", onVis);
-  }, [connected, inLiveGame, attemptReconnect]);
+    if (tok) connect(`${DUEL_WS}/${roomId}/${myId}`, { action: "reconnect", token: tok });
+  }, [roomId, myId, connect]);
+  useAutoReconnect({
+    enabled: inLiveGame, connected, connect: reconnectNow, socketReady,
+    onAttempt: () => setReconnecting(true),
+  });
+  useEffect(() => { if (connected) setReconnecting(false); }, [connected]);
 
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(""), 2600); return () => clearTimeout(t); } }, [toast]);
 

@@ -2,11 +2,12 @@ import { useCallback, useEffect, useRef } from "react";
 
 /* Keep retrying a dropped game socket until it is back.
  *
- * WITHOUT this, "Reconnecting…" is a LIE: four of the six socket games render
- * that word from `!connected` and then do nothing about it, so a dropped socket
- * sits there until the player reloads the page. Rag Tag was reported that way —
- * "I sometimes see 'reconnecting…' and the game is frozen til I reload" — and
- * Duel, Dontminion and Dissonance all still have the same gap today.
+ * WITHOUT this, "Reconnecting…" is a LIE: four of the six socket games once
+ * rendered that word from `!connected` and then did nothing about it, so a
+ * dropped socket sat there until the player reloaded the page. Rag Tag was
+ * reported that way — "I sometimes see 'reconnecting…' and the game is frozen
+ * til I reload". Every socket game with a live room now uses this hook; CoC,
+ * Duel, Dontminion and Dissonance each carried an inline copy until 2026-09-22.
  *
  * It is worse than a stale view in a vs-bot game. The bot's turn is only
  * re-driven when a client reconnects (`_handle_reconnect` re-triggers the
@@ -64,9 +65,27 @@ export function useAutoReconnect({ enabled, connected, connect, socketReady, onA
 
   // A tab coming back to the foreground: try at once rather than waiting out
   // the backoff the player has been staring at.
+  //
+  // `connected` is NOT trusted here, and that is the case this listener exists
+  // for. It used to return early on `connected`, which made it a no-op exactly
+  // when iOS had killed the socket without firing `onclose`: the flag was a
+  // stale `true`, the backoff loop (keyed on the flag) never started, and the
+  // game sat frozen until a reload. The socket's own readyState is the truth.
+  // A stale-true socket gets ONE direct attempt rather than the loop: the loop
+  // is driven by `connected` changing, and if this attempt fails its socket's
+  // `onclose` flips the flag and the loop takes over from there.
+  const connectRef = useRef(connect);
+  connectRef.current = connect;
+  const readyRef = useRef(socketReady);
+  readyRef.current = socketReady;
   useEffect(() => {
     const onVis = () => {
-      if (document.visibilityState !== "visible" || connected || !enabled) return;
+      if (document.visibilityState !== "visible" || !enabled) return;
+      if (connected) {
+        const rs = readyRef.current();
+        if (rs === 2 || rs === 3) connectRef.current();   // CLOSING/CLOSED behind a stale flag
+        return;
+      }
       tries.current = 0;
       attemptRef.current();
     };

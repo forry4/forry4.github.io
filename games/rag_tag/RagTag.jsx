@@ -92,7 +92,7 @@ function useSocket(onMessage) {
     const ws = new WebSocket(url);
     wsRef.current = ws;
     ws.onopen = () => { setConnected(true); if (firstMsg) ws.send(JSON.stringify(firstMsg)); };
-    ws.onclose = () => setConnected(false);
+    ws.onclose = () => { if (wsRef.current === ws) setConnected(false); };
     ws.onmessage = (e) => { try { onMsg.current(JSON.parse(e.data)); } catch {} };
   }, []);
   const send = useCallback((obj) => { try { wsRef.current?.send(JSON.stringify(obj)); } catch {} }, []);

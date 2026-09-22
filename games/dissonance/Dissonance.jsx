@@ -23,6 +23,7 @@ import { dissonanceOfflineRoomData, applyOfflineDissonanceMove,
   abandonOfflineDissonanceGame } from "./offline.js";
 import { contractPrices } from "./pricing.js";
 import { parsePath, buildPath, pushPath, subscribe } from "../../shared/router.js";
+import { useAutoReconnect } from "../../shared/useAutoReconnect.js";
 
 // CSS lives in the sibling .css file, imported ?inline as a STRING and injected
 // by this component's own <style> while mounted. Never a JS template literal —
@@ -1506,7 +1507,7 @@ function useSocket(onMessage) {
     const ws = new WebSocket(url);
     wsRef.current = ws;
     ws.onopen = () => { setConnected(true); if (firstMsg) ws.send(JSON.stringify(firstMsg)); };
-    ws.onclose = () => setConnected(false);
+    ws.onclose = () => { if (wsRef.current === ws) setConnected(false); };
     ws.onmessage = (e) => { try { onMsg.current(JSON.parse(e.data)); } catch {} };
   }, []);
   const send = useCallback((o) => { try { wsRef.current?.send(JSON.stringify(o)); } catch {} }, []);
@@ -1591,8 +1592,6 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
   const [wasmReady, setWasmReady] = useState(false);
   const clientAiArmedRef = useRef(null);
   const aiDispatchRef = useRef(null);
-  const reconnTimer = useRef(null);
-  const reconnTries = useRef(0);
   const roomIdRef = useRef("");
   const popHandlerRef = useRef(() => {});
   const didInitRef = useRef(false);
@@ -2157,26 +2156,16 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
   // scheduler died with the socket.
   const inLiveGame = !!roomId && (screen === "game" || screen === "waiting")
     && roomData?.status !== "over";
-  const attemptReconnect = useCallback(() => {
-    if (reconnTimer.current) { clearTimeout(reconnTimer.current); reconnTimer.current = null; }
-    const rs = socketReady();
-    if (rs === 0 || rs === 1) { reconnTimer.current = setTimeout(attemptReconnect, 3000); return; }
+  const reconnectNow = useCallback(() => {
     let tok = null;
     try { tok = localStorage.getItem(`dissonance_token_${roomId}_${myId}`); } catch {}
-    if (tok) { setReconnecting(true); connect(`${OT_WS}/${roomId}/${myId}`, { action: "reconnect", token: tok }); }
-    reconnTries.current += 1;
-    reconnTimer.current = setTimeout(attemptReconnect, Math.min(2000 * reconnTries.current, 8000));
-  }, [roomId, myId, connect, socketReady]);
-  useEffect(() => {
-    const clear = () => { if (reconnTimer.current) { clearTimeout(reconnTimer.current); reconnTimer.current = null; } };
-    if (connected || !inLiveGame) {
-      clear(); reconnTries.current = 0;
-      if (connected) setReconnecting(false);
-      return clear;
-    }
-    if (!reconnTimer.current) attemptReconnect();
-    return clear;
-  }, [connected, inLiveGame, attemptReconnect]);
+    if (tok) connect(`${OT_WS}/${roomId}/${myId}`, { action: "reconnect", token: tok });
+  }, [roomId, myId, connect]);
+  useAutoReconnect({
+    enabled: inLiveGame, connected, connect: reconnectNow, socketReady,
+    onAttempt: () => setReconnecting(true),
+  });
+  useEffect(() => { if (connected) setReconnecting(false); }, [connected]);
 
   const doBid = () => {
     if (bidLevel === null || bidDenom === null) return;
@@ -2584,7 +2573,7 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
         onRules={() => setShowRules(true)}
         onAbandon={game.phase !== "over" ? () => setConfirmAbandon(true) : null} />}
         user={authUser?.name ? <span className="lby-head-name">{authUser.name}</span> : null} />
-      {reconnecting && <div className="banner">Reconnecting…</div>}
+      {reconnecting && !connected && <div className="banner">Reconnecting…</div>}
       {/* `dis-has-match` and the table's `dis-rail-*` below are what the
           desktop grid keys on. They used to be `:has(> .dis-side-match)` and
           `:has(> .dis-playside)` — correct, and cheap in Chrome, but `:has()`
