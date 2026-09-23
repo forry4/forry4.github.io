@@ -119,6 +119,22 @@ def init_notes_db(conn) -> None:
     )
     cur.execute("CREATE INDEX IF NOT EXISTS idx_notes_folder ON notes(folder_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_note_folders_parent ON note_folders(parent_id)")
+    # body_text: the note's PLAIN text (one block per line, image captions included),
+    # written on every save. Search reads this, never `doc` — in the editor JSON a
+    # bolded word is its own text node, so "reads 3:15" is not a substring of the doc.
+    # Added by ALTER for tables created before search existed; it raises once the
+    # column is there, on both sqlite and libsql.
+    try:
+        cur.execute("ALTER TABLE notes ADD COLUMN body_text TEXT")
+    except Exception:  # noqa: BLE001 - "duplicate column" is the expected steady state
+        pass
+    cur.execute("SELECT id, doc FROM notes WHERE body_text IS NULL")
+    for r in cur.fetchall():
+        try:
+            doc = json.loads(r["doc"]) if r["doc"] else None
+        except ValueError:
+            doc = None
+        conn.execute("UPDATE notes SET body_text=? WHERE id=?", (doc_text(doc), r["id"]))
     conn.commit()
 
 
@@ -226,6 +242,45 @@ def create_note(conn, folder_id=None, title: str = "") -> dict:
     return get_note(conn, nid)
 
 
+# Nodes whose inline children are one line of text; everything else is a container.
+_TEXTBLOCKS = {"paragraph", "heading", "codeBlock"}
+
+
+def doc_text(doc) -> str:
+    """The editor document as plain text: one line per text block (so a match never
+    runs across two paragraphs), plus each image caption on a line of its own."""
+    lines: list[str] = []
+
+    def inline(node) -> str:
+        out = []
+        for c in node.get("content") or []:
+            if c.get("type") == "text":
+                out.append(c.get("text") or "")
+            elif c.get("type") == "hardBreak":
+                out.append(" ")
+        return "".join(out)
+
+    def walk(node):
+        if not isinstance(node, dict):
+            return
+        t = node.get("type")
+        if t in _TEXTBLOCKS:
+            line = inline(node).replace("\n", " ")
+            if line.strip():
+                lines.append(line)
+            return
+        if t == "noteImage":
+            cap = ((node.get("attrs") or {}).get("caption") or "").replace("\n", " ")
+            if cap.strip():
+                lines.append(cap)
+            return
+        for c in node.get("content") or []:
+            walk(c)
+
+    walk(doc)
+    return "\n".join(lines)
+
+
 def _encode_doc(doc) -> str:
     if doc is None:
         return ""
@@ -253,8 +308,8 @@ def save_note(conn, note_id: str, title: str, doc, base_rev: int) -> tuple[str, 
     # The rev in the WHERE makes the check-and-write one statement, so two savers
     # racing past the SELECT above cannot both land (the loser reads back as a conflict).
     conn.execute(
-        "UPDATE notes SET title=?, doc=?, rev=rev+1, updated_at=? WHERE id=? AND rev=?",
-        ((title or "").strip()[:_NAME], body, _now(), note_id, base_rev),
+        "UPDATE notes SET title=?, doc=?, body_text=?, rev=rev+1, updated_at=? WHERE id=? AND rev=?",
+        ((title or "").strip()[:_NAME], body, doc_text(doc), _now(), note_id, base_rev),
     )
     conn.commit()
     note = get_note(conn, note_id)
@@ -419,6 +474,87 @@ def get_image(conn, image_id: str) -> tuple[str, bytes] | None:
     return r["mime"], base64.b64decode(r["data"])
 
 
+# ── search ───────────────────────────────────────────────────────────────────
+SEARCH_MAX_Q = 200
+SEARCH_LIMIT = 100
+SNIPPETS_PER_NOTE = 3
+_SNIP_SIDE = 40
+
+
+def _find_all(text: str, q: str) -> list[int]:
+    """Case-insensitive match offsets IN `text`. `lower()` is length-preserving for
+    almost everything; where it is not (a handful of characters like 'İ'), that line
+    falls back to a case-sensitive search so an offset can never point at the wrong
+    character."""
+    hay = text.lower()
+    needle = q.lower()
+    if len(hay) != len(text) or len(needle) != len(q):
+        hay, needle = text, q
+    out, i = [], hay.find(needle)
+    while i != -1:
+        out.append(i)
+        i = hay.find(needle, i + max(1, len(needle)))
+    return out
+
+
+def _snippet(line: str, start: int, length: int) -> dict:
+    a = max(0, start - _SNIP_SIDE)
+    b = min(len(line), start + length + _SNIP_SIDE)
+    # widen to word boundaries so a snippet does not open mid-word
+    while a > 0 and line[a - 1] not in " \t":
+        a -= 1
+        if start - a > _SNIP_SIDE + 15:
+            break
+    text = ("…" if a > 0 else "") + line[a:b] + ("…" if b < len(line) else "")
+    return {"text": text, "start": start - a + (1 if a > 0 else 0), "length": length}
+
+
+def search_notes(conn, query: str, folder_id: str | None = None) -> list[dict]:
+    """Notes (not in the Trash) whose title or text contains `query`, case-
+    insensitively. `folder_id` limits it to that folder AND every folder inside it.
+    Each hit carries a match count and up to three snippets with the match offsets,
+    so the client can highlight without ever rendering server text as HTML."""
+    q = (query or "").strip()[:SEARCH_MAX_Q]
+    if not q:
+        return []
+    args: list = []
+    where = "deleted_at IS NULL"
+    if folder_id is not None:
+        parents = _folder_parents(conn)
+        if folder_id not in parents:
+            return []
+        sub = sorted(_subtree(parents, folder_id))
+        where += f" AND folder_id IN ({','.join('?' * len(sub))})"
+        args += sub
+    # SQL narrows only when the query is ASCII: sqlite's lower() folds ASCII alone,
+    # so for anything else the exact filter below is the only one that is right.
+    if q.isascii():
+        where += " AND (instr(lower(title), ?) > 0 OR instr(lower(body_text), ?) > 0)"
+        args += [q.lower(), q.lower()]
+    cur = conn.cursor()
+    cur.execute(f"SELECT id, folder_id, title, body_text, pinned, updated_at FROM notes WHERE {where}", args)
+    hits = []
+    for r in cur.fetchall():
+        title = r["title"] or ""
+        in_title = bool(_find_all(title, q))
+        count, snippets = 0, []
+        for line in (r["body_text"] or "").split("\n"):
+            offs = _find_all(line, q)
+            count += len(offs)
+            for o in offs:
+                if len(snippets) < SNIPPETS_PER_NOTE:
+                    snippets.append(_snippet(line, o, len(q)))
+        if not (in_title or count):
+            continue
+        hits.append({
+            "id": r["id"], "folder_id": r["folder_id"], "title": title, "pinned": bool(r["pinned"]),
+            "updated_at": r["updated_at"], "title_match": in_title, "count": count, "snippets": snippets,
+        })
+    # a title hit is the note you meant; after that, the most recently edited
+    hits.sort(key=lambda h: (not h["title_match"], -(h["updated_at"] or 0)))
+    return hits[:SEARCH_LIMIT]
+
+
 # ── retention ────────────────────────────────────────────────────────────────
 def sweep(conn, now: int | None = None) -> dict:
     """Purge trash older than TRASH_DAYS, then images no note references (trashed
@@ -544,6 +680,12 @@ def setup_notes(app, get_db_conn, get_user_by_session, token_resolver=None) -> N
     @app.get("/notes/tree")
     def notes_tree(_: dict = Depends(owner)):
         return {"ok": True, **run(fetch_tree)}
+
+    @app.get("/notes/search")
+    def notes_search(q: str = Query(default="", max_length=SEARCH_MAX_Q * 2),
+                     folder_id: str | None = Query(default=None, max_length=_ID),
+                     _: dict = Depends(owner)):
+        return {"ok": True, "results": run(lambda c: search_notes(c, q, folder_id or None))}
 
     @app.post("/notes/note")
     def notes_create(payload: NoteCreate, _: dict = Depends(owner)):

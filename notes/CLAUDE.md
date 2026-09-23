@@ -44,10 +44,22 @@ In Extras on the home menu, **shown only to admins**.
 - **Alignment (left / center / right)** is `@tiptap/extension-text-align` on paragraphs and
   headings — EXCEPT when an image is selected, where the same buttons set the image node's
   `align` attr (its frame's auto margins). One control, whatever is selected.
-- **16px floor** on every typing surface (title, prose, folder rename, caption) — the iOS zoom
-  footgun. `formControlZoom` can't reach an owner-only page, so `notesEditor` in
-  `webapp/test/screens.mjs` measures all four (stubbed API + seeded admin).
+- **Search, two kinds.** The SIDEBAR box searches all notes, or one folder and every folder
+  inside it (`GET /notes/search`, scope via a folder's "Search in this folder" or the "Only in
+  X" link). It reads `notes.body_text` — the note's PLAIN text, one block per line plus image
+  captions, written on every save and backfilled at boot by `init_notes_db` — never `doc`,
+  where a bolded word is its own node ("reads 3:15" is not a substring of the JSON, and
+  "paragraph" would match every note). SQL `instr(lower())` narrows ASCII queries only (sqlite
+  folds ASCII alone); the exact filter is Python's. Snippets are text + offsets, never HTML.
+  The NOTE's find bar (`find.js`, Ctrl/Cmd+F or the magnifier) is decorations only, so finding
+  never edits or saves the note; it matches per text BLOCK across runs, includes captions, and
+  scrolls a match below the sticky bars itself (ProseMirror's scrollIntoView put it under them).
+  A search hit opens its note with the query already in the find bar, without focusing it (on
+  a phone that would throw the keyboard over the match).
+- **16px floor** on every typing surface (title, prose, folder rename, caption, both search
+  boxes) — the iOS zoom footgun. `formControlZoom` can't reach an owner-only page, so
+  `notesEditor` in `webapp/test/screens.mjs` measures all six (stubbed API + seeded admin).
 - **Deferred** (asked, not chosen for v1): links between notes, per-note status, screenshot
-  annotation, full-text search. The data model has room for all four.
+  annotation. The data model has room for all three.
 - **Tests:** `tests/test_notes.py` (pure functions on a real sqlite file via `core.db._Conn`,
   plus the route-gate walk); `notesEditor` in `screens.mjs` for the frontend.

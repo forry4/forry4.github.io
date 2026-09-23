@@ -22,7 +22,6 @@ from core.auth import get_user_by_session
 from core.config import cors_allowed_origins
 from games.spender.main import router as spender_router, bearer_token
 from books.api import setup_books
-from notes.api import setup_notes
 
 LOG = logging.getLogger("app")
 
@@ -85,8 +84,15 @@ app.include_router(spender_router)
 setup_books(app, get_db_conn, get_user_by_session, bearer_token)
 
 # Notes — the owner's private notebook (folders, notes, screenshots). Owner-only on
-# every route, reads included; same injected deps as Books.
-setup_notes(app, get_db_conn, get_user_by_session, bearer_token)
+# every route, reads included; same injected deps as Books. Defensive like the game
+# mounts below: its boot-time schema migration (the body_text column) cannot be
+# exercised against Turso locally, and a failure there must cost Notes, not the site.
+try:
+    from notes.api import setup_notes
+    setup_notes(app, get_db_conn, get_user_by_session, bearer_token)
+    LOG.info("wired Notes routes (/notes)")
+except Exception as _notes_err:  # pragma: no cover - defensive
+    LOG.warning("Notes not wired: %s", _notes_err)
 
 # Puzzle mode — static, scripted Spender endgame puzzles. Public read-only content
 # (the bank is committed JSON with embedded snapshots); no DB/auth/engine at serve

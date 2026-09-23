@@ -351,3 +351,103 @@ def test_routes_map_errors_to_http(app):
         with pytest.raises(HTTPException) as e:
             call()
         assert e.value.status_code == code
+
+
+# ── search ───────────────────────────────────────────────────────────────────
+def _rich(*blocks) -> dict:
+    """A doc whose paragraphs are lists of (text, bold?) runs — i.e. split text nodes."""
+    content = []
+    for runs in blocks:
+        content.append({"type": "paragraph", "content": [
+            {"type": "text", "text": t, **({"marks": [{"type": "bold"}]} if b else {})} for t, b in runs]})
+    return {"type": "doc", "content": content}
+
+
+def test_doc_text_joins_split_runs_and_keeps_captions():
+    doc = _rich([("The clock reads ", False), ("3:15", True)], [("second", False)])
+    doc["content"].append({"type": "noteImage", "attrs": {"imageId": "x", "caption": "Portrait in the hall"}})
+    doc["content"].append({"type": "bulletList", "content": [{"type": "listItem", "content": [
+        {"type": "paragraph", "content": [{"type": "text", "text": "nested item"}]}]}]})
+    assert N.doc_text(doc).split("\n") == ["The clock reads 3:15", "second", "Portrait in the hall", "nested item"]
+    assert N.doc_text(None) == ""
+
+
+def test_search_matches_across_formatting_and_is_case_insensitive(conn):
+    n = N.create_note(conn, None, "Library")
+    N.save_note(conn, n["id"], "Library", _rich([("The clock reads ", False), ("3:15", True)]), 0)
+    hits = N.search_notes(conn, "READS 3:1")
+    assert [h["id"] for h in hits] == [n["id"]]
+    snip = hits[0]["snippets"][0]
+    assert snip["text"][snip["start"]:snip["start"] + snip["length"]].lower() == "reads 3:1"
+
+
+def test_search_never_matches_the_json_structure(conn):
+    n = N.create_note(conn, None, "t")
+    N.save_note(conn, n["id"], "t", _rich([("hello", True)]), 0)
+    for q in ("paragraph", "marks", "bold", '"type"'):
+        assert N.search_notes(conn, q) == [], q
+
+
+def test_search_title_captions_counts_and_ordering(conn):
+    a = N.create_note(conn, None, "Safe code")
+    N.save_note(conn, a["id"], "Safe code", _rich([("nothing here", False)]), 0)
+    b = N.create_note(conn, None, "Rooms")
+    doc = _rich([("the safe is in the study", False)], [("another safe, a second safe", False)])
+    doc["content"].append({"type": "noteImage", "attrs": {"imageId": "x", "caption": "safe dial"}})
+    N.save_note(conn, b["id"], "Rooms", doc, 0)
+    hits = N.search_notes(conn, "safe")
+    assert [h["id"] for h in hits] == [a["id"], b["id"]]   # the title hit first
+    assert hits[0]["title_match"] and hits[0]["count"] == 0
+    assert hits[1]["count"] == 4 and len(hits[1]["snippets"]) == N.SNIPPETS_PER_NOTE
+
+
+def test_search_scopes_to_a_folder_and_its_subfolders(conn):
+    top = N.create_folder(conn, None, "Blue Prince")
+    sub = N.create_folder(conn, top["id"], "Rooms")
+    other = N.create_folder(conn, None, "Other game")
+    ids = {}
+    for key, fid in (("top", top["id"]), ("sub", sub["id"]), ("other", other["id"]), ("loose", None)):
+        n = N.create_note(conn, fid, key)
+        N.save_note(conn, n["id"], key, _rich([("a clue", False)]), 0)
+        ids[key] = n["id"]
+    got = lambda fid: {h["id"] for h in N.search_notes(conn, "clue", fid)}   # noqa: E731
+    assert got(None) == set(ids.values())
+    assert got(top["id"]) == {ids["top"], ids["sub"]}
+    assert got(sub["id"]) == {ids["sub"]}
+    assert got("no-such-folder") == set()
+
+
+def test_search_skips_the_trash_and_blank_queries(conn):
+    n = N.create_note(conn, None, "clue")
+    N.update_note_meta(conn, n["id"], {"trashed": True})
+    assert N.search_notes(conn, "clue") == []
+    assert N.search_notes(conn, "   ") == []
+
+
+def test_search_non_ascii_query_uses_the_exact_filter(conn):
+    n = N.create_note(conn, None, "t")
+    N.save_note(conn, n["id"], "t", _rich([("Élan in the Café", False)]), 0)
+    assert [h["id"] for h in N.search_notes(conn, "café")] == [n["id"]]
+    assert [h["id"] for h in N.search_notes(conn, "ÉLAN")] == [n["id"]]
+
+
+def test_body_text_is_backfilled_for_notes_saved_before_search(get_conn):
+    c = get_conn()
+    N.init_notes_db(c)
+    n = N.create_note(c, None, "old")
+    N.save_note(c, n["id"], "old", _rich([("legacy clue", False)]), 0)
+    c.execute("UPDATE notes SET body_text=NULL")   # as if written before the column existed
+    c.commit()
+    N.init_notes_db(c)                               # the next boot backfills
+    assert [h["id"] for h in N.search_notes(c, "legacy")] == [n["id"]]
+    c.close()
+
+
+def test_search_route(app):
+    create = _endpoint(app, "POST", "/notes/note")
+    save = _endpoint(app, "PUT", "/notes/note/{note_id}")
+    search = _endpoint(app, "GET", "/notes/search")
+    n = create(N.NoteCreate(title="Parlor"), _=OWNER)["note"]
+    save(n["id"], N.NoteSave(title="Parlor", doc=_rich([("three boxes", False)]), base_rev=0), _=OWNER)
+    assert [h["id"] for h in search(q="boxes", folder_id=None, _=OWNER)["results"]] == [n["id"]]
+    assert search(q="boxes", folder_id="", _=OWNER)["results"][0]["count"] == 1

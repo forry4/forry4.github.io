@@ -36,6 +36,9 @@ export function makeApi(token) {
 
 	return {
 		tree: () => req("GET", "/notes/tree"),
+		// folderId limits it to that folder and every folder inside it
+		search: (q, folderId) => req("GET", `/notes/search?q=${encodeURIComponent(q)}`
+			+ (folderId ? `&folder_id=${encodeURIComponent(folderId)}` : "")).then((d) => d.results),
 		getNote: (id) => req("GET", `/notes/note/${id}`).then((d) => d.note),
 		createNote: (folderId, title = "") =>
 			req("POST", "/notes/note", { folder_id: folderId ?? null, title }).then((d) => d.note),

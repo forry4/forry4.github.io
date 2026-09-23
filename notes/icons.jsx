@@ -32,5 +32,8 @@ export const I = {
 	undo: svg(<><path d="M8.5 8.5H15a4.5 4.5 0 0 1 0 9h-4" /><path d="M11.5 5.2 8.2 8.5l3.3 3.3" /></>),
 	redo: svg(<><path d="M15.5 8.5H9a4.5 4.5 0 0 0 0 9h4" /><path d="m12.5 5.2 3.3 3.3-3.3 3.3" /></>),
 	expand: svg(<path d="M14 4.5h5.5V10M10 19.5H4.5V14M19.5 4.5l-6 6M4.5 19.5l6-6" />),
+	search: svg(<><circle cx="10.5" cy="10.5" r="5.5" /><path d="m14.6 14.6 4.9 4.9" /></>),
+	up: svg(<path d="M6.5 14.5 12 9l5.5 5.5" />),
+	down: svg(<path d="M6.5 9.5 12 15l5.5-5.5" />),
 	close: svg(<path d="m6.5 6.5 11 11M17.5 6.5l-11 11" />),
 };

@@ -2,13 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useEditor, useEditorState, EditorContent, NodeViewWrapper, ReactNodeViewRenderer } from "@tiptap/react";
 import { Extension, Node, mergeAttributes } from "@tiptap/core";
-import { NodeSelection, Selection } from "@tiptap/pm/state";
+import { NodeSelection, Selection, TextSelection } from "@tiptap/pm/state";
 import StarterKit from "@tiptap/starter-kit";
 import { TaskList, TaskItem } from "@tiptap/extension-list";
 import { Placeholder } from "@tiptap/extensions";
 import { TextAlign } from "@tiptap/extension-text-align";
 
 import { I } from "./icons.jsx";
+import { FindInNote, findKey } from "./find.js";
 import {
 	compressImage, blobToBase64, imageFilesFrom, imageUrl, primeImage,
 	pendingUploads, newUploadKey,
@@ -191,6 +192,59 @@ const Indent = Extension.create({
 	},
 });
 
+// ─── find in note ─────────────────────────────────────────────────────────────
+// Select match `i` and scroll it to a third of the way down the note — BELOW the
+// sticky toolbar + find bar, which ProseMirror's own scrollIntoView does not know
+// about (it put a match exactly under the bars, i.e. out of sight).
+function reveal(editor, i) {
+	const { state, view } = editor;
+	const m = findKey.getState(state).matches[i];
+	if (!m) return;
+	const sel = m.node ? NodeSelection.create(state.doc, m.from) : TextSelection.create(state.doc, m.from, m.to);
+	view.dispatch(state.tr.setSelection(sel).setMeta(findKey, { index: i }));
+	const scroller = view.dom.closest(".nt-main");
+	const el = m.node ? view.nodeDOM(m.from) : null;
+	const rect = el?.getBoundingClientRect ? el.getBoundingClientRect() : view.coordsAtPos(m.from);
+	if (!scroller || !rect) return;
+	const box = scroller.getBoundingClientRect();
+	const bars = scroller.querySelector(".nt-bars")?.getBoundingClientRect().height || 0;
+	const top = box.top + bars;
+	if (rect.top < top + 12 || rect.bottom > box.bottom - 12) {
+		scroller.scrollTop += rect.top - (top + (box.height - bars) / 3);
+	}
+}
+
+function FindBar({ editor, text, setText, onClose, inputRef }) {
+	const st = useEditorState({
+		editor,
+		selector: ({ editor: e }) => {
+			const f = findKey.getState(e.state);
+			return { count: f.matches.length, index: f.index };
+		},
+	});
+	const step = (d) => { if (st.count) reveal(editor, (st.index + d + st.count) % st.count); };
+	return (
+		<div className="nt-findbar" role="search">
+			<span className="nt-ic">{I.search}</span>
+			<input ref={inputRef} className="nt-find-in" value={text} placeholder="Find in this note"
+				aria-label="Find in this note" enterKeyHint="search" autoComplete="off" spellCheck={false}
+				onChange={(e) => setText(e.target.value)}
+				onKeyDown={(e) => {
+					if (e.key === "Enter") { e.preventDefault(); step(e.shiftKey ? -1 : 1); }
+					if (e.key === "Escape") { e.preventDefault(); onClose(); }
+				}} />
+			<span className="nt-find-count" aria-live="polite">
+				{text ? (st.count ? `${st.index + 1} of ${st.count}` : "No matches") : ""}
+			</span>
+			<button type="button" className="nt-tb" aria-label="Previous match" title="Previous (Shift+Enter)"
+				disabled={!st.count} onClick={() => step(-1)}>{I.up}</button>
+			<button type="button" className="nt-tb" aria-label="Next match" title="Next (Enter)"
+				disabled={!st.count} onClick={() => step(1)}>{I.down}</button>
+			<button type="button" className="nt-tb" aria-label="Close find" title="Close (Esc)" onClick={onClose}>{I.close}</button>
+		</div>
+	);
+}
+
 // ─── toolbar ──────────────────────────────────────────────────────────────────
 // onMouseDown + preventDefault keeps the editor's selection while a button is pressed.
 // (A keyboard user's Enter/Space fires click, not mousedown, so onClick runs the same.)
@@ -202,7 +256,7 @@ function B({ on, label, onDown, disabled, children, cls = "" }) {
 	);
 }
 
-function Toolbar({ editor, onPickImages }) {
+function Toolbar({ editor, onPickImages, onFind, findOpen }) {
 	const s = useEditorState({
 		editor,
 		selector: ({ editor: e }) => ({
@@ -261,6 +315,8 @@ function Toolbar({ editor, onPickImages }) {
 				</button>
 				<input ref={fileRef} type="file" accept="image/*" multiple hidden
 					onChange={(e) => { const f = Array.from(e.target.files || []); e.target.value = ""; if (f.length) onPickImages(f); }} />
+				<button type="button" className={`nt-tb ${findOpen ? "on" : ""}`} aria-label="Find in note" title="Find in note (Ctrl+F)"
+					aria-pressed={findOpen} onMouseDown={(e) => e.preventDefault()} onClick={onFind}>{I.search}</button>
 			</div>
 			<div className="nt-tb-group">
 				<B label="Heading" on={s.h1} onDown={run((c) => c.toggleHeading({ level: 1 }))} cls="nt-tb-txt">H1</B>
@@ -311,7 +367,7 @@ const SAVE_DELAY = 1000;
 const TOUCH = typeof window !== "undefined" && window.matchMedia?.("(hover: none) and (pointer: coarse)").matches;
 const KEEPALIVE_MAX = 60_000;   // fetch keepalive bodies are capped at 64KB
 
-function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, notify, statusSlot, focusTitle, onTitleFocused }) {
+function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, notify, statusSlot, focusTitle, onTitleFocused, findRequest }) {
 	const noteId = initial.id;
 	const trashed = initial.deleted_at != null;
 	const [title, setTitle] = useState(initial.title || "");
@@ -458,6 +514,7 @@ function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, noti
 				: "Start writing… paste or drop screenshots anywhere." }),
 			NoteImage.configure({ api }),
 			Indent,
+			FindInNote,
 			TextAlign.configure({ types: ["heading", "paragraph"], alignments: ["left", "center", "right"] }),
 		],
 		content: initial.doc || "",
@@ -514,6 +571,49 @@ function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, noti
 		};
 	}, [save]);
 
+	// ── find in note ──
+	const [findOpen, setFindOpen] = useState(false);
+	const [findText, setFindText] = useState("");
+	const findInput = useRef(null);
+	const openFind = (prefill, focus = true) => {
+		setFindOpen(true);
+		if (prefill != null) setFindText(prefill);
+		if (focus) setTimeout(() => { findInput.current?.focus(); findInput.current?.select(); }, 0);
+	};
+	const closeFind = () => {
+		setFindOpen(false);
+		const ed = editorRef.current;
+		if (ed && !ed.isDestroyed) ed.view.focus();   // the cursor is left on the match you stopped at
+	};
+	// The query lives in the editor's plugin state; this keeps it in step with the bar
+	// and jumps to the first match as you type.
+	useEffect(() => {
+		const ed = editorRef.current;
+		if (!ed || ed.isDestroyed) return;
+		const q = findOpen ? findText : "";
+		ed.view.dispatch(ed.state.tr.setMeta(findKey, { query: q }));
+		if (q) reveal(ed, 0);
+	}, [findOpen, findText, editor]);
+	// Ctrl/Cmd+F opens THIS find (pre-filled with the selection) rather than the
+	// browser's, which cannot step through a note or see image captions.
+	useEffect(() => {
+		const onKey = (e) => {
+			if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== "f") return;
+			e.preventDefault();
+			const ed = editorRef.current;
+			const { from, to } = ed?.state.selection || {};
+			const sel = ed && to > from ? ed.state.doc.textBetween(from, to, " ") : "";
+			openFind(sel && sel.length <= 100 && !sel.includes("\n") ? sel : null);
+		};
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, []);   // eslint-disable-line react-hooks/exhaustive-deps
+	// Opened from a sidebar search result: show that query already highlighted — without
+	// focusing the box, which on a phone would throw the keyboard over the match.
+	useEffect(() => {
+		if (findRequest?.q && editor) openFind(findRequest.q, false);
+	}, [findRequest?.n, editor]);   // eslint-disable-line react-hooks/exhaustive-deps
+
 	// Enter in the title continues into the body. SYNCHRONOUSLY: tiptap's focus()
 	// command waits a frame, so a key typed straight after Enter landed in the title.
 	const focusBodyStart = () => {
@@ -541,7 +641,13 @@ function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, noti
 
 	return (
 		<div className="nt-editor">
-			{editor && <Toolbar editor={editor} onPickImages={(f) => insertImages(f)} />}
+			{editor && (
+				<div className="nt-bars">
+					<Toolbar editor={editor} onPickImages={(f) => insertImages(f)} findOpen={findOpen}
+						onFind={() => (findOpen ? closeFind() : openFind(null))} />
+					{findOpen && <FindBar editor={editor} text={findText} setText={setFindText} onClose={closeFind} inputRef={findInput} />}
+				</div>
+			)}
 			{/* The save state lives in the page header (a slot the page hands us): at the
 			    end of the toolbar it scrolled off-screen on a phone, which is exactly
 			    where "Offline — retrying" most needs to be seen. */}
@@ -575,7 +681,7 @@ function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, noti
 
 // Loads a note, then hands it to the editor. `version` remounts the editor with a
 // fresh copy — how "Load theirs" and Restore take effect.
-export default function NoteEditor({ api, noteId, onSaved, onGone, onRestore, notify, statusSlot, focusTitle, onTitleFocused }) {
+export default function NoteEditor({ api, noteId, onSaved, onGone, onRestore, notify, statusSlot, focusTitle, onTitleFocused, findRequest }) {
 	const [note, setNote] = useState(null);
 	const [err, setErr] = useState(null);
 	const [version, setVersion] = useState(0);
@@ -600,7 +706,7 @@ export default function NoteEditor({ api, noteId, onSaved, onGone, onRestore, no
 	if (!note) return <div className="nt-empty nt-loading">Loading…</div>;
 	return (
 		<LoadedEditor key={`${note.id}:${note.rev}:${version}`} api={api} initial={note} notify={notify} statusSlot={statusSlot}
-			focusTitle={focusTitle} onTitleFocused={onTitleFocused}
+			focusTitle={focusTitle} onTitleFocused={onTitleFocused} findRequest={findRequest}
 			onSaved={onSaved} onGone={onGone}
 			onReload={(server) => { if (server) { setNote(server); setVersion((v) => v + 1); } else setVersion((v) => v + 1); }}
 			onRestore={async () => { await onRestore(note.id); setVersion((v) => v + 1); }} />

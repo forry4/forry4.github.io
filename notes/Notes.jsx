@@ -127,6 +127,34 @@ export default function Notes({ authUser, onExit }) {
 	// The note just created here: its title takes focus when its editor MOUNTS. It was a
 	// 250ms timer, which fired mid-sentence if you started typing in the body first.
 	const freshNote = useRef(null);
+
+	// ── search (the sidebar) ──
+	// `scope` is a folder id — that folder and every folder inside it — or null for all
+	// notes. Results are the server's (notes/api.py search_notes reads each note's plain
+	// text), and a result opens its note with the same query highlighted in the note.
+	const [query, setQuery] = useState("");
+	const [scope, setScope] = useState(null);
+	const [results, setResults] = useState(null);   // null = no search running
+	const [searchState, setSearchState] = useState("idle");   // idle | busy | error
+	const [findReq, setFindReq] = useState(null);   // { id, q, n } for the note being opened
+	const searchBox = useRef(null);
+	const searchSeq = useRef(0);
+	const q = query.trim();
+	useEffect(() => {
+		if (!q) { setResults(null); setSearchState("idle"); return undefined; }
+		const seq = ++searchSeq.current;
+		setSearchState("busy");
+		const t = setTimeout(async () => {
+			try {
+				const r = await api.search(q, scope);
+				if (seq === searchSeq.current) { setResults(r); setSearchState("idle"); }
+			} catch {
+				if (seq === searchSeq.current) setSearchState("error");
+			}
+		}, 250);
+		return () => clearTimeout(t);
+	// `tree` too: a save changes what matches, so results stay current as you edit
+	}, [q, scope, api, tree]);
 	const [statusSlot, setStatusSlot] = useState(null);   // header node the editor portals "Saved" into
 
 	const notify = useCallback((msg) => {
@@ -187,6 +215,22 @@ export default function Notes({ authUser, onExit }) {
 		const sub = subtree(fid);
 		return live.filter((n) => sub.has(n.folder_id)).length;
 	}, [live, subtree]);
+
+	const folderPath = (fid) => {
+		const names = [];
+		for (let f = folderById.get(fid); f; f = folderById.get(f.parent_id)) names.unshift(f.name);
+		return names.join(" › ");
+	};
+	const openHit = (h) => {
+		setFindReq({ id: h.id, q, n: Date.now() });
+		setActiveFolder(h.folder_id);
+		go(h.id);
+	};
+	const searchIn = (fid) => {
+		setScope(fid);
+		setMenu(null);
+		setTimeout(() => searchBox.current?.focus(), 0);
+	};
 
 	const openNote = target && target !== TRASH ? target : null;
 	const openMeta = openNote ? notes.find((n) => n.id === openNote) : null;
@@ -314,7 +358,7 @@ export default function Notes({ authUser, onExit }) {
 		return (
 			<div key={key} className={`nt-row nt-note-row${where === "tree" ? " in-tree" : ""}${openNote === n.id ? " on" : ""}`} style={{ "--depth": depth }}>
 				<button type="button" className="nt-row-main" draggable onDragStart={(e) => dragData(e, "note", n.id)}
-					onClick={() => { setActiveFolder(n.folder_id); go(n.id); }}>
+					onClick={() => { setFindReq(null); setActiveFolder(n.folder_id); go(n.id); }}>
 					<span className="nt-ic">{I.note}</span>
 					<span className="nt-row-text">
 						<span className="nt-row-title">{n.title || "Untitled"}</span>
@@ -370,6 +414,7 @@ export default function Notes({ authUser, onExit }) {
 					{menu === key && (
 						<RowMenu onClose={() => setMenu(null)} items={[
 							["New note here", () => newNote(f.id)],
+							["Search in this folder", () => searchIn(f.id)],
 							["New folder inside", () => newFolder(f.id)],
 							["Rename", () => setRenaming(f.id)],
 							["Move to…", () => setMoving({ kind: "folder", id: f.id })],
@@ -394,6 +439,32 @@ export default function Notes({ authUser, onExit }) {
 				{own.map((n) => noteRow(n, depth, "tree"))}
 			</>
 		);
+	};
+
+	useEffect(() => {
+		if (openNote) return undefined;
+		const onKey = (e) => {
+			if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== "f") return;
+			e.preventDefault();
+			searchBox.current?.focus();
+			searchBox.current?.select();
+		};
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, [openNote]);
+
+	// A snippet is plain text + the match's offsets, so nothing the server sends is ever
+	// rendered as HTML.
+	const snippet = (sn, i) => (
+		<span key={i} className="nt-hit-snip">
+			{sn.text.slice(0, sn.start)}<mark>{sn.text.slice(sn.start, sn.start + sn.length)}</mark>{sn.text.slice(sn.start + sn.length)}
+		</span>
+	);
+	const hitTitle = (h) => {
+		const t = h.title || "Untitled";
+		const i = h.title_match ? t.toLowerCase().indexOf(q.toLowerCase()) : -1;
+		return i < 0 || t.length !== t.toLowerCase().length ? t
+			: <>{t.slice(0, i)}<mark>{t.slice(i, i + q.length)}</mark>{t.slice(i + q.length)}</>;
 	};
 
 	// ── screens ──
@@ -443,7 +514,51 @@ export default function Notes({ authUser, onExit }) {
 						</button>
 					</div>
 
+					<div className="nt-search">
+						<span className="nt-ic">{I.search}</span>
+						<input ref={searchBox} className="nt-search-in" value={query} disabled={access !== "ok"}
+							placeholder={scope && folderById.has(scope) ? `Search in ${folderById.get(scope).name}` : "Search all notes"}
+							aria-label="Search notes" enterKeyHint="search" autoComplete="off" spellCheck={false}
+							onChange={(e) => setQuery(e.target.value)}
+							onKeyDown={(e) => { if (e.key === "Escape") { setQuery(""); e.currentTarget.blur(); } }} />
+						{query && (
+							<button type="button" className="nt-search-x" aria-label="Clear search" onClick={() => { setQuery(""); searchBox.current?.focus(); }}>
+								{I.close}
+							</button>
+						)}
+					</div>
+					{scope && folderById.has(scope) ? (
+						<div className="nt-scope">
+							<span>In <b>{folderPath(scope)}</b> and its folders</span>
+							<button type="button" onClick={() => setScope(null)}>Search all notes</button>
+						</div>
+					) : q && activeFolder && folderById.has(activeFolder) ? (
+						<div className="nt-scope">
+							<span>All notes</span>
+							<button type="button" onClick={() => setScope(activeFolder)}>Only in {folderById.get(activeFolder).name}</button>
+						</div>
+					) : null}
+
 					{!tree && access === "loading" && <div className="nt-side-note">Loading…</div>}
+
+					{q ? (
+						<section className="nt-sec nt-results" aria-live="polite">
+							<h2 className="nt-sec-hd">
+								<span className="nt-ic">{I.search}</span>
+								{searchState === "error" ? "Search failed — check your connection"
+									: results == null ? "Searching…"
+									: results.length ? `${results.length} note${results.length === 1 ? "" : "s"}` : "No matches"}
+							</h2>
+							{(results || []).map((h) => (
+								<button key={h.id} type="button" className={`nt-hit${openNote === h.id ? " on" : ""}`} onClick={() => openHit(h)}>
+									<span className="nt-hit-title">{hitTitle(h)}</span>
+									<span className="nt-hit-path">{h.folder_id && folderById.has(h.folder_id) ? folderPath(h.folder_id) : "Top level"}
+										{h.count > 0 && ` · ${h.count} match${h.count === 1 ? "" : "es"}`}</span>
+									{h.snippets.slice(0, 2).map(snippet)}
+								</button>
+							))}
+						</section>
+					) : (<>
 
 					{pinned.length > 0 && (
 						<section className="nt-sec">
@@ -479,6 +594,7 @@ export default function Notes({ authUser, onExit }) {
 							{trashed.length > 0 && <span className="nt-count">{trashed.length}</span>}
 						</button>
 					)}
+					</>)}
 				</aside>
 
 				<main className="nt-main">
@@ -517,6 +633,7 @@ export default function Notes({ authUser, onExit }) {
 						<Suspense fallback={<div className="nt-empty nt-loading">Loading…</div>}>
 							<NoteEditor key={openNote} api={api} noteId={openNote} notify={notify} statusSlot={statusSlot}
 								focusTitle={freshNote.current === openNote} onTitleFocused={() => { freshNote.current = null; }}
+								findRequest={findReq && findReq.id === openNote ? findReq : null}
 								onSaved={patchNote}
 								onGone={() => { notify("This note was deleted or moved to the Trash elsewhere."); load(); }}
 								onRestore={restoreNote} />

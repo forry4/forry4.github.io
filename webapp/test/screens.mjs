@@ -8695,6 +8695,13 @@ try {
 			const body = r.request().postData() ? JSON.parse(r.request().postData()) : null;
 			const now = Math.floor(Date.now() / 1000);
 			if (pathname === "/notes/tree") return r.fulfill(json({ ok: true, folders: db.folders, notes: [...db.notes.values()].map(meta) }));
+			if (pathname === "/notes/search") {
+				const q = new URL(r.request().url()).searchParams.get("q").toLowerCase();
+				const hits = [...db.notes.values()].filter((n) => (n.title + JSON.stringify(n.doc || {})).toLowerCase().includes(q))
+					.map((n) => ({ ...meta(n), title_match: n.title.toLowerCase().includes(q), count: 1,
+						snippets: [{ text: `…${q}…`, start: 1, length: q.length }] }));
+				return r.fulfill(json({ ok: true, results: hits }));
+			}
 			if (pathname === "/notes/folder" && method === "POST") {
 				const f = { id: newId(), parent_id: body.parent_id ?? null, name: body.name || "New folder" };
 				db.folders.push(f);
@@ -8800,6 +8807,18 @@ try {
 			&& docText.includes(`"imageId":"${imgId}"`) && !docText.includes("data:image"),
 			docText.slice(0, 200));
 
+		// search: the sidebar finds the note, and a hit opens it with the find bar on
+		await page.locator(".nt-search-in").fill("boxes");
+		const hit = await has(".nt-hit", 8000);
+		if (hit) await page.locator(".nt-hit").first().click();
+		const findUp = hit && await page.waitForFunction(() => document.querySelector(".nt-find-count")?.textContent === "1 of 1",
+			null, { timeout: 8000 }).then(() => true, () => false);
+		check("sidebar search finds a note, and its hit opens the note with the match highlighted", findUp,
+			`hit=${hit} count=${await page.locator(".nt-find-count").textContent().catch(() => "none")}`);
+		const findFont = await page.evaluate(() => [".nt-search-in", ".nt-find-in"]
+			.map((s) => [s, document.querySelector(s) ? parseFloat(getComputedStyle(document.querySelector(s)).fontSize) : 0]));
+		await page.locator(".nt-find-in").press("Escape").catch(() => {});
+
 		// 16px floor on every typing surface — the roster first, because a control
 		// that never rendered measures 0 and would otherwise read as a pass.
 		if (editorUp) {
@@ -8808,8 +8827,8 @@ try {
 		}
 		const fonts = await page.evaluate(() => [".nt-title", ".nt-prose", ".nt-img-cap"]
 			.map((s) => [s, document.querySelector(s) ? parseFloat(getComputedStyle(document.querySelector(s)).fontSize) : 0]));
-		fonts.push([".nt-rename", renameFont]);
-		check("all four Notes typing surfaces were measured", fonts.every(([, px]) => px > 0), JSON.stringify(fonts));
+		fonts.push([".nt-rename", renameFont], ...findFont);
+		check("all six Notes typing surfaces were measured", fonts.every(([, px]) => px > 0), JSON.stringify(fonts));
 		check("every Notes typing surface is >= 16px (the iOS zoom floor)", fonts.every(([, px]) => px >= 16),
 			JSON.stringify(fonts));
 

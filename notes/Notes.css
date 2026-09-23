@@ -32,6 +32,30 @@
 .nt-side-acts{display:flex;gap:8px;padding:0 4px 12px;}
 .nt-side-acts .btn{flex:1;gap:4px;}
 .nt-side-acts .btn svg{width:15px;height:15px;}
+/* search */
+.nt-search{position:relative;display:flex;align-items:center;margin:0 4px 8px;}
+.nt-search>.nt-ic{position:absolute;left:10px;pointer-events:none;}
+.nt-search-in{width:100%;font:inherit;font-size:1rem;color:var(--text);background:var(--bg);border:1px solid var(--border);
+	border-radius:var(--radius);padding:8px 34px 8px 36px;outline:none;}
+.nt-search-in:focus{border-color:var(--gold);}
+.nt-search-in::placeholder{color:var(--text-dim);}
+.nt-search-x{position:absolute;right:4px;width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;
+	background:none;border:0;color:var(--text-dim);border-radius:6px;cursor:pointer;}
+.nt-search-x:hover{color:var(--text);}
+.nt-search-x svg{width:16px;height:16px;}
+.nt-scope{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:4px 8px;margin:-2px 6px 8px;
+	font-size:.85rem;color:var(--text-soft);}
+.nt-scope b{color:var(--text);font-weight:600;}
+.nt-scope button{background:none;border:0;color:var(--gold);font:inherit;font-size:.85rem;cursor:pointer;padding:2px 0;}
+.nt-scope button:hover{color:var(--gold-light);text-decoration:underline;}
+.nt-hit{display:flex;flex-direction:column;gap:2px;width:100%;background:none;border:0;color:var(--text);font:inherit;
+	text-align:left;padding:8px 10px;border-radius:7px;cursor:pointer;}
+.nt-hit:hover{background:var(--surface2);}
+.nt-hit.on{background:var(--surface3);}
+.nt-hit-title{font-size:1rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.nt-hit-path{font-size:.78rem;color:var(--text-dim);}
+.nt-hit-snip{font-size:.9rem;color:var(--text-soft);line-height:1.35;overflow-wrap:anywhere;}
+.nt-hit mark{background:rgba(232,201,106,.3);color:var(--text);border-radius:2px;padding:0 1px;}
 .nt-side-note{color:var(--text-soft);font-size:.92rem;line-height:1.45;padding:6px 10px;}
 .nt-sec{margin-top:10px;}
 .nt-sec-hd,.nt-sec-hd-in{display:flex;align-items:center;gap:7px;padding:6px 8px;
@@ -94,8 +118,22 @@
 .nt-private .nt-empty{flex:1;justify-content:center;}
 
 .nt-editor{min-height:100%;display:flex;flex-direction:column;}
-.nt-toolbar{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:6px;padding:8px 16px;
+/* the toolbar and the find bar stick TOGETHER at the top of the note */
+.nt-bars{position:sticky;top:0;z-index:10;}
+.nt-toolbar{display:flex;align-items:center;gap:6px;padding:8px 16px;
 	background:rgba(15,14,12,.94);border-bottom:1px solid var(--border);overflow-x:auto;scrollbar-width:thin;}
+.nt-findbar{display:flex;align-items:center;gap:6px;padding:6px 16px;background:rgba(21,19,16,.97);
+	border-bottom:1px solid var(--border);}
+.nt-find-in{flex:1;min-width:0;max-width:360px;font:inherit;font-size:1rem;color:var(--text);background:var(--bg);
+	border:1px solid var(--border);border-radius:var(--radius);padding:6px 10px;outline:none;}
+.nt-find-in:focus{border-color:var(--gold);}
+.nt-find-count{flex:none;min-width:78px;font-size:.88rem;color:var(--text-soft);white-space:nowrap;}
+/* match highlights (decorations — the note itself is untouched) */
+.nt-prose .nt-find{background:rgba(232,201,106,.26);border-radius:2px;}
+.nt-prose .nt-find-cur{background:var(--gold-light);color:#0f0e0c;}
+.nt-find-node .nt-img-frame{outline:2px dashed rgba(232,201,106,.6);outline-offset:2px;}
+.nt-find-node-cur .nt-img-frame{outline:2px solid var(--gold-light);}
+.nt-find-node .nt-img-cap{background:rgba(232,201,106,.14);border-radius:3px;}
 .nt-tb-group{flex:none;display:flex;gap:2px;padding-right:6px;margin-right:2px;border-right:1px solid var(--border);}
 .nt-tb-group:last-child{border-right:0;}
 .nt-tb{flex:none;width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;
