@@ -8772,6 +8772,10 @@ try {
 			}));
 			check("Tab indents the paragraph and keeps focus in the note", tab.indent === "1" && tab.inNote, JSON.stringify(tab));
 			await page.keyboard.press("Shift+Tab");
+			await page.getByRole("button", { name: "Align center", exact: true }).click();
+			const aligned = await page.evaluate(() => getComputedStyle(document.querySelector(".nt-prose > p")).textAlign);
+			check("Align center centres the paragraph", aligned === "center", aligned);
+			await page.getByRole("button", { name: "Align left", exact: true }).click();
 			await page.evaluate(async () => {
 				const c = document.createElement("canvas"); c.width = 2400; c.height = 1350;   // over the 1920px cap
 				const g = c.getContext("2d"); g.fillStyle = "#246"; g.fillRect(0, 0, 2400, 1350);

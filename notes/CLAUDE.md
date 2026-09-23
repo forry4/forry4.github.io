@@ -41,6 +41,9 @@ In Extras on the home menu, **shown only to admins**.
   list items): nest / un-nest a list item, else step a paragraph or heading's `indent` attr
   (0-8, drawn as margin). Left to the browser, Tab moved focus out of the editor. Toolbar
   Indent/Outdent buttons do the same for phones, which have no Tab key.
+- **Alignment (left / center / right)** is `@tiptap/extension-text-align` on paragraphs and
+  headings — EXCEPT when an image is selected, where the same buttons set the image node's
+  `align` attr (its frame's auto margins). One control, whatever is selected.
 - **16px floor** on every typing surface (title, prose, folder rename, caption) — the iOS zoom
   footgun. `formControlZoom` can't reach an owner-only page, so `notesEditor` in
   `webapp/test/screens.mjs` measures all four (stubbed API + seeded admin).
