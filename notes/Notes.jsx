@@ -124,6 +124,9 @@ export default function Notes({ authUser, onExit }) {
 	const [dropOn, setDropOn] = useState(null);     // folder id | "root"
 	const [toast, setToast] = useState("");
 	const toastTimer = useRef(null);
+	// The note just created here: its title takes focus when its editor MOUNTS. It was a
+	// 250ms timer, which fired mid-sentence if you started typing in the body first.
+	const freshNote = useRef(null);
 	const [statusSlot, setStatusSlot] = useState(null);   // header node the editor portals "Saved" into
 
 	const notify = useCallback((msg) => {
@@ -209,8 +212,7 @@ export default function Notes({ authUser, onExit }) {
 			patchNote(n);
 			if (fid) expandTo(fid);
 			go(n.id);
-			// The title field is the first thing a new note wants.
-			setTimeout(() => document.querySelector(".nt-title")?.focus(), 250);
+			freshNote.current = n.id;   // the title is the first thing a new note wants
 		} catch (e) { fail(e); }
 	};
 	const newFolder = async (parent = activeFolder && folderById.has(activeFolder) ? activeFolder : null) => {
@@ -514,6 +516,7 @@ export default function Notes({ authUser, onExit }) {
 					) : openNote ? (
 						<Suspense fallback={<div className="nt-empty nt-loading">Loading…</div>}>
 							<NoteEditor key={openNote} api={api} noteId={openNote} notify={notify} statusSlot={statusSlot}
+								focusTitle={freshNote.current === openNote} onTitleFocused={() => { freshNote.current = null; }}
 								onSaved={patchNote}
 								onGone={() => { notify("This note was deleted or moved to the Trash elsewhere."); load(); }}
 								onRestore={restoreNote} />

@@ -32,7 +32,15 @@ In Extras on the home menu, **shown only to admins**.
 - **Editor behaviours that were bugs first** (all covered by the e2e): a drop lands BETWEEN
   blocks (at the raw point it split "T" | image | "he clock…"); Enter in the title moves the
   cursor SYNCHRONOUSLY (tiptap's `focus()` waits a frame, so the next key landed in the title);
-  inserting while an image is selected goes AFTER it (at the selection it replaced it).
+  inserting while an image is selected goes AFTER it (at the selection it replaced it); a new
+  note's title takes focus when its editor MOUNTS (a 250ms timer stole focus mid-sentence).
+- **The Image button is FIRST in the toolbar, labelled, and opens the picker on click.** On a
+  phone the toolbar scrolls sideways, and at its far end the icon-only button was off-screen —
+  the one way to add a picture on a phone was unfindable. `notesEditor` asserts it on screen.
+- **Tab / Shift-Tab are always consumed in the note** (`Indent` extension, priority above the
+  list items): nest / un-nest a list item, else step a paragraph or heading's `indent` attr
+  (0-8, drawn as margin). Left to the browser, Tab moved focus out of the editor. Toolbar
+  Indent/Outdent buttons do the same for phones, which have no Tab key.
 - **16px floor** on every typing surface (title, prose, folder rename, caption) — the iOS zoom
   footgun. `formControlZoom` can't reach an owner-only page, so `notesEditor` in
   `webapp/test/screens.mjs` measures all four (stubbed API + seeded admin).

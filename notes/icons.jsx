@@ -22,6 +22,8 @@ export const I = {
 	check: svg(<><rect x="3.8" y="5" width="6" height="6" rx="1.2" /><path d="m5.3 8 1.3 1.3 2.2-2.6M13 8h7M3.8 13.5h6v6h-6ZM13 16.5h7" /></>),
 	quote: svg(<><path d="M5.5 6.5v11M9.5 8h9M9.5 12h9M9.5 16h6" /></>),
 	rule: svg(<path d="M4 12h16" />),
+	indent: svg(<path d="M4.5 6h15M11 10h8.5M11 14h8.5M4.5 18h15M4.5 9.5 8 12l-3.5 2.5" />),
+	outdent: svg(<path d="M4.5 6h15M11 10h8.5M11 14h8.5M4.5 18h15M8 9.5 4.5 12 8 14.5" />),
 	link: svg(<><path d="M10.2 13.8a3.6 3.6 0 0 0 5.1 0l2.9-2.9a3.6 3.6 0 0 0-5.1-5.1l-1 1" /><path d="M13.8 10.2a3.6 3.6 0 0 0-5.1 0l-2.9 2.9a3.6 3.6 0 0 0 5.1 5.1l1-1" /></>),
 	image: svg(<><rect x="3.8" y="5" width="16.4" height="14" rx="1.8" /><circle cx="9" cy="10" r="1.6" /><path d="m4.5 17.5 4.8-4.4 3.4 3 2.6-2.3 4.4 3.9" /></>),
 	undo: svg(<><path d="M8.5 8.5H15a4.5 4.5 0 0 1 0 9h-4" /><path d="M11.5 5.2 8.2 8.5l3.3 3.3" /></>),

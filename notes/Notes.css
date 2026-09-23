@@ -103,6 +103,9 @@
 .nt-tb:hover:not(:disabled){background:var(--surface2);color:var(--text);}
 .nt-tb.on{background:var(--surface3);color:var(--gold-light);}
 .nt-tb:disabled{opacity:.3;cursor:default;}
+.nt-tb-add{width:auto;gap:6px;padding:0 12px 0 9px;color:var(--gold);border:1px solid rgba(201,168,76,.45);
+	font-family:'Cinzel','Cinzel Fallback',serif;font-size:.78rem;font-weight:600;letter-spacing:.05em;}
+.nt-tb-add:hover:not(:disabled){color:var(--gold-light);border-color:var(--gold);}
 .nt-tb-txt{font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-size:1.02rem;}
 .nt-tb-b{font-weight:700;}
 .nt-tb-i{font-style:italic;}

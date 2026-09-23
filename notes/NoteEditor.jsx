@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useEditor, useEditorState, EditorContent, NodeViewWrapper, ReactNodeViewRenderer } from "@tiptap/react";
-import { Node, mergeAttributes } from "@tiptap/core";
+import { Extension, Node, mergeAttributes } from "@tiptap/core";
 import { NodeSelection, Selection } from "@tiptap/pm/state";
 import StarterKit from "@tiptap/starter-kit";
 import { TaskList, TaskItem } from "@tiptap/extension-list";
@@ -132,6 +132,63 @@ function stripPending(node) {
 	};
 }
 
+// ─── indent ───────────────────────────────────────────────────────────────────
+// Tab / Shift-Tab. Inside a list they nest / un-nest the item; anywhere else they
+// step a paragraph or heading in / out (an `indent` attribute, drawn as a margin).
+// Tab is ALWAYS consumed inside the note: left to the browser it moves keyboard
+// focus out of the editor, which reads as "Tab does nothing" — including on a
+// list's first item, which has nothing above it to nest under.
+const INDENT_TYPES = ["paragraph", "heading"];
+const MAX_INDENT = 8;
+
+const Indent = Extension.create({
+	name: "indent",
+	// above the list items' own Tab bindings, so one handler decides for both cases
+	priority: 1000,
+	addGlobalAttributes() {
+		return [{
+			types: INDENT_TYPES,
+			attributes: {
+				indent: {
+					default: 0,
+					parseHTML: (el) => Math.max(0, Math.min(MAX_INDENT, Number(el.getAttribute("data-indent")) || 0)),
+					renderHTML: (a) => (a.indent ? { "data-indent": a.indent, style: `margin-left:${a.indent * 1.6}em` } : {}),
+				},
+			},
+		}];
+	},
+	addCommands() {
+		// tiptap dispatches `tr` itself when a command returns true — never dispatch here.
+		const step = (delta) => () => ({ editor, tr, commands }) => {
+			const listItem = editor.isActive("taskItem") ? "taskItem" : editor.isActive("listItem") ? "listItem" : null;
+			if (listItem) {
+				if (delta > 0) commands.sinkListItem(listItem);
+				else commands.liftListItem(listItem);
+				return true;
+			}
+			if (editor.isActive("codeBlock")) {
+				if (delta > 0) tr.insertText("  ");
+				return true;
+			}
+			const { from, to } = tr.selection;
+			tr.doc.nodesBetween(from, to, (node, pos) => {
+				if (!INDENT_TYPES.includes(node.type.name)) return true;
+				const next = Math.max(0, Math.min(MAX_INDENT, (node.attrs.indent || 0) + delta));
+				if (next !== (node.attrs.indent || 0)) tr.setNodeMarkup(pos, undefined, { ...node.attrs, indent: next });
+				return false;
+			});
+			return true;
+		};
+		return { indent: step(1), outdent: step(-1) };
+	},
+	addKeyboardShortcuts() {
+		return {
+			Tab: () => this.editor.commands.indent(),
+			"Shift-Tab": () => this.editor.commands.outdent(),
+		};
+	},
+});
+
 // ─── toolbar ──────────────────────────────────────────────────────────────────
 // onMouseDown + preventDefault keeps the editor's selection while a button is pressed.
 // (A keyboard user's Enter/Space fires click, not mousedown, so onClick runs the same.)
@@ -177,6 +234,19 @@ function Toolbar({ editor, onPickImages }) {
 	};
 	return (
 		<div className="nt-toolbar" role="toolbar" aria-label="Formatting">
+			{/* FIRST, and labelled, because on a phone the toolbar scrolls sideways and
+			    the icon-only button at its far end was simply off-screen — the one
+			    control a phone user most needs was the one they could not find. It
+			    opens the picker on CLICK (a tap's release), which iOS reliably treats
+			    as a user gesture; mousedown only keeps the editor's selection. */}
+			<div className="nt-tb-group">
+				<button type="button" className="nt-tb nt-tb-add" aria-label="Add image" title="Add image"
+					onMouseDown={(e) => e.preventDefault()} onClick={() => fileRef.current?.click()}>
+					{I.image}<span>Image</span>
+				</button>
+				<input ref={fileRef} type="file" accept="image/*" multiple hidden
+					onChange={(e) => { const f = Array.from(e.target.files || []); e.target.value = ""; if (f.length) onPickImages(f); }} />
+			</div>
 			<div className="nt-tb-group">
 				<B label="Heading" on={s.h1} onDown={run((c) => c.toggleHeading({ level: 1 }))} cls="nt-tb-txt">H1</B>
 				<B label="Subheading" on={s.h2} onDown={run((c) => c.toggleHeading({ level: 2 }))} cls="nt-tb-txt">H2</B>
@@ -195,9 +265,9 @@ function Toolbar({ editor, onPickImages }) {
 				<B label="Divider" onDown={run((c) => c.setHorizontalRule())}>{I.rule}</B>
 			</div>
 			<div className="nt-tb-group">
-				<B label="Add image" onDown={(e) => { e.preventDefault(); fileRef.current?.click(); }}>{I.image}</B>
-				<input ref={fileRef} type="file" accept="image/*" multiple hidden
-					onChange={(e) => { const f = Array.from(e.target.files || []); e.target.value = ""; if (f.length) onPickImages(f); }} />
+				{/* Tab / Shift-Tab do this on a keyboard; a phone has no Tab key. */}
+				<B label="Indent (Tab)" onDown={run((c) => c.indent())}>{I.indent}</B>
+				<B label="Outdent (Shift+Tab)" onDown={run((c) => c.outdent())}>{I.outdent}</B>
 			</div>
 			<div className="nt-tb-group">
 				<B label="Undo" disabled={!s.canUndo} onDown={run((c) => c.undo())}>{I.undo}</B>
@@ -218,9 +288,10 @@ function SaveStatus({ status }) {
 
 // ─── the editor ───────────────────────────────────────────────────────────────
 const SAVE_DELAY = 1000;
+const TOUCH = typeof window !== "undefined" && window.matchMedia?.("(hover: none) and (pointer: coarse)").matches;
 const KEEPALIVE_MAX = 60_000;   // fetch keepalive bodies are capped at 64KB
 
-function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, notify, statusSlot }) {
+function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, notify, statusSlot, focusTitle, onTitleFocused }) {
 	const noteId = initial.id;
 	const trashed = initial.deleted_at != null;
 	const [title, setTitle] = useState(initial.title || "");
@@ -239,6 +310,12 @@ function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, noti
 	const retry = useRef(0);
 	const latest = useRef({ title: initial.title || "", doc: initial.doc });
 	const editorRef = useRef(null);
+	const titleRef = useRef(null);
+	useEffect(() => {
+		if (!focusTitle) return;
+		titleRef.current?.focus();
+		onTitleFocused?.();
+	}, []);   // eslint-disable-line react-hooks/exhaustive-deps -- once, at mount
 	const cb = useRef(null);
 	cb.current = { onSaved, onGone, notify };
 
@@ -355,8 +432,12 @@ function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, noti
 			}),
 			TaskList,
 			TaskItem.configure({ nested: true }),
-			Placeholder.configure({ placeholder: "Start writing… paste or drop screenshots anywhere." }),
+			// A phone has no paste-a-screenshot or drag-a-file, so it is told about the button.
+			Placeholder.configure({ placeholder: TOUCH
+				? "Start writing… tap Image to add a photo or screenshot."
+				: "Start writing… paste or drop screenshots anywhere." }),
 			NoteImage.configure({ api }),
+			Indent,
 		],
 		content: initial.doc || "",
 		editorProps: {
@@ -462,7 +543,7 @@ function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, noti
 				</div>
 			)}
 			<div className="nt-page">
-				<input className="nt-title" value={title} placeholder="Untitled" aria-label="Title" maxLength={200}
+				<input ref={titleRef} className="nt-title" value={title} placeholder="Untitled" aria-label="Title" maxLength={200}
 					readOnly={trashed} onChange={(e) => onTitle(e.target.value)}
 					onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); focusBodyStart(); } }} />
 				<EditorContent editor={editor} />
@@ -473,7 +554,7 @@ function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, noti
 
 // Loads a note, then hands it to the editor. `version` remounts the editor with a
 // fresh copy — how "Load theirs" and Restore take effect.
-export default function NoteEditor({ api, noteId, onSaved, onGone, onRestore, notify, statusSlot }) {
+export default function NoteEditor({ api, noteId, onSaved, onGone, onRestore, notify, statusSlot, focusTitle, onTitleFocused }) {
 	const [note, setNote] = useState(null);
 	const [err, setErr] = useState(null);
 	const [version, setVersion] = useState(0);
@@ -498,6 +579,7 @@ export default function NoteEditor({ api, noteId, onSaved, onGone, onRestore, no
 	if (!note) return <div className="nt-empty nt-loading">Loading…</div>;
 	return (
 		<LoadedEditor key={`${note.id}:${note.rev}:${version}`} api={api} initial={note} notify={notify} statusSlot={statusSlot}
+			focusTitle={focusTitle} onTitleFocused={onTitleFocused}
 			onSaved={onSaved} onGone={onGone}
 			onReload={(server) => { if (server) { setNote(server); setVersion((v) => v + 1); } else setVersion((v) => v + 1); }}
 			onRestore={async () => { await onRestore(note.id); setVersion((v) => v + 1); }} />

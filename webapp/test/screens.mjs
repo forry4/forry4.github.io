@@ -8764,6 +8764,14 @@ try {
 			await page.locator(".nt-title").fill("Parlor");
 			await page.locator(".nt-title").press("Enter");
 			await page.keyboard.type("Three boxes, one true statement.");
+			// Tab must indent INSIDE the note — left to the browser it moves focus out.
+			await page.keyboard.press("Tab");
+			const tab = await page.evaluate(() => ({
+				indent: document.querySelector(".nt-prose > p")?.getAttribute("data-indent"),
+				inNote: document.querySelector(".nt-prose").contains(document.activeElement),
+			}));
+			check("Tab indents the paragraph and keeps focus in the note", tab.indent === "1" && tab.inNote, JSON.stringify(tab));
+			await page.keyboard.press("Shift+Tab");
 			await page.evaluate(async () => {
 				const c = document.createElement("canvas"); c.width = 2400; c.height = 1350;   // over the 1920px cap
 				const g = c.getContext("2d"); g.fillStyle = "#246"; g.fillRect(0, 0, 2400, 1350);
@@ -8805,12 +8813,17 @@ try {
 		await page.setViewportSize({ width: 390, height: 844 });
 		await sleep(300);
 		const phone = await page.evaluate(() => ({
+			// the Image button is the ONLY way to add a picture on a phone; at the far
+			// end of the sideways-scrolling toolbar it was off-screen and unfindable
+			imageBtn: (() => { const r = document.querySelector(".nt-tb-add")?.getBoundingClientRect();
+				return !!r && r.width > 0 && r.left >= 0 && r.right <= window.innerWidth; })(),
 			side: getComputedStyle(document.querySelector(".nt-side")).display,
 			over: document.documentElement.scrollWidth - document.documentElement.clientWidth,
 			status: !!document.querySelector(".nt-header .nt-status"),
 		}));
 		check("phone: an open note hides the list, keeps Saved in the header, no sideways scroll",
 			phone.side === "none" && phone.over <= 0 && phone.status, JSON.stringify(phone));
+		check("phone: the Image button is fully on screen", phone.imageBtn, JSON.stringify(phone));
 		await page.locator(".nt-mobile-back").click().catch(() => {});
 		check("phone: All notes returns to the list", await has(".nt-side-acts", 5000)
 			&& await page.evaluate(() => getComputedStyle(document.querySelector(".nt-main")).display === "none"));
