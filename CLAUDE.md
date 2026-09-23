@@ -207,6 +207,13 @@ drops to ephemeral local sqlite and the site stays up — so `/health` reports `
   (works on sqlite → invisible in tests), which made the owner lose admin on every session refresh.
 - **Usernames are unique case-insensitively** — `users.name` has no UNIQUE constraint, so `create_user`
   checks `WHERE name=? COLLATE NOCASE` and `init_core_schema` builds `idx_users_name_ci`. Login too.
+- **A session is per DEVICE, lives 90 days from LAST USE, and is stored hashed** — `user_sessions`
+  (`core/auth.py`, SHA-256 of the token as the key). It was ONE token per user in
+  `users.session_token`, overwritten by every login, so signing in on the laptop signed the phone
+  out, and it died 7 days after login however often the site was used: reported as "I'm often
+  asked to log in on mobile". The expiry slides at most once a day (reads stay reads); a legacy
+  `users.session_token` is honoured once and migrated, so the switch signed nobody out;
+  `POST /auth/logout` ends only this device. `core/tests/test_sessions.py`.
 - **Tokens use a CSPRNG** (`secrets`, not `random`) — session/account/reconnect tokens AND password salts.
 - **Auth rate-limited** (in-memory, per-process — OK because one uvicorn process): login 20/5min per IP +
   10 failures/15min per username (resets on success); register 10/hr per IP. Over-limit returns HTTP 200

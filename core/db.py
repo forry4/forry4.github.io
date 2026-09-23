@@ -199,6 +199,18 @@ def init_core_schema(conn) -> None:
     # Site admins (durable role). Membership = a row keyed by user id. Kept as its
     # own table (not a users column) so it needs only CREATE TABLE IF NOT EXISTS —
     # no ALTER-TABLE migration against the existing prod/Turso users table.
+    # One row per signed-in DEVICE (see core.auth). users.session_token held a single
+    # token per account, so signing in on the laptop signed the phone out. The token
+    # is stored as its SHA-256, never raw.
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS user_sessions (
+        token_hash TEXT PRIMARY KEY,
+        user_id    TEXT NOT NULL,
+        created_at INTEGER,
+        expires_at INTEGER,
+        last_used  INTEGER
+    )""")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions(user_id)")
     cur.execute("""
     CREATE TABLE IF NOT EXISTS admins (
         user_id    TEXT PRIMARY KEY,

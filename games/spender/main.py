@@ -18,7 +18,7 @@ import time
 
 from core.db import get_db_conn, init_core_schema, cleanup_stale_games, maybe_cleanup_games
 from core.auth import (
-    gen_token, create_user, authenticate_user, get_user_by_session,
+    gen_token, create_user, authenticate_user, get_user_by_session, end_session,
     create_reconnect_token, validate_reconnect_token, mark_reconnect_token_used,
     validate_credentials,
 )
@@ -3010,8 +3010,8 @@ async def auth_login(body: LoginBody, request: Request):
 async def auth_session(token: str | None = Depends(bearer_token)):
     """Validate a stored session token. The frontend restores its "logged in"
     state from localStorage and otherwise never checks the token, so a token that
-    has expired (7-day TTL) or been superseded by a login elsewhere (one token per
-    user) silently downgrades every authenticated request to anonymous — e.g. the
+    has expired (unused for 90 days — core.auth SESSION_TTL) or been signed out
+    silently downgrades every authenticated request to anonymous — e.g. the
     Books "Edit ranking" button vanishes while the UI still shows you logged in.
     The app calls this on load: `ok: False` means the token is definitively dead
     (clear the stale login); a network/transport error is NOT a False here, so a
@@ -3021,6 +3021,15 @@ async def auth_session(token: str | None = Depends(bearer_token)):
         return {"ok": False}
     return {"ok": True,
             "user": {"id": user["id"], "name": user["name"], "is_admin": bool(user.get("is_admin"))}}
+
+
+@router.post("/auth/logout")
+async def auth_logout(token: str | None = Depends(bearer_token)):
+    """End THIS device's session server-side. Sessions last 90 days from last use,
+    so logging out must actually revoke the token rather than just forget it in one
+    browser. Always ok — an unknown token is already logged out."""
+    await asyncio.to_thread(end_session, token)
+    return {"ok": True}
 
 
 @router.get("/games")

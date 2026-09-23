@@ -5,8 +5,11 @@ infrastructure, not Spender-specific, so it lives in ``core`` and feature
 packages import it directly (no more lazy imports to dodge a circular dep).
 
 Identity model:
-  * Accounts + sessions are rows in the ``users`` table; a login mints a 7-day
-    session token (one per user — a new login supersedes the old token).
+  * Accounts are rows in ``users``; each LOGIN is a row in ``user_sessions`` — one
+    per signed-in device, so signing in on the laptop no longer signs the phone out.
+    A session lasts SESSION_TTL from its LAST USE (sliding), not from the login.
+    Tokens are stored as their SHA-256, never raw. ``users.session_token`` is the
+    pre-2026-09-23 single-token column: still honoured once, then migrated.
   * ``admins`` is a durable role table. The SITE_OWNER env var (a username) is
     the bootstrap: that account is auto-granted admin on login, durable after.
 ``init_core_schema`` (in ``core.db``) owns the table definitions.
@@ -127,11 +130,10 @@ def authenticate_user(name: str, password: str) -> dict | None:
         conn.close()
         return None
     token = gen_token(32)
-    expiry = int(time.time()) + 7 * 24 * 3600
     # Upgrade legacy (non-PBKDF2) hashes on successful login.
     if not (stored or "").startswith("pbkdf2$"):
         cur.execute("UPDATE users SET password_hash=? WHERE id=?", (hash_password(password), row["id"]))
-    cur.execute("UPDATE users SET session_token=?, session_expiry=? WHERE id=?", (token, expiry, row["id"]))
+    _add_session(conn, row["id"], token)
     conn.commit()
     # Bootstrap the admin role: the SITE_OWNER username is auto-granted admin on
     # login (durable thereafter via the admins table).
@@ -142,20 +144,68 @@ def authenticate_user(name: str, password: str) -> dict | None:
     return {"id": row["id"], "name": row["name"], "session_token": token, "is_admin": admin}
 
 
+# ─── Sessions ─────────────────────────────────────────────────────────────────
+# SLIDING: a session expires SESSION_TTL after it was last USED. It used to be a
+# fixed 7 days from login, so someone on the site every day was still asked to sign
+# in again every week. The expiry is pushed out at most once per SESSION_REFRESH,
+# so an ordinary request costs one read, not a write.
+SESSION_TTL = 90 * 24 * 3600
+SESSION_REFRESH = 24 * 3600
+MAX_SESSIONS_PER_USER = 20   # oldest (least recently used) beyond this are dropped
+
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _add_session(conn, user_id: str, token: str, now: int | None = None) -> None:
+    now = int(time.time()) if now is None else now
+    conn.execute(
+        "INSERT OR REPLACE INTO user_sessions (token_hash, user_id, created_at, expires_at, last_used) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (_token_hash(token), user_id, now, now + SESSION_TTL, now),
+    )
+    # Housekeeping rides on login (rare), never on the per-request read path.
+    conn.execute("DELETE FROM user_sessions WHERE expires_at < ?", (now,))
+    cur = conn.cursor()
+    cur.execute("SELECT token_hash FROM user_sessions WHERE user_id=? ORDER BY last_used DESC", (user_id,))
+    for r in cur.fetchall()[MAX_SESSIONS_PER_USER:]:
+        conn.execute("DELETE FROM user_sessions WHERE token_hash=?", (r[0],))
+
+
 def get_user_by_session(token: str) -> dict | None:
     if not token:
         return None
     conn = get_db_conn()
     cur = conn.cursor()
     now = int(time.time())
+    th = _token_hash(token)
+    # A plain JOIN — NOT a correlated subquery (those read NULL on the libsql driver).
     cur.execute(
-        "SELECT id, name FROM users WHERE session_token=? AND session_expiry>?",
-        (token, now),
+        "SELECT u.id, u.name, s.last_used FROM user_sessions s JOIN users u ON u.id = s.user_id "
+        "WHERE s.token_hash=? AND s.expires_at>?",
+        (th, now),
     )
     row = cur.fetchone()
-    if not row:
-        conn.close()
-        return None
+    if row:
+        if now - (row[2] or 0) >= SESSION_REFRESH:
+            conn.execute("UPDATE user_sessions SET last_used=?, expires_at=? WHERE token_hash=?",
+                         (now, now + SESSION_TTL, th))
+            conn.commit()
+    else:
+        # A token minted before user_sessions existed lives in users.session_token.
+        # Honour it once and move it over, so the deploy signs nobody out.
+        cur.execute(
+            "SELECT id, name FROM users WHERE session_token=? AND session_expiry>?",
+            (token, now),
+        )
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            return None
+        _add_session(conn, row[0], token, now)
+        conn.execute("UPDATE users SET session_token=NULL, session_expiry=NULL WHERE id=?", (row[0],))
+        conn.commit()
     # is_admin = durable admins-table grant (via the SAME direct query the login path uses,
     # is_admin_id — NOT a correlated subquery, which read NULL on the prod libsql driver and so
     # reported any admin as non-admin on every session refresh) OR a live SITE_OWNER username
@@ -163,6 +213,17 @@ def get_user_by_session(token: str) -> dict | None:
     is_admin = is_admin_id(conn, row[0]) or _name_is_owner(row[1])
     conn.close()
     return {"id": row[0], "name": row[1], "is_admin": is_admin}
+
+
+def end_session(token: str) -> None:
+    """Sign THIS device out (the logout button). Other devices stay signed in."""
+    if not token:
+        return
+    conn = get_db_conn()
+    conn.execute("DELETE FROM user_sessions WHERE token_hash=?", (_token_hash(token),))
+    conn.execute("UPDATE users SET session_token=NULL, session_expiry=NULL WHERE session_token=?", (token,))
+    conn.commit()
+    conn.close()
 
 
 # ─── Site owner / admin identity ──────────────────────────────────────────────

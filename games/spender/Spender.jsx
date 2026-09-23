@@ -1379,9 +1379,9 @@ export default function SpenderApp() {
 		if (screen !== "loading") return;
 		let cancelled = false;
 		// Resolve the landing screen. For a logged-in (non-guest) user we also
-		// validate the stored session token here: it can be silently dead (7-day
-		// expiry, or superseded by a login on another device — there's one token
-		// per user), which downgrades every authenticated request to anonymous
+		// validate the stored session token here: it can be silently dead (unused
+		// for 90 days, or logged out — each device has its own session, see
+		// core.auth), which downgrades every authenticated request to anonymous
 		// (e.g. the Books "Edit ranking" button disappears) while the UI still
 		// shows you logged in. A definite ok:false clears the stale login so you
 		// land on auth and can re-login. A network/parse error keeps you logged in
@@ -1757,6 +1757,14 @@ export default function SpenderApp() {
 	};
 
 	const handleLogout = () => {
+		// End this device's session on the server too (sessions last 90 days from last
+		// use, so forgetting the token locally is not a logout). Best effort: the local
+		// sign-out below happens regardless, even offline.
+		const tok = authUser?.session_token;
+		if (tok && !authUser?.guest) {
+			fetch(`${HTTP_BASE}/auth/logout`, { method: "POST", headers: { Authorization: `Bearer ${tok}` }, keepalive: true })
+				.catch(() => {});
+		}
 		setAuthNotice("");
 		setHistoryGames([]);
 		try {
