@@ -20,6 +20,9 @@ on:
       # engine.py would pass CI and silently never reach prod.
       - 'games/spender/*.py'
       - 'books/**'
+      # Notes — owner-only notebook routes. *.py only: Notes.jsx/.css are bundle-only
+      # and must not restart prod.
+      - 'notes/**/*.py'
       - 'games/spender/requirements.txt'
       - 'games/spender/Dockerfile'
       - 'games/spender/ai/serving/**/*.py'   # serving stack: heuristic, valuation, engine, actions, mcts, infer_np, v_state, vsearch, replay

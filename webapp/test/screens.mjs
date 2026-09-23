@@ -56,6 +56,8 @@ const SCREENS = [
 	{ path: "/secretnames", chunk: "SecretNames", marker: ".secretnames" },
 	{ path: "/pinch", chunk: "Pinch", marker: ".pinch" },
 	{ path: "/books", chunk: "Books", marker: ".bk-app" },
+	// A guest gets Notes' private notice — .nt-app is still Notes' own root.
+	{ path: "/notes", chunk: "Notes", marker: ".nt-app" },
 	{ path: "/bggfilter", chunk: "BggFilter", marker: ".bgf" },
 ];
 
@@ -110,7 +112,7 @@ function newestSourceMtime() {
 			}
 		}
 	};
-	for (const d of ["webapp", "games", "shared", "books"]) walk(path.join(repoRoot, d));
+	for (const d of ["webapp", "games", "shared", "books", "notes"]) walk(path.join(repoRoot, d));
 	return newest;
 }
 
@@ -3003,6 +3005,8 @@ try {
 			// registered identity and a seeded shelf should add the surface here; it
 			// is deliberately NOT listed with a min of 0, which would be a green tick
 			// over a page that was never looked at.
+			// NOTES is owner-only, so it is not walked here either: `notesEditor` seeds an
+			// owner, stubs the API and measures all four of its typing surfaces instead.
 		];
 
 		const seen = [];
@@ -8652,6 +8656,169 @@ try {
 		await beta.ctx.close();
 	}
 
+	// ── Notes (owner-only notebook) ───────────────────────────────────────────
+	// /notes is private to SITE_OWNER on every route, and this harness's backend has
+	// no owner — so the API is STUBBED in the page (the historyRecovery pattern) and
+	// the identity is a seeded admin. What this proves is the FRONTEND half end to
+	// end: the admin-only home tile, the lazy page + lazy editor chunks, a pasted
+	// screenshot going through compress -> upload -> an image node that persists by
+	// id, autosave, and the phone drill-down. The server half is notes/tests/.
+	// It also holds the 16px floor for every place you can type in Notes, which
+	// formControlZoom cannot reach (it has no owner identity).
+	async function notesEditor(log) {
+		const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 } });
+		const user = { id: "screens-notes-owner", name: "Owner", is_admin: true, session_token: "notes-owner" };
+		await ctx.addInitScript((u) => localStorage.setItem("spender_user", JSON.stringify(u)), user);
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		const check = (name, cond, detail = "") => {
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
+		};
+		const assets = [];
+		page.on("request", (r) => { if (r.url().includes("/assets/")) assets.push(r.url().split("/").pop()); });
+
+		// ── the stub backend: just enough of notes/api.py to round-trip ──
+		const db = { folders: [], notes: new Map(), images: new Map(), saves: [] };
+		let seq = 0;
+		const newId = () => `stub${String(++seq).padStart(12, "0")}`;
+		const meta = (n) => ({ id: n.id, folder_id: n.folder_id, title: n.title, pinned: n.pinned,
+			created_at: n.created_at, updated_at: n.updated_at, deleted_at: n.deleted_at });
+		const json = (data, status = 200) => ({ status, contentType: "application/json", body: JSON.stringify(data) });
+		const onApi = (test) => (u) => u.port === String(API_PORT) && test(u.pathname);
+		await page.route(onApi((p) => p === "/auth/session"),
+			(r) => r.fulfill(json({ ok: true, user: { id: user.id, name: user.name, is_admin: true } })));
+		await page.route(onApi((p) => p.startsWith("/notes/")), async (r) => {
+			const { pathname } = new URL(r.request().url());
+			const method = r.request().method();
+			const body = r.request().postData() ? JSON.parse(r.request().postData()) : null;
+			const now = Math.floor(Date.now() / 1000);
+			if (pathname === "/notes/tree") return r.fulfill(json({ ok: true, folders: db.folders, notes: [...db.notes.values()].map(meta) }));
+			if (pathname === "/notes/folder" && method === "POST") {
+				const f = { id: newId(), parent_id: body.parent_id ?? null, name: body.name || "New folder" };
+				db.folders.push(f);
+				return r.fulfill(json({ ok: true, folder: f }));
+			}
+			if (pathname.startsWith("/notes/folder/") && method === "POST") {
+				const f = db.folders.find((x) => x.id === pathname.split("/")[3]);
+				Object.assign(f, body);
+				return r.fulfill(json({ ok: true, folder: f }));
+			}
+			if (pathname === "/notes/note" && method === "POST") {
+				const n = { id: newId(), folder_id: body.folder_id ?? null, title: body.title || "", doc: null, rev: 0,
+					pinned: false, created_at: now, updated_at: now, deleted_at: null };
+				db.notes.set(n.id, n);
+				return r.fulfill(json({ ok: true, note: n }));
+			}
+			const nm = pathname.match(/^\/notes\/note\/([a-z0-9]+)$/);
+			if (nm && method === "GET") return r.fulfill(json({ ok: true, note: db.notes.get(nm[1]) }));
+			if (nm && method === "PUT") {
+				const n = db.notes.get(nm[1]);
+				if (body.base_rev !== n.rev) return r.fulfill(json({ ok: false, conflict: true, note: n }, 409));
+				Object.assign(n, { title: body.title, doc: body.doc, rev: n.rev + 1, updated_at: now });
+				db.saves.push(body);
+				return r.fulfill(json({ ok: true, note: n }));
+			}
+			if (pathname === "/notes/image" && method === "POST") {
+				const id = newId();
+				db.images.set(id, body);
+				return r.fulfill(json({ ok: true, image: { id, width: body.width, height: body.height } }));
+			}
+			const im = pathname.match(/^\/notes\/image\/([a-z0-9]+)$/);
+			if (im && db.images.has(im[1])) {
+				const img = db.images.get(im[1]);
+				return r.fulfill({ status: 200, contentType: img.mime, body: Buffer.from(img.data, "base64") });
+			}
+			return r.fulfill(json({ detail: `stub has no ${method} ${pathname}` }, 404));
+		});
+
+		const has = (sel, ms = 20_000) => page.waitForSelector(sel, { timeout: ms }).then(() => true, () => false);
+
+		// Entry is the admin-only Extras tile, not a deep link: the tile's wiring (the
+		// HomeScreen prop + the shell's nav) is exactly what a URL visit would skip.
+		await page.goto(`http://localhost:${PORT}/`, { waitUntil: "networkidle" });
+		await has(".home-extra");
+		const tile = page.locator(".home-extra", { hasText: "Notes" });
+		check("an admin sees the Notes tile in Extras", await tile.count() === 1);
+		await tile.click().catch(() => {});
+		check("the tile opens /notes", await has(".nt-side-acts") && new URL(page.url()).pathname === "/notes", page.url());
+
+		// a folder, renamed inline
+		await page.locator(".nt-side-acts .btn", { hasText: "Folder" }).click().catch(() => {});
+		const renameOk = await has(".nt-rename", 5000);
+		const renameFont = renameOk
+			? await page.locator(".nt-rename").evaluate((el) => parseFloat(getComputedStyle(el).fontSize)) : 0;
+		if (renameOk) {
+			await page.locator(".nt-rename").fill("Blue Prince");
+			await page.locator(".nt-rename").press("Enter");
+		}
+		check("a new folder is renamed inline", await has(".nt-folder-row .nt-row-title:text('Blue Prince')", 5000));
+
+		// a note in it
+		await page.locator(".nt-side-acts .btn", { hasText: "Note" }).click().catch(() => {});
+		const editorUp = await has(".nt-prose");
+		check("a new note opens the editor (its own lazy chunk)", editorUp && assets.some((a) => a.startsWith("NoteEditor-")),
+			`editor=${editorUp} chunks=${assets.filter((a) => /^Note/.test(a)).join(",")}`);
+		if (editorUp) {
+			await page.locator(".nt-title").fill("Parlor");
+			await page.locator(".nt-title").press("Enter");
+			await page.keyboard.type("Three boxes, one true statement.");
+			await page.evaluate(async () => {
+				const c = document.createElement("canvas"); c.width = 2400; c.height = 1350;   // over the 1920px cap
+				const g = c.getContext("2d"); g.fillStyle = "#246"; g.fillRect(0, 0, 2400, 1350);
+				const blob = await new Promise((res) => c.toBlob(res, "image/png"));
+				const dt = new DataTransfer(); dt.items.add(new File([blob], "shot.png", { type: "image/png" }));
+				document.querySelector(".nt-prose").dispatchEvent(
+					new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+			});
+		}
+		const saved = editorUp && await page.waitForFunction(() => document.querySelector(".nt-status")?.textContent === "Saved"
+			&& !document.querySelector(".nt-img-busy") && document.querySelector(".nt-img img"), null, { timeout: 20_000 })
+			.then(() => true, () => false);
+		const up = [...db.images.values()][0];
+		check("a pasted screenshot is downscaled to the 1920px cap and uploaded",
+			saved && up && up.width === 1920 && up.height === 1080,
+			JSON.stringify(up ? { mime: up.mime, w: up.width, h: up.height } : null));
+		const last = db.saves[db.saves.length - 1];
+		const docText = JSON.stringify(last?.doc || {});
+		const imgId = [...db.images.keys()][0];
+		check("autosave persists the title, the text and the image BY ID (no bytes in the doc)",
+			last?.title === "Parlor" && docText.includes("Three boxes")
+			&& docText.includes(`"imageId":"${imgId}"`) && !docText.includes("data:image"),
+			docText.slice(0, 200));
+
+		// 16px floor on every typing surface — the roster first, because a control
+		// that never rendered measures 0 and would otherwise read as a pass.
+		if (editorUp) {
+			await page.locator(".nt-img-frame").first().click().catch(() => {});
+			await has(".nt-img-cap", 5000);
+		}
+		const fonts = await page.evaluate(() => [".nt-title", ".nt-prose", ".nt-img-cap"]
+			.map((s) => [s, document.querySelector(s) ? parseFloat(getComputedStyle(document.querySelector(s)).fontSize) : 0]));
+		fonts.push([".nt-rename", renameFont]);
+		check("all four Notes typing surfaces were measured", fonts.every(([, px]) => px > 0), JSON.stringify(fonts));
+		check("every Notes typing surface is >= 16px (the iOS zoom floor)", fonts.every(([, px]) => px >= 16),
+			JSON.stringify(fonts));
+
+		// phone: one pane at a time, Saved still visible, no sideways page
+		await page.setViewportSize({ width: 390, height: 844 });
+		await sleep(300);
+		const phone = await page.evaluate(() => ({
+			side: getComputedStyle(document.querySelector(".nt-side")).display,
+			over: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+			status: !!document.querySelector(".nt-header .nt-status"),
+		}));
+		check("phone: an open note hides the list, keeps Saved in the header, no sideways scroll",
+			phone.side === "none" && phone.over <= 0 && phone.status, JSON.stringify(phone));
+		await page.locator(".nt-mobile-back").click().catch(() => {});
+		check("phone: All notes returns to the list", await has(".nt-side-acts", 5000)
+			&& await page.evaluate(() => getComputedStyle(document.querySelector(".nt-main")).display === "none"));
+
+		check("no page errors in Notes", errors.length === 0, errors[0]?.slice(0, 180) || "");
+		await ctx.close();
+	}
+
 	const laneA = [offlineSpender, offlineCoc, offlineDuel, offlineDissonance,
 		dissonanceSkat, dissonanceHard, dissonanceBeat, ragtagFight];
 	// `dissonanceQuartet` is lane B: it plays a whole game but arms NO worker
@@ -8661,7 +8828,8 @@ try {
 		waitingRoomKit,
 		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, historyRecovery, dmAdventures,
 		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, formControlZoom, lastDifficulty,
-		dissonanceQuartet, orbitPlay, lobbyFinishSync, blackCastlePlay, pinchPlay, secretNamesPlay, lobbyChrome];
+		dissonanceQuartet, orbitPlay, lobbyFinishSync, blackCastlePlay, pinchPlay, secretNamesPlay, lobbyChrome,
+		notesEditor];
 
 	// EVERY BLOCK MUST BE IN A LANE. Before the lanes existed, adding a block meant
 	// writing it — it then ran because it was simply the next statement. Now it has

@@ -43,7 +43,7 @@ BTN_CLASS = re.compile(r'className="([^"{]*\bbtn\b[^"]*)"')
 def _jsx_files():
     """Every hand-written JSX in the repo. `webapp/` is build output plus the
     test harnesses, and `docs/` is the published bundle -- neither is source."""
-    for d in ("games", "shared", "books", "wwsd"):
+    for d in ("games", "shared", "books", "notes", "wwsd"):
         yield from (ROOT / d).rglob("*.jsx")
 
 

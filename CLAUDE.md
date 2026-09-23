@@ -23,6 +23,7 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
 | [`games/pinch/AGENTS.md`](games/pinch/AGENTS.md) | Pinch (YINSH) — node ids, durable row/ring-removal sub-decisions, the persist boundary |
 | [`shared/CLAUDE.md`](shared/CLAUDE.md) | Shared frontend kits + URL routing |
 | [`books/CLAUDE.md`](books/CLAUDE.md) | The Books feature |
+| [`notes/CLAUDE.md`](notes/CLAUDE.md) | Notes — the owner's private notebook (folders, rich-text notes, screenshots); owner-only on every route |
 | [`bggfilter/CLAUDE.md`](bggfilter/CLAUDE.md) | BGG Filter — the BoardGameGeek harvest + the frontend-only filter page |
 | [`docs/deploy-reliability-log.md`](docs/deploy-reliability-log.md) | **Dated postmortems for RED RUNS** — the deploy gates, the scheduled jobs and the harness itself. Measurements behind the rules below (the CI-vs-dev font spread, the screens gate's failure census, the keepalive watchdog). |
 | [`docs/ai-research-log.md`](docs/ai-research-log.md) | **AI campaign history, dated sessions, rejected-experiment postmortems.** When something here says "see the research log," that's the blow-by-blow + "do not relitigate" detail. |
@@ -56,7 +57,7 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
   `keys[1 - guesser_seat]` — see its CLAUDE.md).
   Orbit (Zenith), Black Castle (The White Castle) and Pinch (YINSH — 2 players, 85
   intersections, Standard ends at three removed rings and Blitz at one).
-  Plus **Books** (a ranking/suggestions page) and **WWSD** (a browser autoplayer for a friend's
+  Plus **Books** (a ranking/suggestions page), **Notes** (the owner's private notebook) and **WWSD** (a browser autoplayer for a friend's
   external Splendor site).
 
 ### Run it locally
@@ -123,6 +124,7 @@ games/
                        #   of four, and scores the three cards each own hand is
                        #   left holding) — see its CLAUDE.md
 books/                 # Books feature (wired into the app, not a sub-app)
+notes/                 # Notes — owner-only notebook (setup_notes, like Books); TipTap editor chunk
 bggfilter/             # BGG Filter — frontend-only; tools/ harvests BGG, the payload ships
                        #   as webapp/public/data/bgg-filter.json (GENERATED, ~1MB, fetched not bundled)
 shared/                # theme.js (baseCss), lobby.jsx, splendor.jsx, router.js — cross-game frontend kits
@@ -830,6 +832,10 @@ covers the logic; each game's wiring is one line).
   `python -m` / `cargo` / `wasm-pack` / `cythonize`. rustup is at `~/.cargo/bin` (off PATH → prepend it).
 
 **Frontend / CSS**
+- **A package imported from OUTSIDE `webapp/` must be in `resolve.dedupe`** (`webapp/vite.config.js`).
+  The only `node_modules` is webapp's and Vite resolves a bare import from the importing file's
+  directory, so `import "@tiptap/react"` in `notes/` fails the build outright. `react` never hit
+  this only because plugin-react dedupes it. Dedupe also keeps ProseMirror single-copy.
 - **CSS lives in real `.css` files, imported with `?inline`** (`games/*/X.css`, `shared/*.css`) — the
   string is still injected by each component's own `<style>` tag, only while mounted, so CoC's bare
   mount and its `html,body` reset are unaffected. This RETIRED the repo's most expensive footgun: CSS

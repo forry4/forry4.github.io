@@ -33,7 +33,7 @@ function checkCssBackticks() {
 			else if (name.endsWith(".jsx")) jsxFiles.push(full);
 		}
 	};
-	for (const d of ["games", "books", "shared", "webapp"]) {
+	for (const d of ["games", "books", "notes", "shared", "webapp"]) {
 		try { walk(path.join(repoRoot, d)); } catch {}
 	}
 	const bad = [];

@@ -42,6 +42,9 @@ const EXTRA_ICON = {
 	// replaced was a rounded square of five pips drawn inside a rounded-square plate —
 	// three nested squares at 20px, i.e. mush.
 	bgg: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><path d="M4.4 5.2h15.2l-5.9 7v6.4l-3.4-2.1v-4.3Z" /></svg>),
+	// A page with a folded corner and two ruled lines — the same drawing as Notes' own
+	// note glyph, so the tile and the page it opens agree.
+	notes: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><path d="M6.5 3.5h7.8l3.7 3.7v13.3H6.5Z" /><path d="M14 3.7v3.8h3.8M9.2 12h5.6M9.2 15.4h5.6" /></svg>),
 };
 
 // Shared by the loading and sign-in screens. The menu deliberately does not use it:
@@ -127,14 +130,17 @@ const GO_CHEVRON = (
 
 export { SITE_NAME, GAMES, GAME_EMBLEM, HERO_RULE };
 
-export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles, onBooks, onBggFilter, onLogout }) {
+export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles, onBooks, onNotes, onBggFilter, onLogout }) {
 	// Built here rather than at module scope because each entry closes over a prop.
 	const games = visibleGames(authUser);
 	const extras = [
 		{ id: "puzzles", label: "Spender Puzzles", onClick: onPuzzles },
 		{ id: "books", label: "Books", onClick: onBooks },
 		{ id: "bgg", label: "BGG Filter", onClick: onBggFilter },
-	];
+		// The owner's private notebook. Hidden from everyone else — a convenience only:
+		// every /notes route refuses a non-owner server-side (notes/api.py).
+		authUser?.is_admin && onNotes && { id: "notes", label: "Notes", onClick: onNotes },
+	].filter(Boolean);
 	return (
 		<>
 			<style>{css}</style>

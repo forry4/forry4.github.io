@@ -6,7 +6,7 @@ depend on it. Nothing here is owned by a single game — that was the point of
 extracting it out of ``games/spender/main.py`` (which now only exposes a router).
 
 Layering (bottom → top):
-    core/ (db + auth)  →  features (games.spender, games.castles_of_crimson, books)  →  app.py
+    core/ (db + auth)  →  features (games.spender, games.castles_of_crimson, books, notes)  →  app.py
 
 The deploy entrypoint ``games/spender/app.py`` re-exports the ``app`` defined here,
 so Procfile/Dockerfile/render.yaml keep their historical ``games.spender.app:app``
@@ -22,6 +22,7 @@ from core.auth import get_user_by_session
 from core.config import cors_allowed_origins
 from games.spender.main import router as spender_router, bearer_token
 from books.api import setup_books
+from notes.api import setup_notes
 
 LOG = logging.getLogger("app")
 
@@ -82,6 +83,10 @@ app.include_router(spender_router)
 # imports a game module (no cycle). bearer_token lets Books accept the same
 # Authorization: Bearer header (with ?token= fallback) as the Spender routes.
 setup_books(app, get_db_conn, get_user_by_session, bearer_token)
+
+# Notes — the owner's private notebook (folders, notes, screenshots). Owner-only on
+# every route, reads included; same injected deps as Books.
+setup_notes(app, get_db_conn, get_user_by_session, bearer_token)
 
 # Puzzle mode — static, scripted Spender endgame puzzles. Public read-only content
 # (the bank is committed JSON with embedded snapshots); no DB/auth/engine at serve

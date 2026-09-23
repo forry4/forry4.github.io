@@ -40,7 +40,7 @@ for f in $files; do
     need_py=1
     case "$f" in */tests/*) continue ;; esac        # Python tests never reach the bundle
     case "$f" in
-        webapp/*|games/*|shared/*|books/*|bggfilter/*) need_fe=1 ;;
+        webapp/*|games/*|shared/*|books/*|notes/*|bggfilter/*) need_fe=1 ;;
     esac
 done
 

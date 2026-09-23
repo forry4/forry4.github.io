@@ -46,6 +46,19 @@ export default defineConfig({
       },
     },
   ],
+  resolve: {
+    // Source outside webapp/ (games/, shared/, books/, notes/) has no node_modules
+    // above it — the ONLY node_modules is webapp's. Vite resolves a bare import from
+    // the importing file's directory, so `import "@tiptap/react"` in notes/ fails to
+    // resolve at all. `react` never hit this only because plugin-react dedupes it,
+    // and dedupe resolves from the project root. Every package imported from outside
+    // webapp/ must be listed here (the tiptap set is Notes' editor; @tiptap/pm keeps
+    // ProseMirror single-copy, which it must be — two copies break instanceof checks).
+    dedupe: [
+      '@tiptap/react', '@tiptap/core', '@tiptap/pm', '@tiptap/starter-kit',
+      '@tiptap/extension-list', '@tiptap/extensions',
+    ],
+  },
   build: {
     // The games' stylesheets are imported with `?inline` and injected by each
     // component's own <style> tag (see any game's .jsx header). They used to be JS
