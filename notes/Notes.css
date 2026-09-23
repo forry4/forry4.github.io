@@ -171,6 +171,18 @@
 .nt-prose h2{font-size:1.32rem;margin-top:1em;}
 .nt-prose h3{font-size:1.14rem;margin-top:.9em;}
 .nt-prose ul,.nt-prose ol{padding-left:1.5em;}
+/* Markers get an EXPLICIT colour and type rather than inheriting them: a list whose
+   markers were left to inherit came out with no visible bullet or number for the
+   owner (reported twice; not reproducible in plain Chrome/Edge/Firefox/WebKit — a
+   page recolourer such as a dark-mode extension leaves ::marker behind). Gold, as the
+   Rules panel draws its bullets (.rl-body li::marker). */
+.nt-prose ul:not([data-type="taskList"]){list-style-type:disc;}
+.nt-prose ul:not([data-type="taskList"]) ul:not([data-type="taskList"]){list-style-type:circle;}
+.nt-prose ul:not([data-type="taskList"]) ul:not([data-type="taskList"]) ul:not([data-type="taskList"]){list-style-type:square;}
+.nt-prose ol{list-style-type:decimal;}
+.nt-prose ol ol{list-style-type:lower-alpha;}
+.nt-prose ol ol ol{list-style-type:lower-roman;}
+.nt-prose li::marker{color:var(--gold-light);font-weight:600;}
 .nt-prose li>p{margin:0;}
 .nt-prose li+li{margin-top:.15em;}
 .nt-prose blockquote{border-left:3px solid var(--gold);padding:2px 0 2px 14px;color:var(--text-soft);font-style:italic;}
