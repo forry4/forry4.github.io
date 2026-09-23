@@ -16,7 +16,7 @@ import { leaveOpenSeat, readRoomToken } from "../../shared/roomLifecycle.js";
 import { useCardInfoGesture } from "../../shared/gestures.js";
 import OrbitRules from "./rules.jsx";
 import { Resource, ResourceIcon, decisionCopy, victoryCondition, InfluenceDisc, OrbitSky } from "./presentation.jsx";
-import { automaticChoices, adjacentPairs, adjacentOrderMatters } from "./decisions.js";
+import { automaticChoices, adjacentPairs, adjacentOrderMatters, orderedChoices, sortedHand } from "./decisions.js";
 import { useCardMotion } from "./cardMotion.js";
 import orbitCssText from "./Orbit.css?inline";
 
@@ -273,14 +273,9 @@ function HandCount({ held, limit }) {
    stable order across re-renders rather than depending on the sort's stability
    for input the engine may have reordered.
    It is presentation ONLY: every move still carries `card_id`, so nothing about
-   which card a click plays depends on where it sits. */
-const PLANET_ORDER = Object.fromEntries(PLANETS.map((planet, i) => [planet, i]));
-function sortedHand(hand) {
-  return [...(hand || [])].sort((a, b) =>
-    (PLANET_ORDER[a?.planet] ?? PLANETS.length) - (PLANET_ORDER[b?.planet] ?? PLANETS.length)
-    || (a?.cost ?? 0) - (b?.cost ?? 0)
-    || (a?.id ?? 0) - (b?.id ?? 0));
-}
+   which card a click plays depends on where it sits.
+   It lives in decisions.js because a decision that picks from the hand
+   (a discard, say) lists its options in this same order. */
 
 
 function orbitMoveKey(move) {
@@ -791,7 +786,7 @@ function DecisionPanel({ game, catalog, sendMove, onInfo }) {
   const frameKey = JSON.stringify([game.turn_number, game.pending, moves, game.log?.slice(-2)]);
   if (!pending || automaticChoices(game).length) return null;
   const pairMoves = orderedPair?.key === frameKey ? orderedPair.moves : null;
-  const choices = pending.type === "two_adjacent" ? pairMoves || adjacentPairs(moves).map((pair) => pair[0]) : moves;
+  const choices = orderedChoices(game, pending.type === "two_adjacent" ? pairMoves || adjacentPairs(moves).map((pair) => pair[0]) : moves);
   const choose = (move) => {
     const pair = pending.type === "two_adjacent" && adjacentPairs(moves).find((pair) => pair.includes(move));
     if (!pairMoves && pair?.length > 1 && adjacentOrderMatters(game, move)) setOrderedPair({ key: frameKey, moves: pair });
