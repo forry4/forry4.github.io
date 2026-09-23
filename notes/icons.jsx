@@ -17,13 +17,18 @@ export const I = {
 	back: svg(<path d="M14.5 6.5 9 12l5.5 5.5" />),
 	clock: svg(<><circle cx="12" cy="12" r="8" /><path d="M12 7.8V12l2.8 2" /></>),
 	// toolbar
-	bullet: svg(<><circle cx="5.5" cy="7" r="1" fill="currentColor" /><circle cx="5.5" cy="12" r="1" fill="currentColor" /><circle cx="5.5" cy="17" r="1" fill="currentColor" /><path d="M9.5 7h10M9.5 12h10M9.5 17h10" /></>),
-	ordered: svg(<><path d="M4.5 5.5h1.3v4M4.3 9.5h3M4.4 14.3c.3-.6.9-.9 1.5-.8.9.1 1.3 1 .8 1.8L4.4 18.3h2.9" /><path d="M10.5 7h9M10.5 12h9M10.5 17h9" /></>),
+	// Solid dots and short lines: at 18px, a list icon has to read as DOTS first. The
+	// old 1px-radius dots vanished, leaving eight near-identical stacks of lines in a
+	// row (lists, quote, align, indent) — and Indent got clicked for "bullet list".
+	bullet: svg(<><circle cx="5.2" cy="6.5" r="2.3" fill="currentColor" stroke="none" /><circle cx="5.2" cy="12" r="2.3" fill="currentColor" stroke="none" /><circle cx="5.2" cy="17.5" r="2.3" fill="currentColor" stroke="none" /><path d="M10.5 6.5h9M10.5 12h9M10.5 17.5h9" /></>),
+	ordered: svg(<><text x="1.6" y="11" fontSize="10.5" fontWeight="700" fill="currentColor" stroke="none" fontFamily="Arial,Helvetica,sans-serif">1</text><text x="1.3" y="21.5" fontSize="10.5" fontWeight="700" fill="currentColor" stroke="none" fontFamily="Arial,Helvetica,sans-serif">2</text><path d="M10.5 7.5h9M10.5 17.5h9" /></>),
 	check: svg(<><rect x="3.8" y="5" width="6" height="6" rx="1.2" /><path d="m5.3 8 1.3 1.3 2.2-2.6M13 8h7M3.8 13.5h6v6h-6ZM13 16.5h7" /></>),
-	quote: svg(<><path d="M5.5 6.5v11M9.5 8h9M9.5 12h9M9.5 16h6" /></>),
+	// Quotation marks, not a bar + lines (which read as one more list/indent icon).
+	quote: svg(<><path d="M10 7.5c-2.6.6-4.2 2.6-4.2 5.4v3.6h4v-4H7.6c.1-1.5 1.1-2.6 2.6-3Z" fill="currentColor" stroke="none" /><path d="M18.2 7.5c-2.6.6-4.2 2.6-4.2 5.4v3.6h4v-4h-2.2c.1-1.5 1.1-2.6 2.6-3Z" fill="currentColor" stroke="none" /></>),
 	rule: svg(<path d="M4 12h16" />),
-	indent: svg(<path d="M4.5 6h15M11 10h8.5M11 14h8.5M4.5 18h15M4.5 9.5 8 12l-3.5 2.5" />),
-	outdent: svg(<path d="M4.5 6h15M11 10h8.5M11 14h8.5M4.5 18h15M8 9.5 4.5 12 8 14.5" />),
+	// A SOLID arrowhead: the 1.6px chevron these used to have disappeared at 18px.
+	indent: svg(<><path d="M4.5 5.5h15M11.5 10h8M11.5 14h8M4.5 18.5h15" /><path d="M4 8.8 8.6 12 4 15.2Z" fill="currentColor" /></>),
+	outdent: svg(<><path d="M4.5 5.5h15M11.5 10h8M11.5 14h8M4.5 18.5h15" /><path d="M8.6 8.8 4 12l4.6 3.2Z" fill="currentColor" /></>),
 	alignLeft: svg(<path d="M4.5 6h15M4.5 10h9M4.5 14h15M4.5 18h9" />),
 	alignCenter: svg(<path d="M4.5 6h15M7.5 10h9M4.5 14h15M7.5 18h9" />),
 	alignRight: svg(<path d="M4.5 6h15M10.5 10h9M4.5 14h15M10.5 18h9" />),

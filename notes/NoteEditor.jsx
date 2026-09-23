@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useEditor, useEditorState, EditorContent, NodeViewWrapper, ReactNodeViewRenderer } from "@tiptap/react";
 import { Extension, Node, mergeAttributes } from "@tiptap/core";
-import { NodeSelection, Selection, TextSelection } from "@tiptap/pm/state";
+import { NodeSelection, Plugin, Selection, TextSelection } from "@tiptap/pm/state";
 import StarterKit from "@tiptap/starter-kit";
 import { TaskList, TaskItem } from "@tiptap/extension-list";
 import { Placeholder } from "@tiptap/extensions";
@@ -183,6 +183,26 @@ const Indent = Extension.create({
 			return true;
 		};
 		return { indent: step(1), outdent: step(-1) };
+	},
+	// A paragraph's indent means nothing inside a list — lists nest instead (Tab) — but
+	// it survived the wrap: a line indented first and then bulleted kept its margin, so
+	// its text sat a tab-stop away from its bullet. Cleared whenever a list holds one.
+	addProseMirrorPlugins() {
+		return [new Plugin({
+			appendTransaction(trs, _old, state) {
+				if (!trs.some((t) => t.docChanged)) return null;
+				let tr = null;
+				state.doc.descendants((node, pos, parent) => {
+					if (INDENT_TYPES.includes(node.type.name) && node.attrs.indent
+						&& parent && (parent.type.name === "listItem" || parent.type.name === "taskItem")) {
+						tr = tr || state.tr;
+						tr.setNodeMarkup(pos, undefined, { ...node.attrs, indent: 0 });
+					}
+					return true;
+				});
+				return tr;
+			},
+		})];
 	},
 	addKeyboardShortcuts() {
 		return {
