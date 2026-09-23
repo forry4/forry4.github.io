@@ -235,6 +235,22 @@ jobs:
           t0, deadline = int(os.environ["T0"]), time.time() + int(os.environ["TIMEOUT_SECONDS"])
           print(f"waiting for {want[:7]} at {url}", flush=True)
 
+          def check_db(data):
+              # The new process is up — but core/db.py falls back to local sqlite
+              # when Turso fails its boot selftest, and that fallback stays UP and
+              # answers /health like a healthy deploy while nothing it writes
+              # survives the next restart. It will not recover by waiting, so fail
+              # now rather than at the timeout.
+              backend = data.get("db_backend")
+              if backend != "turso":
+                  print(f"::error::The new build is live but db_backend={backend!r}, not 'turso'. "
+                        f"Turso failed its boot selftest and prod is writing to EPHEMERAL local "
+                        f"sqlite: accounts and games created now will be lost on the next restart. "
+                        f"Check the Render logs for 'Turso is unusable', then fix or revert.")
+                  sys.exit(1)
+              print("OK  db_backend=turso")
+              sys.exit(0)
+
           last = None
           while time.time() < deadline:
               try:
@@ -250,14 +266,14 @@ jobs:
                   if commit != "unknown":
                       if commit.startswith(want) or want.startswith(commit):
                           print(f"OK  live commit matches {want[:7]}")
-                          sys.exit(0)
+                          check_db(data)
                   elif started > t0:
                       print("::warning::/health reports commit=unknown — RENDER_GIT_COMMIT is not set "
                             "on the service, so this deploy was verified only by process start time "
                             "(weaker: a cold start can look like a deploy). Set it in the Render "
                             "dashboard to get an exact check.")
                       print(f"OK  a new process booted at {started} (> {t0})")
-                      sys.exit(0)
+                      check_db(data)
               print(f"  ... {last}", flush=True)
               time.sleep(15)
 

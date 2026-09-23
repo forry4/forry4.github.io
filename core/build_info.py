@@ -44,5 +44,9 @@ def commit() -> str:
 
 
 def build_info() -> dict:
-    """The block every service's /health merges in."""
-    return {"commit": commit(), "started_at": STARTED_AT}
+    """The block every service's /health merges in.
+
+    `db_backend` is here for the same reason `commit` is: it is a fact about the
+    running process that a deploy must be able to VERIFY. See core.db.backend."""
+    from core import db  # lazy: keep this module importable without the DB layer
+    return {"commit": commit(), "started_at": STARTED_AT, "db_backend": db.backend()}

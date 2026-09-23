@@ -157,6 +157,16 @@ def _turso_selftest() -> bool:
 _USE_TURSO = _turso_selftest()
 
 
+def backend() -> str:
+    """Which store this process actually writes to: "turso" or "sqlite".
+
+    Reported on /health because the fallback above keeps the site UP — a Turso
+    failure on boot looks exactly like a healthy deploy from outside, while
+    nothing written after it survives the next restart. deploy-render.yml fails
+    a deploy that comes up on "sqlite"."""
+    return "turso" if _USE_TURSO else "sqlite"
+
+
 def get_db_conn():
     if _USE_TURSO:
         return _Conn(_connect_turso())
