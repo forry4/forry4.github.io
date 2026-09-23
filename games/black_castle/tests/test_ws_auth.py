@@ -46,7 +46,11 @@ def test_create_supports_two_easy_bots_and_binds_creator():
     assert run(m._handle_create(ws, "abc123", "alice", {"name": "Alice", "max_players": 3, "num_bots": 2}))
     assert set(m.ROOMS["ABC123"]["players"]) == {"alice", "bot1", "bot2"}
     assert m.ROOMS["ABC123"]["status"] == "playing"
-    assert ws.sent[-1]["type"] == "created"
+    # FIRST, not last: `created` is sent before the bot task exists, which is the
+    # guarantee a client relies on. What arrives after it depends on how far that
+    # fire-and-forget task gets before asyncio.run() tears the loop down — on 3.11
+    # it never starts, on 3.14.7 it plays a move and broadcasts it first.
+    assert ws.sent[0]["type"] == "created"
 
 
 def test_unauthed_socket_cannot_move_or_claim_an_existing_seat():
