@@ -56,7 +56,7 @@ export default defineConfig({
     // ProseMirror single-copy, which it must be — two copies break instanceof checks).
     dedupe: [
       '@tiptap/react', '@tiptap/core', '@tiptap/pm', '@tiptap/starter-kit',
-      '@tiptap/extension-list', '@tiptap/extensions',
+      '@tiptap/extension-list', '@tiptap/extensions', '@tiptap/extension-text-align',
     ],
   },
   build: {

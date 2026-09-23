@@ -6,6 +6,7 @@ import { NodeSelection, Selection } from "@tiptap/pm/state";
 import StarterKit from "@tiptap/starter-kit";
 import { TaskList, TaskItem } from "@tiptap/extension-list";
 import { Placeholder } from "@tiptap/extensions";
+import { TextAlign } from "@tiptap/extension-text-align";
 
 import { I } from "./icons.jsx";
 import {
@@ -30,7 +31,7 @@ const dataAttr = (name, key, fallback) => ({
 const WIDTHS = [["small", "S", "Small"], ["half", "M", "Medium"], ["full", "L", "Full width"]];
 
 function ImageView({ node, updateAttributes, deleteNode, selected, extension }) {
-	const { imageId, uploadKey, width, caption, w, h } = node.attrs;
+	const { imageId, uploadKey, width, align, caption, w, h } = node.attrs;
 	const api = extension.options.api;
 	const pending = !imageId && uploadKey ? pendingUploads.get(uploadKey) : null;
 	const [src, setSrc] = useState(pending?.previewUrl || null);
@@ -48,7 +49,7 @@ function ImageView({ node, updateAttributes, deleteNode, selected, extension }) 
 
 	const label = failed ? "Image unavailable" : imageId ? "Loading…" : pending ? "" : "Upload failed";
 	return (
-		<NodeViewWrapper className={`nt-img nt-img-${width}${selected ? " is-selected" : ""}`}>
+		<NodeViewWrapper className={`nt-img nt-img-${width} nt-img-align-${align || "left"}${selected ? " is-selected" : ""}`}>
 			<div className="nt-img-frame" data-drag-handle="" draggable="true"
 				style={w && h ? { aspectRatio: `${w} / ${h}` } : undefined}>
 				{src && !failed
@@ -103,6 +104,7 @@ const NoteImage = Node.create({
 			imageId: dataAttr("image-id", "imageId", null),
 			uploadKey: { default: null, rendered: false, parseHTML: () => null },
 			width: dataAttr("width", "width", "full"),
+			align: dataAttr("align", "align", "left"),
 			caption: dataAttr("caption", "caption", ""),
 			w: dataAttr("w", "w", 0),
 			h: dataAttr("h", "h", 0),
@@ -213,12 +215,25 @@ function Toolbar({ editor, onPickImages }) {
 			ordered: e.isActive("orderedList"),
 			task: e.isActive("taskList"),
 			quote: e.isActive("blockquote"),
+			// With an image selected the align buttons align the IMAGE; otherwise the text.
+			align: e.state.selection instanceof NodeSelection && e.state.selection.node.type.name === "noteImage"
+				? (e.state.selection.node.attrs.align || "left")
+				: (["center", "right"].find((a) => e.isActive({ textAlign: a })) || "left"),
 			link: e.isActive("link"),
 			canUndo: e.can().undo(),
 			canRedo: e.can().redo(),
 		}),
 	});
 	const fileRef = useRef(null);
+	const align = (a) => (ev) => {
+		ev.preventDefault();
+		const sel = editor.state.selection;
+		if (sel instanceof NodeSelection && sel.node.type.name === "noteImage") {
+			editor.chain().focus().updateAttributes("noteImage", { align: a }).run();
+		} else {
+			editor.chain().focus().setTextAlign(a).run();
+		}
+	};
 	const run = (fn) => (ev) => { ev.preventDefault(); fn(editor.chain().focus()).run(); };
 	const link = (ev) => {
 		ev.preventDefault();
@@ -263,6 +278,11 @@ function Toolbar({ editor, onPickImages }) {
 				<B label="Checklist" on={s.task} onDown={run((c) => c.toggleTaskList())}>{I.check}</B>
 				<B label="Quote" on={s.quote} onDown={run((c) => c.toggleBlockquote())}>{I.quote}</B>
 				<B label="Divider" onDown={run((c) => c.setHorizontalRule())}>{I.rule}</B>
+			</div>
+			<div className="nt-tb-group">
+				<B label="Align left" on={s.align === "left"} onDown={align("left")}>{I.alignLeft}</B>
+				<B label="Align center" on={s.align === "center"} onDown={align("center")}>{I.alignCenter}</B>
+				<B label="Align right" on={s.align === "right"} onDown={align("right")}>{I.alignRight}</B>
 			</div>
 			<div className="nt-tb-group">
 				{/* Tab / Shift-Tab do this on a keyboard; a phone has no Tab key. */}
@@ -438,6 +458,7 @@ function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, noti
 				: "Start writing… paste or drop screenshots anywhere." }),
 			NoteImage.configure({ api }),
 			Indent,
+			TextAlign.configure({ types: ["heading", "paragraph"], alignments: ["left", "center", "right"] }),
 		],
 		content: initial.doc || "",
 		editorProps: {

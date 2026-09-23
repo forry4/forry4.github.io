@@ -161,6 +161,11 @@
 .nt-img-small .nt-img-frame{width:max(33%,180px);max-width:100%;}
 .nt-img-half .nt-img-frame{width:max(50%,240px);max-width:100%;}
 .nt-img-full .nt-img-frame{width:100%;}
+/* a small/medium image can sit left, centred or right (a full-width one fills the row anyway) */
+.nt-img-align-center .nt-img-frame{margin-left:auto;margin-right:auto;}
+.nt-img-align-right .nt-img-frame{margin-left:auto;}
+.nt-img-align-center .nt-img-cap{text-align:center;}
+.nt-img-align-right .nt-img-cap{text-align:right;}
 .nt-img.is-selected .nt-img-frame,.ProseMirror-selectednode .nt-img-frame{outline:2px solid var(--gold);outline-offset:2px;}
 .nt-img-ph{min-height:120px;height:100%;display:flex;align-items:center;justify-content:center;color:var(--text-dim);
 	font-style:italic;}
