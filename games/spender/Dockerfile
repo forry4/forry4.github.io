@@ -1,5 +1,5 @@
 ### Builder: build wheels for faster, cacheable installs
-FROM python:3.11-slim AS builder
+FROM python:3.14-slim AS builder
 WORKDIR /build
 
 # Build deps (only needed to compile wheels; not carried into the runtime image)
@@ -15,12 +15,15 @@ RUN pip wheel --wheel-dir=/build/wheels -r /build/requirements.txt
 # Cython is PINNED: the C-array fast paths rely on version-specific pure-mode codegen behavior
 # (e.g. cython.int[5][90] -> C int[90][5] dim reversal), validated on 3.2.5; an unpinned bump could
 # change codegen and (caught by the build GATE below) block the deploy. Bump deliberately + re-gate.
-RUN pip install --no-cache-dir cython==3.2.5
+# setuptools is NOT optional: `cythonize -i` builds through distutils, which Python 3.12 removed
+# from the stdlib; setuptools supplies it. The 3.11 image happened to ship setuptools, so this
+# line was missing and harmless until the move to 3.14, where cythonize dies on the import.
+RUN pip install --no-cache-dir cython==3.2.5 setuptools==80.9.0
 COPY games/spender/ai/serving/valuation3.py /build/cy/valuation3.py
 RUN cythonize -i -3 /build/cy/valuation3.py
 
 ### Runtime: slim image that installs from the prebuilt wheels
-FROM python:3.11-slim
+FROM python:3.14-slim
 WORKDIR /app
 
 # CA roots for outbound TLS (the libSQL/Turso connection)

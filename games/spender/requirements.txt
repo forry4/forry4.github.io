@@ -1,10 +1,11 @@
 # PINNED (2026-09-22). This file is the SERVER's: the Dockerfile builds the prod
-# image from it, and python-app.yml / deploy-render.yml test against it on 3.11.
+# image from it, and python-app.yml / deploy-render.yml test against it on 3.14.
 # Unpinned, every deploy silently took whatever was newest on PyPI that day, so a
 # third-party release could change prod on a push that touched none of this. The
 # pins are what 3.11 resolved at the time, i.e. what prod and the last green CI
-# were already running. Bump deliberately; CI gates the bump before it deploys.
-# Note numpy 2.5+ needs Python 3.12, so 2.4.x is the ceiling while prod is 3.11.
+# were already running; every one has a cp314 (or pure-Python) wheel, which is
+# what made the 3.11 -> 3.14 move a version bump rather than a dependency bump.
+# Bump deliberately; CI gates the bump before it deploys.
 fastapi==0.141.1
 uvicorn[standard]==0.53.0
 pydantic==2.13.5

@@ -14,7 +14,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.14'
           # The Render deploy gate waits for this exact run on main, so keep
           # dependency installation cheap without changing the test boundary.
           cache: pip
@@ -32,7 +32,7 @@ jobs:
           python -m pytest -q -rf 2>&1 | tee "$RUNNER_TEMP/pytest.log"
 
       # A red suite here is often one a dev box cannot reproduce — this runner is
-      # Linux on Python 3.11 while local work happens on Windows on 3.14 — and the
+      # Linux while local work happens on Windows (both on Python 3.14) — and the
       # job log needs repository ADMIN to download through the API. The step
       # summary is part of the check run's public output, so putting the failing
       # tail here is the difference between diagnosing a break and guessing at it.

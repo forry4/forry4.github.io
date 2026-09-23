@@ -176,8 +176,12 @@ per `render.yaml`).
 
 **Persistence:** Render's free filesystem is ephemeral, so prod uses Turso. **Turso is LIVE and verified
 on Render — prod IS persistent; don't tell the user to set it up.** The libsql path **cannot be tested
-locally** (no wheel for Python 3.14 on this box; prod Docker is 3.11) — validate it via Render logs + a
-login that survives a redeploy. The sqlite path (identical wrapper) IS locally tested.
+locally** (libsql ships a Linux cp314 wheel but no Windows one; prod Docker is 3.14 too) — validate it
+via Render logs + a login that survives a redeploy, or run it inside the prod image under Docker. The
+sqlite path (identical wrapper) IS locally tested. **A Turso failure is a SILENT fallback** — `core/db.py`
+drops to ephemeral local sqlite and the site stays up — so `/health` reports `db_backend` and
+`deploy-render.yml` FAILS any deploy that does not come up on `turso`
+(`core/tests/test_deploy_verifies_db_backend.py` runs that step's real script).
 
 ### Auth correctness & security (hard-won — do not regress)
 - **WS SEAT IDENTITY IS BOUND IN ALL SEVEN GAMES.** The `player` path segment is client-supplied and
@@ -504,7 +508,7 @@ covers the logic; each game's wiring is one line).
   the pair is ~59%). Use a cumulative strip-down to see what is really in a blob.
 - **…but a stored RATIO is a measurement, not an invariant — never assert on it tightly.** Its
   denominator is the compressor, not the codec: the same CoC blobs read 0.660 at zlib level 1 and
-  0.755 at level 6, and **Python 3.14 ships zlib-ng** rather than stock zlib. All four games'
+  0.755 at level 6, and **Python 3.14's WINDOWS build ships zlib-ng** rather than stock zlib (the Linux image — prod and CI — is stock zlib 1.3.1, so moving prod to 3.14 did NOT close this gap). All four games'
   `test_compaction_actually_shrinks_the_blob` guards were written against CI's zlib; CoC's sat 0.005
   under its threshold, so it passed CI and was red on every dev box, and Dontminion's/Duel's margins
   were smaller than that swing. A size guard needs a DETERMINISTIC axis (raw bytes) for the tight
@@ -874,8 +878,8 @@ covers the logic; each game's wiring is one line).
 **Backend / DB**
 - **libsql has no `cur.rowcount`** → use SELECT-then-DELETE/UPDATE for any affected-row count (it 500'd
   the cancel endpoint).
-- **Turso can't be tested locally** (no libsql wheel on Python 3.14) — validate via Render logs + a login
-  surviving a redeploy.
+- **Turso can't be tested locally on Windows** (no Windows cp314 libsql wheel) — validate via Render logs, a
+  login surviving a redeploy, and the deploy's own `db_backend == turso` gate.
 - Never use a correlated subquery for `is_admin` (NULL on libsql); usernames are unique NOCASE.
 
 **Cython (Spender `valuation3`)**

@@ -160,7 +160,7 @@ jobs:
       - name: Set up Python (for the screens gate's backend)
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: '3.14'
           # Caches the pip DOWNLOAD dir, keyed on the requirements file itself.
           cache: 'pip'
           cache-dependency-path: games/spender/requirements.txt
