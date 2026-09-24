@@ -6440,8 +6440,17 @@ try {
 		// `.or-agent` transitions transform and box-shadow over 140ms, and a
 		// computed style read inside that window is a MIDPOINT — the first cut of
 		// this check read dy 0 and a half-faded shadow and reported the rule as
-		// not applying at all.
-		await sleep(300);
+		// not applying at all. A FIXED sleep past the 140ms was the next cut, and it
+		// is a coincidence rather than a wait: on a loaded CI runner (Pages run for
+		// 671d369b) the read landed with the shadow at 0.015px — ~99% of the way —
+		// and failed a deploy that touched no Orbit code. So wait for the card's own
+		// transitions to FINISH (getAnimations covers CSS transitions), bounded.
+		const settled = (loc) => loc.evaluate((el) => Promise.race([
+			Promise.all(el.getAnimations().map((a) => a.finished.catch(() => {}))),
+			new Promise((r) => setTimeout(r, 3000)),
+		])).catch(() => {});
+		await sleep(50);   // let the click's class change commit and its transitions start
+		await settled(mulliganPick);
 		const marked = await page.evaluate(() => {
 			const el = document.querySelector(".or-mulligan .or-agent.discarding");
 			if (!el) return null;
@@ -6466,7 +6475,8 @@ try {
 			await page.screenshot({ path: "test-results/orbit-mulligan-marked.png", fullPage: true });
 		}
 		await mulliganPick.click({ timeout: 10_000 }).catch(() => {});
-		await sleep(300);
+		await sleep(50);
+		await settled(mulliganPick);
 		check("un-marking a mulligan pick puts it back",
 			await page.locator(".or-mulligan .or-agent.discarding").count() === 0
 			&& Number(await mulliganPick.evaluate((el) => getComputedStyle(el).opacity)) === 1);
