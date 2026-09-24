@@ -245,9 +245,13 @@ try {
 	// each gets its own fixed deal no matter which LANE it lands in. Override it
 	// to re-roll every hand at once when you want to know a check is not merely
 	// memorising one deal. See core.rooms.deal_rng.
+	// ROOM_CREATES_PER_HOUR lifts the per-address table-creation throttle
+	// (core.rooms.reject_room_create): every block here creates its tables from
+	// 127.0.0.1, dozens a minute, which is exactly what the throttle refuses.
 	api = spawn(PYTHON, ["-m", "uvicorn", "app:app", "--port", String(API_PORT)],
 		{ cwd: repoRoot, stdio: "ignore", shell: true,
-			env: { ...process.env, GAMES_DEAL_SEED: process.env.GAMES_DEAL_SEED || "screens-1" } });
+			env: { ...process.env, GAMES_DEAL_SEED: process.env.GAMES_DEAL_SEED || "screens-1",
+				ROOM_CREATES_PER_HOUR: "100000" } });
 	// The build needs nothing from the backend, so it runs WHILE uvicorn boots
 	// rather than after it. Started before the await so both clocks run together.
 	const built = runBuild();
@@ -675,6 +679,11 @@ try {
 				pillY, cards: cards.length,
 			};
 		});
+		// Notes is every account's now; a guest sees the tile (the page asks them to
+		// sign in), and the owner-only Site health tile is not on a guest's menu at all.
+		const extraLabels = await page.locator(".home-extra-label").allTextContents();
+		check("guests see the Notes tile and not Site health",
+			extraLabels.includes("Notes") && !extraLabels.includes("Site health"), JSON.stringify(extraLabels));
 		const wipIds = new Set(["ragtag", "blackcastle"]);
 		check("WIP game cards stay hidden from guests",
 			m.names.every((game) => !wipIds.has(game.id)), JSON.stringify(m.names.map((game) => game.id)));
@@ -8742,10 +8751,46 @@ try {
 
 		const has = (sel, ms = 20_000) => page.waitForSelector(sel, { timeout: ms }).then(() => true, () => false);
 
-		// Entry is the admin-only Extras tile, not a deep link: the tile's wiring (the
-		// HomeScreen prop + the shell's nav) is exactly what a URL visit would skip.
+		// The owner's Site health panel (core/monitor.py), stubbed: two unread alerts.
+		const healthAlerts = [
+			{ id: 2, created_at: 1758600000, kind: "lobby-flood", severity: "warn", message: "1.2.3.4 tried to create more than 40 tables in an hour.", folded: 3, acked: false },
+			{ id: 1, created_at: 1758590000, kind: "storage", severity: "critical", message: "Database is 4,700 MB of the 5,120 MB budget (92%).", folded: 0, acked: false },
+		];
+		let acked = false;
+		await page.route(onApi((p) => p.startsWith("/admin/")), (r) => {
+			const { pathname } = new URL(r.request().url());
+			const unacked = acked ? 0 : healthAlerts.length;
+			if (pathname === "/admin/alerts") return r.fulfill(json({ ok: true, unacked, channels: [] }));
+			if (pathname === "/admin/alerts/ack") { acked = true; return r.fulfill(json({ ok: true })); }
+			if (pathname === "/admin/health") return r.fulfill(json({ ok: true, channels: [], unacked,
+				alerts: healthAlerts.map((a) => ({ ...a, acked })),
+				snapshot: { db_backend: "turso", db_bytes: 4.7e9, storage_budget_bytes: 5120 * 1024 * 1024,
+					storage_fraction: 0.875, users: 12, open_lobbies: 3, notes_users: 2, notes_bytes: 1.2e6,
+					rooms_in_memory: 4, rss_mb: 210, memory_warn_mb: 420 } }));
+			return r.fulfill(json({ detail: "stub" }, 404));
+		});
+
+		// Entry is the Extras tile, not a deep link: the tile's wiring (the HomeScreen
+		// prop + the shell's nav) is exactly what a URL visit would skip.
 		await page.goto(`http://localhost:${PORT}/`, { waitUntil: "networkidle" });
 		await has(".home-extra");
+		const healthTile = page.locator(".home-extra", { hasText: "Site health" });
+		check("the owner sees Site health with the unread count",
+			await healthTile.count() === 1 && await has(".home-extra-badge", 5000)
+			&& (await page.locator(".home-extra-badge").textContent()) === "2");
+		await healthTile.click().catch(() => {});
+		check("Site health opens and lists every alert", await has(".rl-panel .sh-alert", 5000)
+			&& await page.locator(".sh-alert").count() === healthAlerts.length
+			&& await page.locator(".sh-alert.sh-new").count() === healthAlerts.length);
+		check("with no push channel set, the panel says so", await page.locator(".rl-panel .rl-tip").count() === 1);
+		await page.locator(".sh-acts .btn", { hasText: "Mark all read" }).click().catch(() => {});
+		check("Mark all read clears the badge and the new markers",
+			await page.waitForFunction(() => !document.querySelector(".home-extra-badge")
+				&& !document.querySelector(".sh-alert.sh-new"), null, { timeout: 5000 }).then(() => true, () => false));
+		await page.keyboard.press("Escape");
+		check("Escape closes the panel", await page.waitForSelector(".rl-panel", { state: "detached", timeout: 3000 })
+			.then(() => true, () => false));
+
 		const tile = page.locator(".home-extra", { hasText: "Notes" });
 		check("an admin sees the Notes tile in Extras", await tile.count() === 1);
 		await tile.click().catch(() => {});

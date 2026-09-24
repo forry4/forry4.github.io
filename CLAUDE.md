@@ -23,7 +23,7 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
 | [`games/pinch/AGENTS.md`](games/pinch/AGENTS.md) | Pinch (YINSH) — node ids, durable row/ring-removal sub-decisions, the persist boundary |
 | [`shared/CLAUDE.md`](shared/CLAUDE.md) | Shared frontend kits + URL routing |
 | [`books/CLAUDE.md`](books/CLAUDE.md) | The Books feature |
-| [`notes/CLAUDE.md`](notes/CLAUDE.md) | Notes — the owner's private notebook (folders, rich-text notes, screenshots); owner-only on every route |
+| [`notes/CLAUDE.md`](notes/CLAUDE.md) | Notes — a private notebook per signed-in account (folders, rich-text notes, screenshots); every row scoped to its owner, metered by quota |
 | [`bggfilter/CLAUDE.md`](bggfilter/CLAUDE.md) | BGG Filter — the BoardGameGeek harvest + the frontend-only filter page |
 | [`docs/deploy-reliability-log.md`](docs/deploy-reliability-log.md) | **Dated postmortems for RED RUNS** — the deploy gates, the scheduled jobs and the harness itself. Measurements behind the rules below (the CI-vs-dev font spread, the screens gate's failure census, the keepalive watchdog). |
 | [`docs/ai-research-log.md`](docs/ai-research-log.md) | **AI campaign history, dated sessions, rejected-experiment postmortems.** When something here says "see the research log," that's the blow-by-blow + "do not relitigate" detail. |
@@ -57,7 +57,7 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
   `keys[1 - guesser_seat]` — see its CLAUDE.md).
   Orbit (Zenith), Black Castle (The White Castle) and Pinch (YINSH — 2 players, 85
   intersections, Standard ends at three removed rings and Blitz at one).
-  Plus **Books** (a ranking/suggestions page), **Notes** (the owner's private notebook) and **WWSD** (a browser autoplayer for a friend's
+  Plus **Books** (a ranking/suggestions page), **Notes** (a private notebook per account) and **WWSD** (a browser autoplayer for a friend's
   external Splendor site).
 
 ### Run it locally
@@ -89,6 +89,8 @@ core/                  # SHARED BACKEND PLATFORM (imported by every feature; imp
   rooms.py             #   shared room-server primitives + the state_json codec
                        #   (encode/decode_state, pack/unpack_rng) — all seven games use it
   build_info.py        #   commit + started_at for /health, so a deploy can be VERIFIED not assumed
+  alerts.py            #   owner alerts: dedup + a queue + one thread -> site_alerts table + ntfy/webhook push
+  monitor.py           #   site health: periodic checks, event-loop watchdog, 5xx middleware, /admin routes
 games/
   spender/             # Spender (Splendor) — main.py exposes `router` (APIRouter), + ai/ stack
                        #   engine.py = the rules (single source of truth); cards.py = static card data
@@ -124,7 +126,7 @@ games/
                        #   of four, and scores the three cards each own hand is
                        #   left holding) — see its CLAUDE.md
 books/                 # Books feature (wired into the app, not a sub-app)
-notes/                 # Notes — owner-only notebook (setup_notes, like Books); TipTap editor chunk
+notes/                 # Notes — per-account notebook (setup_notes, like Books); TipTap editor chunk
 bggfilter/             # BGG Filter — frontend-only; tools/ harvests BGG, the payload ships
                        #   as webapp/public/data/bgg-filter.json (GENERATED, ~1MB, fetched not bundled)
 shared/                # theme.js (baseCss), lobby.jsx, splendor.jsx, router.js — cross-game frontend kits
@@ -184,6 +186,39 @@ sqlite path (identical wrapper) IS locally tested. **A Turso failure is a SILENT
 drops to ephemeral local sqlite and the site stays up — so `/health` reports `db_backend` and
 `deploy-render.yml` FAILS any deploy that does not come up on `turso`
 (`core/tests/test_deploy_verifies_db_backend.py` runs that step's real script).
+
+### Owner alerts, abuse limits and Site health (2026-09-23)
+- **`core.alerts.alert(kind, message, key=, severity=, cooldown=)` is the one call, and it is
+  safe ANYWHERE** — async route, WS handler, thread, inside a rate-limit check. It never blocks
+  and never raises: in-memory dedup (one per `key` per `cooldown`, default 1h; repeats are
+  COUNTED and the next push says "+N more"), then a queue drained by one daemon thread that
+  writes the `site_alerts` table (kept to the last 500) and POSTs to whichever channels are set:
+  `ALERT_NTFY_TOPIC` (+ optional `ALERT_NTFY_SERVER`/`ALERT_NTFY_TOKEN`/`ALERT_EMAIL`) and/or
+  `ALERT_WEBHOOK_URL` (Discord/Slack). **No SMTP channel on purpose** — Render's free tier blocks
+  outbound SMTP; every channel is one HTTPS POST. With nothing set, alerts still reach the table.
+- **Tests never deliver.** The root conftest points `alerts._sink` at a per-test list, so a test
+  asserts on exactly what was raised and nothing writes a DB row or pings a phone. The same
+  fixture resets the SITE-WIDE caps (accounts/hour, tables/hour from the one "unknown" test
+  peer), which a long xdist worker would otherwise trip part-way through.
+- **What alerts, and what is REFUSED** (prevention first, the alert tells you it happened):
+  account creation (10/h + 20/day per IP, **60/h site-wide**; alert at 15/h), failed passwords on
+  the OWNER's name (5 in 15 min, critical) and any lockout, **table creation** (40/h per IP —
+  `core.rooms.reject_room_create`, first statement of EVERY game's `create` branch; roster
+  derived from the tree by `shared/tests/test_room_create_throttle.py`; `screens` lifts it with
+  `ROOM_CREATES_PER_HOUR`), the WS connect/message throttles tripping, Notes quota/rate limits,
+  and unhandled 5xx (`ErrorAlertMiddleware`, keyed per route prefix, not per id).
+- **`core.monitor` watches what no request sees**: DB size vs `STORAGE_BUDGET_MB` (5120 = Turso
+  free; 75% warn / 90% critical), RSS vs `MEMORY_WARN_MB` (420 of Render's 512), open lobbies
+  across every game table (found BY SHAPE — `state_json` + `status` — so a new game is counted
+  unlisted), live rooms (a gauge app.py registers by scanning `games.*.main` modules), the Turso
+  → sqlite silent fallback, and a **frozen event loop**: a heartbeat task on the loop plus a
+  watchdog THREAD, so the alert still goes out while the loop is stuck (the CoC outage shape).
+  **Nothing runs at import** — the middleware arms it on the first ASGI call (uvicorn's lifespan
+  startup), because Starlette 1.x has no `on_event`, and so tests calling endpoints directly
+  never start a thread.
+- **Site health panel** — `shared/SiteHealth.jsx` in the shared RulesModal chrome, owner-only
+  Extras tile with an unread badge; `/admin/alerts`, `/admin/health`, `/admin/alerts/ack`,
+  `/admin/alerts/test` (the Test button bypasses dedup, so it always sends).
 
 ### Auth correctness & security (hard-won — do not regress)
 - **WS SEAT IDENTITY IS BOUND IN ALL SEVEN GAMES.** The `player` path segment is client-supplied and

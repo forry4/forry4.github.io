@@ -487,7 +487,8 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
             action = msg.get("action")
 
             if action == "create":
-                authed = await _handle_create(websocket, room_id, pid, msg) or authed
+                if not await _rooms.reject_room_create(websocket):
+                    authed = await _handle_create(websocket, room_id, pid, msg) or authed
             elif action == "join":
                 authed = await _handle_join(websocket, room_id, pid, msg) or authed
             elif action == "reconnect":

@@ -100,6 +100,13 @@
 .nt-rename{flex:1;min-width:0;font:inherit;font-size:1rem;color:var(--text);background:var(--bg);
 	border:1px solid var(--gold);border-radius:5px;padding:3px 7px;outline:none;}
 .nt-trash-link{width:100%;margin-top:14px;border-top:1px solid var(--border);border-radius:0 0 7px 7px;padding-top:10px;}
+/* Storage used, for every account but the site owner's (notes/api.py quotas). */
+.nt-usage{padding:12px 10px 4px;display:flex;flex-direction:column;gap:6px;}
+.nt-usage-bar{height:5px;border-radius:3px;background:var(--surface3);overflow:hidden;}
+.nt-usage-bar>span{display:block;height:100%;background:var(--gold);border-radius:3px;}
+.nt-usage.full .nt-usage-bar>span{background:#e0a23a;}
+.nt-usage-text{font-size:.8rem;color:var(--text-dim);}
+.nt-usage.full .nt-usage-text{color:#e0a23a;}
 
 /* the right-click menu (notes/menu.jsx) — editor and sidebar alike */
 .nt-cmenu{position:fixed;z-index:400;min-width:230px;max-width:340px;display:flex;flex-direction:column;

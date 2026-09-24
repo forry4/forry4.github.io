@@ -13,6 +13,7 @@ so Procfile/Dockerfile/render.yaml keep their historical ``games.spender.app:app
 target unchanged.
 """
 import logging
+import sys
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,6 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from core.db import get_db_conn
 from core.auth import get_user_by_session
 from core.config import cors_allowed_origins
+from core.monitor import ErrorAlertMiddleware, register_gauge, setup_site_health
 from games.spender.main import router as spender_router, bearer_token
 from books.api import setup_books
 
@@ -74,6 +76,9 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "X-Room-Token"],
 )
 app.add_middleware(SecurityHeadersMiddleware)
+# Owner alerts on 5xx responses, and the switch that starts the site-health monitor
+# (the event-loop watchdog + periodic checks) on the first ASGI call — see core.monitor.
+app.add_middleware(ErrorAlertMiddleware)
 
 # Spender's HTTP + WebSocket routes (auth, games, /ws, /health) at the site root.
 app.include_router(spender_router)
@@ -93,6 +98,9 @@ try:
     LOG.info("wired Notes routes (/notes)")
 except Exception as _notes_err:  # pragma: no cover - defensive
     LOG.warning("Notes not wired: %s", _notes_err)
+
+# Site health — the owner's alerts panel (/admin/alerts, /admin/health). Owner-only.
+setup_site_health(app, get_user_by_session, bearer_token)
 
 # Puzzle mode — static, scripted Spender endgame puzzles. Public read-only content
 # (the bank is committed JSON with embedded snapshots); no DB/auth/engine at serve
@@ -196,3 +204,14 @@ try:
     LOG.info("mounted SecretNames at /secretnames")
 except Exception as _secretnames_err:  # pragma: no cover - optional package
     LOG.warning("SecretNames not mounted: %s", _secretnames_err)
+
+
+def _rooms_in_memory() -> int:
+    """Live rooms across every mounted game. Read from the game modules' own ROOMS
+    dicts (a len() is safe from the monitor's thread), found by name so a new game
+    is counted without being listed here."""
+    return sum(len(getattr(mod, "ROOMS", None) or {}) for name, mod in list(sys.modules.items())
+               if name.startswith("games.") and name.endswith(".main"))
+
+
+register_gauge("rooms_in_memory", _rooms_in_memory)

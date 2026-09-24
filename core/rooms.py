@@ -30,6 +30,7 @@ import zlib
 from collections import deque
 from typing import Any, Callable
 
+from core import alerts
 from core.auth import gen_token
 from core.db import get_db_conn
 from core.ratelimit import SlidingWindowLimiter
@@ -435,12 +436,49 @@ async def reject_if_connecting_too_fast(ws) -> bool:
     """
     ip = client_ip(ws)
     if _ws_connect_limiter.exceeded(ip):
+        alerts.alert("socket-flood", f"{ip} opened over {WS_CONNECTS_PER_MIN} game sockets in a "
+                     "minute; the extras are being refused.", key=f"ws-connect:{ip}")
         try:
             await ws.close(code=1008)
         except Exception:
             pass
         return True
     _ws_connect_limiter.record(ip)
+    return False
+
+
+# ─── Table-creation throttle (every game's `create` action) ──────────────────
+# A `create` is the one WebSocket message that writes a NEW row: an open lobby
+# that sits in the DB for 48h and in every lobby's Open list. The connect and
+# message throttles above allow ~60 of those a minute from one address, which
+# is a lobby flood, not play. A vs-bot game is one create per game, so the
+# hourly budget is far above anyone actually playing — including a household
+# behind one NAT. Every game's dispatcher calls this first in its `create`
+# branch; shared/tests/test_room_create_throttle.py fails a game that does not.
+#
+# ROOM_CREATES_PER_HOUR is an env knob for the render gate, whose harness
+# creates dozens of tables from 127.0.0.1 in a minute (webapp/test/screens.mjs).
+ROOM_CREATES_PER_HOUR = int(os.environ.get("ROOM_CREATES_PER_HOUR") or 40)
+_room_create_limiter = SlidingWindowLimiter(max_hits=ROOM_CREATES_PER_HOUR, window_seconds=3600)
+ROOM_CREATE_REFUSED = ("You're creating tables too quickly. Wait a few minutes, "
+                       "or rejoin one of your open tables from the lobby.")
+
+
+async def reject_room_create(ws) -> bool:
+    """Record a table creation for this peer; if it is over the hourly budget,
+    answer with an error (the socket stays open) and alert the owner.
+
+    Returns True when the caller should SKIP the create."""
+    ip = client_ip(ws)
+    if _room_create_limiter.exceeded(ip):
+        alerts.alert("lobby-flood", f"{ip} tried to create more than {ROOM_CREATES_PER_HOUR} "
+                     "tables in an hour; further creates are refused.", key=f"create:{ip}")
+        try:
+            await send_json(ws, {"type": "error", "message": ROOM_CREATE_REFUSED})
+        except Exception:
+            pass
+        return True
+    _room_create_limiter.record(ip)
     return False
 
 
@@ -451,6 +489,7 @@ class MessageThrottle:
     def __init__(self, max_per_min: int = WS_MESSAGES_PER_MIN):
         self._max = max_per_min
         self._hits: deque[float] = deque()
+        self._alerted = False
 
     def allow(self, now: float | None = None) -> bool:
         now = time.time() if now is None else now
@@ -458,6 +497,10 @@ class MessageThrottle:
         while self._hits and self._hits[0] < cutoff:
             self._hits.popleft()
         if len(self._hits) >= self._max:
+            if not self._alerted:
+                self._alerted = True
+                alerts.alert("socket-flood", f"A game socket sent over {self._max} messages "
+                             "in a minute and was closed.", key="ws-messages")
             return False
         self._hits.append(now)
         return True

@@ -77,6 +77,7 @@ import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../sh
 import AuthScreen from "../../shared/AuthScreen.jsx";
 import { leaveOpenSeat, readRoomToken } from "../../shared/roomLifecycle.js";
 import HomeScreen, { SITE_NAME, GAMES, HERO_RULE } from "../../shared/HomeScreen.jsx";
+import SiteHealth, { useUnackedAlerts } from "../../shared/SiteHealth.jsx";
 // The home card and Spender's own lobby must be the same colour; see shared/accents.js.
 import { GAME_ACCENTS } from "../../shared/accents.js";
 // Offline vs-AI: the local game driver (wasm engine + IndexedDB saves) — see offline.js.
@@ -758,6 +759,11 @@ export default function SpenderApp() {
 	// what made the shell impossible to lift out of this file. Spender's own screen now
 	// lives in `spenderScreen` and is only meaningful while screen === "spender".
 	const [screen, setScreen] = useState("loading");
+	// The owner's Site health panel: its unread-alert count badges the Home tile, and
+	// is re-read each time Home shows so it is never an hour stale.
+	const [siteAlerts, refreshSiteAlerts] = useUnackedAlerts(authUser);
+	const [siteHealthOpen, setSiteHealthOpen] = useState(false);
+	useEffect(() => { if (screen === "home") refreshSiteAlerts(); }, [screen, refreshSiteAlerts]);
 	const [spenderScreen, setSpenderScreen] = useState("browser");   // browser | waiting | game
 	// a room connect is in flight (create / join / continue / deep-link) — while it
 	// is AND we're still on the lobby, show the spinner instead of the lobby, so a
@@ -2940,6 +2946,10 @@ export default function SpenderApp() {
 			onBooks={() => nav("books")}
 			onNotes={() => nav("notes")}
 			onBggFilter={() => nav("bggfilter")}
+			onSiteHealth={() => setSiteHealthOpen(true)} siteAlerts={siteAlerts}
+			siteHealth={siteHealthOpen && (
+				<SiteHealth authUser={authUser} onClose={() => setSiteHealthOpen(false)} onChanged={refreshSiteAlerts} />
+			)}
 			onLogout={handleLogout} />
 	);
 

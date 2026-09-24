@@ -11,7 +11,7 @@ import { copyText } from "./editorMenu.js";
 import css from "./Notes.css?inline";
 
 // The editor (TipTap/ProseMirror) is the heavy half of this page; splitting it keeps
-// the sidebar and the "private" screen fast, and a visitor who is not the owner never
+// the sidebar and the sign-in screen fast, and a guest who has not signed in never
 // downloads an editor at all.
 const NoteEditor = lazy(() => import("./NoteEditor.jsx"));
 
@@ -22,6 +22,9 @@ const TRASH = "trash";
 const routeTarget = () => (parsePath().room || "").toLowerCase() || null;
 
 const RECENT_COUNT = 6;
+
+// The server counts storage in decimal megabytes (notes/api.py QUOTA_BYTES).
+const megabytes = (b) => `${(b / 1_000_000).toFixed(b < 10_000_000 ? 1 : 0)} MB`;
 
 function readLS(key, fallback) {
 	try { const v = localStorage.getItem(key); return v == null ? fallback : JSON.parse(v); } catch { return fallback; }
@@ -96,6 +99,9 @@ export default function Notes({ authUser, onExit }) {
 	// while the (possibly cold) backend answers.
 	const [tree, setTree] = useState(() => readLS(cacheKey, null));
 	const [access, setAccess] = useState(token ? "loading" : "denied");   // loading | ok | denied | offline
+	// { bytes, notes, quota_bytes, max_notes } from the tree; quota_bytes is null for the
+	// site owner, whose notebook is unmetered (notes/api.py Meter).
+	const [usage, setUsage] = useState(null);
 	const [target, setTarget] = useState(routeTarget);
 	const [expanded, setExpanded] = useState(() => new Set(readLS("notes.expanded", [])));
 	const [sort, setSort] = useState(() => readLS("notes.sort", "edited"));
@@ -151,6 +157,7 @@ export default function Notes({ authUser, onExit }) {
 			const t = await api.tree();
 			const next = { folders: t.folders, notes: t.notes };
 			setTree(next);
+			setUsage(t.usage || null);
 			writeLS(cacheKey, next);
 			setAccess("ok");
 		} catch (e) {
@@ -224,7 +231,15 @@ export default function Notes({ authUser, onExit }) {
 	const patchNote = (n) => setTree((t) => t && ({ ...t, notes: t.notes.some((x) => x.id === n.id)
 		? t.notes.map((x) => (x.id === n.id ? { ...x, ...pickMeta(n) } : x))
 		: [pickMeta(n), ...t.notes] }));
-	const fail = (e) => notify(e.status === undefined ? "Can't reach the server — try again in a moment." : e.message);
+	// The meter is read from the tree, so it moves when the tree is re-read: on load,
+	// after the Trash frees space, and when a write is refused for being over quota.
+	const refreshUsage = useCallback(() => {
+		api.tree().then((t) => setUsage(t.usage || null), () => {});
+	}, [api]);
+	const fail = (e) => {
+		notify(e.status === undefined ? "Can't reach the server — try again in a moment." : e.message);
+		if (e.status === 413) refreshUsage();
+	};
 
 	const expandTo = (fid) => setExpanded((s) => {
 		const next = new Set(s);
@@ -353,6 +368,7 @@ export default function Notes({ authUser, onExit }) {
 		try {
 			await api.deleteNote(n.id);
 			setTree((t) => ({ ...t, notes: t.notes.filter((x) => x.id !== n.id) }));
+			refreshUsage();
 		} catch (e) { fail(e); }
 	};
 	const emptyTrash = async () => {
@@ -360,6 +376,7 @@ export default function Notes({ authUser, onExit }) {
 		try {
 			await api.emptyTrash();
 			setTree((t) => ({ ...t, notes: t.notes.filter((x) => x.deleted_at == null) }));
+			refreshUsage();
 		} catch (e) { fail(e); }
 	};
 	const deleteFolder = async (f) => {
@@ -506,8 +523,10 @@ export default function Notes({ authUser, onExit }) {
 				<div className="nt-headtitle">Notes</div>
 			</header>
 			<div className="nt-empty">
-				<p>Notes are private to the site owner.</p>
-				{(!authUser || authUser.guest) && <p className="nt-dim">Sign in with the owner account to open them.</p>}
+				<p>Notes is a private notebook for your account: folders, notes and screenshots only you can see.</p>
+				<p className="nt-dim">{!authUser || authUser.guest
+					? "Sign in or create an account to start one."
+					: "Your sign-in has expired. Sign in again to open your notes."}</p>
 			</div>
 		</div>
 	);
@@ -624,6 +643,18 @@ export default function Notes({ authUser, onExit }) {
 							{trashed.length > 0 && <span className="nt-count">{trashed.length}</span>}
 						</button>
 					)}
+					{usage?.quota_bytes > 0 && (() => {
+						const frac = Math.min(1, usage.bytes / usage.quota_bytes);
+						return (
+							<div className={`nt-usage${frac >= 0.9 ? " full" : ""}`}>
+								<div className="nt-usage-bar" role="meter" aria-label="Storage used"
+									aria-valuemin={0} aria-valuemax={usage.quota_bytes} aria-valuenow={usage.bytes}>
+									<span style={{ width: `${Math.max(frac * 100, frac > 0 ? 2 : 0)}%` }} />
+								</div>
+								<span className="nt-usage-text">{megabytes(usage.bytes)} of {megabytes(usage.quota_bytes)} used</span>
+							</div>
+						);
+					})()}
 					</>)}
 				</aside>
 

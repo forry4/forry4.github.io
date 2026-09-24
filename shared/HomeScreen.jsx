@@ -45,6 +45,8 @@ const EXTRA_ICON = {
 	// A page with a folded corner and two ruled lines — the same drawing as Notes' own
 	// note glyph, so the tile and the page it opens agree.
 	notes: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><path d="M6.5 3.5h7.8l3.7 3.7v13.3H6.5Z" /><path d="M14 3.7v3.8h3.8M9.2 12h5.6M9.2 15.4h5.6" /></svg>),
+	// A pulse line: the owner-only Site health panel (alerts + what the monitor sees).
+	health: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><path d="M3.5 12.5h4l2-5 4 10 2-5h5" /></svg>),
 };
 
 // Shared by the loading and sign-in screens. The menu deliberately does not use it:
@@ -130,16 +132,19 @@ const GO_CHEVRON = (
 
 export { SITE_NAME, GAMES, GAME_EMBLEM, HERO_RULE };
 
-export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles, onBooks, onNotes, onBggFilter, onLogout }) {
+export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles, onBooks, onNotes, onBggFilter, onSiteHealth, siteAlerts = 0, siteHealth = null, onLogout }) {
 	// Built here rather than at module scope because each entry closes over a prop.
 	const games = visibleGames(authUser);
 	const extras = [
 		{ id: "puzzles", label: "Spender Puzzles", onClick: onPuzzles },
 		{ id: "books", label: "Books", onClick: onBooks },
 		{ id: "bgg", label: "BGG Filter", onClick: onBggFilter },
-		// The owner's private notebook. Hidden from everyone else — a convenience only:
-		// every /notes route refuses a non-owner server-side (notes/api.py).
-		authUser?.is_admin && onNotes && { id: "notes", label: "Notes", onClick: onNotes },
+		// A private notebook per account. Shown to guests too: the page tells them to
+		// sign in, which is how they find out it exists (notes/api.py refuses them).
+		onNotes && { id: "notes", label: "Notes", onClick: onNotes },
+		// The owner's alerts panel. Hidden from everyone else as a convenience only:
+		// every /admin route refuses a non-owner server-side (core/monitor.py).
+		authUser?.is_admin && onSiteHealth && { id: "health", label: "Site health", onClick: onSiteHealth, badge: siteAlerts },
 	].filter(Boolean);
 	return (
 		<>
@@ -200,9 +205,11 @@ export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles
 						<h2 className="home-more-hd" id="home-more-hd"><span>Extras</span></h2>
 						<div className="home-extras">
 							{extras.map(x => (
-								<button key={x.id} type="button" className="home-extra" onClick={x.onClick}>
+								<button key={x.id} type="button" className="home-extra" onClick={x.onClick}
+									aria-label={x.badge ? `${x.label}, ${x.badge} new` : undefined}>
 									<span className="home-extra-icon" aria-hidden="true">{EXTRA_ICON[x.id]}</span>
 									<span className="home-extra-label">{x.label}</span>
+									{x.badge > 0 && <span className="home-extra-badge" aria-hidden="true">{x.badge > 99 ? "99+" : x.badge}</span>}
 								</button>
 							))}
 						</div>
@@ -210,6 +217,7 @@ export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles
 					</div>
 				</div>
 				{toast && <div className="toast">{toast}</div>}
+				{siteHealth}
 			</div>
 		</>
 	);

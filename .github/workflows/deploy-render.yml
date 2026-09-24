@@ -20,7 +20,7 @@ on:
       # engine.py would pass CI and silently never reach prod.
       - 'games/spender/*.py'
       - 'books/**'
-      # Notes — owner-only notebook routes. *.py only: Notes.jsx/.css are bundle-only
+      # Notes — the per-account notebook routes. *.py only: Notes.jsx/.css are bundle-only
       # and must not restart prod.
       - 'notes/**/*.py'
       - 'games/spender/requirements.txt'

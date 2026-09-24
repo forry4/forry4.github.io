@@ -48,3 +48,25 @@ def pytest_collection_finish(session):
 def _restore_engine_deck():
     yield
     _restore_deck()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_site_alerts_and_caps():
+    """Owner alerts go to a per-test list, never a database or a phone, and the
+    SITE-WIDE abuse caps start empty for every test. The per-IP caps were always
+    reset by the modules that drive them, but the site-wide ones (accounts per hour,
+    tables per hour from the one "unknown" test peer) are shared by every test a
+    worker runs, so without this a long worker trips them part-way through."""
+    import sys
+    from core import alerts
+    alerts.reset()
+    alerts._sink = []
+    rooms = sys.modules.get("core.rooms")
+    if rooms is not None:
+        rooms._room_create_limiter.reset()
+    spender = sys.modules.get("games.spender.main")
+    if spender is not None:
+        spender._register_site_limiter.reset()
+        spender._register_ip_day_limiter.reset()
+    yield
+    alerts._sink = None

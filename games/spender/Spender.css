@@ -430,6 +430,9 @@
 .home-extra-icon svg{width:21px;height:21px;display:block}
 .home-extra-label{min-width:0;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.84rem;font-weight:600;
   letter-spacing:.05em;color:#d8caac;line-height:1.2}
+/* Unread owner alerts on the Site health tile — pushed to the tile's far edge. */
+.home-extra-badge{margin-left:auto;flex:0 0 auto;min-width:22px;height:22px;padding:0 7px;border-radius:11px;
+  display:grid;place-items:center;font-size:.74rem;font-weight:700;line-height:1;color:#1a1208;background:#e0a23a}
 
 @media(prefers-reduced-motion:reduce){
   .home-game-card,.home-game-emblem,.home-game-go,.home-extra{transition:none}

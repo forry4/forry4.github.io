@@ -36,6 +36,12 @@ class SlidingWindowLimiter:
         now = time.time() if now is None else now
         return len(self._purge(key, now)) >= self.max_hits
 
+    def count(self, key: str, now: float | None = None) -> int:
+        """Hits for `key` inside the window — lets a caller alert on a RATE before
+        anything is refused."""
+        now = time.time() if now is None else now
+        return len(self._purge(key, now))
+
     def record(self, key: str, now: float | None = None) -> None:
         """Record one hit for `key`."""
         now = time.time() if now is None else now

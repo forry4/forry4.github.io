@@ -1,13 +1,34 @@
-# Notes (site feature — the owner's private notebook)
+# Notes (site feature — a private notebook per account)
 
 Nested folders of notes; each note is a flowing rich-text document with inline
-screenshots. Built 2026-09-23 for tracking puzzle-game progress (Blue Prince first).
-In Extras on the home menu, **shown only to admins**.
+screenshots. Built 2026-09-23 for tracking puzzle-game progress (Blue Prince first), for
+the owner alone; **opened to every signed-in account the same day**. In Extras on the
+home menu for everyone (a guest gets a "sign in" page).
 
-- **Owner-only on EVERY route, reads included** — `require_owner` (`core.auth.is_site_owner`)
-  behind one `owner` dependency. `tests/test_notes.py` walks the registered routes and fails
-  any `/notes` route that does not depend on it, so a new route cannot ship public. The hidden
-  home tile is a convenience, never the gate.
+- **Signed-in accounts only, on EVERY route** — `require_member` behind one `member`
+  dependency; a guest has no session and gets a 401. `tests/test_notes.py` walks the
+  registered routes and fails any `/notes` route that does not depend on it.
+- **EVERY ROW HAS AN `owner_id` AND EVERY QUERY SCOPES BY IT.** Each pure function takes the
+  caller's id as its SECOND argument — reads, writes, `_folder_parents` (so the tree walks,
+  depth checks and folder moves only ever see your folders), the image fetch and the search.
+  Another account's id behaves exactly like a missing one (404 / "no such folder"). The
+  isolation test drives every function from a second account and then asserts the first
+  notebook is byte-for-byte untouched — extend it when you add a function.
+- **Rows from before owners existed are `owner_id IS NULL`** and invisible to everyone until
+  the SITE_OWNER's first request claims them (`claim_unowned`, once per process). SITE_OWNER
+  by NAME when set — an admin grant alone must not claim the owner's notebook.
+- **Metered — `Meter` (notes/api.py)**, for every account but admins: 25MB (`NOTES_QUOTA_MB`),
+  1000 notes (Trash included), 300 folders, and a SITE-WIDE ceiling across all metered
+  accounts (`NOTES_SITE_BUDGET_MB`, 1024) so many accounts at quota cannot fill Turso either.
+  Only GROWTH is checked, so a full account can always save a note smaller. A refusal is a 413
+  whose detail the page shows as-is. `notes.size` (bytes of doc + plain text + title) is
+  written on every save and backfilled at boot; usage is summed from it and cached a minute
+  per account (Turso bills per row READ, and autosave checks on every save), moved by each
+  write's delta in between. Emptying the Trash sweeps that account's unreferenced images with
+  a one-hour grace, so the space comes back straight away.
+- **Rate limits per account** (the owner too — a stolen session is still a session): 120
+  writes/min and 3000/h (autosave is debounced to one save per 1s pause), 120 uploads/h, 60
+  searches/min. A 429 and a `notes-rate` owner alert.
 - **Backend** (`api.py`) — `setup_notes(...)` with Books' injected deps. Tables `note_folders`
   (nested by `parent_id`, cycle + depth-12 checks), `notes` (`doc` = TipTap JSON as TEXT),
   `note_images` (base64 TEXT, not BLOB — the libsql path can't be tested on Windows). Handlers
@@ -18,10 +39,11 @@ In Extras on the home menu, **shown only to admins**.
   `updated_at` — moving, pinning or trashing must not 409 an open tab, and Recent means
   "last edited".
 - **Deletes are soft** (Trash, purged after 30 days). Images are never deleted directly: a
-  throttled sweep drops images no note's `doc` references (`instr` on the id) once they are
-  7 days old — keeps editor undo working and lets an image pasted into a second note survive.
+  throttled sweep drops images no note OF THE SAME ACCOUNT references (`instr` on the id) once
+  they are 7 days old — keeps editor undo working and lets an image pasted into a second note
+  survive. (Same account: pasting someone else's image id into your note must not keep it alive.)
 - **Frontend** — `Notes.jsx` (page, sidebar tree, Pinned/Recent, Trash, Move dialog) lazily
-  loads `NoteEditor.jsx` (TipTap v3, ~135KB gz — only the owner ever downloads it).
+  loads `NoteEditor.jsx` (TipTap v3, ~135KB gz — only a signed-in visitor ever downloads it).
   `/notes/<noteId>` and `/notes/trash` are deep links; router.js upper-cases segment 2, and ids
   are lowercase, so the page lower-cases it back.
 - **Images**: paste / drop / file picker (camera + gallery on phones) → `images.js` downscales
@@ -76,7 +98,7 @@ In Extras on the home menu, **shown only to admins**.
   refuses, and the menu then says to use Ctrl+V) and goes through `view.pasteHTML/pasteText`,
   the same pipeline as a real paste.
 - **16px floor** on every typing surface (title, prose, folder rename, caption, both search
-  boxes) — the iOS zoom footgun. `formControlZoom` can't reach an owner-only page, so
+  boxes) — the iOS zoom footgun. `formControlZoom` can't reach a signed-in-only page, so
   `notesEditor` in `webapp/test/screens.mjs` measures all six (stubbed API + seeded admin).
 - **Deferred** (asked, not chosen for v1): links between notes, per-note status, screenshot
   annotation. The data model has room for all three.

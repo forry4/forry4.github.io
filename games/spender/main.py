@@ -25,6 +25,8 @@ from core.auth import (
 from core.ratelimit import SlidingWindowLimiter
 from core.build_info import build_info
 from core import rooms as _rooms
+from core import alerts
+from core.auth import site_owner_name
 from games.spender import engine
 from games.spender import persist               # at-rest compaction for the state_json blob
 from games.spender.ai.serving import legacy_variants as _legacy
@@ -2475,6 +2477,8 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
 
             # ── create ──────────────────────────────────────────────────────
             if action == "create":
+                if await _rooms.reject_room_create(websocket):
+                    continue
                 name = str(msg.get("name") or pid).strip()[:24] or "Player"
                 vs_ai = bool(msg.get("vs_ai"))
                 ai_variant = msg.get("ai_variant", "A") if vs_ai else None
@@ -2943,6 +2947,14 @@ _TOO_MANY = "Too many attempts. Please wait a minute and try again."
 _login_ip_limiter = SlidingWindowLimiter(max_hits=20, window_seconds=300)      # 20 / 5min / IP
 _login_user_limiter = SlidingWindowLimiter(max_hits=10, window_seconds=900)    # 10 failures / 15min / username
 _register_ip_limiter = SlidingWindowLimiter(max_hits=10, window_seconds=3600)  # 10 / hour / IP
+_register_ip_day_limiter = SlidingWindowLimiter(max_hits=20, window_seconds=86400)  # 20 / day / IP
+# SITE-WIDE, because the per-IP limits do nothing against many addresses. A real
+# signup burst on this site is a handful of friends; REGISTER_ALERT_PER_HOUR tells
+# the owner something unusual is happening, REGISTER_MAX_PER_HOUR stops it.
+REGISTER_ALERT_PER_HOUR = 15
+REGISTER_MAX_PER_HOUR = 60
+_register_site_limiter = SlidingWindowLimiter(max_hits=REGISTER_MAX_PER_HOUR, window_seconds=3600)
+OWNER_FAILED_LOGIN_ALERT = 5   # failures on the OWNER's name inside the 15-minute window
 # Guards login against a PBKDF2-on-huge-input CPU DoS without blocking legacy
 # accounts (the old frontend allowed up to 64-char passwords).
 _LOGIN_NAME_MAX = 64
@@ -2959,12 +2971,29 @@ class LoginBody(BaseModel):
     password: str
 
 
+def _alert_login_lockout(name_key: str, ip: str) -> None:
+    owner = (site_owner_name() or "").lower()
+    is_owner = bool(owner and name_key == owner)
+    alerts.alert("owner-login" if is_owner else "login-lockout",
+                 f"Sign-ins to {'YOUR account' if is_owner else repr(name_key)} are locked for "
+                 f"15 minutes after 10 failed passwords (latest attempt from {ip}).",
+                 key=f"lockout:{name_key}", severity="critical" if is_owner else "warn")
+
+
 @router.post("/auth/register")
 async def auth_register(body: RegisterBody, request: Request):
     ip = _client_ip(request)
-    if _register_ip_limiter.exceeded(ip):
+    if _register_site_limiter.exceeded("site"):
+        alerts.alert("account-flood", f"Over {REGISTER_MAX_PER_HOUR} accounts were created in the "
+                     "last hour; new registrations are being refused site-wide until it slows.",
+                     key="register:site-cap", severity="critical")
+        return {"ok": False, "message": "Registration is busy right now. Please try again later."}
+    if _register_ip_limiter.exceeded(ip) or _register_ip_day_limiter.exceeded(ip):
+        alerts.alert("account-flood", f"{ip} hit the account-creation limit "
+                     "(10 an hour / 20 a day per address).", key=f"register:{ip}")
         return {"ok": False, "message": _TOO_MANY}
     _register_ip_limiter.record(ip)
+    _register_ip_day_limiter.record(ip)
 
     err = validate_credentials(body.name, body.password)
     if err:
@@ -2973,6 +3002,12 @@ async def auth_register(body: RegisterBody, request: Request):
     user = create_user(body.name, body.password)
     if not user:
         return {"ok": False, "message": "name already taken"}
+    # Counted on SUCCESS only: a typo'd or taken name is not a new account.
+    _register_site_limiter.record("site")
+    made = _register_site_limiter.count("site")
+    if made >= REGISTER_ALERT_PER_HOUR:
+        alerts.alert("account-flood", f"{made} accounts have been created in the last hour "
+                     f"(latest: {body.name!r} from {ip}).", key="register:site-rate")
     # Issue a session immediately so registering also logs the user in. The
     # frontend and session-authenticated features (e.g. the Books page) rely on
     # session_token; without this a freshly registered user has no token and is
@@ -2988,6 +3023,11 @@ async def auth_login(body: LoginBody, request: Request):
     ip = _client_ip(request)
     name_key = (body.name or "").lower()
     if _login_ip_limiter.exceeded(ip) or _login_user_limiter.exceeded(name_key):
+        if _login_user_limiter.exceeded(name_key):
+            _alert_login_lockout(name_key, ip)
+        else:
+            alerts.alert("login-flood", f"{ip} made over 20 login attempts in 5 minutes.",
+                         key=f"login-ip:{ip}")
         return {"ok": False, "message": _TOO_MANY}
     _login_ip_limiter.record(ip)
 
@@ -2999,6 +3039,14 @@ async def auth_login(body: LoginBody, request: Request):
     u = authenticate_user(body.name, body.password)
     if not u:
         _login_user_limiter.record(name_key)
+        owner = (site_owner_name() or "").lower()
+        if owner and name_key == owner:
+            fails = _login_user_limiter.count(name_key)
+            if fails >= OWNER_FAILED_LOGIN_ALERT:
+                alerts.alert("owner-login", f"{fails} failed sign-ins to YOUR account in the last "
+                             f"15 minutes (latest from {ip}). If that wasn't you, someone is "
+                             "guessing your password.", key="login-owner", severity="critical",
+                             cooldown=900)
         return {"ok": False, "message": "invalid name or password"}
     _login_user_limiter.reset(name_key)  # clear failure streak on success
     return {"ok": True,

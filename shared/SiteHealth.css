@@ -1,0 +1,18 @@
+/* Site health panel (SiteHealth.jsx). Everything else is the shared .rl-* chrome. */
+.sh-dim{color:var(--text-dim,#8a7d6a)}
+.sh-hot{color:#e0a23a;font-weight:600}
+.sh-err{color:#e07a6a}
+.sh-acts{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 10px}
+.sh-note{font-size:.84rem}
+/* .rl-body ol (0,1,1) indents every list in the panel; this one is a card stack. */
+.rl-body .sh-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.rl-body .sh-alert{margin:0;padding:8px 10px 9px;border:1px solid var(--border,#3a342a);border-left-width:3px;
+  border-radius:var(--radius,8px);background:var(--surface2,#242018)}
+.sh-alert.sh-info{border-left-color:#6f8fb8}
+.sh-alert.sh-warn{border-left-color:#e0a23a}
+.sh-alert.sh-critical{border-left-color:#dc4040}
+.sh-alert:not(.sh-new){opacity:.72}
+.sh-alert-hd{display:flex;justify-content:space-between;gap:10px;font-size:.76rem;color:var(--text-dim,#8a7d6a);margin-bottom:3px}
+.sh-kind{font-weight:600;letter-spacing:.02em;color:var(--text-soft,#b3a58b)}
+.sh-new .sh-kind::after{content:" · new";color:var(--gold,#c9a84c)}
+.sh-msg{font-size:.88rem;line-height:1.45;color:var(--text,#e8dfc8);overflow-wrap:anywhere}
