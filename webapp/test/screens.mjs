@@ -8799,6 +8799,8 @@ try {
 		check("a pasted screenshot is downscaled to the 1920px cap and uploaded",
 			saved && up && up.width === 1920 && up.height === 1080,
 			JSON.stringify(up ? { mime: up.mime, w: up.width, h: up.height } : null));
+		check("a pasted picture arrives small", saved
+			&& ((await page.locator(".nt-img").first().getAttribute("class").catch(() => "")) || "").includes("nt-img-small"));
 		const last = db.saves[db.saves.length - 1];
 		const docText = JSON.stringify(last?.doc || {});
 		const imgId = [...db.images.keys()][0];

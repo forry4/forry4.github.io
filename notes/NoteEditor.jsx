@@ -529,7 +529,10 @@ function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, noti
 		const nodes = files.map((f) => {
 			const key = newUploadKey();
 			pendingUploads.set(key, { previewUrl: URL.createObjectURL(f) });
-			return { key, file: f, json: { type: "noteImage", attrs: { uploadKey: key, width: "full" } } };
+			// New pictures arrive SMALL (the owner's call): a note is mostly text with
+			// screenshots as evidence, and a full-width one pushed the text off-screen.
+			// Right-click ▸ Size (or S/M/L) makes it bigger.
+			return { key, file: f, json: { type: "noteImage", attrs: { uploadKey: key, width: "small" } } };
 		});
 		const content = nodes.map((n) => n.json);
 		// With an image SELECTED, "insert at the selection" means replace it — so a new
