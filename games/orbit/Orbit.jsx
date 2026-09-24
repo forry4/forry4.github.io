@@ -25,17 +25,9 @@ const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
 const WS_BASE = WS_RAW.replace(/\/ws$/, "");
 const ORBIT_WS = `${WS_BASE}/orbit/ws`;
 const ORBIT_HTTP = WS_RAW.replace(/^ws/, "http").replace(/\/ws$/, "/orbit");
-// The tiers the create modal offers, and — mapped to ids — the list a
-// remembered tier is validated against. ONE list, because a hand-written copy
-// drifts: when Expert landed the id list still read easy/normal/hard, so
-// picking Expert was stored and then rejected on the next open, and the modal
-// silently came back on Hard.
-const ORBIT_AI_TIER_OPTIONS = [
-  { value: "easy", label: "Easy", title: "Public-information ranker" },
-  { value: "normal", label: "Normal", title: "Effect-aware ranker with a validated server fallback" },
-  { value: "hard", label: "Hard", title: "Searches its main action in your browser, resampling the hidden hand every simulation" },
-  { value: "expert", label: "Expert", title: "Searches its main action against one coherent hidden world; the strongest tier" },
-];
+// The tiers this picker offers live in shared/botTiers.js, beside every other
+// game's: the profile page names them too, off the same list.
+import { ORBIT_AI_TIER_OPTIONS } from "../../shared/botTiers.js";
 const ORBIT_AI_TIERS = ORBIT_AI_TIER_OPTIONS.map((t) => t.value);
 // id -> the words a player sees, off the SAME list the picker renders. The
 // create summary used to carry its own hand-written copy of these four labels,

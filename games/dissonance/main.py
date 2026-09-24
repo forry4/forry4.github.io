@@ -32,6 +32,7 @@ from fastapi import Depends, FastAPI, Header, Query, WebSocket, WebSocketDisconn
 from fastapi.middleware.cors import CORSMiddleware
 
 from core import rooms as _rooms
+from core import results as _results
 from core.auth import get_user_by_session
 from core.build_info import build_info
 from core.config import cors_allowed_origins
@@ -633,6 +634,27 @@ def list_user_history(user_id: str) -> list[dict]:
             "updated_at": r["updated_at"],
         })
     return out
+
+
+def _standings(state: dict) -> dict | None:
+    """Who won a finished game, for the profile (core.results). The same reading
+    as the History row above: the MATCH standing, and `match_winner` when the row
+    has it (a forfeit is a loss at any score; -1 is a tie)."""
+    g = state.get("game") or {}
+    res = g.get("result") if isinstance(g, dict) else None
+    seats = g.get("seats") if isinstance(g, dict) else None
+    if not res or not seats or len(seats) != 2:
+        return None
+    scores = res.get("match_scores") or res.get("scores") or [0, 0]
+    mw = res.get("match_winner")
+    if mw is None:
+        mw = 0 if scores[0] > scores[1] else 1 if scores[1] > scores[0] else -1
+    return _results.standings(state, seats, [] if mw == -1 else [seats[mw]], draw=mw == -1,
+                              scores={seats[0]: scores[0], seats[1]: scores[1]},
+                              mode=engine.mode_of(g))
+
+
+_results.register("dissonance", TABLE, decode=_decode_state, standings=_standings)
 
 
 def _unplayable(g) -> bool:

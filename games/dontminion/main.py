@@ -44,6 +44,7 @@ from core.auth import (
 )
 from core.config import cors_allowed_origins
 from core import rooms as _rooms
+from core import results as _results
 from core.build_info import build_info
 
 LOG = logging.getLogger("games.dontminion")
@@ -418,6 +419,19 @@ def list_user_history(user_id: str) -> list[dict]:
             "updated_at": r["updated_at"],
         })
     return out
+
+
+def _standings(state: dict) -> dict | None:
+    """Who won a finished game, for the profile (core.results). Several winners is a tie."""
+    g = state.get("game") or {}
+    if not isinstance(g, dict) or not g.get("players") or not g.get("winners"):
+        return None
+    scores = {p: (s or {}).get("vp") for p, s in (g.get("scores") or {}).items()}
+    return _results.standings(state, list(g["players"]), g["winners"], scores=scores)
+
+
+_results.register("dontminion", "dontminion_games", decode=_decode_state, standings=_standings,
+                  seat_cols=("player1_id", "player2_id", "player3_id", "player4_id"))
 
 
 def delete_open_game(game_id: str, user_id: str) -> bool:

@@ -187,6 +187,28 @@ drops to ephemeral local sqlite and the site stays up — so `/health` reports `
 `deploy-render.yml` FAILS any deploy that does not come up on `turso`
 (`core/tests/test_deploy_verifies_db_backend.py` runs that step's real script).
 
+### Profiles — `core/results.py` + `shared/Profile.jsx` (2026-09-24)
+- **`game_results` is the only record of a finished game that outlives the 30-day prune** —
+  one row per REGISTERED player per finished game (guests and bots get none), never deleted.
+  Each game's `main.py` calls `_results.register(<catalogue id>, <table>, decode=_decode_state,
+  standings=_standings)`, and `_standings(state)` turns a finished blob into win/loss/draw per
+  seat via `core.results.standings` (several winners = a DRAW, except team/co-op games, which
+  pass `shared_win_is_a_draw=False`). **Forgetting to register compiles and renders fine** —
+  that game is simply on nobody's profile — so `shared/tests/test_profile_results.py` derives
+  the roster from `shared/catalog.js` and runs the readers on real engine games.
+- **Rows arrive by a SYNC, not a save hook**: `sync()` scans `status='over'` rows (ids and seat
+  columns only, no blob), diffs against what is recorded, and decodes only the new ones. It runs
+  for one player when their profile opens (`GET /profile`) and for everyone on `core.monitor`'s
+  hourly tick. The first run after shipping was the backfill, so history starts ~30 days before
+  2026-09-24. INSERT OR IGNORE: the first write wins and the two callers can race.
+- **Private, and there is no route to anyone else's.** The way in is your NAME — on the menu
+  and in every lobby's top bar (`LobbyUser`, via `router.navigateTo`, so no lobby wires a
+  callback). Pass `profile={false}` where leaving would abandon something (a board, the waiting
+  room, the offline hub).
+- **Bot tiers are named from `shared/botTiers.js`** — every game's create-modal tier list moved
+  there so the profile names "N" as Expert and "bmplus" as Money+ off the SAME list the picker
+  renders. Games import their own list under its old local name.
+
 ### Owner alerts, abuse limits and Site health (2026-09-23)
 - **`core.alerts.alert(kind, message, key=, severity=, cooldown=)` is the one call, and it is
   safe ANYWHERE** — async route, WS handler, thread, inside a rate-limit check. It never blocks

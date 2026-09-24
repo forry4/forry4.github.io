@@ -538,6 +538,22 @@ def state_ai_tier(state) -> str | None:
     return str(tier) if tier else None
 
 
+def state_bot_ids(state) -> list[str]:
+    """The pids of the bot seats in a saved room — the SEAT half of
+    ``state_ai_tier``, read from the same four places. A single ``ai_player`` is a
+    pid; ``ai_players`` is a list of them (Dontminion, Black Castle)."""
+    if not isinstance(state, dict):
+        return []
+    game = state.get("game") if isinstance(state.get("game"), dict) else {}
+    seated = (state.get("ai_player") or state.get("ai_players")
+              or game.get("ai_player") or game.get("ai_players"))
+    if isinstance(seated, str):
+        return [seated]
+    if isinstance(seated, (list, tuple)):
+        return [str(p) for p in seated if p]
+    return []
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # WHO IS SITTING AT A SAVED ROOM
 # ─────────────────────────────────────────────────────────────────────────────

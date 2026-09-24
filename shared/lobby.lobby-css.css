@@ -41,6 +41,14 @@
 	text-transform:uppercase;color:var(--text-soft);flex:0 0 auto}
 .lby-ident-kind::after{content:"·";margin-left:7px;color:var(--text-soft)}
 .lby-head-name{font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-size:.94rem;color:var(--text);letter-spacing:.01em;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* A REGISTERED name opens the profile (LobbyUser). A button reset and nothing more,
+   so the lockup is unchanged; a faint underline says it is a link on a phone, where
+   there is no hover to discover it by, and the accent takes it over on hover/focus. */
+.lby-ident-link{background:none;border:0;margin:0;padding:6px 0;font:inherit;color:inherit;cursor:pointer;border-radius:4px}
+.lby-ident-link .lby-head-name{text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:4px;
+	text-decoration-color:rgba(255,240,215,.22);transition:text-decoration-color .15s}
+.lby-ident-link:hover .lby-head-name,.lby-ident-link:focus-visible .lby-head-name{text-decoration-color:var(--lby-accent,var(--gold))}
+.lby-ident-link:focus-visible{outline:1px solid var(--lby-accent,var(--gold));outline-offset:3px}
 .lby-head-tag{font-size:.62rem;letter-spacing:.1em;color:var(--text-soft);border:1px solid var(--border);padding:2px 8px;border-radius:10px;font-family:'Cinzel','Cinzel Fallback',serif;text-transform:uppercase;white-space:nowrap}
 
 /* One shared button style for the header (back + rules), identical across all games. */

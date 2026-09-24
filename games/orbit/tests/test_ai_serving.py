@@ -225,8 +225,12 @@ def test_expert_is_a_browser_tier_carrying_its_own_per_decision_allowance():
     # The create modal must offer exactly the tiers the server accepts.
     picker = Path(__file__).resolve().parents[1] / "Orbit.jsx"
     source = picker.read_text(encoding="utf-8")
+    # The picker's list lives in shared/botTiers.js (the profile page names tiers too).
+    assert "import { ORBIT_AI_TIER_OPTIONS }" in source, "Orbit.jsx no longer renders the shared tier list"
+    tiers = (Path(__file__).resolve().parents[3] / "shared" / "botTiers.js").read_text(encoding="utf-8")
+    offered = tiers.split("const ORBIT_AI_TIER_OPTIONS")[1].split("\n];")[0]
     for tier in m.AI_DIFFICULTIES:
-        assert f'value: "{tier}"' in source, f"{tier} is accepted but not offered"
+        assert f'value: "{tier}"' in offered, f"{tier} is accepted but not offered"
     for tier in m.CLIENT_AI_TIERS:
         assert f'"{tier}"' in source.split("const CLIENT_AI_TIERS")[1][:120], (
             f"{tier} is a browser tier but the client never arms a pool for it")

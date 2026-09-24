@@ -22,9 +22,9 @@ const HTTP_BASE = WS_RAW.replace(/^ws/, "http").replace(/\/ws$/, "");
 const styles = baseCss + lobbyCss + createModalCss + lobbyCreateRowCss + rulesModalCss + gameMenuCss + waitingRoomCss + cssText;
 
 const TOKEN_PREFIX = "blackcastle_token_";
-const BLACK_CASTLE_AI_TIER_OPTIONS = [
-  { value: "easy", label: "Easy", title: "Random legal moves" },
-];
+// The tiers this picker offers live in shared/botTiers.js, beside every other
+// game's: the profile page names them too, off the same list.
+import { BLACK_CASTLE_AI_TIER_OPTIONS } from "../../shared/botTiers.js";
 const BLACK_CASTLE_AI_TIERS = BLACK_CASTLE_AI_TIER_OPTIONS.map((tier) => tier.value);
 const BLACK_CASTLE_AI_LABELS = Object.fromEntries(BLACK_CASTLE_AI_TIER_OPTIONS.map((tier) => [tier.value, tier.label]));
 

@@ -43,6 +43,7 @@ from core.auth import (
 )
 from core.config import cors_allowed_origins
 from core import rooms as _rooms
+from core import results as _results
 from core.build_info import build_info
 
 LOG = logging.getLogger("games.spender_duel")
@@ -359,6 +360,25 @@ def list_user_history(user_id: str) -> list[dict]:
             "updated_at": r["updated_at"],
         })
     return out
+
+
+def _standings(state: dict) -> dict | None:
+    """Who won a finished game, for the profile (core.results)."""
+    g = state.get("game") or {}
+    gp = g.get("players") if isinstance(g, dict) else None
+    if not gp or g.get("winner") is None:
+        return None
+    order = [p for p in (state.get("players") or {}) if p in gp] or list(gp)
+    scores = {}
+    for pid in order:
+        try:
+            scores[pid] = engine.points_of(gp[pid])
+        except Exception:
+            pass
+    return _results.standings(state, order, [g["winner"]], scores=scores)
+
+
+_results.register("duel", "duel_games", decode=_decode_state, standings=_standings)
 
 
 def delete_open_game(game_id: str, user_id: str) -> bool:

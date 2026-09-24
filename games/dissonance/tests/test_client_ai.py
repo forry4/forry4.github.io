@@ -279,8 +279,11 @@ def test_every_tier_the_picker_offers_is_one_the_server_accepts():
     import pathlib
     import re
     jsx = (pathlib.Path(__file__).resolve().parents[1] / "Dissonance.jsx").read_text(encoding="utf-8")
-    block = re.search(r"const BOT_TIERS = \[(.*?)\];", jsx, re.S)
-    assert block, "BOT_TIERS moved; this test is reading the wrong thing"
+    # The picker's list lives in shared/botTiers.js (the profile page names tiers too).
+    tiers = (pathlib.Path(__file__).resolve().parents[3] / "shared" / "botTiers.js").read_text(encoding="utf-8")
+    assert "DISSONANCE_BOT_TIERS as BOT_TIERS" in jsx, "Dissonance no longer renders the shared tier list"
+    block = re.search(r"const DISSONANCE_BOT_TIERS = \[(.*?)\];", tiers, re.S)
+    assert block, "DISSONANCE_BOT_TIERS moved; this test is reading the wrong thing"
     offered = set(re.findall(r'id:\s*"([a-z]+)"', block.group(1)))
     assert offered, "no tiers parsed"
     assert offered <= set(m.DIFFICULTIES), offered - set(m.DIFFICULTIES)

@@ -29,7 +29,7 @@ import _rulesModalCssText from "./lobby.rules-modal-css.css?inline";
 import _waitingRoomCssText from "./lobby.waiting-room-css.css?inline";
 import { GAME_EMBLEM } from "./emblems.jsx";
 import { GAME_INFO } from "./catalog.js";
-import { buildPath } from "./router.js";
+import { buildPath, navigateTo } from "./router.js";
 
 // TWO FILES, ONE STRING. `lobby.lobby-css.css` is the lobby's chrome and layout — the
 // bar, the rows, the column grid, the tab bar — and it is what every game already
@@ -67,12 +67,23 @@ export const SCORECARD_GLYPH = (
 // bare `<span className="lby-head-name">`, one passed the string "Guest", and the
 // result was one dim letterspaced word floating in the corner in the LABEL style, with
 // its label missing. A registered player has no role word, so they get the name alone.
-export function LobbyUser({ user }) {
+//
+// A REGISTERED name is the way into the profile (shared/Profile.jsx), from every
+// lobby at once — it navigates through the router rather than a callback, so no
+// lobby has to wire it. Pass `profile={false}` where leaving would abandon
+// something: at a board, in a waiting room, and in the offline hub, which has no
+// server to ask. A guest's name is never a link: guests have no profile.
+export function LobbyUser({ user, profile = true }) {
 	if (!user?.name) return null;
+	const name = <span className="lby-head-name">{user.name}</span>;
+	if (profile && !user.guest) return (
+		<button type="button" className="lby-ident lby-ident-link" title="Your profile"
+			onClick={() => navigateTo("profile")}>{name}</button>
+	);
 	return (
 		<span className="lby-ident">
 			{user.guest && <span className="lby-ident-kind">Guest</span>}
-			<span className="lby-head-name">{user.name}</span>
+			{name}
 		</span>
 	);
 }
@@ -1115,7 +1126,7 @@ export function WaitingRoom({
 	return (
 		<div className="lby-page">
 			<LobbyHeader onBack={onLeave} backLabel="← Back to lobby" onRules={onRules}
-				user={<LobbyUser user={user} />} />
+				user={<LobbyUser user={user} profile={false} />} />
 			<div className="wr-in">
 				{/* A game's own strip above the panel — Where Wolf's reconnect prompt is
 				    the only one today, and it has to be ABOVE the panel rather than in

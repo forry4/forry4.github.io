@@ -190,6 +190,13 @@
 .home-ident-kind::after{content:"·";margin-left:7px;color:var(--text-dim)}
 .home .browser-username{font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;
   font-size:.94rem;color:var(--text-soft);letter-spacing:.01em;text-transform:none}
+/* A registered name opens the profile — the same treatment as the lobby bar's
+   `.lby-ident-link`: a button reset, a faint underline for touch, gold on hover. */
+.home .home-ident-link{background:none;border:0;margin:0;padding:6px 0;font:inherit;color:inherit;cursor:pointer;border-radius:4px}
+.home .home-ident-link .browser-username{text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:4px;
+  text-decoration-color:rgba(255,240,215,.22);transition:text-decoration-color .15s,color .15s}
+.home .home-ident-link:hover .browser-username,.home .home-ident-link:focus-visible .browser-username{color:var(--text);text-decoration-color:var(--gold)}
+.home .home-ident-link:focus-visible{outline:1px solid var(--gold);outline-offset:3px}
 .home .home-header .btn-sm{height:30px;padding:0 14px;text-transform:uppercase;
   border-color:#332e26;color:var(--text-dim)}
 .home .home-header .btn-sm:hover{border-color:var(--text-dim);color:var(--text)}

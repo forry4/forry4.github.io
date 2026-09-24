@@ -132,7 +132,7 @@ const GO_CHEVRON = (
 
 export { SITE_NAME, GAMES, GAME_EMBLEM, HERO_RULE };
 
-export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles, onBooks, onNotes, onBggFilter, onSiteHealth, siteAlerts = 0, siteHealth = null, onLogout }) {
+export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles, onBooks, onNotes, onBggFilter, onSiteHealth, siteAlerts = 0, siteHealth = null, onProfile, onLogout }) {
 	// Built here rather than at module scope because each entry closes over a prop.
 	const games = visibleGames(authUser);
 	const extras = [
@@ -164,10 +164,17 @@ export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles
 					<header className="home-header">
 						<h1 className="home-logo home-corner-logo">{SITE_NAME}</h1>
 						<div className="browser-user">
-							<span className="home-ident">
-								{authUser?.guest && <span className="home-ident-kind">Guest</span>}
-								<span className="browser-username">{authUser?.name}</span>
-							</span>
+							{/* A registered name is the way into the profile; guests have none. */}
+							{onProfile && authUser?.name && !authUser.guest ? (
+								<button type="button" className="home-ident home-ident-link" title="Your profile" onClick={onProfile}>
+									<span className="browser-username">{authUser.name}</span>
+								</button>
+							) : (
+								<span className="home-ident">
+									{authUser?.guest && <span className="home-ident-kind">Guest</span>}
+									<span className="browser-username">{authUser?.name}</span>
+								</span>
+							)}
 							<button className="btn btn-ghost btn-sm" onClick={onLogout}>
 								{authUser?.guest ? "Exit" : "Logout"}
 							</button>

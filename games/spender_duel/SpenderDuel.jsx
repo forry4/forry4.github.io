@@ -78,14 +78,9 @@ const cellCentre = (i) => [
   CELL_PAD + Math.floor(i / 5) * (1 + CELL_GAP) + 0.5,
 ];
 
-// Bot tiers (wire ids match main.AI_DIFFICULTIES). Easy = the trivial random-legal
-// bot; Normal/Hard = determinized MCTS at different budgets.
-const BOT_TIERS = [
-  { id: "easy", name: "Easy", desc: "Plays legally, barely plans" },
-  { id: "normal", name: "Normal", desc: "Thinks a little, makes mistakes" },
-  { id: "hard", name: "Hard", desc: "Searches properly — a real fight" },
-  { id: "expert", name: "Expert", desc: "Hard, retrained to punish impatience" },
-];
+// The tiers this picker offers live in shared/botTiers.js, beside every other
+// game's: the profile page names them too, off the same list.
+import { DUEL_BOT_TIERS as BOT_TIERS } from "../../shared/botTiers.js";
 // id -> the words a player sees, DERIVED from the list above rather than a second
 // hand-written copy of the same four names: this map is read by the in-game
 // header, the create summary and `LobbyBotTier` on the Active/History rows, so a

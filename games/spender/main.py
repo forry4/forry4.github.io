@@ -25,6 +25,7 @@ from core.auth import (
 from core.ratelimit import SlidingWindowLimiter
 from core.build_info import build_info
 from core import rooms as _rooms
+from core import results as _results
 from core import alerts
 from core.auth import site_owner_name
 from games.spender import engine
@@ -424,6 +425,27 @@ def list_user_history(user_id: str, limit: int = _rooms.HISTORY_LIMIT) -> list[d
             "you_won": any(p["is_you"] and p["won"] for p in players),
         })
     return out
+
+
+def _standings(state: dict) -> dict | None:
+    """Who won a finished game, for the profile (core.results). A list winner is a tie."""
+    g = state.get("game") or {}
+    order = g.get("order") or list((state.get("players") or {}).keys())
+    winner = g.get("winner")
+    if not order or winner is None:
+        return None
+    scores = {}
+    for pid in order:
+        try:
+            scores[pid] = _calc_points((g.get("players") or {}).get(pid) or {})
+        except Exception:
+            pass
+    return _results.standings(state, order, winner if isinstance(winner, list) else [winner],
+                              scores=scores)
+
+
+_results.register("spender", "games", decode=_decode_state, standings=_standings,
+                  seat_cols=("player1_id", "player2_id", "player3_id", "player4_id"))
 
 
 def delete_open_game(game_id: str, user_id: str) -> bool:

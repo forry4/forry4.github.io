@@ -22,6 +22,7 @@ from core.db import get_db_conn
 from core.auth import get_user_by_session
 from core.config import cors_allowed_origins
 from core.monitor import ErrorAlertMiddleware, register_gauge, setup_site_health
+from core.results import setup_profile
 from games.spender.main import router as spender_router, bearer_token
 from books.api import setup_books
 
@@ -101,6 +102,11 @@ except Exception as _notes_err:  # pragma: no cover - defensive
 
 # Site health — the owner's alerts panel (/admin/alerts, /admin/health). Owner-only.
 setup_site_health(app, get_user_by_session, bearer_token)
+
+# Profile — the signed-in player's own results across every game (GET /profile).
+# The data is core.results' game_results table, which each game feeds by
+# registering a reader when its main.py is imported (below).
+setup_profile(app, get_user_by_session, bearer_token)
 
 # Puzzle mode — static, scripted Spender endgame puzzles. Public read-only content
 # (the bank is committed JSON with embedded snapshots); no DB/auth/engine at serve

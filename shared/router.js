@@ -15,7 +15,7 @@
 //  - subscribe() fires on POPSTATE ONLY (browser Back/Forward). Programmatic push/replace
 //    never notify, so URL-write + state-write at a call site can't echo back into a loop.
 
-export const MODES = ["spender", "coc", "duel", "werewolf", "dontminion", "dissonance", "ragtag", "orbit", "blackcastle", "secretnames", "pinch", "books", "notes", "puzzles", "bggfilter", "offline"];
+export const MODES = ["spender", "coc", "duel", "werewolf", "dontminion", "dissonance", "ragtag", "orbit", "blackcastle", "secretnames", "pinch", "books", "notes", "profile", "puzzles", "bggfilter", "offline"];
 
 // Room ids are short alphanumeric codes (normalize_room uppercases server-side).
 const ROOM_RE = /^[A-Za-z0-9_-]{1,24}$/;
@@ -51,6 +51,24 @@ export function pushPath(path) {
 export function replacePath(path) {
   if (window.location.pathname === path) return;
   try { window.history.replaceState(null, "", path); } catch { /* e.g. file:// harness */ }
+}
+
+// Navigate the way the browser's own Back/Forward does: write the URL, then tell
+// the shell through the popstate its subscriber already handles. It exists for
+// SHARED components the shell hands no callback to: the name in every lobby's top
+// bar opens the profile this way, instead of eleven lobbies each threading an
+// `onProfile` prop down from the shell. Every game's own subscriber ignores a
+// route that is not its mode, and the shell unmounts it. `state.inApp` is how the
+// destination knows Back can return where you came from (`cameFromInsideApp`).
+export function navigateTo(game, room) {
+  const path = buildPath(game, room);
+  if (window.location.pathname === path) return;
+  try { window.history.pushState({ inApp: true }, "", path); } catch { return; }
+  window.dispatchEvent(new PopStateEvent("popstate", { state: { inApp: true } }));
+}
+
+export function cameFromInsideApp() {
+  try { return !!window.history.state?.inApp; } catch { return false; }
 }
 
 export function subscribe(fn) {

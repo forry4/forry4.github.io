@@ -49,6 +49,7 @@ from core.auth import (
 )
 from core.config import cors_allowed_origins
 from core import rooms as _rooms
+from core import results as _results
 from core.build_info import build_info
 
 LOG = logging.getLogger("games.castles_of_crimson")
@@ -474,6 +475,24 @@ def list_user_history(user_id: str) -> list[dict]:
             "updated_at": r["updated_at"],
         })
     return out
+
+
+def _standings(state: dict) -> dict | None:
+    """Who won a finished game, for the profile (core.results). A list winner is a tie."""
+    g = state.get("game") or {}
+    win = g.get("winner") if isinstance(g, dict) else None
+    if not g or not g.get("players") or win is None:
+        return None
+    try:
+        scores = engine.final_scores(g)
+    except Exception:
+        scores = {}
+    order = [p["id"] for p in _ordered_players(state)]
+    return _results.standings(state, order, win if isinstance(win, list) else [win], scores=scores)
+
+
+_results.register("coc", "coc_games", decode=_decode_state, standings=_standings,
+                  seat_cols=("player1_id", "player2_id", "player3_id", "player4_id"))
 
 
 def delete_open_game(game_id: str, user_id: str) -> bool:

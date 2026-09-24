@@ -32,23 +32,9 @@ const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
 const DM_WS = WS_RAW.replace(/\/ws$/, "/dontminion/ws");
 const DM_HTTP = WS_RAW.replace(/^ws/, "http").replace(/\/ws$/, "/dontminion");
 
-// The bot tiers OFFERED in the picker, and now the whole shipped ladder: a
-// barely-playing Random and the real opponent, Big Money+. Plain Big Money
-// left the UI first and has since been dropped from `main.AI_DIFFICULTIES`
-// too — it is a strictly weaker bmplus, so it only added a choice no one
-// should pick. Keep this list a subset of AI_DIFFICULTIES: the server coerces
-// anything it doesn't know to the default, so an id that drifts out of that
-// tuple silently hands the player a different bot than the one they picked.
-//
-// LABELS ARE SHORT ON PURPOSE. These render as a `cm-seg` sharing one row with
-// the Bots counter (the side-by-side layout is what keeps the create modal
-// inside its 148px budget), and `.cm-seg-btn` is `white-space:nowrap` inside an
-// `overflow:hidden` track — a label too wide for its half of the track is
-// CLIPPED, not wrapped. The full name rides along as the button's title.
-const BOTS = [
-  { id: "easy", name: "Random", title: "Random legal moves — barely plays" },
-  { id: "bmplus", name: "Money+", title: "Big Money+ — reads the board for a terminal, knows how the game ends" },
-];
+// The tiers this picker offers live in shared/botTiers.js, beside every other
+// game's: the profile page names them too, off the same list.
+import { DONTMINION_BOTS as BOTS } from "../../shared/botTiers.js";
 // A remembered last-played tier is validated against THIS list, not against
 // `main.AI_DIFFICULTIES` — plain Big Money left the picker before it left the
 // server, and a retired id must fall back to the default rather than restore as

@@ -171,8 +171,10 @@ def test_every_bot_tier_the_picker_offers_is_one_the_server_accepts():
     AI_DIFFICULTIES doesn't error — it quietly seats a different bot than the
     one the player chose. Plain `bigmoney` leaving the ladder is exactly the
     move that can strand an id here."""
-    jsx = _src(JSX)
-    block = jsx[jsx.find("const BOTS = ["):]
+    # The picker's list lives in shared/botTiers.js (the profile page names bots too).
+    assert "DONTMINION_BOTS as BOTS" in _src(JSX), "Dontminion.jsx no longer renders the shared bot list"
+    tiers = _src("shared/botTiers.js")
+    block = tiers[tiers.find("const DONTMINION_BOTS = ["):]
     block = block[:block.find("]")]
     offered = set(re.findall(r'id:\s*"(\w+)"', block))
     assert offered, "the BOTS picker list was not found — regex rotted"

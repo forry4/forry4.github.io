@@ -32,7 +32,7 @@ from typing import Callable
 
 from fastapi import Depends, HTTPException, Query
 
-from core import alerts
+from core import alerts, results
 from core.auth import is_site_owner
 from core.db import backend, get_db_conn
 
@@ -223,6 +223,8 @@ def _checker() -> None:
             last_slow = time.time()
             _with_conn(check_storage)
             _with_conn(check_lobbies)
+            # Profiles: record finished games before the 30-day prune takes them.
+            _with_conn(results.sync_all)
         time.sleep(FAST_EVERY)
 
 

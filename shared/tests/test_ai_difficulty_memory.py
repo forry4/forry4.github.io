@@ -24,6 +24,7 @@ import re
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 LOBBY = ROOT / "shared" / "lobby.jsx"
+TIERS = ROOT / "shared" / "botTiers.js"
 
 # `const [x, setX, rememberX] = useLastDifficulty("ns", scope, OFFERED, "fallback")`
 # — \s spans newlines on purpose, the call sites wrap after the `=`.
@@ -61,6 +62,12 @@ def _offered_ids(text: str, name: str) -> list[str]:
     assert derived, f"cannot resolve `{name}` — it is neither an id list nor a .map over one"
     src, key = derived.group(1), derived.group(2)
     body = re.search(rf"const {src} = \[([\s\S]*?)\n\];", text)
+    if not body:
+        # The option lists live in shared/botTiers.js (the profile page names
+        # tiers too), imported under the game's own local name.
+        imported = re.search(rf"import \{{\s*(\w+)(?:\s+as\s+{src})?\s*\}} from \"[./]*shared/botTiers\.js\"", text)
+        if imported and (imported.group(1) == src or f" as {src}" in imported.group(0)):
+            body = re.search(rf"export const {imported.group(1)} = \[([\s\S]*?)\n\];", TIERS.read_text(encoding="utf-8"))
     assert body, f"cannot find the `{src}` the offered ids are mapped from"
     return re.findall(rf'{key}: "([^"]+)"', body.group(1))
 

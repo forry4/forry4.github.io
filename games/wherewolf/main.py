@@ -43,6 +43,7 @@ from core.auth import (
 from core.config import cors_allowed_origins
 from core.build_info import build_info
 from core import rooms as _rooms
+from core import results as _results
 
 LOG = logging.getLogger("games.wherewolf")
 
@@ -292,6 +293,24 @@ def list_user_games(user_id: str) -> list[dict]:
             "created_at": r["created_at"], "updated_at": r["updated_at"],
         })
     return out
+
+
+def _standings(state: dict) -> dict | None:
+    """Who won a finished game, for the profile (core.results). A TEAM game, so
+    every winner won — and the detail is the card each player ended the night
+    holding, which is the side they were playing for."""
+    g = state.get("game") or {}
+    if not isinstance(g, dict) or g.get("phase") != engine.OVER or not g.get("order"):
+        return None
+    cards = {p: (s or {}).get("card") for p, s in (g.get("players") or {}).items()}
+    return _results.standings(state, g["order"], g.get("winners") or [],
+                              shared_win_is_a_draw=False, details=cards)
+
+
+# Seven to ten seats, so the membership list is the JSON column (player1/2_id
+# exist only for the shared retention sweep).
+_results.register("wherewolf", "werewolf_games", decode=_rooms.decode_state, standings=_standings,
+                  seat_cols=("player1_id", "player2_id"), ids_col="player_ids")
 
 
 def delete_open_game(game_id: str, user_id: str) -> bool:

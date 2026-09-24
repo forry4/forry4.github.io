@@ -666,7 +666,7 @@ export default function SecretNames({ myId, authUser, onExit }) {
 
     {game && <div className="app secretnames sn-game" style={ACCENT}>
       <style>{styles}</style>
-      <LobbyHeader title="SecretNames" user={<LobbyUser user={authUser} />}
+      <LobbyHeader title="SecretNames" user={<LobbyUser user={authUser} profile={false} />}
         menu={<GameMenu onLeave={exit} onRules={() => setShowRules(true)}
           onAbandon={over ? null : abandon} />} />
       <div className="sn-game-shell">

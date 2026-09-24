@@ -71,8 +71,11 @@ def test_the_frontend_offers_exactly_the_tiers_the_server_accepts():
     # is green where it runs and red where it is read.
     text = os.path.join(os.path.dirname(E.__file__), "Dissonance.jsx")
     src = open(text, encoding="utf-8").read()
+    # The picker's list lives in shared/botTiers.js, beside every other game's.
+    shared = os.path.join(os.path.dirname(E.__file__), "..", "..", "shared", "botTiers.js")
+    offered = open(shared, encoding="utf-8").read().split("const DISSONANCE_BOT_TIERS")[1].split("\n];")[0]
     for tier in m.DIFFICULTIES:
-        assert f'id: "{tier}"' in src, f"{tier} is not in BOT_TIERS"
+        assert f'id: "{tier}"' in offered, f"{tier} is not in DISSONANCE_BOT_TIERS"
     for tier in m.CLIENT_AI_TIERS:
         assert f'"{tier}"' in src.split("const CLIENT_AI_TIERS")[1].split("]")[0], \
             f"{tier} is a client tier the frontend never arms"

@@ -1,0 +1,65 @@
+/* The profile page (Profile.jsx). The lobby kit draws the chrome — the top bar, the
+   identity band, section headers, history rows, empty states — and this sheet adds
+   only its own `pf-` vocabulary: the four summary tiles, the per-game records and
+   the history filters.
+
+   A narrower measure than a lobby: this is one column of reading, not three lists
+   side by side, and a 1500px history row puts the score a long way from the date. */
+.pf-app{--lby-page-w:1080px;min-height:100vh;min-height:100dvh;background:var(--bg);color:var(--text)}
+.pf-section{margin-top:30px}
+.pf-note{margin:14px 0 0;font-size:.84rem;color:var(--text-soft)}
+
+/* A text button — "See games", "Try again". */
+.pf-link{background:none;border:0;padding:4px 0;margin:0;font:inherit;color:var(--gold);cursor:pointer;
+	text-decoration:underline;text-decoration-color:rgba(201,168,76,.4);text-underline-offset:3px}
+.pf-link:hover,.pf-link:focus-visible{color:var(--gold-light);text-decoration-color:currentColor}
+
+/* ── the summary tiles ──────────────────────────────────────────────────────── */
+.pf-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:6px}
+.pf-tile{display:flex;flex-direction:column;gap:3px;min-width:0;padding:14px 16px;border:1px solid var(--border);
+	border-radius:var(--radius-lg,14px);background:linear-gradient(180deg,var(--surface2),var(--surface))}
+.pf-tile-k{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.64rem;letter-spacing:.15em;text-transform:uppercase;color:var(--text-soft)}
+.pf-tile-v{font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-size:1.9rem;line-height:1.1;color:var(--text);
+	font-variant-numeric:tabular-nums}
+.pf-tile-word{font-size:1.25rem;line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pf-tile-sub{font-size:.8rem;color:var(--text-soft);font-variant-numeric:tabular-nums}
+@media(max-width:760px){.pf-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* ── per-game records ──────────────────────────────────────────────────────── */
+.pf-games{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+@media(max-width:420px){.pf-games{grid-template-columns:minmax(0,1fr)}}
+.pf-game{display:flex;flex-direction:column;gap:9px;min-width:0;padding:14px 16px 12px;border:1px solid var(--border);
+	border-radius:var(--radius-lg,14px);background:var(--surface)}
+.pf-game-hd{display:flex;align-items:center;gap:10px;min-width:0}
+.pf-game-emblem{flex:none;display:inline-flex;width:26px;height:26px;color:var(--pf-accent,var(--gold))}
+.pf-game-emblem svg{width:26px;height:26px}
+.pf-game-name{flex:1;min-width:0;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.92rem;letter-spacing:.03em;
+	color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pf-game-rate{flex:none;font-size:.9rem;color:var(--text);font-variant-numeric:tabular-nums}
+.pf-game-meta{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:.84rem;
+	color:var(--text-soft);font-variant-numeric:tabular-nums}
+.pf-vs{list-style:none;margin:0;padding:8px 0 0;border-top:1px solid rgba(255,240,215,.06);display:flex;flex-direction:column;gap:3px}
+.pf-vs li{display:flex;justify-content:space-between;gap:10px;font-size:.84rem}
+.pf-vs-who{color:var(--text-soft);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pf-vs-rec{color:var(--text);font-variant-numeric:tabular-nums}
+
+/* The won / drawn / lost bar. Colours validated on --surface (#1a1814) for every
+   pair — see RecordBar in Profile.jsx. A 2px surface gap separates the segments,
+   and the track's own radius rounds the two ends. */
+.pf-bar{display:flex;gap:2px;height:8px;border-radius:4px;overflow:hidden;background:var(--surface3)}
+.pf-seg{flex-basis:0;min-width:3px}
+.pf-win{background:#23a193}
+.pf-draw{background:#6b645a}
+.pf-loss{background:#d6743a}
+
+/* ── history ───────────────────────────────────────────────────────────────── */
+.pf-filters{display:flex;flex-wrap:wrap;gap:10px 14px;margin-bottom:14px}
+.pf-filter{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1 1 180px;max-width:280px}
+.pf-filter>span{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:.15em;text-transform:uppercase;color:var(--text-soft)}
+/* 16px: iOS zooms the whole page on focusing a control under it and never zooms back. */
+.pf-filter select{font:inherit;font-size:1rem;color:var(--text);background:var(--surface);border:1px solid var(--border);
+	border-radius:var(--radius,8px);padding:8px 10px;min-width:0;color-scheme:dark}
+.pf-filter select:focus-visible{outline:1px solid var(--gold);outline-offset:1px;border-color:var(--gold)}
+@media(max-width:600px){.pf-filter{max-width:none}}
+.pf-list{display:flex;flex-direction:column;gap:8px}
+.pf-row-game{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.84rem;color:var(--text)}

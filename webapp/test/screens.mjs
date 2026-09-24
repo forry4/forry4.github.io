@@ -8921,6 +8921,115 @@ try {
 		await ctx.close();
 	}
 
+	// ── The profile (shared/Profile.jsx) ──────────────────────────────────────
+	// Against a STUBBED /profile, like notesEditor: the rows are chosen so every
+	// naming path is exercised — a Spender variant CODE ("N" must read Expert AI,
+	// via shared/botTiers.js), a Dontminion bot NAME ("bmplus" is Money+), a draw,
+	// a cooperative SecretNames row and a human opponent. The way in is the
+	// player's name, on the menu and in a lobby's top bar; Back returns to each.
+	async function profilePage(log) {
+		const check = (name, cond, detail = "") => {
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
+		};
+		const user = { id: "screens-profile", name: "Proff", session_token: "profile-token" };
+		const now = Math.floor(Date.now() / 1000);
+		const p = (id, name, outcome, extra = {}) => ({ id, name, outcome, score: null, bot: false, detail: null, you: id === user.id, ...extra });
+		const history = [
+			{ game: "spender", id: "S1", finished_at: now - 60, outcome: "loss", score: 12, vs_bot: true, ai_tier: "N", mode: null, detail: null,
+				players: [p(user.id, "Proff", "loss", { score: 12 }), p("ai", "AI (N)", "win", { bot: true, score: 18 })] },
+			{ game: "dontminion", id: "D1", finished_at: now - 3600, outcome: "win", score: 30, vs_bot: true, ai_tier: "bmplus", mode: null, detail: null,
+				players: [p(user.id, "Proff", "win", { score: 30 }), p("bot1", "Bot 1", "loss", { bot: true, score: 22 })] },
+			{ game: "orbit", id: "O1", finished_at: now - 7200, outcome: "draw", score: null, vs_bot: false, ai_tier: null, mode: null, detail: null,
+				players: [p(user.id, "Proff", "draw"), p("h2", "Marguerite", "draw")] },
+			{ game: "secretnames", id: "N1", finished_at: now - 9000, outcome: "win", score: 15, vs_bot: false, ai_tier: null, mode: null, detail: null,
+				players: [p(user.id, "Proff", "win", { score: 15 }), p("h2", "Marguerite", "win", { score: 15 })] },
+			{ game: "orbit", id: "O2", finished_at: now - 90000, outcome: "win", score: null, vs_bot: true, ai_tier: "expert", mode: null, detail: null,
+				players: [p(user.id, "Proff", "win"), p("bot", "Bot", "loss", { bot: true })] },
+		];
+		const json = (data, status = 200) => ({ status, contentType: "application/json", body: JSON.stringify(data) });
+		const onApi = (test) => (u) => u.port === String(API_PORT) && test(u.pathname);
+		const open = async (viewport, { status = 200 } = {}) => {
+			const ctx = await browser.newContext({ viewport });
+			await ctx.addInitScript((u) => localStorage.setItem("spender_user", JSON.stringify(u)), user);
+			const page = await ctx.newPage();
+			const errors = [];
+			page.on("pageerror", (e) => errors.push(String(e)));
+			await page.route(onApi((x) => x === "/auth/session"),
+				(r) => r.fulfill(json({ ok: true, user: { id: user.id, name: user.name, is_admin: false } })));
+			await page.route(onApi((x) => x === "/profile"), (r) => r.fulfill(status === 200
+				? json({ ok: true, user: { id: user.id, name: user.name }, history, truncated: false })
+				: json({ detail: "Sign in to see your profile." }, status)));
+			await page.goto(`http://localhost:${PORT}/`, { waitUntil: "networkidle" });
+			return { ctx, page, errors };
+		};
+
+		{
+			const { ctx, page, errors } = await open({ width: 1280, height: 860 });
+			const link = await page.waitForSelector(".home-ident-link", { timeout: 25_000 }).catch(() => null);
+			check("a registered name on the menu is a link", !!link);
+			await link?.click();
+			await page.waitForSelector(".pf-game", { timeout: 25_000 }).catch(() => {});
+			check("the name opens /profile", new URL(page.url()).pathname === "/profile", page.url());
+			const tiles = await page.$$eval(".pf-tile-v", (els) => els.map((e) => e.textContent.trim()));
+			check("the summary counts every row", tiles[0] === String(history.length), JSON.stringify(tiles));
+			const gamesShown = await page.$$eval(".pf-game-name", (els) => els.map((e) => e.textContent.trim()));
+			check("one record per game, most played first", gamesShown.length === 4 && gamesShown[0] === "Orbit", JSON.stringify(gamesShown));
+			const text = await page.locator(".pf-app").innerText();
+			check("a Spender variant code is named by its tier", /vs Expert AI/.test(text) && !/AI \(N\)/.test(text));
+			check("a Dontminion bot is named, not title-cased", text.includes("Money+ AI") && !text.includes("Bmplus"));
+			check("a co-op game reads 'with', and a draw is a Draw", text.includes("with Marguerite") && text.includes("Draw"));
+			await page.selectOption(".pf-filter select >> nth=0", "orbit");
+			const rows = await page.locator(".pf-row").count();
+			check("the game filter narrows the history", rows === 2, `rows ${rows}`);
+			await page.click(".lby-back");
+			await page.waitForSelector(".home-game-card", { timeout: 10_000 }).catch(() => {});
+			check("Back returns to the menu", new URL(page.url()).pathname === "/", page.url());
+			await page.click('.home-game-card[data-game="orbit"]');
+			const lobbyLink = await page.waitForSelector(".lby-ident-link", { timeout: 25_000 }).catch(() => null);
+			check("a registered name in a lobby's top bar is a link", !!lobbyLink);
+			await lobbyLink?.click();
+			await page.waitForSelector(".pf-game", { timeout: 25_000 }).catch(() => {});
+			check("the lobby name opens /profile", new URL(page.url()).pathname === "/profile", page.url());
+			await page.click(".lby-back");
+			await page.waitForSelector(".lby-hero-name", { timeout: 10_000 }).catch(() => {});
+			check("Back returns to the lobby it came from", new URL(page.url()).pathname === "/orbit", page.url());
+			check("no page errors on the profile", errors.length === 0, errors[0]?.slice(0, 180) || "");
+			await ctx.close();
+		}
+		{
+			const { ctx, page } = await open({ width: 390, height: 844 });
+			await page.goto(`http://localhost:${PORT}/profile`, { waitUntil: "networkidle" });
+			await page.waitForSelector(".pf-filter select", { timeout: 25_000 }).catch(() => {});
+			const sizes = await page.$$eval(".pf-filter select", (els) => els.map((e) => parseFloat(getComputedStyle(e).fontSize)));
+			check("phone: all three filters rendered, each >= 16px (the iOS zoom floor)",
+				sizes.length === 3 && sizes.every((s) => s >= 16), JSON.stringify(sizes));
+			const spill = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+			check("phone: the profile does not scroll sideways", spill <= 0, `${spill}px`);
+			await ctx.close();
+		}
+		{
+			const { ctx, page } = await open({ width: 1280, height: 860 }, { status: 401 });
+			await page.goto(`http://localhost:${PORT}/profile`, { waitUntil: "networkidle" });
+			const said = await page.locator(".lby-empty").innerText({ timeout: 25_000 }).catch(() => "");
+			check("an expired session says so", /session has expired/i.test(said), said);
+			await ctx.close();
+		}
+		{
+			const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 } });
+			await ctx.addInitScript(() => localStorage.setItem("spender_user",
+				JSON.stringify({ id: "screens-profile-guest", name: "Visitor", guest: true })));
+			const page = await ctx.newPage();
+			await page.goto(`http://localhost:${PORT}/`, { waitUntil: "networkidle" });
+			await page.waitForSelector(".home-game-card", { timeout: 25_000 }).catch(() => {});
+			const guestLinks = await page.locator(".home-ident-link").count();
+			const named = await page.locator(".browser-username").count();
+			check("a guest's name is not a link (guests have no profile)", named === 1 && guestLinks === 0,
+				`names ${named}, links ${guestLinks}`);
+			await ctx.close();
+		}
+	}
+
 	const laneA = [offlineSpender, offlineCoc, offlineDuel, offlineDissonance,
 		dissonanceSkat, dissonanceHard, dissonanceBeat, ragtagFight];
 	// `dissonanceQuartet` is lane B: it plays a whole game but arms NO worker
@@ -8931,7 +9040,7 @@ try {
 		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, historyRecovery, dmAdventures,
 		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, formControlZoom, lastDifficulty,
 		dissonanceQuartet, orbitPlay, lobbyFinishSync, blackCastlePlay, pinchPlay, secretNamesPlay, lobbyChrome,
-		notesEditor];
+		notesEditor, profilePage];
 
 	// EVERY BLOCK MUST BE IN A LANE. Before the lanes existed, adding a block meant
 	// writing it — it then ran because it was simply the next statement. Now it has

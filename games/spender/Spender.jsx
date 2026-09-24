@@ -51,6 +51,7 @@ const SecretNames = lazyChunk("SecretNames", () => import("../secretnames/Secret
 const Pinch = lazyChunk("Pinch", () => import("../pinch/Pinch.jsx"));
 const Books = lazyChunk("Books", () => import("../../books/Books.jsx"));
 const Notes = lazyChunk("Notes", () => import("../../notes/Notes.jsx"));
+const Profile = lazyChunk("Profile", () => import("../../shared/Profile.jsx"));
 const BggFilter = lazyChunk("BggFilter", () => import("../../bggfilter/BggFilter.jsx"));
 
 // Shown while a game's chunk loads. Deliberately an empty full-height panel in the
@@ -72,7 +73,7 @@ import SpenderRules from "./rules.jsx";
 import { GemToken, CardView, GEM_COLORS, GEM_LABELS, GEM_HEX,
 	splendorPanelCss, splendorCardCss, splendorCardExtraCss, splendorPillCss,
 	splendorLogCss } from "../../shared/splendor.jsx";
-import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
+import { parsePath, buildPath, pushPath, replacePath, subscribe, navigateTo, cameFromInsideApp } from "../../shared/router.js";
 // Site-shell screens, extracted out of this file (see shared/AuthScreen.jsx).
 import AuthScreen from "../../shared/AuthScreen.jsx";
 import { leaveOpenSeat, readRoomToken } from "../../shared/roomLifecycle.js";
@@ -122,8 +123,8 @@ const HTTP_BASE = WS_BASE.replace(/^ws/, "http").replace(/\/ws$/, "");
 // tables — GAMES[].id ≠ path for wherewolf; Spender is one site-level screen now.
 // The shell owns segment 1; each sub-game owns its own segment 2 (room id). The Spender
 // Spender's own waiting/game map to "spender" (or "puzzles" while puzzling) in applyPopRoute.
-const SCREEN_FOR_MODE = { spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", books: "books", notes: "notes", puzzles: "puzzles", bggfilter: "bggfilter", offline: "offline" };
-const MODE_FOR_SCREEN = { home: "home", spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", books: "books", notes: "notes", puzzles: "puzzles", bggfilter: "bggfilter", offline: "offline" };
+const SCREEN_FOR_MODE = { spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", books: "books", notes: "notes", profile: "profile", puzzles: "puzzles", bggfilter: "bggfilter", offline: "offline" };
+const MODE_FOR_SCREEN = { home: "home", spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", books: "books", notes: "notes", profile: "profile", puzzles: "puzzles", bggfilter: "bggfilter", offline: "offline" };
 
 // Per-game emblem — inline SVG tinted via currentColor (=the card's --accent), so no
 // raster asset / CDN (keeps the self-hosted, no-CLS constraint). Small motifs that read
@@ -134,7 +135,8 @@ const MODE_FOR_SCREEN = { home: "home", spender: "spender", coc: "coc", werewolf
 // above) so Spender and Spender Duel can't drift apart on the palette.
 // Frontend-only display names for the AI variants (wire codes stay H2/H3/S).
 const AI_PERSONAS = { H2: "Henry", H3: "Herald", S: "Steve", N: "Nina" };
-const AI_TIERS = { H2: "easy", H3: "medium", S: "hard", N: "expert" };
+// variant code -> tier word, in shared/botTiers.js so the profile page reads the same map.
+import { SPENDER_AI_TIERS as AI_TIERS } from "../../shared/botTiers.js";
 // The variants the create modal OFFERS, weakest first — the pill row is built
 // from this, and it is what a remembered last-played variant is validated
 // against (a retired code must not restore as a live selection).
@@ -2945,6 +2947,7 @@ export default function SpenderApp() {
 			onPuzzles={() => { pushPath(buildPath("puzzles")); enterPuzzles(); }}
 			onBooks={() => nav("books")}
 			onNotes={() => nav("notes")}
+			onProfile={() => navigateTo("profile")}
 			onBggFilter={() => nav("bggfilter")}
 			onSiteHealth={() => setSiteHealthOpen(true)} siteAlerts={siteAlerts}
 			siteHealth={siteHealthOpen && (
@@ -2965,6 +2968,15 @@ export default function SpenderApp() {
 	if (screen === "notes") return (
 		<Suspense fallback={<GameChunkLoading />}>
 			<Notes authUser={authUser} onExit={() => nav("home")} />
+		</Suspense>
+	);
+
+	// Profile — the signed-in player's own results (core/results.py). Reached by
+	// clicking your name on the menu or in any lobby; Back returns there.
+	if (screen === "profile") return (
+		<Suspense fallback={<GameChunkLoading />}>
+			<Profile authUser={authUser}
+				onExit={() => (cameFromInsideApp() ? window.history.back() : nav("home"))} />
 		</Suspense>
 	);
 
@@ -3108,7 +3120,7 @@ export default function SpenderApp() {
 				<LobbyHeader
 					onBack={() => nav("home")}
 					title="Local vs AI"
-					user={<LobbyUser user={authUser} />}
+					user={<LobbyUser user={authUser} profile={false} />}
 				/>
 				<div className="browser offline-hub">
 					<div className="offline-panel">

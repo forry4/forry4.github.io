@@ -23,9 +23,9 @@ const styles = baseCss + lobbyCss + createModalCss + lobbyCreateRowCss
   + rulesModalCss + gameMenuCss + waitingRoomCss + cssText;
 const ACCENT = { "--lby-accent": GAME_ACCENTS.pinch };
 const TOKEN_PREFIX = "pinch_token_";
-const PINCH_AI_TIER_OPTIONS = [
-  { value: "easy", label: "Easy", title: "Uniformly random legal actions" },
-];
+// The tiers this picker offers live in shared/botTiers.js, beside every other
+// game's: the profile page names them too, off the same list.
+import { PINCH_AI_TIER_OPTIONS } from "../../shared/botTiers.js";
 const PINCH_AI_TIERS = PINCH_AI_TIER_OPTIONS.map((tier) => tier.value);
 const PINCH_AI_LABELS = Object.fromEntries(PINCH_AI_TIER_OPTIONS.map((tier) => [tier.value, tier.label]));
 const MODES = [

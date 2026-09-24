@@ -35,6 +35,7 @@ from fastapi import Depends, FastAPI, Header, Query, WebSocket, WebSocketDisconn
 from fastapi.middleware.cors import CORSMiddleware
 
 from core import rooms as _rooms
+from core import results as _results
 from core.auth import get_user_by_session
 from core.build_info import build_info
 from core.config import cors_allowed_origins
@@ -448,6 +449,21 @@ def _row_summary(state: dict) -> dict:
         "turns_max": turns_max,
         "loss_reason": game.get("loss_reason"),
     }
+
+
+def _standings(state: dict) -> dict | None:
+    """Who won a finished game, for the profile (core.results). COOPERATIVE: both
+    seats win or both lose, and the score is the agents the pair found."""
+    game = state.get("game") if isinstance(state, dict) else None
+    if not isinstance(game, dict) or not engine.is_over(game) or not game.get("seats"):
+        return None
+    seats = list(game["seats"])
+    found = len(game.get("found") or [])
+    return _results.standings(state, seats, seats if game.get("phase") == "won" else [],
+                              shared_win_is_a_draw=False, scores={p: found for p in seats})
+
+
+_results.register("secretnames", TABLE, decode=_decode_state, standings=_standings)
 
 
 def list_open_games() -> list[dict]:

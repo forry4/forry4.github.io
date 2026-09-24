@@ -38,6 +38,7 @@ from fastapi import Depends, FastAPI, Header, Query, WebSocket, WebSocketDisconn
 from fastapi.middleware.cors import CORSMiddleware
 
 from core import rooms as _rooms
+from core import results as _results
 from core.auth import get_user_by_session
 from core.build_info import build_info
 from core.config import cors_allowed_origins
@@ -313,6 +314,22 @@ def list_user_history(user_id: str) -> list[dict]:
             "updated_at": r["updated_at"],
         })
     return out
+
+
+def _standings(state: dict) -> dict | None:
+    """Who won a finished game, for the profile (core.results). `winner` is a
+    seat index, or "draw"."""
+    g = state.get("game") or {}
+    seats = g.get("seats") if isinstance(g, dict) else None
+    winner = g.get("winner") if isinstance(g, dict) else None
+    if not seats or winner is None:
+        return None
+    if winner == "draw":
+        return _results.standings(state, seats, draw=True)
+    return _results.standings(state, seats, [seats[winner]])
+
+
+_results.register("ragtag", TABLE, decode=_decode_state, standings=_standings)
 
 
 def delete_game(game_id: str) -> None:

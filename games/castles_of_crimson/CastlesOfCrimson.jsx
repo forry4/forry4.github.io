@@ -803,14 +803,9 @@ function BoardThumb({ spaces, name, selected, onClick }) {
   );
 }
 
-// The tiers the create modal OFFERS. `main.AI_DIFFICULTIES` also carries
-// "normal", which the picker has never shown — so this list, not that tuple, is
-// what a remembered last-played tier is validated against.
-const AI_TIER_OPTIONS = [
-  { value: "easy", label: "Easy", title: "A capable search opponent — a solid game without neural-net strength" },
-  { value: "hard", label: "Hard", title: "The first-generation neural net, searched in your browser — a real challenge" },
-  { value: "expert", label: "Expert", title: "The strongest neural net, searched in your browser" },
-];
+// The tiers this picker offers live in shared/botTiers.js, beside every other
+// game's: the profile page names them too, off the same list.
+import { COC_AI_TIER_OPTIONS as AI_TIER_OPTIONS } from "../../shared/botTiers.js";
 const AI_TIER_IDS = AI_TIER_OPTIONS.map((t) => t.value);
 // id -> the words a player sees, off the same list the picker renders — what
 // `LobbyBotTier` prints on the Active and History rows. A retired tier still
