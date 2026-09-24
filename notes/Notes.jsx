@@ -3,6 +3,8 @@ import { baseCss } from "../shared/theme.js";
 import { buildPath, parsePath, pushPath, subscribe } from "../shared/router.js";
 import { makeApi } from "./api.js";
 import { I } from "./icons.jsx";
+import { ContextMenu } from "./menu.jsx";
+import { copyText } from "./editorMenu.js";
 
 // CSS in a real .css file, imported ?inline and injected by this component's own
 // <style> tag while it is mounted (see the root CLAUDE.md: never a JS template literal).
@@ -45,26 +47,6 @@ const byEdited = (a, b) => (b.updated_at || 0) - (a.updated_at || 0);
 const byName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
 
 // ─── small building blocks ────────────────────────────────────────────────────
-function RowMenu({ items, onClose }) {
-	const ref = useRef(null);
-	useEffect(() => {
-		const down = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
-		const key = (e) => { if (e.key === "Escape") onClose(); };
-		document.addEventListener("pointerdown", down);
-		document.addEventListener("keydown", key);
-		ref.current?.querySelector("button")?.focus();
-		return () => { document.removeEventListener("pointerdown", down); document.removeEventListener("keydown", key); };
-	}, [onClose]);
-	return (
-		<div className="nt-menu" role="menu" ref={ref}>
-			{items.filter(Boolean).map(([label, fn, danger]) => (
-				<button key={label} type="button" role="menuitem" className={danger ? "danger" : ""}
-					onClick={() => { onClose(); fn(); }}>{label}</button>
-			))}
-		</div>
-	);
-}
-
 function MoveDialog({ title, folders, disabled, current, onPick, onClose }) {
 	useEffect(() => {
 		const key = (e) => { if (e.key === "Escape") onClose(); };
@@ -118,7 +100,7 @@ export default function Notes({ authUser, onExit }) {
 	const [expanded, setExpanded] = useState(() => new Set(readLS("notes.expanded", [])));
 	const [sort, setSort] = useState(() => readLS("notes.sort", "edited"));
 	const [activeFolder, setActiveFolder] = useState(null);
-	const [menu, setMenu] = useState(null);         // "n:<id>" | "f:<id>"
+	const [menu, setMenu] = useState(null);         // { key, x, y, items } — the open row menu
 	const [renaming, setRenaming] = useState(null); // folder id
 	const [moving, setMoving] = useState(null);     // { kind: "note"|"folder", id }
 	const [dropOn, setDropOn] = useState(null);     // folder id | "root"
@@ -293,6 +275,69 @@ export default function Notes({ authUser, onExit }) {
 	const togglePin = async (n) => {
 		try { patchNote(await api.noteMeta(n.id, { pinned: !n.pinned })); } catch (e) { fail(e); }
 	};
+	const openInNewTab = (n) => window.open(buildPath("notes", n.id), "_blank", "noopener");
+	// Titles are edited in the note itself (autosave + the stale-tab guard live there),
+	// so Rename opens the note with its title selected, ready to type over.
+	const renameNote = (n) => {
+		if (openNote === n.id) {
+			const t = document.querySelector(".nt-title");
+			t?.focus();
+			t?.select();
+			return;
+		}
+		freshNote.current = n.id;
+		setFindReq(null);
+		setActiveFolder(n.folder_id);
+		go(n.id);
+	};
+	const duplicateNote = async (n) => {
+		try {
+			const full = await api.getNote(n.id);
+			const title = `${full.title || "Untitled"} (copy)`;
+			const c = await api.createNote(full.folder_id, title);
+			// images are shared by id, so the copy costs no image storage
+			const saved = full.doc ? await api.saveNote(c.id, { title, doc: full.doc, base_rev: 0 }) : c;
+			patchNote(saved);
+			if (full.folder_id) expandTo(full.folder_id);
+			notify(`Duplicated as “${title}”.`);
+		} catch (e) { fail(e); }
+	};
+	const copyNoteLink = (n) => copyText(new URL(buildPath("notes", n.id), window.location.origin).href, notify, "Link copied");
+
+	const noteItems = (n) => [
+		{ label: "Open", onSelect: () => { setFindReq(null); setActiveFolder(n.folder_id); go(n.id); } },
+		{ label: "Open in new tab", onSelect: () => openInNewTab(n) },
+		"-",
+		{ label: "Rename", onSelect: () => renameNote(n) },
+		{ label: n.pinned ? "Unpin" : "Pin to top", onSelect: () => togglePin(n) },
+		{ label: "Move to…", onSelect: () => setMoving({ kind: "note", id: n.id }) },
+		{ label: "Duplicate", onSelect: () => duplicateNote(n) },
+		{ label: "Copy link to this note", onSelect: () => copyNoteLink(n) },
+		"-",
+		{ label: "Move to Trash", danger: true, onSelect: () => trashNote(n) },
+	];
+	const folderItems = (f) => [
+		{ label: "New note here", onSelect: () => newNote(f.id) },
+		{ label: "New folder inside", onSelect: () => newFolder(f.id) },
+		"-",
+		{ label: "Rename", onSelect: () => setRenaming(f.id) },
+		{ label: "Move to…", onSelect: () => setMoving({ kind: "folder", id: f.id }) },
+		{ label: "Search in this folder", onSelect: () => searchIn(f.id) },
+		"-",
+		{ label: "Delete folder", danger: true, onSelect: () => deleteFolder(f) },
+	];
+	// The ⋯ button drops the menu under itself; right-click opens it at the pointer.
+	const menuFromButton = (key, items) => (e) => {
+		if (menu?.key === key) { setMenu(null); return; }
+		const r = e.currentTarget.getBoundingClientRect();
+		setMenu({ key, x: Math.max(8, r.right - 220), y: r.bottom + 2, items });
+	};
+	const menuFromPointer = (key, items) => (e) => {
+		if (e.shiftKey) return;
+		e.preventDefault();
+		setMenu({ key, x: e.clientX, y: e.clientY, items });
+	};
+
 	const trashNote = async (n) => {
 		try {
 			patchNote(await api.noteMeta(n.id, { trashed: true }));
@@ -356,7 +401,8 @@ export default function Notes({ authUser, onExit }) {
 	const noteRow = (n, depth, where) => {
 		const key = `n:${where}:${n.id}`;
 		return (
-			<div key={key} className={`nt-row nt-note-row${where === "tree" ? " in-tree" : ""}${openNote === n.id ? " on" : ""}`} style={{ "--depth": depth }}>
+			<div key={key} className={`nt-row nt-note-row${where === "tree" ? " in-tree" : ""}${openNote === n.id ? " on" : ""}`} style={{ "--depth": depth }}
+				onContextMenu={menuFromPointer(key, noteItems(n))}>
 				<button type="button" className="nt-row-main" draggable onDragStart={(e) => dragData(e, "note", n.id)}
 					onClick={() => { setFindReq(null); setActiveFolder(n.folder_id); go(n.id); }}>
 					<span className="nt-ic">{I.note}</span>
@@ -367,14 +413,7 @@ export default function Notes({ authUser, onExit }) {
 					{n.pinned && where !== "pinned" && <span className="nt-ic nt-pin-mark" title="Pinned">{I.pin}</span>}
 				</button>
 				<button type="button" className="nt-row-more" aria-label={`More for ${n.title || "Untitled"}`}
-					aria-haspopup="menu" aria-expanded={menu === key} onClick={() => setMenu(menu === key ? null : key)}>{I.dots}</button>
-				{menu === key && (
-					<RowMenu onClose={() => setMenu(null)} items={[
-						[n.pinned ? "Unpin" : "Pin to top", () => togglePin(n)],
-						["Move to…", () => setMoving({ kind: "note", id: n.id })],
-						["Move to Trash", () => trashNote(n), true],
-					]} />
-				)}
+					aria-haspopup="menu" aria-expanded={menu?.key === key} onClick={menuFromButton(key, noteItems(n))}>{I.dots}</button>
 			</div>
 		);
 	};
@@ -387,7 +426,8 @@ export default function Notes({ authUser, onExit }) {
 		return (
 			<div key={f.id} className="nt-branch">
 				<div className={`nt-row nt-folder-row${activeFolder === f.id ? " active" : ""}${dropOn === f.id ? " drop" : ""}`}
-					style={{ "--depth": depth }} {...dropProps(f.id, f.id)}>
+					style={{ "--depth": depth }} {...dropProps(f.id, f.id)}
+					onContextMenu={renaming === f.id ? undefined : menuFromPointer(key, folderItems(f))}>
 					{renaming === f.id ? (
 						<div className="nt-row-main nt-renaming">
 							<span className="nt-ic">{I.folder}</span>
@@ -410,17 +450,7 @@ export default function Notes({ authUser, onExit }) {
 						</button>
 					)}
 					<button type="button" className="nt-row-more" aria-label={`More for folder ${f.name}`}
-						aria-haspopup="menu" aria-expanded={menu === key} onClick={() => setMenu(menu === key ? null : key)}>{I.dots}</button>
-					{menu === key && (
-						<RowMenu onClose={() => setMenu(null)} items={[
-							["New note here", () => newNote(f.id)],
-							["Search in this folder", () => searchIn(f.id)],
-							["New folder inside", () => newFolder(f.id)],
-							["Rename", () => setRenaming(f.id)],
-							["Move to…", () => setMoving({ kind: "folder", id: f.id })],
-							["Delete folder", () => deleteFolder(f), true],
-						]} />
-					)}
+						aria-haspopup="menu" aria-expanded={menu?.key === key} onClick={menuFromButton(key, folderItems(f))}>{I.dots}</button>
 				</div>
 				{open && branch(f.id, depth + 1)}
 			</div>
@@ -634,6 +664,25 @@ export default function Notes({ authUser, onExit }) {
 							<NoteEditor key={openNote} api={api} noteId={openNote} notify={notify} statusSlot={statusSlot}
 								focusTitle={freshNote.current === openNote} onTitleFocused={() => { freshNote.current = null; }}
 								findRequest={findReq && findReq.id === openNote ? findReq : null}
+								nav={{
+									notes: live,
+									folderPath,
+									openNote: (id) => {
+										setFindReq(null);
+										const m = notes.find((x) => x.id === id);
+										if (m) setActiveFolder(m.folder_id);
+										go(id);
+									},
+									searchAll: (text) => {
+										setScope(null);
+										setQuery(text);
+										// on a narrow window the list is hidden while a note is open
+										if (window.matchMedia("(max-width: 760px)").matches) go(null);
+										setTimeout(() => searchBox.current?.focus(), 0);
+									},
+									noteCreated: (n) => { patchNote(n); if (n.folder_id) expandTo(n.folder_id); },
+									folderOf: () => notes.find((x) => x.id === openNote)?.folder_id ?? null,
+								}}
 								onSaved={patchNote}
 								onGone={() => { notify("This note was deleted or moved to the Trash elsewhere."); load(); }}
 								onRestore={restoreNote} />
@@ -660,6 +709,7 @@ export default function Notes({ authUser, onExit }) {
 						if (m.kind === "note") moveNote(m.id, fid); else moveFolder(m.id, fid);
 					}} />
 			)}
+			{menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
 			{toast && <div className="nt-toast" role="status">{toast}</div>}
 		</div>
 	);

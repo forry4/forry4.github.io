@@ -8807,6 +8807,15 @@ try {
 			&& docText.includes(`"imageId":"${imgId}"`) && !docText.includes("data:image"),
 			docText.slice(0, 200));
 
+		// right-click: the note's own menu (not the browser's), and Escape closes it
+		await page.locator(".nt-prose p").first().click({ button: "right" }).catch(() => {});
+		const menuUp = await has(".nt-cmenu", 3000);
+		const menuLabels = menuUp ? await page.locator(".nt-cmenu-label").allTextContents() : [];
+		await page.keyboard.press("Escape");
+		check("right-click in a note opens its menu, and Escape closes it",
+			menuUp && ["Paste", "Insert", "Find in note…"].every((l) => menuLabels.includes(l))
+			&& await page.locator(".nt-cmenu").count() === 0, JSON.stringify(menuLabels));
+
 		// search: the sidebar finds the note, and a hit opens it with the find bar on
 		await page.locator(".nt-search-in").fill("boxes");
 		const hit = await has(".nt-hit", 8000);

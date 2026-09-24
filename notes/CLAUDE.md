@@ -56,6 +56,25 @@ In Extras on the home menu, **shown only to admins**.
   scrolls a match below the sticky bars itself (ProseMirror's scrollIntoView put it under them).
   A search hit opens its note with the query already in the find bar, without focusing it (on
   a phone that would throw the keyboard over the match).
+- **Right-click menus** (`menu.jsx` = the menu + note picker, `editorMenu.js` = clipboard,
+  note links, image copy/download, check-all, selection-as-doc). Context-sensitive: an image,
+  a link, a list, a selection each add their own section; the sidebar's rows share one menu
+  with their ⋯ button. Shift+right-click and any TOUCH long-press keep the browser's menu.
+  Bugs found making it, all covered by the menus e2e: the menu renders `visibility:hidden` for
+  one frame while it measures, and a hidden button cannot take focus — focus the first item
+  only once it is visible, or arrows/Escape do nothing; scroll events arrive a frame LATE, so
+  "close on scroll" must ignore scrolls already in flight when it opened; ProseMirror calls
+  `handleClick` for EVERY mouse button (a right-click on a note link opened the note); and
+  tiptap's list toggles convert into/out of a checklist for the SELECTION only, so "Convert
+  list to" rebuilds the whole list node itself (`rebuildList`).
+- **Note links** are ordinary link marks whose href is the note's own URL (`/notes/<id>`) —
+  they survive copy/paste and work as plain URLs anywhere. Recognised by the href, never a
+  class; a plain click opens a NOTE link, a web link needs Ctrl/Cmd+click. The picker offers
+  to create a note that doesn't exist yet. "Move to a new note" round-trips the selection
+  through the schema's own HTML serialiser + parser so a half-selected list still becomes a
+  valid document. Menu Paste reads the clipboard (Chrome/Edge ask once; Firefox mostly
+  refuses, and the menu then says to use Ctrl+V) and goes through `view.pasteHTML/pasteText`,
+  the same pipeline as a real paste.
 - **16px floor** on every typing surface (title, prose, folder rename, caption, both search
   boxes) — the iOS zoom footgun. `formControlZoom` can't reach an owner-only page, so
   `notesEditor` in `webapp/test/screens.mjs` measures all six (stubbed API + seeded admin).
