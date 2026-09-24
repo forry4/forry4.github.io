@@ -166,11 +166,11 @@
 .nt-status-offline,.nt-status-conflict,.nt-status-error{color:var(--red-gem);}
 
 .nt-banner{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;
-	margin:14px auto 0;width:calc(100% - 32px);max-width:760px;padding:10px 14px;border-radius:var(--radius);
+	margin:14px 16px 0;padding:10px 14px;border-radius:var(--radius);
 	background:var(--surface2);border:1px solid var(--gold);color:var(--text);}
 .nt-banner-acts{display:flex;gap:8px;}
 
-.nt-page{width:100%;max-width:760px;margin:0 auto;padding:28px 24px 120px;flex:1;display:flex;flex-direction:column;}
+.nt-page{width:100%;padding:28px 32px 120px;flex:1;display:flex;flex-direction:column;}
 .nt-title{width:100%;background:none;border:0;outline:none;color:var(--text);padding:0 0 10px;
 	font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-size:2rem;font-weight:600;line-height:1.2;}
 .nt-title::placeholder{color:var(--text-muted);}
@@ -265,7 +265,7 @@
 	justify-content:center;background:rgba(40,36,30,.8);border:1px solid var(--border);border-radius:50%;color:var(--text);cursor:pointer;}
 
 /* trash */
-.nt-trash{max-width:760px;margin:0 auto;padding:28px 24px 80px;}
+.nt-trash{padding:28px 32px 80px;}
 .nt-trash-hd{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px;}
 .nt-trash-hd h2{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.2rem;color:var(--gold);letter-spacing:.06em;}
 .nt-trash-list{list-style:none;margin-top:18px;display:flex;flex-direction:column;gap:8px;}
