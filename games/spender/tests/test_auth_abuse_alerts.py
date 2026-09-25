@@ -6,7 +6,6 @@ a locked-out name, and above all failed passwords on the OWNER's account each
 reach the owner. The account functions are stubbed so nothing here touches a
 real users.db.
 """
-import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -32,11 +31,11 @@ def _stub_accounts(monkeypatch):
 
 
 def register(name, ip="5.5.5.5"):
-    return asyncio.run(m.auth_register(m.RegisterBody(name=name, password="right"), _req(ip)))
+    return m.auth_register(m.RegisterBody(name=name, password="right"), _req(ip))
 
 
 def login(name, pw, ip="6.6.6.6"):
-    return asyncio.run(m.auth_login(m.LoginBody(name=name, password=pw), _req(ip)))
+    return m.auth_login(m.LoginBody(name=name, password=pw), _req(ip))
 
 
 def test_a_burst_of_accounts_alerts_then_the_site_cap_refuses(monkeypatch):

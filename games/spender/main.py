@@ -3003,7 +3003,7 @@ def _alert_login_lockout(name_key: str, ip: str) -> None:
 
 
 @router.post("/auth/register")
-async def auth_register(body: RegisterBody, request: Request):
+def auth_register(body: RegisterBody, request: Request):
     ip = _client_ip(request)
     if _register_site_limiter.exceeded("site"):
         alerts.alert("account-flood", f"Over {REGISTER_MAX_PER_HOUR} accounts were created in the "
@@ -3041,7 +3041,7 @@ async def auth_register(body: RegisterBody, request: Request):
 
 
 @router.post("/auth/login")
-async def auth_login(body: LoginBody, request: Request):
+def auth_login(body: LoginBody, request: Request):
     ip = _client_ip(request)
     name_key = (body.name or "").lower()
     if _login_ip_limiter.exceeded(ip) or _login_user_limiter.exceeded(name_key):
@@ -3077,7 +3077,7 @@ async def auth_login(body: LoginBody, request: Request):
 
 
 @router.get("/auth/session")
-async def auth_session(token: str | None = Depends(bearer_token)):
+def auth_session(token: str | None = Depends(bearer_token)):
     """Validate a stored session token. The frontend restores its "logged in"
     state from localStorage and otherwise never checks the token, so a token that
     has expired (unused for 90 days — core.auth SESSION_TTL) or been signed out
@@ -3103,19 +3103,21 @@ async def auth_logout(token: str | None = Depends(bearer_token)):
 
 
 @router.get("/games")
-async def get_open_games():
+def get_open_games():
     return {"ok": True, "games": list_open_games()}
 
 
 @router.get("/games/active")
-async def get_active_games():
+def get_active_games(request: Request):
     # Public: all in-progress games (yours + others'). Frontend pins yours on top.
+    if _rooms.refuse_public_list(request):
+        return {"ok": False, "games": [], "message": _rooms.PUBLIC_LIST_REFUSED}
     return {"ok": True, "games": list_active_games()}
 
 
 @router.get("/games/mine")
-async def get_my_games(token: str | None = Depends(bearer_token),
-                       player_id: str | None = None):
+def get_my_games(token: str | None = Depends(bearer_token),
+                 player_id: str | None = None):
     # A GUEST HAS NO SESSION, and Active is the only list a STARTED game appears
     # in — so without the `player_id` fallback a guest who was invited by link,
     # backed out to the lobby to wait and then had the host deal could not find
@@ -3128,11 +3130,24 @@ async def get_my_games(token: str | None = Depends(bearer_token),
 
 
 @router.get("/games/history")
-async def get_my_history(token: str | None = Depends(bearer_token)):
+def get_my_history(token: str | None = Depends(bearer_token)):
     user = get_user_by_session(token)
     if not user:
         return {"ok": False, "games": [], "message": "unauthenticated"}
     return {"ok": True, "games": list_user_history(user["id"])}
+
+
+def _saved_game_row(room_id: str, cols: str):
+    """One persisted `games` row, for the admin dump and the review routes, which
+    stay async (they read the live room under ROOM_LOCK first) and so run this on
+    a thread. `cols` is a literal from those two callers, never user input."""
+    conn = get_db_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(f"SELECT {cols} FROM games WHERE id=?", (room_id,))
+        return cur.fetchone()
+    finally:
+        conn.close()
 
 
 @router.get("/games/{game_id}/full")
@@ -3141,7 +3156,7 @@ async def get_game_full(game_id: str, token: str | None = Depends(bearer_token))
     plus a card_catalog to resolve the ids — a self-contained dump for offline analysis.
     Prefers the live in-memory copy (fresh for an in-progress game); falls back to the DB
     row for a finished/cold game. Admin-gated because it returns unredacted hidden info."""
-    user = get_user_by_session(token)
+    user = await asyncio.to_thread(get_user_by_session, token)
     if not user or not user.get("is_admin"):
         return {"ok": False, "message": "admin only"}
     room_id = normalize_room(game_id)
@@ -3153,11 +3168,7 @@ async def get_game_full(game_id: str, token: str | None = Depends(bearer_token))
                        "players": dict(room.get("players", {})),
                        "ai_variant": room.get("ai_variant")}
     if payload is None:  # not in memory — read the persisted row (read-only, no ROOMS mutation)
-        conn = get_db_conn()
-        cur = conn.cursor()
-        cur.execute("SELECT state_json FROM games WHERE id=?", (room_id,))
-        row = cur.fetchone()
-        conn.close()
+        row = await asyncio.to_thread(_saved_game_row, room_id, "state_json")
         if not row or not row["state_json"]:
             return {"ok": False, "message": "game not found"}
         try:
@@ -3232,7 +3243,7 @@ async def get_game_review(game_id: str, token: str | None = Depends(bearer_token
     from their perspective) plus a per-turn snapshot list so the client can rewind to any
     turn. Session-gated AND restricted to a player who was in the game. Snapshots are null
     for games created before the `setup` snapshot (no turn-by-turn, final board only)."""
-    user = get_user_by_session(token)
+    user = await asyncio.to_thread(get_user_by_session, token)
     if not user:
         return {"ok": False, "message": "unauthenticated"}
     room_id = normalize_room(game_id)
@@ -3245,11 +3256,7 @@ async def get_game_review(game_id: str, token: str | None = Depends(bearer_token
                        "ai_variant": room.get("ai_variant"),
                        "status": room.get("status")}
     if payload is None:  # not in memory — read the persisted row (read-only, no ROOMS mutation)
-        conn = get_db_conn()
-        cur = conn.cursor()
-        cur.execute("SELECT state_json, status FROM games WHERE id=?", (room_id,))
-        row = cur.fetchone()
-        conn.close()
+        row = await asyncio.to_thread(_saved_game_row, room_id, "state_json, status")
         if not row or not row["state_json"]:
             return {"ok": False, "message": "game not found"}
         try:
@@ -3286,7 +3293,7 @@ async def cancel_open_game(game_id: str, token: str | None = Depends(bearer_toke
     # An open game is just a public waiting room (host_id is listed in /games).
     # Registered hosts use their live session. Guest hosts use the per-seat room
     # token below; the public player_id is only an identifier, never proof.
-    user = get_user_by_session(token)
+    user = await asyncio.to_thread(get_user_by_session, token)
     owner = user["id"] if user else (player_id or None)
     if not owner:
         return {"ok": False, "message": "missing identity"}
@@ -3299,7 +3306,7 @@ async def cancel_open_game(game_id: str, token: str | None = Depends(bearer_toke
                 room = ROOMS.get(room_id)
             if not _rooms.authorized_open_host(room or {}, owner, room_token=room_token):
                 return {"ok": False, "message": "could not verify this seat"}
-    deleted = delete_open_game(room_id, owner)
+    deleted = await asyncio.to_thread(delete_open_game, room_id, owner)
     if deleted:
         async with ROOM_LOCK:
             ROOMS.pop(room_id, None)
@@ -3310,7 +3317,7 @@ async def cancel_open_game(game_id: str, token: str | None = Depends(bearer_toke
 async def leave_open_seat(game_id: str, token: str | None = Depends(bearer_token),
                           player_id: str | None = None,
                           room_token: str | None = Header(default=None, alias="X-Room-Token")):
-    user = get_user_by_session(token)
+    user = await asyncio.to_thread(get_user_by_session, token)
     room_id = normalize_room(game_id)
     async with ROOM_LOCK:
         room = ROOMS.get(room_id)
@@ -3328,8 +3335,8 @@ async def leave_open_seat(game_id: str, token: str | None = Depends(bearer_token
 
 
 @router.post("/me/session-token")
-async def session_token(token: str | None = Depends(bearer_token),
-                        room_id: str | None = None, player_id: str | None = None):
+def session_token(token: str | None = Depends(bearer_token),
+                  room_id: str | None = None, player_id: str | None = None):
     user = get_user_by_session(token)
     if not user:
         return {"ok": False, "message": "unauthenticated"}

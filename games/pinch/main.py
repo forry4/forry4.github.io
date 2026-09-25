@@ -578,19 +578,19 @@ async def health():
 
 
 @pinch_app.get("/games")
-async def games_open():
+def games_open():
     return {"games": list_open_games()}
 
 
 @pinch_app.get("/games/mine")
-async def games_mine(token: str | None = Depends(_bearer_token),
-                     player_id: str | None = None):
+def games_mine(token: str | None = Depends(_bearer_token),
+               player_id: str | None = None):
     viewer = _rooms.lobby_viewer_id(get_user_by_session(token) if token else None, player_id)
     return {"games": list_user_games(viewer)} if viewer else {"games": []}
 
 
 @pinch_app.get("/games/history")
-async def games_history(token: str | None = Depends(_bearer_token)):
+def games_history(token: str | None = Depends(_bearer_token)):
     user = get_user_by_session(token) if token else None
     return {"games": list_user_history(user["id"])} if user else {"games": []}
 
@@ -599,7 +599,7 @@ async def games_history(token: str | None = Depends(_bearer_token)):
 async def games_leave(game_id: str, token: str | None = Depends(_bearer_token),
                       player_id: str | None = None,
                       room_token: str | None = Header(default=None, alias="X-Room-Token")):
-    user = get_user_by_session(token) if token else None
+    user = (await asyncio.to_thread(get_user_by_session, token)) if token else None
     room_id = normalize_room(game_id)
     async with ROOM_LOCK:
         room = _ensure_room_loaded(room_id)
@@ -617,7 +617,7 @@ async def games_leave(game_id: str, token: str | None = Depends(_bearer_token),
 async def games_cancel(game_id: str, token: str | None = Depends(_bearer_token),
                        player_id: str | None = None,
                        room_token: str | None = Header(default=None, alias="X-Room-Token")):
-    user = get_user_by_session(token) if token else None
+    user = (await asyncio.to_thread(get_user_by_session, token)) if token else None
     owner = (user or {}).get("id") or player_id
     if not owner:
         return {"ok": False, "message": "missing identity"}
@@ -627,7 +627,7 @@ async def games_cancel(game_id: str, token: str | None = Depends(_bearer_token),
             room = _ensure_room_loaded(room_id)
             if not _rooms.authorized_open_host(room or {}, owner, room_token=room_token):
                 return {"ok": False, "message": "could not verify this seat"}
-    ok = delete_open_game(room_id, owner)
+    ok = await asyncio.to_thread(delete_open_game, room_id, owner)
     if ok:
         ROOMS.pop(room_id, None)
     return {"ok": ok}

@@ -40,3 +40,23 @@ def test_reset_clears_one_key_and_all():
     assert lim.exceeded("b", now=5.0) is True
     lim.reset()
     assert lim.exceeded("b", now=5.0) is False
+
+
+def test_public_lists_are_throttled_per_address(monkeypatch):
+    """Spender's and CoC's `/games/active` are public and decode up to 100 saved
+    games per call; one address in a loop is refused once over budget, and a
+    different address is not affected."""
+    from types import SimpleNamespace
+    from core import rooms
+    from games.castles_of_crimson import main as coc
+    from games.spender import main as spender
+
+    monkeypatch.setattr(rooms, "_public_list_limiter", SlidingWindowLimiter(max_hits=3, window_seconds=60))
+    for mod, route in ((spender, "get_active_games"), (coc, "games_active")):
+        rooms._public_list_limiter.reset()
+        monkeypatch.setattr(mod, "list_active_games", lambda: [{"id": "G"}])
+        req = lambda ip: SimpleNamespace(headers={}, client=SimpleNamespace(host=ip))
+        answers = [getattr(mod, route)(req("9.9.9.9")) for _ in range(4)]
+        assert [a["ok"] for a in answers] == [True, True, True, False]
+        assert answers[-1]["games"] == []
+        assert getattr(mod, route)(req("8.8.8.8"))["ok"] is True

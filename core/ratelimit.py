@@ -9,7 +9,13 @@ abuse-prevention (a restart doesn't help an attacker who needs thousands of trie
 appends a timestamped hit. Callers decide what a "hit" is — e.g. login records
 every attempt against the per-IP limiter but only FAILED attempts against the
 per-username limiter, so legitimate multi-device logins are never locked out.
+
+THREAD-SAFE. The auth and lobby routes are plain `def` (FastAPI runs them on its
+thread pool, so their database calls never stall the event loop every game socket
+shares), so two requests can check and record the same key at once. One lock per
+limiter keeps a check-then-record from losing a hit.
 """
+import threading
 import time
 from collections import defaultdict, deque
 
@@ -19,6 +25,7 @@ class SlidingWindowLimiter:
         self.max_hits = max_hits
         self.window = window_seconds
         self._hits: dict[str, deque] = defaultdict(deque)
+        self._lock = threading.Lock()
 
     def _purge(self, key: str, now: float) -> deque:
         dq = self._hits[key]
@@ -34,22 +41,26 @@ class SlidingWindowLimiter:
     def exceeded(self, key: str, now: float | None = None) -> bool:
         """True if `key` has already reached the limit within the window."""
         now = time.time() if now is None else now
-        return len(self._purge(key, now)) >= self.max_hits
+        with self._lock:
+            return len(self._purge(key, now)) >= self.max_hits
 
     def count(self, key: str, now: float | None = None) -> int:
         """Hits for `key` inside the window — lets a caller alert on a RATE before
         anything is refused."""
         now = time.time() if now is None else now
-        return len(self._purge(key, now))
+        with self._lock:
+            return len(self._purge(key, now))
 
     def record(self, key: str, now: float | None = None) -> None:
         """Record one hit for `key`."""
         now = time.time() if now is None else now
-        self._hits[key].append(now)
+        with self._lock:
+            self._hits[key].append(now)
 
     def reset(self, key: str | None = None) -> None:
         """Clear one key (e.g. on a successful login) or all keys (tests)."""
-        if key is None:
-            self._hits.clear()
-        else:
-            self._hits.pop(key, None)
+        with self._lock:
+            if key is None:
+                self._hits.clear()
+            else:
+                self._hits.pop(key, None)

@@ -482,6 +482,27 @@ async def reject_room_create(ws) -> bool:
     return False
 
 
+# ─── Public list throttle (Spender's and CoC's `/games/active`) ──────────────
+# The only unauthenticated lists that decode saved games: up to 100 blobs per
+# request (zlib + JSON each). A lobby fetches it on entry and on refresh, so the
+# per-address budget is far above anyone browsing; it exists so one address in a
+# loop cannot keep the thread pool and the database busy. An env knob for the
+# render gate, like ROOM_CREATES_PER_HOUR, since its harness is one address.
+PUBLIC_LISTS_PER_MIN = int(os.environ.get("PUBLIC_LISTS_PER_MIN") or 120)
+_public_list_limiter = SlidingWindowLimiter(max_hits=PUBLIC_LISTS_PER_MIN, window_seconds=60)
+PUBLIC_LIST_REFUSED = "Too many requests. Wait a moment and refresh."
+
+
+def refuse_public_list(request) -> bool:
+    """Record one public-list read for this peer. True when it is over budget and
+    the caller should answer with an empty, `ok: False` list instead."""
+    ip = client_ip(request)
+    if _public_list_limiter.exceeded(ip):
+        return True
+    _public_list_limiter.record(ip)
+    return False
+
+
 class MessageThrottle:
     """Per-socket message budget. Deliberately per-INSTANCE (a plain deque, no
     shared dict) so it cannot leak: it dies with the connection."""

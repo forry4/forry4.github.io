@@ -597,6 +597,13 @@ covers the logic; each game's wiring is one line).
   changed → applies → saves + broadcasts outside the lock. **OUTAGE LESSON (do not regress): never loop
   heavy synchronous engine work under `ROOM_LOCK` on the event-loop thread** — a CoC rewrite that did
   ~12 sync bot turns + ~12 DB saves under the lock hung the loop and took prod down.
+- **An HTTP route is plain `def` unless it needs the loop** (2026-09-25). FastAPI runs a `def`
+  route on its thread pool; an `async def` one runs ON the event loop every game socket shares,
+  so each synchronous DB call inside it (a Turso network round trip) paused every live game — ~70
+  lobby/auth/Books routes did this, and login ran 200k PBKDF2 iterations there. A route that takes
+  `ROOM_LOCK` or reads a live room stays `async` and moves each blocking call onto a thread with
+  `await asyncio.to_thread(fn, ...)`. `core/tests/test_routes_off_event_loop.py` derives the
+  roster and fails the offender. `SlidingWindowLimiter` is locked for the same reason.
 - **A dropped socket must RETRY, or "Reconnecting…" is just a word.** Four of the six
   socket games rendered that label off `!connected` and did nothing about it, so a blip
   left the game frozen until the player reloaded — and in a vs-bot room it is worse than a

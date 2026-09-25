@@ -796,7 +796,7 @@ async def health():
 
 
 @werewolf_app.get("/games")
-async def games_open():
+def games_open():
     return {"ok": True, "games": list_open_games()}
 
 
@@ -812,8 +812,8 @@ def _bearer_token(authorization: str | None = Header(default=None),
 
 
 @werewolf_app.get("/games/mine")
-async def games_mine(token: str | None = Depends(_bearer_token),
-                     player_id: str | None = None):
+def games_mine(token: str | None = Depends(_bearer_token),
+               player_id: str | None = None):
     # A GUEST HAS NO SESSION, and Active is the only list a STARTED game lands
     # in — so a friend invited by link, who backed out to the lobby to wait,
     # had no row anywhere once the host dealt. `lobby_viewer_id` in
@@ -829,7 +829,7 @@ async def games_mine(token: str | None = Depends(_bearer_token),
 async def games_leave(game_id: str, token: str | None = Depends(_bearer_token),
                       player_id: str | None = None,
                       room_token: str | None = Header(default=None, alias="X-Room-Token")):
-    user = get_user_by_session(token) if token else None
+    user = (await asyncio.to_thread(get_user_by_session, token)) if token else None
     room_id = normalize_room(game_id)
     async with ROOM_LOCK:
         room = _ensure_room_loaded(room_id)
@@ -849,7 +849,7 @@ async def games_cancel(game_id: str, token: str | None = Depends(_bearer_token),
                        room_token: str | None = Header(default=None, alias="X-Room-Token")):
     game_id = normalize_room(game_id)
     owner = None
-    user = get_user_by_session(token) if token else None
+    user = (await asyncio.to_thread(get_user_by_session, token)) if token else None
     if user:
         owner = user["id"]
     elif player_id:
@@ -861,7 +861,7 @@ async def games_cancel(game_id: str, token: str | None = Depends(_bearer_token),
             room = _ensure_room_loaded(game_id)
             if not _rooms.authorized_open_host(room or {}, owner, room_token=room_token):
                 return {"ok": False, "message": "could not verify this seat"}
-    deleted = delete_open_game(game_id, owner)
+    deleted = await asyncio.to_thread(delete_open_game, game_id, owner)
     if deleted:
         async with ROOM_LOCK:
             ROOMS.pop(game_id, None)
