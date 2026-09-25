@@ -191,3 +191,35 @@ def test_per_user_cap_still_applies_under_high_global_cap(conn):
     items = [{"title": f"Book {i}"} for i in range(25)]
     B.replace_user_suggestions(conn, ALICE, items)
     assert len(B.fetch_user_suggestions(conn, ALICE["id"])) == B.MAX_SUGGESTIONS  # 10
+
+
+def test_duplicate_or_foreign_suggestion_ids_are_reminted(conn):
+    # The id is the primary key and comes from the page. A repeated id, or one
+    # belonging to another user, used to fail the INSERT and 500 the save.
+    B.replace_user_suggestions(conn, BOB, [{"title": "Bob's pick"}])
+    bob_id = B.fetch_user_suggestions(conn, BOB["id"])[0]["id"]
+    ok, err = B.replace_user_suggestions(conn, ALICE, [
+        {"id": "dup", "title": "One"}, {"id": "dup", "title": "Two"}, {"id": bob_id, "title": "Three"},
+    ])
+    assert ok and err is None
+    mine = B.fetch_user_suggestions(conn, ALICE["id"])
+    assert [s["title"] for s in mine] == ["One", "Two", "Three"]
+    assert len({s["id"] for s in mine}) == 3 and bob_id not in {s["id"] for s in mine}
+    # Bob's row is untouched.
+    assert [s["id"] for s in B.fetch_user_suggestions(conn, BOB["id"])] == [bob_id]
+
+
+def test_own_suggestion_ids_survive_a_resave(conn):
+    B.replace_user_suggestions(conn, ALICE, [{"title": "A"}, {"title": "B"}])
+    before = B.fetch_user_suggestions(conn, ALICE["id"])
+    B.replace_user_suggestions(conn, ALICE, list(reversed(before)))
+    after = B.fetch_user_suggestions(conn, ALICE["id"])
+    assert [(s["id"], s["title"]) for s in after] == [(s["id"], s["title"]) for s in reversed(before)]
+
+
+def test_duplicate_book_ids_are_reminted(conn):
+    ok, _ = B.replace_books(conn, ALICE, [
+        {"id": "x", "title": "Dune", "rating": 5}, {"id": "x", "title": "Emma", "rating": 4},
+    ])
+    assert ok
+    assert len({b["id"] for b in B.fetch_books(conn)}) == 2

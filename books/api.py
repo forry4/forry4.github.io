@@ -78,6 +78,18 @@ def _gen_id(n: int = 10) -> str:
     return "".join(random.choices(string.ascii_lowercase + string.digits, k=n))
 
 
+def _row_id(requested, allowed: set, used: set) -> str:
+    """The id a saved row gets. The client's id is kept only when it is one of the
+    caller's OWN existing ids and not already used in this save — the id is the
+    table's primary key, so a repeated id (or someone else's) used to fail the
+    whole INSERT with a 500. Anything else gets a fresh one. The page replaces its
+    list with what the save returns, so a re-minted id is invisible to it."""
+    rid = requested if isinstance(requested, str) and requested in allowed and requested not in used else None
+    rid = rid or _gen_id()
+    used.add(rid)
+    return rid
+
+
 def _clamp_rating(r) -> int:
     try:
         r = int(r)
@@ -237,6 +249,10 @@ def replace_books(conn, user: dict | None, items: list) -> tuple[bool, str | Non
     now = int(time.time())
     per_rating_seq: dict[int, int] = {}
     rows = []
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM books")
+    existing = {r[0] for r in cur.fetchall()}
+    used: set = set()
     for it in items:
         # accept either pydantic BookIn or a plain dict
         get = (lambda k, d="": getattr(it, k, d)) if not isinstance(it, dict) else (lambda k, d="": it.get(k, d))
@@ -247,7 +263,7 @@ def replace_books(conn, user: dict | None, items: list) -> tuple[bool, str | Non
         seq = per_rating_seq.get(rating, 0)
         per_rating_seq[rating] = seq + 1
         rows.append((
-            get("id") or _gen_id(),
+            _row_id(get("id"), existing, used),
             title,
             (get("author") or "").strip(),
             rating,
@@ -258,7 +274,6 @@ def replace_books(conn, user: dict | None, items: list) -> tuple[bool, str | Non
             now,
         ))
 
-    cur = conn.cursor()
     cur.execute("DELETE FROM books")
     cur.executemany(
         """
@@ -320,6 +335,9 @@ def replace_user_suggestions(conn, user: dict | None, items: list) -> tuple[bool
         return False, "unauthenticated"
 
     cur = conn.cursor()
+    cur.execute("SELECT id FROM book_suggestions WHERE user_id=?", (user["id"],))
+    own = {r[0] for r in cur.fetchall()}
+    used: set = set()
     cur.execute("DELETE FROM book_suggestions WHERE user_id=?", (user["id"],))
     cur.execute("SELECT COUNT(*) FROM book_suggestions")  # other users' rows now
     others_total = cur.fetchone()[0]
@@ -335,7 +353,7 @@ def replace_user_suggestions(conn, user: dict | None, items: list) -> tuple[bool
         if len(rows) >= cap:
             break  # per-user cap and/or site-wide ceiling reached
         rows.append((
-            get("id") or _gen_id(),
+            _row_id(get("id"), own, used),
             user["id"],
             user.get("name") or "",
             title,
@@ -383,7 +401,7 @@ def setup_books(app, get_db_conn, get_user_by_session, token_resolver=None) -> N
     resolve_token = token_resolver or _default_token_resolver
 
     @app.get("/books")
-    async def get_books(token: str | None = Depends(resolve_token)):
+    def get_books(token: str | None = Depends(resolve_token)):
         conn = get_db_conn()
         try:
             user = get_user_by_session(token) if token else None
@@ -396,7 +414,7 @@ def setup_books(app, get_db_conn, get_user_by_session, token_resolver=None) -> N
             conn.close()
 
     @app.put("/books")
-    async def put_books(payload: BooksPayload, token: str | None = Depends(resolve_token)):
+    def put_books(payload: BooksPayload, token: str | None = Depends(resolve_token)):
         conn = get_db_conn()
         try:
             user = get_user_by_session(token) if token else None
@@ -408,7 +426,7 @@ def setup_books(app, get_db_conn, get_user_by_session, token_resolver=None) -> N
             conn.close()
 
     @app.get("/books/suggestions")
-    async def get_suggestions(token: str | None = Depends(resolve_token)):
+    def get_suggestions(token: str | None = Depends(resolve_token)):
         conn = get_db_conn()
         try:
             user = get_user_by_session(token) if token else None
@@ -427,7 +445,7 @@ def setup_books(app, get_db_conn, get_user_by_session, token_resolver=None) -> N
             conn.close()
 
     @app.put("/books/suggestions")
-    async def put_suggestions(payload: SuggestionsPayload, token: str | None = Depends(resolve_token)):
+    def put_suggestions(payload: SuggestionsPayload, token: str | None = Depends(resolve_token)):
         conn = get_db_conn()
         try:
             user = get_user_by_session(token) if token else None
