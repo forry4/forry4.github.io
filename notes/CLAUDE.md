@@ -103,7 +103,10 @@ home menu for everyone (a guest gets a "sign in" page).
   a DOM point ProseMirror cannot hold, so it rewrote the selection and a phone's selection
   handles jumped mid-drag ("selecting text on mobile is pain, especially checklists").
   `notesEditor` samples every point of every list row at 390px and fails any that does not
-  land the caret in text, except the checkbox itself.
+  land the caret in text, except the checkbox itself — and a bullet's MARKER: Chromium 149
+  (CI's) hit-tests it as the `<li>` and carets at `(li, 0)`, the start of that line, where
+  141 and WebKit hit nothing. That one case is accepted by name; it failed the first deploy
+  of this check because the local Playwright Chromium here was 141.
 - **One line rhythm inside a list, and no two lists ever touch.** Every pair of lines in a
   list is `.15em` apart (item to item, text to its nested list, a second paragraph in an
   item); only item-to-item had it, so a nested list hugged its parent. And `JoinLists`

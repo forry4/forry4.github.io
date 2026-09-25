@@ -9081,9 +9081,17 @@ try {
 					if (!el || el.closest("li") !== li) continue;
 					if (el.closest("label")) { onBox++; continue; }
 					samples++;
-					const c = document.caretRangeFromPoint(x, y)?.startContainer;
+					const rg = document.caretRangeFromPoint(x, y);
+					const c = rg?.startContainer;
 					const at = c && (c.nodeType === 3 ? c.parentElement : c);
-					if (!at || !at.closest("p") || at.closest("label")) off.push(`${Math.round(x - ul.left)},${Math.round(y - r.top)}:${at?.nodeName}`);
+					// A bullet's MARKER sits outside its <li>, in the list's padding. Chromium
+					// 149 hit-tests it as the <li> and puts the caret at the item's start
+					// (li, 0), which ProseMirror maps to the start of that line — the right
+					// place; 141 and WebKit do not hit the marker at all. Only that exact
+					// case is accepted, and never inside a checklist item (whose gutter is
+					// inside its box, and is what this check exists for).
+					const onMarker = c === li && rg.startOffset === 0 && x < r.left;
+					if (!onMarker && (!at || !at.closest("p") || at.closest("label"))) off.push(`${Math.round(x - ul.left)},${Math.round(y - r.top)}:${at?.nodeName}`);
 				}
 			}
 			const align = tasks.map((li) => {
