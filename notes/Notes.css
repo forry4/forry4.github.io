@@ -197,8 +197,14 @@
 .nt-prose ol ol{list-style-type:lower-alpha;}
 .nt-prose ol ol ol{list-style-type:lower-roman;}
 .nt-prose li::marker{color:var(--gold-light);font-weight:600;}
+/* ONE gap between every pair of lines in a list, whatever the structure: item to
+   item, an item's text to its nested list, a nested list back out to the next line,
+   and a second paragraph in one item (Delete at an item's end makes one). Only item
+   to item had it, so a nested list hugged its parent — and a checklist had its own
+   rule, so bullets and checklists disagreed. (`:not(label)`: a checklist item's first
+   child is its checkbox, and the text beside it must not drop.) */
 .nt-prose li>p{margin:0;}
-.nt-prose li+li{margin-top:.15em;}
+.nt-prose li+li,.nt-prose li>:not(label)+*,.nt-prose li>div>*+*{margin-top:.15em;}
 .nt-prose blockquote{border-left:3px solid var(--gold);padding:2px 0 2px 14px;color:var(--text-soft);font-style:italic;}
 .nt-prose hr{border:0;border-top:1px solid var(--border);margin:1.2em 0;}
 .nt-prose a{color:var(--gold-light);text-decoration:underline;text-underline-offset:2px;}
@@ -230,7 +236,6 @@
 .nt-prose ul[data-type="taskList"] li>div{padding-left:26px;}
 .nt-prose ul[data-type="taskList"] li>div>p{margin:0;}
 .nt-prose ul[data-type="taskList"] li[data-checked="true"]>div{color:var(--text-dim);text-decoration:line-through;}
-.nt-prose ul[data-type="taskList"] ul[data-type="taskList"]{margin-top:.15em;}
 
 /* images */
 .nt-img{margin:.9em 0;}

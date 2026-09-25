@@ -104,6 +104,13 @@ home menu for everyone (a guest gets a "sign in" page).
   handles jumped mid-drag ("selecting text on mobile is pain, especially checklists").
   `notesEditor` samples every point of every list row at 390px and fails any that does not
   land the caret in text, except the checkbox itself.
+- **One line rhythm inside a list, and no two lists ever touch.** Every pair of lines in a
+  list is `.15em` apart (item to item, text to its nested list, a second paragraph in an
+  item); only item-to-item had it, so a nested list hugged its parent. And `JoinLists`
+  merges same-type sibling lists after every edit: Backspace / Shift-Tab on a nested item
+  and deleting the line between two lists all left two lists touching, spaced as separate
+  blocks (a hole mid-list, a numbered list restarting at 1). `notesEditor` replays those
+  keystrokes and measures every gap.
 - **16px floor** on every typing surface (title, prose, folder rename, caption, both search
   boxes) — the iOS zoom footgun. `formControlZoom` can't reach a signed-in-only page, so
   `notesEditor` in `webapp/test/screens.mjs` measures all six (stubbed API + seeded admin).

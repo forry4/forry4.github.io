@@ -8969,6 +8969,67 @@ try {
 		check("phone: each checkbox sits left of its text, centred on the first line",
 			lists.align.length === 3 && lists.align.every((a) => a.gap >= 6 && Math.abs(a.dy) <= 3), JSON.stringify(lists.align));
 
+		// Editing a nested list must leave ONE line rhythm inside a list. Each case is
+		// the real keystroke on a real document; the gap is measured between every two
+		// consecutive lines of text that share a top-level list. Two ways it broke:
+		// a nested list hugged its parent's line (only item-to-item had a gap), and
+		// Backspace / Shift-Tab / deleting a paragraph left two lists TOUCHING, spaced
+		// as separate blocks — a hole mid-list (and a numbered list restarting at 1).
+		if (editorUp) {
+			const P = (t) => ({ type: "paragraph", content: [{ type: "text", text: t }] });
+			const LI = (t, kids) => ({ type: "listItem", content: [P(t), ...(kids ? [kids] : [])] });
+			const TI = (t, kids) => ({ type: "taskItem", attrs: { checked: false }, content: [P(t), ...(kids ? [kids] : [])] });
+			const UL = (...c) => ({ type: "bulletList", content: c });
+			const OL = (...c) => ({ type: "orderedList", content: c });
+			const TL = (...c) => ({ type: "taskList", content: c });
+			const nested = (L, I) => [L(I("A"), I("B", L(I("B1"), I("B2"))), I("C"))];
+			const cases = [
+				["nested bullets", nested(UL, LI), null, []],
+				["nested checklist", nested(TL, TI), null, []],
+				["bullets nested in a checklist", [TL(TI("A"), TI("B", UL(LI("B1"), LI("B2"))), TI("C"))], null, []],
+				["Backspace twice lifts a nested item out", nested(UL, LI), "B1", ["Backspace", "Backspace"]],
+				["Shift-Tab on a numbered sub-item", nested(OL, LI), "B1", ["Shift+Tab"]],
+				["Delete at an item's end pulls its sub-item up", nested(UL, LI), "B$", ["Delete"]],
+				["deleting the empty line between two lists", [UL(LI("A"), LI("B")), { type: "paragraph" }, UL(LI("C"), LI("D"))], "B$", ["ArrowDown", "Backspace"]],
+			];
+			const bad = [];
+			let measured = 0;
+			for (const [name, content, at, keys] of cases) {
+				await page.evaluate(({ content, at }) => {
+					const ed = document.querySelector(".nt-prose").editor;
+					ed.commands.setContent({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Top" }] }, ...content] });
+					if (!at) return;
+					const end = at.endsWith("$"), t = end ? at.slice(0, -1) : at;
+					let pos = null;
+					ed.state.doc.descendants((n, p) => { if (pos == null && n.isText && n.text === t) pos = end ? p + t.length : p; return pos == null; });
+					ed.commands.focus(); ed.commands.setTextSelection(pos);
+				}, { content, at });
+				for (const k of keys) { await page.keyboard.press(k); await sleep(30); }
+				await sleep(50);
+				const r = await page.evaluate(() => {
+					const prose = document.querySelector(".nt-prose");
+					const top = (el) => { while (el.parentElement !== prose) el = el.parentElement; return el; };
+					const gaps = [];
+					let prev = null;
+					for (const p of prose.querySelectorAll("p")) {
+						const rg = document.createRange(); rg.selectNodeContents(p);
+						const rs = [...rg.getClientRects()];
+						if (!rs.length) continue;
+						const root = top(p);
+						if (prev && prev.root === root && root.matches("ul,ol")) gaps.push(Math.round(rs[0].top - prev.bottom));
+						prev = { root, bottom: rs[rs.length - 1].bottom };
+					}
+					const kids = [...prose.children].map((el) => el.tagName + (el.dataset.type || ""));
+					const touching = kids.some((k, i) => i && k === kids[i - 1] && k !== "P");
+					return { gaps, touching, kids: kids.join(" ") };
+				});
+				measured += r.gaps.length;
+				if (r.touching || new Set(r.gaps).size !== 1) bad.push(`${name}: gaps=${r.gaps} ${r.kids}`);
+			}
+			check("nested-list edits: every case measured lines inside a list", measured >= 25, `measured=${measured}`);
+			check("nested-list edits keep one gap between list lines, and leave no two lists touching",
+				bad.length === 0, bad.join(" | "));
+		}
 		await page.locator(".nt-mobile-back").click().catch(() => {});
 		check("phone: All notes returns to the list", await has(".nt-side-acts", 5000)
 			&& await page.evaluate(() => getComputedStyle(document.querySelector(".nt-main")).display === "none"));

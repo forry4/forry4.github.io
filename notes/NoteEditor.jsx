@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useEditor, useEditorState, EditorContent, NodeViewWrapper, ReactNodeViewRenderer } from "@tiptap/react";
 import { Extension, Node, mergeAttributes } from "@tiptap/core";
 import { NodeSelection, Plugin, Selection, TextSelection } from "@tiptap/pm/state";
+import { canJoin } from "@tiptap/pm/transform";
 import StarterKit from "@tiptap/starter-kit";
 import { TaskList, TaskItem } from "@tiptap/extension-list";
 import { Placeholder } from "@tiptap/extensions";
@@ -229,6 +230,40 @@ const Indent = Extension.create({
 			Tab: () => this.editor.commands.indent(),
 			"Shift-Tab": () => this.editor.commands.outdent(),
 		};
+	},
+});
+
+// ─── join lists ───────────────────────────────────────────────────────────────
+// Two lists of the same kind side by side become one. Nothing makes them on purpose,
+// but editing does: Backspace / Shift-Tab on a nested item lifts it out between two
+// halves, and deleting the paragraph between two lists leaves them touching. The
+// halves were then spaced as separate BLOCKS (a paragraph gap), so one list showed
+// a hole in the middle, and a numbered one restarted at 1.
+const LIST_TYPES = ["bulletList", "orderedList", "taskList"];
+
+const JoinLists = Extension.create({
+	name: "joinLists",
+	addProseMirrorPlugins() {
+		return [new Plugin({
+			appendTransaction(trs, _old, state) {
+				if (!trs.some((t) => t.docChanged)) return null;
+				const joins = [];
+				const walk = (node, start) => {   // start = position of node's first child
+					let prev = null;
+					node.forEach((child, offset) => {
+						if (prev === child.type && LIST_TYPES.includes(child.type.name)) joins.push(start + offset);
+						prev = child.type;
+						if (!child.isTextblock && !child.isLeaf) walk(child, start + offset + 1);
+					});
+				};
+				walk(state.doc, 0);
+				if (!joins.length) return null;
+				const tr = state.tr;
+				// last first, so each join leaves the earlier positions where they were
+				for (const at of joins.reverse()) if (canJoin(tr.doc, at)) tr.join(at);
+				return tr.docChanged ? tr : null;
+			},
+		})];
 	},
 });
 
@@ -561,6 +596,7 @@ function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, noti
 				: "Start writing… paste or drop screenshots anywhere." }),
 			NoteImage.configure({ api }),
 			Indent,
+			JoinLists,
 			FindInNote,
 			Highlight,
 			TextAlign.configure({ types: ["heading", "paragraph"], alignments: ["left", "center", "right"] }),
