@@ -5810,7 +5810,7 @@ try {
 						// in a measurement would corrupt the annotation it appears in.
 						const flat = (t) => String(t).replace(/%/g, "%25").replace(/\s+/g, " ").trim();
 						console.log(`::error title=${flat(fn.name + ": " + name).replace(/[:,]/g, " ").slice(0, 180)}`
-							+ `::${flat(detail || "no detail").slice(0, 900)}`);
+							+ `::${flat(detail || "no detail").slice(0, 200)}`);
 					}
 				}
 			}
@@ -8929,6 +8929,12 @@ try {
 		//  C. a note in the Trash: its toolbar and shortcuts still changed the text on
 		//     screen, which a trashed note never saves.
 		if (editorUp) {
+			// a timeout here names its step, so an intermittent failure says WHERE
+			const stepFailed = (name) => async (e) => {
+				const side = await page.locator(".nt-side").innerText({ timeout: 1000 }).catch(() => "?");
+				await page.screenshot({ path: path.join(resultsDir, "notesEditor-step.png") }).catch(() => {});
+				throw new Error(`${name}: ${String(e?.message || e).split("\n")[0]} | sidebar: ${side.replace(/\s+/g, " ").slice(0, 300)}`);
+			};
 			const noteByTitle = (t) => [...db.notes.values()].find((n) => n.title === t);
 			const textOf = (n) => (n?.doc ? JSON.stringify(n.doc) : "");
 			const recent = (t) => page.locator(".nt-sec", { hasText: "Recent" }).locator(".nt-note-row", { hasText: t }).first();
@@ -8942,11 +8948,19 @@ try {
 				}
 				return seen;
 			};
-			await page.locator(".nt-search-x").click({ timeout: 2000 }).catch(() => {});   // back to the tree
-			await page.locator(".nt-side-acts .btn", { hasText: "Note" }).click();
-			await has(".nt-prose");
-			await page.locator(".nt-title").fill("Alpha");
-			await page.locator(".nt-title").press("Enter");
+			// Back to the tree: the search above left the sidebar showing results, and
+			// the Recent rows these steps click only exist without a query. Clearing it by
+			// a best-effort click was the flake here — under the full suite's load it could
+			// miss, and every click below then waited for a list that never rendered.
+			await page.locator(".nt-search-in").fill("").catch(stepFailed("'.nt-search-in' fill"));
+			await page.locator(".nt-sec", { hasText: "Recent" }).waitFor({ timeout: 10_000 });
+			await page.locator(".nt-side-acts .btn", { hasText: "Note" }).click().catch(stepFailed("'.nt-side-acts .btn', { hasText: 'Note' } click"));
+			// NOT "an editor is up": the click returns before the note exists, and the OLD
+			// note's editor is still up — the title typed next renamed Parlor (1 run in ~4).
+			await page.waitForFunction(() => document.activeElement === document.querySelector(".nt-title")
+				&& document.querySelector(".nt-title").value === "", null, { timeout: 10_000 });
+			await page.locator(".nt-title").fill("Alpha").catch(stepFailed("'.nt-title' fill"));
+			await page.locator(".nt-title").press("Enter").catch(stepFailed("'.nt-title' press"));
 			await page.keyboard.type("one");
 			const setup = await saved();
 			db.putDelay = 2500;
@@ -8954,7 +8968,7 @@ try {
 			const inFlight = await page.waitForFunction(() => document.querySelector(".nt-status")?.textContent === "Saving…",
 				null, { timeout: 5000 }).then(() => true, () => false);
 			await page.keyboard.type(" three");
-			await recent("Parlor").locator(".nt-row-main").click();
+			await recent("Parlor").locator(".nt-row-main").click().catch(stepFailed("Recent row Parlor"));
 			db.putDelay = 0;
 			await page.waitForFunction(() => document.querySelector(".nt-title")?.value === "Parlor", null, { timeout: 5000 }).catch(() => {});
 			await sleep(3500);
@@ -8962,13 +8976,13 @@ try {
 				setup && inFlight && textOf(noteByTitle("Alpha")).includes("one two three"),
 				`setup=${setup} inFlight=${inFlight} saved=${textOf(noteByTitle("Alpha")).match(/one[^"]*/)?.[0]}`);
 
-			await recent("Alpha").locator(".nt-row-main").click();
+			await recent("Alpha").locator(".nt-row-main").click().catch(stepFailed("Recent row Alpha"));
 			await page.waitForFunction(() => document.querySelector(".nt-title")?.value === "Alpha", null, { timeout: 5000 }).catch(() => {});
-			await page.locator(".nt-prose").click();
+			await page.locator(".nt-prose").click().catch(stepFailed("'.nt-prose' click"));
 			await page.keyboard.press("Control+End");
 			await page.keyboard.type(" four");
-			await recent("Alpha").click({ button: "right" });
-			await page.locator(".nt-cmenu-it", { hasText: "Move to Trash" }).click();
+			await recent("Alpha").click({ button: "right" }).catch(stepFailed("Recent row Alpha"));
+			await page.locator(".nt-cmenu-it", { hasText: "Move to Trash" }).click().catch(stepFailed("'.nt-cmenu-it', { hasText: 'Move to Trash' } click"));
 			const trashToasts = await toastsFor(2500);
 			const alpha = noteByTitle("Alpha");
 			check("trashing the open note saves its last edit first, and says it moved to the Trash",
@@ -8976,34 +8990,35 @@ try {
 				&& trashToasts.length === 1 && trashToasts[0].includes("moved to the Trash"),
 				`trashed=${alpha?.deleted_at != null} saved=${textOf(alpha).match(/one[^"]*/)?.[0]} toasts=${JSON.stringify(trashToasts)}`);
 
-			await page.locator(".nt-trash-link").click();
-			await page.locator(".nt-trash-open", { hasText: "Alpha" }).click();
+			await page.locator(".nt-trash-link").click().catch(stepFailed("'.nt-trash-link' click"));
+			await page.locator(".nt-trash-open", { hasText: "Alpha" }).click().catch(stepFailed("'.nt-trash-open', { hasText: 'Alpha' } click"));
 			await page.waitForFunction(() => document.querySelector(".nt-status")?.textContent === "In the Trash", null, { timeout: 5000 }).catch(() => {});
 			const before = await page.locator(".nt-prose").innerHTML();
-			await page.locator(".nt-prose p").first().click();
+			await page.locator(".nt-prose p").first().click().catch(stepFailed("'.nt-prose p' click"));
 			await page.keyboard.press("Control+a");
 			await page.keyboard.press("Control+b");
 			const tools = await page.locator(".nt-toolbar .nt-tb").evaluateAll((bs) => bs.map((b) => b.getAttribute("aria-label")));
 			check("a note in the Trash cannot be changed: find only, and shortcuts do nothing",
 				before === await page.locator(".nt-prose").innerHTML() && tools.join() === "Find in note",
 				`tools=${tools.join()}`);
-			await page.locator(".nt-banner .btn", { hasText: "Restore" }).click();
+			await page.locator(".nt-banner .btn", { hasText: "Restore" }).click().catch(stepFailed("'.nt-banner .btn', { hasText: 'Restore' } click"));
 			await page.waitForFunction(() => !document.querySelector(".nt-banner"), null, { timeout: 5000 }).catch(() => {});
 
 			const confirm = (d) => d.accept();
 			page.on("dialog", confirm);
-			await page.locator(".nt-side-acts .btn", { hasText: "Folder" }).click();
+			await page.locator(".nt-side-acts .btn", { hasText: "Folder" }).click().catch(stepFailed("'.nt-side-acts .btn', { hasText: 'Folder' } click"));
 			await has(".nt-rename");
-			await page.locator(".nt-rename").fill("Scratch");
-			await page.locator(".nt-rename").press("Enter");
-			await page.locator(".nt-side-acts .btn", { hasText: "Note" }).click();
-			await page.waitForFunction(() => document.querySelector(".nt-title") === document.activeElement, null, { timeout: 5000 }).catch(() => {});
+			await page.locator(".nt-rename").fill("Scratch").catch(stepFailed("'.nt-rename' fill"));
+			await page.locator(".nt-rename").press("Enter").catch(stepFailed("'.nt-rename' press"));
+			await page.locator(".nt-side-acts .btn", { hasText: "Note" }).click().catch(stepFailed("'.nt-side-acts .btn', { hasText: 'Note' } click"));
+			await page.waitForFunction(() => document.activeElement === document.querySelector(".nt-title")
+				&& document.querySelector(".nt-title").value === "", null, { timeout: 10_000 });
 			const deltaId = [...db.notes.keys()].pop();
-			await page.locator(".nt-title").fill("Delta");
-			await page.locator(".nt-title").press("Enter");
+			await page.locator(".nt-title").fill("Delta").catch(stepFailed("'.nt-title' fill"));
+			await page.locator(".nt-title").press("Enter").catch(stepFailed("'.nt-title' press"));
 			await page.keyboard.type("five");
-			await page.locator(".nt-folder-row", { hasText: "Scratch" }).click({ button: "right" });
-			await page.locator(".nt-cmenu-it", { hasText: "Delete folder" }).click();
+			await page.locator(".nt-folder-row", { hasText: "Scratch" }).click({ button: "right" }).catch(stepFailed("'.nt-folder-row', { hasText: 'Scratch' } click"));
+			await page.locator(".nt-cmenu-it", { hasText: "Delete folder" }).click().catch(stepFailed("'.nt-cmenu-it', { hasText: 'Delete folder' } click"));
 			const folderToasts = await toastsFor(2500);
 			page.off("dialog", confirm);
 			const delta = db.notes.get(deltaId);
@@ -9012,7 +9027,7 @@ try {
 				&& await page.locator(".nt-prose").count() === 0 && !folderToasts.some((t) => t.includes("elsewhere")),
 				JSON.stringify({ title: delta?.title, text: textOf(delta).match(/five[^"]*/)?.[0], trashed: delta?.deleted_at != null, toasts: folderToasts }));
 
-			await recent("Parlor").locator(".nt-row-main").click();   // the phone checks below edit this one
+			await recent("Parlor").locator(".nt-row-main").click().catch(stepFailed("Recent row Parlor (reopen)"));   // the phone checks below edit this one
 			await page.waitForFunction(() => document.querySelector(".nt-title")?.value === "Parlor", null, { timeout: 5000 }).catch(() => {});
 		}
 		// phone: one pane at a time, Saved still visible, no sideways page
