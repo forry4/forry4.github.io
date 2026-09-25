@@ -111,3 +111,39 @@ def test_maybe_cleanup_is_throttled(tmp_path, monkeypatch):
     dbm.maybe_cleanup_games("games")   # throttled -> skipped
     dbm.maybe_cleanup_games("coc_games")  # different table -> runs
     assert calls == ["games", "coc_games"]
+
+
+def test_a_registered_player_in_any_seat_protects_the_game(tmp_path, monkeypatch):
+    """Seats 3-4 (Spender, CoC, Dontminion, Black Castle) and Where Wolf?'s
+    `player_ids` list count. The cleanup read only player1_id/player2_id, so a
+    registered player in seat 3 lost their game as an all-guest one after a day."""
+    _use_temp_db(tmp_path, monkeypatch)
+    conn = dbm.get_db_conn()
+    dbm.init_core_schema(conn)
+    cur = conn.cursor()
+    cur.execute("""CREATE TABLE four (id TEXT PRIMARY KEY, status TEXT, player1_id TEXT,
+                   player2_id TEXT, player3_id TEXT, player4_id TEXT, updated_at INTEGER)""")
+    cur.execute("""CREATE TABLE wolf (id TEXT PRIMARY KEY, status TEXT, player1_id TEXT,
+                   player2_id TEXT, player_ids TEXT, updated_at INTEGER)""")
+    cur.execute("INSERT INTO users (id, name) VALUES ('u1', 'Alice')")
+    now = int(time.time())
+    two_days, old = now - 2 * DAY, now - 31 * DAY
+    for row in [("seat3", "playing", "g1", "g2", "u1", None, two_days),      # stays: registered in seat 3
+                ("seat4", "over", "g1", "g2", None, "u1", two_days),         # stays: registered in seat 4
+                ("guests", "playing", "g1", "g2", "g3", "g4", two_days),     # gone: all guests
+                ("seat4_old", "over", "g1", "g2", None, "u1", old)]:         # gone: registered, >30d
+        cur.execute("INSERT INTO four VALUES (?,?,?,?,?,?,?)", row)
+    for row in [("w_seat5", "over", "g1", "g2", '["g1","g2","g3","g4","u1"]', two_days),  # stays
+                ("w_guests", "over", "g1", "g2", '["g1","g2","g3"]', two_days),           # gone
+                ("w_badjson", "over", "g1", "g2", "not json", two_days)]:                 # gone
+        cur.execute("INSERT INTO wolf VALUES (?,?,?,?,?,?)", row)
+    conn.commit()
+    conn.close()
+
+    assert dbm.cleanup_stale_games("four") == 2
+    assert dbm.cleanup_stale_games("wolf") == 2
+    check = dbm.get_db_conn()
+    assert {r[0] for r in check.cursor().execute("SELECT id FROM four").fetchall()} == {"seat3", "seat4"}
+    assert {r[0] for r in check.cursor().execute("SELECT id FROM wolf").fetchall()} == {"w_seat5"}
+    check.close()
+

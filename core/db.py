@@ -15,8 +15,10 @@ just non-persistent) instead of crashing.
 reconnect_tokens). Each feature owns its own tables elsewhere: Spender's ``games``
 table, Castles of Crimson's ``coc_games``, and the Books tables.
 """
+import json
 import logging
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -252,6 +254,35 @@ _CLEANUP_MIN_INTERVAL = 3600
 _last_cleanup: dict[str, int] = {}
 
 
+_SEAT_COL = re.compile(r"player\d+_id")
+_DELETE_CHUNK = 200
+
+
+def _seat_columns(cur, table: str) -> tuple[list[str], str | None]:
+    """The seat columns a games table actually has: every `playerN_id`, plus
+    Where Wolf?'s `player_ids` JSON list (its only record of seats 3 and up).
+    Read from the schema rather than assumed, because the tables differ: two
+    seats (Duel, Orbit, ...), four (Spender, CoC, Dontminion, Black Castle), or
+    two plus the list (Where Wolf?)."""
+    try:
+        cur.execute(f"PRAGMA table_info({table})")
+        names = [r[1] for r in cur.fetchall()]
+    except Exception:  # noqa: BLE001 - fall back to the two columns every table has
+        names = []
+    seats = sorted((n for n in names if _SEAT_COL.fullmatch(n)), key=lambda n: int(n[6:-3]))
+    return (seats or ["player1_id", "player2_id"]), ("player_ids" if "player_ids" in names else None)
+
+
+def _row_seat_ids(row, seat_cols: list[str], ids_col: str | None) -> set[str]:
+    ids = {row[c] for c in seat_cols if row[c]}
+    if ids_col and row[ids_col]:
+        try:
+            ids.update(str(p) for p in json.loads(row[ids_col]) if p)
+        except (TypeError, ValueError):
+            pass
+    return ids
+
+
 def cleanup_stale_games(table: str, guest_seconds: int = DEFAULT_GUEST_RETENTION,
                         user_seconds: int = DEFAULT_USER_RETENTION,
                         open_seconds: int = DEFAULT_OPEN_RETENTION) -> int:
@@ -259,35 +290,56 @@ def cleanup_stale_games(table: str, guest_seconds: int = DEFAULT_GUEST_RETENTION
       * a never-started open lobby (`status='open'`) once it's older than
         `open_seconds` (default 48h) — registered host or not, since a waiting
         room nobody joined has no state to resume and no history to keep,
-      * an all-guest game (no player id present in `users`) once it's older than
+      * an all-guest game (no seated id present in `users`) once it's older than
         `guest_seconds` (default 24h),
       * a game with ANY registered player once it's older than `user_seconds`
         (default 30d) — so a registered user's history survives even a game they
         played with a guest.
+    "Any registered player" means ANY SEAT. This used to read only player1_id and
+    player2_id, so a registered player in seat 3 or 4 (Spender, CoC, Dontminion,
+    Black Castle) or seat 3+ of Where Wolf? had their game deleted as an all-guest
+    one after a day. The seat test is done here in Python over ids-only rows —
+    driver-agnostic, and the same answer for any number of seats.
     `table` is a trusted internal constant ("games" / "coc_games"), not user input.
     Returns the number of rows deleted (counted first, since the driver-agnostic
     cursor has no reliable rowcount on libsql)."""
+    assert table.isidentifier(), "table is a SQL identifier, not user input"
     now = int(time.time())
+    guest_cutoff, user_cutoff = now - guest_seconds, now - user_seconds
     open_where = "updated_at < ? AND status = 'open'"
-    guest_where = ("updated_at < ? "
-                   "AND (player1_id IS NULL OR player1_id NOT IN (SELECT id FROM users)) "
-                   "AND (player2_id IS NULL OR player2_id NOT IN (SELECT id FROM users))")
-    user_where = ("updated_at < ? "
-                  "AND (player1_id IN (SELECT id FROM users) OR player2_id IN (SELECT id FROM users))")
     conn = get_db_conn()
     try:
         cur = conn.cursor()
         deleted = 0
-        # The open clause runs FIRST so a row that is both stale-open and
-        # stale-by-players is counted once, under the reason it goes.
-        for where, cutoff in ((open_where, now - open_seconds),
-                              (guest_where, now - guest_seconds),
-                              (user_where, now - user_seconds)):
-            cur.execute(f"SELECT COUNT(*) FROM {table} WHERE {where}", (cutoff,))
-            n = cur.fetchone()[0]
-            if n:
-                cur.execute(f"DELETE FROM {table} WHERE {where}", (cutoff,))
-                deleted += n
+        # Open lobbies go FIRST so a row that is both stale-open and stale-by-players
+        # is counted once, under the reason it goes.
+        cur.execute(f"SELECT COUNT(*) FROM {table} WHERE {open_where}", (now - open_seconds,))
+        n = cur.fetchone()[0]
+        if n:
+            cur.execute(f"DELETE FROM {table} WHERE {open_where}", (now - open_seconds,))
+            deleted += n
+
+        seat_cols, ids_col = _seat_columns(cur, table)
+        cols = seat_cols + ([ids_col] if ids_col else [])
+        cur.execute(f"SELECT id, updated_at, {', '.join(cols)} FROM {table} WHERE updated_at < ?",
+                    (max(guest_cutoff, user_cutoff),))
+        rows = [(r["id"], r["updated_at"], _row_seat_ids(r, seat_cols, ids_col)) for r in cur.fetchall()]
+        seated = sorted(set().union(*(ids for _, _, ids in rows))) if rows else []
+        registered: set[str] = set()
+        for i in range(0, len(seated), _DELETE_CHUNK):
+            chunk = seated[i:i + _DELETE_CHUNK]
+            cur.execute(f"SELECT id FROM users WHERE id IN ({','.join('?' * len(chunk))})", tuple(chunk))
+            registered.update(r[0] for r in cur.fetchall())
+        guest_ids = [gid for gid, upd, ids in rows if not (ids & registered) and upd < guest_cutoff]
+        user_ids = [gid for gid, upd, ids in rows if ids & registered and upd < user_cutoff]
+        # The cutoff is repeated in the DELETE, so a game resumed between the read
+        # above and this write is not removed.
+        for ids, cutoff in ((guest_ids, guest_cutoff), (user_ids, user_cutoff)):
+            for i in range(0, len(ids), _DELETE_CHUNK):
+                chunk = ids[i:i + _DELETE_CHUNK]
+                cur.execute(f"DELETE FROM {table} WHERE updated_at < ? AND id IN ({','.join('?' * len(chunk))})",
+                            (cutoff, *chunk))
+            deleted += len(ids)
         conn.commit()
         if deleted:
             LOG.info("cleanup_stale_games(%s): removed %d stale game(s)", table, deleted)
