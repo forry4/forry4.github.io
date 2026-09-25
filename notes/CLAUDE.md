@@ -122,6 +122,11 @@ home menu for everyone (a guest gets a "sign in" page).
   the document regardless — so a note in the Trash showed edits it could never save.
   `ReadOnlyGuard` refuses any doc-changing transaction while the editor is not editable, and
   a trashed note's toolbar is Find alone.
+- **Ticking a checklist box does not focus the note.** tiptap's TaskItem focuses the editor
+  before it toggles, and on a phone focus raises the keyboard — every tick while READING a
+  list threw it up. A capture-phase `change` listener on the editor toggles the item itself
+  and stops the event before tiptap's. (The owner uses Safari on iOS; the e2e is Chromium,
+  so it asserts the cause — focus — not the keyboard.)
 - **16px floor** on every typing surface (title, prose, folder rename, caption, both search
   boxes) — the iOS zoom footgun. `formControlZoom` can't reach a signed-in-only page, so
   `notesEditor` in `webapp/test/screens.mjs` measures all six (stubbed API + seeded admin).

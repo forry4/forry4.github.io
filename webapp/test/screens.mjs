@@ -9079,6 +9079,23 @@ try {
 			});
 			return { items: items.length, tasks: tasks.length, samples, onBox, off: off.slice(0, 6), nOff: off.length, align };
 		});
+		// Ticking a checklist box must not focus the note: on a phone, focus raises the
+		// keyboard, so every tick while READING a list threw it over the list. The tick
+		// still has to land in the document (and so in the next save).
+		if (editorUp) {
+			await page.evaluate(() => document.activeElement?.blur());
+			await page.locator(".nt-prose li:has(> label) input").first().click();
+			const tick = await page.evaluate(() => ({
+				focused: document.querySelector(".nt-prose").contains(document.activeElement),
+				checked: document.querySelector(".nt-prose li:has(> label)")?.dataset.checked,
+			}));
+			const tickSaved = await page.waitForFunction(() => document.querySelector(".nt-status")?.textContent === "Saved",
+				null, { timeout: 8000 }).then(() => true, () => false)
+				&& JSON.stringify(db.saves[db.saves.length - 1]?.doc || {}).includes('"checked":true');
+			check("phone: ticking a checklist box checks and saves it without focusing the note (no keyboard)",
+				!tick.focused && tick.checked === "true" && tickSaved, JSON.stringify({ ...tick, tickSaved }));
+			await page.locator(".nt-prose li:has(> label) input").first().click();   // back to unchecked
+		}
 		check("phone: every list row was sampled (2 bullets, 3 checklist items)",
 			lists.items === 5 && lists.tasks === 3 && lists.samples > 500 && lists.onBox > 0, JSON.stringify(lists));
 		check("phone: a touch anywhere on a list row but the checkbox lands the caret in its text",

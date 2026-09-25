@@ -706,6 +706,33 @@ function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, noti
 	});
 	editorRef.current = editor;
 
+	// Ticking a checklist box must not focus the note. tiptap's own handler focuses the
+	// editor before it toggles, and on a phone focus is what raises the keyboard — so
+	// every tick while READING a checklist threw the keyboard over it. This runs first
+	// (capture), toggles the item itself, and stops the event before tiptap's handler.
+	useEffect(() => {
+		if (!editor) return undefined;
+		const dom = editor.view.dom;
+		const onChange = (e) => {
+			const box = e.target;
+			if (!(box instanceof HTMLInputElement) || box.type !== "checkbox") return;
+			const li = box.closest("li");
+			if (!li || !dom.contains(li)) return;
+			e.stopPropagation();
+			const { view } = editor;
+			let pos = null;
+			view.state.doc.descendants((n, p) => {
+				if (pos == null && n.type.name === "taskItem" && view.nodeDOM(p) === li) pos = p;
+				return pos == null;
+			});
+			const node = pos == null ? null : view.state.doc.nodeAt(pos);
+			if (!node || !editor.isEditable) { box.checked = !box.checked; return; }   // the Trash: stays as it was
+			view.dispatch(view.state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, checked: box.checked }));
+		};
+		dom.addEventListener("change", onChange, true);
+		return () => dom.removeEventListener("change", onChange, true);
+	}, [editor]);
+
 	// flush on hide / close / note switch
 	useEffect(() => {
 		mounted.current = true;
