@@ -8726,6 +8726,17 @@ try {
 				db.folders.push(f);
 				return r.fulfill(json({ ok: true, folder: f }));
 			}
+			if (pathname.startsWith("/notes/folder/") && method === "DELETE") {   // api.py delete_folder
+				const gone = new Set([pathname.split("/")[3]]);
+				for (let grew = true; grew;) {
+					grew = false;
+					for (const f of db.folders) if (gone.has(f.parent_id) && !gone.has(f.id)) { gone.add(f.id); grew = true; }
+				}
+				let trashed = 0;
+				for (const n of db.notes.values()) if (gone.has(n.folder_id) && n.deleted_at == null) { n.deleted_at = now; trashed++; }
+				db.folders = db.folders.filter((f) => !gone.has(f.id));
+				return r.fulfill(json({ ok: true, trashed }));
+			}
 			if (pathname.startsWith("/notes/folder/") && method === "POST") {
 				const f = db.folders.find((x) => x.id === pathname.split("/")[3]);
 				Object.assign(f, body);
@@ -8740,10 +8751,20 @@ try {
 			const nm = pathname.match(/^\/notes\/note\/([a-z0-9]+)$/);
 			if (nm && method === "GET") return r.fulfill(json({ ok: true, note: db.notes.get(nm[1]) }));
 			if (nm && method === "PUT") {
+				if (db.putDelay) await sleep(db.putDelay);
 				const n = db.notes.get(nm[1]);
+				if (n.deleted_at != null) return r.fulfill(json({ detail: "no such note" }, 404));
 				if (body.base_rev !== n.rev) return r.fulfill(json({ ok: false, conflict: true, note: n }, 409));
 				Object.assign(n, { title: body.title, doc: body.doc, rev: n.rev + 1, updated_at: now });
 				db.saves.push(body);
+				return r.fulfill(json({ ok: true, note: n }));
+			}
+			const mm = pathname.match(/^\/notes\/note\/([a-z0-9]+)\/meta$/);
+			if (mm && method === "POST") {   // notes/api.py update_note_meta: no rev bump
+				const n = db.notes.get(mm[1]);
+				if ("folder_id" in body) n.folder_id = body.folder_id;
+				if ("pinned" in body) n.pinned = !!body.pinned;
+				if ("trashed" in body) n.deleted_at = body.trashed ? now : null;
 				return r.fulfill(json({ ok: true, note: n }));
 			}
 			if (pathname === "/notes/image" && method === "POST") {
@@ -8898,6 +8919,102 @@ try {
 		check("every Notes typing surface is >= 16px (the iOS zoom floor)", fonts.every(([, px]) => px >= 16),
 			JSON.stringify(fonts));
 
+		// Leaving a note must never drop what was typed. Four ways it did, each measured
+		// against the stub's own copy of the note:
+		//  A. switching notes while a save was on the wire: the words typed during its
+		//     round trip waited for a timer that an unmounted editor never ran;
+		//  B. trashing the open note: its last save landed after the trash, was refused
+		//     as "no such note", and the page said the note was deleted "elsewhere";
+		//  D. deleting the folder of the open note: the same, and the editor stayed open;
+		//  C. a note in the Trash: its toolbar and shortcuts still changed the text on
+		//     screen, which a trashed note never saves.
+		if (editorUp) {
+			const noteByTitle = (t) => [...db.notes.values()].find((n) => n.title === t);
+			const textOf = (n) => (n?.doc ? JSON.stringify(n.doc) : "");
+			const recent = (t) => page.locator(".nt-sec", { hasText: "Recent" }).locator(".nt-note-row", { hasText: t }).first();
+			const saved = () => page.waitForFunction(() => document.querySelector(".nt-status")?.textContent === "Saved",
+				null, { timeout: 8000 }).then(() => true, () => false);
+			const toastsFor = async (ms) => {
+				const seen = [];
+				for (const end = Date.now() + ms; Date.now() < end; await sleep(100)) {
+					const t = await page.locator(".nt-toast").textContent({ timeout: 100 }).catch(() => null);
+					if (t && !seen.includes(t)) seen.push(t);
+				}
+				return seen;
+			};
+			await page.locator(".nt-search-x").click({ timeout: 2000 }).catch(() => {});   // back to the tree
+			await page.locator(".nt-side-acts .btn", { hasText: "Note" }).click();
+			await has(".nt-prose");
+			await page.locator(".nt-title").fill("Alpha");
+			await page.locator(".nt-title").press("Enter");
+			await page.keyboard.type("one");
+			const setup = await saved();
+			db.putDelay = 2500;
+			await page.keyboard.type(" two");
+			const inFlight = await page.waitForFunction(() => document.querySelector(".nt-status")?.textContent === "Saving…",
+				null, { timeout: 5000 }).then(() => true, () => false);
+			await page.keyboard.type(" three");
+			await recent("Parlor").locator(".nt-row-main").click();
+			db.putDelay = 0;
+			await page.waitForFunction(() => document.querySelector(".nt-title")?.value === "Parlor", null, { timeout: 5000 }).catch(() => {});
+			await sleep(3500);
+			check("switching notes mid-save keeps the words typed during it",
+				setup && inFlight && textOf(noteByTitle("Alpha")).includes("one two three"),
+				`setup=${setup} inFlight=${inFlight} saved=${textOf(noteByTitle("Alpha")).match(/one[^"]*/)?.[0]}`);
+
+			await recent("Alpha").locator(".nt-row-main").click();
+			await page.waitForFunction(() => document.querySelector(".nt-title")?.value === "Alpha", null, { timeout: 5000 }).catch(() => {});
+			await page.locator(".nt-prose").click();
+			await page.keyboard.press("Control+End");
+			await page.keyboard.type(" four");
+			await recent("Alpha").click({ button: "right" });
+			await page.locator(".nt-cmenu-it", { hasText: "Move to Trash" }).click();
+			const trashToasts = await toastsFor(2500);
+			const alpha = noteByTitle("Alpha");
+			check("trashing the open note saves its last edit first, and says it moved to the Trash",
+				alpha?.deleted_at != null && textOf(alpha).includes("one two three four")
+				&& trashToasts.length === 1 && trashToasts[0].includes("moved to the Trash"),
+				`trashed=${alpha?.deleted_at != null} saved=${textOf(alpha).match(/one[^"]*/)?.[0]} toasts=${JSON.stringify(trashToasts)}`);
+
+			await page.locator(".nt-trash-link").click();
+			await page.locator(".nt-trash-open", { hasText: "Alpha" }).click();
+			await page.waitForFunction(() => document.querySelector(".nt-status")?.textContent === "In the Trash", null, { timeout: 5000 }).catch(() => {});
+			const before = await page.locator(".nt-prose").innerHTML();
+			await page.locator(".nt-prose p").first().click();
+			await page.keyboard.press("Control+a");
+			await page.keyboard.press("Control+b");
+			const tools = await page.locator(".nt-toolbar .nt-tb").evaluateAll((bs) => bs.map((b) => b.getAttribute("aria-label")));
+			check("a note in the Trash cannot be changed: find only, and shortcuts do nothing",
+				before === await page.locator(".nt-prose").innerHTML() && tools.join() === "Find in note",
+				`tools=${tools.join()}`);
+			await page.locator(".nt-banner .btn", { hasText: "Restore" }).click();
+			await page.waitForFunction(() => !document.querySelector(".nt-banner"), null, { timeout: 5000 }).catch(() => {});
+
+			const confirm = (d) => d.accept();
+			page.on("dialog", confirm);
+			await page.locator(".nt-side-acts .btn", { hasText: "Folder" }).click();
+			await has(".nt-rename");
+			await page.locator(".nt-rename").fill("Scratch");
+			await page.locator(".nt-rename").press("Enter");
+			await page.locator(".nt-side-acts .btn", { hasText: "Note" }).click();
+			await page.waitForFunction(() => document.querySelector(".nt-title") === document.activeElement, null, { timeout: 5000 }).catch(() => {});
+			const deltaId = [...db.notes.keys()].pop();
+			await page.locator(".nt-title").fill("Delta");
+			await page.locator(".nt-title").press("Enter");
+			await page.keyboard.type("five");
+			await page.locator(".nt-folder-row", { hasText: "Scratch" }).click({ button: "right" });
+			await page.locator(".nt-cmenu-it", { hasText: "Delete folder" }).click();
+			const folderToasts = await toastsFor(2500);
+			page.off("dialog", confirm);
+			const delta = db.notes.get(deltaId);
+			check("deleting the open note's folder saves it into the Trash and closes it",
+				delta?.title === "Delta" && textOf(delta).includes("five") && delta.deleted_at != null
+				&& await page.locator(".nt-prose").count() === 0 && !folderToasts.some((t) => t.includes("elsewhere")),
+				JSON.stringify({ title: delta?.title, text: textOf(delta).match(/five[^"]*/)?.[0], trashed: delta?.deleted_at != null, toasts: folderToasts }));
+
+			await recent("Parlor").locator(".nt-row-main").click();   // the phone checks below edit this one
+			await page.waitForFunction(() => document.querySelector(".nt-title")?.value === "Parlor", null, { timeout: 5000 }).catch(() => {});
+		}
 		// phone: one pane at a time, Saved still visible, no sideways page
 		await page.setViewportSize({ width: 390, height: 844 });
 		await sleep(300);
@@ -8921,8 +9038,8 @@ try {
 		// hold, so it rewrote the selection and the native handles jumped mid-drag.
 		// Only the checkbox itself may land outside the text (tapping it toggles it).
 		if (editorUp) {
-			await page.locator(".nt-prose").click({ position: { x: 5, y: 5 } }).catch(() => {});
-			await page.keyboard.press("Control+End");
+			// the END of the note, whatever it ends with (an image) and however it was opened
+			await page.evaluate(() => document.querySelector(".nt-prose").editor.commands.focus("end"));
 			await page.keyboard.press("Enter");
 			await page.keyboard.type("- Bullet one");
 			await page.keyboard.press("Enter");

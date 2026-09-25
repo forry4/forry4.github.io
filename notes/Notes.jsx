@@ -115,6 +115,9 @@ export default function Notes({ authUser, onExit }) {
 	// The note just created here: its title takes focus when its editor MOUNTS. It was a
 	// 250ms timer, which fired mid-sentence if you started typing in the body first.
 	const freshNote = useRef(null);
+	// The open editor's flush(): saves what was typed and waits. Trashing the open note
+	// (or its folder) calls it first, or the last edits are refused as "no such note".
+	const flushOpen = useRef(null);
 
 	// ── search (the sidebar) ──
 	// `scope` is a folder id — that folder and every folder inside it — or null for all
@@ -355,6 +358,7 @@ export default function Notes({ authUser, onExit }) {
 
 	const trashNote = async (n) => {
 		try {
+			if (openNote === n.id) await flushOpen.current?.();
 			patchNote(await api.noteMeta(n.id, { trashed: true }));
 			if (openNote === n.id) go(null);
 			notify(`“${n.title || "Untitled"}” moved to the Trash.`);
@@ -385,8 +389,11 @@ export default function Notes({ authUser, onExit }) {
 			? `Delete “${f.name}”? Its ${n} note${n === 1 ? "" : "s"} will move to the Trash.`
 			: `Delete the empty folder “${f.name}”?`;
 		if (!window.confirm(msg)) return;
+		const closing = openMeta && openMeta.deleted_at == null && subtree(f.id).has(openMeta.folder_id);
 		try {
+			if (closing) await flushOpen.current?.();
 			await api.deleteFolder(f.id);
+			if (closing) go(null);   // the open note is in the Trash now, like "Move to Trash"
 			await load();   // the server trashed a whole subtree — take its word for it
 		} catch (e) { fail(e); }
 	};
@@ -714,7 +721,7 @@ export default function Notes({ authUser, onExit }) {
 									noteCreated: (n) => { patchNote(n); if (n.folder_id) expandTo(n.folder_id); },
 									folderOf: () => notes.find((x) => x.id === openNote)?.folder_id ?? null,
 								}}
-								onSaved={patchNote}
+								onSaved={patchNote} flushRef={flushOpen}
 								onGone={() => { notify("This note was deleted or moved to the Trash elsewhere."); load(); }}
 								onRestore={restoreNote} />
 						</Suspense>

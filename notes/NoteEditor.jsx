@@ -38,9 +38,10 @@ const dataAttr = (name, key, fallback) => ({
 
 const WIDTHS = [["small", "S", "Small"], ["half", "M", "Medium"], ["full", "L", "Full width"]];
 
-function ImageView({ node, updateAttributes, deleteNode, selected, extension }) {
+function ImageView({ node, updateAttributes, deleteNode, selected, extension, editor }) {
 	const { imageId, uploadKey, width, align, caption, w, h } = node.attrs;
 	const api = extension.options.api;
+	const ro = !editor.isEditable;
 	const pending = !imageId && uploadKey ? pendingUploads.get(uploadKey) : null;
 	const [src, setSrc] = useState(pending?.previewUrl || null);
 	const [failed, setFailed] = useState(false);
@@ -82,12 +83,12 @@ function ImageView({ node, updateAttributes, deleteNode, selected, extension }) 
 			{/* The controls sit UNDER the image, never on it: a screenshot is kept for the
 			    text in it, and an overlay on its top edge also slid under the sticky
 			    toolbar the moment a tall image was scrolled. */}
-			{(selected || caption || capOpen) && (
+			{((selected && !ro) || caption || capOpen) && (
 				<div className="nt-img-bar">
 					<input ref={capRef} className="nt-img-cap" value={caption || ""} placeholder="Add a caption…"
-						aria-label="Image caption" maxLength={300} onBlur={() => setCapOpen(false)}
+						aria-label="Image caption" maxLength={300} readOnly={ro} onBlur={() => setCapOpen(false)}
 						onChange={(e) => updateAttributes({ caption: e.target.value })} />
-					{selected && (
+					{selected && !ro && (
 						<div className="nt-img-tools" contentEditable={false}>
 							{WIDTHS.map(([id, short, name]) => (
 								<button key={id} type="button" className={width === id ? "on" : ""} title={name} aria-label={name}
@@ -267,6 +268,20 @@ const JoinLists = Extension.create({
 	},
 });
 
+// ─── read-only means read-only ────────────────────────────────────────────────
+// A note in the Trash opens with `editable: false`, which only stops TYPING: the
+// toolbar, keyboard shortcuts, the image's size buttons and its caption field all run
+// commands, and a command changes the document whether or not it is editable. Those
+// changes showed on screen and were never saved (a trashed note refuses saves), so the
+// note looked edited and wasn't. Refused here, for every source at once.
+const ReadOnlyGuard = Extension.create({
+	name: "readOnlyGuard",
+	addProseMirrorPlugins() {
+		const { editor } = this;
+		return [new Plugin({ filterTransaction: (tr) => !tr.docChanged || editor.isEditable })];
+	},
+});
+
 // ─── find in note ─────────────────────────────────────────────────────────────
 // Select match `i` and scroll it to a third of the way down the note — BELOW the
 // sticky toolbar + find bar, which ProseMirror's own scrollIntoView does not know
@@ -331,7 +346,7 @@ function B({ on, label, onDown, disabled, children, cls = "" }) {
 	);
 }
 
-function Toolbar({ editor, onPickImages, onFind, findOpen, fileRef }) {
+function Toolbar({ editor, onPickImages, onFind, findOpen, fileRef, readOnly }) {
 	const s = useEditorState({
 		editor,
 		selector: ({ editor: e }) => ({
@@ -383,15 +398,19 @@ function Toolbar({ editor, onPickImages, onFind, findOpen, fileRef }) {
 			    opens the picker on CLICK (a tap's release), which iOS reliably treats
 			    as a user gesture; mousedown only keeps the editor's selection. */}
 			<div className="nt-tb-group">
-				<button type="button" className="nt-tb nt-tb-add" aria-label="Add image" title="Add image"
-					onMouseDown={(e) => e.preventDefault()} onClick={() => fileRef.current?.click()}>
-					{I.image}<span>Image</span>
-				</button>
-				<input ref={fileRef} type="file" accept="image/*" multiple hidden
-					onChange={(e) => { const f = Array.from(e.target.files || []); e.target.value = ""; if (f.length) onPickImages(f); }} />
+				{!readOnly && <>
+					<button type="button" className="nt-tb nt-tb-add" aria-label="Add image" title="Add image"
+						onMouseDown={(e) => e.preventDefault()} onClick={() => fileRef.current?.click()}>
+						{I.image}<span>Image</span>
+					</button>
+					<input ref={fileRef} type="file" accept="image/*" multiple hidden
+						onChange={(e) => { const f = Array.from(e.target.files || []); e.target.value = ""; if (f.length) onPickImages(f); }} />
+				</>}
 				<button type="button" className={`nt-tb ${findOpen ? "on" : ""}`} aria-label="Find in note" title="Find in note (Ctrl+F)"
 					aria-pressed={findOpen} onMouseDown={(e) => e.preventDefault()} onClick={onFind}>{I.search}</button>
 			</div>
+			{/* a note in the Trash can be read and searched, not formatted */}
+			{!readOnly && <>
 			<div className="nt-tb-group">
 				<B label="Heading" on={s.h1} onDown={run((c) => c.toggleHeading({ level: 1 }))} cls="nt-tb-txt">H1</B>
 				<B label="Subheading" on={s.h2} onDown={run((c) => c.toggleHeading({ level: 2 }))} cls="nt-tb-txt">H2</B>
@@ -423,6 +442,7 @@ function Toolbar({ editor, onPickImages, onFind, findOpen, fileRef }) {
 				<B label="Undo" disabled={!s.canUndo} onDown={run((c) => c.undo())}>{I.undo}</B>
 				<B label="Redo" disabled={!s.canRedo} onDown={run((c) => c.redo())}>{I.redo}</B>
 			</div>
+			</>}
 		</div>
 	);
 }
@@ -441,7 +461,7 @@ const SAVE_DELAY = 1000;
 const TOUCH = typeof window !== "undefined" && window.matchMedia?.("(hover: none) and (pointer: coarse)").matches;
 const KEEPALIVE_MAX = 60_000;   // fetch keepalive bodies are capped at 64KB
 
-function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, notify, statusSlot, focusTitle, onTitleFocused, findRequest, nav }) {
+function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, notify, statusSlot, focusTitle, onTitleFocused, findRequest, nav, flushRef }) {
 	const noteId = initial.id;
 	const trashed = initial.deleted_at != null;
 	const [title, setTitle] = useState(initial.title || "");
@@ -456,6 +476,8 @@ function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, noti
 	const savedSeq = useRef(0);
 	const saving = useRef(false);
 	const again = useRef(false);
+	const againNow = useRef(false);   // the deferred save was a flush (leaving, hiding) — no delay
+	const inflight = useRef(null);    // the save request on the wire, for flush() to wait on
 	const timer = useRef(null);
 	const retry = useRef(0);
 	const latest = useRef({ title: initial.title || "", doc: initial.doc });
@@ -477,7 +499,7 @@ function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, noti
 	const save = useCallback(async ({ keepalive = false } = {}) => {
 		clearTimeout(timer.current);
 		if (statusRef.current === "conflict" || statusRef.current === "readonly" || statusRef.current === "gone") return;
-		if (saving.current) { again.current = true; return; }
+		if (saving.current) { again.current = true; if (keepalive) againNow.current = true; return; }
 		const seq = editSeq.current;
 		if (seq === savedSeq.current) return;
 		const body = { title: latest.current.title, doc: stripPending(latest.current.doc), base_rev: revRef.current };
@@ -485,7 +507,8 @@ function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, noti
 		saving.current = true;
 		setStatus("saving");
 		try {
-			const n = await api.saveNote(noteId, body, { keepalive: ka });
+			inflight.current = api.saveNote(noteId, body, { keepalive: ka });
+			const n = await inflight.current;
 			revRef.current = n.rev;
 			savedSeq.current = seq;
 			retry.current = 0;
@@ -508,12 +531,41 @@ function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, noti
 			}
 		} finally {
 			saving.current = false;
+			inflight.current = null;
 			if ((again.current || editSeq.current > savedSeq.current) && statusRef.current === "dirty") {
 				again.current = false;
-				if (mounted.current) timer.current = setTimeout(() => save(), SAVE_DELAY);
+				// A flush that arrived mid-save (switching notes, closing, hiding the tab)
+				// runs NOW: once unmounted there is no timer to wait for, and the words
+				// typed during the save's round trip were silently dropped.
+				if (againNow.current || !mounted.current) { againNow.current = false; save({ keepalive: true }); }
+				else timer.current = setTimeout(() => save(), SAVE_DELAY);
 			}
 		}
 	}, [api, noteId]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+	// Save everything typed so far and WAIT for it. The page calls this before trashing
+	// the open note (or deleting its folder): a save that lands after the trash is
+	// refused as "no such note", which dropped the last words typed and then reported
+	// the note as "deleted elsewhere". Gives up quietly offline / in conflict — the
+	// page's action goes ahead either way.
+	const flush = async () => {
+		for (let i = 0; i < 6; i++) {
+			if (saving.current) {
+				await (inflight.current ? inflight.current.catch(() => {}) : new Promise((r) => setTimeout(r, 50)));
+				continue;
+			}
+			if (editSeq.current === savedSeq.current || !["dirty", "saved"].includes(statusRef.current)) return;
+			await save();
+		}
+	};
+	const flushImpl = useRef(flush);
+	flushImpl.current = flush;
+	useEffect(() => {
+		if (!flushRef) return undefined;
+		const f = () => flushImpl.current();
+		flushRef.current = f;
+		return () => { if (flushRef.current === f) flushRef.current = null; };
+	}, [flushRef]);
 
 	const markDirty = () => {
 		editSeq.current += 1;
@@ -597,6 +649,7 @@ function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, noti
 			NoteImage.configure({ api }),
 			Indent,
 			JoinLists,
+			ReadOnlyGuard,
 			FindInNote,
 			Highlight,
 			TextAlign.configure({ types: ["heading", "paragraph"], alignments: ["left", "center", "right"] }),
@@ -975,7 +1028,7 @@ function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, noti
 		<div className="nt-editor">
 			{editor && (
 				<div className="nt-bars">
-					<Toolbar editor={editor} onPickImages={(f) => insertImages(f)} findOpen={findOpen} fileRef={fileRef}
+					<Toolbar editor={editor} onPickImages={(f) => insertImages(f)} findOpen={findOpen} fileRef={fileRef} readOnly={trashed}
 						onFind={() => (findOpen ? closeFind() : openFind(null))} />
 					{findOpen && <FindBar editor={editor} text={findText} setText={setFindText} onClose={closeFind} inputRef={findInput} />}
 				</div>
@@ -1019,7 +1072,7 @@ function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, noti
 
 // Loads a note, then hands it to the editor. `version` remounts the editor with a
 // fresh copy — how "Load theirs" and Restore take effect.
-export default function NoteEditor({ api, noteId, onSaved, onGone, onRestore, notify, statusSlot, focusTitle, onTitleFocused, findRequest, nav }) {
+export default function NoteEditor({ api, noteId, onSaved, onGone, onRestore, notify, statusSlot, focusTitle, onTitleFocused, findRequest, nav, flushRef }) {
 	const [note, setNote] = useState(null);
 	const [err, setErr] = useState(null);
 	const [version, setVersion] = useState(0);
@@ -1045,7 +1098,7 @@ export default function NoteEditor({ api, noteId, onSaved, onGone, onRestore, no
 	return (
 		<LoadedEditor key={`${note.id}:${note.rev}:${version}`} api={api} initial={note} notify={notify} statusSlot={statusSlot}
 			focusTitle={focusTitle} onTitleFocused={onTitleFocused} findRequest={findRequest} nav={nav}
-			onSaved={onSaved} onGone={onGone}
+			onSaved={onSaved} onGone={onGone} flushRef={flushRef}
 			onReload={(server) => { if (server) { setNote(server); setVersion((v) => v + 1); } else setVersion((v) => v + 1); }}
 			onRestore={async () => { await onRestore(note.id); setVersion((v) => v + 1); }} />
 	);

@@ -111,6 +111,17 @@ home menu for everyone (a guest gets a "sign in" page).
   and deleting the line between two lists all left two lists touching, spaced as separate
   blocks (a hole mid-list, a numbered list restarting at 1). `notesEditor` replays those
   keystrokes and measures every gap.
+- **Leaving a note never drops what was typed.** Three exits did (`notesEditor` covers each
+  against the stub's copy): switching notes while a save was on the wire (the follow-up save
+  waited on a timer an unmounted editor never runs; a flush that arrives mid-save now runs the
+  moment that save returns); and trashing the open note, or deleting its folder (the last save
+  landed AFTER the trash, was refused as "no such note", and the page blamed "elsewhere"). The
+  page now awaits the editor's `flush()` (handed up through `flushRef`) before either.
+- **Read-only is enforced on the document, not the keyboard.** `editable: false` only stops
+  typing; toolbar buttons, shortcuts and the image's own controls run COMMANDS, which change
+  the document regardless — so a note in the Trash showed edits it could never save.
+  `ReadOnlyGuard` refuses any doc-changing transaction while the editor is not editable, and
+  a trashed note's toolbar is Find alone.
 - **16px floor** on every typing surface (title, prose, folder rename, caption, both search
   boxes) — the iOS zoom footgun. `formControlZoom` can't reach a signed-in-only page, so
   `notesEditor` in `webapp/test/screens.mjs` measures all six (stubbed API + seeded admin).
