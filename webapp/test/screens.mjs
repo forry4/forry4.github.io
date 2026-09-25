@@ -979,6 +979,34 @@ try {
 		// New Game -> the modal defaults to a vs-AI opponent, so accept and create.
 		await page.locator(".lby-cta").click({ timeout: 15_000 }).catch(() => {});
 		check("the create-game modal opens", await has(".cm-panel"));
+		// The create modal shares RulesModal's focus handling (useModalFocus): it is a
+		// labelled dialog, focus moves in, Tab cannot leave it for the lobby behind the
+		// backdrop, and Escape hands focus back to the button that opened it.
+		const cmDialog = await page.evaluate(() => {
+			const p = document.querySelector(".cm-panel");
+			const label = document.getElementById(p?.getAttribute("aria-labelledby") || "-");
+			return { role: p?.getAttribute("role"), label: label?.textContent || "", inside: !!p?.contains(document.activeElement) };
+		});
+		check("the create modal is a labelled dialog that takes focus",
+			cmDialog.role === "dialog" && cmDialog.label.length > 0 && cmDialog.inside, JSON.stringify(cmDialog));
+		const cmControls = await page.evaluate(() => {
+			const items = [...document.querySelectorAll(".cm-panel button:not([disabled]), .cm-panel input:not([disabled]), .cm-panel select:not([disabled])")]
+				.filter((el) => el.getClientRects().length);
+			items[items.length - 1]?.focus();
+			return items.length;
+		});
+		await page.keyboard.press("Tab");
+		const cmWrapped = await page.evaluate(() => !!document.querySelector(".cm-panel")?.contains(document.activeElement));
+		check("Tab past the create modal's last control stays inside it", cmControls > 1 && cmWrapped, `${cmControls} controls`);
+		await page.keyboard.press("Escape");
+		await page.waitForFunction(() => !document.querySelector(".cm-panel"), null, { timeout: 5_000 }).catch(() => {});
+		const cmClosed = await page.evaluate(() => ({
+			open: !!document.querySelector(".cm-panel"),
+			onCta: !!document.activeElement?.classList.contains("lby-cta"),
+		}));
+		check("Escape closes the create modal and returns focus to its button", !cmClosed.open && cmClosed.onCta, JSON.stringify(cmClosed));
+		await page.locator(".lby-cta").click({ timeout: 15_000 }).catch(() => {});
+		await has(".cm-panel");
 		await page.locator(".cm-create").click({ timeout: 15_000 }).catch(() => {});
 
 		// A vs-AI game starts immediately — no waiting room.
@@ -9285,8 +9313,13 @@ try {
 		{
 			const { ctx, page } = await open({ width: 1280, height: 860 }, { status: 401 });
 			await page.goto(`http://localhost:${PORT}/profile`, { waitUntil: "networkidle" });
-			const said = await page.locator(".lby-empty").innerText({ timeout: 25_000 }).catch(() => "");
-			check("an expired session says so", /session has expired/i.test(said), said);
+			// A 401 from /profile is handed to the shell (SESSION_EXPIRED), the same path
+			// the lobbies' history fetch takes: the dead login is cleared and the sign-in
+			// screen says why, and signing in returns to /profile.
+			const said = await page.locator(".auth-notice").innerText({ timeout: 25_000 }).catch(() => "");
+			check("an expired session hands off to sign-in and says why", /session expired/i.test(said), said);
+			const stored = await page.evaluate(() => localStorage.getItem("spender_user"));
+			check("the dead login is cleared", stored === null, String(stored).slice(0, 80));
 			await ctx.close();
 		}
 		{

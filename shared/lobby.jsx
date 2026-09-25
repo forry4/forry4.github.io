@@ -12,7 +12,7 @@
 // Prepend `lobbyCss` to a screen's own CSS, same as baseCss.
 // Components are self-contained (the header renders its OWN back/rules buttons via
 // .lby-back/.lby-headbtn) so the kit never depends on a game's button system.
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useId } from "react";
 
 // CSS lives in the sibling .css file(s) imported below, NOT in a JS template
 // literal. `?inline` hands us the stylesheet as a STRING, so it is still injected
@@ -716,9 +716,12 @@ export function LobbyCreateRow({ onCreate, onJoin, onRefresh, refreshing = false
 // Append `rulesModalCss` to the game's CSS (after `lobbyCreateRowCss`).
 export const rulesModalCss = _rulesModalCssText;
 
-export function RulesModal({ title = "How to play", onClose, closeLabel = "Got it",
-	icon = RULES_GLYPH, children }) {
-	const panelRef = useRef(null);
+// ─── Modal focus (RulesModal and CreateModal) ───────────────────────────────
+// Focus moves into the panel on open, Tab and Shift+Tab stay inside it, Escape
+// closes it, and focus goes back to whatever opened it on close. ONE copy for
+// both shared modals: CreateModal had only the Escape key, so a keyboard user
+// tabbed straight out of it into the lobby behind the backdrop.
+export function useModalFocus(panelRef, onClose) {
 	const onCloseRef = useRef(onClose);
 	useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
 	useEffect(() => {
@@ -734,7 +737,8 @@ export function RulesModal({ title = "How to play", onClose, closeLabel = "Got i
 		// to a stop. It also raced this modal's own render gate, which read
 		// activeElement once and went red on 7 of 9 lobbies on a loaded CI runner.
 		// The frame is kept only as a SECOND attempt, for a panel whose children
-		// mount a tick late; it no-ops once focus is already inside.
+		// mount a tick late; it no-ops once focus is already inside (so a field with
+		// autoFocus keeps it).
 		const takeFocus = () => { if (!panel?.contains(document.activeElement)) focusable()[0]?.focus(); };
 		takeFocus();
 		const focusFrame = requestAnimationFrame(takeFocus);
@@ -754,7 +758,13 @@ export function RulesModal({ title = "How to play", onClose, closeLabel = "Got i
 			document.removeEventListener("keydown", onKey);
 			if (previouslyFocused instanceof HTMLElement && document.contains(previouslyFocused)) previouslyFocused.focus();
 		};
-	}, []);
+	}, [panelRef]);
+}
+
+export function RulesModal({ title = "How to play", onClose, closeLabel = "Got it",
+	icon = RULES_GLYPH, children }) {
+	const panelRef = useRef(null);
+	useModalFocus(panelRef, onClose);
 	return (
 		<div className="rl-backdrop" onClick={onClose}>
 			<div className="rl-panel" role="dialog" aria-modal="true" aria-label={title}
@@ -828,18 +838,18 @@ export function RulesTip({ children }) {
 	return <div className="rl-tip">{children}</div>;
 }
 
-// Backdrop + panel + titled header with a ✕. Backdrop click and Escape both close.
+// Backdrop + panel + titled header with a ✕. Backdrop click and Escape both close;
+// focus is held inside the panel while it is open (useModalFocus).
 export function CreateModal({ title, onClose, children }) {
-	useEffect(() => {
-		const onKey = (e) => { if (e.key === "Escape") onClose(); };
-		document.addEventListener("keydown", onKey);
-		return () => document.removeEventListener("keydown", onKey);
-	}, [onClose]);
+	const panelRef = useRef(null);
+	const titleId = useId();
+	useModalFocus(panelRef, onClose);
 	return (
 		<div className="cm-backdrop" onClick={onClose}>
-			<div className="cm-panel" onClick={(e) => e.stopPropagation()}>
+			<div className="cm-panel" role="dialog" aria-modal="true" aria-labelledby={titleId}
+				ref={panelRef} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
 				<div className="cm-head">
-					<div className="cm-title">{title}</div>
+					<div className="cm-title" id={titleId}>{title}</div>
 					<button type="button" className="cm-x" aria-label="Close" onClick={onClose}>✕</button>
 				</div>
 				{children}

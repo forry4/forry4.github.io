@@ -11,7 +11,7 @@
  * Bot tiers are named from shared/botTiers.js, the lists each game's create modal
  * renders, so a tier reads the same here as it does in that game's lobby.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { baseCss } from "./theme.js";
 import {
 	lobbyCss, LobbyHeader, LobbyHero, LobbyUser, LobbySectionHd, LobbyEmpty, LobbyLoading,
@@ -20,6 +20,7 @@ import {
 import { GAME_INFO } from "./catalog.js";
 import { GAME_EMBLEM } from "./emblems.jsx";
 import { botTierLabel } from "./botTiers.js";
+import { SESSION_EXPIRED } from "./lobbyHistory.js";
 import _css from "./Profile.css?inline";
 
 const WS_BASE = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
@@ -193,12 +194,22 @@ export default function Profile({ authUser, onExit }) {
 	const [oppFilter, setOppFilter] = useState("");
 	const [resultFilter, setResultFilter] = useState("");
 
+	const authUserRef = useRef(authUser);
+	authUserRef.current = authUser;
 	const load = useCallback(async () => {
 		if (!token) return;
 		setStatus("loading");
 		try {
 			const res = await fetch(`${HTTP_BASE}/profile`, { headers: { Authorization: `Bearer ${token}` } });
-			if (res.status === 401) { setStatus("expired"); return; }
+			if (res.status === 401) {
+				// A 401 here is definitive (GET /profile answers it only for a dead
+				// session). Hand it to the shell the way the lobbies do: it signs out,
+				// takes you to sign-in and brings you back to this page afterwards. The
+				// "expired" state only shows if nothing is listening.
+				setStatus("expired");
+				window.dispatchEvent(new CustomEvent(SESSION_EXPIRED, { detail: { ...authUserRef.current, session_token: token } }));
+				return;
+			}
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			const body = await res.json();
 			setRows(body.history || []);
