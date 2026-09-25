@@ -97,6 +97,13 @@ home menu for everyone (a guest gets a "sign in" page).
   valid document. Menu Paste reads the clipboard (Chrome/Edge ask once; Firefox mostly
   refuses, and the menu then says to use Ctrl+V) and goes through `view.pasteHTML/pasteText`,
   the same pipeline as a real paste.
+- **A checklist's checkbox floats over its text's left padding; it is not a flex column.**
+  The item is `<li><label contenteditable=false>☐</label><div>text</div></li>`. As a flex
+  column, every touch in the gutter (under the box, beside it) hit-tested to the LABEL,
+  a DOM point ProseMirror cannot hold, so it rewrote the selection and a phone's selection
+  handles jumped mid-drag ("selecting text on mobile is pain, especially checklists").
+  `notesEditor` samples every point of every list row at 390px and fails any that does not
+  land the caret in text, except the checkbox itself.
 - **16px floor** on every typing surface (title, prose, folder rename, caption, both search
   boxes) — the iOS zoom footgun. `formControlZoom` can't reach a signed-in-only page, so
   `notesEditor` in `webapp/test/screens.mjs` measures all six (stubbed API + seeded admin).

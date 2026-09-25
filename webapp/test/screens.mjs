@@ -8913,6 +8913,62 @@ try {
 		check("phone: an open note hides the list, keeps Saved in the header, no sideways scroll",
 			phone.side === "none" && phone.over <= 0 && phone.status, JSON.stringify(phone));
 		check("phone: the Image button is fully on screen", phone.imageBtn, JSON.stringify(phone));
+
+		// phone: a touch anywhere on a list row must put the caret in that row's TEXT.
+		// A checklist item is <li><label contenteditable=false>☐</label><div>text</div></li>,
+		// and with the label as a flex column the whole left gutter (under the box, and
+		// the gap beside it) hit-tested to the LABEL — a DOM point ProseMirror cannot
+		// hold, so it rewrote the selection and the native handles jumped mid-drag.
+		// Only the checkbox itself may land outside the text (tapping it toggles it).
+		if (editorUp) {
+			await page.locator(".nt-prose").click({ position: { x: 5, y: 5 } }).catch(() => {});
+			await page.keyboard.press("Control+End");
+			await page.keyboard.press("Enter");
+			await page.keyboard.type("- Bullet one");
+			await page.keyboard.press("Enter");
+			await page.keyboard.type("Bullet two runs long enough to wrap onto a second line on a phone");
+			await page.keyboard.press("Enter");
+			await page.keyboard.press("Enter");
+			await page.keyboard.type("[ ] Task one");
+			await page.keyboard.press("Enter");
+			await page.keyboard.type("Task two runs long enough to wrap onto a second line on a phone");
+			await page.keyboard.press("Enter");
+			await page.keyboard.type("Task three");
+			await sleep(200);
+		}
+		const lists = await page.evaluate(() => {
+			const items = [...document.querySelectorAll(".nt-prose li")];
+			const tasks = items.filter((li) => li.querySelector(":scope > label"));
+			let samples = 0, onBox = 0;
+			const off = [];
+			for (const li of items) {
+				const r = li.getBoundingClientRect();
+				const ul = li.parentElement.getBoundingClientRect();
+				for (let y = r.top + 1; y < r.bottom - 1; y += 3) for (let x = ul.left + 1; x < r.right - 1; x += 3) {
+					const el = document.elementFromPoint(x, y);
+					if (!el || el.closest("li") !== li) continue;
+					if (el.closest("label")) { onBox++; continue; }
+					samples++;
+					const c = document.caretRangeFromPoint(x, y)?.startContainer;
+					const at = c && (c.nodeType === 3 ? c.parentElement : c);
+					if (!at || !at.closest("p") || at.closest("label")) off.push(`${Math.round(x - ul.left)},${Math.round(y - r.top)}:${at?.nodeName}`);
+				}
+			}
+			const align = tasks.map((li) => {
+				const box = li.querySelector("input").getBoundingClientRect();
+				const text = document.createRange(); text.selectNodeContents(li.querySelector("p"));
+				const line = text.getClientRects()[0];
+				return { gap: Math.round(line.left - box.right), dy: Math.round((box.top + box.bottom) / 2 - (line.top + line.bottom) / 2) };
+			});
+			return { items: items.length, tasks: tasks.length, samples, onBox, off: off.slice(0, 6), nOff: off.length, align };
+		});
+		check("phone: every list row was sampled (2 bullets, 3 checklist items)",
+			lists.items === 5 && lists.tasks === 3 && lists.samples > 500 && lists.onBox > 0, JSON.stringify(lists));
+		check("phone: a touch anywhere on a list row but the checkbox lands the caret in its text",
+			lists.nOff === 0, JSON.stringify(lists));
+		check("phone: each checkbox sits left of its text, centred on the first line",
+			lists.align.length === 3 && lists.align.every((a) => a.gap >= 6 && Math.abs(a.dy) <= 3), JSON.stringify(lists.align));
+
 		await page.locator(".nt-mobile-back").click().catch(() => {});
 		check("phone: All notes returns to the list", await has(".nt-side-acts", 5000)
 			&& await page.evaluate(() => getComputedStyle(document.querySelector(".nt-main")).display === "none"));
