@@ -368,6 +368,33 @@ export async function runDissonanceBotLoop(rec, myId, publish, isCurrent) {
   }
 }
 
+/** A move the bot can always make without searching, for a decision whose
+ *  answer the referee refused. Online, a decision the browser cannot answer
+ *  is played by the SERVER bot (the per-decision fallback every client-served
+ *  tier has); offline there is no server, and a refused answer used to leave
+ *  the round frozen with nothing to press. This is that fallback: weak, legal,
+ *  and never a stall. */
+function fallbackMove(view) {
+  if (view.phase === "swap") return { kind: "swap", take: null, give: null };
+  if (view.phase === "double") return { kind: "double", on: false };
+  if (view.phase === "play") return view.legal?.length ? { kind: "play", card: view.legal[0] } : null;
+  if (view.phase === "auction") {
+    if (view.options?.may_pass) return { kind: "pass" };
+    const bid = view.options?.bids?.[0];
+    return bid ? { kind: "bid", level: bid[0], denom: bid[1] } : null;
+  }
+  return null;
+}
+
+/** Play the bot's fallback move for the position as it stands. */
+export async function applyOfflineBotFallback(rec, myId) {
+  const { view } = await engine({ kind: "view", g: rec.g, seat: aiSeatOf(rec) });
+  if (turnSeatOf(view) !== aiSeatOf(rec)) return { ok: false, err: "not the bot's turn" };
+  const move = fallbackMove(view);
+  if (!move) return { ok: false, err: `no fallback move in the ${view.phase} phase` };
+  return applyOfflineDissonanceMove(rec, move, myId, { isAi: true });
+}
+
 /** Which seat must act, off the VIEW rather than the dict — the view is what
  *  the online path reads too, so there is one answer to "whose turn". */
 function turnSeatOf(view) {
@@ -385,6 +412,16 @@ function turnSeatOf(view) {
  *  spinning up to play a singleton, which is the same economy the server's
  *  "only arm where there is a choice" rule buys. */
 function onlyMove(view) {
+  // THE SWAP IS NEVER SEARCHED. Online it stays on the server bot on purpose
+  // (`CLIENT_AI_PHASES` in main.py leaves it out: it is a choice about
+  // information with no contract price the solver can search), so the browser
+  // pool has no swap answer at all — handed one, it searched a CARD and the
+  // referee refused "play card N" in the swap phase. That froze every offline
+  // round the bot declared: nothing re-armed after the refusal. Offline has no
+  // server bot to take it, so the bot stands pat, which is always legal. The
+  // fitted swap (`bot.choose_swap`, `bid::SwapPolicy::choose` in the Rust core)
+  // is worth ~+1.5 to a declarer and is the follow-up, not a reason to stall.
+  if (view.phase === "swap") return { kind: "swap", take: null, give: null };
   if (view.phase === "play") {
     return view.legal?.length === 1 ? { kind: "play", card: view.legal[0] } : null;
   }

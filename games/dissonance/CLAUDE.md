@@ -1366,6 +1366,22 @@ seat being asked. Without them every worker errored, the main thread's filter
 dropped them without a word, and the round sat in the auction forever. Same
 silent shape as the online bug that section already records.
 
+**…AND THE PHASE THE SERVER KEEPS FOR ITSELF FROZE EVERY ROUND THE BOT DECLARED
+(fixed 2026-09-26).** Online, the talon and the SWAP never reach the browser —
+`CLIENT_AI_PHASES` leaves them out and the server bot plays them. The offline loop
+had no such line: it armed the bot's swap as a plain search, the pool answered
+"play card N", the referee refused a card play in the swap phase, and nothing
+re-armed — a board with no button to press. It surfaced as a "flaky"
+`offlineDissonance` (Pages, `edd28958`) only because an offline deal is random
+and the bot declares on some of them. Now: the bot STANDS PAT offline
+(`onlyMove`, always legal), and any refused bot answer plays
+`applyOfflineBotFallback` — the offline analog of the server finishing a decision
+the browser could not — so a refusal costs a move, never the round. The gate
+FORCES the case (it passes until the bot declares, up to four deals, and asserts
+the trick). **Open: the fitted swap** — worth ~+1.5 to a declarer; the arithmetic
+already exists as `bid::SwapPolicy::choose` in the Rust core, but the worker does
+not expose it and the weights reach the browser only on an armed online auction.
+
 **A note on the browser gate, because it looks like a softened claim and is
 not.** `offlineDissonance` flips the network off only once the search pool has
 loaded. localhost runs no service worker, so a page taken offline before its

@@ -18,7 +18,7 @@ import DissonanceScorecard from "./scorecard.jsx";
 // `engine.view_for`'s payload and both take the same move objects -- so the
 // wiring is a `send` that routes to the driver and a bot loop that arms
 // `ai_search` the way the server does. See offline.js.
-import { dissonanceOfflineRoomData, applyOfflineDissonanceMove,
+import { dissonanceOfflineRoomData, applyOfflineDissonanceMove, applyOfflineBotFallback,
   runDissonanceBotLoop, loadOfflineDissonanceGame,
   abandonOfflineDissonanceGame } from "./offline.js";
 import { contractPrices } from "./pricing.js";
@@ -1692,7 +1692,15 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
         const move = isAi
           ? (msg.move || { kind: "play", card: msg.card })
           : msg.move;
-        const res = await applyOfflineDissonanceMove(rec, move, myId, { isAi });
+        let res = await applyOfflineDissonanceMove(rec, move, myId, { isAi });
+        // A REFUSED BOT ANSWER must not end the round. Online the server bot
+        // plays a decision the browser could not; offline this is that
+        // fallback, and without it a refusal left the board with nothing to
+        // press and nothing re-arming.
+        if (!res.ok && isAi) {
+          console.warn("[dissonance offline-AI] answer refused, playing the fallback:", res.err);
+          res = await applyOfflineBotFallback(rec, myId);
+        }
         if (!res.ok) { setToast(res.err); return; }
         await publishOffline(res.rec, null);
         pumpOfflineBot();
