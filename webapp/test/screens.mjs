@@ -170,6 +170,12 @@ async function settle(page, read, { tries = 25, gap = 60 } = {}) {
 		if (i > 0 && JSON.stringify(now) === JSON.stringify(prev)) return now;
 		prev = now;
 		await sleep(gap);
+		// ...AND at least one real frame. Two reads `gap` ms apart can land inside
+		// ONE frame when frames are long (a loaded runner; SCREENS_SLOW_FRAMES), and
+		// then they agree because nothing has rendered between them — "settled"
+		// before the page moved at all. dmCardFace's log-follow check read a
+		// half-scrolled log exactly that way.
+		await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))).catch(() => {});
 	}
 	return prev;
 }
@@ -2230,7 +2236,12 @@ try {
 		check("An unverified empty history preserves the list and the login", await rows()===1 && await page.locator('.auth-card').count()===0);
 		mode='delayed'; session='valid'; await refresh();
 		mode='populated'; await refresh();
+		// The NEWER result must be on screen before the older response is let go —
+		// otherwise this measures the populated fetch still landing, not the race.
+		await page.waitForFunction(() => document.querySelectorAll('.lby-col-history .lby-card').length===1,
+			null, {timeout:10_000}).catch(() => {});
 		session='expired'; releaseOld(); await sleep(150);
+		await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 		check("An older empty response cannot erase a newer result or expire its login", await rows()===1 && await page.locator('.auth-card').count()===0);
 		mode='empty'; await refresh();
 		await page.waitForSelector('.auth-notice');
@@ -7378,7 +7389,23 @@ try {
 			gameView.influence.mercury = seat === "mine" ? 2 : -2;
 			gameView.log.push({ turn: ++gameView.turn_number, pid, message: `${fixture.room.players[pid]} gains 3 Credits and 2 Zenithium; Mercury moves toward them.` });
 			socket.send(JSON.stringify(fixture));
-			await page.waitForFunction((seat) => document.querySelectorAll(`.or-player.${seat} .or-resource-delta`).length === 2, seat);
+			// FREEZE ON SIGHT. The disc's slide and the pieces' flight are ~1s long, and
+			// every step between this wait and the reads below costs frames — at long
+			// frames (SCREENS_SLOW_FRAMES=150) they had FINISHED by the time they were
+			// read, and a finished animation leaves `getAnimations()`, so the pieces'
+			// read threw and took the rest of the block with it. Pausing them in the
+			// same frame the deltas appear pins what the checks below measure.
+			// The pieces can mount a frame after the deltas, so wait for BOTH (3 credits
+			// + 2 zenithium) before freezing; bounded and caught, so a miss is a failed
+			// check below rather than a thrown block.
+			await page.waitForFunction((seat) => {
+				if (document.querySelectorAll(`.or-player.${seat} .or-resource-delta`).length !== 2) return false;
+				const pieces = document.querySelectorAll(`.or-player.${seat} .or-resource-piece`);
+				if (pieces.length < 5) return false;
+				document.querySelector(".or-mercury .or-disc")?.getAnimations().forEach((a) => a.pause());
+				pieces.forEach((n) => n.getAnimations().forEach((a) => a.pause()));
+				return true;
+			}, seat, { timeout: 10_000 }).catch(() => {});
 			const moving = await page.locator(".or-mercury .or-disc").evaluate((el) => {
 				const motion = el.getAnimations().find((a) => a.transitionProperty === "top");
 				if (!motion) return false;
@@ -7392,7 +7419,8 @@ try {
                 await page.locator(`.or-player.${seat} .or-resource.credits .or-resource-piece`).count() === 3
                 && await page.locator(`.or-player.${seat} .or-resource.zenithium .or-resource-piece`).count() === 2);
             const stack = await page.locator(`.or-player.${seat} .or-resource-piece`).first().evaluate((node) => {
-                const a = node.getAnimations()[0]; a.pause(); const d = a.effect.getTiming().duration;
+                const a = node.getAnimations()[0]; if (!a) return false;   // fail the check, never the block
+                a.pause(); const d = a.effect.getTiming().duration;
                 const at = (t) => { a.currentTime = t; const r = node.getBoundingClientRect(); return {x:r.x,y:r.y}; };
                 const start = at(0), end = at(d * .8);
                 const base = node.closest('.or-resource').querySelector(':scope > .or-resource-icon').getBoundingClientRect();
@@ -9064,9 +9092,16 @@ try {
 			JSON.stringify(up ? { mime: up.mime, w: up.width, h: up.height } : null));
 		check("a pasted picture arrives small", saved
 			&& ((await page.locator(".nt-img").first().getAttribute("class").catch(() => "")) || "").includes("nt-img-small"));
+		// "Saved" can still be the status of the save BEFORE the picture had an id —
+		// the one that carries it is a fresh autosave, still inside its debounce when
+		// the status was read (long frames open that gap). Wait for the stub server to
+		// have RECEIVED a save naming the image, bounded, then judge that save.
+		const imgId = [...db.images.keys()][0];
+		const savedBy = Date.now() + 10_000;
+		while (imgId && Date.now() < savedBy
+			&& !JSON.stringify(db.saves[db.saves.length - 1]?.doc || {}).includes(`"imageId":"${imgId}"`)) await sleep(50);
 		const last = db.saves[db.saves.length - 1];
 		const docText = JSON.stringify(last?.doc || {});
-		const imgId = [...db.images.keys()][0];
 		check("autosave persists the title, the text and the image BY ID (no bytes in the doc)",
 			last?.title === "Parlor" && docText.includes("Three boxes")
 			&& docText.includes(`"imageId":"${imgId}"`) && !docText.includes("data:image"),

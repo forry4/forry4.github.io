@@ -34,6 +34,19 @@ Each fix was run against the unfixed harness under the same frames: 50ms reprodu
 the quartet and history failures exactly (12 checks) and the fixed version passed
 twice.
 
+A second 150ms pass (the failures vary run to run at that speed) found four more,
+all fixed the same way:
+
+| block | what it was |
+|---|---|
+| `dmCardFace` log follow | **`settle()` sampled by wall clock.** Two reads 60ms apart can land in ONE long frame and agree before anything rendered. It now waits a real frame between samples, which fixes every caller. |
+| `historyRecovery` "an older empty response…" | the "newer result" was assumed on screen after a 100ms sleep; it is now awaited before the older response is released. |
+| `notesEditor` autosave | "Saved" can be the status of the save BEFORE the picture had an id; the check now waits for the stub server to receive the save naming it. |
+| `orbitPlay` resource flight | a ~1s animation read several frames later had finished and left `getAnimations()`, and the unguarded read threw the block. Animations are now PAUSED in the frame the new state is first seen (once the pieces exist), and a missing one fails its check rather than the block. |
+
+After both passes the whole gate at `SCREENS_SLOW_FRAMES=150` fails exactly one
+check, `dissonanceBeat`'s dwell, which measures elapsed time by design.
+
 ### offlineDissonance was never flaky; the game froze
 
 Online, the talon and the swap stay on the server bot (`CLIENT_AI_PHASES`). The
