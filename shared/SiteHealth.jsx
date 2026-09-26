@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { RulesModal, RulesSection, RulesDefs, RulesTip } from "./lobby.jsx";
 import _css from "./SiteHealth.css?inline";
+import { GAME_INFO } from "./catalog.js";
 
 const WS_BASE = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
 const HTTP_BASE = WS_BASE.replace(/^ws/, "http").replace(/\/ws$/, "");
@@ -39,6 +40,12 @@ export function useUnackedAlerts(authUser) {
 	return [n, refresh];
 }
 
+const ago = (t) => {
+	const d = Math.floor(Date.now() / 1000) - t;
+	if (d < 3600) return "just now";
+	if (d < 86400) return `${Math.floor(d / 3600)}h ago`;
+	return d < 60 * 86400 ? `${Math.floor(d / 86400)}d ago` : when(t);
+};
 const mb = (b) => (b == null ? "—" : `${(b / (1024 * 1024)).toFixed(b < 10 * 1024 * 1024 ? 1 : 0)} MB`);
 const when = (t) => new Date(t * 1000).toLocaleString(undefined,
 	{ month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -114,6 +121,38 @@ export default function SiteHealth({ authUser, onClose, onChanged }) {
 										))}
 									</ol>
 								)}
+						</RulesSection>
+						{/* Every account, most recently active first. "Games" counts the finished
+						    games on record for profiles (core/results.py). */}
+						<RulesSection title={`Accounts · ${data.accounts?.length ?? 0}`}>
+							{data.accounts?.length
+								? (
+									<ol className="sh-accts">
+										{data.accounts.map((a, i) => (
+											<li key={`${a.name}:${i}`} className="sh-acct">
+												<details>
+													<summary>
+														<span className="sh-acct-name">{a.name}</span>
+														<span className="sh-dim">
+															{a.games ? `${a.games} game${a.games === 1 ? "" : "s"} · ` : ""}
+															{a.last_seen ? `active ${ago(a.last_seen)}` : "no recent sign-in"}
+														</span>
+													</summary>
+													<dl className="sh-acct-more">
+														<dt>Last sign-in</dt><dd>{a.last_login ? when(a.last_login) : "—"}</dd>
+														<dt>Last active</dt><dd>{a.last_seen ? when(a.last_seen) : "—"}</dd>
+														<dt>Games played</dt>
+														<dd>{a.games
+															? Object.entries(a.by_game || {}).sort((x, y) => y[1] - x[1])
+																.map(([g, n]) => `${GAME_INFO[g]?.name || g} ${n}`).join(" · ")
+															: "none on record"}</dd>
+													</dl>
+												</details>
+											</li>
+										))}
+									</ol>
+								)
+								: <p>No accounts yet.</p>}
 						</RulesSection>
 					</>
 				)}

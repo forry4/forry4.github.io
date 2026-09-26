@@ -155,3 +155,23 @@ def test_the_test_button_always_sends(monkeypatch):
     eps[("POST", "/admin/alerts/test")](_=owner)
     eps[("POST", "/admin/alerts/test")](_=owner)
     assert [a["kind"] for a in alerts._sink] == ["test", "test"]   # never folded
+
+
+def test_accounts_lists_every_name_most_recently_active_first(conn):
+    conn.execute("CREATE TABLE users (id TEXT, name TEXT)")
+    conn.executemany("INSERT INTO users VALUES (?, ?)", [("a", "Ann"), ("b", "Bob"), ("c", "Cy")])
+    conn.commit()
+    # Neither side table exists yet: names alone, never an error.
+    assert [a["name"] for a in monitor.accounts(conn)] == ["Ann", "Bob", "Cy"]
+    conn.execute("CREATE TABLE user_sessions (token_hash TEXT, user_id TEXT, created_at INTEGER, last_used INTEGER)")
+    conn.executemany("INSERT INTO user_sessions VALUES (?, ?, ?, ?)",
+                     [("t1", "b", 50, 100), ("t2", "b", 400, 500), ("t3", "c", 300, 300)])
+    conn.execute("CREATE TABLE game_results (user_id TEXT, game TEXT)")
+    conn.executemany("INSERT INTO game_results VALUES (?, ?)",
+                     [("b", "orbit"), ("b", "orbit"), ("b", "duel"), ("a", "pinch")])
+    conn.commit()
+    assert monitor.accounts(conn) == [
+        {"name": "Bob", "last_login": 400, "last_seen": 500, "games": 3, "by_game": {"orbit": 2, "duel": 1}},
+        {"name": "Cy", "last_login": 300, "last_seen": 300, "games": 0, "by_game": {}},
+        {"name": "Ann", "last_login": None, "last_seen": None, "games": 1, "by_game": {"pinch": 1}},
+    ]

@@ -153,6 +153,39 @@ def snapshot(conn) -> dict:
     }
 
 
+ACCOUNTS_SHOWN = 500
+
+
+def accounts(conn) -> list[dict]:
+    """Every account for the owner's panel, most recently active first:
+      * `last_login` — the latest sign-in (a session's created_at, any device),
+      * `last_seen`  — the latest use of any session (refreshed at most daily),
+      * `games` / `by_game` — finished games on record for profiles (core/results.py).
+    Plain joins against GROUPed subqueries, never a correlated subquery (those
+    read NULL on libsql). Each side table is optional: a missing one leaves its
+    fields empty rather than failing the panel."""
+    def rows(sql):
+        try:
+            cur = conn.cursor()
+            cur.execute(sql)
+            return cur.fetchall()
+        except Exception:  # noqa: BLE001 — a missing side table is an empty column
+            return []
+
+    out = {r[0]: {"name": r[1], "last_login": None, "last_seen": None, "games": 0, "by_game": {}}
+           for r in rows("SELECT id, name FROM users")}
+    # Indexed, not unpacked: rows are the db wrapper's `_Row` on either backend.
+    for r in rows("SELECT user_id, MAX(created_at), MAX(last_used) FROM user_sessions GROUP BY user_id"):
+        if r[0] in out:
+            out[r[0]]["last_login"], out[r[0]]["last_seen"] = r[1], r[2]
+    for r in rows("SELECT user_id, game, COUNT(*) FROM game_results GROUP BY user_id, game"):
+        if r[0] in out:
+            out[r[0]]["by_game"][r[1]] = r[2]
+            out[r[0]]["games"] += r[2]
+    listed = sorted(out.values(), key=lambda a: (-(a["last_seen"] or a["last_login"] or 0), (a["name"] or "").lower()))
+    return listed[:ACCOUNTS_SHOWN]
+
+
 # ── checks ───────────────────────────────────────────────────────────────────
 def _mb(n: float) -> str:
     return f"{n / (1024 * 1024):,.0f} MB"
@@ -343,7 +376,8 @@ def setup_site_health(app, get_user_by_session, token_resolver=None) -> None:
     @app.get("/admin/health")
     def admin_health(_: dict = Depends(site_owner)):
         def go(c):
-            return {"alerts": alerts.recent(c, 100), "unacked": alerts.unacked(c), "snapshot": snapshot(c)}
+            return {"alerts": alerts.recent(c, 100), "unacked": alerts.unacked(c), "snapshot": snapshot(c),
+                    "accounts": accounts(c)}
         return {"ok": True, "channels": alerts.channels(), **run(go)}
 
     @app.post("/admin/alerts/ack")

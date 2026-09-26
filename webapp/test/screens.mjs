@@ -9012,7 +9012,10 @@ try {
 				alerts: healthAlerts.map((a) => ({ ...a, acked })),
 				snapshot: { db_backend: "turso", db_bytes: 4.7e9, storage_budget_bytes: 5120 * 1024 * 1024,
 					storage_fraction: 0.875, users: 12, open_lobbies: 3, notes_users: 2, notes_bytes: 1.2e6,
-					rooms_in_memory: 4, rss_mb: 210, memory_warn_mb: 420 } }));
+					rooms_in_memory: 4, rss_mb: 210, memory_warn_mb: 420 },
+				accounts: [{ name: "Owner", last_login: Math.floor(Date.now() / 1000) - 7200,
+					last_seen: Math.floor(Date.now() / 1000) - 60, games: 7, by_game: { orbit: 5, pinch: 2 } },
+					{ name: "Newcomer", last_login: null, last_seen: null, games: 0, by_game: {} }] }));
 			return r.fulfill(json({ detail: "stub" }, 404));
 		});
 
@@ -9029,6 +9032,14 @@ try {
 			&& await page.locator(".sh-alert").count() === healthAlerts.length
 			&& await page.locator(".sh-alert.sh-new").count() === healthAlerts.length);
 		check("with no push channel set, the panel says so", await page.locator(".rl-panel .rl-tip").count() === 1);
+		const accts = await page.$$eval(".sh-acct summary", (els) => els.map((e) => e.textContent));
+		check("Site health lists every account by name", accts.length === 2
+			&& accts[0].startsWith("Owner") && accts[0].includes("7 games") && accts[1].startsWith("Newcomer"),
+			JSON.stringify(accts));
+		await page.locator(".sh-acct summary").first().click().catch(() => {});
+		const detail = await page.locator(".sh-acct details[open] .sh-acct-more").innerText({ timeout: 3000 }).catch(() => "");
+		check("an account opens to its sign-in times and games per game",
+			/Last sign-in/.test(detail) && /Orbit 5/.test(detail) && /Pinch 2/.test(detail), JSON.stringify(detail));
 		await page.locator(".sh-acts .btn", { hasText: "Mark all read" }).click().catch(() => {});
 		check("Mark all read clears the badge and the new markers",
 			await page.waitForFunction(() => !document.querySelector(".home-extra-badge")

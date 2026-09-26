@@ -16,3 +16,16 @@
 .sh-kind{font-weight:600;letter-spacing:.02em;color:var(--text-soft,#b3a58b)}
 .sh-new .sh-kind::after{content:" · new";color:var(--gold,#c9a84c)}
 .sh-msg{font-size:.88rem;line-height:1.45;color:var(--text,#e8dfc8);overflow-wrap:anywhere}
+/* The account list: one line each (name left, activity right), which opens to the
+   detail — sign-in times and games played per game. */
+.rl-body .sh-accts{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.rl-body .sh-acct{margin:0;border-bottom:1px solid rgba(255,240,215,.06);font-size:.88rem}
+.sh-acct summary{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:7px 0;cursor:pointer;list-style:none}
+.sh-acct summary::-webkit-details-marker{display:none}
+.sh-acct summary:focus-visible{outline:1px solid var(--gold,#c9a84c);outline-offset:2px}
+.sh-acct details[open] summary .sh-acct-name{color:var(--gold,#c9a84c)}
+.sh-acct-name{color:var(--text,#e8dfc8);min-width:0;overflow-wrap:anywhere}
+.sh-acct summary .sh-dim{flex:none;font-size:.8rem;font-variant-numeric:tabular-nums}
+.rl-body .sh-acct-more{display:grid;grid-template-columns:auto 1fr;gap:3px 14px;margin:0 0 9px;font-size:.82rem}
+.rl-body .sh-acct-more dt{margin:0;color:var(--text-soft,#b3a58b)}
+.rl-body .sh-acct-more dd{margin:0;color:var(--text,#e8dfc8);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
