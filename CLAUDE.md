@@ -837,6 +837,14 @@ covers the logic; each game's wiring is one line).
   last dwell for want of a successor), while `orbitPlay`'s deep-link check had the identical
   zero-clearance read and now waits for its observer too. Detail + measurements:
   `docs/deploy-reliability-log.md`.
+- **A HARNESS WAITS FOR THE THING, NOT A DURATION — and when a flake will not reproduce under
+  CPU load, try LONG FRAMES.** `orbitPlay` slept 80-120ms for things the page schedules by
+  animation FRAME (a card flight starts two frames after its render) or delivers over a socket,
+  so it failed ~1 run in 6 here and on loaded runners, a different check each time. Busy cores
+  and Chrome's CPU throttle never reproduced it; `ORBIT_SLOW_FRAMES=150` (every frame >=150ms)
+  failed 9 checks on the old waits and none on frame-counted ones. Poll for a reply, wait on
+  the page's own frames for anything scheduled by frames, and before a "nothing replays"
+  check wait for the last thing to LEAVE. Detail: `docs/deploy-reliability-log.md`.
 - **`NaN` PASSES EVERY `>` COMPARISON, so a geometry check must assert its ROSTER before its
   geometry.** `getComputedStyle` on a node that has left the DOM returns empty strings, so a card
   caught mid-rerender measures NaN and sails through every bound while proving nothing. The tell was

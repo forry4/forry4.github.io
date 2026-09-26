@@ -10,6 +10,65 @@ than re-argued.
 
 ---
 
+## 2026-09-25 — orbitPlay waited on the clock for things the page schedules by frames
+
+The Orbit block failed intermittently on the dev box, and never the same way twice:
+the recruit trio (`clicking sends the move without animating unconfirmed state`,
+`the replacement card draws into the hand`, `the drawn card … settles in its own
+slot`, the last 33px off), `leader`/`technology` variants of the first, and
+`mobilize`/`exile: duplicate column snapshot does not replay`. It failed on a clean
+checkout of `57f81966` as well, so it was the harness, not a change. Measured on
+`edd28958`: 1 run in 6 failed on a quiet machine, always the recruit trio.
+
+### The mechanism
+
+Orbit starts a card flight TWO animation frames after the render that caused it
+(`cardMotion.js`, a double `requestAnimationFrame`, so it can measure the settled
+layout). The block judged that with wall-clock sleeps: "sleep 100ms, then wait
+until no flight is running" before a click, "finish the flights, sleep 80ms, then
+count them" before a duplicate snapshot, "sleep 120ms, then read the socket reply".
+Each holds when a frame takes 16ms and fails when frames stretch — and on this
+laptop they do (see the GPU note in memory), as they do on a loaded runner. The
+recruit trio is one stale draw flight: the pre-click wait passed before the setup
+hand's draw flights existed, they then spawned mid-check, and the "33px" landing
+was a leftover flight whose slot had since moved. Several reply checks read
+`fixtureReplies` straight after a click with no wait at all.
+
+### Reproducing it on demand
+
+Neither loading all 12 cores with busy processes (8 runs, 0 failures either
+version) nor Chrome's CPU throttle at 6x reproduced it; at 15x a different,
+genuinely duration-based check failed instead. What reproduces it is LONG FRAMES:
+`ORBIT_SLOW_FRAMES=<ms>` busy-waits every frame from the fixture section on.
+
+| frames | old harness | frame-counted harness |
+|---|---|---|
+| 70ms, 2 runs | 3 and 6 failures (reply sleeps) | 0 and 0 |
+| 150ms, 1 run | 9 failures, incl. `mobilize: duplicate … does not replay` | 0 |
+
+The trio itself was never forced; its race is the same shape and the same fix.
+
+### The fix
+
+Wait for the thing, not for a duration. `frames()` waits on the page's own frames,
+registered after the render's, so a flight that render schedules exists before they
+resolve; `noFlights()` then waits for flights to end. `finishFlights()` waits for the
+finished ghost to LEAVE (it goes in the `onfinish` that follows `finish()`) before a
+duplicate is sent. Socket replies are polled (`repliesReach`) and fixture renders
+are proved from the DOM (`columnsShow`, the disc's `aria-label`). The resize check
+now PAUSES the flight first, so only the resize can remove it and the wait can be
+as patient as the machine needs without becoming vacuous. The 326-check roster is
+unchanged.
+
+### Carry
+
+A fixed sleep before a NEGATIVE check ("nothing replays") is only safe once the
+thing being counted has provably settled; a fixed sleep before a POSITIVE check
+("the reply arrived") is a wait that should be a poll. When a flake will not
+reproduce under CPU load, try long frames: the two are different stresses.
+
+---
+
 ## 2026-09-18 — the skat check asked the game a question and read the answer off a camera
 
 `a547428d` (SecretNames, the tenth game) went red on Pages with exactly one
