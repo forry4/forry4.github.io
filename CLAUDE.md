@@ -837,14 +837,16 @@ covers the logic; each game's wiring is one line).
   last dwell for want of a successor), while `orbitPlay`'s deep-link check had the identical
   zero-clearance read and now waits for its observer too. Detail + measurements:
   `docs/deploy-reliability-log.md`.
-- **A HARNESS WAITS FOR THE THING, NOT A DURATION — and when a flake will not reproduce under
-  CPU load, try LONG FRAMES.** `orbitPlay` slept 80-120ms for things the page schedules by
-  animation FRAME (a card flight starts two frames after its render) or delivers over a socket,
-  so it failed ~1 run in 6 here and on loaded runners, a different check each time. Busy cores
-  and Chrome's CPU throttle never reproduced it; `ORBIT_SLOW_FRAMES=150` (every frame >=150ms)
-  failed 9 checks on the old waits and none on frame-counted ones. Poll for a reply, wait on
-  the page's own frames for anything scheduled by frames, and before a "nothing replays"
-  check wait for the last thing to LEAVE. Detail: `docs/deploy-reliability-log.md`.
+- **A HARNESS WAITS FOR THE THING, NOT A DURATION — and `SCREENS_SLOW_FRAMES=150` is how to
+  find the ones that don't.** It makes every frame on every page take that long (what a stalling
+  compositor does to a loaded runner), and it turned a 1-in-6 `orbitPlay` flake and a "flaky"
+  `offlineDissonance` into deterministic failures; busy cores and Chrome's CPU throttle
+  reproduced neither. Poll for a reply, wait on the page's own frames for anything scheduled by
+  frames, wait for a POSITIVE change rather than sleeping for it, scope a click to the thing
+  you mean (a page-wide `.play` card picked up a swap card mid-render), and before a "nothing
+  replays" check wait for the last thing to LEAVE. Checks that are ABOUT elapsed time
+  (`dissonanceBeat`'s dwell) fail under it by design — triage those out. Detail:
+  `docs/deploy-reliability-log.md` (2026-09-25, 09-26).
 - **`NaN` PASSES EVERY `>` COMPARISON, so a geometry check must assert its ROSTER before its
   geometry.** `getComputedStyle` on a node that has left the DOM returns empty strings, so a card
   caught mid-rerender measures NaN and sails through every bound while proving nothing. The tell was

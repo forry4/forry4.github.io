@@ -10,6 +10,75 @@ than re-argued.
 
 ---
 
+## 2026-09-26 — a flake hunt with long frames: three harness races and one frozen game
+
+Asked "what else is flaky?", the history answered first: of 12 red Pages runs in
+the last 100, every one but the latest was already explained and fixed in this
+log; the 7 red Python CI runs were real breakages fixed the same day. The one
+open failure was `offlineDissonance` on `edd28958`. So the hunt was for races that
+had not fired YET, with the instrument the previous entry found:
+`SCREENS_SLOW_FRAMES=<ms>` now slows every page in every block (it wraps
+`browser.newContext`), not just Orbit's.
+
+### What long frames found
+
+| frames | failed | what it was |
+|---|---|---|
+| 50ms | `dissonanceQuartet`: go button still disabled (x8, then 3 knock-ons) | **check-then-act across branches.** The loop asks "lead buttons?" then, separately, "any `.dis-card.play`?". When the commit panel rendered between the two reads, the second branch clicked a SWAP card: a take with no give disables Go for the rest of the loop. Other Dissonance blocks were always scoped to `.dis-seat`; this one and Skat's dummy loop were not. |
+| 50ms | `historyRecovery`: "a valid empty history still clears" | a POSITIVE check after a fixed 100ms, where the clear needs a second request (`/auth/session`) first. |
+| 150ms | `offlineDissonance`: stalled before trick 1 | **the Pages failure, reproduced — and a product bug.** See below. |
+| 150ms | `orbitPlay` threw a 30s click timeout | an unbounded `.click()` on a decision button that an automatic response can remove between `count()` and the click; the throw took the whole block. |
+| 150ms | `dissonanceBeat`: shortest dwell 168ms of 700 | **triaged out**: the check measures how long a trick is painted, and 150ms frames eat the paint window. It is about elapsed time by design. |
+
+Each fix was run against the unfixed harness under the same frames: 50ms reproduced
+the quartet and history failures exactly (12 checks) and the fixed version passed
+twice.
+
+### offlineDissonance was never flaky; the game froze
+
+Online, the talon and the swap stay on the server bot (`CLIENT_AI_PHASES`). The
+offline driver armed the bot's swap as an ordinary search; the pool answered
+"play card N"; the local referee refused a card play in the swap phase; and
+nothing re-armed. Every offline round the bot declared froze with nothing to
+press. It looked like a flake because offline deals are random. Both stalls on
+record show it: the bot won `2♣` (CI) and `5♠` (here), then searched a card.
+Fixed in the product (the bot stands pat offline; a refused bot answer plays a
+legal fallback) and FORCED in the gate: a round that only passes, retried on a
+fresh deal until the bot declares, must reach trick 1. The unfixed build fails it.
+
+### Python: one real flake, and a lock bound to a dead event loop
+
+No flake in 150 runs of the Spender files on fresh random deals. Three full suites
+found ONE: `test_mcts_tier_plans_and_applies` (Duel) timed out with the game stuck
+mid-way, 1 run in 3, and never alone — not in 20 solo runs, 60 global seeds, a
+time-bound search, or 60 games under full CPU load (the game is a fixed 129 plies).
+The cause is cross-test: every game server holds ONE module-level
+`ROOM_LOCK = asyncio.Lock()`, and an asyncio.Lock binds to the first loop it is
+CONTENDED in. Each test runs its own `asyncio.run`, so a lock contended by an earlier
+test in the same worker raises "is bound to a different event loop" at the next
+contention — inside the bot's scheduler, whose `finally` needs the same lock, so
+`_bot_running` never clears and the game stops. Reproduced on demand (a test that
+contends the lock, then a game with one forced contention: stuck at ply 14 with
+`bot_running=True`). Nine test files had patched this one at a time; the root
+conftest now gives every `games.*.main` a fresh lock per test, found by name.
+Production is unaffected: it runs one loop.
+
+Eleven polling loops still bounded their wait by ITERATION COUNT (the
+shape that blocked a deploy on 2026-08-07); a count's real budget depends on
+sleep granularity (~15ms on Windows vs ~1ms on Linux) and machine speed, so each
+is now a 60s wall-clock deadline that exits on its condition as before. One of
+them also passed without checking anything when the bot was slow (it gave up
+after 500 yields); it now requires the turn it waits for.
+
+### Carry
+
+`SCREENS_SLOW_FRAMES=150` is a cheap pre-flight for a new block: anything that
+fails there and is not ABOUT elapsed time is a race waiting for a loaded runner.
+And a failure that cannot have been caused by the commit is not automatically the
+harness — the one that looked most like a flake here was a frozen game.
+
+---
+
 ## 2026-09-25 — orbitPlay waited on the clock for things the page schedules by frames
 
 The Orbit block failed intermittently on the dev box, and never the same way twice:

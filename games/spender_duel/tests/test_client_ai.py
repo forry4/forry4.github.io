@@ -101,7 +101,12 @@ def test_client_plays_a_full_game(monkeypatch):
         assert room["client_ai"] is True
         rng = random.Random(11)
         answered = 0
-        for _ in range(20000):
+        # A DEADLINE, not an iteration count: a count's real budget depends on the
+        # sleep's granularity (15ms on Windows vs ~1ms on Linux) and on how fast the
+        # machine runs the bot, so the same count was patient here and short on a
+        # loaded CI runner (the 2026-08-07 deploy block). It only pays when broken.
+        deadline = asyncio.get_running_loop().time() + 60.0
+        while asyncio.get_running_loop().time() < deadline:
             await asyncio.sleep(0)
             g = room.get("game")
             if g is None or engine.is_over(g):
@@ -145,7 +150,8 @@ def test_client_moves_arrive_as_json_strings_too(monkeypatch):
         ws = await _create_hard(rid, pid)
         room = m.ROOMS[rid]
         rng = random.Random(5)
-        for _ in range(20000):
+        deadline = asyncio.get_running_loop().time() + 60.0
+        while asyncio.get_running_loop().time() < deadline:
             await asyncio.sleep(0)
             g = room.get("game")
             if g is None or engine.is_over(g):
@@ -162,7 +168,8 @@ def test_client_moves_arrive_as_json_strings_too(monkeypatch):
                 # one interpreter's task ordering — it passed 45/45 locally on 3.14 and
                 # failed on CI's 3.11. Waiting for the condition tests the same thing
                 # without depending on the event loop's scheduling.
-                for _ in range(400):
+                deadline = asyncio.get_running_loop().time() + 60.0
+                while asyncio.get_running_loop().time() < deadline:
                     if len(room["game"]["log"]) > before:
                         break
                     await asyncio.sleep(0.005)
@@ -197,7 +204,8 @@ def test_watchdog_falls_back_to_the_server(monkeypatch):
         room = m.ROOMS[rid]
         rng = random.Random(2)
         saw_decision = False
-        for _ in range(4000):
+        deadline = asyncio.get_running_loop().time() + 60.0
+        while asyncio.get_running_loop().time() < deadline:
             await asyncio.sleep(0.005)
             g = room.get("game")
             if g is None or engine.is_over(g):
@@ -223,7 +231,8 @@ def test_watchdog_falls_back_to_the_server(monkeypatch):
 async def _run_to_first_decision(ws, rid, pid, seed=3):
     room = m.ROOMS[rid]
     rng = random.Random(seed)
-    for _ in range(20000):
+    deadline = asyncio.get_running_loop().time() + 60.0
+    while asyncio.get_running_loop().time() < deadline:
         await asyncio.sleep(0)
         if room.get("_ai_search") is not None:
             return room["_ai_search"]
@@ -318,12 +327,17 @@ def test_non_hard_tiers_never_use_the_client(monkeypatch, tier):
         await _create_hard(rid, pid, difficulty=tier)
         room = m.ROOMS[rid]
         assert room["ai_difficulty"] == tier
-        for _ in range(500):
+        deadline = asyncio.get_running_loop().time() + 60.0
+        while asyncio.get_running_loop().time() < deadline:
             await asyncio.sleep(0)
             assert room.get("_ai_search") is None, f"{tier} shipped a client decision"
             g = room.get("game")
             if g and (g.get("pending_pid") or g.get("turn")) == pid:
                 break
+        # The loop used to end after 500 yields whether or not the bot had moved, so a
+        # slow first bot turn made this pass having watched nothing. Require the turn.
+        g = room.get("game")
+        assert g and (g.get("pending_pid") or g.get("turn")) == pid, "the bot's turn never ended"
 
     asyncio.run(run())
     m.ROOMS.pop(rid, None)

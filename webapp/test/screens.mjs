@@ -273,6 +273,27 @@ try {
 	console.log("  preview up");
 
 	browser = await launchBrowser();
+	// SCREENS_SLOW_FRAMES=<ms> makes every frame on every page take at least that
+	// long — what a stalling compositor does to a loaded runner. A check that waits
+	// a fixed time for something the page schedules by FRAME (a flight two rAFs
+	// after its render, a scroll event, a React commit) passes at 16ms frames and
+	// fails here, deterministically; that is how orbitPlay's 1-in-6 flake was found
+	// (docs/deploy-reliability-log.md, 2026-09-25). Off unless set. Checks that are
+	// ABOUT elapsed time (an animation's dwell, a transition's midpoint) fail under
+	// it by design; triage those out rather than "fixing" them.
+	if (process.env.SCREENS_SLOW_FRAMES) {
+		const slowMs = Number(process.env.SCREENS_SLOW_FRAMES);
+		const newContext = browser.newContext.bind(browser);
+		browser.newContext = async (...args) => {
+			const ctx = await newContext(...args);
+			await ctx.addInitScript((ms) => {
+				const slow = () => { const until = performance.now() + ms; while (performance.now() < until); requestAnimationFrame(slow); };
+				requestAnimationFrame(slow);
+			}, slowMs);
+			return ctx;
+		};
+		console.log(`  SCREENS_SLOW_FRAMES: every frame takes >= ${slowMs}ms`);
+	}
 	const failures = [];
 
 	const shell = [];
@@ -2192,7 +2213,10 @@ try {
 		const refresh = async () => {
 			const before = historyCalls;
 			await page.getByRole('button',{name:'Refresh',exact:true}).click();
-			for (let i=0;i<100 && historyCalls===before;i++) await sleep(20);
+			const sent = Date.now() + 10_000;
+			while (historyCalls===before && Date.now() < sent) await sleep(20);
+			// Long enough for a WRONG change to show before the "preserves" checks
+			// read; a check that expects a change waits for it itself (below).
 			await sleep(100);
 		};
 		await page.goto(`http://localhost:${PORT}/orbit`, {waitUntil:'networkidle'});
@@ -2225,6 +2249,12 @@ try {
 		check("History reload uses a renewed login from another tab", lastToken==='Bearer another-tab' && await rows()===1);
 		await sibling.close();
 		mode='empty'; await refresh();
+		// A POSITIVE change, so wait for it: an empty list is only accepted after a
+		// second request (/auth/session) confirms the login, and a fixed 100ms after
+		// the first one read the list mid-way under long frames.
+		await page.waitForFunction(() => document.querySelectorAll('.lby-col-history .lby-card').length===0
+			&& JSON.parse(localStorage.getItem('lbyc.orbit.history-recovery.history') || 'null')?.length===0,
+			null, {timeout:10_000}).catch(() => {});
 		check("A valid empty history still clears the list and cache", await rows()===0 && (await cached('orbit'))?.length===0);
 		// Each game's existing refresh button must use the same failure policy.
 		for (const [route, namespace] of [['spender','spender'],['coc','coc'],['duel','duel'],['dontminion','dontminion'],['dissonance','dissonance'],['ragtag','ragtag']]) {
@@ -3816,7 +3846,7 @@ try {
 			widest = Math.max(widest, await dpage.evaluate(() =>
 				document.querySelectorAll(".dis-trick .dis-tp").length));
 			if (widest >= 3) break;
-			const card = dpage.locator(".dis-card.play").first();
+			const card = dpage.locator(".dis-seat .dis-card.play").first();   // a seat's, never a panel's
 			if (await card.count() > 0) {
 				await card.click({ timeout: 5_000 }).catch(() => {});
 				await sleep(120);
@@ -4124,7 +4154,14 @@ try {
 				await sleep(150);
 				continue;
 			}
-			const card = page.locator(".dis-card.play").first();
+			// A SEAT'S card, never any `.play` card on the page. The commit panel's
+			// swap cards are clickable too, and this branch runs AFTER the lead
+			// check — so when the panel rendered between the two reads, the loop
+			// picked a swap card instead of a lead, and a take with no give leaves
+			// the go button disabled for good (every later pass then failed the same
+			// check). Long frames widen that window (SCREENS_SLOW_FRAMES=50 hit it
+			// every run); the other Dissonance blocks were always scoped this way.
+			const card = page.locator(".dis-seat .dis-card.play").first();
 			if (await card.count() > 0) {
 				// CLICK THE VISIBLE STRIP, NOT THE CENTRE. A fanned hand lays each
 				// card partly under the one before it -- that is the point of a
@@ -5701,6 +5738,51 @@ try {
 			.then(() => true).catch(() => false);
 		check("the local game resumes after a reload", resumed);
 
+		// THE BOT DECLARES, which forces the one phase the round above only sampled.
+		// A classic declarer always gets the SWAP, and offline once handed it to the
+		// card search: the pool answered "play card N", the referee refused it in the
+		// swap phase, nothing re-armed, and the round froze with no button to press
+		// — the Pages failure on edd28958, which looked like a flake only because an
+		// offline deal is random and the bot declares on some of them.
+		// So these rounds bid only when forced (a classic opener may not pass) and
+		// pass otherwise. WHO DECLARED is read off the prompt the human is given:
+		// a human declarer gets the swap panel ("Stand pat"), a human DEFENDER gets
+		// the Double ("Let it stand"). A round the human ends up declaring is thrown
+		// away for a fresh deal; a round the bot declares must reach trick 1.
+		// Asserted, not sampled: no bot-declared round in four deals is a failure.
+		const botRound = { games: 0, humanDeclared: 0, botDeclared: false, reached: false, contract: "" };
+		for (let game = 0; game < 4 && !botRound.reached; game++) {
+			botRound.games += 1;
+			await page.goto(`http://localhost:${PORT}/offline`, { waitUntil: "load" });
+			await page.waitForSelector(".offline-panel", { timeout: 20_000 }).catch(() => {});
+			await page.locator(".cm-seg button", { hasText: "Dissonance" }).click({ timeout: 10_000 }).catch(() => {});
+			await page.locator(".cm-create", { hasText: "Start Game" }).click({ timeout: 10_000 }).catch(() => {});
+			await page.waitForSelector(".dis", { timeout: 25_000 }).catch(() => {});
+			const by = Date.now() + 60_000;
+			while (Date.now() < by) {
+				if (await page.locator(".dis-trickinfo").count() > 0) { botRound.reached = botRound.botDeclared; break; }
+				if (await page.getByRole("button", { name: /^Stand pat$/ }).count() > 0) { botRound.humanDeclared += 1; break; }
+				if (await page.locator(".dis-bidgrid").count() > 0) {
+					const pass = page.getByRole("button", { name: /^Pass$/ }).first();
+					if (await pass.count() > 0) await pass.click({ timeout: 5_000 }).catch(() => {});
+					else await disBidCheaply(page);       // the opener must bid in classic
+					await sleep(250);
+					continue;
+				}
+				if (await step(/^Let it stand$/)) { botRound.botDeclared = true; continue; }
+				await sleep(300);                              // the bot is thinking
+			}
+			botRound.contract = await page.evaluate(() => document.querySelector(".dis-contract")?.textContent?.trim() || "");
+			// Out of time with a contract standing and no prompt for us: the auction
+			// ended in the bot's favour and it never finished its own turn. That IS
+			// the freeze (the swap comes before our Double prompt, so a bot stuck in
+			// it never shows "Let it stand"). Say so, and stop dealing.
+			if (!botRound.reached && Date.now() >= by && botRound.contract) { botRound.stalledAfter = botRound.contract; break; }
+			if (botRound.botDeclared) break;                   // reached or stalled: that is the answer
+		}
+		check("when the bot declares, it takes its swap and the round reaches trick 1",
+			botRound.botDeclared && botRound.reached, JSON.stringify(botRound));
+
 		check("no page errors playing offline", errors.length === 0,
 			errors[0]?.slice(0, 200) || "");
 		await ctx.close();
@@ -6687,9 +6769,15 @@ try {
 
         // Automatic responses can leave a brief gap with no decision buttons.
         // Wait for the authoritative end of the turn, including its hand refill.
-        for (let i = 0; i < 80 && latestFrame.room.game.turn_number === playedTurn; i++) {
+        // A button counted here can be gone by the click (an automatic response
+        // resolves under it), and an unbounded click then waits Playwright's full
+        // 30s and THROWS, taking the whole block with it — seen at
+        // SCREENS_SLOW_FRAMES=150. Short, caught clicks; the loop simply retries.
+        // And a deadline rather than 80 passes, for the same reason as everywhere.
+        const chainBy = Date.now() + 20_000;
+        while (latestFrame.room.game.turn_number === playedTurn && Date.now() < chainBy) {
             const choice = page.locator(".or-decision button").first();
-            if (await choice.count()) await choice.click();
+            if (await choice.count()) await choice.click({ timeout: 2_000 }).catch(() => {});
             await sleep(100);
         }
         check("the real action finishes its full decision chain", latestFrame.room.game.turn_number > playedTurn);

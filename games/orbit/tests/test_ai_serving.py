@@ -116,7 +116,12 @@ def test_arming_a_browser_turn_carries_the_tier_and_its_split_budget():
         m.ROOMS["armed-room"] = room
         task = asyncio.ensure_future(m._client_bot_turn("armed-room"))
         try:
-            for _ in range(80):
+            # A DEADLINE, not an iteration count: a count's real budget depends on the
+            # sleep's granularity (15ms on Windows vs ~1ms on Linux) and on how fast the
+            # machine runs the bot, so the same count was patient here and short on a
+            # loaded CI runner (the 2026-08-07 deploy block). It only pays when broken.
+            deadline = asyncio.get_running_loop().time() + 60.0
+            while asyncio.get_running_loop().time() < deadline:
                 if room.get("_ai_search"):
                     return dict(room["_ai_search"])
                 await asyncio.sleep(0.05)

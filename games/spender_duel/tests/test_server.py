@@ -65,7 +65,12 @@ def test_vs_ai_full_game_and_wire_redaction(monkeypatch):
 
         room = m.ROOMS[rid]
         rng = random.Random(3)
-        for _ in range(6000):
+        # A DEADLINE, not an iteration count: a count's real budget depends on the
+        # sleep's granularity (15ms on Windows vs ~1ms on Linux) and on how fast the
+        # machine runs the bot, so the same count was patient here and short on a
+        # loaded CI runner (the 2026-08-07 deploy block). It only pays when broken.
+        deadline = asyncio.get_running_loop().time() + 60.0
+        while asyncio.get_running_loop().time() < deadline:
             await asyncio.sleep(0.002)
             g = room.get("game")
             if g is None or engine.is_over(g):

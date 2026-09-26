@@ -51,6 +51,27 @@ def _restore_engine_deck():
 
 
 @pytest.fixture(autouse=True)
+def _fresh_room_locks():
+    """Every game server holds ONE module-level `ROOM_LOCK = asyncio.Lock()`, and an
+    asyncio.Lock binds to the first event loop it is CONTENDED in. Production runs one
+    loop, so that is invisible there. Tests run one `asyncio.run` loop EACH, so the lock
+    one test contended is bound to a loop that is already closed, and the next test in
+    the same worker that contends it raises "is bound to a different event loop" —
+    inside the bot's scheduler task, whose `finally` needs the same lock, so
+    `_bot_running` never clears and the game simply stops. That was
+    `test_mcts_tier_plans_and_applies` failing 1 run in 3 of the full suite: order- AND
+    timing-dependent, never reproducible alone. Nine test files patched it one by one
+    (`m.ROOM_LOCK = asyncio.Lock()`); this does it for every game, including the next
+    one. Found by module NAME, so a new game joins without being listed."""
+    import asyncio
+    import sys
+    for name, mod in list(sys.modules.items()):
+        if name.startswith("games.") and name.endswith(".main")                 and isinstance(getattr(mod, "ROOM_LOCK", None), asyncio.Lock):
+            mod.ROOM_LOCK = asyncio.Lock()
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _isolate_site_alerts_and_caps():
     """Owner alerts go to a per-test list, never a database or a phone, and the
     SITE-WIDE abuse caps start empty for every test. The per-IP caps were always

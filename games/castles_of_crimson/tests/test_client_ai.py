@@ -55,7 +55,12 @@ def test_expert_client_plays_full_game(monkeypatch):
         assert room["client_ai"] is True
         rng = random.Random(11)
         answered = 0
-        for _ in range(6000):
+        # A DEADLINE, not an iteration count: a count's real budget depends on the
+        # sleep's granularity (15ms on Windows vs ~1ms on Linux) and on how fast the
+        # machine runs the bot, so the same count was patient here and short on a
+        # loaded CI runner (the 2026-08-07 deploy block). It only pays when broken.
+        deadline = asyncio.get_running_loop().time() + 60.0
+        while asyncio.get_running_loop().time() < deadline:
             await asyncio.sleep(0.002)
             g = room.get("game")
             if g is None or engine.is_over(g):
@@ -102,7 +107,8 @@ def test_expert_watchdog_falls_back_to_server(monkeypatch):
     async def run():
         await _create_expert(rid, pid)
         room = m.ROOMS[rid]
-        for _ in range(2000):
+        deadline = asyncio.get_running_loop().time() + 60.0
+        while asyncio.get_running_loop().time() < deadline:
             await asyncio.sleep(0.005)
             g = room.get("game")
             if g is None:
@@ -128,7 +134,8 @@ def test_illegal_client_move_is_dropped(monkeypatch):
     async def run():
         ws = await _create_expert(rid, pid)
         room = m.ROOMS[rid]
-        for _ in range(2000):
+        deadline = asyncio.get_running_loop().time() + 60.0
+        while asyncio.get_running_loop().time() < deadline:
             await asyncio.sleep(0.002)
             if room.get("_ai_search") is not None:
                 break
