@@ -9423,6 +9423,174 @@ try {
 	// via shared/botTiers.js), a Dontminion bot NAME ("bmplus" is Money+), a draw,
 	// a cooperative SecretNames row and a human opponent. The way in is the
 	// player's name, on the menu and in a lobby's top bar; Back returns to each.
+	// ── THE OFFLINE HUB'S READ SECTION ──────────────────────────────────────────
+	// The hub is the one door offline: Play vs AI, and Read — Puzzles, BGG Filter,
+	// Books, Notes and your profile, read-only from copies this device keeps. The
+	// claim under test is the OFFLINE half, so the block takes each copy online (every
+	// API reply stubbed, so it owns what the copy holds), then BLOCKS THE API ORIGIN
+	// and reloads `/offline` — the bundle still serves, nothing behind it answers,
+	// which is what a cold or unreachable backend looks like. There is no service
+	// worker on localhost, so this covers the copies the PAGE keeps (localStorage and
+	// IndexedDB), not the static files the Reading download puts in the SW cache.
+	async function offlineRead(log) {
+		const check = (name, cond, detail = "") => {
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
+		};
+		const user = { id: "offline-reader", name: "Reader", session_token: "reader-token" };
+		const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 } });
+		// Seeded ONCE per tab (sessionStorage survives the reloads below), so the
+		// sign-out at the end is not undone by the next navigation.
+		await ctx.addInitScript((u) => {
+			if (!sessionStorage.getItem("seeded")) {
+				localStorage.setItem("spender_user", JSON.stringify(u));
+				sessionStorage.setItem("seeded", "1");
+			}
+		}, user);
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		const json = (data, status = 200) => ({ status, contentType: "application/json", body: JSON.stringify(data) });
+		const onApi = (test) => (u) => u.port === String(API_PORT) && test(u.pathname);
+		const has = (sel, ms = 20_000) => page.waitForSelector(sel, { timeout: ms }).then(() => true, () => false);
+		const now = Math.floor(Date.now() / 1000);
+		// One pixel of PNG: the picture Notes must show offline from the device's copy.
+		const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+		const note = { id: "offnote1", folder_id: null, title: "Parlor", pinned: false, rev: 3,
+			created_at: now - 99, updated_at: now - 9, deleted_at: null,
+			doc: { type: "doc", content: [
+				{ type: "paragraph", content: [{ type: "text", text: "Three boxes on the pedestal" }] },
+				{ type: "noteImage", attrs: { imageId: "offimg1" } }] } };
+		const { doc: _doc, rev: _rev, ...noteMeta } = note;
+		await page.route(onApi((p) => p === "/auth/session"),
+			(r) => r.fulfill(json({ ok: true, user: { id: user.id, name: user.name, is_admin: false } })));
+		await page.route(onApi((p) => p === "/books"), (r) => r.fulfill(json({ ok: true, can_edit: true,
+			books: [{ id: "bk1", title: "Dune", author: "Frank Herbert", rating: 5, note: "", cover_url: "" }] })));
+		await page.route(onApi((p) => p === "/books/suggestions"), (r) => r.fulfill(json({ ok: true,
+			mine: [{ id: "sg1", title: "Piranesi", author: "Susanna Clarke", cover_url: "", blurb: "" }],
+			all: [], is_owner: false, logged_in: true, max: 10 })));
+		await page.route(onApi((p) => p === "/profile"), (r) => r.fulfill(json({ ok: true, user, truncated: false,
+			history: [{ game: "orbit", id: "OR1", finished_at: now - 500, outcome: "win", score: null, vs_bot: true,
+				ai_tier: "expert", mode: null, detail: null, players: [
+					{ id: user.id, name: "Reader", outcome: "win", score: null, bot: false, you: true },
+					{ id: "bot", name: "Bot", outcome: "loss", score: null, bot: true }] }] })));
+		await page.route(onApi((p) => p.startsWith("/notes/")), (r) => {
+			const { pathname } = new URL(r.request().url());
+			if (pathname === "/notes/tree") return r.fulfill(json({ ok: true, folders: [], notes: [noteMeta],
+				usage: { bytes: 10, notes: 1, folders: 0, quota_bytes: null, max_notes: null } }));
+			if (pathname === `/notes/note/${note.id}`) return r.fulfill(json({ ok: true, note }));
+			if (pathname === "/notes/image/offimg1") return r.fulfill({ status: 200, contentType: "image/png", body: PNG });
+			return r.fulfill(json({ detail: "stub" }, 404));
+		});
+		const readRow = (id) => page.locator(`.offline-read [data-read="${id}"]`);
+		const openRead = (id) => readRow(id).locator("button").click({ timeout: 10_000 }).catch(() => {});
+		const backToHub = async (sel) => {
+			await page.locator(sel).first().click({ timeout: 10_000 }).catch(() => {});
+			return has(".offline-hub", 15_000);
+		};
+
+		// ── online: the one door, and a copy of everything ──
+		await page.goto(`http://localhost:${PORT}/`, { waitUntil: "networkidle" });
+		const tile = page.locator(".home-extra", { hasText: "Offline" });
+		check("the menu has one Offline tile", await tile.count() === 1);
+		await tile.click({ timeout: 10_000 }).catch(() => {});
+		check("...and it opens the offline hub", await has(".offline-hub") && new URL(page.url()).pathname === "/offline",
+			page.url());
+		const rows = await page.locator(".offline-read [data-read]").evaluateAll((els) => els.map((e) => e.dataset.read));
+		check("the hub's Read section lists all five screens",
+			JSON.stringify(rows) === JSON.stringify(["puzzles", "bggfilter", "books", "notes", "profile"]), JSON.stringify(rows));
+		check("...and still has exactly one Open button (the scorecard's)",
+			await page.getByRole("button", { name: /^Open$/ }).count() === 1);
+
+		await openRead("books");
+		check("Books opens from the hub", await has(".bk-app") && (await page.locator(".bk-app").innerText()).includes("Dune"));
+		check("...and Back returns to the hub, not the menu", await backToHub(".bk-header .btn"), page.url());
+
+		await openRead("profile");
+		check("your profile opens from the hub", await has(".pf-row"));
+		check("...and Back returns to the hub", await backToHub(".lby-back"), page.url());
+
+		await openRead("notes");
+		const synced = await has(".nt-app", 20_000) && await page.waitForFunction(() => new Promise((done) => {
+			// Poll the device store the page fills in the background.
+			const req = indexedDB.open("forrest-notes");
+			req.onsuccess = () => {
+				const db = req.result;
+				if (![...db.objectStoreNames].includes("images")) { db.close(); return done(false); }
+				const t = db.transaction(["notes", "images"], "readonly");
+				const n = t.objectStore("notes").count(), i = t.objectStore("images").count();
+				t.oncomplete = () => { db.close(); done(n.result === 1 && i.result === 1); };
+			};
+			req.onerror = () => done(false);
+		}), null, { timeout: 20_000, polling: 250 }).then(() => true, () => false);
+		check("opening Notes online keeps a copy of the note AND its picture on the device", synced);
+		await page.locator(".nt-header .btn").first().click({ timeout: 10_000 }).catch(() => {});
+		await has(".offline-hub", 15_000);
+
+		await openRead("puzzles");
+		const puzzled = await has(".game", 25_000) && /PUZZLE/i.test(await page.locator("#root").innerText().catch(() => ""));
+		check("Spender Puzzles opens from the hub (the bank is a static file now)", puzzled);
+		check("...and leaving it returns to the hub",
+			await backToHub("button:has-text('← Puzzles')"), page.url());
+
+		// ── the backend goes away ──
+		await page.route(`http://localhost:${API_PORT}/**`, (r) => r.abort());
+		await page.goto(`http://localhost:${PORT}/offline`, { waitUntil: "load" });
+		check("with the backend unreachable, the hub still opens", await has(".offline-hub", 25_000));
+		const states = await page.locator(".offline-read .offline-read-state").allTextContents();
+		check("...and says a copy is on this device for Books, Notes and the profile",
+			states.slice(2).every((t) => /copy is on this device/.test(t)), JSON.stringify(states));
+
+		await openRead("books");
+		await has(".bk-app");
+		const books = await page.evaluate(() => ({
+			text: document.querySelector(".bk-app")?.innerText || "",
+			note: document.querySelector(".bk-offline-note")?.textContent || "",
+			edit: [...document.querySelectorAll(".bk-app button")].map((b) => b.textContent.trim())
+				.filter((t) => /Edit|Suggest/.test(t)),
+		}));
+		check("Books offline: the saved list and your suggestions, with a note saying so",
+			books.text.includes("Dune") && books.text.includes("Piranesi") && /Offline/.test(books.note), JSON.stringify(books).slice(0, 300));
+		check("...and nothing on it edits", books.edit.length === 0, JSON.stringify(books.edit));
+		await backToHub(".bk-header .btn");
+
+		await openRead("profile");
+		check("your profile offline: the saved history", await has(".pf-row") && await page.locator(".pf-row").count() === 1);
+		await backToHub(".lby-back");
+
+		await openRead("notes");
+		await page.locator(".nt-note-row .nt-row-main", { hasText: "Parlor" }).first()
+			.click({ timeout: 15_000 }).catch(() => {});
+		await has(".nt-banner", 15_000);
+		await page.waitForFunction(() => document.querySelector(".nt-img img")?.src?.startsWith("blob:"), null,
+			{ timeout: 10_000 }).catch(() => {});
+		const nt = await page.evaluate(() => ({
+			banner: [...document.querySelectorAll(".nt-banner")].map((b) => b.textContent).join(" | "),
+			editable: document.querySelector(".nt-prose")?.getAttribute("contenteditable"),
+			text: document.querySelector(".nt-prose")?.innerText || "",
+			img: document.querySelector(".nt-img img")?.getAttribute("src") || "",
+			newNote: [...document.querySelectorAll("button")].filter((b) => /New note/.test(b.textContent))
+				.every((b) => b.disabled),
+		}));
+		check("Notes offline: the note opens from the device's copy, read-only, with its picture",
+			/Offline/.test(nt.banner) && nt.editable === "false" && nt.text.includes("Three boxes")
+			&& nt.img.startsWith("blob:") && nt.newNote, JSON.stringify(nt));
+
+		// ── signing out takes the private copies with it ──
+		await page.unroute(`http://localhost:${API_PORT}/**`);
+		await page.goto(`http://localhost:${PORT}/`, { waitUntil: "networkidle" });
+		await page.getByRole("button", { name: /^Logout$/ }).click({ timeout: 10_000 }).catch(() => {});
+		await has(".auth-card", 15_000);
+		const left = await page.evaluate(async () => ({
+			dbs: (await indexedDB.databases?.() || []).map((d) => d.name),
+			keys: Object.keys(localStorage).filter((k) => k.startsWith("notes.tree.") || k.startsWith("profile.history.")),
+		}));
+		check("signing out deletes this device's copy of your notes and history",
+			!left.dbs.includes("forrest-notes") && left.keys.length === 0, JSON.stringify(left));
+		check("no page errors across the offline hub", errors.length === 0, errors[0]?.slice(0, 200) || "");
+		await ctx.close();
+	}
+
 	async function profilePage(log) {
 		const check = (name, cond, detail = "") => {
 			if (cond) log(`  OK   ${name}`);
@@ -9541,7 +9709,7 @@ try {
 		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, historyRecovery, dmAdventures,
 		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, formControlZoom, lastDifficulty,
 		dissonanceQuartet, orbitPlay, lobbyFinishSync, blackCastlePlay, pinchPlay, secretNamesPlay, lobbyChrome,
-		notesEditor, profilePage];
+		notesEditor, profilePage, offlineRead];
 
 	// EVERY BLOCK MUST BE IN A LANE. Before the lanes existed, adding a block meant
 	// writing it — it then ran because it was simply the next statement. Now it has

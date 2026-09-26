@@ -1,4 +1,6 @@
 import { fetchGameHistory, SESSION_EXPIRED, latestSession } from "../../shared/lobbyHistory.js";
+import { downloadPack, packReady, refreshOfflinePacks } from "../../shared/offlinePacks.js";
+import { clearNotesOffline } from "../../notes/offlineStore.js";
 import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from "react";
 
 // The other games are CODE-SPLIT. Statically importing them put all four games plus
@@ -735,6 +737,97 @@ function useWebSocket(onMessage, { onOpen, onClose } = {}) {
 
 // ─── Main App ──────────────────────────────────────────────────────────────
 
+// ─── The offline hub's Read section ────────────────────────────────────────
+// Whether each screen has something to show with no connection. The keys are the
+// ones those screens write (Books.jsx / Notes.jsx / Profile.jsx), read here rather
+// than imported so the menu does not pull their lazy chunks in.
+const lsHas = (key) => { try { return localStorage.getItem(key) != null; } catch { return false; } };
+function offlineReadRows(authUser, readingPack) {
+	const member = !!(authUser && !authUser.guest && authUser.session_token);
+	const online = typeof navigator === "undefined" || navigator.onLine !== false;
+	const saved = (has, none) => (has ? "a copy is on this device" : online ? none : "no copy on this device yet");
+	const packed = (id, label, verb) => ({
+		id, label, verb, enabled: readingPack || online,
+		state: readingPack ? "on this device" : online ? "online — use Downloads to keep it" : "not downloaded",
+	});
+	return [
+		packed("puzzles", "Spender Puzzles", "Play"),
+		packed("bggfilter", "BGG Filter", "Browse"),
+		{ id: "books", label: "Books", verb: "Read", enabled: online || lsHas("books.offline.v1"),
+			state: saved(lsHas("books.offline.v1"), "open it once online to keep a copy") },
+		member
+			? { id: "notes", label: "Notes", verb: "Read", enabled: online || lsHas(`notes.tree.${authUser.id}`),
+				state: saved(lsHas(`notes.tree.${authUser.id}`), "open it once online to keep a copy") }
+			: { id: "notes", label: "Notes", verb: "Read", enabled: false, state: "sign in (online) to use Notes" },
+		member
+			? { id: "profile", label: "Your profile", verb: "View", enabled: online || lsHas(`profile.history.${authUser.id}`),
+				state: saved(lsHas(`profile.history.${authUser.id}`), "open it once online to keep a copy") }
+			: { id: "profile", label: "Your profile", verb: "View", enabled: false, state: "profiles are for registered players" },
+	];
+}
+
+// ─── What the offline hub can download ─────────────────────────────────────
+// Everything else on the page is cached opportunistically by sw.js, but these are
+// only ever fetched lazily — a cold install has no engine and no screen for them.
+// Each pack is downloaded, recorded and kept across deploys by shared/offlinePacks.js:
+//   urls   — static files (paths under BASE_URL), fetched with cache:"reload"
+//   chunks — the screen's own code, loaded through the service worker so it is kept
+//   warm   — backend data the screen reads from browser storage (the SW cannot keep it)
+// PER PACK: nobody pays for engines they don't play (CoC's model bins are ~4x the
+// other games combined). Each carries the fonts too (tiny, and any single download
+// must make its screens FULLY offline). Sizes are the real gzip'd transfer, rounded up.
+const OFFLINE_FONT_URLS = ["fonts/cinzel.latin.woff2", "fonts/crimsonpro.latin.woff2", "fonts/crimsonpro-italic.latin.woff2"];
+const OFFLINE_PACKS = {
+	spender: {
+		label: "Spender", size: "~1 MB",
+		urls: ["wasm/spender-worker.js", "wasm/spender_core.js", "wasm/spender_core_bg.wasm", ...OFFLINE_FONT_URLS],
+	},
+	coc: {
+		label: "Castles of Crimson", size: "~5 MB",
+		urls: ["wasm/coc-worker.js", "wasm/coc_core.js", "wasm/coc_core_bg.wasm",
+			"wasm/coc_pv_model.bin", "wasm/coc_pv_model_hard.bin", ...OFFLINE_FONT_URLS],
+		chunks: [() => import("../castles_of_crimson/CastlesOfCrimson.jsx")],
+		warm: () => fetch(`${HTTP_BASE}/coc/boards`).then((r) => r.json())
+			.then((data) => { try { localStorage.setItem("coc_boards_v1", JSON.stringify(data)); } catch {} }),
+	},
+	dissonance: {
+		label: "Dissonance", size: "~350 KB",
+		// The SMALLEST of the four, and the only one whose wasm is both the
+		// AI and the referee: `classic.rs` runs the room offline, so there is
+		// no engine to download beside the search.
+		urls: ["wasm/dissonance-worker.js", "wasm/dissonance.js", "wasm/dissonance_bg.wasm", ...OFFLINE_FONT_URLS],
+		chunks: [() => import("../dissonance/Dissonance.jsx")],
+		warm: () => fetch(`${HTTP_BASE}/dissonance/catalog`).then((r) => r.json())
+			.then((d) => { try { localStorage.setItem("dis_catalog", JSON.stringify(d)); } catch {} }),
+	},
+	duel: {
+		label: "Spender Duel", size: "~1 MB",
+		urls: ["wasm/duel-worker.js", "wasm/duel_core.js", "wasm/duel_core_bg.wasm", ...OFFLINE_FONT_URLS],
+		chunks: [() => import("../spender_duel/SpenderDuel.jsx")],
+		// Same key + shape SpenderDuel.jsx's own catalog cache uses (the full /catalog body).
+		warm: () => fetch(`${HTTP_BASE}/duel/catalog`).then((r) => r.json())
+			.then((d) => { try { if (d.ok) localStorage.setItem("duel_catalog", JSON.stringify(d)); } catch {} }),
+	},
+	// THE READING PACK — the hub's Read section. Puzzles and the BGG data are static
+	// files; Books, Notes and your profile are backend data, so each screen keeps its
+	// own copy whenever it is used online, and `warm` takes one now so a fresh
+	// download is complete without visiting each screen first.
+	reading: {
+		label: "Puzzles, BGG Filter, Books, Notes & profile", size: "~1 MB",
+		urls: ["data/puzzles.json", "data/bgg-filter.json", ...OFFLINE_FONT_URLS],
+		chunks: [
+			() => import("../../books/Books.jsx"), () => import("../../notes/Notes.jsx"),
+			() => import("../../shared/Profile.jsx"), () => import("../../bggfilter/BggFilter.jsx"),
+		],
+		warm: async ({ authUser }) => {
+			const [books, notes, profile] = await Promise.all([
+				import("../../books/Books.jsx"), import("../../notes/Notes.jsx"), import("../../shared/Profile.jsx")]);
+			await Promise.allSettled([books.saveOfflineCopy?.(authUser), notes.saveOfflineCopy?.(authUser),
+				profile.saveOfflineCopy?.(authUser)]);
+		},
+	},
+};
+
 export default function SpenderApp() {
 	// ── Persistent identity ────────────────────────────────────────────────
 	const [authUser, setAuthUser] = useState(() => {
@@ -825,7 +918,22 @@ export default function SpenderApp() {
 	// record (they own their whole screen, unlike Spender whose game screen lives here).
 	const [offlinePlay, setOfflinePlay] = useState(null);
 	// Per-game download state: {spender|coc|duel: null | {done,total} | "ok" | "err"}
-	const [precacheState, setPrecacheState] = useState({});
+	// "ok" for a pack already downloaded for THIS build — the button used to reset to
+	// "Download" on every visit, which read as though the download had not happened.
+	const [precacheState, setPrecacheState] = useState(() => Object.fromEntries(
+		Object.keys(OFFLINE_PACKS).filter(packReady).map((k) => [k, "ok"])));
+	// KEEP THE DOWNLOADS ACROSS DEPLOYS. Every deploy's service worker deletes the last
+	// build's cache, downloads included; once per page load, a few seconds after the site
+	// is up online, re-fetch whatever this device downloaded under an older build.
+	const packsRefreshedRef = useRef(false);
+	useEffect(() => {
+		if (packsRefreshedRef.current || screen === "loading" || screen === "auth") return undefined;
+		const t = setTimeout(() => {
+			packsRefreshedRef.current = true;
+			refreshOfflinePacks(OFFLINE_PACKS, { authUser }).catch(() => {});
+		}, 4000);
+		return () => clearTimeout(t);
+	}, [screen, authUser]);
 	// Dissonance's paper scorecard, opened from the hub (see the import).
 	const [offlineCard, setOfflineCard] = useState(false);
 
@@ -1775,7 +1883,12 @@ export default function SpenderApp() {
 		}
 		setAuthNotice("");
 		setHistoryGames([]);
+		// The PRIVATE copies kept for reading offline leave with the login that made them
+		// (a shared device must not keep someone's notebook). Only on a real sign-out: an
+		// expired session is the same person, who will sign straight back in.
+		clearNotesOffline().catch(() => {});
 		try {
+			for (const k of Object.keys(localStorage)) if (k.startsWith("profile.history.")) localStorage.removeItem(k);
 			localStorage.removeItem("spender_user");
 			localStorage.removeItem("spender_roomId");
 		} catch {}
@@ -2019,10 +2132,16 @@ export default function SpenderApp() {
 		setRoomData(rd => ({ ...(rd || {}), game: g }));
 	};
 
+	// THE BANK IS ONE STATIC FILE beside the bundle (games/spender/puzzle/export_static.py):
+	// a puzzle is a scripted line checked by comparison, so nothing needs the backend —
+	// it loads from the CDN while Render is still waking, and the offline hub's download
+	// keeps it for no connection at all. The per-puzzle backend route stays as a fallback.
+	const puzBankRef = useRef(null);
 	const loadPuzzles = async () => {
 		try {
-			const res = await fetch(`${HTTP_BASE}/puzzles`);
+			const res = await fetch(`${import.meta.env.BASE_URL}data/puzzles.json`);
 			const data = await res.json();
+			puzBankRef.current = data.bank || {};
 			const _list = Array.isArray(data.puzzles) ? data.puzzles : [];
 			setPuzList(_list);
 			return _list;
@@ -2063,8 +2182,8 @@ export default function SpenderApp() {
 
 	const startPuzzle = async (id) => {
 		try {
-			const res = await fetch(`${HTTP_BASE}/puzzles/${id}`);
-			const puz = await res.json();
+			const banked = puzBankRef.current?.[id];
+			const puz = banked ? structuredClone(banked) : await (await fetch(`${HTTP_BASE}/puzzles/${id}`)).json();
 			if (!puz || !Array.isArray(puz.steps) || !puz.steps.length) { setToast("Couldn't load that puzzle"); return; }
 			const heroPid = (puz.position.order || [])[puz.hero_seat];
 			disconnect();
@@ -2152,6 +2271,7 @@ export default function SpenderApp() {
 
 	const exitPuzzle = () => {
 		resetPuzzleState();
+		if (readFromHubRef.current) { exitReadToHub(); return; }
 		pushPath(buildPath("home"));
 		setScreen("home");
 	};
@@ -2215,6 +2335,23 @@ export default function SpenderApp() {
 
 	// Enter the hub (list screen). A deep-linked save id resumes that game once loaded;
 	// a dead id just leaves you on the hub (replace the URL so reload doesn't re-try it).
+	// A Read screen opened FROM THE HUB returns to it, not to the menu: offline the hub
+	// is the one place to go next. Profile needs none of this — it already returns
+	// through history (navigateTo marks the entry as in-app).
+	const readFromHubRef = useRef(false);
+	const exitReadToHub = () => {
+		readFromHubRef.current = false;
+		pushPath(buildPath("offline"));
+		enterOfflineHub(null);
+	};
+	const exitRead = () => (readFromHubRef.current ? exitReadToHub() : nav("home"));
+	const openReadFromHub = (what) => {
+		readFromHubRef.current = true;
+		if (what === "puzzles") { pushPath(buildPath("puzzles")); enterPuzzles(); }
+		else if (what === "profile") navigateTo("profile");
+		else nav(what);
+	};
+
 	const enterOfflineHub = (rid) => {
 		setScreen("offline");
 		setOfflinePlay(null);
@@ -2319,64 +2456,17 @@ export default function SpenderApp() {
 		setOfflineGames(await listOfflineGames());
 	};
 
-	// ── Offline asset precache (the "Download for offline" button) ─────────
-	// Everything else on the page is cached opportunistically by sw.js, but the wasm is
-	// only ever fetched lazily during a live vs-AI game — a cold install has no engine.
-	// This asks the service worker to precache it deliberately (cache:"reload", bypassing
-	// the ~10-min Pages TTL) and streams progress back over a MessageChannel. PER GAME —
-	// nobody pays for engines they don't play (CoC's fetched model bins are ~4x the other
-	// two games combined; Spender + Duel embed their nets in the wasm). Each list carries
-	// the fonts too (tiny, and any single download must make that game FULLY offline).
-	// `warm` covers the localStorage caches the SW can't serve: CoC's board layouts (its
-	// game screen hard-gates on them) and Duel's card catalog. Sizes are the real gzip'd
-	// transfer, rounded up.
-	const OFFLINE_ASSETS = {
-		spender: {
-			label: "Spender", size: "~1 MB",
-			urls: ["wasm/spender-worker.js", "wasm/spender_core.js", "wasm/spender_core_bg.wasm"],
-		},
-		coc: {
-			label: "Castles of Crimson", size: "~5 MB",
-			urls: ["wasm/coc-worker.js", "wasm/coc_core.js", "wasm/coc_core_bg.wasm",
-				"wasm/coc_pv_model.bin", "wasm/coc_pv_model_hard.bin"],
-			warm: () => fetch(`${HTTP_BASE}/coc/boards`).then((r) => r.json())
-				.then((data) => { try { localStorage.setItem("coc_boards_v1", JSON.stringify(data)); } catch {} }),
-		},
-		dissonance: {
-			label: "Dissonance", size: "~350 KB",
-			// The SMALLEST of the four, and the only one whose wasm is both the
-			// AI and the referee: `classic.rs` runs the room offline, so there is
-			// no engine to download beside the search.
-			urls: ["wasm/dissonance-worker.js", "wasm/dissonance.js", "wasm/dissonance_bg.wasm"],
-			warm: () => fetch(`${HTTP_BASE}/dissonance/catalog`).then((r) => r.json())
-				.then((d) => { try { localStorage.setItem("dis_catalog", JSON.stringify(d)); } catch {} }),
-		},
-		duel: {
-			label: "Spender Duel", size: "~1 MB",
-			urls: ["wasm/duel-worker.js", "wasm/duel_core.js", "wasm/duel_core_bg.wasm"],
-			// Same key + shape SpenderDuel.jsx's own catalog cache uses (the full /catalog body).
-			warm: () => fetch(`${HTTP_BASE}/duel/catalog`).then((r) => r.json())
-				.then((d) => { try { if (d.ok) localStorage.setItem("duel_catalog", JSON.stringify(d)); } catch {} }),
-		},
-	};
-	const FONT_URLS = ["fonts/cinzel.latin.woff2", "fonts/crimsonpro.latin.woff2", "fonts/crimsonpro-italic.latin.woff2"];
-	const startPrecache = (gameKey) => {
-		const spec = OFFLINE_ASSETS[gameKey];
+	// ── Offline downloads (the hub's "Download" buttons) ─────────────────────
+	// The packs themselves are OFFLINE_PACKS at module scope; shared/offlinePacks.js
+	// owns the mechanics — the files through the service worker, the screen's own
+	// code, and re-downloading after a deploy (which used to throw every download away).
+	const startPrecache = (packKey) => {
+		const spec = OFFLINE_PACKS[packKey];
 		if (!spec) return;
-		const setGame = (v) => setPrecacheState((s) => ({ ...s, [gameKey]: v }));
-		const urls = [...spec.urls, ...FONT_URLS].map((p) => `${import.meta.env.BASE_URL}${p}`);
-		spec.warm?.().catch(() => {});
-		const ctrl = navigator.serviceWorker?.controller;
-		if (!ctrl) { setGame("err"); return; }
-		const ch = new MessageChannel();
-		ch.port1.onmessage = (e) => {
-			const d = e.data || {};
-			if (d.ok) setGame("ok");
-			else if (d.error) setGame("err");
-			else if (d.total) setGame({ done: d.done, total: d.total });
-		};
-		setGame({ done: 0, total: urls.length });
-		ctrl.postMessage({ type: "PRECACHE_OFFLINE", urls }, [ch.port2]);
+		const setPack = (v) => setPrecacheState((st) => ({ ...st, [packKey]: v }));
+		setPack({ done: 0, total: (spec.urls || []).length || 1 });
+		downloadPack({ ...spec, key: packKey }, { onProgress: setPack, ctx: { authUser } })
+			.then(() => setPack("ok"), () => setPack("err"));
 	};
 
 	// State-only exit from a Spender room/review — shared by goToMenu (user action) and
@@ -2925,7 +3015,7 @@ export default function SpenderApp() {
 					    effect's cleanup); the offline hub then works entirely from local storage. */}
 					<button className="btn btn-ghost loading-escape"
 						onClick={() => { pushPath(buildPath("offline")); enterOfflineHub(null); }}>
-						Play offline vs AI
+						Use offline
 					</button>
 					</div>				</div>
 			</>
@@ -2949,6 +3039,7 @@ export default function SpenderApp() {
 			onNotes={() => nav("notes")}
 			onProfile={() => navigateTo("profile")}
 			onBggFilter={() => nav("bggfilter")}
+			onOffline={() => { pushPath(buildPath("offline")); enterOfflineHub(null); }}
 			onSiteHealth={() => setSiteHealthOpen(true)} siteAlerts={siteAlerts}
 			siteHealth={siteHealthOpen && (
 				<SiteHealth authUser={authUser} onClose={() => setSiteHealthOpen(false)} onChanged={refreshSiteAlerts} />
@@ -2959,7 +3050,7 @@ export default function SpenderApp() {
 	// Books — personal ranked reading list (public read, owner edit)
 	if (screen === "books") return (
 		<Suspense fallback={<GameChunkLoading />}>
-			<Books authUser={authUser} onExit={() => nav("home")} />
+			<Books authUser={authUser} onExit={exitRead} />
 		</Suspense>
 	);
 
@@ -2967,7 +3058,7 @@ export default function SpenderApp() {
 	// refuses everyone else on every route; the page shows them a "private" notice.
 	if (screen === "notes") return (
 		<Suspense fallback={<GameChunkLoading />}>
-			<Notes authUser={authUser} onExit={() => nav("home")} />
+			<Notes authUser={authUser} onExit={exitRead} />
 		</Suspense>
 	);
 
@@ -2983,7 +3074,7 @@ export default function SpenderApp() {
 	// BGG Filter — static BoardGameGeek dataset, filtered client-side. No backend.
 	if (screen === "bggfilter") return (
 		<Suspense fallback={<GameChunkLoading />}>
-			<BggFilter onExit={() => nav("home")} />
+			<BggFilter onExit={exitRead} />
 		</Suspense>
 	);
 
@@ -3119,11 +3210,12 @@ export default function SpenderApp() {
 			<div className="app" style={{ "--lby-accent": "#7fb069" }}>
 				<LobbyHeader
 					onBack={() => nav("home")}
-					title="Local vs AI"
+					title="Offline"
 					user={<LobbyUser user={authUser} profile={false} />}
 				/>
 				<div className="browser offline-hub">
 					<div className="offline-panel">
+						<h3 className="offline-h">Play vs AI</h3>
 						<CmRow label="Game">
 							{/* WRAP: four games no longer fit one phone row, and the base
 							    control clips rather than scrolls -- see cm-seg-wrap. */}
@@ -3224,13 +3316,34 @@ export default function SpenderApp() {
 						))}
 					</div>
 
+					{/* READ — the site's other screens, read-only offline. Each works from a copy
+					    this device keeps: Puzzles and BGG Filter from the Reading download,
+					    Books, Notes and your profile from the last time they were open online
+					    (the Reading download takes one too). Nothing here edits: a screen showing
+					    a saved copy turns its editing off. Verbs differ from the scorecard's
+					    "Open" on purpose — the render gate finds that button by name. */}
+					<div className="offline-panel offline-read">
+						<h3 className="offline-h">Read</h3>
+						{offlineReadRows(authUser, packReady("reading")).map((row) => (
+							<div key={row.id} className="offline-save-row" data-read={row.id}>
+								<div className="offline-save-info"><b>{row.label}</b> · <span className="offline-read-state">{row.state}</span></div>
+								<div className="offline-save-btns">
+									<button className="btn btn-outline btn-sm" disabled={!row.enabled}
+										onClick={() => openReadFromHub(row.id)}>{row.verb}</button>
+								</div>
+							</div>
+						))}
+					</div>
+
 					<div className="offline-panel">
-						<h3 className="offline-h">Play with no connection</h3>
+						<h3 className="offline-h">Downloads</h3>
 						<p className="offline-note">
-							Download a game's AI engine so it works fully offline — even in airplane mode.
-							Install the site to your home screen first for the best experience.
+							Keep a game's AI, or the Read section, on this device so it works with no
+							connection — even in airplane mode. Downloads stay up to date on their own
+							whenever the site is opened online. Install the site to your home screen
+							first for the best experience.
 						</p>
-						{Object.entries(OFFLINE_ASSETS).map(([key, spec]) => {
+						{Object.entries(OFFLINE_PACKS).map(([key, spec]) => {
 							const st = precacheState[key];
 							return (
 								<div key={key} className="offline-save-row">

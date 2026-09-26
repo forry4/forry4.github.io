@@ -1,3 +1,5 @@
+import { getOfflineImage } from "./offlineStore.js";
+
 // Screenshot pipeline: downscale + re-encode in the browser, upload as base64, and
 // load back through an authenticated fetch.
 //
@@ -62,9 +64,22 @@ export const newUploadKey = () => "up_" + Math.random().toString(36).slice(2, 11
 // session is enough; the server also marks it private+immutable for the HTTP cache.
 const urlCache = new Map();
 
+// Whose offline copy a failed fetch may fall back to (notes/offlineStore.js). Set by
+// the Notes page for the signed-in account; null means no fallback.
+let offlineOwner = null;
+export function setImageOwner(uid) { offlineOwner = uid || null; }
+
 export function imageUrl(api, id) {
 	if (!urlCache.has(id)) {
-		const p = api.imageBlob(id).then((b) => URL.createObjectURL(b));
+		const owner = offlineOwner;
+		const p = api.imageBlob(id)
+			.catch(async (e) => {
+				// No server: the picture this device kept, if any (read-only offline Notes).
+				const blob = owner ? await getOfflineImage(owner, id) : null;
+				if (blob) return blob;
+				throw e;
+			})
+			.then((b) => URL.createObjectURL(b));
 		p.catch(() => urlCache.delete(id));   // let a later render retry
 		urlCache.set(id, p);
 	}

@@ -45,6 +45,9 @@ const EXTRA_ICON = {
 	// A page with a folded corner and two ruled lines — the same drawing as Notes' own
 	// note glyph, so the tile and the page it opens agree.
 	notes: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><path d="M6.5 3.5h7.8l3.7 3.7v13.3H6.5Z" /><path d="M14 3.7v3.8h3.8M9.2 12h5.6M9.2 15.4h5.6" /></svg>),
+	// A cloud with a slash: the offline hub — play vs AI and read with no connection.
+	// Two strokes, like the others, so it survives 20px.
+	offline: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><path d="M7.2 18.2H6.8a3.6 3.6 0 0 1-.4-7.2 5.4 5.4 0 0 1 9.9-1.8 4.3 4.3 0 0 1 3 7.3" /><path d="M4.5 4.5l15 15" /></svg>),
 	// A pulse line: the owner-only Site health panel (alerts + what the monitor sees).
 	health: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><path d="M3.5 12.5h4l2-5 4 10 2-5h5" /></svg>),
 };
@@ -132,7 +135,7 @@ const GO_CHEVRON = (
 
 export { SITE_NAME, GAMES, GAME_EMBLEM, HERO_RULE };
 
-export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles, onBooks, onNotes, onBggFilter, onSiteHealth, siteAlerts = 0, siteHealth = null, onProfile, onLogout }) {
+export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles, onBooks, onNotes, onBggFilter, onOffline, onSiteHealth, siteAlerts = 0, siteHealth = null, onProfile, onLogout }) {
 	// Built here rather than at module scope because each entry closes over a prop.
 	const games = visibleGames(authUser);
 	const extras = [
@@ -142,6 +145,10 @@ export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles
 		// A private notebook per account. Shown to guests too: the page tells them to
 		// sign in, which is how they find out it exists (notes/api.py refuses them).
 		onNotes && { id: "notes", label: "Notes", onClick: onNotes },
+		// The one door to everything that works with no connection: vs-AI games, the
+		// Read section, and the downloads that keep them. Here so it can be set up
+		// while there IS signal; the loading screen offers the same hub when there is not.
+		onOffline && { id: "offline", label: "Offline", onClick: onOffline },
 		// The owner's alerts panel. Hidden from everyone else as a convenience only:
 		// every /admin route refuses a non-owner server-side (core/monitor.py).
 		authUser?.is_admin && onSiteHealth && { id: "health", label: "Site health", onClick: onSiteHealth, badge: siteAlerts },

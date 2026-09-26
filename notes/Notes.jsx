@@ -2,6 +2,8 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { baseCss } from "../shared/theme.js";
 import { buildPath, parsePath, pushPath, subscribe } from "../shared/router.js";
 import { makeApi } from "./api.js";
+import { syncNotesOffline } from "./offlineStore.js";
+import { setImageOwner } from "./images.js";
 import { I } from "./icons.jsx";
 import { ContextMenu } from "./menu.jsx";
 import { copyText } from "./editorMenu.js";
@@ -89,6 +91,18 @@ function MoveDialog({ title, folders, disabled, current, onPick, onClose }) {
 	);
 }
 
+/** Take a copy now, without opening the page — the offline hub's Reading download.
+ *  The folder tree under the key the page paints from, then every note and picture. */
+export async function saveOfflineCopy(authUser) {
+	const token = authUser && !authUser.guest ? authUser.session_token : null;
+	if (!token) return;
+	const api = makeApi(token);
+	const t = await api.tree();
+	const tree = { folders: t.folders, notes: t.notes };
+	writeLS(`notes.tree.${authUser.id}`, tree);
+	await syncNotesOffline(api, authUser.id, tree);
+}
+
 // ─── the page ─────────────────────────────────────────────────────────────────
 export default function Notes({ authUser, onExit }) {
 	const token = authUser?.session_token || null;
@@ -163,12 +177,15 @@ export default function Notes({ authUser, onExit }) {
 			setUsage(t.usage || null);
 			writeLS(cacheKey, next);
 			setAccess("ok");
+			// Keep this device's read-only copy current, in the background.
+			syncNotesOffline(api, authUser?.id, next).catch(() => {});
 		} catch (e) {
 			setAccess(e.status === 401 || e.status === 403 ? "denied" : "offline");
 		}
 	}, [api, token, cacheKey]);
 
 	useEffect(() => { load(); }, [load]);
+	useEffect(() => { setImageOwner(authUser?.id); return () => setImageOwner(null); }, [authUser?.id]);
 	useEffect(() => { if (tree) writeLS(cacheKey, tree); }, [tree, cacheKey]);
 	useEffect(() => { writeLS("notes.expanded", [...expanded]); }, [expanded]);
 	useEffect(() => { writeLS("notes.sort", sort); }, [sort]);
@@ -699,7 +716,7 @@ export default function Notes({ authUser, onExit }) {
 						</div>
 					) : openNote ? (
 						<Suspense fallback={<div className="nt-empty nt-loading">Loading…</div>}>
-							<NoteEditor key={openNote} api={api} noteId={openNote} notify={notify} statusSlot={statusSlot}
+							<NoteEditor key={openNote} api={api} uid={authUser?.id} noteId={openNote} notify={notify} statusSlot={statusSlot}
 								focusTitle={freshNote.current === openNote} onTitleFocused={() => { freshNote.current = null; }}
 								findRequest={findReq && findReq.id === openNote ? findReq : null}
 								nav={{

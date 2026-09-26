@@ -47,6 +47,38 @@ async function inlineCover(url) {
 	}
 }
 
+// ─── The offline copy ──────────────────────────────────────────────────────
+// The last list (and this reader's own suggestions) this browser loaded, for the
+// offline hub's Read section. Covers are already inlined data URIs (above), so the
+// copy is complete. A screen showing it is READ-ONLY: editing needs the server.
+// The key is also read by the hub (Spender.jsx offlineReadRows) to say whether a
+// copy exists — keep them in step.
+const OFFLINE_KEY = "books.offline.v1";
+function readOfflineCopy() {
+	try { return JSON.parse(localStorage.getItem(OFFLINE_KEY) || "null"); } catch { return null; }
+}
+function writeOfflineCopy(patch) {
+	const next = { ...(readOfflineCopy() || {}), ...patch, savedAt: Date.now() };
+	try { localStorage.setItem(OFFLINE_KEY, JSON.stringify(next)); }
+	catch { /* over quota — the copy is a convenience, never worth an error */ }
+}
+
+/** Take a copy now, without opening the screen (the offline hub's Reading download). */
+export async function saveOfflineCopy(authUser) {
+	const token = authUser?.session_token || null;
+	const headers = token ? { Authorization: `Bearer ${token}` } : {};
+	const [b, sg] = await Promise.all([
+		fetch(`${HTTP_BASE}/books`, { headers }).then((r) => r.json()),
+		fetch(`${HTTP_BASE}/books/suggestions`, { headers }).then((r) => r.json()).catch(() => null),
+	]);
+	if (!b?.ok) return;
+	writeOfflineCopy({
+		books: b.books || [],
+		...(sg?.ok ? { sugg: { uid: authUser?.id || null, mine: sg.mine || [], all: sg.all || [],
+			info: { is_owner: !!sg.is_owner, logged_in: !!sg.logged_in, max: sg.max || 10 } } } : {}),
+	});
+}
+
 function Stars({ value }) {
 	return (
 		<span className="bk-stars" aria-label={`${value} out of 5 stars`}>
@@ -176,6 +208,9 @@ export default function Books({ authUser, onExit }) {
 	const [dragOverId, setDragOverId] = useState(null);  // row currently under the drag (visual cue)
 
 	const [toast, setToast] = useState("");
+	// Set (to the copy's timestamp) when the server could not be reached and the page is
+	// showing the offline copy instead — which also turns every editing control off.
+	const [offlineAt, setOfflineAt] = useState(null);
 
 	const token = authUser?.session_token || null;
 	// Send the session token in the Authorization header (keeps it out of URLs/logs);
@@ -191,8 +226,15 @@ export default function Books({ authUser, onExit }) {
 				const res = await fetch(`${HTTP_BASE}/books`, { headers: authHeaders });
 				const data = await res.json();
 				if (cancelled) return;
-				if (data.ok) { setBooks(data.books || []); setCanEdit(!!data.can_edit); }
-			} catch { /* leave empty */ }
+				if (data.ok) {
+					setBooks(data.books || []); setCanEdit(!!data.can_edit);
+					writeOfflineCopy({ books: data.books || [] });
+				}
+			} catch {
+				// No server: show the copy this browser kept, read-only.
+				const copy = readOfflineCopy();
+				if (!cancelled && copy?.books) { setBooks(copy.books); setCanEdit(false); setOfflineAt(copy.savedAt || Date.now()); }
+			}
 			finally { if (!cancelled) setLoading(false); }
 		})();
 		return () => { cancelled = true; };
@@ -207,8 +249,16 @@ export default function Books({ authUser, onExit }) {
 				if (cancelled || !data.ok) return;
 				setSugg(data.mine || []);
 				setAllSugg(data.all || []);
-				setSuggInfo({ is_owner: !!data.is_owner, logged_in: !!data.logged_in, max: data.max || 10 });
-			} catch { /* leave empty */ }
+				const info = { is_owner: !!data.is_owner, logged_in: !!data.logged_in, max: data.max || 10 };
+				setSuggInfo(info);
+				writeOfflineCopy({ sugg: { uid: authUser?.id || null, mine: data.mine || [], all: data.all || [], info } });
+			} catch {
+				// Only THIS reader's copy: suggestions are per account.
+				const copy = readOfflineCopy()?.sugg;
+				if (cancelled || !copy || copy.uid !== (authUser?.id || null)) return;
+				setSugg(copy.mine || []); setAllSugg(copy.all || []); setSuggInfo(copy.info || null);
+				setOfflineAt((at) => at || readOfflineCopy()?.savedAt || Date.now());   // read-only either way
+			}
 		})();
 		return () => { cancelled = true; };
 	}, [token]);
@@ -526,7 +576,8 @@ export default function Books({ authUser, onExit }) {
 				);
 				body = suggEditor();
 			} else {
-				controls = <button className="btn btn-outline btn-sm" onClick={startSuggEdit}>{sugg.length ? "Edit" : "Suggest a book"}</button>;
+				controls = offlineAt ? null
+					: <button className="btn btn-outline btn-sm" onClick={startSuggEdit}>{sugg.length ? "Edit" : "Suggest a book"}</button>;
 				body = sugg.length === 0
 					? <div className="bk-empty">You haven't suggested any books yet.</div>
 					: <SuggestionList items={sugg} />;
@@ -576,6 +627,12 @@ export default function Books({ authUser, onExit }) {
 				<div className="bk-hero">
 					<div className="bk-logo">My Bookshelf</div>
 				</div>
+				{offlineAt && (
+					<div className="bk-offline-note" role="status">
+						Offline — showing the copy saved {new Date(offlineAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}.
+						Editing needs a connection.
+					</div>
+				)}
 
 				<div className="bk-columns">
 					{loading ? <div className="bk-empty">Loading…</div> : (editing ? rankEditView() : rankReadView())}

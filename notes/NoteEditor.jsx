@@ -21,6 +21,7 @@ import {
 	compressImage, blobToBase64, imageFilesFrom, imageUrl, primeImage,
 	pendingUploads, newUploadKey,
 } from "./images.js";
+import { getOfflineNote, putOfflineNote } from "./offlineStore.js";
 
 // ─── the image node ────────────────────────────────────────────────────────────
 // A block atom that REFERENCES an uploaded image by id; the bytes never live in the
@@ -449,7 +450,7 @@ function Toolbar({ editor, onPickImages, onFind, findOpen, fileRef, readOnly }) 
 
 const STATUS_TEXT = {
 	saved: "Saved", dirty: "Edited", saving: "Saving…", offline: "Offline — retrying",
-	conflict: "Not saved", error: "Not saved", readonly: "In the Trash",
+	conflict: "Not saved", error: "Not saved", readonly: "In the Trash", copy: "Offline — read-only",
 };
 
 function SaveStatus({ status }) {
@@ -464,8 +465,13 @@ const KEEPALIVE_MAX = 60_000;   // fetch keepalive bodies are capped at 64KB
 function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, notify, statusSlot, focusTitle, onTitleFocused, findRequest, nav, flushRef }) {
 	const noteId = initial.id;
 	const trashed = initial.deleted_at != null;
+	// OPENED FROM THIS DEVICE'S COPY (notes/offlineStore.js) because the server could
+	// not be reached: read-only exactly the way a trashed note is — the same editable
+	// switch and the same guard on every command — with its own banner.
+	const offlineCopy = !!initial.__offlineCopy;
+	const readOnly = trashed || offlineCopy;
 	const [title, setTitle] = useState(initial.title || "");
-	const [status, setStatusState] = useState(trashed ? "readonly" : "saved");
+	const [status, setStatusState] = useState(offlineCopy ? "copy" : trashed ? "readonly" : "saved");
 	const [conflict, setConflict] = useState(null);
 
 	const statusRef = useRef(status);
@@ -633,7 +639,7 @@ function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, noti
 	insertRef.current = insertImages;
 
 	const editor = useEditor({
-		editable: !trashed,
+		editable: !readOnly,
 		extensions: [
 			StarterKit.configure({
 				heading: { levels: [1, 2, 3] },
@@ -887,7 +893,7 @@ function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, noti
 		const src = frame.querySelector("img")?.getAttribute("src");
 		const a = node.attrs;
 		const set = (attrs) => ed.chain().focus().setNodeSelection(pos).updateAttributes("noteImage", attrs).run();
-		const ro = trashed;
+		const ro = readOnly;
 		return [
 			{ label: "Open full size", onSelect: () => frame.dispatchEvent(new Event("nt-lightbox")), disabled: !src },
 			"-",
@@ -911,7 +917,7 @@ function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, noti
 	};
 
 	const textMenu = (ed) => {
-		const ro = trashed;
+		const ro = readOnly;
 		const hasSel = !ed.state.selection.empty;
 		const selText = hasSel ? ed.state.doc.textBetween(ed.state.selection.from, ed.state.selection.to, " ").trim() : "";
 		const link = linkAt(ed);
@@ -1055,7 +1061,7 @@ function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, noti
 		<div className="nt-editor">
 			{editor && (
 				<div className="nt-bars">
-					<Toolbar editor={editor} onPickImages={(f) => insertImages(f)} findOpen={findOpen} fileRef={fileRef} readOnly={trashed}
+					<Toolbar editor={editor} onPickImages={(f) => insertImages(f)} findOpen={findOpen} fileRef={fileRef} readOnly={readOnly}
 						onFind={() => (findOpen ? closeFind() : openFind(null))} />
 					{findOpen && <FindBar editor={editor} text={findText} setText={setFindText} onClose={closeFind} inputRef={findInput} />}
 				</div>
@@ -1073,7 +1079,12 @@ function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, noti
 					</span>
 				</div>
 			)}
-			{trashed && (
+			{offlineCopy && (
+				<div className="nt-banner" role="status">
+					<span>Offline — this is the copy saved on this device, read-only.</span>
+				</div>
+			)}
+			{trashed && !offlineCopy && (
 				<div className="nt-banner">
 					<span>This note is in the Trash.</span>
 					<span className="nt-banner-acts">
@@ -1089,7 +1100,7 @@ function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, noti
 			<div className="nt-page" onContextMenu={onContextMenu}
 				onPointerDown={(e) => { pointerType.current = e.pointerType || "mouse"; }}>
 				<input ref={titleRef} className="nt-title" value={title} placeholder="Untitled" aria-label="Title" maxLength={200}
-					readOnly={trashed} onChange={(e) => onTitle(e.target.value)}
+					readOnly={readOnly} onChange={(e) => onTitle(e.target.value)}
 					onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); focusBodyStart(); } }} />
 				<EditorContent editor={editor} />
 			</div>
@@ -1099,7 +1110,7 @@ function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, noti
 
 // Loads a note, then hands it to the editor. `version` remounts the editor with a
 // fresh copy — how "Load theirs" and Restore take effect.
-export default function NoteEditor({ api, noteId, onSaved, onGone, onRestore, notify, statusSlot, focusTitle, onTitleFocused, findRequest, nav, flushRef }) {
+export default function NoteEditor({ api, uid, noteId, onSaved, onGone, onRestore, notify, statusSlot, focusTitle, onTitleFocused, findRequest, nav, flushRef }) {
 	const [note, setNote] = useState(null);
 	const [err, setErr] = useState(null);
 	const [version, setVersion] = useState(0);
@@ -1109,15 +1120,25 @@ export default function NoteEditor({ api, noteId, onSaved, onGone, onRestore, no
 		setNote(null);
 		setErr(null);
 		api.getNote(noteId).then(
-			(n) => live && setNote(n),
-			(e) => live && setErr(e.status === 404 ? "missing" : e.status === undefined ? "offline" : "error"),
+			(n) => { if (!live) return; setNote(n); putOfflineNote(uid, n); },   // keep the device's copy current
+			async (e) => {
+				if (!live) return;
+				if (e.status === undefined) {
+					// Never reached the server: open this device's copy, read-only.
+					const copy = await getOfflineNote(uid, noteId);
+					if (!live) return;
+					if (copy) { setNote({ ...copy, __offlineCopy: true }); return; }
+				}
+				setErr(e.status === 404 ? "missing" : e.status === undefined ? "offline" : "error");
+			},
 		);
 		return () => { live = false; };
-	}, [api, noteId, version]);
+	}, [api, uid, noteId, version]);
 
 	if (err) return (
 		<div className="nt-empty">
-			<p>{err === "missing" ? "This note doesn't exist any more." : "Couldn't load this note."}</p>
+			<p>{err === "missing" ? "This note doesn't exist any more."
+				: err === "offline" ? "Offline, and this note has no copy on this device yet." : "Couldn't load this note."}</p>
 			{err !== "missing" && <button type="button" className="btn btn-outline btn-sm" onClick={() => setVersion((v) => v + 1)}>Try again</button>}
 		</div>
 	);

@@ -30,6 +30,17 @@ const styles = baseCss + lobbyCss + _css;
 const readCache = (key) => { try { return JSON.parse(localStorage.getItem(key) || "null"); } catch { return null; } };
 const writeCache = (key, v) => { try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* full or blocked */ } };
 
+/** Take a copy now, without opening the page — the offline hub's Reading download.
+ *  Same key the page reads first (stale-while-revalidate), so offline it opens on it. */
+export async function saveOfflineCopy(authUser) {
+	const token = authUser && !authUser.guest ? authUser.session_token : null;
+	if (!token) return;
+	const res = await fetch(`${HTTP_BASE}/profile`, { headers: { Authorization: `Bearer ${token}` } });
+	if (!res.ok) return;
+	const body = await res.json();
+	writeCache(`profile.history.${authUser.id}`, body.history || []);
+}
+
 const titled = (s) => String(s || "").replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
 const pct = (n, d) => (d ? `${Math.round((100 * n) / d)}%` : "—");
 const gameName = (id) => GAME_INFO[id]?.name || titled(id);
