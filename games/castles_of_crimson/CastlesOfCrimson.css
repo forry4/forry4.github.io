@@ -215,7 +215,10 @@ html,body{margin:0;padding:0;background:#120c0d}
   /* fit the "Color bonus" label + all 6 color chips on one phone row (down to ~360px) */
   .coc .coc-bonusbar{display:flex;flex-direction:column;align-items:center;gap:6px;padding:7px 6px}
   .coc .coc-bonus-groups{justify-content:center;gap:4px}
-  .coc .coc-bonus-spacer{display:none}
+  /* SHOWN, centred under the score. This cell was an empty grid spacer when it was
+     hidden here; the turn badge moved INTO it later, and the phone rule went on hiding
+     it — so a phone player had no "Place your starting castle" / "Your turn" anywhere. */
+  .coc .coc-bonus-spacer{justify-content:center;padding-left:0}
   .coc .coc-bonusbar-lbl{letter-spacing:.05em}
   .coc .coc-bonuschip{gap:2px}
   .coc .coc-bonuschip b{font-size:.8rem}

@@ -106,6 +106,10 @@
 .duel-col-cards .level-row .card-cost .cost-col{gap:calc(var(--card-h) * 0.027)}
 .duel-col-cards .level-row .deck-pile{font-size:calc(var(--card-h) * 0.068);gap:calc(var(--card-h) * 0.032)}
 .duel-col-cards .level-row .deck-remaining{font-size:calc(var(--card-h) * 0.147)}
+/* The deck's TIER numeral (I / II / III) took the pile's 0.068 share and came to 6.4px
+   on a phone and ~8px on a desktop — the only thing on the pile saying which deck it
+   is, printed smaller than a cost number. Its own share, with a floor. */
+.duel-col-cards .level-row .deck-pile>span:first-child{font-size:max(calc(var(--card-h) * 0.1), 10px);letter-spacing:.06em}
 .card-empty{visibility:hidden}
 
 /* board */
@@ -355,6 +359,17 @@
   .duel-cols{grid-template-columns:1fr 1fr;grid-template-rows:auto;
     grid-template-areas:"cards board" "log board" "side side"}
 }
+@media(min-width:721px) and (max-width:940px){
+  /* PORTRAIT TABLETS: the pyramid gets the full width. Split in half beside the board it
+     came out ~54px a card at 834px — 44 text nodes under 10px, cost numbers at ~7px —
+     while the log below it sat half-empty. Full width makes the cards ~2.3x larger; the
+     board and the player rail share the row beneath (each about a phone's width, which is
+     the shape both were already tuned for), and the log goes last with the phone's cap
+     so an early-game log can't stretch the page. */
+  .duel-cols{grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+    grid-template-areas:"cards cards" "board side" "log log"}
+  .duel .duel-col-log .move-log{flex:none;max-height:min(40vh,360px)}
+}
 @media(max-width:720px){
   /* Phone single-column: cards, board, player boxes, then the log LAST (a big log
      shouldn't sit between the pyramid and the board on a small screen). */
@@ -410,6 +425,13 @@
   .duel-col-cards .level-row .cost-num{font-size:calc(var(--card-h) * 0.114)}
   .duel-col-cards .level-row .card-bonus{width:calc(var(--card-h) * 0.168);height:calc(var(--card-h) * 0.168)}
   .duel-col-cards .level-row .card-ability{font-size:calc(var(--card-h) * 0.0984)}
+  /* CROWNS GET THEIR OWN LINE. Points + two crowns + the (1.2x) bonus disc need ~60px
+     and a phone card's header has ~51, so the crowns slid LEFT over the points and a
+     3-point, 2-crown card read as a card with no points at all. Wrapping them under the
+     points keeps all three legible, and it is every crowned card rather than only the
+     ones that overflow so the pyramid's headers stay one shape. */
+  .duel-col-cards .level-row .card-header{flex-wrap:wrap;row-gap:calc(var(--card-h) * 0.02)}
+  .duel-col-cards .level-row .card-crowns{order:3;flex:0 0 100%;margin:0}
   .duel .duel-deck{width:52px;min-height:80px}
 }
 @media(max-width:600px){

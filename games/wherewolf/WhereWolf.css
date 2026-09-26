@@ -16,6 +16,15 @@
    out ~714px holding a name at one end and a Join at the other. It is set on the
    PAGE, so the identity band narrows with the grid and the two keep one left edge. */
 .ww-wrap{width:100%;margin:0;padding:0;display:flex;flex-direction:column;gap:16px}
+/* THE GAME SCREEN'S OWN FRAME. `.ww-wrap` lost its padding and its height when the
+   lobby moved onto `.lby-page-in` (both comments above), which was right for the
+   lobby and silently wrong for the table, which uses the same class with no
+   `.lby-page` around it: the ☰ sat on the screen's left edge, "You: Seer" was cut
+   off the right one, and on a phone — where the table is `flex:1` inside a column
+   that no longer had a height — the whole table resolved to 0px tall, so every
+   seat, the centre cards, your own card and the Ready button piled on top of the
+   banner in the first 260px. */
+.ww-game{min-height:100dvh;padding:8px 16px calc(env(safe-area-inset-bottom,0px) + 16px)}
 .ww-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .ww-top-left{display:flex;align-items:center;gap:10px;min-width:0}
 .ww-title{font-family:Cinzel,serif;font-weight:700;color:var(--gold-light);letter-spacing:.5px}
@@ -133,6 +142,11 @@
      second 100dvh on a descendant made this the one lobby whose phone page scrolled
      53px past its own content in BOTH data states. */
   .ww-wrap{padding:0;gap:8px}
+  /* A DEFINITE height, not a min-height: the table is a flex:1 child two levels down,
+     and only a definite column hands a flexed grandchild a size. The results screen
+     is a long scroll, so it keeps the floor instead. */
+  .ww-game{height:100dvh;padding:6px 10px calc(env(safe-area-inset-bottom,0px) + 10px)}
+  .ww-game.ww-game-over{height:auto;min-height:100dvh}
   .ww-banner{font-size:14px;min-height:24px}
   .ww-sub{font-size:12px;min-height:16px}
   /* the game's table area fills the space between the sub-prompt and the action bar */

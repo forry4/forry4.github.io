@@ -608,6 +608,10 @@
 .or-decision .or-choice-grid button { padding: .48rem .68rem; }
 .or-choice-grid { display: flex; flex-wrap: wrap; gap: .5rem; }
 .or-mulligan p { color: var(--or-dim); }
+/* ONE AXIS. The hand is centred, and the eyebrow, heading, sentence and button above
+   and below it were flush left — three alignments in one panel, with the button
+   stranded under the heading at the far edge from the cards it acts on. */
+.or-mulligan { text-align: center; }
 .or-result { text-align: center; }
 .or-result > span { color: var(--lby-accent); font-size: .75rem; font-weight: 900; letter-spacing: .14em; text-transform: uppercase; }
 .or-status { grid-column: 1 / -1; display: flex; justify-content: center; align-items: center; gap: .65rem; padding: 1rem; color: var(--or-dim); }

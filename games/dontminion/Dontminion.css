@@ -578,6 +578,45 @@
 .dm-myhand { flex: 1; min-width: 0; padding-bottom: 12px; }
 .dm-hand { display: flex; flex-wrap: wrap; gap: 8px; }
 .dm-turnbtns { display: flex; flex-direction: column; gap: 8px; }
+/* THE HAND SIZES TO ITS ROW. A fixed 120px card fitted four across beside the piles
+   and the turn buttons at 1366, and two at a portrait tablet, so a five-card hand
+   stood 4+1 or 2+2+1 — the tallest thing on the page, most of it empty — while the
+   supply above used smaller faces. Five across now, 84-120px (84 is the supply's own
+   pile width, so a hand card is never smaller than the card you bought it from).
+   Phones keep their three-across rule below: this is scoped past that breakpoint. */
+@media (min-width: 641px) {
+  .dm .dm-myhand .dm-hand {
+    --card-w: clamp(84px, calc((100cqw - 4 * 8px) / 5), 120px);
+    --card-h: calc(var(--card-w) * 1.4);
+  }
+}
+/* The hand is its own size container only BESIDE the piles, where its width is what
+   is left of the row. Stacked (below), it spans `.dm-me`, which is already a
+   container, so the same 100cqw is right without it — and a column flexbox measures a
+   size-contained item's height as if laid out at zero width, every card on its own
+   line: as a container there it stood ~630px tall around a 168px row. */
+@media (min-width: 981px) {
+  .dm .dm-myhand { container-type: inline-size; }
+}
+/* Portrait tablets take the phone's STACK — piles above, hand across the full width,
+   buttons in a row under it — since beside the piles the hand had ~350px to hold five. */
+@media (min-width: 641px) and (max-width: 980px) {
+  .dm .dm-handrow { flex-direction: column; align-items: stretch; gap: 12px; }
+  .dm .dm-turnbtns { flex-direction: row; flex-wrap: wrap; }
+  .dm .dm-turnbtns .btn { flex: 1 1 auto; }
+  .dm .dm-me .dm-pile-count { bottom: -4px; }
+}
+/* TEN KINGDOM PILES BREAK 5 + 5, NOT 9 + 1. Below the width that holds all ten on one
+   line (the --card-w-s floor: 10 x 88px + gaps = a 1000px supply) the row wrapped
+   wherever it ran out, which at 1366 left Sentry alone under nine others. Capping the
+   row at five piles costs no height — it was two rows already — and reads as the
+   two-row kingdom the physical game lays out. Only an exact ten: a Bane (11) or a
+   landscape-heavy board keeps the plain wrap. */
+@container (max-width: 999px) {
+  .dm-supply-row.dm-kingdom:has(> .dm-pile-slot:nth-child(10):last-child) {
+    max-width: calc(5 * var(--card-w-s) + 4 * 10px + 1px); margin-inline: auto;
+  }
+}
 
 /* ── modals ── */
 .dm-backdrop {

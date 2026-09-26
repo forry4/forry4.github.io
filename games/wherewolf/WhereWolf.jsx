@@ -880,7 +880,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
 
   return (
     <div className="ww" style={{ "--lby-accent": GAME_ACCENTS.wherewolf }}><style>{css}</style>
-      <div className="ww-wrap">
+      <div className={`ww-wrap ww-game${phase === "over" ? " ww-game-over" : ""}`}>
         <div className="ww-top">
           <div className="ww-top-left"><GameMenu onLeave={leaveToLobby} onRules={() => setShowRules(true)} />
             <span className="ww-title">Where Wolf</span></div>
