@@ -7,7 +7,9 @@
 /* Matte gradient + drop shadow, NO ring: a same-hue ring is lighter than the vivid bottom
    of the matte gradient, which paints a bright arc along each gem's lower edge. The gradient
    (light top -> dark bottom) + shadow give enough shape on their own. */
-.gem-token{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:.95rem;background:linear-gradient(180deg,color-mix(in srgb,var(--gc) 80%,#fff),color-mix(in srgb,var(--gc) 86%,#000));box-shadow:0 1px 4px rgba(0,0,0,.4);transition:transform .12s}
+/* ...and a deep, soft drop shadow plus a shaded underside, so a gem SITS on the table
+   rather than being printed on it. */
+.gem-token{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:.95rem;background:linear-gradient(180deg,color-mix(in srgb,var(--gc) 80%,#fff),color-mix(in srgb,var(--gc) 86%,#000));box-shadow:0 8px 18px -8px rgba(0,0,0,.9),0 1px 3px rgba(0,0,0,.35),inset 0 -3px 6px rgba(0,0,0,.22);transition:transform .12s}
 .gem-count{font-size:.75rem;color:var(--text-dim);font-family:'Cinzel','Cinzel Fallback',serif}
 
 /* ─── Cards ─────────────────────────────────────────────────────────────── */
@@ -16,12 +18,16 @@
    Padding on all sides + matching -margin gives clip-room without moving the row. */
 .level-row{display:flex;gap:8px;align-items:flex-start;flex-wrap:nowrap;overflow-x:auto;padding:6px 4px 4px;margin:-6px -4px 0}
 .level-row::-webkit-scrollbar{height:4px}.level-row::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
-.deck-pile{width:var(--card-w,88px);min-height:var(--card-h,120px);border-radius:var(--radius);border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;color:var(--text-dim);cursor:pointer;flex-shrink:0;background:var(--surface2);transition:border-color .12s,color .12s;flex-direction:column;gap:4px}
+/* A deck is the BACK of a card: gold-edged, cross-hatched, with an inset frame — not a
+   dashed empty slot, which read as "nothing here" on the one pile you can draw from. */
+.deck-pile{width:var(--card-w,88px);min-height:var(--card-h,120px);border-radius:calc(var(--radius) + 3px);border:1px solid color-mix(in srgb,var(--gold) 40%,transparent);display:flex;align-items:center;justify-content:center;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;color:color-mix(in srgb,var(--gold) 80%,var(--text-dim));cursor:pointer;flex-shrink:0;background:radial-gradient(60% 45% at 50% 50%,color-mix(in srgb,var(--gold) 14%,transparent),transparent 70%),repeating-linear-gradient(45deg,color-mix(in srgb,var(--gold) 7%,transparent) 0 1px,transparent 1px 8px),repeating-linear-gradient(-45deg,color-mix(in srgb,var(--gold) 7%,transparent) 0 1px,transparent 1px 8px),linear-gradient(160deg,#2a2213,#14100a);box-shadow:inset 0 0 0 5px #19140c,inset 0 0 0 6px color-mix(in srgb,var(--gold) 30%,transparent),0 12px 24px -14px #000;transition:border-color .12s,color .12s;flex-direction:column;gap:4px}
 .deck-pile:hover{border-color:var(--gold);color:var(--gold)}
 .deck-pile.selected{border-color:var(--gold-light);color:var(--gold-light);box-shadow:0 0 0 2px var(--gold-light)}
 .deck-pile.disabled{cursor:not-allowed;opacity:.5}
 .deck-remaining{font-size:1.3rem;font-weight:700;color:var(--text);font-family:'Cinzel','Cinzel Fallback',serif}
-.card{width:var(--card-w,88px);min-height:var(--card-h,120px);border-radius:var(--radius);background:linear-gradient(160deg,var(--surface3),var(--surface2));border:1px solid var(--border);box-shadow:0 1px 3px rgba(0,0,0,.32),inset 0 1px 0 rgba(255,255,255,.045);padding:8px 6px 6px;display:flex;flex-direction:column;cursor:pointer;transition:transform .15s,border-color .15s,opacity .15s;flex-shrink:0;position:relative}
+/* A card has DEPTH: a face lit from the top, a darker foot and a soft cast shadow. The
+   state rules below (hover / selected / affordable) sit after this and still win. */
+.card{width:var(--card-w,88px);min-height:var(--card-h,120px);border-radius:calc(var(--radius) + 3px);background:linear-gradient(170deg,var(--surface3) 0%,var(--surface2) 55%,color-mix(in srgb,var(--surface2) 78%,#000) 100%);border:1px solid color-mix(in srgb,var(--border) 75%,transparent);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),inset 0 -18px 30px -24px rgba(0,0,0,.8),0 12px 26px -14px rgba(0,0,0,.95);padding:8px 6px 6px;display:flex;flex-direction:column;cursor:pointer;transition:transform .15s,border-color .15s,opacity .15s;flex-shrink:0;position:relative}
 .card-slot{width:var(--card-w,88px);flex-shrink:0}
 /* Each cell in a level row (deck pile / card / empty slot) shares the row width
    equally but never exceeds --card-w (88px default; bigger on desktop). A full
@@ -55,7 +61,9 @@
 .card-back-level{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:1.3rem;color:var(--text-dim)}
 .card-back-label{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.55rem;letter-spacing:.1em;color:var(--text-dim);text-transform:uppercase}
 .card-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px}
-.card-points{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:1.1rem;color:var(--gold);min-width:16px;text-shadow:0 1px 2px rgba(0,0,0,.45)}
+/* Points are STRUCK in gold (a gradient through the glyph), with the shadow as a filter —
+   a text-shadow under transparent text would darken the gradient it sits behind. */
+.card-points{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:1.1rem;color:var(--gold);min-width:16px;background:linear-gradient(180deg,#fbe7a6 0%,#d9b252 55%,#a8812e 100%);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;filter:drop-shadow(0 2px 2px rgba(0,0,0,.55))}
 .card-points.zero{color:transparent}
 .card-bonus{width:20px;height:20px;border-radius:50%;flex-shrink:0;background:linear-gradient(180deg,color-mix(in srgb,var(--gc) 80%,#fff),color-mix(in srgb,var(--gc) 86%,#000));box-shadow:0 1px 2px rgba(0,0,0,.35)}
 .card-cost{display:flex;flex-direction:column;gap:3px;margin-top:auto}
@@ -65,3 +73,12 @@
    lighter top still gives the dark pips enough separation from the card. */
 .cost-gem{width:10px;height:10px;border-radius:50%;flex-shrink:0;background:linear-gradient(180deg,color-mix(in srgb,var(--gc) 80%,#fff),color-mix(in srgb,var(--gc) 86%,#000));box-shadow:0 1px 1px rgba(0,0,0,.3)}
 .cost-num{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;color:var(--text-dim)}
+/* On the BOARD each cost colour sits on its own dark chip, so a cost reads as a set of
+   tokens rather than loose dots and digits. em padding, so the chip scales with the card.
+   NO vertical padding: on a min-height card (Spender below 901px, Duel's narrow tiers) a
+   four-colour cost grew its card taller than its row-mates. And not on phone-width cards:
+   Duel's pearl column put two chips side by side on a ~52px face and ran off its edge. */
+@media (min-width:721px){
+  .level-row .cost-row{width:fit-content;padding:0 .5em 0 .15em;border-radius:999px;background:rgba(0,0,0,.34);box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
+  .level-row .cost-num{color:var(--text);font-weight:700}
+}

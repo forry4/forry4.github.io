@@ -22,7 +22,7 @@
  * clipped text, controls a thumb cannot hit) to `probe.json`.
  */
 import { chromium } from "playwright";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const OUT = process.argv[2] || "game-shots";
@@ -47,6 +47,10 @@ const VIEWS = [
 // --viewport captures one screenful, the way a player sees the page; the default is
 // the whole scrollable page stitched into one image.
 const FULL_PAGE = !process.argv.includes("--viewport");
+// --concept=<file.css> shoots every capture TWICE on the same page: as it is, then with
+// that stylesheet appended (`<name>.concept.png`). The game state is identical in both,
+// so a proposed restyle can be judged side by side before anyone writes it for real.
+const CONCEPT = arg("concept") ? readFileSync(arg("concept"), "utf8") : null;
 
 // --browser=msedge renders in the installed Edge rather than Playwright's Chromium.
 const channel = arg("browser");
@@ -137,6 +141,11 @@ async function captureViews(game, state, base, ready, { settle = 1600, prep } = 
 		if (prep) await prep(page);
 		const name = `${game}.${state}.${view.tag}`;
 		await page.screenshot({ path: path.join(OUT, `${name}.png`), fullPage: FULL_PAGE });
+		if (CONCEPT) {
+			await page.addStyleTag({ content: CONCEPT });
+			await sleep(600);
+			await page.screenshot({ path: path.join(OUT, `${name}.concept.png`), fullPage: FULL_PAGE });
+		}
 		const p = await page.evaluate(probeFn).catch((e) => ({ err: String(e) }));
 		probes.push({ name, ready: ok, errs, ...p });
 		console.log(`  ${name}${ok ? "" : "  !! NOT READY"}${p.overflowX ? `  !! overflowX ${p.overflowX}` : ""}`

@@ -94,6 +94,8 @@
 /* ── game frame ── */
 .dm-gamescreen {
   min-height: 100vh; display: flex; flex-direction: column;
+  /* ONE lit table under the board — a lamp above it, falling off to the edges */
+  background: radial-gradient(110% 80% at 55% -10%, #262015 0%, #15120e 55%, #0e0c0a 100%) fixed;
   /* nothing may widen the page — iOS Safari zooms out to fit an overflowing
      element and KEEPS that zoom until reload (clip ≠ hidden: no scroll
      container, sticky top bar unaffected) */
@@ -126,11 +128,12 @@
 /* ── sidebar PLAYER boxes (identity + score; one per seat, above the Trash) ── */
 .dm-pboxes { display: flex; flex-direction: column; gap: 8px; }
 .dm-pbox {
-  background: var(--surface, #1a1814); border: 1px solid var(--border, #3a342a);
+  background: linear-gradient(180deg, rgba(255,240,215,.035), rgba(255,240,215,.01)), var(--surface, #1a1814);
+  border: 1px solid rgba(255,240,215,.06); box-shadow: inset 0 1px 0 rgba(255,240,215,.05);
   border-radius: var(--radius-lg, 14px); padding: 10px 12px;
   display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
 }
-.dm-pbox-acting { border-color: var(--gold, #c9a84c); }
+.dm-pbox-acting { border-color: rgba(232,201,106,.45); box-shadow: 0 0 0 1px rgba(232,201,106,.15), 0 0 22px -8px rgba(232,201,106,.35); }
 .dm-pbox-name { font-weight: 600; font-size: 16px; }
 .dm-vp { color: var(--gold-light, #e8c96a); font-weight: 700; margin-left: auto; white-space: nowrap; }
 .dm-opp-turns { color: var(--text-dim, #8a7d6a); font-size: 13px; font-weight: 400; white-space: nowrap; }
@@ -138,7 +141,8 @@
 /* ── opponent PLAY box (center column, same width as your area): backs for
       their hand, faces for what they played, real piles ── */
 .dm-opp {
-  background: var(--surface, #1a1814); border: 1px solid var(--border, #3a342a);
+  background: linear-gradient(180deg, rgba(255,240,215,.035), rgba(255,240,215,.01)), var(--surface, #1a1814);
+  border: 1px solid rgba(255,240,215,.06); box-shadow: inset 0 1px 0 rgba(255,240,215,.05);
   border-radius: var(--radius-lg, 14px); padding: 6px 12px;
   --card-w-s: 56px; --card-h: calc(var(--card-w-s) * 1.3);
   container-type: inline-size;
@@ -186,7 +190,8 @@
 }
 .dm-trash-list { margin-top: 6px; color: var(--text, #e8dfc8); font-size: 12px; }
 .dm-log {
-  background: var(--surface, #1a1814); border: 1px solid var(--border, #3a342a);
+  background: linear-gradient(180deg, rgba(255,240,215,.035), rgba(255,240,215,.01)), var(--surface, #1a1814);
+  border: 1px solid rgba(255,240,215,.06); box-shadow: inset 0 1px 0 rgba(255,240,215,.05);
   border-radius: var(--radius-lg, 14px); padding: 8px 12px;
   font-size: 13px; line-height: 1.6; overflow-y: auto;
   max-height: min(640px, calc(100vh - 300px));
@@ -205,7 +210,8 @@
 
 /* ── supply ── */
 .dm-supply {
-  background: var(--surface, #1a1814); border: 1px solid var(--border, #3a342a);
+  background: linear-gradient(180deg, rgba(255,240,215,.035), rgba(255,240,215,.01)), var(--surface, #1a1814);
+  border: 1px solid rgba(255,240,215,.06); box-shadow: inset 0 1px 0 rgba(255,240,215,.05);
   border-radius: var(--radius-lg, 14px); padding: 14px 14px 6px;
   container-type: inline-size;
   /* supply piles render as SMALL card faces, which size from --card-w-s;
@@ -231,7 +237,15 @@
 /* ── the card face (rides the shared .card frame) ── */
 .dm-card {
   position: relative; display: flex; flex-direction: column;
-  background: #221d15; overflow: hidden; text-align: left;
+  /* A PRINTED CARD: an inner frame line and a wash of the card's type colour from the
+     top (--tint, set per type below), lit edge and a cast shadow. The frame lives in
+     --dm-frame so the hover / highlight states can add to it instead of replacing it. */
+  --tint: #9c917c;
+  --dm-frame: inset 0 0 0 3px rgba(0,0,0,.28), inset 0 0 0 4px color-mix(in srgb, var(--tint) 22%, transparent), inset 0 1px 0 rgba(255,255,255,.08);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tint) 26%, #1f1a13) 0%, #1c1711 34%, #16120d 100%);
+  border: 1px solid rgba(255,240,215,.1); border-radius: 10px;
+  box-shadow: var(--dm-frame), 0 10px 22px -12px rgba(0,0,0,.95);
+  overflow: hidden; text-align: left;
   /* ONE inset for the whole face. The shared .card frame's own 8/6/6 padding
      stacked on top of each row's 5px and made the real buffer 12px on every
      side — a fifth of a 56px card's width, per side. The face owns its layout,
@@ -255,9 +269,11 @@
 }
 .dm-card-small, .dm-card.dm-card-small { width: var(--card-w-s, 84px); height: calc(var(--card-w-s, 84px) * 1.3); }
 .dm-clickable { cursor: pointer; }
-.dm-clickable:hover { transform: translateY(-2px); }
+.dm-clickable:hover { transform: translateY(-3px); }
+/* the shared .card:hover would swap the frame out for a plain shadow — keep the frame */
+.dm .dm-card:hover { border-color: rgba(255,240,215,.16); box-shadow: var(--dm-frame), 0 16px 28px -12px #000; }
 .dm-sel { outline: 2px solid var(--gold-light, #e8c96a); transform: translateY(-3px); }
-.dm-hl { border-color: var(--gold, #c9a84c); box-shadow: 0 0 8px rgba(201, 168, 76, .35); }
+.dm-hl { border-color: var(--gold, #c9a84c); box-shadow: var(--dm-frame, 0 0 0 transparent), 0 0 0 1px rgba(232,201,106,.55), 0 0 18px rgba(232,201,106,.28), 0 10px 22px -12px #000; }
 .dm-dis { opacity: .55; }
 /* Name on top — FitText shrinks it only as far as the card's full width
    demands; rules text shrinks to fit and the card never grows; foot row =
@@ -269,12 +285,16 @@
      needs it, so a bigger base only helps the names that already fit. */
   font-size: clamp(10.35px, calc(var(--card-h, 120px) * .12075), 16.1px);
   letter-spacing: .3px; line-height: 1.1;
-  padding: var(--cf-pad) var(--cf-pad) 2px;
+  /* margin, not padding, on the sides: the same box for FitText, but the rule under the
+     name now stops at the frame instead of running into it */
+  padding: var(--cf-pad) 0 2px; margin: 0 var(--cf-pad);
+  border-bottom: 1px solid color-mix(in srgb, var(--tint) 32%, transparent);
+  text-shadow: 0 1px 0 #000, 0 0 12px rgba(0,0,0,.6);
 }
 .dm-fitspan { display: inline-block; white-space: nowrap; }
 .dm-card-text {
   flex: 1; font-size: clamp(8px, calc(var(--card-h, 120px) * .082), 11px);
-  color: var(--text-dim, #8a7d6a); padding: 0 var(--cf-pad); white-space: pre-line;
+  color: #b6aa92; padding: 0 var(--cf-pad); white-space: pre-line;
   overflow: hidden; line-height: 1.25; min-height: 0;
 }
 .dm-card-text.dm-text-l { font-size: clamp(7px, calc(var(--card-h, 120px) * .07), 10px); line-height: 1.2; }
@@ -303,7 +323,8 @@
   align-items: flex-start; text-align: left;
 }
 .dm-cost {
-  background: radial-gradient(circle at 35% 30%, #f5d98a, #c9a84c 70%);
+  background: radial-gradient(circle at 35% 28%, #fff0b8 0%, #e3bf5c 38%, #9e7a26 100%);
+  box-shadow: 0 2px 4px rgba(0,0,0,.7), inset 0 -1px 0 rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.4);
   color: #221a05; font-weight: 800; border-radius: 50%;
   width: var(--coin-sz); height: var(--coin-sz);
   display: flex; align-items: center; justify-content: center;
@@ -352,15 +373,15 @@
      widest label past the coin and wraps the foot — the thing we just fixed.
      Above ~70px card height the scale term wins and the full +15% applies. */
   font-size: clamp(5.5px, calc(var(--card-h, 120px) * .0782), 12.65px);
-  text-transform: uppercase; letter-spacing: .3px; color: #cfc4a6;
+  text-transform: uppercase; letter-spacing: .3px; color: color-mix(in srgb, var(--tint) 60%, #d8ceb6);
   white-space: nowrap;
 }
 .dm-f-action .dm-card-name { color: #e8dfc8; }
-.dm-f-treasure { background: #2a2410; }
+.dm-f-treasure { --tint: #e0b84c; }
 .dm-f-treasure .dm-card-name { color: #f0cf72; }
-.dm-f-victory { background: #1c2417; }
+.dm-f-victory { --tint: #6fbf4f; }
 .dm-f-victory .dm-card-name { color: #9fd57e; }
-.dm-f-curse { background: #241a2b; }
+.dm-f-curse { --tint: #a864cf; }
 .dm-f-curse .dm-card-name { color: #c79bdd; }
 .dm-edge { position: absolute; top: 0; bottom: 0; width: 3px; }
 .dm-edge-atk { left: 0; background: var(--red-gem, #dc4040); }
@@ -424,18 +445,22 @@
 
 /* ── my area ── */
 .dm-me {
-  background: var(--surface, #1a1814); border: 1px solid var(--border, #3a342a);
+  background: linear-gradient(180deg, rgba(255,240,215,.035), rgba(255,240,215,.01)), var(--surface, #1a1814);
+  border: 1px solid rgba(255,240,215,.06); box-shadow: inset 0 1px 0 rgba(255,240,215,.05);
   border-radius: var(--radius-lg, 14px); padding: 12px 14px;
   container-type: inline-size;   /* mobile sizes the hand off 100cqw */
   --card-w: 120px; --card-h: 168px;
 }
 .dm-resbar {
   display: flex; flex-wrap: wrap; gap: 26px; align-items: baseline;
-  background: var(--surface2, #242018); border: 1px solid var(--gold, #c9a84c);
-  border-radius: 10px; padding: 10px 18px; margin-bottom: 10px;
+  /* no gold frame — the three numbers are the point, and they carry the gold themselves */
+  background: linear-gradient(90deg, rgba(201,168,76,.14), rgba(201,168,76,.03) 60%, transparent);
+  border: 1px solid transparent; box-shadow: inset 0 1px 0 rgba(255,240,215,.06);
+  border-radius: 12px; padding: 10px 18px; margin-bottom: 10px;
   font-size: 16px; color: var(--text-dim, #8a7d6a);
 }
-.dm-resbar b { color: var(--gold-light, #e8c96a); font-size: 21px; margin-left: 4px; }
+.dm-resbar b { color: var(--gold-light, #e8c96a); font-size: 24px; margin-left: 4px;
+  background: linear-gradient(180deg, #fbe7a6, #c9a24a); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
 /* Coffers and the later spendable counters (Villagers, Favors): a count plus
    its spend controls, kept on one baseline with the rest of the bar. */
 .dm-counter { display: inline-flex; align-items: baseline; gap: 6px; }
@@ -689,7 +714,7 @@
 /* the Undo button lives at the TOP of the play box's button stack during a
    game — greyed when nothing to take back */
 .dm-undo[disabled] { opacity: .4; cursor: default; }
-.dm-kingdom-btn { width: 100%; border: 1px solid var(--border, #3a342a); }
+.dm-kingdom-btn { width: 100%; border: 1px solid rgba(255,240,215,.06); }
 
 /* ── kingdom browser modal ── */
 .dm-kingdom-modal {

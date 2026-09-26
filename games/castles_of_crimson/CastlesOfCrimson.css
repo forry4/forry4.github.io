@@ -38,6 +38,9 @@ html,body{margin:0;padding:0;background:#120c0d}
    lobby's --lby-accent, matching the home card. .coc already sets background:var(--bg) +
    min-height:100vh, so overriding --bg here neutralizes the lobby backdrop too. */
 .coc.coc-neutral{--bg:#0f0e0c;--surface:#1a1814;--surface2:#242018;--border:#3a342a;--text:#e8dfc8;--text-dim:#8a7d6a;--text-soft:#b3a58b;--text-muted:#5a5248;--lby-accent:#d6454b}
+/* The GAME (never the neutral lobby) sits under one lamp: a warm crimson light above the
+   board, falling off to the edges, instead of a flat ground. */
+.coc:not(.coc-neutral){background:radial-gradient(120% 90% at 40% -10%,#2a171b 0%,#150d0f 55%,#0d0809 100%) fixed}
 /* THE LOBBY'S SIDE PADDING AND MEASURE ARE `.lby-page-in` NOW (shared). Every
    lobby had its own — 12/16/18/24px on five different elements — so the create
    row, the tab bar and the columns lined up only within a game, never across
@@ -102,10 +105,13 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-res{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.92rem;letter-spacing:.04em;color:var(--text-dim);display:inline-flex;align-items:center;gap:5px}
 .coc-res b{color:var(--text)}
 .coc-res-ic{font-size:1.15rem;line-height:1}
-.coc-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px}
+/* A lit SURFACE, not a box: a hairline edge, light from the top, a long soft shadow. */
+.coc-panel{background:linear-gradient(180deg,rgba(255,225,225,.03),rgba(255,225,225,.008)),var(--surface);border:1px solid rgba(255,220,220,.06);border-radius:16px;padding:12px;box-shadow:inset 0 1px 0 rgba(255,230,230,.05),0 18px 40px -30px #000}
 .coc-panel h3{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;letter-spacing:.16em;color:var(--gold);text-transform:uppercase;margin-bottom:10px}
 .coc-depots{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
-.coc-depot{border:1px solid var(--border);border-radius:var(--radius);padding:6px;min-height:78px;background:var(--surface2)}
+/* A depot is a PLACE on the board, not a box: its tiles sit on a faint pool of light, so
+   the six read as spots on one board. The border stays (transparent) so nothing moves. */
+.coc-depot{border:1px solid transparent;border-radius:var(--radius);padding:6px;min-height:78px;background:radial-gradient(60% 60% at 50% 55%,rgba(255,230,200,.06),transparent 75%)}
 .coc-depot.match{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset}
 /* A ship/monastery is asking which depot to drain — the eligible depots pulse and are clickable. */
 .coc-depot-pick,.coc-depot-pick *{cursor:pointer}
@@ -127,17 +133,18 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-board-hex{position:relative;width:100%;max-width:640px;margin:6px auto 0;aspect-ratio:1/0.9}
 .coc-board-hex .coc-depot{position:absolute;width:34%;min-height:96px;padding:6px;transform:translate(-50%,-50%);display:flex;flex-direction:column;justify-content:center}
 /* central black depot: a dark box holding the kite of tiles (positioned absolutely) */
-.coc-black-center{left:50%;top:50%;box-sizing:border-box;padding:9px!important;border:1px solid var(--gold)!important;background:#0c0809!important;border-radius:8px;min-height:0!important;z-index:1}
+/* The black depot is the special one: a gold rim and a warm glow around a dark well. */
+.coc-black-center{left:50%;top:50%;box-sizing:border-box;padding:9px!important;border:1px solid rgba(201,168,76,.55)!important;background:radial-gradient(80% 80% at 50% 40%,#1d1414,#0a0707)!important;box-shadow:0 0 0 4px rgba(201,168,76,.06),0 0 30px -6px rgba(201,168,76,.25),0 18px 30px -18px #000;border-radius:12px;min-height:0!important;z-index:1}
 .coc-blacklbl{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:.08em;color:var(--gold);text-transform:uppercase}
 .coc-board-panel{position:relative}
 /* turn-order track — a boxed block ABOVE the depot ring. It used to be absolutely
    pinned into the panel's left gutter, but the board now shares the screen with both
    duchies (no gutter), so it flows in the normal column like on mobile. */
-.coc-track-block{width:100%;max-width:none;background:var(--surface2);border:1px solid var(--gold);border-radius:8px;padding:5px 9px;margin:0 0 4px;box-shadow:0 2px 8px rgba(0,0,0,.45)}
+.coc-track-block{width:100%;max-width:none;background:rgba(0,0,0,.18);border:1px solid rgba(201,168,76,.35);border-radius:12px;padding:5px 9px;margin:0 0 4px}
 .coc-track{display:flex;flex-direction:column;align-items:stretch;gap:3px;margin:0}
 .coc-track-lbl{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:.1em;color:var(--text-dim);text-transform:uppercase;white-space:nowrap}
 .coc-track-spaces{display:flex;gap:3px;align-items:stretch}
-.coc-track-space{position:relative;width:49px;min-height:56px;border:1px solid var(--border);border-radius:5px;background:var(--surface);display:flex;flex-direction:column;justify-content:flex-end;gap:2px;padding:18px 3px 5px}
+.coc-track-space{position:relative;width:49px;min-height:56px;border:1px solid rgba(255,220,220,.07);border-radius:5px;background:rgba(255,230,230,.025);display:flex;flex-direction:column;justify-content:flex-end;gap:2px;padding:18px 3px 5px}
 .coc-track-snum{position:absolute;top:3px;left:0;right:0;text-align:center;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.64rem;color:var(--text-dim)}
 .coc-track-stack{display:flex;flex-direction:column;gap:6px}
 .coc-track-token{border-radius:3px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.56rem;font-weight:700;text-align:center;padding:2px 1px;line-height:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -264,6 +271,10 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-tile-ghost::after{content:"";position:absolute;inset:0;background:var(--surface2);clip-path:polygon(50% 4.3%,95.7% 27.1%,95.7% 72.9%,50% 95.7%,4.3% 72.9%,4.3% 27.1%)}
 .coc-whitedie{display:flex;align-items:center;gap:6px;margin-left:auto}
 .coc-whitedie .coc-die{width:30px;height:30px}
+/* Before its first roll the white die has no pips — show an empty SOCKET, not a solid
+   white tile that reads as a missing image. `.white` is in the selector because the die's
+   own `.coc-die.white` fill comes later in this sheet at the same weight. */
+.coc-whitedie .coc-die.white:not(:has(*)){background:transparent;border:1.5px dashed rgba(243,234,216,.35);box-shadow:none}
 .coc-dicebar{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
 .coc-die{width:46px;height:46px;border-radius:8px;background:#f3ead8;color:#1a1010;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:1.3rem;display:flex;align-items:center;justify-content:center;cursor:pointer;border:2px solid transparent;position:relative}
 .coc-die.sel{border-color:var(--gold);box-shadow:0 0 8px rgba(201,168,76,.6)}
@@ -409,7 +420,7 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-log-t{display:inline-block;min-width:26px;margin-right:6px;color:var(--gold);opacity:.75;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;font-weight:700}
 .coc-log-phase{text-align:center;color:var(--gold);opacity:.85;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;padding:4px 0!important}
 /* Bonuses row: phase/size/color bonuses (left group) + centered score. */
-.coc-bonusbar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px;margin:0 0 10px;padding:7px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)}
+.coc-bonusbar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px;margin:0 0 10px;padding:7px 12px;background:linear-gradient(90deg,rgba(163,38,58,.12),rgba(255,230,230,.02) 50%,rgba(163,38,58,.08)),var(--surface);border:1px solid rgba(255,220,220,.06);border-radius:14px}
 .coc-bonus-groups{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
 .coc-bonus-sec{display:inline-flex;align-items:center;gap:6px}
 .coc-bonuses-lead{color:var(--gold);margin-right:2px}

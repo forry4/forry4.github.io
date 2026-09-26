@@ -233,8 +233,10 @@ const css = baseCss + lobbyCss + _cssText
 
 /* ─── Nobles ────────────────────────────────────────────────────────────── */
 .nobles-row{display:flex;gap:8px;flex-wrap:wrap}
-.noble{width:72px;min-height:72px;border-radius:var(--radius);background:var(--surface2);border:1px solid var(--border);padding:6px;display:flex;flex-direction:column;align-items:center;gap:4px}
-.noble-points{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1rem;font-weight:700;color:var(--gold)}
+/* A noble is a gold-edged PLAQUE with its points struck in gold, the same material as the
+   cards' numerals, rather than one more flat box in the row. */
+.noble{width:72px;min-height:72px;border-radius:calc(var(--radius) + 3px);background:linear-gradient(165deg,#33291a,#1e1810);border:1px solid rgba(232,201,106,.28);box-shadow:inset 0 1px 0 rgba(255,240,215,.08),0 10px 22px -14px #000;padding:6px;display:flex;flex-direction:column;align-items:center;gap:4px}
+.noble-points{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1rem;font-weight:700;color:var(--gold);background:linear-gradient(180deg,#fbe7a6,#b88d34);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
 .noble-req{display:flex;flex-direction:column;gap:2px;width:100%}
 .noble-req-row{display:flex;gap:3px;align-items:center;font-size:.65rem;color:var(--text-dim);font-family:'Cinzel','Cinzel Fallback',serif}
 .noble-req-dot{width:8px;height:8px;border-radius:2px;border:1px solid rgba(255,255,255,.12);flex-shrink:0}
@@ -261,7 +263,7 @@ const css = baseCss + lobbyCss + _cssText
 
 /* ─── Player panels ─────────────────────────────────────────────────────── */
 .players-area{display:flex;flex-direction:column;gap:8px}
-.player-panel{background:linear-gradient(180deg,rgba(255,255,255,.03),transparent 46%),var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 2px 10px -4px rgba(0,0,0,.5);transition:border-color .2s}
+.player-panel{background:linear-gradient(180deg,rgba(255,255,255,.03),transparent 46%),var(--surface);border:1px solid rgba(255,240,215,.06);border-radius:var(--radius-lg);padding:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 2px 10px -4px rgba(0,0,0,.5);transition:border-color .2s}
 /* the active player's box gets a clean gold rounded border (the only highlight);
    your own box is identified by the active dot + "(you)" label, no extra accent. */
 .player-panel.active-turn{border-color:var(--gold);background:linear-gradient(180deg,rgba(255,255,255,.04),transparent 46%),var(--surface3);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(201,168,76,.28),0 3px 16px -4px rgba(201,168,76,.22),0 2px 10px -4px rgba(0,0,0,.5)}
@@ -358,9 +360,9 @@ const css = baseCss + lobbyCss + _cssText
 .mt-8{margin-top:8px}.mt-12{margin-top:12px}
 
 /* ─── Game nav bar ──────────────────────────────────────────────────────── */
-.game-nav{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;padding-top:calc(env(safe-area-inset-top,0px) + 8px);border-bottom:1px solid var(--border);background:var(--surface);position:fixed;top:0;left:0;right:0;z-index:50}
+.game-nav{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;padding-top:calc(env(safe-area-inset-top,0px) + 8px);border-bottom:1px solid rgba(201,168,76,.16);background:linear-gradient(180deg,#1d1914,#15120e);position:fixed;top:0;left:0;right:0;z-index:50}
 .game-nav-spacer{height:calc(env(safe-area-inset-top,0px) + 48px);flex-shrink:0}
-.game-nav-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;letter-spacing:.16em;color:var(--gold);text-transform:uppercase}
+.game-nav-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.8rem;letter-spacing:.32em;color:#d8b95e;text-transform:uppercase}
 
 /* ── Desktop (wide) game layout ──────────────────────────────────────────────
    game-main becomes a 2-column grid: a big-card board on the left and the gem
@@ -377,7 +379,8 @@ const css = baseCss + lobbyCss + _cssText
      unit and looks identical at 1280x720 / 1920x1080 / 2560x1600 (clamp() only
      floors/caps it on extreme screens). Ratios = the old full-size px / 185.
      NOTE: never put backticks in this CSS string — it's a JS template literal. */
-  .game-screen{height:100vh;overflow:hidden}
+  /* ONE lit table under the whole board — a lamp above it, falling off to the edges. */
+  .game-screen{height:100vh;overflow:hidden;background:radial-gradient(120% 90% at 35% -10%,#2b2519 0%,#17140f 50%,#0e0c0a 100%)}
   /* --card-h drives everything; --card-w keeps the prod 144:185 (0.778) aspect.
      17vh scales the board with the window; clamp floors/caps it. Defined on .game so
      BOTH the board (.game-main) and the sidebar inherit the same anchor. */
@@ -411,13 +414,17 @@ const css = baseCss + lobbyCss + _cssText
      and L1 reaches the bottom), the .level-row inside fills the panel, and the cards
      stretch to the row height. The gap between levels then == the grid row-gap above
      Level III == the board padding below Level I == --gap (all identical). Each level keeps
-     its OWN box (the .level-panel gets the panel border/background/radius + --gap padding);
-     because the panels are flex:1 they still fill row 2 with a uniform --gap between boxes
-     (not the big space-between gaps from before). */
+     its own REGION (the .level-panel keeps a transparent 1px border + --gap padding, and no
+     longer paints a box — see below); because the panels are flex:1 they still fill row 2
+     with a uniform --gap between them (not the big space-between gaps from before). */
   .game-main>.levels{grid-column:1 / 3;grid-row:2;align-self:stretch;justify-content:flex-start;gap:var(--gap)}
-  .game-main .level-panel{flex:1 1 0;min-height:0;display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--gap)}
+  /* NO BOX around a level: the cards sit straight on the table. The panel keeps its
+     border as a transparent 1px and its padding, so every card lands exactly where it
+     did when these were boxes — this changes what the rows look like, not where. */
+  .game-main .level-panel{flex:1 1 0;min-height:0;display:flex;flex-direction:column;background:none;border:1px solid transparent;box-shadow:none;border-radius:var(--radius-lg);padding:var(--gap)}
   .game-main .level-panel>.level-row{flex:1 1 0;min-height:0;margin:0;padding:0}
-  .bank-panel{grid-column:3;grid-row:1 / span 2;align-self:stretch;display:flex;flex-direction:column}
+  /* The bank floats too: gems on the table, no container around them. */
+  .bank-panel{grid-column:3;grid-row:1 / span 2;align-self:stretch;display:flex;flex-direction:column;background:none;border-color:transparent;box-shadow:none}
 
   /* Nobles: horizontal row on top of the cards, square, no title. Sized off the capped
      --noble-w (NOT --card-h) so they stay compact + never wrap on tall screens. */
@@ -3779,7 +3786,7 @@ export default function SpenderApp() {
 											setSelectedCard(s => s?.source === "deck" && s?.deckLevel === 3 - i ? null : { source: "deck", deckLevel: 3 - i });
 										}}
 										title="Reserve blind from deck">
-										<span style={{ fontSize: "1.4rem", fontWeight: 700, color: "var(--text)", lineHeight: 1 }}>{["III","II","I"][i]}</span>
+										<span style={{ fontSize: "1.4rem", fontWeight: 700, color: "var(--gold-light)", lineHeight: 1, textShadow: "0 2px 6px #000" }}>{["III","II","I"][i]}</span>
 										<span style={{ fontSize: ".76rem", letterSpacing: ".08em" }}>DECK</span>
 										{(game.decks?.[lk]?.length ?? 0) <= 5 && <span className="deck-remaining">{game.decks?.[lk]?.length || 0}</span>}
 									</div>
