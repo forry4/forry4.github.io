@@ -9279,6 +9279,26 @@ try {
 			phone.side === "none" && phone.over <= 0 && phone.status, JSON.stringify(phone));
 		check("phone: the Image button is fully on screen", phone.imageBtn, JSON.stringify(phone));
 
+		// phone: the formatting bar is DOCKED to the visible bottom edge, not sticky at the
+		// top. On iOS the keyboard pans the whole page, which carried the sticky bar off
+		// the top — starting a list meant scrolling back to the top of the note. Docked,
+		// it stays put however far the note scrolls, with the lists in reach.
+		const dockAt = () => page.evaluate(() => {
+			const bar = document.querySelector(".nt-dock .nt-toolbar")?.getBoundingClientRect();
+			const vis = (label) => { const r = document.querySelector(`.nt-dock [aria-label="${label}"]`)?.getBoundingClientRect();
+				return !!r && r.width > 0 && r.left >= 0 && r.right <= window.innerWidth && r.bottom <= window.innerHeight; };
+			return { docked: !!bar, atTop: document.querySelectorAll(".nt-bars .nt-toolbar").length,
+				gap: bar ? Math.round((window.innerHeight - bar.bottom) * 10) / 10 : null,
+				lists: ["Bulleted list", "Numbered list", "Checklist"].every(vis), image: vis("Add image") };
+		});
+		const dock0 = await dockAt();
+		await page.evaluate(() => { const m = document.querySelector(".nt-main"); m.scrollTop = m.scrollHeight; });
+		await sleep(100);
+		const dock1 = await dockAt();
+		check("phone: the formatting bar is docked at the bottom, lists in reach, and stays there when the note scrolls",
+			dock0.docked && dock0.atTop === 0 && Math.abs(dock0.gap) <= 1 && dock0.lists && dock0.image
+			&& JSON.stringify(dock0) === JSON.stringify(dock1), JSON.stringify({ dock0, dock1 }));
+
 		// phone: a touch anywhere on a list row must put the caret in that row's TEXT.
 		// A checklist item is <li><label contenteditable=false>☐</label><div>text</div></li>,
 		// and with the label as a flex column the whole left gutter (under the box, and
@@ -9288,6 +9308,10 @@ try {
 		if (editorUp) {
 			// the END of the note, whatever it ends with (an image) and however it was opened
 			await page.evaluate(() => document.querySelector(".nt-prose").editor.commands.focus("end"));
+			// Long enough to scroll, so the lists below are typed at the BOTTOM of the
+			// screen — where the docked bar is, and where the caret check means something.
+			await page.evaluate(() => document.querySelector(".nt-prose").editor.commands.insertContent(
+				Array.from({ length: 30 }, (_, i) => ({ type: "paragraph", content: [{ type: "text", text: `Filler ${i + 1}` }] }))));
 			await page.keyboard.press("Enter");
 			await page.keyboard.type("- Bullet one");
 			await page.keyboard.press("Enter");
@@ -9300,6 +9324,18 @@ try {
 			await page.keyboard.press("Enter");
 			await page.keyboard.type("Task three");
 			await sleep(200);
+			// Typing at the end of the note must never leave the caret UNDER the dock:
+			// the browser's and ProseMirror's caret reveal both ignore it (useDock lifts it).
+			const clear = await page.evaluate(() => {
+				const sel = window.getSelection();
+				const r = sel.rangeCount ? sel.getRangeAt(0).getClientRects()[0] || sel.getRangeAt(0).startContainer.parentElement?.getBoundingClientRect() : null;
+				const dock = document.querySelector(".nt-dock")?.getBoundingClientRect().top;
+				return { caret: r ? Math.round(r.bottom) : null, dock: dock == null ? null : Math.round(dock) };
+			});
+			check("phone: typing at the end of a note keeps the caret above the docked bar",
+				// ...and it is measured where it counts: typed at the bottom, just above the bar
+				clear.caret != null && clear.dock != null && clear.caret <= clear.dock && clear.caret > clear.dock - 120,
+				JSON.stringify(clear));
 		}
 		const lists = await page.evaluate(() => {
 			const items = [...document.querySelectorAll(".nt-prose li")];
@@ -9358,6 +9394,25 @@ try {
 			lists.nOff === 0, JSON.stringify(lists));
 		check("phone: each checkbox sits left of its text, centred on the first line",
 			lists.align.length === 3 && lists.align.every((a) => a.gap >= 6 && Math.abs(a.dy) <= 3), JSON.stringify(lists.align));
+
+		// A docked button must work where the caret IS, deep in the note, without taking
+		// focus (on a phone that drops the keyboard). Toggled on and back off, so the
+		// document the nested-list cases below start from is unchanged.
+		if (editorUp) {
+			await page.evaluate(() => document.querySelector(".nt-prose").editor.commands.focus("end"));
+			await page.keyboard.press("Enter");
+			await page.keyboard.press("Enter");   // out of the checklist, onto a new line
+			const bullet = page.locator('.nt-dock [aria-label="Bulleted list"]');
+			await bullet.click().catch(() => {});   // a miss fails the check below
+			const tapped = await page.evaluate(() => {
+				const ed = document.querySelector(".nt-prose").editor;
+				return { list: ed.isActive("bulletList"), focused: document.querySelector(".nt-prose").contains(document.activeElement) };
+			});
+			await bullet.click().catch(() => {});
+			await page.keyboard.press("Backspace");
+			check("phone: the docked Bulleted list button starts a list at the caret and keeps the note focused",
+				tapped.list && tapped.focused, JSON.stringify(tapped));
+		}
 
 		// Editing a nested list must leave ONE line rhythm inside a list. Each case is
 		// the real keystroke on a real document; the gap is measured between every two

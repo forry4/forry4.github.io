@@ -300,8 +300,10 @@ function reveal(editor, i) {
 	const box = scroller.getBoundingClientRect();
 	const bars = scroller.querySelector(".nt-bars")?.getBoundingClientRect().height || 0;
 	const top = box.top + bars;
-	if (rect.top < top + 12 || rect.bottom > box.bottom - 12) {
-		scroller.scrollTop += rect.top - (top + (box.height - bars) / 3);
+	// A phone's formatting bar is docked over the bottom of the pane (useDock).
+	const bottom = Math.min(box.bottom, document.querySelector(".nt-dock")?.getBoundingClientRect().top ?? Infinity);
+	if (rect.top < top + 12 || rect.bottom > bottom - 12) {
+		scroller.scrollTop += rect.top - (top + (bottom - top) / 3);
 	}
 }
 
@@ -347,7 +349,7 @@ function B({ on, label, onDown, disabled, children, cls = "" }) {
 	);
 }
 
-function Toolbar({ editor, onPickImages, onFind, findOpen, fileRef, readOnly }) {
+function Toolbar({ editor, onPickImages, onFind, findOpen, fileRef, readOnly, dock }) {
 	const s = useEditorState({
 		editor,
 		selector: ({ editor: e }) => ({
@@ -391,6 +393,51 @@ function Toolbar({ editor, onPickImages, onFind, findOpen, fileRef, readOnly }) 
 			editor.chain().focus().extendMarkRange("link").setLink({ href }).run();
 		}
 	};
+	const groups = {
+		heads: (
+			<div key="heads" className="nt-tb-group">
+				<B label="Heading" on={s.h1} onDown={run((c) => c.toggleHeading({ level: 1 }))} cls="nt-tb-txt">H1</B>
+				<B label="Subheading" on={s.h2} onDown={run((c) => c.toggleHeading({ level: 2 }))} cls="nt-tb-txt">H2</B>
+			</div>
+		),
+		marks: (
+			<div key="marks" className="nt-tb-group">
+				<B label="Bold" on={s.bold} onDown={run((c) => c.toggleBold())} cls="nt-tb-txt nt-tb-b">B</B>
+				<B label="Italic" on={s.italic} onDown={run((c) => c.toggleItalic())} cls="nt-tb-txt nt-tb-i">I</B>
+				<B label="Strikethrough" on={s.strike} onDown={run((c) => c.toggleStrike())} cls="nt-tb-txt nt-tb-s">S</B>
+				<B label="Link" on={s.link} onDown={link}>{I.link}</B>
+			</div>
+		),
+		blocks: (
+			<div key="blocks" className="nt-tb-group">
+				<B label="Bulleted list" on={s.bullet} onDown={run((c) => c.toggleBulletList())}>{I.bullet}</B>
+				<B label="Numbered list" on={s.ordered} onDown={run((c) => c.toggleOrderedList())}>{I.ordered}</B>
+				<B label="Checklist" on={s.task} onDown={run((c) => c.toggleTaskList())}>{I.check}</B>
+				<B label="Quote" on={s.quote} onDown={run((c) => c.toggleBlockquote())}>{I.quote}</B>
+				<B label="Divider" onDown={run((c) => c.setHorizontalRule())}>{I.rule}</B>
+			</div>
+		),
+		align: (
+			<div key="align" className="nt-tb-group">
+				<B label="Align left" on={s.align === "left"} onDown={align("left")}>{I.alignLeft}</B>
+				<B label="Align center" on={s.align === "center"} onDown={align("center")}>{I.alignCenter}</B>
+				<B label="Align right" on={s.align === "right"} onDown={align("right")}>{I.alignRight}</B>
+			</div>
+		),
+		indent: (
+			<div key="indent" className="nt-tb-group">
+				{/* Tab / Shift-Tab do this on a keyboard; a phone has no Tab key. */}
+				<B label="Indent (Tab)" onDown={run((c) => c.indent())}>{I.indent}</B>
+				<B label="Outdent (Shift+Tab)" onDown={run((c) => c.outdent())}>{I.outdent}</B>
+			</div>
+		),
+		history: (
+			<div key="history" className="nt-tb-group">
+				<B label="Undo" disabled={!s.canUndo} onDown={run((c) => c.undo())}>{I.undo}</B>
+				<B label="Redo" disabled={!s.canRedo} onDown={run((c) => c.redo())}>{I.redo}</B>
+			</div>
+		),
+	};
 	return (
 		<div className="nt-toolbar" role="toolbar" aria-label="Formatting">
 			{/* FIRST, and labelled, because on a phone the toolbar scrolls sideways and
@@ -411,41 +458,96 @@ function Toolbar({ editor, onPickImages, onFind, findOpen, fileRef, readOnly }) 
 					aria-pressed={findOpen} onMouseDown={(e) => e.preventDefault()} onClick={onFind}>{I.search}</button>
 			</div>
 			{/* a note in the Trash can be read and searched, not formatted */}
-			{!readOnly && <>
-			<div className="nt-tb-group">
-				<B label="Heading" on={s.h1} onDown={run((c) => c.toggleHeading({ level: 1 }))} cls="nt-tb-txt">H1</B>
-				<B label="Subheading" on={s.h2} onDown={run((c) => c.toggleHeading({ level: 2 }))} cls="nt-tb-txt">H2</B>
-			</div>
-			<div className="nt-tb-group">
-				<B label="Bold" on={s.bold} onDown={run((c) => c.toggleBold())} cls="nt-tb-txt nt-tb-b">B</B>
-				<B label="Italic" on={s.italic} onDown={run((c) => c.toggleItalic())} cls="nt-tb-txt nt-tb-i">I</B>
-				<B label="Strikethrough" on={s.strike} onDown={run((c) => c.toggleStrike())} cls="nt-tb-txt nt-tb-s">S</B>
-				<B label="Link" on={s.link} onDown={link}>{I.link}</B>
-			</div>
-			<div className="nt-tb-group">
-				<B label="Bulleted list" on={s.bullet} onDown={run((c) => c.toggleBulletList())}>{I.bullet}</B>
-				<B label="Numbered list" on={s.ordered} onDown={run((c) => c.toggleOrderedList())}>{I.ordered}</B>
-				<B label="Checklist" on={s.task} onDown={run((c) => c.toggleTaskList())}>{I.check}</B>
-				<B label="Quote" on={s.quote} onDown={run((c) => c.toggleBlockquote())}>{I.quote}</B>
-				<B label="Divider" onDown={run((c) => c.setHorizontalRule())}>{I.rule}</B>
-			</div>
-			<div className="nt-tb-group">
-				<B label="Align left" on={s.align === "left"} onDown={align("left")}>{I.alignLeft}</B>
-				<B label="Align center" on={s.align === "center"} onDown={align("center")}>{I.alignCenter}</B>
-				<B label="Align right" on={s.align === "right"} onDown={align("right")}>{I.alignRight}</B>
-			</div>
-			<div className="nt-tb-group">
-				{/* Tab / Shift-Tab do this on a keyboard; a phone has no Tab key. */}
-				<B label="Indent (Tab)" onDown={run((c) => c.indent())}>{I.indent}</B>
-				<B label="Outdent (Shift+Tab)" onDown={run((c) => c.outdent())}>{I.outdent}</B>
-			</div>
-			<div className="nt-tb-group">
-				<B label="Undo" disabled={!s.canUndo} onDown={run((c) => c.undo())}>{I.undo}</B>
-				<B label="Redo" disabled={!s.canRedo} onDown={run((c) => c.redo())}>{I.redo}</B>
-			</div>
-			</>}
+			{!readOnly && (dock ? DOCK_ORDER : BAR_ORDER).map((g) => groups[g])}
 		</div>
 	);
+}
+// The docked bar (a phone) puts the lists and indenting straight after Image, where a
+// thumb reaches them without scrolling the bar: at 390px the desktop order left the
+// whole list group off the right edge, and lists are what a phone note is mostly for.
+const BAR_ORDER = ["heads", "marks", "blocks", "align", "indent", "history"];
+const DOCK_ORDER = ["blocks", "indent", "marks", "heads", "align", "history"];
+
+// ─── the phone's dock ─────────────────────────────────────────────────────────
+// On a phone the formatting bar is DOCKED to the bottom of what is visible — above
+// the keyboard while typing — instead of sticky at the top of the note. iOS does not
+// shrink the page for the keyboard; it pans the whole page up to keep the caret in
+// view, which carried the sticky bar off the top of the screen, so starting a list
+// meant scrolling back to the top of the note first.
+const PHONE = "(max-width:760px)";   // the page's one-pane breakpoint (Notes.css)
+function usePhone() {
+	const [on, setOn] = useState(() => typeof window !== "undefined" && !!window.matchMedia?.(PHONE).matches);
+	useEffect(() => {
+		const m = window.matchMedia?.(PHONE);
+		if (!m) return;
+		const f = () => setOn(m.matches);
+		m.addEventListener("change", f);
+		return () => m.removeEventListener("change", f);
+	}, []);
+	return on;
+}
+
+const DOCK_MARGIN = {
+	top: 5, left: 5, right: 5,   // ProseMirror's defaults
+	get bottom() { return 5 + (document.querySelector(".nt-dock")?.offsetHeight || 0); },
+};
+
+function useDock(dockRef, editor, on) {
+	useEffect(() => {
+		const el = dockRef.current;
+		if (!on || !el || !editor) return;
+		const vv = window.visualViewport;
+		// Fixed boxes are placed in the LAYOUT viewport, and the part of it on screen is
+		// [vv.offsetTop, vv.offsetTop + vv.height]: sit on that bottom edge. (Without
+		// visualViewport the CSS `bottom:0` stands.)
+		const place = () => {
+			if (!vv) return;
+			el.style.transform = `translateY(${Math.round(vv.offsetTop + vv.height - el.offsetHeight)}px)`;
+		};
+		// The page's caret reveal (the browser's, and ProseMirror's) knows nothing of the
+		// dock and happily leaves the caret under it: lift it clear. Only on a caret move
+		// or the keyboard opening — never on a plain scroll, which would yank a reader
+		// back to wherever the caret was left.
+		const clear = () => {
+			if (!editor.isFocused || editor.isDestroyed) return;
+			const scroller = editor.view.dom.closest(".nt-main");
+			let c;
+			try { c = editor.view.coordsAtPos(editor.state.selection.head); } catch { return; }
+			const over = c.bottom + 12 - el.getBoundingClientRect().top;
+			if (scroller && over > 0) scroller.scrollTop += over;
+		};
+		// One pending frame PER handler: shared, a pan arriving just after the keyboard
+		// opened would cancel the caret check queued by the resize.
+		const rafs = new Set();
+		let timer = 0;
+		const soon = (fn) => {
+			let raf = 0;
+			return () => {
+				cancelAnimationFrame(raf); rafs.delete(raf);
+				raf = requestAnimationFrame(() => { rafs.delete(raf); place(); fn?.(); });
+				rafs.add(raf);
+			};
+		};
+		const onMove = soon(null);
+		const onCaret = soon(clear);
+		// The keyboard animates in, and iOS pans after it: check again once it has landed.
+		const onResize = () => { onCaret(); clearTimeout(timer); timer = setTimeout(onCaret, 350); };
+		if (vv) el.classList.add("nt-dock-vv");
+		place();
+		vv?.addEventListener("scroll", onMove);
+		vv?.addEventListener("resize", onResize);
+		editor.on("selectionUpdate", onCaret);
+		editor.on("focus", onResize);
+		return () => {
+			rafs.forEach(cancelAnimationFrame); clearTimeout(timer);
+			vv?.removeEventListener("scroll", onMove);
+			vv?.removeEventListener("resize", onResize);
+			editor.off("selectionUpdate", onCaret);
+			editor.off("focus", onResize);
+			el.classList.remove("nt-dock-vv");
+			el.style.transform = "";
+		};
+	}, [dockRef, editor, on]);
 }
 
 const STATUS_TEXT = {
@@ -663,6 +765,10 @@ function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, noti
 		content: initial.doc || "",
 		editorProps: {
 			attributes: { class: "nt-prose", spellcheck: "true", "aria-label": "Note" },
+			// Keep the caret clear of a phone's docked bar when ProseMirror scrolls it into
+			// view as you type. Read at scroll time (a getter), so it follows the dock.
+			scrollMargin: DOCK_MARGIN,
+			scrollThreshold: DOCK_MARGIN,
 			// A link to another NOTE opens it on a plain click (it is navigation, like a
 			// wiki link); a web link opens with Ctrl/Cmd+click, so a plain click can still
 			// put the cursor inside it to edit.
@@ -1048,6 +1154,14 @@ function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, noti
 		markDirty();
 	};
 
+	const phone = usePhone();
+	const dockRef = useRef(null);
+	useDock(dockRef, editor, phone);
+	const toolbar = editor && (
+		<Toolbar editor={editor} onPickImages={(f) => insertImages(f)} findOpen={findOpen} fileRef={fileRef} readOnly={readOnly}
+			dock={phone} onFind={() => (findOpen ? closeFind() : openFind(null))} />
+	);
+
 	const keepMine = () => {
 		if (!conflict) return;
 		revRef.current = conflict.rev;
@@ -1061,11 +1175,13 @@ function LoadedEditor({ api, initial, onSaved, onGone, onReload, onRestore, noti
 		<div className="nt-editor">
 			{editor && (
 				<div className="nt-bars">
-					<Toolbar editor={editor} onPickImages={(f) => insertImages(f)} findOpen={findOpen} fileRef={fileRef} readOnly={readOnly}
-						onFind={() => (findOpen ? closeFind() : openFind(null))} />
+					{!phone && toolbar}
 					{findOpen && <FindBar editor={editor} text={findText} setText={setFindText} onClose={closeFind} inputRef={findInput} />}
 				</div>
 			)}
+			{/* On a phone the bar docks to the visible bottom edge (above the keyboard);
+			    the find bar stays at the top. See useDock. */}
+			{editor && phone && <div className="nt-dock" ref={dockRef}>{toolbar}</div>}
 			{/* The save state lives in the page header (a slot the page hands us): at the
 			    end of the toolbar it scrolled off-screen on a phone, which is exactly
 			    where "Offline — retrying" most needs to be seen. */}

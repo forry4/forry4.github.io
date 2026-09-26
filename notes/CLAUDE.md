@@ -59,6 +59,21 @@ home menu for everyone (a guest gets a "sign in" page).
 - **The Image button is FIRST in the toolbar, labelled, and opens the picker on click.** On a
   phone the toolbar scrolls sideways, and at its far end the icon-only button was off-screen —
   the one way to add a picture on a phone was unfindable. `notesEditor` asserts it on screen.
+- **On a phone (≤760px) the formatting bar is DOCKED to the visible bottom edge — above the
+  keyboard while typing — not sticky at the top** (`useDock` in `NoteEditor.jsx`, 2026-09-26).
+  iOS does not shrink the page for the keyboard; it pans the whole page up to keep the caret
+  in view, which carried the sticky bar off the top, so starting a list meant scrolling to the
+  top of the note ("not super easy to create bulleted lists unless you're at the top").
+  Three parts, each load-bearing: the dock is placed from `visualViewport` (fixed boxes live
+  in the LAYOUT viewport; the visible part is `[offsetTop, offsetTop + height]`); the
+  caret is kept clear of it both by ProseMirror's `scrollMargin`/`scrollThreshold` (a getter,
+  read at scroll time) and by `useDock` itself when the keyboard opens — never on a plain
+  scroll, which would yank a reader back to the caret; and the docked order puts lists and
+  indent right after Image (at 390px the desktop order left the list group off-screen).
+  The find bar stays at the top. `notesEditor` asserts the dock, the caret clearance at the
+  bottom of a long note (verified non-vacuous: caret 839 vs dock 797 with the fix removed),
+  and a docked tap. It cannot open a real iOS keyboard — the visualViewport half is covered
+  only by reasoning and the owner's phone.
 - **Tab / Shift-Tab are always consumed in the note** (`Indent` extension, priority above the
   list items): nest / un-nest a list item, else step a paragraph or heading's `indent` attr
   (0-8, drawn as margin). Left to the browser, Tab moved focus out of the editor. Toolbar

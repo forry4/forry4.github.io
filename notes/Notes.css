@@ -329,7 +329,13 @@
 	.nt-mobile-back{display:flex;align-items:center;gap:4px;background:none;border:0;color:var(--gold);
 		font:inherit;font-size:1rem;padding:10px 12px 4px;cursor:pointer;}
 	.nt-toolbar{padding:6px 10px;}
+	/* The formatting bar docks to the visible bottom edge, above the keyboard
+	   (NoteEditor useDock). With visualViewport, JS places it from the top. */
+	.nt-dock{position:fixed;left:0;right:0;bottom:0;z-index:20;}
+	.nt-dock.nt-dock-vv{top:0;bottom:auto;}
+	.nt-dock .nt-toolbar{border-bottom:0;border-top:1px solid var(--border);background:rgba(15,14,12,.97);}
 	.nt-page{padding:18px 16px 100px;}
+	.nt-app.nt-open .nt-toast{bottom:72px;}
 	.nt-title{font-size:1.6rem;}
 	.nt-trash{padding:18px 16px 80px;}
 	.nt-trash-item{flex-wrap:wrap;}
