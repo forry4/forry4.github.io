@@ -47,8 +47,9 @@ export const WILD_RAINBOW = [
   "radial-gradient(circle at 32% 24%, rgba(255,255,255,.55) 0%, rgba(255,255,255,.12) 20%, rgba(255,255,255,0) 48%)",
   "linear-gradient(135deg, #c98a86 0%, #ccb079 20%, #c3c583 38%, #8ec08f 56%, #83bcc7 72%, #8f9ed0 88%, #bd97cf 100%)",
 ].join(", ");
-// Gems show their initial; the wilds show a symbol.
-const tokenGlyph = (c) => (c === "gold" ? "★" : c === "pearl" ? "●" : c[0].toUpperCase());
+// The wilds show a symbol; the five gems are colour alone. They used to show their
+// initial, which labelled blue AND black "B" — the one pair the letter had to separate.
+const tokenGlyph = (c) => (c === "gold" ? "★" : c === "pearl" ? "●" : "");
 
 /* Gem token. `size` is applied inline (Spender's 42px default). Pass size={null} to
  * let CSS size it instead — Duel's board scales its tokens with the column, and an
@@ -58,7 +59,7 @@ export function GemToken({ color, size = 42, className = "", onClick, title, dat
   if (size) { style.width = size; style.height = size; }
   return (
     <div className={`gem-token ${className}`.trim()} style={style} onClick={onClick}
-      title={title} data-cell={dataCell}>
+      title={title} data-cell={dataCell} aria-label={GEM_LABELS[color] || color}>
       {tokenGlyph(color)}
     </div>
   );
@@ -174,18 +175,17 @@ export function TokenPill({ color, count, dataToken }) {
   );
 }
 
-/* A BOUGHT-CARD pill: "+N W" in that color — Spender's indicator for the cards you own.
+/* A BOUGHT-CARD pill: "+N" in that color — Spender's indicator for the cards you own.
  * `extra` appends a game-specific suffix, unspaced so it stays inside a narrow pill
  * (Duel shows the color's prestige as "★N", since 10 points in one color wins).
- * `letter={false}` drops the color initial: the pill is already color-coded, so the
- * letter is redundant, and dropping it buys room for `extra` in a narrow pill. */
-export function BonusPill({ color, count, extra, title, letter = true }) {
+ * No color initial: the pill is already color-coded, and blue and black share one. */
+export function BonusPill({ color, count, extra, title }) {
   const rim = color === "black" ? "rgba(255,255,255,.4)" : GEM_HEX[color];
   return (
     <span data-bonus={color} className="bonus-pill" title={title}
       style={{ background: GEM_HEX[color] + "55", borderColor: rim,
         color: color === "black" ? "#a8a8a8" : GEM_HEX[color] }}>
-      +{count}{letter ? " " + color[0].toUpperCase() : ""}{extra}
+      +{count}{extra}
     </span>
   );
 }

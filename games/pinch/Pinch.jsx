@@ -45,6 +45,28 @@ const pointOf = (node) => {
   const [q, r] = NODES[node] || [0, 0];
   return { x: (q + r / 2) * 86, y: r * 74.48 };
 };
+// THE PHONE BOARD IS CROPPED TO THE BOARD. The full viewBox pads for the rounded
+// ground on every side, so at 390px the hexagon filled ~75% of the width and the
+// intersections were ~31px apart. The phone box keeps the widest ring (x = 387 +
+// its radius) and the score rails with their names (y = 420 +/- 22, labels at
+// -451 / 467), and nothing else: ~20% larger pieces for ~65px of height. The
+// frame's aspect-ratio at the same breakpoint in Pinch.css must match it.
+const VIEWBOX = "-520 -500 1040 1000";
+const PHONE_VIEWBOX = "-430 -495 860 990";
+const PHONE_QUERY = "(max-width: 520px)";
+function useMatches(query) {
+  const [on, setOn] = useState(() => typeof window !== "undefined" && !!window.matchMedia?.(query).matches);
+  useEffect(() => {
+    const mq = window.matchMedia?.(query);
+    if (!mq) return undefined;
+    const sync = () => setOn(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, [query]);
+  return on;
+}
+
 const EDGES = [];
 NODES.forEach(([q, r], node) => DIRECTIONS.forEach(([dq, dr]) => {
   const other = NODE_ID.get(`${q + dq},${r + dr}`);
@@ -162,9 +184,10 @@ function Board({ game, myId, onMove, connected }) {
   };
   const ringInteractive = (node, owner) => owner === myId && (removal.has(node) || ringMoves.some((move) => move.from === node));
   const boardClass = `pi-board-svg${rotated ? " rotated" : ""}${busy ? " busy" : ""}`;
+  const phone = useMatches(PHONE_QUERY);
 
   return <div className="pi-board-frame">
-    <svg className={boardClass} viewBox="-520 -500 1040 1000" role="group" aria-label="Pinch board">
+    <svg className={boardClass} viewBox={phone ? PHONE_VIEWBOX : VIEWBOX} role="group" aria-label="Pinch board">
       <defs>
         <radialGradient id="pi-board-glow"><stop offset="0" stopColor="#263139" /><stop offset="1" stopColor="#0d1216" /></radialGradient>
         <filter id="pi-soft"><feGaussianBlur stdDeviation="8" /></filter>

@@ -239,7 +239,7 @@
 .ragtag .rt-side-tag {
   text-transform: uppercase;
   letter-spacing: 0.09em;
-  font-size: 0.68em;
+  font-size: max(0.68em, 10px);   /* 0.68em of a phone's name line was 7.4px */
   font-weight: 650;
   color: var(--rt-dim);
   white-space: nowrap;
@@ -1326,6 +1326,21 @@
 
 .ragtag .rt-draft-stats { display: flex; gap: 0.7rem; align-items: center; }
 .ragtag .rt-draft-stats .rt-stat { font-size: clamp(0.86rem, 0.8rem + 0.24vw, 1rem); }
+
+/* ONE COLUMN (a phone): the emblem panel moves to the card's LEFT edge. Stacked
+   above the body it was 73px of colour carrying one icon, so a card stood 147px
+   and a phone showed two and a half of the six fighters — and the draft is a
+   COMPARISON. Beside the body it is the same colour and the same sigil, and all
+   six fit on one screen. */
+@media (max-width: 519px) {
+  .ragtag .rt-draft-card { flex-direction: row; }
+  .ragtag .rt-draft-art {
+    flex: 0 0 4.75rem; height: auto;
+    border-bottom: 0; border-right: 1px solid color-mix(in srgb, var(--f-ink) 32%, transparent);
+  }
+  .ragtag .rt-draft-art .rt-sigil { width: 2.2rem; }
+  .ragtag .rt-draft-body { flex: 1; justify-content: center; }
+}
 
 /* The insert control: your Fight Deck as a stack, with a full-width, LABELLED
    drop zone above, between and below every card. The old version was three

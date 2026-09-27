@@ -76,3 +76,28 @@
 
 .bc-player-scroll-hint{display:none}
 @media(max-width:600px){.bc-players{margin-bottom:4px}.bc-player-scroll-hint{display:flex;align-items:center;justify-content:flex-end;gap:5px;margin:0 3px 14px;color:#aeb9a9;font-size:10px;letter-spacing:.04em}.bc-player-scroll-hint svg{width:13px;height:13px;color:#d2bb82}}
+
+/* PHONE: THE TABLE, NOT THE POSTER. At 390px the board page was 6,761px — eight
+   screens — and three things did most of it:
+   - The hero (kicker, "The Black Castle.", tagline) stood on top of every turn. It
+     folds to the line that changes (whose turn, which turn) beside the round dots.
+   - The six gardens stacked one per row at 252px each: 1,675px, the longest section
+     on the page. They swipe now, exactly as the castle rooms above them already do.
+   - Labels were set at 8-9px (the round mark, the resource names, the bridge
+     notes, "YOUR TURN") — 61 text nodes under 10px. Nothing is under 10px now. */
+@media(max-width:600px){
+  .bc-game-hero{min-height:0;padding:14px 3px;align-items:center}
+  .bc-game-hero .bc-kicker,.bc-game-hero h1{display:none}
+  .bc-game-hero p{font-size:15px;max-width:none;margin:0}
+  .bc-round-mark>span,.bc-round-mark>small{font-size:10px}
+  .bc-round-mark>div{margin:6px 0}
+  .bc-player-resources .bc-stat>span{font-size:11px}
+  .bc-player-foot{font-size:11px}
+  .bc-bridge-title small{font-size:11px}
+  .bc-turn-label{font-size:11px}
+  .bc-player-scroll-hint{font-size:11px}
+  .bc-draft-intro h2{font-size:24px}
+  .bc-garden-grid{display:grid;grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:minmax(250px,84%);overflow-x:auto;gap:12px;padding:4px 3px 12px;scroll-snap-type:x mandatory;scrollbar-width:thin;scrollbar-color:#aabb7d #243c29}
+  .bc-garden{scroll-snap-align:start}
+  .bc-score>small,.bc-value small,.bc-space-occupancy small,.bc-influence-list b small,.bc-log p b,.bc-card-side,.bc-color-label,.bc-draft-pair .bc-kicker,.bc-bridge-ends small,.bc-floor-label small{font-size:10px}
+}

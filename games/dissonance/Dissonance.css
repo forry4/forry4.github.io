@@ -324,6 +324,14 @@
      old 0.18rem shingled them edge to edge. Slightly smaller cards are the
      honest price. The pile row inherits the same gap (one rhythm). */
   .dis .dis-seat { --dis-gap: 0.3rem; }
+  /* A FACE-DOWN HAND IS A COUNT, so on a phone it is drawn as one. The bot's
+     seven backs were full size — a 108px row that says "7" — and they are what
+     pushed YOUR hand, the one you bid from, off the bottom of the auction
+     screen. Only the backs shrink: their piles keep the seat's card size
+     (--dis-cw is overridden on the hand, not the seat), and an Open declarer's
+     face-up hand has no `dis-hand-backs` and stays full size. Four classes to
+     out-specify the base `.dis-seat .dis-hand`, which comes after this block. */
+  .dis .dis-seat .dis-hand.dis-hand-backs { --dis-cw: 1.9rem; }
   /* THE PEEK IS THE WHOLE POINT OF A PILE, so on a phone it is sized from the
      card like the desktop's rather than pinned at 11px. At 11px against a
      66px card the covering card sat almost on top of the buried one and hid

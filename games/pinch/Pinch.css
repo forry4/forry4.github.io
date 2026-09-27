@@ -54,3 +54,16 @@
 @media(max-width:520px){.pi-live-grid{padding:7px 7px 22px;gap:7px}.pi-player{padding:8px 10px;border-radius:5px}.pi-player strong{font-size:12px}.pi-player small{font-size:7px;margin-bottom:2px}.pi-color-token{width:25px;height:25px}.pi-player-score b{font-size:18px}.pi-player-score span{font-size:7px}.pi-table-head{min-height:40px;align-items:center}.pi-table-head strong{font-size:15px}.pi-table-head span{font-size:7px}.pi-table-head p{font-size:9px;line-height:1.25}.pi-board-frame{border-radius:7px}.pi-board-frame:before{inset:5px}.pi-decision{min-height:42px;padding:7px 10px}.pi-decision b{font-size:9px}.pi-decision span{font-size:9px;max-width:62%}.pi-mode-card{padding:9px 11px}.pi-mode-card strong{font-size:26px}.pi-mode-card span{font-size:9px}.pi-log summary{padding:11px}.pi-log p{font-size:10px;padding:7px 0}.pi-result>div{padding:28px 18px}.pi-result h2{font-size:28px}.pi-toast{bottom:12px}.pi-hit{r:36}}
 @media(max-width:360px){.pi-live-grid{padding-left:4px;padding-right:4px}.pi-table-head p{display:none}.pi-table-head{justify-content:center;text-align:center}.pi-player{grid-template-columns:25px minmax(0,1fr) auto}.pi-color-token{width:22px;height:22px}.pi-decision{flex-direction:column;align-items:flex-start;gap:2px}.pi-decision span{max-width:none;text-align:left}.pi-side{grid-template-columns:1fr}.pi-log{grid-column:auto}}
 @media(prefers-reduced-motion:reduce){.pinch *{scroll-behavior:auto!important;animation:none!important;transition:none!important}.pi-piece.pi-moving,.pi-piece.pi-dropping,.pi-piece.pi-flipping{animation:none!important}}
+
+/* PHONE: ONE HINT, A BIGGER BOARD, NOTHING UNDER 10px.
+   - "Select a ring, then its destination." printed twice once the layout stacks:
+     beside the heading above the board and in the decision bar below it. The bar
+     keeps it — it is the one that sits with the controls.
+   - The pool tile stood alone in a two-column grid (the mark tile beside it is
+     hidden here), so it takes the row.
+   - The board's viewBox crops to the pieces at <=520px (PHONE_VIEWBOX in
+     Pinch.jsx); the frame's ratio follows it. The score-rail names are in board
+     units, and 10 units there was ~4px on a phone.
+   - The player / heading / pool labels were 7-9px. */
+@media(max-width:900px){.pi-table-head p{display:none}.pi-side{grid-template-columns:1fr}.pi-log{grid-column:auto}}
+@media(max-width:520px){.pi-board-frame{aspect-ratio:860/990}.pi-score-rail text{font-size:26px;letter-spacing:3px}.pi-player small,.pi-player-score span,.pi-table-head span,.pi-mode-card small{font-size:10px}.pi-decision b,.pi-decision span,.pi-mode-card span{font-size:11px}.pi-log p{font-size:12px}}

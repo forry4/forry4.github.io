@@ -1166,10 +1166,15 @@ export function WaitingRoom({
 						))}
 						{/* Empty chips show every seat still available at this table. The
 						    start label above still uses `short`, so a four-seat table can
-						    start at two while continuing to advertise its two spare seats. */}
-						{Array.from({ length: openSeats }, (_, i) => (
-							<span key={`open-${i}`} className="wr-seat wr-seat-open">Open seat</span>
-						))}
+						    start at two while continuing to advertise its two spare seats.
+						    Past three they fold into ONE chip carrying the count: Where
+						    Wolf's ten-seat table printed seven identical "Open seat" chips,
+						    220px of a phone screen saying one number. */}
+						{openSeats > 3
+							? <span className="wr-seat wr-seat-open" data-open={openSeats}>{openSeats} open seats</span>
+							: Array.from({ length: openSeats }, (_, i) => (
+								<span key={`open-${i}`} className="wr-seat wr-seat-open">Open seat</span>
+							))}
 					</div>
 
 					{/* THE SEAT LIST IS A LIVE FEED, AND A DEAD SOCKET LOOKS EXACTLY

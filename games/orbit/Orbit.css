@@ -758,6 +758,10 @@
   .or-influence .or-track > .or-bonus { grid-column: 2; grid-row: 1; }
   .or-influence .or-track-spaces { grid-column: 1 / -1; grid-row: 2; align-self: end; }
   .or-agent { width: 132px; min-width: 132px; height: 176px; }
+  /* The mulligan is a decision about ALL FOUR cards, so all four are on screen:
+     a 2x2, not the hand's sideways strip (which showed two and a sliver). */
+  .or-mulligan .or-hand { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; overflow: visible; }
+  .or-mulligan .or-agent { width: auto; min-width: 0; }
   .or-action-bar { align-items: stretch; flex-direction: column; }
   .or-action-bar > div { display: grid; grid-template-columns: 1fr; }
   .or-action-bar button { width: 100%; }
@@ -779,7 +783,12 @@
   .or-score-rail .or-player.theirs { order: 1; }
   .or-board-main > .or-influence { order: 2; }
   .or-score-rail .or-player.mine { order: 3; }
-  .or-sideboards > .or-tech { order: 4; }
+  /* YOUR HAND SITS ON YOUR SIDE OF THE BOARD, and technology comes after it. With
+     the technology scoreboard between them, the status pill said "Choose an Agent"
+     over a hand that started ~640px down, and the action bar a chosen card opens
+     (Recruit / Develop / Become Leader) landed below the fold. */
+  .or-board-main > .or-hand-zone { order: 4; }
+  .or-sideboards > .or-tech { order: 6; }
   .or-score-rail .or-player + .or-player { border-left: 1px solid var(--or-line); border-top: 1px solid var(--or-line); }
   .or-score-rail .or-player.active { border-left-color: var(--or-seat); }
 

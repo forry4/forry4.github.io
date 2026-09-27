@@ -2598,7 +2598,7 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
               <OrderPip n={orderOf(oppSeat)} />
               <span>{game.pts[oppSeat] >= 0 ? "+" : ""}{game.pts[oppSeat]} pts</span>
             </div>
-            <div className="dis-hand">
+            <div className={`dis-hand${game.opp_hand ? "" : " dis-hand-backs"}`}>
               {/* Open: the declarer bought a multiplier by playing face up, so
                   their real cards are on the table from trick 1. */}
               {game.opp_hand
@@ -2627,7 +2627,7 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
                 {game.to_play === oppSeat + QUARTET_HANDS && game.phase === "play"
                   && <span className="muted">to play</span>}
               </div>
-              <div className="dis-hand">
+              <div className="dis-hand dis-hand-backs">
                 {Array.from({ length: game.hand_n?.[oppSeat + QUARTET_HANDS] ?? 0 },
                   (_, i) => <Card key={i} c={null} />)}
               </div>

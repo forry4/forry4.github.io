@@ -2844,7 +2844,7 @@ export default function SpenderApp() {
 				<div className="gem-total">{gemTotal(p.tokens)} {gemTotal(p.tokens) === 1 ? "gem" : "gems"}</div>
 				<div className="player-bonuses">
 					{GEM_COLORS.map(c => (bonuses[c] || 0) > 0 && (
-						<span key={c} data-bonus={c} className="bonus-pill" style={{ background: GEM_HEX[c] + "55", borderColor: c === "black" ? "rgba(255,255,255,.4)" : GEM_HEX[c], color: c === "black" ? "#a8a8a8" : GEM_HEX[c] }}>+{bonuses[c]} {c[0].toUpperCase()}</span>
+						<span key={c} data-bonus={c} className="bonus-pill" style={{ background: GEM_HEX[c] + "55", borderColor: c === "black" ? "rgba(255,255,255,.4)" : GEM_HEX[c], color: c === "black" ? "#a8a8a8" : GEM_HEX[c] }} title={`${bonuses[c]} ${GEM_LABELS[c]} bonus${bonuses[c] === 1 ? "" : "es"}`}>+{bonuses[c]}</span>
 					))}
 					{p.nobles.map(n => (
 						<span key={n.id} className="bonus-pill" style={{ borderColor: "var(--gold)", color: "var(--gold)" }}>★{n.points}</span>

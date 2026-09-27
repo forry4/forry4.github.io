@@ -95,9 +95,10 @@
 .ww-ccard.clickable{cursor:pointer;border-color:var(--gold)}
 .ww-ccard.clickable:hover{box-shadow:0 0 0 2px var(--gold-light)}
 .ww-ccard.selected{box-shadow:0 0 0 3px var(--gold-light)}
-.ww-tokens{display:flex;gap:5px;flex-wrap:wrap;justify-content:center;max-width:230px}
-.ww-token{width:26px;height:26px;border-radius:999px;border:1px solid #6a5a3a;background:#2a2418;color:var(--gold-light);
-  display:flex;align-items:center;justify-content:center;font-family:Cinzel,serif;font-size:11px;font-weight:700;cursor:pointer;user-select:none}
+.ww-tokens{display:flex;gap:5px;flex-wrap:wrap;justify-content:center;max-width:280px}
+.ww-token{height:24px;padding:0 9px;border-radius:999px;border:1px solid #6a5a3a;background:#2a2418;color:var(--gold-light);
+  display:flex;align-items:center;justify-content:center;gap:3px;font-family:Cinzel,serif;font-size:11px;font-weight:700;cursor:pointer;user-select:none;white-space:nowrap}
+.ww-token small{font-size:10px;font-weight:400;color:var(--text-dim)}
 .ww-token:hover{border-color:var(--gold);color:#fff}
 .ww-token-info{max-width:280px;margin-top:2px;text-align:center;font-family:Crimson Pro,serif;font-size:12px;line-height:1.25;
   color:var(--text-dim);background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:5px 9px;cursor:pointer}
@@ -156,7 +157,19 @@
   .ww-center{top:40%;gap:5px}
   .ww-ccard{width:50px;height:66px;font-size:10px}
   .ww-tokens{gap:4px;max-width:96vw}
-  .ww-token{width:23px;height:23px;font-size:10px}
+  .ww-token{height:22px;padding:0 7px;font-size:10px}
   .ww-seat .seat-name{font-size:10px;max-width:64px}
   .ww-actions{min-height:38px;gap:8px}
+  /* YOUR CARD IS THE BIGGEST THING ON THE TABLE WHILE YOU MEMORIZE IT. The deal
+     says "This is your card. Memorize it." and the card was the same 58x76 as
+     everyone else's, at the bottom of a mostly empty screen. 1.8x for the dealing
+     phase only (after it the card is face down), lifted by the growth below its
+     centre so its bottom edge (and the Ready button) stay put; it is sized off
+     the seat tier, so a ten-seat table grows it less. */
+  .ww-table.dealing .ww-seat.me{transform:translate(-50%,calc(-50% - var(--pch,76px) * .4))}
+  .ww-table.dealing .ww-seat.me .ww-pcard{width:calc(var(--pcw,58px) * 1.8);height:calc(var(--pch,76px) * 1.8);font-size:calc(var(--pcf,10px) * 1.6)}
+  /* THE HOST'S ROLE PICKER IS ONE COLUMN. Two 150px columns left the name about
+     60px beside its - count + controls, so "Werewolf", "Troublemaker" and
+     "Insomniac" printed as "WEREW...", "TROUBL...", "INSOMN...". */
+  .ww-rolepick{grid-template-columns:1fr;gap:6px}
 }

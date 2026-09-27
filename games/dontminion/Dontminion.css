@@ -148,6 +148,9 @@
   container-type: inline-size;
 }
 .dm-opp-acting { border-color: var(--gold, #c9a84c); }
+/* Shown only once the side column (which names every seat) has moved below the
+   board — see the single-column block. */
+.dm-opp-name { display: none; }
 /* The box holds nothing but this row, so its own margin/padding was pure dead
    space above and below the cards — the count labels already sit inside it. */
 .dm-opp-zones {
@@ -756,12 +759,44 @@
   .dm .dm-side { order: 2; }
   .dm .dm-center-col { order: 1; }
   .dm .dm-log { max-height: 180px; }
+  .dm .dm-opp-name {
+    display: block; padding: 2px 0 6px;
+    font-family: 'Cinzel','Cinzel Fallback',serif; font-size: 11px; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--text-dim, #8a7d6a);
+  }
+  .dm .dm-opp-acting .dm-opp-name { color: var(--gold, #c9a84c); }
 }
 @media (max-width: 640px) {
   /* THREE cards per row, filling it — the supply, the hand, and prompt cards
      all size off their own container's width (100cqw) minus the gaps */
   .dm .dm-supply { --card-w-s: calc((100cqw - 20px) / 3); }
   .dm .dm-supply-row { gap: 10px; row-gap: 22px; justify-content: flex-start; }
+  /* YOUR TURN COMES BEFORE THE SUPPLY. Stacked in source order the phone read
+     opponent -> 17 piles -> you, so the hand, Actions/Buys/Money and "Play all
+     treasures" sat ~1,300px down and every turn began by scrolling past the whole
+     kingdom (and then back up to buy). A pending decision stays first: it is the
+     one thing on the page that must be answered before anything else. */
+  .dm .dm-center-col > .dm-opp { order: 0; }
+  .dm .dm-center-col > .dm-prompt { order: 1; }
+  .dm .dm-center-col > .dm-me { order: 2; }
+  .dm .dm-center-col > .dm-supply { order: 3; }
+  /* THE BASIC PILES ARE SHORT TILES, FOUR ACROSS. A treasure or victory card says
+     one line ("$2", "3 VP"), so at kingdom size each was 130px of empty body — the
+     seven of them were 454px, over half a screen. They keep that line, the type
+     and the cost coin; only the blank rules box goes. --card-h is re-declared
+     here because it is resolved where it is declared (.dm-supply) and would
+     otherwise keep sizing the fonts off the three-across width. */
+  .dm .dm-basics {
+    --card-w-s: calc((100cqw - 30px) / 4); --card-h: calc(var(--card-w-s) * 1.45);
+    gap: 10px; row-gap: 20px;
+  }
+  .dm .dm-basics .dm-card.dm-card-small { height: calc(var(--card-w-s) * .92); }
+  /* --card-h above only scales the TYPE (name, coin, cost), which at a four-across
+     width would otherwise fall to the floors — 9px costs. The type label is the
+     one thing dropped: at this width it floored at 5.7px, and the tile's own
+     colour and its "$2" / "3 VP" line already say Treasure or Victory. */
+  .dm .dm-basics .dm-types { display: none; }
+  .dm .dm-basics .dm-card-text { font-size: 11px; }
   .dm .dm-me { --card-w: calc((100cqw - 16px) / 3); --card-h: calc(var(--card-w) * 1.4); }
   .dm .dm-hand { gap: 8px; }
   .dm .dm-prompt { --card-w-s: calc((100cqw - 16px) / 3); }

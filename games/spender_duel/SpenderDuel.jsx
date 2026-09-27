@@ -1178,11 +1178,11 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
             ? (canUsePrivilege ? "Use a Privilege: click here, then click a gem or pearl on the board" : `${p.privileges} Privilege${p.privileges === 1 ? "" : "s"}`)
             : `${p.privileges} Privilege${p.privileges === 1 ? "" : "s"}`} />
         {renderTokens(p, pid)}
-        {/* The cards you've BOUGHT: Spender's .bonus-pill row ("+2 W"). Duel appends
+        {/* The cards you've BOUGHT: Spender's .bonus-pill row ("+2"). Duel appends
             the color's prestige, since 10 points in ONE color is a win condition. */}
         <div className="player-bonuses">
           {COLORS.map((c) => (bon[c] > 0 || cpts[c] > 0) && (
-            <BonusPill key={c} color={c} count={bon[c]} letter={false}
+            <BonusPill key={c} color={c} count={bon[c]}
               extra={cpts[c] > 0 ? `★${cpts[c]}` : null}
               title={`${bon[c]} ${c} bonus${bon[c] === 1 ? "" : "es"} from cards · ${cpts[c]} prestige in ${c} (10 wins)`} />
           ))}

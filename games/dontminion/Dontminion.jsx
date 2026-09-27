@@ -1976,6 +1976,10 @@ export default function Dontminion({ myId, authUser, onExit }) {
     const handN = Math.min(s.hand_count ?? 0, 12);
     return (
       <div key={pid} className={"dm-opp" + (acting ? " dm-opp-acting" : "")}>
+        {/* Whose strip this is. The desktop names every seat in the side column right
+            beside it; on a phone that column is below the log, and an unlabelled row of
+            deck / discard / "hand 5" read as YOUR hand. */}
+        <div className="dm-opp-name">{names[pid] || "Opponent"}</div>
         <div className="dm-opp-zones">
           <DmPile kind="deck" label="deck" count={s.deck_count ?? 0} />
           <DmPile kind="discard" label="discard" count={s.discard_view?.count ?? 0}

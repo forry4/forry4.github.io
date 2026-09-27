@@ -56,9 +56,16 @@ const ROLE_META = {
 const roleName = (r) => (r && ROLE_META[r]?.name) || (r ? r : "Unknown");
 const roleColor = (r) => (r && ROLE_META[r]?.color) || "#3a342a";
 const roleDesc = (r) => (r && ROLE_META[r]?.desc) || "";
-// Public token letter for a role (mirror of roles.TOKEN_LETTERS — mason is "MA" so
-// it doesn't collide with minion's "M").
-const tokenLetter = (r) => (r === "mason" ? "MA" : (r ? r[0].toUpperCase() : "?"));
+// The token row names each role in play, once, with a count. It used to print the
+// physical game's token LETTERS ("R S T V W W"), which only a regular can decode and
+// a phone cannot hover to explain. Short forms keep the row to two lines on desktop.
+const TOKEN_SHORT = { werewolf: "Wolf", troublemaker: "Trouble", doppelganger: "Doppel" };
+const tokenName = (r) => TOKEN_SHORT[r] || roleName(r);
+const groupTokens = (list) => {
+  const out = [];
+  for (const r of list) { const g = out.find((x) => x.r === r); if (g) g.n += 1; else out.push({ r, n: 1 }); }
+  return out;
+};
 
 // Cinzel renders as wide caps, so the longer role names don't fit one card line.
 // The 12-char names (Troublemaker/Doppelganger) are too wide for ANY card, so force a
@@ -898,7 +905,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
             <div className="ww-banner">{banner}</div>
             <div className="ww-sub">{subPrompt}</div>
 
-            <div className={`ww-table${phase === "night" ? " night" : ""}`} style={cardVars(order.length, isMobile)}>
+            <div className={`ww-table${phase === "night" ? " night" : ""}${phase === "dealing" ? " dealing" : ""}`} style={cardVars(order.length, isMobile)}>
               <svg className="ww-arrows" viewBox="0 0 100 100" preserveAspectRatio="none">
                 <defs>
                   <marker id="ww-ah" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto">
@@ -938,16 +945,17 @@ export default function WhereWolf({ myId, authUser, onExit }) {
                   })}
                 </div>
                 <div className="ww-tokens">
-                  {/* game.deck = public role multiset (== the token row). Render the
-                      public letter + hover/tap for what the role does. Falls back to
-                      the legacy roles_in_play letters if an old payload lacks deck. */}
-                  {(game?.deck ? [...game.deck].sort() : (game?.roles_in_play || [])).map((r, i) => {
+                  {/* game.deck = public role multiset (== the token row). One named pill
+                      per role + tap/hover for what it does. Falls back to the legacy
+                      roles_in_play letters if an old payload lacks deck. */}
+                  {groupTokens(game?.deck ? [...game.deck].sort() : (game?.roles_in_play || [])).map(({ r, n }) => {
                     const known = !!ROLE_META[r];
                     return (
-                      <span className="ww-token" key={i}
+                      <span className="ww-token" key={r}
+                        style={known ? { borderColor: roleColor(r) } : undefined}
                         title={known ? `${roleName(r)} — ${roleDesc(r)}` : r}
                         onClick={known ? () => setTokenInfo((c) => (c === r ? null : r)) : undefined}>
-                        {known ? tokenLetter(r) : r}
+                        {known ? tokenName(r) : r}{n > 1 && <small>×{n}</small>}
                       </span>
                     );
                   })}
