@@ -50,7 +50,7 @@ const pointOf = (node) => {
 // intersections were ~31px apart. The phone box keeps the widest ring (x = 387 +
 // its radius) and the score rails with their names (y = 420 +/- 22, labels at
 // -451 / 467), and nothing else: ~20% larger pieces for ~65px of height. The
-// frame's aspect-ratio at the same breakpoint in Pinch.css must match it.
+// stacked frame in Pinch.css sizes itself from the SVG, so it follows either box.
 const VIEWBOX = "-520 -500 1040 1000";
 const PHONE_VIEWBOX = "-430 -495 860 990";
 const PHONE_QUERY = "(max-width: 520px)";

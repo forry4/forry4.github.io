@@ -62,8 +62,11 @@
    - The pool tile stood alone in a two-column grid (the mark tile beside it is
      hidden here), so it takes the row.
    - The board's viewBox crops to the pieces at <=520px (PHONE_VIEWBOX in
-     Pinch.jsx); the frame's ratio follows it. The score-rail names are in board
-     units, and 10 units there was ~4px on a phone.
+     Pinch.jsx). The stacked frame takes its height FROM the board rather than a
+     fixed 1.04 (which was only the wide viewBox's own 1040/1000 written out), so
+     it matches whichever viewBox is showing — including the render between a
+     resize and React swapping the viewBox, which a fixed ratio let overflow.
+     The score-rail names are in board units, and 10 units there was ~4px.
    - The player / heading / pool labels were 7-9px. */
-@media(max-width:900px){.pi-table-head p{display:none}.pi-side{grid-template-columns:1fr}.pi-log{grid-column:auto}}
-@media(max-width:520px){.pi-board-frame{aspect-ratio:860/990}.pi-score-rail text{font-size:26px;letter-spacing:3px}.pi-player small,.pi-player-score span,.pi-table-head span,.pi-mode-card small{font-size:10px}.pi-decision b,.pi-decision span,.pi-mode-card span{font-size:11px}.pi-log p{font-size:12px}}
+@media(max-width:900px){.pi-table-head p{display:none}.pi-side{grid-template-columns:1fr}.pi-log{grid-column:auto}.pi-board-frame{aspect-ratio:auto}}
+@media(max-width:520px){.pi-score-rail text{font-size:26px;letter-spacing:3px}.pi-player small,.pi-player-score span,.pi-table-head span,.pi-mode-card small{font-size:10px}.pi-decision b,.pi-decision span,.pi-mode-card span{font-size:11px}.pi-log p{font-size:12px}}
