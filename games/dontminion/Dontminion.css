@@ -780,23 +780,6 @@
   .dm .dm-center-col > .dm-prompt { order: 1; }
   .dm .dm-center-col > .dm-me { order: 2; }
   .dm .dm-center-col > .dm-supply { order: 3; }
-  /* THE BASIC PILES ARE SHORT TILES, FOUR ACROSS. A treasure or victory card says
-     one line ("$2", "3 VP"), so at kingdom size each was 130px of empty body — the
-     seven of them were 454px, over half a screen. They keep that line, the type
-     and the cost coin; only the blank rules box goes. --card-h is re-declared
-     here because it is resolved where it is declared (.dm-supply) and would
-     otherwise keep sizing the fonts off the three-across width. */
-  .dm .dm-basics {
-    --card-w-s: calc((100cqw - 30px) / 4); --card-h: calc(var(--card-w-s) * 1.45);
-    gap: 10px; row-gap: 20px;
-  }
-  .dm .dm-basics .dm-card.dm-card-small { height: calc(var(--card-w-s) * .92); }
-  /* --card-h above only scales the TYPE (name, coin, cost), which at a four-across
-     width would otherwise fall to the floors — 9px costs. The type label is the
-     one thing dropped: at this width it floored at 5.7px, and the tile's own
-     colour and its "$2" / "3 VP" line already say Treasure or Victory. */
-  .dm .dm-basics .dm-types { display: none; }
-  .dm .dm-basics .dm-card-text { font-size: 11px; }
   .dm .dm-me { --card-w: calc((100cqw - 16px) / 3); --card-h: calc(var(--card-w) * 1.4); }
   .dm .dm-hand { gap: 8px; }
   .dm .dm-prompt { --card-w-s: calc((100cqw - 16px) / 3); }
@@ -901,4 +884,27 @@
 
 @media (prefers-reduced-motion: reduce) {
   .dm *, .dm *::before, .dm *::after { animation: none !important; }
+}
+
+@media (min-width: 360px) and (max-width: 640px) {
+  /* THE BASIC PILES ARE SHORT TILES, FOUR ACROSS. A treasure or victory card says
+     one line ("$2", "3 VP"), so at kingdom size each was 130px of empty body — the
+     seven of them were 454px, over half a screen. They keep the name, that line and
+     the cost coin; only the blank rules box goes. --card-h is re-declared here
+     because it is resolved where it is declared (.dm-supply) and would otherwise
+     keep sizing the fonts off the three-across width.
+     From 360px only: a quarter of a 320px phone squeezes "Province" to FitText's
+     8px floor, unreadable (and, with CI's wider fonts, a miss on dmCardFace's
+     shrink check), so the narrowest phones keep the three-across cards. */
+  .dm .dm-basics {
+    --card-w-s: calc((100cqw - 30px) / 4); --card-h: calc(var(--card-w-s) * 1.45);
+    gap: 10px; row-gap: 20px;
+  }
+  .dm .dm-basics .dm-card.dm-card-small { height: calc(var(--card-w-s) * .92); }
+  /* --card-h above only scales the TYPE (name, coin, cost), which at a four-across
+     width would otherwise fall to the floors — 9px costs. The type label is the
+     one thing dropped: at this width it floored at 5.7px, and the tile's own
+     colour and its "$2" / "3 VP" line already say Treasure or Victory. */
+  .dm .dm-basics .dm-types { display: none; }
+  .dm .dm-basics .dm-card-text { font-size: 11px; }
 }
