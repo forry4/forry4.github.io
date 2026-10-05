@@ -91,6 +91,15 @@ balanced by the same offline render: every sound ~-25 dB RMS, the opening ~-22, 
 <= 0.54. The mute toggle (header) is localStorage `boxpuzzles.muted`; `screens.mjs`
 counts oscillators to prove a press sounds unmuted and stays silent muted.
 
+**On an iPhone the silent switch muted every sound** (reported as "I don't hear sound on
+mobile"): Safari plays Web Audio in the ambient session, which the switch silences, and
+no desktop test can see it. While the in-app sound is on, `sound.js` asks for
+`navigator.audioSession.type = "playback"` (Safari 17+), which plays through the switch
+like a media app; muting hands it back (`"auto"`). Trade-off, deliberately taken: a
+playback session pauses other audio (music) when the first sound plays. A one-sample
+silent buffer is also started inside the gesture that creates the context (the classic
+iOS unlock). `screens.mjs` stands in an `audioSession` object and asserts the switching.
+
 ## Portrait only on a phone
 
 An ordinary browser tab cannot lock orientation (the Screen Orientation lock needs an

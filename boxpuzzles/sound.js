@@ -6,21 +6,42 @@
 // gesture, and a context made at import time would sit suspended.
 //
 // Muting is a per-device preference (localStorage), read on load and written on toggle.
+//
+// THE iPHONE SILENT SWITCH. Safari plays Web Audio in the "ambient" session, which the
+// ring/silent switch mutes — so on a phone set to silent every sound here was silently
+// dropped while desktop (no switch) played them all. `navigator.audioSession` (Safari
+// 17+) lets a page ask for the "playback" session instead, which plays through the
+// switch the way a media app does. It is asked for only while the in-app sound is ON,
+// and handed back ("auto") on mute: the in-app toggle is the control. The cost, stated
+// plainly: like any media app, a playback session pauses other audio (music) on the
+// phone when the first sound plays. Elsewhere the property does not exist and this is
+// a no-op.
 
 const MUTE_KEY = "boxpuzzles.muted";
 let ctx = null;
 let master = null;
 let muted = (() => { try { return localStorage.getItem(MUTE_KEY) === "1"; } catch { return false; } })();
 
+function session(type) {
+	try {
+		const as = typeof navigator !== "undefined" && navigator.audioSession;
+		if (as && as.type !== type) as.type = type;
+	} catch { /* not supported here */ }
+}
+
 export const isMuted = () => muted;
 export function setMuted(m) {
 	muted = !!m;
 	try { localStorage.setItem(MUTE_KEY, muted ? "1" : "0"); } catch { /* storage unavailable */ }
-	if (muted && ctx && ctx.state === "running") ctx.suspend().catch(() => {});
+	if (muted) {
+		if (ctx && ctx.state === "running") ctx.suspend().catch(() => {});
+		session("auto");
+	}
 }
 
 function audio() {
 	if (muted) return null;
+	session("playback");
 	if (!ctx) {
 		const AC = typeof window !== "undefined" && (window.AudioContext || window.webkitAudioContext);
 		if (!AC) return null;
@@ -36,8 +57,16 @@ function audio() {
 			master = ctx.createGain();
 			master.gain.value = 0.7;
 			master.connect(clip).connect(ctx.destination);
+			// The classic iOS unlock: one silent sample started inside the gesture that
+			// made the context, so the output path is open before the first real sound.
+			const unlock = ctx.createBufferSource();
+			unlock.buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
+			unlock.connect(ctx.destination);
+			unlock.start(0);
 		} catch { ctx = null; return null; }
 	}
+	// Suspended (never started) or "interrupted" (iOS, after a call or the phone locking):
+	// resume inside this gesture, which is the only place iOS allows it.
 	if (ctx.state !== "running") ctx.resume().catch(() => {});
 	return ctx;
 }

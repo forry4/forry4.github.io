@@ -9859,6 +9859,9 @@ try {
 				const AC = window.AudioContext || window.webkitAudioContext;
 				const make = AC && AC.prototype.createOscillator;
 				if (make) AC.prototype.createOscillator = function (...a) { window.__oscs++; return make.apply(this, a); };
+				// Safari's audio session (what lets sound through the iPhone silent switch)
+				// does not exist in Chromium; stand one in so the switching can be asserted
+				if (!navigator.audioSession) Object.defineProperty(navigator, "audioSession", { value: { type: "auto" }, configurable: true });
 			});
 			const page = await ctx.newPage();
 			const errors = [];
@@ -9899,11 +9902,15 @@ try {
 			check("a tile press counts", await count(page) === 1);
 			const sounded = await oscs();
 			check("a tile press makes a sound", sounded > 0, `${sounded} oscillators`);
+			const sessionType = () => page.evaluate(() => navigator.audioSession.type);
+			check("sound asks for the playback session (heard through the iPhone silent switch)",
+				await sessionType() === "playback", await sessionType());
 			check("the mute toggle starts unmuted", await mute.getAttribute("aria-pressed") === "false");
 			await mute.click();
 			await page.locator(`.bx-tile[data-tile="${detour[1]}"]`).click();
 			check("muted, a press makes no sound", await oscs() === sounded && await count(page) === 2,
 				`${await oscs()} vs ${sounded}`);
+			check("muting hands the audio session back", await sessionType() === "auto", await sessionType());
 			await page.reload({ waitUntil: "networkidle" });
 			await page.waitForSelector(".bx-tile", { timeout: 10_000 }).catch(() => {});
 			check("mute survives a reload", await mute.getAttribute("aria-pressed") === "true");
