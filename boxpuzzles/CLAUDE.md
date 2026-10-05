@@ -45,8 +45,10 @@ fails as a refused solve.
   Reset button (owner's call — the wrong corner already resets).
 - **The page carries no prose** (owner's call, 2026-10-05): no instructions, empty states,
   status lines or explanations — not even of the blue. A box's count turns into its result
-  when it opens; the leaderboard renders nothing until it has a row. `screens.mjs` fails
-  on any `<p>` in the page.
+  when it opens. `screens.mjs` fails on any `<p>` in the page.
+- **The leaderboard is always there and starts CLOSED** (owner's call): the scores are a
+  spoiler — a low best tells you how short the line is. It is folded to its title on every
+  box and opens itself when you open the box. Empty and open, it shows a dash.
 - One row per player per box, their best; a tie with your own best keeps the earlier
   time, so ties on the board go to whoever got there first. Signed-in accounts post;
   anyone can read.
@@ -88,3 +90,14 @@ clicks to ~1/4 of their level (measured by rendering each sound offline). Levels
 balanced by the same offline render: every sound ~-25 dB RMS, the opening ~-22, peaks
 <= 0.54. The mute toggle (header) is localStorage `boxpuzzles.muted`; `screens.mjs`
 counts oscillators to prove a press sounds unmuted and stays silent muted.
+
+## Portrait only on a phone
+
+An ordinary browser tab cannot lock orientation (the Screen Orientation lock needs an
+installed or fullscreen app, and iOS Safari has none), so `usePortrait` in the JSX
+counter-rotates the page on a phone held sideways (landscape + coarse pointer + height
+<= 540px): the root goes `position:fixed`, is sized to the portrait box, rotated -90deg
+for screen angle 90 (turned counter-clockwise) or +90deg for 270, and scrolls itself.
+The real lock is also requested, for where it is allowed. Media queries still see the
+LANDSCAPE width, so the phone tier's rules are repeated under `.bx-rot`. `screens.mjs`
+checks the rotation, that all nine tiles are on screen, and that a tap lands.

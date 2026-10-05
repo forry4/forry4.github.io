@@ -9887,6 +9887,11 @@ try {
 				return { l: b.left, r: b.right, w: window.innerWidth, over: document.documentElement.scrollWidth - window.innerWidth };
 			});
 			check("the box sits inside a 16px gutter at 390px", geo.l >= 15.5 && geo.w - geo.r >= 15.5 && geo.over <= 0, JSON.stringify(geo));
+			// the leaderboard is a spoiler (a low best gives the line away): always there, closed
+			check("the leaderboard is always there and starts closed",
+				await page.locator(".bx-board").count() === 1
+				&& await page.locator(".bx-board-hd").getAttribute("aria-expanded") === "false"
+				&& await page.locator(".bx-rows, .bx-empty").count() === 0);
 
 			const oscs = () => page.evaluate(() => window.__oscs);
 			const mute = page.locator(".bx-mute");
@@ -9915,6 +9920,9 @@ try {
 			check("the shortest line opens the box, and the count becomes the result",
 				opened && await count(page) === line.length && await page.locator(".bx-result .btn", { hasText: "Next box" }).count() === 1);
 			check("the box screen carries no prose, opened or not", (await prose()).length === 0, JSON.stringify(await prose()));
+			check("opening the box opens the leaderboard",
+				await page.locator(".bx-board-hd").getAttribute("aria-expanded") === "true"
+				&& await page.locator(".bx-rows, .bx-empty").count() === 1);
 			await page.locator(".bx-header .btn", { hasText: "Back" }).click();
 			check("Back returns to the picker, which marks the box opened",
 				new URL(page.url()).pathname === "/boxpuzzles"
@@ -9978,11 +9986,42 @@ try {
 				JSON.stringify({ id: "screens-box-viewer", name: "Viewer", guest: true })));
 			const page = await ctx.newPage();
 			await page.goto(`http://localhost:${PORT}/boxpuzzles/1`, { waitUntil: "networkidle" });
-			await page.waitForSelector(".bx-row", { timeout: 25_000 }).catch(() => {});
+			await page.waitForSelector(".bx-board-hd", { timeout: 25_000 }).catch(() => {});
+			check("a viewer's leaderboard starts closed", await page.locator(".bx-row").count() === 0);
+			await page.locator(".bx-board-hd").click();
+			await page.waitForSelector(".bx-row", { timeout: 10_000 }).catch(() => {});
 			const rows = await page.locator(".bx-row").allTextContents();
 			check("another viewer sees the row but not that it is optimal",
 				rows.some((r) => r.includes(name)) && await page.locator(".bx-row.optimal").count() === 0
 				&& !/fewest/i.test(await page.locator(".bx-board").innerText()), JSON.stringify(rows));
+			await ctx.close();
+		}
+		{
+			// A PHONE HELD SIDEWAYS keeps the portrait page, turned back to the device:
+			// the root is counter-rotated and sized to the portrait box, every tile is on
+			// screen, and a tap still lands on the tile under it.
+			const ctx = await browser.newContext({ viewport: { width: 844, height: 390 }, isMobile: true, hasTouch: true });
+			await ctx.addInitScript(() => localStorage.setItem("spender_user",
+				JSON.stringify({ id: "screens-box-sideways", name: "Sideways", guest: true })));
+			const page = await ctx.newPage();
+			const errors = [];
+			page.on("pageerror", (e) => errors.push(String(e)));
+			await page.goto(`http://localhost:${PORT}/boxpuzzles/1`, { waitUntil: "networkidle" });
+			await page.waitForSelector(".bx-tile", { timeout: 25_000 }).catch(() => {});
+			const g = await page.evaluate(() => {
+				const root = document.querySelector(".bx");
+				const tiles = [...document.querySelectorAll(".bx-tile")].map((t) => t.getBoundingClientRect());
+				return { rot: root.classList.contains("bx-rot"), transform: getComputedStyle(root).transform,
+					w: root.offsetWidth, h: root.offsetHeight, iw: innerWidth, ih: innerHeight,
+					tiles: tiles.length, inside: tiles.every((r) => r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight) };
+			});
+			check("sideways, the page is turned back to portrait",
+				g.rot && /^matrix\((-?0(\.0+)?|[-0-9.e]+), -?1, -?1,/.test(g.transform) && g.w === g.ih && g.h === g.iw,
+				JSON.stringify(g));
+			check("sideways, every tile is on screen", g.tiles === 9 && g.inside, JSON.stringify(g));
+			await page.locator('.bx-tile[data-tile="0"]').tap();
+			check("sideways, a tap lands on its tile", await page.locator("[data-moves]").textContent() === "1");
+			check("no page errors (sideways)", errors.length === 0, errors.join(" | "));
 			await ctx.close();
 		}
 	}

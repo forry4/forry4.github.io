@@ -105,34 +105,84 @@ function Picker({ results, onPick }) {
 	);
 }
 
-// Rows or nothing: no loading line, no empty state, no footnotes.
-function Leaderboard({ board }) {
-	if (!board || board.error || !board.entries.length) return null;
-	const { entries, you } = board;
+// ALWAYS THERE, AND CLOSED UNTIL ASKED: the scores are a spoiler (a low best says
+// how short the line is), so a box starts with the leaderboard folded to its title
+// and opens it for you once you have opened the box. No loading line, no empty-state
+// sentence: an open board with nobody on it shows a dash.
+const CHEVRON = (
+	<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" aria-hidden="true">
+		<path d="M8 10l4 4 4-4" />
+	</svg>
+);
+
+function Leaderboard({ board, open, onToggle }) {
+	const entries = board && !board.error ? board.entries : [];
+	const you = board && !board.error ? board.you : null;
 	const youListed = entries.some((e) => e.you);
 	return (
-		<div className="bx-board">
-			<h2>Leaderboard</h2>
-			<ol className="bx-rows">
-				{entries.map((e) => (
-					<li key={e.rank} className={`bx-row${e.you ? " me" : ""}${e.optimal ? " optimal" : ""}`}>
-						<span className="bx-row-rank">{e.rank}</span>
-						<span className="bx-row-name">{e.name}</span>
-						<span className="bx-row-moves">{e.moves}</span>
-					</li>
-				))}
-				{you && !youListed && <>
-					<li className="bx-gap" aria-hidden="true">⋯</li>
-					<li className={`bx-row me${you.optimal ? " optimal" : ""}`}>
-						<span className="bx-row-rank">{you.rank}</span>
-						<span className="bx-row-name">You</span>
-						<span className="bx-row-moves">{you.moves}</span>
-					</li>
-				</>}
-			</ol>
+		<div className={`bx-board${open ? " open" : ""}`}>
+			<button type="button" className="bx-board-hd" aria-expanded={open} onClick={onToggle}>
+				<h2>Leaderboard</h2>{CHEVRON}
+			</button>
+			{open && (entries.length ? (
+				<ol className="bx-rows">
+					{entries.map((e) => (
+						<li key={e.rank} className={`bx-row${e.you ? " me" : ""}${e.optimal ? " optimal" : ""}`}>
+							<span className="bx-row-rank">{e.rank}</span>
+							<span className="bx-row-name">{e.name}</span>
+							<span className="bx-row-moves">{e.moves}</span>
+						</li>
+					))}
+					{you && !youListed && <>
+						<li className="bx-gap" aria-hidden="true">⋯</li>
+						<li className={`bx-row me${you.optimal ? " optimal" : ""}`}>
+							<span className="bx-row-rank">{you.rank}</span>
+							<span className="bx-row-name">You</span>
+							<span className="bx-row-moves">{you.moves}</span>
+						</li>
+					</>}
+				</ol>
+			) : <div className="bx-empty" aria-label="No entries">—</div>)}
 		</div>
 	);
 }
+
+// PORTRAIT ONLY ON A PHONE. A page cannot lock the orientation in an ordinary browser
+// tab (the Screen Orientation lock only works installed/fullscreen, and iOS Safari has
+// none), so a phone turned sideways gets the page turned back: the root is counter-
+// rotated to the device and sized to the portrait box, which keeps the layout fixed to
+// the phone. Where the real lock IS allowed it is taken too. Direction comes from the
+// screen angle: 90 = turned counter-clockwise, so the page turns -90deg to follow it.
+const PHONE_LANDSCAPE = "(orientation: landscape) and (pointer: coarse) and (max-height: 540px)";
+function usePortrait() {
+	const [rot, setRot] = useState(null);
+	useEffect(() => {
+		const mq = window.matchMedia(PHONE_LANDSCAPE);
+		const update = () => {
+			if (!mq.matches) { setRot(null); return; }
+			const so = window.screen && window.screen.orientation;
+			const angle = so && typeof so.angle === "number" ? so.angle
+				: typeof window.orientation === "number" ? (window.orientation + 360) % 360 : 90;
+			setRot({ cw: angle === 270, w: window.innerWidth, h: window.innerHeight });
+		};
+		update();
+		try { window.screen?.orientation?.lock?.("portrait")?.catch?.(() => {}); } catch { /* not allowed here */ }
+		mq.addEventListener?.("change", update);
+		window.addEventListener("resize", update);
+		window.addEventListener("orientationchange", update);
+		return () => {
+			mq.removeEventListener?.("change", update);
+			window.removeEventListener("resize", update);
+			window.removeEventListener("orientationchange", update);
+			try { window.screen?.orientation?.unlock?.(); } catch { /* nothing to undo */ }
+		};
+	}, []);
+	return rot;
+}
+const rotStyle = (r) => r && ({
+	width: `${r.h}px`, height: `${r.w}px`, minHeight: 0,
+	transform: r.cw ? `translateX(${r.w}px) rotate(90deg)` : `translateY(${r.h}px) rotate(-90deg)`,
+});
 
 // The header's sound toggle: a speaker, with waves or a cross. Remembered per device.
 const SPEAKER = <path d="M4.5 9.5h3.2L12 5.8v12.4l-4.3-3.7H4.5Z" />;
@@ -187,9 +237,13 @@ export default function BoxPuzzles({ authUser, onExit }) {
 		});
 	}, [who]);
 
+	const rot = usePortrait();
+	const rootRef = useRef(null);
+	useEffect(() => { if (rootRef.current) rootRef.current.scrollTop = 0; }, [num]);
+
 	const solved = Object.keys(results).filter((id) => BANK.some((p) => p.id === id)).length;
 	return (
-		<div className="bx">
+		<div ref={rootRef} className={`bx${rot ? " bx-rot" : ""}`} style={rotStyle(rot) || undefined}>
 			<style>{baseCss + css}</style>
 			<header className="bx-header">
 				<button className="btn btn-ghost btn-sm" onClick={num ? () => go(null) : onExit}>← Back</button>
@@ -212,6 +266,7 @@ function BoxScreen({ n, token, best, onResult, onGo }) {
 	const [shake, setShake] = useState(0);
 	const [opened, setOpened] = useState(null);     // { moves, post: "guest"|"posting"|"error"|result }
 	const [board, setBoard] = useState(null);
+	const [boardOpen, setBoardOpen] = useState(false);
 
 	const loadBoard = useCallback(() => {
 		api(`/boxpuzzles/leaderboard/${p.id}`, token).then(setBoard).catch(() => setBoard({ error: true }));
@@ -242,7 +297,7 @@ function BoxScreen({ n, token, best, onResult, onGo }) {
 		if (opened) return;
 		const { box: next, result } = pressButtonInBox(box, p, k);
 		if (result === "reset") { resetSound(); setShake((s) => s + 1); }
-		else if (result === "open") openSound();
+		else if (result === "open") { openSound(); setBoardOpen(true); }
 		else litSound(next.lit.filter(Boolean).length);
 		commit(next);
 		if (result === "open") {
@@ -302,7 +357,7 @@ function BoxScreen({ n, token, best, onResult, onGo }) {
 						</div>}
 					</div>
 				</div>
-				<aside className="bx-side"><Leaderboard board={board} /></aside>
+				<aside className="bx-side"><Leaderboard board={board} open={boardOpen} onToggle={() => setBoardOpen((o) => !o)} /></aside>
 			</div>
 		</div>
 	);

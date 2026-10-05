@@ -93,10 +93,18 @@
 .bx-result-actions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;}
 
 /* ── the leaderboard ──────────────────────────────────────────────────── */
-.bx-board{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 16px 12px;}
-.bx-board h2{margin:0 0 10px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.78rem;
-	letter-spacing:.12em;text-transform:uppercase;color:var(--text-dim);font-weight:700;}
-.bx-rows{list-style:none;margin:0;padding:0;}
+.bx-board{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);}
+.bx-board-hd{display:flex;align-items:center;justify-content:space-between;width:100%;
+	padding:14px 16px;background:none;border:0;border-radius:var(--radius);color:var(--text-dim);
+	cursor:pointer;font:inherit;}
+.bx-board-hd:focus-visible{outline:2px solid var(--gold-light);outline-offset:-2px;}
+.bx-board-hd:hover{color:var(--text-soft);}
+.bx-board-hd h2{margin:0;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.78rem;
+	letter-spacing:.12em;text-transform:uppercase;color:inherit;font-weight:700;}
+.bx-board-hd svg{width:18px;height:18px;transition:transform .18s ease;}
+.bx-board.open .bx-board-hd svg{transform:rotate(180deg);}
+.bx-empty{margin:0 16px 12px;color:var(--text-muted);text-align:center;padding:4px 0 2px;}
+.bx-rows{list-style:none;margin:0 16px 12px;padding:0;}
 .bx-row{display:grid;grid-template-columns:2.2em minmax(0,1fr) auto;gap:8px;align-items:center;
 	padding:7px 8px;border-radius:6px;font-variant-numeric:tabular-nums;}
 .bx-row+.bx-row{margin-top:2px;}
@@ -115,3 +123,13 @@
 	.bx-picker{grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:10px;}
 	.bx-box{border-radius:18px;}
 }
+/* A phone held sideways: the page is turned back to portrait (usePortrait in the JSX
+   sets the size and the rotation). It is fixed to the viewport and scrolls itself, and
+   the media queries above still see the LANDSCAPE width, so the phone tier is repeated. */
+.bx.bx-rot{position:fixed;top:0;left:0;transform-origin:0 0;overflow-x:hidden;overflow-y:auto;
+	-webkit-overflow-scrolling:touch;overscroll-behavior:contain;}
+.bx-rot .bx-header{padding:10px 16px;}
+.bx-rot .bx-wrap{padding:0 16px;}
+.bx-rot .bx-picker{grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:10px;}
+.bx-rot .bx-box{border-radius:18px;}
+.bx-rot .bx-play{grid-template-columns:minmax(0,1fr);}
