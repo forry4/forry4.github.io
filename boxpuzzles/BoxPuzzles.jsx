@@ -20,6 +20,7 @@ import { buildPath, parsePath, pushPath, subscribe } from "../shared/router.js";
 import _cssText from "./BoxPuzzles.css?inline";
 import BANK from "./puzzles.json";
 import { CORNERS, newBox, pressTileInBox, pressButtonInBox } from "./engine.js";
+import { isMuted, setMuted, tileSound, litSound, resetSound, openSound } from "./sound.js";
 
 const css = _cssText;
 const WS_BASE = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
@@ -133,6 +134,24 @@ function Leaderboard({ board }) {
 	);
 }
 
+// The header's sound toggle: a speaker, with waves or a cross. Remembered per device.
+const SPEAKER = <path d="M4.5 9.5h3.2L12 5.8v12.4l-4.3-3.7H4.5Z" />;
+const WAVES = <path d="M15.4 9.2a4 4 0 0 1 0 5.6M17.9 6.8a7.4 7.4 0 0 1 0 10.4" />;
+const CROSS = <path d="M15.6 9.6l4.8 4.8M20.4 9.6l-4.8 4.8" />;
+
+function MuteToggle() {
+	const [muted, setM] = useState(isMuted);
+	return (
+		<button type="button" className="btn btn-ghost btn-sm bx-mute" aria-pressed={muted}
+			aria-label={muted ? "Unmute sounds" : "Mute sounds"} title={muted ? "Unmute" : "Mute"}
+			onClick={() => { setMuted(!muted); setM(!muted); }}>
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" aria-hidden="true">
+				{SPEAKER}{muted ? CROSS : WAVES}
+			</svg>
+		</button>
+	);
+}
+
 // ── the screen ───────────────────────────────────────────────────────────────
 export default function BoxPuzzles({ authUser, onExit }) {
 	const token = authUser && !authUser.guest ? authUser.session_token : null;
@@ -175,7 +194,7 @@ export default function BoxPuzzles({ authUser, onExit }) {
 			<header className="bx-header">
 				<button className="btn btn-ghost btn-sm" onClick={num ? () => go(null) : onExit}>← Back</button>
 				<div className="bx-headtitle">Box Puzzles</div>
-				<div className="bx-headright">{solved} / {BANK.length}</div>
+				<div className="bx-headright">{solved} / {BANK.length}<MuteToggle /></div>
 			</header>
 			{num ? (
 				<BoxScreen key={num} n={num} token={token} best={results[BANK[num - 1].id]}
@@ -216,12 +235,15 @@ function BoxScreen({ n, token, best, onResult, onGo }) {
 
 	const pressTile = (i) => {
 		if (opened) return;
+		tileSound();
 		commit(pressTileInBox(box, p.target, i));
 	};
 	const pressButton = (k) => {
 		if (opened) return;
 		const { box: next, result } = pressButtonInBox(box, p, k);
-		if (result === "reset") setShake((s) => s + 1);
+		if (result === "reset") { resetSound(); setShake((s) => s + 1); }
+		else if (result === "open") openSound();
+		else litSound(next.lit.filter(Boolean).length);
 		commit(next);
 		if (result === "open") {
 			const moves = next.moves;

@@ -12,6 +12,7 @@ card: it has no lobby, rooms or bot), at `/boxpuzzles` and `/boxpuzzles/<n>`.
 | `minimums.json` | id -> fewest presses, **GENERATED, server-only** |
 | `api.py` | the leaderboard: `setup_box_puzzles` (Books/Notes injected-deps pattern) |
 | `BoxPuzzles.jsx` / `.css` | the page (picker + box + leaderboard) |
+| `sound.js` | the sounds, synthesised with Web Audio (no files) + the per-device mute |
 | `tools/import_bank.py` | source JSON -> `puzzles.json` + `minimums.json` |
 | `tools/gen_parity_fixtures.mjs` | the reference simulator's WASM -> `tests/fixtures/parity.json` |
 
@@ -75,3 +76,15 @@ mode maps) · `webapp/test/screens.mjs` (`SCREENS` + the `boxPuzzles` block in l
 `app.py` · `pytest.ini` · `core/tests/test_routes_off_event_loop.py` · the path filters in
 `deploy-pages.yml`, `deploy-render.yml` (the `.py` files AND the two JSON files api.py
 loads) and `.githooks/pre-push`.
+
+## Sounds
+
+Synthesised, not sampled (`sound.js`): a woody thock per tile, a latch click + bell per
+lit corner (rising E-G-B-D with each button lit), a dull falling thunk on a reset, and
+a latch + four-note chime on opening. The AudioContext is made on the first sound —
+always inside a click/key handler, which is what iOS requires. **The master bus is a
+tanh soft clipper, NOT a DynamicsCompressor**: Chrome's compressor crushed the 70ms
+clicks to ~1/4 of their level (measured by rendering each sound offline). Levels were
+balanced by the same offline render: every sound ~-25 dB RMS, the opening ~-22, peaks
+<= 0.54. The mute toggle (header) is localStorage `boxpuzzles.muted`; `screens.mjs`
+counts oscillators to prove a press sounds unmuted and stays silent muted.

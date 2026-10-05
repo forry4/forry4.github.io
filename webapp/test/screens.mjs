@@ -9851,8 +9851,15 @@ try {
 		// 2 — a guest, on a phone, from the menu
 		{
 			const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
-			await ctx.addInitScript(() => localStorage.setItem("spender_user",
-				JSON.stringify({ id: "screens-box-guest", name: "Boxer", guest: true })));
+			await ctx.addInitScript(() => {
+				localStorage.setItem("spender_user", JSON.stringify({ id: "screens-box-guest", name: "Boxer", guest: true }));
+				// count the oscillators the page asks for: the sounds are synthesised, so
+				// "a sound played" is "an oscillator was made" (see boxpuzzles/sound.js)
+				window.__oscs = 0;
+				const AC = window.AudioContext || window.webkitAudioContext;
+				const make = AC && AC.prototype.createOscillator;
+				if (make) AC.prototype.createOscillator = function (...a) { window.__oscs++; return make.apply(this, a); };
+			});
 			const page = await ctx.newPage();
 			const errors = [];
 			page.on("pageerror", (e) => errors.push(String(e)));
@@ -9881,8 +9888,23 @@ try {
 			});
 			check("the box sits inside a 16px gutter at 390px", geo.l >= 15.5 && geo.w - geo.r >= 15.5 && geo.over <= 0, JSON.stringify(geo));
 
+			const oscs = () => page.evaluate(() => window.__oscs);
+			const mute = page.locator(".bx-mute");
 			await page.locator(`.bx-tile[data-tile="${detour[0]}"]`).click();
 			check("a tile press counts", await count(page) === 1);
+			const sounded = await oscs();
+			check("a tile press makes a sound", sounded > 0, `${sounded} oscillators`);
+			check("the mute toggle starts unmuted", await mute.getAttribute("aria-pressed") === "false");
+			await mute.click();
+			await page.locator(`.bx-tile[data-tile="${detour[1]}"]`).click();
+			check("muted, a press makes no sound", await oscs() === sounded && await count(page) === 2,
+				`${await oscs()} vs ${sounded}`);
+			await page.reload({ waitUntil: "networkidle" });
+			await page.waitForSelector(".bx-tile", { timeout: 10_000 }).catch(() => {});
+			check("mute survives a reload", await mute.getAttribute("aria-pressed") === "true");
+			await mute.click();
+			check("and unmutes again", await mute.getAttribute("aria-pressed") === "false");
+			await page.locator(`.bx-tile[data-tile="${detour[0]}"]`).click();
 			await page.locator(`.bx-cbtn[data-button="${wrongButton}"]`).click();
 			check("a wrong corner button resets the box and the count",
 				await count(page) === 0 && await page.locator(".bx-box.bx-shake").count() === 1);
