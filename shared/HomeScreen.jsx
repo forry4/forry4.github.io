@@ -37,6 +37,8 @@ const EXTRA_ICON = {
 	// interior contour to read as one, and at the 20px these render at, that collapsed
 	// into a cluster of corner brackets. A flag is two strokes and says "solved".
 	puzzles: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><path d="M6.4 20.2V4" /><path d="M6.4 5.2h11.4l-2.5 3.5 2.5 3.5H6.4" /></svg>),
+	// A box seen from above: the case, its 3x3 inset, and the four corner buttons as dots.
+	boxpuzzles: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><rect x="3.6" y="3.6" width="16.8" height="16.8" rx="2.6" /><path d="M8.2 8.2h7.6v7.6H8.2ZM10.73 8.2v7.6M13.27 8.2v7.6M8.2 10.73h7.6M8.2 13.27h7.6" /></svg>),
 	books: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><path d="M12 7.3C10.6 6 8.7 5.3 6.6 5.3H4.4v12.3h2.2c2.1 0 4 .7 5.4 2" /><path d="M12 7.3c1.4-1.3 3.3-2 5.4-2h2.2v12.3h-2.2c-2.1 0-4 .7-5.4 2" /><path d="M12 7.3v12.3" /></svg>),
 	// A funnel, which is what the page DOES, and which survives 20px. The die it
 	// replaced was a rounded square of five pips drawn inside a rounded-square plate —
@@ -135,11 +137,12 @@ const GO_CHEVRON = (
 
 export { SITE_NAME, GAMES, GAME_EMBLEM, HERO_RULE };
 
-export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles, onBooks, onNotes, onBggFilter, onOffline, onSiteHealth, siteAlerts = 0, siteHealth = null, onProfile, onLogout }) {
+export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles, onBoxPuzzles, onBooks, onNotes, onBggFilter, onOffline, onSiteHealth, siteAlerts = 0, siteHealth = null, onProfile, onLogout }) {
 	// Built here rather than at module scope because each entry closes over a prop.
 	const games = visibleGames(authUser);
 	const extras = [
 		{ id: "puzzles", label: "Spender Puzzles", onClick: onPuzzles },
+		onBoxPuzzles && { id: "boxpuzzles", label: "Box Puzzles", onClick: onBoxPuzzles },
 		{ id: "books", label: "Books", onClick: onBooks },
 		{ id: "bgg", label: "BGG Filter", onClick: onBggFilter },
 		// A private notebook per account. Shown to guests too: the page tells them to

@@ -55,6 +55,7 @@ const Books = lazyChunk("Books", () => import("../../books/Books.jsx"));
 const Notes = lazyChunk("Notes", () => import("../../notes/Notes.jsx"));
 const Profile = lazyChunk("Profile", () => import("../../shared/Profile.jsx"));
 const BggFilter = lazyChunk("BggFilter", () => import("../../bggfilter/BggFilter.jsx"));
+const BoxPuzzles = lazyChunk("BoxPuzzles", () => import("../../boxpuzzles/BoxPuzzles.jsx"));
 
 // Shown while a game's chunk loads. Deliberately an empty full-height panel in the
 // site's dark background: each game injects its OWN stylesheet when it mounts, so
@@ -125,8 +126,8 @@ const HTTP_BASE = WS_BASE.replace(/^ws/, "http").replace(/\/ws$/, "");
 // tables — GAMES[].id ≠ path for wherewolf; Spender is one site-level screen now.
 // The shell owns segment 1; each sub-game owns its own segment 2 (room id). The Spender
 // Spender's own waiting/game map to "spender" (or "puzzles" while puzzling) in applyPopRoute.
-const SCREEN_FOR_MODE = { spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", books: "books", notes: "notes", profile: "profile", puzzles: "puzzles", bggfilter: "bggfilter", offline: "offline" };
-const MODE_FOR_SCREEN = { home: "home", spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", books: "books", notes: "notes", profile: "profile", puzzles: "puzzles", bggfilter: "bggfilter", offline: "offline" };
+const SCREEN_FOR_MODE = { spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", books: "books", notes: "notes", profile: "profile", puzzles: "puzzles", bggfilter: "bggfilter", boxpuzzles: "boxpuzzles", offline: "offline" };
+const MODE_FOR_SCREEN = { home: "home", spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", books: "books", notes: "notes", profile: "profile", puzzles: "puzzles", bggfilter: "bggfilter", boxpuzzles: "boxpuzzles", offline: "offline" };
 
 // Per-game emblem — inline SVG tinted via currentColor (=the card's --accent), so no
 // raster asset / CDN (keeps the self-hosted, no-CLS constraint). Small motifs that read
@@ -3046,6 +3047,7 @@ export default function SpenderApp() {
 			onNotes={() => nav("notes")}
 			onProfile={() => navigateTo("profile")}
 			onBggFilter={() => nav("bggfilter")}
+			onBoxPuzzles={() => nav("boxpuzzles")}
 			onOffline={() => { pushPath(buildPath("offline")); enterOfflineHub(null); }}
 			onSiteHealth={() => setSiteHealthOpen(true)} siteAlerts={siteAlerts}
 			siteHealth={siteHealthOpen && (
@@ -3082,6 +3084,14 @@ export default function SpenderApp() {
 	if (screen === "bggfilter") return (
 		<Suspense fallback={<GameChunkLoading />}>
 			<BggFilter onExit={exitRead} />
+		</Suspense>
+	);
+
+	// Box Puzzles — solo boxes played in the browser; the server keeps the
+	// leaderboard. Owns its own segment 2 (/boxpuzzles/<n>).
+	if (screen === "boxpuzzles") return (
+		<Suspense fallback={<GameChunkLoading />}>
+			<BoxPuzzles authUser={authUser} onExit={() => nav("home")} />
 		</Suspense>
 	);
 

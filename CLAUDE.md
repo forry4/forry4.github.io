@@ -24,6 +24,7 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
 | [`shared/CLAUDE.md`](shared/CLAUDE.md) | Shared frontend kits + URL routing |
 | [`books/CLAUDE.md`](books/CLAUDE.md) | The Books feature |
 | [`notes/CLAUDE.md`](notes/CLAUDE.md) | Notes — a private notebook per signed-in account (folders, rich-text notes, screenshots); every row scoped to its owner, metered by quota |
+| [`boxpuzzles/CLAUDE.md`](boxpuzzles/CLAUDE.md) | Box Puzzles — Mora Jai-style solo boxes; the rules held to the reference simulator's WASM, the per-box leaderboard whose minimum is server-only |
 | [`bggfilter/CLAUDE.md`](bggfilter/CLAUDE.md) | BGG Filter — the BoardGameGeek harvest + the frontend-only filter page |
 | [`docs/deploy-reliability-log.md`](docs/deploy-reliability-log.md) | **Dated postmortems for RED RUNS** — the deploy gates, the scheduled jobs and the harness itself. Measurements behind the rules below (the CI-vs-dev font spread, the screens gate's failure census, the keepalive watchdog). |
 | [`docs/ai-research-log.md`](docs/ai-research-log.md) | **AI campaign history, dated sessions, rejected-experiment postmortems.** When something here says "see the research log," that's the blow-by-blow + "do not relitigate" detail. |
@@ -127,6 +128,8 @@ games/
                        #   left holding) — see its CLAUDE.md
 books/                 # Books feature (wired into the app, not a sub-app)
 notes/                 # Notes — per-account notebook (setup_notes, like Books); TipTap editor chunk
+boxpuzzles/            # Box Puzzles — 71 solo boxes played in the browser (engine.js); the server
+                       #   keeps the leaderboard and replays each solve through engine.py
 bggfilter/             # BGG Filter — frontend-only; tools/ harvests BGG, the payload ships
                        #   as webapp/public/data/bgg-filter.json (GENERATED, ~1MB, fetched not bundled)
 shared/                # theme.js (baseCss), lobby.jsx, splendor.jsx, router.js — cross-game frontend kits

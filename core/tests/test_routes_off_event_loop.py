@@ -36,7 +36,7 @@ _ROUTE = (".get(", ".post(", ".put(", ".delete(", ".patch(")
 
 def _route_files():
     patterns = ("app.py", "core/*.py", "games/*/main.py", "games/*/*/serve.py",
-                "books/*.py", "notes/*.py")
+                "books/*.py", "notes/*.py", "boxpuzzles/*.py")
     return sorted({p for pat in patterns for p in REPO.glob(pat)})
 
 

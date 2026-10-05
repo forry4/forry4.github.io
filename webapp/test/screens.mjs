@@ -59,6 +59,7 @@ const SCREENS = [
 	// A guest gets Notes' private notice — .nt-app is still Notes' own root.
 	{ path: "/notes", chunk: "Notes", marker: ".nt-app" },
 	{ path: "/bggfilter", chunk: "BggFilter", marker: ".bgf" },
+	{ path: "/boxpuzzles", chunk: "BoxPuzzles", marker: ".bx" },
 ];
 
 // EVERY GAME LOBBY, IN ONE PLACE. Three blocks below drive "each game's lobby" —
@@ -9765,6 +9766,204 @@ try {
 		}
 	}
 
+	// BOX PUZZLES — three things only a browser run can hold together:
+	//  1. engine.js against the REFERENCE's answers (boxpuzzles/tests/fixtures/parity.json),
+	//     the same file engine.py is tested against in pytest — the two engines meet here;
+	//  2. a guest playing a box on a phone: the counter, a wrong corner button resetting
+	//     the box, Undo stepping back over that reset, and the box opening;
+	//  3. a REGISTERED solve posted to the real backend, which replays the presses
+	//     through engine.py before it counts — so a drift between the two engines fails
+	//     here as a refused solve — and the blue "fewest moves" row that only its owner
+	//     sees (checked again from a second viewer, who must not see it).
+	async function boxPuzzles(log) {
+		const check = (name, cond, detail = "") => {
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(`boxpuzzles: ${name}`); log(`  FAIL ${name}  ${detail}`); }
+		};
+		const root = path.resolve(webappDir, "..");
+		const E = await import(new URL(`file:///${path.join(root, "boxpuzzles", "engine.js").replace(/\\/g, "/")}`).href);
+		const bank = JSON.parse(readFileSync(path.join(root, "boxpuzzles", "puzzles.json"), "utf8"));
+		const fx = JSON.parse(readFileSync(path.join(root, "boxpuzzles", "tests", "fixtures", "parity.json"), "utf8"));
+		const dec = (s) => s.match(/../g);
+		const byId = Object.fromEntries(bank.map((p) => [p.id, p]));
+
+		// 1 — parity, roster first (an empty fixture would agree with anything)
+		const pressBad = fx.presses.filter(([b, i, a]) => E.press(dec(b), i).join("") !== a);
+		check("engine.js matches every recorded reference press",
+			fx.presses.length >= 1000 && pressBad.length === 0, `${pressBad.length} of ${fx.presses.length} differ`);
+		let seqBad = 0, opens = 0;
+		for (const s of fx.sequences) {
+			const p = byId[s.id];
+			let box = E.newBox(p);
+			for (const [mv, code, tiles, lit] of s.steps) {
+				let got = 0;
+				if (mv[0] === "t") box = E.pressTileInBox(box, p.target, +mv.slice(1));
+				else {
+					const r = E.pressButtonInBox(box, p, +mv.slice(1));
+					box = r.box;
+					got = r.result === "reset" ? 1 : r.result === "open" ? 2 : 0;
+				}
+				if (got === 2) opens++;
+				if (got !== code || box.tiles.join("") !== tiles || box.lit.map(Number).join("") !== lit) { seqBad++; break; }
+			}
+		}
+		check("engine.js matches the reference's whole sequences (buttons, resets, opens)",
+			seqBad === 0 && opens === bank.length, `${seqBad} sequences differ, ${opens}/${bank.length} opened`);
+
+		const shortest = (p) => {
+			const prev = new Map([[p.tiles.join(""), null]]);
+			let frontier = [p.tiles];
+			while (frontier.length) {
+				const next = [];
+				for (const t of frontier) for (let i = 0; i < 9; i++) {
+					const u = E.press(t, i), k = u.join("");
+					if (prev.has(k)) continue;
+					prev.set(k, [t.join(""), i]);
+					if (E.cornersMatch(u, p.target)) {
+						const line = [];
+						for (let c = k; prev.get(c); c = prev.get(c)[0]) line.unshift(prev.get(c)[1]);
+						return line;
+					}
+					next.push(u);
+				}
+				frontier = next;
+			}
+			return null;
+		};
+		const box1 = bank[0];
+		const line = shortest(box1);
+		// two presses that cancel, so a longer-than-shortest solve is still a real one
+		let detour = null;
+		for (let i = 0; i < 9 && !detour; i++) for (let j = 0; j < 9 && !detour; j++)
+			if (E.press(E.press(box1.tiles, i), j).join("") === box1.tiles.join("")) detour = [i, j];
+		const wrongButton = E.CORNERS.findIndex((c, k) => box1.tiles[c] !== box1.target[k]);
+		check("the harness found a line, a detour and a wrong button on box 1",
+			!!line && !!detour && wrongButton >= 0, JSON.stringify({ line, detour, wrongButton }));
+		if (!line || !detour || wrongButton < 0) return;
+
+		const play = async (page, moves) => {
+			for (const i of moves) await page.locator(`.bx-tile[data-tile="${i}"]`).click();
+			for (let k = 0; k < 4; k++) await page.locator(`.bx-cbtn[data-button="${k}"]`).click();
+		};
+		const count = (page) => page.locator("[data-moves]").textContent().then(Number, () => NaN);
+
+		// 2 — a guest, on a phone, from the menu
+		{
+			const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+			await ctx.addInitScript(() => localStorage.setItem("spender_user",
+				JSON.stringify({ id: "screens-box-guest", name: "Boxer", guest: true })));
+			const page = await ctx.newPage();
+			const errors = [];
+			page.on("pageerror", (e) => errors.push(String(e)));
+			await page.goto(`http://localhost:${PORT}/`, { waitUntil: "networkidle" });
+			await page.waitForSelector(".home-extra", { timeout: 25_000 }).catch(() => {});
+			await page.locator(".home-extra", { hasText: "Box Puzzles" }).click().catch(() => {});
+			await page.waitForSelector(".bx-pick", { timeout: 15_000 }).catch(() => {});
+			check("the Extras tile opens /boxpuzzles with all 71 boxes",
+				new URL(page.url()).pathname === "/boxpuzzles" && await page.locator(".bx-pick").count() === bank.length,
+				`${page.url()} ${await page.locator(".bx-pick").count()}`);
+			const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+			check("the picker does not scroll sideways at 390px", wide <= 0, `${wide}px over`);
+
+			await page.locator('.bx-pick[data-box="1"]').click();
+			await page.waitForSelector(".bx-tile", { timeout: 10_000 }).catch(() => {});
+			check("a box opens at /boxpuzzles/1", new URL(page.url()).pathname === "/boxpuzzles/1", page.url());
+			const fills = await page.locator(".bx-tile").evaluateAll((els) => els.map((el) => getComputedStyle(el).backgroundColor));
+			check("nine tiles paint their colours (roster first, then colour)",
+				fills.length === 9 && fills.every((c) => c && c !== "rgba(0, 0, 0, 0)")
+				&& new Set(fills).size === new Set(box1.tiles).size, JSON.stringify(fills));
+			const geo = await page.evaluate(() => {
+				const b = document.querySelector(".bx-box").getBoundingClientRect();
+				return { l: b.left, r: b.right, w: window.innerWidth, over: document.documentElement.scrollWidth - window.innerWidth };
+			});
+			check("the box sits inside a 16px gutter at 390px", geo.l >= 15.5 && geo.w - geo.r >= 15.5 && geo.over <= 0, JSON.stringify(geo));
+
+			await page.locator(`.bx-tile[data-tile="${detour[0]}"]`).click();
+			check("a tile press counts", await count(page) === 1);
+			await page.locator(`.bx-cbtn[data-button="${wrongButton}"]`).click();
+			check("a wrong corner button resets the box and the count",
+				await count(page) === 0 && await page.locator(".bx-box.bx-shake").count() === 1);
+			await page.locator(".bx-controls .btn", { hasText: "Undo" }).click();
+			check("Undo steps back over the reset", await count(page) === 1);
+			await page.locator(".bx-controls .btn", { hasText: "Reset" }).click();
+			check("Reset clears the count", await count(page) === 0);
+
+			await play(page, line);
+			const opened = await page.waitForSelector(".bx-result", { timeout: 5000 }).then(() => true, () => false);
+			const text = opened ? await page.locator(".bx-result").innerText() : "";
+			check("the shortest line opens the box and a guest is asked to sign in",
+				opened && text.includes(`Opened in ${line.length}`) && /Sign in/.test(text), JSON.stringify(text));
+			await page.locator(".bx-header .btn", { hasText: "Back" }).click();
+			check("Back returns to the picker, which marks the box opened",
+				new URL(page.url()).pathname === "/boxpuzzles"
+				&& await page.locator('.bx-pick.solved[data-box="1"]').count() === 1, page.url());
+			await page.locator(".bx-header .btn", { hasText: "Back" }).click();
+			check("Back again returns to the menu", await page.waitForSelector(".home-game-card", { timeout: 5000 }).then(() => true, () => false));
+			check("no page errors (guest)", errors.length === 0, errors.join(" | "));
+			await ctx.close();
+		}
+
+		// 3 — a registered player, against the real server
+		const name = `bx${Date.now().toString(36)}`.slice(0, 16);
+		const reg = await fetch(`http://localhost:${API_PORT}/auth/register`, { method: "POST",
+			headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, password: "boxes" }) })
+			.then((r) => r.json()).catch((e) => ({ ok: false, message: String(e) }));
+		check("a fresh account registers", reg.ok && !!reg.session_token, JSON.stringify(reg));
+		if (!reg.ok) return;
+		const user = { ...reg.user, session_token: reg.session_token };
+		{
+			const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 } });
+			await ctx.addInitScript((u) => localStorage.setItem("spender_user", JSON.stringify(u)), user);
+			const page = await ctx.newPage();
+			const errors = [];
+			page.on("pageerror", (e) => errors.push(String(e)));
+			const posts = [];
+			page.on("response", async (r) => {
+				if (r.url().endsWith("/boxpuzzles/solve")) posts.push({ status: r.status(), body: await r.json().catch(() => null) });
+			});
+			await page.goto(`http://localhost:${PORT}/boxpuzzles/1`, { waitUntil: "networkidle" });
+			await page.waitForSelector(".bx-tile", { timeout: 25_000 }).catch(() => {});
+			check("a deep link opens box 1 for a signed-in player", await page.locator(".bx-tile").count() === 9);
+
+			await play(page, [...detour, ...line]);
+			await page.waitForSelector(".bx-result", { timeout: 5000 }).catch(() => {});
+			await page.waitForFunction(() => !/Posting/.test(document.querySelector(".bx-result")?.innerText || "x"),
+				null, { timeout: 15_000 }).catch(() => {});
+			check("a longer solve is accepted by the server and is not blue",
+				posts[0]?.status === 200 && posts[0].body?.optimal === false
+				&& await page.locator(".bx-result.optimal").count() === 0
+				&& await page.locator(".bx-row.me:not(.optimal)").count() === 1, JSON.stringify(posts[0]));
+
+			await page.locator(".bx-result .btn", { hasText: "Play again" }).click();
+			await play(page, line);
+			await page.waitForSelector(".bx-result.optimal", { timeout: 15_000 }).catch(() => {});
+			const blue = await page.locator(".bx-row.me.optimal .bx-row-name").evaluate((el) => getComputedStyle(el).color).catch(() => "");
+			check("the shortest solve is replayed by the server and turns your row blue",
+				posts[1]?.status === 200 && posts[1].body?.optimal === true && posts[1].body?.best === line.length
+				&& await page.locator(".bx-result.optimal").count() === 1 && /^rgb\(91, 140, 255/.test(blue),
+				`${JSON.stringify(posts[1])} colour ${blue}`);
+			await page.locator(".bx-header .btn", { hasText: "Back" }).click();
+			check("the picker marks the box blue for its owner",
+				await page.waitForSelector('.bx-pick.optimal[data-box="1"]', { timeout: 5000 }).then(() => true, () => false));
+			check("no page errors (signed in)", errors.length === 0, errors.join(" | "));
+			await ctx.close();
+		}
+		{
+			// someone else reads the same board: the row is there, the blue is not
+			const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 } });
+			await ctx.addInitScript(() => localStorage.setItem("spender_user",
+				JSON.stringify({ id: "screens-box-viewer", name: "Viewer", guest: true })));
+			const page = await ctx.newPage();
+			await page.goto(`http://localhost:${PORT}/boxpuzzles/1`, { waitUntil: "networkidle" });
+			await page.waitForSelector(".bx-row", { timeout: 25_000 }).catch(() => {});
+			const rows = await page.locator(".bx-row").allTextContents();
+			check("another viewer sees the row but not that it is optimal",
+				rows.some((r) => r.includes(name)) && await page.locator(".bx-row.optimal").count() === 0
+				&& !/fewest/i.test(await page.locator(".bx-board").innerText()), JSON.stringify(rows));
+			await ctx.close();
+		}
+	}
+
 	const laneA = [offlineSpender, offlineCoc, offlineDuel, offlineDissonance,
 		dissonanceSkat, dissonanceHard, dissonanceBeat, ragtagFight];
 	// `dissonanceQuartet` is lane B: it plays a whole game but arms NO worker
@@ -9775,7 +9974,7 @@ try {
 		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, historyRecovery, dmAdventures,
 		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, formControlZoom, lastDifficulty,
 		dissonanceQuartet, orbitPlay, lobbyFinishSync, blackCastlePlay, pinchPlay, secretNamesPlay, lobbyChrome,
-		notesEditor, profilePage, offlineRead];
+		notesEditor, profilePage, offlineRead, boxPuzzles];
 
 	// EVERY BLOCK MUST BE IN A LANE. Before the lanes existed, adding a block meant
 	// writing it — it then ran because it was simply the next statement. Now it has

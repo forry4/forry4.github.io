@@ -100,6 +100,15 @@ try:
 except Exception as _notes_err:  # pragma: no cover - defensive
     LOG.warning("Notes not wired: %s", _notes_err)
 
+# Box Puzzles — the boxes play in the browser; the server keeps the per-box
+# leaderboard and replays every posted solve before it counts. Same injected deps.
+try:
+    from boxpuzzles.api import setup_box_puzzles
+    setup_box_puzzles(app, get_db_conn, get_user_by_session, bearer_token)
+    LOG.info("wired Box Puzzles routes (/boxpuzzles)")
+except Exception as _box_err:  # pragma: no cover - defensive
+    LOG.warning("Box Puzzles not wired: %s", _box_err)
+
 # Site health — the owner's alerts panel (/admin/alerts, /admin/health). Owner-only.
 setup_site_health(app, get_user_by_session, bearer_token)
 

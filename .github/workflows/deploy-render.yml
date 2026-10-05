@@ -23,6 +23,12 @@ on:
       # Notes — the per-account notebook routes. *.py only: Notes.jsx/.css are bundle-only
       # and must not restart prod.
       - 'notes/**/*.py'
+      # Box Puzzles — the leaderboard routes and the engine they replay solves with,
+      # plus the two files api.py loads at import (the bank and the server-only
+      # minimums). A single `*` keeps tools/ (the offline importer) out.
+      - 'boxpuzzles/*.py'
+      - 'boxpuzzles/puzzles.json'
+      - 'boxpuzzles/minimums.json'
       - 'games/spender/requirements.txt'
       - 'games/spender/Dockerfile'
       - 'games/spender/ai/serving/**/*.py'   # serving stack: heuristic, valuation, engine, actions, mcts, infer_np, v_state, vsearch, replay
