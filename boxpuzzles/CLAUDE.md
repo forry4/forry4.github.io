@@ -39,9 +39,13 @@ fails as a refused solve.
 
 ## The leaderboard
 
-- **Score = tile presses since the last reset** (the Reset button, or a corner button
-  pressed while its corner does not match). Corner presses are free. Undo steps back over
-  anything, a reset included — equivalent to resetting and replaying, so it changes no score.
+- **Score = tile presses since the last reset**, and the only reset is a corner button
+  pressed while its corner does not match. Corner presses are free. There is no Undo or
+  Reset button (owner's call — the wrong corner already resets).
+- **The page carries no prose** (owner's call, 2026-10-05): no instructions, empty states,
+  status lines or explanations — not even of the blue. A box's count turns into its result
+  when it opens; the leaderboard renders nothing until it has a row. `screens.mjs` fails
+  on any `<p>` in the page.
 - One row per player per box, their best; a tie with your own best keeps the earlier
   time, so ties on the board go to whoever got there first. Signed-in accounts post;
   anyone can read.

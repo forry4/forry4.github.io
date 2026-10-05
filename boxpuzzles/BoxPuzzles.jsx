@@ -6,10 +6,11 @@
 // counts (boxpuzzles/api.py). Nothing here explains what a colour does — finding
 // that out is the puzzle.
 //
-// A SCORE IS THE TILE PRESSES SINCE THE BOX WAS LAST RESET. Reset is the button or
-// a corner button pressed while its corner does not match; corner presses are free.
-// Undo steps back through every action, a reset included, so it is the same as
-// resetting and replaying the line you meant — which costs nothing under that rule.
+// A SCORE IS THE TILE PRESSES SINCE THE BOX WAS LAST RESET, and the only reset is a
+// corner button pressed while its corner does not match. Corner presses are free.
+//
+// THE PAGE CARRIES NO PROSE (owner's call): no instructions, no empty states, no
+// explanations of the blue. The board, the count and the leaderboard say it.
 //
 // Routes: /boxpuzzles (the picker) and /boxpuzzles/<n> (box n, numbered easiest
 // first). This screen owns its segment 2, like Notes.
@@ -83,9 +84,6 @@ function MiniBoard({ tiles }) {
 function Picker({ results, onPick }) {
 	return (
 		<div className="bx-wrap">
-			<div className="bx-intro">
-				<p className="bx-note">Each box opens when its four corners match the four buttons around it. What the tiles do is yours to find out.</p>
-			</div>
 			<ol className="bx-picker" aria-label="Boxes">
 				{BANK.map((p, idx) => {
 					const r = results[p.id];
@@ -106,43 +104,31 @@ function Picker({ results, onPick }) {
 	);
 }
 
-function Leaderboard({ board, signedIn }) {
-	if (board === null) return <div className="bx-board"><h2>Leaderboard</h2><p className="bx-board-foot">Loading…</p></div>;
-	if (board.error) return <div className="bx-board"><h2>Leaderboard</h2><p className="bx-board-foot">The leaderboard can’t be reached right now.</p></div>;
-	const { entries, you, total } = board;
+// Rows or nothing: no loading line, no empty state, no footnotes.
+function Leaderboard({ board }) {
+	if (!board || board.error || !board.entries.length) return null;
+	const { entries, you } = board;
 	const youListed = entries.some((e) => e.you);
-	const mine = entries.find((e) => e.you) || you;
 	return (
 		<div className="bx-board">
 			<h2>Leaderboard</h2>
-			{entries.length === 0 ? (
-				<p className="bx-board-foot">Nobody has opened this box yet.</p>
-			) : (
-				<ol className="bx-rows">
-					{entries.map((e) => (
-						<li key={e.rank} className={`bx-row${e.you ? " me" : ""}${e.optimal ? " optimal" : ""}`}>
-							<span className="bx-row-rank">{e.rank}</span>
-							<span className="bx-row-name">{e.name}</span>
-							<span className="bx-row-moves">{e.moves}</span>
-						</li>
-					))}
-					{you && !youListed && <>
-						<li className="bx-gap" aria-hidden="true">⋯</li>
-						<li className={`bx-row me${you.optimal ? " optimal" : ""}`}>
-							<span className="bx-row-rank">{you.rank}</span>
-							<span className="bx-row-name">You</span>
-							<span className="bx-row-moves">{you.moves}</span>
-						</li>
-					</>}
-				</ol>
-			)}
-			{mine?.optimal ? (
-				<p className="bx-board-foot optimal">Blue: you opened this box in the fewest moves possible. Only you can see that.</p>
-			) : !signedIn ? (
-				<p className="bx-board-foot">Sign in to post your solves here.</p>
-			) : total > entries.length && !you ? (
-				<p className="bx-board-foot">{total} players have opened this box.</p>
-			) : null}
+			<ol className="bx-rows">
+				{entries.map((e) => (
+					<li key={e.rank} className={`bx-row${e.you ? " me" : ""}${e.optimal ? " optimal" : ""}`}>
+						<span className="bx-row-rank">{e.rank}</span>
+						<span className="bx-row-name">{e.name}</span>
+						<span className="bx-row-moves">{e.moves}</span>
+					</li>
+				))}
+				{you && !youListed && <>
+					<li className="bx-gap" aria-hidden="true">⋯</li>
+					<li className={`bx-row me${you.optimal ? " optimal" : ""}`}>
+						<span className="bx-row-rank">{you.rank}</span>
+						<span className="bx-row-name">You</span>
+						<span className="bx-row-moves">{you.moves}</span>
+					</li>
+				</>}
+			</ol>
 		</div>
 	);
 }
@@ -189,7 +175,7 @@ export default function BoxPuzzles({ authUser, onExit }) {
 			<header className="bx-header">
 				<button className="btn btn-ghost btn-sm" onClick={num ? () => go(null) : onExit}>← Back</button>
 				<div className="bx-headtitle">Box Puzzles</div>
-				<div className="bx-headright">{solved} / {BANK.length} opened</div>
+				<div className="bx-headright">{solved} / {BANK.length}</div>
 			</header>
 			{num ? (
 				<BoxScreen key={num} n={num} token={token} best={results[BANK[num - 1].id]}
@@ -204,12 +190,9 @@ export default function BoxPuzzles({ authUser, onExit }) {
 function BoxScreen({ n, token, best, onResult, onGo }) {
 	const p = BANK[n - 1];
 	const [box, setBox] = useState(() => restoredBox(p));
-	const [history, setHistory] = useState([]);
 	const [shake, setShake] = useState(0);
 	const [opened, setOpened] = useState(null);     // { moves, post: "guest"|"posting"|"error"|result }
 	const [board, setBoard] = useState(null);
-	const boxRef = useRef(box);
-	boxRef.current = box;
 
 	const loadBoard = useCallback(() => {
 		api(`/boxpuzzles/leaderboard/${p.id}`, token).then(setBoard).catch(() => setBoard({ error: true }));
@@ -217,7 +200,6 @@ function BoxScreen({ n, token, best, onResult, onGo }) {
 	useEffect(loadBoard, [loadBoard]);
 
 	const commit = (next) => {
-		setHistory((h) => [...h, boxRef.current]);
 		setBox(next);
 		saveProgress(p.id, next.moves);
 	};
@@ -248,25 +230,15 @@ function BoxScreen({ n, token, best, onResult, onGo }) {
 			post(moves);
 		}
 	};
-	const reset = () => { if (!opened && box.moves.length + box.lit.filter(Boolean).length) commit(newBox(p)); };
-	const undo = () => {
-		if (opened || !history.length) return;
-		const prev = history[history.length - 1];
-		setHistory((h) => h.slice(0, -1));
-		setBox(prev);
-		saveProgress(p.id, prev.moves);
-	};
-	const again = () => { setOpened(null); setHistory([]); setBox(newBox(p)); saveProgress(p.id, []); };
+	const again = () => { setOpened(null); setBox(newBox(p)); saveProgress(p.id, []); };
 
-	// Keys: 1-9 press the tiles row by row (1 is top-left), U undoes, R resets.
+	// Keys: 1-9 press the tiles row by row (1 is top-left).
 	const keyRef = useRef(null);
-	keyRef.current = { pressTile, undo, reset };
+	keyRef.current = { pressTile };
 	useEffect(() => {
 		const onKey = (e) => {
 			if (e.ctrlKey || e.metaKey || e.altKey || /input|textarea|select/i.test(e.target?.tagName || "")) return;
 			if (e.key >= "1" && e.key <= "9") keyRef.current.pressTile(+e.key - 1);
-			else if (e.key === "u" || e.key === "U") keyRef.current.undo();
-			else if (e.key === "r" || e.key === "R") keyRef.current.reset();
 			else return;
 			e.preventDefault();
 		};
@@ -299,33 +271,16 @@ function BoxScreen({ n, token, best, onResult, onGo }) {
 							))}
 						</div>
 					</div>
-					{opened ? (
-						<div className={`bx-result${optimalNow ? " optimal" : ""}`} role="status">
-							<h2>Opened in {opened.moves} {opened.moves === 1 ? "move" : "moves"}</h2>
-							<p className="bx-note">
-								{opened.post === "guest" ? "Sign in to post your solves to the leaderboard."
-									: opened.post === "posting" ? "Posting…"
-									: opened.post === "error" ? "Couldn’t reach the leaderboard."
-									: optimalNow ? "That’s the fewest moves possible."
-									: result.improved ? `Posted — you’re #${result.leaderboard?.you?.rank ?? "?"} on this box.`
-									: `Your best on this box is still ${result.best}.`}
-							</p>
-							<div className="bx-result-actions">
-								{opened.post === "error" && <button className="btn btn-ghost btn-sm" onClick={() => post(box.moves)}>Retry</button>}
-								<button className="btn btn-ghost btn-sm" onClick={again}>Play again</button>
-								{n < BANK.length && <button className="btn btn-gold btn-sm" onClick={() => onGo(n + 1)}>Next box →</button>}
-							</div>
-						</div>
-					) : (
-						<div className="bx-controls">
-							<button className="btn btn-ghost btn-sm" onClick={undo} disabled={!history.length}>Undo</button>
-							<div className="bx-count" aria-live="polite"><b data-moves>{box.moves.length}</b>moves</div>
-							<button className="btn btn-ghost btn-sm" onClick={reset} disabled={!box.moves.length && !box.lit.some(Boolean)}>Reset</button>
-						</div>
-					)}
-					{best && !opened && <p className="bx-note">Your best: {best.moves}</p>}
+					<div className={`bx-controls${opened ? " bx-result" : ""}${optimalNow ? " optimal" : ""}`} role="status">
+						<div className="bx-count"><b data-moves>{opened ? opened.moves : box.moves.length}</b>{(opened ? opened.moves : box.moves.length) === 1 ? "move" : "moves"}</div>
+						{opened && <div className="bx-result-actions">
+							{opened.post === "error" && <button className="btn btn-ghost btn-sm" onClick={() => post(box.moves)}>Retry</button>}
+							<button className="btn btn-ghost btn-sm" onClick={again}>Play again</button>
+							{n < BANK.length && <button className="btn btn-gold btn-sm" onClick={() => onGo(n + 1)}>Next box →</button>}
+						</div>}
+					</div>
 				</div>
-				<Leaderboard board={board} signedIn={!!token} />
+				<aside className="bx-side"><Leaderboard board={board} /></aside>
 			</div>
 		</div>
 	);

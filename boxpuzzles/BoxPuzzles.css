@@ -9,13 +9,10 @@
 	text-transform:uppercase;color:var(--gold);font-size:.95rem;}
 .bx-headright{margin-left:auto;color:var(--text-dim);font-size:.82rem;font-variant-numeric:tabular-nums;}
 .bx-wrap{max-width:1080px;margin:0 auto;padding:0 20px;}
-.bx-note{color:var(--text-dim);font-size:.92rem;line-height:1.55;}
 
 /* ── the picker ───────────────────────────────────────────────────────── */
-.bx-intro{text-align:center;padding:30px 0 22px;}
-.bx-intro .bx-note{max-width:46ch;margin:0 auto;font-style:italic;}
-.bx-picker{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));
-	list-style:none;margin:0;padding:0;}
+.bx-picker{display:grid;gap:12px;margin:24px 0 0;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));
+	list-style:none;padding:0;}
 .bx-pick{width:100%;display:flex;flex-direction:column;align-items:center;gap:8px;
 	padding:12px 8px 10px;background:var(--surface);border:1px solid var(--border);
 	border-radius:var(--radius);color:var(--text);cursor:pointer;font:inherit;
@@ -81,18 +78,14 @@
 	0 0 46px rgba(240,205,122,.35),0 18px 40px rgba(0,0,0,.45);}
 @media (prefers-reduced-motion:reduce){.bx-shake{animation:none;}.bx-tile,.bx-cbtn{transition:none;}}
 
-.bx-controls{display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;}
-.bx-count{min-width:6.5em;text-align:center;font-variant-numeric:tabular-nums;color:var(--text-soft);}
-.bx-count b{display:block;font-size:1.6rem;line-height:1.1;color:var(--text);font-weight:700;}
-.bx-goal{max-width:40ch;text-align:center;}
-
-.bx-result{width:min(100%,430px);box-sizing:border-box;text-align:center;padding:16px 18px;
-	border-radius:var(--radius);border:1px solid rgba(201,168,76,.55);background:var(--surface);}
-.bx-result.optimal{border-color:var(--bx-optimal);background:linear-gradient(var(--bx-optimal-bg),var(--bx-optimal-bg)),var(--surface);}
-.bx-result h2{margin:0 0 6px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.05rem;
-	letter-spacing:.06em;color:var(--gold);}
-.bx-result.optimal h2{color:var(--bx-optimal);}
-.bx-result p{margin:0 0 12px;}
+/* Under the box: the count, which becomes the result when the box opens (blue when it
+   took the fewest moves possible — the only place that is said, and only to you). */
+.bx-controls{display:flex;flex-direction:column;align-items:center;gap:14px;}
+.bx-count{text-align:center;font-variant-numeric:tabular-nums;color:var(--text-dim);font-size:.8rem;
+	letter-spacing:.08em;}
+.bx-count b{display:block;font-size:1.6rem;line-height:1.1;color:var(--text);font-weight:700;letter-spacing:0;}
+.bx-result .bx-count b{color:var(--gold-light);}
+.bx-result.optimal .bx-count b,.bx-result.optimal .bx-count{color:var(--bx-optimal);}
 .bx-result-actions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;}
 
 /* ── the leaderboard ──────────────────────────────────────────────────── */
@@ -111,8 +104,6 @@
 .bx-row.optimal{background:var(--bx-optimal-bg);box-shadow:inset 0 0 0 1px var(--bx-optimal);}
 .bx-row.optimal .bx-row-name,.bx-row.optimal .bx-row-moves{color:var(--bx-optimal);}
 .bx-gap{text-align:center;color:var(--text-muted);padding:2px 0;}
-.bx-board-foot{margin:10px 0 0;font-size:.8rem;color:var(--text-dim);line-height:1.5;}
-.bx-board-foot.optimal{color:var(--bx-optimal);}
 
 @media (max-width:600px){
 	.bx-header{padding:10px 16px;}

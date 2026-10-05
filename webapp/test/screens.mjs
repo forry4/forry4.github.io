@@ -9770,7 +9770,8 @@ try {
 	//  1. engine.js against the REFERENCE's answers (boxpuzzles/tests/fixtures/parity.json),
 	//     the same file engine.py is tested against in pytest — the two engines meet here;
 	//  2. a guest playing a box on a phone: the counter, a wrong corner button resetting
-	//     the box, Undo stepping back over that reset, and the box opening;
+	//     the box (the only reset there is), the box opening — and NO PROSE anywhere on
+	//     the page, which is the owner's call and the thing most likely to creep back;
 	//  3. a REGISTERED solve posted to the real backend, which replays the presses
 	//     through engine.py before it counts — so a drift between the two engines fails
 	//     here as a refused solve — and the blue "fewest moves" row that only its owner
@@ -9864,6 +9865,8 @@ try {
 				`${page.url()} ${await page.locator(".bx-pick").count()}`);
 			const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
 			check("the picker does not scroll sideways at 390px", wide <= 0, `${wide}px over`);
+			const prose = () => page.locator(".bx p").allTextContents();
+			check("the picker carries no prose", (await prose()).length === 0, JSON.stringify(await prose()));
 
 			await page.locator('.bx-pick[data-box="1"]').click();
 			await page.waitForSelector(".bx-tile", { timeout: 10_000 }).catch(() => {});
@@ -9883,16 +9886,13 @@ try {
 			await page.locator(`.bx-cbtn[data-button="${wrongButton}"]`).click();
 			check("a wrong corner button resets the box and the count",
 				await count(page) === 0 && await page.locator(".bx-box.bx-shake").count() === 1);
-			await page.locator(".bx-controls .btn", { hasText: "Undo" }).click();
-			check("Undo steps back over the reset", await count(page) === 1);
-			await page.locator(".bx-controls .btn", { hasText: "Reset" }).click();
-			check("Reset clears the count", await count(page) === 0);
+			check("there are no Undo or Reset buttons", await page.locator(".bx-stage .btn", { hasText: /Undo|Reset/ }).count() === 0);
 
 			await play(page, line);
 			const opened = await page.waitForSelector(".bx-result", { timeout: 5000 }).then(() => true, () => false);
-			const text = opened ? await page.locator(".bx-result").innerText() : "";
-			check("the shortest line opens the box and a guest is asked to sign in",
-				opened && text.includes(`Opened in ${line.length}`) && /Sign in/.test(text), JSON.stringify(text));
+			check("the shortest line opens the box, and the count becomes the result",
+				opened && await count(page) === line.length && await page.locator(".bx-result .btn", { hasText: "Next box" }).count() === 1);
+			check("the box screen carries no prose, opened or not", (await prose()).length === 0, JSON.stringify(await prose()));
 			await page.locator(".bx-header .btn", { hasText: "Back" }).click();
 			check("Back returns to the picker, which marks the box opened",
 				new URL(page.url()).pathname === "/boxpuzzles"
@@ -9927,8 +9927,9 @@ try {
 
 			await play(page, [...detour, ...line]);
 			await page.waitForSelector(".bx-result", { timeout: 5000 }).catch(() => {});
-			await page.waitForFunction(() => !/Posting/.test(document.querySelector(".bx-result")?.innerText || "x"),
-				null, { timeout: 15_000 }).catch(() => {});
+			// wait for the solve's RESPONSE, not for a word on the page (there is none)
+			for (let t = 0; t < 150 && posts.length < 1; t++) await page.waitForTimeout(100);
+			await page.waitForSelector(".bx-row.me", { timeout: 5000 }).catch(() => {});
 			check("a longer solve is accepted by the server and is not blue",
 				posts[0]?.status === 200 && posts[0].body?.optimal === false
 				&& await page.locator(".bx-result.optimal").count() === 0
