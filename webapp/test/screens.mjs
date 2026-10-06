@@ -9880,6 +9880,12 @@ try {
 			check("the picker does not scroll sideways at 390px", wide <= 0, `${wide}px over`);
 			const prose = () => page.locator(".bx p").allTextContents();
 			check("the picker carries no prose", (await prose()).length === 0, JSON.stringify(await prose()));
+			const select = await page.evaluate(() => {
+				const root = document.querySelector(".bx");
+				getSelection().selectAllChildren(root);
+				return { style: getComputedStyle(root).userSelect, selected: getSelection().toString().trim().length };
+			});
+			check("nothing on the page can be selected", select.style === "none" && select.selected === 0, JSON.stringify(select));
 
 			await page.locator('.bx-pick[data-box="1"]').click();
 			await page.waitForSelector(".bx-tile", { timeout: 10_000 }).catch(() => {});

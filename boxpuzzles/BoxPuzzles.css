@@ -2,6 +2,12 @@
 	--bx-GY:#8d8a83;--bx-WH:#f2ede0;--bx-PU:#7d4fc4;--bx-YE:#ecc63c;--bx-GN:#3e9c4f;
 	--bx-PI:#ee8dbb;--bx-BK:#1c1b1f;--bx-RD:#d23b34;--bx-OR:#ee8a2a;--bx-BU:#386fe6;
 	--bx-optimal:#5b8cff;--bx-optimal-bg:rgba(70,115,255,.16);}
+/* NO TEXT SELECTION — a box is pressed fast and often, and a double-tap or a drag
+   across the page selected words and raised the copy callout. Same rule as the
+   games (Dissonance, Rag Tag, Pinch); `-webkit-` for iOS Safari, `-webkit-touch-callout`
+   for the long-press menu. A text field, if one is ever added, stays selectable. */
+.bx{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;}
+.bx input,.bx textarea,.bx [contenteditable]{user-select:text;-webkit-user-select:text;}
 .bx-header{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;
 	padding:12px 20px;background:rgba(15,14,12,.92);backdrop-filter:blur(6px);
 	border-bottom:1px solid var(--border);}
