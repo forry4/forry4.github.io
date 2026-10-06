@@ -20,12 +20,17 @@ player could want to cheat, so:
   * Signed-in accounts only, for posting and for "your results". Reading a box's
     leaderboard needs no account.
 
+The DAILY box (boxpuzzles/daily.py) is the one exception to "nothing to serve": it
+is generated here and only today's is handed out, so it is never in the bundle. Its
+attempt IS saved mid-solve, server-side, and may only grow.
+
 The handlers are plain `def`, so their DB round-trips run in FastAPI's threadpool
 rather than on the event loop the game sockets share.
 """
 from __future__ import annotations
 
 import json
+from datetime import date
 import pathlib
 import time
 
@@ -35,6 +40,7 @@ from pydantic import BaseModel, Field
 from core import alerts
 from core.ratelimit import SlidingWindowLimiter
 
+from boxpuzzles import daily as D
 from boxpuzzles.engine import corners_match, replay
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -45,6 +51,9 @@ MAX_MOVES = 1000          # a solve longer than this is not a leaderboard entry
 BOARD_SIZE = 20           # rows shown per box
 
 _solves_minute = SlidingWindowLimiter(max_hits=30, window_seconds=60)
+# A daily attempt is saved as it is played (debounced in the page), so this is a
+# per-press budget rather than a per-solve one.
+_daily_minute = SlidingWindowLimiter(max_hits=240, window_seconds=60)
 
 
 def init_box_db(conn) -> None:
@@ -143,6 +152,19 @@ class SolveIn(BaseModel):
     moves: list[int] = Field(max_length=MAX_MOVES)
 
 
+class AttemptIn(BaseModel):
+    day: str = Field(max_length=10)
+    segments: list[list[int]] = Field(max_length=D.MAX_SEGMENTS)
+    open: bool = False
+
+
+def _iso_day(day: str) -> str:
+    try:
+        return date.fromisoformat(day).isoformat()
+    except ValueError:
+        raise HTTPException(status_code=404, detail="no such day")
+
+
 def _default_token_resolver(token: str | None = Query(default=None)) -> str | None:
     return token
 
@@ -153,6 +175,7 @@ def setup_box_puzzles(app, get_db_conn, get_user_by_session, token_resolver=None
     conn = get_db_conn()
     try:
         init_box_db(conn)
+        D.init_daily_db(conn)
     finally:
         conn.close()
 
@@ -203,3 +226,56 @@ def setup_box_puzzles(app, get_db_conn, get_user_by_session, token_resolver=None
             return {"moves": moves, **rec, "optimal": is_optimal(payload.puzzle, rec["best"]),
                     "leaderboard": board}
         return run(write)
+
+    # ── the daily box ────────────────────────────────────────────────────────
+    @app.get("/boxpuzzles/daily")
+    def box_daily(user: dict | None = Depends(viewer)):
+        D.start_filler(get_db_conn)
+        today = D.pacific_day()
+        yesterday = D.next_day(today, -1)
+
+        def go(c):
+            box = D.ensure_day(c, today)
+            return {"day": today, "tiles": box["tiles"], "target": box["target"],
+                    "next_at": D.day_start(D.next_day(today)),
+                    "attempt": D.load_attempt(c, user["id"], today) if user else None,
+                    "yesterday": yesterday if D.get_day(c, yesterday) else None}
+        return run(go)
+
+    @app.get("/boxpuzzles/daily/{day}/board")
+    def box_daily_board(day: str, user: dict | None = Depends(viewer)):
+        day, today = _iso_day(day), D.pacific_day()
+        if day > today:
+            raise HTTPException(status_code=404, detail="no such day")
+
+        def go(c):
+            box = D.get_day(c, day)
+            if box is None:
+                raise HTTPException(status_code=404, detail="no such day")
+            return D.daily_board(c, box, user["id"] if user else None, reveal=day < today)
+        return run(go)
+
+    @app.post("/boxpuzzles/daily/attempt")
+    def box_daily_attempt(payload: AttemptIn, user: dict = Depends(member)):
+        uid = user["id"]
+        if _daily_minute.exceeded(uid):
+            alerts.alert("boxpuzzles-rate", f"{user.get('name') or uid} is saving daily Box Puzzle "
+                         "presses faster than the limit; requests are refused.", key=f"boxpuzzles-rate:{uid}")
+            raise HTTPException(status_code=429, detail="Too many saves. Wait a minute and try again.")
+        _daily_minute.record(uid)
+        today = D.pacific_day()
+        if payload.day != today:
+            raise HTTPException(status_code=409, detail="that day is over")
+
+        def go(c):
+            box = D.ensure_day(c, today)
+            try:
+                rec = D.save_attempt(c, uid, box, payload.segments, payload.open)
+            except D.Refused as e:
+                raise HTTPException(status_code=e.status, detail=str(e))
+            out = {"moves": rec["moves"], "solved": rec["solved"]}
+            if rec["solved"]:
+                out["optimal"] = rec["moves"] <= box["minimum"]
+                out["leaderboard"] = D.daily_board(c, box, uid, reveal=False)
+            return out
+        return run(go)

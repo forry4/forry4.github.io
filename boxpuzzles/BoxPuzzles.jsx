@@ -12,14 +12,21 @@
 // THE PAGE CARRIES NO PROSE (owner's call): no instructions, no empty states, no
 // explanations of the blue. The board, the count and the leaderboard say it.
 //
-// Routes: /boxpuzzles (the picker) and /boxpuzzles/<n> (box n, numbered easiest
-// first). This screen owns its segment 2, like Notes.
+// THE DAILY BOX (/boxpuzzles/daily) is the exception to all three: one new box a day
+// (midnight US Pacific), made and kept by the server (boxpuzzles/daily.py), ONE attempt,
+// saved as it is played, and a reset does NOT clear its count. The attempt is a list
+// of segments — the presses between resets — because the server replays each one from
+// the first board. Yesterday's box can be looked at (view only), with its minimum and
+// a shortest line played back on the board.
+//
+// Routes: /boxpuzzles (the picker), /boxpuzzles/<n> (box n, numbered easiest first) and
+// /boxpuzzles/daily. This screen owns its segment 2, like Notes.
 import { useState, useEffect, useCallback, useRef } from "react";
 import { baseCss } from "../shared/theme.js";
 import { buildPath, parsePath, pushPath, subscribe } from "../shared/router.js";
 import _cssText from "./BoxPuzzles.css?inline";
 import BANK from "./puzzles.json";
-import { CORNERS, newBox, pressTileInBox, pressButtonInBox } from "./engine.js";
+import { CORNERS, press, newBox, pressTileInBox, pressButtonInBox } from "./engine.js";
 import { isMuted, setMuted, tileSound, litSound, resetSound, openSound } from "./sound.js";
 
 const css = _cssText;
@@ -45,15 +52,42 @@ function writeJson(key, value) {
 // key an earlier build wrote is cleared once, so no stale line lingers in storage.
 try { localStorage.removeItem("boxpuzzles.progress.v1"); } catch { /* storage unavailable */ }
 
-const routeNumber = () => {
-	const n = parseInt(parsePath().room || "", 10);
+// The open view: a box number, "daily", or null for the picker.
+const routeView = () => {
+	const room = parsePath().room || "";
+	if (room === "DAILY") return "daily";
+	const n = parseInt(room, 10);
 	return n >= 1 && n <= BANK.length ? n : null;
 };
 
-async function api(path, token, body) {
+// The daily attempt this device knows of: { day, segments, moves, solved, optimal? }.
+// Guests have only this copy; a signed-in player's is a cache of the server's.
+const dailyKey = (who) => `boxpuzzles.daily.v1.${who}`;
+// Today in US Pacific, for the picker's tile only — the server decides the real day.
+const pacificToday = () => {
+	try { return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date()); }
+	catch { return ""; }
+};
+const shortDate = (day) => {
+	try { return new Date(`${day}T12:00:00Z`).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" }); }
+	catch { return day; }
+};
+const totalMoves = (segs) => segs.reduce((n, s) => n + s.length, 0);
+const boardAfter = (tiles, moves) => moves.reduce((t, i) => press(t, i), tiles.slice());
+// True if `next` is `prev` played on (the server's rule: an attempt only grows).
+const extendsAttempt = (prev, next) => {
+	if (next.length < prev.length) return false;
+	const k = prev.length - 1;
+	for (let i = 0; i < k; i++) if (prev[i].join() !== next[i].join()) return false;
+	return prev[k].every((m, j) => next[k][j] === m);
+};
+
+// `keepalive` lets a save finish after the page is hidden or closed.
+async function api(path, token, body, keepalive = false) {
 	const headers = token ? { Authorization: `Bearer ${token}` } : {};
 	if (body) headers["Content-Type"] = "application/json";
-	const res = await fetch(HTTP_BASE + path, { method: body ? "POST" : "GET", headers, body: body ? JSON.stringify(body) : undefined });
+	const res = await fetch(HTTP_BASE + path, { method: body ? "POST" : "GET", headers, keepalive,
+		body: body ? JSON.stringify(body) : undefined });
 	let data = null;
 	try { data = await res.json(); } catch { /* not JSON */ }
 	if (!res.ok) { const e = new Error(data?.detail || `HTTP ${res.status}`); e.status = res.status; throw e; }
@@ -69,9 +103,24 @@ function MiniBoard({ tiles }) {
 	);
 }
 
-function Picker({ results, onPick }) {
+const CALENDAR = (
+	<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" aria-hidden="true">
+		<rect x="4" y="5.5" width="16" height="14.5" rx="2" /><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4" />
+	</svg>
+);
+
+function Picker({ results, daily, onPick }) {
+	const today = pacificToday();
+	const done = daily && daily.day === today && daily.solved ? daily : null;
 	return (
 		<div className="bx-wrap">
+			<button type="button" className={`bx-daily-tile${done ? " solved" : ""}${done?.optimal ? " optimal" : ""}`}
+				onClick={() => onPick("daily")} aria-label={`Daily box${done ? `, solved in ${done.moves}` : ""}`}>
+				{CALENDAR}
+				<span className="bx-daily-name">Daily</span>
+				<span className="bx-daily-date">{today ? shortDate(today) : ""}</span>
+				<span className="bx-pick-state">{done ? `✓ ${done.moves}` : ""}</span>
+			</button>
 			<ol className="bx-picker" aria-label="Boxes">
 				{BANK.map((p, idx) => {
 					const r = results[p.id];
@@ -92,6 +141,29 @@ function Picker({ results, onPick }) {
 	);
 }
 
+// The box itself: the case, its four corner buttons and the nine tiles. `hint` rings
+// one tile (yesterday's replay shows each press before it lands).
+function BoxFace({ id, target, box, shake = 0, opened, disabled, hint = -1, onTile, onButton }) {
+	const off = !!(opened || disabled);
+	return (
+		<div key={shake} className={`bx-box${shake ? " bx-shake" : ""}${opened ? " open" : ""}`} data-box={id}>
+			{CORNERS.map((c, k) => (
+				<button key={k} type="button" className={`bx-cbtn bx-c${k}${box.lit[k] ? " lit" : ""}`}
+					style={swatch(target[k])} disabled={off} data-button={k}
+					aria-label={`${CORNER_NAME[k]} button, ${COLOR_NAME[target[k]]}${box.lit[k] ? ", lit" : ""}`}
+					aria-pressed={box.lit[k]} onClick={() => onButton?.(k)} />
+			))}
+			<div className="bx-grid">
+				{box.tiles.map((c, i) => (
+					<button key={i} type="button" className={`bx-tile${i === hint ? " hint" : ""}`} style={swatch(c)}
+						data-tile={i} data-color={c} disabled={off} aria-label={`Tile ${i + 1}, ${COLOR_NAME[c]}`}
+						onClick={() => onTile?.(i)} />
+				))}
+			</div>
+		</div>
+	);
+}
+
 // ALWAYS THERE, AND CLOSED UNTIL ASKED: the scores are a spoiler (a low best says
 // how short the line is), so a box starts with the leaderboard folded to its title
 // and opens it for you once you have opened the box. No loading line, no empty-state
@@ -102,13 +174,15 @@ const CHEVRON = (
 	</svg>
 );
 
-function Leaderboard({ board, open, onToggle }) {
+// `locked`: today's daily board cannot be opened until you have opened the box — in a
+// one-attempt race, a glance at the best score is a head start.
+function Leaderboard({ board, open, onToggle, locked = false }) {
 	const entries = board && !board.error ? board.entries : [];
 	const you = board && !board.error ? board.you : null;
 	const youListed = entries.some((e) => e.you);
 	return (
-		<div className={`bx-board${open ? " open" : ""}`}>
-			<button type="button" className="bx-board-hd" aria-expanded={open} onClick={onToggle}>
+		<div className={`bx-board${open ? " open" : ""}${locked ? " locked" : ""}`}>
+			<button type="button" className="bx-board-hd" aria-expanded={open} onClick={onToggle} disabled={locked}>
 				<h2>Leaderboard</h2>{CHEVRON}
 			</button>
 			{open && (entries.length ? (
@@ -189,20 +263,38 @@ function MuteToggle() {
 	);
 }
 
+// Keys: 1-9 press the tiles row by row (1 is top-left).
+function useTileKeys(pressTile) {
+	const keyRef = useRef(null);
+	keyRef.current = pressTile;
+	useEffect(() => {
+		const onKey = (e) => {
+			if (e.ctrlKey || e.metaKey || e.altKey || /input|textarea|select/i.test(e.target?.tagName || "")) return;
+			if (e.key >= "1" && e.key <= "9") keyRef.current(+e.key - 1);
+			else return;
+			e.preventDefault();
+		};
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, []);
+}
+
 // ── the screen ───────────────────────────────────────────────────────────────
 export default function BoxPuzzles({ authUser, onExit }) {
 	const token = authUser && !authUser.guest ? authUser.session_token : null;
 	const who = (authUser && !authUser.guest && authUser.id) || "guest";
-	const [num, setNum] = useState(routeNumber);
+	const [num, setNum] = useState(routeView);
 	const [results, setResults] = useState(() => readJson(resultsKey(who), {}));
+	const [daily, setDaily] = useState(() => readJson(dailyKey(who), null));
 
 	// The URL is the source of truth for which box is open (Back/Forward included).
-	useEffect(() => subscribe((r) => { if (r.game === "boxpuzzles") setNum(routeNumber()); }), []);
+	useEffect(() => subscribe((r) => { if (r.game === "boxpuzzles") setNum(routeView()); }), []);
 	const go = useCallback((n) => {
 		pushPath(buildPath("boxpuzzles", n ? String(n) : undefined));
 		setNum(n);
 		window.scrollTo(0, 0);
 	}, []);
+	const noteDaily = useCallback((entry) => { setDaily(entry); writeJson(dailyKey(who), entry); }, [who]);
 
 	// Your results: the server's when signed in (they carry `optimal`), else this device's.
 	useEffect(() => {
@@ -237,11 +329,13 @@ export default function BoxPuzzles({ authUser, onExit }) {
 				<div className="bx-headtitle">Box Puzzles</div>
 				<div className="bx-headright">{solved} / {BANK.length}<MuteToggle /></div>
 			</header>
-			{num ? (
+			{num === "daily" ? (
+				<DailyScreen token={token} who={who} onDaily={noteDaily} />
+			) : num ? (
 				<BoxScreen key={num} n={num} token={token} best={results[BANK[num - 1].id]}
 					onResult={noteResult} onGo={go} />
 			) : (
-				<Picker results={results} onPick={go} />
+				<Picker results={results} daily={daily} onPick={go} />
 			)}
 		</div>
 	);
@@ -291,19 +385,7 @@ function BoxScreen({ n, token, best, onResult, onGo }) {
 	};
 	const again = () => { setOpened(null); setBox(newBox(p)); };
 
-	// Keys: 1-9 press the tiles row by row (1 is top-left).
-	const keyRef = useRef(null);
-	keyRef.current = { pressTile };
-	useEffect(() => {
-		const onKey = (e) => {
-			if (e.ctrlKey || e.metaKey || e.altKey || /input|textarea|select/i.test(e.target?.tagName || "")) return;
-			if (e.key >= "1" && e.key <= "9") keyRef.current.pressTile(+e.key - 1);
-			else return;
-			e.preventDefault();
-		};
-		window.addEventListener("keydown", onKey);
-		return () => window.removeEventListener("keydown", onKey);
-	}, []);
+	useTileKeys(pressTile);
 
 	const result = opened && typeof opened.post === "object" ? opened.post : null;
 	const optimalNow = !!(result && result.optimal && result.best === opened.moves);
@@ -316,20 +398,8 @@ function BoxScreen({ n, token, best, onResult, onGo }) {
 						<h1 className="bx-title">Box {n}</h1>
 						<button className="btn btn-ghost btn-sm bx-arrow" disabled={n >= BANK.length} onClick={() => onGo(n + 1)} aria-label="Next box">›</button>
 					</div>
-					<div key={shake} className={`bx-box${shake ? " bx-shake" : ""}${opened ? " open" : ""}`} data-box={n}>
-						{CORNERS.map((c, k) => (
-							<button key={k} type="button" className={`bx-cbtn bx-c${k}${box.lit[k] ? " lit" : ""}`}
-								style={swatch(p.target[k])} disabled={!!opened} data-button={k}
-								aria-label={`${CORNER_NAME[k]} button, ${COLOR_NAME[p.target[k]]}${box.lit[k] ? ", lit" : ""}`}
-								aria-pressed={box.lit[k]} onClick={() => pressButton(k)} />
-						))}
-						<div className="bx-grid">
-							{box.tiles.map((c, i) => (
-								<button key={i} type="button" className="bx-tile" style={swatch(c)} data-tile={i} data-color={c}
-									disabled={!!opened} aria-label={`Tile ${i + 1}, ${COLOR_NAME[c]}`} onClick={() => pressTile(i)} />
-							))}
-						</div>
-					</div>
+					<BoxFace id={n} target={p.target} box={box} shake={shake} opened={!!opened}
+						onTile={pressTile} onButton={pressButton} />
 					<div className={`bx-controls${opened ? " bx-result" : ""}${optimalNow ? " optimal" : ""}`} role="status">
 						<div className="bx-count"><b data-moves>{opened ? opened.moves : box.moves.length}</b>{(opened ? opened.moves : box.moves.length) === 1 ? "move" : "moves"}</div>
 						{opened && <div className="bx-result-actions">
@@ -340,6 +410,269 @@ function BoxScreen({ n, token, best, onResult, onGo }) {
 					</div>
 				</div>
 				<aside className="bx-side"><Leaderboard board={board} open={boardOpen} onToggle={() => setBoardOpen((o) => !o)} /></aside>
+			</div>
+		</div>
+	);
+}
+
+// ── the daily box ────────────────────────────────────────────────────────────
+const CLOCK = (
+	<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
+		<circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" />
+	</svg>
+);
+
+// Time left until the next daily box, h:mm:ss.
+function Countdown({ at }) {
+	const [now, setNow] = useState(() => Date.now());
+	useEffect(() => {
+		const t = setInterval(() => setNow(Date.now()), 1000);
+		return () => clearInterval(t);
+	}, []);
+	const s = Math.max(0, Math.round(at - now / 1000));
+	const hms = [Math.floor(s / 3600), Math.floor(s / 60) % 60, s % 60]
+		.map((n, i) => (i ? String(n).padStart(2, "0") : String(n))).join(":");
+	return <span className="bx-next" role="timer" aria-label={`Next daily box in ${hms}`}>{CLOCK}{hms}</span>;
+}
+
+function DailyScreen({ token, who, onDaily }) {
+	const [daily, setDaily] = useState(null);     // { day, tiles, target, next_at, attempt, yesterday }
+	const [gen, setGen] = useState(0);            // bumps on every load, so a reload re-reads the attempt
+	const [failed, setFailed] = useState(false);
+	const [yesterday, setYesterday] = useState(false);
+	const load = useCallback(() => {
+		setFailed(false);
+		api("/boxpuzzles/daily", token).then((d) => { setDaily(d); setGen((g) => g + 1); })
+			.catch(() => setFailed(true));
+	}, [token]);
+	useEffect(load, [load]);
+	// The day turns at midnight Pacific; fetch the new box when it does.
+	useEffect(() => {
+		if (!daily) return undefined;
+		const ms = daily.next_at * 1000 - Date.now() + 1500;
+		const t = setTimeout(() => { setYesterday(false); load(); }, Math.min(Math.max(ms, 1000), 2 ** 31 - 1));
+		return () => clearTimeout(t);
+	}, [daily, load]);
+
+	if (!daily) return (
+		<div className="bx-wrap">
+			<div className="bx-play"><div className="bx-stage">
+				<div className="bx-nav"><h1 className="bx-title">Daily</h1></div>
+				{failed && <button className="btn btn-ghost btn-sm" onClick={load}>Retry</button>}
+			</div></div>
+		</div>
+	);
+	if (yesterday && daily.yesterday)
+		return <DailyYesterday key={daily.yesterday} day={daily.yesterday} token={token} onToday={() => setYesterday(false)} />;
+	return <DailyToday key={`${daily.day}:${gen}`} daily={daily} token={token} who={who} onDaily={onDaily}
+		onReload={load} onYesterday={daily.yesterday ? () => setYesterday(true) : null} />;
+}
+
+// The attempt to resume: the server's, unless this device holds one that extends it
+// (presses made while a save was still on its way). A guest has only the device's.
+function resumeAttempt(daily, token, who) {
+	const local = readJson(dailyKey(who), null);
+	const mine = local && local.day === daily.day && Array.isArray(local.segments) && local.segments.length ? local : null;
+	const server = daily.attempt;
+	if (!token) return mine ? { segments: mine.segments, solved: !!mine.solved, push: false } : null;
+	if (server?.solved) return { segments: server.segments, solved: true, push: false };
+	if (mine && !mine.solved && (!server || extendsAttempt(server.segments, mine.segments)))
+		return { segments: mine.segments, solved: false,
+			push: !server || totalMoves(mine.segments) > server.moves || mine.segments.length > server.segments.length };
+	return server ? { segments: server.segments, solved: false, push: false } : null;
+}
+
+const ALL_LIT = [true, true, true, true];
+const NONE_LIT = [false, false, false, false];
+
+function DailyToday({ daily, token, who, onDaily, onReload, onYesterday }) {
+	const puzzle = { tiles: daily.tiles, target: daily.target };
+	const [start] = useState(() => resumeAttempt(daily, token, who));
+	const [segments, setSegments] = useState(() => (start ? start.segments : [[]]));
+	const [box, setBox] = useState(() => ({
+		tiles: boardAfter(daily.tiles, (start ? start.segments : [[]]).at(-1)),
+		lit: start?.solved ? ALL_LIT : NONE_LIT, moves: [],
+	}));
+	// { moves, post: "guest" | "done" (opened on an earlier visit) | "posting" | "error" | server result }
+	const [opened, setOpened] = useState(() => (start?.solved
+		? { moves: totalMoves(start.segments), post: token ? "done" : "guest" } : null));
+	const [shake, setShake] = useState(0);
+	const [board, setBoard] = useState(null);
+	const [boardOpen, setBoardOpen] = useState(!!start?.solved);
+
+	const saveLocal = useCallback((segs, solved, extra = {}) =>
+		onDaily({ day: daily.day, segments: segs, moves: totalMoves(segs), solved, ...extra }), [daily.day, onDaily]);
+
+	// SAVING: one request in flight at a time, the latest attempt queued behind it.
+	// Presses are debounced; opening is sent at once. A save the server refuses as
+	// "not the attempt on record" means another device played on: drop this copy
+	// and load the server's.
+	const sync = useRef({ busy: false, next: null, timer: 0 });
+	const flush = useCallback(() => {
+		const s = sync.current;
+		clearTimeout(s.timer);
+		s.timer = 0;
+		if (s.busy || !s.next) return;
+		const { segs, open } = s.next;
+		s.next = null;
+		s.busy = true;
+		api("/boxpuzzles/daily/attempt", token, { day: daily.day, segments: segs, open }, true).then((r) => {
+			if (!open) return;
+			setOpened({ moves: r.moves, post: r });
+			setBoard(r.leaderboard);
+			saveLocal(segs, true, { optimal: r.optimal });
+		}).catch((e) => {
+			if (e.status === 409 || (e.status === 400 && !open)) { s.next = null; onDaily(null); onReload(); }
+			else if (open) setOpened((o) => ({ ...o, post: "error" }));
+		}).finally(() => {
+			s.busy = false;
+			if (s.next) flush();
+		});
+	}, [token, daily.day, saveLocal, onDaily, onReload]);
+	const queue = useCallback((segs, open) => {
+		if (!token) return;
+		const s = sync.current;
+		s.next = { segs, open };
+		clearTimeout(s.timer);
+		if (open) flush();
+		else s.timer = setTimeout(flush, 350);
+	}, [token, flush]);
+	// A resumed attempt that is ahead of the server goes up now; one still waiting
+	// when the page is hidden or left goes up then.
+	const flushRef = useRef(flush);
+	flushRef.current = flush;
+	useEffect(() => {
+		if (start?.push) queue(start.segments, false);
+		const hide = () => { if (document.visibilityState === "hidden" && sync.current.timer) flushRef.current(); };
+		document.addEventListener("visibilitychange", hide);
+		return () => {
+			document.removeEventListener("visibilitychange", hide);
+			if (sync.current.timer) flushRef.current();
+		};
+	}, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+	const loadBoard = useCallback(() => {
+		api(`/boxpuzzles/daily/${daily.day}/board`, token).then(setBoard).catch(() => setBoard({ error: true }));
+	}, [daily.day, token]);
+	const settled = !!opened && (opened.post === "guest" || opened.post === "done");
+	useEffect(() => { if (settled) loadBoard(); }, [settled, loadBoard]);
+
+	const pressTile = (i) => {
+		if (opened) return;
+		tileSound();
+		const segs = [...segments.slice(0, -1), [...segments.at(-1), i]];
+		setSegments(segs);
+		setBox(pressTileInBox(box, daily.target, i));
+		saveLocal(segs, false);
+		queue(segs, false);
+	};
+	const pressButton = (k) => {
+		if (opened) return;
+		const { box: next, result } = pressButtonInBox(box, puzzle, k);
+		setBox(next);
+		if (result === "reset") {
+			resetSound();
+			setShake((s) => s + 1);
+			// back to the first board, and the count carries on: a new segment begins
+			if (segments.at(-1).length) {
+				const segs = [...segments, []];
+				setSegments(segs);
+				saveLocal(segs, false);
+				queue(segs, false);
+			}
+		} else if (result === "open") {
+			openSound();
+			setBoardOpen(true);
+			const moves = totalMoves(segments);
+			if (!token) { setOpened({ moves, post: "guest" }); saveLocal(segments, true); }
+			else { setOpened({ moves, post: "posting" }); queue(segments, true); }
+		} else litSound(next.lit.filter(Boolean).length);
+	};
+	useTileKeys(pressTile);
+
+	const count = opened ? opened.moves : totalMoves(segments);
+	const result = opened && typeof opened.post === "object" ? opened.post : null;
+	const optimal = !!(result ? result.optimal : opened?.post === "done" && board?.you?.optimal);
+	return (
+		<div className="bx-wrap">
+			<div className="bx-play">
+				<div className="bx-stage">
+					<div className="bx-nav">
+						<button className="btn btn-ghost btn-sm bx-arrow" disabled={!onYesterday} onClick={onYesterday || undefined} aria-label="Yesterday's box">‹</button>
+						<h1 className="bx-title">Daily</h1>
+						<button className="btn btn-ghost btn-sm bx-arrow" disabled aria-label="Today's box">›</button>
+					</div>
+					<BoxFace id="daily" target={daily.target} box={box} shake={shake} opened={!!opened}
+						onTile={pressTile} onButton={pressButton} />
+					<div className={`bx-controls${opened ? " bx-result" : ""}${optimal ? " optimal" : ""}`} role="status">
+						<div className="bx-count"><b data-moves>{count}</b>{count === 1 ? "move" : "moves"}</div>
+						{opened && <div className="bx-result-actions">
+							{opened.post === "error" && <button className="btn btn-ghost btn-sm"
+								onClick={() => { setOpened((o) => ({ ...o, post: "posting" })); queue(segments, true); }}>Retry</button>}
+							<Countdown at={daily.next_at} />
+						</div>}
+					</div>
+				</div>
+				<aside className="bx-side">
+					<Leaderboard board={board} open={boardOpen && !!opened} locked={!opened} onToggle={() => setBoardOpen((o) => !o)} />
+				</aside>
+			</div>
+		</div>
+	);
+}
+
+// YESTERDAY, VIEW ONLY: its first board, its minimum (blue, as a minimum is drawn
+// everywhere), every row that reached it in blue, and ▶ to watch a shortest line play.
+function DailyYesterday({ day, token, onToday }) {
+	const [data, setData] = useState(null);
+	const [failed, setFailed] = useState(false);
+	const [step, setStep] = useState(0);          // presses of the line shown so far
+	const [playing, setPlaying] = useState(false);
+	const [boardOpen, setBoardOpen] = useState(true);
+	const load = useCallback(() => {
+		setFailed(false);
+		api(`/boxpuzzles/daily/${day}/board`, token).then(setData).catch(() => setFailed(true));
+	}, [day, token]);
+	useEffect(load, [load]);
+	useEffect(() => {
+		if (!playing || !data) return undefined;
+		if (step >= data.solution.length) { setPlaying(false); return undefined; }
+		const t = setTimeout(() => setStep((n) => n + 1), 700);
+		return () => clearTimeout(t);
+	}, [playing, step, data]);
+
+	const nav = (
+		<div className="bx-nav">
+			<button className="btn btn-ghost btn-sm bx-arrow" disabled aria-label="Yesterday's box">‹</button>
+			<h1 className="bx-title">{shortDate(day)}</h1>
+			<button className="btn btn-ghost btn-sm bx-arrow" onClick={onToday} aria-label="Today's box">›</button>
+		</div>
+	);
+	if (!data) return (
+		<div className="bx-wrap"><div className="bx-play"><div className="bx-stage">
+			{nav}
+			{failed && <button className="btn btn-ghost btn-sm" onClick={load}>Retry</button>}
+		</div></div></div>
+	);
+	const line = data.solution;
+	const done = step > 0 && step >= line.length;
+	const box = { tiles: boardAfter(data.tiles, line.slice(0, step)), lit: done ? ALL_LIT : NONE_LIT, moves: [] };
+	return (
+		<div className="bx-wrap">
+			<div className="bx-play">
+				<div className="bx-stage">
+					{nav}
+					<BoxFace id="yesterday" target={data.target} box={box} opened={done} disabled
+						hint={playing && step < line.length ? line[step] : -1} />
+					<div className="bx-controls bx-result optimal" role="status">
+						<div className="bx-count"><b data-moves>{playing || step ? step : data.minimum}</b>{data.minimum === 1 ? "move" : "moves"}</div>
+						<div className="bx-result-actions">
+							<button className="btn btn-ghost btn-sm bx-replay" disabled={playing} aria-label="Play a shortest line"
+								onClick={() => { setStep(0); setPlaying(true); }}>▶</button>
+						</div>
+					</div>
+				</div>
+				<aside className="bx-side"><Leaderboard board={data} open={boardOpen} onToggle={() => setBoardOpen((o) => !o)} /></aside>
 			</div>
 		</div>
 	);

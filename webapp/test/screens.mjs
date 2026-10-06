@@ -10040,6 +10040,202 @@ try {
 		}
 	}
 
+	// THE DAILY BOX: one attempt, saved as it is played, and a reset does not clear the
+	// count. Today's box comes from the real backend (generated on the first request,
+	// reproducibly under GAMES_DEAL_SEED); the harness solves it itself with the same
+	// engine.js. Yesterday's view is driven against a STUBBED day, because the gate's
+	// fresh database has no yesterday.
+	async function boxDaily(log) {
+		const check = (name, cond, detail = "") => {
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(`boxdaily: ${name}`); log(`  FAIL ${name}  ${detail}`); }
+		};
+		const root = path.resolve(webappDir, "..");
+		const E = await import(new URL(`file:///${path.join(root, "boxpuzzles", "engine.js").replace(/\\/g, "/")}`).href);
+		const bank = JSON.parse(readFileSync(path.join(root, "boxpuzzles", "puzzles.json"), "utf8"));
+		const shortest = (tiles, target) => {
+			const prev = new Map([[tiles.join(""), null]]);
+			let frontier = [tiles];
+			while (frontier.length) {
+				const next = [];
+				for (const t of frontier) for (let i = 0; i < 9; i++) {
+					const u = E.press(t, i), k = u.join("");
+					if (prev.has(k)) continue;
+					prev.set(k, [t.join(""), i]);
+					if (E.cornersMatch(u, target)) {
+						const line = [];
+						for (let c = k; prev.get(c); c = prev.get(c)[0]) line.unshift(prev.get(c)[1]);
+						return line;
+					}
+					next.push(u);
+				}
+				frontier = next;
+			}
+			return null;
+		};
+		const daily = await fetch(`http://localhost:${API_PORT}/boxpuzzles/daily`).then((r) => r.json()).catch((e) => ({ error: String(e) }));
+		const line = daily.tiles ? shortest(daily.tiles, daily.target) : null;
+		check("the server hands out a daily box with no answer attached, 8-15 presses deep",
+			!!line && line.length >= 8 && line.length <= 15 && !("minimum" in daily) && !("solution" in daily),
+			JSON.stringify({ daily, line }));
+		if (!line) return;
+		// one press, then a corner that does not match afterwards: the reset
+		const afterOne = E.press(daily.tiles, line[0]);
+		const wrong = E.CORNERS.findIndex((c, k) => afterOne[c] !== daily.target[k]);
+		const play = async (page, moves) => {
+			for (const i of moves) await page.locator(`.bx-tile[data-tile="${i}"]`).click();
+			for (let k = 0; k < 4; k++) await page.locator(`.bx-cbtn[data-button="${k}"]`).click();
+		};
+		const count = (page) => page.locator("[data-moves]").textContent().then(Number, () => NaN);
+		const prose = (page) => page.locator(".bx p").allTextContents();
+		const tilesNow = (page) => page.locator(".bx-tile").evaluateAll((els) => els.map((el) => el.dataset.color));
+
+		// 1 — a guest, on a phone: one attempt, kept on this device
+		{
+			const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+			await ctx.addInitScript(() => localStorage.setItem("spender_user",
+				JSON.stringify({ id: "screens-daily-guest", name: "Daily", guest: true })));
+			const page = await ctx.newPage();
+			const errors = [];
+			page.on("pageerror", (e) => errors.push(String(e)));
+			await page.goto(`http://localhost:${PORT}/boxpuzzles`, { waitUntil: "networkidle" });
+			await page.waitForSelector(".bx-daily-tile", { timeout: 25_000 }).catch(() => {});
+			await page.locator(".bx-daily-tile").click().catch(() => {});
+			await page.waitForSelector('.bx-box[data-box="daily"] .bx-tile', { timeout: 25_000 }).catch(() => {});
+			check("the picker's Daily tile opens /boxpuzzles/daily on today's box",
+				new URL(page.url()).pathname === "/boxpuzzles/daily"
+				&& (await tilesNow(page)).join("") === daily.tiles.join(""), page.url());
+			check("today's leaderboard cannot be opened before the box is",
+				await page.locator(".bx-board.locked .bx-board-hd[disabled]").count() === 1
+				&& await page.locator(".bx-rows, .bx-empty").count() === 0);
+			const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+			check("the daily does not scroll sideways at 390px", wide <= 0, `${wide}px over`);
+
+			await page.locator(`.bx-tile[data-tile="${line[0]}"]`).click();
+			await page.locator(`.bx-cbtn[data-button="${wrong}"]`).click();
+			check("a wrong corner resets the board but NOT the count",
+				await count(page) === 1 && (await tilesNow(page)).join("") === daily.tiles.join("")
+				&& await page.locator(".bx-box.bx-shake").count() === 1, `${await count(page)} ${await tilesNow(page)}`);
+			await page.reload({ waitUntil: "networkidle" });
+			await page.waitForSelector('.bx-box[data-box="daily"] .bx-tile', { timeout: 25_000 }).catch(() => {});
+			check("the attempt survives a reload", await count(page) === 1);
+
+			await play(page, line);
+			await page.waitForSelector(".bx-result", { timeout: 5000 }).catch(() => {});
+			check("opening the box ends the attempt at every press it took, the reset's included",
+				await count(page) === line.length + 1 && await page.locator(".bx-result .bx-next").count() === 1,
+				`${await count(page)} vs ${line.length + 1}`);
+			check("opening it unlocks and opens the leaderboard",
+				await page.locator(".bx-board.locked").count() === 0
+				&& await page.locator(".bx-board-hd").getAttribute("aria-expanded") === "true");
+			check("the daily carries no prose", (await prose(page)).length === 0, JSON.stringify(await prose(page)));
+			await page.reload({ waitUntil: "networkidle" });
+			await page.waitForSelector(".bx-result", { timeout: 25_000 }).catch(() => {});
+			check("one attempt: a reload shows the opened box, not a fresh one",
+				await count(page) === line.length + 1 && await page.locator(".bx-box.open").count() === 1
+				&& await page.locator(".bx-tile:not([disabled])").count() === 0);
+			await page.locator(".bx-header .btn", { hasText: "Back" }).click();
+			await page.waitForSelector(".bx-daily-tile", { timeout: 5000 }).catch(() => {});
+			check("the picker's Daily tile carries the result",
+				await page.locator(".bx-daily-tile.solved .bx-pick-state").textContent().catch(() => "") === `✓ ${line.length + 1}`);
+			check("no page errors (daily guest)", errors.length === 0, errors.join(" | "));
+			await ctx.close();
+		}
+
+		// 2 — a registered player: the attempt lives on the SERVER, so a different
+		// browser (fresh storage) picks it up where it was left
+		const name = `dy${Date.now().toString(36)}`.slice(0, 16);
+		const reg = await fetch(`http://localhost:${API_PORT}/auth/register`, { method: "POST",
+			headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, password: "boxes" }) })
+			.then((r) => r.json()).catch((e) => ({ ok: false, message: String(e) }));
+		check("a fresh account registers", reg.ok && !!reg.session_token, JSON.stringify(reg));
+		if (!reg.ok) return;
+		const user = { ...reg.user, session_token: reg.session_token };
+		const signedIn = async () => {
+			const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 } });
+			await ctx.addInitScript((u) => localStorage.setItem("spender_user", JSON.stringify(u)), user);
+			const page = await ctx.newPage();
+			const errors = [];
+			page.on("pageerror", (e) => errors.push(String(e)));
+			const saves = [];
+			page.on("response", async (r) => {
+				if (r.url().endsWith("/boxpuzzles/daily/attempt")) saves.push({ status: r.status(), body: await r.json().catch(() => null) });
+			});
+			await page.goto(`http://localhost:${PORT}/boxpuzzles/daily`, { waitUntil: "networkidle" });
+			await page.waitForSelector('.bx-box[data-box="daily"] .bx-tile', { timeout: 25_000 }).catch(() => {});
+			return { ctx, page, errors, saves };
+		};
+		{
+			const { ctx, page, errors, saves } = await signedIn();
+			await page.locator(`.bx-tile[data-tile="${line[0]}"]`).click();
+			await page.locator(`.bx-cbtn[data-button="${wrong}"]`).click();
+			// wait for the save to LAND (it is debounced), not for a word on the page
+			for (let t = 0; t < 100 && !saves.some((s) => s.status === 200); t++) await page.waitForTimeout(100);
+			await page.waitForTimeout(600);
+			check("presses are saved to the server as they are played",
+				saves.length >= 1 && saves.every((s) => s.status === 200), JSON.stringify(saves));
+			check("no page errors (daily, first browser)", errors.length === 0, errors.join(" | "));
+			await ctx.close();
+		}
+		{
+			const { ctx, page, errors, saves } = await signedIn();
+			check("another browser resumes the attempt from the server", await count(page) === 1, String(await count(page)));
+			await play(page, line);
+			for (let t = 0; t < 150 && !saves.some((s) => s.body?.solved); t++) await page.waitForTimeout(100);
+			await page.waitForSelector(".bx-row.me", { timeout: 5000 }).catch(() => {});
+			const done = saves.find((s) => s.body?.solved);
+			check("the server replays the opening and scores every press since the start",
+				done?.status === 200 && done.body.moves === line.length + 1 && done.body.optimal === false
+				&& await page.locator(".bx-row.me:not(.optimal)").count() === 1, JSON.stringify(saves));
+			const again = await fetch(`http://localhost:${API_PORT}/boxpuzzles/daily/attempt`, { method: "POST",
+				headers: { "Content-Type": "application/json", Authorization: `Bearer ${user.session_token}` },
+				body: JSON.stringify({ day: daily.day, segments: [line], open: true }) }).then((r) => r.status);
+			check("one attempt: a second, better solve is refused", again === 409, String(again));
+			check("no page errors (daily, second browser)", errors.length === 0, errors.join(" | "));
+			await ctx.close();
+		}
+
+		// 3 — yesterday, view only, against a stubbed day: box 1 of the bank and its line
+		{
+			const box1 = bank[0], line1 = shortest(box1.tiles, box1.target);
+			const yday = "2026-01-01";
+			const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+			await ctx.addInitScript(() => localStorage.setItem("spender_user",
+				JSON.stringify({ id: "screens-daily-yesterday", name: "Yday", guest: true })));
+			const page = await ctx.newPage();
+			const errors = [];
+			page.on("pageerror", (e) => errors.push(String(e)));
+			await page.route(`http://localhost:${API_PORT}/boxpuzzles/daily`, async (route) => {
+				const r = await route.fetch();
+				await route.fulfill({ response: r, json: { ...(await r.json()), yesterday: yday } });
+			});
+			await page.route(`http://localhost:${API_PORT}/boxpuzzles/daily/${yday}/board`, (route) => route.fulfill({ json: {
+				day: yday, tiles: box1.tiles, target: box1.target, minimum: line1.length, solution: line1, total: 2, you: null,
+				entries: [{ rank: 1, name: "Ann", moves: line1.length, optimal: true }, { rank: 2, name: "Bo", moves: line1.length + 3, optimal: false }] } }));
+			await page.goto(`http://localhost:${PORT}/boxpuzzles/daily`, { waitUntil: "networkidle" });
+			await page.waitForSelector('.bx-box[data-box="daily"]', { timeout: 25_000 }).catch(() => {});
+			await page.locator(".bx-nav .bx-arrow").first().click().catch(() => {});
+			await page.waitForSelector('.bx-box[data-box="yesterday"]', { timeout: 10_000 }).catch(() => {});
+			check("‹ shows yesterday: its first board, its minimum in blue, no tile to press",
+				(await tilesNow(page)).join("") === box1.tiles.join("") && await count(page) === line1.length
+				&& await page.locator(".bx-result.optimal").count() === 1
+				&& await page.locator(".bx-tile:not([disabled])").count() === 0, `${await tilesNow(page)} ${await count(page)}`);
+			check("yesterday's leaderboard is open, with the minimum's rows in blue",
+				await page.locator(".bx-row").count() === 2 && await page.locator(".bx-row.optimal").count() === 1);
+			await page.locator(".bx-replay").click();
+			await page.waitForSelector('.bx-box[data-box="yesterday"].open', { timeout: 10_000 }).catch(() => {});
+			check("▶ plays a shortest line out on the board until it opens",
+				E.cornersMatch(await tilesNow(page), box1.target) && await page.locator(".bx-cbtn.lit").count() === 4,
+				JSON.stringify(await tilesNow(page)));
+			check("yesterday carries no prose", (await prose(page)).length === 0, JSON.stringify(await prose(page)));
+			await page.locator(".bx-nav .bx-arrow").last().click();
+			check("› returns to today's box",
+				await page.waitForSelector('.bx-box[data-box="daily"]', { timeout: 10_000 }).then(() => true, () => false));
+			check("no page errors (yesterday)", errors.length === 0, errors.join(" | "));
+			await ctx.close();
+		}
+	}
+
 	const laneA = [offlineSpender, offlineCoc, offlineDuel, offlineDissonance,
 		dissonanceSkat, dissonanceHard, dissonanceBeat, ragtagFight];
 	// `dissonanceQuartet` is lane B: it plays a whole game but arms NO worker
@@ -10050,7 +10246,7 @@ try {
 		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, historyRecovery, dmAdventures,
 		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, formControlZoom, lastDifficulty,
 		dissonanceQuartet, orbitPlay, lobbyFinishSync, blackCastlePlay, pinchPlay, secretNamesPlay, lobbyChrome,
-		notesEditor, profilePage, offlineRead, boxPuzzles];
+		notesEditor, profilePage, offlineRead, boxPuzzles, boxDaily];
 
 	// EVERY BLOCK MUST BE IN A LANE. Before the lanes existed, adding a block meant
 	// writing it — it then ran because it was simply the next statement. Now it has
