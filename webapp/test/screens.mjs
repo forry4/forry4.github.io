@@ -10107,6 +10107,15 @@ try {
 		const count = (page) => page.locator("[data-moves]").textContent().then(Number, () => NaN);
 		const prose = (page) => page.locator(".bx p").allTextContents();
 		const tilesNow = (page) => page.locator(".bx-tile").evaluateAll((els) => els.map((el) => el.dataset.color));
+		// The tabs' labels on one line, with CLEARANCE (CI's fallback font runs ~27% wider
+		// than a dev box's, so "it fits" is not enough): the narrowest room left beside a label.
+		const tabRoom = (page) => page.locator(".bx-tab").evaluateAll((els) => els.map((el) => {
+			const cs = getComputedStyle(el), r = document.createRange();
+			r.selectNodeContents(el);
+			const inner = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+			return Math.round((inner - r.getBoundingClientRect().width) * 10) / 10;
+		}));
+		const tabsFit = async (page) => { const room = await tabRoom(page); return room.length === 2 && Math.min(...room) >= 12 ? true : room; };
 
 		// 1 — a guest, on a phone: one attempt, kept on this device
 		{
@@ -10176,8 +10185,10 @@ try {
 			check("a retry scores only the presses since its last reset, and a guest's posts nowhere",
 				await count(page) === line.length && await page.locator(".bx-again").count() === 1 && retries.length === 0,
 				`${await count(page)} vs ${line.length}; ${retries}`);
-			check("the daily's leaderboard has One Shot and Best Shot tabs",
-				(await page.locator(".bx-tab").allTextContents()).join("|") === "One Shot|Best Shot");
+			check("the daily's leaderboard has First Attempt and Best Attempt tabs",
+				(await page.locator(".bx-tab").allTextContents()).join("|") === "First Attempt|Best Attempt");
+			const fit390 = await tabsFit(page);
+			check("at 390px both tab labels fit on one line with room to spare", fit390 === true, JSON.stringify(fit390));
 			await page.locator(".bx-header .btn", { hasText: "Back" }).click();
 			await page.waitForSelector(".bx-daily-tile", { timeout: 5000 }).catch(() => {});
 			check("the picker's Daily tile carries the result",
@@ -10235,20 +10246,22 @@ try {
 				headers: { "Content-Type": "application/json", Authorization: `Bearer ${user.session_token}` },
 				body: JSON.stringify({ day: daily.day, segments: [line], open: true }) }).then((r) => r.status);
 			check("one attempt: a second, better solve is refused", again === 409, String(again));
-			// ...but a retry is welcome, and goes on Best Shot
+			// ...but a retry is welcome, and goes on Best Attempt
 			const retried = page.waitForResponse((r) => r.url().endsWith("/boxpuzzles/daily/retry"), { timeout: 10_000 }).catch(() => null);
 			await page.locator(".bx-again").click();
 			await play(page, line);
 			const rr = await retried;
 			const rbody = rr ? await rr.json().catch(() => null) : null;
 			await page.waitForSelector('.bx-tab[data-board="best"][aria-selected="true"]', { timeout: 5000 }).catch(() => {});
-			check("a retry posts to Best Shot, which opens on your row in blue, One Shot untouched",
+			check("a retry posts to Best Attempt, which opens on your row in blue, First Attempt untouched",
 				rr?.status() === 200 && rbody?.best === line.length && rbody?.optimal === true
 				&& rbody.leaderboard?.you?.moves === line.length + 1
 				&& await page.locator(".bx-row.me.optimal").count() === 1
 				&& await page.locator('.bx-result.optimal[data-shot="best"]').count() === 1, JSON.stringify(rbody));
 			await page.locator('.bx-tab[data-board="first"]').click();
-			check("the One Shot tab still shows the attempt",
+			const fitSide = await tabsFit(page);
+			check("in the 300px desktop sidebar both tab labels fit with room to spare", fitSide === true, JSON.stringify(fitSide));
+			check("the First Attempt tab still shows the attempt",
 				await page.locator(".bx-row.me .bx-row-moves").textContent().catch(() => "") === String(line.length + 1));
 			check("no page errors (daily, second browser)", errors.length === 0, errors.join(" | "));
 			await ctx.close();
@@ -10284,7 +10297,7 @@ try {
 			check("yesterday's leaderboard is open, with the minimum's rows in blue",
 				await page.locator(".bx-row").count() === 2 && await page.locator(".bx-row.optimal").count() === 1);
 			await page.locator('.bx-tab[data-board="best"]').click();
-			check("yesterday's Best Shot tab shows the retries' board",
+			check("yesterday's Best Attempt tab shows the retries' board",
 				await page.locator(".bx-row").count() === 3 && await page.locator(".bx-row.optimal").count() === 2);
 			await page.locator(".bx-replay").click();
 			await page.waitForSelector('.bx-box[data-box="yesterday"].open', { timeout: 10_000 }).catch(() => {});

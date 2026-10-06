@@ -224,7 +224,7 @@ def test_today_keeps_the_minimum_secret_and_yesterday_reveals_it(conn):
     assert all(e["optimal"] for e in done["entries"])
 
 
-# ── retries: Best Shot ───────────────────────────────────────────────────────
+# ── retries: Best Attempt ───────────────────────────────────────────────────────
 def test_the_one_attempt_seeds_best_shot(conn):
     pair = _cancelling_pair()
     D.save_attempt(conn, "u_alice", BOX, [pair, LINE], opened=True, now=100.0)
@@ -376,7 +376,7 @@ def test_the_retry_round_trip(app):
     post(B.AttemptIn(day=TODAY, segments=[pair + LINE], open=True), user=ALICE)
     r = retry(B.RetryIn(day=TODAY, moves=LINE), user=ALICE)
     assert r["moves"] == len(LINE) and r["best"] == len(LINE) and r["improved"] and r["optimal"] is True
-    assert r["leaderboard"]["you"]["moves"] == len(LINE) + 2                    # One Shot never moves
+    assert r["leaderboard"]["you"]["moves"] == len(LINE) + 2                    # First Attempt never moves
     assert r["leaderboard"]["best"]["you"]["moves"] == len(LINE)
     assert "minimum" not in r["leaderboard"]
     for payload, code in ((B.RetryIn(day=YESTERDAY, moves=LINE), 409),

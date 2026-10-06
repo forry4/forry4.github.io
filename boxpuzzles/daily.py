@@ -38,8 +38,8 @@ THEN AS MANY RETRIES AS YOU LIKE, ON A SECOND BOARD (owner's call, 2026-10-06). 
 the attempt has opened the box it may be played again, for the fewest presses, with the
 numbered boxes' rules: the count is the presses since the last reset, nothing is saved
 mid-solve, and each player keeps their best (a tie keeps the earlier time). The two
-boards are ONE SHOT (`box_daily_attempts`, the race) and BEST SHOT (`box_daily_best`).
-The one attempt seeds Best Shot with its score, so a player who never retries still
+boards are FIRST ATTEMPT (`box_daily_attempts`, the race) and BEST ATTEMPT (`box_daily_best`).
+The one attempt seeds Best Attempt with its score, so a player who never retries still
 has a row there. Retries need the one attempt done first — a retry before it would be
 free practice for the race.
 """
@@ -272,7 +272,7 @@ def init_daily_db(conn) -> None:
     )""")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_box_daily_best_board "
                 "ON box_daily_best (day, moves, solved_at)")
-    # Attempts opened before Best Shot existed seed it too (a no-op once they have).
+    # Attempts opened before Best Attempt existed seed it too (a no-op once they have).
     cur.execute("INSERT OR IGNORE INTO box_daily_best (user_id, day, moves, solved_at) "
                 "SELECT user_id, day, moves, solved_at FROM box_daily_attempts WHERE solved_at IS NOT NULL")
     conn.commit()
@@ -501,8 +501,8 @@ def _ranked(conn, which: str, day: str, minimum: int, user_id: str | None, revea
 
 def daily_board(conn, box: dict, user_id: str | None, reveal: bool, size: int = BOARD_SIZE) -> dict:
     """The day's two boards, fewest presses first and the earlier finish first on a
-    tie: One Shot at the top level (where it always was, so a cached page still reads
-    it) and Best Shot under `best`. While the day is live (`reveal` False) the minimum
+    tie: First Attempt at the top level (where it always was, so a cached page still reads
+    it) and Best Attempt under `best`. While the day is live (`reveal` False) the minimum
     stays secret and only the caller's own row says whether it is optimal; once the
     day is over every row does, and the minimum and a shortest line come with it."""
     day, minimum = box["day"], box["minimum"]

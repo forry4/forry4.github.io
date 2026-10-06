@@ -17,7 +17,7 @@
 // saved as it is played, and a reset does NOT clear its count. The attempt is a list
 // of segments — the presses between resets — because the server replays each one from
 // the first board. Once it is open, Play again starts RETRIES under the numbered boxes'
-// rules, for a second board: One Shot is the race, Best Shot the fewest presses.
+// rules, for a second board: First Attempt is the race, Best Attempt the fewest presses.
 // Yesterday's box can be looked at (view only), with its minimum and a shortest line
 // played back on the board.
 //
@@ -177,9 +177,9 @@ const CHEVRON = (
 );
 
 // THE DAILY'S TWO BOARDS: the one attempt, and the best of the retries after it (the
-// attempt counts there too). The server sends One Shot at the top level and Best Shot
+// attempt counts there too). The server sends First Attempt at the top level and Best Attempt
 // under `best`.
-const DAILY_BOARDS = [["first", "One Shot"], ["best", "Best Shot"]];
+const DAILY_BOARDS = [["first", "First Attempt"], ["best", "Best Attempt"]];
 
 // `locked`: today's daily board cannot be opened until you have opened the box — in a
 // one-attempt race, a glance at the best score is a head start. The server enforces
@@ -519,7 +519,7 @@ function DailyToday({ daily, token, who, onDaily, onReload, onYesterday }) {
 	const [tab, setTab] = useState("first");
 	// A RETRY, once the attempt has opened the box: a fresh box under the numbered
 	// boxes' rules (a reset clears its count, nothing is saved mid-solve), whose
-	// opening posts to Best Shot. { moves, post } like `opened`.
+	// opening posts to Best Attempt. { moves, post } like `opened`.
 	const [retryBox, setRetryBox] = useState(null);
 	const [retryOpened, setRetryOpened] = useState(null);
 

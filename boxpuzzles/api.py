@@ -23,7 +23,7 @@ player could want to cheat, so:
 The DAILY box (boxpuzzles/daily.py) is the one exception to "nothing to serve": it
 is generated here and only today's is handed out, so it is never in the bundle. Its
 attempt IS saved mid-solve, server-side, and may only grow. Once it has opened the
-box, retries post to a second board (Best Shot) through `/boxpuzzles/daily/retry`.
+box, retries post to a second board (Best Attempt) through `/boxpuzzles/daily/retry`.
 
 The handlers are plain `def`, so their DB round-trips run in FastAPI's threadpool
 rather than on the event loop the game sockets share.
@@ -311,7 +311,7 @@ def setup_box_puzzles(app, get_db_conn, get_user_by_session, token_resolver=None
         return run(go)
 
     # A RETRY, after the one attempt has opened the box: the presses since its last
-    # reset, replayed here, kept on Best Shot if they beat the player's best.
+    # reset, replayed here, kept on Best Attempt if they beat the player's best.
     @app.post("/boxpuzzles/daily/retry")
     def box_daily_retry(payload: RetryIn, user: dict = Depends(member)):
         uid = user["id"]
