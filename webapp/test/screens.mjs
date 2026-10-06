@@ -9906,17 +9906,21 @@ try {
 			const sounded = await oscs();
 			check("a tile press makes a sound", sounded > 0, `${sounded} voices`);
 			const sessionType = () => page.evaluate(() => navigator.audioSession.type);
-			check("sound asks for the playback session (heard through the iPhone silent switch)",
-				await sessionType() === "playback", await sessionType());
+			// "ambient", never "playback": playback pauses the player's audiobook or music
+			check("sound mixes with other audio (the ambient session, not playback)",
+				await sessionType() === "ambient", await sessionType());
 			check("the mute toggle starts unmuted", await mute.getAttribute("aria-pressed") === "false");
 			await mute.click();
 			await page.locator(`.bx-tile[data-tile="${detour[1]}"]`).click();
 			check("muted, a press makes no sound", await oscs() === sounded && await count(page) === 2,
 				`${await oscs()} vs ${sounded}`);
-			check("muting hands the audio session back", await sessionType() === "auto", await sessionType());
 			await page.reload({ waitUntil: "networkidle" });
 			await page.waitForSelector(".bx-tile", { timeout: 10_000 }).catch(() => {});
 			check("mute survives a reload", await mute.getAttribute("aria-pressed") === "true");
+			// a box is never saved mid-solve: two presses in, a reload starts it again
+			check("a reload starts the box again, and nothing in progress is stored",
+				await count(page) === 0
+				&& await page.evaluate(() => !Object.keys(localStorage).some((k) => k.startsWith("boxpuzzles.progress"))));
 			await mute.click();
 			check("and unmutes again", await mute.getAttribute("aria-pressed") === "false");
 			await page.locator(`.bx-tile[data-tile="${detour[0]}"]`).click();

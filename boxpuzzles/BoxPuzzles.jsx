@@ -32,7 +32,6 @@ const CORNER_NAME = ["top-left", "top-right", "bottom-right", "bottom-left"];
 const swatch = (c) => ({ "--t": `var(--bx-${c})` });
 
 // ── storage (every access guarded: private windows and blocked storage throw) ──
-const PROGRESS_KEY = "boxpuzzles.progress.v1";      // { id: [tile presses since reset] }
 const resultsKey = (who) => `boxpuzzles.results.v1.${who}`;   // { id: { moves, optimal? } }
 function readJson(key, fallback) {
 	try { const v = JSON.parse(localStorage.getItem(key)); return v && typeof v === "object" ? v : fallback; }
@@ -41,22 +40,10 @@ function readJson(key, fallback) {
 function writeJson(key, value) {
 	try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* storage unavailable */ }
 }
-function saveProgress(id, moves) {
-	const all = readJson(PROGRESS_KEY, {});
-	if (moves.length) all[id] = moves; else delete all[id];
-	writeJson(PROGRESS_KEY, all);
-}
-
-// A box resumed from storage: replay its saved presses (buttons are not saved; a
-// lit button is one press away again).
-function restoredBox(p) {
-	let box = newBox(p);
-	const saved = readJson(PROGRESS_KEY, {})[p.id];
-	if (Array.isArray(saved)) {
-		for (const i of saved) if (Number.isInteger(i) && i >= 0 && i < 9) box = pressTileInBox(box, p.target, i);
-	}
-	return box;
-}
+// A BOX IS NEVER SAVED MID-SOLVE (owner's call): reloading the page or leaving the box
+// starts it again from its first board. Only finished results are kept. The progress
+// key an earlier build wrote is cleared once, so no stale line lingers in storage.
+try { localStorage.removeItem("boxpuzzles.progress.v1"); } catch { /* storage unavailable */ }
 
 const routeNumber = () => {
 	const n = parseInt(parsePath().room || "", 10);
@@ -262,7 +249,7 @@ export default function BoxPuzzles({ authUser, onExit }) {
 
 function BoxScreen({ n, token, best, onResult, onGo }) {
 	const p = BANK[n - 1];
-	const [box, setBox] = useState(() => restoredBox(p));
+	const [box, setBox] = useState(() => newBox(p));
 	const [shake, setShake] = useState(0);
 	const [opened, setOpened] = useState(null);     // { moves, post: "guest"|"posting"|"error"|result }
 	const [board, setBoard] = useState(null);
@@ -273,10 +260,6 @@ function BoxScreen({ n, token, best, onResult, onGo }) {
 	}, [p.id, token]);
 	useEffect(loadBoard, [loadBoard]);
 
-	const commit = (next) => {
-		setBox(next);
-		saveProgress(p.id, next.moves);
-	};
 
 	const post = useCallback((moves) => {
 		if (!token) { setOpened({ moves: moves.length, post: "guest" }); return; }
@@ -291,7 +274,7 @@ function BoxScreen({ n, token, best, onResult, onGo }) {
 	const pressTile = (i) => {
 		if (opened) return;
 		tileSound();
-		commit(pressTileInBox(box, p.target, i));
+		setBox(pressTileInBox(box, p.target, i));
 	};
 	const pressButton = (k) => {
 		if (opened) return;
@@ -299,15 +282,14 @@ function BoxScreen({ n, token, best, onResult, onGo }) {
 		if (result === "reset") { resetSound(); setShake((s) => s + 1); }
 		else if (result === "open") { openSound(); setBoardOpen(true); }
 		else litSound(next.lit.filter(Boolean).length);
-		commit(next);
+		setBox(next);
 		if (result === "open") {
 			const moves = next.moves;
-			saveProgress(p.id, []);
 			if (!token && (!best || moves.length < best.moves)) onResult(p.id, { moves: moves.length });
 			post(moves);
 		}
 	};
-	const again = () => { setOpened(null); setBox(newBox(p)); saveProgress(p.id, []); };
+	const again = () => { setOpened(null); setBox(newBox(p)); };
 
 	// Keys: 1-9 press the tiles row by row (1 is top-left).
 	const keyRef = useRef(null);

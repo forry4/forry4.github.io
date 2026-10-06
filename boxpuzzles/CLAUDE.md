@@ -46,6 +46,8 @@ fails as a refused solve.
 - **The page carries no prose** (owner's call, 2026-10-05): no instructions, empty states,
   status lines or explanations — not even of the blue. A box's count turns into its result
   when it opens. `screens.mjs` fails on any `<p>` in the page.
+- **A box is never saved mid-solve** (owner's call): a reload, or leaving the box,
+  starts it again from its first board. Only finished results are stored.
 - **The leaderboard is always there and starts CLOSED** (owner's call): the scores are a
   spoiler — a low best tells you how short the line is. It is folded to its title on every
   box and opens itself when you open the box. Empty and open, it shows a dash.
@@ -94,14 +96,15 @@ balanced by the same offline render: tile ~-27 dB RMS, corner/reset ~-25, the op
 ~-21, peaks <= 0.66. The mute toggle (header) is localStorage `boxpuzzles.muted`; `screens.mjs`
 counts synthesised voices (oscillators + noise sources) to prove a press sounds unmuted and stays silent muted.
 
-**On an iPhone the silent switch muted every sound** (reported as "I don't hear sound on
-mobile"): Safari plays Web Audio in the ambient session, which the switch silences, and
-no desktop test can see it. While the in-app sound is on, `sound.js` asks for
-`navigator.audioSession.type = "playback"` (Safari 17+), which plays through the switch
-like a media app; muting hands it back (`"auto"`). Trade-off, deliberately taken: a
-playback session pauses other audio (music) when the first sound plays. A one-sample
-silent buffer is also started inside the gesture that creates the context (the classic
-iOS unlock). `screens.mjs` stands in an `audioSession` object and asserts the switching.
+**The iPhone audio session is a forced trade, decided by the owner (2026-10-05).**
+Safari gives a page no session that both plays through the ring/silent switch AND
+mixes with other audio. "playback" (tried first, after "I don't hear sound on mobile")
+plays through the switch but PAUSES the player's audiobook or music — reported within
+the hour. So `sound.js` sets `navigator.audioSession.type = "ambient"` (Safari 17+):
+the sounds mix over other audio, and the silent switch mutes them, as it does for native
+iPhone games. Do not go back to "playback". A one-sample silent buffer is also started
+inside the gesture that creates the context (the classic iOS unlock). `screens.mjs`
+stands in an `audioSession` object and asserts it is "ambient".
 
 ## Portrait only on a phone
 

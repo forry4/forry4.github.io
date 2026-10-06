@@ -7,15 +7,15 @@
 //
 // Muting is a per-device preference (localStorage), read on load and written on toggle.
 //
-// THE iPHONE SILENT SWITCH. Safari plays Web Audio in the "ambient" session, which the
-// ring/silent switch mutes — so on a phone set to silent every sound here was silently
-// dropped while desktop (no switch) played them all. `navigator.audioSession` (Safari
-// 17+) lets a page ask for the "playback" session instead, which plays through the
-// switch the way a media app does. It is asked for only while the in-app sound is ON,
-// and handed back ("auto") on mute: the in-app toggle is the control. The cost, stated
-// plainly: like any media app, a playback session pauses other audio (music) on the
-// phone when the first sound plays. Elsewhere the property does not exist and this is
-// a no-op.
+// THE iPHONE AUDIO SESSION, and the trade it forces. Safari offers a page no session
+// that both plays through the ring/silent switch AND mixes with other audio:
+//   "playback" plays through the switch, but PAUSES other audio (an audiobook, music) —
+//              tried first, and reported as "the sounds pause my audiobook";
+//   "ambient"  mixes over other audio, but the silent switch mutes it.
+// Sounds that stop someone's audiobook are worse than sounds you need the ringer on to
+// hear, and "ambient" is what native iPhone games use for the same reason — so it is
+// "ambient", set explicitly (Safari 17+ `navigator.audioSession`) rather than left to
+// "auto" so it cannot drift. Elsewhere the property does not exist and this is a no-op.
 
 const MUTE_KEY = "boxpuzzles.muted";
 let ctx = null;
@@ -35,7 +35,6 @@ export function setMuted(m) {
 	try { localStorage.setItem(MUTE_KEY, muted ? "1" : "0"); } catch { /* storage unavailable */ }
 	if (muted) {
 		if (ctx && ctx.state === "running") ctx.suspend().catch(() => {});
-		session("auto");
 	}
 }
 
@@ -47,7 +46,7 @@ let room = null;   // a short feedback echo the felt notes send into
 
 function audio() {
 	if (muted) return null;
-	session("playback");
+	session("ambient");
 	if (!ctx) {
 		const AC = typeof window !== "undefined" && (window.AudioContext || window.webkitAudioContext);
 		if (!AC) return null;
