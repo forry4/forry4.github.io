@@ -14,6 +14,7 @@ card: it has no lobby, rooms or bot), at `/boxpuzzles`, `/boxpuzzles/<n>` and
 | `api.py` | the leaderboard: `setup_box_puzzles` (Books/Notes injected-deps pattern) + the daily routes |
 | `daily.py` | the daily box: Pacific day clock, generator, `box_daily` + `box_daily_attempts` + `box_daily_best`, attempt and retry rules |
 | `BoxPuzzles.jsx` / `.css` | the page (picker + box + leaderboard) |
+| `rules.jsx` | the Rules panel's words (owner-approved; see "no prose" below) |
 | `sound.js` | the sounds, synthesised with Web Audio (no files) + the per-device mute |
 | `tools/import_bank.py` | source JSON -> `puzzles.json` + `minimums.json` |
 | `tools/gen_parity_fixtures.mjs` | the reference simulator's WASM -> `tests/fixtures/parity.json` |
@@ -46,8 +47,13 @@ fails as a refused solve.
   pressed while its corner does not match. Corner presses are free. There is no Undo or
   Reset button (owner's call — the wrong corner already resets).
 - **The page carries no prose** (owner's call, 2026-10-05): no instructions, empty states,
-  status lines or explanations — not even of the blue. A box's count turns into its result
-  when it opens. `screens.mjs` fails on any `<p>` in the page.
+  status lines or explanations. A box's count turns into its result when it opens.
+  `screens.mjs` fails on any `<p>` in the page. **The one place words live is the Rules
+  panel** (owner's call, 2026-10-06): the header's book button opens the shared
+  `RulesModal` with `rules.jsx` — the goal, what each color does, daily mode, nothing
+  more. Its wording was approved line by line; White and Red say "this tile's color" so
+  they read true when Blue borrows them, and Blue is just "uses the center tile's
+  ability". American spelling. The header's old solved counter (n / 71) is gone.
 - **A box is never saved mid-solve** (owner's call): a reload, or leaving the box,
   starts it again from its first board. Only finished results are stored. (The DAILY
   box is the one exception, by design — below.)

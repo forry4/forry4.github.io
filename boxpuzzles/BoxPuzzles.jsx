@@ -25,11 +25,13 @@
 // /boxpuzzles/daily. This screen owns its segment 2, like Notes.
 import { useState, useEffect, useCallback, useRef } from "react";
 import { baseCss } from "../shared/theme.js";
+import { RULES_GLYPH, RulesModal, rulesModalCss } from "../shared/lobby.jsx";
 import { buildPath, parsePath, pushPath, subscribe } from "../shared/router.js";
 import _cssText from "./BoxPuzzles.css?inline";
 import BANK from "./puzzles.json";
 import { CORNERS, press, newBox, pressTileInBox, pressButtonInBox } from "./engine.js";
 import { isMuted, setMuted, tileSound, litSound, resetSound, openSound } from "./sound.js";
+import BoxPuzzlesRules from "./rules.jsx";
 
 const css = _cssText;
 const WS_BASE = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
@@ -270,7 +272,7 @@ const CROSS = <path d="M15.6 9.6l4.8 4.8M20.4 9.6l-4.8 4.8" />;
 function MuteToggle() {
 	const [muted, setM] = useState(isMuted);
 	return (
-		<button type="button" className="btn btn-ghost btn-sm bx-mute" aria-pressed={muted}
+		<button type="button" className="btn btn-ghost btn-sm bx-icon bx-mute" aria-pressed={muted}
 			aria-label={muted ? "Unmute sounds" : "Mute sounds"} title={muted ? "Unmute" : "Mute"}
 			onClick={() => { setMuted(!muted); setM(!muted); }}>
 			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" aria-hidden="true">
@@ -287,6 +289,7 @@ function useTileKeys(pressTile) {
 	useEffect(() => {
 		const onKey = (e) => {
 			if (e.ctrlKey || e.metaKey || e.altKey || /input|textarea|select/i.test(e.target?.tagName || "")) return;
+			if (document.querySelector(".rl-backdrop")) return;     // the rules are open
 			if (e.key >= "1" && e.key <= "9") keyRef.current(+e.key - 1);
 			else return;
 			e.preventDefault();
@@ -337,15 +340,22 @@ export default function BoxPuzzles({ authUser, onExit }) {
 	const rootRef = useRef(null);
 	useEffect(() => { if (rootRef.current) rootRef.current.scrollTop = 0; }, [num]);
 
-	const solved = Object.keys(results).filter((id) => BANK.some((p) => p.id === id)).length;
+	const [showRules, setShowRules] = useState(false);
 	return (
 		<div ref={rootRef} className={`bx${rot ? " bx-rot" : ""}`} style={rotStyle(rot) || undefined}>
-			<style>{baseCss + css}</style>
+			<style>{baseCss + rulesModalCss + css}</style>
 			<header className="bx-header">
 				<button className="btn btn-ghost btn-sm" onClick={num ? () => go(null) : onExit}>← Back</button>
 				<div className="bx-headtitle">Box Puzzles</div>
-				<div className="bx-headright">{solved} / {BANK.length}<MuteToggle /></div>
+				<div className="bx-headright">
+					<button type="button" className="btn btn-ghost btn-sm bx-icon bx-rules" aria-label="Rules" title="Rules"
+						onClick={() => setShowRules(true)}>{RULES_GLYPH}</button>
+					<MuteToggle />
+				</div>
 			</header>
+			{showRules && <RulesModal title="How to play — Box Puzzles" onClose={() => setShowRules(false)}>
+				<BoxPuzzlesRules />
+			</RulesModal>}
 			{num === "daily" ? (
 				<DailyScreen token={token} who={who} onDaily={noteDaily} />
 			) : num ? (

@@ -13,10 +13,13 @@
 	border-bottom:1px solid var(--border);}
 .bx-headtitle{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;letter-spacing:.08em;
 	text-transform:uppercase;color:var(--gold);font-size:.95rem;}
-.bx-headright{margin-left:auto;display:flex;align-items:center;gap:14px;color:var(--text-dim);
+.bx-headright{margin-left:auto;display:flex;align-items:center;gap:6px;color:var(--text-dim);
 	font-size:.82rem;font-variant-numeric:tabular-nums;}
-.bx-mute{padding:0;width:36px;height:34px;}
-.bx-mute svg{width:20px;height:20px;}
+.bx-icon{padding:0;width:36px;height:34px;display:inline-flex;align-items:center;justify-content:center;}
+.bx-icon svg{width:20px;height:20px;}
+/* the rules panel: a swatch of each tile color beside its name */
+.bx-rl-sw{display:inline-block;width:.9em;height:.9em;margin-right:.45em;vertical-align:-.1em;
+	border-radius:3px;background:var(--t);box-shadow:0 0 0 1px rgba(255,255,255,.3);}
 .bx-mute[aria-pressed="true"]{color:var(--text-dim);}
 .bx-wrap{max-width:1080px;margin:0 auto;padding:0 20px;}
 

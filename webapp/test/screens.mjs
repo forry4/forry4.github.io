@@ -9896,6 +9896,28 @@ try {
 				return { style: getComputedStyle(root).userSelect, selected: getSelection().toString().trim().length };
 			});
 			check("nothing on the page can be selected", select.style === "none" && select.selected === 0, JSON.stringify(select));
+			// THE RULES: a book button in the header (where the n/71 counter was) opens the
+			// shared rules panel — the goal, the ten colors, daily mode. The page itself still
+			// carries no prose; the words live only in the panel.
+			const head = await page.locator(".bx-headright").innerText();
+			check("the header has no solved counter", !/\d+\s*\/\s*\d+/.test(head), JSON.stringify(head));
+			await page.locator(".bx-rules").click();
+			await page.waitForSelector(".rl-panel", { timeout: 5000 }).catch(() => {});
+			const rules = await page.evaluate(() => ({
+				sections: [...document.querySelectorAll(".rl-sec h4")].map((h) => h.textContent),
+				colors: [...document.querySelectorAll(".rl-dl dt")].map((d) => d.textContent),
+				swatches: [...document.querySelectorAll(".rl-dl dt .bx-rl-sw")].map((s) => getComputedStyle(s).backgroundColor),
+				inside: (() => { const r = document.querySelector(".rl-panel")?.getBoundingClientRect();
+					return !!r && r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight; })(),
+				british: /colour|centre/i.test(document.querySelector(".rl-panel")?.innerText || ""),
+			}));
+			check("Rules opens the panel: goal, the ten colors with their swatches, daily mode",
+				JSON.stringify(rules.sections) === JSON.stringify(["Goal of the Game", "The colors", "Daily mode"])
+				&& rules.colors.length === 10 && new Set(rules.swatches).size === 10
+				&& rules.swatches.every((c) => c && c !== "rgba(0, 0, 0, 0)") && rules.inside && !rules.british,
+				JSON.stringify(rules));
+			await page.locator(".rl-done").click();
+			check("Got it closes the rules", await page.locator(".rl-panel").count() === 0);
 
 			await page.locator('.bx-pick[data-box="1"]').click();
 			await page.waitForSelector(".bx-tile", { timeout: 10_000 }).catch(() => {});
@@ -9910,6 +9932,13 @@ try {
 			});
 			check("the box sits inside a 16px gutter at 390px", geo.l >= 15.5 && geo.w - geo.r >= 15.5 && geo.over <= 0, JSON.stringify(geo));
 			// the leaderboard is a spoiler (a low best gives the line away): always there, closed
+			// on a box, the rules sit over the tiles: the number keys must not press them
+			await page.locator(".bx-rules").click();
+			await page.waitForSelector(".rl-panel", { timeout: 5000 }).catch(() => {});
+			await page.keyboard.press("5");
+			await page.keyboard.press("Escape");
+			check("keys do not press tiles behind the open rules, and Escape closes them",
+				await page.locator(".rl-panel").count() === 0 && await count(page) === 0, String(await count(page)));
 			check("the leaderboard is always there and starts closed",
 				await page.locator(".bx-board").count() === 1
 				&& await page.locator(".bx-board-hd").getAttribute("aria-expanded") === "false"
