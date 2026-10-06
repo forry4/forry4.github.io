@@ -260,8 +260,35 @@ def test_the_attempt_round_trip(app):
     r = post(B.AttemptIn(day=TODAY, segments=[LINE], open=True), user=ALICE)
     assert r["solved"] and r["optimal"] is True and r["leaderboard"]["you"]["rank"] == 1
     assert "minimum" not in r["leaderboard"]
-    assert "minimum" not in board(TODAY, user=None)
-    assert board(YESTERDAY, user=None)["minimum"] == len(LINE)
+    assert "minimum" not in board(TODAY, line=None, user=ALICE)
+    assert board(YESTERDAY, line=None, user=None)["minimum"] == len(LINE)
+
+
+def test_todays_board_is_only_for_those_who_have_opened_the_box(app):
+    """No score reaches anyone still playing (or not playing) today's box."""
+    post = _endpoint(app, "POST", "/boxpuzzles/daily/attempt")
+    board = _endpoint(app, "GET", "/boxpuzzles/daily/{day}/board")
+    refused = (
+        lambda: board(TODAY, line=None, user=None),                                   # a passer-by
+        lambda: board(TODAY, line=None, user=ALICE),                                  # before playing
+        lambda: board(TODAY, line=",".join(map(str, LINE[:-1])), user=None),          # a line that does not open it
+        lambda: board(TODAY, line="9,x", user=None),
+    )
+    for call in refused:
+        with pytest.raises(HTTPException) as e:
+            call()
+        assert e.value.status_code == 403
+    post(B.AttemptIn(day=TODAY, segments=[[LINE[0]]]), user=ALICE)
+    with pytest.raises(HTTPException) as e:                                           # partway through
+        board(TODAY, line=None, user=ALICE)
+    assert e.value.status_code == 403
+    post(B.AttemptIn(day=TODAY, segments=[LINE], open=True), user=ALICE)
+    assert board(TODAY, line=None, user=ALICE)["you"]["rank"] == 1                    # opened: on record
+    guest = board(TODAY, line=",".join(map(str, LINE)), user=None)                    # a guest's proof
+    assert [e["name"] for e in guest["entries"]] == ["alice"] and "minimum" not in guest
+    assert "optimal" not in guest["entries"][0]
+    # the day before is open to everyone, minimum and all
+    assert board(YESTERDAY, line=None, user=None)["minimum"] == len(LINE)
 
 
 def test_the_routes_refuse_what_they_should(app):
@@ -273,9 +300,9 @@ def test_the_routes_refuse_what_they_should(app):
         (lambda: member(None), 401),                                                     # guests do not post
         (lambda: post(B.AttemptIn(day=YESTERDAY, segments=[LINE], open=True), user=ALICE), 409),
         (lambda: post(B.AttemptIn(day=TODAY, segments=[LINE[:-1]], open=True), user=ALICE), 400),
-        (lambda: board("2026-10-06", user=None), 404),                                    # tomorrow
-        (lambda: board("2026-01-01", user=None), 404),                                    # never generated
-        (lambda: board("not-a-day", user=None), 404),
+        (lambda: board("2026-10-06", line=None, user=None), 404),                         # tomorrow
+        (lambda: board("2026-01-01", line=None, user=None), 404),                         # never generated
+        (lambda: board("not-a-day", line=None, user=None), 404),
     ):
         with pytest.raises(HTTPException) as e:
             call()

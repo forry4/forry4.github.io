@@ -10079,6 +10079,8 @@ try {
 			!!line && line.length >= 8 && line.length <= 15 && !("minimum" in daily) && !("solution" in daily),
 			JSON.stringify({ daily, line }));
 		if (!line) return;
+		const peek = await fetch(`http://localhost:${API_PORT}/boxpuzzles/daily/${daily.day}/board`).then((r) => r.status, () => 0);
+		check("the server will not show today's scores to someone who has not opened the box", peek === 403, String(peek));
 		// one press, then a corner that does not match afterwards: the reset
 		const afterOne = E.press(daily.tiles, line[0]);
 		const wrong = E.CORNERS.findIndex((c, k) => afterOne[c] !== daily.target[k]);
@@ -10098,6 +10100,8 @@ try {
 			const page = await ctx.newPage();
 			const errors = [];
 			page.on("pageerror", (e) => errors.push(String(e)));
+			const boards = [];
+			page.on("response", (r) => { if (/\/boxpuzzles\/daily\/[0-9-]+\/board/.test(r.url())) boards.push(r.status()); });
 			await page.goto(`http://localhost:${PORT}/boxpuzzles`, { waitUntil: "networkidle" });
 			await page.waitForSelector(".bx-daily-tile", { timeout: 25_000 }).catch(() => {});
 			await page.locator(".bx-daily-tile").click().catch(() => {});
@@ -10119,15 +10123,21 @@ try {
 			await page.reload({ waitUntil: "networkidle" });
 			await page.waitForSelector('.bx-box[data-box="daily"] .bx-tile', { timeout: 25_000 }).catch(() => {});
 			check("the attempt survives a reload", await count(page) === 1);
+			check("nothing asked the server for today's board before the box was open", boards.length === 0, String(boards));
 
 			await play(page, line);
 			await page.waitForSelector(".bx-result", { timeout: 5000 }).catch(() => {});
 			check("opening the box ends the attempt at every press it took, the reset's included",
 				await count(page) === line.length + 1 && await page.locator(".bx-result .bx-next").count() === 1,
 				`${await count(page)} vs ${line.length + 1}`);
-			check("opening it unlocks and opens the leaderboard",
+			// a guest's solve is not on the server: the page proves it with the line, and
+			// the server hands over the board. Read the STATUS — a refused board and an
+			// empty one both draw the same dash.
+			for (let t = 0; t < 100 && !boards.length; t++) await page.waitForTimeout(100);
+			check("opening it unlocks and opens the leaderboard, which the server now serves",
 				await page.locator(".bx-board.locked").count() === 0
-				&& await page.locator(".bx-board-hd").getAttribute("aria-expanded") === "true");
+				&& await page.locator(".bx-board-hd").getAttribute("aria-expanded") === "true"
+				&& boards.length === 1 && boards[0] === 200, String(boards));
 			check("the daily carries no prose", (await prose(page)).length === 0, JSON.stringify(await prose(page)));
 			await page.reload({ waitUntil: "networkidle" });
 			await page.waitForSelector(".bx-result", { timeout: 25_000 }).catch(() => {});

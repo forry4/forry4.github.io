@@ -165,6 +165,22 @@ def _iso_day(day: str) -> str:
         raise HTTPException(status_code=404, detail="no such day")
 
 
+def _has_opened(conn, box: dict, user: dict | None, line: str | None) -> bool:
+    """True if the caller has opened `box`: a signed-in player's solved attempt, or a
+    `line` (comma-separated tile presses) that opens it from its first board."""
+    if user:
+        mine = D.load_attempt(conn, user["id"], box["day"])
+        if mine and mine["solved"]:
+            return True
+    if not line:
+        return False
+    try:
+        moves = [int(m) for m in line.split(",")]
+        return len(moves) <= D.MAX_MOVES and corners_match(replay(box["tiles"], moves), box["target"])
+    except ValueError:
+        return False
+
+
 def _default_token_resolver(token: str | None = Query(default=None)) -> str | None:
     return token
 
@@ -242,8 +258,14 @@ def setup_box_puzzles(app, get_db_conn, get_user_by_session, token_resolver=None
                     "yesterday": yesterday if D.get_day(c, yesterday) else None}
         return run(go)
 
+    # TODAY'S BOARD IS FOR THOSE WHO HAVE OPENED TODAY'S BOX (owner's call): any score
+    # is a hint (a low best says how short the line is). A signed-in player's opened
+    # attempt is on record; a guest's is not, so a guest proves it with `line`, the
+    # presses that opened the box, replayed here. Anyone holding such a line already
+    # has the answer, so the board tells them nothing. Past days are open to all.
     @app.get("/boxpuzzles/daily/{day}/board")
-    def box_daily_board(day: str, user: dict | None = Depends(viewer)):
+    def box_daily_board(day: str, line: str | None = Query(default=None, max_length=4 * D.MAX_MOVES),
+                        user: dict | None = Depends(viewer)):
         day, today = _iso_day(day), D.pacific_day()
         if day > today:
             raise HTTPException(status_code=404, detail="no such day")
@@ -252,6 +274,8 @@ def setup_box_puzzles(app, get_db_conn, get_user_by_session, token_resolver=None
             box = D.get_day(c, day)
             if box is None:
                 raise HTTPException(status_code=404, detail="no such day")
+            if day == today and not _has_opened(c, box, user, line):
+                raise HTTPException(status_code=403, detail="open today's box first")
             return D.daily_board(c, box, user["id"] if user else None, reveal=day < today)
         return run(go)
 

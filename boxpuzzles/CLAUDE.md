@@ -100,9 +100,12 @@ three `/boxpuzzles/daily*` routes; the numbered boxes' rules above are untouched
   replays the LAST segment from the first board to check an opening; the score is
   every press in every segment. Signed-in attempts live on the server (another browser
   resumes them); a guest's lives in localStorage and posts nowhere.
-- **Ties go to whoever finished first** (owner's call). Today's leaderboard is LOCKED
-  in the page until you open the box — a glance at the best score is a head start in a
-  one-attempt race. The lock is client-side only; the route is public, like the bank's.
+- **Ties go to whoever finished first** (owner's call). **Today's scores reach no one
+  who has not opened today's box** (owner's call: no hints of any kind). The page keeps
+  the leaderboard locked and never asks for it, and the SERVER refuses today's board
+  (403) unless the caller has opened the box: a signed-in player's solved attempt is on
+  record; a guest's is not, so the page sends the opening line (`?line=`) and the server
+  replays it — anyone holding such a line has the answer already. Past days are public.
 - An attempt still open at midnight is lost: the server refuses a save for a day that
   is over (409), and the page loads the new box.
 - `screens.mjs` `boxDaily` plays today's real box (the harness solves it with engine.js),

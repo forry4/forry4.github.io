@@ -175,7 +175,8 @@ const CHEVRON = (
 );
 
 // `locked`: today's daily board cannot be opened until you have opened the box — in a
-// one-attempt race, a glance at the best score is a head start.
+// one-attempt race, a glance at the best score is a head start. The server enforces
+// it too: it will not hand today's board to anyone who has not opened the box.
 function Leaderboard({ board, open, onToggle, locked = false }) {
 	const entries = board && !board.error ? board.entries : [];
 	const you = board && !board.error ? board.you : null;
@@ -551,9 +552,12 @@ function DailyToday({ daily, token, who, onDaily, onReload, onYesterday }) {
 		};
 	}, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+	// Today's board is served only to someone who has opened the box: the server knows
+	// a signed-in player's, and a guest sends the line that opened it as the proof.
+	const proof = token ? "" : `?line=${segments.at(-1).join(",")}`;
 	const loadBoard = useCallback(() => {
-		api(`/boxpuzzles/daily/${daily.day}/board`, token).then(setBoard).catch(() => setBoard({ error: true }));
-	}, [daily.day, token]);
+		api(`/boxpuzzles/daily/${daily.day}/board${proof}`, token).then(setBoard).catch(() => setBoard({ error: true }));
+	}, [daily.day, token, proof]);
 	const settled = !!opened && (opened.post === "guest" || opened.post === "done");
 	useEffect(() => { if (settled) loadBoard(); }, [settled, loadBoard]);
 
