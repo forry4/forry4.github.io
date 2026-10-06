@@ -9853,12 +9853,15 @@ try {
 			const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
 			await ctx.addInitScript(() => {
 				localStorage.setItem("spender_user", JSON.stringify({ id: "screens-box-guest", name: "Boxer", guest: true }));
-				// count the oscillators the page asks for: the sounds are synthesised, so
-				// "a sound played" is "an oscillator was made" (see boxpuzzles/sound.js)
+				// count the VOICES the page makes: the sounds are synthesised, so "a sound
+				// played" is "an oscillator or a noise source was made" (boxpuzzles/sound.js).
+				// Both, because a kit's click can be pure filtered noise with no oscillator.
 				window.__oscs = 0;
 				const AC = window.AudioContext || window.webkitAudioContext;
-				const make = AC && AC.prototype.createOscillator;
-				if (make) AC.prototype.createOscillator = function (...a) { window.__oscs++; return make.apply(this, a); };
+				for (const m of ["createOscillator", "createBufferSource"]) {
+					const make = AC && AC.prototype[m];
+					if (make) AC.prototype[m] = function (...a) { window.__oscs++; return make.apply(this, a); };
+				}
 				// Safari's audio session (what lets sound through the iPhone silent switch)
 				// does not exist in Chromium; stand one in so the switching can be asserted
 				if (!navigator.audioSession) Object.defineProperty(navigator, "audioSession", { value: { type: "auto" }, configurable: true });
@@ -9901,7 +9904,7 @@ try {
 			await page.locator(`.bx-tile[data-tile="${detour[0]}"]`).click();
 			check("a tile press counts", await count(page) === 1);
 			const sounded = await oscs();
-			check("a tile press makes a sound", sounded > 0, `${sounded} oscillators`);
+			check("a tile press makes a sound", sounded > 0, `${sounded} voices`);
 			const sessionType = () => page.evaluate(() => navigator.audioSession.type);
 			check("sound asks for the playback session (heard through the iPhone silent switch)",
 				await sessionType() === "playback", await sessionType());

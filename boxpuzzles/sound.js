@@ -39,6 +39,12 @@ export function setMuted(m) {
 	}
 }
 
+
+// THE KIT is the owner's pick from the audition page (Box Puzzle Sound Kits artifact,
+// 2026-10-05): "Felt" everywhere except the tile, which is "Brass Latch"'s two-stage
+// switch click. The primitives below are that page's, ported as they were heard.
+let room = null;   // a short feedback echo the felt notes send into
+
 function audio() {
 	if (muted) return null;
 	session("playback");
@@ -57,6 +63,19 @@ function audio() {
 			master = ctx.createGain();
 			master.gain.value = 0.7;
 			master.connect(clip).connect(ctx.destination);
+			// The room: 110ms echo, darkened, feeding back at 0.3.
+			const d = ctx.createDelay(1);
+			d.delayTime.value = 0.11;
+			const fb = ctx.createGain();
+			fb.gain.value = 0.3;
+			const wet = ctx.createGain();
+			wet.gain.value = 0.32;
+			const lp = ctx.createBiquadFilter();
+			lp.type = "lowpass";
+			lp.frequency.value = 3800;
+			d.connect(lp).connect(fb).connect(d);
+			lp.connect(wet).connect(master);
+			room = d;
 			// The classic iOS unlock: one silent sample started inside the gesture that
 			// made the context, so the output path is open before the first real sound.
 			const unlock = ctx.createBufferSource();
@@ -74,7 +93,7 @@ function audio() {
 let noiseBuf = null;
 function noise(c) {
 	if (!noiseBuf) {
-		noiseBuf = c.createBuffer(1, Math.floor(c.sampleRate * 0.25), c.sampleRate);
+		noiseBuf = c.createBuffer(1, Math.floor(c.sampleRate * 0.6), c.sampleRate);
 		const d = noiseBuf.getChannelData(0);
 		for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
 	}
@@ -83,85 +102,95 @@ function noise(c) {
 	return src;
 }
 
-// A filtered noise transient: the "contact" part of any click.
-function tick(c, t, { freq, q = 1.2, gain, dur, type = "bandpass" }) {
-	const src = noise(c);
-	const f = c.createBiquadFilter();
-	f.type = type;
-	f.frequency.value = freq;
-	f.Q.value = q;
-	const g = c.createGain();
-	g.gain.setValueAtTime(gain, t);
-	g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-	src.connect(f).connect(g).connect(master);
-	src.start(t);
-	src.stop(t + dur + 0.02);
+// Route a voice to the master bus, and some of it into the room.
+function bus(c, g, wet) {
+	g.connect(master);
+	if (wet) {
+		const s = c.createGain();
+		s.gain.value = wet;
+		g.connect(s).connect(room);
+	}
 }
 
-// A decaying sine, optionally gliding: the "body" of a thock or a thunk.
-function tone(c, t, { freq, to = freq, gain, dur, type = "sine", attack = 0.003 }) {
+// A decaying (optionally gliding) oscillator.
+function tone(c, t, { f, to = f, g, d, type = "sine", a = 0.003, wet = 0 }) {
 	const o = c.createOscillator();
 	o.type = type;
-	o.frequency.setValueAtTime(freq, t);
-	if (to !== freq) o.frequency.exponentialRampToValueAtTime(to, t + dur);
-	const g = c.createGain();
-	g.gain.setValueAtTime(0.0001, t);
-	g.gain.exponentialRampToValueAtTime(gain, t + attack);
-	g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-	o.connect(g).connect(master);
+	o.frequency.setValueAtTime(f, t);
+	if (to !== f) o.frequency.exponentialRampToValueAtTime(to, t + d);
+	const e = c.createGain();
+	e.gain.setValueAtTime(0.0001, t);
+	e.gain.exponentialRampToValueAtTime(g, t + a);
+	e.gain.exponentialRampToValueAtTime(0.0001, t + d);
+	o.connect(e);
+	bus(c, e, wet);
 	o.start(t);
-	o.stop(t + dur + 0.02);
+	o.stop(t + d + 0.03);
 }
 
-// A small bell: a few inharmonic partials, the higher ones dying first.
-function bell(c, t, freq, gain, dur = 0.9) {
-	[[1, 1, 1], [2.01, 0.42, 0.6], [3.98, 0.18, 0.35], [5.43, 0.08, 0.22]].forEach(([ratio, g, d]) =>
-		tone(c, t, { freq: freq * ratio, gain: gain * g, dur: dur * d, attack: 0.002 }));
+// A filtered noise burst: the contact of a click or a knock.
+function tick(c, t, { f, q = 1.2, g, d, type = "bandpass", a = 0.001 }) {
+	const s = noise(c);
+	const fl = c.createBiquadFilter();
+	fl.type = type;
+	fl.Q.value = q;
+	fl.frequency.setValueAtTime(f, t);
+	const e = c.createGain();
+	e.gain.setValueAtTime(0.0001, t);
+	e.gain.exponentialRampToValueAtTime(g, t + a);
+	e.gain.exponentialRampToValueAtTime(0.0001, t + d);
+	s.connect(fl).connect(e);
+	bus(c, e, 0);
+	s.start(t);
+	s.stop(t + d + 0.03);
+}
+
+// A marimba note: the fundamental, a fast-dying fourth-ish overtone and a soft knock.
+function mallet(c, t, f, g, d = 0.5, wet = 0) {
+	tone(c, t, { f, g, d, a: 0.002, wet });
+	tone(c, t, { f: f * 3.95, g: g * 0.35, d: d * 0.18, a: 0.001, wet });
+	tick(c, t, { f: f * 2, q: 2, g: g * 0.12, d: 0.02 });
 }
 
 const jitter = (cents) => Math.pow(2, ((Math.random() * 2 - 1) * cents) / 1200);
+const note = (midi) => 440 * Math.pow(2, (midi - 69) / 12);
 
-// Pressing a tile: a soft, woody thock.
+// Pressing a tile: a two-stage switch click — the press, its body, and the release.
 export function tileSound() {
 	const c = audio();
 	if (!c) return;
-	const t = c.currentTime + 0.001;
-	const j = jitter(60);
-	tone(c, t, { freq: 260 * j, to: 150 * j, gain: 0.3, dur: 0.09 });
-	tick(c, t, { freq: 2300 * j, q: 1.4, gain: 0.13, dur: 0.035 });
-	tick(c, t + 0.004, { freq: 700 * j, q: 2.5, gain: 0.07, dur: 0.05 });
+	const t = c.currentTime + 0.005;
+	const j = jitter(80);
+	tick(c, t, { f: 4200 * j, q: 2.2, g: 1.6, d: 0.018 });
+	tick(c, t + 0.002, { f: 1600 * j, q: 3, g: 0.8, d: 0.03 });
+	tick(c, t + 0.045, { f: 3400 * j, q: 2.5, g: 0.55, d: 0.014 });
 }
 
-// A corner button that lights: a crisp latch click and a bell that climbs with each
-// button lit (1st..4th), so a box being closed in on sounds like it.
-const LIT_NOTES = [659.25, 783.99, 987.77, 1174.66];   // E5 G5 B5 D6
+// A corner button that lights: a soft knock and a warm marimba note that climbs with
+// each button lit (C D E G), so a box being closed in on sounds like it.
+const LIT_NOTES = [72, 74, 76, 79];
 export function litSound(litCount) {
 	const c = audio();
 	if (!c) return;
-	const t = c.currentTime + 0.001;
-	tick(c, t, { freq: 3800, q: 0.9, gain: 0.28, dur: 0.025, type: "highpass" });
-	tone(c, t, { freq: 420, to: 300, gain: 0.25, dur: 0.05 });
-	bell(c, t + 0.012, LIT_NOTES[Math.max(0, Math.min(3, litCount - 1))], 0.27, 0.8);
+	const t = c.currentTime + 0.005;
+	tick(c, t, { f: 1200, q: 0.8, g: 0.08, d: 0.03, type: "lowpass" });
+	mallet(c, t + 0.01, note(LIT_NOTES[Math.max(0, Math.min(3, litCount - 1))]), 0.32, 0.6, 0.25);
 }
 
-// A corner button pressed on the wrong colour: a dull click and the box falling back.
+// A corner button pressed on the wrong colour: two marimba notes falling (G to C).
 export function resetSound() {
 	const c = audio();
 	if (!c) return;
-	const t = c.currentTime + 0.001;
-	tick(c, t, { freq: 1500, q: 1, gain: 0.25, dur: 0.04 });
-	tone(c, t, { freq: 210, to: 70, gain: 0.38, dur: 0.22, type: "triangle" });
-	tick(c, t + 0.06, { freq: 500, q: 0.8, gain: 0.12, dur: 0.16, type: "lowpass" });
+	const t = c.currentTime + 0.005;
+	mallet(c, t, note(67), 0.24, 0.35);
+	mallet(c, t + 0.11, note(60), 0.26, 0.5);
 }
 
-// The box opening: the last latch, a deep wooden release, then a bright chime.
-const OPEN_CHORD = [783.99, 987.77, 1174.66, 1567.98];   // G5 B5 D6 G6
+// The box opening: a rolled C-major chord over a low C.
 export function openSound() {
 	const c = audio();
 	if (!c) return;
-	const t = c.currentTime + 0.001;
-	tick(c, t, { freq: 3800, q: 0.9, gain: 0.3, dur: 0.025, type: "highpass" });
-	tone(c, t + 0.02, { freq: 140, to: 90, gain: 0.55, dur: 0.25 });
-	tick(c, t + 0.02, { freq: 900, q: 1.5, gain: 0.18, dur: 0.12 });
-	OPEN_CHORD.forEach((f, i) => bell(c, t + 0.09 + i * 0.075, f, 0.21, 1.6));
+	const t = c.currentTime + 0.005;
+	[60, 64, 67, 72, 76].forEach((m, i) => mallet(c, t + i * 0.085, note(m), 0.26, 1.1, 0.3));
+	tone(c, t + 0.4, { f: note(48), g: 0.18, d: 1.4, a: 0.04 });
 }

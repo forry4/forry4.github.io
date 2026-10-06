@@ -81,15 +81,18 @@ loads) and `.githooks/pre-push`.
 
 ## Sounds
 
-Synthesised, not sampled (`sound.js`): a woody thock per tile, a latch click + bell per
-lit corner (rising E-G-B-D with each button lit), a dull falling thunk on a reset, and
-a latch + four-note chime on opening. The AudioContext is made on the first sound —
+Synthesised, not sampled (`sound.js`). **The kit is the owner's pick from an audition
+page of six (2026-10-05): "Felt", with "Brass Latch"'s tile.** A two-stage switch click
+per tile; a warm marimba note per lit corner, climbing C-D-E-G with each button lit; two
+marimba notes falling G-C on a reset; a rolled C-major chord over a low C on opening.
+The felt notes send into a short feedback echo ("the room"). The primitives were
+ported from the audition page as heard, so do not re-tune them by ear in code. The AudioContext is made on the first sound —
 always inside a click/key handler, which is what iOS requires. **The master bus is a
 tanh soft clipper, NOT a DynamicsCompressor**: Chrome's compressor crushed the 70ms
 clicks to ~1/4 of their level (measured by rendering each sound offline). Levels were
-balanced by the same offline render: every sound ~-25 dB RMS, the opening ~-22, peaks
-<= 0.54. The mute toggle (header) is localStorage `boxpuzzles.muted`; `screens.mjs`
-counts oscillators to prove a press sounds unmuted and stays silent muted.
+balanced by the same offline render: tile ~-27 dB RMS, corner/reset ~-25, the opening
+~-21, peaks <= 0.66. The mute toggle (header) is localStorage `boxpuzzles.muted`; `screens.mjs`
+counts synthesised voices (oscillators + noise sources) to prove a press sounds unmuted and stays silent muted.
 
 **On an iPhone the silent switch muted every sound** (reported as "I don't hear sound on
 mobile"): Safari plays Web Audio in the ambient session, which the switch silences, and
