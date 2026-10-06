@@ -706,8 +706,11 @@ function DailyToday({ daily, token, who, onDaily, onReload, onYesterday }) {
 	);
 }
 
-// YESTERDAY, VIEW ONLY: its first board, its minimum (blue, as a minimum is drawn
-// everywhere), every row that reached it in blue, and ▶ to watch a shortest line play.
+// YESTERDAY: its first board, its minimum (blue, as a minimum is drawn everywhere),
+// every row that reached it in blue, and ▶ to watch a shortest line play. PLAY makes it
+// playable FOR FUN (owner's call, 2026-10-06): the numbered boxes' rules (a reset clears
+// the count), nothing posted, nothing saved — the day is over and its boards are closed.
+// Opening it in the minimum draws your count blue: the minimum is public by now.
 function DailyYesterday({ day, token, onToday }) {
 	const [data, setData] = useState(null);
 	const [failed, setFailed] = useState(false);
@@ -715,10 +718,29 @@ function DailyYesterday({ day, token, onToday }) {
 	const [playing, setPlaying] = useState(false);
 	const [boardOpen, setBoardOpen] = useState(true);
 	const [tab, setTab] = useState("first");
+	const [playBox, setPlayBox] = useState(null);      // set while playing it for fun
+	const [playOpened, setPlayOpened] = useState(null);
+	const [shake, setShake] = useState(0);
 	const load = useCallback(() => {
 		setFailed(false);
 		api(`/boxpuzzles/daily/${day}/board`, token).then(setData).catch(() => setFailed(true));
 	}, [day, token]);
+	const play = () => { setPlaying(false); setStep(0); setPlayOpened(null); setPlayBox(newBox(data)); };
+	const watch = () => { setPlayBox(null); setPlayOpened(null); setStep(0); setPlaying(true); };
+	const pressTile = (i) => {
+		if (!playBox || playOpened) return;
+		tileSound();
+		setPlayBox(pressTileInBox(playBox, data.target, i));
+	};
+	const pressButton = (k) => {
+		if (!playBox || playOpened) return;
+		const { box: next, result } = pressButtonInBox(playBox, data, k);
+		if (result === "reset") { resetSound(); setShake((n) => n + 1); }
+		else if (result === "open") { openSound(); setPlayOpened({ moves: next.moves.length }); }
+		else litSound(next.lit.filter(Boolean).length);
+		setPlayBox(next);
+	};
+	useTileKeys(pressTile);
 	useEffect(load, [load]);
 	useEffect(() => {
 		if (!playing || !data) return undefined;
@@ -741,22 +763,45 @@ function DailyYesterday({ day, token, onToday }) {
 		</div></div></div>
 	);
 	const line = data.solution;
-	const done = step > 0 && step >= line.length;
-	const box = { tiles: boardAfter(data.tiles, line.slice(0, step)), lit: done ? ALL_LIT : NONE_LIT, moves: [] };
+	const watched = step > 0 && step >= line.length;
+	const replayButton = <button className="btn btn-ghost btn-sm bx-replay" disabled={playing} aria-label="Play a shortest line"
+		onClick={watch}>▶</button>;
+	let face, controls;
+	if (playBox) {
+		const moves = playOpened ? playOpened.moves : playBox.moves.length;
+		const best = !!playOpened && moves <= data.minimum;
+		face = <BoxFace id="yesterday" target={data.target} box={playBox} shake={shake} opened={!!playOpened}
+			onTile={pressTile} onButton={pressButton} />;
+		controls = (
+			<div className={`bx-controls${playOpened ? " bx-result" : ""}${best ? " optimal" : ""}`} role="status" data-mode="play">
+				<div className="bx-count"><b data-moves>{moves}</b>{moves === 1 ? "move" : "moves"}</div>
+				<div className="bx-result-actions">
+					{playOpened && <button className="btn btn-ghost btn-sm bx-again" onClick={play}>Play again</button>}
+					{replayButton}
+				</div>
+			</div>
+		);
+	} else {
+		const box = { tiles: boardAfter(data.tiles, line.slice(0, step)), lit: watched ? ALL_LIT : NONE_LIT, moves: [] };
+		face = <BoxFace id="yesterday" target={data.target} box={box} opened={watched} disabled
+			hint={playing && step < line.length ? line[step] : -1} />;
+		controls = (
+			<div className="bx-controls bx-result optimal" role="status" data-mode="view">
+				<div className="bx-count"><b data-moves>{playing || step ? step : data.minimum}</b>{data.minimum === 1 ? "move" : "moves"}</div>
+				<div className="bx-result-actions">
+					<button className="btn btn-gold btn-sm bx-play-old" disabled={playing} onClick={play}>Play</button>
+					{replayButton}
+				</div>
+			</div>
+		);
+	}
 	return (
 		<div className="bx-wrap">
 			<div className="bx-play">
 				<div className="bx-stage">
 					{nav}
-					<BoxFace id="yesterday" target={data.target} box={box} opened={done} disabled
-						hint={playing && step < line.length ? line[step] : -1} />
-					<div className="bx-controls bx-result optimal" role="status">
-						<div className="bx-count"><b data-moves>{playing || step ? step : data.minimum}</b>{data.minimum === 1 ? "move" : "moves"}</div>
-						<div className="bx-result-actions">
-							<button className="btn btn-ghost btn-sm bx-replay" disabled={playing} aria-label="Play a shortest line"
-								onClick={() => { setStep(0); setPlaying(true); }}>▶</button>
-						</div>
-					</div>
+					{face}
+					{controls}
 				</div>
 				<aside className="bx-side"><Leaderboard board={data} open={boardOpen} onToggle={() => setBoardOpen((o) => !o)}
 					tab={tab} onTab={setTab} /></aside>

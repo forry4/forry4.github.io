@@ -10334,6 +10334,31 @@ try {
 				E.cornersMatch(await tilesNow(page), box1.target) && await page.locator(".bx-cbtn.lit").count() === 4,
 				JSON.stringify(await tilesNow(page)));
 			check("yesterday carries no prose", (await prose(page)).length === 0, JSON.stringify(await prose(page)));
+
+			// PLAY IT FOR FUN: yesterday's box under the numbered boxes' rules, posting nothing
+			const posts = [];
+			page.on("request", (r) => { if (r.method() === "POST" && r.url().includes("/boxpuzzles/")) posts.push(r.url()); });
+			await page.locator(".bx-play-old").click();
+			await page.waitForSelector('.bx-controls[data-mode="play"]', { timeout: 5000 }).catch(() => {});
+			check("Play turns yesterday's box playable from its first board",
+				(await tilesNow(page)).join("") === box1.tiles.join("") && await count(page) === 0
+				&& await page.locator('.bx-box[data-box="yesterday"] .bx-tile:not([disabled])').count() === 9);
+			const afterOne = E.press(box1.tiles, line1[0]);
+			const wrongK = E.CORNERS.findIndex((c, k) => afterOne[c] !== box1.target[k]);
+			await page.locator(`.bx-tile[data-tile="${line1[0]}"]`).click();
+			await page.locator(`.bx-cbtn[data-button="${wrongK}"]`).click();
+			check("a reset clears the count, as on the numbered boxes", await count(page) === 0 && wrongK >= 0);
+			await play(page, line1);
+			await page.waitForSelector('.bx-controls[data-mode="play"].bx-result', { timeout: 5000 }).catch(() => {});
+			check("the shortest line opens it, drawn blue for the minimum",
+				await count(page) === line1.length && await page.locator('.bx-controls[data-mode="play"].optimal').count() === 1
+				&& await page.locator(".bx-box.open").count() === 1);
+			await page.waitForTimeout(300);
+			check("playing yesterday posts nothing to the server", posts.length === 0, JSON.stringify(posts));
+			await page.locator(".bx-again").click();
+			check("Play again starts it over",
+				await count(page) === 0 && (await tilesNow(page)).join("") === box1.tiles.join("")
+				&& await page.locator(".bx-box.open").count() === 0);
 			await page.locator(".bx-nav .bx-arrow").last().click();
 			check("› returns to today's box",
 				await page.waitForSelector('.bx-box[data-box="daily"]', { timeout: 10_000 }).then(() => true, () => false));

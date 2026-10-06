@@ -133,6 +133,10 @@ four `/boxpuzzles/daily*` routes; the numbered boxes' rules above are untouched.
   still reads it. Today's minimum stays secret on both: blue only on your own row, so
   a retry turning blue is how you learn you found the optimal line. A guest's retries
   post nowhere.
+- **Yesterday's box can be PLAYED FOR FUN** (owner's call, 2026-10-06): Play on
+  yesterday's view makes it playable under the numbered boxes' rules (a reset clears the
+  count), entirely in the page — nothing is posted or saved, and no board changes. Its
+  boards are closed and its minimum is public, so opening it in the minimum draws blue.
 - An attempt still open at midnight is lost: the server refuses a save for a day that
   is over (409), and the page loads the new box.
 - `screens.mjs` `boxDaily` plays today's real box (the harness solves it with engine.js),
