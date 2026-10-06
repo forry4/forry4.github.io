@@ -408,9 +408,9 @@ def save_attempt(conn, user_id: str, box: dict, segments, opened: bool,
 
 def daily_board(conn, box: dict, user_id: str | None, reveal: bool, size: int = BOARD_SIZE) -> dict:
     """The day's finished attempts, fewest presses first and the earlier finish first
-    on a tie. ONLY THE CALLER'S OWN ROW EVER SAYS WHETHER IT IS OPTIMAL (owner's
-    call): blue is drawn for you alone, never on someone else's row, live day or past.
-    Once the day is over (`reveal`) the minimum and a shortest line come with it."""
+    on a tie. While the day is live (`reveal` False) the minimum stays secret and only
+    the caller's own row says whether it is optimal; once the day is over every row
+    does, and the minimum and a shortest line come with it."""
     day, minimum = box["day"], box["minimum"]
     cur = conn.cursor()
     cur.execute("""
@@ -424,7 +424,7 @@ def daily_board(conn, box: dict, user_id: str | None, reveal: bool, size: int = 
         mine = bool(user_id) and uid == user_id
         if mine:
             e["you"] = True
-        if mine:
+        if mine or reveal:
             e["optimal"] = moves <= minimum
         entries.append(e)
     cur.execute("SELECT COUNT(*) FROM box_daily_attempts WHERE day=? AND solved_at IS NOT NULL", (day,))

@@ -10227,18 +10227,17 @@ try {
 			});
 			await page.route(`http://localhost:${API_PORT}/boxpuzzles/daily/${yday}/board`, (route) => route.fulfill({ json: {
 				day: yday, tiles: box1.tiles, target: box1.target, minimum: line1.length, solution: line1, total: 2, you: null,
-				entries: [{ rank: 1, name: "Ann", moves: line1.length }, { rank: 2, name: "Bo", moves: line1.length + 3 }] } }));
+				entries: [{ rank: 1, name: "Ann", moves: line1.length, optimal: true }, { rank: 2, name: "Bo", moves: line1.length + 3, optimal: false }] } }));
 			await page.goto(`http://localhost:${PORT}/boxpuzzles/daily`, { waitUntil: "networkidle" });
 			await page.waitForSelector('.bx-box[data-box="daily"]', { timeout: 25_000 }).catch(() => {});
 			await page.locator(".bx-nav .bx-arrow").first().click().catch(() => {});
 			await page.waitForSelector('.bx-box[data-box="yesterday"]', { timeout: 10_000 }).catch(() => {});
-			// blue means "YOU reached the minimum" and is for you alone: not the minimum itself
-			check("‹ shows yesterday: its first board, its minimum (not blue), no tile to press",
+			check("‹ shows yesterday: its first board, its minimum in blue, no tile to press",
 				(await tilesNow(page)).join("") === box1.tiles.join("") && await count(page) === line1.length
-				&& await page.locator(".bx-result").count() === 1 && await page.locator(".bx .optimal").count() === 0
+				&& await page.locator(".bx-result.optimal").count() === 1
 				&& await page.locator(".bx-tile:not([disabled])").count() === 0, `${await tilesNow(page)} ${await count(page)}`);
-			check("yesterday's leaderboard is open, and no one else's row is blue",
-				await page.locator(".bx-row").count() === 2 && await page.locator(".bx-row.optimal").count() === 0);
+			check("yesterday's leaderboard is open, with the minimum's rows in blue",
+				await page.locator(".bx-row").count() === 2 && await page.locator(".bx-row.optimal").count() === 1);
 			await page.locator(".bx-replay").click();
 			await page.waitForSelector('.bx-box[data-box="yesterday"].open', { timeout: 10_000 }).catch(() => {});
 			check("▶ plays a shortest line out on the board until it opens",

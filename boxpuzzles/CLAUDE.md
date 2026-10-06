@@ -79,9 +79,10 @@ three `/boxpuzzles/daily*` routes; the numbered boxes' rules above are untouched
   only" means out of the bundle, not secret from GitHub), so a committed list or a
   date-seeded generator would publish tomorrow's box and its minimum. Only today's box
   is handed out, without its minimum; a finished day's minimum and a shortest line are
-  revealed (owner's call) on yesterday's view. **Blue stays yours alone there too**
-  (owner's call): only your own row is ever flagged optimal, on any day, and the
-  revealed minimum is not drawn blue.
+  revealed (owner's call) on yesterday's view. **Yesterday is the one place blue marks
+  OTHER players' rows** — every row that reached the minimum, and the minimum itself.
+  That is intended (owner's call, 2026-10-05: "that one is already done"); everywhere
+  else blue is drawn only on your own row.
 - **The generator explores first, then picks the target** — random tiles alone fail
   (64% can't reach any one-colour target; most of the rest open in 3–6). It keeps a
   board only if its minimum is the day's drawn depth (uniform 8–15, owner's range),
