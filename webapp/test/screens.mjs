@@ -9648,10 +9648,20 @@ try {
 		await page.goto(`http://localhost:${PORT}/`, { waitUntil: "networkidle" });
 		await page.getByRole("button", { name: /^Logout$/ }).click({ timeout: 10_000 }).catch(() => {});
 		await has(".auth-card", 15_000);
-		const left = await page.evaluate(async () => ({
+		// WAIT FOR THE DELETE, not for the sign-in card: sign-out starts the IndexedDB
+		// delete and does not wait for it (clearNotesOffline is fire-and-forget), so the
+		// card can paint while the database is still listed. Read once, this was a race
+		// that a loaded CI runner lost (Pages run for efbbc7b5, 2026-10-06). Bounded, and
+		// it still fails if the database never goes.
+		const leftover = () => page.evaluate(async () => ({
 			dbs: (await indexedDB.databases?.() || []).map((d) => d.name),
 			keys: Object.keys(localStorage).filter((k) => k.startsWith("notes.tree.") || k.startsWith("profile.history.")),
 		}));
+		let left = await leftover();
+		for (let t = 0; t < 50 && left.dbs.includes("forrest-notes"); t++) {
+			await page.waitForTimeout(200);
+			left = await leftover();
+		}
 		check("signing out deletes this device's copy of your notes and history",
 			!left.dbs.includes("forrest-notes") && left.keys.length === 0, JSON.stringify(left));
 		check("no page errors across the offline hub", errors.length === 0, errors[0]?.slice(0, 200) || "");

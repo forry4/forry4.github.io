@@ -10,6 +10,25 @@ than re-argued.
 
 ---
 
+## 2026-10-06 — `offlineRead` read an IndexedDB delete before it finished
+
+**Red:** Pages run for `efbbc7b5` (a commit touching only the update banner and a new
+screens block). `offlineRead` › "signing out deletes this device's copy of your notes
+and history" failed with `{"dbs":["forrest-notes","forrest-offline"],"keys":[]}`: the
+localStorage copies were gone, the `forrest-notes` database was still listed.
+
+**Cause: the harness, not the product.** Sign-out calls `clearNotesOffline()`
+fire-and-forget (`games/spender/Spender.jsx`), and that function opens, closes and then
+`deleteDatabase`s — all asynchronous — while the sign-in card paints at once. The check
+waited for the card and read `indexedDB.databases()` once. The localStorage half is
+synchronous, which is exactly why it passed and the database half did not. 3/3 green
+locally and green on every earlier run: a race a loaded runner loses occasionally.
+
+**Fix:** wait for the database to LEAVE (polled, 10s bound), and still fail if it never
+does. Same family as "before a nothing-replays check, wait for the last thing to LEAVE"
+(2026-09-26). Not changed: the product. Awaiting the wipe before showing the sign-in
+card would only make sign-out slower, and the wipe is not something the user waits on.
+
 ## 2026-09-26 — a flake hunt with long frames: three harness races and one frozen game
 
 Asked "what else is flaky?", the history answered first: of 12 red Pages runs in
