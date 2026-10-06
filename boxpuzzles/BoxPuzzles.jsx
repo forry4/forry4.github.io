@@ -16,8 +16,10 @@
 // (midnight US Pacific), made and kept by the server (boxpuzzles/daily.py), ONE attempt,
 // saved as it is played, and a reset does NOT clear its count. The attempt is a list
 // of segments — the presses between resets — because the server replays each one from
-// the first board. Yesterday's box can be looked at (view only), with its minimum and
-// a shortest line played back on the board.
+// the first board. Once it is open, Play again starts RETRIES under the numbered boxes'
+// rules, for a second board: One Shot is the race, Best Shot the fewest presses.
+// Yesterday's box can be looked at (view only), with its minimum and a shortest line
+// played back on the board.
 //
 // Routes: /boxpuzzles (the picker), /boxpuzzles/<n> (box n, numbered easiest first) and
 // /boxpuzzles/daily. This screen owns its segment 2, like Notes.
@@ -174,18 +176,32 @@ const CHEVRON = (
 	</svg>
 );
 
+// THE DAILY'S TWO BOARDS: the one attempt, and the best of the retries after it (the
+// attempt counts there too). The server sends One Shot at the top level and Best Shot
+// under `best`.
+const DAILY_BOARDS = [["first", "One Shot"], ["best", "Best Shot"]];
+
 // `locked`: today's daily board cannot be opened until you have opened the box — in a
 // one-attempt race, a glance at the best score is a head start. The server enforces
 // it too: it will not hand today's board to anyone who has not opened the box.
-function Leaderboard({ board, open, onToggle, locked = false }) {
-	const entries = board && !board.error ? board.entries : [];
-	const you = board && !board.error ? board.you : null;
+// `tab`/`onTab`: the daily's two boards (DAILY_BOARDS), shown as tabs once it is open.
+function Leaderboard({ board, open, onToggle, locked = false, tab = null, onTab = null }) {
+	const tabbed = !!(tab && board && !board.error && board.best);
+	const view = tabbed && tab === "best" ? board.best : board;
+	const entries = view && !view.error ? view.entries : [];
+	const you = view && !view.error ? view.you : null;
 	const youListed = entries.some((e) => e.you);
 	return (
 		<div className={`bx-board${open ? " open" : ""}${locked ? " locked" : ""}`}>
 			<button type="button" className="bx-board-hd" aria-expanded={open} onClick={onToggle} disabled={locked}>
 				<h2>Leaderboard</h2>{CHEVRON}
 			</button>
+			{open && tabbed && <div className="bx-tabs" role="tablist">
+				{DAILY_BOARDS.map(([key, label]) => (
+					<button key={key} type="button" role="tab" className="bx-tab" data-board={key}
+						aria-selected={tab === key} onClick={() => onTab(key)}>{label}</button>
+				))}
+			</div>}
 			{open && (entries.length ? (
 				<ol className="bx-rows">
 					{entries.map((e) => (
@@ -500,6 +516,12 @@ function DailyToday({ daily, token, who, onDaily, onReload, onYesterday }) {
 	const [shake, setShake] = useState(0);
 	const [board, setBoard] = useState(null);
 	const [boardOpen, setBoardOpen] = useState(!!start?.solved);
+	const [tab, setTab] = useState("first");
+	// A RETRY, once the attempt has opened the box: a fresh box under the numbered
+	// boxes' rules (a reset clears its count, nothing is saved mid-solve), whose
+	// opening posts to Best Shot. { moves, post } like `opened`.
+	const [retryBox, setRetryBox] = useState(null);
+	const [retryOpened, setRetryOpened] = useState(null);
 
 	const saveLocal = useCallback((segs, solved, extra = {}) =>
 		onDaily({ day: daily.day, segments: segs, moves: totalMoves(segs), solved, ...extra }), [daily.day, onDaily]);
@@ -561,7 +583,37 @@ function DailyToday({ daily, token, who, onDaily, onReload, onYesterday }) {
 	const settled = !!opened && (opened.post === "guest" || opened.post === "done");
 	useEffect(() => { if (settled) loadBoard(); }, [settled, loadBoard]);
 
+	const postRetry = useCallback((moves) => {
+		if (!token) { setRetryOpened({ moves: moves.length, post: "guest" }); return; }
+		setRetryOpened({ moves: moves.length, post: "posting" });
+		api("/boxpuzzles/daily/retry", token, { day: daily.day, moves }).then((r) => {
+			setRetryOpened({ moves: moves.length, post: r });
+			setBoard(r.leaderboard);
+			setTab("best");
+		}).catch((e) => {
+			if (e.status === 409) onReload();             // the day turned over
+			else setRetryOpened({ moves: moves.length, post: "error" });
+		});
+	}, [token, daily.day, onReload]);
+	const playAgain = () => { setRetryOpened(null); setRetryBox(newBox(puzzle)); };
+
+	const pressRetryTile = (i) => {
+		if (retryOpened) return;
+		tileSound();
+		setRetryBox(pressTileInBox(retryBox, daily.target, i));
+	};
+	const pressRetryButton = (k) => {
+		if (retryOpened) return;
+		const { box: next, result } = pressButtonInBox(retryBox, puzzle, k);
+		if (result === "reset") { resetSound(); setShake((s) => s + 1); }
+		else if (result === "open") { openSound(); setBoardOpen(true); }
+		else litSound(next.lit.filter(Boolean).length);
+		setRetryBox(next);
+		if (result === "open") postRetry(next.moves);
+	};
+
 	const pressTile = (i) => {
+		if (retryBox) { pressRetryTile(i); return; }
 		if (opened) return;
 		tileSound();
 		const segs = [...segments.slice(0, -1), [...segments.at(-1), i]];
@@ -571,6 +623,7 @@ function DailyToday({ daily, token, who, onDaily, onReload, onYesterday }) {
 		queue(segs, false);
 	};
 	const pressButton = (k) => {
+		if (retryBox) { pressRetryButton(k); return; }
 		if (opened) return;
 		const { box: next, result } = pressButtonInBox(box, puzzle, k);
 		setBox(next);
@@ -594,9 +647,24 @@ function DailyToday({ daily, token, who, onDaily, onReload, onYesterday }) {
 	};
 	useTileKeys(pressTile);
 
-	const count = opened ? opened.moves : totalMoves(segments);
-	const result = opened && typeof opened.post === "object" ? opened.post : null;
-	const optimal = !!(result ? result.optimal : opened?.post === "done" && board?.you?.optimal);
+	const firstResult = opened && typeof opened.post === "object" ? opened.post : null;
+	// Play again once the attempt is on record (a guest's: on this device).
+	const recorded = !!(firstResult || opened?.post === "done" || opened?.post === "guest");
+	let shown, done, count, optimal, failed, resend;
+	if (retryBox) {
+		const r = retryOpened && typeof retryOpened.post === "object" ? retryOpened.post : null;
+		shown = retryBox; done = retryOpened;
+		count = retryOpened ? retryOpened.moves : retryBox.moves.length;
+		optimal = !!(r && r.optimal && r.best === retryOpened.moves);
+		failed = retryOpened?.post === "error";
+		resend = () => postRetry(retryBox.moves);
+	} else {
+		shown = box; done = opened;
+		count = opened ? opened.moves : totalMoves(segments);
+		optimal = !!(firstResult ? firstResult.optimal : opened?.post === "done" && board?.you?.optimal);
+		failed = opened?.post === "error";
+		resend = () => { setOpened((o) => ({ ...o, post: "posting" })); queue(segments, true); };
+	}
 	return (
 		<div className="bx-wrap">
 			<div className="bx-play">
@@ -606,19 +674,22 @@ function DailyToday({ daily, token, who, onDaily, onReload, onYesterday }) {
 						<h1 className="bx-title">Daily</h1>
 						<button className="btn btn-ghost btn-sm bx-arrow" disabled aria-label="Today's box">›</button>
 					</div>
-					<BoxFace id="daily" target={daily.target} box={box} shake={shake} opened={!!opened}
+					<BoxFace id="daily" target={daily.target} box={shown} shake={shake} opened={!!done}
 						onTile={pressTile} onButton={pressButton} />
-					<div className={`bx-controls${opened ? " bx-result" : ""}${optimal ? " optimal" : ""}`} role="status">
+					<div className={`bx-controls${done ? " bx-result" : ""}${optimal ? " optimal" : ""}`} role="status"
+						data-shot={retryBox ? "best" : "first"}>
 						<div className="bx-count"><b data-moves>{count}</b>{count === 1 ? "move" : "moves"}</div>
-						{opened && <div className="bx-result-actions">
-							{opened.post === "error" && <button className="btn btn-ghost btn-sm"
-								onClick={() => { setOpened((o) => ({ ...o, post: "posting" })); queue(segments, true); }}>Retry</button>}
+						{done && <div className="bx-result-actions">
+							{failed && <button className="btn btn-ghost btn-sm" onClick={resend}>Retry</button>}
+							{recorded && !failed && done.post !== "posting" &&
+								<button className="btn btn-ghost btn-sm bx-again" onClick={playAgain}>Play again</button>}
 							<Countdown at={daily.next_at} />
 						</div>}
 					</div>
 				</div>
 				<aside className="bx-side">
-					<Leaderboard board={board} open={boardOpen && !!opened} locked={!opened} onToggle={() => setBoardOpen((o) => !o)} />
+					<Leaderboard board={board} open={boardOpen && !!opened} locked={!opened} onToggle={() => setBoardOpen((o) => !o)}
+						tab={tab} onTab={setTab} />
 				</aside>
 			</div>
 		</div>
@@ -633,6 +704,7 @@ function DailyYesterday({ day, token, onToday }) {
 	const [step, setStep] = useState(0);          // presses of the line shown so far
 	const [playing, setPlaying] = useState(false);
 	const [boardOpen, setBoardOpen] = useState(true);
+	const [tab, setTab] = useState("first");
 	const load = useCallback(() => {
 		setFailed(false);
 		api(`/boxpuzzles/daily/${day}/board`, token).then(setData).catch(() => setFailed(true));
@@ -676,7 +748,8 @@ function DailyYesterday({ day, token, onToday }) {
 						</div>
 					</div>
 				</div>
-				<aside className="bx-side"><Leaderboard board={data} open={boardOpen} onToggle={() => setBoardOpen((o) => !o)} /></aside>
+				<aside className="bx-side"><Leaderboard board={data} open={boardOpen} onToggle={() => setBoardOpen((o) => !o)}
+					tab={tab} onTab={setTab} /></aside>
 			</div>
 		</div>
 	);

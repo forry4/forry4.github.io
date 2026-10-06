@@ -10160,6 +10160,24 @@ try {
 			check("one attempt: a reload shows the opened box, not a fresh one",
 				await count(page) === line.length + 1 && await page.locator(".bx-box.open").count() === 1
 				&& await page.locator(".bx-tile:not([disabled])").count() === 0);
+			// Play again: a retry under the numbered boxes' rules, kept on this device only
+			const retries = [];
+			page.on("request", (r) => { if (r.url().endsWith("/boxpuzzles/daily/retry")) retries.push(r.url()); });
+			await page.locator(".bx-again").click();
+			check("Play again starts a fresh box at zero",
+				await count(page) === 0 && (await tilesNow(page)).join("") === daily.tiles.join("")
+				&& await page.locator(".bx-tile:not([disabled])").count() === 9
+				&& await page.locator('.bx-controls[data-shot="best"]').count() === 1, String(await count(page)));
+			await page.locator(`.bx-tile[data-tile="${line[0]}"]`).click();
+			await page.locator(`.bx-cbtn[data-button="${wrong}"]`).click();
+			check("a wrong corner in a retry clears its count, as on a numbered box", await count(page) === 0);
+			await play(page, line);
+			await page.waitForSelector('.bx-result[data-shot="best"]', { timeout: 5000 }).catch(() => {});
+			check("a retry scores only the presses since its last reset, and a guest's posts nowhere",
+				await count(page) === line.length && await page.locator(".bx-again").count() === 1 && retries.length === 0,
+				`${await count(page)} vs ${line.length}; ${retries}`);
+			check("the daily's leaderboard has One Shot and Best Shot tabs",
+				(await page.locator(".bx-tab").allTextContents()).join("|") === "One Shot|Best Shot");
 			await page.locator(".bx-header .btn", { hasText: "Back" }).click();
 			await page.waitForSelector(".bx-daily-tile", { timeout: 5000 }).catch(() => {});
 			check("the picker's Daily tile carries the result",
@@ -10217,6 +10235,21 @@ try {
 				headers: { "Content-Type": "application/json", Authorization: `Bearer ${user.session_token}` },
 				body: JSON.stringify({ day: daily.day, segments: [line], open: true }) }).then((r) => r.status);
 			check("one attempt: a second, better solve is refused", again === 409, String(again));
+			// ...but a retry is welcome, and goes on Best Shot
+			const retried = page.waitForResponse((r) => r.url().endsWith("/boxpuzzles/daily/retry"), { timeout: 10_000 }).catch(() => null);
+			await page.locator(".bx-again").click();
+			await play(page, line);
+			const rr = await retried;
+			const rbody = rr ? await rr.json().catch(() => null) : null;
+			await page.waitForSelector('.bx-tab[data-board="best"][aria-selected="true"]', { timeout: 5000 }).catch(() => {});
+			check("a retry posts to Best Shot, which opens on your row in blue, One Shot untouched",
+				rr?.status() === 200 && rbody?.best === line.length && rbody?.optimal === true
+				&& rbody.leaderboard?.you?.moves === line.length + 1
+				&& await page.locator(".bx-row.me.optimal").count() === 1
+				&& await page.locator('.bx-result.optimal[data-shot="best"]').count() === 1, JSON.stringify(rbody));
+			await page.locator('.bx-tab[data-board="first"]').click();
+			check("the One Shot tab still shows the attempt",
+				await page.locator(".bx-row.me .bx-row-moves").textContent().catch(() => "") === String(line.length + 1));
 			check("no page errors (daily, second browser)", errors.length === 0, errors.join(" | "));
 			await ctx.close();
 		}
@@ -10237,7 +10270,9 @@ try {
 			});
 			await page.route(`http://localhost:${API_PORT}/boxpuzzles/daily/${yday}/board`, (route) => route.fulfill({ json: {
 				day: yday, tiles: box1.tiles, target: box1.target, minimum: line1.length, solution: line1, total: 2, you: null,
-				entries: [{ rank: 1, name: "Ann", moves: line1.length, optimal: true }, { rank: 2, name: "Bo", moves: line1.length + 3, optimal: false }] } }));
+				entries: [{ rank: 1, name: "Ann", moves: line1.length, optimal: true }, { rank: 2, name: "Bo", moves: line1.length + 3, optimal: false }],
+				best: { total: 3, you: null, entries: [{ rank: 1, name: "Ann", moves: line1.length, optimal: true },
+					{ rank: 2, name: "Bo", moves: line1.length, optimal: true }, { rank: 3, name: "Cy", moves: line1.length + 1, optimal: false }] } } }));
 			await page.goto(`http://localhost:${PORT}/boxpuzzles/daily`, { waitUntil: "networkidle" });
 			await page.waitForSelector('.bx-box[data-box="daily"]', { timeout: 25_000 }).catch(() => {});
 			await page.locator(".bx-nav .bx-arrow").first().click().catch(() => {});
@@ -10248,6 +10283,9 @@ try {
 				&& await page.locator(".bx-tile:not([disabled])").count() === 0, `${await tilesNow(page)} ${await count(page)}`);
 			check("yesterday's leaderboard is open, with the minimum's rows in blue",
 				await page.locator(".bx-row").count() === 2 && await page.locator(".bx-row.optimal").count() === 1);
+			await page.locator('.bx-tab[data-board="best"]').click();
+			check("yesterday's Best Shot tab shows the retries' board",
+				await page.locator(".bx-row").count() === 3 && await page.locator(".bx-row.optimal").count() === 2);
 			await page.locator(".bx-replay").click();
 			await page.waitForSelector('.bx-box[data-box="yesterday"].open', { timeout: 10_000 }).catch(() => {});
 			check("▶ plays a shortest line out on the board until it opens",

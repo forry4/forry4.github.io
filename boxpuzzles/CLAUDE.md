@@ -12,7 +12,7 @@ card: it has no lobby, rooms or bot), at `/boxpuzzles`, `/boxpuzzles/<n>` and
 | `puzzles.json` | the 71 boxes, **GENERATED**, shipped in the lazy chunk |
 | `minimums.json` | id -> fewest presses, **GENERATED, server-only** |
 | `api.py` | the leaderboard: `setup_box_puzzles` (Books/Notes injected-deps pattern) + the daily routes |
-| `daily.py` | the daily box: Pacific day clock, generator, `box_daily` + `box_daily_attempts`, attempt rules |
+| `daily.py` | the daily box: Pacific day clock, generator, `box_daily` + `box_daily_attempts` + `box_daily_best`, attempt and retry rules |
 | `BoxPuzzles.jsx` / `.css` | the page (picker + box + leaderboard) |
 | `sound.js` | the sounds, synthesised with Web Audio (no files) + the per-device mute |
 | `tools/import_bank.py` | source JSON -> `puzzles.json` + `minimums.json` |
@@ -69,7 +69,7 @@ fails as a refused solve.
 
 One new box a day, **ONE attempt**, and **a reset does not clear the count** — it is a
 race for the fewest presses in a single try. Everything about it is `daily.py` and the
-three `/boxpuzzles/daily*` routes; the numbered boxes' rules above are untouched.
+four `/boxpuzzles/daily*` routes; the numbered boxes' rules above are untouched.
 
 - **The day turns at midnight US Pacific, daylight saving included.** Computed by hand
   (`pacific_offset`), not `zoneinfo`: neither the Windows dev boxes nor the slim prod
@@ -109,10 +109,25 @@ three `/boxpuzzles/daily*` routes; the numbered boxes' rules above are untouched
   (403) unless the caller has opened the box: a signed-in player's solved attempt is on
   record; a guest's is not, so the page sends the opening line (`?line=`) and the server
   replays it — anyone holding such a line has the answer already. Past days are public.
+- **Then retries, on a second board** (owner's call, 2026-10-06: "a way to retry the
+  daily after you've completed it so you can try for the optimal solve"). Once the one
+  attempt has opened the box, **Play again** starts a retry under the NUMBERED boxes'
+  rules — a reset clears its count, nothing is saved mid-solve — and its opening posts
+  to `POST /boxpuzzles/daily/retry` (the presses since its last reset, replayed; 403
+  until the attempt is open, so retries are never practice for the race). The two
+  boards are tabs on the daily's leaderboard: **One Shot** (`box_daily_attempts`, the
+  race) and **Best Shot** (`box_daily_best`, each player's fewest; a tie with yourself
+  keeps the earlier time). The attempt seeds Best Shot with its score, and
+  `init_daily_db` backfills attempts opened before Best Shot existed. The board payload
+  keeps One Shot at the top level and adds Best Shot under `best`, so a cached page
+  still reads it. Today's minimum stays secret on both: blue only on your own row, so
+  a retry turning blue is how you learn you found the optimal line. A guest's retries
+  post nowhere.
 - An attempt still open at midnight is lost: the server refuses a save for a day that
   is over (409), and the page loads the new box.
 - `screens.mjs` `boxDaily` plays today's real box (the harness solves it with engine.js),
-  across a reset, a reload and a second browser, and drives yesterday's view against a
+  across a reset, a reload and a second browser, retries it for Best Shot (guest and
+  signed in), and drives yesterday's view against a
   STUBBED day (the gate's database has no yesterday).
 - **Local `screens` reuse `games/spender/users.db`**, so after ~20 runs box 1's top 20 is
   all earlier gate accounts tied at the minimum, and `boxPuzzles`' "another viewer sees

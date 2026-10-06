@@ -39,6 +39,7 @@ def _cancelling_pair():
 @pytest.fixture(autouse=True)
 def _quiet(monkeypatch):
     B._daily_minute.reset()
+    B._solves_minute.reset()
     # never start the background filler from a test
     monkeypatch.setattr(D, "start_filler", lambda get_db_conn: None)
     yield
@@ -223,6 +224,62 @@ def test_today_keeps_the_minimum_secret_and_yesterday_reveals_it(conn):
     assert all(e["optimal"] for e in done["entries"])
 
 
+# ── retries: Best Shot ───────────────────────────────────────────────────────
+def test_the_one_attempt_seeds_best_shot(conn):
+    pair = _cancelling_pair()
+    D.save_attempt(conn, "u_alice", BOX, [pair, LINE], opened=True, now=100.0)
+    board = D.daily_board(conn, BOX, "u_alice", reveal=False)
+    assert [(e["name"], e["moves"]) for e in board["entries"]] == [("alice", len(LINE) + 2)]
+    assert [(e["name"], e["moves"]) for e in board["best"]["entries"]] == [("alice", len(LINE) + 2)]
+
+
+def test_a_retry_needs_the_one_attempt_opened_first(conn):
+    with pytest.raises(D.Refused) as e:
+        D.save_retry(conn, "u_alice", BOX, LINE)
+    assert e.value.status == 403
+    D.save_attempt(conn, "u_alice", BOX, [[LINE[0]]], opened=False)          # partway through
+    with pytest.raises(D.Refused) as e:
+        D.save_retry(conn, "u_alice", BOX, LINE)
+    assert e.value.status == 403
+
+
+def test_retries_keep_the_best_and_leave_one_shot_alone(conn):
+    pair = _cancelling_pair()
+    D.save_attempt(conn, "u_alice", BOX, [pair + LINE], opened=True, now=100.0)
+    assert D.save_retry(conn, "u_alice", BOX, pair + pair + LINE, now=150.0) == {
+        "best": len(LINE) + 2, "improved": False}                              # worse: ignored
+    assert D.save_retry(conn, "u_alice", BOX, LINE, now=200.0) == {"best": len(LINE), "improved": True}
+    with pytest.raises(D.Refused):
+        D.save_retry(conn, "u_alice", BOX, LINE[:-1])                          # does not open it
+    board = D.daily_board(conn, BOX, "u_alice", reveal=False)
+    assert board["you"] == {"rank": 1, "moves": len(LINE) + 2, "optimal": False}
+    assert board["best"]["you"] == {"rank": 1, "moves": len(LINE), "optimal": True}
+
+
+def test_best_shot_ties_go_to_the_first_to_get_there(conn):
+    pair = _cancelling_pair()
+    D.save_attempt(conn, "u_alice", BOX, [pair + LINE], opened=True, now=100.0)
+    D.save_attempt(conn, "u_bob", BOX, [pair + LINE], opened=True, now=110.0)
+    D.save_retry(conn, "u_bob", BOX, LINE, now=120.0)
+    D.save_retry(conn, "u_alice", BOX, LINE, now=130.0)
+    D.save_retry(conn, "u_bob", BOX, LINE, now=140.0)                          # a tie with yourself: no move
+    best = D.daily_board(conn, BOX, None, reveal=False)["best"]
+    assert [e["name"] for e in best["entries"]] == ["bob", "alice"]
+    assert all("optimal" not in e for e in best["entries"])                    # still today's secret
+    done = D.daily_board(conn, BOX, None, reveal=True)["best"]
+    assert all(e["optimal"] for e in done["entries"])
+
+
+def test_attempts_opened_before_best_shot_are_carried_over(conn):
+    conn.cursor().execute("INSERT INTO box_daily_attempts (user_id, day, segments, moves, solved_at, updated_at) "
+                          "VALUES ('u_bob', ?, '[[0]]', 9, 50.0, 50.0)", (TODAY,))
+    conn.commit()
+    D.init_daily_db(conn)
+    D.init_daily_db(conn)                                                      # and only once
+    best = D.daily_board(conn, BOX, None, reveal=False)["best"]
+    assert [(e["name"], e["moves"]) for e in best["entries"]] == [("bob", 9)] and best["total"] == 1
+
+
 # ── the routes ───────────────────────────────────────────────────────────────
 @pytest.fixture()
 def app(get_conn, conn, monkeypatch):
@@ -306,6 +363,26 @@ def test_the_routes_refuse_what_they_should(app):
     ):
         with pytest.raises(HTTPException) as e:
             call()
+        assert e.value.status_code == code
+
+
+def test_the_retry_round_trip(app):
+    post = _endpoint(app, "POST", "/boxpuzzles/daily/attempt")
+    retry = _endpoint(app, "POST", "/boxpuzzles/daily/retry")
+    pair = _cancelling_pair()
+    with pytest.raises(HTTPException) as e:
+        retry(B.RetryIn(day=TODAY, moves=LINE), user=ALICE)                    # before the one attempt
+    assert e.value.status_code == 403
+    post(B.AttemptIn(day=TODAY, segments=[pair + LINE], open=True), user=ALICE)
+    r = retry(B.RetryIn(day=TODAY, moves=LINE), user=ALICE)
+    assert r["moves"] == len(LINE) and r["best"] == len(LINE) and r["improved"] and r["optimal"] is True
+    assert r["leaderboard"]["you"]["moves"] == len(LINE) + 2                    # One Shot never moves
+    assert r["leaderboard"]["best"]["you"]["moves"] == len(LINE)
+    assert "minimum" not in r["leaderboard"]
+    for payload, code in ((B.RetryIn(day=YESTERDAY, moves=LINE), 409),
+                          (B.RetryIn(day=TODAY, moves=LINE[:-1]), 400)):
+        with pytest.raises(HTTPException) as e:
+            retry(payload, user=ALICE)
         assert e.value.status_code == code
 
 

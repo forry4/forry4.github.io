@@ -164,3 +164,12 @@
 .bx-rot .bx-picker{grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:10px;}
 .bx-rot .bx-box{border-radius:18px;}
 .bx-rot .bx-play{grid-template-columns:minmax(0,1fr);}
+
+/* The daily's two boards, One Shot and Best Shot, as tabs under the title. */
+.bx-tabs{display:flex;gap:6px;margin:0 16px 10px;}
+.bx-tab{flex:1;padding:6px 8px;background:none;border:1px solid var(--border);border-radius:6px;
+	color:var(--text-dim);cursor:pointer;font:inherit;font-size:.8rem;letter-spacing:.04em;}
+.bx-tab:hover{color:var(--text-soft);}
+.bx-tab:focus-visible{outline:2px solid var(--gold-light);outline-offset:1px;}
+.bx-tab[aria-selected="true"]{color:var(--gold-light);border-color:rgba(201,168,76,.55);
+	background:rgba(201,168,76,.10);}

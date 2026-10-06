@@ -22,7 +22,8 @@ player could want to cheat, so:
 
 The DAILY box (boxpuzzles/daily.py) is the one exception to "nothing to serve": it
 is generated here and only today's is handed out, so it is never in the bundle. Its
-attempt IS saved mid-solve, server-side, and may only grow.
+attempt IS saved mid-solve, server-side, and may only grow. Once it has opened the
+box, retries post to a second board (Best Shot) through `/boxpuzzles/daily/retry`.
 
 The handlers are plain `def`, so their DB round-trips run in FastAPI's threadpool
 rather than on the event loop the game sockets share.
@@ -156,6 +157,11 @@ class AttemptIn(BaseModel):
     day: str = Field(max_length=10)
     segments: list[list[int]] = Field(max_length=D.MAX_SEGMENTS)
     open: bool = False
+
+
+class RetryIn(BaseModel):
+    day: str = Field(max_length=10)
+    moves: list[int] = Field(max_length=D.MAX_MOVES)
 
 
 def _iso_day(day: str) -> str:
@@ -302,4 +308,28 @@ def setup_box_puzzles(app, get_db_conn, get_user_by_session, token_resolver=None
                 out["optimal"] = rec["moves"] <= box["minimum"]
                 out["leaderboard"] = D.daily_board(c, box, uid, reveal=False)
             return out
+        return run(go)
+
+    # A RETRY, after the one attempt has opened the box: the presses since its last
+    # reset, replayed here, kept on Best Shot if they beat the player's best.
+    @app.post("/boxpuzzles/daily/retry")
+    def box_daily_retry(payload: RetryIn, user: dict = Depends(member)):
+        uid = user["id"]
+        if _solves_minute.exceeded(uid):
+            alerts.alert("boxpuzzles-rate", f"{user.get('name') or uid} is posting daily Box Puzzle "
+                         "retries faster than the limit; requests are refused.", key=f"boxpuzzles-rate:{uid}")
+            raise HTTPException(status_code=429, detail="Too many solves. Wait a minute and try again.")
+        _solves_minute.record(uid)
+        today = D.pacific_day()
+        if payload.day != today:
+            raise HTTPException(status_code=409, detail="that day is over")
+
+        def go(c):
+            box = D.ensure_day(c, today)
+            try:
+                rec = D.save_retry(c, uid, box, payload.moves)
+            except D.Refused as e:
+                raise HTTPException(status_code=e.status, detail=str(e))
+            return {"moves": len(payload.moves), **rec, "optimal": rec["best"] <= box["minimum"],
+                    "leaderboard": D.daily_board(c, box, uid, reveal=False)}
         return run(go)

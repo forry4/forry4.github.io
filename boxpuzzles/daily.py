@@ -33,6 +33,15 @@ segment — a reset no longer clears the count — so the server must see the se
 not one flat list, to replay where each one started. A save is accepted only if it
 EXTENDS what is stored (same earlier segments, the stored last one as a prefix), and
 an opened box is final. That one rule is both "progress is saved" and "no rewinding".
+
+THEN AS MANY RETRIES AS YOU LIKE, ON A SECOND BOARD (owner's call, 2026-10-06). Once
+the attempt has opened the box it may be played again, for the fewest presses, with the
+numbered boxes' rules: the count is the presses since the last reset, nothing is saved
+mid-solve, and each player keeps their best (a tie keeps the earlier time). The two
+boards are ONE SHOT (`box_daily_attempts`, the race) and BEST SHOT (`box_daily_best`).
+The one attempt seeds Best Shot with its score, so a player who never retries still
+has a row there. Retries need the one attempt done first — a retry before it would be
+free practice for the race.
 """
 from __future__ import annotations
 
@@ -253,6 +262,19 @@ def init_daily_db(conn) -> None:
     )""")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_box_daily_board "
                 "ON box_daily_attempts (day, solved_at, moves)")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS box_daily_best (
+        user_id TEXT NOT NULL,
+        day TEXT NOT NULL,
+        moves INTEGER NOT NULL,
+        solved_at REAL NOT NULL,
+        PRIMARY KEY (user_id, day)
+    )""")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_box_daily_best_board "
+                "ON box_daily_best (day, moves, solved_at)")
+    # Attempts opened before Best Shot existed seed it too (a no-op once they have).
+    cur.execute("INSERT OR IGNORE INTO box_daily_best (user_id, day, moves, solved_at) "
+                "SELECT user_id, day, moves, solved_at FROM box_daily_attempts WHERE solved_at IS NOT NULL")
     conn.commit()
 
 
@@ -403,20 +425,55 @@ def save_attempt(conn, user_id: str, box: dict, segments, opened: bool,
         cur.execute("UPDATE box_daily_attempts SET segments=?, moves=?, solved_at=?, updated_at=? "
                     "WHERE user_id=? AND day=?", (blob, moves, solved_at, now, user_id, box["day"]))
     conn.commit()
+    if opened:
+        _keep_best(conn, user_id, box["day"], moves, now)
     return {"segments": segments, "moves": moves, "solved": opened}
 
 
-def daily_board(conn, box: dict, user_id: str | None, reveal: bool, size: int = BOARD_SIZE) -> dict:
-    """The day's finished attempts, fewest presses first and the earlier finish first
-    on a tie. While the day is live (`reveal` False) the minimum stays secret and only
-    the caller's own row says whether it is optimal; once the day is over every row
-    does, and the minimum and a shortest line come with it."""
-    day, minimum = box["day"], box["minimum"]
+def _keep_best(conn, user_id: str, day: str, moves: int, now: float) -> dict:
     cur = conn.cursor()
-    cur.execute("""
-        SELECT a.user_id, u.name, a.moves FROM box_daily_attempts a
+    cur.execute("SELECT moves FROM box_daily_best WHERE user_id=? AND day=?", (user_id, day))
+    row = cur.fetchone()
+    if row is None:
+        cur.execute("INSERT INTO box_daily_best (user_id, day, moves, solved_at) VALUES (?, ?, ?, ?)",
+                    (user_id, day, moves, now))
+    elif moves < row[0]:
+        cur.execute("UPDATE box_daily_best SET moves=?, solved_at=? WHERE user_id=? AND day=?",
+                    (moves, now, user_id, day))
+    else:
+        return {"best": row[0], "improved": False}
+    conn.commit()
+    return {"best": moves, "improved": True}
+
+
+def save_retry(conn, user_id: str, box: dict, moves, now: float | None = None) -> dict:
+    """A retry that opened the box: `moves` (the presses since its last reset) must
+    open it from the first board. Kept if it beats the player's best. Refused until
+    their one attempt has opened the box."""
+    now = time.time() if now is None else now
+    stored = load_attempt(conn, user_id, box["day"])
+    if stored is None or not stored["solved"]:
+        raise Refused("open today's box first", status=403)
+    if (not isinstance(moves, list) or len(moves) > MAX_MOVES
+            or any(not isinstance(m, int) or isinstance(m, bool) or not 0 <= m <= 8 for m in moves)):
+        raise Refused("bad moves")
+    if not corners_match(replay(box["tiles"], moves), box["target"]):
+        raise Refused("that does not open the box")
+    return _keep_best(conn, user_id, box["day"], len(moves), now)
+
+
+# The two boards: which table, and whether a row must be a finished one.
+_BOARDS = {"first": ("box_daily_attempts", "AND a.solved_at IS NOT NULL"),
+           "best": ("box_daily_best", "")}
+
+
+def _ranked(conn, which: str, day: str, minimum: int, user_id: str | None, reveal: bool, size: int) -> dict:
+    table, finished = _BOARDS[which]
+    cur = conn.cursor()
+    cur.execute(f"""
+        SELECT a.user_id, u.name, a.moves FROM {table} a
         LEFT JOIN users u ON u.id = a.user_id
-        WHERE a.day=? AND a.solved_at IS NOT NULL
+        WHERE a.day=? {finished}
         ORDER BY a.moves, a.solved_at LIMIT ?""", (day, size))
     entries = []
     for rank, (uid, name, moves) in enumerate(cur.fetchall(), 1):
@@ -427,19 +484,30 @@ def daily_board(conn, box: dict, user_id: str | None, reveal: bool, size: int = 
         if mine or reveal:
             e["optimal"] = moves <= minimum
         entries.append(e)
-    cur.execute("SELECT COUNT(*) FROM box_daily_attempts WHERE day=? AND solved_at IS NOT NULL", (day,))
+    cur.execute(f"SELECT COUNT(*) FROM {table} a WHERE a.day=? {finished}", (day,))
     total = cur.fetchone()[0]
     you = None
     if user_id:
-        cur.execute("SELECT moves, solved_at FROM box_daily_attempts "
-                    "WHERE user_id=? AND day=? AND solved_at IS NOT NULL", (user_id, day))
+        cur.execute(f"SELECT a.moves, a.solved_at FROM {table} a WHERE a.user_id=? AND a.day=? {finished}",
+                    (user_id, day))
         mine = cur.fetchone()
         if mine is not None:
-            cur.execute("""SELECT COUNT(*) FROM box_daily_attempts WHERE day=? AND solved_at IS NOT NULL
-                           AND (moves < ? OR (moves = ? AND solved_at < ?))""",
+            cur.execute(f"""SELECT COUNT(*) FROM {table} a WHERE a.day=? {finished}
+                            AND (a.moves < ? OR (a.moves = ? AND a.solved_at < ?))""",
                         (day, mine[0], mine[0], mine[1]))
             you = {"rank": cur.fetchone()[0] + 1, "moves": mine[0], "optimal": mine[0] <= minimum}
-    out = {"day": day, "entries": entries, "total": total, "you": you}
+    return {"entries": entries, "total": total, "you": you}
+
+
+def daily_board(conn, box: dict, user_id: str | None, reveal: bool, size: int = BOARD_SIZE) -> dict:
+    """The day's two boards, fewest presses first and the earlier finish first on a
+    tie: One Shot at the top level (where it always was, so a cached page still reads
+    it) and Best Shot under `best`. While the day is live (`reveal` False) the minimum
+    stays secret and only the caller's own row says whether it is optimal; once the
+    day is over every row does, and the minimum and a shortest line come with it."""
+    day, minimum = box["day"], box["minimum"]
+    out = {"day": day, **_ranked(conn, "first", day, minimum, user_id, reveal, size),
+           "best": _ranked(conn, "best", day, minimum, user_id, reveal, size)}
     if reveal:
         out.update(tiles=box["tiles"], target=box["target"], minimum=minimum, solution=box["solution"])
     return out
