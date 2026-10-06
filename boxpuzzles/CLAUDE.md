@@ -87,7 +87,11 @@ four `/boxpuzzles/daily*` routes; the numbered boxes' rules above are untouched.
   (64% can't reach any one-colour target; most of the rest open in 3–6). It keeps a
   board only if its minimum is the day's drawn depth (uniform 8–15, owner's range),
   graying out ANY one colour changes that minimum (no decoration), and it has at most
-  200 shortest lines (the real bank's 8–15 boxes have a median of 28). Targets are one
+  200 shortest lines (the real bank's 8–15 boxes have a median of 28), and **no trope**:
+  one repeated motif (1–4 presses, 3+ times) may cover at most half of every shortest
+  line — length is not difficulty (chandler.io's solution-space analysis: long boxes are
+  mostly one trick repeated). A corner-greedy-player filter was measured and NOT added:
+  it could not fire (see `daily.py`'s docstring for both measurements). Targets are one
   colour or a symmetric pair (diagonal / top-bottom / left-right; every mixed target in
   the real bank is diagonal). Measured: every depth 8–15 hits exactly in 0–20s locally.
 - **Who generates:** a daemon filler keeps tomorrow and the day after ready, started by

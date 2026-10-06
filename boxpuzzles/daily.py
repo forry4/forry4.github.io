@@ -19,12 +19,24 @@ in 3-6 presses. So the generator explores EVERYTHING a random board can reach (a
 thousand boards, ~40ms) and only then picks the target, from the corner patterns that
 board can actually make. The real bank's mixed targets are all symmetric pairs, so
 those are the shapes allowed: one colour, diagonal pairs, top/bottom, left/right.
-Then three filters, each one a way a box is bad for a one-attempt race:
+Then four filters, each one a way a box is bad for a one-attempt race:
   * the minimum is the day's drawn depth, 8..15 (owner's range);
   * EVERY COLOUR MATTERS — graying out any one colour must change the minimum, or that
     colour was decoration;
   * AT MOST `MAX_WAYS` SHORTEST LINES — the real boxes in the same range have a median
-    of 28, and a box with thousands can be stumbled through.
+    of 28, and a box with thousands can be stumbled through;
+  * NO TROPES — LENGTH IS NOT DIFFICULTY. chandler.io's solution-space analysis of every
+    Mora Jai box found the long ones are mostly one trick repeated (a centre column
+    driving the blues, a centre row shuffled through them). Every shortest line must
+    have at most `MAX_TROPE` of its presses covered by ONE repeated motif (a run of 1-4
+    presses occurring 3+ times); if any shortest line avoids the repetition, it is not
+    forced. Measured (2026-10-06): median share 0.27 in both the real 8-15 boxes and
+    generated ones, but generated had the longer tail (worst: 14 presses, 11 of them the
+    centre tile); > 0.5 rejects 4 of 80 generated and 1 of 46 real.
+A corner-greedy player test was measured too and NOT added: it cannot fire. A player
+pressing whatever matches the most corners hit the minimum on <= 0.7% of tries on any
+generated box (<= 4.3% on the real ones) and opened them at all on <= 8% (real: <= 30%),
+so the generated boxes already resist it better than the designed ones.
 
 ONE ATTEMPT, AND IT ONLY GROWS. An attempt is a list of SEGMENTS: the tile presses
 between resets (a reset is a corner button pressed while its corner does not match,
@@ -53,10 +65,11 @@ from datetime import date, datetime, timedelta, timezone
 
 from core.rooms import deal_rng
 
-from boxpuzzles.engine import COLORS, CORNERS, corners_match, press, replay, solve
+from boxpuzzles.engine import COLORS, CORNERS, corners_match, press, replay
 
 MIN_DEPTH, MAX_DEPTH = 8, 15
 MAX_WAYS = 200
+MAX_TROPE = 0.5             # most of a shortest line one repeated motif may cover
 STATE_CAP = 40_000          # boards explored per candidate; a bigger board is skipped
 MAX_MOVES = 2000            # an attempt longer than this is refused
 MAX_SEGMENTS = MAX_MOVES + 1   # the page never starts an empty segment, so a reset costs a press
@@ -154,25 +167,58 @@ def _reaches_within(start: tuple, target: tuple, limit: int) -> bool:
     return False
 
 
-def shortest_ways(start: tuple, target: tuple, cap: int | None = None) -> int:
-    """How many distinct shortest press sequences open the box (layered BFS)."""
+def shortest_lines(start: tuple, target: tuple, cap: int = MAX_WAYS + 1) -> list[list[int]]:
+    """The distinct shortest press sequences that open the box, up to `cap` of them
+    (a layered BFS keeping every parent one layer up, then walked back)."""
+    start = tuple(start)
     if corners_match(start, target):
-        return 1
-    layer = {start: 1}
-    seen = {start}
+        return [[]]
+    parents: dict[tuple, list] = {start: []}
+    layer = [start]
     while layer:
-        nxt: dict[tuple, int] = {}
-        for t, n in layer.items():
+        nxt: dict[tuple, list] = {}
+        for t in layer:
             for i in range(9):
                 u = press(t, i)
-                if u not in seen:
-                    nxt[u] = nxt.get(u, 0) + n
-        seen.update(nxt)
-        hits = sum(n for u, n in nxt.items() if corners_match(u, target))
-        if hits:
-            return hits
-        layer = nxt
-    return 0
+                if u not in parents:
+                    nxt.setdefault(u, []).append((t, i))
+        parents.update(nxt)
+        goals = [u for u in nxt if corners_match(u, target)]
+        if goals:
+            out: list[list[int]] = []
+
+            def back(u, tail):
+                if len(out) >= cap:
+                    return
+                if not parents[u]:
+                    out.append(tail[::-1])
+                    return
+                for t, i in parents[u]:
+                    back(t, tail + [i])
+            for g in goals:
+                back(g, [])
+            return out
+        layer = list(nxt)
+    return []
+
+
+def motif_share(line: list[int]) -> float:
+    """The largest share of `line` covered by one motif — a run of 1-4 presses —
+    repeated 3+ times without overlapping. 0 when nothing repeats that often."""
+    n, best = len(line), 0.0
+    for k in range(1, 5):
+        for s in range(n - k + 1):
+            motif = line[s:s + k]
+            occ, i = 0, 0
+            while i <= n - k:
+                if line[i:i + k] == motif:
+                    occ += 1
+                    i += k
+                else:
+                    i += 1
+            if occ >= 3:
+                best = max(best, occ * k / n)
+    return best
 
 
 def _targets(tiles: tuple, depth: dict) -> dict[tuple, int]:
@@ -196,12 +242,17 @@ def _targets(tiles: tuple, depth: dict) -> dict[tuple, int]:
     return out
 
 
-def _good(tiles: tuple, target: tuple, m: int) -> bool:
+def _good(tiles: tuple, target: tuple, m: int) -> list[int] | None:
+    """The box's least repetitive shortest line if it passes every filter, else None."""
     for c in set(tiles) - {"GY"}:
         grayed = tuple("GY" if x == c else x for x in tiles)
         if _reaches_within(grayed, target, m) and not _reaches_within(grayed, target, m - 1):
-            return False            # that colour changed nothing
-    return 1 <= shortest_ways(tiles, target) <= MAX_WAYS
+            return None             # that colour changed nothing
+    lines = shortest_lines(tiles, target)
+    if not 1 <= len(lines) <= MAX_WAYS:
+        return None
+    line = min(lines, key=motif_share)
+    return line if motif_share(line) <= MAX_TROPE else None
 
 
 def _candidate(rng: random.Random) -> tuple:
@@ -226,13 +277,14 @@ def generate(rng: random.Random, want: int, budget: float = FILLER_BUDGET,
             for target, m in ranked[:3]:
                 if best is not None and abs(m - want) >= abs(best[2] - want):
                     break
-                if _good(tiles, target, m):
-                    best = (tiles, target, m)
+                line = _good(tiles, target, m)
+                if line is not None:
+                    best = (tiles, target, m, line)
                     break
         if best is not None and (best[2] == want or time.monotonic() > deadline):
-            tiles, target, m = best
-            line = solve(tiles, target)
-            assert line is not None and len(line) == m
+            tiles, target, m, line = best
+            # the stored line (yesterday's replay) is the least repetitive shortest one
+            assert len(line) == m and corners_match(replay(tiles, line), target)
             return {"tiles": list(tiles), "target": list(target), "minimum": m, "solution": line}
         if pause:
             time.sleep(pause)

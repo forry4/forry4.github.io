@@ -125,7 +125,39 @@ def test_a_generated_box_is_a_good_one(seed):
         grayed = tuple("GY" if x == c else x for x in tiles)
         line = solve(grayed, target)
         assert line is None or len(line) != m, f"{c} is decoration on {tiles}"
-    assert 1 <= D.shortest_ways(tiles, target) <= D.MAX_WAYS
+    lines = D.shortest_lines(tiles, target)
+    assert 1 <= len(lines) <= D.MAX_WAYS
+    # no trope: the stored line is the least repetitive shortest one, and within bounds
+    assert box["solution"] in lines
+    assert D.motif_share(box["solution"]) == min(map(D.motif_share, lines)) <= D.MAX_TROPE
+
+
+@pytest.mark.parametrize("line, share", [
+    ([4, 4, 4, 4, 4, 4, 2, 5, 4, 2, 4, 4, 4, 4], 11 / 14),   # the worst generated box measured
+    ([3, 4, 3, 4, 3, 4, 1, 2], 6 / 8),                       # a pair, three times
+    ([1, 2, 3, 1, 2, 3, 1, 2, 3, 0], 9 / 10),                # a triple, three times
+    ([0, 1, 2, 3, 4, 5, 6, 7], 0.0),                          # nothing repeats
+    ([5, 5, 1, 2, 3, 4], 0.0),                                # twice is not a trope
+])
+def test_motif_share_measures_one_repeated_trick(line, share):
+    assert D.motif_share(line) == pytest.approx(share)
+
+
+def test_shortest_lines_agrees_with_the_bank_importers_count():
+    """Two independent counts of the same thing: the importer's layered path count and
+    this enumeration, on real boxes whose line counts fit under the cap."""
+    from boxpuzzles.tools.import_bank import shortest_solution_count
+    checked = 0
+    for p in list(B.BANK.values())[:30]:
+        n = shortest_solution_count(p["tiles"], p["target"])
+        if n > D.MAX_WAYS:
+            continue
+        lines = D.shortest_lines(p["tiles"], p["target"])
+        assert len(lines) == n and len({tuple(l) for l in lines}) == n
+        assert all(len(l) == B.MINIMUMS[p["id"]] and corners_match(replay(p["tiles"], l), p["target"])
+                   for l in lines)
+        checked += 1
+    assert checked >= 20
 
 
 def test_the_generator_reaches_the_deep_end_too():
