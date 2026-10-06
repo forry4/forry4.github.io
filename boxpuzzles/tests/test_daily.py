@@ -220,7 +220,10 @@ def test_today_keeps_the_minimum_secret_and_yesterday_reveals_it(conn):
     done = D.daily_board(conn, BOX, None, reveal=True)
     assert done["minimum"] == len(LINE) and done["solution"] == LINE
     assert done["tiles"] == FIRST["tiles"] and done["target"] == FIRST["target"]
-    assert all(e["optimal"] for e in done["entries"])
+    # blue is for you alone, even once the day is over: nobody else's row says it
+    assert not any("optimal" in e for e in done["entries"])
+    mine = D.daily_board(conn, BOX, "u_bob", reveal=True)
+    assert [("optimal" in e) for e in mine["entries"]] == [False, True] and mine["you"]["optimal"]
 
 
 # ── the routes ───────────────────────────────────────────────────────────────

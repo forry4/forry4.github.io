@@ -625,8 +625,9 @@ function DailyToday({ daily, token, who, onDaily, onReload, onYesterday }) {
 	);
 }
 
-// YESTERDAY, VIEW ONLY: its first board, its minimum (blue, as a minimum is drawn
-// everywhere), every row that reached it in blue, and ▶ to watch a shortest line play.
+// YESTERDAY, VIEW ONLY: its first board, its minimum, and ▶ to watch a shortest line
+// play. BLUE MEANS "YOU REACHED THE MINIMUM" AND IS FOR YOU ALONE (owner's call): only
+// your own row can be blue here, never another player's, and the minimum is not blue.
 function DailyYesterday({ day, token, onToday }) {
 	const [data, setData] = useState(null);
 	const [failed, setFailed] = useState(false);
@@ -668,7 +669,7 @@ function DailyYesterday({ day, token, onToday }) {
 					{nav}
 					<BoxFace id="yesterday" target={data.target} box={box} opened={done} disabled
 						hint={playing && step < line.length ? line[step] : -1} />
-					<div className="bx-controls bx-result optimal" role="status">
+					<div className="bx-controls bx-result" role="status">
 						<div className="bx-count"><b data-moves>{playing || step ? step : data.minimum}</b>{data.minimum === 1 ? "move" : "moves"}</div>
 						<div className="bx-result-actions">
 							<button className="btn btn-ghost btn-sm bx-replay" disabled={playing} aria-label="Play a shortest line"
