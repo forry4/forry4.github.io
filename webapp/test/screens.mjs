@@ -10252,6 +10252,39 @@ try {
 		}
 	}
 
+	// THE "NEW VERSION" BANNER (shared/update-nudge.js) on a phone. It was centred with
+	// left:50% + translateX(-50%), which caps a fixed box at HALF the viewport, so at
+	// 390px the message wrapped into a 225px column, four lines deep. It only appears
+	// when the deployed build differs from this tab's (and an unstamped local build
+	// never checks), so the module is loaded into a blank page and the banner shown
+	// directly. FONT-INDEPENDENT on purpose (CI's fallback serif runs ~27% wider): the
+	// message may wrap only once the banner already spans the whole usable width.
+	async function updateNudgeLayout(log) {
+		const check = (name, cond, detail = "") => {
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(`update nudge: ${name}`); log(`  FAIL ${name}  ${detail}`); }
+		};
+		const src = readFileSync(path.join(webappDir, "..", "shared", "update-nudge.js"), "utf8")
+			+ ";window.__showNudge = showBanner;";
+		for (const width of [320, 390, 1280]) {
+			const page = await browser.newPage({ viewport: { width, height: 800 } });
+			await page.setContent("<!doctype html><meta name=viewport content='width=device-width'><body style='margin:0'></body>");
+			await page.addScriptTag({ type: "module", content: src });
+			await page.evaluate(() => window.__showNudge());
+			const g = await page.evaluate(() => {
+				const bar = document.getElementById("fg-update-nudge");
+				const b = bar.getBoundingClientRect(), m = bar.querySelector("span").getBoundingClientRect();
+				const line = parseFloat(getComputedStyle(bar).lineHeight) || 18;
+				return { left: b.left, right: innerWidth - b.right, width: b.width, usable: innerWidth - 24,
+					lines: Math.round(m.height / line), buttons: bar.querySelectorAll("button").length };
+			});
+			check(`at ${width}px the banner wraps only when it fills the width, and is centred`,
+				g.buttons === 2 && g.left >= 11.5 && g.right >= 11.5 && Math.abs(g.left - g.right) <= 1
+				&& (g.lines === 1 || g.width >= g.usable - 1), JSON.stringify(g));
+			await page.close();
+		}
+	}
+
 	const laneA = [offlineSpender, offlineCoc, offlineDuel, offlineDissonance,
 		dissonanceSkat, dissonanceHard, dissonanceBeat, ragtagFight];
 	// `dissonanceQuartet` is lane B: it plays a whole game but arms NO worker
@@ -10262,7 +10295,7 @@ try {
 		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, historyRecovery, dmAdventures,
 		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, formControlZoom, lastDifficulty,
 		dissonanceQuartet, orbitPlay, lobbyFinishSync, blackCastlePlay, pinchPlay, secretNamesPlay, lobbyChrome,
-		notesEditor, profilePage, offlineRead, boxPuzzles, boxDaily];
+		notesEditor, profilePage, offlineRead, boxPuzzles, boxDaily, updateNudgeLayout];
 
 	// EVERY BLOCK MUST BE IN A LANE. Before the lanes existed, adding a block meant
 	// writing it — it then ran because it was simply the next statement. Now it has

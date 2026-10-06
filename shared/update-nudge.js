@@ -51,17 +51,23 @@ function showBanner() {
 	bar.setAttribute("role", "status");
 	// Inline styles on purpose: each game injects its own <style> only while mounted,
 	// so there is no stylesheet this can rely on being present.
+	// CENTRED BY AUTO MARGINS BETWEEN BOTH EDGES, NOT `left:50%` + translateX(-50%):
+	// a fixed box at left:50% can only size itself to the space RIGHT of that line,
+	// i.e. half the viewport, so on a 390px phone the message wrapped into a ~190px
+	// column ("kinda squished on mobile"). Pinned 12px from each edge with
+	// `width:fit-content` it takes the width it needs and centres in the rest.
 	Object.assign(bar.style, {
-		position: "fixed", left: "50%", bottom: "18px", transform: "translateX(-50%)",
+		position: "fixed", left: "12px", right: "12px", margin: "0 auto", width: "fit-content",
+		bottom: "calc(18px + env(safe-area-inset-bottom, 0px))",
 		zIndex: "2147483647", display: "flex", alignItems: "center", gap: "12px",
-		padding: "10px 14px", borderRadius: "10px",
+		padding: "10px 14px", borderRadius: "10px", boxSizing: "border-box",
 		background: "#2a1c20", border: "1px solid #e8c96a", color: "#f3e9d2",
 		font: "14px/1.3 Georgia, serif", boxShadow: "0 6px 24px rgba(0,0,0,.45)",
-		maxWidth: "calc(100vw - 24px)",
 	});
 
 	const msg = document.createElement("span");
 	msg.textContent = "A new version is available.";
+	Object.assign(msg.style, { flex: "1 1 auto", minWidth: "0" });
 
 	const refresh = document.createElement("button");
 	refresh.type = "button";
@@ -69,7 +75,7 @@ function showBanner() {
 	Object.assign(refresh.style, {
 		cursor: "pointer", padding: "5px 12px", borderRadius: "7px",
 		border: "1px solid #e8c96a", background: "#e8c96a", color: "#2a1c20",
-		font: "600 14px/1 Georgia, serif",
+		font: "600 14px/1 Georgia, serif", flexShrink: "0", whiteSpace: "nowrap",
 	});
 	refresh.addEventListener("click", () => window.location.reload());
 
@@ -80,7 +86,7 @@ function showBanner() {
 	Object.assign(dismiss.style, {
 		cursor: "pointer", padding: "5px 8px", borderRadius: "7px",
 		border: "1px solid transparent", background: "transparent", color: "#f3e9d2",
-		font: "14px/1 Georgia, serif",
+		font: "14px/1 Georgia, serif", flexShrink: "0",
 	});
 	// Dismiss stops the checks too — never nag someone mid-game who has decided to
 	// finish first. The next full load picks up the new build anyway.
