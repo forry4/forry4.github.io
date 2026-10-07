@@ -75,19 +75,25 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # PINNED, not ubuntu-latest: that label moves to Ubuntu 26 from 2026-10-19, and
+    # this gate measures text against the runner's own fonts (CI already runs ~27%
+    # wider than the dev box -- docs/deploy-reliability-log.md). An image change
+    # should be its own deliberate push with a full screens run, never a surprise
+    # under an unrelated commit. Every workflow pins the same image for the same
+    # reason.
+    runs-on: ubuntu-24.04
     concurrency:
       group: pages-build
       cancel-in-progress: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # The focused screen selection compares this push with its parent.
           fetch-depth: 2
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
           cache-dependency-path: webapp/package-lock.json
 
@@ -129,7 +135,7 @@ jobs:
       # ~1s. That keeps one code path instead of a hit/miss branch whose
       # rarely-taken side is the one that breaks the deploy gate.
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('webapp/package-lock.json') }}
@@ -141,7 +147,7 @@ jobs:
       # NO `--with-deps`, on purpose. The apt half cannot be cached (each run is a
       # fresh VM, so system packages never persist — conditioning it on the browser
       # cache would be incoherent), and it spent ~6s per run installing libraries
-      # ubuntu-latest already ships: the image preinstalls Google Chrome, which
+      # ubuntu-24.04 already ships: the image preinstalls Google Chrome, which
       # pulls in the same shared libraries Playwright's Chromium links against.
       # If a future runner image ever drops them, the failure is LOUD and immediate
       # — the smoke step's browser launch dies with a missing-.so error before
@@ -160,7 +166,7 @@ jobs:
       # the actual backend and asserts each game screen mounts its own markup.
       # Verified by injecting a runtime throw into WhereWolf: smoke PASSED, this FAILED.
       - name: Set up Python (for the screens gate's backend)
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v6
         with:
           python-version: '3.14'
           # Caches the pip DOWNLOAD dir, keyed on the requirements file itself.
@@ -192,7 +198,7 @@ jobs:
 
       - name: Save failed render-gate measurements
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: screens-failure-${{ github.run_id }}-${{ github.run_attempt }}
           path: webapp/test-results/screens/
@@ -204,7 +210,7 @@ jobs:
         run: |
           echo "## Pages validation" >> "$GITHUB_STEP_SUMMARY"
           echo "- Render-gate scope: \`${{ steps.screen_scope.outputs.scope || 'not reached' }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Local pushes compile only; this workflow is the authoritative browser gate." >> "$GITHUB_STEP_SUMMARY"
+          echo "- Local pushes run a targeted gate (webapp/test/affected.mjs); this workflow is the authoritative browser gate." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build
         working-directory: webapp
@@ -226,13 +232,13 @@ jobs:
         run: cp dist/index.html dist/404.html
 
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: webapp/dist
 
   deploy:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Deploys strictly queue and are never cancelled — see the concurrency note at
     # the top of this file.
     concurrency:
@@ -250,7 +256,7 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         continue-on-error: true
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
       # WAIT before retrying. This is the whole reason the retry is worth having:
       # run 717 (2026-08-17) flaked at 18:34:45, retried at 18:34:46 and failed
       # again at 18:34:48 — both attempts inside three seconds, which is the same
@@ -264,4 +270,4 @@ jobs:
       # One automatic in-job retry self-heals a transient flake — no manual re-run needed.
       - name: Retry deploy once if it flaked
         if: steps.deployment.outcome == 'failure'
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

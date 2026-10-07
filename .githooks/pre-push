@@ -1,13 +1,19 @@
 #!/bin/sh
-# Fast pre-push feedback for normal work.
+# Pre-push gate for pushes that move main: the checks a change can plausibly break.
 #
-# GitHub Actions is the authoritative, exhaustive gate. Running its Python and
-# browser suites locally first made every frontend release pay for two serial
-# copies of expensive validation. Set FULL_LOCAL_GATES=1 for a full local
-# release rehearsal when it is useful.
+# DEFAULT (targeted): `vite build`, then pytest on core/ + shared/ + every touched
+# package (the full suite if the shared platform changed), then only the screens
+# blocks for the touched games — webapp/test/affected.mjs decides which. A one-game
+# change is seconds to a minute or two; GitHub Actions still runs everything.
 #
+# Why not build-only: from 2026-09-04 to 2026-10-07 the hook only compiled, and Pages
+# red runs went from 4.9% to ~11.5% (docs/deploy-reliability-log.md, 2026-10-07).
+# Why not everything: the full local rehearsal is ~6.5 minutes on the dev box.
+#
+# FULL_LOCAL_GATES=1  the full rehearsal (whole suite + smoke + every screens block)
+# QUICK_GATES=1       the old build-only check
 # ACTIVATION is opt-in, once per clone: git config core.hooksPath .githooks
-# Escape hatches: git push --no-verify, SKIP_GATES=1, GATES_DRY_RUN=1.
+# Escape hatches: git push --no-verify, SKIP_GATES=1, GATES_DRY_RUN=1 (prints the plan).
 
 [ "$SKIP_GATES" = "1" ] && exit 0
 
@@ -48,6 +54,7 @@ say() { printf '[pre-push] %s\n' "$*"; }
 
 if [ "$GATES_DRY_RUN" = "1" ]; then
     say "dry run — frontend compile=$need_fe; full local rehearsal=${FULL_LOCAL_GATES:-0}"
+    root=$(git rev-parse --show-toplevel) && node "$root/webapp/test/affected.mjs" $ranges | sed 's/^/[pre-push]   /'
     exit 0
 fi
 
@@ -56,12 +63,12 @@ fi
 root=$(git rev-parse --show-toplevel) || exit 1
 cd "$root" || exit 1
 
-if [ "$FULL_LOCAL_GATES" != "1" ]; then
+if [ "$QUICK_GATES" = "1" ] && [ "$FULL_LOCAL_GATES" != "1" ]; then
     if [ "$need_fe" = "1" ]; then
         say "frontend compile check…"
         ( cd webapp && npm run build ) || exit $?
     fi
-    say "full Python and browser validation will run once in GitHub Actions."
+    say "QUICK_GATES: compile only — Python and browser validation run in GitHub Actions."
     exit 0
 fi
 
@@ -75,18 +82,35 @@ else
     PY=$(command -v python || command -v python3)
 fi
 if [ -z "$PY" ]; then
-    say "python not found on PATH — cannot run the full local rehearsal"
+    say "python not found on PATH — cannot run the local gates"
     exit 1
 fi
 
 # A process already listening on 8000 makes the browser gate fail only after it
-# has spent minutes running. Refuse the rehearsal immediately and name the fix.
-if [ "$need_fe" = "1" ]; then
-    "$PY" -c "import socket,sys; s=socket.socket(); s.settimeout(.15); busy=s.connect_ex(('127.0.0.1',8000)) == 0; s.close(); sys.exit(1 if busy else 0)"
-    if [ $? -ne 0 ]; then
-        say "port 8000 is already in use — stop the local API before the browser gate."
-        exit 1
+# has spent minutes running. Refuse immediately and name the fix. (Unconditional:
+# a backend-only change can still schedule screens blocks.)
+"$PY" -c "import socket,sys; s=socket.socket(); s.settimeout(.15); busy=s.connect_ex(('127.0.0.1',8000)) == 0; s.close(); sys.exit(1 if busy else 0)"
+if [ $? -ne 0 ]; then
+    say "port 8000 is already in use — stop the local API before the browser gate."
+    exit 1
+fi
+
+if [ "$FULL_LOCAL_GATES" != "1" ]; then
+    plan=$(node webapp/test/affected.mjs $ranges) || exit 1
+    eval "$plan"
+    if [ "$need_fe" = "1" ]; then
+        say "frontend compile check…"
+        ( cd webapp && npm run build ) || exit $?
     fi
+    say "Python: $PYTEST_SCOPE…"
+    # shellcheck disable=SC2086  # a space-separated path list, word-split on purpose
+    "$PY" -m pytest -q $PYTEST_ARGS || exit $?
+    if [ -n "$SCREENS_BLOCKS" ]; then
+        say "screens: $SCREENS_BLOCKS…"
+        ( cd webapp && SCREENS_REUSE_BUILD=1 node test/screens.mjs --only="$SCREENS_BLOCKS" ) || exit $?
+    fi
+    say "targeted gates green — GitHub Actions runs the rest. Pushing."
+    exit 0
 fi
 
 if [ "$need_py" = "1" ]; then

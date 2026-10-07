@@ -26,6 +26,8 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { chromium } from "playwright";
 import { linuxNumericFont } from "./font-profiles.mjs";
+// The pre-push hook's change->blocks map; held to this file's roster on every run.
+import { assertAffectedMap } from "./affected.mjs";
 // The accent contract lives in ONE place; this gate reads it rather than re-listing it.
 import { GAME_ACCENTS, ACCENT_AA_EXEMPT } from "../../shared/accents.js";
 
@@ -10427,6 +10429,7 @@ try {
 		throw new Error(`these blocks are defined but in no lane, so they would never run: `
 			+ `${orphans.join(", ")} — add each to laneA or laneB (see the lane comment above).`);
 	}
+	assertAffectedMap(declared);
 
 	const allBlocks = [...laneA, ...laneB];
 	if (ONLY_BLOCKS.length) {
@@ -10436,7 +10439,12 @@ try {
 			throw new Error(`unknown focused screen block(s): ${unknown.join(", ")}`);
 		}
 		console.log(`SCREENS FOCUS — ${ONLY_BLOCKS.join(", ")}`);
-		await runLane(ONLY_BLOCKS.map((name) => byName.get(name)));
+		// Keep each focused block in its own lane, so a focused run has the same
+		// concurrency as the full one: lane A's worker pools and timing checks still
+		// never share the machine with each other.
+		const only = new Set(ONLY_BLOCKS);
+		await Promise.all([runLane(laneA.filter((fn) => only.has(fn.name))),
+			runLane(laneB.filter((fn) => only.has(fn.name)))]);
 	} else {
 		await Promise.all([runLane(laneA), runLane(laneB)]);
 	}

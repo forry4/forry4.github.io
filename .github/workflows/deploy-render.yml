@@ -112,7 +112,7 @@ jobs:
   # happen here, while still refusing to deploy if that run is red or missing.
   python_gate:
     if: github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Wait for the matching Python CI run
@@ -182,11 +182,11 @@ jobs:
   # command instead of depending on a separate push-triggered workflow.
   test:
     if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.14'
           cache: pip
@@ -206,7 +206,7 @@ jobs:
       always() &&
       ((github.event_name == 'push' && needs.python_gate.result == 'success') ||
        (github.event_name == 'workflow_dispatch' && needs.test.result == 'success'))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       # Fired BEFORE the hook: the fallback gate below asks "did a process boot
       # after this moment?", so it has to be read before anything is triggered.

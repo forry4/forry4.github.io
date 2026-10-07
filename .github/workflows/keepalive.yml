@@ -46,10 +46,10 @@ jobs:
     concurrency:
       group: keepalive
       cancel-in-progress: false
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 95
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Warm + hold the backend for ~90 min
         run: python3 .github/scripts/keepalive.py --hold-seconds 5400
 
@@ -58,9 +58,9 @@ jobs:
       github.event_name == 'workflow_dispatch'
       || github.event.schedule == '47 17 * * *'
       || github.event.schedule == '13 21 * * *'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Verify backend health and recover if needed
         run: python3 .github/scripts/keepalive.py

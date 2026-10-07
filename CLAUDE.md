@@ -1030,17 +1030,26 @@ git push                      # deploy-pages.yml builds + publishes (~2-3 min)
 ```
 
 - **Pre-push gate (opt-in, once per clone): `git config core.hooksPath .githooks`.**
-  `.githooks/pre-push` runs the deploy workflows' own checks before a push that updates `main`
-  lands: the Python suite for any non-docs change (matching `python-app.yml`, which has no path
-  filter — and the suite reads `.jsx`/`.css` as text, so frontend edits genuinely can fail it),
-  plus `smoke` + `screens` when the push can change the bundle (~80s for the pair — see Testing:
-  screens runs in two lanes and reuses smoke's build; the `deploy-pages.yml` filter:
-  `webapp/**`/`games/**`/`shared/**`/`books/**` minus Python files, `*.md`, and Python `tests/` dirs). Pushes to
-  other branches and docs-only pushes run nothing. `git push --no-verify` or `SKIP_GATES=1` skips
-  it once; `GATES_DRY_RUN=1` prints what would run. It exists because nearly every red run in the
-  2026-08-06/07 launch ledger was a gate that would have failed locally in about a minute. Caveat:
+  `.githooks/pre-push` gates a push that updates `main` with the checks that push can
+  plausibly break — **targeted, not exhaustive**: `vite build`, pytest on `core/tests` +
+  `shared/tests` (they read the whole tree as text) + each touched package's tests (the FULL
+  suite when `core/*.py`/`app.py`/`pytest.ini`/requirements change), then only the `screens`
+  blocks for the touched games. **`webapp/test/affected.mjs` owns that map**, and `screens.mjs`
+  calls its `assertAffectedMap` on every run, so a renamed block or a new game with no entry
+  fails CI rather than quietly going unguarded. A one-game push is ~35s (build included);
+  `shared/`/`webapp/` changes run the kit-wide set (~80s of blocks); a focused run keeps each
+  block in its own lane. `FULL_LOCAL_GATES=1` is the full rehearsal (~6.5 min on the dev box),
+  `QUICK_GATES=1` the old build-only check, `GATES_DRY_RUN=1` prints the plan, `--no-verify` /
+  `SKIP_GATES=1` skip it. **Why targeted and not build-only:** the hook was cut to a bare build
+  on 2026-09-04 and Pages red runs went from 4.9% to ~11.5% (reliability log, 2026-10-07); a
+  full run costs minutes, a targeted one seconds. `dissonanceBeat` is left out of the targeted
+  set — it measures elapsed time and reads short on a busy dev box; CI still runs it. Caveat:
   `core.hooksPath` redirects ALL hooks to `.githooks/`, so personal hooks in `.git/hooks` stop
   firing — move them in if you have any.
+- **Every workflow pins `ubuntu-24.04`, never `ubuntu-latest`.** The label moves to Ubuntu 26
+  from 2026-10-19, and the screens gate measures text against the runner's fonts. Move the
+  image deliberately, in a push of its own, with a full `screens` run — not under a commit
+  that cannot have caused what the new image changes.
 
 - **Backend serving code deploys to Render on push to main.** `deploy-render.yml` carries a
   hand-curated path list, one entry per game; tests, docs, and offline tooling are excluded, and

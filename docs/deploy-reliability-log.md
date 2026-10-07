@@ -10,6 +10,69 @@ than re-argued.
 
 ---
 
+## 2026-10-07 — a census, a hook that had stopped gating, and an image about to move
+
+Asked to find why deploys keep going red. **Since 09-21: Pages 6 red of 52, Python CI
+0 of 55, Render 0 of 25.** Every red Pages run was the screens gate, as on 09-13.
+
+| Run | Block | What it was | Kind |
+|---|---|---|---|
+| #884 | `orbitPlay` mulligan | read on the clock, not frames (09-25) | harness |
+| #888 | `notesEditor` list tap | the assertion was wrong (`5944f630`) | harness |
+| #890 | `offlineDissonance` | the offline game really froze (09-26) | **product** |
+| #899 | `dmCardFace` right inset | 4-across tiles at 320px put "Province" at 8.32px; CI's wider font spilled it (`68f95a0d`) | **product** |
+| #900 | `pinchPlay` 768x1024 | board 975px tall in a 905px frame; the frame now sizes from the SVG (`dc6a96fc`) | **product** |
+| #912 | `offlineRead` | read an IndexedDB delete before it finished (10-06) | harness |
+
+#899 and #900 came from ONE 15-file "phone pass" commit (`5826a1c1`), followed by two fix
+pushes twelve minutes apart. The three keepalive reds on 10-05 were GitHub not
+assigning a runner ("The job was not acquired by Runner of type hosted even after
+multiple attempts"), not this repo.
+
+### The pre-push hook had stopped gating
+
+`2a2725f9` (09-04, titled "Speed up Orbit Pages validation") cut `.githooks/pre-push`
+to a bare `vite build` unless `FULL_LOCAL_GATES=1`; CLAUDE.md still described the full
+gate. Pages red rate by window: **4.9%** (08-20..09-04), **11.6%** (09-05..09-20),
+**11.5%** (09-21..10-07). Those weeks were also the heaviest UI work, so this is a
+correlation, but the 09-09 Python CI streak (six consecutive red runs) is exactly what
+the original hook was written to stop.
+
+The reason for the cut was real: measured today, the full local rehearsal is ~6.5
+minutes (pytest 75s; screens 5m12s including the build). So the hook now runs a
+TARGETED gate (`webapp/test/affected.mjs`): build, `core/tests` + `shared/tests` + the
+touched packages' tests, and only the touched games' screens blocks. A Pinch-only push
+replayed through it took **36s** end to end; the phone-pass push would have run both
+`dmCardFace` and `pinchPlay`. Honestly: #899 is the font gap and would probably still
+have passed on Windows, but #900 was a 70px overflow, not a font measurement.
+
+### `ubuntu-latest` becomes Ubuntu 26 on 2026-10-19
+
+Every run since late September carries that notice. A gate that measures text against
+the runner's fonts should not change image underneath an unrelated commit, so every
+workflow now pins `ubuntu-24.04`; moving is a deliberate push with a full screens
+run. Same push: actions bumped off the deprecated Node 20 runtime (checkout v5,
+setup-node v5, setup-python v6, cache v5, upload-artifact v6, upload-pages-artifact
+v5, deploy-pages v5 — each checked to declare `node24`), and the Pages build moved
+from Node 20 (EOL) to 22, which is what the dev box runs.
+
+### One local reading worth keeping
+
+The full local screens run failed `dissonanceBeat` with **397ms of 700** on one trick
+(the other twelve 697-720), on a box running nothing else. 09-18 measured the shortest
+dwell at 691-699, so that margin is thinner than recorded. CI has not tripped it; if
+it does, the documented remedy (move `dmCardFace` into lane A) comes before any
+threshold change. It is left out of the hook's targeted set for that reason.
+
+### Not done, and why
+
+- **The pinned Linux font is applied to ONE check** (Orbit's numeric cell,
+  `font-profiles.mjs`). #899 is the font gap again. Applying it everywhere needs more
+  than the Bold face the fixture carries; the exact alternative is running screens in
+  Playwright's Ubuntu image. Worth doing if the font gap costs another deploy.
+- **`SCREENS_SLOW_FRAMES=150` on new or changed blocks** would have caught the three
+  harness races above locally. Still manual.
+
 ## 2026-10-06 — `offlineRead` read an IndexedDB delete before it finished
 
 **Red:** Pages run for `efbbc7b5` (a commit touching only the update banner and a new
