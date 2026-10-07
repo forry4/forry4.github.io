@@ -41,6 +41,19 @@ fails as a refused solve.
   coverage for every (pressed, centre) pair, and a test fails if a regenerated fixture
   loses one.
 
+## Auto-open (owner's call, 2026-10-07)
+
+**Once all four corners match, the box is solved**: tile presses are ignored, and the
+corner buttons light THEMSELVES one by one, clockwise from the top-left, 240ms apart,
+through the same `pressButton` a tap uses (`useAutoOpen` in the JSX — every play surface:
+numbered boxes, the daily's first attempt and its retries, yesterday-for-fun). The freeze
+is load-bearing: a tile press mid-sequence would put a lit button out and send the next
+automatic press into a mismatched corner, i.e. a reset. Scores and the server's checks are
+untouched (they count tile presses; buttons were always free). A tap on a button still
+works and a wrong corner still resets. `screens.mjs` samples the lit count by frame and
+presses a tile mid-sequence (verified to fail without the freeze); its `play` helpers
+press tiles only and wait for the open box.
+
 ## The leaderboard
 
 - **Score = tile presses since the last reset**, and the only reset is a corner button

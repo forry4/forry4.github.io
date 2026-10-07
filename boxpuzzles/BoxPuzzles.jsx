@@ -29,7 +29,7 @@ import { RULES_GLYPH, RulesModal, rulesModalCss } from "../shared/lobby.jsx";
 import { buildPath, parsePath, pushPath, subscribe } from "../shared/router.js";
 import _cssText from "./BoxPuzzles.css?inline";
 import BANK from "./puzzles.json";
-import { CORNERS, press, newBox, pressTileInBox, pressButtonInBox } from "./engine.js";
+import { CORNERS, press, cornersMatch, newBox, pressTileInBox, pressButtonInBox } from "./engine.js";
 import { isMuted, setMuted, tileSound, litSound, resetSound, openSound } from "./sound.js";
 import BoxPuzzlesRules from "./rules.jsx";
 
@@ -299,6 +299,26 @@ function useTileKeys(pressTile) {
 	}, []);
 }
 
+// AUTO-OPEN (owner's call, 2026-10-07): once all four corners match, the box is solved.
+// Tile presses are ignored from then on, and the corner buttons light THEMSELVES, one by
+// one clockwise from the top-left, through the very handler a tap uses — so the climbing
+// notes, the lighting and the opening are the same code as before. The freeze is not
+// optional: a tile press mid-sequence would put a lit button out and send the next
+// automatic press into a corner that no longer matches, i.e. a reset. Scores do not
+// move: they count tile presses, and buttons were always free.
+const AUTO_STEP_MS = 240;
+function useAutoOpen(box, target, active, pressButton) {
+	const pressRef = useRef(pressButton);
+	pressRef.current = pressButton;
+	const solved = !!(active && box && target && cornersMatch(box.tiles, target));
+	const next = solved ? box.lit.findIndex((on) => !on) : -1;
+	useEffect(() => {
+		if (next < 0) return undefined;
+		const t = setTimeout(() => pressRef.current(next), AUTO_STEP_MS);
+		return () => clearTimeout(t);
+	}, [box, next]);
+}
+
 // ── the screen ───────────────────────────────────────────────────────────────
 export default function BoxPuzzles({ authUser, onExit }) {
 	const token = authUser && !authUser.guest ? authUser.session_token : null;
@@ -393,7 +413,7 @@ function BoxScreen({ n, token, best, onResult, onGo }) {
 	}, [p.id, token, onResult]);
 
 	const pressTile = (i) => {
-		if (opened) return;
+		if (opened || cornersMatch(box.tiles, p.target)) return;   // solved: the buttons are lighting
 		tileSound();
 		setBox(pressTileInBox(box, p.target, i));
 	};
@@ -413,6 +433,7 @@ function BoxScreen({ n, token, best, onResult, onGo }) {
 	const again = () => { setOpened(null); setBox(newBox(p)); };
 
 	useTileKeys(pressTile);
+	useAutoOpen(box, p.target, !opened, pressButton);
 
 	const result = opened && typeof opened.post === "object" ? opened.post : null;
 	const optimalNow = !!(result && result.optimal && result.best === opened.moves);
@@ -608,7 +629,7 @@ function DailyToday({ daily, token, who, onDaily, onReload, onYesterday }) {
 	const playAgain = () => { setRetryOpened(null); setRetryBox(newBox(puzzle)); };
 
 	const pressRetryTile = (i) => {
-		if (retryOpened) return;
+		if (retryOpened || cornersMatch(retryBox.tiles, daily.target)) return;
 		tileSound();
 		setRetryBox(pressTileInBox(retryBox, daily.target, i));
 	};
@@ -624,7 +645,7 @@ function DailyToday({ daily, token, who, onDaily, onReload, onYesterday }) {
 
 	const pressTile = (i) => {
 		if (retryBox) { pressRetryTile(i); return; }
-		if (opened) return;
+		if (opened || cornersMatch(box.tiles, daily.target)) return;
 		tileSound();
 		const segs = [...segments.slice(0, -1), [...segments.at(-1), i]];
 		setSegments(segs);
@@ -675,6 +696,7 @@ function DailyToday({ daily, token, who, onDaily, onReload, onYesterday }) {
 		failed = opened?.post === "error";
 		resend = () => { setOpened((o) => ({ ...o, post: "posting" })); queue(segments, true); };
 	}
+	useAutoOpen(shown, daily.target, !done, pressButton);
 	return (
 		<div className="bx-wrap">
 			<div className="bx-play">
@@ -728,7 +750,7 @@ function DailyYesterday({ day, token, onToday }) {
 	const play = () => { setPlaying(false); setStep(0); setPlayOpened(null); setPlayBox(newBox(data)); };
 	const watch = () => { setPlayBox(null); setPlayOpened(null); setStep(0); setPlaying(true); };
 	const pressTile = (i) => {
-		if (!playBox || playOpened) return;
+		if (!playBox || playOpened || cornersMatch(playBox.tiles, data.target)) return;
 		tileSound();
 		setPlayBox(pressTileInBox(playBox, data.target, i));
 	};
@@ -741,6 +763,7 @@ function DailyYesterday({ day, token, onToday }) {
 		setPlayBox(next);
 	};
 	useTileKeys(pressTile);
+	useAutoOpen(playBox, data?.target, !!playBox && !playOpened, pressButton);
 	useEffect(load, [load]);
 	useEffect(() => {
 		if (!playing || !data) return undefined;

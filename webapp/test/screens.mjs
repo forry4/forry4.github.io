@@ -9854,9 +9854,11 @@ try {
 			!!line && !!detour && wrongButton >= 0, JSON.stringify({ line, detour, wrongButton }));
 		if (!line || !detour || wrongButton < 0) return;
 
+		// Tiles only: once the corners match, the box lights its own buttons and opens
+		// (auto-open). Wait for the OPEN BOX, never a duration.
 		const play = async (page, moves) => {
 			for (const i of moves) await page.locator(`.bx-tile[data-tile="${i}"]`).click();
-			for (let k = 0; k < 4; k++) await page.locator(`.bx-cbtn[data-button="${k}"]`).click();
+			await page.waitForSelector(".bx-box.open", { timeout: 10_000 }).catch(() => {});
 		};
 		const count = (page) => page.locator("[data-moves]").textContent().then(Number, () => NaN);
 
@@ -9976,8 +9978,27 @@ try {
 				await count(page) === 0 && await page.locator(".bx-box.bx-shake").count() === 1);
 			check("there are no Undo or Reset buttons", await page.locator(".bx-stage .btn", { hasText: /Undo|Reset/ }).count() === 0);
 
-			await play(page, line);
-			const opened = await page.waitForSelector(".bx-result", { timeout: 5000 }).then(() => true, () => false);
+			// AUTO-OPEN: the last tile press matches the corners, and the buttons light
+			// THEMSELVES one at a time. Sample the lit count by frame, and press a tile in the
+			// middle of the sequence: once solved, tile presses are ignored.
+			for (const i of line.slice(0, -1)) await page.locator(`.bx-tile[data-tile="${i}"]`).click();
+			await page.evaluate(() => {
+				window.__lit = [];
+				const tick = () => {
+					window.__lit.push(document.querySelectorAll(".bx-cbtn.lit").length);
+					if (!document.querySelector(".bx-box.open")) requestAnimationFrame(tick);
+				};
+				requestAnimationFrame(tick);
+			});
+			await page.locator(`.bx-tile[data-tile="${line.at(-1)}"]`).click();
+			await page.locator(`.bx-tile[data-tile="${line[0]}"]`).click({ timeout: 2000 }).catch(() => {});
+			const opened = await page.waitForSelector(".bx-result", { timeout: 10_000 }).then(() => true, () => false);
+			const lit = await page.evaluate(() => window.__lit);
+			check("solved corners light the buttons one at a time, then the box opens by itself",
+				opened && lit.length > 0 && lit.some((n) => n > 0 && n < 4)
+				&& lit.every((n, j) => j === 0 || n >= lit[j - 1]) && await page.locator(".bx-cbtn.lit").count() === 4,
+				JSON.stringify([...new Set(lit)]));
+			check("a tile pressed while the buttons light is ignored", await count(page) === line.length, String(await count(page)));
 			check("the shortest line opens the box, and the count becomes the result",
 				opened && await count(page) === line.length && await page.locator(".bx-result .btn", { hasText: "Next box" }).count() === 1);
 			check("the box screen carries no prose, opened or not", (await prose()).length === 0, JSON.stringify(await prose()));
@@ -10131,9 +10152,11 @@ try {
 		// one press, then a corner that does not match afterwards: the reset
 		const afterOne = E.press(daily.tiles, line[0]);
 		const wrong = E.CORNERS.findIndex((c, k) => afterOne[c] !== daily.target[k]);
+		// Tiles only: once the corners match, the box lights its own buttons and opens
+		// (auto-open). Wait for the OPEN BOX, never a duration.
 		const play = async (page, moves) => {
 			for (const i of moves) await page.locator(`.bx-tile[data-tile="${i}"]`).click();
-			for (let k = 0; k < 4; k++) await page.locator(`.bx-cbtn[data-button="${k}"]`).click();
+			await page.waitForSelector(".bx-box.open", { timeout: 10_000 }).catch(() => {});
 		};
 		const count = (page) => page.locator("[data-moves]").textContent().then(Number, () => NaN);
 		const prose = (page) => page.locator(".bx p").allTextContents();
