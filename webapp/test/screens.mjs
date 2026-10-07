@@ -9978,27 +9978,40 @@ try {
 				await count(page) === 0 && await page.locator(".bx-box.bx-shake").count() === 1);
 			check("there are no Undo or Reset buttons", await page.locator(".bx-stage .btn", { hasText: /Undo|Reset/ }).count() === 0);
 
-			// AUTO-OPEN: the last tile press matches the corners, and the buttons light
-			// THEMSELVES one at a time. Sample the lit count by frame, and press a tile in the
-			// middle of the sequence: once solved, tile presses are ignored.
-			for (const i of line.slice(0, -1)) await page.locator(`.bx-tile[data-tile="${i}"]`).click();
-			await page.evaluate(() => {
-				window.__lit = [];
-				const tick = () => {
-					window.__lit.push(document.querySelectorAll(".bx-cbtn.lit").length);
-					if (!document.querySelector(".bx-box.open")) requestAnimationFrame(tick);
-				};
-				requestAnimationFrame(tick);
-			});
+			// AUTO-LIGHT: a button is lit exactly while its corner matches — checked against
+			// engine.js at the start and after EVERY press of the line — and the fourth match
+			// opens the box by itself. A tap on a lit button does nothing; a tile pressed in
+			// the beat before the box opens is ignored.
+			const litNow = () => page.locator(".bx-cbtn").evaluateAll((els) => els.map((el) => el.classList.contains("lit")));
+			const shouldLight = (tiles) => E.CORNERS.map((c, k) => tiles[c] === box1.target[k]);
+			let board = box1.tiles.slice(), litBad = [];
+			const atStart = await litNow();
+			if (JSON.stringify(atStart) !== JSON.stringify(shouldLight(board))) litBad.push({ step: 0, got: atStart });
+			// one press in, tap a LIT button: nothing happens (count and board stay)
+			await page.locator(`.bx-tile[data-tile="${detour[0]}"]`).click();
+			const oneIn = E.press(box1.tiles, detour[0]);
+			const litK = shouldLight(oneIn).findIndex(Boolean), unlitK = shouldLight(oneIn).findIndex((on) => !on);
+			if (litK >= 0) await page.locator(`.bx-cbtn[data-button="${litK}"]`).click();
+			check("a lit button does nothing when tapped",
+				litK >= 0 && await count(page) === 1 && (await page.locator(".bx-tile").evaluateAll((els) => els.map((el) => el.dataset.color))).join("") === oneIn.join(""),
+				JSON.stringify({ litK, count: await count(page) }));
+			// …and an UNLIT one resets the box and its count, back to the first board
+			await page.locator(`.bx-cbtn[data-button="${unlitK}"]`).click();
+			check("an unlit button resets", unlitK >= 0 && await count(page) === 0);
+			for (const [n, i] of line.slice(0, -1).entries()) {
+				await page.locator(`.bx-tile[data-tile="${i}"]`).click();
+				board = E.press(board, i);
+				const got = await litNow();
+				if (JSON.stringify(got) !== JSON.stringify(shouldLight(board))) litBad.push({ step: n + 1, got, want: shouldLight(board) });
+			}
 			await page.locator(`.bx-tile[data-tile="${line.at(-1)}"]`).click();
 			await page.locator(`.bx-tile[data-tile="${line[0]}"]`).click({ timeout: 2000 }).catch(() => {});
 			const opened = await page.waitForSelector(".bx-result", { timeout: 10_000 }).then(() => true, () => false);
-			const lit = await page.evaluate(() => window.__lit);
-			check("solved corners light the buttons one at a time, then the box opens by itself",
-				opened && lit.length > 0 && lit.some((n) => n > 0 && n < 4)
-				&& lit.every((n, j) => j === 0 || n >= lit[j - 1]) && await page.locator(".bx-cbtn.lit").count() === 4,
-				JSON.stringify([...new Set(lit)]));
-			check("a tile pressed while the buttons light is ignored", await count(page) === line.length, String(await count(page)));
+			check("each button is lit exactly while its corner matches, at every press of the line",
+				litBad.length === 0 && line.length >= 2, JSON.stringify(litBad));
+			check("the fourth match opens the box by itself, all four lit",
+				opened && await page.locator(".bx-cbtn.lit").count() === 4);
+			check("a tile pressed in the beat before it opens is ignored", await count(page) === line.length, String(await count(page)));
 			check("the shortest line opens the box, and the count becomes the result",
 				opened && await count(page) === line.length && await page.locator(".bx-result .btn", { hasText: "Next box" }).count() === 1);
 			check("the box screen carries no prose, opened or not", (await prose()).length === 0, JSON.stringify(await prose()));

@@ -11,11 +11,11 @@ const color = (c, name) => <>{swatch(c)}{name}</>;
 export default function BoxPuzzlesRules() {
 	return <>
 		<RulesSection title="Goal of the Game">
-			<p>Light all four corner buttons. Pressing a button lights it if its corner tile
-				matches the button's color; if not, the box resets to its starting tiles. A lit
-				button goes dark if its corner tile changes.</p>
-			<p>Pressing a tile triggers the tile's color ability. Each tile press is a move,
-				and a reset sets your moves back to zero.</p>
+			<p>Make each corner tile match the color of the button beside it. A button lights
+				while its corner matches, and the box is solved when all four are lit.</p>
+			<p>Pressing a tile triggers the tile's color ability. Each tile press is a move.
+				Pressing an unlit button resets the box to its starting tiles and sets your moves
+				back to zero.</p>
 		</RulesSection>
 
 		<RulesSection title="The colors">

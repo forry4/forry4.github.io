@@ -35,24 +35,30 @@ fails as a refused solve.
 - **Orange takes a unique plurality**, not a strict majority (2 of 4 with no tie counts).
 - **A lit button goes dark as soon as its corner stops matching**, so "open" is exactly
   "all four corners match, then the buttons". The server therefore checks a solve from
-  the TILE PRESSES alone.
+  the TILE PRESSES alone. (The page now lights the buttons itself — see Auto-light.)
 - **The first fuzz of these rules was vacuous** — a weak LCG kept five colours out of the
   centre, so it read all-green while the blue quirks were wrong. The generator now BUILDS
   coverage for every (pressed, centre) pair, and a test fails if a regenerated fixture
   loses one.
 
-## Auto-open (owner's call, 2026-10-07)
+## Auto-light and auto-open (owner's calls, 2026-10-07)
 
-**Once all four corners match, the box is solved**: tile presses are ignored, and the
-corner buttons light THEMSELVES one by one, clockwise from the top-left, 240ms apart,
-through the same `pressButton` a tap uses (`useAutoOpen` in the JSX — every play surface:
-numbered boxes, the daily's first attempt and its retries, yesterday-for-fun). The freeze
-is load-bearing: a tile press mid-sequence would put a lit button out and send the next
-automatic press into a mismatched corner, i.e. a reset. Scores and the server's checks are
-untouched (they count tile presses; buttons were always free). A tap on a button still
-works and a wrong corner still resets. `screens.mjs` samples the lit count by frame and
-presses a tile mid-sequence (verified to fail without the freeze); its `play` helpers
-press tiles only and wait for the open box.
+**A corner button is lit exactly while its corner matches** — nobody presses a button to
+light it. It lights (with its climbing note) when a tile press makes its corner match and
+goes dark when one breaks it. **When the fourth corner matches, the box opens by itself**
+450ms later, through the same handler a tap uses, and tile presses are ignored from the
+match on. The only thing a button press still does is **reset, on an unlit button**; a tap
+on a lit one does nothing. Scores and the server's checks are untouched (tile presses only;
+buttons were always free).
+- **It lives in the JSX (`autoLit` / `pressTileAuto` / `pressButtonAuto` / `useAutoOpen`),
+  not in `engine.js`**: engine.js's `pressTileInBox` / `pressButtonInBox` are held
+  press-for-press to the reference simulator, where buttons are pressed by hand, so they
+  are unchanged and the page derives `lit` from the tiles after each of them.
+- Every play surface uses it: numbered boxes, the daily's first attempt and retries,
+  yesterday-for-fun. `screens.mjs` checks the lit buttons against engine.js at every press
+  of a real line, that a lit tap does nothing and an unlit one resets, that the box opens
+  itself, and that a tile press in the opening beat is ignored. Its `play` helpers press
+  tiles only and wait for the open box.
 
 ## The leaderboard
 
