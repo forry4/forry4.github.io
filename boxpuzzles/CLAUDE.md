@@ -44,7 +44,8 @@ fails as a refused solve.
 ## Auto-light and auto-open (owner's calls, 2026-10-07)
 
 **A corner button is lit exactly while its corner matches** — nobody presses a button to
-light it. It lights (with its climbing note) when a tile press makes its corner match and
+light it. It lights — SILENTLY (owner's call: a note on every match played all the
+time; the solved chord still plays) — when a tile press makes its corner match and
 goes dark when one breaks it. **When the fourth corner matches, the box opens by itself**
 450ms later, through the same handler a tap uses, and tile presses are ignored from the
 match on. The only thing a button press still does is **reset, on an unlit button**; a tap
@@ -74,7 +75,7 @@ buttons were always free).
   they read true when Blue borrows them, and Blue is just "uses the center tile's
   ability". American spelling. **A box is SOLVED, never "opened"** (owner's call,
   2026-10-07: "nothing is being opened") — in the rules and anything else a player reads
-  or hears; `screens.mjs` fails the rules panel on the word. (Code names like `opened`
+  or hears. (Code names like `opened`
   and the `.open` class are internal and stay.) The header's old solved counter (n / 71) is gone.
 - **A box is never saved mid-solve** (owner's call): a reload, or leaving the box,
   starts it again from its first board. Only finished results are stored. (The DAILY
@@ -192,8 +193,9 @@ loads) and `.githooks/pre-push`.
 
 Synthesised, not sampled (`sound.js`). **The kit is the owner's pick from an audition
 page of six (2026-10-05): "Felt", with "Brass Latch"'s tile.** A two-stage switch click
-per tile; a warm marimba note per lit corner, climbing C-D-E-G with each button lit; two
-marimba notes falling G-C on a reset; a rolled C-major chord over a low C on opening.
+per tile; two marimba notes falling G-C on a reset; a rolled C-major chord over a low C
+when a box is solved. (`litSound` — a marimba note climbing C-D-E-G per lit corner — is
+still in `sound.js` but unplayed since auto-light: corners light silently, owner's call.)
 The felt notes send into a short feedback echo ("the room"). The primitives were
 ported from the audition page as heard, so do not re-tune them by ear in code. The AudioContext is made on the first sound —
 always inside a click/key handler, which is what iOS requires. **The master bus is a

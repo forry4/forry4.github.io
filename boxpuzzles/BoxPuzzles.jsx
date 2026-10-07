@@ -30,7 +30,7 @@ import { buildPath, parsePath, pushPath, subscribe } from "../shared/router.js";
 import _cssText from "./BoxPuzzles.css?inline";
 import BANK from "./puzzles.json";
 import { CORNERS, press, cornersMatch, newBox, pressTileInBox, pressButtonInBox } from "./engine.js";
-import { isMuted, setMuted, tileSound, litSound, resetSound, openSound } from "./sound.js";
+import { isMuted, setMuted, tileSound, resetSound, openSound } from "./sound.js";
 import BoxPuzzlesRules from "./rules.jsx";
 
 const css = _cssText;
@@ -308,12 +308,9 @@ function useTileKeys(pressTile) {
 // they stay as they are and the page derives `lit` from the tiles after each of them.
 const autoLit = (box, target) => ({ ...box, lit: CORNERS.map((c, k) => box.tiles[c] === target[k]) });
 const freshBox = (puzzle) => autoLit(newBox(puzzle), puzzle.target);
-function pressTileAuto(box, target, i) {
-	const next = autoLit(pressTileInBox(box, target, i), target);
-	const before = box.lit.filter(Boolean).length, after = next.lit.filter(Boolean).length;
-	if (after > before) setTimeout(() => litSound(after), 110);   // after the tile's own click
-	return next;
-}
+// A corner lights SILENTLY (owner's call): with buttons lighting on every match, a note
+// each time played constantly. The solved chord still plays.
+const pressTileAuto = (box, target, i) => autoLit(pressTileInBox(box, target, i), target);
 // -> { box, result: "reset" | "open" | "none" }: a lit button is already where it should be.
 function pressButtonAuto(box, puzzle, k) {
 	const r = pressButtonInBox(box, puzzle, k);
