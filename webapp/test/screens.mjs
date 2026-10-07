@@ -9914,11 +9914,13 @@ try {
 				inside: (() => { const r = document.querySelector(".rl-panel")?.getBoundingClientRect();
 					return !!r && r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight; })(),
 				british: /colour|centre/i.test(document.querySelector(".rl-panel")?.innerText || ""),
+				// a box is SOLVED, never opened (owner's call): nothing is being opened
+				open: /\bopen/i.test(document.querySelector(".rl-panel")?.innerText || ""),
 			}));
 			check("Rules opens the panel: goal, the ten colors with their swatches, daily mode",
 				JSON.stringify(rules.sections) === JSON.stringify(["Goal of the Game", "The colors", "Daily mode"])
 				&& rules.colors.length === 10 && new Set(rules.swatches).size === 10
-				&& rules.swatches.every((c) => c && c !== "rgba(0, 0, 0, 0)") && rules.inside && !rules.british,
+				&& rules.swatches.every((c) => c && c !== "rgba(0, 0, 0, 0)") && rules.inside && !rules.british && !rules.open,
 				JSON.stringify(rules));
 			await page.locator(".rl-done").click();
 			check("Got it closes the rules", await page.locator(".rl-panel").count() === 0);

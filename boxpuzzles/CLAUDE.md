@@ -72,7 +72,10 @@ buttons were always free).
   `RulesModal` with `rules.jsx` — the goal, what each color does, daily mode, nothing
   more. Its wording was approved line by line; White and Red say "this tile's color" so
   they read true when Blue borrows them, and Blue is just "uses the center tile's
-  ability". American spelling. The header's old solved counter (n / 71) is gone.
+  ability". American spelling. **A box is SOLVED, never "opened"** (owner's call,
+  2026-10-07: "nothing is being opened") — in the rules and anything else a player reads
+  or hears; `screens.mjs` fails the rules panel on the word. (Code names like `opened`
+  and the `.open` class are internal and stay.) The header's old solved counter (n / 71) is gone.
 - **A box is never saved mid-solve** (owner's call): a reload, or leaving the box,
   starts it again from its first board. Only finished results are stored. (The DAILY
   box is the one exception, by design — below.)

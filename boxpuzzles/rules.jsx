@@ -36,7 +36,7 @@ export default function BoxPuzzlesRules() {
 
 		<RulesSection title="Daily mode">
 			<p>A new box every day at midnight Pacific time. Your first attempt is saved as you
-				play, and a reset doesn't set your moves back to zero. When you open the box, your
+				play, and a reset doesn't set your moves back to zero. When the box is solved, your
 				moves go on the First Attempt leaderboard. After that, play again as often as you
 				like; your fewest moves go on the Best Attempt leaderboard.</p>
 		</RulesSection>
