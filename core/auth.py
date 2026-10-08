@@ -21,6 +21,7 @@ import os
 import re
 import secrets
 import string
+import threading
 import time
 
 from .db import get_db_conn
@@ -335,3 +336,26 @@ def mark_reconnect_token_used(token: str):
     cur.execute("UPDATE reconnect_tokens SET used=1 WHERE token=?", (token,))
     conn.commit()
     conn.close()
+
+
+_consume_lock = threading.Lock()
+
+
+def consume_reconnect_token(token: str, matches) -> tuple[dict | None, bool]:
+    """Validate a reconnect token and mark it used in ONE step: (record, consumed).
+
+    A WS handler calls this through `asyncio.to_thread`, so the DB round trips stay
+    off the event loop. Done as two awaits instead, two reconnects presenting the
+    same token could both validate before either marked it, and a single-use token
+    would be used twice -- the two sync calls were only atomic because nothing ran
+    between them on the loop. The lock restores that (one uvicorn process).
+
+    `matches(record)` is the caller's scope check (room and seat). A token that
+    fails it comes back as (record, False) and is NOT burned, as before; an
+    unknown, expired or used one comes back as (None, False)."""
+    with _consume_lock:
+        info = validate_reconnect_token(token)
+        if info is None or not matches(info):
+            return info, False
+        mark_reconnect_token_used(token)
+        return info, True

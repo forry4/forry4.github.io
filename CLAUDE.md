@@ -619,9 +619,22 @@ covers the logic; each game's wiring is one line).
   `test_a_stalled_turso_call_in_a_thread_does_not_freeze_the_loop`. **Never put a DB driver
   back on the request path without re-running that test against it.** Each Turso request has
   a 20s socket timeout (`TURSO_HTTP_TIMEOUT`), so no call can hang forever (libsql's could).
-  **Still open:** every game's WS handlers call `save_game`/`_ensure_room_loaded` ON the loop
-  thread, where no driver can help — a slow Turso there still stalls the site (up to that
-  timeout). The frozen alert now names the frame the loop is stuck in (`monitor._loop_stack`).
+  **What is and is not on the loop now (2026-10-08).** Game WRITES never were: every game's
+  `save_game` hands the row to a one-thread `_DB_WRITE_EXEC` (they froze the site only
+  because libsql held the GIL from there). The account and token READS a WS handler makes
+  on join/reconnect are on threads too — `get_user_by_session` via `to_thread`, and a
+  reconnect token through `core.auth.consume_reconnect_token`, which validates AND marks it
+  under a lock: the two sync calls were single-use only because nothing ran between them
+  on the loop, so two separate awaits would let one token reconnect twice
+  (`core/tests/test_reconnect_consume.py` races it, and fails with the lock removed).
+  `test_routes_off_event_loop.py` holds every `async def` in a game server to that.
+  **Still open: room LOADING** (`_ensure_room_loaded`, Spender's `load_game_to_memory`) on
+  a cache miss — the first touch of a room after a restart. It runs under the per-game
+  `ROOM_LOCK`, so it cannot just be awaited: holding the lock across the read stalls that
+  game's other tables, and reading before the lock can race a second load and overwrite
+  a live room with an older copy. It wants one shared per-room load with a re-check in
+  `core/rooms.py`, and a test that races two loads. The frozen alert names the frame the
+  loop is stuck in (`monitor._loop_stack`), so a stall there will say so.
 - **A dropped socket must RETRY, or "Reconnecting…" is just a word.** Four of the six
   socket games rendered that label off `!connected` and did nothing about it, so a blip
   left the game frozen until the player reloaded — and in a vs-bot room it is worse than a

@@ -566,7 +566,7 @@ async def _handle_create(ws, room_id, pid, msg):
 async def _handle_join(ws, room_id, pid, msg):
     name = (msg.get("name") or "Player").strip()[:24] or "Player"
     sess = msg.get("session_token")
-    session_uid = (get_user_by_session(sess) or {}).get("id") if sess else None
+    session_uid = ((await asyncio.to_thread(get_user_by_session, sess)) or {}).get("id") if sess else None
     async with ROOM_LOCK:
         room = _ensure_room_loaded(room_id)
         if not room:
@@ -664,7 +664,7 @@ async def _handle_reconnect(ws, room_id, pid, msg):
 
 async def _handle_auth_reconnect(ws, room_id, pid, msg):
     sess = msg.get("session_token")
-    user = get_user_by_session(sess) if sess else None
+    user = (await asyncio.to_thread(get_user_by_session, sess)) if sess else None
     if not user or user.get("id") != pid:
         await _send(ws, {"type": "error", "message": "bad session"})
         return False

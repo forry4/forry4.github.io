@@ -383,7 +383,7 @@ async def _handle_join(ws: WebSocket, room_id: str, pid: str, msg: dict) -> bool
     name = str(msg.get("name") or "Player").strip()[:24] or "Player"
     session_uid = None
     if msg.get("session_token"):
-        session_uid = (get_user_by_session(msg.get("session_token")) or {}).get("id")
+        session_uid = ((await asyncio.to_thread(get_user_by_session, msg.get("session_token"))) or {}).get("id")
     async with ROOM_LOCK:
         room = _ensure_room_loaded(room_id)
         if not room:
@@ -469,7 +469,7 @@ async def _handle_reconnect(ws: WebSocket, room_id: str, pid: str, msg: dict) ->
 
 async def _handle_auth_reconnect(ws: WebSocket, room_id: str, pid: str, msg: dict) -> bool:
     room_id = normalize_room(room_id)
-    user = get_user_by_session(msg.get("session_token")) if msg.get("session_token") else None
+    user = (await asyncio.to_thread(get_user_by_session, msg.get("session_token"))) if msg.get("session_token") else None
     if not user or user.get("id") != pid:
         await _send(ws, {"type": "error", "message": "bad session"})
         return False

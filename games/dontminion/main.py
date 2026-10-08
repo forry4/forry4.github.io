@@ -40,7 +40,7 @@ from . import persist          # at-rest compaction for the state_json blob
 
 from core.db import cleanup_stale_games, maybe_cleanup_games
 from core.auth import (
-    get_user_by_session, validate_reconnect_token, mark_reconnect_token_used,
+    get_user_by_session, consume_reconnect_token,
 )
 from core.config import cors_allowed_origins
 from core import rooms as _rooms
@@ -649,7 +649,7 @@ async def _handle_join(ws, room_id, pid, msg):
     # A logged-in user re-entering a seat they ALREADY hold proves ownership with
     # their session token (pid == account id). Resolved before the lock (DB read).
     sess = msg.get("session_token")
-    session_uid = (get_user_by_session(sess) or {}).get("id") if sess else None
+    session_uid = ((await asyncio.to_thread(get_user_by_session, sess)) or {}).get("id") if sess else None
     async with ROOM_LOCK:
         room = _ensure_room_loaded(room_id)
         if not room:
@@ -742,11 +742,12 @@ async def _handle_reconnect(ws, room_id, pid, msg):
 
 async def _handle_auth_reconnect(ws, room_id, pid, msg):
     token = msg.get("token")
-    info = validate_reconnect_token(token)
-    if not info or info.get("room_id") != room_id or info.get("player_id") != pid:
+    _info, ok = await asyncio.to_thread(
+        consume_reconnect_token, token,
+        lambda i: i.get("room_id") == room_id and i.get("player_id") == pid)
+    if not ok:
         await _send(ws, {"type": "error", "message": "invalid token"})
         return False
-    mark_reconnect_token_used(token)
     async with ROOM_LOCK:
         room = _ensure_room_loaded(room_id)
         if not room or pid not in room.get("players", {}):
@@ -884,7 +885,7 @@ async def games_review(game_id: str, token: str | None = Depends(_bearer_token),
     if room and room.get("game"):
         g, players = room["game"], room.get("players", {})
     else:
-        state = load_game_state(game_id)
+        state = (await asyncio.to_thread(load_game_state, game_id))
         if not state:
             return {"ok": False, "message": "not found"}
         g, players = state.get("game"), state.get("players", {})

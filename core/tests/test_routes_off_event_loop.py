@@ -30,6 +30,21 @@ BLOCKING = {
     "get_user_by_session", "authenticate_user", "create_user", "end_session",
     "create_reconnect_token", "delete_open_game",
     "list_open_games", "list_user_games", "list_user_history", "list_active_games",
+    "validate_reconnect_token", "mark_reconnect_token_used", "consume_reconnect_token",
+    "load_game_state",
+}
+
+# The account and token lookups a WebSocket handler makes on join/reconnect. Every
+# `async def` in a game server is held to these, not just the routes: the handlers
+# are not routes, so the test above never saw them, and a slow Turso there stalled
+# every game on the site (2026-10-08). Room LOADING (`_ensure_room_loaded`,
+# `load_game_to_memory`) is deliberately not in this set: it runs under ROOM_LOCK,
+# and moving it off the loop needs a shared per-room load with a re-check, not a
+# `to_thread` -- see the root CLAUDE.md.
+WS_BLOCKING = {
+    "get_user_by_session", "authenticate_user",
+    "validate_reconnect_token", "mark_reconnect_token_used", "consume_reconnect_token",
+    "create_reconnect_token", "load_game_state",
 }
 _ROUTE = (".get(", ".post(", ".put(", ".delete(", ".patch(")
 
@@ -107,3 +122,44 @@ async def d():
     routes, bad = _offenders(src, "x")
     assert routes == 4
     assert bad == ["x:4 a() calls get_user_by_session() on the event loop"]
+
+
+def _async_offenders(source: str, label: str, names=WS_BLOCKING):
+    fns, bad = 0, []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.AsyncFunctionDef):
+            continue
+        fns += 1
+        for call in _calls_outside_nested_defs(node):
+            if _name(call.func) in names:
+                bad.append(f"{label}:{call.lineno} {node.name}() calls {_name(call.func)}() on the event loop")
+    return fns, bad
+
+
+def test_game_ws_handlers_make_no_blocking_auth_calls():
+    total, bad = 0, []
+    for path in sorted(REPO.glob("games/*/main.py")):
+        n, b = _async_offenders(path.read_text(encoding="utf-8"), str(path.relative_to(REPO)))
+        total += n
+        bad += b
+    # Derived roster: eleven game servers with a dozen-plus async handlers each.
+    assert total > 150, f"found only {total} async functions"
+    assert not bad, ("Wrap the call in `await asyncio.to_thread(fn, ...)` -- and validate "
+                     "plus mark a reconnect token together, through consume_reconnect_token:\n  "
+                     + "\n  ".join(bad))
+
+
+def test_the_ws_check_is_not_vacuous():
+    src = '''
+async def join(ws, msg):
+    return get_user_by_session(msg["s"])
+
+async def rejoin(ws, msg):
+    return await asyncio.to_thread(consume_reconnect_token, msg["t"], lambda i: True)
+
+def lobby(token):
+    return get_user_by_session(token)
+'''
+    fns, bad = _async_offenders(src, "x")
+    assert fns == 2
+    assert bad == ["x:3 join() calls get_user_by_session() on the event loop"]

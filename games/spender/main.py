@@ -19,7 +19,7 @@ import time
 from core.db import get_db_conn, init_core_schema, cleanup_stale_games, maybe_cleanup_games
 from core.auth import (
     gen_token, create_user, authenticate_user, get_user_by_session, end_session,
-    create_reconnect_token, validate_reconnect_token, mark_reconnect_token_used,
+    create_reconnect_token, consume_reconnect_token,
     validate_credentials,
 )
 from core.ratelimit import SlidingWindowLimiter
@@ -2587,7 +2587,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                 # session token: pid == their account id, which an attacker can't forge.
                 # Resolved before the lock (a DB read).
                 _sess = msg.get("session_token")
-                _session_uid = (get_user_by_session(_sess) or {}).get("id") if _sess else None
+                _session_uid = ((await asyncio.to_thread(get_user_by_session, _sess)) or {}).get("id") if _sess else None
                 async with ROOM_LOCK:
                     if room_id not in ROOMS:
                         await websocket.send_text(json.dumps({"type": "error", "message": "room not found"}))
@@ -2635,11 +2635,13 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
             # ── auth_reconnect ──────────────────────────────────────────────
             elif action == "auth_reconnect":
                 token = msg.get("token")
-                info = validate_reconnect_token(token)
+                info, consumed = await asyncio.to_thread(
+                    consume_reconnect_token, token,
+                    lambda i: normalize_room(i.get("room_id") or "") == room_id and i.get("player_id") == pid)
                 if not info:
                     await websocket.send_text(json.dumps({"type": "error", "message": "invalid or expired reconnect token"}))
                     continue
-                if normalize_room(info.get("room_id") or "") != room_id or info.get("player_id") != pid:
+                if not consumed:
                     await websocket.send_text(json.dumps({"type": "error", "message": "token mismatch"}))
                     continue
                 async with ROOM_LOCK:
@@ -2647,7 +2649,6 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                     r.setdefault("meta", {})
                     r["sockets"][pid] = websocket
                     r["meta"].setdefault(pid, {})["user_id"] = info.get("user_id")
-                mark_reconnect_token_used(token)
                 authed = True   # server-issued reconnect token, scoped to (room_id, pid)
                 await websocket.send_text(json.dumps({"type": "reconnected", "room": mk_room_state(room_id, viewer_pid=pid)}))
                 await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
