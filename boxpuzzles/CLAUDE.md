@@ -77,6 +77,12 @@ buttons were always free).
   2026-10-07: "nothing is being opened") — in the rules and anything else a player reads
   or hears. (Code names like `opened`
   and the `.open` class are internal and stay.) The header's old solved counter (n / 71) is gone.
+- **A solve's answer belongs to the play that sent it.** Play again is live while the
+  post is in flight, so a slow answer used to land on the fresh board and re-open it as
+  solved mid-play — and its Retry then posted THAT board's presses (seen on box 20: "3
+  moves", refused). A play counter drops a stale answer's effect on the box (the score
+  and board still update); same for the daily's retries. `screens.mjs` holds the answer
+  across a Play again to prove it.
 - **A box is never saved mid-solve** (owner's call): a reload, or leaving the box,
   starts it again from its first board. Only finished results are stored. (The DAILY
   box is the one exception, by design — below.)

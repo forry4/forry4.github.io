@@ -10067,6 +10067,25 @@ try {
 				posts[1]?.status === 200 && posts[1].body?.optimal === true && posts[1].body?.best === line.length
 				&& await page.locator(".bx-result.optimal").count() === 1 && /^rgb\(91, 140, 255/.test(blue),
 				`${JSON.stringify(posts[1])} colour ${blue}`);
+
+			// A solve answered AFTER Play again belongs to the box that is gone: hold the
+			// answer, start the box over and press one tile, then let it land. It used to
+			// re-open the half-played board as solved (and Retry posted its presses).
+			let release;
+			const held = new Promise((ok) => { release = ok; });
+			await page.route("**/boxpuzzles/solve", async (route) => { await held; await route.continue(); });
+			await page.locator(".bx-result .btn", { hasText: "Play again" }).click();
+			await play(page, line);
+			await page.locator(".bx-result .btn", { hasText: "Play again" }).click();
+			await page.locator(`.bx-tile[data-tile="${detour[0]}"]`).click();
+			release();
+			for (let t = 0; t < 150 && posts.length < 3; t++) await page.waitForTimeout(100);
+			await page.evaluate(() => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok))));
+			check("a solve answered after Play again leaves the new board in play",
+				posts.length === 3 && await page.locator(".bx-box.open").count() === 0
+				&& await page.locator(".bx-result").count() === 0 && await count(page) === 1,
+				`posts ${posts.length}, open ${await page.locator(".bx-box.open").count()}, count ${await count(page)}`);
+			await page.unroute("**/boxpuzzles/solve");
 			await page.locator(".bx-header .btn", { hasText: "Back" }).click();
 			check("the picker marks the box blue for its owner",
 				await page.waitForSelector('.bx-pick.optimal[data-box="1"]', { timeout: 5000 }).then(() => true, () => false));

@@ -416,14 +416,20 @@ function BoxScreen({ n, token, best, onResult, onGo }) {
 	useEffect(loadBoard, [loadBoard]);
 
 
+	// A SOLVE'S ANSWER BELONGS TO THE PLAY THAT SENT IT. Play again is live while the
+	// post is in flight, so an answer can land on a fresh board half-played — and it used
+	// to re-open that board as solved, with Retry posting ITS presses (a refused 3-move
+	// "solve" on box 20). The score still counts (results, board); the box is left alone.
+	const play = useRef(0);
 	const post = useCallback((moves) => {
 		if (!token) { setOpened({ moves: moves.length, post: "guest" }); return; }
+		const mine = play.current;
 		setOpened({ moves: moves.length, post: "posting" });
 		api("/boxpuzzles/solve", token, { puzzle: p.id, moves }).then((r) => {
-			setOpened({ moves: moves.length, post: r });
+			if (play.current === mine) setOpened({ moves: moves.length, post: r });
 			onResult(p.id, { moves: r.best, optimal: r.optimal });
 			setBoard(r.leaderboard);
-		}).catch(() => setOpened({ moves: moves.length, post: "error" }));
+		}).catch(() => { if (play.current === mine) setOpened({ moves: moves.length, post: "error" }); });
 	}, [p.id, token, onResult]);
 
 	const pressTile = (i) => {
@@ -443,7 +449,7 @@ function BoxScreen({ n, token, best, onResult, onGo }) {
 			post(moves);
 		}
 	};
-	const again = () => { setOpened(null); setBox(freshBox(p)); };
+	const again = () => { play.current++; setOpened(null); setBox(freshBox(p)); };
 
 	useTileKeys(pressTile);
 	useAutoOpen(box, p.target, !opened, pressButton);
@@ -628,19 +634,24 @@ function DailyToday({ daily, token, who, onDaily, onReload, onYesterday }) {
 	const settled = !!opened && (opened.post === "guest" || opened.post === "done");
 	useEffect(() => { if (settled) loadBoard(); }, [settled, loadBoard]);
 
+	// An answer belongs to the retry that sent it (see BoxScreen's `post`): one landing
+	// after Play again updates the board but must not re-open the fresh retry box.
+	const retryPlay = useRef(0);
 	const postRetry = useCallback((moves) => {
 		if (!token) { setRetryOpened({ moves: moves.length, post: "guest" }); return; }
+		const mine = retryPlay.current;
 		setRetryOpened({ moves: moves.length, post: "posting" });
 		api("/boxpuzzles/daily/retry", token, { day: daily.day, moves }).then((r) => {
-			setRetryOpened({ moves: moves.length, post: r });
 			setBoard(r.leaderboard);
+			if (retryPlay.current !== mine) return;
+			setRetryOpened({ moves: moves.length, post: r });
 			setTab("best");
 		}).catch((e) => {
 			if (e.status === 409) onReload();             // the day turned over
-			else setRetryOpened({ moves: moves.length, post: "error" });
+			else if (retryPlay.current === mine) setRetryOpened({ moves: moves.length, post: "error" });
 		});
 	}, [token, daily.day, onReload]);
-	const playAgain = () => { setRetryOpened(null); setRetryBox(freshBox(puzzle)); };
+	const playAgain = () => { retryPlay.current++; setRetryOpened(null); setRetryBox(freshBox(puzzle)); };
 
 	const pressRetryTile = (i) => {
 		if (retryOpened || cornersMatch(retryBox.tiles, daily.target)) return;
