@@ -26,8 +26,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import sys
 import threading
 import time
+import traceback
 from typing import Callable
 
 from fastapi import Depends, HTTPException, Query
@@ -263,10 +265,28 @@ def _checker() -> None:
 
 # ── event-loop watchdog ──────────────────────────────────────────────────────
 _beat = 0.0
+_loop_thread: int | None = None
+_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep
+
+
+def _loop_stack(limit: int = 6) -> str:
+    """Where the loop thread is RIGHT NOW, innermost last: this repo's frames (the
+    caller that blocked), then the innermost frame wherever it is (the call that is
+    waiting). The 2026-10-07 alert said only "see Render's logs", and nothing in the
+    logs said which call it was."""
+    frame = sys._current_frames().get(_loop_thread) if _loop_thread else None
+    if frame is None:
+        return ""
+    stack = traceback.extract_stack(frame)
+    ours = [f for f in stack if f.filename.startswith(_REPO)][-limit:]
+    if stack and (not ours or ours[-1] is not stack[-1]):
+        ours.append(stack[-1])
+    return " <- ".join(f"{f.filename.removeprefix(_REPO)}:{f.lineno} {f.name}" for f in reversed(ours))
 
 
 async def _heartbeat() -> None:
-    global _beat
+    global _beat, _loop_thread
+    _loop_thread = threading.get_ident()
     while True:
         _beat = time.monotonic()
         await asyncio.sleep(1)
@@ -279,9 +299,11 @@ def _watchdog() -> None:
         gap = time.monotonic() - _beat
         if gap >= LOOP_STALL_SECONDS and not stalled:
             stalled = True
+            where = _loop_stack()
             alerts.alert("frozen", f"The server's event loop has not run for {gap:.0f}s — every "
-                         "game, socket and page is frozen until it does. Something is doing heavy "
-                         "work on the loop (see Render's logs around now).",
+                         "game, socket and page is frozen until it does. "
+                         + (f"The loop is in: {where}." if where else
+                            "Something is doing heavy work on the loop (see Render's logs around now)."),
                          severity="critical")
         elif gap < LOOP_STALL_SECONDS:
             stalled = False

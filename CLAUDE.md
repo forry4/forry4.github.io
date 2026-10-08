@@ -163,9 +163,11 @@ per `render.yaml`).
 
 - **`core/db.py`** — `get_db_conn()` is a dual backend behind a driver-agnostic wrapper
   (`_Conn`/`_Cursor`/`_Row` — rows work by index AND column name). Local **sqlite3** by default;
-  **Turso/libSQL** when `TURSO_DATABASE_URL`+`TURSO_AUTH_TOKEN` are set. A boot-time `_turso_selftest()`
-  round-trips a row and **falls back to local sqlite on any failure** (site stays up, just
-  non-persistent). `init_core_schema(conn)` creates `users`/`admins`/`reconnect_tokens`.
+  **Turso** when `TURSO_DATABASE_URL`+`TURSO_AUTH_TOKEN` are set, spoken over its **HTTP API
+  (Hrana v2 `/v2/pipeline`) by `_HranaConn` with the stdlib — NOT the `libsql` driver** (see the
+  GIL bullet below). A boot-time `_turso_selftest()` round-trips a row; if the HTTP client fails it
+  tries `libsql` (reported as `turso-libsql`, which the deploy gate fails), and **falls back to local
+  sqlite on any further failure** (site stays up, just non-persistent). `init_core_schema(conn)` creates `users`/`admins`/`reconnect_tokens`.
   `cleanup_stale_games(table)` / `maybe_cleanup_games(table)` handle retention (all-guest game 24h,
   any-registered-player 30d, and a never-started `status='open'` lobby 48h regardless of who hosts
   it — a waiting room nobody joined has nothing to resume and otherwise outlives the game version
@@ -182,10 +184,11 @@ per `render.yaml`).
   backend never goes down if a game package is absent). No CSP on the API (it serves JSON).
 
 **Persistence:** Render's free filesystem is ephemeral, so prod uses Turso. **Turso is LIVE and verified
-on Render — prod IS persistent; don't tell the user to set it up.** The libsql path **cannot be tested
-locally** (libsql ships a Linux cp314 wheel but no Windows one; prod Docker is 3.14 too) — validate it
-via Render logs + a login that survives a redeploy, or run it inside the prod image under Docker. The
-sqlite path (identical wrapper) IS locally tested. **A Turso failure is a SILENT fallback** — `core/db.py`
+on Render — prod IS persistent; don't tell the user to set it up.** The Turso client is pure stdlib, so
+it IS testable anywhere: `core/tests/test_db_hrana.py` runs it against an in-process Hrana stand-in, and
+a real `sqld` (the libsql-server release binary) runs the whole stack locally —
+`sqld --db-path x.db --http-listen-addr 127.0.0.1:8081` + `TURSO_DATABASE_URL=http://127.0.0.1:8081`.
+The sqlite path (identical wrapper) is what the suite uses by default. **A Turso failure is a SILENT fallback** — `core/db.py`
 drops to ephemeral local sqlite and the site stays up — so `/health` reports `db_backend` and
 `deploy-render.yml` FAILS any deploy that does not come up on `turso`
 (`core/tests/test_deploy_verifies_db_backend.py` runs that step's real script).
@@ -607,6 +610,18 @@ covers the logic; each game's wiring is one line).
   `ROOM_LOCK` or reads a live room stays `async` and moves each blocking call onto a thread with
   `await asyncio.to_thread(fn, ...)`. `core/tests/test_routes_off_event_loop.py` derives the
   roster and fails the offender. `SlidingWindowLimiter` is locked for the same reason.
+- **…and the thread pool only helps if the DB client RELEASES THE GIL — `libsql` did not**
+  (2026-10-08). libsql 0.1.11, the newest release, holds the GIL while it waits on Turso, so a
+  Turso call stalled in a WORKER thread froze the loop exactly as if it ran on it: the Site
+  Health alert "the event loop has not run for 24s" arrived in the same minute as a Turso
+  storage (S3) error on `POST /boxpuzzles/solve`, a plain-`def` route. Measured: a hung server
+  froze the loop >60s through libsql and 0.10s through `http.client`. Hence `_HranaConn`, and
+  `test_a_stalled_turso_call_in_a_thread_does_not_freeze_the_loop`. **Never put a DB driver
+  back on the request path without re-running that test against it.** Each Turso request has
+  a 20s socket timeout (`TURSO_HTTP_TIMEOUT`), so no call can hang forever (libsql's could).
+  **Still open:** every game's WS handlers call `save_game`/`_ensure_room_loaded` ON the loop
+  thread, where no driver can help — a slow Turso there still stalls the site (up to that
+  timeout). The frozen alert now names the frame the loop is stuck in (`monitor._loop_stack`).
 - **A dropped socket must RETRY, or "Reconnecting…" is just a word.** Four of the six
   socket games rendered that label off `!connected` and did nothing about it, so a blip
   left the game frozen until the player reloaded — and in a vs-bot room it is worse than a
@@ -985,10 +1000,10 @@ covers the logic; each game's wiring is one line).
   registered session and a seeded shelf); it is fixed but held by reading the sheet alone.
 
 **Backend / DB**
-- **libsql has no `cur.rowcount`** → use SELECT-then-DELETE/UPDATE for any affected-row count (it 500'd
-  the cancel endpoint).
-- **Turso can't be tested locally on Windows** (no Windows cp314 libsql wheel) — validate via Render logs, a
-  login surviving a redeploy, and the deploy's own `db_backend == turso` gate.
+- **The DB wrapper has no `cur.rowcount`** (libsql's raised; the HTTP client has none) → use
+  SELECT-then-DELETE/UPDATE for any affected-row count (it 500'd the cancel endpoint).
+- **A DB driver that holds the GIL freezes the site from ANY thread** — see the libsql bullet under the
+  room-server invariants. Turso is spoken over HTTP by `core/db.py` for that reason.
 - Never use a correlated subquery for `is_admin` (NULL on libsql); usernames are unique NOCASE.
 
 **Cython (Spender `valuation3`)**

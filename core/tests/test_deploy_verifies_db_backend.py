@@ -56,7 +56,7 @@ def test_live_commit_on_turso_passes(monkeypatch):
     assert _run_gate(monkeypatch, {"commit": SHA, "started_at": 200, "db_backend": "turso"}) == 0
 
 
-@pytest.mark.parametrize("backend", ["sqlite", None])
+@pytest.mark.parametrize("backend", ["sqlite", "turso-libsql", None])
 def test_live_commit_off_turso_fails_at_once(monkeypatch, backend):
     health = {"commit": SHA, "started_at": 200}
     if backend:

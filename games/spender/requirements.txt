@@ -13,4 +13,4 @@ websockets==17.1
 pytest==9.1.1
 pytest-xdist==3.8.0 # the suite runs `-n auto` by default (pytest.ini addopts) — NOT optional
 numpy==2.5.3
-libsql==0.1.11      # Turso/libSQL client for persistent prod DB (imported only when TURSO_DATABASE_URL is set)
+libsql==0.1.11      # FALLBACK only: Turso is spoken over HTTP by core/db.py (libsql holds the GIL on network waits)

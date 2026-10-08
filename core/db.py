@@ -11,17 +11,33 @@ existing query code is unchanged. Turso is verified by a boot-time self-test;
 if anything about it fails we fall back to local sqlite (the site stays up,
 just non-persistent) instead of crashing.
 
+TURSO IS SPOKEN OVER ITS HTTP API (Hrana v2 `/v2/pipeline`) WITH THE STDLIB, NOT
+THROUGH THE `libsql` DRIVER (2026-10-08). libsql 0.1.11 — the newest release —
+HOLDS THE GIL WHILE IT WAITS ON THE NETWORK, so a Turso call stalled in a worker
+thread froze the event loop and every socket with it: the "loop has not run for
+24s" alert of 2026-10-07 arrived in the same minute as a Turso storage error on
+a plain-`def` route, which is exactly the case moving routes off the loop was
+supposed to make safe. `http.client` releases the GIL while it waits (measured:
+the same hung server froze the loop for >60s through libsql, 0.10s through
+http.client). `core/tests/test_db_hrana.py` holds both halves. libsql stays as
+the FALLBACK when the HTTP self-test fails at boot; /health then reports
+`turso-libsql`, which the deploy gate fails loudly while the data still persists.
+
 ``init_core_schema`` creates the cross-cutting tables (users / sessions, admins,
 reconnect_tokens). Each feature owns its own tables elsewhere: Spender's ``games``
 table, Castles of Crimson's ``coc_games``, and the Books tables.
 """
+import base64
+import http.client
 import json
 import logging
 import os
 import re
 import sqlite3
+import ssl
 import threading
 import time
+import urllib.parse
 
 LOG = logging.getLogger("core.db")
 
@@ -125,18 +141,206 @@ class _Conn:
             pass
 
 
-def _connect_turso():
-    import libsql  # lazy: only imported when Turso is configured
+# ── Turso over HTTP (Hrana v2) ───────────────────────────────────────────────
+HRANA_TIMEOUT = float(os.environ.get("TURSO_HTTP_TIMEOUT", "20"))   # per socket operation
+_KEEPALIVE_IDLE = 25.0     # reuse a connection only if it was used this recently
+_DML = re.compile(r"^\s*(?:--[^\n]*\n\s*|/\*.*?\*/\s*)*(INSERT|UPDATE|DELETE|REPLACE)\b",
+                  re.IGNORECASE | re.DOTALL)
+
+
+class HranaError(ValueError):
+    """A statement or request Turso refused. A ValueError, as libsql's errors were,
+    so every existing `except` keeps catching what it caught."""
+
+
+def _http_url(url: str) -> str:
+    for a, b in (("libsql://", "https://"), ("wss://", "https://"), ("ws://", "http://")):
+        if url.startswith(a):
+            return b + url[len(a):]
+    return url
+
+
+def _encode(v) -> dict:
+    if v is None:
+        return {"type": "null"}
+    if isinstance(v, bool) or isinstance(v, int):
+        return {"type": "integer", "value": str(int(v))}
+    if isinstance(v, float):
+        return {"type": "float", "value": v}
+    if isinstance(v, str):
+        return {"type": "text", "value": v}
+    if isinstance(v, (bytes, bytearray, memoryview)):
+        return {"type": "blob", "base64": base64.b64encode(bytes(v)).decode()}
+    raise HranaError(f"unsupported parameter type {type(v).__name__}")
+
+
+def _decode(v: dict):
+    t = v.get("type")
+    if t == "null":
+        return None
+    if t == "integer":
+        return int(v["value"])
+    if t == "float":
+        return float(v["value"])
+    if t == "text":
+        return v["value"]
+    if t == "blob":
+        b = v.get("base64") or ""
+        return base64.b64decode(b + "=" * (-len(b) % 4))
+    raise HranaError(f"unknown value type {t!r}")
+
+
+_local = threading.local()
+
+
+def _post(url: str, token: str | None, body: dict) -> dict:
+    """POST one pipeline on this thread's keep-alive connection to the host.
+
+    A reused connection the server has already dropped is the one failure that is
+    retried (once, on a fresh connection): the request either never left or the
+    server closed without answering, which is the idle keep-alive race."""
+    u = urllib.parse.urlsplit(url)
+    key = (u.scheme, u.netloc)
+    pool = getattr(_local, "pool", None)
+    if pool is None:
+        pool = _local.pool = {}
+    payload = json.dumps(body).encode()
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    path = (u.path.rstrip("/") or "") + "/v2/pipeline"
+    for attempt in (0, 1):
+        conn, last = pool.pop(key, (None, 0.0))
+        reused = conn is not None and time.monotonic() - last < _KEEPALIVE_IDLE
+        if conn is not None and not reused:
+            conn.close()
+        if not reused:
+            conn = (http.client.HTTPSConnection(u.hostname, u.port, timeout=HRANA_TIMEOUT,
+                                                context=ssl.create_default_context())
+                    if u.scheme == "https" else
+                    http.client.HTTPConnection(u.hostname, u.port, timeout=HRANA_TIMEOUT))
+        try:
+            conn.request("POST", path, payload, headers)
+            resp = conn.getresponse()
+            data = resp.read()
+        except (http.client.RemoteDisconnected, ConnectionResetError, BrokenPipeError):
+            conn.close()
+            if reused and attempt == 0:
+                continue
+            raise
+        except Exception:
+            conn.close()
+            raise
+        if resp.status != 200:
+            conn.close()
+            raise HranaError(f"Hrana: HTTP {resp.status}: {data[:500].decode(errors='replace')}")
+        pool[key] = (conn, time.monotonic())
+        return json.loads(data)
+    raise AssertionError("unreachable")
+
+
+class _HranaResult:
+    """One statement's rows, with the sqlite3 cursor surface `_Cursor` reads."""
+
+    def __init__(self, result: dict):
+        cols = result.get("cols") or []
+        self.description = tuple((c.get("name"), None, None, None, None, None, None) for c in cols) or None
+        self._rows = [tuple(_decode(v) for v in row) for row in result.get("rows") or []]
+        self._i = 0
+
+    def fetchone(self):
+        if self._i >= len(self._rows):
+            return None
+        self._i += 1
+        return self._rows[self._i - 1]
+
+    def fetchall(self):
+        rows, self._i = self._rows[self._i:], len(self._rows)
+        return rows
+
+
+class _HranaConn:
+    """A Turso connection over HTTP with sqlite3's (and libsql's) transaction
+    semantics: an INSERT/UPDATE/DELETE/REPLACE outside a transaction opens one,
+    commit() ends it, and close() without commit() rolls it back. A transaction
+    is one Hrana STREAM (its baton carried between requests); anything outside one
+    runs on a stream of its own that closes in the same request."""
+
+    def __init__(self, url: str, token: str | None):
+        self._url = _http_url(url)
+        self._token = token
+        self._baton = None
+        self._base = None          # a stream may be pinned to another URL (base_url)
+        self.in_transaction = False
+
+    def _pipeline(self, stmts: list[str | tuple], close: bool) -> list:
+        reqs = []
+        for st in stmts:
+            sql, params = (st, ()) if isinstance(st, str) else st
+            reqs.append({"type": "execute",
+                         "stmt": {"sql": sql, "args": [_encode(p) for p in params]}})
+        if close:
+            reqs.append({"type": "close"})
+        out = _post(self._base or self._url, self._token, {"baton": self._baton, "requests": reqs})
+        self._baton = None if close else out.get("baton")
+        self._base = None if close else (out.get("base_url") or self._base)
+        results = out.get("results") or []
+        for r in results:
+            if r.get("type") == "error":
+                err = r.get("error") or {}
+                raise HranaError(f"Hrana: {err.get('message')} ({err.get('code')})")
+        return [r["response"]["result"] for r in results
+                if r.get("type") == "ok" and r["response"].get("type") == "execute"]
+
+    def execute(self, sql, params=()):
+        params = tuple(params or ())
+        if self.in_transaction:
+            return _HranaResult(self._pipeline([(sql, params)], close=False)[-1])
+        if _DML.match(sql):
+            self.in_transaction = True
+            try:
+                return _HranaResult(self._pipeline(["BEGIN", (sql, params)], close=False)[-1])
+            except Exception:
+                if self._baton is None:      # the stream never opened: nothing to roll back
+                    self.in_transaction = False
+                raise
+        return _HranaResult(self._pipeline([(sql, params)], close=True)[-1])
+
+    def commit(self):
+        if not self.in_transaction:
+            return
+        self.in_transaction = False
+        self._pipeline(["COMMIT"], close=True)
+
+    def close(self):
+        if self._baton is not None:
+            try:
+                self._pipeline([], close=True)     # an open transaction is rolled back
+            except Exception:
+                pass
+        self._baton, self.in_transaction = None, False
+
+
+def _connect_http():
+    return _HranaConn(TURSO_URL, TURSO_TOKEN)
+
+
+def _connect_libsql():
+    import libsql  # lazy: only the fallback path needs it
     return libsql.connect(database=TURSO_URL, auth_token=TURSO_TOKEN)
 
 
-def _turso_selftest() -> bool:
+def _connect_turso():
+    return _connect_libsql() if _TURSO_DRIVER == "libsql" else _connect_http()
+
+
+def _turso_selftest(connect=None) -> bool:
     """Verify the Turso connection AND that name-based row access works through
     our wrapper. Any failure -> False (fall back to local sqlite)."""
     if not TURSO_URL:
         return False
     try:
-        raw = _connect_turso()
+        raw = (connect or _connect_turso)()
         raw.execute("CREATE TABLE IF NOT EXISTS _selftest (id TEXT, name TEXT)")
         raw.execute("DELETE FROM _selftest")
         raw.execute("INSERT INTO _selftest (id, name) VALUES (?, ?)", ("x", "ok"))
@@ -148,15 +352,29 @@ def _turso_selftest() -> bool:
         raw.execute("DROP TABLE _selftest")
         raw.commit()
         raw.close()
-        LOG.info("Turso/libsql verified — using persistent Turso database.")
+        LOG.info("Turso verified (%s) — using persistent Turso database.",
+                 getattr(connect, "__name__", "_connect_turso"))
         return True
     except Exception as e:  # noqa: BLE001 - never let DB setup crash boot
-        LOG.warning("TURSO_DATABASE_URL set but Turso is unusable (%s); "
-                    "falling back to LOCAL sqlite (data will NOT persist).", e)
+        LOG.warning("TURSO_DATABASE_URL set but Turso is unusable through %s (%s).",
+                    getattr(connect, "__name__", "_connect_turso"), e)
         return False
 
 
-_USE_TURSO = _turso_selftest()
+def _choose_turso() -> tuple[bool, str]:
+    if not TURSO_URL:
+        return False, "http"
+    if _turso_selftest(_connect_http):
+        return True, "http"
+    if _turso_selftest(_connect_libsql):
+        LOG.warning("Turso over HTTP failed its self-test; using the libsql driver, which "
+                    "holds the GIL on every round trip (a slow Turso freezes the site).")
+        return True, "libsql"
+    LOG.warning("Falling back to LOCAL sqlite (data will NOT persist).")
+    return False, "http"
+
+
+_USE_TURSO, _TURSO_DRIVER = _choose_turso()
 
 
 def backend() -> str:
@@ -166,7 +384,9 @@ def backend() -> str:
     failure on boot looks exactly like a healthy deploy from outside, while
     nothing written after it survives the next restart. deploy-render.yml fails
     a deploy that comes up on "sqlite"."""
-    return "turso" if _USE_TURSO else "sqlite"
+    if not _USE_TURSO:
+        return "sqlite"
+    return "turso" if _TURSO_DRIVER == "http" else "turso-libsql"
 
 
 def get_db_conn():

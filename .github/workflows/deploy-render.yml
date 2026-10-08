@@ -251,6 +251,12 @@ jobs:
               # survives the next restart. It will not recover by waiting, so fail
               # now rather than at the timeout.
               backend = data.get("db_backend")
+              if backend == "turso-libsql":
+                  print("::error::The new build is live on Turso, but through the libsql FALLBACK: "
+                        "the HTTP client failed its boot selftest. Data persists, but libsql holds "
+                        "the GIL on every round trip, so a slow Turso freezes the whole site. "
+                        "Check the Render logs for 'Turso over HTTP failed', then fix or revert.")
+                  sys.exit(1)
               if backend != "turso":
                   print(f"::error::The new build is live but db_backend={backend!r}, not 'turso'. "
                         f"Turso failed its boot selftest and prod is writing to EPHEMERAL local "
