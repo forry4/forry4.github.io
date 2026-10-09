@@ -289,6 +289,7 @@ def test_the_matcher_still_says_no_to_things_that_do_not_deploy():
     assert not deploys("games/spender/ai/offline/train_az.py", patterns)
     assert not deploys("books/CLAUDE.md", patterns)
     assert not deploys("core/tests/test_db.py", patterns)
+    assert not deploys("games/orbit/research_tests/test_ai_promotion.py", patterns)
 
     # `*` must not cross a `/`, or `games/spender/*.py` would swallow ai/offline.
     assert not deploys("games/spender/ai/offline/net.py", patterns)

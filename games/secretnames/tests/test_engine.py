@@ -90,22 +90,25 @@ def _guess(game, seat, pos):
 
 
 # ── 1-3: the key card ────────────────────────────────────────────────────────
-@pytest.mark.parametrize("seed", range(40))
-def test_a_generated_key_has_nine_agents_three_assassins_and_thirteen_bystanders(seed):
-    _assert_legal_key(E.make_key_card(random.Random(seed)))
+KEY_SEEDS = range(40)
 
 
-@pytest.mark.parametrize("seed", range(40))
-def test_the_union_of_both_sides_is_exactly_fifteen_agents(seed):
-    keys = E.make_key_card(random.Random(seed))
-    assert len(E.agent_positions(keys)) == 15
+def test_a_generated_key_has_nine_agents_three_assassins_and_thirteen_bystanders():
+    for seed in KEY_SEEDS:
+        _assert_legal_key(E.make_key_card(random.Random(seed)))
 
 
-@pytest.mark.parametrize("seed", range(40))
-def test_exactly_three_agent_positions_are_shared(seed):
-    keys = E.make_key_card(random.Random(seed))
-    assert sum(1 for i in range(BOARD_SIZE)
-               if keys[0][i] == E.AGENT and keys[1][i] == E.AGENT) == 3
+def test_the_union_of_both_sides_is_exactly_fifteen_agents():
+    for seed in KEY_SEEDS:
+        keys = E.make_key_card(random.Random(seed))
+        assert len(E.agent_positions(keys)) == 15, f"seed {seed}"
+
+
+def test_exactly_three_agent_positions_are_shared():
+    for seed in KEY_SEEDS:
+        keys = E.make_key_card(random.Random(seed))
+        assert sum(1 for i in range(BOARD_SIZE)
+                   if keys[0][i] == E.AGENT and keys[1][i] == E.AGENT) == 3, f"seed {seed}"
 
 
 def test_every_generated_key_is_a_different_board_but_the_composition_never_moves():

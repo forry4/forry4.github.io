@@ -10,7 +10,7 @@ import {
   LobbyCreateRow, lobbyCreateRowCss, useProgressiveList, LobbyTabs, useLastDifficulty,
   LobbyHero, LobbyUser, useListFade,
   RulesModal, rulesModalCss, LobbyBotTier, LobbyOpenTitle, LobbyOpenActions, seatStateOf,
-  WaitingRoom, waitingRoomCss,
+  WaitingRoom, waitingRoomCss, LobbyOpenHd, LobbyActiveHd, LobbyNoOpen, LobbyNoActive
 } from "../../shared/lobby.jsx";
 // Only the shared CARD FRAME (sizing vars + .card chrome). Dontminion's card face
 // is its own markup — no gems here, but the frame keeps all five games' cards the
@@ -2262,8 +2262,8 @@ export default function Dontminion({ myId, authUser, onExit }) {
         ]} />
         <div className={"dm-lobby-cols lby-cols tab-" + lobbyTab}>
           <div className="dm-section lby-col-open">
-            <LobbySectionHd title="Open Games" note={`${openGames.length} waiting`} />
-            {openGames.length === 0 && <div className="lby-empty">No open games — create one.</div>}
+            <LobbyOpenHd count={openGames.length} />
+            {openGames.length === 0 && <LobbyNoOpen />}
             <div className="lby-list">
             {openGames.map((g) => (
               <div key={g.id} className="lby-card">
@@ -2300,7 +2300,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
             </div>
           </div>
           <div className="dm-section lby-col-active">
-            <LobbySectionHd title="Active Games" note={`${activeMine.length} in progress`} />
+            <LobbyActiveHd count={activeMine.length} />
             <div className="lby-list">
             {activeMine.map((g) => (
               <div key={g.id} className="lby-card">
@@ -2324,7 +2324,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
               </div>
             ))}
             </div>
-            {activeMine.length === 0 && <div className="lby-empty">No games in progress.</div>}
+            {activeMine.length === 0 && <LobbyNoActive />}
           </div>
           <div className="dm-section lby-col-history">
             <LobbySectionHd title="History" note={`${history.length} finished`} />

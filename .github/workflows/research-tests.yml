@@ -1,0 +1,55 @@
+name: Research tests
+
+# The tests under games/*/research_tests/ cover OFFLINE AI tooling: Orbit's
+# league, promotion gate, neural/value campaigns and sampler, Dontminion's
+# unshipped champion search, and Spender's self-play trainer. The server
+# imports none of it, so it stays out of pytest.ini's `testpaths` and out of
+# the Render deploy gate. It was ~30% of the main suite's CPU time for ~4% of
+# its tests.
+#
+# It still runs whenever the code it covers changes, weekly to catch drift from
+# a shared engine change, and on demand.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'games/orbit/**'
+      - 'games/dontminion/bot*.py'
+      - 'games/dontminion/research_tests/**'
+      - 'games/spender/*.py'
+      - 'games/spender/ai/**'
+      - 'games/spender/research_tests/**'
+      - '.github/workflows/research-tests.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'games/orbit/**'
+      - 'games/dontminion/bot*.py'
+      - 'games/dontminion/research_tests/**'
+      - 'games/spender/*.py'
+      - 'games/spender/ai/**'
+      - 'games/spender/research_tests/**'
+      - '.github/workflows/research-tests.yml'
+  schedule:
+    - cron: '47 6 * * 1'
+  workflow_dispatch:
+
+jobs:
+  research:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+          cache: pip
+          cache-dependency-path: games/spender/requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r games/spender/requirements.txt
+      - name: Run research tests
+        # Explicit paths override `testpaths`; `-n auto` still comes from pytest.ini.
+        run: python -m pytest -q -rf games/*/research_tests

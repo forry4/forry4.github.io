@@ -5,7 +5,7 @@ import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyMatchup, LobbyLo
   RulesModal, rulesModalCss,
   useProgressiveList, LobbyTabs, useLastDifficulty, LobbyHero,
   LobbyAction, LobbyUser, useListFade, LobbyBotTier, LobbyOpenTitle, LobbyOpenActions, seatStateOf,
-  WaitingRoom, waitingRoomCss } from "../../shared/lobby.jsx";
+  WaitingRoom, waitingRoomCss, LobbyOpenHd, LobbyActiveHd, LobbyNoOpen, LobbyNoActive } from "../../shared/lobby.jsx";
 import CocRules from "./rules.jsx";
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 import { useAutoReconnect } from "../../shared/useAutoReconnect.js";
@@ -2124,11 +2124,11 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
           ]} />
           <div className={`coc-lobby-grid lby-cols tab-${lobbyTab}`}>
             <div className="coc-lobby-col lby-col-open">
-              <LobbySectionHd title="Open Games" note={`${openGames.length} waiting`} />
+              <LobbyOpenHd count={openGames.length} />
               {loadingGames && openGames.length === 0 ? (
                 <div className="lby-empty"><span className="lby-spinner lby-spinner-sm" />Loading…</div>
               ) : openGames.length === 0 ? (
-                <div className="lby-empty">No open games — create one.</div>
+                <LobbyNoOpen />
               ) : (
                 <div className="lby-list">
                 {openGames.map((g) => (
@@ -2151,9 +2151,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
             </div>
 
             <div className="coc-lobby-col lby-col-active">
-              <LobbySectionHd title="Active Games" note={`${activeGames.length} in progress`} />
+              <LobbyActiveHd count={activeGames.length} />
               {activeGames.length === 0 ? (
-                <div className="lby-empty">No games in progress.</div>
+                <LobbyNoActive />
               ) : (() => {
                 // All in-progress games (yours + others'). Yours pinned to the top;
                 // each sub-list is already updated_at-desc from the backend.

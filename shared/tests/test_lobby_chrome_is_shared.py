@@ -1,53 +1,20 @@
 """A game may theme its ROWS. It may not re-skin the kit's CHROME.
 
-`test_lobby_kit.py` next door asks whether a game is wired into the shared lobby
-at all — the right class names, the right components, the right columns. Every
-game passes it and one of them still did not look like the others, because using
-the kit's class names and then restyling them from your own sheet is not opting
-in: it is opting in and then painting over.
+CHROME is what the site owns and keeps identical in every lobby: the header bar,
+the identity band, the section headers, the row actions, the create row, the
+phone tab bar and the two shared modals' panels. A game's MATERIAL — the card
+ground, the page ground and the words — is deliberately not protected.
 
-Black Castle shipped 22 rules doing exactly that — `.lby-header`, `.lby-hero`,
-`.lby-hero-name`, `.lby-section-title`, `.lby-cta`, `.lby-card`, the create modal
-and the rules modal, all re-coloured to its own greens and re-set in Georgia. The
-result was a page that shared its markup with eight siblings and nothing else:
-the Cinzel wordmark became a Georgia one, the identity BAND became a 250px
-photographic hero, the emblem was `display:none` on a phone, and the accent that
-`shared/accents.js` exists to keep honest drove nothing, because every colour it
-was supposed to drive had been written out as a literal.
+Only APPEARANCE properties are refused; a game may still position, layer, space
+or size these elements. Using the kit's class names and then repainting them
+from a game sheet passes `test_lobby_kit.py`, which is why this file exists
+(Black Castle did it with 22 rules; see the root CLAUDE.md).
 
-WHERE THE LINE IS, and it is not "a game may change nothing".
-
-  * CHROME is the furniture the SITE owns: the header bar, the identity band, the
-    section headers, the row actions, the create row, the phone tab bar, and the
-    two shared modals' panels. It is what makes nine lobbies one product, and it
-    is the same in all of them. That is the set below.
-  * A game's own MATERIAL is the card ground, the page ground and the words. Orbit
-    paints `.lby-card` over its starfield and blanks `.lby-page` so the starfield
-    shows; Castles of Crimson tunes `.lby-card-meta`. Those are deliberately NOT
-    protected — the kit's own stylesheet says the identity lives on the plate, the
-    wordmark and the edge-lights, not on the paper.
-
-Only APPEARANCE properties are refused. A game may still position, layer, space
-or size these elements (Orbit puts `position`/`z-index` on four of them to lift
-them over its starfield, Dissonance widens `.cm-panel` for the scorecard); what it
-may not do is repaint or re-letter them.
-
-WHAT THIS CANNOT SEE, stated plainly because the drift that prompted the whole
-exercise is in this blind spot. Every game's sheet is concatenated AFTER the
-shared kit, so a rule that never mentions a kit class can still beat one:
-
-    .blackcastle button,.blackcastle input{font-family:inherit}
-
-is (0,1,1) against `.lby-back`/`.lby-cta`/`.cm-create` at (0,1,0), and it stripped
-the Cinzel off every shared control in that game. No scan of `.lby-*` selectors
-can find it; only a rendered page can. That half is `lobbyChrome` in
-`webapp/test/screens.mjs`, which walks all nine lobbies and asserts the kit's
-computed typography and geometry are IDENTICAL across them. Neither test subsumes
-the other: this one covers the whole chrome vocabulary shallowly and runs in a
-second with no browser, that one covers nine elements deeply and sees what the
-player sees.
-
-Read as TEXT, like `test_lobby_kit.py` and `test_css_tokens.py` beside it.
+WHAT THIS CANNOT SEE: game sheets are concatenated after the shared one, so a
+rule that never names a kit class can still out-specify one (e.g.
+`.blackcastle button{font-family:inherit}` at (0,1,1) against `.lby-cta` at
+(0,1,0)). Only a rendered page sees that, which is `lobbyChrome` in
+`webapp/test/screens.mjs`.
 """
 
 from __future__ import annotations

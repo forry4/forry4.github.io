@@ -1,29 +1,13 @@
 """`.btn` is GEOMETRY ONLY. A button that names it and nothing else is unstyled.
 
-`shared/theme.base-css.css` gives `.btn` padding, radius, font, letter-spacing
-and `border:none` -- and deliberately no background and no colour, because the
-paint comes from a variant: `btn-gold`, `btn-outline`, `btn-ghost`, `btn-danger`,
-or a game's own (`dis-gobtn`, `dis-kontrabtn`). That split is fine right up until
-someone writes `className="btn"` on its own, at which point the browser paints
-its DEFAULT button face -- `rgba(239,239,239,.3)` on `rgba(16,16,16,.3)`,
-measured -- which on any of this repo's dark boards is a white chip with grey
-text sitting in the middle of the theme.
+`shared/theme.base-css.css` gives `.btn` padding, radius and font but no
+background or colour — the paint comes from a variant (`btn-gold`,
+`btn-outline`, `btn-ghost`, `btn-danger`, or a game's own). A bare
+`className="btn"` renders the browser's default button face, a white chip on a
+dark board. Nothing throws and the button works, so no render gate notices.
 
-IT FAILS SILENTLY, like every other bug this directory guards. Nothing throws,
-nothing logs, the button works perfectly, and the class name reads as if it were
-finished. Dissonance shipped NINE of them -- Bid, Start, Swap, Look, Next round,
-Back to lobby among them -- and was the only file in the repo that did; every
-other game names a variant on every button. It survived `smoke`, `screens` and
-the whole Python suite, because all three ask whether a thing renders and none
-asks what colour it came out.
-
-Read as TEXT, like `test_lobby_kit.py` and `test_css_tokens.py` next door: a
-button with no variant is a static fact about the source. `screens.mjs` covers
-what a board LOOKS like; only this covers whether a button was ever dressed.
-
-WHAT THIS DOES NOT CLAIM: that a variant is the RIGHT one. `btn btn-gold` on a
-green board passes here and is still the wrong colour -- that is a judgement, and
-judgements do not belong in a text scan.
+WHAT THIS DOES NOT CLAIM: that a variant is the RIGHT one — that is a judgement,
+not a text scan.
 """
 
 from __future__ import annotations

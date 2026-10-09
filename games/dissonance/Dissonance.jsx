@@ -9,7 +9,7 @@ import {
   RulesModal, rulesModalCss,
   useProgressiveList, notWaiting, LobbyAction, useLastDifficulty, LobbyHero,
   SCORECARD_GLYPH, LobbyUser, useListFade, LobbyBotTier, LobbyOpenTitle, LobbyOpenActions, seatStateOf,
-  WaitingRoom, waitingRoomCss,
+  WaitingRoom, waitingRoomCss, LobbyOpenHd, LobbyActiveHd, LobbyNoOpen, LobbyNoActive
 } from "../../shared/lobby.jsx";
 import DissonanceRules from "./rules.jsx";
 import DissonanceScorecard from "./scorecard.jsx";
@@ -2204,9 +2204,9 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
     }
     const openCol = (
       <div className="lby-col-open">
-        <LobbySectionHd title="Open Games" note={`${visibleOpenGames.length} waiting`} />
+        <LobbyOpenHd count={visibleOpenGames.length} />
         <div className="lby-list">
-          {visibleOpenGames.length === 0 && <LobbyEmpty>No open games — create one.</LobbyEmpty>}
+          {visibleOpenGames.length === 0 && <LobbyNoOpen />}
           {visibleOpenGames.map((g) => (
             <div key={g.id} className="lby-card">
               <div className="lby-card-info">
@@ -2229,9 +2229,9 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
     );
     const activeCol = (
       <div className="lby-col-active">
-        <LobbySectionHd title="Active Games" note={`${activeMine.length} in progress`} />
+        <LobbyActiveHd count={activeMine.length} />
         <div className="lby-list">
-          {activeMine.length === 0 && <LobbyEmpty>No games in progress.</LobbyEmpty>}
+          {activeMine.length === 0 && <LobbyNoActive />}
           {activeMine.map((g) => (
             <div key={g.id} className="lby-card">
               <div className="lby-card-info">

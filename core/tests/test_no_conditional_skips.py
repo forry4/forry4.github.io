@@ -26,6 +26,10 @@ Two design choices, both learned here the expensive way:
   join the suite unguarded, silently, which is the exact shape of the
   `range(13)` soak bug the rule itself cites.
 
+The roster also covers `games/*/research_tests/` (run by research-tests.yml), and
+`test_every_test_file_is_collected_by_some_suite` fails on any `test_*.py` that
+neither suite collects, unless `EXPLICIT_ONLY` says how it is meant to be run.
+
 This lives in core/tests for the same reason `test_history_limit.py` does, and
 with the same constraint: it reads source as TEXT and imports no feature, since
 `core/` may not depend on one and that holds for its tests.
@@ -61,16 +65,45 @@ SANCTIONED = {
 }
 
 
-def _test_files():
-    """Every test module the suite actually collects, derived from pytest.ini."""
+# ── TEST FILES THAT NO SUITE COLLECTS ────────────────────────────────────────
+# A test file outside `testpaths` and outside every `research_tests/` directory
+# runs nowhere, so it can rot without anyone noticing. Each one must be listed
+# here with how it is meant to be run.
+EXPLICIT_ONLY = {
+    "games/orbit/ai/tests/test_attention.py": (
+        "Orbit training-environment test; imports torch at module level. Run by hand "
+        "with `pytest games/orbit/ai/tests` in a torch environment."
+    ),
+    "games/orbit/ai/tests/test_policy_head.py": (
+        "Orbit training-environment test; imports torch at module level. Run by hand "
+        "with `pytest games/orbit/ai/tests` in a torch environment."
+    ),
+}
+
+_NOT_SOURCE = {".git", "node_modules", "__pycache__", "dist", ".venv", "venv"}
+
+
+def _testpaths():
     cfg = configparser.ConfigParser()
     cfg.read(REPO / "pytest.ini")
     paths = cfg["pytest"]["testpaths"].split()
     assert paths, "pytest.ini declares no testpaths — this guard has rotted"
+    return paths
+
+
+def _research_dirs():
+    """games/*/research_tests — run by .github/workflows/research-tests.yml."""
+    return sorted(p for p in (REPO / "games").glob("*/research_tests") if p.is_dir())
+
+
+def _test_files():
+    """Every test module the main suite or the research suite collects."""
     files = []
-    for p in paths:
+    for p in _testpaths():
         d = REPO / p
         assert d.is_dir(), f"testpaths names {p}, which does not exist"
+        files.extend(sorted(d.rglob("test_*.py")))
+    for d in _research_dirs():
         files.extend(sorted(d.rglob("test_*.py")))
     return files
 
@@ -132,3 +165,21 @@ def test_the_guard_can_actually_see_a_skip():
         "detector broke, or that skip is gone — if it is gone, delete the row (and its "
         "paragraph in CLAUDE.md) rather than leaving a carve-out for nothing."
     )
+
+
+def test_every_test_file_is_collected_by_some_suite():
+    """A test file no suite collects reports nothing, pass or fail."""
+    collected = {p.relative_to(REPO).as_posix() for p in _test_files()}
+    found = set()
+    for p in REPO.rglob("test_*.py"):
+        if _NOT_SOURCE.intersection(p.relative_to(REPO).parts):
+            continue
+        found.add(p.relative_to(REPO).as_posix())
+    orphans = sorted(found - collected - set(EXPLICIT_ONLY))
+    assert not orphans, (
+        f"{orphans} sit outside pytest.ini's testpaths and every research_tests/ "
+        "directory, so nothing runs them. Move them into a suite, or list them in "
+        "EXPLICIT_ONLY with how they are meant to be run.")
+    stale = sorted(set(EXPLICIT_ONLY) - found)
+    assert not stale, f"EXPLICIT_ONLY lists {stale}, which no longer exist — delete the rows"
+    assert _research_dirs(), "no games/*/research_tests directory found — this guard has rotted"

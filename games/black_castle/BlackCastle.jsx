@@ -5,7 +5,7 @@ import {
   LobbyEmpty, LobbyAction, LobbyTabs, CreateModal, CmRow, CmSeg, RulesModal,
   rulesModalCss, createModalCss, lobbyCreateRowCss, gameMenuCss,
   LobbyBotTier, LobbyMatchup, LobbyOpenTitle, LobbyOpenActions, seatStateOf, useLastDifficulty, useProgressiveList, notWaiting,
-  WaitingRoom, waitingRoomCss,
+  WaitingRoom, waitingRoomCss, LobbyOpenHd, LobbyActiveHd, LobbyNoOpen, LobbyNoActive
 } from "../../shared/lobby.jsx";
 import { GAME_ACCENTS } from "../../shared/accents.js";
 import { useAutoReconnect } from "../../shared/useAutoReconnect.js";
@@ -51,8 +51,8 @@ function Lobby({ myId, authUser, openGames, activeGames, history, onRefresh, ref
         refreshing={refreshing} onRules={onRules} /></LobbyHero>
       <LobbyTabs value={lobbyTab} onChange={setLobbyTab} tabs={[{ key: "open", label: "Open", count: openGames.length || null }, { key: "active", label: "Active", count: activeGames.length || null }, { key: "history", label: "History", count: history.length || null }]} />
       <div className={`lby-cols tab-${lobbyTab}`}>
-        <section className="lby-col-open"><LobbySectionHd title="Open Games" note={`${openGames.length} waiting`} />
-          {!openGames.length && <LobbyEmpty>No open games — create one.</LobbyEmpty>}
+        <section className="lby-col-open"><LobbyOpenHd count={openGames.length} />
+          {!openGames.length && <LobbyNoOpen />}
           <div className="lby-list">{openGames.map((g) => <div className="lby-card" key={g.id}>
             <div className="lby-card-info"><LobbyOpenTitle game={g} myId={myId} defaultMaxPlayers={4} />
               <div className="lby-card-meta">{g.id} · standard base game</div></div>
@@ -61,8 +61,8 @@ function Lobby({ myId, authUser, openGames, activeGames, history, onRefresh, ref
               onLeave={() => onLeave(g.id)} onCancel={() => onCancel(g.id)} /></div>
           </div>)}</div>
         </section>
-        <section className="lby-col-active"><LobbySectionHd title="Active Games" note={`${active.length} in progress`} />
-          {!active.length && <LobbyEmpty>No games in progress.</LobbyEmpty>}
+        <section className="lby-col-active"><LobbyActiveHd count={active.length} />
+          {!active.length && <LobbyNoActive />}
           <div className="lby-list">{active.map((g) => <div className="lby-card" key={g.id}><div className="lby-card-info"><LobbyMatchup placeholder="Opponent" seats={[{ name: g.player1_name || "Clan", you: true }, { name: g.player2_name || "Opponent", you: false }]} /><div className="lby-card-meta"><LobbyBotTier tier={g.ai_difficulty} labels={BLACK_CASTLE_AI_LABELS} /></div></div><div className="lby-card-actions"><LobbyAction onClick={() => onJoin(g.id)}>Resume</LobbyAction></div></div>)}</div>
         </section>
         <section className="lby-col-history"><LobbySectionHd title="History" note={`${history.length} finished`} />

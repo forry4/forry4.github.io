@@ -1,36 +1,14 @@
 """Pin every port's printed numbers to its PUBLISHED rules, game by game.
 
-WHY THIS FILE EXISTS
---------------------
-Black Castle accumulated four rules errors that shared one root: a question the box
-already answers was asked of a corpus of game logs instead. A deleted 2-player rule, a
-starting-resource card deleted because 20 logs never dealt it, two component counts
-inferred from sightings, and a whole mechanic skipped. Every one of them would have been
-caught by reading the rulebook.
+Setup counts, supply sizes and scoring tables are checked against the named
+source in each test, so a later tidy-up that changes one fails here instead of
+silently changing the game. This came out of a 2026-09-21 audit after Black
+Castle shipped four rules errors from inferring rules off game logs instead of
+reading the rulebook; the same audit found Orbit allowing a fifth capture of a
+planet that has four discs.
 
-So on 2026-09-21 the other nine games were audited the same way -- their setup counts,
-supply sizes and scoring tables checked against the published rules rather than against
-their own tests. Eight came back clean, and that has a cause rather than being luck:
-they were built FROM rulebooks, while Black Castle shipped as an explicit placeholder
-port whose own manifest said `"bga_parity": "planned after launch"`.
-
-**The ninth did not, and it was the one this file had written off.** Orbit was recorded
-here as an original design with no rulebook to check against. It is a port of Zenith.
-Auditing it properly found a real divergence -- a planet could be captured a fifth time
-though the box holds only four of its discs, and in every random game where that came up
-it was the WINNING capture. So the audit's own summary reproduced the bug it was written
-to prevent: "I could not find a source" became "there is no source".
-
-This file is what remains of that audit. Each number below was verified against the source
-named in its test, so the audit does not have to be repeated -- and so a later "tidy-up"
-that changes one of them fails here instead of silently changing the game.
-
-WHAT THIS FILE IS NOT
----------------------
-It is not a rules test. Each game's own suite covers its behaviour; this covers the
-COUNTS and TABLES, which is the class of thing that was wrong in Black Castle and the
-class a reader can check against a published source in seconds. It deliberately does not
-try to cover 368 Dominion cards or every Castles of Burgundy tile.
+WHAT THIS IS NOT: a rules test. Each game's own suite covers behaviour; this
+covers the COUNTS and TABLES a reader can check against a rulebook in seconds.
 """
 from __future__ import annotations
 

@@ -453,6 +453,26 @@ export function LobbyEmpty({ children }) {
 	return <div className="lby-empty">{children}</div>;
 }
 
+// THE OPEN AND ACTIVE COLUMNS' WORDS LIVE HERE AND NOWHERE ELSE. The section names
+// and their empty states are the anchors a player learns moving between lobbies,
+// and three games had themed them. A lobby renders these instead of typing the
+// strings, so the next game gets them right by writing nothing.
+export function LobbyOpenHd({ count }) {
+	return <LobbySectionHd title="Open Games" note={`${count} waiting`} />;
+}
+
+export function LobbyActiveHd({ count }) {
+	return <LobbySectionHd title="Active Games" note={`${count} in progress`} />;
+}
+
+export function LobbyNoOpen() {
+	return <LobbyEmpty>No open games — create one.</LobbyEmpty>;
+}
+
+export function LobbyNoActive() {
+	return <LobbyEmpty>No games in progress.</LobbyEmpty>;
+}
+
 // The mobile-only segmented bar that picks WHICH lobby column shows once the grid
 // has collapsed to one. Spender, Duel and Dontminion each carried a near-verbatim
 // copy of this (identical gap/radius/padding/flex/type scale — only the accent and
@@ -667,13 +687,13 @@ export const createModalCss = _createModalCssText;
 export const lobbyCreateRowCss = _lobbyCreateRowCssText;
 
 export function LobbyCreateRow({ onCreate, onJoin, onRefresh, refreshing = false,
-	onRules, rulesLabel = "Rules", createLabel = "+ Create Game", codeMaxLength = 6,
+	onRules, rulesLabel = "Rules", codeMaxLength = 6,
 	extra = null }) {
 	const [code, setCode] = useState("");
 	const submit = () => { const c = code.trim().toUpperCase(); if (c) onJoin(c); };
 	return (
 		<div className="lby-create-row">
-			<button type="button" className="lby-cta" onClick={onCreate}>{createLabel}</button>
+			<button type="button" className="lby-cta" onClick={onCreate}>+ Create Game</button>
 			<div className="lby-join">
 				<input className="lby-code" placeholder="CODE" value={code} maxLength={codeMaxLength}
 					onChange={(e) => setCode(e.target.value)}

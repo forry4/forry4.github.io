@@ -10,7 +10,7 @@ import {
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss, useProgressiveList, LobbyHero, LobbyUser, useListFade,
   readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame,
-  LobbyOpenTitle, LobbyOpenActions, seatStateOf, WaitingRoom, waitingRoomCss,
+  LobbyOpenTitle, LobbyOpenActions, seatStateOf, WaitingRoom, waitingRoomCss, LobbyOpenHd, LobbyActiveHd, LobbyNoOpen, LobbyNoActive
 } from "../../shared/lobby.jsx";
 import { buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 import {
@@ -1794,8 +1794,8 @@ export default function RagTag({ myId, authUser, onExit }) {
 
         <div className={`rt-lobby-cols lby-cols tab-${lobbyTab}`}>
           <div className="lby-col-open">
-            <LobbySectionHd title="Open Games" note={`${openGames.length} waiting`} />
-            {openGames.length === 0 && <LobbyEmpty>No open games — create one.</LobbyEmpty>}
+            <LobbyOpenHd count={openGames.length} />
+            {openGames.length === 0 && <LobbyNoOpen />}
             <div className="lby-list">
               {openGames.map((g) => (
                 <div className="lby-card" key={g.id}>
@@ -1814,8 +1814,8 @@ export default function RagTag({ myId, authUser, onExit }) {
           </div>
 
           <div className="lby-col-active">
-            <LobbySectionHd title="Active Games" note={`${activeMine.length} in progress`} />
-            {activeMine.length === 0 && <LobbyEmpty>No games in progress.</LobbyEmpty>}
+            <LobbyActiveHd count={activeMine.length} />
+            {activeMine.length === 0 && <LobbyNoActive />}
             <div className="lby-list">
               {activeMine.map((g) => (
                 <div className="lby-card" key={g.id}>

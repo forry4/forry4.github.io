@@ -1,31 +1,15 @@
 """`RulesFacts` and `RulesDefs` take SHAPED items — a bare string renders blank.
 
-Both take a list and read named fields off each entry: `RulesFacts` wants
-`{k, v}` and `RulesDefs` wants `{t, d}`. Hand either one a list of plain strings
-and `it.k` / `it.t` are `undefined`, so React renders the wrapper elements with
-nothing inside them. The panel still lays out. The boxes are still there. They
-are simply empty.
+`RulesFacts` wants `{k, v}` and `RulesDefs` wants `{t, d}`. Given plain strings,
+`it.k` / `it.t` are undefined and React renders empty boxes that still lay out
+(Rag Tag shipped three blank sections this way). No other gate can see it: the
+Python suite does not render and `screens.mjs` asserts markup, not content.
 
-Rag Tag shipped exactly that in three sections — Setup, Health tracks and
-Winning — for as long as the game has existed. Nothing could see it: the Python
-suite does not render, `screens.mjs` asserts that markup exists rather than that
-it says anything, and the CSS test only checks tokens. The rules panel had three
-blank strips in it and looked deliberate.
-
-So this reads the JSX as text and checks the SHAPE of what is passed. The roster
-is globbed, never listed, so a new game's rules file is covered the day it is
-written rather than the day someone remembers this file.
-
-`RulesFacts` has NO CALL SITES today — every ruleset opens on "Goal of the Game"
-(Orbit's shape, adopted by all nine), so the players/length/goal strip is gone and
-those facts are stated in Goal and Setup instead. Its row stays in `SHAPES`
-because the component is still in the kit and the trap is still there for whoever
-draws one next; a row that matches nothing costs one loop that does not run.
-`RulesDefs` is what actually carries the check now, which is why
-`test_the_shape_scan_actually_finds_the_component_in_use` exists: with only one
-component really in play, a `_calls` that silently stopped matching would make
-every assertion below pass over nothing at all — the vacuous-guard failure this
-repo has paid for more than once.
+The roster is globbed, so a new game's rules file is covered when it is
+written. `RulesFacts` has no call sites today but stays in `SHAPES` because the
+component is still in the kit; with only `RulesDefs` in use,
+`test_the_shape_scan_actually_finds_the_component_in_use` keeps the scan from
+passing over nothing.
 """
 import re
 from pathlib import Path

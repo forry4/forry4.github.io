@@ -1,38 +1,17 @@
-"""The waiting room is ONE screen, and this is the only thing enforcing it.
+"""The waiting room is ONE screen: `WaitingRoom` in `shared/lobby.jsx`.
 
-`WaitingRoom` in `shared/lobby.jsx` is the page between "I made a table" and
-"we are playing" — the one screen in the product whose entire job is to get a
-second person to the same URL. All nine games built their own, and the nine of
-them had drifted exactly the way the lobby card row and the ☰ menu did before
-they were extracted:
+It is the page between "I made a table" and "we are playing", and its job is to
+get a second person to the same URL — so the invite is a LINK, with the room
+code underneath. All nine games once built their own and drifted (the way out,
+the code, the wording); see the root CLAUDE.md.
 
-  * the way out read "← Back to Menu", "Leave", "← Back to lobby", "Back to
-    lobby", lived inside a ☰, was the header's own Back — and in Black Castle
-    did not exist at all;
-  * the room code was click-to-copy in two games, inert text in six, and the
-    page's `<h1>` in two;
-  * four games printed a static "Waiting for the host to start…" with nothing
-    moving on the screen.
+This file holds the boundary: every game mounts the kit, the words live in one
+file, and no game rolls its own copy-to-clipboard or hand-builds a room URL. It
+does not hold what the screen LOOKS like — that is `spenderWaitingRoom` /
+`waitingRoomKit` in `webapp/test/screens.mjs`.
 
-And the thing all nine of them were FOR was missing from all nine: what you
-could copy was the room CODE, so inviting somebody meant sending six letters
-plus instructions for where to type them. The site has had room URLs since the
-router landed and every game already enters a room from one.
-
-WHAT THIS FILE HOLDS, and what it deliberately does not. It holds the boundary:
-that every game mounts the kit, that the words live in one file, and that no
-game grows its own copy-the-code control again. It does not hold what the screen
-LOOKS like — that is `waitingRoom` in `webapp/test/screens.mjs`, which drives two
-real clients through a real room. Neither subsumes the other: a game can render
-a perfectly reasonable waiting room out of its own markup, which is precisely
-what nine of them did.
-
-Read as TEXT, like `test_lobby_kit.py` and `test_game_menu_kit.py` beside it —
-CI has no browser here, and "does this game mount the kit" is a static fact.
-
-THE ROSTER IS DERIVED FROM THE TREE, never hardcoded. A hardcoded list only ever
-guards the set SHRINKING; the tenth game would join unguarded, which is the
-shape of every drift this directory exists to catch.
+The roster is derived from the tree, so a new game is covered on its first
+commit.
 """
 
 from __future__ import annotations

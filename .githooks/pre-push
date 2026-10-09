@@ -101,6 +101,7 @@ if [ "$FULL_LOCAL_GATES" != "1" ]; then
     if [ "$need_fe" = "1" ]; then
         say "frontend compile check…"
         ( cd webapp && npm run build ) || exit $?
+        ( cd webapp && npm run test:unit ) || exit $?
     fi
     say "Python: $PYTEST_SCOPE…"
     # shellcheck disable=SC2086  # a space-separated path list, word-split on purpose
@@ -120,6 +121,7 @@ fi
 
 if [ "$need_fe" = "1" ]; then
     say "full frontend rehearsal…"
+    ( cd webapp && npm run test:unit ) || exit $?
     ( cd webapp && npm run smoke ) || exit $?
     ( cd webapp && SCREENS_REUSE_BUILD=1 npm run screens ) || exit $?
 fi

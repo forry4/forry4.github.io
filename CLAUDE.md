@@ -388,9 +388,9 @@ opening and the closing are the same everywhere.
 
 **NEW GAME CHECKLIST — apply the shared lobby and rules shape before writing game-specific copy.**
 Every lobby renders the shared `.lby-cols` with Open, Active and History columns (or the documented
-two-column exception), and the first two columns use the exact section titles **Open Games** and
-**Active Games** plus the exact empty states **“No open games — create one.”** and **“No games in
-progress.”**. Use `WaitingRoom` for the between-seats screen; do not add a separate seated-room
+two-column exception), and the first two columns render the kit's `LobbyOpenHd` / `LobbyActiveHd`
+section headers and `LobbyNoOpen` / `LobbyNoActive` empty states — the words live in
+`shared/lobby.jsx` only, so a lobby that types its own is refused. Use `WaitingRoom` for the between-seats screen; do not add a separate seated-room
 banner when the Open row and its Return action already provide the path back to the table. A new
 rules file starts with `Goal of the Game` and `Setup`, has no lead paragraph or `RulesFacts` strip,
 and keeps its later headings in the rulebook order. The source-derived checks in
@@ -460,10 +460,10 @@ shipped spin keyframes.
 **A GAME CARD ROW IS THE KIT'S, DOWN TO THE ROW'S ANATOMY — three things a new game gets for free
 and cannot get wrong by writing nothing** (all three enforced by `shared/tests/test_lobby_kit.py`,
 because each was a per-game decision that looked reasonable in its own file):
-- **The create button says `+ Create Game` in every lobby.** `createLabel` is a prop with that
-  default and two games had themed it (`+ Create Fight`, `+ Create Orbit`) to match their own
-  vocabulary. It is the same control in the same corner on eight pages; theme the rows, the empty
-  states and the create modal instead.
+- **The create button says `+ Create Game` in every lobby, and there is no prop to change it.**
+  `LobbyCreateRow` had a `createLabel` prop and two games themed it (`+ Create Fight`,
+  `+ Create Orbit`); the prop was removed (2026-10-09) rather than policed by a test. It is the same
+  control in the same corner on every page; theme the rows and the create modal instead.
 - **The actions rail is a GRID: buttons top-right, the turn pill UNDERNEATH them.** `.lby-card` is
   `align-items:flex-start` so Resume hangs from the row's top edge (centred, it slid halfway down
   the moment a row went to two lines). The pill's placement is `order`/`grid-row` in the SHARED
@@ -533,7 +533,8 @@ before going back is the only thing that tells the fix apart from the on-entry f
 `core.rooms.HISTORY_LIMIT` (50) is the SQL row cap in every game's `list_user_history`;
 `HISTORY_MAX` in `shared/lobby.jsx` is where `useProgressiveList` stops revealing. They must be equal
 and `core/tests/test_history_limit.py` asserts it by reading the JSX as TEXT (core may not import a
-feature, and that holds for its tests). The list shows `HISTORY_PAGE` (10) rows and reveals another
+feature, and that holds for its tests); `shared/tests/test_history_limit.py` round-trips every
+game's `list_user_history` through sqlite to prove the SQL honours the cap, newest first. The list shows `HISTORY_PAGE` (10) rows and reveals another
 page when the reader scrolls the end into view — via a **SENTINEL + IntersectionObserver, not a scroll
 handler**, because what actually scrolls changes with the tier (the column's own `.lby-list` at the
 3-column tier, the page below it, and a third thing again once the phone tab bar takes over), and an
@@ -714,8 +715,23 @@ covers the logic; each game's wiring is one line).
 
 - **The suite is defined ONCE** in `pytest.ini` `testpaths`. Python CI runs the bare `pytest` on
   every push and pull request; an automatic Render deploy waits for that exact successful run,
-  so the main push no longer runs the 4,651-test suite twice. The manual Render workflow remains
+  so the main push no longer runs the ~4,800-test suite twice. The manual Render workflow remains
   self-contained and runs the same bare command as a fallback.
+- **Tests of OFFLINE AI tooling live in `games/<game>/research_tests/`, outside `testpaths`**
+  (2026-10-09). Orbit's league / promotion / neural / value campaigns and offline sampler, Dontminion's
+  unshipped champion search, and Spender's self-play trainer — code the server never imports. They
+  were ~4% of the tests and ~30% of the suite's CPU. `.github/workflows/research-tests.yml` runs them
+  (`pytest games/*/research_tests`) whenever that code changes, weekly, and on demand; they are
+  excluded from the Render deploy trigger. **A test of code that SHIPS goes in `tests/`**, including
+  research-adjacent ones that guard a served artifact (`test_ai_leaf.py` pins the Python reference of
+  the Rust leaf the browser runs; `test_ai_foundations.py` keeps the observation-boundary half).
+  `core/tests/test_no_conditional_skips.py` also fails on any `test_*.py` that no suite collects, with
+  an `EXPLICIT_ONLY` map for the two torch-only Orbit files run by hand.
+- **Frontend unit tests: `npm run test:unit` (`webapp/test/unit/`, plain `node --test`, no new
+  dependencies).** They cover the pure shared modules — the router's path grammar and dedup/popstate
+  contract, the lobby-history refresh rules, the seat-leave request, bot-tier labels — and run first
+  in the Pages build job and in the pre-push hook's frontend gate. Prefer a unit test here to a
+  `shared/tests/` text scan or a `screens.mjs` block when the thing under test is a function.
 - **The suite runs PARALLEL by default (`addopts = -n auto`) — 6m41s → ~1m04s, and `pytest-xdist` is
   a required dependency, not an optional one.** Two things were wrong, and they are different
   problems worth telling apart:
@@ -772,7 +788,8 @@ covers the logic; each game's wiring is one line).
   unlisted `skipif` is drift by definition.
   **The rule is now MECHANICALLY ENFORCED — `core/tests/test_no_conditional_skips.py`**, because a
   rule whose only enforcement is prose is enforced only by whoever re-reads it, and this one had
-  already drifted to prove it. It walks every module `pytest.ini` collects (122 today) and fails on
+  already drifted to prove it. It walks every module `pytest.ini` collects plus every
+`games/*/research_tests/` module and fails on
   any `skip`/`importorskip`/`xfail` call or `skip`/`skipif`/`xfail` mark outside its `SANCTIONED`
   map, so **a new carve-out must be added in TWO places — that map and this rule.** Two things about
   it are load-bearing and are the local versions of lessons already paid for elsewhere: it parses the
@@ -784,7 +801,7 @@ covers the logic; each game's wiring is one line).
   broken walk or a stale row fails instead of quietly passing. Verified non-vacuous against all four
   skip forms plus a comment-only mention.
 - **CI runs `core/tests/` first; Render deploy is gated on tests.** Frontend deploy is gated by
-  `npm run smoke` AND `npm run screens`.
+  `npm run test:unit`, `npm run smoke` AND `npm run screens`.
 - **`npm run smoke` NEVER RENDERS A GAME — don't mistake it for render coverage.** The shell pings the
   backend before it routes, and smoke has no backend, so all three of its routes sit on the loading
   screen. It genuinely catches a blank page, a bundle that throws at load, and layout shift. That is all.

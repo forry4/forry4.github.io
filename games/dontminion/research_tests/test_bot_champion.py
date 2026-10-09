@@ -1,4 +1,4 @@
-"""Champion tests — the search harness.
+"""Champion tests — the search harness (research, not run in the main suite).
 
 The champion is NOT a shipped tier: it was built, measured, and did not beat
 `bmplus` (see the module docstring in bot.py and the research log). These tests
@@ -17,7 +17,7 @@ is wrong":
 
 import random
 
-from games.dontminion import bot, bot_champion as C, engine, main as m
+from games.dontminion import bot, bot_champion as C, engine
 
 A, B = "alice", "bob"
 K = ["Smithy", "Village", "Moat", "Militia", "Witch", "Throne Room",
@@ -118,42 +118,3 @@ def test_champion_finishes_a_game(monkeypatch):
         ok, err = engine.apply_move(g, pid, bot.choose(g, pid, rng, "champion"))
         assert ok, err
     assert g["over"] and g["winners"]
-
-
-# ── they must not be reachable from a client ─────────────────────────────────
-
-def test_the_unshipped_tiers_are_not_offered_and_coerce_to_the_default():
-    """They lose to bmplus, so a room must never be able to select one. The
-    coercion that lets the ladder grow without a migration is also what keeps
-    a research tier out of production.
-
-    `bigmoney` is in this list for a different reason from the rest: it is not
-    a failed experiment but a RETIRED one, a strict subset of bmplus (same buy
-    ladder, no terminal / Colony rungs / endgame) that bmplus beats 0.77. It
-    stays reachable in code as the arena's reference rung, and unreachable
-    from a client for the same reason as the others."""
-    for tier in (bot.BIG_MONEY, "strategist", "champion", "strategist:engine"):
-        assert tier not in m.AI_DIFFICULTIES
-        assert m._valid_difficulty(tier) == m.DEFAULT_DIFFICULTY
-    assert m.DEFAULT_DIFFICULTY == bot.BM_PLUS
-
-
-def test_bigmoney_is_still_dispatchable_for_the_arena():
-    """Unreachable from a client is NOT the same as deleted. Every bmplus gate
-    and pace anchor is measured against plain money, so `bot.choose` must keep
-    routing the string — and route it to the LADDER, not fall through to the
-    random bot, which would turn the reference rung into noise and make every
-    number measured against it meaningless."""
-    g = engine.new_game(["a", "b"], ["base"], seed=7)
-    pid = g["turn"]
-    g["phase"] = "buy"
-    g["seats"][pid]["hand"] = []      # nothing left to play — read the ladder
-    g["coins"] = 9                    # past the $8 "really early" exception
-
-    assert bot.choose(g, pid, random.Random(0), bot.BIG_MONEY) \
-        == bot.choose_big_money(g, pid, random.Random(0)), \
-        "the bigmoney string no longer routes to choose_big_money"
-    assert bot.choose(g, pid, random.Random(0), bot.BIG_MONEY) \
-        == {"type": "buy", "card": "Province"}, (
-            "bigmoney no longer reaches the buy ladder — if it fell through "
-            "to choose_random the arena's baseline is now a coin flip")

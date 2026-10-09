@@ -18,7 +18,7 @@ import {
   RulesModal, GameMenu, rulesModalCss, createModalCss, lobbyCreateRowCss, gameMenuCss,
   useProgressiveList, useListFade, notWaiting, timeAgo,
   readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame,
-  WaitingRoom, waitingRoomCss, seatStateOf, LobbyOpenActions, LobbyOpenTitle,
+  WaitingRoom, waitingRoomCss, seatStateOf, LobbyOpenActions, LobbyOpenTitle, LobbyOpenHd, LobbyActiveHd, LobbyNoOpen, LobbyNoActive
 } from "../../shared/lobby.jsx";
 import { GAME_ACCENTS } from "../../shared/accents.js";
 import { leaveOpenSeat, readRoomToken } from "../../shared/roomLifecycle.js";
@@ -370,8 +370,8 @@ function Lobby({ myId, authUser, openGames, activeGames, history, onRefresh, ref
           could be neither shown nor hidden. */}
       <div className={`lby-cols tab-${lobbyTab}`}>
         <section className="lby-col-open">
-          <LobbySectionHd title="Open Games" note={`${openGames.length} waiting`} />
-          {!openGames.length && <LobbyEmpty>No open games — create one.</LobbyEmpty>}
+          <LobbyOpenHd count={openGames.length} />
+          {!openGames.length && <LobbyNoOpen />}
           <div className="lby-list">{openGames.map((g) => <div className="lby-card" key={g.id}>
             <div className="lby-card-info">
               <LobbyOpenTitle game={g} myId={myId} />
@@ -391,8 +391,8 @@ function Lobby({ myId, authUser, openGames, activeGames, history, onRefresh, ref
           </div>)}</div>
         </section>
         <section className="lby-col-active">
-          <LobbySectionHd title="Active Games" note={`${active.length} in progress`} />
-          {!active.length && <LobbyEmpty>No games in progress.</LobbyEmpty>}
+          <LobbyActiveHd count={active.length} />
+          {!active.length && <LobbyNoActive />}
           <div className="lby-list">{active.map((g) => <div className="lby-card" key={g.id}>
             <div className="lby-card-info">
               <LobbyMatchup placeholder="Partner" seats={[

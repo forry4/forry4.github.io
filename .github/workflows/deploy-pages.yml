@@ -140,6 +140,13 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('webapp/package-lock.json') }}
 
+      # Unit tests for the shared JS modules (router, lobby history, seat leave,
+      # bot-tier labels). Plain `node --test`, no browser and no build, so it runs
+      # first and fails in seconds.
+      - name: Unit tests (shared JS modules)
+        working-directory: webapp
+        run: npm run test:unit
+
       # Gate the deploy: build the app, load it in a headless browser, and fail if
       # the page is blank / throws (e.g. a stray backtick in the CSS template). This
       # runs BEFORE the real Build step so its throwaway build can't ship.

@@ -4,7 +4,7 @@ import { lobbyCss, LobbyHeader, LobbySectionHd, LobbyLoading, GameMenu, gameMenu
   createModalCss, CreateModal, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss, LobbyHero, LobbyAction, LobbyTabs, timeAgo,
   notWaiting, LobbyUser, LobbyOpenTitle, LobbyOpenActions, seatStateOf, useListFade,
-  WaitingRoom, waitingRoomCss } from "../../shared/lobby.jsx";
+  WaitingRoom, waitingRoomCss, LobbyOpenHd, LobbyActiveHd, LobbyNoOpen, LobbyNoActive } from "../../shared/lobby.jsx";
 import WhereWolfRules from "./rules.jsx";
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 import { leaveOpenSeat, readRoomToken } from "../../shared/roomLifecycle.js";
@@ -666,9 +666,9 @@ export default function WhereWolf({ myId, authUser, onExit }) {
           ]} />
           <div className={`lby-cols lby-cols-2 tab-${lobbyTab}`}>
             <div className="lby-col-open">
-              <LobbySectionHd title="Open Games" note={`${openGames.length} waiting`} />
+              <LobbyOpenHd count={openGames.length} />
               {openGames.length === 0 ? (
-                <div className="lby-empty">No open games — create one.</div>
+                <LobbyNoOpen />
               ) : <div className="lby-list">{openGames.map((g) => (
                 <div className="lby-card" key={g.id}>
                   <div className="lby-card-info"><LobbyOpenTitle game={g} myId={myId} defaultMaxPlayers={10} />
@@ -689,9 +689,9 @@ export default function WhereWolf({ myId, authUser, onExit }) {
               ))}</div>}
             </div>
             <div className="lby-col-active">
-              <LobbySectionHd title="Active Games" note={`${activeMine.length} in progress`} />
+              <LobbyActiveHd count={activeMine.length} />
               {activeMine.length === 0 ? (
-                <div className="lby-empty">No games in progress.</div>
+                <LobbyNoActive />
               ) : <div className="lby-list">{activeMine.map((g) => (
                 <div className="lby-card" key={g.id}>
                   {/* THE ROOM CODE IS THE TITLE. It read "In progress", under a header

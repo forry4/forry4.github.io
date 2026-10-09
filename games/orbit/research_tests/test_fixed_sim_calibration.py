@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from ..tools.calibrate_fixed_sims import actor_pool, tally
-from ..tools.native_search_arena import mirror_control
+from games.orbit.tools.calibrate_fixed_sims import actor_pool, tally
+from games.orbit.tools.native_search_arena import mirror_control
 
 
 def report(rows, *, workers=4, via_observation=True, complete=True):
@@ -127,7 +127,7 @@ def test_any_per_seat_difference_is_not_a_mirror(difference):
 # Pools measured on an old binary and pools measured on a new one are two
 # experiments wearing one name, and nothing in either report says so.
 
-from ..tools.arena_equivalence import compare
+from games.orbit.tools.arena_equivalence import compare
 
 
 def _run(games, **settings):

@@ -7,7 +7,7 @@ import {
   CreateModal, CmRow, CmSeg, RulesModal, GameMenu,
   createModalCss, lobbyCreateRowCss, rulesModalCss, gameMenuCss,
   WaitingRoom, waitingRoomCss, useProgressiveList, useListFade,
-  readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame, useLastDifficulty,
+  readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame, useLastDifficulty, LobbyOpenHd, LobbyActiveHd, LobbyNoOpen, LobbyNoActive
 } from "../../shared/lobby.jsx";
 import { GAME_ACCENTS } from "../../shared/accents.js";
 import { useAutoReconnect } from "../../shared/useAutoReconnect.js";
@@ -324,8 +324,8 @@ function Lobby({ myId, authUser, openGames, myGames, history, refreshing, onRefr
         { key: "history", label: "History", count: history.length || null },
       ]} />
       <div className={`lby-cols tab-${tab}`}>
-        <section className="lby-col-open"><LobbySectionHd title="Open Games" note={`${openGames.length} waiting`} />
-          {!openGames.length && <LobbyEmpty>No open games — create one.</LobbyEmpty>}
+        <section className="lby-col-open"><LobbyOpenHd count={openGames.length} />
+          {!openGames.length && <LobbyNoOpen />}
           <div className="lby-list">{openGames.map((game) => <div className="lby-card" key={game.id}>
             <div className="lby-card-info"><LobbyOpenTitle game={game} myId={myId} />
               <div className="lby-card-meta">{game.id} · {modeLabel(game.mode)} · {timeAgo(game.updated_at)}</div></div>
@@ -334,8 +334,8 @@ function Lobby({ myId, authUser, openGames, myGames, history, refreshing, onRefr
               onLeave={() => onLeave(game.id)} onCancel={() => onCancel(game.id)} /></div>
           </div>)}</div>
         </section>
-        <section className="lby-col-active"><LobbySectionHd title="Active Games" note={`${active.length} in progress`} />
-          {!active.length && <LobbyEmpty>No games in progress.</LobbyEmpty>}
+        <section className="lby-col-active"><LobbyActiveHd count={active.length} />
+          {!active.length && <LobbyNoActive />}
           <div className="lby-list">{active.map((game) => <div className="lby-card" key={game.id}>
             <div className="lby-card-info"><LobbyMatchup seats={[
               { name: game.player1_name || "Player", you: game.player1_id === myId },

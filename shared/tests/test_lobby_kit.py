@@ -56,6 +56,16 @@ def _game_frontend(jsx: pathlib.Path) -> str:
                      for p in sorted(jsx.parent.glob("*.jsx")))
 
 
+def _open_column(text: str) -> str:
+    """The JSX between a lobby's `.lby-col-open` and its `.lby-col-active`."""
+    open_col = re.search(r'className="[^"]*\blby-col-open\b"', text)
+    if not open_col:
+        return ""
+    rest = text[open_col.start():]
+    active_col = re.search(r'className="[^"]*\blby-col-active\b"', rest)
+    return rest[:active_col.start()] if active_col else rest
+
+
 def test_every_lby_class_a_game_uses_is_one_the_shared_sheet_defines():
     css = _shared_css()
     defined = set(re.findall(r"\.(lby-[a-z0-9-]+)", css))
@@ -106,26 +116,28 @@ def test_a_lobby_pins_every_column_it_has():
         assert "lby-col-history" in text, f"{jsx.name} renders .lby-cols without .lby-col-history"
 
 
-def test_every_lobby_uses_the_standard_open_and_active_copy():
+def test_every_lobby_uses_the_kits_open_and_active_copy():
     """Open and Active are shared information architecture, not game flavor.
 
-    The section names and their empty states are the anchors players learn while
-    moving between games. SecretNames and the two games before it each themed
-    these four strings, which made the same lobby columns look like different
-    products and made an empty lobby harder to scan. The roster is derived from
-    the tree so the next game is checked on its first commit.
+    The section names and empty states live in `shared/lobby.jsx`
+    (`LobbyOpenHd`/`LobbyActiveHd`/`LobbyNoOpen`/`LobbyNoActive`), so a lobby
+    that renders the components cannot theme them. This checks the components
+    are used and that no lobby types the strings itself.
     """
+    shared = (SHARED / "lobby.jsx").read_text(encoding="utf-8")
+    for name in ("LobbyOpenHd", "LobbyActiveHd", "LobbyNoOpen", "LobbyNoActive"):
+        assert f"export function {name}" in shared, f"{name} left shared/lobby.jsx"
     missing: dict[str, list[str]] = {}
     for jsx in _lobby_games():
         text = jsx.read_text(encoding="utf-8")
         checks = {
-            'the "Open Games" section': re.search(
-                r'<LobbySectionHd\b[^>]*title="Open Games"', text),
-            'the "Active Games" section': re.search(
-                r'<LobbySectionHd\b[^>]*title="Active Games"', text),
-            'the open-games empty state': "No open games — create one." in text,
-            'the active-games empty state': "No games in progress." in text,
-            'no copied seated-room banner': "SeatedNotice" not in text,
+            "<LobbyOpenHd": "<LobbyOpenHd" in text,
+            "<LobbyActiveHd": "<LobbyActiveHd" in text,
+            "<LobbyNoOpen": "<LobbyNoOpen" in text,
+            "<LobbyNoActive": "<LobbyNoActive" in text,
+            "no hand-typed Open/Active copy": not re.search(
+                r'title="(Open|Active) Games"|No open games|No games in progress', text),
+            "no copied seated-room banner": "SeatedNotice" not in text,
         }
         for label, ok in checks.items():
             if not ok:
@@ -149,12 +161,7 @@ def test_every_lobby_uses_the_shared_open_game_title():
     missing = []
     for jsx in _lobby_games():
         text = jsx.read_text(encoding="utf-8")
-        open_col = re.search(r'className="[^"]*\blby-col-open\b"', text)
-        active_col = (re.search(r'className="[^"]*\blby-col-active\b"', text[open_col.start():])
-                      if open_col else None)
-        open_source = text[open_col.start():] if open_col else ""
-        if active_col:
-            open_source = open_source[:active_col.start()]
+        open_source = _open_column(text)
         if "LobbyOpenTitle" not in open_source:
             missing.append(jsx.name)
     assert not missing, (
@@ -176,12 +183,7 @@ def test_every_lobby_uses_the_shared_open_seat_lifecycle():
     missing = []
     for jsx in _lobby_games():
         text = jsx.read_text(encoding="utf-8")
-        open_col = re.search(r'className="[^"]*\blby-col-open\b"', text)
-        active_col = (re.search(r'className="[^"]*\blby-col-active\b"', text[open_col.start():])
-                      if open_col else None)
-        open_source = text[open_col.start():] if open_col else ""
-        if active_col:
-            open_source = open_source[:active_col.start()]
+        open_source = _open_column(text)
         if ("LobbyOpenActions" not in open_source or "seatStateOf" not in open_source
                 or "onLeave" not in open_source):
             missing.append(jsx.name)
@@ -317,29 +319,6 @@ def test_an_active_list_built_from_games_mine_filters_out_waiting_rooms():
         assert "notWaiting" in near or "notWaiting" in text, (
             f"{jsx.name} builds its Active column from /games/mine without "
             "notWaiting(), so rooms still waiting for a player show as active")
-
-
-def test_the_create_button_says_the_same_thing_in_every_lobby():
-    """`+ Create Game`, everywhere. Two lobbies had themed the label to their own
-    vocabulary — Rag Tag `+ Create Fight`, Orbit `+ Create Orbit` — which is a
-    defensible instinct (every OTHER string in those lobbies says fight/orbit) and
-    still the wrong place for it: this is the same control, in the same corner, on
-    eight pages, and a player moving between them was re-reading a button they had
-    already learned. The theming belongs on the rows, the empty states and the
-    create modal, which are actually about the game.
-
-    Enforced rather than remembered because the label is a PROP with a default: a
-    new game gets this right by writing nothing at all, and gets it wrong by
-    writing one plausible-looking line that nothing else in the repo contradicts.
-    """
-    themed = {}
-    for jsx in _lobby_games():
-        for m in re.finditer(r'createLabel=(?:"([^"]*)"|\{[^}]*\})',
-                             jsx.read_text(encoding="utf-8")):
-            themed[jsx.name] = m.group(1) or "<expression>"
-    assert not themed, (
-        "these lobbies override the shared create-button label; delete the prop "
-        f"and take the default: {themed}")
 
 
 def test_an_active_game_names_the_seat_you_are_sitting_in():

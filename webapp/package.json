@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview --port 5173",
     "smoke": "node test/smoke.mjs",
+    "test:unit": "node --test \"test/unit/*.test.mjs\"",
     "screens": "node test/screens.mjs",
     "screens:orbit": "node test/screens.mjs --only=orbitPlay",
     "screens:pinch": "node test/screens.mjs --only=pinchPlay",

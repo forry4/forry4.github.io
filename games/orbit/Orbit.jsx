@@ -7,7 +7,7 @@ import {
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss, useProgressiveList, LobbyHero, LobbyUser, useListFade,
   readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame, timeAgo, useLastDifficulty,
-  LobbyBotTier, LobbyOpenTitle, LobbyOpenActions, seatStateOf, WaitingRoom, waitingRoomCss,
+  LobbyBotTier, LobbyOpenTitle, LobbyOpenActions, seatStateOf, WaitingRoom, waitingRoomCss, LobbyOpenHd, LobbyActiveHd, LobbyNoOpen, LobbyNoActive
 } from "../../shared/lobby.jsx";
 import { GAME_ACCENTS } from "../../shared/accents.js";
 import { buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
@@ -830,8 +830,8 @@ function Lobby({ authUser, myId, onExit, openGames, myGames, history, historySho
       ]} />
       <div className={`or-lobby-cols lby-cols tab-${lobbyTab}`}>
         <div className="lby-col-open">
-          <LobbySectionHd title="Open Games" note={`${openGames.length} waiting`} />
-          {!openGames.length && <LobbyEmpty>No open games — create one.</LobbyEmpty>}
+          <LobbyOpenHd count={openGames.length} />
+          {!openGames.length && <LobbyNoOpen />}
           <div className="lby-list">{openGames.map((g) => <div className="lby-card" key={g.id}>
             <div className="lby-card-info"><LobbyOpenTitle game={g} myId={myId} />
               <div className="lby-card-meta">{g.id} · {timeAgo(g.created_at)}</div></div>
@@ -841,8 +841,8 @@ function Lobby({ authUser, myId, onExit, openGames, myGames, history, historySho
           </div>)}</div>
         </div>
         <div className="lby-col-active">
-          <LobbySectionHd title="Active Games" note={`${active.length} in progress`} />
-          {!active.length && <LobbyEmpty>No games in progress.</LobbyEmpty>}
+          <LobbyActiveHd count={active.length} />
+          {!active.length && <LobbyNoActive />}
           <div className="lby-list">{active.map((g) => <div className="lby-card" key={g.id}>
             <div className="lby-card-info"><LobbyMatchup placeholder="Opponent" seats={[
               { name: g.player1_name, you: g.you_are_p1 }, { name: g.player2_name, you: !g.you_are_p1 },

@@ -1,47 +1,20 @@
 """Every `var(--token)` without a fallback must name a token IN SCOPE for it.
 
-THIS FAILS SILENTLY AT RUNTIME, which is the whole reason it needs a static
-test. An undefined custom property makes the declaration "invalid at computed
-value time", and the browser throws away THAT DECLARATION ONLY — the rest of
-the rule applies normally and nothing is logged. So:
+An undefined custom property silently drops just that declaration — no error,
+no log — so a selected button keeps its dark ink on a missing background, an
+outline vanishes, or "muted" text inherits full brightness. Dissonance shipped
+`--accent` and `--muted` dead in fourteen places this way.
 
-* `background: var(--accent); color: #08131f` kept the dark background and the
-  near-black text, i.e. a selected button you cannot read;
-* `outline: 2px solid var(--accent)` dropped the whole outline shorthand, so
-  selected cards and won tricks simply lost their outline;
-* `color: var(--muted)` fell back to `inherit` (colour is an inherited
-  property), so "muted" text rendered at full brightness.
+WHAT THIS CATCHES: a token nothing a file can see defines. Scope is narrowed as
+far as text allows: a game may use the theme, the shared kits, its own sheet
+and its own JSX, so a token defined only in ANOTHER game's CSS is caught.
 
-Dissonance shipped with `--accent` dead in eight places and `--muted` dead in
-six, in both auction modes, and no existing gate could see it: the Python suite
-never renders and `screens.mjs` asserts markup and geometry, not colour. A
-player reported the bids looked invisible.
+WHAT IT CANNOT CATCH: a token defined somewhere but not on an ancestor of the
+element using it. Real scope needs a DOM; `screens.mjs` measures a selected
+bid's computed background against its text colour for that half.
 
-WHAT THIS CATCHES: a token NOTHING in the repo defines. That is how `--muted`
-was found — six dead declarations, no definition anywhere.
-
-WHAT THIS CANNOT CATCH, stated plainly because the first two versions of this
-file claimed otherwise and both passed against the real bug: a token that is
-defined somewhere but is not in scope where it is USED. `--accent` is set on
-Spender's `.home-game-card` and inline by `shared/HomeScreen.jsx` for the home
-menu — neither of which is anywhere near a Dissonance board, yet both make the
-name "exist". Real CSS scope is per-element-subtree and needs a DOM; a text
-scan cannot model it, and pretending otherwise is worse than not trying.
-
-The guard for THAT half is a rendering assertion, not a static one:
-`screens.mjs` measures a selected bid's computed background against its own
-text colour, which is the property a player actually cares about and the exact
-symptom that was reported.
-
-Scope is still narrowed as far as text allows — a game may use the theme, the
-shared kits, its own sheet and its own JSX — so a token defined only in another
-game's CSS is still caught.
-
-A `var(--x, fallback)` is FINE and deliberately not flagged: that is the
-documented shared-kit pattern for surviving CoC's bare mount, where the theme
-tokens genuinely are absent.
-
-Read as TEXT, like `test_lobby_kit.py` next door.
+`var(--x, fallback)` is fine and not flagged — it is the shared-kit pattern for
+surviving CoC's bare mount.
 """
 
 from __future__ import annotations

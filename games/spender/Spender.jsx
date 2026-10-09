@@ -71,7 +71,7 @@ import { lobbyCss, LobbyHeader, LobbyLoading, GameMenu, gameMenuCss, readLobbyCa
 	createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss, LobbyHero, LobbyUser,
 	RulesModal, rulesModalCss,
 	useProgressiveList, LobbySectionHd, LobbyOpenTitle, LobbyTabs, TurnBadge, LobbyMatchup, LobbyAction, useListFade,
-	WaitingRoom, waitingRoomCss, LobbyOpenActions, seatStateOf } from "../../shared/lobby.jsx";
+	WaitingRoom, waitingRoomCss, LobbyOpenActions, seatStateOf, LobbyOpenHd, LobbyActiveHd, LobbyNoOpen, LobbyNoActive } from "../../shared/lobby.jsx";
 import SpenderRules from "./rules.jsx";
 import { GemToken, CardView, GEM_COLORS, GEM_LABELS, GEM_HEX,
 	splendorPanelCss, splendorCardCss, splendorCardExtraCss, splendorPillCss,
@@ -3495,11 +3495,11 @@ export default function SpenderApp() {
 
 					<div className={`lobby-grid lby-cols tab-${lobbyTab}`}>
 					<div className="browser-section lby-col-open">
-						<LobbySectionHd title="Open Games" note={`${openGames.length} waiting`} />
+						<LobbyOpenHd count={openGames.length} />
 						{browserLoading && openGames.length === 0 ? (
 							<div className="lby-empty"><span className="lby-spinner lby-spinner-sm" />Loading…</div>
 						) : openGames.length === 0 ? (
-							<div className="lby-empty">No open games — create one.</div>
+							<LobbyNoOpen />
 						) : (
 							<div className="lby-list">
 								{openGames.map(g => (
@@ -3564,9 +3564,9 @@ export default function SpenderApp() {
 						const ordered = [...mine, ...others];
 						return (
 							<div className="browser-section lby-col-active">
-								<LobbySectionHd title="Active Games" note={`${ordered.length} in progress`} />
+								<LobbyActiveHd count={ordered.length} />
 								{ordered.length === 0 ? (
-									<div className="lby-empty">No games in progress.</div>
+									<LobbyNoActive />
 								) : (
 								<div className="lby-list">
 									{ordered.map(g => {

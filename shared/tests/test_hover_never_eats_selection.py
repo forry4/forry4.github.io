@@ -1,37 +1,15 @@
 """A `:hover` fill must never out-specify the SELECTED state it sits next to.
 
-THIS ALSO FAILS SILENTLY, and worse than the token bug in `test_css_tokens.py`:
-there, the selected button lost its background everywhere and at least looked
-uniformly wrong. Here it looks perfect until you interact with it.
-
-The mechanism, measured in Chromium rather than reasoned about:
-
-    .dis-denoms button:hover:not(:disabled)  ->  (0,3,1)   grey fill
-    .dis-denoms button.on                    ->  (0,2,1)   the accent
-
-`:not()` contributes its ARGUMENT's specificity, so `:not(:disabled)` quietly
-buys the hover rule a third class-level point and it beats `.on`. The selected
-button repaints grey while `.on`'s near-black `color` still applies — the exact
-unreadable pairing `--accent` was defined to fix, arriving by a different road.
-
-**On a phone it is permanent, not transient.** `:hover` latches to the last
-element tapped until you tap elsewhere (the same iOS behaviour Dontminion
-already documents, and that Dissonance's own card rules are guarded for), so
-the suit you just picked stays grey for the rest of the auction. Reported from
-a phone: the number green, the suit not.
-
-WHY A STATIC TEST AND NOT JUST THE BROWSER GATE. `screens.mjs` now hovers the
-selected button too, but it can only check the families that are ON SCREEN in
-the phase it happens to be in — and its Dissonance auction is SKAT, which bids
-a number and shows no suit row. So the live gate covers `.dis-valgrid`, which
-was the one family that was never broken: it ties on specificity and keeps its
-colour purely because `.on` comes second in source order. Luck, not design.
-This test covers every family at once and cannot be dodged by phase.
+`:not()` contributes its argument's specificity, so
+`.dis-denoms button:hover:not(:disabled)` at (0,3,1) beats
+`.dis-denoms button.on` at (0,2,1): the selected button repaints grey under
+`.on`'s dark text. On a phone `:hover` latches to the last element tapped, so
+the selection stays unreadable for the rest of the phase.
 
 WHAT IT CHECKS: within one stylesheet, any `:hover` rule that sets `background`
-and whose selector could also match an element carrying `.on` must exclude it
-with `:not(.on)`. Narrow on purpose — it says nothing about rules that do not
-paint a background, and nothing about states other than `.on`.
+and could also match an element carrying `.on` must exclude it with
+`:not(.on)`. Static on purpose — the browser gate can only hover the families
+on screen in the phase it reaches, and this covers all of them at once.
 """
 import re
 from pathlib import Path

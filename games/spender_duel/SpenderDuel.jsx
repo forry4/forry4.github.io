@@ -7,7 +7,7 @@ import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyMatchup, LobbyLo
   RulesModal, rulesModalCss,
   useProgressiveList, LobbyTabs, notWaiting, LobbyAction, useLastDifficulty,
   LobbyHero, LobbyUser, useListFade, LobbyBotTier, LobbyOpenTitle, LobbyOpenActions, seatStateOf,
-  WaitingRoom, waitingRoomCss } from "../../shared/lobby.jsx";
+  WaitingRoom, waitingRoomCss, LobbyOpenHd, LobbyActiveHd, LobbyNoOpen, LobbyNoActive } from "../../shared/lobby.jsx";
 // The gems, jewel cards and move log are SHARED with Spender (same game family, so
 // they must look the same). Duel adds only what Splendor Duel needs on top: pearls,
 // crowns, wild bonuses and ability glyphs — all optional props on the same CardView.
@@ -1621,8 +1621,8 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
         ]} />
         <div className={`duel-lobby-cols lby-cols tab-${lobbyTab}`}>
           <div className="duel-section lby-col-open">
-            <LobbySectionHd title="Open Games" note={`${openGames.length} waiting`} />
-            {openGames.length === 0 && <div className="lby-empty">No open games — create one.</div>}
+            <LobbyOpenHd count={openGames.length} />
+            {openGames.length === 0 && <LobbyNoOpen />}
             <div className="lby-list">
             {openGames.map((g) => (
               <div className="lby-card" key={g.id}>
@@ -1640,7 +1640,7 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
             </div>
           </div>
           <div className="duel-section lby-col-active">
-            <LobbySectionHd title="Active Games" note={`${activeMine.length} in progress`} />
+            <LobbyActiveHd count={activeMine.length} />
             {savedRid && savedTok && !savedListed && activeMine.length === 0 && (
               <div className="lby-card">
                 <div className="lby-card-info">
@@ -1650,7 +1650,7 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
                 <div className="lby-card-actions"><LobbyAction onClick={() => resumeGame(savedRid)}>Resume</LobbyAction></div>
               </div>
             )}
-            {activeMine.length === 0 && !(savedRid && savedTok && !savedListed) && <div className="lby-empty">No games in progress.</div>}
+            {activeMine.length === 0 && !(savedRid && savedTok && !savedListed) && <LobbyNoActive />}
             <div className="lby-list">
             {activeMine.map((g) => (
               <div className="lby-card" key={g.id}>
