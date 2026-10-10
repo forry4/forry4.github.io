@@ -252,5 +252,9 @@ def test_the_frozen_alert_names_where_the_loop_is(monkeypatch):
     monkeypatch.setattr(monitor, "_loop_thread", t.ident)
     where = monitor._loop_stack()
     stop.set()
-    assert "core/tests/test_db_hrana.py" in where and "stuck_somewhere" in where, where
+    # Separator-agnostic: `_loop_stack` reports whatever the interpreter put in the frame,
+    # so this file is `core/tests/...` on the Linux image and `core\tests\...` on a Windows
+    # dev box. Asserting the posix spelling passed CI and failed every local run.
+    assert "core/tests/test_db_hrana.py" in where.replace("\\", "/"), where
+    assert "stuck_somewhere" in where, where
     assert where.split(" <- ")[0].endswith(" wait"), where       # the innermost call, wherever it is
