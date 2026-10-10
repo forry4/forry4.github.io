@@ -54,7 +54,14 @@
 .bx-daily-tile.solved .bx-pick-state{color:var(--gold);}
 .bx-daily-tile.optimal{border-color:var(--bx-optimal);}
 .bx-daily-tile.optimal .bx-pick-state{color:var(--bx-optimal);}
-.bx-daily-tile + .bx-picker{margin-top:14px;}
+.bx-modes + .bx-picker{margin-top:14px;}
+/* The daily and practice tiles, side by side above the bank. */
+.bx-modes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:24px 0 0;}
+.bx-modes .bx-daily-tile{margin:0;}
+.bx-practice-tile{border-color:var(--border);}
+.bx-practice-tile:hover{border-color:var(--text-dim);}
+.bx-practice-tile .bx-daily-name{color:var(--text);}
+.bx-practice-tile svg{color:var(--text-dim);}
 .bx-mini{display:grid;grid-template-columns:repeat(3,12px);gap:2px;padding:4px;
 	background:#5a4632;border-radius:4px;}
 .bx-mini span{width:12px;height:12px;border-radius:2px;background:var(--t);}
@@ -123,6 +130,27 @@
 	font-variant-numeric:tabular-nums;}
 .bx-next svg{width:16px;height:16px;}
 .bx-replay{min-width:44px;}
+
+/* ── practice ─────────────────────────────────────────────────────────── */
+/* No box yet: the empty case, its tiles and buttons dark. */
+.bx-box.blank .bx-tile,.bx-box.blank .bx-cbtn{background:#2b1d11;box-shadow:inset 0 2px 6px rgba(0,0,0,.6);}
+.bx-box.blank .bx-tile:active,.bx-box.blank .bx-cbtn:active{transform:none;}
+.bx-none{color:var(--text-soft);text-align:center;font-size:.9rem;min-height:2.5rem;display:flex;align-items:center;}
+.bx-filter{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px 16px;}
+.bx-filter-hd{margin:0 0 12px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.78rem;
+	letter-spacing:.12em;text-transform:uppercase;color:var(--text-dim);font-weight:700;}
+.bx-swatches{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;}
+.bx-sw{position:relative;aspect-ratio:1;width:100%;max-width:52px;justify-self:center;border:0;padding:0;
+	border-radius:12%;cursor:pointer;background:var(--t);touch-action:manipulation;
+	box-shadow:inset 0 2px 0 rgba(255,255,255,.28),inset 0 -4px 0 rgba(0,0,0,.28),0 2px 4px rgba(0,0,0,.5);
+	transition:opacity .15s ease,transform .08s ease;}
+.bx-sw:active{transform:scale(.94);}
+.bx-sw:focus-visible{outline:3px solid var(--gold-light);outline-offset:2px;}
+/* excluded: dimmed and crossed out */
+.bx-sw.out{opacity:.32;}
+.bx-sw.out::after{content:"";position:absolute;inset:0;border-radius:inherit;
+	background:linear-gradient(to top right,transparent calc(50% - 2px),var(--text) calc(50% - 2px),
+		var(--text) calc(50% + 2px),transparent calc(50% + 2px));}
 
 /* ── the leaderboard ──────────────────────────────────────────────────── */
 .bx-board{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);}
