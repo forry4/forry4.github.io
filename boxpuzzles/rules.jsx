@@ -40,5 +40,10 @@ export default function BoxPuzzlesRules() {
 				moves go on the First Attempt leaderboard. After that, play again as often as you
 				like; your fewest moves go on the Best Attempt leaderboard.</p>
 		</RulesSection>
+
+		<RulesSection title="Practice mode">
+			<p>A random box made without the colors you exclude. Nothing is saved, and there is
+				no leaderboard.</p>
+		</RulesSection>
 	</>;
 }

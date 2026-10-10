@@ -21,17 +21,25 @@
 // Yesterday's box can be looked at (view only), with its minimum and a shortest line
 // played back on the board.
 //
-// Routes: /boxpuzzles (the picker), /boxpuzzles/<n> (box n, numbered easiest first) and
-// /boxpuzzles/daily. This screen owns its segment 2, like Notes.
+// PRACTICE (/boxpuzzles/practice) is a random box made in the browser (practice.js,
+// the daily generator's port and filters) with no tile of the colours the player
+// excluded. Numbered boxes' rules (a reset clears the count); nothing is posted, saved
+// or ranked, and the minimum is never shown. The exclusion lives only in this page's
+// state (owner's call: nothing saved). If no box passes the filters inside the budget,
+// the page says so — the one sentence on the page outside the Rules panel.
+//
+// Routes: /boxpuzzles (the picker), /boxpuzzles/<n> (box n, numbered easiest first),
+// /boxpuzzles/daily and /boxpuzzles/practice. This screen owns its segment 2, like Notes.
 import { useState, useEffect, useCallback, useRef } from "react";
 import { baseCss } from "../shared/theme.js";
 import { RULES_GLYPH, RulesModal, rulesModalCss } from "../shared/lobby.jsx";
 import { buildPath, parsePath, pushPath, subscribe } from "../shared/router.js";
 import _cssText from "./BoxPuzzles.css?inline";
 import BANK from "./puzzles.json";
-import { CORNERS, press, cornersMatch, newBox, pressTileInBox, pressButtonInBox } from "./engine.js";
+import { COLORS, CORNERS, press, cornersMatch, newBox, pressTileInBox, pressButtonInBox } from "./engine.js";
 import { isMuted, setMuted, tileSound, resetSound, openSound } from "./sound.js";
 import BoxPuzzlesRules from "./rules.jsx";
+import { generate as generatePractice } from "./practice.js";
 
 const css = _cssText;
 const WS_BASE = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
@@ -56,10 +64,11 @@ function writeJson(key, value) {
 // key an earlier build wrote is cleared once, so no stale line lingers in storage.
 try { localStorage.removeItem("boxpuzzles.progress.v1"); } catch { /* storage unavailable */ }
 
-// The open view: a box number, "daily", or null for the picker.
+// The open view: a box number, "daily", "practice", or null for the picker.
 const routeView = () => {
 	const room = parsePath().room || "";
 	if (room === "DAILY") return "daily";
+	if (room === "PRACTICE") return "practice";
 	const n = parseInt(room, 10);
 	return n >= 1 && n <= BANK.length ? n : null;
 };
@@ -112,19 +121,34 @@ const CALENDAR = (
 		<rect x="4" y="5.5" width="16" height="14.5" rx="2" /><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4" />
 	</svg>
 );
+// A die: a practice box is random.
+const DIE = (
+	<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" aria-hidden="true">
+		<rect x="4.5" y="4.5" width="15" height="15" rx="3" />
+		<circle cx="9" cy="9" r="1.1" fill="currentColor" /><circle cx="15" cy="9" r="1.1" fill="currentColor" />
+		<circle cx="9" cy="15" r="1.1" fill="currentColor" /><circle cx="15" cy="15" r="1.1" fill="currentColor" />
+	</svg>
+);
 
 function Picker({ results, daily, onPick }) {
 	const today = pacificToday();
 	const done = daily && daily.day === today && daily.solved ? daily : null;
 	return (
 		<div className="bx-wrap">
-			<button type="button" className={`bx-daily-tile${done ? " solved" : ""}${done?.optimal ? " optimal" : ""}`}
-				onClick={() => onPick("daily")} aria-label={`Daily box${done ? `, solved in ${done.moves}` : ""}`}>
-				{CALENDAR}
-				<span className="bx-daily-name">Daily</span>
-				<span className="bx-daily-date">{today ? shortDate(today) : ""}</span>
-				<span className="bx-pick-state">{done ? `✓ ${done.moves}` : ""}</span>
-			</button>
+			<div className="bx-modes">
+				<button type="button" className={`bx-daily-tile${done ? " solved" : ""}${done?.optimal ? " optimal" : ""}`}
+					onClick={() => onPick("daily")} aria-label={`Daily box${done ? `, solved in ${done.moves}` : ""}`}>
+					{CALENDAR}
+					<span className="bx-daily-name">Daily</span>
+					<span className="bx-daily-date">{today ? shortDate(today) : ""}</span>
+					<span className="bx-pick-state">{done ? `✓ ${done.moves}` : ""}</span>
+				</button>
+				<button type="button" className="bx-daily-tile bx-practice-tile" onClick={() => onPick("practice")}
+					aria-label="Practice box">
+					{DIE}
+					<span className="bx-daily-name">Practice</span>
+				</button>
+			</div>
 			<ol className="bx-picker" aria-label="Boxes">
 				{BANK.map((p, idx) => {
 					const r = results[p.id];
@@ -147,10 +171,11 @@ function Picker({ results, daily, onPick }) {
 
 // The box itself: the case, its four corner buttons and the nine tiles. `hint` rings
 // one tile (yesterday's replay shows each press before it lands).
-function BoxFace({ id, target, box, shake = 0, opened, disabled, hint = -1, onTile, onButton }) {
-	const off = !!(opened || disabled);
+// `blank`: no box yet (practice, while one is made) — an empty case, nothing to press.
+function BoxFace({ id, target, box, shake = 0, opened, disabled, blank = false, hint = -1, onTile, onButton }) {
+	const off = !!(opened || disabled || blank);
 	return (
-		<div key={shake} className={`bx-box${shake ? " bx-shake" : ""}${opened ? " open" : ""}`} data-box={id}>
+		<div key={shake} className={`bx-box${shake ? " bx-shake" : ""}${opened ? " open" : ""}${blank ? " blank" : ""}`} data-box={id}>
 			{CORNERS.map((c, k) => (
 				<button key={k} type="button" className={`bx-cbtn bx-c${k}${box.lit[k] ? " lit" : ""}`}
 					style={swatch(target[k])} disabled={off} data-button={k}
@@ -375,6 +400,8 @@ export default function BoxPuzzles({ authUser, onExit }) {
 	useEffect(() => { if (rootRef.current) rootRef.current.scrollTop = 0; }, [num]);
 
 	const [showRules, setShowRules] = useState(false);
+	// Practice's excluded colours: kept while the page is open, never stored.
+	const [exclude, setExclude] = useState([]);
 	return (
 		<div ref={rootRef} className={`bx${rot ? " bx-rot" : ""}`} style={rotStyle(rot) || undefined}>
 			<style>{baseCss + rulesModalCss + css}</style>
@@ -392,6 +419,8 @@ export default function BoxPuzzles({ authUser, onExit }) {
 			</RulesModal>}
 			{num === "daily" ? (
 				<DailyScreen token={token} who={who} onDaily={noteDaily} />
+			) : num === "practice" ? (
+				<PracticeScreen exclude={exclude} onExclude={setExclude} />
 			) : num ? (
 				<BoxScreen key={num} n={num} token={token} best={results[BANK[num - 1].id]}
 					onResult={noteResult} onGo={go} />
@@ -477,6 +506,134 @@ function BoxScreen({ n, token, best, onResult, onGo }) {
 					</div>
 				</div>
 				<aside className="bx-side"><Leaderboard board={board} open={boardOpen} onToggle={() => setBoardOpen((o) => !o)} /></aside>
+			</div>
+		</div>
+	);
+}
+
+// ── practice ─────────────────────────────────────────────────────────────────
+const BLANK = { tiles: Array(9).fill("GY"), lit: [false, false, false, false], moves: [] };
+const BLANK_TARGET = ["GY", "GY", "GY", "GY"];
+const FILTER_DEBOUNCE_MS = 400;
+
+// Makes practice boxes off the page's thread. `make(exclude)` -> Promise<box | null>;
+// a newer call, or `cancel()`, supersedes an older one (its worker is stopped and its
+// promise never settles). Where a worker cannot run, the generator runs here instead.
+function usePracticeMaker() {
+	const cur = useRef(null);
+	const cancel = useCallback(() => {
+		const c = cur.current;
+		cur.current = null;
+		if (c && c.terminate) c.terminate();
+		else if (c) clearTimeout(c.timer);
+	}, []);
+	useEffect(() => cancel, [cancel]);
+	const make = useCallback((exclude) => new Promise((resolve) => {
+		cancel();
+		const local = () => {
+			const job = { timer: 0 };
+			job.timer = setTimeout(() => { if (cur.current === job) { cur.current = null; resolve(generatePractice(exclude)); } }, 0);
+			cur.current = job;
+		};
+		let w;
+		try { w = new Worker(new URL("./practice.worker.js", import.meta.url), { type: "module" }); }
+		catch { local(); return; }
+		cur.current = w;
+		w.onmessage = (e) => { w.terminate(); if (cur.current === w) { cur.current = null; resolve(e.data.box); } };
+		w.onerror = () => { w.terminate(); if (cur.current === w) local(); };
+		w.postMessage({ exclude });
+	}), [cancel]);
+	return { make, cancel };
+}
+
+// The colour filter: one swatch per tile colour, pressed = excluded (crossed out).
+function ColorFilter({ exclude, onToggle }) {
+	return (
+		<div className="bx-filter">
+			<h2 className="bx-filter-hd">Exclude</h2>
+			<div className="bx-swatches">
+				{COLORS.map((c) => {
+					const out = exclude.includes(c);
+					return <button key={c} type="button" className={`bx-sw${out ? " out" : ""}`} style={swatch(c)}
+						data-color={c} aria-pressed={out} aria-label={`Exclude ${COLOR_NAME[c]}`} title={COLOR_NAME[c]}
+						onClick={() => onToggle(c)} />;
+				})}
+			</div>
+		</div>
+	);
+}
+
+// A random box without the excluded colours, under the numbered boxes' rules (a reset
+// clears the count). Nothing is posted or saved, and its minimum is never shown — so
+// no blue: a blue count would say what the minimum is.
+function PracticeScreen({ exclude, onExclude }) {
+	const { make, cancel } = usePracticeMaker();
+	const [puzzle, setPuzzle] = useState(null);       // { tiles, target } once made
+	const [box, setBox] = useState(null);
+	const [busy, setBusy] = useState(true);
+	const [none, setNone] = useState(false);          // no box passes this filter
+	const [opened, setOpened] = useState(null);       // { moves }
+	const [shake, setShake] = useState(0);
+
+	const fresh = useCallback((ex) => {
+		setBusy(true);
+		setNone(false);
+		make(ex).then((p) => {
+			setBusy(false);
+			setOpened(null);
+			if (!p) { setNone(true); setPuzzle(null); setBox(null); return; }
+			setPuzzle(p);
+			setBox(freshBox(p));
+		});
+	}, [make]);
+	// A box on arrival, and a new one each time the filter changes (after a short pause,
+	// so excluding three colours makes one box, not three).
+	const first = useRef(true);
+	useEffect(() => {
+		if (first.current) { first.current = false; fresh(exclude); return undefined; }
+		cancel();
+		setBusy(true);
+		const t = setTimeout(() => fresh(exclude), FILTER_DEBOUNCE_MS);
+		return () => clearTimeout(t);
+	}, [exclude, fresh, cancel]);
+	const toggle = (c) => onExclude(exclude.includes(c) ? exclude.filter((x) => x !== c) : [...exclude, c]);
+
+	const live = !!(puzzle && box && !busy);
+	const pressTile = (i) => {
+		if (!live || opened || cornersMatch(box.tiles, puzzle.target)) return;
+		tileSound();
+		setBox(pressTileAuto(box, puzzle.target, i));
+	};
+	const pressButton = (k) => {
+		if (!live || opened) return;
+		const { box: next, result } = pressButtonAuto(box, puzzle, k);
+		if (result === "reset") { resetSound(); setShake((s) => s + 1); }
+		else if (result === "open") { openSound(); setOpened({ moves: next.moves.length }); }
+		setBox(next);
+	};
+	const again = () => { setOpened(null); setBox(freshBox(puzzle)); };
+	useTileKeys(pressTile);
+	useAutoOpen(box, puzzle?.target, live && !opened, pressButton);
+
+	const count = opened ? opened.moves : box ? box.moves.length : 0;
+	return (
+		<div className="bx-wrap">
+			<div className="bx-play">
+				<div className="bx-stage">
+					<div className="bx-nav"><h1 className="bx-title">Practice</h1></div>
+					<BoxFace id="practice" target={puzzle && !busy ? puzzle.target : BLANK_TARGET} box={puzzle && !busy ? box : BLANK}
+						shake={shake} opened={!!opened} blank={!live} onTile={pressTile} onButton={pressButton} />
+					<div className={`bx-controls${opened ? " bx-result" : ""}`} role="status" data-busy={busy ? "" : undefined}>
+						{none ? <div className="bx-none">No box found. Change the filter.</div>
+							: <div className="bx-count"><b data-moves>{count}</b>{count === 1 ? "move" : "moves"}</div>}
+						<div className="bx-result-actions">
+							{opened && <button className="btn btn-ghost btn-sm bx-again" onClick={again}>Play again</button>}
+							<button className={`btn btn-sm bx-new ${opened ? "btn-gold" : "btn-ghost"}`} disabled={busy}
+								onClick={() => fresh(exclude)}>New box</button>
+						</div>
+					</div>
+				</div>
+				<aside className="bx-side"><ColorFilter exclude={exclude} onToggle={toggle} /></aside>
 			</div>
 		</div>
 	);

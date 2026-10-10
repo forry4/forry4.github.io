@@ -3,8 +3,9 @@
 Solo puzzle boxes in the style of Blue Prince's Mora Jai boxes: a 3x3 grid of coloured
 tiles and four corner buttons. A box opens when all four corner tiles show their buttons'
 colours and each button has been pressed. An Extras tile on the home menu (not a game
-card: it has no lobby, rooms or bot), at `/boxpuzzles`, `/boxpuzzles/<n>` and
-`/boxpuzzles/daily` (the daily box — see its own section; its rules differ).
+card: it has no lobby, rooms or bot), at `/boxpuzzles`, `/boxpuzzles/<n>`,
+`/boxpuzzles/daily` (the daily box — see its own section; its rules differ) and
+`/boxpuzzles/practice` (a random box without the colours you exclude — see Practice).
 
 | File | What it is |
 |---|---|
@@ -13,6 +14,7 @@ card: it has no lobby, rooms or bot), at `/boxpuzzles`, `/boxpuzzles/<n>` and
 | `minimums.json` | id -> fewest presses, **GENERATED, server-only** |
 | `api.py` | the leaderboard: `setup_box_puzzles` (Books/Notes injected-deps pattern) + the daily routes |
 | `daily.py` | the daily box: Pacific day clock, generator, `box_daily` + `box_daily_attempts` + `box_daily_best`, attempt and retry rules |
+| `practice.js` / `practice.worker.js` | practice mode: the daily generator ported to the browser, run in a worker |
 | `BoxPuzzles.jsx` / `.css` | the page (picker + box + leaderboard) |
 | `rules.jsx` | the Rules panel's words (owner-approved; see "no prose" below) |
 | `sound.js` | the sounds, synthesised with Web Audio (no files) + the per-device mute |
@@ -175,6 +177,34 @@ four `/boxpuzzles/daily*` routes; the numbered boxes' rules above are untouched.
 - **Local `screens` reuse `games/spender/users.db`**, so after ~20 runs box 1's top 20 is
   all earlier gate accounts tied at the minimum, and `boxPuzzles`' "another viewer sees
   the row" fails locally. CI's database is fresh. Delete the local rows, don't loosen it.
+
+## Practice (owner's design, 2026-10-10)
+
+A random box made IN THE BROWSER (`practice.js`, in `practice.worker.js` so the page
+never stalls) with no tile of the colours the player excludes — any of the ten,
+gray included. The owner's calls: **the same filters as the daily** (8–15, every
+colour matters, ≤ 200 shortest lines, no trope), **no length picker**, **resets clear
+the count** (numbered boxes' rules), **the minimum is never shown** (so no blue
+either — a blue count would say it), **nothing is posted, saved or shareable**
+(the exclusion lives in the page's state only), **no "must include"**, and if no
+box passes the filter fast enough the page says so ("No box found. Change the
+filter." — the one sentence on the page outside the Rules panel).
+- It is a PORT of `daily.py`'s generator, so the two must move together. It agreed
+  with `_explore`/`_targets`/`_good` on every box checked when written. Two
+  differences, both because nobody races: the drawn depth is a preference (after 1s
+  the closest good box is taken, typically 0.05–1.5s total) and the search gives up
+  at `BUDGET_MS` (5s) and returns null. A filter with no active colour left returns
+  null at once.
+- Excluding a colour keeps it off the STARTING board, and so off the targets (always
+  colours on the board). A rule can still make one mid-play: White makes gray, Red
+  makes black.
+- Changing the filter makes a new box after a 400ms pause (three clicks, one box);
+  a newer request stops the older worker. Where a worker cannot start, the
+  generator runs on the page.
+- Tests: `webapp/test/unit/boxPractice.test.mjs` (exclusions honoured, every filter
+  re-checked by an independent BFS, the budget gives up); the `boxPuzzles` block in
+  `screens.mjs` drives the page (filter, reset, solve, no blue, the no-box sentence,
+  nothing posted).
 
 ## Regenerating
 

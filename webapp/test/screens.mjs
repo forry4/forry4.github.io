@@ -9914,8 +9914,8 @@ try {
 				inside: (() => { const r = document.querySelector(".rl-panel")?.getBoundingClientRect();
 					return !!r && r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight; })(),
 			}));
-			check("Rules opens the panel: goal, the ten colors with their swatches, daily mode",
-				JSON.stringify(rules.sections) === JSON.stringify(["Goal of the Game", "The colors", "Daily mode"])
+			check("Rules opens the panel: goal, the ten colors with their swatches, daily and practice mode",
+				JSON.stringify(rules.sections) === JSON.stringify(["Goal of the Game", "The colors", "Daily mode", "Practice mode"])
 				&& rules.colors.length === 10 && new Set(rules.swatches).size === 10
 				&& rules.swatches.every((c) => c && c !== "rgba(0, 0, 0, 0)") && rules.inside,
 				JSON.stringify(rules));
@@ -10135,6 +10135,71 @@ try {
 			await page.locator('.bx-tile[data-tile="0"]').tap();
 			check("sideways, a tap lands on its tile", await page.locator("[data-moves]").textContent() === "1");
 			check("no page errors (sideways)", errors.length === 0, errors.join(" | "));
+			await ctx.close();
+		}
+		{
+			// PRACTICE: a random box made in the page (boxpuzzles/practice.js, in a worker)
+			// without the excluded colours. Numbered-box rules, nothing posted, no blue, and
+			// a filter nothing can pass says so instead of spinning.
+			const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+			await ctx.addInitScript(() => localStorage.setItem("spender_user",
+				JSON.stringify({ id: "screens-box-practice", name: "Practiser", guest: true })));
+			const page = await ctx.newPage();
+			const errors = [], posts = [];
+			page.on("pageerror", (e) => errors.push(String(e)));
+			page.on("request", (r) => { if (r.method() === "POST" && r.url().includes("/boxpuzzles/")) posts.push(r.url()); });
+			await page.goto(`http://localhost:${PORT}/boxpuzzles`, { waitUntil: "networkidle" });
+			await page.waitForSelector(".bx-practice-tile", { timeout: 25_000 }).catch(() => {});
+			await page.locator(".bx-practice-tile").click().catch(() => {});
+			const ready = () => page.waitForSelector(".bx-box[data-box=practice]:not(.blank)", { timeout: 15_000 }).catch(() => {});
+			await ready();
+			check("the picker's Practice tile opens /boxpuzzles/practice on a box",
+				new URL(page.url()).pathname === "/boxpuzzles/practice"
+				&& await page.locator(".bx-box:not(.blank) .bx-tile:not([disabled])").count() === 9, page.url());
+			check("the filter offers all ten colors", await page.locator(".bx-sw").count() === 10);
+			const NAMES = { gray: "GY", white: "WH", violet: "PU", yellow: "YE", green: "GN", pink: "PI", black: "BK", red: "RD", orange: "OR", blue: "BU" };
+			const readBox = async () => ({
+				tiles: await page.locator(".bx-tile").evaluateAll((els) => els.map((el) => el.dataset.color)),
+				target: (await page.locator(".bx-cbtn").evaluateAll((els) => els.map((el) => el.getAttribute("aria-label"))))
+					.map((l) => NAMES[l.split(", ")[1]]),
+			});
+			const exclude = ["GY", "WH", "BK"];
+			for (const c of exclude) await page.locator(`.bx-sw[data-color="${c}"]`).click();
+			await page.waitForSelector(".bx-box.blank", { timeout: 2000 }).catch(() => {});
+			await ready();
+			const p = await readBox();
+			check("excluding gray, white and black makes a box with none of them, buttons included",
+				p.tiles.length === 9 && p.target.length === 4 && p.target.every(Boolean)
+				&& ![...p.tiles, ...p.target].some((c) => exclude.includes(c))
+				&& await page.locator(".bx-sw.out").count() === 3, JSON.stringify(p));
+			const pline = shortest(p);
+			check("the practice box can be solved, in at least 8 presses", !!pline && pline.length >= 8, JSON.stringify(pline));
+			if (pline) {
+				// a press and an unlit button: back to the first board, the count cleared
+				await page.locator(`.bx-tile[data-tile="${pline[0]}"]`).click();
+				const after = E.press(p.tiles, pline[0]);
+				const wrong = E.CORNERS.findIndex((c, k) => after[c] !== p.target[k]);
+				await page.locator(`.bx-cbtn[data-button="${wrong}"]`).click();
+				check("an unlit button resets practice and clears the count",
+					wrong >= 0 && await count(page) === 0
+					&& JSON.stringify((await readBox()).tiles) === JSON.stringify(p.tiles), String(wrong));
+				await play(page, pline);
+				const res = await page.evaluate(() => ({ open: !!document.querySelector(".bx-box.open"),
+					optimal: !!document.querySelector(".bx-controls.optimal, .bx-optimal"),
+					actions: [...document.querySelectorAll(".bx-result-actions button")].map((b) => b.textContent) }));
+				check("practice solves, with no blue and Play again + New box",
+					res.open && !res.optimal && await count(page) === pline.length
+					&& JSON.stringify(res.actions) === JSON.stringify(["Play again", "New box"]), JSON.stringify(res));
+			}
+			check("practice carries no prose", (await page.locator(".bx p").count()) === 0);
+			// leave only red: no target can pass every filter, so the page says so
+			for (const c of ["PU", "YE", "GN", "PI", "OR", "BU"]) await page.locator(`.bx-sw[data-color="${c}"]`).click();
+			await page.waitForSelector(".bx-none", { timeout: 15_000 }).catch(() => {});
+			const none = await page.locator(".bx-none").textContent().catch(() => "");
+			check("a filter no box can pass says to change it",
+				/change the filter/i.test(none) && await page.locator(".bx-box.blank").count() === 1, JSON.stringify(none));
+			check("practice posts nothing", posts.length === 0, posts.join(" "));
+			check("no page errors (practice)", errors.length === 0, errors.join(" | "));
 			await ctx.close();
 		}
 	}
