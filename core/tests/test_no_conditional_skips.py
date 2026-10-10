@@ -80,7 +80,32 @@ EXPLICIT_ONLY = {
     ),
 }
 
-_NOT_SOURCE = {".git", "node_modules", "__pycache__", "dist", ".venv", "venv"}
+#: `.worktrees` is where this repo parks nested git worktrees, and it is excluded BY NAME
+#: as well as by the marker check below, because a PRUNED worktree has no marker left: of
+#: the four on the dev box, three carry a `.git` file and `orbit-ai-audit-20260914` does
+#: not — `git worktree list` has forgotten it and what remains is an orphaned full copy of
+#: the tree. Detecting only live checkouts left 79 of its test files reported as orphans.
+_NOT_SOURCE = {".git", ".worktrees", "node_modules", "__pycache__", "dist", ".venv", "venv"}
+
+
+def _in_nested_checkout(path):
+    """Is this file inside ANOTHER checkout that happens to sit under this one?
+
+    A git worktree placed inside the repo (`.worktrees/<branch>/`, three of them on the
+    dev box) is a second full copy of the tree, so `rglob` finds every one of its test
+    files and reports them all as orphans no suite collects. They are not this repo's
+    files and listing them in EXPLICIT_ONLY would be a lie — the fix is not to walk into
+    another checkout at all. CI never has one, so the gate was green there and red on
+    every local push, which is the asymmetry worth spending six lines to remove. Detected
+    by the `.git` marker each worktree carries (a FILE in a worktree, a directory in a
+    clone), rather than by the `.worktrees` name, so a checkout parked anywhere is caught.
+    """
+    for parent in path.parents:
+        if parent == REPO:
+            return False
+        if (parent / ".git").exists():
+            return True
+    return False
 
 
 def _testpaths():
@@ -173,6 +198,8 @@ def test_every_test_file_is_collected_by_some_suite():
     found = set()
     for p in REPO.rglob("test_*.py"):
         if _NOT_SOURCE.intersection(p.relative_to(REPO).parts):
+            continue
+        if _in_nested_checkout(p):
             continue
         found.add(p.relative_to(REPO).as_posix())
     orphans = sorted(found - collected - set(EXPLICIT_ONLY))
