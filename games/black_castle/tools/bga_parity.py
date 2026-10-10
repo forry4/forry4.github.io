@@ -103,8 +103,36 @@ def _walk(node):
             yield from _walk(value)
 
 
+#: A promo component announces itself in its own `type`. PROMOS ARE A THIRD CATEGORY, and
+#: the Matcha check cannot stand in for them: a promo garden ships in a game that is
+#: otherwise the base box, raises no Matcha notification, and so classified as "base" it
+#: walked straight into the base catalogue. Measured at 1 of 133 base logs, which is both
+#: small enough to have gone unnoticed and large enough to add a 6th plant and a 6th stone
+#: garden to a 5-and-5 box.
+_PROMO_PREFIX = "promo"
+
+
+def promo_components(packets):
+    """-> the sorted `type:typeArg` of every promo component in this log."""
+    found = set()
+    for node in _walk(packets):
+        if not isinstance(node, dict):
+            continue
+        kind = node.get("type")
+        if isinstance(kind, str) and kind.startswith(_PROMO_PREFIX):
+            found.add(f"{kind}:{node.get('typeArg')}")
+    return sorted(found)
+
+
 def classify(packets):
-    """-> (ruleset, seat count). ``ruleset`` is "base" or "matcha"."""
+    """-> (ruleset, seat count). ``ruleset`` is "base", "matcha" or "promo".
+
+    Matcha is read off its NOTIFICATIONS and promos off their component types, because
+    that is how each one actually shows up: an expansion changes the turn (geishas move,
+    ceremony tiles are gained) while a promo only adds cards to a box whose rules are
+    unchanged. A log is reported as promo only when it is not already Matcha, so the
+    ruleset stays one answer rather than a set of flags.
+    """
     seats, matcha = set(), False
     for event in _events(packets):
         if event.get("type") in _MATCHA_MARKERS:
@@ -112,7 +140,9 @@ def classify(packets):
         args = event.get("args")
         if isinstance(args, dict) and isinstance(args.get("scoreBreakdown"), dict):
             seats |= set(args["scoreBreakdown"])
-    return ("matcha" if matcha else "base"), len(seats)
+    if matcha:
+        return "matcha", len(seats)
+    return ("promo" if promo_components(packets) else "base"), len(seats)
 
 
 def _action_args(event):

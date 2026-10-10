@@ -39,6 +39,13 @@ the walk were picking up the wrong objects, ids would collide and conflicts woul
 Coverage is reported against the printed counts in `data/base_game_manifest.json`, so a
 partial corpus says how partial it is instead of looking finished.
 
+THE PRINTED COUNT IS COMPONENTS; THIS IS DESIGNS, and for one row they differ. The
+manifest prints 6 starting-action cards and this finds 3, across 1,980 sightings in 132
+games -- not a gap, because the box holds DUPLICATES: 7 distinct card ids resolve to 3
+typeArgs, and each game deals exactly one copy per seat (2 copies in the 2p logs, 3 in
+the 3p, 4 in the 4p). Every other row matches exactly, which is what makes this one
+legible as duplication rather than as missing data.
+
 Usage::
 
     python -m games.black_castle.tools.extract_bga_catalogue [--corpus <dir>] [--out <json>]
@@ -55,7 +62,7 @@ import json
 import os
 import sys
 
-from .bga_parity import classify
+from .bga_parity import classify, promo_components
 
 DEFAULT_CORPUS = os.environ.get("WHITECASTLE_CORPUS", "C:/Users/Forrest/WhiteCastle_corpus")
 
@@ -289,6 +296,13 @@ def expected_counts():
     return data.get("components") or {}
 
 
+def _load(path):
+    try:
+        return json.load(open(path, encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--corpus", default=DEFAULT_CORPUS)
@@ -306,6 +320,12 @@ def main(argv=None):
 
     catalogue, conflicts, sightings, used = harvest(paths, base_only=not args.with_expansions)
     by_type = collections.Counter(key[1] for key in catalogue)
+    rulesets = collections.Counter()
+    for path in paths:
+        try:
+            rulesets[classify(json.load(open(path, encoding="utf-8")))[0]] += 1
+        except (OSError, ValueError):
+            pass
 
     scope = "every" if args.with_expansions else "base-game"
     print(f"{len(used)} of {len(paths)} logs ({scope}) -> {len(catalogue)} distinct "
@@ -314,6 +334,20 @@ def main(argv=None):
     for kind in sorted(by_type):
         seen = sum(n for key, n in sightings.items() if key[1] == kind)
         print(f"  {kind:<20} {by_type[kind]:>6} {seen:>10}")
+
+    print("\n  by ruleset: "
+          + ", ".join(f"{k}={v}" for k, v in sorted(rulesets.items())))
+
+    # A PROMO COMPONENT IN THE BASE CATALOGUE IS INVISIBLE UNLESS SOMETHING NAMES IT.
+    # It does not conflict with anything -- it is a real card, consistently rendered -- so
+    # the conflict check passes and the only symptom is a count one over the printed box.
+    # `classify` now routes a promo log out of a base harvest, and this says so out loud
+    # rather than leaving the reader to notice 6 gardens against a printed 5.
+    leaked = sorted({c for path in used for c in promo_components(_load(path))})
+    print(f"  promo components inside the harvested logs : {len(leaked)}"
+          f"   <- must be 0 for a base harvest")
+    if leaked:
+        print(f"    {', '.join(leaked)}")
 
     printed = expected_counts()
     if printed:
@@ -339,7 +373,7 @@ def main(argv=None):
         with open(args.out, "w", encoding="utf-8") as fh:
             json.dump(payload, fh, indent=1, sort_keys=True)
         print(f"\nwrote {len(payload)} definitions -> {args.out}")
-    return 1 if conflicts else 0
+    return 1 if (conflicts or (leaked and not args.with_expansions)) else 0
 
 
 if __name__ == "__main__":
