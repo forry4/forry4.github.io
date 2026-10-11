@@ -1443,10 +1443,33 @@ def _card_action_moves(game: dict, pid: str) -> list[dict]:
 
 
 def _resolve_lantern(game: dict, pid: str) -> None:
+    """Pay every Lantern reward -- "in the order you choose".
+
+    Among the Lantern's rewards order matters in one place only: seals against Passage of
+    Time steps. A seal gained first can pay a checkpoint the steps then cross; steps taken
+    first can spend a seal that the cap would otherwise waste. So the seal and Passage
+    rewards are tried both ways round and the order a player would pick -- further along
+    the track, then more seals -- is the one played.
+    """
     p = _player(game, pid)
     if not p.get("lantern"):
         return
-    for reward in p["lantern"]:
+    rewards = list(p["lantern"])
+    icons = {r.get("icon") for r in rewards}
+    if "seal" in icons and "influence" in icons:
+        def outcome(order):
+            probe = copy.deepcopy(game)
+            _pay_lantern(probe, pid, order)
+            q = _player(probe, pid)
+            return (int(q.get("influence", 0)), int(q.get("seals", 0)))
+        seals_first = sorted(rewards, key=lambda r: r.get("icon") != "seal")
+        steps_first = sorted(rewards, key=lambda r: r.get("icon") != "influence")
+        rewards = max((seals_first, steps_first), key=outcome)
+    _pay_lantern(game, pid, rewards)
+
+
+def _pay_lantern(game: dict, pid: str, rewards: list[dict]) -> None:
+    for reward in rewards:
         icon, amount = reward.get("icon"), int(reward.get("amount", 1))
         if icon == "coin":
             _gain(game, pid, coins=amount, note="lantern")

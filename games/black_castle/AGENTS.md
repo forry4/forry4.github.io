@@ -348,24 +348,15 @@ CREATES (ids newer than the placement), not from what happens to be pending.
 
 ### STILL NOT PARITY
 
-1. **The 15 Die tiles' individual REWARD faces.** A castle tile lies colour side UP all
-   game, so its reward never turns over and never appears in any log — the corpus is
-   genuinely exhausted here, and only the two at the Well are ever read. **That is a limit
-   of the corpus, NOT of what is knowable**: the faces are printed in the box and shown in
-   the rulebook's component artwork. What the publisher's rules do give, and what is now
-   pinned by a test, is the VOCABULARY — resources, coins, Clan Points, Daimyo Seals,
-   Influence advancement, and a resource of your choice — plus three anchors: **3 tiles
-   grant "a resource of your choice"** (the Matcha expansion replaces exactly those three),
-   and the recommended first-game Well holds **a Mother-of-Pearl tile whose reverse is a
-   coral die** and **an Iron tile whose reverse is a black die**. The remaining work is
-   reading the component artwork, not gathering more games.
-2. **The ninth Daimyo card's middle slot** — inferred, see above.
-3. **Lantern order.** The rulebook resolves the Lantern "in the order you choose"; we
-   resolve it in list order. It matters only where a cap or a conversion makes order
-   significant.
-4. **A move-by-move replay against the logs.** Every rule above is held to the corpus one
+1. **The ninth Daimyo card's middle slot** — inferred, see above.
+2. **A move-by-move replay against the logs.** Every rule above is held to the corpus one
    derivation at a time; Rag Tag's bar is replaying whole games. That is now within reach
    — see *What the logs do and do not carry*.
+
+Closed on 2026-10-10 and kept here so nobody re-opens them: **the Die tiles' reward
+faces** (below) and **Lantern order** — the rulebook resolves the Lantern "in the order you
+choose", and within it order matters only between seals and Passage steps, so
+`_resolve_lantern` tries both and plays the one a player would pick.
 
 **The Die tiles, now that the setup rule is known.** There are 15, each DOUBLE-SIDED: a
 die colour on one face, a reward on the other. Setup lays 3 of them into the castle spaces
@@ -376,8 +367,7 @@ so three rooms carry three tiles and two carry two, which is why a room shows tw
 106 times and three colours 24 times in the corpus and never more. **Both halves are
 implemented now** — the Well's two tiles pay their fixed reward every visit, and the
 castle's thirteen decide which rows a die resolves (see the Die tiles section above).
-What is still unknown is the 13 castle tiles' REWARD faces, which stay face down all game
-and are therefore never observable.
+The REWARD faces are solved as well — see below.
 **And the bag is SOLVED: five tiles of each colour.** No rules text states it and no
 single game comes close — the most informative one alone leaves six candidates — but each
 game rules some out and the intersection over the corpus is a single bag. The 6 games
@@ -392,13 +382,27 @@ the well tiles last" admits one. A wrong geometry here does not give a slightly-
 answer, it gives an empty set — which is why an earlier pass, reading three tiles into
 every room, concluded the logs *ruled 5/5/5 out*. They rule it in.
 
-**What is left of the tiles is the REWARD faces**, and only two of the fifteen are ever
-read — the pair at the Well, whose payout the logs show directly. Seventeen games give
-seventeen samples of two tiles drawn from the bag (`coin+1`, `food+1`, `iron+1`, `pearl+1`
-and `vp+1` all appear, and one game paid `iron+1` twice, so at least two iron tiles
-exist). That is enough to reconstruct the reward multiset with more games, by the same
-intersection trick; the castle tiles' reward faces stay face down all game and never
-matter.
+**And the REWARD faces are solved too: every colour carries one tile of each of iron,
+food, pearl, a resource of your choice, and 1 coin.** Only the two Well tiles are ever
+read, but every game reads them, and its castle pins which two COLOURS they are (the bag is
+5/5/5, so the Well holds what the castle's colour sets leave). Trying every
+colour-by-reward table with five tiles a colour against all 101 usable games, **exactly
+one deals every game's Well** (`die_tile_faces()`) — the same unique-intersection shape
+as the bag. Two traps on the way:
+
+- **A "resource of your choice" tile pays AFTER the Well's seal**, as a
+  `GainResourceAction`; a window that closes on the seal reads it as a one-tile Well.
+- **The reward COUNTS alone point the wrong way.** 202 tile draws came out iron 51, food
+  43, choice 44, pearl 38, coin 26, which fits 4/3/3/3/2 better than 3 of each — but no
+  4/3/3/3/2 table survives one game whose Well paid a coin on a black and a white tile.
+  That game's colour sets are not a sampling gap: a white die was takeable 21 times with
+  steward room 1 open and never offered there. One robust game outweighs a χ² at p≈0.08.
+
+**This overturned something written here earlier**: a "published vocabulary" of tile
+rewards including Clan Points, Daimyo Seals and Influence, read off the rules. The Well
+tiles are dealt at random, so any such tile would have reached the Well ~14 times in 104
+games; none ever did. It was a reward legend, not the tiles. The engine's tiles were
+invented from it, and a coin tile paid 2 coins — both fixed.
 
 The two duel rules are now held by **19** 2-player tables rather than one: a space
 already holding a die was offered 0 times in 8709 chances, and the 9 stewards and 9

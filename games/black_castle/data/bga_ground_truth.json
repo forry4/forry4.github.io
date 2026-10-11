@@ -283,6 +283,41 @@
   },
   "well_tiles": 2
  },
+ "die_tile_faces": {
+  "games_used": 101,
+  "tables_consistent_with_every_game": [
+   {
+    "black": {
+     "choice": 1,
+     "coin": 1,
+     "food": 1,
+     "iron": 1,
+     "pearl": 1
+    },
+    "red": {
+     "choice": 1,
+     "coin": 1,
+     "food": 1,
+     "iron": 1,
+     "pearl": 1
+    },
+    "white": {
+     "choice": 1,
+     "coin": 1,
+     "food": 1,
+     "iron": 1,
+     "pearl": 1
+    }
+   }
+  ],
+  "tile_draws_at_the_well": {
+   "choice": 44,
+   "coin": 26,
+   "food": 43,
+   "iron": 51,
+   "pearl": 38
+  }
+ },
  "domain_lines": {
   "black 0": {
    "food+1 iron+1 pearl+1": 2,

@@ -393,3 +393,27 @@ def test_a_well_resource_tile_asks_which_resource():
     game["choice_queue"] = []
     engine._well_bonus(game, pid)
     assert len(game["choice_queue"]) == 1
+
+
+# ------------------------------------------------------------------------- the Lantern
+
+def test_the_lantern_takes_a_seal_first_when_it_pays_a_checkpoint():
+    # "In the order you choose": with no seals, a Passage step cannot cross into space 6
+    # unless the Lantern's seal arrives first.
+    game = _played()
+    pid = game["turn_pid"]
+    p = engine._player(game, pid)
+    p["seals"], p["influence"] = 0, 5
+    p["lantern"] = [{"icon": "influence", "amount": 1}, {"icon": "seal", "amount": 1}]
+    engine._resolve_lantern(game, pid)
+    assert (p["influence"], p["seals"]) == (6, 0)
+
+
+def test_the_lantern_takes_the_step_first_when_the_seal_cap_would_waste_the_seal():
+    game = _played()
+    pid = game["turn_pid"]
+    p = engine._player(game, pid)
+    p["seals"], p["influence"] = engine.MAX_SEALS, 5
+    p["lantern"] = [{"icon": "seal", "amount": 1}, {"icon": "influence", "amount": 1}]
+    engine._resolve_lantern(game, pid)
+    assert (p["influence"], p["seals"]) == (6, engine.MAX_SEALS)

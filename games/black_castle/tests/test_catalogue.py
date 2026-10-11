@@ -513,13 +513,34 @@ def test_the_manifest_matches_the_publishers_own_component_list():
     assert len(cards.DAIMYO) == manifest["daimyo_cards"]
 
 
-def test_a_die_tiles_reward_vocabulary_is_the_published_one():
-    # Devir's rules list what a Die tile's benefit side can show: resources (food, iron,
-    # mother-of-pearl), coins, Clan Points, Daimyo Seals, Influence advancement, and a
-    # resource of your choice. Ours is that set -- which is worth pinning because the
-    # individual tiles' faces are NOT published and ours are generated.
-    assert set(cards.DIE_TILE_REWARDS) == {
-        "coin", "resource", "food", "iron", "pearl", "seal", "influence", "vp"}
+def test_the_die_tiles_are_one_of_each_reward_per_colour():
+    # SOLVED from the corpus, and it overturned what this test used to pin. It asserted
+    # the "published vocabulary" -- resources, coins, Clan Points, Daimyo Seals, Influence
+    # and a resource of your choice -- read off the rules as the set a tile's benefit side
+    # can show. But the Well tiles are dealt at random, so a tile paying Clan Points, a
+    # seal or a Passage step would have reached the Well ~14 times in 104 games, and none
+    # ever did: that list was a reward legend, not the tiles. What the logs do pin, with
+    # each game's castle fixing the Well's two colours, is a single table.
+    truth = json.load(open(os.path.join(_PKG, "data", "bga_ground_truth.json"),
+                           encoding="utf-8"))["die_tile_faces"]
+    assert truth["games_used"] > 90
+    (table,) = truth["tables_consistent_with_every_game"]
+    assert all(table[c] == {"iron": 1, "food": 1, "pearl": 1, "choice": 1, "coin": 1}
+               for c in ("red", "black", "white"))
+    assert set(truth["tile_draws_at_the_well"]) == {"iron", "food", "pearl", "choice", "coin"}
+
+    import random
+    tiles = cards.make_die_tiles(random.Random(1))
+    by_colour = collections.defaultdict(collections.Counter)
+    for tile in tiles:
+        by_colour[tile["color"]][tile["reward"]] += 1
+    choice = {"resource": "choice"}
+    for colour in cards.COLORS:
+        assert {choice.get(r, r): n for r, n in by_colour[colour].items()} == {
+            "iron": 1, "food": 1, "pearl": 1, "choice": 1, "coin": 1}, colour
+    # The rulebook's anchors: the first-game Well holds a pearl tile with a coral die on
+    # its back, and an iron tile with a black one. Both exist.
+    assert by_colour["coral"]["pearl"] and by_colour["black"]["iron"]
 
 
 def test_taking_a_room_card_also_performs_one_of_its_light_actions():

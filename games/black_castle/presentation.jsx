@@ -51,6 +51,7 @@ const rewardNames = {
   influence: ["influence", "influence"], food: ["food", "food"],
   iron: ["iron", "iron"], pearl: ["mother-of-pearl", "mother-of-pearl"],
   any: ["resource of your choice", "resources of your choice"],
+  resource: ["resource of your choice", "resources of your choice"],
 };
 // What a "main board" action may reach, by the filter the engine resolves it with.
 const boardFilters = {

@@ -641,6 +641,109 @@ def die_tile_bag(games):
     }
 
 
+#: What a Die tile can pay at the Well. Read off the corpus: no Well payout in 104 base
+#: games ever showed a Clan Point, a seal beyond the Well's own, or a Passage step from a
+#: tile -- and any tile carrying one would have reached the Well about 14 times.
+TILE_REWARDS = ("iron", "food", "pearl", "choice", "coin")
+
+
+def _well_tile_pair(events):
+    """-> one game's two Well tile rewards as a sorted pair, or None.
+
+    The tiles pay BEFORE the Well's own seal, except a "resource of your choice", which
+    resolves as a `GainResourceAction` after it -- so the window runs past the seal for
+    that and nothing else. A left-bridge die fires the Lantern first, and its payouts
+    carry a `cardId`, which is what keeps them out.
+    """
+    sigs = collections.Counter()
+    for i, event in enumerate(events):
+        args = event.get("args") or {}
+        if not (event.get("type") == "diePlaced" and isinstance(args, dict)
+                and not args.get("isUndo") and str(args["actionSpace"]["id"]).endswith("well")):
+            continue
+        pid, got, sealed, choices = str(args["playerId"]), [], False, set()
+        for later in events[i + 1:i + 60]:
+            kind, more = later.get("type"), later.get("args") or {}
+            if kind in ("diePlaced", "courtierMovedUp", "heronsUpdated"):
+                break
+            if kind == "gameStateChange" and isinstance(more, dict):
+                if more.get("id") in (20, 31, 89):
+                    break
+                act = (more.get("args") or {}).get("action") or {}
+                if (sealed and more.get("id") == 82 and act.get("type") == "GainResourceAction"
+                        and act.get("resourceType") == "resource" and act.get("cardId") is None):
+                    choices.add(act.get("id"))
+                continue
+            if (sealed or not isinstance(more, dict) or str(more.get("playerId", "")) != pid
+                    or more.get("isUndo") or more.get("cardId") is not None):
+                continue
+            if kind == "resourceGained":
+                got.append(more["resource"])
+            elif kind == "coinGained" and more.get("dieId") is None:
+                got.append("coin")
+            elif kind == "sealGained":
+                sealed = True
+        if sealed:
+            sigs[tuple(sorted(got + ["choice"] * len(choices)))] += 1
+    pairs = [sig for sig in sigs if len(sig) == 2]
+    return max(pairs, key=lambda sig: sigs[sig]) if pairs else None
+
+
+def die_tile_faces(games):
+    """-> which reward sits behind which colour on the 15 Die tiles.
+
+    Each game shows the Well's two rewards, and its castle -- through the colour sets the
+    rooms accepted -- pins the Well's two COLOURS to a short list (the bag is 5/5/5). Every
+    3x5 colour-by-reward table with five tiles per colour is then tried against every
+    game: a table that cannot deal a game's Well is out. **Exactly one survives: every
+    colour carries one tile of each reward.** It is the same kind of derivation as the
+    bag, and the same check applies -- a wrong model gives an empty set, not a near miss.
+    The tempting fit on reward counts alone (4 iron, 2 coin) is ruled out by one game with
+    a coin on each of a black and a white tile, and that game's room colours are not a
+    sampling gap: a white die was takeable 21 times with the room open and never offered.
+    """
+    observed = []
+    draws = collections.Counter()
+    for packets in games:
+        rooms = room_colour_sets(packets)
+        if len(rooms) != 5:
+            continue
+        pair = _well_tile_pair([e for e in _events(packets) if isinstance(e, dict)])
+        if not pair:
+            continue
+        wells = set()
+        for castle in _castle_options(rooms, TILES_PER_ROOM):
+            rest = [5 - castle[c] for c in DIE_COLORS]
+            if min(rest) >= 0 and sum(rest) == 2:
+                wells.add(tuple(sorted(c for k, c in enumerate(DIE_COLORS)
+                                       for _ in range(rest[k]))))
+        if wells:
+            observed.append((wells, pair))
+            draws.update(pair)
+
+    def deals(table, colours, rewards):
+        (c1, c2), (r1, r2) = colours, rewards
+        if c1 != c2 and r1 != r2:
+            return table[c1, r1] * table[c2, r2] + table[c1, r2] * table[c2, r1]
+        if c1 != c2:
+            return table[c1, r1] * table[c2, r1]
+        if r1 != r2:
+            return table[c1, r1] * table[c1, r2]
+        return table[c1, r1] * (table[c1, r1] - 1) // 2
+
+    rows = [r for r in itertools.product(range(6), repeat=len(TILE_REWARDS)) if sum(r) == 5]
+    survivors = []
+    for row_set in itertools.product(rows, repeat=3):
+        if min(sum(col) for col in zip(*row_set)) < 1:
+            continue
+        table = {(c, r): row[i] for c, row in zip(DIE_COLORS, row_set)
+                 for i, r in enumerate(TILE_REWARDS)}
+        if all(any(deals(table, w, pair) for w in wells) for wells, pair in observed):
+            survivors.append({c: dict(zip(TILE_REWARDS, row)) for c, row in zip(DIE_COLORS, row_set)})
+    return {"games_used": len(observed), "tile_draws_at_the_well": dict(draws),
+            "tables_consistent_with_every_game": survivors}
+
+
 def two_player(games):
     """-> what a DUEL does differently, MEASURED rather than taken from the rulebook.
 
@@ -1073,6 +1176,7 @@ def build(games, yard_points, all_games=None):
         "action_spaces": {k: v for k, v in sorted(spaces.items())},
         "castle_room_color_set_sizes": dict(sorted(castle_room_colors(games).items())),
         "die_tile_bag": die_tile_bag(games),
+        "die_tile_faces": die_tile_faces(games),
         "gardens": [{"type": t, "food_cost": c, "point_value": p, "action": a,
                      "action_args": json.loads(g)}
                     for t, c, p, a, g in gardens(games)],

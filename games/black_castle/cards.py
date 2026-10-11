@@ -11,10 +11,8 @@ Daimyo's Favor cards -- rebuilt from what BGA logs when a courtier takes a slot,
 never ships the card itself. One field of one of them is INFERRED rather than observed,
 and says so where it is defined.
 
-What is still ours rather than the printed game's:
-
-* **The die tiles' reward faces** -- 13 of the 15 stay face-down all game and are never
-  observable. Their COLOUR bag is solved (5/5/5); the rewards are not.
+The Die tiles are real as well: the colour bag (5/5/5) and, since 2026-10-10, the reward
+behind each colour -- both solved from the corpus, see `make_die_tiles`.
 
 The illustrations are owned by the publisher and are not bundled in this open-source
 client.
@@ -246,16 +244,25 @@ def public_catalog() -> dict:
 #: DERIVED, not chosen: five of each. No rules text states it and no single game comes
 #: close to fixing it -- the most informative one alone leaves six candidates -- but the
 #: intersection over the corpus is a single bag. `tools/bga_parity.py:die_tile_bag()`
-#: solves it and shows the working. The REWARD faces are still ours; only the two that
-#: land at the Well are ever read, so they are the only ones worth deriving next.
-DIE_TILE_REWARDS = ("coin", "resource", "food", "iron", "pearl", "seal", "influence", "vp")
+#: solves it and shows the working.
+#:
+#: **And so are the REWARDS: every colour carries one tile of each of these five.** Only
+#: the two tiles at the Well are ever read, but every game reads them, and its castle pins
+#: which two colours they are. Of every possible colour-by-reward table, exactly one deals
+#: all 101 usable games' Wells (`die_tile_faces()`). The rewards used to be invented --
+#: Clan Points, seals and Passage steps among them, none of which a Well tile has ever
+#: paid in the corpus. `resource` is a resource of the player's choice, and is the three
+#: tiles the Matcha expansion replaces; a coin tile pays ONE coin.
+DIE_TILE_REWARDS = ("iron", "food", "pearl", "resource", "coin")
 CASTLE_DIE_TILES = 13
 WELL_DIE_TILES = 2
 
 
 def make_die_tiles(rng) -> list[dict]:
+    # Colours cycle exactly as they always did, so a seed lays the same castle colours it
+    # did before the rewards were known; each colour gets each reward once.
     tiles = [{"id": i + 1, "color": COLORS[i % len(COLORS)], "number": i + 1,
-              "reward": DIE_TILE_REWARDS[i % len(DIE_TILE_REWARDS)],
+              "reward": DIE_TILE_REWARDS[i // len(COLORS)],
               "location": "bag"}
              for i in range(CASTLE_DIE_TILES + WELL_DIE_TILES)]
     rng.shuffle(tiles)
