@@ -130,6 +130,60 @@ def test_a_generated_box_is_a_good_one(seed):
     # no trope: the stored line is the least repetitive shortest one, and within bounds
     assert box["solution"] in lines
     assert D.motif_share(box["solution"]) == min(map(D.motif_share, lines)) <= D.MAX_TROPE
+    # no easy runner-up: the lines one press longer are not a haystack around the minimum
+    assert D.lines_one_longer(tiles, target, m) <= D.MAX_RUNNER_UP * len(lines)
+
+
+# The daily of 2026-10-10, which passed every other filter and was "close is trivial".
+NEEDLE = (("GY", "YE", "BU", "WH", "GY", "GY", "GY", "GY", "WH"), ("BU", "WH", "BU", "WH"))
+
+
+def test_a_box_whose_runner_up_is_a_haystack_is_refused():
+    tiles, target = NEEDLE
+    m = len(solve(tiles, target))
+    lines = D.shortest_lines(tiles, target)
+    assert len(lines) <= D.MAX_WAYS                         # the older filters let it through
+    assert D.motif_share(min(lines, key=D.motif_share)) <= D.MAX_TROPE
+    assert D.lines_one_longer(tiles, target, m) > 1000 * len(lines)
+    assert D._good(tiles, target, m) is None
+
+
+def test_lines_one_longer_agrees_with_trying_every_line():
+    """Brute force on the small real boxes: every sequence of m+1 presses, kept if each
+    press changes the board and the box first opens on the last one."""
+    from itertools import product
+    checked = 0
+    for p in B.BANK.values():
+        tiles, target, m = tuple(p["tiles"]), tuple(p["target"]), B.MINIMUMS[p["id"]]
+        if not 2 <= m <= 4:
+            continue
+        want = 0
+        for seq in product(range(9), repeat=m + 1):
+            t, ok = tiles, True
+            for k, i in enumerate(seq):
+                u = press(t, i)
+                if u == t or (corners_match(u, target) and k < m):
+                    ok = False
+                    break
+                t = u
+            want += ok and corners_match(t, target)
+        assert D.lines_one_longer(tiles, target, m) == want, p["id"]
+        checked += 1
+    assert checked >= 8
+
+
+def test_no_real_box_the_generator_could_make_has_an_easy_runner_up():
+    """The designed boxes are the calibration: every one in the daily's depth range
+    that fits under STATE_CAP clears the cap with room to spare (worst measured: 19x)."""
+    checked = 0
+    for p in B.BANK.values():
+        tiles, target, m = tuple(p["tiles"]), tuple(p["target"]), B.MINIMUMS[p["id"]]
+        if not D.MIN_DEPTH <= m <= D.MAX_DEPTH or D._explore(tiles) is None:
+            continue
+        ways = len(D.shortest_lines(tiles, target, cap=10**6))
+        assert D.lines_one_longer(tiles, target, m) <= D.MAX_RUNNER_UP / 2 * ways, p["id"]
+        checked += 1
+    assert checked >= 30
 
 
 @pytest.mark.parametrize("line, share", [

@@ -19,7 +19,7 @@ in 3-6 presses. So the generator explores EVERYTHING a random board can reach (a
 thousand boards, ~40ms) and only then picks the target, from the corner patterns that
 board can actually make. The real bank's mixed targets are all symmetric pairs, so
 those are the shapes allowed: one colour, diagonal pairs, top/bottom, left/right.
-Then four filters, each one a way a box is bad for a one-attempt race:
+Then five filters, each one a way a box is bad for a one-attempt race:
   * the minimum is the day's drawn depth, 8..15 (owner's range);
   * EVERY COLOUR MATTERS — graying out any one colour must change the minimum, or that
     colour was decoration;
@@ -33,6 +33,14 @@ Then four filters, each one a way a box is bad for a one-attempt race:
     forced. Measured (2026-10-06): median share 0.27 in both the real 8-15 boxes and
     generated ones, but generated had the longer tail (worst: 14 presses, 11 of them the
     centre tile); > 0.5 rejects 4 of 80 generated and 1 of 46 real.
+  * NO EASY RUNNER-UP — the lines ONE press longer than the minimum may number at most
+    `MAX_RUNNER_UP` times the shortest ones. The other filters only look at the shortest
+    lines, and the daily of 2026-10-10 passed all of them with a minimum that was one
+    trick in three orders, buried in thousands of lines one press longer. The owner
+    finished two over and reported "coming close is pretty trivial". Measured
+    (2026-10-10): that box ~1,200x; the other dailies <= 21x; the real bank's 8-15 boxes <= 31x (<= 19x for
+    the 33 inside STATE_CAP); 40 generated boxes median ~6x, max 86x — so 50 rejects
+    about 1 generated box in 40 and no designed one.
 A corner-greedy player test was measured too and NOT added: it cannot fire. A player
 pressing whatever matches the most corners hit the minimum on <= 0.7% of tries on any
 generated box (<= 4.3% on the real ones) and opened them at all on <= 8% (real: <= 30%),
@@ -70,6 +78,7 @@ from boxpuzzles.engine import COLORS, CORNERS, corners_match, press, replay
 MIN_DEPTH, MAX_DEPTH = 8, 15
 MAX_WAYS = 200
 MAX_TROPE = 0.5             # most of a shortest line one repeated motif may cover
+MAX_RUNNER_UP = 50          # lines one press longer, per shortest line
 STATE_CAP = 40_000          # boards explored per candidate; a bigger board is skipped
 MAX_MOVES = 2000            # an attempt longer than this is refused
 MAX_SEGMENTS = MAX_MOVES + 1   # the page never starts an empty segment, so a reset costs a press
@@ -221,6 +230,29 @@ def motif_share(line: list[int]) -> float:
     return best
 
 
+def lines_one_longer(start: tuple, target: tuple, m: int) -> int:
+    """How many lines open the box in exactly `m + 1` presses without opening it
+    sooner, where `m` is its minimum. Only presses that change the board count — a
+    press on a gray tile is the same line, not a new one — which is also how
+    `shortest_lines` counts, so the two compare."""
+    cur = {tuple(start): 1}
+    opened = 0
+    for _ in range(m + 1):
+        nxt: dict[tuple, int] = {}
+        opened = 0
+        for t, n in cur.items():
+            for i in range(9):
+                u = press(t, i)
+                if u == t:
+                    continue
+                if corners_match(u, target):
+                    opened += n
+                else:
+                    nxt[u] = nxt.get(u, 0) + n
+        cur = nxt
+    return opened
+
+
 def _targets(tiles: tuple, depth: dict) -> dict[tuple, int]:
     """Each allowed target this board can make -> its minimum, within 8..15."""
     first: dict[tuple, int] = {}
@@ -252,7 +284,11 @@ def _good(tiles: tuple, target: tuple, m: int) -> list[int] | None:
     if not 1 <= len(lines) <= MAX_WAYS:
         return None
     line = min(lines, key=motif_share)
-    return line if motif_share(line) <= MAX_TROPE else None
+    if motif_share(line) > MAX_TROPE:
+        return None
+    if lines_one_longer(tiles, target, m) > MAX_RUNNER_UP * len(lines):
+        return None                 # the minimum is a needle in a haystack of m+1s
+    return line
 
 
 def _candidate(rng: random.Random) -> tuple:

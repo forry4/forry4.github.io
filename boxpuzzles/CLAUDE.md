@@ -125,7 +125,12 @@ four `/boxpuzzles/daily*` routes; the numbered boxes' rules above are untouched.
   200 shortest lines (the real bank's 8–15 boxes have a median of 28), and **no trope**:
   one repeated motif (1–4 presses, 3+ times) may cover at most half of every shortest
   line — length is not difficulty (chandler.io's solution-space analysis: long boxes are
-  mostly one trick repeated). A corner-greedy-player filter was measured and NOT added:
+  mostly one trick repeated). And **no easy runner-up** (owner's report, 2026-10-10:
+  "coming close is pretty trivial"): the lines ONE press longer than the minimum may
+  number at most 50x the shortest ones. The other filters only judge the shortest lines,
+  so a needle-in-a-haystack box — the minimum one trick, its +1 thousands of ways —
+  passed all of them (~1,200x; designed 8–15 boxes <= 31x; generated median ~6x, so
+  the cap costs ~1 candidate in 40). A corner-greedy-player filter was measured and NOT added:
   it could not fire (see `daily.py`'s docstring for both measurements). Targets are one
   colour or a symmetric pair (diagonal / top-bottom / left-right; every mixed target in
   the real bank is diagonal). Measured: every depth 8–15 hits exactly in 0–20s locally.
