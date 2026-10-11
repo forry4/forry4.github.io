@@ -143,7 +143,7 @@ function Picker({ results, daily, onPick }) {
 					<span className="bx-daily-date">{today ? shortDate(today) : ""}</span>
 					<span className="bx-pick-state">{done ? `✓ ${done.moves}` : ""}</span>
 				</button>
-				<button type="button" className="bx-daily-tile bx-practice-tile" onClick={() => onPick("practice")}
+				<button type="button" className="bx-practice-tile" onClick={() => onPick("practice")}
 					aria-label="Practice box">
 					{DIE}
 					<span className="bx-daily-name">Practice</span>

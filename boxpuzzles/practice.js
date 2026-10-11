@@ -2,7 +2,7 @@
 // colours the player excluded. A port of the daily generator (boxpuzzles/daily.py),
 // with the SAME filters (see its docstring for why each one exists and what was
 // measured): a minimum of 8..15, every colour matters, at most MAX_WAYS shortest lines,
-// and no trope. Nothing is posted, saved or ranked, so the box needs no secrecy and the
+// no trope, and no easy runner-up. Nothing is posted, saved or ranked, so the box needs no secrecy and the
 // minimum is simply never shown.
 //
 // Two differences from the daily, both because nobody is racing: the drawn depth is a
@@ -16,6 +16,7 @@ import { COLORS, CORNERS, press, cornersMatch } from "./engine.js";
 export const MIN_DEPTH = 8, MAX_DEPTH = 15;
 export const MAX_WAYS = 200;
 export const MAX_TROPE = 0.5;
+export const MAX_RUNNER_UP = 50;   // lines one press longer, per shortest line
 const STATE_CAP = 40_000;
 const TRY_EXACT_MS = 1000;
 export const BUDGET_MS = 5000;
@@ -113,6 +114,27 @@ export function motifShare(line) {
 	return best;
 }
 
+// How many lines solve the box in exactly m + 1 presses without solving it sooner
+// (m its minimum). A press that changes nothing is not a new line — the same count
+// shortestLines makes, so the two compare.
+export function linesOneLonger(start, target, m) {
+	let cur = new Map([[key(start), [start, 1]]]);
+	let opened = 0;
+	for (let d = 0; d <= m; d++) {
+		const next = new Map();
+		opened = 0;
+		for (const [k, [t, n]] of cur) for (let i = 0; i < 9; i++) {
+			const u = press(t, i), uk = key(u);
+			if (uk === k) continue;
+			if (cornersMatch(u, target)) { opened += n; continue; }
+			const e = next.get(uk);
+			if (e) e[1] += n; else next.set(uk, [u, n]);
+		}
+		cur = next;
+	}
+	return opened;
+}
+
 // Each allowed target this board can make -> its minimum, within MIN..MAX_DEPTH.
 function targets(tiles, depth) {
 	const first = new Map();
@@ -141,7 +163,9 @@ function good(tiles, target, m) {
 	if (lines.length < 1 || lines.length > MAX_WAYS) return null;
 	let line = lines[0];
 	for (const l of lines) if (motifShare(l) < motifShare(line)) line = l;
-	return motifShare(line) <= MAX_TROPE ? line : null;
+	if (motifShare(line) > MAX_TROPE) return null;
+	if (linesOneLonger(tiles, target, m) > MAX_RUNNER_UP * lines.length) return null;   // a needle in m+1s
+	return line;
 }
 
 const pick = (rng, xs) => xs[Math.floor(rng() * xs.length)];

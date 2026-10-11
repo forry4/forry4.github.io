@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { COLORS, CORNERS, press, cornersMatch } from "../../../boxpuzzles/engine.js";
-import { generate, shortestLines, motifShare, MIN_DEPTH, MAX_DEPTH, MAX_WAYS, MAX_TROPE }
+import { generate, shortestLines, motifShare, linesOneLonger, MIN_DEPTH, MAX_DEPTH, MAX_WAYS, MAX_TROPE, MAX_RUNNER_UP }
 	from "../../../boxpuzzles/practice.js";
 
 // A seeded PRNG (mulberry32), so a failure here is reproducible.
@@ -44,6 +44,7 @@ test("a practice box has none of the excluded colours and passes the daily's fil
 		const ways = shortestLines(box.tiles, box.target).length;
 		assert.ok(ways >= 1 && ways <= MAX_WAYS, `${ways} shortest lines`);
 		assert.ok(motifShare(box.solution) <= MAX_TROPE);
+		assert.ok(linesOneLonger(box.tiles, box.target, m) <= MAX_RUNNER_UP * ways, "easy runner-up");
 		// every colour matters: graying one out changes the minimum
 		for (const c of new Set(box.tiles)) {
 			if (c === "GY") continue;

@@ -188,14 +188,15 @@ four `/boxpuzzles/daily*` routes; the numbered boxes' rules above are untouched.
 A random box made IN THE BROWSER (`practice.js`, in `practice.worker.js` so the page
 never stalls) with no tile of the colours the player excludes — any of the ten,
 gray included. The owner's calls: **the same filters as the daily** (8–15, every
-colour matters, ≤ 200 shortest lines, no trope), **no length picker**, **resets clear
+colour matters, ≤ 200 shortest lines, no trope, no easy runner-up), **no length picker**, **resets clear
 the count** (numbered boxes' rules), **the minimum is never shown** (so no blue
 either — a blue count would say it), **nothing is posted, saved or shareable**
 (the exclusion lives in the page's state only), **no "must include"**, and if no
 box passes the filter fast enough the page says so ("No box found. Change the
 filter." — the one sentence on the page outside the Rules panel).
 - It is a PORT of `daily.py`'s generator, so the two must move together. It agreed
-  with `_explore`/`_targets`/`_good` on every box checked when written. Two
+  with `_explore`/`_targets`/`_good` on every box checked when written, and
+  `linesOneLonger` gives `lines_one_longer`'s exact counts. Two
   differences, both because nobody races: the drawn depth is a preference (after 1s
   the closest good box is taken, typically 0.05–1.5s total) and the search gives up
   at `BUDGET_MS` (5s) and returns null. A filter with no active colour left returns
