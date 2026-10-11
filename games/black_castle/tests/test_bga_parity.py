@@ -1,15 +1,21 @@
 """Hold the engine to The White Castle as Board Game Arena actually plays it.
 
 The fixture these read, `data/bga_ground_truth.json`, is DERIVED rather than typed:
-`tools/bga_parity.py` reads 26 base-game BGA logs and, before writing anything, recomputes
-all 90 final scoreboards from the formulas it is about to record. So a row here is not "we
-believe the rule is X" -- it is "X reproduced real scoreboards, exactly, 90 times".
+`tools/bga_parity.py` reads 132 base-game BGA logs and, before writing anything, recomputes
+all 398 final scoreboards from the formulas it is about to record. So a row here is not "we
+believe the rule is X" -- it is "X reproduced real scoreboards, exactly, 398 times".
 
 The corpus grew from 20 base logs to 26 on 2026-09-20 and **not one derived rule moved** --
 the 6 new games contributed 20 scoreboards the formulas had never been fitted to and
 reproduced all 20. One of those games matters more than the rest: it is the first 2-PLAYER
 table the corpus has ever held, and it turns both duel rules below from rulebook
 quotations into measurements.
+
+It grew again on 2026-10-10, to 132 base games -- 19 of them duels -- and again no rule
+moved. What did move was two pieces of the INSTRUMENT, each of which had only ever been
+right by the corpus's luck: a space's printed dice cap was its first sighting (it read 1
+the day a duel log sorted first), and the Well's window ran on past the Well into the
+Lantern. Both are fixed in the tool, not papered over here.
 
 WHAT THESE TESTS DO NOT COVER, AND WHY THAT MATTERS
 ---------------------------------------------------
@@ -64,7 +70,7 @@ def _run_draft(game, index=0, resource="food"):
 def test_the_fixture_is_the_verified_one():
     # If the reconstruction ever stops being exact the fixture is a set of guesses, and
     # every assertion below becomes a test of those guesses rather than of the game.
-    assert TRUTH["reconstruction"] == {"base_logs": 26, "seats_exact": 90, "seats_wrong": 0}
+    assert TRUTH["reconstruction"] == {"base_logs": 132, "seats_exact": 398, "seats_wrong": 0}
 
 
 def test_final_scoring_matches_every_category_bga_reports():
@@ -125,14 +131,15 @@ def test_a_marker_without_seals_stops_at_the_checkpoint():
 
 
 def test_a_room_and_an_outside_space_stack_two_dice_at_three_or_four_seats():
-    # BGA prints two on every castle room AND on both Outside the Walls spaces. The
-    # corpus shows dice actually reaching two on all of them -- the Outside spaces 114
-    # times, which is how many placements the engine used to refuse for holding one.
+    # BGA ships each space's cap as `maxNrOfDice`, and it depends on the TABLE: two on
+    # every castle room and both Outside the Walls spaces at three or four seats, one at
+    # two. Read per seat bucket, so a duel log can never again pass for the whole game.
     for space, row in TRUTH["action_spaces"].items():
         if space.startswith(("steward-", "diplomat-", "outside-the-walls-")):
-            assert row["max_dice"] == engine.CASTLE_ROOM_DICE, space
+            assert row["max_dice"] == {"2": engine.SOLO_OR_DUEL_DICE,
+                                       "3-4": engine.CASTLE_ROOM_DICE}, space
         elif space.startswith("personal-domain:"):
-            assert row["max_dice"] == 1, space
+            assert set(row["max_dice"].values()) == {1}, space
     for seats, capacity in ((2, 1), (3, 2), (4, 2)):
         game = engine.new_game([f"p{i}" for i in range(seats)], seed=11)
         _run_draft(game)
@@ -180,10 +187,13 @@ def test_two_players_cannot_stack_dice_anywhere():
 
 
 def test_the_well_is_the_one_space_that_never_fills_up():
-    # The Well is not capped like a room. The corpus shows THREE dice on it at four
-    # players -- more than any room ever holds -- so a capacity rule that happened to
-    # catch the Well too would refuse a legal move.
-    assert TRUTH["two_player"]["peak_dice_per_space"]["3-4"]["well"] == 3
+    # The Well is not capped like a room. The corpus shows FOUR dice on it at four
+    # players -- more than any room ever holds -- and two in a DUEL, where every other
+    # space stops at one: the duel's no-stacking rule does not reach the Well. BGA says the
+    # same thing outright with a cap of 999 at every table size.
+    assert TRUTH["two_player"]["peak_dice_per_space"]["3-4"]["well"] >= 3
+    assert TRUTH["two_player"]["peak_dice_per_space"]["2"]["well"] >= 2
+    assert set(TRUTH["action_spaces"]["well"]["max_dice"].values()) == {999}
     assert max(TRUTH["two_player"]["peak_dice_per_space"]["3-4"][k] for k in
                ("steward", "diplomat", "outside-the-walls")) < 3, "no ROOM ever holds three"
 
@@ -307,7 +317,7 @@ def test_a_gardener_can_reach_both_plots_on_a_bridge_but_a_plot_only_once():
 def test_the_next_round_is_led_by_the_marker_on_top_of_the_pile():
     # 60 of 60 turn-order changes in the corpus follow this and nothing else: position
     # first, and on a tie the clan that stepped onto the space most recently.
-    assert TRUTH["turn_order"] == {"stack_top_first": 78, "mismatches": 0}
+    assert TRUTH["turn_order"] == {"stack_top_first": 394, "mismatches": 0}
     game = engine.new_game(["a", "b", "c"], seed=21)
     first, second, third = game["turn_order"]
     for pid in (second, first):          # second arrives, then first lands on top of it
@@ -417,11 +427,12 @@ def test_a_game_saved_before_the_six_plots_still_loads_and_plays():
 def test_the_well_pays_the_same_thing_every_visit():
     well = TRUTH["well"]["distinct_payouts_within_one_game"]
     one, more = well.get("1", 0), sum(v for k, v in well.items() if k != "1")
-    # Fixed, face-up tiles: a game with several visits shows ONE payout signature. Two
-    # games read as two, and both are a card effect landing in the same turn with no
-    # cardId to tell it apart -- so this asserts the weight of the evidence, not purity,
-    # and would still fail outright if the Well were the lottery the port used to run.
-    assert one >= 15 and one > 4 * more, well
+    # Fixed, face-up tiles: a game with several visits shows ONE payout signature. The
+    # few that read as two all pay LESS on one visit, never something else -- a resource
+    # already at its cap of 7 is simply not gained -- and the instrument checks exactly
+    # that. A lottery would show as many signatures as visits.
+    assert one >= 80 and one > 10 * more, well
+    assert TRUTH["well"]["payouts_that_are_not_part_of_the_fullest"] == 0
     assert all("seal+1" in sig for sig in TRUTH["well"]["payout_signatures"])
 
     game = engine.new_game(["a", "b"], seed=41)
@@ -523,7 +534,7 @@ def test_four_of_the_eight_yard_tiles_are_in_play():
 def test_the_die_tile_bag_is_five_of_each_colour():
     bag = TRUTH["die_tile_bag"]
     assert bag["bags_consistent_with_every_game"] == [{"red": 5, "black": 5, "white": 5}]
-    assert bag["games_used"] == 26 and bag["games_needed_for_a_unique_bag"] > 1, (
+    assert bag["games_used"] == 132 and bag["games_needed_for_a_unique_bag"] > 1, (
         "one game cannot fix the bag; if it could, the constraint is not what we think")
     # The geometry is derived, not assumed, and these two rows are the evidence.
     # A diplomat room never showed a third colour, which is what makes it a 2-tile room...

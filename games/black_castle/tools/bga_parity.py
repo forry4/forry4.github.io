@@ -166,7 +166,11 @@ def _action_args(event):
 def action_spaces(games):
     """-> {space id: {value, dice_colors, max_dice, name}} for the base board.
 
-    `value` and `maxNrOfDice` are printed on the board and BGA ships them literally. The
+    `value` and `maxNrOfDice` are printed on the board and BGA ships them literally --
+    but `maxNrOfDice` is NOT a property of the space alone: a duel caps every room at one
+    die. So `max_dice` is keyed by seat bucket ("2" / "3-4"). It used to be the first
+    sighting, which read 2 while the corpus had no duel and silently became 1 the day a
+    duel log sorted first. The
     COLOURS are not: they come from the die-colour tiles laid into each castle room at
     setup, so they are derived from what the game actually offered -- the union, over every
     "choose a die" state, of the colours whose legal-destination list contained the space.
@@ -175,6 +179,7 @@ def action_spaces(games):
     """
     spaces = {}
     for packets in games:
+        bucket = "2" if classify(packets)[1] <= 2 else "3-4"
         for event in _events(packets):
             args = event.get("args") or {}
             if not isinstance(args, dict):
@@ -189,8 +194,9 @@ def action_spaces(games):
                         key = _space_key(space)
                         row = spaces.setdefault(key, {"value": space.get("value"),
                                                       "name": space.get("locationName"),
-                                                      "max_dice": space.get("maxNrOfDice"),
+                                                      "max_dice": {},
                                                       "die_colors": set()})
+                        row["max_dice"].setdefault(bucket, set()).add(space.get("maxNrOfDice"))
                         if die:
                             row["die_colors"].add(die["type"])
             if event.get("type") == "diePlaced":
@@ -199,11 +205,18 @@ def action_spaces(games):
                     key = _space_key(space)
                     row = spaces.setdefault(key, {"value": space.get("value"),
                                                   "name": space.get("locationName"),
-                                                  "max_dice": space.get("maxNrOfDice"),
+                                                  "max_dice": {},
                                                   "die_colors": set()})
+                    row["max_dice"].setdefault(bucket, set()).add(space.get("maxNrOfDice"))
                     row["die_colors"].add((args.get("die") or {}).get("type"))
-    for row in spaces.values():
+    for key, row in spaces.items():
         row["die_colors"] = sorted(c for c in row["die_colors"] if c)
+        caps = {}
+        for bucket, seen in sorted(row["max_dice"].items()):
+            # One printed number per seat bucket, or the space is not what we think it is.
+            assert len(seen) == 1, (key, bucket, seen)
+            caps[bucket] = seen.pop()
+        row["max_dice"] = caps
     return spaces
 
 
@@ -345,9 +358,17 @@ def well_rewards(games):
     indicated on the tiles there", the same benefits on every visit. If that is right, a
     game with several visits must show ONE payout signature -- which is what this counts,
     and a lottery would show as many signatures as visits.
+
+    The window is the Well's own resolution and nothing else, which took two corrections
+    once the corpus grew to 132 games and 26 of them seemed to pay two different things:
+    the Well's seal is always its LAST gain, so the window closes on it (it used to run to
+    the end of the packet); and a die taken from the LEFT end of a bridge fires the Lantern
+    first, whose Clan Points carry no `cardId` and so read as Well rewards. Points inside a
+    window that opened with a Lantern are therefore not counted.
     """
     per_game = collections.Counter()
     payouts = collections.Counter()
+    not_subset = 0
     for packets in games:
         seen = collections.Counter()
         for packet in packets:
@@ -358,11 +379,15 @@ def well_rewards(games):
                     continue
                 if args.get("isUndo") or not str(args["actionSpace"]["id"]).endswith("well"):
                     continue
-                pid, got = str(args["playerId"]), []
+                pid, got, lantern, closed = str(args["playerId"]), [], False, False
                 for later in events[i + 1:]:
                     kind, more = later.get("type"), later.get("args") or {}
+                    if kind in ("diePlaced", "courtierMovedUp", "heronsUpdated"):
+                        break
                     if not isinstance(more, dict) or str(more.get("playerId", "")) != pid:
                         continue
+                    if kind == "gameLog" and more.get("iconPlaceholder") == "action-lantern":
+                        lantern = True
                     # A gain carrying a cardId came from a card, not from the Well.
                     if more.get("isUndo") or more.get("cardId"):
                         continue
@@ -370,16 +395,24 @@ def well_rewards(games):
                         got.append("%s+%s" % (more["resource"], more["numberOfResources"]))
                     elif kind == "sealGained":
                         got.append("seal+%s" % more["numberOfSeals"])
+                        closed = True
+                        break
                     elif kind == "coinGained" and more.get("dieId") is None:
                         got.append("coin+%s" % more["numberOfCoins"])
-                    elif kind == "scoreUpdated":
+                    elif kind == "scoreUpdated" and not lantern:
                         got.append("vp+%s" % more["numberOfVp"])
-                if got:
+                if got and closed:
                     seen[tuple(sorted(got))] += 1
                     payouts[tuple(sorted(got))] += 1
         if seen:
             per_game[len(seen)] += 1
+            # A capped resource is simply not gained, so a visit may pay LESS than the
+            # tiles show -- but never something else. Every lesser payout in a game must
+            # fit inside its fullest one.
+            full = collections.Counter(max(seen, key=len))
+            not_subset += sum(1 for sig in seen if collections.Counter(sig) - full)
     return {"distinct_payouts_within_one_game": dict(sorted(per_game.items())),
+            "payouts_that_are_not_part_of_the_fullest": not_subset,
             "payout_signatures": {" ".join(k): v for k, v in payouts.most_common()}}
 
 
@@ -762,6 +795,10 @@ def turn_order(games):
                     markers[str(marker["playerId"])] = (
                         int(str(marker["location"]).split("-")[1]), int(marker["locationArg"]))
             elif event.get("type") == "heronsUpdated":
+                if not markers:
+                    # Announced before any Passage of Time marker has moved -- nothing to
+                    # predict from, so it is neither a hit nor a miss.
+                    continue
                 actual = sorted(((int(h["locationArg"]), str(h["playerId"]))
                                  for h in args.get("herons") or ()))
                 order = [pid for _, pid in actual]

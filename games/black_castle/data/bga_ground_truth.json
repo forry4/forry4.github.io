@@ -6,7 +6,10 @@
     "red",
     "white"
    ],
-   "max_dice": 2,
+   "max_dice": {
+    "2": 1,
+    "3-4": 2
+   },
    "name": "The Castle",
    "value": 4
   },
@@ -16,7 +19,10 @@
     "red",
     "white"
    ],
-   "max_dice": 2,
+   "max_dice": {
+    "2": 1,
+    "3-4": 2
+   },
    "name": "The Castle",
    "value": 4
   },
@@ -26,7 +32,10 @@
     "red",
     "white"
    ],
-   "max_dice": 2,
+   "max_dice": {
+    "2": 1,
+    "3-4": 2
+   },
    "name": "Outside the Walls",
    "value": 5
   },
@@ -36,7 +45,10 @@
     "red",
     "white"
    ],
-   "max_dice": 2,
+   "max_dice": {
+    "2": 1,
+    "3-4": 2
+   },
    "name": "Outside the Walls",
    "value": 5
   },
@@ -44,7 +56,10 @@
    "die_colors": [
     "black"
    ],
-   "max_dice": 1,
+   "max_dice": {
+    "2": 1,
+    "3-4": 1
+   },
    "name": "Gardener Personal Domain",
    "value": 6
   },
@@ -52,7 +67,10 @@
    "die_colors": [
     "red"
    ],
-   "max_dice": 1,
+   "max_dice": {
+    "2": 1,
+    "3-4": 1
+   },
    "name": "Courtier Personal Domain",
    "value": 6
   },
@@ -60,7 +78,10 @@
    "die_colors": [
     "white"
    ],
-   "max_dice": 1,
+   "max_dice": {
+    "2": 1,
+    "3-4": 1
+   },
    "name": "Warrior Personal Domain",
    "value": 6
   },
@@ -70,7 +91,10 @@
     "red",
     "white"
    ],
-   "max_dice": 2,
+   "max_dice": {
+    "2": 1,
+    "3-4": 2
+   },
    "name": "The Castle",
    "value": 3
   },
@@ -80,7 +104,10 @@
     "red",
     "white"
    ],
-   "max_dice": 2,
+   "max_dice": {
+    "2": 1,
+    "3-4": 2
+   },
    "name": "The Castle",
    "value": 3
   },
@@ -90,7 +117,10 @@
     "red",
     "white"
    ],
-   "max_dice": 2,
+   "max_dice": {
+    "2": 1,
+    "3-4": 2
+   },
    "name": "The Castle",
    "value": 3
   },
@@ -100,7 +130,10 @@
     "red",
     "white"
    ],
-   "max_dice": 999,
+   "max_dice": {
+    "2": 999,
+    "3-4": 999
+   },
    "name": "The Well",
    "value": 1
   }
@@ -111,8 +144,8 @@
   "seals": 5
  },
  "castle_room_color_set_sizes": {
-  "2": 106,
-  "3": 24
+  "2": 565,
+  "3": 95
  },
  "diamond_cards": {
   "diplomat": {
@@ -160,7 +193,7 @@
   "outside-the-walls": 2,
   "personal-domain": 1,
   "steward": 2,
-  "well": 3
+  "well": 4
  },
  "die_tile_bag": {
   "bags_consistent_with_every_game": [
@@ -174,12 +207,12 @@
    "0": 0,
    "1": 0,
    "2": 1,
-   "3": 4
+   "3": 3
   },
   "castle_tiles": 13,
   "diplomat_rooms_showing_three_colours": 0,
-  "games_needed_for_a_unique_bag": 12,
-  "games_used": 26,
+  "games_needed_for_a_unique_bag": 34,
+  "games_used": 132,
   "tiles_per_room": {
    "diplomat": 2,
    "steward": 3
@@ -188,69 +221,69 @@
  },
  "effect_vocabulary": {
   "block_types": {
-   "dark": 4206,
-   "light": 7837
+   "dark": 18185,
+   "light": 33779
   },
   "conditionals": {
-   "None": 2402,
-   "and": 9641
+   "None": 2702,
+   "and": 49262
   },
   "templates": {
    "Gain ${iconPlaceholder} ${numberOfResources}": {
-    "{\"iconPlaceholder\": \"coin\", \"numberOfResources\": 1}": 583,
-    "{\"iconPlaceholder\": \"coin\", \"numberOfResources\": 2}": 167,
-    "{\"iconPlaceholder\": \"coin\", \"numberOfResources\": 3}": 54,
-    "{\"iconPlaceholder\": \"coin\", \"numberOfResources\": 4}": 74,
-    "{\"iconPlaceholder\": \"coin\", \"numberOfResources\": 5}": 8,
-    "{\"iconPlaceholder\": \"food\", \"numberOfResources\": 1}": 595,
-    "{\"iconPlaceholder\": \"food\", \"numberOfResources\": 2}": 405,
-    "{\"iconPlaceholder\": \"food\", \"numberOfResources\": 4}": 30,
-    "{\"iconPlaceholder\": \"iron\", \"numberOfResources\": 1}": 609,
-    "{\"iconPlaceholder\": \"iron\", \"numberOfResources\": 2}": 515,
-    "{\"iconPlaceholder\": \"pearl\", \"numberOfResources\": 1}": 468,
-    "{\"iconPlaceholder\": \"pearl\", \"numberOfResources\": 2}": 449,
-    "{\"iconPlaceholder\": \"resource\", \"numberOfResources\": 1}": 413,
-    "{\"iconPlaceholder\": \"resource\", \"numberOfResources\": 2}": 451,
-    "{\"iconPlaceholder\": \"resource\", \"numberOfResources\": 3}": 337,
-    "{\"iconPlaceholder\": \"seal\", \"numberOfResources\": 1}": 1055,
-    "{\"iconPlaceholder\": \"seal\", \"numberOfResources\": 2}": 66,
-    "{\"iconPlaceholder\": \"vp\", \"numberOfResources\": 1}": 437,
-    "{\"iconPlaceholder\": \"vp\", \"numberOfResources\": 2}": 756
+    "{\"iconPlaceholder\": \"coin\", \"numberOfResources\": 1}": 2690,
+    "{\"iconPlaceholder\": \"coin\", \"numberOfResources\": 2}": 807,
+    "{\"iconPlaceholder\": \"coin\", \"numberOfResources\": 3}": 202,
+    "{\"iconPlaceholder\": \"coin\", \"numberOfResources\": 4}": 396,
+    "{\"iconPlaceholder\": \"coin\", \"numberOfResources\": 5}": 88,
+    "{\"iconPlaceholder\": \"food\", \"numberOfResources\": 1}": 2772,
+    "{\"iconPlaceholder\": \"food\", \"numberOfResources\": 2}": 1787,
+    "{\"iconPlaceholder\": \"food\", \"numberOfResources\": 4}": 108,
+    "{\"iconPlaceholder\": \"iron\", \"numberOfResources\": 1}": 2854,
+    "{\"iconPlaceholder\": \"iron\", \"numberOfResources\": 2}": 2148,
+    "{\"iconPlaceholder\": \"pearl\", \"numberOfResources\": 1}": 2069,
+    "{\"iconPlaceholder\": \"pearl\", \"numberOfResources\": 2}": 1734,
+    "{\"iconPlaceholder\": \"resource\", \"numberOfResources\": 1}": 1740,
+    "{\"iconPlaceholder\": \"resource\", \"numberOfResources\": 2}": 1772,
+    "{\"iconPlaceholder\": \"resource\", \"numberOfResources\": 3}": 1591,
+    "{\"iconPlaceholder\": \"seal\", \"numberOfResources\": 1}": 4549,
+    "{\"iconPlaceholder\": \"seal\", \"numberOfResources\": 2}": 298,
+    "{\"iconPlaceholder\": \"vp\", \"numberOfResources\": 1}": 1715,
+    "{\"iconPlaceholder\": \"vp\", \"numberOfResources\": 2}": 3195
    },
    "Gain ${iconPlaceholder} Decree Card": {
-    "{\"iconPlaceholder\": \"coin\"}": 34,
-    "{\"iconPlaceholder\": \"seal\"}": 10,
-    "{\"iconPlaceholder\": \"vp\"}": 18
+    "{\"iconPlaceholder\": \"coin\"}": 146,
+    "{\"iconPlaceholder\": \"seal\"}": 34,
+    "{\"iconPlaceholder\": \"vp\"}": 80
    },
    "Gain ${iconPlaceholder} Lantern Rewards": {
-    "{\"iconPlaceholder\": \"action-lantern\"}": 1819
+    "{\"iconPlaceholder\": \"action-lantern\"}": 8017
    },
    "Move ${iconPlaceholder} ${numberOfSteps} Passage of Time": {
-    "{\"iconPlaceholder\": \"action-passage-of-time\", \"numberOfSteps\": 1}": 828,
-    "{\"iconPlaceholder\": \"action-passage-of-time\", \"numberOfSteps\": 2}": 197
+    "{\"iconPlaceholder\": \"action-passage-of-time\", \"numberOfSteps\": 1}": 3464,
+    "{\"iconPlaceholder\": \"action-passage-of-time\", \"numberOfSteps\": 2}": 747
    },
    "Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Courtier Actions": {
-    "{\"iconPlaceholder1\": \"action-courtier\", \"iconPlaceholder2\": \"seal\", \"qty\": 1}": 1006
+    "{\"iconPlaceholder1\": \"action-courtier\", \"iconPlaceholder2\": \"seal\", \"qty\": 1}": 4238
    },
    "Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Gardener Action": {
-    "{\"iconPlaceholder1\": \"action-gardener\", \"iconPlaceholder2\": \"seal\", \"qty\": 1}": 972
+    "{\"iconPlaceholder1\": \"action-gardener\", \"iconPlaceholder2\": \"seal\", \"qty\": 1}": 4123
    },
    "Pay ${iconPlaceholder2} ${qty} to perform ${iconPlaceholder1} Warrior Action": {
-    "{\"iconPlaceholder1\": \"action-warrior\", \"iconPlaceholder2\": \"seal\", \"qty\": 1}": 1021
+    "{\"iconPlaceholder1\": \"action-warrior\", \"iconPlaceholder2\": \"seal\", \"qty\": 1}": 4341
    },
    "Perform ${iconPlaceholder1} Courtier Actions": {
-    "{\"iconPlaceholder1\": \"action-courtier\", \"iconPlaceholder2\": \"coin\", \"qty\": 0}": 572
+    "{\"iconPlaceholder1\": \"action-courtier\", \"iconPlaceholder2\": \"coin\", \"qty\": 0}": 2511
    },
    "Perform ${iconPlaceholder1} Gardener Action": {
-    "{\"iconPlaceholder1\": \"action-gardener\", \"iconPlaceholder2\": \"coin\", \"qty\": 0}": 130,
-    "{\"iconPlaceholder1\": \"action-gardener\"}": 439
+    "{\"iconPlaceholder1\": \"action-gardener\", \"iconPlaceholder2\": \"coin\", \"qty\": 0}": 141,
+    "{\"iconPlaceholder1\": \"action-gardener\"}": 2356
    },
    "Perform ${iconPlaceholder1} Warrior Action": {
     "{\"iconPlaceholder1\": \"action-warrior\", \"iconPlaceholder2\": \"coin\", \"qty\": 0}": 106,
-    "{\"iconPlaceholder1\": \"action-warrior\"}": 404
+    "{\"iconPlaceholder1\": \"action-warrior\"}": 2349
    },
    "Perform ${iconPlaceholder} Well Action": {
-    "{\"iconPlaceholder\": \"action-well\"}": 917
+    "{\"iconPlaceholder\": \"action-well\"}": 4267
    }
   }
  },
@@ -396,44 +429,50 @@
  ],
  "outside_the_walls": {
   "1": {
-   "courtier": 60,
-   "gardener": 41
+   "courtier": 231,
+   "gardener": 198
   },
   "2": {
-   "courtier": 64,
-   "warrior": 17
+   "courtier": 271,
+   "warrior": 58
   }
  },
  "passage_of_time": {
   "blocked_at": {
-   "10": 132,
-   "14": 14,
-   "5": 113
+   "10": 236,
+   "14": 19,
+   "5": 424
   },
   "checkpoint_seals": {
-   "11 2": 34,
-   "15 3": 1,
-   "6 1": 156
+   "11 2": 76,
+   "15 3": 5,
+   "6 1": 467
   },
-  "highest_seen": 15,
+  "highest_seen": 19,
   "position_to_points": {
-   "10 3": 34,
-   "11 6": 12,
-   "12 6": 5,
-   "13 6": 4,
-   "14 6": 4,
-   "15 10": 1,
-   "4 0": 5,
-   "5 0": 18,
-   "6 3": 10,
-   "7 3": 15,
-   "8 3": 13,
-   "9 3": 8
+   "0 0": 1,
+   "1 0": 3,
+   "10 3": 93,
+   "11 6": 17,
+   "12 6": 16,
+   "13 6": 11,
+   "14 6": 10,
+   "15 10": 2,
+   "16 11": 1,
+   "19 14": 2,
+   "2 0": 3,
+   "3 0": 7,
+   "4 0": 14,
+   "5 0": 71,
+   "6 3": 44,
+   "7 3": 60,
+   "8 3": 57,
+   "9 3": 43
   }
  },
  "reconstruction": {
-  "base_logs": 26,
-  "seats_exact": 90,
+  "base_logs": 132,
+  "seats_exact": 398,
   "seats_wrong": 0
  },
  "scoring": {
@@ -489,26 +528,26 @@
  },
  "turn_order": {
   "mismatches": 0,
-  "stack_top_first": 78
+  "stack_top_first": 394
  },
  "two_player": {
   "diamond_cards_seen": {
    "2": 0,
-   "3-4": 1557
+   "3-4": 6253
   },
   "distinct_cards_seen": {
-   "2 diplomat": 2,
-   "2 steward": 8,
+   "2 diplomat": 9,
+   "2 steward": 9,
    "3-4 diplomat": 12,
    "3-4 steward": 15
   },
   "offers_by_occupancy": {
    "2": {
-    "empty": 552
+    "empty": 8709
    },
    "3-4": {
-    "empty": 19681,
-    "occupied": 6831
+    "empty": 81029,
+    "occupied": 26730
    }
   },
   "peak_dice_per_space": {
@@ -517,54 +556,54 @@
     "outside-the-walls": 1,
     "personal-domain": 1,
     "steward": 1,
-    "well": 1
+    "well": 2
    },
    "3-4": {
     "diplomat": 2,
     "outside-the-walls": 2,
     "personal-domain": 1,
     "steward": 2,
-    "well": 3
+    "well": 4
    }
   }
  },
  "well": {
   "distinct_payouts_within_one_game": {
-   "1": 16,
-   "2": 3
+   "1": 92,
+   "2": 4
   },
   "payout_signatures": {
-   "coin+1 food+1 seal+1": 7,
-   "coin+1 food+1 seal+1 vp+1": 1,
-   "coin+1 iron+1 seal+1": 4,
-   "coin+1 pearl+1 seal+1": 2,
-   "coin+1 pearl+1 seal+1 vp+1": 2,
-   "coin+1 seal+1": 1,
-   "food+1 iron+1 seal+1": 1,
-   "food+1 seal+1": 5,
-   "iron+1 iron+1 seal+1": 3,
-   "iron+1 pearl+1 seal+1": 8,
-   "iron+1 pearl+1 seal+1 vp+1": 1,
-   "iron+1 seal+1": 3,
-   "pearl+1 pearl+1 seal+1 vp+1 vp+1": 1,
-   "pearl+1 seal+1": 2,
-   "seal+1": 4,
-   "seal+1 vp+1 vp+1": 1
-  }
+   "coin+1 coin+1 seal+1": 1,
+   "coin+1 food+1 seal+1": 18,
+   "coin+1 iron+1 seal+1": 9,
+   "coin+1 pearl+1 seal+1": 6,
+   "coin+1 seal+1": 17,
+   "food+1 food+1 seal+1": 5,
+   "food+1 iron+1 seal+1": 29,
+   "food+1 pearl+1 seal+1": 17,
+   "food+1 seal+1": 25,
+   "iron+1 iron+1 seal+1": 9,
+   "iron+1 pearl+1 seal+1": 34,
+   "iron+1 seal+1": 30,
+   "pearl+1 pearl+1 seal+1": 5,
+   "pearl+1 seal+1": 15,
+   "seal+1": 12
+  },
+  "payouts_that_are_not_part_of_the_fullest": 0
  },
  "worker_costs": {
   "courtier_climb_pearl_by_levels": {
-   "1 2": 513,
-   "1 5": 3,
-   "2 5": 47
+   "1 2": 2029,
+   "1 5": 15,
+   "2 5": 325
   },
   "courtier_gate_coins": {
-   "2": 478
+   "2": 2003
   },
   "warrior_iron_by_yard": {
-   "1 5": 227,
-   "2 3": 69,
-   "3 1": 73
+   "1 5": 831,
+   "2 3": 465,
+   "3 1": 340
   }
  },
  "yard_tiles": {
@@ -579,7 +618,7 @@
       "numberOfResources": 3
      }
     ],
-    "yard": 3
+    "yard": 1
    },
    "1 front": {
     "action": [
@@ -604,7 +643,7 @@
       "numberOfSteps": 2
      }
     ],
-    "yard": 3
+    "yard": 1
    },
    "2 front": {
     "action": [
@@ -619,7 +658,7 @@
       "iconPlaceholder1": "action-warrior"
      }
     ],
-    "yard": 1
+    "yard": 2
    },
    "3 back": {
     "action": [
@@ -631,7 +670,7 @@
       "numberOfResources": 3
      }
     ],
-    "yard": 1
+    "yard": 3
    },
    "3 front": {
     "action": [
@@ -669,7 +708,7 @@
       "nrOfActions": 1
      }
     ],
-    "yard": 2
+    "yard": 1
    },
    "5 back": {
     "action": [
@@ -681,7 +720,7 @@
       "numberOfResources": 2
      }
     ],
-    "yard": 1
+    "yard": 3
    },
    "5 front": {
     "action": [
@@ -693,7 +732,7 @@
       "nrOfActions": 1
      }
     ],
-    "yard": 1
+    "yard": 2
    },
    "6 back": {
     "action": [
@@ -717,7 +756,7 @@
       "nrOfActions": 1
      }
     ],
-    "yard": 2
+    "yard": 1
    },
    "7 back": {
     "action": [
@@ -741,7 +780,7 @@
       "nrOfActions": 1
      }
     ],
-    "yard": 1
+    "yard": 2
    },
    "8 back": {
     "action": [
@@ -774,9 +813,9 @@
    }
   },
   "tiles_in_play_per_game": {
-   "1": 8,
-   "2": 8,
-   "4": 10
+   "1": 29,
+   "2": 45,
+   "4": 58
   }
  }
 }
