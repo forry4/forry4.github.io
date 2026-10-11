@@ -18,7 +18,7 @@
 // of segments — the presses between resets — because the server replays each one from
 // the first board. Once it is open, Play again starts RETRIES under the numbered boxes'
 // rules, for a second board: First Attempt is the race, Best Attempt the fewest presses.
-// Yesterday's box can be looked at (view only), with its minimum and a shortest line
+// The last week's boxes can be looked at (view only), with its minimum and a shortest line
 // played back on the board.
 //
 // PRACTICE (/boxpuzzles/practice) is a random box made in the browser (practice.js,
@@ -660,10 +660,10 @@ function Countdown({ at }) {
 }
 
 function DailyScreen({ token, who, onDaily }) {
-	const [daily, setDaily] = useState(null);     // { day, tiles, target, next_at, attempt, yesterday }
+	const [daily, setDaily] = useState(null);     // { day, tiles, target, next_at, attempt, past, yesterday }
 	const [gen, setGen] = useState(0);            // bumps on every load, so a reload re-reads the attempt
 	const [failed, setFailed] = useState(false);
-	const [yesterday, setYesterday] = useState(false);
+	const [back, setBack] = useState(0);          // 0 is today; n is past[n - 1]
 	const load = useCallback(() => {
 		setFailed(false);
 		api("/boxpuzzles/daily", token).then((d) => { setDaily(d); setGen((g) => g + 1); })
@@ -674,7 +674,7 @@ function DailyScreen({ token, who, onDaily }) {
 	useEffect(() => {
 		if (!daily) return undefined;
 		const ms = daily.next_at * 1000 - Date.now() + 1500;
-		const t = setTimeout(() => { setYesterday(false); load(); }, Math.min(Math.max(ms, 1000), 2 ** 31 - 1));
+		const t = setTimeout(() => { setBack(0); load(); }, Math.min(Math.max(ms, 1000), 2 ** 31 - 1));
 		return () => clearTimeout(t);
 	}, [daily, load]);
 
@@ -686,10 +686,13 @@ function DailyScreen({ token, who, onDaily }) {
 			</div></div>
 		</div>
 	);
-	if (yesterday && daily.yesterday)
-		return <DailyYesterday key={daily.yesterday} day={daily.yesterday} token={token} onToday={() => setYesterday(false)} />;
+	// The last week's stored days, newest first (`yesterday` alone from a server older than `past`).
+	const past = daily.past || (daily.yesterday ? [daily.yesterday] : []);
+	const older = back < past.length ? () => setBack(back + 1) : null;
+	if (back > 0 && past[back - 1])
+		return <DailyPast key={past[back - 1]} day={past[back - 1]} token={token} onOlder={older} onNewer={() => setBack(back - 1)} />;
 	return <DailyToday key={`${daily.day}:${gen}`} daily={daily} token={token} who={who} onDaily={onDaily}
-		onReload={load} onYesterday={daily.yesterday ? () => setYesterday(true) : null} />;
+		onReload={load} onOlder={older} />;
 }
 
 // The attempt to resume: the server's, unless this device holds one that extends it
@@ -709,7 +712,7 @@ function resumeAttempt(daily, token, who) {
 const ALL_LIT = [true, true, true, true];
 const NONE_LIT = [false, false, false, false];
 
-function DailyToday({ daily, token, who, onDaily, onReload, onYesterday }) {
+function DailyToday({ daily, token, who, onDaily, onReload, onOlder }) {
 	const puzzle = { tiles: daily.tiles, target: daily.target };
 	const [start] = useState(() => resumeAttempt(daily, token, who));
 	const [segments, setSegments] = useState(() => (start ? start.segments : [[]]));
@@ -883,9 +886,9 @@ function DailyToday({ daily, token, who, onDaily, onReload, onYesterday }) {
 			<div className="bx-play">
 				<div className="bx-stage">
 					<div className="bx-nav">
-						<button className="btn btn-ghost btn-sm bx-arrow" disabled={!onYesterday} onClick={onYesterday || undefined} aria-label="Yesterday's box">‹</button>
+						<button className="btn btn-ghost btn-sm bx-arrow" disabled={!onOlder} onClick={onOlder || undefined} aria-label="Previous day's box">‹</button>
 						<h1 className="bx-title">Daily</h1>
-						<button className="btn btn-ghost btn-sm bx-arrow" disabled aria-label="Today's box">›</button>
+						<button className="btn btn-ghost btn-sm bx-arrow" disabled aria-label="Next day's box">›</button>
 					</div>
 					<BoxFace id="daily" target={daily.target} box={shown} shake={shake} opened={!!done}
 						onTile={pressTile} onButton={pressButton} />
@@ -909,12 +912,12 @@ function DailyToday({ daily, token, who, onDaily, onReload, onYesterday }) {
 	);
 }
 
-// YESTERDAY: its first board, its minimum (blue, as a minimum is drawn everywhere),
+// A PAST DAY (the last week, ‹ and › walk it): its first board, its minimum (blue, as a minimum is drawn everywhere),
 // every row that reached it in blue, and ▶ to watch a shortest line play. PLAY makes it
 // playable FOR FUN (owner's call, 2026-10-06): the numbered boxes' rules (a reset clears
 // the count), nothing posted, nothing saved — the day is over and its boards are closed.
 // Opening it in the minimum draws your count blue: the minimum is public by now.
-function DailyYesterday({ day, token, onToday }) {
+function DailyPast({ day, token, onOlder, onNewer }) {
 	const [data, setData] = useState(null);
 	const [failed, setFailed] = useState(false);
 	const [step, setStep] = useState(0);          // presses of the line shown so far
@@ -954,9 +957,10 @@ function DailyYesterday({ day, token, onToday }) {
 
 	const nav = (
 		<div className="bx-nav">
-			<button className="btn btn-ghost btn-sm bx-arrow" disabled aria-label="Yesterday's box">‹</button>
+			<button className="btn btn-ghost btn-sm bx-arrow" disabled={!onOlder} onClick={onOlder || undefined}
+				aria-label="Previous day's box">‹</button>
 			<h1 className="bx-title">{shortDate(day)}</h1>
-			<button className="btn btn-ghost btn-sm bx-arrow" onClick={onToday} aria-label="Today's box">›</button>
+			<button className="btn btn-ghost btn-sm bx-arrow" onClick={onNewer} aria-label="Next day's box">›</button>
 		</div>
 	);
 	if (!data) return (
@@ -973,7 +977,7 @@ function DailyYesterday({ day, token, onToday }) {
 	if (playBox) {
 		const moves = playOpened ? playOpened.moves : playBox.moves.length;
 		const best = !!playOpened && moves <= data.minimum;
-		face = <BoxFace id="yesterday" target={data.target} box={playBox} shake={shake} opened={!!playOpened}
+		face = <BoxFace id="past" target={data.target} box={playBox} shake={shake} opened={!!playOpened}
 			onTile={pressTile} onButton={pressButton} />;
 		controls = (
 			<div className={`bx-controls${playOpened ? " bx-result" : ""}${best ? " optimal" : ""}`} role="status" data-mode="play">
@@ -986,7 +990,7 @@ function DailyYesterday({ day, token, onToday }) {
 		);
 	} else {
 		const box = { tiles: boardAfter(data.tiles, line.slice(0, step)), lit: watched ? ALL_LIT : NONE_LIT, moves: [] };
-		face = <BoxFace id="yesterday" target={data.target} box={box} opened={watched} disabled
+		face = <BoxFace id="past" target={data.target} box={box} opened={watched} disabled
 			hint={playing && step < line.length ? line[step] : -1} />;
 		controls = (
 			<div className="bx-controls bx-result optimal" role="status" data-mode="view">

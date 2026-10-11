@@ -389,8 +389,17 @@ def test_the_daily_route_hands_out_today_without_its_answer(app):
     r = get(user=None)
     assert r["day"] == TODAY and r["tiles"] == FIRST["tiles"] and r["target"] == FIRST["target"]
     assert r["attempt"] is None and r["yesterday"] == YESTERDAY
+    assert r["past"] == [YESTERDAY]
     assert r["next_at"] == D.day_start("2026-10-06")
     assert "minimum" not in r and "solution" not in r
+
+
+def test_past_lists_the_last_week_newest_first_and_skips_gaps(conn):
+    for day in ("2026-09-27", "2026-09-28", "2026-09-30", "2026-10-04", TODAY, "2026-10-06"):
+        D.store_day(conn, day, {**BOX, "day": day})
+    # 09-28 is the 7th day back; 09-27 is too old, today and tomorrow are not past
+    assert D.past_days(conn, TODAY) == ["2026-10-04", "2026-09-30", "2026-09-28"]
+    assert D.past_days(conn, "2026-09-27") == []
 
 
 def test_the_attempt_round_trip(app):

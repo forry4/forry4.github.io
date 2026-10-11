@@ -258,10 +258,12 @@ def setup_box_puzzles(app, get_db_conn, get_user_by_session, token_resolver=None
 
         def go(c):
             box = D.ensure_day(c, today)
-            return {"day": today, "tiles": box["tiles"], "target": box["target"],
+            past = D.past_days(c, today)
+            # `yesterday` stays for bundles cached before `past` existed
+            return {"past": past, "day": today, "tiles": box["tiles"], "target": box["target"],
                     "next_at": D.day_start(D.next_day(today)),
                     "attempt": D.load_attempt(c, user["id"], today) if user else None,
-                    "yesterday": yesterday if D.get_day(c, yesterday) else None}
+                    "yesterday": yesterday if yesterday in past else None}
         return run(go)
 
     # TODAY'S BOARD IS FOR THOSE WHO HAVE OPENED TODAY'S BOX (owner's call): any score

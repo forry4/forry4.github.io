@@ -10433,10 +10433,11 @@ try {
 			await ctx.close();
 		}
 
-		// 3 — yesterday, view only, against a stubbed day: box 1 of the bank and its line
+		// 3 — the past week, view only, against two stubbed days: box 1 of the bank and its line,
+		// then box 2 the day before (only its first board is checked)
 		{
 			const box1 = bank[0], line1 = shortest(box1.tiles, box1.target);
-			const yday = "2026-01-01";
+			const yday = "2026-01-02", older = "2026-01-01", box2 = bank[1];
 			const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
 			await ctx.addInitScript(() => localStorage.setItem("spender_user",
 				JSON.stringify({ id: "screens-daily-yesterday", name: "Yday", guest: true })));
@@ -10445,17 +10446,20 @@ try {
 			page.on("pageerror", (e) => errors.push(String(e)));
 			await page.route(`http://localhost:${API_PORT}/boxpuzzles/daily`, async (route) => {
 				const r = await route.fetch();
-				await route.fulfill({ response: r, json: { ...(await r.json()), yesterday: yday } });
+				await route.fulfill({ response: r, json: { ...(await r.json()), yesterday: yday, past: [yday, older] } });
 			});
 			await page.route(`http://localhost:${API_PORT}/boxpuzzles/daily/${yday}/board`, (route) => route.fulfill({ json: {
 				day: yday, tiles: box1.tiles, target: box1.target, minimum: line1.length, solution: line1, total: 2, you: null,
 				entries: [{ rank: 1, name: "Ann", moves: line1.length, optimal: true }, { rank: 2, name: "Bo", moves: line1.length + 3, optimal: false }],
 				best: { total: 3, you: null, entries: [{ rank: 1, name: "Ann", moves: line1.length, optimal: true },
 					{ rank: 2, name: "Bo", moves: line1.length, optimal: true }, { rank: 3, name: "Cy", moves: line1.length + 1, optimal: false }] } } }));
+			await page.route(`http://localhost:${API_PORT}/boxpuzzles/daily/${older}/board`, (route) => route.fulfill({ json: {
+				day: older, tiles: box2.tiles, target: box2.target, minimum: 1, solution: [], total: 0, you: null, entries: [],
+				best: { total: 0, you: null, entries: [] } } }));
 			await page.goto(`http://localhost:${PORT}/boxpuzzles/daily`, { waitUntil: "networkidle" });
 			await page.waitForSelector('.bx-box[data-box="daily"]', { timeout: 25_000 }).catch(() => {});
 			await page.locator(".bx-nav .bx-arrow").first().click().catch(() => {});
-			await page.waitForSelector('.bx-box[data-box="yesterday"]', { timeout: 10_000 }).catch(() => {});
+			await page.waitForSelector('.bx-box[data-box="past"]', { timeout: 10_000 }).catch(() => {});
 			check("‹ shows yesterday: its first board, its minimum in blue, no tile to press",
 				(await tilesNow(page)).join("") === box1.tiles.join("") && await count(page) === line1.length
 				&& await page.locator(".bx-result.optimal").count() === 1
@@ -10466,7 +10470,7 @@ try {
 			check("yesterday's Best Attempt tab shows the retries' board",
 				await page.locator(".bx-row").count() === 3 && await page.locator(".bx-row.optimal").count() === 2);
 			await page.locator(".bx-replay").click();
-			await page.waitForSelector('.bx-box[data-box="yesterday"].open', { timeout: 10_000 }).catch(() => {});
+			await page.waitForSelector('.bx-box[data-box="past"].open', { timeout: 10_000 }).catch(() => {});
 			check("▶ plays a shortest line out on the board until it opens",
 				E.cornersMatch(await tilesNow(page), box1.target) && await page.locator(".bx-cbtn.lit").count() === 4,
 				JSON.stringify(await tilesNow(page)));
@@ -10479,7 +10483,7 @@ try {
 			await page.waitForSelector('.bx-controls[data-mode="play"]', { timeout: 5000 }).catch(() => {});
 			check("Play turns yesterday's box playable from its first board",
 				(await tilesNow(page)).join("") === box1.tiles.join("") && await count(page) === 0
-				&& await page.locator('.bx-box[data-box="yesterday"] .bx-tile:not([disabled])').count() === 9);
+				&& await page.locator('.bx-box[data-box="past"] .bx-tile:not([disabled])').count() === 9);
 			const afterOne = E.press(box1.tiles, line1[0]);
 			const wrongK = E.CORNERS.findIndex((c, k) => afterOne[c] !== box1.target[k]);
 			await page.locator(`.bx-tile[data-tile="${line1[0]}"]`).click();
@@ -10496,6 +10500,16 @@ try {
 			check("Play again starts it over",
 				await count(page) === 0 && (await tilesNow(page)).join("") === box1.tiles.join("")
 				&& await page.locator(".bx-box.open").count() === 0);
+			await page.locator(".bx-nav .bx-arrow").first().click();
+			await page.waitForFunction((t) => [...document.querySelectorAll(".bx-tile")].map((e) => e.dataset.color).join("") === t,
+				box2.tiles.join(""), { timeout: 10_000 }).catch(() => {});
+			check("‹ again walks back to the day before, the last stored day, so ‹ stops there",
+				(await tilesNow(page)).join("") === box2.tiles.join("")
+				&& await page.locator(".bx-nav .bx-arrow").first().isDisabled(), `${await tilesNow(page)}`);
+			await page.locator(".bx-nav .bx-arrow").last().click();
+			await page.waitForFunction((t) => [...document.querySelectorAll(".bx-tile")].map((e) => e.dataset.color).join("") === t,
+				box1.tiles.join(""), { timeout: 10_000 }).catch(() => {});
+			check("› walks forward a day", (await tilesNow(page)).join("") === box1.tiles.join(""), `${await tilesNow(page)}`);
 			await page.locator(".bx-nav .bx-arrow").last().click();
 			check("› returns to today's box",
 				await page.waitForSelector('.bx-box[data-box="daily"]', { timeout: 10_000 }).then(() => true, () => false));

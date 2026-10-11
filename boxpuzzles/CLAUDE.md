@@ -116,7 +116,7 @@ four `/boxpuzzles/daily*` routes; the numbered boxes' rules above are untouched.
   only" means out of the bundle, not secret from GitHub), so a committed list or a
   date-seeded generator would publish tomorrow's box and its minimum. Only today's box
   is handed out, without its minimum; a finished day's minimum and a shortest line are
-  revealed (owner's call) on yesterday's view. **Yesterday is the one place blue marks
+  revealed (owner's call) on a past day's view. **A past day is the one place blue marks
   OTHER players' rows** — every row that reached the minimum, and the minimum itself.
   That is intended (owner's call, 2026-10-05: "that one is already done"); everywhere
   else blue is drawn only on your own row.
@@ -169,16 +169,21 @@ four `/boxpuzzles/daily*` routes; the numbered boxes' rules above are untouched.
   still reads it. Today's minimum stays secret on both: blue only on your own row, so
   a retry turning blue is how you learn you found the optimal line. A guest's retries
   post nowhere.
-- **Yesterday's box can be PLAYED FOR FUN** (owner's call, 2026-10-06): Play on
-  yesterday's view makes it playable under the numbered boxes' rules (a reset clears the
+- **The page walks back a WEEK** (owner's call, 2026-10-11; it was yesterday only):
+  `/boxpuzzles/daily` lists `past`, the stored days among the 7 before today
+  (`daily.PAST_DAYS`), newest first, and ‹/› step through them; a day never generated is
+  absent and skipped. `yesterday` is still sent for bundles cached before `past`. The
+  board route itself serves any finished day — the limit is the page's.
+- **A past day's box can be PLAYED FOR FUN** (owner's call, 2026-10-06): Play on
+  a past day's view makes it playable under the numbered boxes' rules (a reset clears the
   count), entirely in the page — nothing is posted or saved, and no board changes. Its
   boards are closed and its minimum is public, so opening it in the minimum draws blue.
 - An attempt still open at midnight is lost: the server refuses a save for a day that
   is over (409), and the page loads the new box.
 - `screens.mjs` `boxDaily` plays today's real box (the harness solves it with engine.js),
   across a reset, a reload and a second browser, retries it for Best Attempt (guest and
-  signed in), and drives yesterday's view against a
-  STUBBED day (the gate's database has no yesterday).
+  signed in), and walks the past week's view across two
+  STUBBED days (the gate's database has no past days).
 - **Local `screens` reuse `games/spender/users.db`**, so after ~20 runs box 1's top 20 is
   all earlier gate accounts tied at the minimum, and `boxPuzzles`' "another viewer sees
   the row" fails locally. CI's database is fresh. Delete the local rows, don't loosen it.

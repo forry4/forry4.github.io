@@ -88,6 +88,7 @@ FILLER_BUDGET = 300.0
 FILLER_DELAY = 600.0        # the filler's first pass waits this long after arming
 FILLER_EVERY = 3600.0
 BOARD_SIZE = 20
+PAST_DAYS = 7               # how far back the page's ‹ walks (owner's call, 2026-10-11)
 
 ACTIVE = tuple(c for c in COLORS if c != "GY")
 
@@ -378,6 +379,15 @@ def get_day(conn, day: str) -> dict | None:
         return None
     return {"day": day, "tiles": _codes(row[0]), "target": _codes(row[1]),
             "minimum": row[2], "solution": json.loads(row[3])}
+
+
+def past_days(conn, today: str, n: int = PAST_DAYS) -> list[str]:
+    """The stored days among the `n` before `today`, newest first. A gap (a day the
+    site never generated, e.g. before launch) is simply absent, so ‹ skips it."""
+    cur = conn.cursor()
+    cur.execute("SELECT day FROM box_daily WHERE day < ? AND day >= ? ORDER BY day DESC",
+                (today, next_day(today, -n)))
+    return [r[0] for r in cur.fetchall()]
 
 
 def store_day(conn, day: str, box: dict) -> dict:
