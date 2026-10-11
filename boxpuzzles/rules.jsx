@@ -42,8 +42,7 @@ export default function BoxPuzzlesRules() {
 		</RulesSection>
 
 		<RulesSection title="Practice mode">
-			<p>A random box made without the colors you exclude. Nothing is saved, and there is
-				no leaderboard.</p>
+			<p>A random box made without the colors you exclude.</p>
 		</RulesSection>
 	</>;
 }
