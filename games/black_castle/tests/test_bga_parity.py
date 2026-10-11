@@ -17,15 +17,12 @@ right by the corpus's luck: a space's printed dice cap was its first sighting (i
 the day a duel log sorted first), and the Well's window ran on past the Well into the
 Lantern. Both are fixed in the tool, not papered over here.
 
-WHAT THESE TESTS DO NOT COVER, AND WHY THAT MATTERS
----------------------------------------------------
-`cards.py` is still placeholder and says so: the stewards, diplomats and daimyo are
-generated in loops and their effects are ours, not the printed game's. Everything below is
-the BOARD -- geometry, prices, capacity, turn order, scoring -- which is the half that can
-be checked against the corpus today. The card effects, the die-colour tiles that decide
-which rows of a castle card resolve, and the courtier-takes-the-card loop are the half
-that cannot be, and AGENTS.md lists them as open rather than pretending otherwise. A green
-run here means the frame is right, not that the game is finished.
+WHAT THESE TESTS COVER, AND WHERE THE REST LIVES
+-------------------------------------------------
+Everything below is the BOARD -- geometry, prices, capacity, turn order, scoring. The card
+catalogue is held to the corpus by `test_catalogue.py`, and the worker system (yards,
+gardens, Domain lines, the Daimyo floor) by `test_worker_actions.py`. AGENTS.md lists what
+is still open rather than pretending otherwise.
 """
 
 from __future__ import annotations
@@ -252,6 +249,9 @@ def test_a_social_climb_costs_two_pearls_a_floor_and_five_for_two():
     p = game["players"][pid]
     p["resources"]["pearl"] = 7
     p["workers"]["courtiers"] = {"domain": 1, "gate": 1, "floor1": 1, "floor2": 2, "daimyo": 0}
+    # Reaching the third floor fires the Lantern, whose rewards can include pearl; empty
+    # it so this measures the PRICE of the climb and nothing else.
+    p["lantern"] = []
     game["pending"] = {"pid": pid, "kind": "courtier_destination"}
     assert {(m["from"], m["to"], m["cost"]) for m in engine.legal_moves(game, pid)} == {
         ("gate", "floor1", 2), ("gate", "floor2", 5),

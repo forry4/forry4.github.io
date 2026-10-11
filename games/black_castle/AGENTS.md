@@ -18,11 +18,12 @@ redaction test and a persistence round trip before shipping.
 ## BGA parity: what the corpus proved, and what it proved WRONG
 
 The corpus is `$WHITECASTLE_CORPUS` (default `C:/Users/Forrest/WhiteCastle_corpus`), filled
-by the `cob-mining` cron. **39 logs today, and only 26 of them are base game** — the other
-13 are Matcha, which adds green dice, a fourth personal-domain row, geishas, chasen, the
-Tea Fields and the Outskirts of Himeji, and whose cards share the base id space. Derive
-from the whole pile and the base board grows two action spaces that are not in our box, so
-`tools/bga_parity.py` splits them and works on the 26.
+by the `cob-mining` cron. **151 logs at 2026-10-10, of which 132 are base game** — 19 of
+those are 2-player — and the rest Matcha (or one promo), which adds green dice, a fourth
+personal-domain row, geishas, chasen, the Tea Fields and the Outskirts of Himeji, and whose
+cards share the base id space. Derive from the whole pile and the base board grows two
+action spaces that are not in our box, so `tools/bga_parity.py` splits them and works on
+the base games. **398 of 398 final scoreboards reconstruct exactly** at that size.
 
 **The corpus grew 20 → 26 base games on 2026-09-20 and not one derived rule moved.** The 6
 new games contributed 20 scoreboards the formulas had never been fitted to and reproduced
@@ -140,8 +141,9 @@ in the map **stops the build** naming the card. Silently skipping an unknown eff
 a game that runs perfectly and plays a different game. The 8: gain
 (coin/food/iron/pearl/seal/vp/any-resource), gain Lantern Rewards, move the Passage of
 Time, perform a Courtier / Gardener / Warrior action, perform the Well action, gain a
-Decree Card, plus `domain_action` and `main_board_action`, which appear **only on yard
-tiles** and are data-only until a tile-action system exists.
+Decree Card, plus `domain_action` and `main_board_action`, which the gardens, the yard
+tiles and the Daimyo slots carry — all resolved since 2026-10-10, see *The worker system*
+below.
 
 Three things that were not obvious until the data was real:
 
@@ -303,15 +305,50 @@ scoring composes), and use the rulebook and the components page for what the box
 states. Reaching for the corpus first is why "the data does not show it" kept turning into
 "it is not there".
 
-### STILL NOT PARITY — do not describe this port as faithful
+### The worker system (2026-10-10) — what the 132-game re-derivation found
 
-1. **The 9 Daimyo cards are still ours.** They are the one part of the catalogue the
-   corpus cannot supply: BGA ships a Daimyo card's definition only once a courtier reaches
-   the third floor, which never happens across 26 base games. `cards.py` generates 9,
-   which the publisher's component list confirms is the right COUNT — what is invented is
-   their faces. **The rulebook and the components page, not the corpus, are the source
-   here**, and they have not been mined yet beyond the counts.
-2. **The 15 Die tiles' individual REWARD faces.** A castle tile lies colour side UP all
+Re-running the instrument on the grown corpus moved no rule, and then reading what it had
+never been pointed at found the biggest gap the port has had. **A card's "Perform Warrior
+Action" moved the warrior into a reserve and stopped**: nothing asked which yard, so the
+warrior scored nothing. Over 60 random games, **306 of the 379** warriors and gardeners an
+effect deployed were stranded that way. Chasing it turned up the whole worker system:
+
+| | was | is (source) |
+|---|---|---|
+| Card worker actions | parked in a reserve forever | a DECISION: a yard + its iron, a garden + its food (corpus: `AssignWarriorAction` / `AssignGardenerAction`) |
+| Courtier action | free move to the gate; Outside offered audience OR climb | an audience (2 coins) **and/or** a climb — "either just one of them, or both once each" (rulebook) |
+| Yard tiles | one invented `effect` per yard | 4 of the 8 tiles, laid front/back/front/back over the 5/3/1-iron yards, 131 of 131 games (`yard_tile_layout`) |
+| Gardens | invented actions | the printed ten, generated into `catalogue.GARDEN_CARDS` |
+| Main-board action | logged "not implemented" | light-background (8 blocks, 68 of 68), by Die-tile colour, or any of 13 for 4 coins |
+| Domain line | flat 1 resource + the action card's light side on every line | 1 resource + whatever its departed workers uncovered (`domain_lines`), then **the action card's block for that line** (top/middle/bottom = coral/black/white) |
+| Daimyo floor | the card's name on the board | the Lantern, then a free slot and its reward; one courtier per slot, any clan (1559 of 1559 prompts) |
+| Well coin tile / "resource" tile | 2 coins / nothing | 1 coin / the player's choice |
+
+**One fix serves all of it: `choice_queue` is a queue of DECISIONS.** It began as the list
+of owed resource picks; an entry now has a `kind` (`choose_resource`, `worker`,
+`board_action`, `domain_action`, `daimyo_slot`, `card_action`) and becomes the live
+`pending` in turn. An entry is CONSUMED the moment the player commits to it, before its own
+effects run, so anything those effects queue lands in front of what was already waiting.
+Every granted action can be declined (`skip`), as BGA marks each `canSkip`; one that
+offers nothing (a warrior action with no warrior left) is dropped with a log line rather
+than stranding the turn. Round-end garden decisions belong to the GARDENER, not the seat
+whose turn just ended: they queue clan by clan in the new turn order and the round waits
+for them (`round_end`, `_finish_round`).
+
+**The Daimyo cards were rebuilt from placements, and one field is inferred.** BGA never
+ships the card — which an earlier pass misread as "nobody reaches the third floor"; 338
+courtiers did. It ships the slot taken and what followed, and one card per game makes a
+game's three slots one card: eight of the nine come out whole. The ninth (Lantern / ? /
+2 Clan Points) is seen twice and nobody took its middle slot; **"2 food" is an inference**,
+named in `cards.DAIMYO_INFERRED`, and every other slot is held to the corpus by
+`test_every_daimyo_slot_we_print_is_one_the_corpus_shows`. Two instrument traps here: an
+UNDO of a placement is re-sent as `courtierPlacedOnDaimyoCard` with the courtier back on
+the floor and no `isUndo`, and a slot's action benefit has to be read from the actions it
+CREATES (ids newer than the placement), not from what happens to be pending.
+
+### STILL NOT PARITY
+
+1. **The 15 Die tiles' individual REWARD faces.** A castle tile lies colour side UP all
    game, so its reward never turns over and never appears in any log — the corpus is
    genuinely exhausted here, and only the two at the Well are ever read. **That is a limit
    of the corpus, NOT of what is knowable**: the faces are printed in the box and shown in
@@ -322,10 +359,13 @@ states. Reaching for the corpus first is why "the data does not show it" kept tu
    and the recommended first-game Well holds **a Mother-of-Pearl tile whose reverse is a
    coral die** and **an Iron tile whose reverse is a black die**. The remaining work is
    reading the component artwork, not gathering more games.
-3. **The yard tiles are DATA ONLY.** All 16 faces are in `catalogue.YARD_TILE_FACES` with
-   their effects translated, but the engine has no tile-action system to resolve them, so
-   `domain_action` and `main_board_action` are carried and not executed. Wiring them is a
-   self-contained next job.
+2. **The ninth Daimyo card's middle slot** — inferred, see above.
+3. **Lantern order.** The rulebook resolves the Lantern "in the order you choose"; we
+   resolve it in list order. It matters only where a cap or a conversion makes order
+   significant.
+4. **A move-by-move replay against the logs.** Every rule above is held to the corpus one
+   derivation at a time; Rag Tag's bar is replaying whole games. That is now within reach
+   — see *What the logs do and do not carry*.
 
 **The Die tiles, now that the setup rule is known.** There are 15, each DOUBLE-SIDED: a
 die colour on one face, a reward on the other. Setup lays 3 of them into the castle spaces
@@ -360,20 +400,10 @@ exist). That is enough to reconstruct the reward multiset with more games, by th
 intersection trick; the castle tiles' reward faces stay face down all game and never
 matter.
 
-Also still unverified: the 3 Daimyo Favor cards, and **every 2-player rule beyond the two
-above** — which are now confirmed, but on the strength of a SINGLE duel log. One game is
-enough to settle a rule the game enforces on every offer (no stacking: 552 chances, 0
-violations) and enough to make the diamond removal unlikely to be chance (p ≈ 0.0008); it
-is not enough to turn up a duel rule nobody has thought to look for. More 2-player tables
-remain the cheapest thing the corpus could gain.
-
-### The yard tiles, for when the tile engine lands
-
-The 8 Training Yard tiles are double-sided too, and **a game puts 4 of them in play — two
-in the blue orientation and two in the yellow — distributed 2/1/1 across the three yards**
-(8 of the 20 logs carry all three yards and every one of them reads 2/1/1). All 16 faces
-are in `data/bga_ground_truth.json`. Our yards still carry one placeholder `effect` each
-instead, which is the same job as the card effects and lands with them.
+The two duel rules are now held by **19** 2-player tables rather than one: a space
+already holding a die was offered 0 times in 8709 chances, and the 9 stewards and 9
+diplomats a duel can draw are exactly the ones without the diamond. The Well is the
+exception to "no stacking": it holds two dice in a duel, as BGA's cap of 999 says.
 
 ### What the logs do and do not carry
 
@@ -383,8 +413,9 @@ instead, which is the same job as the card effects and lands with them.
   `warriorAssigned` / `courtierMovedUp` / `gardenerAssigned` / `passageOfTimeMoved` /
   `resourceGained` / `sealPaid` / `scoreUpdated` cover placement, movement and payment,
   and each payment event carries the player's NEW TOTAL, so holdings are reconstructable.
-- **Not at all**: which card a player drew or holds. `actionCardGained` and
-  `lanternCardGained` carry only a `playerId` and `newMainBoardCardRevealed` is empty, so
-  hands are hidden exactly as in Orbit. The catalogue and the public board are readable; a
-  full move-replay is not.
+- **The cards too — this file used to say otherwise.** It claimed `actionCardGained` and
+  `lanternCardGained` carry only a `playerId` and `newMainBoardCardRevealed` is empty, and
+  concluded a full move-replay was impossible. Counted on 2026-10-10: all 3178
+  `actionCardGained`, 3308 `lanternCardGained` and 1784 `newMainBoardCardRevealed` events
+  in the base corpus carry the whole card. A public-state replay is therefore buildable.
 

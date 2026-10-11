@@ -38,21 +38,22 @@ def test_every_op_the_data_can_carry_is_one_the_engine_implements():
     for op in build_catalogue.OPS:
         assert f'op == "{op}"' in source or f'"{op}"' in source, op
 
-    # Scoped to the GENERATED cards. The Daimyo's Favor cards are still ours -- they
-    # appear nowhere in the corpus, because BGA only ships one once a courtier reaches
-    # the third floor -- so they still speak the older hand-written vocabulary.
+    # Every card, garden, yard tile and Daimyo slot speaks the closed vocabulary -- the
+    # Daimyo cards included, since they were rebuilt from the corpus on 2026-10-10.
     generated = (catalogue.STEWARDS + catalogue.DIPLOMATS + catalogue.DECREE_CARDS
-                 + catalogue.STARTING_RESOURCE_CARDS + catalogue.STARTING_ACTION_CARDS)
+                 + catalogue.STARTING_RESOURCE_CARDS + catalogue.STARTING_ACTION_CARDS
+                 + catalogue.GARDEN_CARDS)
     used = {e["op"] for card in generated
             for e in (card.get("light") or []) + (card.get("dark") or [])}
     used |= {card["lantern"]["op"] for card in generated if card.get("lantern")}
+    used |= {e["op"] for face in catalogue.YARD_TILE_FACES.values() for e in face}
+    used |= {e["op"] for card in cards.DAIMYO for slot in card["slots"] for e in slot}
     assert used <= set(build_catalogue.OPS), sorted(used - set(build_catalogue.OPS))
-    assert not (used & set(build_catalogue.TILE_ONLY_OPS)), "tile grammar on a card"
-    # And the placeholder daimyo are the ONLY cards still outside it, so this stops
-    # being a blanket exemption the moment anything else drifts.
+    # And no card at all is outside it any more -- the placeholder Daimyo, the last ones
+    # that spoke the older hand-written vocabulary, are gone.
     everywhere = {e["op"] for card in cards.ALL_CARDS.values()
                   for e in (card.get("light") or []) + (card.get("dark") or [])}
-    assert everywhere - set(build_catalogue.OPS) <= {"influence", "move", "lantern"}
+    assert everywhere <= set(build_catalogue.OPS), sorted(everywhere - set(build_catalogue.OPS))
 
 
 def test_the_catalogue_lands_on_the_printed_counts():
@@ -175,11 +176,23 @@ def test_a_worker_action_pays_the_currency_its_card_names():
     p["seals"], p["coins"] = 3, 9
     p["workers"]["warriors"]["domain"] = 2
 
-    engine._apply_effects(game, pid, [{"op": "worker_action", "worker": "warriors",
-                                       "cost": {"seals": 1}}], source="test")
+    p["resources"]["iron"] = 7
+
+    def deploy(cost):
+        # A worker action is a DECISION now: it is queued, then paid for when the player
+        # commits to a yard -- not when the card is read.
+        game["pending"] = None
+        engine._apply_effects(game, pid, [{"op": "worker_action", "worker": "warriors",
+                                           "cost": cost}], source="test")
+        assert engine._promote_choice(game, pid)
+        assert game["pending"]["kind"] == "worker_destination"
+        cheapest = next(m for m in engine.legal_moves(game, pid)
+                        if m["type"] == "worker_destination" and m["index"] == 2)
+        assert engine.apply_move(game, pid, cheapest) == (True, None)
+
+    deploy({"seals": 1})
     assert (p["seals"], p["coins"]) == (2, 9), "a seal price comes off the seals"
-    engine._apply_effects(game, pid, [{"op": "worker_action", "worker": "warriors",
-                                       "cost": {"coins": 3}}], source="test")
+    deploy({"coins": 3})
     assert (p["seals"], p["coins"]) == (2, 6), "a coin price comes off the coins"
 
 
@@ -532,14 +545,15 @@ def test_taking_a_room_card_also_performs_one_of_its_light_actions():
 
     # The climb does NOT close the turn -- it stops to ask which light action to perform.
     assert game["pending"]["kind"] == "card_action"
-    offered = engine.legal_moves(game, pid)
+    offered = [m for m in engine.legal_moves(game, pid) if m["type"] == "card_action"]
     assert [m["index"] for m in offered] == list(range(len(lights)))
 
     before = (dict(p["resources"]), p["coins"], p["seals"], p["points"])
     assert engine.apply_move(game, pid, {"type": "card_action", "index": 0})[0]
     after = (dict(p["resources"]), p["coins"], p["seals"], p["points"])
-    assert after != before, "the chosen light action actually resolved"
-    assert game["pending"]["kind"] == "end_turn"
+    queued = game["pending"]["kind"] != "end_turn"
+    assert after != before or queued, "the chosen light action actually resolved"
+    assert game["pending"]["kind"] != "card_action", "and the choice is not asked twice"
 
 
 def test_a_card_with_one_light_action_performs_it_without_asking():
@@ -552,7 +566,10 @@ def test_a_card_with_one_light_action_performs_it_without_asking():
                 if m["to"] == "floor1" and m["room"] == 0)
     game["pending"] = {"pid": pid, "kind": "courtier_destination"}
     assert engine.apply_move(game, pid, move)[0]
-    assert game["pending"]["kind"] == "end_turn", "no decision worth raising"
+    # No CHOICE OF ACTION worth raising -- the one block simply resolves. (It may still
+    # leave a decision of its own, such as which resource an "any resource" gain pays;
+    # the climb used to bury that one under `end_turn`.)
+    assert game["pending"]["kind"] != "card_action", "no decision worth raising"
 
 
 def test_a_room_whose_card_cannot_be_replaced_is_not_taken():

@@ -885,6 +885,187 @@ def reconstruct(packets, yard_points):
 
 # --------------------------------------------------------------------------------------
 
+def _gain_token(kind, args):
+    """One logged gain as a short token, or None if it is not a gain we read."""
+    if kind == "resourceGained":
+        return "%s+%s" % (args["resource"], args["numberOfResources"])
+    if kind == "coinGained":
+        return "coin+%s" % args["numberOfCoins"]
+    if kind == "sealGained":
+        return "seal+%s" % args["numberOfSeals"]
+    if kind == "scoreUpdated":
+        return "vp+%s" % args["numberOfVp"]
+    if kind == "passageOfTimeMoved":
+        return "passage"
+    return None
+
+
+def daimyo_slots(games):
+    """-> the Daimyo's Favor card, read off the courtiers that reached the third floor.
+
+    BGA never ships a Daimyo card's definition, and an earlier pass concluded from that
+    that nobody reaches the third floor -- false: 338 courtiers did. What it ships is the
+    PLACEMENT: `PlaceCourtierOnDaimyoCardAction` lists the free `allowedSlotIds`, then
+    `courtierPlacedOnDaimyoCard` names the slot taken, then the slot's benefit resolves.
+    One card is dealt per game, so a game's three slots ARE one card.
+
+    Two things this has to get right:
+
+    * An UNDO of a placement is re-sent as `courtierPlacedOnDaimyoCard` with the courtier
+      back on the floor (`location` != "daimyo-card") and no `isUndo` flag. Read naively
+      it is a second placement on slot 1, and it is what made slots look re-usable.
+    * A benefit is read only from gains carrying no `cardId`, and an ACTION benefit
+      (slot 1) from the action it creates -- a Well or a Lantern logs itself, a main-board
+      action is offered as `GainActionsAction` with an id newer than the placement.
+
+    Returns how the slots behave (one courtier per slot, any player) and every combination
+    of the three benefits seen in one game.
+    """
+    prompts = agree = 0
+    per_game = []
+    for packets in games:
+        events = [e for e in _events(packets) if isinstance(e, dict)]
+        seats_on_card = {}
+        place_id = None
+        seen = {}
+        for i, event in enumerate(events):
+            args = event.get("args") or {}
+            if not isinstance(args, dict):
+                continue
+            kind = event.get("type")
+            if kind == "gameStateChange" and args.get("id") == 82:
+                act = (args.get("args") or {}).get("action") or {}
+                if act.get("type") == "PlaceCourtierOnDaimyoCardAction":
+                    place_id = act.get("id")
+                    prompts += 1
+                    allowed = set((act.get("actionArgs") or {}).get("allowedSlotIds") or ())
+                    agree += allowed == {1, 2, 3} - set(seats_on_card.values())
+            if kind != "courtierPlacedOnDaimyoCard":
+                continue
+            courtier = args.get("courtier") or {}
+            if courtier.get("location") != "daimyo-card":
+                seats_on_card.pop(courtier.get("id"), None)       # an undo
+                continue
+            slot = int(courtier["locationArg"])
+            seats_on_card[courtier.get("id")] = slot
+            pid, benefit = str(args["playerId"]), None
+            for later in events[i + 1:i + 80]:
+                k, more = later.get("type"), later.get("args") or {}
+                if not isinstance(more, dict):
+                    continue
+                if k in ("courtierPlacedOnDaimyoCard", "diePlaced", "courtierMovedUp",
+                         "heronsUpdated"):
+                    break
+                if k == "gameStateChange":
+                    if more.get("id") in (20, 31, 89):
+                        break
+                    for act in (more.get("args") or {}).get("actions") or ():
+                        if (more.get("id") == 81 and act.get("type") == "GainActionsAction"
+                                and isinstance(act.get("id"), int) and place_id is not None
+                                and act["id"] > place_id):
+                            benefit = benefit or "main_board:" + str(act.get("actionType"))
+                    continue
+                if str(more.get("playerId", "")) != pid or more.get("isUndo"):
+                    continue
+                if k == "gameLog" and more.get("iconPlaceholder") in ("action-well",
+                                                                       "action-lantern"):
+                    benefit = benefit or more["iconPlaceholder"]
+                    continue
+                if more.get("cardId") is not None or more.get("dieId") is not None:
+                    continue
+                token = _gain_token(k, more)
+                if token and slot != 1:
+                    benefit = benefit or token
+            if benefit:
+                seen.setdefault(slot, collections.Counter())[benefit] += 1
+        if seen:
+            per_game.append({s: c.most_common(1)[0][0] for s, c in seen.items()})
+    full = collections.Counter(
+        " | ".join(g[s] for s in (1, 2, 3)) for g in per_game if len(g) == 3)
+    # A game whose courtiers took only some of the slots still pins the PAIRS it shows,
+    # and one card -- Lantern / ? / 2 Clan Points -- is only ever seen this way.
+    partial = collections.Counter(
+        " | ".join(g.get(s, "-") for s in (1, 2, 3)) for g in per_game if len(g) < 3)
+    by_slot = {s: dict(collections.Counter(g[s] for g in per_game if s in g))
+               for s in (1, 2, 3)}
+    return {"placement_prompts": prompts,
+            "prompts_offering_exactly_the_free_slots": agree,
+            "games_with_a_placement": len(per_game),
+            "benefits_by_slot": by_slot,
+            "whole_cards_seen": dict(full.most_common()),
+            "partial_cards_seen": dict(partial.most_common())}
+
+
+def domain_lines(games):
+    """-> what a die on a personal Domain line pays, by how many of that line's workers
+    have left it.
+
+    A line's workers stand on its printed rewards and leave left to right, so each one
+    that goes UNCOVERS another. The engine paid a flat 1 resource here regardless. Read
+    only from dice taken off the RIGHT end of a bridge, because a left-end die fires the
+    Lantern too and its payouts are indistinguishable from the line's; and only from gains
+    with no `cardId`, which excludes the action card the line also fires.
+    """
+    assigned = {"courtierAssigned": "red", "gardenerAssigned": "black",
+                "warriorAssigned": "white"}
+    table = collections.defaultdict(collections.Counter)
+    for packets in games:
+        events = [e for e in _events(packets) if isinstance(e, dict)]
+        gone, side = collections.Counter(), {}
+        for i, event in enumerate(events):
+            args = event.get("args") or {}
+            if not isinstance(args, dict):
+                continue
+            kind = event.get("type")
+            if kind == "gameStateChange" and args.get("id") == 20:
+                for die in (args.get("args") or {}).get("dice") or ():
+                    side[die["id"]] = die.get("locationArg")
+            if kind in assigned:
+                gone[(str(args["playerId"]), assigned[kind])] += -1 if args.get("isUndo") else 1
+            if (kind != "diePlaced" or args.get("isUndo")
+                    or "action-space-player" not in str(args["actionSpace"]["id"])
+                    or side.get(args["die"]["id"]) != "right"):
+                continue
+            pid, line = str(args["playerId"]), args["actionSpace"]["type"]
+            got = collections.Counter()
+            for later in events[i + 1:i + 40]:
+                k, more = later.get("type"), later.get("args") or {}
+                if k in ("diePlaced", "heronsUpdated"):
+                    break
+                if (not isinstance(more, dict) or str(more.get("playerId", "")) != pid
+                        or more.get("isUndo") or more.get("cardId") is not None):
+                    continue
+                if k == "gameLog" and more.get("iconPlaceholder") == "action-lantern":
+                    got["lantern"] += 1
+                elif k == "resourceGained":
+                    got[more["resource"]] += int(more["numberOfResources"])
+                elif k == "sealGained":
+                    got["seal"] += int(more["numberOfSeals"])
+                elif k == "coinGained" and more.get("dieId") is None:
+                    got["coin"] += int(more["numberOfCoins"])
+            key = "%s %d" % (line, gone[(pid, line)])
+            table[key][" ".join("%s+%d" % kv for kv in sorted(got.items()))] += 1
+    return {key: dict(counter.most_common(3)) for key, counter in sorted(table.items())}
+
+
+def yard_tile_layout(games):
+    """-> how a game lays its four Yard tiles: which yard, which slot, which face up."""
+    sizes, faces = collections.Counter(), collections.Counter()
+    for packets in games:
+        for event in _events(packets):
+            yards = (_action_args(event) or {}).get("trainingYards")
+            if not yards or len(yards) != 3:
+                continue
+            ordered = sorted(yards, key=lambda y: y["id"])
+            sizes[" ".join(str(len(y.get("yardTiles") or ())) for y in ordered)] += 1
+            for yard in ordered:
+                for tile in yard.get("yardTiles") or ():
+                    faces["yard %s slot %s %s" % (yard["id"], tile.get("locationArg"),
+                                                  tile.get("side"))] += 1
+            break
+    return {"tiles_per_yard": dict(sizes), "slot_faces": dict(sorted(faces.items()))}
+
+
 def build(games, yard_points, all_games=None):
     spaces = action_spaces(games)
     return _jsonable({
@@ -906,6 +1087,9 @@ def build(games, yard_points, all_games=None):
         "passage_of_time": passage_of_time(all_games or games),
         "turn_order": turn_order(games),
         "two_player": two_player(games),
+        "daimyo": daimyo_slots(games),
+        "domain_lines": domain_lines(games),
+        "yard_tile_layout": yard_tile_layout(games),
         "scoring": {
             "courtier_points_by_room": COURTIER_POINTS,
             "warriors": "sum of the point value of each warrior's yard, times the number "

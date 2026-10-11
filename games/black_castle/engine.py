@@ -13,7 +13,8 @@ from typing import Any
 
 from .cards import (COLORS, DAIMYO, DECREE_CARDS, DIPLOMATS, GARDENS,
                     RESOURCES, STARTING_ACTION_CARDS, STARTING_RESOURCE_CARDS,
-                    STEWARDS, TRAINING_YARDS, WELL_DIE_TILES, WORKERS, clone,
+                    STEWARDS, TRAINING_YARDS, WELL_DIE_TILES, WORKERS,
+                    YARD_TILE_COUNT, YARD_TILE_FACES, YARD_TILE_SLOTS, clone,
                     make_die_tiles)
 
 RULESET = "base-2023"
@@ -45,6 +46,35 @@ OUTSIDE_WORKERS = ("gardeners", "warriors")
 BRIDGE_ORDER = ("coral", "black", "white")
 DOMAIN_WORKER = {"coral": "courtiers", "black": "gardeners", "white": "warriors"}
 RESOURCE_FOR_COLOR = {"coral": "food", "black": "iron", "white": "pearl"}
+
+#: WHAT A PERSONAL DOMAIN LINE PAYS. A line's five workers stand on its printed rewards
+#: and leave left to right, so every worker that has gone UNCOVERS one more: the line
+#: pays 1 of its resource plus everything uncovered so far. Read off the corpus
+#: (`bga_ground_truth.json` -> `domain_lines`); the engine used to pay a flat 1 resource
+#: however many workers had left, which took away the reason to empty a line.
+DOMAIN_UNCOVERED = {
+    "coral": ("food", "food", "coins", "food", "seal"),
+    "black": ("iron", "iron", "lantern", "iron", "coins"),
+    "white": ("pearl", "pearl", "seal", "pearl", "lantern"),
+}
+#: ...and then the ACTION CARD's block on that line. "Gain the Action card reward: you
+#: can perform the action shown on the card that corresponds to the line where the die
+#: was placed." A block's `position` names the lines it answers to.
+DOMAIN_LINE = {"coral": "top", "black": "middle", "white": "bottom"}
+#: The coins an uncovered coin icon pays, and the audience fee at the gate.
+DOMAIN_COINS = 2
+AUDIENCE_COINS = 2
+
+#: "Perform any <X> action on the Main Board": X names the castle blocks on offer -- the
+#: light-background ones, the ones a given Die tile colour sits beside, or any of them.
+#: BGA calls the coral die "red".
+BOARD_ACTION_FILTER = {
+    "action-light-background": "light",
+    "action-any-die-tile": "any",
+    "action-red-die-tile": "coral",
+    "action-black-die-tile": "black",
+    "action-white-die-tile": "white",
+}
 
 
 def _rng(game: dict) -> random.Random:
@@ -278,35 +308,115 @@ def _queue_resource_choice(game: dict, pid: str, amount: int, source: str) -> No
     """
     queue = game.setdefault("choice_queue", [])
     for _ in range(max(0, int(amount))):
-        queue.append({"pid": pid, "source": source})
+        queue.append({"pid": pid, "kind": "choose_resource", "source": source})
+
+
+#: THE DECISION QUEUE. `choice_queue` began as the list of owed resource picks and is now
+#: every decision an effect leaves the player: deploy a worker, take a castle action, run
+#: a Domain line, take a Daimyo slot. An entry with no `kind` is a resource pick, which is
+#: what every save written before 2026-10-10 holds.
+#:
+#: This is the fix for the worst gap the 132-game re-derivation turned up. A card's
+#: "Perform Warrior Action" moved the warrior into a reserve and stopped -- nothing ever
+#: asked which yard -- so it scored nothing; measured over 60 random games, 306 of the 379
+#: warriors and gardeners deployed by an effect were stranded that way. Each entry
+#: becomes the live `pending` in turn, and an entry is CONSUMED when the player commits
+#: to it, before its own effects run, so anything those effects queue lands behind it in
+#: the right place.
+QUEUED_KINDS = ("choose_resource", "worker", "board_action", "domain_action",
+                "daimyo_slot", "card_action")
+
+
+def _enqueue(game: dict, items: list[dict], *, at_front: bool = True) -> None:
+    """Queue decisions. An effect's decisions go to the FRONT, so a decision a card
+    raises is answered before the ones that were already waiting behind it."""
+    if not items:
+        return
+    queue = game.setdefault("choice_queue", [])
+    game["choice_queue"] = list(items) + queue if at_front else queue + list(items)
+
+
+def _decision(game: dict, item: dict) -> dict | None:
+    """The live `pending` for a queued decision, or None if it offers nothing to do."""
+    kind = item.get("kind") or "choose_resource"
+    pid = item.get("pid")
+    if kind == "choose_resource":
+        return {"pid": pid, "kind": "choose_resource", "source": item.get("source", "action"),
+                "queued": True}
+    pending = {k: copy.deepcopy(v) for k, v in item.items()}
+    pending.update(pid=pid, queued=True)
+    if kind == "worker":
+        worker = item.get("worker")
+        pending["kind"] = "courtier_actions" if worker == "courtiers" else "worker_destination"
+        pending["audience"] = False
+    real = [m for m in legal_moves({**game, "pending": pending}, pid)
+            if m.get("type") != "skip"]
+    return pending if real else None
+
+
+def _consume(game: dict) -> None:
+    """Take the live decision off the queue the moment the player commits to it."""
+    pending = game.get("pending") or {}
+    if pending.get("queued") and not pending.get("consumed"):
+        queue = game.get("choice_queue") or []
+        if queue:
+            queue.pop(0)
+        pending["consumed"] = True
 
 
 def _promote_choice(game: dict, pid: str) -> bool:
-    """Turn the next queued resource choice into the live pending, if there is one.
+    """Turn the next queued decision into the live pending, if there is one.
 
-    Called wherever an action finishes. A queued choice outranks `end_turn` -- a player
+    Called wherever an action finishes. A queued decision outranks `end_turn` -- a player
     must spend what a card gave them before the turn can close -- but it never displaces
-    a pending that is already mid-decision.
+    a pending that is already mid-decision. A decision that offers nothing (a warrior
+    action with no warrior left, say) is dropped with a line in the log rather than
+    stranding the turn on a choice with no options.
     """
     queue = game.get("choice_queue") or []
-    if not queue:
-        return False
     pending = game.get("pending")
     if pending and pending.get("kind") not in ("end_turn", "choose_resource"):
         return False
-    head = queue[0]
-    game["pending"] = {"pid": head.get("pid", pid), "kind": "choose_resource",
-                       "source": head.get("source", "action")}
-    return True
+    while queue:
+        live = _decision(game, queue[0])
+        if live:
+            game["pending"] = live
+            return True
+        dropped = queue.pop(0)
+        _log(game, f"{_name(game, dropped.get('pid'))} cannot use "
+                   f"{dropped.get('source', 'an action')} right now.", pid=dropped.get("pid"))
+    return False
 
 
-def _apply_effects(game: dict, pid: str, effects: list[dict], *, source: str = "action") -> None:
+def _continue(game: dict, pid: str | None) -> None:
+    """Move on once an action or a decision has resolved.
+
+    The next queued decision if there is one; otherwise, at the end of a round, the rest
+    of the round's bookkeeping; otherwise `end_turn` for the seat whose turn it is.
+    """
+    pending = game.get("pending")
+    if pending and pending.get("kind") != "end_turn":
+        return
+    if _promote_choice(game, pid):
+        return
+    if game.get("round_end"):
+        _finish_round(game)
+        return
+    if game.get("phase") == "play" and pid and game.get("turn_pid") == pid:
+        game["pending"] = {"pid": pid, "kind": "end_turn"}
+
+
+def _apply_effects(game: dict, pid: str, effects: list[dict], *, source: str = "action",
+                   at_front: bool = True) -> None:
+    """Resolve what can be resolved now and QUEUE every decision the effects leave."""
+    deferred: list[dict] = []
     for effect in effects or []:
         op = effect.get("op")
         if op == "gain":
             resource = effect.get("resource")
             if resource == ANY_RESOURCE:
-                _queue_resource_choice(game, pid, int(effect.get("amount", 1)), source)
+                deferred.extend({"pid": pid, "kind": "choose_resource", "source": source}
+                                for _ in range(max(0, int(effect.get("amount", 1)))))
                 continue
             _gain(game, pid, resource=resource,
                   amount=int(effect.get("amount", 1)) if resource else 0,
@@ -329,13 +439,16 @@ def _apply_effects(game: dict, pid: str, effects: list[dict], *, source: str = "
             game["players"][pid]["lantern"].append({"icon": icon, "amount": 1, "card": "decree"})
             _log(game, f"{_name(game, pid)} takes the {icon} Decree card.", pid=pid)
         elif op == "worker_action":
-            _perform_worker_action(game, pid, effect, source)
-        elif op in ("domain_action", "main_board_action"):
-            # Yard-tile vocabulary. No tile resolves through here yet, so reaching this
-            # branch means a tile action was wired up without its implementation -- say so
-            # rather than silently doing nothing.
-            _log(game, f"{_name(game, pid)} has a tile action that is not implemented "
-                       f"({op}).", pid=pid)
+            deferred.append({"pid": pid, "kind": "worker",
+                             "worker": effect.get("worker", "courtiers"),
+                             "cost": dict(effect.get("cost") or {}), "source": source})
+        elif op == "main_board_action":
+            deferred.append({"pid": pid, "kind": "board_action",
+                             "filter": BOARD_ACTION_FILTER.get(effect.get("die_tile"), "light"),
+                             "cost": dict(effect.get("cost") or {}), "source": source})
+        elif op == "domain_action":
+            deferred.append({"pid": pid, "kind": "domain_action",
+                             "cost": dict(effect.get("cost") or {}), "source": source})
         elif op == "coins":
             _gain(game, pid, coins=int(effect.get("amount", 0)), note=source)
         elif op == "seals":
@@ -362,14 +475,15 @@ def _apply_effects(game: dict, pid: str, effects: list[dict], *, source: str = "
         elif op == "pay_seal_for_worker":
             # The pre-catalogue spelling, kept so a game saved before 2026-09-20 still
             # resolves its cards. New data never emits it.
-            _perform_worker_action(
-                game, pid, {"worker": effect.get("worker", "courtiers"),
-                            "cost": {"seals": 1}}, source)
+            deferred.append({"pid": pid, "kind": "worker",
+                             "worker": effect.get("worker", "courtiers"),
+                             "cost": {"seals": 1}, "source": source})
         elif op == "lantern":
             icon = effect.get("icon", "coin")
             game["players"][pid]["lantern"].append({"icon": icon, "amount": int(effect.get("amount", 1))})
         elif op == "well_bonus":
             _well_bonus(game, pid)
+    _enqueue(game, deferred, at_front=at_front)
 
 
 #: Where each worker goes when its action is performed. Warriors and gardeners land in a
@@ -379,32 +493,45 @@ _WORKER_DESTINATION = {"courtiers": "gate", "warriors": "yard_pool",
 
 
 def _perform_worker_action(game: dict, pid: str, effect: dict, source: str) -> None:
-    """Deploy one worker, paying the card's price first if it names one.
+    """Queue one worker action. Kept under its old name for callers outside the engine.
+
+    A worker action is a DECISION, not an effect: a warrior needs a yard, a gardener a
+    garden, a courtier an audience and/or a climb. This used to move the worker into a
+    reserve and stop there, which stranded it for the rest of the game.
+    """
+    _enqueue(game, [{"pid": pid, "kind": "worker", "worker": effect.get("worker", "courtiers"),
+                     "cost": dict(effect.get("cost") or {}), "source": source}])
+
+
+def _can_pay(game: dict, pid: str, cost: dict | None, *, coins: int = 0) -> bool:
+    """Whether a decision's price (plus `coins` more) is affordable.
 
     THE PRICE IS A CURRENCY, NOT A NUMBER. A castle card charges SEALS to repeat a worker
-    action and a yard tile charges COINS, and both arrive in BGA's payload as the same
-    `qty` beside an icon -- so the catalogue keeps `cost` as {currency: amount} and this
-    pays whatever it names. Flattening the two would bill a tile's 3 coins to the seal
-    track, which a player would feel and no test would obviously catch.
+    action and a garden or tile charges COINS, and both arrive in BGA's payload as the
+    same `qty` beside an icon -- so `cost` stays {currency: amount}. Flattening the two
+    would bill a garden's 3 coins to the seal track.
     """
-    worker = effect.get("worker", "courtiers")
-    destination = _WORKER_DESTINATION.get(worker, "gate")
-    p = game.get("players", {}).get(pid)
-    if not p or p.get("workers", {}).get(worker, {}).get("domain", 0) <= 0:
-        return
-    cost = effect.get("cost") or {}
+    p = _player(game, pid)
+    cost = cost or {}
+    return (p.get("coins", 0) >= int(cost.get("coins", 0)) + coins
+            and p.get("seals", 0) >= int(cost.get("seals", 0)))
+
+
+def _pay_cost_once(game: dict, pid: str, pending: dict) -> bool:
+    """Pay a decision's price the first time the player commits to it, and only then."""
+    if pending.get("paid"):
+        return True
+    cost = pending.get("cost") or {}
     coins, seals = int(cost.get("coins", 0)), int(cost.get("seals", 0))
     if (coins or seals) and not _pay(game, pid, coins=coins, seals=seals):
-        _log(game, f"{_name(game, pid)} cannot afford the {worker[:-1]} action.", pid=pid)
-        return
-    if not _move_worker(game, pid, worker, destination):
-        return
-    price = " for ".join(
-        bit for bit in (
-            f"{coins} coin" + ("s" if coins != 1 else "") if coins else "",
-            f"{seals} seal" + ("s" if seals != 1 else "") if seals else "") if bit)
-    _log(game, f"{_name(game, pid)} deploys a {worker[:-1]}"
-               + (f" for {price}" if price else "") + ".", pid=pid)
+        return False
+    pending["paid"] = True
+    return True
+
+
+def _skippable(pending: dict) -> list[dict]:
+    """Every effect-granted action may be declined -- BGA marks each one `canSkip`."""
+    return [{"type": "skip"}] if pending.get("queued") else []
 
 
 def _well_bonus(game: dict, pid: str) -> None:
@@ -424,7 +551,13 @@ def _well_bonus(game: dict, pid: str) -> None:
     for tile in game.get("well_tiles") or ():
         reward = tile.get("reward")
         if reward == "coin":
-            _gain(game, pid, coins=2, note="well tile")
+            # ONE coin. This paid two; every Well payout in the corpus that carries a coin
+            # tile shows `coin+1`.
+            _gain(game, pid, coins=1, note="well tile")
+        elif reward == "resource":
+            # A resource of the player's CHOICE. This branch did not exist, so the tile
+            # silently paid nothing.
+            _queue_resource_choice(game, pid, 1, "well tile")
         elif reward == "seal":
             _gain(game, pid, seals=1, note="well tile")
         elif reward == "influence":
@@ -508,6 +641,24 @@ def _deal_room_tiles(rng, tiles: list[dict], rooms: list[dict]) -> list[dict]:
     return [t for group in spread for t in group]
 
 
+def _lay_yard_tiles(rng, yards: list[dict]) -> None:
+    """Draw four Yard tiles and lay them: two on the 5-iron yard, one on each other.
+
+    What a warrior DOES on arriving is whatever these say -- every tile on its yard, so the
+    5-iron yard gives two actions for its price. The yards used to carry one invented
+    `effect` each instead, and those are gone with this.
+    """
+    numbers = list(range(1, YARD_TILE_COUNT + 1))
+    rng.shuffle(numbers)
+    for yard in yards:
+        yard["tiles"] = []
+    for number, (yard_index, side) in zip(numbers, YARD_TILE_SLOTS):
+        yards[yard_index]["tiles"].append({
+            "tile": number, "side": side,
+            "effects": copy.deepcopy(YARD_TILE_FACES[f"{number}:{side}"]),
+        })
+
+
 def new_game(players: list[str], *, names: dict[str, str] | None = None,
              seed: int | None = None, max_players: int | None = None) -> dict:
     """Create a standard base-game table.
@@ -554,6 +705,9 @@ def new_game(players: list[str], *, names: dict[str, str] | None = None,
                    "card": (steward_deck.pop() if i < 3 else diplomat_deck.pop()),
                    "dice": []} for i in range(5)],
         "daimyo": daimyo_deck.pop(),
+        # Who stands on each slot of the Daimyo's Favor card. A slot takes ONE courtier,
+        # of any clan, for the rest of the game.
+        "daimyo_slots": {"1": None, "2": None, "3": None},
     }
     # One tile per action block, colour side up. This is what decides which rows of a
     # room's card a die resolves.
@@ -582,6 +736,9 @@ def new_game(players: list[str], *, names: dict[str, str] | None = None,
     action_options = [clone(c) for c in STARTING_ACTION_CARDS]
     rng.shuffle(resource_options)
     rng.shuffle(action_options)
+    # Four of the eight Yard tiles, laid as every BGA game lays them. Drawn LAST, after
+    # every older draw, so a seed still deals the castle and the starting pairs it did.
+    _lay_yard_tiles(rng, yards)
     option_count = len(seats) + 1
     draft_options = [{"resource": resource_options[i], "action": action_options[i % len(action_options)]}
                      for i in range(option_count)]
@@ -632,7 +789,16 @@ def _end_round(game: dict) -> None:
     # The garden step happens after rounds one and two. A garden card beside a
     # bridge that still has a die activates once for each clan gardener there;
     # the third round goes straight to final scoring after turn order is updated.
+    #
+    # Now that a garden's action is its real one, many of them are DECISIONS (deploy a
+    # worker, take a castle action, run a Domain line), and they belong to whoever stands
+    # in the garden -- not to the player whose turn just ended. BGA resolves them clan by
+    # clan in the new turn order, so they are queued in that order (`at_front=False`),
+    # and the round only moves on once the queue is empty -- see `_finish_round`.
+    game["pending"] = None
+    game["turn_pid"] = None
     if game["round"] < ROUND_COUNT:
+        game["round_end"] = True
         for occupant in game["turn_order"]:
             for garden in game["gardens"]:
                 if not game["bridges"].get(garden.get("bridge")):
@@ -642,7 +808,16 @@ def _end_round(game: dict) -> None:
                         continue
                     card = garden.get(kind) or {}
                     _apply_effects(game, occupant, card.get("light", []),
-                                   source=f"{card.get('name', 'garden')} round action")
+                                   source=f"{card.get('name', 'garden')} round action",
+                                   at_front=False)
+        _continue(game, None)
+        return
+    _finish_round(game)
+
+
+def _finish_round(game: dict) -> None:
+    """Close a round once every round-end decision is answered: score, or deal the next."""
+    game.pop("round_end", None)
     if game["round"] >= ROUND_COUNT:
         _score_game(game)
         return
@@ -822,8 +997,18 @@ def _convert_moves(game: dict, pid: str) -> list[dict]:
                 for r in RESOURCES if p.get("seals", 0) >= 2]))
 
 
-def _worker_destination_moves(game: dict, pid: str, worker: str) -> list[dict]:
+def _has_worker(game: dict, pid: str, worker: str) -> bool:
+    """A worker still to deploy: in the Domain, or in the reserve an older save parked it."""
+    places = _player(game, pid)["workers"].get(worker, {})
+    pool = {"warriors": "yard_pool", "gardeners": "garden_pool"}.get(worker)
+    return places.get("domain", 0) > 0 or bool(pool and places.get(pool, 0) > 0)
+
+
+def _worker_destination_moves(game: dict, pid: str, worker: str,
+                              cost: dict | None = None) -> list[dict]:
     p = _player(game, pid)
+    if not _has_worker(game, pid, worker) or not _can_pay(game, pid, cost):
+        return []
     if worker == "warriors":
         return [{"type": "worker_destination", "worker": worker, "index": i}
                 for i, yard in enumerate(game.get("yards", []))
@@ -880,19 +1065,24 @@ def legal_moves(game: dict | None, pid: str) -> list[dict]:
             # Offering all three from either space made the two spaces interchangeable and
             # the die's destination free of consequence.
             for worker in _outside_offer(game, pending.get("space")):
-                if (p["workers"][worker].get("domain", 0) > 0 and
-                        _worker_destination_moves(game, pid, worker)):
+                if _worker_destination_moves(game, pid, worker):
                     choices.append({"type": "outside_worker", "worker": worker})
-            if p["workers"]["courtiers"].get("domain", 0) > 0:
-                if p.get("coins", 0) >= 2:
-                    choices.append({"type": "outside_worker", "worker": "courtiers", "action": "audience"})
-                if legal_moves({**game, "pending": {"pid": pid, "kind": "courtier_destination"}}, pid):
-                    choices.append({"type": "outside_worker", "worker": "courtiers", "action": "climb"})
+            # The Courtier action is ONE action with two parts -- "up to 2 of these
+            # different actions: either just one of them, or both once each" -- an
+            # audience at the gate and/or a social climb. It was offered as two separate
+            # either/or choices, which forbade doing both.
+            probe = {"pid": pid, "kind": "courtier_actions", "audience": False}
+            if [m for m in _queued_moves(game, pid, probe) if m["type"] != "skip"]:
+                choices.append({"type": "outside_worker", "worker": "courtiers"})
             return choices
         if kind == "worker_destination":
-            return _worker_destination_moves(game, pid, pending.get("worker", ""))
+            return (_worker_destination_moves(game, pid, pending.get("worker", ""),
+                                              None if pending.get("paid") else pending.get("cost"))
+                    + _skippable(pending))
         if kind == "courtier_destination":
             return _climb_moves(game, pid)
+        if kind in ("courtier_actions", "board_action", "domain_action", "daimyo_slot"):
+            return _queued_moves(game, pid, pending)
         if kind == "card_action":
             return _card_action_moves(game, pid)
         if kind == "end_turn":
@@ -1014,8 +1204,8 @@ def _resolve_castle(game: dict, pid: str, room_index: int, die: dict) -> None:
         if not fired:
             _log(game, f"{_name(game, pid)} places a die on a row no tile matches.", pid=pid)
     else:
-        # A game saved before the tiles existed, or a card without blocks (the Daimyo
-        # cards are still ours). Resolve it the old way rather than doing nothing.
+        # A game saved before the tiles existed, or a card without blocks. Resolve it
+        # the old way rather than doing nothing.
         mode = "light" if (int(die.get("value", 0)) + room_index) % 2 == 0 else "dark"
         _apply_effects(game, pid, card.get(mode, []),
                        source=f"{card.get('name', 'castle')} {mode} action")
@@ -1026,15 +1216,49 @@ def _resolve_domain(game: dict, pid: str, color: str) -> None:
     p = _player(game, pid)
     slot = p["domain"][color]
     slot["uses"] = 1
-    _gain(game, pid, resource=RESOURCE_FOR_COLOR[color], amount=1, note="personal domain")
-    # The drafted action card remains in the domain until a courtier moves it
-    # into the Lantern Area. Its light-side action is therefore available each
-    # time the matching personal-domain row is activated.
-    action_card = p.get("action_card")
-    if action_card:
-        _apply_effects(game, pid, action_card.get("light", []),
-                       source=f"{action_card.get('name', 'domain')} action")
-    _log(game, f"{_name(game, pid)} activates the {color} domain row.", pid=pid)
+    _domain_payout(game, pid, color)
+
+
+def _domain_payout(game: dict, pid: str, color: str) -> None:
+    """Run one personal Domain line: its uncovered rewards, then the action card's block
+    for that line.
+
+    Both halves were wrong. The rewards were a flat 1 resource, where the printed line
+    pays more as its workers leave (`DOMAIN_UNCOVERED`); and the action card's LIGHT side
+    fired on every line, where the rule is the one block printed beside THIS line -- light
+    or dark, so a dark block's price in seals is part of the deal.
+    """
+    p = _player(game, pid)
+    resource = RESOURCE_FOR_COLOR[color]
+    workers = p["workers"][DOMAIN_WORKER[color]]
+    gone = max(0, 5 - int(workers.get("domain", 0)))
+    amount, coins, seals, lantern = 1, 0, 0, False
+    for icon in DOMAIN_UNCOVERED[color][:gone]:
+        if icon == resource:
+            amount += 1
+        elif icon == "coins":
+            coins += DOMAIN_COINS
+        elif icon == "seal":
+            seals += 1
+        elif icon == "lantern":
+            lantern = True
+    _gain(game, pid, resource=resource, amount=amount, coins=coins, seals=seals,
+          note="personal domain")
+    if lantern:
+        _resolve_lantern(game, pid)
+    card = p.get("action_card")
+    if card:
+        line = DOMAIN_LINE[color]
+        blocks = [b for b in card.get("blocks") or () if line in (b.get("position") or ())]
+        if blocks:
+            for block in blocks:
+                _apply_effects(game, pid, block.get("effects") or [],
+                               source=f"{card.get('name', 'action card')} ({line} line)")
+        elif not card.get("blocks"):
+            # A card from before blocks existed: resolve it the old way.
+            _apply_effects(game, pid, card.get("light", []),
+                           source=f"{card.get('name', 'domain')} action")
+    _log(game, f"{_name(game, pid)} activates the {color} domain line.", pid=pid)
 
 
 def _lantern_entry(card: dict) -> dict | None:
@@ -1126,9 +1350,82 @@ def _offer_card_action(game: dict, pid: str, card: dict) -> None:
         _apply_effects(game, pid, blocks[0].get("effects") or [],
                        source=f"{card.get('name', 'card')} light action")
         return
-    game["pending"] = {"pid": pid, "kind": "card_action", "card": card.get("id"),
-                       "name": card.get("name"), "blocks": copy.deepcopy(card.get("blocks") or []),
-                       "options": list(range(len(blocks)))}
+    _enqueue(game, [{"pid": pid, "kind": "card_action", "card": card.get("id"),
+                     "name": card.get("name"),
+                     "blocks": copy.deepcopy(card.get("blocks") or []),
+                     "options": list(range(len(blocks))),
+                     "source": f"{card.get('name', 'card')} light action"}])
+
+
+def _arrive_at_daimyo(game: dict, pid: str) -> None:
+    """A courtier reaching the third floor: the Lantern first, then a slot on the card.
+
+    "Gain the Lantern Reward... Place the Courtier in any available position on the
+    Daimyo's favor card if there are any available, and gain the indicated benefit. If
+    there are no available spaces left, simply leave the Courtier in that room." The engine
+    did neither -- the Daimyo card was a name on the board.
+    """
+    _resolve_lantern(game, pid)
+    if _daimyo_free_slots(game):
+        _enqueue(game, [{"pid": pid, "kind": "daimyo_slot", "source": "the Daimyo's Favor"}])
+
+
+def _daimyo_free_slots(game: dict) -> list[int]:
+    castle = game.get("castle") or {}
+    if not (castle.get("daimyo") or {}).get("slots"):
+        return []
+    taken = castle.setdefault("daimyo_slots", {"1": None, "2": None, "3": None})
+    return [int(k) for k, v in sorted(taken.items()) if v is None]
+
+
+def _board_blocks(game: dict, filt: str) -> list[tuple[int, int]]:
+    """(room, block) pairs a main-board action may perform under `filt`."""
+    out = []
+    for r, room in enumerate(game.get("castle", {}).get("rooms", [])):
+        blocks = (room.get("card") or {}).get("blocks") or []
+        tiles = room.get("tiles") or []
+        for b, block in enumerate(blocks):
+            if filt == "any":
+                ok = True
+            elif filt == "light":
+                ok = block.get("type") == "light"
+            else:
+                ok = b < len(tiles) and tiles[b].get("color") == filt
+            if ok:
+                out.append((r, b))
+    return out
+
+
+def _queued_moves(game: dict, pid: str, pending: dict) -> list[dict]:
+    """Legal moves for the decisions the queue raises."""
+    kind = pending.get("kind")
+    p = _player(game, pid)
+    cost = pending.get("cost") or {}
+    if kind == "courtier_actions":
+        moves = []
+        if not pending.get("paid") and not _can_pay(game, pid, cost):
+            return _skippable(pending) if pending.get("queued") else []
+        extra_coins = 0 if pending.get("paid") else int(cost.get("coins", 0))
+        extra_seals = 0 if pending.get("paid") else int(cost.get("seals", 0))
+        if (not pending.get("audience") and p["workers"]["courtiers"].get("domain", 0) > 0
+                and p.get("coins", 0) >= AUDIENCE_COINS + extra_coins
+                and p.get("seals", 0) >= extra_seals):
+            moves.append({"type": "audience"})
+        moves.extend(_climb_moves(game, pid))
+        return moves + [{"type": "skip"}]
+    if kind == "board_action":
+        if not _can_pay(game, pid, cost):
+            return []
+        return [{"type": "board_action", "room": r, "block": b}
+                for r, b in _board_blocks(game, pending.get("filter", "light"))] + _skippable(pending)
+    if kind == "domain_action":
+        if not _can_pay(game, pid, cost):
+            return []
+        return [{"type": "domain_action", "color": c} for c in COLORS] + _skippable(pending)
+    if kind == "daimyo_slot":
+        return ([{"type": "daimyo_slot", "slot": n} for n in _daimyo_free_slots(game)]
+                + _skippable(pending))
+    return []
 
 
 def _card_action_moves(game: dict, pid: str) -> list[dict]:
@@ -1142,7 +1439,7 @@ def _card_action_moves(game: dict, pid: str) -> list[dict]:
     if card.get("id") != pending.get("card"):
         card = {"blocks": pending.get("blocks") or []}
     return [{"type": "card_action", "index": i}
-            for i in range(len(_light_blocks(card)))]
+            for i in range(len(_light_blocks(card)))] + _skippable(pending)
 
 
 def _resolve_lantern(game: dict, pid: str) -> None:
@@ -1199,8 +1496,28 @@ def _place_die(game: dict, pid: str, space: str) -> tuple[bool, str | None]:
         color = space.split(":")[1]
         _player(game, pid)["domain"][color]["die"] = copy.deepcopy(die)
         _resolve_domain(game, pid, color)
-    if not _promote_choice(game, pid) and not game.get("pending"):
-        game["pending"] = {"pid": pid, "kind": "end_turn"}
+    _continue(game, pid)
+    return True, None
+
+
+def _audience(game: dict, pid: str) -> tuple[bool, str | None]:
+    """The first half of a Courtier action: 2 coins to put a courtier at the gate.
+
+    The second half -- a social climb -- stays on offer afterwards, because the Courtier
+    action is "either just one of them, or both once each".
+    """
+    pending = game.get("pending") or {}
+    _consume(game)
+    if not _pay_cost_once(game, pid, pending):
+        return False, "you cannot afford that action"
+    if not _pay(game, pid, coins=AUDIENCE_COINS):
+        return False, f"an audience costs {AUDIENCE_COINS} coins"
+    _move_worker(game, pid, "courtiers", "gate")
+    _log(game, f"{_name(game, pid)} requests an audience at the gate.", pid=pid)
+    pending["audience"] = True
+    if not _climb_moves(game, pid):
+        game["pending"] = None
+        _continue(game, pid)
     return True, None
 
 
@@ -1227,11 +1544,11 @@ def _perform_card_action(game: dict, pid: str, index: int) -> tuple[bool, str | 
     blocks = _light_blocks(card)
     if not 0 <= index < len(blocks):
         return False, "choose one of the card's light actions"
+    _consume(game)
     game["pending"] = None
     _apply_effects(game, pid, blocks[index].get("effects") or [],
                    source=f"{card.get('name', 'card')} light action")
-    if not _promote_choice(game, pid) and game.get("turn_pid") == pid:
-        game["pending"] = {"pid": pid, "kind": "end_turn"}
+    _continue(game, pid)
     return True, None
 
 
@@ -1248,6 +1565,9 @@ def _choose_resource(game: dict, pid: str, resource: str) -> tuple[bool, str | N
           note=head.get("source", "card"))
     game["pending"] = None
     if _promote_choice(game, pid):
+        return True, None
+    if game.get("round_end"):
+        _finish_round(game)
         return True, None
     if game.get("phase") == "draft":
         # The draft was held open for this choice; close it now if nobody else is owed
@@ -1442,26 +1762,16 @@ def apply_move(game: dict, pid: str, move: dict) -> tuple[bool, str | None]:
         if p["workers"][worker].get("domain", 0) <= 0:
             return False, "that worker is not in your domain"
         if worker == "courtiers":
-            action = move.get("action")
-            if action == "audience":
-                if not _pay(game, pid, coins=2):
-                    return False, "an audience costs 2 coins"
-                _move_worker(game, pid, worker, "gate")
-                _log(game, f"{_name(game, pid)} requests an audience at the gate.", pid=pid)
-                game["pending"] = {"pid": pid, "kind": "end_turn"}
-            elif action == "climb":
-                destinations = legal_moves({**game, "pending": {"pid": pid, "kind": "courtier_destination"}}, pid)
-                if not destinations:
-                    return False, "no courtier can climb yet"
-                game["pending"] = {"pid": pid, "kind": "courtier_destination", "space": pending.get("space")}
-            else:
-                return False, "choose an audience or a social climb"
+            game["pending"] = {"pid": pid, "kind": "courtier_actions", "audience": False,
+                               "space": pending.get("space"), "source": "Outside the Walls"}
+            # A cached bundle still names the half it wanted; honour it.
+            if move.get("action") == "audience":
+                return _audience(game, pid)
         else:
-            destination = "yard_pool" if worker == "warriors" else "garden_pool"
-            _move_worker(game, pid, worker, destination)
-            _log(game, f"{_name(game, pid)} sends a {worker[:-1]} outside the walls.", pid=pid)
+            # The worker stays in the Domain until its destination is chosen. It used to
+            # be parked in a reserve first, which is how card-granted workers got stranded.
             game["pending"] = {"pid": pid, "kind": "worker_destination", "worker": worker,
-                                "space": pending.get("space")}
+                               "space": pending.get("space")}
         return True, None
     if kind == "worker_destination":
         pending = game.get("pending") or {}
@@ -1472,23 +1782,39 @@ def apply_move(game: dict, pid: str, move: dict) -> tuple[bool, str | None]:
             index = int(move.get("index"))
         except (TypeError, ValueError):
             return False, "invalid worker destination"
-        if move not in _worker_destination_moves(game, pid, worker):
+        if move not in legal_moves(game, pid):
             return False, "that worker destination is not legal"
         p = _player(game, pid)
+        _consume(game)
+        if not _pay_cost_once(game, pid, pending):
+            return False, "you cannot afford that action"
+        places = p["workers"][worker]
+        pool = "yard_pool" if worker == "warriors" else "garden_pool"
+        source_place = pool if places.get(pool, 0) > 0 else "domain"
+        game["pending"] = None
         if worker == "warriors":
             yard = game["yards"][index]
             _pay(game, pid, resource="iron", amount=int(yard.get("cost", 0)))
-            p["workers"][worker]["yard_pool"] -= 1
-            p["workers"][worker]["yard"] += 1
-            p["yards"].append(copy.deepcopy(yard))
-            _apply_effects(game, pid, yard.get("effect", []), source="training yard")
+            places[source_place] -= 1
+            places["yard"] = places.get("yard", 0) + 1
+            p["yards"].append({k: copy.deepcopy(v) for k, v in yard.items() if k != "tiles"})
+            _log(game, f"{_name(game, pid)} trains a warrior in the {yard.get('name', 'yard')}.",
+                 pid=pid)
+            # "When a Warrior is placed in a space, you can carry out the action or actions
+            # indicated on that space's Yard tile(s)." A save from before the tiles keeps
+            # its yard's old `effect`.
+            for tile in yard.get("tiles") or ():
+                _apply_effects(game, pid, tile.get("effects") or [],
+                               source=f"yard tile {tile.get('tile')}")
+            if not yard.get("tiles"):
+                _apply_effects(game, pid, yard.get("effect", []), source="training yard")
         elif worker == "gardeners":
             garden = game["gardens"][index]
             plot = str(move.get("kind", "plant"))
             card = garden.get(plot)
             _pay(game, pid, resource="food", amount=int(card.get("cost", 0)))
-            p["workers"][worker]["garden_pool"] -= 1
-            p["workers"][worker]["garden"] += 1
+            places[source_place] -= 1
+            places["garden"] = places.get("garden", 0) + 1
             seats = garden.get("occupants")
             if not isinstance(seats, dict):
                 seats = {"plant": list(seats or ()), "stone": []}
@@ -1496,27 +1822,94 @@ def apply_move(game: dict, pid: str, move: dict) -> tuple[bool, str | None]:
             seats.setdefault(plot, []).append(pid)
             p["gardens"].append(copy.deepcopy(card))
             _apply_effects(game, pid, card.get("light", []), source=card.get("name", "garden"))
-        game["pending"] = {"pid": pid, "kind": "end_turn"}
+        _continue(game, pid)
         return True, None
     if kind == "courtier_destination":
         pending = game.get("pending") or {}
-        if pending.get("pid") != pid or pending.get("kind") != "courtier_destination":
+        if pending.get("pid") != pid or pending.get("kind") not in ("courtier_destination",
+                                                                    "courtier_actions"):
             return False, "choose a courtier destination"
         if move not in legal_moves(game, pid):
             return False, "that social climb is not legal"
         source, to, cost = str(move["from"]), str(move["to"]), int(move["cost"])
+        _consume(game)
+        if not _pay_cost_once(game, pid, pending):
+            return False, "you cannot afford that action"
         if not _pay(game, pid, resource="pearl", amount=cost):
             return False, "not enough mother-of-pearl"
         if not _move_courtier(game, pid, source, to):
             return False, "no courtier can make that climb"
         _log(game, f"{_name(game, pid)} climbs to the {to}.", pid=pid)
+        game["pending"] = None
         if move.get("room") is not None:
             _take_room_card(game, pid, int(move["room"]))
-        # `_take_room_card` may have raised its own decision (which light action to
-        # perform), and that outranks closing the turn.
-        if (game.get("pending") or {}).get("kind") != "card_action":
-            if not _promote_choice(game, pid):
-                game["pending"] = {"pid": pid, "kind": "end_turn"}
+        if to == "daimyo":
+            _arrive_at_daimyo(game, pid)
+        _continue(game, pid)
+        return True, None
+    if kind == "audience":
+        pending = game.get("pending") or {}
+        if pending.get("pid") != pid or move not in legal_moves(game, pid):
+            return False, "an audience is not available"
+        return _audience(game, pid)
+    if kind == "skip":
+        pending = game.get("pending") or {}
+        if pending.get("pid") != pid or move not in legal_moves(game, pid):
+            return False, "there is nothing to skip"
+        _consume(game)
+        game["pending"] = None
+        _continue(game, pid)
+        return True, None
+    if kind == "board_action":
+        pending = game.get("pending") or {}
+        if pending.get("pid") != pid or pending.get("kind") != "board_action":
+            return False, "there is no castle action to take"
+        try:
+            move = {"type": "board_action", "room": int(move.get("room")),
+                    "block": int(move.get("block"))}
+        except (TypeError, ValueError):
+            return False, "choose a castle action"
+        if move not in legal_moves(game, pid):
+            return False, "that castle action is not available"
+        _consume(game)
+        if not _pay_cost_once(game, pid, pending):
+            return False, "you cannot afford that action"
+        room = game["castle"]["rooms"][move["room"]]
+        card = room.get("card") or {}
+        block = (card.get("blocks") or [])[move["block"]]
+        game["pending"] = None
+        _apply_effects(game, pid, block.get("effects") or [],
+                       source=f"{card.get('name', 'castle')} {block.get('type', '')} row")
+        _continue(game, pid)
+        return True, None
+    if kind == "domain_action":
+        pending = game.get("pending") or {}
+        if (pending.get("pid") != pid or pending.get("kind") != "domain_action"
+                or move not in legal_moves(game, pid)):
+            return False, "that Domain line is not available"
+        _consume(game)
+        if not _pay_cost_once(game, pid, pending):
+            return False, "you cannot afford that action"
+        game["pending"] = None
+        _domain_payout(game, pid, str(move["color"]))
+        _continue(game, pid)
+        return True, None
+    if kind == "daimyo_slot":
+        pending = game.get("pending") or {}
+        if (pending.get("pid") != pid or pending.get("kind") != "daimyo_slot"
+                or move not in legal_moves(game, pid)):
+            return False, "that slot is not free"
+        _consume(game)
+        slot = int(move["slot"])
+        castle = game["castle"]
+        castle["daimyo_slots"][str(slot)] = pid
+        card = castle.get("daimyo") or {}
+        game["pending"] = None
+        _log(game, f"{_name(game, pid)} takes slot {slot} of {card.get('name', 'the Daimyo card')}.",
+             pid=pid)
+        _apply_effects(game, pid, (card.get("slots") or [[], [], []])[slot - 1],
+                       source=f"Daimyo's Favor slot {slot}")
+        _continue(game, pid)
         return True, None
     if kind == "convert":
         if game.get("pending"):

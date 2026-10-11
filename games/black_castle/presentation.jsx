@@ -50,6 +50,19 @@ const rewardNames = {
   vp: ["point", "points"], points: ["point", "points"],
   influence: ["influence", "influence"], food: ["food", "food"],
   iron: ["iron", "iron"], pearl: ["mother-of-pearl", "mother-of-pearl"],
+  any: ["resource of your choice", "resources of your choice"],
+};
+// What a "main board" action may reach, by the filter the engine resolves it with.
+const boardFilters = {
+  "action-light-background": "any light-background action in the castle",
+  "action-any-die-tile": "any action in the castle",
+  "action-red-die-tile": "a castle action beside a coral tile",
+  "action-black-die-tile": "a castle action beside an obsidian tile",
+  "action-white-die-tile": "a castle action beside an ivory tile",
+};
+const priceText = (cost) => {
+  const bits = Object.entries(cost || {}).filter(([, n]) => Number(n) > 0).map(([k, n]) => quantity(k, Number(n)));
+  return bits.length ? `Pay ${join(bits)} to ` : "";
 };
 
 const amountOf = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
@@ -74,7 +87,9 @@ export function effectText(effect) {
     const rewards = ["coins", "seals", "points", "influence"]
       .filter((key) => amountOf(effect[key]) !== 0)
       .map((key) => quantity(key, amountOf(effect[key])));
-    if (effect.resource && rewardNames[effect.resource]) {
+    if (effect.resource === "any") {
+      rewards.push(quantity("any", amountOf(effect.amount, 1)));
+    } else if (effect.resource && rewardNames[effect.resource]) {
       rewards.push(quantity(effect.resource, amountOf(effect.amount, 1)));
     }
     return rewards.length ? `Gain ${join(rewards)}` : "";
@@ -85,7 +100,22 @@ export function effectText(effect) {
   if (op === "lantern") {
     return `Add ${rewardText({ icon: effect.icon || "coin", amount: amountOf(effect.amount, 1) })} to your lantern rewards`;
   }
-  if (op === "well_bonus") return "Reveal up to 2 remaining well tiles and receive their benefits";
+  if (op === "well_bonus") return "Receive the Well's two tile rewards";
+  // The catalogue's own vocabulary. Without these the effects rendered as NOTHING --
+  // `effectItems` drops an empty string -- so a card that deploys a worker or moves the
+  // Passage of Time showed only its plain gains.
+  const lead = (verb) => { const price = priceText(effect.cost); return price ? price + verb.charAt(0).toLowerCase() + verb.slice(1) : verb; };
+  if (op === "worker_action") {
+    const worker = effect.worker || "courtiers";
+    if (worker === "courtiers") return lead("Request an audience and/or climb the castle");
+    return lead(worker === "warriors" ? "Train a warrior in a yard" : "Plant a gardener in a garden");
+  }
+  if (op === "passage") return `Move ${amountOf(effect.steps, 1)} on the Passage of Time`;
+  if (op === "well_action") return "Perform a Well action";
+  if (op === "lantern_rewards") return "Collect your Lantern rewards";
+  if (op === "decree") return `Take the ${rewardNames[effect.icon]?.[0] || effect.icon} Decree card`;
+  if (op === "main_board_action") return lead(`Perform ${boardFilters[effect.die_tile] || "a castle action"}`);
+  if (op === "domain_action") return lead("Perform one of your Domain lines");
   if (op === "move") {
     const worker = workerNames[effect.worker];
     const destination = effect.to || effect.destination;
