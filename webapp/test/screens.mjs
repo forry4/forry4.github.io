@@ -8393,6 +8393,22 @@ try {
 			gardenCount === 6, `${gardenCount} plots`);
 		check("influence and turn order are visible", await page.locator(".bc-influence-list > div").count() >= 3);
 		check("the player's lantern rewards are visible", await page.locator(".bc-lantern > div > span").count() > 0);
+		// A Domain line is five worker spots that UNCOVER rewards as workers leave, and it
+		// performs the action card's block printed beside it -- light or dark. The board
+		// used to show a "3 / 5" count and the card's light side only, which misstated both
+		// rules. Asserted by count, because a board can render perfectly with the wrong shape.
+		const domainShape = await page.evaluate(() => ({
+			tracks: document.querySelectorAll("#bc-domain .bc-worker-track").length,
+			spots: document.querySelectorAll("#bc-domain .bc-worker-track li").length,
+			cards: document.querySelectorAll("#bc-domain .bc-line-card").length,
+		}));
+		check("each domain line shows five worker spots and its card action",
+			domainShape.tracks === 3 && domainShape.spots === 15 && domainShape.cards === 3, JSON.stringify(domainShape));
+		// Four Yard tiles, two of them on the 5-iron yard: what a warrior does on arrival.
+		const yardTiles = await page.locator(".bc-yard .bc-yard-tile").count();
+		const outerTiles = await page.locator(".bc-yard").first().locator(".bc-yard-tile").count();
+		check("the four yard tiles sit on their yards", yardTiles === 4 && outerTiles === 2,
+			`${yardTiles} tiles, ${outerTiles} on the outer yard`);
 		let clickedDie = false;
 		for (let i = 0; i < 40 && !clickedDie; i++) {
 			const die = page.locator(".bc-bridge .bc-die:not([disabled])").first();

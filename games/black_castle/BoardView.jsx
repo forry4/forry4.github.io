@@ -26,18 +26,50 @@ const DOMAIN_UNCOVERED = {
 };
 const DOMAIN_LINE = { coral: "top", black: "middle", white: "bottom" };
 const DOMAIN_WORKER = { coral: "courtiers", black: "gardeners", white: "warriors" };
-function domainEffects(player, color) {
-  const gone = Math.max(0, 5 - (player?.workers?.[DOMAIN_WORKER[color]]?.domain ?? 5));
+const workersGone = (player, color) => Math.max(0, 5 - (player?.workers?.[DOMAIN_WORKER[color]]?.domain ?? 5));
+// What the line itself pays right now: 1 of its resource plus everything uncovered.
+function domainReward(player, color) {
   const resource = DOMAIN_RESOURCE[color];
   let amount = 1, coins = 0, seals = 0, lantern = false;
-  for (const icon of DOMAIN_UNCOVERED[color].slice(0, gone)) {
+  for (const icon of DOMAIN_UNCOVERED[color].slice(0, workersGone(player, color))) {
     if (icon === resource) amount += 1; else if (icon === "coins") coins += 2; else if (icon === "seal") seals += 1; else if (icon === "lantern") lantern = true;
   }
   const out = [{ op: "gain", resource, amount, coins, seals }];
   if (lantern) out.push({ op: "lantern_rewards" });
-  const blocks = (player?.action_card?.blocks || []).filter(b => (b.position || []).includes(DOMAIN_LINE[color]));
-  for (const b of blocks) out.push(...(b.effects || []));
   return out;
+}
+// The action card's blocks printed beside a line -- light OR dark. A card from before
+// blocks existed falls back to its flattened light side.
+function lineBlocks(card, color) {
+  if (!card) return [];
+  if (!card.blocks?.length) return card.light?.length ? [{ type: "light", effects: card.light }] : [];
+  return card.blocks.filter(b => (b.position || []).includes(DOMAIN_LINE[color]));
+}
+function domainEffects(player, color) {
+  return [...domainReward(player, color), ...lineBlocks(player?.action_card, color).flatMap(b => b.effects || [])];
+}
+// One spot per worker on a line. Workers leave LEFT TO RIGHT, so the first `gone` spots
+// are empty and show the reward they uncovered; the rest still hold a worker.
+const UNCOVERED_ICON = { food: "food", iron: "iron", pearl: "pearl", coins: "coins", seal: "seals", lantern: "lantern" };
+const UNCOVERED_TEXT = { food: "+1", iron: "+1", pearl: "+1", coins: "+2", seal: "+1", lantern: "All" };
+const UNCOVERED_NAME = { food: "1 more food", iron: "1 more iron", pearl: "1 more pearl", coins: "2 coins", seal: "1 seal", lantern: "your Lantern rewards" };
+function WorkerTrack({ player, color }) {
+  const worker = DOMAIN_WORKER[color];
+  const gone = workersGone(player, color);
+  return <ol className="bc-worker-track" aria-label={`${5 - gone} of 5 ${WORKERS[worker].toLowerCase()} still here; ${gone} reward${gone === 1 ? "" : "s"} uncovered`}>
+    {DOMAIN_UNCOVERED[color].map((icon, i) => <li key={i} className={i < gone ? "open" : "held"} title={i < gone ? `Uncovered: ${UNCOVERED_NAME[icon]}` : `A ${WORKERS[worker].slice(0, -1).toLowerCase()} covers ${UNCOVERED_NAME[icon]}`}>
+      {i < gone ? <><Icon name={UNCOVERED_ICON[icon]} /><small>{UNCOVERED_TEXT[icon]}</small></> : <Icon name={worker} />}
+    </li>)}
+  </ol>;
+}
+function DomainLine({ player, color, die }) {
+  const blocks = lineBlocks(player?.action_card, color);
+  return <div className="bc-line">
+    <div className="bc-line-head"><span className="bc-domain-dot" /><strong>{COLOR_NAMES[color]}</strong><small>{WORKERS[DOMAIN_WORKER[color]]}</small>{die && <Die die={die} />}</div>
+    <WorkerTrack player={player} color={color} />
+    <div className="bc-line-pay"><span className="bc-kicker">Pays</span><Effects effects={domainReward(player, color)} /></div>
+    <div className="bc-line-card"><span className="bc-kicker">Then your card</span>{blocks.length ? blocks.map((b, i) => <div key={i} className={`bc-line-block${b.type === "dark" ? " dark" : ""}`}><Effects effects={b.effects} /></div>) : <span className="bc-line-none">Nothing on this line</span>}</div>
+  </div>;
 }
 const PIPS = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
 
@@ -71,16 +103,20 @@ const firedSlots = (room, die) => {
   return hit;
 };
 
-function CardFace({ card, room, die, onlyLight = false }) {
+function CardFace({ card, room, die, onlyLight = false, picks = null, onPick = null, busy = false }) {
   if (!card) return <div className="bc-card bc-card-empty">Choose a starting pair to receive an action card.</div>;
   const tiles = room?.tiles || [];
   const fired = firedSlots(room, die);
-  // The real card: one action block per row, each with a Die tile beside it.
+  // The real card: one action block per row, each with a Die tile beside it. While a
+  // "perform a castle action" decision is open, the rows it may take are BUTTONS here,
+  // on the board, rather than a list somewhere else.
   if (card.blocks?.length && tiles.length) return <div className="bc-card"><div className="bc-card-heading"><strong>{card.name}</strong>{card.level > 0 && <Icon name={card.level === 3 ? "points" : "castle"} />}</div>
-    {card.blocks.map((block, i) => <div key={i} className={`bc-card-action${block.type === "dark" ? " dark" : ""}${fired ? (fired.has(i) ? " selected" : " inactive") : ""}`}>
-      <span className="bc-card-side"><i className={`bc-tile bc-tile-${tiles[i]?.color}`} aria-hidden="true" />{COLOR_NAMES[tiles[i]?.color] || ""}</span>
-      <Effects effects={block.effects} />
-    </div>)}
+    {card.blocks.map((block, i) => {
+      const pick = picks?.[i];
+      const cls = `bc-card-action${block.type === "dark" ? " dark" : ""}${fired ? (fired.has(i) ? " selected" : " inactive") : ""}${picks ? (pick ? " pickable" : " inactive") : ""}`;
+      const body = <><span className="bc-card-side"><i className={`bc-tile bc-tile-${tiles[i]?.color}`} aria-hidden="true" />{COLOR_NAMES[tiles[i]?.color] || ""}</span><Effects effects={block.effects} />{pick && <span className="bc-pick-cta">Perform <Icon name="arrow" /></span>}</>;
+      return pick ? <button type="button" key={i} className={cls} disabled={busy} onClick={() => onPick(pick)} aria-label={`Perform ${card.name}, ${block.type} row`}>{body}</button> : <div key={i} className={cls}>{body}</div>;
+    })}
   </div>;
   // A card without blocks (the Daimyo cards are still ours) or a pre-tile save.
   return <div className="bc-card"><div className="bc-card-heading"><strong>{card.name}</strong>{card.level > 0 && <Icon name={card.level === 3 ? "points" : "castle"} />}</div>
@@ -170,13 +206,19 @@ function CourtierRow({ game, names, location }) {
   return <div className="bc-courtier-row"><span><Icon name="courtiers" />{FLOORS[location]}</span><Occupants pids={pids} names={names} players={game.players} /></div>;
 }
 
-function Castle({ game, names, onSelect, selected, busy }) {
-  return <section className="bc-castle bc-panel" id="bc-castle"><SectionHead icon="castle" title="The keep" note="Place a die to activate a room" />
+function Castle({ game, names, onSelect, selected, busy, sendMove }) {
+  const boardMoves = (game.legal_moves || []).filter(m => m.type === "board_action");
+  const picking = boardMoves.length > 0;
+  const picksFor = room => { const idx = game.castle.rooms.indexOf(room); const out = {}; for (const m of boardMoves) if (m.room === idx) out[m.block] = m; return out; };
+  return <section className={`bc-castle bc-panel${picking ? " picking" : ""}`} id="bc-castle"><SectionHead icon="castle" title="The keep" note={picking ? "Choose a highlighted row to perform it" : "Place a die to activate a room"} />
     <div className="bc-daimyo"><div><span className="bc-kicker">DAIMYO HALL</span><h3>{game.castle?.daimyo?.name}</h3><p>Courtiers here score 10 points each. Arriving collects your Lantern, then takes a free slot below.</p></div><Icon name="castle" /><CourtierRow game={game} names={names} location="daimyo" />
       {game.castle?.daimyo?.slots && <div className="bc-daimyo-slots">{game.castle.daimyo.slots.map((effects, i) => { const holder = game.castle.daimyo_slots?.[String(i + 1)]; return <div key={i} className={`bc-daimyo-slot${holder ? " taken" : ""}`}><span className="bc-kicker">Slot {i + 1}</span><Effects effects={effects} />{holder ? <Occupants pids={[holder]} names={names} players={game.players} /> : <span className="bc-empty-occupants">Free</span>}</div>; })}</div>}
     </div>
     {[2, 1].map(floor => <div className={`bc-floor bc-floor-${floor}`} key={floor}><div className="bc-floor-label"><span>{floor === 2 ? "02" : "01"}</span><h3>{floor === 2 ? "Second" : "First"} floor</h3><small>{floor === 2 ? "6" : "3"} points per courtier</small></div><div className="bc-rooms">
-      {game.castle?.rooms?.filter(room => room.floor === floor).map(room => <Target key={room.id} {...{ game, onSelect, selected, busy }} space={`castle:${room.id}`} className="bc-room"><CardFace card={room.card} room={room} die={game.pending?.die} /><div className="bc-room-occupancy">{room.dice?.length ? room.dice.map((die, i) => <Die key={i} die={die} />) : <span>Open room</span>}<small>{room.dice?.length || 0}/{dicePerSpace(game)} dice</small></div></Target>)}
+      {game.castle?.rooms?.filter(room => room.floor === floor).map(room => { const occupancy = <div className="bc-room-occupancy">{room.dice?.length ? room.dice.map((die, i) => <Die key={i} die={die} />) : <span>Open room</span>}<small>{room.dice?.length || 0}/{dicePerSpace(game)} dice</small></div>;
+        // A button cannot hold buttons, so while rows are being picked the room is a plain box.
+        return picking ? <div key={room.id} className="bc-target bc-room bc-room-picking"><CardFace card={room.card} room={room} picks={picksFor(room)} onPick={sendMove} busy={busy} />{occupancy}</div>
+          : <Target key={room.id} {...{ game, onSelect, selected, busy }} space={`castle:${room.id}`} className="bc-room"><CardFace card={room.card} room={room} die={game.pending?.die} />{occupancy}</Target>; })}
     </div><CourtierRow game={game} names={names} location={`floor${floor}`} /></div>)}
     <CourtierRow game={game} names={names} location="gate" />
   </section>;
@@ -190,7 +232,7 @@ function Grounds({ game, names, onSelect, selected, busy, sendMove }) {
       <Target {...{ game, onSelect, selected, busy }} space="well" className="bc-well"><Icon name="moon" /><h3>The well</h3><p>1 seal + {(game.well_tiles || []).map(t => rewardText(t.reward)).join(" + ") || "the rewards on its two tiles"}.<br />The same on every visit.</p><div className="bc-space-occupancy"><span>Unlimited visits</span></div></Target>
     </div></section>
     <section className="bc-gardens bc-panel" id="bc-gardens"><SectionHead icon="gardeners" title="The gardens" note="Food to plant · Points at game end" /><div className="bc-garden-grid">{(game.gardens || []).flatMap((garden, i) => ["plant", "stone"].map(kind => { const card = garden[kind]; if (!card) return null; const move = workerMove("gardeners", i, kind); return <button key={`${garden.id}-${kind}`} className={`bc-garden bc-worker-target${move ? " available" : ""}`} disabled={!move || busy} onClick={() => sendMove(move)}><div className="bc-garden-art"><Icon name="gardeners" /><span className={`bc-color-label bc-${garden.bridge}`}>{COLOR_NAMES[garden.bridge]} bridge</span></div><h3>{card.name}</h3><div className="bc-worker-cost"><span><Icon name="food" />{card.cost} food</span><b>{card.vp} points</b></div><Effects effects={card.light} /><p className="bc-card-note">On placement; repeats after rounds 1–2 if this bridge has dice.</p><Occupants pids={gardenOccupants(garden, kind)} names={names} players={game.players} />{move && <span className="bc-worker-cta">Plant a gardener <Icon name="arrow" /></span>}</button>; }))}</div></section>
-    <section className="bc-yards bc-panel" id="bc-yards"><SectionHead icon="warriors" title="Training yards" note="Iron to train · Score with your courtiers" /><div className="bc-yard-grid">{(game.yards || []).map((yard, i) => { const move = workerMove("warriors", i); const pids = Object.entries(game.players).flatMap(([pid, p]) => (p.yards || []).filter(y => y.id === yard.id).map(() => pid)); return <button key={yard.id} className={`bc-yard bc-worker-target${move ? " available" : ""}`} disabled={!move || busy} onClick={() => sendMove(move)}><Icon name="warriors" /><h3>{yard.name}</h3><div className="bc-worker-cost"><span><Icon name="iron" />{yard.cost} iron</span><b>{yard.vp} ×</b></div><p className="bc-card-note">Points per courtier inside the castle. On arrival:</p><Effects effects={yardEffects(yard)} /><Occupants pids={pids} names={names} players={game.players} empty="No warriors" />{move && <span className="bc-worker-cta">Train a warrior <Icon name="arrow" /></span>}</button>; })}</div></section>
+    <section className="bc-yards bc-panel" id="bc-yards"><SectionHead icon="warriors" title="Training yards" note="Iron to train · Score with your courtiers" /><div className="bc-yard-grid">{(game.yards || []).map((yard, i) => { const move = workerMove("warriors", i); const pids = Object.entries(game.players).flatMap(([pid, p]) => (p.yards || []).filter(y => y.id === yard.id).map(() => pid)); return <button key={yard.id} className={`bc-yard bc-worker-target${move ? " available" : ""}`} disabled={!move || busy} onClick={() => sendMove(move)}><Icon name="warriors" /><h3>{yard.name}</h3><div className="bc-worker-cost"><span><Icon name="iron" />{yard.cost} iron</span><b>{yard.vp} ×</b></div><p className="bc-card-note">Points per courtier inside the castle.</p>{yard.tiles?.length ? <div className="bc-yard-tiles" aria-label={`${yard.tiles.length} yard tile${yard.tiles.length === 1 ? "" : "s"}, performed on arrival`}>{yard.tiles.map((t, k) => <div key={k} className={`bc-yard-tile bc-yard-tile-${t.side}`}><span>Tile {t.tile}</span><Effects effects={t.effects} /></div>)}</div> : <Effects effects={yardEffects(yard)} />}<Occupants pids={pids} names={names} players={game.players} empty="No warriors" />{move && <span className="bc-worker-cta">Train a warrior <Icon name="arrow" /></span>}</button>; })}</div></section>
   </>;
 }
 
@@ -198,10 +240,9 @@ function Domain({ game, pid, names, onSelect, selected, busy, inspect = false })
   const player = game.players[pid];
   if (!player) return null;
   return <section className="bc-domain-board bc-panel" id={inspect ? undefined : "bc-domain"}><SectionHead icon="castle" title={inspect ? `${names[pid]}'s domain` : "Your domain"} note="Personal actions" />
-    <CardFace card={player.action_card} onlyLight />
-    <div className="bc-domain-row">{COLORS.map(color => inspect ? <div className="bc-domain-inspect" key={color}><span>{COLOR_NAMES[color]}</span><Effects effects={domainEffects(player, color)} />{player.domain?.[color]?.die && <Die die={player.domain[color].die} />}</div> : <Target key={color} {...{ game, onSelect, selected, busy }} space={`domain:${color}`} className={`bc-domain-slot bc-${color}`}><div><span className="bc-domain-dot" /><strong>{COLOR_NAMES[color]}</strong><Effects effects={domainEffects(player, color)} />{player.domain?.[color]?.die && <Die die={player.domain[color].die} />}</div><p>Pays more as this line's workers leave.</p></Target>)}</div>
+    <div className="bc-domain-card"><span className="bc-kicker">ACTION CARD</span><strong>{player.action_card?.name || "None yet"}</strong><small>Each line performs the action printed beside it.</small></div>
+    <div className="bc-domain-row">{COLORS.map(color => inspect ? <div className={`bc-domain-inspect bc-${color}`} key={color}><DomainLine player={player} color={color} die={player.domain?.[color]?.die} /></div> : <Target key={color} {...{ game, onSelect, selected, busy }} space={`domain:${color}`} className={`bc-domain-slot bc-${color}`}><DomainLine player={player} color={color} die={player.domain?.[color]?.die} /></Target>)}</div>
     <div className="bc-lantern"><h3><Icon name="lantern" />Lantern rewards</h3><p>Collect every reward when you place a low die.</p><div>{player.lantern?.length ? player.lantern.map((reward, i) => <span key={i}>{rewardText(reward)}</span>) : <span>No rewards yet</span>}</div></div>
-    <div className="bc-workers"><h3>Workers in your domain</h3>{Object.entries(WORKERS).map(([key, label]) => <div key={key}><Icon name={key} /><span>{label}</span><b>{player.workers?.[key]?.domain || 0}<small>/ 5</small></b></div>)}<p>Remaining workers available to deploy.</p></div>
     {inspect && <div className="bc-worker-positions"><h3>Deployed workers</h3>{Object.entries(WORKERS).map(([key, label]) => <p key={key}><strong>{label}</strong>{Object.entries(player.workers?.[key] || {}).filter(([place, count]) => place !== "domain" && count > 0).map(([place, count]) => `${count} ${FLOORS[place] || ({ yard_pool: "in training reserve", garden_pool: "in garden reserve", yard: "in training yards", garden: "in gardens" })[place]}`).join(" · ") || "None yet"}</p>)}</div>}
   </section>;
 }
@@ -239,6 +280,13 @@ function moveLabel(move, game) {
   return ["End Turn", "", "check"];
 }
 
+// What a queued decision will be, in the words of the decision panel.
+function queueLabel(item) {
+  const kind = item.kind || "choose_resource";
+  if (kind === "worker") return item.worker === "courtiers" ? "A courtier action" : item.worker === "warriors" ? "Train a warrior" : "Plant a gardener";
+  return { choose_resource: "Choose a resource", board_action: "A castle action", domain_action: "A Domain line", daimyo_slot: "A Daimyo slot", card_action: "A light action on your new card" }[kind] || "An action";
+}
+
 function DecisionPanel({ game, names, myId, sendMove, selected, onSelect, busy, connected }) {
   const moves = game.legal_moves || [];
   const acting = moves.length > 0;
@@ -248,20 +296,38 @@ function DecisionPanel({ game, names, myId, sendMove, selected, onSelect, busy, 
   const ending = moves.some(m => m.type === "end_turn");
   const nextName = names[game.turn_pid] || "The next clan";
   const step = placing ? 2 : taking ? 1 : 3;
-  const title = !connected ? "Reconnecting to the table" : !acting ? `${nextName} is playing` : taking ? "Choose your die" : placing ? "Choose a destination" : ending ? "Your action is complete" : kind === "card_action" ? "Choose an action on your new card" : kind === "choose_resource" ? "Choose a resource" : kind === "outside_worker" ? "Deploy a worker" : kind === "courtier_destination" ? "Choose a floor" : kind === "courtier_actions" ? (game.pending?.audience ? "Climb the castle, or finish" : "Audience and/or climb") : kind === "board_action" ? "Choose a castle action" : kind === "domain_action" ? "Choose a Domain line" : kind === "daimyo_slot" ? "Take a Daimyo slot" : "Choose a worker destination";
+  // The garden step after rounds one and two has no turn player: decisions belong to
+  // whoever stands in a garden, clan by clan, and the round waits for them.
+  const gardenStep = Boolean(game.round_end);
+  const decider = names[game.pending?.pid];
+  const title = !connected ? "Reconnecting to the table" : !acting ? (gardenStep ? (decider ? `${decider} is resolving a garden` : "The gardens are activating") : `${nextName} is playing`) : taking ? "Choose your die" : placing ? "Choose a destination" : ending ? "Your action is complete" : kind === "card_action" ? "Choose an action on your new card" : kind === "choose_resource" ? "Choose a resource" : kind === "outside_worker" ? "Deploy a worker" : kind === "courtier_destination" ? "Choose a floor" : kind === "courtier_actions" ? (game.pending?.audience ? "Climb the castle, or finish" : "Audience and/or climb") : kind === "board_action" ? "Choose a castle action" : kind === "domain_action" ? "Choose a Domain line" : kind === "daimyo_slot" ? "Take a Daimyo slot" : "Choose a worker destination";
   const selectedMove = selected && moves.find(m => m.type === "place_die" && m.space === selected);
   const info = selectedMove ? placementInfo(game, selected) : null;
-  const choices = moves.filter(m => !["take_die", "place_die", "convert", "end_turn"].includes(m.type));
+  // A castle action is chosen ON THE CARDS, where its rows light up; here it is only a
+  // prompt, a folded list for anyone who prefers one, and the way to decline.
+  const boardRows = moves.filter(m => m.type === "board_action");
+  const choices = moves.filter(m => !["take_die", "place_die", "convert", "end_turn", "board_action"].includes(m.type));
   const trades = moves.filter(m => m.type === "convert");
   return <section className="bc-decision bc-panel" id="bc-decision" aria-labelledby="bc-decision-title"><div className="bc-turn-label"><span className={acting ? "lit" : ""} />{acting ? "YOUR TURN" : "AT THE TABLE"}{busy && <small>Sending…</small>}</div>
-    <div className="bc-stepper" aria-label={`Turn step ${step} of 3`}>{["Take", "Place", "Resolve"].map((s, i) => <span className={acting && step === i + 1 ? "current" : step > i + 1 ? "done" : ""} key={s}><b>{step > i + 1 ? <Icon name="check" /> : i + 1}</b>{s}</span>)}</div>
+    {!gardenStep && <div className="bc-stepper" aria-label={`Turn step ${step} of 3`}>{["Take", "Place", "Resolve"].map((s, i) => <span className={acting && step === i + 1 ? "current" : step > i + 1 ? "done" : ""} key={s}><b>{step > i + 1 ? <Icon name="check" /> : i + 1}</b>{s}</span>)}</div>}
     <h2 id="bc-decision-title" aria-live="polite">{title}</h2>
-    {!acting && <p>You can explore the board and inspect every clan while you wait.</p>}
+    {gardenStep && <p className="bc-garden-step"><Icon name="gardeners" />{acting ? "End of the round: your garden acts." : "End of the round: every garden whose bridge still has a die acts once for each gardener there."}</p>}
+    {!acting && !gardenStep && <p>You can explore the board and inspect every clan while you wait.</p>}
+    {acting && game.pending?.source && !["place_die", "end_turn"].includes(kind) && <p className="bc-decision-source">From {game.pending.source}</p>}
     {taking && <p>Take either end of a bridge. The low die also activates your lantern rewards.</p>}
     {placing && <><div className="bc-held-die"><Die die={game.pending.die} /><div><strong>{COLOR_NAMES[game.pending.die.color]} · {game.pending.die.value}</strong><span>{game.pending.side === "left" ? "Low die · Lantern will activate" : "High die · No lantern reward"}</span></div></div><p>Choose a gold-outlined space on the board, then confirm here.</p></>}
     {info && <div className="bc-placement-preview" tabIndex={-1}><span className="bc-kicker">PLACEMENT PREVIEW</span><h3>{info.title}</h3><p>{info.subtitle}</p><Price die={game.pending.die} target={info.target} />{info.effects && <Effects effects={info.effects} />}{info.description && <p>{info.description}</p>}{game.pending.side === "left" && <p className="bc-preview-lantern"><Icon name="lantern" />Plus all your lantern rewards.</p>}<button className="bc-primary bc-confirm" disabled={busy || !connected} onClick={() => sendMove(selectedMove)}>{selected === "well" ? "Place & reveal rewards" : "Place die"}<Icon name="arrow" /></button><button className="bc-text-button" onClick={() => onSelect(null)}>Choose another space</button></div>}
     {placing && <details className="bc-destination-list"><summary>All available destinations <span>{moves.length}</span></summary><div className="bc-choice-grid">{moves.filter(m => m.type === "place_die").map(m => { const choice = placementInfo(game, m.space); return <button key={m.space} onClick={() => onSelect(m.space)} disabled={busy}><strong>{choice.title}{m.space.startsWith("outside") ? ` · ${choice.subtitle}` : ""}</strong><Price die={game.pending.die} target={choice.target} /></button>; })}</div></details>}
+    {boardRows.length > 0 && <><p>Choose a highlighted row on a castle card.</p><details className="bc-destination-list"><summary>All available rows <span>{boardRows.length}</span></summary><div className="bc-choice-grid">{boardRows.map((move, i) => { const [label, note] = moveLabel(move, game); return <button key={i} disabled={busy || !connected} onClick={() => sendMove(move)}><strong>{label}</strong><small>{note}</small></button>; })}</div></details></>}
     {choices.length > 0 && <div className="bc-choice-grid">{choices.map((move, i) => { const [label, note, icon] = moveLabel(move, game); return <button type="button" key={i} disabled={busy || !connected} onClick={() => sendMove(move)}><Icon name={icon} /><span><strong>{label}</strong><small>{note}</small>{move.type === "worker_destination" && (() => { const card = gardenCard(game, move); return <><Effects effects={workerEffects(game, move)} /><small className="bc-choice-reward">{card.vp}{move.worker === "warriors" ? " points × each of your courtiers inside the castle" : " points at game end"}</small></>; })()}</span><Icon name="arrow" /></button>; })}</div>}
+    {acting && (() => {
+      // Decisions still queued behind this one. The head of the queue IS the live
+      // decision until the player commits to it, so it is not listed twice.
+      const queue = game.choice_queue || [];
+      const live = game.pending?.queued && !game.pending?.consumed ? 1 : 0;
+      const later = queue.slice(live).filter(item => item.pid === myId);
+      return later.length > 0 && <div className="bc-queue"><span className="bc-kicker">THEN</span><ol>{later.map((item, i) => <li key={i}>{queueLabel(item)}{item.source ? <small> · {item.source}</small> : null}</li>)}</ol></div>;
+    })()}
     {ending && <><p>Finish your turn, or make an optional trade below.</p><button className="bc-primary bc-end-turn" disabled={busy || !connected} onClick={() => sendMove(moves.find(m => m.type === "end_turn"))}>End Turn <Icon name="arrow" /></button></>}
     {trades.length > 0 && <details className="bc-trades"><summary>Trade resources <span>Optional</span></summary><div className="bc-trade-grid">{trades.map((m, i) => <button key={i} disabled={busy || !connected} onClick={() => sendMove(m)}>{moveLabel(m, game)[0]}</button>)}</div></details>}
     {game.can_undo && <button className="bc-undo" disabled={busy || !connected} onClick={() => sendMove({ type: "undo" })}><Icon name="undo" />Undo this turn</button>}
@@ -323,11 +389,11 @@ export default function BoardView({ roomData, myId, sendMove, onExit, onRules, o
       {game.phase === "draft" ? <Draft {...{ game, names, busy, connected }} sendMove={act} /> : <>
         {game.phase === "over" && <Results {...{ game, names, onExit }} />}
         <div className={`bc-workspace${game.phase === "over" ? " finished" : ""}`}><aside className="bc-rail">{game.phase !== "over" && <DecisionPanel {...{ game, names, myId, selected, busy, connected }} sendMove={act} onSelect={choose} />}<Domain {...{ game, names, selected, busy }} pid={myId} onSelect={choose} /></aside>
-          <div className="bc-board"><Bridges {...{ game, busy }} sendMove={act} /><nav className="bc-board-nav" aria-label="Board areas">{[["bc-castle", "Castle"], ["bc-grounds", "Gates & well"], ["bc-gardens", "Gardens"], ["bc-yards", "Training yards"], ["bc-domain", "Your domain"]].map(([id, label]) => <a key={id} href={`#${id}`}>{label}</a>)}</nav><Castle {...{ game, names, selected, busy }} onSelect={choose} /><Grounds {...{ game, names, selected, busy }} sendMove={act} onSelect={choose} /><Influence {...{ game, names }} /><details className="bc-log bc-panel" open><summary>Castle chronicle <span>{game.log?.length || 0} events</span></summary><div>{(game.log || []).slice(-20).reverse().map(entry => <p key={entry.seq}><b>{entry.turn ? `T${entry.turn}` : "•"}</b><span>{entry.message}</span></p>)}</div></details></div>
+          <div className="bc-board"><Bridges {...{ game, busy }} sendMove={act} /><nav className="bc-board-nav" aria-label="Board areas">{[["bc-castle", "Castle"], ["bc-grounds", "Gates & well"], ["bc-gardens", "Gardens"], ["bc-yards", "Training yards"], ["bc-domain", "Your domain"]].map(([id, label]) => <a key={id} href={`#${id}`}>{label}</a>)}</nav><Castle {...{ game, names, selected, busy }} onSelect={choose} sendMove={act} /><Grounds {...{ game, names, selected, busy }} sendMove={act} onSelect={choose} /><Influence {...{ game, names }} /><details className="bc-log bc-panel" open><summary>Castle chronicle <span>{game.log?.length || 0} events</span></summary><div>{(game.log || []).slice(-20).reverse().map(entry => <p key={entry.seq}><b>{entry.turn ? `T${entry.turn}` : "•"}</b><span>{entry.message}</span></p>)}</div></details></div>
         </div>
       </>}
     </main>
-    {game.phase === "play" && <button className="bc-mobile-turn" onClick={() => document.getElementById("bc-decision")?.scrollIntoView({ behavior: "smooth", block: "start" })}><span><i />{turn ? "Your turn" : `${names[game.turn_pid] || "Opponent"}’s turn`}</span><strong>{turn ? game.pending?.kind === "place_die" ? "Place your die" : game.pending?.kind === "end_turn" ? "Finish turn" : "View action" : "View table"} ↑</strong></button>}
+    {game.phase === "play" && <button className="bc-mobile-turn" onClick={() => document.getElementById("bc-decision")?.scrollIntoView({ behavior: "smooth", block: "start" })}><span><i />{turn ? "Your turn" : game.round_end ? "Gardens activating" : `${names[game.turn_pid] || "Opponent"}’s turn`}</span><strong>{turn ? game.pending?.kind === "place_die" ? "Place your die" : game.pending?.kind === "end_turn" ? "Finish turn" : "View action" : "View table"} ↑</strong></button>}
     {inspect && <RulesModal icon={<Icon name="castle" />} title={`${names[inspect]}${inspect === myId ? " · Your clan" : " · Clan overview"}`} onClose={() => setInspect(null)}><div className="blackcastle bc-inspector"><div className="bc-inspector-stats">{["coins", "seals", "influence"].map(name => <Stat key={name} name={name} value={game.players[inspect][name]} cap={name === "seals" ? 5 : name === "influence" ? 15 : null} />)}{["food", "iron", "pearl"].map(name => <Stat key={name} name={name} value={game.players[inspect].resources?.[name]} cap={7} />)}</div><Domain {...{ game, names }} pid={inspect} inspect /></div></RulesModal>}
   </div>;
 }
