@@ -33,6 +33,7 @@ on:
       - 'books/**'
       - 'notes/**'
       - 'bggfilter/**'
+      - 'steamfilter/**'
       - 'boxpuzzles/**'
       - 'shared/**'
       - '.github/workflows/deploy-pages.yml'

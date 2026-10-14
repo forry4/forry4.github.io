@@ -121,3 +121,5 @@ games/orbit/ai/runs/*
 # BGG Filter harvest scratch (regenerable; only the trimmed payload is committed)
 bggfilter/tools/cache/
 bggfilter/tools/results_all.json
+steamfilter/tools/cache/
+steamfilter/tools/results_all.json

@@ -44,6 +44,8 @@ const EXTRA_ICON = {
 	// replaced was a rounded square of five pips drawn inside a rounded-square plate —
 	// three nested squares at 20px, i.e. mush.
 	bgg: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><path d="M4.4 5.2h15.2l-5.9 7v6.4l-3.4-2.1v-4.3Z" /></svg>),
+	// A gamepad — the Steam Filter is a list of video games — outline and d-pad, two strokes.
+	steam: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><path d="M7.5 8.3h9a4 4 0 0 1 3.9 4.9l-.8 3.4a2 2 0 0 1-3.4.9l-1.7-2.2H9.5l-1.7 2.2a2 2 0 0 1-3.4-.9l-.8-3.4a4 4 0 0 1 3.9-4.9Z" /><path d="M8.5 10.9v3M7 12.4h3" /></svg>),
 	// A page with a folded corner and two ruled lines — the same drawing as Notes' own
 	// note glyph, so the tile and the page it opens agree.
 	notes: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><path d="M6.5 3.5h7.8l3.7 3.7v13.3H6.5Z" /><path d="M14 3.7v3.8h3.8M9.2 12h5.6M9.2 15.4h5.6" /></svg>),
@@ -137,7 +139,7 @@ const GO_CHEVRON = (
 
 export { SITE_NAME, GAMES, GAME_EMBLEM, HERO_RULE };
 
-export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles, onBoxPuzzles, onBooks, onNotes, onBggFilter, onOffline, onSiteHealth, siteAlerts = 0, siteHealth = null, onProfile, onLogout }) {
+export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles, onBoxPuzzles, onBooks, onNotes, onBggFilter, onSteamFilter, onOffline, onSiteHealth, siteAlerts = 0, siteHealth = null, onProfile, onLogout }) {
 	// Built here rather than at module scope because each entry closes over a prop.
 	const games = visibleGames(authUser);
 	const extras = [
@@ -145,6 +147,7 @@ export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles
 		onBoxPuzzles && { id: "boxpuzzles", label: "Box Puzzles", onClick: onBoxPuzzles },
 		{ id: "books", label: "Books", onClick: onBooks },
 		{ id: "bgg", label: "BGG Filter", onClick: onBggFilter },
+		onSteamFilter && { id: "steam", label: "Steam Filter", onClick: onSteamFilter },
 		// A private notebook per account. Shown to guests too: the page tells them to
 		// sign in, which is how they find out it exists (notes/api.py refuses them).
 		onNotes && { id: "notes", label: "Notes", onClick: onNotes },

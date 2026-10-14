@@ -1,0 +1,110 @@
+.stf{min-height:100vh;background:var(--bg);color:var(--text);padding:0 0 80px;}
+.stf-header{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;
+	padding:12px 20px;background:rgba(15,14,12,.92);backdrop-filter:blur(6px);
+	border-bottom:1px solid var(--border);}
+.stf-headtitle{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;letter-spacing:.08em;
+	text-transform:uppercase;color:var(--gold);font-size:.95rem;}
+.stf-headright{margin-left:auto;display:flex;gap:8px;align-items:center;
+	color:var(--text-muted);font-size:.8rem;}
+
+.stf-hero{text-align:center;padding:36px 20px 22px;}
+.stf-logo{font-family:'Cinzel','Cinzel Fallback',serif;font-size:clamp(1.9rem,6vw,2.6rem);
+	font-weight:700;color:var(--gold);letter-spacing:.06em;}
+.stf-tagline{color:var(--text-dim);margin:10px auto 0;font-style:italic;font-size:1.02rem;
+	max-width:60ch;line-height:1.55;}
+
+.stf-wrap{max-width:1200px;margin:0 auto;padding:0 20px;}
+.stf-num{font-variant-numeric:tabular-nums;}
+
+/* ── dials ─────────────────────────────────────────────────────────────── */
+.stf-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+	padding:18px 20px;margin:8px 0 0;}
+.stf-phead{display:flex;align-items:baseline;justify-content:space-between;gap:14px;
+	flex-wrap:wrap;margin:0 0 14px;}
+.stf-phead h2{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.78rem;letter-spacing:.12em;
+	text-transform:uppercase;color:var(--text-dim);font-weight:700;margin:0;}
+.stf-knobs{display:grid;gap:14px 22px;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));}
+.stf-knob label{display:block;font-size:.76rem;color:var(--text-dim);
+	letter-spacing:.04em;margin:0 0 4px;}
+.stf-knob .stf-v{float:right;color:var(--gold);font-weight:700;}
+.stf-knob input[type=range]{width:100%;display:block;margin:0;
+	height:20px;accent-color:var(--gold);cursor:pointer;
+	/* a horizontal drag belongs to the slider; a vertical one still scrolls the page. Without
+	   this the scroller can claim a drag that is a few degrees off true. */
+	touch-action:pan-y;}
+.stf-knob input[type=range]:focus-visible{
+	outline:2px solid var(--gold);outline-offset:3px;}
+
+.stf-effect{margin:16px 0 0;padding-top:13px;border-top:1px solid var(--border);
+	font-size:.88rem;color:var(--text-dim);}
+.stf-effect b{color:var(--text);}
+
+/* ── controls ──────────────────────────────────────────────────────────── */
+.stf-controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:18px 0 10px;}
+.stf-search{flex:1 1 200px;min-width:0;display:flex;align-items:center;gap:8px;
+	background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+	padding:8px 12px;}
+.stf-search input{border:0;background:transparent;color:var(--text);font:inherit;width:100%;
+	outline:none;}
+.stf-count{white-space:nowrap;font-size:.8rem;color:var(--text-muted);
+	font-variant-numeric:tabular-nums;}
+.stf-count b{color:var(--text);}
+
+/* ── table ─────────────────────────────────────────────────────────────── */
+.stf-tablewrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);
+	background:var(--surface);}
+.stf table{border-collapse:collapse;width:100%;min-width:640px;}
+.stf thead th{position:sticky;top:0;z-index:2;background:var(--surface2);
+	border-bottom:1px solid var(--border);font-size:.68rem;letter-spacing:.1em;
+	text-transform:uppercase;color:var(--text-dim);font-weight:700;text-align:left;
+	padding:10px 12px;white-space:nowrap;font-family:'Cinzel','Cinzel Fallback',serif;}
+.stf thead th.stf-s{cursor:pointer;user-select:none;}
+.stf thead th.stf-s:hover{color:var(--text);}
+.stf thead th.stf-s:focus-visible{outline:2px solid var(--gold);outline-offset:-2px;}
+.stf th .stf-arw{opacity:0;margin-left:5px;font-size:.6rem;}
+.stf th[aria-sort] .stf-arw{opacity:1;color:var(--gold);}
+.stf tbody td{padding:9px 12px;border-bottom:1px solid var(--border);vertical-align:middle;}
+.stf tbody tr:last-child td{border-bottom:0;}
+.stf tbody tr:hover{background:var(--surface2);}
+.stf-pos{width:48px;color:var(--text-muted);font-size:.8rem;text-align:right;}
+.stf-game{min-width:210px;}
+.stf-game a{color:var(--text);text-decoration:none;font-weight:600;font-size:.94rem;
+	border-bottom:1px solid transparent;}
+.stf-game a:hover,.stf-game a:focus-visible{color:var(--gold);border-bottom-color:var(--gold);}
+.stf-rating{width:84px;}
+.stf-rating b{font-size:1.05rem;font-weight:700;color:var(--gold);}
+/* F score sits between the two ratings it blends, and reads between them too:
+   the Rating column's weight without its gold. */
+.stf-f{width:78px;color:var(--text);font-size:.9rem;font-weight:600;}
+.stf-a,.stf-t,.stf-y{width:84px;color:var(--text-dim);font-size:.82rem;}
+
+.stf-empty{padding:44px 16px;text-align:center;color:var(--text-dim);}
+.stf-empty b{display:block;color:var(--text);font-size:1rem;margin-bottom:6px;}
+.stf-more{display:block;width:100%;padding:13px;cursor:pointer;background:var(--surface);
+	border:0;border-top:1px solid var(--border);font:inherit;font-size:.84rem;font-weight:700;
+	color:var(--gold);font-family:'Cinzel','Cinzel Fallback',serif;letter-spacing:.06em;}
+.stf-more:hover{background:var(--surface2);}
+.stf-more:focus-visible{outline:2px solid var(--gold);outline-offset:-2px;}
+
+.stf-loading{padding:80px 20px;text-align:center;color:var(--text-dim);}
+
+.stf-notes{margin:32px 0 0;padding-top:22px;border-top:1px solid var(--border);
+	display:grid;gap:20px;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));}
+.stf-notes h3{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;letter-spacing:.12em;
+	text-transform:uppercase;color:var(--text-dim);font-weight:700;margin:0 0 7px;}
+.stf-notes p{margin:0 0 8px;font-size:.82rem;line-height:1.6;color:var(--text-dim);max-width:60ch;}
+.stf-notes p:last-child{margin-bottom:0;}
+.stf-notes b{color:var(--text);}
+
+@media(max-width:640px){
+	.stf-hero{padding:26px 16px 18px;}
+	.stf-wrap{padding:0 12px;}
+	.stf-panel{padding:14px 14px;}
+}
+
+/* A fingertip covers ~40px and the slider drew a 20px row. The visual stays slim — the native
+   control centres itself in the box — but the whole height is grabbable, and every press inside
+   it moves the dial (see rangePointer in the JSX). */
+@media(pointer:coarse){
+	.stf-knob input[type=range]{height:40px;}
+}

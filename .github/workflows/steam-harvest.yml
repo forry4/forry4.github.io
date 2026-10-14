@@ -1,0 +1,50 @@
+name: Steam Filter harvest
+
+# Re-collects webapp/public/data/steam-filter.json from the Steam store and
+# commits it to main. Manual only ("Run workflow"): a harvest is ~1-2 hours of
+# polite requests, and the list moves slowly enough that a refresh every month
+# or two is plenty.
+#
+# A push made with GITHUB_TOKEN does not trigger other workflows, so the job
+# dispatches the Pages deploy itself once the data is on main.
+
+on:
+  workflow_dispatch:
+    inputs:
+      min_reviews:
+        description: 'English-review floor for the dataset'
+        default: '50'
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: steam-harvest
+  cancel-in-progress: false
+
+jobs:
+  harvest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - name: Harvest
+        run: python steamfilter/tools/scan_steam.py --min-reviews "${{ inputs.min_reviews }}"
+      - name: Build the payload
+        run: python steamfilter/tools/make_data.py
+      - name: Commit and deploy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add webapp/public/data/steam-filter.json
+          if git diff --cached --quiet; then echo "no change"; exit 0; fi
+          git commit -m "Steam Filter: harvest $(date -u +%Y-%m-%d)"
+          git pull --rebase origin main
+          git push origin HEAD:main
+          gh workflow run deploy-pages.yml --ref main

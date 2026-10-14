@@ -61,6 +61,7 @@ const SCREENS = [
 	// A guest gets Notes' private notice — .nt-app is still Notes' own root.
 	{ path: "/notes", chunk: "Notes", marker: ".nt-app" },
 	{ path: "/bggfilter", chunk: "BggFilter", marker: ".bgf" },
+	{ path: "/steamfilter", chunk: "SteamFilter", marker: ".stf" },
 	{ path: "/boxpuzzles", chunk: "BoxPuzzles", marker: ".bx" },
 ];
 
@@ -3078,6 +3079,7 @@ try {
 			// is the only reason it was a failure rather than a pass.
 			{ name: "the auth screen", path: "/", wait: ".auth-field", min: 2, anon: true },
 			{ name: "/bggfilter", path: "/bggfilter", wait: ".bgf-search input", min: 1 },
+			{ name: "/steamfilter", path: "/steamfilter", wait: ".stf-search input", min: 1 },
 			// BOOKS IS THE ONE HOLE, AND IT IS THE PAGE'S, NOT THIS WALK'S. `/books`
 			// renders no field at all to this harness — the editor needs `can_edit`
 			// from the server and even the search box is behind a populated list — so
@@ -9582,8 +9584,8 @@ try {
 		check("...and it opens the offline hub", await has(".offline-hub") && new URL(page.url()).pathname === "/offline",
 			page.url());
 		const rows = await page.locator(".offline-read [data-read]").evaluateAll((els) => els.map((e) => e.dataset.read));
-		check("the hub's Read section lists all five screens",
-			JSON.stringify(rows) === JSON.stringify(["puzzles", "bggfilter", "books", "notes", "profile"]), JSON.stringify(rows));
+		check("the hub's Read section lists all six screens",
+			JSON.stringify(rows) === JSON.stringify(["puzzles", "bggfilter", "steamfilter", "books", "notes", "profile"]), JSON.stringify(rows));
 		check("...and still has exactly one Open button (the scorecard's)",
 			await page.getByRole("button", { name: /^Open$/ }).count() === 1);
 
@@ -9624,7 +9626,7 @@ try {
 		check("with the backend unreachable, the hub still opens", await has(".offline-hub", 25_000));
 		const states = await page.locator(".offline-read .offline-read-state").allTextContents();
 		check("...and says a copy is on this device for Books, Notes and the profile",
-			states.slice(2).every((t) => /copy is on this device/.test(t)), JSON.stringify(states));
+			states.slice(3).every((t) => /copy is on this device/.test(t)), JSON.stringify(states));
 
 		await openRead("books");
 		await has(".bk-app");

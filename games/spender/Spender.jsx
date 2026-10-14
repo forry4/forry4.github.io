@@ -55,6 +55,7 @@ const Books = lazyChunk("Books", () => import("../../books/Books.jsx"));
 const Notes = lazyChunk("Notes", () => import("../../notes/Notes.jsx"));
 const Profile = lazyChunk("Profile", () => import("../../shared/Profile.jsx"));
 const BggFilter = lazyChunk("BggFilter", () => import("../../bggfilter/BggFilter.jsx"));
+const SteamFilter = lazyChunk("SteamFilter", () => import("../../steamfilter/SteamFilter.jsx"));
 const BoxPuzzles = lazyChunk("BoxPuzzles", () => import("../../boxpuzzles/BoxPuzzles.jsx"));
 
 // Shown while a game's chunk loads. Deliberately an empty full-height panel in the
@@ -126,8 +127,8 @@ const HTTP_BASE = WS_BASE.replace(/^ws/, "http").replace(/\/ws$/, "");
 // tables — GAMES[].id ≠ path for wherewolf; Spender is one site-level screen now.
 // The shell owns segment 1; each sub-game owns its own segment 2 (room id). The Spender
 // Spender's own waiting/game map to "spender" (or "puzzles" while puzzling) in applyPopRoute.
-const SCREEN_FOR_MODE = { spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", books: "books", notes: "notes", profile: "profile", puzzles: "puzzles", bggfilter: "bggfilter", boxpuzzles: "boxpuzzles", offline: "offline" };
-const MODE_FOR_SCREEN = { home: "home", spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", books: "books", notes: "notes", profile: "profile", puzzles: "puzzles", bggfilter: "bggfilter", boxpuzzles: "boxpuzzles", offline: "offline" };
+const SCREEN_FOR_MODE = { spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", books: "books", notes: "notes", profile: "profile", puzzles: "puzzles", bggfilter: "bggfilter", steamfilter: "steamfilter", boxpuzzles: "boxpuzzles", offline: "offline" };
+const MODE_FOR_SCREEN = { home: "home", spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", books: "books", notes: "notes", profile: "profile", puzzles: "puzzles", bggfilter: "bggfilter", steamfilter: "steamfilter", boxpuzzles: "boxpuzzles", offline: "offline" };
 
 // Per-game emblem — inline SVG tinted via currentColor (=the card's --accent), so no
 // raster asset / CDN (keeps the self-hosted, no-CLS constraint). Small motifs that read
@@ -761,6 +762,7 @@ function offlineReadRows(authUser, readingPack) {
 	return [
 		packed("puzzles", "Spender Puzzles", "Play"),
 		packed("bggfilter", "BGG Filter", "Browse"),
+		packed("steamfilter", "Steam Filter", "Browse"),
 		{ id: "books", label: "Books", verb: "Read", enabled: online || lsHas("books.offline.v1"),
 			state: saved(lsHas("books.offline.v1"), "open it once online to keep a copy") },
 		member
@@ -821,11 +823,12 @@ const OFFLINE_PACKS = {
 	// own copy whenever it is used online, and `warm` takes one now so a fresh
 	// download is complete without visiting each screen first.
 	reading: {
-		label: "Puzzles, BGG Filter, Books, Notes & profile", size: "~1 MB",
-		urls: ["data/puzzles.json", "data/bgg-filter.json", ...OFFLINE_FONT_URLS],
+		label: "Puzzles, BGG & Steam Filters, Books, Notes & profile", size: "~1.5 MB",
+		urls: ["data/puzzles.json", "data/bgg-filter.json", "data/steam-filter.json", ...OFFLINE_FONT_URLS],
 		chunks: [
 			() => import("../../books/Books.jsx"), () => import("../../notes/Notes.jsx"),
 			() => import("../../shared/Profile.jsx"), () => import("../../bggfilter/BggFilter.jsx"),
+			() => import("../../steamfilter/SteamFilter.jsx"),
 		],
 		warm: async ({ authUser }) => {
 			const [books, notes, profile] = await Promise.all([
@@ -3047,6 +3050,7 @@ export default function SpenderApp() {
 			onNotes={() => nav("notes")}
 			onProfile={() => navigateTo("profile")}
 			onBggFilter={() => nav("bggfilter")}
+			onSteamFilter={() => nav("steamfilter")}
 			onBoxPuzzles={() => nav("boxpuzzles")}
 			onOffline={() => { pushPath(buildPath("offline")); enterOfflineHub(null); }}
 			onSiteHealth={() => setSiteHealthOpen(true)} siteAlerts={siteAlerts}
@@ -3084,6 +3088,13 @@ export default function SpenderApp() {
 	if (screen === "bggfilter") return (
 		<Suspense fallback={<GameChunkLoading />}>
 			<BggFilter onExit={exitRead} />
+		</Suspense>
+	);
+
+	// Steam Filter — static Steam reviews dataset, filtered client-side. No backend.
+	if (screen === "steamfilter") return (
+		<Suspense fallback={<GameChunkLoading />}>
+			<SteamFilter onExit={exitRead} />
 		</Suspense>
 	);
 
