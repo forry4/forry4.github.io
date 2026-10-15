@@ -36,8 +36,12 @@ total English reviews. Nothing derived is stored.
    its tail in silence.
 2. `store.steampowered.com/appreviews/<id>?json=1&language=english&purchase_type=all&num_per_page=0`
    — the exact English `total_positive` / `total_reviews`. `purchase_type=all` counts key
-   activations too; the default off-topic (review-bomb) filter stays on. Answers are cached
-   under `tools/cache/reviews/` for `--fresh-hours` (48) so a crashed run resumes.
+   activations too; the default off-topic (review-bomb) filter stays on.
+
+**The harvest is resumable.** Every search page and review answer is cached under
+`tools/cache/` as it arrives and reused for `--fresh-hours` (48). The workflow restores that
+cache, gives the Harvest STEP its own timeout (so the job outlives it) and saves the cache with
+`if: always()` — a run that times out or fails is continued by running the workflow again.
 
 Every response is validated before use (`validate_search` / `validate_reviews`); 429/5xx back
 off 30s+ per try. The admission rule is `keep()` — one function, pinned by the tests.
