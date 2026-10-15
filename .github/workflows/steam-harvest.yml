@@ -26,14 +26,29 @@ concurrency:
 jobs:
   harvest:
     runs-on: ubuntu-24.04
-    timeout-minutes: 340
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: '3.14'
+      # Every Steam answer is cached as it arrives, and the cache is saved even when
+      # the harvest fails or hits its step timeout, so "Run workflow" again resumes
+      # where the last run stopped (answers younger than 48h are reused).
+      - uses: actions/cache/restore@v4
+        with:
+          path: steamfilter/tools/cache
+          key: steam-harvest-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: steam-harvest-
       - name: Harvest
-        run: python steamfilter/tools/scan_steam.py --min-reviews "${{ inputs.min_reviews }}"
+        # A step timeout, not the job's: the job must outlive it to save the cache.
+        timeout-minutes: 320
+        run: python -u steamfilter/tools/scan_steam.py --min-reviews "${{ inputs.min_reviews }}"
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: steamfilter/tools/cache
+          key: steam-harvest-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Build the payload
         run: python steamfilter/tools/make_data.py
       - name: Commit and deploy

@@ -161,8 +161,25 @@ def keep(pos, total, min_reviews):
 
 # ── the two passes ────────────────────────────────────────────────────────
 
-def harvest_search(workers):
-    first = fetch(SEARCH.format(start=0, count=PAGE), validate_search)
+def cached_fetch(path, fresh_hours, url, check):
+    """fetch(), but reuse a validated answer saved within `fresh_hours`. Every
+    answer is written as soon as it arrives, so a run that is killed (the
+    workflow's step timeout) resumes where it stopped instead of from zero."""
+    if os.path.exists(path) and time.time() - os.path.getmtime(path) < fresh_hours * 3600:
+        try:
+            return check(open(path, encoding="utf-8").read())
+        except Rejected:
+            pass
+    j = fetch(url, check)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(j, f)
+    return j
+
+
+def harvest_search(workers, fresh_hours):
+    page_path = lambda start: os.path.join(CACHE, "search", f"{start}.json")
+    first = fetch(SEARCH.format(start=0, count=PAGE), validate_search)   # always fresh: it sets the total
     total = int(first.get("total_count") or 0)
     if total < 1000:
         raise SystemExit(f"search reports only {total} games — refusing a truncated universe")
@@ -171,7 +188,8 @@ def harvest_search(workers):
     pages = {0: first}
 
     def one(start):
-        pages[start] = fetch(SEARCH.format(start=start, count=PAGE), validate_search)
+        pages[start] = cached_fetch(page_path(start), fresh_hours,
+                                    SEARCH.format(start=start, count=PAGE), validate_search)
         if len(pages) % 50 == 0:
             log(f"search: {len(pages):,}/{len(starts) + 1:,} pages")
 
@@ -194,25 +212,15 @@ def harvest_search(workers):
 
 
 def harvest_reviews(cands, workers, fresh_hours):
-    os.makedirs(os.path.join(CACHE, "reviews"), exist_ok=True)
     done = [0]
 
     def one(g):
-        p = os.path.join(CACHE, "reviews", f"{g['id']}.json")
-        j = None
-        if os.path.exists(p) and time.time() - os.path.getmtime(p) < fresh_hours * 3600:
-            try:
-                j = validate_reviews(open(p, encoding="utf-8").read())
-            except Rejected:
-                j = None
-        if j is None:
-            j = fetch(REVIEWS.format(id=g["id"]), validate_reviews)
-            with open(p, "w", encoding="utf-8") as f:
-                json.dump({"success": 1, "query_summary": j["query_summary"]}, f)
+        j = cached_fetch(os.path.join(CACHE, "reviews", f"{g['id']}.json"), fresh_hours,
+                         REVIEWS.format(id=g["id"]), validate_reviews)
         q = j["query_summary"]
         g["pos"], g["tot"] = int(q.get("total_positive") or 0), int(q.get("total_reviews") or 0)
         done[0] += 1
-        if done[0] % 500 == 0:
+        if done[0] % 250 == 0:
             log(f"reviews: {done[0]:,}/{len(cands):,}")
 
     with ThreadPoolExecutor(workers) as ex:
@@ -227,7 +235,7 @@ def main(argv=None):
                     help="reuse a cached review count younger than this (resumes a crashed run)")
     a = ap.parse_args(argv)
 
-    total, by_id = harvest_search(a.workers)
+    total, by_id = harvest_search(a.workers, a.fresh_hours)
     cands = [g for g in by_id.values() if is_candidate(g, a.min_reviews)]
     log(f"prefilter: {len(cands):,} candidates ({a.min_reviews}+ reviews, {PREFILTER_PCT}%+ on the store)")
     harvest_reviews(cands, a.workers, a.fresh_hours)
