@@ -41,7 +41,9 @@ total English reviews. Nothing derived is stored.
 **The harvest is resumable.** Every search page and review answer is cached under
 `tools/cache/` as it arrives and reused for `--fresh-hours` (48). The workflow restores that
 cache, gives the Harvest STEP its own timeout (so the job outlives it) and saves the cache with
-`if: always()` — a run that times out or fails is continued by running the workflow again.
+`if: always()` — a run that times out or fails starts the next round itself (up to 3), which reuses every
+answer already collected. Measured 2026-10-15: search ~68 min for 132k games, then ~60
+review lookups a minute (Steam throttles) for ~22k candidates — about two rounds in all.
 
 Every response is validated before use (`validate_search` / `validate_reviews`); 429/5xx back
 off 30s+ per try. The admission rule is `keep()` — one function, pinned by the tests.

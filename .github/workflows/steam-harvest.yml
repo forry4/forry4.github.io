@@ -14,6 +14,9 @@ on:
       min_reviews:
         description: 'English-review floor for the dataset'
         default: '50'
+      round:
+        description: 'Continuation round (set by the workflow itself; leave at 1)'
+        default: '1'
 
 permissions:
   contents: write
@@ -41,7 +44,10 @@ jobs:
           key: steam-harvest-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: steam-harvest-
       - name: Harvest
+        id: harvest
         # A step timeout, not the job's: the job must outlive it to save the cache.
+        # Measured 2026-10-15: search ~68 min (132k games), then ~60 review lookups a
+        # minute against ~22k candidates — ~7h in all, more than one job may run.
         timeout-minutes: 320
         run: python -u steamfilter/tools/scan_steam.py --min-reviews "${{ inputs.min_reviews }}"
       - uses: actions/cache/save@v4
@@ -49,6 +55,15 @@ jobs:
         with:
           path: steamfilter/tools/cache
           key: steam-harvest-${{ github.run_id }}-${{ github.run_attempt }}
+      # Out of time (or a transient failure): the cache is saved above, so start the
+      # next round, which reuses every answer already collected. Capped at 3 rounds.
+      - name: Continue in a new run
+        if: always() && steps.harvest.outcome != 'success' && fromJSON(inputs.round) < 3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run steam-harvest.yml --ref main \
+            -f min_reviews="${{ inputs.min_reviews }}" -f round="$(( ${{ inputs.round }} + 1 ))"
       - name: Build the payload
         run: python steamfilter/tools/make_data.py
       - name: Commit and deploy
