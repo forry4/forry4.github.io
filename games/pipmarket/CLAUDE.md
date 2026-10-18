@@ -19,7 +19,11 @@ before the game was built — see "The bot" below.
 
 - **Market**: one set per player plus one, five vertical pairs each (30 / 40 / 50 dice).
   A column's price is its INDEX + 1, so buying one slides everything to its right one step
-  cheaper. Later rounds deal the rerolled dice round-robin as pairs; an odd die sits alone.
+  cheaper. Later rounds deal the rerolled dice AS EVENLY AS POSSIBLE BY DICE (`_deal`: every
+  stall gets n // S, the first n % S one more; pairs within a stall, an odd stall ends on a
+  single). Dealing pairs round-robin was the first version and left 17 dice over five
+  stalls as 4/4/4/3/2; the user asked for even stalls, which means several stalls can now
+  end on a single die.
 - **Money**: last seat starts on 12, each earlier seat one less. Cap 18; taking money is
   refused at 18 (you must buy). A line pays +1, +5 at 15+, and SETS money to 18 at 30+.
 - **Placement**: a pair stays together, may be rotated, must touch the board after the
@@ -30,8 +34,13 @@ before the game was built — see "The bot" below.
   skipped; if nobody can act, the leftover market dice go to the cup and scoring starts.
 - **Scoring**: a straight unbroken run of one face, length ≥ face, any sub-run; the board
   must stay connected after removal. Players alternate one line at a time starting with the
-  LAST BUYER; passing is permanent for the round; a player with nothing to score is passed
-  automatically. 1s are offered one at a time (a run of 1s scored together is dominated).
+  LAST BUYER. **Scoring is COMPULSORY** (user call, after the first release offered "Stop
+  scoring"): while you have a line you must score one, so the only choice is which line and
+  therefore the order. There is no pass move; `apply_move` refuses `{"type":"pass"}` and
+  `legal_moves` never offers it. A player with nothing left is marked in `passed`
+  automatically (a log `pass` with `auto: true`) — a removal only touches its own board, so
+  nothing can give them a line back. 1s are offered one at a time (a run of 1s scored
+  together is dominated). Old saves can still carry `auto: false` pass entries in the log.
 - **Round end**: scored dice go to `cup`, are rerolled and dealt back; the last buyer opens
   the next round. A round where nobody scored ends the game. Ties are shared wins.
 
@@ -68,8 +77,12 @@ dominant; 15+ lines appear in ~62% of games and 30+ in ~20%; rounds 2 and 3 aver
 
 - **Dice fly.** `useDiceFlight` snapshots every `[data-die]` rect in the RENDER body when
   `event_seq` changes (the last moment the old DOM exists), and after commit `flyDice` puts a
-  clone in the fixed `.pm-fx` layer for each die that moved and animates it from the old rect
-  to the new one with the Web Animations API. The real die is hidden with `opacity`, never
+  clone in the `.pm-fx` layer for each die that moved and animates it from the old rect to
+  the new one with the Web Animations API. **The layer is ABSOLUTE in the table root, not
+  fixed** — a fixed layer held each die still while a phone scrolled the boards under it,
+  and the die then jumped to where its target had gone. Popups live in the page for the
+  same reason. Clone positions are page-relative (rect minus the layer's own rect); the
+  deltas are viewport-relative and need no conversion. The real die is hidden with `opacity`, never
   `visibility` — a pip's own `visibility:visible` shows through a hidden parent. A die whose
   face changed (a reroll) spins and swaps its face mid-flight. Reduced motion skips it all.
 - **Only a new `event_seq` animates**; reconnects and duplicate broadcasts repaint in place.
@@ -77,6 +90,9 @@ dominant; 15+ lines appear in ~62% of games and 30+ in ~20%; rounds 2 and 3 aver
   newer than the last seq seen.
 - **Boards draw in a fixed 8×8 frame** (6 cells of dice + 2 of reach); the visible window is
   computed from the dice, so a growing board recentres and the flight layer animates it.
+- **Nothing animates `filter` or sits `position:fixed` over the whole page**: the dot weave
+  is a background layer and the lantern's flicker is an opacity pulse, because both were
+  repainting every scroll frame on a phone.
 - **Below 1180px the action panel is a fixed bottom bar** — in the stacked layout it would
   otherwise sit under every board.
 - The shared kit owns the lobby, create modal, waiting room, rules modal and menu; this

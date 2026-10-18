@@ -48,17 +48,19 @@ export default function PipMarketRules() {
         { t: "Money", d: "+1 for the line; +5 if it scored 15 or more; a line of 30 or more sets you to 18." },
       ]} />
       <p>After a line is removed, every die left on your board must still touch
-        another die. Scoring is optional, and once you stop you cannot score
-        again this round.</p>
+        another die. Scoring is compulsory: while you have a line you can score,
+        you must score one on your turn. You choose which line, and so the order.
+        A player with no line left is out of scoring for the round.</p>
       <RulesTip>Order matters: score a die that would be stranded first. Two 1s
         scored one at a time earn two money instead of one.</RulesTip>
     </RulesSection>
 
     <RulesSection title="End of the round">
-      <p>Every scored die is rerolled and dealt back into the market as vertical
-        pairs, one pair to each set in turn; an odd die sits alone in the last
-        column. Dice you did not score stay on your board. Whoever bought the
-        last pair goes first next round.</p>
+      <p>When nobody has a line left, every scored die is rerolled and dealt back
+        into the market as evenly as possible: no stall holds more than one die
+        more than another. Within a stall the dice stand in vertical pairs, and a
+        stall with an odd count ends on a single die. Dice you did not score stay
+        on your board. Whoever bought the last pair goes first next round.</p>
     </RulesSection>
 
     <RulesSection title="End of the game">
@@ -71,7 +73,7 @@ export default function PipMarketRules() {
     <RulesSection title="At the table">
       <p>Select a lit pair in the market, then a glowing cell on your board.
         Select the same cell again to turn the pair, and Place to buy it. When
-        scoring, select a lit die or a line from the list, then Score.</p>
+        scoring, select a lit die or a line from the list, then Score line.</p>
     </RulesSection>
   </>;
 }

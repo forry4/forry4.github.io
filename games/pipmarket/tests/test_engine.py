@@ -186,7 +186,7 @@ def test_money_after():
     assert engine.money_after(36, 17) == 18
 
 
-def test_scoring_alternates_and_passing_is_permanent():
+def test_scoring_alternates_and_is_compulsory():
     game = fresh()
     a, b = game["players"]
     game["boards"][a] = [die(0, 1, 0, 0), die(1, 1, 0, 1), die(2, 6, 0, 2)]
@@ -197,13 +197,47 @@ def test_scoring_alternates_and_passing_is_permanent():
     assert game["phase"] == "scoring" and game["turn"] == a
     assert engine.apply_move(game, a, {"type": "score", "cells": [[0, 0]]})[0]
     assert game["turn"] == b
-    assert engine.apply_move(game, b, {"type": "pass"})[0]
+    # b has a line, so b may not stop: there is no pass while a line is open
+    assert engine.apply_move(game, b, {"type": "pass"}) == (False, "you must score while you have a line")
+    assert {"type": "pass"} not in engine.legal_moves(game, b)
+    assert engine.apply_move(game, b, {"type": "score", "cells": [[0, 0]]})[0]
     assert game["turn"] == a
     assert engine.apply_move(game, a, {"type": "score", "cells": [[0, 0]]})[0]
-    # a has nothing left, b passed: the round ends and the scored dice come back
+    # nobody has a line left: the round ends and every scored die comes back
     assert game["phase"] == "auction" and game["round"] == 2
-    assert market_ids(game) == {0, 1}
+    assert market_ids(game) == {0, 1, 3}
     assert game["turn"] == a      # the last buyer goes first
+
+
+@pytest.mark.parametrize("n_dice,n_sets,expected", [
+    (17, 5, [4, 4, 3, 3, 3]),
+    (11, 3, [4, 4, 3]),
+    (6, 5, [2, 1, 1, 1, 1]),
+    (30, 3, [10, 10, 10]),
+    (3, 4, [1, 1, 1, 0]),
+])
+def test_the_stalls_are_filled_as_evenly_as_possible(n_dice, n_sets, expected):
+    dice = [{"id": i, "f": 1} for i in range(n_dice)]
+    market = engine._deal(dice, n_sets)
+    counts = [sum(len(col) for col in cols) for cols in market]
+    assert counts == expected
+    for cols in market:
+        # pairs first; only the last column of a stall may hold a single die
+        assert all(len(col) == 2 for col in cols[:-1])
+    assert sorted(d["id"] for cols in market for col in cols for d in col) == list(range(n_dice))
+
+
+def test_a_later_round_deals_evenly():
+    game = fresh(4)
+    for pid in game["players"]:
+        game["boards"][pid] = []
+    # 17 dice come back from the cup into five stalls
+    game["cup"] = [{"id": i, "f": 1} for i in range(17)]
+    game["round_scored"] = 17
+    game["phase"] = "scoring"
+    engine._end_round(game)
+    counts = [sum(len(col) for col in cols) for cols in game["market"]]
+    assert counts == [4, 4, 3, 3, 3]
 
 
 def market_ids(game):

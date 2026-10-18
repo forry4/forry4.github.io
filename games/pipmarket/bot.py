@@ -163,8 +163,8 @@ def best_scoring(board: list[dict], money: int) -> tuple[int, list[list[list[int
 
 def choose_scoring(game: dict, pid: str) -> dict:
     _, plan = best_scoring(game["boards"][pid], game["money"][pid])
-    if not plan:
-        return {"type": "pass"}
+    if not plan:      # unreachable: the turn only reaches a player with a line
+        return None
     return {"type": "score", "cells": plan[0]}
 
 

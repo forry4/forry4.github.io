@@ -10,15 +10,17 @@
   --die:38px;--cell:58px;
   color:var(--pm-ink)
 }
-.pm-game,.pm-connecting{min-height:100vh;
+/* The dot weave is the FIRST background layer, not a position:fixed overlay: a
+   fixed full-screen layer is repainted on every scroll frame on a phone, and it
+   was one of the things stealing frames from the dice in flight. */
+.pm-game,.pm-connecting{position:relative;min-height:100vh;
   background:
+    radial-gradient(rgba(255,220,235,.022) 1px,transparent 1.2px) 0 0/7px 7px,
     radial-gradient(60rem 26rem at 12% -6%,rgba(242,145,124,.16),transparent 70%),
     radial-gradient(50rem 24rem at 92% -8%,rgba(233,185,94,.10),transparent 70%),
     radial-gradient(90rem 50rem at 50% 120%,rgba(120,40,110,.30),transparent 70%),
     linear-gradient(180deg,#1d0f22,#140a18 60%,#100814);
   font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
-.pm-game:before,.pm-connecting:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.5;
-  background-image:radial-gradient(rgba(255,220,235,.045) 1px,transparent 1.2px);background-size:7px 7px}
 .pm-game{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 .pm-overlay{position:relative;z-index:50;min-height:0}
 .pm-toast{position:fixed;z-index:120;left:50%;bottom:24px;transform:translateX(-50%);max-width:min(90vw,520px);padding:11px 16px;
@@ -52,7 +54,7 @@
 .pm-die-mini i{box-shadow:none}
 button.pm-die{cursor:pointer}
 .pm-die.pm-landed{animation:pm-land .36s ease-out}
-.pm-fx{position:fixed;inset:0;pointer-events:none;z-index:80}
+.pm-fx{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:80}
 .pm-fx .pm-die{position:absolute;margin:0;will-change:transform;box-shadow:inset 0 calc(var(--d)*-.06) 0 #cdb795,inset 0 1px 0 #fff,0 14px 22px rgba(8,2,10,.55)}
 .pm-fx .pm-die.rolling i{transition:none}
 
@@ -75,7 +77,11 @@ button.pm-die{cursor:pointer}
 .pm-lantern{z-index:0}.pm-lantern i{z-index:-1}
 .pm-lantern.past{color:#d9b46a}.pm-lantern.past i{border-color:#8a6a3a;background:linear-gradient(180deg,#4a3420,#33231a)}
 .pm-lantern.now{color:#3a1209}.pm-lantern.now i{border-color:#ffc9b9;background:radial-gradient(circle at 50% 40%,#ffd9c8,#f2917c 60%,#c9604c);
-  box-shadow:0 0 18px rgba(242,145,124,.65),0 0 44px rgba(242,145,124,.25);animation:pm-flicker 3.2s ease-in-out infinite}
+  box-shadow:0 0 18px rgba(242,145,124,.65)}
+/* The flicker is an OPACITY pulse on a glow layer: animating filter repaints the
+   lantern every frame, which a phone pays for while it scrolls. */
+.pm-lantern.now:after{content:"";position:absolute;inset:-8px;z-index:-2;border-radius:50%;
+  background:radial-gradient(circle,rgba(242,145,124,.5),transparent 68%);animation:pm-flicker 3.2s ease-in-out infinite}
 .pm-market{display:flex;flex-wrap:wrap;justify-content:center;gap:14px}
 .pm-stall{position:relative;padding:14px 12px 10px;border-radius:16px;
   background:linear-gradient(180deg,#3b2236 0,#2b1828 70%,#251422);border:1px solid #573a52;
@@ -194,7 +200,7 @@ button.pm-die{cursor:pointer}
 .pm-live.lost{color:#f1ad95}.pm-live.lost i{background:#f08a6c;box-shadow:none}
 
 /* ── moments ─────────────────────────────────────────────────────────────── */
-.pm-popups{position:fixed;inset:0;pointer-events:none;z-index:90}
+.pm-popups{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:90}
 .pm-pop{position:absolute;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:2px;animation:pm-pop 1.45s cubic-bezier(.2,.8,.2,1) forwards}
 .pm-pop b{font:700 40px/1 'Cinzel','Cinzel Fallback',serif;color:var(--pop);text-shadow:0 0 18px color-mix(in oklab,var(--pop) 60%,transparent),0 3px 0 rgba(0,0,0,.5)}
 .pm-pop small{font:700 12px/1 ui-sans-serif,system-ui,sans-serif;color:#f6d488;letter-spacing:.06em;text-shadow:0 2px 0 rgba(0,0,0,.6)}
@@ -229,7 +235,7 @@ button.pm-die{cursor:pointer}
 .pm-connecting-dice .pm-die+.pm-die{animation-delay:.3s}
 
 @keyframes pm-land{0%{transform:scale(1.12)}60%{transform:scale(.96)}100%{transform:scale(1)}}
-@keyframes pm-flicker{0%,100%{filter:brightness(1)}45%{filter:brightness(1.12)}55%{filter:brightness(.94)}}
+@keyframes pm-flicker{0%,100%{opacity:.7}45%{opacity:1}55%{opacity:.55}}
 @keyframes pm-breathe{50%{opacity:.55}}
 @keyframes pm-hover{50%{transform:translateY(-3px)}}
 @keyframes pm-sweep{0%,100%{opacity:.4}50%{opacity:1}}

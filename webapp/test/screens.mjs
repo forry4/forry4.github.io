@@ -8593,6 +8593,13 @@ try {
 			await page.locator(".pm-btn.primary", { hasText: "Place" }).click().catch(() => {});
 			const flew = await page.waitForSelector(".pm-fx .pm-die", { timeout: 4_000 }).then(() => true).catch(() => false);
 			check("a bought pair flies from the market to the board", flew);
+			// A FIXED flight layer froze each die while a phone scrolled the boards under
+			// it, then the die jumped to its moved target; the layer must scroll with the page.
+			const layerPos = await page.evaluate(() => {
+				const fx = document.querySelector(".pm-fx");
+				return fx ? getComputedStyle(fx).position : "missing";
+			});
+			check("dice fly in a layer that scrolls with the page", layerPos === "absolute", layerPos);
 			const landed = await page.waitForFunction(
 				() => document.querySelectorAll(".pm-player.mine [data-die]").length >= 2, null, { timeout: 10_000 })
 				.then(() => true).catch(() => false);

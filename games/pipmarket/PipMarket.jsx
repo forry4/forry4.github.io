@@ -156,8 +156,12 @@ function measureDice(root) {
   return snap;
 }
 
+// The flight layer is part of the PAGE (absolute in the table's root), not the
+// viewport: a fixed layer held every die still while a phone scrolled the
+// boards under it, then the die jumped to wherever its target had moved.
 function flyDice(root, layer, snap) {
   if (!root || !layer) return;
+  const origin = layer.getBoundingClientRect();
   const movers = [];
   root.querySelectorAll("[data-die]").forEach((el) => {
     const before = snap.get(el.dataset.die);
@@ -174,8 +178,9 @@ function flyDice(root, layer, snap) {
   movers.forEach((m, index) => {
     const { el, before, after, face, rolled, dist } = m;
     const clone = dieNode(rolled ? before.face : face, rolled ? "rolling" : "");
-    Object.assign(clone.style, { left: `${after.left}px`, top: `${after.top}px`, width: `${after.width}px`, height: `${after.height}px` });
+    Object.assign(clone.style, { left: `${after.left - origin.left}px`, top: `${after.top - origin.top}px`, width: `${after.width}px`, height: `${after.height}px` });
     clone.style.setProperty("--d", `${after.width}px`);
+    clone.dataset.flight = el.dataset.die;
     layer.appendChild(clone);
     // opacity, not visibility: a pip's own `visibility:visible` would show through.
     el.style.opacity = "0";
@@ -280,7 +285,7 @@ function PlayerPanel({ game, pid, myId, seat, isBot, children, mine }) {
       <span className="pm-seat-dot" aria-hidden="true" />
       <div className="pm-player-id">
         <strong>{game.names?.[pid] || "Player"}</strong>
-        <small>{mine ? "You" : isBot ? "Bot" : "Player"}{game.first === pid && game.phase !== "over" ? " · opened" : ""}{passed ? " · done scoring" : ""}</small>
+        <small>{mine ? "You" : isBot ? "Bot" : "Player"}{game.first === pid && game.phase !== "over" ? " · opened" : ""}{passed ? " · nothing to score" : ""}</small>
       </div>
       <div className="pm-player-score" title="Points scored">
         <b key={game.points?.[pid]}>{game.points?.[pid] || 0}</b><span>pts</span>
@@ -306,6 +311,7 @@ function LogLine({ entry, names }) {
     case "market_closed": return <p>Nobody can buy; {entry.left} dice go to the cup.</p>;
     case "scoring": return <p className="pm-log-phase">The market closes. {name(entry.first)} scores first.</p>;
     case "score": return <p>{who} scores <MiniDice faces={Array(entry.count).fill(entry.face)} /> for <em>{entry.points}</em>{entry.money ? ` and ${entry.money} money` : ""}.</p>;
+    // Older games could stop scoring by choice (auto: false); scoring is compulsory now.
     case "pass": return <p className="pm-log-quiet">{who} {entry.auto ? "has nothing to score" : "stops scoring"}.</p>;
     case "round": return <p className="pm-log-phase">Round {entry.round}. {entry.dice} dice rerolled; {name(entry.first)} opens.</p>;
     case "concede": return <p>{who} leaves the table.</p>;
@@ -425,16 +431,17 @@ function GameView({ room, myId, connected, onMove, onExit, onRules, onAbandon, e
     const fresh = (game.log || []).filter((e) => e.seq > prev);
     const root = rootRef.current;
     const next = [];
-    const rectOf = (sel) => root?.querySelector(sel)?.getBoundingClientRect();
+    // Popups live in the page too (see flyDice), so they ride along with a scroll.
+    const origin = root?.getBoundingClientRect() || { left: 0, top: 0 };
+    const rectOf = (sel) => {
+      const r = root?.querySelector(sel)?.getBoundingClientRect();
+      return r && { left: r.left - origin.left, top: r.top - origin.top, width: r.width, height: r.height };
+    };
     for (const e of fresh) {
       const color = SEAT_COLORS[seatOf(e.pid) % SEAT_COLORS.length];
       if (e.kind === "score") {
-        const ids = new Set((e.dice || []).map(String));
-        const rects = [...(root?.querySelectorAll("[data-die]") || [])].filter((el) => ids.has(el.dataset.die)).map((el) => el.getBoundingClientRect());
         const box = rectOf(`[data-board="${e.pid}"]`);
-        const x = box ? box.left + box.width / 2 : (rects[0]?.left || 0);
-        const y = box ? box.top + box.height * 0.45 : (rects[0]?.top || 0);
-        next.push({ id: `s${e.seq}`, x, y, color, big: `+${e.points}`, small: e.money ? `+${e.money} money` : "" });
+        if (box) next.push({ id: `s${e.seq}`, x: box.left + box.width / 2, y: box.top + box.height * 0.45, color, big: `+${e.points}`, small: e.money ? `+${e.money} money` : "" });
       } else if (e.kind === "take" || e.kind === "buy") {
         const r = rectOf(`[data-money="${e.pid}"]`);
         if (r) next.push({ id: `m${e.seq}`, x: r.left + r.width / 2, y: r.top, color: e.kind === "take" ? "#f1c65e" : "#ff9c8a", big: e.kind === "take" ? `+${e.amount}` : `−${e.price}`, small: "", tiny: true });
@@ -467,7 +474,7 @@ function GameView({ room, myId, connected, onMove, onExit, onRules, onAbandon, e
       if (!ghost) return [`Pair for ${picked.c + 1}`, "Choose a glowing cell on your board."];
       return ["Place it?", candidates.length > 1 ? "Tap the cell again to turn the pair." : "Confirm to buy."];
     }
-    if (myTurn && scoring) return ["Score a line", chosenLine ? `${chosenLine.count} × ${chosenLine.face} for ${chosenLine.points}.` : "Pick a lit die or a line below, or stop."];
+    if (myTurn && scoring) return ["Score a line", chosenLine ? `${chosenLine.count} × ${chosenLine.face} for ${chosenLine.points}.` : "Pick a lit die or a line below. You score while you have a line."];
     if (scoring) return [`${turnName} is scoring`, "Lines come off one at a time."];
     return [`${turnName}'s turn`, bots.has(game.turn) ? "The bot is shopping." : "Waiting on their pick."];
   })();
@@ -532,7 +539,6 @@ function GameView({ room, myId, connected, onMove, onExit, onRules, onAbandon, e
             </div>
             <div className="pm-buttons">
               <button type="button" className="pm-btn primary" disabled={!chosenLine || busy} onClick={scoreLine}>Score line</button>
-              <button type="button" className="pm-btn" disabled={busy} onClick={() => send({ type: "pass" })}>Stop scoring</button>
             </div>
           </>}
           {game.phase === "over" && !showResult && <div className="pm-buttons"><button type="button" className="pm-btn primary" onClick={() => setShowResult(true)}>Results</button></div>}

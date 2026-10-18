@@ -17,7 +17,7 @@ Shape of ``game`` (JSON-safe; ``player_view`` strips only ``seed``):
     money     {pid: 0..18}
     points    {pid: int}
     cup       dice scored this round, waiting for the reroll
-    passed    pids who have stopped scoring this round
+    passed    pids with nothing left to score this round (scoring is compulsory)
     last_buyer   the pid who bought the most recent column (goes first next round)
 
 Randomness: the deal and each reroll draw from ``Random(f"{seed}:<salt>")``, so
@@ -229,10 +229,19 @@ def _line_of(board: list[dict], cells) -> dict | None:
 # ── setup ───────────────────────────────────────────────────────────────────
 
 def _deal(dice: list[dict], n_sets: int) -> list[list[list[dict]]]:
-    """Vertical pairs, dealt one to each set in turn; an odd die closes the deal alone."""
-    market = [[] for _ in range(n_sets)]
-    for i, k in enumerate(range(0, len(dice), 2)):
-        market[i % n_sets].append(dice[k:k + 2])
+    """Fill the stalls as evenly as possible: every stall gets n // S dice, the
+    first n % S one more, so no two stalls differ by more than a die. Within a
+    stall the dice stand in vertical pairs, and a stall with an odd count ends on
+    a single die. (Dealing PAIRS round-robin instead left 17 dice over five stalls
+    as 4/4/4/3/2.)"""
+    base, extra = divmod(len(dice), n_sets)
+    market = []
+    at = 0
+    for s in range(n_sets):
+        take = base + (1 if s < extra else 0)
+        mine = dice[at:at + take]
+        at += take
+        market.append([mine[k:k + 2] for k in range(0, len(mine), 2)])
     return market
 
 
@@ -335,8 +344,8 @@ def legal_moves(game: dict | None, pid: str) -> list[dict]:
         if can_take(game, pid):
             moves.append({"type": "take"})
         return moves
-    return [{"type": "score", "cells": line["cells"]} for line in scoring_lines(game["boards"][pid])] \
-        + [{"type": "pass"}]
+    # Scoring is compulsory: the turn only reaches a player who has a line.
+    return [{"type": "score", "cells": line["cells"]} for line in scoring_lines(game["boards"][pid])]
 
 
 def totals(game: dict) -> dict:
@@ -380,8 +389,8 @@ def apply_move(game: dict, pid: str, move: dict) -> tuple[bool, str | None]:
         if kind == "score":
             return _score(game, pid, move)
         if kind == "pass":
-            return _pass(game, pid)
-        return False, "score a line or stop scoring"
+            return False, "you must score while you have a line"
+        return False, "score one of your lines"
     return False, "unknown phase"
 
 
@@ -490,13 +499,6 @@ def _score(game: dict, pid: str, move: dict):
     _log(game, "score", pid=pid, face=line["face"], count=len(removed), points=pts,
          money=game["money"][pid] - before, dice=[d["id"] for d in removed],
          cells=[[d["r"], d["c"]] for d in removed])
-    _settle_scoring(game, pid, inclusive=False)
-    return True, None
-
-
-def _pass(game: dict, pid: str):
-    game["passed"].append(pid)
-    _log(game, "pass", pid=pid, auto=False)
     _settle_scoring(game, pid, inclusive=False)
     return True, None
 
