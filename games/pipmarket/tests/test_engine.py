@@ -33,8 +33,8 @@ def test_the_deal_scales_with_the_table(n):
     assert len(game["market"]) == n + 1
     assert all(len(cols) == 5 and all(len(col) == 2 for col in cols) for cols in game["market"])
     assert all_ids(game) == list(range(engine.total_dice(n)))
-    # the last seat starts on 12 and each earlier seat on one less
-    assert [game["money"][p] for p in game["players"]] == list(range(13 - n, 13))
+    # the first seat starts on 10, everyone else on 12
+    assert [game["money"][p] for p in game["players"]] == [10] + [12] * (n - 1)
     assert game["turn"] == game["players"][0]
 
 
@@ -126,7 +126,7 @@ def test_take_adds_two_caps_at_eighteen_and_is_refused_at_eighteen():
     while game["turn"] != pid:
         assert engine.apply_move(game, game["turn"], {"type": "take"})[0]
     ok, err = engine.apply_move(game, pid, {"type": "take"})
-    assert not ok and "must buy" in err
+    assert not ok and "maximum 18" in err
 
 
 def test_a_player_with_no_legal_action_is_skipped():
@@ -135,6 +135,9 @@ def test_a_player_with_no_legal_action_is_skipped():
     full = [die(100 + r * 6 + cc, 1 + (r + cc) % 6, r, cc) for r in range(6) for cc in range(6)]
     game["boards"][b] = full
     game["money"][b] = 18
+    # with its reroll still unspent a reroll is an action, so it is not skipped yet
+    assert engine.has_auction_action(game, b)
+    game["rerolled"].append(b)
     assert not engine.has_auction_action(game, b)
     assert engine.apply_move(game, a, {"type": "take"})[0]
     assert game["turn"] == c
@@ -331,3 +334,80 @@ def test_full_bot_games_conserve_every_die_and_finish(n):
         json.loads(json.dumps(game))
         assert set(game["final"]) == set(game["players"])
         assert game["winners"]
+
+
+def test_a_reroll_pays_the_price_and_rerolls_that_column_in_every_stall():
+    game = fresh(3)
+    pid = game["turn"]
+    before = {d["id"]: (s, c, d["f"]) for s, cols in enumerate(game["market"])
+              for c, col in enumerate(cols) for d in col}
+    money = game["money"][pid]
+    ok, err = engine.apply_move(game, pid, {"type": "reroll", "col": 2})
+    assert ok, err
+    assert game["money"][pid] == money - 3
+    after = {d["id"]: (s, c, d["f"]) for s, cols in enumerate(game["market"])
+             for c, col in enumerate(cols) for d in col}
+    # every die keeps its id and its place; only column 3's dice were rolled
+    assert {i: v[:2] for i, v in after.items()} == {i: v[:2] for i, v in before.items()}
+    rolled = [e for e in game["log"] if e["kind"] == "reroll"][-1]
+    assert sorted(rolled["dice"]) == sorted(i for i, v in before.items() if v[1] == 2)
+    assert all(after[i][2] == before[i][2] for i, v in before.items() if v[1] != 2)
+    assert len(rolled["dice"]) == 2 * len(game["market"])      # a pair in each of the four stalls
+    assert game["turn"] != pid
+    assert all(len(cols) == 5 for cols in game["market"])       # nothing was bought
+
+
+def test_rerolls_are_reproducible_from_the_seed_and_vary_between_rerolls():
+    a, b = fresh(2, seed=21), fresh(2, seed=21)
+    for g in (a, b):
+        engine.apply_move(g, g["turn"], {"type": "reroll", "col": 0})
+    assert a["market"] == b["market"]
+    faces = set()
+    for seed in range(12):
+        g = fresh(2, seed=seed)
+        engine.apply_move(g, g["turn"], {"type": "reroll", "col": 0})
+        faces.add(tuple(d["f"] for cols in g["market"] for d in cols[0]))
+    assert len(faces) > 6
+
+
+def test_one_reroll_per_player_per_round():
+    game = fresh(2)
+    a, b = game["players"]
+    assert engine.apply_move(game, a, {"type": "reroll", "col": 0})[0]
+    assert engine.apply_move(game, b, {"type": "take"})[0]
+    assert engine.rerollable_columns(game, a) == []
+    assert engine.apply_move(game, a, {"type": "reroll", "col": 0}) == (False, "you have already rerolled this round")
+    # a new round gives the reroll back
+    for pid in game["players"]:
+        game["boards"][pid] = [die(100 + game["players"].index(pid), 1, 0, 0)]
+    game["market"] = [[] for _ in game["market"]]
+    engine._start_scoring(game)
+    while game["phase"] == "scoring":
+        engine.apply_move(game, game["turn"], engine.legal_moves(game, game["turn"])[0])
+    assert game["round"] == 2 and game["rerolled"] == []
+    assert engine.rerollable_columns(game, game["turn"])
+
+
+def test_a_reroll_needs_dice_in_that_column_and_the_money_for_it():
+    game = fresh(2)
+    pid = game["turn"]
+    for cols in game["market"]:
+        del cols[3:]
+    assert engine.apply_move(game, pid, {"type": "reroll", "col": 4}) == (False, "no dice stand in that column")
+    assert engine.apply_move(game, pid, {"type": "reroll", "col": -1})[0] is False
+    game["money"][pid] = 1
+    assert engine.rerollable_columns(game, pid) == [0]
+    assert engine.apply_move(game, pid, {"type": "reroll", "col": 1}) == (False, "you cannot afford that reroll")
+    view = engine.player_view(game, pid)
+    assert view["options"]["rerolls"] == [0]
+    assert {"type": "reroll", "col": 0} in engine.legal_moves(game, pid)
+
+
+def test_a_game_saved_before_rerolls_existed_can_still_reroll():
+    game = fresh(2)
+    del game["rerolled"], game["reroll_count"]
+    for st in game["stats"].values():
+        del st["rerolls"]
+    assert engine.rerollable_columns(game, game["turn"])
+    assert engine.apply_move(game, game["turn"], {"type": "reroll", "col": 1})[0]
+    assert game["reroll_count"] == 1

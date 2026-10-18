@@ -18,10 +18,12 @@ Shape of ``game`` (JSON-safe; ``player_view`` strips only ``seed``):
     points    {pid: int}
     cup       dice scored this round, waiting for the reroll
     passed    pids with nothing left to score this round (scoring is compulsory)
+    rerolled  pids who have used their one column reroll this round
+    reroll_count  rerolls so far this game (salts each reroll's dice)
     last_buyer   the pid who bought the most recent column (goes first next round)
 
-Randomness: the deal and each reroll draw from ``Random(f"{seed}:<salt>")``, so
-no generator state is persisted and nothing draws in between.
+Randomness: the deal, each round's reroll and each paid column reroll draw from
+``Random(f"{seed}:<salt>")``, so no generator state is persisted.
 """
 
 from __future__ import annotations
@@ -36,7 +38,8 @@ TAKE_AMOUNT = 2
 SPAN = 6
 ROUNDS = 3
 PAIRS_PER_SET = 5
-LAST_SEAT_MONEY = 12
+FIRST_SEAT_MONEY = 10
+OTHER_SEAT_MONEY = 12
 LOG_CAP = 400
 SCHEMA = 1
 
@@ -266,15 +269,19 @@ def new_game(player_ids, names: dict | None = None, seed: int | None = None) -> 
         "first": players[0],
         "market": _deal(dice, set_count(n)),
         "boards": {pid: [] for pid in players},
-        # The last seat starts on 12 and each earlier seat on one less.
-        "money": {pid: LAST_SEAT_MONEY - (n - 1 - i) for i, pid in enumerate(players)},
+        # The first seat starts on 10 to pay for moving first; everyone else on 12.
+        "money": {pid: FIRST_SEAT_MONEY if i == 0 else OTHER_SEAT_MONEY
+                  for i, pid in enumerate(players)},
         "points": {pid: 0 for pid in players},
         "cup": [],
         "passed": [],
+        "rerolled": [],
+        "reroll_count": 0,
         "last_buyer": None,
         "round_dice": len(dice),
         "round_scored": 0,
-        "stats": {pid: {"lines": 0, "best": 0, "takes": 0, "buys": 0} for pid in players},
+        "stats": {pid: {"lines": 0, "best": 0, "takes": 0, "buys": 0, "rerolls": 0}
+                  for pid in players},
         "final": None,
         "winners": [],
         "conceded": None,
@@ -330,8 +337,32 @@ def can_take(game: dict, pid: str) -> bool:
     return game["money"][pid] < MAX_MONEY
 
 
+def _fill(game: dict) -> None:
+    """Keys added after the first release; a game saved before them gains them here."""
+    game.setdefault("rerolled", [])
+    game.setdefault("reroll_count", 0)
+
+
+def rerollable_columns(game: dict, pid: str) -> list[int]:
+    """Column positions this player may pay to reroll: once per round, a price
+    they can afford, and at least one die standing in that position somewhere.
+
+    Once per round is the anti-stall rule. Without it a player could alternate
+    "reroll column 2" (-2) and "take 2 money" (+2) forever and the market would
+    never empty."""
+    if pid in game.get("rerolled", []):
+        return []
+    money = game["money"][pid]
+    deepest = max((len(cols) for cols in game["market"]), default=0)
+    return [c for c in range(min(deepest, money))]
+
+
+def can_reroll(game: dict, pid: str) -> bool:
+    return bool(rerollable_columns(game, pid))
+
+
 def has_auction_action(game: dict, pid: str) -> bool:
-    return can_take(game, pid) or bool(buyable_columns(game, pid))
+    return can_take(game, pid) or bool(buyable_columns(game, pid)) or can_reroll(game, pid)
 
 
 def legal_moves(game: dict | None, pid: str) -> list[dict]:
@@ -343,6 +374,7 @@ def legal_moves(game: dict | None, pid: str) -> list[dict]:
         moves = [{"type": "buy", "set": s, "col": c} for s, c in buyable_columns(game, pid)]
         if can_take(game, pid):
             moves.append({"type": "take"})
+        moves += [{"type": "reroll", "col": c} for c in rerollable_columns(game, pid)]
         return moves
     # Scoring is compulsory: the turn only reaches a player who has a line.
     return [{"type": "score", "cells": line["cells"]} for line in scoring_lines(game["boards"][pid])]
@@ -379,12 +411,15 @@ def apply_move(game: dict, pid: str, move: dict) -> tuple[bool, str | None]:
     if game["turn"] != pid:
         return False, "not your turn"
     kind = move.get("type")
+    _fill(game)
     if game["phase"] == "auction":
         if kind == "take":
             return _take(game, pid)
         if kind == "buy":
             return _buy(game, pid, move)
-        return False, "the market is open — buy a column or take money"
+        if kind == "reroll":
+            return _reroll(game, pid, move)
+        return False, "the market is open — buy a column, take money or reroll a column"
     if game["phase"] == "scoring":
         if kind == "score":
             return _score(game, pid, move)
@@ -397,11 +432,40 @@ def apply_move(game: dict, pid: str, move: dict) -> tuple[bool, str | None]:
 def _take(game: dict, pid: str):
     money = game["money"][pid]
     if money >= MAX_MONEY:
-        return False, "you hold the maximum 18 — you must buy"
+        return False, "you hold the maximum 18 — buy or reroll instead"
     gained = min(TAKE_AMOUNT, MAX_MONEY - money)
     game["money"][pid] = money + gained
     game["stats"][pid]["takes"] += 1
     _log(game, "take", pid=pid, amount=gained, money=game["money"][pid])
+    _settle_auction(game, pid, inclusive=False)
+    return True, None
+
+
+def _reroll(game: dict, pid: str, move: dict):
+    """Pay a column's price to reroll the dice standing in that position in EVERY
+    stall. The dice keep their ids and their places; only the faces change."""
+    try:
+        c = int(move.get("col"))
+    except (TypeError, ValueError):
+        return False, "no such column"
+    if pid in game["rerolled"]:
+        return False, "you have already rerolled this round"
+    if c < 0 or not any(len(cols) > c for cols in game["market"]):
+        return False, "no dice stand in that column"
+    price = c + 1
+    if price > game["money"][pid]:
+        return False, "you cannot afford that reroll"
+    game["reroll_count"] += 1
+    rng = random.Random(f"{game['seed']}:reroll:{game['reroll_count']}")
+    dice = [die for cols in game["market"] if len(cols) > c for die in cols[c]]
+    for die in dice:
+        die["f"] = rng.randint(1, 6)
+    game["money"][pid] -= price
+    game["rerolled"].append(pid)
+    game["stats"][pid].setdefault("rerolls", 0)
+    game["stats"][pid]["rerolls"] += 1
+    _log(game, "reroll", pid=pid, col=c, price=price,
+         dice=[die["id"] for die in dice], faces=[die["f"] for die in dice])
     _settle_auction(game, pid, inclusive=False)
     return True, None
 
@@ -516,6 +580,7 @@ def _end_round(game: dict) -> None:
     game["round"] += 1
     game["phase"] = "auction"
     game["passed"] = []
+    game["rerolled"] = []
     game["first"] = game["last_buyer"] or game["first"]
     game["last_buyer"] = None
     game["round_dice"] = len(dice)
@@ -561,7 +626,8 @@ def player_view(game: dict | None, viewer: str | None = None) -> dict | None:
     if actor:
         if game["phase"] == "auction":
             view["options"] = {"pid": actor, "take": can_take(game, actor),
-                               "columns": buyable_columns(game, actor)}
+                               "columns": buyable_columns(game, actor),
+                               "rerolls": rerollable_columns(game, actor)}
         else:
             view["options"] = {"pid": actor, "lines": scoring_lines(game["boards"][actor])}
     view["totals"] = totals(game)

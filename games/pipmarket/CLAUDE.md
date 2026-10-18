@@ -24,8 +24,15 @@ before the game was built — see "The bot" below.
   single). Dealing pairs round-robin was the first version and left 17 dice over five
   stalls as 4/4/4/3/2; the user asked for even stalls, which means several stalls can now
   end on a single die.
-- **Money**: last seat starts on 12, each earlier seat one less. Cap 18; taking money is
-  refused at 18 (you must buy). A line pays +1, +5 at 15+, and SETS money to 18 at 30+.
+- **Money**: the first seat starts on 10, every other seat on 12 (user call; it replaced
+  "last seat 12, each earlier seat one less"). Cap 18; taking money is refused at 18.
+- **Column reroll** (`_reroll`): pay a column POSITION's price (c + 1) to reroll the dice
+  standing in that position in EVERY stall — ids and places unchanged, only faces. It is
+  the turn's action. **Once per player per round** (`game["rerolled"]`, cleared by
+  `_end_round`), and that limit is the anti-stall rule, not flavour: without it "reroll
+  column 2" (−2) and "take 2" (+2) alternate forever and the market never empties. The
+  dice come from `Random(f"{seed}:reroll:{reroll_count}")`. Games saved before rerolls get
+  the two keys from `_fill` on the next move. A line pays +1, +5 at 15+, and SETS money to 18 at 30+.
 - **Placement**: a pair stays together, may be rotated, must touch the board after the
   first, and the dice may never span more than 6 rows or 6 columns. There is no fixed grid:
   boards are stored NORMALISED (min row = min col = 0) and a move's cells are given in that
@@ -66,6 +73,14 @@ room (within the 6-span) to reach their face length, scaled by `(len/face)^2`. B
 "value gained minus price"; taking money is worth 2. Potential shrinks with the market in
 round 3. Scoring is an exhaustive search over removal orders (points + money) and the bot
 plays the first line, re-planning each turn. Ties draw from `core.rooms.bot_seed`.
+
+**Rerolls**: the bot samples what a rerolled column could be worth next turn
+(`REROLL_SAMPLES`, discounted by `REROLL_DISCOUNT` because every other seat sees the new
+dice first) and rerolls only when nothing in the market is worth buying
+(`REROLL_ONLY_BELOW`). Measured over 600 paired-seed games against the same bot with rerolls
+blocked: 0.477 vs a 0.482 mirror on the same seeds, i.e. neutral. Rerolling whenever the
+sampled value won the comparison measured 0.463 — it hands the next seat a fresh column —
+so the poor-market gate stays.
 
 Simulation results it was tuned against (2,000 games per arm, floating 6×6 span):
 first player wins 50.0% vs 47.5% at 11/12 starting money (49.2 vs 49.0 at 10/12);

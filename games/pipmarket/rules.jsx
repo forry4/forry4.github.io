@@ -14,8 +14,8 @@ export default function PipMarketRules() {
         player plus one, and each set is five vertical pairs of freshly rolled
         dice. A pair costs its position in its set: the leftmost costs 1, the
         next 2, up to 5.</p>
-      <p>Seats are drawn at random. The last seat starts with 12 money and each
-        earlier seat with one less. Nobody may ever hold more than 18.</p>
+      <p>Seats are drawn at random. The first player starts with 10 money and
+        everyone else with 12. Nobody may ever hold more than 18.</p>
     </RulesSection>
 
     <RulesSection title="Turn overview">
@@ -23,7 +23,8 @@ export default function PipMarketRules() {
         turn, do one thing:</p>
       <RulesDefs items={[
         { t: "A. Buy a pair", d: "Pay its price and place both dice on your board. The pairs to its right slide left and get cheaper." },
-        { t: "B. Take 2 money", d: "Not allowed at 18 — then you must buy." },
+        { t: "B. Take 2 money", d: "Not allowed at 18." },
+        { t: "C. Reroll a column", d: "Pay a column's price to reroll the dice in that position in every stall: pay 3 and the third column of each stall is rerolled. Once per round." },
       ]} />
       <p>A pair you have no legal place for cannot be bought. A player with no
         legal action is skipped.</p>

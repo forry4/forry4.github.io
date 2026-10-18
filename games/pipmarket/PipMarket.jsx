@@ -185,7 +185,7 @@ function flyDice(root, layer, snap) {
     // opacity, not visibility: a pip's own `visibility:visible` would show through.
     el.style.opacity = "0";
     const dx = before.x - after.left, dy = before.y - after.top, s = before.w / after.width;
-    const lift = dist < 90 ? dist * 0.25 : Math.min(110, 16 + dist * 0.22);
+    const lift = Math.max(rolled ? 22 : 0, dist < 90 ? dist * 0.25 : Math.min(110, 16 + dist * 0.22));
     const duration = Math.round(520 + Math.min(380, dist * 0.4));
     const delay = rolled ? Math.min(index * 34, 1300) : index * 45;
     const spin = rolled ? 540 + (index % 3) * 120 : (dist > 140 ? (index % 2 ? -14 : 14) : 0);
@@ -222,13 +222,26 @@ function useDiceFlight(game, rootRef, layerRef) {
 }
 
 // ── the market ──────────────────────────────────────────────────────────────
-function Stall({ index, columns, buyable, selected, onPick, myTurn }) {
+function Stall({ index, columns, buyable, selected, onPick, myTurn, reroll }) {
   return <div className="pm-stall">
     <div className="pm-stall-head"><span className="pm-stall-letter">Stall {STALLS[index]}</span></div>
     <div className="pm-stall-cols">
       {[0, 1, 2, 3, 4].map((slot) => {
         const col = columns[slot];
         if (!col) return <span key={`e${slot}`} className="pm-col empty" aria-hidden="true"><span className="pm-col-dice" /><span className="pm-price">{slot + 1}</span></span>;
+        // In reroll mode a column is a choice of POSITION: picking any column at a
+        // price picks that price's column in every stall.
+        if (reroll) {
+          const may = reroll.allowed.has(slot);
+          const chosen = reroll.col === slot;
+          return <button type="button" key={col.map((d) => d.id).join("-")}
+            className={`pm-col${may ? " reroll-pick" : " locked"}${chosen ? " reroll-sel" : ""}`}
+            disabled={!may} onClick={() => reroll.onPick(slot)}
+            aria-label={`Reroll column ${slot + 1} in every stall for ${slot + 1}`}>
+            <span className="pm-col-dice">{col.map((d) => <Die key={d.id} id={d.id} face={d.f} />)}</span>
+            <span className="pm-price">{slot + 1}</span>
+          </button>;
+        }
         const can = buyable.has(`${index}:${slot}`);
         const isSel = selected && selected.s === index && selected.c === slot;
         return <button type="button" key={col.map((d) => d.id).join("-")}
@@ -308,6 +321,7 @@ function LogLine({ entry, names }) {
     case "deal": return <p>Round 1. {name(entry.first)} opens the market.</p>;
     case "buy": return <p>{who} buys <MiniDice faces={entry.faces} /> for {entry.price}.</p>;
     case "take": return <p>{who} takes {entry.amount} money.</p>;
+    case "reroll": return <p>{who} pays {entry.price} to reroll column {entry.col + 1} in every stall.</p>;
     case "market_closed": return <p>Nobody can buy; {entry.left} dice go to the cup.</p>;
     case "scoring": return <p className="pm-log-phase">The market closes. {name(entry.first)} scores first.</p>;
     case "score": return <p>{who} scores <MiniDice faces={Array(entry.count).fill(entry.face)} /> for <em>{entry.points}</em>{entry.money ? ` and ${entry.money} money` : ""}.</p>;
@@ -349,16 +363,21 @@ function GameView({ room, myId, connected, onMove, onExit, onRules, onAbandon, e
   const [picked, setPicked] = useState(null);          // {s, c}
   const [preview, setPreview] = useState(null);        // {anchor, i}
   const [lineIdx, setLineIdx] = useState(null);
+  const [rerolling, setRerolling] = useState(false);   // choosing a column to reroll
+  const [rerollCol, setRerollCol] = useState(null);
   const [busy, setBusy] = useState(false);
   const [popups, setPopups] = useState([]);
   const [banner, setBanner] = useState(null);
   const [showResult, setShowResult] = useState(true);
   const lastSeq = useRef(game.event_seq);
 
-  useEffect(() => { setPicked(null); setPreview(null); setLineIdx(null); setBusy(false); }, [game.event_seq]);
+  useEffect(() => { setPicked(null); setPreview(null); setLineIdx(null); setRerolling(false); setRerollCol(null); setBusy(false); }, [game.event_seq]);
   useEffect(() => { setBusy(false); }, [errorNonce]);
 
   const buyable = useMemo(() => new Set(myTurn && auction ? (options.columns || []).map(([s, c]) => `${s}:${c}`) : []), [myTurn, auction, options]);
+  const rerollable = useMemo(() => new Set(myTurn && auction ? options.rerolls || [] : []), [myTurn, auction, options]);
+  const startReroll = (col = null) => { setPicked(null); setPreview(null); setRerolling(true); setRerollCol(col); };
+  const stopReroll = () => { setRerolling(false); setRerollCol(null); };
   const myBoard = game.boards[me] || [];
   const pickedCol = picked ? game.market?.[picked.s]?.[picked.c] : null;
   const places = useMemo(() => pickedCol ? placementsFor(myBoard, pickedCol.length) : [], [pickedCol, myBoard]);
@@ -413,7 +432,7 @@ function GameView({ room, myId, connected, onMove, onExit, onRules, onAbandon, e
   useEffect(() => {
     const onKey = (event) => {
       if (event.target?.closest?.("input,textarea,[role=dialog]")) return;
-      if (event.key === "Escape") { setPicked(null); setPreview(null); setLineIdx(null); }
+      if (event.key === "Escape") { setPicked(null); setPreview(null); setLineIdx(null); setRerolling(false); setRerollCol(null); }
       if ((event.key === "r" || event.key === "R") && preview) setPreview((p) => p && { ...p, i: p.i + 1 });
       // A focused button answers Enter itself; the shortcut is for the board.
       if (event.key === "Enter" && !event.target?.closest?.("button")) { if (chosenPlacement) place(); else if (chosenLine) scoreLine(); }
@@ -442,7 +461,7 @@ function GameView({ room, myId, connected, onMove, onExit, onRules, onAbandon, e
       if (e.kind === "score") {
         const box = rectOf(`[data-board="${e.pid}"]`);
         if (box) next.push({ id: `s${e.seq}`, x: box.left + box.width / 2, y: box.top + box.height * 0.45, color, big: `+${e.points}`, small: e.money ? `+${e.money} money` : "" });
-      } else if (e.kind === "take" || e.kind === "buy") {
+      } else if (e.kind === "take" || e.kind === "buy" || e.kind === "reroll") {
         const r = rectOf(`[data-money="${e.pid}"]`);
         if (r) next.push({ id: `m${e.seq}`, x: r.left + r.width / 2, y: r.top, color: e.kind === "take" ? "#f1c65e" : "#ff9c8a", big: e.kind === "take" ? `+${e.amount}` : `−${e.price}`, small: "", tiny: true });
       } else if (e.kind === "round") {
@@ -469,8 +488,12 @@ function GameView({ room, myId, connected, onMove, onExit, onRules, onAbandon, e
   const status = (() => {
     if (!connected) return ["Reconnecting", "Your seat is safe."];
     if (game.phase === "over") return ["Game over", (game.winners || []).length > 1 ? "A shared win." : `${game.names?.[game.winners?.[0]] || "A player"} wins.`];
+    if (myTurn && auction && rerolling) {
+      return rerollCol == null ? ["Reroll which column?", "Pick a column: that price's column is rerolled in every stall."]
+        : [`Reroll every ${rerollCol + 1}-column?`, `Pay ${rerollCol + 1} to reroll those dice in every stall. Once per round.`];
+    }
     if (myTurn && auction) {
-      if (!pickedCol) return ["Your turn", options.columns?.length ? "Pick a pair from a stall, or take 2 money." : "Nothing you can place or afford — take 2 money."];
+      if (!pickedCol) return ["Your turn", options.columns?.length ? (options.rerolls?.length ? "Pick a pair, take 2 money, or reroll a column." : "Pick a pair from a stall, or take 2 money.") : "Nothing you can place or afford — take money or reroll."];
       if (!ghost) return [`Pair for ${picked.c + 1}`, "Choose a glowing cell on your board."];
       return ["Place it?", candidates.length > 1 ? "Tap the cell again to turn the pair." : "Confirm to buy."];
     }
@@ -497,7 +520,8 @@ function GameView({ room, myId, connected, onMove, onExit, onRules, onAbandon, e
         </div>
         <div className={`pm-market stalls-${game.market.length}`}>
           {game.market.map((cols, s) => <Stall key={s} index={s} columns={cols} buyable={buyable}
-            selected={picked} onPick={pickColumn} myTurn={myTurn && auction} />)}
+            selected={picked} onPick={pickColumn} myTurn={myTurn && auction}
+            reroll={myTurn && auction && rerolling ? { allowed: rerollable, col: rerollCol, onPick: setRerollCol } : null} />)}
         </div>
       </section>
 
@@ -519,14 +543,25 @@ function GameView({ room, myId, connected, onMove, onExit, onRules, onAbandon, e
       <aside className="pm-side">
         <div className={`pm-actions${myTurn ? " yours" : ""}`} aria-live="polite">
           <div className="pm-status"><b>{status[0]}</b><span>{status[1]}</span></div>
-          {myTurn && auction && <div className="pm-buttons">
+          {myTurn && auction && rerolling && <div className="pm-buttons">
+            <button type="button" className="pm-btn primary" disabled={rerollCol == null || busy}
+              onClick={() => send({ type: "reroll", col: rerollCol })}>
+              {rerollCol == null ? "Pick a column" : `Reroll · pay ${rerollCol + 1}`}</button>
+            <button type="button" className="pm-btn quiet" onClick={stopReroll}>Cancel</button>
+          </div>}
+          {myTurn && auction && !rerolling && <div className="pm-buttons">
             {pickedCol && <button type="button" className="pm-btn primary" disabled={!ghost || busy} onClick={place}>
               Place · pay {picked.c + 1}</button>}
             {pickedCol && ghost && candidates.length > 1 && <button type="button" className="pm-btn" onClick={() => setPreview((p) => ({ ...p, i: p.i + 1 }))}>Turn pair</button>}
+            {pickedCol && rerollable.has(picked.c) && <button type="button" className="pm-btn" onClick={() => startReroll(picked.c)}
+              title={`Reroll column ${picked.c + 1} in every stall instead`}>Reroll these</button>}
             {pickedCol && <button type="button" className="pm-btn quiet" onClick={() => { setPicked(null); setPreview(null); }}>Cancel</button>}
             {!pickedCol && <button type="button" className="pm-btn primary" disabled={!options.take || busy}
-              onClick={() => send({ type: "take" })} title={options.take ? "" : "At 18 you must buy"}>
-              {options.take ? `Take ${Math.min(2, (game.max_money || 18) - (game.money?.[myId] || 0))} money` : "At 18 — you must buy"}</button>}
+              onClick={() => send({ type: "take" })} title={options.take ? "" : "At 18 you buy or reroll instead"}>
+              {options.take ? `Take ${Math.min(2, (game.max_money || 18) - (game.money?.[myId] || 0))} money` : "At 18 — no more money"}</button>}
+            {!pickedCol && <button type="button" className="pm-btn" disabled={!rerollable.size || busy} onClick={() => startReroll()}
+              title={(game.rerolled || []).includes(myId) ? "You have rerolled this round" : "Pay a column's price to reroll it in every stall, once per round"}>
+              {(game.rerolled || []).includes(myId) ? "Rerolled this round" : "Reroll a column"}</button>}
           </div>}
           {myTurn && scoring && <>
             <div className="pm-lines" role="listbox" aria-label="Lines you can score">

@@ -107,6 +107,15 @@ button.pm-die{cursor:pointer}
   box-shadow:0 0 0 2px rgba(242,145,124,.35),0 16px 30px rgba(0,0,0,.45),0 0 26px rgba(242,145,124,.35)}
 .pm-col.selected .pm-price{background:radial-gradient(circle at 34% 28%,#ffe0d6,#f2917c 55%,#c9604c);color:#2a0b07;box-shadow:inset 0 -2px 0 #9b4535,0 0 12px rgba(242,145,124,.7)}
 .pm-col.locked{opacity:.42;filter:saturate(.6)}
+/* Reroll mode: a column stands for its PRICE, so choosing one lights that
+   price's column in every stall. */
+.pm-col.reroll-pick{cursor:pointer;border-style:dashed;border-color:rgba(233,185,94,.45);background:rgba(233,185,94,.05)}
+.pm-col.reroll-pick:hover{border-color:#f6d488;background:rgba(233,185,94,.12)}
+.pm-col.reroll-pick:focus-visible{outline:2px solid #f6d488;outline-offset:2px}
+.pm-col.reroll-sel{border-style:solid;border-color:#f6d488;background:rgba(233,185,94,.2);box-shadow:0 0 22px rgba(233,185,94,.35)}
+.pm-col.reroll-sel .pm-die{animation:pm-jiggle .6s ease-in-out infinite}
+.pm-col.reroll-sel .pm-die+.pm-die{animation-delay:.15s}
+.pm-col.reroll-sel .pm-price{background:radial-gradient(circle at 34% 28%,#fff6d8,#f6d488 55%,#c9962f)}
 .pm-col:disabled{cursor:default}
 
 /* ── players and boards ──────────────────────────────────────────────────── */
@@ -234,6 +243,7 @@ button.pm-die{cursor:pointer}
 .pm-connecting-dice .pm-die{animation:pm-tumble 1.6s ease-in-out infinite}
 .pm-connecting-dice .pm-die+.pm-die{animation-delay:.3s}
 
+@keyframes pm-jiggle{0%,100%{transform:rotate(0)}25%{transform:rotate(-7deg)}75%{transform:rotate(7deg)}}
 @keyframes pm-land{0%{transform:scale(1.12)}60%{transform:scale(.96)}100%{transform:scale(1)}}
 @keyframes pm-flicker{0%,100%{opacity:.7}45%{opacity:1}55%{opacity:.55}}
 @keyframes pm-breathe{50%{opacity:.55}}

@@ -2,7 +2,8 @@
 
 Auction: every legal (column, placement) is scored by how much it raises a
 board VALUE, minus its price; taking money is worth 2 (money is points at the
-end). The value of a board is, per straight row/column:
+end); a column reroll is valued by sampling what the rerolled dice could be
+worth next turn. The value of a board is, per straight row/column:
 
 * a run already long enough to score is worth its points plus the money its
   line would pay (+1 / +5 / about +10 for "set to 18"), and
@@ -97,6 +98,12 @@ def _potential_weight(game: dict) -> float:
     return POT_W * engine.market_left(game) / max(1, game.get("round_dice") or 1)
 
 
+REROLL_SAMPLES = 12
+# A reroll pays off on a LATER turn, if nobody buys the new dice first.
+REROLL_DISCOUNT = 0.7
+REROLL_ONLY_BELOW = 0.0
+
+
 def choose_auction(game: dict, pid: str, rng: random.Random) -> dict:
     board = game["boards"][pid]
     grid = {(d["r"], d["c"]): d["f"] for d in board}
@@ -104,24 +111,28 @@ def choose_auction(game: dict, pid: str, rng: random.Random) -> dict:
     w = _potential_weight(game)
     base = board_value(grid, w)
     cache: dict[tuple, tuple[float, tuple] | None] = {}
+
+    def placed(faces: tuple):
+        """(value gained, cells) for the best placement of these dice, or None."""
+        if faces not in cache:
+            found = None
+            for cells in engine.placements(board, len(faces)):
+                trial = dict(grid)
+                for cell, f in zip(cells, faces):
+                    trial[cell] = f
+                gain = board_value(trial, w) - base
+                if found is None or gain > found[0]:
+                    found = (gain, cells)
+            cache[faces] = found
+        return cache[faces]
+
     best: tuple[float, float, dict] | None = None
     for s, cols in enumerate(game["market"]):
         for c, col in enumerate(cols):
             price = c + 1
             if price > money:
                 break
-            faces = tuple(d["f"] for d in col)
-            if faces not in cache:
-                found = None
-                for cells in engine.placements(board, len(faces)):
-                    trial = dict(grid)
-                    for cell, f in zip(cells, faces):
-                        trial[cell] = f
-                    gain = board_value(trial, w) - base
-                    if found is None or gain > found[0]:
-                        found = (gain, cells)
-                cache[faces] = found
-            found = cache[faces]
+            found = placed(tuple(d["f"] for d in col))
             if found is None:
                 continue
             value = found[0] - MONEY_VALUE * price
@@ -129,10 +140,39 @@ def choose_auction(game: dict, pid: str, rng: random.Random) -> dict:
             if best is None or (value, tie) > (best[0], best[1]):
                 best = (value, tie, {"type": "buy", "set": s, "col": c,
                                      "cells": [list(cell) for cell in found[1]]})
-    if engine.can_take(game, pid):
-        take = MONEY_VALUE * min(engine.TAKE_AMOUNT, engine.MAX_MONEY - money)
-        if best is None or take > best[0]:
-            return {"type": "take"}
+    take = (MONEY_VALUE * min(engine.TAKE_AMOUNT, engine.MAX_MONEY - money)
+            if engine.can_take(game, pid) else None)
+    now = max(v for v in (best[0] if best else None, take) if v is not None) \
+        if (best or take is not None) else 0.0
+
+    # A reroll: what the rerolled column could be worth next turn, sampled, over
+    # what is on offer anyway — discounted, less its price. It must beat the best
+    # thing this turn outright, so the bot rerolls only when the market is poor.
+    reroll = None
+    held = best[0] if best else 0.0
+    # The new dice are on offer to every seat before this one buys again, so
+    # only reroll a market with nothing worth buying in it.
+    columns = engine.rerollable_columns(game, pid) if held <= REROLL_ONLY_BELOW else []
+    for c in columns:
+        sizes = [len(cols[c]) for cols in game["market"] if len(cols) > c]
+        price = c + 1
+        if price > money - price:      # keep enough to buy the result
+            continue
+        total = 0.0
+        for _ in range(REROLL_SAMPLES):
+            top = held
+            for k in sizes:
+                found = placed(tuple(rng.randint(1, 6) for _ in range(k)))
+                if found is not None:
+                    top = max(top, found[0] - MONEY_VALUE * price)
+            total += top - max(held, 0.0)
+        value = REROLL_DISCOUNT * total / REROLL_SAMPLES - MONEY_VALUE * price
+        if value > now and (reroll is None or value > reroll[0]):
+            reroll = (value, {"type": "reroll", "col": c})
+    if reroll:
+        return reroll[1]
+    if take is not None and (best is None or take > best[0]):
+        return {"type": "take"}
     if best is None:
         return {"type": "take"}
     return best[2]

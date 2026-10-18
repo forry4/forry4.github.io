@@ -8582,6 +8582,8 @@ try {
 		const col = page.locator(".pm-col.buyable").first();
 		const ours = await col.waitFor({ state: "visible", timeout: 30_000 }).then(() => true).catch(() => false);
 		check("the human gets a buyable column", ours);
+		check("the turn also offers a column reroll",
+			await page.locator(".pm-actions .pm-btn", { hasText: "Reroll a column" }).count() === 1);
 		if (ours) {
 			await col.click();
 			const target = page.locator(".pm-cell.target").first();
