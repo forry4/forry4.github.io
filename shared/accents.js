@@ -63,6 +63,11 @@ export const GAME_ACCENTS = {
 	// precise instrument-light used only for legal actions, focus, and its handle
 	// in the site shell. It clears AA both as text and as a filled control.
 	pinch: "#83d6dc",
+	// LANTERN CORAL. Pip Market is a night market — ivory dice on a deep plum
+	// table under paper lanterns — and coral is the lantern light: the price
+	// tags, the legal targets and its handle in the shell. No other game is pink
+	// or coral (Rag Tag's #e8663c is a hotter orange, CoC's crimson far darker).
+	pipmarket: "#f2917c",
 };
 
 // Titles that do not clear the 4.5:1 AA floor on the card, and are shipped anyway

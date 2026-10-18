@@ -51,6 +51,7 @@ const Orbit = lazyChunk("Orbit", () => import("../orbit/Orbit.jsx"));
 const BlackCastle = lazyChunk("BlackCastle", () => import("../black_castle/BlackCastle.jsx"));
 const SecretNames = lazyChunk("SecretNames", () => import("../secretnames/SecretNames.jsx"));
 const Pinch = lazyChunk("Pinch", () => import("../pinch/Pinch.jsx"));
+const PipMarket = lazyChunk("PipMarket", () => import("../pipmarket/PipMarket.jsx"));
 const Books = lazyChunk("Books", () => import("../../books/Books.jsx"));
 const Notes = lazyChunk("Notes", () => import("../../notes/Notes.jsx"));
 const Profile = lazyChunk("Profile", () => import("../../shared/Profile.jsx"));
@@ -127,8 +128,8 @@ const HTTP_BASE = WS_BASE.replace(/^ws/, "http").replace(/\/ws$/, "");
 // tables — GAMES[].id ≠ path for wherewolf; Spender is one site-level screen now.
 // The shell owns segment 1; each sub-game owns its own segment 2 (room id). The Spender
 // Spender's own waiting/game map to "spender" (or "puzzles" while puzzling) in applyPopRoute.
-const SCREEN_FOR_MODE = { spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", books: "books", notes: "notes", profile: "profile", puzzles: "puzzles", bggfilter: "bggfilter", steamfilter: "steamfilter", boxpuzzles: "boxpuzzles", offline: "offline" };
-const MODE_FOR_SCREEN = { home: "home", spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", books: "books", notes: "notes", profile: "profile", puzzles: "puzzles", bggfilter: "bggfilter", steamfilter: "steamfilter", boxpuzzles: "boxpuzzles", offline: "offline" };
+const SCREEN_FOR_MODE = { spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", pipmarket: "pipmarket", books: "books", notes: "notes", profile: "profile", puzzles: "puzzles", bggfilter: "bggfilter", steamfilter: "steamfilter", boxpuzzles: "boxpuzzles", offline: "offline" };
+const MODE_FOR_SCREEN = { home: "home", spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", pipmarket: "pipmarket", books: "books", notes: "notes", profile: "profile", puzzles: "puzzles", bggfilter: "bggfilter", steamfilter: "steamfilter", boxpuzzles: "boxpuzzles", offline: "offline" };
 
 // Per-game emblem — inline SVG tinted via currentColor (=the card's --accent), so no
 // raster asset / CDN (keeps the self-hosted, no-CLS constraint). Small motifs that read
@@ -3182,6 +3183,15 @@ export default function SpenderApp() {
 		return (
 			<Suspense fallback={<GameChunkLoading />}>
 				<Pinch myId={myId} authUser={authUser} onExit={() => nav("home")} />
+			</Suspense>
+		);
+	}
+
+	// Pip Market — the 2–4 player dice auction.
+	if (screen === "pipmarket") {
+		return (
+			<Suspense fallback={<GameChunkLoading />}>
+				<PipMarket myId={myId} authUser={authUser} onExit={() => nav("home")} />
 			</Suspense>
 		);
 	}

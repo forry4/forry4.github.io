@@ -57,6 +57,7 @@ const SCREENS = [
 	{ path: "/blackcastle", chunk: "BlackCastle", marker: ".blackcastle" },
 	{ path: "/secretnames", chunk: "SecretNames", marker: ".secretnames" },
 	{ path: "/pinch", chunk: "Pinch", marker: ".pinch" },
+	{ path: "/pipmarket", chunk: "PipMarket", marker: ".pipmarket" },
 	{ path: "/books", chunk: "Books", marker: ".bk-app" },
 	// A guest gets Notes' private notice — .nt-app is still Notes' own root.
 	{ path: "/notes", chunk: "Notes", marker: ".nt-app" },
@@ -89,6 +90,7 @@ const LOBBY_PAGES = [
 	{ id: "blackcastle", path: "/blackcastle", marker: ".blackcastle" },
 	{ id: "secretnames", path: "/secretnames", marker: ".secretnames" },
 	{ id: "pinch", path: "/pinch", marker: ".pinch" },
+	{ id: "pipmarket", path: "/pipmarket", marker: ".pipmarket" },
 ];
 const LOBBY_PAGES_UNLISTED = Object.keys(GAME_ACCENTS)
 	.filter((k) => !LOBBY_PAGES.some((g) => g.id === k));
@@ -1285,7 +1287,7 @@ try {
 			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
 		};
 
-		for (const route of ["/spender", "/coc", "/werewolf", "/duel", "/dontminion", "/dissonance", "/ragtag", "/orbit", "/blackcastle", "/secretnames", "/pinch"]) {
+		for (const route of ["/spender", "/coc", "/werewolf", "/duel", "/dontminion", "/dissonance", "/ragtag", "/orbit", "/blackcastle", "/secretnames", "/pinch", "/pipmarket"]) {
 			await page.goto(`http://localhost:${PORT}${route}`, { waitUntil: "networkidle" });
 			await page.waitForSelector(".lby-rules", { timeout: 25_000 }).catch(() => {});
 			const hasBtn = await page.locator(".lby-rules").count().catch(() => 0);
@@ -8542,6 +8544,87 @@ try {
 		await ctx.close();
 	}
 
+
+	// ── Pip Market: a vs-bot table, one bought pair that flies home, and the
+	// layout at every acceptance width ──────────────────────────────────────
+	async function pipMarketPlay(log) {
+		const ctx = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "pipmarket-harness", name: "Vector", guest: true })));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		page.on("console", (m) => { if (m.type() === "error") errors.push(`console: ${m.text()}`); });
+		const check = (name, cond, detail = "") => {
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(`pipmarket: ${name}`); log(`  FAIL ${name}  ${detail}`); }
+		};
+
+		await page.goto(`http://localhost:${PORT}/pipmarket`, { waitUntil: "networkidle" });
+		await page.waitForSelector(".pipmarket .lby-create-row", { timeout: 25_000 }).catch(() => {});
+		check("Pip Market lobby is reachable", await page.locator(".pipmarket .lby-create-row").count() === 1);
+		await page.locator(".pipmarket .lby-cta").click().catch(() => {});
+		await page.waitForSelector(".cm-panel", { timeout: 10_000 }).catch(() => {});
+		const modalText = await page.locator(".cm-panel").innerText().catch(() => "");
+		check("create modal offers 2-4 players, bots and the Normal tier",
+			["2 players", "3 players", "4 players", "1 bot", "No bots", "Normal"].every((w) => modalText.includes(w)), modalText);
+		// 2 players + 1 bot fills every seat, so the table deals at once.
+		await page.locator(".cm-panel .cm-seg-btn", { hasText: "2 players" }).click().catch(() => {});
+		await page.locator(".cm-panel .cm-seg-btn", { hasText: "1 bot" }).click().catch(() => {});
+		await page.locator(".cm-create").click().catch(() => {});
+		const dealt = await page.waitForSelector(".pm-market .pm-stall", { timeout: 30_000 }).then(() => true).catch(() => false);
+		check("a table full of bots deals at once", dealt);
+		const stalls = await page.locator(".pm-stall").count();
+		const marketDice = await page.locator(".pm-market [data-die]").count();
+		check("two players shop from three stalls of ten dice", stalls === 3 && marketDice === 30, `${stalls} stalls, ${marketDice} dice`);
+
+		// The bot may open; wait for a column we can buy rather than for a duration.
+		const col = page.locator(".pm-col.buyable").first();
+		const ours = await col.waitFor({ state: "visible", timeout: 30_000 }).then(() => true).catch(() => false);
+		check("the human gets a buyable column", ours);
+		if (ours) {
+			await col.click();
+			const target = page.locator(".pm-cell.target").first();
+			const lit = await target.waitFor({ state: "visible", timeout: 5_000 }).then(() => true).catch(() => false);
+			check("picking a column lights legal cells on the board", lit);
+			if (lit) await target.click();
+			check("choosing a cell previews the pair before it is bought",
+				await page.locator(".pm-die.ghost").count() === 2, String(await page.locator(".pm-die.ghost").count()));
+			await page.locator(".pm-btn.primary", { hasText: "Place" }).click().catch(() => {});
+			const flew = await page.waitForSelector(".pm-fx .pm-die", { timeout: 4_000 }).then(() => true).catch(() => false);
+			check("a bought pair flies from the market to the board", flew);
+			const landed = await page.waitForFunction(
+				() => document.querySelectorAll(".pm-player.mine [data-die]").length >= 2, null, { timeout: 10_000 })
+				.then(() => true).catch(() => false);
+			check("the pair lands on the buyer's board", landed);
+			const logged = await page.waitForFunction(
+				() => /Vector buys/.test(document.querySelector(".pm-log")?.innerText || ""), null, { timeout: 10_000 })
+				.then(() => true).catch(() => false);
+			check("the purchase reaches the market log", logged);
+		}
+
+		for (const viewport of [
+			{ width: 320, height: 568 }, { width: 390, height: 844 }, { width: 768, height: 1024 },
+			{ width: 1366, height: 768 }, { width: 1920, height: 1080 }, { width: 2560, height: 1440 },
+		]) {
+			await page.setViewportSize(viewport);
+			await page.waitForTimeout(120);
+			const g = await page.evaluate(() => {
+				const box = (sel) => { const r = document.querySelector(sel)?.getBoundingClientRect(); return r ? { l: r.left, r: r.right, w: r.width } : null; };
+				return { docW: document.documentElement.scrollWidth, board: box(".pm-player.mine .pm-board"),
+					stalls: [...document.querySelectorAll(".pm-stall")].map((el) => { const r = el.getBoundingClientRect(); return [r.left, r.right]; }),
+					actions: box(".pm-actions") };
+			});
+			check(`${viewport.width}x${viewport.height} the table never scrolls sideways and every stall and the board fit`,
+				g.board && g.actions && g.stalls.length === 3 && g.docW <= viewport.width + 1
+				&& g.board.l >= -1 && g.board.r <= viewport.width + 1 && g.board.w > 200
+				&& g.stalls.every(([l, r]) => l >= -1 && r <= viewport.width + 1),
+				JSON.stringify(g));
+		}
+		check("no page errors in Pip Market play", errors.length === 0, errors[0]?.slice(0, 180) || "");
+		await ctx.close();
+	}
+
 	// ── ONE WAITING ROOM, THREE GAMES ─────────────────────────────────────────
 	// `spenderWaitingRoom` above proves the kit WORKS; this proves it is the SAME
 	// kit in games whose stylesheets are in a position to quietly replace it.
@@ -10562,7 +10645,7 @@ try {
 		waitingRoomKit,
 		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, historyRecovery, dmAdventures,
 		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, formControlZoom, lastDifficulty,
-		dissonanceQuartet, orbitPlay, lobbyFinishSync, blackCastlePlay, pinchPlay, secretNamesPlay, lobbyChrome,
+		dissonanceQuartet, orbitPlay, lobbyFinishSync, blackCastlePlay, pinchPlay, pipMarketPlay, secretNamesPlay, lobbyChrome,
 		notesEditor, profilePage, offlineRead, boxPuzzles, boxDaily, updateNudgeLayout];
 
 	// EVERY BLOCK MUST BE IN A LANE. Before the lanes existed, adding a block meant

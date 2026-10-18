@@ -30,6 +30,7 @@ on:
       - 'games/black_castle/**'
       - 'games/secretnames/**'
       - 'games/pinch/**'
+      - 'games/pipmarket/**'
       - 'books/**'
       - 'notes/**'
       - 'bggfilter/**'

@@ -71,6 +71,9 @@ const GAME_EMBLEM = {
 	// A ring pinching a line of reversible markers — the whole game's action in
 	// the same 24px, 1.5-stroke family as the other home-card emblems.
 	pinch: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><circle cx="7" cy="12" r="3.2" /><circle cx="7" cy="12" r="1.35" /><path d="M10.2 12h8.9" /><circle cx="13" cy="12" r="1.15" fill="currentColor" stroke="none" /><circle cx="16.1" cy="12" r="1.15" fill="currentColor" stroke="none" /><circle cx="19.2" cy="12" r="1.15" fill="currentColor" stroke="none" /></svg>),
+	// A die with its price tag hanging off one corner — the market and the dice
+	// in one mark. Three pips on the diagonal read at 20px where five would mush.
+	pipmarket: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><rect x="3.6" y="7.4" width="12.6" height="12.6" rx="2.6" /><circle cx="6.9" cy="10.7" r="1.05" fill="currentColor" stroke="none" /><circle cx="9.9" cy="13.7" r="1.05" fill="currentColor" stroke="none" /><circle cx="12.9" cy="16.7" r="1.05" fill="currentColor" stroke="none" /><path d="M16.2 9.6l2.3-2.3M17.1 3.6h3.3v3.3l-3.9 3.9-3.3-3.3Z" /><circle cx="18.7" cy="5.3" r=".7" fill="currentColor" stroke="none" /></svg>),
 };
 
 export { GAME_EMBLEM };

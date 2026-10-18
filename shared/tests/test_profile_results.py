@@ -69,7 +69,7 @@ MODULES = {
     "dontminion": "games.dontminion.main", "dissonance": "games.dissonance.main",
     "ragtag": "games.rag_tag.main", "orbit": "games.orbit.main",
     "blackcastle": "games.black_castle.main", "secretnames": "games.secretnames.main",
-    "pinch": "games.pinch.main",
+    "pinch": "games.pinch.main", "pipmarket": "games.pipmarket.main",
 }
 
 
@@ -148,3 +148,19 @@ def test_pinch_concession_is_a_loss_for_the_player_who_conceded():
     res = src.standings({"players": names, "game": g, "mode": "blitz",
                          "ai_player": "b", "ai_difficulty": "easy"})
     assert _outcomes(res) == {"a": "loss", "b": "win"} and res["mode"] == "blitz"
+
+
+def test_pipmarket_reads_totals_and_a_shared_top_score_is_a_draw():
+    from games.pipmarket import engine
+    src = _source("pipmarket", MODULES["pipmarket"])
+    names = {"a": "A", "b": "B", "c": "C"}
+    g = engine.new_game(["a", "b", "c"], names=names, seed=4)
+    g["points"] = {"a": 30, "b": 22, "c": 9}
+    g["money"] = {"a": 2, "b": 10, "c": 4}
+    engine._finish(g)
+    state = {"players": names, "game": g, "ai_players": ["c"], "ai_difficulty": "normal"}
+    res = src.standings(state)
+    assert _outcomes(res) == {"a": "draw", "b": "draw", "c": "loss"}
+    assert {p["id"]: p["score"] for p in res["players"]} == {"a": 32, "b": 32, "c": 13}
+    assert [p["bot"] for p in res["players"] if p["id"] == "c"] == [True]
+    engine.concede(engine.new_game(["a", "b"], names=names, seed=1), "a")

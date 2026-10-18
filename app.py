@@ -220,6 +220,14 @@ try:
 except Exception as _secretnames_err:  # pragma: no cover - optional package
     LOG.warning("SecretNames not mounted: %s", _secretnames_err)
 
+# Pip Market — the 2-4 player dice auction. Same defensive mount.
+try:
+    from games.pipmarket.main import pipmarket_app
+    app.mount("/pipmarket", pipmarket_app)
+    LOG.info("mounted Pip Market at /pipmarket")
+except Exception as _pipmarket_err:  # pragma: no cover - optional package
+    LOG.warning("Pip Market not mounted: %s", _pipmarket_err)
+
 
 def _rooms_in_memory() -> int:
     """Live rooms across every mounted game. Read from the game modules' own ROOMS

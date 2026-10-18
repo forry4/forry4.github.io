@@ -92,6 +92,12 @@ export const PINCH_AI_TIER_OPTIONS = [
   { value: "easy", label: "Easy", title: "Uniformly random legal actions" },
 ];
 
+// ─── Pip Market ──────────────────────────────────────────────────
+// One bot: the line-and-space heuristic measured in the design simulation.
+export const PIPMARKET_AI_TIER_OPTIONS = [
+  { value: "normal", label: "Normal", title: "Values finished lines, growing lines and the room to grow them" },
+];
+
 // ─── The words, per game ───────────────────────────────────────────────────
 const titled = (s) => String(s).replace(/^./, (c) => c.toUpperCase());
 const labelsOf = (options) => Object.fromEntries(options.map((t) => [t.value ?? t.id, t.label ?? t.name]));
@@ -106,6 +112,7 @@ export const BOT_TIER_LABELS = {
 	orbit: labelsOf(ORBIT_AI_TIER_OPTIONS),
 	blackcastle: labelsOf(BLACK_CASTLE_AI_TIER_OPTIONS),
 	pinch: labelsOf(PINCH_AI_TIER_OPTIONS),
+	pipmarket: labelsOf(PIPMARKET_AI_TIER_OPTIONS),
 };
 
 // A retired tier still sitting on an old game keeps its raw id, title-cased —

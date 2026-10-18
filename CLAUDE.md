@@ -1,6 +1,6 @@
 # Forrest Games — Claude Context
 
-An eleven-game multiplayer board-game website (+ a Books feature) sharing one backend, auth
+A twelve-game multiplayer board-game website (+ a Books feature) sharing one backend, auth
 layer, and frontend shell. Real-time play over WebSockets, server-authoritative game state,
 and per-game AI opponents that range from simple heuristics to client-side neural nets
 compiled to WASM.
@@ -21,6 +21,7 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
 | [`games/black_castle/AGENTS.md`](games/black_castle/AGENTS.md) | Black Castle — engine, the BGA-derived card catalogue, `BoardView.jsx` |
 | [`games/secretnames/CLAUDE.md`](games/secretnames/CLAUDE.md) | SecretNames (Codenames: Duet) — **the key-card inversion**, the two-sided key composition, the public/private split, and why it has no bot |
 | [`games/pinch/AGENTS.md`](games/pinch/AGENTS.md) | Pinch (YINSH) — node ids, durable row/ring-removal sub-decisions, the persist boundary |
+| [`games/pipmarket/CLAUDE.md`](games/pipmarket/CLAUDE.md) | Pip Market — the original 2–4 player dice auction: stable die ids, the floating 6×6 board, the seed-derived rerolls, the dice-flight animation |
 | [`shared/CLAUDE.md`](shared/CLAUDE.md) | Shared frontend kits + URL routing |
 | [`books/CLAUDE.md`](books/CLAUDE.md) | The Books feature |
 | [`notes/CLAUDE.md`](notes/CLAUDE.md) | Notes — a private notebook per signed-in account (folders, rich-text notes, screenshots); every row scoped to its owner, metered by quota |
@@ -59,6 +60,9 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
   `keys[1 - guesser_seat]` — see its CLAUDE.md).
   Orbit (Zenith), Black Castle (The White Castle) and Pinch (YINSH — 2 players, 85
   intersections, Standard ends at three removed rings and Blitz at one).
+  Pip Market (an ORIGINAL design — 2–4 players, any seat but the host's may be a bot; buy
+  dice pairs from a sliding market, build a board that spans at most 6×6, score straight
+  lines at least as long as their face; three rounds, points plus money).
   Plus **Books** (a ranking/suggestions page), **Notes** (a private notebook per account) and **WWSD** (a browser autoplayer for a friend's
   external Splendor site).
 
@@ -115,6 +119,8 @@ games/
                        #   socket — that redaction IS the game
   pinch/               # Pinch (YINSH) — 2p abstract, engine.py + bot.py + main.py
                        #   (pinch_app @ /pinch); see its AGENTS.md
+  pipmarket/           # Pip Market — 2-4p dice auction, engine.py + bot.py + main.py
+                       #   (pipmarket_app @ /pipmarket); see its CLAUDE.md
   dissonance/          # Dissonance — 2p parity trick-taking. engine.py is a PORT of
                        #   rust-cores/dissonance-core (the solver-validated reference);
                        #   tests/test_rust_parity.py is the drift gate. FIVE modes

@@ -38,6 +38,7 @@ export const FEATURE_BLOCKS = {
 		"dmRenaissance", "dmInfoModal"],
 	"games/orbit": ["orbitPlay", "lobbyFinishSync"],
 	"games/pinch": ["pinchPlay"],
+	"games/pipmarket": ["pipMarketPlay"],
 	"games/rag_tag": ["ragtagFight"],
 	"games/secretnames": ["secretNamesPlay"],
 	// Spender.jsx is the site SHELL, so it gets the kit-wide set as well as its own.
