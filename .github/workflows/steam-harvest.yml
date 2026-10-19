@@ -11,6 +11,11 @@ name: Steam Filter harvest
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: 'full = re-collect every review (~7h); enrich = only re-apply categories + Switch (~5 min)'
+        type: choice
+        options: [full, enrich]
+        default: full
       min_reviews:
         description: 'English-review floor for the dataset'
         default: '50'
@@ -49,7 +54,7 @@ jobs:
         # Measured 2026-10-15: search ~68 min (132k games), then ~60 review lookups a
         # minute against ~22k candidates — ~7h in all, more than one job may run.
         timeout-minutes: 320
-        run: python -u steamfilter/tools/scan_steam.py --min-reviews "${{ inputs.min_reviews }}"
+        run: python -u steamfilter/tools/scan_steam.py --min-reviews "${{ inputs.min_reviews }}" ${{ inputs.mode == 'enrich' && '--enrich' || '' }}
       - uses: actions/cache/save@v4
         if: always()
         with:
@@ -58,11 +63,11 @@ jobs:
       # Out of time (or a transient failure): the cache is saved above, so start the
       # next round, which reuses every answer already collected. Capped at 3 rounds.
       - name: Continue in a new run
-        if: always() && steps.harvest.outcome != 'success' && fromJSON(inputs.round) < 3
+        if: always() && inputs.mode != 'enrich' && steps.harvest.outcome != 'success' && fromJSON(inputs.round) < 3
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh workflow run steam-harvest.yml --ref main \
+          gh workflow run steam-harvest.yml --ref main -f mode=full \
             -f min_reviews="${{ inputs.min_reviews }}" -f round="$(( ${{ inputs.round }} + 1 ))"
       - name: Build the payload
         run: python steamfilter/tools/make_data.py
@@ -74,7 +79,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add webapp/public/data/steam-filter.json
           if git diff --cached --quiet; then echo "no change"; exit 0; fi
-          git commit -m "Steam Filter: harvest $(date -u +%Y-%m-%d)"
+          git commit -m "Steam Filter: ${{ inputs.mode == 'enrich' && 'categories + Switch' || 'harvest' }} $(date -u +%Y-%m-%d)"
           git pull --rebase origin main
           git push origin HEAD:main
           gh workflow run deploy-pages.yml --ref main

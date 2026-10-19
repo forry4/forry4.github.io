@@ -39,6 +39,21 @@
 	font-size:.88rem;color:var(--text-dim);}
 .stf-effect b{color:var(--text);}
 
+/* ── categories + Switch ───────────────────────────────────────────────── */
+.stf-mhead{margin:18px 0 8px;font-size:.76rem;color:var(--text-dim);letter-spacing:.04em;}
+.stf-mhead em{color:var(--text-muted);font-style:normal;}
+.stf-chips{display:flex;flex-wrap:wrap;gap:6px;}
+.stf-chip,.stf-seg button{font:inherit;font-size:.8rem;cursor:pointer;color:var(--text-dim);
+	background:var(--surface2);border:1px solid var(--border);border-radius:999px;
+	padding:5px 11px;line-height:1.2;}
+.stf-chip span{margin-left:6px;color:var(--text-muted);font-size:.72rem;}
+.stf-chip:hover,.stf-seg button:hover{color:var(--text);}
+.stf-chip[aria-pressed="true"],.stf-seg button[aria-pressed="true"]{color:var(--bg);
+	background:var(--gold);border-color:var(--gold);font-weight:700;}
+.stf-chip[aria-pressed="true"] span{color:var(--bg);opacity:.75;}
+.stf-chip:focus-visible,.stf-seg button:focus-visible{outline:2px solid var(--gold);outline-offset:2px;}
+.stf-seg{display:inline-flex;flex-wrap:wrap;gap:6px;}
+
 /* ── controls ──────────────────────────────────────────────────────────── */
 .stf-controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:18px 0 10px;}
 .stf-search{flex:1 1 200px;min-width:0;display:flex;align-items:center;gap:8px;
@@ -108,3 +123,9 @@
 @media(pointer:coarse){
 	.stf-knob input[type=range]{height:40px;}
 }
+
+/* under the game's name: its categories, and a Switch badge first */
+.stf-tags{display:block;font-size:.7rem;color:var(--text-muted);margin-top:3px;line-height:1.35;}
+.stf-switch{font-style:normal;font-weight:700;color:#ff5d5d;border:1px solid currentColor;
+	border-radius:3px;padding:0 4px;margin-right:6px;font-size:.62rem;letter-spacing:.04em;
+	text-transform:uppercase;}

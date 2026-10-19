@@ -10,7 +10,10 @@ reviews. No backend — it fetches one static JSON and does everything client-si
 | `SteamFilter.css` | `?inline`-imported stylesheet, `.stf`-prefixed (started as a copy of BGG's) |
 | `tools/scan_steam.py` | **the harvester** — store search, then English review totals per candidate |
 | `tools/make_data.py` | `results_all.json` → `webapp/public/data/steam-filter.json` (the shipped payload) |
+| `tools/enrich.py` | categories (SteamSpy tag lists) + Nintendo Switch availability (eShop title match) |
+| `tools/categories.json` | the category groups — label + the Steam tags each one ORs together |
 | `tests/test_scan_steam.py` | the parse + admission rule, off canned store markup |
+| `tests/test_enrich.py` | title folding, tag unions, eShop paging + the truncation guards |
 
 The slider pointer handling is shared with BGG Filter via `shared/rangePointer.js`.
 
@@ -22,8 +25,27 @@ push triggers no workflow on its own). Locally:
 `python steamfilter/tools/scan_steam.py && python steamfilter/tools/make_data.py`.
 Until the first harvest the committed payload has `"games": []` and the page says so.
 
-Payload rows are `{n, id, y, p, t}` — name, app id, release year (or null), positive and
-total English reviews. Nothing derived is stored.
+Payload rows are `{n, id, y, p, t[, c, sw]}` — name, app id, release year (or null),
+positive and total English reviews, category ids and `sw: 1` when on Switch. The header
+carries `categories` (`[{id, label}]`) so the page needs no copy of `categories.json`.
+Nothing derived from the reviews is stored.
+
+## Categories and Switch (`tools/enrich.py`)
+
+Applied to every kept game at the end of a full harvest, or ALONE to the shipped payload by
+the workflow's `mode: enrich` (`scan_steam.py --enrich`, ~5 min, no Steam requests at all) —
+so a change to `categories.json` never needs the 7-hour review harvest.
+- **Categories** are groups of Steam user tags (OR within a group); the page ANDs the groups
+  a reader picks. Membership is SteamSpy's `api.php?request=tag&tag=<name>` — one request per
+  TAG returns every app carrying it, where Steam would need one page per game. A misspelt tag
+  answers an empty list, not an error, so the run names every empty tag and FAILS a group
+  left with no members.
+- **Switch** is a title match against Nintendo's EU eShop index (`searching.nintendo-europe.com`,
+  `system_type:nintendoswitch*`, so Switch 2 too). There is no shared id; `norm_title` folds
+  case, accents, ™/®, punctuation and edition suffixes ("- Nintendo Switch Edition",
+  "Definitive Edition"). A port renamed for Switch is missed; false matches are rare. The run
+  fails if the index lists under 5,000 games, since a truncated catalogue would quietly
+  un-Switch most of the list.
 
 ## Harvest shape
 

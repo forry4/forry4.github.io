@@ -23,9 +23,15 @@ import argparse, datetime, html, json, os, re, sys, threading, time
 import urllib.error, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
+try:                       # imported as steamfilter.tools.scan_steam (the tests)
+    from . import enrich
+except ImportError:        # run as a script from the workflow
+    import enrich
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 CACHE = os.path.join(HERE, "cache")
 OUT = os.path.join(HERE, "results_all.json")
+PAYLOAD = os.path.join(HERE, "..", "..", "webapp", "public", "data", "steam-filter.json")
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
@@ -52,8 +58,7 @@ def log(*a):
 
 # ── fetching ──────────────────────────────────────────────────────────────
 
-class Rejected(Exception):
-    pass
+Rejected = enrich.Rejected   # one class, so fetch() retries the enrich validators too
 
 
 def validate_search(body):
@@ -233,7 +238,19 @@ def main(argv=None):
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--fresh-hours", type=float, default=48,
                     help="reuse a cached review count younger than this (resumes a crashed run)")
+    ap.add_argument("--enrich", action="store_true",
+                    help="only (re)apply categories + Switch to the shipped payload; no Steam requests")
     a = ap.parse_args(argv)
+
+    if a.enrich:
+        cur = json.load(open(PAYLOAD, encoding="utf-8"))
+        if not cur.get("games"):
+            raise SystemExit("--enrich needs a harvested payload; run the full harvest first")
+        games = [{k: g[k] for k in ("n", "id", "y", "p", "t")} for g in cur["games"]]
+        enrich.enrich(games, fetch, log)
+        write(cur["collected"], cur.get("min_reviews", a.min_reviews), games,
+              store_total=None, candidates=None)
+        return
 
     total, by_id = harvest_search(a.workers, a.fresh_hours)
     cands = [g for g in by_id.values() if is_candidate(g, a.min_reviews)]
@@ -242,11 +259,19 @@ def main(argv=None):
 
     games = [{"n": g["n"], "id": g["id"], "y": g["y"], "p": g["pos"], "t": g["tot"]}
              for g in cands if keep(g["pos"], g["tot"], a.min_reviews)]
+    enrich.enrich(games, fetch, log)
+    write(datetime.date.today().isoformat(), a.min_reviews, games,
+          store_total=total, candidates=len(cands))
+
+
+def write(collected, min_reviews, games, store_total, candidates):
+    cats = [{"id": c["id"], "label": c["label"]} for c in enrich.load_categories()]
     with open(OUT, "w", encoding="utf-8") as f:
-        json.dump({"collected": datetime.date.today().isoformat(), "store_total": total,
-                   "candidates": len(cands), "min_reviews": a.min_reviews,
-                   "min_positive": MIN_POSITIVE, "games": games}, f, ensure_ascii=False)
-    log(f"kept {len(games):,} games -> {OUT}")
+        json.dump({"collected": collected, "enriched": datetime.date.today().isoformat(),
+                   "store_total": store_total, "candidates": candidates,
+                   "min_reviews": min_reviews, "min_positive": MIN_POSITIVE,
+                   "categories": cats, "games": games}, f, ensure_ascii=False)
+    log(f"{len(games):,} games -> {OUT}")
 
 
 if __name__ == "__main__":

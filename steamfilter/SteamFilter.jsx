@@ -21,7 +21,10 @@ const STORE = "steam_filter_dials_v1";
 const YMIN = 2005;
 const YMAX = new Date().getFullYear();
 
-const DEFAULTS = { rev: REVIEWS.indexOf(500), yfrom: YMIN, yto: YMAX };
+// `cats`: category ids a game must ALL carry (AND, so Roguelike + Card game finds the
+// roguelike deckbuilders). `sw`: "any", "yes" (on Nintendo Switch) or "no".
+const DEFAULTS = { rev: REVIEWS.indexOf(500), yfrom: YMIN, yto: YMAX, cats: [], sw: "any" };
+const SWITCH = [["any", "Any"], ["yes", "On Switch"], ["no", "Not on Switch"]];
 const fmt = (n) => n.toLocaleString("en-US");
 
 function loadDials() {
@@ -29,9 +32,11 @@ function loadDials() {
 		const v = JSON.parse(localStorage.getItem(STORE) || "null");
 		if (!v || typeof v !== "object") return { ...DEFAULTS };
 		const out = { ...DEFAULTS };
-		for (const k of Object.keys(DEFAULTS)) {
+		for (const k of ["rev", "yfrom", "yto"]) {
 			if (typeof v[k] === "number" && isFinite(v[k])) out[k] = v[k];
 		}
+		if (Array.isArray(v.cats)) out.cats = v.cats.filter((c) => typeof c === "string");
+		if (SWITCH.some(([k]) => k === v.sw)) out.sw = v.sw;
 		out.rev = Math.min(REVIEWS.length - 1, Math.max(0, out.rev));
 		out.yfrom = Math.min(YMAX, Math.max(YMIN, out.yfrom));
 		out.yto = Math.min(YMAX, Math.max(out.yfrom, out.yto));
@@ -50,6 +55,7 @@ export function derive(games) {
 	for (const g of games) {
 		const a = g.t ? g.p / g.t : 0;
 		const r = a - (a - 0.5) * Math.pow(2, -Math.log10(g.t + 1));
+		g.c = g.c || [];
 		g.a = a * 100;
 		g.r = r * 100;
 		g.f = (g.a + g.r) / 2;
@@ -100,15 +106,37 @@ export default function SteamFilter({ onExit }) {
 		setLimit(PAGE);
 	}, []);
 
-	const pass = useCallback((g) => {
+	// The categories this payload knows. A saved pick the payload no longer has is
+	// dropped rather than filtering everything out.
+	const cats = useMemo(() => meta?.categories || [], [meta]);
+	const catLabel = useMemo(() => Object.fromEntries(cats.map((c) => [c.id, c.label])), [cats]);
+	const picked = useMemo(() => d.cats.filter((c) => catLabel[c]), [d.cats, catLabel]);
+	const toggleCat = (id) => {
+		setD((prev) => ({ ...prev, cats: prev.cats.includes(id)
+			? prev.cats.filter((c) => c !== id) : [...prev.cats, id] }));
+		setLimit(PAGE);
+	};
+
+	// Everything but the categories, so each chip can say how many it would leave.
+	const passBase = useCallback((g) => {
 		if (g.t < REVIEWS[d.rev]) return false;
 		// Either year end off its stop is a real bound, and a game with no date fails it.
 		if (d.yfrom > YMIN && (!g.y || g.y < d.yfrom)) return false;
 		if (d.yto < YMAX && (!g.y || g.y > d.yto)) return false;
+		if (d.sw === "yes" && !g.sw) return false;
+		if (d.sw === "no" && g.sw) return false;
 		return true;
 	}, [d]);
 
-	const pool = useMemo(() => (games || []).filter(pass), [games, pass]);
+	const base = useMemo(() => (games || []).filter(passBase), [games, passBase]);
+	const pool = useMemo(() => base.filter((g) => picked.every((c) => g.c.includes(c))), [base, picked]);
+	// A chip's count is what the list would hold with that chip on as well.
+	const catCount = useMemo(() => {
+		const n = {};
+		for (const c of cats) n[c.id] = 0;
+		for (const g of pool) for (const c of g.c) if (c in n) n[c]++;
+		return n;
+	}, [pool, cats]);
 	const view = useMemo(() => {
 		const needle = q.trim().toLowerCase();
 		const rows = needle ? pool.filter((g) => g.n.toLowerCase().includes(needle)) : pool.slice();
@@ -178,6 +206,31 @@ export default function SteamFilter({ onExit }) {
 										value={d.yto} display={d.yto < YMAX ? `${d.yto}` : "now"}
 										onChange={(v) => setDial("yto", v)} />
 								</div>
+								{cats.length > 0 && (
+									<>
+										<p className="stf-mhead">Categories — <em>a game must carry every one you pick</em></p>
+										<div className="stf-chips">
+											{cats.map((c) => {
+												const on = picked.includes(c.id);
+												return (
+													<button type="button" key={c.id} className="stf-chip" aria-pressed={on}
+														onClick={() => toggleCat(c.id)}>
+														{c.label}<span className="stf-num">{fmt(catCount[c.id])}</span>
+													</button>
+												);
+											})}
+										</div>
+										<p className="stf-mhead">Nintendo Switch</p>
+										<div className="stf-seg" role="group" aria-label="Nintendo Switch">
+											{SWITCH.map(([k, label]) => (
+												<button type="button" key={k} aria-pressed={d.sw === k}
+													onClick={() => { setD((prev) => ({ ...prev, sw: k })); setLimit(PAGE); }}>
+													{label}
+												</button>
+											))}
+										</div>
+									</>
+								)}
 								<p className="stf-effect">
 									{!games.length
 										? <>The Steam list hasn’t been harvested yet.</>
@@ -216,7 +269,7 @@ export default function SteamFilter({ onExit }) {
 										{!view.length && (
 											<tr><td className="stf-empty" colSpan={7}>
 												{games.length
-													? <><b>Nothing clears every dial.</b>Loosen the review minimum or widen the years.</>
+													? <><b>Nothing clears every dial.</b>Drop a category, loosen the review minimum or widen the years.</>
 													: <><b>No data yet.</b>The Steam list hasn’t been harvested.</>}
 											</td></tr>
 										)}
@@ -226,6 +279,12 @@ export default function SteamFilter({ onExit }) {
 												<td className="stf-game">
 													<a href={`https://store.steampowered.com/app/${g.id}/`}
 														target="_blank" rel="noopener noreferrer">{g.n}</a>
+													{(g.sw || g.c.length > 0) && (
+														<span className="stf-tags">
+															{g.sw ? <i className="stf-switch">Switch</i> : null}
+															{g.c.map((c) => catLabel[c]).filter(Boolean).join(" · ")}
+														</span>
+													)}
 												</td>
 												<td className="stf-rating stf-num"><b>{g.r.toFixed(1)}</b></td>
 												<td className="stf-f stf-num">{g.f.toFixed(1)}</td>
@@ -262,6 +321,17 @@ export default function SteamFilter({ onExit }) {
 										languages, so a game’s Steam page may show a different share. Reviews from key
 										activations count too; Steam’s off-topic review-bomb filter stays on.</p>
 								</div>
+								{cats.length > 0 && (
+									<div>
+										<h3>Categories and Switch</h3>
+										<p>Categories group Steam’s player-applied tags — <b>Roguelike / Roguelite</b>{" "}
+											covers Roguelike, Roguelite, Action Roguelike and Roguelike Deckbuilder, for
+											instance — read from SteamSpy’s tag lists. Picking two finds games that are
+											both.</p>
+										<p><b>Switch</b> means a game of the same title is in Nintendo’s European eShop.
+											It is matched by name, so a port sold under a different title can be missed.</p>
+									</div>
+								)}
 								<div>
 									<h3>Scope</h3>
 									<p><b>{fmt(games.length)}</b> games, each {minPct}%+ positive across{" "}

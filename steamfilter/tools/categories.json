@@ -1,0 +1,20 @@
+[
+  {"id": "rogue", "label": "Roguelike / Roguelite", "tags": ["Roguelike", "Roguelite", "Action Roguelike", "Roguelike Deckbuilder", "Traditional Roguelike"]},
+  {"id": "card", "label": "Card game", "tags": ["Card Game", "Card Battler", "Deckbuilding", "Roguelike Deckbuilder", "Trading Card Game", "Solitaire"]},
+  {"id": "puzzle", "label": "Puzzle", "tags": ["Puzzle", "Logic", "Puzzle Platformer"]},
+  {"id": "strategy", "label": "Strategy", "tags": ["Strategy", "Turn-Based Strategy", "Grand Strategy", "RTS", "4X", "Tower Defense", "Turn-Based Tactics"]},
+  {"id": "turn", "label": "Turn-based", "tags": ["Turn-Based", "Turn-Based Combat", "Turn-Based Strategy", "Turn-Based Tactics"]},
+  {"id": "rpg", "label": "RPG", "tags": ["RPG", "JRPG", "CRPG", "Action RPG", "Party-Based RPG", "Tactical RPG"]},
+  {"id": "metroidvania", "label": "Metroidvania", "tags": ["Metroidvania"]},
+  {"id": "platformer", "label": "Platformer", "tags": ["Platformer", "2D Platformer", "3D Platformer", "Precision Platformer"]},
+  {"id": "builder", "label": "Building & management", "tags": ["City Builder", "Base Building", "Colony Sim", "Management", "Automation"]},
+  {"id": "sim", "label": "Simulation", "tags": ["Simulation", "Farming Sim", "Life Sim"]},
+  {"id": "story", "label": "Story rich", "tags": ["Story Rich", "Visual Novel", "Interactive Fiction"]},
+  {"id": "coop", "label": "Co-op", "tags": ["Co-op", "Online Co-Op", "Local Co-Op"]},
+  {"id": "local", "label": "Local multiplayer", "tags": ["Local Multiplayer", "Local Co-Op", "Split Screen"]},
+  {"id": "board", "label": "Board game", "tags": ["Board Game", "Tabletop", "Chess"]},
+  {"id": "cozy", "label": "Cozy", "tags": ["Cozy", "Relaxing", "Wholesome"]},
+  {"id": "horror", "label": "Horror", "tags": ["Horror", "Psychological Horror", "Survival Horror"]},
+  {"id": "survival", "label": "Survival", "tags": ["Survival", "Open World Survival Craft"]},
+  {"id": "shooter", "label": "Shooter", "tags": ["Shooter", "FPS", "Shoot 'Em Up", "Bullet Hell", "Twin Stick Shooter"]}
+]
