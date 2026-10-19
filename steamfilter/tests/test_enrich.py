@@ -102,14 +102,20 @@ def eshop_fetch(titles, page_sizes):
 def test_switch_titles_pages_through_the_whole_index():
     titles = [f"Game {i}" for i in range(6000)] + ["Dead Cells™"]
     starts = []
-    keys = e.switch_titles(eshop_fetch(titles, starts), lambda m: None, rows=2000)
+    keys = e.switch_titles(eshop_fetch(titles, starts), lambda m: None, rows=2000, canaries=["Dead Cells"])
     assert starts == [0, 2000, 4000, 6000]
     assert "dead cells" in keys and "game 5999" in keys
 
 
 def test_a_truncated_eshop_index_fails():
     with pytest.raises(SystemExit):
-        e.switch_titles(eshop_fetch(["Only One"], []), lambda m: None)
+        e.switch_titles(eshop_fetch(["Only One"], []), lambda m: None, canaries=[])
+
+
+def test_a_catalogue_missing_a_canary_fails():
+    titles = [f"Game {i}" for i in range(6000)]
+    with pytest.raises(SystemExit, match="Hades"):
+        e.switch_titles(eshop_fetch(titles, []), lambda m: None, canaries=["Hades"])
 
 
 def test_eshop_answer_must_have_the_solr_shape():
@@ -121,6 +127,7 @@ def test_eshop_answer_must_have_the_solr_shape():
 
 def test_enrich_marks_categories_and_switch(monkeypatch):
     monkeypatch.setattr(e, "load_categories", lambda: CATS)
+    monkeypatch.setattr(e, "CANARIES", ["Dead Cells"])
     monkeypatch.setattr(e.time, "sleep", lambda s: None)
     titles = [f"Filler {i}" for i in range(6000)] + ["Dead Cells - Nintendo Switch Edition"]
     steam = steam_fetch()

@@ -33,7 +33,7 @@ Nothing derived from the reviews is stored.
 ## Categories and Switch (`tools/enrich.py`)
 
 Applied to every kept game at the end of a full harvest, or ALONE to the shipped payload by
-the workflow's `mode: enrich` (`scan_steam.py --enrich`, ~5 min, no Steam requests at all) —
+the workflow's `mode: enrich` (`scan_steam.py --enrich`, ~2 min: ~90 tag requests, no reviews) —
 so a change to `categories.json` never needs the 7-hour review harvest.
 - **Categories** are groups of Steam user tags (OR within a group); the page ANDs the groups
   a reader picks. Each game's tags come from Steam's keyless store API
@@ -47,8 +47,10 @@ so a change to `categories.json` never needs the 7-hour review harvest.
   `system_type:nintendoswitch*`, so Switch 2 too). There is no shared id; `norm_title` folds
   case, accents, ™/®, punctuation and edition suffixes ("- Nintendo Switch Edition",
   "Definitive Edition"). A port renamed for Switch is missed; false matches are rare. The run
-  fails if the index lists under 5,000 games, since a truncated catalogue would quietly
-  un-Switch most of the list.
+  fails if the index lists under 5,000 games, or if any of `CANARIES` (Hades, Balatro,
+  Terraria, …) is absent. **The index must be read SORTED** (`sort=sorting_title asc`):
+  the first run paged it unsorted and the pages overlapped — 19,912 entries came back as
+  9,947 titles, and Hades, Balatro, Slay the Spire and Terraria all read "not on Switch".
 
 ## Harvest shape
 

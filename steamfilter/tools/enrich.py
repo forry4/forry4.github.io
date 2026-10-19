@@ -28,7 +28,13 @@ GET_ITEMS = "https://api.steampowered.com/IStoreBrowseService/GetItems/v1/?input
 BATCH = 100
 NINTENDO = ("https://searching.nintendo-europe.com/en/select?q=*"
             "&fq=type:GAME%20AND%20system_type:nintendoswitch*"
-            "&fl=title&wt=json&rows={rows}&start={start}")
+            "&fl=title&sort=sorting_title%20asc&wt=json&rows={rows}&start={start}")
+# Games that have long been on the eShop under exactly their Steam title. If the
+# catalogue read misses any of them, the read is broken (it happened: paging the
+# index WITHOUT a sort returned overlapping pages — 19,912 entries, 9,947 titles,
+# and Hades, Balatro and Terraria all missing), so fail rather than un-Switch them.
+CANARIES = ["Hades", "Balatro", "Terraria", "Stardew Valley", "Hollow Knight",
+            "Slay the Spire", "Celeste", "Dead Cells"]
 
 
 def load_categories():
@@ -141,7 +147,7 @@ def validate_nintendo(body):
     return j
 
 
-def switch_titles(fetch, log, rows=2000):
+def switch_titles(fetch, log, rows=10000, canaries=None):
     keys, start, total = set(), 0, None
     while total is None or start < total:
         r = fetch(NINTENDO.format(rows=rows, start=start), validate_nintendo)["response"]
@@ -157,6 +163,10 @@ def switch_titles(fetch, log, rows=2000):
         raise SystemExit(f"Nintendo's index listed {total} Switch games ({len(keys)} titles) — "
                          "too few to be the whole catalogue")
     log(f"switch: {total:,} eShop games, {len(keys):,} distinct titles")
+    missing = [c for c in (CANARIES if canaries is None else canaries) if norm_title(c) not in keys]
+    if missing:
+        raise SystemExit(f"the eShop read is missing {missing}, which are all on Switch — "
+                         "refusing a catalogue with holes in it")
     return keys
 
 
