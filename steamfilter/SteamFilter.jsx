@@ -326,7 +326,7 @@ export default function SteamFilter({ onExit }) {
 										<h3>Categories and Switch</h3>
 										<p>Categories group Steam’s player-applied tags — <b>Roguelike / Roguelite</b>{" "}
 											covers Roguelike, Roguelite, Action Roguelike and Roguelike Deckbuilder, for
-											instance — read from SteamSpy’s tag lists. Picking two finds games that are
+											instance — read from each game’s Steam store tags. Picking two finds games that are
 											both.</p>
 										<p><b>Switch</b> means a game of the same title is in Nintendo’s European eShop.
 											It is matched by name, so a port sold under a different title can be missed.</p>

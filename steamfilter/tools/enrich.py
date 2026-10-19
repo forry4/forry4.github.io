@@ -5,10 +5,12 @@ re-applied to an existing payload in minutes (`scan_steam.py --enrich`) without
 re-collecting a single review.
 
   Categories — categories.json groups Steam user tags ("Roguelike / Roguelite" is
-    Roguelike + Roguelite + Action Roguelike + ...). Membership comes from
-    SteamSpy's per-tag lists (`api.php?request=tag&tag=<name>`): ONE request
-    per tag returns every app carrying it, where Steam itself would need a page
-    per game. A game is in a group if it carries ANY of the group's tags.
+    Roguelike + Roguelite + Action Roguelike + ...); a game is in a group if it
+    carries ANY of the group's tags. Each game's tags come from Steam's own
+    store API, `IStoreBrowseService/GetItems` (no key; 100 games a request, up
+    to 20 tags each), and tag names from the store's `tagdata/populartags`.
+    (SteamSpy's per-tag lists were tried first and came back near empty —
+    "Puzzle" 0 apps, "Roguelike" 70 — on 2026-10-19.)
 
   Switch — Nintendo's EU eShop search index lists every Switch / Switch 2 game.
     It shares no id with Steam, so a game counts as "on Switch" when its title
@@ -21,7 +23,9 @@ import json, os, re, time, unicodedata, urllib.parse
 HERE = os.path.dirname(os.path.abspath(__file__))
 CATEGORIES = os.path.join(HERE, "categories.json")
 
-STEAMSPY_TAG = "https://steamspy.com/api.php?request=tag&tag={tag}"
+TAG_NAMES = "https://store.steampowered.com/tagdata/populartags/english"
+GET_ITEMS = "https://api.steampowered.com/IStoreBrowseService/GetItems/v1/?input_json={q}"
+BATCH = 100
 NINTENDO = ("https://searching.nintendo-europe.com/en/select?q=*"
             "&fq=type:GAME%20AND%20system_type:nintendoswitch*"
             "&fl=title&wt=json&rows={rows}&start={start}")
@@ -37,36 +41,69 @@ class Rejected(Exception):
     pass
 
 
-def validate_steamspy(body):
+def validate_tag_names(body):
     try:
         j = json.loads(body)
-    except ValueError:
-        raise Rejected("steamspy: not json " + repr(body.lstrip()[:60]))
-    if not isinstance(j, dict):
-        raise Rejected("steamspy: unexpected shape")
-    return j
+        names = {str(t["name"]): int(t["tagid"]) for t in j}
+    except (ValueError, KeyError, TypeError):
+        raise Rejected("tag names: unexpected shape " + repr(body.lstrip()[:80]))
+    if len(names) < 200:
+        raise Rejected(f"tag names: only {len(names)} tags")
+    return names
 
 
-def category_members(fetch, log, cats=None):
-    """{group id: set(app ids)}. SteamSpy asks for one request a second."""
+def validate_items(body):
+    try:
+        items = json.loads(body)["response"].get("store_items", [])
+        list(items)
+    except (ValueError, KeyError, TypeError, AttributeError):
+        raise Rejected("GetItems: unexpected shape " + repr(body.lstrip()[:80]))
+    return items
+
+
+def app_tags(fetch, log, appids):
+    """{appid: set(tag ids)} straight from Steam, BATCH games a request."""
+    out = {}
+    for k in range(0, len(appids), BATCH):
+        q = {"ids": [{"appid": a} for a in appids[k:k + BATCH]],
+             "context": {"language": "english", "country_code": "US", "steam_realm": 1},
+             "data_request": {"include_tag_count": 20}}
+        url = GET_ITEMS.format(q=urllib.parse.quote(json.dumps(q, separators=(",", ":"))))
+        for it in fetch(url, validate_items):
+            a = it.get("appid") or it.get("id")
+            if a is None:
+                continue
+            ids = set(it.get("tagids") or [])
+            ids |= {t["tagid"] for t in it.get("tags") or [] if "tagid" in t}
+            out[int(a)] = {int(t) for t in ids}
+        if (k // BATCH) % 20 == 19:
+            log(f"tags: {min(k + BATCH, len(appids)):,}/{len(appids):,} games")
+        time.sleep(0.5)
+    return out
+
+
+def category_members(fetch, log, appids, cats=None):
+    """{group id: set(app ids)} for the given apps."""
     cats = cats or load_categories()
-    tags = sorted({t for c in cats for t in c["tags"]})
-    by_tag = {}
-    for tag in tags:
-        j = fetch(STEAMSPY_TAG.format(tag=urllib.parse.quote_plus(tag)), validate_steamspy)
-        by_tag[tag] = {int(k) for k in j if str(k).isdigit()}
-        log(f"tag {tag!r}: {len(by_tag[tag]):,} apps")
-        time.sleep(1.1)
-    # A misspelt tag name answers with an empty list, not an error, so it would
-    # silently shrink its group. Say which ones; fail only a group left empty.
-    empty = [t for t in tags if not by_tag[t]]
-    if empty:
-        log(f"WARNING: no apps for tag(s) {empty} — check the spelling in categories.json")
+    names = fetch(TAG_NAMES, validate_tag_names)
+    # A misspelt tag name would silently shrink its group, so name every one that
+    # Steam does not know, and fail a group that is left with no tag at all.
+    unknown = sorted({t for c in cats for t in c["tags"] if t not in names})
+    if unknown:
+        log(f"WARNING: Steam has no tag named {unknown} — check categories.json")
+    tags = app_tags(fetch, log, appids)
+    tagged = sum(1 for a in appids if tags.get(a))
+    log(f"tags: {tagged:,} of {len(appids):,} games came back with tags")
+    if tagged < 0.9 * len(appids):
+        raise SystemExit(f"only {tagged} of {len(appids)} games have tags — refusing a thin answer")
     out = {}
     for c in cats:
-        out[c["id"]] = set().union(*(by_tag[t] for t in c["tags"]))
+        want = {names[t] for t in c["tags"] if t in names}
+        if not want:
+            raise SystemExit(f"category {c['id']!r} has no known tag — refusing a silent hole")
+        out[c["id"]] = {a for a in appids if tags.get(a, set()) & want}
         if not out[c["id"]]:
-            raise SystemExit(f"category {c['id']!r} matched no app at all — refusing a silent hole")
+            raise SystemExit(f"category {c['id']!r} matched no game at all — refusing a silent hole")
     return out
 
 
@@ -125,8 +162,8 @@ def switch_titles(fetch, log, rows=2000):
 
 def enrich(games, fetch, log):
     """Adds `c` (category ids) and `sw` (1 when on Switch) to each game in place."""
-    members = category_members(fetch, log)
-    titles = switch_titles(fetch, log)
+    titles = switch_titles(fetch, log)      # one or two requests: fail fast
+    members = category_members(fetch, log, [g["id"] for g in games])
     on_switch = 0
     for g in games:
         g["c"] = [cid for cid, ids in members.items() if g["id"] in ids]

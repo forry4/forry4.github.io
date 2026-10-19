@@ -10,7 +10,7 @@ reviews. No backend — it fetches one static JSON and does everything client-si
 | `SteamFilter.css` | `?inline`-imported stylesheet, `.stf`-prefixed (started as a copy of BGG's) |
 | `tools/scan_steam.py` | **the harvester** — store search, then English review totals per candidate |
 | `tools/make_data.py` | `results_all.json` → `webapp/public/data/steam-filter.json` (the shipped payload) |
-| `tools/enrich.py` | categories (SteamSpy tag lists) + Nintendo Switch availability (eShop title match) |
+| `tools/enrich.py` | categories (Steam store tags) + Nintendo Switch availability (eShop title match) |
 | `tools/categories.json` | the category groups — label + the Steam tags each one ORs together |
 | `tests/test_scan_steam.py` | the parse + admission rule, off canned store markup |
 | `tests/test_enrich.py` | title folding, tag unions, eShop paging + the truncation guards |
@@ -36,10 +36,13 @@ Applied to every kept game at the end of a full harvest, or ALONE to the shipped
 the workflow's `mode: enrich` (`scan_steam.py --enrich`, ~5 min, no Steam requests at all) —
 so a change to `categories.json` never needs the 7-hour review harvest.
 - **Categories** are groups of Steam user tags (OR within a group); the page ANDs the groups
-  a reader picks. Membership is SteamSpy's `api.php?request=tag&tag=<name>` — one request per
-  TAG returns every app carrying it, where Steam would need one page per game. A misspelt tag
-  answers an empty list, not an error, so the run names every empty tag and FAILS a group
-  left with no members.
+  a reader picks. Each game's tags come from Steam's keyless store API
+  `IStoreBrowseService/GetItems` (100 games a request, `include_tag_count: 20`), names from
+  `store.steampowered.com/tagdata/populartags/english`. An unknown tag name is logged; a group
+  with no known tag or no member FAILS the run, as does fewer than 90% of games coming back
+  with tags. **SteamSpy's `request=tag` lists are NOT usable** — on 2026-10-19 they answered
+  "Puzzle" 0 apps, "Roguelike" 70, "Roguelite" 0, and the empty-group guard is what kept that
+  from shipping.
 - **Switch** is a title match against Nintendo's EU eShop index (`searching.nintendo-europe.com`,
   `system_type:nintendoswitch*`, so Switch 2 too). There is no shared id; `norm_title` folds
   case, accents, ™/®, punctuation and edition suffixes ("- Nintendo Switch Edition",
