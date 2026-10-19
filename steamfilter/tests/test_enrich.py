@@ -89,10 +89,12 @@ def test_responses_must_have_the_expected_shape():
         e.validate_items("<html>Access Denied</html>")
 
 
-def eshop_fetch(titles, page_sizes):
+def eshop_fetch(titles, page_sizes, cap=None):
+    """Answers like the real index, including its silent cap on the page size."""
     def fetch(url, check):
         q = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
         start, rows = int(q["start"][0]), int(q["rows"][0])
+        rows = min(rows, cap) if cap else rows
         page_sizes.append(start)
         docs = [{"title": t} for t in titles[start:start + rows]]
         return check(json.dumps({"response": {"numFound": len(titles), "docs": docs}}))
@@ -105,6 +107,15 @@ def test_switch_titles_pages_through_the_whole_index():
     keys = e.switch_titles(eshop_fetch(titles, starts), lambda m: None, rows=2000, canaries=["Dead Cells"])
     assert starts == [0, 2000, 4000, 6000]
     assert "dead cells" in keys and "game 5999" in keys
+
+
+def test_a_capped_page_size_is_followed_not_skipped():
+    titles = [f"Game {i}" for i in range(6000)] + ["Dead Cells"]
+    starts = []
+    keys = e.switch_titles(eshop_fetch(titles, starts, cap=1000), lambda m: None, rows=2000,
+                           canaries=["Dead Cells"])
+    assert starts == [0, 1000, 2000, 3000, 4000, 5000, 6000]
+    assert len(keys) == 6001
 
 
 def test_a_truncated_eshop_index_fails():

@@ -30,9 +30,9 @@ NINTENDO = ("https://searching.nintendo-europe.com/en/select?q=*"
             "&fq=type:GAME%20AND%20system_type:nintendoswitch*"
             "&fl=title&sort=sorting_title%20asc&wt=json&rows={rows}&start={start}")
 # Games that have long been on the eShop under exactly their Steam title. If the
-# catalogue read misses any of them, the read is broken (it happened: paging the
-# index WITHOUT a sort returned overlapping pages — 19,912 entries, 9,947 titles,
-# and Hades, Balatro and Terraria all missing), so fail rather than un-Switch them.
+# catalogue read misses any of them, the read is broken (it happened: a silently
+# capped page size read half the index — 19,912 entries, 9,947 titles, and Hades,
+# Balatro and Terraria all missing), so fail rather than un-Switch them.
 CANARIES = ["Hades", "Balatro", "Terraria", "Stardew Valley", "Hollow Knight",
             "Slay the Spire", "Celeste", "Dead Cells"]
 
@@ -147,8 +147,11 @@ def validate_nintendo(body):
     return j
 
 
-def switch_titles(fetch, log, rows=10000, canaries=None):
-    keys, start, total = set(), 0, None
+def switch_titles(fetch, log, rows=1000, canaries=None):
+    # The index CAPS a page at ~1,000 docs whatever `rows` asks for, and says nothing:
+    # stepping `start` by `rows` skipped the rest of every page (rows=2000 read half the
+    # catalogue, rows=10000 a tenth). Step by what actually came back, and count it.
+    keys, start, total, read = set(), 0, None, 0
     while total is None or start < total:
         r = fetch(NINTENDO.format(rows=rows, start=start), validate_nintendo)["response"]
         total = int(r["numFound"])
@@ -158,11 +161,14 @@ def switch_titles(fetch, log, rows=10000, canaries=None):
                 keys.add(k)
         if not r["docs"]:
             break
-        start += rows
+        start += len(r["docs"])
+        read += len(r["docs"])
+    if read < 0.98 * total:
+        raise SystemExit(f"read {read:,} of the {total:,} eShop entries — paging was cut short")
     if total < 5000 or len(keys) < 5000:
         raise SystemExit(f"Nintendo's index listed {total} Switch games ({len(keys)} titles) — "
                          "too few to be the whole catalogue")
-    log(f"switch: {total:,} eShop games, {len(keys):,} distinct titles")
+    log(f"switch: read {read:,} of {total:,} eShop entries, {len(keys):,} distinct titles")
     missing = [c for c in (CANARIES if canaries is None else canaries) if norm_title(c) not in keys]
     if missing:
         raise SystemExit(f"the eShop read is missing {missing}, which are all on Switch — "

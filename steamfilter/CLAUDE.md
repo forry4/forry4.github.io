@@ -48,9 +48,10 @@ so a change to `categories.json` never needs the 7-hour review harvest.
   case, accents, ™/®, punctuation and edition suffixes ("- Nintendo Switch Edition",
   "Definitive Edition"). A port renamed for Switch is missed; false matches are rare. The run
   fails if the index lists under 5,000 games, or if any of `CANARIES` (Hades, Balatro,
-  Terraria, …) is absent. **The index must be read SORTED** (`sort=sorting_title asc`):
-  the first run paged it unsorted and the pages overlapped — 19,912 entries came back as
-  9,947 titles, and Hades, Balatro, Slay the Spire and Terraria all read "not on Switch".
+  Terraria, …) is absent, or if it read under 98% of `numFound`. **The index silently caps a
+  page at ~1,000 docs whatever `rows` asks**, so `start` steps by the docs that came back,
+  never by `rows`: stepping by 2,000 read half the catalogue (19,912 entries → 9,947 titles,
+  and Hades, Balatro, Slay the Spire and Terraria read "not on Switch"); by 10,000, a tenth.
 
 ## Harvest shape
 
