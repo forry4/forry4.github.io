@@ -64,6 +64,7 @@ const SCREENS = [
 	{ path: "/bggfilter", chunk: "BggFilter", marker: ".bgf" },
 	{ path: "/steamfilter", chunk: "SteamFilter", marker: ".stf" },
 	{ path: "/boxpuzzles", chunk: "BoxPuzzles", marker: ".bx" },
+	{ path: "/astral", chunk: "AstralGuide", marker: ".aag" },
 ];
 
 // EVERY GAME LOBBY, IN ONE PLACE. Three blocks below drive "each game's lobby" —
@@ -3082,6 +3083,9 @@ try {
 			{ name: "the auth screen", path: "/", wait: ".auth-field", min: 2, anon: true },
 			{ name: "/bggfilter", path: "/bggfilter", wait: ".bgf-search input", min: 1 },
 			{ name: "/steamfilter", path: "/steamfilter", wait: ".stf-search input", min: 1 },
+			// The guide's whole-site search plus a tab's own filter, and the charts' number fields.
+			{ name: "/astral/auras", path: "/astral/auras", wait: ".aag-find input", min: 2 },
+			{ name: "/astral/charts", path: "/astral/charts", wait: ".aag-nf input", min: 7 },
 			// BOOKS IS THE ONE HOLE, AND IT IS THE PAGE'S, NOT THIS WALK'S. `/books`
 			// renders no field at all to this harness — the editor needs `can_edit`
 			// from the server and even the search box is behind a populated list — so
@@ -9676,8 +9680,8 @@ try {
 		check("...and it opens the offline hub", await has(".offline-hub") && new URL(page.url()).pathname === "/offline",
 			page.url());
 		const rows = await page.locator(".offline-read [data-read]").evaluateAll((els) => els.map((e) => e.dataset.read));
-		check("the hub's Read section lists all six screens",
-			JSON.stringify(rows) === JSON.stringify(["puzzles", "bggfilter", "steamfilter", "books", "notes", "profile"]), JSON.stringify(rows));
+		check("the hub's Read section lists all seven screens",
+			JSON.stringify(rows) === JSON.stringify(["puzzles", "bggfilter", "steamfilter", "astral", "books", "notes", "profile"]), JSON.stringify(rows));
 		check("...and still has exactly one Open button (the scorecard's)",
 			await page.getByRole("button", { name: /^Open$/ }).count() === 1);
 
@@ -9716,9 +9720,11 @@ try {
 		await page.route(`http://localhost:${API_PORT}/**`, (r) => r.abort());
 		await page.goto(`http://localhost:${PORT}/offline`, { waitUntil: "load" });
 		check("with the backend unreachable, the hub still opens", await has(".offline-hub", 25_000));
-		const states = await page.locator(".offline-read .offline-read-state").allTextContents();
+		// By row id, not position: the static-file rows above these grow (the guide joined them).
+		const states = await Promise.all(["books", "notes", "profile"].map((id) =>
+			readRow(id).locator(".offline-read-state").textContent().catch(() => "")));
 		check("...and says a copy is on this device for Books, Notes and the profile",
-			states.slice(3).every((t) => /copy is on this device/.test(t)), JSON.stringify(states));
+			states.every((t) => /copy is on this device/.test(t)), JSON.stringify(states));
 
 		await openRead("books");
 		await has(".bk-app");
@@ -10619,6 +10625,128 @@ try {
 	// never checks), so the module is loaded into a blank page and the banner shown
 	// directly. FONT-INDEPENDENT on purpose (CI's fallback serif runs ~27% wider): the
 	// message may wrap only once the banner already spans the whole usable width.
+	// ── The Astral Ascent guide (/astral) ─────────────────────────────────────
+	// A frontend-only page over a static payload. Each check states its ROSTER before
+	// anything about it: a tab that rendered nothing would otherwise pass every
+	// "no overflow" and "count matches" check by having nothing to measure.
+	async function astralGuide(log) {
+		const check = (name, cond, detail = "") => {
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(`astral: ${name}`); log(`  FAIL ${name}  ${detail}`); }
+		};
+		const data = JSON.parse(readFileSync(path.join(webappDir, "public", "data", "astral-guide.json"), "utf8"));
+		// Each tab and the start of its label in the tab bar.
+		const TABS = [["start", "Start"], ["auras", "Auras"], ["gambits", "Gambits"], ["imprints", "Imprints"],
+			["spells", "Spells"], ["echoes", "Echoes"], ["prowess", "Prowess"], ["synergy", "Synergies"],
+			["tiers", "Tier lists"], ["charts", "Charts"], ["bosses", "Bosses"], ["meta", "Meta"], ["glossary", "Glossary"]];
+		const nameIn = (pg) => pg.locator(".aag-dname").textContent({ timeout: 2_000 }).catch(() => "");
+		for (const [width, height] of [[1280, 900], [390, 844]]) {
+			const ctx = await browser.newContext({ viewport: { width, height } });
+			await ctx.addInitScript(() => localStorage.setItem("spender_user",
+				JSON.stringify({ id: "screens-astral", name: "Stargazer", guest: true })));
+			const page = await ctx.newPage();
+			const errors = [];
+			page.on("pageerror", (e) => errors.push(String(e)));
+			const at = `at ${width}px`;
+
+			// The menu tile opens the guide.
+			await page.goto(`http://localhost:${PORT}/`, { waitUntil: "networkidle" });
+			await page.waitForSelector(".home-extra", { timeout: 25_000 }).catch(() => {});
+			await page.locator(".home-extra", { hasText: "Astral Ascent" }).click().catch(() => {});
+			await page.waitForSelector(".aag-hero", { timeout: 15_000 }).catch(() => {});
+			check(`${at}: the Extras tile opens /astral on the Start tab`,
+				new URL(page.url()).pathname === "/astral" && await page.locator(".aag-hero").count() === 1, page.url());
+			check(`${at}: all ${TABS.length} tabs are in the bar`, await page.locator(".aag-tab").count() === TABS.length,
+				String(await page.locator(".aag-tab").count()));
+
+			// Every tab deep-links, renders content, and never scrolls sideways.
+			const over = [], empty = [];
+			for (const [t, label] of TABS) {
+				await page.goto(`http://localhost:${PORT}/astral${t === "start" ? "" : `/${t}`}`, { waitUntil: "networkidle" });
+				await page.waitForSelector(".aag-main > *:not(.aag-loading)", { timeout: 15_000 }).catch(() => {});
+				const sel = await page.locator(".aag-tab[aria-selected=true]").textContent().catch(() => "");
+				const g = await page.evaluate(() => ({ wide: document.documentElement.scrollWidth - innerWidth,
+					items: document.querySelectorAll(".aag-main .aag-card, .aag-main tr, .aag-main .aag-tieritem, .aag-main .aag-chip, .aag-main .aag-qtile").length }));
+				if (!g.items || !sel.startsWith(label)) empty.push(`${t}(${g.items} items, tab "${sel}")`);
+				if (g.wide > 0) over.push(`${t}:${g.wide}px`);
+			}
+			check(`${at}: every tab deep-links to itself and renders content`, empty.length === 0, empty.join(" "));
+			check(`${at}: no tab scrolls sideways`, over.length === 0, over.join(" "));
+
+			// The Imprints tab lists every imprint; an Element chip filters to the payload's own count.
+			await page.goto(`http://localhost:${PORT}/astral/imprints`, { waitUntil: "networkidle" });
+			await page.waitForSelector(".aag-card", { timeout: 15_000 }).catch(() => {});
+			const cards = () => page.locator(".aag-main .aag-grid .aag-card").count();
+			const nImp = await cards();
+			check(`${at}: the Imprints tab shows all ${data.imprints.length}`, nImp === data.imprints.length, String(nImp));
+			if (width < 760) await page.locator(".aag-ftoggle").click().catch(() => {});
+			await page.locator(".aag-chip[data-el=Fire]").first().click().catch(() => {});
+			const nFire = await cards();
+			const wantFire = data.imprints.filter((i) => i.element === "Fire").length;
+			check(`${at}: the Fire chip leaves exactly the ${wantFire} fire imprints`, nFire === wantFire, `${nFire}`);
+			const rowCasts = await page.locator(".aag-table tbody tr", { hasText: "Fajrokometo" }).textContent().catch(() => "");
+			const comet = data.spells.find((x) => x.name === "Magma Comets");
+			check(`${at}: the quick table prints Fajrokometo's spell with its stats`,
+				rowCasts.includes("Magma Comets") && rowCasts.includes(String(comet.dmg)), rowCasts);
+
+			// Global search -> the drawer, its hash, a linked effect, and Back.
+			await page.goto(`http://localhost:${PORT}/astral`, { waitUntil: "networkidle" });
+			await page.waitForSelector(".aag-gs-box input", { timeout: 15_000 }).catch(() => {});
+			await page.fill(".aag-gs-box input", "flame blessing");
+			await page.waitForSelector(".aag-gs-item", { timeout: 5_000 }).catch(() => {});
+			const first = await page.locator(".aag-gs-item .aag-gs-name").first().textContent().catch(() => "");
+			check(`${at}: search ranks the exact name first`, first === "Flame Blessing", first);
+			await page.locator(".aag-gs-item").first().click().catch(() => {});
+			await page.waitForSelector(".aag-drawer", { timeout: 5_000 }).catch(() => {});
+			check(`${at}: a result opens its drawer with a shareable hash`,
+				await nameIn(page) === "Flame Blessing" && decodeURIComponent(new URL(page.url()).hash) === "#aura:flame-blessing", page.url());
+			const tiersShown = await page.locator(".aag-drawer .aag-dtier").count();
+			check(`${at}: the drawer shows every rarity of the aura`, tiersShown === 3, String(tiersShown));
+			await page.locator(".aag-drawer .aag-kw", { hasText: "Combustion" }).first().click().catch(() => {});
+			await page.waitForFunction(() => document.querySelector(".aag-dname")?.textContent === "Combustion", null, { timeout: 5_000 }).catch(() => {});
+			check(`${at}: an effect named in the text opens that effect`, await nameIn(page) === "Combustion", page.url());
+			await page.goBack();
+			await page.waitForFunction(() => document.querySelector(".aag-dname")?.textContent === "Flame Blessing", null, { timeout: 5_000 }).catch(() => {});
+			check(`${at}: browser Back steps back through the drawer`, await nameIn(page) === "Flame Blessing", page.url());
+			await page.keyboard.press("Escape");
+			await page.waitForFunction(() => !document.querySelector(".aag-drawer"), null, { timeout: 5_000 }).catch(() => {});
+			check(`${at}: Escape closes the drawer and drops the hash`,
+				await page.locator(".aag-drawer").count() === 0 && !new URL(page.url()).hash, page.url());
+
+			// A cold load of a hashed URL opens that entry.
+			await page.goto(`http://localhost:${PORT}/astral/echoes#${encodeURIComponent("echo:ordan-s-fury")}`, { waitUntil: "networkidle" });
+			await page.waitForSelector(".aag-drawer", { timeout: 15_000 }).catch(() => {});
+			check(`${at}: a hashed link opens its entry on load`, await nameIn(page) === "Ordan's Fury");
+
+			// The charts answer their inputs.
+			await page.goto(`http://localhost:${PORT}/astral/charts`, { waitUntil: "networkidle" });
+			await page.waitForSelector(".aag-heat", { timeout: 15_000 }).catch(() => {});
+			const heat = await page.locator(".aag-heat").count();
+			const lines = await page.locator(".aag-svg path.aag-line").count();
+			check(`${at}: both heat tables and the stone chart render`, heat === 2 && lines === 2, `${heat} tables, ${lines} lines`);
+			await page.locator('.aag-nf input[type=number][aria-label="Max life"]').fill("600");
+			await page.locator('.aag-nf input[type=number][aria-label="Armor stones"]').fill("0");
+			await page.waitForFunction(() => document.querySelectorAll(".aag-verdict")[1]?.textContent.startsWith("Armor"), null, { timeout: 5_000 }).catch(() => {});
+			const verdict = await page.locator(".aag-verdict").nth(1).textContent().catch(() => "");
+			check(`${at}: past ~485 life with no armor, the chart picks Armor`, verdict.startsWith("Armor is the better"), verdict);
+
+			if (width < 760) {
+				// Phones: the spells table keeps its numbers on screen.
+				await page.goto(`http://localhost:${PORT}/astral/spells`, { waitUntil: "networkidle" });
+				await page.waitForSelector(".aag-spells tbody tr", { timeout: 15_000 }).catch(() => {});
+				const g = await page.evaluate(() => {
+					const td = [...document.querySelectorAll(".aag-spells tbody tr:first-child td")].filter((x) => getComputedStyle(x).display !== "none");
+					return { cells: td.length, right: Math.round(Math.max(...td.map((x) => x.getBoundingClientRect().right))), vw: innerWidth };
+				});
+				check("at 390px the spells table fits name, mana, damage, hits and dmg/mana on screen",
+					g.cells === 5 && g.right <= g.vw, JSON.stringify(g));
+			}
+			check(`${at}: no page errors`, errors.length === 0, errors.join(" | "));
+			await ctx.close();
+		}
+	}
+
+
 	async function updateNudgeLayout(log) {
 		const check = (name, cond, detail = "") => {
 			if (cond) log(`  OK   ${name}`);
@@ -10655,7 +10783,7 @@ try {
 		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, historyRecovery, dmAdventures,
 		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, formControlZoom, lastDifficulty,
 		dissonanceQuartet, orbitPlay, lobbyFinishSync, blackCastlePlay, pinchPlay, pipMarketPlay, secretNamesPlay, lobbyChrome,
-		notesEditor, profilePage, offlineRead, boxPuzzles, boxDaily, updateNudgeLayout];
+		notesEditor, profilePage, offlineRead, boxPuzzles, boxDaily, astralGuide, updateNudgeLayout];
 
 	// EVERY BLOCK MUST BE IN A LANE. Before the lanes existed, adding a block meant
 	// writing it — it then ran because it was simply the next statement. Now it has

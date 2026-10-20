@@ -35,6 +35,7 @@ on:
       - 'notes/**'
       - 'bggfilter/**'
       - 'steamfilter/**'
+      - 'astralguide/**'
       - 'boxpuzzles/**'
       - 'shared/**'
       - '.github/workflows/deploy-pages.yml'

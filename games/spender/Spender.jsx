@@ -57,6 +57,7 @@ const Notes = lazyChunk("Notes", () => import("../../notes/Notes.jsx"));
 const Profile = lazyChunk("Profile", () => import("../../shared/Profile.jsx"));
 const BggFilter = lazyChunk("BggFilter", () => import("../../bggfilter/BggFilter.jsx"));
 const SteamFilter = lazyChunk("SteamFilter", () => import("../../steamfilter/SteamFilter.jsx"));
+const AstralGuide = lazyChunk("AstralGuide", () => import("../../astralguide/AstralGuide.jsx"));
 const BoxPuzzles = lazyChunk("BoxPuzzles", () => import("../../boxpuzzles/BoxPuzzles.jsx"));
 
 // Shown while a game's chunk loads. Deliberately an empty full-height panel in the
@@ -128,8 +129,8 @@ const HTTP_BASE = WS_BASE.replace(/^ws/, "http").replace(/\/ws$/, "");
 // tables — GAMES[].id ≠ path for wherewolf; Spender is one site-level screen now.
 // The shell owns segment 1; each sub-game owns its own segment 2 (room id). The Spender
 // Spender's own waiting/game map to "spender" (or "puzzles" while puzzling) in applyPopRoute.
-const SCREEN_FOR_MODE = { spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", pipmarket: "pipmarket", books: "books", notes: "notes", profile: "profile", puzzles: "puzzles", bggfilter: "bggfilter", steamfilter: "steamfilter", boxpuzzles: "boxpuzzles", offline: "offline" };
-const MODE_FOR_SCREEN = { home: "home", spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", pipmarket: "pipmarket", books: "books", notes: "notes", profile: "profile", puzzles: "puzzles", bggfilter: "bggfilter", steamfilter: "steamfilter", boxpuzzles: "boxpuzzles", offline: "offline" };
+const SCREEN_FOR_MODE = { spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", pipmarket: "pipmarket", books: "books", notes: "notes", profile: "profile", puzzles: "puzzles", bggfilter: "bggfilter", steamfilter: "steamfilter", boxpuzzles: "boxpuzzles", astral: "astral", offline: "offline" };
+const MODE_FOR_SCREEN = { home: "home", spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", pipmarket: "pipmarket", books: "books", notes: "notes", profile: "profile", puzzles: "puzzles", bggfilter: "bggfilter", steamfilter: "steamfilter", boxpuzzles: "boxpuzzles", astral: "astral", offline: "offline" };
 
 // Per-game emblem — inline SVG tinted via currentColor (=the card's --accent), so no
 // raster asset / CDN (keeps the self-hosted, no-CLS constraint). Small motifs that read
@@ -764,6 +765,7 @@ function offlineReadRows(authUser, readingPack) {
 		packed("puzzles", "Spender Puzzles", "Play"),
 		packed("bggfilter", "BGG Filter", "Browse"),
 		packed("steamfilter", "Steam Filter", "Browse"),
+		packed("astral", "Astral Ascent Guide", "Browse"),
 		{ id: "books", label: "Books", verb: "Read", enabled: online || lsHas("books.offline.v1"),
 			state: saved(lsHas("books.offline.v1"), "open it once online to keep a copy") },
 		member
@@ -824,12 +826,12 @@ const OFFLINE_PACKS = {
 	// own copy whenever it is used online, and `warm` takes one now so a fresh
 	// download is complete without visiting each screen first.
 	reading: {
-		label: "Puzzles, BGG & Steam Filters, Books, Notes & profile", size: "~1.5 MB",
-		urls: ["data/puzzles.json", "data/bgg-filter.json", "data/steam-filter.json", ...OFFLINE_FONT_URLS],
+		label: "Puzzles, BGG & Steam Filters, Astral Ascent Guide, Books, Notes & profile", size: "~1.7 MB",
+		urls: ["data/puzzles.json", "data/bgg-filter.json", "data/steam-filter.json", "data/astral-guide.json", ...OFFLINE_FONT_URLS],
 		chunks: [
 			() => import("../../books/Books.jsx"), () => import("../../notes/Notes.jsx"),
 			() => import("../../shared/Profile.jsx"), () => import("../../bggfilter/BggFilter.jsx"),
-			() => import("../../steamfilter/SteamFilter.jsx"),
+			() => import("../../steamfilter/SteamFilter.jsx"), () => import("../../astralguide/AstralGuide.jsx"),
 		],
 		warm: async ({ authUser }) => {
 			const [books, notes, profile] = await Promise.all([
@@ -3052,6 +3054,7 @@ export default function SpenderApp() {
 			onProfile={() => navigateTo("profile")}
 			onBggFilter={() => nav("bggfilter")}
 			onSteamFilter={() => nav("steamfilter")}
+			onAstral={() => nav("astral")}
 			onBoxPuzzles={() => nav("boxpuzzles")}
 			onOffline={() => { pushPath(buildPath("offline")); enterOfflineHub(null); }}
 			onSiteHealth={() => setSiteHealthOpen(true)} siteAlerts={siteAlerts}
@@ -3096,6 +3099,14 @@ export default function SpenderApp() {
 	if (screen === "steamfilter") return (
 		<Suspense fallback={<GameChunkLoading />}>
 			<SteamFilter onExit={exitRead} />
+		</Suspense>
+	);
+
+	// Astral Ascent Guide — static wiki-derived data, browsed client-side. No backend.
+	// Owns its segment 2 (/astral/<tab>) and the hash (#<type>:<id>, the open entry).
+	if (screen === "astral") return (
+		<Suspense fallback={<GameChunkLoading />}>
+			<AstralGuide onExit={exitRead} />
 		</Suspense>
 	);
 
