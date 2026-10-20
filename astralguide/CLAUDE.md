@@ -45,7 +45,7 @@ be paired with an echo — so a wiki rename fails the test rather than rendering
 and the effect clause MAKES Y; "Increases X damage", "per X" and "for each X" USE X;
 "Transforms X into Y" uses X. That is what fills "Makes it / Pays it off" and each drawer's
 "Works well with". The page labels those lists as automatically linked.
-- **`Target` and `Shield` only count Capitalised**, and Target only singular: "Targets and
+- **`Target` and `Shield` only count Capitalized**, and Target only singular: "Targets and
   falls on one enemy" is the verb. Poison skips "poison affinity".
 - **A spell named after "like" is a comparison, not a cast**: the clone imprints make a clone
   "like pisces clones".

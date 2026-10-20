@@ -599,7 +599,7 @@ function StartTab({ ctx }) {
 			<dl className="aag-dl">{ED.HEROES.map((h) => <Fragment key={h.name}><dt>{h.name}</dt><dd>{h.signature}</dd></Fragment>)}</dl>
 		</Section>
 		<p className="aag-source">Data from <a href="https://astralascent.wiki.gg" target="_blank" rel="noopener noreferrer">astralascent.wiki.gg</a>,
-			collected {ctx.data.collected} (latest wiki edit {ctx.data.wikiUpdated}). Tier lists and picks are this guide's own judgement.
+			collected {ctx.data.collected} (latest wiki edit {ctx.data.wikiUpdated}). Tier lists and picks are this guide's own judgment.
 			Counts: {Object.entries(counts).map(([t, ty]) => `${n(ty)} ${t}`).join(", ")}.</p>
 	</>);
 }

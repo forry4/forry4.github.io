@@ -10,7 +10,7 @@ export const RARITIES = ["Common", "Heroic", "Mythic", "Astral"];
 
 // THE EFFECT VOCABULARY. Each entry: canonical name, element, the pattern that finds
 // it in the wiki's prose (singular, plural and the variant forms auras transform it
-// into), and `cap` when only the Capitalised word is the effect — "Target" and
+// into), and `cap` when only the Capitalized word is the effect — "Target" and
 // "Shield" are also ordinary English ("targets the nearest enemy").
 export const KEYWORDS = [
 	{ k: "Burn", el: "Fire", re: "burns?" },
@@ -75,7 +75,7 @@ const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // Spells that auras and imprints CAST, matched in their prose. A name under five
 // letters ("Sol", "Fax", "Luna") is an ordinary word too often to link safely.
-const SPELL_ALIASES = { "cryogenic sword": "Cold-Steel Sword", "eye of judgement": "Eye of Judgment" };
+const SPELL_ALIASES = { "cryogenic sword": "Cold-Steel Sword", "eye of judgment": "Eye of Judgment" };
 
 export function spellMatcher(spells) {
 	const names = spells.map((s) => s.name).filter((n) => n.length >= 5);

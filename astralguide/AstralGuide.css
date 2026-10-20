@@ -1,7 +1,7 @@
 /* Astral Ascent Guide — every rule is .aag-prefixed. The site tokens (--bg, --surface,
    --gold, --text…) come from shared/theme.base-css.css, prepended by the component. */
 .aag{
-	/* Element colours follow the wiki's gambit colours; rarities follow the game's
+	/* Element colors follow the wiki's gambit colors; rarities follow the game's
 	   white / blue / yellow / purple. Chart series are the dataviz palette's first two
 	   dark-mode slots, validated against --surface (#1a1814): CVD ΔE 26.8, 3:1+. */
 	--aag-fire:#ff8a50;--aag-ice:#6ec8ff;--aag-electric:#f2d04b;--aag-poison:#c08cff;--aag-neutral:#a9b8a2;
@@ -12,7 +12,7 @@
 		radial-gradient(900px 400px at -10% 0%,rgba(60,140,200,.07),transparent 60%);
 }
 .aag *{box-sizing:border-box;}
-/* Zero specificity, so every .aag-* button rule below can set its own font and colour. */
+/* Zero specificity, so every .aag-* button rule below can set its own font and color. */
 :where(.aag) :where(button){font:inherit;color:inherit;}
 .aag input{font-size:16px;}
 

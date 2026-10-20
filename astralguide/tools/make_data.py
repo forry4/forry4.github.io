@@ -132,7 +132,7 @@ def gambit_family(fname):
 	for key, fam in GAMBIT_FAMILY.items():
 		if re.search(rf"[-\s]{key}[\(.\s]", f) or f.endswith(f"{key}.png"):
 			return fam
-	raise SystemExit(f"gambits: unrecognised icon {fname!r} — add it to GAMBIT_FAMILY")
+	raise SystemExit(f"gambits: unrecognized icon {fname!r} — add it to GAMBIT_FAMILY")
 
 
 def parse_gambits(p):

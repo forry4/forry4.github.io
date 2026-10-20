@@ -28,7 +28,7 @@ test("the linker prefers the longest name: a spell over the effect inside it", (
 });
 
 test("ordinary English is not linked as an effect", () => {
-	// "Target" and "Shield" are effects only when capitalised, as the wiki writes them.
+	// "Target" and "Shield" are effects only when capitalized, as the wiki writes them.
 	assert.deepEqual(links("Targets and falls on one enemy"), []);
 	assert.deepEqual(links("On spell cast, apply 3 Target"), ["kw:Target"]);
 	assert.deepEqual(links("If the spell is full poison affinity"), []);

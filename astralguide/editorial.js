@@ -1,7 +1,7 @@
 // THE GUIDE'S EDITORIAL LAYER — the only hand-written content on the page.
 //
 // Everything else is parsed from the wiki (tools/make_data.py). What lives here is
-// judgement: tier lists, starting picks and build outlines, plus the wiki's own advice
+// judgment: tier lists, starting picks and build outlines, plus the wiki's own advice
 // condensed. No community tier list for Astral Ascent exists to cite (searched
 // 2026-10-19), so every ranking here is ours, and the page says so beside it.
 //
