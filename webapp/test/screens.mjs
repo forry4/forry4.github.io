@@ -10638,7 +10638,10 @@ try {
 		// Each tab and the start of its label in the tab bar.
 		const TABS = [["start", "Start"], ["auras", "Auras"], ["gambits", "Gambits"], ["imprints", "Imprints"],
 			["spells", "Spells"], ["echoes", "Echoes"], ["prowess", "Prowess"], ["synergy", "Synergies"],
-			["tiers", "Tier lists"], ["charts", "Charts"], ["bosses", "Bosses"], ["meta", "Meta"], ["glossary", "Glossary"]];
+			["tiers", "Tier lists"], ["runs", "Runs"], ["charts", "Charts"], ["bosses", "Bosses"], ["meta", "Meta"],
+			["glossary", "Glossary"]];
+		// The winning runs are a JS module, not part of the payload; read them the way the page does.
+		const { RUNS } = await import(new URL(`file:///${path.join(webappDir, "..", "astralguide", "runs.js").replace(/\\/g, "/")}`).href);
 		const nameIn = (pg) => pg.locator(".aag-dname").textContent({ timeout: 2_000 }).catch(() => "");
 		for (const [width, height] of [[1280, 900], [390, 844]]) {
 			const ctx = await browser.newContext({ viewport: { width, height } });
@@ -10729,6 +10732,33 @@ try {
 			await page.waitForFunction(() => document.querySelectorAll(".aag-verdict")[1]?.textContent.startsWith("Armor"), null, { timeout: 5_000 }).catch(() => {});
 			const verdict = await page.locator(".aag-verdict").nth(1).textContent().catch(() => "");
 			check(`${at}: past ~485 life with no armor, the chart picks Armor`, verdict.startsWith("Armor is the better"), verdict);
+			const run = RUNS.find((r) => r.id === 2);
+			await page.locator(".aag-loadrun select").selectOption(String(run.id));
+			await page.waitForFunction((v) => document.querySelector('.aag-nf input[aria-label="Max life"]')?.value === String(v), run.life, { timeout: 5_000 }).catch(() => {});
+			check(`${at}: loading a winning run puts its stats into the calculators`,
+				await page.locator('.aag-nf input[type=number][aria-label="Max life"]').inputValue() === String(run.life)
+				&& await page.locator('.aag-nf input[type=number][aria-label="Crit chance"]').inputValue() === String(run.crit));
+
+			// The winning runs: every card renders, a hero chip filters to the runs' own count,
+			// and an aura's drawer links back to the runs it was in.
+			await page.goto(`http://localhost:${PORT}/astral/runs`, { waitUntil: "networkidle" });
+			await page.waitForSelector(".aag-run", { timeout: 15_000 }).catch(() => {});
+			const nRuns = await page.locator(".aag-run").count();
+			check(`${at}: the Winning runs tab shows all ${RUNS.length} runs`, nRuns === RUNS.length, String(nRuns));
+			if (width < 760) await page.locator(".aag-ftoggle").click().catch(() => {});
+			await page.locator(".aag-chips[aria-label=Hero] .aag-chip", { hasText: "Arven" }).click().catch(() => {});
+			const nArven = await page.locator(".aag-run").count();
+			const wantArven = RUNS.filter((r) => r.hero === "Arven").length;
+			check(`${at}: the Arven chip leaves his ${wantArven} runs`, nArven === wantArven && wantArven > 0, String(nArven));
+			await page.goto(`http://localhost:${PORT}/astral/auras#${encodeURIComponent("aura:magic-weapon")}`, { waitUntil: "networkidle" });
+			await page.waitForSelector(".aag-drawer", { timeout: 15_000 }).catch(() => {});
+			const used = RUNS.filter((r) => r.auras.includes("Magic Weapon"));
+			const chips = page.locator(".aag-drawer .aag-mchip", { hasText: "Destiny" });
+			check(`${at}: Magic Weapon's drawer lists the ${used.length} runs it was in`, await chips.count() === used.length, String(await chips.count()));
+			await chips.first().click().catch(() => {});
+			await page.waitForSelector(".aag-run.hi", { timeout: 5_000 }).catch(() => {});
+			check(`${at}: a run chip opens the Runs tab on that run`,
+				new URL(page.url()).pathname === "/astral/runs" && await page.locator(".aag-run.hi").count() === 1, page.url());
 
 			if (width < 760) {
 				// Phones: the spells table keeps its numbers on screen.

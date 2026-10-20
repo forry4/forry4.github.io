@@ -77,6 +77,10 @@ def sections(text, level):
 	return [(clean(parts[i]), parts[i + 1]) for i in range(1, len(parts) - 1, 2)]
 
 
+# The game's own capitalization, where the wiki's differs (read off end-of-run screens).
+AURA_FIX = {"Shrineless flame": "Shrineless Flame", "Magnetic field": "Magnetic Field"}
+
+
 # ── Auras ────────────────────────────────────────────────────────────────────
 def parse_auras(p):
 	text = p["Auras"]["text"]
@@ -106,6 +110,7 @@ def parse_auras(p):
 						tiers[cur].append(t)
 			if not tiers:
 				continue
+			name = AURA_FIX.get(name, name)
 			out.append({"name": name, "element": element, "astral": "Astral" in tiers,
 				"tiers": [{"rarity": r, "lines": tiers[r]} for r in RARITIES if r in tiers]})
 	return floor("auras", out, 150)
@@ -164,7 +169,7 @@ def gambit_meta(p):
 
 # ── Spells ───────────────────────────────────────────────────────────────────
 # The spell table's own typos, fixed so the names match the pages and the text that cites them.
-SPELL_FIX = {"Eye Of Judgmen": "Eye of Judgment", "Topez Gladius - Downwell": "Topaz Gladius - Downwell",
+SPELL_FIX = {"Eye Of Judgmen": "Eye of Judgment", "Topez Gladius - Downwell": "Topaz Gladius - Downfall",
 	"Sliterhing Sword": "Slithering Sword"}
 
 TAGS = {":0": "Duration", ":1": "Stackable", ":2": "Weapon Buff", ":3": "Homing",

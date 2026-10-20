@@ -321,6 +321,51 @@
 .aag-stats span{color:var(--text-muted);font-size:.78rem;}
 .aag-related{margin-top:14px;border-top:1px solid var(--border);padding-top:4px;}
 
+/* ── winning runs ────────────────────────────────────────────────────── */
+.aag-wins{display:inline-block;font-size:.72rem;padding:1px 7px;border-radius:999px;white-space:nowrap;font-weight:600;
+	color:var(--gold-light);border:1px solid color-mix(in oklab,var(--gold) 60%,transparent);background:color-mix(in oklab,var(--gold) 12%,transparent);
+	font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;letter-spacing:0;text-transform:none;vertical-align:middle;margin-left:4px;}
+button.aag-wins{cursor:pointer;}
+.aag-gametext{font-size:.9rem;color:var(--text-soft);border-left:2px solid var(--gold);padding-left:8px;}
+.aag-gametext b{color:var(--gold-light);margin-right:4px;}
+.aag-nowiki{color:var(--text-soft);}
+.aag-loadrun{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;background:var(--surface);border:1px solid var(--border);
+	border-radius:var(--radius);padding:10px 12px;margin:0 0 4px;color:var(--text-dim);font-size:.92rem;}
+.aag-loadrun select{flex:1 1 260px;min-width:0;max-width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);
+	border-radius:6px;padding:6px 8px;font:inherit;font-size:16px;}
+.aag-statrange td{white-space:nowrap;}
+.aag-statrange td b{color:var(--text);font-variant-numeric:tabular-nums;}
+.aag-usagegrid{display:grid;gap:14px 22px;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));}
+.aag-usage .aag-h3{margin-top:4px;}
+.aag-bars{list-style:none;margin:0;padding:0;display:grid;gap:4px;}
+.aag-bars li{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(40px,1fr) auto;gap:8px;align-items:center;font-size:.92rem;}
+.aag-bar-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.aag-bar-track{height:8px;border-radius:4px;background:var(--surface3);overflow:hidden;}
+.aag-bar-track i{display:block;height:100%;background:var(--gold);border-radius:4px;}
+.aag-bar-n{font-variant-numeric:tabular-nums;color:var(--text);min-width:2.2em;text-align:right;}
+.aag-bar-n small{color:var(--text-muted);}
+.aag-runs{grid-template-columns:repeat(auto-fill,minmax(min(100%,360px),1fr));}
+.aag-run{scroll-margin-top:120px;}
+.aag-run.hi{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold);}
+.aag-run-hero{font-weight:700;font-size:1.06rem;}
+.aag-run-dl{font-size:.8rem;padding:1px 8px;border-radius:999px;border:1px solid var(--border);color:var(--text-soft);}
+.aag-run-dl[data-dl="100"]{color:#17140f;background:var(--gold);border-color:var(--gold);font-weight:700;}
+.aag-run-engines{display:flex;flex-wrap:wrap;gap:5px;margin:6px 0 0;}
+.aag-run-engines button.aag-pill{cursor:pointer;background:none;}
+.aag-run-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin:8px 0 0;}
+.aag-run-stats div{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:4px 6px;}
+.aag-run-stats dt{font-size:.68rem;color:var(--text-muted);letter-spacing:.03em;}
+.aag-run-stats dd{margin:0;font-variant-numeric:tabular-nums;font-weight:600;}
+.aag-run-spells{width:100%;border-collapse:collapse;margin-top:8px;font-size:.88rem;}
+.aag-run-spells th{text-align:left;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.6rem;letter-spacing:.1em;text-transform:uppercase;
+	color:var(--text-muted);font-weight:700;padding:2px 4px;border-bottom:1px solid var(--border);}
+.aag-run-spells td{padding:4px;border-bottom:1px solid var(--border);vertical-align:top;}
+.aag-run-spells td small{color:var(--text-muted);}
+.aag-run-spells tr:last-child td{border-bottom:0;}
+.aag-run-auras{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:8px;font-size:.92rem;}
+.aag-run-aura b{color:var(--gold-light);}
+.aag-run-note{color:var(--text-soft);font-style:italic;font-size:.92rem;}
+
 /* ── phones ──────────────────────────────────────────────────────────── */
 @media (max-width:760px){
 	.aag-bar{flex-wrap:wrap;padding:8px 16px;gap:8px;}

@@ -9,7 +9,8 @@ and does everything client-side. Like BGG Filter in shape.
 | `AstralGuide.jsx` | the page; props are just `{ onExit }` |
 | `AstralGuide.css` | `?inline`-imported stylesheet, `.aag`-prefixed |
 | `derive.js` | **the logic, kept pure so `node --test` can reach it**: the effect vocabulary, the text linker, the synergy index, search, and the charts' maths |
-| `editorial.js` | **the only hand-written content**: tier lists, starting auras, build outlines, the voko→echo pairing, the wiki's tips condensed |
+| `editorial.js` | **hand-written judgment**: tier lists, starting auras, build outlines, the voko→echo pairing, the wiki's tips condensed |
+| `runs.js` | **23 winning runs transcribed from end-of-run screens** (Destiny 54–100), the in-game text where it differs from the wiki (`GAME_TEXT`), and names the wiki lacks (`NOT_ON_WIKI`) |
 | `tools/harvest.py` | fetches every wiki page's wikitext → `tools/cache/pages.json` (gitignored) |
 | `tools/make_data.py` | `pages.json` → `webapp/public/data/astral-guide.json` (the shipped payload) |
 
@@ -30,6 +31,20 @@ pages. The electric gambit icons are numbered rather than named; `GAMBIT_FAMILY`
 using the Elemental Effect page.
 
 ## Editorial vs derived — keep them apart
+
+**The winning runs are evidence, and everything counted from them is counted, not typed.**
+`runs.js` holds 23 end screens the site's owner shared (2026-10-20). `derive.runUsage`
+counts auras, imprints, summons, engines and heroes across them; the tier lists' ★ badges,
+the Runs tab's bars and the drawers' "In N winning runs" all read that one count. The
+aura/imprint/summon tiers are WEIGHTED by it (an S-tier aura must be in ≥3 wins — the unit
+test enforces it), and `RUN_FINDINGS`' numbers are asserted against the counts, so a new run
+that moves a number fails the test until the prose is updated. Things the runs taught that
+the wiki gets wrong: **each spell level is +20% damage** (the screen prints X as 200%; the
+wiki's Spell Mechanics page says 10%), several auras' numbers (`GAME_TEXT`), the game's
+capitalization of two aura names (`AURA_FIX` in make_data.py), and "Topaz Gladius -
+Downfall". Arven (DLC, May 2026) has no spells on the wiki at all. A summon is recorded only
+where its portrait is unmistakable (Capricorn, Leo); echo icons are unreadable, so the echo
+tiers are not weighted by the runs.
 
 Everything on the page is derived from the payload EXCEPT `editorial.js`. **No community
 tier list for Astral Ascent exists to cite** (searched 2026-10-19), so the tier lists and

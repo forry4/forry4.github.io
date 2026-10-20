@@ -4,8 +4,10 @@ import { buildPath, parsePath, pushPath, subscribe } from "../shared/router.js";
 import {
 	ELEMENTS, RARITIES, KEYWORDS, TYPE_LABEL, buildModel, search, matches, keyOf, slug,
 	critMultiplier, armorPct, effectiveLife, nextStone, breakEvenLife, nextDamageStone,
+	runUsage, statRange, levelBonus,
 } from "./derive.js";
 import * as ED from "./editorial.js";
+import { RUNS, RUN_FINDINGS, GAME_TEXT, NOT_ON_WIKI } from "./runs.js";
 
 // CSS lives in the sibling .css file, imported with `?inline` (see CLAUDE.md: never move
 // it back into a JS template literal).
@@ -22,10 +24,11 @@ const TABS = [
 	{ id: "gambits", label: "Gambits" },
 	{ id: "imprints", label: "Imprints" },
 	{ id: "spells", label: "Spells" },
-	{ id: "echoes", label: "Echoes & Summons" },
+	{ id: "echoes", label: "Echoes" },
 	{ id: "prowess", label: "Prowess" },
 	{ id: "synergy", label: "Synergies" },
 	{ id: "tiers", label: "Tier lists" },
+	{ id: "runs", label: "Runs" },
 	{ id: "charts", label: "Charts" },
 	{ id: "bosses", label: "Bosses" },
 	{ id: "meta", label: "Meta" },
@@ -61,6 +64,21 @@ function RarityTag({ r }) {
 function TierTag({ tier }) {
 	if (!tier) return null;
 	return <span className="aag-tier" data-tier={tier.tier} title={`${tier.list} tier ${tier.tier}: ${tier.why}`}>{tier.tier}</span>;
+}
+
+// How many of the transcribed winning runs (runs.js) used this aura / imprint / summon.
+function WinsTag({ n, onClick }) {
+	if (!n) return null;
+	const label = `${n} win${n === 1 ? "" : "s"}`;
+	return onClick
+		? <button type="button" className="aag-wins" title={`Used in ${label} of ${RUNS.length} winning runs`} onClick={onClick}>★ {label}</button>
+		: <span className="aag-wins" title={`Used in ${label} of ${RUNS.length} winning runs`}>★ {label}</span>;
+}
+
+// Where a winning run's end screen showed different numbers than the wiki.
+function GameText({ name }) {
+	const t = GAME_TEXT[name];
+	return t ? <p className="aag-p aag-gametext"><b>In game</b> {t}</p> : null;
 }
 
 // Prose with every effect and spell made clickable.
@@ -182,6 +200,7 @@ function AuraCard({ e, ctx, rarity }) {
 			<header className="aag-card-hd">
 				<button type="button" className="aag-name" onClick={() => ctx.open(e.key)}>{e.name}</button>
 				<TierTag tier={ctx.tierOf(e.key)} />
+				<WinsTag n={ctx.wins("auras", e.name)} />
 				<span className="aag-card-tags"><ElementTag el={e.element} />
 					{e.astral ? <RarityTag r="Astral" /> : e.tiers.map((t) => (
 						<span key={t.rarity} className={`aag-rdot${t.rarity === tier.rarity ? " on" : ""}`} data-r={t.rarity} title={t.rarity} />
@@ -189,6 +208,7 @@ function AuraCard({ e, ctx, rarity }) {
 				</span>
 			</header>
 			<ul className="aag-lines">{tier.lines.map((l, i) => <li key={i}><Rich text={l} ctx={ctx} /></li>)}</ul>
+			<GameText name={e.name} />
 			{!e.astral && <div className="aag-card-ft">{tier.rarity}{tier.rarity !== "Mythic" ? " — tap the name for every rarity" : ""}</div>}
 		</article>
 	);
@@ -217,6 +237,7 @@ function ImprintCard({ e, ctx }) {
 			<header className="aag-card-hd">
 				<button type="button" className="aag-name" onClick={() => ctx.open(e.key)}>{e.name}</button>
 				<TierTag tier={ctx.tierOf(e.key)} />
+				<WinsTag n={ctx.wins("imprints", e.name)} />
 				<span className="aag-card-tags"><ElementTag el={e.element} /></span>
 			</header>
 			<div className="aag-kind">{e.kind}{e.gambit && e.gambit !== "None" ? ` · gambit: ${e.gambit}` : ""}</div>
@@ -256,6 +277,7 @@ function SummonCard({ e, ctx }) {
 			<header className="aag-card-hd">
 				<button type="button" className="aag-name" onClick={() => ctx.open(e.key)}>{e.name}</button>
 				<TierTag tier={ctx.tierOf(e.key)} />
+				<WinsTag n={ctx.wins("summons", e.name)} />
 				<span className="aag-card-tags"><span className="aag-pill" data-el={kw?.el}>{e.effect}</span></span>
 			</header>
 			<p className="aag-p"><Rich text={e.desc} ctx={ctx} /></p>
@@ -395,9 +417,31 @@ function Detail({ e, ctx }) {
 				<span className="aag-card-tags"><ElementTag el={e.element} />{tier && <TierTag tier={tier} />}</span>
 			</div>
 			{tier && <p className="aag-p aag-tierwhy"><b>{tier.list} tier {tier.tier}.</b> {tier.why}</p>}
+			{e.type === "aura" && <GameText name={e.name} />}
 			{body}
+			<RunsUsing e={e} ctx={ctx} />
 			{e.type !== "effect" && <Related e={e} ctx={ctx} />}
 		</>
+	);
+}
+
+// The winning runs an entry appeared in, each a link to its card on the Runs tab.
+const USAGE_KIND = { aura: "auras", imprint: "imprints", summon: "summons", spell: "spells" };
+function RunsUsing({ e, ctx }) {
+	const kind = USAGE_KIND[e.type];
+	const u = kind && ctx.usage[kind].find((x) => x.name === e.name);
+	if (!u) return null;
+	return (
+		<div className="aag-related">
+			<h3 className="aag-h3">In {u.n} of {RUNS.length} winning runs{u.copies > u.n ? ` (${u.copies} copies)` : ""}</h3>
+			<div className="aag-mini">
+				{u.runs.map((id) => {
+					const r = RUNS.find((x) => x.id === id);
+					return <button type="button" key={id} className="aag-mchip" onClick={() => ctx.goRun(id)}>
+						<span className="aag-mtype">Run {id}</span>{r.hero} · Destiny {r.dl}</button>;
+				})}
+			</div>
+		</div>
 	);
 }
 
@@ -542,6 +586,7 @@ function StartTab({ ctx }) {
 		["spells", "Spells", "Mana, damage and hits for all " + n("spell")],
 		["synergy", "Synergies", "Pick an effect: what makes it, what pays it off"],
 		["tiers", "Tier lists", "Echoes, imprints, auras and summons"],
+		["runs", "Winning runs", `${RUNS.length} Destiny 54–100 wins, build by build`],
 		["charts", "Charts", "Crit damage and life/armor calculators"],
 		["bosses", "Bosses", "Every Zodiac and Star Guardian's attacks"],
 	];
@@ -565,7 +610,7 @@ function StartTab({ ctx }) {
 				<div className="aag-stile"><b>+{s.critBonus}%</b><span>crit damage (more, multiplicative); {s.critPerStone}% chance per stone</span></div>
 				<div className="aag-stile"><b>+{s.strengthPerStone}%</b><span>damage per Strength stone, additive</span></div>
 				<div className="aag-stile"><b>+10%</b><span>spell damage per matching gambit; +50% with all four</span></div>
-				<div className="aag-stile"><b>+10%</b><span>spell damage per spell level (X is the usual max)</span></div>
+				<div className="aag-stile"><b>+20%</b><span>spell damage per spell level (the run screen shows X as 200%)</span></div>
 			</div>
 		</Section>
 		<Section title="Stat priority" sub="The wiki's recommended order for stones and drinks, for a newer player.">
@@ -725,7 +770,7 @@ function SpellsTab({ ctx, f, set }) {
 			<Chips label="Mana" options={["1", "2", "3"]} value={f.mana} onChange={(v) => set({ mana: v })} />
 			<Chips label="Tags" options={tags} value={f.tag} onChange={(v) => set({ tag: v })} />
 		</FilterBar>
-		<p className="aag-sub">Damage is the wiki's estimate if every hit lands, before crits and gambits. Each spell level adds 10%.
+		<p className="aag-sub">Damage is the wiki's estimate if every hit lands, before crits and gambits. Each spell level adds 20% (the end screen shows level X as 200%).
 			Dmg / mana is the fair comparison across costs, but cheap spells also make Spell Refresh come round sooner.</p>
 		<div className="aag-tablewrap">
 			<table className="aag-table aag-spells">
@@ -794,20 +839,29 @@ function ProwessTab({ ctx, f, set }) {
 	</>);
 }
 
+// `focus` is an effect name, or "arch:<name>" to open a build outline directly (the
+// Runs tab's engine chips). An outline can have no single effect (Max-mana, Dash),
+// so the outline and the effect are picked separately.
 function SynergyTab({ ctx, focus }) {
-	const [pick, setPick] = useState(focus || "Combustion");
-	useEffect(() => { if (focus) setPick(focus); }, [focus]);
-	const e = ctx.model.byKey[keyOf("effect", slug(pick))];
-	const arch = ED.ARCHETYPES.find((a) => a.effect === pick);
+	const firstArch = (k) => ED.ARCHETYPES.find((a) => a.effect === k)?.name || null;
+	const fromFocus = (f) => (f && f.startsWith("arch:") ? { arch: f.slice(5), fx: ED.ARCHETYPES.find((a) => a.name === f.slice(5))?.effect || null }
+		: { arch: firstArch(f || "Combustion"), fx: f || "Combustion" });
+	const [sel, setSel] = useState(() => fromFocus(focus));
+	useEffect(() => { if (focus) setSel(fromFocus(focus)); }, [focus]);   // eslint-disable-line react-hooks/exhaustive-deps
+	const e = sel.fx && ctx.model.byKey[keyOf("effect", slug(sel.fx))];
+	const arch = ED.ARCHETYPES.find((a) => a.name === sel.arch);
+	const proven = (name) => ctx.usage.engines.find((x) => x.name === name);
+	const used = arch && proven(arch.name);
 	return (<>
 		<p className="aag-sub">Pick an effect to see everything that <b>makes</b> it and everything that <b>pays it off</b>. The lists are linked
-			automatically from the wiki's wording; the build outlines are curated.</p>
+			automatically from the wiki's wording; the build outlines are curated, and ★ counts the winning runs built on each.</p>
 		<div className="aag-fxpick">
 			{ELEMENTS.map((el) => (
 				<div key={el} className="aag-fxrow">
 					<span className="aag-chips-lbl" data-el={el}>{el}</span>
 					{KEYWORDS.filter((k) => k.el === el).map((k) => (
-						<button type="button" key={k.k} className="aag-chip" data-el={el} aria-pressed={pick === k.k} onClick={() => setPick(k.k)}>
+						<button type="button" key={k.k} className="aag-chip" data-el={el} aria-pressed={sel.fx === k.k}
+							onClick={() => setSel({ fx: k.k, arch: firstArch(k.k) })}>
 							{k.k} <span className="aag-chipn">{(ctx.model.makers[k.k] || []).length}/{(ctx.model.users[k.k] || []).length}</span>
 						</button>
 					))}
@@ -816,26 +870,33 @@ function SynergyTab({ ctx, focus }) {
 		</div>
 		{arch && (
 			<div className="aag-arch" data-el={arch.element}>
-				<h3 className="aag-h3">{arch.name}</h3>
+				<h3 className="aag-h3">{arch.name} {used && <WinsTag n={used.n} />}</h3>
 				<p className="aag-p">{arch.how}</p>
 				<div className="aag-archgrid">
 					<div><div className="aag-rel-hd">Core makers</div><MiniList keys={arch.makers.map((n) => keyOf("aura", slug(n)))} ctx={ctx} /></div>
 					<div><div className="aag-rel-hd">Core payoffs</div><MiniList keys={arch.payoffs.map((n) => keyOf("aura", slug(n)))} ctx={ctx} /></div>
-					<div><div className="aag-rel-hd">Gambits · imprints</div><MiniList keys={[
+					{(arch.gambits.length + arch.imprints.length) > 0 && <div><div className="aag-rel-hd">Gambits · imprints</div><MiniList keys={[
 						...arch.gambits.map((g) => ctx.model.list.find((x) => x.type === "gambit" && x.name === g)?.key).filter(Boolean),
-						...arch.imprints.map((n) => keyOf("imprint", slug(n)))]} ctx={ctx} /></div>
+						...arch.imprints.map((n) => keyOf("imprint", slug(n)))]} ctx={ctx} /></div>}
 					{(arch.summon || arch.echo) && <div><div className="aag-rel-hd">Summon · echo</div><MiniList keys={[
 						arch.summon && keyOf("summon", slug(arch.summon)), arch.echo && keyOf("echo", slug(arch.echo))].filter(Boolean)} ctx={ctx} /></div>}
 				</div>
+				{used && <div className="aag-rel"><div className="aag-rel-hd">Winning runs built on it</div><div className="aag-mini">
+					{used.runs.map((id) => { const r = RUNS.find((x) => x.id === id); return (
+						<button type="button" key={id} className="aag-mchip" onClick={() => ctx.goRun(id)}>
+							<span className="aag-mtype">Run {id}</span>{r.hero} · Destiny {r.dl}</button>); })}
+				</div></div>}
 			</div>
 		)}
 		{e && <div className="aag-panel"><div className="aag-dhead"><span className="aag-dtype">Effect</span><h2 className="aag-dname">{e.name}</h2><ElementTag el={e.element} /></div>
 			<EffectBody e={e} ctx={ctx} /></div>}
-		<Section title="All build outlines">
+		<Section title="All build outlines" sub="Proven ones first: ★ is how many of the winning runs were built on it.">
 			<div className="aag-grid">
-				{ED.ARCHETYPES.map((a) => (
-					<button type="button" key={a.name} className="aag-pick" data-el={a.element} onClick={() => { setPick(a.effect); window.scrollTo({ top: 0, behavior: "smooth" }); }}>
-						<span className="aag-pick-name">{a.name}</span><ElementTag el={a.element} /><span className="aag-pick-why">{a.how}</span>
+				{[...ED.ARCHETYPES].sort((a, b) => (proven(b.name)?.n || 0) - (proven(a.name)?.n || 0)).map((a) => (
+					<button type="button" key={a.name} className="aag-pick" data-el={a.element}
+						onClick={() => { setSel({ arch: a.name, fx: a.effect }); window.scrollTo({ top: 0, behavior: "smooth" }); }}>
+						<span className="aag-pick-name">{a.name} <WinsTag n={proven(a.name)?.n} /></span><ElementTag el={a.element} />
+						<span className="aag-pick-why">{a.how}</span>
 					</button>
 				))}
 			</div>
@@ -843,7 +904,7 @@ function SynergyTab({ ctx, focus }) {
 	</>);
 }
 
-function TierBoard({ list, tiers, ctx, keyFor }) {
+function TierBoard({ list, tiers, ctx, keyFor, kind }) {
 	return (
 		<div className="aag-tierboard">
 			{Object.entries(tiers).map(([t, rows]) => (
@@ -855,7 +916,7 @@ function TierBoard({ list, tiers, ctx, keyFor }) {
 							const e = ctx.model.byKey[k];
 							return (
 								<button type="button" key={name} className="aag-tieritem" data-el={e?.element} onClick={() => ctx.open(k)}>
-									<b>{name}</b><span>{why}</span>
+									<b>{name}{kind && <WinsTag n={ctx.wins(kind, name)} />}</b><span>{why}</span>
 								</button>
 							);
 						})}
@@ -878,14 +939,15 @@ function TiersTab({ ctx }) {
 	];
 	const cur = lists.find((l) => l[0] === which);
 	return (<>
-		<p className="aag-sub">Editor's picks: no community tier list for Astral Ascent exists to cite, so these are judged from the wiki's own
-			descriptions. The criteria are stated with each list. Tap any entry for its full text.</p>
+		<p className="aag-sub">Editor's picks: no community tier list for Astral Ascent exists to cite. Auras, imprints and summons are weighted by
+			{" "}{RUNS.length} winning Destiny 54–100 runs (★ counts them; see <button type="button" className="aag-link" onClick={() => ctx.go("runs")}>Winning runs</button>);
+			the rest are judged from the wiki's own descriptions. Tap any entry for its full text.</p>
 		<div className="aag-seg aag-seg-big" role="tablist" aria-label="Tier list">
 			{lists.map(([id, label]) => <button type="button" key={id} role="tab" aria-selected={which === id} aria-pressed={which === id} onClick={() => setWhich(id)}>{label}</button>)}
 		</div>
 		{which !== "spells" ? (<>
 			<p className="aag-sub"><b>Judged on:</b> {ED.TIER_NOTES[which]}</p>
-			<TierBoard list={cur[1]} tiers={ED.TIERS[which]} ctx={ctx} keyFor={cur[2]} />
+			<TierBoard list={cur[1]} tiers={ED.TIERS[which]} ctx={ctx} keyFor={cur[2]} kind={which === "echoes" ? null : which} />
 		</>) : <SpellTiers ctx={ctx} />}
 	</>);
 }
@@ -909,6 +971,153 @@ function SpellTiers({ ctx }) {
 				</Section>
 			);
 		})}
+	</>);
+}
+
+// ── Winning runs ───────────────────────────────────────────────────────────
+const ROMAN = (n) => {
+	if (!n) return "0";
+	const map = [[10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"]];
+	let out = "";
+	for (const [v, s] of map) while (n >= v) { out += s; n -= v; }
+	return out;
+};
+const DL_BANDS = [["100", (d) => d === 100], ["70–80", (d) => d >= 70 && d < 100], ["54–60", (d) => d < 70]];
+const STAT_ROWS = [["str", "Strength", "%"], ["crit", "Crit chance", "%"], ["speed", "Attack speed", "%"],
+	["armor", "Armor", "%"], ["life", "Max life", ""], ["mana", "Bonus mana", ""]];
+
+// A name from a run is a link when the wiki has it, and plain text (marked) when not.
+function RunName({ type, name, ctx, notOnWiki }) {
+	const k = keyOf(type, slug(name));
+	if (ctx.model.byKey[k]) return <EntityLink k={k} ctx={ctx}>{name}</EntityLink>;
+	return <span className="aag-nowiki" title={notOnWiki ? "Not on the wiki yet" : undefined}>{name}{notOnWiki ? " †" : ""}</span>;
+}
+
+function UsageBars({ title, rows, ctx, type, limit = 14 }) {
+	const max = Math.max(1, ...rows.map((r) => r.n));
+	return (
+		<div className="aag-usage">
+			<h3 className="aag-h3">{title}</h3>
+			<ol className="aag-bars">
+				{rows.slice(0, limit).map((r) => (
+					<li key={r.name}>
+						<span className="aag-bar-name">{type ? <RunName type={type} name={r.name} ctx={ctx} notOnWiki /> : r.name}</span>
+						<span className="aag-bar-track" aria-hidden="true"><i style={{ width: `${(r.n / max) * 100}%` }} /></span>
+						<span className="aag-bar-n">{r.n}{r.copies > r.n ? <small> ×{r.copies}</small> : null}</span>
+					</li>
+				))}
+			</ol>
+		</div>
+	);
+}
+
+function RunCard({ r, ctx, hi }) {
+	const auras = [];
+	for (const a of r.auras) {
+		const last = auras.find((x) => x.name === a);
+		if (last) last.n += 1; else auras.push({ name: a, n: 1 });
+	}
+	return (
+		<article className={`aag-card aag-run${hi ? " hi" : ""}`} id={`run-${r.id}`}>
+			<header className="aag-card-hd">
+				<span className="aag-run-hero">{r.hero}</span>
+				<span className="aag-run-dl" data-dl={r.dl === 100 ? "100" : undefined}>Destiny {r.dl}</span>
+				<span className="aag-card-tags aag-muted">Run {r.id} · {r.date} · {r.time}</span>
+			</header>
+			<div className="aag-run-engines">
+				{r.engines.map((e) => ED.ARCHETYPES.some((a) => a.name === e)
+					? <button type="button" key={e} className="aag-pill aag-pill-gold" onClick={() => ctx.go("synergy", `arch:${e}`)}>{e}</button>
+					: <span key={e} className="aag-pill">{e}</span>)}
+			</div>
+			<dl className="aag-run-stats">
+				{STAT_ROWS.map(([k, label, unit]) => <div key={k}><dt>{label}</dt><dd>{k === "mana" ? "+" : ""}{r[k]}{unit}</dd></div>)}
+			</dl>
+			<table className="aag-run-spells">
+				<thead><tr><th>Spell</th><th>Level</th><th>Imprint</th><th>Affinity</th></tr></thead>
+				<tbody>
+					{r.spells.map((s, i) => (
+						<tr key={i}>
+							<td><RunName type="spell" name={s.name} ctx={ctx} notOnWiki={NOT_ON_WIKI.spells.has(s.name)} /></td>
+							<td className="aag-num">{ROMAN(s.level)} <small>+{levelBonus(s.level)}%</small></td>
+							<td>{s.imprint ? <RunName type="imprint" name={s.imprint} ctx={ctx} notOnWiki={NOT_ON_WIKI.imprints.has(s.imprint)} /> : <span className="aag-muted">—</span>}</td>
+							<td className="aag-num">+{s.aff}%</td>
+						</tr>
+					))}
+				</tbody>
+			</table>
+			<div className="aag-run-auras">
+				{auras.length ? auras.map((a) => (
+					<span key={a.name} className="aag-run-aura"><RunName type="aura" name={a.name} ctx={ctx} notOnWiki={NOT_ON_WIKI.auras.has(a.name)} />
+						{a.n > 1 && <b> ×{a.n}</b>}</span>
+				)) : <span className="aag-muted">No auras — all five slots empty.</span>}
+			</div>
+			<div className="aag-card-ft">
+				{r.summon ? <>Summon: <RunName type="summon" name={r.summon} ctx={ctx} /> · </> : null}
+				{fmt(r.total)} total damage
+			</div>
+			{r.note && <p className="aag-p aag-run-note">{r.note}</p>}
+		</article>
+	);
+}
+
+function RunsTab({ ctx, f, set, focusRun }) {
+	const all = RUNS;
+	const heroes = [...new Set(all.map((r) => r.hero))];
+	const engines = ctx.usage.engines.map((e) => e.name);
+	const hay = (r) => [r.hero, ...r.engines, ...r.auras, ...r.spells.flatMap((s) => [s.name, s.imprint || ""]), r.summon || "", r.note]
+		.join(" ").toLowerCase();
+	const words = f.q.toLowerCase().split(/\s+/).filter(Boolean);
+	const list = all.filter((r) => words.every((w) => hay(r).includes(w))
+		&& (!f.hero.length || f.hero.includes(r.hero))
+		&& (!f.tier.length || f.tier.some((b) => DL_BANDS.find(([id]) => id === b)[1](r.dl)))
+		&& (!f.kind.length || f.kind.some((e) => r.engines.includes(e))))
+		.sort((a, b) => b.dl - a.dl || b.date.localeCompare(a.date));
+	useEffect(() => {
+		if (!focusRun) return;
+		const el = document.getElementById(`run-${focusRun}`);
+		el?.scrollIntoView?.({ block: "start", behavior: "smooth" });
+	}, [focusRun]);
+	const dl100 = all.filter((r) => r.dl === 100), rest = all.filter((r) => r.dl < 100);
+	const cell = (runs, key, unit) => {
+		const s = statRange(runs, key);
+		return s ? <><b>{fmt(s.median)}{unit}</b> <span className="aag-muted">{fmt(s.min)}–{fmt(s.max)}</span></> : "—";
+	};
+	return (<>
+		<p className="aag-sub">{all.length} winning runs at Destiny {Math.min(...all.map((r) => r.dl))}–100, transcribed from the end-of-run
+			screens the site's owner shared. They are one player's wins, so they show what has worked, not everything that can.
+			The tier lists' ★ counts come from here. † marks a name the wiki doesn't have yet.</p>
+		<Section title="What the wins have in common">
+			<div className="aag-cols2">{RUN_FINDINGS.map(([h, t]) => <div key={h} className="aag-note"><b>{h}</b><p>{t}</p></div>)}</div>
+		</Section>
+		<Section title="Stats at the end of a win" sub="Median, then the range. Armor includes armor from auras.">
+			<div className="aag-tablewrap">
+				<table className="aag-table aag-statrange">
+					<thead><tr><th>Stat</th><th>All {all.length}</th><th>Destiny 100 ({dl100.length})</th><th>Destiny 54–80 ({rest.length})</th></tr></thead>
+					<tbody>{STAT_ROWS.map(([k, label, unit]) => (
+						<tr key={k}><td>{label}</td><td>{cell(all, k, unit)}</td><td>{cell(dl100, k, unit)}</td><td>{cell(rest, k, unit)}</td></tr>
+					))}</tbody>
+				</table>
+			</div>
+		</Section>
+		<Section title="What they used" sub="Bars count runs; ×N is total copies where a run took more than one.">
+			<div className="aag-usagegrid">
+				<UsageBars title="Auras" rows={ctx.usage.auras} ctx={ctx} type="aura" limit={16} />
+				<UsageBars title="Imprints" rows={ctx.usage.imprints} ctx={ctx} type="imprint" limit={16} />
+				<div>
+					<UsageBars title="Engines" rows={ctx.usage.engines} ctx={ctx} limit={12} />
+					<UsageBars title="Heroes" rows={ctx.usage.heroes} ctx={ctx} limit={6} />
+					<UsageBars title="Summons (where recognizable)" rows={ctx.usage.summons} ctx={ctx} type="summon" limit={4} />
+				</div>
+			</div>
+		</Section>
+		<Section title="Every run">
+			<FilterBar f={f} set={set} placeholder="Filter runs by aura, spell, imprint or hero…" count={list.length} total={all.length}>
+				<Chips label="Hero" options={heroes} value={f.hero} onChange={(v) => set({ hero: v })} />
+				<Chips label="Destiny" options={DL_BANDS.map(([id]) => id)} value={f.tier} onChange={(v) => set({ tier: v })} />
+				<Chips label="Engine" options={engines} value={f.kind} onChange={(v) => set({ kind: v })} />
+			</FilterBar>
+			{list.length ? <div className="aag-grid aag-runs">{list.map((r) => <RunCard key={r.id} r={r} ctx={ctx} hi={r.id === focusRun} />)}</div> : <Empty />}
+		</Section>
 	</>);
 }
 
@@ -944,6 +1153,14 @@ function ChartsTab({ ctx }) {
 	const ds = nextDamageStone(str, chance, bonus, { str: s.strengthPerStone, crit: s.critPerStone });
 	const ns = nextStone(life, armor, { cap: s.armorCap, perStone: s.armorPerStone, lifePerStone: s.lifePerStone });
 	const be = breakEvenLife(armor, s.armorPerStone, s.lifePerStone);
+	// A winning run's end-screen stats, loaded into both calculators. Its armor % already
+	// includes auras, so it goes in as "armor from auras" with no stones.
+	const loadRun = (id) => {
+		const r = RUNS.find((x) => x.id === Number(id));
+		if (!r) return;
+		setChance(r.crit); setBonus(s.critBonus); setStr(r.str);
+		setLife(r.life); setStones(0); setExtra(Math.min(50, r.armor));
+	};
 
 	const CH = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
 	const BO = [50, 60, 70, 80, 90, 100, 125, 150, 200];
@@ -955,6 +1172,15 @@ function ChartsTab({ ctx }) {
 	const nc = near(CH, chance), nb = near(BO, bonus), nl = near(LIFE, life), nst = near(ST, stones);
 
 	return (<>
+		<label className="aag-loadrun">
+			<span>Load a winning run's stats</span>
+			<select defaultValue="" onChange={(e) => loadRun(e.target.value)} aria-label="Load a winning run's stats">
+				<option value="" disabled>Pick a run…</option>
+				{[...RUNS].sort((a, b) => b.dl - a.dl).map((r) => (
+					<option key={r.id} value={r.id}>Run {r.id}: {r.hero}, Destiny {r.dl} — {r.life} life, {r.armor}% armor, {r.str}% Strength</option>
+				))}
+			</select>
+		</label>
 		<Section title="Critical hits" sub={`A crit deals +${s.critBonus}% MORE damage by default, multiplying everything else. Your average damage is 1 + chance × crit bonus.`}>
 			<div className="aag-calc">
 				<div className="aag-calc-in">
@@ -1255,6 +1481,7 @@ export default function AstralGuide({ onExit }) {
 	const [tab, setTab] = useState(routeTab);
 	const [filters, setFilters] = useState({});
 	const [focus, setFocus] = useState(null);
+	const [focusRun, setFocusRun] = useState(null);
 	const [stack, setStack] = useState(() => (hashKey() ? [hashKey()] : []));
 	const searchRef = useRef(null);
 	const tabsRef = useRef(null);
@@ -1309,6 +1536,7 @@ export default function AstralGuide({ onExit }) {
 		setStack([]);
 		setTab(t);
 		if (t === "synergy" && q) setFocus(q);
+		if (t !== "runs") setFocusRun(null);
 		else if (q != null) setFilters((all) => ({ ...all, [t]: { ...FILTER_DEFAULTS, q } }));
 		pushPath(buildPath("astral", t === "start" ? undefined : t));
 		window.scrollTo({ top: 0 });
@@ -1334,8 +1562,11 @@ export default function AstralGuide({ onExit }) {
 	const f = { ...FILTER_DEFAULTS, ...(filters[tab] || {}) };
 	const set = (patch) => setFilters((all) => ({ ...all, [tab]: patch === null ? { ...FILTER_DEFAULTS } : { ...FILTER_DEFAULTS, ...(all[tab] || {}), ...patch } }));
 
+	const usage = useMemo(() => runUsage(RUNS), []);
 	const ctx = model && {
-		data, model, open, go,
+		data, model, open, go, usage,
+		wins: (kind, name) => usage[kind].find((x) => x.name === name)?.n || 0,
+		goRun: (id) => { go("runs"); setFocusRun(id); },
 		tierOf: (k) => tierIndex[k],
 		maxDpm: Math.max(...data.spells.map((s) => s.dpm || 0)),
 	};
@@ -1343,7 +1574,7 @@ export default function AstralGuide({ onExit }) {
 	const counts = model ? {
 		auras: data.auras.length, gambits: model.list.filter((e) => e.type === "gambit").length, imprints: data.imprints.length,
 		spells: data.spells.length, echoes: data.echoes.length + data.summons.length, prowess: data.prowess.length,
-		bosses: data.bosses.length, glossary: KEYWORDS.length,
+		bosses: data.bosses.length, glossary: KEYWORDS.length, runs: RUNS.length,
 	} : {};
 
 	const body = !ctx ? null : (() => {
@@ -1357,6 +1588,7 @@ export default function AstralGuide({ onExit }) {
 			case "prowess": return <ProwessTab {...p} />;
 			case "synergy": return <SynergyTab ctx={ctx} focus={focus} />;
 			case "tiers": return <TiersTab ctx={ctx} />;
+			case "runs": return <RunsTab {...p} focusRun={focusRun} />;
 			case "charts": return <ChartsTab ctx={ctx} />;
 			case "bosses": return <BossesTab {...p} />;
 			case "meta": return <MetaTab {...p} />;

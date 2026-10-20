@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import * as D from "../../../astralguide/derive.js";
 import * as ED from "../../../astralguide/editorial.js";
+import { RUNS, NOT_ON_WIKI, GAME_TEXT, RUN_FINDINGS } from "../../../astralguide/runs.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const data = JSON.parse(readFileSync(path.join(root, "webapp", "public", "data", "astral-guide.json"), "utf8"));
@@ -106,7 +107,7 @@ test("every name the editorial layer cites exists in the payload", () => {
 		for (const n of a.imprints) if (!of.imprints.has(n)) bad.push(`${a.name} imprint: ${n}`);
 		if (a.summon && !of.summons.has(a.summon)) bad.push(`${a.name} summon: ${a.summon}`);
 		if (a.echo && !of.echoes.has(a.echo)) bad.push(`${a.name} echo: ${a.echo}`);
-		if (!D.KEYWORD[a.effect]) bad.push(`${a.name} effect: ${a.effect}`);
+		if (a.effect !== null && !D.KEYWORD[a.effect]) bad.push(`${a.name} effect: ${a.effect}`);
 	}
 	const cat = new Set(data.catalyst.map((c) => c.name));
 	for (const [n] of [...ED.CATALYST_PICKS.first10, ...ED.CATALYST_PICKS.first50]) if (!cat.has(n)) bad.push(`catalyst: ${n}`);
@@ -126,4 +127,62 @@ test("the echo tier list ranks every echo exactly once", () => {
 	const ranked = Object.values(ED.TIERS.echoes).flat().map(([n]) => n);
 	assert.equal(new Set(ranked).size, ranked.length, "an echo is ranked twice");
 	assert.deepEqual([...names("echo")].filter((n) => !ranked.includes(n)), []);
+});
+
+test("every tier list names each entry once", () => {
+	for (const [list, tiers] of Object.entries(ED.TIERS)) {
+		const all = Object.values(tiers).flat().map(([n]) => n);
+		assert.equal(new Set(all).size, all.length, `${list} ranks something twice`);
+	}
+});
+
+// ── The winning runs (runs.js), held to the payload ──────────────────────
+test("every name in the winning runs exists, or is declared not on the wiki", () => {
+	const of = { aura: names("aura"), imprint: names("imprint"), spell: names("spell"), summon: names("summon") };
+	const bad = [];
+	for (const r of RUNS) {
+		for (const a of r.auras) if (!of.aura.has(a) && !NOT_ON_WIKI.auras.has(a)) bad.push(`run ${r.id} aura: ${a}`);
+		for (const s of r.spells) {
+			if (!of.spell.has(s.name) && !NOT_ON_WIKI.spells.has(s.name)) bad.push(`run ${r.id} spell: ${s.name}`);
+			if (s.imprint && !of.imprint.has(s.imprint) && !NOT_ON_WIKI.imprints.has(s.imprint)) bad.push(`run ${r.id} imprint: ${s.imprint}`);
+		}
+		if (r.summon && !of.summon.has(r.summon)) bad.push(`run ${r.id} summon: ${r.summon}`);
+		for (const e of r.engines) if (e !== "No auras" && !ED.ARCHETYPES.some((a) => a.name === e)) bad.push(`run ${r.id} engine: ${e}`);
+	}
+	// A "not on the wiki" name that the wiki has since gained must leave the list.
+	for (const [kind, set] of [["aura", NOT_ON_WIKI.auras], ["imprint", NOT_ON_WIKI.imprints], ["spell", NOT_ON_WIKI.spells]]) {
+		for (const n of set) if (of[kind].has(n)) bad.push(`${n} is on the wiki now; drop it from NOT_ON_WIKI`);
+	}
+	for (const n of Object.keys(GAME_TEXT)) if (!of.aura.has(n) && !NOT_ON_WIKI.auras.has(n)) bad.push(`GAME_TEXT: ${n}`);
+	assert.deepEqual(bad, []);
+});
+
+test("each run is a full end screen: four spells, at most five auras, sane stats", () => {
+	assert.equal(new Set(RUNS.map((r) => r.id)).size, RUNS.length);
+	for (const r of RUNS) {
+		assert.equal(r.spells.length, 4, `run ${r.id}`);
+		assert.ok(r.auras.length <= 5, `run ${r.id}`);
+		assert.ok(r.dl >= 1 && r.dl <= 100 && r.armor <= 70 && r.life > 0, `run ${r.id}`);
+		for (const s of r.spells) assert.ok(s.level >= 0 && s.level <= 15 && [0, 10, 20, 30, 50].includes(s.aff), `run ${r.id} ${s.name}`);
+	}
+});
+
+test("the findings' numbers are the runs' own counts", () => {
+	const u = D.runUsage(RUNS);
+	const n = (list, name) => u[list].find((x) => x.name === name)?.n || 0;
+	const text = RUN_FINDINGS.map(([h, t]) => `${h} ${t}`).join(" ");
+	assert.ok(text.includes(`in ${n("auras", "Magic Weapon")} wins`), `Magic Weapon is in ${n("auras", "Magic Weapon")}`);
+	assert.ok(text.includes(`${n("summons", "Capricorn")} of the ${RUNS.length} wins`), `Capricorn is in ${n("summons", "Capricorn")}`);
+	const loop = n("engines", "Missile ↔ Ice Sword loop");
+	assert.ok(text.includes(["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight"][loop] + " wins run it"), `the loop is in ${loop}`);
+	const stacked = RUNS.filter((r) => new Set(r.auras).size < r.auras.length).length;
+	assert.ok(text.includes(["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight"][stacked] + " runs carry"), `${stacked} runs stack copies`);
+	// The aura tier list's S tier is made of proven auras.
+	for (const [name] of ED.TIERS.auras.S) assert.ok(n("auras", name) >= 3, `${name} is S tier on ${n("auras", name)} wins`);
+});
+
+test("statRange takes the median of the values present", () => {
+	assert.deepEqual(D.statRange([{ a: 1 }, { a: 3 }, { a: 2 }], "a"), { min: 1, median: 2, max: 3, n: 3 });
+	assert.equal(D.statRange([{ a: 1 }, { a: 4 }], "a").median, 2.5);
+	assert.equal(D.levelBonus(10), 200);
 });

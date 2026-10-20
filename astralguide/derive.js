@@ -404,5 +404,43 @@ export function nextDamageStone(strengthPct, critChancePct, critBonusPct, { str 
 	return { strGain, critGain };
 }
 
+// ── Winning runs (runs.js) ──────────────────────────────────────────────────
+// How many runs used each aura / imprint / summon / engine, and how many copies.
+// The tier lists' "N wins" badges and the Runs tab's bars both read this, so the
+// numbers the page states can only come from the transcribed runs.
+export function runUsage(runs) {
+	const tally = () => new Map();
+	const auras = tally(), imprints = tally(), summons = tally(), engines = tally(), heroes = tally(), spells = tally();
+	const bump = (m, name, id) => {
+		if (!m.has(name)) m.set(name, { name, runs: new Set(), copies: 0 });
+		const e = m.get(name);
+		e.runs.add(id);
+		e.copies += 1;
+	};
+	for (const r of runs) {
+		r.auras.forEach((a) => bump(auras, a, r.id));
+		r.spells.forEach((s) => { bump(spells, s.name, r.id); if (s.imprint) bump(imprints, s.imprint, r.id); });
+		if (r.summon) bump(summons, r.summon, r.id);
+		r.engines.forEach((e) => bump(engines, e, r.id));
+		bump(heroes, r.hero, r.id);
+	}
+	const rank = (m) => [...m.values()].map((e) => ({ ...e, runs: [...e.runs], n: e.runs.size }))
+		.sort((a, b) => b.n - a.n || b.copies - a.copies || a.name.localeCompare(b.name));
+	return { auras: rank(auras), imprints: rank(imprints), summons: rank(summons), engines: rank(engines),
+		heroes: rank(heroes), spells: rank(spells) };
+}
+
+// min / median / max of one stat across runs.
+export function statRange(runs, key) {
+	const v = runs.map((r) => r[key]).filter((x) => typeof x === "number").sort((a, b) => a - b);
+	if (!v.length) return null;
+	const mid = v.length >> 1;
+	const median = v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2;
+	return { min: v[0], median, max: v[v.length - 1], n: v.length };
+}
+
+// Each spell level adds 20% damage: the end screen prints level X as 200%.
+export const levelBonus = (level) => level * 20;
+
 export { slug };
 export const elementOfImprint = (name) => (PREFIX_EL.find(([p]) => name.startsWith(p)) || [])[1] || "Neutral";
