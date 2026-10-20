@@ -321,6 +321,10 @@
 .aag-stats span{color:var(--text-muted);font-size:.78rem;}
 .aag-related{margin-top:14px;border-top:1px solid var(--border);padding-top:4px;}
 
+/* ── field notes ─────────────────────────────────────────────────────── */
+.aag-fieldsrc{font-size:.86rem;color:var(--gold-light);}
+.aag-variants{margin:0 0 8px;}
+
 /* ── winning runs ────────────────────────────────────────────────────── */
 .aag-wins{display:inline-block;font-size:.72rem;padding:1px 7px;border-radius:999px;white-space:nowrap;font-weight:600;
 	color:var(--gold-light);border:1px solid color-mix(in oklab,var(--gold) 60%,transparent);background:color-mix(in oklab,var(--gold) 12%,transparent);

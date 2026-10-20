@@ -8,6 +8,7 @@ import {
 } from "./derive.js";
 import * as ED from "./editorial.js";
 import { RUNS, RUN_FINDINGS, GAME_TEXT, NOT_ON_WIKI } from "./runs.js";
+import { VARIANTS } from "./fieldnotes.js";
 
 // CSS lives in the sibling .css file, imported with `?inline` (see CLAUDE.md: never move
 // it back into a JS template literal).
@@ -36,7 +37,8 @@ const TABS = [
 ];
 const TAB_IDS = TABS.map((t) => t.id);
 const TAB_OF_TYPE = { aura: "auras", gambit: "gambits", imprint: "imprints", spell: "spells", echo: "echoes",
-	summon: "echoes", prowess: "prowess", boss: "bosses", catalyst: "meta", telluric: "meta", cursed: "meta", effect: "glossary" };
+	summon: "echoes", prowess: "prowess", boss: "bosses", catalyst: "meta", telluric: "meta", cursed: "meta", effect: "glossary",
+	variant: "glossary" };
 
 // Segment 2 of /astral/<tab>; router.js upper-cases it (it was written for room codes),
 // and tab ids are lowercase letters, so lower-casing it back is exact.
@@ -88,6 +90,10 @@ function Rich({ text, ctx }) {
 		if (s.t === "kw") {
 			const el = KEYWORDS.find((k) => k.k === s.k)?.el;
 			return <button type="button" key={i} className="aag-kw" data-el={el} onClick={() => ctx.open(keyOf("effect", slug(s.k)))}>{s.text}</button>;
+		}
+		if (s.t === "variant") {
+			return <button type="button" key={i} className="aag-kw" data-el={s.v.el} onClick={() => ctx.open(keyOf("variant", slug(s.v.name)))}
+				title={s.v.known ? s.v.known.note : "Named by the wiki but not explained"}>{s.text}</button>;
 		}
 		if (s.t === "spell") {
 			return <button type="button" key={i} className="aag-sp" onClick={() => ctx.open(keyOf("spell", slug(s.name)))}
@@ -406,6 +412,7 @@ function Detail({ e, ctx }) {
 			case "telluric": return (<><p className="aag-p">{e.desc}</p>{e.synergy && <p className="aag-p aag-muted"><b>Synergy:</b> {e.synergy}</p>}</>);
 			case "cursed": return <p className="aag-p"><b>{e.kind}.</b> <Rich text={e.desc} ctx={ctx} /></p>;
 			case "effect": return <EffectBody e={e} ctx={ctx} />;
+			case "variant": return <VariantBody e={e} ctx={ctx} />;
 			default: return null;
 		}
 	})();
@@ -445,12 +452,30 @@ function RunsUsing({ e, ctx }) {
 	);
 }
 
+// A named effect the wiki mentions but never explains (fieldnotes.js).
+function VariantBody({ e, ctx }) {
+	return (<>
+		{e.parent && <p className="aag-p">A kind of <EntityLink k={keyOf("effect", slug(e.parent))} ctx={ctx}>{e.parent}</EntityLink>:
+			anything that makes it also counts as making {e.parent}.</p>}
+		{e.known ? (<>
+			<p className="aag-p">{e.known.note}</p>
+			{e.known.makes.length > 0 && <p className="aag-p">Makes: {e.known.makes.map((k, i) => (
+				<Fragment key={k}>{i ? ", " : ""}<EntityLink k={keyOf("effect", slug(k))} ctx={ctx}>{k}</EntityLink></Fragment>))}</p>}
+			<p className="aag-p aag-fieldsrc">Source: {e.known.source}. Not on the wiki.</p>
+		</>) : <p className="aag-p aag-muted">The wiki names this but never says what it does. Field notes from play or the community fill these in.</p>}
+		<h3 className="aag-h3">Named by</h3>
+		<MiniList keys={e.mentions} ctx={ctx} />
+	</>);
+}
+
 function EffectBody({ e, ctx }) {
 	const makers = groupKeys(ctx.model.makers[e.name], ctx.model);
 	const users = groupKeys(ctx.model.users[e.name], ctx.model);
 	const arch = ED.ARCHETYPES.find((a) => a.effect === e.name);
+	const kinds = ctx.model.list.filter((x) => x.type === "variant" && x.parent === e.name);
 	return (<>
 		{e.desc && <p className="aag-p">{e.desc}</p>}
+		{kinds.length > 0 && <div className="aag-rel"><div className="aag-rel-hd">Variants the wiki names</div><MiniList keys={kinds.map((x) => x.key)} ctx={ctx} /></div>}
 		{arch && <p className="aag-p aag-muted">Build: <button type="button" className="aag-link" onClick={() => ctx.go("synergy", e.name)}>{arch.name}</button> — {arch.how}</p>}
 		<h3 className="aag-h3">Makes it</h3>
 		{makers.length ? makers.map(([t, keys]) => (
@@ -1448,6 +1473,23 @@ function GlossaryTab({ ctx, f, set }) {
 				</article>
 			))}
 		</div>
+		<Section title="Named, but not explained by the wiki"
+			sub={`${ctx.model.list.filter((x) => x.type === "variant").length} things the wiki's aura and imprint text names without ever saying what they do. Ones marked ✓ are filled in from play, with the source on the entry; tap any one to see what names it.`}>
+			{ELEMENTS.map((el) => {
+				const vs = ctx.model.list.filter((x) => x.type === "variant" && x.element === el && matches(x, f.q));
+				return vs.length ? (
+					<div key={el} className="aag-fxrow aag-variants">
+						<span className="aag-chips-lbl" data-el={el}>{el}</span>
+						{vs.map((v) => (
+							<button type="button" key={v.key} className="aag-chip" data-el={el} aria-pressed={!!v.known} onClick={() => ctx.open(v.key)}
+								title={v.known ? v.known.note : "Not explained on the wiki"}>
+								{v.known ? "✓ " : ""}{v.name} <span className="aag-chipn">{v.mentions.length}</span>
+							</button>
+						))}
+					</div>
+				) : null;
+			})}
+		</Section>
 		<Section title="Spell tags">
 			<dl className="aag-dl">
 				<dt>Duration</dt><dd>Part of the spell happens over time.</dd>
@@ -1495,7 +1537,7 @@ export default function AstralGuide({ onExit }) {
 		return () => { live = false; };
 	}, []);
 
-	const model = useMemo(() => (data ? buildModel(data, ED) : null), [data]);
+	const model = useMemo(() => (data ? buildModel(data, ED, { variants: VARIANTS }) : null), [data]);
 	const tierIndex = useMemo(() => {
 		const out = {};
 		const types = { echoes: "echo", imprints: "imprint", auras: "aura", summons: "summon" };

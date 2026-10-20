@@ -10716,6 +10716,16 @@ try {
 			check(`${at}: Escape closes the drawer and drops the hash`,
 				await page.locator(".aag-drawer").count() === 0 && !new URL(page.url()).hash, page.url());
 
+			// Field notes: a variant the wiki never explains is its own entry, and what it is
+			// known to make reaches the synergy lists (Kamikaze Wisps make Thunder Strikes).
+			await page.goto(`http://localhost:${PORT}/astral/glossary#${encodeURIComponent("effect:thunder-strike")}`, { waitUntil: "networkidle" });
+			await page.waitForSelector(".aag-drawer", { timeout: 15_000 }).catch(() => {});
+			check(`${at}: Careless Wisper is listed as making Thunder Strikes`,
+				await page.locator(".aag-drawer .aag-mchip", { hasText: "Careless Wisper" }).count() >= 1);
+			await page.keyboard.press("Escape");
+			const nVar = await page.locator(".aag-variants .aag-chip").count();
+			check(`${at}: the Glossary's checklist lists every named-but-unexplained effect`, nVar >= 50, String(nVar));
+
 			// A cold load of a hashed URL opens that entry.
 			await page.goto(`http://localhost:${PORT}/astral/echoes#${encodeURIComponent("echo:ordan-s-fury")}`, { waitUntil: "networkidle" });
 			await page.waitForSelector(".aag-drawer", { timeout: 15_000 }).catch(() => {});

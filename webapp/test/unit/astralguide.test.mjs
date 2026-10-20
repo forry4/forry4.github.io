@@ -8,6 +8,7 @@ import path from "node:path";
 import * as D from "../../../astralguide/derive.js";
 import * as ED from "../../../astralguide/editorial.js";
 import { RUNS, NOT_ON_WIKI, GAME_TEXT, RUN_FINDINGS } from "../../../astralguide/runs.js";
+import { VARIANTS } from "../../../astralguide/fieldnotes.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const data = JSON.parse(readFileSync(path.join(root, "webapp", "public", "data", "astral-guide.json"), "utf8"));
@@ -185,4 +186,30 @@ test("statRange takes the median of the values present", () => {
 	assert.deepEqual(D.statRange([{ a: 1 }, { a: 3 }, { a: 2 }], "a"), { min: 1, median: 2, max: 3, n: 3 });
 	assert.equal(D.statRange([{ a: 1 }, { a: 4 }], "a").median, 2.5);
 	assert.equal(D.levelBonus(10), 200);
+});
+
+// ── Field notes (fieldnotes.js) ───────────────────────────────────────────
+const withNotes = D.buildModel(data, ED, { variants: VARIANTS });
+
+test("every named-but-unexplained effect is found in the wiki's text", () => {
+	const vs = withNotes.list.filter((e) => e.type === "variant");
+	assert.equal(vs.length, VARIANTS.length);
+	assert.deepEqual(vs.filter((v) => !v.mentions.length).map((v) => v.name), []);
+	for (const v of VARIANTS) {
+		if (v.parent) assert.ok(D.KEYWORD[v.parent], `${v.name}: unknown parent ${v.parent}`);
+		if (v.known) {
+			assert.ok(v.known.source && v.known.note, `${v.name} needs a note and a source`);
+			for (const k of v.known.makes) assert.ok(D.KEYWORD[k], `${v.name} makes unknown ${k}`);
+		}
+	}
+});
+
+test("a variant links as itself and credits its parent and what it makes", () => {
+	const segs = withNotes.segments("On wisp summon, summons 1 Kamikaze Wisp").filter((s) => s.t !== "text");
+	assert.equal(segs.at(-1).t, "variant");
+	const cw = withNotes.byKey["aura:careless-wisper"];
+	assert.ok(cw.makes.includes("Wisps") && cw.makes.includes("Thunder Strike"), JSON.stringify(cw.makes));
+	assert.ok(withNotes.makers["Thunder Strike"].includes("aura:careless-wisper"));
+	// A glued-on hyphen ("fire idol-Unique") still ends the word.
+	assert.ok(withNotes.segments("Ice Idol had 30% chance to become a fire idol-Unique").some((s) => s.t === "variant" && s.v.name === "Fire Idol"));
 });

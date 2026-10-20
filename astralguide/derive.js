@@ -92,10 +92,14 @@ export function spellMatcher(spells) {
 
 // ONE regex over spells AND keywords, longest alternative first, so "Meteor Blades"
 // links the spell and not the Meteor effect inside it.
-export function makeLinker(spells) {
+// Variants (fieldnotes.js) come FIRST in the alternation, so "Kamikaze Wisp" links the
+// variant rather than the Wisps keyword whose pattern would also take it.
+export function makeLinker(spells, variants = []) {
 	const sm = spellMatcher(spells);
 	const kwSrc = KEYWORDS.map((x) => `(?<k_${x.k.replace(/\W/g, "_")}>${x.re})`).join("|");
-	const re = new RegExp(`(?<![\\w-])(?:(?<spell>${sm.source})|${kwSrc})(?![\\w-])`, "gi");
+	const vSrc = variants.map((v, i) => `(?<v_${i}>${v.re})|`).join("");
+	// The trailing edge allows a hyphen: the wiki glues words on ("fire idol-Unique").
+	const re = new RegExp(`(?<![\\w-])(?:${vSrc}(?<spell>${sm.source})|${kwSrc})(?!\\w)`, "gi");
 	const resolveSpell = (text) => {
 		const t = text.toLowerCase();
 		return sm.forms.get(t) || sm.forms.get(t.replace(/s$/, "")) || null;
@@ -106,7 +110,10 @@ export function makeLinker(spells) {
 		for (const m of String(text || "").matchAll(re)) {
 			const g = m.groups;
 			let seg = null;
-			if (g.spell) {
+			const vKey = Object.keys(g).find((n) => n.startsWith("v_") && g[n] !== undefined);
+			if (vKey) {
+				seg = { t: "variant", v: variants[Number(vKey.slice(2))], text: m[0] };
+			} else if (g.spell) {
 				const name = resolveSpell(g.spell);
 				if (name) seg = { t: "spell", name, text: m[0] };
 			} else {
@@ -143,13 +150,18 @@ export function classifyLine(line, segments) {
 	for (const s of segments(text)) {
 		const start = pos;
 		pos += s.text.length;
-		if (s.t !== "kw") continue;
+		// A variant counts as its parent effect, and what it is known to make it makes too.
+		const own = s.t === "kw" ? [s.k] : s.t === "variant" ? [s.v.parent].filter(Boolean) : null;
+		if (!own) continue;
+		const products = s.t === "variant" ? (s.v.known?.makes || []) : [];
 		const before = text.slice(0, start);
 		const after = text.slice(pos);
-		if (cut > 0 && start < cut) { uses.add(s.k); continue; }
-		if (AMPLIFY_AFTER.test(after) || /\b(per|for each|with|on enemies with|transforms?)\s+(\d+\s+)?$/i.test(before)
-			|| /\bincreases?\s+(the\s+)?$/i.test(before)) { uses.add(s.k); continue; }
-		makes.add(s.k);
+		const use = (cut > 0 && start < cut) || AMPLIFY_AFTER.test(after)
+			|| /\b(per|for each|with|on enemies with|transforms?)\s+(\d+\s+)?$/i.test(before)
+			|| /\bincreases?\s+(the\s+)?$/i.test(before);
+		if (use) { own.forEach((k) => uses.add(k)); continue; }
+		own.forEach((k) => makes.add(k));
+		products.forEach((k) => makes.add(k));
 	}
 	// "Transforms Embers into Blue Embers": the second mention is the same family, so a
 	// transform reads as a payoff only.
@@ -161,7 +173,7 @@ export function classifyLine(line, segments) {
 export const TYPE_LABEL = {
 	aura: "Aura", gambit: "Gambit", imprint: "Imprint", spell: "Spell", echo: "Echo",
 	summon: "Summon", prowess: "Prowess", boss: "Boss", catalyst: "Void Catalyst",
-	telluric: "Telluric Telescope", cursed: "Cursed Telescope", effect: "Effect",
+	telluric: "Telluric Telescope", cursed: "Cursed Telescope", effect: "Effect", variant: "Named effect",
 };
 
 const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -190,8 +202,11 @@ export function imprintNeeds(imp) {
 	return needs;
 }
 
-export function buildModel(data, editorial = {}) {
-	const segments = makeLinker(data.spells);
+export function buildModel(data, editorial = {}, extras = {}) {
+	const variants = (extras.variants || []).map((v) => ({
+		...v, el: v.el || (v.parent && KEYWORD[v.parent]?.el) || "Neutral",
+	}));
+	const segments = makeLinker(data.spells, variants);
 	const spellByName = Object.fromEntries(data.spells.map((s) => [s.name, s]));
 	const list = [];
 	const add = (e) => { e.key = keyOf(e.type, e.id); list.push(e); return e; };
@@ -278,6 +293,17 @@ export function buildModel(data, editorial = {}) {
 		const g = glossary[kw.k];
 		add({ type: "effect", id: slug(kw.k), name: kw.k, element: kw.el,
 			desc: g ? g.desc : BUFF_NOTES[kw.k] || "", text: g ? g.desc : "", makes: [], uses: [] });
+	}
+
+	// Named effects the wiki never explains (fieldnotes.js), each with the entries that
+	// mention it — which is what fills the Glossary's checklist and a variant's drawer.
+	for (const v of variants) {
+		const re = new RegExp(`(?<![\\w-])(?:${v.re})(?!\\w)`, "i");
+		const mentions = list.filter((e) => e.type !== "effect" && e.type !== "variant" && re.test(e.type === "aura"
+			? e.tiers.flatMap((t) => t.lines).join(" ") : e.text || "")).map((e) => e.key);
+		add({ type: "variant", id: slug(v.name), name: v.name, element: v.el, parent: v.parent || null,
+			known: v.known || null, mentions, text: `${v.name} ${v.parent || ""} ${v.known?.note || ""}`,
+			makes: v.known?.makes || [], uses: [] });
 	}
 
 	const byKey = Object.fromEntries(list.map((e) => [e.key, e]));

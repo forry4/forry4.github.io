@@ -10,6 +10,7 @@ and does everything client-side. Like BGG Filter in shape.
 | `AstralGuide.css` | `?inline`-imported stylesheet, `.aag`-prefixed |
 | `derive.js` | **the logic, kept pure so `node --test` can reach it**: the effect vocabulary, the text linker, the synergy index, search, and the charts' maths |
 | `editorial.js` | **hand-written judgment**: tier lists, starting auras, build outlines, the voko→echo pairing, the wiki's tips condensed |
+| `fieldnotes.js` | **named effects the wiki never explains** (Kamikaze Wisp, Fire Plasma, Ice Dagger…: ~50), each with its parent effect and, where known, what it makes plus the source of that fact |
 | `runs.js` | **23 winning runs transcribed from end-of-run screens** (Destiny 54–100), the in-game text where it differs from the wiki (`GAME_TEXT`), and names the wiki lacks (`NOT_ON_WIKI`) |
 | `tools/harvest.py` | fetches every wiki page's wikitext → `tools/cache/pages.json` (gitignored) |
 | `tools/make_data.py` | `pages.json` → `webapp/public/data/astral-guide.json` (the shipped payload) |
@@ -82,3 +83,17 @@ the payload's counts, search → drawer → Back, a hashed cold load, the charts
 phone spells table), plus `formControlZoom` (`/astral/auras`, `/astral/charts`) and
 `offlineRead` (the guide is in the offline hub's reading pack). `affected.mjs` maps this
 directory and `astral-guide.json` to those blocks.
+
+## Field notes — what the wiki names but never explains
+
+The wiki's aura and imprint text names ~50 things it never defines ("summons 1 Kamikaze
+Wisp"), so the synergy index could not see through them: Careless Wisper's Kamikaze Wisps
+make Thunder Strikes, and nothing on the wiki says so. `fieldnotes.js` lists each one with a
+`parent` (anything that makes a Kamikaze Wisp makes Wisps) and, once known, `known.makes`,
+which `classifyLine` credits exactly like the wiki's own wording. Variants come FIRST in the
+linker's alternation, so they link as themselves rather than as the keyword whose pattern
+would also take them. **The game is only on Switch here, so its files cannot be read**:
+facts come from play and the community, and every `known` entry carries its `source`, which
+the page prints. The Glossary's checklist shows which are still blank. The unit test fails
+an entry the wiki's text never mentions (a typo in `re`), and the linker's trailing edge
+allows a hyphen because the wiki glues words on ("fire idol-Unique").
