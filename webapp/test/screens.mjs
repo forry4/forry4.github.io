@@ -10690,7 +10690,8 @@ try {
 			const rowCasts = await page.locator(".aag-table tbody tr", { hasText: "Fajrokometo" }).textContent().catch(() => "");
 			const comet = data.spells.find((x) => x.name === "Magma Comets");
 			check(`${at}: the quick table prints Fajrokometo's spell with its stats`,
-				rowCasts.includes("Magma Comets") && rowCasts.includes(String(comet.dmg)), rowCasts);
+				// The page shows every spell at level 1: the payload's level-0 number x1.2.
+				rowCasts.includes("Magma Comets") && rowCasts.includes(String(Math.round(comet.dmg * 1.2))), rowCasts);
 
 			// Global search -> the drawer, its hash, a linked effect, and Back.
 			await page.goto(`http://localhost:${PORT}/astral`, { waitUntil: "networkidle" });
