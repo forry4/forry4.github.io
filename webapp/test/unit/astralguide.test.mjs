@@ -228,3 +228,33 @@ test("spell tiers rank by damage per mana or by hits, each breaking the other's 
 	const one = data.spells.filter((x) => x.mana === 1 && x.group !== "Hero" && x.dpm != null);
 	assert.notEqual(D.rankSpells(one, "dpm")[0].name, D.rankSpells(one, "hits")[0].name);
 });
+
+// ── In-game spell numbers (ingame.js) ──────────────────────────────────────
+import { GAME_SPELLS } from "../../../astralguide/ingame.js";
+
+test("in-game spell numbers replace the wiki's, and dmg/mana follows them", () => {
+	const g = D.applyGameSpells(data, GAME_SPELLS);
+	const by = Object.fromEntries(g.spells.map((s) => [s.name, s]));
+	assert.equal(by["Hasta"].dmg, 91);
+	assert.equal(by["Hasta"].hits, "4-6");
+	assert.equal(by["Hasta"].mana, 1);                     // not given in game: the wiki's stays
+	assert.equal(by["Hasta"].dpm, 91);
+	assert.deepEqual(by["Hasta"].wiki, { dmg: 86, hits: "6", mana: 1 });
+	assert.equal(by["Twin Dragon Punch"].dpm, Math.round((316 / 3) * 10) / 10);
+	// A spell the wiki lacks is added, unrankable until its mana is known.
+	assert.equal(by["Crater Maker"].dmg, 226);
+	assert.equal(by["Crater Maker"].dpm, null);
+	assert.equal(g.spells.length, data.spells.length + 1);
+	assert.equal(data.spells.find((s) => s.name === "Hasta").dmg, 86, "the payload itself is not mutated");
+});
+
+test("every in-game override still differs from the wiki, and names its source", () => {
+	const wiki = Object.fromEntries(data.spells.map((s) => [s.name, s]));
+	for (const [name, o] of Object.entries(GAME_SPELLS)) {
+		assert.ok(o.source, `${name} needs a source`);
+		const w = wiki[name];
+		if (!w) continue;                                      // new to the game, not on the wiki
+		const differs = ["dmg", "hits", "mana"].some((k) => o[k] != null && String(o[k]) !== String(w[k]));
+		assert.ok(differs, `${name} now matches the wiki — drop its override`);
+	}
+});

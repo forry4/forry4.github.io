@@ -260,7 +260,7 @@ export function buildModel(data, editorial = {}, extras = {}) {
 	}
 	for (const s of data.spells) {
 		add({ type: "spell", id: slug(s.name), name: s.name, element: null, ...s,
-			text: `${s.desc} ${s.group} ${s.hero || ""} ${s.tags.join(" ")}`, makes: [], uses: [] });
+			text: `${s.desc} ${s.group || ""} ${s.hero || ""} ${s.tags.join(" ")}`, makes: [], uses: [] });
 	}
 	for (const e of data.echoes) {
 		add({ type: "echo", id: slug(e.name), name: e.name, element: null, desc: e.desc, cooldown: e.cooldown,
@@ -463,6 +463,30 @@ export function statRange(runs, key) {
 	const mid = v.length >> 1;
 	const median = v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2;
 	return { min: v[0], median, max: v[v.length - 1], n: v.length };
+}
+
+// In-game spell numbers (ingame.js) laid over the wiki's, before anything is computed.
+// A corrected spell keeps the wiki's old values in `wiki`; one the wiki lacks is added,
+// with whatever the game showed and nulls for the rest.
+export function applyGameSpells(data, overrides = {}) {
+	const spells = data.spells.map((s) => {
+		const o = overrides[s.name];
+		if (!o) return s;
+		const merged = { ...s, ...Object.fromEntries(Object.entries(o).filter(([k, v]) => k !== "source" && v !== undefined && v !== null)) };
+		return finishSpell({ ...merged, game: o.source, wiki: { dmg: s.dmg, hits: s.hits, mana: s.mana } });
+	});
+	for (const [name, o] of Object.entries(overrides)) {
+		if (spells.some((s) => s.name === name)) continue;
+		spells.push(finishSpell({ name, group: o.hero ? "Hero" : null, hero: o.hero || null, mana: o.mana ?? null,
+			dmg: o.dmg ?? null, hits: o.hits || "", tags: o.tags || [], desc: o.desc || "", game: o.source, wiki: null }));
+	}
+	return { ...data, spells };
+}
+
+function finishSpell(s) {
+	const hi = String(s.hits || "").match(/\d+/g)?.map(Number) || [];
+	return { ...s, hitsMax: hi.length ? Math.max(...hi) : null,
+		dpm: typeof s.dmg === "number" && typeof s.mana === "number" && s.mana ? Math.round((s.dmg / s.mana) * 10) / 10 : null };
 }
 
 // A spell's hits as one number: the middle of its range ("1-8" = 4.5), which is how the

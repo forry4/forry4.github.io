@@ -10,6 +10,7 @@ and does everything client-side. Like BGG Filter in shape.
 | `AstralGuide.css` | `?inline`-imported stylesheet, `.aag`-prefixed |
 | `derive.js` | **the logic, kept pure so `node --test` can reach it**: the effect vocabulary, the text linker, the synergy index, search, and the charts' maths |
 | `editorial.js` | **hand-written judgment**: tier lists, starting auras, build outlines, the voko→echo pairing, the wiki's tips condensed |
+| `ingame.js` | **numbers read off the game** that replace the wiki's where it is out of date (spells so far); `derive.applyGameSpells` merges them before anything is computed |
 | `fieldnotes.js` | **named effects the wiki never explains** (Kamikaze Wisp, Fire Plasma, Ice Dagger…: ~50), each with its parent effect and, where known, what it makes plus the source of that fact |
 | `runs.js` | **23 winning runs transcribed from end-of-run screens** (Destiny 54–100), the in-game text where it differs from the wiki (`GAME_TEXT`), and names the wiki lacks (`NOT_ON_WIKI`) |
 | `tools/harvest.py` | fetches every wiki page's wikitext → `tools/cache/pages.json` (gitignored) |
@@ -97,3 +98,13 @@ facts come from play and the community, and every `known` entry carries its `sou
 the page prints. The Glossary's checklist shows which are still blank. The unit test fails
 an entry the wiki's text never mentions (a typo in `re`), and the linker's trailing edge
 allows a hyphen because the wiki glues words on ("fire idol-Unique").
+
+## In-game numbers beat the wiki's
+
+The wiki's spell table predates balance passes: seven spells read off the game (2026-10-21)
+differ from it by 1.06x-1.62x with three hit ranges changed, so they are real changes, not
+a level or Strength multiplier. `ingame.js` holds them and `applyGameSpells` lays them over
+the payload in the page (never in the JSON, which stays the wiki's), so damage per mana,
+the tiers and the imprint tables follow; the spell's panel shows the wiki's old numbers
+beside them. A field left out keeps the wiki's value. The unit test fails an override that
+no longer differs from the wiki, so a re-harvest after the wiki catches up retires it.

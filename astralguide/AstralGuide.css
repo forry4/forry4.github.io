@@ -394,3 +394,7 @@ button.aag-wins{cursor:pointer;}
 	.aag-chip{padding:6px 12px;}
 	.aag-nf input[type=range]{height:40px;}
 }
+
+/* a spell whose numbers come from the game rather than the wiki */
+.aag-ingame{display:inline-block;margin-left:6px;font-size:.66rem;padding:0 6px;border-radius:999px;vertical-align:middle;
+	color:var(--gold-light);border:1px solid color-mix(in oklab,var(--gold) 55%,transparent);}

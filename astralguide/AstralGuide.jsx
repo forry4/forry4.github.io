@@ -4,11 +4,12 @@ import { buildPath, parsePath, pushPath, subscribe } from "../shared/router.js";
 import {
 	ELEMENTS, RARITIES, KEYWORDS, TYPE_LABEL, buildModel, search, matches, keyOf, slug,
 	critMultiplier, armorPct, effectiveLife, nextStone, breakEvenLife, nextDamageStone,
-	runUsage, statRange, levelBonus, rankSpells, quartileTier,
+	runUsage, statRange, levelBonus, rankSpells, quartileTier, applyGameSpells,
 } from "./derive.js";
 import * as ED from "./editorial.js";
 import { RUNS, RUN_FINDINGS, GAME_TEXT, NOT_ON_WIKI } from "./runs.js";
 import { VARIANTS } from "./fieldnotes.js";
+import { GAME_SPELLS } from "./ingame.js";
 
 // CSS lives in the sibling .css file, imported with `?inline` (see CLAUDE.md: never move
 // it back into a JS template literal).
@@ -390,10 +391,14 @@ function Detail({ e, ctx }) {
 			</>);
 			case "spell": return (<>
 				<div className="aag-stats">
-					<div><b>{e.mana}</b><span>mana</span></div><div><b>{e.dmg}</b><span>damage</span></div>
+					<div><b>{e.mana ?? "?"}</b><span>mana</span></div><div><b>{e.dmg}</b><span>damage</span></div>
 					<div><b>{e.hits}</b><span>hits</span></div>{e.dpm != null && <div><b>{e.dpm}</b><span>dmg / mana</span></div>}
 				</div>
-				<p className="aag-p">{e.group === "Hero" ? `${e.hero}'s spell` : `${e.group} spell`}{e.tags.length ? ` · ${e.tags.join(" · ")}` : ""}</p>
+				{e.game && <p className="aag-p aag-gametext"><b>In game</b> {e.wiki
+					? `These numbers are the game's; the wiki still says ${e.wiki.dmg} damage, ${e.wiki.hits} hits.`
+					: "Not on the wiki at all; the numbers are the game's."}{" "}{e.mana == null || !e.hero ? "Its mana cost and hero are not recorded yet." : ""}
+					<span className="aag-muted"> {e.game}.</span></p>}
+				<p className="aag-p">{e.group === "Hero" ? `${e.hero}'s spell` : e.group ? `${e.group} spell` : "Hero spell (hero not recorded)"}{e.tags.length ? ` · ${e.tags.join(" · ")}` : ""}</p>
 				{e.desc && <p className="aag-p">{e.desc}</p>}
 				{e.castBy.length > 0 && <><h3 className="aag-h3">Also cast by</h3><MiniList keys={e.castBy} ctx={ctx} /></>}
 			</>);
@@ -807,7 +812,8 @@ function SpellsTab({ ctx, f, set }) {
 					{list.map((e) => (
 						<tr key={e.key}>
 							<td><EntityLink k={e.key} ctx={ctx}>{e.name}</EntityLink>
-								<span className="aag-ttags">{[e.hero || e.group, ...e.tags].join(" · ")}</span></td>
+								{e.game && <span className="aag-ingame" title={e.wiki ? `Game numbers; the wiki says ${e.wiki.dmg} dmg, ${e.wiki.hits} hits` : "Not on the wiki"}>in game</span>}
+								<span className="aag-ttags">{[e.hero || e.group || "hero not recorded", ...e.tags].join(" · ")}</span></td>
 							<td className="aag-num">{e.mana}</td><td className="aag-num">{e.dmg}</td><td className="aag-num">{e.hits}</td>
 							<td className="aag-num"><DpmBar v={e.dpm} max={ctx.maxDpm} /></td>
 							<td className="aag-num">{e.castBy.length ? <EntityLink k={e.key} ctx={ctx}>{e.castBy.length}</EntityLink> : ""}</td>
@@ -1556,7 +1562,9 @@ export default function AstralGuide({ onExit }) {
 		return () => { live = false; };
 	}, []);
 
-	const model = useMemo(() => (data ? buildModel(data, ED, { variants: VARIANTS }) : null), [data]);
+	// The in-game spell numbers (ingame.js) replace the wiki's before anything is derived.
+	const gameData = useMemo(() => (data ? applyGameSpells(data, GAME_SPELLS) : null), [data]);
+	const model = useMemo(() => (gameData ? buildModel(gameData, ED, { variants: VARIANTS }) : null), [gameData]);
 	const tierIndex = useMemo(() => {
 		const out = {};
 		const types = { echoes: "echo", imprints: "imprint", auras: "aura", summons: "summon" };
@@ -1625,16 +1633,16 @@ export default function AstralGuide({ onExit }) {
 
 	const usage = useMemo(() => runUsage(RUNS), []);
 	const ctx = model && {
-		data, model, open, go, usage,
+		data: gameData, model, open, go, usage,
 		wins: (kind, name) => usage[kind].find((x) => x.name === name)?.n || 0,
 		goRun: (id) => { go("runs"); setFocusRun(id); },
 		tierOf: (k) => tierIndex[k],
-		maxDpm: Math.max(...data.spells.map((s) => s.dpm || 0)),
+		maxDpm: Math.max(...gameData.spells.map((s) => s.dpm || 0)),
 	};
 
 	const counts = model ? {
 		auras: data.auras.length, gambits: model.list.filter((e) => e.type === "gambit").length, imprints: data.imprints.length,
-		spells: data.spells.length, echoes: data.echoes.length + data.summons.length, prowess: data.prowess.length,
+		spells: gameData.spells.length, echoes: data.echoes.length + data.summons.length, prowess: data.prowess.length,
 		bosses: data.bosses.length, glossary: KEYWORDS.length, runs: RUNS.length,
 	} : {};
 
