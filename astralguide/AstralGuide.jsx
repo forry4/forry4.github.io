@@ -4,7 +4,7 @@ import { buildPath, parsePath, pushPath, subscribe } from "../shared/router.js";
 import {
 	ELEMENTS, RARITIES, KEYWORDS, TYPE_LABEL, buildModel, search, matches, keyOf, slug,
 	critMultiplier, armorPct, effectiveLife, nextStone, breakEvenLife, nextDamageStone,
-	runUsage, statRange, levelBonus, rankSpells, quartileTier, applyGameSpells,
+	runUsage, statRange, levelBonus, rankSpells, quartileTier, applyGameSpells, atLevel, WIKI_LEVEL,
 } from "./derive.js";
 import * as ED from "./editorial.js";
 import { RUNS, RUN_FINDINGS, GAME_TEXT, NOT_ON_WIKI } from "./runs.js";
@@ -103,6 +103,11 @@ function Rich({ text, ctx }) {
 		return <Fragment key={i}>{s.text}</Fragment>;
 	});
 }
+
+// How an in-game reading reached level 1: read there, or converted from the level it was read at.
+const readNote = (e) => e.readAt === GAME_BASE_LEVEL
+	? `Read at level ${e.readAt}.`
+	: `Read at level ${e.readAt}${e.inferred ? " (inferred — read it again at level 1 to confirm)" : ""}, shown at level ${GAME_BASE_LEVEL}.`;
 
 const spellTitle = (s) => (s ? `${s.name}: ${s.mana} mana · ${s.dmg} dmg · ${s.hits} hits` : "");
 
@@ -394,10 +399,11 @@ function Detail({ e, ctx }) {
 					<div><b>{e.mana ?? "?"}</b><span>mana</span></div><div><b>{e.dmg}</b><span>damage</span></div>
 					<div><b>{e.hits}</b><span>hits</span></div>{e.dpm != null && <div><b>{e.dpm}</b><span>dmg / mana</span></div>}
 				</div>
-				{e.game && <p className="aag-p aag-gametext"><b>In game</b> {e.wiki
-					? `These are the game's numbers at level ${GAME_BASE_LEVEL}, the base once every Destiny Fragment is unlocked; the wiki (an older patch) says ${e.wiki.dmg} damage, ${e.wiki.hits} hits.`
-					: `Not on the wiki at all; these are the game's numbers at level ${GAME_BASE_LEVEL}.`}{" "}{e.mana == null || !e.hero ? "Its mana cost and hero are not recorded yet." : ""}
-					<span className="aag-muted"> {e.game}.</span></p>}
+				{e.game ? <p className="aag-p aag-gametext"><b>In game</b> {readNote(e)}{" "}{e.wiki
+					? `The wiki says ${e.wiki.mana} mana, ${e.wiki.dmg} damage at level 0 (${atLevel(e.wiki.dmg, WIKI_LEVEL, GAME_BASE_LEVEL)} at level ${GAME_BASE_LEVEL}), ${e.wiki.hits} hits.`
+					: "Not on the wiki at all."}{" "}{e.mana == null || !e.hero ? "Its mana cost and hero are not recorded yet." : ""}
+					<span className="aag-muted"> {e.game}.</span></p>
+					: <p className="aag-p aag-muted">Damage at level {GAME_BASE_LEVEL}: the wiki's level-0 number × 1.2. Not checked in game yet.</p>}
 				<p className="aag-p">{e.group === "Hero" ? `${e.hero}'s spell` : e.group ? `${e.group} spell` : "Hero spell (hero not recorded)"}{e.tags.length ? ` · ${e.tags.join(" · ")}` : ""}</p>
 				{e.desc && <p className="aag-p">{e.desc}</p>}
 				{e.castBy.length > 0 && <><h3 className="aag-h3">Also cast by</h3><MiniList keys={e.castBy} ctx={ctx} /></>}
@@ -800,9 +806,9 @@ function SpellsTab({ ctx, f, set }) {
 			<Chips label="Mana" options={["1", "2", "3"]} value={f.mana} onChange={(v) => set({ mana: v })} />
 			<Chips label="Tags" options={tags} value={f.tag} onChange={(v) => set({ tag: v })} />
 		</FilterBar>
-		<p className="aag-sub">Damage is the total if every hit lands, before crits and gambits. Spells marked <span className="aag-ingame">in game</span> use
-			the game's level-{GAME_BASE_LEVEL} numbers — the base once every Destiny Fragment is unlocked; the rest are still the wiki's older numbers,
-			so compare across the two with care. Each spell level adds 20% (the end screen shows level X as 200%).
+		<p className="aag-sub">Damage is the total at level {GAME_BASE_LEVEL} — where spells start once every Destiny Fragment is unlocked — if every hit
+			lands, before crits and gambits. Each level adds 20% of the level-0 number (level X shows as 200%). The wiki lists level 0, so its numbers are
+			scaled by 1.2; spells marked <span className="aag-ingame">in game</span> use the game's own numbers instead, which differ wherever a patch changed the spell.
 			Dmg / mana is the fair comparison across costs, but cheap spells also make Spell Refresh come round sooner.</p>
 		<div className="aag-tablewrap">
 			<table className="aag-table aag-spells">
@@ -814,7 +820,7 @@ function SpellsTab({ ctx, f, set }) {
 					{list.map((e) => (
 						<tr key={e.key}>
 							<td><EntityLink k={e.key} ctx={ctx}>{e.name}</EntityLink>
-								{e.game && <span className="aag-ingame" title={e.wiki ? `Game numbers at level ${GAME_BASE_LEVEL}; the wiki says ${e.wiki.dmg} dmg, ${e.wiki.hits} hits` : `Game numbers at level ${GAME_BASE_LEVEL}; not on the wiki`}>in game</span>}
+								{e.game && <span className="aag-ingame" title={e.wiki ? `Game numbers; the wiki says ${e.wiki.mana} mana, ${atLevel(e.wiki.dmg, WIKI_LEVEL, GAME_BASE_LEVEL)} dmg at level ${GAME_BASE_LEVEL}, ${e.wiki.hits} hits` : "Game numbers; not on the wiki"}>in game</span>}
 								<span className="aag-ttags">{[e.hero || e.group || "hero not recorded", ...e.tags].join(" · ")}</span></td>
 							<td className="aag-num">{e.mana}</td><td className="aag-num">{e.dmg}</td><td className="aag-num">{e.hits}</td>
 							<td className="aag-num"><DpmBar v={e.dpm} max={ctx.maxDpm} /></td>
@@ -992,14 +998,14 @@ const SPELL_RANK_KEY = "astral.spellRank";
 const SPELL_RANKS = [["dpm", "Damage per mana first"], ["hits", "Hits first"]];
 
 function SpellTiers({ ctx }) {
-	const spells = ctx.model.list.filter((e) => e.type === "spell" && e.dpm != null && e.group !== "Hero");
+	const spells = ctx.model.list.filter((e) => e.type === "spell" && e.dpm != null && e.group && e.group !== "Hero");
 	const [by, setBy] = useState(() => {
 		try { return localStorage.getItem(SPELL_RANK_KEY) === "hits" ? "hits" : "dpm"; } catch { return "dpm"; }
 	});
 	const pick = (v) => { setBy(v); try { localStorage.setItem(SPELL_RANK_KEY, v); } catch { /* private mode */ } };
 	const line = (s) => {
 		const dpm = `${s.dpm} dmg/mana`, hits = `${s.hits} hits`;
-		return `${by === "hits" ? `${hits} · ${dpm}` : `${dpm} · ${hits}`} · ${s.dmg} dmg${s.game ? ` · in game, level ${GAME_BASE_LEVEL}` : ""}`;
+		return `${by === "hits" ? `${hits} · ${dpm}` : `${dpm} · ${hits}`} · ${s.dmg} dmg${s.game ? " · in game" : ""}`;
 	};
 	return (<>
 		<p className="aag-sub"><b>Computed:</b> shared spells (common and Zodiac) ranked within each mana cost, split into quartiles.

@@ -101,13 +101,15 @@ allows a hyphen because the wiki glues words on ("fire idol-Unique").
 
 ## In-game numbers beat the wiki's
 
-**Game readings are at LEVEL 1**, the base once every Destiny Fragment is unlocked
-(`GAME_BASE_LEVEL`); the wiki's are an older patch at an unstated level, so the two cannot be
-converted into each other and the page labels which a spell uses. The wiki's spell table
-predates balance passes: nine spells read off the game (2026-10-21)
-differ from it by 1.06x-1.62x with three hit ranges changed, so they are real changes, not
-a level or Strength multiplier. `ingame.js` holds them and `applyGameSpells` lays them over
-the payload in the page (never in the JSON, which stays the wiki's), so damage per mana,
-the tiers and the imprint tables follow; the spell's panel shows the wiki's old numbers
-beside them. A field left out keeps the wiki's value. The unit test fails an override that
-no longer differs from the wiki, so a re-harvest after the wiki catches up retires it.
+**Every spell is shown at LEVEL 1**, the base once every Destiny Fragment is unlocked
+(`GAME_BASE_LEVEL`). Damage is (1 + 20% x level) of the level-0 number, and **the wiki's
+spell table IS level 0**: four unchanged spells read off the game match the wiki's x1.2 at
+level 1 and x1.4 at level 2 to the point (`atLevel`, `WIKI_LEVEL`; the unit test holds
+those four to it). So `applyGameSpells` lifts every wiki number to level 1, and each
+reading in `ingame.js` from the `level` it was read at. A reading is only needed where a
+patch changed the spell (mana, damage or hits); the rest are the wiki's x1.2 and say
+"not checked in game". The first batch of readings (2026-10-21 morning) turned out to be
+level 2 — the three read again came back x1.18 — so the four not read again are marked
+`inferred` and the panel asks for a re-read. Readings are laid over the payload in the
+page, never in the JSON, which stays the wiki's raw level-0 numbers; the spell panel shows
+those beside the game's. A spell with no recorded hero stays out of the tier list.

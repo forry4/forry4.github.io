@@ -465,20 +465,36 @@ export function statRange(runs, key) {
 	return { min: v[0], median, max: v[v.length - 1], n: v.length };
 }
 
-// In-game spell numbers (ingame.js) laid over the wiki's, before anything is computed.
-// A corrected spell keeps the wiki's old values in `wiki`; one the wiki lacks is added,
-// with whatever the game showed and nulls for the rest.
-export function applyGameSpells(data, overrides = {}) {
+// Spell damage scales with level: (1 + 20% x level) of the level-0 number.
+export const atLevel = (dmg, from, to) =>
+	typeof dmg === "number" ? Math.round((dmg * (1 + 0.2 * to)) / (1 + 0.2 * from)) : dmg;
+
+// The wiki's table is LEVEL 0 — the game's level-1 reading of every unchanged spell is
+// the wiki's x1.2 to the point (Ultra Loaded Knuckles 150 -> 180, Explosive Hug 248 -> 298),
+// and level 2 is x1.4 (Helping Hands 247 -> 346).
+export const WIKI_LEVEL = 0;
+
+// Puts every spell at `base` (level 1, the start once every Destiny Fragment is unlocked):
+// the wiki's numbers are scaled up from level 0, and in-game readings (ingame.js) from the
+// level each was read at. A corrected spell keeps the wiki's raw values in `wiki`; one the
+// wiki lacks is added, with whatever the game showed and nulls for the rest.
+export function applyGameSpells(data, overrides = {}, base = 1) {
+	const read = (o) => ({ ...o, dmg: atLevel(o.dmg, o.level ?? base, base) });
 	const spells = data.spells.map((s) => {
 		const o = overrides[s.name];
-		if (!o) return s;
-		const merged = { ...s, ...Object.fromEntries(Object.entries(o).filter(([k, v]) => k !== "source" && v !== undefined && v !== null)) };
-		return finishSpell({ ...merged, game: o.source, wiki: { dmg: s.dmg, hits: s.hits, mana: s.mana } });
+		const lifted = { ...s, dmg: atLevel(s.dmg, WIKI_LEVEL, base) };
+		if (!o) return finishSpell(lifted);
+		const merged = { ...lifted, ...Object.fromEntries(Object.entries(read(o))
+			.filter(([k, v]) => !["source", "level", "inferred"].includes(k) && v !== undefined && v !== null)) };
+		return finishSpell({ ...merged, game: o.source, readAt: o.level ?? base, inferred: !!o.inferred,
+			wiki: { dmg: s.dmg, hits: s.hits, mana: s.mana } });
 	});
-	for (const [name, o] of Object.entries(overrides)) {
+	for (const [name, raw] of Object.entries(overrides)) {
 		if (spells.some((s) => s.name === name)) continue;
+		const o = read(raw);
 		spells.push(finishSpell({ name, group: o.hero ? "Hero" : null, hero: o.hero || null, mana: o.mana ?? null,
-			dmg: o.dmg ?? null, hits: o.hits || "", tags: o.tags || [], desc: o.desc || "", game: o.source, wiki: null }));
+			dmg: o.dmg ?? null, hits: o.hits || "", tags: o.tags || [], desc: o.desc || "", game: o.source,
+			readAt: raw.level ?? base, inferred: !!raw.inferred, wiki: null }));
 	}
 	return { ...data, spells };
 }

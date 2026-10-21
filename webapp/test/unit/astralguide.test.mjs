@@ -232,35 +232,38 @@ test("spell tiers rank by damage per mana or by hits, each breaking the other's 
 // ── In-game spell numbers (ingame.js) ──────────────────────────────────────
 import { GAME_SPELLS } from "../../../astralguide/ingame.js";
 
-test("in-game spell numbers replace the wiki's, and dmg/mana follows them", () => {
+test("every spell is at level 1: the wiki's lifted from level 0, readings from their own level", () => {
 	const g = D.applyGameSpells(data, GAME_SPELLS);
 	const by = Object.fromEntries(g.spells.map((s) => [s.name, s]));
-	assert.equal(by["Hasta"].dmg, 91);
-	assert.equal(by["Hasta"].hits, "4-6");
-	assert.equal(by["Hasta"].mana, 1);                     // not given in game: the wiki's stays
-	assert.equal(by["Hasta"].dpm, 91);
-	assert.deepEqual(by["Hasta"].wiki, { dmg: 86, hits: "6", mana: 1 });
-	assert.equal(by["Twin Dragon Punch"].dpm, Math.round((316 / 3) * 10) / 10);
-	assert.equal(by["Relentless Fury"].dmg, 150);
-	assert.equal(by["Dirty Way Of Doing This"].hits, "3-5");
-	// A spell the wiki lacks is added, unrankable until its mana is known.
-	assert.equal(by["Crater Maker"].dmg, 226);
-	assert.equal(by["Crater Maker"].dpm, null);
-	// …and one whose mana is known ranks like any other Kiran spell.
+	const wiki = (n) => data.spells.find((s) => s.name === n);
+	// A spell with no reading: the wiki's level-0 number x1.2.
+	const plain = data.spells.find((s) => !GAME_SPELLS[s.name] && s.dmg === 100) || data.spells.find((s) => !GAME_SPELLS[s.name]);
+	assert.equal(by[plain.name].dmg, Math.round(plain.dmg * 1.2));
+	assert.equal(by[plain.name].game, undefined);
+	// Read at level 1: as read. Read at level 2: x1.2/1.4.
+	assert.equal(by["Lightspeed Fist"].dmg, 173);
+	assert.equal(by["Dark Burst"].dmg, Math.round((266 * 1.2) / 1.4));
+	assert.equal(by["Dark Burst"].readAt, 2);
+	assert.equal(by["Hasta"].inferred, true);
+	assert.equal(by["Hasta"].mana, 1, "a field the game reading leaves out keeps the wiki's");
+	assert.deepEqual(by["Hasta"].wiki, { dmg: 86, hits: "6", mana: 1 }, "the wiki's raw numbers are kept");
+	assert.equal(by["UUUUUULTIMATE BEAM"].mana, 2);
+	assert.equal(by["Twin Dragon Punch"].dpm, Math.round((269 / 3) * 10) / 10);
+	// Spells the wiki lacks are added; one with no hero stays out of the tier list.
 	assert.equal(by["Hard Rock Punch"].hero, "Kiran");
 	assert.equal(by["Hard Rock Punch"].dpm, 72);
-	assert.equal(by["Flaming Slide"].dpm, 96);
+	assert.equal(by["Crater Maker"].group, null);
 	assert.equal(g.spells.length, data.spells.length + 2);
-	assert.equal(data.spells.find((s) => s.name === "Hasta").dmg, 86, "the payload itself is not mutated");
+	assert.equal(wiki("Hasta").dmg, 86, "the payload itself is not mutated");
 });
 
-test("every in-game override still differs from the wiki, and names its source", () => {
-	const wiki = Object.fromEntries(data.spells.map((s) => [s.name, s]));
-	for (const [name, o] of Object.entries(GAME_SPELLS)) {
-		assert.ok(o.source, `${name} needs a source`);
-		const w = wiki[name];
-		if (!w) continue;                                      // new to the game, not on the wiki
-		const differs = ["dmg", "hits", "mana"].some((k) => o[k] != null && String(o[k]) !== String(w[k]));
-		assert.ok(differs, `${name} now matches the wiki — drop its override`);
+test("the four unchanged spells prove the wiki is level 0 (x1.2 at level 1, x1.4 at level 2)", () => {
+	for (const n of ["Ultra Loaded Knuckles", "Twin Dragon Punch", "Explosive Hug", "Helping Hands (got it?)"]) {
+		const o = GAME_SPELLS[n], w = data.spells.find((s) => s.name === n);
+		assert.ok(Math.abs(D.atLevel(w.dmg, D.WIKI_LEVEL, o.level) - o.dmg) <= 1, `${n}: wiki ${w.dmg} at level ${o.level} vs game ${o.dmg}`);
+	}
+	for (const [n, o] of Object.entries(GAME_SPELLS)) {
+		assert.ok(o.source, `${n} needs a source`);
+		assert.ok([1, 2].includes(o.level), `${n} needs the level it was read at`);
 	}
 });
