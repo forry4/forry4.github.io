@@ -241,6 +241,8 @@ test("in-game spell numbers replace the wiki's, and dmg/mana follows them", () =
 	assert.equal(by["Hasta"].dpm, 91);
 	assert.deepEqual(by["Hasta"].wiki, { dmg: 86, hits: "6", mana: 1 });
 	assert.equal(by["Twin Dragon Punch"].dpm, Math.round((316 / 3) * 10) / 10);
+	assert.equal(by["Relentless Fury"].dmg, 150);
+	assert.equal(by["Dirty Way Of Doing This"].hits, "3-5");
 	// A spell the wiki lacks is added, unrankable until its mana is known.
 	assert.equal(by["Crater Maker"].dmg, 226);
 	assert.equal(by["Crater Maker"].dpm, null);

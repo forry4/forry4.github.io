@@ -101,7 +101,10 @@ allows a hyphen because the wiki glues words on ("fire idol-Unique").
 
 ## In-game numbers beat the wiki's
 
-The wiki's spell table predates balance passes: seven spells read off the game (2026-10-21)
+**Game readings are at LEVEL 1**, the base once every Destiny Fragment is unlocked
+(`GAME_BASE_LEVEL`); the wiki's are an older patch at an unstated level, so the two cannot be
+converted into each other and the page labels which a spell uses. The wiki's spell table
+predates balance passes: nine spells read off the game (2026-10-21)
 differ from it by 1.06x-1.62x with three hit ranges changed, so they are real changes, not
 a level or Strength multiplier. `ingame.js` holds them and `applyGameSpells` lays them over
 the payload in the page (never in the JSON, which stays the wiki's), so damage per mana,

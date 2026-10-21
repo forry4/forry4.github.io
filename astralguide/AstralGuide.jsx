@@ -9,7 +9,7 @@ import {
 import * as ED from "./editorial.js";
 import { RUNS, RUN_FINDINGS, GAME_TEXT, NOT_ON_WIKI } from "./runs.js";
 import { VARIANTS } from "./fieldnotes.js";
-import { GAME_SPELLS } from "./ingame.js";
+import { GAME_SPELLS, GAME_BASE_LEVEL } from "./ingame.js";
 
 // CSS lives in the sibling .css file, imported with `?inline` (see CLAUDE.md: never move
 // it back into a JS template literal).
@@ -395,8 +395,8 @@ function Detail({ e, ctx }) {
 					<div><b>{e.hits}</b><span>hits</span></div>{e.dpm != null && <div><b>{e.dpm}</b><span>dmg / mana</span></div>}
 				</div>
 				{e.game && <p className="aag-p aag-gametext"><b>In game</b> {e.wiki
-					? `These numbers are the game's; the wiki still says ${e.wiki.dmg} damage, ${e.wiki.hits} hits.`
-					: "Not on the wiki at all; the numbers are the game's."}{" "}{e.mana == null || !e.hero ? "Its mana cost and hero are not recorded yet." : ""}
+					? `These are the game's numbers at level ${GAME_BASE_LEVEL}, the base once every Destiny Fragment is unlocked; the wiki (an older patch) says ${e.wiki.dmg} damage, ${e.wiki.hits} hits.`
+					: `Not on the wiki at all; these are the game's numbers at level ${GAME_BASE_LEVEL}.`}{" "}{e.mana == null || !e.hero ? "Its mana cost and hero are not recorded yet." : ""}
 					<span className="aag-muted"> {e.game}.</span></p>}
 				<p className="aag-p">{e.group === "Hero" ? `${e.hero}'s spell` : e.group ? `${e.group} spell` : "Hero spell (hero not recorded)"}{e.tags.length ? ` · ${e.tags.join(" · ")}` : ""}</p>
 				{e.desc && <p className="aag-p">{e.desc}</p>}
@@ -800,7 +800,9 @@ function SpellsTab({ ctx, f, set }) {
 			<Chips label="Mana" options={["1", "2", "3"]} value={f.mana} onChange={(v) => set({ mana: v })} />
 			<Chips label="Tags" options={tags} value={f.tag} onChange={(v) => set({ tag: v })} />
 		</FilterBar>
-		<p className="aag-sub">Damage is the wiki's estimate if every hit lands, before crits and gambits. Each spell level adds 20% (the end screen shows level X as 200%).
+		<p className="aag-sub">Damage is the total if every hit lands, before crits and gambits. Spells marked <span className="aag-ingame">in game</span> use
+			the game's level-{GAME_BASE_LEVEL} numbers — the base once every Destiny Fragment is unlocked; the rest are still the wiki's older numbers,
+			so compare across the two with care. Each spell level adds 20% (the end screen shows level X as 200%).
 			Dmg / mana is the fair comparison across costs, but cheap spells also make Spell Refresh come round sooner.</p>
 		<div className="aag-tablewrap">
 			<table className="aag-table aag-spells">
@@ -812,7 +814,7 @@ function SpellsTab({ ctx, f, set }) {
 					{list.map((e) => (
 						<tr key={e.key}>
 							<td><EntityLink k={e.key} ctx={ctx}>{e.name}</EntityLink>
-								{e.game && <span className="aag-ingame" title={e.wiki ? `Game numbers; the wiki says ${e.wiki.dmg} dmg, ${e.wiki.hits} hits` : "Not on the wiki"}>in game</span>}
+								{e.game && <span className="aag-ingame" title={e.wiki ? `Game numbers at level ${GAME_BASE_LEVEL}; the wiki says ${e.wiki.dmg} dmg, ${e.wiki.hits} hits` : `Game numbers at level ${GAME_BASE_LEVEL}; not on the wiki`}>in game</span>}
 								<span className="aag-ttags">{[e.hero || e.group || "hero not recorded", ...e.tags].join(" · ")}</span></td>
 							<td className="aag-num">{e.mana}</td><td className="aag-num">{e.dmg}</td><td className="aag-num">{e.hits}</td>
 							<td className="aag-num"><DpmBar v={e.dpm} max={ctx.maxDpm} /></td>
@@ -997,7 +999,7 @@ function SpellTiers({ ctx }) {
 	const pick = (v) => { setBy(v); try { localStorage.setItem(SPELL_RANK_KEY, v); } catch { /* private mode */ } };
 	const line = (s) => {
 		const dpm = `${s.dpm} dmg/mana`, hits = `${s.hits} hits`;
-		return `${by === "hits" ? `${hits} · ${dpm}` : `${dpm} · ${hits}`} · ${s.dmg} dmg`;
+		return `${by === "hits" ? `${hits} · ${dpm}` : `${dpm} · ${hits}`} · ${s.dmg} dmg${s.game ? ` · in game, level ${GAME_BASE_LEVEL}` : ""}`;
 	};
 	return (<>
 		<p className="aag-sub"><b>Computed:</b> shared spells (common and Zodiac) ranked within each mana cost, split into quartiles.
