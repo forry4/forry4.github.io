@@ -32,6 +32,10 @@ export const GAME_SPELLS = {
 	"Hasta": { dmg: 91, hits: "4-6", ...FIRST },
 	"Laceratio": { dmg: 186, hits: "2-6", ...FIRST },
 	"Lightning Dance": { dmg: 169, hits: "1-5", ...FIRST },
+	// Octave's, at level 1.
+	"Balista": { mana: 1, dmg: 140, hits: "2-12", level: 1, source: SEEN },
+	"Sol": { mana: 3, dmg: 313, hits: "1", level: 1, source: SEEN },
+	"Pluvia": { mana: 2, dmg: 163, hits: "3-7", level: 1, source: SEEN },
 	// Kiran's, at the level given.
 	"Dirty Way Of Doing This": { dmg: 150, hits: "3-5", level: 1, source: SEEN },
 	"Relentless Fury": { dmg: 150, hits: "2-6", level: 1, source: SEEN },
