@@ -213,3 +213,18 @@ test("a variant links as itself and credits its parent and what it makes", () =>
 	// A glued-on hyphen ("fire idol-Unique") still ends the word.
 	assert.ok(withNotes.segments("Ice Idol had 30% chance to become a fire idol-Unique").some((s) => s.t === "variant" && s.v.name === "Fire Idol"));
 });
+
+test("spell tiers rank by damage per mana or by hits, each breaking the other's ties", () => {
+	assert.equal(D.avgHits("1-8"), 4.5);
+	assert.equal(D.avgHits("5"), 5);
+	const s = [
+		{ name: "A", dpm: 60, hits: "2" }, { name: "B", dpm: 60, hits: "1-9" },
+		{ name: "C", dpm: 90, hits: "1" }, { name: "D", dpm: 50, hits: "8" },
+	];
+	assert.deepEqual(D.rankSpells(s, "dpm").map((x) => x.name), ["C", "B", "A", "D"]);
+	assert.deepEqual(D.rankSpells(s, "hits").map((x) => x.name), ["D", "B", "A", "C"]);
+	assert.deepEqual([0, 1, 2, 3, 4, 5, 6, 7].map((i) => D.quartileTier(i, 8)), ["S", "S", "A", "A", "B", "B", "C", "C"]);
+	// On the real 1-mana shared spells the two orders genuinely differ, or the toggle would be pointless.
+	const one = data.spells.filter((x) => x.mana === 1 && x.group !== "Hero" && x.dpm != null);
+	assert.notEqual(D.rankSpells(one, "dpm")[0].name, D.rankSpells(one, "hits")[0].name);
+});

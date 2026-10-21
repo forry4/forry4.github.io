@@ -4,7 +4,7 @@ import { buildPath, parsePath, pushPath, subscribe } from "../shared/router.js";
 import {
 	ELEMENTS, RARITIES, KEYWORDS, TYPE_LABEL, buildModel, search, matches, keyOf, slug,
 	critMultiplier, armorPct, effectiveLife, nextStone, breakEvenLife, nextDamageStone,
-	runUsage, statRange, levelBonus,
+	runUsage, statRange, levelBonus, rankSpells, quartileTier,
 } from "./derive.js";
 import * as ED from "./editorial.js";
 import { RUNS, RUN_FINDINGS, GAME_TEXT, NOT_ON_WIKI } from "./runs.js";
@@ -979,17 +979,36 @@ function TiersTab({ ctx }) {
 
 // Spells ranked by damage per mana WITHIN their cost, since a 1-mana spell also buys a
 // faster Spell Refresh. Tiers are quartiles of that cost bracket — computed, not judged.
+// The ranking toggle is a per-viewer preference, so it lives in this browser only.
+const SPELL_RANK_KEY = "astral.spellRank";
+const SPELL_RANKS = [["dpm", "Damage per mana first"], ["hits", "Hits first"]];
+
 function SpellTiers({ ctx }) {
 	const spells = ctx.model.list.filter((e) => e.type === "spell" && e.dpm != null && e.group !== "Hero");
+	const [by, setBy] = useState(() => {
+		try { return localStorage.getItem(SPELL_RANK_KEY) === "hits" ? "hits" : "dpm"; } catch { return "dpm"; }
+	});
+	const pick = (v) => { setBy(v); try { localStorage.setItem(SPELL_RANK_KEY, v); } catch { /* private mode */ } };
+	const line = (s) => {
+		const dpm = `${s.dpm} dmg/mana`, hits = `${s.hits} hits`;
+		return `${by === "hits" ? `${hits} · ${dpm}` : `${dpm} · ${hits}`} · ${s.dmg} dmg`;
+	};
 	return (<>
-		<p className="aag-sub"><b>Computed:</b> shared spells (common and Zodiac) ranked by damage per mana within each mana cost, split into quartiles.
-			Hero spells are left out because only that hero can take them; sort them in the Spells tab.</p>
+		<p className="aag-sub"><b>Computed:</b> shared spells (common and Zodiac) ranked within each mana cost, split into quartiles.
+			{by === "hits"
+				? " Ranked by hits — the middle of a range, so 1–8 counts as 4.5 — with damage per mana breaking ties. More hits means more on-hit gambit and aura triggers."
+				: " Ranked by damage per mana, with hits breaking ties."}
+			{" "}Hero spells are left out because only that hero can take them; sort them in the Spells tab.</p>
+		<div className="aag-seg" role="group" aria-label="Rank spells by">
+			<span className="aag-chips-lbl">Rank by</span>
+			{SPELL_RANKS.map(([id, label]) => (
+				<button type="button" key={id} aria-pressed={by === id} onClick={() => pick(id)}>{label}</button>))}
+		</div>
 		{[1, 2, 3].map((m) => {
-			const row = spells.filter((s) => s.mana === m).sort((a, b) => b.dpm - a.dpm);
+			const row = rankSpells(spells.filter((s) => s.mana === m), by);
 			if (!row.length) return null;
-			const q = (i) => ["S", "A", "B", "C"][Math.min(3, Math.floor((i / row.length) * 4))];
 			const tiers = {};
-			row.forEach((s, i) => (tiers[q(i)] ||= []).push([s.name, `${s.dmg} dmg · ${s.hits} hits · ${s.dpm}/mana`]));
+			row.forEach((s, i) => (tiers[quartileTier(i, row.length)] ||= []).push([s.name, line(s)]));
 			return (
 				<Section key={m} title={`${m}-mana spells`}>
 					<TierBoard list={`${m} mana`} tiers={tiers} ctx={ctx} keyFor={(n) => keyOf("spell", slug(n))} />

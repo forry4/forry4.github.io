@@ -10726,6 +10726,24 @@ try {
 			const nVar = await page.locator(".aag-variants .aag-chip").count();
 			check(`${at}: the Glossary's checklist lists every named-but-unexplained effect`, nVar >= 50, String(nVar));
 
+			// The spell tier list's toggle re-ranks: its top 1-mana spell must match the
+			// ranking computed from the payload in each mode.
+			{
+				const D = await import(new URL(`file:///${path.join(webappDir, "..", "astralguide", "derive.js").replace(/\\/g, "/")}`).href);
+				const one = data.spells.filter((x) => x.mana === 1 && x.group !== "Hero" && x.dpm != null);
+				await page.goto(`http://localhost:${PORT}/astral/tiers`, { waitUntil: "networkidle" });
+				await page.locator(".aag-seg button", { hasText: "Spells by the numbers" }).click().catch(() => {});
+				const top = () => page.locator(".aag-tierboard").first().locator(".aag-tieritem b").first().textContent().catch(() => "");
+				await page.locator(".aag-seg button", { hasText: "Damage per mana first" }).click().catch(() => {});
+				const byDpm = await top();
+				await page.locator(".aag-seg button", { hasText: "Hits first" }).click().catch(() => {});
+				await page.waitForFunction((n) => document.querySelector(".aag-tierboard .aag-tieritem b")?.textContent === n,
+					D.rankSpells(one, "hits")[0].name, { timeout: 5_000 }).catch(() => {});
+				const byHits = await top();
+				check(`${at}: the spell tiers' toggle re-ranks by damage per mana or by hits`,
+					byDpm === D.rankSpells(one, "dpm")[0].name && byHits === D.rankSpells(one, "hits")[0].name, `${byDpm} / ${byHits}`);
+			}
+
 			// A cold load of a hashed URL opens that entry.
 			await page.goto(`http://localhost:${PORT}/astral/echoes#${encodeURIComponent("echo:ordan-s-fury")}`, { waitUntil: "networkidle" });
 			await page.waitForSelector(".aag-drawer", { timeout: 15_000 }).catch(() => {});

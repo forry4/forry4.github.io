@@ -465,6 +465,28 @@ export function statRange(runs, key) {
 	return { min: v[0], median, max: v[v.length - 1], n: v.length };
 }
 
+// A spell's hits as one number: the middle of its range ("1-8" = 4.5), which is how the
+// wiki's own Hits/mana column counts them.
+export function avgHits(hits) {
+	const n = String(hits || "").match(/\d+/g)?.map(Number) || [];
+	return n.length ? (Math.min(...n) + Math.max(...n)) / 2 : 0;
+}
+
+// Order spells for the tier list: by damage per mana with hits breaking ties, or by
+// hits with damage per mana breaking ties; the name settles anything left.
+export function rankSpells(spells, by = "dpm") {
+	const key = by === "hits"
+		? (s) => [avgHits(s.hits), s.dpm ?? 0]
+		: (s) => [s.dpm ?? 0, avgHits(s.hits)];
+	return [...spells].sort((a, b) => {
+		const [a1, a2] = key(a), [b1, b2] = key(b);
+		return b1 - a1 || b2 - a2 || a.name.localeCompare(b.name);
+	});
+}
+
+// Quartile tiers over a ranked list: the top quarter is S, the bottom C.
+export const quartileTier = (i, n) => ["S", "A", "B", "C"][Math.min(3, Math.floor((i / n) * 4))];
+
 // Each spell level adds 20% damage: the end screen prints level X as 200%.
 export const levelBonus = (level) => level * 20;
 
