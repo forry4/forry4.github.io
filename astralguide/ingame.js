@@ -10,9 +10,9 @@
 //
 // derive.applyGameSpells merges these over the payload before anything is computed, so
 // damage per mana, the tier lists and the imprint tables all use them; each spell keeps
-// the wiki's old numbers for display. A field left out keeps the wiki's value (none of
-// these came with a mana cost). A spell the wiki lacks needs `mana` and `hero` before it
-// can be ranked; until then it is listed with those blank.
+// the wiki's old numbers for display. A field left out keeps the wiki's value (only the
+// later readings came with a mana cost). A spell the wiki lacks needs `mana` and `hero`
+// before it can be ranked; until then it is listed with those blank.
 
 export const GAME_BASE_LEVEL = 1;
 export const GAME_SOURCE = "Read off the game (Switch) at level 1 by the site's owner";
@@ -28,6 +28,9 @@ export const GAME_SPELLS = {
 	"Twin Dragon Punch": { dmg: 316, hits: "2", source: SEEN },
 	"Dirty Way Of Doing This": { dmg: 150, hits: "3-5", source: SEEN },
 	"Relentless Fury": { dmg: 150, hits: "2-6", source: SEEN },
+	"Flaming Slide": { mana: 1, dmg: 96, hits: "3-5", source: SEEN },
 	// Not on the wiki at all.
 	"Crater Maker": { dmg: 226, hits: "2-6", mana: null, hero: null, source: SEEN },
+	// Kiran's (run 10 cast it); the wiki has no page for it.
+	"Hard Rock Punch": { mana: 2, dmg: 144, hits: "1-3", hero: "Kiran", source: SEEN },
 };

@@ -246,7 +246,11 @@ test("in-game spell numbers replace the wiki's, and dmg/mana follows them", () =
 	// A spell the wiki lacks is added, unrankable until its mana is known.
 	assert.equal(by["Crater Maker"].dmg, 226);
 	assert.equal(by["Crater Maker"].dpm, null);
-	assert.equal(g.spells.length, data.spells.length + 1);
+	// …and one whose mana is known ranks like any other Kiran spell.
+	assert.equal(by["Hard Rock Punch"].hero, "Kiran");
+	assert.equal(by["Hard Rock Punch"].dpm, 72);
+	assert.equal(by["Flaming Slide"].dpm, 96);
+	assert.equal(g.spells.length, data.spells.length + 2);
 	assert.equal(data.spells.find((s) => s.name === "Hasta").dmg, 86, "the payload itself is not mutated");
 });
 
