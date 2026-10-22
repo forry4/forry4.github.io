@@ -19,6 +19,14 @@
 // level 1 that evening — x1.18 each, which is level 2 over level 1 (x1.17) plus ~1%.
 // The four from that batch not yet read again are marked `inferred` and converted from
 // level 2; read them again at level 1 to replace the inference.
+//
+// READINGS VARY. Four spells read twice at the same stated level came out 4-10% apart
+// (Balista 140/134, Laceratio 186/202, Plasma Portal 135@2/148@1, Hasta 91/90). The
+// spell screen's damage adds Strength and gambit affinity (+10% per matching gambit) to
+// the level bonus, so a reading taken mid-run carries that run's bonuses. The cleanest
+// reading is a spell with no gambits slotted and no Strength; where two disagree the
+// later one is kept. The seven exact matches above were evidently clean, which is why
+// the inferred level-2 batch is shaky (Hasta's first reading was level 1 after all).
 
 export const GAME_BASE_LEVEL = 1;
 export const GAME_SOURCE = "Read off the game (Switch) by the site's owner";
@@ -27,15 +35,21 @@ const SEEN = `${GAME_SOURCE}, 2026-10-21`;
 const FIRST = { level: 2, inferred: true, source: SEEN };
 
 export const GAME_SPELLS = {
-	// From the first batch, so the level is inferred (see above). Octave's three, then Kiran's.
+	// From the first batch, so the level is inferred (see above). Octave's, then Kiran's.
 	"Resilio": { dmg: 190, hits: "2-4", ...FIRST },
-	"Hasta": { dmg: 91, hits: "4-6", ...FIRST },
-	"Laceratio": { dmg: 186, hits: "2-6", ...FIRST },
 	"Lightning Dance": { dmg: 169, hits: "1-5", ...FIRST },
-	// Octave's, at level 1.
-	"Balista": { mana: 1, dmg: 140, hits: "2-12", level: 1, source: SEEN },
+	// Octave's. Balista, Hasta and Laceratio were read twice and the later reading is kept
+	// (134 vs 140, 90 vs 91, 202 vs 186) — see READINGS VARY above.
+	"Balista": { mana: 1, dmg: 134, hits: "2-12", level: 1, source: SEEN },
+	"Hasta": { mana: 1, dmg: 90, hits: "4-6", level: 1, source: SEEN },
+	"Laceratio": { mana: 2, dmg: 202, hits: "2-6", level: 1, source: SEEN },
 	"Sol": { mana: 3, dmg: 313, hits: "1", level: 1, source: SEEN },
 	"Pluvia": { mana: 2, dmg: 163, hits: "3-7", level: 1, source: SEEN },
+	"Adustio": { mana: 2, dmg: 144, hits: "3-5", level: 1, source: SEEN },
+	"Perforatio": { mana: 2, dmg: 144, hits: "1-3", level: 1, source: SEEN },
+	"Praecipitatio": { mana: 2, dmg: 286, hits: "1-11", level: 2, source: SEEN },
+	"Eruca": { mana: 3, dmg: 252, hits: "6", level: 1, source: SEEN },
+	"Stella": { mana: 3, dmg: 252, hits: "6-8", level: 1, source: SEEN },
 	// Kiran's, at the level given.
 	"Dirty Way Of Doing This": { dmg: 150, hits: "3-5", level: 1, source: SEEN },
 	"Relentless Fury": { dmg: 150, hits: "2-6", level: 1, source: SEEN },
@@ -43,13 +57,29 @@ export const GAME_SPELLS = {
 	"Flamin' Hot Strike": { mana: 2, dmg: 162, hits: "1-5", level: 1, source: SEEN },
 	"UUUUUULTIMATE BEAM": { mana: 2, dmg: 210, hits: "2-8", level: 2, source: SEEN },
 	"Lightspeed Fist": { mana: 2, dmg: 173, hits: "3", level: 1, source: SEEN },
-	// Unchanged from the wiki: these four are the evidence that the wiki is level 0.
+	// Unchanged from the wiki: these (and the three shared ones below) are the evidence
+	// that the wiki is level 0.
 	"Ultra Loaded Knuckles": { mana: 2, dmg: 180, hits: "1", level: 1, source: SEEN },
 	"Twin Dragon Punch": { mana: 3, dmg: 269, hits: "2", level: 1, source: SEEN },
 	"Explosive Hug": { mana: 3, dmg: 298, hits: "1", level: 1, source: SEEN },
 	"Helping Hands (got it?)": { mana: 3, dmg: 346, hits: "1", level: 2, source: SEEN },
-	// Shared spells.
-	"Plasma Portal": { mana: 2, dmg: 135, hits: "2-4", level: 2, source: SEEN },
+	// Shared spells. Unchanged from the wiki, so more evidence for level 0:
+	"Sword of Judgment": { mana: 3, dmg: 364, hits: "1", level: 2, source: SEEN },
+	"Magic Cyclone": { mana: 2, dmg: 156, hits: "1-9", level: 1, source: SEEN },
+	"Aqua Ball": { mana: 1, dmg: 144, hits: "1-3", level: 1, source: SEEN },
+	// Changed. Plasma Portal was read twice: 135 at level 2 and 148 at level 1; the later is kept.
+	"Plasma Portal": { mana: 2, dmg: 148, hits: "2-4", level: 1, source: SEEN },
+	"Thunder Orb": { mana: 1, dmg: 112, hits: "3-5", level: 2, source: SEEN },
+	"Ice Thrower": { mana: 1, dmg: 94, hits: "3", level: 1, source: SEEN },
+	"Nightbreaker": { mana: 2, dmg: 186, hits: "3-5", level: 1, source: SEEN },
+	"Thousand Knives": { mana: 2, dmg: 202, hits: "8", level: 2, source: SEEN },
+	"Meteor Blades": { mana: 2, dmg: 216, hits: "1-3", level: 2, source: SEEN },
+	"Freezing Needles": { mana: 2, dmg: 266, hits: "1-2", level: 2, source: SEEN },
+	"Electrospheres": { mana: 1, dmg: 146, hits: "1-7", level: 1, source: SEEN },
+	"Burning Wave": { mana: 3, dmg: 250, hits: "8", level: 1, source: SEEN },
+	"World-Ender": { mana: 2, dmg: 228, hits: "1", level: 1, source: SEEN },
+	"Corrupted Typhoon": { mana: 3, dmg: 259, hits: "8", level: 1, source: SEEN },
+	"Eye of Judgment": { mana: 2, dmg: 180, hits: "3-7", level: 1, source: SEEN },
 	"Ki Blast": { mana: 1, dmg: 96, hits: "1", level: 1, source: SEEN },
 	"Poisonous Vortex": { mana: 2, dmg: 173, hits: "2-10", level: 1, source: SEEN },
 	"Dark Burst": { mana: 2, dmg: 266, hits: "1", level: 2, source: SEEN },

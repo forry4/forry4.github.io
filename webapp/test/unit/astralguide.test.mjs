@@ -244,7 +244,8 @@ test("every spell is at level 1: the wiki's lifted from level 0, readings from t
 	assert.equal(by["Lightspeed Fist"].dmg, 173);
 	assert.equal(by["Dark Burst"].dmg, Math.round((266 * 1.2) / 1.4));
 	assert.equal(by["Dark Burst"].readAt, 2);
-	assert.equal(by["Hasta"].inferred, true);
+	assert.equal(by["Resilio"].inferred, true);
+	assert.equal(by["Hasta"].inferred, false);
 	assert.equal(by["Hasta"].mana, 1, "a field the game reading leaves out keeps the wiki's");
 	assert.deepEqual(by["Hasta"].wiki, { dmg: 86, hits: "6", mana: 1 }, "the wiki's raw numbers are kept");
 	assert.equal(by["UUUUUULTIMATE BEAM"].mana, 2);
@@ -257,8 +258,9 @@ test("every spell is at level 1: the wiki's lifted from level 0, readings from t
 	assert.equal(wiki("Hasta").dmg, 86, "the payload itself is not mutated");
 });
 
-test("the four unchanged spells prove the wiki is level 0 (x1.2 at level 1, x1.4 at level 2)", () => {
-	for (const n of ["Ultra Loaded Knuckles", "Twin Dragon Punch", "Explosive Hug", "Helping Hands (got it?)"]) {
+test("the unchanged spells prove the wiki is level 0 (x1.2 at level 1, x1.4 at level 2)", () => {
+	for (const n of ["Ultra Loaded Knuckles", "Twin Dragon Punch", "Explosive Hug", "Helping Hands (got it?)",
+		"Sword of Judgment", "Magic Cyclone", "Aqua Ball"]) {
 		const o = GAME_SPELLS[n], w = data.spells.find((s) => s.name === n);
 		assert.ok(Math.abs(D.atLevel(w.dmg, D.WIKI_LEVEL, o.level) - o.dmg) <= 1, `${n}: wiki ${w.dmg} at level ${o.level} vs game ${o.dmg}`);
 	}
