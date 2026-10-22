@@ -105,9 +105,12 @@ function Rich({ text, ctx }) {
 }
 
 // How an in-game reading reached level 1: read there, or converted from the level it was read at.
-const readNote = (e) => e.readAt === GAME_BASE_LEVEL
-	? `Read at level ${e.readAt}.`
-	: `Read at level ${e.readAt}${e.inferred ? " (inferred — read it again at level 1 to confirm)" : ""}, shown at level ${GAME_BASE_LEVEL}.`;
+const readNote = (e) => {
+	const str = e.strength ? ` with +${e.strength}% Strength (${e.readDmg} on screen, taken back out)` : "";
+	return e.readAt === GAME_BASE_LEVEL && !e.strength
+		? `Read at level ${e.readAt}.`
+		: `Read at level ${e.readAt}${e.inferred ? " (inferred — read it again at level 1 to confirm)" : ""}${str}, shown at level ${GAME_BASE_LEVEL}.`;
+};
 
 const spellTitle = (s) => (s ? `${s.name}: ${s.mana} mana · ${s.dmg} dmg · ${s.hits} hits` : "");
 

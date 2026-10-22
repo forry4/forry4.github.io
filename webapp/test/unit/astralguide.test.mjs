@@ -245,6 +245,9 @@ test("every spell is at level 1: the wiki's lifted from level 0, readings from t
 	assert.equal(by["Dark Burst"].dmg, Math.round((266 * 1.2) / 1.4));
 	assert.equal(by["Dark Burst"].readAt, 2);
 	assert.equal(by["Resilio"].inferred, true);
+	// Strength is additive with the level bonus, so +5% at level 1 is divided out of 1.25.
+	assert.equal(by["Miseria"].dmg, Math.round((156 * 1.2) / 1.25));
+	assert.equal(by["Miseria"].readDmg, 156);
 	assert.equal(by["Hasta"].inferred, false);
 	assert.equal(by["Hasta"].mana, 1, "a field the game reading leaves out keeps the wiki's");
 	assert.deepEqual(by["Hasta"].wiki, { dmg: 86, hits: "6", mana: 1 }, "the wiki's raw numbers are kept");

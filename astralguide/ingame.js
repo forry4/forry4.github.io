@@ -25,7 +25,8 @@
 // spell screen's damage adds Strength and gambit affinity (+10% per matching gambit) to
 // the level bonus, so a reading taken mid-run carries that run's bonuses. The cleanest
 // reading is a spell with no gambits slotted and no Strength; where two disagree the
-// later one is kept. The seven exact matches above were evidently clean, which is why
+// later one is kept. A reading taken with Strength can say so (`strength`, in percent),
+// and the conversion takes it back out. The seven exact matches above were evidently clean, which is why
 // the inferred level-2 batch is shaky (Hasta's first reading was level 1 after all).
 
 export const GAME_BASE_LEVEL = 1;
@@ -45,6 +46,8 @@ export const GAME_SPELLS = {
 	"Laceratio": { mana: 2, dmg: 202, hits: "2-6", level: 1, source: SEEN },
 	"Sol": { mana: 3, dmg: 313, hits: "1", level: 1, source: SEEN },
 	"Pluvia": { mana: 2, dmg: 163, hits: "3-7", level: 1, source: SEEN },
+	// Read with +5% Strength, which the conversion takes back out (156 -> 150 at level 1).
+	"Miseria": { mana: 2, dmg: 156, hits: "5", level: 1, strength: 5, source: SEEN },
 	"Adustio": { mana: 2, dmg: 144, hits: "3-5", level: 1, source: SEEN },
 	"Perforatio": { mana: 2, dmg: 144, hits: "1-3", level: 1, source: SEEN },
 	"Praecipitatio": { mana: 2, dmg: 286, hits: "1-11", level: 2, source: SEEN },
