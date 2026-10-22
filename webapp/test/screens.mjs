@@ -10731,7 +10731,10 @@ try {
 			// ranking computed from the payload in each mode.
 			{
 				const D = await import(new URL(`file:///${path.join(webappDir, "..", "astralguide", "derive.js").replace(/\\/g, "/")}`).href);
-				const one = data.spells.filter((x) => x.mana === 1 && x.group !== "Hero" && x.dpm != null);
+				const { GAME_SPELLS } = await import(new URL(`file:///${path.join(webappDir, "..", "astralguide", "ingame.js").replace(/\\/g, "/")}`).href);
+				// The page ranks with the game's readings laid over the wiki's, so the check does too.
+				const one = D.applyGameSpells(data, GAME_SPELLS).spells
+					.filter((x) => x.mana === 1 && x.group && x.group !== "Hero" && x.dpm != null);
 				await page.goto(`http://localhost:${PORT}/astral/tiers`, { waitUntil: "networkidle" });
 				await page.locator(".aag-seg button", { hasText: "Spells by the numbers" }).click().catch(() => {});
 				const top = () => page.locator(".aag-tierboard").first().locator(".aag-tieritem b").first().textContent().catch(() => "");
