@@ -25,8 +25,12 @@
 // spell screen's damage adds Strength and gambit affinity (+10% per matching gambit) to
 // the level bonus, so a reading taken mid-run carries that run's bonuses. The cleanest
 // reading is a spell with no gambits slotted and no Strength; where two disagree the
-// later one is kept. A reading taken with Strength can say so (`strength`, in percent),
-// and the conversion takes it back out. The seven exact matches above were evidently clean, which is why
+// later one is kept. THE SPELL SCREEN LEAVES STRENGTH OUT: at 15% Strength, Sol, Aqua Ball,
+// Adustio, Plasma Portal and Eye of Judgment read exactly what they read before. One
+// sitting (Balista 140, Sol 313, Pluvia 163, Miseria 156) did carry a +5% bonus from
+// something else in that run — Sol and Miseria came out exactly right once it was taken
+// out (Sol = the wiki's 300; Miseria 156 -> 150 = its later level-2 175 -> 150). A
+// reading with such a bonus says so (`bonus`, in percent) and the conversion removes it. The seven exact matches above were evidently clean, which is why
 // the inferred level-2 batch is shaky (Hasta's first reading was level 1 after all).
 
 export const GAME_BASE_LEVEL = 1;
@@ -44,18 +48,23 @@ export const GAME_SPELLS = {
 	"Balista": { mana: 1, dmg: 134, hits: "2-12", level: 1, source: SEEN },
 	"Hasta": { mana: 1, dmg: 90, hits: "4-6", level: 1, source: SEEN },
 	"Laceratio": { mana: 2, dmg: 202, hits: "2-6", level: 1, source: SEEN },
-	// Sol and Pluvia were read in the same sitting as Balista's 140, with +5% Strength: Sol
-	// comes out at exactly the wiki's 250 x1.2 = 300 once it is taken out, and Balista's 140
-	// is exactly its later, clean 134 x1.25/1.2. So Sol is unchanged since the wiki.
-	"Sol": { mana: 3, dmg: 313, hits: "1", level: 1, strength: 5, source: SEEN },
-	"Pluvia": { mana: 2, dmg: 163, hits: "3-7", level: 1, strength: 5, source: SEEN },
-	// Read with +5% Strength, which the conversion takes back out (156 -> 150 at level 1).
-	"Miseria": { mana: 2, dmg: 156, hits: "5", level: 1, strength: 5, source: SEEN },
+	// Sol read 313 in the +5% sitting and 300 since: the wiki's 250 x1.2, unchanged.
+	"Sol": { mana: 3, dmg: 300, hits: "1", level: 1, source: SEEN },
+	"Pluvia": { mana: 2, dmg: 163, hits: "3-7", level: 1, bonus: 5, source: SEEN },
+	// 156 at level 1 in the +5% sitting, 175 at level 2 since: both are 150 at level 1.
+	"Miseria": { mana: 2, dmg: 175, hits: "5", level: 2, source: SEEN },
+	"Sagitta": { mana: 3, dmg: 300, hits: "1", level: 1, source: SEEN },
+	"Gravitas": { mana: 2, dmg: 203, hits: "1", level: 2, source: SEEN },
+	"Luna": { mana: 2, dmg: 173, hits: "4-12", level: 1, source: SEEN },
+	"Mecanica Aranea": { mana: 2, dmg: 168, hits: "2-12", level: 1, source: SEEN },
+	// Not on the wiki. Octave's by its name — every one of his spells is Latin.
+	"Infinitus": { mana: 2, dmg: 175, hits: "4-6", level: 2, hero: "Octave", source: SEEN },
 	"Adustio": { mana: 2, dmg: 144, hits: "3-5", level: 1, source: SEEN },
 	"Perforatio": { mana: 2, dmg: 144, hits: "1-3", level: 1, source: SEEN },
 	"Praecipitatio": { mana: 2, dmg: 286, hits: "1-11", level: 2, source: SEEN },
 	"Eruca": { mana: 3, dmg: 252, hits: "6", level: 1, source: SEEN },
-	"Stella": { mana: 3, dmg: 252, hits: "6-8", level: 1, source: SEEN },
+	// 252 at level 1 and 294 at level 2: the same spell either way.
+	"Stella": { mana: 3, dmg: 294, hits: "6-8", level: 2, source: SEEN },
 	// Kiran's, at the level given.
 	"Dirty Way Of Doing This": { dmg: 150, hits: "3-5", level: 1, source: SEEN },
 	"Relentless Fury": { dmg: 150, hits: "2-6", level: 1, source: SEEN },
@@ -88,11 +97,13 @@ export const GAME_SPELLS = {
 	"World-Ender": { mana: 2, dmg: 228, hits: "1", level: 1, source: SEEN },
 	"Corrupted Typhoon": { mana: 3, dmg: 259, hits: "8", level: 1, source: SEEN },
 	"Eye of Judgment": { mana: 2, dmg: 180, hits: "3-7", level: 1, source: SEEN },
+	"Frost Splinters": { mana: 1, dmg: 105, hits: "2-4", level: 2, source: SEEN },
+	"Water Bubbles": { mana: 2, dmg: 218, hits: "6", level: 2, source: SEEN },
+	"Demonic Explosion": { mana: 2, dmg: 144, hits: "1-3", level: 1, source: SEEN },
 	"Ki Blast": { mana: 1, dmg: 96, hits: "1", level: 1, source: SEEN },
 	"Poisonous Vortex": { mana: 2, dmg: 173, hits: "2-10", level: 1, source: SEEN },
 	"Dark Burst": { mana: 2, dmg: 266, hits: "1", level: 2, source: SEEN },
 	// Not on the wiki at all. Crater Maker's hero is not recorded, so it is not ranked.
 	"Crater Maker": { mana: 2, dmg: 192, hits: "2-6", level: 1, hero: null, source: SEEN },
-	// Kiran's (run 10 cast it).
-	"Hard Rock Punch": { mana: 2, dmg: 144, hits: "1-3", level: 1, hero: "Kiran", source: SEEN },
+	"Hard Rock Punch": { mana: 2, dmg: 144, hits: "1-3", level: 1, source: SEEN },
 };

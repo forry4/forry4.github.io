@@ -112,6 +112,12 @@ patch changed the spell (mana, damage or hits); the rest are the wiki's x1.2 and
 level 2 — the three read again came back x1.18 — so the four not read again are marked
 `inferred` and the panel asks for a re-read. Readings are laid over the payload in the
 page, never in the JSON, which stays the wiki's raw level-0 numbers; the spell panel shows
-those beside the game's. A spell with no recorded hero stays out of the tier list. **Readings are not perfectly clean**: the spell screen adds Strength and
-gambit affinity to the level bonus, and four spells read twice came out 4-10% apart; the
-later reading is kept and `ingame.js` says which.
+those beside the game's. A spell with no recorded hero stays out of the tier list. **The spell screen leaves Strength out** (at 15% Strength five spells read
+exactly as before), but one sitting carried a +5% bonus from something else; a reading
+can record that as `bonus` and the conversion removes it. Where two readings disagree the
+later one is kept and `ingame.js` says which.
+
+**The spell parser once dropped the last row of every table** — it ran on into the next
+table's colspan heading and was read as a heading. Six spells were missing (Demonic
+Explosion, Gemini's Cyclone, Hard Rock Punch, ...). `parse_spells` now splits at `|}`
+first.

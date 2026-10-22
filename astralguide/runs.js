@@ -22,7 +22,7 @@ export const NOT_ON_WIKI = {
 	auras: new Set(["Snow Day"]),
 	imprints: new Set(["Nulovoko II"]),
 	// Arven (DLC, May 2026) has no spell pages yet, and Yamat's two newest are missing.
-	spells: new Set(["Gale Claw", "Blazing Thrust", "Maelstrom Howl", "Hard Rock Punch", "Fowl Plumage",
+	spells: new Set(["Gale Claw", "Blazing Thrust", "Maelstrom Howl", "Fowl Plumage",
 		"Starburst", "Energy Nexus", "Moonfang", "Moonfang: Void Ripper", "Plenilune Missiles"]),
 };
 

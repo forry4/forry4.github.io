@@ -245,9 +245,10 @@ test("every spell is at level 1: the wiki's lifted from level 0, readings from t
 	assert.equal(by["Dark Burst"].dmg, Math.round((266 * 1.2) / 1.4));
 	assert.equal(by["Dark Burst"].readAt, 2);
 	assert.equal(by["Resilio"].inferred, true);
-	// Strength is additive with the level bonus, so +5% at level 1 is divided out of 1.25.
-	assert.equal(by["Miseria"].dmg, Math.round((156 * 1.2) / 1.25));
-	assert.equal(by["Miseria"].readDmg, 156);
+	// A bonus showing on screen adds to the level bonus, so +5% at level 1 is divided out of 1.25.
+	assert.equal(by["Pluvia"].dmg, Math.round((163 * 1.2) / 1.25));
+	assert.equal(by["Pluvia"].readDmg, 163);
+	assert.equal(by["Miseria"].dmg, 150);
 	assert.equal(by["Hasta"].inferred, false);
 	assert.equal(by["Hasta"].mana, 1, "a field the game reading leaves out keeps the wiki's");
 	assert.deepEqual(by["Hasta"].wiki, { dmg: 86, hits: "6", mana: 1 }, "the wiki's raw numbers are kept");
@@ -256,6 +257,7 @@ test("every spell is at level 1: the wiki's lifted from level 0, readings from t
 	// Spells the wiki lacks are added; one with no hero stays out of the tier list.
 	assert.equal(by["Hard Rock Punch"].hero, "Kiran");
 	assert.equal(by["Hard Rock Punch"].dpm, 72);
+	assert.equal(by["Infinitus"].hero, "Octave");
 	assert.equal(by["Crater Maker"].group, null);
 	assert.equal(g.spells.length, data.spells.length + 2);
 	assert.equal(wiki("Hasta").dmg, 86, "the payload itself is not mutated");
@@ -263,9 +265,9 @@ test("every spell is at level 1: the wiki's lifted from level 0, readings from t
 
 test("the unchanged spells prove the wiki is level 0 (x1.2 at level 1, x1.4 at level 2)", () => {
 	for (const n of ["Ultra Loaded Knuckles", "Twin Dragon Punch", "Explosive Hug", "Helping Hands (got it?)",
-		"Sword of Judgment", "Magic Cyclone", "Aqua Ball", "Sol"]) {
+		"Sword of Judgment", "Magic Cyclone", "Aqua Ball", "Sol", "Sagitta", "Gravitas"]) {
 		const o = GAME_SPELLS[n], w = data.spells.find((s) => s.name === n);
-		const onScreen = w.dmg * (1 + 0.2 * o.level + (o.strength || 0) / 100);
+		const onScreen = w.dmg * (1 + 0.2 * o.level + (o.bonus || 0) / 100);
 		assert.ok(Math.abs(onScreen - o.dmg) <= 1, `${n}: wiki ${w.dmg} at level ${o.level} vs game ${o.dmg}`);
 	}
 	for (const [n, o] of Object.entries(GAME_SPELLS)) {

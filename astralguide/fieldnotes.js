@@ -68,8 +68,6 @@ export const VARIANTS = [
 	{ name: "Giant Slime", re: "giant slimes?", parent: "Slime" },
 	{ name: "Flying Slime", re: "flying slimes?", parent: "Slime" },
 	{ name: "Dark Cloud", re: "dark clouds?", el: "Poison" },
-	{ name: "Demonic Explosion", re: "demonic explosions?", el: "Poison",
-		known: { makes: [], note: "An unstable projectile that explodes in a cross pattern (a 2-mana spell; the wiki gives no damage or hits).", source: "The wiki's Demonic Explosion page" } },
 	{ name: "Venom Mine", re: "venom mines?", el: "Poison" },
 	{ name: "Curse Mark", re: "curse marks?", el: "Poison" },
 	{ name: "Weakening Zone", re: "weakening zones?", el: "Poison" },

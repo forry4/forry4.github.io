@@ -196,7 +196,9 @@ def parse_spells(p):
 	text = p["Spells"]["text"]
 	table = text[: text.find("== Effect Glossary")]
 	out, group, hero = [], None, None
-	for row in rows_of(table):
+	# Split at each table's end first: otherwise a table's LAST row runs on into the next
+	# table's colspan heading, reads as a heading, and that spell is dropped.
+	for row in (r for t in re.split(r"\n\|\}", table) for r in rows_of(t)):
 		h = re.search(r'colspan="\d+"\s*\|(.*)', row)
 		if h:
 			label = clean(h.group(1))

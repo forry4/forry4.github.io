@@ -465,11 +465,11 @@ export function statRange(runs, key) {
 	return { min: v[0], median, max: v[v.length - 1], n: v.length };
 }
 
-// Spell damage scales with level: (1 + 20% x level) of the level-0 number. Strength adds
-// to the same sum (the wiki's Spell Mechanics page: level, affinity and Strength are
-// additive), so a reading taken with `strength` percent is divided back out of it.
-export const atLevel = (dmg, from, to, strength = 0) =>
-	typeof dmg === "number" ? Math.round((dmg * (1 + 0.2 * to)) / (1 + 0.2 * from + strength / 100)) : dmg;
+// Spell damage scales with level: (1 + 20% x level) of the level-0 number. Other damage
+// bonuses add to the same sum, so a reading taken with a `bonus` percent showing on the
+// spell screen is divided back out of it. (The screen leaves Strength out.)
+export const atLevel = (dmg, from, to, bonus = 0) =>
+	typeof dmg === "number" ? Math.round((dmg * (1 + 0.2 * to)) / (1 + 0.2 * from + bonus / 100)) : dmg;
 
 // The wiki's table is LEVEL 0 — the game's level-1 reading of every unchanged spell is
 // the wiki's x1.2 to the point (Ultra Loaded Knuckles 150 -> 180, Explosive Hug 248 -> 298),
@@ -481,15 +481,15 @@ export const WIKI_LEVEL = 0;
 // level each was read at. A corrected spell keeps the wiki's raw values in `wiki`; one the
 // wiki lacks is added, with whatever the game showed and nulls for the rest.
 export function applyGameSpells(data, overrides = {}, base = 1) {
-	const read = (o) => ({ ...o, dmg: atLevel(o.dmg, o.level ?? base, base, o.strength || 0) });
+	const read = (o) => ({ ...o, dmg: atLevel(o.dmg, o.level ?? base, base, o.bonus || 0) });
 	const spells = data.spells.map((s) => {
 		const o = overrides[s.name];
 		const lifted = { ...s, dmg: atLevel(s.dmg, WIKI_LEVEL, base) };
 		if (!o) return finishSpell(lifted);
 		const merged = { ...lifted, ...Object.fromEntries(Object.entries(read(o))
-			.filter(([k, v]) => !["source", "level", "inferred", "strength"].includes(k) && v !== undefined && v !== null)) };
+			.filter(([k, v]) => !["source", "level", "inferred", "bonus"].includes(k) && v !== undefined && v !== null)) };
 		return finishSpell({ ...merged, game: o.source, readAt: o.level ?? base, inferred: !!o.inferred,
-			readDmg: o.dmg, strength: o.strength || 0,
+			readDmg: o.dmg, bonus: o.bonus || 0,
 			wiki: { dmg: s.dmg, hits: s.hits, mana: s.mana } });
 	});
 	for (const [name, raw] of Object.entries(overrides)) {
