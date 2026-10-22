@@ -44,8 +44,11 @@ export const GAME_SPELLS = {
 	"Balista": { mana: 1, dmg: 134, hits: "2-12", level: 1, source: SEEN },
 	"Hasta": { mana: 1, dmg: 90, hits: "4-6", level: 1, source: SEEN },
 	"Laceratio": { mana: 2, dmg: 202, hits: "2-6", level: 1, source: SEEN },
-	"Sol": { mana: 3, dmg: 313, hits: "1", level: 1, source: SEEN },
-	"Pluvia": { mana: 2, dmg: 163, hits: "3-7", level: 1, source: SEEN },
+	// Sol and Pluvia were read in the same sitting as Balista's 140, with +5% Strength: Sol
+	// comes out at exactly the wiki's 250 x1.2 = 300 once it is taken out, and Balista's 140
+	// is exactly its later, clean 134 x1.25/1.2. So Sol is unchanged since the wiki.
+	"Sol": { mana: 3, dmg: 313, hits: "1", level: 1, strength: 5, source: SEEN },
+	"Pluvia": { mana: 2, dmg: 163, hits: "3-7", level: 1, strength: 5, source: SEEN },
 	// Read with +5% Strength, which the conversion takes back out (156 -> 150 at level 1).
 	"Miseria": { mana: 2, dmg: 156, hits: "5", level: 1, strength: 5, source: SEEN },
 	"Adustio": { mana: 2, dmg: 144, hits: "3-5", level: 1, source: SEEN },
@@ -75,6 +78,8 @@ export const GAME_SPELLS = {
 	"Thunder Orb": { mana: 1, dmg: 112, hits: "3-5", level: 2, source: SEEN },
 	"Ice Thrower": { mana: 1, dmg: 94, hits: "3", level: 1, source: SEEN },
 	"Nightbreaker": { mana: 2, dmg: 186, hits: "3-5", level: 1, source: SEEN },
+	// 202 is also exactly the wiki's 139 at level 2 WITH +5% Strength — taken as clean,
+	// like the rest of its sitting, but a re-read would settle it.
 	"Thousand Knives": { mana: 2, dmg: 202, hits: "8", level: 2, source: SEEN },
 	"Meteor Blades": { mana: 2, dmg: 216, hits: "1-3", level: 2, source: SEEN },
 	"Freezing Needles": { mana: 2, dmg: 266, hits: "1-2", level: 2, source: SEEN },

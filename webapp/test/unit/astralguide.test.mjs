@@ -263,9 +263,10 @@ test("every spell is at level 1: the wiki's lifted from level 0, readings from t
 
 test("the unchanged spells prove the wiki is level 0 (x1.2 at level 1, x1.4 at level 2)", () => {
 	for (const n of ["Ultra Loaded Knuckles", "Twin Dragon Punch", "Explosive Hug", "Helping Hands (got it?)",
-		"Sword of Judgment", "Magic Cyclone", "Aqua Ball"]) {
+		"Sword of Judgment", "Magic Cyclone", "Aqua Ball", "Sol"]) {
 		const o = GAME_SPELLS[n], w = data.spells.find((s) => s.name === n);
-		assert.ok(Math.abs(D.atLevel(w.dmg, D.WIKI_LEVEL, o.level) - o.dmg) <= 1, `${n}: wiki ${w.dmg} at level ${o.level} vs game ${o.dmg}`);
+		const onScreen = w.dmg * (1 + 0.2 * o.level + (o.strength || 0) / 100);
+		assert.ok(Math.abs(onScreen - o.dmg) <= 1, `${n}: wiki ${w.dmg} at level ${o.level} vs game ${o.dmg}`);
 	}
 	for (const [n, o] of Object.entries(GAME_SPELLS)) {
 		assert.ok(o.source, `${n} needs a source`);
