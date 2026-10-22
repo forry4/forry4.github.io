@@ -242,8 +242,8 @@ test("every spell is at level 1: the wiki's lifted from level 0, readings from t
 	assert.equal(by[plain.name].game, undefined);
 	// Read at level 1: as read. Read at level 2: x1.2/1.4.
 	assert.equal(by["Lightspeed Fist"].dmg, 173);
-	assert.equal(by["Dark Burst"].dmg, Math.round((266 * 1.2) / 1.4));
-	assert.equal(by["Dark Burst"].readAt, 2);
+	assert.equal(by["Water Bubbles"].dmg, Math.round((218 * 1.2) / 1.4));
+	assert.equal(by["Water Bubbles"].readAt, 2);
 	assert.equal(by["Resilio"].inferred, true);
 	// A bonus showing on screen adds to the level bonus, so +5% at level 1 is divided out of 1.25.
 	assert.equal(by["Pluvia"].dmg, Math.round((163 * 1.2) / 1.25));
@@ -265,7 +265,7 @@ test("every spell is at level 1: the wiki's lifted from level 0, readings from t
 
 test("the unchanged spells prove the wiki is level 0 (x1.2 at level 1, x1.4 at level 2)", () => {
 	for (const n of ["Ultra Loaded Knuckles", "Twin Dragon Punch", "Explosive Hug", "Helping Hands (got it?)",
-		"Sword of Judgment", "Magic Cyclone", "Aqua Ball", "Sol", "Sagitta", "Gravitas"]) {
+		"Sword of Judgment", "Magic Cyclone", "Aqua Ball", "Sol", "Sagitta", "Gravitas", "Frost Splinters", "Demonic Explosion"]) {
 		const o = GAME_SPELLS[n], w = data.spells.find((s) => s.name === n);
 		const onScreen = w.dmg * (1 + 0.2 * o.level + (o.bonus || 0) / 100);
 		assert.ok(Math.abs(onScreen - o.dmg) <= 1, `${n}: wiki ${w.dmg} at level ${o.level} vs game ${o.dmg}`);

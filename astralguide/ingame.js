@@ -46,6 +46,7 @@ export const GAME_SPELLS = {
 	// Octave's. Balista, Hasta and Laceratio were read twice and the later reading is kept
 	// (134 vs 140, 90 vs 91, 202 vs 186) — see READINGS VARY above.
 	"Balista": { mana: 1, dmg: 134, hits: "2-12", level: 1, source: SEEN },
+	// Read 4-6 hits twice and 2-6 once (at level 2, 105 -> 90, the same damage); 4-6 kept.
 	"Hasta": { mana: 1, dmg: 90, hits: "4-6", level: 1, source: SEEN },
 	"Laceratio": { mana: 2, dmg: 202, hits: "2-6", level: 1, source: SEEN },
 	// Sol read 313 in the +5% sitting and 300 since: the wiki's 250 x1.2, unchanged.
@@ -61,7 +62,10 @@ export const GAME_SPELLS = {
 	"Infinitus": { mana: 2, dmg: 175, hits: "4-6", level: 2, hero: "Octave", source: SEEN },
 	"Adustio": { mana: 2, dmg: 144, hits: "3-5", level: 1, source: SEEN },
 	"Perforatio": { mana: 2, dmg: 144, hits: "1-3", level: 1, source: SEEN },
-	"Praecipitatio": { mana: 2, dmg: 286, hits: "1-11", level: 2, source: SEEN },
+	// 286 at level 2 first, then 245 at level 1: exactly what the conversion predicted.
+	"Praecipitatio": { mana: 2, dmg: 245, hits: "1-11", level: 1, source: SEEN },
+	"Fax": { mana: 1, dmg: 102, hits: "4-6", level: 1, source: SEEN },
+	"Pruna": { mana: 2, dmg: 150, hits: "4-6", level: 1, source: SEEN },
 	"Eruca": { mana: 3, dmg: 252, hits: "6", level: 1, source: SEEN },
 	// 252 at level 1 and 294 at level 2: the same spell either way.
 	"Stella": { mana: 3, dmg: 294, hits: "6-8", level: 2, source: SEEN },
@@ -84,25 +88,34 @@ export const GAME_SPELLS = {
 	"Aqua Ball": { mana: 1, dmg: 144, hits: "1-3", level: 1, source: SEEN },
 	// Changed. Plasma Portal was read twice: 135 at level 2 and 148 at level 1; the later is kept.
 	"Plasma Portal": { mana: 2, dmg: 148, hits: "2-4", level: 1, source: SEEN },
-	"Thunder Orb": { mana: 1, dmg: 112, hits: "3-5", level: 2, source: SEEN },
+	// Thunder Orb, Meteor Blades and Dark Burst were first read at level 2; their later
+	// level-1 readings are exactly what the conversion gave (96, 185, 228).
+	"Thunder Orb": { mana: 1, dmg: 96, hits: "3-5", level: 1, source: SEEN },
 	"Ice Thrower": { mana: 1, dmg: 94, hits: "3", level: 1, source: SEEN },
 	"Nightbreaker": { mana: 2, dmg: 186, hits: "3-5", level: 1, source: SEEN },
 	// 202 is also exactly the wiki's 139 at level 2 WITH +5% Strength — taken as clean,
 	// like the rest of its sitting, but a re-read would settle it.
 	"Thousand Knives": { mana: 2, dmg: 202, hits: "8", level: 2, source: SEEN },
-	"Meteor Blades": { mana: 2, dmg: 216, hits: "1-3", level: 2, source: SEEN },
+	"Meteor Blades": { mana: 2, dmg: 185, hits: "1-3", level: 1, source: SEEN },
 	"Freezing Needles": { mana: 2, dmg: 266, hits: "1-2", level: 2, source: SEEN },
 	"Electrospheres": { mana: 1, dmg: 146, hits: "1-7", level: 1, source: SEEN },
 	"Burning Wave": { mana: 3, dmg: 250, hits: "8", level: 1, source: SEEN },
 	"World-Ender": { mana: 2, dmg: 228, hits: "1", level: 1, source: SEEN },
 	"Corrupted Typhoon": { mana: 3, dmg: 259, hits: "8", level: 1, source: SEEN },
 	"Eye of Judgment": { mana: 2, dmg: 180, hits: "3-7", level: 1, source: SEEN },
-	"Frost Splinters": { mana: 1, dmg: 105, hits: "2-4", level: 2, source: SEEN },
+	// Read 105 then 104 at level 2; 104 is the wiki's 74 x1.4 exactly, so it is unchanged.
+	"Frost Splinters": { mana: 1, dmg: 104, hits: "2-4", level: 2, source: SEEN },
 	"Water Bubbles": { mana: 2, dmg: 218, hits: "6", level: 2, source: SEEN },
 	"Demonic Explosion": { mana: 2, dmg: 144, hits: "1-3", level: 1, source: SEEN },
+	// Now 1 mana (the wiki says 2).
+	"Shattering Stars": { mana: 1, dmg: 90, hits: "2-4", level: 1, source: SEEN },
+	"Shooting Star": { mana: 1, dmg: 120, hits: "1-2", level: 1, source: SEEN },
+	"Ravaging Spheres": { mana: 2, dmg: 173, hits: "2-6", level: 1, source: SEEN },
+	"Glacial Spikes": { mana: 2, dmg: 173, hits: "2-4", level: 1, source: SEEN },
+	"Electrical Deluge": { mana: 3, dmg: 221, hits: "4-12", level: 1, source: SEEN },
 	"Ki Blast": { mana: 1, dmg: 96, hits: "1", level: 1, source: SEEN },
 	"Poisonous Vortex": { mana: 2, dmg: 173, hits: "2-10", level: 1, source: SEEN },
-	"Dark Burst": { mana: 2, dmg: 266, hits: "1", level: 2, source: SEEN },
+	"Dark Burst": { mana: 2, dmg: 228, hits: "1", level: 1, source: SEEN },
 	// Not on the wiki at all. Crater Maker's hero is not recorded, so it is not ranked.
 	"Crater Maker": { mana: 2, dmg: 192, hits: "2-6", level: 1, hero: null, source: SEEN },
 	"Hard Rock Punch": { mana: 2, dmg: 144, hits: "1-3", level: 1, source: SEEN },
