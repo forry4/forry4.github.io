@@ -258,14 +258,19 @@ test("every spell is at level 1: the wiki's lifted from level 0, readings from t
 	assert.equal(by["Hard Rock Punch"].hero, "Kiran");
 	assert.equal(by["Hard Rock Punch"].dpm, 72);
 	assert.equal(by["Infinitus"].hero, "Octave");
+	// A mana-only reading keeps the wiki's damage at level 1.
+	assert.equal(by["Fire Rain"].mana, 2);
+	assert.equal(by["Fire Rain"].dmg, Math.round(wiki("Fire Rain").dmg * 1.2));
+	assert.equal(by["Fire Rain"].readDmg, undefined);
 	assert.equal(by["Crater Maker"].group, null);
-	assert.equal(g.spells.length, data.spells.length + 2);
+	assert.equal(g.spells.length, data.spells.length + 3);
 	assert.equal(wiki("Hasta").dmg, 86, "the payload itself is not mutated");
 });
 
 test("the unchanged spells prove the wiki is level 0 (x1.2 at level 1, x1.4 at level 2)", () => {
 	for (const n of ["Ultra Loaded Knuckles", "Twin Dragon Punch", "Explosive Hug", "Helping Hands (got it?)",
-		"Sword of Judgment", "Magic Cyclone", "Aqua Ball", "Sol", "Sagitta", "Gravitas", "Frost Splinters", "Demonic Explosion"]) {
+		"Sword of Judgment", "Magic Cyclone", "Aqua Ball", "Sol", "Sagitta", "Gravitas", "Frost Splinters", "Demonic Explosion",
+		"Frost Mines", "Topaz Gladius - Guardian"]) {
 		const o = GAME_SPELLS[n], w = data.spells.find((s) => s.name === n);
 		const onScreen = w.dmg * (1 + 0.2 * o.level + (o.bonus || 0) / 100);
 		assert.ok(Math.abs(onScreen - o.dmg) <= 1, `${n}: wiki ${w.dmg} at level ${o.level} vs game ${o.dmg}`);

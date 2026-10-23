@@ -106,6 +106,7 @@ function Rich({ text, ctx }) {
 
 // How an in-game reading reached level 1: read there, or converted from the level it was read at.
 const readNote = (e) => {
+	if (e.readDmg == null) return `Only the mana cost was read in game; the damage is the wiki's × 1.2 (level ${GAME_BASE_LEVEL}).`;
 	const str = e.bonus ? ` with a +${e.bonus}% damage bonus showing (${e.readDmg} on screen, taken back out)` : "";
 	return e.readAt === GAME_BASE_LEVEL && !e.bonus
 		? `Read at level ${e.readAt}.`

@@ -69,6 +69,23 @@ export const GAME_SPELLS = {
 	"Eruca": { mana: 3, dmg: 252, hits: "6", level: 1, source: SEEN },
 	// 252 at level 1 and 294 at level 2: the same spell either way.
 	"Stella": { mana: 3, dmg: 294, hits: "6-8", level: 2, source: SEEN },
+	// Calie's.
+	"Prismatic Beam": { mana: 2, dmg: 169, hits: "3", level: 1, source: SEEN },
+	"Deadly Connections": { mana: 2, dmg: 148, hits: "2-4", level: 1, source: SEEN },
+	"Kunzite Scythe": { mana: 2, dmg: 168, hits: "1-3", level: 2, source: SEEN },
+	"Emerald Bow": { mana: 2, dmg: 202, hits: "6", level: 1, source: SEEN },
+	"Ruby Spear - Legion": { mana: 1, dmg: 96, hits: "1-3", level: 1, source: SEEN },
+	"Ruby Spear - Swarm": { mana: 2, dmg: 172, hits: "1-5", level: 2, source: SEEN },
+	"Shimmering Ascent": { mana: 2, dmg: 197, hits: "2-4", level: 1, source: SEEN },
+	"Stones Of The Ancients": { mana: 2, dmg: 194, hits: "1-3", level: 1, source: SEEN },
+	"Wall Of Arrows": { mana: 2, dmg: 144, hits: "2-6", level: 1, source: SEEN },
+	"Azurite Falchions - Disk": { mana: 3, dmg: 280, hits: "3-7", level: 2, source: SEEN },
+	// Unchanged from the wiki (within 1-2 of x1.2 / x1.4).
+	"Topaz Gladius - Guardian": { mana: 1, dmg: 122, hits: "6", level: 1, source: SEEN },
+	"Scylla & Charybdis": { mana: 3, dmg: 299, hits: "1", level: 1, source: SEEN },
+	"Stellar Radiation": { mana: 2, dmg: 203, hits: "1", level: 2, source: SEEN },
+	// Not on the wiki. Calie's by the company it was read in (her gem spells) and its name.
+	"Opulent Waltz": { mana: 3, dmg: 252, hits: "3", level: 1, hero: "Calie", source: SEEN },
 	// Kiran's, at the level given.
 	"Dirty Way Of Doing This": { dmg: 150, hits: "3-5", level: 1, source: SEEN },
 	"Relentless Fury": { dmg: 150, hits: "2-6", level: 1, source: SEEN },
@@ -107,6 +124,10 @@ export const GAME_SPELLS = {
 	"Frost Splinters": { mana: 1, dmg: 104, hits: "2-4", level: 2, source: SEEN },
 	"Water Bubbles": { mana: 2, dmg: 218, hits: "6", level: 2, source: SEEN },
 	"Demonic Explosion": { mana: 2, dmg: 144, hits: "1-3", level: 1, source: SEEN },
+	"Frost Mines": { mana: 2, dmg: 169, hits: "2-4", level: 1, source: SEEN },
+	"Dark Outbreak": { mana: 3, dmg: 314, hits: "3-5", level: 2, source: SEEN },
+	// Only the mana was read: 2, not the wiki's 1. Damage stays the wiki's x1.2.
+	"Fire Rain": { mana: 2, level: 1, source: SEEN },
 	// Now 1 mana (the wiki says 2).
 	"Shattering Stars": { mana: 1, dmg: 90, hits: "2-4", level: 1, source: SEEN },
 	"Shooting Star": { mana: 1, dmg: 120, hits: "1-2", level: 1, source: SEEN },
