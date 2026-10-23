@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { baseCss } from "../shared/theme.js";
 import { rangePointer } from "../shared/rangePointer.js";
+import { attachPrices, money, day } from "./prices.js";
 
 // CSS lives in the sibling .css file, imported with `?inline` so it is still a string
 // injected by this component's own <style> while mounted. Never move it back into a JS
@@ -11,6 +12,9 @@ const css = _cssText;
 // The dataset is a build artifact, fetched rather than bundled (see BggFilter.jsx).
 // Regenerate with steamfilter/tools/scan_steam.py + make_data.py.
 const DATA_URL = `${import.meta.env.BASE_URL || "/"}data/steam-filter.json`;
+// Prices move daily, so they ship in their own file (steamfilter/tools/prices.py, run by
+// the steam-prices workflow). The page works without it: every price reads "—".
+const PRICES_URL = `${import.meta.env.BASE_URL || "/"}data/steam-prices.json`;
 
 const REVIEWS = [50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000];
 const PAGE = 50;
@@ -22,9 +26,11 @@ const YMIN = 2005;
 const YMAX = new Date().getFullYear();
 
 // `cats`: category ids a game must ALL carry (AND, so Roguelike + Card game finds the
-// roguelike deckbuilders). `sw`: "any", "yes" (on Nintendo Switch) or "no".
-const DEFAULTS = { rev: REVIEWS.indexOf(500), yfrom: YMIN, yto: YMAX, cats: [], sw: "any" };
+// roguelike deckbuilders). `sw`: "any", "yes" (on Nintendo Switch) or "no". `sale`: a
+// sale running today on either store, on Steam, or on the eShop.
+const DEFAULTS = { rev: REVIEWS.indexOf(500), yfrom: YMIN, yto: YMAX, cats: [], sw: "any", sale: "any" };
 const SWITCH = [["any", "Any"], ["yes", "On Switch"], ["no", "Not on Switch"]];
+const SALE = [["any", "Any"], ["either", "On sale"], ["steam", "Steam sale"], ["switch", "Switch sale"]];
 const fmt = (n) => n.toLocaleString("en-US");
 
 function loadDials() {
@@ -37,6 +43,7 @@ function loadDials() {
 		}
 		if (Array.isArray(v.cats)) out.cats = v.cats.filter((c) => typeof c === "string");
 		if (SWITCH.some(([k]) => k === v.sw)) out.sw = v.sw;
+		if (SALE.some(([k]) => k === v.sale)) out.sale = v.sale;
 		out.rev = Math.min(REVIEWS.length - 1, Math.max(0, out.rev));
 		out.yfrom = Math.min(YMAX, Math.max(YMIN, out.yfrom));
 		out.yto = Math.min(YMAX, Math.max(out.yfrom, out.yto));
@@ -73,11 +80,26 @@ function Dial({ id, label, value, min, max, step, onChange, display }) {
 	);
 }
 
+// One store's price cell: today's price, and for a sale the regular price, the discount
+// and the day it ends. `none` is what a game with no price there shows.
+function Price({ p, store, none = "—" }) {
+	if (!p) return <td className="stf-price stf-num stf-none">{none}</td>;
+	if (!p.off) return <td className="stf-price stf-num">{money(p.cur)}</td>;
+	const when = p.start ? `${day(p.start)} – ${day(p.end)}` : p.end ? `until ${day(p.end)}` : "no end date given";
+	return (
+		<td className="stf-price stf-num" title={`${store} sale: ${money(p.cur)}, regularly ${money(p.reg)} (${when})`}>
+			<b className="stf-sale">{money(p.cur)}</b><span className="stf-off">−{p.off}%</span>
+			<span className="stf-was"><s>{money(p.reg)}</s>{p.end ? ` · to ${day(p.end)}` : ""}</span>
+		</td>
+	);
+}
+
 // Props: { onExit }.
 export default function SteamFilter({ onExit }) {
 	const [games, setGames] = useState(null);
 	const [err, setErr] = useState("");
 	const [meta, setMeta] = useState(null);
+	const [prices, setPrices] = useState(null);
 	const [d, setD] = useState(loadDials);
 	const [q, setQ] = useState("");
 	const [sortKey, setSortKey] = useState("f");
@@ -90,8 +112,16 @@ export default function SteamFilter({ onExit }) {
 			.then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
 			.then((j) => { if (live) { setMeta(j); setGames(derive(j.games || [])); } })
 			.catch((e) => { if (live) setErr(String(e.message || e)); });
+		fetch(PRICES_URL)
+			.then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+			.then((j) => { if (live) setPrices(j); })
+			.catch(() => { /* no prices: the columns read "—" */ });
 		return () => { live = false; };
 	}, []);
+
+	// A new array when prices land, so everything downstream re-sorts and re-filters.
+	const priced = useMemo(() => (games ? attachPrices(games, prices?.games, Date.now() / 1000).slice() : null),
+		[games, prices]);
 
 	useEffect(() => { try { localStorage.setItem(STORE, JSON.stringify(d)); } catch { /* private mode */ } }, [d]);
 
@@ -125,10 +155,13 @@ export default function SteamFilter({ onExit }) {
 		if (d.yto < YMAX && (!g.y || g.y > d.yto)) return false;
 		if (d.sw === "yes" && !g.sw) return false;
 		if (d.sw === "no" && g.sw) return false;
+		if (d.sale === "either" && !g.ps?.off && !g.pw?.off) return false;
+		if (d.sale === "steam" && !g.ps?.off) return false;
+		if (d.sale === "switch" && !g.pw?.off) return false;
 		return true;
 	}, [d]);
 
-	const base = useMemo(() => (games || []).filter(passBase), [games, passBase]);
+	const base = useMemo(() => (priced || []).filter(passBase), [priced, passBase]);
 	const pool = useMemo(() => base.filter((g) => picked.every((c) => g.c.includes(c))), [base, picked]);
 	// A chip's count is what the list would hold with that chip on as well.
 	const catCount = useMemo(() => {
@@ -140,9 +173,11 @@ export default function SteamFilter({ onExit }) {
 	const view = useMemo(() => {
 		const needle = q.trim().toLowerCase();
 		const rows = needle ? pool.filter((g) => g.n.toLowerCase().includes(needle)) : pool.slice();
+		// A missing value (no year, no price in that store) sorts last in either direction.
 		rows.sort((a, b) => {
-			const x = a[sortKey] ?? -1, y = b[sortKey] ?? -1;
-			const c = typeof x === "string" ? x.localeCompare(y) : x - y;
+			const x = a[sortKey], y = b[sortKey];
+			if ((x == null) !== (y == null)) return x == null ? 1 : -1;
+			const c = x == null ? 0 : typeof x === "string" ? x.localeCompare(y) : x - y;
 			return c * dir || a.n.localeCompare(b.n);
 		});
 		return rows;
@@ -150,7 +185,7 @@ export default function SteamFilter({ onExit }) {
 
 	const sortBy = (k) => {
 		if (k === sortKey) setDir((v) => -v);
-		else { setSortKey(k); setDir(k === "n" ? 1 : -1); }
+		else { setSortKey(k); setDir(k === "n" || k === "sp" || k === "wp" ? 1 : -1); }
 		setLimit(PAGE);
 	};
 
@@ -231,6 +266,19 @@ export default function SteamFilter({ onExit }) {
 										</div>
 									</>
 								)}
+								{prices && (
+									<>
+										<p className="stf-mhead">Sales — <em>running today, US stores</em></p>
+										<div className="stf-seg" role="group" aria-label="Sales">
+											{SALE.map(([k, label]) => (
+												<button type="button" key={k} aria-pressed={d.sale === k}
+													onClick={() => { setD((prev) => ({ ...prev, sale: k })); setLimit(PAGE); }}>
+													{label}
+												</button>
+											))}
+										</div>
+									</>
+								)}
 								<p className="stf-effect">
 									{!games.length
 										? <>The Steam list hasn’t been harvested yet.</>
@@ -263,11 +311,13 @@ export default function SteamFilter({ onExit }) {
 											{th("a", "Positive")}
 											{th("t", "Reviews")}
 											{th("y", "Released")}
+											{th("sp", "Steam")}
+											{th("wp", "Switch")}
 										</tr>
 									</thead>
 									<tbody>
 										{!view.length && (
-											<tr><td className="stf-empty" colSpan={7}>
+											<tr><td className="stf-empty" colSpan={9}>
 												{games.length
 													? <><b>Nothing clears every dial.</b>Drop a category, loosen the review minimum or widen the years.</>
 													: <><b>No data yet.</b>The Steam list hasn’t been harvested.</>}
@@ -281,7 +331,7 @@ export default function SteamFilter({ onExit }) {
 														target="_blank" rel="noopener noreferrer">{g.n}</a>
 													{(g.sw || g.c.length > 0) && (
 														<span className="stf-tags">
-															{g.sw ? <i className="stf-switch">Switch</i> : null}
+															{g.sw ? <i className="stf-switch">{g.w2 ? "Switch 2" : "Switch"}</i> : null}
 															{g.c.map((c) => catLabel[c]).filter(Boolean).join(" · ")}
 														</span>
 													)}
@@ -293,6 +343,8 @@ export default function SteamFilter({ onExit }) {
 												</td>
 												<td className="stf-t stf-num">{fmt(g.t)}</td>
 												<td className="stf-y stf-num">{g.y || "—"}</td>
+												<Price p={g.ps} store="Steam" />
+												<Price p={g.pw} store="eShop" none={g.sw ? "—" : ""} />
 											</tr>
 										))}
 									</tbody>
@@ -330,6 +382,19 @@ export default function SteamFilter({ onExit }) {
 											both.</p>
 										<p><b>Switch</b> means a game of the same title is in Nintendo’s European eShop.
 											It is matched by name, so a port sold under a different title can be missed.</p>
+									</div>
+								)}
+								{prices && (
+									<div>
+										<h3>Prices and sales</h3>
+										<p>US prices, read {prices.priced ? prices.priced.slice(0, 10) : "recently"} and
+											refreshed daily. <b>Steam</b> is the game’s own store listing; <b>Switch</b> is
+											the cheapest eShop listing of the same title today — a Switch 2 version or
+											Nintendo Switch 2 Edition counts, and the badge reads <b>Switch 2</b> when one
+											is sold.</p>
+										<p>A sale shows its discount and the day it ends, in your time zone, and drops
+											back to the regular price once that day passes. Sort a store’s column for
+											the cheapest first.</p>
 									</div>
 								)}
 								<div>

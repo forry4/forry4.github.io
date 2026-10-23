@@ -1,0 +1,52 @@
+name: Steam Filter prices
+
+# Re-reads today's Steam and US eShop prices (and the sales running) for every game
+# in the Steam Filter payload into webapp/public/data/steam-prices.json, and commits
+# it to main. ~2 minutes: ~90 Steam requests and ~40 eShop searches.
+#
+# Twice a day, because GitHub drops a good share of scheduled firings (CLAUDE.md,
+# keep-alive) and sales start at both ends of the day: the eShop's at 07:00 or 16:00
+# UTC, Steam's at 17:00. The page never shows a sale past its end, so a missed run
+# leaves a sale that started unshown, never an ended one shown.
+#
+# prices.py leaves the file untouched when no price moved, so a quiet run commits
+# nothing and fires no deploy. A push made with GITHUB_TOKEN does not trigger other
+# workflows, so the job dispatches the Pages deploy itself.
+
+on:
+  schedule:
+    - cron: "17 8 * * *"
+    - cron: "43 17 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: steam-prices
+  cancel-in-progress: false
+
+jobs:
+  prices:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - name: Read prices
+        run: python -u steamfilter/tools/prices.py
+      - name: Commit and deploy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add webapp/public/data/steam-prices.json
+          if git diff --cached --quiet; then echo "no change"; exit 0; fi
+          git commit -m "Steam Filter: prices $(date -u +%Y-%m-%d)"
+          git pull --rebase origin main
+          git push origin HEAD:main
+          gh workflow run deploy-pages.yml --ref main

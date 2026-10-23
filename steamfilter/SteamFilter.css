@@ -68,7 +68,7 @@
 /* ── table ─────────────────────────────────────────────────────────────── */
 .stf-tablewrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);
 	background:var(--surface);}
-.stf table{border-collapse:collapse;width:100%;min-width:640px;}
+.stf table{border-collapse:collapse;width:100%;min-width:820px;}
 .stf thead th{position:sticky;top:0;z-index:2;background:var(--surface2);
 	border-bottom:1px solid var(--border);font-size:.68rem;letter-spacing:.1em;
 	text-transform:uppercase;color:var(--text-dim);font-weight:700;text-align:left;
@@ -92,6 +92,14 @@
    the Rating column's weight without its gold. */
 .stf-f{width:78px;color:var(--text);font-size:.9rem;font-weight:600;}
 .stf-a,.stf-t,.stf-y{width:84px;color:var(--text-dim);font-size:.82rem;}
+/* a store's price: today's, and on a sale the discount, then the struck regular price
+   and the day the sale ends on a second line */
+.stf-price{width:104px;white-space:nowrap;font-size:.86rem;color:var(--text);}
+.stf-none{color:var(--text-muted);}
+.stf-sale{color:#7fd17f;font-weight:700;}
+.stf-off{margin-left:5px;font-size:.68rem;font-weight:700;color:var(--bg);background:#7fd17f;
+	border-radius:3px;padding:0 4px;}
+.stf-was{display:block;font-size:.68rem;color:var(--text-muted);margin-top:2px;}
 
 .stf-empty{padding:44px 16px;text-align:center;color:var(--text-dim);}
 .stf-empty b{display:block;color:var(--text);font-size:1rem;margin-bottom:6px;}

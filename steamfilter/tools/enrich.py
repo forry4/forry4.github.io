@@ -116,8 +116,10 @@ def category_members(fetch, log, appids, cats=None):
 # ── Nintendo Switch ───────────────────────────────────────────────────────
 
 # Applied after punctuation is folded to spaces, so "Director's Cut" is "directors cut".
+# "Nintendo Switch 2 Edition" is how the eShop sells a Switch 2 upgrade of a game.
 EDITION = re.compile(
-    r"\s+(?:(?:for\s+)?nintendo\s+switch(?:\s+edition)?|switch\s+edition|remastered|directors\s+cut|"
+    r"\s+(?:(?:for\s+)?nintendo\s+switch(?:\s+2)?(?:\s+edition)?|switch(?:\s+2)?\s+edition|"
+    r"remastered|directors\s+cut|"
     r"(?:definitive|complete|deluxe|ultimate|enhanced|special|anniversary|game\s+of\s+the\s+year|"
     r"goty|digital|standard|gold|collectors)\s+edition)$")
 

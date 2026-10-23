@@ -12,8 +12,11 @@ reviews. No backend — it fetches one static JSON and does everything client-si
 | `tools/make_data.py` | `results_all.json` → `webapp/public/data/steam-filter.json` (the shipped payload) |
 | `tools/enrich.py` | categories (Steam store tags) + Nintendo Switch availability (eShop title match) |
 | `tools/categories.json` | the category groups — label + the Steam tags each one ORs together |
+| `tools/prices.py` | US Steam + eShop prices and running sales → `webapp/public/data/steam-prices.json` |
+| `prices.js` | the page's price logic (sale window, sort keys), unit-tested by `webapp/test/unit/steamPrices.test.mjs` |
 | `tests/test_scan_steam.py` | the parse + admission rule, off canned store markup |
 | `tests/test_enrich.py` | title folding, tag unions, eShop paging + the truncation guards |
+| `tests/test_prices.py` | both stores' price parsing, listing choice, batching + the thin-answer guards |
 
 The slider pointer handling is shared with BGG Filter via `shared/rangePointer.js`.
 
@@ -52,6 +55,29 @@ so a change to `categories.json` never needs the 7-hour review harvest.
   page at ~1,000 docs whatever `rows` asks**, so `start` steps by the docs that came back,
   never by `rows`: stepping by 2,000 read half the catalogue (19,912 entries → 9,947 titles,
   and Hades, Balatro, Slay the Spire and Terraria read "not on Switch"); by 10,000, a tenth.
+
+## Prices (`tools/prices.py`) — their own file, their own workflow
+
+Prices move daily and a sale ends mid-week, while the review harvest runs every month or
+two, so they ship as `steam-prices.json`, written by `.github/workflows/steam-prices.yml`
+(08:17 + 17:43 UTC daily, and "Run workflow"; ~2 min). `prices.py` leaves the file untouched
+when nothing moved, so a quiet run commits nothing and fires no deploy. The page fetches it
+beside the payload and works without it (every price reads "—").
+- **Steam** — the same `IStoreBrowseService/GetItems` as the tags, with
+  `include_all_purchase_options`: `best_purchase_option` gives the price, the discount and
+  `active_discounts[].discount_end_date`. Steam gives no START.
+- **Switch** — nintendo.com's own store search (Algolia app `U3B6GR4UA3`, the search-only
+  key the site ships to every browser; index `store_game_en_us`), 50 queries a request,
+  only for `sw` games, **searched by the FOLDED title** — the full one let "Game of the Year
+  Edition" rank every other GOTY above Batman. A hit must `norm_title`-match; the cheapest
+  listing today wins (Switch, Switch 2 and Deluxe listings of one game all match), and `w2`
+  records that a Switch 2 version is sold. `eshopDetails` carries the sale's start AND end.
+  **DLC is `dlcType: "Individual"` only** — a "ROM Bundle" is a game sold with its DLC, and
+  DOOM Eternal's base listing is one. Some games have a priceless twin listing; skip it.
+- **The page shows a sale only inside its window** (`priceNow` in `prices.js`), so a file a
+  day old shows an ended sale at its regular price, never a price that is gone.
+- Guards: Steam must price 95% of the payload, the eShop 85% of `sw` games and every
+  `enrich.CANARIES` title. Measured 2026-10-23: 8,556/8,567 and 1,970/1,992.
 
 ## Harvest shape
 

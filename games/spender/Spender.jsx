@@ -827,7 +827,7 @@ const OFFLINE_PACKS = {
 	// download is complete without visiting each screen first.
 	reading: {
 		label: "Puzzles, BGG & Steam Filters, Astral Ascent Guide, Books, Notes & profile", size: "~1.7 MB",
-		urls: ["data/puzzles.json", "data/bgg-filter.json", "data/steam-filter.json", "data/astral-guide.json", ...OFFLINE_FONT_URLS],
+		urls: ["data/puzzles.json", "data/bgg-filter.json", "data/steam-filter.json", "data/steam-prices.json", "data/astral-guide.json", ...OFFLINE_FONT_URLS],
 		chunks: [
 			() => import("../../books/Books.jsx"), () => import("../../notes/Notes.jsx"),
 			() => import("../../shared/Profile.jsx"), () => import("../../bggfilter/BggFilter.jsx"),

@@ -84,15 +84,16 @@ def validate_reviews(body):
     return j
 
 
-def fetch(url, check, tries=10):
-    """GET url, validate with `check`, retry. 429 and 5xx back off harder than a
-    malformed body: Steam's store rate-limits per IP and recovers in tens of seconds."""
+def fetch(url, check, tries=10, data=None, headers=None):
+    """GET url (POST `data` when given), validate with `check`, retry. 429 and 5xx back
+    off harder than a malformed body: Steam's store rate-limits per IP and recovers in
+    tens of seconds."""
     last = None
     for a in range(tries):
         try:
-            req = urllib.request.Request(url, headers={
+            req = urllib.request.Request(url, data=data, headers={
                 "User-Agent": UA, "Accept-Language": "en-US,en;q=0.9",
-                "Accept": "application/json,text/javascript,*/*;q=0.8"})
+                "Accept": "application/json,text/javascript,*/*;q=0.8", **(headers or {})})
             with urllib.request.urlopen(req, timeout=45) as r:
                 body = r.read().decode("utf-8", "replace")
             return check(body)

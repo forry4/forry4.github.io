@@ -12,6 +12,8 @@ from steamfilter.tools import enrich as e
     ("DEAD CELLS", "dead cells"),
     ("Dead Cells - Nintendo Switch Edition", "dead cells"),
     ("Celeste Remastered Nintendo Switch Edition", "celeste"),
+    ("Hades II – Nintendo Switch™ 2 Edition", "hades ii"),
+    ("Dispatch Nintendo Switch 2 Edition", "dispatch"),
     ("The Witcher 3: Wild Hunt – Complete Edition", "the witcher 3 wild hunt"),
     ("Pokémon", "pokemon"),
     ("Baldur's Gate 3", "baldurs gate 3"),
