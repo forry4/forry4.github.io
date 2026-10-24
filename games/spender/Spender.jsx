@@ -3098,7 +3098,7 @@ export default function SpenderApp() {
 	// Steam Filter — static Steam reviews dataset, filtered client-side. No backend.
 	if (screen === "steamfilter") return (
 		<Suspense fallback={<GameChunkLoading />}>
-			<SteamFilter onExit={exitRead} />
+			<SteamFilter authUser={authUser} onExit={exitRead} />
 		</Suspense>
 	);
 

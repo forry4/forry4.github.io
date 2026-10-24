@@ -10629,6 +10629,101 @@ try {
 	// A frontend-only page over a static payload. Each check states its ROSTER before
 	// anything about it: a tab that rendered nothing would otherwise pass every
 	// "no overflow" and "count matches" check by having nothing to measure.
+	// STEAM FILTER SAVED GAMES — a guest's star survives a reload; a signed-in reader's
+	// lives on the SERVER, so a second browser (fresh storage) shows it; a guest list on
+	// the device joins the account on first sign-in; and unsaving reaches the server too.
+	async function steamSaved(log) {
+		const check = (name, cond, detail = "") => {
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(`steamSaved: ${name}`); log(`  FAIL ${name}  ${detail}`); }
+		};
+		const games = JSON.parse(readFileSync(path.join(webappDir, "public", "data", "steam-filter.json"), "utf8")).games;
+		const terraria = games.find((g) => g.n === "Terraria");
+		const open = async (seed) => {
+			const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+			await ctx.addInitScript(seed.init, seed.arg);
+			const page = await ctx.newPage();
+			const errors = [];
+			page.on("pageerror", (e) => errors.push(String(e)));
+			const posts = [];
+			page.on("response", (r) => {
+				if (r.url().endsWith("/steamfilter/saved") && r.request().method() === "POST") posts.push(r.status());
+			});
+			await page.goto(`http://localhost:${PORT}/steamfilter`, { waitUntil: "networkidle" });
+			await page.waitForSelector(".stf tbody .stf-star button", { timeout: 25_000 }).catch(() => {});
+			return { ctx, page, errors, posts };
+		};
+		const savedCount = (page) => page.locator('.stf-controls [aria-label="Show"] button', { hasText: "Saved" })
+			.locator(".stf-num").textContent({ timeout: 3_000 }).catch(() => "");
+		const firstName = (page) => page.locator(".stf tbody tr").first().locator(".stf-game a").textContent();
+
+		// 1 — a guest: the star is kept in this browser and survives a reload
+		{
+			const { ctx, page, errors } = await open({ arg: null, init: () => localStorage.setItem("spender_user",
+				JSON.stringify({ id: "screens-steam", name: "Saver", guest: true })) });
+			const name = await firstName(page);
+			await page.locator(".stf tbody tr").first().locator(".stf-star button").click();
+			check("a guest's star fills and the Saved count reads 1",
+				await page.locator(".stf tbody tr").first().locator('.stf-star button[aria-pressed="true"]').count() === 1
+				&& await savedCount(page) === "1", await savedCount(page));
+			await page.reload({ waitUntil: "networkidle" });
+			await page.waitForSelector(".stf tbody .stf-star button", { timeout: 25_000 }).catch(() => {});
+			await page.locator('.stf-controls [aria-label="Show"] button', { hasText: "Saved" }).click();
+			const rows = await page.locator(".stf tbody .stf-game a").allTextContents();
+			check("...and after a reload Saved lists exactly that game", JSON.stringify(rows) === JSON.stringify([name]),
+				JSON.stringify(rows));
+			check("no page errors (guest)", errors.length === 0, errors.join(" | "));
+			await ctx.close();
+		}
+
+		// 2 — a registered reader, with a guest list already on the device
+		const uname = `st${Date.now().toString(36)}`.slice(0, 16);
+		const reg = await fetch(`http://localhost:${API_PORT}/auth/register`, { method: "POST",
+			headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: uname, password: "steam" }) })
+			.then((r) => r.json()).catch((e) => ({ ok: false, message: String(e) }));
+		check("a fresh account registers", reg.ok && !!reg.session_token, JSON.stringify(reg));
+		if (!reg.ok) return;
+		const user = { ...reg.user, session_token: reg.session_token };
+		const onServer = () => fetch(`http://localhost:${API_PORT}/steamfilter/saved`,
+			{ headers: { Authorization: `Bearer ${reg.session_token}` } }).then((r) => r.json()).then((j) => j.saved.map((x) => x[0]));
+		const signedIn = { arg: user, init: (u) => localStorage.setItem("spender_user", JSON.stringify(u)) };
+		let starred;
+		{
+			const { ctx, page, errors, posts } = await open({ arg: [user, terraria.id], init: ([u, id]) => {
+				localStorage.setItem("spender_user", JSON.stringify(u));
+				localStorage.setItem("steam_filter_saved_v1.guest", JSON.stringify({ saved: { [id]: 1 }, pending: {} }));
+			} });
+			for (let t = 0; t < 50 && !posts.includes(200); t++) await page.waitForTimeout(100);
+			check("the device's guest list joins the account on first sign-in",
+				JSON.stringify(await onServer()) === JSON.stringify([terraria.id]), JSON.stringify(await onServer()));
+			// star the first game the list shows that is not already saved
+			const row = page.locator(".stf tbody tr").filter({ has: page.locator('.stf-star button[aria-pressed="false"]') }).first();
+			starred = await row.locator(".stf-game a").textContent();
+			const before = posts.length;
+			await row.locator(".stf-star button").click();
+			for (let t = 0; t < 50 && posts.length === before; t++) await page.waitForTimeout(100);
+			check("a member's star is posted to the server", posts.slice(before).every((s) => s === 200) && posts.length > before,
+				JSON.stringify(posts));
+			check("no page errors (member, first browser)", errors.length === 0, errors.join(" | "));
+			await ctx.close();
+		}
+		{
+			const { ctx, page, errors, posts } = await open(signedIn);
+			for (let t = 0; t < 50 && await savedCount(page) !== "2"; t++) await page.waitForTimeout(100);
+			await page.locator('.stf-controls [aria-label="Show"] button', { hasText: "Saved" }).click();
+			const rows = (await page.locator(".stf tbody .stf-game a").allTextContents()).sort();
+			check("a second browser shows both saved games", JSON.stringify(rows) === JSON.stringify([starred, "Terraria"].sort()),
+				JSON.stringify(rows));
+			const before = posts.length;
+			await page.locator(".stf tbody tr", { hasText: "Terraria" }).locator(".stf-star button").click();
+			for (let t = 0; t < 50 && posts.length === before; t++) await page.waitForTimeout(100);
+			const left = await onServer();
+			check("unsaving reaches the server", left.length === 1 && left[0] !== terraria.id, JSON.stringify(left));
+			check("no page errors (member, second browser)", errors.length === 0, errors.join(" | "));
+			await ctx.close();
+		}
+	}
+
 	async function astralGuide(log) {
 		const check = (name, cond, detail = "") => {
 			if (cond) log(`  OK   ${name}`);
@@ -10845,7 +10940,7 @@ try {
 		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, historyRecovery, dmAdventures,
 		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, formControlZoom, lastDifficulty,
 		dissonanceQuartet, orbitPlay, lobbyFinishSync, blackCastlePlay, pinchPlay, pipMarketPlay, secretNamesPlay, lobbyChrome,
-		notesEditor, profilePage, offlineRead, boxPuzzles, boxDaily, astralGuide, updateNudgeLayout];
+		notesEditor, profilePage, offlineRead, boxPuzzles, boxDaily, astralGuide, steamSaved, updateNudgeLayout];
 
 	// EVERY BLOCK MUST BE IN A LANE. Before the lanes existed, adding a block meant
 	// writing it — it then ran because it was simply the next statement. Now it has

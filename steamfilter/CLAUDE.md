@@ -1,12 +1,15 @@
 # Steam Filter — Claude Context
 
-BGG Filter's sibling over Steam: a **frontend-only** filterable table of every game on the
-Steam store whose **English** reviews are **90% or more positive**, with at least 50 English
-reviews. No backend — it fetches one static JSON and does everything client-side.
+BGG Filter's sibling over Steam: a filterable table of every game on the Steam store whose
+**English** reviews are **90% or more positive**, with at least 50 English reviews. The list
+and its prices are static JSON filtered client-side; the ONE server feature is each
+account's **saved games** (`api.py`, below).
 
 | File | What it is |
 |---|---|
-| `SteamFilter.jsx` | the whole feature; props are just `{ onExit }` |
+| `SteamFilter.jsx` | the whole page; props `{ authUser, onExit }` (`authUser` for saved games) |
+| `api.py` | saved games: `GET`/`POST /steamfilter/saved`, table `steam_saved` |
+| `saved.js` | the page's saved-list sync (device copy + queue), unit-tested by `webapp/test/unit/steamSaved.test.mjs` |
 | `SteamFilter.css` | `?inline`-imported stylesheet, `.stf`-prefixed (started as a copy of BGG's) |
 | `tools/scan_steam.py` | **the harvester** — store search, then English review totals per candidate |
 | `tools/make_data.py` | `results_all.json` → `webapp/public/data/steam-filter.json` (the shipped payload) |
@@ -16,6 +19,7 @@ reviews. No backend — it fetches one static JSON and does everything client-si
 | `prices.js` | the page's price logic (sale window, sort keys), unit-tested by `webapp/test/unit/steamPrices.test.mjs` |
 | `tests/test_scan_steam.py` | the parse + admission rule, off canned store markup |
 | `tests/test_enrich.py` | title folding, tag unions, eShop paging + the truncation guards |
+| `tests/test_api.py` | the saved list on real sqlite + the routes: auth, per-account, cap, rate limit |
 | `tests/test_prices.py` | both stores' price parsing, listing choice, batching + the thin-answer guards |
 
 The slider pointer handling is shared with BGG Filter via `shared/rangePointer.js`.
@@ -110,6 +114,26 @@ Mirror BGG Filter's Geek / F / Average trio, derived in `derive()`:
   50% by an amount that shrinks with the review count (100% of 60 → ~85.5; 97% of 100k → ~95.5).
   The count-aware analogue of the Geek rating.
 - **F score** (`f`) — their midpoint, exactly as BGG's F average. Default sort.
+
+## Saved games (`api.py` + `saved.js`)
+
+A ☆ on every row; **Saved** above the table lists every saved game whatever the dials
+say (a game kept for later must not vanish because a dial moved since).
+- **Signed in, the list is the ACCOUNT's** (`steam_saved`, one row per user per app id,
+  capped at 2,000), so it follows the reader between devices. **One write route**,
+  `POST {save, unsave}`, answers with the WHOLE list, so a single star and a batch are
+  the same call and the page never reconciles a partial reply.
+- **The device keeps a copy per identity** (`steam_filter_saved_v1.<id>`): `saved` plus
+  `pending`, the stars not yet acknowledged. A star shows at once; requests go one at a
+  time and whatever was pressed meanwhile goes in the next (`settle` keeps a change queued
+  if it moved again while its request was out). Offline, or with an expired session, the
+  copy stands and the queue waits for the next visit.
+- **A guest's list stays in the browser** and is handed to the account (as queued saves)
+  the first time that browser is signed in.
+- Wired in `app.py` behind the usual try/except; `deploy-render.yml` carries
+  `steamfilter/*.py` (a single `*`, so `tools/` never restarts prod). `screens.mjs`
+  `steamSaved` drives the guest reload, the guest→account hand-over, a second browser and
+  an unsave against the live backend.
 
 ## Wiring
 

@@ -1,7 +1,8 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { baseCss } from "../shared/theme.js";
 import { rangePointer } from "../shared/rangePointer.js";
 import { attachPrices, money, day } from "./prices.js";
+import { readSaved, writeSaved, clearSaved, toggle, adopt, settle, batch } from "./saved.js";
 
 // CSS lives in the sibling .css file, imported with `?inline` so it is still a string
 // injected by this component's own <style> while mounted. Never move it back into a JS
@@ -15,6 +16,9 @@ const DATA_URL = `${import.meta.env.BASE_URL || "/"}data/steam-filter.json`;
 // Prices move daily, so they ship in their own file (steamfilter/tools/prices.py, run by
 // the steam-prices workflow). The page works without it: every price reads "—".
 const PRICES_URL = `${import.meta.env.BASE_URL || "/"}data/steam-prices.json`;
+// Saved games are the page's one piece of server state (steamfilter/api.py).
+const WS_BASE = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
+const HTTP_BASE = WS_BASE.replace(/^ws/, "http").replace(/\/ws$/, "");
 
 const REVIEWS = [50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000];
 const PAGE = 50;
@@ -94,8 +98,70 @@ function Price({ p, store, none = "—" }) {
 	);
 }
 
-// Props: { onExit }.
-export default function SteamFilter({ onExit }) {
+async function api(path, token, body) {
+	const headers = { Authorization: `Bearer ${token}` };
+	if (body) headers["Content-Type"] = "application/json";
+	const res = await fetch(HTTP_BASE + path, { method: body ? "POST" : "GET", headers,
+		body: body ? JSON.stringify(body) : undefined });
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return res.json();
+}
+
+// The saved list: this device's copy, and for a signed-in reader the account's, synced.
+// A star shows at once; the request follows, one at a time, and whatever was pressed
+// while one was out goes in the next. Offline (or signed out by the server) the device
+// copy stands and the queue waits for the next visit.
+function useSaved(authUser) {
+	const token = authUser && !authUser.guest && authUser.session_token ? authUser.session_token : null;
+	const who = token ? authUser.id : "guest";
+	const [store, setStore] = useState(() => readSaved(who));
+	const ref = useRef(store);
+	const busy = useRef(false);
+
+	const update = useCallback((next) => {
+		ref.current = next;
+		setStore(next);
+		writeSaved(who, next);
+	}, [who]);
+
+	const sync = useCallback(async () => {
+		if (!token || busy.current) return;
+		busy.current = true;
+		try {
+			for (let round = 0; round < 5; round++) {
+				const sent = { ...ref.current.pending };
+				const r = Object.keys(sent).length
+					? await api("/steamfilter/saved", token, batch(sent))
+					: await api("/steamfilter/saved", token);
+				const next = settle(ref.current, sent, r.saved || []);
+				update(next);
+				if (!Object.keys(next.pending).length) break;
+			}
+		} catch { /* offline or signed out: the device copy stands, the queue waits */ }
+		finally { busy.current = false; }
+	}, [token, update]);
+
+	useEffect(() => {
+		let s = readSaved(who);
+		// A list made as a guest on this device joins the account the first time.
+		if (token) {
+			const guest = readSaved("guest");
+			if (Object.keys(guest.saved).length) { s = adopt(s, guest, Date.now() / 1000); clearSaved("guest"); }
+		}
+		update(s);
+		sync();
+	}, [who, token, update, sync]);
+
+	const flip = useCallback((id) => {
+		update(toggle(ref.current, id, Date.now() / 1000, !!token));
+		sync();
+	}, [token, update, sync]);
+
+	return { saved: store.saved, flip, member: !!token };
+}
+
+// Props: { authUser, onExit }.
+export default function SteamFilter({ authUser, onExit }) {
 	const [games, setGames] = useState(null);
 	const [err, setErr] = useState("");
 	const [meta, setMeta] = useState(null);
@@ -105,6 +171,10 @@ export default function SteamFilter({ onExit }) {
 	const [sortKey, setSortKey] = useState("f");
 	const [dir, setDir] = useState(-1);
 	const [limit, setLimit] = useState(PAGE);
+	const { saved, flip, member } = useSaved(authUser);
+	// "all": the dials' list. "saved": every saved game, dials or not — a game kept for
+	// later should not vanish because a dial moved since.
+	const [show, setShow] = useState("all");
 
 	useEffect(() => {
 		let live = true;
@@ -122,6 +192,7 @@ export default function SteamFilter({ onExit }) {
 	// A new array when prices land, so everything downstream re-sorts and re-filters.
 	const priced = useMemo(() => (games ? attachPrices(games, prices?.games, Date.now() / 1000).slice() : null),
 		[games, prices]);
+	const nSaved = useMemo(() => (priced || []).filter((g) => g.id in saved).length, [priced, saved]);
 
 	useEffect(() => { try { localStorage.setItem(STORE, JSON.stringify(d)); } catch { /* private mode */ } }, [d]);
 
@@ -172,7 +243,8 @@ export default function SteamFilter({ onExit }) {
 	}, [pool, cats]);
 	const view = useMemo(() => {
 		const needle = q.trim().toLowerCase();
-		const rows = needle ? pool.filter((g) => g.n.toLowerCase().includes(needle)) : pool.slice();
+		const from = show === "saved" ? (priced || []).filter((g) => g.id in saved) : pool;
+		const rows = needle ? from.filter((g) => g.n.toLowerCase().includes(needle)) : from.slice();
 		// A missing value (no year, no price in that store) sorts last in either direction.
 		rows.sort((a, b) => {
 			const x = a[sortKey], y = b[sortKey];
@@ -181,7 +253,7 @@ export default function SteamFilter({ onExit }) {
 			return c * dir || a.n.localeCompare(b.n);
 		});
 		return rows;
-	}, [pool, q, sortKey, dir]);
+	}, [pool, priced, saved, show, q, sortKey, dir]);
 
 	const sortBy = (k) => {
 		if (k === sortKey) setDir((v) => -v);
@@ -289,6 +361,14 @@ export default function SteamFilter({ onExit }) {
 							</section>
 
 							<div className="stf-controls">
+								<div className="stf-seg" role="group" aria-label="Show">
+									<button type="button" aria-pressed={show === "all"}
+										onClick={() => { setShow("all"); setLimit(PAGE); }}>All games</button>
+									<button type="button" aria-pressed={show === "saved"}
+										onClick={() => { setShow("saved"); setLimit(PAGE); }}>
+										Saved<span className="stf-num">{fmt(nSaved)}</span>
+									</button>
+								</div>
 								<label className="stf-search">
 									<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
 										strokeWidth="2.2" aria-hidden="true">
@@ -297,7 +377,11 @@ export default function SteamFilter({ onExit }) {
 									<input type="search" placeholder="Filter by title…" aria-label="Filter by title"
 										value={q} onChange={(e) => { setQ(e.target.value); setLimit(PAGE); }} />
 								</label>
-								<p className="stf-count"><b>{fmt(view.length)}</b> of {fmt(pool.length)} shown</p>
+								<p className="stf-count">
+									{show === "saved"
+										? <><b>{fmt(view.length)}</b> of {fmt(nSaved)} saved shown</>
+										: <><b>{fmt(view.length)}</b> of {fmt(pool.length)} shown</>}
+								</p>
 							</div>
 
 							<div className="stf-tablewrap">
@@ -305,6 +389,7 @@ export default function SteamFilter({ onExit }) {
 									<thead>
 										<tr>
 											<th className="stf-pos">#</th>
+											<th className="stf-star" aria-label="Saved" />
 											{th("n", "Game")}
 											{th("r", "Rating")}
 											{th("f", "F score")}
@@ -317,8 +402,12 @@ export default function SteamFilter({ onExit }) {
 									</thead>
 									<tbody>
 										{!view.length && (
-											<tr><td className="stf-empty" colSpan={9}>
-												{games.length
+											<tr><td className="stf-empty" colSpan={10}>
+												{show === "saved"
+													? (nSaved
+														? <><b>No saved game matches that title.</b>Clear the title filter to see them all.</>
+														: <><b>No saved games yet.</b>Tap the ☆ beside a game to keep it here for later.</>)
+													: games.length
 													? <><b>Nothing clears every dial.</b>Drop a category, loosen the review minimum or widen the years.</>
 													: <><b>No data yet.</b>The Steam list hasn’t been harvested.</>}
 											</td></tr>
@@ -326,6 +415,12 @@ export default function SteamFilter({ onExit }) {
 										{view.slice(0, limit).map((g, i) => (
 											<tr key={g.id}>
 												<td className="stf-pos stf-num">{i + 1}</td>
+												<td className="stf-star">
+													<button type="button" aria-pressed={g.id in saved}
+														aria-label={g.id in saved ? `Remove ${g.n} from saved` : `Save ${g.n} for later`}
+														title={g.id in saved ? "Saved — tap to remove" : "Save for later"}
+														onClick={() => flip(g.id)}>{g.id in saved ? "★" : "☆"}</button>
+												</td>
 												<td className="stf-game">
 													<a href={`https://store.steampowered.com/app/${g.id}/`}
 														target="_blank" rel="noopener noreferrer">{g.n}</a>
@@ -397,6 +492,14 @@ export default function SteamFilter({ onExit }) {
 											the cheapest first.</p>
 									</div>
 								)}
+								<div>
+									<h3>Saved games</h3>
+									<p>Tap <b>☆</b> beside a game to keep it, and <b>Saved</b> above the list to see
+										them all — the dials don’t hide a saved game.{" "}
+										{member
+											? "They’re kept with your account, so they follow you to any device you sign in on."
+											: "As a guest they stay in this browser; sign in and they move to your account."}</p>
+								</div>
 								<div>
 									<h3>Scope</h3>
 									<p><b>{fmt(games.length)}</b> games, each {minPct}%+ positive across{" "}

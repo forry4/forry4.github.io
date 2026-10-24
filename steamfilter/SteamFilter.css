@@ -99,6 +99,14 @@
 .stf-sale{color:#7fd17f;font-weight:700;}
 .stf-off{margin-left:5px;font-size:.68rem;font-weight:700;color:var(--bg);background:#7fd17f;
 	border-radius:3px;padding:0 4px;}
+/* the save star: a full-height target in a narrow column */
+.stf-star{width:34px;padding-left:0!important;padding-right:0!important;text-align:center;}
+.stf-star button{font:inherit;font-size:1.15rem;line-height:1;cursor:pointer;background:none;border:0;
+	color:var(--text-muted);padding:6px 6px;border-radius:4px;}
+.stf-star button:hover{color:var(--gold);}
+.stf-star button[aria-pressed="true"]{color:var(--gold);}
+.stf-star button:focus-visible{outline:2px solid var(--gold);outline-offset:1px;}
+.stf-seg button .stf-num{margin-left:6px;font-size:.72rem;opacity:.8;}
 .stf-was{display:block;font-size:.68rem;color:var(--text-muted);margin-top:2px;}
 
 .stf-empty{padding:44px 16px;text-align:center;color:var(--text-dim);}

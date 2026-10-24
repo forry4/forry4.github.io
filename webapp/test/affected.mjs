@@ -50,7 +50,7 @@ export const FEATURE_BLOCKS = {
 	"notes": ["notesEditor", "offlineRead"],
 	"boxpuzzles": ["boxPuzzles", "boxDaily"],
 	"bggfilter": ["formControlZoom", "offlineRead"],
-	"steamfilter": ["formControlZoom", "offlineRead"],
+	"steamfilter": ["formControlZoom", "offlineRead", "steamSaved"],
 	"astralguide": ["astralGuide", "formControlZoom", "offlineRead"],
 	"shared": SHELL,
 	"webapp": SHELL,

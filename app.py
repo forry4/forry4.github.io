@@ -109,6 +109,15 @@ try:
 except Exception as _box_err:  # pragma: no cover - defensive
     LOG.warning("Box Puzzles not wired: %s", _box_err)
 
+# Steam Filter — the page is static files; its one server feature is each account's
+# saved games (/steamfilter/saved). Same injected deps.
+try:
+    from steamfilter.api import setup_steam_saved
+    setup_steam_saved(app, get_db_conn, get_user_by_session, bearer_token)
+    LOG.info("wired Steam Filter routes (/steamfilter)")
+except Exception as _steam_err:  # pragma: no cover - defensive
+    LOG.warning("Steam Filter not wired: %s", _steam_err)
+
 # Site health — the owner's alerts panel (/admin/alerts, /admin/health). Owner-only.
 setup_site_health(app, get_user_by_session, bearer_token)
 

@@ -29,6 +29,9 @@ on:
       - 'boxpuzzles/*.py'
       - 'boxpuzzles/puzzles.json'
       - 'boxpuzzles/minimums.json'
+      # Steam Filter — only api.py serves (saved games); a single `*` keeps tools/
+      # (the harvesters) and the page's own files out.
+      - 'steamfilter/*.py'
       - 'games/spender/requirements.txt'
       - 'games/spender/Dockerfile'
       - 'games/spender/ai/serving/**/*.py'   # serving stack: heuristic, valuation, engine, actions, mcts, infer_np, v_state, vsearch, replay
