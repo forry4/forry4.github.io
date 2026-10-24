@@ -69,7 +69,8 @@ export const GAME_SPELLS = {
 	"Eruca": { mana: 3, dmg: 252, hits: "6", level: 1, source: SEEN },
 	// 252 at level 1 and 294 at level 2: the same spell either way.
 	"Stella": { mana: 3, dmg: 294, hits: "6-8", level: 2, source: SEEN },
-	// Calie's.
+	// Calie's. Prismatic Beam, Emerald Bow, Ruby Spear - Legion and Azurite Falchions -
+	// Disk were read twice, on 2026-10-23 and 10-24, and came out the same both times.
 	"Prismatic Beam": { mana: 2, dmg: 169, hits: "3", level: 1, source: SEEN },
 	"Deadly Connections": { mana: 2, dmg: 148, hits: "2-4", level: 1, source: SEEN },
 	"Kunzite Scythe": { mana: 2, dmg: 168, hits: "1-3", level: 2, source: SEEN },
@@ -80,12 +81,18 @@ export const GAME_SPELLS = {
 	"Stones Of The Ancients": { mana: 2, dmg: 194, hits: "1-3", level: 1, source: SEEN },
 	"Wall Of Arrows": { mana: 2, dmg: 144, hits: "2-6", level: 1, source: SEEN },
 	"Azurite Falchions - Disk": { mana: 3, dmg: 280, hits: "3-7", level: 2, source: SEEN },
-	// Unchanged from the wiki (within 1-2 of x1.2 / x1.4).
+	"Kunzite Scythe - Scourge": { mana: 3, dmg: 252, hits: "5-7", level: 1, source: SEEN },
+	"Pillar of Destruction": { mana: 2, dmg: 184, hits: "3", level: 1, source: SEEN },
+	// Unchanged from the wiki (within 1-2 of x1.2 / x1.4). Topaz Gladius - Guardian read
+	// 122 at level 1 and 143 at level 2: both the wiki's 102 to the point.
 	"Topaz Gladius - Guardian": { mana: 1, dmg: 122, hits: "6", level: 1, source: SEEN },
+	"Ruby Spear - Domination": { mana: 3, dmg: 299, hits: "1", level: 1, source: SEEN },
 	"Scylla & Charybdis": { mana: 3, dmg: 299, hits: "1", level: 1, source: SEEN },
 	"Stellar Radiation": { mana: 2, dmg: 203, hits: "1", level: 2, source: SEEN },
 	// Not on the wiki. Calie's by the company it was read in (her gem spells) and its name.
 	"Opulent Waltz": { mana: 3, dmg: 252, hits: "3", level: 1, hero: "Calie", source: SEEN },
+	// Not on the wiki either: a third Kunzite Scythe beside the plain one and Scourge.
+	"Kunzite Scythe - Quake": { mana: 2, dmg: 180, hits: "1-3", level: 1, hero: "Calie", source: SEEN },
 	// Kiran's, at the level given.
 	"Dirty Way Of Doing This": { dmg: 150, hits: "3-5", level: 1, source: SEEN },
 	"Relentless Fury": { dmg: 150, hits: "2-6", level: 1, source: SEEN },
@@ -103,8 +110,10 @@ export const GAME_SPELLS = {
 	"Sword of Judgment": { mana: 3, dmg: 364, hits: "1", level: 2, source: SEEN },
 	"Magic Cyclone": { mana: 2, dmg: 156, hits: "1-9", level: 1, source: SEEN },
 	"Aqua Ball": { mana: 1, dmg: 144, hits: "1-3", level: 1, source: SEEN },
-	// Changed. Plasma Portal was read twice: 135 at level 2 and 148 at level 1; the later is kept.
+	// Changed. Plasma Portal was read three times: 135 at level 2, then 148 at level 1 twice.
 	"Plasma Portal": { mana: 2, dmg: 148, hits: "2-4", level: 1, source: SEEN },
+	// The wiki's 117 x 3 hits would be 140 at level 1.
+	"Slashing Squall": { mana: 2, dmg: 162, hits: "4-6", level: 1, source: SEEN },
 	// Thunder Orb, Meteor Blades and Dark Burst were first read at level 2; their later
 	// level-1 readings are exactly what the conversion gave (96, 185, 228).
 	"Thunder Orb": { mana: 1, dmg: 96, hits: "3-5", level: 1, source: SEEN },
