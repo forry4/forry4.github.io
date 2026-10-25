@@ -3,13 +3,13 @@
 BGG Filter's sibling over Steam: a filterable table of every game on the Steam store whose
 **English** reviews are **90% or more positive**, with at least 50 English reviews. The list
 and its prices are static JSON filtered client-side; the ONE server feature is each
-account's **saved games** (`api.py`, below).
+account's **saved and not-interested games** (`api.py`, below).
 
 | File | What it is |
 |---|---|
 | `SteamFilter.jsx` | the whole page; props `{ authUser, onExit }` (`authUser` for saved games) |
-| `api.py` | saved games: `GET`/`POST /steamfilter/saved`, table `steam_saved` |
-| `saved.js` | the page's saved-list sync (device copy + queue), unit-tested by `webapp/test/unit/steamSaved.test.mjs` |
+| `api.py` | saved + not-interested games: `GET`/`POST /steamfilter/saved`, tables `steam_saved` / `steam_hidden` |
+| `saved.js` | the page's saved/not-interested sync (device copy + queue), unit-tested by `webapp/test/unit/steamSaved.test.mjs` |
 | `SteamFilter.css` | `?inline`-imported stylesheet, `.stf`-prefixed (started as a copy of BGG's) |
 | `tools/scan_steam.py` | **the harvester** — store search, then English review totals per candidate |
 | `tools/make_data.py` | `results_all.json` → `webapp/public/data/steam-filter.json` (the shipped payload) |
@@ -19,7 +19,7 @@ account's **saved games** (`api.py`, below).
 | `prices.js` | the page's price logic (sale window, sort keys), unit-tested by `webapp/test/unit/steamPrices.test.mjs` |
 | `tests/test_scan_steam.py` | the parse + admission rule, off canned store markup |
 | `tests/test_enrich.py` | title folding, tag unions, eShop paging + the truncation guards |
-| `tests/test_api.py` | the saved list on real sqlite + the routes: auth, per-account, cap, rate limit |
+| `tests/test_api.py` | both lists on real sqlite (one mark per game) + the routes: auth, per-account, cap, rate limit |
 | `tests/test_prices.py` | both stores' price parsing, listing choice, batching + the thin-answer guards |
 
 The slider pointer handling is shared with BGG Filter via `shared/rangePointer.js`.
@@ -115,25 +115,39 @@ Mirror BGG Filter's Geek / F / Average trio, derived in `derive()`:
   The count-aware analogue of the Geek rating.
 - **F score** (`f`) — their midpoint, exactly as BGG's F average. Default sort.
 
-## Saved games (`api.py` + `saved.js`)
+## Saved and not-interested games (`api.py` + `saved.js`)
 
-A ☆ on every row; **Saved** above the table lists every saved game whatever the dials
-say (a game kept for later must not vanish because a dial moved since).
-- **Signed in, the list is the ACCOUNT's** (`steam_saved`, one row per user per app id,
-  capped at 2,000), so it follows the reader between devices. **One write route**,
-  `POST {save, unsave}`, answers with the WHOLE list, so a single star and a batch are
-  the same call and the page never reconciles a partial reply.
-- **The device keeps a copy per identity** (`steam_filter_saved_v1.<id>`): `saved` plus
-  `pending`, the stars not yet acknowledged. A star shows at once; requests go one at a
-  time and whatever was pressed meanwhile goes in the next (`settle` keeps a change queued
-  if it moved again while its request was out). Offline, or with an expired session, the
-  copy stands and the queue waits for the next visit.
-- **A guest's list stays in the browser** and is handed to the account (as queued saves)
-  the first time that browser is signed in.
+Each row carries a ☆ (save it for later) and a struck eye (not interested). **A game has
+at most ONE mark** — saving a hidden game unhides it and the reverse, on the server and
+on the device alike. Above the table, **All games** is the dials' list LESS the hidden
+games; **Saved** and **Not interested** list every game with that mark whatever the
+dials say (a game kept for later must not vanish because a dial moved since, and a
+hidden one must be findable to bring it back). Hiding a game from the list shows an
+Undo bar for 8s — a mis-tap on a phone otherwise sends a game somewhere it will not be
+looked for.
+- **Signed in, the lists are the ACCOUNT's** — `steam_saved` and `steam_hidden`, one row
+  per user per app id, capped at 2,000 and 5,000, so they follow the reader between
+  devices. **One write route**, `POST {save, unsave, hide, unhide}`, answers with BOTH
+  whole lists, so a single tap and a batch are the same call and the page never
+  reconciles a partial reply. Within a batch a removal beats an addition, and a cap
+  refusal writes nothing.
+- **The device keeps a copy per identity** (`steam_filter_saved_v1.<id>`): `saved`,
+  `hidden` and `pending` (`{appId: "saved"|"hidden"|"none"}`, the marks not yet
+  acknowledged; a pre-hide copy's `true`/`false` is read as saved/none). A tap shows at
+  once; requests go one at a time and whatever was pressed meanwhile goes in the next
+  (`settle` keeps a mark queued if it moved again while its request was out). Offline,
+  or with an expired session, the copy stands and the queue waits for the next visit.
+- **`hide`/`unhide` were added after the route shipped**, so each side tolerates the
+  other's old version: an old page's `{save, unsave}` still works (pydantic defaults the
+  new fields), and against an old server (no `hidden` in the reply) the page counts only
+  saves as landed and keeps hides queued — the sync loop stops when a round lands
+  nothing, rather than spinning.
+- **A guest's lists stay in the browser** and are handed to the account (as queued
+  marks) the first time that browser is signed in.
 - Wired in `app.py` behind the usual try/except; `deploy-render.yml` carries
   `steamfilter/*.py` (a single `*`, so `tools/` never restarts prod). `screens.mjs`
-  `steamSaved` drives the guest reload, the guest→account hand-over, a second browser and
-  an unsave against the live backend.
+  `steamSaved` drives a guest's star and hide (Undo, reload, Not interested), the
+  guest→account hand-over, a second browser seeing both marks, and an unsave.
 
 ## Wiring
 

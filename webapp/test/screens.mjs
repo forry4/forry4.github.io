@@ -10629,9 +10629,11 @@ try {
 	// A frontend-only page over a static payload. Each check states its ROSTER before
 	// anything about it: a tab that rendered nothing would otherwise pass every
 	// "no overflow" and "count matches" check by having nothing to measure.
-	// STEAM FILTER SAVED GAMES — a guest's star survives a reload; a signed-in reader's
-	// lives on the SERVER, so a second browser (fresh storage) shows it; a guest list on
-	// the device joins the account on first sign-in; and unsaving reaches the server too.
+	// STEAM FILTER SAVED / NOT INTERESTED — a guest's marks survive a reload; a hidden
+	// game leaves the list, can be undone, and is listed under Not interested; a
+	// signed-in reader's marks live on the SERVER, so a second browser (fresh storage)
+	// shows them; a guest list on the device joins the account on first sign-in; and
+	// unsaving reaches the server too.
 	async function steamSaved(log) {
 		const check = (name, cond, detail = "") => {
 			if (cond) log(`  OK   ${name}`);
@@ -10650,11 +10652,13 @@ try {
 				if (r.url().endsWith("/steamfilter/saved") && r.request().method() === "POST") posts.push(r.status());
 			});
 			await page.goto(`http://localhost:${PORT}/steamfilter`, { waitUntil: "networkidle" });
-			await page.waitForSelector(".stf tbody .stf-star button", { timeout: 25_000 }).catch(() => {});
+			await page.waitForSelector(".stf tbody .stf-save", { timeout: 25_000 }).catch(() => {});
 			return { ctx, page, errors, posts };
 		};
-		const savedCount = (page) => page.locator('.stf-controls [aria-label="Show"] button', { hasText: "Saved" })
-			.locator(".stf-num").textContent({ timeout: 3_000 }).catch(() => "");
+		const viewBtn = (page, label) => page.locator('.stf-controls [aria-label="Show"] button', { hasText: label });
+		const countOf = (page, label) => viewBtn(page, label).locator(".stf-num").textContent({ timeout: 3_000 }).catch(() => "");
+		const savedCount = (page) => countOf(page, "Saved");
+		const listed = (page) => page.locator(".stf tbody .stf-game a").allTextContents();
 		const firstName = (page) => page.locator(".stf tbody tr").first().locator(".stf-game a").textContent();
 
 		// 1 — a guest: the star is kept in this browser and survives a reload
@@ -10662,16 +10666,33 @@ try {
 			const { ctx, page, errors } = await open({ arg: null, init: () => localStorage.setItem("spender_user",
 				JSON.stringify({ id: "screens-steam", name: "Saver", guest: true })) });
 			const name = await firstName(page);
-			await page.locator(".stf tbody tr").first().locator(".stf-star button").click();
+			await page.locator(".stf tbody tr").first().locator(".stf-save").click();
 			check("a guest's star fills and the Saved count reads 1",
-				await page.locator(".stf tbody tr").first().locator('.stf-star button[aria-pressed="true"]').count() === 1
+				await page.locator(".stf tbody tr").first().locator('.stf-save[aria-pressed="true"]').count() === 1
 				&& await savedCount(page) === "1", await savedCount(page));
 			await page.reload({ waitUntil: "networkidle" });
-			await page.waitForSelector(".stf tbody .stf-star button", { timeout: 25_000 }).catch(() => {});
+			await page.waitForSelector(".stf tbody .stf-save", { timeout: 25_000 }).catch(() => {});
 			await page.locator('.stf-controls [aria-label="Show"] button', { hasText: "Saved" }).click();
 			const rows = await page.locator(".stf tbody .stf-game a").allTextContents();
 			check("...and after a reload Saved lists exactly that game", JSON.stringify(rows) === JSON.stringify([name]),
 				JSON.stringify(rows));
+
+			// not interested: the game leaves the list, Undo brings it back
+			await viewBtn(page, "All games").click();
+			const gone = await firstName(page);
+			await page.locator(".stf tbody tr").first().locator(".stf-hide").click();
+			check("a hidden game leaves the list", !(await listed(page)).includes(gone), gone);
+			check("...an Undo bar names it", (await page.locator(".stf-undo").textContent({ timeout: 2_000 }).catch(() => "")).includes(gone));
+			await page.locator(".stf-undo button", { hasText: "Undo" }).click();
+			check("...and Undo puts it back", (await listed(page))[0] === gone && await countOf(page, "Not interested") === "0",
+				JSON.stringify((await listed(page)).slice(0, 2)));
+			await page.locator(".stf tbody tr").first().locator(".stf-hide").click();
+			await page.reload({ waitUntil: "networkidle" });
+			await page.waitForSelector(".stf tbody .stf-save", { timeout: 25_000 }).catch(() => {});
+			check("after a reload the hidden game is still out of the list", !(await listed(page)).includes(gone));
+			await viewBtn(page, "Not interested").click();
+			check("...and Not interested lists exactly it", JSON.stringify(await listed(page)) === JSON.stringify([gone]),
+				JSON.stringify(await listed(page)));
 			check("no page errors (guest)", errors.length === 0, errors.join(" | "));
 			await ctx.close();
 		}
@@ -10687,7 +10708,7 @@ try {
 		const onServer = () => fetch(`http://localhost:${API_PORT}/steamfilter/saved`,
 			{ headers: { Authorization: `Bearer ${reg.session_token}` } }).then((r) => r.json()).then((j) => j.saved.map((x) => x[0]));
 		const signedIn = { arg: user, init: (u) => localStorage.setItem("spender_user", JSON.stringify(u)) };
-		let starred;
+		let starred, hiddenName;
 		{
 			const { ctx, page, errors, posts } = await open({ arg: [user, terraria.id], init: ([u, id]) => {
 				localStorage.setItem("spender_user", JSON.stringify(u));
@@ -10697,13 +10718,21 @@ try {
 			check("the device's guest list joins the account on first sign-in",
 				JSON.stringify(await onServer()) === JSON.stringify([terraria.id]), JSON.stringify(await onServer()));
 			// star the first game the list shows that is not already saved
-			const row = page.locator(".stf tbody tr").filter({ has: page.locator('.stf-star button[aria-pressed="false"]') }).first();
+			const row = page.locator(".stf tbody tr").filter({ has: page.locator('.stf-save[aria-pressed="false"]') }).first();
 			starred = await row.locator(".stf-game a").textContent();
 			const before = posts.length;
-			await row.locator(".stf-star button").click();
+			await row.locator(".stf-save").click();
 			for (let t = 0; t < 50 && posts.length === before; t++) await page.waitForTimeout(100);
 			check("a member's star is posted to the server", posts.slice(before).every((s) => s === 200) && posts.length > before,
 				JSON.stringify(posts));
+			const plain = page.locator(".stf tbody tr").filter({ has: page.locator('.stf-save[aria-pressed="false"]') }).first();
+			hiddenName = await plain.locator(".stf-game a").textContent();
+			const before2 = posts.length;
+			await plain.locator(".stf-hide").click();
+			for (let t = 0; t < 50 && posts.length === before2; t++) await page.waitForTimeout(100);
+			const hid = await fetch(`http://localhost:${API_PORT}/steamfilter/saved`,
+				{ headers: { Authorization: `Bearer ${reg.session_token}` } }).then((r) => r.json()).then((j) => j.hidden || []);
+			check("a member's not-interested mark is posted to the server", hid.length === 1, JSON.stringify(hid));
 			check("no page errors (member, first browser)", errors.length === 0, errors.join(" | "));
 			await ctx.close();
 		}
@@ -10714,8 +10743,12 @@ try {
 			const rows = (await page.locator(".stf tbody .stf-game a").allTextContents()).sort();
 			check("a second browser shows both saved games", JSON.stringify(rows) === JSON.stringify([starred, "Terraria"].sort()),
 				JSON.stringify(rows));
+			await viewBtn(page, "Not interested").click();
+			check("...and the game marked not interested", JSON.stringify(await listed(page)) === JSON.stringify([hiddenName]),
+				JSON.stringify(await listed(page)));
+			await viewBtn(page, "Saved").click();
 			const before = posts.length;
-			await page.locator(".stf tbody tr", { hasText: "Terraria" }).locator(".stf-star button").click();
+			await page.locator(".stf tbody tr", { hasText: "Terraria" }).locator(".stf-save").click();
 			for (let t = 0; t < 50 && posts.length === before; t++) await page.waitForTimeout(100);
 			const left = await onServer();
 			check("unsaving reaches the server", left.length === 1 && left[0] !== terraria.id, JSON.stringify(left));

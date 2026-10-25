@@ -99,13 +99,22 @@
 .stf-sale{color:#7fd17f;font-weight:700;}
 .stf-off{margin-left:5px;font-size:.68rem;font-weight:700;color:var(--bg);background:#7fd17f;
 	border-radius:3px;padding:0 4px;}
-/* the save star: a full-height target in a narrow column */
-.stf-star{width:34px;padding-left:0!important;padding-right:0!important;text-align:center;}
-.stf-star button{font:inherit;font-size:1.15rem;line-height:1;cursor:pointer;background:none;border:0;
-	color:var(--text-muted);padding:6px 6px;border-radius:4px;}
-.stf-star button:hover{color:var(--gold);}
-.stf-star button[aria-pressed="true"]{color:var(--gold);}
-.stf-star button:focus-visible{outline:2px solid var(--gold);outline-offset:1px;}
+/* the marks: save (star) and not interested (struck eye), full-height targets in a
+   narrow column */
+.stf-marks{width:62px;padding-left:2px!important;padding-right:0!important;white-space:nowrap;}
+.stf-marks button{font:inherit;font-size:1.15rem;line-height:1;cursor:pointer;background:none;border:0;
+	color:var(--text-muted);padding:6px 5px;border-radius:4px;vertical-align:middle;}
+.stf-marks button svg{display:block;}
+.stf-save:hover,.stf-save[aria-pressed="true"]{color:var(--gold);}
+.stf-hide{opacity:.55;}
+.stf-hide:hover{opacity:1;color:var(--text);}
+.stf-hide[aria-pressed="true"]{opacity:1;color:#ff8a80;}
+.stf-marks button:focus-visible{outline:2px solid var(--gold);outline-offset:1px;}
+/* "X is hidden — Undo", for a few seconds after a game leaves the list */
+.stf-undo{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+	margin:0 0 10px;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius);
+	background:var(--surface2);font-size:.84rem;color:var(--text-dim);}
+.stf-undo b{color:var(--text);}
 .stf-seg button .stf-num{margin-left:6px;font-size:.72rem;opacity:.8;}
 .stf-was{display:block;font-size:.68rem;color:var(--text-muted);margin-top:2px;}
 

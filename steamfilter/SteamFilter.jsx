@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { baseCss } from "../shared/theme.js";
 import { rangePointer } from "../shared/rangePointer.js";
 import { attachPrices, money, day } from "./prices.js";
-import { readSaved, writeSaved, clearSaved, toggle, adopt, settle, batch } from "./saved.js";
+import { readSaved, writeSaved, clearSaved, setMark, markOf, adopt, settle, batch } from "./saved.js";
 
 // CSS lives in the sibling .css file, imported with `?inline` so it is still a string
 // injected by this component's own <style> while mounted. Never move it back into a JS
@@ -107,10 +107,10 @@ async function api(path, token, body) {
 	return res.json();
 }
 
-// The saved list: this device's copy, and for a signed-in reader the account's, synced.
-// A star shows at once; the request follows, one at a time, and whatever was pressed
-// while one was out goes in the next. Offline (or signed out by the server) the device
-// copy stands and the queue waits for the next visit.
+// The saved and not-interested lists: this device's copy, and for a signed-in reader
+// the account's, synced. A tap shows at once; the request follows, one at a time, and
+// whatever was pressed while one was out goes in the next. Offline (or signed out by
+// the server) the device copy stands and the queue waits for the next visit.
 function useSaved(authUser) {
 	const token = authUser && !authUser.guest && authUser.session_token ? authUser.session_token : null;
 	const who = token ? authUser.id : "guest";
@@ -133,9 +133,13 @@ function useSaved(authUser) {
 				const r = Object.keys(sent).length
 					? await api("/steamfilter/saved", token, batch(sent))
 					: await api("/steamfilter/saved", token);
-				const next = settle(ref.current, sent, r.saved || []);
+				const before = Object.keys(ref.current.pending).length;
+				const next = settle(ref.current, sent, r);
 				update(next);
-				if (!Object.keys(next.pending).length) break;
+				// Done, or nothing landed (a server from before "not interested" keeps a
+				// hide queued): either way, stop until the next tap or visit.
+				const left = Object.keys(next.pending).length;
+				if (!left || left >= before) break;
 			}
 		} catch { /* offline or signed out: the device copy stands, the queue waits */ }
 		finally { busy.current = false; }
@@ -143,22 +147,36 @@ function useSaved(authUser) {
 
 	useEffect(() => {
 		let s = readSaved(who);
-		// A list made as a guest on this device joins the account the first time.
+		// Lists made as a guest on this device join the account the first time.
 		if (token) {
 			const guest = readSaved("guest");
-			if (Object.keys(guest.saved).length) { s = adopt(s, guest, Date.now() / 1000); clearSaved("guest"); }
+			if (Object.keys(guest.saved).length || Object.keys(guest.hidden).length) {
+				s = adopt(s, guest, Date.now() / 1000);
+				clearSaved("guest");
+			}
 		}
 		update(s);
 		sync();
 	}, [who, token, update, sync]);
 
-	const flip = useCallback((id) => {
-		update(toggle(ref.current, id, Date.now() / 1000, !!token));
+	// Give a game `mark` ("saved" / "hidden"), or take it off if it already has it.
+	const mark = useCallback((id, m) => {
+		const next = markOf(ref.current, id) === m ? "none" : m;
+		update(setMark(ref.current, id, next, Date.now() / 1000, !!token));
 		sync();
 	}, [token, update, sync]);
 
-	return { saved: store.saved, flip, member: !!token };
+	return { saved: store.saved, hidden: store.hidden, mark, member: !!token };
 }
+
+// "Not interested": an eye struck through — the game leaves the list.
+const EyeOff = () => (
+	<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+		strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+		<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" />
+		<path d="M3 3l18 18" />
+	</svg>
+);
 
 // Props: { authUser, onExit }.
 export default function SteamFilter({ authUser, onExit }) {
@@ -171,10 +189,18 @@ export default function SteamFilter({ authUser, onExit }) {
 	const [sortKey, setSortKey] = useState("f");
 	const [dir, setDir] = useState(-1);
 	const [limit, setLimit] = useState(PAGE);
-	const { saved, flip, member } = useSaved(authUser);
-	// "all": the dials' list. "saved": every saved game, dials or not — a game kept for
-	// later should not vanish because a dial moved since.
+	const { saved, hidden, mark, member } = useSaved(authUser);
+	// "all": the dials' list, less the games marked not interested. "saved" / "hidden":
+	// every game with that mark, dials or not — a game kept for later should not vanish
+	// because a dial moved since, and a hidden one has to be findable to bring it back.
 	const [show, setShow] = useState("all");
+	// The last game hidden from the list, for a moment, so a mis-tap can be taken back.
+	const [undo, setUndo] = useState(null);
+	useEffect(() => {
+		if (!undo) return undefined;
+		const t = setTimeout(() => setUndo(null), 8000);
+		return () => clearTimeout(t);
+	}, [undo]);
 
 	useEffect(() => {
 		let live = true;
@@ -193,6 +219,12 @@ export default function SteamFilter({ authUser, onExit }) {
 	const priced = useMemo(() => (games ? attachPrices(games, prices?.games, Date.now() / 1000).slice() : null),
 		[games, prices]);
 	const nSaved = useMemo(() => (priced || []).filter((g) => g.id in saved).length, [priced, saved]);
+	const nHidden = useMemo(() => (priced || []).filter((g) => g.id in hidden).length, [priced, hidden]);
+	const hide = (g) => {
+		const wasHidden = g.id in hidden;
+		mark(g.id, "hidden");
+		setUndo(wasHidden ? null : { id: g.id, n: g.n, was: g.id in saved ? "saved" : null });
+	};
 
 	useEffect(() => { try { localStorage.setItem(STORE, JSON.stringify(d)); } catch { /* private mode */ } }, [d]);
 
@@ -220,6 +252,7 @@ export default function SteamFilter({ authUser, onExit }) {
 
 	// Everything but the categories, so each chip can say how many it would leave.
 	const passBase = useCallback((g) => {
+		if (g.id in hidden) return false;
 		if (g.t < REVIEWS[d.rev]) return false;
 		// Either year end off its stop is a real bound, and a game with no date fails it.
 		if (d.yfrom > YMIN && (!g.y || g.y < d.yfrom)) return false;
@@ -230,7 +263,7 @@ export default function SteamFilter({ authUser, onExit }) {
 		if (d.sale === "steam" && !g.ps?.off) return false;
 		if (d.sale === "switch" && !g.pw?.off) return false;
 		return true;
-	}, [d]);
+	}, [d, hidden]);
 
 	const base = useMemo(() => (priced || []).filter(passBase), [priced, passBase]);
 	const pool = useMemo(() => base.filter((g) => picked.every((c) => g.c.includes(c))), [base, picked]);
@@ -243,7 +276,8 @@ export default function SteamFilter({ authUser, onExit }) {
 	}, [pool, cats]);
 	const view = useMemo(() => {
 		const needle = q.trim().toLowerCase();
-		const from = show === "saved" ? (priced || []).filter((g) => g.id in saved) : pool;
+		const marked = show === "saved" ? saved : show === "hidden" ? hidden : null;
+		const from = marked ? (priced || []).filter((g) => g.id in marked) : pool;
 		const rows = needle ? from.filter((g) => g.n.toLowerCase().includes(needle)) : from.slice();
 		// A missing value (no year, no price in that store) sorts last in either direction.
 		rows.sort((a, b) => {
@@ -253,7 +287,7 @@ export default function SteamFilter({ authUser, onExit }) {
 			return c * dir || a.n.localeCompare(b.n);
 		});
 		return rows;
-	}, [pool, priced, saved, show, q, sortKey, dir]);
+	}, [pool, priced, saved, hidden, show, q, sortKey, dir]);
 
 	const sortBy = (k) => {
 		if (k === sortKey) setDir((v) => -v);
@@ -357,6 +391,9 @@ export default function SteamFilter({ authUser, onExit }) {
 										: pool.length
 											? <><b>{fmt(pool.length)}</b> of {fmt(games.length)} games clear these dials.</>
 											: <>No game clears every dial. Loosen one.</>}
+									{games.length > 0 && nHidden > 0 && (
+										<> {fmt(nHidden)} you’re not interested in {nHidden === 1 ? "is" : "are"} left out.</>
+									)}
 								</p>
 							</section>
 
@@ -367,6 +404,10 @@ export default function SteamFilter({ authUser, onExit }) {
 									<button type="button" aria-pressed={show === "saved"}
 										onClick={() => { setShow("saved"); setLimit(PAGE); }}>
 										Saved<span className="stf-num">{fmt(nSaved)}</span>
+									</button>
+									<button type="button" aria-pressed={show === "hidden"}
+										onClick={() => { setShow("hidden"); setLimit(PAGE); }}>
+										Not interested<span className="stf-num">{fmt(nHidden)}</span>
 									</button>
 								</div>
 								<label className="stf-search">
@@ -380,16 +421,27 @@ export default function SteamFilter({ authUser, onExit }) {
 								<p className="stf-count">
 									{show === "saved"
 										? <><b>{fmt(view.length)}</b> of {fmt(nSaved)} saved shown</>
-										: <><b>{fmt(view.length)}</b> of {fmt(pool.length)} shown</>}
+										: show === "hidden"
+											? <><b>{fmt(view.length)}</b> of {fmt(nHidden)} not interested shown</>
+											: <><b>{fmt(view.length)}</b> of {fmt(pool.length)} shown</>}
 								</p>
 							</div>
+							{undo && (
+								<div className="stf-undo" role="status">
+									<span><b>{undo.n}</b> is hidden — find it under Not interested.</span>
+									<button type="button" className="btn btn-ghost btn-sm" onClick={() => {
+										mark(undo.id, undo.was || "hidden");   // back to saved, or off "hidden"
+										setUndo(null);
+									}}>Undo</button>
+								</div>
+							)}
 
 							<div className="stf-tablewrap">
 								<table>
 									<thead>
 										<tr>
 											<th className="stf-pos">#</th>
-											<th className="stf-star" aria-label="Saved" />
+											<th className="stf-marks" aria-label="Saved or not interested" />
 											{th("n", "Game")}
 											{th("r", "Rating")}
 											{th("f", "F score")}
@@ -407,6 +459,10 @@ export default function SteamFilter({ authUser, onExit }) {
 													? (nSaved
 														? <><b>No saved game matches that title.</b>Clear the title filter to see them all.</>
 														: <><b>No saved games yet.</b>Tap the ☆ beside a game to keep it here for later.</>)
+													: show === "hidden"
+													? (nHidden
+														? <><b>No hidden game matches that title.</b>Clear the title filter to see them all.</>
+														: <><b>Nothing hidden.</b>Tap the crossed-out eye beside a game you know you won’t like, and it leaves the list.</>)
 													: games.length
 													? <><b>Nothing clears every dial.</b>Drop a category, loosen the review minimum or widen the years.</>
 													: <><b>No data yet.</b>The Steam list hasn’t been harvested.</>}
@@ -415,11 +471,15 @@ export default function SteamFilter({ authUser, onExit }) {
 										{view.slice(0, limit).map((g, i) => (
 											<tr key={g.id}>
 												<td className="stf-pos stf-num">{i + 1}</td>
-												<td className="stf-star">
-													<button type="button" aria-pressed={g.id in saved}
+												<td className="stf-marks">
+													<button type="button" className="stf-save" aria-pressed={g.id in saved}
 														aria-label={g.id in saved ? `Remove ${g.n} from saved` : `Save ${g.n} for later`}
 														title={g.id in saved ? "Saved — tap to remove" : "Save for later"}
-														onClick={() => flip(g.id)}>{g.id in saved ? "★" : "☆"}</button>
+														onClick={() => mark(g.id, "saved")}>{g.id in saved ? "★" : "☆"}</button>
+													<button type="button" className="stf-hide" aria-pressed={g.id in hidden}
+														aria-label={g.id in hidden ? `Show ${g.n} again` : `Not interested in ${g.n}`}
+														title={g.id in hidden ? "Not interested — tap to show it again" : "Not interested — hide it"}
+														onClick={() => hide(g)}><EyeOff /></button>
 												</td>
 												<td className="stf-game">
 													<a href={`https://store.steampowered.com/app/${g.id}/`}
@@ -493,12 +553,14 @@ export default function SteamFilter({ authUser, onExit }) {
 									</div>
 								)}
 								<div>
-									<h3>Saved games</h3>
+									<h3>Saved and not interested</h3>
 									<p>Tap <b>☆</b> beside a game to keep it, and <b>Saved</b> above the list to see
-										them all — the dials don’t hide a saved game.{" "}
-										{member
-											? "They’re kept with your account, so they follow you to any device you sign in on."
-											: "As a guest they stay in this browser; sign in and they move to your account."}</p>
+										them all — the dials don’t hide a saved game. Tap the <b>crossed-out eye</b> on a
+										game you know you won’t like and it leaves the list for good; <b>Not
+										interested</b> lists those, to bring one back.</p>
+									<p>{member
+										? "Both lists are kept with your account, so they follow you to any device you sign in on."
+										: "As a guest they stay in this browser; sign in and they move to your account."}</p>
 								</div>
 								<div>
 									<h3>Scope</h3>

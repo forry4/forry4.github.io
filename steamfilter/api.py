@@ -1,19 +1,24 @@
-"""Steam Filter — your saved games, the page's one piece of server state.
+"""Steam Filter — each account's saved and not-interested games, the page's one
+piece of server state.
 
-Everything else on the page is a static file. A saved list is per ACCOUNT so it
-follows a reader from phone to laptop; a guest keeps one in the browser only, and
-the page hands it over the first time they sign in.
+Everything else on the page is a static file. The two lists are per ACCOUNT so they
+follow a reader from phone to laptop; a guest keeps them in the browser only, and the
+page hands them over the first time they sign in. A game is on at most one of them:
+saving a game takes it off "not interested", and the reverse.
 
-  GET  /steamfilter/saved                          -> {"saved": [[app id, saved_at], ...]}
-  POST /steamfilter/saved {"save": [...], "unsave": [...]}  -> the same, after the change
+  GET  /steamfilter/saved   -> {"saved": [[app id, at], ...], "hidden": [[app id, at], ...]}
+  POST /steamfilter/saved {"save", "unsave", "hide", "unhide": [...]}  -> the same, after
 
-ONE write route, for a single star and for a batch alike: the page queues changes
-made offline (or as a guest) and sends them together, and every answer is the whole
-list, so the page never has to reconcile a partial reply. Saving twice keeps the
-first time; unsaving a game that is not saved is a no-op.
+ONE write route, for a single tap and for a batch alike: the page queues changes made
+offline (or as a guest) and sends them together, and every answer is both whole lists,
+so the page never has to reconcile a partial reply. Marking twice keeps the first time;
+removing a mark a game does not carry is a no-op. Within one batch a removal beats an
+addition, so a game both saved and hidden in the same request ends up on neither.
+`hide`/`unhide` arrived after `save`/`unsave`; a page from before them sends neither,
+and pydantic defaults both to empty.
 
 App ids are not checked against the payload (the server never loads it); they are
-bounded integers and the list is capped, which is all a stray id can cost.
+bounded integers and the lists are capped, which is all a stray id can cost.
 
 The handlers are plain `def`, so their DB round-trips run in FastAPI's threadpool
 rather than on the event loop the game sockets share.
@@ -29,60 +34,78 @@ from core import alerts
 from core.ratelimit import SlidingWindowLimiter
 
 MAX_SAVED = 2000          # far past any real "look at later" list
+MAX_HIDDEN = 5000         # a reader weeding the list hides far more than they save
 MAX_BATCH = 500
 MAX_APP_ID = 10 ** 8      # Steam app ids are under 4 million today
 
-# A star is one request; a reader clicking down a list makes a few a second at most.
+# A tap is one request; a reader clicking down a list makes a few a second at most.
 _writes_minute = SlidingWindowLimiter(max_hits=120, window_seconds=60)
+
+# list name -> (table, cap). Both tables share one shape.
+LISTS = {"saved": ("steam_saved", MAX_SAVED), "hidden": ("steam_hidden", MAX_HIDDEN)}
+
 
 class SavedIn(BaseModel):
     save: list[int] = Field(default_factory=list, max_length=MAX_BATCH)
     unsave: list[int] = Field(default_factory=list, max_length=MAX_BATCH)
+    hide: list[int] = Field(default_factory=list, max_length=MAX_BATCH)
+    unhide: list[int] = Field(default_factory=list, max_length=MAX_BATCH)
 
 
 def init_saved_db(conn) -> None:
     cur = conn.cursor()
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS steam_saved (
-        user_id TEXT NOT NULL,
-        app_id INTEGER NOT NULL,
-        saved_at REAL NOT NULL,
-        PRIMARY KEY (user_id, app_id)
-    )""")
+    for table, _ in LISTS.values():
+        cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {table} (
+            user_id TEXT NOT NULL,
+            app_id INTEGER NOT NULL,
+            saved_at REAL NOT NULL,
+            PRIMARY KEY (user_id, app_id)
+        )""")
     conn.commit()
 
 
 # ── pure functions (each takes a connection; tested on a real sqlite file) ────
-def list_saved(conn, user_id: str) -> list[list]:
-    """[[app id, saved_at], ...], newest first."""
+def _list(conn, table: str, user_id: str) -> list[list]:
+    """[[app id, at], ...], newest first."""
     cur = conn.cursor()
-    cur.execute("SELECT app_id, saved_at FROM steam_saved WHERE user_id=? "
+    cur.execute(f"SELECT app_id, saved_at FROM {table} WHERE user_id=? "
                 "ORDER BY saved_at DESC, app_id", (user_id,))
     return [[int(r[0]), float(r[1])] for r in cur.fetchall()]
 
 
-def apply_changes(conn, user_id: str, save: list[int], unsave: list[int], now: float | None = None) -> list[list]:
-    """Saves then unsaves, and returns the whole list. Refuses (ValueError) a save
-    that would take the list past MAX_SAVED."""
-    bad = [a for a in [*save, *unsave] if not (1 <= a < MAX_APP_ID)]
+def marks(conn, user_id: str) -> dict:
+    return {name: _list(conn, table, user_id) for name, (table, _) in LISTS.items()}
+
+
+def apply_changes(conn, user_id: str, save=(), unsave=(), hide=(), unhide=(), now: float | None = None) -> dict:
+    """Applies one batch and returns both whole lists. Refuses (ValueError) a batch
+    that would take either list past its cap, before writing anything."""
+    bad = [a for a in [*save, *unsave, *hide, *unhide] if not (1 <= a < MAX_APP_ID)]
     if bad:
         raise ValueError(f"not an app id: {bad[0]}")
     now = time.time() if now is None else now
-    gone = set(unsave)
-    save = [a for a in dict.fromkeys(save) if a not in gone]
+    # Each list's removals include the other list's additions: one mark per game.
+    plan = {"saved": (save, {*unsave, *hide}), "hidden": (hide, {*unhide, *save})}
+    work = []
+    for name, (add, gone) in plan.items():
+        table, cap = LISTS[name]
+        have = {a for a, _ in _list(conn, table, user_id)}
+        new = [a for a in dict.fromkeys(add) if a not in gone and a not in have]
+        if len(have - gone) + len(new) > cap:
+            raise ValueError(f"the {'saved' if name == 'saved' else 'not-interested'} list "
+                             f"holds at most {cap:,} games")
+        work.append((table, gone & have, new))
     cur = conn.cursor()
-    have = {a for a, _ in list_saved(conn, user_id)}
-    new = [a for a in save if a not in have]
-    if len(have - gone) + len(new) > MAX_SAVED:
-        raise ValueError(f"a saved list holds at most {MAX_SAVED:,} games")
-    for a in gone & have:
-        cur.execute("DELETE FROM steam_saved WHERE user_id=? AND app_id=?", (user_id, a))
-    # Saving an already-saved game keeps its first time.
-    for a in new:
-        cur.execute("INSERT OR IGNORE INTO steam_saved (user_id, app_id, saved_at) VALUES (?, ?, ?)",
-                    (user_id, a, now))
+    for table, drop, new in work:
+        for a in drop:
+            cur.execute(f"DELETE FROM {table} WHERE user_id=? AND app_id=?", (user_id, a))
+        # Marking an already-marked game keeps its first time.
+        for a in new:
+            cur.execute(f"INSERT OR IGNORE INTO {table} (user_id, app_id, saved_at) VALUES (?, ?, ?)",
+                        (user_id, a, now))
     conn.commit()
-    return list_saved(conn, user_id)
+    return marks(conn, user_id)
 
 
 # ── routes ────────────────────────────────────────────────────────────────────
@@ -116,7 +139,7 @@ def setup_steam_saved(app, get_db_conn, get_user_by_session, token_resolver=None
 
     @app.get("/steamfilter/saved")
     def steam_saved(user: dict = Depends(member)):
-        return {"saved": run(lambda c: list_saved(c, user["id"]))}
+        return run(lambda c: marks(c, user["id"]))
 
     @app.post("/steamfilter/saved")
     def steam_save(payload: SavedIn, user: dict = Depends(member)):
@@ -129,7 +152,7 @@ def setup_steam_saved(app, get_db_conn, get_user_by_session, token_resolver=None
 
         def go(c):
             try:
-                return {"saved": apply_changes(c, uid, payload.save, payload.unsave)}
+                return apply_changes(c, uid, payload.save, payload.unsave, payload.hide, payload.unhide)
             except ValueError as e:
                 raise HTTPException(status_code=400, detail=str(e))
         return run(go)
