@@ -10960,6 +10960,8 @@ try {
 		const regions = D.seedRegions({ splitG2: true, majors: true });
 		const table = D.champTable(D.scope([latest]));
 		const azir = D.champLine(D.scope([latest]), "Azir");
+		const azirWith = D.partners(D.scope([latest]), "Azir", "with");
+		const bestWith = (n) => D.ranked(azirWith, { min: 10, best: true, n }).length;
 
 		for (const [width, height] of [[1280, 900], [390, 844]]) {
 			const ctx = await browser.newContext({ viewport: { width, height } });
@@ -11019,6 +11021,10 @@ try {
 				.locator(".lol-tile-val").innerText().catch(() => "");
 			check(`${at}: Azir's ${latest.year} games read ${azir.games}`, games === azir.games.toLocaleString("en-US"), games);
 			check(`${at}: all four partner lists render`, await page.locator(".lol-plist").count() === 4);
+			const bestRows = () => page.locator(".lol-plist").first().locator(".lol-prow").count();
+			check(`${at}: Best with opens at its top ${bestWith(10)} (of up to 10)`, await bestRows() === bestWith(10), String(await bestRows()));
+			await page.locator(".lol-chip", { hasText: "Top 20" }).click().catch(() => {});
+			check(`${at}: "Top 20" expands Best with to ${bestWith(20)}`, bestWith(20) > 10 && await bestRows() === bestWith(20), String(await bestRows()));
 			await page.waitForSelector(".lol-sec h2:has-text('By year') + p + .lol-frame tbody tr", { timeout: 20_000 }).catch(() => {});
 			const yearRows = await page.locator(".lol-sec", { hasText: "By year" }).locator("tbody tr").count();
 			check(`${at}: the By year table has a row for each of the ${index.years.length} years`, yearRows === index.years.length, String(yearRows));

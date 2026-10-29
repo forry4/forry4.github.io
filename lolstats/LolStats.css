@@ -124,6 +124,7 @@
 .lol-tile-val{font-size:1.45rem;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.2;}
 .lol-tile-note{color:var(--text-soft);font-size:.84rem;}
 
+.lol-pctl{display:flex;flex-wrap:wrap;gap:8px 20px;}
 .lol-plists{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px;}
 .lol-plist{padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);min-width:0;}
 .lol-psub{color:var(--text-soft);font-size:.86rem;margin:2px 0 8px;}

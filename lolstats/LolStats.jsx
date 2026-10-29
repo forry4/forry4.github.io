@@ -234,6 +234,8 @@ function SeedsTab() {
 const PHASES = [["all", "All games"], ["regular", "Regular season"], ["playoffs", "Playoffs"]];
 const SORTS = [["name", "Champion"], ["role", "Role"], ["games", "Games"], ["winRate", "Win %"], ["pickRate", "Pick %"], ["banRate", "Ban %"], ["presence", "Presence"]];
 const MINS = [5, 10, 20, 40];
+// How many champions each partner/matchup list shows; one setting for all four, so they stay level.
+const SHOWS = [10, 20];
 
 function ChampSearch({ names, onPick, inputRef }) {
 	const [q, setQ] = useState("");
@@ -353,6 +355,7 @@ function StatTile({ label, value, note }) {
 
 function ChampView({ champ, games, years, allLoaded, regions, phase, onOpen, onClose }) {
 	const [min, setMin] = useState(10);
+	const [show, setShow] = useState(10);
 	const line = useMemo(() => D.champLine(games, champ), [games, champ]);
 	const byRegion = useMemo(() => D.CHAMP_REGIONS.map((r) => [r, D.champLine(D.scope(years, { regions: [r], phase }), champ)]),
 		[years, phase, champ]);
@@ -361,10 +364,10 @@ function ChampView({ champ, games, years, allLoaded, regions, phase, onOpen, onC
 	const lists = useMemo(() => {
 		const withs = D.partners(games, champ, "with"), intos = D.partners(games, champ, "into");
 		return {
-			bestWith: D.ranked(withs, { min, best: true }), worstWith: D.ranked(withs, { min, best: false }),
-			bestInto: D.ranked(intos, { min, best: true }), worstInto: D.ranked(intos, { min, best: false }),
+			bestWith: D.ranked(withs, { min, best: true, n: show }), worstWith: D.ranked(withs, { min, best: false, n: show }),
+			bestInto: D.ranked(intos, { min, best: true, n: show }), worstInto: D.ranked(intos, { min, best: false, n: show }),
 		};
-	}, [games, champ, min]);
+	}, [games, champ, min, show]);
 	const a = line.avg;
 	const mainRole = line.roles.reduce((b, r) => (r.games > b.games ? r : b), line.roles[0]);
 
@@ -392,7 +395,10 @@ function ChampView({ champ, games, years, allLoaded, regions, phase, onOpen, onC
 					<section className="lol-sec">
 						<div className="lol-tablehd">
 							<h2 className="lol-h2">Partners and matchups</h2>
-							<Chips label="At least" options={MINS.map((n) => [n, `${n} games`])} value={min} onToggle={setMin} />
+							<div className="lol-pctl">
+								<Chips label="Show" options={SHOWS.map((n) => [n, `Top ${n}`])} value={show} onToggle={setShow} />
+								<Chips label="At least" options={MINS.map((n) => [n, `${n} games`])} value={min} onToggle={setMin} />
+							</div>
 						</div>
 						<p className="lol-sub">{champ}’s win rate in games with each champion on its team, or on the enemy team in any role.</p>
 						<div className="lol-plists">

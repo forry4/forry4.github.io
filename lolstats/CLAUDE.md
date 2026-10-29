@@ -9,6 +9,7 @@ backend, no auth: it fetches static JSON and computes everything in the browser.
   pick, ban, presence and win rate by year and region, and for one champion its best
   and worst partners ("with": same team) and matchups ("into": ANY enemy champion,
   not just the lane opponent — the owner's choice).
+  Each list shows its top 10, or 20 with the Show control (one setting for all four).
 
 | File | What it is |
 |---|---|
