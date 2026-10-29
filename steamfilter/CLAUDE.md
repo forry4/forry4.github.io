@@ -78,6 +78,17 @@ beside the payload and works without it (every price reads "—").
   records that a Switch 2 version is sold. `eshopDetails` carries the sale's start AND end.
   **DLC is `dlcType: "Individual"` only** — a "ROM Bundle" is a game sold with its DLC, and
   DOOM Eternal's base listing is one. Some games have a priceless twin listing; skip it.
+- **A sale's START: the eShop's is real, Steam's is a first sighting.** Steam publishes no
+  start anywhere (GetItems' purchase options and `appdetails` were both checked,
+  2026-10-28), so `carry_starts` gives a Steam sale the run that first saw it and carries
+  that forward while the game stays on sale. Rows are `[sale, regular, end, start]` for
+  both stores (Steam's end is 0 when Steam gives none). The header's `tracked_since` is
+  when recording began: a start equal to it means "already running then", which the page
+  shows as "on or before" and never counts as recent. The first file was BACKFILLED by
+  replaying the file's git history (Oct 23 → 28) through `carry_starts` — Steam's Halloween
+  sale shows up as 706 first sightings on Oct 26. The scheduled runs land hours after
+  their cron slots, so a Steam start is right to within about a day. **Sale started**
+  (Past day … 2 weeks) filters on it: the store `sale` names, either if it names none.
 - **The page shows a sale only inside its window** (`priceNow` in `prices.js`), so a file a
   day old shows an ended sale at its regular price, never a price that is gone.
 - Guards: Steam must price 95% of the payload, the eShop 85% of `sw` games and every

@@ -21,10 +21,17 @@ Writes webapp/public/data/steam-prices.json:
     {"priced": "2026-10-23T17:42Z", "region": "US",
      "games": {"<app id>": {"s": [999], "w": [624, 2499, <end>, <start>], "w2": 1}}}
 
-`s` is Steam and `w` the eShop, in cents: `[price]`, or `[sale, regular, end]` for a
-sale (Unix seconds; the eShop adds its start). Steam names no start, and a discount
-with no end date is `[sale, regular]`. `w2` is 1 when a Switch 2 version is sold.
-A game with no price in a store has no key for it.
+`s` is Steam and `w` the eShop, in cents: `[price]`, or `[sale, regular, end, start]`
+for a sale (Unix seconds; an end of 0 is a discount Steam gives no end for). `w2` is 1
+when a Switch 2 version is sold. A game with no price in a store has no key for it.
+
+A sale's START is the eShop's own. Steam publishes no start anywhere (not in GetItems'
+purchase options, not in appdetails), so a Steam sale's start is the run that FIRST
+SAW it, carried forward from the previous file while the sale lasts (`carry_starts`).
+That is accurate to a run or two (twice a day, minus the firings GitHub drops). A sale
+already running when starts were first recorded has no first sighting; it carries
+`tracked_since`, a header field, and the page reads a start at or before that as
+"on or before" rather than as a date.
 
     python steamfilter/tools/prices.py
 """
@@ -179,6 +186,19 @@ def switch_prices(fetch, log, games, canaries=None):
 
 # ── the file ──────────────────────────────────────────────────────────────
 
+def carry_starts(prev, rows, now, since):
+    """Gives every Steam sale in `rows` a start: the previous file's, if the game was
+    already on sale there (`since` if that file predates starts), else `now`."""
+    for a, r in rows.items():
+        s = r.get("s")
+        if not s or len(s) < 2:
+            continue
+        before = (prev.get(a) or {}).get("s") or []
+        start = (before[3] if len(before) >= 4 else since) if len(before) >= 2 else now
+        r["s"] = [s[0], s[1], s[2] if len(s) >= 3 else 0, start]
+    return rows
+
+
 def merge(steam, switch):
     rows = {}
     for a, p in steam.items():
@@ -196,18 +216,23 @@ def main(argv=None):
     if not games:
         raise SystemExit("prices need a harvested payload; run the full harvest first")
     rows = merge(steam_prices(fetch, log, [g["id"] for g in games]), switch_prices(fetch, log, games))
-    # Nothing moved: leave the file (and its timestamp) alone, so the workflow has
-    # nothing to commit and no deploy to fire.
+    now = datetime.datetime.now(datetime.timezone.utc).replace(second=0, microsecond=0)
+    prev = {}
     if os.path.exists(a.out):
         try:
-            if json.load(open(a.out, encoding="utf-8")).get("games") == rows:
-                log("prices: unchanged")
-                return
+            prev = json.load(open(a.out, encoding="utf-8"))
         except ValueError:
             pass
-    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
+    since = prev.get("tracked_since") or int(now.timestamp())
+    carry_starts(prev.get("games") or {}, rows, int(now.timestamp()), since)
+    # Nothing moved: leave the file (and its timestamp) alone, so the workflow has
+    # nothing to commit and no deploy to fire.
+    if prev.get("games") == rows:
+        log("prices: unchanged")
+        return
     with open(a.out, "w", encoding="utf-8") as f:
-        json.dump({"priced": now, "region": "US", "games": rows}, f, separators=(",", ":"))
+        json.dump({"priced": now.strftime("%Y-%m-%dT%H:%MZ"), "region": "US", "tracked_since": since,
+                   "games": rows}, f, separators=(",", ":"))
     log(f"{len(rows):,} games priced -> {a.out} ({os.path.getsize(a.out):,} bytes)")
 
 

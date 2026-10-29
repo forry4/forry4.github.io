@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { baseCss } from "../shared/theme.js";
 import { rangePointer } from "../shared/rangePointer.js";
-import { attachPrices, money, day } from "./prices.js";
+import { attachPrices, startedWithin, money, day, span } from "./prices.js";
 import { readSaved, writeSaved, clearSaved, setMark, markOf, adopt, settle, batch } from "./saved.js";
 
 // CSS lives in the sibling .css file, imported with `?inline` so it is still a string
@@ -31,10 +31,13 @@ const YMAX = new Date().getFullYear();
 
 // `cats`: category ids a game must ALL carry (AND, so Roguelike + Card game finds the
 // roguelike deckbuilders). `sw`: "any", "yes" (on Nintendo Switch) or "no". `sale`: a
-// sale running today on either store, on Steam, or on the eShop.
-const DEFAULTS = { rev: REVIEWS.indexOf(500), yfrom: YMIN, yto: YMAX, cats: [], sw: "any", sale: "any" };
+// sale running today on either store, on Steam, or on the eShop. `started`: only sales
+// that began within that many days (on the store `sale` names, either if it names none).
+const DEFAULTS = { rev: REVIEWS.indexOf(500), yfrom: YMIN, yto: YMAX, cats: [], sw: "any", sale: "any",
+	started: "any" };
 const SWITCH = [["any", "Any"], ["yes", "On Switch"], ["no", "Not on Switch"]];
 const SALE = [["any", "Any"], ["either", "On sale"], ["steam", "Steam sale"], ["switch", "Switch sale"]];
+const STARTED = [["any", "Any time"], ["1", "Past day"], ["3", "Past 3 days"], ["7", "Past week"], ["14", "Past 2 weeks"]];
 const fmt = (n) => n.toLocaleString("en-US");
 
 function loadDials() {
@@ -48,6 +51,7 @@ function loadDials() {
 		if (Array.isArray(v.cats)) out.cats = v.cats.filter((c) => typeof c === "string");
 		if (SWITCH.some(([k]) => k === v.sw)) out.sw = v.sw;
 		if (SALE.some(([k]) => k === v.sale)) out.sale = v.sale;
+		if (STARTED.some(([k]) => k === v.started)) out.started = v.started;
 		out.rev = Math.min(REVIEWS.length - 1, Math.max(0, out.rev));
 		out.yfrom = Math.min(YMAX, Math.max(YMIN, out.yfrom));
 		out.yto = Math.min(YMAX, Math.max(out.yfrom, out.yto));
@@ -89,11 +93,17 @@ function Dial({ id, label, value, min, max, step, onChange, display }) {
 function Price({ p, store, none = "—" }) {
 	if (!p) return <td className="stf-price stf-num stf-none">{none}</td>;
 	if (!p.off) return <td className="stf-price stf-num">{money(p.cur)}</td>;
-	const when = p.start ? `${day(p.start)} – ${day(p.end)}` : p.end ? `until ${day(p.end)}` : "no end date given";
+	// Steam publishes no start: its start is when the daily price check first saw the sale.
+	const seen = store === "Steam" ? "First seen on sale" : "Started";
+	const began = p.start ? `${seen} ${day(p.start)}` : p.before ? `${seen} on or before ${day(p.before)}` : "";
+	const ends = p.end ? `ends ${day(p.end)}` : "no end date given";
+	const tip = began ? `${began}; ${ends}.` : `${ends[0].toUpperCase()}${ends.slice(1)}.`;
 	return (
-		<td className="stf-price stf-num" title={`${store} sale: ${money(p.cur)}, regularly ${money(p.reg)} (${when})`}>
+		<td className="stf-price stf-num"
+			title={`${store} sale: ${money(p.cur)}, regularly ${money(p.reg)}. ${tip}`}>
 			<b className="stf-sale">{money(p.cur)}</b><span className="stf-off">−{p.off}%</span>
-			<span className="stf-was"><s>{money(p.reg)}</s>{p.end ? ` · to ${day(p.end)}` : ""}</span>
+			<span className="stf-was"><s>{money(p.reg)}</s>
+				{p.start && p.end ? ` · ${span(p.start, p.end)}` : p.end ? ` · to ${day(p.end)}` : ""}</span>
 		</td>
 	);
 }
@@ -216,7 +226,7 @@ export default function SteamFilter({ authUser, onExit }) {
 	}, []);
 
 	// A new array when prices land, so everything downstream re-sorts and re-filters.
-	const priced = useMemo(() => (games ? attachPrices(games, prices?.games, Date.now() / 1000).slice() : null),
+	const priced = useMemo(() => (games ? attachPrices(games, prices?.games, Date.now() / 1000, prices?.tracked_since || 0).slice() : null),
 		[games, prices]);
 	const nSaved = useMemo(() => (priced || []).filter((g) => g.id in saved).length, [priced, saved]);
 	const nHidden = useMemo(() => (priced || []).filter((g) => g.id in hidden).length, [priced, hidden]);
@@ -262,6 +272,8 @@ export default function SteamFilter({ authUser, onExit }) {
 		if (d.sale === "either" && !g.ps?.off && !g.pw?.off) return false;
 		if (d.sale === "steam" && !g.ps?.off) return false;
 		if (d.sale === "switch" && !g.pw?.off) return false;
+		if (d.started !== "any"
+			&& !startedWithin(g, d.sale === "any" ? "either" : d.sale, Date.now() / 1000, Number(d.started))) return false;
 		return true;
 	}, [d, hidden]);
 
@@ -379,6 +391,15 @@ export default function SteamFilter({ authUser, onExit }) {
 											{SALE.map(([k, label]) => (
 												<button type="button" key={k} aria-pressed={d.sale === k}
 													onClick={() => { setD((prev) => ({ ...prev, sale: k })); setLimit(PAGE); }}>
+													{label}
+												</button>
+											))}
+										</div>
+										<p className="stf-mhead">Sale started — <em>to see what just went on sale</em></p>
+										<div className="stf-seg" role="group" aria-label="Sale started">
+											{STARTED.map(([k, label]) => (
+												<button type="button" key={k} aria-pressed={d.started === k}
+													onClick={() => { setD((prev) => ({ ...prev, started: k })); setLimit(PAGE); }}>
 													{label}
 												</button>
 											))}
@@ -547,9 +568,15 @@ export default function SteamFilter({ authUser, onExit }) {
 											the cheapest eShop listing of the same title today — a Switch 2 version or
 											Nintendo Switch 2 Edition counts, and the badge reads <b>Switch 2</b> when one
 											is sold.</p>
-										<p>A sale shows its discount and the day it ends, in your time zone, and drops
-											back to the regular price once that day passes. Sort a store’s column for
-											the cheapest first.</p>
+										<p>A sale shows its discount and its dates, in your time zone, and drops back
+											to the regular price once it ends. Sort a store’s column for the cheapest
+											first.</p>
+										<p><b>Sale started</b> keeps the sales that began in that window. The eShop
+											publishes when a sale starts; Steam doesn’t, so a Steam sale’s start is the
+											day the twice-daily price check first saw it — right to within a day.
+											{prices.tracked_since
+												? ` Steam sales already running on ${day(prices.tracked_since)}, when the check started recording, count as older than every window.`
+												: ""}</p>
 									</div>
 								)}
 								<div>

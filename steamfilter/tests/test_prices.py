@@ -150,6 +150,26 @@ def test_eshop_answer_must_have_one_result_per_query():
 
 # ── the file ──────────────────────────────────────────────────────────────
 
+def test_a_steam_sale_keeps_the_start_it_was_first_seen_with():
+    prev = {"1": {"s": [500, 2000, 900, 100]},     # on sale, start recorded
+            "2": {"s": [500, 2000, 900]},          # on sale before starts were recorded
+            "3": {"s": [999]}}                     # full price last time
+    rows = {"1": {"s": [400, 2000, 950]}, "2": {"s": [500, 2000, 900]}, "3": {"s": [499, 999, 800]},
+            "4": {"s": [300, 600]}, "5": {"s": [999]}, "6": {"w": [1, 2, 3, 4]}}
+    p.carry_starts(prev, rows, now=500, since=50)
+    assert rows["1"]["s"] == [400, 2000, 950, 100]   # still on sale (deeper now): same start
+    assert rows["2"]["s"] == [500, 2000, 900, 50]    # running before tracking: tracked_since
+    assert rows["3"]["s"] == [499, 999, 800, 500]    # newly on sale: this run
+    assert rows["4"]["s"] == [300, 600, 0, 500]      # no end given: end 0
+    assert rows["5"]["s"] == [999] and rows["6"] == {"w": [1, 2, 3, 4]}
+
+
+def test_a_sale_that_ended_and_came_back_starts_again():
+    rows = {"1": {"s": [500, 2000, 900]}}
+    p.carry_starts({"1": {"s": [2000]}}, rows, now=700, since=50)
+    assert rows["1"]["s"][3] == 700
+
+
 def test_an_unchanged_answer_leaves_the_file_alone(monkeypatch, tmp_path):
     payload = tmp_path / "steam-filter.json"
     payload.write_text(json.dumps({"games": [{"n": "A", "id": 1, "sw": 1}]}))
@@ -160,6 +180,12 @@ def test_an_unchanged_answer_leaves_the_file_alone(monkeypatch, tmp_path):
     p.main(["--out", str(out)])
     first = json.loads(out.read_text())
     assert first["games"] == {"1": {"s": [999], "w": [1999], "w2": 1}} and first["region"] == "US"
-    out.write_text(json.dumps(dict(first, priced="earlier")))
+    assert isinstance(first["tracked_since"], int)
+    out.write_text(json.dumps(dict(first, priced="earlier", tracked_since=42)))
     p.main(["--out", str(out)])
     assert json.loads(out.read_text())["priced"] == "earlier"
+    # a run that does write keeps the file's tracked_since
+    monkeypatch.setattr(p, "steam_prices", lambda f, l, ids: {1: [499, 999, 2_000_000_000]})
+    p.main(["--out", str(out)])
+    again = json.loads(out.read_text())
+    assert again["tracked_since"] == 42 and again["games"]["1"]["s"][:3] == [499, 999, 2_000_000_000]
