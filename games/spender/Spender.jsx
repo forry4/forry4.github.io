@@ -58,6 +58,7 @@ const Profile = lazyChunk("Profile", () => import("../../shared/Profile.jsx"));
 const BggFilter = lazyChunk("BggFilter", () => import("../../bggfilter/BggFilter.jsx"));
 const SteamFilter = lazyChunk("SteamFilter", () => import("../../steamfilter/SteamFilter.jsx"));
 const AstralGuide = lazyChunk("AstralGuide", () => import("../../astralguide/AstralGuide.jsx"));
+const LolStats = lazyChunk("LolStats", () => import("../../lolstats/LolStats.jsx"));
 const BoxPuzzles = lazyChunk("BoxPuzzles", () => import("../../boxpuzzles/BoxPuzzles.jsx"));
 
 // Shown while a game's chunk loads. Deliberately an empty full-height panel in the
@@ -129,8 +130,8 @@ const HTTP_BASE = WS_BASE.replace(/^ws/, "http").replace(/\/ws$/, "");
 // tables — GAMES[].id ≠ path for wherewolf; Spender is one site-level screen now.
 // The shell owns segment 1; each sub-game owns its own segment 2 (room id). The Spender
 // Spender's own waiting/game map to "spender" (or "puzzles" while puzzling) in applyPopRoute.
-const SCREEN_FOR_MODE = { spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", pipmarket: "pipmarket", books: "books", notes: "notes", profile: "profile", puzzles: "puzzles", bggfilter: "bggfilter", steamfilter: "steamfilter", boxpuzzles: "boxpuzzles", astral: "astral", offline: "offline" };
-const MODE_FOR_SCREEN = { home: "home", spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", pipmarket: "pipmarket", books: "books", notes: "notes", profile: "profile", puzzles: "puzzles", bggfilter: "bggfilter", steamfilter: "steamfilter", boxpuzzles: "boxpuzzles", astral: "astral", offline: "offline" };
+const SCREEN_FOR_MODE = { spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", pipmarket: "pipmarket", books: "books", notes: "notes", profile: "profile", puzzles: "puzzles", bggfilter: "bggfilter", steamfilter: "steamfilter", boxpuzzles: "boxpuzzles", astral: "astral", lolstats: "lolstats", offline: "offline" };
+const MODE_FOR_SCREEN = { home: "home", spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", pipmarket: "pipmarket", books: "books", notes: "notes", profile: "profile", puzzles: "puzzles", bggfilter: "bggfilter", steamfilter: "steamfilter", boxpuzzles: "boxpuzzles", astral: "astral", lolstats: "lolstats", offline: "offline" };
 
 // Per-game emblem — inline SVG tinted via currentColor (=the card's --accent), so no
 // raster asset / CDN (keeps the self-hosted, no-CLS constraint). Small motifs that read
@@ -766,6 +767,7 @@ function offlineReadRows(authUser, readingPack) {
 		packed("bggfilter", "BGG Filter", "Browse"),
 		packed("steamfilter", "Steam Filter", "Browse"),
 		packed("astral", "Astral Ascent Guide", "Browse"),
+		packed("lolstats", "LoL Stats", "Browse"),
 		{ id: "books", label: "Books", verb: "Read", enabled: online || lsHas("books.offline.v1"),
 			state: saved(lsHas("books.offline.v1"), "open it once online to keep a copy") },
 		member
@@ -826,18 +828,24 @@ const OFFLINE_PACKS = {
 	// own copy whenever it is used online, and `warm` takes one now so a fresh
 	// download is complete without visiting each screen first.
 	reading: {
-		label: "Puzzles, BGG & Steam Filters, Astral Ascent Guide, Books, Notes & profile", size: "~1.7 MB",
-		urls: ["data/puzzles.json", "data/bgg-filter.json", "data/steam-filter.json", "data/steam-prices.json", "data/astral-guide.json", ...OFFLINE_FONT_URLS],
+		label: "Puzzles, BGG & Steam Filters, Astral Ascent Guide, LoL Stats, Books, Notes & profile", size: "~2.9 MB",
+		urls: ["data/puzzles.json", "data/bgg-filter.json", "data/steam-filter.json", "data/steam-prices.json", "data/astral-guide.json",
+			"data/lol-worlds.json", "data/lol-champs-index.json", ...OFFLINE_FONT_URLS],
 		chunks: [
 			() => import("../../books/Books.jsx"), () => import("../../notes/Notes.jsx"),
 			() => import("../../shared/Profile.jsx"), () => import("../../bggfilter/BggFilter.jsx"),
 			() => import("../../steamfilter/SteamFilter.jsx"), () => import("../../astralguide/AstralGuide.jsx"),
+			() => import("../../lolstats/LolStats.jsx"),
 		],
 		warm: async ({ authUser }) => {
 			const [books, notes, profile] = await Promise.all([
 				import("../../books/Books.jsx"), import("../../notes/Notes.jsx"), import("../../shared/Profile.jsx")]);
+			// LoL Stats' year files are named by its index, so a new year joins the pack
+			// without a code change; sw.js keeps every same-origin GET it serves.
+			const lolYears = fetch(`${import.meta.env.BASE_URL || "/"}data/lol-champs-index.json`).then((r) => r.json())
+				.then((ix) => Promise.all(ix.years.map((y) => fetch(`${import.meta.env.BASE_URL || "/"}data/lol-champs-${y.year}.json`))));
 			await Promise.allSettled([books.saveOfflineCopy?.(authUser), notes.saveOfflineCopy?.(authUser),
-				profile.saveOfflineCopy?.(authUser)]);
+				profile.saveOfflineCopy?.(authUser), lolYears]);
 		},
 	},
 };
@@ -3055,6 +3063,7 @@ export default function SpenderApp() {
 			onBggFilter={() => nav("bggfilter")}
 			onSteamFilter={() => nav("steamfilter")}
 			onAstral={() => nav("astral")}
+			onLolStats={() => nav("lolstats")}
 			onBoxPuzzles={() => nav("boxpuzzles")}
 			onOffline={() => { pushPath(buildPath("offline")); enterOfflineHub(null); }}
 			onSiteHealth={() => setSiteHealthOpen(true)} siteAlerts={siteAlerts}
@@ -3107,6 +3116,15 @@ export default function SpenderApp() {
 	if (screen === "astral") return (
 		<Suspense fallback={<GameChunkLoading />}>
 			<AstralGuide onExit={exitRead} />
+		</Suspense>
+	);
+
+	// LoL Stats — Worlds seed records (Liquipedia) and champion stats (Oracle's Elixir),
+	// static data browsed client-side. No backend. Owns its segment 2 (/lolstats/<tab>)
+	// and the hash (#<champion>, the open champion).
+	if (screen === "lolstats") return (
+		<Suspense fallback={<GameChunkLoading />}>
+			<LolStats onExit={exitRead} />
 		</Suspense>
 	);
 

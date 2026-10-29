@@ -48,6 +48,8 @@ const EXTRA_ICON = {
 	steam: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><path d="M7.5 8.3h9a4 4 0 0 1 3.9 4.9l-.8 3.4a2 2 0 0 1-3.4.9l-1.7-2.2H9.5l-1.7 2.2a2 2 0 0 1-3.4-.9l-.8-3.4a4 4 0 0 1 3.9-4.9Z" /><path d="M8.5 10.9v3M7 12.4h3" /></svg>),
 	// A four-point star: the Astral Ascent guide. One closed path, so it survives 20px.
 	astral: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><path d="M12 3.2c.7 4.6 1.9 6.8 6.8 8.8-4.9 2-6.1 4.2-6.8 8.8-.7-4.6-1.9-6.8-6.8-8.8 4.9-2 6.1-4.2 6.8-8.8Z" /></svg>),
+	// Three rising bars: LoL Stats is win rates and records. Three strokes, so it survives 20px.
+	lolstats: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><path d="M4.5 19.5h15" /><path d="M7.5 16.5v-5M12 16.5V7.5M16.5 16.5v-8" /></svg>),
 	// A page with a folded corner and two ruled lines — the same drawing as Notes' own
 	// note glyph, so the tile and the page it opens agree.
 	notes: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><path d="M6.5 3.5h7.8l3.7 3.7v13.3H6.5Z" /><path d="M14 3.7v3.8h3.8M9.2 12h5.6M9.2 15.4h5.6" /></svg>),
@@ -141,7 +143,7 @@ const GO_CHEVRON = (
 
 export { SITE_NAME, GAMES, GAME_EMBLEM, HERO_RULE };
 
-export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles, onBoxPuzzles, onBooks, onNotes, onBggFilter, onSteamFilter, onAstral, onOffline, onSiteHealth, siteAlerts = 0, siteHealth = null, onProfile, onLogout }) {
+export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles, onBoxPuzzles, onBooks, onNotes, onBggFilter, onSteamFilter, onAstral, onLolStats, onOffline, onSiteHealth, siteAlerts = 0, siteHealth = null, onProfile, onLogout }) {
 	// Built here rather than at module scope because each entry closes over a prop.
 	const games = visibleGames(authUser);
 	const extras = [
@@ -151,6 +153,7 @@ export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles
 		{ id: "bgg", label: "BGG Filter", onClick: onBggFilter },
 		onSteamFilter && { id: "steam", label: "Steam Filter", onClick: onSteamFilter },
 		onAstral && { id: "astral", label: "Astral Ascent", onClick: onAstral },
+		onLolStats && { id: "lolstats", label: "LoL Stats", onClick: onLolStats },
 		// A private notebook per account. Shown to guests too: the page tells them to
 		// sign in, which is how they find out it exists (notes/api.py refuses them).
 		onNotes && { id: "notes", label: "Notes", onClick: onNotes },

@@ -1,0 +1,58 @@
+name: LoL Stats refresh
+
+# Re-downloads Oracle's Elixir match data and rebuilds LoL Stats' champion payload
+# (webapp/public/data/lol-champs-<year>.json + the index), then commits it to main.
+# Manual only ("Run workflow"): the current year changes as the season is played, so
+# run it whenever fresh numbers are wanted. Past years are settled; rebuild one by
+# naming it. The Worlds seeds tab (lol-worlds.json) is not refreshed here: it is built
+# from Liquipedia by `python -I lolstats/tools/worlds.py fetch && ... build`, by hand,
+# once a Worlds has finished (its SEEDS table needs the new year written first).
+#
+# A push made with GITHUB_TOKEN does not trigger other workflows, so the job
+# dispatches the Pages deploy itself once the data is on main.
+
+on:
+  workflow_dispatch:
+    inputs:
+      years:
+        description: 'Years to rebuild, space-separated (blank = the current year)'
+        default: ''
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: lol-stats-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      # The input reaches the shell through env, never pasted into the script.
+      - name: Download
+        env:
+          YEARS: ${{ inputs.years }}
+        run: python -I lolstats/tools/harvest.py ${YEARS:-$(date -u +%Y)}
+      - name: Build the payload
+        env:
+          YEARS: ${{ inputs.years }}
+        run: python -I lolstats/tools/make_data.py ${YEARS:-$(date -u +%Y)}
+      - name: Commit and deploy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add webapp/public/data/lol-champs-*.json
+          if git diff --cached --quiet; then echo "no change"; exit 0; fi
+          git commit -m "LoL Stats: refresh $(date -u +%Y-%m-%d)"
+          git pull --rebase origin main
+          git push origin HEAD:main
+          gh workflow run deploy-pages.yml --ref main

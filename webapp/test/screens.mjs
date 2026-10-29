@@ -65,6 +65,7 @@ const SCREENS = [
 	{ path: "/steamfilter", chunk: "SteamFilter", marker: ".stf" },
 	{ path: "/boxpuzzles", chunk: "BoxPuzzles", marker: ".bx" },
 	{ path: "/astral", chunk: "AstralGuide", marker: ".aag" },
+	{ path: "/lolstats", chunk: "LolStats", marker: ".lol" },
 ];
 
 // EVERY GAME LOBBY, IN ONE PLACE. Three blocks below drive "each game's lobby" —
@@ -3086,6 +3087,8 @@ try {
 			// The guide's whole-site search plus a tab's own filter, and the charts' number fields.
 			{ name: "/astral/auras", path: "/astral/auras", wait: ".aag-find input", min: 2 },
 			{ name: "/astral/charts", path: "/astral/charts", wait: ".aag-nf input", min: 7 },
+			// The champion search and the list's own filter.
+			{ name: "/lolstats/champions", path: "/lolstats/champions", wait: ".lol-find input", min: 2 },
 			// BOOKS IS THE ONE HOLE, AND IT IS THE PAGE'S, NOT THIS WALK'S. `/books`
 			// renders no field at all to this harness — the editor needs `can_edit`
 			// from the server and even the search box is behind a populated list — so
@@ -9680,8 +9683,8 @@ try {
 		check("...and it opens the offline hub", await has(".offline-hub") && new URL(page.url()).pathname === "/offline",
 			page.url());
 		const rows = await page.locator(".offline-read [data-read]").evaluateAll((els) => els.map((e) => e.dataset.read));
-		check("the hub's Read section lists all seven screens",
-			JSON.stringify(rows) === JSON.stringify(["puzzles", "bggfilter", "steamfilter", "astral", "books", "notes", "profile"]), JSON.stringify(rows));
+		check("the hub's Read section lists all eight screens",
+			JSON.stringify(rows) === JSON.stringify(["puzzles", "bggfilter", "steamfilter", "astral", "lolstats", "books", "notes", "profile"]), JSON.stringify(rows));
 		check("...and still has exactly one Open button (the scorecard's)",
 			await page.getByRole("button", { name: /^Open$/ }).count() === 1);
 
@@ -10937,6 +10940,105 @@ try {
 	}
 
 
+	// ── LoL Stats (/lolstats) ─────────────────────────────────────────────
+	// Both tabs at desktop and phone width, with every number checked against
+	// lolstats/derive.js run on the same payloads (so a wrong filter default or a
+	// mis-wired region shows up as a wrong number, not just a rendered table).
+	async function lolStats(log) {
+		const check = (name, cond, detail = "") => {
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(`lolstats: ${name}`); log(`  FAIL ${name}  ${detail}`); }
+		};
+		const D = await import(new URL(`file:///${path.join(webappDir, "..", "lolstats", "derive.js").replace(/\\/g, "/")}`).href);
+		const pub = (f) => JSON.parse(readFileSync(path.join(webappDir, "public", "data", f), "utf8"));
+		const worlds = pub("lol-worlds.json");
+		const index = pub("lol-champs-index.json");
+		const latest = D.decodeYear(pub(`lol-champs-${index.years[index.years.length - 1].year}.json`));
+		// The page's defaults: main event, majors only, G2 separate, every year.
+		const sides = D.seedSides(worlds.matches, { nonMajorTeams: worlds.nonMajorTeams });
+		const lck1 = D.tally(sides.filter((x) => x.reg === "LCK" && x.seed === 1));
+		const regions = D.seedRegions({ splitG2: true, majors: true });
+		const table = D.champTable(D.scope([latest]));
+		const azir = D.champLine(D.scope([latest]), "Azir");
+
+		for (const [width, height] of [[1280, 900], [390, 844]]) {
+			const ctx = await browser.newContext({ viewport: { width, height } });
+			await ctx.addInitScript(() => localStorage.setItem("spender_user",
+				JSON.stringify({ id: "screens-lolstats", name: "Faker", guest: true })));
+			const page = await ctx.newPage();
+			const errors = [];
+			page.on("pageerror", (e) => errors.push(String(e)));
+			const at = `at ${width}px`;
+			const wide = () => page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+
+			// The menu tile opens the Seeds tab.
+			await page.goto(`http://localhost:${PORT}/`, { waitUntil: "networkidle" });
+			await page.waitForSelector(".home-extra", { timeout: 25_000 }).catch(() => {});
+			await page.locator(".home-extra", { hasText: "LoL Stats" }).click().catch(() => {});
+			await page.waitForSelector(".lol-heat .lol-cell.pick", { timeout: 15_000 }).catch(() => {});
+			check(`${at}: the Extras tile opens /lolstats on the Worlds seeds tab`,
+				new URL(page.url()).pathname === "/lolstats"
+				&& await page.locator(".lol-tab[aria-selected=true]").textContent().catch(() => "") === "Worlds seeds", page.url());
+			const rowsShown = await page.locator(".lol-heat").first().locator("tbody th").allTextContents();
+			check(`${at}: the seed table has one row per default region (${regions.join(", ")})`,
+				JSON.stringify(rowsShown) === JSON.stringify(regions), JSON.stringify(rowsShown));
+			const cell = await page.locator(".lol-cell.pick[aria-label='LCK seed 1']").innerText().catch(() => "");
+			const want = `${D.pct(lck1.gw / (lck1.gw + lck1.gl))}\n${lck1.gw}–${lck1.gl}`;
+			check(`${at}: LCK #1 reads ${want.replace("\n", " ")}, as derive.js computes`, cell === want, JSON.stringify(cell));
+			check(`${at}: the seeds tab does not scroll sideways`, await wide() <= 0, String(await wide()));
+
+			// A cell lists its teams; merging the LEC brings its row back.
+			await page.locator(".lol-cell.pick[aria-label='G2 seed 1']").click().catch(() => {});
+			const g2Teams = D.seedTeams(sides, "G2", 1).length;
+			check(`${at}: picking G2 #1 lists its ${g2Teams} team-years`,
+				await page.locator(".lol-detail .lol-app").count() === g2Teams, String(await page.locator(".lol-detail .lol-app").count()));
+			await page.locator(".lol-chip", { hasText: "LEC combined" }).click().catch(() => {});
+			const merged = await page.locator(".lol-heat").first().locator("tbody th").allTextContents();
+			check(`${at}: "LEC combined" replaces the G2 rows with one LEC row`,
+				merged.includes("LEC") && !merged.includes("G2"), JSON.stringify(merged));
+
+			// The Champions tab: the latest year's table, sorted by presence.
+			await page.locator(".lol-tab", { hasText: "Champions" }).click().catch(() => {});
+			await page.waitForSelector(".lol-table tbody tr", { timeout: 15_000 }).catch(() => {});
+			const nRows = await page.locator(".lol-table tbody tr").count();
+			check(`${at}: the Champions tab lists all ${table.length} champions of ${latest.year}`,
+				new URL(page.url()).pathname === "/lolstats/champions" && nRows === table.length, `${page.url()} ${nRows}`);
+			const top = table.slice().sort((a, b) => b.presence - a.presence || b.games - a.games || a.name.localeCompare(b.name))[0];
+			check(`${at}: the list opens on the most-present champion (${top.name})`,
+				(await page.locator(".lol-table tbody tr").first().locator("th").innerText().catch(() => "")) === top.name);
+			check(`${at}: the champion list does not scroll sideways`, await wide() <= 0, String(await wide()));
+
+			// Search -> a champion's page, with its numbers and the four lists.
+			await page.locator("#lol-champ-search").fill("azi");
+			await page.locator("#lol-champ-search").press("Enter");
+			await page.waitForSelector(".lol-champname", { timeout: 15_000 }).catch(() => {});
+			check(`${at}: searching "azi" + Enter opens Azir at /lolstats/champions#Azir`,
+				await page.locator(".lol-champname").innerText().catch(() => "") === "Azir" && new URL(page.url()).hash === "#Azir", page.url());
+			// By the tile's LABEL: "games" also appears in the gold-diff tile's note.
+			const games = await page.locator(".lol-tile").filter({ has: page.locator(".lol-tile-lbl", { hasText: /^Games$/ }) })
+				.locator(".lol-tile-val").innerText().catch(() => "");
+			check(`${at}: Azir's ${latest.year} games read ${azir.games}`, games === azir.games.toLocaleString("en-US"), games);
+			check(`${at}: all four partner lists render`, await page.locator(".lol-plist").count() === 4);
+			await page.waitForSelector(".lol-sec h2:has-text('By year') + p + .lol-frame tbody tr", { timeout: 20_000 }).catch(() => {});
+			const yearRows = await page.locator(".lol-sec", { hasText: "By year" }).locator("tbody tr").count();
+			check(`${at}: the By year table has a row for each of the ${index.years.length} years`, yearRows === index.years.length, String(yearRows));
+			check(`${at}: a champion page does not scroll sideways`, await wide() <= 0, String(await wide()));
+
+			// A partner opens its own page; Back returns; a deep link with an apostrophe works.
+			const firstPartner = await page.locator(".lol-plist .lol-link").first().innerText().catch(() => "");
+			await page.locator(".lol-plist .lol-link").first().click().catch(() => {});
+			check(`${at}: a partner's name opens that champion`, await page.locator(".lol-champname").innerText().catch(() => "") === firstPartner, firstPartner);
+			await page.goBack();
+			await page.waitForFunction(() => document.querySelector(".lol-champname")?.textContent === "Azir", null, { timeout: 5_000 }).catch(() => {});
+			check(`${at}: browser Back returns to Azir`, await page.locator(".lol-champname").innerText().catch(() => "") === "Azir");
+			await page.goto(`http://localhost:${PORT}/lolstats/champions#${encodeURIComponent("Kai'Sa")}`, { waitUntil: "networkidle" });
+			await page.waitForSelector(".lol-champname", { timeout: 15_000 }).catch(() => {});
+			check(`${at}: a deep link to Kai'Sa opens her page`, await page.locator(".lol-champname").innerText().catch(() => "") === "Kai'Sa");
+			check(`${at}: no page errors`, errors.length === 0, errors.join(" | "));
+			await ctx.close();
+		}
+	}
+
 	async function updateNudgeLayout(log) {
 		const check = (name, cond, detail = "") => {
 			if (cond) log(`  OK   ${name}`);
@@ -10973,7 +11075,7 @@ try {
 		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, historyRecovery, dmAdventures,
 		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, formControlZoom, lastDifficulty,
 		dissonanceQuartet, orbitPlay, lobbyFinishSync, blackCastlePlay, pinchPlay, pipMarketPlay, secretNamesPlay, lobbyChrome,
-		notesEditor, profilePage, offlineRead, boxPuzzles, boxDaily, astralGuide, steamSaved, updateNudgeLayout];
+		notesEditor, profilePage, offlineRead, boxPuzzles, boxDaily, astralGuide, lolStats, steamSaved, updateNudgeLayout];
 
 	// EVERY BLOCK MUST BE IN A LANE. Before the lanes existed, adding a block meant
 	// writing it — it then ran because it was simply the next statement. Now it has

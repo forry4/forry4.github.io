@@ -1,0 +1,135 @@
+/* LoL Stats — every rule is .lol-prefixed. The site tokens (--bg, --surface, --gold,
+   --text…) come from shared/theme.base-css.css, prepended by the component. Win-rate
+   fills are computed in LolStats.jsx (heat()), so no color here encodes a rate. */
+.lol{min-height:100vh;background:var(--bg);color:var(--text);padding:0 0 80px;
+	background-image:radial-gradient(1100px 460px at 80% -12%,rgba(57,135,229,.08),transparent 60%),
+		radial-gradient(900px 420px at -10% 0%,rgba(201,168,76,.06),transparent 60%);}
+.lol *{box-sizing:border-box;}
+/* Zero specificity, so every .lol-* button rule below can set its own font and color. */
+:where(.lol) :where(button){font:inherit;color:inherit;}
+.lol input{font-size:16px;}
+.lol button:focus-visible,.lol .lol-cell.pick:focus-visible{outline:2px solid var(--gold-light);outline-offset:2px;}
+
+/* ── header ──────────────────────────────────────────────────────────── */
+.lol-top{position:sticky;top:0;z-index:20;background:rgba(15,14,12,.94);backdrop-filter:blur(8px);border-bottom:1px solid var(--border);}
+.lol-bar{display:flex;align-items:center;gap:10px 14px;padding:10px max(16px,env(safe-area-inset-right,0px)) 0 max(16px,env(safe-area-inset-left,0px));
+	max-width:1240px;margin:0 auto;flex-wrap:wrap;}
+.lol-back{flex:none;margin-bottom:10px;}
+.lol-title{background:none;border:0;cursor:pointer;padding:0;margin-bottom:10px;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;
+	letter-spacing:.08em;text-transform:uppercase;color:var(--gold);font-size:.95rem;white-space:nowrap;}
+.lol-tabs{display:flex;gap:2px;margin-left:auto;align-self:flex-end;}
+.lol-tab{flex:none;background:none;border:0;border-bottom:2px solid transparent;cursor:pointer;padding:9px 12px 10px;
+	color:var(--text-soft);font-family:'Cinzel','Cinzel Fallback',serif;font-size:.76rem;letter-spacing:.06em;white-space:nowrap;}
+.lol-tab:hover{color:var(--text);}
+.lol-tab[aria-selected="true"]{color:var(--gold-light);border-bottom-color:var(--gold);}
+@media (max-width:560px){
+	.lol .lol-tabs{margin-left:0;width:100%;}
+	.lol .lol-tab{flex:1;}
+}
+
+.lol-main{max-width:1240px;margin:0 auto;padding:20px max(16px,env(safe-area-inset-right,0px)) 0 max(16px,env(safe-area-inset-left,0px));}
+.lol-loading{padding:70px 0;text-align:center;color:var(--text-soft);}
+.lol-loading-sm{padding:20px 0;text-align:left;}
+
+/* ── type ────────────────────────────────────────────────────────────── */
+.lol-intro{margin:4px 0 16px;}
+.lol-h1{font-family:'Cinzel','Cinzel Fallback',serif;font-size:clamp(1.35rem,4.2vw,1.9rem);font-weight:700;color:var(--gold);
+	letter-spacing:.04em;margin:0;text-wrap:balance;line-height:1.15;}
+.lol-h2{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.86rem;letter-spacing:.12em;text-transform:uppercase;color:var(--gold);margin:0;font-weight:700;}
+.lol-h3{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.8rem;letter-spacing:.08em;color:var(--text);margin:0;font-weight:700;}
+.lol-sub{color:var(--text-soft);font-size:.98rem;line-height:1.5;margin:6px 0 12px;max-width:78ch;}
+.lol-dim{color:var(--text-soft);font-weight:400;}
+.lol-sec{margin:30px 0 0;min-width:0;}
+.lol-pad{padding:10px 14px;}
+
+/* ── filters ─────────────────────────────────────────────────────────── */
+.lol-controls{display:flex;flex-wrap:wrap;align-items:center;gap:10px 22px;padding:12px 14px;background:var(--surface);
+	border:1px solid var(--border);border-radius:var(--radius);}
+.lol-chips{display:flex;flex-wrap:wrap;align-items:center;gap:5px;}
+.lol-chips-lbl{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;color:var(--text-dim);margin-right:3px;}
+.lol-chip{font-variant-numeric:tabular-nums;font-size:.9rem;padding:3px 10px;border-radius:999px;border:1px solid var(--border);
+	background:transparent;color:var(--text-soft);cursor:pointer;line-height:1.35;}
+.lol-chip:hover{border-color:var(--text-dim);color:var(--text);}
+.lol-chip[aria-pressed="true"]{background:rgba(201,168,76,.16);border-color:var(--gold);color:var(--gold-light);}
+.lol-count{color:var(--text-soft);font-size:.88rem;font-variant-numeric:tabular-nums;margin-left:auto;}
+
+/* ── heat tables ─────────────────────────────────────────────────────── */
+.lol-frame{overflow-x:auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);}
+.lol-heat{border-collapse:separate;border-spacing:2px;margin:6px;font-variant-numeric:tabular-nums;}
+.lol-heat th{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:600;font-size:.74rem;letter-spacing:.06em;color:var(--text-soft);
+	padding:6px 8px;white-space:nowrap;}
+.lol-heat thead th{text-transform:uppercase;font-size:.66rem;letter-spacing:.1em;}
+/* The row names stay on screen while a wide table scrolls sideways on a phone. */
+.lol-heat tbody th{text-align:left;color:var(--text);position:sticky;left:0;z-index:1;background:var(--surface);}
+.lol-heat tr.lol-gap > *{border-top:8px solid transparent;}
+.lol-cell{min-width:78px;height:50px;text-align:center;border-radius:5px;padding:4px 6px;}
+.lol-cell.pick{cursor:pointer;min-width:92px;height:56px;}
+.lol-cell.empty{background:transparent;color:var(--text-dim);}
+.lol-pct{display:block;font-weight:700;font-size:1.05rem;line-height:1.1;}
+.lol-rec{display:block;font-size:.8rem;opacity:.88;}
+.lol-cell.low{outline:1.5px dashed currentColor;outline-offset:-4px;}
+.lol-cell.total{box-shadow:inset 0 0 0 1px var(--border);}
+.lol-cell.sel{box-shadow:inset 0 0 0 2px var(--gold-light);}
+.lol-legend{display:flex;flex-wrap:wrap;gap:8px 20px;align-items:center;color:var(--text-soft);font-size:.9rem;margin-top:12px;}
+.lol-ramp{display:flex;align-items:center;gap:6px;font-variant-numeric:tabular-nums;}
+.lol-ramp-bar{display:inline-block;width:150px;height:10px;border-radius:3px;}
+.lol-dash{display:inline-block;width:22px;height:14px;border-radius:3px;outline:1.5px dashed var(--text-soft);outline-offset:-3px;vertical-align:-2px;margin-right:4px;}
+
+.lol-detail{margin-top:12px;padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);}
+.lol-apps{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:2px 18px;margin-top:8px;}
+.lol-app{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums;min-width:0;}
+.lol-app-who{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lol-app-r{color:var(--text-soft);white-space:nowrap;}
+.lol-pip{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px;vertical-align:1px;}
+
+.lol-notes p{color:var(--text-soft);font-size:.95rem;line-height:1.5;margin:8px 0;max-width:80ch;}
+.lol-notes b{color:var(--text);}
+.lol-notes a{color:var(--gold-light);}
+
+/* ── champions ───────────────────────────────────────────────────────── */
+.lol-search{position:relative;flex:1 1 260px;max-width:380px;min-width:0;}
+.lol-search-box,.lol-find{display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border);
+	border-radius:var(--radius);padding:6px 10px;color:var(--text-soft);}
+.lol-search-box:focus-within,.lol-find:focus-within{border-color:var(--gold);}
+.lol-search-box input,.lol-find input{border:0;background:transparent;color:var(--text);font:inherit;font-size:16px;width:100%;min-width:0;outline:none;}
+.lol-search-pop{position:absolute;z-index:15;top:calc(100% + 6px);left:0;right:0;background:var(--surface);border:1px solid var(--border);
+	border-radius:var(--radius);box-shadow:0 18px 50px rgba(0,0,0,.55);padding:5px;}
+.lol-search-hit{display:block;width:100%;text-align:left;background:none;border:0;border-radius:6px;padding:7px 9px;cursor:pointer;font-weight:600;}
+.lol-search-hit.hi,.lol-search-hit:hover{background:var(--surface3);}
+.lol-search-none{padding:10px;color:var(--text-soft);}
+
+.lol-tablehd{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 16px;}
+.lol-find{max-width:240px;flex:1 1 180px;}
+.lol-table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;}
+.lol-table th,.lol-table td{padding:6px 12px;border-bottom:1px solid var(--border);text-align:left;white-space:nowrap;}
+.lol-table thead th{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;
+	color:var(--text-soft);font-weight:600;position:sticky;top:0;background:var(--surface);}
+.lol-table tbody th{font-weight:600;position:sticky;left:0;z-index:1;background:var(--surface);}
+.lol-table thead th:first-child{left:0;z-index:2;}
+.lol-table tbody tr:last-child > *{border-bottom:0;}
+.lol-table tbody tr:hover{background:rgba(255,255,255,.025);}
+.lol-table .num{text-align:right;}
+.lol-sort{background:none;border:0;cursor:pointer;padding:0;letter-spacing:inherit;text-transform:inherit;font-family:inherit;color:inherit;}
+.lol-sort:hover{color:var(--text);}
+.lol-link{background:none;border:0;padding:0;cursor:pointer;color:var(--text);font-weight:600;text-align:left;
+	text-decoration:underline;text-decoration-color:rgba(201,168,76,.4);text-underline-offset:3px;}
+.lol-link:hover{color:var(--gold-light);text-decoration-color:var(--gold);}
+.lol-wr{display:inline-block;min-width:54px;text-align:center;border-radius:4px;padding:1px 6px;font-weight:600;}
+
+.lol-champhd{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 14px;margin:22px 0 14px;}
+.lol-champname{font-size:clamp(1.6rem,5vw,2.3rem);}
+.lol-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;}
+.lol-tile{display:flex;flex-direction:column;gap:2px;padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);min-width:0;}
+.lol-tile-lbl{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.64rem;letter-spacing:.12em;text-transform:uppercase;color:var(--text-soft);}
+.lol-tile-val{font-size:1.45rem;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.2;}
+.lol-tile-note{color:var(--text-soft);font-size:.84rem;}
+
+.lol-plists{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px;}
+.lol-plist{padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);min-width:0;}
+.lol-psub{color:var(--text-soft);font-size:.86rem;margin:2px 0 8px;}
+.lol-prows{list-style:none;margin:0;padding:0;}
+.lol-prow{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid var(--border);
+	font-variant-numeric:tabular-nums;}
+.lol-prow:last-child{border-bottom:0;}
+.lol-prow .lol-link{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lol-prec{color:var(--text-soft);font-size:.9rem;}

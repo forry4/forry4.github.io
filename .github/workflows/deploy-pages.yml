@@ -36,6 +36,7 @@ on:
       - 'bggfilter/**'
       - 'steamfilter/**'
       - 'astralguide/**'
+      - 'lolstats/**'
       - 'boxpuzzles/**'
       - 'shared/**'
       - '.github/workflows/deploy-pages.yml'

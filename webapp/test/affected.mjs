@@ -52,6 +52,7 @@ export const FEATURE_BLOCKS = {
 	"bggfilter": ["formControlZoom", "offlineRead"],
 	"steamfilter": ["formControlZoom", "offlineRead", "steamSaved"],
 	"astralguide": ["astralGuide", "formControlZoom", "offlineRead"],
+	"lolstats": ["lolStats", "formControlZoom", "offlineRead"],
 	"shared": SHELL,
 	"webapp": SHELL,
 };
@@ -65,7 +66,7 @@ const PUBLIC_TOKENS = [
 	[/dissonance/, "games/dissonance"], [/coc/, "games/castles_of_crimson"],
 	[/duel/, "games/spender_duel"], [/orbit/, "games/orbit"], [/spender/, "games/spender"],
 	[/blackcastle/, "games/black_castle"], [/werewolf/, "games/wherewolf"],
-	[/bgg-filter/, "bggfilter"], [/steam-filter/, "steamfilter"], [/steam-prices/, "steamfilter"], [/astral-guide/, "astralguide"], [/puzzles\.json/, "games/spender"],
+	[/bgg-filter/, "bggfilter"], [/steam-filter/, "steamfilter"], [/steam-prices/, "steamfilter"], [/astral-guide/, "astralguide"], [/\/lol-[a-z0-9-]+\.json$/, "lolstats"], [/puzzles\.json/, "games/spender"],
 ];
 
 // Python: core/ and shared/ tests read the whole tree as text (rosters derived from
