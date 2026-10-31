@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { priceNow, attachPrices, startedWithin, money, span } from "../../../steamfilter/prices.js";
+import { priceNow, attachPrices, onSale, money, span } from "../../../steamfilter/prices.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const NOW = 1793000000;
@@ -34,21 +34,23 @@ test("a Steam start at or before tracked_since is 'on or before', not a date", (
 	assert.equal(priceNow([500, 2000, 0, NOW - 60], NOW, since).off, 75);
 });
 
-test("startedWithin reads the store asked for, and an unknown start is never recent", () => {
+test("onSale: any sale, or one that started in the window; an unknown start is never recent", () => {
 	const since = NOW - 10 * 86400;
-	const g = {};
-	attachPrices([Object.assign(g, { id: 1 })], {
+	const g = { id: 1 };
+	attachPrices([g], {
 		1: { s: [500, 2000, NOW + 99, NOW - 2 * 86400], w: [900, 1000, NOW + 99, NOW - 6 * 86400] } }, NOW, since);
-	assert.equal(startedWithin(g, "steam", NOW, 3), true);
-	assert.equal(startedWithin(g, "switch", NOW, 3), false);
-	assert.equal(startedWithin(g, "switch", NOW, 7), true);
-	assert.equal(startedWithin(g, "either", NOW, 3), true);
+	assert.equal(onSale(g.ps, NOW), true);
+	assert.equal(onSale(g.ps, NOW, 3), true);
+	assert.equal(onSale(g.pw, NOW, 3), false);
+	assert.equal(onSale(g.pw, NOW, 7), true);
 	const old = { id: 2 };
 	attachPrices([old], { 2: { s: [500, 2000, NOW + 99, since] } }, NOW, since);
-	assert.equal(startedWithin(old, "steam", NOW, 14), false);
+	assert.equal(onSale(old.ps, NOW), true);       // on sale...
+	assert.equal(onSale(old.ps, NOW, 14), false);  // ...but not known to be recent
 	const full = { id: 3 };
 	attachPrices([full], { 3: { s: [999] } }, NOW, since);
-	assert.equal(startedWithin(full, "either", NOW, 14), false);
+	assert.equal(onSale(full.ps, NOW), false);
+	assert.equal(onSale(full.pw, NOW), false);     // no eShop price at all
 });
 
 test("span", () => {

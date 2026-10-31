@@ -22,14 +22,12 @@ export function priceNow(p, now, since = 0) {
 	return { cur: p.length > 1 ? reg : cur };
 }
 
-// True when a sale on `store` ("steam", "switch" or "either") started within the last
-// `days`. A sale with no known start (Steam's, from before starts were recorded) is not
-// recent by definition: it was already running then.
-export function startedWithin(g, store, now, days) {
-	const fresh = (p) => !!(p && p.off && p.start && now - p.start <= days * 86400);
-	if (store === "steam") return fresh(g.ps);
-	if (store === "switch") return fresh(g.pw);
-	return fresh(g.ps) || fresh(g.pw);
+// True when one store's price (`g.ps` or `g.pw`) is a sale today — and, given `days`,
+// one that started within that many days. A sale with no known start (Steam's, from
+// before starts were recorded) is not recent by definition: it was already running then.
+export function onSale(p, now, days = null) {
+	if (!p || !p.off) return false;
+	return days == null || !!(p.start && now - p.start <= days * 86400);
 }
 
 // Adds to each game: `ps`/`pw` (Steam / eShop, from priceNow), `sp`/`wp` (today's price

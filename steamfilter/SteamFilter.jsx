@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { baseCss } from "../shared/theme.js";
 import { rangePointer } from "../shared/rangePointer.js";
-import { attachPrices, startedWithin, money, day, span } from "./prices.js";
+import { attachPrices, onSale, money, day, span } from "./prices.js";
 import { readSaved, writeSaved, clearSaved, setMark, markOf, adopt, settle, batch } from "./saved.js";
 
 // CSS lives in the sibling .css file, imported with `?inline` so it is still a string
@@ -30,14 +30,14 @@ const YMIN = 2005;
 const YMAX = new Date().getFullYear();
 
 // `cats`: category ids a game must ALL carry (AND, so Roguelike + Card game finds the
-// roguelike deckbuilders). `sw`: "any", "yes" (on Nintendo Switch) or "no". `sale`: a
-// sale running today on either store, on Steam, or on the eShop. `started`: only sales
-// that began within that many days (on the store `sale` names, either if it names none).
-const DEFAULTS = { rev: REVIEWS.indexOf(500), yfrom: YMIN, yto: YMAX, cats: [], sw: "any", sale: "any",
-	started: "any" };
-const SWITCH = [["any", "Any"], ["yes", "On Switch"], ["no", "Not on Switch"]];
-const SALE = [["any", "Any"], ["either", "On sale"], ["steam", "Steam sale"], ["switch", "Switch sale"]];
-const STARTED = [["any", "Any time"], ["1", "Past day"], ["3", "Past 3 days"], ["7", "Past week"], ["14", "Past 2 weeks"]];
+// roguelike deckbuilders). `sw`: "yes" (on Nintendo Switch) or "any". `steamSale` /
+// `switchSale`: null (don't care), "any" (on sale in that store) or a number of days (a
+// sale there that began within them). Each is its own filter, so both set means both.
+const DEFAULTS = { rev: REVIEWS.indexOf(500), yfrom: YMIN, yto: YMAX, cats: [], sw: "any",
+	steamSale: null, switchSale: null };
+// One row per store; tapping the lit chip again clears it.
+const SALE = [["any", "On sale"], ["1", "Past day"], ["3", "Past 3 days"], ["7", "Past week"], ["14", "Past 2 weeks"]];
+const isSale = (v) => SALE.some(([k]) => k === v);
 const fmt = (n) => n.toLocaleString("en-US");
 
 function loadDials() {
@@ -49,9 +49,9 @@ function loadDials() {
 			if (typeof v[k] === "number" && isFinite(v[k])) out[k] = v[k];
 		}
 		if (Array.isArray(v.cats)) out.cats = v.cats.filter((c) => typeof c === "string");
-		if (SWITCH.some(([k]) => k === v.sw)) out.sw = v.sw;
-		if (SALE.some(([k]) => k === v.sale)) out.sale = v.sale;
-		if (STARTED.some(([k]) => k === v.started)) out.started = v.started;
+		if (v.sw === "yes") out.sw = "yes";   // a saved "no" (Not on Switch, gone) reads as any
+		if (isSale(v.steamSale)) out.steamSale = v.steamSale;
+		if (isSale(v.switchSale)) out.switchSale = v.switchSale;
 		out.rev = Math.min(REVIEWS.length - 1, Math.max(0, out.rev));
 		out.yfrom = Math.min(YMAX, Math.max(YMIN, out.yfrom));
 		out.yto = Math.min(YMAX, Math.max(out.yfrom, out.yto));
@@ -268,12 +268,10 @@ export default function SteamFilter({ authUser, onExit }) {
 		if (d.yfrom > YMIN && (!g.y || g.y < d.yfrom)) return false;
 		if (d.yto < YMAX && (!g.y || g.y > d.yto)) return false;
 		if (d.sw === "yes" && !g.sw) return false;
-		if (d.sw === "no" && g.sw) return false;
-		if (d.sale === "either" && !g.ps?.off && !g.pw?.off) return false;
-		if (d.sale === "steam" && !g.ps?.off) return false;
-		if (d.sale === "switch" && !g.pw?.off) return false;
-		if (d.started !== "any"
-			&& !startedWithin(g, d.sale === "any" ? "either" : d.sale, Date.now() / 1000, Number(d.started))) return false;
+		const now = Date.now() / 1000;
+		const days = (v) => (v === "any" ? null : Number(v));
+		if (d.steamSale && !onSale(g.ps, now, days(d.steamSale))) return false;
+		if (d.switchSale && !onSale(g.pw, now, days(d.switchSale))) return false;
 		return true;
 	}, [d, hidden]);
 
@@ -375,37 +373,26 @@ export default function SteamFilter({ authUser, onExit }) {
 										</div>
 										<p className="stf-mhead">Nintendo Switch</p>
 										<div className="stf-seg" role="group" aria-label="Nintendo Switch">
-											{SWITCH.map(([k, label]) => (
-												<button type="button" key={k} aria-pressed={d.sw === k}
-													onClick={() => { setD((prev) => ({ ...prev, sw: k })); setLimit(PAGE); }}>
-													{label}
-												</button>
-											))}
+											<button type="button" aria-pressed={d.sw === "yes"}
+												onClick={() => { setD((prev) => ({ ...prev, sw: prev.sw === "yes" ? "any" : "yes" })); setLimit(PAGE); }}>
+												On Switch
+											</button>
 										</div>
 									</>
 								)}
-								{prices && (
-									<>
-										<p className="stf-mhead">Sales — <em>running today, US stores</em></p>
-										<div className="stf-seg" role="group" aria-label="Sales">
+								{prices && [["steamSale", "Steam sale"], ["switchSale", "Switch sale"]].map(([key, title]) => (
+									<div key={key}>
+										<p className="stf-mhead">{title} — <em>tap again to clear</em></p>
+										<div className="stf-seg" role="group" aria-label={title}>
 											{SALE.map(([k, label]) => (
-												<button type="button" key={k} aria-pressed={d.sale === k}
-													onClick={() => { setD((prev) => ({ ...prev, sale: k })); setLimit(PAGE); }}>
+												<button type="button" key={k} aria-pressed={d[key] === k}
+													onClick={() => { setD((prev) => ({ ...prev, [key]: prev[key] === k ? null : k })); setLimit(PAGE); }}>
 													{label}
 												</button>
 											))}
 										</div>
-										<p className="stf-mhead">Sale started — <em>to see what just went on sale</em></p>
-										<div className="stf-seg" role="group" aria-label="Sale started">
-											{STARTED.map(([k, label]) => (
-												<button type="button" key={k} aria-pressed={d.started === k}
-													onClick={() => { setD((prev) => ({ ...prev, started: k })); setLimit(PAGE); }}>
-													{label}
-												</button>
-											))}
-										</div>
-									</>
-								)}
+									</div>
+								))}
 								<p className="stf-effect">
 									{!games.length
 										? <>The Steam list hasn’t been harvested yet.</>
@@ -571,7 +558,9 @@ export default function SteamFilter({ authUser, onExit }) {
 										<p>A sale shows its discount and its dates, in your time zone, and drops back
 											to the regular price once it ends. Sort a store’s column for the cheapest
 											first.</p>
-										<p><b>Sale started</b> keeps the sales that began in that window. The eShop
+										<p><b>Steam sale</b> and <b>Switch sale</b> are separate filters: <b>On sale</b>
+											keeps any game on sale in that store, a window keeps the sales that began in
+											it, and setting both keeps games that pass both. The eShop
 											publishes when a sale starts; Steam doesn’t, so a Steam sale’s start is the
 											day the twice-daily price check first saw it — right to within a day.
 											{prices.tracked_since

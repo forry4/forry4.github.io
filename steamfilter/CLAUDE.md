@@ -87,8 +87,14 @@ beside the payload and works without it (every price reads "—").
   shows as "on or before" and never counts as recent. The first file was BACKFILLED by
   replaying the file's git history (Oct 23 → 28) through `carry_starts` — Steam's Halloween
   sale shows up as 706 first sightings on Oct 26. The scheduled runs land hours after
-  their cron slots, so a Steam start is right to within about a day. **Sale started**
-  (Past day … 2 weeks) filters on it: the store `sale` names, either if it names none.
+  their cron slots, so a Steam start is right to within about a day.
+- **The filters: "On Switch" is one toggle, and each store has its OWN sale row** —
+  Steam sale / Switch sale, each `On sale` · `Past day` · `3 days` · `week` · `2 weeks`,
+  single-select and cleared by tapping the lit chip again (null = don't care). The two
+  rows are independent filters, so both set means both (`onSale` in `prices.js`, per
+  store). This replaced (2026-10-31) an Any/On Switch/Not on Switch row, an
+  Any/On sale/Steam sale/Switch sale row and a shared "Sale started" row; `loadDials`
+  drops the old keys, and a saved "Not on Switch" reads as no filter.
 - **The page shows a sale only inside its window** (`priceNow` in `prices.js`), so a file a
   day old shows an ended sale at its regular price, never a price that is gone.
 - Guards: Steam must price 95% of the payload, the eShop 85% of `sw` games and every
