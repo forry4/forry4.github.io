@@ -275,16 +275,18 @@ function ChampSearch({ names, onPick, inputRef }) {
 function ChampTable({ games, onOpen, title }) {
 	const [sort, setSort] = useState({ key: "presence", dir: -1 });
 	const [filter, setFilter] = useState("");
+	const [min, setMin] = useState(1);
+	const all = useMemo(() => D.champTable(games), [games]);
+	// "Any" keeps the ban-only champions (0 games); a typed filter ignores the minimum.
 	const rows = useMemo(() => {
-		const all = D.champTable(games);
 		const f = filter.trim() ? new Set(D.findChampions(all.map((r) => r.name), filter)) : null;
 		const val = (r) => (sort.key === "winRate" ? (r.winRate ?? -1) : r[sort.key]);
-		return all.filter((r) => !f || f.has(r.name)).sort((a, b) => {
+		return all.filter((r) => (f ? f.has(r.name) : min <= 1 || r.games >= min)).sort((a, b) => {
 			const x = val(a), y = val(b);
 			const c = typeof x === "string" ? x.localeCompare(y) : x - y;
 			return sort.dir * c || b.games - a.games || a.name.localeCompare(b.name);
 		});
-	}, [games, sort, filter]);
+	}, [all, sort, filter, min]);
 	const by = (key) => setSort((s) => (s.key === key ? { key, dir: -s.dir } : { key, dir: key === "name" || key === "role" ? 1 : -1 }));
 	return (
 		<section className="lol-sec">
@@ -296,6 +298,10 @@ function ChampTable({ games, onOpen, title }) {
 				</div>
 			</div>
 			<p className="lol-sub">{fmt(games.length)} games. Presence is how often a champion was picked or banned. Pick a row for its partners and matchups.</p>
+			<div className="lol-pctl">
+				<Chips label="At least" options={MINS.map(([n, label]) => [n, n === 1 ? label : `${label} games`])} value={min} onToggle={setMin} />
+			</div>
+			{min > 1 && !filter.trim() && <p className="lol-psub lol-champ-note">Showing {fmt(rows.length)} of the {fmt(all.length)} champions, those played at least {min} times.</p>}
 			<div className="lol-frame">
 				<table className="lol-table">
 					<thead>
@@ -319,7 +325,8 @@ function ChampTable({ games, onOpen, title }) {
 						))}
 					</tbody>
 				</table>
-				{!rows.length && <p className="lol-sub lol-pad">No champion matches “{filter}”.</p>}
+				{!rows.length && <p className="lol-sub lol-pad">{filter.trim()
+					? `No champion matches “${filter}”.` : `No champion was played ${min} times. Lower the minimum or widen the filters.`}</p>}
 			</div>
 		</section>
 	);

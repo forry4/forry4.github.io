@@ -6,7 +6,8 @@ backend, no auth: it fetches static JSON and computes everything in the browser.
 - **Worlds seeds** (`/lolstats`) — every regional seed's game and series record at
   Worlds 2020–2025, a seed-vs-region matrix and a region-vs-region matrix.
 - **Champions** (`/lolstats/champions`, `#<Champion>` opens one) — every champion's
-  pick, ban, presence and win rate by year and region, and for one champion its best
+  pick, ban, presence and win rate by year and region (with an "At least N games"
+  minimum, default Any, which keeps the ban-only champions), and for one champion its best
   and worst partners ("with": same team) and matchups ("into": ANY enemy champion,
   not just the lane opponent — the owner's choice).
   ONE table (`PairTable`) holds both: every champion that shared a game with it,

@@ -11013,6 +11013,13 @@ try {
 			check(`${at}: the list opens on the most-present champion (${top.name})`,
 				(await page.locator(".lol-table tbody tr").first().locator("th").innerText().catch(() => "")) === top.name);
 			check(`${at}: the champion list does not scroll sideways`, await wide() <= 0, String(await wide()));
+			const min20 = table.filter((r) => r.games >= 20).length;
+			const listMin = page.locator(".lol-chips[aria-label='At least'] .lol-chip");
+			await listMin.filter({ hasText: /^20 games$/ }).click().catch(() => {});
+			const n20 = await page.locator(".lol-table tbody tr").count();
+			check(`${at}: "At least 20 games" keeps the ${min20} champions played 20+ times`, n20 === min20 && min20 < table.length, `${n20} of ${table.length}`);
+			await listMin.filter({ hasText: /^Any$/ }).click().catch(() => {});
+			check(`${at}: "Any" brings back all ${table.length}`, await page.locator(".lol-table tbody tr").count() === table.length);
 
 			// Search -> a champion's page, with its numbers and the four lists.
 			await page.locator("#lol-champ-search").fill("azi");
