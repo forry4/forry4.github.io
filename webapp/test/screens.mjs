@@ -10962,10 +10962,10 @@ try {
 		const regions = D.seedRegions({ splitG2: true, majors: true });
 		const table = D.champTable(D.scope([latest]));
 		const azir = D.champLine(D.scope([latest]), "Azir");
-		const azirWith = D.partners(D.scope([latest]), "Azir", "with");
-		const bestWith = (n) => D.ranked(azirWith, { min: 10, best: true, n }).length;
 		const azirPairs = D.pairTable(D.scope([latest]), "Azir");
 		const ori = azirPairs.find((r) => r.name === "Orianna");
+		const bestWith = D.sortPairs(azirPairs, { key: "withRate", dir: -1, min: 10 });
+		const worstInto = D.sortPairs(azirPairs, { key: "intoRate", dir: 1, min: 10 });
 
 		for (const [width, height] of [[1280, 900], [390, 844]]) {
 			const ctx = await browser.newContext({ viewport: { width, height } });
@@ -11024,17 +11024,27 @@ try {
 			const games = await page.locator(".lol-tile").filter({ has: page.locator(".lol-tile-lbl", { hasText: /^Games$/ }) })
 				.locator(".lol-tile-val").innerText().catch(() => "");
 			check(`${at}: Azir's ${latest.year} games read ${azir.games}`, games === azir.games.toLocaleString("en-US"), games);
-			check(`${at}: all four partner lists render`, await page.locator(".lol-plist").count() === 4);
-			const bestRows = () => page.locator(".lol-plist").first().locator(".lol-prow").count();
-			check(`${at}: Best with opens at its top ${bestWith(10)} (of up to 10)`, await bestRows() === bestWith(10), String(await bestRows()));
-			await page.locator(".lol-chip", { hasText: "Top 20" }).click().catch(() => {});
-			check(`${at}: "Top 20" expands Best with to ${bestWith(20)}`, bestWith(20) > 10 && await bestRows() === bestWith(20), String(await bestRows()));
-			// The full pair table: 25 rows, every one on "Show all", and the filter finds one champion.
+			// Partners and matchups: one table, opening on Best with at 10+ games, top 10.
 			const pairRows = () => page.locator(".lol-pair tbody tr").count();
-			check(`${at}: the pair table opens on 25 of Azir's ${azirPairs.length} partners and opponents`,
-				azirPairs.length > 25 && await pairRows() === 25, String(await pairRows()));
-			await page.locator(".lol-more").click().catch(() => {});
-			check(`${at}: "Show all" lists all ${azirPairs.length}`, await pairRows() === azirPairs.length, String(await pairRows()));
+			const firstPair = () => page.locator(".lol-pair tbody tr").first().locator("th").innerText().catch(() => "");
+			const chip = (group, label) => page.locator(`.lol-chips[aria-label="${group}"]`).getByRole("button", { name: label, exact: true });
+			check(`${at}: partners open on Best with, top 10 (${bestWith[0].name} first)`,
+				bestWith.length > 20 && await pairRows() === 10 && await firstPair() === bestWith[0].name, `${await pairRows()} ${await firstPair()}`);
+			await chip("Show", "20").click().catch(() => {});
+			check(`${at}: Show 20 lists 20`, await pairRows() === 20, String(await pairRows()));
+			await chip("Sort", "Worst into").click().catch(() => {});
+			check(`${at}: Worst into re-sorts the same table (${worstInto[0].name} first)`,
+				await pairRows() === Math.min(20, worstInto.length) && await firstPair() === worstInto[0].name, `${await pairRows()} ${await firstPair()}`);
+			await chip("Show", "All").click().catch(() => {});
+			check(`${at}: Show All lists all ${worstInto.length} met 10+ times on the enemy team`, await pairRows() === worstInto.length, String(await pairRows()));
+			// "Any" still sorts by the enemy side, so it keeps only champions that ever faced Azir...
+			const facedAny = D.sortPairs(azirPairs, { key: "intoRate", dir: 1, min: 1 }).length;
+			await chip("At least", "Any").click().catch(() => {});
+			check(`${at}: At least Any under Worst into lists the ${facedAny} champions that ever faced Azir`,
+				facedAny < azirPairs.length && await pairRows() === facedAny, String(await pairRows()));
+			// ...and Most games, which reads both sides, lists every one.
+			await chip("Sort", "Most games").click().catch(() => {});
+			check(`${at}: Most games at Any lists all ${azirPairs.length} partners and opponents`, await pairRows() === azirPairs.length, String(await pairRows()));
 			await page.locator("#lol-pair-filter").fill("orian");
 			const oriRows = await page.locator(".lol-pair tbody tr").count();
 			const oriCells = (await page.locator(".lol-pair tbody tr").first().locator("th, td").allInnerTexts()).map((s) => s.trim());
@@ -11048,8 +11058,8 @@ try {
 			check(`${at}: a champion page does not scroll sideways`, await wide() <= 0, String(await wide()));
 
 			// A partner opens its own page; Back returns; a deep link with an apostrophe works.
-			const firstPartner = await page.locator(".lol-plist .lol-link").first().innerText().catch(() => "");
-			await page.locator(".lol-plist .lol-link").first().click().catch(() => {});
+			const firstPartner = await page.locator(".lol-pair .lol-link").first().innerText().catch(() => "");
+			await page.locator(".lol-pair .lol-link").first().click().catch(() => {});
 			check(`${at}: a partner's name opens that champion`, await page.locator(".lol-champname").innerText().catch(() => "") === firstPartner, firstPartner);
 			await page.goBack();
 			await page.waitForFunction(() => document.querySelector(".lol-champname")?.textContent === "Azir", null, { timeout: 5_000 }).catch(() => {});

@@ -125,11 +125,29 @@ test("the phase filter splits league games and leaves internationals alone", () 
 	assert.equal(reg + po - intl, all);
 });
 
-test("ranked keeps the minimum and orders by win rate, then sample", () => {
-	const list = [{ name: "A", games: 12, wins: 9 }, { name: "B", games: 40, wins: 30 }, { name: "C", games: 4, wins: 4 },
-		{ name: "D", games: 20, wins: 5 }].map((e) => ({ ...e, winRate: e.wins / e.games }));
-	assert.deepEqual(D.ranked(list, { min: 10 }).map((e) => e.name), ["B", "A", "D"]);
-	assert.deepEqual(D.ranked(list, { min: 10, best: false }).map((e) => e.name), ["D", "B", "A"]);
+test("sortPairs: the minimum applies to the side being sorted, ties go to the larger sample", () => {
+	const e = (games, wins) => ({ games, wins, winRate: wins / games });
+	const rows = [
+		{ name: "A", with: e(12, 9), into: e(3, 0) },
+		{ name: "B", with: e(40, 30), into: null },
+		{ name: "C", with: e(4, 4), into: e(30, 6) },
+		{ name: "D", with: e(20, 5), into: e(12, 9) },
+		{ name: "E", with: null, into: e(11, 11) },
+	];
+	const names = (opts) => D.sortPairs(rows, opts).map((r) => r.name).join("");
+	assert.equal(names({ key: "withRate", dir: -1, min: 10 }), "BAD");     // best with: 75% (40g) beats 75% (12g)
+	assert.equal(names({ key: "withRate", dir: 1, min: 10 }), "DBA");      // worst with
+	assert.equal(names({ key: "intoRate", dir: -1, min: 10 }), "EDC");     // best into: C counts here, 30 games against
+	assert.equal(names({ key: "intoRate", dir: 1, min: 10 }), "CDE");
+	assert.equal(names({ key: "together", dir: -1, min: 1 }), "BCDAE");    // most met, both sides added
+	assert.equal(names({ key: "name", dir: 1, min: 1 }), "ABCDE");
+	// On a real champion: "Best with" at 10 is exactly the same-team partners met 10+ times, best first.
+	const games = D.scope([years[years.length - 1]]);
+	const real = D.pairTable(games, "Azir");
+	const best = D.sortPairs(real, { key: "withRate", dir: -1, min: 10 });
+	assert.deepEqual(best.map((r) => r.name).sort(), real.filter((r) => (r.with?.games || 0) >= 10).map((r) => r.name).sort());
+	assert.ok(best.every((r, i) => i === 0 || best[i - 1].with.winRate >= r.with.winRate));
+	assert.equal(D.sortPairs(real, { min: 1 }).length, real.length);
 });
 
 test("search finds names by prefix, word or spelling without punctuation", () => {

@@ -193,12 +193,24 @@ export function pairTable(games, champ) {
 	return [...by.values()];
 }
 
-// The top `n` of a partner list at or above `min` games, highest or lowest win rate
-// first; ties go to the larger sample.
-export function ranked(list, { min = 10, best = true, n = 8 } = {}) {
-	return list.filter((e) => e.games >= min)
-		.sort((a, b) => (best ? b.winRate - a.winRate : a.winRate - b.winRate) || b.games - a.games || a.name.localeCompare(b.name))
-		.slice(0, n);
+// Sorting the pair table. `key` names a column; the "with" columns read the same-team
+// record, the "into" columns the enemy-team one, and name/together read both. The
+// minimum applies to the side being sorted: "Best with" at 10 keeps the champions met
+// at least 10 times on the same team, however often they met on the enemy team.
+// Ties go to the larger sample, then the name.
+export const PAIR_SIDE = { name: null, together: null, withGames: "with", withRate: "with", intoGames: "into", intoRate: "into" };
+const met = (r, side) => (side ? r[side]?.games || 0 : (r.with?.games || 0) + (r.into?.games || 0));
+const PAIR_VAL = {
+	name: (r) => r.name, together: (r) => met(r, null),
+	withGames: (r) => met(r, "with"), withRate: (r) => (r.with ? r.with.winRate : -1),
+	intoGames: (r) => met(r, "into"), intoRate: (r) => (r.into ? r.into.winRate : -1),
+};
+export function sortPairs(rows, { key = "together", dir = -1, min = 0 } = {}) {
+	const side = PAIR_SIDE[key], val = PAIR_VAL[key];
+	return rows.filter((r) => met(r, side) >= min).sort((a, b) => {
+		const x = val(a), y = val(b);
+		return dir * (typeof x === "string" ? x.localeCompare(y) : x - y) || met(b, side) - met(a, side) || a.name.localeCompare(b.name);
+	});
 }
 
 // Search: exact-prefix matches first, then word-prefix ("sol" -> Aurelion Sol), then

@@ -130,14 +130,7 @@
 .lol-pair .lol-pair-grp th + th{border-left:1px solid var(--border);}
 .lol-pair tbody td:nth-child(5){border-left:1px solid var(--border);}
 .lol-pair thead tr:last-child th:nth-child(5){border-left:1px solid var(--border);}
-.lol-more{margin-top:10px;}
-.lol-pctl{display:flex;flex-wrap:wrap;gap:8px 20px;}
-.lol-plists{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px;}
-.lol-plist{padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);min-width:0;}
-.lol-psub{color:var(--text-soft);font-size:.86rem;margin:2px 0 8px;}
-.lol-prows{list-style:none;margin:0;padding:0;}
-.lol-prow{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid var(--border);
-	font-variant-numeric:tabular-nums;}
-.lol-prow:last-child{border-bottom:0;}
-.lol-prow .lol-link{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.lol-prec{color:var(--text-soft);font-size:.9rem;}
+.lol-pctl{display:flex;flex-wrap:wrap;gap:8px 20px;margin:2px 0 8px;}
+.lol-psub{color:var(--text-soft);font-size:.86rem;margin:0 0 8px;}
+/* A cell under the chosen minimum stays readable but steps back. */
+.lol-pair td.lol-low{opacity:.55;}

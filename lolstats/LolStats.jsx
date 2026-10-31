@@ -233,9 +233,11 @@ function SeedsTab() {
 // ── Champions ───────────────────────────────────────────────────────────────
 const PHASES = [["all", "All games"], ["regular", "Regular season"], ["playoffs", "Playoffs"]];
 const SORTS = [["name", "Champion"], ["role", "Role"], ["games", "Games"], ["winRate", "Win %"], ["pickRate", "Pick %"], ["banRate", "Ban %"], ["presence", "Presence"]];
-const MINS = [5, 10, 20, 40];
-// How many champions each partner/matchup list shows; one setting for all four, so they stay level.
-const SHOWS = [10, 20];
+const MINS = [[1, "Any"], [5, "5"], [10, "10"], [20, "20"], [40, "40"]];
+const SHOWS = [[10, "10"], [20, "20"], ["all", "All"]];
+// The four views the best/worst lists used to be: each is a sort of the one table.
+const PRESETS = [["together", -1, "Most games"], ["withRate", -1, "Best with"], ["withRate", 1, "Worst with"],
+	["intoRate", -1, "Best into"], ["intoRate", 1, "Worst into"]];
 
 function ChampSearch({ names, onPick, inputRef }) {
 	const [q, setQ] = useState("");
@@ -323,60 +325,38 @@ function ChampTable({ games, onOpen, title }) {
 	);
 }
 
-function Partners({ title, sub, list, onOpen, min }) {
-	return (
-		<div className="lol-plist">
-			<h3 className="lol-h3">{title}</h3>
-			<p className="lol-psub">{sub}</p>
-			{list.length ? (
-				<ol className="lol-prows">
-					{list.map((e) => (
-						<li key={e.name} className="lol-prow">
-							<button type="button" className="lol-link" onClick={() => onOpen(e.name)}>{e.name}</button>
-							<span className="lol-prec">{rec(e.wins, e.games - e.wins)}</span>
-							<span className="lol-wr" style={heat(e.winRate)}>{D.pct(e.winRate)}</span>
-						</li>
-					))}
-				</ol>
-			) : <p className="lol-psub">Nothing with {min}+ games together. Lower the minimum or widen the filters.</p>}
-		</div>
-	);
-}
-
-// Every champion that shared a game with this one, no minimum: its record with each on
-// the same team and against each on the enemy team. The 25 it met most often show first;
-// the filter finds any one of them.
-const PAIR_PAGE = 25;
-const pairVal = {
-	name: (r) => r.name,
-	together: (r) => (r.with?.games || 0) + (r.into?.games || 0),
-	withGames: (r) => r.with?.games || 0, withRate: (r) => (r.with ? r.with.winRate : -1),
-	intoGames: (r) => r.into?.games || 0, intoRate: (r) => (r.into ? r.into.winRate : -1),
-};
-function PairCells({ e }) {
+// Partners and matchups: every champion that shared a game with this one, its record
+// with it on the same team and against it on the enemy team, in one table. The old
+// best/worst lists are its sort presets; the minimum applies to the side being sorted
+// (derive.sortPairs), and a search shows its champion whatever the sample.
+function PairCells({ e, min }) {
 	if (!e) return <><td className="num lol-dim">–</td><td className="num lol-dim">–</td><td className="num lol-dim">–</td></>;
+	const low = e.games < min ? " lol-low" : "";
 	return (
 		<>
-			<td className="num">{fmt(e.games)}</td>
-			<td className="num lol-dim">{rec(e.wins, e.games - e.wins)}</td>
-			<td className="num"><span className="lol-wr" style={heat(e.winRate)}>{D.pct(e.winRate)}</span></td>
+			<td className={`num${low}`}>{fmt(e.games)}</td>
+			<td className={`num lol-dim${low}`}>{rec(e.wins, e.games - e.wins)}</td>
+			<td className={`num${low}`}><span className="lol-wr" style={heat(e.winRate)}>{D.pct(e.winRate)}</span></td>
 		</>
 	);
 }
+const SIDE_WORDS = { with: "on the same team", into: "on the enemy team", null: "together or against" };
+
 function PairTable({ champ, games, onOpen }) {
 	const [filter, setFilter] = useState("");
-	const [sort, setSort] = useState({ key: "together", dir: -1 });
-	const [all, setAll] = useState(false);
+	const [sort, setSort] = useState({ key: "withRate", dir: -1 });
+	const [min, setMin] = useState(10);
+	const [show, setShow] = useState(10);
 	const rows = useMemo(() => D.pairTable(games, champ), [games, champ]);
-	const shown = useMemo(() => {
-		const f = filter.trim() ? new Set(D.findChampions(rows.map((r) => r.name), filter)) : null;
-		const val = pairVal[sort.key];
-		return rows.filter((r) => !f || f.has(r.name)).sort((a, b) => {
-			const x = val(a), y = val(b);
-			return sort.dir * (typeof x === "string" ? x.localeCompare(y) : x - y) || a.name.localeCompare(b.name);
-		});
-	}, [rows, filter, sort]);
-	const visible = filter.trim() || all ? shown : shown.slice(0, PAIR_PAGE);
+	const searching = filter.trim() !== "";
+	const sorted = useMemo(() => {
+		if (!searching) return D.sortPairs(rows, { ...sort, min });
+		const hit = new Set(D.findChampions(rows.map((r) => r.name), filter));
+		return D.sortPairs(rows.filter((r) => hit.has(r.name)), { ...sort, min: 0 });
+	}, [rows, sort, min, filter, searching]);
+	const visible = searching || show === "all" ? sorted : sorted.slice(0, show);
+	const side = D.PAIR_SIDE[sort.key];
+	const preset = PRESETS.find(([k, d]) => k === sort.key && d === sort.dir);
 	const by = (key) => setSort((s) => (s.key === key ? { key, dir: -s.dir } : { key, dir: key === "name" ? 1 : -1 }));
 	const head = (key, label, cls = "num") => (
 		<th scope="col" className={cls} aria-sort={sort.key === key ? (sort.dir > 0 ? "ascending" : "descending") : "none"}>
@@ -386,13 +366,25 @@ function PairTable({ champ, games, onOpen }) {
 	return (
 		<section className="lol-sec">
 			<div className="lol-tablehd">
-				<h2 className="lol-h2">Every champion with and against {champ}</h2>
+				<h2 className="lol-h2">Partners and matchups</h2>
 				<div className="lol-find lol-pair-find">
 					<input id="lol-pair-filter" type="search" placeholder="Find a champion" value={filter}
 						aria-label={`Find a champion in ${champ}'s partners and matchups`} onChange={(e) => setFilter(e.target.value)} />
 				</div>
 			</div>
-			<p className="lol-sub">{champ}’s record in every game with each champion on its team, and with each on the enemy team. No minimum, so small samples are shown as they are.</p>
+			<p className="lol-sub">{champ}’s win rate with each champion on its team, and against each on the enemy team in any role.</p>
+			<div className="lol-pctl">
+				<Chips label="Sort" options={PRESETS.map(([k, d, label]) => [`${k}|${d}`, label])} value={preset ? `${preset[0]}|${preset[1]}` : null}
+					onToggle={(v) => { const [key, dir] = v.split("|"); setSort({ key, dir: Number(dir) }); }} />
+				<Chips label="Show" options={SHOWS} value={show} onToggle={setShow} />
+				<Chips label="At least" options={MINS.map(([n, label]) => [n, n === 1 ? label : `${label} games`])} value={min} onToggle={setMin} />
+			</div>
+			<p className="lol-psub lol-pair-note">
+				{searching
+					? `Every champion matching “${filter.trim()}”, whatever the sample.`
+					: `Showing ${fmt(visible.length)} of the ${fmt(sorted.length)} champions${min > 1
+						? ` met at least ${min} times ${SIDE_WORDS[side]}. Faded cells have fewer than ${min} games.` : "."}`}
+			</p>
 			<div className="lol-frame">
 				<table className="lol-table lol-pair">
 					<thead>
@@ -411,19 +403,16 @@ function PairTable({ champ, games, onOpen }) {
 						{visible.map((r) => (
 							<tr key={r.name}>
 								<th scope="row"><button type="button" className="lol-link" onClick={() => onOpen(r.name)}>{r.name}</button></th>
-								<PairCells e={r.with} />
-								<PairCells e={r.into} />
+								<PairCells e={r.with} min={searching ? 0 : min} />
+								<PairCells e={r.into} min={searching ? 0 : min} />
 							</tr>
 						))}
 					</tbody>
 				</table>
-				{!shown.length && <p className="lol-sub lol-pad">{filter.trim() ? `No champion matching “${filter}” shared a game with ${champ}.` : "No games."}</p>}
+				{!sorted.length && <p className="lol-sub lol-pad">{searching
+					? `No champion matching “${filter.trim()}” shared a game with ${champ}.`
+					: `No champion met ${champ} ${min} times ${SIDE_WORDS[side]}. Lower the minimum or widen the filters.`}</p>}
 			</div>
-			{!filter.trim() && shown.length > PAIR_PAGE && (
-				<button type="button" className="btn btn-ghost btn-sm lol-more" onClick={() => setAll((a) => !a)}>
-					{all ? `Show the top ${PAIR_PAGE}` : `Show all ${shown.length}`}
-				</button>
-			)}
 		</section>
 	);
 }
@@ -439,20 +428,11 @@ function StatTile({ label, value, note }) {
 }
 
 function ChampView({ champ, games, years, allLoaded, regions, phase, onOpen, onClose }) {
-	const [min, setMin] = useState(10);
-	const [show, setShow] = useState(10);
 	const line = useMemo(() => D.champLine(games, champ), [games, champ]);
 	const byRegion = useMemo(() => D.CHAMP_REGIONS.map((r) => [r, D.champLine(D.scope(years, { regions: [r], phase }), champ)]),
 		[years, phase, champ]);
 	const byYear = useMemo(() => allLoaded.map((y) => [y.year, D.champLine(D.scope([y], { regions, phase }), champ)]),
 		[allLoaded, regions, phase, champ]);
-	const lists = useMemo(() => {
-		const withs = D.partners(games, champ, "with"), intos = D.partners(games, champ, "into");
-		return {
-			bestWith: D.ranked(withs, { min, best: true, n: show }), worstWith: D.ranked(withs, { min, best: false, n: show }),
-			bestInto: D.ranked(intos, { min, best: true, n: show }), worstInto: D.ranked(intos, { min, best: false, n: show }),
-		};
-	}, [games, champ, min, show]);
 	const a = line.avg;
 	const mainRole = line.roles.reduce((b, r) => (r.games > b.games ? r : b), line.roles[0]);
 
@@ -477,22 +457,6 @@ function ChampView({ champ, games, years, allLoaded, regions, phase, onOpen, onC
 							note={a.gdN < line.games ? `${fmt(a.gdN)} of ${fmt(line.games)} games recorded it` : "vs its lane opponent"} />
 					</div>
 
-					<section className="lol-sec">
-						<div className="lol-tablehd">
-							<h2 className="lol-h2">Partners and matchups</h2>
-							<div className="lol-pctl">
-								<Chips label="Show" options={SHOWS.map((n) => [n, `Top ${n}`])} value={show} onToggle={setShow} />
-								<Chips label="At least" options={MINS.map((n) => [n, `${n} games`])} value={min} onToggle={setMin} />
-							</div>
-						</div>
-						<p className="lol-sub">{champ}’s win rate in games with each champion on its team, or on the enemy team in any role.</p>
-						<div className="lol-plists">
-							<Partners title="Best with" sub="Highest win rate on the same team" list={lists.bestWith} onOpen={onOpen} min={min} />
-							<Partners title="Worst with" sub="Lowest win rate on the same team" list={lists.worstWith} onOpen={onOpen} min={min} />
-							<Partners title="Best into" sub="Highest win rate against" list={lists.bestInto} onOpen={onOpen} min={min} />
-							<Partners title="Worst into" sub="Lowest win rate against" list={lists.worstInto} onOpen={onOpen} min={min} />
-						</div>
-					</section>
 					<PairTable key={champ} champ={champ} games={games} onOpen={onOpen} />
 				</>
 			)}

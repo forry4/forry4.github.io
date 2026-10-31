@@ -9,9 +9,13 @@ backend, no auth: it fetches static JSON and computes everything in the browser.
   pick, ban, presence and win rate by year and region, and for one champion its best
   and worst partners ("with": same team) and matchups ("into": ANY enemy champion,
   not just the lane opponent — the owner's choice).
-  Each list shows its top 10, or 20 with the Show control (one setting for all four).
-  Below them, `PairTable` lists EVERY champion that shared a game with it (no minimum):
-  same-team and enemy-team records side by side, top 25 by games met, a filter to find one.
+  ONE table (`PairTable`) holds both: every champion that shared a game with it,
+  same-team and enemy-team records side by side. Best/Worst with/into are its Sort
+  presets (it opens on Best with, top 10 of Show 10/20/All); the "At least" minimum
+  applies to the SIDE being sorted (`derive.sortPairs`), so under an enemy-team sort a
+  champion only ever met as a teammate drops out even at Any; a search shows its
+  champion whatever the sample. (It was four lists plus a table until 2026-10-31 —
+  the same numbers twice.)
 
 | File | What it is |
 |---|---|
