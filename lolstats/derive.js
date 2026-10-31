@@ -178,6 +178,21 @@ export function partners(games, champ, mode) {
 	return [...by.values()].map((e) => ({ ...e, winRate: e.wins / e.games }));
 }
 
+// Every champion that shared a game with `champ`, with no minimum: `champ`'s record
+// with it on the same team (`with`) and against it on the enemy team (`into`); either
+// is null when the two never met that way.
+export function pairTable(games, champ) {
+	const by = new Map();
+	for (const mode of ["with", "into"]) {
+		for (const e of partners(games, champ, mode)) {
+			const r = by.get(e.name) || { name: e.name, with: null, into: null };
+			r[mode] = e;
+			by.set(e.name, r);
+		}
+	}
+	return [...by.values()];
+}
+
 // The top `n` of a partner list at or above `min` games, highest or lowest win rate
 // first; ties go to the larger sample.
 export function ranked(list, { min = 10, best = true, n = 8 } = {}) {

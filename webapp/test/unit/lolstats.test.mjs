@@ -90,6 +90,17 @@ test("partners are symmetric: A with B is B with A, and A into B plus B into A i
 	}
 });
 
+test("the pair table holds every teammate and opponent: 4 and 5 per game, with no minimum", () => {
+	const games = D.scope([years[years.length - 1]]);
+	for (const r of D.champTable(games).sort((a, b) => b.games - a.games).slice(0, 15)) {
+		const rows = D.pairTable(games, r.name);
+		assert.equal(rows.reduce((n, x) => n + (x.with?.games || 0), 0), 4 * r.games, r.name);
+		assert.equal(rows.reduce((n, x) => n + (x.into?.games || 0), 0), 5 * r.games, r.name);
+		assert.equal(rows.reduce((n, x) => n + (x.with?.wins || 0), 0), 4 * r.wins, r.name);
+		assert.ok(rows.every((x) => x.with || x.into) && !rows.some((x) => x.name === r.name), r.name);
+	}
+});
+
 test("a champion's line matches the table, and its regions add up to it", () => {
 	const y = years[years.length - 1];
 	const games = D.scope([y]);

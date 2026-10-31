@@ -3089,6 +3089,8 @@ try {
 			{ name: "/astral/charts", path: "/astral/charts", wait: ".aag-nf input", min: 7 },
 			// The champion search and the list's own filter.
 			{ name: "/lolstats/champions", path: "/lolstats/champions", wait: ".lol-find input", min: 2 },
+			// A champion's page: the search and the pair table's filter.
+			{ name: "/lolstats/champions#Azir", path: "/lolstats/champions#Azir", wait: "#lol-pair-filter", min: 2 },
 			// BOOKS IS THE ONE HOLE, AND IT IS THE PAGE'S, NOT THIS WALK'S. `/books`
 			// renders no field at all to this harness — the editor needs `can_edit`
 			// from the server and even the search box is behind a populated list — so
@@ -10962,6 +10964,8 @@ try {
 		const azir = D.champLine(D.scope([latest]), "Azir");
 		const azirWith = D.partners(D.scope([latest]), "Azir", "with");
 		const bestWith = (n) => D.ranked(azirWith, { min: 10, best: true, n }).length;
+		const azirPairs = D.pairTable(D.scope([latest]), "Azir");
+		const ori = azirPairs.find((r) => r.name === "Orianna");
 
 		for (const [width, height] of [[1280, 900], [390, 844]]) {
 			const ctx = await browser.newContext({ viewport: { width, height } });
@@ -11025,6 +11029,19 @@ try {
 			check(`${at}: Best with opens at its top ${bestWith(10)} (of up to 10)`, await bestRows() === bestWith(10), String(await bestRows()));
 			await page.locator(".lol-chip", { hasText: "Top 20" }).click().catch(() => {});
 			check(`${at}: "Top 20" expands Best with to ${bestWith(20)}`, bestWith(20) > 10 && await bestRows() === bestWith(20), String(await bestRows()));
+			// The full pair table: 25 rows, every one on "Show all", and the filter finds one champion.
+			const pairRows = () => page.locator(".lol-pair tbody tr").count();
+			check(`${at}: the pair table opens on 25 of Azir's ${azirPairs.length} partners and opponents`,
+				azirPairs.length > 25 && await pairRows() === 25, String(await pairRows()));
+			await page.locator(".lol-more").click().catch(() => {});
+			check(`${at}: "Show all" lists all ${azirPairs.length}`, await pairRows() === azirPairs.length, String(await pairRows()));
+			await page.locator("#lol-pair-filter").fill("orian");
+			const oriRows = await page.locator(".lol-pair tbody tr").count();
+			const oriCells = (await page.locator(".lol-pair tbody tr").first().locator("th, td").allInnerTexts()).map((s) => s.trim());
+			const oriWant = ["Orianna", ori.with ? String(ori.with.games) : "–", ori.into ? String(ori.into.games) : "–"];
+			check(`${at}: filtering "orian" leaves Orianna's row: ${oriWant[1]} games together, ${oriWant[2]} against`,
+				oriRows === 1 && [oriCells[0], oriCells[1], oriCells[4]].join("|") === oriWant.join("|"), JSON.stringify(oriCells));
+			await page.locator("#lol-pair-filter").fill("");
 			await page.waitForSelector(".lol-sec h2:has-text('By year') + p + .lol-frame tbody tr", { timeout: 20_000 }).catch(() => {});
 			const yearRows = await page.locator(".lol-sec", { hasText: "By year" }).locator("tbody tr").count();
 			check(`${at}: the By year table has a row for each of the ${index.years.length} years`, yearRows === index.years.length, String(yearRows));

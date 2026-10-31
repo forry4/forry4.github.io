@@ -10,6 +10,8 @@ backend, no auth: it fetches static JSON and computes everything in the browser.
   and worst partners ("with": same team) and matchups ("into": ANY enemy champion,
   not just the lane opponent — the owner's choice).
   Each list shows its top 10, or 20 with the Show control (one setting for all four).
+  Below them, `PairTable` lists EVERY champion that shared a game with it (no minimum):
+  same-team and enemy-team records side by side, top 25 by games met, a filter to find one.
 
 | File | What it is |
 |---|---|
