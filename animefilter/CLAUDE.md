@@ -77,7 +77,10 @@ site without harvesting. What the 2026-11-03 probes found, each of which cost a 
    second series each sat alone, because their chain runs through a special. The harvest
    follows those edges too. `SPLIT` cuts the chains AniList draws between genuinely
    different series: the four Fate/stay night adaptations hanging off Fate/Zero, Initial
-   D → MF Ghost, End of Evangelion → the Rebuild films, and three prequel spin-offs. **To
+   D → MF Ghost, End of Evangelion → the Rebuild films, GitS SAC → SAC_2045, Touch → MIX
+   (both reached only through a special), and three prequel spin-offs. **Following bridges
+   joins more than it should, so after a harvest that changes the closure, diff the show
+   list against the shipped one** — that is how the last two were found. **To
    find the next one**, list groups whose seasons' titles don't share the show's first
    word, or whose years span 15+ — that scan found every split above.
 3. **Site score** = the plain mean of the show's seasons on that site — each season counts

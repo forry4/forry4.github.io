@@ -54,6 +54,9 @@ SPLIT = {
 	(167404, 21),      # MONSTERS (a one-shot short) -> ONE PIECE
 	(21394, 14513),    # Magi: Adventure of Sinbad, a prequel spin-off series
 	(21626, 20722),    # Handa-kun, a prequel spin-off series of Barakamon
+	# Reached through a special once the harvest followed bridges (2026-11-03):
+	(1566, 106154),    # GitS SAC: Solid State Society -> SAC_2045, a later, separate production
+	(1539, 103555),    # Touch: Cross Road (special) -> MIX, a sequel series set 30 years on
 }
 
 
