@@ -8,8 +8,8 @@ shipped payload, offline, as often as it likes.
 Sources:
   * AniList (graphql.anilist.co) — score, popularity, English title, genres, tags,
     start date and the SEQUEL/PREQUEL relations that group seasons into a show.
-  * MyAnimeList, through Jikan (api.jikan.moe/v4) — score, voters, members, English
-    title, demographic. MAL's own API needs a registered client id.
+  * MyAnimeList (myanimelist.net's own pages) — score, voters, members, rank, English
+    title. MAL's API needs a registered client id and Jikan doesn't answer runners.
   * Kitsu (kitsu.app/api/edge) — average rating and its vote count.
   * manami-project/anime-offline-database (a GitHub release) — the cross-site id map
     (which Kitsu entry is which AniList entry).
@@ -22,7 +22,7 @@ over ALL its seasons, not just the ones good enough to chart on their own).
 Every answer is validated BEFORE it is cached (the BGG lesson: a cached rate-limit
 page reads as "no data" forever) and cached under tools/cache/ so a re-run resumes.
 """
-import argparse, hashlib, json, os, socket, sys, time, urllib.error, urllib.parse, urllib.request
+import argparse, hashlib, html, json, os, re, socket, sys, time, urllib.error, urllib.parse, urllib.request
 
 # Try IPv4 addresses first. The first runner harvest died on Jikan with "Network is
 # unreachable" (errno 101) — the shape of an IPv6 address on a host with no IPv6 route.
@@ -37,7 +37,7 @@ OUT = os.path.join(HERE, "results_all.json")
 UA = "forrest-games-anime-filter/1.0 (+https://forry4.github.io/animefilter)"
 
 ANILIST = "https://graphql.anilist.co"
-JIKAN = "https://api.jikan.moe/v4"
+MAL = "https://myanimelist.net"
 KITSU = "https://kitsu.io/api/edge"  # kitsu.app answers runners with a Cloudflare 403
 AOD = "https://github.com/manami-project/anime-offline-database/releases/latest/download/anime-offline-database-minified.json"
 DUBS = "https://raw.githubusercontent.com/MAL-Dubs/MAL-Dubs/main/data/dubInfo.json"
@@ -45,12 +45,15 @@ DUBS = "https://raw.githubusercontent.com/MAL-Dubs/MAL-Dubs/main/data/dubInfo.js
 # Formats that can be a "season" or a film. Specials, OVAs, music videos and recaps
 # are neither, and would pull a show's average around without being the show.
 SHOW_FORMATS = ["TV", "TV_SHORT", "ONA", "MOVIE"]
-MAL_TYPES = {"TV", "ONA", "Movie"}
 GROUP_EDGES = {"SEQUEL", "PREQUEL"}
 
 # Minimum seconds between requests, per host. AniList's documented limit is 90/min
 # but it has run "degraded" at 30/min for long stretches; Jikan allows 60/min.
-GAP = {"graphql.anilist.co": 2.1, "api.jikan.moe": 1.15, "kitsu.io": 0.5}
+GAP = {"graphql.anilist.co": 2.1, "myanimelist.net": 2.0, "kitsu.io": 0.5}
+# MAL's site serves pages to a browser; its own API needs a registered client id, and
+# Jikan (the unofficial API) does not answer GitHub's runners at all (2026-11-03 probe).
+BROWSER_HOSTS = {"myanimelist.net"}
+BROWSER_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36"
 _last = {}
 
 
@@ -62,8 +65,10 @@ def _key(url, body):
 	return hashlib.sha1((url + "\n" + (body or "")).encode()).hexdigest()
 
 
-def fetch(url, body=None, validate=None, fresh_hours=72, tries=10):
-	"""GET (or POST `body` as JSON) -> parsed JSON, through the cache.
+def fetch(url, body=None, validate=None, fresh_hours=72, tries=10, parse=json.loads):
+	"""GET (or POST `body` as JSON) -> `parse(bytes)` (JSON by default), through the cache.
+
+	The PARSED value is what is cached, so an HTML page is stored as its few fields.
 
 	A 404 is a real answer ("no such entry") and is cached as None. 429 and 5xx back
 	off (honouring Retry-After); anything `validate` rejects is retried, never cached.
@@ -80,7 +85,8 @@ def fetch(url, body=None, validate=None, fresh_hours=72, tries=10):
 		if wait > 0:
 			time.sleep(wait)
 		_last[host] = time.time()
-		headers = {"User-Agent": UA, "Accept": "application/json"}
+		headers = {"User-Agent": BROWSER_UA if host in BROWSER_HOSTS else UA,
+			"Accept": "text/html" if parse is not json.loads else "application/json"}
 		data = None
 		if body is not None:
 			headers["Content-Type"] = "application/json"
@@ -89,13 +95,14 @@ def fetch(url, body=None, validate=None, fresh_hours=72, tries=10):
 		try:
 			with urllib.request.urlopen(req, timeout=60) as r:
 				raw = r.read()
-			v = json.loads(raw)
+			v = parse(raw)
 			if validate:
 				validate(v)
 		except urllib.error.HTTPError as e:
 			if e.code == 404:
 				v = None
-			elif e.code in (429, 500, 502, 503, 504, 520, 522, 524):
+			# MAL answers a burst with 403/405 as well as 429 — throttling, not a ban.
+			elif e.code in (403, 405, 429, 500, 502, 503, 504, 520, 522, 524):
 				ra = e.headers.get("Retry-After")
 				delay = float(ra) + 1 if ra and ra.isdigit() else min(60, 5 * (attempt + 1))
 				err = f"HTTP {e.code}"
@@ -201,45 +208,74 @@ def close_over_sequels(al, cap):
 		al.update(anilist_by(Q_IDS, want))
 
 
-# ---------------------------------------------------------------- MyAnimeList (Jikan)
+# ---------------------------------------------------------------- MyAnimeList (its pages)
 
-def v_jikan(v):
-	if not isinstance(v, dict) or "data" not in v:
-		raise Reject(str(v)[:200])
-
-
-def mal_trim(a):
-	"""The fields make_data reads, so results_all.json stays a sane size."""
-	return {
-		"id": a["mal_id"], "title": a.get("title"), "title_english": a.get("title_english"),
-		"type": a.get("type"), "episodes": a.get("episodes"), "status": a.get("status"),
-		"score": a.get("score"), "scored_by": a.get("scored_by"), "rank": a.get("rank"),
-		"members": a.get("members"), "year": a.get("year"),
-		"aired_from": (a.get("aired") or {}).get("from"),
-		"genres": [g["name"] for g in a.get("genres") or []],
-		"themes": [g["name"] for g in a.get("themes") or []],
-		"demographics": [g["name"] for g in a.get("demographics") or []],
-	}
+def _num(x):
+	return int(x.replace(",", "")) if x else None
 
 
-def mal_top(score_floor, max_pages=400):
+def _text(raw):
+	t = raw.decode("utf-8", "replace")
+	# A throttle page is a 200 with no data in it — never let one into the cache.
+	if "Too Many Requests" in t[:2000] or "temporarily restricting site connections" in t:
+		raise Reject("MAL throttle page")
+	return t
+
+
+def parse_top(raw):
+	"""topanime.php -> [{id, rank, score, members}], 50 rows a page (fewer on the last)."""
+	t = _text(raw)
+	if 'class="ranking-list"' not in t:
+		raise Reject("no ranking rows")
+	rows = []
+	for chunk in t.split('class="ranking-list"')[1:]:
+		mid = re.search(r"myanimelist\.net/anime/(\d+)/", chunk)
+		if not mid:
+			continue
+		rank = re.search(r"top-anime-rank-text[^>]*>\s*(\d+)", chunk)
+		mem = re.search(r"([\d,]+) members", chunk)
+		sc = re.search(r'score-label score-[0-9a-z]+">\s*([0-9.]+)', chunk)
+		rows.append({"id": int(mid.group(1)), "rank": int(rank.group(1)) if rank else None,
+			"members": _num(mem.group(1)) if mem else None,
+			"score": float(sc.group(1)) if sc else None})
+	if not rows:
+		raise Reject("ranking rows without ids")
+	return rows
+
+
+def parse_anime(raw):
+	"""anime/<id> -> {score, scored_by, members, rank, title_english} (None where MAL shows N/A)."""
+	t = _text(raw)
+	if "Members:</span>" not in t:
+		raise Reject("not an anime page")
+	g = lambda rx: (lambda m: m.group(1).strip() if m else None)(re.search(rx, t))
+	score = g(r'itemprop="ratingValue"[^>]*>\s*([0-9.]+)')
+	eng = g(r"English:</span>\s*([^<\n]+)")
+	return {"score": float(score) if score else None,
+		"scored_by": _num(g(r'itemprop="ratingCount"[^>]*>\s*([\d,]+)')),
+		"members": _num(g(r"Members:</span>\s*([\d,]+)")),
+		"rank": _num(g(r"Ranked:</span>\s*#(\d+)")),
+		"title_english": html.unescape(eng) if eng else None}
+
+
+def mal_top(score_floor, max_pages=200):
 	out = {}
-	for page in range(1, max_pages + 1):
-		v = fetch(f"{JIKAN}/top/anime?page={page}", validate=v_jikan)
-		rows = v["data"]
-		for a in rows:
-			out[a["mal_id"]] = mal_trim(a)
-		low = min((a.get("score") or 0) for a in rows) if rows else 0
-		if page % 10 == 0 or not rows:
-			print(f"MAL top page {page}: {len(out)} total (lowest score {low})", flush=True)
-		if not rows or not (v.get("pagination") or {}).get("has_next_page") or low < score_floor:
+	for page in range(max_pages):
+		rows = fetch(f"{MAL}/topanime.php?limit={page * 50}", parse=parse_top)
+		for r in rows:
+			out[r["id"]] = r
+		scored = [r["score"] for r in rows if r["score"]]
+		low = min(scored) if scored else 0
+		if page % 10 == 9 or len(rows) < 50:
+			print(f"MAL top page {page + 1}: {len(out)} total (lowest score {low})", flush=True)
+		if len(rows) < 50 or low < score_floor:
 			break
 	return out
 
 
 def mal_one(mid):
-	v = fetch(f"{JIKAN}/anime/{mid}", validate=v_jikan)
-	return mal_trim(v["data"]) if v and v.get("data") else None
+	v = fetch(f"{MAL}/anime/{mid}", parse=parse_anime)
+	return dict(v, id=mid) if v else None
 
 
 # ---------------------------------------------------------------- Kitsu
@@ -325,6 +361,8 @@ def main():
 	ap.add_argument("--anilist-score", type=int, default=68, help="stop paging AniList below this score")
 	ap.add_argument("--mal-score", type=float, default=7.0, help="stop paging MAL below this score")
 	ap.add_argument("--mal-members", type=int, default=20000, help="MAL top entries below this aren't chased onto AniList")
+	ap.add_argument("--mal-details", action="store_true",
+		help="also read every entry's MAL page for voters + English title (~2s each), not just those off the top list")
 	ap.add_argument("--cap", type=int, default=12000)
 	args = ap.parse_args()
 	t0 = time.time()
@@ -339,19 +377,19 @@ def main():
 	print(f"AniList top: {len(al)}, MAL top: {len(mal)}", flush=True)
 
 	have_mal = {m["idMal"] for m in al.values() if m.get("idMal")}
-	chase = [a["id"] for a in mal.values() if a["type"] in MAL_TYPES and (a["members"] or 0) >= args.mal_members
-		and a["id"] not in have_mal]
+	chase = [a["id"] for a in mal.values() if (a["members"] or 0) >= args.mal_members and a["id"] not in have_mal]
 	print(f"MAL-top entries missing from AniList's list: {len(chase)}", flush=True)
 	al.update(anilist_by(Q_MAL, chase))
 	close_over_sequels(al, args.cap)
 	print(f"AniList universe after the sequel closure: {len(al)}", flush=True)
 
-	need = sorted({m["idMal"] for m in al.values() if m.get("idMal")} - set(mal))
+	held = {m["idMal"] for m in al.values() if m.get("idMal")}
+	need = sorted(held if args.mal_details else held - set(mal))
 	print(f"MAL details to fetch one by one: {len(need)}", flush=True)
 	for i, mid in enumerate(need):
 		a = mal_one(mid)
 		if a:
-			mal[mid] = a
+			mal[mid] = {**mal.get(mid, {}), **{k: v for k, v in a.items() if v is not None}}
 		if (i + 1) % 100 == 0:
 			print(f"  MAL {i + 1}/{len(need)}", flush=True)
 
