@@ -43,6 +43,17 @@ jobs:
           path: animefilter/tools/cache
           key: anime-harvest-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: anime-harvest-
+      # What each host resolves to and whether it answers — printed so a harvest that
+      # cannot reach a site says which and how, before the long run starts.
+      - name: Probe the sites
+        continue-on-error: true
+        run: |
+          for h in graphql.anilist.co api.jikan.moe kitsu.app kitsu.io; do
+            echo "== $h"; getent ahosts "$h" | awk '{print $1}' | sort -u | head -4
+            curl -s -o /dev/null -m 20 -w "  v4: %{http_code} %{remote_ip}\n" -4 "https://$h/" || echo "  v4: failed"
+            curl -s -o /dev/null -m 20 -w "  v6: %{http_code} %{remote_ip}\n" -6 "https://$h/" || echo "  v6: failed"
+          done
+          curl -s -m 20 -4 "https://api.jikan.moe/v4/anime/1" | head -c 300; echo
       - name: Harvest
         timeout-minutes: 160
         run: python -u animefilter/tools/harvest.py

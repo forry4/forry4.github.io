@@ -22,7 +22,14 @@ over ALL its seasons, not just the ones good enough to chart on their own).
 Every answer is validated BEFORE it is cached (the BGG lesson: a cached rate-limit
 page reads as "no data" forever) and cached under tools/cache/ so a re-run resumes.
 """
-import argparse, hashlib, json, os, sys, time, urllib.error, urllib.parse, urllib.request
+import argparse, hashlib, json, os, socket, sys, time, urllib.error, urllib.parse, urllib.request
+
+# Try IPv4 addresses first. The first runner harvest died on Jikan with "Network is
+# unreachable" (errno 101) — the shape of an IPv6 address on a host with no IPv6 route.
+_gai = socket.getaddrinfo
+def _v4_first(*a, **k):
+	return sorted(_gai(*a, **k), key=lambda r: r[0] != socket.AF_INET)
+socket.getaddrinfo = _v4_first
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CACHE = os.path.join(HERE, "cache")
