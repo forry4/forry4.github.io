@@ -66,6 +66,7 @@ const SCREENS = [
 	{ path: "/boxpuzzles", chunk: "BoxPuzzles", marker: ".bx" },
 	{ path: "/astral", chunk: "AstralGuide", marker: ".aag" },
 	{ path: "/lolstats", chunk: "LolStats", marker: ".lol" },
+	{ path: "/animefilter", chunk: "AnimeFilter", marker: ".anf" },
 ];
 
 // EVERY GAME LOBBY, IN ONE PLACE. Three blocks below drive "each game's lobby" —
@@ -3089,6 +3090,7 @@ try {
 			{ name: "/astral/charts", path: "/astral/charts", wait: ".aag-nf input", min: 7 },
 			// The champion search and the list's own filter.
 			{ name: "/lolstats/champions", path: "/lolstats/champions", wait: ".lol-find input", min: 2 },
+			{ name: "/animefilter", path: "/animefilter", wait: ".anf-search input", min: 1 },
 			// A champion's page: the search and the pair table's filter.
 			{ name: "/lolstats/champions#Azir", path: "/lolstats/champions#Azir", wait: "#lol-pair-filter", min: 2 },
 			// BOOKS IS THE ONE HOLE, AND IT IS THE PAGE'S, NOT THIS WALK'S. `/books`
@@ -9685,8 +9687,8 @@ try {
 		check("...and it opens the offline hub", await has(".offline-hub") && new URL(page.url()).pathname === "/offline",
 			page.url());
 		const rows = await page.locator(".offline-read [data-read]").evaluateAll((els) => els.map((e) => e.dataset.read));
-		check("the hub's Read section lists all eight screens",
-			JSON.stringify(rows) === JSON.stringify(["puzzles", "bggfilter", "steamfilter", "astral", "lolstats", "books", "notes", "profile"]), JSON.stringify(rows));
+		check("the hub's Read section lists all nine screens",
+			JSON.stringify(rows) === JSON.stringify(["puzzles", "bggfilter", "steamfilter", "astral", "lolstats", "animefilter", "books", "notes", "profile"]), JSON.stringify(rows));
 		check("...and still has exactly one Open button (the scorecard's)",
 			await page.getByRole("button", { name: /^Open$/ }).count() === 1);
 

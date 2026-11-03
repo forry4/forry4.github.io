@@ -46,6 +46,10 @@ DUBS = "https://raw.githubusercontent.com/MAL-Dubs/MAL-Dubs/main/data/dubInfo.js
 # are neither, and would pull a show's average around without being the show.
 SHOW_FORMATS = ["TV", "TV_SHORT", "ONA", "MOVIE"]
 GROUP_EDGES = {"SEQUEL", "PREQUEL"}
+# A sequel chain can run through a special or OVA (Gintama's Semi-Final sits between
+# its last TV season and its final film), so the closure follows those too;
+# make_data.py joins through them without listing them.
+BRIDGE_FORMATS = ["SPECIAL", "OVA"]
 
 # Minimum seconds between requests, per host. AniList's documented limit is 90/min
 # but it has run "degraded" at 30/min for long stretches; Jikan allows 60/min.
@@ -193,14 +197,14 @@ def group_neighbours(m):
 	"""AniList ids joined to `m` by a sequel/prequel edge to another show-format entry."""
 	for e in (m.get("relations") or {}).get("edges") or []:
 		n = e.get("node") or {}
-		if e.get("relationType") in GROUP_EDGES and n.get("type") == "ANIME" and n.get("format") in SHOW_FORMATS:
+		if e.get("relationType") in GROUP_EDGES and n.get("type") == "ANIME" and n.get("format") in SHOW_FORMATS + BRIDGE_FORMATS:
 			yield n["id"]
 
 
 def close_over_sequels(al, cap):
 	"""Pull in every sequel/prequel (transitively) of what is already held."""
-	for rnd in range(30):
-		want = {n for m in list(al.values()) if m.get("format") in SHOW_FORMATS
+	for rnd in range(80):
+		want = {n for m in list(al.values()) if m.get("format") in SHOW_FORMATS + BRIDGE_FORMATS
 			for n in group_neighbours(m)} - set(al)
 		if not want:
 			return

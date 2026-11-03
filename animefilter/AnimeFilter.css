@@ -1,0 +1,156 @@
+.anf{min-height:100vh;background:var(--bg);color:var(--text);padding:0 0 80px;}
+.anf-header{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;
+	padding:12px 20px;background:rgba(15,14,12,.92);backdrop-filter:blur(6px);
+	border-bottom:1px solid var(--border);}
+.anf-headtitle{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;letter-spacing:.08em;
+	text-transform:uppercase;color:var(--gold);font-size:.95rem;}
+.anf-headright{margin-left:auto;display:flex;gap:8px;align-items:center;
+	color:var(--text-muted);font-size:.8rem;}
+
+.anf-hero{text-align:center;padding:36px 20px 22px;}
+.anf-logo{font-family:'Cinzel','Cinzel Fallback',serif;font-size:clamp(1.9rem,6vw,2.6rem);
+	font-weight:700;color:var(--gold);letter-spacing:.06em;}
+.anf-tagline{color:var(--text-dim);margin:10px auto 0;font-style:italic;font-size:1.02rem;
+	max-width:60ch;line-height:1.55;}
+
+.anf-wrap{max-width:1200px;margin:0 auto;padding:0 20px;}
+.anf-num{font-variant-numeric:tabular-nums;}
+
+/* ── dials ─────────────────────────────────────────────────────────────── */
+.anf-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+	padding:18px 20px;margin:8px 0 0;}
+.anf-phead{display:flex;align-items:baseline;justify-content:space-between;gap:14px;
+	flex-wrap:wrap;margin:0 0 14px;}
+.anf-phead h2{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.78rem;letter-spacing:.12em;
+	text-transform:uppercase;color:var(--text-dim);font-weight:700;margin:0;}
+.anf-knobs{display:grid;gap:14px 22px;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));}
+.anf-knob label{display:block;font-size:.76rem;color:var(--text-dim);
+	letter-spacing:.04em;margin:0 0 4px;}
+.anf-knob .anf-v{float:right;color:var(--gold);font-weight:700;}
+.anf-knob input[type=range]{width:100%;display:block;margin:0;
+	height:20px;accent-color:var(--gold);cursor:pointer;
+	/* a horizontal drag belongs to the slider; a vertical one still scrolls the page. Without
+	   this the scroller can claim a drag that is a few degrees off true. */
+	touch-action:pan-y;}
+.anf-knob input[type=range]:focus-visible{
+	outline:2px solid var(--gold);outline-offset:3px;}
+
+.anf-effect{margin:16px 0 0;padding-top:13px;border-top:1px solid var(--border);
+	font-size:.88rem;color:var(--text-dim);}
+.anf-effect b{color:var(--text);}
+
+/* ── categories + Switch ───────────────────────────────────────────────── */
+.anf-mhead{margin:18px 0 8px;font-size:.76rem;color:var(--text-dim);letter-spacing:.04em;}
+.anf-mhead em{color:var(--text-muted);font-style:normal;}
+.anf-chips{display:flex;flex-wrap:wrap;gap:6px;}
+.anf-chip,.anf-seg button{font:inherit;font-size:.8rem;cursor:pointer;color:var(--text-dim);
+	background:var(--surface2);border:1px solid var(--border);border-radius:999px;
+	padding:5px 11px;line-height:1.2;}
+.anf-chip span{margin-left:6px;color:var(--text-muted);font-size:.72rem;}
+.anf-chip:hover,.anf-seg button:hover{color:var(--text);}
+.anf-chip[aria-pressed="true"],.anf-seg button[aria-pressed="true"]{color:var(--bg);
+	background:var(--gold);border-color:var(--gold);font-weight:700;}
+.anf-chip[aria-pressed="true"] span{color:var(--bg);opacity:.75;}
+.anf-chip:focus-visible,.anf-seg button:focus-visible{outline:2px solid var(--gold);outline-offset:2px;}
+.anf-seg{display:inline-flex;flex-wrap:wrap;gap:6px;}
+
+/* ── controls ──────────────────────────────────────────────────────────── */
+.anf-controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:18px 0 10px;}
+.anf-search{flex:1 1 200px;min-width:0;display:flex;align-items:center;gap:8px;
+	background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+	padding:8px 12px;}
+.anf-search input{border:0;background:transparent;color:var(--text);font:inherit;width:100%;
+	outline:none;}
+.anf-count{white-space:nowrap;font-size:.8rem;color:var(--text-muted);
+	font-variant-numeric:tabular-nums;}
+.anf-count b{color:var(--text);}
+
+/* ── table ─────────────────────────────────────────────────────────────── */
+.anf-tablewrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);
+	background:var(--surface);}
+.anf table{border-collapse:collapse;width:100%;min-width:900px;}
+.anf thead th{position:sticky;top:0;z-index:2;background:var(--surface2);
+	border-bottom:1px solid var(--border);font-size:.68rem;letter-spacing:.1em;
+	text-transform:uppercase;color:var(--text-dim);font-weight:700;text-align:left;
+	padding:10px 12px;white-space:nowrap;font-family:'Cinzel','Cinzel Fallback',serif;}
+.anf thead th.anf-s{cursor:pointer;user-select:none;}
+.anf thead th.anf-s:hover{color:var(--text);}
+.anf thead th.anf-s:focus-visible{outline:2px solid var(--gold);outline-offset:-2px;}
+.anf th .anf-arw{opacity:0;margin-left:5px;font-size:.6rem;}
+.anf th[aria-sort] .anf-arw{opacity:1;color:var(--gold);}
+.anf tbody td{padding:9px 12px;border-bottom:1px solid var(--border);vertical-align:middle;}
+.anf tbody tr:last-child td{border-bottom:0;}
+.anf tbody tr:hover{background:var(--surface2);}
+.anf-pos{width:48px;color:var(--text-muted);font-size:.8rem;text-align:right;}
+.anf-title{min-width:210px;}
+.anf-title a{color:var(--text);text-decoration:none;font-weight:600;font-size:.94rem;
+	border-bottom:1px solid transparent;}
+.anf-title a:hover,.anf-title a:focus-visible{color:var(--gold);border-bottom-color:var(--gold);}
+.anf-score{width:84px;}
+.anf-score b{font-size:1.05rem;font-weight:700;color:var(--gold);}
+/* F score sits between the two ratings it blends, and reads between them too:
+   the Rating column's weight without its gold. */
+.anf-f{width:78px;color:var(--text);font-size:.9rem;font-weight:600;}
+.anf-site,.anf-y,.anf-mv,.anf-n{width:76px;color:var(--text-dim);font-size:.82rem;}
+.anf-empty{padding:44px 16px;text-align:center;color:var(--text-dim);}
+.anf-empty b{display:block;color:var(--text);font-size:1rem;margin-bottom:6px;}
+.anf-more{display:block;width:100%;padding:13px;cursor:pointer;background:var(--surface);
+	border:0;border-top:1px solid var(--border);font:inherit;font-size:.84rem;font-weight:700;
+	color:var(--gold);font-family:'Cinzel','Cinzel Fallback',serif;letter-spacing:.06em;}
+.anf-more:hover{background:var(--surface2);}
+.anf-more:focus-visible{outline:2px solid var(--gold);outline-offset:-2px;}
+
+.anf-loading{padding:80px 20px;text-align:center;color:var(--text-dim);}
+
+.anf-notes{margin:32px 0 0;padding-top:22px;border-top:1px solid var(--border);
+	display:grid;gap:20px;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));}
+.anf-notes h3{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;letter-spacing:.12em;
+	text-transform:uppercase;color:var(--text-dim);font-weight:700;margin:0 0 7px;}
+.anf-notes p{margin:0 0 8px;font-size:.82rem;line-height:1.6;color:var(--text-dim);max-width:60ch;}
+.anf-notes p:last-child{margin-bottom:0;}
+.anf-notes b{color:var(--text);}
+
+@media(max-width:640px){
+	.anf-hero{padding:26px 16px 18px;}
+	.anf-wrap{padding:0 12px;}
+	.anf-panel{padding:14px 14px;}
+}
+
+/* A fingertip covers ~40px and the slider drew a 20px row. The visual stays slim — the native
+   control centres itself in the box — but the whole height is grabbable, and every press inside
+   it moves the dial (see rangePointer in the JSX). */
+@media(pointer:coarse){
+	.anf-knob input[type=range]{height:40px;}
+}
+
+
+/* the four single-choice rows sit side by side where they fit */
+.anf-rowset{display:flex;flex-wrap:wrap;gap:0 28px;}
+
+/* under the title: the romaji or the parent show, then format · demographic · genres, then tags */
+.anf-of{display:block;font-size:.74rem;color:var(--text-dim);margin-top:2px;font-style:italic;}
+.anf-tags{display:block;font-size:.7rem;color:var(--text-muted);margin-top:3px;line-height:1.35;}
+.anf-tagline2{display:block;opacity:.8;}
+.anf-dub{font-style:normal;font-weight:700;color:#7fb8ff;border:1px solid currentColor;
+	border-radius:3px;padding:0 4px;margin-left:8px;font-size:.6rem;letter-spacing:.04em;
+	text-transform:uppercase;vertical-align:2px;white-space:nowrap;}
+.anf-dub-part{color:var(--text-muted);}
+.anf-title{min-width:260px;}
+.anf-mv{width:96px;}
+/* a site switched out of the score is still shown, greyed */
+.anf-off{opacity:.38;}
+.anf-expand{font:inherit;font-size:.86rem;cursor:pointer;color:var(--gold);background:var(--surface2);
+	border:1px solid var(--border);border-radius:999px;padding:2px 10px;font-variant-numeric:tabular-nums;}
+.anf-expand:hover{border-color:var(--gold);}
+.anf-expand:focus-visible{outline:2px solid var(--gold);outline-offset:2px;}
+.anf tbody tr.anf-open td{border-bottom-color:transparent;}
+.anf tbody tr.anf-part td{background:var(--bg);padding-top:6px;padding-bottom:6px;font-size:.84rem;}
+.anf tbody tr.anf-part .anf-title a{font-weight:500;font-size:.86rem;}
+.anf tbody tr.anf-part .anf-title{padding-left:26px;}
+.anf-part .anf-score{color:var(--text);font-weight:600;}
+
+.anf-more-tags{margin:14px 0 0;}
+.anf-more-tags summary{cursor:pointer;font-size:.76rem;color:var(--text-dim);letter-spacing:.04em;
+	margin:0 0 8px;}
+.anf-more-tags summary em{color:var(--text-muted);font-style:normal;}
+.anf-more-tags summary:focus-visible{outline:2px solid var(--gold);outline-offset:2px;}

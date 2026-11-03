@@ -29,6 +29,7 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
 | [`bggfilter/CLAUDE.md`](bggfilter/CLAUDE.md) | BGG Filter — the BoardGameGeek harvest + the frontend-only filter page |
 | [`steamfilter/CLAUDE.md`](steamfilter/CLAUDE.md) | Steam Filter — the Steam store harvest (English reviews, 90%+ positive) + its filter page, the daily US Steam/eShop prices + sales, and per-account saved / not-interested games |
 | [`astralguide/CLAUDE.md`](astralguide/CLAUDE.md) | Astral Ascent Guide — the wiki harvest, the derived-vs-editorial split, the heuristic synergy index, `/astral/<tab>#<entry>` routing |
+| [`animefilter/CLAUDE.md`](animefilter/CLAUDE.md) | Anime Filter — the top 500 anime across MAL, AniList and Kitsu, seasons averaged; harvested on a runner (the container can't reach the sites), the z-score combine, English dubs from MAL-Dubs |
 | [`lolstats/CLAUDE.md`](lolstats/CLAUDE.md) | LoL Stats — Worlds seed records (Liquipedia) and champion stats (Oracle's Elixir), which games count, and the Worlds-qualifier trap in Oracle's Elixir |
 | [`docs/deploy-reliability-log.md`](docs/deploy-reliability-log.md) | **Dated postmortems for RED RUNS** — the deploy gates, the scheduled jobs and the harness itself. Measurements behind the rules below (the CI-vs-dev font spread, the screens gate's failure census, the keepalive watchdog). |
 | [`docs/ai-research-log.md`](docs/ai-research-log.md) | **AI campaign history, dated sessions, rejected-experiment postmortems.** When something here says "see the research log," that's the blow-by-blow + "do not relitigate" detail. |
@@ -146,6 +147,8 @@ steamfilter/           # Steam Filter — the same shape over Steam; harvested b
                        #   api.py keeps each account's saved / not-interested games (its only server code)
 astralguide/           # Astral Ascent Guide — frontend-only; tools/ harvests the game wiki's API, the payload
                        #   ships as webapp/public/data/astral-guide.json (GENERATED); editorial.js is the only hand-written part
+animefilter/           # Anime Filter — frontend-only; anime-harvest.yml harvests AniList/MAL/Kitsu on a runner,
+                       #   make_data.py groups seasons -> webapp/public/data/anime-filter.json (GENERATED)
 lolstats/              # LoL Stats — frontend-only; tools/ builds webapp/public/data/lol-*.json (GENERATED) from
                        #   Oracle's Elixir (champions) and Liquipedia (Worlds seeds); derive.js holds all the logic
 shared/                # theme.js (baseCss), lobby.jsx, splendor.jsx, router.js — cross-game frontend kits
