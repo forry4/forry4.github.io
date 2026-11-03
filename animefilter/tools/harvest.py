@@ -86,7 +86,9 @@ def fetch(url, body=None, validate=None, fresh_hours=72, tries=10, parse=json.lo
 			time.sleep(wait)
 		_last[host] = time.time()
 		headers = {"User-Agent": BROWSER_UA if host in BROWSER_HOSTS else UA,
-			"Accept": "text/html" if parse is not json.loads else "application/json"}
+			# Kitsu is JSON:API and answers anything but its own media type with a 406.
+			"Accept": "text/html" if parse is not json.loads
+				else "application/vnd.api+json" if host == "kitsu.io" else "application/json"}
 		data = None
 		if body is not None:
 			headers["Content-Type"] = "application/json"
