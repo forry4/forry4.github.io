@@ -1,0 +1,79 @@
+name: Anime Filter harvest
+
+# Re-collects the Anime Filter data from AniList, MyAnimeList (Jikan) and Kitsu.
+# Manual only ("Run workflow"): ~20-40 minutes of polite requests, and ratings move
+# slowly enough that a refresh every month or two is plenty. Runs on a runner
+# because those APIs are not reachable from the dev container.
+#
+# The RAW harvest (results_all.json) is force-pushed to the `anime-harvest` branch,
+# so make_data.py can be re-tuned locally without asking the sites again
+# (`git fetch origin anime-harvest && git show origin/anime-harvest:results_all.json.gz`).
+# With publish=true the payload is also rebuilt and committed to main, and the
+# Pages deploy dispatched (a GITHUB_TOKEN push triggers no workflow on its own).
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Rebuild webapp/public/data/anime-filter.json and commit it to main'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: anime-harvest
+  cancel-in-progress: false
+
+jobs:
+  harvest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      # Every answer is cached as it arrives and the cache is saved even when the
+      # harvest fails, so "Run workflow" again resumes where the last run stopped.
+      - uses: actions/cache/restore@v4
+        with:
+          path: animefilter/tools/cache
+          key: anime-harvest-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: anime-harvest-
+      - name: Harvest
+        timeout-minutes: 160
+        run: python -u animefilter/tools/harvest.py
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: animefilter/tools/cache
+          key: anime-harvest-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Push the raw harvest to the anime-harvest branch
+        run: |
+          mkdir -p /tmp/raw && gzip -9 -c animefilter/tools/results_all.json > /tmp/raw/results_all.json.gz
+          cd /tmp/raw
+          git init -q -b anime-harvest
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add results_all.json.gz
+          git commit -q -m "Anime Filter raw harvest $(date -u +%Y-%m-%d)"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" anime-harvest
+      - name: Build the payload
+        if: inputs.publish
+        run: python animefilter/tools/make_data.py
+      - name: Commit and deploy
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add webapp/public/data/anime-filter.json
+          if git diff --cached --quiet; then echo "no change"; exit 0; fi
+          git commit -m "Anime Filter: harvest $(date -u +%Y-%m-%d)"
+          git pull --rebase origin main
+          git push origin HEAD:main
+          gh workflow run deploy-pages.yml --ref main
