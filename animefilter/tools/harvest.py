@@ -38,7 +38,7 @@ UA = "forrest-games-anime-filter/1.0 (+https://forry4.github.io/animefilter)"
 
 ANILIST = "https://graphql.anilist.co"
 JIKAN = "https://api.jikan.moe/v4"
-KITSU = "https://kitsu.app/api/edge"
+KITSU = "https://kitsu.io/api/edge"  # kitsu.app answers runners with a Cloudflare 403
 AOD = "https://github.com/manami-project/anime-offline-database/releases/latest/download/anime-offline-database-minified.json"
 DUBS = "https://raw.githubusercontent.com/MAL-Dubs/MAL-Dubs/main/data/dubInfo.json"
 
@@ -50,7 +50,7 @@ GROUP_EDGES = {"SEQUEL", "PREQUEL"}
 
 # Minimum seconds between requests, per host. AniList's documented limit is 90/min
 # but it has run "degraded" at 30/min for long stretches; Jikan allows 60/min.
-GAP = {"graphql.anilist.co": 2.1, "api.jikan.moe": 1.15, "kitsu.app": 0.5}
+GAP = {"graphql.anilist.co": 2.1, "api.jikan.moe": 1.15, "kitsu.io": 0.5}
 _last = {}
 
 

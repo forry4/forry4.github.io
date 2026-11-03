@@ -18,6 +18,10 @@ on:
         description: 'Rebuild webapp/public/data/anime-filter.json and commit it to main'
         type: boolean
         default: true
+      probe_only:
+        description: 'Only probe the sites (prints DNS, status codes and sample markup), no harvest'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -48,13 +52,19 @@ jobs:
       - name: Probe the sites
         continue-on-error: true
         run: |
-          for h in graphql.anilist.co api.jikan.moe kitsu.app kitsu.io; do
+          for h in graphql.anilist.co api.jikan.moe kitsu.io myanimelist.net api.myanimelist.net; do
             echo "== $h"; getent ahosts "$h" | awk '{print $1}' | sort -u | head -4
             curl -s -o /dev/null -m 20 -w "  v4: %{http_code} %{remote_ip}\n" -4 "https://$h/" || echo "  v4: failed"
             curl -s -o /dev/null -m 20 -w "  v6: %{http_code} %{remote_ip}\n" -6 "https://$h/" || echo "  v6: failed"
           done
-          curl -s -m 20 -4 "https://api.jikan.moe/v4/anime/1" | head -c 300; echo
+          UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36"
+          curl -s -m 30 -A "$UA" "https://myanimelist.net/topanime.php?limit=0" -o /tmp/top.html -w "topanime: %{http_code} %{size_download}\n"
+          grep -o -E 'class="ranking-list".{0,40}|score-label score-[0-9]+">[0-9.]+|[0-9,]+ members|anime/[0-9]+/[^"]{0,40}"' /tmp/top.html | head -12
+          curl -s -m 30 -A "$UA" "https://myanimelist.net/anime/16498" -o /tmp/one.html -w "anime page: %{http_code} %{size_download}\n"
+          grep -o -E 'itemprop="(ratingValue|ratingCount)"[^>]*>[^<]*|Members:</span>[^<]{0,30}|English:</span>[^<]{0,60}|Demographic:</span>.{0,160}|class="score-label[^>]*>[^<]*' /tmp/one.html | head -12
+          curl -s -m 30 -A "$UA" "https://kitsu.io/api/edge/anime?filter%5Bid%5D=7442&fields%5Banime%5D=averageRating,userCount" | head -c 300; echo
       - name: Harvest
+        if: ${{ !inputs.probe_only }}
         timeout-minutes: 160
         run: python -u animefilter/tools/harvest.py
       - uses: actions/cache/save@v4
@@ -63,6 +73,7 @@ jobs:
           path: animefilter/tools/cache
           key: anime-harvest-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Push the raw harvest to the anime-harvest branch
+        if: ${{ !inputs.probe_only }}
         run: |
           mkdir -p /tmp/raw && gzip -9 -c animefilter/tools/results_all.json > /tmp/raw/results_all.json.gz
           cd /tmp/raw
@@ -73,10 +84,10 @@ jobs:
           git commit -q -m "Anime Filter raw harvest $(date -u +%Y-%m-%d)"
           git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" anime-harvest
       - name: Build the payload
-        if: inputs.publish
+        if: inputs.publish && !inputs.probe_only
         run: python animefilter/tools/make_data.py
       - name: Commit and deploy
-        if: inputs.publish
+        if: inputs.publish && !inputs.probe_only
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
