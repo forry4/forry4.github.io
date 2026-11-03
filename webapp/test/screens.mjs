@@ -8586,8 +8586,15 @@ try {
 		const dealt = await page.waitForSelector(".pm-market .pm-stall", { timeout: 30_000 }).then(() => true).catch(() => false);
 		check("a table full of bots deals at once", dealt);
 		const stalls = await page.locator(".pm-stall").count();
-		const marketDice = await page.locator(".pm-market [data-die]").count();
-		check("two players shop from three stalls of ten dice", stalls === 3 && marketDice === 30, `${stalls} stalls, ${marketDice} dice`);
+		// The bot may open before this runs, and a pair it bought sits on its board,
+		// so the deal is the market plus every board (CI read 28 under slow frames).
+		await page.waitForFunction(() => document.querySelectorAll(".pm-market [data-die], .pm-board [data-die]").length === 30,
+			null, { timeout: 5_000 }).catch(() => {});
+		const dice = await page.evaluate(() => ({
+			market: document.querySelectorAll(".pm-market [data-die]").length,
+			boards: document.querySelectorAll(".pm-board [data-die]").length }));
+		check("two players shop from three stalls of ten dice", stalls === 3 && dice.market + dice.boards === 30,
+			`${stalls} stalls, ${JSON.stringify(dice)}`);
 
 		// The bot may open; wait for a column we can buy rather than for a duration.
 		const col = page.locator(".pm-col.buyable").first();
@@ -8628,12 +8635,28 @@ try {
 			{ width: 1366, height: 768 }, { width: 1920, height: 1080 }, { width: 2560, height: 1440 },
 		]) {
 			await page.setViewportSize(viewport);
-			await page.waitForTimeout(120);
+			// A board cell GLIDES to its place (`left`/`top` over .45s, for the window
+			// re-centering), so after a resize the cells are still crossing from the
+			// last width. A fixed 120ms read them mid-flight on a loaded runner: 14px
+			// past a 320px page on Pages 2026-10-25, and every time under
+			// SCREENS_SLOW_FRAMES. Wait for the glides themselves to land.
+			await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => {
+				const glides = document.getAnimations().filter((a) => a instanceof CSSTransition
+					&& !a.effect?.pseudoElement && a.effect?.target?.closest?.(".pm-board"));
+				Promise.race([Promise.all(glides.map((a) => a.finished.catch(() => {}))),
+					new Promise((r) => setTimeout(r, 5_000))]).then(done);
+			}))));
 			const g = await page.evaluate(() => {
 				const box = (sel) => { const r = document.querySelector(sel)?.getBoundingClientRect(); return r ? { l: r.left, r: r.right, w: r.width } : null; };
+				const vw = document.documentElement.clientWidth;
+				// What sticks out, so a red run names the element and not just the width.
+				const over = [...document.querySelectorAll(".pipmarket *")]
+					.map((el) => [el, el.getBoundingClientRect()])
+					.filter(([, r]) => r.width > 0 && r.right > vw + 1).slice(0, 4)
+					.map(([el, r]) => `${el.tagName.toLowerCase()}.${[...el.classList].join(".")}@${Math.round(r.left)}-${Math.round(r.right)}`);
 				return { docW: document.documentElement.scrollWidth, board: box(".pm-player.mine .pm-board"),
 					stalls: [...document.querySelectorAll(".pm-stall")].map((el) => { const r = el.getBoundingClientRect(); return [r.left, r.right]; }),
-					actions: box(".pm-actions") };
+					actions: box(".pm-actions"), over };
 			});
 			check(`${viewport.width}x${viewport.height} the table never scrolls sideways and every stall and the board fit`,
 				g.board && g.actions && g.stalls.length === 3 && g.docW <= viewport.width + 1

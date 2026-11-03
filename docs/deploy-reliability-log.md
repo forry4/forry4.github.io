@@ -10,6 +10,41 @@ than re-argued.
 
 ---
 
+## 2026-11-03 — `pipMarketPlay` measured a board while its cells were still gliding
+
+Census of the 300 runs from 10-21 to 11-03: **Pages 2 red of 46, Python CI 0 of 30,
+Render 0 of 2.** Both reds were the screens gate.
+
+| Run | Block | What it was | Kind |
+|---|---|---|---|
+| 10-21 `7d26fcbe` | `astralGuide` quick table | `Magma Comets21554`, the stats run together; fixed by the follow-up astralguide commits, green since | **product** |
+| 10-25 `e1dde154` | `pipMarketPlay` 320x568 | `docW` 334 in a 320px page, on a run triggered by the Steam prices job (no Pip Market change) | harness |
+
+The 10-25 detail named the board, the stalls and the action bar, and all three fitted.
+Something else was 14px wide, and the check could not say what. With the overflowing
+elements added to the detail, `SCREENS_SLOW_FRAMES=150` reproduced it every time: the
+human's OWN board cells, at exactly their 1920px positions (`--x` 4.5 x 65.9px cells
++ 32 = 328px). `.pm-cell` transitions `left`/`top` over .45s so the board window glides
+when it re-centers, and the block read the layout `waitForTimeout(120)` after each
+resize. The cells were still crossing from the previous width. The page is right once
+they land, so the fix is the wait: two frames for the transitions to start, then the
+board's own `CSSTransition`s' `finished`, with a 5s bound. The check now also prints what
+overflowed.
+
+The same slow-frames run turned up a second race in the block, and CI had not drawn it
+yet: "three stalls of ten dice" counted the MARKET, and when the bot opened first two of
+the thirty were already on its board (`28 dice`). The deal is now counted as the market
+plus every board.
+
+Both checks went from failing on every slow-frames run to passing.
+
+**Open:** one of eleven local normal-speed runs threw `locator.click: Timeout 30000ms`,
+and a grep on the output hid where (the two unguarded clicks are the buyable column
+and the target cell). The next ten passed. If CI draws it, the block's
+`test-results/screens/pipMarketPlay.json` has the checks that ran before it.
+
+---
+
 ## 2026-10-07 — a census, a hook that had stopped gating, and an image about to move
 
 Asked to find why deploys keep going red. **Since 09-21: Pages 6 red of 52, Python CI
