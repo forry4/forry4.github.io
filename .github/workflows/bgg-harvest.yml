@@ -1,0 +1,88 @@
+name: BGG Filter harvest
+
+# Re-collects webapp/public/data/bgg-filter.json from BoardGameGeek and commits it to
+# main, then dispatches the Pages deploy (a GITHUB_TOKEN push triggers no workflow).
+#
+# Twice a year, on March 1 and September 1 (the first harvest was 2026-08-29): ratings
+# move slowly, and a new game takes months to reach the 100-rating floor. ~50k polite
+# requests through curl (BGG 403s Python's TLS fingerprint), longer than one job may
+# run, so each answer is cached as it arrives, the cache is saved however the step
+# ends, and an unfinished harvest continues in a new run (up to three). The cache key
+# carries the month, so a new harvest never replays an old one's answers: the harvester
+# reuses a cached answer forever (bggfilter/tools/scan_bgg.py).
+#
+# make_data.py refuses a payload with under 90% of the current file's games, which is
+# what a band answered by Cloudflare challenge pages would look like.
+
+on:
+  schedule:
+    - cron: "29 5 1 3,9 *"
+  workflow_dispatch:
+    inputs:
+      round:
+        description: 'Continuation round (set by the workflow itself; leave at 1)'
+        default: '1'
+      month:
+        description: 'Harvest month the cache belongs to (set by the workflow itself; leave blank)'
+        default: ''
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: bgg-harvest
+  cancel-in-progress: false
+
+jobs:
+  harvest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - name: Round
+        id: round
+        env:
+          ROUND: ${{ inputs.round }}
+          MONTH: ${{ inputs.month }}
+        run: |
+          { echo "round=${ROUND:-1}"; echo "month=${MONTH:-$(date -u +%Y-%m)}"; } >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v4
+        with:
+          path: bggfilter/tools/cache
+          key: bgg-harvest-${{ steps.round.outputs.month }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: bgg-harvest-${{ steps.round.outputs.month }}-
+      - name: Harvest
+        id: harvest
+        # A step timeout, not the job's: the job must outlive it to save the cache.
+        timeout-minutes: 320
+        run: python -u bggfilter/tools/scan_bgg.py
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: bggfilter/tools/cache
+          key: bgg-harvest-${{ steps.round.outputs.month }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Continue in a new run
+        if: always() && steps.harvest.outcome != 'success' && fromJSON(steps.round.outputs.round) < 3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run bgg-harvest.yml --ref main \
+            -f round="$(( ${{ steps.round.outputs.round }} + 1 ))" -f month="${{ steps.round.outputs.month }}"
+      - name: Build the payload
+        run: python bggfilter/tools/make_data.py
+      - name: Commit and deploy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add webapp/public/data/bgg-filter.json
+          if git diff --cached --quiet; then echo "no change"; exit 0; fi
+          git commit -m "BGG Filter: harvest $(date -u +%Y-%m-%d)"
+          git pull --rebase origin main
+          git push origin HEAD:main
+          gh workflow run deploy-pages.yml --ref main

@@ -14,7 +14,12 @@ fetches one static JSON and does everything client-side.
 ## The data is GENERATED — do not hand-edit the JSON
 
 `webapp/public/data/bgg-filter.json` (17,515 games, ~2.5MB / ~650KB gzipped) is a build artifact.
-Regenerate with `python bggfilter/tools/scan_bgg.py && python bggfilter/tools/make_data.py`.
+`.github/workflows/bgg-harvest.yml` regenerates it on Mar 1 and Sep 1 (and on "Run workflow"),
+chaining up to three runs over a saved cache; `make_data.py` refuses a payload under 90% of the
+current file's games (`--force`). Locally:
+`python bggfilter/tools/scan_bgg.py && python bggfilter/tools/make_data.py` — but the local
+`tools/cache/` is reused FOREVER (no expiry), so a local re-run replays the old answers; move it
+aside first.
 The intermediate `results_all.json` is **not** committed; only the trimmed payload is.
 
 **It is fetched, not imported.** At ~2.5MB, bundling it would put the whole dataset in the lazy

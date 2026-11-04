@@ -142,7 +142,7 @@ boxpuzzles/            # Box Puzzles — 71 solo boxes played in the browser (en
                        #   keeps the leaderboard and replays each solve through engine.py
 bggfilter/             # BGG Filter — frontend-only; tools/ harvests BGG, the payload ships
                        #   as webapp/public/data/bgg-filter.json (GENERATED, ~1MB, fetched not bundled)
-steamfilter/           # Steam Filter — the same shape over Steam; harvested by the manual
+steamfilter/           # Steam Filter — the same shape over Steam; harvested by the scheduled
                        #   steam-harvest.yml workflow into webapp/public/data/steam-filter.json;
                        #   api.py keeps each account's saved / not-interested games (its only server code)
 astralguide/           # Astral Ascent Guide — frontend-only; tools/ harvests the game wiki's API, the payload
@@ -1188,6 +1188,30 @@ git push                      # deploy-pages.yml builds + publishes (~2-3 min)
 - **Staging** (Cloudflare Worker `webprojectsstaging.forry4.workers.dev`, tracks the `staging` branch,
   reuses the prod backend) — test frontend/layout changes on a real URL first. Local↔Cloudflare bundle
   hashes differ; verify by served content. Use vs-AI games so test data stays private.
+
+### The data refresh schedule (set 2026-11-03, the owner's cadences)
+
+Each cadence follows how often its SOURCE changes. Every job commits only when the data moved
+(a quiet run commits and deploys nothing) and dispatches `deploy-pages.yml` itself (a
+`GITHUB_TOKEN` push triggers no workflow). A data-only deploy does not prompt open tabs to
+Refresh — the update nudge compares the APP id, not the commit (see Stale-tab nudge).
+
+| Data | Workflow | When (UTC; GitHub fires schedules hours late) | Why |
+|---|---|---|---|
+| Steam + eShop prices | `steam-prices.yml` | daily 08:17 + 17:43 | prices move on most runs; sales start at both ends of the day |
+| Steam store list (full) | `steam-harvest.yml` | first Friday of the month, ~7h over ≤3 chained runs | releases cross the review floor slowly |
+| Switch marks + Steam categories | `steam-harvest.yml` (enrich) | every other Friday, ~5 min | eShop releases land Thursdays; an unmarked game is never priced on the eShop |
+| LoL champion stats | `lol-stats-refresh.yml` | the 15th, Jan–Nov (January also rebuilds last year) | the pro season runs Jan to Worlds; nothing in December |
+| LoL Worlds seeds | `lol-worlds.yml` | Mondays in Oct and Nov | Worlds is played then; ONE hand step a year (SEEDS/PAGES/SEED_YEARS), and the job fails until it is done |
+| Anime Filter | `anime-harvest.yml` | the 10th of Jan/Apr/Jul/Oct | anime airs in seasons starting those months |
+| BGG Filter | `bgg-harvest.yml` | Mar 1 + Sep 1, ≤3 chained runs | ratings move slowly; first harvested 2026-08-29 |
+| Astral Ascent guide | none — by hand | after a game patch | half of it is editorial |
+
+**An unattended publish needs a guard against a half-answered harvest**, because the failure
+mode of every one of these sources is a 200 OK with less in it: anime and BGG `make_data.py`
+refuse a payload that falls below 90% of the current file (`--force` overrides), Steam's enrich
+refuses an eShop read missing its canaries, and `prices.py` refuses a thin answer. A new
+scheduled job gets one before its cron.
 
 ### Querying the prod DB directly
 Turso creds live in gitignored `C:\Users\Forrest\.spender_turso`; query via `curl` POST to the libSQL

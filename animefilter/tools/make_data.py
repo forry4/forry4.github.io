@@ -276,11 +276,33 @@ def compare(rows, entries, info, keep, min_members):
 		"multi_season": multi, "entries": sum(len(r["ids"]) for r in keep)}
 
 
+def coverage(payload):
+	"""How many listed shows carry a score from each site."""
+	shows = payload.get("shows") or []
+	return {"shows": len(shows), **{s: sum(x.get(s) is not None for x in shows) for s in "mak"}}
+
+
+def thin(new, old, share=0.9):
+	"""Why `new` looks like a harvest a site half-answered, or None. The quarterly run
+	publishes unattended, and a site that failed or blocked part-way would otherwise
+	ship as a list missing that site's scores."""
+	if new["shows"] < TOP:
+		return f"only {new['shows']} shows, not {TOP}"
+	low = [s for s in "mak" if new[s] < share * old.get(s, 0)]
+	return f"site coverage fell {[(s, old[s], new[s]) for s in low]}" if low else None
+
+
 def main():
-	src = sys.argv[1] if len(sys.argv) > 1 else SRC
+	args = [a for a in sys.argv[1:] if a != "--force"]
+	src = args[0] if args else SRC
 	with open(src, encoding="utf-8") as f:
 		raw = json.load(f)
 	out = build(raw)
+	if os.path.exists(DST) and "--force" not in sys.argv:
+		with open(DST, encoding="utf-8") as f:
+			why = thin(coverage(out), coverage(json.load(f)))
+		if why:
+			raise SystemExit(f"refusing to replace {DST}: {why} (--force to publish anyway)")
 	os.makedirs(os.path.dirname(DST), exist_ok=True)
 	with open(DST, "w", encoding="utf-8") as f:
 		json.dump(out, f, separators=(",", ":"), ensure_ascii=False)

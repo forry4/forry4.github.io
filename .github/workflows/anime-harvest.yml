@@ -1,9 +1,15 @@
 name: Anime Filter harvest
 
 # Re-collects the Anime Filter data from AniList, MyAnimeList (Jikan) and Kitsu.
-# Manual only ("Run workflow"): ~20-40 minutes of polite requests, and ratings move
-# slowly enough that a refresh every month or two is plenty. Runs on a runner
-# because those APIs are not reachable from the dev container.
+# ~20-40 minutes of polite requests. Runs on a runner because those APIs are not
+# reachable from the dev container.
+#
+# Quarterly, on the 10th of January, April, July and October: anime airs in seasons
+# that start on those months, a show joins the top list once its season has finished
+# and been rated, and ratings otherwise move slowly. A scheduled run always publishes,
+# and make_data.py refuses a list that is short or that one site half-answered (its
+# coverage falling below 90% of the current file's), so an unattended run cannot ship
+# a page missing a site's scores.
 #
 # The RAW harvest (results_all.json) is force-pushed to the `anime-harvest` branch,
 # so make_data.py can be re-tuned locally without asking the sites again
@@ -12,6 +18,8 @@ name: Anime Filter harvest
 # Pages deploy dispatched (a GITHUB_TOKEN push triggers no workflow on its own).
 
 on:
+  schedule:
+    - cron: "41 6 10 1,4,7,10 *"
   workflow_dispatch:
     inputs:
       publish:
@@ -84,10 +92,10 @@ jobs:
           git commit -q -m "Anime Filter raw harvest $(date -u +%Y-%m-%d)"
           git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" anime-harvest
       - name: Build the payload
-        if: inputs.publish && !inputs.probe_only
+        if: (github.event_name == 'schedule' || inputs.publish) && !inputs.probe_only
         run: python animefilter/tools/make_data.py
       - name: Commit and deploy
-        if: inputs.publish && !inputs.probe_only
+        if: (github.event_name == 'schedule' || inputs.publish) && !inputs.probe_only
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

@@ -18,10 +18,12 @@ backend, no auth — one static JSON.
 
 **The dev container cannot reach any of the rating sites** (AniList, Jikan, MAL, Kitsu,
 Anime-Planet and AniDB all draw a proxy 403; only GitHub is allowed). So
-`.github/workflows/anime-harvest.yml` ("Run workflow") runs `harvest.py` on a runner —
+`.github/workflows/anime-harvest.yml` (quarterly on the 10th of Jan/Apr/Jul/Oct, and "Run
+workflow") runs `harvest.py` on a runner —
 ~25 min cold (most of it MAL at one page per 2s), ~2 min off a warm cache — and and **force-pushes the raw `results_all.json.gz` to the `anime-harvest` branch**;
-with `publish` on (the default) it also runs `make_data.py`, commits the payload to `main`
-and dispatches the Pages deploy. To re-tune the list without asking the sites again:
+with `publish` on (the default, and always on a scheduled run) it also runs `make_data.py`,
+commits the payload to `main` and dispatches the Pages deploy. `make_data.py` refuses a list
+under 500 shows or with any site's coverage below 90% of the current file's (`--force`). To re-tune the list without asking the sites again:
 
 ```bash
 git fetch origin anime-harvest
