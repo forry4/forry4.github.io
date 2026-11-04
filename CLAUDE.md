@@ -1146,8 +1146,14 @@ git push                      # deploy-pages.yml builds + publishes (~2-3 min)
     3. **contract** — remove the compatibility path.
   Order-independent, zero broken window. The exception is a change whose whole point is to STOP
   accepting the old shape (closing a security hole): there the compat window *is* the vulnerability.
-- **Stale-tab nudge**: the build stamps `__BUILD_ID__` into the bundle and emits a matching
-  `version.json`; `shared/update-nudge.js` re-checks it on tab-focus and offers a Refresh.
+- **Stale-tab nudge**: the build stamps `__BUILD_ID__` (the commit) and `__APP_ID__` into the
+  bundle and emits a matching `version.json`; `shared/update-nudge.js` re-checks it on tab-focus
+  and offers a Refresh. **It compares the APP id, never the commit** — the price/LoL/anime
+  refresh jobs redeploy a data file several times a day, and comparing commits asked every open
+  tab to Refresh for an identical page. `__APP_ID__` hashes the build's INPUTS (every module's
+  source, `public/` minus `public/data/`, the `VITE_*` env) in `webapp/vite.config.js`, so a file
+  that reaches the bundle any other way must be added there. The service worker and offline
+  downloads stay on `__BUILD_ID__`, because a data-only deploy still has to refresh offline data.
 - **WASM is a committed artifact** — CI does not rebuild Rust. Build with `wasm-pack build --target web
   --release --no-typescript`, copy `pkg/*.{js,_bg.wasm}` into `webapp/public/wasm/`, commit. **Same
   filename ⇒ browsers may serve the cached old wasm** (~10 min Pages TTL / hard-refresh). The crates are

@@ -12,10 +12,14 @@
  * you deliberately break old clients, e.g. closing a security hole, where a
  * compatibility window is the vulnerability.
  *
- * HOW: the build emits `version.json` next to the bundle containing the same id that
- * is compiled into this file as `__BUILD_ID__` (see webapp/vite.config.js). If the
- * served file ever reports a different id, a newer frontend has been deployed and
- * this tab is stale.
+ * HOW: the build emits `version.json` next to the bundle containing the same ids
+ * that are compiled into this file (see webapp/vite.config.js): `build`, the commit,
+ * and `app`, a hash of what the bundle is built from. The banner compares `app`.
+ * The commit moves on every deploy, and the price, LoL and anime refresh jobs each
+ * deploy a new data file several times a day, so comparing the commit asked every
+ * open tab to Refresh for a page a reload would not change (the data is fetched at
+ * runtime anyway). A version.json with no `app` (a deploy from before it existed)
+ * falls back to the commit.
  *
  * Deliberately NOT compared against the backend's commit: the backend only
  * redeploys when backend paths change, so a frontend-only release would leave the
@@ -28,18 +32,25 @@
  */
 
 const BUILD_ID = typeof __BUILD_ID__ === "string" ? __BUILD_ID__ : "dev";
+const APP_ID = typeof __APP_ID__ === "string" ? __APP_ID__ : null;
 const BANNER_ID = "fg-update-nudge";
 
 let shown = false;
 let stopped = false;
 
-async function fetchDeployedBuildId(base) {
+async function fetchDeployed(base) {
 	// `cache: no-store` matters: the whole point is to bypass the CDN copy that is
 	// keeping this tab stale in the first place.
 	const res = await fetch(`${base}version.json`, { cache: "no-store" });
 	if (!res.ok) throw new Error(`version.json ${res.status}`);
-	const data = await res.json();
-	return data && typeof data.build === "string" ? data.build : null;
+	return res.json();
+}
+
+/** Is the deployed version.json a frontend this tab is not running? */
+export function isNewerApp(deployed, running = { build: BUILD_ID, app: APP_ID }) {
+	if (!deployed || typeof deployed.build !== "string" || deployed.build === running.build) return false;
+	if (typeof deployed.app === "string" && running.app) return deployed.app !== running.app;
+	return true;
 }
 
 function showBanner() {
@@ -99,8 +110,7 @@ function showBanner() {
 async function check(base) {
 	if (stopped || shown) return;
 	try {
-		const deployed = await fetchDeployedBuildId(base);
-		if (deployed && deployed !== BUILD_ID) showBanner();
+		if (isNewerApp(await fetchDeployed(base))) showBanner();
 	} catch {
 		// Offline, or version.json not deployed yet. Never surface this: a failed
 		// check must be indistinguishable from "you are up to date".
