@@ -1,14 +1,25 @@
 name: Steam Filter harvest
 
 # Re-collects webapp/public/data/steam-filter.json from the Steam store and
-# commits it to main. Manual only ("Run workflow"): a harvest is ~1-2 hours of
-# polite requests, and the list moves slowly enough that a refresh every month
-# or two is plenty.
+# commits it to main.
+#
+# Every Friday, and the day of the month picks the mode:
+#   - the first Friday: FULL — every review re-read (~7h, chained over up to three
+#     runs). New releases cross the review floor and scores drift across 90% slowly,
+#     so once a month is enough. It enriches too.
+#   - every other Friday: ENRICH — categories and the Switch mark only (~5 min).
+#     The eShop's new releases land mostly on Thursdays, and a Steam game that
+#     reaches Switch is neither marked nor priced there until this runs.
+# One cron, not two, so the two modes can never be queued together: a pending run
+# in this concurrency group would cancel a full harvest's pending next round.
+# An enrich that moves nothing leaves the file alone, so it commits and deploys nothing.
 #
 # A push made with GITHUB_TOKEN does not trigger other workflows, so the job
 # dispatches the Pages deploy itself once the data is on main.
 
 on:
+  schedule:
+    - cron: "13 9 * * 5"
   workflow_dispatch:
     inputs:
       mode:
@@ -40,10 +51,24 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.14'
+      # A scheduled run has no inputs: full in the month's first week, else enrich.
+      - name: Mode
+        id: mode
+        env:
+          MODE: ${{ inputs.mode }}
+          MIN: ${{ inputs.min_reviews }}
+          ROUND: ${{ inputs.round }}
+        run: |
+          if [ -z "$MODE" ]; then
+            if [ "$(date -u +%-d)" -le 7 ]; then MODE=full; else MODE=enrich; fi
+          fi
+          { echo "mode=$MODE"; echo "min=${MIN:-50}"; echo "round=${ROUND:-1}"; } >> "$GITHUB_OUTPUT"
+          echo "mode=$MODE min_reviews=${MIN:-50} round=${ROUND:-1}"
       # Every Steam answer is cached as it arrives, and the cache is saved even when
       # the harvest fails or hits its step timeout, so "Run workflow" again resumes
       # where the last run stopped (answers younger than 48h are reused).
       - uses: actions/cache/restore@v4
+        if: steps.mode.outputs.mode == 'full'
         with:
           path: steamfilter/tools/cache
           key: steam-harvest-${{ github.run_id }}-${{ github.run_attempt }}
@@ -54,21 +79,21 @@ jobs:
         # Measured 2026-10-15: search ~68 min (132k games), then ~60 review lookups a
         # minute against ~22k candidates — ~7h in all, more than one job may run.
         timeout-minutes: 320
-        run: python -u steamfilter/tools/scan_steam.py --min-reviews "${{ inputs.min_reviews }}" ${{ inputs.mode == 'enrich' && '--enrich' || '' }}
+        run: python -u steamfilter/tools/scan_steam.py --min-reviews "${{ steps.mode.outputs.min }}" ${{ steps.mode.outputs.mode == 'enrich' && '--enrich' || '' }}
       - uses: actions/cache/save@v4
-        if: always()
+        if: always() && steps.mode.outputs.mode == 'full'
         with:
           path: steamfilter/tools/cache
           key: steam-harvest-${{ github.run_id }}-${{ github.run_attempt }}
       # Out of time (or a transient failure): the cache is saved above, so start the
       # next round, which reuses every answer already collected. Capped at 3 rounds.
       - name: Continue in a new run
-        if: always() && inputs.mode != 'enrich' && steps.harvest.outcome != 'success' && fromJSON(inputs.round) < 3
+        if: always() && steps.mode.outputs.mode == 'full' && steps.harvest.outcome != 'success' && fromJSON(steps.mode.outputs.round) < 3
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh workflow run steam-harvest.yml --ref main -f mode=full \
-            -f min_reviews="${{ inputs.min_reviews }}" -f round="$(( ${{ inputs.round }} + 1 ))"
+            -f min_reviews="${{ steps.mode.outputs.min }}" -f round="$(( ${{ steps.mode.outputs.round }} + 1 ))"
       - name: Build the payload
         run: python steamfilter/tools/make_data.py
       - name: Commit and deploy
@@ -79,7 +104,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add webapp/public/data/steam-filter.json
           if git diff --cached --quiet; then echo "no change"; exit 0; fi
-          git commit -m "Steam Filter: ${{ inputs.mode == 'enrich' && 'categories + Switch' || 'harvest' }} $(date -u +%Y-%m-%d)"
+          git commit -m "Steam Filter: ${{ steps.mode.outputs.mode == 'enrich' && 'categories + Switch' || 'harvest' }} $(date -u +%Y-%m-%d)"
           git pull --rebase origin main
           git push origin HEAD:main
           gh workflow run deploy-pages.yml --ref main

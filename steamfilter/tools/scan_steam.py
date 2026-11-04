@@ -249,8 +249,15 @@ def main(argv=None):
             raise SystemExit("--enrich needs a harvested payload; run the full harvest first")
         games = [{k: g[k] for k in ("n", "id", "y", "p", "t")} for g in cur["games"]]
         enrich.enrich(games, fetch, log)
+        # The weekly run: when no game's categories or Switch mark moved, keep the old
+        # date too, so the payload comes out byte-identical and nothing is committed.
+        tags = lambda g: (g.get("c") or [], bool(g.get("sw")))
+        same = ([tags(g) for g in games] == [tags(g) for g in cur["games"]]
+                and [{"id": c["id"], "label": c["label"]} for c in enrich.load_categories()] == cur.get("categories"))
+        if same:
+            log("enrich: nothing moved")
         write(cur["collected"], cur.get("min_reviews", a.min_reviews), games,
-              store_total=None, candidates=None)
+              store_total=None, candidates=None, enriched=cur.get("enriched") if same else None)
         return
 
     total, by_id = harvest_search(a.workers, a.fresh_hours)
@@ -265,10 +272,10 @@ def main(argv=None):
           store_total=total, candidates=len(cands))
 
 
-def write(collected, min_reviews, games, store_total, candidates):
+def write(collected, min_reviews, games, store_total, candidates, enriched=None):
     cats = [{"id": c["id"], "label": c["label"]} for c in enrich.load_categories()]
     with open(OUT, "w", encoding="utf-8") as f:
-        json.dump({"collected": collected, "enriched": datetime.date.today().isoformat(),
+        json.dump({"collected": collected, "enriched": enriched or datetime.date.today().isoformat(),
                    "store_total": store_total, "candidates": candidates,
                    "min_reviews": min_reviews, "min_positive": MIN_POSITIVE,
                    "categories": cats, "games": games}, f, ensure_ascii=False)

@@ -26,8 +26,9 @@ The slider pointer handling is shared with BGG Filter via `shared/rangePointer.j
 
 ## The data is GENERATED — and harvested by a workflow
 
-`.github/workflows/steam-harvest.yml` (manual "Run workflow") runs both tools on a GitHub
-runner, commits the payload to `main` and dispatches `deploy-pages.yml` (a `GITHUB_TOKEN`
+`.github/workflows/steam-harvest.yml` runs both tools on a GitHub runner every Friday — the
+full harvest in the month's first week, the ~5 min categories + Switch enrich in the others
+(schedule in the root CLAUDE.md) — and on "Run workflow". It commits the payload to `main` and dispatches `deploy-pages.yml` (a `GITHUB_TOKEN`
 push triggers no workflow on its own). Locally:
 `python steamfilter/tools/scan_steam.py && python steamfilter/tools/make_data.py`.
 Until the first harvest the committed payload has `"games": []` and the page says so.
@@ -62,8 +63,7 @@ so a change to `categories.json` never needs the 7-hour review harvest.
 
 ## Prices (`tools/prices.py`) — their own file, their own workflow
 
-Prices move daily and a sale ends mid-week, while the review harvest runs every month or
-two, so they ship as `steam-prices.json`, written by `.github/workflows/steam-prices.yml`
+Prices move daily and a sale ends mid-week, while the review harvest runs monthly, so they ship as `steam-prices.json`, written by `.github/workflows/steam-prices.yml`
 (08:17 + 17:43 UTC daily, and "Run workflow"; ~2 min). `prices.py` leaves the file untouched
 when nothing moved, so a quiet run commits nothing and fires no deploy. The page fetches it
 beside the payload and works without it (every price reads "—").
