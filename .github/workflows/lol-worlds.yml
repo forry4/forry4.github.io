@@ -1,0 +1,66 @@
+name: LoL Worlds refresh
+
+# Re-reads this year's Worlds brackets from Liquipedia into the LoL Stats seeds tab
+# (webapp/public/data/lol-worlds.json), commits it to main and dispatches the Pages
+# deploy (a GITHUB_TOKEN push triggers no workflow on its own).
+#
+# Weekly on Mondays through October and November, which is when Worlds is played
+# (2026: Oct 15 - Nov 14), after the weekend's series. A series still being played,
+# or not yet drawn, is left out until a later run has its winner; a run that finds
+# nothing new commits nothing and deploys nothing.
+#
+# ONE HAND STEP A YEAR, once the field is known (late September): add the year to
+# SEEDS and PAGES in lolstats/tools/worlds.py and to SEED_YEARS in lolstats/derive.js.
+# Until then this fails and says so, which is the reminder.
+#
+# Liquipedia allows one rendered page per 30s. The cache keeps the settled years'
+# pages between runs, so a refresh asks for this year's three (~1 minute); a run with
+# no cache renders every page (~11 minutes).
+
+on:
+  schedule:
+    - cron: "31 9 * 10,11 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: lol-worlds
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - uses: actions/cache/restore@v4
+        with:
+          path: lolstats/tools/cache/worlds
+          key: lol-worlds-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: lol-worlds-
+      - name: Fetch this year's pages
+        run: python -I lolstats/tools/worlds.py fetch "$(date -u +%Y)"
+      - uses: actions/cache/save@v4
+        with:
+          path: lolstats/tools/cache/worlds
+          key: lol-worlds-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Build the payload
+        run: python -I lolstats/tools/worlds.py build
+      - name: Commit and deploy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add webapp/public/data/lol-worlds.json
+          if git diff --cached --quiet; then echo "no change"; exit 0; fi
+          git commit -m "LoL Stats: Worlds $(date -u +%Y-%m-%d)"
+          git pull --rebase origin main
+          git push origin HEAD:main
+          gh workflow run deploy-pages.yml --ref main

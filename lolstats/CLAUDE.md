@@ -4,7 +4,7 @@ A **frontend-only** page in the home menu's Extras (`/lolstats`), with two tabs.
 backend, no auth: it fetches static JSON and computes everything in the browser.
 
 - **Worlds seeds** (`/lolstats`) — every regional seed's game and series record at
-  Worlds 2020–2025, a seed-vs-region matrix and a region-vs-region matrix.
+  Worlds 2020–2026, a seed-vs-region matrix and a region-vs-region matrix.
 - **Champions** (`/lolstats/champions`, `#<Champion>` opens one) — every champion's
   pick, ban, presence and win rate by year and region (with an "At least N games"
   minimum, default Any, which keeps the ban-only champions), and for one champion its best
@@ -77,14 +77,26 @@ over the games that have it and the tile says how many.
 
 ## Refreshing
 
-- **The current year:** "Run workflow" on `lol-stats-refresh.yml` (re-downloads, rebuilds,
-  commits, dispatches the Pages deploy). Or locally:
+- **Champion stats:** `lol-stats-refresh.yml` runs on the 15th, January to November
+  (the current year; January's also rebuilds the year before, and skips a new year
+  Oracle's Elixir has not posted yet). "Run workflow" rebuilds any years named. Locally:
   `python -I lolstats/tools/harvest.py 2026 && python -I lolstats/tools/make_data.py 2026`.
-- **A finished Worlds (seeds tab):** add the year to `SEEDS` and `PAGES` in `worlds.py`
-  and to `SEED_YEARS` in `derive.js`, then `python -I lolstats/tools/worlds.py fetch`
-  (~9 min — Liquipedia's parse API allows one request per 30s) and `... build`. The build
-  fails on any team without a seed or any seeded team without a match. From 2022 on the
-  match pages carry `{{ApiMap}}` instead of scores, so the tool reads RENDERED pages.
+- **Worlds seeds:** `lol-worlds.yml` runs every Monday in October and November and
+  re-renders only the current year's pages (`worlds.py fetch <year>`; the cache keeps the
+  rest). A series counts once Liquipedia marks its winner (`match-info-header-winner`), so
+  a live Bo5 at 1-1 or an undrawn "TBD" slot waits for a later run; a year with matches
+  still to play may have seeds that have not played yet, and `lol-worlds.json`'s
+  `complete` lists the years that are done.
+- **ONE HAND STEP A YEAR, once the field is known (late September):** add the year to
+  `SEEDS` and `PAGES` in `worlds.py` and to `SEED_YEARS` in `derive.js`. Until then the
+  weekly job fails and names what to write. Seeds come from Liquipedia's
+  `World_Championship/<year>/Qualification` page (it lists qualifying paths, not seeds,
+  and team CODES — the names to use are the RENDERED ones the build reports as unseeded).
+  The build fails on any team without a seed. From 2022 on the match pages carry
+  `{{ApiMap}}` instead of scores, so the tool reads RENDERED pages.
+- **The two sources disagree while the newest year is played** (Liquipedia weekly,
+  Oracle's Elixir monthly), so `lolstats.test.mjs` holds the newest year to `oe <= lp`
+  once Liquipedia has it whole and to nothing before, and every older year to equality.
 
 ## Tests
 

@@ -5,7 +5,9 @@
 // ── Seeds ───────────────────────────────────────────────────────────────────
 export const SEED_REGIONS = ["LCK", "LPL", "LEC", "LCS/LTA", "PCS/LCP", "VCS", "Wildcard"];
 export const MAJOR_REGIONS = ["LCK", "LPL", "LEC", "LCS/LTA"];
-export const SEED_YEARS = [2020, 2021, 2022, 2023, 2024, 2025];
+// Added each year once the Worlds field is known (with SEEDS and PAGES in
+// tools/worlds.py); lol-worlds.yml then refreshes it weekly while it is played.
+export const SEED_YEARS = [2020, 2021, 2022, 2023, 2024, 2025, 2026];
 export const G2 = "G2 Esports";
 
 // Split G2 out of the LEC: "G2" and "LEC excl. G2" take the LEC's place in the order.

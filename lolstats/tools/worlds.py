@@ -1,6 +1,7 @@
 """Worlds results for LoL Stats' Seeds tab, from Liquipedia.
 
-    python -I lolstats/tools/worlds.py fetch    # ~9 min: renders each stage page (Liquipedia's parse limit is 1 per 30s)
+    python -I lolstats/tools/worlds.py fetch    # ~10 min: renders each stage page (Liquipedia's parse limit is 1 per 30s)
+    python -I lolstats/tools/worlds.py fetch 2026   # just that year's pages, plus any page not in the cache
     python -I lolstats/tools/worlds.py build    # cache -> webapp/public/data/lol-worlds.json
 
 WHY LIQUIPEDIA AND NOT ORACLE'S ELIXIR: the seeds tab splits Play-In from the main
@@ -43,7 +44,8 @@ PAGES = ["2020/Play-In", "2020/Group_Stage", "2020/Bracket_Stage",
          "2022/Play-In", "2022/Group_Stage", "2022/Knockout_Stage",
          "2023/Play-In", "2023/Swiss_Stage", "2023/Knockout_Stage",
          "2024/Play-In", "2024/Swiss_Stage", "2024/Knockout_Stage",
-         "2025/Play-In", "2025/Swiss_Stage", "2025/Knockout_Stage"]
+         "2025/Play-In", "2025/Swiss_Stage", "2025/Knockout_Stage",
+         "2026/Play-In", "2026/Swiss_Stage", "2026/Knockout_Stage"]
 STAGE = {"Play-In": "Play-In", "Group_Stage": "Groups", "Swiss_Stage": "Swiss",
          "Bracket_Stage": "Knockout", "Knockout_Stage": "Knockout"}
 
@@ -106,6 +108,16 @@ SEEDS = {
            ("LTA", 1, ["FlyQuest"]), ("LTA", 2, ["Vivo Keyd Stars", "Keyd Stars"]), ("LTA", 3, ["100 Thieves"]),
            ("LCP", 1, ["CTBC Flying Oyster"]), ("LCP", 2, ["Team Secret Whales", "Secret Whales"]),
            ("LCP", 3, ["PSG Talon"])],
+    # The LTA split back into the LCS and CBLOL for 2026, and Worlds grew to 19 teams.
+    2026: [("LCK", 1, ["Gen.G Esports", "Gen.G"]), ("LCK", 2, ["Hanwha Life Esports"]), ("LCK", 3, ["T1"]),
+           ("LCK", 4, ["Dplus KIA", "Dplus"]),
+           ("LPL", 1, ["Anyone's Legend"]), ("LPL", 2, ["Bilibili Gaming"]), ("LPL", 3, ["Top Esports"]),
+           ("LPL", 4, ["Invictus Gaming"]),
+           ("LEC", 1, ["G2 Esports"]), ("LEC", 2, ["Movistar KOI", "MAD Lions KOI"]), ("LEC", 3, ["Karmine Corp"]),
+           ("LCS", 1, ["Team Liquid"]), ("LCS", 2, ["LYON", "Lyon"]), ("LCS", 3, ["Cloud9"]),
+           ("LCP", 1, ["Team Secret Whales", "Secret Whales"]), ("LCP", 2, ["CTBC Flying Oyster"]),
+           ("LCP", 3, ["MVK Esports"]),
+           ("CBLOL", 1, ["LOS"]), ("CBLOL", 2, ["FURIA"])],
 }
 REGION = {"LCK": "LCK", "LPL": "LPL", "LEC": "LEC", "LCS": "LCS/LTA", "LTA": "LCS/LTA",
           "PCS": "PCS/LCP", "LCP": "PCS/LCP", "VCS": "VCS"}
@@ -124,15 +136,22 @@ def get(params):
     return json.loads(b)
 
 
-def fetch():
+def cache_path(page):
+    return os.path.join(CACHE, page.replace("/", "_") + ".json")
+
+
+def fetch(years=()):
+    """Renders every page of `years` (all of them when none are named), and any other
+    page the cache does not have yet, so a weekly refresh asks Liquipedia for three."""
     os.makedirs(CACHE, exist_ok=True)
-    for i, page in enumerate(PAGES):
+    want = [p for p in PAGES if not years or int(p[:4]) in years or not os.path.exists(cache_path(p))]
+    for i, page in enumerate(want):
         if i:
             time.sleep(31)   # Liquipedia's API terms: one parse request per 30 seconds
         d = get({"action": "parse", "page": f"World_Championship/{page}", "prop": "text"})
         if "parse" not in d:
             raise SystemExit(f"{page}: {d.get('error')}")
-        dest = os.path.join(CACHE, page.replace("/", "_") + ".json")
+        dest = cache_path(page)
         with open(dest, "w", encoding="utf-8") as f:
             json.dump(d, f)
         print(f"{page}: {os.path.getsize(dest) // 1000} KB", flush=True)
@@ -150,6 +169,11 @@ def matches(path):
         ts = re.search(r'data-timestamp="(\d+)"', chunk[:hi])
         body = chunk[hi:hi + 20000]
         names = re.findall(r'<div class="team-name">(?:<a[^>]*>)?([^<]+)', body)
+        # A decided series marks its winner in the header. A live one (a Bo5 at 1-1) and
+        # an upcoming one (no score, "TBD") do not, and are left for a later refresh.
+        if "match-info-header-winner" not in body[:body.find("match-info-header-scoreholder-lower")]:
+            out.append(dict(pending=True))
+            continue
         sc = re.search(r'scoreholder-upper">(.*?</span>)</span>', body, re.S)
         if not sc or len(names) < 2:
             continue
@@ -165,11 +189,13 @@ def build():
         for lg, s, names in rows:
             for n in names:
                 lookup[(y, n.lower())] = (lg, s, names[0])
-    seen, out, unknown = set(), [], collections.Counter()
+    seen, out, unknown, pending = set(), [], collections.Counter(), collections.Counter()
     for page in PAGES:
         y, stage = int(page[:4]), STAGE[page[5:]]
-        path = os.path.join(CACHE, page.replace("/", "_") + ".json")
-        for m in matches(path):
+        for m in matches(cache_path(page)):
+            if m.get("pending"):
+                pending[y] += 1
+                continue
             if len(m["s"]) != 2 or not all(x.isdigit() for x in m["s"]):
                 raise SystemExit(f"{page}: unreadable score {m}")
             a, b = (int(x) for x in m["s"])
@@ -189,17 +215,29 @@ def build():
     if unknown:
         raise SystemExit(f"teams with no seed: {dict(unknown)}")
     present = {(m["y"], m["a"]) for m in out} | {(m["y"], m["b"]) for m in out}
-    missing = [(y, n[0]) for y, rows in SEEDS.items() for _, _, n in rows if (y, n[0]) not in present]
+    # A Worlds still being played may have a seed that has not played yet (the Swiss
+    # teams sit out the Play-In); a finished one may not.
+    missing = [(y, n[0]) for y, rows in SEEDS.items() for _, _, n in rows
+               if (y, n[0]) not in present and not pending[y]]
     if missing:
         raise SystemExit(f"seeded teams with no match: {missing}")
+    complete = sorted(y for y in SEEDS if not pending[y])
     with open(OUT, "w", encoding="utf-8") as f:
-        json.dump({"source": "Liquipedia", "nonMajorTeams": NON_MAJOR_TEAMS, "matches": out}, f,
-                  ensure_ascii=False, separators=(",", ":"))
+        json.dump({"source": "Liquipedia", "nonMajorTeams": NON_MAJOR_TEAMS, "complete": complete,
+                   "matches": out}, f, ensure_ascii=False, separators=(",", ":"))
     games = collections.Counter()
     for m in out:
         games[m["y"]] += m["ag"] + m["bg"]
-    print(f"{len(out)} series, games per year {dict(sorted(games.items()))} -> {OUT}")
+    print(f"{len(out)} series, games per year {dict(sorted(games.items()))}, "
+          f"still to play {dict(sorted(pending.items()))} -> {OUT}")
 
 
 if __name__ == "__main__":
-    {"fetch": fetch, "build": build}[sys.argv[1] if len(sys.argv) > 1 else "build"]()
+    cmd, years = (sys.argv[1] if len(sys.argv) > 1 else "build"), {int(a) for a in sys.argv[2:]}
+    # The weekly refresh names the current year, so a Worlds nobody has set up yet
+    # fails here with what to do, rather than refreshing nothing in silence.
+    unset = sorted(y for y in years if y not in SEEDS or not any(p.startswith(f"{y}/") for p in PAGES))
+    if unset:
+        raise SystemExit(f"{unset}: no SEEDS/PAGES yet. Write them from Liquipedia's "
+                         "World_Championship/<year>/Qualification page, and add the year to SEED_YEARS in derive.js")
+    fetch(years) if cmd == "fetch" else build()

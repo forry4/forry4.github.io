@@ -35,11 +35,21 @@ test("each year's champion is the one team to win three Knockout series", () => 
 	}
 });
 
+// The two sources refresh on different days (Liquipedia weekly during Worlds, Oracle's
+// Elixir monthly), so only the newest year may disagree: while it is being played
+// either can be ahead, and once Liquipedia has it whole, Oracle's Elixir can only trail.
+// It is held to equality the year after, when it is no longer the newest.
 test("Liquipedia's brackets and Oracle's Elixir agree on every year's Worlds game count", () => {
+	const newest = Math.max(...D.SEED_YEARS);
 	for (const y of D.SEED_YEARS) {
 		const lp = worlds.matches.filter((m) => m.y === y).reduce((n, m) => n + m.ag + m.bg, 0);
 		const oe = years.find((x) => x.year === y).games.filter((g) => g.league === "WLDs").length;
-		assert.equal(oe, lp, `${y}: Oracle's Elixir ${oe}, Liquipedia ${lp}`);
+		const msg = `${y}: Oracle's Elixir ${oe}, Liquipedia ${lp}`;
+		if (y !== newest) {
+			assert.ok(worlds.complete.includes(y), `${y} is not the newest year and is still marked in progress`);
+			assert.equal(oe, lp, msg);
+		} else if (worlds.complete.includes(y)) assert.ok(oe <= lp, msg);
+		else assert.ok(lp > 0, msg);
 	}
 });
 

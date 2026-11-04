@@ -8,6 +8,7 @@ each). make_data.py reads them from there.
 
     python -I lolstats/tools/harvest.py              # 2020 through the current year
     python -I lolstats/tools/harvest.py 2026         # just the given years
+    python -I lolstats/tools/harvest.py --skip-missing 2026 2027   # a year not posted yet is skipped
 """
 import datetime
 import html
@@ -56,10 +57,15 @@ def download(year, fid):
 
 
 def main(argv):
-    years = [int(a) for a in argv] or list(range(FIRST_YEAR, datetime.date.today().year + 1))
+    skip = "--skip-missing" in argv
+    years = [int(a) for a in argv if a != "--skip-missing"] or list(range(FIRST_YEAR, datetime.date.today().year + 1))
     ids = file_ids()
     for y in years:
         if y not in ids:
+            # A new year's file appears with its first games; January asks before then.
+            if skip:
+                print(f"{y}: not posted yet, skipped")
+                continue
             raise SystemExit(f"{y}: no file in the Oracle's Elixir folder")
         download(y, ids[y])
 

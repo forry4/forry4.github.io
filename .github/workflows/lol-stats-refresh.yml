@@ -2,16 +2,22 @@ name: LoL Stats refresh
 
 # Re-downloads Oracle's Elixir match data and rebuilds LoL Stats' champion payload
 # (webapp/public/data/lol-champs-<year>.json + the index), then commits it to main.
-# Manual only ("Run workflow"): the current year changes as the season is played, so
-# run it whenever fresh numbers are wanted. Past years are settled; rebuild one by
-# naming it. The Worlds seeds tab (lol-worlds.json) is not refreshed here: it is built
-# from Liquipedia by `python -I lolstats/tools/worlds.py fetch && ... build`, by hand,
-# once a Worlds has finished (its SEEDS table needs the new year written first).
+#
+# Monthly on the 15th, January through November: the pro season runs from January to
+# Worlds (2026's final: Nov 14), and nothing is played in December. A scheduled run
+# rebuilds the current year; January's also rebuilds the year before, which picks up
+# the games played after November's run. Oracle's Elixir posts a year's file with its
+# first games, so a January run before that skips the new year rather than failing.
+# "Run workflow" rebuilds any years named (blank = the current year).
+#
+# The Worlds seeds tab (lol-worlds.json) is lol-worlds.yml, from Liquipedia.
 #
 # A push made with GITHUB_TOKEN does not trigger other workflows, so the job
 # dispatches the Pages deploy itself once the data is on main.
 
 on:
+  schedule:
+    - cron: "23 10 15 1-11 *"
   workflow_dispatch:
     inputs:
       years:
@@ -39,11 +45,15 @@ jobs:
       - name: Download
         env:
           YEARS: ${{ inputs.years }}
-        run: python -I lolstats/tools/harvest.py ${YEARS:-$(date -u +%Y)}
+        run: |
+          y=$(date -u +%Y)
+          if [ -n "$YEARS" ]; then python -I lolstats/tools/harvest.py $YEARS
+          elif [ "$(date -u +%m)" = 01 ]; then python -I lolstats/tools/harvest.py --skip-missing $((y - 1)) $y
+          else python -I lolstats/tools/harvest.py $y
+          fi
+      # Every CSV downloaded above, and only those (the runner starts with none).
       - name: Build the payload
-        env:
-          YEARS: ${{ inputs.years }}
-        run: python -I lolstats/tools/make_data.py ${YEARS:-$(date -u +%Y)}
+        run: python -I lolstats/tools/make_data.py
       - name: Commit and deploy
         env:
           GH_TOKEN: ${{ github.token }}
