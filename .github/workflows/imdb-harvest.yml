@@ -1,0 +1,99 @@
+name: IMDb Filter harvest
+
+# Re-collects the IMDb Filter data from IMDb's non-commercial datasets
+# (https://developer.imdb.com/non-commercial-datasets/): six gzipped TSV files,
+# streamed and filtered, never saved. ~10-15 minutes, nearly all of it reading
+# title.principals. Runs on a runner because datasets.imdbws.com is not reachable
+# from the dev container.
+#
+# Monthly, on the 20th: IMDb refreshes the files daily, but a rating moves slowly
+# and a new release takes weeks to cross the vote floor. A scheduled run always
+# publishes, and make_data.py refuses a payload whose titles, cast, directors or
+# episode counts fall below 90% of the current file's, so a dataset cut short
+# cannot ship a page missing half of it.
+#
+# The RAW harvest (results_all.json) is force-pushed to the `imdb-harvest` branch,
+# so make_data.py can be re-tuned locally without asking IMDb again
+# (`git fetch origin imdb-harvest && git show origin/imdb-harvest:results_all.json.gz`).
+# With publish on, the payload is rebuilt and committed to the branch the run is
+# on, and on main the Pages deploy dispatched (a GITHUB_TOKEN push triggers no
+# workflow on its own).
+
+on:
+  schedule:
+    - cron: "23 4 20 * *"
+  # TEMPORARY: bootstraps the first payload from the feature branch, before this
+  # file is on main (a dispatch-only workflow cannot run until it is). Remove once
+  # the payload is committed.
+  push:
+    branches: [claude/friendly-galileo-fj3di9]
+    paths: ['imdbfilter/tools/**', '.github/workflows/imdb-harvest.yml']
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Rebuild webapp/public/data/imdb-filter.json and commit it'
+        type: boolean
+        default: true
+      probe_only:
+        description: 'Only probe the dataset files (status, size, last modified), no harvest'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: imdb-harvest
+  cancel-in-progress: false
+
+jobs:
+  harvest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      # Status, size and date of each file, printed so a harvest that cannot reach
+      # one says which before the long read starts.
+      - name: Probe the datasets
+        continue-on-error: true
+        run: |
+          for f in title.ratings title.basics title.crew title.episode title.principals name.basics; do
+            curl -sI -m 30 "https://datasets.imdbws.com/$f.tsv.gz" \
+              | grep -i -E '^(HTTP|content-length|last-modified)' | tr -d '\r' | paste -sd' ' | sed "s/^/$f: /"
+          done
+      - name: Harvest
+        if: ${{ !inputs.probe_only }}
+        timeout-minutes: 50
+        run: python -u imdbfilter/tools/harvest.py
+      - name: Push the raw harvest to the imdb-harvest branch
+        if: ${{ !inputs.probe_only }}
+        run: |
+          mkdir -p /tmp/raw && gzip -9 -c imdbfilter/tools/results_all.json > /tmp/raw/results_all.json.gz
+          cd /tmp/raw
+          git init -q -b imdb-harvest
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add results_all.json.gz
+          git commit -q -m "IMDb Filter raw harvest $(date -u +%Y-%m-%d)"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" imdb-harvest
+      - name: Build the payload
+        if: (github.event_name != 'workflow_dispatch' || inputs.publish) && !inputs.probe_only
+        run: python imdbfilter/tools/make_data.py
+      - name: Commit and deploy
+        if: (github.event_name != 'workflow_dispatch' || inputs.publish) && !inputs.probe_only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add webapp/public/data/imdb-filter.json
+          if git diff --cached --quiet; then echo "no change"; exit 0; fi
+          git commit -m "IMDb Filter: harvest $(date -u +%Y-%m-%d)"
+          git pull --rebase origin "$BRANCH"
+          git push origin "HEAD:$BRANCH"
+          if [ "$BRANCH" = main ]; then gh workflow run deploy-pages.yml --ref main; fi

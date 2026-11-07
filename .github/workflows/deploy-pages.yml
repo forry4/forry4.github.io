@@ -38,6 +38,7 @@ on:
       - 'astralguide/**'
       - 'lolstats/**'
       - 'animefilter/**'
+      - 'imdbfilter/**'
       - 'boxpuzzles/**'
       - 'shared/**'
       - '.github/workflows/deploy-pages.yml'

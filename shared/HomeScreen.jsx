@@ -52,6 +52,9 @@ const EXTRA_ICON = {
 	lolstats: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><path d="M4.5 19.5h15" /><path d="M7.5 16.5v-5M12 16.5V7.5M16.5 16.5v-8" /></svg>),
 	// A play triangle inside a screen: Anime Filter is a list of shows. Two closed paths, so it survives 20px.
 	animefilter: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><path d="M3.5 5.5h17v11h-17Z" /><path d="M10.2 8.4v5.2l4.3-2.6Z" /><path d="M8.5 19.5h7" /></svg>),
+	// A clapperboard: IMDb Filter is a list of films and series. The slate and its
+	// hinged clapper, two closed paths and two stripes, so it survives 20px.
+	imdbfilter: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><path d="M4 10.5h16v9H4Z" /><path d="M4 10.5 3.4 7.4 18.9 4.4l.6 3.1Z" /><path d="M8.2 6.6l2 2.9M13.2 5.6l2 2.9" /></svg>),
 	// A page with a folded corner and two ruled lines — the same drawing as Notes' own
 	// note glyph, so the tile and the page it opens agree.
 	notes: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><path d="M6.5 3.5h7.8l3.7 3.7v13.3H6.5Z" /><path d="M14 3.7v3.8h3.8M9.2 12h5.6M9.2 15.4h5.6" /></svg>),
@@ -145,7 +148,7 @@ const GO_CHEVRON = (
 
 export { SITE_NAME, GAMES, GAME_EMBLEM, HERO_RULE };
 
-export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles, onBoxPuzzles, onBooks, onNotes, onBggFilter, onSteamFilter, onAstral, onLolStats, onAnimeFilter, onOffline, onSiteHealth, siteAlerts = 0, siteHealth = null, onProfile, onLogout }) {
+export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles, onBoxPuzzles, onBooks, onNotes, onBggFilter, onSteamFilter, onAstral, onLolStats, onAnimeFilter, onImdbFilter, onOffline, onSiteHealth, siteAlerts = 0, siteHealth = null, onProfile, onLogout }) {
 	// Built here rather than at module scope because each entry closes over a prop.
 	const games = visibleGames(authUser);
 	const extras = [
@@ -157,6 +160,7 @@ export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles
 		onAstral && { id: "astral", label: "Astral Ascent", onClick: onAstral },
 		onLolStats && { id: "lolstats", label: "LoL Stats", onClick: onLolStats },
 		onAnimeFilter && { id: "animefilter", label: "Anime Filter", onClick: onAnimeFilter },
+		onImdbFilter && { id: "imdbfilter", label: "IMDb Filter", onClick: onImdbFilter },
 		// A private notebook per account. Shown to guests too: the page tells them to
 		// sign in, which is how they find out it exists (notes/api.py refuses them).
 		onNotes && { id: "notes", label: "Notes", onClick: onNotes },
