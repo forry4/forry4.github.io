@@ -160,9 +160,11 @@ def harvest(src=None, floor=HARVEST_FLOOR):
 
 	print("principals", flush=True)
 	for t, _o, n, cat, _j, _c in keyed("title.principals", titles, src):
+		# A series lists one person once per role (Dee Bradley Baker is a row per
+		# voice in Avatar), so a name already taken is skipped, not repeated.
 		if cat in CAST:
 			cast = titles[t].setdefault("c", [])
-			if len(cast) < CAST_PER_TITLE:
+			if len(cast) < CAST_PER_TITLE and n not in cast:
 				cast.append(n)
 
 	print("names", flush=True)

@@ -30,6 +30,7 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
 | [`steamfilter/CLAUDE.md`](steamfilter/CLAUDE.md) | Steam Filter — the Steam store harvest (English reviews, 90%+ positive) + its filter page, the daily US Steam/eShop prices + sales, and per-account saved / not-interested games |
 | [`astralguide/CLAUDE.md`](astralguide/CLAUDE.md) | Astral Ascent Guide — the wiki harvest, the derived-vs-editorial split, the heuristic synergy index, `/astral/<tab>#<entry>` routing |
 | [`animefilter/CLAUDE.md`](animefilter/CLAUDE.md) | Anime Filter — the top 500 anime across MAL, AniList and Kitsu, seasons averaged; harvested on a runner (the container can't reach the sites), the z-score combine, English dubs from MAL-Dubs |
+| [`imdbfilter/CLAUDE.md`](imdbfilter/CLAUDE.md) | IMDb Filter — every film and series with 10,000+ IMDb votes, from IMDb's non-commercial datasets (streamed on a runner; the container can't reach them), the Top 250 weighted rating, the required attribution line |
 | [`lolstats/CLAUDE.md`](lolstats/CLAUDE.md) | LoL Stats — Worlds seed records (Liquipedia) and champion stats (Oracle's Elixir), which games count, and the Worlds-qualifier trap in Oracle's Elixir |
 | [`docs/deploy-reliability-log.md`](docs/deploy-reliability-log.md) | **Dated postmortems for RED RUNS** — the deploy gates, the scheduled jobs and the harness itself. Measurements behind the rules below (the CI-vs-dev font spread, the screens gate's failure census, the keepalive watchdog). |
 | [`docs/ai-research-log.md`](docs/ai-research-log.md) | **AI campaign history, dated sessions, rejected-experiment postmortems.** When something here says "see the research log," that's the blow-by-blow + "do not relitigate" detail. |
@@ -149,6 +150,8 @@ astralguide/           # Astral Ascent Guide — frontend-only; tools/ harvests 
                        #   ships as webapp/public/data/astral-guide.json (GENERATED); editorial.js is the only hand-written part
 animefilter/           # Anime Filter — frontend-only; anime-harvest.yml harvests AniList/MAL/Kitsu on a runner,
                        #   make_data.py groups seasons -> webapp/public/data/anime-filter.json (GENERATED)
+imdbfilter/            # IMDb Filter — frontend-only; imdb-harvest.yml streams IMDb's datasets on a runner,
+                       #   make_data.py interns names -> webapp/public/data/imdb-filter.json (GENERATED)
 lolstats/              # LoL Stats — frontend-only; tools/ builds webapp/public/data/lol-*.json (GENERATED) from
                        #   Oracle's Elixir (champions) and Liquipedia (Worlds seeds); derive.js holds all the logic
 shared/                # theme.js (baseCss), lobby.jsx, splendor.jsx, router.js — cross-game frontend kits
@@ -1204,12 +1207,14 @@ Refresh — the update nudge compares the APP id, not the commit (see Stale-tab 
 | LoL champion stats | `lol-stats-refresh.yml` | the 15th, Jan–Nov (January also rebuilds last year) | the pro season runs Jan to Worlds; nothing in December |
 | LoL Worlds seeds | `lol-worlds.yml` | Mondays in Oct and Nov | Worlds is played then; ONE hand step a year (SEEDS/PAGES/SEED_YEARS), and the job fails until it is done |
 | Anime Filter | `anime-harvest.yml` | the 10th of Jan/Apr/Jul/Oct | anime airs in seasons starting those months |
+| IMDb Filter | `imdb-harvest.yml` | the 20th, monthly | IMDb refreshes daily, but ratings move slowly and a release takes weeks to cross the vote floor |
 | BGG Filter | `bgg-harvest.yml` | Mar 1 + Sep 1, ≤3 chained runs | ratings move slowly; first harvested 2026-08-29 |
 | Astral Ascent guide | none — by hand | after a game patch | half of it is editorial |
 
 **An unattended publish needs a guard against a half-answered harvest**, because the failure
 mode of every one of these sources is a 200 OK with less in it: anime and BGG `make_data.py`
-refuse a payload that falls below 90% of the current file (`--force` overrides), Steam's enrich
+refuse a payload that falls below 90% of the current file (`--force` overrides), IMDb's
+`make_data.py` the same for its titles, cast, directors and episode counts, Steam's enrich
 refuses an eShop read missing its canaries, and `prices.py` refuses a thin answer. A new
 scheduled job gets one before its cron.
 

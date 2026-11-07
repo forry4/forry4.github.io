@@ -51,7 +51,9 @@ def build(raw, floor=FLOOR, bayes_m=BAYES_M):
 			if name not in nix:
 				nix[name] = len(names)
 				names.append(name)
-			out.append(nix[name])
+			# Older harvests repeat a series' cast member once per role.
+			if nix[name] not in out:
+				out.append(nix[name])
 		return out
 
 	titles = []

@@ -51,6 +51,7 @@ def src(tmp_path, monkeypatch):
 		["tt0111161", "2", "nm0000151", "actor", "\\N", '["Red"]'],
 		["tt0111161", "3", "nm0001104", "director", "\\N", "\\N"],
 		["tt0903747", "1", "nm0186505", "actor", "\\N", '["Walter"]'],
+		["tt0903747", "2", "nm0186505", "actor", "\\N", '["Heisenberg"]'],   # one person, two roles
 		["tt0903747", "2", "nm0666739", "actress", "\\N", '["Skyler"]'],
 		["tt0903747", "3", "nm0348152", "actor", "\\N", "\\N"],
 		["tt0903747", "4", "nm0000006", "actor", "\\N", "\\N"],
@@ -70,7 +71,7 @@ def test_harvest_keeps_rated_titles_of_the_four_kinds(src):
 	bb = raw["titles"]["tt0903747"]
 	assert bb["ye"] == 2013 and bb["ep"] == 4 and bb["se"] == 2   # an unnumbered episode counts, not as a season
 	assert "d" not in bb                                          # a series' crew is every episode's: not read
-	assert len(bb["c"]) == hv.CAST_PER_TITLE                      # top-billed only
+	assert bb["c"] == ["nm0186505", "nm0666739", "nm0348152", "nm0000006"]   # top-billed, once each
 	am = raw["titles"]["tt0000005"]
 	assert am["o"] == "Le fabuleux destin d'Amélie Poulain" and am["rt"] is None
 	assert am["d"] == ["nm0000002", "nm0000003", "nm0000004"]     # capped at three
@@ -105,6 +106,9 @@ def test_make_data_interns_names_and_floors_votes(src):
 		out["names"].index("Name nm0000003"), out["names"].index("Name nm0000004")]
 	assert out["bayes"] == {"m": md.BAYES_M, "c": round((9.3 + 9.5 + 7.5) / 3, 3)}
 	assert len(out["names"]) == len(set(out["names"]))
+	raw["titles"]["tt0903747"]["c"] = ["nm0186505", "nm0186505", "nm0666739"]   # an older harvest's repeat
+	bb = md.build(raw, floor=15000)["titles"][1]
+	assert len(bb["c"]) == 2
 
 
 def test_thin_refuses_a_half_answered_harvest():

@@ -23,7 +23,8 @@
 	flex-wrap:wrap;margin:0 0 14px;}
 .imf-phead h2{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.78rem;letter-spacing:.12em;
 	text-transform:uppercase;color:var(--text-dim);font-weight:700;margin:0;}
-.imf-knobs{display:grid;gap:14px 22px;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));}
+/* six dials: 3x2 on a desktop (185px packed them 5+1, one stranded), one per row on a phone */
+.imf-knobs{display:grid;gap:14px 22px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));}
 .imf-knob label{display:block;font-size:.76rem;color:var(--text-dim);
 	letter-spacing:.04em;margin:0 0 4px;}
 .imf-knob .imf-v{float:right;color:var(--gold);font-weight:700;}

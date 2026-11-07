@@ -832,7 +832,7 @@ const OFFLINE_PACKS = {
 	// own copy whenever it is used online, and `warm` takes one now so a fresh
 	// download is complete without visiting each screen first.
 	reading: {
-		label: "Puzzles, the BGG, Steam, Anime & IMDb Filters, Astral Ascent Guide, LoL Stats, Books, Notes & profile", size: "~3.2 MB",
+		label: "Puzzles, the BGG, Steam, Anime & IMDb Filters, Astral Ascent Guide, LoL Stats, Books, Notes & profile", size: "~4.1 MB",
 		urls: ["data/puzzles.json", "data/bgg-filter.json", "data/steam-filter.json", "data/steam-prices.json", "data/astral-guide.json",
 			"data/lol-worlds.json", "data/lol-champs-index.json", "data/anime-filter.json", "data/imdb-filter.json", ...OFFLINE_FONT_URLS],
 		chunks: [
