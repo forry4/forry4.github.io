@@ -1,8 +1,17 @@
 <!doctype html>
-<html>
+<!-- lang: without it a screen reader picks its voice from the OS language (English
+     read with another language's pronunciation), and browsers have nothing to base
+     hyphenation or the "translate this page?" offer on. -->
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- What a search result or a pasted link shows under the title. An invite link
+         is this site's whole sharing story, and it used to unfurl as a bare URL. -->
+    <meta name="description" content="Forrest Games: a collection of tabletop games to play in the browser with friends or against AI opponents." />
+    <meta property="og:title" content="Forrest Games" />
+    <meta property="og:description" content="A collection of tabletop games to play in the browser with friends or against AI opponents." />
+    <meta property="og:type" content="website" />
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <!-- Warm the Render backend as early as possible (before the bundle even loads) so its
          cold start (~30-50s; free tier spins down after ~15 min idle) overlaps page load
@@ -57,6 +66,11 @@
     <title>Forrest Games</title>
   </head>
   <body>
+    <noscript>
+      <p style="color:#f3e9d2;font:16px/1.5 Georgia,serif;padding:32px;max-width:36em;margin:0 auto">
+        Forrest Games needs JavaScript to run. Turn it on for this site and reload the page.
+      </p>
+    </noscript>
     <div id="root"></div>
     <script type="module" src="/main.jsx"></script>
   </body>
