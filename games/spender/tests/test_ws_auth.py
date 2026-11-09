@@ -303,3 +303,166 @@ def test_connect_does_not_register_the_socket():
     before = dict(m.ROOMS["ROOMO"]["sockets"])
     _run(_FakeWS(), "ROOMO", "stranger")
     assert dict(m.ROOMS["ROOMO"]["sockets"]) == before
+
+
+# ── a reconnect must PRESENT a token (2026-11-09 audit) ──────────────────────
+
+@pytest.mark.parametrize("payload", [{}, {"token": None}, {"token": ""}])
+def test_a_tokenless_reconnect_never_matches_a_seat_without_a_token(payload):
+    """`stored != sent` is None != None for a seat whose meta carries no token, so
+    a `reconnect` that sent none was authenticated as it. Both sides must be
+    present. (Spender's AI seat was safe only because it has no meta ENTRY; a meta
+    entry without a token — auth_reconnect used to mint exactly that — was not.)"""
+    _create(room="ROOMP", pid="host", extra={"vs_ai": True, "ai_variant": "H3"})
+    room = m.ROOMS["ROOMP"]
+    room["meta"]["ai"] = {"user_id": "someone"}     # an entry, but no token in it
+    for seat in ("ai", "host"):
+        ws = _FakeWS(inbox=[json.dumps({"action": "reconnect", **payload}),
+                            json.dumps({"action": "abandon"})])
+        _run(ws, "ROOMP", seat)
+        assert "reconnected" not in ws.types(), seat
+        assert AUTH_ERR in ws.errors(), seat
+    assert room["status"] == "playing"              # nobody abandoned anything
+
+
+# ── the host cannot `start` a game twice ─────────────────────────────────────
+
+def test_start_is_refused_once_the_game_is_under_way():
+    """Every other game answered "already started"; Spender re-dealt. A host could
+    send `start` again mid-game and get a fresh board, fresh nobles, a full bank
+    and a re-rolled turn order while every seat kept its cards and gems."""
+    _create(room="ROOMQ", pid="host")
+    _run(_FakeWS(inbox=[json.dumps({"action": "join", "name": "Guest"})]), "ROOMQ", "guest")
+    room = m.ROOMS["ROOMQ"]
+    tok = room["meta"]["host"]["token"]
+
+    first = _FakeWS(inbox=[json.dumps({"action": "reconnect", "token": tok}),
+                           json.dumps({"action": "start"})])
+    _run(first, "ROOMQ", "host")
+    assert room["status"] == "playing" and not first.errors()
+    g = room["game"]
+    board = {lk: [c and c["id"] for c in row] for lk, row in g["board"].items()}
+    decks = {lk: len(d) for lk, d in g["decks"].items()}
+    order, nobles = list(g["order"]), [n["id"] for n in g["nobles"]]
+
+    again = _FakeWS(inbox=[json.dumps({"action": "reconnect", "token": tok}),
+                           json.dumps({"action": "start"})])
+    _run(again, "ROOMQ", "host")
+    assert "already started" in again.errors()
+    assert {lk: [c and c["id"] for c in row] for lk, row in g["board"].items()} == board
+    assert {lk: len(d) for lk, d in g["decks"].items()} == decks      # nothing re-dealt
+    assert list(g["order"]) == order and [n["id"] for n in g["nobles"]] == nobles
+
+
+def test_start_cannot_bring_a_finished_game_back():
+    _create(room="ROOMR", pid="host")
+    _run(_FakeWS(inbox=[json.dumps({"action": "join", "name": "Guest"})]), "ROOMR", "guest")
+    room = m.ROOMS["ROOMR"]
+    tok = room["meta"]["host"]["token"]
+    _run(_FakeWS(inbox=[json.dumps({"action": "reconnect", "token": tok}),
+                        json.dumps({"action": "start"}),
+                        json.dumps({"action": "abandon"})]), "ROOMR", "host")
+    assert room["status"] == "over" and room["game"]["winner"] == "guest"
+
+    ws = _FakeWS(inbox=[json.dumps({"action": "reconnect", "token": tok}),
+                        json.dumps({"action": "start"})])
+    _run(ws, "ROOMR", "host")
+    assert "already started" in ws.errors()
+    assert room["status"] == "over" and room["game"]["phase"] == "over"
+
+
+# ── auth_reconnect: the account's OWN seat, in a room it is actually in ──────
+
+def _mint(monkeypatch, *, user_id, room, pid):
+    """Stand in for core.auth's token store: one live token with this record."""
+    record = {"token": "rt", "user_id": user_id, "room_id": room, "player_id": pid}
+
+    def consume(token, matches):
+        if token != "rt":
+            return None, False
+        return record, bool(matches(record))
+    monkeypatch.setattr(m, "consume_reconnect_token", consume)
+
+
+def test_auth_reconnect_with_your_own_token_authenticates(monkeypatch):
+    _create(room="ROOMS1", pid="host")
+    _run(_FakeWS(inbox=[json.dumps({"action": "join", "name": "Acct"})]), "ROOMS1", "acct-1")
+    _mint(monkeypatch, user_id="acct-1", room="ROOMS1", pid="acct-1")
+    ws = _FakeWS(inbox=[json.dumps({"action": "auth_reconnect", "token": "rt"}),
+                        json.dumps({"action": "ping", "target": "host"})])
+    _run(ws, "ROOMS1", "acct-1")
+    assert "reconnected" in ws.types() and AUTH_ERR not in ws.errors()
+
+
+def test_a_token_minted_by_another_account_cannot_take_the_seat(monkeypatch):
+    """THE HOLE. `/me/session-token` minted for whatever player_id the query named,
+    and the redeeming side only compared room and seat — so any signed-in account
+    could become any seat. The token's `user_id` must BE the seat."""
+    _create(room="ROOMS2", pid="host")
+    _run(_FakeWS(inbox=[json.dumps({"action": "join", "name": "Victim"})]), "ROOMS2", "acct-victim")
+    _mint(monkeypatch, user_id="acct-attacker", room="ROOMS2", pid="acct-victim")
+    ws = _FakeWS(inbox=[json.dumps({"action": "auth_reconnect", "token": "rt"}),
+                        json.dumps({"action": "move", "move": {"type": "take_gems", "colors": ["red"]}})])
+    _run(ws, "ROOMS2", "acct-victim")
+    assert "reconnected" not in ws.types()
+    assert "token mismatch" in ws.errors() and AUTH_ERR in ws.errors()
+    assert "acct-victim" not in {k for k, v in m.ROOMS["ROOMS2"]["sockets"].items() if v is ws}
+
+
+def test_auth_reconnect_to_a_room_you_are_not_in_is_refused(monkeypatch):
+    """A valid token for your own id is still not a seat. This used to register the
+    socket and flip `authed` — and an authed socket could `abandon`, which ended
+    the game for the people actually playing it."""
+    _create(room="ROOMS3", pid="host")
+    _run(_FakeWS(inbox=[json.dumps({"action": "join", "name": "Guest"})]), "ROOMS3", "guest")
+    room = m.ROOMS["ROOMS3"]
+    tok = room["meta"]["host"]["token"]
+    _run(_FakeWS(inbox=[json.dumps({"action": "reconnect", "token": tok}),
+                        json.dumps({"action": "start"})]), "ROOMS3", "host")
+    assert room["status"] == "playing"
+
+    _mint(monkeypatch, user_id="acct-outsider", room="ROOMS3", pid="acct-outsider")
+    ws = _FakeWS(inbox=[json.dumps({"action": "auth_reconnect", "token": "rt"}),
+                        json.dumps({"action": "abandon"})])
+    _run(ws, "ROOMS3", "acct-outsider")
+    assert "reconnected" not in ws.types()
+    assert "no such seat" in ws.errors() and AUTH_ERR in ws.errors()
+    assert room["status"] == "playing" and room["game"]["phase"] == "playing"
+    assert "acct-outsider" not in room["sockets"] and "acct-outsider" not in room.get("meta", {})
+
+
+def test_the_token_route_only_mints_for_the_callers_own_seat(monkeypatch):
+    minted = []
+    monkeypatch.setattr(m, "get_user_by_session",
+                        lambda tok: {"id": "acct-1", "name": "A"} if tok == "sess" else None)
+    monkeypatch.setattr(m, "create_reconnect_token",
+                        lambda uid, room, pid, ttl=120: minted.append((uid, room, pid)) or "rt")
+    assert m.session_token(token="nope", room_id="ROOMT", player_id="acct-1")["ok"] is False
+    other = m.session_token(token="sess", room_id="ROOMT", player_id="acct-victim")
+    assert other["ok"] is False and "reconnect_token" not in other
+    assert minted == []                                   # nothing was written for it
+    mine = m.session_token(token="sess", room_id="roomt", player_id="acct-1")
+    assert mine == {"ok": True, "reconnect_token": "rt"}
+    assert minted == [("acct-1", "ROOMT", "acct-1")]
+
+
+# ── a message that is JSON but not an OBJECT ─────────────────────────────────
+
+@pytest.mark.parametrize("junk", ["[]", "1", '"create"', "null", "true"])
+def test_a_non_object_message_is_an_error_not_a_crash(junk):
+    _create(room="ROOMU", pid="host")
+    ws = _FakeWS(inbox=[junk, json.dumps({"action": "join", "name": "Guest"})])
+    _run(ws, "ROOMU", "guest")                 # must not raise AttributeError
+    assert ws.types()[0] == "error"
+    assert "joined" in ws.types()              # and the socket lived to do real work
+
+
+def test_a_non_object_move_is_an_illegal_move_not_a_crash():
+    ws = _FakeWS(inbox=[
+        json.dumps({"action": "create", "name": "Host", "vs_ai": True, "ai_variant": "H3"}),
+        json.dumps({"action": "move", "move": [1, 2]}),
+        json.dumps({"action": "move", "move": "take"}),
+        json.dumps({"action": "ping", "target": "ai"}),
+    ])
+    _run(ws, "ROOMV", "host")
+    assert AUTH_ERR not in ws.errors() and len(ws.errors()) == 2

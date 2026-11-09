@@ -32,6 +32,10 @@ BLOCKING = {
     "list_open_games", "list_user_games", "list_user_history", "list_active_games",
     "validate_reconnect_token", "mark_reconnect_token_used", "consume_reconnect_token",
     "load_game_state",
+    # Not I/O but the same stall: a finished game REPLAYED move by move to build a
+    # review (Spender 30-250ms with the values overlay, Duel ~50ms, on a dev box).
+    # Both ran inside `async def` review routes, on the loop, until 2026-11-09.
+    "_build_review_snapshots", "review_payload",
 }
 
 # The account and token lookups a WebSocket handler makes on join/reconnect. Every
@@ -51,7 +55,7 @@ _ROUTE = (".get(", ".post(", ".put(", ".delete(", ".patch(")
 
 def _route_files():
     patterns = ("app.py", "core/*.py", "games/*/main.py", "games/*/*/serve.py",
-                "books/*.py", "notes/*.py", "boxpuzzles/*.py")
+                "books/*.py", "notes/*.py", "boxpuzzles/*.py", "steamfilter/*.py")
     return sorted({p for pat in patterns for p in REPO.glob(pat)})
 
 

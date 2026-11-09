@@ -228,6 +228,17 @@ async def send_json(ws, payload: dict) -> None:
     await ws.send_text(json.dumps(payload))
 
 
+def move_of(msg: dict) -> dict:
+    """The `move` object of a `{"action": "move", "move": {...}}` message, or `{}`.
+
+    Every engine's first act is `move.get("type")`. `msg.get("move") or {}` covered
+    a MISSING move, but a truthy non-object one (`[1]`, `"x"`, `7`) went straight to
+    the engine, raised AttributeError under ROOM_LOCK and dropped the sender's
+    socket with a traceback instead of an "illegal move" reply."""
+    move = msg.get("move")
+    return move if isinstance(move, dict) else {}
+
+
 def delete_open_game(table: str, host_col: str, game_id: str, user_id: str) -> bool:
     """Delete an OPEN game the user hosts (the lobby 'cancel'). True if a row went.
 
@@ -260,14 +271,42 @@ def delete_open_game(table: str, host_col: str, game_id: str, user_id: str) -> b
 
 def seat_proof_matches(room: Room, pid: str, *, room_token: str | None = None,
                        session_uid: str | None = None) -> bool:
-    """Return whether a reconnect token or matching account owns ``pid``."""
+    """Return whether a reconnect token or matching account owns ``pid``.
+
+    BOTH SIDES OF THE TOKEN MUST BE PRESENT. A seat with no stored token (every
+    bot seat: bots get no meta entry) is not a seat with the token ``None``, and
+    comparing the two with ``!=`` let a `reconnect` that sent no token at all
+    claim it. Compared as BYTES: `hmac.compare_digest` raises on a non-ASCII
+    `str`, and the token arrives straight off the wire.
+    """
     if not room or not pid:
         return False
-    expected = (room.get("meta") or {}).get(pid, {}).get("token")
+    expected = ((room.get("meta") or {}).get(pid) or {}).get("token")
     token_ok = bool(room_token and expected and
-                    hmac.compare_digest(str(room_token), str(expected)))
+                    hmac.compare_digest(str(room_token).encode("utf-8"),
+                                        str(expected).encode("utf-8")))
     session_ok = bool(session_uid and session_uid == pid)
     return token_ok or session_ok
+
+
+def reconnect_token_matches(info: dict | None, room_id: str, pid: str) -> bool:
+    """Whether a server-issued reconnect token (`core.auth`, minted by
+    `POST /me/session-token`) proves ownership of seat ``pid`` in ``room_id``.
+
+    Three things, and the third is the one that was missing: the token names this
+    ROOM, it names this SEAT, and it was minted BY THE ACCOUNT THE SEAT BELONGS TO
+    — a signed-in player's pid is their account id, so ``user_id`` must equal it.
+    Without that last clause the token only recorded what the caller ASKED for:
+    any signed-in account could mint one for another player's seat (every pid is
+    public) and redeem it through ``auth_reconnect`` for that seat's private view
+    and its moves, in all five games that accept these tokens. One definition
+    because the five `matches` lambdas this replaces were five chances to leave
+    the clause out again.
+    """
+    return bool(info and pid
+                and normalize_room(info.get("room_id") or "") == normalize_room(room_id)
+                and info.get("player_id") == pid
+                and info.get("user_id") == pid)
 
 
 def authorized_open_host(room: Room, pid: str, *, room_token: str | None = None,
@@ -428,12 +467,34 @@ def client_ip(ws) -> str:
     return getattr(client, "host", None) or "unknown"
 
 
+# The room code and the player id are PATH SEGMENTS the client chooses, and both
+# become dict keys, DB columns (the row id and the seat columns) and part of every
+# broadcast and every lobby list. A real room code is 6 characters and an id about
+# 10. Only Spender bounded them; the other eleven sockets took whatever the HTTP
+# layer would carry (~16KB a segment), so one `create` could park a 32KB row in
+# every player's Open list for 48 hours. Checked HERE — the one call every game
+# already makes right after `accept()` — so no game has to remember it.
+MAX_ID_LEN = 64
+
+
+def _oversized_path_ids(ws) -> bool:
+    params = getattr(ws, "path_params", None) or {}
+    return any(isinstance(v, str) and len(v) > MAX_ID_LEN for v in params.values())
+
+
 async def reject_if_connecting_too_fast(ws) -> bool:
-    """Record this connection and, if the peer is over the limit, close it.
+    """The connect gate: refuse an absurd room/player id, then record this
+    connection and, if the peer is over the limit, close it.
 
     Returns True when the caller should ABORT (the socket is closed). Call right
     after `accept()`, before touching ROOMS.
     """
+    if _oversized_path_ids(ws):
+        try:
+            await ws.close(code=1008)
+        except Exception:
+            pass
+        return True
     ip = client_ip(ws)
     if _ws_connect_limiter.exceeded(ip):
         alerts.alert("socket-flood", f"{ip} opened over {WS_CONNECTS_PER_MIN} game sockets in a "

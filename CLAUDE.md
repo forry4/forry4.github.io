@@ -281,6 +281,34 @@ drops to ephemeral local sqlite and the site stays up — so `/health` reports `
   displaced the victim's live socket. (The follow-on trap: that registration was also what made the room
   get cleaned up, so removing it leaked an empty `ROOMS` shell per connect — `core.rooms.release_socket`
   now collects phantom rooms independently of socket ownership.)
+- **A SEAT PROOF NEEDS BOTH SIDES PRESENT, AND A RECONNECT TOKEN IS ONLY GOOD FOR THE ACCOUNT THAT
+  MINTED IT** (2026-11-09 audit — two takeovers that sat UNDER the binding above, each a property no
+  single game's `test_ws_auth.py` thought to ask):
+  - Four games compared the room token with `stored != sent`. A **bot seat has no meta entry**, so a
+    `reconnect` that sent NO token read `None != None` and an anonymous socket became the bot — its
+    private view (a Dontminion hand, Duel's reserves) and its moves — in every vs-bot room of Duel,
+    Dontminion and CoC. Every room-token check goes through **`core.rooms.seat_proof_matches`**
+    (both sides present, compared as bytes: `hmac.compare_digest` raises on a non-ASCII `str`).
+  - `POST /me/session-token` minted a reconnect token for whatever `player_id` the query named, and
+    `auth_reconnect` compared room and seat but never who minted it — so any signed-in account could
+    take any seat in the five games that redeem those tokens (Spender, Duel, CoC, Dontminion, Where
+    Wolf?). The route now mints only for the caller's own id, and the redeeming side goes through
+    **`core.rooms.reconnect_token_matches`** (room + seat + `user_id == pid`). No frontend calls the
+    route today; it was live on the API regardless.
+  - Spender's `auth_reconnect` also registered the socket whether or not the pid held a seat, and an
+    authed socket could `abandon` — which ended the game for the people actually playing it. An
+    authed socket must always be a SEATED one.
+  `shared/tests/test_ws_seat_proof.py` derives its rosters from the tree and drives all of it across
+  every game; Spender's inline dispatcher is covered in its own `test_ws_auth.py`.
+- **Every action is gated on the room's STATUS as well as the seat.** Spender's `start` checked the
+  host and the seat count and nothing else, so a host could send it again MID-GAME and re-deal the
+  board, nobles, bank and turn order under a game in progress (the eleven handler-based games all
+  answered "already started").
+- **The connect gate (`core.rooms.reject_if_connecting_too_fast`) also bounds the room and player
+  ids** (`MAX_ID_LEN`, 64). Both are client-chosen path segments that become dict keys, DB columns
+  and part of every lobby list; only Spender bounded them. And a WS message must be a JSON OBJECT:
+  `[]`/`1`/`null` reached `msg.get("action")` and dropped the socket in all twelve dispatchers
+  (`_rooms.move_of(msg)` is the same guard for the nested `move`).
 - **Any new broadcast field must be per-field redacted** — "an honest client ignores it" is NOT security.
   A 2026-07 audit found 3 of 4 games shipping raw hidden ordered state (Spender `decks`, WW `deck`, CoC
   supplies + `rng_state`).
@@ -630,6 +658,10 @@ covers the logic; each game's wiring is one line).
   `ROOM_LOCK` or reads a live room stays `async` and moves each blocking call onto a thread with
   `await asyncio.to_thread(fn, ...)`. `core/tests/test_routes_off_event_loop.py` derives the
   roster and fails the offender. `SlidingWindowLimiter` is locked for the same reason.
+  **CPU counts too, not just I/O**: Spender's and Duel's `/review` routes REPLAYED the finished
+  game on the loop (Spender 30–250ms with the values overlay, Duel ~50ms, on a dev box — several
+  times that on the free instance), so every Review click paused every live game. Both builders
+  now run through `asyncio.to_thread` and are on that test's roster.
 - **…and the thread pool only helps if the DB client RELEASES THE GIL — `libsql` did not**
   (2026-10-08). libsql 0.1.11, the newest release, holds the GIL while it waits on Turso, so a
   Turso call stalled in a WORKER thread froze the loop exactly as if it ran on it: the Site

@@ -293,6 +293,82 @@ def test_connect_limit_is_per_ip_not_global():
     rooms._ws_connect_limiter.reset()
 
 
+def test_an_oversized_room_or_player_id_is_refused_at_the_connect_gate():
+    """Both path segments are client-chosen and become dict keys, DB columns and
+    part of every broadcast. Only Spender bounded them; the other eleven sockets
+    took ~16KB each. The bound lives in the one call every game makes on connect."""
+    rooms._ws_connect_limiter.reset()
+    ok = _FakeWS(host="203.0.113.50")
+    ok.path_params = {"room": "ABC123", "player": "p" * rooms.MAX_ID_LEN}
+    assert _run(rooms.reject_if_connecting_too_fast(ok)) is False and ok.closed_with is None
+
+    for bad in ({"room": "R" * (rooms.MAX_ID_LEN + 1), "player": "p1"},
+                {"room": "ABC123", "player": "p" * 5000}):
+        ws = _FakeWS(host="203.0.113.51")
+        ws.path_params = bad
+        assert _run(rooms.reject_if_connecting_too_fast(ws)) is True
+        assert ws.closed_with == 1008
+    # Refused before it is counted: junk must not spend the peer's connect budget.
+    assert rooms._ws_connect_limiter.count("203.0.113.51") == 0
+    rooms._ws_connect_limiter.reset()
+
+
+def test_every_game_socket_passes_through_the_connect_gate():
+    """The id bound above only reaches a game that calls the gate. Derived from
+    the tree, so the next game is held to it the day it ships."""
+    import ast
+    from pathlib import Path
+    mains = sorted((Path(__file__).resolve().parents[2] / "games").glob("*/main.py"))
+    assert len(mains) >= 12, mains
+    for main in mains:
+        tree = ast.parse(main.read_text(encoding="utf-8"))
+        sockets = [n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef)
+                   and any(".websocket(" in ast.unparse(d) for d in n.decorator_list)]
+        assert sockets, f"{main}: no websocket endpoint found"
+        for fn in sockets:
+            assert any(isinstance(n, ast.Attribute) and n.attr == "reject_if_connecting_too_fast"
+                       for n in ast.walk(fn)), (
+                f"{main}: {fn.name}() must call _rooms.reject_if_connecting_too_fast(websocket)")
+
+
+def test_a_missing_room_token_never_matches_a_seat_that_has_none():
+    """A bot seat has no meta entry. `stored != sent` read None != None for a
+    `reconnect` with no token, and handed an anonymous socket the bot's seat."""
+    room = {"players": {"human": "H", "bot": "Bot"}, "meta": {"human": {"token": "tok123"}, "odd": {}}}
+    for missing in (None, "", 0, [], {}):
+        assert not rooms.seat_proof_matches(room, "bot", room_token=missing)
+        assert not rooms.seat_proof_matches(room, "odd", room_token=missing)
+        assert not rooms.seat_proof_matches(room, "human", room_token=missing)
+    assert not rooms.seat_proof_matches(room, "bot", room_token="None")
+    assert not rooms.seat_proof_matches(room, "human", room_token="tok124")
+    assert rooms.seat_proof_matches(room, "human", room_token="tok123")
+    # Straight off the wire: a non-ASCII token is a wrong token, not a TypeError
+    # (hmac.compare_digest refuses non-ASCII str).
+    assert not rooms.seat_proof_matches(room, "human", room_token="tök123")
+    assert not rooms.seat_proof_matches({"meta": {"human": None}}, "human", room_token="x")
+
+
+def test_a_reconnect_token_must_be_minted_by_the_seats_own_account():
+    """room + seat + USER. Without the third, a token recorded only what its
+    caller asked for, so any account could mint one for anyone's seat."""
+    mine = {"room_id": "ROOMA", "player_id": "acct1", "user_id": "acct1"}
+    assert rooms.reconnect_token_matches(mine, "ROOMA", "acct1")
+    assert rooms.reconnect_token_matches({**mine, "room_id": "rooma"}, "ROOMA", "acct1")   # codes fold
+    assert not rooms.reconnect_token_matches(mine, "ROOMB", "acct1")
+    assert not rooms.reconnect_token_matches(mine, "ROOMA", "acct2")
+    # THE HOLE: minted by acct2 FOR acct1's seat.
+    assert not rooms.reconnect_token_matches({**mine, "user_id": "acct2"}, "ROOMA", "acct1")
+    assert not rooms.reconnect_token_matches({**mine, "user_id": None}, "ROOMA", "acct1")
+    assert not rooms.reconnect_token_matches(None, "ROOMA", "acct1")
+    assert not rooms.reconnect_token_matches({}, "ROOMA", "")
+
+
+def test_move_of_only_ever_returns_an_object():
+    assert rooms.move_of({"move": {"type": "buy"}}) == {"type": "buy"}
+    for junk in ({}, {"move": None}, {"move": [1]}, {"move": "x"}, {"move": 7}, {"move": True}):
+        assert rooms.move_of(junk) == {}
+
+
 def test_message_throttle_allows_then_blocks_within_the_window():
     t = rooms.MessageThrottle(max_per_min=3)
     assert [t.allow(now=1000.0) for _ in range(3)] == [True, True, True]

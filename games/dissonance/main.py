@@ -1127,6 +1127,11 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
             except Exception:
                 await _send(websocket, {"type": "error", "message": "bad message"})
                 continue
+            if not isinstance(msg, dict):
+                # Valid JSON that is not an OBJECT ([], 1, "x", null): every branch
+                # below reads it with .get(), which raised and dropped the socket.
+                await _send(websocket, {"type": "error", "message": "bad message"})
+                continue
             action = msg.get("action")
 
             if action == "create":
@@ -1273,11 +1278,11 @@ async def _handle_move(ws, room_id, pid, msg):
             await _send(ws, {"type": "error", "message": "not your turn"})
             return
         try:
-            engine.apply_move(g, pid, msg.get("move") or {})
+            engine.apply_move(g, pid, _rooms.move_of(msg))
         except (ValueError, KeyError, TypeError) as exc:
             await _send(ws, {"type": "error", "message": str(exc) or "illegal move"})
             return
-        if (msg.get("move") or {}).get("kind") == "next_round":
+        if _rooms.move_of(msg).get("kind") == "next_round":
             # A new deal makes any armed search a question about a game that no
             # longer exists. Re-broadcasting it would hand the browser a view of
             # the previous round's cards; the answer would be re-validated and

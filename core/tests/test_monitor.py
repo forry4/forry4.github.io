@@ -71,6 +71,52 @@ def test_a_silent_fall_back_to_sqlite_is_critical(monkeypatch):
     assert _kinds() == [("database", "critical")]
 
 
+def test_the_libsql_fallback_is_not_reported_as_lost_data(monkeypatch):
+    """`turso-libsql` PERSISTS — what is wrong is the driver (it holds the GIL).
+    The alert used to say "came up on LOCAL sqlite ... nothing survives the next
+    restart" for it too, which is the wrong emergency."""
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://x")
+    monkeypatch.setattr(monitor, "backend", lambda: "turso-libsql")
+    monitor.check_backend()
+    assert _kinds() == [("database", "critical")]
+    said = alerts._sink[0]["message"]
+    assert "libsql" in said and "IS being saved" in said and "sqlite" not in said
+    alerts._sink.clear()
+    alerts.reset()
+    monkeypatch.setattr(monitor, "backend", lambda: "turso")
+    monitor.check_backend()
+    assert alerts._sink == []                       # the healthy case stays quiet
+
+
+def test_the_heartbeat_task_is_held_so_it_cannot_be_collected(monkeypatch):
+    """The event loop keeps only a weak reference to a task. An unreferenced
+    heartbeat that is collected stops beating, and the watchdog then reports a
+    frozen site that is running fine."""
+    started = []
+
+    class _NoThread:                 # arm() also starts the two monitor threads
+        def __init__(self, *a, **k):
+            started.append(k.get("name"))
+
+        def start(self):
+            pass
+    monkeypatch.setattr(monitor.threading, "Thread", _NoThread)
+    monkeypatch.setattr(monitor, "_armed", False)
+    monkeypatch.setattr(monitor, "_heartbeat_task", None)
+
+    async def go():
+        monitor.arm()
+        task = monitor._heartbeat_task
+        try:
+            assert isinstance(task, asyncio.Task) and not task.done()
+            await asyncio.sleep(0)
+            assert monitor._loop_thread is not None      # it ran, on this loop
+        finally:
+            task.cancel()
+    asyncio.run(go())
+    assert started == ["loop-watchdog", "health-checks"]
+
+
 def test_snapshot_reads_without_the_notes_tables(conn):
     snap = monitor.snapshot(conn)
     assert snap["db_backend"] in ("sqlite", "turso") and snap["notes_bytes"] == 0

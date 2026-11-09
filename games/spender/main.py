@@ -2494,6 +2494,11 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                 LOG.warning("invalid JSON from ws client: %s", e)
                 await websocket.send_text(json.dumps({"type": "error", "message": "invalid json"}))
                 continue
+            if not isinstance(msg, dict):
+                # Valid JSON that is not an OBJECT ([], 1, "x", null): every branch
+                # below reads it with .get(), which raised and dropped the socket.
+                await websocket.send_text(json.dumps({"type": "error", "message": "invalid json"}))
+                continue
 
             action = msg.get("action")
 
@@ -2568,8 +2573,10 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
             elif action == "reconnect":
                 token = msg.get("token")
                 async with ROOM_LOCK:
-                    info = r.setdefault("meta", {}).get(pid)
-                    if not info or info.get("token") != token:
+                    # Both sides must be PRESENT (core.rooms.seat_proof_matches): a
+                    # meta entry with no token is not a seat whose token is None, so a
+                    # `reconnect` sent without one must never match it.
+                    if not _rooms.seat_proof_matches(r, pid, room_token=token):
                         await websocket.send_text(json.dumps({"type": "error", "message": "invalid token"}))
                         continue
                     r["sockets"][pid] = websocket
@@ -2635,9 +2642,12 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
             # ── auth_reconnect ──────────────────────────────────────────────
             elif action == "auth_reconnect":
                 token = msg.get("token")
+                # The token must be for THIS room and seat, and minted BY the account
+                # that seat belongs to (a signed-in seat's pid is its account id) —
+                # see core.rooms.reconnect_token_matches.
                 info, consumed = await asyncio.to_thread(
                     consume_reconnect_token, token,
-                    lambda i: normalize_room(i.get("room_id") or "") == room_id and i.get("player_id") == pid)
+                    lambda i: _rooms.reconnect_token_matches(i, room_id, pid))
                 if not info:
                     await websocket.send_text(json.dumps({"type": "error", "message": "invalid or expired reconnect token"}))
                     continue
@@ -2645,10 +2655,22 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                     await websocket.send_text(json.dumps({"type": "error", "message": "token mismatch"}))
                     continue
                 async with ROOM_LOCK:
-                    r = ROOMS.setdefault(room_id, {"players": {}, "sockets": {}, "status": "open", "game": None, "host": None})
-                    r.setdefault("meta", {})
-                    r["sockets"][pid] = websocket
-                    r["meta"].setdefault(pid, {})["user_id"] = info.get("user_id")
+                    # The seat must EXIST. This used to `setdefault` the room and
+                    # register the socket whatever the room held, so a token for a
+                    # room the caller was never in still came back `authed` — and an
+                    # authed socket can `abandon`, which ended that table's game.
+                    _room = ROOMS.get(room_id)
+                    if _room is None and load_game_to_memory(room_id):
+                        _room = ROOMS.get(room_id)   # dropped since connect: Spender drops any empty room
+                    _seated = bool(_room and pid in _room.get("players", {}))
+                    if _seated:
+                        r = _room
+                        r.setdefault("meta", {})
+                        r["sockets"][pid] = websocket
+                        r["meta"].setdefault(pid, {})["user_id"] = info.get("user_id")
+                if not _seated:
+                    await websocket.send_text(json.dumps({"type": "error", "message": "no such seat"}))
+                    continue
                 authed = True   # server-issued reconnect token, scoped to (room_id, pid)
                 await websocket.send_text(json.dumps({"type": "reconnected", "room": mk_room_state(room_id, viewer_pid=pid)}))
                 await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
@@ -2666,6 +2688,13 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                     r = ROOMS.get(room_id)
                     if not r or r.get("host") != pid:
                         _err = "only the host can start"
+                    elif r.get("status") != "open":
+                        # Every other game refuses this; Spender did not, so a host
+                        # could send `start` again MID-GAME and re-deal the board, the
+                        # nobles, the bank and the turn order under a game in progress
+                        # (or bring a finished one back to life). The seats kept their
+                        # cards and gems, so it was a free re-roll of everything else.
+                        _err = "already started"
                     elif len(r["players"]) < 2:
                         _err = "need 2-4 players to start"
                     else:
@@ -2695,7 +2724,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                     await websocket.send_text(json.dumps(
                         {"type": "error", "message": "not authenticated for this seat"}))
                     continue
-                mv = msg.get("move") or {}
+                mv = _rooms.move_of(msg)
                 _err = None
                 _did_change = False
                 _discard_pid: str | None = None
@@ -2775,7 +2804,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                     await websocket.send_text(json.dumps(
                         {"type": "error", "message": "not authenticated for this seat"}))
                     continue
-                mv = msg.get("move") or {}
+                mv = _rooms.move_of(msg)
                 _err = None
                 _did_change = False
                 _deferred = False       # the AI is mid-turn awaiting the client's net-chosen discard
@@ -2880,6 +2909,11 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                         g = r["game"]
                         if g.get("phase") == "over":
                             _err = "game already over"
+                        elif pid not in g.get("order", []):
+                            # Only a seat IN the game may concede it: `other` below is
+                            # "the first seat that is not me", which for a socket with
+                            # no seat is simply the first player.
+                            _err = "not a player in this game"
                         else:
                             other = next((p for p in g.get("order", []) if p != pid), None)
                             if not other:
@@ -3274,6 +3308,14 @@ async def get_game_review(game_id: str, token: str | None = Depends(bearer_token
     viewer = user["id"]
     if viewer not in (game.get("order") or []):
         return {"ok": False, "message": "you were not a player in this game"}
+    # ON A THREAD. The replay rebuilds one board per turn and, for an AI game, runs
+    # the static values overlay on each: 30-250ms of pure CPU for one finished game
+    # on a dev box, several times that on the free instance, and this route is
+    # `async` — so every Review click paused every live game for that long. `game`
+    # is a private copy (a deepcopy of the live room, or freshly decoded), so
+    # nothing else can touch it while the thread reads it.
+    snapshots = await asyncio.to_thread(
+        _build_review_snapshots, game, viewer, payload.get("ai_variant"))
     return {
         "ok": True,
         "room_id": room_id,
@@ -3283,7 +3325,7 @@ async def get_game_review(game_id: str, token: str | None = Depends(bearer_token
         "win_points": game.get("win_points", 15),
         "viewer_pid": viewer,
         "final": _review_view(game, viewer),
-        "snapshots": _build_review_snapshots(game, viewer, payload.get("ai_variant")),
+        "snapshots": snapshots,
     }
 
 
@@ -3343,6 +3385,17 @@ def session_token(token: str | None = Depends(bearer_token),
         return {"ok": False, "message": "unauthenticated"}
     if not room_id or not player_id:
         return {"ok": False, "message": "room_id and player_id required"}
+    # ONLY FOR THE CALLER'S OWN SEAT. `auth_reconnect` redeems this token as PROOF
+    # that the socket owns (room, player_id) — in Spender, Duel, CoC, Dontminion and
+    # Where Wolf? — and a signed-in player's seat id IS their account id. Minting it
+    # for whatever `player_id` the query named let any account take any seat in any
+    # room: every pid is public (the players map, the open and active lists), so a
+    # freshly registered account could ask for a token for someone else's seat and
+    # redeem it for that seat's private view and its moves. The redeeming side
+    # checks the same thing (the token's `user_id` must be the seat), so a token
+    # minted any other way cannot cross accounts either.
+    if player_id != user["id"]:
+        return {"ok": False, "message": "you can only reconnect to your own seat"}
     rt = create_reconnect_token(user["id"], normalize_room(room_id), player_id, ttl=120)
     return {"ok": True, "reconnect_token": rt}
 

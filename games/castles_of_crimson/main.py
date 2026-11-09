@@ -873,6 +873,11 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
             except Exception:
                 await websocket.send_text(json.dumps({"type": "error", "message": "bad message"}))
                 continue
+            if not isinstance(msg, dict):
+                # Valid JSON that is not an OBJECT ([], 1, "x", null): every branch
+                # below reads it with .get(), which raised and dropped the socket.
+                await websocket.send_text(json.dumps({"type": "error", "message": "bad message"}))
+                continue
             action = msg.get("action")
 
             if action == "create":
@@ -1033,7 +1038,7 @@ async def _handle_move(ws, room_id, pid, msg):
         if not game:
             await _send(ws, {"type": "error", "message": "game not started"})
             return
-        ok, err = engine.apply_move(game, pid, msg.get("move") or {})
+        ok, err = engine.apply_move(game, pid, _rooms.move_of(msg))
         if not ok:
             await _send(ws, {"type": "error", "message": err or "illegal move"})
             return
@@ -1115,7 +1120,11 @@ async def _handle_reconnect(ws, room_id, pid, msg):
         if not room or pid not in room.get("players", {}):
             await _send(ws, {"type": "error", "message": "invalid token"})
             return False
-        if room.get("meta", {}).get(pid, {}).get("token") != token:
+        # A MISSING token must never match a seat that HAS none. A bot seat carries
+        # no meta entry, so `stored != sent` read None != None for a `reconnect`
+        # sent without a token and handed an anonymous socket the bot's seat: its
+        # private view, and its moves. seat_proof_matches needs both sides present.
+        if not _rooms.seat_proof_matches(room, pid, room_token=token):
             await _send(ws, {"type": "error", "message": "invalid token"})
             return False
         room["sockets"][pid] = ws
@@ -1130,7 +1139,7 @@ async def _handle_auth_reconnect(ws, room_id, pid, msg):
     token = msg.get("token")
     _info, ok = await asyncio.to_thread(
         consume_reconnect_token, token,
-        lambda i: i.get("room_id") == room_id and i.get("player_id") == pid)
+        lambda i: _rooms.reconnect_token_matches(i, room_id, pid))
     if not ok:
         await _send(ws, {"type": "error", "message": "invalid token"})
         return False

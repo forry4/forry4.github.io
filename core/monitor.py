@@ -230,7 +230,19 @@ def check_rooms() -> None:
 
 
 def check_backend() -> None:
-    if os.environ.get("TURSO_DATABASE_URL") and backend() != "turso":
+    if not os.environ.get("TURSO_DATABASE_URL"):
+        return
+    which = backend()
+    if which == "turso-libsql":
+        # The data IS persisting, so this must not say it is not. What is wrong is
+        # the driver: libsql holds the GIL on every round trip (core/db.py), so a
+        # slow Turso freezes every game on the site.
+        alerts.alert("database", "Turso's HTTP client failed its self-test at boot, so the server "
+                     "is using the libsql driver instead. Data IS being saved, but a slow Turso "
+                     "call can now freeze every game on the site. Check Render's logs for the "
+                     "HTTP self-test error, then redeploy.",
+                     severity="critical", cooldown=6 * 3600)
+    elif which != "turso":
         alerts.alert("database", "Turso is configured but the server came up on LOCAL sqlite. "
                      "The site works, but nothing written now (accounts, games, notes) survives "
                      "the next restart. Check Render's logs for the Turso error.",
@@ -266,6 +278,10 @@ def _checker() -> None:
 # ── event-loop watchdog ──────────────────────────────────────────────────────
 _beat = 0.0
 _loop_thread: int | None = None
+# The loop keeps only a WEAK reference to a task, so the heartbeat is held here.
+# Collected, it would stop beating and the watchdog would report a frozen site
+# that is running fine.
+_heartbeat_task: "asyncio.Task | None" = None
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep
 
 
@@ -315,7 +331,7 @@ _arm_lock = threading.Lock()
 
 def arm() -> None:
     """Start the heartbeat (on the running loop) and the two monitor threads, once."""
-    global _armed, _beat
+    global _armed, _beat, _heartbeat_task
     if _armed:
         return
     with _arm_lock:
@@ -324,7 +340,7 @@ def arm() -> None:
         _armed = True
     _beat = time.monotonic()
     try:
-        asyncio.get_running_loop().create_task(_heartbeat())
+        _heartbeat_task = asyncio.get_running_loop().create_task(_heartbeat())
         threading.Thread(target=_watchdog, name="loop-watchdog", daemon=True).start()
     except RuntimeError:
         pass   # no running loop: nothing to watch

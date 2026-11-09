@@ -244,6 +244,11 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
             except Exception:
                 await _send(websocket, {"type": "error", "message": "bad message"})
                 continue
+            if not isinstance(msg, dict):
+                # Valid JSON that is not an OBJECT ([], 1, "x", null): every branch
+                # below reads it with .get(), which raised and dropped the socket.
+                await _send(websocket, {"type": "error", "message": "bad message"})
+                continue
             action = msg.get("action")
             if action == "create":
                 if not await _rooms.reject_room_create(websocket):
@@ -368,7 +373,7 @@ async def _handle_move(ws: WebSocket, room_id: str, pid: str, msg: dict) -> None
         if not room or not room.get("game"):
             await _send(ws, {"type": "error", "message": "game not started"})
             return
-        ok, error = engine.apply_move(room["game"], pid, msg.get("move") or {})
+        ok, error = engine.apply_move(room["game"], pid, _rooms.move_of(msg))
         if not ok:
             await _send(ws, {"type": "error", "message": error or "illegal move"})
             return
