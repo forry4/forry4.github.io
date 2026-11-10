@@ -1239,6 +1239,25 @@ Refresh — the update nudge compares the APP id, not the commit (see Stale-tab 
 | BGG Filter | `bgg-harvest.yml` | Mar 1 + Sep 1, ≤3 chained runs | ratings move slowly; first harvested 2026-08-29 |
 | Astral Ascent guide | none — by hand | after a game patch | half of it is editorial |
 
+**THE DATA STORE — a refresh without a commit (pilot: `steam-prices.json`, 2026-11-10).**
+Every job above reaches the site as a commit plus a full Pages build, because Pages serves only
+what was in the build. `data-worker/` is the way out: an R2 bucket behind a small Cloudflare
+Worker (`GET /<name>.json` public and CORS-open; `PUT` with the `PUBLISH_TOKEN` bearer, JSON
+only), so a refresh is one upload. **It is INERT until configured** and the move is an
+expand/contract driven by repo settings, not code:
+- `vars.DATA_URL` unset: nothing changes anywhere.
+- `vars.DATA_URL` + `secrets.DATA_PUBLISH_TOKEN` set: `steam-prices.yml` builds on the STORE's
+  previous file (prices.py carries sale starts forward from it), PUTs the new one and reads it
+  back, and STILL commits; the next Pages build bakes `VITE_DATA_URL`, and the page reads the
+  store first (`shared/dataUrl.js` `fetchData`), falling back to the bundled copy on ANY failure.
+- `vars.DATA_COMMITS=off`: the commits stop. Only after a deployed page is reading the store.
+The bundled copy stays in the repo as the fallback and as what OFFLINE serves (the service
+worker is same-origin only), so it goes stale once commits are off; a manual run of the job with
+commits back on refreshes it. Converting another feed = `fetchData("<file>")` in its page plus the
+same three workflow steps. `puzzles.json` and `astral-guide.json` stay in the repo (generated
+from code / hand-refreshed). Set-up steps are in `data-worker/wrangler.jsonc`; nothing in CI
+deploys the Worker. Tests: `webapp/test/unit/dataWorker.test.mjs`.
+
 **An unattended publish needs a guard against a half-answered harvest**, because the failure
 mode of every one of these sources is a 200 OK with less in it: anime and BGG `make_data.py`
 refuse a payload that falls below 90% of the current file (`--force` overrides), Steam's enrich

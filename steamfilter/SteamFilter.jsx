@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { baseCss } from "../shared/theme.js";
 import { rangePointer } from "../shared/rangePointer.js";
+import { fetchData } from "../shared/dataUrl.js";
 import { attachPrices, onSale, money, day, span } from "./prices.js";
 import { readSaved, writeSaved, clearSaved, setMark, markOf, adopt, settle, batch } from "./saved.js";
 
@@ -15,7 +16,9 @@ const css = _cssText;
 const DATA_URL = `${import.meta.env.BASE_URL || "/"}data/steam-filter.json`;
 // Prices move daily, so they ship in their own file (steamfilter/tools/prices.py, run by
 // the steam-prices workflow). The page works without it: every price reads "—".
-const PRICES_URL = `${import.meta.env.BASE_URL || "/"}data/steam-prices.json`;
+// Read through shared/dataUrl.js: the data store's copy when the build knows one (so a
+// price refresh needs no commit and no deploy), else the copy bundled with the site.
+const PRICES_FILE = "steam-prices.json";
 // Saved games are the page's one piece of server state (steamfilter/api.py).
 const WS_BASE = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
 const HTTP_BASE = WS_BASE.replace(/^ws/, "http").replace(/\/ws$/, "");
@@ -225,8 +228,7 @@ export default function SteamFilter({ authUser, onExit }) {
 			.then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
 			.then((j) => { if (live) { setMeta(j); setGames(derive(j.games || [])); } })
 			.catch((e) => { if (live) setErr(String(e.message || e)); });
-		fetch(PRICES_URL)
-			.then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+		fetchData(PRICES_FILE)
 			.then((j) => { if (live) setPrices(j); })
 			.catch(() => { /* no prices: the columns read "—" */ });
 		return () => { live = false; };

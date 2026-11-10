@@ -228,6 +228,10 @@ jobs:
         working-directory: webapp
         env:
           VITE_WS_URL: wss://splendid-nelz.onrender.com/ws
+          # The data store (data-worker/): pages read a refreshed data file from here
+          # first and fall back to the bundled copy (shared/dataUrl.js). Unset -> the
+          # bundled copy only, i.e. exactly the old behaviour.
+          VITE_DATA_URL: ${{ vars.DATA_URL }}
           # Stamps the bundle AND the emitted version.json with this commit, so a
           # tab still running an older build can notice and offer a refresh
           # (shared/update-nudge.js). Absent locally -> 'dev' -> nudge disabled.

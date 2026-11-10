@@ -1,17 +1,30 @@
 name: Steam Filter prices
 
 # Re-reads today's Steam and US eShop prices (and the sales running) for every game
-# in the Steam Filter payload into webapp/public/data/steam-prices.json, and commits
-# it to main. ~2 minutes: ~90 Steam requests and ~40 eShop searches.
+# in the Steam Filter payload into steam-prices.json. ~2 minutes: ~90 Steam requests
+# and ~40 eShop searches.
 #
 # Twice a day, because GitHub drops a good share of scheduled firings (CLAUDE.md,
 # keep-alive) and sales start at both ends of the day: the eShop's at 07:00 or 16:00
 # UTC, Steam's at 17:00. The page never shows a sale past its end, so a missed run
 # leaves a sale that started unshown, never an ended one shown.
 #
-# prices.py leaves the file untouched when no price moved, so a quiet run commits
-# nothing and fires no deploy. A push made with GITHUB_TOKEN does not trigger other
-# workflows, so the job dispatches the Pages deploy itself.
+# WHERE THE FILE GOES — two destinations, switched by repo settings, so the move off
+# commits is an expand/contract and never a flag day:
+#
+#   vars.DATA_URL set     -> PUT to the data store (data-worker/, R2). The page reads
+#                            it within minutes: no commit, no Pages build.
+#   vars.DATA_COMMITS     -> anything but "off" (the default): ALSO commit to main and
+#                            deploy, as before. Set it to "off" once the site is
+#                            reading the store, and the commits stop.
+#
+# With neither set this is the old job, byte for byte in behaviour.
+#
+# prices.py leaves the file untouched when no price moved, so a quiet run uploads and
+# commits nothing. It BUILDS ON THE PREVIOUS FILE (a Steam sale's start is the run that
+# first saw it, carried forward), so with the store on, the previous file is the
+# store's — once commits are off the checkout's copy is stale. A push made with
+# GITHUB_TOKEN does not trigger other workflows, so the job dispatches the deploy.
 
 on:
   schedule:
@@ -36,9 +49,48 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.14'
+      # The store's copy is the truth once it exists. 404 = first run (keep the
+      # checkout's). Anything else must FAIL: building on a stale file would reset
+      # every running sale's start date and publish that.
+      - name: Take the published file
+        if: vars.DATA_URL != ''
+        env:
+          DATA_URL: ${{ vars.DATA_URL }}
+        run: |
+          f=webapp/public/data/steam-prices.json
+          code=$(curl -sS --retry 3 --retry-all-errors -o "$RUNNER_TEMP/prev.json" -w '%{http_code}' "${DATA_URL%/}/steam-prices.json")
+          if [ "$code" = "200" ]; then
+            python -c "import json,sys; json.load(open(sys.argv[1], encoding='utf-8'))" "$RUNNER_TEMP/prev.json"
+            cp "$RUNNER_TEMP/prev.json" "$f"
+            echo "building on the data store's copy"
+          elif [ "$code" = "404" ]; then
+            echo "::notice::the data store has no steam-prices.json yet; building on the repo's copy"
+          else
+            echo "::error::the data store answered HTTP $code for steam-prices.json"; exit 1
+          fi
+          sha256sum "$f" | cut -d' ' -f1 > "$RUNNER_TEMP/before.sha"
       - name: Read prices
         run: python -u steamfilter/tools/prices.py
+      - name: Publish to the data store
+        if: vars.DATA_URL != ''
+        env:
+          DATA_URL: ${{ vars.DATA_URL }}
+          DATA_PUBLISH_TOKEN: ${{ secrets.DATA_PUBLISH_TOKEN }}
+        run: |
+          f=webapp/public/data/steam-prices.json
+          if [ "$(sha256sum "$f" | cut -d' ' -f1)" = "$(cat "$RUNNER_TEMP/before.sha")" ] && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+            echo "no change"; exit 0
+          fi
+          if [ -z "$DATA_PUBLISH_TOKEN" ]; then echo "::error::DATA_URL is set but the DATA_PUBLISH_TOKEN secret is not"; exit 1; fi
+          curl -sS --fail-with-body --retry 3 --retry-all-errors -X PUT \
+            -H "Authorization: Bearer $DATA_PUBLISH_TOKEN" -H "Content-Type: application/json" \
+            --data-binary "@$f" "${DATA_URL%/}/steam-prices.json"
+          echo
+          # Read it back: a 200 from the PUT is not the same as the file being served.
+          curl -sS --fail --retry 3 --retry-all-errors "${DATA_URL%/}/steam-prices.json" | cmp - "$f"
+          echo "published $(wc -c < "$f") bytes"
       - name: Commit and deploy
+        if: vars.DATA_COMMITS != 'off'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

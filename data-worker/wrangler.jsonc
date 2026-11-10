@@ -1,0 +1,33 @@
+{
+  // The data Worker — serves the site's generated data files from an R2 bucket so a
+  // data refresh needs no commit and no Pages deploy. See src/index.js for the why,
+  // and docs in the root CLAUDE.md ("The data refresh schedule").
+  //
+  // Its own Worker for the same reason the keepalive one is (keepalive-worker/): the
+  // staging Worker's config lives on a diverged branch, and this shares nothing with it.
+  //
+  // SET UP (once; nothing in CI deploys this):
+  //
+  //     npx wrangler r2 bucket create forrestgames-data
+  //     npx wrangler deploy --config data-worker/wrangler.jsonc
+  //     npx wrangler secret put PUBLISH_TOKEN --config data-worker/wrangler.jsonc
+  //         (paste a long random string — `openssl rand -hex 32`)
+  //
+  // then in the GitHub repo (Settings -> Secrets and variables -> Actions):
+  //
+  //     secret    DATA_PUBLISH_TOKEN = the same string
+  //     variable  DATA_URL           = https://forrestgames-data.<your-subdomain>.workers.dev
+  //
+  // VERIFY: `curl -s $DATA_URL/` answers {"ok":true,...}; run the "Steam Filter prices"
+  // workflow once and `curl -sI $DATA_URL/steam-prices.json` answers 200 with an ETag.
+  // Until DATA_URL is set, every job and the site behave exactly as before.
+  "name": "forrestgames-data",
+  "main": "src/index.js",
+  "compatibility_date": "2025-01-01",
+  "r2_buckets": [
+    { "binding": "DATA", "bucket_name": "forrestgames-data" }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}
