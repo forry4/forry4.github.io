@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, Fragment } from "react";
 import { baseCss } from "../shared/theme.js";
 import { rangePointer } from "../shared/rangePointer.js";
+import { fetchData } from "../shared/dataUrl.js";
 import { SITES, ALL_SITES, DUB, FORMAT, rescore, seasonRows, showRows, passes, matches, sorter } from "./derive.js";
 
 // CSS lives in the sibling .css file, imported with `?inline` so it is still a string
@@ -11,7 +12,9 @@ const css = _cssText;
 
 // The dataset is a build artifact, fetched rather than bundled (see BggFilter.jsx).
 // Harvested by .github/workflows/anime-harvest.yml; built by animefilter/tools/make_data.py.
-const DATA_URL = `${import.meta.env.BASE_URL || "/"}data/anime-filter.json`;
+// Read through shared/dataUrl.js: the data store's copy (refreshed with no commit and
+// no deploy), else the copy bundled with the site.
+const DATA_FILE = "anime-filter.json";
 
 const MEMBERS = [0, 50000, 100000, 250000, 500000, 1000000, 2000000];
 const PAGE = 50;
@@ -94,8 +97,7 @@ export default function AnimeFilter({ onExit }) {
 
 	useEffect(() => {
 		let live = true;
-		fetch(DATA_URL)
-			.then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+		fetchData(DATA_FILE)
 			.then((j) => { if (live) setData(j); })
 			.catch((e) => { if (live) setErr(String(e.message || e)); });
 		return () => { live = false; };

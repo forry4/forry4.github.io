@@ -17,6 +17,10 @@ name: Anime Filter harvest
 # With publish=true the payload is also rebuilt and committed to main, and the
 # Pages deploy dispatched (a GITHUB_TOKEN push triggers no workflow on its own).
 
+#
+# THE DATA STORE (data-worker/, root CLAUDE.md "THE DATA STORE"): with vars.DATA_URL set
+# this job starts from the store's copy of what it builds on, uploads what it changed,
+# and the pages read it from there. vars.DATA_COMMITS=off stops the commit + deploy.
 on:
   schedule:
     - cron: "41 6 10 1,4,7,10 *"
@@ -91,11 +95,23 @@ jobs:
           git add results_all.json.gz
           git commit -q -m "Anime Filter raw harvest $(date -u +%Y-%m-%d)"
           git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" anime-harvest
+      # The data store's copy is what the build must start from (data-worker/datastore.py).
+      - name: Take the published files
+        if: (github.event_name == 'schedule' || inputs.publish) && !inputs.probe_only
+        env:
+          DATA_URL: ${{ vars.DATA_URL }}
+        run: python data-worker/datastore.py take anime-filter.json
       - name: Build the payload
         if: (github.event_name == 'schedule' || inputs.publish) && !inputs.probe_only
         run: python animefilter/tools/make_data.py
-      - name: Commit and deploy
+      - name: Publish to the data store
         if: (github.event_name == 'schedule' || inputs.publish) && !inputs.probe_only
+        env:
+          DATA_URL: ${{ vars.DATA_URL }}
+          DATA_PUBLISH_TOKEN: ${{ secrets.DATA_PUBLISH_TOKEN }}
+        run: python data-worker/datastore.py publish anime-filter.json
+      - name: Commit and deploy
+        if: ((github.event_name == 'schedule' || inputs.publish) && !inputs.probe_only) && vars.DATA_COMMITS != 'off'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

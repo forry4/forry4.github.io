@@ -852,12 +852,18 @@ const OFFLINE_PACKS = {
 		warm: async ({ authUser }) => {
 			const [books, notes, profile] = await Promise.all([
 				import("../../books/Books.jsx"), import("../../notes/Notes.jsx"), import("../../shared/Profile.jsx")]);
+			// The refreshed data files live in the data store, and fetchData writes the
+			// store's copy over the bundled one the service worker just precached (see
+			// shared/dataUrl.js) — so this pack holds the fresh data, not the build's.
 			// LoL Stats' year files are named by its index, so a new year joins the pack
-			// without a code change; sw.js keeps every same-origin GET it serves.
-			const lolYears = fetch(`${import.meta.env.BASE_URL || "/"}data/lol-champs-index.json`).then((r) => r.json())
-				.then((ix) => Promise.all(ix.years.map((y) => fetch(`${import.meta.env.BASE_URL || "/"}data/lol-champs-${y.year}.json`))));
+			// without a code change.
+			const { fetchData } = await import("../../shared/dataUrl.js");
+			const storeFiles = ["bgg-filter.json", "steam-filter.json", "steam-prices.json",
+				"lol-worlds.json", "anime-filter.json"].map((f) => fetchData(f));
+			const lolYears = fetchData("lol-champs-index.json")
+				.then((ix) => Promise.all(ix.years.map((y) => fetchData(`lol-champs-${y.year}.json`))));
 			await Promise.allSettled([books.saveOfflineCopy?.(authUser), notes.saveOfflineCopy?.(authUser),
-				profile.saveOfflineCopy?.(authUser), lolYears]);
+				profile.saveOfflineCopy?.(authUser), lolYears, ...storeFiles]);
 		},
 	},
 };

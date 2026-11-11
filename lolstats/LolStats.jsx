@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { baseCss } from "../shared/theme.js";
 import { buildPath, parsePath, pushPath, subscribe } from "../shared/router.js";
 import * as D from "./derive.js";
+import { fetchData } from "../shared/dataUrl.js";
 
 // CSS lives in the sibling .css file, imported with `?inline` (see CLAUDE.md: never move
 // it back into a JS template literal).
@@ -10,12 +11,11 @@ const css = _cssText;
 
 // The payloads are build artifacts (tools/), fetched rather than bundled so the lazy
 // chunk stays small. Each is fetched once per page load.
-const dataUrl = (f) => `${import.meta.env.BASE_URL || "/"}data/${f}`;
+// Through shared/dataUrl.js: the data store's copy, else the one bundled with the site.
 const cache = new Map();
 const getJson = (f) => {
 	if (!cache.has(f)) {
-		cache.set(f, fetch(dataUrl(f)).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-			.catch((e) => { cache.delete(f); throw e; }));
+		cache.set(f, fetchData(f).catch((e) => { cache.delete(f); throw e; }));
 	}
 	return cache.get(f);
 };

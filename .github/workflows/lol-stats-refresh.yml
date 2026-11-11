@@ -15,6 +15,10 @@ name: LoL Stats refresh
 # A push made with GITHUB_TOKEN does not trigger other workflows, so the job
 # dispatches the Pages deploy itself once the data is on main.
 
+#
+# THE DATA STORE (data-worker/, root CLAUDE.md "THE DATA STORE"): with vars.DATA_URL set
+# this job starts from the store's copy of what it builds on, uploads what it changed,
+# and the pages read it from there. vars.DATA_COMMITS=off stops the commit + deploy.
 on:
   schedule:
     - cron: "23 10 15 1-11 *"
@@ -42,6 +46,11 @@ jobs:
         with:
           python-version: '3.14'
       # The input reaches the shell through env, never pasted into the script.
+      # The data store's copy is what the build must start from (data-worker/datastore.py).
+      - name: Take the published files
+        env:
+          DATA_URL: ${{ vars.DATA_URL }}
+        run: python data-worker/datastore.py take-lol
       - name: Download
         env:
           YEARS: ${{ inputs.years }}
@@ -54,7 +63,13 @@ jobs:
       # Every CSV downloaded above, and only those (the runner starts with none).
       - name: Build the payload
         run: python -I lolstats/tools/make_data.py
+      - name: Publish to the data store
+        env:
+          DATA_URL: ${{ vars.DATA_URL }}
+          DATA_PUBLISH_TOKEN: ${{ secrets.DATA_PUBLISH_TOKEN }}
+        run: python data-worker/datastore.py publish $(cd webapp/public/data && ls lol-champs-*.json)
       - name: Commit and deploy
+        if: vars.DATA_COMMITS != 'off'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

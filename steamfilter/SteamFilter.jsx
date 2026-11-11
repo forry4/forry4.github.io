@@ -13,7 +13,9 @@ const css = _cssText;
 
 // The dataset is a build artifact, fetched rather than bundled (see BggFilter.jsx).
 // Regenerate with steamfilter/tools/scan_steam.py + make_data.py.
-const DATA_URL = `${import.meta.env.BASE_URL || "/"}data/steam-filter.json`;
+// Read through shared/dataUrl.js: the data store's copy (refreshed with no commit and
+// no deploy), else the copy bundled with the site.
+const DATA_FILE = "steam-filter.json";
 // Prices move daily, so they ship in their own file (steamfilter/tools/prices.py, run by
 // the steam-prices workflow). The page works without it: every price reads "—".
 // Read through shared/dataUrl.js: the data store's copy when the build knows one (so a
@@ -224,8 +226,7 @@ export default function SteamFilter({ authUser, onExit }) {
 
 	useEffect(() => {
 		let live = true;
-		fetch(DATA_URL)
-			.then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+		fetchData(DATA_FILE)
 			.then((j) => { if (live) { setMeta(j); setGames(derive(j.games || [])); } })
 			.catch((e) => { if (live) setErr(String(e.message || e)); });
 		fetchData(PRICES_FILE)

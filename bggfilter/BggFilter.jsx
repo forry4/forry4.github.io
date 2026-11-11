@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { baseCss } from "../shared/theme.js";
 import { rangePointer } from "../shared/rangePointer.js";
+import { fetchData } from "../shared/dataUrl.js";
 
 // CSS lives in the sibling .css file, imported with `?inline` so it is still a string
 // injected by this component's own <style> while mounted. Never move it back into a JS
@@ -11,7 +12,9 @@ const css = _cssText;
 // The dataset is a build artifact, not a bundle import: at ~1MB it would bloat the lazy
 // chunk for everyone who opens the page, so it is fetched once on mount and cached by the
 // CDN like any other static asset. Regenerate with bggfilter/tools/make_data.py.
-const DATA_URL = `${import.meta.env.BASE_URL || "/"}data/bgg-filter.json`;
+// Read through shared/dataUrl.js: the data store's copy (refreshed with no commit and
+// no deploy), else the copy bundled with the site.
+const DATA_FILE = "bgg-filter.json";
 
 const RATINGS = [100, 250, 500, 1000, 2000, 3000, 5000, 10000, 20000, 50000, 100000];
 const COUNTS = ["2", "3", "4"];
@@ -113,8 +116,7 @@ export default function BggFilter({ onExit }) {
 
 	useEffect(() => {
 		let live = true;
-		fetch(DATA_URL)
-			.then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+		fetchData(DATA_FILE)
 			.then((j) => { if (live) { setMeta(j); setGames(derive(j.games)); } })
 			.catch((e) => { if (live) setErr(String(e.message || e)); });
 		return () => { live = false; };

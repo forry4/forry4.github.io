@@ -1225,7 +1225,8 @@ git push                      # deploy-pages.yml builds + publishes (~2-3 min)
 
 Each cadence follows how often its SOURCE changes. Every job commits only when the data moved
 (a quiet run commits and deploys nothing) and dispatches `deploy-pages.yml` itself (a
-`GITHUB_TOKEN` push triggers no workflow). A data-only deploy does not prompt open tabs to
+`GITHUB_TOKEN` push triggers no workflow) — unless `vars.DATA_COMMITS=off`, when the data
+store below is the only destination. A data-only deploy does not prompt open tabs to
 Refresh — the update nudge compares the APP id, not the commit (see Stale-tab nudge).
 
 | Data | Workflow | When (UTC; GitHub fires schedules hours late) | Why |
@@ -1239,25 +1240,35 @@ Refresh — the update nudge compares the APP id, not the commit (see Stale-tab 
 | BGG Filter | `bgg-harvest.yml` | Mar 1 + Sep 1, ≤3 chained runs | ratings move slowly; first harvested 2026-08-29 |
 | Astral Ascent guide | none — by hand | after a game patch | half of it is editorial |
 
-**THE DATA STORE — a refresh without a commit (pilot: `steam-prices.json`, 2026-11-10).**
-Every job above reaches the site as a commit plus a full Pages build, because Pages serves only
-what was in the build. `data-worker/` is the way out: a Workers KV namespace behind a small Cloudflare
-Worker (KV, not R2: R2 needs a billing subscription even for free use; KV's free plan has hard
-limits and cannot be charged for) (`GET /<name>.json` public and CORS-open; `PUT` with the `PUBLISH_TOKEN` bearer, JSON
-only), so a refresh is one upload. **It is INERT until configured** and the move is an
-expand/contract driven by repo settings, not code:
-- `vars.DATA_URL` unset: nothing changes anywhere.
-- `vars.DATA_URL` + `secrets.DATA_PUBLISH_TOKEN` set: `steam-prices.yml` builds on the STORE's
-  previous file (prices.py carries sale starts forward from it), PUTs the new one and reads it
-  back, and STILL commits; the next Pages build bakes `VITE_DATA_URL`, and the page reads the
-  store first (`shared/dataUrl.js` `fetchData`), falling back to the bundled copy on ANY failure.
-- `vars.DATA_COMMITS=off`: the commits stop. Only after a deployed page is reading the store.
-The bundled copy stays in the repo as the fallback and as what OFFLINE serves (the service
-worker is same-origin only), so it goes stale once commits are off; a manual run of the job with
-commits back on refreshes it. Converting another feed = `fetchData("<file>")` in its page plus the
-same three workflow steps. `puzzles.json` and `astral-guide.json` stay in the repo (generated
-from code / hand-refreshed). Set-up steps are in `data-worker/wrangler.jsonc`; nothing in CI
-deploys the Worker. Tests: `webapp/test/unit/dataWorker.test.mjs`.
+**THE DATA STORE — a refresh without a commit (every scheduled feed, 2026-11-11).**
+Pages serves only what was in the build, so every job above used to reach the site as a
+commit plus a full Pages build. `data-worker/` is the way out: a Workers KV namespace behind a
+small Cloudflare Worker at `forrestgames-data.forry4.workers.dev` (KV, not R2: R2 needs a billing
+subscription even for free use; KV's free plan has hard limits and cannot be charged for).
+`GET /<name>.json` is public and CORS-open; `PUT` needs the `PUBLISH_TOKEN` bearer and a JSON body.
+- **Every job above** (prices, the Steam harvest, BGG, anime, LoL stats, LoL Worlds) runs
+  `data-worker/datastore.py take <files>` before its build and `publish <files>` after it.
+  TAKE matters as much as publish: every builder builds ON the previous file (prices carries sale
+  starts forward AND reads the Steam game list, enrich re-reads the payload, anime/BGG refuse a
+  payload under 90% of the current one, LoL rebuilds its index from the year files on disk), so
+  once commits stop, building on the repo's copy would publish a regression. A store that answers
+  anything but 200/404 FAILS the job. Publish uploads only what changed (or was never published)
+  and reads it back until KV serves it (eventually consistent, up to ~a minute).
+- **Every page** reads through `shared/dataUrl.js` `fetchData(name)`: the store first (the build
+  bakes `VITE_DATA_URL` from `vars.DATA_URL`), the bundled copy on ANY failure. A store read is
+  also written into the service worker's cache under the BUNDLED path, and the offline reading
+  pack's `warm` calls `fetchData` for each file — the SW is same-origin only, so this is the only
+  way an offline reader gets the store's copy rather than the build's.
+- **Repo settings drive it, not code**: `vars.DATA_URL` unset = everything as before;
+  `secrets.DATA_PUBLISH_TOKEN` must match the Worker's `PUBLISH_TOKEN`; `vars.DATA_COMMITS=off`
+  stops the commits and deploys (each job's `Commit and deploy` step is gated on it). With
+  commits off the repo's `public/data/` copies are only the fallback and go stale.
+- **Not in the store, on purpose**: `puzzles.json` (generated from code and held to it by
+  `test_puzzle_static.py`) and `astral-guide.json` (hand-refreshed with its editorial half) change
+  only alongside code. The anime job still force-pushes its RAW harvest to the `anime-harvest`
+  branch — an archive, not a site commit.
+- Set-up is in `data-worker/wrangler.jsonc`; nothing in CI deploys the Worker. Tests:
+  `webapp/test/unit/dataWorker.test.mjs` (Worker + reader) and `data-worker/tests/` (take/publish).
 
 **An unattended publish needs a guard against a half-answered harvest**, because the failure
 mode of every one of these sources is a 200 OK with less in it: anime and BGG `make_data.py`

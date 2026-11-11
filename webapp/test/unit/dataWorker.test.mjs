@@ -75,7 +75,7 @@ test("names are one flat namespace of lowercase .json files", async () => {
 });
 
 // ── the page side ────────────────────────────────────────────────────────────
-const res = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => JSON.parse(body) });
+const res = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => JSON.parse(body), text: async () => body });
 function fetcher(routes) {
 	const calls = [];
 	const f = async (url) => {
@@ -111,4 +111,13 @@ test("every way the store can fail falls back to the bundled copy", async () => 
 test("both missing is an error the caller can show", async () => {
 	const [f] = fetcher({ "/data/p.json": [404, "{}"] });
 	await assert.rejects(fetchData("p.json", { fetchImpl: f, remote: "https://d.example", base: "/" }), /HTTP 404/);
+});
+
+test("a dev build never writes to Cache Storage, even with a store", async () => {
+	const [f] = fetcher({ "https://d.example/p.json": [200, '{"from":"store"}'] });
+	let opened = 0;
+	const cachesImpl = { open: async () => { opened++; return { put: async () => {} }; } };
+	assert.deepEqual(await fetchData("p.json", { fetchImpl: f, remote: "https://d.example", base: "/", cachesImpl }), { from: "store" });
+	await new Promise((r) => setTimeout(r, 0));
+	assert.equal(opened, 0);   // __BUILD_ID__ is unset under node, i.e. "dev"
 });

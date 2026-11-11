@@ -14,6 +14,10 @@ name: BGG Filter harvest
 # make_data.py refuses a payload with under 90% of the current file's games, which is
 # what a band answered by Cloudflare challenge pages would look like.
 
+#
+# THE DATA STORE (data-worker/, root CLAUDE.md "THE DATA STORE"): with vars.DATA_URL set
+# this job starts from the store's copy of what it builds on, uploads what it changed,
+# and the pages read it from there. vars.DATA_COMMITS=off stops the commit + deploy.
 on:
   schedule:
     - cron: "29 5 1 3,9 *"
@@ -72,9 +76,20 @@ jobs:
         run: |
           gh workflow run bgg-harvest.yml --ref main \
             -f round="$(( ${{ steps.round.outputs.round }} + 1 ))" -f month="${{ steps.round.outputs.month }}"
+      # The data store's copy is what the build must start from (data-worker/datastore.py).
+      - name: Take the published files
+        env:
+          DATA_URL: ${{ vars.DATA_URL }}
+        run: python data-worker/datastore.py take bgg-filter.json
       - name: Build the payload
         run: python bggfilter/tools/make_data.py
+      - name: Publish to the data store
+        env:
+          DATA_URL: ${{ vars.DATA_URL }}
+          DATA_PUBLISH_TOKEN: ${{ secrets.DATA_PUBLISH_TOKEN }}
+        run: python data-worker/datastore.py publish bgg-filter.json
       - name: Commit and deploy
+        if: vars.DATA_COMMITS != 'off'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
