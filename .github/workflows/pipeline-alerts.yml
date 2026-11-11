@@ -27,6 +27,8 @@ on:
       - Deploy Backend to Render
       - Python CI
     types: [completed]
+  # By hand: send one test alert down the whole path (secret, backend, push channel).
+  workflow_dispatch:
 
 permissions:
   actions: read
@@ -36,6 +38,7 @@ jobs:
     # main only (Python CI also runs on pull requests), and only real failures: a
     # cancelled run is a concurrency hand-off or a person, not a problem.
     if: >-
+      github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.head_branch == 'main' &&
       (github.event.workflow_run.conclusion == 'failure' || github.event.workflow_run.conclusion == 'timed_out')
     runs-on: ubuntu-24.04
@@ -46,6 +49,7 @@ jobs:
       # not a failure; only the round that does not hand off is worth a push.
       - name: Was it handed to a continuation run?
         id: handoff
+        if: github.event_name == 'workflow_run'
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ github.event.workflow_run.id }}
@@ -58,13 +62,14 @@ jobs:
         if: steps.handoff.outputs.handoff != 'yes'
         env:
           ALERT_INGEST_TOKEN: ${{ secrets.ALERT_INGEST_TOKEN }}
-          NAME: ${{ github.event.workflow_run.name }}
-          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
-          EVENT: ${{ github.event.workflow_run.event }}
-          URL: ${{ github.event.workflow_run.html_url }}
+          NAME: ${{ github.event.workflow_run.name || 'Pipeline alerts test' }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion || 'sent by hand, all is well' }}
+          EVENT: ${{ github.event.workflow_run.event || 'manual' }}
+          URL: ${{ github.event.workflow_run.html_url || format('{0}/{1}/actions/runs/{2}', github.server_url, github.repository, github.run_id) }}
         run: |
           if [ -z "$ALERT_INGEST_TOKEN" ]; then
-            echo "::warning::ALERT_INGEST_TOKEN is not set; '$NAME' failed and nobody was told"; exit 0
+            echo "::warning::ALERT_INGEST_TOKEN is not set; '$NAME' failed and nobody was told"
+            [ "${{ github.event_name }}" = workflow_dispatch ] && exit 1 || exit 0
           fi
           body=$(jq -n --arg name "$NAME" --arg how "${CONCLUSION//_/ }" --arg ev "$EVENT" --arg url "$URL" \
             '{kind: "pipeline", key: ("pipeline:" + $name), message: ($name + " " + $how + " (" + $ev + " run). " + $url)}')
