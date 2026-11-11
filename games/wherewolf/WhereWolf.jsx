@@ -55,6 +55,10 @@ const ROLE_META = {
 };
 const roleName = (r) => (r && ROLE_META[r]?.name) || (r ? r : "Unknown");
 const roleColor = (r) => (r && ROLE_META[r]?.color) || "#3a342a";
+// The role colour as TEXT. The raw colours are tuned for borders and card edges; set as
+// 13px type on the dark panel several of them (Tanner, Hunter, Minion) read at well under
+// 3:1. Mixing toward the page's light ink keeps each hue and lifts every one clear.
+const roleInk = (r) => `color-mix(in srgb, ${roleColor(r)} 55%, #f3ead8)`;
 const roleDesc = (r) => (r && ROLE_META[r]?.desc) || "";
 // The token row names each role in play, once, with a count. It used to print the
 // physical game's token LETTERS ("R S T V W W"), which only a regular can decode and
@@ -769,7 +773,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
                   const n = counts[role] || 0;
                   return (
                     <div className="ww-rolepick-row" key={role} title={roleDesc(role)}>
-                      <span className="ww-rp-name" style={{ color: roleColor(role) }}>{roleName(role)}</span>
+                      <span className="ww-rp-name" style={{ color: roleInk(role) }}>{roleName(role)}</span>
                       <button className="ww-cap-btn" disabled={n <= 0} onClick={() => adjustRole(role, -1)}>−</button>
                       <span className="ww-rp-count">{n}</span>
                       <button className="ww-cap-btn" disabled={n >= (ROLE_CAPS[role] || 0)} onClick={() => adjustRole(role, 1)}>+</button>

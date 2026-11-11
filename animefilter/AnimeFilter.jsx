@@ -76,6 +76,13 @@ function Seg({ label, options, value, onPick }) {
 // Props: { onExit }.
 export default function AnimeFilter({ onExit }) {
 	const [data, setData] = useState(null);
+	// PHONES OPEN ON THE RESULTS. The dials are several screens tall at 390px, so the
+	// list they filter started far below the fold; there they begin folded behind one
+	// button, with the "N of M clear these dials" line still showing. The fold is
+	// CSS-scoped to the phone tier, so on a wide screen this state does nothing.
+	const [dialsOpen, setDialsOpen] = useState(() => {
+		try { return !window.matchMedia("(max-width:640px)").matches; } catch { return true; }
+	});
 	const [err, setErr] = useState("");
 	const [d, setD] = useState(loadDials);
 	const [q, setQ] = useState("");
@@ -187,9 +194,11 @@ export default function AnimeFilter({ onExit }) {
 					{!err && !data && <div className="anf-loading">Loading the list…</div>}
 					{data && (
 						<>
-							<section className="anf-panel">
+							<section className={`anf-panel${dialsOpen ? "" : " is-folded"}`}>
 								<div className="anf-phead">
 									<h2>Dials</h2>
+									<button type="button" className="btn btn-ghost btn-sm anf-fold" aria-expanded={dialsOpen}
+										onClick={() => setDialsOpen((o) => !o)}>{dialsOpen ? "Hide dials" : "Show dials"}</button>
 									<button type="button" className="btn btn-ghost btn-sm"
 										onClick={() => { setD({ ...DEFAULTS }); setLimit(PAGE); }}>Reset all dials</button>
 								</div>

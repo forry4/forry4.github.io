@@ -1466,3 +1466,12 @@
 .or-acting-theirs .or-player.theirs .or-player-hint { padding: 2px 8px; border: 1px solid var(--or-seat); border-radius: 999px; line-height: 1.3; }
 .or-acting-mine .or-player.mine .or-player-hint { background: var(--or-seat); color: #062624; box-shadow: 0 0 12px color-mix(in srgb, var(--or-seat) 60%, transparent); }
 .or-acting-theirs .or-player.theirs .or-player-hint { color: var(--or-seat); }
+
+/* PHONE: the hand scrolls sideways and the cut-off card at the right edge read as a
+   layout slip rather than "there is more". Fade the trailing edge so the cut is plainly
+   deliberate; the matching end padding lets the last card scroll clear of the fade. The
+   mulligan hand is a 2-column grid, not a scroller, so it is excluded. */
+@media (max-width: 760px) {
+  .or-hand-zone .or-hand { padding-right: 30px; -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 30px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 30px), transparent); }
+  .or-mulligan .or-hand { padding-right: 0; -webkit-mask-image: none; mask-image: none; }
+}

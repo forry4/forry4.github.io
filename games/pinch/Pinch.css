@@ -70,3 +70,11 @@
    - The player / heading / pool labels were 7-9px. */
 @media(max-width:900px){.pi-table-head p{display:none}.pi-side{grid-template-columns:1fr}.pi-log{grid-column:auto}.pi-board-frame{aspect-ratio:auto}}
 @media(max-width:520px){.pi-score-rail text{font-size:26px;letter-spacing:3px}.pi-player small,.pi-player-score span,.pi-table-head span,.pi-mode-card small{font-size:10px}.pi-decision b,.pi-decision span,.pi-mode-card span{font-size:11px}.pi-log p{font-size:12px}}
+
+/* ONE status line, ONE wordmark. On a desktop the heading and its hint were printed
+   above the board (.pi-table-head) and again below it (.pi-decision), and the side
+   rail repeated the "PINCH" the top bar already carries. The bar under the board
+   stays in the tree as the live region — it is only taken off screen — and it is
+   still the visible one on phones, where the head's hint is hidden instead. */
+.pi-mark{display:none}
+@media(min-width:901px){.pi-decision{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;min-height:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}}

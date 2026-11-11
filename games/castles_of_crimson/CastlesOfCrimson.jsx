@@ -2396,6 +2396,14 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
   // Whose turn is it? The badge shows on the ACTIVE player's own panel — beside your
   // Discard/End buttons on your turn, in the same header spot on the opponent's turn.
   const mineActive = !over && (setupPhase ? setupMine : myTurnRaw);
+  // Stacked layouts (phones, portrait tablets) put the whole market above your own
+  // duchy, so "Place your starting castle" asked for a move on a board 1.5 screens down.
+  // The badge that says it is your turn is also the way there; CSS adds the arrow only
+  // where the layout is stacked.
+  const jumpToDuchy = () => {
+    const el = document.querySelector(".coc-duchy-head");
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
   const myBadgeText = setupPhase ? "Place your starting castle" : (pendingMine ? "Your decision" : "Your turn");
   const oppBadgeText = setupPhase
     ? (aiThinking ? "Bot is choosing…" : `${players[game.turn] || "Opponent"} is choosing…`)
@@ -2471,7 +2479,10 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
             {over
               ? <span className="coc-turnbadge you coc-gameover-badge">Game over</span>
               : mineActive
-                ? <span className="coc-turnbadge you">{myBadgeText}</span>
+                ? <span className="coc-turnbadge you coc-jump" role="button" tabIndex={0}
+                    title="Jump to your duchy"
+                    onClick={jumpToDuchy}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); jumpToDuchy(); } }}>{myBadgeText}</span>
                 : <span className="coc-turnbadge them">{oppBadgeText}</span>}
           </span>
         </div>

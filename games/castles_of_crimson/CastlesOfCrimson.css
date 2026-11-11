@@ -565,3 +565,13 @@ html,body{margin:0;padding:0;background:#120c0d}
 @media (min-width:1600px){
   .coc-col-board .coc-board-hex{zoom:1}
 }
+
+/* The your-turn badge doubles as a jump to your own duchy wherever the layout stacks the
+   market above it (see jumpToDuchy). The arrow only appears there; on a wide screen the
+   duchy is already beside the market and the badge stays a plain label. */
+.coc .coc-turnbadge.coc-jump{cursor:default}
+@media (max-width:900px){
+  .coc .coc-turnbadge.coc-jump{cursor:pointer}
+  .coc .coc-turnbadge.coc-jump::after{content:" \2193";font-family:inherit}
+  .coc .coc-duchy-head{scroll-margin-top:10px}
+}

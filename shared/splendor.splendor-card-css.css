@@ -80,5 +80,7 @@
    Duel's pearl column put two chips side by side on a ~52px face and ran off its edge. */
 @media (min-width:721px){
   .level-row .cost-row{width:fit-content;padding:0 .5em 0 .15em;border-radius:999px;background:rgba(0,0,0,.34);box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
-  .level-row .cost-num{color:var(--text);font-weight:700}
 }
+/* The NUMERAL is bright and bold at every width. It used to be inside the block above,
+   so on a phone — where the digits are smallest — a cost was dim grey on a dark card. */
+.level-row .cost-num{color:var(--text);font-weight:700}

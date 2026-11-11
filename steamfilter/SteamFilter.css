@@ -154,3 +154,15 @@
 .stf-switch{font-style:normal;font-weight:700;color:#ff5d5d;border:1px solid currentColor;
 	border-radius:3px;padding:0 4px;margin-right:6px;font-size:.62rem;letter-spacing:.04em;
 	text-transform:uppercase;}
+
+/* The dials fold away on phones (see `dialsOpen`): only the heading row and the
+   "N of M clear these dials" line stay, so the list is on the first screen. The page
+   name is already in the top bar, so the hero drops its second copy and keeps the blurb. */
+.stf-fold{display:none}
+@media(max-width:640px){
+	.stf-fold{display:inline-flex;margin-left:auto}
+	.stf-panel.is-folded>:not(.stf-phead):not(.stf-effect){display:none}
+	.stf-panel.is-folded .stf-phead .btn:not(.stf-fold){display:none}
+	.stf-panel.is-folded .stf-phead{margin-bottom:0}
+	.stf-logo{display:none}
+}

@@ -191,6 +191,13 @@ const EyeOff = () => (
 // Props: { authUser, onExit }.
 export default function SteamFilter({ authUser, onExit }) {
 	const [games, setGames] = useState(null);
+	// PHONES OPEN ON THE RESULTS. The dials are several screens tall at 390px, so the
+	// list they filter started far below the fold; there they begin folded behind one
+	// button, with the "N of M clear these dials" line still showing. The fold is
+	// CSS-scoped to the phone tier, so on a wide screen this state does nothing.
+	const [dialsOpen, setDialsOpen] = useState(() => {
+		try { return !window.matchMedia("(max-width:640px)").matches; } catch { return true; }
+	});
 	const [err, setErr] = useState("");
 	const [meta, setMeta] = useState(null);
 	const [prices, setPrices] = useState(null);
@@ -341,9 +348,11 @@ export default function SteamFilter({ authUser, onExit }) {
 					{!err && !games && <div className="stf-loading">Loading the list…</div>}
 					{games && (
 						<>
-							<section className="stf-panel">
+							<section className={`stf-panel${dialsOpen ? "" : " is-folded"}`}>
 								<div className="stf-phead">
 									<h2>Dials</h2>
+									<button type="button" className="btn btn-ghost btn-sm stf-fold" aria-expanded={dialsOpen}
+										onClick={() => setDialsOpen((o) => !o)}>{dialsOpen ? "Hide dials" : "Show dials"}</button>
 									<button type="button" className="btn btn-ghost btn-sm"
 										onClick={() => { setD({ ...DEFAULTS }); setLimit(PAGE); }}>Reset all dials</button>
 								</div>
