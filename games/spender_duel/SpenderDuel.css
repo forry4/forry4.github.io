@@ -258,7 +258,9 @@
 .duel-player{margin-bottom:14px}
 /* Reserve the top-right for the (absolutely-positioned) win meters so the name/turn-badge
    never run under them; the name truncates rather than colliding. */
-.duel-player .hd{display:flex;align-items:center;gap:8px;margin-bottom:6px;padding-right:150px;min-height:22px}
+/* WRAPS: beside the 138px win meters there is room for a name OR a name and a turn badge,
+   not always both — unwrapped, the badge won and the player's own name was cut to "Aurel…". */
+.duel-player .hd{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin-bottom:6px;padding-right:150px;min-height:22px}
 .duel-player .hd .nm{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.02rem;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .duel-player .hd .duel-turnbadge{flex-shrink:0}
 .duel-player.active{border-color:#e8c96a;box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(232,201,106,.3),0 3px 16px -4px rgba(201,168,76,.3),0 2px 10px -4px rgba(0,0,0,.5)}

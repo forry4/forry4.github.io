@@ -443,7 +443,9 @@ const css = baseCss + lobbyCss + _cssText
   /* points absolutely pinned near the top (so they never shift with req count);
      reqs are the only flow child, so justify-content:center on the noble centers them
      around the box's vertical middle, align-items:flex-start keeps them on the left. */
-  .noble-points{font-size:calc(var(--noble-w) * 0.28);position:absolute;top:calc(var(--noble-w) * 0.05);left:0;right:0;text-align:center;line-height:1}
+  /* TOP-RIGHT, not centred: the requirement column starts at the left edge and, with
+     three rows, rises into the band the numeral sits in — centred, the two collided. */
+  .noble-points{font-size:calc(var(--noble-w) * 0.28);position:absolute;top:calc(var(--noble-w) * 0.06);right:calc(var(--noble-w) * 0.1);text-align:right;line-height:1}
   .noble-req{gap:calc(var(--noble-w) * 0.03);flex:0 0 auto;justify-content:center;align-items:flex-start}
   .noble-req-row{font-size:calc(var(--noble-w) * 0.14);gap:calc(var(--noble-w) * 0.04)}
   .noble-req-dot{width:calc(var(--noble-w) * 0.09);height:calc(var(--noble-w) * 0.09)}
@@ -644,6 +646,14 @@ const css = baseCss + lobbyCss + _cssText
   .puzzle-fail-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:2rem;color:#e0696b;margin-bottom:8px}
   .puzzle-fail-sub{opacity:.85;margin-bottom:20px;line-height:1.45}
   .puzzle-nav-aids{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+  /* Phone: Back + five aids do not fit one row beside the title, and wrapping squeezed the
+     title into three stacked words. Two rows: Back and the title, then the aids spread out. */
+  @media(max-width:640px){
+  .game-nav.puzzle-nav{flex-wrap:wrap;row-gap:6px}
+  .game-nav.puzzle-nav .game-nav-title{white-space:nowrap;letter-spacing:.2em;margin-right:auto;margin-left:12px}
+  .game-nav.puzzle-nav .puzzle-nav-aids{flex:1 0 100%;flex-wrap:nowrap;justify-content:space-between}
+  .game-nav.puzzle-nav .puzzle-nav-aids .btn{flex:1 1 auto;padding-left:6px;padding-right:6px;white-space:nowrap}
+  }
   .puzzle-hint-word{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.5rem;color:var(--gold);font-weight:700;margin:10px 0 16px}
   .puzzle-answer-list{margin:6px 0 10px;padding-left:22px;line-height:1.7}
   .puzzle-answer-note{font-size:.8rem;opacity:.7;margin:0 0 14px}
@@ -3754,7 +3764,7 @@ export default function SpenderApp() {
 		<>
 			<style>{css}</style>
 			<div className="app game-screen">
-				<div className="game-nav">
+				<div className={`game-nav${puzzling ? " puzzle-nav" : ""}`}>
 					{puzzling
 						? <button className="btn btn-ghost btn-sm" onClick={exitPuzzle}>← Puzzles</button>
 						: reviewChrome

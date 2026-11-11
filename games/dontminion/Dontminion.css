@@ -646,6 +646,21 @@
   }
 }
 
+/* THE TWO-ROW LAPTOP SUPPLY USES ITS WIDTH. Below the one-line width the piles sat at
+   the 88px floor in a ~950px box — seven basics across, five kingdom piles under them,
+   and a third of the row empty on either side — and at 88px four or five of ten rules
+   texts would not fit even at the 10px floor and ended in an ellipsis. Seven across is
+   the binding row, so size to that (up to 124px). The basics pay for the extra height:
+   they carry no rules text, so they drop to a short face, as they already do on phones. */
+@container (min-width: 700px) and (max-width: 999px) {
+  .dm-supply-row {
+    --card-w-s: clamp(88px, calc((100cqw - 6 * 10px - 30px) / 7), 124px);
+    --card-h: calc(var(--card-w-s) * 1.18);
+  }
+  .dm-basics .dm-card.dm-card-small { height: calc(var(--card-w-s) * .62); }
+  .dm-basics .dm-types { display: none; }
+}
+
 /* ── modals ── */
 .dm-backdrop {
   position: fixed; inset: 0; background: rgba(10, 8, 5, .72);

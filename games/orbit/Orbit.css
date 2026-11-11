@@ -1203,7 +1203,12 @@
   .or-sideboards { grid-template-rows: minmax(0, auto) minmax(120px, 1fr); }
   .or-tech-col { padding: 5px; gap: 3px; }
   .or-tech-space { padding: 5px; }
-  .or-tech-text { -webkit-line-clamp: 3; font-size: .7rem; line-height: 1.25; }
+  /* FIVE lines of slightly smaller type, not three: at three, six of the fifteen
+     spaces ended in an ellipsis on a 1366x768 laptop ("…on 1 single planet o…"),
+     and this is the only place on the board the effect is written out. Five holds
+     every space but the one double-sentence Exile (~140 characters), which still
+     opens in full on a press. Costs ~17px a rung, which the log below gives up. */
+  .or-tech-text { -webkit-line-clamp: 5; font-size: .66rem; line-height: 1.18; }
   .or-control-hint { padding: 8px; }
   /* Every row of the player box gives a little at short heights; the played
      strip is the newest and the easiest to tighten without losing a fact. */

@@ -668,8 +668,16 @@
 }
 
 /* ─── Local vs AI hub (the /offline screen) ─────────────────────────────── */
-.offline-hub{display:flex;flex-direction:column;gap:14px;max-width:560px;margin:0 auto;width:100%}
+.offline-hub{display:flex;flex-direction:column;gap:14px;max-width:560px;margin:0 auto;width:100%;box-sizing:border-box}
+/* `.browser` is padding:0 here, so the first panel sat flush against the header; the
+   class is doubled to out-rank that reset wherever the two rules land in the sheet. */
+.offline-hub.offline-hub{padding:18px 12px 28px}
 .offline-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px}
+/* The create MODAL spaces its rows with a flex gap on its body; this panel reuses the
+   rows without that body, so each label sat on the control above it. */
+.offline-panel>.cm-row{margin-bottom:14px}
+/* Four games: two rows of two, rather than three and one stretched full width. */
+.offline-panel .cm-seg-wrap .cm-seg-btn{flex:1 1 calc(50% - 3px)}
 .offline-h{font-family:Cinzel,serif;color:var(--gold-light);font-size:1rem;margin:0 0 8px}
 .offline-note{display:block;color:var(--text-dim);font-size:13px;line-height:1.45;margin:0 0 10px}
 .offline-note.ok{color:#7fb069}
