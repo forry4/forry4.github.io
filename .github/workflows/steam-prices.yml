@@ -12,7 +12,7 @@ name: Steam Filter prices
 # WHERE THE FILE GOES — two destinations, switched by repo settings, so the move off
 # commits is an expand/contract and never a flag day:
 #
-#   vars.DATA_URL set     -> PUT to the data store (data-worker/, R2). The page reads
+#   vars.DATA_URL set     -> PUT to the data store (data-worker/, Workers KV). The page reads
 #                            it within minutes: no commit, no Pages build.
 #   vars.DATA_COMMITS     -> anything but "off" (the default): ALSO commit to main and
 #                            deploy, as before. Set it to "off" once the site is
@@ -87,7 +87,12 @@ jobs:
             --data-binary "@$f" "${DATA_URL%/}/steam-prices.json"
           echo
           # Read it back: a 200 from the PUT is not the same as the file being served.
-          curl -sS --fail --retry 3 --retry-all-errors "${DATA_URL%/}/steam-prices.json" | cmp - "$f"
+          # The store is eventually consistent (up to ~60s), so give the read-back time.
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if curl -sS --fail "${DATA_URL%/}/steam-prices.json?v=$i" | cmp -s - "$f"; then ok=1; break; fi
+            sleep 10
+          done
+          [ "${ok:-}" = 1 ] || { echo "::error::the data store is not serving the file that was just published"; exit 1; }
           echo "published $(wc -c < "$f") bytes"
       - name: Commit and deploy
         if: vars.DATA_COMMITS != 'off'

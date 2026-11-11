@@ -5,20 +5,15 @@ import assert from "node:assert/strict";
 import { handle, MAX_BYTES } from "../../../data-worker/src/index.js";
 import { fetchData } from "../../../shared/dataUrl.js";
 
-function bucket() {
+function bucket() {            // a stand-in Workers KV namespace
 	const store = new Map();
-	let n = 0;
 	return {
 		store,
-		async get(key) {
+		async getWithMetadata(key) {
 			const o = store.get(key);
-			return o ? { body: o.bytes, httpEtag: o.etag, uploaded: o.uploaded } : null;
+			return o ? { value: o.bytes, metadata: o.metadata } : { value: null, metadata: null };
 		},
-		async put(key, bytes) {
-			const o = { bytes, etag: `"v${++n}"`, uploaded: Date.now() };
-			store.set(key, o);
-			return { httpEtag: o.etag };
-		},
+		async put(key, bytes, opts = {}) { store.set(key, { bytes, metadata: opts.metadata || null }); },
 	};
 }
 const env = () => ({ DATA: bucket(), PUBLISH_TOKEN: "s3cret-token" });

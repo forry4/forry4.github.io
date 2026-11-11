@@ -1241,8 +1241,9 @@ Refresh — the update nudge compares the APP id, not the commit (see Stale-tab 
 
 **THE DATA STORE — a refresh without a commit (pilot: `steam-prices.json`, 2026-11-10).**
 Every job above reaches the site as a commit plus a full Pages build, because Pages serves only
-what was in the build. `data-worker/` is the way out: an R2 bucket behind a small Cloudflare
-Worker (`GET /<name>.json` public and CORS-open; `PUT` with the `PUBLISH_TOKEN` bearer, JSON
+what was in the build. `data-worker/` is the way out: a Workers KV namespace behind a small Cloudflare
+Worker (KV, not R2: R2 needs a billing subscription even for free use; KV's free plan has hard
+limits and cannot be charged for) (`GET /<name>.json` public and CORS-open; `PUT` with the `PUBLISH_TOKEN` bearer, JSON
 only), so a refresh is one upload. **It is INERT until configured** and the move is an
 expand/contract driven by repo settings, not code:
 - `vars.DATA_URL` unset: nothing changes anywhere.

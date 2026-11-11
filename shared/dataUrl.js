@@ -2,8 +2,8 @@
  *
  * They used to be only `<site>/data/<name>` — files committed to the repo and shipped
  * in the Pages build, so refreshing one meant a commit and a full deploy. A refreshed
- * file can now live in the data store instead (data-worker/, an R2 bucket behind a
- * Worker), and this is the one place that knows about both:
+ * file can now live in the data store instead (data-worker/, a Workers KV namespace behind
+ * a Worker), and this is the one place that knows about both:
  *
  *   1. the data store, when the build was given VITE_DATA_URL — the fresh copy;
  *   2. the copy bundled with the site — always there, and what serves OFFLINE (the

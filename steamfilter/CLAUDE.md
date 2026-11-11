@@ -64,7 +64,7 @@ so a change to `categories.json` never needs the 7-hour review harvest.
 ## Prices (`tools/prices.py`) — their own file, their own workflow
 
 **Prices are the pilot for the data store** (root CLAUDE.md, "THE DATA STORE"): with
-`vars.DATA_URL` set the workflow publishes the file to R2 and the page reads it through
+`vars.DATA_URL` set the workflow publishes the file to the store and the page reads it through
 `shared/dataUrl.js`, bundled copy as the fallback. Unset, everything below is unchanged.
 
 Prices move daily and a sale ends mid-week, while the review harvest runs monthly, so they ship as `steam-prices.json`, written by `.github/workflows/steam-prices.yml`

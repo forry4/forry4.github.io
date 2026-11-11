@@ -1,5 +1,5 @@
 {
-  // The data Worker — serves the site's generated data files from an R2 bucket so a
+  // The data Worker — serves the site's generated data files from a Workers KV namespace so a
   // data refresh needs no commit and no Pages deploy. See src/index.js for the why,
   // and docs in the root CLAUDE.md ("The data refresh schedule").
   //
@@ -8,7 +8,7 @@
   //
   // SET UP (once; nothing in CI deploys this):
   //
-  //     npx wrangler r2 bucket create forrestgames-data
+  //     npx wrangler kv namespace create forrestgames-data     (put its id below)
   //     npx wrangler deploy --config data-worker/wrangler.jsonc
   //     npx wrangler secret put PUBLISH_TOKEN --config data-worker/wrangler.jsonc
   //         (paste a long random string — `openssl rand -hex 32`)
@@ -24,8 +24,10 @@
   "name": "forrestgames-data",
   "main": "src/index.js",
   "compatibility_date": "2025-01-01",
-  "r2_buckets": [
-    { "binding": "DATA", "bucket_name": "forrestgames-data" }
+  // KV, not R2: R2 needs a billing subscription even for free use; KV on the free plan
+  // has hard limits and cannot be charged for (see src/index.js). The id is not a secret.
+  "kv_namespaces": [
+    { "binding": "DATA", "id": "8a208e0a70a94a99b587b82b9eea8ee9" }
   ],
   "observability": {
     "enabled": true

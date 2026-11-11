@@ -1,5 +1,5 @@
-// The data store's front door — serves the site's GENERATED data files out of an R2
-// bucket, and takes a new copy from the job that made it.
+// The data store's front door — serves the site's GENERATED data files out of a Workers
+// KV namespace, and takes a new copy from the job that made it.
 //
 // WHY THIS EXISTS. Every refreshed data file (prices twice a day, LoL, anime, ...) used
 // to reach the site as a COMMIT to main followed by a full Pages build, because Pages
@@ -13,6 +13,13 @@
 //   GET  /<name>.json   public, CORS-open (it is the same public data the site ships),
 //                       ETag + a short max-age so a refresh shows within minutes
 //   PUT  /<name>.json   Authorization: Bearer <PUBLISH_TOKEN>; body must be JSON
+//
+// KV AND NOT R2, deliberately: R2 needs a billing subscription on the account even to
+// stay inside its free tier, and KV does not — on the Workers Free plan it has hard
+// daily limits (100k reads, 1k writes, 1GB) and simply refuses past them, so this can
+// never produce a charge. A value may be 25MB; the largest file is 2.6MB. KV is
+// eventually consistent (a write can take up to a minute to be read everywhere), which
+// is why the publishing job retries its read-back.
 //
 // The name is the whole key: one flat namespace of lowercase `*.json` files, the same
 // filenames that live in webapp/public/data/. `handle` is exported so the unit test
@@ -53,20 +60,21 @@ export async function handle(request, env) {
 	if (!NAME.test(name)) return json(404, { ok: false, message: "no such file" });
 
 	if (method === "GET" || method === "HEAD") {
-		const obj = await env.DATA.get(name);
-		if (!obj) return json(404, { ok: false, message: "no such file" });
+		const { value, metadata } = await env.DATA.getWithMetadata(name, "arrayBuffer");
+		if (value === null) return json(404, { ok: false, message: "no such file" });
+		const etag = (metadata && metadata.etag) || null;
 		const headers = {
 			"Content-Type": "application/json",
 			"Cache-Control": `public, max-age=${MAX_AGE}`,
-			ETag: obj.httpEtag,
-			...(obj.uploaded ? { "Last-Modified": new Date(obj.uploaded).toUTCString() } : {}),
+			...(etag ? { ETag: etag } : {}),
+			...(metadata && metadata.uploaded ? { "Last-Modified": new Date(metadata.uploaded).toUTCString() } : {}),
 			...CORS,
 		};
 		const seen = request.headers.get("If-None-Match");
-		if (seen && seen.split(",").map((s) => s.trim()).includes(obj.httpEtag)) {
+		if (etag && seen && seen.split(",").map((s) => s.trim()).includes(etag)) {
 			return new Response(null, { status: 304, headers });
 		}
-		return new Response(method === "HEAD" ? null : obj.body, { status: 200, headers });
+		return new Response(method === "HEAD" ? null : value, { status: 200, headers });
 	}
 
 	if (method === "PUT") {
@@ -86,8 +94,10 @@ export async function handle(request, env) {
 		} catch {
 			return json(400, { ok: false, message: "body is not a JSON object or array" });
 		}
-		const put = await env.DATA.put(name, body, { httpMetadata: { contentType: "application/json" } });
-		return json(200, { ok: true, name, bytes: body.byteLength, etag: put && put.httpEtag });
+		const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", body));
+		const etag = `"${[...digest.slice(0, 16)].map((b) => b.toString(16).padStart(2, "0")).join("")}"`;
+		await env.DATA.put(name, body, { metadata: { etag, uploaded: Date.now() } });
+		return json(200, { ok: true, name, bytes: body.byteLength, etag });
 	}
 
 	return json(405, { ok: false, message: "method not allowed" });
