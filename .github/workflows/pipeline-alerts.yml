@@ -1,0 +1,74 @@
+name: Pipeline alerts
+
+# Tells the site owner when a pipeline fails, through the same channel as every other
+# site alert: this posts to the backend's /ops/alert (core/monitor.py), which raises
+# it in the Site health panel and pushes it to whatever ntfy/webhook channel Render is
+# configured with. GitHub's own failure email reaches only whoever last edited the
+# workflow's schedule, and is easy to filter away.
+#
+# What this cannot see is a scheduled run GitHub never STARTED (it drops a good share
+# of them). core.monitor covers that half for the busiest feed by reading how old the
+# data store's prices file is.
+#
+# Needs the ALERT_INGEST_TOKEN Actions secret to equal the ALERT_INGEST_TOKEN env var
+# on Render. Without the secret this job notes a warning and does nothing else.
+
+on:
+  workflow_run:
+    workflows:
+      - Steam Filter prices
+      - Steam Filter harvest
+      - BGG Filter harvest
+      - Anime Filter harvest
+      - LoL Stats refresh
+      - LoL Worlds refresh
+      - Data store seed
+      - Deploy to GitHub Pages
+      - Deploy Backend to Render
+      - Python CI
+    types: [completed]
+
+permissions:
+  actions: read
+
+jobs:
+  alert:
+    # main only (Python CI also runs on pull requests), and only real failures: a
+    # cancelled run is a concurrency hand-off or a person, not a problem.
+    if: >-
+      github.event.workflow_run.head_branch == 'main' &&
+      (github.event.workflow_run.conclusion == 'failure' || github.event.workflow_run.conclusion == 'timed_out')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      # The Steam and BGG harvests fail ON PURPOSE when a round runs out of time,
+      # then dispatch the next round ("Continue in a new run"). That is a hand-off,
+      # not a failure; only the round that does not hand off is worth a push.
+      - name: Was it handed to a continuation run?
+        id: handoff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          n=$(gh api "repos/${{ github.repository }}/actions/runs/$RUN_ID/jobs" \
+            --jq '[.jobs[].steps[]? | select(.name == "Continue in a new run" and .conclusion == "success")] | length')
+          echo "handoff=$([ "${n:-0}" -gt 0 ] && echo yes || echo no)" >> "$GITHUB_OUTPUT"
+          echo "continuation steps that ran: ${n:-0}"
+      - name: Alert the owner
+        if: steps.handoff.outputs.handoff != 'yes'
+        env:
+          ALERT_INGEST_TOKEN: ${{ secrets.ALERT_INGEST_TOKEN }}
+          NAME: ${{ github.event.workflow_run.name }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          EVENT: ${{ github.event.workflow_run.event }}
+          URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          if [ -z "$ALERT_INGEST_TOKEN" ]; then
+            echo "::warning::ALERT_INGEST_TOKEN is not set; '$NAME' failed and nobody was told"; exit 0
+          fi
+          body=$(jq -n --arg name "$NAME" --arg how "${CONCLUSION//_/ }" --arg ev "$EVENT" --arg url "$URL" \
+            '{kind: "pipeline", key: ("pipeline:" + $name), message: ($name + " " + $how + " (" + $ev + " run). " + $url)}')
+          # The backend may be asleep (Render free tier): hold on through its cold start.
+          curl -sS --fail-with-body --retry 6 --retry-all-errors --retry-delay 15 --max-time 120 \
+            -X POST -H "Authorization: Bearer $ALERT_INGEST_TOKEN" -H "Content-Type: application/json" \
+            --data "$body" https://splendid-nelz.onrender.com/ops/alert

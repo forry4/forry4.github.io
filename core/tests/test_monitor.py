@@ -221,3 +221,56 @@ def test_accounts_lists_every_name_most_recently_active_first(conn):
         {"name": "Cy", "last_login": 300, "last_seen": 300, "games": 0, "by_game": {}},
         {"name": "Ann", "last_login": None, "last_seen": None, "games": 1, "by_game": {"pinch": 1}},
     ]
+
+
+# ── alerts from GitHub Actions (/ops/alert) ──────────────────────────────────
+def _ingest(token="sekret", auth="Bearer sekret", **kw):
+    body = monitor.IngestIn(**{"kind": "pipeline", "message": "Steam Filter prices failed", **kw})
+    return monitor.ingest_alert(body, auth)
+
+
+def test_a_pipeline_alert_with_the_token_is_raised(monkeypatch):
+    monkeypatch.setenv("ALERT_INGEST_TOKEN", "sekret")
+    monkeypatch.setattr(monitor, "_ingest_limiter", None)
+    assert _ingest(key="pipeline:prices", severity="critical") == {"ok": True, "queued": True}
+    assert _kinds() == [("pipeline", "critical")]
+    assert alerts._sink[0]["message"] == "Steam Filter prices failed"
+
+
+def test_the_ingest_route_refuses_without_the_right_token(monkeypatch):
+    monkeypatch.setattr(monitor, "_ingest_limiter", None)
+    monkeypatch.delenv("ALERT_INGEST_TOKEN", raising=False)
+    for auth in (None, "Bearer ", "Bearer anything"):
+        with pytest.raises(HTTPException) as e:      # unset on the server = closed
+            _ingest(auth=auth)
+        assert e.value.status_code == 401
+    monkeypatch.setenv("ALERT_INGEST_TOKEN", "sekret")
+    for auth in (None, "sekret", "Bearer wrong", "Basic sekret", "Bearer sëkret"):
+        with pytest.raises(HTTPException) as e:
+            _ingest(auth=auth)
+        assert e.value.status_code == 401, auth
+    with pytest.raises(HTTPException) as e:          # only the kinds it exists for
+        _ingest(kind="owner-login")
+    assert e.value.status_code == 400
+    assert alerts._sink == []
+
+
+def test_the_ingest_route_is_registered_outside_the_owner_routes():
+    app, eps, _ = _routes({})
+    assert ("POST", "/ops/alert") in eps
+
+
+def test_a_stale_price_file_alerts_and_a_fresh_one_does_not(monkeypatch):
+    now = 1_000_000_000
+    monitor.check_data_freshness(now, last_modified=lambda n: now - 3600)
+    assert alerts._sink == []
+    monitor.check_data_freshness(now, last_modified=lambda n: now - 72 * 3600)
+    assert _kinds() == [("data-stale", "warn")]
+    assert "72 hours" in alerts._sink[0]["message"]
+
+
+def test_an_unreachable_store_alerts_rather_than_crashing_the_monitor():
+    def boom(name):
+        raise OSError("connection refused")
+    monitor.check_data_freshness(1, last_modified=boom)
+    assert _kinds() == [("data-store", "warn")]

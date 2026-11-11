@@ -24,15 +24,19 @@ call endpoints directly never start a thread or a task.
 from __future__ import annotations
 
 import asyncio
+import hmac
 import logging
 import os
 import sys
 import threading
 import time
 import traceback
+import urllib.request
+from email.utils import parsedate_to_datetime
 from typing import Callable
 
-from fastapi import Depends, HTTPException, Query
+from fastapi import Depends, Header, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from core import alerts, results
 from core.auth import is_site_owner
@@ -249,6 +253,46 @@ def check_backend() -> None:
                      severity="critical", cooldown=6 * 3600)
 
 
+# ── the data store's freshness ───────────────────────────────────────────────
+# The scheduled data jobs alert on their own FAILURE (.github/workflows/pipeline-alerts.yml,
+# through /ops/alert below). What that cannot see is a job that never RAN: GitHub
+# drops over half of its scheduled firings, and a dropped run fails nothing. So the
+# monitor reads how old the store's files are. Only files that change on (nearly)
+# every run belong here — a store copy is only rewritten when its data moved, so a
+# slow feed would look stale while being perfectly healthy. Prices: two runs a day,
+# and 600+ games on sale means the file changes on essentially every one.
+DATA_STORE_URL = (os.environ.get("DATA_STORE_URL") or "https://forrestgames-data.forry4.workers.dev").rstrip("/")
+DATA_MAX_AGE = {"steam-prices.json": 48 * 3600}
+
+
+def _store_last_modified(name: str) -> float | None:
+    req = urllib.request.Request(f"{DATA_STORE_URL}/{name}", method="HEAD",
+                                 headers={"User-Agent": "forrestgames-monitor"})
+    with urllib.request.urlopen(req, timeout=15) as r:     # noqa: S310 - fixed https endpoint
+        lm = r.headers.get("Last-Modified")
+    return parsedate_to_datetime(lm).timestamp() if lm else None
+
+
+def check_data_freshness(now: float | None = None, last_modified=None) -> None:
+    if not DATA_STORE_URL:
+        return
+    now = time.time() if now is None else now
+    read = last_modified or _store_last_modified
+    for name, max_age in DATA_MAX_AGE.items():
+        try:
+            at = read(name)
+        except Exception as e:  # noqa: BLE001 - an unreachable store is its own alert
+            alerts.alert("data-store", f"Could not read {name} from the data store ({e}). "
+                         "Pages fall back to the copy built into the site.", key=f"data-store:{name}")
+            continue
+        if at is not None and now - at > max_age:
+            hours = (now - at) / 3600
+            alerts.alert("data-stale", f"{name} in the data store was last updated {hours:.0f} hours "
+                         f"ago (expected within {max_age // 3600}). Its scheduled job is not "
+                         "running or not publishing: check GitHub Actions.",
+                         key=f"data-stale:{name}", cooldown=12 * 3600)
+
+
 def _with_conn(fn) -> None:
     conn = get_db_conn()
     try:
@@ -270,6 +314,10 @@ def _checker() -> None:
             last_slow = time.time()
             _with_conn(check_storage)
             _with_conn(check_lobbies)
+            try:
+                check_data_freshness()
+            except Exception as e:  # noqa: BLE001 - a failed check must not stop the monitor
+                LOG.warning("data freshness check failed: %s", e)
             # Profiles: record finished games before the 30-day prune takes them.
             _with_conn(results.sync_all)
         time.sleep(FAST_EVERY)
@@ -392,6 +440,43 @@ def _default_token_resolver(token: str | None = Query(default=None)) -> str | No
     return token
 
 
+# ── alerts from outside the server ───────────────────────────────────────────
+# GitHub Actions has no way to reach the owner's phone, and the push channels are
+# configured HERE (Render's env), so a failed pipeline posts its alert to the server
+# and the server raises it like any other: the Site health panel + ntfy/webhook.
+# Authenticated by ALERT_INGEST_TOKEN (a shared secret, also a GitHub Actions secret);
+# with it unset the route refuses everything. Kept off /admin: that prefix is the
+# owner's SESSION routes, and this caller has no session.
+_INGEST_KINDS = {"pipeline"}
+_ingest_limiter = None
+
+
+class IngestIn(BaseModel):
+    kind: str = Field(max_length=32)
+    message: str = Field(max_length=900)
+    key: str | None = Field(default=None, max_length=120)
+    severity: str = Field(default="warn", max_length=10)
+
+
+def ingest_alert(payload: IngestIn, authorization: str | None) -> dict:
+    global _ingest_limiter
+    want = os.environ.get("ALERT_INGEST_TOKEN", "").strip()
+    got = (authorization or "").partition(" ")[2].strip() if (authorization or "").lower().startswith("bearer ") else ""
+    if not want or not got or not hmac.compare_digest(got.encode(), want.encode()):
+        raise HTTPException(status_code=401, detail="bad token")
+    if payload.kind not in _INGEST_KINDS:
+        raise HTTPException(status_code=400, detail="unknown kind")
+    if _ingest_limiter is None:
+        from core.ratelimit import SlidingWindowLimiter
+        _ingest_limiter = SlidingWindowLimiter(max_hits=60, window_seconds=3600)
+    if _ingest_limiter.exceeded("ingest"):
+        raise HTTPException(status_code=429, detail="too many alerts")
+    _ingest_limiter.record("ingest")
+    queued = alerts.alert(payload.kind, payload.message, key=payload.key or payload.kind,
+                          severity=payload.severity if payload.severity in alerts.SEVERITIES else "warn")
+    return {"ok": True, "queued": queued}
+
+
 def setup_site_health(app, get_user_by_session, token_resolver=None) -> None:
     resolve = token_resolver or _default_token_resolver
 
@@ -422,6 +507,10 @@ def setup_site_health(app, get_user_by_session, token_resolver=None) -> None:
     def admin_ack(_: dict = Depends(site_owner)):
         run(alerts.ack_all)
         return {"ok": True}
+
+    @app.post("/ops/alert")
+    def ops_alert(payload: IngestIn, authorization: str | None = Header(default=None)):
+        return ingest_alert(payload, authorization)
 
     @app.post("/admin/alerts/test")
     def admin_test(_: dict = Depends(site_owner)):

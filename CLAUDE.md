@@ -1272,6 +1272,19 @@ subscription even for free use; KV's free plan has hard limits and cannot be cha
   overwrites one it does. Tests:
   `webapp/test/unit/dataWorker.test.mjs` (Worker + reader) and `data-worker/tests/` (take/publish).
 
+**A FAILED PIPELINE PUSHES AN ALERT (2026-11-11).** `pipeline-alerts.yml` runs on
+`workflow_run` for every data job, both deploys and Python CI (main only; failure or timeout,
+never a cancel) and POSTs to the backend's `/ops/alert` (`core/monitor.py`), which raises it
+like any site alert: the Site health panel plus the ntfy/webhook push. It needs the Actions
+secret `ALERT_INGEST_TOKEN` to equal the Render env var of the same name; unset, the route
+refuses everything and the job only warns. A harvest round that hands off to its next round
+("Continue in a new run") is not alerted. **The list is by workflow `name:`**, so
+`core/tests/test_pipeline_alerts.py` derives who must be on it (anything running
+`datastore.py`, every `deploy-*`, Python CI) and fails on a missing or misspelt name. **The half
+it cannot see is a run GitHub never started**: `core.monitor.check_data_freshness` reads the
+store's `steam-prices.json` age hourly and alerts past 48h. Only near-every-run feeds belong in
+`DATA_MAX_AGE` — the store is rewritten only when data moved, so a slow feed would read stale.
+
 **An unattended publish needs a guard against a half-answered harvest**, because the failure
 mode of every one of these sources is a 200 OK with less in it: anime and BGG `make_data.py`
 refuse a payload that falls below 90% of the current file (`--force` overrides), Steam's enrich
