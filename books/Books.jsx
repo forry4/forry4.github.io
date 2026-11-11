@@ -607,7 +607,7 @@ export default function Books({ authUser, onExit }) {
 	return (
 		<>
 			<style>{baseCss + css}</style>
-			<div className="bk-app">
+			<div className="bk-app site-ground">
 				<header className="bk-header">
 					<button className="btn btn-ghost btn-sm" onClick={onExit}>← Back</button>
 					<div className="bk-headtitle">Books</div>

@@ -55,7 +55,7 @@
 
 /* ── heat tables ─────────────────────────────────────────────────────── */
 .lol-frame{overflow-x:auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);}
-.lol-heat{border-collapse:separate;border-spacing:2px;margin:6px;font-variant-numeric:tabular-nums;}
+.lol-heat{border-collapse:separate;border-spacing:2px;margin:6px auto;font-variant-numeric:tabular-nums;}
 .lol-heat th{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:600;font-size:.74rem;letter-spacing:.06em;color:var(--text-soft);
 	padding:6px 8px;white-space:nowrap;}
 .lol-heat thead th{text-transform:uppercase;font-size:.66rem;letter-spacing:.1em;}

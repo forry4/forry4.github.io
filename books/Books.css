@@ -20,6 +20,10 @@
 	.bk-columns>.bk-section{margin-top:40px;padding-top:24px;border-top:1px solid var(--border);}
 }
 .bk-empty{text-align:center;color:var(--text-dim);padding:30px 0;font-style:italic;}
+/* In the two-column page an empty shelf was a loose italic line, centred in the left
+   column under a heading centred on the PAGE — so it read as misplaced. Framed, each
+   empty state is a block that belongs to its own column. */
+.bk-columns .bk-empty{border:1px dashed var(--border);border-radius:var(--radius);padding:34px 16px;}
 .bk-tier{margin-bottom:30px;}
 .bk-tier-head{margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:8px;}
 .bk-tier-empty{color:var(--text-muted);font-size:.85rem;font-style:italic;padding:6px 0 14px;}

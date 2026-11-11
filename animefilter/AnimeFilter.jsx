@@ -174,7 +174,7 @@ export default function AnimeFilter({ onExit }) {
 	return (
 		<>
 			<style>{baseCss + css}</style>
-			<div className="anf">
+			<div className="anf site-ground">
 				<header className="anf-header">
 					<button className="btn btn-ghost btn-sm" onClick={onExit}>← Back</button>
 					<div className="anf-headtitle">Anime Filter</div>

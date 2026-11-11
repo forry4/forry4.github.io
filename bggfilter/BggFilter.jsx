@@ -188,7 +188,7 @@ export default function BggFilter({ onExit }) {
 	return (
 		<>
 			<style>{baseCss + css}</style>
-			<div className="bgf">
+			<div className="bgf site-ground">
 				<header className="bgf-header">
 					<button className="btn btn-ghost btn-sm" onClick={onExit}>← Back</button>
 					<div className="bgf-headtitle">BGG Filter</div>

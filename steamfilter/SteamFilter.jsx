@@ -327,7 +327,7 @@ export default function SteamFilter({ authUser, onExit }) {
 	return (
 		<>
 			<style>{baseCss + css}</style>
-			<div className="stf">
+			<div className="stf site-ground">
 				<header className="stf-header">
 					<button className="btn btn-ghost btn-sm" onClick={onExit}>← Back</button>
 					<div className="stf-headtitle">Steam Filter</div>

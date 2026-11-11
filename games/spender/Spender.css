@@ -538,6 +538,14 @@
   .home-game-emblem svg{width:23px;height:23px}
   .home-game-card{column-gap:12px;padding-left:17px;padding-right:12px}
 }
+/* ONE COLUMN IS A DENSE LIST. Twelve games at the roomy row height were ~2,200px of
+   scrolling on a phone before Extras came into view. Tighter rows and gaps take roughly
+   a fifth off that without touching the plate, the title or the pill. Last in the
+   section, for the ordering reason given above. */
+@media(max-width:559px){
+  .home-games{--gap:10px}
+  .home-game-card{padding-top:10px;padding-bottom:10px;row-gap:6px}
+}
 
 /* SHORT-AND-WIDE. A 1280x800 laptop is the one common size where the page did not fit:
    919px of content against an 800px viewport, and the fold landed within ~20px of the

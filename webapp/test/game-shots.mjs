@@ -2,8 +2,12 @@
  *
  * NOT A GATE — `npm run screens` decides whether the frontend ships. This is the
  * in-game counterpart to `lobby-shots.mjs` (the lobbies) and `shell-shots.mjs` (the
- * shell): it exists for the judgements a measurement cannot make, across all eleven
- * boards at once, so a visual pass can be compared BEFORE and AFTER on identical deals.
+ * shell): it exists for the judgements a measurement cannot make, across every
+ * board at once, so a visual pass can be compared BEFORE and AFTER on identical deals.
+ *
+ * SERVE A BUILD (`vite preview`), NOT `vite dev`: each view re-enters the room on a fresh
+ * load, and under dev's StrictMode double-mount the CoC/Duel/Dontminion reconnect socket is
+ * closed before it sends, so those captures show a spinner or the lobby instead of the board.
  *
  * Same convention as those files: it boots NOTHING. Point it at a frontend on 5173 and
  * a backend on 8000 that are already up — start the backend with a fixed
@@ -272,6 +276,14 @@ const GAMES = {
 		}
 		await sleep(2000);
 		await captureViews("pinch", "board", b, ".pi-board-svg");
+		await b.ctx.close();
+	},
+	async pipmarket() {
+		const b = await seat("gs-pipmarket", "Aurelia");
+		await createVsAi(b.page, "/pipmarket");
+		await has(b.page, ".pm-stall", 30_000);
+		await sleep(1500);
+		await captureViews("pipmarket", "board", b, ".pm-stall", { settle: 2000 });
 		await b.ctx.close();
 	},
 	async secretnames() {

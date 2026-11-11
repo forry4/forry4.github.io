@@ -110,3 +110,9 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro','Crimson F
 .btn-sm{padding:7px 14px;font-size:.78rem}
 .input{width:100%;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'Cinzel','Cinzel Fallback',serif;font-size:1rem;letter-spacing:.1em;outline:none}
 .input:focus{border-color:var(--gold)}
+/* THE SHELL'S TOP LIGHT, for pages outside the lobby kit. Books and the three filter
+   pages painted a flat --bg while the menu, every lobby and the profile share one warm
+   lamp at the top of the page — so stepping into an extra read as leaving the site.
+   This is the lobby ground's second gradient, alone. The class is doubled so a page
+   sheet's own `background:var(--bg)` shorthand (loaded after this one) cannot reset it. */
+.site-ground.site-ground{background-image:radial-gradient(1500px 780px at 50% -8%,rgba(214,178,88,.085),rgba(214,178,88,.03) 45%,rgba(214,178,88,0) 72%);background-repeat:no-repeat}
