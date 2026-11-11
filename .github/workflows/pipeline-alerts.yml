@@ -74,6 +74,8 @@ jobs:
           body=$(jq -n --arg name "$NAME" --arg how "${CONCLUSION//_/ }" --arg ev "$EVENT" --arg url "$URL" \
             '{kind: "pipeline", key: ("pipeline:" + $name), message: ($name + " " + $how + " (" + $ev + " run). " + $url)}')
           # The backend may be asleep (Render free tier): hold on through its cold start.
-          curl -sS --fail-with-body --retry 6 --retry-all-errors --retry-delay 15 --max-time 120 \
+          # Retries cover connection failures and 5xx/429 only: a 401 is a token
+          # mismatch, and asking six more times only delays saying so.
+          curl -sS --fail-with-body --retry 6 --retry-connrefused --retry-delay 15 --max-time 120 \
             -X POST -H "Authorization: Bearer $ALERT_INGEST_TOKEN" -H "Content-Type: application/json" \
             --data "$body" https://splendid-nelz.onrender.com/ops/alert
