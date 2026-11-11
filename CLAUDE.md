@@ -1267,7 +1267,9 @@ subscription even for free use; KV's free plan has hard limits and cannot be cha
   `test_puzzle_static.py`) and `astral-guide.json` (hand-refreshed with its editorial half) change
   only alongside code. The anime job still force-pushes its RAW harvest to the `anime-harvest`
   branch — an archive, not a site commit.
-- Set-up is in `data-worker/wrangler.jsonc`; nothing in CI deploys the Worker. Tests:
+- Set-up is in `data-worker/wrangler.jsonc`; nothing in CI deploys the Worker. `data-seed.yml`
+  (by hand) uploads the repo's copy of any file the store does not have yet, and never
+  overwrites one it does. Tests:
   `webapp/test/unit/dataWorker.test.mjs` (Worker + reader) and `data-worker/tests/` (take/publish).
 
 **An unattended publish needs a guard against a half-answered harvest**, because the failure

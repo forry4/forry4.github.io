@@ -1,0 +1,41 @@
+name: Data store seed
+
+# Uploads the repo's copy of every store-backed data file that the data store does
+# NOT have yet (data-worker/, root CLAUDE.md "THE DATA STORE"). Run by hand: once
+# when the store is set up, or after a new feed is added. It is safe to re-run at
+# any time: TAKE first replaces each local copy with the store's where one exists,
+# so PUBLISH then finds it unchanged and leaves it alone — a newer published file
+# is never overwritten by the repo's older one.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: data-seed
+  cancel-in-progress: false
+
+jobs:
+  seed:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      DATA_URL: ${{ vars.DATA_URL }}
+      DATA_PUBLISH_TOKEN: ${{ secrets.DATA_PUBLISH_TOKEN }}
+      FILES: steam-filter.json steam-prices.json bgg-filter.json anime-filter.json lol-worlds.json
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - name: Require the store
+        run: |
+          if [ -z "$DATA_URL" ]; then echo "::error::vars.DATA_URL is not set"; exit 1; fi
+      - name: Take what the store already has
+        run: |
+          python data-worker/datastore.py take $FILES
+          python data-worker/datastore.py take-lol
+      - name: Publish the rest
+        run: python data-worker/datastore.py publish $FILES $(cd webapp/public/data && ls lol-champs-*.json)
