@@ -140,7 +140,7 @@ def test_lists_round_trip_through_sqlite(tmp_path, monkeypatch):
 
     monkeypatch.setattr(m, "_db", conn)
     m._init_db()
-    m._save_conn = None
+    m.STORE.reset_writer()
     state = {"players": {"alice": "Alice", "pm-bot-1": "Bot"}, "host": "alice",
              "status": "over", "meta": {}, "max_players": 2, "ai_players": ["pm-bot-1"],
              "ai_difficulty": "normal"}
@@ -159,4 +159,4 @@ def test_lists_round_trip_through_sqlite(tmp_path, monkeypatch):
                    3, "alice", m._encode_state(dict(open_state, max_players=3)), 101)
     opened = m.list_open_games()
     assert opened[0]["id"] == "OPEN" and opened[0]["player_count"] == 2 and opened[0]["max_players"] == 3
-    m._save_conn = None
+    m.STORE.reset_writer()

@@ -21,6 +21,7 @@ from fastapi import Depends, FastAPI, Header, Query, WebSocket, WebSocketDisconn
 from fastapi.middleware.cors import CORSMiddleware
 
 from core import rooms as _rooms
+from core.gamestore import GameStore
 from core import results as _results
 from core.auth import get_user_by_session
 from core.build_info import build_info
@@ -73,11 +74,8 @@ try:
 except Exception:  # pragma: no cover - defensive boot cleanup
     LOG.warning("pipmarket retention sweep skipped", exc_info=True)
 
-_DB_WRITE_EXEC = concurrent.futures.ThreadPoolExecutor(
-    max_workers=1, thread_name_prefix="pipmarket-db-write")
 _BOT_EXEC = concurrent.futures.ThreadPoolExecutor(
     max_workers=2, thread_name_prefix="pipmarket-bot")
-_save_conn = None
 
 
 def _encode_state(state: dict) -> str:
@@ -86,6 +84,15 @@ def _encode_state(state: dict) -> str:
 
 def _decode_state(blob) -> dict:
     return persist.expand_state(_rooms.decode_state(blob))
+
+
+# The table: one reused write connection on one thread, the state read and the
+# lobby queries (core.gamestore). `_db`, `_decode_state` and the retention
+# sweep are looked up when called, so tests can still patch them here.
+STORE = GameStore(TABLE, seats=4, connect=lambda: _db(),
+                  decode=lambda blob: _decode_state(blob), label="pipmarket",
+                  cleanup=lambda: maybe_cleanup_games(TABLE, background=True))
+_DB_WRITE_EXEC = STORE.executor
 
 
 def _valid_max_players(value) -> int:
@@ -97,35 +104,11 @@ def _valid_max_players(value) -> int:
 
 def _persist_row(room_id: str, status: str, seats: list[tuple[str | None, str | None]],
                  max_players: int, host: str | None, state_json: str, now: int) -> None:
-    global _save_conn
-    try:
-        if _save_conn is None:
-            _save_conn = _db()
-        cur = _save_conn.cursor()
-        flat = [value for pair in seats for value in pair]
-        cur.execute(f"SELECT id FROM {TABLE} WHERE id=?", (room_id,))
-        if cur.fetchone() is not None:
-            cur.execute(f"""UPDATE {TABLE} SET status=?,
-                player1_id=?, player1_name=?, player2_id=?, player2_name=?,
-                player3_id=?, player3_name=?, player4_id=?, player4_name=?,
-                max_players=?, host_id=?, state_json=?, updated_at=? WHERE id=?""",
-                        (status, *flat, max_players, host, state_json, now, room_id))
-        else:
-            cur.execute(f"""INSERT INTO {TABLE}
-                (id,status,player1_id,player1_name,player2_id,player2_name,
-                 player3_id,player3_name,player4_id,player4_name,max_players,
-                 host_id,state_json,created_at,updated_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                        (room_id, status, *flat, max_players, host, state_json, now, now))
-        _save_conn.commit()
-    except Exception:
-        LOG.exception("pipmarket save failed for %s", room_id)
-        try:
-            if _save_conn is not None:
-                _save_conn.close()
-        except Exception:
-            pass
-        _save_conn = None
+    """The row's columns; UPDATE rewrites every one of them."""
+    cols = {"status": status, **STORE.seat_columns(seats), "max_players": max_players,
+            "host_id": host, "state_json": state_json}
+    STORE.upsert(room_id, update={**cols, "updated_at": now},
+                 insert={**cols, "created_at": now, "updated_at": now})
 
 
 def save_game(room_id: str) -> None:
@@ -150,19 +133,7 @@ def save_game(room_id: str) -> None:
         room.get("max_players", 4), room.get("host"), _encode_state(state), int(time.time()))
 
 
-def load_game_state(room_id: str) -> dict | None:
-    conn = _db()
-    cur = conn.cursor()
-    cur.execute(f"SELECT state_json FROM {TABLE} WHERE id=?", (room_id,))
-    row = cur.fetchone()
-    conn.close()
-    if not row or not row["state_json"]:
-        return None
-    try:
-        return _decode_state(row["state_json"])
-    except Exception:
-        LOG.warning("corrupt Pip Market room %s", room_id, exc_info=True)
-        return None
+load_game_state = STORE.load_state     # the stored state through the codec, or None
 
 
 def _read_room(room_id: str) -> dict | None:
@@ -499,81 +470,49 @@ async def _handle_abandon(room_id: str, pid: str) -> None:
     await broadcast_state(room_id)
 
 
-def _safe_state(blob) -> dict:
-    """A stored room blob, or `{}` — never a raise: one corrupt row must not take
-    a whole lobby list down with it."""
-    try:
-        state = _decode_state(blob)
-    except Exception:
-        return {}
-    return state if isinstance(state, dict) else {}
-
-
 def _seats(state: dict, user_id: str | None) -> list[dict]:
     return [{"name": name, "you": pid == user_id}
             for pid, name in (state.get("players") or {}).items()]
 
 
 def list_open_games() -> list[dict]:
-    maybe_cleanup_games(TABLE, background=True)
-    conn = _db(); cur = conn.cursor()
-    cur.execute(f"""SELECT id, host_id, player1_name, state_json, updated_at
-                    FROM {TABLE} WHERE status='open'
-                    ORDER BY updated_at DESC LIMIT 50""")
-    rows = cur.fetchall(); conn.close()
-    out = []
-    for row in rows:
-        state = _safe_state(row["state_json"])
+    def row(r, state):
         if not state:
-            continue
-        out.append({
-            "id": row["id"], "host_id": row["host_id"], "host_name": row["player1_name"],
+            return None
+        return {
+            "id": r["id"], "host_id": r["host_id"], "host_name": r["player1_name"],
             "player_count": len(state.get("players") or {}) or 1,
             "player_ids": _rooms.state_seat_ids(state),
             "max_players": _valid_max_players(state.get("max_players")),
             "bots": len(state.get("ai_players") or []),
-            "updated_at": row["updated_at"],
-        })
-    return out
+            "updated_at": r["updated_at"],
+        }
+    return STORE.open_games("id, host_id, player1_name, state_json, updated_at", row)
 
 
 def list_user_games(user_id: str) -> list[dict]:
-    conn = _db(); cur = conn.cursor()
-    cur.execute(f"""SELECT id, status, state_json, created_at, updated_at FROM {TABLE}
-                    WHERE (player1_id=? OR player2_id=? OR player3_id=? OR player4_id=?)
-                    AND status != 'over' ORDER BY updated_at DESC LIMIT 50""", (user_id,) * 4)
-    rows = cur.fetchall(); conn.close()
-    out = []
-    for row in rows:
-        state = _safe_state(row["state_json"])
+    def row(r, state):
         if not state:
-            continue
+            return None
         game = state.get("game") or {}
-        out.append({
-            "id": row["id"], "status": row["status"],
+        return {
+            "id": r["id"], "status": r["status"],
             "seats": _seats(state, user_id),
             "ai_difficulty": _rooms.state_ai_tier(state),
             "round": game.get("round"),
             "phase": game.get("phase"),
             "your_turn": engine.to_act(game) == user_id if game else False,
-            "created_at": row["created_at"], "updated_at": row["updated_at"],
-        })
-    return out
+            "created_at": r["created_at"], "updated_at": r["updated_at"],
+        }
+    return STORE.user_games(user_id, "id, status, state_json, created_at, updated_at", row,
+                            limit=50)
 
 
 def list_user_history(user_id: str) -> list[dict]:
-    conn = _db(); cur = conn.cursor()
-    cur.execute(f"""SELECT id, state_json, updated_at FROM {TABLE}
-                    WHERE (player1_id=? OR player2_id=? OR player3_id=? OR player4_id=?)
-                    AND status='over' ORDER BY updated_at DESC LIMIT ?""",
-                (user_id,) * 4 + (_rooms.HISTORY_LIMIT,))
-    rows = cur.fetchall(); conn.close()
-    out = []
-    for row in rows:
-        state = _safe_state(row["state_json"])
+    def row(r, state):
         game = state.get("game") if state else None
         if not isinstance(game, dict) or not game.get("players"):
-            continue
+            return None
         names = state.get("players") or {}
         winners = game.get("winners") or []
         final = game.get("final") or {}
@@ -581,17 +520,17 @@ def list_user_history(user_id: str) -> list[dict]:
             outcome = "won" if len(winners) == 1 else "tied"
         else:
             outcome = "lost"
-        out.append({
-            "id": row["id"], "status": "over", "outcome": outcome,
+        return {
+            "id": r["id"], "status": "over", "outcome": outcome,
             "standings": sorted(
                 ({"name": names.get(p, p), "score": final.get(p), "you": p == user_id,
                   "won": p in winners} for p in game.get("players", [])),
                 key=lambda s: not s["you"]),
             "rounds": game.get("round"),
             "ai_difficulty": _rooms.state_ai_tier(state),
-            "updated_at": row["updated_at"],
-        })
-    return out
+            "updated_at": r["updated_at"],
+        }
+    return STORE.user_history(user_id, "id, state_json, updated_at", row)
 
 
 def _standings(state: dict) -> dict | None:

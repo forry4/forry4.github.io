@@ -23,7 +23,6 @@ executor; the stale-socket disconnect guard) with three differences:
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
 import json
 import logging
 import random
@@ -44,6 +43,7 @@ from core.auth import (
 )
 from core.config import cors_allowed_origins
 from core import rooms as _rooms
+from core.gamestore import GameStore
 from core import results as _results
 from core.build_info import build_info
 
@@ -178,44 +178,16 @@ cleanup_stale_games("dontminion_games")
 
 
 # ── Persistence (single-thread write executor with a reused connection) ──────
-_DB_WRITE_EXEC = concurrent.futures.ThreadPoolExecutor(
-    max_workers=1, thread_name_prefix="dontminion-db-write")
-_save_conn = None  # only ever touched by the _DB_WRITE_EXEC thread
 
 
 def _persist_row(room_id, status, seats, host, state_json, now, created_at) -> None:
-    """seats = [(pid, name)] padded to 4. SELECT-then-INSERT/UPDATE — never
+    """seats = [(pid, name)] padded to 4; UPDATE rewrites all four, never the host.
+    The write is SELECT-then-INSERT/UPDATE in core.gamestore — never
     cursor.rowcount (absent on libsql; it 500'd prod once)."""
-    global _save_conn
-    try:
-        if _save_conn is None:
-            _save_conn = _db()
-        cur = _save_conn.cursor()
-        cur.execute("SELECT id FROM dontminion_games WHERE id=?", (room_id,))
-        flat = [x for pair in seats for x in pair]
-        if cur.fetchone() is not None:
-            cur.execute("""UPDATE dontminion_games SET status=?,
-                           player1_id=?, player1_name=?, player2_id=?, player2_name=?,
-                           player3_id=?, player3_name=?, player4_id=?, player4_name=?,
-                           state_json=?, updated_at=? WHERE id=?""",
-                        (status, *flat, state_json, now, room_id))
-        else:
-            cur.execute("""INSERT INTO dontminion_games
-                           (id,status,player1_id,player1_name,player2_id,player2_name,
-                            player3_id,player3_name,player4_id,player4_name,
-                            host_id,state_json,created_at,updated_at)
-                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                        (room_id, status, *flat, host, state_json, created_at, now))
-        _save_conn.commit()
-    except Exception:  # noqa: BLE001 — a save must never crash; reconnect next time
-        LOG.warning("dontminion save_game write failed for %s; dropping connection",
-                    room_id, exc_info=True)
-        try:
-            if _save_conn is not None:
-                _save_conn.close()
-        except Exception:
-            pass
-        _save_conn = None
+    cols = {"status": status, **STORE.seat_columns(seats)}
+    STORE.upsert(room_id, update={**cols, "state_json": state_json, "updated_at": now},
+                 insert={**cols, "host_id": host, "state_json": state_json,
+                         "created_at": created_at, "updated_at": now})
 
 
 def _encode_state(state: dict) -> str:
@@ -229,6 +201,15 @@ def _decode_state(blob) -> dict:
     rng_state where it expects a list of ints. Rows written before compaction carry no
     marker and pass through untouched."""
     return persist.expand_state(_rooms.decode_state(blob))
+
+
+# The table: one reused write connection on one thread, the state read and the
+# lobby queries (core.gamestore). `_db`, `_decode_state` and the retention
+# sweep are looked up when called, so tests can still patch them here.
+STORE = GameStore("dontminion_games", seats=4, connect=lambda: _db(),
+                  decode=lambda blob: _decode_state(blob), label="dontminion",
+                  cleanup=lambda: maybe_cleanup_games("dontminion_games", background=True))
+_DB_WRITE_EXEC = STORE.executor
 
 
 def save_game(room_id: str) -> None:
@@ -258,18 +239,7 @@ def save_game(room_id: str) -> None:
     )
 
 
-def load_game_state(room_id: str) -> dict | None:
-    conn = _db()
-    cur = conn.cursor()
-    cur.execute("SELECT state_json FROM dontminion_games WHERE id=?", (room_id,))
-    row = cur.fetchone()
-    conn.close()
-    if not row or not row["state_json"]:
-        return None
-    try:
-        return _decode_state(row["state_json"])
-    except Exception:
-        return None
+load_game_state = STORE.load_state     # the stored state through the codec, or None
 
 
 def _read_room(room_id: str) -> dict | None:
@@ -315,21 +285,8 @@ def _locked_room(room_id: str):
 
 
 def list_open_games() -> list[dict]:
-    maybe_cleanup_games("dontminion_games", background=True)  # throttled, non-blocking
-    conn = _db()
-    cur = conn.cursor()
-    cur.execute("""SELECT id, player1_id, player1_name, state_json, created_at
-                   FROM dontminion_games
-                   WHERE status='open' ORDER BY created_at DESC LIMIT 20""")
-    rows = cur.fetchall()
-    conn.close()
-    out = []
-    for r in rows:
-        try:
-            state = _decode_state(r["state_json"])
-        except Exception:
-            state = {}
-        out.append({
+    def row(r, state):
+        return {
             "id": r["id"], "host_id": r["player1_id"], "host_name": r["player1_name"],
             "player_count": len(state.get("players", {})) or 1,
             # Who is already seated — see `state_seat_ids` in core/rooms.py and
@@ -339,33 +296,18 @@ def list_open_games() -> list[dict]:
             "max_players": _valid_max_players(state.get("max_players")),
             "expansions": _valid_expansions(state.get("expansions")),
             "created_at": r["created_at"],
-        })
-    return out
+        }
+    return STORE.open_games("id, player1_id, player1_name, state_json, created_at", row,
+                            order="created_at DESC", limit=20)
 
 
 def list_user_games(user_id: str) -> list[dict]:
-    conn = _db()
-    cur = conn.cursor()
-    cur.execute("""SELECT id, status, player1_id, player1_name, player2_id, player2_name,
-                          player3_id, player3_name, player4_id, player4_name,
-                          state_json, created_at, updated_at
-                   FROM dontminion_games
-                   WHERE (player1_id=? OR player2_id=? OR player3_id=? OR player4_id=?)
-                         AND status != 'over'
-                   ORDER BY updated_at DESC""", (user_id,) * 4)
-    rows = cur.fetchall()
-    conn.close()
-    out = []
-    for r in rows:
-        try:
-            state = _decode_state(r["state_json"])
-        except Exception:
-            state = {}
+    def row(r, state):
         g = state.get("game") or {}
         players = state.get("players", {})
         others = [n for p, n in players.items() if p != user_id]
         your_turn = isinstance(g, dict) and (g.get("pending_pid") or g.get("turn")) == user_id
-        out.append({
+        return {
             "id": r["id"], "status": r["status"],
             "players": list(players.values()),
             "opponents": others,
@@ -381,34 +323,22 @@ def list_user_games(user_id: str) -> list[dict]:
             "ai_difficulty": _rooms.state_ai_tier(state),
             "your_turn": your_turn,
             "created_at": r["created_at"], "updated_at": r["updated_at"],
-        })
-    return out
+        }
+    return STORE.user_games(
+        user_id, "id, status, player1_id, player1_name, player2_id, player2_name, "
+        "player3_id, player3_name, player4_id, player4_name, state_json, created_at, "
+        "updated_at", row)
 
 
 def list_user_history(user_id: str) -> list[dict]:
-    conn = _db()
-    cur = conn.cursor()
-    cur.execute("""SELECT id, state_json, updated_at
-                   FROM dontminion_games
-                   WHERE (player1_id=? OR player2_id=? OR player3_id=? OR player4_id=?)
-                         AND status='over'
-                   ORDER BY updated_at DESC LIMIT ?""",
-                (user_id,) * 4 + (_rooms.HISTORY_LIMIT,))
-    rows = cur.fetchall()
-    conn.close()
-    out = []
-    for r in rows:
-        try:
-            state = _decode_state(r["state_json"])
-        except Exception:
-            state = {}
+    def row(r, state):
         g = state.get("game") or {}
         players = state.get("players", {})
         if not isinstance(g, dict) or not g.get("players"):
-            continue
+            return None
         scores = g.get("scores") or {}
         winners = g.get("winners") or []
-        out.append({
+        return {
             "id": r["id"],
             "players": list(players.values()),
             "opponents": [n for p, n in players.items() if p != user_id],
@@ -429,8 +359,8 @@ def list_user_history(user_id: str) -> list[dict]:
             "you_won": user_id in winners,
             "winners": [players.get(p, p) for p in winners],
             "updated_at": r["updated_at"],
-        })
-    return out
+        }
+    return STORE.user_history(user_id, "id, state_json, updated_at", row)
 
 
 def _standings(state: dict) -> dict | None:

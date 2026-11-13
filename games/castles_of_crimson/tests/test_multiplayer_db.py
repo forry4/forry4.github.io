@@ -11,7 +11,7 @@ from games.castles_of_crimson import main, engine
 
 def _seed_db(tmp_path, monkeypatch):
     monkeypatch.setattr(coredb, "DB_PATH", str(tmp_path / "coc_test.db"))
-    main._save_conn = None
+    main.STORE.reset_writer()
     main.coc_init_db()
 
 
@@ -42,7 +42,7 @@ def test_four_player_row_indexed_for_all_seats(tmp_path, monkeypatch):
         og = next(x for x in main.list_open_games() if x["id"] == "ROPEN")
         assert og["player_count"] == 3 and og["max_players"] == main.MAX_PLAYERS
     finally:
-        main._save_conn = None
+        main.STORE.reset_writer()
 
 
 def test_four_player_history_lists_all_opponents(tmp_path, monkeypatch):
@@ -59,4 +59,4 @@ def test_four_player_history_lists_all_opponents(tmp_path, monkeypatch):
         assert next(x for x in main.list_user_history("a") if x["id"] == "RH")["you_won"] is True
         assert hist["you_won"] is False
     finally:
-        main._save_conn = None
+        main.STORE.reset_writer()

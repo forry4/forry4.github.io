@@ -24,7 +24,6 @@ No bots — humans only (3..10 players). Site identity/DB come from the shared
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
 import json
 import logging
 import time
@@ -43,6 +42,7 @@ from core.auth import (
 from core.config import cors_allowed_origins
 from core.build_info import build_info
 from core import rooms as _rooms
+from core.gamestore import GameStore
 from core import results as _results
 
 LOG = logging.getLogger("games.wherewolf")
@@ -117,57 +117,25 @@ cleanup_stale_games("werewolf_games")   # cold-start prune
 # persistent connection — save_game snapshots+serializes on the CALLING thread (fast,
 # race-free vs ROOMS) then fires the write off; the single worker keeps writes strictly
 # in submission order; a failed write drops the connection so the next one reconnects.
-_DB_WRITE_EXEC = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="ww-db-write")
-_save_conn = None  # persistent write connection; ONLY ever touched by the _DB_WRITE_EXEC thread
-
-
-def _drop_save_conn() -> None:
-    global _save_conn
-    try:
-        if _save_conn is not None:
-            _save_conn.close()
-    except Exception:
-        pass
-    _save_conn = None
+# The table (core.gamestore). `_db` and the retention sweep are looked up when
+# called, so tests can still patch them here. Where Wolf? stores its state with the
+# shared codec alone (no persist.py: nothing in it is worth compacting).
+STORE = GameStore("werewolf_games", seats=2, connect=lambda: _db(),
+                  decode=lambda blob: _rooms.decode_state(blob), label="ww",
+                  cleanup=lambda: maybe_cleanup_games("werewolf_games", background=True))
+_DB_WRITE_EXEC = STORE.executor
 
 
 def _persist_row(room_id, status, host_id, host_name, p1id, p2id, player_ids_json,
                  state_json, now, created_at) -> None:
-    """Upsert one werewolf_games row on the dedicated write thread (reused connection)."""
-    global _save_conn
-    try:
-        if _save_conn is None:
-            _save_conn = _db()
-        cur = _save_conn.cursor()
-        cur.execute("SELECT id FROM werewolf_games WHERE id=?", (room_id,))
-        if cur.fetchone() is not None:
-            cur.execute("""UPDATE werewolf_games SET status=?, player2_id=?, player_ids=?, state_json=?, updated_at=?
-                           WHERE id=?""",
-                        (status, p2id, player_ids_json, state_json, now, room_id))
-        else:
-            cur.execute("""INSERT INTO werewolf_games
-                           (id,status,host_id,host_name,player1_id,player2_id,player_ids,state_json,created_at,updated_at)
-                           VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                        (room_id, status, host_id, host_name, p1id, p2id,
-                         player_ids_json, state_json, created_at, now))
-        _save_conn.commit()
-    except Exception:  # noqa: BLE001 — a save must never crash; drop the (maybe stale) conn
-        LOG.warning("wherewolf save_game write failed for %s; dropping connection", room_id, exc_info=True)
-        _drop_save_conn()
-
-
-def _delete_row(room_id) -> None:
-    """Delete one row on the SAME write thread so it serializes after pending saves."""
-    global _save_conn
-    try:
-        if _save_conn is None:
-            _save_conn = _db()
-        cur = _save_conn.cursor()
-        cur.execute("DELETE FROM werewolf_games WHERE id=?", (room_id,))
-        _save_conn.commit()
-    except Exception:  # noqa: BLE001
-        LOG.warning("wherewolf delete_game failed for %s; dropping connection", room_id, exc_info=True)
-        _drop_save_conn()
+    """Upsert one werewolf_games row on the write thread (core.gamestore)."""
+    STORE.upsert(room_id,
+                 update={"status": status, "player2_id": p2id, "player_ids": player_ids_json,
+                         "state_json": state_json, "updated_at": now},
+                 insert={"status": status, "host_id": host_id, "host_name": host_name,
+                         "player1_id": p1id, "player2_id": p2id,
+                         "player_ids": player_ids_json, "state_json": state_json,
+                         "created_at": created_at, "updated_at": now})
 
 
 def save_game(room_id: str) -> None:
@@ -196,23 +164,16 @@ def save_game(room_id: str) -> None:
 
 
 def delete_game(room_id: str) -> None:
-    _DB_WRITE_EXEC.submit(_delete_row, room_id)
+    """Delete one row on the SAME write thread, so it serializes after pending saves."""
+    _DB_WRITE_EXEC.submit(STORE.remove, room_id)
 
 
 def _read_room(room_id: str) -> dict | None:
     """Read and build a room from its saved row WITHOUT installing it in ROOMS
     (it runs on a worker thread; core.rooms.locked_room installs it). None if
     there is no playable row."""
-    conn = _db()
-    cur = conn.cursor()
-    cur.execute("SELECT state_json FROM werewolf_games WHERE id=?", (room_id,))
-    row = cur.fetchone()
-    conn.close()
-    if not row or not row["state_json"]:
-        return None
-    try:
-        state = _rooms.decode_state(row["state_json"])
-    except Exception:
+    state = STORE.load_state(room_id)
+    if state is None:
         return None
     room = {
         "players": state.get("players", {}),
@@ -255,40 +216,32 @@ def _locked_room(room_id: str):
 
 
 def list_open_games() -> list[dict]:
-    maybe_cleanup_games("werewolf_games", background=True)   # throttled (<=1/h), non-blocking
-    conn = _db()
-    cur = conn.cursor()
-    cur.execute("""SELECT id, host_id, host_name, player_ids, created_at FROM werewolf_games
-                   WHERE status='open' ORDER BY created_at DESC LIMIT 20""")
-    rows = cur.fetchall()
-    conn.close()
-    out = []
-    for r in rows:
+    def row(r, state):
         try:
             pids = [str(p) for p in json.loads(r["player_ids"] or "[]") if p]
         except Exception:
             pids = []
-        out.append({"id": r["id"], "host_id": r["host_id"], "host_name": r["host_name"],
-                    "players": len(pids),
-                    # THE IDS, not just the count. Where Wolf is the one game that
-                    # already stored them in a column of their own, and the Open row
-                    # still threw them away — so a player who had joined somebody
-                    # else's table and gone back to the lobby was offered Join on
-                    # their own seat, which the WS refuses as a takeover. See
-                    # `seatStateOf` in shared/lobby.jsx.
-                    "player_ids": pids,
-                    "max_players": MAX_PLAYERS,
-                    "created_at": r["created_at"]})
-    return out
+        return {"id": r["id"], "host_id": r["host_id"], "host_name": r["host_name"],
+                "players": len(pids),
+                # THE IDS, not just the count. Where Wolf is the one game that
+                # already stored them in a column of their own, and the Open row
+                # still threw them away — so a player who had joined somebody
+                # else's table and gone back to the lobby was offered Join on
+                # their own seat, which the WS refuses as a takeover. See
+                # `seatStateOf` in shared/lobby.jsx.
+                "player_ids": pids,
+                "max_players": MAX_PLAYERS,
+                "created_at": r["created_at"]}
+    return STORE.open_games("id, host_id, host_name, player_ids, created_at", row,
+                            order="created_at DESC", limit=20)
 
 
 def list_user_games(user_id: str) -> list[dict]:
-    conn = _db()
-    cur = conn.cursor()
-    cur.execute("""SELECT id, status, host_id, host_name, player_ids, created_at, updated_at
-                   FROM werewolf_games WHERE status != 'over' ORDER BY updated_at DESC LIMIT 100""")
-    rows = cur.fetchall()
-    conn.close()
+    # NOT `STORE.user_games`: a Where Wolf? table seats up to ten, and its seats live
+    # in the `player_ids` JSON column rather than one column per seat, so the filter
+    # is here in Python over the latest unfinished rows.
+    rows = STORE.fetch("id, status, host_id, host_name, player_ids, created_at, updated_at",
+                       "status != 'over'", order="updated_at DESC", limit=100)
     out = []
     for r in rows:
         try:

@@ -15,6 +15,7 @@ from fastapi import Depends, FastAPI, Header, Query, WebSocket, WebSocketDisconn
 from fastapi.middleware.cors import CORSMiddleware
 
 from core import rooms as _rooms
+from core.gamestore import GameStore
 from core import results as _results
 from core.auth import get_user_by_session
 from core.build_info import build_info
@@ -73,9 +74,6 @@ try:
 except Exception:  # pragma: no cover - defensive import-time cleanup
     LOG.warning("blackcastle retention sweep skipped", exc_info=True)
 
-_DB_WRITE_EXEC = concurrent.futures.ThreadPoolExecutor(
-    max_workers=1, thread_name_prefix="blackcastle-db-write")
-_save_conn = None
 
 
 def _encode_state(state: dict) -> str:
@@ -86,38 +84,26 @@ def _decode_state(blob) -> dict:
     return persist.expand_state(_rooms.decode_state(blob))
 
 
+# The table: one reused write connection on one thread, the state read and the
+# lobby queries (core.gamestore). `_db`, `_decode_state` and the retention
+# sweep are looked up when called, so tests can still patch them here.
+STORE = GameStore(TABLE, seats=4, connect=lambda: _db(),
+                  decode=lambda blob: _decode_state(blob), label="blackcastle",
+                  cleanup=lambda: maybe_cleanup_games(TABLE, background=True))
+_DB_WRITE_EXEC = STORE.executor
+
+
 def _persist_row(room_id: str, status: str, seats: list[tuple[str | None, str | None]],
                  max_players: int, host: str | None, state_json: str,
                  now: int, created_at: int) -> None:
-    global _save_conn
-    try:
-        if _save_conn is None:
-            _save_conn = _db()
-        cur = _save_conn.cursor()
-        flat = [value for pair in seats for value in pair]
-        cur.execute(f"SELECT id FROM {TABLE} WHERE id=?", (room_id,))
-        if cur.fetchone() is not None:
-            cur.execute(f"""UPDATE {TABLE} SET status=?,
-                player1_id=?, player1_name=?, player2_id=?, player2_name=?,
-                player3_id=?, player3_name=?, player4_id=?, player4_name=?,
-                max_players=?, state_json=?, updated_at=? WHERE id=?""",
-                        (status, *flat, max_players, state_json, now, room_id))
-        else:
-            cur.execute(f"""INSERT INTO {TABLE}
-                (id,status,player1_id,player1_name,player2_id,player2_name,
-                 player3_id,player3_name,player4_id,player4_name,host_id,
-                 max_players,state_json,created_at,updated_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                        (room_id, status, *flat, host, max_players, state_json, created_at, now))
-        _save_conn.commit()
-    except Exception:
-        LOG.warning("blackcastle save failed for %s", room_id, exc_info=True)
-        try:
-            if _save_conn is not None:
-                _save_conn.close()
-        except Exception:
-            pass
-        _save_conn = None
+    """The row's columns; UPDATE rewrites the seats and the cap, never the host."""
+    cols = {"status": status, **STORE.seat_columns(seats)}
+    STORE.upsert(room_id,
+                 update={**cols, "max_players": max_players, "state_json": state_json,
+                         "updated_at": now},
+                 insert={**cols, "host_id": host, "max_players": max_players,
+                         "state_json": state_json, "created_at": created_at,
+                         "updated_at": now})
 
 
 def save_game(room_id: str) -> None:
@@ -142,19 +128,7 @@ def save_game(room_id: str) -> None:
                           _encode_state(state), now, created)
 
 
-def load_game_state(room_id: str) -> dict | None:
-    conn = _db()
-    cur = conn.cursor()
-    cur.execute(f"SELECT state_json FROM {TABLE} WHERE id=?", (room_id,))
-    row = cur.fetchone()
-    conn.close()
-    if not row or not row["state_json"]:
-        return None
-    try:
-        return _decode_state(row["state_json"])
-    except Exception:
-        LOG.warning("blackcastle state decode failed for %s", room_id, exc_info=True)
-        return None
+load_game_state = STORE.load_state     # the stored state through the codec, or None
 
 
 def _read_room(room_id: str) -> dict | None:
@@ -515,85 +489,51 @@ async def _handle_abandon(room_id: str, pid: str) -> None:
     await broadcast_state(room_id)
 
 
-def _safe_state(blob) -> dict:
-    """A stored room blob, or `{}` — never a raise. The lobby lists are the one
-    place a single corrupt row must not take the whole list down with it."""
-    try:
-        state = _decode_state(blob)
-    except Exception:
-        return {}
-    return state if isinstance(state, dict) else {}
-
-
 def list_open_games() -> list[dict]:
-    maybe_cleanup_games(TABLE, background=True)
-    conn = _db()
-    cur = conn.cursor()
-    cur.execute(f"""SELECT id, host_id, player1_name, player2_name, player3_name,
-                       player4_name, max_players, state_json, updated_at FROM {TABLE}
-                       WHERE status='open' ORDER BY updated_at DESC LIMIT 50""")
-    rows = cur.fetchall()
-    conn.close()
-    return [{"id": row["id"], "player1_name": row["player1_name"],
-             "player2_name": row["player2_name"], "player3_name": row["player3_name"],
-             "player4_name": row["player4_name"], "max_players": row["max_players"] or 4,
-             # THE HOST AND THE SEATED IDS, which this row never carried: it named
-             # seats and nothing else, so the lobby could not tell a table you own
-             # (or are already sitting at) from one to join, and offered Join on a
-             # seat you held — which the WS refuses as a takeover. `seatStateOf` in
-             # shared/lobby.jsx reads both.
-             "host_id": row["host_id"],
-             "player_ids": _rooms.state_seat_ids(_safe_state(row["state_json"])),
-             "updated_at": row["updated_at"]} for row in rows]
+    def row(r, state):
+        return {"id": r["id"], "player1_name": r["player1_name"],
+                "player2_name": r["player2_name"], "player3_name": r["player3_name"],
+                "player4_name": r["player4_name"], "max_players": r["max_players"] or 4,
+                # THE HOST AND THE SEATED IDS, which this row never carried: it named
+                # seats and nothing else, so the lobby could not tell a table you own
+                # (or are already sitting at) from one to join, and offered Join on a
+                # seat you held — which the WS refuses as a takeover. `seatStateOf` in
+                # shared/lobby.jsx reads both.
+                "host_id": r["host_id"],
+                "player_ids": _rooms.state_seat_ids(state),
+                "updated_at": r["updated_at"]}
+    return STORE.open_games(
+        "id, host_id, player1_name, player2_name, player3_name, player4_name, "
+        "max_players, state_json, updated_at", row)
 
 
 def list_user_games(user_id: str) -> list[dict]:
-    conn = _db(); cur = conn.cursor()
-    cur.execute(f"""SELECT id, status, player1_name, player2_name, player3_name,
-                       player4_name, state_json, created_at, updated_at FROM {TABLE}
-                       WHERE (player1_id=? OR player2_id=? OR player3_id=? OR player4_id=?)
-                       AND status != 'over' ORDER BY updated_at DESC LIMIT 50""", (user_id,) * 4)
-    rows = cur.fetchall(); conn.close()
-    out = []
-    for row in rows:
-        try:
-            state = _decode_state(row["state_json"])
-        except Exception:
-            state = {}
-        out.append({"id": row["id"], "status": row["status"],
-                    "player1_name": row["player1_name"], "player2_name": row["player2_name"],
-                    "player3_name": row["player3_name"], "player4_name": row["player4_name"],
-                    "ai_difficulty": _rooms.state_ai_tier(state),
-                    "updated_at": row["updated_at"], "created_at": row["created_at"]})
-    return out
+    def row(r, state):
+        return {"id": r["id"], "status": r["status"],
+                "player1_name": r["player1_name"], "player2_name": r["player2_name"],
+                "player3_name": r["player3_name"], "player4_name": r["player4_name"],
+                "ai_difficulty": _rooms.state_ai_tier(state),
+                "updated_at": r["updated_at"], "created_at": r["created_at"]}
+    return STORE.user_games(
+        user_id, "id, status, player1_name, player2_name, player3_name, player4_name, "
+        "state_json, created_at, updated_at", row, limit=50)
 
 
 def list_user_history(user_id: str) -> list[dict]:
-    conn = _db(); cur = conn.cursor()
-    cur.execute(f"""SELECT id, status, player1_name, player2_name, player3_name,
-                       player4_name, state_json, updated_at FROM {TABLE}
-                       WHERE (player1_id=? OR player2_id=? OR player3_id=? OR player4_id=?)
-                       AND status='over' ORDER BY updated_at DESC LIMIT ?""",
-                (user_id,) * 4 + (_rooms.HISTORY_LIMIT,))
-    rows = cur.fetchall(); conn.close()
-    out = []
-    for row in rows:
-        try:
-            state = _decode_state(row["state_json"])
-        except Exception:
-            state = {}
-        game = state.get("game") if isinstance(state, dict) else {}
+    def row(r, state):
+        game = state.get("game")
         winner = game.get("winner") if isinstance(game, dict) else None
-        players = state.get("players", {}) if isinstance(state, dict) else {}
-        names = [row["player1_name"], row["player2_name"], row["player3_name"], row["player4_name"]]
-        out.append({"id": row["id"], "status": row["status"],
-                    "player1_name": row["player1_name"], "player2_name": row["player2_name"],
-                    "player3_name": row["player3_name"], "player4_name": row["player4_name"],
-                    "outcome": "won" if winner == user_id else "lost",
-                    "players": [n for n in names if n], "ai_difficulty": _rooms.state_ai_tier(state),
-                    "scores": (game.get("scores", {}) if isinstance(game, dict) else {}),
-                    "updated_at": row["updated_at"]})
-    return out
+        names = [r["player1_name"], r["player2_name"], r["player3_name"], r["player4_name"]]
+        return {"id": r["id"], "status": r["status"],
+                "player1_name": r["player1_name"], "player2_name": r["player2_name"],
+                "player3_name": r["player3_name"], "player4_name": r["player4_name"],
+                "outcome": "won" if winner == user_id else "lost",
+                "players": [n for n in names if n], "ai_difficulty": _rooms.state_ai_tier(state),
+                "scores": (game.get("scores", {}) if isinstance(game, dict) else {}),
+                "updated_at": r["updated_at"]}
+    return STORE.user_history(
+        user_id, "id, status, player1_name, player2_name, player3_name, player4_name, "
+        "state_json, updated_at", row)
 
 
 def _standings(state: dict) -> dict | None:

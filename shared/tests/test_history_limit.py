@@ -66,7 +66,7 @@ def game_db(request, tmp_path, monkeypatch):
     coredb.init_core_schema(conn)
     before = _tables(conn)
     conn.close()
-    monkeypatch.setattr(main, "_save_conn", None, raising=False)
+    main.STORE.reset_writer()
     getattr(main, init)()
     conn = coredb.get_db_conn()
     new = [t for t in _tables(conn) - before
@@ -75,7 +75,7 @@ def game_db(request, tmp_path, monkeypatch):
     table, cols = new[0], _columns(conn, new[0])
     conn.close()
     yield main, table, cols
-    main._save_conn = None
+    main.STORE.reset_writer()
 
 
 def _finished_rows(main, table, cols, n):

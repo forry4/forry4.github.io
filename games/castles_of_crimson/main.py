@@ -18,7 +18,6 @@ persistence uses a separate ``coc_games`` table in the shared site database.
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
 import json
 import logging
 import random
@@ -49,6 +48,7 @@ from core.auth import (
 )
 from core.config import cors_allowed_origins
 from core import rooms as _rooms
+from core.gamestore import GameStore
 from core import results as _results
 from core.build_info import build_info
 
@@ -193,51 +193,22 @@ cleanup_stale_games("coc_games")
 # strictly in submission order (no interleaving/last-writer-loses race). save_game
 # snapshots+serializes the row on the CALLING thread (fast, race-free vs ROOMS) then
 # fires the write off; a failed write drops the connection so the next one reconnects.
-_DB_WRITE_EXEC = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="coc-db-write")
-_save_conn = None  # persistent write connection; ONLY ever touched by the _DB_WRITE_EXEC thread
 
 
 def _persist_row(room_id, status, seats, host, state_json, now, created_at) -> None:
-    """Upsert one coc_games row on the dedicated write thread using a reused connection.
+    """Upsert one coc_games row on the write thread (core.gamestore).
 
     `seats` is a list of (player_id, player_name) in seat order (up to 4). The columns
     are a query index (the authoritative player list is in state_json); seats 2-4 can
     fill in after creation (late joiners), so UPDATE rewrites them all."""
-    global _save_conn
-    ids = [None, None, None, None]
-    names = [None, None, None, None]
-    for i, (pid, pname) in enumerate(seats[:4]):
-        ids[i], names[i] = pid, pname
-    try:
-        if _save_conn is None:
-            _save_conn = _db()
-        cur = _save_conn.cursor()
-        cur.execute("SELECT id FROM coc_games WHERE id=?", (room_id,))
-        if cur.fetchone() is not None:
-            cur.execute("""UPDATE coc_games SET status=?,
-                             player2_id=?, player2_name=?, player3_id=?, player3_name=?,
-                             player4_id=?, player4_name=?, state_json=?, updated_at=?
-                           WHERE id=?""",
-                        (status, ids[1], names[1], ids[2], names[2], ids[3], names[3],
-                         state_json, now, room_id))
-        else:
-            cur.execute("""INSERT INTO coc_games
-                           (id,status,player1_id,player1_name,player2_id,player2_name,
-                            player3_id,player3_name,player4_id,player4_name,
-                            host_id,state_json,created_at,updated_at)
-                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                        (room_id, status, ids[0], names[0], ids[1], names[1],
-                         ids[2], names[2], ids[3], names[3], host, state_json, created_at, now))
-        _save_conn.commit()
-    except Exception:  # noqa: BLE001 — a save must never crash; drop the (maybe stale) conn so the next reconnects
-        LOG.warning("coc save_game write failed for %s; dropping connection to reconnect next time", room_id,
-                    exc_info=True)
-        try:
-            if _save_conn is not None:
-                _save_conn.close()
-        except Exception:
-            pass
-        _save_conn = None
+    padded = (list(seats[:4]) + [(None, None)] * 4)[:4]
+    later = STORE.seat_columns(padded[1:], first=2)
+    STORE.upsert(room_id,
+                 update={"status": status, **later, "state_json": state_json,
+                         "updated_at": now},
+                 insert={"status": status, **STORE.seat_columns(padded[:1]), **later,
+                         "host_id": host, "state_json": state_json,
+                         "created_at": created_at, "updated_at": now})
 
 
 def _encode_state(state: dict) -> str:
@@ -251,6 +222,15 @@ def _decode_state(blob) -> dict:
     `[id, shape]` pairs where it expects tiles. Rows written before compaction carry
     no marker and pass through untouched."""
     return persist.expand_state(_rooms.decode_state(blob))
+
+
+# The table: one reused write connection on one thread, the state read and the
+# lobby queries (core.gamestore). `_db`, `_decode_state` and the retention
+# sweep are looked up when called, so tests can still patch them here.
+STORE = GameStore("coc_games", seats=4, connect=lambda: _db(),
+                  decode=lambda blob: _decode_state(blob), label="coc",
+                  cleanup=lambda: maybe_cleanup_games("coc_games", background=True))
+_DB_WRITE_EXEC = STORE.executor
 
 
 def save_game(room_id: str) -> None:
@@ -283,33 +263,15 @@ def save_game(room_id: str) -> None:
 def load_game_state(room_id: str) -> dict | None:
     """Raw persisted room state (players/game/…) from the DB, without touching ROOMS.
     Used by the read-only finished-game review endpoint."""
-    conn = _db()
-    cur = conn.cursor()
-    cur.execute("SELECT state_json FROM coc_games WHERE id=?", (room_id,))
-    row = cur.fetchone()
-    conn.close()
-    if not row or not row["state_json"]:
-        return None
-    try:
-        return _decode_state(row["state_json"])
-    except Exception:
-        return None
+    return STORE.load_state(room_id)
 
 
 def _read_room(room_id: str) -> dict | None:
     """Read and build a room from its saved row WITHOUT installing it in ROOMS
     (it runs on a worker thread; core.rooms.locked_room installs it). None if
     there is no playable row."""
-    conn = _db()
-    cur = conn.cursor()
-    cur.execute("SELECT state_json FROM coc_games WHERE id=?", (room_id,))
-    row = cur.fetchone()
-    conn.close()
-    if not row or not row["state_json"]:
-        return None
-    try:
-        state = _decode_state(row["state_json"])
-    except Exception:
+    state = STORE.load_state(room_id)
+    if state is None:
         return None
     room = {
         "players": state.get("players", {}),
@@ -341,13 +303,6 @@ def _locked_room(room_id: str):
     return _rooms.locked_room(ROOMS, ROOM_LOCK, room_id, _read_room)
 
 
-def _parse_state(row) -> dict:
-    try:
-        return _decode_state(row["state_json"])
-    except Exception:
-        return {}
-
-
 def _ordered_players(state: dict) -> list[dict]:
     """[{id, name}] in seat order for a parsed room state (2-4 players). Uses the game's
     seat order once dealt, else the pre-start room player list."""
@@ -361,19 +316,10 @@ def _ordered_players(state: dict) -> list[dict]:
 
 
 def list_open_games() -> list[dict]:
-    maybe_cleanup_games("coc_games", background=True)  # throttled (<=1/h), non-blocking: prune stale games during long-awake periods
-    conn = _db()
-    cur = conn.cursor()
-    cur.execute("""SELECT id, player1_id, player1_name, state_json, created_at FROM coc_games
-                   WHERE status='open' ORDER BY created_at DESC LIMIT 20""")
-    rows = cur.fetchall()
-    conn.close()
-    out = []
-    for r in rows:
-        state = _parse_state(r)
+    def row(r, state):
         players = _ordered_players(state)
         host_board = (state.get("boards") or {}).get(state.get("host"))
-        out.append({"id": r["id"], "host_id": r["player1_id"], "host_name": r["player1_name"],
+        return {"id": r["id"], "host_id": r["player1_id"], "host_name": r["player1_name"],
                     "player_count": len(players) or 1,
                     # WHO IS ALREADY SEATED. Every lobby's Open row asked only
                     # `host_id == myId`, so a player who joined someone ELSE'S
@@ -385,37 +331,28 @@ def list_open_games() -> list[dict]:
                     "max_players": _valid_max_players(state.get("max_players")),
                     "same_board": bool(state.get("same_board")),
                     "host_board": host_board,
-                    "created_at": r["created_at"]})
-    return out
+                    "created_at": r["created_at"]}
+    return STORE.open_games("id, player1_id, player1_name, state_json, created_at", row,
+                            order="created_at DESC", limit=20)
 
 
 def list_user_games(user_id: str) -> list[dict]:
-    conn = _db()
-    cur = conn.cursor()
-    cur.execute("""SELECT id, status, player1_id, player1_name, player2_id, player2_name,
-                          state_json, created_at, updated_at
-                   FROM coc_games
-                   WHERE (player1_id=? OR player2_id=? OR player3_id=? OR player4_id=?)
-                         AND status != 'over'
-                   ORDER BY updated_at DESC""", (user_id,) * 4)
-    rows = cur.fetchall()
-    conn.close()
-    out = []
-    for r in rows:
-        state = _parse_state(r)
+    def row(r, state):
         g = state.get("game") or {}
         players = _ordered_players(state)
         is_p1 = r["player1_id"] == user_id
         your_turn = isinstance(g, dict) and g.get("turn") == user_id
-        out.append({
+        return {
             "id": r["id"], "status": r["status"],
             "players": [{**p, "is_you": p["id"] == user_id} for p in players],
             "player1_name": r["player1_name"], "player2_name": r["player2_name"],  # legacy 2p fields
             "you_are_p1": is_p1, "your_turn": your_turn,
             "ai_difficulty": _rooms.state_ai_tier(state),
             "created_at": r["created_at"], "updated_at": r["updated_at"],
-        })
-    return out
+        }
+    return STORE.user_games(
+        user_id, "id, status, player1_id, player1_name, player2_id, player2_name, "
+        "state_json, created_at, updated_at", row)
 
 
 def list_active_games() -> list[dict]:
@@ -424,18 +361,9 @@ def list_active_games() -> list[dict]:
     own games to the top (mine = a player id == myId) with a Resume button; others
     are read-only. Exposes player ids + whose turn (list_open_games already exposes
     host_id, so no new exposure)."""
-    conn = _db()
-    cur = conn.cursor()
-    cur.execute("""SELECT id, player1_id, player1_name, player2_id, player2_name,
-                          state_json, created_at, updated_at FROM coc_games
-                   WHERE status='playing' ORDER BY updated_at DESC LIMIT 100""")
-    rows = cur.fetchall()
-    conn.close()
-    out = []
-    for r in rows:
-        state = _parse_state(r)
+    def row(r, state):
         g = state.get("game") or {}
-        out.append({
+        return {
             "id": r["id"],
             "players": _ordered_players(state),
             "player1_id": r["player1_id"], "player1_name": r["player1_name"],  # legacy 2p fields
@@ -443,30 +371,19 @@ def list_active_games() -> list[dict]:
             "turn": g.get("turn") if isinstance(g, dict) else None,
             "ai_difficulty": _rooms.state_ai_tier(state),
             "created_at": r["created_at"], "updated_at": r["updated_at"],
-        })
-    return out
+        }
+    return STORE.active_games(
+        "id, player1_id, player1_name, player2_id, player2_name, state_json, "
+        "created_at, updated_at", row)
 
 
 def list_user_history(user_id: str) -> list[dict]:
     """The user's FINISHED games (newest first) for the lobby History column: opponent,
     final scores, and whether they won — each reviewable via /games/{id}/review."""
-    conn = _db()
-    cur = conn.cursor()
-    cur.execute("""SELECT id, player1_id, player1_name, player2_id, player2_name,
-                          state_json, updated_at
-                   FROM coc_games
-                   WHERE (player1_id=? OR player2_id=? OR player3_id=? OR player4_id=?)
-                         AND status='over'
-                   ORDER BY updated_at DESC LIMIT ?""",
-                (user_id,) * 4 + (_rooms.HISTORY_LIMIT,))
-    rows = cur.fetchall()
-    conn.close()
-    out = []
-    for r in rows:
-        state = _parse_state(r)
+    def row(r, state):
         g = state.get("game") or {}
         if not isinstance(g, dict) or not g.get("players"):
-            continue
+            return None
         try:
             scores = engine.final_scores(g)
         except Exception:
@@ -477,7 +394,7 @@ def list_user_history(user_id: str) -> list[dict]:
         opp_name = ", ".join(p["name"] for p in opps) if opps else "Opponent"
         top_opp = max(opps, key=lambda p: scores.get(p["id"], 0), default=None)  # best opponent, for the 2-num display
         you_won = (win == user_id) or (isinstance(win, list) and user_id in win)
-        out.append({
+        return {
             "id": r["id"], "opp_name": opp_name,
             "players": [{**p, "is_you": p["id"] == user_id, "score": scores.get(p["id"])} for p in players],
             "your_score": scores.get(user_id),
@@ -485,8 +402,10 @@ def list_user_history(user_id: str) -> list[dict]:
             "you_won": you_won, "tie": isinstance(win, list),
             "ai_difficulty": _rooms.state_ai_tier(state),
             "updated_at": r["updated_at"],
-        })
-    return out
+        }
+    return STORE.user_history(
+        user_id, "id, player1_id, player1_name, player2_id, player2_name, state_json, "
+        "updated_at", row)
 
 
 def _standings(state: dict) -> dict | None:
