@@ -76,6 +76,7 @@ core/                  # SHARED BACKEND PLATFORM (imported by every feature; imp
   config.py            #   cors_allowed_origins()
   rooms.py             #   shared room-server primitives + the state_json codec
                        #   (encode/decode_state, pack/unpack_rng) — all seven games use it
+  gamestore.py         #   each game's TABLE: write thread, upsert, state read, lobby queries
   build_info.py        #   commit + started_at for /health, so a deploy can be VERIFIED not assumed
 games/
   spender/             # Spender (Splendor) — main.py exposes `router` (APIRouter), + ai/ stack
@@ -214,14 +215,26 @@ collection; per-game policy stays explicit as the `disarm_client_ai` / `drop_emp
 Extracting it was not tidiness: the same hidden-info broadcast leak had to be found and fixed THREE
 times because three copies of `mk_room_state` each leaked differently.
 
-**Still duplicated (~25 functions, the obvious next extraction):** `save_game`, `load_game_to_memory`,
-`_persist_row` and the `list_open_games`/`list_user_games`/`list_user_history`/`list_active_games`
-family. Same shape in every game, differing only in table name and columns — though not every game
-has every member: `save_game`/`load_game_to_memory`/`list_open_games` are all seven, `list_user_history`
-is six (Where Wolf? has no History), `list_active_games` only Spender and CoC. **They drift exactly
-as you would expect** — back when four games had one, the `list_user_history` row caps were
-independently 20/30/30/30 until 2026-08-05; all six now bind `core.rooms.HISTORY_LIMIT` (see the
-lobby History note below).
+**The table is shared too — `core/gamestore.py` (2026-11-13).** Each game builds one `STORE =
+GameStore(table, seats=, connect=, decode=, label=, cleanup=)` and its persistence goes through it:
+the one-thread write executor and its reused connection (`_DB_WRITE_EXEC` is `STORE.executor`), the
+SELECT-then-UPDATE/INSERT upsert, the codec-checked state read, and the open / mine / active /
+history queries (mine never returns `status='over'`, history binds `core.rooms.HISTORY_LIMIT`, an
+unreadable row reaches the shaper as `{}` instead of 500ing the list). What stays in each game is
+what is really its own: `save_game`'s snapshot of the room, `_persist_row`'s two column maps (which
+columns an UPDATE rewrites differs per game and is part of the row's meaning — CoC and Spender never
+rewrite seat 1, Pinch rewrites the host), and each list's row shaping, as a `row(r, state)` nested
+in the list function so the source guards that read those `def`s still see it.
+`connect`/`decode`/`cleanup` are lambdas over the game's module globals, so a test that patches
+`m._db` or `m.maybe_cleanup_games` is still honoured; a test that points the database somewhere new
+calls `m.STORE.reset_writer()` (there is no `_save_conn` any more). **Where Wolf?'s "my games" query
+stays its own** (over `STORE.fetch`): its seats live in a JSON `player_ids` column, not one column
+per seat. Its deletes go through `STORE.remove`, which runs on the write thread so it lands after
+pending saves. Gates: `core/tests/test_gamestore.py` (the store, on a connection with no
+`rowcount`); `shared/tests/test_persistence_characterization.py` (every game's stored rows, lobby
+lists, retention sweeps and reloaded rooms, byte-compared with a baseline captured BEFORE the
+extraction — `PERSIST_BASELINE=write` builds one for a new game); and
+`shared/tests/test_gamestore_roster.py` (no game grows its own executor, connection or table SQL).
 
 **THE HOW-TO-PLAY MODAL IS SHARED — `RulesModal` in `shared/lobby.jsx`, reached from a Rules button
 in every lobby's create row (right of ↻).** Chrome only: each game's WORDS live in its own
