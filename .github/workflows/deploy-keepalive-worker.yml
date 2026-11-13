@@ -1,0 +1,57 @@
+name: Deploy keepalive Worker
+
+# Deploys keepalive-worker/ (the second, Cloudflare-scheduled pinger) with wrangler.
+# BY HAND ONLY, and only when the owner has added a CLOUDFLARE_API_TOKEN secret (a
+# token with "Edit Cloudflare Workers" on the account; CLOUDFLARE_ACCOUNT_ID too if
+# the token can see more than one account). Without the secret the run skips green
+# and says so. The equivalent from a signed-in machine is the one command
+#
+#     npx wrangler deploy --config keepalive-worker/wrangler.jsonc
+#
+# Nothing else in CI deploys this Worker, and nothing should run this on a schedule:
+# the Worker carries its own cron. The last step verifies the deploy by asking the
+# Worker itself, as keepalive.yml's watchdog does.
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+  WORKER_URL: https://forrestgames-keepalive.forry4.workers.dev/
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Skip without a Cloudflare token
+        id: gate
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            msg="Skipped: no CLOUDFLARE_API_TOKEN secret. Add one (Workers edit permission) and re-run, or deploy from a signed-in machine with: npx wrangler deploy --config keepalive-worker/wrangler.jsonc"
+            echo "::notice::$msg"
+            printf '## Deploy keepalive Worker\n\n- %s\n' "$msg" >> "$GITHUB_STEP_SUMMARY"
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v5
+        if: steps.gate.outputs.deploy == 'true'
+      - uses: actions/setup-node@v5
+        if: steps.gate.outputs.deploy == 'true'
+        with:
+          node-version: '22'
+      - name: Deploy
+        if: steps.gate.outputs.deploy == 'true'
+        run: npx --yes wrangler@4.20.0 deploy --config keepalive-worker/wrangler.jsonc
+      - name: Verify the Worker answers
+        if: steps.gate.outputs.deploy == 'true'
+        run: |
+          # A fresh workers.dev route can take a few seconds to resolve everywhere.
+          sleep 15
+          python3 .github/scripts/keepalive.py --check-worker "$WORKER_URL"

@@ -11,12 +11,18 @@ name: Keep backend warm
 # Keep boot times in the summary, recover transient failures, and fail only when
 # /health stays unhealthy for the full four-minute recovery window.
 # See docs/keepalive-reliability.md for the incident and validation.
+#
+# A run GitHub delivers OUTSIDE 13:00-06:59 UTC (late deliveries are common)
+# exits green at once without pinging, and a hold stops at 07:00 UTC: the
+# window is Render's instance-hour budget. keepalive.py enforces both.
 
 permissions:
   contents: read
 
 env:
   HEALTH_URL: https://splendid-nelz.onrender.com/health
+  # The second, independent pinger (keepalive-worker/). The watchdog checks it exists.
+  WORKER_URL: https://forrestgames-keepalive.forry4.workers.dev/
 
 on:
   schedule:
@@ -59,8 +65,16 @@ jobs:
       || github.event.schedule == '47 17 * * *'
       || github.event.schedule == '13 21 * * *'
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
       - name: Verify backend health and recover if needed
         run: python3 .github/scripts/keepalive.py
+      # RED UNTIL THE OWNER DEPLOYS THE WORKER, deliberately: on 2026-11-13 its URL
+      # answered Cloudflare's 404 (error 1042) - it had never been deployed, so the
+      # "second scheduler" this design rests on did not exist and nothing said so.
+      # Deploy: `npx wrangler deploy --config keepalive-worker/wrangler.jsonc`
+      # (the owner's Cloudflare login), or the deploy-keepalive-worker.yml workflow.
+      - name: Verify the Cloudflare keepalive Worker is deployed
+        if: ${{ !cancelled() }}
+        run: python3 .github/scripts/keepalive.py --check-worker "$WORKER_URL"

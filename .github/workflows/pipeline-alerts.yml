@@ -25,6 +25,7 @@ on:
       - Data store seed
       - Deploy to GitHub Pages
       - Deploy Backend to Render
+      - Deploy keepalive Worker
       - Python CI
     types: [completed]
   # By hand: send one test alert down the whole path (secret, backend, push channel).
