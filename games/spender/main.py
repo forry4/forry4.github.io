@@ -754,7 +754,7 @@ def _ai_variant_valid(variant: str) -> bool:
     """Is `variant` selectable/resumable? Z only when its net actually loaded, so a
     fresh game can never pick a variant the server can't play."""
     return (variant in WEIGHT_VARIANTS
-            or (variant == "Z" and _legacy.AZ_EVALUATE is not None)
+            or (variant == "Z" and _legacy.az_evaluator() is not None)
             or variant in ("H", "H2", "H3", "S", "N", "PV"))  # H/H2/H3 = greedy heuristics; S = H3-eval+PUCT; N = learned-value leaf + PUCT; PV = learned value+POLICY net + PUCT (N/PV client-WASM; server falls back to S)
 
 
@@ -2199,7 +2199,7 @@ def _ai_think(variant: str, game: dict, ai_pid: str) -> dict:
     """Dispatch to the configured variant's move chooser. Runs in a thread-pool executor
     (so the event loop stays free during the compute); raises if the chooser fails — the
     caller guards that and falls back so a failed think can't freeze the AI's turn."""
-    if variant == "Z" and _legacy.AZ_EVALUATE is not None:
+    if variant == "Z" and _legacy.az_evaluator() is not None:
         return _az_choose_move(game, ai_pid, 5.0)
     if variant == "H":
         return _v4_choose_move(game, ai_pid)

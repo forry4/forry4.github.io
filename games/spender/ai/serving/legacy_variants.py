@@ -14,8 +14,9 @@ in the serving stack, but out of `main.py`, which was carrying the deployed rule
 every DB query, the room server, AND the retired brains in one 3,400-line module.
 
 WHAT'S HERE
-  Z  — the AlphaZero net (PUCT + numpy inference, no torch in prod). Enabled only
-       when ai/models/az_model.npz is present; absent, `evaluate()` stays None and
+  Z  — the AlphaZero net (PUCT + numpy inference, no torch in prod), loaded on
+       first use by `az_evaluator()`. Enabled only when ai/models/az_model.npz is
+       present; absent, the evaluator stays None and
        `_ai_variant_valid` rejects "Z", so a fresh game can never select it.
   H  — the v4 valuation heuristic: 1-ply greedy argmax over the shared card model,
        no search. Plus its card-value transparency overlay.
@@ -30,6 +31,7 @@ from __future__ import annotations
 import logging
 import os
 import random
+import threading
 import time
 
 LOG = logging.getLogger("games.spender")
@@ -41,10 +43,28 @@ _MODELS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models")
 AZ_MODEL_PATH = os.environ.get("SPENDER_AZ_MODEL") or os.path.join(_MODELS_DIR, "az_model.npz")
 AZ_EVALUATE = None
 
+# LOADED ON FIRST USE, not at import. Z is retired: only an old saved game against
+# it ever asks, and loading it at boot pulled numpy in (the only thing at import
+# that did) plus the .npz, on every Render cold start. `az_evaluator()` is the one
+# way in; `_AZ_TRIED` makes a missing or broken model cost one attempt, not one per
+# call. Threaded: the AI runs in a thread pool, so two first calls can race.
+_AZ_LOCK = threading.Lock()
+_AZ_TRIED = False
+
+
+def az_evaluator():
+    """The variant-Z evaluator, loading it on the first call; None when absent."""
+    if AZ_EVALUATE is None and not _AZ_TRIED:
+        with _AZ_LOCK:
+            if not _AZ_TRIED:
+                load_az_model()
+    return AZ_EVALUATE
+
 
 def load_az_model() -> None:
-    """Load the exported AZ net for variant Z. Safe at import; never raises."""
-    global AZ_EVALUATE
+    """Load the exported AZ net for variant Z. Never raises."""
+    global AZ_EVALUATE, _AZ_TRIED
+    _AZ_TRIED = True
     AZ_EVALUATE = None
     if os.environ.get("SPENDER_AZ_MODEL") == "none":
         return
@@ -69,6 +89,7 @@ def az_choose_move(game: dict, ai_pid: str, time_limit: float = 5.0) -> dict:
     legal = _aze.legal_actions(s)
     if len(legal) == 1:
         return _aza.action_to_move(s, legal[0])
+    evaluate = az_evaluator()
     search = Search(s, random.Random(), add_noise=False)
     deadline = time.time() + time_limit
     while time.time() < deadline:
@@ -77,7 +98,7 @@ def az_choose_move(game: dict, ai_pid: str, time_limit: float = 5.0) -> dict:
             if req is None:
                 continue
             feats, mask = req
-            p, v = AZ_EVALUATE(feats[None, :], mask[None, :])
+            p, v = evaluate(feats[None, :], mask[None, :])
             search.apply_evals(p[0], float(v[0]))
     visits = search.root.N
     return _aza.action_to_move(s, max(range(len(visits)), key=visits.__getitem__))
@@ -126,4 +147,4 @@ def v4_card_values(game: dict, seat_pid: str) -> dict:
     return out
 
 
-load_az_model()   # ai/models/az_model.npz -> variant Z, when present
+# variant Z loads on first use: see az_evaluator().

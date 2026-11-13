@@ -10,6 +10,7 @@ from __future__ import annotations
 import glob
 import json
 import os
+import threading
 
 from fastapi import HTTPException
 
@@ -30,7 +31,22 @@ def _load_bank() -> dict:
     return bank
 
 
-_BANK = _load_bank()
+# LOADED ON FIRST REQUEST, not at import: 83 files / ~5MB of JSON that only the
+# puzzle routes read, parsed on every Render cold start before anything could be
+# served. `_bank()` is the one way in; the lock makes two first requests (the
+# routes run on FastAPI's thread pool) parse it once. The bank is committed data,
+# so loading later serves exactly what loading at boot did.
+_BANK: dict | None = None
+_BANK_LOCK = threading.Lock()
+
+
+def _bank() -> dict:
+    global _BANK
+    if _BANK is None:
+        with _BANK_LOCK:
+            if _BANK is None:
+                _BANK = _load_bank()
+    return _BANK
 
 
 def _difficulty(k: int) -> str:
@@ -61,11 +77,12 @@ def _meta(puz: dict) -> dict:
 
 
 def list_puzzles() -> list:
-    return [_meta(_BANK[pid]) for pid in sorted(_BANK)]
+    bank = _bank()
+    return [_meta(bank[pid]) for pid in sorted(bank)]
 
 
 def get_puzzle(pid: str):
-    return _BANK.get(pid)
+    return _bank().get(pid)
 
 
 def setup_puzzles(app) -> None:

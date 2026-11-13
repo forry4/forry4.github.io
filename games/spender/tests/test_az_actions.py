@@ -75,6 +75,7 @@ def test_az_choose_move_returns_legal_dict_move(monkeypatch):
     assert a in E.legal_actions(s)
 
     monkeypatch.setattr(legacy, "AZ_EVALUATE", None)
+    monkeypatch.setattr(legacy, "_AZ_TRIED", True)   # i.e. the model is absent
     assert not inc._ai_variant_valid("Z")
     assert inc._ai_variant_valid("A")
 

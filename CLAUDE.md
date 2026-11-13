@@ -1320,6 +1320,27 @@ git push                      # deploy-pages.yml builds + publishes (~2-3 min)
   extra (hours are counted on the service being up, not on who woke it), but widening either does.
   `core/tests/test_keepalive_budget.py` guards it, and also pins that both pingers point at the SAME
   backend URL — a URL changed in one and not the other is a green workflow warming nothing.
+  **GitHub's LATE deliveries spent the budget too** — ~2.5h/day of warming outside the window over the
+  six days to 2026-11-13 — so `.github/scripts/keepalive.py` now exits green at once (saying why in the
+  job summary) when it STARTS outside 13:00-06:59 UTC, and cuts a hold off at 07:00 UTC, including one
+  mid-recovery. Its window constants must equal the Worker's (`test_keepalive_monitor.py` reads both).
+- **THE WORKER WAS NEVER DEPLOYED (found 2026-11-13).** `forrestgames-keepalive.forry4.workers.dev`
+  answered Cloudflare's 404 (error 1042), so the "reliable" half of the design above did not exist and
+  GitHub alone covered 58% of the window (0% for UTC 14-16). The watchdog job in `keepalive.yml` now
+  probes the Worker and FAILS until it answers with its `{"warming": …}` JSON — **red by design until
+  the owner deploys it** with `npx wrangler deploy --config keepalive-worker/wrangler.jsonc` (their
+  Cloudflare login) or by running `deploy-keepalive-worker.yml` (manual; needs a
+  `CLOUDFLARE_API_TOKEN` secret, skips green without one). Nothing else deploys the Worker.
+- **A cold start is also OUR boot, and `/health` measures it** — its `boot` block
+  (`core/build_info.py`) splits process start → top of `app.py` (`interpreter_s`) → bottom of
+  `app.py` (`import_s`) → first ASGI call (`startup_s`). Read it on prod, never a laptop: the first
+  prod reading was **import 12.1s of a 13.7s boot** where a dev box says 2-5s. What fixed it, and
+  must not regress: the Dockerfile **precompiles bytecode** (the official image strips the stdlib's
+  `.pyc`, `.dockerignore` drops ours, and a woken instance keeps nothing it wrote), and the
+  **puzzle bank and the retired AZ net load on first use** (`serve._bank()`,
+  `legacy_variants.az_evaluator()`, each behind a lock) — the net was the only thing pulling numpy
+  in at boot. `games/spender/tests/test_lazy_boot.py` imports the app in a clean interpreter and
+  fails if any of the three comes back. Before/after numbers: `docs/keepalive-reliability.md`.
 - **The $7/mo Starter tier remains the only *guaranteed* fix**, and is explicitly declined (user
   directive, 2026-09-06). Don't propose it again; propose another free scheduler instead.
 - **Staging** (Cloudflare Worker `webprojectsstaging.forry4.workers.dev`, tracks the `staging` branch,

@@ -40,6 +40,21 @@ COPY . /app
 
 # Drop in the precompiled Cython hot-path module (shadows valuation3.py -> faster variant-S V-leaf).
 COPY --from=builder /build/cy/valuation3*.so /app/games/spender/ai/serving/
+
+# PRECOMPILE BYTECODE, or every Render wake compiles it again. .dockerignore drops the
+# host's *.pyc (right: they are another interpreter's), the official python image
+# strips the stdlib's .pyc to save space, and a woken free instance starts from the
+# image with nothing written back — so before this, every cold start compiled the
+# stdlib it imports plus ~56,000 lines of our own code on a fractional CPU. Prod's
+# /health measured that import at 12.1s on 2026-11-13 (core/build_info.py, "boot").
+# Done AFTER the last COPY into /app so no later layer changes a source under its
+# .pyc; the default timestamp check then matches at runtime. Strict: a file that
+# does not compile fails the build here instead of an import at boot. The stdlib pass
+# skips site-packages (pip compiled it at install) and any test dirs (CPython ships
+# deliberately broken files there; the slim image removes them, but do not bet on it).
+RUN python -m compileall -q -j 0 -x '/(site-packages|test|tests|idle_test)/' \
+        "$(python -c 'import sysconfig; print(sysconfig.get_path("stdlib"))')" \
+ && python -m compileall -q -j 0 /app
 # Build GATE: the compiled module must be byte-identical to the source (exact-value tests) or the
 # image fails to build -- a Cython miscompile can never reach production.
 RUN python -m pytest games/spender/tests/test_h3_valuation.py games/spender/tests/test_vsearch.py -q
