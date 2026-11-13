@@ -11181,10 +11181,15 @@ try {
 		check("the report reached the backend and raised an alert",
 			res?.status() === 200 && answer?.ok === true && answer?.queued === true,
 			JSON.stringify({ status: res?.status(), answer }));
+		// The build id is whatever the bundle under test was stamped with: "dev" locally,
+		// the commit in CI (vite.config.js, GITHUB_SHA). Read it from that build's own
+		// version.json rather than assuming either.
+		let builtId = null;
+		try { builtId = JSON.parse(readFileSync(path.join(webappDir, "dist", "version.json"), "utf8")).build; } catch { /* */ }
 		check("it carried the build, the route, the source and the message",
-			body.build === "dev" && body.route === "/bggfilter" && body.source === "boundary"
+			typeof builtId === "string" && builtId.length > 0 && body.build === builtId && body.route === "/bggfilter" && body.source === "boundary"
 			&& /^TypeError: screens: injected crash in BggFilter/.test(body.message || "") && typeof body.stack === "string",
-			JSON.stringify(body).slice(0, 300));
+			JSON.stringify({ builtId, ...body }).slice(0, 300));
 		await sleep(400);
 		check("one throw is one report", reports.length === 1, String(reports.length));
 
