@@ -129,10 +129,6 @@ _db = _rooms.db_conn
 _send = _rooms.send_json
 
 
-def _ensure_room_loaded(room_id: str) -> dict | None:
-    return _rooms.ensure_room_loaded(ROOMS, room_id, load_game_to_memory)
-
-
 def duel_init_db() -> None:
     conn = _db()
     cur = conn.cursor()
@@ -237,11 +233,14 @@ def load_game_state(room_id: str) -> dict | None:
         return None
 
 
-def load_game_to_memory(room_id: str) -> bool:
+def _read_room(room_id: str) -> dict | None:
+    """Read and build a room from its saved row WITHOUT installing it in ROOMS
+    (it runs on a worker thread; core.rooms.locked_room installs it). None if
+    there is no playable row."""
     state = load_game_state(room_id)
     if not state:
-        return False
-    ROOMS[room_id] = {
+        return None
+    room = {
         "players": state.get("players", {}),
         "host": state.get("host"),
         "status": state.get("status", "open"),
@@ -255,7 +254,20 @@ def load_game_to_memory(room_id: str) -> bool:
         "ai_difficulty": _valid_difficulty(state.get("ai_difficulty")),
         "sockets": {},
     }
-    return True
+    return room
+
+
+def load_game_to_memory(room_id: str) -> bool:
+    """Synchronous hydrate, for tests and offline tools -- never from an async
+    handler, which goes through `_locked_room` and reads off the event loop."""
+    return _rooms.load_into(ROOMS, room_id, _read_room)
+
+
+def _locked_room(room_id: str):
+    """`async with _locked_room(rid) as room:` -- the room (None if no such row)
+    with ROOM_LOCK held; on first touch it is read on a thread with the lock
+    RELEASED and installed after a re-check (core.rooms.locked_room)."""
+    return _rooms.locked_room(ROOMS, ROOM_LOCK, room_id, _read_room)
 
 
 def _safe_state(blob) -> dict:
@@ -724,8 +736,8 @@ async def _handle_create(ws, room_id, pid, msg):
     name = (msg.get("name") or "Player").strip()[:24] or "Player"
     vs_ai = bool(msg.get("vs_ai"))
     difficulty = _valid_difficulty(msg.get("ai_difficulty"))
-    async with ROOM_LOCK:
-        if room_id in ROOMS or _ensure_room_loaded(room_id):
+    async with _locked_room(room_id) as existing:
+        if existing:
             await _send(ws, {"type": "error", "message": "room already exists"})
             return False
         room = {
@@ -765,8 +777,7 @@ async def _handle_join(ws, room_id, pid, msg):
     # (a DB read; mirrors _handle_auth_reconnect validating before ROOM_LOCK).
     sess = msg.get("session_token")
     session_uid = ((await asyncio.to_thread(get_user_by_session, sess)) or {}).get("id") if sess else None
-    async with ROOM_LOCK:
-        room = _ensure_room_loaded(room_id)
+    async with _locked_room(room_id) as room:
         if not room:
             await _send(ws, {"type": "error", "message": "no such room"})
             return False
@@ -793,8 +804,7 @@ async def _handle_join(ws, room_id, pid, msg):
 
 
 async def _handle_start(ws, room_id, pid):
-    async with ROOM_LOCK:
-        room = _ensure_room_loaded(room_id)
+    async with _locked_room(room_id) as room:
         if not room:
             await _send(ws, {"type": "error", "message": "no such room"})
             return
@@ -818,8 +828,7 @@ async def _handle_start(ws, room_id, pid):
 
 
 async def _handle_move(ws, room_id, pid, msg):
-    async with ROOM_LOCK:
-        room = _ensure_room_loaded(room_id)
+    async with _locked_room(room_id) as room:
         if not room or not room.get("game"):
             await _send(ws, {"type": "error", "message": "game not started"})
             return
@@ -846,8 +855,7 @@ async def _handle_client_ai_ready(ws, room_id, pid, msg):
     player the other's face-down cards. Against the bot it is cheating at solitaire.
     """
     bot_turn = False
-    async with ROOM_LOCK:
-        room = _ensure_room_loaded(room_id)
+    async with _locked_room(room_id) as room:
         if not room or pid not in room.get("players", {}):
             return
         if not room.get("ai_player"):
@@ -871,8 +879,7 @@ async def _handle_ai_move(ws, room_id, pid, msg):
     deliberately does NOT consume `_ai_search`, so the decision stays armed for the
     watchdog rather than falling through on a garbage submit.
     """
-    async with ROOM_LOCK:
-        room = _ensure_room_loaded(room_id)
+    async with _locked_room(room_id) as room:
         if not room or pid not in room.get("players", {}):
             return
         game = room.get("game")
@@ -904,8 +911,7 @@ async def _handle_ai_move(ws, room_id, pid, msg):
 
 async def _handle_reconnect(ws, room_id, pid, msg):
     token = msg.get("token")
-    async with ROOM_LOCK:
-        room = _ensure_room_loaded(room_id)
+    async with _locked_room(room_id) as room:
         if not room or pid not in room.get("players", {}):
             await _send(ws, {"type": "error", "message": "invalid token"})
             return False
@@ -932,8 +938,7 @@ async def _handle_auth_reconnect(ws, room_id, pid, msg):
     if not ok:
         await _send(ws, {"type": "error", "message": "invalid token"})
         return False
-    async with ROOM_LOCK:
-        room = _ensure_room_loaded(room_id)
+    async with _locked_room(room_id) as room:
         if not room or pid not in room.get("players", {}):
             await _send(ws, {"type": "error", "message": "no such room"})
             return False
@@ -948,8 +953,7 @@ async def _handle_auth_reconnect(ws, room_id, pid, msg):
 
 
 async def _handle_abandon(ws, room_id, pid):
-    async with ROOM_LOCK:
-        room = _ensure_room_loaded(room_id)
+    async with _locked_room(room_id) as room:
         if not room:
             return
         game = room.get("game")
@@ -1023,8 +1027,7 @@ async def games_leave(game_id: str, token: str | None = Depends(_bearer_token),
                       room_token: str | None = Header(default=None, alias="X-Room-Token")):
     user = (await asyncio.to_thread(get_user_by_session, token)) if token else None
     room_id = normalize_room(game_id)
-    async with ROOM_LOCK:
-        room = _ensure_room_loaded(room_id)
+    async with _locked_room(room_id) as room:
         ok, message = _rooms.remove_open_seat(
             room or {}, player_id or "", room_token=room_token,
             session_uid=(user or {}).get("id"))
@@ -1089,8 +1092,7 @@ async def games_cancel(game_id: str, token: str | None = Depends(_bearer_token),
     if not owner:
         return {"ok": False, "message": "unauthenticated"}
     if not user:
-        async with ROOM_LOCK:
-            room = _ensure_room_loaded(game_id)
+        async with _locked_room(game_id) as room:
             if not _rooms.authorized_open_host(room or {}, owner, room_token=room_token):
                 return {"ok": False, "message": "could not verify this seat"}
     deleted = await asyncio.to_thread(delete_open_game, game_id, owner)

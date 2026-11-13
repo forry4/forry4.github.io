@@ -208,7 +208,7 @@ ROOMS[room_id] = {
 ```
 
 **The generic half lives in `core/rooms.py`** (all seven games use it, aliased to their historical
-private names): `normalize_room`, `gen_room_token`, `db_conn`, `ensure_room_loaded`, `send_json`,
+private names): `normalize_room`, `gen_room_token`, `db_conn`, `locked_room` (the off-loop room load), `send_json`,
 `delete_open_game(table, host_col, ...)`, and `release_socket` (the stale-socket guard + phantom-room
 collection; per-game policy stays explicit as the `disarm_client_ai` / `drop_empty_open_only` flags).
 Extracting it was not tidiness: the same hidden-info broadcast leak had to be found and fixed THREE

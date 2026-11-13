@@ -222,19 +222,21 @@ def save_game(room_id: str) -> None:
                           ids, nms, room.get("host"), _encode_state(state), now, now)
 
 
-def load_game_to_memory(room_id: str) -> bool:
-    """Load a persisted game from DB into ROOMS. Returns True if found."""
+def _read_room(room_id: str) -> dict | None:
+    """Read and build a room from its saved row WITHOUT installing it in ROOMS
+    (it runs on a worker thread; core.rooms.locked_room installs it). None if
+    there is no playable row."""
     conn = get_db_conn()
     cur = conn.cursor()
     cur.execute("SELECT state_json FROM games WHERE id=?", (room_id,))
     row = cur.fetchone()
     conn.close()
     if not row or not row["state_json"]:
-        return False
+        return None
     try:
         state = _decode_state(row["state_json"])
     except Exception:
-        return False
+        return None
     game = state.get("game")
     ai_variant = state.get("ai_variant")
     if not ai_variant and game and game.get("ai_player"):
@@ -246,7 +248,7 @@ def load_game_to_memory(room_id: str) -> bool:
             v = nm[4:-1]
             if _ai_variant_valid(v):
                 ai_variant = v
-    ROOMS[room_id] = {
+    room = {
         "players": state.get("players", {}),
         "host": state.get("host"),
         "status": state.get("status", "open"),
@@ -257,7 +259,20 @@ def load_game_to_memory(room_id: str) -> bool:
         "sockets": {},
     }
     LOG.info("loaded game %s from DB", room_id)
-    return True
+    return room
+
+
+def load_game_to_memory(room_id: str) -> bool:
+    """Synchronous hydrate, for tests and offline tools -- never from an async
+    handler, which goes through `_locked_room` and reads off the event loop."""
+    return _rooms.load_into(ROOMS, room_id, _read_room)
+
+
+def _locked_room(room_id: str):
+    """`async with _locked_room(rid) as room:` -- the room (None if no such row)
+    with ROOM_LOCK held; on first touch it is read on a thread with the lock
+    RELEASED and installed after a re-check (core.rooms.locked_room)."""
+    return _rooms.locked_room(ROOMS, ROOM_LOCK, room_id, _read_room)
 
 
 def list_open_games() -> list[dict]:
@@ -2465,9 +2480,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
     # every mutating action is gated on it. Mirrors Where Wolf?/Duel/CoC.
     authed = False
 
-    async with ROOM_LOCK:
-        if room_id not in ROOMS:
-            load_game_to_memory(room_id)
+    async with _locked_room(room_id):
         r = ROOMS.setdefault(room_id, {"players": {}, "sockets": {}, "status": "open", "game": None, "host": None})
         r.setdefault("meta", {})
         # The socket is REGISTERED BY THE HANDSHAKE (create/join/reconnect/
@@ -2654,14 +2667,13 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                 if not consumed:
                     await websocket.send_text(json.dumps({"type": "error", "message": "token mismatch"}))
                     continue
-                async with ROOM_LOCK:
+                # The room may have been dropped since connect (Spender drops any
+                # empty room), so this reloads it -- off the loop -- if need be.
+                async with _locked_room(room_id) as _room:
                     # The seat must EXIST. This used to `setdefault` the room and
                     # register the socket whatever the room held, so a token for a
                     # room the caller was never in still came back `authed` — and an
                     # authed socket can `abandon`, which ended that table's game.
-                    _room = ROOMS.get(room_id)
-                    if _room is None and load_game_to_memory(room_id):
-                        _room = ROOMS.get(room_id)   # dropped since connect: Spender drops any empty room
                     _seated = bool(_room and pid in _room.get("players", {}))
                     if _seated:
                         r = _room
@@ -3342,11 +3354,7 @@ async def cancel_open_game(game_id: str, token: str | None = Depends(bearer_toke
         return {"ok": False, "message": "missing identity"}
     room_id = normalize_room(game_id)
     if not user:
-        async with ROOM_LOCK:
-            room = ROOMS.get(room_id)
-            if room is None:
-                load_game_to_memory(room_id)
-                room = ROOMS.get(room_id)
+        async with _locked_room(room_id) as room:
             if not _rooms.authorized_open_host(room or {}, owner, room_token=room_token):
                 return {"ok": False, "message": "could not verify this seat"}
     deleted = await asyncio.to_thread(delete_open_game, room_id, owner)
@@ -3362,11 +3370,7 @@ async def leave_open_seat(game_id: str, token: str | None = Depends(bearer_token
                           room_token: str | None = Header(default=None, alias="X-Room-Token")):
     user = await asyncio.to_thread(get_user_by_session, token)
     room_id = normalize_room(game_id)
-    async with ROOM_LOCK:
-        room = ROOMS.get(room_id)
-        if room is None:
-            load_game_to_memory(room_id)
-            room = ROOMS.get(room_id)
+    async with _locked_room(room_id) as room:
         ok, message = _rooms.remove_open_seat(
             room or {}, player_id or "", room_token=room_token,
             session_uid=(user or {}).get("id"))

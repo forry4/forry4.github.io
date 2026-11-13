@@ -15,7 +15,7 @@ from games.dontminion import main as m
 
 # The real function objects, grabbed at import time — the autouse fixture stubs
 # the module attributes, and the persistence tests need the real ones back.
-_REAL_LOAD_TO_MEMORY = m.load_game_to_memory
+_REAL_READ_ROOM = m._read_room
 _REAL_SAVE_GAME = m.save_game
 
 
@@ -44,7 +44,7 @@ def _isolate(monkeypatch):
     m.ROOM_LOCK = asyncio.Lock()
     _rooms._ws_connect_limiter.reset()
     monkeypatch.setattr(m, "save_game", lambda room_id: None)
-    monkeypatch.setattr(m, "load_game_to_memory", lambda room_id: False)
+    monkeypatch.setattr(m, "_read_room", lambda room_id: None)
     monkeypatch.setattr(m, "get_user_by_session", lambda tok: None)
     # Bots run through _schedule_bots called EXPLICITLY in tests; the fire-and-
     # forget kick would leave dangling tasks on the per-test loop.
@@ -129,7 +129,7 @@ def test_kingdom_requirements_reach_the_deal_and_survive_the_blob(monkeypatch):
     assert blob["requires"] == ["actions", "draw"]     # save_game itself writes it
 
     monkeypatch.setattr(m, "load_game_state", lambda rid: blob)
-    monkeypatch.setattr(m, "load_game_to_memory", _REAL_LOAD_TO_MEMORY)
+    monkeypatch.setattr(m, "_read_room", _REAL_READ_ROOM)
     m.ROOMS.clear()
     assert m.load_game_to_memory("RQ") is True
     assert m.ROOMS["RQ"]["requires"] == ["actions", "draw"]
@@ -367,7 +367,7 @@ def test_save_blob_round_trip_restores_options(monkeypatch):
 
     # wipe + reload through the REAL load_game_to_memory (state read stubbed)
     monkeypatch.setattr(m, "load_game_state", lambda rid: captured["state"])
-    monkeypatch.setattr(m, "load_game_to_memory", _REAL_LOAD_TO_MEMORY)
+    monkeypatch.setattr(m, "_read_room", _REAL_READ_ROOM)
     m.ROOMS.clear()
     assert m.load_game_to_memory("R8") is True
     r2 = m.ROOMS["R8"]
@@ -384,7 +384,7 @@ def test_load_revalidates_difficulty(monkeypatch):
             "meta": {}, "vs_ai": False, "ai_players": [],
             "ai_difficulty": "cheater", "expansions": ["nope"], "max_players": 99}
     monkeypatch.setattr(m, "load_game_state", lambda rid: blob)
-    monkeypatch.setattr(m, "load_game_to_memory", _REAL_LOAD_TO_MEMORY)
+    monkeypatch.setattr(m, "_read_room", _REAL_READ_ROOM)
     assert m.load_game_to_memory("R9") is True
     r = m.ROOMS["R9"]
     assert r["ai_difficulty"] == m.DEFAULT_DIFFICULTY
@@ -425,7 +425,7 @@ def test_a_dark_ages_vs_ai_room_creates_saves_and_reloads(monkeypatch):
     _REAL_SAVE_GAME("RDA")
     assert blob["game"]["schema"] == engine.SCHEMA
     monkeypatch.setattr(m, "load_game_state", lambda rid: blob)
-    monkeypatch.setattr(m, "load_game_to_memory", _REAL_LOAD_TO_MEMORY)
+    monkeypatch.setattr(m, "_read_room", _REAL_READ_ROOM)
     m.ROOMS.clear()
     assert m.load_game_to_memory("RDA") is True
     loaded = m.ROOMS["RDA"]["game"]

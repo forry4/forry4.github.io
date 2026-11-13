@@ -56,7 +56,7 @@ def _isolate(monkeypatch):
     # reset it per test or the suite eventually throttles itself. See core.rooms.
     _rooms._ws_connect_limiter.reset()
     monkeypatch.setattr(m, "save_game", lambda room_id: None)
-    monkeypatch.setattr(m, "load_game_to_memory", lambda room_id: False)
+    monkeypatch.setattr(m, "_read_room", lambda room_id: None)
     monkeypatch.setattr(m, "get_user_by_session", lambda tok: None)
     yield
     loop.close()

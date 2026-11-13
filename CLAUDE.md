@@ -373,7 +373,7 @@ ROOMS[room_id] = {
 ```
 
 **The generic half lives in `core/rooms.py`** (all seven games use it, aliased to their historical
-private names): `normalize_room`, `gen_room_token`, `db_conn`, `ensure_room_loaded`, `send_json`,
+private names): `normalize_room`, `gen_room_token`, `db_conn`, `locked_room` (the off-loop room load), `send_json`,
 `delete_open_game(table, host_col, ...)`, and `release_socket` (the stale-socket guard + phantom-room
 collection; per-game policy stays explicit as the `disarm_client_ai` / `drop_empty_open_only` flags).
 Extracting it was not tidiness: the same hidden-info broadcast leak had to be found and fixed THREE
@@ -705,13 +705,33 @@ covers the logic; each game's wiring is one line).
   on the loop, so two separate awaits would let one token reconnect twice
   (`core/tests/test_reconnect_consume.py` races it, and fails with the lock removed).
   `test_routes_off_event_loop.py` holds every `async def` in a game server to that.
-  **Still open: room LOADING** (`_ensure_room_loaded`, Spender's `load_game_to_memory`) on
-  a cache miss — the first touch of a room after a restart. It runs under the per-game
-  `ROOM_LOCK`, so it cannot just be awaited: holding the lock across the read stalls that
-  game's other tables, and reading before the lock can race a second load and overwrite
-  a live room with an older copy. It wants one shared per-room load with a re-check in
-  `core/rooms.py`, and a test that races two loads. The frozen alert names the frame the
-  loop is stuck in (`monitor._loop_stack`), so a stall there will say so.
+  **Room LOADING is off the loop too (2026-11-12) — `core.rooms.locked_room`.** The first
+  touch of a room after a restart reads its row, and every game did that synchronously
+  as the first statement inside `async with ROOM_LOCK:` (105 call sites across the twelve
+  servers, Spender's four included). Neither obvious `to_thread` placement works: reading
+  WHILE holding the lock queues that game's other tables behind one cold room, and
+  reading BEFORE the lock and installing the result lets a stale copy overwrite a room
+  that went live meanwhile. So a handler writes `async with _locked_room(rid) as room:`,
+  and the shared loader (1) runs the game's `_read_room` — DB read + build, never touching
+  `ROOMS` — on a thread with the lock RELEASED, (2) shares one in-flight read per room
+  (keyed by loop, `ROOMS` dict and id; shielded, so a waiter whose socket closes does not
+  cancel it for the others), (3) installs only after a RE-CHECK under the lock (a room
+  already live wins, always), and (4) retries if the room was dropped from memory between
+  the install and the handler's acquire, as the old reload-under-the-lock did; a load
+  that found no row is not retried. The lock is passed per call, never captured — the
+  root conftest swaps every `ROOM_LOCK` per test. `load_game_to_memory` survives only
+  as a SYNC wrapper for tests and offline tools; tests stub `_read_room`.
+  Gates: `core/tests/test_room_loading.py` (the race, the shared read, the drop-and-
+  reload, the cancelled waiter, the stall — the race test goes red with the re-check
+  removed, the shared-read test with the dedup removed, the stall test with a sync
+  read), `shared/tests/test_room_load_off_loop.py` (each game's real leave route: a
+  hung read of a cold room never delays a live one; roster from the registered routes),
+  and `test_routes_off_event_loop.py`, which now refuses any CALL to `_read_room` /
+  `load_game_to_memory` / `_ensure_room_loaded` inside an `async def` of a game server
+  and requires every server to define and enter `_locked_room`. One window it does not
+  close: a lobby cancel deletes the row outside the lock, so a read that began before
+  the delete can still install the room it read (the same class of race the cancel
+  path already had with a concurrent join's save).
 - **A dropped socket must RETRY, or "Reconnecting…" is just a word.** Four of the six
   socket games rendered that label off `!connected` and did nothing about it, so a blip
   left the game frozen until the player reloaded — and in a vs-bot room it is worse than a

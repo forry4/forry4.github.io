@@ -15,6 +15,8 @@ from games.orbit.ai.state import observation
 from games.orbit.cards import CARDS
 from games.orbit import main as m
 
+_REAL_READ_ROOM = m._read_room
+
 
 class _FakeWS:
     def __init__(self):
@@ -31,7 +33,7 @@ def _isolate(monkeypatch):
     m.ROOMS.clear()
     m.ROOM_LOCK = asyncio.Lock()
     monkeypatch.setattr(m, "save_game", lambda *_a, **_k: None)
-    monkeypatch.setattr(m, "_ensure_room_loaded", lambda rid: m.ROOMS.get(rid))
+    monkeypatch.setattr(m, "_read_room", lambda rid: None)
     yield
     loop.close()
 
@@ -438,6 +440,7 @@ def test_persisted_budget_and_legacy_history_restore_safely(monkeypatch):
         "ai_decisions_this_turn": 2, "configuration": "sun",
     }
     monkeypatch.setattr(m, "load_game_state", lambda _rid: copy.deepcopy(state))
+    monkeypatch.setattr(m, "_read_room", _REAL_READ_ROOM)   # the fixture stubs it
     assert m.load_game_to_memory("r1")
     restored = m.ROOMS["r1"]
     assert restored["ai_budget_remaining_ms"] == 1234
@@ -461,6 +464,7 @@ def test_corrupt_history_with_a_hidden_field_is_discarded(monkeypatch):
         "ai_memory": {}, "configuration": "sun",
     }
     monkeypatch.setattr(m, "load_game_state", lambda _rid: copy.deepcopy(state))
+    monkeypatch.setattr(m, "_read_room", _REAL_READ_ROOM)   # the fixture stubs it
     assert m.load_game_to_memory("r2")
     restored = m.ROOMS["r2"]["seat_histories"]
     assert all("secret_hand" not in json.dumps(history) for history in restored.values())

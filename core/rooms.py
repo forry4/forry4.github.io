@@ -19,7 +19,9 @@ does not know what a game is.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
+import contextlib
 import hashlib
 import hmac
 import json
@@ -212,16 +214,112 @@ def bot_seed(*parts) -> int:
     return int.from_bytes(hashlib.sha256(key.encode()).digest()[:4], "big")
 
 
-def ensure_room_loaded(rooms: Rooms, room_id: str,
-                       loader: Callable[[str], Any]) -> Room | None:
-    """Return the live room, hydrating it from the DB on first touch.
+# ── room loading ──────────────────────────────────────────────────────────────
+#
+# THE FIRST TOUCH OF A ROOM AFTER A RESTART IS A DATABASE READ, and it used to run
+# on the event loop under the game's ROOM_LOCK: every game's handlers called a
+# synchronous `_ensure_room_loaded(room_id)` as the first statement inside
+# `async with ROOM_LOCK:`. On Turso that is a network round trip, so a cold room
+# paused every socket on the site for it, and a stalled one (the 20s
+# TURSO_HTTP_TIMEOUT) froze the loop outright. A `to_thread` wrap alone was not
+# the fix, because the two obvious placements are each wrong:
+#   * read on a thread WHILE HOLDING the lock: the loop runs, but that game's
+#     other tables queue behind one cold room;
+#   * read on a thread BEFORE taking the lock and install the result: a second
+#     touch of the same room, or a create that lands meanwhile, makes the room
+#     live while the read is in flight, a move mutates it, and the stale DB copy
+#     then overwrites the live room.
+# So the read runs on a thread with the lock RELEASED, concurrent first touches of
+# one room share a single in-flight read, and the result is installed only after
+# a RE-CHECK under the lock: a room that is already live wins, always.
+#
+# A game hands in a `read(room_id) -> room dict | None` that does the DB read and
+# builds the room WITHOUT touching ROOMS (it runs on a worker thread), and enters
+# `locked_room(...)` where it used to write `async with ROOM_LOCK:` + load.
+# The lock is passed per call, never captured: the root conftest gives every test
+# a fresh ROOM_LOCK, and a captured one would be bound to a closed loop.
 
-    `loader` is the game's `load_game_to_memory`, which inserts into `rooms` as a
-    side effect — hence the re-read rather than using its return value.
+# (loop, rooms dict, room id) -> the one in-flight load. The loop is part of the
+# key because a Task belongs to its loop; tests run a loop per `asyncio.run`.
+_LOADS: dict[tuple[int, int, str], "asyncio.Task[bool]"] = {}
+_LOCKED_ROOM_ATTEMPTS = 3
+
+
+def load_into(rooms: Rooms, room_id: str, read: Callable[[str], Room | None]) -> bool:
+    """SYNCHRONOUS hydrate, for tests and offline tools only. True if the DB had it.
+
+    Never call this from an `async def` in a game server — that is the blocking
+    read this module exists to keep off the loop, and
+    `core/tests/test_routes_off_event_loop.py` refuses it there.
     """
-    if room_id not in rooms:
-        loader(room_id)
-    return rooms.get(room_id)
+    room = read(room_id)
+    if room is None:
+        return False
+    rooms[room_id] = room
+    return True
+
+
+async def _load_once(rooms: Rooms, lock, room_id: str,
+                     read: Callable[[str], Room | None]) -> bool:
+    room = await asyncio.to_thread(read, room_id)
+    async with lock:
+        # THE RE-CHECK. The read ran without the lock, so the room may have gone
+        # live meanwhile (a create, a load on another path) and been played on.
+        # The live room wins; the copy just read is older by construction.
+        if room_id in rooms:
+            return True
+        if room is None:
+            return False
+        rooms[room_id] = room
+        return True
+
+
+async def load_room(rooms: Rooms, lock, room_id: str,
+                    read: Callable[[str], Room | None]) -> bool:
+    """Make `room_id` live in `rooms` if the DB has it. Call WITHOUT the lock held.
+
+    True if the room was live when the load finished. Concurrent callers for one
+    room share one read. The read itself is shielded: a caller cancelled mid-load
+    (its socket closed) leaves the load running for everyone else waiting on it.
+    """
+    if room_id in rooms:
+        return True
+    key = (id(asyncio.get_running_loop()), id(rooms), room_id)
+    task = _LOADS.get(key)
+    if task is None:
+        task = asyncio.ensure_future(_load_once(rooms, lock, room_id, read))
+        _LOADS[key] = task
+
+        def _forget(done, key=key):
+            if _LOADS.get(key) is done:
+                del _LOADS[key]
+        task.add_done_callback(_forget)
+    return await asyncio.shield(task)
+
+
+@contextlib.asynccontextmanager
+async def locked_room(rooms: Rooms, lock, room_id: str,
+                      read: Callable[[str], Room | None]):
+    """`async with locked_room(ROOMS, ROOM_LOCK, rid, read) as room:` — the room
+    (or None if the DB has no such row), with the lock HELD for the block.
+
+    Replaces `async with ROOM_LOCK: room = _ensure_room_loaded(rid)`. The read
+    happens before the lock is taken, so between the load and the acquire another
+    handler can drop the room from memory (Spender drops an empty room; a cancel
+    pops it). The old code would simply have reloaded it under the lock, so this
+    retries the load rather than answering "no such room" for a row that exists.
+    A load that found NO row is not retried: that answer is authoritative.
+    """
+    for attempt in range(_LOCKED_ROOM_ATTEMPTS):
+        found = await load_room(rooms, lock, room_id, read)
+        await lock.acquire()
+        if room_id in rooms or not found or attempt == _LOCKED_ROOM_ATTEMPTS - 1:
+            break
+        lock.release()
+    try:
+        yield rooms.get(room_id)
+    finally:
+        lock.release()
 
 
 async def send_json(ws, payload: dict) -> None:

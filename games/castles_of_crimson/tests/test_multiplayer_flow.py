@@ -20,7 +20,7 @@ def test_four_human_players_full_game(monkeypatch):
     rid = "MP4TEST"
     m.ROOMS.pop(rid, None)
     monkeypatch.setattr(m, "save_game", lambda room_id: None)
-    monkeypatch.setattr(m, "load_game_to_memory", lambda room_id: False)
+    monkeypatch.setattr(m, "_read_room", lambda room_id: None)
     pids = ["h1", "h2", "h3", "h4"]
 
     async def run():
@@ -65,7 +65,7 @@ def test_host_chosen_max_players_caps_joins(monkeypatch):
     rid = "CAP3"
     m.ROOMS.pop(rid, None)
     monkeypatch.setattr(m, "save_game", lambda room_id: None)
-    monkeypatch.setattr(m, "load_game_to_memory", lambda room_id: False)
+    monkeypatch.setattr(m, "_read_room", lambda room_id: None)
 
     async def run():
         h = _FakeWS()
@@ -86,7 +86,7 @@ def test_missing_max_players_defaults_to_four(monkeypatch):
     rid = "DEF4"
     m.ROOMS.pop(rid, None)
     monkeypatch.setattr(m, "save_game", lambda room_id: None)
-    monkeypatch.setattr(m, "load_game_to_memory", lambda room_id: False)
+    monkeypatch.setattr(m, "_read_room", lambda room_id: None)
 
     async def run():
         await m._handle_create(_FakeWS(), rid, "h1", {"name": "H1", "vs_ai": False, "board_id": "1"})
@@ -98,7 +98,7 @@ def test_same_board_forces_everyone_onto_host_board(monkeypatch):
     rid = "SAMEBRD"
     m.ROOMS.pop(rid, None)
     monkeypatch.setattr(m, "save_game", lambda room_id: None)
-    monkeypatch.setattr(m, "load_game_to_memory", lambda room_id: False)
+    monkeypatch.setattr(m, "_read_room", lambda room_id: None)
 
     async def run():
         # host on board 3, same_board on; joiners pick different boards
@@ -126,7 +126,7 @@ def test_cannot_join_a_vs_ai_room(monkeypatch):
     rid = "VSAIJOIN"
     m.ROOMS.pop(rid, None)
     monkeypatch.setattr(m, "save_game", lambda room_id: None)
-    monkeypatch.setattr(m, "load_game_to_memory", lambda room_id: False)
+    monkeypatch.setattr(m, "_read_room", lambda room_id: None)
 
     async def run():
         host = _FakeWS()

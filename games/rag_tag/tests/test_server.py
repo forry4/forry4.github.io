@@ -49,7 +49,7 @@ def _isolate(monkeypatch):
     _rooms._ws_connect_limiter = _rooms.SlidingWindowLimiter(
         _rooms.WS_CONNECTS_PER_MIN, 60)
     monkeypatch.setattr(m, "save_game", lambda *_a, **_k: None)
-    monkeypatch.setattr(m, "_ensure_room_loaded", lambda rid: m.ROOMS.get(rid))
+    monkeypatch.setattr(m, "_read_room", lambda rid: None)
     monkeypatch.setattr(m, "get_user_by_session", lambda _t: None)
     monkeypatch.setattr(m, "BOT_FLOOR_SECONDS", 0.0)
     yield

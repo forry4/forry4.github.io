@@ -41,15 +41,23 @@ BLOCKING = {
 # The account and token lookups a WebSocket handler makes on join/reconnect. Every
 # `async def` in a game server is held to these, not just the routes: the handlers
 # are not routes, so the test above never saw them, and a slow Turso there stalled
-# every game on the site (2026-10-08). Room LOADING (`_ensure_room_loaded`,
-# `load_game_to_memory`) is deliberately not in this set: it runs under ROOM_LOCK,
-# and moving it off the loop needs a shared per-room load with a re-check, not a
-# `to_thread` -- see the root CLAUDE.md.
+# every game on the site (2026-10-08).
+#
+# Room LOADING is in it too (2026-11-12): the first touch of a room after a
+# restart reads its row, and that read ran synchronously under ROOM_LOCK on the
+# loop in every game. A handler now enters `async with _locked_room(rid) as room:`
+# (core.rooms.locked_room), which reads on a thread with the lock released and
+# re-checks before installing. `_read_room` is handed to it, never called, so a
+# CALL to any of these inside an `async def` is the old blocking shape.
+ROOM_LOAD = {
+    "load_game_to_memory", "_read_room", "load_into",
+    "ensure_room_loaded", "_ensure_room_loaded",
+}
 WS_BLOCKING = {
     "get_user_by_session", "authenticate_user",
     "validate_reconnect_token", "mark_reconnect_token_used", "consume_reconnect_token",
     "create_reconnect_token", "load_game_state",
-}
+} | ROOM_LOAD
 _ROUTE = (".get(", ".post(", ".put(", ".delete(", ".patch(")
 
 
@@ -167,3 +175,48 @@ def lobby(token):
     fns, bad = _async_offenders(src, "x")
     assert fns == 2
     assert bad == ["x:3 join() calls get_user_by_session() on the event loop"]
+
+
+def test_every_game_loads_rooms_through_the_shared_loader():
+    """The other half of the room-load check: refusing the blocking call proves
+    nothing if a game simply has no loader to call. Every game server must define
+    the thread-side `_read_room` and enter `_locked_room` from its handlers. The
+    roster is the tree, so a new game is held to it the day it ships."""
+    mains = sorted(REPO.glob("games/*/main.py"))
+    assert len(mains) >= 12, [str(m) for m in mains]
+    missing = []
+    for path in mains:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        defs = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+        entered = sum(1 for n in ast.walk(tree) if isinstance(n, ast.AsyncWith)
+                      for item in n.items
+                      if isinstance(item.context_expr, ast.Call)
+                      and _name(item.context_expr.func) == "_locked_room")
+        if "_read_room" not in defs or "_locked_room" not in defs or entered < 3:
+            missing.append(f"{path.relative_to(REPO)}: _read_room={'_read_room' in defs} "
+                           f"_locked_room={'_locked_room' in defs} entered={entered}")
+    assert not missing, "\n  ".join(["games not on core.rooms.locked_room:", *missing])
+
+
+def test_the_room_load_check_is_not_vacuous():
+    src = '''
+async def join(ws, rid):
+    async with ROOM_LOCK:
+        room = _ensure_room_loaded(rid)
+
+async def leave(rid):
+    async with ROOM_LOCK:
+        if rid not in ROOMS:
+            load_game_to_memory(rid)
+
+async def start(ws, rid):
+    async with _locked_room(rid) as room:
+        return room
+
+def _locked_room(rid):
+    return _rooms.locked_room(ROOMS, ROOM_LOCK, rid, _read_room)
+'''
+    fns, bad = _async_offenders(src, "x")
+    assert fns == 3
+    assert bad == ["x:4 join() calls _ensure_room_loaded() on the event loop",
+                   "x:9 leave() calls load_game_to_memory() on the event loop"]

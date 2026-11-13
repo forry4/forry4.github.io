@@ -30,23 +30,12 @@ def test_gen_room_token_is_random_and_sized():
     assert len(rooms.gen_room_token(6)) > 0
 
 
-def test_ensure_room_loaded_hydrates_once():
+def test_load_into_hydrates_and_reports_a_missing_row():
     store = {}
-    calls = []
-
-    def loader(rid):
-        calls.append(rid)
-        store[rid] = {"players": {}, "sockets": {}}
-
-    assert rooms.ensure_room_loaded(store, "R1", loader) is store["R1"]
-    assert calls == ["R1"]
-    # Already resident -> no second load.
-    assert rooms.ensure_room_loaded(store, "R1", loader) is store["R1"]
-    assert calls == ["R1"]
-
-
-def test_ensure_room_loaded_returns_none_when_the_loader_finds_nothing():
-    assert rooms.ensure_room_loaded({}, "GONE", lambda rid: None) is None
+    assert rooms.load_into(store, "R1", lambda rid: {"players": {}, "sockets": {}, "id": rid})
+    assert store["R1"]["id"] == "R1"
+    assert rooms.load_into(store, "GONE", lambda rid: None) is False
+    assert "GONE" not in store
 
 
 def test_send_json_serialises_the_payload():

@@ -49,7 +49,7 @@ def _isolate(monkeypatch):
     # "unknown" so the whole suite shares one budget — reset per test (repo rule).
     _rooms._ws_connect_limiter.reset()
     monkeypatch.setattr(m, "save_game", lambda room_id: None)
-    monkeypatch.setattr(m, "load_game_to_memory", lambda room_id: False)
+    monkeypatch.setattr(m, "_read_room", lambda room_id: None)
     monkeypatch.setattr(m, "get_user_by_session", lambda tok: None)
     monkeypatch.setattr(m, "_kick_bots", lambda room_id: None)
     yield

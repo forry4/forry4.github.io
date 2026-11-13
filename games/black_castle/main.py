@@ -157,11 +157,14 @@ def load_game_state(room_id: str) -> dict | None:
         return None
 
 
-def load_game_to_memory(room_id: str) -> bool:
+def _read_room(room_id: str) -> dict | None:
+    """Read and build a room from its saved row WITHOUT installing it in ROOMS
+    (it runs on a worker thread; core.rooms.locked_room installs it). None if
+    there is no playable row."""
     state = load_game_state(room_id)
     if not isinstance(state, dict):
-        return False
-    ROOMS[room_id] = {
+        return None
+    room = {
         "players": state.get("players", {}), "host": state.get("host"),
         "status": state.get("status", "open"), "game": state.get("game"),
         "meta": state.get("meta", {}), "max_players": int(state.get("max_players", 4)),
@@ -172,11 +175,20 @@ def load_game_to_memory(room_id: str) -> bool:
         "created_at": state.get("created_at"), "sockets": {},
         "_bot_running": False,
     }
-    return True
+    return room
 
 
-def _ensure_room_loaded(room_id: str) -> dict | None:
-    return _rooms.ensure_room_loaded(ROOMS, room_id, load_game_to_memory)
+def load_game_to_memory(room_id: str) -> bool:
+    """Synchronous hydrate, for tests and offline tools -- never from an async
+    handler, which goes through `_locked_room` and reads off the event loop."""
+    return _rooms.load_into(ROOMS, room_id, _read_room)
+
+
+def _locked_room(room_id: str):
+    """`async with _locked_room(rid) as room:` -- the room (None if no such row)
+    with ROOM_LOCK held; on first touch it is read on a thread with the lock
+    RELEASED and installed after a re-check (core.rooms.locked_room)."""
+    return _rooms.locked_room(ROOMS, ROOM_LOCK, room_id, _read_room)
 
 
 def _position_key(game: dict) -> str:
@@ -369,8 +381,8 @@ async def _handle_create(ws: WebSocket, room_id: str, pid: str, msg: dict) -> bo
     except (TypeError, ValueError):
         num_bots = 0
     difficulty = DEFAULT_DIFFICULTY if str(msg.get("ai_difficulty", "easy")).lower() not in AI_DIFFICULTIES else str(msg.get("ai_difficulty")).lower()
-    async with ROOM_LOCK:
-        if room_id in ROOMS or _ensure_room_loaded(room_id):
+    async with _locked_room(room_id) as existing:
+        if existing:
             await _send(ws, {"type": "error", "message": "room already exists"})
             return False
         room = _new_room(room_id, pid, name, max_players, num_bots, difficulty, ws)
@@ -389,8 +401,7 @@ async def _handle_join(ws: WebSocket, room_id: str, pid: str, msg: dict) -> bool
     session_uid = None
     if msg.get("session_token"):
         session_uid = ((await asyncio.to_thread(get_user_by_session, msg.get("session_token"))) or {}).get("id")
-    async with ROOM_LOCK:
-        room = _ensure_room_loaded(room_id)
+    async with _locked_room(room_id) as room:
         if not room:
             await _send(ws, {"type": "error", "message": "no such room"})
             return False
@@ -414,8 +425,7 @@ async def _handle_join(ws: WebSocket, room_id: str, pid: str, msg: dict) -> bool
 
 async def _handle_start(ws: WebSocket, room_id: str, pid: str) -> None:
     room_id = normalize_room(room_id)
-    async with ROOM_LOCK:
-        room = _ensure_room_loaded(room_id)
+    async with _locked_room(room_id) as room:
         if not room:
             await _send(ws, {"type": "error", "message": "no such room"})
             return
@@ -438,8 +448,7 @@ async def _handle_start(ws: WebSocket, room_id: str, pid: str) -> None:
 
 async def _handle_move(ws: WebSocket, room_id: str, pid: str, msg: dict) -> None:
     room_id = normalize_room(room_id)
-    async with ROOM_LOCK:
-        room = _ensure_room_loaded(room_id)
+    async with _locked_room(room_id) as room:
         if not room or not room.get("game"):
             await _send(ws, {"type": "error", "message": "game not started"})
             return
@@ -458,8 +467,7 @@ async def _handle_move(ws: WebSocket, room_id: str, pid: str, msg: dict) -> None
 
 async def _handle_reconnect(ws: WebSocket, room_id: str, pid: str, msg: dict) -> bool:
     room_id = normalize_room(room_id)
-    async with ROOM_LOCK:
-        room = _ensure_room_loaded(room_id)
+    async with _locked_room(room_id) as room:
         token = room.get("meta", {}).get(pid, {}).get("token") if room else None
         if not room or not token or msg.get("token") != token:
             await _send(ws, {"type": "error", "message": "bad reconnect token"})
@@ -478,8 +486,7 @@ async def _handle_auth_reconnect(ws: WebSocket, room_id: str, pid: str, msg: dic
     if not user or user.get("id") != pid:
         await _send(ws, {"type": "error", "message": "bad session"})
         return False
-    async with ROOM_LOCK:
-        room = _ensure_room_loaded(room_id)
+    async with _locked_room(room_id) as room:
         if not room or pid not in room.get("players", {}):
             await _send(ws, {"type": "error", "message": "no such seat"})
             return False
@@ -653,8 +660,7 @@ async def games_leave(game_id: str, token: str | None = Depends(_bearer_token),
                       room_token: str | None = Header(default=None, alias="X-Room-Token")):
     user = (await asyncio.to_thread(get_user_by_session, token)) if token else None
     room_id = normalize_room(game_id)
-    async with ROOM_LOCK:
-        room = _ensure_room_loaded(room_id)
+    async with _locked_room(room_id) as room:
         ok, message = _rooms.remove_open_seat(
             room or {}, player_id or "", room_token=room_token,
             session_uid=(user or {}).get("id"))
@@ -675,8 +681,7 @@ async def games_cancel(game_id: str, token: str | None = Depends(_bearer_token),
         return {"ok": False, "message": "missing identity"}
     room_id = normalize_room(game_id)
     if not user:
-        async with ROOM_LOCK:
-            room = _ensure_room_loaded(room_id)
+        async with _locked_room(room_id) as room:
             if not _rooms.authorized_open_host(room or {}, owner, room_token=room_token):
                 return {"ok": False, "message": "could not verify this seat"}
     ok = await asyncio.to_thread(delete_open_game, room_id, owner)

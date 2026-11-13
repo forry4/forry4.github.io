@@ -82,8 +82,7 @@ def quiet(monkeypatch):
         mod.ROOMS.clear()
         _rooms._ws_connect_limiter.reset()
         monkeypatch.setattr(mod, "save_game", lambda *a, **k: None)
-        if hasattr(mod, "load_game_to_memory"):
-            monkeypatch.setattr(mod, "load_game_to_memory", lambda *a, **k: False)
+        monkeypatch.setattr(mod, "_read_room", lambda *a, **k: None)
         monkeypatch.setattr(mod, "get_user_by_session", lambda *a, **k: None)
 
         async def _anoop(*a, **k):

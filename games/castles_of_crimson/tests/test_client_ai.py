@@ -26,7 +26,7 @@ def _isolate(monkeypatch, rid):
     """No DB reads/writes; fast pacing; a clean room slate."""
     m.ROOMS.pop(rid, None)
     monkeypatch.setattr(m, "save_game", lambda room_id: None)
-    monkeypatch.setattr(m, "load_game_to_memory", lambda room_id: False)
+    monkeypatch.setattr(m, "_read_room", lambda room_id: None)
     monkeypatch.setattr(m, "_BOT_MOVE_DELAY", 0.001)
     monkeypatch.setattr(m, "_PHASE_END_PAUSE", 0.001)
     monkeypatch.setattr(m, "_POST_TURN_PAUSE", 0.001)
