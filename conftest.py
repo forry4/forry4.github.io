@@ -86,6 +86,9 @@ def _isolate_site_alerts_and_caps():
     if rooms is not None:
         rooms._room_create_limiter.reset()
         rooms._public_list_limiter.reset()
+    client_errors = sys.modules.get("core.client_errors")
+    if client_errors is not None:
+        client_errors.reset()
     spender = sys.modules.get("games.spender.main")
     if spender is not None:
         spender._register_site_limiter.reset()

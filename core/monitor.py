@@ -35,10 +35,10 @@ import urllib.request
 from email.utils import parsedate_to_datetime
 from typing import Callable
 
-from fastapi import Depends, Header, HTTPException, Query
+from fastapi import Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from core import alerts, results
+from core import alerts, client_errors, results
 from core.auth import is_site_owner
 from core.db import backend, get_db_conn
 
@@ -511,6 +511,13 @@ def setup_site_health(app, get_user_by_session, token_resolver=None) -> None:
     @app.post("/ops/alert")
     def ops_alert(payload: IngestIn, authorization: str | None = Header(default=None)):
         return ingest_alert(payload, authorization)
+
+    # A page that threw in a player's browser (shared/crashReport.js). Unauthenticated
+    # by design — a crash can happen signed out — so core/client_errors.py caps,
+    # scrubs and rate-limits it. Plain `def`: off the event loop like the rest.
+    @app.post("/ops/client-error")
+    def client_error(payload: client_errors.ClientErrorIn, request: Request):
+        return client_errors.report(payload, request)
 
     @app.post("/admin/alerts/test")
     def admin_test(_: dict = Depends(site_owner)):
