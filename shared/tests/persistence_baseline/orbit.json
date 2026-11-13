@@ -1,0 +1,290 @@
+{
+ "rows": [
+  {
+   "id": "BAD0",
+   "status": "open",
+   "player1_id": "alice",
+   "player1_name": "Alice",
+   "player2_id": null,
+   "player2_name": null,
+   "host_id": "alice",
+   "state_json": "this is not a state blob",
+   "created_at": 1790000600,
+   "updated_at": 1790000600
+  },
+  {
+   "id": "BAD1",
+   "status": "playing",
+   "player1_id": "alice",
+   "player1_name": "Alice",
+   "player2_id": null,
+   "player2_name": null,
+   "host_id": "alice",
+   "state_json": "this is not a state blob",
+   "created_at": 1790000601,
+   "updated_at": 1790000601
+  },
+  {
+   "id": "BAD2",
+   "status": "over",
+   "player1_id": "alice",
+   "player1_name": "Alice",
+   "player2_id": null,
+   "player2_name": null,
+   "host_id": "alice",
+   "state_json": "this is not a state blob",
+   "created_at": 1790000602,
+   "updated_at": 1790000602
+  },
+  {
+   "id": "BOT1",
+   "status": "playing",
+   "player1_id": "bob",
+   "player1_name": "Bob",
+   "player2_id": "bot",
+   "player2_name": "Bot",
+   "host_id": "bob",
+   "state_json": "sha256:1d63b79b3b5059c7b6dfa231bf535ff44af69caf04f9c8afa9aac57238fac784 (12025 chars)",
+   "created_at": 1790000000,
+   "updated_at": 1790000000
+  },
+  {
+   "id": "OPEN1",
+   "status": "open",
+   "player1_id": "alice",
+   "player1_name": "Alice",
+   "player2_id": "erin",
+   "player2_name": "Erin",
+   "host_id": "alice",
+   "state_json": "sha256:1927130f2d55360ffb4cd78a1ff9420c83f2162f307a369c95bf47286cbaa6c9 (382 chars)",
+   "created_at": 1790000010,
+   "updated_at": 1790000500
+  },
+  {
+   "id": "OVER1",
+   "status": "over",
+   "player1_id": "alice",
+   "player1_name": "Alice",
+   "player2_id": "bob",
+   "player2_name": "Bob",
+   "host_id": "alice",
+   "state_json": "sha256:f2e29090ec655d0d6f252e54a3835c3c01f32073b4c663e88c941839d20a6513 (12079 chars)",
+   "created_at": 1790000020,
+   "updated_at": 1790000020
+  },
+  {
+   "id": "PLAY1",
+   "status": "playing",
+   "player1_id": "alice",
+   "player1_name": "Alice",
+   "player2_id": "bob",
+   "player2_name": "Bob",
+   "host_id": "alice",
+   "state_json": "sha256:43ebfbfc75ca669c4a44713514babbc8e063783ebaf7d15aab43af440aaf0a04 (12079 chars)",
+   "created_at": 1789999900,
+   "updated_at": 1790000030
+  }
+ ],
+ "lists": {
+  "list_open_games": [
+   {
+    "id": "BAD0",
+    "host_id": "alice",
+    "player_ids": [],
+    "max_players": 2,
+    "host_name": "Alice",
+    "created_at": 1790000600
+   },
+   {
+    "id": "OPEN1",
+    "host_id": "alice",
+    "player_ids": [
+     "alice",
+     "erin"
+    ],
+    "max_players": 2,
+    "host_name": "Alice",
+    "created_at": 1790000010
+   }
+  ],
+  "list_user_games(alice)": [
+   {
+    "id": "BAD1",
+    "status": "playing",
+    "player1_name": "Alice",
+    "player2_name": null,
+    "you_are_p1": true,
+    "ai_difficulty": null,
+    "your_turn": false,
+    "turn": null,
+    "created_at": 1790000601,
+    "updated_at": 1790000601
+   },
+   {
+    "id": "BAD0",
+    "status": "open",
+    "player1_name": "Alice",
+    "player2_name": null,
+    "you_are_p1": true,
+    "ai_difficulty": null,
+    "your_turn": false,
+    "turn": null,
+    "created_at": 1790000600,
+    "updated_at": 1790000600
+   },
+   {
+    "id": "OPEN1",
+    "status": "open",
+    "player1_name": "Alice",
+    "player2_name": "Erin",
+    "you_are_p1": true,
+    "ai_difficulty": null,
+    "your_turn": false,
+    "turn": null,
+    "created_at": 1790000010,
+    "updated_at": 1790000500
+   },
+   {
+    "id": "PLAY1",
+    "status": "playing",
+    "player1_name": "Alice",
+    "player2_name": "Bob",
+    "you_are_p1": true,
+    "ai_difficulty": null,
+    "your_turn": true,
+    "turn": 0,
+    "created_at": 1789999900,
+    "updated_at": 1790000030
+   }
+  ],
+  "list_user_games(bob)": [
+   {
+    "id": "PLAY1",
+    "status": "playing",
+    "player1_name": "Alice",
+    "player2_name": "Bob",
+    "you_are_p1": false,
+    "ai_difficulty": null,
+    "your_turn": true,
+    "turn": 0,
+    "created_at": 1789999900,
+    "updated_at": 1790000030
+   },
+   {
+    "id": "BOT1",
+    "status": "playing",
+    "player1_name": "Bob",
+    "player2_name": "Bot",
+    "you_are_p1": true,
+    "ai_difficulty": "easy",
+    "your_turn": true,
+    "turn": 0,
+    "created_at": 1790000000,
+    "updated_at": 1790000000
+   }
+  ],
+  "list_user_games(erin)": [
+   {
+    "id": "OPEN1",
+    "status": "open",
+    "player1_name": "Alice",
+    "player2_name": "Erin",
+    "you_are_p1": false,
+    "ai_difficulty": null,
+    "your_turn": false,
+    "turn": null,
+    "created_at": 1790000010,
+    "updated_at": 1790000500
+   }
+  ],
+  "list_user_games(zed)": [],
+  "list_user_history(alice)": [
+   {
+    "id": "BAD2",
+    "player1_name": "Alice",
+    "player2_name": null,
+    "you_are_p1": true,
+    "ai_difficulty": null,
+    "outcome": "draw",
+    "turns": null,
+    "updated_at": 1790000602
+   },
+   {
+    "id": "OVER1",
+    "player1_name": "Alice",
+    "player2_name": "Bob",
+    "you_are_p1": true,
+    "ai_difficulty": null,
+    "outcome": "won",
+    "turns": 0,
+    "updated_at": 1790000020
+   }
+  ],
+  "list_user_history(bob)": [
+   {
+    "id": "OVER1",
+    "player1_name": "Alice",
+    "player2_name": "Bob",
+    "you_are_p1": false,
+    "ai_difficulty": null,
+    "outcome": "lost",
+    "turns": 0,
+    "updated_at": 1790000020
+   }
+  ],
+  "list_user_history(erin)": [],
+  "list_user_history(zed)": []
+ },
+ "sweeps": [
+  [
+   [
+    "orbit_games"
+   ],
+   {
+    "background": true
+   }
+  ]
+ ],
+ "loads": {
+  "BAD0": {
+   "ok": false,
+   "room": null,
+   "load_game_state": null
+  },
+  "BAD1": {
+   "ok": false,
+   "room": null,
+   "load_game_state": null
+  },
+  "BAD2": {
+   "ok": false,
+   "room": null,
+   "load_game_state": null
+  },
+  "BOT1": {
+   "ok": true,
+   "room": "sha256:eb7d29ee30c9ba2f0bc8f6d0dd6a399728376e0c13860c62385cad0d7139d156 (16082 chars)",
+   "load_game_state": "sha256:0b1877b2ccc831559dbb5775cfbee306b635a1ba0ae7224719a73366b1484175 (16012 chars)"
+  },
+  "OPEN1": {
+   "ok": true,
+   "room": "sha256:e1fa274dd33d200b3fa47eaf0ec81c7f0a8e49e8be209097bde9f4f94afc812b (452 chars)",
+   "load_game_state": "sha256:1927130f2d55360ffb4cd78a1ff9420c83f2162f307a369c95bf47286cbaa6c9 (382 chars)"
+  },
+  "OVER1": {
+   "ok": true,
+   "room": "sha256:20248dbb73c576e47c5bcdc6a50902eede98001ee04be4ebf6a26b82cd2c2009 (16119 chars)",
+   "load_game_state": "sha256:7c52d34b87a507fc96276d64ac7198724a45c70bb6a7d185acc09a01faa42671 (16061 chars)"
+  },
+  "PLAY1": {
+   "ok": true,
+   "room": "sha256:9a30a72d1394c7d736367a3795438f8bb3fad0daa4f809f9f48750f4ce75e78e (16131 chars)",
+   "load_game_state": "sha256:788c545302ff0e73ea63ec435e2706df88e707a44a53f78f2282edd6732752cd (16061 chars)"
+  },
+  "MISSING": {
+   "ok": false,
+   "room": null,
+   "load_game_state": null
+  }
+ }
+}
