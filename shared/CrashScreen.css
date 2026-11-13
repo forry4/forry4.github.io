@@ -1,0 +1,30 @@
+/* The crash screen (shared/CrashScreen.jsx). The site's own ground, type and gold,
+   from baseCss's tokens — with hard fallbacks, because this is the one screen that
+   cannot assume anything else on the page rendered. */
+.crash{min-height:100vh;min-height:100dvh;display:flex;align-items:flex-start;justify-content:center;
+  padding:calc(env(safe-area-inset-top,0px) + 12vh) 16px 32px;
+  background:radial-gradient(ellipse at 50% 0%,rgba(201,168,76,.07),transparent 60%),var(--bg,#0f0e0c);
+  color:var(--text,#e8dfc8);font-family:'Crimson Pro','Crimson Fallback',Georgia,serif}
+.crash-card{width:100%;max-width:34rem;padding:32px 28px 26px;border:1px solid var(--border,#3a342a);
+  border-radius:var(--radius-lg,14px);background:var(--surface,#1a1814);
+  box-shadow:0 18px 50px rgba(0,0,0,.45);text-align:center}
+.crash-glyph{width:34px;height:34px;color:var(--gold,#c9a84c);margin:0 auto 14px;display:block}
+.crash-title{font-family:'Cinzel','Cinzel Fallback',Georgia,serif;font-weight:600;font-size:1.5rem;
+  letter-spacing:.05em;color:var(--gold-light,#e8c96a);margin:0 0 12px}
+.crash-lede{font-size:1.12rem;line-height:1.5;color:var(--text,#e8dfc8);margin:0 auto 6px;max-width:28em}
+.crash-note{font-size:1rem;font-style:italic;color:var(--text-soft,#b3a58b);margin:0 0 4px}
+.crash-acts{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:22px 0 22px}
+.crash-acts .btn{min-width:9.5rem}
+.crash-detail{text-align:left;border-top:1px solid var(--border,#3a342a);padding-top:14px}
+.crash-detail summary{cursor:pointer;font-size:1rem;color:var(--text-soft,#b3a58b);text-align:center;
+  list-style-position:inside}
+.crash-detail summary:focus-visible{outline:2px solid var(--gold,#c9a84c);outline-offset:3px;border-radius:4px}
+.crash-detail pre{margin:12px 0 0;max-height:16rem;overflow:auto;padding:12px;border-radius:var(--radius,8px);
+  background:var(--bg,#0f0e0c);border:1px solid var(--border,#3a342a);color:var(--text-soft,#b3a58b);
+  font:12.5px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-word}
+@media(max-width:430px){
+  .crash{padding-top:calc(env(safe-area-inset-top,0px) + 8vh)}
+  .crash-card{padding:26px 18px 20px}
+  .crash-title{font-size:1.3rem}
+  .crash-acts .btn{flex:1 1 100%}
+}

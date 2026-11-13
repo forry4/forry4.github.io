@@ -145,6 +145,9 @@ const MODE_FOR_SCREEN = { home: "home", spender: "spender", coc: "coc", werewolf
 const AI_PERSONAS = { H2: "Henry", H3: "Herald", S: "Steve", N: "Nina" };
 // variant code -> tier word, in shared/botTiers.js so the profile page reads the same map.
 import { SPENDER_AI_TIERS as AI_TIERS } from "../../shared/botTiers.js";
+// One error boundary per lazily loaded screen: a crash inside a game draws the shared
+// crash screen there and leaves the shell, and the way home, intact.
+import { ScreenBoundary } from "../../shared/CrashScreen.jsx";
 // The variants the create modal OFFERS, weakest first — the pill row is built
 // from this, and it is what a remembered last-played variant is validated
 // against (a retired code must not restore as a live selection).
@@ -2536,6 +2539,9 @@ export default function SpenderApp() {
 		pushPath(buildPath(MODE_FOR_SCREEN[screenName] || "home"));
 		setScreen(screenName);
 	};
+	// "Back to menu" on a screen that crashed (ScreenBoundary, shared/CrashScreen.jsx):
+	// the shell is still mounted, so going home is the shell's own navigation.
+	const crashHome = () => nav("home");
 
 	// enterRoute(): state-only navigation to a parsed route — used by boot, the post-auth
 	// consume, and popstate. NEVER pushes (the URL is already what it should be); only an
@@ -3094,170 +3100,170 @@ export default function SpenderApp() {
 
 	// Books — personal ranked reading list (public read, owner edit)
 	if (screen === "books") return (
-		<Suspense fallback={<GameChunkLoading />}>
+		<ScreenBoundary key={screen} onHome={crashHome}><Suspense fallback={<GameChunkLoading />}>
 			<Books authUser={authUser} onExit={exitRead} />
-		</Suspense>
+		</Suspense></ScreenBoundary>
 	);
 
 	// Notes — the owner's private notebook (folders, notes, screenshots). The server
 	// refuses everyone else on every route; the page shows them a "private" notice.
 	if (screen === "notes") return (
-		<Suspense fallback={<GameChunkLoading />}>
+		<ScreenBoundary key={screen} onHome={crashHome}><Suspense fallback={<GameChunkLoading />}>
 			<Notes authUser={authUser} onExit={exitRead} />
-		</Suspense>
+		</Suspense></ScreenBoundary>
 	);
 
 	// Profile — the signed-in player's own results (core/results.py). Reached by
 	// clicking your name on the menu or in any lobby; Back returns there.
 	if (screen === "profile") return (
-		<Suspense fallback={<GameChunkLoading />}>
+		<ScreenBoundary key={screen} onHome={crashHome}><Suspense fallback={<GameChunkLoading />}>
 			<Profile authUser={authUser}
 				onExit={() => (cameFromInsideApp() ? window.history.back() : nav("home"))} />
-		</Suspense>
+		</Suspense></ScreenBoundary>
 	);
 
 	// BGG Filter — static BoardGameGeek dataset, filtered client-side. No backend.
 	if (screen === "bggfilter") return (
-		<Suspense fallback={<GameChunkLoading />}>
+		<ScreenBoundary key={screen} onHome={crashHome}><Suspense fallback={<GameChunkLoading />}>
 			<BggFilter onExit={exitRead} />
-		</Suspense>
+		</Suspense></ScreenBoundary>
 	);
 
 	// Steam Filter — static Steam reviews dataset, filtered client-side. No backend.
 	if (screen === "steamfilter") return (
-		<Suspense fallback={<GameChunkLoading />}>
+		<ScreenBoundary key={screen} onHome={crashHome}><Suspense fallback={<GameChunkLoading />}>
 			<SteamFilter authUser={authUser} onExit={exitRead} />
-		</Suspense>
+		</Suspense></ScreenBoundary>
 	);
 
 	// Astral Ascent Guide — static wiki-derived data, browsed client-side. No backend.
 	// Owns its segment 2 (/astral/<tab>) and the hash (#<type>:<id>, the open entry).
 	if (screen === "astral") return (
-		<Suspense fallback={<GameChunkLoading />}>
+		<ScreenBoundary key={screen} onHome={crashHome}><Suspense fallback={<GameChunkLoading />}>
 			<AstralGuide onExit={exitRead} />
-		</Suspense>
+		</Suspense></ScreenBoundary>
 	);
 
 	// Anime Filter — the top shows across MAL, AniList and Kitsu, seasons averaged;
 	// static data filtered client-side. No backend.
 	if (screen === "animefilter") return (
-		<Suspense fallback={<GameChunkLoading />}>
+		<ScreenBoundary key={screen} onHome={crashHome}><Suspense fallback={<GameChunkLoading />}>
 			<AnimeFilter onExit={exitRead} />
-		</Suspense>
+		</Suspense></ScreenBoundary>
 	);
 
 	// LoL Stats — Worlds seed records (Liquipedia) and champion stats (Oracle's Elixir),
 	// static data browsed client-side. No backend. Owns its segment 2 (/lolstats/<tab>)
 	// and the hash (#<champion>, the open champion).
 	if (screen === "lolstats") return (
-		<Suspense fallback={<GameChunkLoading />}>
+		<ScreenBoundary key={screen} onHome={crashHome}><Suspense fallback={<GameChunkLoading />}>
 			<LolStats onExit={exitRead} />
-		</Suspense>
+		</Suspense></ScreenBoundary>
 	);
 
 	// Box Puzzles — solo boxes played in the browser; the server keeps the
 	// leaderboard. Owns its own segment 2 (/boxpuzzles/<n>).
 	if (screen === "boxpuzzles") return (
-		<Suspense fallback={<GameChunkLoading />}>
+		<ScreenBoundary key={screen} onHome={crashHome}><Suspense fallback={<GameChunkLoading />}>
 			<BoxPuzzles authUser={authUser} onExit={() => nav("home")} />
-		</Suspense>
+		</Suspense></ScreenBoundary>
 	);
 
 	// Castles of Crimson — self-contained game component, mounted by the shell.
 	if (screen === "coc") {
 		return (
-			<Suspense fallback={<GameChunkLoading />}>
+			<ScreenBoundary key={screen} onHome={crashHome}><Suspense fallback={<GameChunkLoading />}>
 				<CastlesOfCrimson myId={myId} authUser={authUser} onExit={() => nav("home")} />
-			</Suspense>
+			</Suspense></ScreenBoundary>
 		);
 	}
 
 	// Where Wolf? — self-contained social-deduction game component.
 	if (screen === "werewolf") {
 		return (
-			<Suspense fallback={<GameChunkLoading />}>
+			<ScreenBoundary key={screen} onHome={crashHome}><Suspense fallback={<GameChunkLoading />}>
 				<WhereWolf myId={myId} authUser={authUser} onExit={() => nav("home")} />
-			</Suspense>
+			</Suspense></ScreenBoundary>
 		);
 	}
 
 	// Spender Duel — self-contained 2-player game component.
 	if (screen === "duel") {
 		return (
-			<Suspense fallback={<GameChunkLoading />}>
+			<ScreenBoundary key={screen} onHome={crashHome}><Suspense fallback={<GameChunkLoading />}>
 				<SpenderDuel myId={myId} authUser={authUser} onExit={() => nav("home")} />
-			</Suspense>
+			</Suspense></ScreenBoundary>
 		);
 	}
 
 	if (screen === "dontminion") {
 		return (
-			<Suspense fallback={<GameChunkLoading />}>
+			<ScreenBoundary key={screen} onHome={crashHome}><Suspense fallback={<GameChunkLoading />}>
 				<Dontminion myId={myId} authUser={authUser} onExit={() => nav("home")} />
-			</Suspense>
+			</Suspense></ScreenBoundary>
 		);
 	}
 
 	// Dissonance — self-contained 2-player trick-taking game component.
 	if (screen === "dissonance") {
 		return (
-			<Suspense fallback={<GameChunkLoading />}>
+			<ScreenBoundary key={screen} onHome={crashHome}><Suspense fallback={<GameChunkLoading />}>
 				<Dissonance myId={myId} authUser={authUser} onExit={() => nav("home")} />
-			</Suspense>
+			</Suspense></ScreenBoundary>
 		);
 	}
 
 	// Rag Tag — self-contained 2-player auto battler.
 	if (screen === "ragtag") {
 		return (
-			<Suspense fallback={<GameChunkLoading />}>
+			<ScreenBoundary key={screen} onHome={crashHome}><Suspense fallback={<GameChunkLoading />}>
 				<RagTag myId={myId} authUser={authUser} onExit={() => nav("home")} />
-			</Suspense>
+			</Suspense></ScreenBoundary>
 		);
 	}
 
 	// Orbit — faithful two-player Zenith with a random first-release opponent.
 	if (screen === "orbit") {
 		return (
-			<Suspense fallback={<GameChunkLoading />}>
+			<ScreenBoundary key={screen} onHome={crashHome}><Suspense fallback={<GameChunkLoading />}>
 				<Orbit myId={myId} authUser={authUser} onExit={() => nav("home")} />
-			</Suspense>
+			</Suspense></ScreenBoundary>
 		);
 	}
 
 	// Black Castle — the 2–4 seat Himeji worker-placement game.
 	if (screen === "blackcastle") {
 		return (
-			<Suspense fallback={<GameChunkLoading />}>
+			<ScreenBoundary key={screen} onHome={crashHome}><Suspense fallback={<GameChunkLoading />}>
 				<BlackCastle myId={myId} authUser={authUser} onExit={() => nav("home")} />
-			</Suspense>
+			</Suspense></ScreenBoundary>
 		);
 	}
 
 	// Pinch — two-player rings, reversible markers, and a random practice bot.
 	if (screen === "pinch") {
 		return (
-			<Suspense fallback={<GameChunkLoading />}>
+			<ScreenBoundary key={screen} onHome={crashHome}><Suspense fallback={<GameChunkLoading />}>
 				<Pinch myId={myId} authUser={authUser} onExit={() => nav("home")} />
-			</Suspense>
+			</Suspense></ScreenBoundary>
 		);
 	}
 
 	// Pip Market — the 2–4 player dice auction.
 	if (screen === "pipmarket") {
 		return (
-			<Suspense fallback={<GameChunkLoading />}>
+			<ScreenBoundary key={screen} onHome={crashHome}><Suspense fallback={<GameChunkLoading />}>
 				<PipMarket myId={myId} authUser={authUser} onExit={() => nav("home")} />
-			</Suspense>
+			</Suspense></ScreenBoundary>
 		);
 	}
 
 	// SecretNames — the two-player cooperative word game.
 	if (screen === "secretnames") {
 		return (
-			<Suspense fallback={<GameChunkLoading />}>
+			<ScreenBoundary key={screen} onHome={crashHome}><Suspense fallback={<GameChunkLoading />}>
 				<SecretNames myId={myId} authUser={authUser} onExit={() => nav("home")} />
-			</Suspense>
+			</Suspense></ScreenBoundary>
 		);
 	}
 
@@ -3284,7 +3290,7 @@ export default function SpenderApp() {
 	// renders its own whole screen (CoC's board layout / Duel's card catalog come from
 	// their localStorage caches, warmed by the precache).
 	if (screen === "offline" && offlinePlay) return (
-		<Suspense fallback={<GameChunkLoading />}>
+		<ScreenBoundary key="offline-play" onHome={exitOfflinePlayToHub}><Suspense fallback={<GameChunkLoading />}>
 			{offlinePlay.game === "duel"
 				? <SpenderDuel myId={myId} authUser={authUser} offline={offlinePlay}
 					onExit={exitOfflinePlayToHub} />
@@ -3293,7 +3299,7 @@ export default function SpenderApp() {
 						onExit={exitOfflinePlayToHub} />
 					: <CastlesOfCrimson myId={myId} authUser={authUser} offline={offlinePlay}
 						onExit={exitOfflinePlayToHub} />}
-		</Suspense>
+		</Suspense></ScreenBoundary>
 	);
 
 	// Local vs AI hub — start/resume/delete offline games + the offline-asset download.

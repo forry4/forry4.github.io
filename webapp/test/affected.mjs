@@ -23,7 +23,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 // The kit-wide checks. A change to shared/ or the shell can break any lobby, and these
 // are the blocks that walk every lobby's chrome rather than one game's board (~80s).
 const SHELL = ["routeMounts", "shellNav", "lobbyChrome", "waitingRoomKit", "rulesModal",
-	"phoneLobbyColumns", "formControlZoom", "updateNudgeLayout"];
+	"phoneLobbyColumns", "formControlZoom", "updateNudgeLayout", "crashScreen"];
 
 // Per feature directory: its own screens blocks. `dissonanceBeat` is left out on purpose:
 // it measures elapsed time by design and reads short on a busy dev box (397ms of 700 on
@@ -49,7 +49,7 @@ export const FEATURE_BLOCKS = {
 	"books": ["offlineRead"],
 	"notes": ["notesEditor", "offlineRead"],
 	"boxpuzzles": ["boxPuzzles", "boxDaily"],
-	"bggfilter": ["formControlZoom", "offlineRead"],
+	"bggfilter": ["formControlZoom", "offlineRead", "crashScreen"],
 	"steamfilter": ["formControlZoom", "offlineRead", "steamSaved"],
 	"astralguide": ["astralGuide", "formControlZoom", "offlineRead"],
 	"lolstats": ["lolStats", "formControlZoom", "offlineRead"],

@@ -50,6 +50,35 @@ const mb = (b) => (b == null ? "—" : `${(b / (1024 * 1024)).toFixed(b < 10 * 1
 const when = (t) => new Date(t * 1000).toLocaleString(undefined,
 	{ month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
+/* The words for the kinds whose id does not read as English. Anything unlisted shows
+ * its id, which is what every kind showed before; the id stays in the tooltip. */
+const KIND_LABEL = {
+	"client-error": "Browser crash",
+	"server-error": "Server error",
+	"pipeline": "Pipeline failed",
+	"data-stale": "Data stale",
+	"frozen": "Server frozen",
+	"test": "Test",
+};
+
+/* A browser crash (core/client_errors.py) is one headline line — the error, the page,
+ * the build and the browser — then the top of its stack. The headline is what says
+ * which bug it is; the stack is for fixing it, so it folds away. */
+function AlertMessage({ a }) {
+	const folded = a.folded > 0 && <span className="sh-dim"> (+{a.folded} more)</span>;
+	const nl = a.kind === "client-error" ? a.message.indexOf("\n") : -1;
+	if (nl < 0) return <div className="sh-msg">{a.message}{folded}</div>;
+	return (
+		<div className="sh-msg">
+			{a.message.slice(0, nl)}{folded}
+			<details className="sh-stack">
+				<summary>Stack</summary>
+				<pre>{a.message.slice(nl + 1)}</pre>
+			</details>
+		</div>
+	);
+}
+
 export default function SiteHealth({ authUser, onClose, onChanged }) {
 	const token = authUser?.session_token;
 	const [data, setData] = useState(null);
@@ -113,10 +142,10 @@ export default function SiteHealth({ authUser, onClose, onChanged }) {
 										{data.alerts.map((a) => (
 											<li key={a.id} className={`sh-alert sh-${a.severity}${a.acked ? "" : " sh-new"}`}>
 												<div className="sh-alert-hd">
-													<span className="sh-kind">{a.kind}</span>
+													<span className="sh-kind" title={a.kind}>{KIND_LABEL[a.kind] || a.kind}</span>
 													<time>{when(a.created_at)}</time>
 												</div>
-												<div className="sh-msg">{a.message}{a.folded > 0 && <span className="sh-dim"> (+{a.folded} more)</span>}</div>
+												<AlertMessage a={a} />
 											</li>
 										))}
 									</ol>

@@ -265,7 +265,32 @@ drops to ephemeral local sqlite and the site stays up — so `/health` reports `
   never start a thread.
 - **Site health panel** — `shared/SiteHealth.jsx` in the shared RulesModal chrome, owner-only
   Extras tile with an unread badge; `/admin/alerts`, `/admin/health`, `/admin/alerts/ack`,
-  `/admin/alerts/test` (the Test button bypasses dedup, so it always sends).
+  `/admin/alerts/test` (the Test button bypasses dedup, so it always sends). It names the kinds
+  whose id does not read as English (`KIND_LABEL`) and folds a browser crash's stack under its
+  headline.
+- **A page that throws in a player's browser is a `client-error` alert (2026-11-12).**
+  `shared/crashReport.js` reports from the error boundaries' `componentDidCatch` and from
+  `window` `error` / `unhandledrejection` (installed in `webapp/main.jsx` before the first
+  render) to the unauthenticated `POST /ops/client-error` (`core/client_errors.py`, plain
+  `def`). The server caps every field by TRUNCATION (a 422 is a lost report), rate-limits 10 per
+  IP per 10 min and 200/h site-wide, keeps the PATH only, scrubs anything token-shaped, reduces
+  the User-Agent to "Safari on iOS", and stores no IP or id. **Dedup key = build + SCREEN (first
+  path segment, so every room of a game is one key) + first line of the message**: one bug on
+  one page is one alert with a count. The client stays quiet on a `dev` build (the screens
+  harness sets `window.__FG_CRASH_REPORTS__` to force it), offline, after 3 reports per page
+  load, and on the known non-bugs — a lazy chunk that failed after a deploy (`lazyChunk`
+  already reloads once for it), `ResizeObserver loop`, a contentless "Script error." and an
+  extension's own throws; the server drops the first two kinds too.
+- **The crash screen is `shared/CrashScreen.jsx`, and every lazy screen in `Spender.jsx` has its
+  own `ScreenBoundary`** (`key={screen}`: the branches all return one at the same position, so
+  without a key React reuses one instance — and its error — across screens). A crash inside a
+  game leaves the shell mounted, so "Back to menu" is the shell's own `nav("home")` with no
+  reload; `AppBoundary` at the root is the last resort for the shell itself and does a full load
+  of the home path. Both offer Reload and fold the technical detail behind a disclosure, and
+  bring their own sheet, because the game's sheet left with the game. **A new lazy screen goes
+  inside a `ScreenBoundary` like its siblings.** `screens.mjs`'s `crashScreen` block rewrites
+  BGG Filter's chunk on the wire to throw and asserts the screen, the report's 200, Back to
+  menu WITHOUT a reload (red with only the root boundary) and Reload recovering.
 
 ### Auth correctness & security (hard-won — do not regress)
 - **WS SEAT IDENTITY IS BOUND IN ALL SEVEN GAMES.** The `player` path segment is client-supplied and

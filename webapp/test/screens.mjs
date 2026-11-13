@@ -11104,6 +11104,112 @@ try {
 		}
 	}
 
+	// ── a crash inside ONE lazy screen (shared/CrashScreen.jsx + crashReport.js) ──
+	// BGG Filter's chunk is rewritten on the wire so its default export throws on
+	// render — the real lazy-load path, the real ScreenBoundary, no test hook in the
+	// product beyond the flag that lets a LOCAL ("dev") build send its report. Asserts
+	// the three things the boundary is for: the player gets the site's own crash
+	// screen instead of a stack trace, "Back to menu" works without a reload (the
+	// shell survived — the root boundary would have taken it down), and the backend
+	// accepted the report. Then Reload, with the chunk left alone, recovers the page.
+	async function crashScreen(log) {
+		const check = (name, cond, detail = "") => {
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(`crash screen: ${name}`); log(`  FAIL ${name}  ${detail}`); }
+		};
+		const ctx = await browser.newContext();
+		await ctx.addInitScript(() => {
+			localStorage.setItem("spender_user", JSON.stringify({ id: "crash-harness", name: "Crash", guest: true }));
+			window.__FG_CRASH_REPORTS__ = true;
+		});
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		// The route stays installed for the whole block and is switched off by a flag:
+		// unrouting re-enables the HTTP cache, and Reload would then be served the
+		// rewritten copy it cached.
+		let injected = 0, crashing = true;
+		const rewrite = async (route) => {
+			if (!crashing) return route.continue();
+			const res = await route.fetch();
+			const body = await res.text();
+			const re = /export\s*\{\s*([\w$]+)\s+as\s+default\s*\}/;
+			if (re.test(body)) injected++;
+			await route.fulfill({ response: res, body: body.replace(re,
+				'const __screensCrash=()=>{throw new TypeError("screens: injected crash in BggFilter")};export{__screensCrash as default}') });
+		};
+		await page.route("**/assets/BggFilter-*.js", rewrite);
+		const reports = [];
+		page.on("request", (req) => {
+			if (req.method() === "POST" && req.url().endsWith("/ops/client-error")) reports.push(req);
+		});
+
+		await page.goto(`http://localhost:${PORT}/bggfilter`, { waitUntil: "networkidle" });
+		await page.waitForSelector(".crash", { timeout: 25_000 }).catch(() => {});
+		check("the chunk was rewritten to throw (the harness reached the lazy screen)", injected >= 1, String(injected));
+		const screen = await page.evaluate(() => {
+			const c = document.querySelector(".crash");
+			const d = c?.querySelector(".crash-detail");
+			// checkVisibility, not a box: a closed <details> keeps its content laid out
+			// under content-visibility:hidden, so it still measures a height.
+			const vis = (el) => !!el && el.checkVisibility();
+			return {
+				count: document.querySelectorAll(".crash").length,
+				title: c?.querySelector(".crash-title")?.textContent || "",
+				titleFont: c ? getComputedStyle(c.querySelector(".crash-title")).fontFamily : "",
+				buttons: [...(c?.querySelectorAll(".crash-acts button") || [])].map((b) => b.textContent.trim()),
+				detailClosed: !!d && !d.open, preVisible: vis(d?.querySelector("pre")),
+				detailText: d?.querySelector("pre")?.textContent || "",
+				role: c?.getAttribute("role"), wide: document.documentElement.scrollWidth - innerWidth,
+			};
+		});
+		check("the crash screen renders in the site's type, with Reload and Back to menu",
+			screen.count === 1 && screen.title === "Something went wrong" && /Cinzel/.test(screen.titleFont)
+			&& JSON.stringify(screen.buttons) === JSON.stringify(["Reload", "Back to menu"]) && screen.role === "alert",
+			JSON.stringify(screen));
+		check("the technical detail is folded behind a disclosure, and names the error",
+			screen.detailClosed && !screen.preVisible && /injected crash in BggFilter/.test(screen.detailText),
+			JSON.stringify({ closed: screen.detailClosed, pre: screen.preVisible, text: screen.detailText.slice(0, 120) }));
+		check("the crash screen does not scroll sideways", screen.wide <= 0, String(screen.wide));
+
+		// The report: one POST, the backend's 200, and what it carried.
+		const deadline = Date.now() + 10_000;
+		while (!reports.length && Date.now() < deadline) await sleep(100);
+		const res = reports[0] ? await reports[0].response().catch(() => null) : null;
+		const body = reports[0] ? JSON.parse(reports[0].postData() || "{}") : {};
+		const answer = res ? await res.json().catch(() => null) : null;
+		check("the report reached the backend and raised an alert",
+			res?.status() === 200 && answer?.ok === true && answer?.queued === true,
+			JSON.stringify({ status: res?.status(), answer }));
+		check("it carried the build, the route, the source and the message",
+			body.build === "dev" && body.route === "/bggfilter" && body.source === "boundary"
+			&& /^TypeError: screens: injected crash in BggFilter/.test(body.message || "") && typeof body.stack === "string",
+			JSON.stringify(body).slice(0, 300));
+		await sleep(400);
+		check("one throw is one report", reports.length === 1, String(reports.length));
+
+		// Back to menu: the SHELL is still mounted, so it navigates without a reload.
+		await page.evaluate(() => { window.__crashMarker = 1; });
+		await page.locator(".crash-home").click({ timeout: 5_000 }).catch(() => {});
+		await page.waitForSelector(".home", { timeout: 10_000 }).catch(() => {});
+		const home = await page.evaluate(() => ({
+			path: location.pathname, home: !!document.querySelector(".home"),
+			crash: document.querySelectorAll(".crash").length, marker: window.__crashMarker,
+		}));
+		check("Back to menu returns to the menu without reloading the page",
+			home.path === "/" && home.home && home.crash === 0 && home.marker === 1, JSON.stringify(home));
+
+		// Reload recovers once the bug is gone (here: the chunk is served as built).
+		await page.goto(`http://localhost:${PORT}/bggfilter`, { waitUntil: "networkidle" });
+		await page.waitForSelector(".crash", { timeout: 25_000 }).catch(() => {});
+		crashing = false;
+		await page.locator(".crash-reload").click({ timeout: 5_000 }).catch(() => {});
+		const recovered = await page.waitForSelector(".bgf", { timeout: 25_000 }).then(() => true).catch(() => false);
+		check("Reload brings the screen back", recovered && await page.locator(".crash").count() === 0);
+		check("no page errors", errors.length === 0, errors.join(" | ").slice(0, 200));
+		await ctx.close();
+	}
+
 	async function updateNudgeLayout(log) {
 		const check = (name, cond, detail = "") => {
 			if (cond) log(`  OK   ${name}`);
@@ -11140,7 +11246,8 @@ try {
 		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, historyRecovery, dmAdventures,
 		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, formControlZoom, lastDifficulty,
 		dissonanceQuartet, orbitPlay, lobbyFinishSync, blackCastlePlay, pinchPlay, pipMarketPlay, secretNamesPlay, lobbyChrome,
-		notesEditor, profilePage, offlineRead, boxPuzzles, boxDaily, astralGuide, lolStats, steamSaved, updateNudgeLayout];
+		notesEditor, profilePage, offlineRead, boxPuzzles, boxDaily, astralGuide, lolStats, steamSaved, updateNudgeLayout,
+		crashScreen];
 
 	// EVERY BLOCK MUST BE IN A LANE. Before the lanes existed, adding a block meant
 	// writing it — it then ran because it was simply the next statement. Now it has

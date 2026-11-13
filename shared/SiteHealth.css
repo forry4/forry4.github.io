@@ -16,6 +16,13 @@
 .sh-kind{font-weight:600;letter-spacing:.02em;color:var(--text-soft,#b3a58b)}
 .sh-new .sh-kind::after{content:" · new";color:var(--gold,#c9a84c)}
 .sh-msg{font-size:.88rem;line-height:1.45;color:var(--text,#e8dfc8);overflow-wrap:anywhere}
+/* A browser crash's stack, folded under its headline. */
+.sh-stack{margin-top:5px}
+.sh-stack summary{cursor:pointer;font-size:.78rem;color:var(--text-soft,#b3a58b)}
+.sh-stack summary:focus-visible{outline:1px solid var(--gold,#c9a84c);outline-offset:2px}
+.rl-body .sh-stack pre{margin:5px 0 0;padding:7px 8px;max-height:12rem;overflow:auto;border-radius:6px;
+  background:var(--bg,#0f0e0c);color:var(--text-soft,#b3a58b);
+  font:11.5px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
 /* The account list: one line each (name left, activity right), which opens to the
    detail — sign-in times and games played per game. */
 .rl-body .sh-accts{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
