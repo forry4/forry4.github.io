@@ -38,7 +38,7 @@ from typing import Callable
 from fastapi import Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from core import alerts, client_errors, results
+from core import alerts, build_info, client_errors, results
 from core.auth import is_site_owner
 from core.db import backend, get_db_conn
 
@@ -405,6 +405,9 @@ class ErrorAlertMiddleware:
 
     async def __call__(self, scope, receive, send):
         if not _armed:
+            # The first ASGI call is uvicorn's lifespan startup, made just before it
+            # binds the port: the end of a cold start (core.build_info.boot_timing).
+            build_info.mark("serving")
             arm()
         if scope["type"] != "http":
             await self.app(scope, receive, send)

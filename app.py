@@ -12,6 +12,12 @@ The deploy entrypoint ``games/spender/app.py`` re-exports the ``app`` defined he
 so Procfile/Dockerfile/render.yaml keep their historical ``games.spender.app:app``
 target unchanged.
 """
+import time as _time
+
+# Boot timing (core.build_info): stamped BEFORE any feature import, so the gap to
+# the mark at the bottom of this file is the import cost of our own code.
+_IMPORT_STARTED = _time.time()
+
 import logging
 import sys
 
@@ -247,3 +253,9 @@ def _rooms_in_memory() -> int:
 
 
 register_gauge("rooms_in_memory", _rooms_in_memory)
+
+# Every feature is imported and wired: the import phase of a cold start ends here.
+from core import build_info as _build_info  # noqa: E402
+
+_build_info.mark("app_import_started", _IMPORT_STARTED)
+_build_info.mark("app_imported")
