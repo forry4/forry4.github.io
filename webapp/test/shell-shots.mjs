@@ -10,9 +10,8 @@
  *
  * Same convention as that file: it boots NOTHING. Point it at a `vite preview`/`vite
  * dev` on 5173 and a backend on 8000 that are already up, and an iteration costs
- * seconds. The LOADING screen is reached without stopping the backend, by stalling
- * `**\/games**` past the shell's 250ms fast path — which is the spun-down-dyno case
- * that screen exists for.
+ * seconds. (It used to capture a LOADING screen too, by stalling the shell's backend
+ * ping; there is none since the boot stopped waiting for the server, 2026-11-12.)
  *
  * Captures are `reducedMotion:"reduce"`, so what you see is the reduced-motion
  * rendering: if that one is right, the other is a superset.
@@ -24,7 +23,7 @@
  *     show the real thing.
  *   - tall captures sometimes ghost a line of text near the top; that is stitching.
  *
- *   cd webapp && node test/shell-shots.mjs <outDir> [--only=home|auth|loading]
+ *   cd webapp && node test/shell-shots.mjs <outDir> [--only=home|auth]
  */
 import { chromium } from "playwright";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -51,23 +50,20 @@ const GUEST = () => localStorage.setItem("spender_user",
 const browser = await chromium.launch().catch(() => chromium.launch({ channel: "msedge" }));
 const probes = [];
 
-/** One capture. `stall` delays the shell's backend ping so the loading screen shows. */
-async function shot(name, { view, guest = true, stall = false, after, probe, fullPage = true } = {}) {
+/** One capture. */
+async function shot(name, { view, guest = true, after, probe, fullPage = true } = {}) {
 	const ctx = await browser.newContext({
 		viewport: { width: view.w, height: view.h }, deviceScaleFactor: view.dsf, reducedMotion: "reduce",
 	});
 	if (guest) await ctx.addInitScript(GUEST);
-	if (stall) await ctx.route("**/games**", async (route) => {
-		await sleep(2000); await route.continue();
-	});
 	const page = await ctx.newPage();
 	const errs = [];
 	page.on("pageerror", (e) => errs.push(String(e)));
 	page.on("console", (m) => { if (m.type() === "error") errs.push("console: " + m.text()); });
 	await page.goto(`http://localhost:${PORT}/`, { waitUntil: "load", timeout: 30_000 });
-	await page.waitForSelector(stall ? ".loading-screen" : ".home-game-card,.auth-card", { timeout: 25_000 })
+	await page.waitForSelector(".home-game-card,.auth-card", { timeout: 25_000 })
 		.catch(() => {});
-	await sleep(stall ? 1200 : 700);
+	await sleep(700);
 	if (after) await after(page);
 	await sleep(350);
 	await page.screenshot({ path: path.join(OUT, `${name}.${view.tag}.png`), fullPage });
@@ -115,9 +111,6 @@ try {
 			await shot("auth-register", { view, guest: false, after: (p) => p.locator(".auth-tab").nth(1).click() });
 			await shot("auth-guest", { view, guest: false, after: (p) => p.locator(".auth-tab").nth(2).click() });
 		}
-	}
-	if (!only || only === "loading") {
-		for (const view of [VIEWS[1], VIEWS[3], VIEWS[4]]) await shot("loading", { view, stall: true });
 	}
 	if (probes.length) {
 		writeFileSync(path.join(OUT, "probe.json"), JSON.stringify(probes, null, 1));

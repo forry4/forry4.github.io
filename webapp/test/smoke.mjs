@@ -91,7 +91,11 @@ function checkFontPreloads() {
 	}
 	console.log(`font-preload guard: OK (all ${faces.length} @font-face files preloaded)`);
 }
-const PORT = 4188;
+// SMOKE_PORT overrides it. A leftover `vite preview` from another worktree on this port
+// used to be tested IN PLACE of this build — our own preview is --strictPort, so it
+// exits quietly and waitForServer() then finds the stranger. The run now refuses a
+// port that is already answering (below).
+const PORT = Number(process.env.SMOKE_PORT) || 4188;
 // Cumulative Layout Shift budget on load. Good CWV is < 0.1; our reflow bugs (font
 // swap reflowing the page, a resizing control) blow well past it. Keep it tight so
 // regressions are caught; raise only with a documented reason.
@@ -135,8 +139,19 @@ async function launchBrowser() {
 // paths may legitimately transition screens when a local backend is running, and their
 // point is the ROUTER: render + no crash + the URL survives — pathPrefix catches both a
 // router parse crash and an accidental normalize-to-"/").
-async function checkPage(browser, pagePath, { checkCls = false, pathPrefix = null } = {}) {
-	const page = await browser.newPage();
+//
+// `expect` is the REAL SCREEN that path must reach with no backend at all. Smoke
+// used to be unable to assert one: the shell pinged the server before it routed,
+// and this gate has no server, so every path sat on the loading screen and the
+// best it could say was "something rendered". The boot lands from local state now
+// (Spender.jsx), so a stored identity must reach Home, a deep link its lobby, and
+// no identity the sign-in screen — and if a ping ever creeps back in front of the
+// landing, these go red.
+const GUEST = JSON.stringify({ id: "smoke-guest", name: "Smoke", guest: true });
+async function checkPage(browser, pagePath, { checkCls = false, pathPrefix = null, identity = null, expect = null } = {}) {
+	const ctx = await browser.newContext();
+	if (identity) await ctx.addInitScript((u) => localStorage.setItem("spender_user", u), identity);
+	const page = await ctx.newPage();
 	const pageErrors = [];
 	page.on("pageerror", (e) => pageErrors.push(e.message));
 	// Accumulate layout-shift BEFORE any page script runs. buffered:true also catches
@@ -168,16 +183,20 @@ async function checkPage(browser, pagePath, { checkCls = false, pathPrefix = nul
 			null, { timeout: 3000 },
 		).catch(() => {});
 	}
+	const reached = expect
+		? await page.waitForSelector(expect, { timeout: 10000 }).then(() => true, () => false)
+		: true;
 	const rootLen = await page.evaluate(() => document.getElementById("root")?.innerHTML.length ?? 0);
 	const cls = await page.evaluate(() => Math.round((window.__cls || 0) * 1000) / 1000);
 	const pathname = await page.evaluate(() => window.location.pathname);
-	await page.close();
+	await ctx.close();
 
 	if (pageErrors.length) return `uncaught page error(s):\n` + pageErrors.join("\n").slice(0, 1000);
 	if (rootLen < 100) return `#root did not render (innerHTML length ${rootLen}); app is blank.`;
+	if (!reached) return `never reached its first screen (${expect}) with no backend — is the boot waiting on the server again?`;
 	if (checkCls && cls > CLS_BUDGET) return `layout shifted on load (CLS ${cls} > ${CLS_BUDGET}); something resizes/reflows after first paint.`;
 	if (pathPrefix && !pathname.startsWith(pathPrefix)) return `URL not preserved (pathname ${pathname}, expected ${pathPrefix}...); the router normalized/crashed.`;
-	console.log(`  ${pagePath} OK — #root length ${rootLen}, CLS ${cls}, pathname ${pathname}`);
+	console.log(`  ${pagePath}${identity ? " (signed in)" : ""} OK — ${expect ? `${expect} rendered, ` : ""}#root length ${rootLen}, CLS ${cls}, pathname ${pathname}`);
 	return null;
 }
 
@@ -191,6 +210,11 @@ try {
 	checkCssBackticks();   // source-level guard for the stray-css-backtick blank-page bug
 	checkFontPreloads();   // source-level guard for the un-preloaded-face fallback bug
 	await run("npx", ["vite", "build"], {});
+	try {
+		await fetch(url);
+		throw new Error(`port ${PORT} is already serving something — another worktree's preview? ` +
+			"It would be tested instead of this build. Stop it, or set SMOKE_PORT.");
+	} catch (e) { if (String(e.message).startsWith("port ")) throw e; /* refused: free */ }
 	preview = spawn("npx", ["vite", "preview", "--port", String(PORT), "--strictPort"],
 		{ cwd: webappDir, stdio: "ignore", shell: true });
 
@@ -198,10 +222,12 @@ try {
 
 	const browser = await launchBrowser();
 	const checks = [
-		["/", { checkCls: true }],                        // the original blank-page + CLS gate
-		["/duel", { pathPrefix: "/duel" }],               // mode deep link survives + renders
-		["/dontminion", { pathPrefix: "/dontminion" }],   // 5th game's mode deep link
-		["/spender/ABCDEF", { pathPrefix: "/spender" }],  // room-segment parse (Layer B may normalize to /spender)
+		// the original blank-page + CLS gate, now on the two screens a visitor can land on
+		["/", { checkCls: true, expect: ".auth-card" }],                    // no identity -> sign-in
+		["/", { checkCls: true, identity: GUEST, expect: ".home-game-card" }], // stored identity -> Home
+		["/duel", { pathPrefix: "/duel", identity: GUEST, expect: ".duel .lby-cols" }],   // deep link -> its lobby
+		["/dontminion", { pathPrefix: "/dontminion", expect: ".auth-card" }], // logged out: sign-in, URL kept
+		["/spender/ABCDEF", { pathPrefix: "/spender", identity: GUEST, expect: ".lby-loading, .lby-cols" }],  // room deep link: its join, waiting on the (absent) server
 	];
 	const failures = [];
 	for (const [p, opts] of checks) {

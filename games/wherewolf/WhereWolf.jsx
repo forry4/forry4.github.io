@@ -1,3 +1,6 @@
+// Every game socket goes through openSocket: it rides out a waking server (shared/backend.js).
+import { openSocket } from "../../shared/backend.js";
+import { useOnBackendAwake } from "../../shared/lobby.jsx";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { baseCss } from "../../shared/theme.js";
 import { lobbyCss, LobbyHeader, LobbySectionHd, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame,
@@ -188,7 +191,7 @@ function useSocket(onMessage) {
   onMsg.current = onMessage;
   const connect = useCallback((url, firstMsg) => {
     try { wsRef.current?.close(); } catch {}
-    const ws = new WebSocket(url);
+    const ws = openSocket(url);
     wsRef.current = ws;
     ws.onopen = () => { setConnected(true); if (firstMsg) ws.send(JSON.stringify(firstMsg)); };
     ws.onclose = () => setConnected(false);
@@ -364,6 +367,8 @@ export default function WhereWolf({ myId, authUser, onExit }) {
         .then((r) => r.json()).then((d) => { const g = d.games || []; setMyGames(g); writeLobbyCache("ww", myId, "mine", g); }).catch(() => {});
     }
   }, [authUser, myId]);
+  // A list fetched while the server was still waking may have been refused; fetch again when it answers.
+  useOnBackendAwake(fetchGames);
 
   useEffect(() => { if (screen === "lobby") fetchGames(); }, [screen, fetchGames]);
   // The game you just finished leaves Active and joins History the moment it

@@ -1,3 +1,6 @@
+// Every game socket goes through openSocket: it rides out a waking server (shared/backend.js).
+import { openSocket } from "../../shared/backend.js";
+import { useOnBackendAwake } from "../../shared/lobby.jsx";
 import { fetchGameHistory } from "../../shared/lobbyHistory.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { baseCss } from "../../shared/theme.js";
@@ -79,7 +82,7 @@ function useSocket(onMessage) {
   const connect = useCallback((url, firstMessage) => {
     try { wsRef.current?.close(); } catch {}
     setConnected(false);
-    const ws = new WebSocket(url);
+    const ws = openSocket(url);
     wsRef.current = ws;
     ws.onopen = () => {
       if (firstMessage) ws.send(JSON.stringify(firstMessage));
@@ -1154,6 +1157,8 @@ export default function Orbit({ myId, authUser, onExit }) {
       setMyGames([]); setHistory([]);
     }
   }, [authUser, myId]);
+  // A list fetched while the server was still waking may have been refused; fetch again when it answers.
+  useOnBackendAwake(fetchGames);
 
   useEffect(() => { if (screen === "lobby" && !connecting) fetchGames(); }, [screen, connecting, fetchGames]);
   // The game you just finished leaves Active and joins History the moment it

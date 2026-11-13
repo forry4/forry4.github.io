@@ -909,13 +909,12 @@ try {
 			bad.slice(0, 3).join(" | "));
 
 		// ── SHELL WORDMARKS ─────────────────────────────────────────────────────
-		// Loading and auth are one entrance sequence, so their hero lockup must not
-		// shift while the backend wakes. The menu intentionally differs: it puts a
+		// The sign-in screen carries the hero lockup. The menu intentionally differs: it puts a
 		// compact wordmark in its identity rail, leaving the catalogue as the page's
 		// title. Test both contracts rather than letting an old "all three match" rule
 		// undo the menu composition.
 		const lockup = async (page) => page.evaluate(() => {
-			const el = document.querySelector(".auth-logo,.loading-logo");
+			const el = document.querySelector(".auth-logo");
 			const cs = getComputedStyle(el), r = el.getBoundingClientRect();
 			const rule = document.querySelector(".home-rule");
 			return { top: Math.round(r.top + window.scrollY),
@@ -943,26 +942,23 @@ try {
 			menu && Math.abs(menu.left) <= 1 && menu.top >= -1 && menu.bottom >= -1
 				&& menu.beforeUser && !menu.rule && menu.fontSize < 28,
 			JSON.stringify(menu));
-		const marks = {};
-		for (const [name, seedUser, stall] of [["auth", false, false], ["loading", false, true]]) {
+		// This used to compare the auth screen's hero lockup against the LOADING
+		// screen's (reached by stalling /games past the shell's 250ms fast path), so the
+		// wordmark could not shift while the backend woke. There is no loading screen
+		// since the boot stopped waiting for the server (2026-11-12): the auth screen is
+		// the one hero lockup left, and the stall would now only wait out its timeout
+		// and measure the auth screen twice — passing over nothing.
+		{
 			const c = await browser.newContext({ viewport: vp });
-			// The loading screen is only reachable when the backend MISSES the shell's
-			// 250ms fast path, which is the spun-down-dyno case it exists for.
-			if (stall) await c.route("**/games**", async (route) => {
-				await new Promise((r) => setTimeout(r, 1200)); await route.continue();
-			});
 			const pg = await c.newPage();
 			await pg.goto(`http://localhost:${PORT}/`, { waitUntil: "load" });
-			await pg.waitForSelector(stall ? ".loading-logo" : ".auth-logo", { timeout: 25_000 }).catch(() => {});
+			await pg.waitForSelector(".auth-logo", { timeout: 25_000 }).catch(() => {});
 			await pg.waitForTimeout(400);
-			marks[name] = await lockup(pg).catch(() => null);
+			const mark = await lockup(pg).catch(() => null);
 			await c.close();
+			check(`the sign-in screen carries the hero wordmark lockup at ${vp.width}x${vp.height}`,
+				mark && parseFloat(mark.px) >= 28 && mark.ruleW > 0, JSON.stringify(mark));
 		}
-		const off = ["top", "px", "track", "ruleW", "gap"].filter((k) =>
-			new Set(Object.values(marks).map((m) => m?.[k])).size !== 1);
-		check(`the wordmark lockup is identical on loading and auth at ${vp.width}x${vp.height}`,
-			marks.auth && marks.loading && off.length === 0,
-			off.length ? `${off.join(",")} differ: ${JSON.stringify(marks)}` : "a screen did not render");
 		}
 		// Admins retain the remaining WIP cards so they can exercise unreleased
 		// games from the same catalogue. Seed a separate context so the shell hydrates
@@ -11241,6 +11237,113 @@ try {
 		}
 	}
 
+	// THE FIRST SCREEN DOES NOT WAIT FOR THE SERVER. The shell used to ping the
+	// backend before it routed, so a cold Render instance meant ~25s of "Waking the
+	// server…" in front of a menu that needs no server. It lands from local state now
+	// (Spender.jsx's boot effect, shared/backend.js), and this drives the whole
+	// arrangement against a real backend with the API origin switched off and back on:
+	// Home paints with no server, a lobby paints and SAYS the server is waking (with
+	// the offline door), and when the server answers the notice goes and the lobby
+	// fills in without a refresh. Plus the stale-session rule: Home first, then a
+	// definite ok:false sends the player to sign-in and says why.
+	async function bootWithoutServer(log) {
+		const check = (name, cond, detail = "") => {
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(`boot without server: ${name}`); log(`  FAIL ${name}  ${detail}`); }
+		};
+		const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 } });
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "boot-harness", name: "Booter", guest: true })));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		const api = `http://localhost:${API_PORT}/**`;
+		let blocked = true, probes = 0;
+		await page.route(api, (r) => {
+			if (new URL(r.request().url()).pathname === "/health") probes++;
+			return blocked ? r.abort() : r.fallback();
+		});
+		const t0 = Date.now();
+		await page.goto(`http://localhost:${PORT}/`, { waitUntil: "commit" });
+		const home = await page.waitForSelector(".home-game-card", { timeout: 10_000 }).then(() => true, () => false);
+		const homeMs = Date.now() - t0;
+		check("with the API unreachable, a stored identity lands on Home", home, `after ${homeMs}ms`);
+		check("...in well under the old cold-start wait", home && homeMs < 5000, `${homeMs}ms`);
+		await sleep(2000);   // past the notice's grace period
+		check("Home needs no server, so it shows no waking notice",
+			await page.locator("#fg-waking").count() === 0);
+		check("the /health probe keeps retrying while the server is away", probes >= 2, `${probes} probes`);
+
+		// Into a lobby while the server is still away. Orbit's cache is empty in a
+		// fresh context, so what paints is the lobby's own frame.
+		await page.locator('.home-game-card[data-game="orbit"]').click();
+		const lobby = await page.waitForSelector(".orbit .lby-cols", { timeout: 15_000 }).then(() => true, () => false);
+		check("a lobby opens while the server is away", lobby);
+		const notice = await page.waitForSelector("#fg-waking", { timeout: 5000 }).then(() => true, () => false);
+		check("...and says the server is waking, with the offline door",
+			notice && /waking/i.test(await page.locator("#fg-waking").textContent())
+			&& await page.locator("#fg-waking button", { hasText: "Use offline" }).count() === 1);
+
+		// The server answers. A stubbed open table proves the list was fetched AGAIN
+		// (the one made during the outage was refused), not merely painted from cache.
+		await page.route(`http://localhost:${API_PORT}/orbit/games`, (r) => r.fulfill({
+			status: 200, contentType: "application/json",
+			body: JSON.stringify({ ok: true, games: [{ id: "WAKE01", host_id: "someone", player_ids: ["someone"],
+				max_players: 2, host_name: "Early Bird", created_at: Math.floor(Date.now() / 1000) - 30 }] }),
+		}));
+		blocked = false;
+		const gone = await page.waitForFunction(() => !document.getElementById("fg-waking"), null,
+			{ timeout: 20_000 }).then(() => true, () => false);
+		check("when the server answers, the notice goes", gone);
+		const filled = await page.waitForSelector('.orbit .lby-col-open .lby-card:has-text("WAKE01")',
+			{ timeout: 10_000 }).then(() => true, () => false);
+		check("...and the lobby fills in without a refresh", filled);
+
+		// The offline door, from a lobby, while the server is away.
+		blocked = true;
+		const page2 = await ctx.newPage();
+		await page2.route(api, (r) => (blocked ? r.abort() : r.fallback()));
+		await page2.goto(`http://localhost:${PORT}/orbit`, { waitUntil: "commit" });
+		await page2.waitForSelector("#fg-waking button", { timeout: 15_000 }).catch(() => {});
+		await page2.locator("#fg-waking button").click({ timeout: 5000 }).catch(() => {});
+		check("Use offline, from a waking lobby, opens the offline hub",
+			await page2.waitForSelector(".offline-hub", { timeout: 10_000 }).then(() => true, () => false)
+			&& new URL(page2.url()).pathname === "/offline");
+		check("...and the notice does not follow it there",
+			await page2.locator("#fg-waking").count() === 0);
+		await page2.close();
+		check("no page errors while the server was away", errors.length === 0, errors[0]?.slice(0, 200) || "");
+		await ctx.close();
+
+		// A stored login whose session is dead: Home first (no wait), then sign-in,
+		// saying why, with the login cleared. A transport error must NOT do this.
+		const sctx = await browser.newContext();
+		await sctx.addInitScript(() => {
+			if (!sessionStorage.getItem("seeded")) {
+				sessionStorage.setItem("seeded", "1");
+				localStorage.setItem("spender_user", JSON.stringify({ id: "boot-stale", name: "Stale", session_token: "dead" }));
+			}
+		});
+		const sp = await sctx.newPage();
+		let session = "transport";
+		await sp.route(`http://localhost:${API_PORT}/auth/session`, (r) => session === "transport"
+			? r.abort() : r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: false }) }));
+		await sp.goto(`http://localhost:${PORT}/`, { waitUntil: "commit" });
+		await sp.waitForSelector(".home-game-card", { timeout: 10_000 }).catch(() => {});
+		await sleep(1500);
+		check("a session check that cannot reach the server keeps the player signed in",
+			await sp.locator(".home-game-card").count() > 0
+			&& await sp.evaluate(() => !!localStorage.getItem("spender_user")));
+		session = "dead";
+		await sp.reload({ waitUntil: "commit" });
+		const toAuth = await sp.waitForSelector(".auth-card", { timeout: 15_000 }).then(() => true, () => false);
+		check("a definitely dead session lands on sign-in and clears the login",
+			toAuth && await sp.evaluate(() => !localStorage.getItem("spender_user")));
+		check("...and says why", /signed out/i.test(await sp.locator(".auth-notice").textContent().catch(() => "")),
+			await sp.locator(".auth-notice").textContent().catch(() => "(no notice)"));
+		await sctx.close();
+	}
+
 	const laneA = [offlineSpender, offlineCoc, offlineDuel, offlineDissonance,
 		dissonanceSkat, dissonanceHard, dissonanceBeat, ragtagFight];
 	// `dissonanceQuartet` is lane B: it plays a whole game but arms NO worker
@@ -11252,7 +11355,7 @@ try {
 		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, formControlZoom, lastDifficulty,
 		dissonanceQuartet, orbitPlay, lobbyFinishSync, blackCastlePlay, pinchPlay, pipMarketPlay, secretNamesPlay, lobbyChrome,
 		notesEditor, profilePage, offlineRead, boxPuzzles, boxDaily, astralGuide, lolStats, steamSaved, updateNudgeLayout,
-		crashScreen];
+		crashScreen, bootWithoutServer];
 
 	// EVERY BLOCK MUST BE IN A LANE. Before the lanes existed, adding a block meant
 	// writing it — it then ran because it was simply the next statement. Now it has

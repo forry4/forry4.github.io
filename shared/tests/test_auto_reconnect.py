@@ -32,7 +32,7 @@ def _socket_games() -> list[pathlib.Path]:
     """Every game screen that opens a WebSocket — derived from the tree, so the
     next game joins the roster on its own (the `range(13)` lesson)."""
     out = [p for p in sorted((ROOT / "games").glob("*/[A-Z]*.jsx"))
-           if "new WebSocket(" in p.read_text(encoding="utf-8")]
+           if "openSocket(" in p.read_text(encoding="utf-8")]
     assert len(out) >= 11, f"expected the socket games, found {[p.name for p in out]}"
     return out
 

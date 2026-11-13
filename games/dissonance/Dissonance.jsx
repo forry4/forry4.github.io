@@ -1,3 +1,6 @@
+// Every game socket goes through openSocket: it rides out a waking server (shared/backend.js).
+import { openSocket } from "../../shared/backend.js";
+import { useOnBackendAwake } from "../../shared/lobby.jsx";
 import { fetchGameHistory } from "../../shared/lobbyHistory.js";
 import { leaveOpenSeat, readRoomToken } from "../../shared/roomLifecycle.js";
 import { Fragment, useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
@@ -1498,7 +1501,7 @@ function useSocket(onMessage) {
   onMsg.current = onMessage;
   const connect = useCallback((url, firstMsg) => {
     try { wsRef.current?.close(); } catch {}
-    const ws = new WebSocket(url);
+    const ws = openSocket(url);
     wsRef.current = ws;
     ws.onopen = () => { setConnected(true); if (firstMsg) ws.send(JSON.stringify(firstMsg)); };
     ws.onclose = () => { if (wsRef.current === ws) setConnected(false); };
@@ -1751,6 +1754,8 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
       writeLobbyCache("dissonance", myId, "mine", []); writeLobbyCache("dissonance", myId, "history", []);
     }
   }, [authUser, myId]);
+  // A list fetched while the server was still waking may have been refused; fetch again when it answers.
+  useOnBackendAwake(fetchGames);
 
   // The skat price table is the server's, never a copy: /catalog hands over the
   // per-denomination bases so the "what clears this number" hint below is the

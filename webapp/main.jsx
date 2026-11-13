@@ -8,6 +8,13 @@ import { startUpdateNudge } from '../shared/update-nudge.js'
 // Registers the service worker (prod hosts only) so the site is installable to a
 // phone home screen and opens offline. Fire-and-forget, outside React, after load.
 import { startPwa } from '../shared/pwa.js'
+// Is the server up? The first screen no longer waits to find out (see the boot effect
+// in Spender.jsx), so the question is asked here, at load, by ONE /health probe that
+// holds its request through a cold start; the notice says so on the screens that
+// need the server. Plain DOM, outside React, for the same reason as the nudge.
+import { startBackendProbe, startWakingNotice } from '../shared/backend.js'
+
+startBackendProbe()
 
 // The crash screen and its boundaries live in shared/CrashScreen.jsx: this root one is
 // the last resort for a throw in the SHELL itself (each lazily loaded screen has its own
@@ -29,3 +36,4 @@ createRoot(document.getElementById('root')).render(
 
 startUpdateNudge()
 startPwa()
+startWakingNotice()

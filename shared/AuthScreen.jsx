@@ -23,6 +23,8 @@
  * Spender.css are deliberate, so the two screens cannot drift into two looks.
  */
 import { useState } from "react";
+import { isBackendAwake, whenBackendAwake, markBackendAwake } from "./backend.js";
+import { useBackendAwake } from "./lobby.jsx";
 
 const TABS = [
 	{ id: "login", label: "Sign In" },
@@ -58,6 +60,11 @@ export default function AuthScreen({ siteName, httpBase, css, myId, onAuthentica
 	const [guestName, setGuestName] = useState("");
 	const [error, setError] = useState("");
 	const [loading, setLoading] = useState(false);
+	// The site no longer waits for the server before showing this screen, so a
+	// sign-in can be the first thing to reach a server that is still waking (~30s on
+	// a cold start). The request rides the wake; the slot under the fields says so.
+	const awake = useBackendAwake();
+	const waking = loading && !awake;
 
 	const submit = async () => {
 		if (!name.trim() || !password.trim()) {
@@ -68,12 +75,21 @@ export default function AuthScreen({ siteName, httpBase, css, myId, onAuthentica
 		setLoading(true);
 		try {
 			const endpoint = tab === "login" ? "/auth/login" : "/auth/register";
-			const res = await fetch(`${httpBase}${endpoint}`, {
+			const post = () => fetch(`${httpBase}${endpoint}`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ name: name.trim(), password: password.trim() }),
-			});
+			}).catch(() => null);
+			let res = await post();
+			// Refused, or a 503 while the instance spins up: nothing was processed, so
+			// wait for the server to answer and send it once more.
+			if ((!res || res.status >= 500) && !isBackendAwake()) {
+				await whenBackendAwake();
+				res = await post();
+			}
+			if (!res) throw new Error("unreachable");
 			const data = await res.json();
+			markBackendAwake();
 			if (data.ok) {
 				onAuthenticated({
 					id: data.user.id,
@@ -167,6 +183,7 @@ export default function AuthScreen({ siteName, httpBase, css, myId, onAuthentica
 								})}
 								{/* aria-live so the failure is announced, not just drawn. */}
 								<div className="auth-error-slot" role="alert" aria-live="polite">
+									{waking && !error && <div className="auth-waking">Waking the server — you'll be signed in when it answers.</div>}
 									{error && <div className="auth-error">
 										<span className="auth-error-icon" aria-hidden="true">{ICON.alert}</span>{error}
 									</div>}

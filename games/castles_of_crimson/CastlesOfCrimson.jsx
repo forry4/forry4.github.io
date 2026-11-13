@@ -1,3 +1,6 @@
+// Every game socket goes through openSocket: it rides out a waking server (shared/backend.js).
+import { openSocket } from "../../shared/backend.js";
+import { useBackendAwake, useOnBackendAwake } from "../../shared/lobby.jsx";
 import { fetchGameHistory } from "../../shared/lobbyHistory.js";
 import { Fragment, useState, useEffect, useLayoutEffect, useRef, useCallback, useId } from "react";
 import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyMatchup, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame,
@@ -680,7 +683,7 @@ function useSocket(onMessage) {
   onMsg.current = onMessage;
   const connect = useCallback((url, firstMsg) => {
     try { wsRef.current?.close(); } catch {}
-    const ws = new WebSocket(url);
+    const ws = openSocket(url);
     wsRef.current = ws;
     ws.onopen = () => { setConnected(true); if (firstMsg) ws.send(JSON.stringify(firstMsg)); };
     ws.onclose = () => { if (wsRef.current === ws) setConnected(false); };
@@ -824,6 +827,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
   // Join/Create feels like a dead half-second. Set true on click, cleared the moment
   // authoritative state (or an error) lands; a timeout drops it so it can't hang.
   const [connecting, setConnecting] = useState(false);
+  const backendAwake = useBackendAwake();
   const connectTimer = useRef(null);
   const [roomId, setRoomId] = useState("");
   const [roomData, setRoomData] = useState(null);
@@ -1160,14 +1164,15 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
   // Safety: never leave the connect loader spinning forever — if the first room state
   // hasn't arrived within the window (dead socket / cold-start that never wakes), drop
   // back to the lobby with a hint. handleMessage clears `connecting` on success/error.
+  // The window starts once the server is up — a cold start's wake is not a dead connect.
   useEffect(() => {
-    if (!connecting) { if (connectTimer.current) { clearTimeout(connectTimer.current); connectTimer.current = null; } return; }
+    if (!connecting || !backendAwake) { if (connectTimer.current) { clearTimeout(connectTimer.current); connectTimer.current = null; } return; }
     connectTimer.current = setTimeout(() => {
       setConnecting(false);
       setToast("Still connecting… the server may be waking up. Try again in a moment.");
     }, 15000);
     return () => { if (connectTimer.current) { clearTimeout(connectTimer.current); connectTimer.current = null; } };
-  }, [connecting]);
+  }, [connecting, backendAwake]);
 
   // Resolve the hex layout for a given board id (falls back to the default board).
   const boardSpaces = useCallback((boardId) => {
@@ -1189,6 +1194,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
       setHistory([]); writeLobbyCache("coc", myId, "history", []);
     }
   }, [authUser, myId]);
+  // A list fetched while the server was still waking may have been refused; fetch again when it answers.
+  useOnBackendAwake(fetchGames);
 
   // Load + show a finished game's board + results, read-only over HTTP (no WebSocket).
   const enterCocReview = (id) => {
@@ -2015,7 +2022,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
   // the layouts arrive. The game/waiting screens still need `board` (guarded after this).
   // Instant feedback the moment a game is clicked, while the WS + first state land.
   if (connecting && screen === "lobby") {
-    return (<div className="coc coc-neutral" style={{ "--lby-accent": GAME_ACCENTS.coc }}><style>{css}</style><LobbyLoading /></div>);
+    return (<div className="coc coc-neutral" style={{ "--lby-accent": GAME_ACCENTS.coc }}><style>{css}</style><LobbyLoading label="Connecting…" /></div>);
   }
   if (screen === "lobby") {
     // Board pickers live in the create/join modals (not the lobby), so the lobby

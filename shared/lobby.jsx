@@ -12,7 +12,7 @@
 // Prepend `lobbyCss` to a screen's own CSS, same as baseCss.
 // Components are self-contained (the header renders its OWN back/rules buttons via
 // .lby-back/.lby-headbtn) so the kit never depends on a game's button system.
-import React, { useState, useRef, useEffect, useId } from "react";
+import React, { useState, useRef, useEffect, useId, useSyncExternalStore } from "react";
 
 // CSS lives in the sibling .css file(s) imported below, NOT in a JS template
 // literal. `?inline` hands us the stylesheet as a STRING, so it is still injected
@@ -30,6 +30,26 @@ import _waitingRoomCssText from "./lobby.waiting-room-css.css?inline";
 import { GAME_EMBLEM } from "./emblems.jsx";
 import { GAME_INFO } from "./catalog.js";
 import { buildPath, navigateTo } from "./router.js";
+import { isBackendAwake, subscribeBackend } from "./backend.js";
+
+// Is the server up yet (shared/backend.js)? The site no longer waits for it before
+// drawing anything, so the few places that DO need it ask here.
+export function useBackendAwake() {
+	return useSyncExternalStore(subscribeBackend, isBackendAwake, isBackendAwake);
+}
+
+// Run `fn` once, the moment a server that was still waking at mount answers. Every
+// lobby passes its list fetch: the lobby paints its cached rows at once, and a fetch
+// made during the wake may have been answered 503 — this is what fills the lobby in
+// without a manual refresh. A no-op when the server was already up.
+export function useOnBackendAwake(fn) {
+	const ref = useRef(fn);
+	ref.current = fn;
+	useEffect(() => {
+		if (isBackendAwake()) return undefined;
+		return subscribeBackend(() => { if (isBackendAwake()) ref.current?.(); });
+	}, []);
+}
 
 // TWO FILES, ONE STRING. `lobby.lobby-css.css` is the lobby's chrome and layout — the
 // bar, the rows, the column grid, the tab bar — and it is what every game already
@@ -500,11 +520,16 @@ export function LobbyTabs({ tabs, value, onChange }) {
 }
 
 // Centered spinner + label — the shared game-entry loading screen.
-export function LobbyLoading({ label = "Loading…" }) {
+// `server` marks a wait ON THE SERVER (a socket opening), and it defaults on for the
+// "Connecting…" label every game passes for exactly that: while the server is still
+// waking, the line says so instead of a "Connecting…" that looks hung for 30s.
+export function LobbyLoading({ label = "Loading…", server = label === "Connecting…" }) {
+	const awake = useBackendAwake();
+	const waking = server && !awake;
 	return (
 		<div className="lby-loading">
 			<span className="lby-spinner" />
-			<span>{label}</span>
+			<span>{waking ? "Waking the server…" : label}</span>
 		</div>
 	);
 }

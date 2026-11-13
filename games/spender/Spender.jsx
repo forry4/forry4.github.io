@@ -1,5 +1,8 @@
+// Every game socket goes through openSocket: it rides out a waking server (shared/backend.js).
+import { openSocket } from "../../shared/backend.js";
 import { fetchGameHistory, SESSION_EXPIRED, latestSession } from "../../shared/lobbyHistory.js";
 import { downloadPack, packReady, refreshOfflinePacks } from "../../shared/offlinePacks.js";
+import { isBackendAwake, whenBackendAwake, markBackendAwake, setServerWanted } from "../../shared/backend.js";
 import { clearNotesOffline } from "../../notes/offlineStore.js";
 import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from "react";
 
@@ -28,7 +31,9 @@ import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } fro
 // window and heals, while a chunk that is genuinely gone reloads once and then reports.
 const RELOADED_KEY = "spender_chunk_reloaded_at";
 const RELOAD_COOLDOWN_MS = 30_000;
-const lazyChunk = (name, importer) => lazy(() => importer().catch(() => importer()).catch((err) => {
+// Each screen's importer, by name, so the boot can start a deep link's chunk early.
+const CHUNK_IMPORTERS = {};
+const lazyChunk = (name, importer) => (CHUNK_IMPORTERS[name] = importer, lazy(() => importer().catch(() => importer()).catch((err) => {
 	let last = 0;
 	try { last = Number(sessionStorage.getItem(RELOADED_KEY)) || 0; } catch { /* private mode */ }
 	if (Date.now() - last > RELOAD_COOLDOWN_MS) {
@@ -39,7 +44,7 @@ const lazyChunk = (name, importer) => lazy(() => importer().catch(() => importer
 	}
 	console.error(`[chunk] ${name} still failing after a reload — surfacing the error`);
 	throw err;
-}));
+})));
 
 const CastlesOfCrimson = lazyChunk("CastlesOfCrimson", () => import("../castles_of_crimson/CastlesOfCrimson.jsx"));
 const WhereWolf = lazyChunk("WhereWolf", () => import("../wherewolf/WhereWolf.jsx"));
@@ -62,6 +67,27 @@ const LolStats = lazyChunk("LolStats", () => import("../../lolstats/LolStats.jsx
 const AnimeFilter = lazyChunk("AnimeFilter", () => import("../../animefilter/AnimeFilter.jsx"));
 const BoxPuzzles = lazyChunk("BoxPuzzles", () => import("../../boxpuzzles/BoxPuzzles.jsx"));
 
+// The chunk behind each URL mode (shared/router.js). The boot calls its importer the
+// moment it reads a deep link, so the chunk downloads alongside the fonts and the
+// server probe instead of after the landing mounts. The same import() specifier is
+// one module, so lazy() later finds it already loaded (or in flight).
+const CHUNK_FOR_MODE = { coc: "CastlesOfCrimson", werewolf: "WhereWolf", duel: "SpenderDuel",
+	dontminion: "Dontminion", dissonance: "Dissonance", ragtag: "RagTag", orbit: "Orbit",
+	blackcastle: "BlackCastle", secretnames: "SecretNames", pinch: "Pinch", pipmarket: "PipMarket",
+	books: "Books", notes: "Notes", profile: "Profile", bggfilter: "BggFilter",
+	steamfilter: "SteamFilter", astral: "AstralGuide", lolstats: "LolStats",
+	animefilter: "AnimeFilter", boxpuzzles: "BoxPuzzles" };
+const prefetchScreen = (mode) => {
+	const importer = CHUNK_IMPORTERS[CHUNK_FOR_MODE[mode]];
+	if (importer) importer().catch(() => {});   // a failure is lazyChunk's to handle at mount
+};
+
+// Screens that live on the server — where the "waking" notice shows (shared/backend.js).
+const SERVER_SCREENS = new Set(["auth", "spender", "coc", "werewolf", "duel", "dontminion",
+	"dissonance", "ragtag", "orbit", "blackcastle", "secretnames", "pinch", "pipmarket",
+	"books", "notes", "profile", "boxpuzzles"]);
+const SIGNED_OUT_NOTICE = "You were signed out on this device. Sign in again to pick up where you left off.";
+
 // Shown while a game's chunk loads. Deliberately an empty full-height panel in the
 // site's dark background: each game injects its OWN stylesheet when it mounts, so
 // there is no shared CSS to rely on here, and painting nothing avoids a flash of
@@ -70,7 +96,7 @@ const GameChunkLoading = () => (
 	<div style={{ minHeight: "100vh", background: "#120c0d" }} />
 );
 import { baseCss } from "../../shared/theme.js";
-import { lobbyCss, LobbyHeader, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame,
+import { lobbyCss, LobbyHeader, LobbyLoading, useBackendAwake, useOnBackendAwake, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame,
 	useLastDifficulty,
 	LobbyBotTier,
 	createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss, LobbyHero, LobbyUser,
@@ -715,7 +741,7 @@ function useWebSocket(onMessage, { onOpen, onClose } = {}) {
 		urlRef.current = url;
 		if (retryTimerRef.current) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null; }
 		if (wsRef.current) wsRef.current.close();
-		const ws = new WebSocket(url);
+		const ws = openSocket(url);
 		wsRef.current = ws;
 		const send = (data) => {
 			if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(data));
@@ -878,6 +904,7 @@ export default function SpenderApp() {
 		return null;
 	});
 	const [authNotice, setAuthNotice] = useState("");
+	const backendAwake = useBackendAwake();
 	const [myId, setMyId] = useState(() => {
 		try {
 			const s = localStorage.getItem("spender_user");
@@ -902,6 +929,9 @@ export default function SpenderApp() {
 	const [siteAlerts, refreshSiteAlerts] = useUnackedAlerts(authUser);
 	const [siteHealthOpen, setSiteHealthOpen] = useState(false);
 	useEffect(() => { if (screen === "home") refreshSiteAlerts(); }, [screen, refreshSiteAlerts]);
+	// Home now shows before the server answers, so on a cold start that first read is
+	// refused; read again the moment it is up, or the owner's badge sits at 0.
+	useOnBackendAwake(() => { if (screenRef.current === "home") refreshSiteAlerts(); });
 	const [spenderScreen, setSpenderScreen] = useState("browser");   // browser | waiting | game
 	// a room connect is in flight (create / join / continue / deep-link) — while it
 	// is AND we're still on the lobby, show the spinner instead of the lobby, so a
@@ -912,12 +942,6 @@ export default function SpenderApp() {
 	// (a bare setSpenderScreen while the site is on, say, /coc would render nothing).
 	// NOTE: a puzzle also runs on "game" — with puzzling=true and no socket.
 	const goSpender = (sub) => { setScreen("spender"); setSpenderScreen(sub); };
-	const [loadingProgress, setLoadingProgress] = useState(0);
-	const [showLoading, setShowLoading] = useState(false);
-	// Bumped when the tab is foregrounded while still stuck on the loading screen, to
-	// re-kick the loading effect with a fresh fetch (a fetch started during a
-	// background/freeze transition can hang with its abort timer throttled).
-	const [loadingKick, setLoadingKick] = useState(0);
 	const [modalCard, setModalCard] = useState(null);
 	const [roomId, setRoomId] = useState("");
 	const [roomData, setRoomData] = useState(null);
@@ -1096,29 +1120,30 @@ export default function SpenderApp() {
 	// ── fetchGames ─────────────────────────────────────────────────────────
 	const fetchGames = useCallback(async (user) => {
 		setBrowserLoading(true);
+		// A list that could not be read (refused or 503'd while the server wakes) is
+		// null and leaves the cached rows on screen; useOnBackendAwake fetches again.
+		const list = (r) => (r.ok ? r.json() : null);
 		try {
-			const openP = fetch(`${HTTP_BASE}/games`).then(r => r.json()).catch(() => ({ games: [] }));
+			const openP = fetch(`${HTTP_BASE}/games`).then(list).catch(() => null);
 			// Active Games is PUBLIC: all in-progress games (yours + others', vs-AI or
 			// not). The frontend pins yours to the top via myId. No auth needed.
-			const activeP = fetch(`${HTTP_BASE}/games/active`).then(r => r.json()).catch(() => ({ games: [] }));
+			const activeP = fetch(`${HTTP_BASE}/games/active`).then(list).catch(() => null);
 			// History (your finished games) is session-gated — only fetch for a logged-in user.
 			const histP = user?.session_token
 				? fetchGameHistory(`${HTTP_BASE}/games/history`, user).catch(() => null)
 				: Promise.resolve({ games: [] });
 			const [open, active, hist] = await Promise.all([openP, activeP, histP]);
-			const og = open.games || [], ag = active.games || [], hg = hist?.games;
-			setOpenGames(og); setActiveGames(ag);
+			const hg = hist?.games;
+			if (open) { const og = open.games || []; setOpenGames(og); writeLobbyCache("spender", myId, "open", og); }
+			if (active) { const ag = active.games || []; setActiveGames(ag); writeLobbyCache("spender", myId, "active", ag); }
 			if (hg) {
 				setHistoryGames(hg);
 				writeLobbyCache("spender", myId, "history", hg);
 			}
-			writeLobbyCache("spender", myId, "open", og);
-			writeLobbyCache("spender", myId, "active", ag);
-		} catch {
-			setOpenGames([]); setActiveGames([]);
-		}
+		} catch { /* keep what is on screen */ }
 		setBrowserLoading(false);
 	}, [myId]);
+	useOnBackendAwake(() => { if (screenRef.current === "spender") fetchGames(authUser); });
 
 	// ── handleMessage ──────────────────────────────────────────────────────
 	const handleMessage = useCallback((msg) => {
@@ -1285,12 +1310,6 @@ export default function SpenderApp() {
 				&& roomIdRef.current
 				&& getReadyState() !== WebSocket.OPEN) {
 				connect(`${WS_BASE}/${roomIdRef.current}/${myId}`);
-			}
-			// If the tab was reloaded/frozen and we're still stuck on the loading
-			// screen, re-fire the load now that we're actually foreground — the
-			// backgrounded fetch may be hung with its abort timer throttled.
-			if (document.visibilityState === "visible" && screenRef.current === "loading") {
-				setLoadingKick(k => k + 1);
 			}
 		};
 		document.addEventListener("visibilitychange", handleVisibility);
@@ -1497,15 +1516,17 @@ export default function SpenderApp() {
 		if (toast) { const t = setTimeout(() => setToast(""), 2500); return () => clearTimeout(t); }
 	}, [toast]);
 
-	// a connect that never answers must not leave the spinner up forever
+	// a connect that never answers must not leave the spinner up forever — but the
+	// 15s only starts once the server is up: a table created during a cold start's
+	// ~30s wake is not a dead connect (the socket rides the wake, shared/backend.js).
 	useEffect(() => {
-		if (!connecting) return;
+		if (!connecting || !backendAwake) return;
 		const t = setTimeout(() => {
 			setConnecting(false);
 			setToast("Still connecting — the server may be waking up. Try again in a moment.");
 		}, 15000);
 		return () => clearTimeout(t);
-	}, [connecting]);
+	}, [connecting, backendAwake]);
 
 	// Hold on the final board for 0.5s after the game ends before revealing the
 	// win/loss screen, so the player sees the move that ended it. Resets whenever
@@ -1533,78 +1554,17 @@ export default function SpenderApp() {
 		return () => vp.setAttribute("content", base);
 	}, [screen]);
 
-	// ── Loading: ping backend until ready, then proceed to auth/browser ────
+	// ── Boot: land from LOCAL state, never wait for the server ──────────────
+	// The first screen used to be gated on the backend: ping /games (250ms race),
+	// show "Waking the server…" and poll until a 200, validate the session, wait for
+	// the fonts, then a fixed 350ms — ~23s of progress bar on a cold Render instance
+	// and ~1s even when warm, in front of a menu that needs no server at all.
+	// Now: a stored identity lands on Home (or its deep link) and no identity lands
+	// on sign-in, as soon as the fonts are in. Everything that needs the server asks
+	// shared/backend.js, whose /health probe webapp/main.jsx started at load.
 	useEffect(() => {
 		if (screen !== "loading") return;
 		let cancelled = false;
-		// Resolve the landing screen. For a logged-in (non-guest) user we also
-		// validate the stored session token here: it can be silently dead (unused
-		// for 90 days, or logged out — each device has its own session, see
-		// core.auth), which downgrades every authenticated request to anonymous
-		// (e.g. the Books "Edit ranking" button disappears) while the UI still
-		// shows you logged in. A definite ok:false clears the stale login so you
-		// land on auth and can re-login. A network/parse error keeps you logged in
-		// (a blip must never log anyone out). Called only after the backend is
-		// confirmed reachable, so the error branch means a real transport failure.
-		const resolveDest = async () => {
-			let stored = null;
-			try { const s = localStorage.getItem("spender_user"); if (s) stored = JSON.parse(s); } catch {}
-			if (!stored) return "auth";
-			if (stored.guest || !stored.session_token) return "home";
-			try {
-				const ctrl = new AbortController();
-				const t = setTimeout(() => ctrl.abort(), 5000);
-				const res = await fetch(`${HTTP_BASE}/auth/session`,
-					{ signal: ctrl.signal, headers: { Authorization: `Bearer ${stored.session_token}` } });
-				clearTimeout(t);
-				const data = await res.json();
-				if (data?.ok && data.user) {
-					// Keep the token; refresh the cached identity (name / is_admin).
-					const fresh = { ...stored, name: data.user.name, is_admin: !!data.user.is_admin };
-					try { localStorage.setItem("spender_user", JSON.stringify(fresh)); } catch {}
-					if (!cancelled) setAuthUser(fresh);
-					return "home";
-				}
-				if (data && data.ok === false) {  // definitively invalid — clear it
-					try {
-						localStorage.removeItem("spender_user");
-						localStorage.removeItem("spender_roomId");
-					} catch {}
-					const newId = uid();
-					try { localStorage.setItem("spender_myId", newId); } catch {}
-					if (!cancelled) { setAuthUser(null); setMyId(newId); }
-					return "auth";
-				}
-			} catch { /* transport/parse error — don't punish a blip, stay logged in */ }
-			return "home";
-		};
-		let interval = null;
-		const startPolling = () => {
-			const startTime = Date.now();
-			interval = setInterval(() => {
-				if (cancelled) return;
-				setLoadingProgress(Math.min((Date.now() - startTime) / 25000, 0.9));
-			}, 100);
-			(async () => {
-				while (!cancelled) {
-					try {
-						const ctrl = new AbortController();
-						const t = setTimeout(() => ctrl.abort(), 5000);
-						const res = await fetch(`${HTTP_BASE}/games`, { signal: ctrl.signal });
-						clearTimeout(t);
-						if (res.ok && !cancelled) {
-							clearInterval(interval);
-							setLoadingProgress(1);
-							const dest = await resolveDest();
-							await waitFonts();
-							setTimeout(() => { if (!cancelled) landAt(dest); }, 350);
-							return;
-						}
-					} catch {}
-					if (!cancelled) await new Promise(r => setTimeout(r, 2000));
-				}
-			})();
-		};
 		// Wait for the web fonts (Cinzel/Crimson) to actually finish loading before
 		// revealing a real screen, so the first paint already uses them — otherwise the
 		// page paints in the fallback serif then "snaps" wider when the fonts swap in.
@@ -1632,26 +1592,87 @@ export default function SpenderApp() {
 				]);
 			} catch {}
 		};
-		// OFFLINE route: the whole point of /offline is working with NO backend, so it must
-		// never gate on the ping (the polling loop below has no give-up branch). Land straight
-		// on the hub — identity is local (guest myId / cached login) and needs no network.
-		if (initialRouteRef.current?.game === "offline") {
-			(async () => { await waitFonts(); if (!cancelled) landAt("home"); })();
-			return () => { cancelled = true; };
-		}
-		// Fast path: if backend responds within 250ms, skip the loading screen entirely
+		const stored = () => {
+			try { const s = localStorage.getItem("spender_user"); return s ? JSON.parse(s) : null; } catch { return null; }
+		};
+		const route = initialRouteRef.current;
+		// A deep link's screen is a lazy chunk: start fetching it NOW, alongside the
+		// fonts and the probe, rather than after the landing mounts its <Suspense>.
+		prefetchScreen(route?.game);
+		// OFFLINE route: identity is local (guest myId / cached login) and needs no
+		// network, so it never checks the session either.
+		if (route?.game !== "offline") checkStoredSession(stored());
 		(async () => {
-			try {
-				const ctrl = new AbortController();
-				const t = setTimeout(() => ctrl.abort(), 250);
-				const res = await fetch(`${HTTP_BASE}/games`, { signal: ctrl.signal });
-				clearTimeout(t);
-				if (res.ok && !cancelled) { const dest = await resolveDest(); await waitFonts(); if (!cancelled) landAt(dest); return; }
-			} catch {}
-			if (!cancelled) { setShowLoading(true); startPolling(); }
+			await waitFonts();
+			// Read identity AFTER the fonts: a session the check has already found
+			// dead was cleared from storage in the meantime, and lands on sign-in.
+			if (!cancelled) landAt(route?.game === "offline" || stored() ? "home" : "auth");
 		})();
-		return () => { cancelled = true; if (interval) clearInterval(interval); };
-	}, [screen, loadingKick]); // eslint-disable-line react-hooks/exhaustive-deps
+		return () => { cancelled = true; };
+	}, [screen]); // eslint-disable-line react-hooks/exhaustive-deps
+
+	// Validate a stored login in the BACKGROUND. The token can be silently dead
+	// (unused for 90 days, or logged out — each device has its own session, see
+	// core.auth), which downgrades every authenticated request to anonymous while the
+	// UI still shows you logged in. Same rules as when this gated the boot:
+	//  - ok:true refreshes the cached identity (name / is_admin);
+	//  - a definite ok:false clears the stale login and sends the player to sign-in
+	//    (through the SESSION_EXPIRED path every lobby already uses, which keeps the
+	//    route for after they sign in and says why on the sign-in screen);
+	//  - a transport error, a 5xx or a non-JSON body NEVER signs anyone out: it waits
+	//    for the server to answer and asks again, a few times, then lets it be.
+	// It runs alongside the /health probe rather than after it; a cold start holds
+	// this request open just the same, and a success here marks the server awake.
+	const checkStoredSession = (user) => {
+		if (!user || user.guest || !user.session_token) return;
+		(async () => {
+			for (let attempt = 0; attempt < 4; attempt++) {
+				let data = null;
+				try {
+					const res = await fetch(`${HTTP_BASE}/auth/session`,
+						{ headers: { Authorization: `Bearer ${user.session_token}` } });
+					if (res.ok || (res.status >= 400 && res.status < 500)) data = await res.json();
+				} catch { data = null; }
+				let current = null;
+				try { current = JSON.parse(localStorage.getItem("spender_user") || "null"); } catch {}
+				// Signed out, or signed in as someone else, while this was in flight.
+				if (!current || current.id !== user.id || current.session_token !== user.session_token) return;
+				if (data?.ok && data.user) {
+					markBackendAwake();
+					const fresh = { ...current, name: data.user.name, is_admin: !!data.user.is_admin };
+					try { localStorage.setItem("spender_user", JSON.stringify(fresh)); } catch {}
+					setAuthUser(fresh);
+					return;
+				}
+				if (data && data.ok === false) {
+					markBackendAwake();
+					// Before the landing (still on the blank boot screen), clearing
+					// storage is enough — the boot reads it and lands on sign-in.
+					if (screenRef.current === "loading") {
+						try { localStorage.removeItem("spender_user"); localStorage.removeItem("spender_roomId"); } catch {}
+						const newId = uid();
+						try { localStorage.setItem("spender_myId", newId); } catch {}
+						setAuthUser(null); setMyId(newId);
+						setAuthNotice(SIGNED_OUT_NOTICE);
+						return;
+					}
+					window.dispatchEvent(new CustomEvent(SESSION_EXPIRED,
+						{ detail: { ...user, notice: SIGNED_OUT_NOTICE } }));
+					return;
+				}
+				// No answer: wait for the server (or a short pause if it is up), then retry.
+				if (!isBackendAwake()) await whenBackendAwake();
+				else await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+			}
+		})();
+	};
+
+	// The waking notice (shared/backend.js) shows only where the server matters:
+	// sign-in and the screens that live on it. Home, the offline hub, puzzles and the
+	// static data pages do not need it, and an offline game is local by definition.
+	useEffect(() => {
+		setServerWanted(SERVER_SCREENS.has(screen) && !puzzling && !offline);
+	}, [screen, puzzling, offline]);
 
 	// ── Gem flash when bank count drops ───────────────────────────────────────
 	const prevBankRef = useRef(null);
@@ -1966,7 +1987,7 @@ export default function SpenderApp() {
 			setMyId(newId);
 			setAuthUser(null);
 			setHistoryGames([]);
-			setAuthNotice("Your session expired. Sign in again to load your game history.");
+			setAuthNotice(detail.notice || "Your session expired. Sign in again to load your game history.");
 			setScreen("auth");
 			setRoomData(null); setRoomId(""); disconnect();
 		};
@@ -2563,7 +2584,7 @@ export default function SpenderApp() {
 		setScreen(SCREEN_FOR_MODE[g]);   // coc/werewolf/duel/books mount and read their own segment 2
 	};
 
-	// landAt(): boot injection — resolveDest still decides auth-vs-in, the initial URL
+	// landAt(): boot injection — the stored identity decides auth-vs-in, the initial URL
 	// decides WHERE. A deep link seen while logged out is stashed across the auth screen
 	// (URL left untouched so it survives in the address bar) and consumed after login/guest.
 	const landAt = (dest) => {
@@ -3022,51 +3043,10 @@ export default function SpenderApp() {
 
 	// ── Screens ────────────────────────────────────────────────────────────
 
-	// Loading screen (only shown after 250ms fast-path check misses)
-	if (screen === "loading") {
-		if (!showLoading) return <style>{css}</style>;
-		return (
-			<>
-				<style>{css}</style>
-				{/* THE THIRD SHELL SCREEN, and on a cold Render dyno the one a first-time
-				    visitor looks at for 30-50 seconds — so it wears the same wordmark,
-				    the same ornament and the same ground as the two screens behind it
-				    (`.loading-screen` is named alongside `.home`/`.auth-screen` in the
-				    paired selectors in Spender.css) rather than being a bare progress
-				    bar on black. */}
-				<div className="app loading-screen">
-					{/* Same shell as the auth screen: the block centres in the space above
-					    the strapline and the strapline takes the bottom edge. It used to
-					    be one centred column biased upward with trailing padding, which
-					    left ~40% of every viewport empty BELOW it — 308px at 1280x800,
-					    460px at 1920x1080 — on the one screen a cold visitor stares at
-					    for thirty seconds. */}
-					<div className="auth-main">
-					<h1 className="loading-logo">{SITE_NAME}</h1>
-					{HERO_RULE}
-					<p className="loading-sub">Waking the server…</p>
-					{/* role=progressbar with the real value, so the wait is announced
-					    rather than being a decorative div that only sighted users can
-					    read. aria-valuetext carries the same words as the caption. */}
-					<div className="loading-bar-wrap" role="progressbar" aria-label="Connecting"
-						aria-valuemin={0} aria-valuemax={100}
-						aria-valuenow={Math.round(loadingProgress * 100)}>
-						<div className="loading-bar" style={{ width: `${Math.round(loadingProgress * 100)}%` }} />
-					</div>
-					<p className="loading-hint">
-						{loadingProgress >= 0.99 ? "Ready" : loadingProgress < 0.05 ? "Connecting…" : `${Math.round(loadingProgress * 100)}%`}
-					</p>
-					{/* The polling loop above never gives up, so a user with NO connection needs an
-					    exit that doesn't. Navigating away from "loading" cancels the poll (the
-					    effect's cleanup); the offline hub then works entirely from local storage. */}
-					<button className="btn btn-ghost loading-escape"
-						onClick={() => { pushPath(buildPath("offline")); enterOfflineHub(null); }}>
-						Use offline
-					</button>
-					</div>				</div>
-			</>
-		);
-	}
+	// Boot: a blank frame while the fonts land (≤1.5s, ~0 when cached) — then a real
+	// screen from local state. There is no "Waking the server…" screen any more; the
+	// wait moved to the places that need the server (shared/backend.js).
+	if (screen === "loading") return <style>{css}</style>;
 
 	// Auth screen
 	if (screen === "auth") return (

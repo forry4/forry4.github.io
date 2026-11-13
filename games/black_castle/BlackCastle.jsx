@@ -1,3 +1,6 @@
+// Every game socket goes through openSocket: it rides out a waking server (shared/backend.js).
+import { openSocket } from "../../shared/backend.js";
+import { useOnBackendAwake } from "../../shared/lobby.jsx";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { baseCss } from "../../shared/theme.js";
 import {
@@ -113,6 +116,8 @@ export default function BlackCastle({ myId, authUser, onExit }) {
     } catch { setToast("Could not load open castles."); }
     finally { setRefreshing(false); }
   }, [authUser]);
+  // A list fetched while the server was still waking may have been refused; fetch again when it answers.
+  useOnBackendAwake(refresh);
   useEffect(() => { refresh(); }, [refresh]);
 
   const onMessage = useCallback((message) => {
@@ -135,7 +140,7 @@ export default function BlackCastle({ myId, authUser, onExit }) {
     const rid = roomRef.current;
     if (!rid) return;
     try { wsRef.current?.close(); } catch {}
-    const ws = new WebSocket(`${WS_BASE}/blackcastle/ws/${encodeURIComponent(rid)}/${encodeURIComponent(myId)}`);
+    const ws = openSocket(`${WS_BASE}/blackcastle/ws/${encodeURIComponent(rid)}/${encodeURIComponent(myId)}`);
     wsRef.current = ws;
     ws.onopen = () => {
       if (wsRef.current !== ws) return;

@@ -113,7 +113,8 @@ Cross-game frontend kits. **Dependency direction is one-way: `games/* → shared
   its upper-left identity rail; loading and auth are one entrance sequence and share the
   foiled hero wordmark and `HERO_RULE` ornament. All three share the fixed warm ground,
   vignette and tiled feTurbulence grain through paired selectors in
-  `games/spender/Spender.css` (the loading screen still lives in `Spender.jsx`).
+  `games/spender/Spender.css`. (There was a third, the loading screen; it went when the boot
+  stopped waiting for the server, 2026-11-12.)
   `HERO_RULE` is exported from `HomeScreen.jsx` and passed into `AuthScreen`; do not copy
   its declaration.
   **Historical note — before the menu refinement, the gate rendered all three screens**

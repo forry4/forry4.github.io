@@ -1,3 +1,6 @@
+// Every game socket goes through openSocket: it rides out a waking server (shared/backend.js).
+import { openSocket } from "../../shared/backend.js";
+import { useBackendAwake, useOnBackendAwake } from "../../shared/lobby.jsx";
 import { fetchGameHistory } from "../../shared/lobbyHistory.js";
 import { leaveOpenSeat, readRoomToken } from "../../shared/roomLifecycle.js";
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
@@ -939,7 +942,7 @@ function useSocket(onMessage) {
   onMsg.current = onMessage;
   const connect = useCallback((url, firstMsg) => {
     try { wsRef.current?.close(); } catch {}
-    const ws = new WebSocket(url);
+    const ws = openSocket(url);
     wsRef.current = ws;
     ws.onopen = () => { setConnected(true); if (firstMsg) ws.send(JSON.stringify(firstMsg)); };
     ws.onclose = () => { if (wsRef.current === ws) setConnected(false); };
@@ -976,6 +979,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
   // AND we're still on the lobby screen, show the loading spinner instead of the
   // lobby, so a reconnect doesn't flash the lobby then snap into the game (CoC).
   const [connecting, setConnecting] = useState(false);
+  const backendAwake = useBackendAwake();
   const [showRules, setShowRules] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createOpp, setCreateOpp] = useState("ai");
@@ -1292,6 +1296,8 @@ export default function Dontminion({ myId, authUser, onExit }) {
       fetchGameHistory(`${DM_HTTP}/games/history`, authUser).then((d) => { const g = d.games || []; setHistory(g); writeLobbyCache("dontminion", myId, "history", g); }).catch(() => {});
     } else { setMyGames([]); setHistory([]); writeLobbyCache("dontminion", myId, "mine", []); writeLobbyCache("dontminion", myId, "history", []); }
   }, [authUser, myId]);
+  // A list fetched while the server was still waking may have been refused; fetch again when it answers.
+  useOnBackendAwake(fetchGames);
 
   useEffect(() => { if (screen === "lobby") fetchGames(); }, [screen, fetchGames]);
   // The game you just finished leaves Active and joins History the moment it
@@ -1342,14 +1348,15 @@ export default function Dontminion({ myId, authUser, onExit }) {
 
   // A connect that never answers (server asleep, socket never opens) must not
   // leave the spinner up forever — bail back to the lobby with a hint.
+  // The window starts once the server is up — a cold start's wake is not a dead connect.
   useEffect(() => {
-    if (!connecting) return;
+    if (!connecting || !backendAwake) return;
     const t = setTimeout(() => {
       setConnecting(false);
       setToast("Still connecting — the server may be waking up. Try again in a moment.");
     }, 15000);
     return () => clearTimeout(t);
-  }, [connecting]);
+  }, [connecting, backendAwake]);
 
   // The log reads oldest-at-top, so the newest line is at the BOTTOM and the
   // view has to follow it — unless the reader deliberately scrolled up to

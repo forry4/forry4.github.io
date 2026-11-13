@@ -78,8 +78,8 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
   For a fully local stack point `VITE_WS_URL` at `ws://localhost:8000/ws`.
 - **Vite MUST run on port 5173** — `core/config.py` CORS only allowlists `localhost:5173`; on 5174
   the browser fetch is CORS-blocked and the app hangs on the loader.
-- Smoke gate before pushing frontend: `cd webapp && npm run smoke` (see Testing — it is weaker than
-  it looks).
+- Smoke gate before pushing frontend: `cd webapp && npm run smoke` (see Testing — it reaches the
+  first screen with no backend, and no further).
 - Distinct local players need **distinct browser storage** — two incognito windows in the same
   browser share `localStorage` → same `spender_myId` → they collapse into one identity. Use
   different browsers/profiles.
@@ -878,9 +878,16 @@ covers the logic; each game's wiring is one line).
   skip forms plus a comment-only mention.
 - **CI runs `core/tests/` first; Render deploy is gated on tests.** Frontend deploy is gated by
   `npm run test:unit`, `npm run smoke` AND `npm run screens`.
-- **`npm run smoke` NEVER RENDERS A GAME — don't mistake it for render coverage.** The shell pings the
-  backend before it routes, and smoke has no backend, so all three of its routes sit on the loading
-  screen. It genuinely catches a blank page, a bundle that throws at load, and layout shift. That is all.
+- **`npm run smoke` REACHES THE FIRST SCREEN WITH NO BACKEND, AND NO FURTHER — it is not game render
+  coverage.** It asserts the sign-in screen with no identity, Home with a stored one, the Duel lobby on
+  a deep link and a Spender room link's join state, all with no server at all (the boot lands from
+  local state — see "THE FIRST SCREEN NEVER WAITS FOR THE SERVER"). Until 2026-11-12 the shell pinged
+  the backend before it routed, every smoke route sat on the loading screen, and the most smoke could
+  say was "something rendered"; a ping creeping back in front of the landing now turns it red. It still
+  never plays a game, opens a working socket or reads real data, and catches a blank page, a bundle that
+  throws at load, and layout shift. **It refuses a port that is already serving** (4188, or
+  `SMOKE_PORT`): its own preview is `--strictPort` and exits quietly, so a leftover `vite preview` from
+  another worktree used to be tested IN PLACE of this build, and passed or failed on someone else's code.
 - **`npm run screens` is the real render gate** (`webapp/test/screens.mjs`): boots the actual backend,
   builds, serves on **5173** (load-bearing — `core/config.py` only allowlists that port for CORS;
   anywhere else the fetch is blocked and the app hangs on the loader), seeds a guest identity, and
@@ -1010,9 +1017,10 @@ covers the logic; each game's wiring is one line).
   gzipped as of 2026-09-22, deliberately — the offline hub eagerly carries CoC/Duel/Dissonance's
   offline drivers and the Dissonance scorecard so they are cached for play without signal. Adding a game screen means
   a `lazy()` + `<Suspense>` branch, and a `SCREENS` entry in `webapp/test/screens.mjs`.
-- **THE OFFLINE HUB (`/offline`) IS THE ONE DOOR WITH NO CONNECTION (2026-09-26)** — the only route
-  the boot gate lets through without the backend, reached from the loading screen's "Use offline"
-  and the menu's Offline tile. Two sections: **Play vs AI** (the local games) and **Read** —
+- **THE OFFLINE HUB (`/offline`) IS THE ONE DOOR WITH NO CONNECTION (2026-09-26)** — the one screen
+  built to need no server at all (it never even checks the stored session), reached from the menu's
+  Offline tile and from the waking notice's "Use offline" while the server is asleep. (It used to be
+  the only route the boot gate let through; there is no boot gate now — see the next bullet.) Two sections: **Play vs AI** (the local games) and **Read** —
   Spender Puzzles, BGG Filter, Books, Notes, your profile — each READ-ONLY from a copy this device
   keeps, and each returning to the hub on Back. Where the copies come from:
   - **Downloads are PACKS** (`OFFLINE_PACKS` in Spender.jsx, mechanics in
@@ -1029,6 +1037,43 @@ covers the logic; each game's wiring is one line).
     read-only when the server cannot be reached. **Notes and the profile are PRIVATE, so a real
     sign-out wipes them** (an expired session does not). `screens.mjs` `offlineRead` takes each
     copy online, blocks the API origin, and reads them back.
+- **THE FIRST SCREEN NEVER WAITS FOR THE SERVER (2026-11-12).** The shell used to ping `/games` (a
+  250ms race, then a 2s poll with a 5s abort), validate the session, wait for the fonts and then a fixed
+  350ms before drawing ANYTHING — measured on the live site at ~23.5s of "Waking the server…" on a cold
+  Render instance and ~1s warm with no open connection, in front of a menu that needs no server. Now the
+  boot effect in `Spender.jsx` lands from `localStorage` once the fonts are in: a stored identity on Home
+  (or its deep link), none on sign-in. The question "is the server up?" moved to **`shared/backend.js`**:
+  - **ONE `/health` probe, started in `webapp/main.jsx`, that HOLDS each request up to 90s** and retries
+    a refusal or 503 with a backoff capped at 8s — never a short abort, for the reason the keepalive
+    bullets give. Awake once is awake for the page (later drops are the sockets' business).
+  - **The session check runs alongside it, in the background**, with the old rules: ok:true refreshes
+    name/is_admin (so the owner's Site health tile can show from the cached identity, then correct
+    itself), a definite ok:false clears the login and goes to sign-in through `SESSION_EXPIRED` with a
+    notice saying why, and a transport error/5xx waits for the server and asks again, never signing out.
+  - **What needs the server rides the wake instead of failing or hanging.** Every game socket is
+    `openSocket(url)`: a socket that dies before it ever opened while the server is waking is retried
+    once the probe answers, reporting CONNECTING meanwhile (so `useAutoReconnect` does not stack
+    retries). Every lobby calls `useOnBackendAwake(<its list fetch>)`, because a list fetched during the
+    wake may have been 503'd and the cached rows would otherwise sit until a manual refresh. A
+    `LobbyLoading label="Connecting…"` reads "Waking the server…" until it answers; the 15s connect bail
+    (Spender/CoC/Dontminion) starts only once the server is up; sign-in resends a refused/503'd POST once.
+    `shared/tests/test_backend_wake.py` derives both rosters from the tree.
+  - **A plain-DOM notice (`#fg-waking`, like the update nudge) says the server is waking**, with the
+    "Use offline" door the loading screen used to carry — only on the screens the shell lists in
+    `SERVER_SCREENS` (sign-in, the game lobbies, Books/Notes/Profile/Box Puzzles), and only after 1.5s,
+    so a warm visit never sees it flash.
+  - **A deep link to a ROOM goes straight to that game's own connecting screen** — no shell-level wait.
+    Its "Connecting…" reads "Waking the server…", its socket completes when the server does, and the
+    screen's lazy chunk was already fetched at boot (`prefetchScreen`, in parallel with the fonts and the
+    probe). Chosen over holding the shell on a "taking you to table X" screen because every game already
+    owns that state, and it costs a warm server nothing.
+  - **Measured** (fresh browser context against the live backend, median of 5 when warm): navigation to
+    Home 326ms → 167ms warm (the old path also had 1.1–2.5s outliers whenever the 250ms race missed);
+    unreachable never → 175ms; a held 20s cold start 22.1s → 184ms; a deep link to the Orbit lobby
+    324ms → 276ms warm and 22.2s → 314ms asleep (its list then fills when the server answers).
+  - Gates: `smoke` (first screens with no backend), `screens.mjs`'s `bootWithoutServer` (API blocked →
+    Home, a lobby with the notice, Use offline → hub; unblocked → notice gone, list re-fetched; the
+    stale-session pair), `webapp/test/unit/backend.test.mjs` (probe never aborts early, socket retry).
 - **The WS throttle is process-global and keyed on client IP** (`core.rooms`, 60 connects/min,
   300 msgs/min). Test fake sockets all report `"unknown"`, so they share ONE budget: any test module
   driving `ws_room_player` MUST reset `_rooms._ws_connect_limiter` per test, or the suite eventually

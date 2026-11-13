@@ -10,6 +10,9 @@
  * viewer's OWN side — which is what the board's spines and corner marks are
  * drawn from. It arrives per-socket from `engine.player_view`.
  */
+// Every game socket goes through openSocket: it rides out a waking server (shared/backend.js).
+import { openSocket } from "../../shared/backend.js";
+import { useOnBackendAwake } from "../../shared/lobby.jsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { baseCss } from "../../shared/theme.js";
 import {
@@ -477,6 +480,8 @@ export default function SecretNames({ myId, authUser, onExit }) {
     } catch { setToast("Could not reach headquarters."); }
     finally { setRefreshing(false); }
   }, [authUser, myId]);
+  // A list fetched while the server was still waking may have been refused; fetch again when it answers.
+  useOnBackendAwake(refresh);
   useEffect(() => { if (screen === "lobby") refresh(); }, [screen, refresh]);
 
   // A finished mission leaves Active and joins History at the moment it ends,
@@ -526,7 +531,7 @@ export default function SecretNames({ myId, authUser, onExit }) {
     const rid = roomRef.current;
     if (!rid) return;
     try { wsRef.current?.close(); } catch {}
-    const ws = new WebSocket(`${WS_BASE}/secretnames/ws/${encodeURIComponent(rid)}/${encodeURIComponent(myId)}`);
+    const ws = openSocket(`${WS_BASE}/secretnames/ws/${encodeURIComponent(rid)}/${encodeURIComponent(myId)}`);
     wsRef.current = ws;
     ws.onopen = () => {
       if (wsRef.current !== ws) return;

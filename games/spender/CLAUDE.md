@@ -210,9 +210,9 @@ design: no server row, no history, no sync. Games vs the client-WASM tiers only 
 - **Shell** (`Spender.jsx`): `/offline` = hub (create/resume/delete + the offline-asset download),
   `/offline/<LOCALID>` = a save; the game screen renders a puzzle-mode-style synthesized `roomData`
   whose `ai_search` is built locally, so the EXISTING worker-pool dispatch plays the AI unchanged —
-  the one `ai_move` send has an offline fork into the driver. The boot gate skips the backend ping
-  for `/offline` routes, and the loading screen has a "Play offline" escape hatch (the poll loop has
-  no give-up branch). `offlineRef` guards the visibility reconnect exactly like `puzzlingRef`.
+  the one `ai_move` send has an offline fork into the driver. The boot never waits for the backend on
+  any route now (root `CLAUDE.md`, "THE FIRST SCREEN NEVER WAITS FOR THE SERVER"); `/offline` also
+  skips the background session check, and the waking notice carries the "Use offline" door. `offlineRef` guards the visibility reconnect exactly like `puzzlingRef`.
 - **Service worker**: source moved to `webapp/sw.js`, emitted by `vite.config.js` with a
   `__BUILD_ID__`-stamped cache name (each deploy's `activate` drops the old cache). The hub's
   "Download for offline" sends `PRECACHE_OFFLINE` → the SW `cache:"reload"`-fetches the wasm trio +

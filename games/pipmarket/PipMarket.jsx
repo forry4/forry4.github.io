@@ -1,3 +1,6 @@
+// Every game socket goes through openSocket: it rides out a waking server (shared/backend.js).
+import { openSocket } from "../../shared/backend.js";
+import { useOnBackendAwake } from "../../shared/lobby.jsx";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { baseCss } from "../../shared/theme.js";
 import {
@@ -719,6 +722,8 @@ export default function PipMarket({ myId, authUser, onExit }) {
     } catch { setToast("Could not refresh Pip Market tables."); }
     finally { setRefreshing(false); }
   }, [authUser, myId]);
+  // A list fetched while the server was still waking may have been refused; fetch again when it answers.
+  useOnBackendAwake(fetchGames);
   useEffect(() => { if (screen === "lobby") fetchGames(); }, [screen, fetchGames]);
 
   const handleMessage = useCallback((message) => {
@@ -737,7 +742,7 @@ export default function PipMarket({ myId, authUser, onExit }) {
     const rid = roomRef.current;
     if (!rid) return;
     try { wsRef.current?.close(); } catch {}
-    const ws = new WebSocket(`${WS_BASE}/pipmarket/ws/${encodeURIComponent(rid)}/${encodeURIComponent(myId)}`);
+    const ws = openSocket(`${WS_BASE}/pipmarket/ws/${encodeURIComponent(rid)}/${encodeURIComponent(myId)}`);
     wsRef.current = ws;
     ws.onopen = () => {
       if (wsRef.current !== ws) return;
