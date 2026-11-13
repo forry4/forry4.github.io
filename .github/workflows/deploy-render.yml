@@ -238,17 +238,49 @@ jobs:
       # fall back to `started_at` (a process that booted after t0) and say so, so
       # the weaker check is never silent. Non-200s are normal here: the free tier
       # returns 503 while spinning up and during the deploy swap.
+      #
+      # A NEWER commit that CONTAINS this one also passes. The hook has no ref: Render
+      # builds whatever main is when it fires, so when a second push lands while this
+      # run is still waiting on Python CI, the hook builds THAT commit and this SHA
+      # never appears in /health at all. Run 43462009284 (2026-11-13) waited its whole
+      # 20 minutes for ea0b823 and went red, 18 minutes after prod came up on cdfa23e,
+      # its child. The question is "is the code I pushed being served", and a
+      # descendant answers yes; an older or unrelated commit still does not.
       - name: Verify the new build is actually live
         env:
           HEALTH_URL: https://splendid-nelz.onrender.com/health
           WANT_SHA: ${{ github.sha }}
+          REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
           T0: ${{ steps.pre.outputs.t0 }}
           TIMEOUT_SECONDS: "1200"   # 20 min: Docker build + wheelhouse + Cython on the free tier
         run: |
           python3 - <<'PY'
           import json, os, subprocess, sys, time
+          import urllib.request
 
           url, want = os.environ["HEALTH_URL"], os.environ["WANT_SHA"]
+          repo, token = os.environ.get("REPOSITORY", ""), os.environ.get("GH_TOKEN", "")
+          contained = {}   # live commit -> does it contain `want`? (settled answers only)
+
+          def contains_want(live):
+              # GitHub's compare, base=want head=live: "ahead" means live is want plus
+              # more commits. An API failure is not an answer, so it is asked again.
+              if not repo:
+                  return False
+              if live not in contained:
+                  try:
+                      headers = {"Accept": "application/vnd.github+json", "User-Agent": "deploy-verify"}
+                      if token:
+                          headers["Authorization"] = f"Bearer {token}"
+                      req = urllib.request.Request(
+                          f"https://api.github.com/repos/{repo}/compare/{want}...{live}", headers=headers)
+                      with urllib.request.urlopen(req, timeout=30) as r:
+                          contained[live] = json.load(r).get("status") in ("ahead", "identical")
+                  except Exception as e:
+                      print(f"  ... could not compare {live[:7]} with {want[:7]} ({type(e).__name__})", flush=True)
+                      return False
+              return contained[live]
           t0, deadline = int(os.environ["T0"]), time.time() + int(os.environ["TIMEOUT_SECONDS"])
           print(f"waiting for {want[:7]} at {url}", flush=True)
 
@@ -289,6 +321,10 @@ jobs:
                   if commit != "unknown":
                       if commit.startswith(want) or want.startswith(commit):
                           print(f"OK  live commit matches {want[:7]}")
+                          check_db(data)
+                      if contains_want(commit):
+                          print(f"OK  prod is serving {commit[:7]}, a newer commit that contains "
+                                f"{want[:7]} (a later push was built in its place)")
                           check_db(data)
                   elif started > t0:
                       print("::warning::/health reports commit=unknown — RENDER_GIT_COMMIT is not set "

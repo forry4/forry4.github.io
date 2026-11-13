@@ -1262,7 +1262,10 @@ git push                      # deploy-pages.yml builds + publishes (~2-3 min)
   means adding it here in the same push; the file also triggers on itself, so a fix to the list can
   actually land. Automatic deploys wait for the matching successful Python CI run; manual Render
   runs execute the same suite in the workflow. The deploy job **verifies itself** by polling
-  `/health` until it reports the pushed commit and FAILS if that never happens.
+  `/health` until it reports the pushed commit and FAILS if that never happens. **A newer live
+  commit that CONTAINS the pushed one also passes** (GitHub compare): the hook has no ref, so a
+  second push inside the Python CI wait is what Render builds, and the first run's SHA never
+  appears (a 20-minute false red on 2026-11-13).
 - **The deploy hook returning 200 is NOT a successful deploy** (this cost a real gap): it only means
   Render accepted the request. A failed Docker build — the Dockerfile's Cython parity gate is *designed*
   to fail one — or a boot crash used to leave prod silently on the old code behind a green tick.

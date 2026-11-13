@@ -81,3 +81,50 @@ def test_responses_must_prove_themselves():
     ok = s.validate_reviews(json.dumps({"success": 1, "query_summary": {
         "total_positive": 9, "total_negative": 1, "total_reviews": 10}}))
     assert ok["query_summary"]["total_reviews"] == 10
+
+
+# ── the review endpoint is asked about one known game before the hour of search ──
+
+def _answer(monkeypatch, body):
+    """fetch() with the network replaced: the validator runs on `body`, as it would on
+    Steam's answer, and a rejection is what ten failed tries turn into."""
+    def fake(url, check, tries=10, **_):
+        assert "/ajaxappreviews/620?" in url and "language=english" in url
+        try:
+            return check(body)
+        except s.Rejected as e:
+            raise RuntimeError(f"gave up on {url}: {e}")
+    monkeypatch.setattr(s, "fetch", fake)
+
+
+def test_preflight_passes_on_a_real_answer(monkeypatch):
+    _answer(monkeypatch, json.dumps({"success": 1, "query_summary": {
+        "total_positive": 210325, "total_reviews": 212805}}))
+    s.preflight_reviews()
+
+
+def test_preflight_refuses_the_store_front_page(monkeypatch):
+    # What /appreviews/ answered from 2026-11: a 302 to the store's HTML front page.
+    _answer(monkeypatch, '<!DOCTYPE html>\n<html class=" responsive DesktopUI" lang="en">')
+    with pytest.raises(SystemExit, match="not answering"):
+        s.preflight_reviews()
+
+
+def test_preflight_refuses_an_endpoint_that_changed_meaning(monkeypatch):
+    # Valid JSON, wrong question: a count this low for Portal 2 is not its English total.
+    _answer(monkeypatch, json.dumps({"success": 1, "query_summary": {
+        "total_positive": 0, "total_reviews": 0}}))
+    with pytest.raises(SystemExit, match="meaning changed"):
+        s.preflight_reviews()
+
+
+def test_the_harvest_asks_before_it_searches(monkeypatch):
+    order = []
+    monkeypatch.setattr(s, "preflight_reviews", lambda: order.append("preflight"))
+    def search(*a):
+        order.append("search")
+        raise SystemExit("stop here")
+    monkeypatch.setattr(s, "harvest_search", search)
+    with pytest.raises(SystemExit):
+        s.main([])
+    assert order == ["preflight", "search"]

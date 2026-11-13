@@ -6,7 +6,7 @@ Two passes, both over endpoints the Steam STORE itself calls (no API key):
      100 rows a page: app id, title, release date and the review tooltip
      ("94% of the 1,234 user reviews ..."). That tooltip is only a PREFILTER —
      it may count every language, and the page is about English reviews.
-  2. /appreviews/<id>?json=1&language=english&num_per_page=0   the exact English
+  2. /ajaxappreviews/<id>?json=1&language=english&num_per_page=1   the exact English
      totals for every candidate the prefilter kept.
 
 Only games whose ENGLISH reviews are at least MIN_POSITIVE positive, with at
@@ -45,8 +45,14 @@ PREFILTER_PCT = 80
 SEARCH = ("https://store.steampowered.com/search/results/?query=&start={start}&count={count}"
           "&dynamic_data=&sort_by=Released_DESC&category1=998&infinite=1&json=1"
           "&l=english&cc=us&ignore_preferences=1&ndl=1")
-REVIEWS = ("https://store.steampowered.com/appreviews/{id}?json=1&language=english"
-           "&purchase_type=all&review_type=all&filter=all&num_per_page=0")
+# /ajaxappreviews/, not /appreviews/: from 2026-11 the latter answers every app with a
+# 302 to the store's front page, which killed the November harvest three rounds running
+# (68 min of search each first). Same English totals (checked against the October file).
+# num_per_page=1: 0 is no longer honoured and sends twenty review bodies (~25KB an app).
+REVIEWS = ("https://store.steampowered.com/ajaxappreviews/{id}?json=1&language=english"
+           "&purchase_type=all&review_type=all&filter=all&num_per_page=1")
+# An app whose English reviews cannot plausibly fall under this: the preflight below.
+REVIEWS_CANARY = (620, 100_000)   # Portal 2, ~212k
 
 _print_lock = threading.Lock()
 
@@ -183,6 +189,22 @@ def cached_fetch(path, fresh_hours, url, check):
     return j
 
 
+def preflight_reviews():
+    """Ask the review endpoint about one known game BEFORE the hour of search. Steam
+    moving or closing the endpoint fails every lookup alike, and found only after the
+    search it costs a 76-minute red run plus both continuation rounds."""
+    app, floor = REVIEWS_CANARY
+    try:
+        j = fetch(REVIEWS.format(id=app), validate_reviews, tries=4)
+    except RuntimeError as e:
+        raise SystemExit(f"the review endpoint is not answering: {e}")
+    got = int(j["query_summary"].get("total_reviews") or 0)
+    if got < floor:
+        raise SystemExit(f"the review endpoint reports {got:,} English reviews for app {app} "
+                         f"(expected {floor:,}+): its meaning changed, refusing to harvest on it")
+    log(f"reviews: endpoint answers ({got:,} for app {app})")
+
+
 def harvest_search(workers, fresh_hours):
     page_path = lambda start: os.path.join(CACHE, "search", f"{start}.json")
     first = fetch(SEARCH.format(start=0, count=PAGE), validate_search)   # always fresh: it sets the total
@@ -260,6 +282,7 @@ def main(argv=None):
               store_total=None, candidates=None, enriched=cur.get("enriched") if same else None)
         return
 
+    preflight_reviews()
     total, by_id = harvest_search(a.workers, a.fresh_hours)
     cands = [g for g in by_id.values() if is_candidate(g, a.min_reviews)]
     log(f"prefilter: {len(cands):,} candidates ({a.min_reviews}+ reviews, {PREFILTER_PCT}%+ on the store)")

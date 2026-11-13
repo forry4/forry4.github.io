@@ -10,6 +10,67 @@ than re-argued.
 
 ---
 
+## 2026-11-13 — a deploy that waited for a commit Render never built, and an endpoint Steam moved
+
+Census of the 300 runs from 11-03 to 11-13: **Pages 1 red of 36, Render 1 of 8, Python CI
+0 of 29, the data jobs 7 of 35.** Ten reds; four causes were still live.
+
+| Run | Step | What it was | Kind | State |
+|---|---|---|---|---|
+| 11-13 Render `ea0b823e` | verify, 20 min timeout | prod was serving `cdfa23e`, its child, 18 minutes before the timeout | harness | **fixed here** |
+| 11-13 Pages `85da021d` | `crashScreen` build id | the check compared the report's build with the wrong source | harness | fixed same hour (`1da4c4ff`) |
+| 11-06 Steam harvest x3 | Harvest | `/appreviews/` now 302s to the store front page | **product** | **fixed here** |
+| 11-11 Steam prices | Publish | `DATA_URL` set before the `DATA_PUBLISH_TOKEN` secret | setup, by hand | resolved |
+| 11-11 Pipeline alerts | Alert the owner | the by-hand test, token not yet matching | setup, by hand | resolved (`cb97c3e5`) |
+| 11-03 Anime harvest x3 | Harvest | the workflow's first hour: Jikan, IPv6, Kitsu's media type | new job | resolved same hour |
+
+### The Render deploy waited for a SHA that could not appear
+
+The deploy hook carries no ref: Render builds whatever `main` is when the hook fires.
+`ea0b823e` was pushed at 16:22:04 and `cdfa23e` at 16:23:49, while the first run was
+still waiting on Python CI. Its hook fired at 16:24:28 and Render built `cdfa23e`. The
+second run saw its own SHA and passed at 16:26:16. The first polled `/health` for
+`ea0b823` until 16:44:33 and failed with "the Render build likely FAILED", which it had
+not. Any two backend pushes inside the CI wait (~2.5 min) do this, and the gate that
+waits for Python CI (which made the window) is newer than the verify step.
+
+The verify step now also passes when the live commit CONTAINS the pushed one, asked of
+GitHub's compare API (`compare/<pushed>...<live>` is `ahead` or `identical`). Checked on
+the real pair: `ea0b823e...cdfa23e9` answers `ahead`, the reverse `behind`. An older or
+diverged live commit still waits, a compare that errors is asked again rather than
+counted, and the superseding build is held to `db_backend == turso` like any other.
+Tests run the workflow's own script (`core/tests/test_deploy_verifies_db_backend.py`).
+
+### Steam's review endpoint moved, and the harvest found out after an hour of search
+
+Inferred from timings, not read from the log (the logs API needs a sign-in): round 1
+failed at 76 minutes, which is the ~68-minute search plus one lookup's retries, and
+rounds 2 and 3, with the search cached, at 6 minutes each. Measured today:
+`store.steampowered.com/appreviews/<id>?json=1` answers **302 to the store's front
+page** for every app and every parameter set tried. `/ajaxappreviews/<id>` with the
+same query answers the JSON, with the same English totals (Portal 2 212,805 against
+212,185 in the 10-15 file; a small game identical at 163/181). `num_per_page=0` is no
+longer honored there (twenty review bodies, ~25KB an app), so the harvester asks for 1.
+
+Nothing had fixed this: the 11-13 run was the weekly enrich, which makes no review
+request, so the next full harvest (12-04) would have gone red three more times.
+`preflight_reviews` now asks about one known game before the search and refuses both a
+non-answer and a count too low to be Portal 2's, so a moved endpoint costs seconds.
+
+**Not verified:** a full harvest on the new path. The preflight and three lookups ran
+against live Steam; the ~7h run did not. Steam's throttle on `/ajaxappreviews/` may
+differ from the ~60 a minute measured on the old path.
+
+### Carry
+
+- **A gate that waits for "my SHA" must accept a descendant** wherever the thing
+  deployed is "the branch head", not the SHA. Same family as the keepalive watchdog
+  (09-13): measure the property (is my code served), not the mechanism (did my id appear).
+- **A harvest's cheapest request that can fail goes first.** The search could not fail
+  in the way that mattered and took an hour; the lookup that did fail took a second.
+
+---
+
 ## 2026-11-03 — `pipMarketPlay` measured a board while its cells were still gliding
 
 Census of the 300 runs from 10-21 to 11-03: **Pages 2 red of 46, Python CI 0 of 30,

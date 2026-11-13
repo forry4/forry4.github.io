@@ -75,3 +75,70 @@ def test_health_reports_the_backend_this_process_writes_to(monkeypatch):
         monkeypatch.setattr(db, "_USE_TURSO", flag)
         assert db.backend() == name
         assert build_info.build_info()["db_backend"] == name
+
+
+# ── a later push built in this one's place is a pass, not a 20-minute red ──────────
+#
+# The deploy hook carries no ref: Render builds whatever main is when it fires. Push
+# twice inside the Python CI wait and the first run's SHA never reaches /health; it
+# used to poll for it until the timeout while prod served its child (2026-11-13).
+
+NEWER = "fedcba9876543210fedcba9876543210fedcba98"
+
+
+class _StillWaiting(Exception):
+    pass
+
+
+def _run_superseded(monkeypatch, status):
+    import io
+    import urllib.request
+    asked = []
+
+    def compare(req, timeout=None):
+        asked.append(req.full_url)
+        return io.BytesIO(json.dumps({"status": status}).encode())
+
+    monkeypatch.setenv("HEALTH_URL", "https://example.invalid/health")
+    monkeypatch.setenv("WANT_SHA", SHA)
+    monkeypatch.setenv("T0", "100")
+    monkeypatch.setenv("TIMEOUT_SECONDS", "60")
+    monkeypatch.setenv("REPOSITORY", "owner/repo")
+    monkeypatch.setenv("GH_TOKEN", "t")
+    health = {"commit": NEWER, "started_at": 200, "db_backend": "turso"}
+    monkeypatch.setattr(subprocess, "run",
+                        lambda *a, **k: subprocess.CompletedProcess(a, 0, json.dumps(health), ""))
+    monkeypatch.setattr(urllib.request, "urlopen", compare)
+
+    def sleep(_):
+        raise _StillWaiting
+    monkeypatch.setattr(time, "sleep", sleep)
+    try:
+        exec(compile(_verify_script(), "deploy-render.yml:verify", "exec"), {"__name__": "__main__"})
+    except SystemExit as e:
+        return e.code, asked
+    except _StillWaiting:
+        return "waiting", asked
+
+
+def test_a_newer_commit_containing_this_one_passes(monkeypatch):
+    code, asked = _run_superseded(monkeypatch, "ahead")
+    assert code == 0
+    # base=the pushed commit, head=the live one: "ahead" then means live = pushed + more.
+    assert asked == [f"https://api.github.com/repos/owner/repo/compare/{SHA}...{NEWER}"]
+
+
+@pytest.mark.parametrize("status", ["behind", "diverged"])
+def test_an_older_or_unrelated_live_commit_keeps_waiting(monkeypatch, status):
+    # The previous build still serving (behind), or a branch that never had this
+    # commit (diverged): the pushed code is NOT live, so the gate must not pass.
+    assert _run_superseded(monkeypatch, status)[0] == "waiting"
+
+
+def test_a_superseding_build_is_still_held_to_turso(monkeypatch):
+    import io
+    import urllib.request
+    monkeypatch.setenv("REPOSITORY", "owner/repo")
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda req, timeout=None: io.BytesIO(b'{"status": "ahead"}'))
+    assert _run_gate(monkeypatch, {"commit": NEWER, "started_at": 200, "db_backend": "sqlite"}) == 1

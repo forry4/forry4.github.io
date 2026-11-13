@@ -113,8 +113,11 @@ beside the payload and works without it (every price reads "—").
    packages (no single `data-ds-appid`) are counted but skipped. **The harvest fails if the
    rows returned fall >2% short of `total_count`** — BGG's lesson that a short page loses
    its tail in silence.
-2. `store.steampowered.com/appreviews/<id>?json=1&language=english&purchase_type=all&num_per_page=0`
-   — the exact English `total_positive` / `total_reviews`. `purchase_type=all` counts key
+2. `store.steampowered.com/ajaxappreviews/<id>?json=1&language=english&purchase_type=all&num_per_page=1`
+   — the exact English `total_positive` / `total_reviews`. **Not `/appreviews/`**: since 2026-11
+   that path 302s every app to the store's front page (it failed the November harvest three
+   rounds running). `preflight_reviews` asks about Portal 2 before the hour of search, so a
+   moved endpoint fails in seconds. `purchase_type=all` counts key
    activations too; the default off-topic (review-bomb) filter stays on.
 
 **The harvest is resumable.** Every search page and review answer is cached under
