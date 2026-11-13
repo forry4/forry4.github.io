@@ -6,7 +6,7 @@
 // arriving after first paint → the "snaps into place" reflow we kept hitting.
 //
 // Run: `npm run smoke` (from webapp/). Used locally before pushing and in CI.
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -245,6 +245,15 @@ try {
 } catch (e) {
 	console.error("SMOKE FAIL — " + (e?.stack || e?.message || e));
 } finally {
+	// The TREE, as screens.mjs does: the preview is spawned with `shell: true`, so
+	// `kill()` reaps only the shell and leaves vite holding the port — which is how a
+	// stranger's preview came to sit on 4188 and be tested in place of this build.
+	if (preview?.pid) {
+		try {
+			if (process.platform === "win32") spawnSync("taskkill", ["/pid", String(preview.pid), "/T", "/F"], { stdio: "ignore" });
+			else process.kill(-preview.pid, "SIGKILL");
+		} catch { /* already gone */ }
+	}
 	try { preview?.kill(); } catch {}
 	process.exit(code);
 }

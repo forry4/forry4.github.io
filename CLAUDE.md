@@ -888,6 +888,8 @@ covers the logic; each game's wiring is one line).
   throws at load, and layout shift. **It refuses a port that is already serving** (4188, or
   `SMOKE_PORT`): its own preview is `--strictPort` and exits quietly, so a leftover `vite preview` from
   another worktree used to be tested IN PLACE of this build, and passed or failed on someone else's code.
+  That stranger was smoke's own leftover: it spawned the preview with `shell: true` and `kill()`ed only
+  the shell, so vite outlived every run. It now reaps the TREE (`taskkill /T`), as `screens.mjs` does.
 - **`npm run screens` is the real render gate** (`webapp/test/screens.mjs`): boots the actual backend,
   builds, serves on **5173** (load-bearing — `core/config.py` only allowlists that port for CORS;
   anywhere else the fetch is blocked and the app hangs on the loader), seeds a guest identity, and
