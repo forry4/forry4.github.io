@@ -8612,7 +8612,7 @@ try {
 	async function pipMarketPlay(log) {
 		const ctx = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
 		await ctx.addInitScript(() => localStorage.setItem("spender_user",
-			JSON.stringify({ id: "pipmarket-harness", name: "Vector", guest: true })));
+			JSON.stringify({ id: "pipmarket-harness", name: "Guest4821", guest: true })));
 		const page = await ctx.newPage();
 		const errors = [];
 		page.on("pageerror", (e) => errors.push(String(e)));
@@ -8676,7 +8676,7 @@ try {
 				.then(() => true).catch(() => false);
 			check("the pair lands on the buyer's board", landed);
 			const logged = await page.waitForFunction(
-				() => /Vector buys/.test(document.querySelector(".pm-log")?.innerText || ""), null, { timeout: 10_000 })
+				() => /Guest4821 buys/.test(document.querySelector(".pm-log")?.innerText || ""), null, { timeout: 10_000 })
 				.then(() => true).catch(() => false);
 			check("the purchase reaches the market log", logged);
 		}
