@@ -1,15 +1,21 @@
-"""Warm the backend and fail only on an observed, unrecovered health failure.
+"""The keepalive WATCHDOG: is the backend healthy, and is the Worker still there?
+
+The Cloudflare Worker (keepalive-worker/) does the warming — every 5 minutes, which
+keeps Render's free instance from ever reaching its 15-minute idle timeout inside
+the window. This script used to warm too, holding a retrying curl open for 90
+minutes from ~20 GitHub schedules a day; once the Worker was deployed (2026-11-13)
+those holds only duplicated it from a scheduler that drops over half its firings,
+so they were removed (2026-11-14). What is left is the check nothing else makes:
+two runs a day confirm /health answers (recovering a transient failure first) and
+that the Worker still answers, because a Worker that vanishes fails SILENTLY.
 
 Process start time does not identify why Render restarted a free instance. Keep
 it in the diagnostics; it cannot prove that a player encountered a cold start.
 
-THE WARM WINDOW IS A BUDGET (13:00-06:59 UTC; see keepalive-worker/src/index.js
-and core/tests/test_keepalive_budget.py). GitHub delivers some scheduled runs
-hours late, so a run can START outside the window, and a 90-minute hold that
-started at 06:30 would run to 08:00. Measured over six days to 2026-11-13 that
-was ~2.5 hours a day of instance hours spent outside the window. So this script
-does nothing when it starts outside the window, and a hold stops when the
-window closes.
+THE WARM WINDOW IS A BUDGET (see keepalive-worker/src/index.js and
+core/tests/test_keepalive_budget.py). GitHub delivers some scheduled runs hours
+late, so a run can START outside the window: it then pings nothing, and a
+recovery still running when the window closes stops without a verdict.
 """
 from __future__ import annotations
 
@@ -22,13 +28,12 @@ import subprocess
 import time
 
 # Must equal the Worker's WARM_FROM_UTC_HOUR / WARM_UNTIL_UTC_HOUR (a test reads both).
-WARM_FROM_UTC_HOUR = 13
-WARM_UNTIL_UTC_HOUR = 7   # exclusive
+WARM_FROM_UTC_HOUR = 11
+WARM_UNTIL_UTC_HOUR = 10   # exclusive
 
 RECOVERY_SECONDS = 240
 ATTEMPT_SECONDS = 80  # Outlast Render's roughly one-minute cold start.
 RETRY_SECONDS = 8
-PING_INTERVAL_SECONDS = 240
 # The Worker's fetch handler warms the backend before answering when the window is
 # open: three attempts of up to 55s with 5s pauses. Outlast that.
 WORKER_PROBE_SECONDS = 190
@@ -95,9 +100,9 @@ def check_worker(url, *, timeout=WORKER_PROBE_SECONDS, log=print, summary_path=N
     """Is the Cloudflare keepalive Worker deployed? Its `fetch` handler always
     answers JSON with a boolean `warming` field (keepalive-worker/src/index.js),
     inside the window or out. Anything else - Cloudflare's 404 / error 1042 for a
-    Worker that was never deployed, an HTML page, a timeout - fails, because the
-    second scheduler being absent is otherwise silent: GitHub's holds alone covered
-    58% of the window over the six days to 2026-11-13."""
+    Worker that is not deployed, an HTML page, a timeout - fails, because the Worker
+    is the only thing warming the backend and its absence is otherwise silent (it
+    was not deployed until 2026-11-13, and nothing said so)."""
     got = None
     try:
         result = subprocess.run(
@@ -119,9 +124,9 @@ def check_worker(url, *, timeout=WORKER_PROBE_SECONDS, log=print, summary_path=N
     else:
         message = (
             f"The keepalive Worker at {url} did not answer as its fetch handler does "
-            f"(JSON with a `warming` field); got {got}. Until it is deployed the backend "
-            f"has ONE unreliable scheduler (GitHub) and mornings go cold. This stays red "
-            f"until the owner deploys it, which needs their Cloudflare login: "
+            f"(JSON with a `warming` field); got {got}. It is the only thing keeping the "
+            f"backend warm, so until it answers again the site cold-starts after every "
+            f"15 idle minutes. Redeploying needs the owner's Cloudflare login: "
             f"`{WORKER_DEPLOY_COMMAND}`, or the 'Deploy keepalive Worker' workflow with "
             f"a CLOUDFLARE_API_TOKEN secret. See docs/keepalive-reliability.md."
         )
@@ -136,7 +141,7 @@ def _window_label():
     return f"{WARM_FROM_UTC_HOUR:02d}:00-{WARM_UNTIL_UTC_HOUR - 1:02d}:59 UTC"
 
 
-def run(url, *, hold_seconds=0, clock=time.monotonic, sleep=time.sleep,
+def run(url, *, clock=time.monotonic, sleep=time.sleep,
         fetch=probe, log=print, summary_path=None, now=_utc_now):
     started_at = now()
 
@@ -148,7 +153,7 @@ def run(url, *, hold_seconds=0, clock=time.monotonic, sleep=time.sleep,
 
     if not in_warm_window(started_at):
         # A late GitHub delivery. Exit at once and green: a ping now would wake the
-        # box (or keep it up) on instance hours the budget does not have.
+        # box on instance hours the budget does not have.
         why = (f"Skipped: started {started_at:%H:%M} UTC, outside the {_window_label()} "
                f"warm window (GitHub delivered this scheduled run late). Nothing was "
                f"pinged; the window is an instance-hour budget.")
@@ -156,68 +161,43 @@ def run(url, *, hold_seconds=0, clock=time.monotonic, sleep=time.sleep,
         summarize([why])
         return 0
 
-    window_left = seconds_until_window_closes(started_at)
-    window_end = clock() + window_left
-    hold = min(hold_seconds, window_left)
-    end = clock() + hold
-    notes = []
-    if hold < hold_seconds:
-        notes.append(f"Hold cut from {hold_seconds}s to {int(hold)}s: the warm window "
-                     f"closes at {WARM_UNTIL_UTC_HOUR:02d}:00 UTC.")
-    checks, recoveries, health, error = 0, 0, None, None
+    budget = min(RECOVERY_SECONDS, seconds_until_window_closes(started_at))
+    health, error, notes = None, None, []
     try:
-        while True:
-            budget = min(RECOVERY_SECONDS, window_end - clock())
-            try:
-                health, attempts = recover(url, budget=budget, fetch=fetch, clock=clock,
-                                           sleep=sleep, log=log)
-            except RuntimeError:
-                if budget < RECOVERY_SECONDS:
-                    # The window closed mid-recovery: stop warming, as at any other
-                    # window end. Not an outage verdict either way.
-                    notes.append("The warm window closed during a recovery; stopped "
-                                 "without a verdict.")
-                    log(f"::warning::{notes[-1]}")
-                    break
-                raise
-            checks += 1
-            recoveries += attempts > 1
-            remaining = end - clock()
-            if remaining <= 0:
-                break
-            sleep(min(PING_INTERVAL_SECONDS, remaining))
-            if clock() >= end:
-                break
+        health, attempts = recover(url, budget=budget, fetch=fetch, clock=clock,
+                                   sleep=sleep, log=log)
+        notes.append(f"Healthy; attempts needed: {attempts}")
     except RuntimeError as exc:
-        error = str(exc)
-        log(f"::error::{error}")
-    finally:
-        lines = [f"Result: {'unrecovered health failure' if error else 'healthy'}",
-                 f"Successful checks: {checks}; checks requiring retries: {recoveries}",
-                 *notes]
-        if health:
-            started = health.get("started_at")
-            if isinstance(started, (int, float)) and 0 < started < 253402300800:
-                boot = dt.datetime.fromtimestamp(started, dt.timezone.utc).isoformat()
-                lines.append(f"Reported process start: {boot}")
-            lines.append("Process start time is diagnostic; it does not establish downtime or its cause.")
-            lines.append(f"Last health response: `{json.dumps(health)}`")
-        if error:
-            lines.append(error)
-        summarize(lines)
+        if budget < RECOVERY_SECONDS:
+            # The window closed mid-recovery: stop, as the Worker does. Not an
+            # outage verdict either way.
+            notes.append("The warm window closed during a recovery; stopped without a verdict.")
+            log(f"::warning::{notes[-1]}")
+        else:
+            error = str(exc)
+            log(f"::error::{error}")
+    lines = [f"Result: {'unrecovered health failure' if error else 'healthy' if health else 'no verdict'}",
+             *notes]
+    if health:
+        started = health.get("started_at")
+        if isinstance(started, (int, float)) and 0 < started < 253402300800:
+            boot = dt.datetime.fromtimestamp(started, dt.timezone.utc).isoformat()
+            lines.append(f"Reported process start: {boot}")
+        lines.append("Process start time is diagnostic; it does not establish downtime or its cause.")
+        lines.append(f"Last health response: `{json.dumps(health)}`")
+    if error:
+        lines.append(error)
+    summarize(lines)
     return 1 if error else 0
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--hold-seconds", type=int, default=0)
     parser.add_argument("--check-worker", metavar="URL",
                         help="probe the Cloudflare keepalive Worker instead of /health")
     args = parser.parse_args()
-    if args.hold_seconds < 0:
-        parser.error("--hold-seconds must be non-negative")
     if args.check_worker:
         raise SystemExit(check_worker(args.check_worker,
                                       summary_path=os.environ.get("GITHUB_STEP_SUMMARY")))
-    raise SystemExit(run(os.environ["HEALTH_URL"], hold_seconds=args.hold_seconds,
+    raise SystemExit(run(os.environ["HEALTH_URL"],
                          summary_path=os.environ.get("GITHUB_STEP_SUMMARY")))

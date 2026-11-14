@@ -27,7 +27,7 @@
   "compatibility_date": "2025-01-01",
 
   // Every 5 minutes. Render spins a free service down after 15 minutes idle, so this is
-  // three chances before the timeout — a missed beat costs nothing. The 13:00-06:59 UTC
+  // three chances before the timeout — a missed beat costs nothing. The 11:00-09:59 UTC
   // warm window is enforced IN CODE rather than here, because the reason for it (the
   // 750 instance-hours/month cap) belongs next to the logic, and because the free plan
   // allows only 3 triggers per Worker — spending them on hour ranges would leave none.

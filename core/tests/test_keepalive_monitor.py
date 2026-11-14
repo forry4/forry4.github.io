@@ -1,5 +1,5 @@
-"""Keepalive must recover transient outages without turning old restarts into failures,
-and must spend no instance hours outside the 13:00-06:59 UTC warm window."""
+"""The keepalive watchdog must recover transient outages without turning old restarts
+into failures, and must spend no instance hours outside the Worker's warm window."""
 import datetime as dt
 import functools
 import importlib.util
@@ -24,7 +24,8 @@ def utc(hour, minute=0):
     return dt.datetime(2026, 11, 13, hour, minute, tzinfo=dt.timezone.utc)
 
 
-# Mid-window, with 16 hours before it closes: the window plays no part in these.
+FROM, UNTIL = monitor.WARM_FROM_UTC_HOUR, monitor.WARM_UNTIL_UTC_HOUR
+# Mid-window, hours before it closes: the window plays no part in these.
 IN_WINDOW = utc(15)
 run = functools.partial(monitor.run, now=lambda: IN_WINDOW)
 
@@ -66,37 +67,37 @@ def test_a_503_followed_by_a_held_cold_start_recovers():
     assert any("::warning::Backend recovered" in line for line in logs)
 
 
-def test_persistent_failure_is_bounded_and_fails_even_after_an_earlier_success(tmp_path):
+def test_persistent_failure_is_bounded_and_fails(tmp_path):
     clock, calls, logs = Clock(), [], []
 
     def fetch(url, timeout):
         calls.append(timeout)
-        if len(calls) == 1:
-            return HEALTH
         clock.sleep(timeout)
         raise subprocess.TimeoutExpired("curl", timeout)
 
     summary = tmp_path / "summary.md"
-    code = run("local", hold_seconds=5400, fetch=fetch, clock=clock,
+    code = run("local", fetch=fetch, clock=clock,
                        sleep=clock.sleep, log=logs.append, summary_path=summary)
     assert code == 1
-    assert clock.now == monitor.PING_INTERVAL_SECONDS + monitor.RECOVERY_SECONDS
+    assert clock.now == monitor.RECOVERY_SECONDS
     assert calls[-1] < monitor.ATTEMPT_SECONDS  # Last attempt respects the remaining budget.
     assert any("::error::Backend did not recover" in line for line in logs)
     assert "Result: unrecovered health failure" in summary.read_text()
 
 
-def test_healthy_hold_keeps_the_four_minute_cadence():
+def test_a_healthy_check_pings_once_and_returns():
     clock, times = Clock(), []
+    assert run("local", fetch=lambda *_: times.append(clock()) or HEALTH, clock=clock,
+               sleep=clock.sleep, log=lambda _: None) == 0
+    assert times == [0] and clock.now == 0
 
-    def fetch(*_):
-        times.append(clock())
-        return HEALTH
 
-    assert run("local", hold_seconds=5400, fetch=fetch, clock=clock,
-                       sleep=clock.sleep, log=lambda _: None) == 0
-    assert times == list(range(0, 5400, 240))
-    assert clock.now == 5400
+def test_there_is_no_hold_any_more():
+    # The Worker warms; the workflow only checks. A hold creeping back would spend
+    # GitHub minutes duplicating the Worker from a scheduler that drops half its runs.
+    workflow = (ROOT / ".github/workflows/keepalive.yml").read_text()
+    assert "--hold-seconds" not in workflow and "hold_seconds" not in (ROOT / ".github/scripts/keepalive.py").read_text()
+    assert len(re.findall(r"- cron:", workflow)) == 2
 
 
 @pytest.mark.parametrize("body", ["<html>starting</html>", "[]", '{"status":"error"}'])
@@ -123,60 +124,36 @@ def test_curl_and_process_both_have_bounded_timeouts(monkeypatch):
     assert monitor.probe("local", 17) == HEALTH
 
 
-def test_recovery_finishes_before_both_github_job_timeouts():
+def test_recovery_and_the_worker_probe_finish_before_the_job_timeout():
     workflow = (ROOT / ".github/workflows/keepalive.yml").read_text()
-    ping, watchdog = workflow.split("  warm-window-watchdog:")
-    hold = int(re.search(r"--hold-seconds (\d+)", ping)[1])
+    watchdog = workflow.split("  warm-window-watchdog:")[1]
     # The watchdog also waits out the Worker probe (which warms before it answers).
-    for job, work in [(ping, hold), (watchdog, monitor.WORKER_PROBE_SECONDS + 5)]:
-        limit = int(re.search(r"timeout-minutes: (\d+)", job)[1]) * 60
-        assert work + monitor.RECOVERY_SECONDS + 30 < limit  # checkout/exit margin
+    limit = int(re.search(r"timeout-minutes: (\d+)", watchdog)[1]) * 60
+    assert monitor.WORKER_PROBE_SECONDS + 5 + monitor.RECOVERY_SECONDS + 30 < limit
 
 
 # ── the warm window ──────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("hour,minute", [(7, 0), (9, 30), (12, 59)])
+@pytest.mark.parametrize("hour,minute", [(UNTIL, 0), (UNTIL, 30), (FROM - 1, 59)])
 def test_a_late_firing_outside_the_window_pings_nothing_and_passes(tmp_path, hour, minute):
     clock, logs, calls = Clock(), [], []
     summary = tmp_path / "summary.md"
-    code = monitor.run("local", hold_seconds=5400, fetch=lambda *a: calls.append(a) or HEALTH,
+    code = monitor.run("local", fetch=lambda *a: calls.append(a) or HEALTH,
                        clock=clock, sleep=clock.sleep, log=logs.append,
                        summary_path=summary, now=lambda: utc(hour, minute))
     assert code == 0 and calls == [] and clock.now == 0
     text = summary.read_text()
-    assert f"started {hour:02d}:{minute:02d} UTC" in text and "outside the 13:00-06:59 UTC" in text
+    assert f"started {hour:02d}:{minute:02d} UTC" in text
+    assert f"outside the {FROM:02d}:00-{UNTIL - 1:02d}:59 UTC" in text
     assert any(line.startswith("::notice::Skipped") for line in logs)
 
 
-def test_the_first_minute_of_the_window_warms():
-    clock, times = Clock(), []
-    code = monitor.run("local", hold_seconds=5400, fetch=lambda *_: times.append(clock()) or HEALTH,
-                       clock=clock, sleep=clock.sleep, log=lambda _: None, now=lambda: utc(13, 0))
-    assert code == 0 and times == list(range(0, 5400, 240))
-
-
-def test_the_last_minute_of_the_window_pings_once_and_stops_at_seven(tmp_path):
-    clock, times = Clock(), []
-    summary = tmp_path / "summary.md"
-    code = monitor.run("local", hold_seconds=5400, fetch=lambda *_: times.append(clock()) or HEALTH,
-                       clock=clock, sleep=clock.sleep, log=lambda _: None,
-                       summary_path=summary, now=lambda: utc(6, 59))
-    assert code == 0 and times == [0] and clock.now == 60
-    assert "Hold cut from 5400s to 60s" in summary.read_text()
-
-
-def test_a_hold_that_starts_late_in_the_window_ends_with_it():
-    clock, times = Clock(), []
-    monitor.run("local", hold_seconds=5400, fetch=lambda *_: times.append(clock()) or HEALTH,
-                clock=clock, sleep=clock.sleep, log=lambda _: None, now=lambda: utc(6, 0))
-    assert times == list(range(0, 3600, 240)) and clock.now == 3600
-
-
-def test_a_hold_across_midnight_is_not_cut():
-    clock = Clock()
-    monitor.run("local", hold_seconds=5400, fetch=lambda *_: HEALTH, clock=clock,
-                sleep=clock.sleep, log=lambda _: None, now=lambda: utc(23, 30))
-    assert clock.now == 5400
+@pytest.mark.parametrize("hour,minute", [(FROM, 0), (UNTIL - 1, 59), (23, 59), (0, 0)])
+def test_every_minute_inside_the_window_checks(hour, minute):
+    calls = []
+    code = monitor.run("local", fetch=lambda *a: calls.append(a) or HEALTH, clock=Clock(),
+                       sleep=lambda _: None, log=lambda _: None, now=lambda: utc(hour, minute))
+    assert code == 0 and len(calls) == 1
 
 
 def test_the_window_closing_mid_recovery_stops_without_a_verdict():
@@ -186,10 +163,15 @@ def test_the_window_closing_mid_recovery_stops_without_a_verdict():
         clock.sleep(timeout)
         raise subprocess.TimeoutExpired("curl", timeout)
 
-    code = monitor.run("local", hold_seconds=5400, fetch=fetch, clock=clock, sleep=clock.sleep,
-                       log=logs.append, now=lambda: utc(6, 58))
-    assert code == 0 and clock.now == 120  # never past 07:00
+    code = monitor.run("local", fetch=fetch, clock=clock, sleep=clock.sleep,
+                       log=logs.append, now=lambda: utc(UNTIL - 1, 58))
+    assert code == 0 and clock.now == 120  # never past the window's close
     assert not any("::error::" in line for line in logs)
+
+
+def test_the_window_is_the_one_just_under_the_cap():
+    # 11:00-09:59 UTC: asleep only for 10:00-10:59 (3-4am PDT / 2-3am PST).
+    assert (FROM, UNTIL) == (11, 10)
 
 
 def test_the_window_matches_the_workers():

@@ -2,20 +2,21 @@
 
 Render's free tier grants **750 instance-hours per calendar month per workspace**,
 shared across every free service, and exhausting them SUSPENDS the service until
-the next month. A month is ~730 hours, so "just keep it warm all the time" spends
-essentially the entire allowance — and takes the backend fully offline for the rest
-of the month the moment a second free service exists, or the moment a long month
-and a restart or two push it over.
+the next month. With ONE free service a 31-day month can only ever run 744h, so the
+window is set JUST UNDER the cap (2026-11-14, the owner's call): 23 hours a day,
+asleep for the quietest hour. What this guards is the modelled spend — the warm
+hours, plus Render's 15-minute idle tail after each window close — staying under a
+ceiling that leaves room for what the model cannot see (deploy overlaps, a wake in
+the quiet hour). Widening to 24/7 fails here on purpose: it leaves no margin at all.
 
 That makes the warm window the one number in the keepalive that fails EXPENSIVELY
-and SILENTLY in the widening direction: a wider window looks strictly better right
-up until the service is suspended, and nothing in the workflow, the Worker or the
-app reports it. The narrowing direction is self-reporting — the morning is cold and
-a player says so — which is how this whole area came to be looked at.
+and SILENTLY in the widening direction: nothing in the Worker or the app reports a
+suspended service until it is suspended. If a SECOND free service is ever added to
+the Render workspace, this budget no longer holds and the window must narrow.
 
-Two pingers, two schedulers, one target. They must also agree on WHICH backend they
-are warming: a URL changed in one and not the other leaves a workflow that is green
-while warming nothing, which is the same silence the dead cron band had.
+The Worker is the warmer and the GitHub workflow its watchdog; they must agree on
+WHICH backend: a URL changed in one and not the other leaves a watchdog that is
+green while checking a backend nobody warms.
 
 Read as TEXT, never imported: `core/` may not depend on a feature and that holds for
 its tests, and neither of these files is Python at all.
@@ -28,12 +29,13 @@ WORKER = ROOT / "keepalive-worker" / "src" / "index.js"
 WRANGLER = ROOT / "keepalive-worker" / "wrangler.jsonc"
 WORKFLOW = ROOT / ".github" / "workflows" / "keepalive.yml"
 
-# 750 is the hard cap. Hold the window to a level that leaves room for the month's
-# restarts, deploys and the odd manual wake, rather than betting on the arithmetic
-# being exactly right.
+# 750 is the hard cap; the modelled spend must leave ~25h of it for what the model
+# does not count (deploy overlaps, a visitor waking the box in the quiet hour).
 RENDER_FREE_HOURS_PER_MONTH = 750
-MAX_BUDGETED_HOURS = 640
+MAX_BUDGETED_HOURS = 725
 LONGEST_MONTH_DAYS = 31
+# Render keeps an idle free instance up ~15 minutes after its last request.
+IDLE_TAIL_HOURS = 0.25
 
 
 def _const(name: str) -> int:
@@ -51,9 +53,11 @@ def _warm_hours_per_day() -> int:
 
 def test_the_warm_window_stays_inside_renders_free_instance_hours():
     per_day = _warm_hours_per_day()
-    per_month = per_day * LONGEST_MONTH_DAYS
+    # One window close a day, each followed by the idle tail (none if never closed).
+    tail = IDLE_TAIL_HOURS if per_day < 24 else 0
+    per_month = (per_day + tail) * LONGEST_MONTH_DAYS
     assert per_month <= MAX_BUDGETED_HOURS, (
-        f"the Worker warms {per_day}h/day = {per_month}h in a {LONGEST_MONTH_DAYS}-day "
+        f"the Worker warms {per_day}h/day = ~{per_month:.0f}h in a {LONGEST_MONTH_DAYS}-day "
         f"month, over the {MAX_BUDGETED_HOURS}h budget and closing on Render's hard "
         f"{RENDER_FREE_HOURS_PER_MONTH}h cap. Past the cap the backend is SUSPENDED for "
         f"the rest of the month — a cold morning is the cheaper failure. Narrow the "

@@ -1332,41 +1332,36 @@ git push                      # deploy-pages.yml builds + publishes (~2-3 min)
   (`rust-cores/dissonance-core/**` does trigger `rust-dissonance.yml` — a test job that deploys
   nothing). CoC is the
   exception where a *model* swap needs no rebuild (the `.bin` is fetched); Spender and Duel embed nets.
-- **Render keep-alive** (free tier spins down ~15min idle, ~30-50s cold start): **TWO pingers on TWO
-  providers, and the split is the design.** `keepalive-worker/` is a Cloudflare Worker cron firing
-  every 5 min — reliable, so the box should never reach the 15-minute idle timeout at all;
-  `keepalive.yml` (GitHub Actions) runs long-lived (~90min) jobs HOLDING the connection open and
-  retrying through the spin-up 503s (`curl --retry-all-errors` + long `--max-time`, like a browser),
-  which is what completes a wake (~7s) once the box IS cold. **Key lesson (do not regress):** a SHORT
-  30s pinger is worse than nothing — it disconnects mid-spin-up and ABORTS the wake, which was the
-  actual cause of the 7-9am outages (not "GitHub fired late").
-  **The SECOND lesson, and the reason there are two providers: the ping was never the weak part — the
-  SCHEDULER was.** GitHub drops over half of all scheduled firings and whole hour-bands go dead for
-  weeks; UTC 13 and 14, which held every pre-7am warm-up, fired ZERO times from 2026-08-27 to 09-06,
-  a re-registration push did not revive them, and measured warm coverage was **39%** with the box cold
-  every morning 06:00-~09:30 local. Redundancy inside one scheduler cannot fix that, which is what the
-  three "INDEPENDENT" attempts (all inside 13:00-14:59) proved by failing together.
-- ⚠ **The warm window is an INSTANCE-HOUR BUDGET, not a preference — never make it 24/7.** Render's
-  free tier gives **750 instance-hours/month per workspace, shared across every free service**, and
-  exhausting them SUSPENDS the service until the next month. A month is ~730h, so round-the-clock
-  warming spends the whole allowance and takes the site down outright if a second free service exists.
-  Both pingers therefore warm ~13:00-06:59 UTC (~18h/day ≈ 548h/month); overlapping them costs nothing
-  extra (hours are counted on the service being up, not on who woke it), but widening either does.
-  `core/tests/test_keepalive_budget.py` guards it, and also pins that both pingers point at the SAME
-  backend URL — a URL changed in one and not the other is a green workflow warming nothing.
-  **GitHub's LATE deliveries spent the budget too** — ~2.5h/day of warming outside the window over the
-  six days to 2026-11-13 — so `.github/scripts/keepalive.py` now exits green at once (saying why in the
-  job summary) when it STARTS outside 13:00-06:59 UTC, and cuts a hold off at 07:00 UTC, including one
-  mid-recovery. Its window constants must equal the Worker's (`test_keepalive_monitor.py` reads both).
+- **Render keep-alive** (free tier spins down ~15min idle, ~30-50s cold start): **ONE warmer, ONE
+  watchdog, on two providers (2026-11-14).** `keepalive-worker/` is a Cloudflare Worker cron firing every
+  5 min, so the box never reaches the idle timeout inside the window; each tick's wake is three attempts
+  of up to 55s, which outlasts a cold start. `keepalive.yml` (GitHub Actions) is only a WATCHDOG now —
+  twice a day (05:47 and 17:47 UTC) it checks `/health` (recovering a transient failure first) and that
+  the Worker still answers, and it is on `pipeline-alerts.yml`, so a failure pushes to the owner. It
+  used to warm too, with ~20 daily 90-minute holds; once the Worker existed those only duplicated it
+  from a scheduler that drops half its firings, and were removed. **Key lesson (do not regress):** a
+  SHORT 30s pinger is worse than nothing — it disconnects mid-spin-up and ABORTS the wake, which was the
+  actual cause of the 7-9am outages. **The second lesson, and why the warmer is not on GitHub: the
+  ping was never the weak part — the SCHEDULER was.** GitHub drops over half of all scheduled firings
+  and whole hour-bands go dead for weeks; UTC 13 and 14 fired ZERO times from 2026-08-27 to 09-06 and
+  measured warm coverage was **39%**. **The trade accepted:** a Worker that stops is caught only at
+  the next watchdog run, up to ~12h later.
+- ⚠ **The warm window is an INSTANCE-HOUR BUDGET, set JUST UNDER the cap (owner's call, 2026-11-14).**
+  Render's free tier gives **750 instance-hours/month per workspace, shared across every free
+  service**, and exhausting them SUSPENDS the service until the next month. With ONE free service a
+  31-day month can run at most 744h, so the window is **11:00-09:59 UTC — 23h/day, asleep only
+  10:00-10:59 UTC (3-4am PDT / 2-3am PST)**: ~713h warm plus the 15-minute idle tail ≈ 721h, leaving
+  ~29h for deploy overlaps and stray wakes. `core/tests/test_keepalive_budget.py` models that (cap 725h,
+  so 24/7 fails) and pins that the Worker and the watchdog check the SAME backend URL. **A second free
+  service in the Render workspace breaks this budget — narrow the window first.** The watchdog exits
+  green without pinging when GitHub delivers it outside the window; its constants must equal the
+  Worker's (`test_keepalive_monitor.py` reads both). Changing the window means REDEPLOYING the Worker.
 - **THE WORKER IS DEPLOYED (2026-11-13) — it once was not.** Until then
-  `forrestgames-keepalive.forry4.workers.dev` answered Cloudflare's 404 (error 1042), so the
-  "reliable" half of the design above did not exist and GitHub alone covered 58% of the window (0% for
-  UTC 14-16). The owner deployed it with `npx wrangler deploy --config keepalive-worker/wrangler.jsonc`;
-  it runs on Cloudflare, so a restart of any machine changes nothing, and it needs redeploying ONLY
-  when `keepalive-worker/src/` changes (that command, or `deploy-keepalive-worker.yml`, which needs a
-  `CLOUDFLARE_API_TOKEN` secret and skips green without one). The watchdog job in `keepalive.yml`
-  probes the Worker and fails if it ever stops answering with its `{"warming": …}` JSON — **check the
-  live URL before telling anyone to deploy it.**
+  `forrestgames-keepalive.forry4.workers.dev` answered Cloudflare's 404 (error 1042), and nothing said
+  so. Deploy with `npx wrangler deploy --config keepalive-worker/wrangler.jsonc` (the owner's Cloudflare
+  login) or `deploy-keepalive-worker.yml` (needs a `CLOUDFLARE_API_TOKEN` secret, skips green without
+  one). It runs on Cloudflare, so a restart of any machine changes nothing; it needs redeploying ONLY
+  when `keepalive-worker/` changes. **Check the live URL before telling anyone to deploy it.**
 - **A cold start is also OUR boot, and `/health` measures it** — its `boot` block
   (`core/build_info.py`) splits process start → top of `app.py` (`interpreter_s`) → bottom of
   `app.py` (`import_s`) → first ASGI call (`startup_s`). Read it on prod, never a laptop: the first

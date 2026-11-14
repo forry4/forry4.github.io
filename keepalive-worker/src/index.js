@@ -1,19 +1,14 @@
-// Keeps the Render free-tier backend warm — the SECOND, INDEPENDENT scheduler.
+// Keeps the Render free-tier backend warm — the ONE warmer since 2026-11-14.
 //
-// WHY THIS EXISTS. `.github/workflows/keepalive.yml` was the sole mechanism, and the
+// WHY CLOUDFLARE. `.github/workflows/keepalive.yml` was the original mechanism, and the
 // thing that broke was not the ping, it was the SCHEDULER: GitHub drops over half of
 // all scheduled firings, and whole hour-bands go dead for weeks at a time (UTC 13 and
 // 14 — which held every pre-7am warm-up — fired zero times between 2026-08-27 and
 // 09-06, and a push that re-registered the cron did not revive them). Measured warm
 // coverage over that window was 39%, with the box cold every morning from 06:00 local
-// until 09:00-10:00. No amount of re-arranging crons inside one unreliable scheduler
-// fixes that, so this adds a different one. The two are complementary, not redundant:
-//
-//   Cloudflare (here)  — fires reliably every 5 min, so the backend never reaches the
-//                        15-minute idle timeout and never spins down in the first place.
-//   GitHub Actions     — holds a retrying curl open for ~90 min, which is what actually
-//                        completes a wake once the box IS cold. Its firings are
-//                        unreliable, but recovery only has to work occasionally.
+// until 09:00-10:00. This fires reliably every 5 minutes, so the backend never reaches
+// the 15-minute idle timeout inside the window. The GitHub workflow is now only a
+// twice-daily WATCHDOG that checks /health and that this Worker still answers.
 //
 // Free-plan facts this is built around (Workers Free): cron triggers are supported, the
 // minimum interval is 1 minute, you get 3 triggers per Worker, and the CPU limit is 10ms
@@ -21,21 +16,27 @@
 // count — so holding a connection open for a cold start is fine here. One trigger is
 // used; 288 invocations/day is negligible against the 100k/day request allowance.
 //
-// ⚠ THE WINDOW IS A BUDGET, NOT A PREFERENCE — DO NOT MAKE THIS 24/7. Render's free
-// tier grants 750 INSTANCE-HOURS PER MONTH per workspace, shared across every free
-// service, and blowing through them SUSPENDS the service until the next month. A month
-// is ~730 hours, so keeping the backend up around the clock spends essentially the whole
-// allowance and takes the site down outright if there is ever a second free service in
-// the workspace. Warming 13:00-06:59 UTC is ~18h/day ≈ 547h/month, which covers
-// 06:00-23:59 local in summer (PDT) and 05:00-22:59 in winter (PST) and leaves real
-// margin. Widening this trades a cold morning for a dead month.
+// THE WINDOW IS A BUDGET, SET JUST UNDER THE CAP. Render's free tier grants 750
+// INSTANCE-HOURS PER MONTH per workspace, shared across every free service, and
+// running out SUSPENDS the service until the next month. With one free service a
+// 31-day month can run at most 744h, so the window is 23h/day (11:00-09:59 UTC) and
+// the box is let sleep for the quietest hour — 10:00-10:59 UTC, 3-4am PDT / 2-3am
+// PST. That is ~713h warm plus the 15-minute idle tail after the window closes,
+// ~721h, leaving ~29h for whatever else counts (deploy overlaps, a stray wake).
+// core/tests/test_keepalive_budget.py holds it there. A SECOND free service in the
+// workspace would blow this — narrow the window first if one is ever added.
+//
+// Since 2026-11-14 this is the ONLY warmer: the GitHub workflow's 90-minute holds
+// only duplicated it and were removed; what remains there is a twice-daily watchdog
+// that checks this Worker still answers. A cold box after the quiet hour is woken
+// by the next tick: three attempts of up to 55s outlast a ~30-50s cold start.
 
 const HEALTH_URL = "https://splendid-nelz.onrender.com/health";
 
-// Warm from 13:00 UTC through 06:59 UTC. See the instance-hour budget above before
+// Warm from 11:00 UTC through 09:59 UTC. See the instance-hour budget above before
 // touching these. Local = UTC-7 (PDT) / UTC-8 (PST).
-const WARM_FROM_UTC_HOUR = 13;
-const WARM_UNTIL_UTC_HOUR = 7;   // exclusive
+const WARM_FROM_UTC_HOUR = 11;
+const WARM_UNTIL_UTC_HOUR = 10;   // exclusive
 
 const inWarmWindow = (d) => {
   const h = d.getUTCHours();

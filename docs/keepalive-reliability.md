@@ -39,37 +39,43 @@ deliver a scheduled run.
 
 ## The warm window is enforced in the script (2026-11-13)
 
-Over the six days to 2026-11-13, GitHub's holds covered 58% of the 13:00-06:59
-UTC window (0% for UTC 14-16) and, because some firings arrive hours late, spent
-about 2.5 hours a day warming OUTSIDE it. The window is Render's instance-hour
-budget (750 h/month, shared; see `core/tests/test_keepalive_budget.py`), so:
+Over the six days to 2026-11-13, GitHub's holds covered 58% of the then
+13:00-06:59 UTC window (0% for UTC 14-16) and, because some firings arrive hours
+late, spent about 2.5 hours a day warming OUTSIDE it. The window is Render's
+instance-hour budget, so a run that starts outside it exits green at once and
+pings nothing, and a recovery still in progress when it closes stops without a
+verdict. `keepalive.py`'s window constants must equal the Worker's; a test reads
+both.
 
-- A run that starts outside 13:00-06:59 UTC exits successfully at once, pings
-  nothing, and says so in the job summary (`Skipped: started HH:MM UTC ...`).
-- A hold that started inside the window stops at 07:00 UTC; its summary says the
-  hold was cut. A recovery still in progress at 07:00 stops without a verdict.
-- `keepalive.py`'s window constants must equal the Worker's; a test reads both.
-
-## The Cloudflare Worker must exist, and today it does not
+## The Cloudflare Worker must exist
 
 On 2026-11-13 `https://forrestgames-keepalive.forry4.workers.dev/` answered
-HTTP 404 (Cloudflare error 1042): the Worker had never been deployed, so the
-second scheduler the design depends on was absent and nothing reported it.
-
-The watchdog job now runs `keepalive.py --check-worker "$WORKER_URL"` after its
-health check (even if that failed). It passes only when the Worker answers as its
-`fetch` handler does: HTTP 200 with JSON carrying a boolean `warming` field
-(inside the window the handler warms the backend first, so the probe allows
-190s). **The step is red, correctly, until the owner deploys the Worker.** Either:
+HTTP 404 (Cloudflare error 1042): the Worker had never been deployed, and nothing
+reported it. The owner deployed it the same day. The watchdog now runs
+`keepalive.py --check-worker "$WORKER_URL"` after its health check (even if that
+failed), and passes only when the Worker answers as its `fetch` handler does:
+HTTP 200 with JSON carrying a boolean `warming` field (inside the window the
+handler warms the backend first, so the probe allows 190s). To (re)deploy:
 
     npx wrangler deploy --config keepalive-worker/wrangler.jsonc
 
-from a machine signed in to the owner's Cloudflare account, or run the
-`Deploy keepalive Worker` workflow (`deploy-keepalive-worker.yml`, manual only)
-after adding a `CLOUDFLARE_API_TOKEN` secret with Workers edit permission (plus
-`CLOUDFLARE_ACCOUNT_ID` if the token sees more than one account). Without the
-secret that workflow skips green and says so. It verifies the deploy with the
-same probe.
+from a machine signed in to the owner's Cloudflare account, or run
+`deploy-keepalive-worker.yml` (manual) with a `CLOUDFLARE_API_TOKEN` secret.
+
+## One warmer, one watchdog; the window just under the cap (2026-11-14)
+
+With the Worker live, GitHub's ~20 daily 90-minute holds only duplicated it, from
+a scheduler that drops over half its firings. They were removed: `keepalive.yml`
+is a watchdog that runs twice a day (05:47 and 17:47 UTC), checks `/health` and
+the Worker, and is on `pipeline-alerts.yml` so a failure is pushed to the owner.
+The trade accepted: a Worker that stops is noticed at the next run, up to ~12h.
+
+The window was widened, at the owner's request, to just under Render's 750
+instance-hour cap: **11:00-09:59 UTC**, asleep only 10:00-10:59 UTC (3-4am PDT,
+2-3am PST). With one free service a 31-day month is at most 744h; the model is
+23h x 31 = 713h plus a 15-minute idle tail a day, about 721h, under the test's
+725h ceiling (`core/tests/test_keepalive_budget.py`). A second free service in
+the workspace would break this.
 
 ## A cold start is also our own boot
 
@@ -98,11 +104,8 @@ import. A laptop reads 2-5s for the same import; size against prod.
 ## Validation
 
 `core/tests/test_keepalive_monitor.py` replays the exact health payload rejected
-by #850. It also covers a 503 followed by a one-minute wake, persistent failure
-after earlier success, invalid health bodies, the full 90-minute cadence using
-a fake clock, and recovery fitting inside both job timeouts.
-
-The live one-shot check returned healthy in 0.7 seconds on 2026-09-15 UTC.
-The window and Worker checks are covered in the same file, including the
-boundary minutes 06:59, 07:00, 12:59 and 13:00 and Cloudflare's 404 body.
-The existing keepalive budget tests still protect the warming window and target.
+by #850. It also covers a 503 followed by a one-minute wake, persistent failure,
+invalid health bodies, a single check per run (and no hold creeping back), the
+window's boundary minutes, a recovery cut by the window closing, and Cloudflare's
+404 body for a missing Worker. `test_keepalive_budget.py` holds the window under
+the cap and both files at the same backend.

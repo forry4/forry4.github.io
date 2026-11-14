@@ -2,7 +2,8 @@
 
 That workflow names the runs it watches by their `name:`, so a new data job — or a
 renamed one — silently drops off it: no alert, and nothing failing to say so. The
-roster here is DERIVED: every workflow that publishes to the data store or deploys.
+roster here is DERIVED: every workflow that publishes to the data store or deploys,
+plus the keepalive watchdog (a vanished Worker is otherwise silent).
 """
 from pathlib import Path
 
@@ -23,7 +24,7 @@ def _must_watch():
         text = f.read_text(encoding="utf-8")
         if f.name == "pipeline-alerts.yml":
             continue
-        if "datastore.py" in text or f.name.startswith("deploy-") or f.name == "python-app.yml":
+        if "datastore.py" in text or f.name.startswith("deploy-")                 or f.name in ("python-app.yml", "keepalive.yml"):
             out[f.name] = yaml.safe_load(text)["name"]
     return out
 

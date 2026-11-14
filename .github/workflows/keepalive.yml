@@ -1,80 +1,45 @@
 name: Keep backend warm
 
-# GitHub schedule delivery is best-effort. Preserve the existing ramp and 90-minute
-# holds; the independent Cloudflare Worker is configured in keepalive-worker/.
-# Do not widen the warming window: both schedulers spend Render's instance hours.
+# The WATCHDOG for the keepalive. The warming itself is the Cloudflare Worker in
+# keepalive-worker/ (every 5 minutes, 11:00-09:59 UTC). This workflow used to warm
+# too — ~20 schedules a day, each holding a retrying curl open for 90 minutes —
+# but once the Worker was deployed those holds only duplicated it from a scheduler
+# that drops over half its firings, so they were removed (2026-11-14).
 #
-# A successful /health response is a successful keepalive. Missed cron starts and
-# process boot timestamps do not prove an outage: Render can restart free services
-# at any time. The old watchdog failed twice daily over those historical signals
-# even while its own request and the companion ping job returned healthy responses.
-# Keep boot times in the summary, recover transient failures, and fail only when
-# /health stays unhealthy for the full four-minute recovery window.
-# See docs/keepalive-reliability.md for the incident and validation.
-#
-# A run GitHub delivers OUTSIDE 13:00-06:59 UTC (late deliveries are common)
-# exits green at once without pinging, and a hold stops at 07:00 UTC: the
-# window is Render's instance-hour budget. keepalive.py enforces both.
+# What is left is what nothing else checks, twice a day, ~12h apart: /health
+# answers (a transient failure is recovered first, and only a failure that lasts
+# the whole four-minute recovery window is red), and the Worker still answers. A
+# Worker that disappears fails SILENTLY — the site just goes back to cold starts —
+# so this job is how anyone finds out. A run GitHub delivers outside the warm
+# window exits green without pinging (keepalive.py): the window is Render's
+# instance-hour budget. See docs/keepalive-reliability.md.
 
 permissions:
   contents: read
 
 env:
   HEALTH_URL: https://splendid-nelz.onrender.com/health
-  # The second, independent pinger (keepalive-worker/). The watchdog checks it exists.
+  # The warmer itself (keepalive-worker/). The watchdog checks it still answers.
   WORKER_URL: https://forrestgames-keepalive.forry4.workers.dev/
 
 on:
   schedule:
-    # ── the pre-7am ramp: six starts, five different UTC hours ──────────────────
-    - cron: "41 11 * * *"          # 04:41 PDT — first warm-up, holds to 13:11 UTC
-    - cron: "19 12 * * *"          # 05:19 PDT
-    - cron: "53 12 * * *"          # 05:53 PDT — holds past 14:00 UTC, so it alone makes 7am PDT
-    - cron: "29 13 * * *"          # 06:29 PDT — likewise
-    - cron: "11 14 * * *"          # 07:11 PDT / 06:11 PST
-    - cron: "9 15 * * *"           # 08:09 PDT / 07:09 PST — the PST 7am warm-up
-    # ── stay warm through the play window (7am-10pm local), twice an hour ───────
-    # Two of these hours are carved out into entries of their own so the watchdog job
-    # below can be gated on them: `github.event.schedule` reports the cron EXPRESSION
-    # that fired, never the time, so nothing inside a `14-23` range can tell 17:47
-    # from 18:47. Gating on the range instead would start the watchdog on all twenty
-    # firings a day; splitting the hour out costs one line and starts it on one.
-    - cron: "13 15-20,22-23,0-4 * * *"
-    - cron: "13 21 * * *"          # ...and wakes the watchdog
-    - cron: "47 14-16,18-23,0-4 * * *"
-    - cron: "47 17 * * *"          # ...and wakes the watchdog
+    - cron: "47 5 * * *"           # 22:47 PDT / 21:47 PST
+    - cron: "47 17 * * *"          # 10:47 PDT / 09:47 PST
   workflow_dispatch: {}
 
 jobs:
-  ping:
-    # Keep concurrency per job so the immediate watchdog never queues behind
-    # a 90-minute hold. Pending holds still bridge delayed scheduler starts.
-    concurrency:
-      group: keepalive
-      cancel-in-progress: false
-    runs-on: ubuntu-24.04
-    timeout-minutes: 95
-    steps:
-      - uses: actions/checkout@v5
-      - name: Warm + hold the backend for ~90 min
-        run: python3 .github/scripts/keepalive.py --hold-seconds 5400
-
   warm-window-watchdog:
-    if: >-
-      github.event_name == 'workflow_dispatch'
-      || github.event.schedule == '47 17 * * *'
-      || github.event.schedule == '13 21 * * *'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
       - name: Verify backend health and recover if needed
         run: python3 .github/scripts/keepalive.py
-      # RED UNTIL THE OWNER DEPLOYS THE WORKER, deliberately: on 2026-11-13 its URL
-      # answered Cloudflare's 404 (error 1042) - it had never been deployed, so the
-      # "second scheduler" this design rests on did not exist and nothing said so.
-      # Deploy: `npx wrangler deploy --config keepalive-worker/wrangler.jsonc`
-      # (the owner's Cloudflare login), or the deploy-keepalive-worker.yml workflow.
+      # Red whenever the Worker does not answer: until 2026-11-13 it had never been
+      # deployed, and nothing said so. Redeploy: `npx wrangler deploy --config
+      # keepalive-worker/wrangler.jsonc` (the owner's Cloudflare login), or the
+      # deploy-keepalive-worker.yml workflow.
       - name: Verify the Cloudflare keepalive Worker is deployed
         if: ${{ !cancelled() }}
         run: python3 .github/scripts/keepalive.py --check-worker "$WORKER_URL"
