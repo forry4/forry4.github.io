@@ -2,7 +2,7 @@
 import { openSocket } from "../../shared/backend.js";
 import { fetchGameHistory, SESSION_EXPIRED, latestSession } from "../../shared/lobbyHistory.js";
 import { downloadPack, packReady, refreshOfflinePacks } from "../../shared/offlinePacks.js";
-import { isBackendAwake, whenBackendAwake, markBackendAwake, setServerWanted } from "../../shared/backend.js";
+import { isBackendAwake, whenBackendAwake, markBackendAwake } from "../../shared/backend.js";
 import { clearNotesOffline } from "../../notes/offlineStore.js";
 import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from "react";
 
@@ -82,10 +82,6 @@ const prefetchScreen = (mode) => {
 	if (importer) importer().catch(() => {});   // a failure is lazyChunk's to handle at mount
 };
 
-// Screens that live on the server — where the "waking" notice shows (shared/backend.js).
-const SERVER_SCREENS = new Set(["login", "spender", "coc", "werewolf", "duel", "dontminion",
-	"dissonance", "ragtag", "orbit", "blackcastle", "secretnames", "pinch", "pipmarket",
-	"books", "notes", "profile", "boxpuzzles"]);
 const SIGNED_OUT_NOTICE = "You were signed out on this device. Sign in again to pick up where you left off.";
 
 // Shown while a game's chunk loads. Deliberately an empty full-height panel in the
@@ -1639,13 +1635,6 @@ export default function SpenderApp() {
 			}
 		})();
 	};
-
-	// The waking notice (shared/backend.js) shows only where the server matters:
-	// sign-in and the screens that live on it. Home, the offline hub, puzzles and the
-	// static data pages do not need it, and an offline game is local by definition.
-	useEffect(() => {
-		setServerWanted(SERVER_SCREENS.has(screen) && !puzzling && !offline);
-	}, [screen, puzzling, offline]);
 
 	// ── Gem flash when bank count drops ───────────────────────────────────────
 	const prevBankRef = useRef(null);

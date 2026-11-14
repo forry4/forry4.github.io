@@ -10,9 +10,8 @@ import { startUpdateNudge } from '../shared/update-nudge.js'
 import { startPwa } from '../shared/pwa.js'
 // Is the server up? The first screen no longer waits to find out (see the boot effect
 // in Spender.jsx), so the question is asked here, at load, by ONE /health probe that
-// holds its request through a cold start; the notice says so on the screens that
-// need the server. Plain DOM, outside React, for the same reason as the nudge.
-import { startBackendProbe, startWakingNotice } from '../shared/backend.js'
+// holds its request through a cold start. Only what needs the server waits on it.
+import { startBackendProbe } from '../shared/backend.js'
 
 startBackendProbe()
 
@@ -36,4 +35,3 @@ createRoot(document.getElementById('root')).render(
 
 startUpdateNudge()
 startPwa()
-startWakingNotice()

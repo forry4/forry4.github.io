@@ -212,7 +212,7 @@ design: no server row, no history, no sync. Games vs the client-WASM tiers only 
   whose `ai_search` is built locally, so the EXISTING worker-pool dispatch plays the AI unchanged —
   the one `ai_move` send has an offline fork into the driver. The boot never waits for the backend on
   any route now (root `CLAUDE.md`, "THE FIRST SCREEN NEVER WAITS FOR THE SERVER"); `/offline` also
-  skips the background session check, and the waking notice carries the "Use offline" door. `offlineRef` guards the visibility reconnect exactly like `puzzlingRef`.
+  skips the background session check. `offlineRef` guards the visibility reconnect exactly like `puzzlingRef`.
 - **Service worker**: source moved to `webapp/sw.js`, emitted by `vite.config.js` with a
   `__BUILD_ID__`-stamped cache name (each deploy's `activate` drops the old cache). The hub's
   "Download for offline" sends `PRECACHE_OFFLINE` → the SW `cache:"reload"`-fetches the wasm trio +

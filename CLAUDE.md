@@ -1085,7 +1085,7 @@ covers the logic; each game's wiring is one line).
   a `lazy()` + `<Suspense>` branch, and a `SCREENS` entry in `webapp/test/screens.mjs`.
 - **THE OFFLINE HUB (`/offline`) IS THE ONE DOOR WITH NO CONNECTION (2026-09-26)** — the one screen
   built to need no server at all (it never even checks the stored session), reached from the menu's
-  Offline tile and from the waking notice's "Use offline" while the server is asleep. (It used to be
+  Offline tile. (It used to be
   the only route the boot gate let through; there is no boot gate now — see the next bullet.) Two sections: **Play vs AI** (the local games) and **Read** —
   Spender Puzzles, BGG Filter, Books, Notes, your profile — each READ-ONLY from a copy this device
   keeps, and each returning to the hub on Back. Where the copies come from:
@@ -1124,10 +1124,9 @@ covers the logic; each game's wiring is one line).
     `LobbyLoading label="Connecting…"` reads "Waking the server…" until it answers; the 15s connect bail
     (Spender/CoC/Dontminion) starts only once the server is up; sign-in resends a refused/503'd POST once.
     `shared/tests/test_backend_wake.py` derives both rosters from the tree.
-  - **A plain-DOM notice (`#fg-waking`, like the update nudge) says the server is waking**, with the
-    "Use offline" door the loading screen used to carry — only on the screens the shell lists in
-    `SERVER_SCREENS` (sign-in, the game lobbies, Books/Notes/Profile/Box Puzzles), and only after 1.5s,
-    so a warm visit never sees it flash.
+  - **No site-wide "waking" banner** (one shipped 2026-11-12 and was removed 2026-11-13 at the
+    owner's request): a page painted from its cache has nothing to announce. The waiting is said only
+    where something actually waits — the empty lobby's `LobbyLoading` and a room's connecting screen.
   - **A deep link to a ROOM goes straight to that game's own connecting screen** — no shell-level wait.
     Its "Connecting…" reads "Waking the server…", its socket completes when the server does, and the
     screen's lazy chunk was already fetched at boot (`prefetchScreen`, in parallel with the fonts and the
@@ -1138,7 +1137,7 @@ covers the logic; each game's wiring is one line).
     unreachable never → 175ms; a held 20s cold start 22.1s → 184ms; a deep link to the Orbit lobby
     324ms → 276ms warm and 22.2s → 314ms asleep (its list then fills when the server answers).
   - Gates: `smoke` (first screens with no backend), `screens.mjs`'s `bootWithoutServer` (API blocked →
-    Home, a lobby with the notice, Use offline → hub; unblocked → notice gone, list re-fetched; the
+    Home, a lobby with no banner; unblocked → list re-fetched; the
     stale-session pair), `webapp/test/unit/backend.test.mjs` (probe never aborts early, socket retry).
 - **The WS throttle is process-global and keyed on client IP** (`core.rooms`, 60 connects/min,
   300 msgs/min). Test fake sockets all report `"unknown"`, so they share ONE budget: any test module

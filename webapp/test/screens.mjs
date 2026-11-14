@@ -11303,9 +11303,9 @@ try {
 	// server…" in front of a menu that needs no server. It lands from local state now
 	// (Spender.jsx's boot effect, shared/backend.js), and this drives the whole
 	// arrangement against a real backend with the API origin switched off and back on:
-	// Home paints with no server, a lobby paints and SAYS the server is waking (with
-	// the offline door), and when the server answers the notice goes and the lobby
-	// fills in without a refresh. Plus the stale-session rule: Home first, then a
+	// Home paints with no server, a lobby paints its own frame with no site-wide
+	// banner over it, and when the server answers the lobby fills in without a
+	// refresh. Plus the stale-session rule: Home first, then a
 	// definite ok:false sends the player to sign-in and says why.
 	async function bootWithoutServer(log) {
 		const check = (name, cond, detail = "") => {
@@ -11330,9 +11330,7 @@ try {
 		const homeMs = Date.now() - t0;
 		check("with the API unreachable, a stored identity lands on Home", home, `after ${homeMs}ms`);
 		check("...in well under the old cold-start wait", home && homeMs < 5000, `${homeMs}ms`);
-		await sleep(2000);   // past the notice's grace period
-		check("Home needs no server, so it shows no waking notice",
-			await page.locator("#fg-waking").count() === 0);
+		await sleep(2000);   // long enough for the probe's backoff to retry
 		check("the /health probe keeps retrying while the server is away", probes >= 2, `${probes} probes`);
 
 		// Into a lobby while the server is still away. Orbit's cache is empty in a
@@ -11340,10 +11338,9 @@ try {
 		await page.locator('.home-game-card[data-game="orbit"]').click();
 		const lobby = await page.waitForSelector(".orbit .lby-cols", { timeout: 15_000 }).then(() => true, () => false);
 		check("a lobby opens while the server is away", lobby);
-		const notice = await page.waitForSelector("#fg-waking", { timeout: 5000 }).then(() => true, () => false);
-		check("...and says the server is waking, with the offline door",
-			notice && /waking/i.test(await page.locator("#fg-waking").textContent())
-			&& await page.locator("#fg-waking button", { hasText: "Use offline" }).count() === 1);
+		await sleep(2000);
+		check("...with no site-wide waking banner over it (the lobby's own state says it)",
+			await page.locator("#fg-waking").count() === 0);
 
 		// The server answers. A stubbed open table proves the list was fetched AGAIN
 		// (the one made during the outage was refused), not merely painted from cache.
@@ -11353,26 +11350,10 @@ try {
 				max_players: 2, host_name: "Early Bird", created_at: Math.floor(Date.now() / 1000) - 30 }] }),
 		}));
 		blocked = false;
-		const gone = await page.waitForFunction(() => !document.getElementById("fg-waking"), null,
-			{ timeout: 20_000 }).then(() => true, () => false);
-		check("when the server answers, the notice goes", gone);
 		const filled = await page.waitForSelector('.orbit .lby-col-open .lby-card:has-text("WAKE01")',
-			{ timeout: 10_000 }).then(() => true, () => false);
+			{ timeout: 30_000 }).then(() => true, () => false);
 		check("...and the lobby fills in without a refresh", filled);
 
-		// The offline door, from a lobby, while the server is away.
-		blocked = true;
-		const page2 = await ctx.newPage();
-		await page2.route(api, (r) => (blocked ? r.abort() : r.fallback()));
-		await page2.goto(`http://localhost:${PORT}/orbit`, { waitUntil: "commit" });
-		await page2.waitForSelector("#fg-waking button", { timeout: 15_000 }).catch(() => {});
-		await page2.locator("#fg-waking button").click({ timeout: 5000 }).catch(() => {});
-		check("Use offline, from a waking lobby, opens the offline hub",
-			await page2.waitForSelector(".offline-hub", { timeout: 10_000 }).then(() => true, () => false)
-			&& new URL(page2.url()).pathname === "/offline");
-		check("...and the notice does not follow it there",
-			await page2.locator("#fg-waking").count() === 0);
-		await page2.close();
 		check("no page errors while the server was away", errors.length === 0, errors[0]?.slice(0, 200) || "");
 		await ctx.close();
 

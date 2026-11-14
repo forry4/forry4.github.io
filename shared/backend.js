@@ -21,7 +21,7 @@
  * restarts is the sockets' problem (useAutoReconnect), not a reason to put a
  * "waking" notice back over a game in progress.
  *
- * Three consumers:
+ * Two consumers:
  *  - `openSocket(url)` — every game's socket. A socket that fails before it ever
  *    opened while the server is still waking is retried once the server answers,
  *    without telling the game, so a table created or joined during the wake just
@@ -30,15 +30,15 @@
  *    "Connecting…" reads "Waking the server…", and each lobby re-fetches its lists
  *    the moment the server answers (a 503'd fetch during the wake would otherwise
  *    leave the cached rows up until a manual refresh).
- *  - `startWakingNotice()` (webapp/main.jsx) — a plain-DOM notice, like the update
- *    nudge, shown on screens that need the server (the shell says which, through
- *    `setServerWanted`), carrying the "Use offline" door the old loading screen had.
+ *
+ * There is deliberately NO site-wide "waking" banner (one existed 2026-11-12/13):
+ * a page that paints from its cache has nothing to apologise for, and the places
+ * that really do wait — a lobby with no rows yet, a room's connecting screen —
+ * already say "Waking the server…" in their own loading state.
  *
  * No React here on purpose: `node --test` imports this file directly
  * (webapp/test/unit/backend.test.mjs), and shared/ has no node_modules of its own.
  */
-
-import { navigateTo } from "./router.js";
 
 const WS_URL = (import.meta.env && import.meta.env.VITE_WS_URL) || "ws://localhost:8000/ws";
 export const BACKEND_HTTP = WS_URL.replace(/^ws/, "http").replace(/\/ws$/, "");
@@ -197,69 +197,7 @@ export function openSocket(url) {
 	return awake ? ws : new WakeSocket(url, ws);
 }
 
-// ── The waking notice ───────────────────────────────────────────────────────
-const NOTICE_ID = "fg-waking";
-let wanted = false;
-let noticeArmed = false;
-let graceOver = false;
-
-/** The shell says whether the current screen needs the server (lobbies, sign-in). */
-export function setServerWanted(on) {
-	wanted = !!on;
-	renderNotice();
-}
-
-function renderNotice() {
-	if (!noticeArmed || typeof document === "undefined") return;
-	const show = wanted && !awake && graceOver;
-	const el = document.getElementById(NOTICE_ID);
-	if (!show) { if (el) el.remove(); return; }
-	if (el) return;
-	const bar = document.createElement("div");
-	bar.id = NOTICE_ID;
-	bar.setAttribute("role", "status");
-	// Same frame as the update nudge (shared/update-nudge.js), and for the same
-	// reasons: inline styles because no game's stylesheet can be relied on, and
-	// pinned between both edges so a phone does not squeeze it into half a column.
-	Object.assign(bar.style, {
-		position: "fixed", left: "12px", right: "12px", margin: "0 auto", width: "fit-content",
-		bottom: "calc(18px + env(safe-area-inset-bottom, 0px))",
-		zIndex: "2147483646", display: "flex", alignItems: "center", gap: "12px",
-		padding: "10px 14px", borderRadius: "10px", boxSizing: "border-box",
-		background: "#2a1c20", border: "1px solid #e8c96a", color: "#f3e9d2",
-		font: "14px/1.3 Georgia, serif", boxShadow: "0 6px 24px rgba(0,0,0,.45)",
-	});
-	const msg = document.createElement("span");
-	msg.textContent = "Waking the server — it naps when nobody is playing. Tables and lists fill in when it answers.";
-	Object.assign(msg.style, { flex: "1 1 auto", minWidth: "0" });
-	const off = document.createElement("button");
-	off.type = "button";
-	off.textContent = "Use offline";
-	Object.assign(off.style, {
-		cursor: "pointer", padding: "5px 12px", borderRadius: "7px",
-		border: "1px solid #e8c96a", background: "transparent", color: "#f3e9d2",
-		font: "600 14px/1 Georgia, serif", flexShrink: "0", whiteSpace: "nowrap",
-	});
-	// Through the router's own Back/Forward path (the shell's popstate subscriber
-	// knows how to enter the hub), so this module needs no handle on the shell.
-	off.addEventListener("click", () => navigateTo("offline"));
-	bar.append(msg, off);
-	document.body.appendChild(bar);
-}
-
-/**
- * Arm the notice. `graceMs` keeps it off a warm visit: the probe answers in a few
- * hundred milliseconds then, and a notice that flashes up and away is noise.
- */
-export function startWakingNotice({ graceMs = 1500 } = {}) {
-	if (noticeArmed) return;
-	noticeArmed = true;
-	subscribeBackend(renderNotice);
-	setTimeout(() => { graceOver = true; renderNotice(); }, graceMs);
-}
-
 // For the unit test: forget everything between cases.
 export function _resetBackendForTest() {
 	awake = false; waiters = []; listeners.clear(); probe = null; nudge = null;
-	wanted = false; noticeArmed = false; graceOver = false;
 }
