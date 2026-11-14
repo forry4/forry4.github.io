@@ -1358,13 +1358,15 @@ git push                      # deploy-pages.yml builds + publishes (~2-3 min)
   six days to 2026-11-13 — so `.github/scripts/keepalive.py` now exits green at once (saying why in the
   job summary) when it STARTS outside 13:00-06:59 UTC, and cuts a hold off at 07:00 UTC, including one
   mid-recovery. Its window constants must equal the Worker's (`test_keepalive_monitor.py` reads both).
-- **THE WORKER WAS NEVER DEPLOYED (found 2026-11-13).** `forrestgames-keepalive.forry4.workers.dev`
-  answered Cloudflare's 404 (error 1042), so the "reliable" half of the design above did not exist and
-  GitHub alone covered 58% of the window (0% for UTC 14-16). The watchdog job in `keepalive.yml` now
-  probes the Worker and FAILS until it answers with its `{"warming": …}` JSON — **red by design until
-  the owner deploys it** with `npx wrangler deploy --config keepalive-worker/wrangler.jsonc` (their
-  Cloudflare login) or by running `deploy-keepalive-worker.yml` (manual; needs a
-  `CLOUDFLARE_API_TOKEN` secret, skips green without one). Nothing else deploys the Worker.
+- **THE WORKER IS DEPLOYED (2026-11-13) — it once was not.** Until then
+  `forrestgames-keepalive.forry4.workers.dev` answered Cloudflare's 404 (error 1042), so the
+  "reliable" half of the design above did not exist and GitHub alone covered 58% of the window (0% for
+  UTC 14-16). The owner deployed it with `npx wrangler deploy --config keepalive-worker/wrangler.jsonc`;
+  it runs on Cloudflare, so a restart of any machine changes nothing, and it needs redeploying ONLY
+  when `keepalive-worker/src/` changes (that command, or `deploy-keepalive-worker.yml`, which needs a
+  `CLOUDFLARE_API_TOKEN` secret and skips green without one). The watchdog job in `keepalive.yml`
+  probes the Worker and fails if it ever stops answering with its `{"warming": …}` JSON — **check the
+  live URL before telling anyone to deploy it.**
 - **A cold start is also OUR boot, and `/health` measures it** — its `boot` block
   (`core/build_info.py`) splits process start → top of `app.py` (`interpreter_s`) → bottom of
   `app.py` (`import_s`) → first ASGI call (`startup_s`). Read it on prod, never a laptop: the first
