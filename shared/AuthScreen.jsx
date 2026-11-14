@@ -1,4 +1,4 @@
-/* The site's sign-in / register / guest screen.
+/* The site's sign-in / register / guest screen, at /login.
  *
  * FIRST PIECE OF THE SHELL/GAME SPLIT. games/spender/Spender.jsx is both the site
  * shell (auth, home menu, routing to every game, Books, Puzzles) and Spender's own
@@ -16,15 +16,22 @@
  * cross-game kits) beats a cycle waiting on a refactor that may never happen.
  *
  * Owns only its own form state. It does NOT know about localStorage, routing, or the
- * session — the shell still owns identity, and `onAuthenticated(user)` hands it back.
+ * session — the shell still owns identity. `onAuthenticated(user)` hands an account
+ * back; `onGuest(name)` keeps the guest, under that name; `onBack()` changes nothing.
  *
- * It is also the site's FRONT DOOR, and it shares the home menu's ground, wordmark and
- * ornament rather than approximating them: the `.auth-screen`/`.home` selector pairs in
- * Spender.css are deliberate, so the two screens cannot drift into two looks.
+ * NOBODY MEETS THIS SCREEN FIRST. A visitor with no account is a guest from the first
+ * paint (shared/identity.js) and comes here by choice, from "Log in" beside their name
+ * — so whoever is looking at it is ALREADY a guest, and the Guest tab is where they
+ * name themselves and go back, not where they get in.
+ *
+ * It shares the home menu's ground, wordmark and ornament rather than approximating
+ * them: the `.auth-screen`/`.home` selector pairs in Spender.css are deliberate, so
+ * the two screens cannot drift into two looks.
  */
 import { useState } from "react";
 import { isBackendAwake, whenBackendAwake, markBackendAwake } from "./backend.js";
 import { useBackendAwake } from "./lobby.jsx";
+import { GUEST_NAME_MAX } from "./identity.js";
 
 const TABS = [
 	{ id: "login", label: "Sign In" },
@@ -41,23 +48,22 @@ const ICON = {
 	no: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round"><path d="M6.4 6.4 17.6 17.6M17.6 6.4 6.4 17.6" /></svg>),
 };
 
-// WHAT GUEST MODE COSTS YOU, as three scannable rows rather than a sentence: one
-// thing it buys you and the two it takes away, so the trade is read rather than
-// inferred. (An older note here claimed the list also existed to hold the Guest panel
-// to the other two panels' height. That height lock is gone -- the card is
-// top-anchored now, see the `.auth-panel` comment in Spender.css -- so these rows
-// carry their own weight and are free to say less.)
+// WHAT STAYING A GUEST COSTS YOU, as three scannable rows rather than a sentence: one
+// thing it keeps and the two it goes without, so the trade is read rather than
+// inferred.
 const GUEST_FACTS = [
-	["yes", "Play immediately"],
+	["yes", "Play every game, on this device"],
 	["no", "Game history is not saved"],
 	["no", "Cannot resume on another device"],
 ];
 
-export default function AuthScreen({ siteName, httpBase, css, myId, onAuthenticated, heroRule, notice }) {
+export default function AuthScreen({ siteName, httpBase, css, guestName, onAuthenticated, onGuest, onBack, heroRule, notice }) {
 	const [tab, setTab] = useState("login");
 	const [name, setName] = useState("");
 	const [password, setPassword] = useState("");
-	const [guestName, setGuestName] = useState("");
+	// Starts as the name the guest already plays under, so the field shows what
+	// "Continue as Guest" will keep rather than an empty box to fill in.
+	const [displayName, setDisplayName] = useState(guestName || "");
 	const [error, setError] = useState("");
 	const [loading, setLoading] = useState(false);
 	// The site no longer waits for the server before showing this screen, so a
@@ -108,15 +114,7 @@ export default function AuthScreen({ siteName, httpBase, css, myId, onAuthentica
 		setLoading(false);
 	};
 
-	const playAsGuest = () => {
-		// A guest keeps the shell's existing anonymous id, so a game started before
-		// signing in stays theirs.
-		onAuthenticated({
-			id: myId,
-			name: guestName.trim() || `Guest${Math.floor(Math.random() * 9000 + 1000)}`,
-			guest: true,
-		});
-	};
+	const continueAsGuest = () => onGuest(displayName);
 
 	// A real <label> per field, not a placeholder doing double duty. A placeholder
 	// vanishes the moment you type, so on a two-field form the user loses the only
@@ -136,9 +134,12 @@ export default function AuthScreen({ siteName, httpBase, css, myId, onAuthentica
 		<>
 			<style>{css}</style>
 			<div className="app auth-screen">
+				{/* The way out, where every lobby keeps its own. This is a page someone
+				    opened, so it cannot lean on the browser's Back: an installed app
+				    has none. Out of flow, in the rail the hero already stands clear of. */}
+				<button type="button" className="btn btn-ghost btn-sm auth-back" onClick={onBack}>← Back</button>
 				{/* hero + card centre together, top-anchored, exactly as on the home
-				    menu — the wordmark must not move as the boot steps through the
-				    three screens. */}
+				    menu. */}
 				<div className="auth-main">
 				<div className="auth-hero">
 					<h1 className="auth-logo">{siteName}</h1>
@@ -222,10 +223,10 @@ export default function AuthScreen({ siteName, httpBase, css, myId, onAuthentica
 						) : (
 							<>
 								{field("auth-guest", "Display name", "user", {
-									value: guestName, placeholder: "Optional",
-									autoComplete: "off", maxLength: 20,
-									onChange: e => setGuestName(e.target.value),
-									onKeyDown: e => e.key === "Enter" && playAsGuest(),
+									value: displayName, placeholder: guestName || "Guest",
+									autoComplete: "off", maxLength: GUEST_NAME_MAX,
+									onChange: e => setDisplayName(e.target.value),
+									onKeyDown: e => e.key === "Enter" && continueAsGuest(),
 								})}
 								<ul className="auth-facts">
 									{GUEST_FACTS.map(([kind, text]) => (
@@ -235,8 +236,8 @@ export default function AuthScreen({ siteName, httpBase, css, myId, onAuthentica
 										</li>
 									))}
 								</ul>
-								<button className="btn btn-gold btn-full" onClick={playAsGuest}>
-									Play as Guest
+								<button className="btn btn-gold btn-full" onClick={continueAsGuest}>
+									Continue as Guest
 								</button>
 							</>
 						)}

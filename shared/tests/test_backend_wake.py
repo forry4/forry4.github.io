@@ -79,6 +79,6 @@ def test_the_boot_does_not_wait_for_the_server():
     src = (ROOT / "games" / "spender" / "Spender.jsx").read_text(encoding="utf-8")
     boot = src[src.index("// ── Boot: land from LOCAL state"):src.index("const checkStoredSession")]
     boot = "\n".join(l for l in boot.splitlines() if not l.strip().startswith("//"))
-    assert "landAt(" in boot
+    assert "enterRoute(initialRouteRef.current)" in boot
     for gate in ("fetch(", "whenBackendAwake", "/health", "/games"):
         assert gate not in boot, f"the boot effect waits on the server again ({gate!r})"

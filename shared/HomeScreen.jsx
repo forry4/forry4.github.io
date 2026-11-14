@@ -145,7 +145,7 @@ const GO_CHEVRON = (
 
 export { SITE_NAME, GAMES, GAME_EMBLEM, HERO_RULE };
 
-export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles, onBoxPuzzles, onBooks, onNotes, onBggFilter, onSteamFilter, onAstral, onLolStats, onAnimeFilter, onOffline, onSiteHealth, siteAlerts = 0, siteHealth = null, onProfile, onLogout }) {
+export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles, onBoxPuzzles, onBooks, onNotes, onBggFilter, onSteamFilter, onAstral, onLolStats, onAnimeFilter, onOffline, onSiteHealth, siteAlerts = 0, siteHealth = null, onProfile, onLogin, onLogout }) {
 	// Built here rather than at module scope because each entry closes over a prop.
 	const games = visibleGames(authUser);
 	const extras = [
@@ -157,8 +157,8 @@ export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles
 		onAstral && { id: "astral", label: "Astral Ascent", onClick: onAstral },
 		onLolStats && { id: "lolstats", label: "LoL Stats", onClick: onLolStats },
 		onAnimeFilter && { id: "animefilter", label: "Anime Filter", onClick: onAnimeFilter },
-		// A private notebook per account. Shown to guests too: the page tells them to
-		// sign in, which is how they find out it exists (notes/api.py refuses them).
+		// A private notebook per account. Shown to guests too: the page offers them
+		// Log in, which is how they find out it exists (notes/api.py refuses them).
 		onNotes && { id: "notes", label: "Notes", onClick: onNotes },
 		// The one door to everything that works with no connection: vs-AI games, the
 		// Read section, and the downloads that keep them. Here so it can be set up
@@ -166,7 +166,7 @@ export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles
 		onOffline && { id: "offline", label: "Offline", onClick: onOffline },
 		// The owner's alerts panel. Hidden from everyone else as a convenience only:
 		// every /admin route refuses a non-owner server-side (core/monitor.py).
-		authUser?.is_admin && onSiteHealth && { id: "health", label: "Site health", onClick: onSiteHealth, badge: siteAlerts },
+		authUser.is_admin && onSiteHealth && { id: "health", label: "Site health", onClick: onSiteHealth, badge: siteAlerts },
 	].filter(Boolean);
 	return (
 		<>
@@ -182,24 +182,31 @@ export default function HomeScreen({ authUser, css, toast, onPickGame, onPuzzles
 					{/* ONE unboxed identity string and ONE chip. It used to be a bordered
 					    "Guest" pill, then a bare username, then a bordered button — three
 					    items where the MIDDLE one had no frame, which does not read as a
-					    hierarchy, it reads as a style rule that failed to apply. */}
+					    hierarchy, it reads as a style rule that failed to apply.
+					    The chip is the one account action open to whoever is looking: a
+					    guest (everyone who has not signed in) is offered Log in, an
+					    account Logout. A guest's name carries no "Guest" label: the
+					    button beside it says so already, and on a phone the label took
+					    the room the name needs. */}
 					<header className="home-header">
 						<h1 className="home-logo home-corner-logo">{SITE_NAME}</h1>
 						<div className="browser-user">
-							{/* A registered name is the way into the profile; guests have none. */}
-							{onProfile && authUser?.name && !authUser.guest ? (
-								<button type="button" className="home-ident home-ident-link" title="Your profile" onClick={onProfile}>
-									<span className="browser-username">{authUser.name}</span>
-								</button>
+							{authUser.guest ? (
+								<>
+									<span className="home-ident">
+										<span className="browser-username">{authUser.name}</span>
+									</span>
+									<button className="btn btn-ghost btn-sm home-login" onClick={onLogin}>Log in</button>
+								</>
 							) : (
-								<span className="home-ident">
-									{authUser?.guest && <span className="home-ident-kind">Guest</span>}
-									<span className="browser-username">{authUser?.name}</span>
-								</span>
+								<>
+									{/* A registered name is the way into the profile; guests have none. */}
+									<button type="button" className="home-ident home-ident-link" title="Your profile" onClick={onProfile}>
+										<span className="browser-username">{authUser.name}</span>
+									</button>
+									<button className="btn btn-ghost btn-sm" onClick={onLogout}>Logout</button>
+								</>
 							)}
-							<button className="btn btn-ghost btn-sm" onClick={onLogout}>
-								{authUser?.guest ? "Exit" : "Logout"}
-							</button>
 						</div>
 					</header>
 

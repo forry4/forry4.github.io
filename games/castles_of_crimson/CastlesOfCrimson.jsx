@@ -2043,7 +2043,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
       <div className="coc coc-neutral" style={{ "--lby-accent": GAME_ACCENTS.coc }}><style>{css}</style>
         <LobbyHeader
           onBack={onExit}
-          user={<LobbyUser user={authUser || { name: playerName, guest: true }} />}
+          user={<LobbyUser user={authUser} />}
         />
         <div className="coc-wrap lby-page">
           <div className="lby-page-in">

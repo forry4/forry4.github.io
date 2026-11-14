@@ -29,7 +29,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 CHROME = (
     # the top bar
     "lby-header", "lby-title", "lby-back", "lby-headbtn", "lby-head-name",
-    "lby-head-left", "lby-head-right", "lby-ident", "lby-ident-kind",
+    "lby-head-left", "lby-head-right", "lby-ident", "lby-ident-kind", "lby-login",
     # the identity band
     "lby-hero", "lby-hero-id", "lby-hero-emblem", "lby-hero-name",
     "lby-hero-seats", "lby-hero-text", "lby-hero-actions",

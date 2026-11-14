@@ -15,7 +15,7 @@
 //  - subscribe() fires on POPSTATE ONLY (browser Back/Forward). Programmatic push/replace
 //    never notify, so URL-write + state-write at a call site can't echo back into a loop.
 
-export const MODES = ["spender", "coc", "duel", "werewolf", "dontminion", "dissonance", "ragtag", "orbit", "blackcastle", "secretnames", "pinch", "pipmarket", "books", "notes", "profile", "puzzles", "bggfilter", "steamfilter", "boxpuzzles", "astral", "lolstats", "animefilter", "offline"];
+export const MODES = ["spender", "coc", "duel", "werewolf", "dontminion", "dissonance", "ragtag", "orbit", "blackcastle", "secretnames", "pinch", "pipmarket", "books", "notes", "profile", "puzzles", "bggfilter", "steamfilter", "boxpuzzles", "astral", "lolstats", "animefilter", "offline", "login"];
 
 // Room ids are short alphanumeric codes (normalize_room uppercases server-side).
 const ROOM_RE = /^[A-Za-z0-9_-]{1,24}$/;
@@ -43,9 +43,11 @@ export function buildPath(game, room) {
   return base() + "/" + game + (room ? "/" + room : "");
 }
 
-export function pushPath(path) {
-  if (window.location.pathname === path) return;
-  try { window.history.pushState(null, "", path); } catch { /* e.g. file:// harness */ }
+// Returns whether an entry was pushed. `state` marks the entry (see navigateTo).
+export function pushPath(path, state = null) {
+  if (window.location.pathname === path) return false;
+  try { window.history.pushState(state, "", path); } catch { return false; /* e.g. file:// harness */ }
+  return true;
 }
 
 export function replacePath(path) {
@@ -60,11 +62,10 @@ export function replacePath(path) {
 // `onProfile` prop down from the shell. Every game's own subscriber ignores a
 // route that is not its mode, and the shell unmounts it. `state.inApp` is how the
 // destination knows Back can return where you came from (`cameFromInsideApp`).
+export const IN_APP = { inApp: true };
 export function navigateTo(game, room) {
-  const path = buildPath(game, room);
-  if (window.location.pathname === path) return;
-  try { window.history.pushState({ inApp: true }, "", path); } catch { return; }
-  window.dispatchEvent(new PopStateEvent("popstate", { state: { inApp: true } }));
+  if (!pushPath(buildPath(game, room), IN_APP)) return;
+  window.dispatchEvent(new PopStateEvent("popstate", { state: IN_APP }));
 }
 
 export function cameFromInsideApp() {

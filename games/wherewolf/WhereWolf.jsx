@@ -621,7 +621,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
       <div className="ww" style={{ "--lby-accent": GAME_ACCENTS.wherewolf }}><style>{css}</style>
         <LobbyHeader
           onBack={onExit}
-          user={<LobbyUser user={authUser || { name: playerName, guest: true }} />}
+          user={<LobbyUser user={authUser} />}
         />
         <div className="ww-wrap lby-page">
           <div className="lby-page-in">

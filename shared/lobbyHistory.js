@@ -1,12 +1,16 @@
+import { readIdentity, isMember } from "./identity.js";
+
 export const SESSION_EXPIRED = "lobby-session-expired";
 
 // A login in another tab replaces the server's one session token. Refresh with
 // that account's current token, never a stale callback's or another account's.
+// A stored GUEST is no login at all (the other tab signed out): keep the token in
+// hand, and the server's answer to it decides what happens next.
 export function latestSession(user) {
-  let saved;
-  try { saved = JSON.parse(localStorage.getItem("spender_user")); } catch {}
-  if (saved?.id && saved.id !== user.id) throw new Error("Account changed");
-  return saved?.session_token ? saved : user;
+  const saved = readIdentity();
+  if (!isMember(saved)) return user;
+  if (saved.id !== user.id) throw new Error("Account changed");
+  return saved;
 }
 
 const requests = new Map();

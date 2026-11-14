@@ -81,7 +81,7 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
 - Smoke gate before pushing frontend: `cd webapp && npm run smoke` (see Testing — it reaches the
   first screen with no backend, and no further).
 - Distinct local players need **distinct browser storage** — two incognito windows in the same
-  browser share `localStorage` → same `spender_myId` → they collapse into one identity. Use
+  browser share `localStorage` → same `spender_user` → they collapse into one identity. Use
   different browsers/profiles.
 
 ---
@@ -212,6 +212,37 @@ The sqlite path (identical wrapper) is what the suite uses by default. **A Turso
 drops to ephemeral local sqlite and the site stays up — so `/health` reports `db_backend` and
 `deploy-render.yml` FAILS any deploy that does not come up on `turso`
 (`core/tests/test_deploy_verifies_db_backend.py` runs that step's real script).
+
+### Everyone has an identity; sign-in is a page, not a gate (2026-11-13)
+- **A visitor who has not signed in IS a guest, from the first paint — `shared/identity.js`.** One
+  `localStorage` key, `spender_user`, never empty once the site has loaded: a guest is
+  `{id, name, guest:true}`, an account `{id, name, is_admin, session_token}`. The shell's `authUser`
+  is therefore never null and `myId` is just `authUser.id`. Sign-in used to be the first screen for
+  anyone with no stored login (an invite link stopped its recipient there, with the room stashed
+  behind it); a guest was re-asked every visit and never stored. Guests still never touch the
+  server for identity — the id and name are made on the device, a seat is proved per room as before.
+- **Sign-in is the `/login` route, opened by choice**: "Log in" beside a guest's name on the menu
+  and in every lobby's top bar (`LobbyUser`, via `router.navigateTo`, like the profile link — and
+  withheld by the same `profile={false}`). It has its own ← Back (an installed app has no browser
+  Back), and its Guest tab is where a guest sets a display name and
+  goes back. Leaving it — signing in, Continue as Guest — returns to where Log in was pressed
+  (`history.back()` when the entry is in-app, else Home). **One effect in `Spender.jsx` leaves
+  `/login` whenever the identity on it is an account**, which covers the form, Forward into
+  `/login`, and a typed `/login` alike.
+- **Logout and a dead session both end in a NEW guest** (`guestAfterLogin`): never the account's
+  id, and not the guest from before either. Logout stays on the menu; a dead session
+  (`SESSION_EXPIRED`) goes to `/login` with a notice and comes back to its route after sign-in.
+- **A guest's games do not follow them into an account** — the seat is under the guest id. Known,
+  not solved: claiming seats server-side touches seat proof in all twelve games.
+- **Never change identity and navigate through `navigateTo` in the same tick.** Its popstate is a
+  DISCRETE event to React, so the screen change renders before a `setAuthUser` made beside it; the
+  expired-session redirect did that, sign-in rendered for one frame with the old ACCOUNT, and the
+  effect above sent it straight back. That redirect writes the URL and `setScreen` directly.
+- Gates: `webapp/test/unit/identity.test.mjs`; `authScreen` in `screens.mjs` (an UNSEEDED visitor:
+  guest on Home, same guest after reload, Log in from the menu and from a lobby, rename, sign in
+  and land back, `/login` as an account, Logout into a new guest); `spenderWaitingRoom` (an invite
+  link seats a stranger with no sign-in); `historyRecovery`/`profilePage`/`bootWithoutServer` (the
+  dead-session path).
 
 ### Profiles — `core/results.py` + `shared/Profile.jsx` (2026-09-24)
 - **`game_results` is the only record of a finished game that outlives the 30-day prune** —
@@ -912,8 +943,8 @@ covers the logic; each game's wiring is one line).
 - **CI runs `core/tests/` first; Render deploy is gated on tests.** Frontend deploy is gated by
   `npm run test:unit`, `npm run smoke` AND `npm run screens`.
 - **`npm run smoke` REACHES THE FIRST SCREEN WITH NO BACKEND, AND NO FURTHER — it is not game render
-  coverage.** It asserts the sign-in screen with no identity, Home with a stored one, the Duel lobby on
-  a deep link and a Spender room link's join state, all with no server at all (the boot lands from
+  coverage.** It asserts Home with a stored identity AND with none (a new guest), the sign-in screen at
+  `/login`, the Duel and Dontminion lobbies on a deep link and a Spender room link's join state, all with no server at all (the boot lands from
   local state — see "THE FIRST SCREEN NEVER WAITS FOR THE SERVER"). Until 2026-11-12 the shell pinged
   the backend before it routed, every smoke route sat on the loading screen, and the most smoke could
   say was "something rendered"; a ping creeping back in front of the landing now turns it red. It still
@@ -1076,15 +1107,15 @@ covers the logic; each game's wiring is one line).
   250ms race, then a 2s poll with a 5s abort), validate the session, wait for the fonts and then a fixed
   350ms before drawing ANYTHING — measured on the live site at ~23.5s of "Waking the server…" on a cold
   Render instance and ~1s warm with no open connection, in front of a menu that needs no server. Now the
-  boot effect in `Spender.jsx` lands from `localStorage` once the fonts are in: a stored identity on Home
-  (or its deep link), none on sign-in. The question "is the server up?" moved to **`shared/backend.js`**:
+  boot effect in `Spender.jsx` lands from `localStorage` once the fonts are in: on Home (or its deep link),
+  as the stored identity or — having none — as a new guest (next section). The question "is the server up?" moved to **`shared/backend.js`**:
   - **ONE `/health` probe, started in `webapp/main.jsx`, that HOLDS each request up to 90s** and retries
     a refusal or 503 with a backoff capped at 8s — never a short abort, for the reason the keepalive
     bullets give. Awake once is awake for the page (later drops are the sockets' business).
   - **The session check runs alongside it, in the background**, with the old rules: ok:true refreshes
     name/is_admin (so the owner's Site health tile can show from the cached identity, then correct
-    itself), a definite ok:false clears the login and goes to sign-in through `SESSION_EXPIRED` with a
-    notice saying why, and a transport error/5xx waits for the server and asks again, never signing out.
+    itself), a definite ok:false ends the login (the device becomes a guest) and goes to sign-in through
+    `SESSION_EXPIRED` with a notice saying why, and a transport error/5xx waits for the server and asks again, never signing out.
   - **What needs the server rides the wake instead of failing or hanging.** Every game socket is
     `openSocket(url)`: a socket that dies before it ever opened while the server is waking is retried
     once the probe answers, reporting CONNECTING meanwhile (so `useAutoReconnect` does not stack
@@ -1172,7 +1203,7 @@ covers the logic; each game's wiring is one line).
   CASCADED value anyway (`.bgf-search input` is `font:inherit` and lands on 16 only because of
   what it inherits). Hence ONE gate rather than this repo's usual two —
   **`formControlZoom` in `webapp/test/screens.mjs`** walks every lobby (roster derived from
-  `LOBBY_PAGES`), the scorecard modal, the auth screen and `/bggfilter` and fails any text-entry
+  `LOBBY_PAGES`), the scorecard modal, the sign-in screen and `/bggfilter` and fails any text-entry
   control under 16px. It asserts its control COUNT per surface first, because a surface that
   failed to render contributes zero controls and would otherwise pass loudly.
   Three rules fall out: **16px is a floor on anything you can type into**, not a size preference;

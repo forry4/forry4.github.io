@@ -51,9 +51,11 @@
 .lby-ident-link:focus-visible{outline:1px solid var(--lby-accent,var(--gold));outline-offset:3px}
 .lby-head-tag{font-size:.62rem;letter-spacing:.1em;color:var(--text-soft);border:1px solid var(--border);padding:2px 8px;border-radius:10px;font-family:'Cinzel','Cinzel Fallback',serif;text-transform:uppercase;white-space:nowrap}
 
-/* One shared button style for the header (back + rules), identical across all games. */
-.lby-back,.lby-headbtn{display:inline-flex;align-items:center;gap:6px;padding:8px 15px;border-radius:var(--radius,8px);border:1px solid var(--border);background:transparent;color:var(--text-soft);cursor:pointer;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.75rem;letter-spacing:.05em;font-weight:600;white-space:nowrap;transition:border-color .15s,color .15s}
-.lby-back:hover,.lby-headbtn:hover{border-color:var(--lby-accent,var(--gold));color:var(--text)}
+/* One shared button style for the header (back + rules + a guest's Log in), identical
+   across all games. Log in has a class of its own, NOT `.lby-headbtn`: the render gate
+   counts header Rules buttons by that class. */
+.lby-back,.lby-headbtn,.lby-login{display:inline-flex;align-items:center;gap:6px;padding:8px 15px;border-radius:var(--radius,8px);border:1px solid var(--border);background:transparent;color:var(--text-soft);cursor:pointer;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.75rem;letter-spacing:.05em;font-weight:600;white-space:nowrap;transition:border-color .15s,color .15s}
+.lby-back:hover,.lby-headbtn:hover,.lby-login:hover{border-color:var(--lby-accent,var(--gold));color:var(--text)}
 
 /* Section header: micro uppercase accent label + optional muted note, over a rule.
    THE RULE IS DRAWN AS A BACKGROUND, NOT AS `border-bottom`, and that is what lets it
@@ -601,7 +603,7 @@
 	   (Castles of Crimson) — the title is nowrap+non-shrinking and pushed into the username.
 	   Shrink the title + Back so all three fit; shorter titles just render a touch smaller. */
 	.lby-title{font-size:clamp(.82rem,3.2vw,1.1rem);letter-spacing:.03em}
-	.lby-back,.lby-headbtn{padding:5px 9px;font-size:.66rem;gap:4px}
+	.lby-back,.lby-headbtn,.lby-login{padding:5px 9px;font-size:.66rem;gap:4px}
 	.lby-head-name{max-width:104px;font-size:.72rem}
 	/* Shrink the CODE field to ~6 characters (room codes are 6), and tighten the row gap +
 	   button padding, so the create button, the code+Join group, and the refresh button all

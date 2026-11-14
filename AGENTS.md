@@ -60,7 +60,7 @@ Per-area detail lives in a `AGENTS.md` next to the code, loaded when you read fi
 - Smoke gate before pushing frontend: `cd webapp && npm run smoke` (see Testing — it is weaker than
   it looks).
 - Distinct local players need **distinct browser storage** — two incognito windows in the same
-  browser share `localStorage` → same `spender_myId` → they collapse into one identity. Use
+  browser share `localStorage` → same `spender_user` → they collapse into one identity. Use
   different browsers/profiles.
 
 ---

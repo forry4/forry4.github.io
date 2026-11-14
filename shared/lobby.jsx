@@ -81,31 +81,33 @@ export const SCORECARD_GLYPH = (
 );
 
 // THE IDENTITY IN THE TOP-RIGHT, and it is the shell's lockup, not a seventh
-// invention. The home menu reads "GUEST · Harness" — a role label in dim
-// letterspaced small caps, then the name in the brighter serif — beside an EXIT chip.
-// The seven lobbies each hand-built their own version of the right rail: five passed a
-// bare `<span className="lby-head-name">`, one passed the string "Guest", and the
-// result was one dim letterspaced word floating in the corner in the LABEL style, with
-// its label missing. A registered player has no role word, so they get the name alone.
+// invention: the name in the brighter serif, as on the home menu. The seven lobbies
+// each hand-built their own version of the right rail: five passed a bare
+// `<span className="lby-head-name">`, one passed the string "Guest", and the result
+// was one dim letterspaced word floating in the corner in the LABEL style, with its
+// label missing.
 //
-// A REGISTERED name is the way into the profile (shared/Profile.jsx), from every
-// lobby at once — it navigates through the router rather than a callback, so no
-// lobby has to wire it. Pass `profile={false}` where leaving would abandon
-// something: at a board, in a waiting room, and in the offline hub, which has no
-// server to ask. A guest's name is never a link: guests have no profile.
+// A REGISTERED name is the way into the profile (shared/Profile.jsx), and a GUEST
+// gets a Log in button beside theirs (a guest's name is never a link: guests have no
+// profile). Both work from every lobby at once — they navigate through the router
+// rather than a callback, so no lobby has to wire either. Pass `profile={false}`
+// where leaving would abandon something: at a board, in a waiting room, and in the
+// offline hub, which has no server to ask. There a guest's name wears a "GUEST"
+// role label instead — with the button it would say the same thing twice, and on a
+// phone it took the room the name needs.
 export function LobbyUser({ user, profile = true }) {
 	if (!user?.name) return null;
 	const name = <span className="lby-head-name">{user.name}</span>;
-	if (profile && !user.guest) return (
+	if (!user.guest) return profile ? (
 		<button type="button" className="lby-ident lby-ident-link" title="Your profile"
 			onClick={() => navigateTo("profile")}>{name}</button>
-	);
-	return (
-		<span className="lby-ident">
-			{user.guest && <span className="lby-ident-kind">Guest</span>}
-			{name}
-		</span>
-	);
+	) : <span className="lby-ident">{name}</span>;
+	return profile ? (
+		<>
+			<span className="lby-ident">{name}</span>
+			<button type="button" className="lby-login" onClick={() => navigateTo("login")}>Log in</button>
+		</>
+	) : <span className="lby-ident"><span className="lby-ident-kind">Guest</span>{name}</span>;
 }
 
 // Full-width flush top bar. Renders its own back + rules buttons (uniform across games);

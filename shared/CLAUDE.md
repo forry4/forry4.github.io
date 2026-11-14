@@ -18,7 +18,7 @@ Cross-game frontend kits. **Dependency direction is one-way: `games/* → shared
   malformed, superseded, or unverified empty replies must preserve the last successful
   list and cache. Legacy endpoints return `{games: []}` for expired sessions: verify
   `/auth/session` before accepting that empty result. Only a confirmed dead token asks
-  the shell for sign-in, keeping the route for recovery without reloading. A same-account
+  the shell for sign-in (`/login`; signing in returns to the lobby without reloading). A same-account
   login in another tab supplies the fresh token; never borrow another account's token.
   `screens.mjs`'s `historyRecovery` block covers these paths and every lobby's wiring.
 - **`lobby.jsx`** — shared lobby chrome (`LobbyHeader`/`LobbySectionHd`/`LobbyEmpty`/`LobbyLoading`/
@@ -443,7 +443,7 @@ across a table, typed into the lobby's own Join field).
 
 ## URL routing (`router.js` — LIVE on prod)
 
-Every mode has a path (`/spender /coc /duel /werewolf /books /puzzles`) and every room a sub-path
+Every mode has a path (`/spender /coc /duel /werewolf /books /puzzles`, and `/login` for sign-in) and every room a sub-path
 (`/spender/ABC123`) — reload/reconnect lands right, Back/Forward work, room URLs double as invite links.
 - **The load-bearing contract:** `pushPath`/`replacePath` are **NO-OPS when the path is already current**
   (one function serves both a click and a popstate call → no duplicate history); `subscribe` fires on

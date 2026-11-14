@@ -55,7 +55,6 @@ for (const lobby of LOBBIES) {
 		const ctx = await browser.newContext({ viewport: { width: view.w, height: view.h }, reducedMotion: "reduce" });
 		await ctx.addInitScript((me) => {
 			localStorage.setItem("spender_user", JSON.stringify({ id: me, name: "Aurelia", session_token: "stub" }));
-			localStorage.setItem("spender_myId", me);
 		}, ME);
 		const page = await ctx.newPage();
 		await page.route("**/auth/session*", (r) => r.abort());

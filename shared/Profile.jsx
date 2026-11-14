@@ -21,6 +21,7 @@ import { GAME_INFO } from "./catalog.js";
 import { GAME_EMBLEM } from "./emblems.jsx";
 import { botTierLabel } from "./botTiers.js";
 import { SESSION_EXPIRED } from "./lobbyHistory.js";
+import { navigateTo } from "./router.js";
 import _css from "./Profile.css?inline";
 
 const WS_BASE = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
@@ -253,7 +254,12 @@ export default function Profile({ authUser, onExit }) {
 
 	let body;
 	if (status === "guest") {
-		body = <LobbyEmpty>Profiles are for registered players. Sign in with an account to get one.</LobbyEmpty>;
+		body = (
+			<LobbyEmpty>
+				Profiles are for registered players.{" "}
+				<button type="button" className="pf-link" onClick={() => navigateTo("login")}>Log in</button> to get one.
+			</LobbyEmpty>
+		);
 	} else if (status === "expired") {
 		body = <LobbyEmpty>Your session has expired. Sign out and back in to see your profile.</LobbyEmpty>;
 	} else if (!rows && status === "loading") {

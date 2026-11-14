@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { baseCss } from "../shared/theme.js";
-import { buildPath, parsePath, pushPath, subscribe } from "../shared/router.js";
+import { buildPath, navigateTo, parsePath, pushPath, subscribe } from "../shared/router.js";
 import { makeApi } from "./api.js";
 import { syncNotesOffline } from "./offlineStore.js";
 import { setImageOwner } from "./images.js";
@@ -548,9 +548,12 @@ export default function Notes({ authUser, onExit }) {
 			</header>
 			<div className="nt-empty">
 				<p>Notes is a private notebook for your account: folders, notes and screenshots only you can see.</p>
-				<p className="nt-dim">{!authUser || authUser.guest
-					? "Sign in or create an account to start one."
+				<p className="nt-dim">{authUser.guest
+					? "Log in or create an account to start one."
 					: "Your sign-in has expired. Sign in again to open your notes."}</p>
+				{authUser.guest && (
+					<button type="button" className="btn btn-gold btn-sm" onClick={() => navigateTo("login")}>Log in</button>
+				)}
 			</div>
 		</div>
 	);

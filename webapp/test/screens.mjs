@@ -468,11 +468,14 @@ try {
 		await ctx.close();
 	}
 
-	// ── Auth screen ───────────────────────────────────────────────────────────
-	// Every context above SEEDS a guest identity to skip straight to a game, so
-	// nothing else here ever renders the auth screen. It is the site's front door
-	// and the first screen extracted out of Spender.jsx, so it gets its own pass
-	// with NO stored user.
+	// ── A fresh visitor, and the sign-in screen ───────────────────────────────
+	// Every context above SEEDS an identity, so nothing else here is ever a visitor
+	// the site has not seen. That visitor is a GUEST from the first paint
+	// (shared/identity.js) and is never stopped at sign-in: this block starts with
+	// NO stored user and walks what only they can — becoming a guest, staying the
+	// same guest across a reload, opening /login from the menu and from a lobby,
+	// naming themselves, signing in and landing back where they pressed Log in,
+	// and signing out into a new guest.
 	async function authScreen(log) {
 		const ctx = await browser.newContext();           // deliberately unseeded
 		const page = await ctx.newPage();
@@ -487,19 +490,83 @@ try {
 			return (await page.locator(sel).count().catch(() => 0)) > 0;
 		};
 
-		await page.goto(`http://localhost:${PORT}/`, { waitUntil: "networkidle" });
-		check("a fresh visitor gets the auth screen", await has(".auth-screen"));
-		check("...with all three tabs", await page.locator(".auth-tab").count() === 3);
+		const identity = () => page.evaluate(() => JSON.parse(localStorage.getItem("spender_user") || "null"));
+		const pathname = () => new URL(page.url()).pathname;
+		const shownName = () => page.locator(".home .browser-username").textContent({ timeout: 5000 }).catch(() => "");
 
-		// Guest sign-in is the one path that needs no account, so it is the flow the
-		// harness can drive end to end: it must produce an identity and land on home.
+		await page.goto(`http://localhost:${PORT}/`, { waitUntil: "networkidle" });
+		check("a fresh visitor lands on the home menu, not on sign-in",
+			await has(".home-game-card") && await page.locator(".auth-screen").count() === 0);
+		const born = await identity();
+		check("...as a guest, stored on the device", !!born && born.guest === true && !!born.id
+			&& /^Guest\d{4}$/.test(born.name) && !born.session_token, JSON.stringify(born));
+		check("...named beside a Log in button, with no Logout",
+			(await shownName()) === born?.name && await page.locator(".home-login").count() === 1
+			&& await page.getByRole("button", { name: /^Logout$/ }).count() === 0);
+		await page.reload({ waitUntil: "networkidle" });
+		await has(".home-game-card");
+		check("a reload is the same guest", JSON.stringify(await identity()) === JSON.stringify(born),
+			JSON.stringify(await identity()));
+
+		// Log in opens the sign-in screen as a page of its own, and Back leaves it.
+		await page.locator(".home-login").click({ timeout: 10_000 }).catch(() => {});
+		check("Log in opens the sign-in screen at /login", await has(".auth-screen") && pathname() === "/login", pathname());
+		check("...with all three tabs", await page.locator(".auth-tab").count() === 3);
+		await page.goBack();
+		check("the browser's Back returns to the menu", await has(".home-game-card") && pathname() === "/", pathname());
+		await page.locator(".home-login").click({ timeout: 10_000 }).catch(() => {});
+		await page.locator(".auth-back").click({ timeout: 10_000 }).catch(() => {});
+		check("...and so does the screen's own Back, leaving the guest as it was",
+			await has(".home-game-card") && pathname() === "/"
+			&& JSON.stringify(await identity()) === JSON.stringify(born), pathname());
+
+		// The Guest tab is where a guest names themselves and goes back: the field
+		// starts as the name they have, and the id their seats are under never moves.
+		await page.locator(".home-login").click({ timeout: 10_000 }).catch(() => {});
 		await page.locator(".auth-tab").nth(2).click().catch(() => {});
-		const guestBtn = page.locator("button", { hasText: "Play as Guest" });
-		await guestBtn.click({ timeout: 15_000 }).catch(() => {});
-		check("guest sign-in reaches the home menu", await has(".home-game-card"));
-		const stored = await page.evaluate(() => localStorage.getItem("spender_user"));
-		check("...and a guest is NOT persisted to localStorage", stored === null,
-			`got ${stored}`);
+		check("the Guest tab starts from the name the guest already has",
+			await page.locator("#auth-guest").inputValue({ timeout: 10_000 }).catch(() => "") === born?.name);
+		await page.locator("#auth-guest").fill("  Wanderer  ").catch(() => {});
+		await page.locator("button", { hasText: "Continue as Guest" }).click({ timeout: 15_000 }).catch(() => {});
+		check("Continue as Guest returns to the menu", await has(".home-game-card") && pathname() === "/", pathname());
+		const named = await identity();
+		check("...under the chosen name, as the same guest",
+			named?.name === "Wanderer" && named?.id === born?.id && named?.guest === true
+			&& (await shownName()) === "Wanderer", JSON.stringify(named));
+
+		// Signing in FROM A LOBBY returns to that lobby as the account. The login is
+		// stubbed (the form and the shell are under test, not the password check).
+		const account = { id: "screens-auth-account", name: "Signed", is_admin: false };
+		await page.route("**/auth/login", (r) => r.fulfill({ status: 200, contentType: "application/json",
+			body: JSON.stringify({ ok: true, user: account, session_token: "screens-auth-token" }) }));
+		await page.route("**/auth/session*", (r) => r.fulfill({ status: 200, contentType: "application/json",
+			body: JSON.stringify({ ok: true, user: account }) }));
+		await page.locator('.home-game-card[data-game="duel"]').click({ timeout: 10_000 }).catch(() => {});
+		check("a guest's lobby bar offers Log in", await has(".duel .lby-login"));
+		await page.locator(".duel .lby-login").click({ timeout: 10_000 }).catch(() => {});
+		await has(".auth-screen");
+		await page.locator("#auth-name").fill("Signed").catch(() => {});
+		await page.locator("#auth-pass").fill("secret").catch(() => {});
+		await page.locator("#auth-pass").press("Enter").catch(() => {});
+		check("signing in returns to the lobby Log in was pressed in",
+			await has(".duel .lby-ident-link") && pathname() === "/duel", pathname());
+		const signed = await identity();
+		check("...as the account, which replaces the guest on the device",
+			signed?.id === account.id && signed?.session_token === "screens-auth-token" && !signed?.guest
+			&& await page.locator(".duel .lby-login").count() === 0, JSON.stringify(signed));
+		await page.goto(`http://localhost:${PORT}/login`, { waitUntil: "networkidle" });
+		check("/login has nothing to offer an account, and goes to the menu",
+			await has(".home-game-card") && pathname() === "/" && await page.locator(".auth-screen").count() === 0, pathname());
+
+		// Logout stays on the menu and leaves a NEW guest: never the account's id,
+		// and not the guest from before either (that one's seats are not resumed).
+		await page.getByRole("button", { name: /^Logout$/ }).click({ timeout: 10_000 }).catch(() => {});
+		check("Logout stays on the menu, with Log in back", await has(".home-login") && pathname() === "/", pathname());
+		const after = await identity();
+		check("...as a new guest", after?.guest === true && !after?.session_token
+			&& after?.id !== account.id && after?.id !== born?.id, JSON.stringify(after));
+		await page.unroute("**/auth/login");
+		await page.unroute("**/auth/session*");
 		// THE TAB STRIP HOLDS STILL ACROSS THE THREE TABS, AT EVERY TIER — and note what
 		// this replaced. It used to assert the panel was ONE HEIGHT, which was the right
 		// check while the card was vertically centred: a shorter tab moved the strip up,
@@ -510,7 +577,7 @@ try {
 		// matters rather than a proxy for it. 1920 is here because the >=1500 tier scales
 		// the type, and is where an edited helper line would first show up.
 		for (const vp of [{ width: 1280, height: 800 }, { width: 1920, height: 1080 }]) {
-			await page.goto(`http://localhost:${PORT}/`, { waitUntil: "networkidle" });
+			await page.goto(`http://localhost:${PORT}/login`, { waitUntil: "networkidle" });
 			await page.setViewportSize(vp);
 			await page.waitForSelector(".auth-card", { timeout: 20_000 }).catch(() => {});
 			const marks = [];
@@ -530,7 +597,7 @@ try {
 				same("tabs") && same("card") && same("field"), JSON.stringify(marks));
 		}
 
-		// EVERY PIECE OF TEXT ON THE FRONT DOOR CLEARS AA, not just the ones someone
+		// EVERY PIECE OF TEXT ON THE SIGN-IN SCREEN CLEARS AA, not just the ones someone
 		// thought to check. Three separate review rounds each found a different single
 		// element under 4.5:1 -- a helper line, a section label, a button label -- and each
 		// time it was a token reused one step too far down the hierarchy. This walks the
@@ -589,14 +656,14 @@ try {
 		// `<span className="spinner" />`, a class no stylesheet has defined since
 		// the site's three hand-rolled spinners were folded into `.lby-spinner`.
 		// It therefore painted a 0x0 box — no feedback at all on the one control
-		// the whole front door hangs on — while still taking a flex slot in a
+		// the whole sign-in screen hangs on — while still taking a flex slot in a
 		// `.btn` with `gap: 8px`, which slid the centred label 4px right for the
 		// length of the request and back again when it resolved. Measured: 4.00px
 		// on iPhone-sized viewports, held for as long as the login took. Neither
 		// half shows up in a screenshot of the resting screen, so both are
 		// asserted here: the spinner has a real box and a running animation, and
 		// the label's own text range does not move between the two states.
-		await page.goto(`http://localhost:${PORT}/`, { waitUntil: "networkidle" });
+		await page.goto(`http://localhost:${PORT}/login`, { waitUntil: "networkidle" });
 		await page.waitForSelector(".auth-screen", { timeout: 20_000 }).catch(() => {});
 		// Hold the request open so the pending state can be measured at leisure.
 		await page.route("**/auth/login", async (route) => { await sleep(1500); await route.continue(); });
@@ -951,7 +1018,7 @@ try {
 		{
 			const c = await browser.newContext({ viewport: vp });
 			const pg = await c.newPage();
-			await pg.goto(`http://localhost:${PORT}/`, { waitUntil: "load" });
+			await pg.goto(`http://localhost:${PORT}/login`, { waitUntil: "load" });
 			await pg.waitForSelector(".auth-logo", { timeout: 25_000 }).catch(() => {});
 			await pg.waitForTimeout(400);
 			const mark = await lockup(pg).catch(() => null);
@@ -1231,28 +1298,24 @@ try {
 				`url ${new URL(deep.url()).pathname}`);
 			await deep.close();
 
-			// ...AND IT SURVIVES THE FRONT DOOR. The person a link is sent to is by
-			// definition somebody who was not already in this tab, so the first thing
-			// a real invite hits is the auth screen. The shell stashes the route in
-			// `pendingRouteRef` and consumes it after sign-in, leaving the URL in the
-			// address bar untouched so it survives a reload too — a chain of three
-			// steps (land on auth, keep the URL, replay it) that has no other
-			// coverage, and whose failure mode is a recipient dropped on the home
-			// menu with no idea which room they were invited to.
+			// ...AND IT NEEDS NOTHING FROM THE PERSON IT WAS SENT TO. They are by
+			// definition somebody this site has never seen, and an invite used to
+			// stop them at the sign-in screen with the room waiting behind it. They
+			// are a guest on arrival now, so the link's whole job is one step: open
+			// it, be seated. The failure modes are a recipient asked to sign in
+			// first, or dropped on the home menu with no idea which room it was.
 			const guestCtx = await browser.newContext();   // deliberately unseeded
 			const guest = await guestCtx.newPage();
 			await guest.goto(`http://localhost:${PORT}/spender/${code}`, { waitUntil: "networkidle" });
-			const atAuth = await guest.waitForSelector(".auth-screen", { timeout: 25_000 })
-				.then(() => true).catch(() => false);
-			check("an invited stranger meets the sign-in screen", atAuth);
-			check("...with the room still in the address bar",
-				new URL(guest.url()).pathname === `/spender/${code}`,
-				`url ${new URL(guest.url()).pathname}`);
-			await guest.locator(".auth-tab").nth(2).click({ timeout: 10_000 }).catch(() => {});
-			await guest.locator("button", { hasText: "Play as Guest" }).click({ timeout: 15_000 }).catch(() => {});
 			const seated = await guest.waitForSelector(".wr-panel, .game", { timeout: 30_000 })
 				.then(() => true).catch(() => false);
-			check("...and signing in lands them in the room, not on the home menu", seated,
+			check("an invited stranger is seated in the room straight from the link", seated,
+				`url ${new URL(guest.url()).pathname}`);
+			check("...as a guest, without meeting the sign-in screen",
+				await guest.locator(".auth-screen").count() === 0
+				&& await guest.evaluate(() => JSON.parse(localStorage.getItem("spender_user") || "null")?.guest === true));
+			check("...with the room still in the address bar",
+				new URL(guest.url()).pathname === `/spender/${code}`,
 				`url ${new URL(guest.url()).pathname}`);
 			await guestCtx.close();
 		}
@@ -2250,11 +2313,11 @@ try {
 		check("An older empty response cannot erase a newer result or expire its login", await rows()===1 && await page.locator('.auth-card').count()===0);
 		mode='empty'; await refresh();
 		await page.waitForSelector('.auth-notice');
-		check("Expired history refresh asks for sign-in and preserves the cached history", (await cached('orbit'))?.length===1 && new URL(page.url()).pathname==='/orbit');
+		check("Expired history refresh asks for sign-in and preserves the cached history", (await cached('orbit'))?.length===1 && new URL(page.url()).pathname==='/login');
 		await page.locator('#auth-name').fill('History'); await page.locator('#auth-pass').fill('testpass');
 		await page.locator('#auth-pass').press('Enter');
 		await page.waitForSelector('.orbit .lby-col-history .lby-card');
-		check("Signing back in restores history at the same route without a page refresh", await rows()===1 && await page.evaluate(() => window.__historyDocument === "same document") && lastToken==='Bearer renewed');
+		check("Signing back in restores history at the same route without a page refresh", await rows()===1 && new URL(page.url()).pathname==='/orbit' && await page.evaluate(() => window.__historyDocument === "same document") && lastToken==='Bearer renewed');
 		// A real storage event from another tab updates the mounted shell as well
 		// as the token used by the next refresh.
 		const sibling = await ctx.newPage();
@@ -3073,12 +3136,9 @@ try {
 					await pg.locator(".lby-extra").click({ timeout: 10_000 }).catch(() => {});
 					await pg.waitForSelector(".dsc-player input", { timeout: 10_000 }).catch(() => {});
 				} },
-			// A SEPARATE CONTEXT, not a `localStorage.removeItem` before the goto: the
-			// seeded identity comes from `addInitScript`, which re-runs on every new
-			// document, so clearing it and navigating just puts it straight back. That
-			// cost a run — the surface reported zero fields and the roster guard above
-			// is the only reason it was a failure rather than a pass.
-			{ name: "the auth screen", path: "/", wait: ".auth-field", min: 2, anon: true },
+			// Sign-in is a guest's page (an account is sent on to the menu), and the
+			// seeded identity here is a guest, so it is walked like any other path.
+			{ name: "the sign-in screen", path: "/login", wait: ".auth-field", min: 2 },
 			{ name: "/bggfilter", path: "/bggfilter", wait: ".bgf-search input", min: 1 },
 			{ name: "/steamfilter", path: "/steamfilter", wait: ".stf-search input", min: 1 },
 			// The guide's whole-site search plus a tab's own filter, and the charts' number fields.
@@ -3103,13 +3163,7 @@ try {
 
 		const seen = [];
 		for (const s of SURFACES) {
-			// `anon` surfaces only exist to a visitor with no stored identity, so they
-			// get a context of their own (see the note on the auth row above).
-			const anonCtx = s.anon
-				? await browser.newContext({ viewport: { width: 390, height: 844 } })
-				: null;
-			const pg = anonCtx ? await anonCtx.newPage() : page;
-			if (anonCtx) pg.on("pageerror", (e) => errors.push(String(e)));
+			const pg = page;
 			await pg.goto(`http://localhost:${PORT}${s.path}`, { waitUntil: "networkidle" });
 			await pg.waitForSelector(s.wait, { timeout: 25_000 }).catch(() => {});
 			if (s.open) await s.open(pg);
@@ -3120,7 +3174,6 @@ try {
 			check(`${s.name}: no field under 16px`, small.length === 0,
 				small.map((f) => `${f.what} = ${f.px}px`).join(", "));
 			seen.push(...fields);
-			if (anonCtx) await anonCtx.close();
 		}
 
 		// One more roster guard, one level up: if the walk itself broke — a renamed
@@ -3183,6 +3236,8 @@ try {
 		// what is being asked is what the player sees.
 		const PROBES = {
 			".lby-back": ["fontFamily", "fontSize", "fontWeight", "letterSpacing", "textTransform", "padding", "borderRadius"],
+			// A guest's Log in (the seeded identity here is one): the bar's other button.
+			".lby-login": ["fontFamily", "fontSize", "fontWeight", "letterSpacing", "textTransform", "padding", "borderRadius"],
 			".lby-hero-name": ["fontFamily", "fontSize", "fontWeight", "letterSpacing"],
 			".lby-hero-emblem": ["display", "width", "height", "borderRadius"],
 			".lby-hero-seats": ["fontFamily", "fontSize", "letterSpacing", "textTransform"],
@@ -9791,10 +9846,10 @@ try {
 		await page.unroute(`http://localhost:${API_PORT}/**`);
 		await page.goto(`http://localhost:${PORT}/`, { waitUntil: "networkidle" });
 		await page.getByRole("button", { name: /^Logout$/ }).click({ timeout: 10_000 }).catch(() => {});
-		await has(".auth-card", 15_000);
-		// WAIT FOR THE DELETE, not for the sign-in card: sign-out starts the IndexedDB
+		await has(".home-login", 15_000);
+		// WAIT FOR THE DELETE, not for the guest's menu: sign-out starts the IndexedDB
 		// delete and does not wait for it (clearNotesOffline is fire-and-forget), so the
-		// card can paint while the database is still listed. Read once, this was a race
+		// menu can repaint while the database is still listed. Read once, this was a race
 		// that a loaded CI runner lost (Pages run for efbbc7b5, 2026-10-06). Bounded, and
 		// it still fails if the database never goes.
 		const leftover = () => page.evaluate(async () => ({
@@ -9897,12 +9952,13 @@ try {
 			const { ctx, page } = await open({ width: 1280, height: 860 }, { status: 401 });
 			await page.goto(`http://localhost:${PORT}/profile`, { waitUntil: "networkidle" });
 			// A 401 from /profile is handed to the shell (SESSION_EXPIRED), the same path
-			// the lobbies' history fetch takes: the dead login is cleared and the sign-in
-			// screen says why, and signing in returns to /profile.
+			// the lobbies' history fetch takes: the dead login gives way to a guest and
+			// the sign-in screen says why, and signing in returns to /profile.
 			const said = await page.locator(".auth-notice").innerText({ timeout: 25_000 }).catch(() => "");
 			check("an expired session hands off to sign-in and says why", /session expired/i.test(said), said);
-			const stored = await page.evaluate(() => localStorage.getItem("spender_user"));
-			check("the dead login is cleared", stored === null, String(stored).slice(0, 80));
+			const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("spender_user") || "null"));
+			check("the dead login is cleared, leaving a guest",
+				stored?.guest === true && !stored?.session_token && stored?.id !== user.id, JSON.stringify(stored).slice(0, 120));
 			await ctx.close();
 		}
 		{
@@ -9916,6 +9972,11 @@ try {
 			const named = await page.locator(".browser-username").count();
 			check("a guest's name is not a link (guests have no profile)", named === 1 && guestLinks === 0,
 				`names ${named}, links ${guestLinks}`);
+			await page.goto(`http://localhost:${PORT}/profile`, { waitUntil: "networkidle" });
+			await page.locator(".pf-link", { hasText: "Log in" }).click({ timeout: 25_000 }).catch(() => {});
+			check("a guest who opens /profile is offered Log in, which opens sign-in",
+				await page.waitForSelector(".auth-screen", { timeout: 10_000 }).then(() => true, () => false)
+				&& new URL(page.url()).pathname === "/login", page.url());
 			await ctx.close();
 		}
 	}
@@ -11337,8 +11398,11 @@ try {
 		session = "dead";
 		await sp.reload({ waitUntil: "commit" });
 		const toAuth = await sp.waitForSelector(".auth-card", { timeout: 15_000 }).then(() => true, () => false);
-		check("a definitely dead session lands on sign-in and clears the login",
-			toAuth && await sp.evaluate(() => !localStorage.getItem("spender_user")));
+		check("a definitely dead session lands on sign-in and clears the login, leaving a guest",
+			toAuth && await sp.evaluate(() => {
+				const u = JSON.parse(localStorage.getItem("spender_user") || "null");
+				return u?.guest === true && !u.session_token && u.id !== "boot-stale";
+			}));
 		check("...and says why", /signed out/i.test(await sp.locator(".auth-notice").textContent().catch(() => "")),
 			await sp.locator(".auth-notice").textContent().catch(() => "(no notice)"));
 		await sctx.close();

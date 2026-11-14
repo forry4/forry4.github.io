@@ -144,9 +144,9 @@ async function launchBrowser() {
 // used to be unable to assert one: the shell pinged the server before it routed,
 // and this gate has no server, so every path sat on the loading screen and the
 // best it could say was "something rendered". The boot lands from local state now
-// (Spender.jsx), so a stored identity must reach Home, a deep link its lobby, and
-// no identity the sign-in screen — and if a ping ever creeps back in front of the
-// landing, these go red.
+// (Spender.jsx), so a visitor must reach Home and a deep link its lobby — with a
+// stored identity or, having none, as the guest the shell makes them — and /login
+// the sign-in screen. If a ping ever creeps back in front of the landing, these go red.
 const GUEST = JSON.stringify({ id: "smoke-guest", name: "Smoke", guest: true });
 async function checkPage(browser, pagePath, { checkCls = false, pathPrefix = null, identity = null, expect = null } = {}) {
 	const ctx = await browser.newContext();
@@ -222,11 +222,12 @@ try {
 
 	const browser = await launchBrowser();
 	const checks = [
-		// the original blank-page + CLS gate, now on the two screens a visitor can land on
-		["/", { checkCls: true, expect: ".auth-card" }],                    // no identity -> sign-in
+		// the original blank-page + CLS gate, on the screens a visitor can land on
+		["/", { checkCls: true, expect: ".home-game-card" }],               // no identity -> Home, as a new guest
 		["/", { checkCls: true, identity: GUEST, expect: ".home-game-card" }], // stored identity -> Home
+		["/login", { checkCls: true, pathPrefix: "/login", expect: ".auth-card" }],       // the sign-in screen
 		["/duel", { pathPrefix: "/duel", identity: GUEST, expect: ".duel .lby-cols" }],   // deep link -> its lobby
-		["/dontminion", { pathPrefix: "/dontminion", expect: ".auth-card" }], // logged out: sign-in, URL kept
+		["/dontminion", { pathPrefix: "/dontminion", expect: ".lby-cols" }], // no identity: its lobby too, URL kept
 		["/spender/ABCDEF", { pathPrefix: "/spender", identity: GUEST, expect: ".lby-loading, .lby-cols" }],  // room deep link: its join, waiting on the (absent) server
 	];
 	const failures = [];

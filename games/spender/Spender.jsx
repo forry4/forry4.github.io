@@ -83,7 +83,7 @@ const prefetchScreen = (mode) => {
 };
 
 // Screens that live on the server — where the "waking" notice shows (shared/backend.js).
-const SERVER_SCREENS = new Set(["auth", "spender", "coc", "werewolf", "duel", "dontminion",
+const SERVER_SCREENS = new Set(["login", "spender", "coc", "werewolf", "duel", "dontminion",
 	"dissonance", "ragtag", "orbit", "blackcastle", "secretnames", "pinch", "pipmarket",
 	"books", "notes", "profile", "boxpuzzles"]);
 const SIGNED_OUT_NOTICE = "You were signed out on this device. Sign in again to pick up where you left off.";
@@ -107,9 +107,10 @@ import SpenderRules from "./rules.jsx";
 import { GemToken, CardView, GEM_COLORS, GEM_LABELS, GEM_HEX,
 	splendorPanelCss, splendorCardCss, splendorCardExtraCss, splendorPillCss,
 	splendorLogCss } from "../../shared/splendor.jsx";
-import { parsePath, buildPath, pushPath, replacePath, subscribe, navigateTo, cameFromInsideApp } from "../../shared/router.js";
+import { parsePath, buildPath, pushPath, replacePath, subscribe, navigateTo, cameFromInsideApp, IN_APP } from "../../shared/router.js";
 // Site-shell screens, extracted out of this file (see shared/AuthScreen.jsx).
 import AuthScreen from "../../shared/AuthScreen.jsx";
+import { loadIdentity, readIdentity, writeIdentity, guestAfterLogin, renamedGuest, isMember } from "../../shared/identity.js";
 import { leaveOpenSeat, readRoomToken } from "../../shared/roomLifecycle.js";
 import HomeScreen, { SITE_NAME, GAMES, HERO_RULE } from "../../shared/HomeScreen.jsx";
 import SiteHealth, { useUnackedAlerts } from "../../shared/SiteHealth.jsx";
@@ -157,8 +158,8 @@ const HTTP_BASE = WS_BASE.replace(/^ws/, "http").replace(/\/ws$/, "");
 // tables — GAMES[].id ≠ path for wherewolf; Spender is one site-level screen now.
 // The shell owns segment 1; each sub-game owns its own segment 2 (room id). The Spender
 // Spender's own waiting/game map to "spender" (or "puzzles" while puzzling) in applyPopRoute.
-const SCREEN_FOR_MODE = { spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", pipmarket: "pipmarket", books: "books", notes: "notes", profile: "profile", puzzles: "puzzles", bggfilter: "bggfilter", steamfilter: "steamfilter", boxpuzzles: "boxpuzzles", astral: "astral", lolstats: "lolstats", animefilter: "animefilter", offline: "offline" };
-const MODE_FOR_SCREEN = { home: "home", spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", pipmarket: "pipmarket", books: "books", notes: "notes", profile: "profile", puzzles: "puzzles", bggfilter: "bggfilter", steamfilter: "steamfilter", boxpuzzles: "boxpuzzles", astral: "astral", lolstats: "lolstats", animefilter: "animefilter", offline: "offline" };
+const SCREEN_FOR_MODE = { spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", pipmarket: "pipmarket", books: "books", notes: "notes", profile: "profile", puzzles: "puzzles", bggfilter: "bggfilter", steamfilter: "steamfilter", boxpuzzles: "boxpuzzles", astral: "astral", lolstats: "lolstats", animefilter: "animefilter", offline: "offline", login: "login" };
+const MODE_FOR_SCREEN = { home: "home", spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", pipmarket: "pipmarket", books: "books", notes: "notes", profile: "profile", puzzles: "puzzles", bggfilter: "bggfilter", steamfilter: "steamfilter", boxpuzzles: "boxpuzzles", astral: "astral", lolstats: "lolstats", animefilter: "animefilter", offline: "offline", login: "login" };
 
 // Per-game emblem — inline SVG tinted via currentColor (=the card's --accent), so no
 // raster asset / CDN (keeps the self-hosted, no-CLS constraint). Small motifs that read
@@ -192,7 +193,6 @@ const displayName = (name) => {                                // backend "AI (H
 };
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
-function uid() { return Math.random().toString(36).slice(2, 10); }
 function roomCode() { return Array.from({ length: 6 }, () => "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[Math.floor(Math.random() * 26)]).join(""); }
 function emptyGems() { return { white: 0, blue: 0, green: 0, red: 0, black: 0, gold: 0 }; }
 function gemTotal(tokens) { return Object.values(tokens).reduce((a, b) => a + b, 0); }
@@ -795,7 +795,7 @@ function useWebSocket(onMessage, { onOpen, onClose } = {}) {
 // than imported so the menu does not pull their lazy chunks in.
 const lsHas = (key) => { try { return localStorage.getItem(key) != null; } catch { return false; } };
 function offlineReadRows(authUser, readingPack) {
-	const member = !!(authUser && !authUser.guest && authUser.session_token);
+	const member = isMember(authUser);
 	const online = typeof navigator === "undefined" || navigator.onLine !== false;
 	const saved = (has, none) => (has ? "a copy is on this device" : online ? none : "no copy on this device yet");
 	const packed = (id, label, verb) => ({
@@ -899,26 +899,15 @@ const OFFLINE_PACKS = {
 
 export default function SpenderApp() {
 	// ── Persistent identity ────────────────────────────────────────────────
-	const [authUser, setAuthUser] = useState(() => {
-		try { const s = localStorage.getItem("spender_user"); if (s) return JSON.parse(s); } catch {}
-		return null;
-	});
+	// There is always one (shared/identity.js): an account, or the guest every
+	// visitor is until they sign in. `myId` is the seat id every game plays under.
+	const [authUser, setAuthUser] = useState(loadIdentity);
+	const myId = authUser.id;
 	const [authNotice, setAuthNotice] = useState("");
 	const backendAwake = useBackendAwake();
-	const [myId, setMyId] = useState(() => {
-		try {
-			const s = localStorage.getItem("spender_user");
-			if (s) { const u = JSON.parse(s); if (u?.id) return u.id; }
-			const g = localStorage.getItem("spender_myId");
-			if (g) return g;
-		} catch {}
-		const id = uid();
-		try { localStorage.setItem("spender_myId", id); } catch {}
-		return id;
-	});
 
 	// ── Screen & room state ────────────────────────────────────────────────
-	// SITE-LEVEL mode only: loading | auth | home | spender | coc | werewolf | duel |
+	// SITE-LEVEL mode only: loading | login | home | spender | coc | werewolf | duel |
 	// books | puzzles. `screen` used to ALSO carry Spender's own browser/waiting/game,
 	// conflating "which part of the site am I in" with "which Spender screen" — which is
 	// what made the shell impossible to lift out of this file. Spender's own screen now
@@ -994,7 +983,7 @@ export default function SpenderApp() {
 	// is up online, re-fetch whatever this device downloaded under an older build.
 	const packsRefreshedRef = useRef(false);
 	useEffect(() => {
-		if (packsRefreshedRef.current || screen === "loading" || screen === "auth") return undefined;
+		if (packsRefreshedRef.current || screen === "loading" || screen === "login") return undefined;
 		const t = setTimeout(() => {
 			packsRefreshedRef.current = true;
 			refreshOfflinePacks(OFFLINE_PACKS, { authUser }).catch(() => {});
@@ -1281,18 +1270,16 @@ export default function SpenderApp() {
 
 	// ── URL routing (shared/router.js) ─────────────────────────────────────
 	// Segment 1 (game mode) is owned HERE; each sub-game owns its own segment 2 (room id).
-	const initialRouteRef = useRef(parsePath());   // parsed once at first render; landAt consumes it
-	const pendingRouteRef = useRef(null);          // deep link stashed across the auth screen
+	const initialRouteRef = useRef(parsePath());   // parsed once at first render; the boot lands on it
 	const applyPopRouteRef = useRef(() => {});     // fresh-closure mirror for the mount-once popstate effect
 	// A URL-driven room attempt in flight ({rid, retried}): its failure falls back to the
 	// lobby (replacePath /spender + toast) instead of leaving a dead room URL; a stale
 	// reconnect token is retried ONCE as a plain join (invite-link case).
 	const urlAttemptRef = useRef(null);
 	useEffect(() => subscribe((route) => {
-		// Back/Forward. While still booting, just retarget the landing; while on auth,
-		// retarget the post-login destination. Otherwise apply the route now.
+		// Back/Forward. While still booting, just retarget the landing; otherwise
+		// apply the route now.
 		if (screenRef.current === "loading") { initialRouteRef.current = route; return; }
-		if (screenRef.current === "auth") { pendingRouteRef.current = route.game && route.game !== "home" ? route : null; return; }
 		applyPopRouteRef.current(route);
 	}), []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1559,8 +1546,10 @@ export default function SpenderApp() {
 	// show "Waking the server…" and poll until a 200, validate the session, wait for
 	// the fonts, then a fixed 350ms — ~23s of progress bar on a cold Render instance
 	// and ~1s even when warm, in front of a menu that needs no server at all.
-	// Now: a stored identity lands on Home (or its deep link) and no identity lands
-	// on sign-in, as soon as the fonts are in. Everything that needs the server asks
+	// Now: the URL decides where the visitor lands — Home, or a deep link — as soon as
+	// the fonts are in, and as WHOEVER THIS DEVICE ALREADY IS: an account, or a guest.
+	// Nobody is stopped at a sign-in screen first; that is a page a guest opens, from
+	// "Log in" beside their name. Everything that needs the server asks
 	// shared/backend.js, whose /health probe webapp/main.jsx started at load.
 	useEffect(() => {
 		if (screen !== "loading") return;
@@ -1592,21 +1581,18 @@ export default function SpenderApp() {
 				]);
 			} catch {}
 		};
-		const stored = () => {
-			try { const s = localStorage.getItem("spender_user"); return s ? JSON.parse(s) : null; } catch { return null; }
-		};
 		const route = initialRouteRef.current;
 		// A deep link's screen is a lazy chunk: start fetching it NOW, alongside the
 		// fonts and the probe, rather than after the landing mounts its <Suspense>.
-		prefetchScreen(route?.game);
-		// OFFLINE route: identity is local (guest myId / cached login) and needs no
+		prefetchScreen(route.game);
+		// OFFLINE route: identity is local (a guest, or a cached login) and needs no
 		// network, so it never checks the session either.
-		if (route?.game !== "offline") checkStoredSession(stored());
+		if (route.game !== "offline") checkStoredSession(authUser);
 		(async () => {
 			await waitFonts();
-			// Read identity AFTER the fonts: a session the check has already found
-			// dead was cleared from storage in the meantime, and lands on sign-in.
-			if (!cancelled) landAt(route?.game === "offline" || stored() ? "home" : "auth");
+			// Read the route AFTER the fonts: a session the check has already found
+			// dead has retargeted the landing to sign-in in the meantime.
+			if (!cancelled) enterRoute(initialRouteRef.current);
 		})();
 		return () => { cancelled = true; };
 	}, [screen]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1616,15 +1602,15 @@ export default function SpenderApp() {
 	// core.auth), which downgrades every authenticated request to anonymous while the
 	// UI still shows you logged in. Same rules as when this gated the boot:
 	//  - ok:true refreshes the cached identity (name / is_admin);
-	//  - a definite ok:false clears the stale login and sends the player to sign-in
-	//    (through the SESSION_EXPIRED path every lobby already uses, which keeps the
-	//    route for after they sign in and says why on the sign-in screen);
+	//  - a definite ok:false ends the stale login and sends the player to sign-in
+	//    (through the SESSION_EXPIRED path every lobby already uses, which returns
+	//    them to this route once they sign in and says why on the sign-in screen);
 	//  - a transport error, a 5xx or a non-JSON body NEVER signs anyone out: it waits
 	//    for the server to answer and asks again, a few times, then lets it be.
 	// It runs alongside the /health probe rather than after it; a cold start holds
 	// this request open just the same, and a success here marks the server awake.
 	const checkStoredSession = (user) => {
-		if (!user || user.guest || !user.session_token) return;
+		if (!isMember(user)) return;
 		(async () => {
 			for (let attempt = 0; attempt < 4; attempt++) {
 				let data = null;
@@ -1633,29 +1619,16 @@ export default function SpenderApp() {
 						{ headers: { Authorization: `Bearer ${user.session_token}` } });
 					if (res.ok || (res.status >= 400 && res.status < 500)) data = await res.json();
 				} catch { data = null; }
-				let current = null;
-				try { current = JSON.parse(localStorage.getItem("spender_user") || "null"); } catch {}
+				const current = readIdentity();
 				// Signed out, or signed in as someone else, while this was in flight.
 				if (!current || current.id !== user.id || current.session_token !== user.session_token) return;
 				if (data?.ok && data.user) {
 					markBackendAwake();
-					const fresh = { ...current, name: data.user.name, is_admin: !!data.user.is_admin };
-					try { localStorage.setItem("spender_user", JSON.stringify(fresh)); } catch {}
-					setAuthUser(fresh);
+					setAuthUser(writeIdentity({ ...current, name: data.user.name, is_admin: !!data.user.is_admin }));
 					return;
 				}
 				if (data && data.ok === false) {
 					markBackendAwake();
-					// Before the landing (still on the blank boot screen), clearing
-					// storage is enough — the boot reads it and lands on sign-in.
-					if (screenRef.current === "loading") {
-						try { localStorage.removeItem("spender_user"); localStorage.removeItem("spender_roomId"); } catch {}
-						const newId = uid();
-						try { localStorage.setItem("spender_myId", newId); } catch {}
-						setAuthUser(null); setMyId(newId);
-						setAuthNotice(SIGNED_OUT_NOTICE);
-						return;
-					}
 					window.dispatchEvent(new CustomEvent(SESSION_EXPIRED,
 						{ detail: { ...user, notice: SIGNED_OUT_NOTICE } }));
 					return;
@@ -1920,32 +1893,38 @@ export default function SpenderApp() {
 	}
 
 	// ── Auth actions ───────────────────────────────────────────────────────
-	// The FORM lives in shared/AuthScreen.jsx; the shell keeps identity. A
-	// registered user's id/token is persisted, a guest's is not (guests keep the
-	// anonymous id they already had, so a game started before signing in stays theirs).
-	const handleAuthenticated = (user) => {
-		setAuthNotice("");
-		if (!user.guest) {
-			try {
-				localStorage.setItem("spender_user", JSON.stringify(user));
-				localStorage.setItem("spender_myId", user.id);
-			} catch {}
-			setMyId(user.id);
-		}
-		setAuthUser(user);
-		consumePendingRoute();
-	};
+	// The FORM lives in shared/AuthScreen.jsx, at /login; the shell keeps identity
+	// (shared/identity.js). Signing in only changes WHO: the effect below is what
+	// leaves the screen, so every way of becoming an account while on it — the form,
+	// Forward into /login when already signed in, a typed /login — exits the same way.
+	const handleAuthenticated = (user) => setAuthUser(writeIdentity(user));
 
+	// Back to wherever "Log in" was pressed; opened cold (a typed URL), to Home.
+	const leaveLogin = () => {
+		if (cameFromInsideApp()) { window.history.back(); return; }
+		replacePath(buildPath("home"));
+		setScreen("home");
+	};
+	const continueAsGuest = (name) => {
+		if (authUser.guest) setAuthUser(renamedGuest(authUser, name));
+		leaveLogin();
+	};
+	useEffect(() => {
+		if (screen === "login" && !authUser.guest) leaveLogin();
+		// The notice explains one arrival at sign-in; it does not outlive the visit.
+		if (screen !== "login") setAuthNotice("");
+	}, [screen, authUser]); // eslint-disable-line react-hooks/exhaustive-deps
+
+	// Only Home offers it, so there is nowhere to go: the menu redraws for the guest
+	// this device now is, with Log in where Logout was.
 	const handleLogout = () => {
 		// End this device's session on the server too (sessions last 90 days from last
 		// use, so forgetting the token locally is not a logout). Best effort: the local
 		// sign-out below happens regardless, even offline.
-		const tok = authUser?.session_token;
-		if (tok && !authUser?.guest) {
-			fetch(`${HTTP_BASE}/auth/logout`, { method: "POST", headers: { Authorization: `Bearer ${tok}` }, keepalive: true })
+		if (isMember(authUser)) {
+			fetch(`${HTTP_BASE}/auth/logout`, { method: "POST", headers: { Authorization: `Bearer ${authUser.session_token}` }, keepalive: true })
 				.catch(() => {});
 		}
-		setAuthNotice("");
 		setHistoryGames([]);
 		// The PRIVATE copies kept for reading offline leave with the login that made them
 		// (a shared device must not keep someone's notebook). Only on a real sign-out: an
@@ -1953,42 +1932,39 @@ export default function SpenderApp() {
 		clearNotesOffline().catch(() => {});
 		try {
 			for (const k of Object.keys(localStorage)) if (k.startsWith("profile.history.")) localStorage.removeItem(k);
-			localStorage.removeItem("spender_user");
 			localStorage.removeItem("spender_roomId");
 		} catch {}
-		const newId = uid();
-		setMyId(newId);
-		try { localStorage.setItem("spender_myId", newId); } catch {}
-		setAuthUser(null);
-		replacePath(buildPath("home"));
-		setScreen("auth");
+		setAuthUser(guestAfterLogin());
 		setRoomData(null);
 		setRoomId("");
 		disconnect();
 	};
 
 	// Lobby refreshes can discover a session that expired while this tab was
-	// open. Keep the route and cached lists so signing in returns to that lobby.
+	// open. The player becomes a guest and is taken to sign-in, which says why;
+	// the cached lists stay, and signing in returns to the lobby they were in.
 	useEffect(() => {
 		const syncLogin = () => {
-			if (!authUser?.session_token) return;
+			if (!isMember(authUser)) return;
 			try {
 				const latest = latestSession(authUser);
 				if (latest.session_token !== authUser.session_token) setAuthUser(latest);
 			} catch {}
 		};
 		const expired = ({ detail }) => {
-			if (!authUser?.session_token || detail.id !== authUser.id) return;
+			if (!isMember(authUser) || detail.id !== authUser.id) return;
 			try { if (latestSession(authUser).session_token !== detail.session_token) { syncLogin(); return; } } catch { return; }
-			pendingRouteRef.current = parsePath();
-			try { localStorage.removeItem("spender_user"); localStorage.removeItem("spender_roomId"); } catch {}
-			const newId = uid();
-			try { localStorage.setItem("spender_myId", newId); } catch {}
-			setMyId(newId);
-			setAuthUser(null);
+			try { localStorage.removeItem("spender_roomId"); } catch {}
+			setAuthUser(guestAfterLogin());
 			setHistoryGames([]);
 			setAuthNotice(detail.notice || "Your session expired. Sign in again to load your game history.");
-			setScreen("auth");
+			// To sign-in, as an entry Back (and signing in) returns from. Written here
+			// rather than through navigateTo: its popstate is a DISCRETE event, so React
+			// would render the new screen before the new identity, and for that one
+			// frame sign-in would be showing an account — which is what leaves it.
+			pushPath(buildPath("login"), IN_APP);
+			if (screenRef.current === "loading") initialRouteRef.current = parsePath();   // the boot lands there
+			else setScreen("login");
 			setRoomData(null); setRoomId(""); disconnect();
 		};
 		const storage = (event) => { if (event.key === "spender_user") syncLogin(); };
@@ -2564,8 +2540,8 @@ export default function SpenderApp() {
 	// the shell is still mounted, so going home is the shell's own navigation.
 	const crashHome = () => nav("home");
 
-	// enterRoute(): state-only navigation to a parsed route — used by boot, the post-auth
-	// consume, and popstate. NEVER pushes (the URL is already what it should be); only an
+	// enterRoute(): state-only navigation to a parsed route — used by boot and
+	// popstate. NEVER pushes (the URL is already what it should be); only an
 	// unknown path is normalized (replace, not push).
 	const enterRoute = (route) => {
 		const g = route?.game;
@@ -2582,27 +2558,6 @@ export default function SpenderApp() {
 			return;
 		}
 		setScreen(SCREEN_FOR_MODE[g]);   // coc/werewolf/duel/books mount and read their own segment 2
-	};
-
-	// landAt(): boot injection — the stored identity decides auth-vs-in, the initial URL
-	// decides WHERE. A deep link seen while logged out is stashed across the auth screen
-	// (URL left untouched so it survives in the address bar) and consumed after login/guest.
-	const landAt = (dest) => {
-		if (dest === "auth") {
-			const r = initialRouteRef.current;
-			pendingRouteRef.current = r && r.game && r.game !== "home" ? r : null;
-			setScreen("auth");
-			return;
-		}
-		enterRoute(initialRouteRef.current || { game: "home", room: null });
-	};
-
-	const consumePendingRoute = () => {
-		const route = pendingRouteRef.current;
-		pendingRouteRef.current = null;
-		if (route) { enterRoute(route); return; }
-		replacePath(buildPath("home"));
-		setScreen("home");
 	};
 
 	// applyPopRoute(): Back/Forward while on a real screen. Mode-level plus Spender's own
@@ -3048,12 +3003,13 @@ export default function SpenderApp() {
 	// wait moved to the places that need the server (shared/backend.js).
 	if (screen === "loading") return <style>{css}</style>;
 
-	// Auth screen
-	if (screen === "auth") return (
+	// Sign in / register (/login) — opened by a guest, from Log in beside their name
+	if (screen === "login") return (
 		// heroRule is the home menu's ornament, handed over rather than re-drawn:
-		// the front door and the menu behind it are one title plate.
-		<AuthScreen siteName={SITE_NAME} httpBase={HTTP_BASE} css={css} myId={myId}
-			heroRule={HERO_RULE} notice={authNotice} onAuthenticated={handleAuthenticated} />
+		// this screen and the menu behind it are one title plate.
+		<AuthScreen siteName={SITE_NAME} httpBase={HTTP_BASE} css={css} guestName={authUser.name}
+			heroRule={HERO_RULE} notice={authNotice}
+			onAuthenticated={handleAuthenticated} onGuest={continueAsGuest} onBack={leaveLogin} />
 	);
 
 	// Home menu — pick a game (Forrest Games landing)
@@ -3064,6 +3020,7 @@ export default function SpenderApp() {
 			onBooks={() => nav("books")}
 			onNotes={() => nav("notes")}
 			onProfile={() => navigateTo("profile")}
+			onLogin={() => navigateTo("login")}
 			onBggFilter={() => nav("bggfilter")}
 			onSteamFilter={() => nav("steamfilter")}
 			onAstral={() => nav("astral")}
@@ -3583,7 +3540,7 @@ export default function SpenderApp() {
 					</div>
 					<div className="browser-section lby-col-history">
 						<LobbySectionHd title="History" note={`${historyGames.length} finished`} />
-						{(!authUser || authUser.guest) ? (
+						{authUser.guest ? (
 							<div className="lby-empty">Log in to keep your game history.</div>
 						) : historyGames.length === 0 ? (
 							<div className="lby-empty">No finished games yet.</div>

@@ -51,16 +51,16 @@ const browser = await chromium.launch().catch(() => chromium.launch({ channel: "
 const probes = [];
 
 /** One capture. */
-async function shot(name, { view, guest = true, after, probe, fullPage = true } = {}) {
+async function shot(name, { view, at = "/", after, probe, fullPage = true } = {}) {
 	const ctx = await browser.newContext({
 		viewport: { width: view.w, height: view.h }, deviceScaleFactor: view.dsf, reducedMotion: "reduce",
 	});
-	if (guest) await ctx.addInitScript(GUEST);
+	await ctx.addInitScript(GUEST);
 	const page = await ctx.newPage();
 	const errs = [];
 	page.on("pageerror", (e) => errs.push(String(e)));
 	page.on("console", (m) => { if (m.type() === "error") errs.push("console: " + m.text()); });
-	await page.goto(`http://localhost:${PORT}/`, { waitUntil: "load", timeout: 30_000 });
+	await page.goto(`http://localhost:${PORT}${at}`, { waitUntil: "load", timeout: 30_000 });
 	await page.waitForSelector(".home-game-card,.auth-card", { timeout: 25_000 })
 		.catch(() => {});
 	await sleep(700);
@@ -106,10 +106,10 @@ try {
 		console.log("  phone-top.png / phone-bottom.png");
 	}
 	if (!only || only === "auth") {
-		for (const view of VIEWS) await shot("auth-login", { view, guest: false });
+		for (const view of VIEWS) await shot("auth-login", { view, at: "/login" });
 		for (const view of [VIEWS[1], VIEWS[3]]) {
-			await shot("auth-register", { view, guest: false, after: (p) => p.locator(".auth-tab").nth(1).click() });
-			await shot("auth-guest", { view, guest: false, after: (p) => p.locator(".auth-tab").nth(2).click() });
+			await shot("auth-register", { view, at: "/login", after: (p) => p.locator(".auth-tab").nth(1).click() });
+			await shot("auth-guest", { view, at: "/login", after: (p) => p.locator(".auth-tab").nth(2).click() });
 		}
 	}
 	if (probes.length) {

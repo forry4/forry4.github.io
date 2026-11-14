@@ -1,7 +1,7 @@
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { installDom } from "./dom-stub.mjs";
-import { parsePath, buildPath, pushPath, replacePath, subscribe, navigateTo, cameFromInsideApp, MODES }
+import { parsePath, buildPath, pushPath, replacePath, subscribe, navigateTo, cameFromInsideApp, MODES, IN_APP }
 	from "../../../shared/router.js";
 
 let win;
@@ -60,4 +60,14 @@ test("navigateTo pushes, notifies subscribers and marks the entry as in-app", ()
 	assert.equal(cameFromInsideApp(), true);
 	navigateTo("profile");
 	assert.equal(seen.length, 1, "navigating to the current path does nothing");
+});
+
+test("pushPath can mark an entry as in-app without notifying anyone, and says whether it pushed", () => {
+	const seen = [];
+	subscribe((r) => seen.push(r));
+	assert.equal(pushPath("/login", IN_APP), true);
+	assert.equal(cameFromInsideApp(), true);
+	assert.equal(seen.length, 0, "a state-only navigation writes its own screen; nothing is notified");
+	assert.equal(pushPath("/login", IN_APP), false);
+	assert.deepEqual(parsePath(), { game: "login", room: null });
 });

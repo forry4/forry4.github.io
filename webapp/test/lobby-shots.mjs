@@ -104,7 +104,6 @@ async function shot(lobby, view, state) {
 	// third column can never be seen populated.
 	await ctx.addInitScript((me) => {
 		localStorage.setItem("spender_user", JSON.stringify({ id: me, name: "Aurelia", session_token: "stub" }));
-		localStorage.setItem("spender_myId", me);
 	}, ME);
 	const page = await ctx.newPage();
 	const errs = [];

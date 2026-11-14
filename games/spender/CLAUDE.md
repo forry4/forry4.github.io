@@ -238,11 +238,10 @@ otherwise means cross-game kits. They briefly sat in `webapp/shell/`, which is w
 the shell is really lifted out (`main.jsx` -> `Shell.jsx` -> `games/*`), but until then that made
 `games/spender` import from `webapp/` while `webapp/main.jsx` imports `games/spender` — a
 directory-level cycle. One-way (`games -> shared`) beats a cycle waiting on a refactor. AuthScreen owns
-its own six form-state hooks and reports back through a single `onAuthenticated(user)`; the shell keeps
-identity. Note the asymmetry it preserves: a REGISTERED user is written to `localStorage`, a GUEST is
-not (guests keep the anonymous id they already had, so a game started before signing in stays theirs) —
-`npm run screens` asserts exactly that.
-**Still to invert:** `screen`, `myId`, `authUser` and `toast` remain in `SpenderApp`, and ~38
+its own form-state hooks and reports back through `onAuthenticated(user)` (an account) or `onGuest(name)`
+(stay a guest); the shell keeps identity, through `shared/identity.js` — there is ALWAYS one, a guest
+until someone signs in, stored either way (root `CLAUDE.md`, "Everyone has an identity").
+**Still to invert:** `screen`, `authUser` and `toast` remain in `SpenderApp`, and ~38
 routing-machinery references (`screenRef`/`applyPopRoute`/`enterRoute`/`deepRoom`) are still entangled
 there. Finishing it means the shell takes those over AND Spender takes over its own room segment, the
 way CoC/WW/Duel already do.
@@ -263,7 +262,8 @@ smaller, purely mechanical step (splitting `screen`) still shipped two regressio
 invite links.
 
 ### Screen flow & derived state
-- `"auth"` → `"browser"` → `"waiting"` (2-player) | `"game"` (vs-AI goes straight to game).
+- `"browser"` → `"waiting"` (2-player) | `"game"` (vs-AI goes straight to game). Sign-in is not on
+  this path: it is the site-level `"login"` screen at `/login`, opened from Log in.
 - `inGame(status)` = `"playing"` OR `"over"` (a finished game stays on the game screen for the review UI).
 - **Derived game state (`game`, `me`, `myTurn`, `aiThinking`, review flags) MUST be hoisted ABOVE all
   `useEffect` hooks** — they appear in dep arrays; a later declaration throws a TDZ ReferenceError in
@@ -271,10 +271,10 @@ invite links.
 - **`WS_BASE = import.meta.env.VITE_WS_URL` is baked in at build time** (not from `window.location`) — so
   a separate frontend host (Cloudflare staging) points at the prod backend just by setting `VITE_WS_URL`.
 - Reconnect tokens in `localStorage` as `spender_token_${roomId}_${myId}`; sent as `{action:"reconnect",
-  token}`. Identity: logged-in `myId === user.id`; guest gets a random `spender_myId`.
-- **Session validation on load**: `GET /auth/session?token=` runs before routing — a definitively-dead
-  token (expired / superseded by a login elsewhere) clears the stale login; a network error NEVER logs you
-  out.
+  token}`. Identity: `myId === authUser.id`, for an account and a guest alike.
+- **Session validation on load**: `GET /auth/session` runs in the background beside the landing — a
+  definitively-dead token ends the stale login (guest + `/login` with a notice); a network error NEVER
+  logs you out.
 
 ### Lobby & multiplayer (2–4 players)
 - Spender seats 2–4 humans (AI games stay 2-player); the engine is player-count-agnostic. `_bank_for(n)`

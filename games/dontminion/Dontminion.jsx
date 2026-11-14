@@ -2152,7 +2152,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
     return (
       <div className="app dm" style={{ "--lby-accent": GAME_ACCENTS.dontminion }}>
         <style>{dmStyles}</style>
-        <LobbyHeader onBack={onExit} user={<LobbyUser user={authUser || { name: "Guest", guest: true }} />} />
+        <LobbyHeader onBack={onExit} user={<LobbyUser user={authUser} />} />
         <div className="lby-page"><div className="lby-page-in">
         <LobbyHero game="dontminion">
         <LobbyCreateRow onCreate={() => setShowCreateModal(true)} onJoin={joinGame}
