@@ -1,8 +1,8 @@
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { installDom } from "./dom-stub.mjs";
-import { loadIdentity, readIdentity, writeIdentity, guestAfterLogin, renamedGuest, isMember,
-	GUEST_NAME_MAX } from "../../../shared/identity.js";
+import { loadIdentity, readIdentity, writeIdentity, guestAfterLogin, isMember,
+	isGuestName } from "../../../shared/identity.js";
 import { latestSession } from "../../../shared/lobbyHistory.js";
 
 const stored = () => JSON.parse(localStorage.getItem("spender_user"));
@@ -52,13 +52,17 @@ test("...and a tab that finds another tab already signed out takes that tab's gu
 	assert.deepEqual(guestAfterLogin(), other);
 });
 
-test("a guest's chosen name is trimmed, capped and stored; an empty one keeps the old name", () => {
+test("a guest never keeps a name of their own: a stored one goes back to Guest####, same id", () => {
+	writeIdentity({ id: "g-named", name: "Wanderer", guest: true });
 	const guest = loadIdentity();
-	const named = renamedGuest(guest, `  ${"x".repeat(GUEST_NAME_MAX + 5)}  `);
-	assert.equal(named.name, "x".repeat(GUEST_NAME_MAX));
-	assert.equal(named.id, guest.id);
-	assert.deepEqual(stored(), named);
-	assert.equal(renamedGuest(named, "   "), named);
+	assert.equal(guest.id, "g-named");
+	assert.ok(isGuestName(guest.name), guest.name);
+	assert.deepEqual(stored(), guest);
+});
+
+test("...while an account keeps the name it signed up with", () => {
+	writeIdentity(account);
+	assert.deepEqual(loadIdentity(), account);
 });
 
 test("a stored guest is not a login: the token in hand is still the one to use", () => {

@@ -474,7 +474,7 @@ try {
 	// (shared/identity.js) and is never stopped at sign-in: this block starts with
 	// NO stored user and walks what only they can — becoming a guest, staying the
 	// same guest across a reload, opening /login from the menu and from a lobby,
-	// naming themselves, signing in and landing back where they pressed Log in,
+	// staying a guest under the site-given name, signing in and landing back where they pressed Log in,
 	// and signing out into a new guest.
 	async function authScreen(log) {
 		const ctx = await browser.newContext();           // deliberately unseeded
@@ -520,19 +520,17 @@ try {
 			await has(".home-game-card") && pathname() === "/"
 			&& JSON.stringify(await identity()) === JSON.stringify(born), pathname());
 
-		// The Guest tab is where a guest names themselves and goes back: the field
-		// starts as the name they have, and the id their seats are under never moves.
+		// The Guest tab says who the guest is and goes back. There is NO name to pick:
+		// a guest is always the name the site gave them.
 		await page.locator(".home-login").click({ timeout: 10_000 }).catch(() => {});
 		await page.locator(".auth-tab").nth(2).click().catch(() => {});
-		check("the Guest tab starts from the name the guest already has",
-			await page.locator("#auth-guest").inputValue({ timeout: 10_000 }).catch(() => "") === born?.name);
-		await page.locator("#auth-guest").fill("  Wanderer  ").catch(() => {});
+		check("the Guest tab names the guest and offers no name field",
+			(await page.locator(".auth-guest-as").textContent({ timeout: 10_000 }).catch(() => "")).includes(born?.name)
+			&& await page.locator(".auth-panel input").count() === 0);
 		await page.locator("button", { hasText: "Continue as Guest" }).click({ timeout: 15_000 }).catch(() => {});
-		check("Continue as Guest returns to the menu", await has(".home-game-card") && pathname() === "/", pathname());
-		const named = await identity();
-		check("...under the chosen name, as the same guest",
-			named?.name === "Wanderer" && named?.id === born?.id && named?.guest === true
-			&& (await shownName()) === "Wanderer", JSON.stringify(named));
+		check("Continue as Guest returns to the menu as the same guest",
+			await has(".home-game-card") && pathname() === "/"
+			&& JSON.stringify(await identity()) === JSON.stringify(born), pathname());
 
 		// Signing in FROM A LOBBY returns to that lobby as the account. The login is
 		// stubbed (the form and the shell are under test, not the password check).
@@ -593,8 +591,10 @@ try {
 				}).catch(() => null));
 			}
 			const same = (k) => new Set(marks.map((m) => m && m[k])).size === 1;
+			// Only Sign In and Register have fields (the Guest tab has none to hold).
 			check(`the tab strip and the first field hold still across the tabs at ${vp.width}x${vp.height}`,
-				same("tabs") && same("card") && same("field"), JSON.stringify(marks));
+				same("tabs") && same("card") && marks[0]?.field != null && marks[0]?.field === marks[1]?.field,
+				JSON.stringify(marks));
 		}
 
 		// EVERY PIECE OF TEXT ON THE SIGN-IN SCREEN CLEARS AA, not just the ones someone

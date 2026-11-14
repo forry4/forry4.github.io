@@ -238,8 +238,8 @@ otherwise means cross-game kits. They briefly sat in `webapp/shell/`, which is w
 the shell is really lifted out (`main.jsx` -> `Shell.jsx` -> `games/*`), but until then that made
 `games/spender` import from `webapp/` while `webapp/main.jsx` imports `games/spender` — a
 directory-level cycle. One-way (`games -> shared`) beats a cycle waiting on a refactor. AuthScreen owns
-its own form-state hooks and reports back through `onAuthenticated(user)` (an account) or `onGuest(name)`
-(stay a guest); the shell keeps identity, through `shared/identity.js` — there is ALWAYS one, a guest
+its own form-state hooks and reports back through `onAuthenticated(user)` (an account) or `onBack()`
+(stay a guest, unchanged); the shell keeps identity, through `shared/identity.js` — there is ALWAYS one, a guest
 until someone signs in, stored either way (root `CLAUDE.md`, "Everyone has an identity").
 **Still to invert:** `screen`, `authUser` and `toast` remain in `SpenderApp`, and ~38
 routing-machinery references (`screenRef`/`applyPopRoute`/`enterRoute`/`deepRoom`) are still entangled

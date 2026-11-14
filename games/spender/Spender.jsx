@@ -106,7 +106,7 @@ import { GemToken, CardView, GEM_COLORS, GEM_LABELS, GEM_HEX,
 import { parsePath, buildPath, pushPath, replacePath, subscribe, navigateTo, cameFromInsideApp, IN_APP } from "../../shared/router.js";
 // Site-shell screens, extracted out of this file (see shared/AuthScreen.jsx).
 import AuthScreen from "../../shared/AuthScreen.jsx";
-import { loadIdentity, readIdentity, writeIdentity, guestAfterLogin, renamedGuest, isMember } from "../../shared/identity.js";
+import { loadIdentity, readIdentity, writeIdentity, guestAfterLogin, isMember } from "../../shared/identity.js";
 import { leaveOpenSeat, readRoomToken } from "../../shared/roomLifecycle.js";
 import HomeScreen, { SITE_NAME, GAMES, HERO_RULE } from "../../shared/HomeScreen.jsx";
 import SiteHealth, { useUnackedAlerts } from "../../shared/SiteHealth.jsx";
@@ -1894,10 +1894,6 @@ export default function SpenderApp() {
 		replacePath(buildPath("home"));
 		setScreen("home");
 	};
-	const continueAsGuest = (name) => {
-		if (authUser.guest) setAuthUser(renamedGuest(authUser, name));
-		leaveLogin();
-	};
 	useEffect(() => {
 		if (screen === "login" && !authUser.guest) leaveLogin();
 		// The notice explains one arrival at sign-in; it does not outlive the visit.
@@ -2998,7 +2994,7 @@ export default function SpenderApp() {
 		// this screen and the menu behind it are one title plate.
 		<AuthScreen siteName={SITE_NAME} httpBase={HTTP_BASE} css={css} guestName={authUser.name}
 			heroRule={HERO_RULE} notice={authNotice}
-			onAuthenticated={handleAuthenticated} onGuest={continueAsGuest} onBack={leaveLogin} />
+			onAuthenticated={handleAuthenticated} onBack={leaveLogin} />
 	);
 
 	// Home menu — pick a game (Forrest Games landing)

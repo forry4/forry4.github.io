@@ -16,8 +16,6 @@
  * a seat is still proved per room by the token that room hands out.
  */
 const KEY = "spender_user";
-export const GUEST_NAME_MAX = 20;
-
 const newId = () => Math.random().toString(36).slice(2, 10);
 
 export const isMember = (user) => !!(user && !user.guest && user.session_token);
@@ -34,13 +32,21 @@ export function writeIdentity(user) {
 	return user;
 }
 
+const guestName = () => `Guest${Math.floor(Math.random() * 9000 + 1000)}`;
+// A guest's name is always one the site gave them: choosing a name is what an
+// account is for.
+export const isGuestName = (name) => /^Guest\d{4}$/.test(String(name || ""));
+
 export function newGuest() {
-	return { id: newId(), name: `Guest${Math.floor(Math.random() * 9000 + 1000)}`, guest: true };
+	return { id: newId(), name: guestName(), guest: true };
 }
 
 // The identity to start with: the stored one, else a guest made now.
 export function loadIdentity() {
 	const stored = readIdentity();
+	// A guest who picked their own name (the sign-in screen allowed it briefly,
+	// 2026-11-13) keeps their id and seats but goes back to a site-given name.
+	if (stored?.guest && !isGuestName(stored.name)) return writeIdentity({ ...stored, name: guestName() });
 	if (stored) return stored;
 	const guest = newGuest();
 	// Guests used to keep only an id, under `spender_myId`, and were asked for a name
@@ -58,10 +64,4 @@ export function loadIdentity() {
 export function guestAfterLogin() {
 	const stored = readIdentity();
 	return stored?.guest ? stored : writeIdentity(newGuest());
-}
-
-// A guest's chosen display name; an empty one keeps the name they had.
-export function renamedGuest(guest, name) {
-	const clean = String(name || "").trim().slice(0, GUEST_NAME_MAX);
-	return clean && clean !== guest.name ? writeIdentity({ ...guest, name: clean }) : guest;
 }

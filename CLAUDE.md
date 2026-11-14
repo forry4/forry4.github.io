@@ -224,8 +224,9 @@ drops to ephemeral local sqlite and the site stays up — so `/health` reports `
 - **Sign-in is the `/login` route, opened by choice**: "Log in" beside a guest's name on the menu
   and in every lobby's top bar (`LobbyUser`, via `router.navigateTo`, like the profile link — and
   withheld by the same `profile={false}`). It has its own ← Back (an installed app has no browser
-  Back), and its Guest tab is where a guest sets a display name and
-  goes back. Leaving it — signing in, Continue as Guest — returns to where Log in was pressed
+  Back), and its Guest tab says what staying a guest means and goes back. **A guest never
+  picks a display name** — it is always the site-given `Guest####` (`isGuestName`; `loadIdentity`
+  resets any other stored guest name, keeping the id); a name of your own is what an account is for. Leaving it — signing in, Continue as Guest — returns to where Log in was pressed
   (`history.back()` when the entry is in-app, else Home). **One effect in `Spender.jsx` leaves
   `/login` whenever the identity on it is an account**, which covers the form, Forward into
   `/login`, and a typed `/login` alike.
@@ -239,7 +240,7 @@ drops to ephemeral local sqlite and the site stays up — so `/health` reports `
   expired-session redirect did that, sign-in rendered for one frame with the old ACCOUNT, and the
   effect above sent it straight back. That redirect writes the URL and `setScreen` directly.
 - Gates: `webapp/test/unit/identity.test.mjs`; `authScreen` in `screens.mjs` (an UNSEEDED visitor:
-  guest on Home, same guest after reload, Log in from the menu and from a lobby, rename, sign in
+  guest on Home, same guest after reload, Log in from the menu and from a lobby, the Guest tab (no name field), sign in
   and land back, `/login` as an account, Logout into a new guest); `spenderWaitingRoom` (an invite
   link seats a stranger with no sign-in); `historyRecovery`/`profilePage`/`bootWithoutServer` (the
   dead-session path).

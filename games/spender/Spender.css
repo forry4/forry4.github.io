@@ -92,6 +92,8 @@
 /* NOT --text-dim: at 4.35:1 and ~11px this was the only text on the site under the
    AA floor. Still clearly subordinate to the primary helper above it. */
 .auth-note-sub{display:block;margin-top:5px;color:#9a8d78;font-size:.78rem}
+.auth-guest-as{margin:0 0 18px;color:var(--text-soft)}
+.auth-guest-as strong{color:var(--gold-light);font-weight:600}
 .auth-facts{list-style:none;margin:auto 0 20px;padding:0;display:flex;flex-direction:column;gap:12px}
 .auth-fact{display:flex;align-items:flex-start;gap:10px;color:var(--text-soft);
   font-size:.87rem;line-height:1.35;text-wrap:pretty}

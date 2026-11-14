@@ -17,12 +17,13 @@
  *
  * Owns only its own form state. It does NOT know about localStorage, routing, or the
  * session — the shell still owns identity. `onAuthenticated(user)` hands an account
- * back; `onGuest(name)` keeps the guest, under that name; `onBack()` changes nothing.
+ * back; `onBack()` changes nothing (it is also what "Continue as Guest" does).
  *
  * NOBODY MEETS THIS SCREEN FIRST. A visitor with no account is a guest from the first
  * paint (shared/identity.js) and comes here by choice, from "Log in" beside their name
- * — so whoever is looking at it is ALREADY a guest, and the Guest tab is where they
- * name themselves and go back, not where they get in.
+ * — so whoever is looking at it is ALREADY a guest, and the Guest tab only says what
+ * staying one means and goes back. A guest does NOT choose a display name: the site
+ * gives them `Guest1234`, and a name of your own is what an account is for.
  *
  * It shares the home menu's ground, wordmark and ornament rather than approximating
  * them: the `.auth-screen`/`.home` selector pairs in Spender.css are deliberate, so
@@ -31,7 +32,6 @@
 import { useState } from "react";
 import { isBackendAwake, whenBackendAwake, markBackendAwake } from "./backend.js";
 import { useBackendAwake } from "./lobby.jsx";
-import { GUEST_NAME_MAX } from "./identity.js";
 
 const TABS = [
 	{ id: "login", label: "Sign In" },
@@ -57,13 +57,10 @@ const GUEST_FACTS = [
 	["no", "Cannot resume on another device"],
 ];
 
-export default function AuthScreen({ siteName, httpBase, css, guestName, onAuthenticated, onGuest, onBack, heroRule, notice }) {
+export default function AuthScreen({ siteName, httpBase, css, guestName, onAuthenticated, onBack, heroRule, notice }) {
 	const [tab, setTab] = useState("login");
 	const [name, setName] = useState("");
 	const [password, setPassword] = useState("");
-	// Starts as the name the guest already plays under, so the field shows what
-	// "Continue as Guest" will keep rather than an empty box to fill in.
-	const [displayName, setDisplayName] = useState(guestName || "");
 	const [error, setError] = useState("");
 	const [loading, setLoading] = useState(false);
 	// The site no longer waits for the server before showing this screen, so a
@@ -113,8 +110,6 @@ export default function AuthScreen({ siteName, httpBase, css, guestName, onAuthe
 		}
 		setLoading(false);
 	};
-
-	const continueAsGuest = () => onGuest(displayName);
 
 	// A real <label> per field, not a placeholder doing double duty. A placeholder
 	// vanishes the moment you type, so on a two-field form the user loses the only
@@ -222,12 +217,7 @@ export default function AuthScreen({ siteName, httpBase, css, guestName, onAuthe
 							</>
 						) : (
 							<>
-								{field("auth-guest", "Display name", "user", {
-									value: displayName, placeholder: guestName || "Guest",
-									autoComplete: "off", maxLength: GUEST_NAME_MAX,
-									onChange: e => setDisplayName(e.target.value),
-									onKeyDown: e => e.key === "Enter" && continueAsGuest(),
-								})}
+								{guestName && <p className="auth-guest-as">Playing as <strong>{guestName}</strong></p>}
 								<ul className="auth-facts">
 									{GUEST_FACTS.map(([kind, text]) => (
 										<li key={text} className={`auth-fact ${kind}`}>
@@ -236,7 +226,7 @@ export default function AuthScreen({ siteName, httpBase, css, guestName, onAuthe
 										</li>
 									))}
 								</ul>
-								<button className="btn btn-gold btn-full" onClick={continueAsGuest}>
+								<button className="btn btn-gold btn-full" onClick={onBack}>
 									Continue as Guest
 								</button>
 							</>
