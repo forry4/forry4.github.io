@@ -19,9 +19,16 @@ name: LoL Stats refresh
 # THE DATA STORE (data-worker/, root CLAUDE.md "THE DATA STORE"): with vars.DATA_URL set
 # this job starts from the store's copy of what it builds on, uploads what it changed,
 # and the pages read it from there. vars.DATA_COMMITS=off stops the commit + deploy.
+#
+# THE 17th AND 20th ARE RETRIES, and do nothing once the month's refresh has landed.
+# Google Drive caps downloads of one file per day, and the 15th can be the busiest day
+# of that file's year: 2026-11-15 was the morning after the Worlds final, and every
+# request got Drive's "Quota exceeded" page (harvest.py exits 75 for it). The cap resets
+# on its own, so a run that meets it stays GREEN while a later retry is scheduled, and
+# only the 20th's, the last chance that month, goes red. A run by hand always fails on it.
 on:
   schedule:
-    - cron: "23 10 15 1-11 *"
+    - cron: "23 10 15,17,20 1-11 *"
   workflow_dispatch:
     inputs:
       years:
@@ -51,25 +58,46 @@ jobs:
         env:
           DATA_URL: ${{ vars.DATA_URL }}
         run: python data-worker/datastore.py take-lol
+      # A retry day (17th/20th) whose month already has a build from the 15th on: done.
+      # `built` is the date of the rebuild, read off the index the step above took.
+      - name: Due
+        id: due
+        env:
+          EVENT: ${{ github.event_name }}
+        run: python -I lolstats/tools/refresh_due.py
       - name: Download
+        id: download
+        if: steps.due.outputs.due == 'true'
         env:
           YEARS: ${{ inputs.years }}
+          EVENT: ${{ github.event_name }}
         run: |
           y=$(date -u +%Y)
+          set +e
           if [ -n "$YEARS" ]; then python -I lolstats/tools/harvest.py $YEARS
           elif [ "$(date -u +%m)" = 01 ]; then python -I lolstats/tools/harvest.py --skip-missing $((y - 1)) $y
           else python -I lolstats/tools/harvest.py $y
           fi
+          code=$?
+          set -e
+          if [ "$code" = 75 ] && [ "$EVENT" = schedule ] && [ "$(date -u +%-d)" -lt 20 ]; then
+            echo "::warning::Google Drive's download quota is used up; the next scheduled retry (17th / 20th) will try again"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          exit "$code"
       # Every CSV downloaded above, and only those (the runner starts with none).
       - name: Build the payload
+        if: steps.due.outputs.due == 'true' && steps.download.outputs.skip != 'true'
         run: python -I lolstats/tools/make_data.py
       - name: Publish to the data store
+        if: steps.due.outputs.due == 'true' && steps.download.outputs.skip != 'true'
         env:
           DATA_URL: ${{ vars.DATA_URL }}
           DATA_PUBLISH_TOKEN: ${{ secrets.DATA_PUBLISH_TOKEN }}
         run: python data-worker/datastore.py publish $(cd webapp/public/data && ls lol-champs-*.json)
       - name: Commit and deploy
-        if: vars.DATA_COMMITS != 'off'
+        if: vars.DATA_COMMITS != 'off' && steps.due.outputs.due == 'true' && steps.download.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

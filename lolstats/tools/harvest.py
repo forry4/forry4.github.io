@@ -19,8 +19,28 @@ import urllib.request
 
 FOLDER = "1gLSw0RLjBbtaNy0dgnGQDAZOHIgCe-HH"
 FIRST_YEAR = 2020
-CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache", "oe")
+CACHE = os.environ.get("LOL_OE_CACHE") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache", "oe")
 UA = "ForrestGames-LoLStats/1.0 (+https://forry4.github.io)"
+
+# Drive caps how often one file may be downloaded in a day and answers past the cap with
+# a 200 HTML page titled "Quota exceeded". It is not a fault of ours or of the file: the
+# cap resets on its own, so it exits TEMPFAIL (sysexits' 75) and the workflow retries on
+# a later day. Measured 2026-11-15, the morning after the Worlds final: every request for
+# the 2026 file, whatever the URL form or User-Agent, got the quota page.
+EX_TEMPFAIL = 75
+
+
+class QuotaExceeded(Exception):
+    pass
+
+
+def check_head(year, head):
+    """The first bytes of a download, or raise. Only the CSV's own header passes."""
+    if head.startswith(b"gameid,"):
+        return
+    if b"Quota exceeded" in head:
+        raise QuotaExceeded(f"{year}: Google Drive's daily download quota for this file is used up")
+    raise SystemExit(f"{year}: Drive did not return the CSV (got {head[:40]!r})")
 
 
 def get(url):
@@ -45,13 +65,13 @@ def download(year, fid):
     os.makedirs(CACHE, exist_ok=True)
     dest = os.path.join(CACHE, f"{year}.csv")
     tmp = dest + ".part"
-    with get(f"https://drive.usercontent.google.com/download?id={fid}&export=download&confirm=t") as r, open(tmp, "wb") as f:
-        head = r.read(64)
-        if not head.startswith(b"gameid,"):
-            raise SystemExit(f"{year}: Drive did not return the CSV (got {head[:40]!r})")
-        f.write(head)
-        while chunk := r.read(1 << 20):
-            f.write(chunk)
+    with get(f"https://drive.usercontent.google.com/download?id={fid}&export=download&confirm=t") as r:
+        head = r.read(512)   # enough to reach the quota page's <title>
+        check_head(year, head)   # before the .part exists, so a refusal leaves nothing behind
+        with open(tmp, "wb") as f:
+            f.write(head)
+            while chunk := r.read(1 << 20):
+                f.write(chunk)
     os.replace(tmp, dest)
     print(f"{year}: {os.path.getsize(dest) / 1e6:.1f} MB -> {dest}")
 
@@ -71,4 +91,8 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    try:
+        main(sys.argv[1:])
+    except QuotaExceeded as e:
+        print(f"{e}; it resets on its own, try again later", file=sys.stderr)
+        sys.exit(EX_TEMPFAIL)

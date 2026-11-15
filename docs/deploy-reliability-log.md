@@ -10,6 +10,37 @@ than re-argued.
 
 ---
 
+## 2026-11-15 — LoL Stats met Google Drive's download quota the morning after Worlds
+
+Run `43740083922` (scheduled, 17:15 UTC) failed in `Download` after two seconds with
+"Drive did not return the CSV". Reproduced locally the same hour: the folder listing
+resolves all thirteen files, and every request for the 2026 CSV — the harvester's own
+URL, a browser User-Agent, the older `drive.google.com/uc` form — gets a 200 HTML page
+titled **"Google Drive - Quota exceeded"**. Drive caps downloads of one file per day, and
+the run fired the morning after the Worlds final (Nov 14), when everyone who keeps stats
+wants that file. Nothing of ours is wrong, and nothing of ours can lift the cap; it resets
+on its own.
+
+So the failure became a schedule rather than a fix:
+
+- `harvest.py` tells the quota page apart from every other refusal and exits **75**
+  (sysexits' TEMPFAIL). A sign-in wall or a moved file is still the old hard failure.
+  It also checks the first bytes before creating its `.part` file, which a refusal used
+  to leave behind.
+- The cron runs the 15th, 17th and 20th. `refresh_due.py` makes a retry a no-op once any
+  year's `built` is on or after the 15th, so a good month still costs one download.
+- A 75 on the 15th or 17th is a warning and a green run; on the 20th, or by hand, it
+  is red. The alert still comes, but only when the month has actually run out of tries.
+
+**Not verified:** a successful download. The quota was still exhausted when this shipped;
+the 17th's run is the first that can show the retry path working end to end.
+
+**Carry:** a source that refuses with a 200 needs its refusal NAMED before it can be
+scheduled around. "Did not return the CSV" covered a quota that resets in a day and a file
+that will never come back, and only the first is worth waiting for.
+
+---
+
 ## 2026-11-13 — a deploy that waited for a commit Render never built, and an endpoint Steam moved
 
 Census of the 300 runs from 11-03 to 11-13: **Pages 1 red of 36, Render 1 of 8, Python CI

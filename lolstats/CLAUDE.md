@@ -81,6 +81,13 @@ over the games that have it and the tile says how many.
   (the current year; January's also rebuilds the year before, and skips a new year
   Oracle's Elixir has not posted yet). "Run workflow" rebuilds any years named. Locally:
   `python -I lolstats/tools/harvest.py 2026 && python -I lolstats/tools/make_data.py 2026`.
+  **It retries on the 17th and 20th, and Google Drive's download quota is why.** Drive caps
+  how often one file is downloaded per day and answers past it with a 200 HTML page titled
+  "Quota exceeded" (2026-11-15, the morning after the Worlds final, for every URL form and
+  User-Agent). `harvest.py` exits **75** for that page and no other; the workflow stays green
+  on 75 while a later retry is scheduled, and only the 20th's run (or one by hand) goes red.
+  `tools/refresh_due.py` skips a retry once any year's `built` is on or after the 15th.
+  `lolstats/tests/test_refresh.py` pins both halves and the cron.
 - **Worlds seeds:** `lol-worlds.yml` runs every Monday in October and November and
   re-renders only the current year's pages (`worlds.py fetch <year>`; the cache keeps the
   rest). A series counts once Liquipedia marks its winner (`match-info-header-winner`), so
