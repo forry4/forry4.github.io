@@ -273,6 +273,7 @@ const css = baseCss + lobbyCss + _cssText
 .noble-req-dot{width:8px;height:8px;border-radius:2px;border:1px solid rgba(255,255,255,.12);flex-shrink:0}
 /* claimer name on a taken noble — absolutely pinned to the bottom so it sits at the
    same height no matter how many requirement rows the noble has (4/4 vs 3/3/3) */
+.goal-plaque{display:none}
 .noble-claimer{position:absolute;left:3px;right:3px;bottom:4px;text-align:center;font-size:.55rem;color:var(--gold);font-family:'Cinzel','Cinzel Fallback',serif;letter-spacing:.04em;line-height:1.05;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* ─── Action bar ────────────────────────────────────────────────────────── */
@@ -475,8 +476,23 @@ const css = baseCss + lobbyCss + _cssText
      four-player game, which left the three of a two-player game — much the commonest
      table — at 106px beside 300px of empty row. Keyed on the COUNT, because the row must
      still leave the actions column its width: five nobles keep the old size. */
-  .nobles-panel[data-n="2"],.nobles-panel[data-n="3"]{--noble-w:min(calc(var(--card-h) * 0.74), 158px)}
-  .nobles-panel[data-n="4"]{--noble-w:min(calc(var(--card-h) * 0.66), 142px)}
+  .game-main[data-nobles="2"],.game-main[data-nobles="3"]{--noble-w:min(calc(var(--card-h) * 0.74), 158px)}
+  .game-main[data-nobles="4"]{--noble-w:min(calc(var(--card-h) * 0.66), 142px)}
+  /* The goal seal (in the actions column, see the JSX): set apart from the nobles by a
+     rule and drawn as type rather than as a gold plaque, so it reads as the row's
+     caption and not as one more noble. It sizes off the nobles' own anchor. */
+  .goal-plaque{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:calc(var(--noble-w) * 0.035);
+    padding:calc(var(--noble-w) * 0.06) calc(var(--noble-w) * 0.16);border-left:1px solid color-mix(in srgb,var(--gold) 26%,transparent);max-width:100%}
+  .goal-plaque-cap{font-family:'Cinzel','Cinzel Fallback',serif;font-size:calc(var(--noble-w) * 0.105);letter-spacing:.16em;text-transform:uppercase;color:var(--text-soft);line-height:1;white-space:nowrap}
+  .goal-plaque-num{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:calc(var(--noble-w) * 0.46);line-height:1;
+    background:linear-gradient(180deg,#fbe7a6 0%,#d9b252 55%,#a8812e 100%);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;filter:drop-shadow(0 2px 2px rgba(0,0,0,.55))}
+  /* With the goal a seal, the actions box has nothing to frame: it loses its panel, like
+     the bank and the card rows, which already sit straight on the table. The seal hugs
+     the nobles (left); the controls that replace it are centered in the column. */
+  .game-main>.actions-panel{background:none;border-color:transparent;box-shadow:none;justify-content:center}
+  .actions-panel .actions-panel-top{align-items:flex-start}
+  .actions-panel.acting .actions-panel-top{display:none}
+  .actions-panel.acting .actions-panel-btns{justify-content:center}
   .nobles-row{gap:calc(var(--noble-w) * 0.12);flex-wrap:nowrap}
   /* Point value pinned at the TOP (justify-content:flex-start, so it never shifts with
      the number of requirements); requirements fill the rest and sit centered on the LEFT
@@ -3768,7 +3784,8 @@ export default function SpenderApp() {
 				</div>
 				<div className="game-nav-spacer" />
 				<div className="game">
-					<div className="game-main">
+					<div className="game-main"
+						data-nobles={(game.nobles || []).length + (game.order || []).reduce((n, pid) => n + (game.players?.[pid]?.nobles?.length || 0), 0)}>
 
 						<div className="action-bar">
 								{reviewing ? renderReplayBar() : puzzling ? renderPuzzleBar() : (<>
@@ -3852,8 +3869,7 @@ export default function SpenderApp() {
 						))}
 						</div>
 
-						<div className="panel nobles-panel"
-							data-n={(game.nobles || []).length + (game.order || []).reduce((n, pid) => n + (game.players?.[pid]?.nobles?.length || 0), 0)}>
+						<div className="panel nobles-panel">
 							<div className="panel-title">Nobles</div>
 							<div className="nobles-row">
 								{(() => {
@@ -3898,21 +3914,36 @@ export default function SpenderApp() {
 						{/* Column layout (desktop): Target pinned to the TOP, hint to the BOTTOM,
 						    buttons centered between them — so a NARROW box (4-player games widen the
 						    nobles row, shrinking this column) never squishes the hint beside the buttons. */}
-						<div className="panel actions-panel">
-							{game.phase !== "over" && (
-								<div className="actions-panel-top">
-									<span className="target-label">Target: {game.win_points || 15}</span>
+						{/* THE GOAL IS A SEAL BESIDE THE NOBLES, AND IT GIVES WAY TO THE CONTROLS. This was
+						    the words "Target: 15" alone in a 300px box. The points you are playing to
+						    belong with the things you are playing for, so at rest this column shows a
+						    seal in the nobles' own gold; selecting gems or a card swaps it for Take /
+						    Buy, which is the only time those exist. The row's height is the nobles',
+						    so the swap moves nothing. */}
+						{(() => {
+							const acting = !aiThinking && renderActionButtons();
+							return (
+								<div className={`panel actions-panel${acting ? " acting" : ""}`}>
+									{game.phase !== "over" && (
+										<div className="actions-panel-top">
+											<div className="goal-plaque" title={`First to ${game.win_points || 15} points wins`}>
+												<span className="goal-plaque-cap">Play to</span>
+												<span className="goal-plaque-num">{game.win_points || 15}</span>
+												<span className="goal-plaque-cap">points</span>
+											</div>
+										</div>
+									)}
+									{renderAiEval()}
+									<div className="actions-panel-btns">
+										{renderAiValsToggle()}
+										{aiThinking
+											? <span className="ai-thinking"><span className="think-dot"/><span className="think-dot"/><span className="think-dot"/> thinking…</span>
+											: acting}
+									</div>
+									<span className="action-hint">{game.phase === "over" ? "Final board & game log" : getHint()}</span>
 								</div>
-							)}
-							{renderAiEval()}
-							<div className="actions-panel-btns">
-								{renderAiValsToggle()}
-								{aiThinking
-									? <span className="ai-thinking"><span className="think-dot"/><span className="think-dot"/><span className="think-dot"/> thinking…</span>
-									: renderActionButtons()}
-							</div>
-							<span className="action-hint">{game.phase === "over" ? "Final board & game log" : getHint()}</span>
-						</div>
+							);
+						})()}
 					</div>
 
 					<div className="game-sidebar">
