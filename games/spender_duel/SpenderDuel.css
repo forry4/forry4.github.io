@@ -81,6 +81,15 @@
   --card-h:calc(var(--card-w) * 1.364);   /* Spender's 88x120 aspect */
   margin-bottom:8px;
 }
+/* THE ROWS ARE A PYRAMID, NOT A RAGGED LEFT EDGE. Three, four and five cards were all
+   packed against the deck, so the shape the game is named for read as a staircase with
+   an empty wedge on the right. The decks stay in one column on the left; the CARDS of a
+   row are centred in the width the five-card row fills. Auto margins rather than
+   justify-content, because the deck must not move: the first card after the deck and
+   the last cell in the row take the row's spare width equally (the cells are capped at
+   --card-w, so a short row has spare width and the full row has none and is unchanged). */
+.duel-col-cards .level-row>.deck-pile+*{margin-left:auto}
+.duel-col-cards .level-row>:last-child{margin-right:auto}
 /* --card-w is container-query-derived, so it settles a frame AFTER the game data lays out.
    The shared .card / .deck-pile use transition:all, which ANIMATES that width change into a
    jarring shrink on load. Transition only the hover/state props here (never width/height/
