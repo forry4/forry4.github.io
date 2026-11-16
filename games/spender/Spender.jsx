@@ -309,6 +309,17 @@ const css = baseCss + lobbyCss + _cssText
 .player-score{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.1rem;font-weight:700;color:var(--gold)}
 `
 	+ splendorPillCss + `
+/* An EMPTY slot in a player's tableau: the colour's outline, dashed, with a dimmed
+   gem and no number. It is the same box as a filled pill (so nothing moves when a
+   count goes from 0 to 1) and reads as a place rather than as a thing held.
+   min-height holds an empty bonus slot, which has no text, at a filled pill's height. */
+.token-pill.is-empty,.bonus-pill.is-empty{background:transparent;border:1px dashed color-mix(in srgb,var(--pc) 55%,transparent);min-height:1.55em;min-width:2.2em}
+.token-pill.is-empty>span{opacity:.38}
+/* The empty reserve slots are a DESKTOP 2-player thing (see the desktop block): on a
+   phone the box is a one-line summary, and with three or four players each box is too
+   short to hold a card row without scrolling inside itself. */
+.reserved-slot{display:none}
+.player-reserved.is-empty{display:none!important}
 /* Compact mobile player summary + log caret — hidden on desktop (shown only in
    the max-width:600px block below), so the laptop layout is unchanged. */
 .player-summary{display:none;flex-wrap:wrap;gap:5px;align-items:center;margin-top:8px}
@@ -544,6 +555,9 @@ const css = baseCss + lobbyCss + _cssText
   .player-reserved .card-points{font-size:23.8cqw;min-width:0}
   .player-reserved .card-bonus{width:25.4cqw;height:25.4cqw}
   .player-reserved .card-cost{gap:4.4cqw}
+  .players-area[data-n="2"] .player-reserved.is-empty{display:block!important}
+  .players-area[data-n="2"] .reserved-slot{display:block;flex:0 0 calc((100% - var(--card-h) * 0.04) / 3);aspect-ratio:0.72;border-radius:calc(var(--radius) + 3px);border:1px dashed color-mix(in srgb,var(--border) 85%,transparent);background:rgba(0,0,0,.14)}
+  .players-area[data-n="2"] .player-reserved{margin-top:calc(var(--card-h) * 0.05)}
   .player-reserved .cost-gem{width:13.1cqw;height:13.1cqw}
   .player-reserved .cost-num{font-size:13cqw}
   .player-tokens{min-height:calc(var(--card-h) * 0.151);align-items:flex-start;flex-wrap:nowrap;margin-bottom:0}
@@ -2832,31 +2846,52 @@ export default function SpenderApp() {
 				</div>
 				<div className="player-detail">
 				<div className="player-tokens">
-					{[...GEM_COLORS, "gold"].map(c => (p.tokens[c] || 0) > 0 && (
-						<span key={c} data-token={c} className="token-pill" style={{ background: GEM_HEX[c] + "55", border: `1px solid ${c === "black" ? "rgba(255,255,255,.4)" : GEM_HEX[c]}` }}>
-							{/* light rim so the near-black onyx gem stays visible on the warm "your turn" (surface3) panel */}
-							<span style={{ width: 10, height: 10, borderRadius: "50%", background: GEM_HEX[c], border: c === "black" ? "1px solid rgba(255,255,255,.4)" : "1px solid rgba(255,255,255,.25)", display: "inline-block" }} />
-							{p.tokens[c]}
-						</span>
-					))}
+					{/* EVERY colour has a slot from turn one. A pill used to exist only once you held
+					    that colour, so a new player's box was an empty rectangle and each pill slid
+					    sideways whenever a colour appeared to its left. An empty slot is a dashed
+					    outline in its colour; it keeps data-token, so the first gem of a colour now
+					    flies to its own slot instead of to the row. */}
+					{[...GEM_COLORS, "gold"].map(c => {
+						const n = p.tokens[c] || 0;
+						const rim = c === "black" ? "rgba(255,255,255,.4)" : GEM_HEX[c];
+						return (
+							<span key={c} data-token={c} className={`token-pill${n ? "" : " is-empty"}`}
+								title={`${n} ${GEM_LABELS[c]}`}
+								style={n ? { background: GEM_HEX[c] + "55", border: `1px solid ${rim}` } : { "--pc": rim }}>
+								{/* light rim so the near-black onyx gem stays visible on the warm "your turn" (surface3) panel */}
+								<span style={{ width: 10, height: 10, borderRadius: "50%", background: GEM_HEX[c], border: c === "black" ? "1px solid rgba(255,255,255,.4)" : "1px solid rgba(255,255,255,.25)", display: "inline-block" }} />
+								{n || ""}
+							</span>
+						);
+					})}
 				</div>
 				{/* always render (even "0 gems") so the bonus pills below keep a fixed position */}
 				<div className="gem-total">{gemTotal(p.tokens)} {gemTotal(p.tokens) === 1 ? "gem" : "gems"}</div>
 				<div className="player-bonuses">
-					{GEM_COLORS.map(c => (bonuses[c] || 0) > 0 && (
-						<span key={c} data-bonus={c} className="bonus-pill" style={{ background: GEM_HEX[c] + "55", borderColor: c === "black" ? "rgba(255,255,255,.4)" : GEM_HEX[c], color: c === "black" ? "#a8a8a8" : GEM_HEX[c] }} title={`${bonuses[c]} ${GEM_LABELS[c]} bonus${bonuses[c] === 1 ? "" : "es"}`}>+{bonuses[c]}</span>
-					))}
+					{GEM_COLORS.map(c => {
+						const n = bonuses[c] || 0;
+						const rim = c === "black" ? "rgba(255,255,255,.4)" : GEM_HEX[c];
+						return (
+							<span key={c} data-bonus={c} className={`bonus-pill${n ? "" : " is-empty"}`}
+								style={n ? { background: GEM_HEX[c] + "55", borderColor: rim, color: c === "black" ? "#a8a8a8" : GEM_HEX[c] } : { "--pc": rim }}
+								title={`${n} ${GEM_LABELS[c]} bonus${n === 1 ? "" : "es"}`}>{n ? `+${n}` : ""}</span>
+						);
+					})}
 					{p.nobles.map(n => (
 						<span key={n.id} className="bonus-pill" style={{ borderColor: "var(--gold)", color: "var(--gold)" }}>★{n.points}</span>
 					))}
 				</div>
 				</div>
-				{p.reserved?.length > 0 && (
-					<div className="player-reserved">
-						<div className="reserved-label">Reserved ({p.reserved.length}/3)</div>
-						<div className="reserved-row">{p.reserved.map(c => renderCard(c, { source: "reserved", readonly: !isMe }))}</div>
+				{/* The three reserve slots are always drawn (desktop, 2-player — CSS decides):
+				    an unused one is a dashed card outline, so the lower half of the box says
+				    what goes there instead of standing empty until the first reserve. */}
+				<div className={`player-reserved${p.reserved?.length > 0 ? "" : " is-empty"}`}>
+					<div className="reserved-label">Reserved ({p.reserved?.length || 0}/3)</div>
+					<div className="reserved-row">
+						{(p.reserved || []).map(c => renderCard(c, { source: "reserved", readonly: !isMe }))}
+						{Array.from({ length: Math.max(0, 3 - (p.reserved?.length || 0)) }, (_, i) => <div key={"slot" + i} className="reserved-slot" aria-hidden="true" />)}
 					</div>
-				)}
+				</div>
 			</div>
 		);
 	}
@@ -3932,7 +3967,7 @@ export default function SpenderApp() {
 							</div>
 						)}
 						<div className="panel-title" style={{ padding: "0 4px" }}>Players</div>
-						<div className="players-area">
+						<div className="players-area" data-n={(game.order || []).length}>
 							{(game.order || []).map(pid => renderPlayerPanel(pid))}
 						</div>
 					</div>
