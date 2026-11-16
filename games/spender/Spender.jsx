@@ -471,6 +471,12 @@ const css = baseCss + lobbyCss + _cssText
   /* Nobles: horizontal row on top of the cards, square, no title. Sized off the capped
      --noble-w (NOT --card-h) so they stay compact + never wrap on tall screens. */
   .nobles-panel .panel-title{display:none}
+  /* BIGGER TILES WHERE THE ROW HAS THE ROOM. One size was tuned for the five nobles of a
+     four-player game, which left the three of a two-player game — much the commonest
+     table — at 106px beside 300px of empty row. Keyed on the COUNT, because the row must
+     still leave the actions column its width: five nobles keep the old size. */
+  .nobles-panel[data-n="2"],.nobles-panel[data-n="3"]{--noble-w:min(calc(var(--card-h) * 0.74), 158px)}
+  .nobles-panel[data-n="4"]{--noble-w:min(calc(var(--card-h) * 0.66), 142px)}
   .nobles-row{gap:calc(var(--noble-w) * 0.12);flex-wrap:nowrap}
   /* Point value pinned at the TOP (justify-content:flex-start, so it never shifts with
      the number of requirements); requirements fill the rest and sit centered on the LEFT
@@ -3846,7 +3852,8 @@ export default function SpenderApp() {
 						))}
 						</div>
 
-						<div className="panel nobles-panel">
+						<div className="panel nobles-panel"
+							data-n={(game.nobles || []).length + (game.order || []).reduce((n, pid) => n + (game.players?.[pid]?.nobles?.length || 0), 0)}>
 							<div className="panel-title">Nobles</div>
 							<div className="nobles-row">
 								{(() => {
