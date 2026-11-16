@@ -371,6 +371,9 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
   const [lobbyTab, setLobbyTab] = useState("open");  // mobile-only Open/Active/History selector
   const [loadingGames, setLoadingGames] = useState(false);
   const [toast, setToast] = useState("");
+  // Desktop: the log is a one-line bar under the cards that opens upward as a drawer
+  // (SpenderDuel.css). Narrower layouts and a review ignore this and show it whole.
+  const [logOpen, setLogOpen] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
   // room connect in flight (create / join / deep-link resume) — while it is AND
   // we're still on the lobby screen, show the spinner instead of the lobby.
@@ -1368,8 +1371,11 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
     const log = liveGame?.log || [];
     const shownLen = reviewing ? replaySnapshots[replayTurn].log_len : log.length;
     return (
-      <div className="duel-panel log-panel">
-        <div className="panel-title">Log</div>
+      <div className={`duel-panel log-panel${logOpen ? " open" : ""}`}>
+        <div className="panel-title duel-log-head" onClick={() => setLogOpen((o) => !o)}
+          role="button" aria-expanded={logOpen} title={logOpen ? "Close the log" : "Open the full log"}>
+          Log <span className="duel-log-caret" aria-hidden="true">{logOpen ? "▾" : "▴"}</span>
+        </div>
         <div className="move-log">
           {over && (
             <LogEntry kind="win"
@@ -1759,7 +1765,7 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
           : <div style={{ width: 40 }} />}
       </div>
       {renderReplayBar()}
-      <div className="duel-cols">
+      <div className={`duel-cols${replaySnapshots ? " reviewing" : ""}`}>
         <div className="duel-col-cards">{renderPyramid()}</div>
         <div className="duel-col-board">{renderBoard()}</div>
         <div className="duel-col-side">

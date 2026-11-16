@@ -498,4 +498,39 @@
   /* the log fills its (viewport-bounded) column and scrolls inside — the row-2 1fr height
      caps it to the screen, min-height:0 lets the inner move-log overflow-scroll. */
   .duel-gamescreen .duel-col-log{min-height:0}
+
+  /* THE LOG IS A DRAWER, AND THE CARDS GET THE COLUMN (not while reviewing — a review
+     navigates BY the log, so it keeps the open layout above).
+     The log held the whole lower-left quarter of the screen from move one, empty for
+     most of the opening, while the cards — the thing you actually read — were 85px wide
+     above it. Now: the cards' panel fills the column, the three rows spread through it,
+     and each card grows TALLER into the room (its width is still set by the five-card
+     row). The log is one line under them showing the latest move; its header opens it
+     upward over the foot of the column, so opening it resizes nothing.
+     --card-h stays the SCALE ANCHOR for a card's type and pips (so nothing inside a
+     card changes size and a three-crown header still fits its width); only the box's
+     height reads the new --card-tall. That needs the column's height, hence
+     container-type:size — safe here because the grid, not the content, sizes it. */
+  .duel-gamescreen .duel-cols:not(.reviewing){grid-template-rows:minmax(0,1fr) auto}
+  .duel-gamescreen .duel-cols:not(.reviewing) .duel-col-cards{container-type:size;min-height:0}
+  .duel-gamescreen .duel-cols:not(.reviewing) .duel-col-cards>.duel-panel{height:100%;display:flex;flex-direction:column;justify-content:space-evenly}
+  .duel-gamescreen .duel-cols:not(.reviewing) .duel-col-cards .level-row{--card-tall:min(calc(var(--card-w) * 1.66), calc((100cqh - 60px) / 3));margin:0;padding:0;overflow:visible}
+  .duel-gamescreen .duel-cols:not(.reviewing) .duel-col-cards .level-row .card,
+  .duel-gamescreen .duel-cols:not(.reviewing) .duel-col-cards .level-row .deck-pile,
+  .duel-gamescreen .duel-cols:not(.reviewing) .duel-col-cards .level-row .card-slot{min-height:var(--card-tall)}
+  .duel-gamescreen .duel-cols:not(.reviewing) .duel-col-log{position:relative;display:block;height:46px;align-self:end}
+  .duel-gamescreen .duel-cols:not(.reviewing) .log-panel{position:absolute;inset:0;display:flex;flex-direction:row;align-items:center;gap:14px;padding:0 14px;z-index:30}
+  .duel-gamescreen .duel-cols:not(.reviewing) .log-panel .duel-log-head{margin:0;flex:0 0 auto}
+  .duel-gamescreen .duel-cols:not(.reviewing) .log-panel .move-log{flex:1;min-width:0;max-height:none;overflow:hidden}
+  .duel-gamescreen .duel-cols:not(.reviewing) .log-panel:not(.open) .move-log>*:not(:first-child){display:none}
+  .duel-gamescreen .duel-cols:not(.reviewing) .log-panel:not(.open) .log-entry{padding:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;animation:none}
+  .duel-gamescreen .duel-cols:not(.reviewing) .log-panel.open{top:auto;height:min(58vh,440px);flex-direction:column;align-items:stretch;gap:8px;padding:12px;
+    box-shadow:inset 0 1px 0 rgba(255,240,215,.05),0 -18px 44px -14px #000,0 0 0 1px rgba(232,201,106,.22)}
+  .duel-gamescreen .duel-cols:not(.reviewing) .log-panel.open .move-log{overflow-y:auto;min-height:0}
 }
+/* The log's header is its drawer handle on desktop; elsewhere it is just the title. */
+.duel-log-head{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
+.duel-log-caret{font-size:1.15em;line-height:1;color:var(--gold,#c9a84c)}
+.duel-cols.reviewing .duel-log-head{cursor:default}
+.duel-cols.reviewing .duel-log-caret{display:none}
+@media(max-width:1120px){.duel-log-head{cursor:default}.duel-log-caret{display:none}}
