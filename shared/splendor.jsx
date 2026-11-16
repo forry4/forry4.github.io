@@ -167,15 +167,17 @@ export function CardView({ card, selected, affordable, needsGold, disabled, onCl
 /* A gem-in-hand pill (Spender's player panel). Works for any token incl. Duel's pearl. */
 export function TokenPill({ color, count, dataToken }) {
   const rim = color === "black" ? "rgba(255,255,255,.4)" : GEM_HEX[color];
+  // count 0 is an EMPTY SLOT: the same box, class `is-empty`, its colour handed to the
+  // sheet as --pc. The game's sheet decides what an empty slot looks like.
   return (
-    <span data-token={dataToken ?? color} className="token-pill"
-      title={`${count} ${GEM_LABELS[color] || color}`}
-      style={{ background: GEM_HEX[color] + "55", border: `1px solid ${rim}` }}>
+    <span data-token={dataToken ?? color} className={`token-pill${count ? "" : " is-empty"}`}
+      title={`${count || 0} ${GEM_LABELS[color] || color}`}
+      style={count ? { background: GEM_HEX[color] + "55", border: `1px solid ${rim}` } : { "--pc": rim }}>
       {/* light rim so the near-black onyx stays visible on the warm "your turn" panel */}
       <span style={{ width: 10, height: 10, borderRadius: "50%", background: GEM_HEX[color],
         border: color === "black" ? "1px solid rgba(255,255,255,.4)" : "1px solid rgba(255,255,255,.25)",
         display: "inline-block" }} />
-      {count}
+      {count || ""}
     </span>
   );
 }
@@ -186,6 +188,9 @@ export function TokenPill({ color, count, dataToken }) {
  * No color initial: the pill is already color-coded, and blue and black share one. */
 export function BonusPill({ color, count, extra, title }) {
   const rim = color === "black" ? "rgba(255,255,255,.4)" : GEM_HEX[color];
+  if (!count && !extra) {
+    return <span data-bonus={color} className="bonus-pill is-empty" title={title} style={{ "--pc": rim }} />;
+  }
   return (
     <span data-bonus={color} className="bonus-pill" title={title}
       style={{ background: GEM_HEX[color] + "55", borderColor: rim,

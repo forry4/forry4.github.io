@@ -1158,9 +1158,10 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
     return (
       <>
         <div className="player-tokens" data-tokens={pid}>
-          {TOKENS.map((t) => (p?.tokens?.[t] || 0) > 0 && (
-            <TokenPill key={t} color={t} count={p.tokens[t]} />
-          ))}
+          {/* Every token has a slot from the first turn (an unheld one is a dashed
+              outline), so the box has its shape before anything is in it and a pill
+              never slides sideways when a colour appears to its left. */}
+          {TOKENS.map((t) => <TokenPill key={t} color={t} count={p?.tokens?.[t] || 0} />)}
         </div>
         <div className="gem-total duel-token-total">{total} {total === 1 ? "token" : "tokens"}</div>
       </>
@@ -1198,8 +1199,8 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
         {/* The cards you've BOUGHT: Spender's .bonus-pill row ("+2"). Duel appends
             the color's prestige, since 10 points in ONE color is a win condition. */}
         <div className="player-bonuses">
-          {COLORS.map((c) => (bon[c] > 0 || cpts[c] > 0) && (
-            <BonusPill key={c} color={c} count={bon[c]}
+          {COLORS.map((c) => (
+            <BonusPill key={c} color={c} count={bon[c] || 0}
               extra={cpts[c] > 0 ? `★${cpts[c]}` : null}
               title={`${bon[c]} ${c} bonus${bon[c] === 1 ? "" : "es"} from cards · ${cpts[c]} prestige in ${c} (10 wins)`} />
           ))}
@@ -1228,6 +1229,11 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
             ) : (
               <CardBack key={i} level={r.level} />
             ))}
+          {/* The unused reserve slots, as dashed card outlines — only on a tall desktop
+              (CSS), where the box has the height for a card row without scrolling. */}
+          {Array.from({ length: Math.max(0, 3 - (p.reserved || []).length) }, (_, i) => (
+            <div key={"slot" + i} className="duel-reserve-slot" aria-hidden="true" />
+          ))}
         </div>
       </div>
     );

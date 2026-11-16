@@ -265,6 +265,17 @@
    color-coded) freed enough room that the bonus pill can use Spender's own font ratio,
    identical to the token pill. */
 .duel-player .bonus-pill{letter-spacing:-.02em}
+/* An EMPTY slot (shared TokenPill / BonusPill with nothing in it): the colour's
+   outline, dashed, the gem dimmed, no number. Same box as a filled pill. */
+.duel-player .token-pill.is-empty,.duel-player .bonus-pill.is-empty{background:transparent;border:1px dashed color-mix(in srgb,var(--pc) 55%,transparent)}
+.duel-player .token-pill.is-empty>span{opacity:.38}
+/* The three reserve slots, drawn empty. Desktop AND tall only: at 768px a player box is
+   ~340px, and a card row it does not need yet would make it scroll inside itself. */
+.duel-reserve-slot{display:none}
+@media(min-width:1121px) and (min-height:860px){
+  .duel-gamescreen .duel-col-side .duel-reserve-slot{display:block;flex:0 1 var(--card-w-small);min-width:0;height:var(--card-h-small);
+    border-radius:11px;border:1px dashed rgba(255,240,215,.16);background:rgba(0,0,0,.14)}
+}
 /* Buffer between the privilege scrolls (⚜) and the token pills directly beneath them,
    plus a smaller one before the bought-card indicators. */
 .duel-player .player-tokens{margin-top:13px}
