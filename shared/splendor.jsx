@@ -89,8 +89,13 @@ export function CardView({ card, selected, affordable, needsGold, disabled, onCl
   const bonusBg = isWild ? (asColor ? GEM_HEX[asColor] : WILD_RAINBOW) : GEM_HEX[card.bonus];
   const gems = Object.entries(card.cost || {}).filter(([c, n]) => c !== "pearl" && n > 0);
   const pearl = (card.cost || {}).pearl || 0;
+  // The face wears its gem colour (the tint + the faint cut gem behind the cost, both in
+  // the card sheet). An unattached wild has no single colour, so it is marked "wild".
+  const faceColor = isWild ? asColor : card.bonus;
+  const faceKey = faceColor || (isWild ? "wild" : undefined);
   return (
-    <div data-pos={dataPos}
+    <div data-pos={dataPos} data-bonus={faceKey}
+      style={faceColor ? { "--cc": GEM_HEX[faceColor] } : undefined}
       className={`card${small ? " card-small" : ""}${selected ? " selected" : ""}${affordable ? (needsGold ? " affordable-gold" : " affordable") : ""}${disabled ? " disabled" : ""}`}
       onClick={disabled ? undefined : onClick}
     >

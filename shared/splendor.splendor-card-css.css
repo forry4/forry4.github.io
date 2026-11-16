@@ -28,6 +28,34 @@
 /* A card has DEPTH: a face lit from the top, a darker foot and a soft cast shadow. The
    state rules below (hover / selected / affordable) sit after this and still win. */
 .card{width:var(--card-w,88px);min-height:var(--card-h,120px);border-radius:calc(var(--radius) + 3px);background:linear-gradient(170deg,var(--surface3) 0%,var(--surface2) 55%,color-mix(in srgb,var(--surface2) 78%,#000) 100%);border:1px solid color-mix(in srgb,var(--border) 75%,transparent);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),inset 0 -18px 30px -24px rgba(0,0,0,.8),0 12px 26px -14px rgba(0,0,0,.95);padding:8px 6px 6px;display:flex;flex-direction:column;cursor:pointer;transition:transform .15s,border-color .15s,opacity .15s;flex-shrink:0;position:relative}
+/* THE FACE WEARS ITS GEM COLOUR. Every card was the same brown whatever it gave, so the
+   only thing saying "this is a ruby card" was a 20px disc in the corner, and the middle
+   60% of the face was empty. Two things fill that: a wash of the bonus colour from the
+   top edge, and a large faint CUT GEM behind the cost column. Both read --cc, set inline
+   by CardView (shared/splendor.jsx), so Duel's cards get the same face.
+   These sit BEFORE the hover / selected / affordable rules on purpose: same specificity,
+   so a state's border colour still wins.
+   `isolation` makes the card its own stacking context, which is what lets the gem sit at
+   z-index:-1 — above the face, below the points and the cost — without a wrapper. */
+.card[data-bonus]{isolation:isolate;border-color:color-mix(in srgb,var(--cc) 36%,var(--border));
+  background:linear-gradient(180deg,color-mix(in srgb,var(--cc) 40%,transparent) 0%,color-mix(in srgb,var(--cc) 15%,transparent) 30%,transparent 64%),
+    linear-gradient(170deg,var(--surface3) 0%,var(--surface2) 55%,color-mix(in srgb,var(--surface2) 78%,#000) 100%)}
+.card[data-bonus]::before{content:"";position:absolute;z-index:-1;pointer-events:none;left:50%;top:52%;width:58%;aspect-ratio:1/.9;
+  transform:translate(-50%,-50%);clip-path:polygon(24% 0,76% 0,100% 34%,50% 100%,0 34%);opacity:.2;
+  background:linear-gradient(180deg,color-mix(in srgb,var(--cc) 62%,#fff) 0 34%,transparent 34%),
+    linear-gradient(90deg,color-mix(in srgb,var(--cc) 72%,#000) 0 30%,var(--cc) 30% 50%,color-mix(in srgb,var(--cc) 84%,#fff) 50% 70%,color-mix(in srgb,var(--cc) 80%,#000) 70% 100%)}
+/* Onyx is near-black, so tinting brown with it shows nothing: the face goes to a cool
+   blue-black instead and the gem is drawn in steel. Diamond's cream needs less wash than
+   the saturated three or the top of the card turns to fog. */
+.card[data-bonus="black"]{--cc:#8d94ab;border-color:#4b4f61;
+  background:linear-gradient(180deg,#2d303d 0%,#191a21 46%,#0d0d11 100%)}
+.card[data-bonus="black"]::before{opacity:.15}
+.card[data-bonus="white"]{background:linear-gradient(180deg,color-mix(in srgb,var(--cc) 30%,transparent) 0%,color-mix(in srgb,var(--cc) 10%,transparent) 30%,transparent 64%),
+    linear-gradient(170deg,var(--surface3) 0%,var(--surface2) 55%,color-mix(in srgb,var(--surface2) 78%,#000) 100%)}
+/* An unattached wild can still become any colour, so it wears the muted spectrum. */
+.card[data-bonus="wild"]{isolation:isolate;background:linear-gradient(180deg,rgba(26,24,20,.5) 0%,var(--surface2) 62%),
+    linear-gradient(135deg,#c98a86 0%,#ccb079 20%,#c3c583 38%,#8ec08f 56%,#83bcc7 72%,#8f9ed0 88%,#bd97cf 100%)}
+.card[data-bonus="wild"]::before{display:none}
 .card-slot{width:var(--card-w,88px);flex-shrink:0}
 /* Each cell in a level row (deck pile / card / empty slot) shares the row width
    equally but never exceeds --card-w (88px default; bigger on desktop). A full
