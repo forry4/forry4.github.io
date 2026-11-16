@@ -61,6 +61,8 @@ const abilityGlyph = (card) =>
   ) : (
     ABILITY_GLYPH[card.ability]
   );
+// The word printed on a Royal's foot band (the tooltip keeps the full sentence).
+const ROYAL_ABILITY_NAME = { again: "Play again", privilege: "Privilege", steal: "Steal" };
 const ABILITY_DESC = {
   again: "Take another turn after this one.",
   take_same: "Take 1 token of this card's color from the board.",
@@ -248,8 +250,15 @@ function RoyalCard({ royal, dim, onClick, selected }) {
   return (
     <div className={`duel-royal${dim ? " dim" : ""}${selected ? " selected" : ""}`} onClick={onClick}
       title={royal.ability ? ABILITY_DESC[royal.ability] : "No ability"}>
-      <span className="duel-royal-pts">{"★"}{royal.points}</span>
-      {royal.ability && <span className="duel-royal-abil">{ABILITY_GLYPH[royal.ability]}</span>}
+      {/* A Royal is a CARD: a crown over its points struck in gold, and its ability
+          NAMED in a foot band. It was a 66x46 chip reading "★2 ↻", where the glyph was
+          the only thing saying what the card did. */}
+      <span className="duel-royal-crown" aria-hidden="true">{"♛"}</span>
+      <span className="duel-royal-pts">{royal.points}</span>
+      <span className="duel-royal-cap">points</span>
+      <span className={`duel-royal-abil${royal.ability ? "" : " none"}`}>
+        {royal.ability ? <><b>{ABILITY_GLYPH[royal.ability]}</b>{ROYAL_ABILITY_NAME[royal.ability]}</> : "No ability"}
+      </span>
     </div>
   );
 }
