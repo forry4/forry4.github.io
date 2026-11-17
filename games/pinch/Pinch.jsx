@@ -192,7 +192,7 @@ function Board({ game, myId, onMove, connected }) {
   return <div className="pi-board-frame">
     <svg className={boardClass} viewBox={phone ? PHONE_VIEWBOX : VIEWBOX} role="group" aria-label="Pinch board">
       <defs>
-        <radialGradient id="pi-board-glow"><stop offset="0" stopColor="#263139" /><stop offset="1" stopColor="#0d1216" /></radialGradient>
+        <radialGradient id="pi-board-glow"><stop offset="0" stopColor="#4a5e6a" /><stop offset="1" stopColor="#2b3841" /></radialGradient>
         <filter id="pi-soft"><feGaussianBlur stdDeviation="8" /></filter>
       </defs>
       <rect x="-505" y="-485" width="1010" height="970" rx="76" className="pi-board-ground" />
