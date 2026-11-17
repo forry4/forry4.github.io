@@ -1500,3 +1500,7 @@
    inherit a font, so their effect text fell to the browser's Arial while the tech board
    and the log beside them used the game's face. */
 .or-game .or-agent { font-family: inherit; }
+/* An empty Agent slot is its OUTLINE, in its planet's color — the five columns already
+   sit under the five planet names, so the word "EMPTY" five times said nothing. */
+.or-game .or-played-agent.empty { border-color: color-mix(in srgb, currentColor 40%, transparent); background: color-mix(in srgb, currentColor 5%, transparent); }
+.or-game .or-played-agent.empty .or-played-name { opacity: 0; }
