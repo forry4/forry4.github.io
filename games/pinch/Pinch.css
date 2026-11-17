@@ -84,3 +84,22 @@
    still the visible one on phones, where the head's hint is hidden instead. */
 .pi-mark{display:none}
 @media(min-width:901px){.pi-decision{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;min-height:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}}
+
+/* ONE FRAME, AND THE BOARD GETS THE HEIGHT. The board sat inside three nested boxes
+   (the frame's border, its inset hairline, the board's own edge), under a heading row
+   that took 56px off the one dimension the board is bound by. The frame is now only a
+   place to put the board; and on a desktop the heading and its hint move into the left
+   column, between the two player cards, which was an empty 480px. `display:contents`
+   lets the centre section's children take grid areas of their own without moving them
+   in the DOM (the phone layout, which stacks, still reads them in order). */
+.pi-board-frame{border:0;background:none;box-shadow:none;overflow:visible}
+.pi-board-frame:before{display:none}
+@media(min-width:901px){
+  .pi-live-grid{grid-template-areas:"opp center side" "status center side" "self center side"}
+  .pi-center{display:contents}
+  .pi-board-frame{grid-area:center}
+  .pi-board-svg{max-width:none}
+  .pi-table-head{grid-area:status;align-self:center;flex-direction:column;align-items:flex-start;justify-content:center;gap:12px;min-height:0;padding:0 4px}
+  .pi-table-head strong{font-size:24px;line-height:1.15}
+  .pi-table-head p{max-width:none;text-align:left;font-size:13px;line-height:1.5}
+}
