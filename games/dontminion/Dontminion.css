@@ -196,20 +196,25 @@
   background: linear-gradient(180deg, rgba(255,240,215,.035), rgba(255,240,215,.01)), var(--surface, #1a1814);
   border: 1px solid rgba(255,240,215,.06); box-shadow: inset 0 1px 0 rgba(255,240,215,.05);
   border-radius: var(--radius-lg, 14px); padding: 8px 12px;
-  font-size: 13px; line-height: 1.6; overflow-y: auto;
+  font-size: 14.5px; line-height: 1.55; overflow-y: auto;
   max-height: min(640px, calc(100vh - 300px));
 }
 /* CHRONOLOGICAL: the newest entry is the LAST child, and the JSX auto-scrolls
    to it. Both the highlight and the entry animation below key off :last-child —
    they were :first-child while the list was reversed, so leaving them there
    would have brightened and re-animated the OLDEST line on every move. */
-.dm-log-line { color: var(--text-dim, #8a7d6a); }
+/* THE LOG IS READ, NOT GLANCED AT, so it is set in the body-copy dim (--text-soft,
+   6.1:1 on this panel) rather than the label dim it had (--text-dim, 4.4:1 — under AA
+   for a sentence), and a step larger. Each turn opens under a rule, so a long log has
+   landmarks to scroll by. */
+.dm-log-line { color: var(--text-soft, #b3a58b); }
 .dm-log-line:last-child { color: var(--text, #e8dfc8); }
 /* sub-effects indent under the play that caused them (engine log depth) */
 .dm-log-d1 { padding-left: 16px; }
 .dm-log-d2 { padding-left: 32px; }
 .dm-log-d3 { padding-left: 48px; }
-.dm-log-turn { color: var(--text, #e8dfc8); font-weight: 600; margin-top: 6px; }
+.dm-log-turn { color: var(--gold-light, #e8c96a); font-weight: 600; margin-top: 8px; padding-top: 6px; border-top: 1px solid rgba(255,240,215,.09); }
+.dm-log-turn:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
 
 /* ── supply ── */
 .dm-supply {
