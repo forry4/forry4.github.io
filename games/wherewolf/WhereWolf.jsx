@@ -9,6 +9,7 @@ import { lobbyCss, LobbyHeader, LobbySectionHd, LobbyLoading, GameMenu, gameMenu
   notWaiting, LobbyUser, LobbyOpenTitle, LobbyOpenActions, seatStateOf, useListFade,
   WaitingRoom, waitingRoomCss, LobbyOpenHd, LobbyActiveHd, LobbyNoOpen, LobbyNoActive } from "../../shared/lobby.jsx";
 import WhereWolfRules from "./rules.jsx";
+import { RoleGlyph, MoonBack } from "./art.jsx";
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 import { leaveOpenSeat, readRoomToken } from "../../shared/roomLifecycle.js";
 
@@ -88,6 +89,19 @@ const cardLabel = (r) => {
   const at = CARD_WBR[r];
   return at ? <>{n.slice(0, at)}<wbr />{n.slice(at)}</> : n;
 };
+
+// A role card's FACE: its glyph (art.jsx), its name, and a foot band in its TEAM's
+// colour — village green, werewolf red, tanner tan, the same three the result screen's
+// headline uses. The card's own border and wash come from --rc, set by the caller.
+function RoleFace({ role }) {
+  return (
+    <>
+      <span className="ww-face-glyph"><RoleGlyph role={role} /></span>
+      <span className="ww-face-name">{cardLabel(role)}</span>
+      <span className={`ww-face-team ${ROLE_META[role]?.team || "village"}`} aria-hidden="true" />
+    </>
+  );
+}
 
 // Seat cards scale down as the table fills so up to 10 still ring the circle (card
 // height must stay under the chord between adjacent seats), while the common 3–7
@@ -864,11 +878,12 @@ export default function WhereWolf({ myId, authUser, onExit }) {
       <div className={`ww-seat${isMe ? " me" : ""}`} key={pid} style={{ left: pos.x + "%", top: pos.y + "%" }}>
         <div
           data-pid={pid}
-          className={`ww-pcard${faceUp ? "" : " back"}${clickable ? " clickable" : ""}${selected ? " selected" : ""}${revealed ? " revealed" : ""}`}
-          style={faceUp ? { borderColor: roleColor(pdata.card), background: "#1a1622" } : undefined}
+          className={`ww-pcard${faceUp ? " face" : " back"}${clickable ? " clickable" : ""}${selected ? " selected" : ""}${revealed ? " revealed" : ""}`}
+          style={faceUp ? { "--rc": roleColor(pdata.card) } : undefined}
+          title={faceUp ? `${roleName(pdata.card)} — ${roleDesc(pdata.card)}` : undefined}
           onClick={clickable ? () => clickPlayer(pid) : undefined}
         >
-          {faceUp ? cardLabel(pdata.card) : ""}
+          {faceUp ? <RoleFace role={pdata.card} /> : <MoonBack />}
           {phase === "dealing" && pdata.ready && <span className="ww-ready">✓</span>}
           {dayActive && game.locked?.[pid] && <span className="ww-lock">🔒</span>}
           {phase === "over" && voteCount > 0 && <span className="ww-badge">{voteCount}</span>}
@@ -947,8 +962,9 @@ export default function WhereWolf({ myId, authUser, onExit }) {
                     return (
                       <div key={i} data-center-idx={i}
                         className={`ww-ccard${up ? " up" : ""}${clickable ? " clickable" : ""}${sel ? " selected" : ""}`}
+                        style={up ? { "--rc": roleColor(c) } : undefined}
                         onClick={clickable ? () => clickCenter(i) : undefined}>
-                        {up ? cardLabel(c) : ""}
+                        {up ? <RoleFace role={c} /> : <MoonBack />}
                       </div>
                     );
                   })}
@@ -1030,7 +1046,7 @@ function WinScreen({ game, order, myIdx, players, roomData, isMobile, onExit }) 
           <div className="ww-card-meta">Center cards</div>
           <div className="ww-center-cards">
             {(game.center || []).map((c, i) => (
-              <div key={i} className="ww-ccard up" style={{ borderColor: roleColor(c) }}>{cardLabel(c)}</div>
+              <div key={i} className="ww-ccard up" style={{ "--rc": roleColor(c) }} title={roleDesc(c)}><RoleFace role={c} /></div>
             ))}
           </div>
         </div>
@@ -1043,8 +1059,8 @@ function WinScreen({ game, order, myIdx, players, roomData, isMobile, onExit }) 
           const won = winners.includes(pid);
           return (
             <div className={`ww-seat${pid === order[myIdx] ? " me" : ""}`} key={pid} style={{ left: pos.x + "%", top: pos.y + "%" }}>
-              <div className={`ww-pcard${isDead ? " revealed" : ""}`} style={{ borderColor: roleColor(pdata.card), background: "#1a1622" }}>
-                {cardLabel(pdata.card)}
+              <div className={`ww-pcard face${isDead ? " revealed" : ""}`} style={{ "--rc": roleColor(pdata.card) }} title={roleDesc(pdata.card)}>
+                <RoleFace role={pdata.card} />
                 {votes > 0 && <span className="ww-badge">{votes}</span>}
                 {isDead && <span className="ww-dead">☠</span>}
               </div>

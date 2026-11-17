@@ -74,8 +74,28 @@
 .ww-seat.me .seat-name{color:var(--gold-light)}
 .ww-pcard{width:var(--pcw,72px);height:var(--pch,94px);border-radius:8px;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;
   text-align:center;font-family:Cinzel,serif;font-size:var(--pcf,11px);line-height:1.1;padding:3px;overflow-wrap:anywhere;background:#1a1622;position:relative;transition:all .15s}
-.ww-pcard.back{background:repeating-linear-gradient(45deg,#241a2e,#241a2e 6px,#2c2038 6px,#2c2038 12px);color:transparent}
-.ww-pcard.back::after{content:"?";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#54486a;font-size:24px}
+/* A ROLE CARD HAS A FACE AND A BACK. It was a dark box holding the role's name, and
+   face down a striped box holding a "?" — on a screen that is nothing BUT cards.
+   FACE: a wash of the role's colour from the top (--rc, set inline), the role's glyph
+   (art.jsx), its name, and a foot band in its TEAM's colour.
+   BACK: a night sky with a crescent — one back for every card, as a deck has.
+   No overflow:hidden on the card: the vote badge, the lock and the skull hang outside
+   its corners. The band rounds its own two corners instead. */
+.ww-pcard,.ww-ccard{flex-direction:column;gap:calc(var(--pcf,11px) * .28)}
+.ww-pcard.face,.ww-ccard.up{border-color:var(--rc,#3a342a);color:var(--text);
+  background:linear-gradient(180deg,color-mix(in srgb,var(--rc,#3a342a) 44%,#1a1622) 0%,#1d1826 56%,#15111c 100%);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.1),0 10px 20px -12px #000}
+.ww-face-glyph{display:flex;width:46%;max-width:54px;color:color-mix(in srgb,var(--rc,#8a7d6a) 46%,#f3ead8);filter:drop-shadow(0 2px 2px rgba(0,0,0,.5))}
+.ww-face-glyph svg{display:block;width:100%;height:auto}
+.ww-face-glyph:empty{display:none}
+.ww-face-name{display:block;text-shadow:0 1px 2px #000}
+.ww-face-team{position:absolute;left:0;right:0;bottom:0;height:5px;border-radius:0 0 5px 5px;background:#7ed07a}
+.ww-face-team.werewolf{background:#e0655a}
+.ww-face-team.tanner{background:#d6a24a}
+.ww-pcard.back,.ww-ccard:not(.up){color:#cfc5f4;border-color:#4d4480;
+  background:radial-gradient(130% 95% at 50% 0%,#3d3470 0%,#251f48 52%,#16122c 100%);
+  box-shadow:inset 0 0 0 3px rgba(0,0,0,.26),inset 0 0 0 4px rgba(196,184,244,.16),0 10px 20px -12px #000}
+.ww-back-moon{display:block;width:44%;height:auto;opacity:.82;filter:drop-shadow(0 0 6px rgba(190,180,255,.35))}
 .ww-pcard.clickable{cursor:pointer;border-color:var(--gold)}
 .ww-pcard.clickable:hover{box-shadow:0 0 0 2px var(--gold-light);transform:translateY(-2px)}
 .ww-pcard.selected{box-shadow:0 0 0 3px var(--gold-light)}
@@ -88,10 +108,8 @@
 /* center: the 3 face-down cards + the token row */
 .ww-center{position:absolute;top:42%;left:50%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:8px;z-index:2}
 .ww-center-cards{display:flex;gap:8px}
-.ww-ccard{width:62px;height:82px;border-radius:7px;border:2px solid var(--border);background:repeating-linear-gradient(45deg,#241a2e,#241a2e 6px,#2c2038 6px,#2c2038 12px);
-  display:flex;align-items:center;justify-content:center;text-align:center;font-family:Cinzel,serif;font-size:11px;line-height:1.1;padding:3px;overflow-wrap:anywhere;color:transparent;position:relative}
-.ww-ccard::after{content:"";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#54486a;font-size:18px}
-.ww-ccard.up{background:#1a1622;color:var(--text)}
+.ww-ccard{width:62px;height:82px;border-radius:7px;border:2px solid var(--border);
+  display:flex;align-items:center;justify-content:center;text-align:center;font-family:Cinzel,serif;font-size:11px;line-height:1.1;padding:3px;overflow-wrap:anywhere;position:relative}
 .ww-ccard.clickable{cursor:pointer;border-color:var(--gold)}
 .ww-ccard.clickable:hover{box-shadow:0 0 0 2px var(--gold-light)}
 .ww-ccard.selected{box-shadow:0 0 0 3px var(--gold-light)}
