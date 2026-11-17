@@ -1496,3 +1496,7 @@
     linear-gradient(180deg, transparent 0 30%, rgba(80,40,10,.32) 30% 40%, transparent 40% 56%, rgba(80,40,10,.26) 56% 64%, transparent 64%),
     currentColor;
 }
+/* One face for every line of RULES TEXT. The Agent cards are <button>s, which do not
+   inherit a font, so their effect text fell to the browser's Arial while the tech board
+   and the log beside them used the game's face. */
+.or-game .or-agent { font-family: inherit; }
