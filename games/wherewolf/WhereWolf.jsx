@@ -109,9 +109,13 @@ function RoleFace({ role }) {
 // the ellipse is tall, so the tiers are tighter. Returns inline CSS vars the cards
 // read via var(--pcw/--pch/--pcf).
 const cardVars = (n, mobile) => {
+  // Every tier is a step up from the old 76/66/56 (58/52/46 on a phone), and three or
+  // four seats — the commonest tables, with the most room — get a tier of their own.
+  // The limit at five seats is not the chord between neighbours but the two upper
+  // seats closing on the centre cards, which is why five shares the middle tier.
   const tiers = mobile
-    ? (n <= 7 ? ["58px", "76px", "10px"] : n <= 9 ? ["52px", "68px", "9.5px"] : ["46px", "60px", "9px"])
-    : (n <= 7 ? ["76px", "98px", "11.5px"] : n <= 9 ? ["66px", "86px", "10.5px"] : ["56px", "76px", "10px"]);
+    ? (n <= 4 ? ["68px", "90px", "11px"] : n <= 7 ? ["60px", "79px", "10px"] : n <= 9 ? ["52px", "68px", "10px"] : ["46px", "60px", "10px"])
+    : (n <= 4 ? ["98px", "128px", "13.5px"] : n <= 7 ? ["84px", "110px", "12px"] : n <= 9 ? ["70px", "92px", "11px"] : ["58px", "78px", "10px"]);
   const [w, h, f] = tiers;
   return { "--pcw": w, "--pch": h, "--pcf": f };
 };
