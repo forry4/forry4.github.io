@@ -244,6 +244,9 @@ function DmCardFace({ name, card, onClick, onInfo, selected, disabled, highlight
     disabled ? "dm-dis" : "", click ? "dm-clickable" : ""].filter(Boolean).join(" ");
   // long rules text shrinks to fit — the card itself NEVER grows
   const text = card?.text || "";
+  const coinM = /^\$(\d+)$/.exec(text.trim());
+  const vpM = /^(-?\d+) VP$/.exec(text.trim());
+  const emblem = coinM ? { kind: "coin", n: coinM[1] } : vpM ? { kind: "vp", n: vpM[1] } : null;
   const textCls = text.length > 200 ? " dm-text-xxl" : text.length > 130 ? " dm-text-xl"
     : text.length > 80 ? " dm-text-l" : "";
   return (
@@ -253,6 +256,21 @@ function DmCardFace({ name, card, onClick, onInfo, selected, disabled, highlight
       {types.includes("reaction") && <span className="dm-edge dm-edge-rx" />}
       {types.includes("duration") && !types.includes("attack") && <span className="dm-edge dm-edge-dur" />}
       <FitText text={name} className="dm-card-name" />
+      {/* A card whose whole text is a value ("$2", "6 VP") is that value, drawn large:
+          a coin for money, a shield for points. Without it Copper was a name over a
+          black rectangle, and a hand of five of them was five black rectangles. The
+          text line stays (it is what a screen reader and the fitted-text gate read). */}
+      {emblem && (
+        <span className={"dm-emblem dm-emblem-" + emblem.kind} aria-hidden="true">
+          <svg viewBox="0 0 48 48">
+            {emblem.kind === "coin"
+              ? <><circle cx="24" cy="24" r="21" className="dm-emblem-face" /><circle cx="24" cy="24" r="16.500" className="dm-emblem-ring" /></>
+              : <><path d="M24 3 42 9v13c0 11-7.500 18.500-18 23C13.500 40.500 6 33 6 22V9Z" className="dm-emblem-face" /><path d="M24 8.500 37 13v9.500c0 8-5 13.800-13 17.500-8-3.700-13-9.500-13-17.500V13Z" className="dm-emblem-ring" /></>}
+            <text x="24" y={emblem.kind === "coin" ? 31.500 : 30} textAnchor="middle" className="dm-emblem-num"
+              fontSize={emblem.n.length > 1 ? 17 : 21}>{emblem.n}</text>
+          </svg>
+        </span>
+      )}
       {/* supply piles opt into fitted body text via `body` (small stays text-free
           on the 56px in-play/hand/mat faces); large faces keep the length tiers */}
       {body

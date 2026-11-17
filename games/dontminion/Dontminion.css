@@ -394,6 +394,21 @@
   box-shadow: calc(var(--cf-pad) * -1) 0 0 0 var(--band), var(--cf-pad) 0 0 0 var(--band);
   border-bottom-color: color-mix(in srgb, var(--tint) 62%, transparent);
 }
+/* The value emblem on a pure-value card (see DmCardFace): centred in the face's empty
+   middle, sized off the card, under the text and the foot row in paint order so a
+   long name or the cost coin is never covered. */
+.dm-emblem { position: absolute; left: 50%; top: 57%; height: 50%; max-height: 86px; aspect-ratio: 1; max-width: 46%; transform: translate(-50%, -50%); pointer-events: none; z-index: 0;
+  filter: drop-shadow(0 4px 6px rgba(0,0,0,.6)); }
+.dm-emblem svg { display: block; width: 100%; height: 100%; }
+.dm-emblem-coin .dm-emblem-face { fill: #d9b252; stroke: #7d5d1c; stroke-width: 1.500; }
+.dm-emblem-coin .dm-emblem-ring { fill: none; stroke: #fbe7a6; stroke-width: 1.200; opacity: .7; }
+.dm-emblem-coin .dm-emblem-num { fill: #3a2a08; }
+.dm-emblem-vp .dm-emblem-face { fill: color-mix(in srgb, var(--tint) 62%, #10160c); stroke: color-mix(in srgb, var(--tint) 70%, #000); stroke-width: 1.500; }
+.dm-emblem-vp .dm-emblem-ring { fill: none; stroke: color-mix(in srgb, var(--tint) 55%, #fff); stroke-width: 1.200; opacity: .6; }
+.dm-emblem-vp .dm-emblem-num { fill: #f6ffe9; }
+.dm-emblem-num { font-family: 'Cinzel','Cinzel Fallback',serif; font-weight: 700; }
+.dm-card-small .dm-emblem, .dm-card.dm-card-small .dm-emblem { top: 58%; height: 46%; max-width: 54%; }
+.dm-dis .dm-emblem { opacity: .7; }
 .dm-f-reaction { --tint: #5f86e6; }
 .dm-f-reaction .dm-card-name { color: #dbe5ff; }
 .dm-f-duration { --tint: #d98f3c; }
