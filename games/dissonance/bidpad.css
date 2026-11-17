@@ -54,6 +54,15 @@
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.28);
 }
 .dis-bidgrid button:disabled, .dis-denoms button:disabled { opacity: 0.3; cursor: not-allowed; }
+/* WAITING IS NOT REFUSED. Before a level is picked every suit key is disabled, and at
+   0.3 the whole row read as a denied one — dark glyphs on a dark board, as if no suit
+   could be bid. A key that is only waiting for its level keeps its suit legible; a key
+   that is truly unavailable at the chosen level still drops to 0.3. */
+.dis-denoms button.wait:disabled { opacity: 0.62; cursor: default; }
+/* The suit pips are the text font's own glyphs, which sit about two-thirds the height
+   of a numeral; on a key the size of a level key they read as specks. Scaled to the
+   numerals' visual weight, on line-height 1 so the key does not grow. */
+.dis-denoms button .dis-suit-r, .dis-denoms button .dis-suit-b { font-size: 1.4em; line-height: 1; }
 /* THE DENOMINATIONS ARE THE SAME KEY AS THE LEVELS. There are exactly five of
    them and the level pad is five wide, so they take the identical fifth-width
    basis, padding and box — two rows of one keypad rather than two differently

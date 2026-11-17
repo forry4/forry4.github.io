@@ -2764,7 +2764,7 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
                       const ok = bidLevel !== null && denomOkAt(bidLevel, d);
                       return (
                         <button key={d}
-                          className={bidDenom === d ? "on" : ""}
+                          className={bidDenom === d ? "on" : bidLevel === null ? "wait" : ""}
                           disabled={!ok}
                           title={ok ? DENOM_NAME[d]
                             : bidLevel === null ? "pick a level first"
