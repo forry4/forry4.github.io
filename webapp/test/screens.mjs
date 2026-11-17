@@ -210,9 +210,27 @@ const until = (page, fn, ms, arg = null) => page.waitForFunction(fn, arg, { time
 // back to msedge was the old answer and only worked on one machine.
 async function launchBrowser() {
 	const exe = process.env.PLAYWRIGHT_CHROMIUM_PATH;
-	if (exe) return await chromium.launch({ executablePath: exe });
-	try { return await chromium.launch(); }
-	catch { return await chromium.launch({ channel: "msedge" }); }
+	// SILENT, ALWAYS. Where Wolf? narrates its night out loud (an mp3 per step, and
+	// speechSynthesis as the fallback), and a gate that drives it played that through
+	// the developer's speakers on every run. --mute-audio silences the media; speech
+	// can go through the OS voice rather than Chrome's audio output, so every context
+	// also gets a speechSynthesis that accepts the call and says nothing.
+	const opts = { args: ["--mute-audio"] };
+	let b;
+	if (exe) b = await chromium.launch({ ...opts, executablePath: exe });
+	else {
+		try { b = await chromium.launch(opts); }
+		catch { b = await chromium.launch({ ...opts, channel: "msedge" }); }
+	}
+	const newContext = b.newContext.bind(b);
+	b.newContext = async (...a) => {
+		const ctx = await newContext(...a);
+		await ctx.addInitScript(() => {
+			try { if (window.speechSynthesis) { window.speechSynthesis.speak = () => {}; } } catch {}
+		});
+		return ctx;
+	};
+	return b;
 }
 
 let api, preview, browser;
