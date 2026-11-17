@@ -80,6 +80,23 @@ export function Die({ die, onClick, disabled = true, label }) {
   return onClick ? <button type="button" {...props} disabled={disabled} onClick={onClick}>{contents}</button> : <span {...props} role="img">{contents}</span>;
 }
 
+// The starting cards have no printed names -- the catalogue numbers them ("Resource 9",
+// "Action 3") so a card can be told apart in data, and those ids were being printed as
+// headings, where they read as placeholders. A starting ACTION card does one thing, so
+// that thing is its name; a starting RESOURCE card is a list, and gets no heading.
+const PLACEHOLDER_NAME = /^(Resource|Action) \d+$/;
+function cardTitle(card) {
+  if (!card) return null;
+  if (!PLACEHOLDER_NAME.test(card.name || "")) return card.name;
+  const items = effectItems(card.light || []);
+  if (card.kind !== "starting_resource" && items.length === 1) {
+    const t = typeof items[0] === "string" ? items[0] : items[0].text;
+    return t.charAt(0).toUpperCase() + t.slice(1);
+  }
+  return null;
+}
+const titleIsEffect = (card) => !!card && PLACEHOLDER_NAME.test(card.name || "") && cardTitle(card) != null;
+
 function Effects({ effects, className = "" }) {
   const items = effectItems(effects || []);
   return <ul className={`bc-effects ${className}`}>{items.map((item, i) => <li key={i}>{typeof item === "string" ? item : item.text}</li>)}</ul>;
@@ -240,7 +257,7 @@ function Domain({ game, pid, names, onSelect, selected, busy, inspect = false })
   const player = game.players[pid];
   if (!player) return null;
   return <section className="bc-domain-board bc-panel" id={inspect ? undefined : "bc-domain"}><SectionHead icon="castle" title={inspect ? `${names[pid]}'s domain` : "Your domain"} note="Personal actions" />
-    <div className="bc-domain-card"><span className="bc-kicker">ACTION CARD</span><strong>{player.action_card?.name || "None yet"}</strong><small>Each line performs the action printed beside it.</small></div>
+    <div className="bc-domain-card"><span className="bc-kicker">ACTION CARD</span><strong>{cardTitle(player.action_card) || player.action_card?.name || "None yet"}</strong><small>Each line performs the action printed beside it.</small></div>
     <div className="bc-domain-row">{COLORS.map(color => inspect ? <div className={`bc-domain-inspect bc-${color}`} key={color}><DomainLine player={player} color={color} die={player.domain?.[color]?.die} /></div> : <Target key={color} {...{ game, onSelect, selected, busy }} space={`domain:${color}`} className={`bc-domain-slot bc-${color}`}><DomainLine player={player} color={color} die={player.domain?.[color]?.die} /></Target>)}</div>
     <div className="bc-lantern"><h3><Icon name="lantern" />Lantern rewards</h3><p>Collect every reward when you place a low die.</p><div>{player.lantern?.length ? player.lantern.map((reward, i) => <span key={i}>{rewardText(reward)}</span>) : <span>No rewards yet</span>}</div></div>
     {inspect && <div className="bc-worker-positions"><h3>Deployed workers</h3>{Object.entries(WORKERS).map(([key, label]) => <p key={key}><strong>{label}</strong>{Object.entries(player.workers?.[key] || {}).filter(([place, count]) => place !== "domain" && count > 0).map(([place, count]) => `${count} ${FLOORS[place] || ({ yard_pool: "in training reserve", garden_pool: "in garden reserve", yard: "in training yards", garden: "in gardens" })[place]}`).join(" · ") || "None yet"}</p>)}</div>}
@@ -353,7 +370,7 @@ function Draft({ game, names, sendMove, busy, connected }) {
   const chosen = game.draft_options?.find(o => o.resource.id === selection);
   if (picks.length) return <section className="bc-draft"><ResourceChoice moves={picks} {...{ sendMove, busy, connected }} /></section>;
   return <section className="bc-draft"><div className="bc-draft-intro"><span className="bc-kicker">THE OPENING DRAFT</span><h2>{active ? "Every great clan begins with a choice." : `${names[game.draft_queue?.[0]] || "Another clan"} is choosing.`}</h2><p>Choose a pair. Take its starting resources now, keep the action card for your domain, and add the lantern reward.</p></div>
-    <div className="bc-draft-grid">{(game.draft_options || []).map((option, i) => <button type="button" key={option.resource.id} className={`bc-draft-pair${selection === option.resource.id ? " selected" : ""}`} disabled={!active || busy || !connected} onClick={() => setSelection(option.resource.id)} aria-pressed={selection === option.resource.id}><span className="bc-draft-number">PAIR {String(i + 1).padStart(2, "0")}<Icon name={selection === option.resource.id ? "check" : "castle"} /></span><div className="bc-draft-resource"><span className="bc-kicker">START WITH</span><h3>{option.resource.name}</h3><Effects effects={option.resource.light} /></div><div className="bc-draft-action"><span className="bc-kicker">YOUR DOMAIN ACTION</span><h3>{option.action.name}</h3><Effects effects={option.action.light} /></div><div className="bc-draft-lantern"><Icon name="lantern" /><span>Lantern<small>{rewardText({ icon: ["food", "iron", "pearl", "coin", "seal", "influence", "vp"].includes(option.resource.back) ? option.resource.back : "coin", amount: 1 })}</small></span></div><span className="bc-draft-select">{selection === option.resource.id ? "Selected" : active ? "Select pair" : "Waiting for your turn"}<Icon name="arrow" /></span></button>)}</div>
+    <div className="bc-draft-grid">{(game.draft_options || []).map((option, i) => <button type="button" key={option.resource.id} className={`bc-draft-pair${selection === option.resource.id ? " selected" : ""}`} disabled={!active || busy || !connected} onClick={() => setSelection(option.resource.id)} aria-pressed={selection === option.resource.id}><span className="bc-draft-number">PAIR {String(i + 1).padStart(2, "0")}<Icon name={selection === option.resource.id ? "check" : "castle"} /></span><div className="bc-draft-resource"><span className="bc-kicker">START WITH</span>{cardTitle(option.resource) && <h3>{cardTitle(option.resource)}</h3>}<Effects effects={option.resource.light} /></div><div className="bc-draft-action"><span className="bc-kicker">YOUR DOMAIN ACTION</span><h3>{cardTitle(option.action) || option.action.name}</h3>{!titleIsEffect(option.action) && <Effects effects={option.action.light} />}</div><div className="bc-draft-lantern"><Icon name="lantern" /><span>Lantern<small>{rewardText({ icon: ["food", "iron", "pearl", "coin", "seal", "influence", "vp"].includes(option.resource.back) ? option.resource.back : "coin", amount: 1 })}</small></span></div><span className="bc-draft-select">{selection === option.resource.id ? "Selected" : active ? "Select pair" : "Waiting for your turn"}<Icon name="arrow" /></span></button>)}</div>
     <div className="bc-draft-confirm"><span>{chosen ? `${chosen.resource.name} + ${chosen.action.name}` : active ? "Select a pair to see your choice here." : "The remaining pairs will be yours to choose from."}</span><button className="bc-primary" disabled={!chosen || !active || busy || !connected} onClick={() => sendMove({ type: "draft", index: game.draft_options.findIndex(o => o.resource.id === selection) })}>Begin with this pair <Icon name="arrow" /></button></div>
   </section>;
 }
