@@ -221,6 +221,10 @@ const faceClass = (types) => {
   if (types.includes("curse")) return "dm-f-curse";
   if (types.includes("treasure")) return "dm-f-treasure";
   if (types.includes("victory")) return "dm-f-victory";
+  // An Action that is also a Reaction or a Duration wears THAT colour (blue / orange),
+  // as the printed cards do; Attack has no colour of its own and keeps its red edge.
+  if (types.includes("reaction")) return "dm-f-action dm-f-reaction";
+  if (types.includes("duration")) return "dm-f-action dm-f-duration";
   return "dm-f-action";
 };
 

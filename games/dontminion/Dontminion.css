@@ -380,6 +380,27 @@
   white-space: nowrap;
 }
 .dm-f-action .dm-card-name { color: #e8dfc8; }
+/* THE NAME SITS ON A BAND OF THE CARD'S TYPE COLOUR. The type was a 26% wash fading out
+   of the top edge, which on the cream Action tint is nearly the page colour — so ten
+   kingdom piles read as ten identical brown boxes and the type lived in a 6px word at
+   the foot. The band is the printed cards' own device: gold Treasure, green Victory,
+   purple Curse, parchment Action, blue Reaction, orange Duration.
+   Painted as the name's own background PLUS two side shadows, not as padding: FitText
+   measures this element's box, so its width must stay exactly what it was. The shadows
+   carry the colour out across the --cf-pad inset to the card's edge. */
+.dm-card { --band: color-mix(in srgb, var(--tint) 44%, #17120c); }
+.dm-card-name {
+  background: var(--band);
+  box-shadow: calc(var(--cf-pad) * -1) 0 0 0 var(--band), var(--cf-pad) 0 0 0 var(--band);
+  border-bottom-color: color-mix(in srgb, var(--tint) 62%, transparent);
+}
+.dm-f-reaction { --tint: #5f86e6; }
+.dm-f-reaction .dm-card-name { color: #dbe5ff; }
+.dm-f-duration { --tint: #d98f3c; }
+.dm-f-duration .dm-card-name { color: #ffe3c2; }
+.dm-f-treasure .dm-card-name { color: #ffe9a8; }
+.dm-f-victory .dm-card-name { color: #d5f3c4; }
+.dm-f-curse .dm-card-name { color: #ecd3fa; }
 .dm-f-treasure { --tint: #e0b84c; }
 .dm-f-treasure .dm-card-name { color: #f0cf72; }
 .dm-f-victory { --tint: #6fbf4f; }
