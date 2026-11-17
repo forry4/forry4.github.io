@@ -1,0 +1,106 @@
+/* ─── THE GAME KIT — the site owns the materials, a game picks the colors ──────────
+ *
+ * Twelve games were built on three different construction systems: the house look
+ * (Cinzel + Crimson Pro, lit 14px panels, the lit 8px plate) and two others that came
+ * later — a system sans with pill buttons (Pinch, Pip Market, Orbit's in-game type) and
+ * Inter with Georgia headings and 3-6px corners (Black Castle). A game looking different
+ * is fine; a game looking like a different PRODUCT is what made the site feel jarring.
+ * This sheet is the house look written once, so a game can only vary it by COLOR.
+ *
+ * A GAME SETS FOUR TOKENS ON THE ELEMENT THAT WEARS `fg-table`, and nothing else
+ * about its chrome:
+ *     --g-ground   the page color, the game's own hue kept very dark
+ *     --g-accent   its one accent: primary buttons, the active seat, the top-bar hairline
+ *     --g-ink      text on the accent (the lit plate is light, so this is dark)
+ *     --g-label    panel-title color — usually the accent lifted toward white
+ * Every other value below is DERIVED from those and must never be set by a game. The
+ * defaults are the house values, so a house game (Spender, Duel, Dontminion, CoC, Rag
+ * Tag) wears `fg-table` and sets nothing.
+ *
+ * Tokens go on the ROOT, never a descendant: a derived value is computed where it is
+ * DECLARED, so `--g-surface` on `.fg-table` reads that element's `--g-ground` and does
+ * not follow a `--g-ground` set further down.
+ *
+ * The defaults sit in `:where()` (specificity 0), so a game's token rule wins whichever
+ * side of this sheet it is concatenated on — CoC's sheet comes BEFORE the kit, every
+ * other game's after it.
+ *
+ * WHAT THE KIT OWNS — and what a game sheet may therefore NOT restyle on an element
+ * that wears the class (shared/tests/test_game_kit.py reads the JSX for every element
+ * wearing a kit class and refuses those properties on its co-classes):
+ *     fg-table   the text face and the text color of the game screen
+ *     fg-panel   ground, edge, corner and shadow of a panel
+ *     fg-lit     the "this one is live" edge (the seat to play, your turn); a seat-
+ *                colored game sets `--g-lit` on the panel to light it in that seat
+ *     fg-label   a panel title / small caps label
+ *     fg-log-row one line of a game log
+ *     .btn .btn-gold / .btn-outline / .btn-ghost   the buttons, now in the accent
+ *     .lby-header  the in-game top bar, derived from the ground (lobby.lobby-css.css)
+ * What a game keeps is its MATERIAL: the board, the pieces, the cards, the art, and the
+ * layout of all of them.
+ */
+
+:where(.fg-table){
+  --g-ground:var(--bg);
+  --g-accent:var(--gold);
+  --g-ink:#0f0e0c;
+  --g-label:var(--gold);
+}
+
+.fg-table{
+  /* Derived. srgb against a warm white, so on the house ground these land within a
+     shade of the hand-picked tokens they replace (--surface #1a1814 -> #1b1a16,
+     --surface2 #242018 -> #272521, --border #3a342a -> #3a3831). */
+  --g-surface:color-mix(in srgb,var(--g-ground) 95%,#fff5dc);
+  --g-surface-2:color-mix(in srgb,var(--g-ground) 90%,#fff5dc);
+  --g-edge:color-mix(in srgb,var(--g-ground) 82%,#fff5dc);
+  --g-text:var(--text);
+  --g-text-soft:var(--text-soft);
+  --g-lit:var(--g-accent);
+  --g-serif:'Crimson Pro','Crimson Fallback',Georgia,serif;
+  --g-display:'Cinzel','Cinzel Fallback',serif;
+  /* The top bar reads these (lobby.lobby-css.css); a lobby, which wears no
+     `fg-table`, keeps the bar's own warm literals. */
+  --lby-bar-top:var(--g-surface-2);
+  --lby-bar-bot:var(--g-surface);
+  --lby-bar-edge:var(--g-edge);
+  font-family:var(--g-serif);
+  color:var(--g-text);
+}
+
+/* ── panels ──────────────────────────────────────────────────────────────────── */
+.fg-panel{
+  background:linear-gradient(180deg,rgba(255,240,215,.035),rgba(255,240,215,.012)),var(--g-surface,var(--surface));
+  border:1px solid rgba(255,240,215,.07);
+  border-radius:var(--radius-lg);
+  box-shadow:inset 0 1px 0 rgba(255,240,215,.05),0 18px 40px -30px #000;
+}
+/* The live one: an edge in the accent (or the seat's color), never a neon glow. */
+.fg-panel.fg-lit{
+  border-color:color-mix(in srgb,var(--g-lit,var(--gold)) 60%,transparent);
+  box-shadow:inset 0 1px 0 rgba(255,240,215,.06),
+    0 0 0 1px color-mix(in srgb,var(--g-lit,var(--gold)) 18%,transparent),
+    0 18px 40px -30px #000;
+}
+
+/* ── labels: Cinzel caps in the label color ──────────────────────────────────── */
+.fg-label{
+  font-family:var(--g-display,'Cinzel','Cinzel Fallback',serif);
+  font-size:.68rem;font-weight:600;line-height:1.2;
+  letter-spacing:.14em;text-transform:uppercase;
+  color:var(--g-label,var(--gold));
+}
+/* A caption under a name or a number ("You", "Bot", "pts") is a label in the text
+   color, not a panel title: in the label color it competes with the name above it. */
+.fg-label.fg-label-soft{color:var(--g-text-soft,var(--text-soft));}
+
+/* ── the log: one row style ──────────────────────────────────────────────────── */
+.fg-log-row{
+  font-size:.92rem;line-height:1.4;
+  padding:5px 0;
+  color:var(--g-text-soft,var(--text-soft));
+  border-bottom:1px solid rgba(255,240,215,.05);
+}
+/* A row that marks a turn or round boundary, and a row that records nothing happening. */
+.fg-log-row.fg-log-head{color:var(--g-label,var(--gold));}
+.fg-log-row.fg-log-quiet{color:var(--text-dim);}

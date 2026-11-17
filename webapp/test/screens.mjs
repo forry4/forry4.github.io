@@ -3353,6 +3353,119 @@ try {
 		await ctx.close();
 	}
 
+	// ── THE GAME KIT, RENDERED: one look across every vs-AI board ──────────────
+	//
+	// `shared/tests/test_game_kit.py` reads the sheets and refuses a kit-owned property
+	// on any rule that names an element wearing a kit class. It cannot see what the
+	// lobbyChrome comment above describes: a game rule that never names the kit at all
+	// (`.blackcastle button{font-family:inherit}`) and still out-specifies it. Only the
+	// painted board can, so this block enters each game against a bot and compares the
+	// kit's COMPUTED style across them — equality, not a table of values, for the same
+	// reason as lobbyChrome. Colour is excluded: the four tokens are what a game is
+	// supposed to change. What is compared is typography and construction.
+	//
+	// SecretNames and Where Wolf? are NOT here: neither has a bot, so a board needs two
+	// or three seated humans, and their kit wiring is held by the text gate. Every tier
+	// is Easy where the game offers one, so this lane-B block never arms a worker pool.
+	async function gameKit(log) {
+		const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "kit-harness", name: "Harness", guest: true })));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		const check = (name, cond, detail = "") => {
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(`gameKit: ${name}`); log(`  FAIL ${name}  ${detail}`); }
+		};
+		const BOARDS = [
+			{ id: "spender", path: "/spender", board: ".gem-stack" },
+			{ id: "coc", path: "/coc", board: ".coc-board-hex" },
+			{ id: "duel", path: "/duel", board: ".duel-gamescreen" },
+			{ id: "dontminion", path: "/dontminion", board: ".dm-supply .dm-card" },
+			{ id: "dissonance", path: "/dissonance", board: ".dis-bidgrid, .dis-trick" },
+			{ id: "ragtag", path: "/ragtag", board: ".rt-prompt .rt-pick" },
+			// The mulligan is one LIT panel and nothing else; keep the hand to reach the
+			// table, whose log is the plain panel this block compares.
+			{ id: "orbit", path: "/orbit", board: ".or-mulligan, .or-log",
+				after: async (p) => {
+					await p.locator(".or-mulligan .or-primary").first().click({ timeout: 3_000 }).catch(() => {});
+					await p.waitForSelector(".or-log", { timeout: 20_000 }).catch(() => {});
+				} },
+			{ id: "blackcastle", path: "/blackcastle", board: ".bc-game-hero" },
+			{ id: "pinch", path: "/pinch", board: ".pi-board-svg" },
+			{ id: "pipmarket", path: "/pipmarket", board: ".pm-stall",
+				pre: ["2 players", "1 bot"] },
+		];
+		// What must not vary. Font sizes are computed px, so rem-vs-px compares equal.
+		const PROBES = {
+			".fg-table": ["fontFamily"],
+			".fg-panel:not(.fg-lit)": ["borderTopWidth", "borderTopStyle", "borderRadius", "backgroundImage"],
+			".fg-label:not(.fg-label-soft)": ["fontFamily", "fontSize", "fontWeight", "letterSpacing", "textTransform"],
+			".fg-log-row": ["fontSize", "lineHeight"],
+			".fg-table .btn-gold": ["fontFamily", "fontWeight", "letterSpacing", "borderTopWidth", "borderRadius"],
+			".fg-table .btn-outline": ["fontFamily", "fontWeight", "letterSpacing", "borderTopWidth", "borderRadius"],
+		};
+		// Which kit pieces a game must actually wear. The house games carry the root
+		// only (their panels are where the kit was derived FROM); the four that came
+		// from other construction systems were moved onto the panel, label and buttons.
+		const MUST = {
+			".fg-table": BOARDS.map((b) => b.id),
+			".fg-panel:not(.fg-lit)": ["dissonance", "orbit", "blackcastle", "pinch", "pipmarket"],
+			".fg-label:not(.fg-label-soft)": ["dissonance", "blackcastle", "pinch", "pipmarket"],
+		};
+
+		const seen = {};
+		for (const { id, path: route, board, pre = [], after } of BOARDS) {
+			await page.goto(`http://localhost:${PORT}${route}`, { waitUntil: "networkidle" });
+			await page.waitForSelector(".lby-cta", { timeout: 25_000 }).catch(() => {});
+			await page.locator(".lby-cta").first().click({ timeout: 8_000 }).catch(() => {});
+			await page.waitForSelector(".cm-panel", { timeout: 10_000 }).catch(() => {});
+			await page.locator(".cm-panel .cm-seg-btn", { hasText: /^VS AI$/ }).first().click({ timeout: 1_500 }).catch(() => {});
+			await page.locator(".cm-panel .cm-seg-btn", { hasText: /^Easy$/ }).first().click({ timeout: 1_500 }).catch(() => {});
+			for (const label of pre) {
+				await page.locator(".cm-panel .cm-seg-btn", { hasText: label }).first().click({ timeout: 3_000 }).catch(() => {});
+			}
+			await page.locator(".cm-create").first().click({ timeout: 8_000 }).catch(() => {});
+			const there = await page.waitForSelector(board, { timeout: 30_000 }).then(() => true).catch(() => false);
+			check(`${id}: a vs-AI board rendered`, there, board);
+			if (!there) continue;
+			if (after) await after(page);
+			// Wait for the kit to be on the page, not for a duration.
+			await page.waitForSelector(".fg-table", { timeout: 10_000 }).catch(() => {});
+			await page.waitForTimeout(400);
+			seen[id] = await page.evaluate((probes) => {
+				const out = {};
+				for (const [sel, props] of Object.entries(probes)) {
+					// The first VISIBLE match: a collapsed log or a hidden phone sheet
+					// computes the same, but a display:none node is not what anyone sees.
+					const el = [...document.querySelectorAll(sel)].find((e) => e.getClientRects().length);
+					out[sel] = el ? props.map((p) => `${p}=${getComputedStyle(el)[p]}`).join(" ") : null;
+				}
+				return out;
+			}, PROBES);
+		}
+
+		const ids = Object.keys(seen);
+		check("every board in the roster rendered", ids.length === BOARDS.length, `${ids.length}/${BOARDS.length}`);
+		for (const [sel, who] of Object.entries(MUST)) {
+			const missing = who.filter((id) => seen[id] && !seen[id][sel]);
+			check(`${sel} is worn on every board that must wear it`, missing.length === 0, missing.join(", "));
+		}
+		for (const sel of Object.keys(PROBES)) {
+			const have = ids.filter((id) => seen[id][sel]);
+			// A comparison over fewer than two boards proves nothing — say so.
+			check(`${sel}: measured on at least two boards`, have.length >= 2, have.join(", "));
+			const ref = have[0];
+			const want = seen[ref]?.[sel];
+			const off = have.filter((id) => seen[id][sel] !== want).map((id) => `${id}: ${seen[id][sel]}`);
+			check(`${sel} is the kit's on every board (${have.length})`, off.length === 0,
+				off.length ? `${ref}: ${want}  ||  ${off.join("  ||  ")}` : `${ref}: ${want}`);
+		}
+		check("no page errors across the boards", errors.length === 0, errors[0]?.slice(0, 160) || "");
+		await ctx.close();
+	}
+
 	async function dissonanceSkat(log) {
 		const ctx = await browser.newContext();
 		await ctx.addInitScript(() => localStorage.setItem("spender_user",
@@ -4196,16 +4309,22 @@ try {
 				// `border: none` while `.dis-annbtn` only sets a border COLOUR
 				// -- so they rendered as bare accent text that did not read as
 				// buttons, with no selected state, while the go button stayed
-				// disabled until one was picked. Three things have to hold.
+				// disabled until one was picked. Three things have to hold. They are
+				// the game kit's `.btn-outline` now (`.active` when picked), so
+				// "painted" is a real border, read as computed style rather than as
+				// whichever construction drew it.
 				if (!sawCommit) {
 					const pre = await page.evaluate(() => {
 						const b = document.querySelector(".dis-auction .dis-annbtn");
 						const go = document.querySelector(".dis-gobtn");
-						return { ring: b ? getComputedStyle(b).boxShadow : "",
+						const cs = b && getComputedStyle(b);
+						return { border: cs ? `${cs.borderTopWidth} ${cs.borderTopStyle} ${cs.borderTopColor}` : "",
+							ring: cs ? cs.boxShadow : "",
 							goDisabled: !!go?.disabled, goText: go?.textContent.trim() || "" };
 					});
+					const bordered = /^[1-9][\d.]*px solid (?!rgba\([^)]*, 0\))/.test(pre.border);
 					check("the lead buttons are painted, not bare text",
-						/inset/.test(pre.ring), pre.ring.slice(0, 60));
+						bordered || /inset/.test(pre.ring), JSON.stringify(pre).slice(0, 160));
 					check("...and the go button says what is missing until one is picked",
 						pre.goDisabled && /which hand leads/i.test(pre.goText),
 						JSON.stringify(pre));
@@ -4225,12 +4344,12 @@ try {
 				// this check treats as "not visibly selected".
 				await until(page, () => {
 					const go = document.querySelector(".dis-gobtn");
-					const sel = document.querySelector(".dis-annbtn.sel");
+					const sel = document.querySelector(".dis-annbtn.active");
 					if (!sel || !go || go.disabled) return false;
 					return getComputedStyle(sel).backgroundColor !== "rgba(0, 0, 0, 0)";
 				}, 5_000);
 				const post = await page.evaluate(() => {
-					const sel = document.querySelector(".dis-annbtn.sel");
+					const sel = document.querySelector(".dis-annbtn.active");
 					const go = document.querySelector(".dis-gobtn");
 					return { selected: !!sel,
 						filled: sel ? getComputedStyle(sel).backgroundColor : "",
@@ -7303,6 +7422,18 @@ try {
 				wide: document.documentElement.scrollWidth > window.innerWidth + 1,
 				outside: sections.filter((section) => !inside(section)).map((section) => section.className),
 				order: other.bottom <= influence.top + 1 && mine.top >= influence.bottom - 1,
+				// What actually sticks out, so a red run names it. A box inside a
+				// scroller or a clipping ancestor (the hand scrolls sideways by design)
+				// cannot widen the page, so only an unclipped one is reported.
+				past: [...document.querySelectorAll(".or-game *")].filter((el) => {
+					const r = el.getBoundingClientRect();
+					if (!(r.width > 0 && r.right > window.innerWidth + 1)) return false;
+					for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) {
+						const cs = getComputedStyle(a);
+						if (cs.overflowX !== "visible" || cs.position === "fixed") return false;
+					}
+					return true;
+				}).slice(0, 6).map((el) => `${String(el.className?.baseVal ?? el.className) || el.tagName} r=${Math.round(el.getBoundingClientRect().right)}`),
 			};
 		});
 		check("the playable board stays inside a phone viewport",
@@ -11420,7 +11551,7 @@ try {
 		waitingRoomKit,
 		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, historyRecovery, dmAdventures,
 		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, formControlZoom, lastDifficulty,
-		dissonanceQuartet, orbitPlay, lobbyFinishSync, blackCastlePlay, pinchPlay, pipMarketPlay, secretNamesPlay, lobbyChrome,
+		dissonanceQuartet, orbitPlay, lobbyFinishSync, blackCastlePlay, pinchPlay, pipMarketPlay, secretNamesPlay, lobbyChrome, gameKit,
 		notesEditor, profilePage, offlineRead, boxPuzzles, boxDaily, astralGuide, lolStats, steamSaved, updateNudgeLayout,
 		crashScreen, bootWithoutServer];
 

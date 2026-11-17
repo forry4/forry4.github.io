@@ -218,7 +218,7 @@ export default function BlackCastle({ myId, authUser, onExit }) {
   const showWaiting = screen === "game" && roomData && !roomData.game;
   return <>
     {screen === "lobby" && <Lobby {...{ myId, authUser, openGames, activeGames, history, onRefresh: refresh, refreshing, onCreate: () => setShowCreate(true), onJoin: joinRoom, onLeave: leaveSeat, onCancel: cancelGame, onExit, onRules: () => setShowRules(true) }} />}
-    {screen === "game" && !roomData && <div className="app blackcastle"><style>{styles}</style><LobbyHeader title="Black Castle" onBack={exit} /><div className="bc-waiting"><Icon name="castle" size={48} /><h1>{toast ? "The gate is closed." : "Opening the castle…"}</h1><p role="status">{toast || "Connecting to your table. This may take a moment."}</p><button type="button" className="bc-primary" onClick={exit}>Return to lobby</button></div></div>}
+    {screen === "game" && !roomData && <div className="app blackcastle"><style>{styles}</style><LobbyHeader title="Black Castle" onBack={exit} /><div className="bc-waiting fg-table"><Icon name="castle" size={48} /><h1>{toast ? "The gate is closed." : "Opening the castle…"}</h1><p role="status">{toast || "Connecting to your table. This may take a moment."}</p><button type="button" className="btn btn-gold bc-primary" onClick={exit}>Return to lobby</button></div></div>}
     {showWaiting && <div className="app blackcastle" style={{ "--lby-accent": GAME_ACCENTS.blackcastle }}><style>{styles}</style>
       {/* `WaitingRoom` in shared/lobby.jsx. This was the one waiting room in the
           product with NO way out at all — the way back was the browser's own Back

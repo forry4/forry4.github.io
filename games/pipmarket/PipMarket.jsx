@@ -295,13 +295,13 @@ function PlayerPanel({ game, pid, myId, seat, isBot, children, mine }) {
   const active = game.turn === pid && game.phase !== "over";
   const passed = game.phase === "scoring" && (game.passed || []).includes(pid);
   const won = game.phase === "over" && (game.winners || []).includes(pid);
-  return <section className={`pm-player${mine ? " mine" : ""}${active ? " active" : ""}${passed ? " passed" : ""}${won ? " won" : ""}`}
+  return <section className={`fg-panel pm-player${mine ? " mine" : ""}${active ? " active" : ""}${passed ? " passed" : ""}${won ? " won" : ""}${active || won ? " fg-lit" : ""}`}
     style={{ "--seat": SEAT_COLORS[seat % SEAT_COLORS.length] }}>
     <header className="pm-player-head">
       <span className="pm-seat-dot" aria-hidden="true" />
       <div className="pm-player-id">
         <strong>{game.names?.[pid] || "Player"}</strong>
-        <small>{mine ? "You" : isBot ? "Bot" : "Player"}{game.first === pid && game.phase !== "over" ? " · opened" : ""}{passed ? " · nothing to score" : ""}</small>
+        <small className="pm-player-role">{mine ? "You" : isBot ? "Bot" : "Player"}{game.first === pid && game.phase !== "over" ? " · opened" : ""}{passed ? " · nothing to score" : ""}</small>
       </div>
       <div className="pm-player-score" title="Points scored">
         <b key={game.points?.[pid]}>{game.points?.[pid] || 0}</b><span>pts</span>
@@ -321,20 +321,20 @@ function LogLine({ entry, names }) {
   const who = <b>{names?.[entry.pid] || "A player"}</b>;
   const name = (pid) => <b>{names?.[pid] || "A player"}</b>;
   switch (entry.kind) {
-    case "deal": return <p>Round 1. {name(entry.first)} opens the market.</p>;
-    case "buy": return <p>{who} buys <MiniDice faces={entry.faces} /> for {entry.price}.</p>;
-    case "take": return <p>{who} takes {entry.amount} money.</p>;
-    case "reroll": return <p>{who} pays {entry.price} to reroll column {entry.col + 1} in every stall.</p>;
-    case "market_closed": return <p>Nobody can buy; {entry.left} dice go to the cup.</p>;
-    case "scoring": return <p className="pm-log-phase">The market closes. {name(entry.first)} scores first.</p>;
-    case "score": return <p>{who} scores <MiniDice faces={Array(entry.count).fill(entry.face)} /> for <em>{entry.points}</em>{entry.money ? ` and ${entry.money} money` : ""}.</p>;
+    case "deal": return <p className="fg-log-row pm-log-row">Round 1. {name(entry.first)} opens the market.</p>;
+    case "buy": return <p className="fg-log-row pm-log-row">{who} buys <MiniDice faces={entry.faces} /> for {entry.price}.</p>;
+    case "take": return <p className="fg-log-row pm-log-row">{who} takes {entry.amount} money.</p>;
+    case "reroll": return <p className="fg-log-row pm-log-row">{who} pays {entry.price} to reroll column {entry.col + 1} in every stall.</p>;
+    case "market_closed": return <p className="fg-log-row pm-log-row">Nobody can buy; {entry.left} dice go to the cup.</p>;
+    case "scoring": return <p className="fg-log-row fg-log-head pm-log-row pm-log-phase">The market closes. {name(entry.first)} scores first.</p>;
+    case "score": return <p className="fg-log-row pm-log-row">{who} scores <MiniDice faces={Array(entry.count).fill(entry.face)} /> for <em>{entry.points}</em>{entry.money ? ` and ${entry.money} money` : ""}.</p>;
     // Older games could stop scoring by choice (auto: false); scoring is compulsory now.
-    case "pass": return <p className="pm-log-quiet">{who} {entry.auto ? "has nothing to score" : "stops scoring"}.</p>;
-    case "round": return <p className="pm-log-phase">Round {entry.round}. {entry.dice} dice rerolled; {name(entry.first)} opens.</p>;
-    case "concede": return <p>{who} leaves the table.</p>;
+    case "pass": return <p className="fg-log-row fg-log-quiet pm-log-row pm-log-quiet">{who} {entry.auto ? "has nothing to score" : "stops scoring"}.</p>;
+    case "round": return <p className="fg-log-row fg-log-head pm-log-row pm-log-phase">Round {entry.round}. {entry.dice} dice rerolled; {name(entry.first)} opens.</p>;
+    case "concede": return <p className="fg-log-row pm-log-row">{who} leaves the table.</p>;
     case "game_over": {
       const ws = entry.winners || [];
-      return <p className="pm-log-phase">{entry.early ? "Nobody scored, so the game ends. " : "The game ends. "}
+      return <p className="fg-log-row fg-log-head pm-log-row pm-log-phase">{entry.early ? "Nobody scored, so the game ends. " : "The game ends. "}
         {ws.map((p, i) => <span key={p}>{i ? " and " : ""}{name(p)}</span>)} {ws.length > 1 ? "share the win" : "wins"}.</p>;
     }
     default: return null;
@@ -507,7 +507,7 @@ function GameView({ room, myId, connected, onMove, onExit, onRules, onAbandon, e
 
   const finalRows = game.phase === "over" ? [...order].sort((a, b) => (game.final?.[b] ?? 0) - (game.final?.[a] ?? 0)) : [];
 
-  return <div ref={rootRef} className="app pipmarket pm-game" style={ACCENT}>
+  return <div ref={rootRef} className="app pipmarket pm-game fg-table" style={ACCENT}>
     <style>{styles}</style>
     <LobbyHeader title="Pip Market" menu={<GameMenu onLeave={onExit} onRules={onRules}
       onAbandon={game.phase === "over" || !seated ? null : onAbandon} />}
@@ -519,7 +519,7 @@ function GameView({ room, myId, connected, onMove, onExit, onRules, onAbandon, e
             {[1, 2, 3].map((r) => <span key={r} className={`pm-lantern${r < game.round ? " past" : ""}${r === game.round ? " now" : ""}`}><i />{r}</span>)}
           </div>
           <h2>{game.phase === "over" ? "Market closed" : auction ? "The market" : "Scoring"}</h2>
-          <span className="pm-zone-note">{auction ? `${game.market.flat().reduce((n, col) => n + col.length, 0)} dice for sale` : `Round ${game.round} of ${game.rounds || 3}`}</span>
+          <span className="fg-label pm-zone-note">{auction ? `${game.market.flat().reduce((n, col) => n + col.length, 0)} dice for sale` : `Round ${game.round} of ${game.rounds || 3}`}</span>
         </div>
         <div className={`pm-market stalls-${game.market.length}`}>
           {game.market.map((cols, s) => <Stall key={s} index={s} columns={cols} buyable={buyable}
@@ -544,25 +544,25 @@ function GameView({ room, myId, connected, onMove, onExit, onRules, onAbandon, e
       </section>
 
       <aside className="pm-side">
-        <div className={`pm-actions${myTurn ? " yours" : ""}`} aria-live="polite">
+        <div className={`fg-panel pm-actions${myTurn ? " yours fg-lit" : ""}`} aria-live="polite">
           <div className="pm-status"><b>{status[0]}</b><span>{status[1]}</span></div>
           {myTurn && auction && rerolling && <div className="pm-buttons">
-            <button type="button" className="pm-btn primary" disabled={rerollCol == null || busy}
+            <button type="button" className="btn btn-gold pm-btn primary" disabled={rerollCol == null || busy}
               onClick={() => send({ type: "reroll", col: rerollCol })}>
               {rerollCol == null ? "Pick a column" : `Reroll · pay ${rerollCol + 1}`}</button>
-            <button type="button" className="pm-btn quiet" onClick={stopReroll}>Cancel</button>
+            <button type="button" className="btn btn-ghost pm-btn quiet" onClick={stopReroll}>Cancel</button>
           </div>}
           {myTurn && auction && !rerolling && <div className="pm-buttons">
-            {pickedCol && <button type="button" className="pm-btn primary" disabled={!ghost || busy} onClick={place}>
+            {pickedCol && <button type="button" className="btn btn-gold pm-btn primary" disabled={!ghost || busy} onClick={place}>
               Place · pay {picked.c + 1}</button>}
-            {pickedCol && ghost && candidates.length > 1 && <button type="button" className="pm-btn" onClick={() => setPreview((p) => ({ ...p, i: p.i + 1 }))}>Turn pair</button>}
-            {pickedCol && rerollable.has(picked.c) && <button type="button" className="pm-btn" onClick={() => startReroll(picked.c)}
+            {pickedCol && ghost && candidates.length > 1 && <button type="button" className="btn btn-outline pm-btn" onClick={() => setPreview((p) => ({ ...p, i: p.i + 1 }))}>Turn pair</button>}
+            {pickedCol && rerollable.has(picked.c) && <button type="button" className="btn btn-outline pm-btn" onClick={() => startReroll(picked.c)}
               title={`Reroll column ${picked.c + 1} in every stall instead`}>Reroll these</button>}
-            {pickedCol && <button type="button" className="pm-btn quiet" onClick={() => { setPicked(null); setPreview(null); }}>Cancel</button>}
-            {!pickedCol && <button type="button" className="pm-btn primary" disabled={!options.take || busy}
+            {pickedCol && <button type="button" className="btn btn-ghost pm-btn quiet" onClick={() => { setPicked(null); setPreview(null); }}>Cancel</button>}
+            {!pickedCol && <button type="button" className="btn btn-gold pm-btn primary" disabled={!options.take || busy}
               onClick={() => send({ type: "take" })} title={options.take ? "" : "At 18 you buy or reroll instead"}>
               {options.take ? `Take ${Math.min(2, (game.max_money || 18) - (game.money?.[myId] || 0))} money` : "At 18 — no more money"}</button>}
-            {!pickedCol && <button type="button" className="pm-btn" disabled={!rerollable.size || busy} onClick={() => startReroll()}
+            {!pickedCol && <button type="button" className="btn btn-outline pm-btn" disabled={!rerollable.size || busy} onClick={() => startReroll()}
               title={(game.rerolled || []).includes(myId) ? "You have rerolled this round" : "Pay a column's price to reroll it in every stall, once per round"}>
               {(game.rerolled || []).includes(myId) ? "Rerolled this round" : "Reroll a column"}</button>}
           </div>}
@@ -576,17 +576,17 @@ function GameView({ room, myId, connected, onMove, onExit, onRules, onAbandon, e
               </button>)}
             </div>
             <div className="pm-buttons">
-              <button type="button" className="pm-btn primary" disabled={!chosenLine || busy} onClick={scoreLine}>Score line</button>
+              <button type="button" className="btn btn-gold pm-btn primary" disabled={!chosenLine || busy} onClick={scoreLine}>Score line</button>
             </div>
           </>}
-          {game.phase === "over" && !showResult && <div className="pm-buttons"><button type="button" className="pm-btn primary" onClick={() => setShowResult(true)}>Results</button></div>}
+          {game.phase === "over" && !showResult && <div className="pm-buttons"><button type="button" className="btn btn-gold pm-btn primary" onClick={() => setShowResult(true)}>Results</button></div>}
         </div>
-        <div className="pm-cup">
-          <div className="pm-side-head"><span>The cup</span><small>{game.cup?.length ? "rerolled when the round ends" : "scored dice land here"}</small></div>
+        <div className="fg-panel pm-cup">
+          <div className="pm-side-head"><span className="fg-label pm-side-title">The cup</span><small>{game.cup?.length ? "rerolled when the round ends" : "scored dice land here"}</small></div>
           <div className="pm-cup-dice">{(game.cup || []).map((d) => <Die key={d.id} id={d.id} face={d.f} />)}</div>
         </div>
-        <details className="pm-log" open>
-          <summary>Market log</summary>
+        <details className="fg-panel pm-log" open>
+          <summary className="fg-label pm-log-title">Market log</summary>
           <div>{(game.log || []).slice(-80).reverse().map((entry) => <LogLine key={entry.seq} entry={entry} names={game.names} />)}</div>
         </details>
       </aside>
@@ -599,8 +599,8 @@ function GameView({ room, myId, connected, onMove, onExit, onRules, onAbandon, e
     </div>
     {banner && <div key={banner.id} className="pm-banner" role="status"><div><span>{banner.text}</span><h2>{banner.title}</h2><small>{banner.sub}</small></div></div>}
     {game.phase === "over" && showResult && <div className="pm-result" role="dialog" aria-modal="true" aria-label="Final scores">
-      <div className="pm-result-card">
-        <span className="pm-result-kicker">{game.conceded ? "Table closed" : "Final tally"}</span>
+      <div className="fg-panel pm-result-card">
+        <span className="fg-label pm-result-kicker">{game.conceded ? "Table closed" : "Final tally"}</span>
         <h2>{(game.winners || []).length > 1 ? "A shared win" : `${game.names?.[game.winners?.[0]] || "A player"} wins`}</h2>
         <table className="pm-final">
           <thead><tr><th scope="col">Player</th><th scope="col">Points</th><th scope="col">Money</th><th scope="col">Total</th></tr></thead>
@@ -610,8 +610,8 @@ function GameView({ room, myId, connected, onMove, onExit, onRules, onAbandon, e
           </tr>)}</tbody>
         </table>
         <div className="pm-result-actions">
-          <button type="button" className="pm-btn" onClick={() => setShowResult(false)}>View the table</button>
-          <button type="button" className="pm-btn primary" onClick={onExit}>Return to lobby</button>
+          <button type="button" className="btn btn-outline pm-btn" onClick={() => setShowResult(false)}>View the table</button>
+          <button type="button" className="btn btn-gold pm-btn primary" onClick={onExit}>Return to lobby</button>
         </div>
       </div>
     </div>}
@@ -838,12 +838,12 @@ export default function PipMarket({ myId, authUser, onExit }) {
     </CreateModal></div>}
     {rulesModal}{toastNode}</>;
 
-  if (!roomData) return <div className="app pipmarket pm-connecting" style={ACCENT}><style>{styles}</style>
+  if (!roomData) return <div className="app pipmarket pm-connecting fg-table" style={ACCENT}><style>{styles}</style>
     <LobbyHeader title="Pip Market" onBack={leaveToLobby} />
     <div className="pm-connecting-in"><div className="pm-connecting-dice"><Die face={3} /><Die face={5} /></div>
       <h1>{toast ? "That table stayed closed." : "Setting up the stalls…"}</h1>
       <p role="status">{toast || "Connecting to the market."}</p>
-      <button type="button" className="pm-btn primary" onClick={leaveToLobby}>Return to lobby</button></div>
+      <button type="button" className="btn btn-gold pm-btn primary" onClick={leaveToLobby}>Return to lobby</button></div>
     {rulesModal}</div>;
 
   if (!roomData.game) {

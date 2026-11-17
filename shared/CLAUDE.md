@@ -14,6 +14,16 @@ Cross-game frontend kits. **Dependency direction is one-way: `games/* → shared
   came out in lowercase Georgia with `cinzel:true` in the same probe. `swap` is safe here
   precisely because of the `size-adjust` metric-matched fallbacks — the worst case is a repaint
   at the same widths, not a reflow.
+- **`theme.game-kit.css` — THE GAME KIT** (in `baseCss`; `gameKitCss` alone for CoC). A game sets
+  four tokens on its `fg-table` root (`--g-ground`/`--g-accent`/`--g-ink`/`--g-label`) and the
+  kit derives the rest; `fg-panel`/`fg-lit`/`fg-label`/`fg-log-row` and the `.btn` family are the
+  board's chrome. **Tokens are read where they are DECLARED**: a derived value such as
+  `--g-surface` on `.fg-table` reads THAT element's `--g-ground`, so a token set on a descendant
+  does not flow into it (setting them on an ANCESTOR of `fg-table`, or through a game class on the
+  same element, works — Dissonance, Where Wolf? and SecretNames do that). `.btn-gold` carries a transparent 1px border so it is the same height
+  as `.btn-outline` beside it — every gold button on the site grew 2px with that. The selected
+  outline state (`.btn-outline.active`) and the touch sticky-hover reset are in the kit too, so a
+  game does not re-add them. Rules and gates: root `CLAUDE.md`, "THE GAME KIT".
 - **`lobbyHistory.js`** owns authenticated history refresh for every game. Failed,
   malformed, superseded, or unverified empty replies must preserve the last successful
   list and cache. Legacy endpoints return `{games: []}` for expired sessions: verify

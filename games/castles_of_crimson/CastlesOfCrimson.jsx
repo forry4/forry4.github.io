@@ -2,6 +2,7 @@
 import { openSocket } from "../../shared/backend.js";
 import { useBackendAwake, useOnBackendAwake } from "../../shared/lobby.jsx";
 import { fetchGameHistory } from "../../shared/lobbyHistory.js";
+import { gameKitCss } from "../../shared/theme.js";
 import { Fragment, useState, useEffect, useLayoutEffect, useRef, useCallback, useId } from "react";
 import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyMatchup, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache, useFinishedGameSync, dropLobbyGame,
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
@@ -737,7 +738,9 @@ function Pips({ n }) {
 // lobbyCss is appended AFTER CoC's own styles (see the close of this template) so the
 // shared .lby-* rules win the specificity TIE against CoC's `.coc *{margin:0;padding:0}`
 // reset (both are one class) — otherwise the reset strips the kit's padding/margins.
-const css = _cssText + lobbyCss + gameMenuCss + createModalCss + lobbyCreateRowCss + rulesModalCss + waitingRoomCss;
+// The game kit (shared/theme.game-kit.css) — every other game gets it inside baseCss,
+// which CoC does not mount. Appended after the reset for the same tie-break reason.
+const css = _cssText + lobbyCss + gameMenuCss + createModalCss + lobbyCreateRowCss + rulesModalCss + waitingRoomCss + gameKitCss;
 
 // ─── Hex geometry ─────────────────────────────────────────────────────────────
 const HEX_S = 26;
@@ -2430,7 +2433,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
     : (aiThinking ? "Bot is playing…" : `${players[game.turn] || "Opponent"}'s turn`);
 
   return (
-    <div className="coc" style={{ "--lby-accent": GAME_ACCENTS.coc }}><style>{css}</style>
+    <div className="coc fg-table" style={{ "--lby-accent": GAME_ACCENTS.coc }}><style>{css}</style>
       <div className="coc-wrap coc-wrap-game">
         <div className="coc-top coc-top-game">
           <div className="coc-top-left">

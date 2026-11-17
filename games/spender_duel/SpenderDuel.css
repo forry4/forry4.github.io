@@ -163,12 +163,10 @@
 .duel-bag-svg{width:100%;height:100%;display:block}
 .duel-bag-num{position:absolute;left:0;right:0;top:69%;transform:translateY(-50%);text-align:center;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:.86rem;line-height:1;color:#5a2f74;pointer-events:none;text-shadow:0 0 2px rgba(255,255,255,.9),0 1px 1px rgba(255,255,255,.7)}
 .duel-actionrow{display:flex;gap:10px;align-items:center;min-height:40px;flex-wrap:wrap;justify-content:center}
-/* Keep every action-row button the SAME height. Two mismatches to cancel: (1) btn-gold has
-   no border while btn-outline adds 1px — with border-box + auto height a border still adds
-   2px, so the gold Take/Buy came out 2px short; give gold a transparent border to match.
-   (2) the ✕ glyph falls back to a font with taller line metrics (+2px); pin line-height so
+/* Keep every action-row button the SAME height. (1) used to be btn-gold having no
+   border while btn-outline adds 1px; the kit's gold button carries a transparent 1px
+   border now (shared/theme.base-css.css), so only the glyph case is left here. (2) the ✕ glyph falls back to a font with taller line metrics (+2px); pin line-height so
    the glyph can't inflate its button past the text ones. */
-.duel-actionrow .btn-gold{border:1px solid transparent}
 .duel-actionrow .btn{line-height:1.2}
 /* "Claim a Royal at 3 & 6 crowns" — the royal cards themselves no longer draw a crown
    (it read as if a Royal cost/gave crowns); this line is the only crown-threshold cue. */

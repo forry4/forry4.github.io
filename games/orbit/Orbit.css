@@ -102,21 +102,16 @@
 
 /* The waiting room is `WaitingRoom` in shared/lobby.jsx now; `.or-wait` and its
    seat pills went with it. `.or-kicker` stays -- the board uses it too. */
-.or-kicker, .or-eyebrow {
+.or-kicker{
   color: var(--lby-accent);
   font-size: .72rem;
   font-weight: 800;
   letter-spacing: .14em;
   text-transform: uppercase;
 }
-.or-primary {
+.or-primary{
   margin: .5rem;
   padding: .72rem 1.1rem;
-  border: 1px solid color-mix(in srgb, var(--lby-accent), white 20%);
-  border-radius: 9px;
-  background: var(--lby-accent);
-  color: #0b0d18;
-  font-weight: 900;
   cursor: pointer;
 }
 
@@ -153,9 +148,9 @@
 }
 .or-table > * { min-width: 0; }
 
-.or-table > section,
-.or-board-main > section,
-.or-sideboards > section,
+.or-table > section:where(:not(.fg-panel)),
+.or-board-main > section:where(:not(.fg-panel)),
+.or-sideboards > section:where(:not(.fg-panel)),
 .or-score-rail {
   border: 1px solid var(--or-line);
   border-radius: 15px;
@@ -339,7 +334,7 @@
    the TOP card kept together on the left, and the count, which is about the
    pile, alone at the right. Left-aligned, so the gap between the name and the
    price it belongs with never depends on how long the name happens to be. */
-.or-played-name { min-width: 0; overflow: hidden; color: var(--or-ink); font-family: Georgia, serif; font-size: .72rem; line-height: 1.15; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.or-played-name { min-width: 0; overflow: hidden; color: var(--or-ink); font-family: 'Crimson Pro','Crimson Fallback',Georgia,serif; font-size: .72rem; line-height: 1.15; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 .or-played-agent.empty .or-played-name { color: #5d6684; font-family: inherit; font-size: .56rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
 /* THE TOP AGENT'S PRINTED COST. It is a NUMBER THE RULES READ, not detail about
    a card: `card_cost` pays Credits equal to the printed cost of the Agent an
@@ -427,7 +422,7 @@
 .or-sideboards { grid-column: 2; display: grid; grid-template-rows: auto minmax(170px, 1fr); gap: 10px; min-width: 0; min-height: 0; }
 .or-tech { overflow: hidden; }
 .or-tech > header { display: flex; justify-content: space-between; align-items: center; gap: .5rem; padding: .56rem .75rem; border-bottom: 1px solid var(--or-line); }
-.or-tech h2, .or-log h2 { margin: 0; font-size: 1rem; }
+.or-tech h2{ margin: 0; font-size: 1rem; }.or-log h2{ margin: 0; }
 .or-tech-toggle, .or-tech-summary { display: none; }
 /* The NAMED key. Two dots in one accent colour said "somebody is here"; this
    says who, in the same two colours the rail and the markers use. */
@@ -486,16 +481,16 @@
 .or-log { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .or-log h2 { flex: none; padding: .55rem .75rem; border-bottom: 1px solid var(--or-line); }
 .or-log > div { flex: 1; min-height: 0; contain: size; overflow: auto; padding: .3rem .7rem .55rem; }
-.or-log p { display: grid; grid-template-columns: 1.6rem 1fr; gap: .35rem; margin: .28rem 0; padding-left: .3rem; border-left: 2px solid transparent; color: #bbc1d5; font-size: .68rem; line-height: 1.34; }
+.or-log p{ display: grid; grid-template-columns: 1.6rem 1fr; gap: .35rem; margin: .28rem 0; }
 /* `> b` on purpose: the turn number is the DIRECT child, and an entry's own
    text now nests bold names and pressable tokens a level deeper. */
 .or-log p > b { color: #747d9c; }
-.or-log-line.mine { border-left-color: color-mix(in srgb, var(--or-me), transparent 55%); }
-.or-log-line.theirs { border-left-color: color-mix(in srgb, var(--or-them), transparent 55%); }
+
+
 /* The turn line is the log's only structure: without it a long resolution and
    the next player's whole turn read as one paragraph. */
-.or-log-line.turn-start { margin-top: .6rem; padding-top: .38rem; border-top: 1px solid var(--or-line); color: var(--or-ink); font-weight: 700; }
-.or-log-line.turn-start:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.or-log-line.turn-start{ margin-top: .6rem; }
+.or-log-line.turn-start:first-child{ margin-top: 0; }
 .or-log-name { color: var(--or-ink); font-weight: 700; }
 /* A token in the log opens the SAME modal as the piece on the table. It is a
    real button, so it is keyboard reachable, but it is styled as inline text —
@@ -578,7 +573,7 @@
    than the max-content width it would otherwise report. `nowrap` is what turns
    the overflow into a WIDTH the fitter can see; without it the browser solves
    the overflow itself, by wrapping, and the fitter has nothing to correct. */
-.or-agent strong { flex: 1; min-width: 0; margin: .48rem 0 .3rem; color: var(--or-ink); font-family: Georgia, serif; font-size: .92rem; text-align: center; white-space: nowrap; }
+.or-agent strong { flex: 1; min-width: 0; margin: .48rem 0 .3rem; color: var(--or-ink); font-family: 'Crimson Pro','Crimson Fallback',Georgia,serif; font-size: .92rem; text-align: center; white-space: nowrap; }
 .or-agent strong > span { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; white-space: nowrap; }
 .or-agent-text { flex: 1; color: #cbd0e2; font-size: .68rem; line-height: 1.28; }
 .or-agent-foot { display: flex; align-items: center; gap: .3rem; color: var(--or-dim); font-size: .6rem; font-weight: 850; letter-spacing: .07em; text-transform: uppercase; }
@@ -590,7 +585,7 @@
 .or-action-bar { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-top: .8rem; padding-top: .8rem; border-top: 1px solid var(--or-line); }
 .or-action-bar > span { color: var(--or-dim); font-size: .78rem; }
 .or-action-bar > div { display: flex; flex-wrap: wrap; gap: .45rem; }
-.or-action-bar button, .or-choice-grid button, .or-result button {
+.or-choice-grid button{
   padding: .62rem .8rem;
   border: 1px solid var(--lby-accent);
   border-radius: 8px;
@@ -598,10 +593,13 @@
   color: var(--or-ink);
   font-weight: 800;
   cursor: pointer;
+}.or-action-bar button,.or-result button{
+  padding: .62rem .8rem;
+  cursor: pointer;
 }
-.or-action-bar button:disabled { border-color: var(--or-line); background: transparent; color: #606985; cursor: not-allowed; }
+.or-action-bar button:disabled { cursor: not-allowed; }
 
-.or-decision, .or-mulligan, .or-result { grid-column: 1 / -1; padding: clamp(1rem, 3vw, 1.6rem); border-color: color-mix(in srgb, var(--lby-accent), transparent 45%) !important; background: linear-gradient(110deg, rgba(72, 54, 130, .32), rgba(18,21,42,.96)) !important; }
+.or-decision,.or-mulligan,.or-result{ grid-column: 1 / -1; padding: clamp(1rem, 3vw, 1.6rem); }
 .or-decision h2, .or-mulligan h2, .or-result h1 { margin: .25rem 0 .8rem; }
 .or-decision { padding: .62rem .8rem; }
 .or-decision h2 { margin: .12rem 0 .42rem; font-size: 1rem; }
@@ -635,8 +633,8 @@
   background: linear-gradient(155deg, color-mix(in srgb, currentColor 12%, #171a32), #12152a 58%);
   box-shadow: 0 26px 80px #000c;
 }
-.or-info h2 { margin: .15rem 0 .7rem; color: var(--or-ink); font-family: Georgia, serif; font-size: 1.32rem; text-transform: capitalize; }
-.or-info .or-eyebrow { color: currentColor; }
+.or-info h2 { margin: .15rem 0 .7rem; color: var(--or-ink); font-family: 'Crimson Pro','Crimson Fallback',Georgia,serif; font-size: 1.32rem; text-transform: capitalize; }
+
 .or-info-x { position: absolute; right: .5rem; top: .4rem; width: 2rem; height: 2rem; border: 0; border-radius: 50%; background: transparent; color: var(--or-dim); font-size: 1.35rem; line-height: 1; cursor: pointer; }
 .or-info-x:hover { background: #ffffff14; color: var(--or-ink); }
 .or-info-tags { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .7rem; margin: 0 0 .7rem; font-size: .68rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
@@ -659,7 +657,7 @@
 .or-info-list button:hover { border-color: currentColor; background: #ffffff12; }
 .or-info-li-head { display: flex; align-items: center; gap: .4rem; }
 .or-info-li-head b { display: grid; place-items: center; width: 1.25rem; height: 1.25rem; border-radius: 50%; background: #f2f0e8; color: #121526; font-size: .66rem; }
-.or-info-li-head strong { color: var(--or-ink); font-family: Georgia, serif; font-size: .82rem; }
+.or-info-li-head strong { color: var(--or-ink); font-family: 'Crimson Pro','Crimson Fallback',Georgia,serif; font-size: .82rem; }
 .or-info-li-head em { margin-left: auto; color: var(--lby-accent); font-size: .58rem; font-style: normal; letter-spacing: .1em; text-transform: uppercase; }
 
 .or-confirm { position: fixed; z-index: 1000; inset: 0; display: grid; place-items: center; padding: 1rem; background: #050612cc; }
@@ -689,7 +687,7 @@
   .or-track > .or-bonus { width: 1.6rem; height: 1.6rem; }
   .or-hand-zone { padding: .4rem .6rem; }
   .or-action-bar { gap: .5rem; margin-top: .4rem; padding-top: .4rem; }
-  .or-action-bar button { padding: .45rem .5rem; font-size: .72rem; }
+  .or-action-bar button{ padding: .45rem .5rem; }
 }
 
 @media (max-width: 980px) {
@@ -845,14 +843,15 @@
 /* Crafted surfaces and state-driven motion, shared by both seats. Motion
    durations are 85% of the original beat so the table feels 15% faster while
    preserving the same easing and choreography. */
-.or-game { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+/* The game screen's text face is the kit's (`fg-table`). Orbit's own faces are
+   its MATERIAL: --or-instrument on gauges and counters, --or-agent-face on agents. */
 .or-game .or-table { --or-panel: linear-gradient(145deg, #1b2035f5, #101426f5); }
 .or-game::before { opacity: .14; }
 .or-resource { position: relative; display: inline-flex; align-items: center; gap: .3rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .or-resource-icon { display: inline-block; flex: none; width: 19px; height: 19px; vertical-align: middle; filter: drop-shadow(0 2px 2px #0005); }
 .or-resource.credits > b { color: #ffe1a1; }
 .or-resource.zenithium > b { color: #b0efff; }
-.or-resource-delta { position: absolute; z-index: 5; right: 0; top: 0; min-width: 26px; padding: 2px 5px; border-radius: 5px; background: #1c3542; border: 1px solid #8de7d7; color: #c6fff0; font: 800 12px/1.2 ui-sans-serif, sans-serif; text-align: center; pointer-events: none; animation: or-resource-change 1.53s both; }
+.or-resource-delta { position: absolute; z-index: 5; right: 0; top: 0; min-width: 26px; padding: 2px 5px; border-radius: 5px; background: #1c3542; border: 1px solid #8de7d7; color: #c6fff0; font: 700 12px/1.2 var(--or-instrument); text-align: center; pointer-events: none; animation: or-resource-change 1.53s both; }
 .or-resource:has(.or-resource-delta) > span { visibility: hidden; }
 .or-resource-delta.spent { color: #ffe0b7; background: #422e29; border-color: #bd9271; }
 @keyframes or-resource-change { 0% { opacity: 1; transform: translateY(4px); } 15%, 75% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; transform: translateY(-5px); } }
@@ -885,9 +884,9 @@
 .or-hand { padding: .35rem .25rem .45rem; scroll-snap-type: x proximity; scrollbar-width: thin; scrollbar-color: #59617f #121629; }
 .or-hand > .or-agent { scroll-snap-align: start; }
 .or-action-bar button { min-height: 44px; transition: background .306s, box-shadow .306s, transform .306s; }
-.or-action-bar button:not(:disabled) { background: linear-gradient(160deg, color-mix(in srgb, var(--lby-accent) 25%, #182336), #19313e); box-shadow: inset 0 1px #ffffff18, 0 3px 8px #0003; }
-.or-action-bar button:disabled { color: #8b93ad; background: #15192b; }
-.or-action-bar button:active:not(:disabled), .or-choice-grid button:active { transform: translateY(1px); box-shadow: inset 0 2px 6px #0005; }
+/* The action buttons are the kit's `btn-outline` (`or-act-btn`): their fill, edge and
+   disabled state are the kit's, so no `.or-action-bar button` rule may paint them. */
+.or-choice-grid button:active{ transform: translateY(1px); box-shadow: inset 0 2px 6px #0005; }.or-action-bar button:active:not(:disabled){ transform: translateY(1px); }
 .orbit button:focus-visible { outline: 2px solid #b5f6ee; outline-offset: 3px; }
 .or-info { animation: or-turn-arrive .153s ease-out; }
 .or-info-x { width: 44px; height: 44px; }
@@ -937,7 +936,7 @@
   .or-agent-text { font-size: .72rem; line-height: 1.35; }
   .or-hand-zone { padding: .65rem .7rem .75rem; }
   .or-action-bar { margin-top: .6rem; padding-top: .6rem; }
-  .or-log p { font-size: .72rem; line-height: 1.5; }
+  
 }
 @media (max-width: 360px) {
   .or-resource > span { font-size: .64rem; }
@@ -991,7 +990,7 @@
   .or-hand-zone { padding: .45rem .6rem; }
   .or-action-bar { margin-top: .4rem; padding-top: .4rem; gap: .5rem; }
   .or-action-bar > span { font-size: .7rem; }
-  .or-action-bar button { padding: .45rem .65rem; font-size: .72rem; }
+  .or-action-bar button{ padding: .45rem .65rem; }
   .or-sideboards { gap: 14px; }
   .or-log > div { padding: .6rem .7rem; }
 }
@@ -1028,7 +1027,7 @@
 .or-resource:has(.or-resource-delta) > span { visibility: visible; }
 .or-resource-delta { top: -10px; right: 0; min-width: 0; padding: 0 3px; font-size: 10px; line-height: 11px; border: 0; animation: or-delta-fade 2.38s both; }
 @keyframes or-delta-fade { 0%, 80% { opacity: 1; } 100% { opacity: 0; } }
-.or-decision { background: #172331 !important; border-color: #5baba780 !important; padding: .8rem !important; }
+.or-decision{ padding: .8rem !important; }
 .or-decision-source { display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem .5rem; margin-bottom: .4rem; font-size: .72rem; }
 .or-decision-source > span { color: #9cabbc; }
 .or-decision-source > b { color: #dfeae9; }
@@ -1038,7 +1037,7 @@
 .or-decision .or-choice-grid button { min-height: 44px; border-color: #657f8b; background: #223544; color: #e0ebed; font-family: inherit; font-size: .76rem; font-weight: 600; line-height: 1.4; }
 .or-decision .planet-choices { display: grid; grid-template-columns: repeat(var(--or-choice-count, 5), minmax(0, 1fr)); gap: 4px; }
 .or-decision .planet-choices button { padding: .45rem 1px; min-width: 0; }
-.or-decision .planet-choices .or-pl { font-family: ui-sans-serif, system-ui, sans-serif; font-size: .66rem; font-weight: 700; text-transform: capitalize; letter-spacing: 0; }
+.or-decision .planet-choices .or-pl { font-family: var(--or-instrument); font-size: .66rem; font-weight: 700; text-transform: capitalize; letter-spacing: 0; }
 .or-decision .or-choice-grid button:hover { border-color: #a2dcd4; background: #2b4552; }
 .or-decision .or-choice-grid button:active { background: #365762; }
 .or-decision .planet-choices button,
@@ -1084,7 +1083,7 @@
 .or-controls { border-top: 1px solid var(--or-line); margin-top: 4px; }
 .or-control-hint { margin: 0; padding: 12px 8px; text-align: center; color: var(--or-dim); font-size: .74rem; line-height: 1.5; }
 .or-controls .or-action-bar { border: 0; margin: 0; padding: 10px 2px; }
-.or-controls .or-decision { padding: 9px 12px !important; border: 1px solid #5baba780; border-radius: 10px; margin-top: 6px; }
+.or-controls .or-decision{ padding: 9px 12px !important; margin-top: 6px; }
 .or-decision-source { margin-bottom: 3px; }
 .or-decision h2 { margin-bottom: 5px; }
 .or-decision-detail { margin: 0 0 7px; }
@@ -1178,7 +1177,7 @@
   .or-tech-token { left: 6px; right: auto; top: 5px; }
   .or-tech-lv { font-size: .85rem; }
   .or-row-bonus { font-size: .65rem; line-height: 1.5; }
-  .or-log p { font-size: .74rem; line-height: 1.45; }
+  
 }
 @media (min-width: 981px) and (hover: hover) and (pointer: fine) {
   /* 44px is a TOUCH target. On a pointer that can hit 20px it is 6px of reserve
@@ -1308,6 +1307,11 @@
 @keyframes or-sky-drift { from { transform: translate3d(0, 0, 0) scale(1); } to { transform: translate3d(-2.5%, 1.5%, 0) scale(1.05); } }
 @keyframes or-twinkle { 0%, 100% { opacity: .2; } 50% { opacity: 1; } }
 
+/* The LOG is the kit's panel (`fg-panel`), like every other game's log, so the
+   `> section` lists below and above skip it with a zero-specificity `:where()`:
+   the tech board beside it is Orbit's instrument material and keeps the square
+   corners and the accent wash. Neither list names a kit class, which is why only
+   the render gate (`gameKit` in webapp/test/screens.mjs) could see them. */
 /* ── Instrument-panel surfaces ──────────────────────────────────────────────
    The panels are only just translucent (.93) — the sky shows at the edges and
    tints the grounds, but nothing on the table is washed out by it. .7 read as
@@ -1322,12 +1326,12 @@
     linear-gradient(145deg, rgba(25, 30, 54, .93), rgba(12, 15, 31, .93));
 }
 .orbit.or-game .or-influence { background: radial-gradient(ellipse at 50% 0, rgba(66, 209, 199, .07), transparent 70%), rgba(12, 15, 31, .9) !important; }
-.or-game .or-table > section,
-.or-game .or-board-main > section,
-.or-game .or-sideboards > section,
+.or-game .or-table > section:where(:not(.fg-panel)),
+.or-game .or-board-main > section:where(:not(.fg-panel)),
+.or-game .or-sideboards > section:where(:not(.fg-panel)),
 .or-game .or-score-rail .or-player { border-radius: 4px; }
-.or-game .or-board-main > section,
-.or-game .or-sideboards > section {
+.or-game .or-board-main > section:where(:not(.fg-panel)),
+.or-game .or-sideboards > section:where(:not(.fg-panel)) {
   border-color: rgba(66, 209, 199, .24);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07), inset 0 0 28px rgba(66, 209, 199, .045), 0 10px 26px rgba(0, 0, 0, .45);
 }
@@ -1339,12 +1343,12 @@
   border-bottom-color: color-mix(in srgb, var(--or-seat) 30%, transparent);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07), 0 10px 26px rgba(0, 0, 0, .4);
 }
-.or-game .or-tech > header h2, .or-game .or-log h2 { font-family: var(--or-instrument); font-size: .8rem; font-weight: 600; letter-spacing: .24em; text-transform: uppercase; color: var(--or-me); }
+.or-game .or-tech > header h2 { font-family: var(--or-instrument); font-size: .8rem; font-weight: 600; letter-spacing: .24em; text-transform: uppercase; color: var(--or-me); }
 .or-game .or-tech > header, .or-game .or-log h2 { border-bottom-color: rgba(66, 209, 199, .22); }
 .or-game .or-tech-space { border-radius: 3px; }
 .or-game .or-played-agent { border-radius: 3px; }
 @media (max-width: 360px) {
-  .or-game .or-tech > header h2, .or-game .or-log h2 { letter-spacing: .12em; }
+  .or-game .or-tech > header h2 { letter-spacing: .12em; }
 }
 
 /* ── Planet card faces ──────────────────────────────────────────────────────
@@ -1500,3 +1504,10 @@
    sit under the five planet names, so the word "EMPTY" five times said nothing. */
 .or-game .or-played-agent.empty { border-color: color-mix(in srgb, currentColor 40%, transparent); background: color-mix(in srgb, currentColor 5%, transparent); }
 .or-game .or-played-agent.empty .or-played-name { opacity: 0; }
+
+/* ── the game kit (shared/theme.game-kit.css) ─────────────────────────────────
+   Orbit's colors, as the kit's four tokens. The log, the decision / mulligan /
+   result panels, their labels and the action buttons are the kit's; the starfield,
+   the influence board, the seat rail and the agent cards are Orbit's MATERIAL. */
+.orbit.or-game{--g-ground:#060812;--g-accent:#42d1c7;--g-ink:#061614;--g-label:#a3ebe4}
+.or-act-btn{text-align:center;line-height:1.25;white-space:normal}

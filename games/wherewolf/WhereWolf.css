@@ -28,15 +28,8 @@
 .ww-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .ww-top-left{display:flex;align-items:center;gap:10px;min-width:0}
 .ww-title{font-family:Cinzel,serif;font-weight:700;color:var(--gold-light);letter-spacing:.5px}
-.ww-btn{font-family:Cinzel,serif;font-size:14px;border:1px solid var(--border);background:var(--surface2);color:var(--text);
-  padding:9px 16px;border-radius:var(--radius);cursor:pointer;transition:all .15s}
-.ww-btn:hover{border-color:var(--gold);color:var(--gold-light)}
-.ww-btn.gold{background:linear-gradient(180deg,#7a3f4a,#5a2630);border-color:#9a4a58;color:#f2dcc4}
-.ww-btn.gold:hover{filter:brightness(1.12)}
-.ww-btn.sm{padding:6px 11px;font-size:12px}
-.ww-btn.ghost{background:transparent;border-color:transparent;color:var(--text-dim)}
-.ww-btn.ghost:hover{color:var(--gold-light)}
-.ww-btn:disabled{opacity:.4;cursor:not-allowed}
+/* `.ww-btn` is only a hook now: the buttons are the game kit's (`btn btn-gold` /
+   `btn-outline` / `btn-ghost`, shared/theme.base-css.css), in this game's accent. */
 .ww-input{font-family:Cinzel,serif;letter-spacing:3px;text-transform:uppercase;background:var(--surface);border:1px solid var(--border);
   color:var(--text);padding:9px 12px;border-radius:var(--radius);width:120px;text-align:center}
 /* Where Wolf? has only TWO columns (no History), so it keeps its own grid rather
@@ -47,7 +40,7 @@
    private grid was the reason it was the only lobby with no tab bar at 390px, and
    its 700px breakpoint did not agree with the shared ladder's 760. */
 .ww-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:center}
-.ww-section{font-family:Cinzel,serif;color:var(--gold);font-size:14px;margin-top:10px;border-bottom:1px solid var(--border);padding-bottom:4px}
+.ww-section{margin-top:10px;border-bottom:1px solid var(--border);padding-bottom:4px}
 .ww-card{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--surface);border:1px solid var(--border);
   border-radius:var(--radius);padding:10px 14px}
 .ww-card-title{font-family:Cinzel,serif}
@@ -233,3 +226,10 @@
      "Insomniac" printed as "WEREW...", "TROUBL...", "INSOMN...". */
   .ww-rolepick{grid-template-columns:1fr;gap:6px}
 }
+
+/* ── the game kit (shared/theme.game-kit.css) ─────────────────────────────────
+   Where Wolf's colors, as the kit's tokens: the night-blue accent its lobby already
+   wears. On `.ww` so the waiting room's role picker matches the table. The cards,
+   the table and the night are this game's MATERIAL. */
+.ww{--g-accent:var(--lby-accent);--g-ink:#0c1124;--g-label:#b9c6ee}
+

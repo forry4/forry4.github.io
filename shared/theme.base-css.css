@@ -70,22 +70,32 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro','Crimson F
    against. That harness reads `backgroundColor` up the ancestor chain, so a
    gradient-only face would leave it measuring near-black ink against the CARD's dark
    ground and failing a button that is in fact 8:1. */
-.btn-gold{color:#0f0e0c;background-color:var(--gold);
-  background-image:linear-gradient(180deg,color-mix(in srgb,var(--gold) 84%,#fff5dc),var(--gold));
-  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--gold) 72%,#000),
+/* The transparent border is GEOMETRY: outline and ghost buttons carry a 1px border,
+   so without one a gold button in the same row sat 2px shorter (Duel and Dissonance
+   each patched it locally). */
+.btn-gold{border:1px solid transparent;color:var(--g-ink,#0f0e0c);background-color:var(--g-accent,var(--gold));
+  background-image:linear-gradient(180deg,color-mix(in srgb,var(--g-accent,var(--gold)) 84%,#fff5dc),var(--g-accent,var(--gold)));
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--g-accent,var(--gold)) 72%,#000),
     inset 0 1px 0 rgba(255,255,255,.26),
-    0 3px 9px -7px color-mix(in srgb,var(--gold) 55%,transparent)}
+    0 3px 9px -7px color-mix(in srgb,var(--g-accent,var(--gold)) 55%,transparent)}
 .btn-gold:hover:not(:disabled){filter:brightness(1.08);transform:translateY(-1px);
-  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--gold) 72%,#000),
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--g-accent,var(--gold)) 72%,#000),
     inset 0 1px 0 rgba(255,255,255,.3),
-    0 6px 14px -8px color-mix(in srgb,var(--gold) 68%,transparent)}
+    0 6px 14px -8px color-mix(in srgb,var(--g-accent,var(--gold)) 68%,transparent)}
 /* A disabled plate is not lit and does not hover-lift: the Sign In button spends the
    whole request disabled, and a button that still rises under the cursor while it is
    refusing the click is telling the user the opposite of what it is doing. */
 .btn-gold:disabled{filter:none;transform:none;
-  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--gold) 72%,#000)}
-.btn-outline{background:transparent;color:var(--gold);border:1px solid var(--gold)}.btn-outline:hover{background:var(--gold);color:#0f0e0c}
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--g-accent,var(--gold)) 72%,#000)}
+.btn-outline{background:transparent;color:var(--g-accent,var(--gold));border:1px solid var(--g-accent,var(--gold))}.btn-outline:hover{background:var(--g-accent,var(--gold));color:var(--g-ink,#0f0e0c)}
 .btn-ghost{background:transparent;color:var(--text-soft);border:1px solid var(--border)}.btn-ghost:hover{border-color:var(--text-dim);color:var(--text)}
+/* The selected one of a set of outline buttons (a filter, a declared lead). */
+.btn-outline.active{background:var(--g-accent,var(--gold));color:var(--g-ink,#0f0e0c)}
+/* A ghost toggle that is switched OFF reads quieter (mute, hide). */
+.btn-ghost[aria-pressed="true"]{color:var(--text-dim)}
+/* On touch :hover STICKS to the last-tapped button, so a just-deselected outline
+   button kept the hover fill and read as selected (reported in Dontminion). */
+@media (hover:none){.btn-outline:hover:not(.active){background:transparent;color:var(--g-accent,var(--gold))}}
 .btn-danger{background:transparent;color:var(--red-gem);border:1px solid var(--red-gem)}.btn-danger:hover{background:var(--red-gem);color:#fff}
 /* A VISIBLE KEYBOARD RING, because .btn had none and the browser default is a 1px
    near-black outline — on a #0f0e0c page that is nothing at all. Measured by tabbing
@@ -95,7 +105,7 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro','Crimson F
    the PAGE ground, so the gold ring is always sitting on dark even when the button
    itself is a solid gold slab. */
 .btn:focus-visible{outline:2px solid var(--gold-light);outline-offset:2px}
-.btn-gold:focus-visible{outline-color:var(--gold-light)}
+.btn-gold:focus-visible{outline-color:var(--g-label,var(--gold-light))}
 .btn:disabled{opacity:.35;cursor:not-allowed}
 .btn-full{width:100%}
 /* A busy button's spinner sits OUT OF FLOW, scoped with :has so no other button
@@ -106,7 +116,7 @@ body{background:var(--bg);color:var(--text);font-family:'Crimson Pro','Crimson F
    leading edge in `--lby-accent`, which on this face is gold on gold. */
 .btn:has(.btn-spin){position:relative}
 .btn-spin{position:absolute;left:14px;top:50%;margin:0;transform:translateY(-50%)}
-.btn-gold .btn-spin{border-color:rgba(15,14,12,.28);border-top-color:#0f0e0c}
+.btn-gold .btn-spin{border-color:rgba(15,14,12,.28);border-top-color:var(--g-ink,#0f0e0c)}
 .btn-sm{padding:7px 14px;font-size:.78rem}
 .input{width:100%;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'Cinzel','Cinzel Fallback',serif;font-size:1rem;letter-spacing:.1em;outline:none}
 .input:focus{border-color:var(--gold)}

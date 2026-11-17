@@ -513,6 +513,51 @@ rules file starts with `Goal of the Game` and `Setup`, has no lead paragraph or 
 and keeps its later headings in the rulebook order. The source-derived checks in
 `shared/tests/test_lobby_kit.py` and `shared/tests/test_rules_kit_shapes.py` are part of the
 first-commit gate for every new game — do not add a per-game exception for a copy difference.
+**The board goes on the game kit too:** `fg-table` on the game screen's root with the four tokens
+set there, `fg-panel` (+ `fg-lit` for the live one) on its panels, `fg-label` on panel titles,
+`fg-log-row` on log lines, and `.btn .btn-gold/.btn-outline/.btn-ghost` for its buttons — see the
+next section. `shared/tests/test_game_kit.py` and `gameKit` in `screens.mjs` are first-commit gates
+as well.
+
+**THE GAME KIT — a game picks the COLORS, the site owns the MATERIALS (2026-11-17).**
+`shared/theme.game-kit.css`, appended to `baseCss` (and exported alone as `gameKitCss` for CoC's
+bare mount). The lobbies had been one product since the chrome rule above; the BOARDS were still
+three. Twelve games ran on three construction systems: the house look (Crimson Pro + Cinzel, lit
+14px panels, the lit 8px plate), a system sans with pill buttons (Pinch, Pip Market, Orbit's
+in-game type) and Inter + Georgia with 3-6px corners (Black Castle). A game looking DIFFERENT
+is fine; a game looking like a different PRODUCT is what the owner called jarring.
+- **A game sets four tokens on the element wearing `fg-table`, and nothing else about its chrome**:
+  `--g-ground` (the page color, its hue kept very dark), `--g-accent` (its one accent),
+  `--g-ink` (text on the accent) and `--g-label` (panel titles, usually the accent lifted toward
+  white). Everything else — `--g-surface`, `--g-surface-2`, `--g-edge`, `--g-lit`, the faces, the
+  in-game top bar's `--lby-bar-*` — is DERIVED in the kit. Defaults are the house values inside
+  `:where()`, so the five house games (Spender, Duel, Dontminion, CoC, Rag Tag) wear `fg-table`
+  and set nothing, and a game's token rule wins on either side of the kit in the cascade. A
+  seat-colored game lights a panel by setting `--g-lit` on it (Pip Market's seats, SecretNames'
+  result).
+- **What the kit owns** (the gate's `OWNS` map): `fg-table` the text face and color; `fg-panel`
+  ground, edge, corner and shadow; `fg-lit` the live edge; `fg-label` (+ `fg-label-soft` for a
+  caption under a name or a number) the small-caps title; `fg-log-row` (+ `fg-log-head`,
+  `fg-log-quiet`) one log line; and the buttons, which now read `--g-accent`/`--g-ink`. A
+  game keeps its MATERIAL — board, pieces, cards, art and the layout of all of them — and the
+  house games' own panels stayed theirs, since the kit was derived FROM them.
+- **Two gates, the lobby-chrome split again.** `shared/tests/test_game_kit.py` reads the JSX for
+  every element wearing a kit class and refuses a kit-owned property on any rule whose last
+  compound names one of its co-classes or a kit class itself, with a `SANCTIONED` map that fails
+  a row once nothing needs it (today: the two phone-docked sheets, Pip Market's `.pm-actions` and
+  SecretNames' `.sn-console`). `gameKit` in `webapp/test/screens.mjs` enters ten vs-AI boards and
+  asserts the kit's COMPUTED typography and construction are identical across them. The second is
+  not optional, and it proved it on its first run: Orbit's `.or-sideboards > section` and
+  `.or-game .or-log h2` name no kit class, and they had put the log back on 4px corners and its
+  title back in Chakra Petch while the text gate was green. SecretNames and Where Wolf? have no
+  bot, so the render gate cannot seat them; the text gate holds them.
+- **Extras stay off `fg-table` on purpose.** Box Puzzles is a game and wears it; Books, Notes,
+  the four filters, Astral, Profile and Site health are reading and tool pages with no table,
+  panel row or log. They already use the house faces and the kit buttons, and the text gate's
+  typeface and repaint scans cover their directories.
+- **Not done:** the in-game header is still two treatments — the `LobbyHeader` gradient bar in
+  seven games and a flat hairline row in five (Spender `.game-nav`, Duel `.duel-topbar`,
+  `.dm-top`, `.coc-top`, `.ww-top`).
 
 **A GAME THEMES ITS ROWS, NEVER THE KIT'S CHROME — and this is the rule every new game
 has broken so far, because using the kit's class names and then restyling them from your

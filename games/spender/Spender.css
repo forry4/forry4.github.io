@@ -559,7 +559,7 @@
    .browser-user* rail classes below are still used by the Home menu header. */
 .browser-user{flex:1 1 0;display:flex;align-items:center;justify-content:flex-end;gap:10px;min-width:0}
 .browser-username{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.8rem;color:var(--text-dim);letter-spacing:.06em;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.btn-outline.active{background:var(--gold);color:#0f0e0c}
+
 /* Section headers, card rows, empty states, badges, the card list and the column
    grid are ALL the shared lobby kit now (shared/lobby.jsx + .lby-* in its CSS).
    Spender carried a parallel vocabulary — .section-hd, .game-card*, .empty-state

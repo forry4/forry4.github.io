@@ -178,11 +178,11 @@ function MoveLog({ entries = [], game, catalog, myId, onInfo }) {
     observer.observe(node);
     return () => observer.disconnect();
   }, [entries]);
-  return <section className="or-log"><h2>Log</h2><div ref={viewport}>
+  return <section className="fg-panel or-log"><h2 className="fg-label or-log-title">Log</h2><div ref={viewport}>
     {entries.map((entry, i) => {
       const seat = !entry.pid ? "" : entry.pid === myId ? " mine" : " theirs";
       return <p key={`${entry.turn}-${i}`}
-        className={`or-log-line${seat}${entry.turn_start ? " turn-start" : ""}`}
+        className={`fg-log-row or-log-line${seat}${entry.turn_start ? " fg-log-head turn-start" : ""}`}
         title={logText(entry)}>
         <b>{entry.turn}</b>
         <span>{entry.parts
@@ -720,7 +720,7 @@ function InfoModal({ info, catalog, onClose, onInfo }) {
     <div className={`or-info ${tint}`} role="dialog" aria-modal="true" aria-label={title}
       onClick={(event) => event.stopPropagation()}>
       <button type="button" className="or-info-x" onClick={onClose} aria-label="Close">×</button>
-      <span className="or-eyebrow">{eyebrow}</span>
+      <span className="fg-label or-eyebrow">{eyebrow}</span>
       <h2>{title}</h2>
       {body}
     </div>
@@ -793,7 +793,7 @@ function DecisionPanel({ game, catalog, sendMove, onInfo }) {
   const planetChoices = moves.every((move) => "planet" in move) && moves.length <= 5;
   const action = [...(game.log || [])].reverse().find((entry) => entry.action)?.action;
   const context = action === "technology" ? "Technology" : action === "leader" ? "Leader action" : "Agent effect";
-  return <section className="or-decision" aria-live="polite" aria-label="Current decision">
+  return <section className="fg-panel fg-lit or-decision" aria-live="polite" aria-label="Current decision">
     <div className="or-decision-source"><span>{context}</span><b>{game.pending.source}</b></div>
     <h2>{pairMoves ? "Which planet gains influence first?" : title}</h2>
     {pairMoves && <p className="or-decision-detail">A capture can resolve its bonus before the second planet moves.</p>}
@@ -1335,7 +1335,7 @@ export default function Orbit({ myId, authUser, onExit }) {
           me leader={game.leader} connected={connected} orderLabel={game.phase === "mulligan" ? (game.order[0] === myId ? "First player" : "Second player") : null} hint={myHint} onInfo={setInfo} />
       </div>
   );
-  return <div className={`app orbit or-game${!over && game.phase !== "mulligan" ? " or-live" : ""}`} style={{ "--lby-accent": GAME_ACCENTS.orbit }}>
+  return <div className={`app orbit or-game fg-table${!over && game.phase !== "mulligan" ? " or-live" : ""}`} style={{ "--lby-accent": GAME_ACCENTS.orbit }}>
     <style>{styles}</style>
     <LobbyHeader title="Orbit" user={<span className={`or-connection${connected ? "" : " lost"}`}>{connected ? (authUser?.name || "Connected") : "Reconnecting…"}</span>}
       menu={<GameMenu onLeave={leaveToLobby} onRules={() => setShowRules(true)}
@@ -1344,13 +1344,13 @@ export default function Orbit({ myId, authUser, onExit }) {
     <main className={`or-table${connected ? "" : " motion-paused"}${acting}`} ref={motionSurface}>
       {game.phase === "mulligan" && playerRails}
 
-      {over && <section className="or-result">
+      {over && <section className="fg-panel fg-lit or-result">
         <h1>{winnerName ? `${winnerName} wins${victoryCondition(game) ? ` by ${victoryCondition(game)}` : ""}` : "The Agent supply was exhausted"}</h1>
-        <button type="button" onClick={leaveToLobby}>Return to lobby</button>
+        <button type="button" className="btn btn-gold or-result-btn" onClick={leaveToLobby}>Return to lobby</button>
       </section>}
 
-      {game.phase === "mulligan" && isMyTurn && <section className="or-mulligan">
-        <span className="or-eyebrow">Opening hand</span><h2>Replace any Agents?</h2>
+      {game.phase === "mulligan" && isMyTurn && <section className="fg-panel fg-lit or-mulligan">
+        <span className="fg-label or-eyebrow">Opening hand</span><h2>Replace any Agents?</h2>
         {/* The copy names the CUE, not the gesture. "Select the cards you want to
             discard" describes a click and leaves the reader to work out which of
             two marked states they are looking at; naming the fade means the
@@ -1358,7 +1358,7 @@ export default function Orbit({ myId, authUser, onExit }) {
         <p>Tap the Agents you want to replace — they fade out. You draw back to four.</p>
         <div className="or-hand">{sortedHand(me.hand).map((card) => <AgentCard card={card} key={card.id} discarding={mulligan.includes(card.id)} onInfo={setInfo}
           onClick={() => setMulligan((old) => old.includes(card.id) ? old.filter((id) => id !== card.id) : [...old, card.id])} />)}</div>
-        <button type="button" className="or-primary" onClick={() => sendMove({ action: "mulligan", card_ids: [...mulligan].sort((a, b) => a - b) })}>
+        <button type="button" className="btn btn-gold or-primary" onClick={() => sendMove({ action: "mulligan", card_ids: [...mulligan].sort((a, b) => a - b) })}>
           {mulligan.length ? `Replace ${mulligan.length} card${mulligan.length === 1 ? "" : "s"}` : "Keep this hand"}
         </button>
       </section>}
@@ -1385,7 +1385,7 @@ export default function Orbit({ myId, authUser, onExit }) {
                     ? `Develop ${selectedAgent?.faction || "Technology"} · ${technologyCost} Zenithium`
                     : `Become Leader · ${selectedAgent?.faction || "Faction"}${selectedAgent?.faction
                       ? ` (${LEADER_EFFECT[selectedAgent.faction]})` : ""}`;
-                return <button type="button" key={action} disabled={!move} onClick={() => move && sendMove(move)}>{label}</button>;
+                return <button type="button" className="btn btn-outline or-act-btn" key={action} disabled={!move} onClick={() => move && sendMove(move)}>{label}</button>;
               })}</div>
             </div>}
             {!over && !game.pending && isMyTurn && !selectedAgent && <p className="or-control-hint">Choose a card to recruit an Agent, develop technology, or become Leader.</p>}

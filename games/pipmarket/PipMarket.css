@@ -19,25 +19,22 @@
     radial-gradient(60rem 26rem at 12% -6%,rgba(242,145,124,.16),transparent 70%),
     radial-gradient(50rem 24rem at 92% -8%,rgba(233,185,94,.10),transparent 70%),
     radial-gradient(90rem 50rem at 50% 120%,rgba(120,40,110,.30),transparent 70%),
-    linear-gradient(180deg,#1d0f22,#140a18 60%,#100814);
-  font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+    linear-gradient(180deg,#1d0f22,#140a18 60%,#100814)}
 .pm-game{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 .pm-overlay{position:relative;z-index:50;min-height:0}
 .pm-toast{position:fixed;z-index:120;left:50%;bottom:24px;transform:translateX(-50%);max-width:min(90vw,520px);padding:11px 16px;
-  border:1px solid #f2917c88;border-radius:10px;background:#231428f2;color:#fbeaf0;box-shadow:0 14px 36px #000a;font:500 13px/1.4 ui-sans-serif,system-ui,sans-serif}
+  border:1px solid #f2917c88;border-radius:10px;background:#231428f2;color:#fbeaf0;box-shadow:0 14px 36px #000a;font:500 15px/1.4 'Crimson Pro','Crimson Fallback',Georgia,serif}
 
 /* ── buttons ─────────────────────────────────────────────────────────────── */
-.pm-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:10px 18px;border-radius:999px;
-  border:1px solid #6a4a72;background:#2a1932;color:var(--pm-ink);font:650 13px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:.02em;
+.pm-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:10px 18px;
   cursor:pointer;transition:transform .15s,filter .15s,background .15s,border-color .15s}
-.pm-btn:hover:not(:disabled){transform:translateY(-1px);border-color:var(--pm-coral);background:#352040}
+.pm-btn:hover:not(:disabled){transform:translateY(-1px)}
 .pm-btn:focus-visible{outline:2px solid var(--pm-coral-hi);outline-offset:3px}
 .pm-btn:disabled{opacity:.45;cursor:not-allowed}
-.pm-btn.primary{border-color:#ffb8a6;background:linear-gradient(180deg,#ffb19e,#ee7f68 55%,#d9654f);color:#2a0f14;
-  box-shadow:inset 0 1px #fff8,0 8px 22px rgba(242,145,124,.28)}
-.pm-btn.primary:hover:not(:disabled){filter:brightness(1.06);background:linear-gradient(180deg,#ffbcaa,#f38a73 55%,#de6c56)}
-.pm-btn.quiet{border-color:transparent;background:transparent;color:var(--pm-soft)}
-.pm-btn.quiet:hover:not(:disabled){background:#ffffff0d;border-color:transparent}
+
+.pm-btn.primary:hover:not(:disabled){filter:brightness(1.06)}
+
+
 
 /* ── dice ────────────────────────────────────────────────────────────────── */
 .pm-die{--d:var(--die);position:relative;display:inline-grid;grid-template:repeat(3,1fr)/repeat(3,1fr);width:var(--d);height:var(--d);
@@ -69,7 +66,7 @@ button.pm-die{cursor:pointer}
 /* ── the market ──────────────────────────────────────────────────────────── */
 .pm-zone-head{display:flex;align-items:center;gap:16px;margin:0 4px 10px}
 .pm-zone-head h2{font:600 19px/1 'Cinzel','Cinzel Fallback',serif;letter-spacing:.1em;color:#ffe2d8}
-.pm-zone-note{margin-left:auto;color:var(--pm-mute);font-size:12px;letter-spacing:.06em}
+.pm-zone-note{margin-left:auto}
 .pm-rounds{display:flex;gap:8px}
 .pm-lantern{position:relative;display:inline-grid;place-items:center;width:30px;height:36px;color:#7b6380;font:700 11px 'Cinzel','Cinzel Fallback',serif}
 .pm-lantern i{position:absolute;inset:4px 4px 2px;border-radius:45% 45% 40% 40%;border:1px solid #5b4161;background:linear-gradient(180deg,#2f1d36,#24152b)}
@@ -119,15 +116,12 @@ button.pm-die{cursor:pointer}
 .pm-col:disabled{cursor:default}
 
 /* ── players and boards ──────────────────────────────────────────────────── */
-.pm-player{--seat:#f2917c;position:relative;flex:0 0 auto;padding:12px 14px 16px;border-radius:18px;
-  background:linear-gradient(170deg,#2a1832,#1e1124 70%);border:1px solid var(--pm-line);
-  box-shadow:inset 0 1px 0 rgba(255,230,240,.07),0 16px 36px rgba(4,0,6,.45);transition:border-color .3s,box-shadow .3s}
-.pm-player.active{border-color:color-mix(in oklab,var(--seat) 70%,#fff 0%);
-  box-shadow:inset 0 1px 0 rgba(255,230,240,.1),0 0 0 1px color-mix(in oklab,var(--seat) 45%,transparent),0 0 34px color-mix(in oklab,var(--seat) 30%,transparent),0 16px 36px rgba(4,0,6,.5)}
+.pm-player{--seat:#f2917c;position:relative;flex:0 0 auto;padding:12px 14px 16px;transition:border-color .3s,box-shadow .3s}
+
 .pm-player.active:after{content:"";position:absolute;left:18px;right:18px;top:-1px;height:2px;border-radius:2px;
   background:linear-gradient(90deg,transparent,var(--seat),transparent);animation:pm-sweep 2.4s ease-in-out infinite}
 .pm-player.passed{opacity:.72}
-.pm-player.won{border-color:#e9b95e;box-shadow:0 0 0 1px #e9b95e66,0 0 40px rgba(233,185,94,.25)}
+
 .pm-player-head{display:flex;align-items:center;gap:10px;margin-bottom:10px;min-width:0}
 .pm-seat-dot{flex:0 0 auto;width:12px;height:12px;border-radius:50%;background:var(--seat);box-shadow:0 0 0 3px color-mix(in oklab,var(--seat) 25%,transparent),0 0 12px var(--seat)}
 .pm-player-id{min-width:0;flex:1}
@@ -175,9 +169,8 @@ button.pm-die{cursor:pointer}
 .pm-rivals .pm-player-score b{font-size:19px}
 
 /* ── the side column ─────────────────────────────────────────────────────── */
-.pm-actions{padding:14px;border-radius:16px;background:linear-gradient(170deg,#2b1934,#21122a);border:1px solid var(--pm-line);
-  box-shadow:0 14px 30px rgba(4,0,6,.4);display:flex;flex-direction:column;gap:12px}
-.pm-actions.yours{border-color:rgba(242,145,124,.65);box-shadow:0 0 0 1px rgba(242,145,124,.2),0 0 30px rgba(242,145,124,.18),0 14px 30px rgba(4,0,6,.4)}
+.pm-actions{padding:14px;display:flex;flex-direction:column;gap:12px}
+
 .pm-status b{display:block;font:600 17px/1.2 'Cinzel','Cinzel Fallback',serif;color:#ffe6dd}
 .pm-status span{display:block;margin-top:4px;color:var(--pm-soft);font-size:13px;line-height:1.4}
 .pm-buttons{display:flex;flex-wrap:wrap;gap:8px}
@@ -190,20 +183,20 @@ button.pm-die{cursor:pointer}
 .pm-line-money{font-size:11px;color:#f6d488}
 .pm-mini{display:inline-flex;gap:2px;vertical-align:middle}
 .pm-side-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:8px}
-.pm-side-head span{font:600 12px 'Cinzel','Cinzel Fallback',serif;letter-spacing:.12em;text-transform:uppercase;color:#f3c9bd}
+
 .pm-side-head small{color:var(--pm-mute);font-size:11px;text-align:right}
-.pm-cup{padding:12px 14px;border-radius:16px;background:radial-gradient(circle at 50% 0%,#331d3b,#1d1023 75%);border:1px solid var(--pm-line)}
+.pm-cup{padding:12px 14px}
 .pm-cup-dice{--die:24px;display:flex;flex-wrap:wrap;gap:5px;min-height:28px}
-.pm-log{display:flex;flex-direction:column;border-radius:16px;border:1px solid var(--pm-line-soft);background:#1a0f1f;overflow:hidden}
-.pm-log summary{list-style:none;padding:12px 14px;border-bottom:1px solid #2f1f36;color:#f3c9bd;font:600 12px 'Cinzel','Cinzel Fallback',serif;letter-spacing:.12em;text-transform:uppercase;cursor:pointer}
+.pm-log{display:flex;flex-direction:column;overflow:hidden}
+.pm-log summary{list-style:none;padding:12px 14px;border-bottom:1px solid #2f1f36;cursor:pointer}
 .pm-log summary::-webkit-details-marker{display:none}
 .pm-log>div{max-height:300px;overflow:auto;padding:4px 14px 12px;scrollbar-width:thin;scrollbar-color:#5c4262 transparent}
-.pm-log p{padding:7px 0;border-bottom:1px solid #ffffff09;color:var(--pm-soft);font-size:12.5px;line-height:1.45}
-.pm-log p:first-child{color:#fff2f5}
+
+
 .pm-log b{color:#ffe7df;font-weight:650}
 .pm-log em{font-style:normal;font-weight:700;color:#ffd0c2}
-.pm-log .pm-log-phase{color:#f6d488}
-.pm-log .pm-log-quiet{color:var(--pm-mute)}
+
+
 .pm-live{display:inline-flex;align-items:center;gap:7px;color:#e7c9d4;font-size:12px}
 .pm-live i{width:7px;height:7px;border-radius:50%;background:#8ee0a8;box-shadow:0 0 8px #8ee0a8}
 .pm-live.lost{color:#f1ad95}.pm-live.lost i{background:#f08a6c;box-shadow:none}
@@ -212,7 +205,7 @@ button.pm-die{cursor:pointer}
 .pm-popups{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:90}
 .pm-pop{position:absolute;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:2px;animation:pm-pop 1.45s cubic-bezier(.2,.8,.2,1) forwards}
 .pm-pop b{font:700 40px/1 'Cinzel','Cinzel Fallback',serif;color:var(--pop);text-shadow:0 0 18px color-mix(in oklab,var(--pop) 60%,transparent),0 3px 0 rgba(0,0,0,.5)}
-.pm-pop small{font:700 12px/1 ui-sans-serif,system-ui,sans-serif;color:#f6d488;letter-spacing:.06em;text-shadow:0 2px 0 rgba(0,0,0,.6)}
+.pm-pop small{font:700 11px/1 'Cinzel','Cinzel Fallback',serif;color:#f6d488;letter-spacing:.06em;text-shadow:0 2px 0 rgba(0,0,0,.6)}
 .pm-pop.tiny b{font-size:20px}
 .pm-banner{position:fixed;inset:0;z-index:85;display:grid;place-items:center;pointer-events:none}
 .pm-banner>div{padding:22px 44px;text-align:center;border-radius:20px;background:linear-gradient(180deg,rgba(43,24,52,.94),rgba(26,14,31,.94));
@@ -221,13 +214,12 @@ button.pm-die{cursor:pointer}
 .pm-banner h2{margin:8px 0 6px;font:600 44px/1 'Cinzel','Cinzel Fallback',serif;color:#ffe2d8;letter-spacing:.06em}
 .pm-banner small{color:#f6d488;font-size:13px}
 .pm-result{position:fixed;inset:0;z-index:95;display:grid;place-items:center;padding:20px;background:rgba(14,6,17,.72);backdrop-filter:blur(8px);animation:pm-fade .4s ease-out}
-.pm-result-card{width:min(94vw,520px);padding:30px 28px 24px;text-align:center;border-radius:22px;border:1px solid rgba(233,185,94,.6);
-  background:linear-gradient(170deg,#30203a,#1d1024);box-shadow:0 0 70px rgba(233,185,94,.18),0 40px 100px rgba(0,0,0,.7);animation:pm-rise .5s cubic-bezier(.2,.8,.2,1)}
-.pm-result-kicker{color:#f6d488;font-size:11px;letter-spacing:.24em;text-transform:uppercase}
+.pm-result-card{width:min(94vw,520px);padding:30px 28px 24px;text-align:center;animation:pm-rise .5s cubic-bezier(.2,.8,.2,1)}
+
 .pm-result-card h2{margin:10px 0 18px;font:600 32px/1.1 'Cinzel','Cinzel Fallback',serif;color:#fff0ea}
 .pm-final{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
 .pm-final th,.pm-final td{padding:9px 8px;border-bottom:1px solid #ffffff12;text-align:right;color:var(--pm-soft);font-size:14px}
-.pm-final thead th{font:600 10px ui-sans-serif,system-ui,sans-serif;letter-spacing:.12em;text-transform:uppercase;color:var(--pm-mute)}
+.pm-final thead th{font:600 10px 'Cinzel','Cinzel Fallback',serif;letter-spacing:.12em;text-transform:uppercase;color:var(--pm-mute)}
 .pm-final tbody th{text-align:left;color:var(--pm-ink);font-weight:600}
 .pm-final thead th:first-child{text-align:left}
 .pm-final tbody th i{display:inline-block;width:9px;height:9px;margin-right:8px;border-radius:50%;background:var(--seat)}
@@ -266,8 +258,8 @@ button.pm-die{cursor:pointer}
   /* Below the two-column table the controls would sit under every board, so they
      ride along the bottom of the screen instead. */
   .pm-actions{position:fixed;left:50%;bottom:0;z-index:70;width:min(100%,760px);transform:translateX(-50%);border-radius:18px 18px 0 0;
-    padding:12px max(16px,env(safe-area-inset-left)) calc(12px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-right));
-    box-shadow:0 -16px 40px rgba(4,0,6,.65)}
+    box-shadow:0 -16px 40px rgba(4,0,6,.65);
+    padding:12px max(16px,env(safe-area-inset-left)) calc(12px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-right))}
   .pm-status{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
   .pm-status span{margin:0}
   .pm-lines{max-height:96px}
@@ -306,3 +298,20 @@ button.pm-die{cursor:pointer}
 @media(prefers-reduced-motion:reduce){
   .pipmarket *{animation:none!important;transition:none!important;scroll-behavior:auto!important}
 }
+
+/* ── the game kit (shared/theme.game-kit.css) ─────────────────────────────────
+   Pip Market's colors, as the kit's four tokens. Every panel, label, log row and
+   button above is the kit's; what stays here is the market's MATERIAL — dice,
+   stalls, boards, lanterns and the plum night sky. */
+.pm-game,.pm-connecting{--g-ground:#170c1b;--g-accent:#f2917c;--g-ink:#2a0f14;--g-label:#f6c3b6;font-size:16px}
+/* The lit seat is lit in its own seat color, the winner in gold. */
+.pm-player{--g-lit:var(--seat)}
+.pm-player.won{--g-lit:#e9b95e}
+.pm-player.active:after{display:none}
+/* Crimson Pro sets ~12% narrower than the system sans it replaced, so copy steps up. */
+.pm-status span{font-size:16px;color:var(--g-text-soft)}
+.pm-player-id small,.pm-side-head small{font-size:14px}
+.pm-player-role{color:var(--g-text-soft)}
+.pm-live{font-size:15px}
+.pm-log summary{border-bottom-color:rgba(255,240,215,.06)}
+

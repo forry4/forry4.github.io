@@ -1770,7 +1770,7 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
   }
 
   return (
-    <div className="app duel duel-gamescreen" style={{ "--lby-accent": GAME_ACCENTS.duel }}>
+    <div className="app duel duel-gamescreen fg-table" style={{ "--lby-accent": GAME_ACCENTS.duel }}>
       <style>{duelStyles}</style>
       {reconnecting && !connected && !reviewOnly && <div className="duel-reconnbar">Reconnecting…</div>}
       <div className="duel-topbar">

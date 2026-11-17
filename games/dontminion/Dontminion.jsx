@@ -2477,7 +2477,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
 
   // ── game screen ──
   return (
-    <div className="app dm dm-gamescreen" style={{ "--lby-accent": GAME_ACCENTS.dontminion }}>
+    <div className="app dm dm-gamescreen fg-table" style={{ "--lby-accent": GAME_ACCENTS.dontminion }}>
       <style>{dmStyles}</style>
       {/* Title bar only — the game's NAME, centred, like every other game on the
           site. Whose turn it is and which phase you're in are already carried by

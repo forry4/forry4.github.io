@@ -2574,7 +2574,7 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
     /* `dis-game` marks the GAME screen specifically -- `.dis` is also the
        lobby's root, and the desktop rules below lock this screen to the
        viewport so the board never scrolls. */
-    <div className={`dis dis-game${cardPts(game) ? " dis-cardpts" : ""}`}>
+    <div className={`dis dis-game fg-table${cardPts(game) ? " dis-cardpts" : ""}`}>
       <style>{styles}</style>
       <LobbyHeader title="Dissonance" menu={<OddMenu onLeave={leaveToLobby}
         onRules={() => setShowRules(true)}
@@ -2698,7 +2698,7 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
                       prefix={`yours would need`} />
                   )}
                   <div className="dis-actrow">
-                    <button className="btn dis-gobtn" disabled={bidValue === null} onClick={doValueBid}>
+                    <button className="btn btn-gold dis-gobtn" disabled={bidValue === null} onClick={doValueBid}>
                       Bid {bidValue ?? ""}
                     </button>
                     <button className="btn btn-ghost" onClick={doPass}>Pass</button>
@@ -2774,7 +2774,7 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
                     })}
                   </div>
                   <div className="dis-actrow">
-                    <button className="btn dis-gobtn" disabled={!bidReady} onClick={doBid}>
+                    <button className="btn btn-gold dis-gobtn" disabled={!bidReady} onClick={doBid}>
                       Bid {bidLevel ?? ""}{bidDenom !== null ? <Den d={bidDenom} /> : ""}
                     </button>
                     {opt.may_pass && <button className="btn btn-ghost" onClick={doPass}>Pass</button>}
@@ -2829,7 +2829,7 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
                   <div className="dis-actrow">
                     {game.commit.leads.map((p) => (
                       <button key={p}
-                        className={`btn btn-ghost dis-annbtn${commitLead === p ? " sel" : ""}`}
+                        className={`btn btn-outline dis-annbtn${commitLead === p ? " active" : ""}`}
                         aria-pressed={commitLead === p}
                         onClick={() => setCommitLead(p)}>
                         {p < QUARTET_HANDS ? "Your hand leads" : "Opposite leads"}
@@ -2870,7 +2870,7 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
                     </div>
                   )}
                   <div className="dis-actrow">
-                    <button className="btn dis-gobtn"
+                    <button className="btn btn-gold dis-gobtn"
                       disabled={commitLead === null
                         || (commitTake !== null && commitGive === null)}
                       onClick={() => {
@@ -2916,7 +2916,7 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
                     </div>
                   )}
                   <div className="dis-actrow">
-                    <button className="btn dis-gobtn" disabled={swapTake === null || swapGive === null}
+                    <button className="btn btn-gold dis-gobtn" disabled={swapTake === null || swapGive === null}
                       onClick={() => doSwap(swapTake, swapGive)}>
                       Swap {swapTake !== null ? <CardName c={swapTake} /> : ""}
                       {swapGive !== null ? <> for <CardName c={swapGive} /></> : ""}
@@ -2947,10 +2947,10 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
                       +1 to your multiplier.
                     </div>
                     <div className="dis-actrow">
-                      <button className="btn dis-gobtn" onClick={() => doMove({ kind: "look" })}>
+                      <button className="btn btn-gold dis-gobtn" onClick={() => doMove({ kind: "look" })}>
                         Look at the talon
                       </button>
-                      <button className="btn btn-ghost dis-annbtn"
+                      <button className="btn btn-outline dis-annbtn"
                         onClick={() => doMove({ kind: "hand" })}>
                         Play Hand (×2)
                       </button>
@@ -2974,7 +2974,7 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
                       </div>
                     )}
                     <div className="dis-actrow">
-                      <button className="btn dis-gobtn" disabled={swapTake === null || swapGive === null}
+                      <button className="btn btn-gold dis-gobtn" disabled={swapTake === null || swapGive === null}
                         onClick={() => doSwap(swapTake, swapGive)}>
                         Swap{swapTake !== null ? <> <CardName c={swapTake} /></> : ""}
                         {swapGive !== null ? <> for <CardName c={swapGive} /></> : ""}
@@ -3058,7 +3058,7 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
                       {" = "}<b>{value * mult}</b>
                       {` · you must take ${ptsLabel(declLevel + (declSharp ? d.sharp_bonus : 0))}`}
                     </div>
-                    <button className="btn dis-gobtn" disabled={!ok}
+                    <button className="btn btn-gold dis-gobtn" disabled={!ok}
                       onClick={() => doDeclare(declDenom, declLevel, declSharp, declOpen)}>
                       Declare
                     </button>
@@ -3176,7 +3176,7 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
                 it was closed where it stood. Nothing was scored. Start a new
                 game from the lobby.
               </div>
-              <button className="btn dis-gobtn" onClick={leaveToLobby}>Back to lobby</button>
+              <button className="btn btn-gold dis-gobtn" onClick={leaveToLobby}>Back to lobby</button>
             </div>
           ) : (game.phase === "over" && !heldTrick) ? (
             <div className="dis-result">
@@ -3458,13 +3458,13 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
                   along so two simultaneous clicks cannot deal twice. */}
               {res.match_scores && !res.match_over ? (
                 <div className="dis-resbtns">
-                  <button className="btn dis-gobtn" onClick={() => doMove({
+                  <button className="btn btn-gold dis-gobtn" onClick={() => doMove({
                     kind: "next_round", round: res.round,
                   })}>Next round</button>
                   <button className="btn btn-ghost" onClick={leaveToLobby}>Back to lobby</button>
                 </div>
               ) : (
-                <button className="btn dis-gobtn" onClick={leaveToLobby}>Back to lobby</button>
+                <button className="btn btn-gold dis-gobtn" onClick={leaveToLobby}>Back to lobby</button>
               )}
             </div>
           ) : (
@@ -3631,8 +3631,8 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
               with nothing in it under a heading promising cards. A defender
               gets `null` and is excluded either way. */}
           {game.shown?.length > 0 && game.phase !== "over" && (
-            <div className="dis-panel dis-p-talon">
-              <h4>The talon · you saw these</h4>
+            <div className="fg-panel dis-panel dis-p-talon">
+              <h4 className="fg-label dis-panel-hd">The talon · you saw these</h4>
               <div className="dis-outrow">
                 {game.shown.map((c) => <Card key={c} c={c} small />)}
               </div>
@@ -3651,8 +3651,8 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
               that change once a round; the live panel belongs at the top, next
               to the talon, where the eye already is. */}
           {prev && (
-            <div className="dis-panel dis-p-last">
-              <h4>Last trick</h4>
+            <div className="fg-panel dis-panel dis-p-last">
+              <h4 className="fg-label dis-panel-hd">Last trick</h4>
               <div className="dis-lasttrick">
                 {prev.plays.map((p, i) => (
                   <div key={i} className={`dis-lt-play${p[0] === prev.winner ? " won" : ""}`}>
@@ -3670,8 +3670,8 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
               </div>
             </div>
           )}
-          <div className="dis-panel dis-p-contract">
-            <h4>Contract</h4>
+          <div className="fg-panel dis-panel dis-p-contract">
+            <h4 className="fg-label dis-panel-hd">Contract</h4>
             {/* THE BET, at the top of the box it re-prices. This row and the
                 gold chip on the felt are where a Double lives now — the
                 full-screen flash it replaced covered the board at the exact
@@ -3777,8 +3777,8 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
               </div>
             )}
           </div>
-          <div className="dis-panel dis-p-points">
-            <h4>Points</h4>
+          <div className="fg-panel dis-panel dis-p-points">
+            <h4 className="fg-label dis-panel-hd">Points</h4>
             <div className="dis-scorerow"><span>{nameOf(mySeat)}</span><b>{game.pts[mySeat]}</b></div>
             <div className="dis-scorerow"><span>{nameOf(oppSeat)}</span><b>{game.pts[oppSeat]}</b></div>
             <div className="muted" style={{ fontSize: "0.72rem", marginTop: "0.3rem" }}>
@@ -3799,8 +3799,8 @@ export default function Dissonance({ myId, authUser, onExit, offline = null }) {
             grid asks `:has()` rather than assuming the element is there. */}
         {game.match && (
           <div className="dis-side dis-side-match">
-            <div className="dis-panel dis-p-match">
-              <h4>Match to {game.match.target}</h4>
+            <div className="fg-panel dis-panel dis-p-match">
+              <h4 className="fg-label dis-panel-hd">Match to {game.match.target}</h4>
               <div className="dis-scorerow">
                 <span>{nameOf(mySeat)}</span><b>{game.match.scores[mySeat]}</b>
               </div>

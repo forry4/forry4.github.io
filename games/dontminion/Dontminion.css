@@ -79,9 +79,9 @@
    `.btn-gold` is a lit plate that BRIGHTENS and lifts on hover instead of swapping
    its fill, so a background override here would have stripped the gradient off every
    selected option on a phone to cancel a hover that no longer touches it. Cancel what
-   the hover actually does. */
+   the hover actually does. The OUTLINE half is the kit's now (theme.base-css.css),
+   since every game with a toggle row on a phone has the same bug. */
 @media (hover: none) {
-  .dm .btn-outline:hover { background: transparent; color: var(--gold, #c9a84c); }
   .dm .btn-gold:hover { filter: none; transform: none; }
 }
 
@@ -616,7 +616,7 @@
 .dm-ls-artifact { background: #2a2418; }
 .dm-ls-holder { font-size: 10px; color: var(--gold-light, #e8c96a); white-space: nowrap; }
 
-.dm-spend { padding: 2px 8px; font-size: 12px; align-self: center; }
+.dm-spend { padding: 2px 8px; align-self: center; }
 /* the what-you-can-do hint rides the right edge of the resource bar */
 .dm-reshint {
   margin-left: auto; font-style: italic; color: var(--gold-light, #e8c96a) !important;
@@ -782,7 +782,7 @@
 /* the Undo button lives at the TOP of the play box's button stack during a
    game — greyed when nothing to take back */
 .dm-undo[disabled] { opacity: .4; cursor: default; }
-.dm-kingdom-btn { width: 100%; border: 1px solid rgba(255,240,215,.06); }
+.dm-kingdom-btn { width: 100%; }
 
 /* ── kingdom browser modal ── */
 .dm-kingdom-modal {

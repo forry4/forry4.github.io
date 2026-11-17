@@ -18,7 +18,7 @@
    the same arithmetic `.lby-page-in` does with margin and padding, off the same
    `--lby-page-w`, so the two cannot drift. A game that narrows its page (Where Wolf,
    which has two columns rather than three) narrows this bar's rails with it. */
-.lby-header{position:relative;display:flex;align-items:center;gap:12px;padding:13px max(24px,calc((100% - var(--lby-page-w,1500px)) / 2 + 24px));padding-top:calc(env(safe-area-inset-top,0px) + 13px);border-bottom:1px solid var(--border);background:linear-gradient(180deg,#231f18 0%,#1a1713 100%);box-shadow:inset 0 1px 0 rgba(255,240,215,.055),0 1px 0 rgba(0,0,0,.5),0 10px 24px -18px rgba(0,0,0,1)}
+.lby-header{position:relative;display:flex;align-items:center;gap:12px;padding:13px max(24px,calc((100% - var(--lby-page-w,1500px)) / 2 + 24px));padding-top:calc(env(safe-area-inset-top,0px) + 13px);border-bottom:1px solid var(--lby-bar-edge,var(--border));background:linear-gradient(180deg,var(--lby-bar-top,#231f18) 0%,var(--lby-bar-bot,#1a1713) 100%);box-shadow:inset 0 1px 0 rgba(255,240,215,.055),0 1px 0 rgba(0,0,0,.5),0 10px 24px -18px rgba(0,0,0,1)}
 .lby-header::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;pointer-events:none;
 	background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--lby-accent,var(--gold,#c9a84c)) 30%,transparent) 34%,color-mix(in srgb,var(--lby-accent,var(--gold,#c9a84c)) 30%,transparent) 66%,transparent)}
 .lby-head-left{flex:1 1 0;display:flex;align-items:center;justify-content:flex-start;gap:8px;min-width:0}

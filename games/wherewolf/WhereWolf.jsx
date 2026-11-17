@@ -777,14 +777,14 @@ export default function WhereWolf({ myId, authUser, onExit }) {
           onRules={() => setShowRules(true)}
           banner={!connected && (
             <div className="ww-row" style={{ justifyContent: "center", marginBottom: 10 }}>
-              <button className="ww-btn sm" onClick={() => reconnectNow()} title="Reconnect">⟳ Reconnecting…</button>
+              <button className="btn btn-outline btn-sm ww-btn" onClick={() => reconnectNow()} title="Reconnect">⟳ Reconnecting…</button>
             </div>
           )}
           onStart={startGame}
           startLabel="Deal & Start"
           canStart={deckOk}
           blockedLabel={`Deck ${selected}/${need}`}>
-          <div className="ww-section">Roles in the deck
+          <div className="fg-label ww-section">Roles in the deck
             <span className={`ww-deck-status ${deckOk ? "ok" : "bad"}`}>
               {selected} / {need}{deckOk ? " ✓" : isHost ? (selected < need ? ` · add ${need - selected}` : ` · remove ${selected - need}`) : ""}
             </span>
@@ -805,7 +805,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
                 })}
               </div>
               <div className="ww-row" style={{ gap: 8 }}>
-                <button className="ww-btn sm" onClick={() => pushDeck(roomData?.recommended_deck || [])}>Recommended</button>
+                <button className="btn btn-outline btn-sm ww-btn" onClick={() => pushDeck(roomData?.recommended_deck || [])}>Recommended</button>
               </div>
             </>
           ) : (
@@ -915,13 +915,13 @@ export default function WhereWolf({ myId, authUser, onExit }) {
 
   return (
     <div className="ww" style={{ "--lby-accent": GAME_ACCENTS.wherewolf }}><style>{css}</style>
-      <div className={`ww-wrap ww-game${phase === "over" ? " ww-game-over" : ""}`} data-phase={phase}>
+      <div className={`ww-wrap ww-game fg-table${phase === "over" ? " ww-game-over" : ""}`} data-phase={phase}>
         <div className="ww-top">
           <div className="ww-top-left"><GameMenu onLeave={leaveToLobby} onRules={() => setShowRules(true)} />
             <span className="ww-title">Where Wolf</span></div>
           <div className="ww-row" style={{ gap: 8 }}>
-            {!connected && <button className="ww-btn sm" onClick={() => reconnectNow()} title="Reconnect">⟳ Reconnecting…</button>}
-            <button className="ww-btn ghost sm" title="Narration voice" onClick={toggleNarrate}>{effNarrate ? "🔊" : "🔇"}</button>
+            {!connected && <button className="btn btn-outline btn-sm ww-btn" onClick={() => reconnectNow()} title="Reconnect">⟳ Reconnecting…</button>}
+            <button className="btn btn-ghost btn-sm ww-btn" title="Narration voice" onClick={toggleNarrate}>{effNarrate ? "🔊" : "🔇"}</button>
             {myDealt && phase !== "over" && <span className="ww-you">You: <b>{roleName(myDealt)}</b></span>}
           </div>
         </div>
@@ -1001,12 +1001,12 @@ export default function WhereWolf({ myId, authUser, onExit }) {
 
             <div className="ww-actions">
               {phase === "dealing" && !players[myId]?.ready &&
-                <button className="ww-btn gold" onClick={() => mv({ type: "ready" })}>Ready</button>}
+                <button className="btn btn-gold ww-btn" onClick={() => mv({ type: "ready" })}>Ready</button>}
               {phase === "dealing" && players[myId]?.ready &&
                 <span className="ww-card-meta">Ready ✓ — waiting for {order.filter((p) => !players[p]?.ready).length} more…</span>}
 
               {((myActiveStep && step !== "drunk") || loneWolfActive) &&
-                <button className="ww-btn sm" onClick={() => mv({ type: "skip" })}>Skip</button>}
+                <button className="btn btn-outline btn-sm ww-btn" onClick={() => mv({ type: "skip" })}>Skip</button>}
               {phase === "night" && stepLeft != null && (myActiveStep || loneWolfActive) &&
                 <span className="ww-timer">{Math.ceil(stepLeft)}s</span>}
 
@@ -1014,8 +1014,8 @@ export default function WhereWolf({ myId, authUser, onExit }) {
                 <>
                   <span className="ww-timer">{fmtTime(voteLeft)}</span>
                   {game.votes?.[myId] && (game.locked?.[myId]
-                    ? <button className="ww-btn" onClick={() => mv({ type: "unlock_vote" })}>Unlock</button>
-                    : <button className="ww-btn gold" onClick={() => mv({ type: "lock_vote" })}>Lock vote</button>)}
+                    ? <button className="btn btn-outline ww-btn" onClick={() => mv({ type: "unlock_vote" })}>Unlock</button>
+                    : <button className="btn btn-gold ww-btn" onClick={() => mv({ type: "lock_vote" })}>Lock vote</button>)}
                 </>
               )}
             </div>
@@ -1073,7 +1073,7 @@ function WinScreen({ game, order, myIdx, players, roomData, isMobile, onExit }) 
           );
         })}
       </div>
-      <div className="ww-row"><button className="ww-btn gold" onClick={onExit}>Back to lobby</button></div>
+      <div className="ww-row"><button className="btn btn-gold ww-btn" onClick={onExit}>Back to lobby</button></div>
     </div>
   );
 }

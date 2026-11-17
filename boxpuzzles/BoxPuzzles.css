@@ -23,7 +23,7 @@
    apart. `middle` keeps the name's baseline as the row's, so dt and dd still line up. */
 .bx-rl-sw{display:inline-block;width:1.6em;height:1.6em;margin-right:.55em;vertical-align:middle;
 	border-radius:5px;background:var(--t);box-shadow:0 0 0 1px rgba(255,255,255,.3);}
-.bx-mute[aria-pressed="true"]{color:var(--text-dim);}
+
 .bx-wrap{max-width:1080px;margin:0 auto;padding:0 20px;}
 
 /* ── the picker ───────────────────────────────────────────────────────── */

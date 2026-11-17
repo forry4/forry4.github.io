@@ -259,9 +259,9 @@ function phaseCopy(game, myId, connected) {
 function PlayerRail({ game, pid, myId }) {
   const pearl = game.order?.[0] === pid;
   const active = game.turn_pid === pid || game.pending_pid === pid;
-  return <section className={`pi-player${pid === myId ? " mine" : ""}${active ? " active" : ""}`}>
+  return <section className={`fg-panel pi-player${pid === myId ? " mine" : ""}${active ? " active fg-lit" : ""}`}>
     <span className={`pi-color-token ${pearl ? "pearl" : "obsidian"}`} aria-hidden="true" />
-    <div><small>{pid === myId ? "YOU" : "OPPONENT"}</small><strong>{game.players?.[pid] || "Player"}</strong></div>
+    <div><small className="fg-label fg-label-soft pi-seat-label">{pid === myId ? "YOU" : "OPPONENT"}</small><strong>{game.players?.[pid] || "Player"}</strong></div>
     <div className="pi-player-score"><b>{game.removed?.[pid] || 0}</b><span>rings scored</span></div>
   </section>;
 }
@@ -285,7 +285,7 @@ function GameView({ room, myId, connected, onMove, onExit, onRules, onAbandon })
   const [heading, detail] = phaseCopy(game, myId, connected);
   const other = game.order.find((pid) => pid !== myId) || game.order[1];
   const winTarget = game.mode === "blitz" ? 1 : 3;
-  return <div className="app pinch pi-game" style={ACCENT}>
+  return <div className="app pinch pi-game fg-table" style={ACCENT}>
     <style>{styles}</style>
     <LobbyHeader title="Pinch" menu={<GameMenu onLeave={onExit} onRules={onRules}
       onAbandon={game.phase === "over" ? null : onAbandon} />} user={<span className={`pi-live-dot${connected ? "" : " lost"}`}><i />{connected ? "Live" : "Reconnecting…"}</span>} />
@@ -293,24 +293,24 @@ function GameView({ room, myId, connected, onMove, onExit, onRules, onAbandon })
       <div className="pi-opponent"><PlayerRail game={game} pid={other} myId={myId} /></div>
       <div className="pi-self"><PlayerRail game={game} pid={myId} myId={myId} /></div>
       <section className="pi-center">
-        <div className="pi-table-head"><div><span>{modeLabel(game.mode)} · first to {winTarget}</span><strong>{heading}</strong></div><p>{detail}</p></div>
+        <div className="pi-table-head"><div><span className="fg-label pi-head-label">{modeLabel(game.mode)} · first to {winTarget}</span><strong>{heading}</strong></div><p>{detail}</p></div>
         <Board game={game} myId={myId} onMove={onMove} connected={connected} />
-        <div className="pi-decision" aria-live="polite"><b>{heading}</b><span>{detail}</span></div>
+        <div className="fg-panel pi-decision" aria-live="polite"><b>{heading}</b><span>{detail}</span></div>
       </section>
       <aside className="pi-side">
         <div className="pi-mark"><span className="pi-mark-ring" />PINCH</div>
-        <div className="pi-mode-card"><small>MARKER POOL</small><strong>{game.marker_pool}</strong><span>of 51 remaining</span></div>
-        <details className="pi-log" open>
-          <summary>Move log</summary>
-          <div>{(game.log || []).slice().reverse().map((entry) => <p key={entry.seq}>{logText(entry, game.players)}</p>)}</div>
+        <div className="fg-panel pi-mode-card"><small className="fg-label pi-pool-label">MARKER POOL</small><strong>{game.marker_pool}</strong><span>of 51 remaining</span></div>
+        <details className="fg-panel pi-log" open>
+          <summary className="fg-label pi-log-title">Move log</summary>
+          <div>{(game.log || []).slice().reverse().map((entry) => <p key={entry.seq} className="fg-log-row pi-log-row">{logText(entry, game.players)}</p>)}</div>
         </details>
       </aside>
     </main>
     {game.phase === "over" && <div className="pi-result" role="dialog" aria-modal="true">
-      <div><span>{game.result === "concession" ? "TABLE CLOSED" : game.winner ? "FINAL RING" : "EVEN POSITION"}</span>
+      <div className="fg-panel pi-result-card"><span className="fg-label pi-result-kicker">{game.result === "concession" ? "TABLE CLOSED" : game.winner ? "FINAL RING" : "EVEN POSITION"}</span>
         <h2>{game.winner ? `${game.players?.[game.winner] || "Player"} wins` : "Draw"}</h2>
         <p>{Object.entries(game.removed || {}).map(([pid, score]) => `${game.players?.[pid] || pid} ${score}`).join(" · ")}</p>
-        <button type="button" className="pi-primary" onClick={onExit}>Return to lobby</button>
+        <button type="button" className="btn btn-gold pi-primary" onClick={onExit}>Return to lobby</button>
       </div>
     </div>}
   </div>;
@@ -517,9 +517,9 @@ export default function Pinch({ myId, authUser, onExit }) {
     </CreateModal></div>}
     {rulesModal}{toast && <div className="pi-toast" role="status">{toast}</div>}</>;
 
-  if (!roomData) return <div className="app pinch pi-connecting" style={ACCENT}><style>{styles}</style>
+  if (!roomData) return <div className="app pinch pi-connecting fg-table" style={ACCENT}><style>{styles}</style>
     <LobbyHeader title="Pinch" onBack={leaveToLobby} /><div><span className="pi-mark-ring" /><h1>{toast ? "That table stayed closed." : "Aligning the board…"}</h1>
-      <p role="status">{toast || "Connecting to the authoritative game state."}</p><button type="button" className="pi-primary" onClick={leaveToLobby}>Return to lobby</button></div>{rulesModal}</div>;
+      <p role="status">{toast || "Connecting to the authoritative game state."}</p><button type="button" className="btn btn-gold pi-primary" onClick={leaveToLobby}>Return to lobby</button></div>{rulesModal}</div>;
 
   if (!roomData.game) return <div className="app pinch" style={ACCENT}><style>{styles}</style>
     <WaitingRoom game="pinch" roomId={roomData.room_id} players={roomData.players}

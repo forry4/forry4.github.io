@@ -3754,7 +3754,7 @@ export default function SpenderApp() {
 	if (screen === "spender" && spenderScreen === "game" && game) return (
 		<>
 			<style>{css}</style>
-			<div className="app game-screen">
+			<div className="app game-screen fg-table">
 				<div className={`game-nav${puzzling ? " puzzle-nav" : ""}`}>
 					{puzzling
 						? <button className="btn btn-ghost btn-sm" onClick={exitPuzzle}>← Puzzles</button>

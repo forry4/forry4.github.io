@@ -403,7 +403,7 @@ export default function BoxPuzzles({ authUser, onExit }) {
 	// Practice's excluded colours: kept while the page is open, never stored.
 	const [exclude, setExclude] = useState([]);
 	return (
-		<div ref={rootRef} className={`bx${rot ? " bx-rot" : ""}`} style={rotStyle(rot) || undefined}>
+		<div ref={rootRef} className={`bx fg-table${rot ? " bx-rot" : ""}`} style={rotStyle(rot) || undefined}>
 			<style>{baseCss + rulesModalCss + css}</style>
 			<header className="bx-header">
 				<button className="btn btn-ghost btn-sm" onClick={num ? () => go(null) : onExit}>← Back</button>

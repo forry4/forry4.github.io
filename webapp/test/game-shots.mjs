@@ -58,14 +58,19 @@ const CONCEPT = arg("concept") ? readFileSync(arg("concept"), "utf8") : null;
 
 // --browser=msedge renders in the installed Edge rather than Playwright's Chromium.
 const channel = arg("browser");
-const browser = channel ? await chromium.launch({ channel })
-	: await chromium.launch().catch(() => chromium.launch({ channel: "msedge" }));
+// Muted, like the render gate: Where Wolf narrates its night aloud, so the media is
+// silenced and every context's speechSynthesis accepts the call and says nothing.
+const LAUNCH = { args: ["--mute-audio"] };
+const browser = channel ? await chromium.launch({ ...LAUNCH, channel })
+	: await chromium.launch(LAUNCH).catch(() => chromium.launch({ ...LAUNCH, channel: "msedge" }));
+const silence = () => { try { if (window.speechSynthesis) window.speechSynthesis.speak = () => {}; } catch {} };
 const probes = [];
 
 async function seat(id, name, view = { w: 1366, h: 900, dsf: 1 }) {
 	const ctx = await browser.newContext({ viewport: { width: view.w, height: view.h }, deviceScaleFactor: view.dsf });
 	await ctx.addInitScript(([i, n]) => localStorage.setItem("spender_user",
 		JSON.stringify({ id: i, name: n, guest: true })), [id, name]);
+	await ctx.addInitScript(silence);
 	const page = await ctx.newPage();
 	page.__errs = [];
 	page.on("pageerror", (e) => page.__errs.push(String(e)));
@@ -131,6 +136,7 @@ async function captureViews(game, state, base, ready, { settle = 1600, prep } = 
 			viewport: { width: view.w, height: view.h }, deviceScaleFactor: view.dsf,
 			storageState: storage, reducedMotion: "reduce", hasTouch: !!view.mobile, isMobile: !!view.mobile,
 		});
+		await ctx.addInitScript(silence);
 		const page = await ctx.newPage();
 		const errs = [];
 		page.on("pageerror", (e) => errs.push(String(e)));

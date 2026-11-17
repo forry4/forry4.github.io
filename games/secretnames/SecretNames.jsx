@@ -176,17 +176,17 @@ function Console({ game, mySeat, onClue, onPass, onEndTurn, error }) {
   if (phase === "won" || phase === "lost") return null;
 
   return (
-    <div className={`sn-console${sudden ? " sn-sudden" : ""}`}>
+    <div className={`fg-panel sn-console${sudden ? " sn-sudden fg-lit" : ""}`}>
       {sudden && (
         <div className="sn-console-lead">
-          <span className="sn-console-k">Sudden death</span>
+          <span className="fg-label sn-console-k">Sudden death</span>
           <span className="sn-console-v">No more clues. Either of you may contact one
             word at a time — every one of them has to be an agent.</span>
         </div>
       )}
       {!sudden && phase === "clue" && iClue && <>
         <div className="sn-console-lead">
-          <span className="sn-console-k">Your clue</span>
+          <span className="fg-label sn-console-k">Your clue</span>
           <span className="sn-console-v">One word (up to 16 letters), and how many of {partner}'s guesses it is worth.</span>
         </div>
         <div className="sn-form">
@@ -200,20 +200,20 @@ function Console({ game, mySeat, onClue, onPass, onEndTurn, error }) {
             <button type="button" className="sn-step" aria-label="More" disabled={number >= CLUE_NUMBER_MAX}
               onClick={() => setNumber((n) => Math.min(CLUE_NUMBER_MAX, n + 1))}>+</button>
           </div>
-          <button type="button" className="sn-btn sn-btn-go" disabled={!word.trim()} onClick={submit}>Send clue</button>
-          <button type="button" className="sn-btn sn-btn-quiet" onClick={onPass}
+          <button type="button" className="btn btn-gold sn-btn sn-btn-go" disabled={!word.trim()} onClick={submit}>Send clue</button>
+          <button type="button" className="btn btn-ghost sn-btn sn-btn-quiet" onClick={onPass}
             title="Give up clue-giving for the rest of the game">Pass for good</button>
         </div>
       </>}
       {!sudden && phase === "clue" && !iClue && (
         <div className="sn-console-lead">
-          <span className="sn-console-k">Waiting</span>
+          <span className="fg-label sn-console-k">Waiting</span>
           <span className="sn-console-v">{partner} is choosing a clue.</span>
         </div>
       )}
       {!sudden && phase === "guess" && game.clue && (
         <div className="sn-console-lead">
-          <span className="sn-console-k">{iGuess ? "Your clue to work from" : "You gave"}</span>
+          <span className="fg-label sn-console-k">{iGuess ? "Your clue to work from" : "You gave"}</span>
           <div className="sn-clue" key={`${game.clues.length}:${game.clue.word}`}>
             <span className="sn-clue-word">{game.clue.word}</span>
             <span className="sn-clue-num">{game.clue.number}</span>
@@ -222,7 +222,7 @@ function Console({ game, mySeat, onClue, onPass, onEndTurn, error }) {
       )}
       {!sudden && phase === "guess" && iGuess && (
         <div className="sn-form" style={{ flex: "0 1 auto" }}>
-          <button type="button" className="sn-btn" disabled={(game.guesses_this_turn || 0) < 1}
+          <button type="button" className="btn btn-outline sn-btn" disabled={(game.guesses_this_turn || 0) < 1}
             onClick={onEndTurn}
             title={(game.guesses_this_turn || 0) < 1 ? "Make at least one guess first" : "Stop here and spend the turn"}>
             End turn
@@ -231,7 +231,7 @@ function Console({ game, mySeat, onClue, onPass, onEndTurn, error }) {
       )}
       {!sudden && phase === "guess" && !iGuess && (
         <div className="sn-console-lead">
-          <span className="sn-console-k">Say nothing</span>
+          <span className="fg-label sn-console-k">Say nothing</span>
           <span className="sn-console-v">{partner} is guessing. No hints, no reactions.</span>
         </div>
       )}
@@ -249,7 +249,7 @@ function MissionStrip({ game, mySeat }) {
   return (
     <div className="sn-strip">
       <div className="sn-metric">
-        <span className="sn-metric-k">Timer tokens</span>
+        <span className="fg-label sn-metric-k">Timer tokens</span>
         <span className="sn-tokens" role="img" aria-label={`${left} of ${max} turns left`}>
           {Array.from({ length: max }, (_, i) => (
             <span key={i} className={`sn-token${i >= left ? " sn-spent" : ""}${left === 1 && i === 0 ? " sn-last" : ""}`} />
@@ -257,13 +257,13 @@ function MissionStrip({ game, mySeat }) {
         </span>
       </div>
       <div className="sn-metric" style={{ flex: "1 1 160px" }}>
-        <span className="sn-metric-k">Agents contacted</span>
+        <span className="fg-label sn-metric-k">Agents contacted</span>
         <span className="sn-metric-v"><b>{found}</b> / {total}</span>
         <span className="sn-progress"><i style={{ width: `${(found / total) * 100}%` }} /></span>
       </div>
       {mySeat != null && (
         <div className="sn-metric">
-          <span className="sn-metric-k">Still on your key</span>
+          <span className="fg-label sn-metric-k">Still on your key</span>
           <span className="sn-metric-v"><b>{game.your_agents_left ?? 0}</b> to clue</span>
         </div>
       )}
@@ -276,7 +276,7 @@ function MissionStrip({ game, mySeat }) {
               : game.exhausted?.[seat] ? "Side complete"
                 : seat === game.clue_giver ? "Clue-giver" : "Guessing";
           return (
-            <div key={pid} className={`sn-role${acting ? " sn-acting" : ""}${game.exhausted?.[seat] ? " sn-done" : ""}`}>
+            <div key={pid} className={`fg-panel sn-role${acting ? " sn-acting fg-lit" : ""}${game.exhausted?.[seat] ? " sn-done" : ""}`}>
               <span className="sn-role-name">{game.names?.[pid] || "Player"}{seat === mySeat ? " (you)" : ""}</span>
               <span className="sn-role-job">{job}</span>
             </div>
@@ -298,15 +298,15 @@ function Result({ game, onExit, onAgain }) {
   const found = (game.found || []).length;
   const used = (game.turns_max || 9) - Math.max(0, game.turns_remaining || 0);
   return (
-    <div className={`sn-result ${won ? "sn-won" : "sn-lost"}`} role="status">
+    <div className={`fg-panel fg-lit sn-result ${won ? "sn-won" : "sn-lost"}`} role="status">
       <h2>{won ? "All 15 agents contacted" : "Mission lost"}</h2>
       <p>{won
         ? `You found every agent with ${Math.max(0, game.turns_remaining || 0)} token${game.turns_remaining === 1 ? "" : "s"} to spare.`
         : `${LOSS_TEXT[game.loss_reason] || "The mission ended."} ${found} of 15 agents found in ${used} turn${used === 1 ? "" : "s"}.`}
         {" Both key cards are now on the board — the top-left wedge is the first seat's side, the bottom-right the second's."}</p>
       <div className="sn-result-actions">
-        <button type="button" className="sn-btn sn-btn-go" onClick={onAgain}>New mission</button>
-        <button type="button" className="sn-btn" onClick={onExit}>Back to lobby</button>
+        <button type="button" className="btn btn-gold sn-btn sn-btn-go" onClick={onAgain}>New mission</button>
+        <button type="button" className="btn btn-outline sn-btn" onClick={onExit}>Back to lobby</button>
       </div>
     </div>
   );
@@ -317,10 +317,10 @@ function Rail({ game }) {
   const log = [...(game.log || [])].reverse().slice(0, 60);
   return (
     <div className="sn-rail">
-      <div className="sn-panel sn-clues">
-        <div className="sn-panel-hd"><span>Clues given</span><span>{(game.clues || []).length}</span></div>
+      <div className="fg-panel sn-panel sn-clues">
+        <div className="fg-label sn-panel-hd"><span>Clues given</span><span>{(game.clues || []).length}</span></div>
         <div className="sn-panel-body">
-          {!clues.length && <span className="sn-log-line">No clues yet.</span>}
+          {!clues.length && <span className="fg-log-row sn-log-line">No clues yet.</span>}
           {clues.map((c, i) => (
             <div className="sn-clue-row" key={`${i}-${c.word}`}>
               <b>{c.word}</b><span className="sn-n">{c.number}</span>
@@ -329,8 +329,8 @@ function Rail({ game }) {
           ))}
         </div>
       </div>
-      <div className="sn-panel">
-        <div className="sn-panel-hd"><span>Your key</span></div>
+      <div className="fg-panel sn-panel">
+        <div className="fg-label sn-panel-hd"><span>Your key</span></div>
         <div className="sn-panel-body">
           <div className="sn-legend">
             <span><i className="sn-l-agent" />Agent — get your partner to say it</span>
@@ -339,10 +339,10 @@ function Rail({ game }) {
           </div>
         </div>
       </div>
-      <div className="sn-panel sn-log">
-        <div className="sn-panel-hd"><span>Mission log</span></div>
+      <div className="fg-panel sn-panel sn-log">
+        <div className="fg-label sn-panel-hd"><span>Mission log</span></div>
         <div className="sn-panel-body">
-          {log.map((e, i) => <span className="sn-log-line" data-k={e.k} key={i}>{e.t}</span>)}
+          {log.map((e, i) => <span className="fg-log-row sn-log-line" data-k={e.k} key={i}>{e.t}</span>)}
         </div>
       </div>
     </div>
@@ -355,7 +355,7 @@ function Lobby({ myId, authUser, openGames, activeGames, history, onRefresh, ref
   const [lobbyTab, setLobbyTab] = useState("open");
   const [visibleHistory, historySentinel] = useProgressiveList(history);
   useListFade();
-  return <div className="app secretnames" style={ACCENT}>
+  return <div className="app secretnames fg-table" style={ACCENT}>
     <style>{styles}</style>
     <LobbyHeader onBack={onExit} user={<LobbyUser user={authUser} />} />
     <div className="lby-page"><div className="lby-page-in">
@@ -642,13 +642,13 @@ export default function SecretNames({ myId, authUser, onExit }) {
       onExit, onRules: () => setShowRules(true),
     }} />}
 
-    {screen === "game" && !roomData && <div className="app secretnames" style={ACCENT}>
+    {screen === "game" && !roomData && <div className="app secretnames fg-table" style={ACCENT}>
       <style>{styles}</style>
       <LobbyHeader title="SecretNames" onBack={exit} />
       <div className="sn-waiting">
         <h1>{toast ? "That table is not available." : "Opening a secure line…"}</h1>
         <p role="status">{toast || "Connecting to the table. A cold server can take up to a minute."}</p>
-        <button type="button" className="sn-btn" onClick={exit}>Back to lobby</button>
+        <button type="button" className="btn btn-outline sn-btn" onClick={exit}>Back to lobby</button>
       </div>
     </div>}
 
@@ -676,8 +676,8 @@ export default function SecretNames({ myId, authUser, onExit }) {
           onAbandon={over ? null : abandon} />} />
       <div className="sn-game-shell">
         <div className="sn-main">
-          {!connected && <div className="sn-console"><div className="sn-console-lead">
-            <span className="sn-console-k">Reconnecting</span>
+          {!connected && <div className="fg-panel sn-console"><div className="sn-console-lead">
+            <span className="fg-label sn-console-k">Reconnecting</span>
             <span className="sn-console-v">The line dropped. Retrying — nothing has been lost.</span>
           </div></div>}
           {over && <Result game={game} onExit={exit} onAgain={() => { exit(); setShowCreate(true); }} />}
