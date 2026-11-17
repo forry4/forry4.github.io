@@ -566,6 +566,12 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
         } catch {}
         setRoomId(""); setRoomData(null); setScreen("lobby");
         replacePath(buildPath("duel"));
+        // The two ways a saved seat dies say nothing a player can act on ("invalid
+        // token"), and the stale entry is gone now either way, so say THAT.
+        if (msg.message === "invalid token" || msg.message === "no such room") {
+          setToast("That game has ended or expired, so it was cleared from this device");
+          return;
+        }
       }
       setToast(msg.message || "error"); return;
     }
@@ -1673,7 +1679,7 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
                   <div className="lby-card-title">Game {savedRid}</div>
                   <div className="lby-card-meta">saved on this device</div>
                 </div>
-                <div className="lby-card-actions"><LobbyAction onClick={() => resumeGame(savedRid)}>Resume</LobbyAction></div>
+                <div className="lby-card-actions"><LobbyAction onClick={() => urlResume(savedRid)}>Resume</LobbyAction></div>
               </div>
             )}
             {activeMine.length === 0 && !(savedRid && savedTok && !savedListed) && <LobbyNoActive />}
