@@ -299,7 +299,12 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-storage{display:flex;gap:6px;flex-wrap:wrap}
 .coc-stt{width:70px;height:81px;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.05rem;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;color:#15100a;transition:transform .1s}
 .coc-stt:hover{transform:scale(1.08)}
-.coc-stt.empty{cursor:default}
+.coc-stt.empty{cursor:default;background:#5a463c;filter:none}
+/* An empty storage space is a SOCKET: a warm rim and a dark well, so the three places you
+   can hold a tile are visible before you hold one (they were surface-on-surface before). */
+.coc-stt.empty::after{content:"";position:absolute;inset:3px;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);background:linear-gradient(180deg,#0d0809 0%,#1e1517 70%,#2a1f20 100%)}
+.coc-stt.empty:hover{transform:none}
+.coc-goods-slot{width:34px;height:34px;flex:none;border-radius:24%/20%;border:1.5px dashed rgba(214,180,130,.38);background:rgba(0,0,0,.22)}
 /* Selected storage tile (ready to place): scale the hex and wrap it in a NON-clipped
    layer that carries the pulsing gold glow. The glow MUST live on the wrapper — a
    drop-shadow (or border/box-shadow) on the hex itself is clipped away by the hex's

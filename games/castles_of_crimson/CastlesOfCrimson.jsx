@@ -708,6 +708,16 @@ function timeAgo(ts) {
   return `${Math.floor(diff / 86400)}d ago`;
 }
 
+// The goods box holds at most three kinds (the storage cap). The kinds you do not hold
+// yet are drawn as empty trays, so the box says how much room is left instead of being a
+// blank strip with a "x0" in the corner.
+function GoodsSlots({ used }) {
+  const n = Math.max(0, 3 - used);
+  return Array.from({ length: n }, (_, i) => (
+    <span key={"slot" + i} className="coc-goods-slot" title="Empty goods space" aria-hidden="true" />
+  ));
+}
+
 // Die faces as dots/pips (1-6) instead of a numeral. Cells of a 3x3 grid:
 //   1 2 3 / 4 5 6 / 7 8 9 . Scales with the die via % sizing, so it works for the
 // big rolled dice, the white die, and the small depot mini-dice alike.
@@ -2723,7 +2733,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
                   <div className="coc-storage" data-storage="1">
                     {[0, 1, 2].map((i) => {
                       const t = me?.storage?.[i];
-                      if (!t) return <div key={i} data-storage-slot={i} className="coc-stt empty" style={{ background: "var(--surface2)" }} />;
+                      if (!t) return <div key={i} data-storage-slot={i} className="coc-stt empty" title="Empty storage space" />;
                       const isSel = selStorage === t.id;
                       return (
                         <div key={t.id} className={`coc-stt-wrap${isSel ? " sel" : ""}`}>
@@ -2759,6 +2769,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
                         </span>
                       );
                     })}
+                    <GoodsSlots used={Object.keys(me?.goods || {}).length} />
                     <span className={`coc-goods-sold${(me?.sold_goods?.length || 0) ? "" : " none"}`}
                       onContextMenu={(e) => inspect(e, soldGoodsDesc(me?.sold_goods?.length || 0))}
                       title={soldGoodsDesc(me?.sold_goods?.length || 0)}
@@ -2833,7 +2844,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
                 <div className="coc-storage">
                   {[0, 1, 2].map((i) => {
                     const t = opp.storage?.[i];
-                    if (!t) return <div key={i} data-oppstorage-slot={i} className="coc-stt empty" style={{ background: "var(--surface2)" }} />;
+                    if (!t) return <div key={i} data-oppstorage-slot={i} className="coc-stt empty" title="Empty storage space" />;
                     return <div key={t.id} data-oppstorage-slot={i} className="coc-stt" style={{ background: TILE_HEX[t.color] }}
                       onContextMenu={(e) => inspect(e, tileDesc(t, board))} title={tileDesc(t, board)} onClick={() => setToast(tileDesc(t, board))}><TileArt tile={t} px={70} /></div>;
                   })}
@@ -2847,6 +2858,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
                       <span className="coc-tile goods" style={{ background: GOODS_HEX[c] }}>{goodsSellNum(c)}</span>×{n}
                     </span>
                   ))}
+                  <GoodsSlots used={Object.keys(opp.goods || {}).length} />
                   <span className={`coc-goods-sold${(opp.sold_goods?.length || 0) ? "" : " none"}`}
                     onContextMenu={(e) => inspect(e, soldGoodsDesc(opp.sold_goods?.length || 0))}
                     title={soldGoodsDesc(opp.sold_goods?.length || 0)}
