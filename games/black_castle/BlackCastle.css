@@ -102,3 +102,10 @@
   .bc-garden{scroll-snap-align:start}
   .bc-score>small,.bc-value small,.bc-space-occupancy small,.bc-influence-list b small,.bc-log p b,.bc-card-side,.bc-color-label,.bc-draft-pair .bc-kicker,.bc-bridge-ends small,.bc-floor-label small{font-size:10px}
 }
+/* THE RAIL SAYS THAT IT SCROLLS. It is sticky and capped to the window, so on a laptop
+   the domain board below the decision ran past the bottom edge and was simply cut off
+   mid-card -- nothing said there was more. The last 36px now fade out (the cue), the
+   rail carries 36px of slack at its end so the final line can scroll clear of the
+   fade, and the scrollbar is a color you can see. Off below 950px, where the rail
+   dissolves into the page (display:contents) and nothing scrolls. */
+@media(min-width:951px){.bc-rail{-webkit-mask-image:linear-gradient(180deg,#000 calc(100% - 36px),transparent);mask-image:linear-gradient(180deg,#000 calc(100% - 36px),transparent);padding-bottom:36px;scrollbar-color:#a99c69 #0000}}
