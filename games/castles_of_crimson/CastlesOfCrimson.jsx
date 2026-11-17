@@ -2342,8 +2342,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
               strong dark band at the top (the socket lip's shadow) fading to a faint
               light rim at the bottom (the lit floor) — the inverse of a raised tile. */}
           <linearGradient id="coc-socket" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#000" stopOpacity="0.62" />
-            <stop offset="42%" stopColor="#000" stopOpacity="0.16" />
+            <stop offset="0%" stopColor="#000" stopOpacity="0.5" />
+            <stop offset="42%" stopColor="#000" stopOpacity="0.12" />
             <stop offset="84%" stopColor="#000" stopOpacity="0" />
             <stop offset="100%" stopColor="#fff" stopOpacity="0.22" />
           </linearGradient>
@@ -2380,7 +2380,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
               <title>{tile ? tileDesc(tile, board)
                 : setupPhase ? (sp.color === "burgundy" ? "Click to place your starting castle here." : `${colorLabel(sp.color)} space (die ${sp.number}).`)
                 : `Empty ${colorLabel(sp.color)} space — place a matching tile using die ${sp.number}.`}</title>
-              <polygon points={hexPoints(c.x, c.y, HEX_S - 1.5)} fill={fill} fillOpacity={placed ? 1 : 0.5}
+              <polygon points={hexPoints(c.x, c.y, HEX_S - 1.5)} fill={fill} fillOpacity={placed ? 1 : 0.74}
                 stroke={stroke} strokeWidth={strokeWidth} />
               <polygon points={hexPoints(c.x, c.y, HEX_S - 1.5)} fill={placed ? "url(#coc-raise)" : "url(#coc-socket)"}
                 stroke="none" style={{ pointerEvents: "none" }} />
