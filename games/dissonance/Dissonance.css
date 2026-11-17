@@ -139,6 +139,12 @@
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 2px 8px rgba(0, 0, 0, 0.30);
 }
 .dis-gobtn:hover:not(:disabled) { filter: brightness(1.09); }
+/* THE GAME SCREEN IS FULL WIDTH, SO ITS HEADER IS TOO. The kit centres the header's
+   menu and name on the LOBBY's 1500px measure (`--lby-page-w`, the hook it offers for
+   exactly this), and the board below runs edge to edge — at 1920 the menu button sat
+   238px in from the panel it belongs to. Setting the measure to the screen puts both
+   ends of the header on the board's own edges at every width. */
+.dis-game { --lby-page-w: 100%; }
 .dis-gobtn:active:not(:disabled) {
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.25); transform: translateY(1px);
 }
