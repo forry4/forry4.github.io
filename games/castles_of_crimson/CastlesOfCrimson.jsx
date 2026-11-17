@@ -877,7 +877,10 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
   const [actedThisTurn, setActedThisTurn] = useState(false);  // did I take any action this turn? (gates Undo)
   const [extraValue, setExtraValue] = useState(null);
   const [showScores, setShowScores] = useState(false);   // mid-game VP breakdown popup
-  const [viewOppId, setViewOppId] = useState(null);      // which opponent's board is shown (3-4p peek tabs)
+  const [viewOppId, setViewOppId] = useState(null);
+  // Phones show the opponent's duchy as a THUMBNAIL until asked (CSS applies it only at
+  // phone width): a second full-size board below yours made the page two boards long.
+  const [oppMini, setOppMini] = useState(true);      // which opponent's board is shown (3-4p peek tabs)
   const [confirmAbandon, setConfirmAbandon] = useState(false);
   const [myBoard, setMyBoard] = useState("1");          // board the local player picked
   const [oppBoard, setOppBoard] = useState("1");        // board chosen for the bot (vs-AI)
@@ -2803,7 +2806,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
         {/* Opponent's area: always on screen (replaces the old View Opponent modal).
             The data-opp* anchors here are the flyer-animation targets. */}
         {opp && (
-          <div className="coc-panel">
+          <div className={`coc-panel coc-opp-panel${oppMini ? " mini" : ""}`}>
             <div className="coc-duchy-head">
               <h3>{players[oppId] || "Opponent"} — {over && fscore?.[oppId] != null ? fscore[oppId] : (opp.vp ?? 0)} VP</h3>
               {opponentIds.length > 1 && (
@@ -2822,6 +2825,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
                   })}
                 </div>
               )}
+              <button type="button" className="coc-opp-size" onClick={() => setOppMini((m) => !m)}
+                aria-expanded={!oppMini}>{oppMini ? "Show full" : "Shrink"}</button>
             </div>
             <div className="coc-oppbar coc-dicebar">
               {oppDice && (<>
@@ -2878,7 +2883,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
                 )}
               </div>
             </div>
-            <div className="coc-duchy-board">
+            <div className="coc-duchy-board" onClick={oppMini ? () => setOppMini(false) : undefined}>
               {renderDuchy(opp, false, true)}
             </div>
           </div>

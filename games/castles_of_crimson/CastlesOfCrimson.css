@@ -585,3 +585,16 @@ html,body{margin:0;padding:0;background:#120c0d}
   .coc .coc-turnbadge.coc-jump::after{content:" \2193";font-family:inherit}
   .coc .coc-duchy-head{scroll-margin-top:10px}
 }
+
+/* The opponent's duchy on a phone: a thumbnail beside their dice, resources, storage and
+   goods, until "Show full". Everything stays MOUNTED (only resized) so the flyer
+   animations still find their data-opp* targets. Desktop never sees the toggle. */
+.coc-opp-size{display:none}
+@media (max-width:600px){
+  .coc .coc-opp-size{display:inline-flex;align-items:center;flex:none;padding:5px 11px;border-radius:999px;border:1px solid rgba(226,190,140,.3);background:transparent;color:var(--gold);font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;letter-spacing:.06em;cursor:pointer}
+  .coc .coc-opp-panel.mini{display:grid;grid-template-columns:44% minmax(0,1fr);grid-template-areas:"head head" "board bar" "board sec";column-gap:14px;align-items:start}
+  .coc .coc-opp-panel.mini>.coc-duchy-head{grid-area:head}
+  .coc .coc-opp-panel.mini>.coc-oppbar{grid-area:bar;zoom:.7;flex-wrap:wrap}
+  .coc .coc-opp-panel.mini>.coc-opp-sections{grid-area:sec;zoom:.55;margin-bottom:0}
+  .coc .coc-opp-panel.mini>.coc-duchy-board{grid-area:board;cursor:zoom-in}
+}
