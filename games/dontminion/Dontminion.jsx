@@ -228,6 +228,49 @@ const faceClass = (types) => {
   return "dm-f-action";
 };
 
+// THE BONUSES A CARD OPENS WITH ARE DRAWN, NOT SPELLED. "+1 Card / +1 Action / +1 Buy /
+// +$1" is four lines of a face that has room for seven, so Market's whole text and the
+// first half of most others was boilerplate at the smallest size the fitter allows.
+// Leading lines of exactly that shape become one row of icons; whatever follows is the
+// card's own rule and gets the space. Only LEADING lines: a "+1 Card" in the middle of
+// a sentence is part of the sentence.
+const BONUS_RE = /^\+(\d+) (Card|Action|Buy)s?$|^\+\$(\d+)$/;
+function splitBonuses(text) {
+  const lines = (text || "").split("\n");
+  const bonuses = [];
+  let i = 0;
+  for (; i < lines.length; i++) {
+    const m = BONUS_RE.exec(lines[i].trim());
+    if (!m) break;
+    bonuses.push(m[3] ? { kind: "coin", n: m[3] } : { kind: m[2].toLowerCase(), n: m[1] });
+  }
+  return { bonuses, rest: lines.slice(i).join("\n") };
+}
+const BONUS_ICON = {
+  // a card
+  card: <rect x="3.800" y="1.600" width="8.400" height="12.800" rx="1.700" fill="currentColor" fillOpacity=".22" stroke="currentColor" strokeWidth="1.900" />,
+  // an arrow: an Action is another thing you get to DO
+  action: <path d="M2 8h10.500M8.300 3.500 13 8l-4.700 4.500" fill="none" stroke="currentColor" strokeWidth="2.300" strokeLinecap="round" strokeLinejoin="round" />,
+  // a shopping bag
+  buy: <path d="M3.300 5.600h9.400l-.8 8.200H4.100ZM5.800 5.600V4.300a2.200 2.200 0 0 1 4.400 0v1.300" fill="none" stroke="currentColor" strokeWidth="1.900" strokeLinejoin="round" strokeLinecap="round" />,
+};
+const BONUS_WORD = { card: "Card", action: "Action", buy: "Buy" };
+const bonusTitle = (b) => (b.kind === "coin" ? "+$" + b.n
+  : "+" + b.n + " " + BONUS_WORD[b.kind] + (b.n === "1" ? "" : "s"));
+function BonusRow({ bonuses }) {
+  return (
+    <div className="dm-bonuses">
+      {bonuses.map((b, i) => (
+        <span key={i} className={"dm-bonus dm-bonus-" + b.kind} title={bonusTitle(b)} aria-label={bonusTitle(b)}>
+          +{b.kind === "coin"
+            ? <i className="dm-bonus-coin">{b.n}</i>
+            : <>{b.n}<svg viewBox="0 0 16 16" aria-hidden="true">{BONUS_ICON[b.kind]}</svg></>}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 // The card-info gesture (right-click / press-and-hold) now lives in
 // shared/gestures.js — Rag Tag uses it too, and the tricky half is the iOS
 // vs Android difference, which is not a thing to keep two copies of.
@@ -244,11 +287,12 @@ function DmCardFace({ name, card, onClick, onInfo, selected, disabled, highlight
     disabled ? "dm-dis" : "", click ? "dm-clickable" : ""].filter(Boolean).join(" ");
   // long rules text shrinks to fit — the card itself NEVER grows
   const text = card?.text || "";
+  const { bonuses, rest } = splitBonuses(text);
   const coinM = /^\$(\d+)$/.exec(text.trim());
   const vpM = /^(-?\d+) VP$/.exec(text.trim());
   const emblem = coinM ? { kind: "coin", n: coinM[1] } : vpM ? { kind: "vp", n: vpM[1] } : null;
-  const textCls = text.length > 200 ? " dm-text-xxl" : text.length > 130 ? " dm-text-xl"
-    : text.length > 80 ? " dm-text-l" : "";
+  const textCls = rest.length > 200 ? " dm-text-xxl" : rest.length > 130 ? " dm-text-xl"
+    : rest.length > 80 ? " dm-text-l" : "";
   return (
     <div className={cls} onClick={click} {...infoGesture}
       title={card ? `${name} (${card.cost}) — ${card.text}` : name}>
@@ -273,9 +317,10 @@ function DmCardFace({ name, card, onClick, onInfo, selected, disabled, highlight
       )}
       {/* supply piles opt into fitted body text via `body` (small stays text-free
           on the 56px in-play/hand/mat faces); large faces keep the length tiers */}
+      {bonuses.length > 0 && (body || !small) && <BonusRow bonuses={bonuses} />}
       {body
-        ? <FitBodyText text={text} hasPotion={card?.potion > 0} />
-        : (!small && <div className={"dm-card-text" + textCls + (card?.potion > 0 ? " dm-has-potion" : "")}>{text}</div>)}
+        ? <FitBodyText text={rest} hasPotion={card?.potion > 0} />
+        : (!small && <div className={"dm-card-text" + textCls + (card?.potion > 0 ? " dm-has-potion" : "")}>{rest}</div>)}
       {/* foot row: type lines bottom-LEFT, the coin cost bottom-RIGHT */}
       <div className="dm-card-foot">
         <div className="dm-types">
@@ -486,6 +531,7 @@ function FitBodyText({ text, min = BODY_MIN_PX, max = BODY_MAX_PX, hasPotion = f
     <div ref={ref}
       className={"dm-card-text dm-card-body" + (clipped ? " dm-body-clip" : "")
         + (hasPotion ? " dm-has-potion" : "")}
+      data-full={text}
       style={{ fontSize: size + "px", lineHeight: BODY_LH }}>
       {shown}
     </div>

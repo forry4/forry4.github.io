@@ -409,6 +409,16 @@
 .dm-emblem-num { font-family: 'Cinzel','Cinzel Fallback',serif; font-weight: 700; }
 .dm-card-small .dm-emblem, .dm-card.dm-card-small .dm-emblem { top: 58%; height: 46%; max-width: 54%; }
 .dm-dis .dm-emblem { opacity: .7; }
+/* The bonus row (see splitBonuses): one line of "+N icon" above the card's own rule. It
+   does not shrink — the fitted text below it gives way instead, which is the point. */
+.dm-bonuses { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: .1em .55em; padding: 2px var(--cf-pad) 1px;
+  font-family: 'Cinzel','Cinzel Fallback',serif; font-weight: 700; color: #f3e9d2;
+  font-size: clamp(12px, calc(var(--card-h, 120px) * .105), 17px); line-height: 1.2; }
+.dm-bonus { display: inline-flex; align-items: center; gap: .14em; white-space: nowrap; }
+.dm-bonus svg { width: 1.15em; height: 1.15em; flex: none; color: color-mix(in srgb, var(--tint) 45%, #f3e9d2); }
+.dm-bonus-coin { display: inline-flex; align-items: center; justify-content: center; width: 1.3em; height: 1.3em; border-radius: 50%; font-style: normal; margin-left: .22em; flex: none; line-height: 1;
+  font-size: .9em; color: #221a05; background: radial-gradient(circle at 35% 28%, #fff0b8 0%, #e3bf5c 38%, #9e7a26 100%);
+  box-shadow: 0 1px 2px rgba(0,0,0,.6); }
 .dm-f-reaction { --tint: #5f86e6; }
 .dm-f-reaction .dm-card-name { color: #dbe5ff; }
 .dm-f-duration { --tint: #d98f3c; }

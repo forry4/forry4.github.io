@@ -1806,19 +1806,23 @@ try {
 					const px = +parseFloat(getComputedStyle(el).fontSize).toFixed(2);
 					const shown = el.textContent;
 					// full rule rides in the face's title as "Name (cost) — <text>"
-					const full = (c.getAttribute("title") || "").split(" — ").slice(1).join(" — ");
+					// ...minus the leading "+N Card / Action / Buy / $" lines, which the face
+					// draws as an icon row: the body is asked to show the REST, and says
+					// which text that is in data-full.
+					const full = el.dataset.full ?? (c.getAttribute("title") || "").split(" — ").slice(1).join(" — ");
 					// measure the FULL text at the floor, then restore the fitter's output
 					const prevF = el.style.fontSize, prevT = el.textContent;
 					el.style.fontSize = "10px"; el.textContent = full;
 					const fullOverflows = el.scrollHeight > el.clientHeight + 0.5;
 					el.textContent = prevT; el.style.fontSize = prevF;
-					return { name, hasBody: true, px, shown, truncated: /…$/.test(shown),
+					return { name, hasBody: true, px, shown, bonus: !!c.querySelector(".dm-bonuses"), truncated: /…$/.test(shown),
 						fullOverflows, overflow: el.scrollHeight - el.clientHeight };
 				});
 				const b = rows.filter((r) => r.hasBody);
 				const basic = /^(Copper|Silver|Gold|Estate|Duchy|Province|Curse)$/;
 				return {
-					total: rows.length, withText: b.filter((r) => r.shown && r.shown.length).length,
+					// a card that is ALL bonuses (Village, Market) has an icon row and no text left
+					total: rows.length, withText: b.filter((r) => (r.shown && r.shown.length) || r.bonus).length,
 					outOfBand: b.filter((r) => r.px < 9.9 || r.px > 16.1).map((r) => [r.name, r.px]),
 					overflowing: b.filter((r) => r.overflow > 1).map((r) => r.name),
 					short: b.filter((r) => basic.test(r.name)),
