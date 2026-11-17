@@ -199,7 +199,7 @@ function Board({ game, myId, onMove, connected }) {
       <ellipse cx="0" cy="0" rx="430" ry="380" className="pi-board-aura" />
       <g className="pi-grid">
         {EDGES.map(([a, b]) => { const p = pointOf(a); const q = pointOf(b); return <line key={`${a}-${b}`} x1={p.x} y1={p.y} x2={q.x} y2={q.y} />; })}
-        {NODES.map((_, node) => { const p = pointOf(node); return <circle key={node} cx={p.x} cy={p.y} r="4" />; })}
+        {NODES.map((_, node) => { const p = pointOf(node); return <circle key={node} cx={p.x} cy={p.y} r="5.5" />; })}
       </g>
 
       <g className="pi-score-rail pi-score-top">

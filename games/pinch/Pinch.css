@@ -27,7 +27,9 @@
    while the other's shone. A mid slate puts the board BETWEEN the two colours: pearl is
    lighter than it and obsidian darker, and both read at a glance. */
 .pi-board-ground{fill:#2b3841;stroke:#607480;stroke-width:1.5}.pi-board-aura{fill:url(#pi-board-glow);opacity:1}
-.pi-grid line{stroke:#64737c;stroke-width:1.15;opacity:.63}.pi-grid circle{fill:#8c9ba3;opacity:.8}
+/* The lines ARE the board: every move runs along one. Hairlines at 63% left the
+   three directions to be inferred from the dots. */
+.pi-grid line{stroke:#b4c6cf;stroke-width:2.2;opacity:.5;stroke-linecap:round}.pi-grid circle{fill:#d3e0e6;opacity:.9}
 .pi-score-rail text{fill:#86959d;font:600 10px ui-sans-serif,system-ui,sans-serif;letter-spacing:2px;text-anchor:middle}.pi-score-rail circle{fill:#0b1013;stroke:#53616a;stroke-width:2}.pi-score-rail circle.filled{fill:#83d6dc;stroke:#c2ffff;filter:drop-shadow(0 0 8px #72dce6aa)}
 .pi-piece{pointer-events:none}.pi-piece .pi-hit{fill:transparent;stroke:none;pointer-events:all;cursor:pointer}.pi-piece .pi-hit:focus{outline:none}.pi-piece:focus-visible .pi-ring-shadow,.pi-piece:focus-visible .pi-marker-edge{stroke:#fff;stroke-width:4}
 .pi-ring-shadow{fill:#020405aa;stroke:#071013;stroke-width:3}.pi-ring-face{fill:none;stroke-width:11}.pi-ring-hole{fill:none;stroke-width:1.5}.pi-pearl .pi-ring-face{stroke:#ece9df;filter:drop-shadow(0 3px 3px #0009)}.pi-pearl .pi-ring-hole{stroke:#fff}.pi-obsidian .pi-ring-face{stroke:#0c1114;filter:drop-shadow(0 3px 3px #000b) drop-shadow(0 0 1px #a8b8c0)}.pi-obsidian .pi-ring-hole{stroke:#56646d}
