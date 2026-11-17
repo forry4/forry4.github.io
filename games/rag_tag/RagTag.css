@@ -107,9 +107,17 @@
   margin: 0 auto;
   padding: 0 clamp(0.5rem, 0.25rem + 1vw, 1rem) 3rem;
   position: relative;
-  /* The warm lamp above the ring, moved off `.ragtag` so it lights the fight and not
-     the lobby. `background-attachment: fixed` keeps it a room rather than a texture
-     that scrolls with a long log. */
+}
+
+/* The warm lamp above the ring, moved off `.ragtag` so it lights the fight and not
+   the lobby. It lives on the GAME screen's root (`.rt-arena`, never the lobby's),
+   not on `.rt-wrap`: the wrap is a centred 84rem column as tall as its content, so
+   the floor stopped ~640px down a short draft screen and short of both edges of a
+   wide one, leaving bare black below and beside the ring. The root is
+   `min-height: 100dvh` and full width, so the room is the whole window.
+   `background-attachment: fixed` keeps it a room rather than a texture that
+   scrolls with a long log. */
+.ragtag.rt-arena {
   background:
     radial-gradient(120% 62% at 50% 0%, rgba(232, 102, 60, 0.15), transparent 62%),
     radial-gradient(90% 45% at 50% 100%, rgba(120, 70, 160, 0.09), transparent 60%),

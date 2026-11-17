@@ -1956,7 +1956,7 @@ export default function RagTag({ myId, authUser, onExit }) {
     ));
 
   return (
-    <div className="app ragtag">
+    <div className="app ragtag rt-arena">
       <style>{ragtagStyles}</style>
       <LobbyHeader
         title="Rag Tag"
