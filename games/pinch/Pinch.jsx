@@ -202,16 +202,21 @@ function Board({ game, myId, onMove, connected }) {
         {NODES.map((_, node) => { const p = pointOf(node); return <circle key={node} cx={p.x} cy={p.y} r="5.5" />; })}
       </g>
 
-      <g className="pi-score-rail pi-score-top">
-        <text x="0" y="-451">{game.players?.[game.order?.[rotated ? 0 : 1]] || "OPPONENT"}</text>
-        {scoreSlots.map((i) => <circle key={i} cx={(i - (scoreSlots.length - 1) / 2) * 70} cy="-420" r="22"
-          className={i < (game.removed?.[game.order?.[rotated ? 0 : 1]] || 0) ? "filled" : ""} />)}
-      </g>
-      <g className="pi-score-rail pi-score-bottom">
-        <text x="0" y="467">{game.players?.[game.order?.[rotated ? 1 : 0]] || "YOU"}</text>
-        {scoreSlots.map((i) => <circle key={i} cx={(i - (scoreSlots.length - 1) / 2) * 70} cy="420" r="22"
-          className={i < (game.removed?.[game.order?.[rotated ? 1 : 0]] || 0) ? "filled" : ""} />)}
-      </g>
+      {/* THE SCORE IS THE RINGS YOU HAVE TAKEN OFF, SO THE SLOTS HOLD RINGS. They were
+          three dark discs that turned cyan, which said "something is lit" and not "a
+          ring was removed here". An empty slot is a dashed socket; a filled one is a
+          ring in its owner's own colour, the same piece that left the board. */}
+      {[["top", rotated ? 0 : 1, -420, -451, "OPPONENT"], ["bottom", rotated ? 1 : 0, 420, 467, "YOU"]].map(([side, seat, cy, ty, fallback]) => {
+        const pid = game.order?.[seat];
+        const taken = game.removed?.[pid] || 0;
+        return (
+          <g key={side} className={`pi-score-rail pi-score-${side} ${pid === pearlPid ? "pearl" : "obsidian"}`}>
+            <text x="0" y={ty}>{game.players?.[pid] || fallback}</text>
+            {scoreSlots.map((i) => <circle key={i} cx={(i - (scoreSlots.length - 1) / 2) * 74} cy={cy} r="21"
+              className={i < taken ? "filled" : ""} />)}
+          </g>
+        );
+      })}
 
       <g className="pi-board-content" transform={rotated ? "rotate(180)" : undefined}>
         {placement.size > 0 && NODES.map((_, node) => placement.has(node) ? <Piece key={`p-${node}`} kind="target" owner={pearlPid} pearlPid={pearlPid} node={node} interactive legal onActivate={() => activateNode(node)} /> : null)}
