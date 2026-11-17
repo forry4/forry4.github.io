@@ -130,6 +130,14 @@
 .ww-pcard.back,.ww-ccard:not(.up){color:#cfc5f4;border-color:#4d4480;
   background:radial-gradient(130% 95% at 50% 0%,#3d3470 0%,#251f48 52%,#16122c 100%);
   box-shadow:inset 0 0 0 3px rgba(0,0,0,.26),inset 0 0 0 4px rgba(196,184,244,.16),0 10px 20px -12px #000}
+/* A CARD TURNS OVER. A reveal used to be a repaint: the box's text changed. The face
+   now swings in around its vertical axis whenever a card becomes face up — your own at
+   the deal, a peek in the night, every card at the result. It keys off the class the
+   JSX already toggles, so there is no new state. No fill-mode: once it ends the card is
+   back under its normal rules, so the hover lift on a clickable card still works. */
+@keyframes ww-flip{0%{transform:perspective(600px) rotateY(88deg) scale(1.05)}55%{transform:perspective(600px) rotateY(-9deg) scale(1.05)}100%{transform:perspective(600px) rotateY(0) scale(1)}}
+.ww-pcard.face,.ww-ccard.up{animation:ww-flip .52s cubic-bezier(.2,.7,.2,1)}
+@media(prefers-reduced-motion:reduce){.ww-pcard.face,.ww-ccard.up{animation:none}}
 .ww-back-moon{display:block;width:44%;height:auto;opacity:.82;filter:drop-shadow(0 0 6px rgba(190,180,255,.35))}
 .ww-pcard.clickable{cursor:pointer;border-color:var(--gold)}
 .ww-pcard.clickable:hover{box-shadow:0 0 0 2px var(--gold-light);transform:translateY(-2px)}
