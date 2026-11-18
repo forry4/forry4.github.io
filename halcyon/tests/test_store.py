@@ -529,7 +529,7 @@ def test_recall_keeps_the_xp_the_run_earned(db, me):
     assert _char(db, me["char_id"])["xp"] == 9
 
 
-def test_completing_adds_the_bonus_and_reaches_the_level_the_table_says(db, me):
+def test_the_boss_kill_adds_the_clear_bonus_and_reaches_the_level_the_table_says(db, me):
     from halcyon import content as C
     run = S.start_run(db, ME, me["char_id"], "shallows", "seed", _xp_dungeon())
     S.apply_events(db, ME, run["run_id"], _seq({"type": "complete"}))     # refused: boss alive
@@ -600,3 +600,9 @@ def test_items_follow_their_base_when_content_makes_it_unique(db, me):
     S.init_schema(conn)
     conn.close()
     assert _rows(db, "SELECT kind, tier FROM hr_items WHERE base_id='repeater'") == [{"kind": "unique", "tier": 1}]
+
+
+def test_the_clear_bonus_comes_with_the_boss_so_a_recall_after_it_keeps_it(db, me):
+    run = S.start_run(db, ME, me["char_id"], "shallows", "seed", _xp_dungeon())
+    S.apply_events(db, ME, run["run_id"], _seq({"type": "kill", "enemy": "boss"}, {"type": "recall"}))
+    assert _char(db, me["char_id"])["xp"] == 50          # boss 20 + the clear's 30, no portal needed

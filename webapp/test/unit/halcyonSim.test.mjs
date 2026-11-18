@@ -53,6 +53,7 @@ function play(dungeon, { god = true, ticks = 60 * TPS, inputs = bot, hero } = {}
 	if (god) { st.stats.maxHp = st.p.hp = st.p.low = 1e9; }
 	const events = [], prints = [];
 	for (let t = 0; t < ticks && st.status === "play"; t++) {
+		if (god) st.p.hp = st.p.low = 1e9;           // a level-up mid-fight resets the god HP; put it back
 		step(st, inputs(st, t));
 		events.push(...st.events);
 		prints.push(fingerprint(st));
@@ -205,6 +206,9 @@ test("a full clear earns every enemy's XP plus the completion bonus, and levels 
 		const ups = events.filter((e) => e.type === "level");
 		assert.deepEqual(ups, [{ type: "level", level: 2, local: true }], "a level-up is the page's to show, never sent");
 		assert.equal(events.at(-1).type, "complete");
+		const boss = events.findIndex((e) => e.type === "kill" && e.enemy === d.boss);
+		assert.deepEqual(events[events.findIndex((e) => e.type === "cleared")], { type: "cleared", xp: d.complete_xp, local: true });
+		assert.ok(events.findIndex((e) => e.type === "cleared") > boss && boss >= 0, "the clear comes with the boss, not the portal");
 		assert.equal(Math.round(st.stats.maxHp), Math.round(statsFor(STARTER, 2).maxHp));
 	}
 });
@@ -339,4 +343,16 @@ test("the Tidecaller fans three arrows, and they glance off a wall once", () => 
 	assert.ok(b.vx < 0 && b.vy === 0 && b.bounce === 0 && b.x < 5);
 	b.x = 5.1;
 	assert.equal(wallHit(b, (x) => wall(x)), true);
+});
+
+test("enemies sleep until the player comes within their trigger range, in sight", () => {
+	const st = createSim(A, STARTER);
+	for (let t = 0; t < 30; t++) step(st, {});
+	const far = st.enemies.filter((e) => Math.hypot(e.x - st.p.x, e.y - st.p.y) > 12);
+	assert.ok(far.length > 0 && far.every((e) => !e.active), "nobody far away is awake at the start");
+	// Put one enemy just inside its range with a clear view: it wakes on the next tick.
+	const e = st.enemies.find((x) => x.type === "chaser") || st.enemies[0];
+	e.x = st.p.x + 3; e.y = st.p.y;
+	step(st, {});
+	assert.ok(e.active, "close and in sight: awake");
 });

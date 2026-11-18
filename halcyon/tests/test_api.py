@@ -74,7 +74,7 @@ def test_the_whole_loop_through_the_routes(app):
     ch = route(app, "POST", "/halcyon/characters")(A.CharacterIn(slot=0), who)
     state = route(app, "GET", "/halcyon/state")(who)
     gear = {i["equip_slot"]: i["base_id"] for i in state["items"] if i["loc"] == "equipped"}
-    assert gear == {"weapon": "shortbow", "armor": "leather_vest", "ability": "volley_quiver"}
+    assert gear == {"weapon": "longbow", "armor": "leather_vest", "ability": "volley_quiver"}
     assert [c["char_id"] for c in state["characters"]] == [ch["char_id"]]
     assert state["levels"][:3] == [0, 120, 280] and state["characters"][0]["level"] == 1
 

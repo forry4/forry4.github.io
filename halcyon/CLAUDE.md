@@ -20,7 +20,7 @@ menu; `/halcyon` works for anyone who has the link (guests included).
 | `render.js` | Canvas 2D drawing of the sim's state (and the town's) in the art doc's color roles; never changes it |
 | `town.js` | the walkable town: a plaza, its stations (vault, forge, one portal per realm in `REALMS`), `stepTown` |
 | `client.js` | who is asking (Bearer or the guest pair) and the run's event QUEUE |
-| `HalcyonRift.jsx` / `.css` | one screen: the stage (town or dungeon, with the vault / forge / discard panels over it) and the side panel (roster, equipment, inventory) |
+| `HalcyonRift.jsx` / `.css` | one screen: the stage (town or dungeon, with the vault / forge / discard panels over it) and the side panel (equipment, inventory); before both, the main menu |
 
 Tests: `tests/` (store, dungeon, routes, the sim fixtures' freshness),
 `webapp/test/unit/halcyonSim.test.mjs` + `halcyonTown.test.mjs` + `halcyonClient.test.mjs`
@@ -82,8 +82,8 @@ drag the vest off mid-run → recall → reload, the vest still off).
   vault or the forge closes it. Coming out of a run puts you just in front of the portal
   you took — out of its reach, so E does not send you straight back in.
 - **The inventory is always on screen**, in town and in a run. During a run it shows
-  what you picked up (gold-ringed, "picked up this run") before the server has minted
-  it.
+  what you picked up before the server has minted it. A found item is NOT marked
+  (owner's call, 2026-11-18: it was a dashed ring and read as noise).
 - **Gear changes mid-run (owner's ask, 2026-11-18).** In a run the equipment and bag
   are the page's own model (`runControl` in `HalcyonRift.jsx`), owned outside React
   so the fight's loop can ask it synchronously which slot a pickup goes to. A move
@@ -114,7 +114,7 @@ drag the vest off mid-run → recall → reload, the vest still off).
   tier 1 for a unique), so an item minted before a base changed kind follows it (tested).
 - **A unique is named, not tiered.** It always drops at tier 1, its slot is a gold face
   with a ★ where the tier number goes, its name has no "· T1", and its tooltip is lit
-  gold. "Picked up this run" is a dashed ring, so it never reads as a unique. The first
+  gold. The first
   unique weapon is the Tidecaller: three arrows in a wide fan that glance off a wall
   once (`bounce`, `sim.wallHit`).
 - **Every number a player reads is flat** (owner's ask: "stop with all the
@@ -136,11 +136,15 @@ drag the vest off mid-run → recall → reload, the vest still off).
 
 ## Levels and XP (2026-11-18, owner's calls on design §10.1 / §13.1)
 
-- **XP comes from kills, plus a bonus for completing a dungeon**, and **recall keeps
-  it** — so does a closed tab. Death takes the character, level and all.
+- **XP comes from kills, plus a bonus for CLEARING a dungeon — paid when the boss
+  dies, not at the portal** (owner's ask, 2026-11-18), and **recall keeps it** — so
+  does a closed tab, and so does a recall straight after the boss. Death takes the
+  character, level and all. The sim pushes a `cleared` event (`local`, never sent;
+  the page shows the "cleared! +N XP" banner off it); the server adds `complete_xp`
+  on the boss's `kill`, and `complete` only checks the boss is dead.
 - **The server credits it from its own dungeon.** `dungeon.generate` writes each
   enemy's `xp` (`content.ENEMY_XP`) and the dungeon's `complete_xp` into the dungeon
-  it stores; `store._apply_one` adds them on an accepted `kill` / `complete`. XP is
+  it stores; `store._apply_one` adds them on an accepted `kill` (the boss's carries the clear). XP is
   written as each kill lands, which is why a recall keeps it with no extra rule. An
   `xp` field on an event is ignored (tested).
 - **One level table, shipped as data.** `content.LEVEL_XP[n]` is the XP to BE level
@@ -203,3 +207,19 @@ item on the dungeon floor (the store takes `drop_item`/`pickup_item`; the page s
 neither), touch controls
 (the dungeon is keyboard + mouse), the minimum-time plausibility checks (design §18.3),
 the input-log upload (§18.6), and hiding the drop table (above).
+
+## The main menu, keys and waking (2026-11-18)
+- **The page opens on a main menu** (`.hr-menu`): one card per character slot — a
+  character's card (level, XP bar, weapon) enters the town as it; an empty one makes a
+  new Ranger and enters with it. **A death returns you there**, with the result panel
+  over the cards; a recall stays in town. Back in town goes to the menu, Back on the
+  menu leaves the game. The side panel no longer has a roster. A new Ranger starts
+  with the LONGBOW (`api.STARTER`).
+- **Keys:** F recall, T auto-fire (in town and in a run), E use / pick up, Space
+  volley, 1–8 equip from the bag.
+- **Enemies wake by TRIGGER RANGE, not by room**: each `ENEMY` type has a `wake`
+  radius (tiles); an asleep enemy wakes when the player is inside it with a clear line
+  (`sim.clearLine` — walls and rocks block it, water does not), or when an arrow hits
+  it. There is no room bookkeeping left in the sim.
+- **The Shallows are harder than at first**: chaser 55 HP, shooter 48, radial 95, boss
+  1150, and each combat template has two more enemies.

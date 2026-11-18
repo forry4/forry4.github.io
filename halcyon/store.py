@@ -522,6 +522,10 @@ def _apply_one(cur, run: dict, dungeon: dict, state: dict, ev: dict, now: float)
             raise _Refused
         state["killed"].append(e)
         _credit_xp(cur, char_id, dungeon["enemies"][e].get("xp", 0))
+        # The boss's fall CLEARS the dungeon: its bonus is credited here, so a
+        # recall after the kill keeps it (owner's ask, 2026-11-18).
+        if e == dungeon["boss"]:
+            _credit_xp(cur, char_id, dungeon.get("complete_xp", 0))
     elif t == "pickup":
         d = str(ev.get("drop"))
         drop = dungeon["drops"].get(d)
@@ -574,7 +578,6 @@ def _apply_one(cur, run: dict, dungeon: dict, state: dict, ev: dict, now: float)
     elif t == "complete":
         if dungeon["boss"] is None or dungeon["boss"] not in state["killed"]:
             raise _Refused
-        _credit_xp(cur, char_id, dungeon.get("complete_xp", 0))
         return "completed"
     else:
         raise _Refused

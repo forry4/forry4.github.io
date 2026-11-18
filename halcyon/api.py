@@ -27,7 +27,7 @@ from halcyon import content as C
 from halcyon import dungeon as D
 from halcyon import store as S
 
-STARTER = [({"base_id": "shortbow", "tier": 1, "slot_count": 0, "enchants": []}, "weapon"),
+STARTER = [({"base_id": "longbow", "tier": 1, "slot_count": 0, "enchants": []}, "weapon"),
            ({"base_id": "leather_vest", "tier": 1, "slot_count": 0, "enchants": []}, "armor"),
            ({"base_id": "volley_quiver", "tier": 1, "slot_count": 0, "enchants": []}, "ability")]
 

@@ -14,10 +14,10 @@
   --g-ink:#120f22;
   --g-label:#cdc6fb;
   --gap:6px;
-  /* 4.8 squares tall (4 inventory rows + the equipment row at 4/5 width); 466px is
-     the header, the panel's padding, the roster, the HP and MP bars, the stats, two
-     titles, the XP line and the bin. */
-  --slot:clamp(30px, min(calc((100dvh - 466px) / 4.8), 5vw), 70px);
+  /* 4.8 squares tall (4 inventory rows + the equipment row at 4/5 width); 414px is
+     the header, the panel's padding, the HP and MP bars, the stats, two titles, the
+     name and XP line and the bin. (The roster is on the main menu.) */
+  --slot:clamp(30px, min(calc((100dvh - 414px) / 4.8), 5vw), 70px);
   --side-w:calc(var(--slot) * 4 + var(--gap) * 3 + 28px);
   --vslot:clamp(22px, min(calc((100dvh - 330px) / 8.6), calc((100vw - var(--side-w) - 130px) / 8.6)), 58px);
   height:100vh;
@@ -78,24 +78,31 @@
 .hr-hint{margin:0;color:var(--text-soft);font-size:.9rem}
 .hr-actions{display:flex;flex-wrap:wrap;gap:8px}
 
+/* ── the main menu: make or pick a character ─────────────────────────────── */
+.hr-menu{flex:1;min-height:0;overflow:hidden;position:relative;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:14px;padding:12px 16px 24px}
+.hr-menu-title{margin:0;font-family:"Cinzel",serif;font-size:clamp(1.8rem,5vw,3rem);letter-spacing:.08em;color:var(--g-label)}
+.hr-menu .hr-result{position:static;width:min(640px,100%)}
+.hr-menu-cards{display:grid;grid-template-columns:repeat(4,minmax(0,170px));gap:14px;width:min(740px,100%)}
+.hr-menu-card{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-height:180px;
+  padding:16px 12px;border-radius:12px;cursor:pointer;font:inherit;color:inherit;
+  background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.1)}
+.hr-menu-card:hover:not(:disabled){border-color:var(--g-accent);background:color-mix(in srgb,var(--g-accent) 10%,transparent)}
+.hr-menu-card:disabled{cursor:default;opacity:.6}
+.hr-menu-card .hr-xp{flex-basis:auto;width:80%}
+.hr-menu-new{border-style:dashed;color:var(--text-soft)}
+.hr-menu-plus{font-size:2rem;line-height:1}
+.hr-menu-glyph{width:34px;height:34px;box-shadow:inset 0 0 0 9px #1d5f6a}
+.hr-menu-weapon{font-size:.8rem;color:var(--text-soft)}
+.hr-cleared{animation:hr-cleared 2.6s ease-out forwards}
+@keyframes hr-cleared{0%{opacity:0;transform:translate(-50%,-40%)}12%{opacity:1;transform:translate(-50%,-50%)}75%{opacity:1}100%{opacity:0}}
+
 /* ── the side panel: the character, on screen the whole time ──────────────── */
 .hr-side{min-height:0;overflow:hidden;padding:14px;display:flex;flex-direction:column;gap:8px}
 .hr-side h2{margin:2px 0 0}
-.hr-roster{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--gap)}
-.hr-char{
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
-  height:44px;padding:4px 2px;border-radius:8px;cursor:pointer;font:inherit;font-size:.78rem;color:inherit;
-  background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);
-}
-.hr-char:hover:not(:disabled){border-color:color-mix(in srgb,var(--g-accent) 50%,transparent)}
-.hr-char.sel{border-color:var(--g-accent);background:color-mix(in srgb,var(--g-accent) 12%,transparent)}
-.hr-char:disabled{cursor:default}
-.hr-char-empty{font-size:1.2rem;color:var(--text-soft);border-style:dashed}
-.hr-char-empty:disabled{opacity:.5}
 .hr-char-glyph{width:15px;height:15px;border-radius:50%;background:#7fe3f0;box-shadow:inset 0 0 0 4px #1d5f6a}
 .hr-who{display:flex;align-items:baseline;flex-wrap:wrap;column-gap:8px;row-gap:5px;min-height:34px}
 .hr-char-name{font-family:"Cinzel",serif;font-size:.95rem}
-.hr-fallen{margin-left:auto;color:var(--text-soft);font-size:.82rem}
 .hr-xp{flex-basis:100%;display:block;height:4px;border-radius:2px;overflow:hidden;
   background:color-mix(in srgb,var(--g-accent) 18%,transparent)}
 .hr-xp > i{display:block;height:100%;background:var(--g-accent)}
@@ -146,7 +153,6 @@
   box-shadow:0 0 8px rgba(233,194,90,.35), inset 0 0 0 1px rgba(255,230,160,.35)}
 .hr-slot.unique .hr-abbr{color:#ffe7a6}
 .hr-star{color:#ffd85e;font-size:.78rem}
-.hr-slot.fresh{outline:2px dashed rgba(244,239,228,.55);outline-offset:-4px}
 .hr-slot.forging{outline:3px solid var(--g-accent);outline-offset:1px;
   box-shadow:0 0 0 5px color-mix(in srgb,var(--g-accent) 30%,transparent)}
 .hr-num{position:absolute;top:2px;left:4px;font-size:.62rem;line-height:1;color:var(--text-soft)}
@@ -179,7 +185,8 @@
   .hr-side{padding:10px;gap:6px}
   .hr-grid-inv{grid-template-columns:repeat(8,1fr)}
   .hr-equip{grid-template-columns:repeat(5,var(--slot))}
-  .hr-char{height:36px;flex-direction:row}
+  .hr-menu-cards{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .hr-menu-card{min-height:120px}
   .hr-who{min-height:0}
   .hr-keys{display:none}
 }

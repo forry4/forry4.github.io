@@ -54,11 +54,15 @@ export const RECOVERY_MARGIN = 40;                   // design §9.2: limit = mi
 export const HEAL = 35;                              // a heal pickup: +HP and +limit
 export const ABILITY_COST = 30;
 
+/* `wake` is the trigger range in tiles: an enemy sleeps until the player comes that
+ * close with nothing solid between them, or an arrow hits it (owner's ask,
+ * 2026-11-18 — it used to be "the player entered the room"). HP went up by about a
+ * third at the same time ("slightly harder"). */
 export const ENEMY = {
-	chaser: { hp: 40, r: 0.4, speed: 3.4, touch: 16 },
-	shooter: { hp: 35, r: 0.38, speed: 2.4 },
-	radial: { hp: 70, r: 0.45, speed: 0 },
-	boss: { hp: 900, r: 1.0, speed: 1.2 },
+	chaser: { hp: 55, r: 0.4, speed: 3.4, touch: 16, wake: 7 },
+	shooter: { hp: 48, r: 0.38, speed: 2.4, wake: 7.5 },
+	radial: { hp: 95, r: 0.45, speed: 0, wake: 7 },
+	boss: { hp: 1150, r: 1.0, speed: 1.2, wake: 9 },
 };
 
 /* Each weapon fires its own PATTERN, not just its own numbers (owner's ask,
@@ -172,10 +176,15 @@ function moveBody(st, b, dx, dy) {
 	if (dy !== 0 && !blocked(st, b.x, b.y + dy, b.r)) b.y += dy;
 }
 
-function roomOf(st, x) {
-	for (let i = 0; i < st.rooms.length; i++)
-		if (x >= st.rooms[i].x0 - 0.5 && x <= st.rooms[i].x1 + 0.5) return i;
-	return -1;
+/* Nothing that blocks walking (wall, rock, water) between two points? Marched in
+ * quarter tiles — enough for a one-tile wall, and exact arithmetic. */
+function clearLine(st, ax, ay, bx, by) {
+	const dx = bx - ax, dy = by - ay, d = Math.sqrt(dx * dx + dy * dy), n = Math.ceil(d * 4);
+	for (let i = 1; i < n; i++) {
+		const c = tileAt(st, ax + (dx * i) / n, ay + (dy * i) / n);
+		if (c === "#" || c === "o") return false;            // water is low: you can see across it
+	}
+	return true;
 }
 
 /* The level `xp` reaches on the server's table (`levels[n]` = the XP to BE
@@ -389,16 +398,17 @@ export function step(st, input) {
 	// boss's loot must not end the run with that loot still on the floor.
 	if (input.enter && st.portal && near(p, st.portal, REACH)) {
 		st.status = "complete";
-		gainXp(st, st.completeXp);
 		st.events.push({ type: "complete" });
 		return st;
 	}
 
-	// enemies wake when the player enters their room
-	const room = roomOf(st, p.x);
+	// enemies wake when the player comes within their trigger range, in sight
 	for (const e of st.enemies) {
 		if (e.hp <= 0) continue;
-		if (!e.active && e.room === room) e.active = true;
+		if (!e.active) {
+			const dx = e.x - p.x, dy = e.y - p.y, w = ENEMY[e.type].wake;
+			if (dx * dx + dy * dy <= w * w && clearLine(st, p.x, p.y, e.x, e.y)) e.active = true;
+		}
 		if (e.active) enemyStep(st, e);
 		if (st.status !== "play") return st;
 	}
@@ -411,11 +421,11 @@ export function step(st, input) {
 		let gone = false;
 		if (b.owner === "p") {
 			for (const e of st.enemies) {
-				if (e.hp <= 0 || !e.active || b.hit.includes(e.id)) continue;
+				if (e.hp <= 0 || b.hit.includes(e.id)) continue;
 				if (e.phase === 0) continue;                     // the boss's transition is untouchable
 				const dx = e.x - b.x, dy = e.y - b.y, rr = e.r + b.r;
 				if (dx * dx + dy * dy < rr * rr) {
-					e.hp -= b.dmg; e.flash = 4; b.hit.push(e.id);
+					e.hp -= b.dmg; e.flash = 4; b.hit.push(e.id); e.active = true;   // a hit wakes it
 					if (e.hp <= 0) kill(st, e);
 					if (b.pierce-- <= 0) { gone = true; break; }
 				}
@@ -538,7 +548,11 @@ function kill(st, e) {
 	if (drops && drops.length) st.bags.push({ enemy: e.id, x: e.x, y: e.y, drops: [...drops] });
 	if (e.type === "boss") {
 		st.portal = portalSpot(st, e);
-
+		// The dungeon is CLEARED when its boss falls: the bonus and the news come now,
+		// not at the portal (owner's ask, 2026-11-18). The server credits it on the
+		// same kill event.
+		gainXp(st, st.completeXp);
+		st.events.push({ type: "cleared", xp: st.completeXp, local: true });
 		st.bossDown = true;                                        // its fire dies with it (below)
 	}
 }

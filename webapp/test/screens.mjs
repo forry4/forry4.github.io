@@ -10265,14 +10265,16 @@ try {
 		});
 
 		await page.goto(`http://localhost:${PORT}/halcyon`, { waitUntil: "load" });
-		const town = await page.waitForSelector(".halcyon .hr-roster", { timeout: 30_000 }).then(() => true).catch(() => false);
-		check("the town renders from the server's state", town);
-		check("four roster slots, the inventory beside the stage, and no vault until it is opened",
-			await page.locator(".hr-roster .hr-char").count() === 4 && await page.locator(".hr-side .hr-grid-inv .hr-slot").count() === 16
-			&& await page.locator(".hr-grid-vault").count() === 0);
+		const menu = await page.waitForSelector(".halcyon .hr-menu", { timeout: 30_000 }).then(() => true).catch(() => false);
+		check("the page opens on the main menu, from the server's state", menu);
+		check("the menu offers four character slots, all empty for a new guest",
+			await page.locator(".hr-menu-card").count() === 4 && await page.locator(".hr-menu-new").count() === 4);
+		await page.locator(".hr-menu-new").first().click().catch(() => {});
+		const town = await page.waitForSelector(".halcyon .hr-main .hr-canvas", { timeout: 15_000 }).then(() => true).catch(() => false);
+		check("making a Ranger goes straight to the town, the inventory beside the stage and no vault until it is opened",
+			town && await page.locator(".hr-side .hr-grid-inv .hr-slot").count() === 16 && await page.locator(".hr-grid-vault").count() === 0);
 		const townPaint = await paint();
 		check("the town is drawn on the stage (a walkable plaza, not one flat fill)", townPaint.colors >= 6, JSON.stringify(townPaint));
-		await page.locator(".hr-char-empty").first().click().catch(() => {});
 		const geared = await page.waitForFunction(() => document.querySelectorAll(".hr-equip .hr-slot.has").length === 3,
 			null, { timeout: 15_000 }).then(() => true).catch(() => false);
 		check("a new Ranger is made wearing its three starter items", geared);
@@ -10353,18 +10355,20 @@ try {
 		await page.keyboard.down("KeyD");
 		await page.waitForTimeout(900);
 		await page.keyboard.up("KeyD");
-		await page.keyboard.press("KeyR");
+		await page.keyboard.press("KeyF");
 		const recalled = await page.waitForSelector(".hr-result.res-recalled", { timeout: 15_000 }).then(() => true).catch(() => false);
-		check("R recalls to town and says so", recalled);
+		check("F recalls to town and says so", recalled && await page.locator(".hr-menu").count() === 0);
 		const drained = await page.waitForFunction(() => localStorage.getItem("halcyon.queue.v1.guest") === null,
 			null, { timeout: 15_000 }).then(() => true).catch(() => false);
 		check("the recall reached the server (the device's queue emptied)", drained, String(await queued()));
 		await page.reload({ waitUntil: "load" });
-		await page.waitForSelector(".halcyon .hr-roster", { timeout: 30_000 }).catch(() => {});
+		await page.waitForSelector(".halcyon .hr-menu", { timeout: 30_000 }).catch(() => {});
+		const kept = await page.locator(".hr-menu-card:not(.hr-menu-new)").count();
+		await page.locator(".hr-menu-card:not(.hr-menu-new)").first().click().catch(() => {});
 		await page.waitForFunction(() => document.querySelectorAll(".hr-equip .hr-slot.has").length === 2,
 			null, { timeout: 10_000 }).catch(() => {});
 		check("after a reload the same guest roster still has its Ranger, with the vest where the run put it",
-			await page.locator(".hr-char:not(.hr-char-empty)").count() === 1
+			kept === 1
 			&& await page.locator(".hr-equip .hr-slot.has").count() === 2
 			&& (await page.locator(".hr-grid-inv .hr-slot").first().getAttribute("aria-label") || "").startsWith("Leather Vest"));
 		check("no page errors", errors.length === 0, errors.slice(0, 3).join(" | "));

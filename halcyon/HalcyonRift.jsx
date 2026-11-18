@@ -26,7 +26,7 @@ import { GAME_ACCENTS } from "../shared/accents.js";
 import { makeClient } from "./client.js";
 import { createSim, step, TPS, REACH, xpProgress, WEAPONS, statsFor, enchantValue, recoveryLimit } from "./sim.js";
 import { camera, draw, drawTown, promptFor } from "./render.js";
-import { createTown, stepTown, setTownGear, postDps, STATIONS, standAt } from "./town.js";
+import { createTown, stepTown, setTownGear, postDps, STATIONS, SPAWN, standAt } from "./town.js";
 import cssText from "./HalcyonRift.css?inline";
 
 const styles = baseCss + lobbyCss + cssText;
@@ -140,6 +140,9 @@ export default function HalcyonRift({ authUser, onExit }) {
 	// wherever the player moved it. Kept until the town's refresh replaces it.
 	const [runItems, setRunItems] = useState(null);
 	const [result, setResult] = useState(null);
+	// THE MAIN MENU (owner's ask, 2026-11-18): where you make or pick a character,
+	// and where a death sends you. The town is entered from it with one character.
+	const [menu, setMenu] = useState(true);
 	const townRef = useRef(null);
 	if (!townRef.current) townRef.current = createTown();
 	const townNotes = useRef([]);
@@ -198,14 +201,22 @@ export default function HalcyonRift({ authUser, onExit }) {
 	const townNote = (text, color) => townNotes.current.push({ text, color, until: townRef.current.tick + 3 * TPS });
 
 	const chooseChar = (c) => {
-		setPicked(null);
+		setPicked(null); setPanel(null); setResult(null);
 		setSelChar(c.char_id);
+		Object.assign(townRef.current.p, SPAWN);
+		setMenu(false);
 		// A run this character left open (a closed tab) ends as a recall now (§13.1a).
 		if (view.open_runs[c.char_id]) act(() => client.openCharacter(c.char_id));
 	};
+	const newChar = (slot) => act(async () => {
+		const c = await client.createCharacter(slot);
+		setSelChar(c.char_id); setResult(null); setPanel(null);
+		Object.assign(townRef.current.p, SPAWN);
+		setMenu(false);
+	});
 
 	const enter = (realm) => {
-		if (!char) { townNote("Make a Ranger first: the + beside your roster.", "#f3a39c"); return; }
+		if (!char) { setMenu(true); return; }
 		act(async () => {
 			await client.flush();
 			if (client.pendingRun()) throw new Error("Your last run is still being saved. Try again in a moment.");
@@ -232,6 +243,7 @@ export default function HalcyonRift({ authUser, onExit }) {
 		setRun(null);
 		setPicked(null); setDrag(null); setTip(null);
 		setResult(outcome);
+		if (outcome.status === "dead") setMenu(true);               // a fallen character: back to the menu
 		// The town's copy replaces the run's once it has landed — unless a new run began meanwhile.
 		refresh().then(() => setRunItems((cur) => (cur === outcome.items ? null : cur)));
 	}, [refresh]);
@@ -294,7 +306,7 @@ export default function HalcyonRift({ authUser, onExit }) {
 		if (to) placeAt({ kind: "place", to }, it);
 	};
 	const quickRef = useRef(null);
-	quickRef.current = (i) => char && quick(byPlace[keyOf(at.inv(char.char_id, i))]);
+	quickRef.current = (i) => !menu && char && quick(byPlace[keyOf(at.inv(char.char_id, i))]);
 	// The number keys 1-8 put the matching bag slot's item on (in town and in a run).
 	useEffect(() => {
 		const onKey = (e) => {
@@ -326,8 +338,8 @@ export default function HalcyonRift({ authUser, onExit }) {
 		hideTip: () => setTip(null),
 	};
 
-	const header = <LobbyHeader onBack={run ? null : onExit} title={run ? run.dungeon.name : "Halcyon Rift"}
-		user={<LobbyUser user={authUser} profile={!run} />} />;
+	const header = <LobbyHeader onBack={run ? null : menu ? onExit : () => { setPanel(null); setMenu(true); }}
+		title={run ? run.dungeon.name : "Halcyon Rift"} user={<LobbyUser user={authUser} profile={!run} />} />;
 
 	if (!view) {
 		return (
@@ -345,6 +357,42 @@ export default function HalcyonRift({ authUser, onExit }) {
 	const fusable = fa && fb && ["base_id", "tier", "kind", "slot_count"].every((k) => fa[k] === fb[k]);
 	const invItem = (i) => (char ? byPlace[keyOf(at.inv(char.char_id, i))] : null);
 	const equipped = char ? view.limits.equip.map((s) => byPlace[keyOf(at.eq(char.char_id, s))]).filter(Boolean) : [];
+
+	if (menu && !run) {
+		return (
+			<div className="app halcyon fg-table" style={ACCENT}><style>{styles}</style>
+				{header}
+				<main className="hr-menu">
+					<h1 className="hr-menu-title">Halcyon Rift</h1>
+					<p className="hr-hint">{view.characters.length ? "Choose a character, or make a new one." : "Make a character to begin."}</p>
+					{result && <ResultPanel result={result} onClose={() => setResult(null)} />}
+					<div className="hr-menu-cards" role="group" aria-label="Characters">
+						{slots.map((s) => {
+							const c = view.characters.find((x) => x.slot === s);
+							if (!c) return (
+								<button key={s} className="hr-menu-card hr-menu-new" disabled={busy} onClick={() => newChar(s)}>
+									<span className="hr-menu-plus" aria-hidden="true">+</span>
+									<span>New Ranger</span>
+								</button>);
+							const weapon = items.find((it) => it.char_id === c.char_id && it.loc === "equipped" && it.equip_slot === "weapon");
+							return (
+								<button key={s} className="hr-menu-card" disabled={busy} onClick={() => chooseChar(c)}
+									aria-label={`Ranger, level ${c.level}`}>
+									<span className="hr-char-glyph hr-menu-glyph" aria-hidden="true" />
+									<span className="hr-char-name">Ranger</span>
+									<span className="fg-label-soft">Level {c.level}</span>
+									<XpBar levels={view.levels} xp={c.xp} />
+									<span className="hr-menu-weapon">{weapon ? nameOf(weapon) : "No weapon"}</span>
+								</button>);
+						})}
+					</div>
+					{view.fallen.length > 0 && <p className="hr-hint">{view.fallen.length} fallen</p>}
+					{error && <div className="hr-error" role="alert">{error}
+						<button className="hr-x" aria-label="Dismiss" onClick={() => setError(null)}>×</button></div>}
+				</main>
+			</div>
+		);
+	}
 
 	return (
 		<div className={"app halcyon fg-table" + (run ? " hr-in-run" : "")} style={ACCENT}><style>{styles}</style>
@@ -408,35 +456,20 @@ export default function HalcyonRift({ authUser, onExit }) {
 					</div>
 					<p className="hr-keys">
 						{run
-							? <><kbd>WASD</kbd> move · <kbd>mouse</kbd> aim, hold to shoot · <kbd>F</kbd> auto-fire ·
-								<kbd>Space</kbd> volley · <kbd>E</kbd> pick up · <kbd>1</kbd>–<kbd>8</kbd> equip · <kbd>R</kbd> recall</>
+							? <><kbd>WASD</kbd> move · <kbd>mouse</kbd> aim, hold to shoot · <kbd>T</kbd> auto-fire ·
+								<kbd>Space</kbd> volley · <kbd>E</kbd> pick up · <kbd>1</kbd>–<kbd>8</kbd> equip · <kbd>F</kbd> recall</>
 							: <><kbd>WASD</kbd> walk · <kbd>mouse</kbd> shoot · <kbd>E</kbd> use the vault, the forge or a portal ·
 								<kbd>1</kbd>–<kbd>8</kbd> or double-click to equip</>}
 					</p>
 				</section>
 
 				<aside className="hr-side fg-panel" aria-label="Your character">
-					<div className="hr-roster" role="group" aria-label="Characters">
-						{slots.map((s) => {
-							const c = view.characters.find((x) => x.slot === s);
-							if (!c) return (
-								<button key={s} className="hr-char hr-char-empty" disabled={locked || !!run} title="New Ranger"
-									aria-label="New Ranger" onClick={() => act(() => client.createCharacter(s))}>+</button>);
-							return (
-								<button key={s} className={"hr-char" + (c.char_id === selChar ? " sel" : "")} disabled={!!run}
-									title={`Ranger · Level ${c.level}`} aria-pressed={c.char_id === selChar} onClick={() => chooseChar(c)}>
-									<span className="hr-char-glyph" aria-hidden="true" />
-									<span className="hr-char-lv">Lv {c.level}</span>
-								</button>);
-						})}
-					</div>
 					<div className="hr-who">
 						{char ? <>
 							<span className="hr-char-name">Ranger</span>
 							<span className="fg-label-soft">Level {char.level}</span>
 							<XpBar levels={view.levels} xp={char.xp} />
-						</> : <span className="hr-hint">Make a Ranger to begin: press +.</span>}
-						{view.fallen.length > 0 && <span className="hr-fallen">{view.fallen.length} fallen</span>}
+						</> : null}
 					</div>
 
 					{char && <Vitals read={() => vitalsOf(run ? run.ctl.st : townRef.current)} />}
@@ -477,7 +510,7 @@ function Slot({ label, item, target, locked, ctx, num: n = null }) {
 	const forged = item && ctx.forge.includes(item.item_id);
 	return (
 		<button className={"hr-slot" + (item ? ` has fam-${fam}` : "") + (item && item.item_id === ctx.picked ? " sel" : "")
-			+ (item?.kind === "unique" ? " unique" : "") + (item?.fresh ? " fresh" : "") + (forged ? " forging" : "")
+			+ (item?.kind === "unique" ? " unique" : "") + (forged ? " forging" : "")
 			+ (ok === true ? " ok" : ok === false ? " no" : "") + (item && item.item_id === ctx.drag ? " dragging" : "")}
 			aria-label={name} aria-pressed={forged || undefined} disabled={!target && !item}
 			draggable={!!item && !locked && (!item.fresh || ctx.inRun)}
@@ -517,7 +550,7 @@ function ItemTip({ tip, bases }) {
 			style={pos ? { left: pos.left, top: pos.top } : { left: 0, top: 0, visibility: "hidden" }}>
 			<h3 className="fg-label">{nameOf(it)}</h3>
 			<p className="fg-label-soft">{it.kind === "unique" ? `Unique ${(FAMILY[fam] || "item").toLowerCase()}` : `${FAMILY[fam] || ""} · Tier ${it.tier}`}
-				{it.fresh ? " · picked up this run" : ""}</p>
+			</p>
 			{line && <p className="hr-tip-weapon">{WEAPON_FEEL[it.base_id]}<br /><span className="hr-q">{line}</span></p>}
 			{base && <p className="hr-q">{base}</p>}
 			{it.enchants?.length > 0 && (
@@ -713,7 +746,7 @@ function Town({ st, notes, ready, onUse, onNear, onEscape, gear, level }) {
 				const s = STATIONS.find((x) => x.id === st.near);
 				if (s) cb.current.onUse(s);
 			} else if (e.code === "Escape") cb.current.onEscape();
-			else if (e.code === "KeyF") auto = !auto;
+			else if (e.code === "KeyT") auto = !auto;
 			else if (e.code === "Space" || e.code === "KeyQ") { ability = true; e.preventDefault(); }
 		};
 		const onKeyUp = (e) => keys.delete(e.code);
@@ -754,6 +787,7 @@ function Town({ st, notes, ready, onUse, onNear, onEscape, gear, level }) {
 function Dungeon({ run, client, onEnd }) {
 	const canvasRef = useRef(null);
 	const [ending, setEnding] = useState(null);
+	const [cleared, setCleared] = useState(false);
 
 	useEffect(() => {
 		const cv = canvasRef.current;
@@ -807,6 +841,11 @@ function Dungeon({ run, client, onEnd }) {
 
 		const handle = (ev) => {
 			if (ev.type === "level") note(`Level ${ev.level}!`, "#cdc6fb");
+			if (ev.type === "cleared") {
+				note(`${run.dungeon.name} cleared! +${ev.xp} XP`, "#9fe7ff");
+				setCleared(true);
+				setTimeout(() => setCleared(false), 2600);
+			}
 			if (ev.local) return;
 			if (ev.type === "pickup") {
 				const d = run.dungeon.drops[ev.drop];
@@ -884,8 +923,8 @@ function Dungeon({ run, client, onEnd }) {
 			if (e.repeat) return;
 			if (e.code === "Space" || e.code === "KeyQ") { edge.ability = true; e.preventDefault(); }
 			else if (e.code === "KeyE") edge.interact = true;
-			else if (e.code === "KeyR") edge.recall = true;
-			else if (e.code === "KeyF") { auto = !auto; note(auto ? "Auto-fire on" : "Auto-fire off"); }
+			else if (e.code === "KeyF") edge.recall = true;
+			else if (e.code === "KeyT") { auto = !auto; note(auto ? "Auto-fire on" : "Auto-fire off"); }
 		};
 		const onKeyUp = (e) => keys.delete(e.code);
 		const toCanvas = (e) => {
@@ -920,6 +959,7 @@ function Dungeon({ run, client, onEnd }) {
 	return (
 		<>
 			<canvas ref={canvasRef} className="hr-canvas hr-canvas-run" aria-label="The dungeon" />
+			{cleared && !ending && <div className="hr-ending hr-cleared res-completed" role="status">Cleared</div>}
 			{ending && <div className={"hr-ending res-" + ending}>{{ completed: "Cleared", recalled: "Recalled", dead: "Fallen" }[ending]}</div>}
 		</>
 	);
