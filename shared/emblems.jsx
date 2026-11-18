@@ -74,6 +74,9 @@ const GAME_EMBLEM = {
 	// A die with its price tag hanging off one corner — the market and the dice
 	// in one mark. Three pips on the diagonal read at 20px where five would mush.
 	pipmarket: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><rect x="3.6" y="7.4" width="12.6" height="12.6" rx="2.6" /><circle cx="6.9" cy="10.7" r="1.05" fill="currentColor" stroke="none" /><circle cx="9.9" cy="13.7" r="1.05" fill="currentColor" stroke="none" /><circle cx="12.9" cy="16.7" r="1.05" fill="currentColor" stroke="none" /><path d="M16.2 9.6l2.3-2.3M17.1 3.6h3.3v3.3l-3.9 3.9-3.3-3.3Z" /><circle cx="18.7" cy="5.3" r=".7" fill="currentColor" stroke="none" /></svg>),
+	// A rift: an upright portal with a jagged tear down its middle, and the
+	// arrow's point at its foot — the way in, and what you carry through it.
+	halcyon: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><ellipse cx="12" cy="11.4" rx="6.1" ry="8.3" /><path d="M12.9 5.4 10.7 9.9l2.7 2.2-2.1 5.1" /><path d="M7.6 21h8.8" /></svg>),
 };
 
 export { GAME_EMBLEM };

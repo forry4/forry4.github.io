@@ -67,6 +67,7 @@ const SCREENS = [
 	{ path: "/astral", chunk: "AstralGuide", marker: ".aag" },
 	{ path: "/lolstats", chunk: "LolStats", marker: ".lol" },
 	{ path: "/animefilter", chunk: "AnimeFilter", marker: ".anf" },
+	{ path: "/halcyon", chunk: "HalcyonRift", marker: ".halcyon" },
 ];
 
 // EVERY GAME LOBBY, IN ONE PLACE. Three blocks below drive "each game's lobby" —
@@ -95,8 +96,13 @@ const LOBBY_PAGES = [
 	{ id: "pinch", path: "/pinch", marker: ".pinch" },
 	{ id: "pipmarket", path: "/pipmarket", marker: ".pipmarket" },
 ];
+// Catalogue games with NO lobby, each with why. Halcyon Rift is a solo ARPG coded
+// like an Extra (design §20a): its page is a roster and a vault, not open tables,
+// so there are no lobby columns, create row or identity band to measure. Its own
+// render check is `halcyonPlay`.
+const NOT_A_LOBBY = { halcyon: "solo ARPG, coded like an Extra — no lobby (halcyonPlay covers it)" };
 const LOBBY_PAGES_UNLISTED = Object.keys(GAME_ACCENTS)
-	.filter((k) => !LOBBY_PAGES.some((g) => g.id === k));
+	.filter((k) => !LOBBY_PAGES.some((g) => g.id === k) && !NOT_A_LOBBY[k]);
 
 // Newest mtime across everything the bundle is built FROM — the same four trees
 // `deploy-pages.yml` filters its build on. Used only to decide whether an existing
@@ -10215,6 +10221,75 @@ try {
 	//     through engine.py before it counts — so a drift between the two engines fails
 	//     here as a refused solve — and the blue "fewest moves" row that only its owner
 	//     sees (checked again from a second viewer, who must not see it).
+	// HALCYON RIFT — the greybox, end to end on the real backend: a guest roster is
+	// minted, a Ranger is made with its starter gear, the Shallows are entered and
+	// DRAWN, the player walks, and R recalls — and the run's reports reach the server
+	// (the device's queue empties) and the Ranger is still alive in town afterwards.
+	// The simulation's own rules are node unit tests (halcyonSim.test.mjs); this is
+	// the page around it.
+	async function halcyonPlay(log) {
+		const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "halcyon-harness", name: "Wren", guest: true })));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		page.on("console", (m) => { if (m.type() === "error") errors.push(`console: ${m.text()}`); });
+		const check = (name, cond, detail = "") => {
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(`halcyon: ${name}`); log(`  FAIL ${name}  ${detail}`); }
+		};
+
+		await page.goto(`http://localhost:${PORT}/halcyon`, { waitUntil: "load" });
+		const town = await page.waitForSelector(".halcyon .hr-roster", { timeout: 30_000 }).then(() => true).catch(() => false);
+		check("the town renders from the server's state", town);
+		check("four character slots, a 16-slot inventory panel and a 64-slot vault",
+			await page.locator(".hr-char").count() === 4 && await page.locator(".hr-grid-vault .hr-slot").count() === 64,
+			`${await page.locator(".hr-char").count()} slots, ${await page.locator(".hr-grid-vault .hr-slot").count()} vault`);
+		await page.locator(".hr-char-empty").first().click().catch(() => {});
+		const geared = await page.waitForFunction(() => document.querySelectorAll(".hr-equip .hr-slot.has").length === 3,
+			null, { timeout: 15_000 }).then(() => true).catch(() => false);
+		check("a new Ranger is made wearing its three starter items", geared);
+		check("its inventory is the 16 empty slots", await page.locator(".hr-grid-inv .hr-slot").count() === 16);
+
+		await page.locator(".hr-enter").click().catch(() => {});
+		const stage = await page.waitForSelector(".hr-canvas", { timeout: 15_000 }).then(() => true).catch(() => false);
+		check("Enter the Shallows opens the dungeon canvas", stage);
+		await page.waitForTimeout(600);
+		const paint = await page.evaluate(() => {
+			const cv = document.querySelector(".hr-canvas");
+			if (!cv || !cv.width) return { colors: 0 };
+			const d = cv.getContext("2d").getImageData(0, 0, cv.width, cv.height).data, seen = new Set();
+			for (let i = 0; i < d.length; i += 4 * 97) seen.add((d[i] >> 4) << 8 | (d[i + 1] >> 4) << 4 | (d[i + 2] >> 4));
+			return { colors: seen.size, w: cv.width, h: cv.height };
+		});
+		check("the dungeon is drawn (the canvas holds the map, not one flat fill)", paint.colors >= 6, JSON.stringify(paint));
+		const queued = () => page.evaluate(() => localStorage.getItem("halcyon.queue.v1.guest"));
+		check("the run's queue is on the device before anything is sent", (await queued()) !== null);
+		await page.locator(".hr-canvas").hover();
+		await page.keyboard.down("KeyD");
+		await page.waitForTimeout(900);
+		await page.keyboard.up("KeyD");
+		await page.keyboard.press("KeyR");
+		const back = await page.waitForSelector(".hr-result.res-recalled", { timeout: 15_000 }).then(() => true).catch(() => false);
+		check("R recalls to town and says so", back);
+		const drained = await page.waitForFunction(() => localStorage.getItem("halcyon.queue.v1.guest") === null,
+			null, { timeout: 15_000 }).then(() => true).catch(() => false);
+		check("the recall reached the server (the device's queue emptied)", drained, String(await queued()));
+		await page.reload({ waitUntil: "load" });
+		await page.waitForSelector(".halcyon .hr-roster", { timeout: 30_000 }).catch(() => {});
+		check("after a reload the same guest roster still has its Ranger, gear and all",
+			await page.locator(".hr-char:not(.hr-char-empty)").count() === 1
+			&& await page.locator(".hr-equip .hr-slot.has").count() === 3);
+
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.waitForTimeout(250);
+		const sideways = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+		check("the town does not scroll sideways on a phone", sideways <= 0, `${sideways}px`);
+		check("no page errors", errors.length === 0, errors.slice(0, 3).join(" | "));
+		await ctx.close();
+	}
+
 	async function boxPuzzles(log) {
 		const check = (name, cond, detail = "") => {
 			if (cond) log(`  OK   ${name}`);
@@ -11623,7 +11698,7 @@ try {
 		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, historyRecovery, dmAdventures,
 		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, formControlZoom, lastDifficulty,
 		dissonanceQuartet, orbitPlay, lobbyFinishSync, blackCastlePlay, pinchPlay, pipMarketPlay, secretNamesPlay, lobbyChrome, gameKit,
-		notesEditor, profilePage, offlineRead, boxPuzzles, boxDaily, astralGuide, lolStats, steamSaved, updateNudgeLayout,
+		notesEditor, profilePage, offlineRead, boxPuzzles, boxDaily, halcyonPlay, astralGuide, lolStats, steamSaved, updateNudgeLayout,
 		crashScreen, bootWithoutServer];
 
 	// EVERY BLOCK MUST BE IN A LANE. Before the lanes existed, adding a block meant

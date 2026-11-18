@@ -2,7 +2,7 @@
 
 Status: Pre-implementation plan  
 Purpose: Define the art and supporting asset package needed for the first playable implementation  
-Primary style reference: The approved pixel-art style board supplied in the design conversation  
+Primary style reference: [`halcyon-rift-style-board.webp`](halcyon-rift-style-board.webp) (committed 2026-11-18)  
 Working name: Halcyon Rift
 
 ## 1. Objective
@@ -39,6 +39,12 @@ The target language is:
 Do not create each asset from an unrelated prompt. Every generation must use the approved style board or an approved descendant asset as a reference.
 
 The board is a style and role reference. It should not be treated as a final production sprite sheet unless individual elements are separately cleaned and prepared.
+
+Three things the board does **not** settle (2026-11-18):
+
+- **Class.** Its player sample is a hooded caster with a staff; the first class is Ranger. The sample fixes the style, not the character.
+- **Scale.** The room appears to be drawn at a smaller scale than the characters (its torches are a fraction of the player's height), so it is a style sample, not a scale sample. The scale sheet in §5.1 is still needed.
+- **Color roles.** The player, boss and room all sit in purple, and the health potion and torches sit in the enemy reds. See art direction §2.3 for the fix.
 
 ## 3. Generation principles
 
@@ -112,7 +118,7 @@ Before generating the production pack, finalize these technical values:
 These are starting recommendations, not final commitments:
 
 - use a fixed logical pixel grid;
-- use eight directions for the player;
+- use three drawn facings for the player (down, up, side) and mirror the other side;
 - use fewer directions for ordinary enemies where possible;
 - use small frame counts rather than elaborate animation;
 - use transparent PNG exports;
@@ -209,29 +215,21 @@ Exact enemy identities and mechanics remain a design choice. The art package sho
 
 ### 5.4 Introductory dungeon package
 
-The first dungeon is Beach.
+The first dungeon is the Shallows (it is no longer Beach — game design §14.4): daylit shallow water and sandbars crossed by a faint glowing seam where the Rift has barely opened. It is the gentlest place in the game and should look it. The style board's dark stone room is the look of a deeper dungeon, not this one. Daylight does not change the color roles (art direction §2.3): the ground stays the quietest, least saturated thing on screen, in muted sand, gray and blue-green rather than purple — and the water must stay clearly darker and duller than the cyan player shots.
 
 Required:
 
-- entrance room;
-- several reusable combat-room templates;
-- transition or connector pieces;
-- boss room;
-- walkable ground;
-- blocked terrain;
-- terrain edges;
-- water or environmental boundary;
-- rock or obstacle objects;
-- decorative props;
+- a tileset: floor variants, wall tops and faces, corners, door gaps, an edge or boundary (water, pit or void);
+- prop sprites: torches, rubble, crates/barrels, a chest;
+- an entrance room, several combat rooms, connectors and a boss room — **laid out in a tile editor from that tileset**, not generated as images (art direction §7.4);
 - room shadows;
-- room collision masks;
 - boss-room boundary or encounter marker;
 - dungeon icon;
 - dungeon-selection thumbnail.
 
-The initial dungeon should use complete authored room templates rather than unconstrained random tile generation. Procedural logic can select, arrange, mirror, and populate the rooms.
+Procedural logic selects, orders, mirrors left-to-right and populates the authored rooms. It never rotates them.
 
-Each room needs separate data for:
+Each room needs separate data for (in the tile editor's object layer, beside the tile layers):
 
 - visual art;
 - walkable areas;
@@ -241,7 +239,7 @@ Each room needs separate data for:
 - entry and exit points;
 - boss or encounter markers.
 
-AI should generate the visual room concepts and room art. Collision and spawn metadata should be authored separately.
+AI can generate room concepts and the tile and prop art. Collision comes from the tiles; spawn and loot metadata are authored in the editor.
 
 ### 5.5 Projectiles and combat effects
 
@@ -269,7 +267,7 @@ Effects must be judged at gameplay size. Large concept-board effects often becom
 
 Required:
 
-- health recovery pickup;
+- health recovery pickup — in the pickup color family (green or gold), not red (art direction §2.3);
 - optional MP pickup if the first design includes one;
 - common gear pickup appearance;
 - uncommon or better gear pickup appearance;
@@ -499,7 +497,7 @@ Exit condition:
 
 Deliverables:
 
-- Beach room templates;
+- the Shallows tileset and room layouts;
 - terrain and obstacle art;
 - room decorations;
 - boss room;
@@ -565,7 +563,7 @@ They can be added incrementally after the data model and rendering pipeline are 
 
 ## 11. When architecture can begin
 
-Architecture can begin after the following are approved:
+Revised 2026-11-18: **architecture does not wait for art.** The greybox prototype (game design §23, step 6) is built on the real architecture with colored shapes, and runs in parallel with Phases 0–2 here. The list below is now what has to be approved before the shapes are swapped for art, not before code starts:
 
 - style reference;
 - technical asset specification;

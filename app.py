@@ -80,7 +80,9 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_allowed_origins(),
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Room-Token"],
+    # X-Halcyon-*: a Halcyon Rift guest roster proves itself with these two
+    # (halcyon/api.py) — without them every guest request dies at the preflight.
+    allow_headers=["Authorization", "Content-Type", "X-Room-Token", "X-Halcyon-Owner", "X-Halcyon-Secret"],
 )
 app.add_middleware(SecurityHeadersMiddleware)
 # Owner alerts on 5xx responses, and the switch that starts the site-health monitor
@@ -114,6 +116,15 @@ try:
     LOG.info("wired Box Puzzles routes (/boxpuzzles)")
 except Exception as _box_err:  # pragma: no cover - defensive
     LOG.warning("Box Puzzles not wired: %s", _box_err)
+
+# Halcyon Rift — the solo ARPG (in design). The fight runs in the browser; these
+# routes keep the roster, the items and each run's dungeon (halcyon/CLAUDE.md).
+try:
+    from halcyon.api import setup_halcyon
+    setup_halcyon(app, get_db_conn, get_user_by_session, bearer_token)
+    LOG.info("wired Halcyon Rift routes (/halcyon)")
+except Exception as _halcyon_err:  # pragma: no cover - defensive
+    LOG.warning("Halcyon Rift not wired: %s", _halcyon_err)
 
 # Steam Filter — the page is static files; its one server feature is each account's
 # saved games (/steamfilter/saved). Same injected deps.

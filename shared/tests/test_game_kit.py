@@ -50,7 +50,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 # Every game screen. Derived, so a new game joins on its first commit.
 GAME_DIRS = sorted(p for p in (ROOT / "games").iterdir()
                    if p.is_dir() and any(p.glob("[A-Z]*.jsx")))
-EXTRA_DIRS = [ROOT / d for d in ("books", "notes", "boxpuzzles", "bggfilter", "steamfilter",
+EXTRA_DIRS = [ROOT / d for d in ("books", "notes", "boxpuzzles", "halcyon", "bggfilter", "steamfilter",
                                  "animefilter", "lolstats", "astralguide")]
 
 _BTN = ("background", "border", "box-shadow", "color", "font", "letter-spacing",

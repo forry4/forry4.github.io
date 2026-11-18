@@ -49,6 +49,7 @@ export const FEATURE_BLOCKS = {
 	"books": ["offlineRead"],
 	"notes": ["notesEditor", "offlineRead"],
 	"boxpuzzles": ["boxPuzzles", "boxDaily"],
+	"halcyon": ["halcyonPlay", "gameKit"],
 	"bggfilter": ["formControlZoom", "offlineRead", "crashScreen"],
 	"steamfilter": ["formControlZoom", "offlineRead", "steamSaved"],
 	"astralguide": ["astralGuide", "formControlZoom", "offlineRead"],

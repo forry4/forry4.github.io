@@ -1,7 +1,7 @@
 # Halcyon Rift — Game Design Document
 
-Status: Concept and pre-implementation design  
-Last updated: 2026-11-17  
+Status: Concept and pre-implementation design — the architecture-shaping decisions are now made (2026-11-18); the numbers are deliberately left to the greybox prototype  
+Last updated: 2026-11-18  
 Working name: Halcyon Rift  
 Audience: Future collaborators and AI agents  
 
@@ -55,7 +55,7 @@ The more precise current description is:
 
 Combat should emphasize planning, positioning, and avoiding patterns rather than perfect reflexes or invulnerability-dodge timing.
 
-Projectiles, enemy attacks, terrain, and safe spaces must be visually legible. Difficulty should come from choosing and maintaining safe positions, not from hidden or unavoidable damage.
+Projectiles, enemy attacks, terrain, and safe spaces must be visually legible. Difficulty should come from choosing and maintaining safe positions, not from hidden damage. **A badly chosen position can be fatal** — see §8.3: the danger is real, and it is what gives instant recall its weight.
 
 #### Meaningful character loss
 
@@ -141,7 +141,7 @@ These may be revisited only deliberately. They should not be added merely becaus
 DECIDED:
 
 - Browser desktop is the first and primary platform.
-- The game is online-only, including solo play.
+- The game is online-only, including solo play — in the precise sense of §18: entering a dungeon and saving its results need the server, but a dungeon already in progress keeps playing through a server restart, deploy or dropped connection.
 - Mouse and keyboard are the supported controls.
 - Mobile and controller support are not initial requirements.
 - Steam is not part of the launch plan.
@@ -157,8 +157,9 @@ DECIDED:
 - The visual inspiration is the readable, compact, sprite-oriented style of Realm of the Mad God and Darza's Dominion.
 - The game should use original visual assets and its own visual identity.
 - Projectiles and danger telegraphs must remain readable against the environment.
+- The approved style reference is [`halcyon-rift-style-board.webp`](halcyon-rift-style-board.webp) (2026-11-18). The art docs say how it is used and what it still has to resolve (color roles, scale).
 
-OPEN:
+OPEN (all to be settled by the art docs' Phase 0, not by this document):
 
 - Exact art style;
 - pixel scale;
@@ -229,7 +230,9 @@ Dungeons are:
 - designed around a specific difficulty and loot profile;
 - ended by a boss encounter.
 
-An easy dungeon may take roughly one minute. A hard dungeon may take roughly five minutes. Exact durations are OPEN and should be tuned through play.
+DECIDED (2026-11-18): harder dungeons are harder to complete AND longer — more rooms, denser patterns, more boss phases. A longer dungeon also means more carried loot at stake by the time the boss is reached, which is the point.
+
+An easy dungeon may take roughly one to two minutes; a hard one may take roughly ten to fifteen. Exact durations are OPEN and are tuned in the prototype.
 
 ## 7. Character model
 
@@ -243,6 +246,7 @@ DECIDED:
 - A new character can be created after another dies.
 - The initial game begins with one class.
 - The first class planned for the initial content slice is Ranger, but class-specific design is intentionally outside the current general-design discussion.
+- **Guests can play** (2026-11-18). A guest's roster and vault are pruned 24 hours after their last activity, as guest games are everywhere else on the site, and do not carry over if the guest later makes an account (a site-wide limitation, not one specific to this game). Accounts keep theirs indefinitely. See §20.1 for how a guest proves the roster is theirs.
 
 ### 7.2 Character death
 
@@ -309,22 +313,27 @@ OPEN:
 
 ### 8.3 Combat priorities
 
+DECIDED (2026-11-18): **combat is lethal to the unprepared.** Attacks may deal burst damage, and some patterns will kill a character who is badly positioned or who walked into a room without a plan. This is deliberate: recall is instant and always available (§13.1), so if danger only ever arrived slowly, the best play would be "recall at 30% HP" and permadeath would never happen. Burst damage turns recall into a **planning** decision (leave before you engage something you cannot handle) rather than a **reaction** (leave once you are already losing), because a reactive recall often comes too late.
+
+"Unescapable" means unescapable *from where you are standing once the attack is fired* — never unescapable in general. The player who read the room, kept escape space and chose the fight should have been safe.
+
 Combat should prioritize:
 
 - planning;
 - positioning;
+- reading a room before committing to it;
 - target priority;
 - projectile awareness;
 - terrain use;
 - choosing when to spend mana;
-- deciding when to recall.
+- deciding when to recall — ideally before the fight, not during it.
 
 It should not primarily prioritize:
 
 - reaction-time tests with tiny telegraphs;
 - animation-cancel mastery;
 - memorizing long cooldown rotations;
-- unavoidable burst damage;
+- burst damage that no amount of planning could have avoided (an attack from off-screen with no warning, damage with no visual source);
 - party role requirements.
 
 ### 8.4 Abilities
@@ -444,7 +453,7 @@ DECIDED:
 - Early levels should be gained relatively quickly.
 - The XP requirement increases at each level.
 - The easiest dungeon provides enough XP for approximately level 1 → level 2.
-- Beach is intended to provide early XP but no stat increases.
+- The first dungeon (the Shallows, §14.4) is intended to provide early XP but no stat increases.
 
 The exact XP curve is OPEN. A likely baseline is:
 
@@ -669,21 +678,33 @@ OPEN:
 DECIDED:
 
 - Recall is instant.
-- Recall is always available.
+- Recall is always available — including in the boss arena (2026-11-18).
 - Recall has no cooldown.
 - Recall restores current HP and recovery capacity to full.
 - Loot already picked up remains on the character after recall.
 - The current dungeon instance is abandoned.
 - New dungeon entry creates a new instance.
+- Recall happens in the browser with no server round trip (§18), so latency can never eat it.
+
+What keeps instant recall from removing the risk is the combat design, not a recall cost: see §8.3.
 
 OPEN:
 
-- whether the player can recall from the boss arena;
-- whether a boss arena prevents walking out but still permits recall;
+- whether a boss arena prevents walking out (recall still works);
 - whether any completion rewards are granted immediately on boss death or after a formal completion state;
 - whether recall preserves experience gained during the current instance.
 
 The intended design is that recall is a safe extraction option, not a failure. The player gives up the remaining dungeon and its completion rewards in exchange for safety.
+
+### 13.1a Leaving without pressing recall — DECIDED (2026-11-18)
+
+Every way of leaving a dungeon other than dying counts as a recall:
+
+- **Closing the tab, losing the connection, the device sleeping:** recall. Everything picked up and reported so far stays on the character.
+- **Server restart, deploy or Render cold start during a run:** not an event at all from the player's side. The dungeon runs in the browser (§18); its reports queue up and are delivered when the server is back. If the tab is also closed before then, the queue is kept on the device and sent on the next visit.
+- **A bug that kills a character:** the death stands. There is no restore tool. (Owner's call. The input log in §18.6 exists so the bug can be found and fixed.)
+
+Since a modified client could also suppress its own death report, "close the tab to survive" is possible for a cheater. That is accepted: it gains nothing an honest player cannot get by pressing recall, and with no trading, PvP or leaderboard it only affects the cheater.
 
 ### 13.2 Completion
 
@@ -774,11 +795,12 @@ It is not a player-facing game feature.
 
 DECIDED:
 
-- The initial dungeon is called Beach.
-- Beach is entry-level.
-- Beach provides early XP and early-game loot.
-- Beach does not increase character stats.
-- Detailed Beach room, enemy, boss, and loot design remains open.
+- The initial dungeon is entry-level, provides early XP and early-game loot, and does not increase character stats.
+- It is **not** called Beach (2026-11-18 — that is the starting zone of the game this one is most often compared to).
+- Name: **the Shallows** (2026-11-18) — the shallow edge of the Rift, where it has barely opened and little comes through. It also nods to the title: "halcyon" is the old name for the kingfisher, a shoreline bird said to calm the sea. It should read as gentle: daylit shallow water and sandbars with a faint glowing seam running through them, a deliberate contrast to the dark stone of the style board, which suits a deeper dungeon. (Rejected: "the Hairline", which reads as hair; "Meadow", which says nothing about the Rift.)
+
+RECOMMENDED naming convention: name dungeons by **how deep into the Rift they go** — the Shallows first, the deepest at the end (for example: Shallows, Fissure, Chasm, the Deep). That gives the title its meaning, and it tells a player how dangerous a dungeon is before they enter, without a progression gate (§3.1, player agency). Not every dungeon has to fit the ladder, but the easiest and hardest ones should.
+- Detailed room, enemy, boss, and loot design remains open.
 
 ## 15. Enemy and boss philosophy
 
@@ -800,13 +822,14 @@ Enemies should have distinct jobs rather than merely different health values.
 
 Enemies should generally:
 
-- communicate attacks visually;
-- give the player time to reposition;
-- create avoidable danger;
+- communicate attacks visually, or follow a pattern that can be learned;
+- reward a player who positioned well before the attack started;
+- be allowed to punish a player who did not — including with lethal burst in harder dungeons (§8.3);
 - use terrain and group composition to create pressure;
-- avoid unexplained one-shot damage;
-- avoid hard crowd control initially;
-- avoid attacks that are impossible to avoid through ordinary movement.
+- never deal damage the player cannot see the source of;
+- avoid hard crowd control initially.
+
+The line is: *a death should always be explainable afterwards* ("I stood in the open when the radial shooter fired"), even when it was not escapable in the moment. Harder dungeons move closer to that line; easy dungeons stay forgiving.
 
 ### 15.2 Bosses
 
@@ -857,6 +880,8 @@ Recommended future direction:
 - enemy difficulty scales without making low-level players irrelevant;
 - no class should become mandatory for dungeon completion.
 
+How co-op fits the networking model (§18.7): each browser stays in charge of its own character (position, damage taken), one browser — the party leader's — runs the enemies, and the server relays between them over a WebSocket. This is the main reason the simulation must be written so that "run the enemies here" and "receive the enemies from someone else" are both possible from day one, even though only the first is built.
+
 ## 17. Content volume and production model
 
 The long-term goal is a large content volume, but the first release should establish reusable structures.
@@ -897,48 +922,67 @@ As the content volume grows, useful tooling may include:
 - content schema validation;
 - balance dashboards.
 
-## 18. Technical direction, kept intentionally high-level
+## 18. Simulation and networking model — DECIDED (2026-11-18)
 
-This section is guidance rather than a final implementation specification.
+The one-line version: **the browser runs the fight; the server owns the dungeon and everything that persists.** The server never simulates movement, projectiles or hits. A client never tells the server what it earned — only what it did — and the server works out the reward from its own record.
 
-### 18.1 Client
+### 18.1 Why not a server-run simulation
 
-RECOMMENDED:
+The rest of the site is server-authoritative, so this needs saying. A server-run bullet simulation is the wrong fit here for four reasons:
 
-- React remains the website shell;
-- the game scene uses a dedicated 2D Canvas/WebGL renderer;
-- Phaser or a similar 2D framework is a reasonable starting point;
-- the real-time game loop should not be represented as thousands of React components;
-- React can render town, inventory, vault, menus, and overlays.
+1. **Hosting.** The backend is one Python process on Render's free tier — a fraction of one CPU and 512 MB — sharing one event loop with twelve live board games. A frozen loop has already taken the site down (root `CLAUDE.md`, the CoC outage). A 30–60 Hz simulation of hundreds of projectiles per dungeon in that process is exactly the load that rule exists to keep out.
+2. **Feel.** Dodging bullets against a server 100 ms or more away needs client prediction, reconciliation and lag compensation to feel fair. That is a large, subtle system, and getting it wrong breaks the "readable, fair" pillar directly. A local simulation has zero input latency.
+3. **Restarts.** Render restarts the process on every deploy, often several times a day. A server-run dungeon would end on every deploy; a browser-run one does not notice (§13.1a).
+4. **Threat model.** There is no trading, PvP, leaderboard or currency, so a cheater can only affect their own characters. That is the same argument the site already uses for running its strongest bots in the browser (root `CLAUDE.md`, "Client-side AI is safe because…"). The game-it-is-modeled-on famously decided player hits on the client too.
 
-### 18.2 Server authority
+### 18.2 What the server does
 
-The existing project uses server-authoritative game state. Halcyon Rift should follow the same principle:
+- **Starts a run.** It checks the character is alive and not already in a run, picks a fresh seed, and **generates the dungeon itself** (Python): the room sequence, every enemy with a stable id and type, and the pre-rolled drop for every enemy, boss and chest. It stores that and sends the client the full description.
+- **Applies run events** (§18.4) idempotently, against its own copy of the dungeon.
+- **Owns all persistent state** — characters, items, vault, XP, stat progress (§20.1) — and every town operation (equip, vault, fuse, discard).
+- **Derives every reward.** "I killed enemy 17" is a claim it checks; the XP and the drop for enemy 17 come from its own record. No request can name an item, an XP amount or a stat value.
 
-- the client sends input and intentions;
-- the server determines movement validity, collisions, damage, cooldown/resource validity, death, loot, and rewards;
-- the client may predict or visually smooth movement, but it cannot authoritatively grant items or stats.
+Because the server generates the dungeon, there is exactly one dungeon generator and one loot roller, both in Python. The browser never needs either.
 
-The current board-game room architecture should not be copied blindly. A real-time action game needs a continuous simulation loop rather than turn-based room updates.
+### 18.3 What the server checks (plausibility, not proof)
 
-### 18.3 Persistence
+- every claimed enemy, drop and chest exists in this run;
+- each is claimed at most once;
+- a drop is picked up only after its enemy was killed;
+- completion only after the boss kill;
+- rooms and the whole run are not cleared faster than a floor time;
+- one open run per character; a closed run accepts nothing.
 
-Active dungeon state can remain transient while a session is active. Durable state includes:
+A modified client can still claim kills it did not earn. That is accepted (§18.1, point 4). Full proof — the server replaying the run's inputs — stays possible later (§18.6) if co-op or a leaderboard ever needs it.
 
-- account identity;
-- character roster;
-- character progression;
-- equipped gear;
-- character inventory;
-- vault contents;
-- fusion operations;
-- completed dungeon rewards.
+### 18.4 Transport and the run lifecycle
 
-The system should not write movement and projectile state to the database every frame.
+- **Plain HTTP, not a WebSocket, for solo.** No in-memory room, no `ROOM_LOCK`. Every route is a plain `def` (root `CLAUDE.md`: a route only takes the event loop when it must).
+- The client keeps a **queue of run events** — `kill`, `pickup`, `drop_item`, `move_item`, `boss_kill`, `recall`, `death`, `complete` — each numbered by a per-run sequence number. It flushes the queue every few seconds and immediately on recall, death or completion.
+- The server applies a batch only past its last applied sequence number, so **re-sending is always safe**. That is what makes retry after a restart or a dropped connection correct rather than merely likely.
+- The queue is written to `localStorage` before it is sent, so closing the tab does not lose it. On the next visit the backlog is sent first.
+- The death event is queued **before** the death screen is shown.
+- **Closing a run.** A run ends on `recall`, `death` or `complete`. A run with none of those (the tab was closed) is closed **as a recall** the next time that character is opened in town or sent into a dungeon — from any device — or by a sweep 24 hours after its last event. After that it accepts nothing; a late backlog for it is discarded.
+- **Starting a run needs the server**; when it is waking, entry waits with "Waking the server…" like every other game on the site. Nothing else in a run does.
 
-### 18.4 Performance target
+### 18.5 Client architecture
 
-The initial technical target is one to four players in a two-dimensional dungeon with substantial projectile counts and many enemies on screen. The exact benchmark is OPEN and should be established before content volume grows.
+- **The simulation is a pure module** — no DOM, no React, no renderer — driven by a fixed timestep (60 Hz to start) with rendering interpolated between steps.
+- **It is deterministic**: all in-run randomness comes from a seeded generator; no `Math.random` or `Date` inside it; and no `Math.sin` / `cos` / `atan2` / `exp` in game logic, because browsers are allowed to differ in the last bit of those (use the module's own implementations or lookup tables). Same seed + same inputs = same run, on any browser.
+- **Renderer: plain Canvas 2D for the greybox**, PixiJS (a renderer only) if sprite counts later need WebGL. **Not Phaser**: its own game loop and physics would want to own the simulation, which has to stay ours to stay deterministic.
+- **React** renders town, roster, inventory, vault, fusion, menus and the HUD overlay, as on the rest of the site. The real-time scene is never React components.
+
+### 18.6 Input log — RECOMMENDED
+
+The client records its inputs as change events (compact — a held key is one event, not sixty a second) and uploads them with the run's final batch. The server keeps them about 14 days. With the seed, that reproduces any run exactly: the way to investigate "the game killed me", and the foundation for server-side replay if it is ever wanted.
+
+### 18.7 Co-op later
+
+Not built now, but not designed out: each browser stays authoritative for its own character (position, damage taken), the party leader's browser runs the enemies from the shared seed, and the server relays over a WebSocket. The simulation module therefore needs, from the start, a clean seam between "my character", "enemies simulated here" and "enemies received from elsewhere". Co-op is the one feature that brings a socket and an in-memory room back, and it should reuse `core/rooms.py` when it does.
+
+### 18.8 Performance target
+
+The initial technical target is one to four players in a two-dimensional dungeon with substantial projectile counts and many enemies on screen — now a **browser** budget, not a server one. The exact benchmark is OPEN and is set during the greybox (a mid-range laptop at 60 fps with the densest boss pattern on screen is a reasonable first bar).
 
 ## 19. Accessibility and usability
 
@@ -960,11 +1004,9 @@ RECOMMENDED:
 
 Mobile and controller support are not initial requirements, but UI layout should not be deliberately impossible at different desktop sizes.
 
-## 20. Economy and abuse boundaries
+## 20. Economy, persistence and item identity
 
-There is no monetary economy and no player trading.
-
-The game still needs to protect the internal item economy from accidental duplication. Each persistent item should eventually have a stable identity, and vault/fusion operations should be atomic.
+There is no monetary economy and no player trading. There is no need to invent a currency simply to make the economy look more conventional.
 
 The major item sinks are:
 
@@ -973,7 +1015,94 @@ The major item sinks are:
 - deliberate discard;
 - future optional systems.
 
-There is no need to invent a currency simply to make the economy look more conventional.
+The game still has to protect the item store from **duplication and silent loss**, because the vault is permanent from the first build. That is why item identity is designed now (2026-11-18) rather than "eventually".
+
+### 20.1 The persistent model — RECOMMENDED schema
+
+Table names are prefixed `hr_`. Column lists are the contract; exact types follow the site's existing tables.
+
+**`hr_owners`** — whose roster this is.
+- `owner_id` — the account's user id, or the guest's device id.
+- `kind` — `account` | `guest`.
+- `guest_secret_hash` — guests only. A guest's id is made on the device and is broadcast nowhere, but it is not a secret, so the server mints a random secret the first time a guest creates a character, returns it once, and stores only its hash. The client keeps it in `localStorage` beside the guest identity and sends it on every Halcyon request. Accounts use their normal session.
+- `last_seen_at` — drives the 24-hour guest prune (§7.1).
+
+**`hr_characters`**
+- `char_id`, `owner_id`, `slot` (0–3), `class_id`, `level`, `xp`, `stat_progress` (per stat), `status` (`alive` | `dead`), `created_at`, `died_at`, `death_run_id`.
+- At most one **alive** character per `(owner_id, slot)`. Dead characters are kept as rows — they are the "fallen" list, and a death can be investigated afterwards.
+
+**`hr_items`** — one row per item that has ever existed.
+- `item_id` — 128 random bits, never reused, never derived from anything else.
+- `owner_id`, `base_id`, `tier`, `kind` (`standard` | `unique`), `slot_count`.
+- `enchants` — a list of `{id, q}`: the enchantment's definition id and its **roll quality** `q` from 0 to 1, *not* its final number. The number is computed from the current definition when read, so rebalancing an enchantment re-scales every existing item fairly. Enchantment and base-item ids are never reused or deleted, only retired.
+- `content_version` — the data-definition version the item was minted under.
+- `origin` — `drop` (with `origin_run_id` + `origin_drop_id`), `fusion` (with `fused_from` = the two consumed ids), or `grant` (starter or admin).
+- **Location — exactly one of:**
+  - `vault` + `slot_index`;
+  - `equipped` + `char_id` + equipment slot;
+  - `inventory` + `char_id` + `slot_index`;
+  - `ground` + `run_id` (dropped inside a dungeon; can be picked back up until the run ends);
+  - `destroyed` + `destroyed_reason` (`death` | `fusion` | `discard` | `run_end`) + `destroyed_at`.
+- `version` — incremented on every change (optimistic concurrency, below).
+
+Uniqueness that enforces the invariants in the database itself, not just in code:
+- `UNIQUE(origin_run_id, origin_drop_id)` — **the duplication guard.** A drop can be minted once, however many times its pickup is re-sent.
+- one item per vault slot per owner; one item per equipment or inventory slot per character.
+
+Destroyed items are kept as tombstones, not deleted, so "where did my sword go?" always has an answer. They are small; they can be pruned after ~90 days if storage ever matters.
+
+**`hr_runs`**
+- `run_id`, `char_id`, `owner_id`, `dungeon_id`, `seed`, `content_version`, `status` (`open` | `recalled` | `completed` | `died`), `started_at`, `last_event_at`, `last_seq`.
+- `dungeon` — the server's generated dungeon: enemies, drops, and which have been killed and picked up.
+
+### 20.2 Operations
+
+Every operation is **one database transaction** (the Turso client in `core/db.py` runs a transaction as a single Hrana stream, so this works in prod as it does on local sqlite) and is checked on the server:
+
+| Operation | Effect |
+|---|---|
+| `pickup(run, drop_id)` | Mint the drop as a new item into the character's inventory. Idempotent through the uniqueness guard. |
+| `drop_item` in a dungeon | Item → `ground(run)`. Picking it back up returns it to the inventory. |
+| run ends (recall / complete / closed) | Every item still on `ground(run)` → `destroyed(run_end)`. |
+| `discard` in town | Item → `destroyed(discard)`. The UI confirms first. |
+| `move` / `equip` / `swap` | Between vault, inventory and equipment. Checks class, the one-of-each-ring rule, and that the slot is free or swapped. |
+| `fuse(a, b)` | Checks same base, tier, kind and slot count, both owned, neither on a character in an open run. Destroys both (`fusion`) and mints one with `fused_from = [a, b]` — all or nothing. |
+| `death(run)` | Character → `dead`; every item equipped, carried or on `ground(run)` → `destroyed(death)`. The vault is not touched. |
+
+Two rules about **who may move what**:
+- An item on a character who is in an open run can only be moved by that run's events. Town operations refuse it. (Another character can use the vault meanwhile.)
+- Every write names the `version` of each row it expects; if a row moved underneath it (two tabs, a late retry), the write fails cleanly and the client reloads. On top of that, the single server process serializes each owner's writes behind a per-owner lock.
+
+### 20.3 What must never happen (these become the first tests)
+
+- an item exists in two places, or in none;
+- one drop is minted twice;
+- a fusion consumes two items and mints nothing, or mints one and consumes fewer than two;
+- a death destroys anything in the vault, or leaves anything on the character;
+- re-sending any event batch changes anything;
+- a town operation moves an item on a character who is mid-run;
+- a client names an item, XP amount or stat value and the server accepts it.
+
+The fusion and death tests run with a failure injected between the statements to prove the transaction leaves nothing half-done.
+
+## 20a. Place on the site — DECIDED (2026-11-18): a catalog game on the outside, built like an Extra
+
+**Outwardly a catalog game:** an entry in `shared/catalog.js` and an accent in `shared/accents.js`, so it has a tile on the Home menu among the games — **`adminOnly` while it is being built** (as Rag Tag and Black Castle are today), so it can be played on prod without appearing on the public menu.
+
+**Built like an Extra:** the code lives in **`halcyon/` at the repo root**, not in `games/`, the way Box Puzzles does (`boxpuzzles/`). The reason is speed. Nearly every shared game gate finds a game by globbing `games/*/` (`main.py`, `[A-Z]*.jsx`, `rules.jsx`), and almost all of them were written for turn-based tables: the lobby kit's Open/Active/History columns, the waiting room, seat proof, the room-create throttle, auto-reconnect, finished-game sync. Inside `games/` each would need fitting or a written exemption before the first commit could go green; outside it, none of them apply.
+
+What that leaves — **two catalog-keyed checks, each with one written exemption in the first commit:**
+
+1. `shared/tests/test_profile_results.py` requires every catalog id to register a results reader. Halcyon is exempted until there is a profile mapping (proposed: a completed dungeon is a win, a death is a loss, a recall records nothing — OPEN), and the exemption is removed when there is.
+2. `webapp/test/screens.mjs` requires every accented game to be in `LOBBY_PAGES`, whose blocks assume a table lobby (pinned columns, shared lobby chrome). Halcyon's first screen is a town, not a table lobby, so it goes on a short "catalog game without a table lobby" list. The home card's accent check still runs on it.
+
+**What it has to do by hand**, Box Puzzles' wiring being the template: `setup_halcyon(app)` in `app.py` behind the usual try/except; `halcyon/**` in `deploy-pages.yml`'s path filter and `halcyon/*.py` in `deploy-render.yml`'s, **in the same push** (a feature missing from that list never deploys, and nothing goes red); `halcyon/tests` in `pytest.ini`; a lazy route `/halcyon` in `Spender.jsx` inside its own `ScreenBoundary`; a `SCREENS` entry in `screens.mjs`; a row in `affected.mjs`.
+
+**The cost, stated plainly:** looking like the rest of the site becomes voluntary rather than enforced. Town, inventory and vault panels should still use the house faces, the kit buttons and `fg-panel`, as Box Puzzles does — but no gate will insist.
+
+**When it graduates:** co-op brings back sockets and in-memory rooms (§18.7), and that is exactly what the `games/*` socket gates (seat proof, auto-reconnect, room loading off the loop) exist to check. When co-op is built, Halcyon moves into `games/` or those gates are pointed at it — not before.
+
+**Root `CLAUDE.md` gets a line when the first code lands**, so that "every catalog game lives in `games/`" does not quietly become false.
 
 ## 21. Testing philosophy
 
@@ -999,7 +1128,7 @@ The initial minimum should cover:
 
 Load testing, extensive co-op testing, replay systems, and large-scale simulation tests can be added when those features are actually implemented.
 
-The highest-priority tests are anything that could permanently destroy or duplicate player progress.
+The highest-priority tests are anything that could permanently destroy or duplicate player progress — §20.3 lists them. Next come the simulation's determinism (same seed and inputs give the same run) and the event queue (a batch re-sent after a simulated server restart changes nothing).
 
 ## 22. Open questions and next design decisions
 
@@ -1046,7 +1175,11 @@ These are the most important unresolved items.
 - What makes a dungeon mechanically distinct from another?
 - Which dungeon types grant each stat?
 - How much more efficient are late-game stat dungeons?
-- Does the boss arena prevent walking out while still allowing instant recall?
+- Does the boss arena prevent walking out? (Recall always works there — §13.1.)
+
+### Site
+
+- What does a run put on the player's profile (§20a)?
 
 ### Co-op
 
@@ -1060,16 +1193,16 @@ These are the most important unresolved items.
 
 ## 23. Recommended design order from here
 
-Before implementation, the most useful sequence is:
+Revised 2026-11-18. The original order finalized numbers (stat caps, XP curve, pickup sizes) before anything was playable; numbers come from playing, so they move after the prototype. What has to be settled before code is what shapes the architecture, and that is now done:
 
-1. Finalize the stat-progression contract.
-2. Finalize XP and level pacing.
-3. Finalize the health/recovery/pickup rules.
-4. Define the generic item and enchantment model.
-5. Define the dungeon-generation grammar.
-6. Define the general loot-table model.
-7. Define the first vertical-slice scope.
-8. Only then choose the detailed client and server implementation plan.
+1. ~~Where the risk comes from~~ — instant recall + lethal combat (§8.3, §13.1). DONE.
+2. ~~Who runs the simulation~~ — the browser; the server owns the dungeon and persistence (§18). DONE.
+3. ~~Disconnects, restarts, bugs~~ — all count as recall; bugs stand (§13.1a). DONE.
+4. ~~Item identity and persistence~~ — §20.1–20.3. DONE.
+5. ~~The place on the site~~ — a catalog tile, built like an Extra in `halcyon/` (§20a). DONE.
+6. **Greybox prototype — colored shapes, no art.** BUILT 2026-11-18 (`halcyon/`, admin-only at `/halcyon`): movement, mouse aim with hold-to-fire and an auto-fire toggle, the Volley ability; chaser / aimed shooter / radial enemies; a two-phase boss (spiral and aimed fans, then a telegraphed nova); four combat rooms plus the boss room; heal orbs and loot bags (E); the recovery limit on the HUD; recall (R); death; a portal that needs E so walking to the boss's loot never ends the run. On the real architecture throughout. Its job is still to answer one question — *does moving and dodging feel good in a browser?* — and to produce the first real numbers; every number in `sim.js` is a placeholder until it has been played by a person.
+7. Then, from play: the stat-progression contract, XP and level pacing, health/recovery/pickup amounts, loot tables and enchantment ranges.
+8. Art runs in parallel with 6–7 (the art docs' Phase 0 and the anchor pack) and is swapped in for the shapes once approved.
 
 The first vertical slice should remain deliberately small:
 
@@ -1102,8 +1235,11 @@ When working on Halcyon Rift:
 10. Keep dungeon access open and avoid inventing mandatory progression gates.
 11. Prefer readable, data-driven, reusable systems over large amounts of one-off content.
 12. Before coding, summarize which decisions are being relied upon and which assumptions remain open.
+13. The browser runs the fight; the server generates the dungeon and owns all persistent state (§18). Never let a request name an item, an XP amount or a stat value.
+14. Keep the simulation module deterministic and free of the DOM (§18.5).
+15. Every item operation is one transaction, and every run event is idempotent (§20.2, §18.4).
 
 ## 25. Current one-paragraph summary
 
-Halcyon Rift is a browser-based, desktop-only, top-down projectile action RPG and procedural dungeon crawler. Players maintain four class-locked characters, enter short named dungeons from a town, manually collect class-appropriate gear, gain levels, and decide whether to recall safely or continue toward a boss for better rewards. Characters permanently die with all carried gear, inventory, level, and stats, while a shared 64-slot vault protects equipment for future characters. Gear has five tiers and zero to four enchantments; duplicate matching items can be fused into rerolled versions. There are no currencies, shops, trading, narrative systems, PvP, or mandatory progression paths. Some mid- and late-game dungeon completions increase specific stats until a character's caps. The first version is single-player, but the design should remain compatible with future one-to-four-player co-op.
+Halcyon Rift is a browser-based, desktop-only, top-down projectile action RPG and procedural dungeon crawler. Players maintain four class-locked characters, enter named dungeons from a town — harder ones are longer and can kill a careless character outright — manually collect class-appropriate gear, gain levels, and decide whether to recall (instant, always available) or continue toward a boss for better rewards. The browser runs the fight; the server generates each dungeon and owns every character and item. Characters permanently die with all carried gear, inventory, level, and stats, while a shared 64-slot vault protects equipment for future characters. Gear has five tiers and zero to four enchantments; duplicate matching items can be fused into rerolled versions. There are no currencies, shops, trading, narrative systems, PvP, or mandatory progression paths. Some mid- and late-game dungeon completions increase specific stats until a character's caps. The first version is single-player, but the design should remain compatible with future one-to-four-player co-op.
 

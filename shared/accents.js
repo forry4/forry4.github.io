@@ -68,6 +68,11 @@ export const GAME_ACCENTS = {
 	// tags, the legal targets and its handle in the shell. No other game is pink
 	// or coral (Rag Tag's #e8663c is a hotter orange, CoC's crimson far darker).
 	pipmarket: "#f2917c",
+	// RIFT LAVENDER. Halcyon Rift's world is daylit water and the player is drawn
+	// cyan, so the shell's handle on it is the RIFT, not the sea: a cool violet at
+	// hue ~248, between Where Wolf's periwinkle (228) and Duel's orchid (290), and
+	// well clear of SecretNames' #4fb3e8, which a kingfisher blue sat almost on top of.
+	halcyon: "#9d8ff2",
 };
 
 // Titles that do not clear the 4.5:1 AA floor on the card, and are shipped anyway

@@ -1,0 +1,185 @@
+"""Halcyon Rift HTTP routes (design §18.4) — plain `def`, no sockets, no rooms.
+
+`setup_halcyon(app, get_db_conn, get_user_by_session, token_resolver)` follows the
+Books / Notes / Box Puzzles injected-dependency pattern. Every route is plain `def`,
+so FastAPI runs it on its thread pool and a Turso round trip never pauses the
+event loop the board games share (root CLAUDE.md).
+
+WHO IS ASKING. An account is its session (Authorization: Bearer). A guest is a
+roster the SERVER minted — `POST /halcyon/guest` returns an owner id and a secret,
+once, and the device sends both on every request (X-Halcyon-Owner / -Secret). The
+owner id is server-made rather than the site's guest id because guest ids are
+printed in other games' public player lists, and a known id could be registered
+first by someone else.
+"""
+from __future__ import annotations
+
+import secrets
+import threading
+import time
+
+from fastapi import Depends, Header, HTTPException, Query, Request
+from pydantic import BaseModel, Field
+
+from core import alerts
+from core.ratelimit import SlidingWindowLimiter
+from halcyon import content as C
+from halcyon import dungeon as D
+from halcyon import store as S
+
+STARTER = [({"base_id": "shortbow", "tier": 1, "slot_count": 0, "enchants": []}, "weapon"),
+           ({"base_id": "leather_vest", "tier": 1, "slot_count": 0, "enchants": []}, "armor"),
+           ({"base_id": "volley_quiver", "tier": 1, "slot_count": 0, "enchants": []}, "ability")]
+
+_guests_hour = SlidingWindowLimiter(max_hits=10, window_seconds=3600)
+_runs_hour = SlidingWindowLimiter(max_hits=120, window_seconds=3600)
+_events_minute = SlidingWindowLimiter(max_hits=120, window_seconds=60)
+_upkeep = {"at": 0.0, "lock": threading.Lock()}
+UPKEEP_EVERY = 3600.0
+
+
+def _default_token_resolver(token: str | None = Query(default=None)) -> str | None:
+    return token
+
+
+class CharacterIn(BaseModel):
+    slot: int = Field(ge=0, lt=C.CHARACTER_SLOTS)
+    class_id: str = Field(default="ranger", max_length=32)
+
+
+class RunIn(BaseModel):
+    char_id: str = Field(max_length=64)
+    dungeon_id: str = Field(default="shallows", max_length=32)
+
+
+class EventsIn(BaseModel):
+    events: list[dict] = Field(max_length=500)
+
+
+class MoveIn(BaseModel):
+    to: list = Field(min_length=2, max_length=3)
+    version: int | None = None
+
+
+class DiscardIn(BaseModel):
+    version: int | None = None
+
+
+class FuseIn(BaseModel):
+    a: str = Field(max_length=64)
+    b: str = Field(max_length=64)
+
+
+def _refuse(e: S.HalcyonError):
+    raise HTTPException(status_code=409, detail=str(e))
+
+
+def _place(to: list) -> tuple:
+    """The wire's place ([kind, ...]) as the store's tuple, with indexes as ints."""
+    kind, rest = to[0], list(to[1:])
+    if kind == "vault":
+        return ("vault", rest[0] if isinstance(rest[0], int) else -1)
+    if kind == "inventory" and len(rest) == 2:
+        return ("inventory", str(rest[0]), rest[1] if isinstance(rest[1], int) else -1)
+    if kind == "equipped" and len(rest) == 2:
+        return ("equipped", str(rest[0]), str(rest[1]))
+    return ("nowhere",)
+
+
+def setup_halcyon(app, get_db_conn, get_user_by_session, token_resolver=None) -> None:
+    conn = get_db_conn()
+    try:
+        S.init_schema(conn)
+    finally:
+        conn.close()
+    connect = get_db_conn
+    resolve_token = token_resolver or _default_token_resolver
+
+    def owner(token: str | None = Depends(resolve_token),
+              x_halcyon_owner: str | None = Header(default=None),
+              x_halcyon_secret: str | None = Header(default=None)) -> str:
+        user = get_user_by_session(token) if token else None
+        if user and user.get("id") and not user.get("guest"):
+            S.register_owner(connect, user["id"], "account")      # idempotent
+            return user["id"]
+        if x_halcyon_owner and x_halcyon_secret and len(x_halcyon_owner) <= 64 \
+                and S.verify_guest(connect, x_halcyon_owner, x_halcyon_secret):
+            return x_halcyon_owner
+        raise HTTPException(status_code=401, detail="no roster")
+
+    def upkeep() -> None:
+        """Tidy idle guests and abandoned runs at most hourly, on a read."""
+        with _upkeep["lock"]:
+            now = time.time()
+            if now - _upkeep["at"] < UPKEEP_EVERY:
+                return
+            _upkeep["at"] = now
+        S.prune_guests(connect)
+        S.sweep_runs(connect)
+
+    def call(fn, *a, **kw):
+        try:
+            return fn(connect, *a, **kw)
+        except S.HalcyonError as e:
+            _refuse(e)
+
+    @app.post("/halcyon/guest")
+    def halcyon_guest(request: Request):
+        ip = request.client.host if request.client else "unknown"
+        if _guests_hour.exceeded(ip):
+            alerts.alert("halcyon-guests", f"{ip} is minting Halcyon guest rosters past the limit.",
+                         key=f"halcyon-guests:{ip}")
+            raise HTTPException(status_code=429, detail="Too many new rosters. Try again later.")
+        _guests_hour.record(ip)
+        owner_id = "hg_" + secrets.token_hex(12)
+        secret = S.register_owner(connect, owner_id, "guest")
+        return {"owner": owner_id, "secret": secret}
+
+    @app.get("/halcyon/state")
+    def halcyon_state(who: str = Depends(owner)):
+        upkeep()
+        view = S.owner_view(connect, who)
+        return {**view, "dungeons": [{"id": k, "name": v["name"]} for k, v in D.DUNGEONS.items()],
+                "limits": {"vault": C.VAULT_SIZE, "inventory": C.INVENTORY_SIZE,
+                           "characters": C.CHARACTER_SLOTS, "equip": list(C.EQUIP_SLOTS)},
+                "bases": C.BASE_ITEMS}
+
+    @app.post("/halcyon/characters")
+    def halcyon_create(body: CharacterIn, who: str = Depends(owner)):
+        return call(S.create_character, who, body.slot, body.class_id, starter=STARTER)
+
+    @app.post("/halcyon/characters/{char_id}/open")
+    def halcyon_open(char_id: str, who: str = Depends(owner)):
+        return call(S.open_character, who, char_id)
+
+    @app.post("/halcyon/runs")
+    def halcyon_run(body: RunIn, who: str = Depends(owner)):
+        if _runs_hour.exceeded(who):
+            raise HTTPException(status_code=429, detail="Too many dungeons this hour.")
+        _runs_hour.record(who)
+        try:
+            d = D.generate(body.dungeon_id)
+            run = S.start_run(connect, who, body.char_id, body.dungeon_id, d["seed"], d)
+        except S.HalcyonError as e:
+            _refuse(e)
+        return {"run_id": run["run_id"], "dungeon": d}
+
+    @app.post("/halcyon/runs/{run_id}/events")
+    def halcyon_events(run_id: str, body: EventsIn, who: str = Depends(owner)):
+        if _events_minute.exceeded(who):
+            raise HTTPException(status_code=429, detail="slow down")
+        _events_minute.record(who)
+        return call(S.apply_events, who, run_id, body.events)
+
+    @app.post("/halcyon/items/{item_id}/move")
+    def halcyon_move(item_id: str, body: MoveIn, who: str = Depends(owner)):
+        return call(S.move_item, who, item_id, _place(body.to), body.version)
+
+    @app.post("/halcyon/items/{item_id}/discard")
+    def halcyon_discard(item_id: str, body: DiscardIn, who: str = Depends(owner)):
+        call(S.discard, who, item_id, body.version)
+        return {"ok": True}
+
+    @app.post("/halcyon/fuse")
+    def halcyon_fuse(body: FuseIn, who: str = Depends(owner)):
+        return call(S.fuse, who, body.a, body.b)

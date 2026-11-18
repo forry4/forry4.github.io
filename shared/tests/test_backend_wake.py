@@ -22,7 +22,7 @@ import pathlib
 import re
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-FRONTEND_DIRS = ("games", "shared", "books", "notes", "boxpuzzles", "steamfilter",
+FRONTEND_DIRS = ("games", "shared", "books", "notes", "boxpuzzles", "halcyon", "steamfilter",
                  "bggfilter", "astralguide", "animefilter", "lolstats", "webapp")
 
 

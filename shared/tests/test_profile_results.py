@@ -27,11 +27,28 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 CATALOG = ROOT / "shared" / "catalog.js"
 REGISTER = re.compile(r'_results\.register\(\s*"(\w+)"')
 
+# Catalogue entries that are not table games and so have no win or loss to put on
+# a profile. Self-policing: a row whose game starts registering a reader is STALE.
+NOT_TABLE_GAMES = {
+    "halcyon": "a solo ARPG coded like an Extra (docs/halcyon-rift-game-design.md §20a); "
+               "a run ends in a recall, a clear or a death, never a result against anyone",
+}
 
-def _catalog_ids() -> list[str]:
+
+def _catalog_all() -> list[str]:
     ids = re.findall(r'\{\s*id:\s*"(\w+)"', CATALOG.read_text(encoding="utf-8"))
     assert len(ids) >= 11, f"read too few games out of shared/catalog.js: {ids}"
     return ids
+
+
+def _catalog_ids() -> list[str]:
+    return [g for g in _catalog_all() if g not in NOT_TABLE_GAMES]
+
+
+def test_the_non_table_exemptions_are_real_and_not_stale():
+    assert set(NOT_TABLE_GAMES) <= set(_catalog_all()), "an exemption names no catalogue game"
+    stale = set(NOT_TABLE_GAMES) & set(_registrations())
+    assert not stale, f"these now register a results reader — delete their exemption: {sorted(stale)}"
 
 
 def _registrations() -> dict[str, list[pathlib.Path]]:

@@ -1,0 +1,721 @@
+"""Halcyon Rift item store — characters, items, vault and runs (design §18, §20).
+
+The contract, in one paragraph: every item has a permanent random id and is in
+EXACTLY ONE place (vault, a character's inventory or equipment, the floor of a
+run, or destroyed — destroyed items are kept as tombstones). Every operation is
+ONE transaction, opened and closed here: it commits on success, and on any
+failure the connection is closed WITHOUT a commit, which rolls back on sqlite
+and on Turso alike (`core/db.py`'s wrapper has no `rollback()`, and needs none).
+A run's events are numbered and applied idempotently, so a batch re-sent after
+a restart or a dropped connection changes nothing; a drop is minted at most
+once, enforced by a UNIQUE index rather than by code. A client never names an
+item, an XP amount or a stat — it names what it did ("picked up drop 4"), and
+the item comes from the run's own record of what drop 4 is.
+
+Concurrency: the site is ONE uvicorn process, so each owner's writes are
+serialised behind an in-process lock, and the reads an operation validates
+against happen under it. Town operations may also carry the `version` the
+client last saw; a mismatch is refused as stale.
+
+The wrapper has no `rowcount` (CLAUDE.md, Backend footguns), so nothing here
+depends on one: every check is a SELECT under the lock, before the write.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import random
+import secrets
+import threading
+import time
+from contextlib import contextmanager
+
+from halcyon import content as C
+
+
+class HalcyonError(ValueError):
+    """A refused operation. The message is safe to show the player."""
+
+
+# ── locks ────────────────────────────────────────────────────────────────────
+# A fixed pool, so guest ids that come and go never grow a dict. Two owners
+# sharing a stripe only wait on each other; correctness never depends on it.
+_LOCKS = [threading.Lock() for _ in range(64)]
+
+
+def _owner_lock(owner_id: str) -> threading.Lock:
+    return _LOCKS[hash(owner_id) % len(_LOCKS)]
+
+
+@contextmanager
+def _tx(connect, owner_id: str | None = None):
+    """One operation = one transaction. Commit on success; on ANY exception,
+    close without committing (= roll back) and re-raise."""
+    lock = _owner_lock(owner_id) if owner_id is not None else None
+    if lock:
+        lock.acquire()
+    try:
+        conn = connect()
+        try:
+            yield conn.cursor()
+            conn.commit()
+        finally:
+            conn.close()
+    finally:
+        if lock:
+            lock.release()
+
+
+def _now(now: float | None) -> float:
+    return time.time() if now is None else now
+
+
+def _new_id() -> str:
+    return secrets.token_hex(16)                     # 128 random bits
+
+
+# ── schema ───────────────────────────────────────────────────────────────────
+SCHEMA = [
+    """CREATE TABLE IF NOT EXISTS hr_owners (
+        owner_id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,                  -- account | guest
+        guest_secret_hash TEXT,
+        created_at REAL NOT NULL,
+        last_seen_at REAL NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS hr_characters (
+        char_id TEXT PRIMARY KEY,
+        owner_id TEXT NOT NULL,
+        slot INTEGER NOT NULL,
+        class_id TEXT NOT NULL,
+        level INTEGER NOT NULL DEFAULT 1,
+        xp INTEGER NOT NULL DEFAULT 0,
+        stat_progress TEXT NOT NULL DEFAULT '{}',
+        status TEXT NOT NULL,                -- alive | dead
+        created_at REAL NOT NULL,
+        died_at REAL,
+        death_run_id TEXT)""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_hr_char_alive_slot "
+    "ON hr_characters (owner_id, slot) WHERE status = 'alive'",
+    """CREATE TABLE IF NOT EXISTS hr_items (
+        item_id TEXT PRIMARY KEY,
+        owner_id TEXT NOT NULL,
+        base_id TEXT NOT NULL,
+        tier INTEGER NOT NULL,
+        kind TEXT NOT NULL,                  -- standard | unique
+        slot_count INTEGER NOT NULL,
+        enchants TEXT NOT NULL,              -- JSON [{"id": ..., "q": 0..1}]
+        content_version INTEGER NOT NULL,
+        origin TEXT NOT NULL,                -- drop | fusion | grant
+        origin_run_id TEXT,
+        origin_drop_id TEXT,
+        fused_from TEXT,                     -- JSON [a, b]
+        loc TEXT NOT NULL,                   -- vault | inventory | equipped | ground | destroyed
+        char_id TEXT,
+        run_id TEXT,
+        slot_index INTEGER,
+        destroyed_reason TEXT,               -- death | fusion | discard | run_end
+        destroyed_at REAL,
+        created_at REAL NOT NULL,
+        updated_at REAL NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1)""",
+    # THE DUPLICATION GUARD: a drop is minted once, however often its pickup is sent.
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_hr_items_drop "
+    "ON hr_items (origin_run_id, origin_drop_id)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_hr_items_vault_slot "
+    "ON hr_items (owner_id, slot_index) WHERE loc = 'vault'",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_hr_items_char_slot "
+    "ON hr_items (char_id, loc, slot_index) WHERE loc IN ('inventory', 'equipped')",
+    "CREATE INDEX IF NOT EXISTS idx_hr_items_owner ON hr_items (owner_id, loc)",
+    "CREATE INDEX IF NOT EXISTS idx_hr_items_run ON hr_items (run_id)",
+    """CREATE TABLE IF NOT EXISTS hr_runs (
+        run_id TEXT PRIMARY KEY,
+        char_id TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        dungeon_id TEXT NOT NULL,
+        seed TEXT NOT NULL,
+        content_version INTEGER NOT NULL,
+        status TEXT NOT NULL,                -- open | recalled | completed | died
+        started_at REAL NOT NULL,
+        last_event_at REAL NOT NULL,
+        last_seq INTEGER NOT NULL DEFAULT 0,
+        dungeon TEXT NOT NULL,               -- JSON: the server's generated dungeon
+        state TEXT NOT NULL,                 -- JSON: {"killed": [...], "picked": [...]}
+        refused TEXT NOT NULL DEFAULT '[]')""",
+    "CREATE INDEX IF NOT EXISTS idx_hr_runs_char ON hr_runs (char_id, status)",
+]
+
+
+def init_schema(conn) -> None:
+    cur = conn.cursor()
+    for stmt in SCHEMA:
+        cur.execute(stmt)
+    conn.commit()
+
+
+# ── row helpers ──────────────────────────────────────────────────────────────
+def _dicts(cur) -> list[dict]:
+    cols = [c[0] for c in (cur.description or [])]
+    return [dict(zip(cols, list(r))) for r in cur.fetchall()]
+
+
+def _one(cur, sql: str, params=()) -> dict | None:
+    cur.execute(sql, params)
+    rows = _dicts(cur)
+    return rows[0] if rows else None
+
+
+def _item_out(row: dict) -> dict:
+    out = dict(row)
+    out["enchants"] = json.loads(row["enchants"])
+    out["fused_from"] = json.loads(row["fused_from"]) if row.get("fused_from") else None
+    if row["loc"] == "equipped" and row["slot_index"] is not None:
+        out["equip_slot"] = C.EQUIP_SLOTS[row["slot_index"]]
+    return out
+
+
+def _require_owner(cur, owner_id: str, now: float) -> dict:
+    o = _one(cur, "SELECT * FROM hr_owners WHERE owner_id=?", (owner_id,))
+    if o is None:
+        raise HalcyonError("no such player")
+    cur.execute("UPDATE hr_owners SET last_seen_at=? WHERE owner_id=?", (now, owner_id))
+    return o
+
+
+def _require_char(cur, owner_id: str, char_id: str, alive: bool = True) -> dict:
+    ch = _one(cur, "SELECT * FROM hr_characters WHERE char_id=?", (char_id,))
+    if ch is None or ch["owner_id"] != owner_id:
+        raise HalcyonError("no such character")
+    if alive and ch["status"] != "alive":
+        raise HalcyonError("that character has fallen")
+    return ch
+
+
+def _require_item(cur, owner_id: str, item_id: str) -> dict:
+    it = _one(cur, "SELECT * FROM hr_items WHERE item_id=?", (item_id,))
+    if it is None or it["owner_id"] != owner_id:
+        raise HalcyonError("no such item")
+    if it["loc"] == "destroyed":
+        raise HalcyonError("that item no longer exists")
+    return it
+
+
+def _open_run(cur, char_id: str) -> dict | None:
+    return _one(cur, "SELECT * FROM hr_runs WHERE char_id=? AND status='open'", (char_id,))
+
+
+def _check_version(it: dict, expected: int | None) -> None:
+    if expected is not None and it["version"] != expected:
+        raise HalcyonError("that item changed; reload")
+
+
+# ── places ───────────────────────────────────────────────────────────────────
+# A place is a tuple, and the only spelling of one the store accepts:
+#   ("vault", i)  ("inventory", char_id, i)  ("equipped", char_id, slot_name)  ("ground", run_id)
+def _place_cols(owner_id: str, place: tuple) -> tuple[str, str | None, str | None, int | None]:
+    """(loc, char_id, run_id, slot_index) for a place, range-checked."""
+    kind = place[0] if place else None
+    if kind == "vault" and len(place) == 2:
+        i = place[1]
+        if not isinstance(i, int) or not 0 <= i < C.VAULT_SIZE:
+            raise HalcyonError("no such vault slot")
+        return "vault", None, None, i
+    if kind == "inventory" and len(place) == 3:
+        i = place[2]
+        if not isinstance(i, int) or not 0 <= i < C.INVENTORY_SIZE:
+            raise HalcyonError("no such inventory slot")
+        return "inventory", place[1], None, i
+    if kind == "equipped" and len(place) == 3:
+        if place[2] not in C.EQUIP_SLOTS:
+            raise HalcyonError("no such equipment slot")
+        return "equipped", place[1], None, C.EQUIP_SLOTS.index(place[2])
+    if kind == "ground" and len(place) == 2:
+        return "ground", None, place[1], None
+    raise HalcyonError("not a place")
+
+
+def _place_of(it: dict) -> tuple:
+    if it["loc"] == "vault":
+        return ("vault", it["slot_index"])
+    if it["loc"] == "inventory":
+        return ("inventory", it["char_id"], it["slot_index"])
+    if it["loc"] == "equipped":
+        return ("equipped", it["char_id"], C.EQUIP_SLOTS[it["slot_index"]])
+    if it["loc"] == "ground":
+        return ("ground", it["run_id"])
+    raise HalcyonError("that item is not anywhere")
+
+
+def _occupant(cur, owner_id: str, cols: tuple) -> dict | None:
+    loc, char_id, _run, slot = cols
+    if loc == "vault":
+        return _one(cur, "SELECT * FROM hr_items WHERE owner_id=? AND loc='vault' AND slot_index=?",
+                    (owner_id, slot))
+    if loc in ("inventory", "equipped"):
+        return _one(cur, "SELECT * FROM hr_items WHERE char_id=? AND loc=? AND slot_index=?",
+                    (char_id, loc, slot))
+    return None                                     # the ground holds any number
+
+
+def _check_fits(cur, it: dict, cols: tuple, ignore_item: str | None = None) -> None:
+    """May this item sit in this place? Equipment rules live here: the slot
+    family, the class, and one of each ring (design §11.2)."""
+    loc, char_id, _run, slot = cols
+    if loc != "equipped":
+        return
+    name = C.EQUIP_SLOTS[slot]
+    if not C.slot_fits(it["base_id"], name):
+        raise HalcyonError("that does not go in that slot")
+    ch = _one(cur, "SELECT class_id FROM hr_characters WHERE char_id=?", (char_id,))
+    need = C.base(it["base_id"])["cls"]
+    if need is not None and ch is not None and ch["class_id"] != need:
+        raise HalcyonError("that character's class cannot use it")
+    if name in ("ring1", "ring2"):
+        other = C.EQUIP_SLOTS.index("ring2" if name == "ring1" else "ring1")
+        twin = _one(cur, "SELECT item_id, base_id FROM hr_items WHERE char_id=? AND loc='equipped' "
+                         "AND slot_index=?", (char_id, other))
+        if twin and twin["item_id"] not in (it["item_id"], ignore_item) and twin["base_id"] == it["base_id"]:
+            raise HalcyonError("you cannot wear two of the same ring")
+
+
+def _set_place(cur, item_id: str, cols: tuple, now: float) -> None:
+    loc, char_id, run_id, slot = cols
+    cur.execute("UPDATE hr_items SET loc=?, char_id=?, run_id=?, slot_index=?, updated_at=?, "
+                "version=version+1 WHERE item_id=?", (loc, char_id, run_id, slot, now, item_id))
+
+
+def _move_with_swap(cur, owner_id: str, it: dict, cols: tuple, now: float) -> None:
+    """Put `it` at `cols`; whatever is there takes `it`'s old place. Validates
+    BOTH directions before writing anything."""
+    src = (it["loc"], it["char_id"], it["run_id"], it["slot_index"])
+    if src == cols:
+        return
+    there = _occupant(cur, owner_id, cols)
+    _check_fits(cur, it, cols, ignore_item=there["item_id"] if there else None)
+    if there is not None:
+        if src[0] == "ground":
+            raise HalcyonError("that slot is full")
+        _check_fits(cur, there, src, ignore_item=it["item_id"])
+        # Through limbo: the slot indexes are checked per statement.
+        cur.execute("UPDATE hr_items SET loc='limbo', slot_index=NULL WHERE item_id=?", (it["item_id"],))
+        _set_place(cur, there["item_id"], src, now)
+    _set_place(cur, it["item_id"], cols, now)
+
+
+def _destroy(cur, where_sql: str, params: tuple, reason: str, now: float) -> None:
+    cur.execute(f"UPDATE hr_items SET loc='destroyed', slot_index=NULL, destroyed_reason=?, "
+                f"destroyed_at=?, updated_at=?, version=version+1 "
+                f"WHERE loc != 'destroyed' AND ({where_sql})", (reason, now, now) + params)
+
+
+def _insert_item(cur, owner_id: str, spec: dict, origin: str, cols: tuple, now: float,
+                 run_id: str | None = None, drop_id: str | None = None,
+                 fused_from: list | None = None) -> str:
+    item_id = _new_id()
+    loc, char_id, place_run, slot = cols
+    cur.execute(
+        "INSERT INTO hr_items (item_id, owner_id, base_id, tier, kind, slot_count, enchants, "
+        "content_version, origin, origin_run_id, origin_drop_id, fused_from, loc, char_id, run_id, "
+        "slot_index, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (item_id, owner_id, spec["base_id"], spec["tier"], spec["kind"], spec["slot_count"],
+         json.dumps(spec["enchants"]), C.CONTENT_VERSION, origin, run_id, drop_id,
+         json.dumps(fused_from) if fused_from else None, loc, char_id, place_run, slot, now, now))
+    return item_id
+
+
+def _validate_spec(spec: dict) -> dict:
+    """An item description from the SERVER's own generator (never a client)."""
+    b = C.base(spec["base_id"])
+    tier, slots, ench = spec["tier"], spec["slot_count"], spec.get("enchants", [])
+    if tier not in C.TIERS:
+        raise HalcyonError("no such tier")
+    if not 0 <= slots <= C.MAX_ENCHANT_SLOTS or len(ench) != slots:
+        raise HalcyonError("enchantments do not match the slot count")
+    allowed = set(C.enchants_for(spec["base_id"]))
+    for e in ench:
+        if e["id"] not in allowed or not 0.0 <= float(e["q"]) <= 1.0:
+            raise HalcyonError("not a valid enchantment")
+    return {"base_id": spec["base_id"], "tier": tier, "kind": b["kind"], "slot_count": slots,
+            "enchants": [{"id": e["id"], "q": float(e["q"])} for e in ench]}
+
+
+def roll_enchants(base_id: str, slot_count: int, rng: random.Random) -> list[dict]:
+    pool = C.enchants_for(base_id)
+    picks = rng.sample(pool, min(slot_count, len(pool)))
+    return [{"id": e, "q": rng.random()} for e in picks]
+
+
+# ── owners and characters ────────────────────────────────────────────────────
+def _hash_secret(secret: str) -> str:
+    return hashlib.sha256(secret.encode()).hexdigest()
+
+
+def register_owner(connect, owner_id: str, kind: str, now: float | None = None) -> str | None:
+    """Create the roster's owner. For a GUEST, returns a secret — once — that the
+    device keeps beside its guest id and sends on every request (design §20.1).
+    Returns None for an account, or for an owner that already exists."""
+    if kind not in ("account", "guest"):
+        raise HalcyonError("not an owner kind")
+    now = _now(now)
+    with _tx(connect, owner_id) as cur:
+        if _one(cur, "SELECT owner_id FROM hr_owners WHERE owner_id=?", (owner_id,)):
+            return None
+        secret = secrets.token_urlsafe(24) if kind == "guest" else None
+        cur.execute("INSERT INTO hr_owners (owner_id, kind, guest_secret_hash, created_at, last_seen_at) "
+                    "VALUES (?,?,?,?,?)", (owner_id, kind, _hash_secret(secret) if secret else None, now, now))
+        return secret
+
+
+def verify_guest(connect, owner_id: str, secret: str) -> bool:
+    conn = connect()
+    try:
+        o = _one(conn.cursor(), "SELECT kind, guest_secret_hash FROM hr_owners WHERE owner_id=?", (owner_id,))
+    finally:
+        conn.close()
+    if not o or o["kind"] != "guest" or not o["guest_secret_hash"] or not secret:
+        return False
+    return secrets.compare_digest(o["guest_secret_hash"].encode(), _hash_secret(secret).encode())
+
+
+def create_character(connect, owner_id: str, slot: int, class_id: str, now: float | None = None,
+                     starter: list[tuple[dict, str]] | None = None) -> dict:
+    """A new character, optionally with `starter` gear [(spec, equip_slot)]
+    minted onto it in the SAME transaction — a character never exists without it."""
+    if class_id not in C.CLASSES:
+        raise HalcyonError("no such class")
+    if not isinstance(slot, int) or not 0 <= slot < C.CHARACTER_SLOTS:
+        raise HalcyonError("no such character slot")
+    now = _now(now)
+    starter = [(_validate_spec(s), e) for s, e in (starter or [])]
+    with _tx(connect, owner_id) as cur:
+        _require_owner(cur, owner_id, now)
+        if _one(cur, "SELECT char_id FROM hr_characters WHERE owner_id=? AND slot=? AND status='alive'",
+                (owner_id, slot)):
+            raise HalcyonError("that slot already has a character")
+        char_id = _new_id()
+        cur.execute("INSERT INTO hr_characters (char_id, owner_id, slot, class_id, status, created_at) "
+                    "VALUES (?,?,?,?, 'alive', ?)", (char_id, owner_id, slot, class_id, now))
+        for spec, equip in starter:
+            cols = _place_cols(owner_id, ("equipped", char_id, equip))
+            probe = {"item_id": "", "base_id": spec["base_id"]}
+            _check_fits(cur, probe, cols)
+            _insert_item(cur, owner_id, spec, "grant", cols, now)
+        return _one(cur, "SELECT * FROM hr_characters WHERE char_id=?", (char_id,))
+
+
+def grant_item(connect, owner_id: str, spec: dict, place: tuple, now: float | None = None) -> dict:
+    """Mint an item from nothing — starter gear and admin grants only."""
+    now = _now(now)
+    spec = _validate_spec(spec)
+    with _tx(connect, owner_id) as cur:
+        _require_owner(cur, owner_id, now)
+        cols = _place_cols(owner_id, place)
+        if cols[0] not in ("vault", "inventory"):
+            raise HalcyonError("grants go to the vault or an inventory")
+        if cols[1] is not None:
+            ch = _require_char(cur, owner_id, cols[1])
+            if _open_run(cur, ch["char_id"]):
+                raise HalcyonError("that character is in a dungeon")
+        if _occupant(cur, owner_id, cols):
+            raise HalcyonError("that slot is full")
+        item_id = _insert_item(cur, owner_id, spec, "grant", cols, now)
+        return _item_out(_one(cur, "SELECT * FROM hr_items WHERE item_id=?", (item_id,)))
+
+
+# ── runs ─────────────────────────────────────────────────────────────────────
+def _close_run(cur, run: dict, status: str, now: float) -> None:
+    """End a run. A death destroys the character and everything on it; every
+    ending destroys what was left on the run's floor. The vault is never touched."""
+    if status == "died":
+        _destroy(cur, "char_id=? AND loc IN ('inventory','equipped')", (run["char_id"],), "death", now)
+        _destroy(cur, "loc='ground' AND run_id=?", (run["run_id"],), "death", now)
+        cur.execute("UPDATE hr_characters SET status='dead', died_at=?, death_run_id=? WHERE char_id=?",
+                    (now, run["run_id"], run["char_id"]))
+    else:
+        _destroy(cur, "loc='ground' AND run_id=?", (run["run_id"],), "run_end", now)
+    cur.execute("UPDATE hr_runs SET status=?, last_event_at=? WHERE run_id=?", (status, now, run["run_id"]))
+
+
+def _validate_dungeon(dungeon: dict) -> dict:
+    enemies = dungeon.get("enemies") or {}
+    boss = dungeon.get("boss")
+    if boss is not None and boss not in enemies:
+        raise HalcyonError("the boss is not one of the enemies")
+    drops = {}
+    for drop_id, d in (dungeon.get("drops") or {}).items():
+        if d.get("enemy") is not None and d["enemy"] not in enemies:
+            raise HalcyonError("a drop names an enemy that is not there")
+        drops[str(drop_id)] = {**_validate_spec(d), "enemy": d.get("enemy")}
+    return {"enemies": {str(k): v for k, v in enemies.items()}, "boss": boss, "drops": drops}
+
+
+def start_run(connect, owner_id: str, char_id: str, dungeon_id: str, seed: str, dungeon: dict,
+              now: float | None = None) -> dict:
+    """Begin a run with a dungeon the SERVER generated. A run this character
+    left open (a closed tab) is closed first, as a recall (design §13.1a)."""
+    now = _now(now)
+    dungeon = _validate_dungeon(dungeon)
+    with _tx(connect, owner_id) as cur:
+        _require_owner(cur, owner_id, now)
+        _require_char(cur, owner_id, char_id)
+        prior = _open_run(cur, char_id)
+        if prior:
+            _close_run(cur, prior, "recalled", now)
+        run_id = _new_id()
+        cur.execute("INSERT INTO hr_runs (run_id, char_id, owner_id, dungeon_id, seed, content_version, "
+                    "status, started_at, last_event_at, dungeon, state) VALUES (?,?,?,?,?,?, 'open', ?,?,?,?)",
+                    (run_id, char_id, owner_id, dungeon_id, str(seed), C.CONTENT_VERSION, now, now,
+                     json.dumps(dungeon), json.dumps({"killed": [], "picked": []})))
+        return {"run_id": run_id, "dungeon": dungeon}
+
+
+def open_character(connect, owner_id: str, char_id: str, now: float | None = None) -> dict:
+    """The character is opened in town: an open run it left behind ends as a recall."""
+    now = _now(now)
+    with _tx(connect, owner_id) as cur:
+        _require_owner(cur, owner_id, now)
+        ch = _require_char(cur, owner_id, char_id)
+        run = _open_run(cur, char_id)
+        if run:
+            _close_run(cur, run, "recalled", now)
+        return ch
+
+
+class _Refused(Exception):
+    pass
+
+
+def _apply_one(cur, run: dict, dungeon: dict, state: dict, ev: dict, now: float) -> str | None:
+    """Apply one run event. Validates fully BEFORE writing, so a refusal never
+    leaves half an event behind. Returns the run's new status if the event ended it."""
+    owner, char_id, run_id = run["owner_id"], run["char_id"], run["run_id"]
+    t = ev.get("type")
+    if t == "kill":
+        e = str(ev.get("enemy"))
+        if e not in dungeon["enemies"] or e in state["killed"]:
+            raise _Refused
+        state["killed"].append(e)
+    elif t == "pickup":
+        d = str(ev.get("drop"))
+        drop = dungeon["drops"].get(d)
+        if drop is None or d in state["picked"]:
+            raise _Refused
+        if drop["enemy"] is not None and drop["enemy"] not in state["killed"]:
+            raise _Refused                           # nothing dropped it yet
+        try:
+            cols = _place_cols(owner, ("inventory", char_id, ev.get("slot")))
+        except HalcyonError:
+            raise _Refused
+        if _occupant(cur, owner, cols):
+            raise _Refused
+        state["picked"].append(d)
+        _insert_item(cur, owner, drop, "drop", cols, now, run_id=run_id, drop_id=d)
+    elif t in ("pickup_item", "drop_item", "move"):
+        it = _one(cur, "SELECT * FROM hr_items WHERE item_id=?", (str(ev.get("item")),))
+        if it is None or it["owner_id"] != owner:
+            raise _Refused
+        on_me = it["loc"] in ("inventory", "equipped") and it["char_id"] == char_id
+        on_floor = it["loc"] == "ground" and it["run_id"] == run_id
+        if t == "drop_item":
+            if not on_me:
+                raise _Refused
+            _set_place(cur, it["item_id"], ("ground", None, run_id, None), now)
+            return None
+        if t == "pickup_item" and not on_floor:
+            raise _Refused
+        if t == "move" and not on_me:
+            raise _Refused
+        to = ev.get("to") if t == "move" else ["inventory", ev.get("slot")]
+        if not isinstance(to, (list, tuple)) or len(to) != 2 or to[0] not in ("inventory", "equipped"):
+            raise _Refused
+        try:
+            cols = _place_cols(owner, (to[0], char_id, to[1]))
+            _move_with_swap(cur, owner, it, cols, now)
+        except HalcyonError:
+            raise _Refused
+    elif t == "death":
+        return "died"
+    elif t == "recall":
+        return "recalled"
+    elif t == "complete":
+        if dungeon["boss"] is None or dungeon["boss"] not in state["killed"]:
+            raise _Refused
+        return "completed"
+    else:
+        raise _Refused
+    return None
+
+
+def apply_events(connect, owner_id: str, run_id: str, events: list[dict], now: float | None = None) -> dict:
+    """Apply a batch of run events (design §18.4), as one transaction.
+
+    Each event carries `seq`, numbered from 1 per run. Anything at or below the
+    run's last applied number is skipped, so re-sending is always safe; a gap
+    stops the batch there (the client re-sends from where the server is). An
+    event the server will not accept is RECORDED AS REFUSED and the sequence
+    moves past it — a client stuck re-sending a refused event forever would
+    never deliver anything after it. A closed run accepts nothing.
+    """
+    now = _now(now)
+    with _tx(connect, owner_id) as cur:
+        run = _one(cur, "SELECT * FROM hr_runs WHERE run_id=?", (run_id,))
+        if run is None or run["owner_id"] != owner_id:
+            raise HalcyonError("no such run")
+        if run["status"] != "open":
+            return {"status": run["status"], "last_seq": run["last_seq"], "refused": json.loads(run["refused"])}
+        _require_owner(cur, owner_id, now)
+        dungeon, state = json.loads(run["dungeon"]), json.loads(run["state"])
+        refused = json.loads(run["refused"])
+        last, status = run["last_seq"], "open"
+        for ev in sorted((e for e in events if isinstance(e, dict) and isinstance(e.get("seq"), int)),
+                         key=lambda e: e["seq"]):
+            if ev["seq"] <= last:
+                continue
+            if ev["seq"] != last + 1:
+                break
+            try:
+                ended = _apply_one(cur, run, dungeon, state, ev, now)
+            except _Refused:
+                refused.append(ev["seq"])
+                ended = None
+            last = ev["seq"]
+            if ended:
+                status = ended
+                break
+        cur.execute("UPDATE hr_runs SET last_seq=?, last_event_at=?, state=?, refused=? WHERE run_id=?",
+                    (last, now, json.dumps(state), json.dumps(refused), run_id))
+        if status != "open":
+            _close_run(cur, run, status, now)
+        return {"status": status, "last_seq": last, "refused": refused}
+
+
+def sweep_runs(connect, now: float | None = None, max_idle: float = 24 * 3600) -> int:
+    """Close runs nobody has touched for `max_idle` as recalls. Tidiness only:
+    opening the character closes its run anyway."""
+    now = _now(now)
+    conn = connect()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT run_id, owner_id FROM hr_runs WHERE status='open' AND last_event_at < ?",
+                    (now - max_idle,))
+        stale = _dicts(cur)
+    finally:
+        conn.close()
+    closed = 0
+    for r in stale:
+        with _tx(connect, r["owner_id"]) as cur:
+            run = _one(cur, "SELECT * FROM hr_runs WHERE run_id=?", (r["run_id"],))
+            if run and run["status"] == "open" and run["last_event_at"] < now - max_idle:
+                _close_run(cur, run, "recalled", now)
+                closed += 1
+    return closed
+
+
+# ── town ─────────────────────────────────────────────────────────────────────
+def _town_item(cur, owner_id: str, item_id: str, expected_version: int | None) -> dict:
+    it = _require_item(cur, owner_id, item_id)
+    _check_version(it, expected_version)
+    if it["loc"] not in ("vault", "inventory", "equipped"):
+        raise HalcyonError("that item is not in town")
+    if it["char_id"] is not None:
+        _require_char(cur, owner_id, it["char_id"])
+        if _open_run(cur, it["char_id"]):
+            raise HalcyonError("that character is in a dungeon")
+    return it
+
+
+def move_item(connect, owner_id: str, item_id: str, to: tuple, expected_version: int | None = None,
+              now: float | None = None) -> dict:
+    """Vault <-> inventory <-> equipment, swapping with whatever is there."""
+    now = _now(now)
+    with _tx(connect, owner_id) as cur:
+        _require_owner(cur, owner_id, now)
+        it = _town_item(cur, owner_id, item_id, expected_version)
+        cols = _place_cols(owner_id, tuple(to))
+        if cols[0] == "ground":
+            raise HalcyonError("there is no floor in town")
+        if cols[1] is not None:
+            _require_char(cur, owner_id, cols[1])
+            if _open_run(cur, cols[1]):
+                raise HalcyonError("that character is in a dungeon")
+        _move_with_swap(cur, owner_id, it, cols, now)
+        return _item_out(_one(cur, "SELECT * FROM hr_items WHERE item_id=?", (item_id,)))
+
+
+def discard(connect, owner_id: str, item_id: str, expected_version: int | None = None,
+            now: float | None = None) -> None:
+    now = _now(now)
+    with _tx(connect, owner_id) as cur:
+        _require_owner(cur, owner_id, now)
+        _town_item(cur, owner_id, item_id, expected_version)
+        _destroy(cur, "item_id=?", (item_id,), "discard", now)
+
+
+def fuse(connect, owner_id: str, a: str, b: str, rng: random.Random | None = None,
+         expected_versions: tuple[int, int] | None = None, now: float | None = None) -> dict:
+    """Two identical items in, one rerolled item out (design §11.7), all or
+    nothing. The result takes the first item's place."""
+    if a == b:
+        raise HalcyonError("pick two different items")
+    rng = rng or random.Random(secrets.randbits(64))
+    now = _now(now)
+    with _tx(connect, owner_id) as cur:
+        _require_owner(cur, owner_id, now)
+        ev = expected_versions or (None, None)
+        ia = _town_item(cur, owner_id, a, ev[0])
+        ib = _town_item(cur, owner_id, b, ev[1])
+        for k in ("base_id", "tier", "kind", "slot_count"):
+            if ia[k] != ib[k]:
+                raise HalcyonError("only identical items fuse")
+        slots = ia["slot_count"]
+        for gain, p in C.FUSE_SLOT_GAIN:
+            if rng.random() < p:
+                slots = min(C.MAX_ENCHANT_SLOTS, slots + gain)
+                break
+        spec = {"base_id": ia["base_id"], "tier": ia["tier"], "kind": ia["kind"], "slot_count": slots,
+                "enchants": roll_enchants(ia["base_id"], slots, rng)}
+        spec["slot_count"] = len(spec["enchants"])     # a small pool can cap it
+        place = (ia["loc"], ia["char_id"], ia["run_id"], ia["slot_index"])
+        _destroy(cur, "item_id IN (?, ?)", (a, b), "fusion", now)
+        new_id = _insert_item(cur, owner_id, spec, "fusion", place, now, fused_from=[a, b])
+        return _item_out(_one(cur, "SELECT * FROM hr_items WHERE item_id=?", (new_id,)))
+
+
+# ── reading and pruning ──────────────────────────────────────────────────────
+def owner_view(connect, owner_id: str) -> dict:
+    conn = connect()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM hr_characters WHERE owner_id=? ORDER BY created_at", (owner_id,))
+        chars = _dicts(cur)
+        cur.execute("SELECT * FROM hr_items WHERE owner_id=? AND loc != 'destroyed'", (owner_id,))
+        items = [_item_out(r) for r in _dicts(cur)]
+        cur.execute("SELECT run_id, char_id FROM hr_runs WHERE owner_id=? AND status='open'", (owner_id,))
+        runs = {r["char_id"]: r["run_id"] for r in _dicts(cur)}
+    finally:
+        conn.close()
+    return {"characters": [c for c in chars if c["status"] == "alive"],
+            "fallen": [c for c in chars if c["status"] == "dead"],
+            "items": items, "open_runs": runs}
+
+
+def prune_guests(connect, now: float | None = None, max_idle: float = 24 * 3600) -> int:
+    """Remove guest rosters idle for `max_idle` (design §7.1) — every row, not
+    tombstones: a pruned guest has nobody to answer "where did it go" for."""
+    now = _now(now)
+    conn = connect()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT owner_id FROM hr_owners WHERE kind='guest' AND last_seen_at < ?", (now - max_idle,))
+        gone = [r["owner_id"] for r in _dicts(cur)]
+    finally:
+        conn.close()
+    pruned = 0
+    for owner in gone:
+        with _tx(connect, owner) as cur:
+            o = _one(cur, "SELECT last_seen_at FROM hr_owners WHERE owner_id=?", (owner,))
+            if not o or o["last_seen_at"] >= now - max_idle:
+                continue                             # came back while we looked
+            for table in ("hr_items", "hr_runs", "hr_characters", "hr_owners"):
+                cur.execute(f"DELETE FROM {table} WHERE owner_id=?", (owner,))
+            pruned += 1
+    return pruned

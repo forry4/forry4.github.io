@@ -86,6 +86,25 @@ Avoid:
 - effects that hide the player;
 - decorative particles that resemble damage.
 
+### 2.3 Color roles — RECOMMENDED (2026-11-18)
+
+With lethal burst damage in the design (game design §8.3), a player has to tell **danger** from **everything else** at a glance. Assign every hue family one job and keep it:
+
+| Role | Hue family | Value / saturation |
+|---|---|---|
+| Environment (floor, walls, props) | each dungeon's own ground color (purple-gray stone for deep dungeons, muted sand and gray-green for the daylit Shallows) | low saturation — always the quietest thing on screen |
+| Player + player shots + player abilities | cyan, blue, white | bright; the player needs a light rim or accent so it never sinks into the floor |
+| Enemies + **all** enemy projectiles and telegraphs | red, orange, hot magenta | brightest and most saturated on screen; a projectile is a bright core inside a dark outline |
+| Pickups and loot | gold, green | bright but never warm-red |
+| Bosses | free body color, but their attacks follow the enemy row | — |
+
+What this means for the approved style board ([`halcyon-rift-style-board.webp`](halcyon-rift-style-board.webp)):
+
+- **The player is purple on a purple floor.** Keep the robe if it is liked, but add a cyan/white accent or rim so the silhouette separates from the room.
+- **The health potion is red**, the same family as the enemy slime and enemy eyes. Move recovery pickups to the pickup row (green or gold), or a player will hesitate at the one object they should run to.
+- **The torches are bright orange flames** — decorative fire in the exact family enemy projectiles will use. Keep light sources in the room, but dimmer and less saturated than any enemy shot.
+- The blue orb and blue flame ring already sit in the player row, which is right.
+
 ## 3. Provisional technical art standards
 
 These values are starting points for the style test, not permanent commitments.
@@ -109,7 +128,7 @@ Do not rely on the AI model to produce perfect tiny pixel art directly.
 
 Recommended initial test:
 
-- eight directional character poses;
+- three drawn facings for the player — down, up and side, with the other side made by mirroring (revised 2026-11-18 from eight directions: eight directions times six animation states is the hardest possible consistency problem for AI generation, and at this sprite size the extra four facings are barely visible);
 - two to four idle frames;
 - four to six walking frames;
 - a short attack animation;
@@ -300,18 +319,19 @@ Keep the boss recognizable even when its effects are active.
 
 ### 7.4 Environments
 
-Prefer AI-generated complete room templates over unconstrained AI-generated tiles during the initial phase.
+Revised 2026-11-18: **rooms are built from a tileset, not generated as whole images.**
 
-Workflow:
+The original plan generated each room as one image and then mirrored and rotated rooms procedurally. With a slightly angled camera and a consistent light direction, rotating a room breaks both — walls show their front faces and the light swings around. A whole-image room also needs its collision traced by hand, and every new layout is a new generation.
 
-1. Generate a room concept.
-2. Select a coherent set of rooms.
-3. Clean their edges and perspective.
-4. Define collision separately from the art.
-5. Add decorative variants.
-6. Assemble rooms procedurally.
+Instead:
 
-A formal tileset can be derived later if greater map flexibility is needed.
+1. **Light comes from above** (straight down, slightly toward the viewer), so mirroring a room left-to-right changes nothing about the lighting. Shadows fall straight below objects, as on the style board.
+2. **Rooms may be mirrored left-to-right. They are never rotated or flipped top-to-bottom.**
+3. Build a **small tileset** — floor variants, wall tops and faces, corners, door gaps, water/edge — plus separate prop sprites (torches, barrels, crates, rubble).
+4. Lay out rooms in a tile editor (Tiled, free, exports JSON). Collision comes from the tiles; spawn points, loot points, entry/exit and the boss marker are an object layer in the same file — so art and gameplay data live side by side but separately.
+5. Variety comes from many cheap authored layouts × mirroring × spawn sets × prop variants, rather than from rotation.
+
+AI is still useful here — for the tile and prop art, and for room *concepts* to lay out by hand — but expect hand cleanup: AI output is rarely seamless enough to tile.
 
 ### 7.5 Projectiles and effects
 
@@ -442,9 +462,10 @@ Only after those are approved should we begin producing a full class, dungeon, o
 
 Use an AI-generated, reference-controlled, crisp 2D pixel-style pipeline with:
 
-- one complete skin per class;
+- one complete skin per class, three drawn facings plus mirroring;
 - no character equipment layers;
-- authored room templates;
+- rooms built from a tileset in a tile editor, mirrored left-to-right only, lit from above (§7.4);
+- the color roles in §2.3;
 - limited palettes;
 - reference-guided generation;
 - large-source generation followed by standardized pixelization;

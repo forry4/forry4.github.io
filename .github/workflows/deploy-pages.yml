@@ -39,6 +39,7 @@ on:
       - 'lolstats/**'
       - 'animefilter/**'
       - 'boxpuzzles/**'
+      - 'halcyon/**'
       - 'shared/**'
       - '.github/workflows/deploy-pages.yml'
       # Docs never reach the bundle — nothing in the build imports markdown, and the

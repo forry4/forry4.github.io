@@ -33,6 +33,10 @@ export const GAME_CATALOG = [
 	{ id: "secretnames", name: "SecretNames", status: "ready", screen: "secretnames", players: "2 players" },
 	{ id: "pinch", name: "Pinch", status: "ready", screen: "pinch", players: "1–2 players" },
 	{ id: "pipmarket", name: "Pip Market", status: "ready", screen: "pipmarket", players: "1–4 players" },
+	// A catalog game CODED LIKE AN EXTRA (docs/halcyon-rift-game-design.md §20a): a
+	// solo ARPG with no lobby, no table and no win/loss, so it lives in halcyon/ and
+	// is exempt from the table-game gates (test_profile_results, LOBBY_PAGES).
+	{ id: "halcyon", name: "Halcyon Rift", status: "ready", adminOnly: true, screen: "halcyon", players: "1 player" },
 ].map((g) => ({ ...g, accent: GAME_ACCENTS[g.id] }));
 
 // Keyed lookup, for the lobbies — a lobby knows its own id and nothing else.
