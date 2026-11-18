@@ -1182,7 +1182,7 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
     const bon = bonusesOf(p, cardsById);
     const active = !over && (game.pending_pid || game.turn) === pid;
     return (
-      <div className={`duel-panel duel-player${active ? " active" : ""}`} key={pid}>
+      <div className={`fg-panel duel-panel duel-player${active ? " active fg-lit" : ""}`} key={pid}>
         <div className="hd">
           <span className="nm">
             {names[pid] || pid}{isMe ? " (you)" : ""}
@@ -1248,7 +1248,7 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
   // The pyramid uses SPENDER's level-row + deck-pile + card (shared/splendor.jsx), so
   // the rows fit and scale by the same proven mechanism Spender's board uses.
   const renderPyramid = () => (
-    <div className="duel-panel" data-pyramid>
+    <div className="fg-panel duel-panel" data-pyramid>
       {[3, 2, 1].map((lvl) => {
         const left = game.deck_counts?.[String(lvl)] || 0;
         const canDraw = goldCell != null && left > 0;
@@ -1278,7 +1278,7 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
   );
 
   const renderBoard = () => (
-    <div className="duel-panel duel-board-wrap">
+    <div className="fg-panel duel-panel duel-board-wrap">
       <div className="duel-board-meta">
         <Scroll n={game.privileges_board} title="Privileges available above the board" />
         <DuelBag count={game.bag_count} />
@@ -1392,8 +1392,8 @@ export default function SpenderDuel({ myId, authUser, onExit, offline = null }) 
     const log = liveGame?.log || [];
     const shownLen = reviewing ? replaySnapshots[replayTurn].log_len : log.length;
     return (
-      <div className={`duel-panel log-panel${logOpen ? " open" : ""}`}>
-        <div className="panel-title duel-log-head" onClick={() => setLogOpen((o) => !o)}
+      <div className={`fg-panel duel-panel log-panel${logOpen ? " open" : ""}`}>
+        <div className="fg-label panel-title duel-log-head" onClick={() => setLogOpen((o) => !o)}
           role="button" aria-expanded={logOpen} title={logOpen ? "Close the log" : "Open the full log"}>
           Log <span className="duel-log-caret" aria-hidden="true">{logOpen ? "▾" : "▴"}</span>
         </div>

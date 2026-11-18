@@ -727,7 +727,7 @@ function FighterCard({ fid, state, board, active, fx, beatKey, scale, onInfo }) 
 
 function TeamSide({ label, mine, team, fighters, catalog, activeSlot, fxSlots, beatKey, scale, onInfo }) {
   return (
-    <div className={`rt-side${mine ? " rt-mine" : ""}`}>
+    <div className={`fg-panel rt-side${mine ? " rt-mine" : ""}`}>
       <div className="rt-side-hd">
         <span className="rt-side-name">{label}</span>
         <span className="rt-side-tag">{mine ? "your team" : "their team"}</span>
@@ -1984,7 +1984,7 @@ export default function RagTag({ myId, authUser, onExit }) {
             />}
 
             {fightOn ? (
-              <section className="rt-stage">
+              <section className="fg-panel rt-stage">
                 <header className="rt-stage-hd">
                   <span className="rt-round">
                     Round <b>{game?.round}</b>
@@ -2117,7 +2117,7 @@ export default function RagTag({ myId, authUser, onExit }) {
 
             {/* ── Prompts. Every one of them is "you owe a submission". ── */}
             {!over && owes === "pending" && game?.pending && (
-              <div className="rt-prompt">
+              <div className="fg-panel fg-lit rt-prompt">
                 <h3><Icon name="spirit" />Choose your next Character</h3>
                 <p>Their marker goes on the top space of their track, and its icon applies at once.</p>
                 <div className="rt-picks">
@@ -2134,7 +2134,7 @@ export default function RagTag({ myId, authUser, onExit }) {
             )}
 
             {!over && owes === "draft" && (
-              <div className="rt-prompt">
+              <div className="fg-panel fg-lit rt-prompt">
                 <h3><Icon name="win" />
                   {game.draft_round === 2 ? "Your second fighter" : "Your first fighter"}
                   <span className="rt-step-of">fighter {game.draft_round === 2 ? 2 : 1} of 2</span>
@@ -2181,7 +2181,7 @@ export default function RagTag({ myId, authUser, onExit }) {
             )}
 
             {!over && owes === "order" && (
-              <div className="rt-prompt">
+              <div className="fg-panel fg-lit rt-prompt">
                 <h3><Icon name="again" />Who leads?</h3>
                 <p>Whoever you pick plays their Starting Card first.</p>
                 <div className="rt-picks rt-picks-wide">
@@ -2257,7 +2257,7 @@ export default function RagTag({ myId, authUser, onExit }) {
                 : null;
 
               return (
-                <div className="rt-prompt">
+                <div className="fg-panel fg-lit rt-prompt">
                   <h3><Icon name="plant_scheme" />Build your deck</h3>
                   <p>
                     The two you do not keep go to the bottom of your Build Deck.
@@ -2327,7 +2327,7 @@ export default function RagTag({ myId, authUser, onExit }) {
             )}
 
             {over && atEnd && (
-              <div className={`rt-over rt-over-${game.winner === "draw" ? "draw" : game.winner === mySeat ? "win" : "lose"}`}>
+              <div className={`fg-panel fg-lit rt-over rt-over-${game.winner === "draw" ? "draw" : game.winner === mySeat ? "win" : "lose"}`}>
                 <span className="rt-over-crest"><Icon name="win" /></span>
                 <h2>
                   {game.winner === "draw" ? "A draw"
@@ -2354,7 +2354,7 @@ export default function RagTag({ myId, authUser, onExit }) {
               Only what has actually been watched. Stepping back does not erase
               it: the log is the record of the fight, the stage is the moment. */}
           <aside className={`rt-rail${roundRows.length || pastRounds.length ? "" : " rt-rail-empty"}`}>
-            <div className="rt-log">
+            <div className="fg-panel rt-log">
               <header className="rt-log-hd"><Icon name="track" />Battle log</header>
               <div className="rt-log-body" ref={logRef}>
                 {pastRounds.map((r) => (

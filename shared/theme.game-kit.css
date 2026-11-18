@@ -98,9 +98,12 @@
 .fg-log-row{
   font-size:.92rem;line-height:1.4;
   padding:5px 0;
-  color:var(--g-text-soft,var(--text-soft));
+  color:var(--g-row-ink,var(--g-text-soft,var(--text-soft)));
   border-bottom:1px solid rgba(255,240,215,.05);
 }
 /* A row that marks a turn or round boundary, and a row that records nothing happening. */
-.fg-log-row.fg-log-head{color:var(--g-label,var(--gold));}
-.fg-log-row.fg-log-quiet{color:var(--text-dim);}
+.fg-log-row.fg-log-head{color:var(--g-row-ink,var(--g-label,var(--gold)));}
+.fg-log-row.fg-log-quiet{color:var(--g-row-ink,var(--text-dim));}
+/* --g-row-ink is the ONE log knob a game gets: set it on a row to tint what that row
+   records (SecretNames colors a line by the card it turned up). It is a custom
+   property, so the text gate allows it; the color itself stays the kit's to apply. */

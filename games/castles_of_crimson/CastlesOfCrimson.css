@@ -106,8 +106,9 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-res b{color:var(--text)}
 .coc-res-ic{font-size:1.15rem;line-height:1}
 /* A lit SURFACE, not a box: a hairline edge, light from the top, a long soft shadow. */
-.coc-panel{background:linear-gradient(180deg,rgba(255,225,225,.03),rgba(255,225,225,.008)),var(--surface);border:1px solid rgba(255,220,220,.06);border-radius:16px;padding:12px;box-shadow:inset 0 1px 0 rgba(255,230,230,.05),0 18px 40px -30px #000}
-.coc-panel h3{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;letter-spacing:.16em;color:var(--gold);text-transform:uppercase;margin-bottom:10px}
+.coc-panel{padding:12px}
+/* Panel titles are the kit's fg-label; only the gap under them is CoC's. */
+.coc-panel h3{margin-bottom:10px}
 .coc-depots{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
 /* A depot is a PLACE on the board, not a box: its tiles sit on a faint pool of light, so
    the six read as spots on one board. The border stays (transparent) so nothing moves. */

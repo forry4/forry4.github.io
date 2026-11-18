@@ -539,18 +539,30 @@ is fine; a game looking like a different PRODUCT is what the owner called jarrin
   ground, edge, corner and shadow; `fg-lit` the live edge; `fg-label` (+ `fg-label-soft` for a
   caption under a name or a number) the small-caps title; `fg-log-row` (+ `fg-log-head`,
   `fg-log-quiet`) one log line; and the buttons, which now read `--g-accent`/`--g-ink`. A
-  game keeps its MATERIAL — board, pieces, cards, art and the layout of all of them — and the
-  house games' own panels stayed theirs, since the kit was derived FROM them.
+  game keeps its MATERIAL — board, pieces, cards, art and the layout of all of them. **All
+  twelve boards' panels are `fg-panel`, the house games' included** (Spender's `.panel` and
+  player boxes, Duel's `.duel-panel`, Dontminion's five, CoC's `.coc-panel`, Rag Tag's five):
+  they carried their own copies of the recipe the kit was derived from, and copies drift. What
+  a house game kept is what is really its own — Rag Tag's grain layer and its brown ground
+  (set as `--g-ground`), CoC's padding.
+- **A log row may be tinted, through ONE knob: `--g-row-ink`** on the row. The kit applies it
+  (`.fg-log-row`, `-head`, `-quiet` all read it first); a game that sets `color` on a log row
+  is refused. SecretNames colors each line by the card it turned up this way.
 - **Two gates, the lobby-chrome split again.** `shared/tests/test_game_kit.py` reads the JSX for
   every element wearing a kit class and refuses a kit-owned property on any rule whose last
   compound names one of its co-classes or a kit class itself, with a `SANCTIONED` map that fails
-  a row once nothing needs it (today: the two phone-docked sheets, Pip Market's `.pm-actions` and
-  SecretNames' `.sn-console`). `gameKit` in `webapp/test/screens.mjs` enters ten vs-AI boards and
-  asserts the kit's COMPUTED typography and construction are identical across them. The second is
+  a row once nothing needs it (today: the phone-docked sheets — Pip Market's `.pm-actions`,
+  SecretNames' `.sn-console`, Duel's opened log — and Spender's phone nobles row, which sheds
+  its panel). It reads a `className` EXPRESSION as well as a plain string (every class word a
+  `{"a" + (x ? " b" : "")}` or a template's `${}` arms can produce), and a selector that ends in
+  a bare tag (`.or-log h2`) is resolved against the elements that tag reaches in the JSX — both
+  were blind spots that let a repaint through. `gameKit` in `webapp/test/screens.mjs` enters ten
+  vs-AI boards, plus SecretNames and Where Wolf? seated by two and three browser contexts
+  through the invite link, and asserts the kit's COMPUTED typography and construction are
+  identical across them. The second is
   not optional, and it proved it on its first run: Orbit's `.or-sideboards > section` and
   `.or-game .or-log h2` name no kit class, and they had put the log back on 4px corners and its
-  title back in Chakra Petch while the text gate was green. SecretNames and Where Wolf? have no
-  bot, so the render gate cannot seat them; the text gate holds them.
+  title back in Chakra Petch while the text gate was green.
 - **Extras stay off `fg-table` on purpose.** Box Puzzles is a game and wears it; Books, Notes,
   the four filters, Astral, Profile and Site health are reading and tool pages with no table,
   panel row or log. They already use the house faces and the kit buttons, and the text gate's

@@ -153,7 +153,8 @@
 .or-sideboards > section:where(:not(.fg-panel)),
 .or-score-rail {
   border: 1px solid var(--or-line);
-  border-radius: 15px;
+  /* The kit's panel corner, so the log (a kit panel) and its neighbors match. */
+  border-radius: var(--radius-lg, 14px);
   background: var(--or-panel);
   box-shadow: 0 12px 40px rgba(0, 0, 0, .24);
 }
@@ -1326,9 +1327,6 @@
     linear-gradient(145deg, rgba(25, 30, 54, .93), rgba(12, 15, 31, .93));
 }
 .orbit.or-game .or-influence { background: radial-gradient(ellipse at 50% 0, rgba(66, 209, 199, .07), transparent 70%), rgba(12, 15, 31, .9) !important; }
-.or-game .or-table > section:where(:not(.fg-panel)),
-.or-game .or-board-main > section:where(:not(.fg-panel)),
-.or-game .or-sideboards > section:where(:not(.fg-panel)),
 .or-game .or-score-rail .or-player { border-radius: 4px; }
 .or-game .or-board-main > section:where(:not(.fg-panel)),
 .or-game .or-sideboards > section:where(:not(.fg-panel)) {

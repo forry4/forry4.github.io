@@ -2514,7 +2514,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
             together (3 columns on wide screens, 2+1 on medium, stacked on phones). */}
         <div className="coc-game-cols">
         {/* Shared board: 6 numbered depots arranged as a hexagon, black depot centered */}
-        <div className="coc-panel coc-board-panel coc-col-board">
+        <div className="fg-panel coc-panel coc-board-panel coc-col-board">
           <div className="coc-board-head">
             <div className="coc-board-status">
               <span className="coc-pill coc-pill-phase">Phase <b>{game.phase_letter}</b></span>
@@ -2674,11 +2674,11 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
         <div className="coc-duchy-row">
 
         {/* Your area: dice/storage/goods controls, your duchy board below */}
-        <div className="coc-panel">
+        <div className="fg-panel coc-panel">
           <div className="coc-duchy-head">
             {/* At game end show the FINAL score (leftover resources + monastery
                 end-game bonuses folded in) so it matches the top score bar. */}
-            <h3>Your Duchy — {over && fscore?.[myId] != null ? fscore[myId] : (me?.vp ?? 0)} VP</h3>
+            <h3 className="fg-label">Your Duchy — {over && fscore?.[myId] != null ? fscore[myId] : (me?.vp ?? 0)} VP</h3>
             {/* Always shown during play (not setup/over) so the panel keeps a stable
                 height across turns; each button just disables (fades) when it can't act,
                 including on the opponent's turn (!myTurnRaw). */}
@@ -2809,9 +2809,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
         {/* Opponent's area: always on screen (replaces the old View Opponent modal).
             The data-opp* anchors here are the flyer-animation targets. */}
         {opp && (
-          <div className={`coc-panel coc-opp-panel${oppMini ? " mini" : ""}`}>
+          <div className={`fg-panel coc-panel coc-opp-panel${oppMini ? " mini" : ""}`}>
             <div className="coc-duchy-head">
-              <h3>{players[oppId] || "Opponent"} — {over && fscore?.[oppId] != null ? fscore[oppId] : (opp.vp ?? 0)} VP</h3>
+              <h3 className="fg-label">{players[oppId] || "Opponent"} — {over && fscore?.[oppId] != null ? fscore[oppId] : (opp.vp ?? 0)} VP</h3>
               {opponentIds.length > 1 && (
                 <div className="coc-opp-tabs" role="tablist">
                   {opponentIds.map((pid) => {
@@ -2895,8 +2895,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit, offline = nul
 
         {/* Move log — fills the area beneath the duchy row (3-col), scrolling internally
             so it never stretches the board. Full width below everything at narrower widths. */}
-        <div className="coc-panel coc-log-panel">
-          <h3>Log</h3>
+        <div className="fg-panel coc-panel coc-log-panel">
+          <h3 className="fg-label">Log</h3>
           <div className="coc-log">
             {(game.moves || []).map((m, i) => (
               m.type === "phase_end"

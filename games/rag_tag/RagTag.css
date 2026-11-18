@@ -52,6 +52,7 @@
   --rt-faint: #a3907e;
 
   --rt-bg: #17100c;
+  --g-ground: var(--rt-bg);   /* the kit's panels derive their surface from it */
   --rt-panel: #241a15;
   --rt-panel-2: #2f221b;
   --rt-panel-3: #3a2a21;
@@ -173,18 +174,14 @@
 }
 
 /* Shared panel treatment: bevel, grain, warm edge. */
+/* The panels are the kit's fg-panel (the input one fg-lit); what stays Rag Tag's is
+   the grain laid over them and the brown ground they derive from (--g-ground). */
 .ragtag .rt-side,
 .ragtag .rt-stage,
 .ragtag .rt-prompt,
 .ragtag .rt-log,
 .ragtag .rt-over {
   position: relative;
-  border: 1px solid var(--rt-line);
-  border-radius: var(--rt-radius);
-  background:
-    linear-gradient(180deg, rgba(255, 226, 196, 0.045), transparent 46%),
-    linear-gradient(180deg, var(--rt-panel-2), var(--rt-panel));
-  box-shadow: var(--rt-shadow);
   isolation: isolate;
 }
 
@@ -215,10 +212,15 @@
 
 .ragtag .rt-side { padding: clamp(0.4rem, 0.3rem + 0.3vw, 0.6rem); }
 /* Ownership is carried by the label and a left edge, NOT by the accent ring:
-   the ring is reserved for the panel that wants input. */
-.ragtag .rt-side.rt-mine {
-  border-color: var(--rt-line);
-  box-shadow: inset 3px 0 0 0 color-mix(in srgb, var(--lby-accent) 70%, transparent), var(--rt-shadow);
+   the ring is reserved for the panel that wants input. The edge is drawn on a
+   layer over the panel, so the panel itself stays the kit's. */
+.ragtag .rt-side.rt-mine::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 3px 0 0 0 color-mix(in srgb, var(--lby-accent) 70%, transparent);
+  pointer-events: none;
 }
 
 .ragtag .rt-side-hd {
@@ -1108,9 +1110,9 @@
 
 /* ── Choices ────────────────────────────────────────────────────────────── */
 
+/* The panel that wants input: lit by the kit (fg-lit) in the accent. */
 .ragtag .rt-prompt {
   padding: clamp(0.5rem, 0.35rem + 0.5vw, 0.85rem);
-  border-color: color-mix(in srgb, var(--lby-accent) 60%, var(--rt-line));
   animation: rt-rise 340ms cubic-bezier(0.2, 0.8, 0.3, 1) both;
 }
 
@@ -1563,9 +1565,9 @@
 .ragtag .rt-over h2 { font-size: clamp(1.25rem, 1rem + 1.1vw, 1.8rem); margin-bottom: 0.2rem; position: relative; z-index: 1; }
 .ragtag .rt-over p { color: var(--rt-dim); font-size: var(--rt-fs-sm); position: relative; z-index: 1; }
 .ragtag .rt-over-actions { margin-top: 0.9rem; position: relative; z-index: 1; }
-.ragtag .rt-over-win { border-color: color-mix(in srgb, var(--rt-hp) 55%, var(--rt-line)); }
+.ragtag .rt-over-win { --g-lit: var(--rt-hp); }
 .ragtag .rt-over-win h2 { color: var(--rt-hp); }
-.ragtag .rt-over-lose { border-color: color-mix(in srgb, var(--rt-hit) 50%, var(--rt-line)); }
+.ragtag .rt-over-lose { --g-lit: var(--rt-hit); }
 .ragtag .rt-over-lose h2 { color: var(--rt-hit); }
 .ragtag .rt-over-lose .rt-over-crest { color: var(--rt-hit); border-color: color-mix(in srgb, var(--rt-hit) 45%, transparent); }
 
@@ -1575,9 +1577,6 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  background: linear-gradient(180deg, rgba(0, 0, 0, 0.22), rgba(0, 0, 0, 0.32));
-  border-color: var(--rt-line-soft);
-  box-shadow: none;
 }
 
 .ragtag .rt-log-hd {

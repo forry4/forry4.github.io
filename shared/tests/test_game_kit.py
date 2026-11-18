@@ -22,9 +22,22 @@ Two ways to break that, two tests:
    kit variable, a monospace stack for codes, or a face SANCTIONED below as a game's
    own material.
 
-WHAT THIS CANNOT SEE: a rule that names neither a kit class nor a co-class can still
-out-specify the kit (`.blackcastle button{...}`). `gameKit` in `webapp/test/screens.mjs`
-reads the COMPUTED kit styles on real boards, which is the half that catches that.
+A rule that ends in a bare ELEMENT (`.or-action-bar button`, `.or-game .or-log h2`)
+names no class at all, and both of the first render-gate failures were that shape:
+Orbit's log title went back to its own face and its action buttons to their own fill
+while this file was green. So a selector whose last compound is a tag is resolved
+against the JSX too — every element of that tag NESTED inside an element carrying the
+nearest classed compound's class — and held to the kit classes those elements wear.
+
+A `className` is read whatever its shape: a plain string, a template literal, or an
+expression (`{"fg-panel dm-pbox" + (acting ? " fg-lit" : "")}`). The first reader took
+only the first two, so Dontminion's player and opponent boxes — both built by `+` — were
+invisible to it and could repaint the kit's panel without a word.
+
+WHAT THIS STILL CANNOT SEE: nesting that crosses a component boundary (a container
+whose children are rendered by another component), and a rule whose specificity alone
+wins (`.blackcastle button{...}` against a kit class at (0,1,0)). `gameKit` in
+`webapp/test/screens.mjs` reads the COMPUTED kit styles on real boards for those.
 """
 
 from __future__ import annotations
@@ -65,6 +78,12 @@ SANCTIONED: dict[tuple[str, str, str], str] = {
         "bottom corners and a shadow cast UP, which no free-standing panel has",
     ("SecretNames", "@media(max-width:760px)", ".sn-console"):
         "the same docked sheet: on a phone the clue console sticks to the bottom edge",
+    ("SpenderDuel", "@media(min-width:1121px)", ".duel-gamescreen .duel-cols:not(.reviewing) .log-panel.open"):
+        "the opened log rises OVER the card column as an overlay, so it casts its "
+        "shadow upward like the docked sheets above",
+    ("Spender", "@media(max-width:900px)", ".nobles-panel.panel"):
+        "below 900px the nobles panel DISSOLVES into a plain row holding two smaller "
+        "boxes, so it must shed the panel it is on a desktop",
 }
 
 # Faces a game may set because they are its MATERIAL, not its chrome.
@@ -118,6 +137,20 @@ def _parse(text: str) -> list[tuple[str, dict[str, str], str]]:
     return out
 
 
+def _split_list(selector: str) -> list[str]:
+    """A selector list split at its TOP-LEVEL commas only: `button:not(.a,.b),input`
+    is two selectors, not three."""
+    out, depth, cur = [], 0, ""
+    for ch in selector:
+        depth += (ch == "(") - (ch == ")")
+        if ch == "," and depth == 0:
+            out.append(cur)
+            cur = ""
+        else:
+            cur += ch
+    return [x.strip() for x in out + [cur] if x.strip()]
+
+
 def _sheets(dirs) -> list[pathlib.Path]:
     return sorted(p for d in dirs for p in d.glob("*.css"))
 
@@ -135,7 +168,58 @@ def _classes(compound: str) -> set[str]:
 
 
 # ── the JSX side: which game classes are kit-dressed ────────────────────────
-_CLASSNAME = re.compile(r"className=(?:\"([^\"]*)\"|\{`([^`]*)`\}|\{\"([^\"]*)\"\})")
+_CLASS_ATTR = re.compile(r"\bclassName=")
+_QUOTED = re.compile(r"\"([^\"\n]*)\"|'([^'\n]*)'")
+
+
+def _balanced(src: str, i: int) -> int:
+    """Index of the brace closing the one opened at src[i]."""
+    depth = 0
+    for j in range(i, len(src)):
+        if src[j] == "{":
+            depth += 1
+        elif src[j] == "}":
+            depth -= 1
+            if depth == 0:
+                return j
+    return len(src)
+
+
+def _class_attrs(src: str):
+    """(offset, classes, dynamic) for every className attribute. An expression
+    (`{"dm-pbox" + (acting ? " dm-pbox-acting fg-lit" : "")}`, a template with
+    `${...}` arms) yields EVERY class word it can produce, conditional ones too: a
+    rule for `.dm-pbox-acting` repaints the element whenever that arm is taken."""
+    for m in _CLASS_ATTR.finditer(src):
+        i = m.end()
+        if src.startswith('"', i):
+            j = src.find('"', i + 1)
+            yield m.start(), set(src[i + 1:j].split()), False
+            continue
+        if not src.startswith("{", i):
+            continue
+        expr = src[i + 1:_balanced(src, i)]
+        words: set[str] = set()
+        for q in _QUOTED.finditer(expr):
+            words.update((q.group(1) or q.group(2) or "").split())
+        # a template literal's own text, with each ${...} arm cut out (the arms'
+        # strings were already collected above)
+        k = 0
+        while (t := expr.find("`", k)) != -1:
+            e = expr.find("`", t + 1)
+            e = len(expr) if e == -1 else e
+            body, out, n = expr[t + 1:e], [], 0
+            while n < len(body):
+                if body.startswith("${", n):
+                    n = _balanced(body, n + 1) + 1
+                    out.append(" ")
+                else:
+                    out.append(body[n])
+                    n += 1
+            words.update("".join(out).split())
+            k = e + 1
+        words = {w for w in words if re.fullmatch(r"[A-Za-z_][\w-]*", w)}
+        yield m.start(), words, True
 
 
 def _dressed(dirs) -> dict[str, set[str]]:
@@ -143,9 +227,7 @@ def _dressed(dirs) -> dict[str, set[str]]:
     out: dict[str, set[str]] = {}
     for d in dirs:
         for jsx in d.glob("*.jsx"):
-            for m in _CLASSNAME.finditer(jsx.read_text(encoding="utf-8")):
-                raw = next(g for g in m.groups() if g is not None)
-                static = re.sub(r"\$\{[^}]*\}", " ", raw).split()
+            for _, static, _dyn in _class_attrs(jsx.read_text(encoding="utf-8")):
                 kits = [c for c in static if c in OWNS]
                 if not kits:
                     continue
@@ -155,6 +237,101 @@ def _dressed(dirs) -> dict[str, set[str]]:
                     if c not in KIT_CLASSES and "-" in c:
                         out.setdefault(c, set()).update(kits)
     return out
+
+
+_OPEN = re.compile(r"<([a-z][a-z0-9]*)\b")
+
+
+def _element_end(src: str, tag: str, start: int) -> int:
+    """Where the element opened at `start` closes: same-name opens and closes
+    counted, self-closing ones skipped. Attributes hold `=>` arrows, so the end of an
+    opening tag is the first `>` that is not part of one."""
+    def tag_end(i: int) -> int:
+        depth = 0
+        while i < len(src):
+            ch = src[i]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+            elif ch == ">" and depth == 0:
+                return i
+            i += 1
+        return len(src)
+    e = tag_end(start)
+    if src[e - 1] == "/":
+        return e
+    depth, i = 1, e + 1
+    pat = re.compile(rf"<{tag}\b|</{tag}\s*>")
+    while depth:
+        m = pat.search(src, i)
+        if not m:
+            return len(src)
+        if m.group(0).startswith("</"):
+            depth -= 1
+        else:
+            te = tag_end(m.start())
+            if src[te - 1] != "/":
+                depth += 1
+        i = m.end()
+    return i
+
+
+def _elements(dirs) -> list[tuple[str, int, int, set[str], bool, str]]:
+    """(tag, start, end, static classes, has a dynamic part, file) for every
+    lowercase JSX element that carries a className."""
+    out = []
+    for d in dirs:
+        for jsx in d.glob("*.jsx"):
+            src = jsx.read_text(encoding="utf-8")
+            attrs = list(_class_attrs(src))
+            for m in _OPEN.finditer(src):
+                head = src[m.start():m.start() + 600]
+                cm = next(((o, c, dy) for o, c, dy in attrs
+                           if m.start() < o < m.start() + 600), None)
+                # the className must belong to THIS opening tag, not a later one
+                if not cm or "<" in src[m.start() + 1:cm[0]]:
+                    continue
+                out.append((m.group(1), m.start(), _element_end(src, m.group(1), m.start()),
+                            cm[1], cm[2], jsx.name))
+    return out
+
+
+def _tag_kits(part: str, elements) -> set[str]:
+    """The kit classes worn by the elements a tag-ending selector reaches."""
+    compounds = [c for c in re.split(r"\s*[ >+~]\s*", part.strip()) if c]
+    if len(compounds) < 2:
+        return set()
+    last = compounds[-1]
+    if "::" in last or re.search(r":(before|after)\b", last):
+        return set()
+    tm = re.match(r"([a-z][a-z0-9]*)", last)
+    if not tm:
+        return set()
+    tag = tm.group(1)
+    want = _classes(last)
+    # `:not([class*="btn"])` / `:not(.x)` exclusions on the last compound
+    # (each may be a list, `:not([class*="lby-"],[class*="btn"])`)
+    nots = " ".join(re.findall(r":not\(((?:[^()]|\([^()]*\))*)\)", last))
+    excl_sub = re.findall(r"\[class\*=\"([^\"]+)\"\]", nots)
+    excl_cls = re.findall(r"\.([\w-]+)", nots)
+    anc = next((c for c in reversed(compounds[:-1]) if _classes(c)), None)
+    if anc is None:
+        return set()
+    anc_cls = _classes(anc)
+    kits: set[str] = set()
+    for a_tag, a_start, a_end, a_static, _dyn, a_file in elements:
+        if not anc_cls <= a_static:
+            continue
+        for tg, st, _en, static, dyn, f in elements:
+            if f != a_file or tg != tag or not (a_start < st < a_end):
+                continue
+            if want and not (want <= static or dyn):
+                continue
+            if any(sub in " ".join(static) for sub in excl_sub) or static & set(excl_cls):
+                continue
+            kits |= static & set(OWNS)
+    return kits
 
 
 def _owned(prop: str, families: tuple[str, ...]) -> bool:
@@ -168,17 +345,18 @@ _SANCTION_HITS: set[tuple[str, str, str]] = set()
 
 def _violations(dirs) -> dict[str, list[str]]:
     dressed = _dressed(dirs)
+    elements = _elements(dirs)
     problems: dict[str, list[str]] = {}
     used = _SANCTION_HITS
     for css in _sheets(dirs):
         for sel, decls, at in _parse(css.read_text(encoding="utf-8")):
-            for part in sel.split(","):
-                part = part.strip()
+            for part in _split_list(sel):
                 cls = _classes(_last_compound(part))
                 # a co-class worn beside a kit class, or the kit class itself
                 # (`.dis .btn-gold{...}` repaints the kit under a game scope)
                 kits = set().union(*(dressed.get(c, set()) for c in cls)) if cls else set()
                 kits |= cls & set(OWNS)
+                kits |= _tag_kits(part, elements)
                 if not kits:
                     continue
                 if (css.stem, at, part) in SANCTIONED:
@@ -285,3 +463,17 @@ def test_the_scans_can_see_what_they_refuse():
     assert _owned("font", OWNS["fg-table"]) and not _owned("font-size", OWNS["fg-table"])
     dressed = _dressed(GAME_DIRS)
     assert len(dressed) >= 12, f"only {len(dressed)} kit-dressed classes found — the JSX read is broken"
+    # An EXPRESSION className (`{"fg-panel dm-pbox" + (acting ? " … fg-lit" : "")}`)
+    # is read too, conditional arm included; the first reader saw neither.
+    assert "fg-panel" in dressed.get("dm-pbox", set()), "a `+`-built className was not read"
+    assert "fg-panel" in dressed.get("dm-pbox-acting", set()), "a className's conditional arm was not read"
+    # The tag-ending path, on the two shapes that first slipped past this file, and
+    # on the exclusion list that is the whole point of Black Castle's `:not()`.
+    assert _split_list('.a b:not([class*="x"],[class*="y"]),.a i') == ['.a b:not([class*="x"],[class*="y"])', ".a i"]
+    els = _elements(GAME_DIRS)
+    assert len(els) > 500, f"only {len(els)} JSX elements indexed — the JSX read is broken"
+    assert _tag_kits(".or-game .or-log h2", els) == {"fg-label"}
+    assert "btn-outline" in _tag_kits(".or-action-bar button", els)
+    assert "btn-gold" in _tag_kits(".blackcastle button", els)
+    assert not _tag_kits('.blackcastle button:not([class*="lby-"],[class*="btn"])', els)
+    assert not _tag_kits(".dis-bidgrid button", els), "a material control is not a kit button"

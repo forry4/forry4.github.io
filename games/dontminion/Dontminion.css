@@ -127,27 +127,21 @@
 
 /* ── sidebar PLAYER boxes (identity + score; one per seat, above the Trash) ── */
 .dm-pboxes { display: flex; flex-direction: column; gap: 8px; }
-.dm-pbox {
-  background: linear-gradient(180deg, rgba(255,240,215,.035), rgba(255,240,215,.01)), var(--surface, #1a1814);
-  border: 1px solid rgba(255,240,215,.06); box-shadow: inset 0 1px 0 rgba(255,240,215,.05);
-  border-radius: var(--radius-lg, 14px); padding: 10px 12px;
+.dm-pbox{ padding: 10px 12px;
   display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
 }
-.dm-pbox-acting { border-color: rgba(232,201,106,.45); box-shadow: 0 0 0 1px rgba(232,201,106,.15), 0 0 22px -8px rgba(232,201,106,.35); }
+
 .dm-pbox-name { font-weight: 600; font-size: 16px; }
 .dm-vp { color: var(--gold-light, #e8c96a); font-weight: 700; margin-left: auto; white-space: nowrap; }
 .dm-opp-turns { color: var(--text-dim, #8a7d6a); font-size: 13px; font-weight: 400; white-space: nowrap; }
 
 /* ── opponent PLAY box (center column, same width as your area): backs for
       their hand, faces for what they played, real piles ── */
-.dm-opp {
-  background: linear-gradient(180deg, rgba(255,240,215,.035), rgba(255,240,215,.01)), var(--surface, #1a1814);
-  border: 1px solid rgba(255,240,215,.06); box-shadow: inset 0 1px 0 rgba(255,240,215,.05);
-  border-radius: var(--radius-lg, 14px); padding: 6px 12px;
+.dm-opp{ padding: 6px 12px;
   --card-w-s: 56px; --card-h: calc(var(--card-w-s) * 1.3);
   container-type: inline-size;
 }
-.dm-opp-acting { border-color: var(--gold, #c9a84c); }
+
 /* Shown only once the side column (which names every seat) has moved below the
    board — see the single-column block. */
 .dm-opp-name { display: none; }
@@ -192,10 +186,7 @@
   color: var(--text-dim, #8a7d6a);
 }
 .dm-trash-list { margin-top: 6px; color: var(--text, #e8dfc8); font-size: 12px; }
-.dm-log {
-  background: linear-gradient(180deg, rgba(255,240,215,.035), rgba(255,240,215,.01)), var(--surface, #1a1814);
-  border: 1px solid rgba(255,240,215,.06); box-shadow: inset 0 1px 0 rgba(255,240,215,.05);
-  border-radius: var(--radius-lg, 14px); padding: 8px 12px;
+.dm-log{ padding: 8px 12px;
   font-size: 14.5px; line-height: 1.55; overflow-y: auto;
   max-height: min(640px, calc(100vh - 300px));
 }
@@ -217,10 +208,7 @@
 .dm-log-turn:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
 
 /* ── supply ── */
-.dm-supply {
-  background: linear-gradient(180deg, rgba(255,240,215,.035), rgba(255,240,215,.01)), var(--surface, #1a1814);
-  border: 1px solid rgba(255,240,215,.06); box-shadow: inset 0 1px 0 rgba(255,240,215,.05);
-  border-radius: var(--radius-lg, 14px); padding: 14px 14px 6px;
+.dm-supply{ padding: 14px 14px 6px;
   container-type: inline-size;
   /* supply piles render as SMALL card faces, which size from --card-w-s;
      10 kingdom piles across on a wide screen, wrapping below that */
@@ -494,14 +482,12 @@
 .dm-fitlabel-wrap {
   white-space: normal; line-height: 1.16; overflow-wrap: anywhere;
 }
-.dm-slots button, .dm-names button { padding: 6px 10px; font-size: 13px; }
+/* Compact kit buttons (`btn-sm` sizes the type); only the padding is tightened. */
+.dm-slots button, .dm-names button { padding: 6px 10px; }
 .dm-names { max-height: 180px; overflow-y: auto; }
 
 /* ── my area ── */
-.dm-me {
-  background: linear-gradient(180deg, rgba(255,240,215,.035), rgba(255,240,215,.01)), var(--surface, #1a1814);
-  border: 1px solid rgba(255,240,215,.06); box-shadow: inset 0 1px 0 rgba(255,240,215,.05);
-  border-radius: var(--radius-lg, 14px); padding: 12px 14px;
+.dm-me{ padding: 12px 14px;
   container-type: inline-size;   /* mobile sizes the hand off 100cqw */
   --card-w: 120px; --card-h: 168px;
 }

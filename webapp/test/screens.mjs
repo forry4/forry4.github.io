@@ -3364,9 +3364,10 @@ try {
 	// reason as lobbyChrome. Colour is excluded: the four tokens are what a game is
 	// supposed to change. What is compared is typography and construction.
 	//
-	// SecretNames and Where Wolf? are NOT here: neither has a bot, so a board needs two
-	// or three seated humans, and their kit wiring is held by the text gate. Every tier
-	// is Easy where the game offers one, so this lane-B block never arms a worker pool.
+	// SecretNames and Where Wolf? have no bot, so their boards are reached the way a
+	// table really fills: the host makes a friend room and two (or three) more browser
+	// contexts open its invite link. Every tier is Easy where the game offers one, so
+	// this lane-B block never arms a worker pool.
 	async function gameKit(log) {
 		const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
 		await ctx.addInitScript(() => localStorage.setItem("spender_user",
@@ -3397,6 +3398,11 @@ try {
 			{ id: "pipmarket", path: "/pipmarket", board: ".pm-stall",
 				pre: ["2 players", "1 bot"] },
 		];
+		// No bot: seated by friends through the invite link.
+		const FRIENDS = [
+			{ id: "secretnames", path: "/secretnames", seats: 2, board: ".sn-board" },
+			{ id: "wherewolf", path: "/werewolf", seats: 3, board: ".ww-game.fg-table" },
+		];
 		// What must not vary. Font sizes are computed px, so rem-vs-px compares equal.
 		const PROBES = {
 			".fg-table": ["fontFamily"],
@@ -3410,10 +3416,20 @@ try {
 		// only (their panels are where the kit was derived FROM); the four that came
 		// from other construction systems were moved onto the panel, label and buttons.
 		const MUST = {
-			".fg-table": BOARDS.map((b) => b.id),
-			".fg-panel:not(.fg-lit)": ["dissonance", "orbit", "blackcastle", "pinch", "pipmarket"],
-			".fg-label:not(.fg-label-soft)": ["dissonance", "blackcastle", "pinch", "pipmarket"],
+			".fg-table": [...BOARDS, ...FRIENDS].map((b) => b.id),
+			".fg-panel:not(.fg-lit)": ["dissonance", "orbit", "blackcastle", "pinch", "pipmarket", "secretnames"],
+			".fg-label:not(.fg-label-soft)": ["dissonance", "blackcastle", "pinch", "pipmarket", "secretnames"],
 		};
+		const measure = (pg) => pg.evaluate((probes) => {
+			const out = {};
+			for (const [sel, props] of Object.entries(probes)) {
+				// The first VISIBLE match: a collapsed log or a hidden phone sheet
+				// computes the same, but a display:none node is not what anyone sees.
+				const el = [...document.querySelectorAll(sel)].find((e) => e.getClientRects().length);
+				out[sel] = el ? props.map((p) => `${p}=${getComputedStyle(el)[p]}`).join(" ") : null;
+			}
+			return out;
+		}, PROBES);
 
 		const seen = {};
 		for (const { id, path: route, board, pre = [], after } of BOARDS) {
@@ -3434,20 +3450,44 @@ try {
 			// Wait for the kit to be on the page, not for a duration.
 			await page.waitForSelector(".fg-table", { timeout: 10_000 }).catch(() => {});
 			await page.waitForTimeout(400);
-			seen[id] = await page.evaluate((probes) => {
-				const out = {};
-				for (const [sel, props] of Object.entries(probes)) {
-					// The first VISIBLE match: a collapsed log or a hidden phone sheet
-					// computes the same, but a display:none node is not what anyone sees.
-					const el = [...document.querySelectorAll(sel)].find((e) => e.getClientRects().length);
-					out[sel] = el ? props.map((p) => `${p}=${getComputedStyle(el)[p]}`).join(" ") : null;
-				}
-				return out;
-			}, PROBES);
+			seen[id] = await measure(page);
+		}
+
+		for (const { id, path: route, seats, board } of FRIENDS) {
+			await page.goto(`http://localhost:${PORT}${route}`, { waitUntil: "networkidle" });
+			await page.waitForSelector(".lby-cta", { timeout: 25_000 }).catch(() => {});
+			await page.locator(".lby-cta").first().click({ timeout: 8_000 }).catch(() => {});
+			await page.waitForSelector(".cm-panel", { timeout: 10_000 }).catch(() => {});
+			await page.locator(".cm-create").first().click({ timeout: 8_000 }).catch(() => {});
+			await page.waitForSelector(".wr-code-btn", { timeout: 25_000 }).catch(() => {});
+			const code = ((await page.locator(".wr-code-btn").first().textContent().catch(() => "")) || "")
+				.replace(/[^A-Z0-9]/g, "");
+			const guests = [];
+			for (let i = 1; i < seats; i++) {
+				const g = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+				await g.addInitScript((gid) => localStorage.setItem("spender_user",
+					JSON.stringify({ id: gid, name: gid.replace(/-/g, ""), guest: true })), `kit-guest-${id}-${i}`);
+				const gp = await g.newPage();
+				await gp.goto(`http://localhost:${PORT}${route}/${code}`, { waitUntil: "load" });
+				guests.push(g);
+			}
+			const full = await page.waitForFunction((n) =>
+				document.querySelectorAll(".wr-seat:not(.wr-seat-open)").length >= n, seats, { timeout: 30_000 })
+				.then(() => true).catch(() => false);
+			await page.locator(".wr-start:not([disabled])").first().click({ timeout: 8_000 }).catch(() => {});
+			const there = await page.waitForSelector(board, { timeout: 30_000 }).then(() => true).catch(() => false);
+			check(`${id}: a ${seats}-seat board rendered through the invite link`, there,
+				`code=${code || "(none)"} seated=${full}`);
+			if (there) {
+				await page.waitForTimeout(400);
+				seen[id] = await measure(page);
+			}
+			for (const g of guests) await g.close();
 		}
 
 		const ids = Object.keys(seen);
-		check("every board in the roster rendered", ids.length === BOARDS.length, `${ids.length}/${BOARDS.length}`);
+		const roster = BOARDS.length + FRIENDS.length;
+		check("every board in the roster rendered", ids.length === roster, `${ids.length}/${roster}`);
 		for (const [sel, who] of Object.entries(MUST)) {
 			const missing = who.filter((id) => seen[id] && !seen[id][sel]);
 			check(`${sel} is worn on every board that must wear it`, missing.length === 0, missing.join(", "));

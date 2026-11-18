@@ -1755,7 +1755,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
       return (
         <div className="dm-prompt-actions dm-slots">
           {Array.from({ length: c.deck_len + 1 }, (_, p) => (
-            <button key={p} className="btn btn-outline"
+            <button key={p} className="btn btn-outline btn-sm"
               onClick={() => mv({ type: "decision", position: p })}>
               {p === 0 ? "Top" : p === c.deck_len ? "Bottom" : p}
             </button>
@@ -1767,7 +1767,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
       return (
         <div className="dm-prompt-actions dm-names">
           {c.cards.map((n) => (
-            <button key={n} className="btn btn-outline" onClick={() => mv({ type: "decision", card: n })}>
+            <button key={n} className="btn btn-outline btn-sm" onClick={() => mv({ type: "decision", card: n })}>
               <FitLabel>{n}</FitLabel>
             </button>
           ))}
@@ -1983,7 +1983,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
     const isBot = (roomData?.ai_players || []).includes(pid);
     const acting = !over && (game.pending_pid || game.turn) === pid;
     return (
-      <div key={pid} className={"dm-pbox" + (acting ? " dm-pbox-acting" : "")}>
+      <div key={pid} className={"fg-panel dm-pbox" + (acting ? " dm-pbox-acting fg-lit" : "")}>
         <span className="dm-pbox-name">
           {names[pid] || pid}{isBot ? " 🤖" : ""}{pid === myId ? " (you)" : ""}
         </span>
@@ -2050,7 +2050,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
     const acting = !over && (game.pending_pid || game.turn) === pid;
     const handN = Math.min(s.hand_count ?? 0, 12);
     return (
-      <div key={pid} className={"dm-opp" + (acting ? " dm-opp-acting" : "")}>
+      <div key={pid} className={"fg-panel dm-opp" + (acting ? " dm-opp-acting fg-lit" : "")}>
         {/* Whose strip this is. The desktop names every seat in the side column right
             beside it; on a phone that column is below the log, and an unlabelled row of
             deck / discard / "hand 5" read as YOUR hand. */}
@@ -2512,7 +2512,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
           </div>
           {/* the gesture handlers are what tell a reader's scroll apart from
               the browser's own — see onLogScroll */}
-          <div className="dm-log" ref={logRef} onScroll={onLogScroll}
+          <div className="fg-panel dm-log" ref={logRef} onScroll={onLogScroll}
                onWheel={onLogGesture} onPointerDown={onLogGesture}
                onTouchMove={onLogGesture}>
             {/* CHRONOLOGICAL: oldest at the top, newest appended at the bottom,
@@ -2533,7 +2533,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
         <div className="dm-center-col">
           {focusOpp && renderOppPlay(focusOpp)}
           {renderPrompt()}
-          <div className="dm-supply">
+          <div className="fg-panel dm-supply">
             {/* Landscapes sit ABOVE the Supply, and the row renders NOTHING at
                 all when the game has none — no ghost row and no layout shift,
                 which is every game until Adventures (ph. 7) ships one. */}
@@ -2549,7 +2549,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
               </div>
             )}
           </div>
-          <div className="dm-me">
+          <div className="fg-panel dm-me">
             {!over && game.turn === myId && (
               <div className="dm-resbar">
                 {/* Even the three vanilla counters answer the gesture: "unspent

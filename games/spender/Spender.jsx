@@ -295,10 +295,10 @@ const css = baseCss + lobbyCss + _cssText
 
 /* ─── Player panels ─────────────────────────────────────────────────────── */
 .players-area{display:flex;flex-direction:column;gap:8px}
-.player-panel{background:linear-gradient(180deg,rgba(255,255,255,.03),transparent 46%),var(--surface);border:1px solid rgba(255,240,215,.06);border-radius:var(--radius-lg);padding:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 2px 10px -4px rgba(0,0,0,.5);transition:border-color .2s}
-/* the active player's box gets a clean gold rounded border (the only highlight);
-   your own box is identified by the active dot + "(you)" label, no extra accent. */
-.player-panel.active-turn{border-color:var(--gold);background:linear-gradient(180deg,rgba(255,255,255,.04),transparent 46%),var(--surface3);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(201,168,76,.28),0 3px 16px -4px rgba(201,168,76,.22),0 2px 10px -4px rgba(0,0,0,.5)}
+/* The box itself is the kit's fg-panel, lit by fg-lit on the active seat. */
+.player-panel{padding:12px;transition:border-color .2s}
+/* the active player's box is lit by the kit (fg-lit); your own box is identified
+   by the active dot + "(you)" label, no extra accent. */
 /* an opponent's box is tappable to ping them — signal it (your own box has no click). */
 .player-panel.pingable{cursor:pointer}
 .player-panel.pingable:active{border-color:var(--gold)}
@@ -2833,7 +2833,7 @@ export default function SpenderApp() {
 		const pingPlayer = () => { playPing(); send({ action: "ping", target: pid }); };
 		return (
 			<div key={pid} data-pid={pid}
-				className={`player-panel${isMe ? " me" : ""}${isActive ? " active-turn" : ""}${expanded ? " expanded" : ""}${canPing ? " pingable" : ""}`}
+				className={`fg-panel player-panel${isMe ? " me" : ""}${isActive ? " active-turn fg-lit" : ""}${expanded ? " expanded" : ""}${canPing ? " pingable" : ""}`}
 				onClick={canPing ? pingPlayer : undefined}>
 				<div className="player-header" onClick={p.reserved?.length > 0 ? toggleExpand : undefined}>
 					<div className="player-name-row">
@@ -3807,8 +3807,8 @@ export default function SpenderApp() {
 								</>)}
 						</div>
 
-						<div className="panel bank-panel">
-							<div className="panel-title">Gem Bank</div>
+						<div className="fg-panel panel bank-panel">
+							<div className="fg-label panel-title">Gem Bank</div>
 							<div className="bank-gems">
 								{/* gold (the wild/reserve token) first so it sits above white */}
 								{["gold", ...GEM_COLORS].map(c => {
@@ -3849,7 +3849,7 @@ export default function SpenderApp() {
 
 						<div className="levels">
 						{["L3", "L2", "L1"].map((lk, i) => (
-							<div key={lk} className="panel level-panel">
+							<div key={lk} className="fg-panel panel level-panel">
 								<div className="level-row">
 									<div className={`deck-pile${!myTurn ? " disabled" : ""}${reserveArmed ? " reserve-ready" : ""}${selectedCard?.source === "deck" && selectedCard?.deckLevel === 3 - i ? " selected" : ""}`}
 										onClick={() => {
@@ -3869,8 +3869,8 @@ export default function SpenderApp() {
 						))}
 						</div>
 
-						<div className="panel nobles-panel">
-							<div className="panel-title">Nobles</div>
+						<div className="fg-panel panel nobles-panel">
+							<div className="fg-label panel-title">Nobles</div>
 							<div className="nobles-row">
 								{(() => {
 									// Render the FULL original noble set in a stable id-sorted order so
@@ -3949,7 +3949,7 @@ export default function SpenderApp() {
 					<div className="game-sidebar">
 						{(
 							<div className={`panel log-panel${logOpen ? " open" : ""}`}>
-								<div className="panel-title log-head" onClick={() => setLogOpen(o => !o)}>
+								<div className="fg-label panel-title log-head" onClick={() => setLogOpen(o => !o)}>
 									Log <span className="log-caret">{logOpen ? "▾" : "▸"}</span>
 								</div>
 								<div className="move-log">
@@ -4004,7 +4004,7 @@ export default function SpenderApp() {
 								</div>
 							</div>
 						)}
-						<div className="panel-title" style={{ padding: "0 4px" }}>Players</div>
+						<div className="fg-label panel-title" style={{ padding: "0 4px" }}>Players</div>
 						<div className="players-area" data-n={(game.order || []).length}>
 							{(game.order || []).map(pid => renderPlayerPanel(pid))}
 						</div>

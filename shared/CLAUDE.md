@@ -23,7 +23,9 @@ Cross-game frontend kits. **Dependency direction is one-way: `games/* → shared
   same element, works — Dissonance, Where Wolf? and SecretNames do that). `.btn-gold` carries a transparent 1px border so it is the same height
   as `.btn-outline` beside it — every gold button on the site grew 2px with that. The selected
   outline state (`.btn-outline.active`) and the touch sticky-hover reset are in the kit too, so a
-  game does not re-add them. Rules and gates: root `CLAUDE.md`, "THE GAME KIT".
+  game does not re-add them. `--g-row-ink` on a log row is the one per-row knob (a tint the kit
+  applies). The Splendor kit's `.panel`/`.panel-title` keep only their spacing now: Spender wears
+  `fg-panel`/`fg-label` beside them. Rules and gates: root `CLAUDE.md`, "THE GAME KIT".
 - **`lobbyHistory.js`** owns authenticated history refresh for every game. Failed,
   malformed, superseded, or unverified empty replies must preserve the last successful
   list and cache. Legacy endpoints return `{games: []}` for expired sessions: verify
