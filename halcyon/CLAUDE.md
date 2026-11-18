@@ -46,6 +46,15 @@ Tests: `tests/` (store, dungeon, routes, the sim fixtures' freshness),
   needs E. It used to open ON the boss and complete on contact — the boss's loot bag is
   in the same spot, so walking to the loot ended the run with loot left on the floor
   (found by the first full clear through the page).
+- **Draw only the tiles on screen, every frame — never bake the whole dungeon.** The
+  first greybox pre-rendered the map to one canvas at device pixels (~20,500×2,800 on a
+  150% display), past the GPU's texture limit, and copied it every frame: reported as
+  "super laggy", measured 33ms p50 / 50ms p99 at 1440p. `drawMap` walks the visible tile
+  range instead (16.7/16.8 at 2560×1600@2 with a GPU). Moving things are drawn
+  INTERPOLATED between the last two ticks (`at(obj)`, `alpha = acc/STEP_MS`), so a
+  120/144 Hz screen does not show 60 Hz steps; the sim never sees the interpolation, and
+  aim goes through the camera the player last SAW. A headless benchmark rasterizes on
+  the CPU unless launched with `--enable-gpu --use-angle=d3d11 --ignore-gpu-blocklist`.
 - **A hidden tab gets no frames, so the fight pauses.** That is intended (a solo game);
   closing the tab is a recall. DEV builds expose `window.__halcyon` = `{ st, drive,
   advance(n) }` so a script can play a whole run through the real page without frames;

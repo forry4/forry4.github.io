@@ -18,7 +18,7 @@ import { lobbyCss, LobbyHeader, LobbyUser, LobbyLoading } from "../shared/lobby.
 import { GAME_ACCENTS } from "../shared/accents.js";
 import { makeClient } from "./client.js";
 import { createSim, step, TPS, REACH } from "./sim.js";
-import { bakeMap, camera, draw } from "./render.js";
+import { camera, draw } from "./render.js";
 import cssText from "./HalcyonRift.css?inline";
 
 const styles = baseCss + lobbyCss + cssText;
@@ -285,7 +285,11 @@ function Dungeon({ run, client, onEnd }) {
 		const keys = new Set();
 		const mouse = { x: 0, y: 0, down: false };
 		const edge = { ability: false, interact: false, recall: false };
-		let auto = false, px = 32, map = null, raf = 0, ended = false;
+		let auto = false, px = 32, raf = 0, ended = false;
+		// Where each moving thing was before the last tick, so a frame can draw it part
+		// of the way to where it is now (the sim steps at 60 Hz; a screen may run at 144).
+		let prev = new WeakMap(), alpha = 1;
+		let cam = camera(st, 1, 1, px);              // the camera of the last drawn frame
 		// DEV ONLY (stripped from a production build): the live sim, and a seam for a
 		// scripted driver, so a whole run can be played through the real page.
 		if (import.meta.env.DEV) window.__halcyon = { st, drive: null };
@@ -296,7 +300,6 @@ function Dungeon({ run, client, onEnd }) {
 			cv.width = Math.max(1, Math.round(r.width * dpr));
 			cv.height = Math.max(1, Math.round(r.height * dpr));
 			px = Math.max(18, Math.floor(Math.min(cv.height / 12, cv.width / 16)));
-			map = bakeMap(st, px);
 		};
 		const ro = new ResizeObserver(resize);
 		ro.observe(cv);
@@ -314,7 +317,7 @@ function Dungeon({ run, client, onEnd }) {
 		const input = () => {
 			let mx = 0, my = 0;
 			for (const k of keys) { const d = KEY_DIR[k]; if (d) { mx += d[0]; my += d[1]; } }
-			const { ox, oy } = camera(st, cv.width, cv.height, px);
+			const { ox, oy } = cam;                    // aim through what the player SEES
 			const bag = edge.interact ? nearestBag() : null;
 			let take = null;
 			if (bag && free.length) take = bag.drops[0];
@@ -347,6 +350,10 @@ function Dungeon({ run, client, onEnd }) {
 		};
 
 		const tick = () => {
+			prev = new WeakMap();
+			prev.set(st.p, [st.p.x, st.p.y]);
+			for (const e of st.enemies) if (e.hp > 0) prev.set(e, [e.x, e.y]);
+			for (const b of st.bullets) prev.set(b, [b.x, b.y]);
 			const drive = import.meta.env.DEV && window.__halcyon?.drive;
 			step(st, drive ? drive(st) : input());
 			for (const ev of st.events) handle(ev);
@@ -374,9 +381,15 @@ function Dungeon({ run, client, onEnd }) {
 			last = now;
 			while (acc >= STEP_MS && !ended) { acc -= STEP_MS; tick(); }
 			while (notes.length && notes[0].until < st.tick) notes.shift();
-			const { ox, oy } = camera(st, cv.width, cv.height, px);
-			draw(g, st, map, { width: cv.width, height: cv.height, px,
-				aim: { x: (mouse.x - ox) / px - st.p.x, y: (mouse.y - oy) / px - st.p.y },
+			alpha = ended ? 1 : acc / STEP_MS;
+			const at = (o) => {
+				const q = prev.get(o);
+				return q ? { x: q[0] + (o.x - q[0]) * alpha, y: q[1] + (o.y - q[1]) * alpha } : o;
+			};
+			const pp = at(st.p);
+			cam = camera(st, cv.width, cv.height, px, pp);
+			draw(g, st, { width: cv.width, height: cv.height, px, at,
+				aim: { x: (mouse.x - cam.ox) / px - pp.x, y: (mouse.y - cam.oy) / px - pp.y },
 				notes: [...notes, ...(ended ? [] : bagHint())] });
 			raf = requestAnimationFrame(frame);
 		};

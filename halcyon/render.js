@@ -19,54 +19,63 @@ export const COLORS = {
 	hp: "#e2564e", hpLimit: "#f3e2c0", mp: "#5a8de8", hudBack: "rgba(16,18,20,.72)",
 };
 
-/* The map drawn once per dungeon, at `px` pixels a tile. */
-export function bakeMap(st, px) {
-	const c = document.createElement("canvas");
-	c.width = st.w * px; c.height = st.h * px;
-	const g = c.getContext("2d");
-	for (let y = 0; y < st.h; y++) {
-		for (let x = 0; x < st.w; x++) {
-			const t = st.tiles[y][x], X = x * px, Y = y * px;
+/* The map, drawn tile by tile for ONLY the tiles on screen, every frame — about
+ * 250 rectangles. It used to be baked once into one canvas the size of the whole
+ * dungeon at screen resolution; on a 150% display that canvas was ~20,500 x 2,800
+ * pixels, and copying it every frame halved the frame rate (measured: 33ms frames
+ * at 2560x1440@1.5 against 16.7ms at 1080p). */
+function drawMap(g, st, ox, oy, px, width, height) {
+	const x0 = Math.max(0, Math.floor(-ox / px)), x1 = Math.min(st.w - 1, Math.floor((width - ox) / px));
+	const y0 = Math.max(0, Math.floor(-oy / px)), y1 = Math.min(st.h - 1, Math.floor((height - oy) / px));
+	// Whole pixels, one tile wide plus a pixel, so neighbours never leave a seam.
+	const P = Math.ceil(px) + 1;
+	for (let y = y0; y <= y1; y++) {
+		const row = st.tiles[y], below = y + 1 < st.h ? st.tiles[y + 1] : null;
+		for (let x = x0; x <= x1; x++) {
+			const t = row[x], X = Math.floor(ox + x * px), Y = Math.floor(oy + y * px);
 			if (t === "#") {
-				g.fillStyle = COLORS.wall; g.fillRect(X, Y, px, px);
+				g.fillStyle = COLORS.wall; g.fillRect(X, Y, P, P);
 				// A lit top edge where a wall meets floor below it: light comes from above.
-				if (y + 1 < st.h && st.tiles[y + 1][x] !== "#") { g.fillStyle = COLORS.wallTop; g.fillRect(X, Y + px * 0.72, px, px * 0.28); }
+				if (below && below[x] !== "#") { g.fillStyle = COLORS.wallTop; g.fillRect(X, Y + px * 0.72, P, px * 0.28 + 1); }
+			} else if (t === "~") {
+				g.fillStyle = COLORS.water; g.fillRect(X, Y, P, P);
+				g.fillStyle = COLORS.waterLight; g.fillRect(X + px * 0.15, Y + px * 0.3, px * 0.4, px * 0.08);
 			} else {
-				g.fillStyle = (x + y) % 2 ? COLORS.sand : COLORS.sandDark; g.fillRect(X, Y, px, px);
-				if (t === "~") {
-					g.fillStyle = COLORS.water; g.fillRect(X, Y, px, px);
-					g.fillStyle = COLORS.waterLight; g.fillRect(X + px * 0.15, Y + px * 0.3, px * 0.4, px * 0.08);
-				} else if (t === "o") {
+				g.fillStyle = (x + y) % 2 ? COLORS.sand : COLORS.sandDark; g.fillRect(X, Y, P, P);
+				if (t === "o") {
 					g.fillStyle = COLORS.rock; g.fillRect(X + px * 0.06, Y + px * 0.12, px * 0.88, px * 0.84);
 					g.fillStyle = COLORS.rockTop; g.fillRect(X + px * 0.06, Y + px * 0.12, px * 0.88, px * 0.22);
 				}
 			}
 		}
 	}
-	return c;
 }
 
 function circle(g, x, y, r, fill) {
 	g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fillStyle = fill; g.fill();
 }
 
-/* Where the world sits on the canvas: it follows the player, clamped so the map
- * never scrolls past its edge. The page uses it too, to turn the mouse into aim. */
-export function camera(st, width, height, px) {
+/* Where the world sits on the canvas: it follows the player (at `at`, the drawn —
+ * interpolated — position), clamped so the map never scrolls past its edge. The page
+ * uses it too, to turn the mouse into aim. */
+export function camera(st, width, height, px, at = st.p) {
 	const vw = width / px, vh = height / px;
-	const cx = st.w < vw ? st.w / 2 : Math.max(vw / 2, Math.min(st.w - vw / 2, st.p.x));
-	const cy = st.h < vh ? st.h / 2 : Math.max(vh / 2, Math.min(st.h - vh / 2, st.p.y));
+	const cx = st.w < vw ? st.w / 2 : Math.max(vw / 2, Math.min(st.w - vw / 2, at.x));
+	const cy = st.h < vh ? st.h / 2 : Math.max(vh / 2, Math.min(st.h - vh / 2, at.y));
 	return { ox: width / 2 - cx * px, oy: height / 2 - cy * px };
 }
 
-/* One frame, at `px` pixels a tile. */
-export function draw(g, st, map, { width, height, px, aim, notes = [] }) {
-	const p = st.p;
-	const { ox, oy } = camera(st, width, height, px);
+/* One frame, at `px` pixels a tile. `at(obj)` is where to DRAW a moving thing —
+ * the page passes its position interpolated between the last two ticks, so motion
+ * is smooth at any refresh rate while the simulation stays a fixed 60 Hz. */
+const here = (o) => o;
+export function draw(g, st, { width, height, px, aim, notes = [], at = here }) {
+	const p = st.p, pp = at(p);
+	const { ox, oy } = camera(st, width, height, px, pp);
 	const sx = (x) => ox + x * px, sy = (y) => oy + y * px;
 
 	g.fillStyle = "#1b2220"; g.fillRect(0, 0, width, height);
-	g.drawImage(map, Math.round(ox), Math.round(oy));
+	drawMap(g, st, ox, oy, px, width, height);
 
 	for (const h of st.pickups) {                     // healing: green, a cross
 		const X = sx(h.x), Y = sy(h.y), s = px * 0.16;
@@ -86,12 +95,12 @@ export function draw(g, st, map, { width, height, px, aim, notes = [] }) {
 
 	for (const e of st.enemies) {
 		if (e.hp <= 0) continue;
-		const X = sx(e.x), Y = sy(e.y), r = e.r * px;
+		const ep = at(e), X = sx(ep.x), Y = sy(ep.y), r = e.r * px;
 		// Telegraphs: what is about to fire says so, and says where.
 		if (e.tele > 0 && e.active) {
 			g.strokeStyle = COLORS.tele; g.lineWidth = Math.max(1, px * 0.05);
 			if (e.type === "shooter") {
-				g.beginPath(); g.moveTo(X, Y); g.lineTo(sx(p.x), sy(p.y)); g.stroke();
+				g.beginPath(); g.moveTo(X, Y); g.lineTo(sx(pp.x), sy(pp.y)); g.stroke();
 			} else {
 				const grow = e.type === "boss" && e.phase === 0 ? 1.6 : 1 + (1 - e.tele / 50) * 0.8;
 				g.beginPath(); g.arc(X, Y, r * grow + px * 0.2, 0, Math.PI * 2); g.stroke();
@@ -116,7 +125,7 @@ export function draw(g, st, map, { width, height, px, aim, notes = [] }) {
 	}
 
 	// The player: cyan body, white core, a tick toward the aim.
-	const pr = p.r * px, PX = sx(p.x), PY = sy(p.y);
+	const pr = p.r * px, PX = sx(pp.x), PY = sy(pp.y);
 	circle(g, PX, PY, pr + px * 0.06, p.hurt > 0 ? "#ffffff" : "#1d5f6a");
 	circle(g, PX, PY, pr, COLORS.player);
 	circle(g, PX, PY, pr * 0.42, COLORS.playerCore);
@@ -128,12 +137,13 @@ export function draw(g, st, map, { width, height, px, aim, notes = [] }) {
 	}
 
 	for (const b of st.bullets) {
+		const bp = at(b), X = sx(bp.x), Y = sy(bp.y);
 		if (b.owner === "p") {
 			g.strokeStyle = COLORS.playerShot; g.lineWidth = Math.max(2, b.r * px * 0.9);
-			g.beginPath(); g.moveTo(sx(b.x), sy(b.y)); g.lineTo(sx(b.x - b.vx * 0.03), sy(b.y - b.vy * 0.03)); g.stroke();
+			g.beginPath(); g.moveTo(X, Y); g.lineTo(X - b.vx * 0.03 * px, Y - b.vy * 0.03 * px); g.stroke();
 		} else {
-			circle(g, sx(b.x), sy(b.y), b.r * px * 1.15, "rgba(255,240,235,.9)");
-			circle(g, sx(b.x), sy(b.y), b.r * px, b.dmg >= 30 ? COLORS.enemyShotHeavy : COLORS.enemyShot);
+			circle(g, X, Y, b.r * px * 1.15, "rgba(255,240,235,.9)");
+			circle(g, X, Y, b.r * px, b.dmg >= 30 ? COLORS.enemyShotHeavy : COLORS.enemyShot);
 		}
 	}
 
