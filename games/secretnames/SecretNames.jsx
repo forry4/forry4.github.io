@@ -355,7 +355,7 @@ function Lobby({ myId, authUser, openGames, activeGames, history, onRefresh, ref
   const [lobbyTab, setLobbyTab] = useState("open");
   const [visibleHistory, historySentinel] = useProgressiveList(history);
   useListFade();
-  return <div className="app secretnames fg-table" style={ACCENT}>
+  return <div className="app secretnames" style={ACCENT}>
     <style>{styles}</style>
     <LobbyHeader onBack={onExit} user={<LobbyUser user={authUser} />} />
     <div className="lby-page"><div className="lby-page-in">
@@ -669,7 +669,7 @@ export default function SecretNames({ myId, authUser, onExit }) {
         onStart={() => send({ action: "start" })} />
     </div>}
 
-    {game && <div className="app secretnames sn-game" style={ACCENT}>
+    {game && <div className="app secretnames sn-game fg-table" style={ACCENT}>
       <style>{styles}</style>
       <LobbyHeader title="SecretNames" user={<LobbyUser user={authUser} profile={false} />}
         menu={<GameMenu onLeave={exit} onRules={() => setShowRules(true)}

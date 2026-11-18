@@ -3417,7 +3417,10 @@ try {
 		// from other construction systems were moved onto the panel, label and buttons.
 		const MUST = {
 			".fg-table": [...BOARDS, ...FRIENDS].map((b) => b.id),
-			".fg-panel:not(.fg-lit)": ["dissonance", "orbit", "blackcastle", "pinch", "pipmarket", "secretnames"],
+			// Rag Tag is absent on purpose: its board opens on the DRAFT, whose only panel is
+			// the lit prompt; its stage and log panels arrive with the first fight.
+			".fg-panel:not(.fg-lit)": ["spender", "coc", "duel", "dontminion", "dissonance", "orbit",
+				"blackcastle", "pinch", "pipmarket", "secretnames"],
 			".fg-label:not(.fg-label-soft)": ["dissonance", "blackcastle", "pinch", "pipmarket", "secretnames"],
 		};
 		const measure = (pg) => pg.evaluate((probes) => {
@@ -3425,7 +3428,12 @@ try {
 			for (const [sel, props] of Object.entries(probes)) {
 				// The first VISIBLE match: a collapsed log or a hidden phone sheet
 				// computes the same, but a display:none node is not what anyone sees.
-				const el = [...document.querySelectorAll(sel)].find((e) => e.getClientRects().length);
+				// A panel a game DISSOLVES on purpose at this width (Spender's bank and card
+				// rows above 900px: no fill, a transparent edge, so the cards sit on the table)
+				// is not a panel anyone sees, so it is not the one compared.
+				const dissolved = (e) => sel.startsWith(".fg-panel") && getComputedStyle(e).backgroundImage === "none"
+					&& /rgba\([^)]*,\s*0\)|transparent/.test(getComputedStyle(e).borderTopColor);
+				const el = [...document.querySelectorAll(sel)].find((e) => e.getClientRects().length && !dissolved(e));
 				out[sel] = el ? props.map((p) => `${p}=${getComputedStyle(el)[p]}`).join(" ") : null;
 			}
 			return out;
