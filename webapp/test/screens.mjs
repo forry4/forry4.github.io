@@ -10246,6 +10246,15 @@ try {
 			for (let i = 0; i < d.length; i += 4 * 97) seen.add((d[i] >> 4) << 8 | (d[i + 1] >> 4) << 4 | (d[i + 2] >> 4));
 			return { colors: seen.size, w: cv.width, h: cv.height };
 		});
+		// A canvas that has only just mounted has not drawn its first frame yet, and on a
+		// loaded runner that gap is long enough to sample (Pages, 152038b9: one color).
+		// Wait for the drawing, not a duration; return the last sample for the detail.
+		const painted = async (min = 6, ms = 10_000) => {
+			const until = Date.now() + ms;
+			let last = await paint();
+			while (last.colors < min && Date.now() < until) { await page.waitForTimeout(100); last = await paint(); }
+			return last;
+		};
 		// Walk (real key presses, real frames) until the stage says we are at `id`.
 		const walkTo = async (id, keys) => {
 			for (const k of keys) await page.keyboard.down(k);
@@ -10273,7 +10282,7 @@ try {
 		const town = await page.waitForSelector(".halcyon .hr-main .hr-canvas", { timeout: 15_000 }).then(() => true).catch(() => false);
 		check("making a Ranger goes straight to the town, the inventory beside the stage and no vault until it is opened",
 			town && await page.locator(".hr-side .hr-grid-inv .hr-slot").count() === 16 && await page.locator(".hr-grid-vault").count() === 0);
-		const townPaint = await paint();
+		const townPaint = await painted();
 		check("the town is drawn on the stage (a walkable plaza, not one flat fill)", townPaint.colors >= 6, JSON.stringify(townPaint));
 		const geared = await page.waitForFunction(() => document.querySelectorAll(".hr-equip .hr-slot.has").length === 3,
 			null, { timeout: 15_000 }).then(() => true).catch(() => false);
@@ -10299,15 +10308,23 @@ try {
 		check("and dragging it back onto the weapon slot equips it again", back);
 
 		// A double click takes the bow off into the bag's first slot; the 1 key puts it back on.
-		// The server is held back 1.5s here: a town move must land on the page at once,
-		// not when the round trip does.
-		await page.route("**/halcyon/items/*/move", async (r) => { await new Promise((ok) => setTimeout(ok, 1500)); await r.continue().catch(() => {}); });
-		const t0 = Date.now();
+		// Each move's answer is held back 3s: a town move must land on the page BEFORE the
+		// server answers, which is asserted by COUNTING answers, not by a stopwatch (under
+		// SCREENS_SLOW_FRAMES the click itself takes most of a second).
+		let answered = 0;
+		await page.route("**/halcyon/items/*/move", async (r) => {
+			await new Promise((ok) => setTimeout(ok, 3000));
+			await r.continue().catch(() => {});
+			answered += 1;
+		});
 		await page.locator(".hr-equip .hr-slot").first().dblclick().catch(() => {});
 		const off = await page.waitForFunction(() => document.querySelectorAll(".hr-equip .hr-slot.has").length === 2
 			&& document.querySelector(".hr-grid-inv .hr-slot.has"), null, { timeout: 10_000 }).then(() => true).catch(() => false);
-		const offMs = Date.now() - t0;
-		check("a double click takes the bow off into the bag, before the server answers", off && offMs < 900, `${offMs}ms`);
+		const offAnswered = answered;
+		check("a double click takes the bow off into the bag, before the server answers", off && offAnswered === 0,
+			`${offAnswered} answered first`);
+		// The read-back after the series is a /halcyon/state request; listen before the second move.
+		const readBack = page.waitForResponse((r) => r.url().includes("/halcyon/state"), { timeout: 30_000 }).catch(() => null);
 		await page.keyboard.press("Digit1");
 		const on = await page.waitForFunction(() => document.querySelectorAll(".hr-equip .hr-slot.has").length === 3
 			&& !document.querySelector(".hr-grid-inv .hr-slot.has"), null, { timeout: 10_000 }).then(() => true).catch(() => false);
@@ -10316,10 +10333,11 @@ try {
 		// Both moves reach the server in order (the second names the version the first
 		// left); once the last answers, the page reads the server's state back, so a
 		// refusal would show as an error and the bow back in the bag.
-		await page.waitForTimeout(3500);
+		const back2 = await readBack;
+		await page.waitForFunction(() => true, null, { polling: "raf" });   // one frame for React to draw the read-back
 		const kept1 = await page.evaluate(() => document.querySelectorAll(".hr-equip .hr-slot.has").length === 3
 			&& !document.querySelector(".hr-grid-inv .hr-slot.has") && !document.querySelector(".hr-error"));
-		check("the quick off-and-on series reached the server and read back the same", kept1,
+		check("the quick off-and-on series reached the server and read back the same", !!back2 && answered === 2 && kept1,
 			await page.locator(".hr-error").textContent().catch(() => ""));
 		const flat = await page.evaluate(() => [...document.querySelectorAll(".hr-stats dd")].map((d) => d.textContent));
 		check("the stats are on screen as flat numbers, never percentages",
@@ -10349,8 +10367,7 @@ try {
 		await page.keyboard.press("KeyE");
 		const stage = await page.waitForSelector(".hr-canvas-run", { timeout: 15_000 }).then(() => true).catch(() => false);
 		check("E at the portal enters the Shallows", stage);
-		await page.waitForTimeout(600);
-		const runPaint = await paint();
+		const runPaint = await painted();
 		check("the dungeon is drawn (the canvas holds the map, not one flat fill)", runPaint.colors >= 6, JSON.stringify(runPaint));
 		check("the inventory stays on screen during the run", await page.locator(".hr-side .hr-grid-inv .hr-slot").count() === 16);
 		const vit = await page.evaluate(() => {
