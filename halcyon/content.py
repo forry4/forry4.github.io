@@ -31,6 +31,10 @@ MAX_ENCHANT_SLOTS = 4
 BASE_ITEMS: dict[str, dict] = {
     "shortbow":      {"slot": "weapon",  "cls": "ranger", "kind": "standard"},
     "longbow":       {"slot": "weapon",  "cls": "ranger", "kind": "standard"},
+    # Two STANDARD weapon types per class, plus uniques (owner's call, 2026-11-18).
+    # The repeater was a third standard bow; it is now a rare unique.
+    "repeater":      {"slot": "weapon",  "cls": "ranger", "kind": "unique"},
+    "tidecaller":    {"slot": "weapon",  "cls": "ranger", "kind": "unique"},
     "leather_vest":  {"slot": "armor",   "cls": "ranger", "kind": "standard"},
     "volley_quiver": {"slot": "ability", "cls": "ranger", "kind": "standard"},
     "band_of_vigor": {"slot": "ring",    "cls": None,     "kind": "standard"},
@@ -50,6 +54,34 @@ ENCHANTS: dict[str, dict] = {
     "mp_regen":      {"slots": ("armor", "ability", "ring")},
     "hp_regen":      {"slots": ("armor", "ring")},
 }
+
+# ── levels and XP (design §10.1) ────────────────────────────────────────────
+# XP comes from kills, plus a bonus for completing a dungeon; recall keeps what a
+# run earned (owner's call, 2026-11-18). The SERVER credits it, from the XP it
+# wrote into the dungeon it generated — a request never names an amount.
+MAX_LEVEL = 20
+ENEMY_XP = {"chaser": 4, "shooter": 5, "radial": 6, "boss": 20}
+
+
+def _level_table() -> tuple[int, ...]:
+    """LEVEL_XP[n] = the total XP a character needs to BE level n + 1. A full clear
+    of the Shallows (~140 XP) is about level 1 -> 2; each level asks 30% more."""
+    out, total = [0], 0
+    for level in range(1, MAX_LEVEL):
+        total += int(round(120 * 1.3 ** (level - 1) / 10)) * 10
+        out.append(total)
+    return tuple(out)
+
+
+LEVEL_XP = _level_table()
+
+
+def level_for(xp: int) -> int:
+    level = 1
+    while level < MAX_LEVEL and xp >= LEVEL_XP[level]:
+        level += 1
+    return level
+
 
 # Fusion's chance to gain enchantment slots (design §11.7: "may rarely gain
 # multiple slots"). Checked in order; the first hit wins.

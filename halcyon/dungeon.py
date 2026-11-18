@@ -26,6 +26,7 @@ import random
 import secrets
 from collections import deque
 
+from halcyon import content as C
 from halcyon import store
 
 # Every template has an ODD number of rows, so its middle row is the map's middle
@@ -131,12 +132,15 @@ BOSS_ROOM = [
 
 CORRIDOR = 3
 # The Shallows (design §14.4): the gentlest dungeon. Four combat rooms.
-DUNGEONS = {"shallows": {"name": "The Shallows", "combat_rooms": 4}}
+# `complete_xp` is the bonus for finishing it (design §10.1); each enemy's own XP
+# is content.ENEMY_XP, written onto the enemy here so the run keeps what it was worth.
+DUNGEONS = {"shallows": {"name": "The Shallows", "combat_rooms": 4, "complete_xp": 30}}
 
 ENEMY_WEIGHTS = (("chaser", 40), ("shooter", 35), ("radial", 25))
 DROP_CHANCE = {"chaser": 0.20, "shooter": 0.30, "radial": 0.35}
-LOOT = (("shortbow", 18), ("longbow", 12), ("leather_vest", 25), ("volley_quiver", 15),
-        ("band_of_vigor", 14), ("band_of_focus", 14), ("kingfisher_eye", 2))
+LOOT = (("shortbow", 16), ("longbow", 14), ("leather_vest", 22), ("volley_quiver", 14),
+        ("band_of_vigor", 14), ("band_of_focus", 14), ("kingfisher_eye", 2), ("tidecaller", 2),
+        ("repeater", 2))
 SLOT_ODDS = ((0, 50), (1, 35), (2, 12), (3, 3))
 
 
@@ -153,6 +157,8 @@ def _pick(rng: random.Random, table) -> object:
 def _item(rng: random.Random, tier: int) -> dict:
     base_id = _pick(rng, LOOT)
     slots = _pick(rng, SLOT_ODDS)
+    if C.base(base_id)["kind"] == "unique":
+        tier = 1                  # a unique is its own thing, not a rung on the tier ladder
     return {"base_id": base_id, "tier": tier, "slot_count": slots,
             "enchants": store.roll_enchants(base_id, slots, rng)}
 
@@ -196,7 +202,7 @@ def generate(dungeon_id: str, seed: str | None = None) -> dict:
                 elif ch in "EB":
                     eid = "boss" if ch == "B" else f"e{len(enemies) + 1}"
                     etype = "boss" if ch == "B" else _pick(rng, ENEMY_WEIGHTS)
-                    enemies[eid] = {"type": etype, "room": n, **pos}
+                    enemies[eid] = {"type": etype, "room": n, "xp": C.ENEMY_XP[etype], **pos}
                     if ch == "B":
                         boss = eid
         if n > 0:                                    # door in the left wall
@@ -223,7 +229,8 @@ def generate(dungeon_id: str, seed: str | None = None) -> dict:
 
     return {"id": dungeon_id, "name": spec["name"], "seed": seed, "width": width, "height": height,
             "tiles": ["".join(r) for r in grid], "start": start, "rooms": room_spans,
-            "enemies": enemies, "boss": boss, "drops": drops, "pickups": pickups}
+            "enemies": enemies, "boss": boss, "drops": drops, "pickups": pickups,
+            "complete_xp": spec["complete_xp"]}
 
 
 def walkable(d: dict, x: int, y: int) -> bool:

@@ -149,6 +149,13 @@ def init_schema(conn) -> None:
     cur = conn.cursor()
     for stmt in SCHEMA:
         cur.execute(stmt)
+    # Whether a base is standard or unique belongs to the BASE, so items follow
+    # content.py when it changes (the repeater became a unique, 2026-11-18). A unique
+    # has no tier ladder: it is tier 1. Cheap, and a no-op once everything agrees.
+    for base_id, b in C.BASE_ITEMS.items():
+        cur.execute("UPDATE hr_items SET kind=? WHERE base_id=? AND kind<>?", (b["kind"], base_id, b["kind"]))
+        if b["kind"] == "unique":
+            cur.execute("UPDATE hr_items SET tier=1 WHERE base_id=? AND tier<>1", (base_id,))
     conn.commit()
 
 
@@ -445,7 +452,27 @@ def _validate_dungeon(dungeon: dict) -> dict:
         if d.get("enemy") is not None and d["enemy"] not in enemies:
             raise HalcyonError("a drop names an enemy that is not there")
         drops[str(drop_id)] = {**_validate_spec(d), "enemy": d.get("enemy")}
-    return {"enemies": {str(k): v for k, v in enemies.items()}, "boss": boss, "drops": drops}
+    for e in enemies.values():
+        if not _is_xp(e.get("xp", 0)):
+            raise HalcyonError("an enemy's XP is not a whole number")
+    if not _is_xp(dungeon.get("complete_xp", 0)):
+        raise HalcyonError("the completion XP is not a whole number")
+    return {"enemies": {str(k): v for k, v in enemies.items()}, "boss": boss, "drops": drops,
+            "complete_xp": dungeon.get("complete_xp", 0)}
+
+
+def _is_xp(v) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 100_000
+
+
+def _credit_xp(cur, char_id: str, amount: int) -> None:
+    """Add XP the server's own record says was earned, and the level it reaches.
+    Written as each kill lands, so a recall (or a closed tab) keeps it."""
+    if amount <= 0:
+        return
+    ch = _one(cur, "SELECT xp FROM hr_characters WHERE char_id=?", (char_id,))
+    xp = ch["xp"] + amount
+    cur.execute("UPDATE hr_characters SET xp=?, level=? WHERE char_id=?", (xp, C.level_for(xp), char_id))
 
 
 def start_run(connect, owner_id: str, char_id: str, dungeon_id: str, seed: str, dungeon: dict,
@@ -494,6 +521,7 @@ def _apply_one(cur, run: dict, dungeon: dict, state: dict, ev: dict, now: float)
         if e not in dungeon["enemies"] or e in state["killed"]:
             raise _Refused
         state["killed"].append(e)
+        _credit_xp(cur, char_id, dungeon["enemies"][e].get("xp", 0))
     elif t == "pickup":
         d = str(ev.get("drop"))
         drop = dungeon["drops"].get(d)
@@ -510,7 +538,14 @@ def _apply_one(cur, run: dict, dungeon: dict, state: dict, ev: dict, now: float)
         state["picked"].append(d)
         _insert_item(cur, owner, drop, "drop", cols, now, run_id=run_id, drop_id=d)
     elif t in ("pickup_item", "drop_item", "move"):
-        it = _one(cur, "SELECT * FROM hr_items WHERE item_id=?", (str(ev.get("item")),))
+        # An item picked up THIS run may be named by its drop: the page has no item id
+        # for it until the run's reports land, and within one run a drop names exactly
+        # one item (the UNIQUE index on origin_run_id + origin_drop_id).
+        if ev.get("item") is None and ev.get("drop") is not None:
+            it = _one(cur, "SELECT * FROM hr_items WHERE origin_run_id=? AND origin_drop_id=?",
+                      (run_id, str(ev["drop"])))
+        else:
+            it = _one(cur, "SELECT * FROM hr_items WHERE item_id=?", (str(ev.get("item")),))
         if it is None or it["owner_id"] != owner:
             raise _Refused
         on_me = it["loc"] in ("inventory", "equipped") and it["char_id"] == char_id
@@ -539,6 +574,7 @@ def _apply_one(cur, run: dict, dungeon: dict, state: dict, ev: dict, now: float)
     elif t == "complete":
         if dungeon["boss"] is None or dungeon["boss"] not in state["killed"]:
             raise _Refused
+        _credit_xp(cur, char_id, dungeon.get("complete_xp", 0))
         return "completed"
     else:
         raise _Refused

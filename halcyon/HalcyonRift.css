@@ -1,97 +1,185 @@
-/* Halcyon Rift — the greybox screen. The site owns the materials (the game kit:
-   fg-table, fg-panel, fg-label, .btn); this sheet sets the four tokens and the
-   LAYOUT, and paints only what is the game's own: the item slots and the stage. */
+/* Halcyon Rift — one screen, never scrolled. The site owns the materials (the game
+   kit: fg-table, fg-panel, fg-label, .btn); this sheet sets the four tokens and the
+   LAYOUT, and paints only what is the game's own: the item slots and the stage.
+
+   THE PAGE NEVER SCROLLS (owner's rule, 2026-11-18). The root is the window's
+   height with overflow hidden, and every size below is derived from the window:
+   --slot (an inventory square) from the height left after the header and the side
+   panel's fixed rows, --vslot (a vault square) from the stage it sits on. A new row
+   in the side panel must be paid for in --slot's formula, or it pushes the
+   inventory out of the panel — `halcyonPlay` measures that at several sizes. */
 .halcyon{
   --g-ground:#0d1418;
   --g-accent:#9d8ff2;
   --g-ink:#120f22;
   --g-label:#cdc6fb;
-  min-height:100vh;
+  --gap:6px;
+  /* 4.8 squares tall (4 inventory rows + the equipment row at 4/5 width); 466px is
+     the header, the panel's padding, the roster, the HP and MP bars, the stats, two
+     titles, the XP line and the bin. */
+  --slot:clamp(30px, min(calc((100dvh - 466px) / 4.8), 5vw), 70px);
+  --side-w:calc(var(--slot) * 4 + var(--gap) * 3 + 28px);
+  --vslot:clamp(22px, min(calc((100dvh - 330px) / 8.6), calc((100vw - var(--side-w) - 130px) / 8.6)), 58px);
+  height:100vh;
+  height:100dvh;
+  min-height:0;
+  overflow:hidden;
   background:var(--g-ground);
 }
-
-/* ── town ───────────────────────────────────────────────────────────────── */
-.hr-town{
-  display:grid;
-  grid-template-columns:minmax(180px,220px) minmax(300px,1fr) minmax(300px,1fr);
-  grid-template-areas:"result result result" "error error error" "roster hero vault" "roster detail vault";
-  gap:16px;
-  max-width:1280px;
-  margin:0 auto;
-  padding:20px 16px 40px;
-  align-items:start;
-}
-.hr-roster{grid-area:roster;padding:14px;display:flex;flex-direction:column;gap:8px}
-.hr-hero{grid-area:hero;padding:14px}
-.hr-vault{grid-area:vault;padding:14px}
-.hr-detail{grid-area:detail;padding:14px;min-height:150px}
-.hr-result{grid-area:result;padding:14px 18px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
-.hr-result p{margin:0;flex:1 1 240px}
-.hr-result.res-completed{--g-lit:#6fd36a}
-.hr-result.res-dead{--g-lit:#e2564e}
-.hr-error{grid-area:error;color:#f3a39c;padding:4px 2px}
-.hr-error-page{max-width:420px;margin:60px auto;padding:20px;text-align:center}
-.hr-town h2{margin:0 0 10px}
-.hr-town h2 + .hr-grid, .hr-equip + h2{margin-top:0}
-.hr-equip{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:16px}
-.hr-grid{display:grid;gap:6px}
-.hr-grid-inv{grid-template-columns:repeat(4,1fr)}
-.hr-grid-vault{grid-template-columns:repeat(8,1fr)}
-.hr-enter{margin-top:16px;width:100%}
-.hr-hint{margin:8px 0 0;color:var(--text-soft)}
-.hr-fallen{margin:6px 2px 0;color:var(--text-soft);font-size:.9rem}
-
-.hr-char{
-  display:grid;grid-template-columns:28px 1fr;grid-template-rows:auto auto;column-gap:10px;
-  align-items:center;text-align:left;padding:10px 12px;border-radius:10px;cursor:pointer;
-  background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);color:inherit;font:inherit;
-}
-.hr-char:hover{border-color:color-mix(in srgb,var(--g-accent) 50%,transparent)}
-.hr-char.sel{border-color:var(--g-accent);background:color-mix(in srgb,var(--g-accent) 10%,transparent)}
-.hr-char-glyph{grid-row:1 / span 2;width:22px;height:22px;border-radius:50%;
-  background:#7fe3f0;box-shadow:inset 0 0 0 5px #1d5f6a}
-.hr-char-name{font-family:"Cinzel",serif;font-size:.95rem}
-.hr-char-empty{display:block;text-align:center;color:var(--text-soft);border-style:dashed}
-.hr-char:disabled{cursor:default;opacity:.6}
-
-/* An item slot: the game's own material. A shape per family, so a full bag
-   reads at a glance: weapon gold-brown, armor slate, ability violet, ring teal. */
-.hr-slot{
-  position:relative;aspect-ratio:1;min-width:0;border-radius:8px;cursor:pointer;padding:0;
-  background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.09);color:#f4efe4;font:inherit;
-  display:flex;align-items:center;justify-content:center;
-}
-.hr-slot:hover{border-color:color-mix(in srgb,var(--g-accent) 55%,transparent)}
-.hr-slot.has{background:var(--fam,#5b6168)}
-.hr-slot.fam-weapon{--fam:#8a6a3c}
-.hr-slot.fam-armor{--fam:#55657a}
-.hr-slot.fam-ability{--fam:#6b5492}
-.hr-slot.fam-ring{--fam:#3f7d78}
-.hr-slot.unique{box-shadow:inset 0 0 0 2px #e9c25a}
-.hr-slot.sel{outline:2px solid var(--g-accent);outline-offset:2px}
-.hr-abbr{font-family:"Cinzel",serif;font-size:.8rem;letter-spacing:.04em}
-.hr-tier{position:absolute;top:3px;right:5px;font-size:.7rem;opacity:.85}
-.hr-dots{position:absolute;bottom:1px;left:0;right:0;text-align:center;font-size:.65rem;line-height:1;color:#e9c25a}
-.hr-slot-label{font-size:.7rem;color:var(--text-soft)}
-.hr-enchants{list-style:none;margin:0;padding:0;display:grid;gap:4px}
-.hr-q{color:var(--text-soft)}
-.hr-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
-
-@media(max-width:980px){
-  .hr-town{grid-template-columns:1fr;grid-template-areas:"result" "error" "roster" "hero" "detail" "vault"}
-  .hr-roster{flex-direction:row;flex-wrap:wrap}
-  .hr-roster .hr-char{flex:1 1 160px}
-  .hr-roster h2,.hr-fallen{flex-basis:100%}
+.hr-main{
+  flex:1;min-height:0;display:grid;
+  grid-template-columns:minmax(0,1fr) var(--side-w);
+  gap:12px;padding:2px 12px 12px;
 }
 
-/* ── the dungeon ────────────────────────────────────────────────────────── */
-.hr-run{display:flex;flex-direction:column;height:100vh;overflow:hidden}
-.hr-stage{position:relative;flex:1;display:flex;flex-direction:column;min-height:0;padding:0 12px 10px}
-.hr-canvas{flex:1;width:100%;min-height:0;border-radius:10px;display:block;cursor:crosshair;background:#1b2220}
-.hr-keys{margin:8px 0 0;text-align:center;color:var(--text-soft);font-size:.9rem}
-.hr-keys kbd{font:inherit;font-size:.8rem;padding:1px 6px;border-radius:4px;border:1px solid rgba(255,255,255,.18)}
+/* ── the stage: the town or the dungeon, and the panels opened over it ───────── */
+.hr-stage{min-width:0;min-height:0;display:flex;flex-direction:column;gap:6px}
+.hr-view{position:relative;flex:1;min-height:0}
+.hr-canvas{position:absolute;inset:0;width:100%;height:100%;border-radius:10px;display:block;background:#1b2220}
+.hr-canvas-run,.hr-canvas-town{cursor:crosshair}
+.hr-keys{margin:0;text-align:center;color:var(--text-soft);font-size:.85rem;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hr-keys kbd{font:inherit;font-size:.78rem;padding:0 5px;border-radius:4px;border:1px solid rgba(255,255,255,.18)}
 .hr-ending{position:absolute;left:50%;top:40%;transform:translate(-50%,-50%);pointer-events:none;
   font-family:"Cinzel",serif;font-size:clamp(2rem,6vw,4rem);letter-spacing:.08em;color:#f4efe4;
   text-shadow:0 2px 18px rgba(0,0,0,.8)}
 .hr-ending.res-dead{color:#f08a80}
 .hr-ending.res-completed{color:#9fe7ff}
+
+.hr-overlay{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:2;
+  max-width:calc(100% - 24px);max-height:calc(100% - 24px);overflow:hidden;
+  padding:12px 16px 14px;display:flex;flex-direction:column;gap:10px}
+.hr-overlay-hd{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.hr-overlay-hd h2{margin:0}
+.hr-overlay p{margin:0}
+.hr-forge-panel{width:min(420px, calc(100% - 24px))}
+.hr-confirm{width:min(320px, calc(100% - 24px))}
+.hr-x{background:none;border:0;color:var(--text-soft);font-size:1.4rem;line-height:1;cursor:pointer;padding:0 4px}
+.hr-x:hover{color:#f4efe4}
+.hr-forge{display:flex;align-items:center;gap:10px}
+.hr-forge-pick{flex:1 1 0;min-width:0;padding:8px 10px;border-radius:8px;text-align:center;font-size:.9rem;
+  color:var(--text-soft);border:1px dashed rgba(255,255,255,.16);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hr-forge-pick.on{color:#f4efe4;border:1px solid var(--g-accent);background:color-mix(in srgb,var(--g-accent) 14%,transparent)}
+.hr-forge .btn{margin-left:auto}
+.hr-plus{font-size:1.4rem;color:var(--text-soft)}
+.hr-forge-note{color:var(--g-label)}
+
+.hr-result{position:absolute;left:12px;right:12px;top:12px;z-index:3;
+  padding:10px 14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.hr-result h2{margin:0}
+.hr-result p{margin:0;flex:1 1 220px}
+.hr-result.res-completed{--g-lit:#6fd36a}
+.hr-result.res-dead{--g-lit:#e2564e}
+.hr-result .hr-result-xp{color:var(--g-label);flex:0 1 auto}
+.hr-error{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);z-index:4;
+  max-width:calc(100% - 24px);display:flex;align-items:center;gap:10px;
+  padding:8px 10px 8px 14px;border-radius:8px;background:rgba(40,16,14,.92);color:#f3a39c}
+.hr-error-page{max-width:420px;margin:60px auto;padding:20px;text-align:center}
+.hr-hint{margin:0;color:var(--text-soft);font-size:.9rem}
+.hr-actions{display:flex;flex-wrap:wrap;gap:8px}
+
+/* ── the side panel: the character, on screen the whole time ──────────────── */
+.hr-side{min-height:0;overflow:hidden;padding:14px;display:flex;flex-direction:column;gap:8px}
+.hr-side h2{margin:2px 0 0}
+.hr-roster{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--gap)}
+.hr-char{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  height:44px;padding:4px 2px;border-radius:8px;cursor:pointer;font:inherit;font-size:.78rem;color:inherit;
+  background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);
+}
+.hr-char:hover:not(:disabled){border-color:color-mix(in srgb,var(--g-accent) 50%,transparent)}
+.hr-char.sel{border-color:var(--g-accent);background:color-mix(in srgb,var(--g-accent) 12%,transparent)}
+.hr-char:disabled{cursor:default}
+.hr-char-empty{font-size:1.2rem;color:var(--text-soft);border-style:dashed}
+.hr-char-empty:disabled{opacity:.5}
+.hr-char-glyph{width:15px;height:15px;border-radius:50%;background:#7fe3f0;box-shadow:inset 0 0 0 4px #1d5f6a}
+.hr-who{display:flex;align-items:baseline;flex-wrap:wrap;column-gap:8px;row-gap:5px;min-height:34px}
+.hr-char-name{font-family:"Cinzel",serif;font-size:.95rem}
+.hr-fallen{margin-left:auto;color:var(--text-soft);font-size:.82rem}
+.hr-xp{flex-basis:100%;display:block;height:4px;border-radius:2px;overflow:hidden;
+  background:color-mix(in srgb,var(--g-accent) 18%,transparent)}
+.hr-xp > i{display:block;height:100%;background:var(--g-accent)}
+.hr-equip{display:grid;grid-template-columns:repeat(5,1fr);gap:var(--gap)}
+/* HP and MP. HP: red is what you have, light gray what regeneration can bring back
+   (up to the recovery limit), the bar's dark ground what only a heal can. */
+.hr-vitals{display:grid;gap:3px}
+.hr-bar{position:relative;height:15px;border-radius:4px;overflow:hidden;background:#34383d;
+  display:flex;align-items:center;justify-content:space-between;padding:0 6px;font-size:.72rem;line-height:1}
+.hr-bar > i{position:absolute;left:0;top:0;bottom:0;width:0}
+.hr-bar-hp .hr-bar-rec{background:#8d9298}
+.hr-bar-hp .hr-bar-fill{background:#d5453b}
+.hr-bar-mp{background:#1d2740}
+.hr-bar-mp .hr-bar-fill{background:#4f7fd8}
+.hr-bar > span{position:relative;color:#f8f4ec;text-shadow:0 1px 2px rgba(0,0,0,.7);font-variant-numeric:tabular-nums}
+.hr-bar-name{font-size:.62rem;letter-spacing:.08em}
+/* The character's numbers: two rows of three, flat values only. */
+.hr-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:4px var(--gap);margin:0}
+.hr-stats > div{display:flex;align-items:baseline;justify-content:space-between;gap:4px;min-width:0;
+  padding:2px 6px;border-radius:6px;background:rgba(255,255,255,.035);font-size:.8rem;line-height:1.3}
+.hr-stats dt{color:var(--text-soft);font-size:.68rem;letter-spacing:.06em}
+.hr-stats dd{margin:0;font-variant-numeric:tabular-nums;white-space:nowrap}
+.hr-grid{display:grid;gap:var(--gap)}
+.hr-grid-inv{grid-template-columns:repeat(4,1fr)}
+.hr-grid-vault{grid-template-columns:repeat(8,var(--vslot))}
+.hr-trash{margin-top:auto;padding:7px 6px;border-radius:8px;text-align:center;font-size:.8rem;
+  color:var(--text-soft);border:1px dashed rgba(255,255,255,.14)}
+.hr-trash.armed{border-color:#e2564e;color:#f3a39c}
+
+/* An item slot: the game's own material. A color per family, so a full bag reads
+   at a glance: weapon gold-brown, armor slate, ability violet, ring teal. */
+.hr-slot{
+  position:relative;aspect-ratio:1;min-width:0;width:100%;border-radius:8px;cursor:pointer;padding:0;
+  background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.09);color:#f4efe4;font:inherit;
+  display:flex;align-items:center;justify-content:center;
+}
+.hr-slot:disabled{cursor:default}
+.hr-slot:hover:not(:disabled){border-color:color-mix(in srgb,var(--g-accent) 55%,transparent)}
+.hr-slot.has{background:var(--fam,#5b6168);cursor:grab}
+.hr-slot.fam-weapon{--fam:#8a6a3c}
+.hr-slot.fam-armor{--fam:#55657a}
+.hr-slot.fam-ability{--fam:#6b5492}
+.hr-slot.fam-ring{--fam:#3f7d78}
+/* A UNIQUE reads at a glance as not-a-tier: a gold face with a star where the
+   tier number would be. "Picked up this run" is a dashed ring, so it never
+   looks like a unique. */
+.hr-slot.unique{background:linear-gradient(150deg,#7a5a1c,#3b2a0c 70%);border-color:#e9c25a;
+  box-shadow:0 0 8px rgba(233,194,90,.35), inset 0 0 0 1px rgba(255,230,160,.35)}
+.hr-slot.unique .hr-abbr{color:#ffe7a6}
+.hr-star{color:#ffd85e;font-size:.78rem}
+.hr-slot.fresh{outline:2px dashed rgba(244,239,228,.55);outline-offset:-4px}
+.hr-slot.forging{outline:3px solid var(--g-accent);outline-offset:1px;
+  box-shadow:0 0 0 5px color-mix(in srgb,var(--g-accent) 30%,transparent)}
+.hr-num{position:absolute;top:2px;left:4px;font-size:.62rem;line-height:1;color:var(--text-soft)}
+.hr-slot.sel{outline:2px solid var(--g-accent);outline-offset:2px}
+.hr-slot.ok{outline:2px dashed color-mix(in srgb,var(--g-accent) 80%,transparent);outline-offset:-3px}
+.hr-slot.no{opacity:.35}
+.hr-slot.dragging{opacity:.4}
+.hr-abbr{font-family:"Cinzel",serif;font-size:clamp(.62rem, calc(var(--slot) * .2), .82rem);letter-spacing:.04em}
+.hr-tier{position:absolute;top:2px;right:4px;font-size:.66rem;opacity:.85}
+.hr-dots{position:absolute;bottom:1px;left:0;right:0;text-align:center;font-size:.62rem;line-height:1;color:#e9c25a}
+.hr-slot-label{font-size:.62rem;color:var(--text-soft)}
+
+.hr-tip{position:fixed;z-index:50;width:250px;padding:10px 12px;pointer-events:none}
+.hr-tip h3{margin:0 0 2px}
+.hr-tip.unique{--g-lit:#e9c25a;--g-label:#ffd85e}
+.hr-tip p{margin:0 0 6px;font-size:.88rem}
+.hr-tip-weapon{line-height:1.35}
+.hr-enchants{list-style:none;margin:0;padding:0;display:grid;gap:3px;font-size:.9rem}
+.hr-q{color:var(--text-soft)}
+
+/* A narrow window: the stage on top, the character below it, the inventory as two
+   rows of eight. Still one screen. (The fight itself is desktop-only, design §2.) */
+@media(max-width:760px){
+  .halcyon{
+    --slot:clamp(26px, calc((100vw - 24px - 20px - 7 * var(--gap)) / 8), 52px);
+    --side-w:auto;
+    --vslot:clamp(20px, min(calc((100vw - 64px) / 8.6), calc((100dvh - 420px) / 8.6)), 44px);
+  }
+  .hr-main{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) auto;gap:8px;padding:0 12px 10px}
+  .hr-side{padding:10px;gap:6px}
+  .hr-grid-inv{grid-template-columns:repeat(8,1fr)}
+  .hr-equip{grid-template-columns:repeat(5,var(--slot))}
+  .hr-char{height:36px;flex-direction:row}
+  .hr-who{min-height:0}
+  .hr-keys{display:none}
+}

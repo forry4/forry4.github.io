@@ -116,7 +116,7 @@ export function makeClient(authUser, { base = BACKEND_HTTP, fetchImpl = (...a) =
 		state: () => request("/halcyon/state"),
 		createCharacter: (slot) => request("/halcyon/characters", { slot, class_id: "ranger" }),
 		openCharacter: (charId) => request(`/halcyon/characters/${encodeURIComponent(charId)}/open`, {}),
-		startRun: (charId) => request("/halcyon/runs", { char_id: charId, dungeon_id: "shallows" }),
+		startRun: (charId, dungeonId = "shallows") => request("/halcyon/runs", { char_id: charId, dungeon_id: dungeonId }),
 		move: (itemId, to, version) => request(`/halcyon/items/${encodeURIComponent(itemId)}/move`, { to, version }),
 		discard: (itemId, version) => request(`/halcyon/items/${encodeURIComponent(itemId)}/discard`, { version }),
 		fuse: (a, b) => request("/halcyon/fuse", { a, b }),

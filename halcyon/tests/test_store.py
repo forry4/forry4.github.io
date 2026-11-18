@@ -488,3 +488,115 @@ def test_four_character_slots(db):
         S.create_character(db, ME, 4, "ranger")
     with pytest.raises(S.HalcyonError, match="already"):
         S.create_character(db, ME, 0, "ranger")
+
+
+# ── XP and levels (design §10.1) ──────────────────────────────────────────────
+def _xp_dungeon():
+    d = _dungeon()
+    for e, xp in (("e1", 4), ("e2", 5), ("boss", 20)):
+        d["enemies"][e]["xp"] = xp
+    d["complete_xp"] = 30
+    return d
+
+
+def _char(db, char_id):
+    return _rows(db, "SELECT level, xp, status FROM hr_characters WHERE char_id=?", (char_id,))[0]
+
+
+def test_each_kill_credits_the_xp_the_servers_dungeon_says_it_was_worth(db, me):
+    run = S.start_run(db, ME, me["char_id"], "shallows", "seed", _xp_dungeon())
+    S.apply_events(db, ME, run["run_id"], _seq({"type": "kill", "enemy": "e1", "xp": 9999},
+                                               {"type": "kill", "enemy": "e2"}))
+    assert _char(db, me["char_id"])["xp"] == 9, "an XP amount on the event is ignored"
+
+
+def test_a_kill_counted_twice_or_refused_earns_nothing(db, me):
+    run = S.start_run(db, ME, me["char_id"], "shallows", "seed", _xp_dungeon())
+    batch = _seq({"type": "kill", "enemy": "e1"}, {"type": "kill", "enemy": "e1"},
+                 {"type": "kill", "enemy": "nobody"})
+    S.apply_events(db, ME, run["run_id"], batch)
+    S.apply_events(db, ME, run["run_id"], batch)                  # re-sent whole
+    assert _char(db, me["char_id"])["xp"] == 4
+
+
+def test_recall_keeps_the_xp_the_run_earned(db, me):
+    run = S.start_run(db, ME, me["char_id"], "shallows", "seed", _xp_dungeon())
+    S.apply_events(db, ME, run["run_id"], _seq({"type": "kill", "enemy": "e1"}, {"type": "recall"}))
+    assert _char(db, me["char_id"])["xp"] == 4
+    run = S.start_run(db, ME, me["char_id"], "shallows", "seed", _xp_dungeon())
+    S.apply_events(db, ME, run["run_id"], _seq({"type": "kill", "enemy": "e2"}))
+    S.open_character(db, ME, me["char_id"])                       # a closed tab is a recall too
+    assert _char(db, me["char_id"])["xp"] == 9
+
+
+def test_completing_adds_the_bonus_and_reaches_the_level_the_table_says(db, me):
+    from halcyon import content as C
+    run = S.start_run(db, ME, me["char_id"], "shallows", "seed", _xp_dungeon())
+    S.apply_events(db, ME, run["run_id"], _seq({"type": "complete"}))     # refused: boss alive
+    assert _char(db, me["char_id"])["xp"] == 0
+    S.apply_events(db, ME, run["run_id"], [{"seq": 2, "type": "kill", "enemy": "boss"},
+                                           {"seq": 3, "type": "complete"}])
+    assert _char(db, me["char_id"]) == {"level": 1, "xp": 50, "status": "alive"}
+    db_conn = db()
+    db_conn.execute("UPDATE hr_characters SET xp=? WHERE char_id=?", (C.LEVEL_XP[1] - 10, me["char_id"]))
+    db_conn.commit(); db_conn.close()
+    run = S.start_run(db, ME, me["char_id"], "shallows", "seed", _xp_dungeon())
+    S.apply_events(db, ME, run["run_id"], _seq({"type": "kill", "enemy": "boss"}))
+    assert _char(db, me["char_id"])["level"] == 2
+
+
+def test_the_level_table_climbs_to_twenty_and_a_shallows_clear_is_about_one_level():
+    from halcyon import content as C
+    from halcyon import dungeon as D
+    assert len(C.LEVEL_XP) == C.MAX_LEVEL and C.LEVEL_XP[0] == 0
+    steps = [b - a for a, b in zip(C.LEVEL_XP, C.LEVEL_XP[1:])]
+    assert all(b > a for a, b in zip(steps, steps[1:])), "each level asks more than the last"
+    assert C.level_for(0) == 1 and C.level_for(10 ** 9) == C.MAX_LEVEL
+    assert all(C.level_for(t) == n + 1 and C.level_for(t - 1) == n for n, t in enumerate(C.LEVEL_XP) if n)
+    for seed in map(str, range(30)):
+        d = D.generate("shallows", seed)
+        clear = sum(e["xp"] for e in d["enemies"].values()) + d["complete_xp"]
+        assert C.LEVEL_XP[1] <= clear < C.LEVEL_XP[2], (seed, clear)
+
+
+def test_a_dungeon_with_a_made_up_xp_value_is_refused(db, me):
+    d = _xp_dungeon()
+    d["enemies"]["e1"]["xp"] = "lots"
+    with pytest.raises(S.HalcyonError):
+        S.start_run(db, ME, me["char_id"], "shallows", "seed", d)
+
+
+# ── changing gear mid-run ────────────────────────────────────────────────────
+def test_a_drop_picked_up_this_run_can_be_equipped_by_naming_the_drop(db, me):
+    bow = S.grant_item(db, ME, BOW, ("inventory", me["char_id"], 0))
+    S.move_item(db, ME, bow["item_id"], ("equipped", me["char_id"], "weapon"))
+    run = S.start_run(db, ME, me["char_id"], "shallows", "seed", _dungeon())
+    out = S.apply_events(db, ME, run["run_id"], _seq(
+        {"type": "kill", "enemy": "e2"},
+        {"type": "pickup", "drop": "d2", "slot": 3},                      # a vest, into slot 3
+        {"type": "move", "drop": "d2", "to": ["equipped", "armor"]},
+        {"type": "move", "drop": "d2", "to": ["equipped", "weapon"]},     # a vest is not a weapon
+        {"type": "move", "drop": "nope", "to": ["inventory", 5]}))
+    assert out["refused"] == [4, 5]
+    vest = _rows(db, "SELECT loc, slot_index FROM hr_items WHERE origin_drop_id='d2'")
+    assert vest == [{"loc": "equipped", "slot_index": EQUIP_SLOTS.index("armor")}]
+
+
+def test_a_drop_from_another_run_cannot_be_named(db, me):
+    run1 = S.start_run(db, ME, me["char_id"], "shallows", "seed", _dungeon())
+    S.apply_events(db, ME, run1["run_id"], _seq({"type": "kill", "enemy": "e1"},
+                                                {"type": "pickup", "drop": "d1", "slot": 0},
+                                                {"type": "recall"}))
+    run2 = S.start_run(db, ME, me["char_id"], "shallows", "seed", _dungeon())
+    out = S.apply_events(db, ME, run2["run_id"], _seq({"type": "move", "drop": "d1", "to": ["equipped", "weapon"]}))
+    assert out["refused"] == [1], "a drop id names an item of THIS run only"
+
+
+def test_items_follow_their_base_when_content_makes_it_unique(db, me):
+    S.grant_item(db, ME, {"base_id": "repeater", "tier": 3, "slot_count": 0, "enchants": []}, ("vault", 5))
+    conn = db()
+    conn.execute("UPDATE hr_items SET kind='standard' WHERE base_id='repeater'")   # as minted before the change
+    conn.commit()
+    S.init_schema(conn)
+    conn.close()
+    assert _rows(db, "SELECT kind, tier FROM hr_items WHERE base_id='repeater'") == [{"kind": "unique", "tier": 1}]

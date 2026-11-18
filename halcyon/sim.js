@@ -11,7 +11,8 @@
  *
  * What the server learns of a run comes from `state.events` (kill, pickup,
  * death, recall, complete) — the page queues them (design §18.4), all but the
- * ones marked `local` (a heal: the server keeps no HP). The server
+ * ones marked `local` (a heal, a level-up: the server keeps no HP and works the
+ * level out from the XP it credits itself). The server
  * never simulates; it checks those claims against the dungeon it generated.
  *
  * GREYBOX: every number below is a placeholder to tune by playing (design §23).
@@ -60,39 +61,93 @@ export const ENEMY = {
 	boss: { hp: 900, r: 1.0, speed: 1.2 },
 };
 
-const WEAPONS = {
-	shortbow: { dmg: 12, rate: 4.5, range: 7.5 },
-	longbow: { dmg: 21, rate: 2.6, range: 10 },
+/* Each weapon fires its own PATTERN, not just its own numbers (owner's ask,
+ * 2026-11-18). `rate` is volleys a second; a volley is `shots` arrows fanned
+ * `spread` radians apart, or a `burst` of bolts `gap` ticks apart. `pierce` is how
+ * many enemies a shot passes through. Damage is per arrow, scaled by tier.
+ * Two STANDARD types per class plus uniques (owner's call, 2026-11-18); ranges in
+ * tiles are the owner's: shortbow 5, repeater 6, longbow 7.
+ *   shortbow   — twin arrows, fast, short: strong up close, spreads out at range.
+ *   longbow    — one heavy arrow, slow, the longest reach, punches through two enemies.
+ *   tidecaller — UNIQUE: three arrows in a wide fan that glance off a wall once.
+ *   repeater   — UNIQUE: a three-bolt burst, then a reload: front-loaded damage.
+ * `bounce` is how many walls a shot glances off before it breaks. */
+export const WEAPONS = {
+	none: { dmg: 6, rate: 3, range: 5, speed: 14, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0 },
+	shortbow: { dmg: 7, rate: 5, range: 5, speed: 15, shots: 2, spread: 0.12, pierce: 0, burst: 1, gap: 0 },
+	longbow: { dmg: 34, rate: 1.5, range: 7, speed: 20, shots: 1, spread: 0, pierce: 2, burst: 1, gap: 0 },
+	tidecaller: { dmg: 13, rate: 2.5, range: 6, speed: 16, shots: 3, spread: 0.24, pierce: 0, burst: 1, gap: 0, bounce: 1 },
+	repeater: { dmg: 14, rate: 1.5, range: 6, speed: 17, shots: 1, spread: 0, pierce: 0, burst: 3, gap: 5 },
 };
 
-/* A character's numbers from what it wears. `gear` is the equipped items as the
- * server lists them ({base_id, tier, enchants: [{id, q}]}). */
-export function statsFor(gear = []) {
-	const s = { maxHp: 100, maxMp: 100, dmg: 6, rate: 3, range: 6, shotSpeed: 14, def: 0,
-		hpRegen: 1.2, mpRegen: 6, ap: 1, arrows: 0, abilityDmg: 0, pierce: 0 };
+/* EVERY NUMBER A PLAYER READS IS FLAT (owner's ask, 2026-11-18: "stop with all the
+ * percentages"). A character has Attack and Dexterity as plain points; each point
+ * is worth 1/STAT_SCALE more damage (Attack) or shots a second (Dexterity), so a
+ * weapon's damage is still its own and the points scale every weapon alike. The
+ * points themselves, the damage per arrow and every enchantment are whole numbers. */
+export const STAT_SCALE = 25;
+
+/* An enchantment's flat value at roll quality q (0-1): [at q=0, at q=1], rounded.
+ * The store keeps the QUALITY, so changing a row here re-scales every item. */
+export const ENCHANT_FLAT = {
+	max_hp: [5, 25], max_mp: [5, 25], attack: [1, 6], attack_speed: [1, 6], defense: [1, 5],
+	ability_power: [2, 10], mp_regen: [1, 4], hp_regen: [1, 3],
+};
+export const enchantValue = (id, q) => {
+	const r = ENCHANT_FLAT[id];
+	return r ? Math.round(r[0] + (r[1] - r[0]) * q) : 0;
+};
+
+/* What each level past the first adds (design §10.1: levels are separate from
+ * the per-dungeon stat rewards and their caps). Greybox numbers. */
+export const PER_LEVEL = { maxHp: 6, maxMp: 4, att: 1 };
+
+const tierScale = (it) => 1 + 0.2 * ((it.tier || 1) - 1);
+
+/* A character's numbers from its level and what it wears. `gear` is the equipped
+ * items as the server lists them ({base_id, tier, enchants: [{id, q}]}). */
+export function statsFor(gear = [], level = 1) {
+	const s = { maxHp: 100, maxMp: 100, att: 0, dex: 0, def: 0, hpRegen: 1, mpRegen: 6, arrows: 0, abilityDmg: 0,
+		...weaponStats(WEAPONS.none, 1) };
+	// Points gather first and apply once the weapon is known, so the order the
+	// server lists gear in can never change the numbers.
+	let pierce = 0;
 	for (const it of gear) {
-		const t = 1 + 0.2 * ((it.tier || 1) - 1);
+		const t = tierScale(it), tier = it.tier || 1;
 		const w = WEAPONS[it.base_id];
-		if (w) { s.dmg = w.dmg * t; s.rate = w.rate; s.range = w.range; }
-		if (it.base_id === "leather_vest") { s.def += 2 * t; s.maxHp += 10 * ((it.tier || 1) - 1); }
-		if (it.base_id === "volley_quiver") { s.arrows = 7; s.abilityDmg = 15 * t; }
-		if (it.base_id === "band_of_vigor") s.maxHp += 15 * t;
-		if (it.base_id === "band_of_focus") { s.maxMp += 15 * t; s.mpRegen += 1.5; }
-		if (it.base_id === "kingfisher_eye") { s.pierce = 1; s.dmg *= 1.1; }
+		if (w) Object.assign(s, weaponStats(w, t));
+		if (it.base_id === "leather_vest") { s.def += 1 + tier; s.maxHp += 10 * (tier - 1); }
+		if (it.base_id === "volley_quiver") { s.arrows = 7; s.abilityDmg += Math.round(15 * t); }
+		if (it.base_id === "band_of_vigor") s.maxHp += Math.round(15 * t);
+		if (it.base_id === "band_of_focus") { s.maxMp += Math.round(15 * t); s.mpRegen += 2; }
+		if (it.base_id === "kingfisher_eye") { pierce += 1; s.att += 5; }
 		for (const e of it.enchants || []) {
-			const q = e.q;
-			if (e.id === "max_hp") s.maxHp += 20 * q;
-			else if (e.id === "max_mp") s.maxMp += 20 * q;
-			else if (e.id === "attack") s.dmg *= 1 + 0.2 * q;
-			else if (e.id === "defense") s.def += 4 * q;
-			else if (e.id === "attack_speed") s.rate *= 1 + 0.2 * q;
-			else if (e.id === "ability_power") s.ap += 0.25 * q;
-			else if (e.id === "mp_regen") s.mpRegen += 3 * q;
-			else if (e.id === "hp_regen") s.hpRegen += 1.5 * q;
+			const v = enchantValue(e.id, e.q);
+			if (e.id === "max_hp") s.maxHp += v;
+			else if (e.id === "max_mp") s.maxMp += v;
+			else if (e.id === "attack") s.att += v;
+			else if (e.id === "attack_speed") s.dex += v;
+			else if (e.id === "defense") s.def += v;
+			else if (e.id === "ability_power") s.abilityDmg += v;
+			else if (e.id === "mp_regen") s.mpRegen += v;
+			else if (e.id === "hp_regen") s.hpRegen += v;
 		}
 	}
-	s.abilityDmg *= s.ap;
+	const up = Math.max(0, (level | 0) - 1);
+	s.maxHp += PER_LEVEL.maxHp * up;
+	s.maxMp += PER_LEVEL.maxMp * up;
+	s.att += PER_LEVEL.att * up;
+	s.pierce += pierce;
+	s.weaponDmg = s.dmg;                                   // per arrow, before Attack
+	s.dmg = Math.round(s.dmg * (1 + s.att / STAT_SCALE));
+	s.rate = s.rate * (1 + s.dex / STAT_SCALE);
+	s.abilityDmg = s.arrows ? Math.round(s.abilityDmg * (1 + s.att / STAT_SCALE)) : 0;
 	return s;
+}
+
+function weaponStats(w, t) {
+	return { dmg: Math.round(w.dmg * t), rate: w.rate, range: w.range, shotSpeed: w.speed, shots: w.shots,
+		spread: w.spread, pierce: w.pierce, burst: w.burst, gap: w.gap, bounce: w.bounce || 0 };
 }
 
 // ── the map ─────────────────────────────────────────────────────────────────
@@ -123,12 +178,32 @@ function roomOf(st, x) {
 	return -1;
 }
 
+/* The level `xp` reaches on the server's table (`levels[n]` = the XP to BE
+ * level n + 1 — the state route ships it, so the two sides read one table). */
+export function levelFor(levels, xp) {
+	let level = 1;
+	while (level < levels.length && xp >= levels[level]) level++;
+	return level;
+}
+
+/* Where `xp` sits inside its level: { level, into, span } (span 0 at the top). */
+export function xpProgress(levels, xp) {
+	const level = levelFor(levels, xp);
+	if (level >= levels.length) return { level, into: 0, span: 0 };
+	return { level, into: xp - levels[level - 1], span: levels[level] - levels[level - 1] };
+}
+
 // ── state ───────────────────────────────────────────────────────────────────
-export function createSim(dungeon, gear = []) {
-	const stats = statsFor(gear);
+/* `hero` is the character as the server lists it: { level, xp }, plus the
+ * server's level table. The XP a run earns is shown and levelled on here, but it
+ * is CREDITED by the server from its own dungeon (each enemy's `xp`). */
+export function createSim(dungeon, gear = [], hero = {}) {
+	const levels = hero.levels || [0];
+	const xp = hero.xp || 0, level = Math.max(hero.level || 1, levelFor(levels, xp));
+	const stats = statsFor(gear, level);
 	const enemies = Object.entries(dungeon.enemies)
 		.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))      // a fixed order, never insertion order
-		.map(([id, e]) => ({ id, type: e.type, room: e.room, x: e.x, y: e.y,
+		.map(([id, e]) => ({ id, type: e.type, room: e.room, x: e.x, y: e.y, xp: e.xp || 0,
 			r: ENEMY[e.type].r, hp: ENEMY[e.type].hp, maxHp: ENEMY[e.type].hp,
 			active: false, cd: 30 + (e.type === "boss" ? 60 : 0), tele: 0, flash: 0,
 			side: 1, phase: 1, mode: 0, modeT: e.type === "boss" ? BOSS_CYCLE[0][1] : 0, ang: 0, aimX: 0, aimY: 0 }));
@@ -138,9 +213,10 @@ export function createSim(dungeon, gear = []) {
 	return {
 		tick: 0, rng: hashSeed(String(dungeon.seed)), status: "play",
 		w: dungeon.width, h: dungeon.height, tiles: dungeon.tiles, rooms: dungeon.rooms,
-		stats,
+		stats, gear, levels, completeXp: dungeon.complete_xp || 0,
+		hero: { level, xp, startLevel: level, startXp: xp },
 		p: { x: dungeon.start.x, y: dungeon.start.y, r: PLAYER_R, hp: stats.maxHp, low: stats.maxHp,
-			mp: stats.maxMp, fireCd: 0, hurt: 0 },
+			mp: stats.maxMp, fireCd: 0, hurt: 0, burstLeft: 0, burstCd: 0 },
 		enemies, bullets: [], dropsBy,
 		pickups: dungeon.pickups.map((p) => ({ ...p })),
 		bags: [], portal: null, events: [],
@@ -267,11 +343,13 @@ function bossStep(st, e, d, ux, uy) {
 // ── one tick ────────────────────────────────────────────────────────────────
 /* input: { mx, my: -1|0|1; ax, ay: the aim vector (any length); fire: bool;
  *          ability: bool (this tick only); take: drop id | null; heal: bool (E on
- *          an orb); enter: bool (E on the portal); recall: bool } */
+ *          an orb); enter: bool (E on the portal); recall: bool;
+ *          gear: the whole equipped list, on the tick it changes (else absent) } */
 export function step(st, input) {
 	st.events = [];
 	if (st.status !== "play") return st;
 	st.tick++;
+	if (input.gear) setGear(st, input.gear);
 	const p = st.p, s = st.stats;
 
 	if (input.recall) { st.status = "recalled"; st.events.push({ type: "recall" }); return st; }
@@ -287,23 +365,7 @@ export function step(st, input) {
 	p.mp = Math.min(s.maxMp, p.mp + s.mpRegen * DT);
 	if (p.hurt > 0) p.hurt--;
 
-	// aim
-	const ix = input.ax || 0, iy = input.ay || 0, al = Math.sqrt(ix * ix + iy * iy);
-	const ax = al > 0 ? ix / al : 1, ay = al > 0 ? iy / al : 0;
-	if (p.fireCd > 0) p.fireCd--;
-	if (input.fire && p.fireCd === 0) {
-		st.bullets.push({ owner: "p", x: p.x, y: p.y, vx: ax * s.shotSpeed, vy: ay * s.shotSpeed,
-			dmg: s.dmg, r: 0.14, life: Math.round(s.range / s.shotSpeed * TPS), pierce: s.pierce, hit: [] });
-		p.fireCd = Math.max(1, Math.round(TPS / s.rate));
-	}
-	if (input.ability && s.arrows > 0 && p.mp >= ABILITY_COST) {
-		p.mp -= ABILITY_COST;
-		for (let i = 0; i < s.arrows; i++) {
-			const [vx, vy] = rotate(ax, ay, (i - (s.arrows - 1) / 2) * 0.14);
-			st.bullets.push({ owner: "p", x: p.x, y: p.y, vx: vx * 16, vy: vy * 16, dmg: s.abilityDmg,
-				r: 0.16, life: 45, pierce: 1, hit: [] });
-		}
-	}
+	playerFire(st, input);
 
 	// manual pickups (design §11.6, §9.4)
 	if (input.heal) {
@@ -327,6 +389,7 @@ export function step(st, input) {
 	// boss's loot must not end the run with that loot still on the floor.
 	if (input.enter && st.portal && near(p, st.portal, REACH)) {
 		st.status = "complete";
+		gainXp(st, st.completeXp);
 		st.events.push({ type: "complete" });
 		return st;
 	}
@@ -344,7 +407,7 @@ export function step(st, input) {
 	const keep = [];
 	for (const b of st.bullets) {
 		b.x += b.vx * DT; b.y += b.vy * DT;
-		if (--b.life <= 0 || shotSolid(tileAt(st, b.x, b.y))) continue;
+		if (--b.life <= 0 || wallHit(b, (x, y) => shotSolid(tileAt(st, x, y)))) continue;
 		let gone = false;
 		if (b.owner === "p") {
 			for (const e of st.enemies) {
@@ -369,6 +432,56 @@ export function step(st, input) {
 	return st;
 }
 
+/* The player's weapon and ability for one tick: aim, the fire cooldown, a burst in
+ * flight, the volley ability. Shared with the town (town.js), which has a `p`, its
+ * `stats` and `bullets` of the same shape, so a weapon fires there exactly as here. */
+export function playerFire(st, input) {
+	const p = st.p, s = st.stats;
+	const ix = input.ax || 0, iy = input.ay || 0, al = Math.sqrt(ix * ix + iy * iy);
+	const ax = al > 0 ? ix / al : 1, ay = al > 0 ? iy / al : 0;
+	if (p.fireCd > 0) p.fireCd--;
+	if (input.fire && p.fireCd === 0) {
+		volley(st, ax, ay);
+		p.burstLeft = s.burst - 1; p.burstCd = s.gap;
+		p.fireCd = Math.max(1, Math.round(TPS / s.rate));
+	} else if (p.burstLeft > 0 && --p.burstCd <= 0) {   // a burst finishes once started
+		volley(st, ax, ay);
+		p.burstLeft--; p.burstCd = s.gap;
+	}
+	if (input.ability && s.arrows > 0 && p.mp >= ABILITY_COST) {
+		p.mp -= ABILITY_COST;
+		for (let i = 0; i < s.arrows; i++) {
+			const [vx, vy] = rotate(ax, ay, (i - (s.arrows - 1) / 2) * 0.14);
+			st.bullets.push({ owner: "p", x: p.x, y: p.y, vx: vx * 16, vy: vy * 16, dmg: s.abilityDmg,
+				r: 0.16, life: 45, pierce: 1, bounce: 0, hit: [] });
+		}
+	}
+}
+
+/* One volley from the player: `shots` arrows fanned around the aim. */
+function volley(st, ax, ay) {
+	const p = st.p, s = st.stats, life = Math.round(s.range / s.shotSpeed * TPS);
+	for (let i = 0; i < s.shots; i++) {
+		const [vx, vy] = s.shots > 1 ? rotate(ax, ay, (i - (s.shots - 1) / 2) * s.spread) : [ax, ay];
+		st.bullets.push({ owner: "p", x: p.x, y: p.y, vx: vx * s.shotSpeed, vy: vy * s.shotSpeed,
+			dmg: s.dmg, r: 0.14, life, pierce: s.pierce, bounce: s.bounce, hit: [] });
+	}
+}
+
+/* A shot that has just moved into something solid: true if it breaks there. One
+ * with `bounce` left glances off instead — back to where it was, its velocity
+ * mirrored on the axis it crossed (both, into a corner). */
+export function wallHit(b, solidAt) {
+	if (!solidAt(b.x, b.y)) return false;
+	if (!(b.bounce > 0)) return true;
+	const x0 = b.x - b.vx * DT, y0 = b.y - b.vy * DT;
+	const flipX = solidAt(b.x, y0), flipY = solidAt(x0, b.y);
+	if (flipX || !flipY) b.vx = -b.vx;
+	if (flipY || !flipX) b.vy = -b.vy;
+	b.x = x0; b.y = y0; b.bounce--;
+	return false;
+}
+
 function near(a, b, r) {
 	const dx = a.x - b.x, dy = a.y - b.y;
 	return dx * dx + dy * dy <= r * r;
@@ -385,9 +498,42 @@ function portalSpot(st, e) {
 	return { x: e.x, y: e.y };
 }
 
+/* Gear changed mid-run (the player moved an item in the side panel). It is an
+ * INPUT, applied at the top of a tick, so a replay of the same inputs swaps on the
+ * same tick. Nothing is given for free: HP, the recovery limit and MP keep their
+ * values and only come DOWN to a smaller maximum — otherwise taking a +HP ring off
+ * and putting it back would be a heal. A burst in flight stops. */
+export function setGear(st, gear) {
+	st.gear = gear;
+	st.stats = statsFor(gear, st.hero.level);
+	const p = st.p, s = st.stats;
+	p.hp = Math.min(p.hp, s.maxHp);
+	p.low = Math.min(p.low, s.maxHp);
+	p.mp = Math.min(p.mp, s.maxMp);
+	p.burstLeft = 0; p.burstCd = 0;
+}
+
+/* XP, and a level when it crosses one: the new stats apply at once, and the HP,
+ * recovery limit and MP each rise by what the level added to their maximum. */
+function gainXp(st, amount) {
+	const h = st.hero;
+	if (amount <= 0) return;
+	h.xp += amount;
+	const level = levelFor(st.levels, h.xp);
+	if (level <= h.level) return;
+	const was = st.stats, now = statsFor(st.gear, level), p = st.p;
+	p.hp += now.maxHp - was.maxHp;
+	p.low += now.maxHp - was.maxHp;
+	p.mp = Math.min(now.maxMp, p.mp + now.maxMp - was.maxMp);
+	st.stats = now;
+	h.level = level;
+	st.events.push({ type: "level", level, local: true });
+}
+
 function kill(st, e) {
 	e.hp = 0;
 	st.events.push({ type: "kill", enemy: e.id });
+	gainXp(st, e.xp);
 	const drops = st.dropsBy[e.id];
 	if (drops && drops.length) st.bags.push({ enemy: e.id, x: e.x, y: e.y, drops: [...drops] });
 	if (e.type === "boss") {
@@ -401,7 +547,7 @@ function kill(st, e) {
  * determinism tests and for comparing a replay against a live run. */
 export function fingerprint(st) {
 	const r = (v) => Math.round(v * 1e6) / 1e6;
-	return JSON.stringify([st.tick, st.rng, st.status, r(st.p.x), r(st.p.y), r(st.p.hp), r(st.p.low), r(st.p.mp),
+	return JSON.stringify([st.tick, st.rng, st.status, st.hero.level, st.hero.xp, st.p.burstLeft, r(st.p.x), r(st.p.y), r(st.p.hp), r(st.p.low), r(st.p.mp),
 		st.enemies.map((e) => [e.id, r(e.x), r(e.y), r(e.hp), e.cd, e.tele, e.mode, e.modeT]),
 		st.bullets.length, st.bullets.map((b) => [r(b.x), r(b.y)]).slice(0, 40),
 		st.bags.map((b) => b.drops.join(",")), st.pickups.length]);

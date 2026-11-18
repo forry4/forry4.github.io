@@ -10239,53 +10239,134 @@ try {
 			if (cond) log(`  OK   ${name}`);
 			else { shell.push(`halcyon: ${name}`); log(`  FAIL ${name}  ${detail}`); }
 		};
-
-		await page.goto(`http://localhost:${PORT}/halcyon`, { waitUntil: "load" });
-		const town = await page.waitForSelector(".halcyon .hr-roster", { timeout: 30_000 }).then(() => true).catch(() => false);
-		check("the town renders from the server's state", town);
-		check("four character slots, a 16-slot inventory panel and a 64-slot vault",
-			await page.locator(".hr-char").count() === 4 && await page.locator(".hr-grid-vault .hr-slot").count() === 64,
-			`${await page.locator(".hr-char").count()} slots, ${await page.locator(".hr-grid-vault .hr-slot").count()} vault`);
-		await page.locator(".hr-char-empty").first().click().catch(() => {});
-		const geared = await page.waitForFunction(() => document.querySelectorAll(".hr-equip .hr-slot.has").length === 3,
-			null, { timeout: 15_000 }).then(() => true).catch(() => false);
-		check("a new Ranger is made wearing its three starter items", geared);
-		check("its inventory is the 16 empty slots", await page.locator(".hr-grid-inv .hr-slot").count() === 16);
-
-		await page.locator(".hr-enter").click().catch(() => {});
-		const stage = await page.waitForSelector(".hr-canvas", { timeout: 15_000 }).then(() => true).catch(() => false);
-		check("Enter the Shallows opens the dungeon canvas", stage);
-		await page.waitForTimeout(600);
-		const paint = await page.evaluate(() => {
+		const paint = () => page.evaluate(() => {
 			const cv = document.querySelector(".hr-canvas");
 			if (!cv || !cv.width) return { colors: 0 };
 			const d = cv.getContext("2d").getImageData(0, 0, cv.width, cv.height).data, seen = new Set();
 			for (let i = 0; i < d.length; i += 4 * 97) seen.add((d[i] >> 4) << 8 | (d[i + 1] >> 4) << 4 | (d[i + 2] >> 4));
 			return { colors: seen.size, w: cv.width, h: cv.height };
 		});
-		check("the dungeon is drawn (the canvas holds the map, not one flat fill)", paint.colors >= 6, JSON.stringify(paint));
+		// Walk (real key presses, real frames) until the stage says we are at `id`.
+		const walkTo = async (id, keys) => {
+			for (const k of keys) await page.keyboard.down(k);
+			const ok = await page.waitForFunction((want) => document.querySelector(".hr-stage")?.dataset.near === want,
+				id, { timeout: 8_000 }).then(() => true).catch(() => false);
+			for (const k of keys) await page.keyboard.up(k);
+			return ok;
+		};
+		// The page never scrolls, and nothing inside it spills out of its box.
+		const fit = () => page.evaluate(() => {
+			const d = document.documentElement, side = document.querySelector(".hr-side"), view = document.querySelector(".hr-view");
+			const ov = document.querySelector(".hr-overlay"), o = ov?.getBoundingClientRect(), v = view.getBoundingClientRect();
+			return { scrollY: d.scrollHeight - d.clientHeight, scrollX: d.scrollWidth - d.clientWidth,
+				side: side.scrollHeight - side.clientHeight, overlay: o ? Math.round(Math.max(v.top - o.top, o.bottom - v.bottom,
+					v.left - o.left, o.right - v.right)) : null,
+				inv: document.querySelectorAll(".hr-side .hr-grid-inv .hr-slot").length };
+		});
+
+		await page.goto(`http://localhost:${PORT}/halcyon`, { waitUntil: "load" });
+		const town = await page.waitForSelector(".halcyon .hr-roster", { timeout: 30_000 }).then(() => true).catch(() => false);
+		check("the town renders from the server's state", town);
+		check("four roster slots, the inventory beside the stage, and no vault until it is opened",
+			await page.locator(".hr-roster .hr-char").count() === 4 && await page.locator(".hr-side .hr-grid-inv .hr-slot").count() === 16
+			&& await page.locator(".hr-grid-vault").count() === 0);
+		const townPaint = await paint();
+		check("the town is drawn on the stage (a walkable plaza, not one flat fill)", townPaint.colors >= 6, JSON.stringify(townPaint));
+		await page.locator(".hr-char-empty").first().click().catch(() => {});
+		const geared = await page.waitForFunction(() => document.querySelectorAll(".hr-equip .hr-slot.has").length === 3,
+			null, { timeout: 15_000 }).then(() => true).catch(() => false);
+		check("a new Ranger is made wearing its three starter items", geared);
+		const meter = await page.locator(".hr-who .hr-xp").first()
+			.evaluate((m) => [m.getAttribute("aria-valuenow"), m.getAttribute("aria-valuemax")]).catch(() => null);
+		check("its XP toward level 2 is shown, off the server's level table",
+			JSON.stringify(meter) === JSON.stringify(["0", "120"]), JSON.stringify(meter));
+
+		check("walking west reaches the vault", await walkTo("vault", ["KeyA"]));
+		await page.keyboard.press("KeyE");
+		const vault = await page.waitForFunction(() => document.querySelectorAll(".hr-grid-vault .hr-slot").length === 64,
+			null, { timeout: 5_000 }).then(() => true).catch(() => false);
+		check("E at the vault opens its 64 slots over the stage", vault);
+		const weapon = page.locator(".hr-equip .hr-slot").first();
+		await weapon.dragTo(page.locator(".hr-grid-vault .hr-slot").first()).catch(() => {});
+		const stored = await page.waitForFunction(() => document.querySelectorAll(".hr-equip .hr-slot.has").length === 2
+			&& document.querySelector(".hr-grid-vault .hr-slot.has"), null, { timeout: 10_000 }).then(() => true).catch(() => false);
+		check("dragging the bow onto the vault stores it", stored);
+		await page.locator(".hr-grid-vault .hr-slot.has").first().dragTo(weapon).catch(() => {});
+		const back = await page.waitForFunction(() => document.querySelectorAll(".hr-equip .hr-slot.has").length === 3
+			&& !document.querySelector(".hr-grid-vault .hr-slot.has"), null, { timeout: 10_000 }).then(() => true).catch(() => false);
+		check("and dragging it back onto the weapon slot equips it again", back);
+
+		// A double click takes the bow off into the bag's first slot; the 1 key puts it back on.
+		await page.locator(".hr-equip .hr-slot").first().dblclick().catch(() => {});
+		const off = await page.waitForFunction(() => document.querySelectorAll(".hr-equip .hr-slot.has").length === 2
+			&& document.querySelector(".hr-grid-inv .hr-slot.has"), null, { timeout: 10_000 }).then(() => true).catch(() => false);
+		check("a double click takes the bow off into the bag", off);
+		await page.keyboard.press("Digit1");
+		const on = await page.waitForFunction(() => document.querySelectorAll(".hr-equip .hr-slot.has").length === 3
+			&& !document.querySelector(".hr-grid-inv .hr-slot.has"), null, { timeout: 10_000 }).then(() => true).catch(() => false);
+		check("and the 1 key (the bag's first slot, numbered) puts it back on", on
+			&& await page.locator(".hr-grid-inv .hr-num").count() === 8);
+		const flat = await page.evaluate(() => [...document.querySelectorAll(".hr-stats dd")].map((d) => d.textContent));
+		check("the stats are on screen as flat numbers, never percentages",
+			flat.length === 6 && flat.every((t) => /^[0-9.]+(?:×\d)?(?:\/s)?$/.test(t)), JSON.stringify(flat));
+		await page.locator(".hr-equip .hr-slot").first().hover();
+		const tipText = await page.locator(".hr-tip").textContent({ timeout: 3_000 }).catch(() => "");
+		check("an item's tooltip has no percentages", tipText.length > 0 && !tipText.includes("%"), tipText);
+		await page.mouse.move(5, 5);
+
+		for (const [w, h] of [[1440, 900], [1024, 600], [1920, 1080], [390, 844]]) {
+			await page.setViewportSize({ width: w, height: h });
+			await page.waitForTimeout(200);
+			const f = await fit();
+			check(`${w}x${h}: the page does not scroll and the panels hold their contents`,
+				f.scrollY <= 0 && f.scrollX <= 0 && f.side <= 0 && f.overlay !== null && f.overlay <= 1 && f.inv === 16, JSON.stringify(f));
+		}
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.keyboard.press("Escape");
+
+		// The portal is up and to the right of the vault: a diagonal walk passes through it.
+		check("walking to the Shallows' portal", await walkTo("realm:shallows", ["KeyD", "KeyW"]));
+		await page.keyboard.press("KeyE");
+		const stage = await page.waitForSelector(".hr-canvas-run", { timeout: 15_000 }).then(() => true).catch(() => false);
+		check("E at the portal enters the Shallows", stage);
+		await page.waitForTimeout(600);
+		const runPaint = await paint();
+		check("the dungeon is drawn (the canvas holds the map, not one flat fill)", runPaint.colors >= 6, JSON.stringify(runPaint));
+		check("the inventory stays on screen during the run", await page.locator(".hr-side .hr-grid-inv .hr-slot").count() === 16);
+		const vit = await page.evaluate(() => {
+			const v = document.querySelector(".hr-vitals");
+			return v && { ...v.dataset, hp: v.querySelector('[data-k="hp-text"]')?.textContent, mp: v.querySelector('[data-k="mp-text"]')?.textContent };
+		});
+		check("the HP and MP bars read the fight: full at the start, as flat numbers",
+			!!vit && vit.hp === `${vit.maxHp} / ${vit.maxHp}` && vit.limit === vit.maxHp && /^\d+ \/ \d+$/.test(vit.mp || ""), JSON.stringify(vit));
 		const queued = () => page.evaluate(() => localStorage.getItem("halcyon.queue.v1.guest"));
 		check("the run's queue is on the device before anything is sent", (await queued()) !== null);
+		// Gear changes mid-fight: drag the vest off into the (empty) bag. It is a run
+		// event, so it must survive the recall and the reload below.
+		await page.locator(".hr-equip .hr-slot").nth(1).dragTo(page.locator(".hr-grid-inv .hr-slot").first()).catch(() => {});
+		const swapped = await page.waitForFunction(() => document.querySelectorAll(".hr-equip .hr-slot.has").length === 2
+			&& document.querySelector(".hr-grid-inv .hr-slot")?.getAttribute("aria-label")?.startsWith("Leather Vest"),
+			null, { timeout: 5_000 }).then(() => true).catch(() => false);
+		const moveQueued = (await queued() || "").includes('"move"');
+		check("during the run, dragging the vest into the bag takes it off and queues a move", swapped && moveQueued, String(await queued()));
 		await page.locator(".hr-canvas").hover();
 		await page.keyboard.down("KeyD");
 		await page.waitForTimeout(900);
 		await page.keyboard.up("KeyD");
 		await page.keyboard.press("KeyR");
-		const back = await page.waitForSelector(".hr-result.res-recalled", { timeout: 15_000 }).then(() => true).catch(() => false);
-		check("R recalls to town and says so", back);
+		const recalled = await page.waitForSelector(".hr-result.res-recalled", { timeout: 15_000 }).then(() => true).catch(() => false);
+		check("R recalls to town and says so", recalled);
 		const drained = await page.waitForFunction(() => localStorage.getItem("halcyon.queue.v1.guest") === null,
 			null, { timeout: 15_000 }).then(() => true).catch(() => false);
 		check("the recall reached the server (the device's queue emptied)", drained, String(await queued()));
 		await page.reload({ waitUntil: "load" });
 		await page.waitForSelector(".halcyon .hr-roster", { timeout: 30_000 }).catch(() => {});
-		check("after a reload the same guest roster still has its Ranger, gear and all",
+		await page.waitForFunction(() => document.querySelectorAll(".hr-equip .hr-slot.has").length === 2,
+			null, { timeout: 10_000 }).catch(() => {});
+		check("after a reload the same guest roster still has its Ranger, with the vest where the run put it",
 			await page.locator(".hr-char:not(.hr-char-empty)").count() === 1
-			&& await page.locator(".hr-equip .hr-slot.has").count() === 3);
-
-		await page.setViewportSize({ width: 390, height: 844 });
-		await page.waitForTimeout(250);
-		const sideways = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-		check("the town does not scroll sideways on a phone", sideways <= 0, `${sideways}px`);
+			&& await page.locator(".hr-equip .hr-slot.has").count() === 2
+			&& (await page.locator(".hr-grid-inv .hr-slot").first().getAttribute("aria-label") || "").startsWith("Leather Vest"));
 		check("no page errors", errors.length === 0, errors.slice(0, 3).join(" | "));
 		await ctx.close();
 	}

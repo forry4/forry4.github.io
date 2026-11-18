@@ -76,6 +76,7 @@ def test_the_whole_loop_through_the_routes(app):
     gear = {i["equip_slot"]: i["base_id"] for i in state["items"] if i["loc"] == "equipped"}
     assert gear == {"weapon": "shortbow", "armor": "leather_vest", "ability": "volley_quiver"}
     assert [c["char_id"] for c in state["characters"]] == [ch["char_id"]]
+    assert state["levels"][:3] == [0, 120, 280] and state["characters"][0]["level"] == 1
 
     run = route(app, "POST", "/halcyon/runs")(A.RunIn(char_id=ch["char_id"]), who)
     d = run["dungeon"]
@@ -87,6 +88,7 @@ def test_the_whole_loop_through_the_routes(app):
         {"seq": 3, "type": "complete"}]), who)
     assert out == {"status": "completed", "last_seq": 3, "refused": []}
     state = route(app, "GET", "/halcyon/state")(who)
+    assert state["characters"][0]["xp"] == d["enemies"]["boss"]["xp"] + d["complete_xp"]
     loot = next(i for i in state["items"] if i["loc"] == "inventory")
     moved = route(app, "POST", "/halcyon/items/{item_id}/move")(
         loot["item_id"], A.MoveIn(to=["vault", 3], version=loot["version"]), who)

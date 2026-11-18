@@ -142,6 +142,7 @@ def setup_halcyon(app, get_db_conn, get_user_by_session, token_resolver=None) ->
         return {**view, "dungeons": [{"id": k, "name": v["name"]} for k, v in D.DUNGEONS.items()],
                 "limits": {"vault": C.VAULT_SIZE, "inventory": C.INVENTORY_SIZE,
                            "characters": C.CHARACTER_SLOTS, "equip": list(C.EQUIP_SLOTS)},
+                "levels": list(C.LEVEL_XP),
                 "bases": C.BASE_ITEMS}
 
     @app.post("/halcyon/characters")

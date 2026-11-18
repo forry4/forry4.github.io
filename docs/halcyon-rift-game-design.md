@@ -462,13 +462,16 @@ The exact XP curve is OPEN. A likely baseline is:
 - harder dungeons provide more XP;
 - completing difficult content should eventually be more efficient than farming the easiest dungeon.
 
+DECIDED (2026-11-18):
+
+- XP is awarded continuously from enemies, plus a bonus for completing the dungeon.
+- Recall keeps the XP a run earned (so does a closed tab, which is a recall — §13.1a).
+- A level adds a small amount to the class's base stats, separate from the per-dungeon
+  stat rewards and their caps (§10.2).
+
 OPEN:
 
-- whether XP is awarded continuously from enemies;
-- whether XP is lost or retained when recalling;
-- whether boss completion gives a large XP bonus;
-- whether a dungeon must be completed for its XP;
-- exact level 20 pacing.
+- exact level 20 pacing (the greybox table is a placeholder: each level asks ~30% more).
 
 ### 10.2 Stats
 
@@ -692,7 +695,7 @@ OPEN:
 
 - whether a boss arena prevents walking out (recall still works);
 - whether any completion rewards are granted immediately on boss death or after a formal completion state;
-- whether recall preserves experience gained during the current instance.
+- ~~whether recall preserves experience gained during the current instance~~ — it does (§10.1, 2026-11-18).
 
 The intended design is that recall is a safe extraction option, not a failure. The player gives up the remaining dungeon and its completion rewards in exchange for safety.
 

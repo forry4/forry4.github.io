@@ -80,3 +80,25 @@ def test_the_store_accepts_every_generated_dungeon(tmp_path):
 def test_an_unknown_dungeon_is_refused():
     with pytest.raises(S.HalcyonError):
         D.generate("the_deep")
+
+
+def test_loot_is_two_weapons_per_class_plus_uniques_and_nothing_retired():
+    from halcyon import content as C
+    names = [b for b, _ in D.LOOT]
+    assert all(b in C.BASE_ITEMS and not C.BASE_ITEMS[b].get("retired") for b in names)
+    for cls in C.CLASSES:
+        std = [b for b in names if C.BASE_ITEMS[b]["slot"] == "weapon" and C.BASE_ITEMS[b]["cls"] == cls
+               and C.BASE_ITEMS[b]["kind"] == "standard"]
+        assert len(std) == 2, (cls, std)
+    assert any(C.BASE_ITEMS[b]["kind"] == "unique" and C.BASE_ITEMS[b]["slot"] == "weapon" for b in names)
+
+
+def test_a_unique_drop_has_no_tier_to_climb():
+    from halcyon import content as C
+    seen = 0
+    for seed in map(str, range(300)):
+        for d in D.generate("shallows", seed)["drops"].values():
+            if C.BASE_ITEMS[d["base_id"]]["kind"] == "unique":
+                seen += 1
+                assert d["tier"] == 1, d
+    assert seen > 0, "300 dungeons rolled no unique at all"
