@@ -162,7 +162,9 @@ drag the vest off mid-run → recall → reload, the vest still off).
 
 ## A catalog game built like an Extra (design §20a)
 
-`shared/catalog.js` has it (`adminOnly`), with an accent (rift lavender, `#9d8ff2`) and
+`shared/catalog.js` has it — PUBLIC on the menu since 2026-11-18 (it was `adminOnly`
+while it was a greybox; the guest/run/event limits in `api.py` and the idle-guest
+prune are what make that safe) — with an accent (rift lavender, `#9d8ff2`) and
 an emblem. Its code lives HERE, not in `games/`, so the `games/*`-globbed table-game
 gates do not apply. The two catalog-keyed gates carry written, self-policing
 exemptions: `NOT_TABLE_GAMES` in `shared/tests/test_profile_results.py` and
@@ -242,3 +244,14 @@ the input-log upload (§18.6), and hiding the drop table (above).
   each frame (`LiveHero`), so the boss kill (which carries the clear) moves the bar
   then, and nothing arrives on the way back — the result panel has no "+XP" line, and
   `endRun` keeps the run's XP on screen until the server's copy lands.
+
+## Putting items down (2026-11-18)
+- **In a run an item can go on the ground**: drag it onto the bin's place (it reads
+  "Drop an item here (or on the stage) to leave it on the ground" in a run) or onto the
+  stage. It lands at the Ranger's feet (`st.floor`, `{key, x, y}` — the sim only keeps
+  WHERE; the page's `runControl.floor` keeps WHAT), and E takes it back into the first
+  free bag slot. The page reports `drop_item` / `pickup_item`, naming the item by its
+  drop if it was picked up this run (the store already accepted both). Whatever is
+  still on the floor when the run ends is gone (the store destroys `ground` items at
+  run end), and the result panel's "Brought back" counts only what is still carried.
+- In town there is no floor (`move_item` refuses `ground`); the bin discards.

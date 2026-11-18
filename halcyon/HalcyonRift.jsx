@@ -110,6 +110,8 @@ function runControl(mine, charId, view, setRunItems) {
 	const ctl = {
 		items: mine.map((it) => ({ ...it })),
 		gear: null,
+		floor: new Map(),              // key -> the item, for what the player put down
+		drops: [],                     // keys to put on the floor on the fight's next tick
 		equipped: () => ctl.items.filter((it) => it.loc === "equipped"),
 		room: () => ctl.items.filter((it) => it.loc === "inventory").length < view.limits.inventory,
 		take(drop, spec) {
@@ -118,6 +120,25 @@ function runControl(mine, charId, view, setRunItems) {
 			if (slot === undefined) return undefined;
 			ctl.items = [...ctl.items, { ...spec, item_id: `drop:${drop}`, drop, fresh: true, char_id: charId,
 				loc: "inventory", slot_index: slot, kind: view.bases[spec.base_id]?.kind || "standard" }];
+			setRunItems(ctl.items);
+			return slot;
+		},
+		freeSlot() {
+			const used = new Set(ctl.items.filter((it) => it.loc === "inventory").map((it) => it.slot_index));
+			return [...Array(view.limits.inventory).keys()].find((i) => !used.has(i));
+		},
+		drop(it) {
+			ctl.items = ctl.items.filter((x) => x.item_id !== it.item_id);
+			ctl.floor.set(it.item_id, it);
+			ctl.drops.push(it.item_id);
+			if (it.loc === "equipped") ctl.gear = ctl.equipped();
+			setRunItems(ctl.items);
+		},
+		lift(key) {
+			const it = ctl.floor.get(key), slot = ctl.freeSlot();
+			if (!it || slot === undefined) return undefined;
+			ctl.floor.delete(key);
+			ctl.items = [...ctl.items, { ...it, loc: "inventory", slot_index: slot, equip_slot: null }];
 			setRunItems(ctl.items);
 			return slot;
 		},
@@ -309,10 +330,20 @@ export default function HalcyonRift({ authUser, onExit }) {
 		ctl.move(it, to, other, here);
 		client.report({ type: "move", ...(it.fresh ? { drop: it.drop } : { item: it.item_id }), to: [to[0], to[2]] });
 	};
+	// Mid-run, an item can be put on the floor at the Ranger's feet: the bin's place
+	// in a run, or anywhere on the stage. E picks it back up; the run's end takes
+	// whatever is still lying there (the server destroys it, design §19).
+	const runDrop = (it) => {
+		const ctl = run.ctl;
+		if (ctl.ended || !ctl.items.some((x) => x.item_id === it.item_id)) return;
+		ctl.drop(it);
+		client.report({ type: "drop_item", ...(it.fresh ? { drop: it.drop } : { item: it.item_id }) });
+	};
 	const placeAt = (target, it) => {
 		if (!it) return;
 		if (run) {
 			if (target.kind === "place" && target.to[0] !== "vault") runMove(it, target.to);
+			else if (target.kind === "trash") runDrop(it);
 			setPicked(null);
 			return;
 		}
@@ -441,7 +472,9 @@ export default function HalcyonRift({ authUser, onExit }) {
 			{header}
 			<main className="hr-main">
 				<section className="hr-stage" aria-label={run ? run.dungeon.name : "The town"}
-					data-near={near || ""} data-panel={panel || ""}>
+					data-near={near || ""} data-panel={panel || ""}
+					onDragOver={(e) => { if (run && drag) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; } }}
+					onDrop={(e) => { if (run && drag) { e.preventDefault(); slotCtx.dropAt({ kind: "trash" }); setDrag(null); } }}>
 					<div className="hr-view">
 						{run
 							? <Dungeon run={run} client={client} onEnd={endRun} />
@@ -532,10 +565,10 @@ export default function HalcyonRift({ authUser, onExit }) {
 							return <Slot key={i} num={i < 8 ? i + 1 : null} item={invItem(i)} target={to && { kind: "place", to }} locked={locked} ctx={slotCtx} />;
 						})}
 					</div>
-					<div className={"hr-trash" + (drag && !run ? " armed" : "")} aria-label="Discard"
-						onDragOver={(e) => { if (drag && !locked && !run) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; } }}
-						onDrop={(e) => { e.preventDefault(); if (!locked && !run) slotCtx.dropAt({ kind: "trash" }); setDrag(null); }}>
-						{run ? "Swap gear any time · the vault and the bin are in town" : "Drop an item here to discard it"}
+					<div className={"hr-trash" + (drag ? " armed" : "") + (run ? " hr-ground" : "")} aria-label={run ? "Drop on the ground" : "Discard"}
+						onDragOver={(e) => { if (drag && !locked) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; } }}
+						onDrop={(e) => { e.preventDefault(); if (!locked) slotCtx.dropAt({ kind: "trash" }); setDrag(null); }}>
+						{run ? "Drop an item here (or on the stage) to leave it on the ground" : "Drop an item here to discard it"}
 					</div>
 				</aside>
 			</main>
@@ -872,7 +905,6 @@ function Dungeon({ run, client, onEnd }) {
 		const st = createSim(run.dungeon, run.gear, run.hero);
 		const ctl = run.ctl;
 		ctl.st = st;                                 // the side panel's HP and MP bars read it live
-		const loot = [];
 		const notes = [];
 		const keys = new Set();
 		const mouse = { x: 0, y: 0, down: false };
@@ -892,11 +924,16 @@ function Dungeon({ run, client, onEnd }) {
 		ro.observe(cv);
 		resize();
 
-		const nearestBag = () => {
+		// The nearest thing E would take: a loot bag or an item the player put down.
+		const nearestLoot = () => {
 			let best = null, bd = REACH * REACH;
 			for (const b of st.bags) {
 				const d = (b.x - st.p.x) ** 2 + (b.y - st.p.y) ** 2;
-				if (d <= bd) { bd = d; best = b; }
+				if (d <= bd) { bd = d; best = { bag: b }; }
+			}
+			for (const f of st.floor) {
+				const d = (f.x - st.p.x) ** 2 + (f.y - st.p.y) ** 2;
+				if (d <= bd) { bd = d; best = { floor: f }; }
 			}
 			return best;
 		};
@@ -905,13 +942,13 @@ function Dungeon({ run, client, onEnd }) {
 			let mx = 0, my = 0;
 			for (const k of keys) { const d = KEY_DIR[k]; if (d) { mx += d[0]; my += d[1]; } }
 			const { ox, oy } = cam;                    // aim through what the player SEES
-			const bag = edge.interact ? nearestBag() : null;
-			let take = null;
-			if (bag && ctl.room()) take = bag.drops[0];
-			else if (bag) note("Inventory full", "#f3a39c");
+			const loot = edge.interact ? nearestLoot() : null;
+			let take = null, lift = null;
+			if (loot && ctl.room()) { if (loot.bag) take = loot.bag.drops[0]; else lift = loot.floor.key; }
+			else if (loot) note("Inventory full", "#f3a39c");
 			const out = { mx: Math.sign(mx), my: Math.sign(my), ax: (mouse.x - ox) / px - st.p.x, ay: (mouse.y - oy) / px - st.p.y,
-				fire: mouse.down || auto, ability: edge.ability, heal: edge.interact, take, recall: edge.recall,
-				enter: edge.interact && !bag };
+				fire: mouse.down || auto, ability: edge.ability, heal: edge.interact, take, lift, drop: ctl.drops.shift() || null,
+				recall: edge.recall, enter: edge.interact && !loot };
 			edge.ability = edge.interact = edge.recall = false;
 			return out;
 		};
@@ -923,6 +960,13 @@ function Dungeon({ run, client, onEnd }) {
 				setCleared(true);
 				setTimeout(() => setCleared(false), 2600);
 			}
+			if (ev.type === "lift") {
+				const it = ctl.floor.get(ev.key), slot = ctl.lift(ev.key);
+				if (slot === undefined) return;
+				client.report({ type: "pickup_item", ...(it.fresh ? { drop: it.drop } : { item: it.item_id }), slot });
+				note(`Picked up ${nameOf(it)}`, "#e9c25a");
+				return;
+			}
 			if (ev.local) return;
 			if (ev.type === "pickup") {
 				const d = run.dungeon.drops[ev.drop];
@@ -930,7 +974,6 @@ function Dungeon({ run, client, onEnd }) {
 				if (slot === undefined) return;            // input() never takes into a full bag
 				client.report({ ...ev, slot });
 				const name = nameOf({ ...d, kind: run.bases[d.base_id]?.kind });
-				loot.push(name);
 				note(`Picked up ${name}`, "#e9c25a");
 				return;
 			}
@@ -943,7 +986,9 @@ function Dungeon({ run, client, onEnd }) {
 			setEnding(status);
 			client.flush();
 			const h = st.hero;
-			setTimeout(() => onEnd({ status, loot, items: ctl.items, realm: run.realm, heroXp: h.xp, level: h.level }),
+			// What came back is what is still carried (an item put down and left is gone).
+			const brought = ctl.items.filter((it) => it.fresh).map(nameOf);
+			setTimeout(() => onEnd({ status, loot: brought, items: ctl.items, realm: run.realm, heroXp: h.xp, level: h.level }),
 				status === "dead" ? 1400 : 700);
 		};
 
@@ -964,7 +1009,8 @@ function Dungeon({ run, client, onEnd }) {
 		};
 
 		const bagHint = () => {
-			const b = nearestBag();
+			const l = nearestLoot(), b = l?.bag;
+			if (l?.floor) return [{ text: `E: take ${nameOf(ctl.floor.get(l.floor.key))}`, color: "#e9c25a" }];
 			if (!b && st.portal && Math.hypot(st.portal.x - st.p.x, st.portal.y - st.p.y) <= REACH)
 				return [{ text: "E: leave the Shallows", color: "#9fe7ff" }];
 			if (!b) return [];

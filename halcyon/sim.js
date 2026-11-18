@@ -228,7 +228,7 @@ export function createSim(dungeon, gear = [], hero = {}) {
 			mp: stats.maxMp, fireCd: 0, hurt: 0, burstLeft: 0, burstCd: 0 },
 		enemies, bullets: [], dropsBy,
 		pickups: dungeon.pickups.map((p) => ({ ...p })),
-		bags: [], portal: null, events: [],
+		bags: [], floor: [], portal: null, events: [],
 	};
 }
 
@@ -351,7 +351,9 @@ function bossStep(st, e, d, ux, uy) {
 
 // ── one tick ────────────────────────────────────────────────────────────────
 /* input: { mx, my: -1|0|1; ax, ay: the aim vector (any length); fire: bool;
- *          ability: bool (this tick only); take: drop id | null; heal: bool (E on
+ *          ability: bool (this tick only); take: drop id | null;
+ *          drop: an item the player put down (an opaque key the page names it by);
+ *          lift: the key of an item on the floor to take back; heal: bool (E on
  *          an orb); enter: bool (E on the portal); recall: bool;
  *          gear: the whole equipped list, on the tick it changes (else absent) } */
 export function step(st, input) {
@@ -393,6 +395,13 @@ export function step(st, input) {
 			st.events.push({ type: "pickup", drop: input.take });
 		}
 		st.bags = st.bags.filter((b) => b.drops.length);
+	}
+	// The floor: items the PLAYER put down, at their feet. The sim only keeps where
+	// they lie; what they are is the page's (it reports drop_item / pickup_item).
+	if (input.drop) st.floor.push({ key: input.drop, x: p.x, y: p.y });
+	if (input.lift) {
+		const i = st.floor.findIndex((f) => f.key === input.lift && near(p, f, REACH));
+		if (i >= 0) { st.floor.splice(i, 1); st.events.push({ type: "lift", key: input.lift, local: true }); }
 	}
 	// Leaving is a choice (E), never a step: walking over the portal to reach the
 	// boss's loot must not end the run with that loot still on the floor.

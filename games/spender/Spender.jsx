@@ -3229,7 +3229,7 @@ export default function SpenderApp() {
 		);
 	}
 
-	// Halcyon Rift — the solo ARPG (in design; admin-only on the menu). Coded like
+	// Halcyon Rift — the solo ARPG (public on the menu since 2026-11-18). Coded like
 	// an Extra: no room segment, no lobby (halcyon/CLAUDE.md).
 	if (screen === "halcyon") {
 		return (

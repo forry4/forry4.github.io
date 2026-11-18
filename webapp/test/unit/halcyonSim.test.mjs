@@ -184,6 +184,22 @@ test("a bag cannot be taken from across the room", () => {
 	assert.deepEqual(st.events.filter((v) => v.type === "pickup"), [{ type: "pickup", drop: dropId }]);
 });
 
+test("an item put down lies at the player's feet and only comes back from within reach", () => {
+	const st = createSim(A, STARTER);
+	step(st, { drop: "item-1" });
+	assert.equal(st.floor.length, 1);
+	const f = st.floor[0];
+	st.p.x = f.x + REACH + 2;
+	step(st, { lift: "item-1" });
+	assert.equal(st.floor.length, 1, "taken from afar");
+	st.p.x = f.x; st.p.y = f.y;
+	step(st, { lift: "item-2" });
+	assert.equal(st.floor.length, 1, "a key that is not there took something");
+	step(st, { lift: "item-1" });
+	assert.equal(st.floor.length, 0);
+	assert.deepEqual(st.events, [{ type: "lift", key: "item-1", local: true }]);
+});
+
 test("gear changes the numbers: a longbow hits harder and slower, enchantments scale by quality", () => {
 	const short = statsFor([{ base_id: "shortbow", tier: 1 }]), long = statsFor([{ base_id: "longbow", tier: 1 }]);
 	assert.ok(long.dmg > short.dmg && long.rate < short.rate && long.range > short.range);

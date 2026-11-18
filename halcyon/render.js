@@ -93,6 +93,11 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here }) {
 		g.fillStyle = COLORS.bag; g.fillRect(X - px * 0.22, Y - px * 0.18, px * 0.44, px * 0.38);
 		g.fillStyle = "#7a5a1c"; g.fillRect(X - px * 0.22, Y - px * 0.06, px * 0.44, px * 0.05);
 	}
+	for (const f of st.floor || []) {                 // what the player put down: pale, a bundle
+		const X = sx(f.x), Y = sy(f.y);
+		g.fillStyle = "#c9cfd6"; g.fillRect(X - px * 0.18, Y - px * 0.16, px * 0.36, px * 0.32);
+		g.fillStyle = "#6c747d"; g.fillRect(X - px * 0.18, Y - px * 0.04, px * 0.36, px * 0.05);
+	}
 	if (st.portal) {
 		const pulse = 0.5 + 0.5 * Math.sin(st.tick / 9);
 		circle(g, sx(st.portal.x), sy(st.portal.y), px * (0.55 + 0.1 * pulse), "rgba(159,231,255,.35)");

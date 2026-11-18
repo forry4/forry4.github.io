@@ -10375,7 +10375,20 @@ try {
 			null, { timeout: 5_000 }).then(() => true).catch(() => false);
 		const moveQueued = (await queued() || "").includes('"move"');
 		check("during the run, dragging the vest into the bag takes it off and queues a move", swapped && moveQueued, String(await queued()));
+		// Put the vest on the ground (the bin's place in a run), then E takes it back. The
+		// queue may already have been sent, so what is counted is the events REPORTED
+		// (its `next`); the reload below proves the server took both.
+		const reported = async () => JSON.parse(await queued() || "{}").next || 0;
+		const n0 = await reported();
+		await page.locator(".hr-grid-inv .hr-slot").first().dragTo(page.locator(".hr-trash")).catch(() => {});
+		const grounded = await page.waitForFunction(() => !document.querySelector(".hr-grid-inv .hr-slot.has"), null, { timeout: 5_000 }).then(() => true).catch(() => false);
+		check("dragging the vest onto the ground puts it at the Ranger's feet and reports it",
+			grounded && await reported() === n0 + 1, String(await queued()));
 		await page.locator(".hr-canvas").hover();
+		await page.keyboard.press("KeyE");
+		const lifted = await page.waitForFunction(() => document.querySelector(".hr-grid-inv .hr-slot")?.getAttribute("aria-label")?.startsWith("Leather Vest"),
+			null, { timeout: 5_000 }).then(() => true).catch(() => false);
+		check("and E picks it back up into the bag, reporting it", lifted && await reported() === n0 + 2, String(await queued()));
 		await page.keyboard.down("KeyD");
 		await page.waitForTimeout(900);
 		await page.keyboard.up("KeyD");

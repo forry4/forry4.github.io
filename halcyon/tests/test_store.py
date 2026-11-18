@@ -239,6 +239,26 @@ def _carrying(db, char_id):
     return run
 
 
+def test_an_item_put_down_is_picked_back_up_by_its_drop_or_its_id_and_never_from_another_run(db, me):
+    run = _carrying(db, me["char_id"])
+    # The ring picked up this run is named by its drop (the page has no id for it yet).
+    out = S.apply_events(db, ME, run["run_id"], [{"seq": 6, "type": "pickup_item", "drop": "d3", "slot": 7}])
+    assert out["refused"] == []
+    ring = next(i for i in _live(db) if i["origin_drop_id"] == "d3")
+    assert (ring["loc"], ring["slot_index"]) == ("inventory", 7)
+    # A carried-in item goes down and comes back by its id.
+    bow = next(i for i in _live(db) if i["base_id"] == "shortbow")
+    out = S.apply_events(db, ME, run["run_id"], [
+        {"seq": 7, "type": "drop_item", "item": bow["item_id"]},
+        {"seq": 8, "type": "pickup_item", "item": bow["item_id"], "slot": 2}])
+    assert out["refused"] == []
+    bow = next(i for i in _live(db) if i["item_id"] == bow["item_id"])
+    assert (bow["loc"], bow["slot_index"]) == ("inventory", 2)
+    # Only from the floor: picking up what is already carried is refused.
+    out = S.apply_events(db, ME, run["run_id"], [{"seq": 9, "type": "pickup_item", "item": bow["item_id"], "slot": 5}])
+    assert out["refused"] == [9]
+
+
 def test_death_destroys_everything_carried_and_nothing_in_the_vault(db, me):
     run = _carrying(db, me["char_id"])
     out = S.apply_events(db, ME, run["run_id"], [{"seq": 6, "type": "death"}])

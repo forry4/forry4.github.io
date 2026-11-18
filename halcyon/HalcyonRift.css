@@ -133,6 +133,7 @@
 .hr-trash{margin-top:auto;padding:7px 6px;border-radius:8px;text-align:center;font-size:.8rem;
   color:var(--text-soft);border:1px dashed rgba(255,255,255,.14)}
 .hr-trash.armed{border-color:#e2564e;color:#f3a39c}
+.hr-trash.hr-ground.armed{border-color:#c9cfd6;color:var(--text)}
 
 /* An item slot: the game's own material. A color per family, so a full bag reads
    at a glance: weapon gold-brown, armor slate, ability violet, ring teal. */
