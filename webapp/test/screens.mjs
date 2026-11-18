@@ -10299,21 +10299,39 @@ try {
 		check("and dragging it back onto the weapon slot equips it again", back);
 
 		// A double click takes the bow off into the bag's first slot; the 1 key puts it back on.
+		// The server is held back 1.5s here: a town move must land on the page at once,
+		// not when the round trip does.
+		await page.route("**/halcyon/items/*/move", async (r) => { await new Promise((ok) => setTimeout(ok, 1500)); await r.continue().catch(() => {}); });
+		const t0 = Date.now();
 		await page.locator(".hr-equip .hr-slot").first().dblclick().catch(() => {});
 		const off = await page.waitForFunction(() => document.querySelectorAll(".hr-equip .hr-slot.has").length === 2
 			&& document.querySelector(".hr-grid-inv .hr-slot.has"), null, { timeout: 10_000 }).then(() => true).catch(() => false);
-		check("a double click takes the bow off into the bag", off);
+		const offMs = Date.now() - t0;
+		check("a double click takes the bow off into the bag, before the server answers", off && offMs < 900, `${offMs}ms`);
 		await page.keyboard.press("Digit1");
 		const on = await page.waitForFunction(() => document.querySelectorAll(".hr-equip .hr-slot.has").length === 3
 			&& !document.querySelector(".hr-grid-inv .hr-slot.has"), null, { timeout: 10_000 }).then(() => true).catch(() => false);
 		check("and the 1 key (the bag's first slot, numbered) puts it back on", on
 			&& await page.locator(".hr-grid-inv .hr-num").count() === 8);
+		// Both moves reach the server in order (the second names the version the first
+		// left); once the last answers, the page reads the server's state back, so a
+		// refusal would show as an error and the bow back in the bag.
+		await page.waitForTimeout(3500);
+		const kept1 = await page.evaluate(() => document.querySelectorAll(".hr-equip .hr-slot.has").length === 3
+			&& !document.querySelector(".hr-grid-inv .hr-slot.has") && !document.querySelector(".hr-error"));
+		check("the quick off-and-on series reached the server and read back the same", kept1,
+			await page.locator(".hr-error").textContent().catch(() => ""));
 		const flat = await page.evaluate(() => [...document.querySelectorAll(".hr-stats dd")].map((d) => d.textContent));
 		check("the stats are on screen as flat numbers, never percentages",
-			flat.length === 6 && flat.every((t) => /^[0-9.]+(?:×\d)?(?:\/s)?$/.test(t)), JSON.stringify(flat));
+			flat.length === 5 && flat.every((t) => /^[0-9.]+(?:×\d)?(?:\/s)?$/.test(t)), JSON.stringify(flat));
 		await page.locator(".hr-equip .hr-slot").first().hover();
 		const tipText = await page.locator(".hr-tip").textContent({ timeout: 3_000 }).catch(() => "");
-		check("an item's tooltip has no percentages", tipText.length > 0 && !tipText.includes("%"), tipText);
+		const tipLines = await page.locator(".hr-tip .hr-tip-lines li").allTextContents().catch(() => []);
+		check("an item's tooltip has no percentages, and the bow's numbers (range among them) are one to a line",
+			tipText.length > 0 && !tipText.includes("%") && tipLines.length >= 4 && tipLines.some((l) => /^Range \d+ tiles$/.test(l)),
+			JSON.stringify(tipLines));
+		const regen = await page.evaluate(() => [...document.querySelectorAll(".hr-bar-reg")].map((e) => e.textContent));
+		check("the HP and MP bars carry their regeneration a second", regen.length === 2 && regen.every((t) => /^\+[\d.]+\/s$/.test(t)), JSON.stringify(regen));
 		await page.mouse.move(5, 5);
 
 		for (const [w, h] of [[1440, 900], [1024, 600], [1920, 1080], [390, 844]]) {
@@ -10341,6 +10359,12 @@ try {
 		});
 		check("the HP and MP bars read the fight: full at the start, as flat numbers",
 			!!vit && vit.hp === `${vit.maxHp} / ${vit.maxHp}` && vit.limit === vit.maxHp && /^\d+ \/ \d+$/.test(vit.mp || ""), JSON.stringify(vit));
+		const live = await page.evaluate(() => {
+			const h = document.querySelector(".hr-live-hero"), m = h?.querySelector(".hr-xp");
+			return h && { level: h.querySelector(".fg-label-soft")?.textContent, now: m?.getAttribute("aria-valuenow"), max: m?.getAttribute("aria-valuemax") };
+		});
+		check("in the run the level and XP are read live off the fight", !!live && live.level === "Level 1" && live.max === "120",
+			JSON.stringify(live));
 		const queued = () => page.evaluate(() => localStorage.getItem("halcyon.queue.v1.guest"));
 		check("the run's queue is on the device before anything is sent", (await queued()) !== null);
 		// Gear changes mid-fight: drag the vest off into the (empty) bag. It is a run

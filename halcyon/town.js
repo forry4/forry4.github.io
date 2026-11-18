@@ -61,11 +61,13 @@ export function createTown(at = SPAWN) {
 	return st;
 }
 
-/* What the player has equipped, for the town's shooting. MP fills at once — the
- * town is for trying things. */
+/* What the player has equipped, for the town's shooting. MP regenerates at the
+ * gear's own rate, as in a fight (owner's call, 2026-11-18: no town bonus); a
+ * change of gear only clamps it to the new maximum. */
 export function setTownGear(st, gear, level = 1) {
+	const first = !st.stats;
 	st.stats = statsFor(gear, level);
-	st.p.mp = st.stats.maxMp;
+	st.p.mp = first ? st.stats.maxMp : Math.min(st.p.mp, st.stats.maxMp);
 	st.p.burstLeft = 0;
 }
 
@@ -113,7 +115,7 @@ export function stepTown(st, input) {
 	if (dx !== 0 && !blocked(st, p.x + dx, p.y, p.r)) p.x += dx;
 	if (dy !== 0 && !blocked(st, p.x, p.y + dy, p.r)) p.y += dy;
 
-	p.mp = Math.min(st.stats.maxMp, p.mp + st.stats.maxMp * DT);
+	p.mp = Math.min(st.stats.maxMp, p.mp + st.stats.mpRegen * DT);
 	playerFire(st, input);
 	const keep = [];
 	for (const b of st.bullets) {

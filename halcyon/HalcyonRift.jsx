@@ -51,23 +51,24 @@ const WEAPON_FEEL = { shortbow: "Fast and close: twin arrows that spread with di
 const nameOf = (it) => (it.kind === "unique" ? NAMES[it.base_id] || it.base_id : `${NAMES[it.base_id] || it.base_id} · T${it.tier}`);
 const num = (x) => (Number.isInteger(x) ? String(x) : x.toFixed(1));
 
-/* A weapon's pattern in words, off the sim's own numbers (so they cannot drift). */
-function weaponLine(it) {
+/* A weapon's numbers, one per line, off the sim's own (so they cannot drift). Range
+ * lives here, not in the character's stats: it is the bow's, not the Ranger's. */
+function weaponLines(it) {
 	const w = WEAPONS[it.base_id];
-	if (!w) return null;
+	if (!w) return [];
 	const s = statsFor([{ ...it, enchants: [] }]);
-	const shape = w.burst > 1 ? `${w.burst}-bolt burst` : w.shots > 1 ? `${w.shots} arrows` : "1 arrow";
-	return `${shape} · ${s.weaponDmg} damage each · ${num(w.rate)} a second · range ${w.range}`
-		+ `${w.pierce ? ` · pierces ${w.pierce}` : ""}${w.bounce ? " · bounces once" : ""}`;
+	return [w.burst > 1 ? `${w.burst}-bolt burst` : w.shots > 1 ? `${w.shots} arrows a shot` : "1 arrow a shot",
+		`${s.weaponDmg} damage an arrow`, `${num(w.rate)} shots a second`, `Range ${w.range} tiles`,
+		...(w.pierce ? [`Pierces ${w.pierce}`] : []), ...(w.bounce ? ["Bounces off a wall once"] : [])];
 }
 
 /* What an item's base gives, flat, worked out by the sim (what it adds to bare stats). */
 const STAT_WORDS = [["maxHp", "Max HP"], ["maxMp", "Max MP"], ["att", "Attack"], ["dex", "Dexterity"],
 	["def", "Defense"], ["mpRegen", "MP regen"], ["hpRegen", "HP regen"], ["abilityDmg", "Volley damage"], ["pierce", "Pierce"]];
-function baseLine(it) {
-	if (WEAPONS[it.base_id]) return null;
+function baseLines(it) {
+	if (WEAPONS[it.base_id]) return [];
 	const bare = statsFor([]), s = statsFor([{ ...it, enchants: [] }]);
-	return STAT_WORDS.filter(([k]) => s[k] !== bare[k]).map(([k, w]) => `+${num(s[k] - bare[k])} ${w}`).join(" · ") || null;
+	return STAT_WORDS.filter(([k]) => s[k] !== bare[k]).map(([k, w]) => `+${num(s[k] - bare[k])} ${w}`);
 }
 
 // The three places an item can be in town, as the wire writes them.
@@ -82,6 +83,18 @@ function placeKey(it) {
 	if (it.loc === "inventory") return keyOf(at.inv(it.char_id, it.slot_index));
 	if (it.loc === "equipped") return keyOf(at.eq(it.char_id, it.equip_slot));
 	return null;
+}
+
+/* Where any town item is, as a place tuple; and an item put somewhere else (a version on). */
+function placeOf(it) {
+	return it.loc === "vault" ? at.vault(it.slot_index) : placeAt_(it);
+}
+function putAt(it, to) {
+	const [loc] = to;
+	return { ...it, loc, version: it.version + 1,
+		char_id: loc === "vault" ? null : to[1],
+		slot_index: loc === "vault" ? to[1] : loc === "inventory" ? to[2] : null,
+		equip_slot: loc === "equipped" ? to[2] : null };
 }
 
 /* Where an item on a character is, as a place tuple (the inverse of placeKey). */
@@ -171,10 +184,14 @@ export default function HalcyonRift({ authUser, onExit }) {
 		return () => { clearInterval(id); window.removeEventListener("pagehide", bye); };
 	}, [client]);
 
+	// Town moves are applied on the page at once and sent in order behind it (see
+	// townMove); anything else waits for them, so it never acts on a stale version.
+	const moveChain = useRef(Promise.resolve());
+	const movesOut = useRef(0);
 	const act = useCallback(async (fn) => {
 		setBusy(true);
 		let failed = null;
-		try { await fn(); }
+		try { await moveChain.current; await fn(); }
 		catch (e) { failed = e.message || "That did not work."; }
 		setBusy(false); setPicked(null); setDiscardAsk(null);
 		await refresh();
@@ -243,10 +260,35 @@ export default function HalcyonRift({ authUser, onExit }) {
 		setRun(null);
 		setPicked(null); setDrag(null); setTip(null);
 		setResult(outcome);
+		// The XP the fight already showed stays on screen until the server's copy lands.
+		if (outcome.status !== "dead") setView((v) => v && ({ ...v, characters: v.characters.map((c) =>
+			c.char_id === selChar ? { ...c, xp: Math.max(c.xp, outcome.heroXp), level: Math.max(c.level, outcome.level) } : c) }));
 		if (outcome.status === "dead") setMenu(true);               // a fallen character: back to the menu
 		// The town's copy replaces the run's once it has landed — unless a new run began meanwhile.
 		refresh().then(() => setRunItems((cur) => (cur === outcome.items ? null : cur)));
-	}, [refresh]);
+	}, [refresh, selChar]);
+
+	// A town move lands on the page in the same frame: the item and whatever it
+	// swaps with change places, each one version on (the server bumps both by one,
+	// so the next move in a quick series names the version it will find). Requests
+	// go one at a time, in order; once the last has answered, the server's state is
+	// read back — a refusal shows its reason and that read puts things back.
+	const townMove = (it, to) => {
+		const from = placeOf(it), there = byPlace[keyOf(to)];
+		setView((v) => ({ ...v, items: v.items.map((x) => (x.item_id === it.item_id ? putAt(x, to)
+			: there && x.item_id === there.item_id ? putAt(x, from) : x)) }));
+		movesOut.current += 1;
+		moveChain.current = moveChain.current
+			.then(() => client.move(it.item_id, to, it.version))
+			.catch((e) => { const m = e.message || "That did not work."; setError(m[0].toUpperCase() + m.slice(1)); })
+			.then(async () => {
+				if ((movesOut.current -= 1) > 0) return;
+				try {
+					const v = await client.state();
+					if (movesOut.current === 0) setView(v);   // a move made meanwhile reads back after itself
+				} catch { /* the next refresh will do */ }
+			});
+	};
 
 	// ── moving items: drag and drop, or click one and then click where it goes ──
 	const fits = (it, to) => {
@@ -281,7 +323,7 @@ export default function HalcyonRift({ authUser, onExit }) {
 			if (!fits(it, target.to) || (other && it.loc === "equipped" && !fits(other, placeAt_(it)))) {
 				setError(`${nameOf(fits(it, target.to) ? other : it)} does not go there.`); setPicked(null); return;
 			}
-			act(() => client.move(it.item_id, target.to, it.version));
+			townMove(it, target.to);
 		} else if (target.kind === "trash") setDiscardAsk(it);
 		setPicked(null);
 	};
@@ -467,8 +509,9 @@ export default function HalcyonRift({ authUser, onExit }) {
 					<div className="hr-who">
 						{char ? <>
 							<span className="hr-char-name">Ranger</span>
-							<span className="fg-label-soft">Level {char.level}</span>
-							<XpBar levels={view.levels} xp={char.xp} />
+							{run ? <LiveHero levels={view.levels} read={() => run.ctl.st?.hero} />
+								: <><span className="fg-label-soft">Level {char.level}</span>
+									<XpBar levels={view.levels} xp={char.xp} /></>}
 						</> : null}
 					</div>
 
@@ -544,17 +587,17 @@ function ItemTip({ tip, bases }) {
 		setPos({ left: Math.max(8, Math.min(window.innerWidth - w - 8, left)),
 			top: Math.max(8, Math.min(window.innerHeight - h - 8, r.top)) });
 	}, [tip]);
-	const it = tip.item, fam = bases[it.base_id]?.slot, line = weaponLine(it), base = baseLine(it);
+	const it = tip.item, fam = bases[it.base_id]?.slot, lines = [...weaponLines(it), ...baseLines(it)];
 	return (
 		<div ref={ref} className={"hr-tip fg-panel" + (it.kind === "unique" ? " fg-lit unique" : "")} role="tooltip"
 			style={pos ? { left: pos.left, top: pos.top } : { left: 0, top: 0, visibility: "hidden" }}>
 			<h3 className="fg-label">{nameOf(it)}</h3>
 			<p className="fg-label-soft">{it.kind === "unique" ? `Unique ${(FAMILY[fam] || "item").toLowerCase()}` : `${FAMILY[fam] || ""} · Tier ${it.tier}`}
 			</p>
-			{line && <p className="hr-tip-weapon">{WEAPON_FEEL[it.base_id]}<br /><span className="hr-q">{line}</span></p>}
-			{base && <p className="hr-q">{base}</p>}
+			{WEAPON_FEEL[it.base_id] && <p className="hr-tip-weapon">{WEAPON_FEEL[it.base_id]}</p>}
+			{lines.length > 0 && <ul className="hr-tip-lines hr-q">{lines.map((l) => <li key={l}>{l}</li>)}</ul>}
 			{it.enchants?.length > 0 && (
-				<ul className="hr-enchants">
+				<ul className="hr-tip-lines hr-enchants">
 					{it.enchants.map((e, i) => <li key={i}>+{enchantValue(e.id, e.q)} {ENCHANT_NAMES[e.id] || e.id}</li>)}
 				</ul>)}
 		</div>
@@ -578,7 +621,7 @@ function Stats({ gear, level }) {
 	const s = statsFor(gear, level);
 	const cells = [["ATT", s.att, "Attack: each point adds to every arrow's damage"], ["DEX", s.dex, "Dexterity: each point adds to how fast you shoot"],
 		["DEF", s.def, "Defense: taken off every hit"], ["DMG", s.shots > 1 ? `${s.dmg}×${s.shots}` : s.dmg, "Damage per arrow, with Attack"],
-		["RATE", `${num(Math.round(s.rate * 10) / 10)}/s`, "Shots a second, with Dexterity"], ["RNG", s.range, "Range in tiles"]];
+		["RATE", `${num(Math.round(s.rate * 10) / 10)}/s`, "Shots a second, with Dexterity"]];
 	return (
 		<dl className="hr-stats" aria-label="Stats">
 			{cells.map(([k, v, t]) => <div key={k} title={t}><dt>{k}</dt><dd>{v}</dd></div>)}
@@ -592,7 +635,8 @@ function Stats({ gear, level }) {
 function vitalsOf(st) {
 	if (!st || !st.stats) return null;
 	const s = st.stats, p = st.p, town = p.hp === undefined;
-	return { hp: town ? s.maxHp : p.hp, limit: town ? s.maxHp : recoveryLimit(st), maxHp: s.maxHp, mp: p.mp, maxMp: s.maxMp };
+	return { hp: town ? s.maxHp : p.hp, limit: town ? s.maxHp : recoveryLimit(st), maxHp: s.maxHp, mp: p.mp, maxMp: s.maxMp,
+		hpRegen: s.hpRegen, mpRegen: s.mpRegen };
 }
 
 /* The bars repaint themselves each frame from `read()` and touch the DOM only when a
@@ -604,13 +648,13 @@ function Vitals({ read }) {
 	useEffect(() => {
 		let raf = 0, last = "";
 		const el = ref.current;
-		const [hpFill, hpRec, hpText, mpFill, mpText] = ["hp-fill", "hp-rec", "hp-text", "mp-fill", "mp-text"]
+		const [hpFill, hpRec, hpText, mpFill, mpText, hpReg, mpReg] = ["hp-fill", "hp-rec", "hp-text", "mp-fill", "mp-text", "hp-reg", "mp-reg"]
 			.map((k) => el.querySelector(`[data-k="${k}"]`));
 		const frame = () => {
 			const v = readRef.current();
 			if (v) {
 				const hp = Math.ceil(v.hp), lim = Math.ceil(v.limit), mp = Math.floor(v.mp);
-				const key = `${hp}|${lim}|${v.maxHp}|${mp}|${v.maxMp}`;
+				const key = `${hp}|${lim}|${v.maxHp}|${mp}|${v.maxMp}|${v.hpRegen}|${v.mpRegen}`;
 				if (key !== last) {
 					last = key;
 					hpFill.style.width = `${(100 * Math.min(v.hp, v.maxHp)) / v.maxHp}%`;
@@ -618,6 +662,8 @@ function Vitals({ read }) {
 					hpText.textContent = `${hp} / ${v.maxHp}`;
 					mpFill.style.width = `${(100 * Math.min(v.mp, v.maxMp)) / v.maxMp}%`;
 					mpText.textContent = `${mp} / ${v.maxMp}`;
+					hpReg.textContent = `+${num(v.hpRegen)}/s`;
+					mpReg.textContent = `+${num(v.mpRegen)}/s`;
 					el.dataset.hp = hp; el.dataset.limit = lim; el.dataset.maxHp = v.maxHp;
 				}
 			}
@@ -628,15 +674,48 @@ function Vitals({ read }) {
 	}, []);
 	return (
 		<div className="hr-vitals" ref={ref}>
-			<div className="hr-bar hr-bar-hp" title="Health. Light gray: regeneration brings it back. Dark gray: only a heal does.">
+			<div className="hr-bar hr-bar-hp" title="Health, and what it regenerates a second. Light gray: regeneration brings it back. Dark gray: only a heal does.">
 				<i className="hr-bar-rec" data-k="hp-rec" /><i className="hr-bar-fill" data-k="hp-fill" />
-				<span className="hr-bar-name">HP</span><span className="hr-bar-num" data-k="hp-text" />
+				<span className="hr-bar-name">HP <span className="hr-bar-reg" data-k="hp-reg" /></span><span className="hr-bar-num" data-k="hp-text" />
 			</div>
-			<div className="hr-bar hr-bar-mp" title="Mana">
+			<div className="hr-bar hr-bar-mp" title="Mana, and what it regenerates a second">
 				<i className="hr-bar-fill" data-k="mp-fill" />
-				<span className="hr-bar-name">MP</span><span className="hr-bar-num" data-k="mp-text" />
+				<span className="hr-bar-name">MP <span className="hr-bar-reg" data-k="mp-reg" /></span><span className="hr-bar-num" data-k="mp-text" />
 			</div>
 		</div>
+	);
+}
+
+/* During a run the level and XP move as kills land (the boss's carries the clear), read
+ * off the sim each frame like the vitals — so nothing is left to arrive on the way back. */
+function LiveHero({ levels, read }) {
+	const ref = useRef(null);
+	const readRef = useRef(read);
+	readRef.current = read;
+	useEffect(() => {
+		let raf = 0, last = "";
+		const el = ref.current, lv = el.querySelector(".fg-label-soft"), bar = el.querySelector(".hr-xp"), fill = bar.firstChild;
+		const frame = () => {
+			const h = readRef.current();
+			if (h && `${h.level}|${h.xp}` !== last) {
+				last = `${h.level}|${h.xp}`;
+				const { into, span } = xpProgress(levels, h.xp);
+				lv.textContent = `Level ${h.level}`;
+				fill.style.width = `${span ? (100 * into) / span : 100}%`;
+				bar.setAttribute("aria-valuenow", span ? into : 1);
+				bar.setAttribute("aria-valuemax", span || 1);
+				bar.title = span ? `${into} / ${span} XP` : "Top level";
+			}
+			raf = requestAnimationFrame(frame);
+		};
+		frame();
+		return () => cancelAnimationFrame(raf);
+	}, [levels]);
+	return (
+		<span className="hr-live-hero" ref={ref}>
+			<span className="fg-label-soft" />
+			<span className="hr-xp" role="meter" aria-label="Experience" aria-valuemin={0}><i /></span>
+		</span>
 	);
 }
 
@@ -663,8 +742,6 @@ function ResultPanel({ result, onClose }) {
 				: result.loot.length
 					? <p>Brought back: {result.loot.join(", ")}.</p>
 					: <p>Nothing was picked up.</p>}
-			{result.status !== "dead" && result.xp > 0 && (
-				<p className="hr-result-xp">+{result.xp} XP{result.levelUp ? ` · reached level ${result.level}` : ""}</p>)}
 			<button className="btn btn-outline" onClick={onClose}>OK</button>
 		</section>
 	);
@@ -866,7 +943,7 @@ function Dungeon({ run, client, onEnd }) {
 			setEnding(status);
 			client.flush();
 			const h = st.hero;
-			setTimeout(() => onEnd({ status, loot, items: ctl.items, realm: run.realm, xp: h.xp - h.startXp, level: h.level, levelUp: h.level > h.startLevel }),
+			setTimeout(() => onEnd({ status, loot, items: ctl.items, realm: run.realm, heroXp: h.xp, level: h.level }),
 				status === "dead" ? 1400 : 700);
 		};
 

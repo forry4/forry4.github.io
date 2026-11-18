@@ -223,3 +223,22 @@ the input-log upload (§18.6), and hiding the drop table (above).
   it. There is no room bookkeeping left in the sim.
 - **The Shallows are harder than at first**: chaser 55 HP, shooter 48, radial 95, boss
   1150, and each combat template has two more enemies.
+
+## Snappy items, and what the side panel shows (2026-11-18)
+- **A town move lands on the page in the same frame** (`townMove` in
+  `HalcyonRift.jsx`): the item and whatever it swaps with change places at once, each
+  one `version` on — the store bumps both by exactly one (`_set_place`), so the next
+  move of a quick series names the version the server will find. Requests go one at
+  a time on `moveChain`, in order; when the last has answered, the page reads
+  `/halcyon/state` back (unless another move was made meanwhile), so a refusal shows
+  its reason and the read-back puts things back. Moves never set `busy`; `act`
+  (discard, fuse, runs) waits for the chain first. Run moves were always local.
+  `halcyonPlay` holds the move route back 1.5s and still sees the swap at once.
+- **Range is the weapon's, not the Ranger's**: it is in the weapon's tooltip, not in
+  the stats (ATT DEX DEF over DMG RATE). Every tooltip number is its own line.
+- **Regeneration a second is on the HP and MP bars.** The town has NO bonus regen: MP
+  refills at the gear's `mpRegen`, and a gear change only clamps it.
+- **XP shows as it is earned**: in a run the level and XP bar are read off the sim
+  each frame (`LiveHero`), so the boss kill (which carries the clear) moves the bar
+  then, and nothing arrives on the way back — the result panel has no "+XP" line, and
+  `endRun` keeps the run's XP on screen until the server's copy lands.
