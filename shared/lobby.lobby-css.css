@@ -107,6 +107,9 @@
 	background:linear-gradient(158deg,#272319 0%,#1d1a15 62%);
 	border:1px solid var(--border);border-top-color:#4c4437;border-bottom-color:#2a251d;
 	border-radius:var(--radius-lg);padding:13px 15px 13px 19px;display:flex;align-items:flex-start;gap:14px;margin-bottom:9px;
+	/* The floor an empty plate shares (see `.lby-empty`); a row whose text is shorter
+	   than it centres its lines in the extra rather than leaving it all at the foot. */
+	min-height:var(--lby-row-min,4.25rem);align-content:center;
 	/* THE ACTIONS DROP TO THEIR OWN LINE RATHER THAN SQUEEZING THE TITLE. The rail
 	   (a turn pill plus a button) does not shrink, so in a 359px tablet column it
 	   left the title 113px of a 171px string and ellipsised "Aurelia (you) vs Bot 1"
@@ -341,8 +344,19 @@
    inside its own header with no relationship to it, and at the tablet tier the three
    plates landed at three unrelated horizontal positions.
    It is the same solid, lit material as a real card, on the column's own measure, so
-   its edges continue the rule above it. It is a state, not a hole. */
-.lby-empty{position:relative;text-align:center;padding:26px 18px;border-radius:var(--radius-lg,14px);
+   its edges continue the rule above it. It is a state, not a hole.
+   ITS HEIGHT IS THE ROW'S, NOT ITS OWN. The plate sits level with the first row of
+   the next column, and it used to size itself (26px of padding round one line, 74px)
+   while a two-line row sized itself from its text (65px) — so an Active column with
+   one game ended 10px short of the empty plates either side of it. Both now share
+   `--lby-row-min`, which sits just above a two-line row's natural height. The plate
+   stays a BLOCK (a flex plate would split "text <a>link</a>" into items and drop the
+   spaces between them), so its padding is solved for one 1.5em line inside the
+   floor: exact whatever the font, and a second line simply grows it. A three-line
+   row (a matchup) is still taller; that is content, not drift. */
+.lby-empty{position:relative;text-align:center;border-radius:var(--radius-lg,14px);
+	--lby-empty-pad:max(8px,calc((var(--lby-row-min,4.25rem) - 1.5em - 2px) / 2));
+	padding:var(--lby-empty-pad) 18px;min-height:var(--lby-row-min,4.25rem);
 	color:var(--text-soft);font-style:normal;font-size:.88rem;line-height:1.5;
 	border:1px solid var(--border,#3a342a);border-top-color:#413a2f;
 	background:linear-gradient(158deg,rgba(39,35,25,.55) 0%,rgba(20,18,15,.55) 70%);

@@ -3304,6 +3304,25 @@ try {
 				out.strayCols = [...(document.querySelector(".lby-cols")?.children || [])]
 					.filter((c) => !/\blby-col-/.test(c.className))
 					.map((c) => c.className || c.tagName);
+				// A TWO-LINE ROW AND AN EMPTY PLATE ARE ONE HEIGHT. They sit level across
+				// the columns, and Duel's "saved on this device" row ended 10px short of
+				// the plates either side of it: the plate padded one line out to 74px, the
+				// row sized itself from its text to 65px. The row is built from the kit's
+				// own classes, as every lobby's Open row and Duel's saved row are, so this
+				// measures the SHEET each lobby actually carries.
+				// Any column's plate: Spender's and CoC's Active columns are PUBLIC, so on a
+				// shared harness backend they can hold someone else's game.
+				const plate = document.querySelector(".lby-cols .lby-empty");
+				if (plate) {
+					const row = document.createElement("div");
+					row.className = "lby-card";
+					row.innerHTML = '<div class="lby-card-info"><div class="lby-card-title">Game ABCDEF</div>'
+						+ '<div class="lby-card-meta">saved on this device</div></div>'
+						+ '<div class="lby-card-actions"><button class="lby-act lby-act-primary">Resume</button></div>';
+					plate.parentNode.insertBefore(row, plate);
+					out.rowVsPlate = [row.getBoundingClientRect().height, plate.getBoundingClientRect().height];
+					row.remove();
+				}
 				return out;
 			}, PROBES);
 
@@ -3313,6 +3332,10 @@ try {
 				seen[id].headerBtns === 0, `${seen[id].headerBtns} found — Rules lives in the create row`);
 			check(`${id}: the column grid holds only kit columns`,
 				seen[id].strayCols.length === 0, seen[id].strayCols.join(" | "));
+			const rp = seen[id].rowVsPlate;
+			check(`${id}: a two-line row is as tall as the empty plate beside it`,
+				!!rp && rp[0] > 0 && Math.abs(rp[0] - rp[1]) < 0.5,
+				rp ? `row ${rp[0].toFixed(2)}px, plate ${rp[1].toFixed(2)}px` : "no empty plate in any column to compare against");
 
 			// The Rules modal's icon slot, measured against the create row's. They render
 			// the SAME glyph (`RULES_GLYPH`), and the kit sized only one of them: an
