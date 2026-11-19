@@ -1154,6 +1154,13 @@ After a comparison with RotMG, Darza's Dominion, Diablo/PoE, Hades and Enter the
 - **Dropping goes on the ground, everywhere.** In town too: drag an item onto the bin's place or the stage, or point at it and press the Drop key (X). It lies at the player's feet, E picks it up, and it is destroyed when the character leaves town — a run starts, the player goes to the main menu, or the character is opened again. There is no discard any more.
 - **Keys** (§13.4, §14.7): the Dream Key and the Boss Rush key.
 
+**Third round (owner's calls, 2026-11-19):**
+
+- **No ability cooldowns.** MP is the only limit (as §7 always said).
+- **The Paladin's field also burns**: slight damage, every half second, to each enemy inside it.
+- **The boss shells a player who hides.** Cover is for a moment, not for good: after about a second out of the boss's sight, it lobs a mortar at where the player stands — a ring that fills, a hit, then burning ground that lasts a few seconds — and keeps lobbing while the player stays hidden. In sight, it lobs nothing. Pillars do not crumble (deferred).
+- **An item found in a run can be locked in the run.**
+
 LATER (noted, not built): a collection log of uniques and a records board (§14.8), a guided first rift, a loot preview at the portal. NEVER: controller support.
 
 ## 20. Economy, persistence and item identity

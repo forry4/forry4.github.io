@@ -5,8 +5,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { createSim, step, setGear, wallHit, enchantValue, STAT_SCALE, fingerprint, dsin, dcos, recoveryLimit, statsFor, levelFor, xpProgress, PER_LEVEL, WEAPONS, TPS, REACH, SHIELD_DURATION, SLOW_FACTOR, SLOW_DURATION, SLOW_RADIUS,
-	ABILITY_COOLDOWN, STARFALL_DELAY, COUNTER_WINDOW, COUNTER_GUARD, ENEMY, POTION_HEAL, POTION_COOLDOWN, RECOVERY_MARGIN } from "../../../halcyon/sim.js";
+import { createSim, step, setGear, wallHit, enchantValue, STAT_SCALE, fingerprint, dsin, dcos, recoveryLimit, statsFor, levelFor, xpProgress, PER_LEVEL, WEAPONS, TPS, REACH, SHIELD_DURATION, ABILITY_COST, MORTAR, inSight, SLOW_FACTOR, SLOW_DURATION, SLOW_RADIUS,
+	SLOW_PULSE, STARFALL_DELAY, COUNTER_WINDOW, COUNTER_GUARD, ENEMY, POTION_HEAL, POTION_COOLDOWN, RECOVERY_MARGIN } from "../../../halcyon/sim.js";
 
 const load = (s) => JSON.parse(readFileSync(new URL(`./fixtures/halcyon-dungeon-${s}.json`, import.meta.url)));
 const A = load("unit-a"), B = load("unit-b");
@@ -363,22 +363,34 @@ test("one standard ability per class: field, stars, counter (and the volley)", (
 	assert.equal(WEAPONS.shuriken.look, "star");
 });
 
-test("an ability has a cooldown, so MP regeneration cannot keep it up", () => {
+test("an ability has no cooldown: MP is its only limit", () => {
 	const st = createSim(A, PALADIN, { class_id: "paladin" });
 	st.enemies = [];
-	st.p.mp = 1000; st.stats.maxMp = 1000;
+	st.p.mp = 2 * ABILITY_COST + 1;
 	step(st, { ability: true });
-	const mp = st.p.mp;
-	assert.ok(st.p.abilityCd > ABILITY_COOLDOWN.slow - 3, "casting starts the cooldown");
+	const first = st.slowUntil;
 	step(st, { ability: true });
-	assert.ok(st.p.mp >= mp, "a second cast during the cooldown spends nothing");
-	assert.ok(st.slowUntil <= SLOW_DURATION + 2, "and starts nothing");
-	for (let i = 0; i < ABILITY_COOLDOWN.slow; i++) step(st, {});
+	assert.ok(st.slowUntil > first, "a second cast right away refreshes the field");
+	assert.ok(st.p.mp < ABILITY_COST, "and spends its MP");
 	step(st, { ability: true });
-	assert.ok(st.p.mp < mp + 50, "after the cooldown it casts again");
-	assert.ok(st.slowUntil > SLOW_DURATION + 2);
+	assert.equal(st.slowUntil, first + 1, "with too little MP nothing is cast");
 });
 
+test("the Paladin's field burns enemies inside it, and only inside it", () => {
+	const st = createSim(A, PALADIN, { class_id: "paladin" });
+	const [inside, outside] = st.enemies.slice(0, 2);
+	assert.ok(inside && outside);
+	st.enemies = [inside, outside];
+	for (const e of st.enemies) Object.assign(e, { type: "radial", active: true, cd: 1e9, scd: 1e9 });
+	Object.assign(inside, { x: st.p.x + 1, y: st.p.y, hp: 500, maxHp: 500 });
+	Object.assign(outside, { x: st.p.x + st.stats.slowRadius + 3, y: st.p.y, hp: 500, maxHp: 500 });
+	step(st, { ability: true });
+	for (let i = 0; i < SLOW_PULSE * 3; i++) step(st, {});
+	assert.ok(st.stats.abilityDmg > 0);
+	assert.ok(inside.hp <= 500 - 3 * st.stats.abilityDmg, `inside took ${500 - inside.hp}`);
+	assert.equal(outside.hp, 500);
+	assert.ok(500 - inside.hp < 60, "slight: under a second of weapon fire");
+});
 test("the Paladin's field slows enemy shots inside it; AP widens it, never lengthens it", () => {
 	const st = createSim(A, PALADIN, { class_id: "paladin" });
 	st.enemies = [];
@@ -447,7 +459,7 @@ test("countering twice before attacking does not stack; AP raises the damage but
 	assert.ok(mult > 2, "AP raises the counter's damage");
 	const hit = () => st.bullets.push({ owner: "e", x: st.p.x, y: st.p.y, vx: 0, vy: 0, dmg: 30, r: 0.1, life: 5, pierce: 0, hit: [] });
 	for (let n = 0; n < 2; n++) {
-		st.p.abilityCd = 0; st.p.mp = 100;
+		st.p.mp = 100;
 		step(st, { ability: true });
 		hit(); step(st, {});
 		assert.ok(st.p.guardUntil - st.tick <= COUNTER_GUARD, "the guard is the same at any AP");
@@ -455,7 +467,7 @@ test("countering twice before attacking does not stack; AP raises the damage but
 	assert.equal(st.p.empower, mult, "still one empowered shot, not two");
 });
 
-test("a counter that catches nothing still costs its MP and starts its cooldown", () => {
+test("a counter that catches nothing still costs its MP", () => {
 	const st = createSim(A, NINJA, { class_id: "ninja" });
 	st.enemies = [];
 	const mp = st.p.mp;
@@ -463,7 +475,6 @@ test("a counter that catches nothing still costs its MP and starts its cooldown"
 	for (let i = 0; i < COUNTER_WINDOW + 2; i++) step(st, {});
 	assert.equal(st.p.empower, 0);
 	assert.ok(st.p.mp < mp + (COUNTER_WINDOW + 3) * st.stats.mpRegen / TPS);
-	assert.ok(st.p.abilityCd > 0);
 });
 
 test("the retired shield still works for the class that gets it later", () => {
@@ -476,7 +487,6 @@ test("the retired shield still works for the class that gets it later", () => {
 	step(st, { ax: 1, ay: 0, fire: true });
 	assert.equal(st.shield, null);
 	assert.equal(st.p.hp, hp);
-	for (let i = 0; i < ABILITY_COOLDOWN.shield; i++) step(st, {});
 	step(st, { ax: 1, ay: 0, ability: true });
 	assert.ok(st.shield);
 	for (let i = 0; i < SHIELD_DURATION * 2; i++) step(st, {});
@@ -730,4 +740,74 @@ test("a hit on an enemy floats what it did over that enemy (a ward's hit floats 
 	const f = st.damageNumbers.filter((n) => n.foe);
 	assert.equal(f.length, 1);
 	assert.equal(f[0].amount, 7);
+});
+
+/* THE MORTAR (2026-11-19): the boss shells a player who stays out of its sight. */
+function bossFight() {
+	const st = createSim(A, STARTER);
+	const boss = st.enemies.find((e) => e.type === "boss");
+	const i = st.rooms.findIndex((r) => r.kind === "boss");
+	st.sealed = i;
+	boss.active = true; boss.cd = 0;
+	st.p.hp = 100000; st.stats.def = 0;
+	return { st, boss };
+}
+function hiddenSpot(st, boss) {
+	for (let y = 0.5; y < st.h; y += 0.5) for (let x = 0.5; x < st.w; x += 0.5) {
+		if (st.tiles[Math.floor(y)][Math.floor(x)] !== "." || Math.hypot(x - boss.x, y - boss.y) > 8) continue;
+		const ok = [[-0.4, 0], [0.4, 0], [0, -0.4], [0, 0.4]].every(([dx, dy]) => st.tiles[Math.floor(y + dy)][Math.floor(x + dx)] === ".");
+		if (ok && !inSight(st, boss, { x, y })) return { x, y };
+	}
+	return null;
+}
+
+test("in the boss's sight, no mortar is lobbed", () => {
+	const { st, boss } = bossFight();
+	st.p.x = boss.x - 3; st.p.y = boss.y;
+	assert.ok(inSight(st, boss, st.p));
+	let most = 0;
+	for (let t = 0; t < MORTAR.after + 3 * MORTAR.every; t++) { step(st, {}); most = Math.max(most, st.mortars.length); }
+	assert.equal(most, 0);
+	assert.equal(st.fires.length, 0);
+});
+
+test("hiding behind cover draws a mortar after a grace, and it leaves burning ground", () => {
+	const { st, boss } = bossFight();
+	const spot = hiddenSpot(st, boss);
+	assert.ok(spot, "the boss room has cover to hide behind");
+	Object.assign(st.p, spot);
+	for (let t = 0; t < MORTAR.after - 2; t++) step(st, {});
+	assert.equal(st.mortars.length, 0, "a moment behind cover is free");
+	for (let t = 0; t < 4; t++) step(st, {});
+	assert.equal(st.mortars.length, 1, "staying is not");
+	const [m] = st.mortars;
+	assert.ok(Math.hypot(m.x - spot.x, m.y - spot.y) < 1e-9, "aimed where the player stood");
+	const hp = st.p.hp;
+	while (st.mortars.some((x) => x === m)) step(st, {});
+	assert.ok(hp - st.p.hp >= MORTAR.dmg - 1e-9, `the shell landed for ${hp - st.p.hp}`);
+	assert.equal(st.fires.length, 1);
+	assert.equal(st.lastHit.src, "boss:mortar");
+	const hp2 = st.p.hp;
+	for (let t = 0; t < MORTAR.burnEvery * 3; t++) step(st, {});
+	assert.ok(hp2 - st.p.hp >= MORTAR.burnDmg * 2, "the ground burns");
+	assert.ok(st.fires.length >= 1);
+	// stepping out of the fire, in sight again: the burning stops and no more shells come
+	st.p.x = boss.x - 3; st.p.y = boss.y;
+	step(st, {});
+	const before = st.mortars.length;
+	for (let t = 0; t < MORTAR.burn + MORTAR.delay + 2; t++) step(st, {});
+	assert.ok(st.mortars.length <= before);
+	assert.equal(st.fires.length, 0, "the fires burn out");
+});
+
+test("the boss's fall puts out its shells and fires", () => {
+	const { st, boss } = bossFight();
+	Object.assign(st.p, hiddenSpot(st, boss));
+	for (let t = 0; t < MORTAR.after + MORTAR.delay + 4; t++) step(st, {});
+	assert.ok(st.fires.length + st.mortars.length > 0);
+	boss.hp = 1; boss.phase = 2;
+	st.bullets.push({ owner: "p", x: boss.x, y: boss.y, vx: 0, vy: 0, dmg: 5, r: 0.1, life: 5, pierce: 0, hit: [] });
+	step(st, {});
+	assert.equal(boss.hp <= 0, true);
+	assert.equal(st.mortars.length + st.fires.length, 0);
 });

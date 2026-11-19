@@ -663,6 +663,22 @@ def test_a_drop_picked_up_this_run_can_be_equipped_by_naming_the_drop(db, me):
     assert vest == [{"loc": "equipped", "slot_index": EQUIP_SLOTS.index("armor")}]
 
 
+def test_a_drop_picked_up_this_run_can_be_locked_and_then_cannot_be_dropped(db, me):
+    run = S.start_run(db, ME, me["char_id"], "shallows", "seed", _dungeon())
+    out = S.apply_events(db, ME, run["run_id"], _seq(
+        {"type": "kill", "enemy": "e2"},
+        {"type": "pickup", "drop": "d2", "slot": 3},
+        {"type": "lock", "drop": "d2", "locked": True},
+        {"type": "drop_item", "drop": "d2"},                              # locked: refused
+        {"type": "lock", "drop": "nope", "locked": True},                 # no such drop
+        {"type": "lock", "drop": "d2", "locked": "yes"}))                 # not a bool
+    assert out["refused"] == [4, 5, 6]
+    vest = _rows(db, "SELECT loc, locked FROM hr_items WHERE origin_drop_id='d2'")
+    assert vest == [{"loc": "inventory", "locked": 1}]
+    S.apply_events(db, ME, run["run_id"], [{"type": "lock", "drop": "d2", "locked": False, "seq": 7}])
+    assert _rows(db, "SELECT locked FROM hr_items WHERE origin_drop_id='d2'") == [{"locked": 0}]
+
+
 def test_a_drop_from_another_run_cannot_be_named(db, me):
     run1 = S.start_run(db, ME, me["char_id"], "shallows", "seed", _dungeon())
     S.apply_events(db, ME, run1["run_id"], _seq({"type": "kill", "enemy": "e1"},

@@ -716,6 +716,19 @@ def _apply_one(cur, run: dict, dungeon: dict, state: dict, ev: dict, now: float)
             raise _Refused
         state["picked"].append(d)
         _insert_item(cur, owner, drop, "drop", cols, now, run_id=run_id, drop_id=d)
+    elif t == "lock":
+        # LOCKING an item found THIS run (2026-11-19: refusing it read as a bug). The
+        # page has no item id for it yet, so it names the drop, as a move does. Any
+        # item the owner has may be named; a lock is never a move.
+        if ev.get("item") is None and ev.get("drop") is not None:
+            it = _one(cur, "SELECT * FROM hr_items WHERE origin_run_id=? AND origin_drop_id=?",
+                      (run_id, str(ev["drop"])))
+        else:
+            it = _one(cur, "SELECT * FROM hr_items WHERE item_id=?", (str(ev.get("item")),))
+        if it is None or it["owner_id"] != owner or not isinstance(ev.get("locked"), bool):
+            raise _Refused
+        cur.execute("UPDATE hr_items SET locked=?, updated_at=? WHERE item_id=?",
+                    (1 if ev["locked"] else 0, now, it["item_id"]))
     elif t in ("pickup_item", "drop_item", "move"):
         if practice and t == "drop_item":
             raise _Refused

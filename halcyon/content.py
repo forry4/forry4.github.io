@@ -20,7 +20,7 @@ CLASSES = ("ranger", "paladin", "diviner", "ninja")
 CLASS_NAMES = {"ranger": "Ranger", "paladin": "Paladin", "diviner": "Diviner", "ninja": "Ninja"}
 CLASS_DESCRIPTIONS = {
     "ranger": "A quick ranged fighter with a volley of arrows.",
-    "paladin": "A close-range guardian whose field slows enemy shots around them.",
+    "paladin": "A close-range guardian whose field slows enemy shots and burns enemies around them.",
     "diviner": "A long-range mage who calls stars down on a spot.",
     "ninja": "A quick thrower who counters a hit and strikes back twice as hard.",
 }

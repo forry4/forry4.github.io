@@ -14,7 +14,7 @@
  *
  * A new realm is one more entry in REALMS and one more portal here.
  */
-import { PLAYER_R, PLAYER_SPEED, DT, TPS, REACH, statsFor, playerFire, wallHit, landStarfalls } from "./sim.js";
+import { PLAYER_R, PLAYER_SPEED, DT, TPS, REACH, statsFor, playerFire, wallHit, landStarfalls, slowPulse } from "./sim.js";
 
 // '#' wall, 'o' planter (blocks), '~' fountain water (blocks), '.' flagstone.
 const MAP = [
@@ -58,7 +58,7 @@ export const DPS_WINDOW = 3 * TPS;
 
 export function createTown(at = SPAWN, classId = "ranger") {
 	const st = { tick: 0, w: MAP[0].length, h: MAP.length, tiles: MAP, stations: STATIONS,
-		p: { x: at.x, y: at.y, r: PLAYER_R, mp: 0, fireCd: 0, burstLeft: 0, burstCd: 0, abilityCd: 0, empower: 0 }, near: null,
+		p: { x: at.x, y: at.y, r: PLAYER_R, mp: 0, fireCd: 0, burstLeft: 0, burstCd: 0, empower: 0 }, near: null,
 		bullets: [], starfalls: [], blasts: [], posts: POSTS.map((q) => ({ ...q, hits: [] })), floats: [],
 		// What lies on the town's ground: { key, x, y } (the page keeps it from the store).
 		floor: [], nearFloor: null };
@@ -133,6 +133,15 @@ export function stepTown(st, input) {
 			if (ddx * ddx + ddy * ddy >= rr * rr) continue;
 			q.hits.push({ t: st.tick, dmg: f.dmg });
 			st.floats.push({ x: q.x, y: q.y - 0.6, text: String(f.dmg), until: st.tick + 40 });
+		}
+	});
+	// and the Paladin's field burns them too
+	slowPulse(st, (r) => {
+		for (const q of st.posts) {
+			const ddx = q.x - p.x, ddy = q.y - p.y, rr = q.r + r;
+			if (ddx * ddx + ddy * ddy >= rr * rr) continue;
+			q.hits.push({ t: st.tick, dmg: st.slowDmg });
+			st.floats.push({ x: q.x, y: q.y - 0.6, text: String(st.slowDmg), until: st.tick + 40 });
 		}
 	});
 	const keep = [];

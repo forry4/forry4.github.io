@@ -62,10 +62,12 @@ export const SLOW_DURATION = 5 * TPS;
 export const SLOW_RADIUS = 3;
 export const SLOW_FACTOR = 0.45;
 
-/* EVERY ABILITY HAS A COOLDOWN as well as its MP cost (owner's worry, 2026-11-18: with
- * enough MP regeneration a defensive ability could be kept up for good). Regen helps
- * only up to the cooldown. Ticks, from the cast. */
-export const ABILITY_COOLDOWN = { volley: 3 * TPS, slow: 10 * TPS, starfall: 4 * TPS, counter: 4 * TPS, shield: 8 * TPS };
+/* NO ABILITY COOLDOWN (owner's call, 2026-11-19, reversing 2026-11-18's): MP is the
+ * only limit on casting. The Paladin's field also BURNS (owner's ask, 2026-11-19):
+ * every SLOW_PULSE ticks it hits every enemy inside it for its damage — slight,
+ * tier- and Ability-power-scaled like the other abilities' damage. */
+export const SLOW_PULSE = 30;
+export const SLOW_DAMAGE = 6;
 // Starfall (the Diviner): a star lands where you aim, after a beat, on everything near it.
 export const STARFALL_DELAY = 36;
 export const STARFALL_RADIUS = 1.5;
@@ -81,7 +83,7 @@ export const COUNTER_MULT = 2;
  * with its item, kept in the code for a future class. */
 export const CLASS_INFO = {
 	ranger: { name: "Ranger", description: "A quick ranged fighter with a volley of arrows.", ability: "volley" },
-	paladin: { name: "Paladin", description: "A close-range guardian whose field slows enemy shots around them.", ability: "slow" },
+	paladin: { name: "Paladin", description: "A close-range guardian whose field slows enemy shots and burns enemies around them.", ability: "slow" },
 	diviner: { name: "Diviner", description: "A long-range mage who calls stars down on a spot.", ability: "starfall" },
 	ninja: { name: "Ninja", description: "A quick thrower who counters a hit and strikes back twice as hard.", ability: "counter" },
 };
@@ -174,7 +176,7 @@ export function statsFor(gear = [], level = 1, classId = "ranger") {
 		if (it.base_id === "plate_armor") { s.def += 3 + tier; s.maxHp += 18 * (tier - 1); }
 		if (it.base_id === "grounding_aegis") s.abilityKind = "shield";
 		if (it.base_id === "seer_robes") { s.maxMp += 18 * tier; s.mpRegen += 0.5; }
-		if (it.base_id === "stillness_orb") s.abilityKind = "slow";
+		if (it.base_id === "stillness_orb") { s.abilityKind = "slow"; s.abilityDmg += Math.round(SLOW_DAMAGE * t); }
 		if (it.base_id === "star_tome") { s.abilityKind = "starfall"; s.abilityDmg += Math.round(45 * t); }
 		if (it.base_id === "shadow_garb") { s.def += tier; s.dex += 2 + tier; s.maxHp += 8 * (tier - 1); }
 		if (it.base_id === "mirror_charm") s.abilityKind = "counter";
@@ -207,7 +209,7 @@ export function statsFor(gear = [], level = 1, classId = "ranger") {
 	// volley's and the starfall's damage, the slowing field's REACH (not its time),
 	// the counter's damage (not its guard).
 	s.abilityPower = 1 + s.ap / STAT_SCALE;
-	s.abilityDmg = s.abilityKind === "volley" || s.abilityKind === "starfall" ? Math.round(s.abilityDmg * s.abilityPower) : 0;
+	s.abilityDmg = s.abilityKind === "volley" || s.abilityKind === "starfall" || s.abilityKind === "slow" ? Math.round(s.abilityDmg * s.abilityPower) : 0;
 	s.slowRadius = Math.round(SLOW_RADIUS * s.abilityPower * 100) / 100;
 	s.counterMult = Math.round(COUNTER_MULT * s.abilityPower * 100) / 100;
 	return s;
@@ -299,13 +301,13 @@ export function createSim(dungeon, gear = [], hero = {}) {
 		hero: { level, xp, startLevel: level, startXp: xp },
 		p: { x: dungeon.start.x, y: dungeon.start.y, r: PLAYER_R, hp: stats.maxHp, low: stats.maxHp,
 			mp: stats.maxMp, fireCd: 0, hurt: 0, burstLeft: 0, burstCd: 0,
-			abilityCd: 0, potionCd: 0, counterUntil: 0, guardUntil: 0, empower: 0 },
+			potionCd: 0, counterUntil: 0, guardUntil: 0, empower: 0 },
 		enemies, bullets: [], dropsBy, scale,
 		// Heal orbs DROP from the enemy that carries one (dungeon.py); one with a
 		// position of its own (an older dungeon) lies where it was placed.
 		pickups: dungeon.pickups.filter((h) => h.enemy == null).map((h) => ({ ...h })),
 		healsBy: Object.fromEntries(dungeon.pickups.filter((h) => h.enemy != null).map((h) => [h.enemy, h.id])),
-		bags: [], floor: [], portal: null, deeper: null, shield: null, slowUntil: 0, starfalls: [], blasts: [], damageNumbers: [], events: [],
+		bags: [], floor: [], portal: null, deeper: null, shield: null, slowUntil: 0, starfalls: [], blasts: [], mortars: [], fires: [], damageNumbers: [], events: [],
 	};
 }
 
@@ -414,6 +416,52 @@ function enemyStep(st, e) {
  * rings of heavy shots. Caught in the open, a nova is lethal; behind a rock, or
  * in a gap read early, it is not (design §8.3). */
 const BOSS_CYCLE = [["spiral", 150], ["rest", 40], ["fan", 100], ["rest", 40]];
+/* THE MORTAR (owner's ask, 2026-11-19): cover is for a moment, not for good. Once the
+ * player has been out of the boss's sight for `after` ticks, it lobs a shell at
+ * where they stand every `every` ticks while they stay hidden: a ring that fills for
+ * `delay` ticks, `dmg` on landing, then BURNING ground for `burn` ticks that hurts
+ * `burnDmg` every `burnEvery` ticks — so the same spot behind the same pillar cannot
+ * be gone back to for a while. In sight, the boss fires as before and lobs nothing. */
+export const MORTAR = { after: 60, every: 100, delay: 54, r: 1.4, dmg: 22, burn: 300, burnEvery: 20, burnDmg: 6 };
+
+/* Can the boss see the player? A shot's line: no rock or wall between them. */
+export function inSight(st, a, b) {
+	const dx = b.x - a.x, dy = b.y - a.y, n = Math.ceil(Math.sqrt(dx * dx + dy * dy) / 0.25);
+	for (let i = 1; i < n; i++) {
+		if (shotSolid(tileAt(st, a.x + dx * i / n, a.y + dy * i / n))) return false;
+	}
+	return true;
+}
+
+function bossMortar(st, e) {
+	if (inSight(st, e, st.p)) { e.hidden = 0; return; }
+	e.hidden = (e.hidden || 0) + 1;
+	const k = e.hidden - MORTAR.after;
+	if (k < 0 || k % cadence(st, MORTAR.every) !== 0) return;
+	(st.mortars ||= []).push({ x: st.p.x, y: st.p.y, r: MORTAR.r, at: st.tick + MORTAR.delay });
+}
+
+/* Shells landing, and the ground they leave burning. */
+function stepMortars(st) {
+	const p = st.p;
+	if (st.fires?.length) st.fires = st.fires.filter((f) => f.until > st.tick);
+	if (st.mortars?.length) {
+		const due = st.mortars.filter((m) => m.at <= st.tick);
+		st.mortars = st.mortars.filter((m) => m.at > st.tick);
+		for (const m of due) {
+			const dx = p.x - m.x, dy = p.y - m.y, rr = m.r + p.r;
+			if (dx * dx + dy * dy < rr * rr) hurtPlayer(st, MORTAR.dmg, "boss:mortar");
+			(st.fires ||= []).push({ x: m.x, y: m.y, r: m.r, until: st.tick + MORTAR.burn });
+			(st.blasts ||= []).push({ x: m.x, y: m.y, r: m.r, until: st.tick + 18, hot: true });
+			if (st.status !== "play") return;
+		}
+	}
+	if (st.fires?.length && st.tick % MORTAR.burnEvery === 0) {
+		const burning = st.fires.some((f) => { const dx = p.x - f.x, dy = p.y - f.y, rr = f.r + p.r * 0.5; return dx * dx + dy * dy < rr * rr; });
+		if (burning) hurtPlayer(st, MORTAR.burnDmg, "boss:fire");
+	}
+}
+
 const BOSS_CYCLE_2 = [["spiral", 140], ["rest", 30], ["nova", 80], ["rest", 40], ["fan", 90], ["rest", 30]];
 
 function bossStep(st, e, d, ux, uy) {
@@ -425,6 +473,7 @@ function bossStep(st, e, d, ux, uy) {
 		return;
 	}
 	if (e.cd > 0) return;                             // the opening beat after the room wakes it
+	bossMortar(st, e);
 	const cycle = e.phase === 1 ? BOSS_CYCLE : BOSS_CYCLE_2;
 	const [mode] = cycle[e.mode];
 	const t = cycle[e.mode][1] - e.modeT;              // ticks into this mode
@@ -546,6 +595,9 @@ export function step(st, input) {
 		if (st.status !== "play") return st;
 	}
 
+	stepMortars(st);
+	if (st.status !== "play") return st;
+
 	// stars landing (the Diviner's ability)
 	landStarfalls(st, (f) => {
 		for (const e of st.enemies) {
@@ -553,6 +605,15 @@ export function step(st, input) {
 			const dx = e.x - f.x, dy = e.y - f.y, rr = f.r + e.r;
 			if (dx * dx + dy * dy >= rr * rr) continue;
 			hurtEnemy(st, e, f.dmg, 6);
+		}
+	});
+	if (st.status !== "play") return st;
+	// the Paladin's field burning what is inside it
+	slowPulse(st, (r) => {
+		for (const e of st.enemies) {
+			if (e.hp <= 0 || e.phase === 0 || !e.active) continue;
+			const dx = e.x - st.p.x, dy = e.y - st.p.y, rr = r + e.r;
+			if (dx * dx + dy * dy < rr * rr) { hurtEnemy(st, e, st.slowDmg, 3); if (st.status !== "play") return; }
 		}
 	});
 	if (st.status !== "play") return st;
@@ -591,6 +652,7 @@ export function step(st, input) {
 		if (st.status !== "play") break;
 	}
 	st.bullets = st.bossDown ? keep.filter((b) => b.owner === "p") : keep;
+	if (st.bossDown) { st.mortars = []; st.fires = []; }        // its shells and fires too
 	st.bossDown = false;
 	if (st.rings?.length) {                            // Volatile: what fell this tick bursts
 		for (const r of st.rings) {
@@ -618,10 +680,8 @@ export function playerFire(st, input) {
 		volley(st, ax, ay);
 		p.burstLeft--; p.burstCd = s.gap;
 	}
-	if (p.abilityCd > 0) p.abilityCd--;
-	if (input.ability && s.abilityKind && p.mp >= ABILITY_COST && !(p.abilityCd > 0)) {
+	if (input.ability && s.abilityKind && p.mp >= ABILITY_COST) {
 		p.mp -= ABILITY_COST;
-		p.abilityCd = ABILITY_COOLDOWN[s.abilityKind] || 0;
 		if (s.abilityKind === "volley") {
 			for (let i = 0; i < s.arrows; i++) {
 				const [vx, vy] = rotate(ax, ay, (i - (s.arrows - 1) / 2) * 0.14);
@@ -634,6 +694,7 @@ export function playerFire(st, input) {
 		} else if (s.abilityKind === "slow") {
 			st.slowUntil = st.tick + SLOW_DURATION;
 			st.slowR = s.slowRadius;
+			st.slowDmg = s.abilityDmg;
 		} else if (s.abilityKind === "starfall") {
 			// Where the cursor is, no farther than STARFALL_RANGE.
 			const k = al > STARFALL_RANGE ? STARFALL_RANGE / al : 1;
@@ -661,6 +722,14 @@ function volley(st, ax, ay) {
 
 /* Stars that are due land now: `hit(star)` deals the damage (enemies in a rift,
  * the practice posts in town). Each leaves a short-lived blast for the renderer. */
+/* One pulse of the Paladin's field while it is up: `hit(radius)` deals its damage
+ * around the player. Shared with the town's posts. */
+export function slowPulse(st, hit) {
+	if (!(st.slowUntil > st.tick) || !st.slowDmg) return;
+	const left = st.slowUntil - st.tick;
+	if (left % SLOW_PULSE === 0) hit(st.slowR || SLOW_RADIUS);
+}
+
 export function landStarfalls(st, hit) {
 	if (st.blasts?.length) st.blasts = st.blasts.filter((b) => b.until > st.tick);
 	if (!st.starfalls?.length) return;
@@ -798,6 +867,7 @@ export function fingerprint(st) {
 		st.enemies.map((e) => [e.id, r(e.x), r(e.y), r(e.hp), e.cd, e.tele, e.scd, e.mode, e.modeT, e.ward, e.active]),
 		st.sealed, st.roomLeft,
 		st.bullets.length, st.bullets.map((b) => [r(b.x), r(b.y)]).slice(0, 40),
-		st.bags.map((b) => b.drops.join(",")), st.pickups.length, st.shield && [r(st.shield.x), r(st.shield.y), st.shield.until], st.slowUntil,
-		st.p.abilityCd, st.p.potionCd, st.p.counterUntil, st.p.guardUntil, st.p.empower, (st.starfalls || []).map((f) => [r(f.x), r(f.y), f.at])]);
+		st.bags.map((b) => b.drops.join(",")), st.pickups.length, st.shield && [r(st.shield.x), r(st.shield.y), st.shield.until], st.slowUntil, st.slowDmg || 0,
+		st.p.potionCd, st.p.counterUntil, st.p.guardUntil, st.p.empower, (st.starfalls || []).map((f) => [r(f.x), r(f.y), f.at]),
+		(st.mortars || []).map((m) => [r(m.x), r(m.y), m.at]), (st.fires || []).map((f) => [r(f.x), r(f.y), f.until]), st.enemies.map((e) => e.hidden || 0)]);
 }

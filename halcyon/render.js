@@ -7,7 +7,7 @@
  * rock), the player cyan/white, every enemy and every enemy shot red/orange/
  * magenta, pickups gold (loot) and green (healing).
  */
-import { recoveryLimit, xpProgress, STARFALL_DELAY, TPS } from "./sim.js";
+import { recoveryLimit, xpProgress, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR } from "./sim.js";
 
 /* A loot bag wears the color of the best thing in it (design §19.1): a tier color, and
  * a unique's gold with a glow. The tier number in every slot is the non-color cue. */
@@ -122,6 +122,7 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here, bag
 	g.fillStyle = "#1b2220"; g.fillRect(0, 0, width, height);
 	drawMap(g, st, ox, oy, px, width, height);
 	drawDoors(g, st, ox, oy, px);
+	drawHazards(g, st, sx, sy, px);
 	drawAbilityFx(g, st, sx, sy, px, pp);
 	if (st.shield) {
 		circle(g, sx(st.shield.x), sy(st.shield.y), px * st.shield.r, COLORS.shield);
@@ -288,6 +289,24 @@ function drawMinimap(g, st, { width, ui, dpr, bagBest, mods = [] }) {
 	}
 }
 
+/* The boss's mortar: burning ground (a flickering orange pool that fades in its last
+ * second), and each shell's landing spot, ringed red and filling as it comes. */
+function drawHazards(g, st, sx, sy, px) {
+	for (const f of st.fires || []) {
+		const left = f.until - st.tick, fade = Math.min(1, left / TPS);
+		const flick = 0.85 + 0.15 * Math.sin((st.tick + f.x * 7) * 0.35);
+		circle(g, sx(f.x), sy(f.y), px * f.r, `rgba(255,112,40,${(0.34 * fade * flick).toFixed(3)})`);
+		circle(g, sx(f.x), sy(f.y), px * f.r * 0.6, `rgba(255,190,80,${(0.22 * fade * flick).toFixed(3)})`);
+	}
+	const lw = Math.max(1.5, px * 0.07);
+	for (const m of st.mortars || []) {
+		const k = Math.min(1, Math.max(0, 1 - (m.at - st.tick) / MORTAR.delay));
+		g.strokeStyle = "#ff5a3c"; g.lineWidth = lw;
+		g.beginPath(); g.arc(sx(m.x), sy(m.y), px * m.r, 0, Math.PI * 2); g.stroke();
+		circle(g, sx(m.x), sy(m.y), px * m.r * k, "rgba(255,90,60,.3)");
+	}
+}
+
 /* What an ability leaves on the ground: the Paladin's field (gold, around the player),
  * a falling star (its spot ringed, filling as it comes) and its blast, and the
  * Ninja's counter — a white ring while it is ready to catch a hit, a solid guard
@@ -307,7 +326,7 @@ function drawAbilityFx(g, st, sx, sy, px, pp) {
 	}
 	for (const b of st.blasts || []) {
 		const a = Math.max(0, (b.until - st.tick) / 18);
-		circle(g, sx(b.x), sy(b.y), px * b.r * (1.1 - 0.1 * a), `rgba(255,240,190,${(0.75 * a).toFixed(3)})`);
+		circle(g, sx(b.x), sy(b.y), px * b.r * (1.1 - 0.1 * a), b.hot ? `rgba(255,140,70,${(0.75 * a).toFixed(3)})` : `rgba(255,240,190,${(0.75 * a).toFixed(3)})`);
 	}
 	const X = sx(pp.x), Y = sy(pp.y), R = px * (p.r + 0.22);
 	if (p.counterUntil >= st.tick) {
@@ -505,12 +524,12 @@ function drawHud(g, st, { width, height, px, notes, ui = 1, keys = {}, auto = fa
 	g.textBaseline = "middle";
 	g.fillText(`${Math.ceil(p.hp)} / ${Math.round(s.maxHp)}`, X + 6, Y + H / 2 + 1);
 	g.fillText(`${Math.floor(p.mp)} / ${Math.round(s.maxMp)}`, X + 6, Y + H * 1.5 + 9);
-	// The ability's cooldown, at the MP bar's right end.
+	// Whether the ability can be cast, at the MP bar's right end: MP is its only limit.
 	if (s.abilityKind) {
-		const cd = p.abilityCd || 0;
+		const ok = p.mp >= ABILITY_COST;
 		g.textAlign = "right";
-		g.fillStyle = cd > 0 ? "#c9cfd6" : "#9fe7ff";
-		g.fillText(cd > 0 ? `${(cd / TPS).toFixed(1)}s` : "Ready", X + W - 6, Y + H * 1.5 + 9);
+		g.fillStyle = ok ? "#9fe7ff" : "#c9cfd6";
+		g.fillText(ok ? "Ready" : `${ABILITY_COST} MP`, X + W - 6, Y + H * 1.5 + 9);
 		g.textAlign = "left";
 	}
 	// XP inside the level, and the level itself at the bar's right end.

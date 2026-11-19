@@ -322,12 +322,15 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
   it used to sit on the start until the player walked off it.
 
 ## One ability per class (2026-11-18, owner's calls)
-- **ONE standard ability per class, each on a cooldown** (`ABILITY_COOLDOWN` in `sim.js`:
-  volley 3s, slow 10s, starfall 4s, counter 4s). The cooldown is what stops MP regeneration
-  from keeping an ability up forever; a cast during it spends nothing.
+- **ONE standard ability per class, and NO cooldown** (owner's call, 2026-11-19, reversing
+  the 2026-11-18 cooldowns): MP is the only limit, as design §7 says. Recasting the
+  Paladin's field while it is up refreshes it. The HUD shows "Ready" or the MP cost.
 - **Ranger — Volley Quiver**: the arrow fan. AP raises its damage.
 - **Paladin — Stillness Orb** (moved from the Diviner): a field that slows ENEMY SHOTS
   inside it (not enemies), 5s. **AP widens it (`slowRadius`) and never lengthens it.**
+  It also BURNS (2026-11-19): every `SLOW_PULSE` (30) ticks, every enemy inside takes
+  `abilityDmg` (`SLOW_DAMAGE` 6, tier- and AP-scaled) — `slowPulse`, shared with the
+  town's posts. Slight on purpose: ~12 a second at tier 1.
 - **Diviner — Star Tome**: a star falls where you aim (clamped to 8 tiles), lands after 36
   ticks, hits everything within 1.5 tiles. AP raises its damage. `landStarfalls` is shared
   with the town, where it hits the posts.
@@ -335,7 +338,7 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
   next hit is ignored, then 0.5s untouchable, and the next volley does `counterMult` x
   (2 x abilityPower). **AP scales the damage, NEVER the guard** — the owner does not want a
   late-game character to be invincible. A second counter before attacking does not stack;
-  a counter that catches nothing still costs its MP and its cooldown.
+  a counter that catches nothing still costs its MP.
 - **The Grounding Aegis shield is retired, not deleted** — kept in the sim for a future
   class. Its content row is `retired`, and `init_schema` turns any into a Stillness Orb
   (and a Diviner's equipped Stillness Orb into a Star Tome).
@@ -480,3 +483,19 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
   so a settings change never puts back an old auto-fire value.
 - **A run's modifiers** are `runModRows(run)`: drawn under the minimap (`draw`'s `mods`) and
   listed with their wording in the game menu.
+
+## The boss's mortar, no cooldowns, locking mid-run (2026-11-19, owner's asks)
+- **Cover is for a moment, not for good** (`sim.MORTAR`, `bossMortar`, `stepMortars`). The
+  boss keeps `e.hidden`, the ticks the player has been out of its sight (`inSight`: no
+  `shotSolid` tile on the line between them). Past `after` (1s) it lobs a shell at where
+  the player stands every `every` ticks (Frenzied shortens it): a red ring that fills for
+  `delay` ticks, `dmg` on landing, then BURNING GROUND for `burn` (5s) that hurts
+  `burnDmg` every `burnEvery` ticks, so the same spot behind the same pillar cannot be
+  gone back to. In sight it lobs nothing. The boss's fall puts out its shells and fires.
+  Sources `boss:mortar` / `boss:fire` for the death screen. Crumbling pillars were
+  considered and deferred (owner's call).
+- **No ability cooldown** — see "One ability per class" above. The Paladin's field burns.
+- **An item found THIS run can be locked mid-run**: it has no id on the server until its
+  pickup lands, so the lock rides the run's events as `{"type": "lock", "drop", "locked"}`
+  (`store._apply_one`), naming the drop as a move does. Items from town still use
+  `POST /halcyon/items/{id}/lock`, which works mid-run too.

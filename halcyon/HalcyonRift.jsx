@@ -25,7 +25,7 @@ import { lobbyCss, LobbyHeader, LobbyUser, LobbyLoading } from "../shared/lobby.
 import { GAME_ACCENTS } from "../shared/accents.js";
 import { makeClient } from "./client.js";
 import { createSim, step, TPS, REACH, xpProgress, WEAPONS, statsFor, enchantValue, recoveryLimit, CLASS_INFO,
-	STAT_SCALE, ABILITY_COST, ABILITY_COOLDOWN, SHIELD_DURATION, SLOW_DURATION, SLOW_FACTOR,
+	STAT_SCALE, ABILITY_COST, SHIELD_DURATION, SLOW_DURATION, SLOW_FACTOR, SLOW_PULSE,
 	STARFALL_DELAY, STARFALL_RADIUS, STARFALL_RANGE, COUNTER_WINDOW, COUNTER_GUARD, POTION_HEAL, POTION_COOLDOWN } from "./sim.js";
 import { camera, draw, drawTown, promptFor, formatRiftTime, TIER_COLORS, UNIQUE_COLOR } from "./render.js";
 import { createTown, stepTown, setTownGear, postDps, STATIONS, SPAWN, standAt } from "./town.js";
@@ -106,10 +106,11 @@ function baseLines(it) {
  * 2026-11-18: AP is the ability's stat, as Attack is the weapon's). */
 function abilityLines(it, ap = 0) {
 	const s = statsFor([{ ...it, enchants: [] }]), pw = 1 + ap / STAT_SCALE, secs = (t) => num(Math.round(t / TPS * 10) / 10);
-	const kind = s.abilityKind, cost = `Costs ${ABILITY_COST} MP, ${secs(ABILITY_COOLDOWN[kind] || 0)}s cooldown`;
+	const kind = s.abilityKind, cost = `Costs ${ABILITY_COST} MP`;
 	const r2 = (x) => num(Math.round(x * 100) / 100);
 	if (kind === "volley") return [`Space: a fan of ${s.arrows} arrows`, `${Math.round(s.abilityDmg * pw)} damage each`, cost];
-	if (kind === "slow") return ["Space: a field that slows enemy shots inside it",
+	if (kind === "slow") return ["Space: a field around you that slows enemy shots inside it",
+		`and burns enemies inside it for ${Math.round(s.abilityDmg * pw)} damage every ${secs(SLOW_PULSE)}s`,
 		`${r2(statsFor([{ ...it, enchants: [] }]).slowRadius * pw)}-tile radius (Ability power widens it)`,
 		`${Math.round((1 - SLOW_FACTOR) * 100)}% slower, lasts ${secs(SLOW_DURATION)}s`, cost];
 	if (kind === "starfall") return [`Space: a star falls where you aim (up to ${STARFALL_RANGE} tiles)`,
@@ -566,12 +567,15 @@ export default function HalcyonRift({ authUser, onExit }) {
 	/* LOCK (design §19.1): right-click an item. It changes nothing about where the
 	 * item is, so the page shows it at once and the server is told behind it. */
 	const toggleLock = (it) => {
-		if (!it || it.fresh) { if (it?.fresh) notify("An item found this run can be locked once you are back in town.", "bad"); return; }
+		if (!it || it.fresh && !run) return;
 		const locked = !it.locked, flip = (x) => (x.item_id === it.item_id ? { ...x, locked } : x);
 		setView((v) => ({ ...v, items: v.items.map(flip) }));
 		if (run) { run.ctl.items = run.ctl.items.map(flip); setRunItems(run.ctl.items); }
 		setTip((t) => (t && t.item.item_id === it.item_id ? { ...t, item: { ...t.item, locked } } : t));
-		client.lock(it.item_id, locked).catch((e) => { setError(e.message || "Could not lock that."); refresh(); });
+		// An item found this run has no id on the server yet: its lock rides the run's
+		// events, naming the drop, and lands with the pickup before it.
+		if (it.fresh) client.report({ type: "lock", drop: it.drop, locked });
+		else client.lock(it.item_id, locked).catch((e) => { setError(e.message || "Could not lock that."); refresh(); });
 	};
 
 	// ── moving items: drag and drop, or click one and then click where it goes ──
@@ -1257,7 +1261,7 @@ const keyRows = () => [
  * chaser's charge) with "<enemy>:<attack>" and keeps the last hit that landed. */
 const ENEMY_NAMES = { chaser: "a Chaser", shooter: "a Shooter", radial: "a Radial", boss: "the boss" };
 const ATTACK_NAMES = { touch: "charge", spit: "spit", bolt: "bolt", ring: "ring of shots", spiral: "spiral",
-	fan: "fan of shots", nova: "nova", burst: "dying burst" };
+	fan: "fan of shots", nova: "nova", burst: "dying burst", mortar: "mortar", fire: "burning ground" };
 function causeOf(hit) {
 	if (!hit || !hit.src) return "Fell in the rift";
 	const [who, how] = hit.src.split(":");
