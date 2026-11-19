@@ -284,7 +284,7 @@ LOOT_BY_CLASS = {"ranger": RANGER_LOOT, "paladin": PALADIN_LOOT, "diviner": DIVI
 # chance of at least n slots: 1+ 50%, 2+ 18.75% (50% x 37.5%), 3+ 4.6875% (x 25%),
 # 4 0.5859% (x 12.5%). As one weighted roll (in 2048ths) that is exactly
 # 0: 50%, 1: 31.25%, 2: 14.0625%, 3: 4.1016%, 4: 0.5859%.
-SLOT_ODDS = ((0, 1024), (1, 640), (2, 288), (3, 84), (4, 12))
+SLOT_ODDS = C.SLOT_ODDS
 
 
 def slot_odds(bonus: float = 0.0) -> tuple:
@@ -316,6 +316,21 @@ def _item(rng: random.Random, tier: int, class_id: str, unique: bool = False,
     slots = _pick(rng, slot_odds(bonus))
     return {"base_id": base_id, "tier": tier, "slot_count": slots,
             "enchants": store.roll_enchants(base_id, slots, rng)}
+
+
+def _specials(it: dict, stream: random.Random, level: int) -> None:
+    """SPECIAL LINES (owner's calls, 2026-11-19): from depth 3 down, each slot of a drop
+    may hold a special line instead (content.SPECIAL_CHANCE). Its OWN stream per drop,
+    so every other roll in the dungeon is what it was. Rolled for EVERY slot whether it
+    hits or not, so one slot's luck never moves another's."""
+    chance = C.SPECIAL_CHANCE.get(level, 0.0)
+    pool = C.enchants_for(it["base_id"], special=True)
+    for line in it["enchants"]:
+        hit, pick, u = stream.random(), stream.random(), stream.random()
+        left = [e for e in pool if e not in {x["id"] for x in it["enchants"]}]
+        if hit < chance and left:
+            line["id"] = left[int(pick * len(left))]
+            line["q"] = C.line_q(u)
 
 
 def _unique_tier(stream: str, quality) -> int:
@@ -483,6 +498,8 @@ def generate(dungeon_id: str, seed: str | None = None, class_id: str = "ranger",
             unique = q == "unique"
             tier = _unique_tier(f"{dungeon_id}:{seed}:utier{level}:{eid}:{n_drop}", quality) if unique else int(q[1:])
             it = _item(rng, tier, class_id, unique, frozenset(dropped), bonus, dungeon_id)
+            if C.SPECIAL_CHANCE.get(level):
+                _specials(it, random.Random(f"{dungeon_id}:{seed}:spec{level}:{n_drop}"), level)
             dropped.add(it["base_id"])
             n_drop += 1
             drops[f"{pre}d{n_drop}"] = {**it, "enemy": eid}

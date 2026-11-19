@@ -483,18 +483,28 @@ def test_fusion_consumes_two_and_mints_one_in_the_first_ones_place(db, me):
     assert_invariants(db)
 
 
-def test_only_identical_items_fuse(db, me):
+def test_only_two_of_the_same_item_fuse(db, me):
     a = S.grant_item(db, ME, BOW, ("vault", 0))
-    for i, other in enumerate(({**BOW, "tier": 2},
-                               {**BOW, "slot_count": 0, "enchants": []},
-                               {"base_id": "longbow", "tier": 1, "slot_count": 1,
-                                "enchants": [{"id": "attack", "q": 0.5}]}), start=1):
-        b = S.grant_item(db, ME, other, ("vault", i))
-        with pytest.raises(S.HalcyonError, match="identical"):
-            S.fuse(db, ME, a["item_id"], b["item_id"])
+    b = S.grant_item(db, ME, {"base_id": "longbow", "tier": 1, "slot_count": 1,
+                              "enchants": [{"id": "attack", "q": 0.5}]}, ("vault", 1))
+    with pytest.raises(S.HalcyonError, match="same item"):
+        S.fuse(db, ME, a["item_id"], b["item_id"])
     with pytest.raises(S.HalcyonError):
         S.fuse(db, ME, a["item_id"], a["item_id"])
-    assert len(_live(db)) == 4
+    assert len(_live(db)) == 2
+
+
+def test_two_of_a_base_fuse_whatever_their_tiers_and_slots(db, me):
+    """RotMG's route (owner, 2026-11-19): the higher tier, at least the fewer slots."""
+    for seed in range(40):
+        a = S.grant_item(db, ME, {**BOW, "tier": 2}, ("vault", 0))
+        b = S.grant_item(db, ME, {**BOW, "tier": 5, "slot_count": 2,
+                                  "enchants": [{"id": "attack", "q": 0.5}, {"id": "max_hp", "q": 0.5}]}, ("vault", 1))
+        new = S.fuse(db, ME, a["item_id"], b["item_id"], rng=random.Random(seed))
+        assert new["tier"] == 5 and new["slot_count"] >= 1
+        assert not any(C.is_special(e["id"]) for e in new["enchants"])
+        S.discard(db, ME, new["item_id"])
+    assert_invariants(db)
 
 
 def test_a_fusion_that_fails_half_way_changes_nothing(db, me):
@@ -507,34 +517,104 @@ def test_a_fusion_that_fails_half_way_changes_nothing(db, me):
     assert_invariants(db)
 
 
-def test_fusion_gains_a_slot_often_enough_to_be_seen():
-    """Owner, 2026-11-18: the forge must have a real chance of more slots (5% never showed)."""
-    rng = random.Random(7)
-    hits = 0
-    for _ in range(4000):
-        for gain, p in C.FUSE_SLOT_GAIN:
-            if rng.random() < p:
-                hits += 1
-                break
-    assert 0.18 <= hits / 4000 <= 0.30, hits / 4000
+def test_fusion_odds_are_the_slot_table_from_the_floor_up():
+    """0 -> 50% for 1+, 1 -> 37.5% for 2+, 2 -> 25% for 3+, 3 -> 12.5% for 4."""
+    for floor, up in ((0, 0.5), (1, 0.375), (2, 0.25), (3, 0.125)):
+        odds = dict(C.fuse_slot_odds(floor))
+        assert min(odds) == floor and abs(sum(odds.values()) - 1) < 1e-12
+        assert abs(1 - odds[floor] - up) < 1e-12
+    assert C.fuse_slot_odds(4) == ((4, 1.0),)
 
 
-def test_fusion_can_rarely_gain_slots_and_never_passes_four(db, me):
-    gained = set()
-    for seed in range(300):
+def test_fusion_never_drops_below_the_floor_and_reaches_every_count(db, me):
+    seen = set()
+    for seed in range(400):
         a = S.grant_item(db, ME, VIGOR, ("vault", 0))
         b = S.grant_item(db, ME, VIGOR, ("vault", 1))
         new = S.fuse(db, ME, a["item_id"], b["item_id"], rng=random.Random(seed))
-        gained.add(new["slot_count"])
+        seen.add(new["slot_count"])
         S.discard(db, ME, new["item_id"])
-    assert gained == {0, 1, 2}, gained              # every branch reached, none beyond
+    assert seen == {0, 1, 2, 3}, seen          # 4 from a 0-slot pair is 1 in 171: not asserted
     full = {"base_id": "band_of_focus", "tier": 1, "slot_count": 4,
             "enchants": [{"id": e, "q": 0.1} for e in ("max_hp", "max_mp", "attack", "defense")]}
-    for seed in range(50):
+    for seed in range(30):
         a = S.grant_item(db, ME, full, ("vault", 0))
         b = S.grant_item(db, ME, full, ("vault", 1))
         assert S.fuse(db, ME, a["item_id"], b["item_id"], rng=random.Random(seed))["slot_count"] == 4
         S.discard(db, ME, _live(db)[0]["item_id"])
+
+
+# ── shards, the reroll and breaking down ─────────────────────────────────────
+def _give_shards(db, n, owner=ME):
+    conn = db()
+    conn.cursor().execute("UPDATE hr_owners SET shards=? WHERE owner_id=?", (n, owner))
+    conn.commit(); conn.close()
+
+
+def _balance(db, owner=ME):
+    return S.owner_view(db, owner)["shards"]
+
+
+RING3 = {"base_id": "band_of_focus", "tier": 3, "slot_count": 3,
+         "enchants": [{"id": "attack", "q": 0.9}, {"id": "defense", "q": 0.2}, {"id": "max_hp", "q": 0.3}]}
+
+
+def test_a_reroll_keeps_locked_lines_and_charges_double_for_each(db, me):
+    it = S.grant_item(db, ME, RING3, ("vault", 0))
+    base = C.reroll_cost(3, 3, 0)
+    _give_shards(db, base * 2 + base * 4)
+    one = S.reroll(db, ME, it["item_id"], [0], rng=random.Random(1))
+    assert one["cost"] == base * 2 and one["enchants"][0] == RING3["enchants"][0]
+    assert len({e["id"] for e in one["enchants"]}) == 3 and one["item_id"] == it["item_id"]
+    two = S.reroll(db, ME, it["item_id"], [0, 1], rng=random.Random(2))
+    assert two["cost"] == base * 4 and two["enchants"][:2] == one["enchants"][:2]
+    assert _balance(db) == 0
+    with pytest.raises(S.HalcyonError, match="not enough shards"):
+        S.reroll(db, ME, it["item_id"], [], rng=random.Random(3))
+    assert_invariants(db)
+
+
+def test_a_reroll_never_makes_a_special_line_and_always_keeps_one(db, me):
+    it = S.grant_item(db, ME, {**RING3, "enchants": [{"id": "fury", "q": 0.5}, *RING3["enchants"][1:]]}, ("vault", 0))
+    _give_shards(db, 10 ** 6)
+    for seed in range(60):
+        out = S.reroll(db, ME, it["item_id"], [], rng=random.Random(seed))
+        assert out["enchants"][0] == {"id": "fury", "q": 0.5}
+        assert out["cost"] == C.reroll_cost(3, 3, 1)            # the special line counts as a lock
+        assert not any(C.is_special(e["id"]) for e in out["enchants"][1:])
+    with pytest.raises(S.HalcyonError, match="nothing to reroll"):
+        S.reroll(db, ME, it["item_id"], [1, 2])
+
+
+def test_a_reroll_refuses_bad_lines_locked_items_and_keys(db, me):
+    it = S.grant_item(db, ME, RING3, ("vault", 0))
+    key = S.grant_item(db, ME, DREAM_KEY, ("vault", 1))
+    bare = S.grant_item(db, ME, VIGOR, ("vault", 2))
+    _give_shards(db, 10 ** 6)
+    for keep in ([5], [-1], [True], "0"):
+        with pytest.raises(S.HalcyonError):
+            S.reroll(db, ME, it["item_id"], keep)
+    with pytest.raises(S.HalcyonError):
+        S.reroll(db, ME, key["item_id"], [])
+    with pytest.raises(S.HalcyonError, match="no lines"):
+        S.reroll(db, ME, bare["item_id"], [])
+    S.set_lock(db, ME, it["item_id"], True)
+    with pytest.raises(S.HalcyonError, match="locked"):
+        S.reroll(db, ME, it["item_id"], [])
+    assert _balance(db) == 10 ** 6
+
+
+def test_breaking_an_item_down_pays_shards_and_destroys_it(db, me):
+    it = S.grant_item(db, ME, RING3, ("vault", 0))
+    out = S.salvage(db, ME, it["item_id"])
+    assert out["gained"] == C.salvage_value(3, 3) == out["shards"] == _balance(db)
+    assert _live(db) == []
+    (row,) = _rows(db, "SELECT destroyed_reason FROM hr_items WHERE item_id=?", (it["item_id"],))
+    assert row["destroyed_reason"] == "salvage"
+    locked = S.grant_item(db, ME, RING3, ("vault", 0))
+    S.set_lock(db, ME, locked["item_id"], True)
+    with pytest.raises(S.HalcyonError, match="locked"):
+        S.salvage(db, ME, locked["item_id"])
 
 
 # ── owners ───────────────────────────────────────────────────────────────────
@@ -707,7 +787,7 @@ def test_the_clear_bonus_comes_with_the_boss_so_a_recall_after_it_keeps_it(db, m
 
 def test_never_two_of_the_same_unique_whatever_their_slots(db, me):
     eye = lambda n: {"base_id": "kingfisher_eye", "tier": 1, "slot_count": n,
-                     "enchants": [{"id": "attack", "q": 0.5}] * n}
+                     "enchants": [{"id": e, "q": 0.5} for e in ("attack", "defense", "max_hp", "max_mp")[:n]]}
     a = S.grant_item(db, ME, eye(0), ("vault", 0))
     b = S.grant_item(db, ME, eye(2), ("vault", 1))
     cid = me["char_id"]
@@ -1038,3 +1118,34 @@ def test_a_ranger_wears_light_armor_of_either_kind_but_not_heavy(db, me):
                          ("inventory", me["char_id"], 1))
     with pytest.raises(S.HalcyonError, match="class cannot use it"):
         S.move_item(db, ME, plate["item_id"], ("equipped", me["char_id"], "armor"))
+
+
+# ── shards from runs ─────────────────────────────────────────────────────────
+def test_shards_come_home_on_a_recall_and_scale_with_the_loot_bonus(db, me):
+    run = S.start_run(db, ME, me["char_id"], "shallows", "sh-a", _dungeon())
+    S.apply_events(db, ME, run["run_id"], _seq({"type": "kill", "enemy": "e1"}, {"type": "kill", "enemy": "e2"},
+                                               {"type": "kill", "enemy": "boss"}, {"type": "recall"}))
+    assert _balance(db) == 2 * C.SHARDS_PER_KILL + C.SHARDS_PER_BOSS
+    d = {**_dungeon(), "mods": ["brutal", "swarming", "volatile"], "level": 3}
+    run = S.start_run(db, ME, me["char_id"], "shallows", "sh-b", d)
+    S.apply_events(db, ME, run["run_id"], _seq({"type": "kill", "enemy": "boss"}, {"type": "complete"}))
+    bonus = C.loot_bonus(3, 3)
+    assert _balance(db) == 12 + int(C.SHARDS_PER_BOSS * (1 + bonus) + 1e-9)
+
+
+def test_a_death_loses_the_runs_shards_and_a_dream_rift_pays_none(db, me):
+    _give_shards(db, 7)
+    _key(db, me["char_id"])
+    run = S.start_run(db, ME, me["char_id"], "shallows", "sh-d", _dungeon(), practice=True)
+    S.apply_events(db, ME, run["run_id"], _seq({"type": "kill", "enemy": "boss"}, {"type": "complete"}))
+    assert _balance(db) == 7
+    run = S.start_run(db, ME, me["char_id"], "shallows", "sh-c", _dungeon())
+    S.apply_events(db, ME, run["run_id"], _seq({"type": "kill", "enemy": "boss"}, {"type": "death"}))
+    assert _balance(db) == 7, "the vault's shards are never touched by a death"
+
+
+def test_a_run_closed_by_opening_the_character_still_banks_its_shards(db, me):
+    run = S.start_run(db, ME, me["char_id"], "shallows", "sh-e", _dungeon())
+    S.apply_events(db, ME, run["run_id"], _seq({"type": "kill", "enemy": "boss"}))
+    S.open_character(db, ME, me["char_id"])
+    assert _balance(db) == C.SHARDS_PER_BOSS

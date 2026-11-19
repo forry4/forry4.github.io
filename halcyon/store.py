@@ -114,7 +114,7 @@ SCHEMA = [
         char_id TEXT,
         run_id TEXT,
         slot_index INTEGER,
-        destroyed_reason TEXT,               -- death | fusion | discard | run_end
+        destroyed_reason TEXT,               -- death | fusion | discard | salvage | run_end
         destroyed_at REAL,
         created_at REAL NOT NULL,
         updated_at REAL NOT NULL,
@@ -171,6 +171,10 @@ def init_schema(conn) -> None:
     cur.execute("PRAGMA table_info(hr_items)")
     if not any(row[1] == "locked" for row in cur.fetchall()):
         cur.execute("ALTER TABLE hr_items ADD COLUMN locked INTEGER NOT NULL DEFAULT 0")
+    # The forge's currency (2026-11-19): the OWNER's, like the vault.
+    cur.execute("PRAGMA table_info(hr_owners)")
+    if not any(row[1] == "shards" for row in cur.fetchall()):
+        cur.execute("ALTER TABLE hr_owners ADD COLUMN shards INTEGER NOT NULL DEFAULT 0")
     cur.execute("PRAGMA table_info(hr_characters)")
     if not any(row[1] == "death_summary" for row in cur.fetchall()):
         cur.execute("ALTER TABLE hr_characters ADD COLUMN death_summary TEXT")
@@ -378,10 +382,12 @@ def _validate_spec(spec: dict) -> dict:
         raise HalcyonError("no such tier")
     if not 0 <= slots <= C.MAX_ENCHANT_SLOTS or len(ench) != slots:
         raise HalcyonError("enchantments do not match the slot count")
-    allowed = set(C.enchants_for(spec["base_id"]))
+    allowed = C.lines_allowed(spec["base_id"])
     for e in ench:
         if e["id"] not in allowed or not 0.0 <= float(e["q"]) <= 1.0:
             raise HalcyonError("not a valid enchantment")
+    if len({e["id"] for e in ench}) != len(ench):
+        raise HalcyonError("a line appears twice")
     return {"base_id": spec["base_id"], "tier": tier, "kind": b["kind"], "slot_count": slots,
             "enchants": [{"id": e["id"], "q": float(e["q"])} for e in ench]}
 
@@ -389,7 +395,7 @@ def _validate_spec(spec: dict) -> dict:
 def roll_enchants(base_id: str, slot_count: int, rng: random.Random) -> list[dict]:
     pool = C.enchants_for(base_id)
     picks = rng.sample(pool, min(slot_count, len(pool)))
-    return [{"id": e, "q": rng.random()} for e in picks]
+    return [{"id": e, "q": C.line_q(rng.random())} for e in picks]
 
 
 # ── owners and characters ────────────────────────────────────────────────────
@@ -477,7 +483,11 @@ def grant_item(connect, owner_id: str, spec: dict, place: tuple, now: float | No
 
 
 # ── runs ─────────────────────────────────────────────────────────────────────
-def _close_run(cur, run: dict, status: str, now: float) -> None:
+def _run_shards(state: dict) -> int:
+    return int(state.get("shards", 0) + 1e-9)
+
+
+def _close_run(cur, run: dict, status: str, now: float, state: dict | None = None) -> None:
     """End a run. A normal death destroys the character and everything on it;
     normal endings destroy what was left on the run's floor. Dream runs never
     touch the character, its carried items, or their floor state. The vault is
@@ -491,6 +501,11 @@ def _close_run(cur, run: dict, status: str, now: float) -> None:
                     (now, run["run_id"], run["char_id"]))
     elif not bool(run.get("practice", 0)):
         _destroy(cur, "loc='ground' AND run_id=?", (run["run_id"],), "run_end", now)
+        # SHARDS come home on any way out but a death (they are lost with the run).
+        state = state if state is not None else json.loads(run.get("state") or "{}")
+        if _run_shards(state):
+            cur.execute("UPDATE hr_owners SET shards = shards + ? WHERE owner_id=?",
+                        (_run_shards(state), run["owner_id"]))
     cur.execute("UPDATE hr_runs SET status=?, last_event_at=? WHERE run_id=?", (status, now, run["run_id"]))
 
 
@@ -713,6 +728,11 @@ def _apply_one(cur, run: dict, dungeon: dict, state: dict, ev: dict, now: float)
         state["killed"].append(e)
         if not practice:
             _credit_xp(cur, char_id, dungeon["enemies"][e].get("xp", 0))
+            # Shards are held by the RUN until it ends (a death loses them), scaled by
+            # this level's loot bonus; fractions add up and the total is rounded down.
+            per = C.SHARDS_PER_BOSS if dungeon["enemies"][e].get("type") == "boss" else C.SHARDS_PER_KILL
+            bonus = C.loot_bonus(len(dungeon.get("mods") or []), dungeon.get("level", 1))
+            state["shards"] = round(state.get("shards", 0) + per * (1 + bonus), 6)
         if e == dungeon.get("boss"):
             # The boss's fall clears the dungeon; its bonus is credited here so
             # a recall after the kill keeps it. Practice runs earn nothing.
@@ -838,7 +858,7 @@ def apply_events(connect, owner_id: str, run_id: str, events: list[dict], now: f
         cur.execute("UPDATE hr_runs SET last_seq=?, last_event_at=?, state=?, refused=? WHERE run_id=?",
                     (last, now, json.dumps(state), json.dumps(refused), run_id))
         if status != "open":
-            _close_run(cur, run, status, now)
+            _close_run(cur, run, status, now, state)
         return {"status": status, "last_seq": last, "refused": refused}
 
 
@@ -975,9 +995,87 @@ def set_lock(connect, owner_id: str, item_id: str, locked: bool, now: float | No
         return _item_out(_one(cur, "SELECT * FROM hr_items WHERE item_id=?", (item_id,)))
 
 
+def _shards(cur, owner_id: str) -> int:
+    row = _one(cur, "SELECT shards FROM hr_owners WHERE owner_id=?", (owner_id,))
+    return int(row["shards"]) if row else 0
+
+
+def _spend(cur, owner_id: str, cost: int) -> None:
+    if _shards(cur, owner_id) < cost:
+        raise HalcyonError("not enough shards")
+    cur.execute("UPDATE hr_owners SET shards = shards - ? WHERE owner_id=?", (cost, owner_id))
+
+
+def _forgeable(it: dict, what: str) -> None:
+    if it.get("locked"):
+        raise HalcyonError(f"a locked item cannot be {what}")
+    if it["kind"] == "key":
+        raise HalcyonError(f"keys cannot be {what}")
+
+
+def reroll(connect, owner_id: str, item_id: str, keep: list[int], rng: random.Random | None = None,
+           expected_version: int | None = None, now: float | None = None) -> dict:
+    """THE REROLL (owner's calls, 2026-11-19, after RotMG's enchanter): every line NOT
+    kept is rolled again, into a REGULAR line only, never one the item already holds.
+    `keep` names lines by index. A special line is always kept (it can only be found,
+    never made), and counts as a lock. The price is content.reroll_cost, doubled for
+    every kept line. The item keeps its id and place; its version moves."""
+    rng = rng or random.Random(secrets.randbits(64))
+    now = _now(now)
+    with _tx(connect, owner_id) as cur:
+        _require_owner(cur, owner_id, now)
+        it = _town_item(cur, owner_id, item_id, expected_version)
+        _forgeable(it, "rerolled")
+        lines = json.loads(it["enchants"]) if isinstance(it["enchants"], str) else it["enchants"]
+        if not lines:
+            raise HalcyonError("that item has no lines to reroll")
+        if not isinstance(keep, list) or any(not isinstance(k, int) or isinstance(k, bool) for k in keep):
+            raise HalcyonError("not a list of lines")
+        kept = set(keep) | {i for i, e in enumerate(lines) if C.is_special(e["id"])}
+        if any(not 0 <= k < len(lines) for k in kept):
+            raise HalcyonError("no such line")
+        if len(kept) >= len(lines):
+            raise HalcyonError("every line is kept: there is nothing to reroll")
+        cost = C.reroll_cost(it["tier"], it["slot_count"], len(kept))
+        _spend(cur, owner_id, cost)
+        held = {lines[k]["id"] for k in kept}
+        pool = [e for e in C.enchants_for(it["base_id"]) if e not in held]
+        fresh = rng.sample(pool, min(len(lines) - len(kept), len(pool)))
+        out, f = [], iter(fresh)
+        for i, e in enumerate(lines):
+            if i in kept:
+                out.append(e)
+            else:
+                nid = next(f, None)
+                if nid is not None:
+                    out.append({"id": nid, "q": C.line_q(rng.random())})
+        spec = _validate_spec({"base_id": it["base_id"], "tier": it["tier"], "slot_count": len(out), "enchants": out})
+        cur.execute("UPDATE hr_items SET enchants=?, slot_count=?, updated_at=?, version=version+1 WHERE item_id=?",
+                    (json.dumps(spec["enchants"]), spec["slot_count"], now, item_id))
+        res = _item_out(_one(cur, "SELECT * FROM hr_items WHERE item_id=?", (item_id,)))
+        res["cost"], res["shards"] = cost, _shards(cur, owner_id)
+        return res
+
+
+def salvage(connect, owner_id: str, item_id: str, expected_version: int | None = None,
+            now: float | None = None) -> dict:
+    """Break an item down into shards (content.salvage_value: more for its tier and slots)."""
+    now = _now(now)
+    with _tx(connect, owner_id) as cur:
+        _require_owner(cur, owner_id, now)
+        it = _town_item(cur, owner_id, item_id, expected_version)
+        _forgeable(it, "broken down")
+        value = C.salvage_value(it["tier"], it["slot_count"])
+        _destroy(cur, "item_id=?", (item_id,), "salvage", now)
+        cur.execute("UPDATE hr_owners SET shards = shards + ? WHERE owner_id=?", (value, owner_id))
+        return {"gained": value, "shards": _shards(cur, owner_id)}
+
+
 def fuse(connect, owner_id: str, a: str, b: str, rng: random.Random | None = None,
          expected_versions: tuple[int, int] | None = None, now: float | None = None) -> dict:
-    """Two identical items in, one rerolled item out (design §11.7), all or
+    """RotMG's fusion (owner's call, 2026-11-19; content FUSION): two items of the SAME
+    BASE, any tier and slots, in; one out with at least the fewer slots — more by the
+    slot table's own odds from there — the higher tier and fresh regular lines, all or
     nothing. The result takes the first item's place."""
     if a == b:
         raise HalcyonError("pick two different items")
@@ -992,16 +1090,17 @@ def fuse(connect, owner_id: str, a: str, b: str, rng: random.Random | None = Non
             raise HalcyonError("a locked item cannot be fused")
         if ia["kind"] == "key" or ib["kind"] == "key":
             raise HalcyonError("keys do not fuse")
-        for k in ("base_id", "tier", "kind", "slot_count"):
-            if ia[k] != ib[k]:
-                raise HalcyonError("only identical items fuse")
-        slots = ia["slot_count"]
-        for gain, p in C.FUSE_SLOT_GAIN:
-            if rng.random() < p:
-                slots = min(C.MAX_ENCHANT_SLOTS, slots + gain)
+        if ia["base_id"] != ib["base_id"]:
+            raise HalcyonError("only two of the same item fuse")
+        u, slots = rng.random(), C.MAX_ENCHANT_SLOTS
+        for n, p in C.fuse_slot_odds(min(ia["slot_count"], ib["slot_count"])):
+            if u < p:
+                slots = n
                 break
-        spec = {"base_id": ia["base_id"], "tier": ia["tier"], "kind": ia["kind"], "slot_count": slots,
-                "enchants": roll_enchants(ia["base_id"], slots, rng)}
+            u -= p
+        base = C.base(ia["base_id"])
+        spec = {"base_id": ia["base_id"], "tier": max(ia["tier"], ib["tier"]), "kind": base["kind"],
+                "slot_count": slots, "enchants": roll_enchants(ia["base_id"], slots, rng)}
         spec["slot_count"] = len(spec["enchants"])     # a small pool can cap it
         place = (ia["loc"], ia["char_id"], ia["run_id"], ia["slot_index"])
         _destroy(cur, "item_id IN (?, ?)", (a, b), "fusion", now)
@@ -1021,6 +1120,7 @@ def owner_view(connect, owner_id: str) -> dict:
         chars = _dicts(cur)
         cur.execute("SELECT * FROM hr_items WHERE owner_id=? AND loc != 'destroyed'", (owner_id,))
         items = [_item_out(r) for r in _dicts(cur)]
+        shards = _shards(cur, owner_id)
         cur.execute("SELECT run_id, char_id FROM hr_runs WHERE owner_id=? AND status='open'", (owner_id,))
         runs = {r["char_id"]: r["run_id"] for r in _dicts(cur)}
         cur.execute("SELECT dungeon_id, time_ticks, practice FROM hr_rift_times "
@@ -1045,7 +1145,7 @@ def owner_view(connect, owner_id: str) -> dict:
             # THE ONE RECORD (owner's call, 2026-11-18): the best level any character on
             # the account has reached, alive or fallen.
             "best_level": max((c["level"] for c in chars), default=0),
-            "items": items, "open_runs": runs, "leaderboards": times}
+            "items": items, "open_runs": runs, "leaderboards": times, "shards": shards}
 
 
 def prune_guests(connect, now: float | None = None, max_idle: float = 24 * 3600) -> int:

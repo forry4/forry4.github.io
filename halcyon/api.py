@@ -96,6 +96,11 @@ class FuseIn(BaseModel):
     b: str = Field(max_length=64)
 
 
+class RerollIn(BaseModel):
+    keep: list[int] = Field(default_factory=list, max_length=8)
+    version: int | None = None
+
+
 def _refuse(e: S.HalcyonError):
     raise HTTPException(status_code=409, detail=str(e))
 
@@ -184,7 +189,10 @@ def setup_halcyon(app, get_db_conn, get_user_by_session, token_resolver=None) ->
                 "boss_rush": C.BOSS_RUSH,
                 # The odds the page shows (the forge's and the modifiers' panels), read
                 # off the same constants the generator and the store roll against.
-                "odds": {"fuse_slot_gain": [list(g) for g in C.FUSE_SLOT_GAIN], "max_slots": C.MAX_ENCHANT_SLOTS,
+                "odds": {"fuse_slots": {n: [list(r) for r in C.fuse_slot_odds(n)] for n in range(C.MAX_ENCHANT_SLOTS + 1)},
+                         "max_slots": C.MAX_ENCHANT_SLOTS,
+                         "line_levels": list(C.LINE_LEVEL_WEIGHTS), "special_chance": C.SPECIAL_CHANCE,
+                         "reroll": {"base": C.REROLL_BASE, "per_tier": C.REROLL_PER_TIER, "per_slot": C.REROLL_PER_SLOT},
                          # The loot odds at 0..N modifiers, worked out from the tables.
                          "loot": [C.loot_odds(r) for r in range(C.START_MODS + 1)]},
                 "bases": C.BASE_ITEMS}
@@ -251,3 +259,11 @@ def setup_halcyon(app, get_db_conn, get_user_by_session, token_resolver=None) ->
     @app.post("/halcyon/fuse")
     def halcyon_fuse(body: FuseIn, who: str = Depends(owner)):
         return call(S.fuse, who, body.a, body.b)
+
+    @app.post("/halcyon/items/{item_id}/reroll")
+    def halcyon_reroll(item_id: str, body: RerollIn, who: str = Depends(owner)):
+        return call(S.reroll, who, item_id, body.keep, expected_version=body.version)
+
+    @app.post("/halcyon/items/{item_id}/salvage")
+    def halcyon_salvage(item_id: str, body: DiscardIn, who: str = Depends(owner)):
+        return call(S.salvage, who, item_id, body.version)

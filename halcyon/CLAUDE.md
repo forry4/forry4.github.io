@@ -15,7 +15,7 @@ since 2026-11-18; guests play without an account.
 | `store.py` | characters, items, vault, runs: the schema and every operation (design §20.2) |
 | `content.py` | base items, enchantments, slot sizes, enemy XP and the level table — **greybox placeholders**, except the id rules at its top |
 | `dungeon.py` | the Shallows: room templates stitched left-to-right, enemies, heal orbs and every drop PRE-ROLLED (design §18.2) |
-| `api.py` | `setup_halcyon` — guest mint, state, characters (with starter gear), runs, run events, move/discard/fuse. Plain `def` routes |
+| `api.py` | `setup_halcyon` — guest mint, state, characters (with starter gear), runs, run events, move/discard/fuse/reroll/salvage. Plain `def` routes |
 | `sim.js` | the fight: PURE, deterministic, fixed 60 Hz (design §18.5). No DOM, no clock, no Math.random/sin/cos/atan2 |
 | `render.js` | Canvas 2D drawing of the sim's state (and the town's) in the art doc's color roles; never changes it |
 | `town.js` | the walkable town: a plaza, its stations (vault, forge, Dream Rift gate, one portal per realm in `REALMS`), `stepTown` |
@@ -104,9 +104,8 @@ drag the vest off mid-run → put it on the ground and take it back → recall �
   asks before it discards.
 - **The forge is a pick, not a drop target** (owner's ask: dragging into it "felt
   janky"). At the forge a click PICKS an item in the bag or equipment — it stays where
-  it is, ringed in the accent — two at most, then Fuse. It says why two will not fuse
-  (item, tier or slot count). Leaving the forge drops the picks. Since 2026-11-18 it is
-  laid out as two input cards + a result card (see "Loot, the forge, modifiers").
+  it is, ringed in the accent — one on the Reroll tab, two on Fuse. Leaving the forge
+  drops the picks. See "The forge, RotMG-style" for what it does.
 - **Two STANDARD weapon types per class, plus uniques** (owner's calls, 2026-11-18). The
   Ranger's are the shortbow (twin fanned arrows, fast, range 5) and the longbow (one
   heavy slow arrow, range 7); Paladin has the short-range
@@ -301,12 +300,6 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
   each ability's own lever (see "One ability per class": never a duration or a guard). An ability item's tooltip says
   what it does at the character's current AP (`abilityLines`). Base HP regen is 0.5/s
   (was 1.0); the `hp_regen` enchant rolls 0.2–1.2.
-- **The forge** shows two input cards (each item's slots and enchantments) and a
-  result card with the slot odds as the store rolls them (`slotOdds` — each gain tried
-  in turn, capped at `max_slots`; `FUSE_SLOT_GAIN` is now 4% +2, else 20% +1). After
-  Fuse it REVEALS: the inputs struck through, the new item's slot dots with gained ones
-  lit, "+1 enchantment slot! 2 → 3", each enchantment tagged New / was +N against the
-  best of its kind on either input, and where the item went — that slot flashes.
 - **What is in reach shows as slots in the stage's bottom right** (`.hr-loot`): every
   bag drop and put-down item within `REACH`, click one to take it (queued, one a tick,
   through the same `take` / `lift` inputs E uses), or Take all / G. Hovering a bag on
@@ -389,8 +382,8 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
   left, so its real rate is below what is written and the last row soaks up the rest.
   With one weighted roll a row's chance is exactly weight / total, and
   `test_drops_come_at_the_rates_the_tables_say` holds the generator to that (4 standard
-  errors, at 0 and 3 modifiers). (The forge's slot gain IS a checked-in-order list, but the
-  page computes its true odds — `slotOdds` — and shows those.)
+  errors, at 0 and 3 modifiers). (Fusion's slot odds are the same table from a floor up —
+  `content.fuse_slot_odds`, sent to the page as `odds.fuse_slots`.)
 - **An enemy's loot is: how many (DROP_COUNT by enemy type), then for each item its quality
   (QUALITY: t1-t4 or unique), then its base, then its slots.** Ordinary enemies drop 0 or 1
   (20-35%) at T1 70 / T2 25 / T3 5. **The boss is a better table, not a jackpot** (owner):
@@ -660,3 +653,41 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
   Every class has uniques in both dungeons, and each armor type has one in each. The
   tooltip says "Found in The Shallows". `test_every_unique_has_one_home_dungeon...`.
 - **The Dream Key drops 25% of the time per boss** (was 10%; owner's ask, 2026-11-19).
+
+## The forge, RotMG-style (2026-11-19, owner's calls)
+Modeled on RotMG's enchanting, minus its percentages, dust colors and artifacts.
+- **Rarity is still the slot count** (`content.SLOT_ODDS`, moved from dungeon.py so
+  fusion reads the same table). **Each line has a LEVEL I-IV**: the quarter of its
+  stored quality (`content.line_level`, `sim.lineLevel`), so items from before levels
+  kept their exact numbers. A new roll picks the level by `LINE_LEVEL_WEIGHTS`
+  (35/28/22/15: IV ~2.3x rarer than I) and then a spot in that quarter — from ONE draw
+  (`content.line_q`), so no stream after it moved. A stat never appears twice on an
+  item (the store refuses it). **Values are flat and do not grow with tier** (owner):
+  strong on a level-1 character, solid on a level-20. `mp_regen` tops out at +1.5 (was
+  2.5: base regen is 2.5, so four lines more than quadrupled casting).
+- **SPECIAL LINES** (`content.ENCHANTS` `special`, `sim.SPECIAL`): tradeoffs — Fury
+  (+Attack, -3 Defense), Glass Mind (+AP, -20 HP), Fleetfoot (+Dexterity, -15 HP) — and
+  triggers — Kindling (a cast sets the next 3 volleys burning), Second Wind (MP back on
+  a kill, once a second), Bulwark (+Defense for 2s after a hit, every 4s). They are only
+  ever DROPPED, from depth 3 down: `SPECIAL_CHANCE` per slot 0.1% / 0.3% / 0.8% at
+  depth 3 / 4 / 5 — measured ~1 per 210 / 80 / 21 level clears ("extremely extremely
+  rare" at 3, still rare at 5). Their own stream per drop (`dungeon._specials`), so
+  every other roll is unchanged (tested). A reroll or fusion never makes one.
+- **SHARDS** are the one currency, the OWNER's (`hr_owners.shards`). Each kill in a
+  real run adds `SHARDS_PER_KILL` (boss `SHARDS_PER_BOSS`) x (1 + the loot bonus) to
+  the RUN (`state.shards`), banked by `_close_run` on a recall, a clear or a sweep; a
+  death loses them and a Dream Rift pays none. **Break down** (`store.salvage`) turns
+  an item into `content.salvage_value(tier, slots)` shards.
+- **Reroll** (`store.reroll`, `POST /halcyon/items/{id}/reroll {keep}`): every line not
+  kept is rerolled into a REGULAR line the item does not hold. Price
+  `content.reroll_cost` = (8 + 2·tier + 6·slots) x 2^kept. A special line is always
+  kept and counts. Unique EFFECTS live on the base, never on a line, so no reroll can
+  touch one. The page works the same price out from `/halcyon/state` `odds.reroll`.
+- **Fusion** (`store.fuse`): two of the SAME BASE, any tier and slots. The result has
+  at least the FEWER slots, more by the slot table from that floor up
+  (`content.fuse_slot_odds`: 0 -> 50% for 1+, 1 -> 37.5% for 2+, 2 -> 25% for 3+,
+  3 -> 12.5% for 4), the higher tier and fresh regular lines; the page warns when an
+  input carries a special line. The old 4%/20% `FUSE_SLOT_GAIN` is gone.
+- Tests: `test_store.py` (reroll, locks, salvage, fusion floors and odds, shards banked
+  / lost), `test_dungeon.py` (level weights, special odds by depth, their own stream),
+  `webapp/test/unit/halcyonSpecialLines.test.mjs` (every special line in the sim).

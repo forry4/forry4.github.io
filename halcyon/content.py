@@ -141,7 +141,45 @@ ENCHANTS: dict[str, dict] = {
     "ability_power": {"slots": ("ability", "ring")},
     "mp_regen":      {"slots": ("armor", "ability", "ring")},
     "hp_regen":      {"slots": ("armor", "ring")},
+    # SPECIAL LINES (owner's calls, 2026-11-19): stronger, and only ever DROPPED, from
+    # depth 3 down (SPECIAL_CHANCE) — a reroll or a fusion never makes one. Two kinds:
+    # tradeoffs (a big gain for a small loss) and triggers (sim.js SPECIAL).
+    "fury":          {"slots": ("weapon", "ring"), "special": True},    # +Attack, -Defense
+    "glass_mind":    {"slots": ("ability", "ring"), "special": True},   # +Ability power, -HP
+    "fleetfoot":     {"slots": ("armor", "ring"), "special": True},     # +Dexterity, -HP
+    "kindling":      {"slots": ("ability",), "special": True},          # a cast sets the next shots burning
+    "second_wind":   {"slots": ("armor", "ring"), "special": True},     # a kill gives MP back
+    "bulwark":       {"slots": ("armor",), "special": True},            # a hit raises Defense briefly
 }
+
+# LINE LEVELS I-IV (owner's call, 2026-11-19, after RotMG's enchant tiers). A line's
+# level is the QUARTER of its stored quality, so items made before levels keep their
+# exact numbers. A new roll lands on a level by these weights (IV ~2.3x rarer than I),
+# then anywhere inside that level's quarter.
+LINE_LEVEL_WEIGHTS = (35, 28, 22, 15)
+# The chance, PER enchantment slot of a drop, that the line is a special one, by depth.
+# Nothing above depth 3. Owner's call 2026-11-19: "extremely extremely rare" at 3 and
+# still rare at 5 — measured at ~5 slots a deep level, that is about one special line
+# per 240 level-3 clears, 65 level-4 clears and 22 level-5 clears.
+SPECIAL_CHANCE = {3: 0.001, 4: 0.003, 5: 0.008}
+
+# SHARDS: the forge's one currency, the owner's (not a character's). Earned by kills in
+# a real run — the boss pays a bonus — times (1 + the loot bonus), so modifiers and depth
+# pay more; kept on a recall or a clear, lost with the run on a death. Breaking down an
+# item pays shards too. A Dream Rift pays nothing.
+SHARDS_PER_KILL = 1
+SHARDS_PER_BOSS = 10
+def salvage_value(tier: int, slot_count: int) -> int:
+    return 2 + 2 * max(0, tier) + 4 * slot_count
+
+
+# A REROLL costs this, doubled for every locked line (owner: "locking lines when
+# rerolling should be expensive"). A special line is ALWAYS locked, and counts.
+REROLL_BASE = 8
+REROLL_PER_TIER = 2
+REROLL_PER_SLOT = 6
+def reroll_cost(tier: int, slot_count: int, locks: int) -> int:
+    return (REROLL_BASE + REROLL_PER_TIER * max(0, tier) + REROLL_PER_SLOT * slot_count) * 2 ** locks
 
 # ── levels and XP (design §10.1) ────────────────────────────────────────────
 # XP comes from kills, plus a bonus for completing a dungeon; recall keeps what a
@@ -173,11 +211,18 @@ def level_for(xp: int) -> int:
     return level
 
 
-# Fusion's chance to gain enchantment slots (design §11.7: "may rarely gain
-# multiple slots"). Checked in order; the first hit wins. Raised 2026-11-18 (owner:
-# "make sure using the forge has a chance of increasing the number of slots") —
-# at 5% it never showed up in play.
-FUSE_SLOT_GAIN = ((2, 0.04), (1, 0.20))
+# THE SLOT TABLE (the same for every source; dungeon.slot_odds tilts it by the loot
+# bonus): 0: 50%, 1: 31.25%, 2: 14.0625%, 3: 4.1016%, 4: 0.5859% — RotMG's cumulative
+# 50% x 37.5% x 25% x 12.5%.
+SLOT_ODDS = ((0, 1024), (1, 640), (2, 288), (3, 84), (4, 12))
+
+
+def fuse_slot_odds(floor: int) -> tuple:
+    """(slots, chance) for a fusion whose inputs' FEWER slot count is `floor`: the
+    slot table taken from that floor up (see FUSION below)."""
+    rows = [(n, w) for n, w in SLOT_ODDS if n >= floor]
+    total = sum(w for _, w in rows)
+    return tuple((n, w / total) for n, w in rows)
 
 # Rift modifiers (owner's ask, 2026-11-18): picked before a run; each makes the
 # rift harder and adds one RARITY point. Each point is one LOOT BONUS (see
@@ -377,6 +422,43 @@ def slot_fits(base_id: str, equip_slot: str) -> bool:
     return fam == equip_slot or (fam == "ring" and equip_slot in ("ring1", "ring2"))
 
 
-def enchants_for(base_id: str) -> list[str]:
+def enchants_for(base_id: str, special: bool = False) -> list[str]:
+    """The lines this base may ROLL: the regular ones, or (special=True) the special ones."""
     fam = base(base_id)["slot"]
-    return sorted(e for e, d in ENCHANTS.items() if fam in d["slots"] and not d.get("retired"))
+    return sorted(e for e, d in ENCHANTS.items()
+                  if fam in d["slots"] and not d.get("retired") and bool(d.get("special")) == special)
+
+
+def lines_allowed(base_id: str) -> set[str]:
+    """Every line an item of this base may CARRY (what the store validates)."""
+    fam = base(base_id)["slot"]
+    return {e for e, d in ENCHANTS.items() if fam in d["slots"]}
+
+
+def is_special(enchant_id: str) -> bool:
+    return bool(ENCHANTS.get(enchant_id, {}).get("special"))
+
+
+def line_level(q: float) -> int:
+    return min(4, int(q * 4) + 1)
+
+
+def line_q(u: float) -> float:
+    """One uniform draw -> a quality: its level by LINE_LEVEL_WEIGHTS, then where in
+    that level's quarter. ONE draw, so every roll after it in a stream is unchanged."""
+    total = sum(LINE_LEVEL_WEIGHTS)
+    lo = 0.0
+    for i, w in enumerate(LINE_LEVEL_WEIGHTS):
+        hi = lo + w / total
+        if u < hi or i == len(LINE_LEVEL_WEIGHTS) - 1:
+            frac = min(0.999999, max(0.0, (u - lo) / (hi - lo)))
+            return (i + frac) / 4
+        lo = hi
+    return 1.0
+
+
+# FUSION (owner's call, 2026-11-19, RotMG's route): two items of the SAME BASE, any
+# tier and slot count. The result has at least the FEWER slots of the two; above that
+# it rises by the slot table's own odds (dungeon.SLOT_ODDS taken from that floor up:
+# 0 -> 50% for 1+, 1 -> 37.5% for 2+, 2 -> 25% for 3+, 3 -> 12.5% for 4). It keeps the
+# higher tier and rolls fresh regular lines. (The 4%/20% gain it replaces is retired.)

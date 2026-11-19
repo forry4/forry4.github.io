@@ -205,10 +205,28 @@ export const STAT_SCALE = 25;
 
 /* An enchantment's flat value at roll quality q (0-1): [at q=0, at q=1], rounded.
  * The store keeps the QUALITY, so changing a row here re-scales every item. */
+/* MP regen tops out at +1.5 (was 2.5, 2026-11-19): a character starts at 2.5 MP a second,
+ * so four +2.5 lines more than quadrupled casting. FLAT on purpose: a line is a big
+ * share of a level-1 character and a solid one of a level-20 (owner's call). */
 export const ENCHANT_FLAT = {
 	max_hp: [5, 25], max_mp: [5, 25], attack: [1, 6], attack_speed: [1, 6], defense: [1, 5],
-	ability_power: [2, 10], mp_regen: [0.5, 2.5], hp_regen: [0.2, 1.2],
+	ability_power: [2, 10], mp_regen: [0.3, 1.5], hp_regen: [0.2, 1.2],
+	// the SPECIAL lines (content.ENCHANTS `special`): the main number; SPECIAL below has the rest
+	fury: [5, 9], glass_mind: [8, 14], fleetfoot: [4, 7],
+	kindling: [2, 4], second_wind: [3, 6], bulwark: [3, 6],
 };
+/* What a special line costs or how it fires (fixed, whatever its roll). */
+export const SPECIAL = {
+	fury: { def: 3 },                       // +Attack, -3 Defense
+	glass_mind: { hp: 20 },                 // +Ability power, -20 HP
+	fleetfoot: { hp: 15 },                  // +Dexterity, -15 HP
+	kindling: { shots: 3 },                 // a cast sets the next 3 volleys burning (burn per pulse)
+	second_wind: { cooldown: TPS },         // MP back on a kill, at most once a second
+	bulwark: { last: 2 * TPS, cooldown: 4 * TPS },   // +Defense for 2 s after a hit, every 4 s at most
+};
+export const isSpecial = (id) => id in SPECIAL;
+/* A line's level, I-IV: the quarter of its quality (content.line_level). */
+export const lineLevel = (q) => Math.min(4, Math.floor((q || 0) * 4) + 1);
 export const enchantValue = (id, q) => {
 	const r = ENCHANT_FLAT[id];
 	if (!r) return 0;
@@ -284,6 +302,12 @@ export function statsFor(gear = [], level = 1, classId = "ranger") {
 			else if (e.id === "ability_power") s.ap += v;
 			else if (e.id === "mp_regen") s.mpRegen += v;
 			else if (e.id === "hp_regen") s.hpRegen += v;
+			else if (e.id === "fury") { s.att += v; s.def -= SPECIAL.fury.def; }
+			else if (e.id === "glass_mind") { s.ap += v; s.maxHp -= SPECIAL.glass_mind.hp; }
+			else if (e.id === "fleetfoot") { s.dex += v; s.maxHp -= SPECIAL.fleetfoot.hp; }
+			else if (e.id === "kindling") s.kindle = Math.max(s.kindle || 0, v);
+			else if (e.id === "second_wind") s.secondWind = Math.max(s.secondWind || 0, v);
+			else if (e.id === "bulwark") s.bulwark = Math.max(s.bulwark || 0, v);
 		}
 	}
 	const up = Math.max(0, (level | 0) - 1);
@@ -416,7 +440,8 @@ export function createSim(dungeon, gear = [], hero = {}) {
 		hero: { level, xp, startLevel: level, startXp: xp },
 		p: { x: dungeon.start.x, y: dungeon.start.y, r: PLAYER_R, hp: stats.maxHp, low: stats.maxHp,
 			mp: stats.maxMp, fireCd: 0, hurt: 0, burstLeft: 0, burstCd: 0,
-			potionCd: 0, counterUntil: 0, guardUntil: 0, empower: 0, abilityCd: 0, primed: 0 },
+			potionCd: 0, counterUntil: 0, guardUntil: 0, empower: 0, abilityCd: 0, primed: 0,
+			kindled: 0, windAt: 0, bulwarkUntil: 0, bulwarkAt: 0 },
 		enemies, bullets: [], dropsBy, scale,
 		// Heal orbs DROP from the enemy that carries one (dungeon.py); one with a
 		// position of its own (an older dungeon) lies where it was placed.
@@ -446,7 +471,12 @@ function hurtPlayer(st, dmg, src = null) {
 		}
 		return;
 	}
-	const taken = Math.round(Math.max(dmg * 0.4, dmg - st.stats.def) * 10) / 10;
+	const def = st.stats.def + (p.bulwarkUntil > st.tick ? st.stats.bulwark : 0);
+	const taken = Math.round(Math.max(dmg * 0.4, dmg - def) * 10) / 10;
+	if (st.stats.bulwark && !(p.bulwarkAt > st.tick)) {      // Bulwark: Defense up for the hits after this one
+		p.bulwarkUntil = st.tick + SPECIAL.bulwark.last;
+		p.bulwarkAt = st.tick + SPECIAL.bulwark.cooldown;
+	}
 	p.hp -= taken;
 	p.hurt = 8;
 	st.lastHit = { src, dmg: taken, tick: st.tick };
@@ -1065,6 +1095,7 @@ export function playerFire(st, input) {
 	if (p.abilityCd > 0) p.abilityCd--;
 	if (input.ability && s.abilityKind && p.mp >= s.abilityCost && !(p.abilityCd > 0)) {
 		p.mp -= s.abilityCost;
+		if (s.kindle) p.kindled = SPECIAL.kindling.shots;       // Kindling: the next volleys burn
 		if (s.abilityKind === "volley" && s.gale) {           // the Gale Quiver: one arrow through everything
 			const q = UNIQUE.gale;
 			st.bullets.push({ owner: "p", x: p.x, y: p.y, vx: ax * q.speed, vy: ay * q.speed, dmg: s.abilityDmg,
@@ -1105,12 +1136,14 @@ function volley(st, ax, ay) {
 	p.empower = 0;
 	if (s.fullMoon && p.mp >= s.maxMp) mult *= s.fullMoon;      // the Mantle of the Full Moon
 	if (p.primed > 0) { mult *= p.primed; p.primed = 0; }       // Duskmail: the shot after a kill
+	let burn = s.burn || 0;
+	if (p.kindled > 0) { burn = Math.max(burn, s.kindle || 0); p.kindled--; }   // Kindling
 	for (let i = 0; i < s.shots; i++) {
 		const [vx, vy] = s.shots > 1 ? rotate(ax, ay, (i - (s.shots - 1) / 2) * s.spread) : [ax, ay];
 		st.bullets.push({ owner: "p", x: p.x, y: p.y, vx: vx * s.shotSpeed, vy: vy * s.shotSpeed,
 			dmg: Math.round(s.dmg * mult), r: 0.14, life, pierce: s.pierce, bounce: s.bounce, hit: [],
 			...(s.look ? { look: s.look } : {}), ...(mult > 1 ? { power: true } : {}),
-			...(s.burn ? { burn: s.burn } : {}), ...(s.splash ? { splash: 1 } : {}), ...(s.comet ? { comet: 1 } : {}),
+			...(burn ? { burn } : {}), ...(s.splash ? { splash: 1 } : {}), ...(s.comet ? { comet: 1 } : {}),
 			...(s.ret ? { ret: Math.floor(life / 2) } : {}) });
 	}
 }
@@ -1207,7 +1240,7 @@ export function setGear(st, gear) {
 	p.low = Math.min(p.low, s.maxHp);
 	p.mp = Math.min(p.mp, s.maxMp);
 	p.burstLeft = 0; p.burstCd = 0;
-	p.empower = 0; p.primed = 0;
+	p.empower = 0; p.primed = 0; p.kindled = 0;
 }
 
 /* XP, and a level when it crosses one: the new stats apply at once, and the HP,
@@ -1238,6 +1271,10 @@ function kill(st, e) {
 	gainXp(st, e.xp);
 	if (st.stats.leech) st.p.hp = Math.min(recoveryLimit(st), st.p.hp + st.stats.leech);   // the Leechstone
 	if (st.stats.dusk) st.p.primed = st.stats.dusk;                                       // Duskmail
+	if (st.stats.secondWind && !(st.p.windAt > st.tick)) {                               // Second Wind
+		st.p.mp = Math.min(st.stats.maxMp, st.p.mp + st.stats.secondWind);
+		st.p.windAt = st.tick + SPECIAL.second_wind.cooldown;
+	}
 	// A Splitter breaks into its Splinters: they come into play where it fell.
 	let k = 0;
 	for (const s of st.enemies) {
@@ -1274,6 +1311,7 @@ export function fingerprint(st) {
 		st.bullets.length, st.bullets.map((b) => [r(b.x), r(b.y)]).slice(0, 40),
 		st.bags.map((b) => b.drops.join(",")), st.pickups.length, st.shield && [r(st.shield.x), r(st.shield.y), st.shield.until], st.slowUntil, st.slowDmg || 0,
 		st.p.potionCd, st.p.counterUntil, st.p.guardUntil, st.p.empower, st.p.abilityCd || 0, st.p.primed || 0,
+		st.p.kindled || 0, st.p.windAt || 0, st.p.bulwarkUntil || 0, st.p.bulwarkAt || 0,
 		st.slowAt ? [r(st.slowAt.x), r(st.slowAt.y)] : 0, st.enemies.map((e) => e.burnUntil || 0), (st.starfalls || []).map((f) => [r(f.x), r(f.y), f.at]),
 		(st.mortars || []).map((m) => [r(m.x), r(m.y), m.at]), (st.fires || []).map((f) => [r(f.x), r(f.y), f.until]), st.enemies.map((e) => e.hidden || 0),
 		(st.cracks || []).map((c) => c.t), st.fastRoom ?? -1, st.enemies.map((e) => (e.dormant ? 1 : 0))]);

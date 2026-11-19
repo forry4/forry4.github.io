@@ -224,6 +224,7 @@
 .hr-enchants li i{font-style:normal;display:inline-block;width:1.1em;color:#9fe7ff}
 .hr-enchants li.empty{color:var(--text-soft);opacity:.8}
 .hr-enchants li.empty i{color:var(--text-soft)}
+.hr-enchants li.special,.hr-enchants li.special i{color:#ffb86b}
 
 /* ── notifications: top left, fading; the log opens them all again ─────────── */
 .hr-notices{position:absolute;left:10px;top:10px;z-index:5;display:flex;flex-direction:column;align-items:flex-start;gap:6px;
@@ -266,7 +267,19 @@ button.hr-forge-card:hover{border-color:#f08a80}
 .hr-forge-dots i{width:9px;height:9px;border-radius:50%;border:1px solid rgba(255,255,255,.3)}
 .hr-forge-dots i.on{background:#e9c25a;border-color:#e9c25a}
 .hr-forge-dots i.new{background:#9fe7ff;border-color:#9fe7ff;box-shadow:0 0 8px #9fe7ff;animation:hr-pop .5s .25s both}
-.hr-forge-go{justify-content:flex-end}
+.hr-forge-go{justify-content:flex-end;flex-wrap:wrap}
+.hr-forge-top{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.hr-forge-tabs{display:flex;gap:6px}
+.hr-shards{font-variant-numeric:tabular-nums;color:#e9c25a;font-weight:700}
+.hr-reroll-card{min-height:0;width:min(420px,100%);margin:0 auto 10px}
+.hr-reroll-lines{list-style:none;margin:2px 0 0;padding:0;display:grid;gap:4px;width:100%}
+.hr-line{display:flex;align-items:center;gap:8px;width:100%;padding:6px 9px;border-radius:8px;text-align:left;font:inherit;font-size:.84rem;
+  color:#9fe7ff;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.14);cursor:pointer}
+.hr-line i{font-style:normal;width:1.2em;text-align:center}
+.hr-line:hover:not(:disabled){border-color:#9fe7ff}
+.hr-line.kept{border-color:#e9c25a;background:rgba(233,194,90,.1)}
+.hr-line.special,.hr-line.special.kept{color:#ffb86b;cursor:default;border-color:#ffb86b}
+.hr-warn{font-size:.78rem;color:#ffb86b}
 .hr-reveal{display:flex;flex-direction:column;align-items:center;gap:10px}
 .hr-reveal-in{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
 .hr-reveal-used{font-size:.78rem;color:var(--text-soft);text-decoration:line-through;opacity:.7}

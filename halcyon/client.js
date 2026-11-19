@@ -125,6 +125,8 @@ export function makeClient(authUser, { base = BACKEND_HTTP, fetchImpl = (...a) =
 		discard: (itemId, version) => request(`/halcyon/items/${encodeURIComponent(itemId)}/discard`, { version }),
 		lock: (itemId, locked) => request(`/halcyon/items/${encodeURIComponent(itemId)}/lock`, { locked }),
 		fuse: (a, b) => request("/halcyon/fuse", { a, b }),
+		reroll: (itemId, keep, version) => request(`/halcyon/items/${encodeURIComponent(itemId)}/reroll`, { keep, version }),
+		salvage: (itemId, version) => request(`/halcyon/items/${encodeURIComponent(itemId)}/salvage`, { version }),
 		// A run with nothing left to deliver is not "pending": an open run that reported
 		// nothing (the tab closed at once) is the server's to close, not the queue's.
 		beginRun, report, flush, pendingRun: () => { const q = loadQueue(); return q && q.pending.length ? q.run_id : null; },

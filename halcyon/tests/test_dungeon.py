@@ -415,3 +415,53 @@ def test_every_unique_drops_for_a_class_that_can_wear_it():
     assert uniques == dropped
     for cls, table in D.UNIQUE_LOOT.items():
         assert all(C.usable_by(b, cls) for b, _ in table), cls
+
+
+# ── line levels and special lines (2026-11-19) ───────────────────────────────
+def test_line_levels_land_by_their_weights_inside_their_quarter():
+    from collections import Counter
+    rng = random.Random(5)
+    got = Counter(C.line_level(C.line_q(rng.random())) for _ in range(40000))
+    total = sum(C.LINE_LEVEL_WEIGHTS)
+    for lv, w in enumerate(C.LINE_LEVEL_WEIGHTS, start=1):
+        assert abs(got[lv] / 40000 - w / total) < 0.01, (lv, got)
+    for u in (0.0, 0.3499, 0.35, 0.9999):
+        q = C.line_q(u)
+        assert 0 <= q < 1 and C.line_level(q) == (1 if u < 0.35 else 2 if u < 0.63 else 3 if u < 0.85 else 4)
+
+
+def _specials_at(level, n=600):
+    out = 0
+    for s in range(n):
+        d = D.generate("fracture", seed=f"sp{s}", level=level)
+        for it in d["drops"].values():
+            assert len({e["id"] for e in it["enchants"]}) == len(it["enchants"])
+            out += sum(C.is_special(e["id"]) for e in it["enchants"])
+    return out
+
+
+def test_special_lines_drop_only_from_depth_3_and_rarely():
+    assert _specials_at(1, 200) == 0 and _specials_at(2, 200) == 0
+    deep = _specials_at(5)
+    assert 10 <= deep <= 60, deep          # ~0.05 a level-5 clear: ~29 in 600
+    for d_id in ("shallows", "fracture"):
+        for base in C.BASE_ITEMS:
+            for e in C.enchants_for(base, special=True):
+                assert C.base(base)["slot"] in C.ENCHANTS[e]["slots"]
+
+
+def test_special_lines_leave_every_other_roll_alone():
+    """Their own stream: with the chance forced to zero the dungeon is byte-identical."""
+    saved = dict(C.SPECIAL_CHANCE)
+    try:
+        with_lines = D.generate("fracture", seed="same", level=5)
+        C.SPECIAL_CHANCE.clear()
+        plain = D.generate("fracture", seed="same", level=5)
+    finally:
+        C.SPECIAL_CHANCE.update(saved)
+    strip = lambda d: {k: [e for e in v["enchants"] if not C.is_special(e["id"])] for k, v in d["drops"].items()}
+    assert set(with_lines["drops"]) == set(plain["drops"])
+    for k in plain["drops"]:
+        a, b = with_lines["drops"][k], plain["drops"][k]
+        assert (a["base_id"], a["tier"], a["slot_count"]) == (b["base_id"], b["tier"], b["slot_count"])
+        assert all(x in b["enchants"] for x in strip(with_lines)[k])

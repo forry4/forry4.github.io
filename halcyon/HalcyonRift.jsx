@@ -24,7 +24,7 @@ import { baseCss } from "../shared/theme.js";
 import { lobbyCss, LobbyHeader, LobbyUser, LobbyLoading } from "../shared/lobby.jsx";
 import { GAME_ACCENTS } from "../shared/accents.js";
 import { makeClient } from "./client.js";
-import { createSim, step, TPS, REACH, xpProgress, WEAPONS, statsFor, enchantValue, recoveryLimit, CLASS_INFO,
+import { createSim, step, TPS, REACH, xpProgress, WEAPONS, statsFor, enchantValue, recoveryLimit, CLASS_INFO, SPECIAL, isSpecial, lineLevel,
 	STAT_SCALE, ABILITY_COST, ABILITY, SLOW_DURATION, SLOW_FACTOR, SLOW_PULSE,
 	STARFALL_DELAY, STARFALL_RADIUS, STARFALL_RANGE, COUNTER_WINDOW, COUNTER_GUARD, POTION_HEAL, POTION_COOLDOWN, UNIQUE } from "./sim.js";
 import { camera, draw, drawTown, promptFor, formatRiftTime, TIER_COLORS, UNIQUE_COLOR } from "./render.js";
@@ -57,11 +57,29 @@ const runModRows = (run) => !run ? [] : [
 	...(run.dungeon?.mods || []).map((id) => ({ id, name: run.modInfo?.[id]?.name || id, text: run.modInfo?.[id]?.text || "" }))];
 // Every enchantment reads as flat points ("+4 Attack"), never a percentage.
 const ENCHANT_NAMES = { max_hp: "Max HP", max_mp: "Max MP", attack: "Attack", defense: "Defense",
-	attack_speed: "Dexterity", ability_power: "Ability power", mp_regen: "MP regen", hp_regen: "HP regen" };
+	attack_speed: "Dexterity", ability_power: "Ability power", mp_regen: "MP regen", hp_regen: "HP regen",
+	fury: "Fury", glass_mind: "Glass Mind", fleetfoot: "Fleetfoot", kindling: "Kindling", second_wind: "Second Wind", bulwark: "Bulwark" };
+const ROMAN = ["I", "II", "III", "IV"];
+/* One line as a player reads it: "+5 Attack III", or a SPECIAL line's name, level and
+ * what it does ("Fury III: +7 Attack, −3 Defense"). */
+function lineText(e) {
+	const v = enchantValue(e.id, e.q), lv = ROMAN[lineLevel(e.q) - 1];
+	if (!isSpecial(e.id)) return `+${v} ${ENCHANT_NAMES[e.id] || e.id} ${lv}`;
+	const what = {
+		fury: `+${v} Attack, −${SPECIAL.fury.def} Defense`,
+		glass_mind: `+${v} Ability power, −${SPECIAL.glass_mind.hp} HP`,
+		fleetfoot: `+${v} Dexterity, −${SPECIAL.fleetfoot.hp} HP`,
+		kindling: `after your ability, your next ${SPECIAL.kindling.shots} shots burn for ${v} a pulse`,
+		second_wind: `a kill gives back ${v} MP (once a second)`,
+		bulwark: `a hit gives +${v} Defense for ${SPECIAL.bulwark.last / TPS}s (every ${SPECIAL.bulwark.cooldown / TPS}s at most)`,
+	}[e.id] || "";
+	return `${ENCHANT_NAMES[e.id] || e.id} ${lv}: ${what}`;
+}
 /* ONE ORDER FOR EVERY STAT, on every item (owner's ask, 2026-11-18): two tooltips side
  * by side line up row for row. The base's stats (STAT_WORDS) and the enchantments
  * (ENCHANT_ORDER) follow the same sequence. */
-const ENCHANT_ORDER = ["max_hp", "max_mp", "attack", "attack_speed", "defense", "ability_power", "hp_regen", "mp_regen"];
+const ENCHANT_ORDER = ["max_hp", "max_mp", "attack", "attack_speed", "defense", "ability_power", "hp_regen", "mp_regen",
+	"fury", "glass_mind", "fleetfoot", "kindling", "second_wind", "bulwark"];
 const byEnchantOrder = (a, b) => ENCHANT_ORDER.indexOf(a.id) - ENCHANT_ORDER.indexOf(b.id);
 const sortedEnchants = (it) => [...(it.enchants || [])].sort(byEnchantOrder);
 const SLOT_NAMES = { weapon: "Weapon", armor: "Armor", ability: "Ability", ring1: "Ring", ring2: "Ring" };
@@ -309,6 +327,9 @@ export default function HalcyonRift({ authUser, onExit }) {
 	const [createSlot, setCreateSlot] = useState(null);
 	const [forge, setForge] = useState([]);           // the item ids picked for fusion (at most two)
 	const [forged, setForged] = useState(null);
+	const [forgeTab, setForgeTab] = useState("reroll");   // "reroll" (one item) | "fuse" (two)
+	const [keep, setKeep] = useState([]);                 // the reroll's locked lines, by index
+	const [breaking, setBreaking] = useState(false);      // Break down asks twice
 	const [near, setNear] = useState(null);
 	const [run, setRun] = useState(null);
 	// THE GAME MENU (owner's ask, 2026-11-18): Escape opens it over the town or the run
@@ -425,6 +446,7 @@ export default function HalcyonRift({ authUser, onExit }) {
 	// Walking away from the vault or the forge closes it; leaving the forge drops its picks.
 	useEffect(() => { if (panel && near !== panel) setPanel(null); }, [near, panel]);
 	useEffect(() => { if (panel !== "forge") setForge([]); }, [panel]);
+	useEffect(() => { setKeep([]); setBreaking(false); }, [forge[0], forgeTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
 	const chooseChar = (c) => {
 		setPicked(null); setPanel(null);
@@ -780,9 +802,11 @@ export default function HalcyonRift({ authUser, onExit }) {
 	}, []);
 	// At the forge a click PICKS an item for fusion (it stays where it is, lit).
 	const forgePick = (it) => {
-		if (it.locked && !forge.includes(it.item_id)) { notify(`${nameOf(it)} is locked, so it cannot be fused.`, "bad"); return; }
+		if (it.locked && !forge.includes(it.item_id)) { notify(`${nameOf(it)} is locked. Right-click it to unlock.`, "bad"); return; }
+		if (it.kind === "key") { notify("Keys cannot be forged.", "bad"); return; }
 		if (forged) setForged(null);
-		setForge((f) => (f.includes(it.item_id) ? f.filter((id) => id !== it.item_id) : [...f, it.item_id].slice(-2)));
+		const most = forgeTab === "fuse" ? 2 : 1;
+		setForge((f) => (f.includes(it.item_id) ? f.filter((id) => id !== it.item_id) : [...f, it.item_id].slice(-most)));
 	};
 	const slotCtx = {
 		bases: view?.bases || {}, picked, drag, flash, dragItem: drag ? byId[drag] : null, accepts, inRun: !!run, forge, quick,
@@ -817,7 +841,28 @@ export default function HalcyonRift({ authUser, onExit }) {
 
 	const slots = [...Array(view.limits.characters).keys()];
 	const [fa, fb] = [byId[forge[0]] || null, byId[forge[1]] || null];
-	const fusable = fa && fb && ["base_id", "tier", "kind", "slot_count"].every((k) => fa[k] === fb[k]);
+	const fusable = fa && fb && fa.base_id === fb.base_id;
+	const shards = view.shards ?? 0;
+	// The reroll's price, as the store works it out (content.reroll_cost): special lines are always kept.
+	const rr = view.odds?.reroll || { base: 8, per_tier: 2, per_slot: 6 };
+	const kept = fa ? new Set([...keep, ...(fa.enchants || []).map((e, i) => (isSpecial(e.id) ? i : -1)).filter((i) => i >= 0)]) : new Set();
+	const rerollCost = fa ? (rr.base + rr.per_tier * Math.max(0, fa.tier) + rr.per_slot * fa.slot_count) * 2 ** kept.size : 0;
+	const canReroll = fa && (fa.enchants || []).length > kept.size && shards >= rerollCost;
+	const salvageValue = fa ? 2 + 2 * Math.max(0, fa.tier) + 4 * fa.slot_count : 0;
+	const reroll = () => act(async () => {
+		const out = await client.reroll(fa.item_id, [...keep].sort(), fa.version);
+		setFlash(out.item_id);
+		setTimeout(() => setFlash((f) => (f === out.item_id ? null : f)), 1400);
+	});
+	const breakDown = () => {
+		if (!breaking) { setBreaking(true); return; }
+		const it = fa;
+		act(async () => {
+			const out = await client.salvage(it.item_id, it.version);
+			setForge([]);
+			notify(`${nameOf(it)} broke down into ${out.gained} shards.`);
+		});
+	};
 	const fuse = () => act(async () => {
 		const made = await client.fuse(fa.item_id, fb.item_id);
 		setForged({ item: made, a: fa, b: fb });
@@ -1009,33 +1054,69 @@ export default function HalcyonRift({ authUser, onExit }) {
 										: forged.item.loc === "inventory" ? `In your bag, slot ${forged.item.slot_index + 1}` : "In the vault"}
 									onAgain={() => setForged(null)} onDone={() => { setForged(null); setPanel(null); }} />
 								: <>
-									<p className="hr-hint">Click two identical items in your bag or equipment: same item, tier and
-										number of enchantment slots. Both are used up; one comes back with fresh enchantments.</p>
-									<div className="hr-forge">
-										<ForgeCard item={fa} label="First item" ap={stats?.ap || 0} onClear={fa ? () => forgePick(fa) : null} />
-										<span className="hr-plus" aria-hidden="true">+</span>
-										<ForgeCard item={fb} label="Second item" ap={stats?.ap || 0} onClear={fb ? () => forgePick(fb) : null} />
-										<span className="hr-plus" aria-hidden="true">=</span>
-										<div className={"hr-forge-card hr-forge-out" + (fusable ? " ready" : "")}>
-											{fusable ? <>
-												<span className="hr-forge-glyph">{ABBR[fa.base_id]}<b>?</b></span>
-												<strong>{nameOf(fa)}</strong>
-												<span className="hr-forge-slots">{fa.slot_count} slot{fa.slot_count === 1 ? "" : "s"}, maybe more</span>
-												<ul className="hr-forge-odds">
-													{slotOdds(view.odds?.fuse_slot_gain, fa.slot_count, view.odds?.max_slots).map(([g, pct]) =>
-													<li key={g}>+{g} slot{g > 1 ? "s" : ""}: {pct}%</li>)}
-												</ul>
-												<span className="hr-hint">Every enchantment rerolled</span>
-											</> : <span className="hr-hint">{!fa || !fb ? "Pick two items"
-												: fa.base_id !== fb.base_id ? "Not the same item"
-												: fa.tier !== fb.tier ? `Not the same tier (${fa.tier} and ${fb.tier})`
-												: fa.slot_count !== fb.slot_count ? `Not the same number of slots (${fa.slot_count} and ${fb.slot_count})`
-												: "These two are not identical"}</span>}
+									<div className="hr-forge-top">
+										<div className="hr-forge-tabs" role="tablist">
+											{[["reroll", "Reroll"], ["fuse", "Fuse"]].map(([id, label]) =>
+												<button key={id} role="tab" aria-selected={forgeTab === id}
+													className={"btn " + (forgeTab === id ? "btn-gold" : "btn-ghost")}
+													onClick={() => { setForgeTab(id); setForge((f) => f.slice(0, id === "fuse" ? 2 : 1)); }}>{label}</button>)}
 										</div>
+										<span className="hr-shards" aria-label="Your shards">◈ {shards} shards</span>
 									</div>
-									<div className="hr-actions hr-forge-go">
-										<button className="btn btn-gold" disabled={!fusable || locked} onClick={fuse}>Fuse</button>
-									</div>
+									{forgeTab === "reroll" ? <>
+										<p className="hr-hint">Click an item in your bag or equipment. Click its lines to keep them:
+											each kept line doubles the price. Special lines (✦) are always kept.</p>
+										{fa ? <div className="hr-forge-card hr-reroll-card">
+											<span className="hr-forge-glyph">{ABBR[fa.base_id] || "?"}</span>
+											<strong>{nameOf(fa)}</strong>
+											<Dots n={fa.slot_count} />
+											<ul className="hr-reroll-lines">
+												{(fa.enchants || []).map((e, i) => {
+													const special = isSpecial(e.id), on = kept.has(i);
+													return <li key={i}><button className={"hr-line" + (on ? " kept" : "") + (special ? " special" : "")}
+														disabled={special} aria-pressed={on}
+														onClick={() => setKeep((k) => (k.includes(i) ? k.filter((x) => x !== i) : [...k, i]))}>
+														<i aria-hidden="true">{special ? "✦" : on ? "🔒︎" : "○"}</i>{lineText(e)}</button></li>;
+												})}
+												{!fa.enchants?.length && <li className="hr-hint">No enchantment slots: nothing to reroll</li>}
+											</ul>
+											<button className="hr-forge-clear btn btn-ghost" onClick={() => forgePick(fa)}>Put it back</button>
+										</div> : <div className="hr-forge-card empty"><span className="hr-hint">Pick an item</span></div>}
+										<div className="hr-actions hr-forge-go">
+											<button className="btn btn-gold" disabled={!canReroll || locked} onClick={reroll}>
+												Reroll{fa ? ` · ${rerollCost} shards` : ""}</button>
+											<button className="btn btn-outline" disabled={!fa || locked} onClick={breakDown}>
+												{breaking ? `Click again: break it down for ${salvageValue}` : fa ? `Break down · +${salvageValue} shards` : "Break down"}</button>
+										</div>
+										{fa && shards < rerollCost && (fa.enchants || []).length > kept.size &&
+											<p className="hr-hint">You need {rerollCost - shards} more shards. Kills in a rift pay them, more with modifiers and deeper levels.</p>}
+									</> : <>
+										<p className="hr-hint">Click two of the same item, any tier. Both are used up; one comes back
+											with the higher tier, at least the fewer slots, and fresh lines.</p>
+										<div className="hr-forge">
+											<ForgeCard item={fa} label="First item" ap={stats?.ap || 0} onClear={fa ? () => forgePick(fa) : null} />
+											<span className="hr-plus" aria-hidden="true">+</span>
+											<ForgeCard item={fb} label="Second item" ap={stats?.ap || 0} onClear={fb ? () => forgePick(fb) : null} />
+											<span className="hr-plus" aria-hidden="true">=</span>
+											<div className={"hr-forge-card hr-forge-out" + (fusable ? " ready" : "")}>
+												{fusable ? <>
+													<span className="hr-forge-glyph">{ABBR[fa.base_id]}<b>?</b></span>
+													<strong>{nameOf({ ...fa, tier: Math.max(fa.tier, fb.tier) })}</strong>
+													<span className="hr-forge-slots">At least {Math.min(fa.slot_count, fb.slot_count)} slot{Math.min(fa.slot_count, fb.slot_count) === 1 ? "" : "s"}</span>
+													<ul className="hr-forge-odds">
+														{(view.odds?.fuse_slots?.[Math.min(fa.slot_count, fb.slot_count)] || []).map(([n, pr]) =>
+														<li key={n}>{n} slot{n === 1 ? "" : "s"}: {Math.round(pr * 1000) / 10}%</li>)}
+													</ul>
+													<span className="hr-hint">Every line rolled fresh</span>
+													{[fa, fb].some((x) => (x.enchants || []).some((e) => isSpecial(e.id))) &&
+														<span className="hr-warn">A special line (✦) will be lost</span>}
+												</> : <span className="hr-hint">{!fa || !fb ? "Pick two items" : "Not the same item"}</span>}
+											</div>
+										</div>
+										<div className="hr-actions hr-forge-go">
+											<button className="btn btn-gold" disabled={!fusable || locked} onClick={fuse}>Fuse</button>
+										</div>
+									</>}
 								</>}
 							</Overlay>)}
 
@@ -1230,7 +1311,7 @@ function TipCard({ it, bases, ap, lit = false, equipped = false, kicker = null, 
 				<ul className="hr-tip-lines hr-enchants" aria-label="Enchantment slots">
 					{[...Array(it.slot_count).keys()].map((i) => {
 						const e = ench[i];
-						return e ? <li key={i}><i aria-hidden="true">◆</i>+{enchantValue(e.id, e.q)} {ENCHANT_NAMES[e.id] || e.id}</li>
+						return e ? <li key={i} className={isSpecial(e.id) ? "special" : ""}><i aria-hidden="true">{isSpecial(e.id) ? "✦" : "◆"}</i>{lineText(e)}</li>
 							: <li key={i} className="empty"><i aria-hidden="true">◇</i>Empty slot</li>;
 					})}
 				</ul>)}
@@ -1240,25 +1321,12 @@ function TipCard({ it, bases, ap, lit = false, equipped = false, kicker = null, 
 	);
 }
 
-/* The forge's slot odds, as the store rolls them: each gain is tried in turn, the
- * first that lands wins, and nothing passes the cap. */
-function slotOdds(gains = [], have = 0, max = 4) {
-	let left = 1;
-	const out = new Map();
-	for (const [g, pr] of gains) {
-		const real = Math.min(max, have + g) - have;
-		if (real > 0) out.set(real, (out.get(real) || 0) + left * pr);
-		left *= 1 - pr;
-	}
-	return [...out].sort((a, b) => a[0] - b[0]).map(([g, pr]) => [g, Math.round(pr * 1000) / 10]);
-}
-
 function Dots({ n, of = n, lit = 0 }) {
 	return <span className="hr-forge-dots" aria-label={`${n} enchantment slot${n === 1 ? "" : "s"}`}>
 		{[...Array(Math.max(n, of)).keys()].map((i) => <i key={i} className={(i < n ? "on" : "") + (i >= n - lit && i < n ? " new" : "")} />)}</span>;
 }
 
-const enchantLine = (e) => `+${enchantValue(e.id, e.q)} ${ENCHANT_NAMES[e.id] || e.id}`;
+const enchantLine = lineText;
 
 /* One input on the forge: the item picked, or an empty socket. */
 function ForgeCard({ item, label, onClear }) {
@@ -1278,7 +1346,7 @@ function ForgeCard({ item, label, onClear }) {
  * of the same kind on either input. */
 function ForgeReveal({ forged, where, onAgain, onDone }) {
 	const { item, a, b } = forged;
-	const before = a.slot_count, after = item.slot_count, gained = after - before;
+	const before = Math.min(a.slot_count, b.slot_count), after = item.slot_count, gained = after - before;
 	const best = {};
 	for (const e of [...(a.enchants || []), ...(b.enchants || [])]) best[e.id] = Math.max(best[e.id] ?? -Infinity, enchantValue(e.id, e.q));
 	return (
@@ -1292,7 +1360,7 @@ function ForgeReveal({ forged, where, onAgain, onDone }) {
 				<Dots n={after} lit={Math.max(0, gained)} />
 				{gained > 0
 					? <p className="hr-reveal-gain">+{gained} enchantment slot{gained > 1 ? "s" : ""}! {before} → {after}</p>
-					: <p className="hr-hint">{after} slot{after === 1 ? "" : "s"}, as before</p>}
+					: <p className="hr-hint">{after} slot{after === 1 ? "" : "s"}: the fewer of the two</p>}
 				<ul className="hr-forge-ench hr-reveal-ench">
 					{sortedEnchants(item).map((e, i) => {
 						const v = enchantValue(e.id, e.q), was = best[e.id];
