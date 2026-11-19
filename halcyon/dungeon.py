@@ -14,7 +14,11 @@ Tiles (one character each, a row is a string):
   '#' wall / void   — blocks movement and projectiles
   'o' rock          — blocks movement and projectiles (cover)
   '~' water         — blocks movement, projectiles fly over it
+  'x' torn floor    — the Fracture's void: blocks movement, projectiles fly over it
   '.' floor
+A Fracture template may also mark CRACKS with '1', '2', '3': floor that opens into
+void on a cycle, one group per digit (design §14.4a). They are laid as floor and
+listed in the dungeon's `cracks`; the browser's fight opens and closes them.
 Template-only markers, replaced by floor when laid: 'E' enemy spawn, 'B' boss
 spawn, 'S' the player's start. Healing orbs are not placed: they DROP from
 enemies (owner's ask, 2026-11-18), about one a rift.
@@ -131,6 +135,95 @@ BOSS_ROOM = [
     "......................",
 ]
 
+# ── the Fracture (design §14.4a) ────────────────────────────────────────────
+# Same shape rules as above. Cracks never touch a doorway row's edge columns or a
+# spawn, and every room stays crossable with ANY one crack group open (tested).
+FRACTURE_COMBAT = [
+    [
+        "................",
+        "..E.....1....E..",
+        "....xx..1.......",
+        "....xx..1...oo..",
+        "........1.......",
+        "......E...2222..",
+        "..3333..........",
+        "..........xx....",
+        "...oo..E..xx..E.",
+        "................",
+        "................",
+    ],
+    [
+        "..................",
+        ".E..xx......xx..E.",
+        "....xx......xx....",
+        "......1....2......",
+        ".......1..2.......",
+        "....E....E....E...",
+        ".......2..1.......",
+        "......2....1......",
+        "....oo......oo....",
+        "....oo..E...oo....",
+        "..................",
+    ],
+    [
+        "................",
+        "...E........E...",
+        "..1111....2222..",
+        "................",
+        "....xx....xx....",
+        ".......E........",
+        "....xx....xx....",
+        "................",
+        "..3333....1111..",
+        "...E........E...",
+        "................",
+    ],
+    [
+        "....................",
+        "..E....xxxxxx....E..",
+        "....................",
+        "...111........222...",
+        "........oooo........",
+        ".....E........E.....",
+        "........oooo........",
+        "...333........111...",
+        "....................",
+        "..E....xxxxxx....E..",
+        "....................",
+    ],
+    [
+        "..............",
+        "..E....1....E.",
+        ".......1......",
+        "..xx...1..xx..",
+        "..xx......xx..",
+        "......E.......",
+        "..xx......xx..",
+        "..xx...2..xx..",
+        ".......2......",
+        "..E....2....E.",
+        "..............",
+    ],
+]
+
+FRACTURE_BOSS = [
+    "......................",
+    "......................",
+    "...oo.....1......oo...",
+    "...oo.....1......oo...",
+    "..........1...........",
+    "......................",
+    "..222...........333...",
+    "..........B...........",
+    "..333...........222...",
+    "......................",
+    "..........1...........",
+    "...oo.....1......oo...",
+    "...oo.....1......oo...",
+    "......................",
+    "......................",
+]
+
 CORRIDOR = 3
 # MODIFIERS PAY XP TOO (owner's ask, 2026-11-19: "it should increase it a bit"): each
 # modifier adds MOD_XP of the level's whole XP. Each enemy's share is rounded DOWN, and the
@@ -140,9 +233,23 @@ MOD_XP = 0.10
 # The Shallows (design §14.4): the gentlest dungeon. Four combat rooms.
 # `complete_xp` is the bonus for finishing it (design §10.1); each enemy's own XP
 # is content.ENEMY_XP, written onto the enemy here so the run keeps what it was worth.
-DUNGEONS = {"shallows": {"name": "The Shallows", "boss_name": "The Tidewarden", "combat_rooms": 4, "complete_xp": 30}}
-
 ENEMY_WEIGHTS = (("chaser", 40), ("shooter", 35), ("radial", 25))
+FRACTURE_WEIGHTS = (("shard", 35), ("splitter", 30), ("flicker", 35))
+# A Splitter breaks into this many Splinters (generated with it, so each is a real
+# enemy the server can credit; the fight keeps them out of play until it dies).
+SPLINTERS = 2
+
+# Each dungeon: its rooms, its enemies, its loot tables (content.QUALITY rows), and
+# what its boss is (`boss_kind`, read by the fight). `boss_xp` overrides the boss's
+# usual XP. The Fracture is design §14.4a.
+DUNGEONS = {
+    "shallows": {"name": "The Shallows", "boss_name": "The Tidewarden", "combat_rooms": 4, "complete_xp": 30,
+                 "combat": COMBAT, "boss_room": BOSS_ROOM, "weights": ENEMY_WEIGHTS,
+                 "quality": ("enemy", "boss"), "boss_kind": "tidewarden"},
+    "fracture": {"name": "The Fracture", "boss_name": "The Breach", "combat_rooms": 4, "complete_xp": 60,
+                 "boss_xp": 40, "combat": FRACTURE_COMBAT, "boss_room": FRACTURE_BOSS, "weights": FRACTURE_WEIGHTS,
+                 "quality": ("fracture_enemy", "fracture_boss"), "boss_kind": "breach"},
+}
 # A heal orb drops from an ordinary enemy at this chance: about one a rift (0-2 is
 # the usual spread). The boss never drops one — the fight is over.
 HEAL_CHANCE = 0.035
@@ -282,10 +389,10 @@ def generate(dungeon_id: str, seed: str | None = None, class_id: str = "ranger",
     pre = "" if level == 1 else f"L{level}-"
     spec = DUNGEONS[dungeon_id]
 
-    combat = rng.sample(COMBAT, spec["combat_rooms"] if level == 1 else DEEP_ROOMS)
+    combat = rng.sample(spec["combat"], spec["combat_rooms"] if level == 1 else DEEP_ROOMS)
     if boss_rush:
         combat = []
-    rooms = [("entrance", ENTRANCE)] + [("combat", t) for t in combat] + [("boss", BOSS_ROOM)]
+    rooms = [("entrance", ENTRANCE)] + [("combat", t) for t in combat] + [("boss", spec["boss_room"])]
     rooms = [(k, _mirror(t) if rng.random() < 0.5 else list(t)) for k, t in rooms]
 
     height = max(len(t) for _, t in rooms) + 2
@@ -293,13 +400,20 @@ def generate(dungeon_id: str, seed: str | None = None, class_id: str = "ranger",
     width = sum(len(t[0]) + 2 for _, t in rooms) + CORRIDOR * (len(rooms) - 1)
     grid = [["#"] * width for _ in range(height)]
 
-    enemies, pickups, room_spans = {}, [], []
+    enemies, pickups, room_spans, cracks = {}, [], [], {}
     start = boss = None
     x = 0
+    weights = spec["weights"]
+    worth = lambda etype: spec.get("boss_xp", C.ENEMY_XP["boss"]) if etype == "boss" else C.ENEMY_XP[etype]
 
-    def add(etype: str, n: int, gx: int, gy: int) -> str:
+    def add(etype: str, n: int, gx: int, gy: int, parent: str | None = None) -> str:
         eid = f"{pre}boss" if etype == "boss" else f"{pre}e{sum(1 for k in enemies if not k.endswith('boss')) + 1}"
-        enemies[eid] = {"type": etype, "room": n, "xp": int(C.ENEMY_XP[etype] * xp_mult + 1e-9), "x": gx + 0.5, "y": gy + 0.5}
+        enemies[eid] = {"type": etype, "room": n, "xp": int(worth(etype) * xp_mult + 1e-9), "x": gx + 0.5, "y": gy + 0.5}
+        if parent:
+            enemies[eid]["parent"] = parent
+        if etype == "splitter":
+            for _ in range(SPLINTERS):
+                add("splinter", n, gx, gy, parent=eid)
         return eid
 
     for n, (kind, t) in enumerate(rooms):
@@ -309,18 +423,20 @@ def generate(dungeon_id: str, seed: str | None = None, class_id: str = "ranger",
         for r, row in enumerate(t):
             for c, ch in enumerate(row):
                 gx, gy = x + 1 + c, top + 1 + r
-                grid[gy][gx] = ch if ch in "o~." else "."
+                grid[gy][gx] = ch if ch in "o~.x" else "."
+                if ch in "123":
+                    cracks.setdefault((n, int(ch) - 1), []).append([gx, gy])
                 if ch == "S":
                     start = {"x": gx + 0.5, "y": gy + 0.5}
                 elif ch in "EB":
                     spawns.append((c, r))
-                    eid = add("boss" if ch == "B" else _pick(rng, ENEMY_WEIGHTS), n, gx, gy)
+                    eid = add("boss" if ch == "B" else _pick(rng, weights), n, gx, gy)
                     if ch == "B":
                         boss = eid
         if swarm and kind in ("combat", "boss"):
             extra = SWARM_BOSS if kind == "boss" else -(-len(spawns) * SWARM_ROOM // 1)
             for c, r in _swarm_spots(swarm, t, spawns, int(extra)):
-                add(_pick(swarm, ENEMY_WEIGHTS), n, x + 1 + c, top + 1 + r)
+                add(_pick(swarm, weights), n, x + 1 + c, top + 1 + r)
         if n > 0:                                    # door in the left wall
             for dy in (-1, 0, 1):
                 grid[mid + dy][x] = "."
@@ -337,7 +453,7 @@ def generate(dungeon_id: str, seed: str | None = None, class_id: str = "ranger",
         n = _pick(rng, C.DROP_COUNT[e["type"]])               # how many items: one roll
         if not is_boss and rng.random() < HEAL_CHANCE:           # a heal orb, dropped where it falls
             pickups.append({"id": f"{pre}h{len(pickups) + 1}", "kind": "heal", "enemy": eid})
-        quality = C.quality_table("boss" if is_boss else "enemy", rarity)
+        quality = C.quality_table(spec["quality"][1] if is_boss else spec["quality"][0], rarity)
         dropped: set[str] = set()
         for _ in range(min(n, BAG_MAX)):
             q = _pick(rng, quality)                          # what each is: one roll
@@ -354,14 +470,17 @@ def generate(dungeon_id: str, seed: str | None = None, class_id: str = "ranger",
                     drops[f"{pre}d{n_drop}"] = {"base_id": key, "tier": 1, "slot_count": 0, "enchants": [],
                                                "enemy": eid}
 
-    base = spec["complete_xp"] + sum(C.ENEMY_XP[e["type"]] for e in enemies.values())
+    base = spec["complete_xp"] + sum(worth(e["type"]) for e in enemies.values())
     complete_xp = round(base * xp_mult) - sum(e["xp"] for e in enemies.values())
     return {"id": dungeon_id, "name": spec["name"], "boss_name": spec["boss_name"], "seed": seed, "width": width, "height": height,
             "tiles": ["".join(r) for r in grid], "start": start, "rooms": room_spans, "door_y": mid,
             "enemies": enemies, "boss": boss, "drops": drops, "pickups": pickups,
             "complete_xp": complete_xp, "class_id": class_id,
             "mods": mods, "scale": mod_scale(mods, level), "level": level,
-            "offers": offers_for(dungeon_id, seed, mods, level), "boss_rush": bool(boss_rush)}
+            "offers": offers_for(dungeon_id, seed, mods, level), "boss_rush": bool(boss_rush),
+            "boss_kind": spec["boss_kind"],
+            # Cracks (design §14.4a), one entry per room and group, in a fixed order.
+            "cracks": [{"room": n, "group": g, "tiles": t} for (n, g), t in sorted(cracks.items())]}
 
 
 def walkable(d: dict, x: int, y: int) -> bool:

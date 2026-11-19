@@ -35,8 +35,8 @@ const MAP = [
 	"######################",
 ];
 
-/* The realms a portal can lead to. Only the Shallows exists yet (design §14.4). */
-export const REALMS = [{ id: "shallows", name: "The Shallows" }];
+/* The realms a portal can lead to, gentlest first (design §14.4, §14.4a). */
+export const REALMS = [{ id: "shallows", name: "The Shallows" }, { id: "fracture", name: "The Fracture" }];
 
 /* Places to use. `hw`/`hh` are a solid station's half-size; a portal is walked
  * onto, so it is not solid. `reach` is how close counts as "at" it. */

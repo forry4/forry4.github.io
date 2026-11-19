@@ -687,6 +687,9 @@ def _apply_one(cur, run: dict, dungeon: dict, state: dict, ev: dict, now: float)
         e = str(ev.get("enemy"))
         if e not in dungeon["enemies"] or e in state["killed"]:
             raise _Refused
+        parent = dungeon["enemies"][e].get("parent")
+        if parent is not None and parent not in state["killed"]:
+            raise _Refused                           # a Splinter is only out once its Splitter fell
         state["killed"].append(e)
         if not practice:
             _credit_xp(cur, char_id, dungeon["enemies"][e].get("xp", 0))

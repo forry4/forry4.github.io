@@ -100,7 +100,9 @@ ENCHANTS: dict[str, dict] = {
 # run earned (owner's call, 2026-11-18). The SERVER credits it, from the XP it
 # wrote into the dungeon it generated — a request never names an amount.
 MAX_LEVEL = 20
-ENEMY_XP = {"chaser": 4, "shooter": 5, "radial": 6, "boss": 20}
+ENEMY_XP = {"chaser": 4, "shooter": 5, "radial": 6, "boss": 20,
+            # the Fracture's (design §14.4a): tougher, and worth more
+            "shard": 8, "splitter": 9, "splinter": 3, "flicker": 9}
 
 
 def _level_table() -> tuple[int, ...]:
@@ -170,6 +172,10 @@ DROP_COUNT: dict[str, tuple] = {
     "shooter": ((0, 70), (1, 30)),
     "radial":  ((0, 65), (1, 35)),
     "boss":    ((1, 60), (2, 30), (3, 10)),
+    "shard":    ((0, 62), (1, 38)),
+    "splitter": ((0, 62), (1, 38)),
+    "splinter": ((0, 92), (1, 8)),
+    "flicker":  ((0, 62), (1, 38)),
 }
 # (result, weight, + weight per RARITY point). Rarity (one point a rift modifier)
 # only ADDS weight to the better rows, so it shifts the odds up without touching
@@ -177,6 +183,10 @@ DROP_COUNT: dict[str, tuple] = {
 QUALITY: dict[str, tuple] = {
     "enemy": (("t1", 70, 0), ("t2", 25, 5), ("t3", 5, 3)),
     "boss":  (("t1", 40, 0), ("t2", 35, 0), ("t3", 15, 5), ("t4", 2, 3), ("unique", 8, 0)),
+    # The Fracture (design §14.4a): enemies start at tier 2, its boss at tier 3, and
+    # tier 5 is possible. The same rarity rules: modifiers only add to the better rows.
+    "fracture_enemy": (("t2", 60, 0), ("t3", 32, 5), ("t4", 8, 3)),
+    "fracture_boss":  (("t3", 45, 0), ("t4", 32, 5), ("t5", 15, 3), ("unique", 8, 0)),
 }
 # THE BOSS'S UNIQUE CHANCE RISES 15% (of itself) PER MODIFIER, so 45% with all three
 # (owner's call, 2026-11-18). A flat weight per point cannot do that — the other rows
@@ -192,11 +202,11 @@ def _boss_unique_chance(table) -> float:
     return 1 - sum(pc * (1 - u) ** n for n, pc in chances(DROP_COUNT["boss"]).items())
 
 
-def _unique_weight(rarity: int) -> float:
+def _unique_weight(rarity: int, source: str = "boss") -> float:
     """The unique row's weight that puts the boss's unique chance at
     base x (1 + UNIQUE_PER_MODIFIER x rarity), with the other rows as they are."""
-    rows = [(r, w + per * rarity) for r, w, per in QUALITY["boss"] if r != "unique"]
-    base = _boss_unique_chance(tuple((r, w) for r, w, _ in QUALITY["boss"]))
+    rows = [(r, w + per * rarity) for r, w, per in QUALITY[source] if r != "unique"]
+    base = _boss_unique_chance(tuple((r, w) for r, w, _ in QUALITY[source]))
     want = base * (1 + UNIQUE_PER_MODIFIER * rarity)
     lo, hi = 0.0, 1000.0
     for _ in range(60):                     # bisection: the chance only grows with the weight
@@ -208,8 +218,8 @@ def _unique_weight(rarity: int) -> float:
 def quality_table(source: str, rarity: int = 0) -> tuple:
     """The (result, weight) table a drop of this source rolls on, at this rarity."""
     rows = tuple((r, w + per * rarity) for r, w, per in QUALITY[source])
-    if source == "boss" and rarity:
-        rows = tuple((r, _unique_weight(rarity) if r == "unique" else w) for r, w in rows)
+    if rarity and any(r == "unique" for r, _ in rows):
+        rows = tuple((r, _unique_weight(rarity, source) if r == "unique" else w) for r, w in rows)
     return rows
 
 
@@ -219,14 +229,22 @@ def chances(table) -> dict:
     return {r: w / total for r, w in table}
 
 
-def loot_odds(rarity: int) -> dict:
-    """What the rift panel shows, worked out from the tables above (never typed twice)."""
-    boss_q, enemy_q = chances(quality_table("boss", rarity)), chances(quality_table("enemy", rarity))
+def _at_least(q: dict, tier: int) -> float:
+    return sum(p for r, p in q.items() if r.startswith("t") and int(r[1:]) >= tier)
+
+
+def loot_odds(rarity: int, enemy: str = "enemy", boss: str = "boss") -> dict:
+    """What the rift panel shows, worked out from the tables above (never typed twice).
+    `enemy_hi` / `boss_hi` are the chances of a tier at least `*_hi_tier` — one above
+    the table's lowest tier for enemies, two above for the boss."""
+    boss_q, enemy_q = chances(quality_table(boss, rarity)), chances(quality_table(enemy, rarity))
+    low = lambda q: min(int(r[1:]) for r in q if r.startswith("t"))
+    e_hi, b_hi = low(enemy_q) + 1, low(boss_q) + 2
     counts = chances(DROP_COUNT["boss"])
-    unique = _boss_unique_chance(quality_table("boss", rarity))
-    return {"enemy_t2_plus": enemy_q["t2"] + enemy_q["t3"],
-            "boss_t3_plus": boss_q["t3"] + boss_q["t4"],
-            "boss_unique": unique,
+    return {"enemy_t2_plus": _at_least(enemy_q, 2), "boss_t3_plus": _at_least(boss_q, 3),
+            "enemy_hi_tier": e_hi, "enemy_hi": _at_least(enemy_q, e_hi),
+            "boss_hi_tier": b_hi, "boss_hi": _at_least(boss_q, b_hi),
+            "boss_unique": _boss_unique_chance(quality_table(boss, rarity)),
             "boss_items": sum(n * pc for n, pc in counts.items())}
 
 def base(base_id: str) -> dict:

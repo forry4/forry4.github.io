@@ -863,6 +863,21 @@ DECIDED:
 RECOMMENDED naming convention: name dungeons by **how deep into the Rift they go** — the Shallows first, the deepest at the end (for example: Shallows, Fissure, Chasm, the Deep). That gives the title its meaning, and it tells a player how dangerous a dungeon is before they enter, without a progression gate (§3.1, player agency). Not every dungeon has to fit the ladder, but the easiest and hardest ones should.
 - Detailed room, enemy, boss, and loot design remains open.
 
+### 14.4a The Fracture — DECIDED (2026-11-19, owner's pick)
+
+The second dungeon, one rung deeper than the Shallows: the place where the Rift is **breaking apart**. Its idea is that nothing stays where it is — floor tears away, enemies split and blink, the boss moves. It is where tier 3–5 gear comes from.
+
+- **Look**: dark violet stone over a black void; torn-away patches of floor that never close; glowing seams that crack open.
+- **Torn floor (void)**: blocks walking; shots fly over it, as over the Shallows' water.
+- **Cracks**: authored lines of floor in each room that OPEN on a cycle — a second of flickering warning on the seam, then a few seconds as void, then closed again. Three groups per room, out of step, so a room is never the same shape twice in a fight. A crack that opens under the player throws them to the nearest solid ground and hurts. Shots ignore cracks. Doors and spawns are never on a crack, and the way through a room never depends on one being closed.
+- **Enemies**:
+  - **Shard** — drifts at mid range and fires a four-way cross, turning 45° each time.
+  - **Splitter** — keeps its distance and fires an aimed pair; when it dies it breaks into two **Splinters**, small and fast, which spit short shots. The room is not clear until they fall.
+  - **Flicker** — blinks to a new spot (marked a beat before it lands), then fires a ring.
+- **Boss: the Breach.** Phase 1 turns four-armed spokes of shots and fires aimed tears (a fast line of shots). Phase 2 (half health) makes its room's cracks open twice as fast and BLINKS between four anchors, firing a ring each time it lands. It lobs the mortar at a player who hides, as every boss does.
+- **Harder and richer than the Shallows**: more health and XP per enemy, a bigger clear bonus, and loot that starts at tier 2 from enemies and tier 3 from the boss, with tier 5 possible. Uniques, keys and modifiers work as in the Shallows. No level gate: the portal is open to every character.
+- LATER: a third boss phase that leaves only islands; Fracture-only uniques.
+
 ### 14.5 Rift timers and personal times
 
 DECIDED for the first slice:

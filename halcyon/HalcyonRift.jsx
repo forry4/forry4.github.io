@@ -914,8 +914,8 @@ export default function HalcyonRift({ authUser, onExit }) {
 									</div>
 									{deeper.mods.length > 0 && <p className="hr-hint">This run: {deeper.mods.map((m) => names[m]?.name || m).join(", ")}</p>}
 									<dl className="hr-mod-sum">
-										<div><dt>Enemy drop T2+</dt><dd>{pct(lo.enemy_t2_plus)}</dd></div>
-										<div><dt>Boss drop T3+</dt><dd>{pct(lo.boss_t3_plus)}</dd></div>
+										<div><dt>Enemy drop T{lo.enemy_hi_tier ?? 2}+</dt><dd>{pct(lo.enemy_hi ?? lo.enemy_t2_plus)}</dd></div>
+										<div><dt>Boss drop T{lo.boss_hi_tier ?? 3}+</dt><dd>{pct(lo.boss_hi ?? lo.boss_t3_plus)}</dd></div>
 										<div><dt>Boss unique</dt><dd>{pct(lo.boss_unique)}</dd></div>
 									</dl>
 									{descending && <p className="hr-hint" role="status">Descending…</p>}
@@ -992,7 +992,8 @@ export default function HalcyonRift({ authUser, onExit }) {
 
 						{panel?.startsWith?.("realm:") && !run && (() => {
 							const realm = panel.slice(6), d = (view.dungeons || []).find((x) => x.id === realm);
-							const r = mods.filter((m) => m !== BOSS_RUSH).length, lo = view.odds?.loot?.[Math.min(r, (view.odds?.loot?.length || 1) - 1)] || {};
+							const table = d?.loot || view.odds?.loot || [];
+							const r = mods.filter((m) => m !== BOSS_RUSH).length, lo = table[Math.min(r, (table.length || 1) - 1)] || {};
 							const pct = (x) => `${Math.round((x || 0) * 100)}%`;
 							return (
 								<Overlay title={d?.name || "Rift"} onClose={() => setPanel(null)} className="hr-rift-panel">
@@ -1272,9 +1273,11 @@ const keyRows = () => [
 ];
 /* What dealt the killing blow, in words: the sim tags every enemy shot (and a
  * chaser's charge) with "<enemy>:<attack>" and keeps the last hit that landed. */
-const ENEMY_NAMES = { chaser: "a Chaser", shooter: "a Shooter", radial: "a Radial", boss: "the boss" };
+const ENEMY_NAMES = { chaser: "a Chaser", shooter: "a Shooter", radial: "a Radial", boss: "the boss",
+	shard: "a Shard", splitter: "a Splitter", splinter: "a Splinter", flicker: "a Flicker", rift: "the Rift" };
 const ATTACK_NAMES = { touch: "charge", spit: "spit", bolt: "bolt", ring: "ring of shots", spiral: "spiral",
-	fan: "fan of shots", nova: "nova", burst: "dying burst", mortar: "mortar", fire: "burning ground" };
+	fan: "fan of shots", nova: "nova", burst: "dying burst", mortar: "mortar", fire: "burning ground",
+	cross: "cross of shots", pair: "pair of shots", spokes: "spokes", tear: "tear", blink: "ring", crack: "opening crack" };
 function causeOf(hit) {
 	if (!hit || !hit.src) return "Fell in the rift";
 	const [who, how] = hit.src.split(":");

@@ -19,6 +19,9 @@ export const COLORS = {
 	water: "#5f8f93", waterLight: "#6d9ea1", rock: "#7b7a70", rockTop: "#918f84",
 	player: "#7fe3f0", playerCore: "#f4fdff", playerShot: "#c9f6ff",
 	chaser: "#e8573f", shooter: "#ef8a3a", radial: "#c8458f", boss: "#d63a5a",
+	// the Fracture's (design §14.4a): violet stone over a black void
+	shard: "#7fd4ff", splitter: "#ff7a59", splinter: "#ffb199", flicker: "#e16bff", breach: "#9b6bff",
+	void: "#0d0a14", voidSpeck: "#3a2a5c", seam: "rgba(185,150,255,.35)", seamHot: "#e7d8ff",
 	enemyShot: "#ff5a4a", enemyShotHeavy: "#ff3d8b", tele: "rgba(255,90,74,.55)",
 	heal: "#6fd36a", bag: "#e9c25a", portal: "#9fe7ff", dream: "#b9a7ff", deeper: "#ff9f5a",
 	veil: "rgba(214,58,90,.22)", veilEdge: "rgba(255,138,150,.55)", bars: "#2a2f2d", barsLit: "#d63a5a", ward: "#cfe3ff",
@@ -31,6 +34,8 @@ export const COLORS = {
 };
 
 const SHALLOWS = { floorA: COLORS.sand, floorB: COLORS.sandDark, wall: COLORS.wall, wallTop: COLORS.wallTop };
+const FRACTURE = { floorA: "#3d3550", floorB: "#39324b", wall: "#17131f", wallTop: "#2a2338" };
+const PALETTES = { shallows: SHALLOWS, fracture: FRACTURE };
 const TOWN = { floorA: COLORS.stone, floorB: COLORS.stoneDark, wall: COLORS.townWall, wallTop: COLORS.townWallTop };
 
 export function formatRiftTime(ticks) {
@@ -57,6 +62,9 @@ function drawMap(g, st, ox, oy, px, width, height, pal = SHALLOWS) {
 				g.fillStyle = pal.wall; g.fillRect(X, Y, P, P);
 				// A lit top edge where a wall meets floor below it: light comes from above.
 				if (below && below[x] !== "#") { g.fillStyle = pal.wallTop; g.fillRect(X, Y + px * 0.72, P, px * 0.28 + 1); }
+			} else if (t === "x") {                       // torn floor: the void under the Rift
+				g.fillStyle = COLORS.void; g.fillRect(X, Y, P, P);
+				if ((x * 7 + y * 13) % 5 === 0) { g.fillStyle = COLORS.voidSpeck; g.fillRect(X + px * 0.3, Y + px * 0.55, px * 0.08, px * 0.08); }
 			} else if (t === "~") {
 				g.fillStyle = COLORS.water; g.fillRect(X, Y, P, P);
 				g.fillStyle = COLORS.waterLight; g.fillRect(X + px * 0.15, Y + px * 0.3, px * 0.4, px * 0.08);
@@ -66,6 +74,28 @@ function drawMap(g, st, ox, oy, px, width, height, pal = SHALLOWS) {
 					g.fillStyle = COLORS.rock; g.fillRect(X + px * 0.06, Y + px * 0.12, px * 0.88, px * 0.84);
 					g.fillStyle = COLORS.rockTop; g.fillRect(X + px * 0.06, Y + px * 0.12, px * 0.88, px * 0.22);
 				}
+			}
+		}
+	}
+}
+
+/* CRACKS (sim.js): a faint seam while closed, a bright flickering one in the second
+ * before it opens, and the void while open. */
+function drawCracks(g, st, ox, oy, px, calm) {
+	if (!st.cracks?.length) return;
+	const P = Math.ceil(px) + 1;
+	for (const c of st.cracks) {
+		for (const [x, y] of c.tiles) {
+			const X = Math.floor(ox + x * px), Y = Math.floor(oy + y * px);
+			if (c.open) {
+				g.fillStyle = COLORS.void; g.fillRect(X, Y, P, P);
+				g.fillStyle = "rgba(155,107,255,.35)"; g.fillRect(X, Y, P, Math.max(1, px * 0.08));
+			} else if (c.warn) {
+				const on = calm || st.tick % 8 < 5;
+				g.fillStyle = on ? "rgba(231,216,255,.55)" : "rgba(185,150,255,.3)"; g.fillRect(X, Y, P, P);
+				g.fillStyle = COLORS.seamHot; g.fillRect(X + px * 0.15, Y + px * 0.45, px * 0.7, Math.max(1.5, px * 0.1));
+			} else {
+				g.fillStyle = COLORS.seam; g.fillRect(X + px * 0.2, Y + px * 0.47, px * 0.6, Math.max(1, px * 0.06));
 			}
 		}
 	}
@@ -120,7 +150,8 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here, bag
 	const sx = (x) => ox + x * px, sy = (y) => oy + y * px;
 
 	g.fillStyle = "#1b2220"; g.fillRect(0, 0, width, height);
-	drawMap(g, st, ox, oy, px, width, height);
+	drawMap(g, st, ox, oy, px, width, height, PALETTES[st.dungeonId] || SHALLOWS);
+	drawCracks(g, st, ox, oy, px, calm);
 	drawDoors(g, st, ox, oy, px);
 	drawHazards(g, st, sx, sy, px);
 	drawAbilityFx(g, st, sx, sy, px, pp);
@@ -163,12 +194,18 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here, bag
 	}
 
 	for (const e of st.enemies) {
-		if (e.hp <= 0) continue;
+		if (e.hp <= 0 || e.dormant) continue;
 		const ep = at(e), X = sx(ep.x), Y = sy(ep.y), r = e.r * px;
 		// Telegraphs: what is about to fire says so, and says where.
 		if (e.tele > 0 && e.active) {
 			g.strokeStyle = COLORS.tele; g.lineWidth = Math.max(1, px * 0.05);
-			if (e.type === "shooter") {
+			if (e.toX || e.toY) {                         // a blink: where it will land
+				const k = 1 - e.tele / 40;
+				g.strokeStyle = COLORS[e.form || e.type] || COLORS.tele;
+				g.setLineDash?.([px * 0.18, px * 0.14]);
+				g.beginPath(); g.arc(sx(e.toX), sy(e.toY), r * (1.4 - 0.4 * Math.min(1, k)), 0, Math.PI * 2); g.stroke();
+				g.setLineDash?.([]);
+			} else if (e.type === "shooter" || e.type === "splitter") {
 				g.beginPath(); g.moveTo(X, Y); g.lineTo(sx(pp.x), sy(pp.y)); g.stroke();
 			} else {
 				const grow = e.type === "boss" && e.phase === 0 ? 1.6 : 1 + (1 - e.tele / 50) * 0.8;
@@ -176,13 +213,32 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here, bag
 			}
 		}
 		// Reduced flashing (a setting): a hit tints, and the boss's turn holds still.
-		const col = e.flash > 0 ? (calm ? "#f3b9a8" : "#fff3ea") : COLORS[e.type];
+		const col = e.flash > 0 ? (calm ? "#f3b9a8" : "#fff3ea") : COLORS[e.form === "breach" ? "breach" : e.type];
 		if (e.type === "chaser") {
 			g.save(); g.translate(X, Y); g.rotate(Math.PI / 4); g.fillStyle = col; g.fillRect(-r * 0.8, -r * 0.8, r * 1.6, r * 1.6); g.restore();
 		} else if (e.type === "shooter") {
 			g.beginPath(); g.moveTo(X, Y - r); g.lineTo(X + r, Y + r * 0.8); g.lineTo(X - r, Y + r * 0.8); g.closePath(); g.fillStyle = col; g.fill();
 		} else if (e.type === "radial") {
 			circle(g, X, Y, r, col); circle(g, X, Y, r * 0.45, "#5c1b3f");
+		} else if (e.type === "shard") {                    // a crystal: a diamond with a cross
+			g.beginPath(); g.moveTo(X, Y - r * 1.2); g.lineTo(X + r, Y); g.lineTo(X, Y + r * 1.2); g.lineTo(X - r, Y); g.closePath();
+			g.fillStyle = col; g.fill();
+			g.fillStyle = "#1d3a4a"; g.fillRect(X - r * 0.12, Y - r * 0.6, r * 0.24, r * 1.2); g.fillRect(X - r * 0.6, Y - r * 0.12, r * 1.2, r * 0.24);
+		} else if (e.type === "splitter" || e.type === "splinter") {   // a split hexagon
+			g.beginPath();
+			for (let k = 0; k < 6; k++) { const a = Math.PI / 6 + k * Math.PI / 3; g[k ? "lineTo" : "moveTo"](X + Math.cos(a) * r, Y + Math.sin(a) * r); }
+			g.closePath(); g.fillStyle = col; g.fill();
+			if (e.type === "splitter") { g.fillStyle = "#3a160d"; g.fillRect(X - r * 0.08, Y - r, r * 0.16, r * 2); }
+		} else if (e.type === "flicker") {                  // a ring that is not all there
+			g.strokeStyle = col; g.lineWidth = Math.max(2, r * 0.45);
+			g.beginPath(); g.arc(X, Y, r * 0.75, 0.3, Math.PI * 2 - 0.3); g.stroke();
+			circle(g, X, Y, r * 0.25, col);
+		} else if (e.form === "breach") {                   // the Breach: a torn violet star
+			const n = 8, spin = st.tick * 0.02;
+			g.beginPath();
+			for (let k = 0; k < n * 2; k++) { const a = spin + k * Math.PI / n, rr = k % 2 ? r * 0.55 : r * 1.05; g[k ? "lineTo" : "moveTo"](X + Math.cos(a) * rr, Y + Math.sin(a) * rr); }
+			g.closePath(); g.fillStyle = e.phase === 0 && !calm && st.tick % 10 < 5 ? "#fff3ea" : col; g.fill();
+			circle(g, X, Y, r * 0.38, COLORS.void);
 		} else {
 			circle(g, X, Y, r, e.phase === 0 && !calm && st.tick % 10 < 5 ? "#fff3ea" : col);
 			circle(g, X, Y, r * 0.55, "#5a1424");

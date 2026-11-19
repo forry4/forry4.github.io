@@ -167,7 +167,10 @@ def setup_halcyon(app, get_db_conn, get_user_by_session, token_resolver=None) ->
     def halcyon_state(who: str = Depends(owner)):
         upkeep()
         view = S.owner_view(connect, who)
-        return {**view, "dungeons": [{"id": k, "name": v["name"]} for k, v in D.DUNGEONS.items()],
+        return {**view, "dungeons": [{"id": k, "name": v["name"], "boss_name": v["boss_name"],
+                                  # this rift's loot odds at 0..N modifiers (its own tables)
+                                  "loot": [C.loot_odds(r, *v["quality"]) for r in range(len(C.RIFT_MODS) + 1)]}
+                                 for k, v in D.DUNGEONS.items()],
                 "limits": {"vault": C.VAULT_SIZE, "inventory": C.INVENTORY_SIZE,
                            "characters": C.CHARACTER_SLOTS, "equip": list(C.EQUIP_SLOTS)},
                 "classes": [{"id": k, "name": C.CLASS_NAMES[k], "description": C.CLASS_DESCRIPTIONS[k]}

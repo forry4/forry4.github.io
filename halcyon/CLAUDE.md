@@ -521,3 +521,39 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
   (`whyNot`) instead of "does not go there".
 - **No "Right-click to lock" on the death screen or graveyard**: the hint follows whether
   the slot can lock (`tip.canLock`).
+
+## The Fracture — the second rift (2026-11-19, owner's pick; design §14.4a)
+- **A dungeon is a SPEC in `dungeon.DUNGEONS`**: its room templates (`combat`,
+  `boss_room`), enemy `weights`, `quality` (the enemy and boss loot-table names in
+  `content.QUALITY`), `boss_kind`, `boss_xp` and names. A new rift is a spec plus its
+  enemies in `sim.js`/`render.js` and a palette in `render.PALETTES`, keyed by
+  `st.dungeonId`. The town's portals are `town.REALMS`.
+- **Torn floor**: `x` in a template is void. It blocks walking (`walkSolid`) but not
+  shots (`shotSolid`), so it is cover from bodies, not from bullets.
+- **Cracks**: digits `1`/`2`/`3` in a template are crack tiles, grouped, and the generator
+  lists them as `cracks: [{room, group, tiles}]`. They cycle on `sim.CRACK` (warn, open,
+  close; groups staggered) ONLY while their room is sealed. An open crack reads `x`
+  from `tileAt`. Opening under the player throws them to the nearest clear spot and
+  hurts (`rift:crack`); an enemy is moved clear without harm. A template must stay
+  crossable with any one group open (`test_dungeon.py`), and no spawn or doorway may
+  sit on a crack.
+- **Enemies**: Shard (a turning cross), Splitter (an aimed pair, then splits), Splinter
+  (a small fast spitter), Flicker (marks a spot, blinks there, fires a ring of eight).
+  A marked destination lives in `e.toX/toY`, NEVER `aimX/aimY` (the Tidewarden's fan
+  telegraph reads those). The Flicker picks no spot on a crack, and if a crack opens
+  where it is about to land it lands on the nearest clear ground.
+- **Splinters are pre-rolled**: each Splitter has two enemies with `parent` set. They
+  start `dormant` (out of play, not drawn, not sealing), the parent's kill releases them
+  at its body, and the room stays sealed until they fall. The store REFUSES a splinter
+  kill before its parent's, so no client can credit one early.
+- **The Breach** keeps `type: "boss"`; `e.form = dungeon.boss_kind` picks its step
+  (`breachStep`) and its HP (`sim.BOSS_HP`). Phase 1 fires turning spokes and tears; at
+  half health its cracks run at double speed (`st.fastRoom`) and it blinks between four
+  anchors around its home. It lobs the mortar like every boss.
+- **Harder, with better loot**: `fracture_enemy` drops T2–T4, `fracture_boss` T3–T5 plus
+  the unique (`quality_table` solves the unique weight for any table with a unique row).
+  `/halcyon/state` gives each dungeon its own `loot` odds per modifier count, and the
+  rift panel reads `enemy_hi_tier`/`boss_hi_tier` off them ("T2+", "T3+").
+- Fixtures: `halcyon-dungeon-fracture-a.json` (seed `fracture-a`) beside the Shallows'
+  pair, held to the generator by `test_sim_fixtures.py`. The rules are
+  `webapp/test/unit/halcyonFracture.test.mjs`.

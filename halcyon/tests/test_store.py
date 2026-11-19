@@ -963,3 +963,17 @@ def test_the_town_ground_refuses_what_it_should(db, me):
     S.start_run(db, ME, me["char_id"], "shallows", "s", _dungeon())
     with pytest.raises(S.HalcyonError, match="dungeon"):
         S.move_item(db, ME, vest["item_id"], ("floor", me["char_id"]))
+
+
+
+def test_a_splinter_is_credited_only_after_its_splitter(db, me):
+    from halcyon import dungeon as D
+    d = D.generate("fracture", "split-store")
+    splitter = next(k for k, e in d["enemies"].items() if e["type"] == "splitter")
+    kid = next(k for k, e in d["enemies"].items() if e.get("parent") == splitter)
+    run = S.start_run(db, ME, me["char_id"], "fracture", d["seed"], d)
+    out = S.apply_events(db, ME, run["run_id"], _seq(
+        {"type": "kill", "enemy": kid},                  # its Splitter is still standing
+        {"type": "kill", "enemy": splitter},
+        {"type": "kill", "enemy": kid}))
+    assert out["refused"] == [1]

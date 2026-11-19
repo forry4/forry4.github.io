@@ -127,13 +127,13 @@ def test_uniques_drop_only_from_the_boss():
     assert seen_boss_unique
 
 
-def _loot_sample(n, mods=(), cls="ranger"):
+def _loot_sample(n, mods=(), cls="ranger", dungeon="shallows"):
     """Per source: how many items each enemy dropped, and each item's quality."""
     counts = {t: [] for t in C.DROP_COUNT}
     quality = {"enemy": [], "boss": []}
     slots = []
     for i in range(n):
-        d = D.generate("shallows", f"loot-{i}-{len(mods)}", cls, mods=list(mods))
+        d = D.generate(dungeon, f"loot-{i}-{len(mods)}", cls, mods=list(mods))
         per = {}
         for dr in d["drops"].values():
             if C.base(dr["base_id"])["kind"] == "key":
@@ -158,13 +158,15 @@ def _close(seen: list, want: dict):
 def test_drops_come_at_the_rates_the_tables_say():
     """One weighted roll per outcome, never a cascade of checks: a row's real rate
     is exactly weight / total (a cascade under-delivers the middle rows)."""
-    for mods in ((), ("fortified", "brutal", "swift")):
-        counts, quality, slots = _loot_sample(1500, mods)
-        for etype, table in C.DROP_COUNT.items():
-            _close(counts[etype], C.chances(table))
-        for src in ("enemy", "boss"):
-            _close(quality[src], C.chances(C.quality_table(src, len(mods))))
-        _close(slots, C.chances(D.SLOT_ODDS))
+    for dungeon, spec in D.DUNGEONS.items():
+        for mods in ((), ("fortified", "brutal", "swift")):
+            counts, quality, slots = _loot_sample(1500 if dungeon == "shallows" else 600, mods, dungeon=dungeon)
+            for etype, table in C.DROP_COUNT.items():
+                if counts[etype]:                        # each rift has its own enemies
+                    _close(counts[etype], C.chances(table))
+            for src, table in zip(("enemy", "boss"), spec["quality"]):
+                _close(quality[src], C.chances(C.quality_table(table, len(mods))))
+            _close(slots, C.chances(D.SLOT_ODDS))
 
 
 def test_slot_odds_are_the_owners_cumulative_table():
@@ -300,3 +302,49 @@ def test_each_modifier_adds_a_tenth_of_the_levels_xp():
         got, d = total(mods)
         assert got == round(base * (1 + D.MOD_XP * len(mods))), (mods, got, base)
         assert d["complete_xp"] >= plain["complete_xp"], "the clear bonus never shrinks"
+
+
+# ── the Fracture (design §14.4a) ─────────────────────────────────────────────
+def test_the_fracture_is_crossable_with_any_crack_group_open():
+    """Doors and spawns are never on a crack, and the way through never depends on
+    one being closed: open each group in turn and the boss's room is still reached."""
+    for i in range(60):
+        d = D.generate("fracture", f"cross-{i}", mods=["swarming"] if i % 3 == 0 else [])
+        assert d["cracks"], "the Fracture has cracks"
+        spawns = {(int(e["x"]), int(e["y"])) for e in d["enemies"].values()}
+        mid = d["door_y"]
+        for c in d["cracks"]:
+            for x, y in c["tiles"]:
+                assert (x, y) not in spawns, ("a spawn on a crack", x, y)
+                assert not (abs(y - mid) <= 1 and any(x in (r["x0"], r["x1"] - 1) for r in d["rooms"])), ("a doorway crack", x, y)
+        boss = d["enemies"][d["boss"]]
+        for g in range(3):
+            shut = {(x, y) for c in d["cracks"] if c["group"] == g for x, y in c["tiles"]}
+            tiles = ["".join("x" if (x, y) in shut else ch for x, ch in enumerate(row)) for y, row in enumerate(d["tiles"])]
+            seen = D.reachable({**d, "tiles": tiles})
+            assert (int(boss["x"]) + 2, int(boss["y"])) in seen or (int(boss["x"]), int(boss["y"])) in seen, (i, g)
+            for e in d["enemies"].values():
+                if e["type"] != "boss":
+                    assert (int(e["x"]), int(e["y"])) in seen, ("an enemy cut off", i, g, e)
+
+
+def test_every_splitter_has_its_splinters_and_the_fracture_pays_more():
+    d = D.generate("fracture", "split")
+    kids = [e for e in d["enemies"].values() if e["type"] == "splinter"]
+    splitters = [k for k, e in d["enemies"].items() if e["type"] == "splitter"]
+    assert len(kids) == D.SPLINTERS * len(splitters) and splitters
+    assert all(k["parent"] in splitters for k in kids)
+    assert d["boss_kind"] == "breach" and d["enemies"][d["boss"]]["xp"] == D.DUNGEONS["fracture"]["boss_xp"]
+    s = D.generate("shallows", "split")
+    total = lambda x: x["complete_xp"] + sum(e["xp"] for e in x["enemies"].values())
+    assert total(d) > 1.5 * total(s)
+
+
+def test_fracture_loot_starts_at_tier_two_and_its_boss_at_three():
+    for i in range(200):
+        d = D.generate("fracture", f"tiers-{i}")
+        for dr in d["drops"].values():
+            if C.base(dr["base_id"])["kind"] != "standard":
+                continue                                  # uniques and keys are their own thing
+            floor = 3 if dr["enemy"] == d["boss"] else 2
+            assert dr["tier"] >= floor, dr

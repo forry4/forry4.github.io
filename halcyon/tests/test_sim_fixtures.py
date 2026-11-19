@@ -5,6 +5,8 @@ tested against a dungeon shape the server no longer makes.
 
 Rewrite them with:
     python -c "import json; from halcyon import dungeon as D; [open(f'webapp/test/unit/fixtures/halcyon-dungeon-{s}.json','w').write(json.dumps(D.generate('shallows', s), sort_keys=True)+'\\n') for s in ('unit-a','unit-b')]"
+    python -c "import json; from halcyon import dungeon as D; open('webapp/test/unit/fixtures/halcyon-dungeon-fracture-a.json','w').write(json.dumps(D.generate('fracture', 'fracture-a'), sort_keys=True)+'
+')"
 """
 import json
 from pathlib import Path
@@ -16,10 +18,10 @@ from halcyon import dungeon as D
 FIXTURES = Path(__file__).resolve().parents[2] / "webapp" / "test" / "unit" / "fixtures"
 
 
-@pytest.mark.parametrize("seed", ["unit-a", "unit-b"])
-def test_the_sim_fixtures_are_what_the_generator_makes(seed):
+@pytest.mark.parametrize("dungeon,seed", [("shallows", "unit-a"), ("shallows", "unit-b"), ("fracture", "fracture-a")])
+def test_the_sim_fixtures_are_what_the_generator_makes(dungeon, seed):
     on_disk = json.loads((FIXTURES / f"halcyon-dungeon-{seed}.json").read_text(encoding="utf-8"))
-    assert on_disk == D.generate("shallows", seed), "stale fixture: rewrite it (see this module's docstring)"
+    assert on_disk == D.generate(dungeon, seed), "stale fixture: rewrite it (see this module's docstring)"
 
 
 def test_the_sim_tests_level_table_is_the_servers():

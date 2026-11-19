@@ -100,7 +100,21 @@ export const ENEMY = {
 	shooter: { hp: 48, r: 0.38, speed: 2.4 },
 	radial: { hp: 95, r: 0.45, speed: 0 },
 	boss: { hp: 1150, r: 1.0, speed: 1.2 },
+	// The Fracture (design §14.4a)
+	shard: { hp: 85, r: 0.42, speed: 1.4 },
+	splitter: { hp: 110, r: 0.5, speed: 2.0 },
+	splinter: { hp: 30, r: 0.28, speed: 3.6, shot: { range: 3, speed: 7, dmg: 8, tele: 12, every: 70 } },
+	flicker: { hp: 75, r: 0.38, speed: 0 },
 };
+// Each dungeon's boss is a `boss` enemy of its own KIND (dungeon.boss_kind).
+export const BOSS_HP = { tidewarden: 1150, breach: 1700 };
+
+/* CRACKS (the Fracture, design §14.4a): authored lines of floor that open into void
+ * while their room is being fought. Each counts `t` round a `period`: closed, then
+ * `warn` ticks of a flickering seam, then `open` ticks as void (walking blocked,
+ * shots fly over). One that opens under a body throws it to the nearest solid
+ * ground, and hurts the player `dmg`. Groups start `stagger` apart. */
+export const CRACK = { period: 480, warn: 60, open: 180, stagger: 160, dmg: 14 };
 
 /* Each weapon fires its own PATTERN, not just its own numbers (owner's ask,
  * 2026-11-18). `rate` is volleys a second; a volley is `shots` arrows fanned
@@ -239,10 +253,14 @@ function tileAt(st, x, y) {
 		const r = st.doorCols[tx];
 		if (r >= 0 && st.roomLeft[r] > 0) return st.sealed === r ? "=" : "|";
 	}
+	if (st.cracks?.length) {
+		const k = st.crackAt[ty * st.w + tx];
+		if (k !== undefined && st.cracks[k].open) return "x";
+	}
 	return st.tiles[ty][tx];
 }
 export const doorAt = (st, x, y) => tileAt(st, x, y);
-const walkSolid = (c) => c === "#" || c === "o" || c === "~" || c === "=";
+const walkSolid = (c) => c === "#" || c === "o" || c === "~" || c === "=" || c === "x";
 const shotSolid = (c) => c === "#" || c === "o" || c === "=" || c === "|";
 
 function blocked(st, x, y, r) {
@@ -283,13 +301,16 @@ export function createSim(dungeon, gear = [], hero = {}) {
 	const classId = hero.class_id || hero.classId || dungeon.class_id || "ranger";
 	const stats = statsFor(gear, level, classId);
 	const scale = { hp: 1, dmg: 1, speed: 1, shot: 1, cadence: 1, ward: 0, ward_boss: 0, volatile: 0, ...(dungeon.scale || {}) };
+	const bossKind = dungeon.boss_kind || "tidewarden";
+	const hpOf = (e) => (e.type === "boss" ? BOSS_HP[bossKind] || ENEMY.boss.hp : ENEMY[e.type].hp);
 	const enemies = Object.entries(dungeon.enemies)
 		.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))      // a fixed order, never insertion order
 		.map(([id, e]) => ({ id, type: e.type, room: e.room, x: e.x, y: e.y, xp: e.xp || 0,
-			r: ENEMY[e.type].r, hp: Math.round(ENEMY[e.type].hp * scale.hp), maxHp: Math.round(ENEMY[e.type].hp * scale.hp),
+			r: ENEMY[e.type].r, hp: Math.round(hpOf(e) * scale.hp), maxHp: Math.round(hpOf(e) * scale.hp),
+			parent: e.parent || null, dormant: !!e.parent, form: e.type === "boss" ? bossKind : null, homeX: e.x, homeY: e.y,
 			active: false, cd: 30 + (e.type === "boss" ? 60 : 0), tele: 0, scd: 0, flash: 0,
 			ward: e.type === "boss" ? scale.ward_boss : scale.ward,
-			side: 1, phase: 1, mode: 0, modeT: e.type === "boss" ? BOSS_CYCLE[0][1] : 0, ang: 0, aimX: 0, aimY: 0 }));
+			side: 1, phase: 1, mode: 0, modeT: e.type === "boss" ? (bossKind === "breach" ? BREACH_CYCLE : BOSS_CYCLE)[0][1] : 0, ang: 0, aimX: 0, aimY: 0, toX: 0, toY: 0 }));
 	// The doors: each room's left and right doorway columns, on the three rows
 	// around the map's middle row (dungeon.py cuts them there).
 	const rooms = dungeon.rooms || [];
@@ -297,13 +318,18 @@ export function createSim(dungeon, gear = [], hero = {}) {
 	const doorCols = new Array(dungeon.width).fill(-1);
 	rooms.forEach((r, i) => { if (i > 0) doorCols[r.x0 - 1] = i; if (i < rooms.length - 1) doorCols[r.x1] = i; });
 	const roomLeft = rooms.map((_, i) => enemies.filter((e) => e.room === i).length);
+	const cracks = (dungeon.cracks || []).map((c) => ({ room: c.room, group: c.group, tiles: c.tiles,
+		t: c.group * CRACK.stagger, open: false, warn: false }));
+	const crackAt = {};
+	cracks.forEach((c, i) => { for (const [x, y] of c.tiles) crackAt[y * dungeon.width + x] = i; });
 	const dropsBy = {};
 	for (const [id, d] of Object.entries(dungeon.drops)) (dropsBy[d.enemy] ||= []).push(id);
 	for (const k of Object.keys(dropsBy)) dropsBy[k].sort();
 	return {
 		tick: 0, elapsedTicks: 0, bossTimeTicks: null, rng: hashSeed(String(dungeon.seed)), status: "play",
 		classId, practice: !!hero.practice,
-		w: dungeon.width, h: dungeon.height, tiles: dungeon.tiles, rooms,
+		w: dungeon.width, h: dungeon.height, tiles: dungeon.tiles, rooms, dungeonId: dungeon.id || "shallows",
+		cracks, crackAt, fastRoom: -1,
 		doorY, doorCols, roomLeft, sealed: -1, depth: dungeon.level || 1, offers: dungeon.offers || [],
 		stats, gear, levels, completeXp: dungeon.complete_xp || 0,
 		hero: { level, xp, startLevel: level, startXp: xp },
@@ -373,6 +399,64 @@ function rotate(vx, vy, a) {
 	return [vx * c - vy * s, vx * s + vy * c];
 }
 
+// ── cracks ──────────────────────────────────────────────────────────────────
+/* The nearest place a body fits, searching outward in a fixed order. */
+const DIRS = [[1, 0], [0, 1], [-1, 0], [0, -1], [0.7071, 0.7071], [-0.7071, 0.7071], [-0.7071, -0.7071], [0.7071, -0.7071]];
+function nearestClear(st, b) {
+	for (let d = 0.5; d <= 6; d += 0.5)
+		for (const [dx, dy] of DIRS) if (!blocked(st, b.x + dx * d, b.y + dy * d, b.r)) return { x: b.x + dx * d, y: b.y + dy * d };
+	return null;
+}
+
+function stepCracks(st) {
+	if (!st.cracks?.length) return;
+	let opened = false;
+	for (const c of st.cracks) {
+		if (st.sealed !== c.room) {                    // only while its room is fought
+			c.open = c.warn = false;
+			c.t = c.group * CRACK.stagger;
+			continue;
+		}
+		c.t = (c.t + (st.fastRoom === c.room ? 2 : 1)) % CRACK.period;
+		const was = c.open;
+		c.open = c.t >= CRACK.period - CRACK.open;
+		c.warn = !c.open && c.t >= CRACK.period - CRACK.open - CRACK.warn;
+		if (c.open && !was) opened = true;
+	}
+	if (!opened) return;
+	const p = st.p;
+	if (blocked(st, p.x, p.y, p.r)) {
+		const to = nearestClear(st, p);
+		if (to) { p.x = to.x; p.y = to.y; }
+		hurtPlayer(st, CRACK.dmg, "rift:crack");
+	}
+	for (const e of st.enemies) {
+		if (e.hp <= 0 || e.dormant || !blocked(st, e.x, e.y, e.r)) continue;
+		const to = nearestClear(st, e);
+		if (to) { e.x = to.x; e.y = to.y; }
+	}
+}
+
+function nearCrack(st, x, y, r) {
+	for (const [cx, cy] of [[x - r, y - r], [x + r, y - r], [x - r, y + r], [x + r, y + r]])
+		if (st.crackAt[Math.floor(cy) * st.w + Math.floor(cx)] !== undefined) return true;
+	return false;
+}
+
+/* A place in the enemy's room it can blink to: clear, off every crack (one may open
+ * before it lands), and `lo`..`hi` tiles from the player. Up to a dozen tries, then
+ * nowhere (it stays). */
+function blinkSpot(st, e, lo, hi) {
+	const r = st.rooms[e.room];
+	if (!r) return null;
+	for (let k = 0; k < 12; k++) {
+		const x = r.x0 + 1 + rand(st) * (r.x1 - r.x0 - 2), y = 1.5 + rand(st) * (st.h - 3);
+		const d = Math.sqrt((x - st.p.x) ** 2 + (y - st.p.y) ** 2);   // never Math.hypot: not exact everywhere
+		if (d >= lo && d <= hi && !blocked(st, x, y, e.r + 0.1) && !nearCrack(st, x, y, e.r + 0.1)) return { x, y };
+	}
+	return null;
+}
+
 // ── enemies ─────────────────────────────────────────────────────────────────
 function enemyStep(st, e) {
 	const p = st.p;
@@ -405,6 +489,69 @@ function enemyStep(st, e) {
 		} else if (e.cd === 0 && d < 11) e.tele = 21;
 		return;
 	}
+	if (e.type === "shard") {                          // drifts at mid range; a turning four-way cross
+		if (d < 4.5) moveBody(st, e, -ux * sp, -uy * sp);
+		else if (d > 7) moveBody(st, e, ux * sp, uy * sp);
+		if (e.tele > 0) {
+			if (--e.tele === 0) {
+				st.src = "shard:cross";
+				for (let k = 0; k < 4; k++) shoot(st, "e", e.x, e.y, e.ang + k * TAU / 4, 5.5, 15, 0.2, 200);
+				e.ang = e.ang === 0 ? TAU / 8 : 0;
+				e.cd = cadence(st, 96);
+			}
+		} else if (e.cd === 0 && d < 11) e.tele = 24;
+		return;
+	}
+	if (e.type === "splitter") {                       // keeps its distance; an aimed pair
+		if (st.tick % 100 === 0 && rand(st) < 0.5) e.side = -e.side;
+		if (d < 4) moveBody(st, e, -ux * sp, -uy * sp);
+		else if (d > 7) moveBody(st, e, ux * sp, uy * sp);
+		else moveBody(st, e, -uy * sp * e.side, ux * sp * e.side);
+		if (e.tele > 0) {
+			if (--e.tele === 0) {
+				st.src = "splitter:pair";
+				for (const a of [-0.14, 0.14]) {
+					const [vx, vy] = rotate(ux, uy, a);
+					shootAt(st, "e", e.x, e.y, e.x + vx, e.y + vy, 7.5, 13, 0.19, 150);
+				}
+				e.cd = cadence(st, 100);
+			}
+		} else if (e.cd === 0 && d < 11) e.tele = 18;
+		return;
+	}
+	if (e.type === "splinter") {                       // small and fast; a short spit
+		moveBody(st, e, ux * sp, uy * sp);
+		const sh = ENEMY.splinter.shot;
+		if (e.scd > 0) e.scd--;
+		if (e.tele > 0) {
+			if (--e.tele === 0) {
+				st.src = "splinter:spit";
+				shootAt(st, "e", e.x, e.y, p.x, p.y, sh.speed, sh.dmg, 0.15, Math.round((sh.range / sh.speed) * TPS));
+				e.scd = cadence(st, sh.every);
+			}
+		} else if (!(e.scd > 0) && d < sh.range) e.tele = sh.tele;
+		return;
+	}
+	if (e.type === "flicker") {                        // blinks (marked first), then a ring
+		if (e.tele > 0) {
+			if (--e.tele === 0) {
+				if (e.toX || e.toY) {                    // a crack may have opened there meanwhile
+					const to = blocked(st, e.toX, e.toY, e.r) ? nearestClear(st, { x: e.toX, y: e.toY, r: e.r }) : { x: e.toX, y: e.toY };
+					if (to) { e.x = to.x; e.y = to.y; }
+				}
+				e.toX = e.toY = 0;
+				st.src = "flicker:ring";
+				e.ang = e.ang === 0 ? TAU / 16 : 0;
+				for (let k = 0; k < 8; k++) shoot(st, "e", e.x, e.y, e.ang + k * TAU / 8, 4.8, 15, 0.2, 200);
+				e.cd = cadence(st, 150);
+			}
+		} else if (e.cd === 0) {
+			const to = blinkSpot(st, e, 3, 7);
+			e.toX = to ? to.x : 0; e.toY = to ? to.y : 0;
+			e.tele = 36;
+		}
+		return;
+	}
 	if (e.type === "radial") {
 		if (e.tele > 0) {
 			if (--e.tele === 0) {
@@ -416,7 +563,63 @@ function enemyStep(st, e) {
 		} else if (e.cd === 0) e.tele = 30;
 		return;
 	}
-	bossStep(st, e, d, ux, uy);
+	if (e.form === "breach") breachStep(st, e, ux, uy);
+	else bossStep(st, e, d, ux, uy);
+}
+
+/* THE BREACH (the Fracture's boss, design §14.4a). Phase 1: four-armed SPOKES that
+ * turn (the other way each time) and aimed TEARS — a line of shots, fast to slow.
+ * Phase 2 (half health, after the same telegraphed pause): its room's cracks run
+ * twice as fast, and it BLINKS between four anchors round where it started, a ring
+ * on each landing. It lobs the mortar at a player who hides, as every boss does. */
+const BREACH_CYCLE = [["spokes", 180], ["rest", 40], ["tear", 120], ["rest", 40]];
+const BREACH_CYCLE_2 = [["spokes", 160], ["blink", 60], ["tear", 100], ["blink", 60]];
+const BREACH_ANCHORS = [[-5, -3], [5, 3], [5, -3], [-5, 3]];
+function breachStep(st, e, ux, uy) {
+	const p = st.p;
+	if (e.phase === 1 && e.hp <= e.maxHp / 2) { e.phase = 0; e.modeT = 70; e.tele = 70; return; }
+	if (e.phase === 0) {
+		if (--e.modeT <= 0) { e.phase = 2; e.mode = 0; e.modeT = BREACH_CYCLE_2[0][1]; e.tele = 0; st.fastRoom = e.room; }
+		else e.tele = e.modeT;
+		return;
+	}
+	if (e.cd > 0) return;
+	bossMortar(st, e);
+	const cycle = e.phase === 1 ? BREACH_CYCLE : BREACH_CYCLE_2;
+	const [mode, len] = cycle[e.mode];
+	const t = len - e.modeT;
+	st.src = `boss:${mode}`;
+	if (mode === "spokes") {
+		if (t === 0) e.side = -e.side;
+		if (t % cadence(st, 7) === 0) {
+			for (let k = 0; k < 4; k++) shoot(st, "e", e.x, e.y, e.ang + k * TAU / 4, 5, 15, 0.21, 240);
+			e.ang += 0.09 * e.side;
+		}
+	} else if (mode === "tear") {
+		const k = t % 40;
+		if (k === 0) { e.aimX = p.x; e.aimY = p.y; e.tele = 18; }
+		if (k === 18) {
+			const dx = e.aimX - e.x, dy = e.aimY - e.y, n = Math.sqrt(dx * dx + dy * dy) || 1;
+			for (let i = 0; i < 6; i++) shootAt(st, "e", e.x, e.y, e.x + dx / n, e.y + dy / n, 6.5 + i, 12, 0.2, 200);
+		}
+	} else if (mode === "blink") {
+		if (t === 0) {
+			e.anchor = ((e.anchor || 0) + 1) % BREACH_ANCHORS.length;
+			const [ax, ay] = BREACH_ANCHORS[e.anchor];
+			e.toX = e.homeX + ax; e.toY = e.homeY + ay; e.tele = 40;
+		}
+		if (t === 40) {
+			const to = blocked(st, e.toX, e.toY, e.r) ? nearestClear(st, { x: e.toX, y: e.toY, r: e.r }) : { x: e.toX, y: e.toY };
+			if (to) { e.x = to.x; e.y = to.y; }
+			e.toX = e.toY = 0;
+			for (let k = 0; k < 20; k++) shoot(st, "e", e.x, e.y, e.ang + k * TAU / 20, 5, 16, 0.22, 240);
+		}
+	}
+	if (e.tele > 0) e.tele--;
+	if (--e.modeT <= 0) {
+		e.mode = (e.mode + 1) % cycle.length;
+		e.modeT = cycle[e.mode][0] === "rest" ? cadence(st, cycle[e.mode][1]) : cycle[e.mode][1];
+	}
 }
 
 /* The boss: two phases. Phase 1 alternates a rotating SPIRAL with aimed FANS.
@@ -598,6 +801,8 @@ export function step(st, input) {
 	if (input.enter && st.deeper && near(p, st.deeper, REACH)) st.events.push({ type: "deeper", local: true });
 
 	sealRoom(st);
+	stepCracks(st);
+	if (st.status !== "play") return st;
 	for (const e of st.enemies) {
 		if (e.hp <= 0 || !e.active) continue;
 		enemyStep(st, e);
@@ -791,7 +996,7 @@ function sealRoom(st) {
 		const r = st.rooms[i];
 		if (st.roomLeft[i] > 0 && p.x - p.r > r.x0 && p.x + p.r < r.x1) {
 			st.sealed = i;
-			for (const e of st.enemies) if (e.room === i && e.hp > 0) e.active = true;
+			for (const e of st.enemies) if (e.room === i && e.hp > 0 && !e.dormant) e.active = true;
 			st.events.push({ type: "seal", room: i, local: true });
 			return;
 		}
@@ -850,6 +1055,14 @@ function kill(st, e) {
 	}
 	if (st.scale.volatile) (st.rings ||= []).push({ x: e.x, y: e.y, n: e.type === "boss" ? 16 : 8, a: rand(st) * TAU, type: e.type });
 	gainXp(st, e.xp);
+	// A Splitter breaks into its Splinters: they come into play where it fell.
+	let k = 0;
+	for (const s of st.enemies) {
+		if (s.parent !== e.id || !s.dormant) continue;
+		s.dormant = false; s.active = true; s.cd = 20;
+		s.x = e.x + (k++ % 2 ? 0.45 : -0.45); s.y = e.y;
+		if (blocked(st, s.x, s.y, s.r)) { const to = nearestClear(st, s); if (to) { s.x = to.x; s.y = to.y; } }
+	}
 	const drops = st.practice ? [] : st.dropsBy[e.id];
 	if (e.type === "boss") st.bossTimeTicks = st.elapsedTicks;
 	if (drops && drops.length) st.bags.push({ enemy: e.id, x: e.x, y: e.y, drops: [...drops] });
@@ -878,5 +1091,6 @@ export function fingerprint(st) {
 		st.bullets.length, st.bullets.map((b) => [r(b.x), r(b.y)]).slice(0, 40),
 		st.bags.map((b) => b.drops.join(",")), st.pickups.length, st.shield && [r(st.shield.x), r(st.shield.y), st.shield.until], st.slowUntil, st.slowDmg || 0,
 		st.p.potionCd, st.p.counterUntil, st.p.guardUntil, st.p.empower, (st.starfalls || []).map((f) => [r(f.x), r(f.y), f.at]),
-		(st.mortars || []).map((m) => [r(m.x), r(m.y), m.at]), (st.fires || []).map((f) => [r(f.x), r(f.y), f.until]), st.enemies.map((e) => e.hidden || 0)]);
+		(st.mortars || []).map((m) => [r(m.x), r(m.y), m.at]), (st.fires || []).map((f) => [r(f.x), r(f.y), f.until]), st.enemies.map((e) => e.hidden || 0),
+		(st.cracks || []).map((c) => c.t), st.fastRoom ?? -1, st.enemies.map((e) => (e.dormant ? 1 : 0))]);
 }
