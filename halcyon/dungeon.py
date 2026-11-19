@@ -138,9 +138,17 @@ DUNGEONS = {"shallows": {"name": "The Shallows", "combat_rooms": 4, "complete_xp
 
 ENEMY_WEIGHTS = (("chaser", 40), ("shooter", 35), ("radial", 25))
 DROP_CHANCE = {"chaser": 0.20, "shooter": 0.30, "radial": 0.35}
-LOOT = (("shortbow", 16), ("longbow", 14), ("leather_vest", 22), ("volley_quiver", 14),
-        ("band_of_vigor", 14), ("band_of_focus", 14), ("kingfisher_eye", 2), ("tidecaller", 2),
-        ("repeater", 2))
+RANGER_LOOT = (("shortbow", 16), ("longbow", 14), ("leather_vest", 22), ("volley_quiver", 14),
+               ("band_of_vigor", 14), ("band_of_focus", 14), ("kingfisher_eye", 2), ("tidecaller", 2),
+               ("repeater", 2))
+PALADIN_LOOT = (("mace", 16), ("greatsword", 14), ("plate_armor", 22), ("grounding_aegis", 14),
+                ("band_of_vigor", 14), ("band_of_focus", 14))
+DIVINER_LOOT = (("wand", 16), ("starstaff", 14), ("seer_robes", 22), ("stillness_orb", 14),
+                ("band_of_vigor", 14), ("band_of_focus", 14))
+# Kept as the complete content list for audits and content tests. A run uses the
+# class-specific table below, so a Ranger never receives a Paladin's starter gear.
+LOOT = RANGER_LOOT + PALADIN_LOOT + DIVINER_LOOT
+LOOT_BY_CLASS = {"ranger": RANGER_LOOT, "paladin": PALADIN_LOOT, "diviner": DIVINER_LOOT}
 SLOT_ODDS = ((0, 50), (1, 35), (2, 12), (3, 3))
 
 
@@ -154,8 +162,8 @@ def _pick(rng: random.Random, table) -> object:
     return table[-1][0]
 
 
-def _item(rng: random.Random, tier: int) -> dict:
-    base_id = _pick(rng, LOOT)
+def _item(rng: random.Random, tier: int, class_id: str) -> dict:
+    base_id = _pick(rng, LOOT_BY_CLASS[class_id])
     slots = _pick(rng, SLOT_ODDS)
     if C.base(base_id)["kind"] == "unique":
         tier = 1                  # a unique is its own thing, not a rung on the tier ladder
@@ -167,10 +175,12 @@ def _mirror(rows: list[str]) -> list[str]:
     return [r[::-1] for r in rows]
 
 
-def generate(dungeon_id: str, seed: str | None = None) -> dict:
+def generate(dungeon_id: str, seed: str | None = None, class_id: str = "ranger") -> dict:
     """The whole dungeon for one run, as JSON-safe data."""
     if dungeon_id not in DUNGEONS:
         raise store.HalcyonError("no such dungeon")
+    if class_id not in C.CLASSES:
+        raise store.HalcyonError("no such class")
     seed = seed or secrets.token_hex(8)
     rng = random.Random(f"{dungeon_id}:{seed}")
     spec = DUNGEONS[dungeon_id]
@@ -225,12 +235,12 @@ def generate(dungeon_id: str, seed: str | None = None) -> dict:
             rolls = [1 if rng.random() < 0.85 else 2] if rng.random() < DROP_CHANCE[e["type"]] else []
         for tier in rolls:
             n_drop += 1
-            drops[f"d{n_drop}"] = {**_item(rng, tier), "enemy": eid}
+            drops[f"d{n_drop}"] = {**_item(rng, tier, class_id), "enemy": eid}
 
     return {"id": dungeon_id, "name": spec["name"], "seed": seed, "width": width, "height": height,
             "tiles": ["".join(r) for r in grid], "start": start, "rooms": room_spans,
             "enemies": enemies, "boss": boss, "drops": drops, "pickups": pickups,
-            "complete_xp": spec["complete_xp"]}
+            "complete_xp": spec["complete_xp"], "class_id": class_id}
 
 
 def walkable(d: dict, x: int, y: int) -> bool:

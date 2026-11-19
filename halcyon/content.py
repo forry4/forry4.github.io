@@ -14,9 +14,15 @@ its rules. Two rules about this file are NOT placeholders:
 """
 from __future__ import annotations
 
-CONTENT_VERSION = 1
+CONTENT_VERSION = 2
 
-CLASSES = ("ranger",)
+CLASSES = ("ranger", "paladin", "diviner")
+CLASS_NAMES = {"ranger": "Ranger", "paladin": "Paladin", "diviner": "Diviner"}
+CLASS_DESCRIPTIONS = {
+    "ranger": "A quick ranged fighter with a volley of arrows.",
+    "paladin": "A close-range guardian who plants a projectile-eating shield.",
+    "diviner": "A long-range mage who slows enemy projectiles around them.",
+}
 
 # The five equipment slots, in the order the store numbers them.
 EQUIP_SLOTS = ("weapon", "armor", "ability", "ring1", "ring2")
@@ -31,19 +37,27 @@ MAX_ENCHANT_SLOTS = 4
 BASE_ITEMS: dict[str, dict] = {
     "shortbow":      {"slot": "weapon",  "cls": "ranger", "kind": "standard"},
     "longbow":       {"slot": "weapon",  "cls": "ranger", "kind": "standard"},
+    "mace":          {"slot": "weapon",  "cls": "paladin", "kind": "standard"},
+    "greatsword":    {"slot": "weapon",  "cls": "paladin", "kind": "standard"},
+    "wand":          {"slot": "weapon",  "cls": "diviner", "kind": "standard"},
+    "starstaff":     {"slot": "weapon",  "cls": "diviner", "kind": "standard"},
     # Two STANDARD weapon types per class, plus uniques (owner's call, 2026-11-18).
     # The repeater was a third standard bow; it is now a rare unique.
     "repeater":      {"slot": "weapon",  "cls": "ranger", "kind": "unique"},
     "tidecaller":    {"slot": "weapon",  "cls": "ranger", "kind": "unique"},
     "leather_vest":  {"slot": "armor",   "cls": "ranger", "kind": "standard"},
     "volley_quiver": {"slot": "ability", "cls": "ranger", "kind": "standard"},
+    "plate_armor":   {"slot": "armor",   "cls": "paladin", "kind": "standard"},
+    "grounding_aegis": {"slot": "ability", "cls": "paladin", "kind": "standard"},
+    "seer_robes":     {"slot": "armor",   "cls": "diviner", "kind": "standard"},
+    "stillness_orb":  {"slot": "ability", "cls": "diviner", "kind": "standard"},
     "band_of_vigor": {"slot": "ring",    "cls": None,     "kind": "standard"},
     "band_of_focus": {"slot": "ring",    "cls": None,     "kind": "standard"},
     "kingfisher_eye": {"slot": "ring",   "cls": None,     "kind": "unique"},
 }
 
-# enchantment id -> which slot families it may roll on. Values (what q=1.0 is
-# worth) are deliberately absent until the greybox produces real numbers.
+# enchantment id -> which slot families it may roll on. Regen rolls may be
+# fractional; the browser displays them to one decimal place.
 ENCHANTS: dict[str, dict] = {
     "max_hp":        {"slots": ("weapon", "armor", "ability", "ring")},
     "max_mp":        {"slots": ("weapon", "armor", "ability", "ring")},

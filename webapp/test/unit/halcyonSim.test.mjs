@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { createSim, step, setGear, wallHit, enchantValue, STAT_SCALE, fingerprint, dsin, dcos, recoveryLimit, statsFor, levelFor, xpProgress, PER_LEVEL, WEAPONS, TPS, REACH } from "../../../halcyon/sim.js";
+import { createSim, step, setGear, wallHit, enchantValue, STAT_SCALE, fingerprint, dsin, dcos, recoveryLimit, statsFor, levelFor, xpProgress, PER_LEVEL, WEAPONS, TPS, REACH, SHIELD_DURATION, SLOW_FACTOR } from "../../../halcyon/sim.js";
 
 const load = (s) => JSON.parse(readFileSync(new URL(`./fixtures/halcyon-dungeon-${s}.json`, import.meta.url)));
 const A = load("unit-a"), B = load("unit-b");
@@ -165,7 +165,7 @@ test("standing still in front of the boss is lethal", () => {
 	const events = [];
 	for (let t = 0; t < 60 * TPS && st.status === "play"; t++) { step(st, {}); events.push(...st.events); }
 	assert.equal(st.status, "dead");
-	assert.deepEqual(events.map((e) => e.type), ["death"]);
+	assert.deepEqual(events.filter((e) => !e.local).map((e) => e.type), ["death"]);
 	assert.equal(st.p.hp, 0);
 });
 
@@ -327,10 +327,11 @@ test("a run with gear swaps is as deterministic as any other", () => {
 	assert.deepEqual(play(B, { ticks: 90 * TPS, inputs: swaps }).prints, play(B, { ticks: 90 * TPS, inputs: swaps }).prints);
 });
 
-test("every number a player reads is flat: whole points, whole damage, whole enchantments", () => {
+test("every number a player reads is flat, with one decimal place for regeneration", () => {
 	for (let q = 0; q <= 1; q += 0.05)
 		for (const id of ["max_hp", "max_mp", "attack", "attack_speed", "defense", "ability_power", "mp_regen", "hp_regen"])
-			assert.ok(Number.isInteger(enchantValue(id, q)) && enchantValue(id, q) > 0, `${id} @ ${q}`);
+			assert.ok((id.endsWith("regen") ? Math.round(enchantValue(id, q) * 10) === enchantValue(id, q) * 10 : Number.isInteger(enchantValue(id, q)))
+				&& enchantValue(id, q) > 0, `${id} @ ${q}`);
 	const ench = [{ id: "attack", q: 1 }, { id: "attack_speed", q: 0.5 }, { id: "defense", q: 0.3 }];
 	for (const base of ["shortbow", "longbow", "tidecaller"])
 		for (const tier of [1, 2, 3, 4, 5]) {
@@ -338,11 +339,76 @@ test("every number a player reads is flat: whole points, whole damage, whole enc
 			for (const k of ["maxHp", "maxMp", "att", "dex", "def", "dmg", "weaponDmg", "abilityDmg"])
 				assert.ok(Number.isInteger(s[k]), `${base} T${tier}: ${k} = ${s[k]}`);
 		}
+	assert.equal(statsFor([]).mpRegen, 2.5, "base MP regeneration is deliberately lower");
 	// Attack is points, and a point is worth the same share of ANY weapon's damage.
 	const bare = statsFor([{ base_id: "longbow", tier: 1 }]);
 	const strong = statsFor([{ base_id: "longbow", tier: 1, enchants: [{ id: "attack", q: 1 }] }]);
 	assert.equal(strong.att, enchantValue("attack", 1));
 	assert.equal(strong.dmg, Math.round(bare.weaponDmg * (1 + strong.att / STAT_SCALE)));
+});
+
+test("Paladin and Diviner have their intended starter ranges and abilities", () => {
+	const paladin = statsFor([
+		{ base_id: "mace", tier: 1 }, { base_id: "plate_armor", tier: 1 }, { base_id: "grounding_aegis", tier: 1 },
+	], 1, "paladin");
+	const diviner = statsFor([
+		{ base_id: "starstaff", tier: 1 }, { base_id: "seer_robes", tier: 1 }, { base_id: "stillness_orb", tier: 1 },
+	], 1, "diviner");
+	assert.equal(paladin.range, 3);
+	assert.equal(paladin.abilityKind, "shield");
+	assert.equal(diviner.range, 8);
+	assert.equal(diviner.abilityKind, "slow");
+});
+
+test("Paladin's shield absorbs one enemy projectile, lets player shots through, and expires", () => {
+	const st = createSim(A, [
+		{ base_id: "mace", tier: 1 }, { base_id: "plate_armor", tier: 1 }, { base_id: "grounding_aegis", tier: 1 },
+	], { class_id: "paladin" });
+	st.enemies = [];
+	step(st, { ax: 1, ay: 0, ability: true });
+	assert.ok(st.shield);
+	st.bullets.push({ owner: "e", x: st.shield.x, y: st.shield.y, vx: 0, vy: 0, dmg: 99, r: 0.1, life: 5, pierce: 0, hit: [] });
+	const hp = st.p.hp;
+	step(st, { ax: 1, ay: 0, fire: true });
+	assert.equal(st.shield, null);
+	assert.equal(st.p.hp, hp);
+	assert.ok(st.bullets.some((b) => b.owner === "p"), "the shield does not block player fire");
+	step(st, { ax: 1, ay: 0, ability: true });
+	assert.ok(st.shield);
+	for (let i = 0; i < SHIELD_DURATION; i++) step(st, {});
+	assert.equal(st.shield, null);
+});
+
+test("Diviner's ability slows enemy projectiles inside its three-tile aura", () => {
+	const st = createSim(A, [
+		{ base_id: "starstaff", tier: 1 }, { base_id: "seer_robes", tier: 1 }, { base_id: "stillness_orb", tier: 1 },
+	], { class_id: "diviner" });
+	st.enemies = [];
+	step(st, { ability: true });
+	const b = { owner: "e", x: st.p.x - 1, y: st.p.y, vx: 6, vy: 0, dmg: 1, r: 0.1, life: 5, pierce: 0, hit: [] };
+	st.bullets.push(b);
+	step(st, {});
+	assert.equal(b.x, st.p.x - 1 + 6 * (1 / TPS) * SLOW_FACTOR);
+});
+
+test("damage taken creates a visible one-decimal damage event, and the rift timer freezes at boss death", () => {
+	const st = createSim(A, STARTER);
+	st.enemies = [];
+	st.bullets.push({ owner: "e", x: st.p.x, y: st.p.y, vx: 0, vy: 0, dmg: 17.3, r: 0.1, life: 5, pierce: 0, hit: [] });
+	step(st, {});
+	const taken = Math.round(Math.max(17.3 * 0.4, 17.3 - st.stats.def) * 10) / 10;
+	assert.equal(st.events.find((e) => e.type === "damage").amount, taken);
+	assert.equal(st.damageNumbers.at(-1).amount, taken);
+	assert.equal(Math.round(taken * 10), taken * 10);
+	const boss = { id: "boss", type: "boss", x: st.p.x + 2, y: st.p.y, xp: 0, r: 1, hp: 1, maxHp: 1,
+		active: true, cd: 999, tele: 0, flash: 0, side: 1, phase: 1, mode: 0, modeT: 1, ang: 0, aimX: 0, aimY: 0 };
+	st.enemies = [boss];
+	st.bullets = [{ owner: "p", x: boss.x, y: boss.y, vx: 0, vy: 0, dmg: 10, r: 0.1, life: 5, pierce: 0, hit: [] }];
+	step(st, {});
+	assert.equal(st.bossTimeTicks, st.elapsedTicks);
+	const stopped = st.elapsedTicks;
+	for (let i = 0; i < 30; i++) step(st, {});
+	assert.equal(st.elapsedTicks, stopped);
 });
 
 test("the Tidecaller fans three arrows, and they glance off a wall once", () => {

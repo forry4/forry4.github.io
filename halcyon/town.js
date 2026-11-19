@@ -43,6 +43,7 @@ export const REALMS = [{ id: "shallows", name: "The Shallows" }];
 export const STATIONS = [
 	{ id: "vault", kind: "vault", label: "Vault", x: 3.5, y: 8, hw: 1.2, hh: 0.8, solid: true, reach: 0.9 },
 	{ id: "forge", kind: "forge", label: "Forge", x: 18.5, y: 8, hw: 1.0, hh: 0.8, solid: true, reach: 0.9 },
+	{ id: "dream", kind: "dream", label: "Dream Rift", x: 6, y: 4.7, hw: 1.25, hh: 0.7, solid: true, reach: 0.9 },
 	...REALMS.map((r, i) => ({ id: `realm:${r.id}`, kind: "portal", realm: r.id, label: r.name,
 		x: 11 + (i - (REALMS.length - 1) / 2) * 5, y: 2.6, hw: 0, hh: 0, solid: false, reach: 1.3 })),
 ];
@@ -53,20 +54,21 @@ export const SPAWN = { x: 11, y: 7.5 };
 export const POSTS = [{ id: "post-w", x: 6.5, y: 12.4, r: 0.45 }, { id: "post-e", x: 15.5, y: 12.4, r: 0.45 }];
 export const DPS_WINDOW = 3 * TPS;
 
-export function createTown(at = SPAWN) {
+export function createTown(at = SPAWN, classId = "ranger") {
 	const st = { tick: 0, w: MAP[0].length, h: MAP.length, tiles: MAP, stations: STATIONS,
 		p: { x: at.x, y: at.y, r: PLAYER_R, mp: 0, fireCd: 0, burstLeft: 0, burstCd: 0 }, near: null,
 		bullets: [], posts: POSTS.map((q) => ({ ...q, hits: [] })), floats: [] };
-	setTownGear(st, [], 1);
+	setTownGear(st, [], 1, classId);
 	return st;
 }
 
 /* What the player has equipped, for the town's shooting. MP regenerates at the
  * gear's own rate, as in a fight (owner's call, 2026-11-18: no town bonus); a
  * change of gear only clamps it to the new maximum. */
-export function setTownGear(st, gear, level = 1) {
+export function setTownGear(st, gear, level = 1, classId = st.classId || "ranger") {
+	st.classId = classId;
 	const first = !st.stats;
-	st.stats = statsFor(gear, level);
+	st.stats = statsFor(gear, level, classId);
 	st.p.mp = first ? st.stats.maxMp : Math.min(st.p.mp, st.stats.maxMp);
 	st.p.burstLeft = 0;
 }

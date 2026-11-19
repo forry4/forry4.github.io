@@ -135,6 +135,7 @@ SCHEMA = [
         seed TEXT NOT NULL,
         content_version INTEGER NOT NULL,
         status TEXT NOT NULL,                -- open | recalled | completed | died
+        practice INTEGER NOT NULL DEFAULT 0,  -- Dream Rift: no rewards or character loss
         started_at REAL NOT NULL,
         last_event_at REAL NOT NULL,
         last_seq INTEGER NOT NULL DEFAULT 0,
@@ -142,6 +143,15 @@ SCHEMA = [
         state TEXT NOT NULL,                 -- JSON: {"killed": [...], "picked": [...]}
         refused TEXT NOT NULL DEFAULT '[]')""",
     "CREATE INDEX IF NOT EXISTS idx_hr_runs_char ON hr_runs (char_id, status)",
+    """CREATE TABLE IF NOT EXISTS hr_rift_times (
+        time_id TEXT PRIMARY KEY,
+        owner_id TEXT NOT NULL,
+        dungeon_id TEXT NOT NULL,
+        run_id TEXT NOT NULL UNIQUE,
+        time_ticks INTEGER NOT NULL,
+        practice INTEGER NOT NULL DEFAULT 0,
+        created_at REAL NOT NULL)""",
+    "CREATE INDEX IF NOT EXISTS idx_hr_rift_times_owner ON hr_rift_times (owner_id, dungeon_id, time_ticks)",
 ]
 
 
@@ -149,6 +159,11 @@ def init_schema(conn) -> None:
     cur = conn.cursor()
     for stmt in SCHEMA:
         cur.execute(stmt)
+    # `hr_runs` predates Dream Rifts on existing Turso/sqlite databases. Keep the
+    # migration additive: old real runs remain ordinary runs (practice=0).
+    cur.execute("PRAGMA table_info(hr_runs)")
+    if not any(row[1] == "practice" for row in cur.fetchall()):
+        cur.execute("ALTER TABLE hr_runs ADD COLUMN practice INTEGER NOT NULL DEFAULT 0")
     # Whether a base is standard or unique belongs to the BASE, so items follow
     # content.py when it changes (the repeater became a unique, 2026-11-18). A unique
     # has no tier ladder: it is tier 1. Cheap, and a no-op once everything agrees.
@@ -409,6 +424,13 @@ def create_character(connect, owner_id: str, slot: int, class_id: str, now: floa
         return _one(cur, "SELECT * FROM hr_characters WHERE char_id=?", (char_id,))
 
 
+def character_class(connect, owner_id: str, char_id: str) -> str:
+    """Read the class for server-side dungeon generation."""
+    with _tx(connect, owner_id) as cur:
+        _require_owner(cur, owner_id, _now(None))
+        return _require_char(cur, owner_id, char_id)["class_id"]
+
+
 def grant_item(connect, owner_id: str, spec: dict, place: tuple, now: float | None = None) -> dict:
     """Mint an item from nothing — starter gear and admin grants only."""
     now = _now(now)
@@ -430,19 +452,26 @@ def grant_item(connect, owner_id: str, spec: dict, place: tuple, now: float | No
 
 # ── runs ─────────────────────────────────────────────────────────────────────
 def _close_run(cur, run: dict, status: str, now: float) -> None:
-    """End a run. A death destroys the character and everything on it; every
-    ending destroys what was left on the run's floor. The vault is never touched."""
-    if status == "died":
+    """End a run. A normal death destroys the character and everything on it;
+    normal endings destroy what was left on the run's floor. Dream runs never
+    touch the character, its carried items, or their floor state. The vault is
+    never touched."""
+    # Dream Rifts are disposable practice instances. Their death and any future
+    # completion path must never touch the character or its carried items.
+    if status == "died" and not bool(run.get("practice", 0)):
         _destroy(cur, "char_id=? AND loc IN ('inventory','equipped')", (run["char_id"],), "death", now)
         _destroy(cur, "loc='ground' AND run_id=?", (run["run_id"],), "death", now)
         cur.execute("UPDATE hr_characters SET status='dead', died_at=?, death_run_id=? WHERE char_id=?",
                     (now, run["run_id"], run["char_id"]))
-    else:
+    elif not bool(run.get("practice", 0)):
         _destroy(cur, "loc='ground' AND run_id=?", (run["run_id"],), "run_end", now)
     cur.execute("UPDATE hr_runs SET status=?, last_event_at=? WHERE run_id=?", (status, now, run["run_id"]))
 
 
 def _validate_dungeon(dungeon: dict) -> dict:
+    class_id = dungeon.get("class_id", "ranger")
+    if class_id not in C.CLASSES:
+        raise HalcyonError("the dungeon has no such class")
     enemies = dungeon.get("enemies") or {}
     boss = dungeon.get("boss")
     if boss is not None and boss not in enemies:
@@ -458,7 +487,7 @@ def _validate_dungeon(dungeon: dict) -> dict:
     if not _is_xp(dungeon.get("complete_xp", 0)):
         raise HalcyonError("the completion XP is not a whole number")
     return {"enemies": {str(k): v for k, v in enemies.items()}, "boss": boss, "drops": drops,
-            "complete_xp": dungeon.get("complete_xp", 0)}
+            "complete_xp": dungeon.get("complete_xp", 0), "class_id": class_id}
 
 
 def _is_xp(v) -> bool:
@@ -475,24 +504,49 @@ def _credit_xp(cur, char_id: str, amount: int) -> None:
     cur.execute("UPDATE hr_characters SET xp=?, level=? WHERE char_id=?", (xp, C.level_for(xp), char_id))
 
 
+def _record_time(cur, run: dict, elapsed_ticks, now: float) -> None:
+    """Keep the five fastest boss-kill times for this owner and rift.
+
+    The combat simulation is intentionally client-side. This is a personal
+    leaderboard, not a competitive ranking, so a claimed time is useful for the
+    player's own practice without becoming an authority boundary for loot or XP.
+    """
+    if (not isinstance(elapsed_ticks, int) or isinstance(elapsed_ticks, bool)
+            or not 0 < elapsed_ticks <= 7 * 24 * 60 * 60 * 60):
+        return
+    if _one(cur, "SELECT time_id FROM hr_rift_times WHERE run_id=?", (run["run_id"],)):
+        return
+    cur.execute("INSERT INTO hr_rift_times (time_id, owner_id, dungeon_id, run_id, time_ticks, practice, created_at) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (_new_id(), run["owner_id"], run["dungeon_id"], run["run_id"], elapsed_ticks,
+                 int(bool(run.get("practice", 0))), now))
+    rows = _dicts(cur.execute("SELECT time_id FROM hr_rift_times WHERE owner_id=? AND dungeon_id=? "
+                             "ORDER BY time_ticks ASC, created_at ASC", (run["owner_id"], run["dungeon_id"])))
+    for row in rows[5:]:
+        cur.execute("DELETE FROM hr_rift_times WHERE time_id=?", (row["time_id"],))
+
+
 def start_run(connect, owner_id: str, char_id: str, dungeon_id: str, seed: str, dungeon: dict,
-              now: float | None = None) -> dict:
+              practice: bool = False, now: float | None = None) -> dict:
     """Begin a run with a dungeon the SERVER generated. A run this character
     left open (a closed tab) is closed first, as a recall (design §13.1a)."""
     now = _now(now)
     dungeon = _validate_dungeon(dungeon)
     with _tx(connect, owner_id) as cur:
         _require_owner(cur, owner_id, now)
-        _require_char(cur, owner_id, char_id)
+        ch = _require_char(cur, owner_id, char_id)
+        if dungeon["class_id"] != ch["class_id"]:
+            raise HalcyonError("the dungeon was made for another class")
         prior = _open_run(cur, char_id)
         if prior:
             _close_run(cur, prior, "recalled", now)
         run_id = _new_id()
         cur.execute("INSERT INTO hr_runs (run_id, char_id, owner_id, dungeon_id, seed, content_version, "
-                    "status, started_at, last_event_at, dungeon, state) VALUES (?,?,?,?,?,?, 'open', ?,?,?,?)",
-                    (run_id, char_id, owner_id, dungeon_id, str(seed), C.CONTENT_VERSION, now, now,
-                     json.dumps(dungeon), json.dumps({"killed": [], "picked": []})))
-        return {"run_id": run_id, "dungeon": dungeon}
+                    "status, practice, started_at, last_event_at, dungeon, state) "
+                    "VALUES (?,?,?,?,?,?, 'open', ?, ?,?,?,?)",
+                    (run_id, char_id, owner_id, dungeon_id, str(seed), C.CONTENT_VERSION, int(bool(practice)),
+                     now, now, json.dumps(dungeon), json.dumps({"killed": [], "picked": []})))
+        return {"run_id": run_id, "dungeon": dungeon, "practice": bool(practice)}
 
 
 def open_character(connect, owner_id: str, char_id: str, now: float | None = None) -> dict:
@@ -515,18 +569,24 @@ def _apply_one(cur, run: dict, dungeon: dict, state: dict, ev: dict, now: float)
     """Apply one run event. Validates fully BEFORE writing, so a refusal never
     leaves half an event behind. Returns the run's new status if the event ended it."""
     owner, char_id, run_id = run["owner_id"], run["char_id"], run["run_id"]
+    practice = bool(run.get("practice", 0))
     t = ev.get("type")
     if t == "kill":
         e = str(ev.get("enemy"))
         if e not in dungeon["enemies"] or e in state["killed"]:
             raise _Refused
         state["killed"].append(e)
-        _credit_xp(cur, char_id, dungeon["enemies"][e].get("xp", 0))
-        # The boss's fall CLEARS the dungeon: its bonus is credited here, so a
-        # recall after the kill keeps it (owner's ask, 2026-11-18).
-        if e == dungeon["boss"]:
-            _credit_xp(cur, char_id, dungeon.get("complete_xp", 0))
+        if not practice:
+            _credit_xp(cur, char_id, dungeon["enemies"][e].get("xp", 0))
+        if e == dungeon.get("boss"):
+            # The boss's fall clears the dungeon; its bonus is credited here so
+            # a recall after the kill keeps it. Practice runs earn nothing.
+            if not practice:
+                _credit_xp(cur, char_id, dungeon.get("complete_xp", 0))
+            _record_time(cur, run, ev.get("elapsed_ticks"), now)
     elif t == "pickup":
+        if practice:
+            raise _Refused
         d = str(ev.get("drop"))
         drop = dungeon["drops"].get(d)
         if drop is None or d in state["picked"]:
@@ -542,6 +602,8 @@ def _apply_one(cur, run: dict, dungeon: dict, state: dict, ev: dict, now: float)
         state["picked"].append(d)
         _insert_item(cur, owner, drop, "drop", cols, now, run_id=run_id, drop_id=d)
     elif t in ("pickup_item", "drop_item", "move"):
+        if practice and t == "drop_item":
+            raise _Refused
         # An item picked up THIS run may be named by its drop: the page has no item id
         # for it until the run's reports land, and within one run a drop names exactly
         # one item (the UNIQUE index on origin_run_id + origin_drop_id).
@@ -730,11 +792,18 @@ def owner_view(connect, owner_id: str) -> dict:
         items = [_item_out(r) for r in _dicts(cur)]
         cur.execute("SELECT run_id, char_id FROM hr_runs WHERE owner_id=? AND status='open'", (owner_id,))
         runs = {r["char_id"]: r["run_id"] for r in _dicts(cur)}
+        cur.execute("SELECT dungeon_id, time_ticks, practice FROM hr_rift_times "
+                    "WHERE owner_id=? ORDER BY dungeon_id, time_ticks, created_at", (owner_id,))
+        times = {}
+        for row in _dicts(cur):
+            times.setdefault(row["dungeon_id"], []).append({
+                "time_ticks": row["time_ticks"], "practice": bool(row["practice"]),
+            })
     finally:
         conn.close()
     return {"characters": [c for c in chars if c["status"] == "alive"],
             "fallen": [c for c in chars if c["status"] == "dead"],
-            "items": items, "open_runs": runs}
+            "items": items, "open_runs": runs, "leaderboards": times}
 
 
 def prune_guests(connect, now: float | None = None, max_idle: float = 24 * 3600) -> int:
@@ -754,7 +823,7 @@ def prune_guests(connect, now: float | None = None, max_idle: float = 24 * 3600)
             o = _one(cur, "SELECT last_seen_at FROM hr_owners WHERE owner_id=?", (owner,))
             if not o or o["last_seen_at"] >= now - max_idle:
                 continue                             # came back while we looked
-            for table in ("hr_items", "hr_runs", "hr_characters", "hr_owners"):
+            for table in ("hr_items", "hr_runs", "hr_rift_times", "hr_characters", "hr_owners"):
                 cur.execute(f"DELETE FROM {table} WHERE owner_id=?", (owner,))
             pruned += 1
     return pruned

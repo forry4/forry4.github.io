@@ -63,6 +63,29 @@
 .hr-forge .btn{margin-left:auto}
 .hr-plus{font-size:1.4rem;color:var(--text-soft)}
 .hr-forge-note{color:var(--g-label)}
+.hr-dream-panel{width:min(560px,calc(100% - 24px))}
+.hr-dream-list{display:grid;gap:8px;min-height:0;overflow:auto}
+.hr-dream-rift{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:12px;
+  padding:10px 0;border-top:1px solid rgba(255,255,255,.1)}
+.hr-dream-rift h3{margin:0 0 2px}
+.hr-dream-rift p{margin:0}
+.hr-times{list-style:none;margin:0;padding:0;display:grid;gap:2px;min-width:118px;font-variant-numeric:tabular-nums}
+.hr-times li{display:flex;justify-content:space-between;gap:8px;color:#f4efe4;font-size:.82rem}
+.hr-times small{color:var(--text-soft);font-size:.72rem}
+.hr-result-time{color:#e9c25a;flex:0 1 auto;font-variant-numeric:tabular-nums}
+.hr-character-menu{width:min(520px,calc(100% - 24px))}
+.hr-class-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.hr-class-option{min-width:0;min-height:86px;padding:10px;border-radius:8px;text-align:left;color:inherit;
+  background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.12);font:inherit;cursor:pointer}
+.hr-class-option:hover:not(:disabled){border-color:var(--g-accent);background:color-mix(in srgb,var(--g-accent) 12%,transparent)}
+.hr-class-option strong{display:block;margin-bottom:4px;font-family:"Cinzel",serif}
+.hr-class-option span{display:block;color:var(--text-soft);font-size:.82rem;line-height:1.25}
+.hr-class-paladin strong{color:#f1c46b}
+.hr-class-diviner strong{color:#c4a5ff}
+.hr-menu-card.hr-class-paladin .hr-menu-glyph{background:#f1c46b;box-shadow:inset 0 0 0 9px #805d24}
+.hr-menu-card.hr-class-diviner .hr-menu-glyph{background:#c4a5ff;box-shadow:inset 0 0 0 9px #5b4384}
+.hr-menu-new.sel{border-color:var(--g-accent);border-style:solid;color:var(--text)}
+.hr-menu .hr-character-menu{width:min(740px,100%);padding:12px 14px;display:grid;gap:8px}
 
 .hr-result{position:absolute;left:12px;right:12px;top:12px;z-index:3;
   padding:10px 14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
@@ -191,6 +214,9 @@
   .hr-menu-cards{grid-template-columns:repeat(2,minmax(0,1fr))}
   .hr-menu-card{min-height:120px}
   .hr-who{min-height:0}
+  .hr-class-options{grid-template-columns:1fr}
+  .hr-dream-rift{grid-template-columns:minmax(0,1fr) auto}
+  .hr-dream-rift .hr-times{grid-column:1 / -1;grid-row:2}
   .hr-keys{display:none}
 }
 

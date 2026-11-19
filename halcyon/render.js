@@ -15,7 +15,9 @@ export const COLORS = {
 	player: "#7fe3f0", playerCore: "#f4fdff", playerShot: "#c9f6ff",
 	chaser: "#e8573f", shooter: "#ef8a3a", radial: "#c8458f", boss: "#d63a5a",
 	enemyShot: "#ff5a4a", enemyShotHeavy: "#ff3d8b", tele: "rgba(255,90,74,.55)",
-	heal: "#6fd36a", bag: "#e9c25a", portal: "#9fe7ff",
+	heal: "#6fd36a", bag: "#e9c25a", portal: "#9fe7ff", dream: "#b9a7ff",
+	paladin: "#f1c46b", diviner: "#c4a5ff", shield: "rgba(241,196,107,.72)",
+	slow: "rgba(196,165,255,.2)", damage: "#ff9b8d",
 	hp: "#e2564e", mp: "#5a8de8", xp: "#9d8ff2", hudBack: "rgba(16,18,20,.72)",
 	// The town: cool flagstone, so the safe place never reads like a dungeon floor.
 	stone: "#56605c", stoneDark: "#515b57", townWall: "#2e3836", townWallTop: "#3c4845",
@@ -24,6 +26,12 @@ export const COLORS = {
 
 const SHALLOWS = { floorA: COLORS.sand, floorB: COLORS.sandDark, wall: COLORS.wall, wallTop: COLORS.wallTop };
 const TOWN = { floorA: COLORS.stone, floorB: COLORS.stoneDark, wall: COLORS.townWall, wallTop: COLORS.townWallTop };
+
+export function formatRiftTime(ticks) {
+	const seconds = Math.max(0, Number(ticks) || 0) / 60;
+	const minutes = Math.floor(seconds / 60);
+	return `${minutes}:${(seconds - minutes * 60).toFixed(1).padStart(4, "0")}`;
+}
 
 /* The map, drawn tile by tile for ONLY the tiles on screen, every frame — about
  * 250 rectangles. It used to be baked once into one canvas the size of the whole
@@ -82,6 +90,16 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here }) {
 
 	g.fillStyle = "#1b2220"; g.fillRect(0, 0, width, height);
 	drawMap(g, st, ox, oy, px, width, height);
+	if (st.slowUntil > st.tick) {
+		circle(g, sx(pp.x), sy(pp.y), px * 3, COLORS.slow);
+		g.strokeStyle = COLORS.diviner; g.lineWidth = Math.max(1, px * 0.05);
+		g.beginPath(); g.arc(sx(pp.x), sy(pp.y), px * 3, 0, Math.PI * 2); g.stroke();
+	}
+	if (st.shield) {
+		circle(g, sx(st.shield.x), sy(st.shield.y), px * st.shield.r, COLORS.shield);
+		g.strokeStyle = "#fff0b7"; g.lineWidth = Math.max(2, px * 0.08);
+		g.beginPath(); g.arc(sx(st.shield.x), sy(st.shield.y), px * st.shield.r, 0, Math.PI * 2); g.stroke();
+	}
 
 	for (const h of st.pickups) {                     // healing: green, a cross
 		const X = sx(h.x), Y = sy(h.y), s = px * 0.16;
@@ -135,9 +153,10 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here }) {
 		}
 	}
 
-	drawPlayer(g, p, sx(pp.x), sy(pp.y), px, aim);
+	drawPlayer(g, p, sx(pp.x), sy(pp.y), px, aim, st.classId);
 
 	drawShots(g, st.bullets, sx, sy, px, at);
+	drawDamageNumbers(g, st.damageNumbers || [], sx, sy, px, st.tick);
 	drawHud(g, st, { width, height, px, notes });
 }
 
@@ -155,10 +174,11 @@ function drawShots(g, bullets, sx, sy, px, at) {
 }
 
 /* The player: cyan body, white core, a tick toward the aim. */
-function drawPlayer(g, p, PX, PY, px, aim) {
+function drawPlayer(g, p, PX, PY, px, aim, classId = "ranger") {
 	const pr = p.r * px;
+	const body = classId === "paladin" ? COLORS.paladin : classId === "diviner" ? COLORS.diviner : COLORS.player;
 	circle(g, PX, PY, pr + px * 0.06, p.hurt > 0 ? "#ffffff" : "#1d5f6a");
-	circle(g, PX, PY, pr, COLORS.player);
+	circle(g, PX, PY, pr, body);
 	circle(g, PX, PY, pr * 0.42, COLORS.playerCore);
 	if (aim) {
 		const l = Math.hypot(aim.x, aim.y) || 1;
@@ -166,6 +186,18 @@ function drawPlayer(g, p, PX, PY, px, aim) {
 		g.beginPath(); g.moveTo(PX + aim.x / l * pr * 1.2, PY + aim.y / l * pr * 1.2);
 		g.lineTo(PX + aim.x / l * pr * 1.9, PY + aim.y / l * pr * 1.9); g.stroke();
 	}
+}
+
+function drawDamageNumbers(g, numbers, sx, sy, px, tick) {
+	g.font = `bold ${Math.round(Math.max(13, px * 0.38))}px "Crimson Pro", Georgia, serif`;
+	g.textAlign = "center"; g.textBaseline = "middle";
+	for (const f of numbers) {
+		const rise = (45 - (f.until - tick)) * 0.018;
+		const text = Number.isInteger(f.amount) ? `-${f.amount}` : `-${f.amount.toFixed(1)}`;
+		g.fillStyle = "rgba(16,18,20,.8)"; g.fillText(text, sx(f.x) + 1, sy(f.y - 0.55 - rise) + 1.5);
+		g.fillStyle = COLORS.damage; g.fillText(text, sx(f.x), sy(f.y - 0.55 - rise));
+	}
+	g.textAlign = "left";
 }
 
 function label(g, text, X, Y, px, color = "#f4efe4") {
@@ -178,7 +210,7 @@ function label(g, text, X, Y, px, color = "#f4efe4") {
 
 /* The town (town.js): flagstones, the vault, the forge, a portal per realm. The
  * station in reach glows, and the prompt for it sits at the bottom of the view. */
-const PROMPT = { vault: "Open the vault", forge: "Use the forge", portal: "Enter" };
+const PROMPT = { vault: "Open the vault", forge: "Use the forge", dream: "Practice a rift", portal: "Enter" };
 export function drawTown(g, st, { width, height, px, at = here, notes = [], prompt = null, aim = null, dps = () => 0 }) {
 	const pp = at(st.p);
 	const { ox, oy } = camera(st, width, height, px, pp);
@@ -188,10 +220,11 @@ export function drawTown(g, st, { width, height, px, at = here, notes = [], prom
 
 	for (const s of st.stations) {
 		const X = sx(s.x), Y = sy(s.y), lit = st.near === s.id;
-		if (s.kind === "portal") {
+		if (s.kind === "portal" || s.kind === "dream") {
 			const pulse = 0.5 + 0.5 * Math.sin(st.tick / 14);
+			const core = s.kind === "dream" ? COLORS.dream : COLORS.realm;
 			circle(g, X, Y, px * (0.95 + 0.12 * pulse), lit ? "rgba(205,198,251,.45)" : "rgba(157,143,242,.28)");
-			circle(g, X, Y, px * 0.7, COLORS.realm);
+			circle(g, X, Y, px * 0.7, core);
 			circle(g, X, Y, px * 0.48, "#2a2350");
 			circle(g, X, Y, px * (0.2 + 0.06 * pulse), COLORS.portal);
 		} else {
@@ -225,7 +258,7 @@ export function drawTown(g, st, { width, height, px, at = here, notes = [], prom
 		// Below the stake: the hit numbers float up from above the post.
 		if (d > 0) label(g, `${d} / s`, X, Y + R * 1.3 + px * 0.38, px, "#e9c25a");
 	}
-	drawPlayer(g, st.p, sx(pp.x), sy(pp.y), px, aim);
+	drawPlayer(g, st.p, sx(pp.x), sy(pp.y), px, aim, st.classId);
 	drawShots(g, st.bullets, sx, sy, px, at);
 	g.font = `bold ${Math.round(Math.max(12, px * 0.4))}px "Crimson Pro", Georgia, serif`;
 	g.textAlign = "center"; g.textBaseline = "middle";
@@ -249,7 +282,8 @@ export function drawTown(g, st, { width, height, px, at = here, notes = [], prom
 /* What the prompt for a station says, given whether it can be used now. */
 export function promptFor(station, ready = true) {
 	if (!station) return null;
-	if (station.kind === "portal") return ready ? `E — Enter ${station.label}` : "Make a Ranger to enter";
+	if (station.kind === "portal") return ready ? `E — Enter ${station.label}` : "Make a character to enter";
+	if (station.kind === "dream") return ready ? `E — ${PROMPT.dream}` : "Make a character to practice";
 	return `E — ${PROMPT[station.kind]}`;
 }
 
@@ -276,6 +310,10 @@ function drawHud(g, st, { width, height, px, notes }) {
 	g.textAlign = "right"; g.fillStyle = "#f4efe4";
 	g.fillText(`Lv ${st.hero.level}`, X + W - 6, Y + H / 2 + 1);
 	g.textAlign = "left";
+	const timer = formatRiftTime(st.bossTimeTicks == null ? st.elapsedTicks : st.bossTimeTicks);
+	g.fillStyle = COLORS.hudBack; g.fillRect(width - 154, 16, 138, 30);
+	g.fillStyle = "#f4efe4"; g.font = `${Math.round(Math.max(13, px * 0.38))}px "Crimson Pro", Georgia, serif`;
+	g.fillText(`${st.practice ? "Dream " : "Rift "}${timer}`, width - 144, 31);
 
 	drawNotes(g, notes, width, height, px);
 }

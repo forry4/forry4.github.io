@@ -274,6 +274,40 @@ def test_death_destroys_everything_carried_and_nothing_in_the_vault(db, me):
     assert_invariants(db)
 
 
+def test_a_dream_rift_death_is_a_safe_return_to_town(db, me):
+    item = S.grant_item(db, ME, BOW, ("inventory", me["char_id"], 0))
+    run = S.start_run(db, ME, me["char_id"], "shallows", "dream-death", _dungeon(), practice=True)
+    out = S.apply_events(db, ME, run["run_id"], [{"seq": 1, "type": "drop_item", "item": item["item_id"]},
+                                                   {"seq": 2, "type": "death"}])
+    assert out["status"] == "died"
+    assert _char(db, me["char_id"]) == {"level": 1, "xp": 0, "status": "alive"}
+    assert [(i["base_id"], i["loc"]) for i in _live(db)] == [("shortbow", "inventory")]
+    assert not _rows(db, "SELECT * FROM hr_items WHERE destroyed_reason='death'")
+
+
+def test_a_dream_rift_gives_no_rewards_or_xp_and_records_a_boss_time(db, me):
+    run = S.start_run(db, ME, me["char_id"], "shallows", "dream-clear", _dungeon(), practice=True)
+    out = S.apply_events(db, ME, run["run_id"], [
+        {"seq": 1, "type": "kill", "enemy": "boss", "elapsed_ticks": 321},
+        {"seq": 2, "type": "pickup", "drop": "d3", "slot": 0},
+        {"seq": 3, "type": "complete"},
+    ])
+    assert out["status"] == "completed" and out["refused"] == [2]
+    assert _char(db, me["char_id"]) == {"level": 1, "xp": 0, "status": "alive"}
+    assert _live(db) == []
+    assert S.owner_view(db, ME)["leaderboards"] == {"shallows": [{"time_ticks": 321, "practice": True}]}
+
+
+def test_a_personal_rift_leaderboard_keeps_only_the_five_fastest_times(db, me):
+    for n, ticks in enumerate((500, 100, 300, 200, 50, 600), start=1):
+        run = S.start_run(db, ME, me["char_id"], "shallows", f"time-{n}", _dungeon(), practice=True)
+        S.apply_events(db, ME, run["run_id"], [
+            {"seq": 1, "type": "kill", "enemy": "boss", "elapsed_ticks": ticks},
+            {"seq": 2, "type": "complete"},
+        ])
+    assert [x["time_ticks"] for x in S.owner_view(db, ME)["leaderboards"]["shallows"]] == [50, 100, 200, 300, 500]
+
+
 def test_a_death_that_fails_half_way_changes_nothing(db, me):
     run = _carrying(db, me["char_id"])
     before = _snapshot(db)

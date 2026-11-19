@@ -10222,7 +10222,7 @@ try {
 	//     here as a refused solve — and the blue "fewest moves" row that only its owner
 	//     sees (checked again from a second viewer, who must not see it).
 	// HALCYON RIFT — the greybox, end to end on the real backend: a guest roster is
-	// minted, a Ranger is made with its starter gear, the Shallows are entered and
+	// minted, the character menu makes a Ranger with its starter gear, the Shallows are entered and
 	// DRAWN, the player walks, and R recalls — and the run's reports reach the server
 	// (the device's queue empties) and the Ranger is still alive in town afterwards.
 	// The simulation's own rules are node unit tests (halcyonSim.test.mjs); this is
@@ -10279,6 +10279,10 @@ try {
 		check("the menu offers four character slots, all empty for a new guest",
 			await page.locator(".hr-menu-card").count() === 4 && await page.locator(".hr-menu-new").count() === 4);
 		await page.locator(".hr-menu-new").first().click().catch(() => {});
+		const classMenu = await page.waitForSelector(".hr-menu .hr-character-menu", { timeout: 5_000 }).then(() => true).catch(() => false);
+		check("an empty slot opens the class choice on the menu, all three classes offered",
+			classMenu && await page.locator(".hr-class-option").count() === 3);
+		await page.locator(".hr-class-option.hr-class-ranger").click().catch(() => {});
 		const town = await page.waitForSelector(".halcyon .hr-main .hr-canvas", { timeout: 15_000 }).then(() => true).catch(() => false);
 		check("making a Ranger goes straight to the town, the inventory beside the stage and no vault until it is opened",
 			town && await page.locator(".hr-side .hr-grid-inv .hr-slot").count() === 16 && await page.locator(".hr-grid-vault").count() === 0);
@@ -10286,7 +10290,7 @@ try {
 		check("the town is drawn on the stage (a walkable plaza, not one flat fill)", townPaint.colors >= 6, JSON.stringify(townPaint));
 		const geared = await page.waitForFunction(() => document.querySelectorAll(".hr-equip .hr-slot.has").length === 3,
 			null, { timeout: 15_000 }).then(() => true).catch(() => false);
-		check("a new Ranger is made wearing its three starter items", geared);
+		check("the character menu makes a Ranger wearing its three starter items", geared);
 		const meter = await page.locator(".hr-who .hr-xp").first()
 			.evaluate((m) => [m.getAttribute("aria-valuenow"), m.getAttribute("aria-valuemax")]).catch(() => null);
 		check("its XP toward level 2 is shown, off the server's level table",

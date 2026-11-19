@@ -7,8 +7,8 @@ docs. This file is the code's half.
 
 ## Where it stands (2026-11-18)
 
-A playable **greybox**: colored shapes on the real architecture. Admin-only on the
-menu; `/halcyon` works for anyone who has the link (guests included).
+A playable **greybox**: colored shapes on the real architecture. Public on the menu
+since 2026-11-18; guests play without an account.
 
 | File | What it is |
 |---|---|
@@ -18,15 +18,15 @@ menu; `/halcyon` works for anyone who has the link (guests included).
 | `api.py` | `setup_halcyon` — guest mint, state, characters (with starter gear), runs, run events, move/discard/fuse. Plain `def` routes |
 | `sim.js` | the fight: PURE, deterministic, fixed 60 Hz (design §18.5). No DOM, no clock, no Math.random/sin/cos/atan2 |
 | `render.js` | Canvas 2D drawing of the sim's state (and the town's) in the art doc's color roles; never changes it |
-| `town.js` | the walkable town: a plaza, its stations (vault, forge, one portal per realm in `REALMS`), `stepTown` |
+| `town.js` | the walkable town: a plaza, its stations (vault, forge, Dream Rift gate, one portal per realm in `REALMS`), `stepTown` |
 | `client.js` | who is asking (Bearer or the guest pair) and the run's event QUEUE |
 | `HalcyonRift.jsx` / `.css` | one screen: the stage (town or dungeon, with the vault / forge / discard panels over it) and the side panel (equipment, inventory); before both, the main menu |
 
-Tests: `tests/` (store, dungeon, routes, the sim fixtures' freshness),
+Tests: `tests/` (store, dungeon, routes, class/practice/time rules, the sim fixtures' freshness),
 `webapp/test/unit/halcyonSim.test.mjs` + `halcyonTown.test.mjs` + `halcyonClient.test.mjs`
-(node), and `halcyonPlay` in `webapp/test/screens.mjs` (guest → Ranger → walk to the
+(node), and `halcyonPlay` in `webapp/test/screens.mjs` (guest → character menu → Ranger → walk to the
 vault → drag the bow in and back → the no-scroll sizes → walk to the portal → Shallows →
-drag the vest off mid-run → recall → reload, the vest still off).
+drag the vest off mid-run → put it on the ground and take it back → recall → reload, the vest still off).
 
 ## The browser half's rules (do not regress)
 
@@ -108,8 +108,11 @@ drag the vest off mid-run → recall → reload, the vest still off).
   (item, tier or slot count). Leaving the forge drops the picks.
 - **Two STANDARD weapon types per class, plus uniques** (owner's calls, 2026-11-18). The
   Ranger's are the shortbow (twin fanned arrows, fast, range 5) and the longbow (one
-  heavy slow arrow that pierces two, range 7 — the longest). The repeater (a three-bolt
-  burst, range 6) is a rare UNIQUE drop. **A base's kind belongs to the base**:
+  heavy slow arrow that pierces two, range 7 — the longest); Paladin has the short-range
+  mace and greatsword; Diviner has the wand and the range-8 starstaff. Paladin's ability
+  plants a shield in front of the character for five seconds or one enemy projectile;
+  Diviner's ability slows enemy projectiles within three tiles while active. The repeater
+  (a three-bolt burst, range 6) is a rare UNIQUE drop. **A base's kind belongs to the base**:
   `store.init_schema` brings existing items into line with `content.py` (kind, and
   tier 1 for a unique), so an item minted before a base changed kind follows it (tested).
 - **A unique is named, not tiered.** It always drops at tier 1, its slot is a gold face
@@ -121,9 +124,11 @@ drag the vest off mid-run → recall → reload, the vest still off).
   percentages"). Attack and Dexterity are POINTS; each is worth 1/`STAT_SCALE` (25) more
   damage or shots a second. Damage per arrow, the points and every enchantment are whole
   numbers — an enchantment's value is `sim.enchantValue(id, q)` off `ENCHANT_FLAT`, so the
-  store still keeps only quality. The side panel's stats row (HP, MP, ATT, DEX, DEF, DMG,
-  RATE, RNG) is `statsFor` of what is on, so it is what the fight will use. Points apply
-  after the loop over gear, so gear order cannot change a number (tested).
+  store still keeps only quality. HP/MP regeneration is the one intentional exception: it
+  is tunable to one decimal place and displayed as `/s`. The side panel's stats row (ATT,
+  DEX, DEF over DMG, RATE — range is in the weapon's tooltip) is `statsFor` of what is on, so it is what the fight
+  will use. Points apply after the loop over gear, so gear order cannot change a number
+  (tested). Base MP regeneration is 2.5/s; the Ranger's Volley starts at 8 damage per arrow.
 - **HP and MP bars sit in the side panel**, under the character and above the stats,
   in town and in a run. HP is three parts: red what you have, light gray what
   regeneration can bring back (up to the recovery limit), dark gray what only a heal
@@ -133,6 +138,12 @@ drag the vest off mid-run → recall → reload, the vest still off).
 - **The town can be shot in** with the fight's own code (`sim.playerFire`, `wallHit`):
   the equipped weapon, the volley ability, two practice posts that float each hit's
   damage above them and show what the last three seconds came to a second below them.
+- **The Dream Rift gate** opens a menu of the available dungeons. Practice runs use the
+  real combat but grant no loot, XP, stats or item changes; death returns to town without
+  killing the character, and `drop_item` is refused by both the page and the store.
+- **Every rift has a deterministic timer.** It freezes on the boss-kill tick, not when the
+  player reaches or leaves the portal. The store keeps the five fastest personal times per
+  owner and dungeon; these are convenience data, not a competitive leaderboard.
 
 ## Levels and XP (2026-11-18, owner's calls on design §10.1 / §13.1)
 
@@ -201,14 +212,18 @@ exemptions: `NOT_TABLE_GAMES` in `shared/tests/test_profile_results.py` and
   `content.py` edit. Base and enchantment ids are never reused or deleted — only retired.
 - **Destroyed items are tombstones** with a reason (`death`/`fusion`/`discard`/
   `run_end`); a pruned GUEST is deleted outright.
+- **Dream runs are disposable.** `hr_runs.practice=1` prevents XP/loot/stat changes,
+  refuses item drops, and skips the character/item destruction path on death or completion.
+- **Boss times are personal only.** `hr_rift_times` keeps five fastest valid integer tick
+  claims per owner and dungeon and labels each as normal or practice. It is not a proof
+  boundary; competitive times would require a future replay/plausibility design.
 
 ## Not built yet (deliberately)
 
-Per-dungeon stat progress (§10.2 — no dungeon but the Shallows exists yet), dropping an
-item on the dungeon floor (the store takes `drop_item`/`pickup_item`; the page sends
-neither), touch controls
-(the dungeon is keyboard + mouse), the minimum-time plausibility checks (design §18.3),
-the input-log upload (§18.6), and hiding the drop table (above).
+Per-dungeon stat progress (§10.2 — no dungeon but the Shallows exists yet), competitive
+time validation, touch controls (the dungeon is keyboard + mouse), minimum-time
+plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop table
+(above), and art assets are not built yet.
 
 ## The main menu, keys and waking (2026-11-18)
 - **The page opens on a main menu** (`.hr-menu`): one card per character slot — a

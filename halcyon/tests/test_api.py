@@ -73,6 +73,7 @@ def test_the_whole_loop_through_the_routes(app):
     who = owner_dep(app)("tok", None, None)
     ch = route(app, "POST", "/halcyon/characters")(A.CharacterIn(slot=0), who)
     state = route(app, "GET", "/halcyon/state")(who)
+    assert [c["id"] for c in state["classes"]] == ["ranger", "paladin", "diviner"]
     gear = {i["equip_slot"]: i["base_id"] for i in state["items"] if i["loc"] == "equipped"}
     assert gear == {"weapon": "longbow", "armor": "leather_vest", "ability": "volley_quiver"}
     assert [c["char_id"] for c in state["characters"]] == [ch["char_id"]]
@@ -97,6 +98,16 @@ def test_the_whole_loop_through_the_routes(app):
         route(app, "POST", "/halcyon/items/{item_id}/move")(
             loot["item_id"], A.MoveIn(to=["vault", 4], version=loot["version"]), who)
     assert e.value.status_code == 409
+
+
+def test_character_menu_starts_class_specific_practice_runs(app):
+    who = owner_dep(app)("tok", None, None)
+    ch = route(app, "POST", "/halcyon/characters")(A.CharacterIn(slot=0, class_id="paladin"), who)
+    state = route(app, "GET", "/halcyon/state")(who)
+    gear = {i["equip_slot"]: i["base_id"] for i in state["items"] if i["loc"] == "equipped"}
+    assert gear == {"weapon": "mace", "armor": "plate_armor", "ability": "grounding_aegis"}
+    run = route(app, "POST", "/halcyon/runs")(A.RunIn(char_id=ch["char_id"], practice=True), who)
+    assert run["practice"] is True and run["class_id"] == "paladin" and run["dungeon"]["class_id"] == "paladin"
 
 
 def test_refusals_are_409_with_a_readable_reason(app):

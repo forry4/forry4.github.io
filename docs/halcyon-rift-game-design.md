@@ -1,6 +1,6 @@
 # Halcyon Rift — Game Design Document
 
-Status: Concept and pre-implementation design — the architecture-shaping decisions are now made (2026-11-18); the numbers are deliberately left to the greybox prototype  
+Status: Greybox validation design — the core architecture and first playable rules are implemented; balance numbers remain provisional (2026-11-18)
 Last updated: 2026-11-18  
 Working name: Halcyon Rift  
 Audience: Future collaborators and AI agents  
@@ -18,7 +18,7 @@ It is intentionally written as a handoff document. A future AI should use it to 
 - which decisions must not be casually changed;
 - what should be discussed before implementation begins.
 
-This is still a design-phase document. No implementation should begin merely because a system is mentioned here. Open questions should be resolved first, and tentative recommendations should not be treated as settled rules.
+An admin-only greybox now exercises the core loop on the real site architecture. This document is the source of truth for the rules it exposes: DECIDED items constrain implementation, while OPEN items are tuning or production decisions that should be resolved through play and explicit discussion rather than invented ad hoc.
 
 ### Decision labels
 
@@ -33,7 +33,7 @@ When a later user decision conflicts with an older recommendation, the later use
 
 Halcyon Rift is a browser-first, desktop-only, top-down projectile-focused action RPG and procedural dungeon crawler.
 
-Players maintain a roster of persistent characters. Each character belongs to one class and can never change class. A character enters short, finite, named dungeons, fights enemies, collects class-appropriate gear, gains experience, and decides whether to safely recall or push toward the boss for better rewards.
+Players maintain a roster of persistent characters. Each character belongs to one class and can never change class. The current slice offers Ranger, Paladin, and Diviner. A character enters short, finite, named dungeons, fights enemies, collects class-appropriate gear, gains experience, and decides whether to safely recall or push toward the boss for better rewards. Town also offers Dream Rift practice runs: the same combat with no progression or loss.
 
 Death permanently destroys the character. Everything carried by that character is lost, including equipment, inventory, level, and stat progression. Equipment stored in the account-wide vault survives and can be used by future characters.
 
@@ -41,11 +41,11 @@ The game is inspired by the combat, projectile patterns, permadeath, classes, pr
 
 ### Core elevator pitch
 
-> A browser-based, top-down, bullet-heavy action RPG where one to four players explore dangerous procedural worlds, defeat bosses, collect equipment, and risk losing their current character when they die.
+> A browser-based, top-down, bullet-heavy action RPG where players choose a class, explore dangerous procedural worlds, defeat bosses, collect equipment, and risk losing their current character when they die.
 
 The more precise current description is:
 
-> A casual but dangerous character-permadeath dungeon crawler where players build a roster, choose their own dungeons, extract loot by recalling to town, and risk everything carried by a character when pushing for boss rewards.
+> A casual but dangerous character-permadeath dungeon crawler where players build a roster, choose their own dungeons, practice safely when they want, extract loot by recalling to town, and risk everything carried by a character when pushing for boss rewards.
 
 ## 3. Product identity and design pillars
 
@@ -128,7 +128,7 @@ The following are not part of the initial product direction:
 - a large account-wide power tree;
 - mandatory party composition;
 - a required progression path through dungeons;
-- status effects in the initial combat system;
+- a broad status-effect system; the initial slice has one deliberate exception: the Diviner's projectile slow;
 - complicated cooldown management;
 - automatic loot collection.
 
@@ -199,7 +199,8 @@ The intended loop is:
 11. Complete the dungeon for its best rewards, or die and lose the character.
 12. Return to town.
 13. Sort, equip, vault, discard, or fuse gear.
-14. Repeat with the same character or create a replacement.
+14. Review the personal fastest-time board, practice any rift in a Dream Rift, or create a replacement.
+15. Repeat with the same character.
 
 ### 6.1 Town
 
@@ -212,6 +213,7 @@ Town is the safe management space. It should provide:
 - equipment management;
 - inventory management;
 - item fusion;
+- a Dream Rift practice gate that can launch any available rift without rewards or character loss;
 - the ability to discard or reorganize gear;
 - future co-op party entry, if co-op is later added.
 
@@ -229,6 +231,7 @@ Dungeons are:
 - playable without a mandatory order;
 - designed around a specific difficulty and loot profile;
 - ended by a boss encounter.
+- timed from the start of the run until the boss dies; leaving afterward does not change the time.
 
 DECIDED (2026-11-18): harder dungeons are harder to complete AND longer — more rooms, denser patterns, more boss phases. A longer dungeon also means more carried loot at stake by the time the boss is reached, which is the point.
 
@@ -244,8 +247,8 @@ DECIDED:
 - A character belongs permanently to one class.
 - A character cannot change class.
 - A new character can be created after another dies.
-- The initial game begins with one class.
-- The first class planned for the initial content slice is Ranger, but class-specific design is intentionally outside the current general-design discussion.
+- The initial content slice has three class choices: Ranger, Paladin, and Diviner.
+- The character-creation menu is class-based even while the roster and class list are small.
 - **Guests can play** (2026-11-18). A guest's roster and vault are pruned 24 hours after their last activity, as guest games are everywhere else on the site, and do not carry over if the guest later makes an account (a site-wide limitation, not one specific to this game). Accounts keep theirs indefinitely. See §20.1 for how a guest proves the roster is theirs.
 
 ### 7.2 Character death
@@ -275,6 +278,16 @@ Rebuilding should be fast enough that death does not end a play session. A new c
 - survive through skillful play even when undergeared.
 
 Veteran characters should have a meaningful advantage, but not such a large advantage that a new character is instantly killed or irrelevant.
+
+### 7.4 Initial classes
+
+DECIDED for the first playable slice:
+
+- **Ranger:** ranged fighter. The starter Shortbow is the quick, shorter-range option and Volley is the class ability.
+- **Paladin:** melee fighter. The starter Mace has a shorter range than the ranged classes. The Grounding Aegis ability places a shield on the ground in front of the Paladin. The shield lasts five seconds or until it absorbs one enemy projectile. It is not solid: the Paladin can walk through it and fire through it.
+- **Diviner:** mage. The starter Starstaff has range 8 tiles. The class ability creates a three-tile aura around the Diviner that slows enemy projectiles while it is active.
+
+All three classes are class-locked, can solo the initial dungeon, and use the same five equipment slots. Their base numbers, MP cost, and exact combat tuning are greybox values. The current Diviner slow duration is five seconds; its final duration and scaling remain OPEN.
 
 ## 8. Combat rules
 
@@ -346,6 +359,14 @@ DECIDED:
 - Abilities can be used while basic attacks continue.
 - Mana regeneration is constant but slow.
 
+The first class abilities are deliberately readable rather than rotation-heavy:
+
+- Ranger fires a multi-arrow Volley.
+- Paladin places the one-projectile Grounding Aegis shield described in §7.4.
+- Diviner slows enemy projectiles inside the three-tile aura described in §7.4.
+
+The greybox Ranger Volley starts at 8 damage per arrow before scaling, and base MP regeneration starts at 2.5 MP/s. These are deliberately conservative tuning points, not final balance claims.
+
 The mana cost is the primary limiter for the initial ability system. Some future abilities may have cooldowns if necessary, but cooldowns should not become the dominant management system.
 
 OPEN:
@@ -359,7 +380,7 @@ OPEN:
 
 ### 8.5 Status effects
 
-Status effects are deferred. The initial combat system should avoid poison, stun, silence, slow, root, burn, and similar effects unless a specific future design discussion adds them.
+A broad status-effect system is deferred. The initial slice intentionally includes only the Diviner's enemy-projectile slow, because it is local, visual, and part of the class identity. Poison, stun, silence, root, burn, and similar effects remain out of scope unless a future design discussion adds them.
 
 ## 9. Health, healing, and mana
 
@@ -409,6 +430,7 @@ DECIDED:
 - It restores current HP only.
 - It cannot raise the recovery limit.
 - It stops restoring health when current HP reaches the recovery limit.
+- HP/MP-per-second values may use one decimal place; the UI displays that precision. The current greybox base values are 1.0 HP/s and 2.5 MP/s.
 
 ### 9.4 Map pickups
 
@@ -434,6 +456,7 @@ DECIDED:
 - Abilities consume MP.
 - Mana regeneration is constant but slow.
 - Mana regeneration can be improved through stats or enchantments.
+- The current greybox reduces base MP regeneration to 2.5 MP/s so ability timing is tunable without coarse whole-number jumps.
 
 OPEN:
 
@@ -694,8 +717,7 @@ What keeps instant recall from removing the risk is the combat design, not a rec
 OPEN:
 
 - whether a boss arena prevents walking out (recall still works);
-- whether any completion rewards are granted immediately on boss death or after a formal completion state;
-- ~~whether recall preserves experience gained during the current instance~~ — it does (§10.1, 2026-11-18).
+- whether any future completion-only stat rewards are granted immediately on boss death or after a formal completion state.
 
 The intended design is that recall is a safe extraction option, not a failure. The player gives up the remaining dungeon and its completion rewards in exchange for safety.
 
@@ -707,22 +729,34 @@ Every way of leaving a dungeon other than dying counts as a recall:
 - **Server restart, deploy or Render cold start during a run:** not an event at all from the player's side. The dungeon runs in the browser (§18); its reports queue up and are delivered when the server is back. If the tab is also closed before then, the queue is kept on the device and sent on the next visit.
 - **A bug that kills a character:** the death stands. There is no restore tool. (Owner's call. The input log in §18.6 exists so the bug can be found and fixed.)
 
-Since a modified client could also suppress its own death report, "close the tab to survive" is possible for a cheater. That is accepted: it gains nothing an honest player cannot get by pressing recall, and with no trading, PvP or leaderboard it only affects the cheater.
+Since a modified client could also suppress its own death report, "close the tab to survive" is possible for a cheater. That is accepted: it gains nothing an honest player cannot get by pressing recall, and personal times are not a competitive leaderboard.
 
 ### 13.2 Completion
 
-The likely completion condition is:
+DECIDED for the greybox:
 
-- reach the boss;
-- defeat the boss;
-- receive the dungeon's completion rewards;
-- return to town or enter a completed state.
+- Defeating the boss opens an exit but does not end the run immediately.
+- The timer freezes on the boss-kill tick.
+- The player must reach the exit and press E to complete the rift.
+- Completion awards the dungeon bonus XP and preserves collected loot.
+- Recalling after the boss dies keeps the boss time but gives up the completion bonus.
 
-The exact reward timing is OPEN.
+Future completion-only stat rewards may be granted on the formal completion event; that timing remains OPEN.
 
 ### 13.3 Death
 
 Death immediately ends the character's run and permanently deletes the character. Any loot on the ground, carried by the character, or equipped by the character is lost. Vault contents remain unaffected.
+
+### 13.4 Dream Rift practice mode
+
+DECIDED:
+
+- Town has a Dream Rift station where the player chooses any available rift.
+- A Dream Rift uses the same dungeon and combat simulation as a normal run.
+- It gives no loot, XP, stat progress, item changes, or other completion reward.
+- It has no permadeath. Dying closes the practice run and returns the player to town with the character, gear, level, and XP unchanged.
+- Items cannot be dropped in a Dream Rift. Gear swapping for testing is allowed, but it cannot create or destroy an item.
+- Practice completion returns to town normally and still gives nothing.
 
 ## 14. Dungeon design
 
@@ -804,6 +838,15 @@ DECIDED:
 
 RECOMMENDED naming convention: name dungeons by **how deep into the Rift they go** — the Shallows first, the deepest at the end (for example: Shallows, Fissure, Chasm, the Deep). That gives the title its meaning, and it tells a player how dangerous a dungeon is before they enter, without a progression gate (§3.1, player agency). Not every dungeon has to fit the ladder, but the easiest and hardest ones should.
 - Detailed room, enemy, boss, and loot design remains open.
+
+### 14.5 Rift timers and personal times
+
+DECIDED for the first slice:
+
+- Every rift has a visible timer measured in deterministic simulation ticks and displayed as minutes plus one decimal second.
+- The timer starts when the browser simulation starts and stops on the tick that the boss dies. Walking to the exit, recalling, or completing afterward does not change it.
+- Town shows the player's five fastest recorded boss-kill times for each dungeon, fastest first.
+- Each time is tagged as a normal Rift or a Dream Rift. The board is personal convenience data, not a competitive ranking or a reward authority; it does not make client-reported times trustworthy for competition.
 
 ## 15. Enemy and boss philosophy
 
@@ -936,13 +979,14 @@ The rest of the site is server-authoritative, so this needs saying. A server-run
 1. **Hosting.** The backend is one Python process on Render's free tier — a fraction of one CPU and 512 MB — sharing one event loop with twelve live board games. A frozen loop has already taken the site down (root `CLAUDE.md`, the CoC outage). A 30–60 Hz simulation of hundreds of projectiles per dungeon in that process is exactly the load that rule exists to keep out.
 2. **Feel.** Dodging bullets against a server 100 ms or more away needs client prediction, reconciliation and lag compensation to feel fair. That is a large, subtle system, and getting it wrong breaks the "readable, fair" pillar directly. A local simulation has zero input latency.
 3. **Restarts.** Render restarts the process on every deploy, often several times a day. A server-run dungeon would end on every deploy; a browser-run one does not notice (§13.1a).
-4. **Threat model.** There is no trading, PvP, leaderboard or currency, so a cheater can only affect their own characters. That is the same argument the site already uses for running its strongest bots in the browser (root `CLAUDE.md`, "Client-side AI is safe because…"). The game-it-is-modeled-on famously decided player hits on the client too.
+4. **Threat model.** There is no trading, PvP, competitive leaderboard or currency, so a cheater can only affect their own characters. Personal five-best times are deliberately non-competitive convenience data. That is the same argument the site already uses for running its strongest bots in the browser (root `CLAUDE.md`, "Client-side AI is safe because…"). The game-it-is-modeled-on famously decided player hits on the client too.
 
 ### 18.2 What the server does
 
 - **Starts a run.** It checks the character is alive and not already in a run, picks a fresh seed, and **generates the dungeon itself** (Python): the room sequence, every enemy with a stable id and type, and the pre-rolled drop for every enemy, boss and chest. It stores that and sends the client the full description.
 - **Applies run events** (§18.4) idempotently, against its own copy of the dungeon.
 - **Owns all persistent state** — characters, items, vault, XP, stat progress (§20.1) — and every town operation (equip, vault, fuse, discard).
+- **Stores personal rift times** — at most the five fastest boss-kill times per owner and dungeon. These times are not used to grant rewards or establish a competitive ranking.
 - **Derives every reward.** "I killed enemy 17" is a claim it checks; the XP and the drop for enemy 17 come from its own record. No request can name an item, an XP amount or a stat value.
 
 Because the server generates the dungeon, there is exactly one dungeon generator and one loot roller, both in Python. The browser never needs either.
@@ -953,15 +997,15 @@ Because the server generates the dungeon, there is exactly one dungeon generator
 - each is claimed at most once;
 - a drop is picked up only after its enemy was killed;
 - completion only after the boss kill;
-- rooms and the whole run are not cleared faster than a floor time;
+- normal reward claims still obey the run's event and ownership rules; the personal timer is recorded from the client's boss-kill tick but is not a competitive anti-cheat boundary;
 - one open run per character; a closed run accepts nothing.
 
-A modified client can still claim kills it did not earn. That is accepted (§18.1, point 4). Full proof — the server replaying the run's inputs — stays possible later (§18.6) if co-op or a leaderboard ever needs it.
+A modified client can still claim kills it did not earn. That is accepted (§18.1, point 4). Full proof — the server replaying the run's inputs — stays possible later (§18.6) if co-op or a competitive leaderboard ever needs it.
 
 ### 18.4 Transport and the run lifecycle
 
 - **Plain HTTP, not a WebSocket, for solo.** No in-memory room, no `ROOM_LOCK`. Every route is a plain `def` (root `CLAUDE.md`: a route only takes the event loop when it must).
-- The client keeps a **queue of run events** — `kill`, `pickup`, `drop_item`, `move_item`, `boss_kill`, `recall`, `death`, `complete` — each numbered by a per-run sequence number. It flushes the queue every few seconds and immediately on recall, death or completion.
+- The client keeps a **queue of run events** — `kill` (including `elapsed_ticks` when it is the boss kill), `pickup`, `drop_item`, `move`, `pickup_item`, `recall`, `death`, `complete` — each numbered by a per-run sequence number. It flushes the queue every few seconds and immediately on recall, death or completion.
 - The server applies a batch only past its last applied sequence number, so **re-sending is always safe**. That is what makes retry after a restart or a dropped connection correct rather than merely likely.
 - The queue is written to `localStorage` before it is sent, so closing the tab does not lose it. On the next visit the backlog is sent first.
 - The death event is queued **before** the death screen is shown.
@@ -1020,7 +1064,7 @@ The major item sinks are:
 
 The game still has to protect the item store from **duplication and silent loss**, because the vault is permanent from the first build. That is why item identity is designed now (2026-11-18) rather than "eventually".
 
-### 20.1 The persistent model — RECOMMENDED schema
+### 20.1 The persistent model — IMPLEMENTED greybox schema
 
 Table names are prefixed `hr_`. Column lists are the contract; exact types follow the site's existing tables.
 
@@ -1055,8 +1099,12 @@ Uniqueness that enforces the invariants in the database itself, not just in code
 Destroyed items are kept as tombstones, not deleted, so "where did my sword go?" always has an answer. They are small; they can be pruned after ~90 days if storage ever matters.
 
 **`hr_runs`**
-- `run_id`, `char_id`, `owner_id`, `dungeon_id`, `seed`, `content_version`, `status` (`open` | `recalled` | `completed` | `died`), `started_at`, `last_event_at`, `last_seq`.
+- `run_id`, `char_id`, `owner_id`, `dungeon_id`, `seed`, `content_version`, `status` (`open` | `recalled` | `completed` | `died`), `practice`, `started_at`, `last_event_at`, `last_seq`.
 - `dungeon` — the server's generated dungeon: enemies, drops, and which have been killed and picked up.
+
+**`hr_rift_times`**
+- `owner_id`, `dungeon_id`, `run_id`, `time_ticks`, `practice`, and `created_at`.
+- A per-owner/dungeon query keeps only the five fastest boss-kill times. It is a personal display board, not a source of rewards or competitive truth.
 
 ### 20.2 Operations
 
@@ -1071,6 +1119,7 @@ Every operation is **one database transaction** (the Turso client in `core/db.py
 | `move` / `equip` / `swap` | Between vault, inventory and equipment. Checks class, the one-of-each-ring rule, and that the slot is free or swapped. |
 | `fuse(a, b)` | Checks same base, tier, kind and slot count, both owned, neither on a character in an open run. Destroys both (`fusion`) and mints one with `fused_from = [a, b]` — all or nothing. |
 | `death(run)` | Character → `dead`; every item equipped, carried or on `ground(run)` → `destroyed(death)`. The vault is not touched. |
+| `practice(run)` | Uses the normal dungeon event path but refuses loot pickup and item drops, grants no XP or stats, and leaves the character alive on death or completion. A boss kill may record a personal time. |
 
 Two rules about **who may move what**:
 - An item on a character who is in an open run can only be moved by that run's events. Town operations refuse it. (Another character can use the vault meanwhile.)
@@ -1085,6 +1134,8 @@ Two rules about **who may move what**:
 - re-sending any event batch changes anything;
 - a town operation moves an item on a character who is mid-run;
 - a client names an item, XP amount or stat value and the server accepts it.
+- a Dream Rift destroys a character, grants progression, mints loot, or accepts an item drop;
+- a time-board entry grants a reward or is treated as a competitive claim.
 
 The fusion and death tests run with a failure injected between the statements to prove the transaction leaves nothing half-done.
 
@@ -1126,6 +1177,9 @@ The initial minimum should cover:
 - dungeon completion rewards;
 - stat progression rewards;
 - XP progression;
+- class-specific starters and abilities;
+- Dream Rift safety (no rewards, no character loss, no item drops);
+- damage feedback, one-decimal HP/MP rates, boss-stop timers, and five-time personal boards;
 - procedural dungeon completeness;
 - basic browser rendering at several desktop sizes.
 
@@ -1145,9 +1199,7 @@ These are the most important unresolved items.
 - Which dungeons improve which stats?
 - Are stat rewards guaranteed or chance-based?
 - Can players choose a stat in some dungeons?
-- What is the exact XP curve from level 1 to 20?
-- Is XP awarded on enemy defeat, room completion, boss completion, or some combination?
-- Is XP retained after recall?
+- What is the exact XP curve from level 1 to 20 after greybox play?
 
 ### Health and resources
 
@@ -1157,11 +1209,11 @@ These are the most important unresolved items.
 - Are MP pickups needed?
 - Does HP or MP regeneration continue at the same rate while firing?
 - Can any future ability heal?
+- What is the final MP cost and duration of each class ability?
+- How much should the Diviner slow enemy projectiles?
 
 ### Loot and inventory
 
-- What exact interaction picks up an item?
-- Can the player reorganize inventory during combat?
 - How are full inventories communicated?
 - Can ordinary items be destroyed instantly?
 - How many items should a typical dungeon produce?
@@ -1179,6 +1231,12 @@ These are the most important unresolved items.
 - Which dungeon types grant each stat?
 - How much more efficient are late-game stat dungeons?
 - Does the boss arena prevent walking out? (Recall always works there — §13.1.)
+
+### Time boards and practice
+
+- Should personal times eventually separate normal and Dream Rift boards instead of labeling them together?
+- Should a future competitive board exist at all? If so, what server-verifiable replay or plausibility contract would it require?
+- What final duration and strength should the Diviner's slow use?
 
 ### Site
 
@@ -1203,13 +1261,13 @@ Revised 2026-11-18. The original order finalized numbers (stat caps, XP curve, p
 3. ~~Disconnects, restarts, bugs~~ — all count as recall; bugs stand (§13.1a). DONE.
 4. ~~Item identity and persistence~~ — §20.1–20.3. DONE.
 5. ~~The place on the site~~ — a catalog tile, built like an Extra in `halcyon/` (§20a). DONE.
-6. **Greybox prototype — colored shapes, no art.** BUILT 2026-11-18 (`halcyon/`, admin-only at `/halcyon`): movement, mouse aim with hold-to-fire and an auto-fire toggle, the Volley ability; chaser / aimed shooter / radial enemies; a two-phase boss (spiral and aimed fans, then a telegraphed nova); four combat rooms plus the boss room; heal orbs and loot bags (E); the recovery limit on the HUD; recall (R); death; a portal that needs E so walking to the boss's loot never ends the run. On the real architecture throughout. Its job is still to answer one question — *does moving and dodging feel good in a browser?* — and to produce the first real numbers; every number in `sim.js` is a placeholder until it has been played by a person.
-7. Then, from play: the stat-progression contract, XP and level pacing, health/recovery/pickup amounts, loot tables and enchantment ranges.
+6. **Greybox validation slice — colored shapes, no art.** BUILT 2026-11-18 (`halcyon/`, admin-only at `/halcyon`): town movement and stations; class creation for Ranger, Paladin, and Diviner; class-specific starters; mouse aim, hold-to-fire and auto-fire; class abilities; chaser / aimed shooter / radial enemies; a two-phase boss; four combat rooms plus the boss room; heal orbs and loot bags; visible damage feedback; the recovery limit; recall; Dream Rift practice; boss-stop timers and personal five-time boards. Its job is to answer the play-feel questions in a browser and produce the first real numbers.
+7. **Next: play and tune.** Decide the stat-progression contract, XP and level pacing, health/recovery/pickup amounts, class balance, loot tables, enchantment ranges, and the final presentation of the time board from observed play.
 8. Art runs in parallel with 6–7 (the art docs' Phase 0 and the anchor pack) and is swapped in for the shapes once approved.
 
 The first vertical slice should remain deliberately small:
 
-- one class;
+- three classes;
 - one dungeon;
 - a few enemy archetypes;
 - one boss;
@@ -1241,8 +1299,10 @@ When working on Halcyon Rift:
 13. The browser runs the fight; the server generates the dungeon and owns all persistent state (§18). Never let a request name an item, an XP amount or a stat value.
 14. Keep the simulation module deterministic and free of the DOM (§18.5).
 15. Every item operation is one transaction, and every run event is idempotent (§20.2, §18.4).
+16. Dream Rifts are disposable practice instances: no loot, XP, stats, item drops, or permadeath.
+17. A rift timer stops at boss death, and the personal board stores only the five fastest times per dungeon.
 
 ## 25. Current one-paragraph summary
 
-Halcyon Rift is a browser-based, desktop-only, top-down projectile action RPG and procedural dungeon crawler. Players maintain four class-locked characters, enter named dungeons from a town — harder ones are longer and can kill a careless character outright — manually collect class-appropriate gear, gain levels, and decide whether to recall (instant, always available) or continue toward a boss for better rewards. The browser runs the fight; the server generates each dungeon and owns every character and item. Characters permanently die with all carried gear, inventory, level, and stats, while a shared 64-slot vault protects equipment for future characters. Gear has five tiers and zero to four enchantments; duplicate matching items can be fused into rerolled versions. There are no currencies, shops, trading, narrative systems, PvP, or mandatory progression paths. Some mid- and late-game dungeon completions increase specific stats until a character's caps. The first version is single-player, but the design should remain compatible with future one-to-four-player co-op.
+Halcyon Rift is a browser-based, desktop-only, top-down projectile action RPG and procedural dungeon crawler. Players maintain four class-locked characters — currently Ranger, Paladin, and Diviner — and enter named dungeons from a town. Harder rifts are longer and can kill a careless character outright; Dream Rifts provide the same combat as safe practice with no rewards or losses. Players manually collect class-appropriate gear, gain levels, see damage taken, and decide whether to recall (instant, always available) or continue toward a boss for better rewards. Every rift has a timer that freezes on boss death, and town keeps the player's five fastest personal times per dungeon. The browser runs the fight; the server generates each dungeon and owns every character and item. Characters permanently die with all carried gear, inventory, level, and stats in normal runs, while a shared 64-slot vault protects equipment for future characters. Gear has five tiers and zero to four enchantments; duplicate matching items can be fused into rerolled versions. There are no currencies, shops, trading, narrative systems, PvP, or mandatory progression paths. Some mid- and late-game dungeon completions increase specific stats until a character's caps. The first version is single-player, but the design should remain compatible with future one-to-four-player co-op.
 

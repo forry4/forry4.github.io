@@ -27,9 +27,19 @@ from halcyon import content as C
 from halcyon import dungeon as D
 from halcyon import store as S
 
-STARTER = [({"base_id": "longbow", "tier": 1, "slot_count": 0, "enchants": []}, "weapon"),
-           ({"base_id": "leather_vest", "tier": 1, "slot_count": 0, "enchants": []}, "armor"),
-           ({"base_id": "volley_quiver", "tier": 1, "slot_count": 0, "enchants": []}, "ability")]
+STARTERS = {
+    "ranger": [({"base_id": "longbow", "tier": 1, "slot_count": 0, "enchants": []}, "weapon"),
+               ({"base_id": "leather_vest", "tier": 1, "slot_count": 0, "enchants": []}, "armor"),
+               ({"base_id": "volley_quiver", "tier": 1, "slot_count": 0, "enchants": []}, "ability")],
+    "paladin": [({"base_id": "mace", "tier": 1, "slot_count": 0, "enchants": []}, "weapon"),
+                ({"base_id": "plate_armor", "tier": 1, "slot_count": 0, "enchants": []}, "armor"),
+                ({"base_id": "grounding_aegis", "tier": 1, "slot_count": 0, "enchants": []}, "ability")],
+    "diviner": [({"base_id": "starstaff", "tier": 1, "slot_count": 0, "enchants": []}, "weapon"),
+                ({"base_id": "seer_robes", "tier": 1, "slot_count": 0, "enchants": []}, "armor"),
+                ({"base_id": "stillness_orb", "tier": 1, "slot_count": 0, "enchants": []}, "ability")],
+}
+# Kept as a named Ranger alias for the existing route tests and tools.
+STARTER = STARTERS["ranger"]
 
 _guests_hour = SlidingWindowLimiter(max_hits=10, window_seconds=3600)
 _runs_hour = SlidingWindowLimiter(max_hits=120, window_seconds=3600)
@@ -50,6 +60,7 @@ class CharacterIn(BaseModel):
 class RunIn(BaseModel):
     char_id: str = Field(max_length=64)
     dungeon_id: str = Field(default="shallows", max_length=32)
+    practice: bool = False
 
 
 class EventsIn(BaseModel):
@@ -142,12 +153,15 @@ def setup_halcyon(app, get_db_conn, get_user_by_session, token_resolver=None) ->
         return {**view, "dungeons": [{"id": k, "name": v["name"]} for k, v in D.DUNGEONS.items()],
                 "limits": {"vault": C.VAULT_SIZE, "inventory": C.INVENTORY_SIZE,
                            "characters": C.CHARACTER_SLOTS, "equip": list(C.EQUIP_SLOTS)},
+                "classes": [{"id": k, "name": C.CLASS_NAMES[k], "description": C.CLASS_DESCRIPTIONS[k]}
+                            for k in C.CLASSES],
                 "levels": list(C.LEVEL_XP),
                 "bases": C.BASE_ITEMS}
 
     @app.post("/halcyon/characters")
     def halcyon_create(body: CharacterIn, who: str = Depends(owner)):
-        return call(S.create_character, who, body.slot, body.class_id, starter=STARTER)
+        return call(S.create_character, who, body.slot, body.class_id,
+                    starter=STARTERS.get(body.class_id, STARTER))
 
     @app.post("/halcyon/characters/{char_id}/open")
     def halcyon_open(char_id: str, who: str = Depends(owner)):
@@ -159,11 +173,13 @@ def setup_halcyon(app, get_db_conn, get_user_by_session, token_resolver=None) ->
             raise HTTPException(status_code=429, detail="Too many dungeons this hour.")
         _runs_hour.record(who)
         try:
-            d = D.generate(body.dungeon_id)
-            run = S.start_run(connect, who, body.char_id, body.dungeon_id, d["seed"], d)
+            class_id = S.character_class(connect, who, body.char_id)
+            d = D.generate(body.dungeon_id, class_id=class_id)
+            run = S.start_run(connect, who, body.char_id, body.dungeon_id, d["seed"], d,
+                              practice=body.practice)
         except S.HalcyonError as e:
             _refuse(e)
-        return {"run_id": run["run_id"], "dungeon": d}
+        return {"run_id": run["run_id"], "dungeon": d, "practice": body.practice, "class_id": class_id}
 
     @app.post("/halcyon/runs/{run_id}/events")
     def halcyon_events(run_id: str, body: EventsIn, who: str = Depends(owner)):
