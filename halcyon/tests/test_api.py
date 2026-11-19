@@ -127,6 +127,7 @@ def test_character_menu_starts_class_specific_practice_runs(app):
     state = route(app, "GET", "/halcyon/state")(who)
     gear = {i["equip_slot"]: i["base_id"] for i in state["items"] if i["loc"] == "equipped"}
     assert gear == {"weapon": "mace", "armor": "plate_armor", "ability": "stillness_orb"}
+    assert {i["tier"] for i in state["items"] if i["loc"] == "equipped"} == {0}, "starter gear is tier 0"
     with pytest.raises(HTTPException) as e:
         route(app, "POST", "/halcyon/runs")(A.RunIn(char_id=ch["char_id"], practice=True), who)
     assert e.value.status_code == 409 and "Dream Key" in e.value.detail

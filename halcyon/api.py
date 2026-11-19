@@ -27,19 +27,20 @@ from halcyon import content as C
 from halcyon import dungeon as D
 from halcyon import store as S
 
+# New characters start at TIER 0 (owner's call, 2026-11-19), so the first drops are upgrades.
 STARTERS = {
-    "ranger": [({"base_id": "longbow", "tier": 1, "slot_count": 0, "enchants": []}, "weapon"),
-               ({"base_id": "leather_vest", "tier": 1, "slot_count": 0, "enchants": []}, "armor"),
-               ({"base_id": "volley_quiver", "tier": 1, "slot_count": 0, "enchants": []}, "ability")],
-    "paladin": [({"base_id": "mace", "tier": 1, "slot_count": 0, "enchants": []}, "weapon"),
-                ({"base_id": "plate_armor", "tier": 1, "slot_count": 0, "enchants": []}, "armor"),
-                ({"base_id": "stillness_orb", "tier": 1, "slot_count": 0, "enchants": []}, "ability")],
-    "diviner": [({"base_id": "starstaff", "tier": 1, "slot_count": 0, "enchants": []}, "weapon"),
-                ({"base_id": "seer_robes", "tier": 1, "slot_count": 0, "enchants": []}, "armor"),
-                ({"base_id": "star_tome", "tier": 1, "slot_count": 0, "enchants": []}, "ability")],
-    "ninja": [({"base_id": "shuriken", "tier": 1, "slot_count": 0, "enchants": []}, "weapon"),
-              ({"base_id": "shadow_garb", "tier": 1, "slot_count": 0, "enchants": []}, "armor"),
-              ({"base_id": "mirror_charm", "tier": 1, "slot_count": 0, "enchants": []}, "ability")],
+    "ranger": [({"base_id": "longbow", "tier": 0, "slot_count": 0, "enchants": []}, "weapon"),
+               ({"base_id": "leather_vest", "tier": 0, "slot_count": 0, "enchants": []}, "armor"),
+               ({"base_id": "volley_quiver", "tier": 0, "slot_count": 0, "enchants": []}, "ability")],
+    "paladin": [({"base_id": "mace", "tier": 0, "slot_count": 0, "enchants": []}, "weapon"),
+                ({"base_id": "plate_armor", "tier": 0, "slot_count": 0, "enchants": []}, "armor"),
+                ({"base_id": "stillness_orb", "tier": 0, "slot_count": 0, "enchants": []}, "ability")],
+    "diviner": [({"base_id": "starstaff", "tier": 0, "slot_count": 0, "enchants": []}, "weapon"),
+                ({"base_id": "seer_robes", "tier": 0, "slot_count": 0, "enchants": []}, "armor"),
+                ({"base_id": "star_tome", "tier": 0, "slot_count": 0, "enchants": []}, "ability")],
+    "ninja": [({"base_id": "shuriken", "tier": 0, "slot_count": 0, "enchants": []}, "weapon"),
+              ({"base_id": "shadow_garb", "tier": 0, "slot_count": 0, "enchants": []}, "armor"),
+              ({"base_id": "mirror_charm", "tier": 0, "slot_count": 0, "enchants": []}, "ability")],
 }
 # Kept as a named Ranger alias for the existing route tests and tools.
 STARTER = STARTERS["ranger"]

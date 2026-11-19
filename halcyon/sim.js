@@ -155,7 +155,9 @@ export const enchantValue = (id, q) => {
  * the per-dungeon stat rewards and their caps). Greybox numbers. */
 export const PER_LEVEL = { maxHp: 6, maxMp: 4, att: 1, ap: 1 };
 
-const tierScale = (it) => 1 + 0.2 * ((it.tier || 1) - 1);
+/* Tier 0 is starter gear (owner's call, 2026-11-19): a fifth weaker than tier 1, so
+ * the first drops are upgrades. It never takes away max HP (`up` below). */
+const tierScale = (it) => 1 + 0.2 * ((it.tier ?? 1) - 1);
 
 /* A character's numbers from its level and what it wears. `gear` is the equipped
  * items as the server lists them ({base_id, tier, enchants: [{id, q}]}). */
@@ -168,18 +170,18 @@ export function statsFor(gear = [], level = 1, classId = "ranger") {
 	// server lists gear in can never change the numbers.
 	let pierce = 0;
 	for (const it of gear) {
-		const t = tierScale(it), tier = it.tier || 1;
+		const t = tierScale(it), tier = it.tier ?? 1, up = Math.max(0, tier - 1);
 		const w = WEAPONS[it.base_id];
 		if (w) Object.assign(s, weaponStats(w, t));
-		if (it.base_id === "leather_vest") { s.def += 1 + tier; s.maxHp += 10 * (tier - 1); }
+		if (it.base_id === "leather_vest") { s.def += 1 + tier; s.maxHp += 10 * up; }
 		if (it.base_id === "volley_quiver") { s.arrows = 7; s.abilityDmg += Math.round(8 * t); s.abilityKind = "volley"; }
-		if (it.base_id === "plate_armor") { s.def += 3 + tier; s.maxHp += 18 * (tier - 1); }
-		if (it.base_id === "grounding_aegis") s.abilityKind = "shield";
+		if (it.base_id === "plate_armor") { s.def += 3 + tier; s.maxHp += 18 * up; }
+		if (it.base_id === "grounding_aegis") { s.abilityKind = "shield"; s.abilityTier = t; }
 		if (it.base_id === "seer_robes") { s.maxMp += 18 * tier; s.mpRegen += 0.5; }
-		if (it.base_id === "stillness_orb") { s.abilityKind = "slow"; s.abilityDmg += Math.round(SLOW_DAMAGE * t); }
+		if (it.base_id === "stillness_orb") { s.abilityKind = "slow"; s.abilityDmg += Math.round(SLOW_DAMAGE * t); s.abilityTier = t; }
 		if (it.base_id === "star_tome") { s.abilityKind = "starfall"; s.abilityDmg += Math.round(45 * t); }
-		if (it.base_id === "shadow_garb") { s.def += tier; s.dex += 2 + tier; s.maxHp += 8 * (tier - 1); }
-		if (it.base_id === "mirror_charm") s.abilityKind = "counter";
+		if (it.base_id === "shadow_garb") { s.def += tier; s.dex += 2 + tier; s.maxHp += 8 * up; }
+		if (it.base_id === "mirror_charm") { s.abilityKind = "counter"; s.abilityTier = t; }
 		if (it.base_id === "band_of_vigor") s.maxHp += Math.round(15 * t);
 		if (it.base_id === "band_of_focus") { s.maxMp += Math.round(15 * t); s.mpRegen += 2; }
 		if (it.base_id === "kingfisher_eye") { pierce += 1; s.att += 5; }
@@ -210,8 +212,14 @@ export function statsFor(gear = [], level = 1, classId = "ranger") {
 	// the counter's damage (not its guard).
 	s.abilityPower = 1 + s.ap / STAT_SCALE;
 	s.abilityDmg = s.abilityKind === "volley" || s.abilityKind === "starfall" || s.abilityKind === "slow" ? Math.round(s.abilityDmg * s.abilityPower) : 0;
-	s.slowRadius = Math.round(SLOW_RADIUS * s.abilityPower * 100) / 100;
-	s.counterMult = Math.round(COUNTER_MULT * s.abilityPower * 100) / 100;
+	// EVERY ABILITY GROWS WITH ITS TIER (owner's ask, 2026-11-19: "a t5 ability should
+	// have higher base effectiveness than a t2"): `abilityTier` is the tier's scale, the
+	// same 20% a tier as weapons and armor. The damage abilities take it in abilityDmg;
+	// the field's reach, the counter's multiplier and the shield's time take it here.
+	const at = s.abilityTier || 1;
+	s.slowRadius = Math.round(SLOW_RADIUS * at * s.abilityPower * 100) / 100;
+	s.counterMult = Math.round(COUNTER_MULT * at * s.abilityPower * 100) / 100;
+	s.shieldTime = Math.round(SHIELD_DURATION * at * s.abilityPower);
 	return s;
 }
 
@@ -514,8 +522,7 @@ function bossStep(st, e, d, ux, uy) {
 /* input: { mx, my: -1|0|1; ax, ay: the aim vector (any length); fire: bool;
  *          ability: bool (this tick only); take: drop id | null;
  *          drop: an item the player put down (an opaque key the page names it by);
- *          lift: the key of an item on the floor to take back; heal: bool (E on
- *          an orb); potion: bool (this tick only); enter: bool (E on the portal); recall: bool;
+ *          lift: the key of an item on the floor to take back; potion: bool (this tick only); enter: bool (E on the portal); recall: bool;
  *          gear: the whole equipped list, on the tick it changes (else absent) } */
 export function step(st, input) {
 	st.events = [];
@@ -552,15 +559,17 @@ export function step(st, input) {
 		st.events.push({ type: "potion", local: true });
 	}
 
-	// manual pickups (design §11.6, §9.4)
-	if (input.heal) {
-		const i = st.pickups.findIndex((h) => near(p, h, REACH));
-		if (i >= 0) {
-			st.pickups.splice(i, 1);
-			p.low = Math.min(s.maxHp, p.low + HEAL);
-			p.hp = Math.min(recoveryLimit(st), p.hp + HEAL);
-			st.events.push({ type: "heal", local: true });   // the server keeps no HP
-		}
+	// HEAL ORBS ARE TAKEN BY WALKING OVER THEM (owner's ask, 2026-11-19; was E) —
+	// unless it would do nothing (full HP and a full recovery limit), so a full-health
+	// player does not waste one by passing it.
+	for (let i = 0; i < st.pickups.length; i++) {
+		const h = st.pickups[i];
+		if (!near(p, h, p.r + 0.35) || (p.hp >= s.maxHp && p.low >= s.maxHp)) continue;
+		st.pickups.splice(i, 1);
+		p.low = Math.min(s.maxHp, p.low + HEAL);
+		p.hp = Math.min(recoveryLimit(st), p.hp + HEAL);
+		st.events.push({ type: "heal", local: true });   // the server keeps no HP
+		break;
 	}
 	if (input.take) {
 		const bag = st.bags.find((b) => b.drops.includes(input.take) && near(p, b, REACH));
@@ -690,7 +699,7 @@ export function playerFire(st, input) {
 			}
 		} else if (s.abilityKind === "shield") {
 			st.shield = { x: p.x + ax * 0.95, y: p.y + ay * 0.95, r: 0.72, hits: 1 + Math.floor(s.ap / 8),
-				until: st.tick + Math.round(SHIELD_DURATION * s.abilityPower) };
+				until: st.tick + s.shieldTime };
 		} else if (s.abilityKind === "slow") {
 			st.slowUntil = st.tick + SLOW_DURATION;
 			st.slowR = s.slowRadius;

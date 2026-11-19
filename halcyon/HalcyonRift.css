@@ -188,6 +188,8 @@
 .hr-tip-hint{margin:8px 0 0 !important;font-size:.76rem !important;color:var(--text-soft)}
 .hr-lock-mark{font-size:.8em}
 .hr-tip-weapon{line-height:1.35}
+.hr-tip-class{font-size:.82rem;letter-spacing:.02em;color:#b9c4cf}
+.hr-tip-class.cant{color:#ff8d7d}
 .hr-enchants{list-style:none;margin:0;padding:0;display:grid;gap:3px;font-size:.9rem}
 .hr-q{color:var(--text-soft)}
 

@@ -30,7 +30,9 @@ EQUIP_SLOTS = ("weapon", "armor", "ability", "ring1", "ring2")
 VAULT_SIZE = 64
 INVENTORY_SIZE = 16
 CHARACTER_SLOTS = 4
-TIERS = (1, 2, 3, 4, 5)
+# Tier 0 is STARTER gear only (owner's call, 2026-11-19): nothing drops at it, so a
+# new character's first finds are upgrades. Drops roll 1..MAX_TIER.
+TIERS = (0, 1, 2, 3, 4, 5)
 MAX_ENCHANT_SLOTS = 4
 
 # base_id -> what kind of thing it is. `cls` None means any class (rings).

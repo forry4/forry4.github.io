@@ -141,7 +141,7 @@ test("health regenerates only to the recovery limit, and a heal raises both", ()
 	assert.equal(st.pickups.length, 0, "no heal lies in a room: they drop from enemies");
 	const orb = { id: "h-test", kind: "heal", x: st.p.x, y: st.p.y };
 	st.pickups.push(orb);
-	step(st, { heal: true });
+	step(st, {});                                       // walking over it is enough
 	assert.equal(st.p.low, 55);
 	assert.equal(st.p.hp, 95);
 	assert.deepEqual(st.events, [{ type: "heal", local: true }]);
@@ -810,4 +810,53 @@ test("the boss's fall puts out its shells and fires", () => {
 	step(st, {});
 	assert.equal(boss.hp <= 0, true);
 	assert.equal(st.mortars.length + st.fires.length, 0);
+});
+
+test("a heal orb is taken by walking over it, and left alone at full health", () => {
+	const st = createSim(A, STARTER);
+	st.enemies = [];
+	const orb = { id: "h-walk", kind: "heal", x: st.p.x + 2, y: st.p.y };
+	st.pickups.push(orb);
+	let crossed = false;
+	for (let t = 0; t < 2 * TPS; t++) { step(st, { mx: 1 }); crossed ||= Math.abs(st.p.x - orb.x) < 0.1; }
+	assert.ok(crossed, "the walk went over it");
+	assert.equal(st.pickups.length, 1, "at full health, walking over it leaves it");
+	st.p.hp = st.p.low = 30;
+	st.p.x = orb.x; st.p.y = orb.y;
+	step(st, {});
+	assert.equal(st.pickups.length, 0, "hurt, standing on it takes it");
+	assert.ok(st.p.hp > 30);
+});
+
+test("tier 0 starter gear is weaker than tier 1 and never takes away max HP", () => {
+	const t0 = statsFor([{ base_id: "longbow", tier: 0 }, { base_id: "leather_vest", tier: 0 }]);
+	const t1 = statsFor([{ base_id: "longbow", tier: 1 }, { base_id: "leather_vest", tier: 1 }]);
+	assert.ok(t0.dmg < t1.dmg && t0.def < t1.def);
+	assert.equal(t0.maxHp, t1.maxHp);
+});
+
+test("the Mirror Charm's tier raises its counter", () => {
+	const m = (tier) => statsFor([{ base_id: "mirror_charm", tier }], 1, "ninja").counterMult;
+	assert.ok(m(1) < m(2) && m(2) < m(5), `${m(1)} ${m(2)} ${m(5)}`);
+});
+
+test("every standard item is stronger at a higher tier, abilities included", () => {
+	const at = (base_id, tier) => statsFor([{ base_id, tier }], 1);
+	const power = {
+		weapon: (s) => s.dmg,
+		armor: (s) => s.def + s.maxHp + s.maxMp + s.dex,
+		ring: (s) => s.maxHp + s.maxMp,
+		volley_quiver: (s) => s.abilityDmg, star_tome: (s) => s.abilityDmg,
+		stillness_orb: (s) => s.abilityDmg + s.slowRadius, mirror_charm: (s) => s.counterMult,
+		grounding_aegis: (s) => s.shieldTime,
+	};
+	const kinds = { leather_vest: "armor", plate_armor: "armor", seer_robes: "armor", shadow_garb: "armor",
+		band_of_vigor: "ring", band_of_focus: "ring" };
+	const ids = [...Object.keys(WEAPONS).filter((w) => w !== "none" && !["repeater", "tidecaller"].includes(w)),
+		...Object.keys(kinds), "volley_quiver", "star_tome", "stillness_orb", "mirror_charm", "grounding_aegis"];
+	for (const id of ids) {
+		const f = power[id] || power[kinds[id]] || power.weapon;
+		const p = [0, 1, 2, 3, 4, 5].map((t) => f(at(id, t)));
+		for (let t = 1; t < p.length; t++) assert.ok(p[t] > p[t - 1], `${id}: T${t} (${p[t]}) is not above T${t - 1} (${p[t - 1]})`);
+	}
 });

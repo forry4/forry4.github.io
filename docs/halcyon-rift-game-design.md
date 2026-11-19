@@ -1160,6 +1160,10 @@ After a comparison with RotMG, Darza's Dominion, Diablo/PoE, Hades and Enter the
 - **The Paladin's field also burns**: slight damage, every half second, to each enemy inside it.
 - **The boss shells a player who hides.** Cover is for a moment, not for good: after about a second out of the boss's sight, it lobs a mortar at where the player stands — a ring that fills, a hit, then burning ground that lasts a few seconds — and keeps lobbing while the player stays hidden. In sight, it lobs nothing. Pillars do not crumble (deferred).
 - **An item found in a run can be locked in the run.**
+- **New characters start in tier 0 gear** (starter only; nothing drops at tier 0), so their first finds are upgrades.
+- **Every modifier adds 10% to a level's XP.**
+- **Heal orbs are taken by walking over them**, unless the player is at full health.
+- **An item says which class can use it**, and a refused equip says why.
 
 LATER (noted, not built): a collection log of uniques and a records board (§14.8), a guided first rift, a loot preview at the portal. NEVER: controller support.
 

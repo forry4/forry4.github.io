@@ -25,7 +25,7 @@ import { lobbyCss, LobbyHeader, LobbyUser, LobbyLoading } from "../shared/lobby.
 import { GAME_ACCENTS } from "../shared/accents.js";
 import { makeClient } from "./client.js";
 import { createSim, step, TPS, REACH, xpProgress, WEAPONS, statsFor, enchantValue, recoveryLimit, CLASS_INFO,
-	STAT_SCALE, ABILITY_COST, SHIELD_DURATION, SLOW_DURATION, SLOW_FACTOR, SLOW_PULSE,
+	STAT_SCALE, ABILITY_COST, SLOW_DURATION, SLOW_FACTOR, SLOW_PULSE,
 	STARFALL_DELAY, STARFALL_RADIUS, STARFALL_RANGE, COUNTER_WINDOW, COUNTER_GUARD, POTION_HEAL, POTION_COOLDOWN } from "./sim.js";
 import { camera, draw, drawTown, promptFor, formatRiftTime, TIER_COLORS, UNIQUE_COLOR } from "./render.js";
 import { createTown, stepTown, setTownGear, postDps, STATIONS, SPAWN, standAt } from "./town.js";
@@ -111,15 +111,15 @@ function abilityLines(it, ap = 0) {
 	if (kind === "volley") return [`Space: a fan of ${s.arrows} arrows`, `${Math.round(s.abilityDmg * pw)} damage each`, cost];
 	if (kind === "slow") return ["Space: a field around you that slows enemy shots inside it",
 		`and burns enemies inside it for ${Math.round(s.abilityDmg * pw)} damage every ${secs(SLOW_PULSE)}s`,
-		`${r2(statsFor([{ ...it, enchants: [] }]).slowRadius * pw)}-tile radius (Ability power widens it)`,
+		`${r2(s.slowRadius * pw)}-tile radius (its tier and Ability power widen it)`,
 		`${Math.round((1 - SLOW_FACTOR) * 100)}% slower, lasts ${secs(SLOW_DURATION)}s`, cost];
 	if (kind === "starfall") return [`Space: a star falls where you aim (up to ${STARFALL_RANGE} tiles)`,
 		`Lands after ${secs(STARFALL_DELAY)}s, ${Math.round(s.abilityDmg * pw)} damage to all within ${STARFALL_RADIUS} tiles`, cost];
 	if (kind === "counter") return [`Space: the next hit within ${secs(COUNTER_WINDOW)}s is ignored`,
-		`Then ${secs(COUNTER_GUARD)}s untouchable, and your next attack does ${r2(2 * pw)}x damage`,
+		`Then ${secs(COUNTER_GUARD)}s untouchable, and your next attack does ${r2(s.counterMult * pw)}x damage`,
 		"A second counter before attacking does not stack", cost];
 	if (kind === "shield") return ["Space: plant a shield in front of you",
-		`Blocks ${1 + Math.floor(ap / 8)} enemy shot${ap >= 8 ? "s" : ""}, lasts ${secs(SHIELD_DURATION)}s`, cost];
+		`Blocks ${1 + Math.floor(ap / 8)} enemy shot${ap >= 8 ? "s" : ""}, lasts ${secs(s.shieldTime * pw)}s`, cost];
 	return [];
 }
 
@@ -585,6 +585,15 @@ export default function HalcyonRift({ authUser, onExit }) {
 		return !!b && (!b.cls || b.cls === char?.class_id)
 			&& (b.slot === to[2] || (b.slot === "ring" && to[2].startsWith("ring")));
 	};
+	/* Why an item does not go in a place, in words (owner's ask, 2026-11-19: "does not
+	 * go there" said nothing). The class first: that is the one a player cannot see. */
+	const whyNot = (it, to) => {
+		const b = view.bases[it.base_id], cls = b?.cls;
+		if (cls && cls !== char?.class_id)
+			return `Only a ${CLASS_INFO[cls]?.name || cls} can use ${nameOf(it)}; this is a ${CLASS_INFO[char?.class_id]?.name || "different class"}.`;
+		if (b?.slot === "key") return `${nameOf(it)} is carried, not worn.`;
+		return `${nameOf(it)} goes in ${b?.slot === "ring" ? "a ring" : `the ${b?.slot || "right"}`} slot.`;
+	};
 	const accepts = (target, it) => (target.kind === "place" ? fits(it, target.to) : true);
 	// Mid-run, a move is a run EVENT (queued with the fight's reports, so it lands after
 	// the pickup that minted the item) and the fight takes the new gear on its next tick.
@@ -593,7 +602,7 @@ export default function HalcyonRift({ authUser, onExit }) {
 		if (ctl.ended) return;                         // the run is closed; the server takes nothing more
 		if (keyOf(here) === keyOf(to)) return;
 		const other = ctl.items.find((x) => placeKey(x) === keyOf(to));
-		if (!fits(it, to) || (other && !fits(other, here))) { notify(`${nameOf(other && fits(it, to) ? other : it)} does not go there.`, "bad"); return; }
+		if (!fits(it, to) || (other && !fits(other, here))) { const bad = other && fits(it, to) ? other : it; notify(whyNot(bad, bad === it ? to : here), "bad"); return; }
 		ctl.move(it, to, other, here);
 		client.report({ type: "move", ...(it.fresh ? { drop: it.drop } : { item: it.item_id }), to: [to[0], to[2]] });
 	};
@@ -621,7 +630,7 @@ export default function HalcyonRift({ authUser, onExit }) {
 			if (placeKey(it) === keyOf(target.to)) { setPicked(null); return; }
 			const other = byPlace[keyOf(target.to)];
 			if (!fits(it, target.to) || (other && it.loc === "equipped" && !fits(other, placeAt_(it)))) {
-				setError(`${nameOf(fits(it, target.to) ? other : it)} does not go there.`); setPicked(null); return;
+				const bad = fits(it, target.to) ? other : it; setError(whyNot(bad, bad === it ? target.to : placeAt_(it))); setPicked(null); return;
 			}
 			townMove(it, target.to);
 		} else if (target.kind === "trash") {
@@ -742,7 +751,7 @@ export default function HalcyonRift({ authUser, onExit }) {
 			if (it && it.item_id === held.item_id) { setPicked(null); return; }
 			placeAt(target, held);
 		},
-		showTip: (it, el) => { if (!drag) setTip({ item: it, rect: el.getBoundingClientRect() }); },
+		showTip: (it, el, canLock) => { if (!drag) setTip({ item: it, rect: el.getBoundingClientRect(), canLock }); },
 		lock: toggleLock,
 		hideTip: () => setTip(null),
 	};
@@ -815,7 +824,7 @@ export default function HalcyonRift({ authUser, onExit }) {
 				<main className="hr-death-page">
 					<RunReport r={fallen} equip={view.limits.equip} ctx={{ ...slotCtx, lock: null }} onDone={done} />
 				</main>
-				{tip && <ItemTip tip={tip} bases={view.bases} ap={statsFor(gear, fallen.level, fallen.classId).ap} />}
+				{tip && <ItemTip tip={{ ...tip, canLock: false }} bases={view.bases} ap={statsFor(gear, fallen.level, fallen.classId).ap} classId={fallen.classId} />}
 			</div>
 		);
 	}
@@ -869,7 +878,7 @@ export default function HalcyonRift({ authUser, onExit }) {
 						onClose={() => setGraveyard(false)} />}
 					{reportView}
 				</main>
-				{tip && <ItemTip tip={tip} bases={view.bases} ap={0} />}
+				{tip && <ItemTip tip={{ ...tip, canLock: false }} bases={view.bases} ap={0} />}
 			</div>
 		);
 	}
@@ -1081,7 +1090,7 @@ export default function HalcyonRift({ authUser, onExit }) {
 					</div>
 				</aside>
 			</main>
-			{tip && <ItemTip tip={tip} bases={view.bases} ap={stats?.ap || 0} compare={compareFor(tip.item)} />}
+			{tip && <ItemTip tip={tip} bases={view.bases} ap={stats?.ap || 0} compare={compareFor(tip.item)} classId={char?.class_id} />}
 		</div>
 	);
 }
@@ -1103,9 +1112,9 @@ function Slot({ label, item, target, locked, ctx, num: n = null, dim = false }) 
 			onDragEnd={(e) => { ctx.endDrag(); if (ctx.inRun) e.currentTarget.blur(); }}
 			onDragOver={(e) => { if (ctx.drag && target && !locked) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; } }}
 			onDrop={(e) => { e.preventDefault(); if (target && !locked) ctx.dropAt(target); ctx.endDrag(); }}
-			onMouseEnter={(e) => item && ctx.showTip(item, e.currentTarget)}
+			onMouseEnter={(e) => item && ctx.showTip(item, e.currentTarget, !!(ctx.lock && target))}
 			onMouseLeave={ctx.hideTip}
-			onFocus={(e) => item && ctx.showTip(item, e.currentTarget)}
+			onFocus={(e) => item && ctx.showTip(item, e.currentTarget, !!(ctx.lock && target))}
 			onBlur={ctx.hideTip}
 			onClick={(e) => { if (!locked && target) ctx.clickAt(target, item); if (ctx.inRun) e.currentTarget.blur(); }}
 			onDoubleClick={(e) => { if (!locked && item && target) ctx.quick(item); if (ctx.inRun) e.currentTarget.blur(); }}
@@ -1125,7 +1134,7 @@ function Slot({ label, item, target, locked, ctx, num: n = null, dim = false }) 
 /* What an item is, beside the slot under the pointer — kept inside the window. With
  * `compare` (what is equipped in that slot: both rings for a ring), the cards stand
  * SIDE BY SIDE (owner's ask, 2026-11-18: not stat deltas), every stat in one order. */
-function ItemTip({ tip, bases, ap = 0, compare = [] }) {
+function ItemTip({ tip, bases, ap = 0, compare = [], classId = null }) {
 	const ref = useRef(null);
 	const [pos, setPos] = useState(null);
 	const key = `${tip.item.item_id}|${compare.map((c) => c.item_id).join(",")}`;
@@ -1139,15 +1148,16 @@ function ItemTip({ tip, bases, ap = 0, compare = [] }) {
 	return (
 		<div ref={ref} className={"hr-tip" + (compare.length ? " hr-tip-compare" : "")} role="tooltip"
 			style={pos ? { left: pos.left, top: pos.top } : { left: 0, top: 0, visibility: "hidden" }}>
-			<TipCard it={tip.item} bases={bases} ap={ap} lit={unique} kicker={compare.length ? "This item" : null} />
-			{compare.map((c) => <TipCard key={c.item_id} it={c} bases={bases} ap={ap} equipped />)}
+			<TipCard it={tip.item} bases={bases} ap={ap} lit={unique} kicker={compare.length ? "This item" : null}
+				classId={classId} canLock={tip.canLock} />
+			{compare.map((c) => <TipCard key={c.item_id} it={c} bases={bases} ap={ap} classId={classId} equipped />)}
 		</div>
 	);
 }
 
 /* One item's card in a tooltip: name, kind, its own stats, then its enchantment slots. */
-function TipCard({ it, bases, ap, lit = false, equipped = false, kicker = null }) {
-	const fam = bases[it.base_id]?.slot, lines = [...weaponLines(it), ...abilityLines(it, ap), ...baseLines(it)];
+function TipCard({ it, bases, ap, lit = false, equipped = false, kicker = null, classId = null, canLock }) {
+	const fam = bases[it.base_id]?.slot, cls = bases[it.base_id]?.cls, lines = [...weaponLines(it), ...abilityLines(it, ap), ...baseLines(it)];
 	const ench = sortedEnchants(it);
 	return (
 		<div className={"hr-tip-card fg-panel" + (it.kind === "unique" ? " unique" : "") + (lit ? " fg-lit" : "")}>
@@ -1155,6 +1165,9 @@ function TipCard({ it, bases, ap, lit = false, equipped = false, kicker = null }
 			<h3 className="fg-label">{it.locked && <span className="hr-lock-mark" aria-label="Locked">🔒︎ </span>}{nameOf(it)}</h3>
 			<p className="fg-label-soft">{it.kind === "key" ? "Key" : it.kind === "unique" ? `Unique ${(FAMILY[fam] || "item").toLowerCase()}` : `${FAMILY[fam] || ""} · Tier ${it.tier}`}
 			</p>
+			{fam && fam !== "key" && (cls && classId && cls !== classId
+				? <p className="hr-tip-class cant">{CLASS_INFO[cls]?.name || cls} only — your {CLASS_INFO[classId]?.name || "character"} cannot use it</p>
+				: <p className="hr-tip-class">{cls ? `${CLASS_INFO[cls]?.name || cls} only` : "Any class"}</p>)}
 			{WEAPON_FEEL[it.base_id] && <p className="hr-tip-weapon">{WEAPON_FEEL[it.base_id]}</p>}
 			{KEY_TEXT[it.base_id] && <p className="hr-tip-weapon">{KEY_TEXT[it.base_id]}</p>}
 			{lines.length > 0 && <ul className="hr-tip-lines hr-q">{lines.map((l) => <li key={l}>{l}</li>)}</ul>}
@@ -1168,7 +1181,7 @@ function TipCard({ it, bases, ap, lit = false, equipped = false, kicker = null }
 							: <li key={i} className="empty"><i aria-hidden="true">◇</i>Empty slot</li>;
 					})}
 				</ul>)}
-			{!equipped && it.item_id && !String(it.item_id).startsWith("drop:") && !it.fresh && it.loc &&
+			{!equipped && (canLock ?? (it.item_id && !String(it.item_id).startsWith("drop:") && !it.fresh && it.loc)) &&
 				<p className="hr-tip-hint">{it.locked ? "Locked: Sort, discard and fuse leave it alone. Right-click to unlock." : "Right-click to lock."}</p>}
 		</div>
 	);
@@ -1812,7 +1825,7 @@ function Dungeon({ run, client, onEnd, notify, tips, onDeeper }) {
 				else if (w.take) take = w.take; else lift = w.lift;
 			}
 			const out = { mx: Math.sign(mx), my: Math.sign(my), ax: (mouse.x - ox) / px - st.p.x, ay: (mouse.y - oy) / px - st.p.y,
-				fire: mouse.down || livePrefs.current.auto, ability: edge.ability, heal: edge.interact, take, lift, drop: ctl.drops.shift() || null,
+				fire: mouse.down || livePrefs.current.auto, ability: edge.ability, take, lift, drop: ctl.drops.shift() || null,
 				recall: edge.recall, enter: edge.interact && !loot, potion: edge.potion };
 			if (ctl.recall) { out.recall = true; ctl.recall = false; }      // Recall / Main menu in the game menu
 			edge.ability = edge.interact = edge.recall = edge.potion = false;

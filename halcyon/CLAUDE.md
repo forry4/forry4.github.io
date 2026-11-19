@@ -499,3 +499,25 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
   pickup lands, so the lock rides the run's events as `{"type": "lock", "drop", "locked"}`
   (`store._apply_one`), naming the drop as a move does. Items from town still use
   `POST /halcyon/items/{id}/lock`, which works mid-run too.
+
+## Fourth round (2026-11-19, owner's asks)
+- **Tier 0 is starter gear** (`content.TIERS` now starts at 0; `api.STARTERS` are all
+  tier 0). Nothing drops at it, so a new character's first finds are upgrades.
+  `sim.tierScale` uses `tier ?? 1` (a `|| 1` would read 0 as 1) — 0.8x — and tier 0
+  never SUBTRACTS max HP (armor's HP bonus is `max(0, tier - 1)`).
+- **EVERY item grows with its tier, abilities included** (owner's ask: "a t5 ability
+  should have higher base effectiveness than a t2"). Damage abilities scale `abilityDmg`;
+  the rest scale through `abilityTier` (the tier's 0.8–1.8 scale) — the Stillness Orb's
+  reach, the Mirror Charm's multiplier (it was AP-only, so T2 and T5 read the same) and
+  the shield's time — with AP on top. `halcyonSim.test.mjs` walks every standard base
+  item from T0 to T5 and fails one that does not rise.
+- **Modifiers pay XP**: `dungeon.MOD_XP` (+10% of the level's whole XP per modifier).
+  Enemy XP rounds DOWN and the clear bonus takes the remainder, so the total is exact
+  and the clear bonus never shrinks.
+- **Heal orbs are taken by walking over them** (no E; there was never a prompt). An orb
+  is left alone when it would do nothing (full HP and a full recovery limit).
+- **Which class can use an item is said**: the tooltip says "Paladin only" / "Any class",
+  in red when the open character cannot use it, and a refused equip names the class
+  (`whyNot`) instead of "does not go there".
+- **No "Right-click to lock" on the death screen or graveyard**: the hint follows whether
+  the slot can lock (`tip.canLock`).

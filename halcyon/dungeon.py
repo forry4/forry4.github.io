@@ -132,6 +132,11 @@ BOSS_ROOM = [
 ]
 
 CORRIDOR = 3
+# MODIFIERS PAY XP TOO (owner's ask, 2026-11-19: "it should increase it a bit"): each
+# modifier adds MOD_XP of the level's whole XP. Each enemy's share is rounded DOWN, and the
+# clear bonus takes up what the rounding left, so the TOTAL is right (an enemy worth 4
+# would round 4.4 back to 4 and one modifier would pay nothing for it).
+MOD_XP = 0.10
 # The Shallows (design §14.4): the gentlest dungeon. Four combat rooms.
 # `complete_xp` is the bonus for finishing it (design §10.1); each enemy's own XP
 # is content.ENEMY_XP, written onto the enemy here so the run keeps what it was worth.
@@ -270,6 +275,7 @@ def generate(dungeon_id: str, seed: str | None = None, class_id: str = "ranger",
     if any(m not in C.RIFT_MODS for m in mods):
         raise store.HalcyonError("no such rift modifier")
     rarity = len(mods)
+    xp_mult = 1 + MOD_XP * len(mods)
     seed = seed or secrets.token_hex(8)
     rng = random.Random(f"{dungeon_id}:{seed}" if level == 1 else f"{dungeon_id}:{seed}:L{level}")
     swarm = random.Random(f"{dungeon_id}:{seed}:swarm{level}") if "swarming" in mods else None
@@ -293,7 +299,7 @@ def generate(dungeon_id: str, seed: str | None = None, class_id: str = "ranger",
 
     def add(etype: str, n: int, gx: int, gy: int) -> str:
         eid = f"{pre}boss" if etype == "boss" else f"{pre}e{sum(1 for k in enemies if not k.endswith('boss')) + 1}"
-        enemies[eid] = {"type": etype, "room": n, "xp": C.ENEMY_XP[etype], "x": gx + 0.5, "y": gy + 0.5}
+        enemies[eid] = {"type": etype, "room": n, "xp": int(C.ENEMY_XP[etype] * xp_mult + 1e-9), "x": gx + 0.5, "y": gy + 0.5}
         return eid
 
     for n, (kind, t) in enumerate(rooms):
@@ -348,10 +354,12 @@ def generate(dungeon_id: str, seed: str | None = None, class_id: str = "ranger",
                     drops[f"{pre}d{n_drop}"] = {"base_id": key, "tier": 1, "slot_count": 0, "enchants": [],
                                                "enemy": eid}
 
+    base = spec["complete_xp"] + sum(C.ENEMY_XP[e["type"]] for e in enemies.values())
+    complete_xp = round(base * xp_mult) - sum(e["xp"] for e in enemies.values())
     return {"id": dungeon_id, "name": spec["name"], "boss_name": spec["boss_name"], "seed": seed, "width": width, "height": height,
             "tiles": ["".join(r) for r in grid], "start": start, "rooms": room_spans, "door_y": mid,
             "enemies": enemies, "boss": boss, "drops": drops, "pickups": pickups,
-            "complete_xp": spec["complete_xp"], "class_id": class_id,
+            "complete_xp": complete_xp, "class_id": class_id,
             "mods": mods, "scale": mod_scale(mods, level), "level": level,
             "offers": offers_for(dungeon_id, seed, mods, level), "boss_rush": bool(boss_rush)}
 

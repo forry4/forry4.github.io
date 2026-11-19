@@ -289,3 +289,14 @@ def test_the_keys_leave_every_other_drop_as_it_was():
     d = D.generate("shallows", "same-loot")
     items = [x for x in d["drops"].values() if x["base_id"] not in ("dream_key", "boss_rush_key")]
     assert items and all(x["base_id"] in C.BASE_ITEMS and C.BASE_ITEMS[x["base_id"]]["kind"] != "key" for x in items)
+
+
+def test_each_modifier_adds_a_tenth_of_the_levels_xp():
+    def total(mods):
+        d = D.generate("shallows", "xp-seed", mods=mods)
+        return d["complete_xp"] + sum(e["xp"] for e in d["enemies"].values()), d
+    base, plain = total([])
+    for mods in (["brutal"], ["brutal", "swift"], ["brutal", "swift", "fortified"]):
+        got, d = total(mods)
+        assert got == round(base * (1 + D.MOD_XP * len(mods))), (mods, got, base)
+        assert d["complete_xp"] >= plain["complete_xp"], "the clear bonus never shrinks"
