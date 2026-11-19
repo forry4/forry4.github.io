@@ -874,7 +874,7 @@ The second dungeon, one rung deeper than the Shallows: the place where the Rift 
   - **Shard** — drifts at mid range and fires a four-way cross, turning 45° each time.
   - **Splitter** — keeps its distance and fires an aimed pair; when it dies it breaks into two **Splinters**, small and fast, which spit short shots. The room is not clear until they fall.
   - **Flicker** — blinks to a new spot (marked a beat before it lands), then fires a ring.
-- **Boss: the Breach.** Phase 1 turns four-armed spokes of shots and fires aimed tears (a fast line of shots). Phase 2 (half health) makes its room's cracks open twice as fast and BLINKS between four anchors, firing a ring each time it lands. It lobs the mortar at a player who hides, as every boss does.
+- **Boss: the Breach.** Nothing it fires turns, so it never reads like the Tidewarden's spiral (owner's note, 2026-11-19). Phase 1 marks FAULT LINES from its body (a Y aimed at the player) that tear into a still wall of shots for a moment, a pillar stopping a line; throws SHATTER shards that burst into rings; and fires aimed tears (a fast line of shots). Short rests, 1950 HP. Phase 2 (half health) makes its room's cracks open twice as fast and BLINKS between four anchors, firing a ring each time it lands. It lobs the mortar at a player who hides, as every boss does.
 - **Harder and richer than the Shallows**: more health and XP per enemy, a bigger clear bonus, and loot that starts at tier 2 from enemies and tier 3 from the boss, with tier 5 possible. Uniques, keys and modifiers work as in the Shallows. No level gate: the portal is open to every character.
 - LATER: a third boss phase that leaves only islands; Fracture-only uniques.
 

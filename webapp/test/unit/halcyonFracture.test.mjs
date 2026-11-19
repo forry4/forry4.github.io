@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { createSim, step, fingerprint, doorAt, CRACK, BOSS_HP, TPS } from "../../../halcyon/sim.js";
+import { createSim, step, fingerprint, doorAt, CRACK, BOSS_HP, TPS, FAULT, SHATTER } from "../../../halcyon/sim.js";
 
 const F = JSON.parse(readFileSync(new URL("./fixtures/halcyon-dungeon-fracture-a.json", import.meta.url)));
 const GEAR = [{ base_id: "longbow", tier: 1 }, { base_id: "leather_vest", tier: 1 }, { base_id: "volley_quiver", tier: 1 }];
@@ -119,13 +119,53 @@ test("a Flicker never picks a crack to land on, and a crack that opens there mov
 	assert.notEqual(doorAt(st, fl.x, fl.y), "x", "landed on solid ground");
 });
 
-test("the Breach turns, and at half health speeds its cracks and blinks between anchors", () => {
+test("the Breach marks fault lines, then they tear into a still wall that a pillar stops", () => {
+	const st = createSim(F, GEAR);
+	const boss = st.enemies.find((e) => e.type === "boss");
+	inRoom(st, boss.room, (e) => e === boss);
+	st.p.x = boss.x - 6; st.p.y = boss.y;              // straight west of it
+	boss.cd = 0;
+	step(st, {});
+	assert.equal(boss.faults.length, 3, "a Y in phase 1");
+	const [vx, vy] = boss.faults[0];
+	assert.ok(vx < -0.99 && Math.abs(vy) < 0.01, "the first line points at the player");
+	const marks = boss.faults.map((f) => f.slice());
+	assert.ok(!st.bullets.some((b) => b.src === "boss:fault"), "nothing yet: only marks");
+	for (let t = 0; t < FAULT.tele; t++) step(st, {});
+	const wall = st.bullets.filter((b) => b.src === "boss:fault");
+	assert.ok(wall.length > 10 && wall.every((b) => b.vx === 0 && b.vy === 0), `a still wall of ${wall.length}`);
+	for (const [mx, my, len] of marks) {                // every shot on a marked line, inside its length
+		assert.ok(len < FAULT.reach + 1e-9);
+	}
+	for (const b of wall) assert.ok(marks.some(([mx, my, len]) => {
+		const s = (b.x - boss.x) * mx + (b.y - boss.y) * my, off = Math.abs((b.x - boss.x) * my - (b.y - boss.y) * mx);
+		return off < 1e-6 && s > 0.5 && s <= len + 1e-6;
+	}), "on a mark");
+	assert.ok(marks.some(([, , len]) => len < FAULT.reach - 1), "a pillar or wall cut one short");
+	for (let t = 0; t < FAULT.life + 2; t++) { st.p.hp = 100000; step(st, {}); }
+	assert.ok(!st.bullets.some((b) => b.src === "boss:fault" && b.vx === 0 && wall.includes(b)), "and the tear closes");
+});
+
+test("the Breach's shatter shards burst into rings", () => {
+	const st = createSim(F, GEAR);
+	const boss = st.enemies.find((e) => e.type === "boss");
+	inRoom(st, boss.room, (e) => e === boss);
+	st.p.x = boss.x; st.p.y = boss.y + 6;
+	boss.cd = 0; boss.mode = 2; boss.modeT = 66;     // the shatter
+	for (let t = 0; t < 21; t++) step(st, {});
+	const shards = st.bullets.filter((b) => b.shard);
+	assert.equal(shards.length, 3, "three shards");
+	for (let t = 0; t < SHATTER.fuse; t++) step(st, {});
+	assert.ok(st.bullets.filter((b) => b.src === "boss:shatter" && !b.shard).length >= 2 * SHATTER.n, "each burst into a ring");
+});
+
+test("the Breach, at half health, speeds its cracks and blinks between anchors", () => {
 	const st = createSim(F, GEAR);
 	const boss = st.enemies.find((e) => e.type === "boss");
 	inRoom(st, boss.room, (e) => e === boss);
 	boss.cd = 0;
 	for (let t = 0; t < 120; t++) step(st, {});
-	assert.ok(st.bullets.some((b) => b.src === "boss:spokes"), "phase 1 fires spokes");
+	assert.ok(st.bullets.some((b) => b.src === "boss:fault"), "phase 1 tears fault lines");
 	boss.hp = boss.maxHp / 2;
 	for (let t = 0; t < 80; t++) step(st, {});
 	assert.equal(boss.phase, 2);

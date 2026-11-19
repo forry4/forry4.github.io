@@ -107,7 +107,7 @@ export const ENEMY = {
 	flicker: { hp: 75, r: 0.38, speed: 0 },
 };
 // Each dungeon's boss is a `boss` enemy of its own KIND (dungeon.boss_kind).
-export const BOSS_HP = { tidewarden: 1150, breach: 1700 };
+export const BOSS_HP = { tidewarden: 1150, breach: 1950 };
 
 /* CRACKS (the Fracture, design §14.4a): authored lines of floor that open into void
  * while their room is being fought. Each counts `t` round a `period`: closed, then
@@ -567,17 +567,43 @@ function enemyStep(st, e) {
 	else bossStep(st, e, d, ux, uy);
 }
 
-/* THE BREACH (the Fracture's boss, design §14.4a). Phase 1: four-armed SPOKES that
- * turn (the other way each time) and aimed TEARS — a line of shots, fast to slow.
+/* THE BREACH (the Fracture's boss, design §14.4a). Nothing about it turns: the
+ * Tidewarden's spiral is the Shallows' (owner's note, 2026-11-19).
+ *  FAULT  — lines from its body, marked first, that TEAR into a still wall of shots
+ *           for a moment; a pillar stops a line. Three (a Y aimed at the player) in
+ *           phase 1, four (an X) in phase 2, in waves.
+ *  SHATTER — slow heavy shards aimed round the player that burst into rings.
+ *  TEAR   — an aimed line of shots, fast to slow.
  * Phase 2 (half health, after the same telegraphed pause): its room's cracks run
  * twice as fast, and it BLINKS between four anchors round where it started, a ring
  * on each landing. It lobs the mortar at a player who hides, as every boss does. */
-const BREACH_CYCLE = [["spokes", 180], ["rest", 40], ["tear", 120], ["rest", 40]];
-const BREACH_CYCLE_2 = [["spokes", 160], ["blink", 60], ["tear", 100], ["blink", 60]];
+const BREACH_CYCLE = [["fault", 100], ["rest", 24], ["shatter", 66], ["rest", 24], ["tear", 80], ["rest", 24]];
+const BREACH_CYCLE_2 = [["fault", 110], ["blink", 50], ["shatter", 66], ["blink", 50], ["tear", 70], ["blink", 50]];
 const BREACH_ANCHORS = [[-5, -3], [5, 3], [5, -3], [-5, 3]];
+export const FAULT = { tele: 34, reach: 14, gap: 0.55, life: 40, dmg: 18, waves: [0, 50] };
+export const SHATTER = { fuse: 58, n: 8, speed: 6, dmg: 12 };
+/* Mark fault lines from the body, the first at the player: [vx, vy, length], each
+ * stopped by the first pillar or wall (what the page draws is what will tear). */
+function markFaults(st, e, n) {
+	const dx = st.p.x - e.x, dy = st.p.y - e.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
+	e.faults = [];
+	for (let k = 0; k < n; k++) {
+		const [vx, vy] = rotate(dx / d, dy / d, k * TAU / n);
+		let len = 0;
+		for (let s = 1; s <= FAULT.reach && !shotSolid(tileAt(st, e.x + vx * s, e.y + vy * s)); s += FAULT.gap) len = s;
+		e.faults.push([vx, vy, len]);
+	}
+	e.faultT = FAULT.tele;
+}
+/* Tear the marked lines open: a still wall of shots along each, for a moment. */
+function tearFaults(st, e) {
+	for (const [vx, vy, len] of e.faults || [])
+		for (let s = 1; s <= len; s += FAULT.gap) shoot(st, "e", e.x + vx * s, e.y + vy * s, 0, 0, FAULT.dmg, 0.24, FAULT.life);
+	e.faults = null; e.faultT = 0;
+}
 function breachStep(st, e, ux, uy) {
 	const p = st.p;
-	if (e.phase === 1 && e.hp <= e.maxHp / 2) { e.phase = 0; e.modeT = 70; e.tele = 70; return; }
+	if (e.phase === 1 && e.hp <= e.maxHp / 2) { e.phase = 0; e.modeT = 70; e.tele = 70; e.faults = null; e.faultT = 0; return; }
 	if (e.phase === 0) {
 		if (--e.modeT <= 0) { e.phase = 2; e.mode = 0; e.modeT = BREACH_CYCLE_2[0][1]; e.tele = 0; st.fastRoom = e.room; }
 		else e.tele = e.modeT;
@@ -589,18 +615,27 @@ function breachStep(st, e, ux, uy) {
 	const [mode, len] = cycle[e.mode];
 	const t = len - e.modeT;
 	st.src = `boss:${mode}`;
-	if (mode === "spokes") {
-		if (t === 0) e.side = -e.side;
-		if (t % cadence(st, 7) === 0) {
-			for (let k = 0; k < 4; k++) shoot(st, "e", e.x, e.y, e.ang + k * TAU / 4, 5, 15, 0.21, 240);
-			e.ang += 0.09 * e.side;
+	if (mode === "fault") {
+		const lines = e.phase === 1 ? 3 : 4;
+		for (const w of FAULT.waves) if (t === w) markFaults(st, e, lines);
+		if (e.faultT > 0 && --e.faultT === 0) tearFaults(st, e);
+	} else if (mode === "shatter") {
+		if (t === 0) e.tele = 20;
+		if (t === 20 || t === 44) {
+			const dx = p.x - e.x, dy = p.y - e.y, n = Math.sqrt(dx * dx + dy * dy) || 1;
+			for (let i = -1; i <= 1; i++) {
+				const [vx, vy] = rotate(dx / n, dy / n, i * 0.42 + (t === 44 ? 0.21 : 0));
+				shootAt(st, "e", e.x, e.y, e.x + vx, e.y + vy, 3.6, 22, 0.42, 200);
+				const b = st.bullets[st.bullets.length - 1];
+				b.fuse = SHATTER.fuse; b.shard = true;
+			}
 		}
 	} else if (mode === "tear") {
-		const k = t % 40;
-		if (k === 0) { e.aimX = p.x; e.aimY = p.y; e.tele = 18; }
-		if (k === 18) {
+		const k = t % 34;
+		if (k === 0) { e.aimX = p.x; e.aimY = p.y; e.tele = 16; }
+		if (k === 16) {
 			const dx = e.aimX - e.x, dy = e.aimY - e.y, n = Math.sqrt(dx * dx + dy * dy) || 1;
-			for (let i = 0; i < 6; i++) shootAt(st, "e", e.x, e.y, e.x + dx / n, e.y + dy / n, 6.5 + i, 12, 0.2, 200);
+			for (let i = 0; i < 7; i++) shootAt(st, "e", e.x, e.y, e.x + dx / n, e.y + dy / n, 6.5 + i, 14, 0.2, 200);
 		}
 	} else if (mode === "blink") {
 		if (t === 0) {
@@ -844,6 +879,12 @@ export function step(st, input) {
 			const sx = st.shield.x - b.x, sy = st.shield.y - b.y;
 			const rr = st.shield.r + b.r;
 			if (sx * sx + sy * sy < rr * rr) { if (--st.shield.hits <= 0) st.shield = null; continue; }
+		}
+		if (b.fuse && --b.fuse <= 0) {                    // a shatter shard bursts into a ring
+			const src = st.src; st.src = b.src;
+			for (let k = 0; k < SHATTER.n; k++) shoot(st, "e", b.x, b.y, k * TAU / SHATTER.n + 0.2, SHATTER.speed, SHATTER.dmg, 0.18, 120);
+			st.src = src;
+			continue;
 		}
 		if (--b.life <= 0 || wallHit(b, (x, y) => shotSolid(tileAt(st, x, y)))) continue;
 		let gone = false;

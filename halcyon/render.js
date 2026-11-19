@@ -7,7 +7,7 @@
  * rock), the player cyan/white, every enemy and every enemy shot red/orange/
  * magenta, pickups gold (loot) and green (healing).
  */
-import { recoveryLimit, xpProgress, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR } from "./sim.js";
+import { recoveryLimit, xpProgress, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT } from "./sim.js";
 
 /* A loot bag wears the color of the best thing in it (design §19.1): a tier color, and
  * a unique's gold with a glow. The tier number in every slot is the non-color cue. */
@@ -196,6 +196,14 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here, bag
 	for (const e of st.enemies) {
 		if (e.hp <= 0 || e.dormant) continue;
 		const ep = at(e), X = sx(ep.x), Y = sy(ep.y), r = e.r * px;
+		// The Breach's fault lines: dashed, thickening until they tear.
+		if (e.faults && e.faultT > 0 && e.active) {
+			const k = 1 - e.faultT / FAULT.tele;
+			g.strokeStyle = `rgba(255,90,74,${0.3 + 0.55 * k})`; g.lineWidth = Math.max(1, px * (0.05 + 0.22 * k));
+			g.setLineDash?.([px * 0.3, px * 0.2]);
+			for (const [vx, vy, len] of e.faults) { g.beginPath(); g.moveTo(X, Y); g.lineTo(X + vx * len * px, Y + vy * len * px); g.stroke(); }
+			g.setLineDash?.([]);
+		}
 		// Telegraphs: what is about to fire says so, and says where.
 		if (e.tele > 0 && e.active) {
 			g.strokeStyle = COLORS.tele; g.lineWidth = Math.max(1, px * 0.05);
@@ -430,6 +438,11 @@ function drawShots(g, bullets, sx, sy, px, at) {
 			g.lineWidth = Math.max(2, b.r * px * (b.power ? 2 : 0.9));
 			const tail = b.look === "blade" ? 0.022 : 0.03;
 			g.beginPath(); g.moveTo(X, Y); g.lineTo(X - b.vx * tail * px, Y - b.vy * tail * px); g.stroke();
+		} else if (b.shard) {                                 // a shatter shard: a crystal that will burst
+			const r = b.r * px * 1.2;
+			g.beginPath(); g.moveTo(X, Y - r); g.lineTo(X + r * 0.7, Y); g.lineTo(X, Y + r); g.lineTo(X - r * 0.7, Y); g.closePath();
+			g.fillStyle = COLORS.enemyShotHeavy; g.fill();
+			g.strokeStyle = "rgba(255,240,235,.9)"; g.lineWidth = Math.max(1, px * 0.05); g.stroke();
 		} else {
 			circle(g, X, Y, b.r * px * 1.15, "rgba(255,240,235,.9)");
 			circle(g, X, Y, b.r * px, b.dmg >= 30 ? COLORS.enemyShotHeavy : COLORS.enemyShot);
