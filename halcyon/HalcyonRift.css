@@ -368,6 +368,7 @@ button.hr-forge-card:hover{border-color:#f08a80}
   color:#f4efe4;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.16)}
 .hr-vault-search:focus{outline:none;border-color:var(--g-accent)}
 .hr-vault-fams{display:flex;flex-wrap:wrap;gap:4px}
+.hr-chip-usable{margin-left:10px}
 .hr-chip{font:inherit;font-size:.78rem;padding:2px 9px;border-radius:999px;cursor:pointer;color:var(--text-soft);
   background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.14)}
 .hr-chip:hover{color:#f4efe4}

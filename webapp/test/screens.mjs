@@ -10316,6 +10316,17 @@ try {
 		const stored = await page.waitForFunction(() => document.querySelectorAll(".hr-equip .hr-slot.has").length === 2
 			&& document.querySelector(".hr-grid-vault .hr-slot.has"), null, { timeout: 10_000 }).then(() => true).catch(() => false);
 		check("dragging the bow onto the vault stores it", stored);
+		// Equippable keeps what this Ranger could put on (the bow) lit, and combines with the
+		// type chips: Equippable + Armor dims it.
+		const bowDim = () => page.locator(".hr-grid-vault .hr-slot.has").first().evaluate((e) => e.classList.contains("dim")).catch(() => null);
+		await page.locator(".hr-chip-usable").click().catch(() => {});
+		const usableLit = await bowDim();
+		await page.locator(".hr-vault-fams .hr-chip", { hasText: "Armor" }).click().catch(() => {});
+		const armorDim = await bowDim();
+		await page.locator(".hr-vault-fams .hr-chip", { hasText: "All" }).click().catch(() => {});
+		await page.locator(".hr-chip-usable").click().catch(() => {});
+		check("the vault's Equippable chip keeps the Ranger's bow lit, and with Armor it dims", usableLit === false && armorDim === true,
+			JSON.stringify([usableLit, armorDim]));
 		await page.locator(".hr-grid-vault .hr-slot.has").first().dragTo(weapon).catch(() => {});
 		const back = await page.waitForFunction(() => document.querySelectorAll(".hr-equip .hr-slot.has").length === 3
 			&& !document.querySelector(".hr-grid-vault .hr-slot.has"), null, { timeout: 10_000 }).then(() => true).catch(() => false);

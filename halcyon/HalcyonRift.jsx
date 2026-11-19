@@ -317,6 +317,7 @@ export default function HalcyonRift({ authUser, onExit }) {
 	}, [prefs.ui]);
 	const [vaultQuery, setVaultQuery] = useState("");
 	const [vaultFam, setVaultFam] = useState("");
+	const [vaultUsable, setVaultUsable] = useState(false);
 	const [flash, setFlash] = useState(null);         // an item id lit in the panel for a moment
 	// THE MAIN MENU (owner's ask, 2026-11-18): where you make or pick a character,
 	// and where a death sends you. The town is entered from it with one character.
@@ -594,6 +595,11 @@ export default function HalcyonRift({ authUser, onExit }) {
 		if (b?.slot === "key") return `${nameOf(it)} is carried, not worn.`;
 		return `${nameOf(it)} goes in ${b?.slot === "ring" ? "a ring" : `the ${b?.slot || "right"}`} slot.`;
 	};
+	// Something the open character could put on: a worn slot, and its class (or any).
+	const usable = (it) => {
+		const b = view.bases[it.base_id];
+		return !!b && b.slot !== "key" && (!b.cls || b.cls === char?.class_id);
+	};
 	const accepts = (target, it) => (target.kind === "place" ? fits(it, target.to) : true);
 	// Mid-run, a move is a run EVENT (queued with the fight's reports, so it lands after
 	// the pickup that minted the item) and the fight takes the new gear on its next tick.
@@ -791,12 +797,13 @@ export default function HalcyonRift({ authUser, onExit }) {
 		if (free === undefined) { notify("Your bag is full.", "bad"); return; }
 		floorAt.current.delete(itemId);
 		townMove(it, at.inv(char.char_id, free));
-		notify(`Picked up ${nameOf(it)}`, it.kind === "unique" ? "unique" : "loot");
+		if (it.kind === "unique") notify(`Picked up ${nameOf(it)}`, "unique");   // only a unique is worth a line
 	};
 	// The vault's search and filter dim what does not match; nothing moves.
 	const vaultMatch = (it) => {
 		const fam = view.bases[it.base_id]?.slot;
 		if (vaultFam === "unique" ? it.kind !== "unique" : vaultFam && fam !== vaultFam) return false;
+		if (vaultUsable && !usable(it)) return false;
 		const q = vaultQuery.trim().toLowerCase();
 		if (!q) return true;
 		const words = [nameOf(it), FAMILY[fam] || "", it.kind === "unique" ? "unique" : `tier ${it.tier}`,
@@ -941,6 +948,9 @@ export default function HalcyonRift({ authUser, onExit }) {
 										{[["", "All"], ["weapon", "Weapons"], ["armor", "Armor"], ["ability", "Abilities"], ["ring", "Rings"], ["key", "Keys"], ["unique", "Uniques"]].map(([f, label]) =>
 											<button key={f || "all"} className={"hr-chip" + (vaultFam === f ? " on" : "")} aria-pressed={vaultFam === f}
 												onClick={() => setVaultFam(f)}>{label}</button>)}
+										<button className={"hr-chip hr-chip-usable" + (vaultUsable ? " on" : "")} aria-pressed={vaultUsable}
+											title={`What this ${CLASS_INFO[char?.class_id]?.name || "character"} can equip`}
+											onClick={() => setVaultUsable((u) => !u)}>Equippable</button>
 									</div>
 									<button className="btn btn-ghost btn-sm" disabled={locked} onClick={sortVault} title="Weapons, armor, abilities, rings; best first. Locked items stay put.">Sort</button>
 								</div>
@@ -1277,7 +1287,7 @@ const ENEMY_NAMES = { chaser: "a Chaser", shooter: "a Shooter", radial: "a Radia
 	shard: "a Shard", splitter: "a Splitter", splinter: "a Splinter", flicker: "a Flicker", rift: "the Rift" };
 const ATTACK_NAMES = { touch: "charge", spit: "spit", bolt: "bolt", ring: "ring of shots", spiral: "spiral",
 	fan: "fan of shots", nova: "nova", burst: "dying burst", mortar: "mortar", fire: "burning ground",
-	cross: "cross of shots", pair: "pair of shots", spokes: "spokes", tear: "tear", blink: "ring", crack: "opening crack" };
+	cross: "cross of shots", pair: "pair of shots", fault: "fault line", shatter: "shatter shard", tear: "tear", blink: "ring", crack: "opening crack" };
 function causeOf(hit) {
 	if (!hit || !hit.src) return "Fell in the rift";
 	const [who, how] = hit.src.split(":");
@@ -1580,8 +1590,7 @@ function outcomeNotice(r) {
 	if (r.practice) return [{ completed: "Dream Rift complete.", recalled: "Dream Rift left.", dead: "Dream Rift failed." }[r.status]
 		+ time + " Nothing changed; your character is safe.", r.status === "dead" ? "bad" : "info"];
 	if (r.status === "dead") return [`Your ${className(r.classId)} has fallen. Everything it carried is gone; the vault is untouched.`, "bad"];
-	const head = r.status === "completed" ? `${r.dungeonName || "The Rift"} cleared.` : "Recalled to town.";
-	return [`${head}${time} ${r.loot.length ? `Brought back: ${r.loot.join(", ")}.` : "Nothing was picked up."}`, r.status === "completed" ? "good" : "info"];
+	return ["Recalled to town.", "info"];   // nothing about what came back (owner's ask)
 }
 
 /* The notifications: the newest few in the top left, each fading after a few
@@ -1858,7 +1867,7 @@ function Dungeon({ run, client, onEnd, notify, tips, onDeeper }) {
 				const it = ctl.floor.get(ev.key), slot = ctl.lift(ev.key);
 				if (slot === undefined) return;
 				client.report({ type: "pickup_item", ...(it.fresh ? { drop: it.drop } : { item: it.item_id }), slot });
-				note(`Picked up ${nameOf(it)}`, "loot");
+				if (it.kind === "unique") note(`Picked up ${nameOf(it)}`, "unique");
 				return;
 			}
 			if (ev.local) return;
@@ -1867,8 +1876,7 @@ function Dungeon({ run, client, onEnd, notify, tips, onDeeper }) {
 				const slot = ctl.take(ev.drop, d);
 				if (slot === undefined) return;            // input() never takes into a full bag
 				client.report({ ...ev, slot });
-				const name = nameOf({ ...d, kind: run.bases[d.base_id]?.kind });
-				note(`Picked up ${name}`, d && run.bases[d.base_id]?.kind === "unique" ? "unique" : "loot");
+				if (run.bases[d.base_id]?.kind === "unique") note(`Picked up ${nameOf({ ...d, kind: "unique" })}`, "unique");
 				return;
 			}
 			client.report(ev.type === "kill" && ev.enemy === run.dungeon.boss
@@ -1882,8 +1890,7 @@ function Dungeon({ run, client, onEnd, notify, tips, onDeeper }) {
 			client.flush();
 			const h = st.hero;
 			// What came back is what is still carried (an item put down and left is gone).
-			const brought = ctl.items.filter((it) => it.fresh).map(nameOf);
-			setTimeout(() => onEnd({ status, runId: run.run_id, loot: brought, items: ctl.items, realm: run.realm, dungeonName: run.dungeon.name,
+			setTimeout(() => onEnd({ status, runId: run.run_id, items: ctl.items, realm: run.realm, dungeonName: run.dungeon.name,
 				classId: run.class_id || st.classId, practice: run.practice, timeTicks: st.bossTimeTicks,
 				heroXp: h.xp, level: h.level, startLevel: run.startLevel ?? h.startLevel,
 				lastHit: st.lastHit || null, depth: st.depth, mods: run.dungeon.mods || [],

@@ -267,7 +267,7 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
   free bag slot. The page reports `drop_item` / `pickup_item`, naming the item by its
   drop if it was picked up this run (the store already accepted both). Whatever is
   still on the floor when the run ends is gone (the store destroys `ground` items at
-  run end), and the end-of-run notification's "Brought back" counts only what is still carried.
+  run end).
 - **In town there is a floor too** (2026-11-18): the place `("floor", char_id)`, stored as
   `ground` under the run id `town:<char_id>` (`store.TOWN_FLOOR`). `move_item` puts an item
   there (never a locked one) and picks it up again (`_town_item(..., floor=True)` — only a move
@@ -547,7 +547,12 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
   at its body, and the room stays sealed until they fall. The store REFUSES a splinter
   kill before its parent's, so no client can credit one early.
 - **The Breach** keeps `type: "boss"`; `e.form = dungeon.boss_kind` picks its step
-  (`breachStep`) and its HP (`sim.BOSS_HP`). Phase 1 fires turning spokes and tears; at
+  (`breachStep`) and its HP (`sim.BOSS_HP`, 1950). Nothing it fires TURNS (the spiral is
+  the Tidewarden's; owner's note): FAULT lines (`sim.FAULT`) are marked from its body —
+  a Y aimed at the player, an X in phase 2, two waves — then tear into a still wall of
+  shots, each line stopped at the first pillar or wall (the mark is drawn to that same
+  length); SHATTER shards (`sim.SHATTER`) fly slow and burst into rings; TEARS are an
+  aimed line, fast to slow. Rests are short. At
   half health its cracks run at double speed (`st.fastRoom`) and it blinks between four
   anchors around its home. It lobs the mortar like every boss.
 - **Harder, with better loot**: `fracture_enemy` drops T2–T4, `fracture_boss` T3–T5 plus
@@ -557,3 +562,10 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
 - Fixtures: `halcyon-dungeon-fracture-a.json` (seed `fracture-a`) beside the Shallows'
   pair, held to the generator by `test_sim_fixtures.py`. The rules are
   `webapp/test/unit/halcyonFracture.test.mjs`.
+
+## Quieter notices, and Equippable in the vault (2026-11-19, owner's asks)
+- **A recall says "Recalled to town." and nothing else** — no list of what came back.
+- **Picking an item up is silent unless it is a unique** (town floor, run floor and drops
+  alike); a unique still gets its gold line.
+- **The vault's Equippable chip** shows only what the open character could put on (a worn
+  slot, and its class or any class). It combines with the type chips and the search.
