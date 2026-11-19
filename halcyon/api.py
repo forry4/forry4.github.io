@@ -65,6 +65,7 @@ class RunIn(BaseModel):
     dungeon_id: str = Field(default="shallows", max_length=32)
     practice: bool = False
     mods: list[str] = Field(default_factory=list, max_length=8)
+    boss_rush: bool = False
 
 
 class DescendIn(BaseModel):
@@ -107,6 +108,8 @@ def _place(to: list) -> tuple:
         return ("inventory", str(rest[0]), rest[1] if isinstance(rest[1], int) else -1)
     if kind == "equipped" and len(rest) == 2:
         return ("equipped", str(rest[0]), str(rest[1]))
+    if kind == "floor" and len(rest) == 1:
+        return ("floor", str(rest[0]))
     return ("nowhere",)
 
 
@@ -170,6 +173,7 @@ def setup_halcyon(app, get_db_conn, get_user_by_session, token_resolver=None) ->
                             for k in C.CLASSES],
                 "levels": list(C.LEVEL_XP),
                 "rift_mods": [{"id": k, **v} for k, v in C.RIFT_MODS.items()],
+                "boss_rush": C.BOSS_RUSH,
                 # The odds the page shows (the forge's and the modifiers' panels), read
                 # off the same constants the generator and the store roll against.
                 "odds": {"fuse_slot_gain": [list(g) for g in C.FUSE_SLOT_GAIN], "max_slots": C.MAX_ENCHANT_SLOTS,
@@ -186,6 +190,11 @@ def setup_halcyon(app, get_db_conn, get_user_by_session, token_resolver=None) ->
     def halcyon_open(char_id: str, who: str = Depends(owner)):
         return call(S.open_character, who, char_id)
 
+    @app.post("/halcyon/characters/{char_id}/leave")
+    def halcyon_leave(char_id: str, who: str = Depends(owner)):
+        call(S.leave_town, who, char_id)
+        return {"ok": True}
+
     @app.post("/halcyon/runs")
     def halcyon_run(body: RunIn, who: str = Depends(owner)):
         if _runs_hour.exceeded(who):
@@ -193,20 +202,21 @@ def setup_halcyon(app, get_db_conn, get_user_by_session, token_resolver=None) ->
         _runs_hour.record(who)
         try:
             class_id = S.character_class(connect, who, body.char_id)
-            d = D.generate(body.dungeon_id, class_id=class_id, mods=body.mods)
+            d = D.generate(body.dungeon_id, class_id=class_id, mods=body.mods, boss_rush=body.boss_rush)
             run = S.start_run(connect, who, body.char_id, body.dungeon_id, d["seed"], d,
                               practice=body.practice)
         except S.HalcyonError as e:
             _refuse(e)
-        return {"run_id": run["run_id"], "dungeon": d, "practice": body.practice, "class_id": class_id}
+        return {"run_id": run["run_id"], "dungeon": d, "practice": body.practice, "class_id": class_id,
+                "spent": run["spent"]}
 
     @app.post("/halcyon/runs/{run_id}/descend")
     def halcyon_descend(run_id: str, body: DescendIn, who: str = Depends(owner)):
         if _events_minute.exceeded(who):
             raise HTTPException(status_code=429, detail="slow down")
         _events_minute.record(who)
-        make = lambda dungeon_id, seed, class_id, mods, level: D.generate(
-            dungeon_id, seed, class_id=class_id, mods=mods, level=level)
+        make = lambda dungeon_id, seed, class_id, mods, level, boss_rush=False: D.generate(
+            dungeon_id, seed, class_id=class_id, mods=mods, level=level, boss_rush=boss_rush)
         d = call(S.descend, who, run_id, body.mod, body.from_level, make)
         return {"dungeon": d}
 

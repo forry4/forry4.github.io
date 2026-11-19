@@ -94,7 +94,7 @@ export const CLASS_INFO = {
 export const ENEMY = {
 	// A chaser also spits a short shot when it is close (owner's ask, 2026-11-18): a
 	// short telegraph, then one slow bolt that dies after `shot.range` tiles.
-	chaser: { hp: 55, r: 0.4, speed: 3.4, touch: 16, shot: { range: 3.5, speed: 7, dmg: 9, tele: 14, every: 75 } },
+	chaser: { hp: 55, r: 0.4, speed: 3.4, shot: { range: 3.5, speed: 7, dmg: 9, tele: 14, every: 75 } },
 	shooter: { hp: 48, r: 0.38, speed: 2.4 },
 	radial: { hp: 95, r: 0.45, speed: 0 },
 	boss: { hp: 1150, r: 1.0, speed: 1.2 },
@@ -374,7 +374,6 @@ function enemyStep(st, e) {
 
 	if (e.type === "chaser") {
 		moveBody(st, e, ux * sp, uy * sp);
-		if (d < e.r + p.r + 0.05 && e.cd === 0) { hurtPlayer(st, ENEMY.chaser.touch, "chaser:touch"); e.cd = 36; }
 		const sh = ENEMY.chaser.shot;
 		if (e.scd > 0) e.scd--;
 		if (e.tele > 0) {
@@ -496,9 +495,10 @@ export function step(st, input) {
 
 	// the healing potion: only when it would heal, then a cooldown
 	if (p.potionCd > 0) p.potionCd--;
-	if (input.potion && !(p.potionCd > 0) && p.hp < s.maxHp) {
-		p.low = Math.min(s.maxHp, p.low + POTION_HEAL);
-		p.hp = Math.min(recoveryLimit(st), p.hp + POTION_HEAL);
+	// It heals only up to the recovery limit and never raises it (owner's call,
+	// 2026-11-18): a potion tops up what regeneration could reach, faster.
+	if (input.potion && !(p.potionCd > 0) && p.hp < limit) {
+		p.hp = Math.min(limit, p.hp + POTION_HEAL);
 		p.potionCd = POTION_COOLDOWN;
 		st.events.push({ type: "potion", local: true });
 	}

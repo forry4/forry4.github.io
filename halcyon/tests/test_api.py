@@ -127,6 +127,11 @@ def test_character_menu_starts_class_specific_practice_runs(app):
     state = route(app, "GET", "/halcyon/state")(who)
     gear = {i["equip_slot"]: i["base_id"] for i in state["items"] if i["loc"] == "equipped"}
     assert gear == {"weapon": "mace", "armor": "plate_armor", "ability": "stillness_orb"}
+    with pytest.raises(HTTPException) as e:
+        route(app, "POST", "/halcyon/runs")(A.RunIn(char_id=ch["char_id"], practice=True), who)
+    assert e.value.status_code == 409 and "Dream Key" in e.value.detail
+    S.grant_item(app.state.connect, who, {"base_id": "dream_key", "tier": 1, "slot_count": 0, "enchants": []},
+                 ("inventory", ch["char_id"], 0))
     run = route(app, "POST", "/halcyon/runs")(A.RunIn(char_id=ch["char_id"], practice=True), who)
     assert run["practice"] is True and run["class_id"] == "paladin" and run["dungeon"]["class_id"] == "paladin"
 
@@ -195,3 +200,36 @@ def test_lock_and_the_graveyard_through_the_routes(app):
     grave = state["fallen"][0]["death_summary"]
     assert grave["src"] == "radial:ring" and grave["dungeon_name"] == run["dungeon"]["name"]
     assert {i["base_id"] for i in grave["items"]} >= {bow["base_id"]}
+
+
+def test_a_boss_rush_run_through_the_route_is_only_the_boss_at_every_level(app):
+    who = owner_dep(app)("tok", None, None)
+    ch = route(app, "POST", "/halcyon/characters")(A.CharacterIn(slot=0), who)
+    start = route(app, "POST", "/halcyon/runs")
+    with pytest.raises(HTTPException) as e:
+        start(A.RunIn(char_id=ch["char_id"], boss_rush=True), who)
+    assert "Boss Rush key" in e.value.detail
+    S.grant_item(app.state.connect, who, {"base_id": "boss_rush_key", "tier": 1, "slot_count": 0, "enchants": []},
+                 ("inventory", ch["char_id"], 0))
+    run = start(A.RunIn(char_id=ch["char_id"], boss_rush=True), who)
+    d = run["dungeon"]
+    assert d["boss_rush"] and [r["kind"] for r in d["rooms"]] == ["entrance", "boss"]
+    assert all(e["type"] == "boss" for e in d["enemies"].values())
+    assert "boss_rush_key" not in {x["base_id"] for x in d["drops"].values()}
+    route(app, "POST", "/halcyon/runs/{run_id}/events")(run["run_id"], A.EventsIn(events=[
+        {"seq": 1, "type": "kill", "enemy": d["boss"], "elapsed_ticks": 500}]), who)
+    deeper = route(app, "POST", "/halcyon/runs/{run_id}/descend")(run["run_id"], A.DescendIn(
+        mod=d["offers"][0], from_level=1), who)["dungeon"]
+    assert deeper["boss_rush"] and [r["kind"] for r in deeper["rooms"]] == ["entrance", "boss"]
+    assert route(app, "GET", "/halcyon/state")(who)["leaderboards"] == {}
+
+
+def test_the_town_ground_through_the_routes(app):
+    who = owner_dep(app)("tok", None, None)
+    ch = route(app, "POST", "/halcyon/characters")(A.CharacterIn(slot=0), who)
+    state = route(app, "GET", "/halcyon/state")(who)
+    vest = next(i for i in state["items"] if i["base_id"] == "leather_vest")
+    out = route(app, "POST", "/halcyon/items/{item_id}/move")(vest["item_id"], A.MoveIn(to=["floor", ch["char_id"]]), who)
+    assert out["loc"] == "ground" and out["run_id"] == "town:" + ch["char_id"]
+    assert route(app, "POST", "/halcyon/characters/{char_id}/leave")(ch["char_id"], who) == {"ok": True}
+    assert vest["item_id"] not in {i["item_id"] for i in route(app, "GET", "/halcyon/state")(who)["items"]}

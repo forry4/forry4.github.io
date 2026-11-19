@@ -136,6 +136,8 @@ def _loot_sample(n, mods=(), cls="ranger"):
         d = D.generate("shallows", f"loot-{i}-{len(mods)}", cls, mods=list(mods))
         per = {}
         for dr in d["drops"].values():
+            if C.base(dr["base_id"])["kind"] == "key":
+                continue                                 # keys are their own roll (KEY_DROPS)
             per[dr["enemy"]] = per.get(dr["enemy"], 0) + 1
             src = "boss" if dr["enemy"] == d["boss"] else "enemy"
             quality[src].append("unique" if C.base(dr["base_id"])["kind"] == "unique" else f"t{dr['tier']}")
@@ -265,3 +267,25 @@ def test_swarming_puts_more_enemies_in_every_fight_the_boss_room_included():
         reach = D.reachable(many)
         assert all((int(e["x"]), int(e["y"])) in reach for e in many["enemies"].values())
         assert all(many["tiles"][int(e["y"])][int(e["x"])] == "." for e in many["enemies"].values())
+
+
+def test_keys_drop_from_the_boss_at_their_rates_and_a_boss_rush_never_drops_its_own_key():
+    n, got = 2000, {"dream_key": 0, "boss_rush_key": 0}
+    for i in range(n):
+        d = D.generate("shallows", f"keys-{i}")
+        for x in d["drops"].values():
+            if x["base_id"] in got:
+                assert x["enemy"] == d["boss"] and x["slot_count"] == 0 and x["enchants"] == []
+                got[x["base_id"]] += 1
+    assert abs(got["dream_key"] / n - 0.10) < 0.02, got
+    assert abs(got["boss_rush_key"] / n - 0.03) < 0.012, got
+    for i in range(300):
+        d = D.generate("shallows", f"rush-{i}", boss_rush=True)
+        assert "boss_rush_key" not in {x["base_id"] for x in d["drops"].values()}
+
+
+def test_the_keys_leave_every_other_drop_as_it_was():
+    """Keys roll on their own stream: an item a seed dropped before still drops."""
+    d = D.generate("shallows", "same-loot")
+    items = [x for x in d["drops"].values() if x["base_id"] not in ("dream_key", "boss_rush_key")]
+    assert items and all(x["base_id"] in C.BASE_ITEMS and C.BASE_ITEMS[x["base_id"]]["kind"] != "key" for x in items)

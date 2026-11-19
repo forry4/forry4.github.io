@@ -53,6 +53,15 @@ def _dungeon():
                       "d3": {**VIGOR, "enemy": "boss"}}}
 
 
+DREAM_KEY = {"base_id": "dream_key", "tier": 1, "slot_count": 0, "enchants": []}
+RUSH_KEY = {"base_id": "boss_rush_key", "tier": 1, "slot_count": 0, "enchants": []}
+
+
+def _key(db, char_id, spec=DREAM_KEY, slot=15, owner=ME):
+    """A key in the character's bag (the last slot, out of the tests' way)."""
+    return S.grant_item(db, owner, spec, ("inventory", char_id, slot))
+
+
 def _rows(db, sql, params=()):
     conn = db()
     try:
@@ -91,7 +100,7 @@ def assert_invariants(db):
             run = _rows(db, "SELECT status FROM hr_runs WHERE run_id=?", (it["run_id"],))
             assert run and run[0]["status"] == "open", f"an item left on a closed run's floor: {it}"
         else:
-            assert it["destroyed_reason"] in ("death", "fusion", "discard", "run_end"), it
+            assert it["destroyed_reason"] in ("death", "fusion", "discard", "run_end", "key", "left"), it
     drops = [(i["origin_run_id"], i["origin_drop_id"]) for i in items if i["origin"] == "drop"]
     assert len(drops) == len(set(drops)), "a drop was minted twice"
 
@@ -278,6 +287,7 @@ def test_death_destroys_everything_carried_and_nothing_in_the_vault(db, me):
 
 def test_a_dream_rift_death_is_a_safe_return_to_town(db, me):
     item = S.grant_item(db, ME, BOW, ("inventory", me["char_id"], 0))
+    _key(db, me["char_id"])
     run = S.start_run(db, ME, me["char_id"], "shallows", "dream-death", _dungeon(), practice=True)
     out = S.apply_events(db, ME, run["run_id"], [{"seq": 1, "type": "drop_item", "item": item["item_id"]},
                                                    {"seq": 2, "type": "death"}])
@@ -288,6 +298,7 @@ def test_a_dream_rift_death_is_a_safe_return_to_town(db, me):
 
 
 def test_a_dream_rift_gives_no_rewards_or_xp_and_records_a_boss_time(db, me):
+    _key(db, me["char_id"])
     run = S.start_run(db, ME, me["char_id"], "shallows", "dream-clear", _dungeon(), practice=True)
     out = S.apply_events(db, ME, run["run_id"], [
         {"seq": 1, "type": "kill", "enemy": "boss", "elapsed_ticks": 321},
@@ -302,6 +313,7 @@ def test_a_dream_rift_gives_no_rewards_or_xp_and_records_a_boss_time(db, me):
 
 def test_a_personal_rift_leaderboard_keeps_only_the_five_fastest_times(db, me):
     for n, ticks in enumerate((500, 100, 300, 200, 50, 600), start=1):
+        _key(db, me["char_id"])
         run = S.start_run(db, ME, me["char_id"], "shallows", f"time-{n}", _dungeon(), practice=True)
         S.apply_events(db, ME, run["run_id"], [
             {"seq": 1, "type": "kill", "enemy": "boss", "elapsed_ticks": ticks},
@@ -829,6 +841,7 @@ def test_a_strange_death_summary_is_bounded_and_a_dream_death_writes_none(db, me
     d = S.owner_view(db, ME)["fallen"][0]["death_summary"]
     assert len(d["src"]) == 40 and d["hit"] == 100_000 and d["kills"] == 0 and "taken" not in d
     c = S.create_character(db, ME, 1, "ranger")
+    _key(db, c["char_id"])
     run = S.start_run(db, ME, c["char_id"], "shallows", "dream", _dungeon(), practice=True)
     S.apply_events(db, ME, run["run_id"], [{"seq": 1, "type": "death", "summary": {"src": "boss:fan"}}])
     assert _rows(db, "SELECT death_summary FROM hr_characters WHERE char_id=?", (c["char_id"],)) == [{"death_summary": None}]
@@ -841,3 +854,96 @@ def test_the_best_level_counts_the_fallen_too(db, me):
     conn.commit(); conn.close()
     S.create_character(db, ME, 0, "ninja")
     assert S.owner_view(db, ME)["best_level"] == 7
+
+
+# ── keys (owner's ask, 2026-11-18) ─────────────────────────────────────────────
+def test_a_dream_rift_needs_a_dream_key_in_the_bag_and_spends_it(db, me):
+    with pytest.raises(S.HalcyonError, match="Dream Key"):
+        S.start_run(db, ME, me["char_id"], "shallows", "no-key", _dungeon(), practice=True)
+    S.grant_item(db, ME, DREAM_KEY, ("vault", 0))                 # the vault's does not count
+    with pytest.raises(S.HalcyonError, match="Dream Key"):
+        S.start_run(db, ME, me["char_id"], "shallows", "no-key", _dungeon(), practice=True)
+    assert not _rows(db, "SELECT * FROM hr_runs")
+    key = _key(db, me["char_id"])
+    S.start_run(db, ME, me["char_id"], "shallows", "key", _dungeon(), practice=True)
+    assert _rows(db, "SELECT loc, destroyed_reason FROM hr_items WHERE item_id=?", (key["item_id"],)) == [
+        {"loc": "destroyed", "destroyed_reason": "key"}]
+    assert [i["loc"] for i in _live(db) if i["base_id"] == "dream_key"] == ["vault"]
+    assert_invariants(db)
+
+
+def test_a_boss_rush_run_spends_its_key_and_records_no_time(db, me):
+    rush = {**_dungeon(), "boss_rush": True}
+    with pytest.raises(S.HalcyonError, match="Boss Rush key"):
+        S.start_run(db, ME, me["char_id"], "shallows", "rush", rush)
+    _key(db, me["char_id"], RUSH_KEY)
+    run = S.start_run(db, ME, me["char_id"], "shallows", "rush", rush)
+    assert not [i for i in _live(db) if i["base_id"] == "boss_rush_key"]
+    S.apply_events(db, ME, run["run_id"], [{"seq": 1, "type": "kill", "enemy": "boss", "elapsed_ticks": 99},
+                                           {"seq": 2, "type": "complete"}])
+    assert S.owner_view(db, ME)["leaderboards"] == {}
+    _key(db, me["char_id"], RUSH_KEY)
+    _key(db, me["char_id"], DREAM_KEY, slot=14)
+    with pytest.raises(S.HalcyonError, match="no Boss Rush"):
+        S.start_run(db, ME, me["char_id"], "shallows", "both", rush, practice=True)
+
+
+def test_keys_do_not_fuse_or_go_in_an_equipment_slot(db, me):
+    a, b = _key(db, me["char_id"], slot=1), _key(db, me["char_id"], slot=2)
+    with pytest.raises(S.HalcyonError, match="keys do not fuse"):
+        S.fuse(db, ME, a["item_id"], b["item_id"])
+    for slot in EQUIP_SLOTS:
+        with pytest.raises(S.HalcyonError):
+            S.move_item(db, ME, a["item_id"], ("equipped", me["char_id"], slot))
+
+
+# ── the town's ground (owner's ask, 2026-11-18) ────────────────────────────────
+def _loc(db, item_id):
+    return _rows(db, "SELECT loc, run_id, destroyed_reason FROM hr_items WHERE item_id=?", (item_id,))[0]
+
+
+def test_dropping_in_town_puts_it_on_the_ground_and_it_can_be_picked_back_up(db, me):
+    bow = S.grant_item(db, ME, BOW, ("inventory", me["char_id"], 0))
+    S.move_item(db, ME, bow["item_id"], ("floor", me["char_id"]))
+    assert _loc(db, bow["item_id"]) == {"loc": "ground", "run_id": "town:" + me["char_id"], "destroyed_reason": None}
+    back = S.move_item(db, ME, bow["item_id"], ("inventory", me["char_id"], 3))
+    assert back["loc"] == "inventory" and back["slot_index"] == 3
+    S.move_item(db, ME, bow["item_id"], ("floor", me["char_id"]))
+    S.move_item(db, ME, bow["item_id"], ("vault", 5))               # straight into the vault works too
+    assert _loc(db, bow["item_id"])["loc"] == "vault"
+    assert_invariants(db)
+
+
+def test_the_town_ground_is_emptied_on_leaving_town(db, me):
+    for n, leave in enumerate((
+            lambda: S.start_run(db, ME, me["char_id"], "shallows", "s", _dungeon()),
+            lambda: S.open_character(db, ME, me["char_id"]),
+            lambda: S.leave_town(db, ME, me["char_id"]))):
+        it = S.grant_item(db, ME, VEST, ("inventory", me["char_id"], 0))
+        S.move_item(db, ME, it["item_id"], ("floor", me["char_id"]))
+        leave()
+        assert _loc(db, it["item_id"])["loc"] == "destroyed" and _loc(db, it["item_id"])["destroyed_reason"] == "left", n
+        S.open_character(db, ME, me["char_id"])                     # back in town for the next
+    assert_invariants(db)
+
+
+def test_the_town_ground_refuses_what_it_should(db, me):
+    bow = S.grant_item(db, ME, BOW, ("inventory", me["char_id"], 0))
+    S.set_lock(db, ME, bow["item_id"], True)
+    with pytest.raises(S.HalcyonError, match="locked"):
+        S.move_item(db, ME, bow["item_id"], ("floor", me["char_id"]))
+    S.set_lock(db, ME, bow["item_id"], False)
+    with pytest.raises(S.HalcyonError):
+        S.move_item(db, ME, bow["item_id"], ("ground", "some-run"))   # only the town's own ground
+    S.move_item(db, ME, bow["item_id"], ("floor", me["char_id"]))
+    vest = S.grant_item(db, ME, VEST, ("inventory", me["char_id"], 1))
+    with pytest.raises(S.HalcyonError, match="full"):
+        S.move_item(db, ME, bow["item_id"], ("inventory", me["char_id"], 1))   # no swapping onto the ground
+    with pytest.raises(S.HalcyonError):
+        S.discard(db, ME, bow["item_id"])                                    # lying there, it is only picked up
+    S.register_owner(db, THEM, "account")
+    with pytest.raises(S.HalcyonError):
+        S.move_item(db, THEM, bow["item_id"], ("vault", 0))
+    S.start_run(db, ME, me["char_id"], "shallows", "s", _dungeon())
+    with pytest.raises(S.HalcyonError, match="dungeon"):
+        S.move_item(db, ME, vest["item_id"], ("floor", me["char_id"]))

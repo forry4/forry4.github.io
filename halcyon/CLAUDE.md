@@ -268,7 +268,15 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
   drop if it was picked up this run (the store already accepted both). Whatever is
   still on the floor when the run ends is gone (the store destroys `ground` items at
   run end), and the end-of-run notification's "Brought back" counts only what is still carried.
-- In town there is no floor (`move_item` refuses `ground`); the bin discards.
+- **In town there is a floor too** (2026-11-18): the place `("floor", char_id)`, stored as
+  `ground` under the run id `town:<char_id>` (`store.TOWN_FLOOR`). `move_item` puts an item
+  there (never a locked one) and picks it up again (`_town_item(..., floor=True)` — only a move
+  touches it; discard and fuse do not). `_clear_town_floor` destroys it (`destroyed_reason
+  'left'`) in `start_run`, `open_character` and `leave_town` (the page's main-menu exit). The
+  server keeps no position: the page's `floorAt` remembers where each was put down, and the
+  town's `st.floor` / `st.nearFloor` draw it and let E take it before any station. The bin no
+  longer discards (the discard route is still there, unused by the page). The Drop key (X)
+  drops the item under the pointer in town or a run.
 
 ## Loot, the forge, modifiers, AP and notifications (2026-11-18, owner's asks)
 - **Heals drop from enemies, never lie in rooms.** The templates have no `H` markers;
@@ -354,8 +362,9 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
   wears a gold ring while the next shot is countered.
 - **Drops**: one enemy never drops the same base twice (a unique the boss already gave turns
   into a standard item). The boss's better odds are in "Loot tables" below.
-- **The Dream Rift is solid as the disc it is drawn as** (`rad` on a station; `inStation` and
-  `distanceTo` read it). It was a 2.5 x 1.4 box under a one-tile disc.
+- **The Dream Rift is a portal** (owner's call, 2026-11-18): not solid, `hw`/`hh` 0, reached
+  from its centre like a realm's. (It was briefly solid as a disc with `rad`; `inStation` and
+  `distanceTo` still read `rad` for any future round station.)
 - **Coming back from a clear says nothing**; the in-run "cleared!" note carries the time.
 - **Tooltip**: the item's own stats, then a rule, then ONE ROW A SLOT (◆ enchantment, ◇ empty
   slot). No "x of y enchantment slots" line.
@@ -449,3 +458,25 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
 - **The graveyard** is `hr_characters.death_summary`, written by the `death` event BEFORE `_close_run` destroys the gear. The page's fields (cause, tallies) are bounded and only describe; the items and the rift are the server's.
 - **The healing potion** is `input.potion` with `p.potionCd` (in the fingerprint); enemy damage numbers are drawing-only (`damageNumbers` with `foe`).
 - **The run summary never opens on its own**: a clear's or recall's line in the log gets `report` when the run ends, and only a click opens it.
+
+## Keys, Boss Rush, and the second QOL round (2026-11-18, owner's asks; design §13.4, §14.7a, §19.1)
+- **Keys are items** (`content.BASE_ITEMS`, `kind: "key"`, slot family `key`, which fits no
+  equipment slot; `fuse` refuses them). `dungeon.generate` adds them to the BOSS's drops from
+  `content.KEY_DROPS` on a SEPARATE stream (`<dungeon>:<seed>:keys<level>`), so every other drop
+  a seed makes is unchanged; the loot-rate tests skip keys.
+- **`start_run` spends keys in its own transaction** and returns their ids (`spent`) so the page
+  can take them out of the bag before the run's item copy is made: a Dream Key for
+  `practice=True`, a Boss Rush key for a dungeon with `boss_rush`. Only the character's BAG
+  counts (`_carried_key`), unlocked first. Practice + Boss Rush is refused.
+- **Boss Rush** is `generate(..., boss_rush=True)`: no combat rooms at any level (entrance +
+  boss). It is stored in the run's dungeon; `descend` passes it to `make` (only when set, so an
+  older `make` without the argument still works) and refuses a next level that dropped it.
+  `_record_time` skips it. On the page it rides in the `mods` state as the pseudo-id
+  `boss_rush`, split out in `enter`.
+- **No contact damage**: the chaser's touch is gone (`ENEMY.chaser.touch` removed). The
+  potion heals to `recoveryLimit` and no further, never moving `p.low`.
+- **Auto-fire** is `livePrefs.current.auto`, flipped by `toggleAuto()` and saved with the other
+  prefs; both loops read it live. `setPrefs` builds from `livePrefs.current`, not React's copy,
+  so a settings change never puts back an old auto-fire value.
+- **A run's modifiers** are `runModRows(run)`: drawn under the minimap (`draw`'s `mods`) and
+  listed with their wording in the game menu.

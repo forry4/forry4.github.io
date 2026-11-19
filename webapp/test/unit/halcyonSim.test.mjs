@@ -679,11 +679,15 @@ test("the last hit that landed is kept with what dealt it, for the death screen"
 	for (let t = 0; t < 120 && !shot.lastHit; t++) step(shot, {});
 	assert.equal(shot.lastHit?.src, "shooter:bolt");
 	assert.ok(shot.lastHit.dmg > 0 && shot.lastHit.tick > 0);
+	// NO CONTACT DAMAGE (owner's call, 2026-11-18): a chaser pressed against the
+	// player and never shooting does nothing to them.
 	const touch = createSim(A, STARTER);
 	const ch = touch.enemies.find((x) => x.type === "chaser");
 	touch.enemies = [ch]; ch.active = true; ch.cd = 0; ch.scd = 1e9; ch.x = touch.p.x + 0.5; ch.y = touch.p.y;
-	step(touch, {});
-	assert.equal(touch.lastHit?.src, "chaser:touch");
+	const before = touch.p.hp;
+	for (let t = 0; t < 120; t++) { ch.scd = 1e9; ch.tele = 0; step(touch, {}); }
+	assert.ok(!touch.lastHit, "touching hurts nothing");
+	assert.equal(touch.p.hp, before);
 	const ring = createSim({ ...A, scale: { ...A.scale, volatile: 1 } }, STARTER);
 	const r = ring.enemies.find((x) => x.type === "radial");
 	ring.enemies = [r]; r.active = true; r.hp = 1; r.x = ring.p.x + 1.2; r.y = ring.p.y;
@@ -692,14 +696,15 @@ test("the last hit that landed is kept with what dealt it, for the death screen"
 	assert.equal(ring.lastHit?.src, "radial:burst", "a Volatile ring names the enemy that burst");
 });
 
-test("the healing potion heals and lifts the recovery limit, then waits out its cooldown; never at full health", () => {
+test("the healing potion heals only up to the recovery limit, never raising it, then waits out its cooldown", () => {
 	const st = createSim(A, STARTER);
 	step(st, { potion: true });
 	assert.equal(st.p.potionCd, 0, "nothing to heal: not spent");
 	st.p.hp = 20; st.p.low = 20;
 	step(st, { potion: true });
-	assert.equal(st.p.low, 20 + POTION_HEAL);
-	assert.ok(Math.abs(st.p.hp - (20 + POTION_HEAL)) < 0.1, `hp ${st.p.hp}`);
+	assert.equal(st.p.low, 20, "the limit is not raised");
+	assert.ok(Math.abs(st.p.hp - Math.min(20 + RECOVERY_MARGIN, 20 + POTION_HEAL)) < 0.1, `hp ${st.p.hp}`);
+	assert.ok(st.p.hp <= recoveryLimit(st));
 	assert.equal(st.p.potionCd, POTION_COOLDOWN);
 	assert.ok(st.events.some((e) => e.type === "potion" && e.local));
 	const hp = st.p.hp;

@@ -65,7 +65,20 @@ BASE_ITEMS: dict[str, dict] = {
     "band_of_vigor": {"slot": "ring",    "cls": None,     "kind": "standard"},
     "band_of_focus": {"slot": "ring",    "cls": None,     "kind": "standard"},
     "kingfisher_eye": {"slot": "ring",   "cls": None,     "kind": "unique"},
+    # KEYS (owner's ask, 2026-11-18). A key is carried in a character's bag and spent
+    # on entering: the Dream Key opens the Dream Rift for one practice run, the Boss
+    # Rush key one Boss Rush run. Slot family "key" fits no equipment slot, a key has
+    # no tier ladder or enchantments, and keys never fuse.
+    "dream_key":      {"slot": "key",    "cls": None,     "kind": "key"},
+    "boss_rush_key":  {"slot": "key",    "cls": None,     "kind": "key"},
 }
+DREAM_KEY, BOSS_RUSH_KEY = "dream_key", "boss_rush_key"
+# What a level's boss drops besides its items, rolled on their own stream so the
+# rest of the loot is unchanged: each a flat chance per boss, any rift, any level,
+# never touched by rarity. A Boss Rush run never drops a Boss Rush key.
+KEY_DROPS = ((DREAM_KEY, 0.10), (BOSS_RUSH_KEY, 0.03))
+BOSS_RUSH = {"name": "Boss Rush", "text": "No ordinary rooms: every level is its boss. Spends a Boss Rush key; "
+                                          "no time is recorded."}
 
 # enchantment id -> which slot families it may roll on. Regen rolls may be
 # fractional; the browser displays them to one decimal place.

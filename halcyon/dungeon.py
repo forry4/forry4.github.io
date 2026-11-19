@@ -256,8 +256,10 @@ def _swarm_spots(rng: random.Random, t: list[str], taken: list[tuple[int, int]],
 
 
 def generate(dungeon_id: str, seed: str | None = None, class_id: str = "ranger",
-             mods: list[str] | tuple = (), level: int = 1) -> dict:
-    """One level of a run's dungeon, as JSON-safe data."""
+             mods: list[str] | tuple = (), level: int = 1, boss_rush: bool = False) -> dict:
+    """One level of a run's dungeon, as JSON-safe data. BOSS RUSH (owner's ask,
+    2026-11-18) drops the combat rooms at every level: the entrance opens straight
+    onto the boss's room."""
     if dungeon_id not in DUNGEONS:
         raise store.HalcyonError("no such dungeon")
     if class_id not in C.CLASSES:
@@ -275,6 +277,8 @@ def generate(dungeon_id: str, seed: str | None = None, class_id: str = "ranger",
     spec = DUNGEONS[dungeon_id]
 
     combat = rng.sample(COMBAT, spec["combat_rooms"] if level == 1 else DEEP_ROOMS)
+    if boss_rush:
+        combat = []
     rooms = [("entrance", ENTRANCE)] + [("combat", t) for t in combat] + [("boss", BOSS_ROOM)]
     rooms = [(k, _mirror(t) if rng.random() < 0.5 else list(t)) for k, t in rooms]
 
@@ -336,13 +340,20 @@ def generate(dungeon_id: str, seed: str | None = None, class_id: str = "ranger",
             dropped.add(it["base_id"])
             n_drop += 1
             drops[f"{pre}d{n_drop}"] = {**it, "enemy": eid}
+        if is_boss:                                          # the keys: their own stream
+            keys = random.Random(f"{dungeon_id}:{seed}:keys{level}")
+            for key, chance in C.KEY_DROPS:
+                if keys.random() < chance and not (boss_rush and key == C.BOSS_RUSH_KEY):
+                    n_drop += 1
+                    drops[f"{pre}d{n_drop}"] = {"base_id": key, "tier": 1, "slot_count": 0, "enchants": [],
+                                               "enemy": eid}
 
     return {"id": dungeon_id, "name": spec["name"], "boss_name": spec["boss_name"], "seed": seed, "width": width, "height": height,
             "tiles": ["".join(r) for r in grid], "start": start, "rooms": room_spans, "door_y": mid,
             "enemies": enemies, "boss": boss, "drops": drops, "pickups": pickups,
             "complete_xp": spec["complete_xp"], "class_id": class_id,
             "mods": mods, "scale": mod_scale(mods, level), "level": level,
-            "offers": offers_for(dungeon_id, seed, mods, level)}
+            "offers": offers_for(dungeon_id, seed, mods, level), "boss_rush": bool(boss_rush)}
 
 
 def walkable(d: dict, x: int, y: int) -> bool:

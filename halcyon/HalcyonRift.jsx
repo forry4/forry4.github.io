@@ -27,7 +27,7 @@ import { makeClient } from "./client.js";
 import { createSim, step, TPS, REACH, xpProgress, WEAPONS, statsFor, enchantValue, recoveryLimit, CLASS_INFO,
 	STAT_SCALE, ABILITY_COST, ABILITY_COOLDOWN, SHIELD_DURATION, SLOW_DURATION, SLOW_FACTOR,
 	STARFALL_DELAY, STARFALL_RADIUS, STARFALL_RANGE, COUNTER_WINDOW, COUNTER_GUARD, POTION_HEAL, POTION_COOLDOWN } from "./sim.js";
-import { camera, draw, drawTown, promptFor, formatRiftTime } from "./render.js";
+import { camera, draw, drawTown, promptFor, formatRiftTime, TIER_COLORS, UNIQUE_COLOR } from "./render.js";
 import { createTown, stepTown, setTownGear, postDps, STATIONS, SPAWN, standAt } from "./town.js";
 import cssText from "./HalcyonRift.css?inline";
 
@@ -40,7 +40,17 @@ const NAMES = { shortbow: "Shortbow", longbow: "Longbow", mace: "Mace", greatswo
 	leather_vest: "Leather Vest", volley_quiver: "Volley Quiver", plate_armor: "Plate Armor",
 	grounding_aegis: "Grounding Aegis", seer_robes: "Seer Robes", stillness_orb: "Stillness Orb",
 	band_of_vigor: "Band of Vigor", band_of_focus: "Band of Focus", kingfisher_eye: "Kingfisher's Eye",
-	star_tome: "Star Tome", shuriken: "Shuriken", kunai: "Kunai", shadow_garb: "Shadow Garb", mirror_charm: "Mirror Charm" };
+	star_tome: "Star Tome", shuriken: "Shuriken", kunai: "Kunai", shadow_garb: "Shadow Garb", mirror_charm: "Mirror Charm",
+	dream_key: "Dream Key", boss_rush_key: "Boss Rush Key" };
+/* KEYS (owner's ask, 2026-11-18): carried in the bag, spent on entering. */
+const KEY_TEXT = { dream_key: "Opens the Dream Rift for one practice run. Spent on entering.",
+	boss_rush_key: "Lets you pick Boss Rush at a realm portal: every level is only its boss. Spent on entering; no time is recorded." };
+const BOSS_RUSH = "boss_rush";
+/* A run's modifiers in words (Boss Rush first: it is the run's shape), for the HUD
+ * under the minimap and the game menu. */
+const runModRows = (run) => !run ? [] : [
+	...(run.dungeon?.boss_rush ? [{ id: BOSS_RUSH, name: run.bossRush?.name || "Boss Rush", text: run.bossRush?.text || "" }] : []),
+	...(run.dungeon?.mods || []).map((id) => ({ id, name: run.modInfo?.[id]?.name || id, text: run.modInfo?.[id]?.text || "" }))];
 // Every enchantment reads as flat points ("+4 Attack"), never a percentage.
 const ENCHANT_NAMES = { max_hp: "Max HP", max_mp: "Max MP", attack: "Attack", defense: "Defense",
 	attack_speed: "Dexterity", ability_power: "Ability power", mp_regen: "MP regen", hp_regen: "HP regen" };
@@ -51,11 +61,12 @@ const ENCHANT_ORDER = ["max_hp", "max_mp", "attack", "attack_speed", "defense", 
 const byEnchantOrder = (a, b) => ENCHANT_ORDER.indexOf(a.id) - ENCHANT_ORDER.indexOf(b.id);
 const sortedEnchants = (it) => [...(it.enchants || [])].sort(byEnchantOrder);
 const SLOT_NAMES = { weapon: "Weapon", armor: "Armor", ability: "Ability", ring1: "Ring", ring2: "Ring" };
-const FAMILY = { weapon: "Weapon", armor: "Armor", ability: "Ability", ring: "Ring" };
+const FAMILY = { weapon: "Weapon", armor: "Armor", ability: "Ability", ring: "Ring", key: "Key" };
 const ABBR = { shortbow: "SB", longbow: "LB", mace: "MC", greatsword: "GS", wand: "WD", starstaff: "SS",
 	repeater: "RP", tidecaller: "TC", leather_vest: "LV", volley_quiver: "VQ", plate_armor: "PA",
 	grounding_aegis: "GA", seer_robes: "SR", stillness_orb: "SO", band_of_vigor: "BV", band_of_focus: "BF",
-	kingfisher_eye: "KE", star_tome: "ST", shuriken: "SH", kunai: "KN", shadow_garb: "SG", mirror_charm: "MR" };
+	kingfisher_eye: "KE", star_tome: "ST", shuriken: "SH", kunai: "KN", shadow_garb: "SG", mirror_charm: "MR",
+	dream_key: "DK", boss_rush_key: "BR" };
 const WEAPON_FEEL = { shortbow: "Fast and close: twin arrows that spread with distance.",
 	longbow: "Slow and far: one heavy arrow that passes through enemies.",
 	mace: "Melee range: a quick, solid strike.", greatsword: "Short range: a heavy sweeping strike.",
@@ -65,7 +76,7 @@ const WEAPON_FEEL = { shortbow: "Fast and close: twin arrows that spread with di
 	shuriken: "A spinning star with a short reach that cuts through one enemy.",
 	kunai: "A slow, heavy blade thrown hard and far." };
 /* A UNIQUE is named, not tiered: it is its own thing, not a rung on the ladder. */
-const nameOf = (it) => (it.kind === "unique" ? NAMES[it.base_id] || it.base_id : `${NAMES[it.base_id] || it.base_id} · T${it.tier}`);
+const nameOf = (it) => (it.kind === "unique" || it.kind === "key" ? NAMES[it.base_id] || it.base_id : `${NAMES[it.base_id] || it.base_id} · T${it.tier}`);
 const num = (x) => (Number.isInteger(x) ? String(x) : x.toFixed(1));
 const classInfo = (id) => CLASS_INFO[id] || CLASS_INFO.ranger;
 const className = (id) => classInfo(id).name;
@@ -116,7 +127,10 @@ const at = {
 	vault: (i) => ["vault", i],
 	inv: (c, i) => ["inventory", c, i],
 	eq: (c, s) => ["equipped", c, s],
+	floor: (c) => ["floor", c],                 // the town's ground under that character
 };
+const TOWN_FLOOR = "town:";
+const onTownFloor = (it, charId) => it.loc === "ground" && it.run_id === TOWN_FLOOR + charId;
 const keyOf = (to) => to.join(":");
 function placeKey(it) {
 	if (it.loc === "vault") return keyOf(at.vault(it.slot_index));
@@ -127,11 +141,14 @@ function placeKey(it) {
 
 /* Where any town item is, as a place tuple; and an item put somewhere else (a version on). */
 function placeOf(it) {
+	if (it.loc === "ground" && String(it.run_id).startsWith(TOWN_FLOOR)) return at.floor(it.run_id.slice(TOWN_FLOOR.length));
 	return it.loc === "vault" ? at.vault(it.slot_index) : placeAt_(it);
 }
 function putAt(it, to) {
 	const [loc] = to;
-	return { ...it, loc, version: it.version + 1,
+	if (loc === "floor") return { ...it, loc: "ground", run_id: TOWN_FLOOR + to[1], char_id: null, slot_index: null,
+		equip_slot: null, version: it.version + 1 };
+	return { ...it, loc, version: it.version + 1, run_id: null,
 		char_id: loc === "vault" ? null : to[1],
 		slot_index: loc === "vault" ? to[1] : loc === "inventory" ? to[2] : null,
 		equip_slot: loc === "equipped" ? to[2] : null };
@@ -150,6 +167,7 @@ export const ACTIONS = [
 	["up", "Move up", ["KeyW"]], ["left", "Move left", ["KeyA"]], ["down", "Move down", ["KeyS"]], ["right", "Move right", ["KeyD"]],
 	["ability", "Ability", ["Space", "KeyQ"]], ["interact", "Use / pick up", ["KeyE"]], ["potion", "Healing potion", ["KeyR"]],
 	["takeAll", "Take all the loot here", ["KeyG"]], ["recall", "Recall to town", ["KeyF"]], ["auto", "Auto-fire on / off", ["KeyT"]],
+	["drop", "Drop the item under the pointer", ["KeyX"]],
 ];
 const DEFAULT_KEYS = Object.fromEntries(ACTIONS.map(([id, , k]) => [id, k]));
 // Keys that are never rebound: Escape (the menu), the arrows (always move), 1-8 (the bag).
@@ -160,9 +178,16 @@ function loadPrefs() {
 	try { p = JSON.parse(localStorage.getItem(PREFS_KEY) || "{}") || {}; } catch { p = {}; }
 	const keys = { ...DEFAULT_KEYS };
 	for (const [id] of ACTIONS) if (Array.isArray(p.keys?.[id]) && p.keys[id].every((c) => typeof c === "string" && !FIXED_KEY(c))) keys[id] = p.keys[id];
-	return { keys, calm: !!p.calm, ui: UI_SIZES.some(([v]) => v === p.ui) ? p.ui : 1 };
+	return { keys, calm: !!p.calm, ui: UI_SIZES.some(([v]) => v === p.ui) ? p.ui : 1, auto: !!p.auto };
 }
 const livePrefs = { current: loadPrefs() };
+/* AUTO-FIRE IS REMEMBERED (owner's ask, 2026-11-18): across town and every run, and
+ * the next visit. It lives with the other preferences; the loops read it live. */
+function toggleAuto() {
+	livePrefs.current = { ...livePrefs.current, auto: !livePrefs.current.auto };
+	try { localStorage.setItem(PREFS_KEY, JSON.stringify(livePrefs.current)); } catch { /* this visit only */ }
+	return livePrefs.current.auto;
+}
 const actionOf = (code) => ACTIONS.find(([id]) => livePrefs.current.keys[id]?.includes(code))?.[0] || null;
 export function keyLabel(code) {
 	if (!code) return "—";
@@ -240,7 +265,6 @@ export default function HalcyonRift({ authUser, onExit }) {
 	const [picked, setPicked] = useState(null);       // an item id, for click-to-move
 	const [drag, setDrag] = useState(null);           // the item id being dragged
 	const [tip, setTip] = useState(null);             // { item, rect }
-	const [discardAsk, setDiscardAsk] = useState(null);
 	const [panel, setPanel] = useState(null);         // "vault" | "forge" | "dream" | null
 	const [createSlot, setCreateSlot] = useState(null);
 	const [forge, setForge] = useState([]);           // the item ids picked for fusion (at most two)
@@ -276,8 +300,9 @@ export default function HalcyonRift({ authUser, onExit }) {
 	const [graveyard, setGraveyard] = useState(false);
 	const [settings, setSettings] = useState(false);
 	const [prefs, setPrefsState] = useState(() => livePrefs.current);
-	const setPrefs = useCallback((fn) => setPrefsState((cur) => {
-		const next = typeof fn === "function" ? fn(cur) : fn;
+	const setPrefs = useCallback((fn) => setPrefsState(() => {
+		// From the LIVE prefs: auto-fire changes there without a render.
+		const next = typeof fn === "function" ? fn(livePrefs.current) : fn;
 		livePrefs.current = next;
 		try { localStorage.setItem(PREFS_KEY, JSON.stringify(next)); } catch { /* kept for this visit only */ }
 		return next;
@@ -297,6 +322,7 @@ export default function HalcyonRift({ authUser, onExit }) {
 	const [menu, setMenu] = useState(true);
 	const townRef = useRef(null);
 	if (!townRef.current) townRef.current = createTown();
+	const floorAt = useRef(new Map());                 // item id -> where it was put down in town
 	const townNotes = useRef([]);
 	const [mods, setMods] = useState([]);             // the rift modifiers picked at a portal
 
@@ -335,7 +361,7 @@ export default function HalcyonRift({ authUser, onExit }) {
 		let failed = null;
 		try { await moveChain.current; await fn(); }
 		catch (e) { failed = e.message || "That did not work."; }
-		setBusy(false); setPicked(null); setDiscardAsk(null);
+		setBusy(false); setPicked(null);
 		await refresh();
 		// After the refresh, which clears it. The store's reasons are lower-case clauses.
 		if (failed) setError(failed[0].toUpperCase() + failed.slice(1));
@@ -343,6 +369,8 @@ export default function HalcyonRift({ authUser, onExit }) {
 
 	const items = view?.items || [];
 	const onChar = (it, id) => (it.loc === "inventory" || it.loc === "equipped") && it.char_id === id;
+	// How many of a key the selected character carries in its bag (the only place a key counts).
+	const carried = (baseId) => items.filter((it) => it.base_id === baseId && it.loc === "inventory" && it.char_id === char?.char_id).length;
 	// (The roster is locked during a run, so the selected character IS the one in it.)
 	const shown = useMemo(() => (runItems ? [...items.filter((it) => !onChar(it, selChar)), ...runItems] : items),
 		[items, runItems, selChar]);
@@ -373,17 +401,23 @@ export default function HalcyonRift({ authUser, onExit }) {
 		setMenu(false);
 	});
 
-	const enter = (realm, practice = false, riftMods = []) => {
+	const enter = (realm, practice = false, picked = []) => {
 		if (!char) { setMenu(true); return; }
+		// Boss Rush is picked beside the modifiers but is not one: it is the run's shape.
+		const bossRush = picked.includes(BOSS_RUSH), riftMods = picked.filter((m) => m !== BOSS_RUSH);
 		act(async () => {
 			await client.flush();
 			if (client.pendingRun()) throw new Error("Your last run is still being saved. Try again in a moment.");
-			const { run_id, dungeon, class_id } = await client.startRun(char.char_id, realm, practice, riftMods);
+			const { run_id, dungeon, class_id, spent = [] } = await client.startRun(char.char_id, realm, practice, riftMods, bossRush);
 			client.beginRun(run_id);
-			const ctl = runControl(items.filter((it) => onChar(it, char.char_id)), char.char_id, view, setRunItems);
+			// The keys the server spent on the way in are gone from the bag.
+			if (spent.length) setView((v) => ({ ...v, items: v.items.filter((x) => !spent.includes(x.item_id)) }));
+			if (bossRush) setMods((cur) => cur.filter((m) => m !== BOSS_RUSH));
+			const ctl = runControl(items.filter((it) => onChar(it, char.char_id) && !spent.includes(it.item_id)), char.char_id, view, setRunItems);
 			setPanel(null); setTip(null); setPicked(null);
 			setRunItems(ctl.items);
 			setRun({ run_id, dungeon, gear: ctl.equipped(), ctl, realm, bases: view.bases, practice,
+				modInfo: Object.fromEntries((view.rift_mods || []).map((m) => [m.id, m])), bossRush: view.boss_rush,
 				class_id: class_id || char.class_id,
 				hero: { level: char.level, xp: char.xp, levels: view.levels, class_id: class_id || char.class_id, practice } });
 		});
@@ -483,7 +517,7 @@ export default function HalcyonRift({ authUser, onExit }) {
 	// uniques first, then tier and slots, highest first. A LOCKED item keeps its slot
 	// and the rest sort around it. In town it is a series of swaps worked out here and
 	// sent in order; in a run, the run's own moves. The vault sorts the same way.
-	const sortKey = (it) => [{ weapon: 0, armor: 1, ability: 2, ring: 3 }[view.bases[it.base_id]?.slot] ?? 9, it.kind === "unique" ? 0 : 1,
+	const sortKey = (it) => [{ weapon: 0, armor: 1, ability: 2, ring: 3, key: 4 }[view.bases[it.base_id]?.slot] ?? 9, it.kind === "unique" ? 0 : 1,
 		-(it.tier || 0), -(it.slot_count || 0), NAMES[it.base_id] || it.base_id, String(it.item_id)];
 	const cmpItems = (a, b) => { const x = sortKey(a), y = sortKey(b); for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] < y[i] ? -1 : 1; return 0; };
 	/* Where each item should go: `list` the items, `n` the slots; locked items stay. */
@@ -587,8 +621,15 @@ export default function HalcyonRift({ authUser, onExit }) {
 			}
 			townMove(it, target.to);
 		} else if (target.kind === "trash") {
+			// IN TOWN TOO, DROPPING PUTS IT ON THE GROUND (owner's ask, 2026-11-18): at the
+			// player's feet, where E picks it up again, until the character leaves town.
 			if (it.locked) notify(`${nameOf(it)} is locked. Right-click it to unlock.`, "bad");
-			else setDiscardAsk(it);
+			else if (char) {
+				const p = townRef.current.p;
+				floorAt.current.set(it.item_id, { x: p.x, y: p.y });
+				townMove(it, at.floor(char.char_id));
+				notify(`Dropped ${nameOf(it)}. It is gone when you leave town.`);
+			}
 		}
 		setPicked(null);
 	};
@@ -625,7 +666,6 @@ export default function HalcyonRift({ authUser, onExit }) {
 		if (settings) { setSettings(false); return; }
 		if (gameMenu) { setGameMenu(false); return; }
 		if (deeper) { setDeeper(null); return; }
-		if (discardAsk) { setDiscardAsk(null); return; }
 		if (panel && !run) { setPanel(null); return; }
 		setGameMenu(true);
 	};
@@ -642,8 +682,34 @@ export default function HalcyonRift({ authUser, onExit }) {
 	const toMainMenu = () => {
 		setGameMenu(false); setPanel(null); setTip(null); setPicked(null);
 		if (run) { toMenuAfterRun.current = true; run.ctl.recall = true; return; }   // leave the rift first
+		// Leaving town: what lies on its ground is gone (the server clears it).
+		if (char && items.some((it) => onTownFloor(it, char.char_id))) {
+			setView((v) => ({ ...v, items: v.items.filter((it) => !onTownFloor(it, char.char_id)) }));
+			client.leaveTown(char.char_id).catch(() => { /* opening the character clears it too */ });
+		}
 		setMenu(true);
 	};
+	// THE DROP KEY (owner's ask, 2026-11-18: dropping should be easier): the item under
+	// the pointer goes on the ground, in town or in a run.
+	const tipRef = useRef(tip);
+	tipRef.current = tip;
+	const dropKeyRef = useRef(null);
+	dropKeyRef.current = () => {
+		const it = tipRef.current?.item;
+		if (!it || busy || it.fresh && !run || String(it.item_id).startsWith("drop:") && !run) return;
+		const mine = run ? run.ctl.items.some((x) => x.item_id === it.item_id) : items.some((x) => x.item_id === it.item_id && x.loc !== "ground");
+		if (!mine) return;
+		setTip(null);
+		placeAt({ kind: "trash" }, it);
+	};
+	useEffect(() => {
+		const onKey = (e) => {
+			if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName || "")) return;
+			if (actionOf(e.code) === "drop") { e.preventDefault(); dropKeyRef.current(); }
+		};
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, []);
 	// The number keys 1-8 put the matching bag slot's item on (in town and in a run).
 	useEffect(() => {
 		const onKey = (e) => {
@@ -702,6 +768,18 @@ export default function HalcyonRift({ authUser, onExit }) {
 		setTimeout(() => setFlash((f) => (f === made.item_id ? null : f)), 2600);
 	});
 	const invItem = (i) => (char ? byPlace[keyOf(at.inv(char.char_id, i))] : null);
+	// What lies on the town's ground, and picking it up (E beside it): into the first
+	// empty bag slot.
+	const townFloor = char ? items.filter((it) => onTownFloor(it, char.char_id)) : [];
+	const liftFromFloor = (itemId) => {
+		const it = items.find((x) => x.item_id === itemId);
+		if (!it || !char || busy) return;
+		const free = [...Array(view.limits.inventory).keys()].find((i) => !byPlace[keyOf(at.inv(char.char_id, i))]);
+		if (free === undefined) { notify("Your bag is full.", "bad"); return; }
+		floorAt.current.delete(itemId);
+		townMove(it, at.inv(char.char_id, free));
+		notify(`Picked up ${nameOf(it)}`, it.kind === "unique" ? "unique" : "loot");
+	};
 	// The vault's search and filter dim what does not match; nothing moves.
 	const vaultMatch = (it) => {
 		const fam = view.bases[it.base_id]?.slot;
@@ -797,14 +875,14 @@ export default function HalcyonRift({ authUser, onExit }) {
 			<main className="hr-main">
 				<section className="hr-stage" aria-label={run ? run.dungeon.name : "The town"}
 					data-near={near || ""} data-panel={panel || ""}
-					onDragOver={(e) => { if (run && drag) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; } }}
-					onDrop={(e) => { if (run && drag) { e.preventDefault(); slotCtx.dropAt({ kind: "trash" }); setDrag(null); } }}>
+					onDragOver={(e) => { if (drag && !busy) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; } }}
+					onDrop={(e) => { if (drag && !busy && !e.defaultPrevented) { e.preventDefault(); slotCtx.dropAt({ kind: "trash" }); setDrag(null); } }}>
 					<div className="hr-view">
 						{run
 							? <Dungeon run={run} client={client} onEnd={endRun} notify={notify} tips={slotCtx} onDeeper={setDeeper} />
 							: <Town st={townRef.current} notes={townNotes} ready={!!char && !busy} gear={equipped} level={char?.level || 1}
-								classId={char?.class_id || "ranger"}
-								onUse={use} onNear={setNear} />}
+								classId={char?.class_id || "ranger"} floor={townFloor} floorAt={floorAt.current}
+								onUse={use} onNear={setNear} onLift={liftFromFloor} />}
 
 						<button className="hr-menu-btn" onClick={(e) => { e.currentTarget.blur(); setGameMenu((m) => !m); }}
 							aria-expanded={gameMenu} title="Menu (Esc)"><span aria-hidden="true">☰</span> Menu <kbd>Esc</kbd></button>
@@ -830,7 +908,7 @@ export default function HalcyonRift({ authUser, onExit }) {
 									{descending && <p className="hr-hint" role="status">Descending…</p>}
 								</Overlay>);
 						})()}
-						{gameMenu && !settings && <GameMenu inRun={!!run} practice={!!run?.practice}
+						{gameMenu && !settings && <GameMenu inRun={!!run} practice={!!run?.practice} mods={runModRows(run)}
 							onSettings={() => setSettings(true)}
 							onResume={() => setGameMenu(false)}
 							onRecall={() => { setGameMenu(false); run.ctl.recall = true; }}
@@ -847,7 +925,7 @@ export default function HalcyonRift({ authUser, onExit }) {
 									<input className="hr-vault-search" type="search" placeholder="Search: name or enchantment" value={vaultQuery}
 										aria-label="Search the vault" onChange={(e) => setVaultQuery(e.target.value)} />
 									<div className="hr-vault-fams" role="group" aria-label="Show only">
-										{[["", "All"], ["weapon", "Weapons"], ["armor", "Armor"], ["ability", "Abilities"], ["ring", "Rings"], ["unique", "Uniques"]].map(([f, label]) =>
+										{[["", "All"], ["weapon", "Weapons"], ["armor", "Armor"], ["ability", "Abilities"], ["ring", "Rings"], ["key", "Keys"], ["unique", "Uniques"]].map(([f, label]) =>
 											<button key={f || "all"} className={"hr-chip" + (vaultFam === f ? " on" : "")} aria-pressed={vaultFam === f}
 												onClick={() => setVaultFam(f)}>{label}</button>)}
 									</div>
@@ -901,7 +979,7 @@ export default function HalcyonRift({ authUser, onExit }) {
 
 						{panel?.startsWith?.("realm:") && !run && (() => {
 							const realm = panel.slice(6), d = (view.dungeons || []).find((x) => x.id === realm);
-							const r = mods.length, lo = view.odds?.loot?.[Math.min(r, (view.odds?.loot?.length || 1) - 1)] || {};
+							const r = mods.filter((m) => m !== BOSS_RUSH).length, lo = view.odds?.loot?.[Math.min(r, (view.odds?.loot?.length || 1) - 1)] || {};
 							const pct = (x) => `${Math.round((x || 0) * 100)}%`;
 							return (
 								<Overlay title={d?.name || "Rift"} onClose={() => setPanel(null)} className="hr-rift-panel">
@@ -915,6 +993,14 @@ export default function HalcyonRift({ authUser, onExit }) {
 												<strong>{m.name || m.id}</strong><span>{m.text}</span></button>;
 										})}
 									</div>
+									{(() => {
+										const keys = carried("boss_rush_key"), on = mods.includes(BOSS_RUSH);
+										return keys > 0 || on ? <button className={"hr-mod hr-mod-rush" + (on ? " on" : "")} aria-pressed={on}
+											onClick={() => setMods((cur) => (on ? cur.filter((x) => x !== BOSS_RUSH) : [...cur, BOSS_RUSH]))}>
+											<strong>{view.boss_rush?.name || "Boss Rush"} <small>· {keys} key{keys === 1 ? "" : "s"} in your bag</small></strong>
+											<span>{view.boss_rush?.text}</span></button>
+											: <p className="hr-hint">With a Boss Rush key in your bag you can skip straight to each level's boss.</p>;
+									})()}
 									<dl className="hr-mod-sum">
 										<div><dt>Enemy drop T2+</dt><dd>{pct(lo.enemy_t2_plus)}</dd></div>
 										<div><dt>Boss drop T3+</dt><dd>{pct(lo.boss_t3_plus)}</dd></div>
@@ -931,6 +1017,9 @@ export default function HalcyonRift({ authUser, onExit }) {
 						{panel === "dream" && !run && (
 							<Overlay title="Dream Rifts" onClose={() => setPanel(null)} className="hr-dream-panel">
 								<p className="hr-hint">Practice any rift without loot, XP, stats, item drops or character death. A fallen practice run returns you to town.</p>
+								<p className={"hr-dream-keys" + (carried("dream_key") ? "" : " none")}>{carried("dream_key")
+									? `Each practice run spends a Dream Key from your bag. You carry ${carried("dream_key")}.`
+									: "Each practice run spends a Dream Key, and your bag has none. Bosses drop them now and then."}</p>
 								<div className="hr-dream-list">
 									{(view.dungeons || []).map((d) => {
 										const best = view.leaderboards?.[d.id] || [];
@@ -939,22 +1028,13 @@ export default function HalcyonRift({ authUser, onExit }) {
 											{best.length > 0 && <ol className="hr-times">{best.map((t, i) => <li key={`${t.time_ticks}-${i}`}>
 												<span>{formatRiftTime(t.time_ticks)}</span><small>{t.practice ? "Dream" : "Rift"}</small>
 											</li>)}</ol>}
-											<button className="btn btn-gold" disabled={!char || busy}
+											<button className="btn btn-gold" disabled={!char || busy || !carried("dream_key")}
 												onClick={() => { setPanel(null); enterRef.current(d.id, true); }}>Practice</button>
 										</article>;
 									})}
 								</div>
 							</Overlay>)}
 
-						{discardAsk && (
-							<Overlay title="Discard?" onClose={() => setDiscardAsk(null)} className="hr-confirm">
-								<p>{nameOf(discardAsk)} is destroyed for good.</p>
-								<div className="hr-actions">
-									<button className="btn btn-outline" disabled={busy}
-										onClick={() => act(() => client.discard(discardAsk.item_id, discardAsk.version))}>Discard</button>
-									<button className="btn btn-ghost" onClick={() => setDiscardAsk(null)}>Keep it</button>
-								</div>
-							</Overlay>)}
 					</div>
 				</section>
 
@@ -989,11 +1069,11 @@ export default function HalcyonRift({ authUser, onExit }) {
 							return <Slot key={i} num={i < 8 ? i + 1 : null} item={invItem(i)} target={to && { kind: "place", to }} locked={locked} ctx={slotCtx} />;
 						})}
 					</div>
-					<div className={"hr-trash" + (drag && !run?.practice ? " armed" : "") + (run ? " hr-ground" : "")} aria-label={run ? "Drop on the ground" : "Discard"}
+					<div className={"hr-trash hr-ground" + (drag && !run?.practice ? " armed" : "")} aria-label="Drop on the ground"
 						onDragOver={(e) => { if (drag && !locked) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; } }}
 						onDrop={(e) => { e.preventDefault(); if (!locked) slotCtx.dropAt({ kind: "trash" }); setDrag(null); }}>
 						{run?.practice ? "Swap gear any time · nothing can be dropped in a Dream Rift"
-							: run ? "Drop an item here (or on the stage) to leave it on the ground" : "Drop an item here to discard it"}
+							: `Drag here or onto the stage, or point and press ${keysOf("drop")}, to drop an item. It lies there until you leave ${run ? "the rift" : "town"}.`}
 					</div>
 				</aside>
 			</main>
@@ -1030,6 +1110,7 @@ function Slot({ label, item, target, locked, ctx, num: n = null, dim = false }) 
 			{item?.locked && <span className="hr-lock" aria-hidden="true">🔒︎</span>}
 			{item ? <><span className="hr-abbr">{ABBR[item.base_id] || "?"}</span>
 				{item.kind === "unique" ? <span className="hr-tier hr-star" aria-hidden="true">★</span>
+					: item.kind === "key" ? <span className="hr-tier hr-key" aria-hidden="true">⚷</span>
 					: <span className="hr-tier">{item.tier}</span>}
 				{item.slot_count > 0 && <span className="hr-dots">{"•".repeat(item.slot_count)}</span>}</>
 				: label && <span className="hr-slot-label">{label}</span>}
@@ -1068,9 +1149,10 @@ function TipCard({ it, bases, ap, lit = false, equipped = false, kicker = null }
 		<div className={"hr-tip-card fg-panel" + (it.kind === "unique" ? " unique" : "") + (lit ? " fg-lit" : "")}>
 			{(equipped || kicker) && <p className="hr-tip-kicker">{equipped ? "Equipped" : kicker}</p>}
 			<h3 className="fg-label">{it.locked && <span className="hr-lock-mark" aria-label="Locked">🔒︎ </span>}{nameOf(it)}</h3>
-			<p className="fg-label-soft">{it.kind === "unique" ? `Unique ${(FAMILY[fam] || "item").toLowerCase()}` : `${FAMILY[fam] || ""} · Tier ${it.tier}`}
+			<p className="fg-label-soft">{it.kind === "key" ? "Key" : it.kind === "unique" ? `Unique ${(FAMILY[fam] || "item").toLowerCase()}` : `${FAMILY[fam] || ""} · Tier ${it.tier}`}
 			</p>
 			{WEAPON_FEEL[it.base_id] && <p className="hr-tip-weapon">{WEAPON_FEEL[it.base_id]}</p>}
+			{KEY_TEXT[it.base_id] && <p className="hr-tip-weapon">{KEY_TEXT[it.base_id]}</p>}
 			{lines.length > 0 && <ul className="hr-tip-lines hr-q">{lines.map((l) => <li key={l}>{l}</li>)}</ul>}
 			{/* The item's own stats above; its enchantment slots below a rule, one row a
 			    slot — filled or empty — so a count never has to be read (owner's ask). */}
@@ -1317,7 +1399,7 @@ function Settings({ prefs, setPrefs, onClose }) {
 	);
 }
 
-function GameMenu({ inRun, practice, onResume, onRecall, onMainMenu, onSettings }) {
+function GameMenu({ inRun, practice, mods = [], onResume, onRecall, onMainMenu, onSettings }) {
 	return (
 		<Overlay title="Menu" onClose={onResume} className="hr-game-menu">
 			<div className="hr-game-menu-acts">
@@ -1327,6 +1409,12 @@ function GameMenu({ inRun, practice, onResume, onRecall, onMainMenu, onSettings 
 				<button className="btn btn-ghost" onClick={onSettings}>Settings</button>
 			</div>
 			{inRun && !practice && <p className="hr-hint">Recalling keeps what you carry; the rift is closed behind you.</p>}
+			{inRun && <>
+				<h3 className="fg-label">This rift's modifiers</h3>
+				{mods.length ? <dl className="hr-keylist hr-run-mods">
+					{mods.map((m) => <div key={m.id}><dt>{m.name}</dt><dd>{m.text}</dd></div>)}
+				</dl> : <p className="hr-hint">None.</p>}
+			</>}
 			<h3 className="fg-label">Keys</h3>
 			<dl className="hr-keylist">
 				{keyRows().map(([k, what]) => <div key={what}><dt><kbd>{k}</kbd></dt><dd>{what}</dd></div>)}
@@ -1517,10 +1605,14 @@ function fitCanvas(cv) {
 // ── the town ────────────────────────────────────────────────────────────────
 /* The plaza, walked at the same fixed 60 Hz step as the fight and drawn between
  * ticks the same way. `st` lives in the page, so the town keeps where you stood. */
-function Town({ st, notes, ready, onUse, onNear, gear, level, classId }) {
+function Town({ st, notes, ready, onUse, onNear, onLift, gear, level, classId, floor = [], floorAt }) {
 	const canvasRef = useRef(null);
 	const cb = useRef(null);
-	cb.current = { ready, onUse, onNear };
+	cb.current = { ready, onUse, onNear, onLift };
+	// The town's ground as the plaza draws it: each item where it was put down (one
+	// whose spot this page never saw lies by the spawn).
+	st.floor = floor.map((it) => ({ key: it.item_id, ...(floorAt.get(it.item_id) || { x: SPAWN.x + 0.8, y: SPAWN.y + 0.6 }),
+		color: it.kind === "unique" ? UNIQUE_COLOR : it.kind === "key" ? "#f0d27a" : TIER_COLORS[it.tier] || TIER_COLORS[1], name: nameOf(it) }));
 	const gearKey = JSON.stringify([gear.map((g) => [g.base_id, g.tier, g.enchants]), level]);
 	useEffect(() => { setTownGear(st, gear, level, classId); }, [gearKey, classId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1529,7 +1621,7 @@ function Town({ st, notes, ready, onUse, onNear, gear, level, classId }) {
 		const g = cv.getContext("2d");
 		const keys = new Set();
 		const mouse = { x: 0, y: 0, down: false };
-		let px = 32, raf = 0, prev = null, lastNear, auto = false, ability = false, cam = { ox: 0, oy: 0 };
+		let px = 32, raf = 0, prev = null, lastNear, ability = false, cam = { ox: 0, oy: 0 };
 		// The whole plaza is always in view: where everything is should never be a search.
 		const fit = () => {
 			fitCanvas(cv);
@@ -1545,7 +1637,7 @@ function Town({ st, notes, ready, onUse, onNear, gear, level, classId }) {
 			let mx = 0, my = 0;
 			for (const k of keys) { const d = dirOf(k); if (d) { mx += d[0]; my += d[1]; } }
 			stepTown(st, { mx: Math.sign(mx), my: Math.sign(my), ax: (mouse.x - cam.ox) / px - st.p.x,
-				ay: (mouse.y - cam.oy) / px - st.p.y, fire: mouse.down || auto, ability });
+				ay: (mouse.y - cam.oy) / px - st.p.y, fire: mouse.down || livePrefs.current.auto, ability });
 			ability = false;
 			if (st.near !== lastNear) { lastNear = st.near; cb.current.onNear(st.near); }
 		};
@@ -1562,8 +1654,10 @@ function Town({ st, notes, ready, onUse, onNear, gear, level, classId }) {
 			const pp = atPos(st.p);
 			cam = camera(st, cv.width, cv.height, px, pp);
 			drawTown(g, st, { width: cv.width, height: cv.height, px, at: atPos, notes: list, dps: (q) => postDps(st, q),
+				auto: livePrefs.current.auto, ui: livePrefs.current.ui,
 				aim: { x: (mouse.x - cam.ox) / px - pp.x, y: (mouse.y - cam.oy) / px - pp.y },
-				prompt: promptFor(station, !["portal", "dream"].includes(station?.kind) || cb.current.ready) });
+				prompt: st.nearFloor ? `E — Pick up ${st.floor.find((f) => f.key === st.nearFloor)?.name || "it"}`
+					: promptFor(station, !["portal", "dream"].includes(station?.kind) || cb.current.ready) });
 			raf = requestAnimationFrame(frame);
 		};
 		raf = requestAnimationFrame(frame);
@@ -1577,9 +1671,10 @@ function Town({ st, notes, ready, onUse, onNear, gear, level, classId }) {
 			if (e.repeat) return;
 			const act = actionOf(e.code);
 			if (act === "interact") {
+				if (st.nearFloor) { cb.current.onLift(st.nearFloor); return; }   // what lies here comes first
 				const s = STATIONS.find((x) => x.id === st.near);
 				if (s) cb.current.onUse(s);
-			} else if (act === "auto") auto = !auto;
+			} else if (act === "auto") toggleAuto();
 			else if (act === "ability") { ability = true; e.preventDefault(); }
 		};
 		const onKeyUp = (e) => keys.delete(e.code);
@@ -1641,7 +1736,8 @@ function Dungeon({ run, client, onEnd, notify, tips, onDeeper }) {
 		const want = [];                             // takes asked for from the loot panel, one a tick
 		let lootKey = "", hoverKey = "";
 		const edge = { ability: false, interact: false, recall: false, potion: false };
-		let auto = false, px = 32, raf = 0, ended = false;
+		let px = 32, raf = 0, ended = false;
+		const modNames = runModRows(run).map((m) => m.name);
 		// Where each moving thing was before the last tick, so a frame can draw it part
 		// of the way to where it is now (the sim steps at 60 Hz; a screen may run at 144).
 		let prev = new WeakMap(), alpha = 1;
@@ -1712,7 +1808,7 @@ function Dungeon({ run, client, onEnd, notify, tips, onDeeper }) {
 				else if (w.take) take = w.take; else lift = w.lift;
 			}
 			const out = { mx: Math.sign(mx), my: Math.sign(my), ax: (mouse.x - ox) / px - st.p.x, ay: (mouse.y - oy) / px - st.p.y,
-				fire: mouse.down || auto, ability: edge.ability, heal: edge.interact, take, lift, drop: ctl.drops.shift() || null,
+				fire: mouse.down || livePrefs.current.auto, ability: edge.ability, heal: edge.interact, take, lift, drop: ctl.drops.shift() || null,
 				recall: edge.recall, enter: edge.interact && !loot, potion: edge.potion };
 			if (ctl.recall) { out.recall = true; ctl.recall = false; }      // Recall / Main menu in the game menu
 			edge.ability = edge.interact = edge.recall = edge.potion = false;
@@ -1828,7 +1924,8 @@ function Dungeon({ run, client, onEnd, notify, tips, onDeeper }) {
 			draw(g, st, { width: cv.width, height: cv.height, px, at,
 				aim: { x: (mouse.x - cam.ox) / px - pp.x, y: (mouse.y - cam.oy) / px - pp.y },
 				notes: ended ? [] : bagHint(), bagBest, calm: pf.calm, ui: pf.ui, dpr,
-				bossName: run.dungeon.boss_name || "The boss", keys: { potion: keyLabel(pf.keys.potion?.[0]) } });
+				bossName: run.dungeon.boss_name || "The boss", keys: { potion: keyLabel(pf.keys.potion?.[0]) },
+				mods: modNames, auto: pf.auto });
 			raf = requestAnimationFrame(frame);
 		};
 		raf = requestAnimationFrame(frame);
@@ -1841,7 +1938,7 @@ function Dungeon({ run, client, onEnd, notify, tips, onDeeper }) {
 			else if (act === "interact") edge.interact = true;
 			else if (act === "recall") edge.recall = true;
 			else if (act === "potion") edge.potion = true;
-			else if (act === "auto") { auto = !auto; note(auto ? "Auto-fire on" : "Auto-fire off"); }
+			else if (act === "auto") note(toggleAuto() ? "Auto-fire on" : "Auto-fire off");
 			else if (act === "takeAll") lootApi.current?.takeAll();
 		};
 		const onKeyUp = (e) => keys.delete(e.code);
@@ -1896,7 +1993,8 @@ function Dungeon({ run, client, onEnd, notify, tips, onDeeper }) {
 								onClick={(ev) => { lootApi.current?.take(e); tips.hideTip(); ev.currentTarget.blur(); }}
 								onMouseEnter={(ev) => tips.showTip(it, ev.currentTarget)} onMouseLeave={tips.hideTip}>
 								<span className="hr-abbr">{ABBR[it.base_id] || "?"}</span>
-								{it.kind === "unique" ? <span className="hr-tier hr-star" aria-hidden="true">★</span> : <span className="hr-tier">{it.tier}</span>}
+								{it.kind === "unique" ? <span className="hr-tier hr-star" aria-hidden="true">★</span>
+									: it.kind === "key" ? <span className="hr-tier hr-key" aria-hidden="true">⚷</span> : <span className="hr-tier">{it.tier}</span>}
 								{it.slot_count > 0 && <span className="hr-dots">{"•".repeat(it.slot_count)}</span>}
 							</button>;
 						})}

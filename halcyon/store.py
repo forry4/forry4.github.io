@@ -251,6 +251,10 @@ def _check_version(it: dict, expected: int | None) -> None:
 # ── places ───────────────────────────────────────────────────────────────────
 # A place is a tuple, and the only spelling of one the store accepts:
 #   ("vault", i)  ("inventory", char_id, i)  ("equipped", char_id, slot_name)  ("ground", run_id)
+#   ("floor", char_id) — the TOWN's ground under that character (owner's ask, 2026-11-18):
+#   stored as ground under the run id "town:<char_id>", destroyed when the character
+#   leaves town (a run starts, the character is opened again, or the player leaves).
+TOWN_FLOOR = "town:"
 def _place_cols(owner_id: str, place: tuple) -> tuple[str, str | None, str | None, int | None]:
     """(loc, char_id, run_id, slot_index) for a place, range-checked."""
     kind = place[0] if place else None
@@ -270,6 +274,8 @@ def _place_cols(owner_id: str, place: tuple) -> tuple[str, str | None, str | Non
         return "equipped", place[1], None, C.EQUIP_SLOTS.index(place[2])
     if kind == "ground" and len(place) == 2:
         return "ground", None, place[1], None
+    if kind == "floor" and len(place) == 2:
+        return "ground", None, TOWN_FLOOR + str(place[1]), None
     raise HalcyonError("not a place")
 
 
@@ -281,6 +287,8 @@ def _place_of(it: dict) -> tuple:
     if it["loc"] == "equipped":
         return ("equipped", it["char_id"], C.EQUIP_SLOTS[it["slot_index"]])
     if it["loc"] == "ground":
+        if str(it["run_id"]).startswith(TOWN_FLOOR):
+            return ("floor", it["run_id"][len(TOWN_FLOOR):])
         return ("ground", it["run_id"])
     raise HalcyonError("that item is not anywhere")
 
@@ -514,7 +522,7 @@ def _validate_dungeon(dungeon: dict) -> dict:
         raise HalcyonError("the dungeon names a modifier it cannot")
     return {"enemies": {str(k): v for k, v in enemies.items()}, "boss": boss, "drops": drops,
             "complete_xp": dungeon.get("complete_xp", 0), "class_id": class_id,
-            "level": level, "mods": mods, "offers": offers,
+            "level": level, "mods": mods, "offers": offers, "boss_rush": bool(dungeon.get("boss_rush")),
             # Only for the graveyard's words; nothing is decided by it.
             "name": str(dungeon.get("name") or "")[:60]}
 
@@ -540,6 +548,8 @@ def _record_time(cur, run: dict, elapsed_ticks, now: float) -> None:
     leaderboard, not a competitive ranking, so a claimed time is useful for the
     player's own practice without becoming an authority boundary for loot or XP.
     """
+    if json.loads(run["dungeon"]).get("boss_rush"):
+        return                      # a Boss Rush clear is not a clear of the rift (owner's call)
     if (not isinstance(elapsed_ticks, int) or isinstance(elapsed_ticks, bool)
             or not 0 < elapsed_ticks <= 7 * 24 * 60 * 60 * 60):
         return
@@ -555,12 +565,34 @@ def _record_time(cur, run: dict, elapsed_ticks, now: float) -> None:
         cur.execute("DELETE FROM hr_rift_times WHERE time_id=?", (row["time_id"],))
 
 
+def _key_needed(practice: bool, boss_rush: bool) -> list[str]:
+    """The keys a run spends on entry (owner's ask, 2026-11-18)."""
+    return ([C.DREAM_KEY] if practice else []) + ([C.BOSS_RUSH_KEY] if boss_rush else [])
+
+
+def _carried_key(cur, char_id: str, base_id: str) -> dict | None:
+    """A key of this kind in the character's bag, an unlocked one first."""
+    return _one(cur, "SELECT * FROM hr_items WHERE char_id=? AND loc='inventory' AND base_id=? "
+                     "ORDER BY locked, slot_index LIMIT 1", (char_id, base_id))
+
+
+def _clear_town_floor(cur, char_id: str, now: float) -> None:
+    """Leaving town: what this character left on the town's ground is gone."""
+    _destroy(cur, "loc='ground' AND run_id=?", (TOWN_FLOOR + char_id,), "left", now)
+
+
 def start_run(connect, owner_id: str, char_id: str, dungeon_id: str, seed: str, dungeon: dict,
               practice: bool = False, now: float | None = None) -> dict:
     """Begin a run with a dungeon the SERVER generated. A run this character
-    left open (a closed tab) is closed first, as a recall (design §13.1a)."""
+    left open (a closed tab) is closed first, as a recall (design §13.1a).
+
+    KEYS ARE SPENT HERE, in the run's own transaction: a Dream Rift needs a Dream
+    Key in the character's bag, a Boss Rush run a Boss Rush key, and the run does
+    not begin without them."""
     now = _now(now)
     dungeon = _validate_dungeon(dungeon)
+    if practice and dungeon["boss_rush"]:
+        raise HalcyonError("a Dream Rift has no Boss Rush")
     with _tx(connect, owner_id) as cur:
         _require_owner(cur, owner_id, now)
         ch = _require_char(cur, owner_id, char_id)
@@ -569,13 +601,22 @@ def start_run(connect, owner_id: str, char_id: str, dungeon_id: str, seed: str, 
         prior = _open_run(cur, char_id)
         if prior:
             _close_run(cur, prior, "recalled", now)
+        _clear_town_floor(cur, char_id, now)
+        spent = []
+        for base_id in _key_needed(practice, dungeon["boss_rush"]):
+            key = _carried_key(cur, char_id, base_id)
+            if key is None:
+                raise HalcyonError("you need a Dream Key in your bag" if base_id == C.DREAM_KEY
+                                   else "you need a Boss Rush key in your bag")
+            _destroy(cur, "item_id=?", (key["item_id"],), "key", now)
+            spent.append(key["item_id"])
         run_id = _new_id()
         cur.execute("INSERT INTO hr_runs (run_id, char_id, owner_id, dungeon_id, seed, content_version, "
                     "status, practice, started_at, last_event_at, dungeon, state) "
                     "VALUES (?,?,?,?,?,?, 'open', ?, ?,?,?,?)",
                     (run_id, char_id, owner_id, dungeon_id, str(seed), C.CONTENT_VERSION, int(bool(practice)),
                      now, now, json.dumps(dungeon), json.dumps({"killed": [], "picked": []})))
-        return {"run_id": run_id, "dungeon": dungeon, "practice": bool(practice)}
+        return {"run_id": run_id, "dungeon": dungeon, "practice": bool(practice), "spent": spent}
 
 
 def open_character(connect, owner_id: str, char_id: str, now: float | None = None) -> dict:
@@ -587,7 +628,17 @@ def open_character(connect, owner_id: str, char_id: str, now: float | None = Non
         run = _open_run(cur, char_id)
         if run:
             _close_run(cur, run, "recalled", now)
+        _clear_town_floor(cur, char_id, now)
         return ch
+
+
+def leave_town(connect, owner_id: str, char_id: str, now: float | None = None) -> None:
+    """The player left town for the main menu: the town's ground is cleared."""
+    now = _now(now)
+    with _tx(connect, owner_id) as cur:
+        _require_owner(cur, owner_id, now)
+        _require_char(cur, owner_id, char_id, alive=False)
+        _clear_town_floor(cur, char_id, now)
 
 
 class _Refused(Exception):
@@ -775,8 +826,9 @@ def descend(connect, owner_id: str, run_id: str, mod: str, from_level: int, make
         _require_owner(cur, owner_id, now)
         dungeon, state = json.loads(run["dungeon"]), json.loads(run["state"])
         level, mods = dungeon.get("level", 1), list(dungeon.get("mods") or [])
+        rush = {"boss_rush": True} if dungeon.get("boss_rush") else {}   # Boss Rush holds at every level
         if run["status"] == "open" and level == from_level + 1 and mod in mods:
-            return make(run["dungeon_id"], run["seed"], dungeon["class_id"], mods, level)   # a retry
+            return make(run["dungeon_id"], run["seed"], dungeon["class_id"], mods, level, **rush)  # a retry
         if run["status"] != "open":
             raise HalcyonError("that run is over")
         if level != from_level:
@@ -785,9 +837,9 @@ def descend(connect, owner_id: str, run_id: str, mod: str, from_level: int, make
             raise HalcyonError("the way deeper opens when the boss falls")
         if mod not in (dungeon.get("offers") or []):
             raise HalcyonError("that modifier was not offered")
-        d = make(run["dungeon_id"], run["seed"], dungeon["class_id"], mods + [mod], level + 1)
+        d = make(run["dungeon_id"], run["seed"], dungeon["class_id"], mods + [mod], level + 1, **rush)
         nxt = _validate_dungeon(d)
-        if nxt["class_id"] != dungeon["class_id"] or set(nxt["enemies"]) & set(dungeon["enemies"])                 or set(nxt["drops"]) & set(dungeon["drops"]):
+        if nxt["class_id"] != dungeon["class_id"] or nxt["boss_rush"] != bool(dungeon.get("boss_rush")) or set(nxt["enemies"]) & set(dungeon["enemies"])                 or set(nxt["drops"]) & set(dungeon["drops"]):
             raise HalcyonError("the next level does not fit this run")
         merged = {**nxt, "enemies": {**dungeon["enemies"], **nxt["enemies"]},
                   "drops": {**dungeon["drops"], **nxt["drops"]}}
@@ -821,31 +873,44 @@ def sweep_runs(connect, now: float | None = None, max_idle: float = 24 * 3600) -
 
 
 # ── town ─────────────────────────────────────────────────────────────────────
-def _town_item(cur, owner_id: str, item_id: str, expected_version: int | None) -> dict:
+def _town_item(cur, owner_id: str, item_id: str, expected_version: int | None,
+               floor: bool = False) -> dict:
+    """An item town operations may touch. `floor`: the town's ground counts too (a
+    move may pick an item up from it; nothing else works on what lies there)."""
     it = _require_item(cur, owner_id, item_id)
     _check_version(it, expected_version)
-    if it["loc"] not in ("vault", "inventory", "equipped"):
+    on_floor = it["loc"] == "ground" and str(it["run_id"]).startswith(TOWN_FLOOR)
+    if it["loc"] not in ("vault", "inventory", "equipped") and not (floor and on_floor):
         raise HalcyonError("that item is not in town")
-    if it["char_id"] is not None:
-        _require_char(cur, owner_id, it["char_id"])
-        if _open_run(cur, it["char_id"]):
+    char_id = it["run_id"][len(TOWN_FLOOR):] if on_floor else it["char_id"]
+    if char_id is not None:
+        _require_char(cur, owner_id, char_id)
+        if _open_run(cur, char_id):
             raise HalcyonError("that character is in a dungeon")
     return it
 
 
 def move_item(connect, owner_id: str, item_id: str, to: tuple, expected_version: int | None = None,
               now: float | None = None) -> dict:
-    """Vault <-> inventory <-> equipment, swapping with whatever is there."""
+    """Vault <-> inventory <-> equipment <-> the town's ground, swapping with
+    whatever is there (the ground holds any number, so nothing swaps onto it)."""
     now = _now(now)
     with _tx(connect, owner_id) as cur:
         _require_owner(cur, owner_id, now)
-        it = _town_item(cur, owner_id, item_id, expected_version)
-        cols = _place_cols(owner_id, tuple(to))
+        it = _town_item(cur, owner_id, item_id, expected_version, floor=True)
+        to = tuple(to)
+        cols = _place_cols(owner_id, to)
         if cols[0] == "ground":
-            raise HalcyonError("there is no floor in town")
-        if cols[1] is not None:
-            _require_char(cur, owner_id, cols[1])
-            if _open_run(cur, cols[1]):
+            if to[0] != "floor":
+                raise HalcyonError("that is not the town's ground")
+            if it.get("locked"):
+                raise HalcyonError("that item is locked")
+            if it["loc"] == "ground":
+                raise HalcyonError("that item is already on the ground")
+        whose = to[1] if to[0] == "floor" else cols[1]
+        if whose is not None:
+            _require_char(cur, owner_id, str(whose))
+            if _open_run(cur, str(whose)):
                 raise HalcyonError("that character is in a dungeon")
         _move_with_swap(cur, owner_id, it, cols, now)
         return _item_out(_one(cur, "SELECT * FROM hr_items WHERE item_id=?", (item_id,)))
@@ -889,6 +954,8 @@ def fuse(connect, owner_id: str, a: str, b: str, rng: random.Random | None = Non
         ib = _town_item(cur, owner_id, b, ev[1])
         if ia.get("locked") or ib.get("locked"):
             raise HalcyonError("a locked item cannot be fused")
+        if ia["kind"] == "key" or ib["kind"] == "key":
+            raise HalcyonError("keys do not fuse")
         for k in ("base_id", "tier", "kind", "slot_count"):
             if ia[k] != ib[k]:
                 raise HalcyonError("only identical items fuse")

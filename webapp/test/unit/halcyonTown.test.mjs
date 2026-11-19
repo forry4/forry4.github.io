@@ -17,7 +17,7 @@ test("every station can be reached from the spawn and reports itself as near", (
 	assert.ok(STATIONS.some((s) => s.kind === "vault") && STATIONS.some((s) => s.kind === "forge"));
 	assert.equal(STATIONS.filter((s) => s.kind === "portal").length, REALMS.length, "one portal per realm");
 	for (const s of STATIONS) {
-		const to = s.kind === "portal" ? { x: s.x, y: s.y } : standAt(s.id);   // standAt(portal) is just out of reach
+		const to = s.kind === "portal" || s.kind === "dream" ? { x: s.x, y: s.y } : standAt(s.id);   // standAt(portal) is just out of reach
 		const st = walk(createTown(), to, (t) => t.near === s.id);
 		assert.equal(st.near, s.id, `${s.id}: stopped at ${st.p.x.toFixed(2)},${st.p.y.toFixed(2)}`);
 	}
@@ -78,14 +78,21 @@ test("nobody can stand inside a practice post", () => {
 	}
 });
 
-test("the Dream Rift is solid as the disc it is drawn as, not a box around it", () => {
+test("the Dream Rift is walked onto like a realm portal: nothing stops you on it", () => {
 	const s = STATIONS.find((x) => x.id === "dream");
-	const st = createTown({ x: s.x + 1.05, y: s.y + 0.9 });     // beside the disc, where the old box's corner was
-	const x0 = st.p.x;
-	for (let i = 0; i < 10; i++) stepTown(st, { mx: -1, my: 0 });
-	assert.ok(st.p.x < x0 - 0.3, "walks past the corner a box would have blocked");
-	const head = createTown({ x: s.x + 2, y: s.y });
-	for (let i = 0; i < 120; i++) stepTown(head, { mx: -1, my: 0 });
-	assert.ok(Math.abs(head.p.x - (s.x + s.rad + head.p.r)) < 0.1, `stopped at the disc's edge, at ${head.p.x}`);
-	assert.equal(head.near, "dream");
+	assert.equal(s.solid, false);
+	const st = createTown({ x: s.x + 2, y: s.y });
+	for (let i = 0; i < 40 && st.p.x > s.x; i++) stepTown(st, { mx: -1, my: 0 });
+	assert.ok(st.p.x <= s.x + 0.05, `walked over its centre, at ${st.p.x}`);
+	assert.equal(st.near, "dream");
+});
+
+test("what lies on the town's ground is in reach before any station, and only close by", () => {
+	const st = createTown();
+	st.floor = [{ key: "a", x: st.p.x + 0.5, y: st.p.y }, { key: "b", x: st.p.x + 5, y: st.p.y }];
+	stepTown(st, {});
+	assert.equal(st.nearFloor, "a");
+	st.floor = [{ key: "b", x: st.p.x + 5, y: st.p.y }];
+	stepTown(st, {});
+	assert.equal(st.nearFloor, null);
 });

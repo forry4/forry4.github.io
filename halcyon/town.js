@@ -14,7 +14,7 @@
  *
  * A new realm is one more entry in REALMS and one more portal here.
  */
-import { PLAYER_R, PLAYER_SPEED, DT, TPS, statsFor, playerFire, wallHit, landStarfalls } from "./sim.js";
+import { PLAYER_R, PLAYER_SPEED, DT, TPS, REACH, statsFor, playerFire, wallHit, landStarfalls } from "./sim.js";
 
 // '#' wall, 'o' planter (blocks), '~' fountain water (blocks), '.' flagstone.
 const MAP = [
@@ -43,9 +43,9 @@ export const REALMS = [{ id: "shallows", name: "The Shallows" }];
 export const STATIONS = [
 	{ id: "vault", kind: "vault", label: "Vault", x: 3.5, y: 8, hw: 1.2, hh: 0.8, solid: true, reach: 0.9 },
 	{ id: "forge", kind: "forge", label: "Forge", x: 18.5, y: 8, hw: 1.0, hh: 0.8, solid: true, reach: 0.9 },
-	// The Dream Rift is drawn ROUND, so it is solid as a circle (`rad`), not a box: it
-	// was a 2.5 x 1.4 rectangle under a one-tile disc and stopped you in thin air.
-	{ id: "dream", kind: "dream", label: "Dream Rift", x: 6, y: 4.7, hw: 0.75, hh: 0.75, rad: 0.75, solid: true, reach: 0.9 },
+	// The Dream Rift is a portal like a realm's (owner's call, 2026-11-18): walked
+	// onto, not solid, and "at" it measured from its centre.
+	{ id: "dream", kind: "dream", label: "Dream Rift", x: 6, y: 4.7, hw: 0, hh: 0, solid: false, reach: 1.3 },
 	...REALMS.map((r, i) => ({ id: `realm:${r.id}`, kind: "portal", realm: r.id, label: r.name,
 		x: 11 + (i - (REALMS.length - 1) / 2) * 5, y: 2.6, hw: 0, hh: 0, solid: false, reach: 1.3 })),
 ];
@@ -59,7 +59,9 @@ export const DPS_WINDOW = 3 * TPS;
 export function createTown(at = SPAWN, classId = "ranger") {
 	const st = { tick: 0, w: MAP[0].length, h: MAP.length, tiles: MAP, stations: STATIONS,
 		p: { x: at.x, y: at.y, r: PLAYER_R, mp: 0, fireCd: 0, burstLeft: 0, burstCd: 0, abilityCd: 0, empower: 0 }, near: null,
-		bullets: [], starfalls: [], blasts: [], posts: POSTS.map((q) => ({ ...q, hits: [] })), floats: [] };
+		bullets: [], starfalls: [], blasts: [], posts: POSTS.map((q) => ({ ...q, hits: [] })), floats: [],
+		// What lies on the town's ground: { key, x, y } (the page keeps it from the store).
+		floor: [], nearFloor: null };
 	setTownGear(st, [], 1, classId);
 	return st;
 }
@@ -159,6 +161,13 @@ export function stepTown(st, input) {
 		if (d <= s.reach && d < bd) { bd = d; best = s; }
 	}
 	st.near = best ? best.id : null;
+	// The closest thing on the ground within reach, picked up with E before any station.
+	let fb = null, fd = REACH * REACH;
+	for (const f of st.floor || []) {
+		const d = (f.x - p.x) ** 2 + (f.y - p.y) ** 2;
+		if (d <= fd) { fd = d; fb = f.key; }
+	}
+	st.nearFloor = fb;
 	return st;
 }
 
@@ -167,6 +176,6 @@ export function stepTown(st, input) {
 export function standAt(id) {
 	const s = STATIONS.find((x) => x.id === id);
 	if (!s) return SPAWN;
-	if (s.kind === "portal") return { x: s.x, y: s.y + 2.2 };
+	if (s.kind === "portal" || s.kind === "dream") return { x: s.x, y: s.y + 2.2 };
 	return { x: s.x + (s.x < SPAWN.x ? 1 : -1) * (s.hw + 0.8), y: s.y };
 }

@@ -153,6 +153,8 @@
 .hr-slot.fam-armor{--fam:#55657a}
 .hr-slot.fam-ability{--fam:#6b5492}
 .hr-slot.fam-ring{--fam:#3f7d78}
+.hr-slot.fam-key{--fam:#8b7a3a}
+.hr-tier.hr-key{color:#f0d27a}
 /* A UNIQUE reads at a glance as not-a-tier: a gold face with a star where the
    tier number would be. "Picked up this run" is a dashed ring, so it never
    looks like a unique. */
@@ -293,6 +295,10 @@ button.hr-forge-card:hover{border-color:#f08a80}
 .hr-mod:hover{border-color:var(--g-accent)}
 .hr-mod.on{border-color:#f08a80;background:rgba(240,138,128,.12)}
 .hr-mod.on strong{color:#f6c2bc}
+.hr-mod-rush{margin:0}
+.hr-mod-rush small{font-weight:400;color:var(--text-soft)}
+.hr-dream-keys{margin:0;color:#cfc6f7}
+.hr-dream-keys.none{color:#f0b9a8}
 .hr-mod-sum{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0}
 .hr-mod-sum div{display:flex;flex-direction:column;gap:2px}
 .hr-mod-sum dt{color:var(--text-soft);font-size:.72rem;letter-spacing:.06em}
@@ -410,3 +416,4 @@ button.hr-forge-card:hover{border-color:#f08a80}
 .hr-size{font:inherit;font-size:.8rem;padding:2px 10px;border-radius:999px;cursor:pointer;color:var(--text-soft);
   background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.14)}
 .hr-size.on{color:#f4efe4;border-color:var(--g-accent);background:color-mix(in srgb,var(--g-accent) 16%,transparent)}
+.hr-run-mods dt{color:#f6c2bc}

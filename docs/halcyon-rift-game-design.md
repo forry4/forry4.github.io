@@ -764,7 +764,8 @@ Death immediately ends the character's run and permanently deletes the character
 
 DECIDED:
 
-- Town has a Dream Rift station where the player chooses any available rift.
+- Town has a Dream Rift station where the player chooses any available rift. It is a portal, walked onto like a realm's, not a solid object.
+- **Each practice run spends a Dream Key** carried in the character's bag (owner's call, 2026-11-18): practice is earned by clearing real rifts, so it cannot replace risking a character. Every level's boss drops one at 10%. Without one, the gate shows its rifts but Practice is disabled.
 - A Dream Rift uses the same dungeon and combat simulation as a normal run.
 - It gives no loot, XP, stat progress, item changes, or other completion reward.
 - It has no permadeath. Dying closes the practice run and returns the player to town with the character, gear, level, and XP unchanged.
@@ -906,6 +907,15 @@ As built (greybox numbers, `halcyon/dungeon.py`): a deeper level has 2 combat ro
 As built (greybox numbers, `content.RIFT_MODS`): Fortified ×1.5 health; Brutal ×1.4 damage; Swift ×1.25 speed; Warded 3 hits / the boss 10; Swarming +50% enemies in each combat room and 3 more in the boss arena; Bulky shots ×1.5 radius; Frenzied ×1.4 attack rate (the boss's rests shorten, its spiral thickens); Volatile a ring of 8 shots (16 from the boss).
 
 Rejected: modifiers that hide information (invisible shots, darkness) — they break "every death is explainable" (§15.1).
+
+### 14.7a Boss Rush — DECIDED (2026-11-18)
+
+- A **Boss Rush key** is a rare drop: 3% from each level's boss, never from a Boss Rush run.
+- With one in the character's bag, the realm portal offers **Boss Rush** beside the modifiers. Entering spends the key.
+- A Boss Rush run has **no combat rooms at any level**: the entrance opens straight onto the boss's room, and the portal deeper leads to another level that is only its boss.
+- It is not a modifier: it adds no rarity and is never offered deeper. The run's other modifiers work as usual.
+- **Boss Rush clears are not recorded** on the personal times board.
+- Keys (Dream and Boss Rush) roll on their own random stream, after the boss's items, so they never change what else a seed drops. A key cannot be equipped or fused.
 
 ### 14.8 Later: optional challenges and records — RECOMMENDED (not built)
 
@@ -1128,12 +1138,21 @@ After a comparison with RotMG, Darza's Dominion, Diablo/PoE, Hades and Enter the
 - **NO off-screen arrows**: the MINIMAP (top right) does that job — rooms cleared, sealed and ahead, the player, the portals and the bags.
 - **The run summary is never shown on its own.** A clear (or a recall) in the notification log can be clicked to open it; a player who only wants to grind never sees it.
 - **Audio waits for the art pass**, and with it the volume settings.
-- **A healing potion on a cooldown**, not a stock: R heals and raises the recovery limit, then waits. Heal orbs still drop.
-- **Vault search, filter and sort**; **item lock** (Sort, discard and fuse never touch a locked item; it cannot be dropped in a run).
+- **A healing potion on a cooldown**, not a stock: R heals up to the recovery limit (never past it, and never raising it), then waits. Heal orbs still drop.
+- **Vault search, filter and sort**; **item lock** (Sort and fuse never touch a locked item; it cannot be dropped).
 - **NO auto-loot rules.**
 - **Records: just the best character level** ever reached on the account.
 - **A graveyard**: every fallen character keeps its death screen.
 - **Settings** (per device): key rebinding, reduced flashing, interface size. Colorblind-safe palettes wait for the art pass, which replaces every color anyway.
+
+**Second round (owner's calls, 2026-11-18):**
+
+- **NO CONTACT DAMAGE.** Touching an enemy never hurts; only shots, rings, novas and blasts do.
+- **The potion heals only up to the recovery limit and never raises it.** It is usable only while HP is below that limit.
+- **Auto-fire is remembered** — across town, every run and the next visit (a device setting), with an "Auto-fire" tag over the HP bar while it is on.
+- **A run's modifiers are always readable**: listed under the minimap, and with their wording in the game menu.
+- **Dropping goes on the ground, everywhere.** In town too: drag an item onto the bin's place or the stage, or point at it and press the Drop key (X). It lies at the player's feet, E picks it up, and it is destroyed when the character leaves town — a run starts, the player goes to the main menu, or the character is opened again. There is no discard any more.
+- **Keys** (§13.4, §14.7): the Dream Key and the Boss Rush key.
 
 LATER (noted, not built): a collection log of uniques and a records board (§14.8), a guided first rift, a loot preview at the portal. NEVER: controller support.
 

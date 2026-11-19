@@ -114,7 +114,7 @@ export function camera(st, width, height, px, at = st.p, follow = false) {
  * is smooth at any refresh rate while the simulation stays a fixed 60 Hz. */
 const here = (o) => o;
 export function draw(g, st, { width, height, px, aim, notes = [], at = here, bagBest = () => ({ tier: 1 }),
-	calm = false, ui = 1, dpr = 1, bossName = "The boss", keys = {} }) {
+	calm = false, ui = 1, dpr = 1, bossName = "The boss", keys = {}, mods = [], auto = false }) {
 	const p = st.p, pp = at(p);
 	const { ox, oy } = camera(st, width, height, px, pp, true);
 	const sx = (x) => ox + x * px, sy = (y) => oy + y * px;
@@ -201,9 +201,19 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here, bag
 
 	drawShots(g, st.bullets, sx, sy, px, at);
 	drawDamageNumbers(g, st.damageNumbers || [], sx, sy, px, st.tick);
-	drawHud(g, st, { width, height, px, notes, ui, keys });
+	drawHud(g, st, { width, height, px, notes, ui, keys, auto });
 	drawBossBar(g, st, { width, ui, name: bossName });
-	drawMinimap(g, st, { width, ui, dpr, bagBest });
+	drawMinimap(g, st, { width, ui, dpr, bagBest, mods });
+}
+
+/* "Auto-fire" over the HP box while it is on (it is remembered between visits, so
+ * it must be visible). `bottom` is the top edge of what it sits on. */
+function drawAutoTag(g, x, bottom, ui) {
+	g.font = `600 ${Math.round(12 * ui)}px "Crimson Pro", Georgia, serif`;
+	g.textBaseline = "middle"; g.textAlign = "left";
+	const t = "Auto-fire", w = g.measureText(t).width + 14, h = Math.round(20 * ui);
+	g.fillStyle = COLORS.hudBack; g.fillRect(x - 8, bottom - h - 6, w, h);
+	g.fillStyle = "#e9c25a"; g.fillText(t, x - 1, bottom - h / 2 - 6);
 }
 
 /* The boss's health across the top of the stage while it fights (design §19.1),
@@ -234,7 +244,7 @@ function drawBossBar(g, st, { width, ui, name }) {
  * room still to fight is dark, the sealed one red, a cleared one green-gray; the
  * player, the portals and the loot bags are dots on it. */
 const MINI = { open: "#5c645f", ahead: "#2f3437", sealed: "#a5443f", cleared: "#4f7262", boss: "#4a2a33" };
-function drawMinimap(g, st, { width, ui, dpr, bagBest }) {
+function drawMinimap(g, st, { width, ui, dpr, bagBest, mods = [] }) {
 	if (!st.rooms?.length) return;
 	const W = Math.min(width * 0.3, 240 * ui * dpr), m = W / st.w, H = st.h * m;
 	const X = width - 16 - W, Y = 90 * dpr;                         // under the timer and the Menu button
@@ -265,6 +275,17 @@ function drawMinimap(g, st, { width, ui, dpr, bagBest }) {
 	if (st.portal) dot(st.portal, 2.6, COLORS.portal);
 	if (st.deeper) dot(st.deeper, 2.6, COLORS.deeper);
 	dot(st.p, 2.8, "#ffffff");
+	// THE RUN'S MODIFIERS, under the map (owner's ask, 2026-11-18: viewable in a run).
+	if (mods.length) {
+		const fs = Math.round(12 * ui * dpr), lh = fs + 4 * dpr;
+		g.font = `${fs}px "Crimson Pro", Georgia, serif`;
+		g.textAlign = "right"; g.textBaseline = "middle";
+		const w = Math.max(...mods.map((t) => g.measureText(t).width)) + 16;
+		const top = Y + H + 10;
+		g.fillStyle = "rgba(10,12,14,.66)"; g.fillRect(X + W + 5 - w, top, w, mods.length * lh + 8);
+		mods.forEach((t, i) => { g.fillStyle = "#f6c2bc"; g.fillText(t, X + W - 3, top + 4 + lh * i + lh / 2); });
+		g.textAlign = "left";
+	}
 }
 
 /* What an ability leaves on the ground: the Paladin's field (gold, around the player),
@@ -381,7 +402,7 @@ function label(g, text, X, Y, px, color = "#f4efe4") {
 /* The town (town.js): flagstones, the vault, the forge, a portal per realm. The
  * station in reach glows, and the prompt for it sits at the bottom of the view. */
 const PROMPT = { vault: "Open the vault", forge: "Use the forge", dream: "Practice a rift", portal: "Enter" };
-export function drawTown(g, st, { width, height, px, at = here, notes = [], prompt = null, aim = null, dps = () => 0 }) {
+export function drawTown(g, st, { width, height, px, at = here, notes = [], prompt = null, aim = null, dps = () => 0, auto = false, ui = 1 }) {
 	const pp = at(st.p);
 	const { ox, oy } = camera(st, width, height, px, pp);
 	const sx = (x) => ox + x * px, sy = (y) => oy + y * px;
@@ -413,8 +434,16 @@ export function drawTown(g, st, { width, height, px, at = here, notes = [], prom
 				g.fillStyle = "#33373c"; g.fillRect(X - W / 2, Y - H / 2, W, H * 0.22);
 			}
 		}
-		label(g, s.label, X, Y - (s.kind === "portal" ? px * 1.25 : s.hh * px + px * 0.42), px,
+		label(g, s.label, X, Y - (s.kind === "portal" || s.kind === "dream" ? px * 1.25 : s.hh * px + px * 0.42), px,
 			lit ? "#ffffff" : "#e6e1f7");
+	}
+
+	// What the player put down here: a small bag in its color, ringed while in reach.
+	for (const f of st.floor || []) {
+		const X = sx(f.x), Y = sy(f.y);
+		if (st.nearFloor === f.key) circle(g, X, Y, px * 0.38, "rgba(255,255,255,.28)");
+		circle(g, X, Y, px * 0.24, "#2b2418");
+		circle(g, X, Y, px * 0.18, f.color || COLORS.bag);
 	}
 
 	// The practice posts: a straw target on a stake, and what it is taking a second.
@@ -447,6 +476,7 @@ export function drawTown(g, st, { width, height, px, at = here, notes = [], prom
 		g.fillText(prompt, width / 2, Y + 1);
 		g.textAlign = "left";
 	}
+	if (auto) drawAutoTag(g, 24, height - 16, ui);
 	drawNotes(g, notes, width, height, px);
 }
 
@@ -458,11 +488,12 @@ export function promptFor(station, ready = true) {
 	return `E — ${PROMPT[station.kind]}`;
 }
 
-function drawHud(g, st, { width, height, px, notes, ui = 1, keys = {} }) {
+function drawHud(g, st, { width, height, px, notes, ui = 1, keys = {}, auto = false }) {
 	const p = st.p, s = st.stats;
 	const W = Math.min(320 * ui, width * 0.42), H = Math.max(10, px * 0.32) * ui, X = 16;
 	const XH = Math.max(4, Math.round(H * 0.4)), Y = height - 16 - H * 2 - 8 - XH - 8;
 	g.fillStyle = COLORS.hudBack; g.fillRect(X - 8, Y - 8, W + 16, H * 2 + XH + 32);
+	if (auto) drawAutoTag(g, X, Y - 8, ui);
 	// HP in three parts, as in the side panel: red what you have, light gray what
 	// regeneration can bring back (to the recovery limit), dark gray what only a heal can.
 	g.fillStyle = "#34383d"; g.fillRect(X, Y, W, H);
