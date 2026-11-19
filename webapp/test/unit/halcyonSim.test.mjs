@@ -366,12 +366,14 @@ test("one standard ability per class: field, stars, counter (and the volley)", (
 test("an ability has no cooldown: MP is its only limit", () => {
 	const st = createSim(A, PALADIN, { class_id: "paladin" });
 	st.enemies = [];
-	st.p.mp = 2 * ABILITY_COST + 1;
+	const cost = st.stats.abilityCost;
+	assert.equal(cost, 45, "the Paladin's field costs 45 MP");
+	st.p.mp = 2 * cost + 1;
 	step(st, { ability: true });
 	const first = st.slowUntil;
 	step(st, { ability: true });
 	assert.ok(st.slowUntil > first, "a second cast right away refreshes the field");
-	assert.ok(st.p.mp < ABILITY_COST, "and spends its MP");
+	assert.ok(st.p.mp < cost, "and spends its MP");
 	step(st, { ability: true });
 	assert.equal(st.slowUntil, first + 1, "with too little MP nothing is cast");
 });
@@ -856,7 +858,7 @@ test("every standard item is stronger at a higher tier, abilities included", () 
 		...Object.keys(kinds), "volley_quiver", "star_tome", "stillness_orb", "mirror_charm", "grounding_aegis"];
 	for (const id of ids) {
 		const f = power[id] || power[kinds[id]] || power.weapon;
-		const p = [0, 1, 2, 3, 4, 5].map((t) => f(at(id, t)));
+		const p = Array.from({ length: 11 }, (_, t) => f(at(id, t)));     // T0 to T10
 		for (let t = 1; t < p.length; t++) assert.ok(p[t] > p[t - 1], `${id}: T${t} (${p[t]}) is not above T${t - 1} (${p[t - 1]})`);
 	}
 });

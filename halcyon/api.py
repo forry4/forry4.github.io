@@ -168,9 +168,13 @@ def setup_halcyon(app, get_db_conn, get_user_by_session, token_resolver=None) ->
         upkeep()
         view = S.owner_view(connect, who)
         return {**view, "dungeons": [{"id": k, "name": v["name"], "boss_name": v["boss_name"],
-                                  # this rift's loot odds at 0..N modifiers (its own tables)
-                                  "loot": [C.loot_odds(r, *v["quality"]) for r in range(len(C.RIFT_MODS) + 1)]}
+                                  "requires": (C.REQUIRES.get(k) or (None,))[0],
+                                  # this rift's loot at 0..START_MODS modifiers (its own tables)
+                                  "loot": [C.loot_odds(r, *v["quality"]) for r in range(C.START_MODS + 1)]}
                                  for k, v in D.DUNGEONS.items()],
+                # What the panels say: one loot bonus per modifier and per level deeper.
+                "loot_rule": {"per_mod": C.LOOT_PER_MODIFIER, "per_level": C.LOOT_PER_LEVEL,
+                              "xp_per_mod": C.MOD_XP, "start_mods": C.START_MODS},
                 "limits": {"vault": C.VAULT_SIZE, "inventory": C.INVENTORY_SIZE,
                            "characters": C.CHARACTER_SLOTS, "equip": list(C.EQUIP_SLOTS)},
                 "classes": [{"id": k, "name": C.CLASS_NAMES[k], "description": C.CLASS_DESCRIPTIONS[k]}
@@ -182,7 +186,7 @@ def setup_halcyon(app, get_db_conn, get_user_by_session, token_resolver=None) ->
                 # off the same constants the generator and the store roll against.
                 "odds": {"fuse_slot_gain": [list(g) for g in C.FUSE_SLOT_GAIN], "max_slots": C.MAX_ENCHANT_SLOTS,
                          # The loot odds at 0..N modifiers, worked out from the tables.
-                         "loot": [C.loot_odds(r) for r in range(len(C.RIFT_MODS) + 1)]},
+                         "loot": [C.loot_odds(r) for r in range(C.START_MODS + 1)]},
                 "bases": C.BASE_ITEMS}
 
     @app.post("/halcyon/characters")

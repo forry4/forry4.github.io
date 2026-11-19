@@ -161,12 +161,12 @@ def test_drops_come_at_the_rates_the_tables_say():
     for dungeon, spec in D.DUNGEONS.items():
         for mods in ((), ("fortified", "brutal", "swift")):
             counts, quality, slots = _loot_sample(1500 if dungeon == "shallows" else 600, mods, dungeon=dungeon)
-            for etype, table in C.DROP_COUNT.items():
+            for etype in C.DROP_COUNT:
                 if counts[etype]:                        # each rift has its own enemies
-                    _close(counts[etype], C.chances(table))
+                    _close(counts[etype], C.chances(C.drop_count(etype, C.loot_bonus(len(mods)))))
             for src, table in zip(("enemy", "boss"), spec["quality"]):
                 _close(quality[src], C.chances(C.quality_table(table, len(mods))))
-            _close(slots, C.chances(D.SLOT_ODDS))
+            _close(slots, C.chances(D.slot_odds(C.loot_bonus(len(mods)))))
 
 
 def test_slot_odds_are_the_owners_cumulative_table():
@@ -179,7 +179,7 @@ def test_slot_odds_are_the_owners_cumulative_table():
 def test_the_boss_is_a_better_table_not_a_jackpot():
     counts, quality, _ = _loot_sample(600)
     assert min(counts["boss"]) == 1 and max(counts["boss"]) <= 3          # one item guaranteed, no more
-    assert counts["boss"].count(1) / len(counts["boss"]) > 0.5           # usually just the one
+    assert abs(sum(counts["boss"]) / len(counts["boss"]) - 1.7) < 0.1    # 1.7 on average (owner's call)
     tier = lambda q: 0 if q == "unique" else int(q[1:])
     mean = lambda xs: sum(xs) / len(xs)
     boss = [tier(q) for q in quality["boss"] if q != "unique"]
@@ -189,16 +189,36 @@ def test_the_boss_is_a_better_table_not_a_jackpot():
     assert "unique" not in quality["enemy"] and "unique" in quality["boss"]
 
 
-def test_rift_modifiers_raise_quality_but_not_counts_or_slots():
-    c0, q0, s0 = _loot_sample(500)
-    c3, q3, s3 = _loot_sample(500, ("fortified", "brutal", "swift"))
-    # Each modifier raises the boss's unique chance by 15% of itself: 45% with all three.
+def test_each_modifier_is_one_loot_bonus_on_count_slots_tier_and_unique():
+    """One number, +15% a modifier, moves all four a little (content.LOOT_PER_MODIFIER)."""
     for r in range(4):
-        assert abs(C.loot_odds(r)["boss_unique"] / C.loot_odds(0)["boss_unique"] - (1 + 0.15 * r)) < 1e-4, r
-    assert C.loot_odds(3)["enemy_t2_plus"] > C.loot_odds(0)["enemy_t2_plus"]
+        o = C.loot_odds(r)
+        assert abs(o["loot_bonus"] - 0.15 * r) < 1e-12 and abs(o["xp_bonus"] - 0.10 * r) < 1e-12
+        # the boss's unique chance is (1 + bonus) times its base, solved exactly
+        assert abs(o["boss_unique"] / C.loot_odds(0)["boss_unique"] - (1 + 0.15 * r)) < 1e-4, r
+    o0, o3 = C.loot_odds(0), C.loot_odds(3)
+    assert o3["boss_items"] > o0["boss_items"]                                  # more items ...
+    drops = lambda r: 1 - C.chances(C.drop_count("chaser", C.loot_bonus(r)))[0]
+    assert abs(drops(0) - 0.17) < 1e-12                                          # every ordinary enemy: 17%
+    # LINEAR: each modifier adds the same amount (owner's call)
+    assert abs((drops(1) - drops(0)) - (drops(3) - drops(2))) < 1e-12 and drops(1) > drops(0)
+    items = lambda r: C.loot_odds(r)["boss_items"]
+    assert abs(items(0) - 1.7) < 1e-12 and abs((items(1) - items(0)) - (items(3) - items(2))) < 1e-9
+    slots = lambda r: C.chances(D.slot_odds(C.loot_bonus(r)))
+    mean = lambda p: sum(n * v for n, v in p.items())
+    assert mean(slots(0)) < mean(slots(1)) < mean(slots(3))                      # more slots ...
+    assert slots(3)[4] / slots(0)[4] > slots(3)[1] / slots(0)[1]                 # ... the fourth most
+    assert slots(0) == C.chances(D.SLOT_ODDS)                                    # no modifier: the owner's table
+    assert o3["enemy_t2_plus"] > o0["enemy_t2_plus"]                              # higher tiers
+    for etype in C.DROP_COUNT:
+        assert C.drop_count(etype, 0) == C.DROP_COUNT[etype]
+    # and the dungeon really rolls them: a sample at three modifiers drops more, with more slots
+    c0, _, s0 = _loot_sample(400)
+    c3, q3, s3 = _loot_sample(400, ("fortified", "brutal", "swift"))
+    assert sum(s3) / len(s3) > sum(s0) / len(s0)
+    total = lambda c: sum(sum(v) for v in c.values()) / sum(len(v) for v in c.values())
+    assert total(c3) > total(c0)
     assert all(r in ("t1", "t2", "t3") for r in q3["enemy"])
-    assert abs(sum(s3) / len(s3) - sum(s0) / len(s0)) < 0.15            # the same enchantment slots
-    assert C.loot_odds(3)["boss_items"] == C.loot_odds(0)["boss_items"]   # and the same count
 
 
 def test_rift_modifiers_are_named_and_scale_the_enemies():
@@ -348,3 +368,17 @@ def test_fracture_loot_starts_at_tier_two_and_its_boss_at_three():
                 continue                                  # uniques and keys are their own thing
             floor = 3 if dr["enemy"] == d["boss"] else 2
             assert dr["tier"] >= floor, dr
+
+
+def test_depth_pays_its_own_bonus_and_lifts_tiers_up_to_ten():
+    """Going deeper is the only way past three modifiers, and the only way to tiers
+    6-10: each level adds LOOT_PER_LEVEL and lifts every standard tier by one."""
+    assert abs(C.loot_bonus(3, 1) - 0.45) < 1e-12 and abs(C.loot_bonus(3, 5) - 0.85) < 1e-12
+    tiers = lambda t: {int(r[1:]) for r, _ in t if r != "unique"}
+    assert max(tiers(C.quality_table("boss", 0, 1))) == 4
+    assert tiers(C.quality_table("enemy", 0, 3)) == {t + 2 for t in tiers(C.quality_table("enemy", 0, 1))}
+    top = C.quality_table("fracture_boss", 3, D.MAX_LEVEL)
+    assert max(tiers(top)) == C.MAX_TIER == 10 and any(r == "unique" for r, _ in top)
+    d = D.generate("fracture", "deep", mods=["fortified", "brutal", "swift", "warded"], level=D.MAX_LEVEL)
+    got = [x["tier"] for x in d["drops"].values() if C.base(x["base_id"])["kind"] == "standard"]
+    assert got and min(got) >= 6 and max(got) <= 10

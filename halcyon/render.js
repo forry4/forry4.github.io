@@ -11,7 +11,9 @@ import { recoveryLimit, xpProgress, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, F
 
 /* A loot bag wears the color of the best thing in it (design §19.1): a tier color, and
  * a unique's gold with a glow. The tier number in every slot is the non-color cue. */
-export const TIER_COLORS = { 0: "#8e8a80", 1: "#c9bfa6", 2: "#6fd36a", 3: "#5aa9ff", 4: "#b77cff", 5: "#ff9f43" };
+// Tiers 6-10 (2026-11-19) come only from going deeper: hotter, then pale toward 10.
+export const TIER_COLORS = { 0: "#8e8a80", 1: "#c9bfa6", 2: "#6fd36a", 3: "#5aa9ff", 4: "#b77cff", 5: "#ff9f43",
+	6: "#ff5f57", 7: "#ff4fae", 8: "#3fe0d0", 9: "#f2ee6b", 10: "#fff7ec" };
 export const UNIQUE_COLOR = "#ffd85e";
 
 export const COLORS = {
@@ -595,10 +597,10 @@ function drawHud(g, st, { width, height, px, notes, ui = 1, keys = {}, auto = fa
 	g.fillText(`${Math.floor(p.mp)} / ${Math.round(s.maxMp)}`, X + 6, Y + H * 1.5 + 9);
 	// Whether the ability can be cast, at the MP bar's right end: MP is its only limit.
 	if (s.abilityKind) {
-		const ok = p.mp >= ABILITY_COST;
+		const cost = s.abilityCost ?? ABILITY_COST, ok = p.mp >= cost;
 		g.textAlign = "right";
 		g.fillStyle = ok ? "#9fe7ff" : "#c9cfd6";
-		g.fillText(ok ? "Ready" : `${ABILITY_COST} MP`, X + W - 6, Y + H * 1.5 + 9);
+		g.fillText(ok ? "Ready" : `${cost} MP`, X + W - 6, Y + H * 1.5 + 9);
 		g.textAlign = "left";
 	}
 	// XP inside the level, and the level itself at the bar's right end.

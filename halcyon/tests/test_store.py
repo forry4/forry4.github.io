@@ -966,8 +966,44 @@ def test_the_town_ground_refuses_what_it_should(db, me):
 
 
 
+def _clear_shallows(db, char_id, practice=False):
+    """Fell the Shallows' boss with this character (what opens the Fracture)."""
+    from halcyon import dungeon as D
+    d = D.generate("shallows", "opens-fracture")
+    run = S.start_run(db, ME, char_id, "shallows", d["seed"], d, practice=practice)
+    S.apply_events(db, ME, run["run_id"], _seq({"type": "kill", "enemy": d["boss"]}))
+
+
+def test_the_fracture_opens_once_this_character_fells_the_shallows_boss(db, me):
+    from halcyon import dungeon as D
+    d = D.generate("fracture", "gate")
+    with pytest.raises(S.HalcyonError, match="clear The Shallows"):
+        S.start_run(db, ME, me["char_id"], "fracture", d["seed"], d)
+    assert S.owner_view(db, ME)["characters"][0]["cleared"] == []
+    _key(db, me["char_id"])                            # a Dream Rift's boss does not count
+    _clear_shallows(db, me["char_id"], practice=True)
+    assert S.owner_view(db, ME)["characters"][0]["cleared"] == []
+    _clear_shallows(db, me["char_id"])
+    assert S.owner_view(db, ME)["characters"][0]["cleared"] == ["shallows"]
+    S.start_run(db, ME, me["char_id"], "fracture", d["seed"], d)
+    # another character on the same account starts at the beginning
+    other = S.create_character(db, ME, 1, "ranger")
+    with pytest.raises(S.HalcyonError, match="clear The Shallows"):
+        S.start_run(db, ME, other["char_id"], "fracture", d["seed"], d)
+
+
+def test_a_run_starts_with_at_most_three_modifiers(db, me):
+    from halcyon import dungeon as D
+    four = D.generate("shallows", "four", mods=["fortified", "brutal", "swift", "warded"])
+    with pytest.raises(S.HalcyonError, match="at most 3"):
+        S.start_run(db, ME, me["char_id"], "shallows", four["seed"], four)
+    three = D.generate("shallows", "three", mods=["fortified", "brutal", "swift"])
+    S.start_run(db, ME, me["char_id"], "shallows", three["seed"], three)
+
+
 def test_a_splinter_is_credited_only_after_its_splitter(db, me):
     from halcyon import dungeon as D
+    _clear_shallows(db, me["char_id"])
     d = D.generate("fracture", "split-store")
     splitter = next(k for k, e in d["enemies"].items() if e["type"] == "splitter")
     kid = next(k for k, e in d["enemies"].items() if e.get("parent") == splitter)

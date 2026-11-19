@@ -57,8 +57,13 @@ export const HEAL = 35;                              // a heal pickup: +HP and +
 export const POTION_HEAL = 30;
 export const POTION_COOLDOWN = 20 * TPS;
 export const ABILITY_COST = 30;
+/* An ability's MP cost, where it is not the usual. The Paladin's field was up all the
+ * time on modest MP gear (owner's note, 2026-11-19): 45 MP and 4 seconds puts full
+ * uptime at ~11 MP/s, past any gear; a fresh character gets about a fifth of it. */
+export const ABILITY_COSTS = { slow: 45 };
+export const abilityCost = (kind) => ABILITY_COSTS[kind] ?? ABILITY_COST;
 export const SHIELD_DURATION = 5 * TPS;
-export const SLOW_DURATION = 5 * TPS;
+export const SLOW_DURATION = 4 * TPS;
 export const SLOW_RADIUS = 3;
 export const SLOW_FACTOR = 0.45;
 
@@ -172,6 +177,10 @@ export const PER_LEVEL = { maxHp: 6, maxMp: 4, att: 1, ap: 1 };
 /* Tier 0 is starter gear (owner's call, 2026-11-19): a fifth weaker than tier 1, so
  * the first drops are upgrades. It never takes away max HP (`up` below). */
 const tierScale = (it) => 1 + 0.2 * ((it.tier ?? 1) - 1);
+/* What a tier does to an ability's NON-damage reach (the field's radius, the counter's
+ * multiplier, the shield's time): 12% a tier, not 20%, so tier 10 (2026-11-19) is a
+ * field of ~6 tiles, not ~8. */
+const effectScale = (it) => 1 + 0.12 * ((it.tier ?? 1) - 1);
 
 /* A character's numbers from its level and what it wears. `gear` is the equipped
  * items as the server lists them ({base_id, tier, enchants: [{id, q}]}). */
@@ -190,12 +199,12 @@ export function statsFor(gear = [], level = 1, classId = "ranger") {
 		if (it.base_id === "leather_vest") { s.def += 1 + tier; s.maxHp += 10 * up; }
 		if (it.base_id === "volley_quiver") { s.arrows = 7; s.abilityDmg += Math.round(8 * t); s.abilityKind = "volley"; }
 		if (it.base_id === "plate_armor") { s.def += 3 + tier; s.maxHp += 18 * up; }
-		if (it.base_id === "grounding_aegis") { s.abilityKind = "shield"; s.abilityTier = t; }
+		if (it.base_id === "grounding_aegis") { s.abilityKind = "shield"; s.abilityTier = effectScale(it); }
 		if (it.base_id === "seer_robes") { s.maxMp += 18 * tier; s.mpRegen += 0.5; }
-		if (it.base_id === "stillness_orb") { s.abilityKind = "slow"; s.abilityDmg += Math.round(SLOW_DAMAGE * t); s.abilityTier = t; }
+		if (it.base_id === "stillness_orb") { s.abilityKind = "slow"; s.abilityDmg += Math.round(SLOW_DAMAGE * t); s.abilityTier = effectScale(it); }
 		if (it.base_id === "star_tome") { s.abilityKind = "starfall"; s.abilityDmg += Math.round(45 * t); }
 		if (it.base_id === "shadow_garb") { s.def += tier; s.dex += 2 + tier; s.maxHp += 8 * up; }
-		if (it.base_id === "mirror_charm") { s.abilityKind = "counter"; s.abilityTier = t; }
+		if (it.base_id === "mirror_charm") { s.abilityKind = "counter"; s.abilityTier = effectScale(it); }
 		if (it.base_id === "band_of_vigor") s.maxHp += Math.round(15 * t);
 		if (it.base_id === "band_of_focus") { s.maxMp += Math.round(15 * t); s.mpRegen += 2; }
 		if (it.base_id === "kingfisher_eye") { pierce += 1; s.att += 5; }
@@ -234,6 +243,7 @@ export function statsFor(gear = [], level = 1, classId = "ranger") {
 	s.slowRadius = Math.round(SLOW_RADIUS * at * s.abilityPower * 100) / 100;
 	s.counterMult = Math.round(COUNTER_MULT * at * s.abilityPower * 100) / 100;
 	s.shieldTime = Math.round(SHIELD_DURATION * at * s.abilityPower);
+	s.abilityCost = abilityCost(s.abilityKind);
 	return s;
 }
 
@@ -935,8 +945,8 @@ export function playerFire(st, input) {
 		volley(st, ax, ay);
 		p.burstLeft--; p.burstCd = s.gap;
 	}
-	if (input.ability && s.abilityKind && p.mp >= ABILITY_COST) {
-		p.mp -= ABILITY_COST;
+	if (input.ability && s.abilityKind && p.mp >= s.abilityCost) {
+		p.mp -= s.abilityCost;
 		if (s.abilityKind === "volley") {
 			for (let i = 0; i < s.arrows; i++) {
 				const [vx, vy] = rotate(ax, ay, (i - (s.arrows - 1) / 2) * 0.14);

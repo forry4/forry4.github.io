@@ -229,7 +229,7 @@ CORRIDOR = 3
 # modifier adds MOD_XP of the level's whole XP. Each enemy's share is rounded DOWN, and the
 # clear bonus takes up what the rounding left, so the TOTAL is right (an enemy worth 4
 # would round 4.4 back to 4 and one modifier would pay nothing for it).
-MOD_XP = 0.10
+MOD_XP = C.MOD_XP
 # The Shallows (design §14.4): the gentlest dungeon. Four combat rooms.
 # `complete_xp` is the bonus for finishing it (design §10.1); each enemy's own XP
 # is content.ENEMY_XP, written onto the enemy here so the run keeps what it was worth.
@@ -279,6 +279,12 @@ LOOT_BY_CLASS = {"ranger": RANGER_LOOT, "paladin": PALADIN_LOOT, "diviner": DIVI
 SLOT_ODDS = ((0, 1024), (1, 640), (2, 288), (3, 84), (4, 12))
 
 
+def slot_odds(bonus: float = 0.0) -> tuple:
+    """The slot table at this loot bonus: n slots weigh (1 + bonus)^n more (content.loot_bonus)."""
+    k = 1 + bonus
+    return tuple((n, w * k ** n) for n, w in SLOT_ODDS)
+
+
 def _pick(rng: random.Random, table) -> object:
     total = sum(w for _, w in table)
     r = rng.random() * total
@@ -290,7 +296,7 @@ def _pick(rng: random.Random, table) -> object:
 
 
 def _item(rng: random.Random, tier: int, class_id: str, unique: bool = False,
-          exclude: frozenset = frozenset()) -> dict:
+          exclude: frozenset = frozenset(), bonus: float = 0.0) -> dict:
     # ONE ENEMY NEVER DROPS THE SAME ITEM TWICE (owner's ask, 2026-11-18): what it
     # already dropped is left out. A unique the boss already gave becomes a standard
     # item instead (a class may have only one unique).
@@ -298,7 +304,7 @@ def _item(rng: random.Random, tier: int, class_id: str, unique: bool = False,
     table = left(UNIQUE_LOOT.get(class_id, ())) if unique else ()
     table = table or left(LOOT_BY_CLASS[class_id]) or LOOT_BY_CLASS[class_id]
     base_id = _pick(rng, table)
-    slots = _pick(rng, SLOT_ODDS)
+    slots = _pick(rng, slot_odds(bonus))
     if C.base(base_id)["kind"] == "unique":
         tier = 1                  # a unique is its own thing, not a rung on the tier ladder
     return {"base_id": base_id, "tier": tier, "slot_count": slots,
@@ -382,6 +388,7 @@ def generate(dungeon_id: str, seed: str | None = None, class_id: str = "ranger",
     if any(m not in C.RIFT_MODS for m in mods):
         raise store.HalcyonError("no such rift modifier")
     rarity = len(mods)
+    bonus = C.loot_bonus(rarity, level)
     xp_mult = 1 + MOD_XP * len(mods)
     seed = seed or secrets.token_hex(8)
     rng = random.Random(f"{dungeon_id}:{seed}" if level == 1 else f"{dungeon_id}:{seed}:L{level}")
@@ -450,15 +457,15 @@ def generate(dungeon_id: str, seed: str | None = None, class_id: str = "ranger",
     drops, n_drop = {}, 0
     for eid, e in enemies.items():
         is_boss = e["type"] == "boss"
-        n = _pick(rng, C.DROP_COUNT[e["type"]])               # how many items: one roll
+        n = _pick(rng, C.drop_count(e["type"], bonus))       # how many items: one roll
         if not is_boss and rng.random() < HEAL_CHANCE:           # a heal orb, dropped where it falls
             pickups.append({"id": f"{pre}h{len(pickups) + 1}", "kind": "heal", "enemy": eid})
-        quality = C.quality_table(spec["quality"][1] if is_boss else spec["quality"][0], rarity)
+        quality = C.quality_table(spec["quality"][1] if is_boss else spec["quality"][0], rarity, level)
         dropped: set[str] = set()
         for _ in range(min(n, BAG_MAX)):
             q = _pick(rng, quality)                          # what each is: one roll
             unique = q == "unique"
-            it = _item(rng, 1 if unique else int(q[1:]), class_id, unique, frozenset(dropped))
+            it = _item(rng, 1 if unique else int(q[1:]), class_id, unique, frozenset(dropped), bonus)
             dropped.add(it["base_id"])
             n_drop += 1
             drops[f"{pre}d{n_drop}"] = {**it, "enemy": eid}

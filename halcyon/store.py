@@ -541,6 +541,23 @@ def _credit_xp(cur, char_id: str, amount: int) -> None:
     cur.execute("UPDATE hr_characters SET xp=?, level=? WHERE char_id=?", (xp, C.level_for(xp), char_id))
 
 
+def _cleared(cur, char_id: str) -> set:
+    """The rifts (of those another rift REQUIRES) this character has felled a boss of,
+    in a real run (a Dream Rift does not count). Reads only the boss id and the small
+    state, never the whole dungeon."""
+    want = sorted({need for need, _ in C.REQUIRES.values()})
+    if not want:
+        return set()
+    cur.execute("SELECT dungeon_id, json_extract(dungeon, '$.boss') AS boss, state FROM hr_runs "
+                f"WHERE char_id=? AND practice=0 AND dungeon_id IN ({','.join('?' * len(want))})",
+                (char_id, *want))
+    done = set()
+    for r in _dicts(cur):
+        if r["dungeon_id"] not in done and r["boss"] in json.loads(r["state"] or "{}").get("killed", []):
+            done.add(r["dungeon_id"])
+    return done
+
+
 def _record_time(cur, run: dict, elapsed_ticks, now: float) -> None:
     """Keep the five fastest boss-kill times for this owner and rift.
 
@@ -593,11 +610,16 @@ def start_run(connect, owner_id: str, char_id: str, dungeon_id: str, seed: str, 
     dungeon = _validate_dungeon(dungeon)
     if practice and dungeon["boss_rush"]:
         raise HalcyonError("a Dream Rift has no Boss Rush")
+    if dungeon["level"] == 1 and len(dungeon["mods"]) > C.START_MODS:
+        raise HalcyonError(f"a run starts with at most {C.START_MODS} modifiers; each level deeper adds one")
     with _tx(connect, owner_id) as cur:
         _require_owner(cur, owner_id, now)
         ch = _require_char(cur, owner_id, char_id)
         if dungeon["class_id"] != ch["class_id"]:
             raise HalcyonError("the dungeon was made for another class")
+        need = C.REQUIRES.get(dungeon_id)
+        if need and need[0] not in _cleared(cur, char_id):
+            raise HalcyonError(f"clear {need[1]} with this character first")
         prior = _open_run(cur, char_id)
         if prior:
             _close_run(cur, prior, "recalled", now)
@@ -1010,6 +1032,9 @@ def owner_view(connect, owner_id: str) -> dict:
             times.setdefault(row["dungeon_id"], []).append({
                 "time_ticks": row["time_ticks"], "practice": bool(row["practice"]),
             })
+        for c in chars:
+            if c["status"] == "alive":
+                c["cleared"] = sorted(_cleared(cur, c["char_id"]))
     finally:
         conn.close()
     fallen = []

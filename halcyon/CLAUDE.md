@@ -396,11 +396,18 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
   Enchantment slots on a drop (owner's cumulative table: 1+ 50%, 2+ 18.75%, 3+ 4.69%,
   4 0.59%): 0 50% / 1 31.25% / 2 14.06% / 3 4.10% / 4 0.59% — `dungeon.SLOT_ODDS`, in 2048ths. Same slot odds
   for every source.
-- **Rarity** (one point a modifier) adds each row's `per` weight: better rows only, never
-  the count or the slots. At three modifiers: enemy T2+ 30%→44%, boss T3+ 17%→32%.
-  **The boss's unique chance rises 15% of itself per modifier** (owner's call): 11.6% →
-  13.4% → 15.1% → 16.9%. A flat weight cannot hit that evenly, so the unique row's weight
-  is solved for it at each rarity (`content._unique_weight`), tested to 0.01%. The rift panel shows exactly these, from `content.loot_odds`.
+- **Each modifier is ONE LOOT BONUS, +15% (`content.LOOT_PER_MODIFIER`), and each level
+  past the first another +10% (`LOOT_PER_LEVEL`)** (owner's calls 2026-11-19, "rarity for
+  us is the number of enchantment slots"). The panels say only "Loot +N%" and "XP +N%",
+  worked out on the page from the server's `loot_rule` — no odds, by the owner's wish.
+  The bonus moves four things: QUANTITY, LINEARLY (`content.drop_count`: an ordinary
+  enemy's 17% and a boss's 1.7-item mean are each (1+bonus) times base, so every
+  modifier adds the same amount; a boss's extra comes as whole extra items plus one at
+  the remainder's chance), SLOTS (an n-slot result weighs (1+bonus)^n more,
+  `dungeon.slot_odds`, so the fourth slot gains most), TIERS (each `QUALITY` row's own
+  `per` weight) and UNIQUES (the boss's chance is 1+bonus times its base, the unique
+  row solved at each bonus, `content._unique_weight`). Every ordinary enemy drops at
+  17% (a Splinter 8%: its Splitter spawns two), every boss 45/40/15 for 1/2/3 items.
 
 ## Locked rooms and going deeper (2026-11-18, owner's calls; design §14.1a, §14.6, §14.7)
 - **Purely linear, and every room locks.** `sim.sealRoom`: the player ALL the way inside
@@ -557,8 +564,8 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
   anchors around its home. It lobs the mortar like every boss.
 - **Harder, with better loot**: `fracture_enemy` drops T2–T4, `fracture_boss` T3–T5 plus
   the unique (`quality_table` solves the unique weight for any table with a unique row).
-  `/halcyon/state` gives each dungeon its own `loot` odds per modifier count, and the
-  rift panel reads `enemy_hi_tier`/`boss_hi_tier` off them ("T2+", "T3+").
+  `/halcyon/state` gives each dungeon its own `loot` entry per modifier count (the panel
+  reads only its `loot_bonus` and `xp_bonus`).
 - Fixtures: `halcyon-dungeon-fracture-a.json` (seed `fracture-a`) beside the Shallows'
   pair, held to the generator by `test_sim_fixtures.py`. The rules are
   `webapp/test/unit/halcyonFracture.test.mjs`.
@@ -569,3 +576,22 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
   alike); a unique still gets its gold line.
 - **The vault's Equippable chip** shows only what the open character could put on (a worn
   slot, and its class or any class). It combines with the type chips and the search.
+
+## Progression: three to start, depth for the rest, tiers to 10 (2026-11-19, owner's calls)
+- **A run starts with at most `content.START_MODS` (3) modifiers**; each level deeper adds
+  one (up to 7 at level 5). The store refuses more at level 1; the panel greys the rest
+  once three are on. Going deeper is the only way past three.
+- **Depth pays what modifiers cannot**: +10% loot a level, and every standard drop's tier
+  is LIFTED one per level past the first (`content.DEPTH_TIER`, capped at `MAX_TIER`
+  10; `quality_table(source, rarity, level)` merges rows that land on one tier). Tiers
+  6-10 come only from depth; the Fracture's boss has a rare T6 row so its level-5 boss
+  can reach T10. `content.TIERS` is 0-10; `render.TIER_COLORS` names all eleven.
+- **An ability's non-damage reach grows 12% a tier, not 20%** (`sim.effectScale`: the
+  field's radius, the counter's multiplier, the shield's time), so T10 is not absurd.
+- **The Fracture opens per CHARACTER, once it has felled the Shallows' boss in a real run**
+  (`content.REQUIRES`; `store._cleared` reads the boss id with `json_extract` and the small
+  state, never the whole dungeon; a Dream Rift does not count). The store refuses the run
+  (Dream Rifts too) and `owner_view` lists each living character's `cleared`; the portal
+  panel says what opens it.
+- **The Paladin's Stillness Orb costs 45 MP and lasts 4s** (`sim.ABILITY_COSTS`; other
+  abilities stay 30). Full uptime would need ~11 MP/s, past any gear.

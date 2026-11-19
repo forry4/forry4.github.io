@@ -106,7 +106,7 @@ function baseLines(it) {
  * 2026-11-18: AP is the ability's stat, as Attack is the weapon's). */
 function abilityLines(it, ap = 0) {
 	const s = statsFor([{ ...it, enchants: [] }]), pw = 1 + ap / STAT_SCALE, secs = (t) => num(Math.round(t / TPS * 10) / 10);
-	const kind = s.abilityKind, cost = `Costs ${ABILITY_COST} MP`;
+	const kind = s.abilityKind, cost = `Costs ${s.abilityCost ?? ABILITY_COST} MP`;
 	const r2 = (x) => num(Math.round(x * 100) / 100);
 	if (kind === "volley") return [`Space: a fan of ${s.arrows} arrows`, `${Math.round(s.abilityDmg * pw)} damage each`, cost];
 	if (kind === "slow") return ["Space: a field around you that slows enemy shots inside it",
@@ -908,12 +908,13 @@ export default function HalcyonRift({ authUser, onExit }) {
 							aria-expanded={gameMenu} title="Menu (Esc)"><span aria-hidden="true">☰</span> Menu <kbd>Esc</kbd></button>
 						{run && deeper && !gameMenu && (() => {
 							const names = Object.fromEntries((view.rift_mods || []).map((m) => [m.id, m]));
-							const r = deeper.mods.length + 1, lo = view.odds?.loot?.[Math.min(r, (view.odds?.loot?.length || 1) - 1)] || {};
-							const pct = (x) => `${Math.round((x || 0) * 100)}%`;
+							// The next level's bonus: every modifier, plus each level past the first.
+							const r = deeper.mods.length + 1, rule = lootRule(view);
+							const plus = (x) => `+${Math.round(x * 100)}%`;
 							return (
 								<Overlay title={`Deeper: level ${deeper.from + 1}`} onClose={() => setDeeper(null)} className="hr-deeper-panel">
 									<p className="hr-hint">Pick one modifier to add. It stays for the rest of this run, and every
-										modifier makes the loot rarer. Recall is the only way out.</p>
+										modifier makes the loot better. Recall is the only way out.</p>
 									<div className="hr-mods hr-mods-3" role="group" aria-label="Pick a modifier">
 										{deeper.offers.map((id) => (
 											<button key={id} className="hr-mod" disabled={descending} onClick={() => descend(id)}>
@@ -921,9 +922,8 @@ export default function HalcyonRift({ authUser, onExit }) {
 									</div>
 									{deeper.mods.length > 0 && <p className="hr-hint">This run: {deeper.mods.map((m) => names[m]?.name || m).join(", ")}</p>}
 									<dl className="hr-mod-sum">
-										<div><dt>Enemy drop T{lo.enemy_hi_tier ?? 2}+</dt><dd>{pct(lo.enemy_hi ?? lo.enemy_t2_plus)}</dd></div>
-										<div><dt>Boss drop T{lo.boss_hi_tier ?? 3}+</dt><dd>{pct(lo.boss_hi ?? lo.boss_t3_plus)}</dd></div>
-										<div><dt>Boss unique</dt><dd>{pct(lo.boss_unique)}</dd></div>
+										<div><dt>Loot</dt><dd>{plus(rule.per_mod * r + rule.per_level * deeper.from)}</dd></div>
+										<div><dt>XP</dt><dd>{plus(rule.xp_per_mod * r)}</dd></div>
 									</dl>
 									{descending && <p className="hr-hint" role="status">Descending…</p>}
 								</Overlay>);
@@ -1002,17 +1002,20 @@ export default function HalcyonRift({ authUser, onExit }) {
 
 						{panel?.startsWith?.("realm:") && !run && (() => {
 							const realm = panel.slice(6), d = (view.dungeons || []).find((x) => x.id === realm);
-							const table = d?.loot || view.odds?.loot || [];
-							const r = mods.filter((m) => m !== BOSS_RUSH).length, lo = table[Math.min(r, (table.length || 1) - 1)] || {};
-							const pct = (x) => `${Math.round((x || 0) * 100)}%`;
+							const r = mods.filter((m) => m !== BOSS_RUSH).length, rule = lootRule(view), cap = rule.start_mods;
+							const plus = (x) => `+${Math.round(x * 100)}%`;
+							const shut = riftShut(view, d, char);
+							if (shut) return (
+								<Overlay title={d?.name || "Rift"} onClose={() => setPanel(null)} className="hr-rift-panel hr-rift-shut">
+									<p className="hr-hint">{shut}</p>
+								</Overlay>);
 							return (
 								<Overlay title={d?.name || "Rift"} onClose={() => setPanel(null)} className="hr-rift-panel">
-									<p className="hr-hint">Add modifiers for a harder rift and rarer loot: higher tiers and a better
-										chance of the boss's unique. The number of enchantment slots is not changed.</p>
+									<p className="hr-hint">Add modifiers for a harder rift and better loot: up to {cap} to start. Each level deeper adds one more.</p>
 									<div className="hr-mods" role="group" aria-label="Rift modifiers">
 										{(view.rift_mods || []).map((m) => {
 											const on = mods.includes(m.id);
-											return <button key={m.id} className={"hr-mod" + (on ? " on" : "")} aria-pressed={on}
+											return <button key={m.id} className={"hr-mod" + (on ? " on" : "")} aria-pressed={on} disabled={!on && r >= cap}
 												onClick={() => setMods((cur) => (on ? cur.filter((x) => x !== m.id) : [...cur, m.id]))}>
 												<strong>{m.name || m.id}</strong><span>{m.text}</span></button>;
 										})}
@@ -1026,9 +1029,8 @@ export default function HalcyonRift({ authUser, onExit }) {
 											: <p className="hr-hint">With a Boss Rush key in your bag you can skip straight to each level's boss.</p>;
 									})()}
 									<dl className="hr-mod-sum">
-										<div><dt>Enemy drop T2+</dt><dd>{pct(lo.enemy_t2_plus)}</dd></div>
-										<div><dt>Boss drop T3+</dt><dd>{pct(lo.boss_t3_plus)}</dd></div>
-										<div><dt>Boss unique</dt><dd>{pct(lo.boss_unique)}</dd></div>
+										<div><dt>Loot</dt><dd>{plus(rule.per_mod * r)}</dd></div>
+										<div><dt>XP</dt><dd>{plus(rule.xp_per_mod * r)}</dd></div>
 									</dl>
 									<div className="hr-actions">
 										<button className="btn btn-gold" disabled={!char || busy}
@@ -1046,13 +1048,13 @@ export default function HalcyonRift({ authUser, onExit }) {
 									: "Each practice run spends a Dream Key, and your bag has none. Bosses drop them now and then."}</p>
 								<div className="hr-dream-list">
 									{(view.dungeons || []).map((d) => {
-										const best = view.leaderboards?.[d.id] || [];
+										const best = view.leaderboards?.[d.id] || [], shut = riftShut(view, d, char);
 										return <article className="hr-dream-rift" key={d.id}>
-											<div><h3 className="fg-label">{d.name}</h3><p className="hr-hint">{best.length ? "Your five fastest boss times" : "No recorded times yet"}</p></div>
+											<div><h3 className="fg-label">{d.name}</h3><p className="hr-hint">{shut || (best.length ? "Your five fastest boss times" : "No recorded times yet")}</p></div>
 											{best.length > 0 && <ol className="hr-times">{best.map((t, i) => <li key={`${t.time_ticks}-${i}`}>
 												<span>{formatRiftTime(t.time_ticks)}</span><small>{t.practice ? "Dream" : "Rift"}</small>
 											</li>)}</ol>}
-											<button className="btn btn-gold" disabled={!char || busy || !carried("dream_key")}
+											<button className="btn btn-gold" disabled={!char || busy || !carried("dream_key") || !!shut}
 												onClick={() => { setPanel(null); enterRef.current(d.id, true); }}>Practice</button>
 										</article>;
 									})}
@@ -1579,6 +1581,18 @@ function XpBar({ levels, xp }) {
 			<i style={{ width: `${span ? (100 * into) / span : 100}%` }} />
 		</span>
 	);
+}
+
+/* The loot rule the panels say (the server's; an older server sends none, so the
+ * same numbers stand in). */
+function lootRule(view) {
+	return { per_mod: 0.15, per_level: 0.10, xp_per_mod: 0.10, start_mods: 3, ...(view.loot_rule || {}) };
+}
+/* Why this character cannot enter a rift yet (a rift opened by clearing another), or null. */
+function riftShut(view, d, char) {
+	if (!d?.requires || (char?.cleared || []).includes(d.requires)) return null;
+	const need = (view.dungeons || []).find((x) => x.id === d.requires);
+	return `Fell ${need?.boss_name || "the boss"} in ${need?.name || "the first rift"} with this character to open ${d.name}.`;
 }
 
 /* How a run ended, as one notification (text, tone) — or null. A CLEAR says nothing
