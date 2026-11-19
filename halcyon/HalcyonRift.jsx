@@ -56,7 +56,7 @@ const WEAPON_FEEL = { shortbow: "Fast and close: twin arrows that spread with di
 	wand: "A steady bolt with medium range.", starstaff: "Long range: a heavy star that reaches eight tiles.",
 	tidecaller: "Three arrows in a wide fan that glance off a wall once.",
 	repeater: "A three-bolt burst, then a reload.",
-	shuriken: "Fast and short: a spinning star that cuts through one enemy.",
+	shuriken: "A spinning star with a short reach that cuts through one enemy.",
 	kunai: "A slow, heavy blade thrown hard and far." };
 /* A UNIQUE is named, not tiered: it is its own thing, not a rung on the ladder. */
 const nameOf = (it) => (it.kind === "unique" ? NAMES[it.base_id] || it.base_id : `${NAMES[it.base_id] || it.base_id} · T${it.tier}`);
@@ -70,8 +70,9 @@ function weaponLines(it) {
 	const w = WEAPONS[it.base_id];
 	if (!w) return [];
 	const s = statsFor([{ ...it, enchants: [] }]);
-	return [w.burst > 1 ? `${w.burst}-bolt burst` : w.shots > 1 ? `${w.shots} arrows a shot` : "1 arrow a shot",
-		`${s.weaponDmg} damage an arrow`, `${num(w.rate)} shots a second`, `Range ${w.range} tiles`,
+	const noun = { star: "star", blade: "blade" }[w.look] || "arrow";      // what the weapon throws
+	return [w.burst > 1 ? `${w.burst}-bolt burst` : w.shots > 1 ? `${w.shots} ${noun}s a shot` : `1 ${noun} a shot`,
+		`${s.weaponDmg} damage a ${noun}`, `${num(w.rate)} shots a second`, `Range ${w.range} tiles`,
 		...(w.pierce ? [`Pierces ${w.pierce}`] : []), ...(w.bounce ? ["Bounces off a wall once"] : [])];
 }
 
@@ -203,6 +204,12 @@ export default function HalcyonRift({ authUser, onExit }) {
 	const [forged, setForged] = useState(null);
 	const [near, setNear] = useState(null);
 	const [run, setRun] = useState(null);
+	// THE GAME MENU (owner's ask, 2026-11-18): Escape opens it over the town or the run
+	// — the keys, Resume, and the way back to the main menu, which is the only screen
+	// that wears the site's banner. NOTHING PAUSES under it (owner's call): the fight
+	// goes on, and the keys still work.
+	const [gameMenu, setGameMenu] = useState(false);
+	const toMenuAfterRun = useRef(false);
 	// During a run, this character's equipment and bag as the PAGE knows them: what it
 	// carried in, what it picked up (named by drop until the server mints it), moved
 	// wherever the player moved it. Kept until the town's refresh replaces it.
@@ -336,11 +343,13 @@ export default function HalcyonRift({ authUser, onExit }) {
 		Object.assign(t.p, standAt(`realm:${outcome.realm}`));    // back out of the portal you took
 		setRun(null);
 		setPicked(null); setDrag(null); setTip(null);
-		notify(...outcomeNotice(outcome));
+		const said = outcomeNotice(outcome);
+		if (said) notify(...said);
 		// The XP the fight already showed stays on screen until the server's copy lands.
 		if (outcome.status !== "dead" && !outcome.practice) setView((v) => v && ({ ...v, characters: v.characters.map((c) =>
 			c.char_id === selChar ? { ...c, xp: Math.max(c.xp, outcome.heroXp), level: Math.max(c.level, outcome.level) } : c) }));
 		if (outcome.status === "dead" && !outcome.practice) setMenu(true);   // a fallen character: back to the menu
+		if (toMenuAfterRun.current) { toMenuAfterRun.current = false; setMenu(true); }
 		// The town's copy replaces the run's once it has landed — unless a new run began meanwhile.
 		refresh().then(() => setRunItems((cur) => (cur === outcome.items ? null : cur)));
 	}, [refresh, selChar, notify]);
@@ -477,6 +486,31 @@ export default function HalcyonRift({ authUser, onExit }) {
 	};
 	const quickRef = useRef(null);
 	quickRef.current = (i) => !menu && char && quick(byPlace[keyOf(at.inv(char.char_id, i))]);
+	// Escape: close what is open (a tooltip, a station's panel, a question), else the game menu.
+	const escRef = useRef(null);
+	escRef.current = () => {
+		if (menu && !run) return;
+		if (tip) { setTip(null); return; }
+		if (gameMenu) { setGameMenu(false); return; }
+		if (discardAsk) { setDiscardAsk(null); return; }
+		if (panel && !run) { setPanel(null); return; }
+		setGameMenu(true);
+	};
+	useEffect(() => {
+		const onKey = (e) => {
+			if (e.code !== "Escape" || e.repeat || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName || "")) return;
+			e.preventDefault();
+			escRef.current();
+		};
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, []);
+	useEffect(() => { if (menu) setGameMenu(false); }, [menu]);
+	const toMainMenu = () => {
+		setGameMenu(false); setPanel(null); setTip(null); setPicked(null);
+		if (run) { toMenuAfterRun.current = true; run.ctl.recall = true; return; }   // leave the rift first
+		setMenu(true);
+	};
 	// The number keys 1-8 put the matching bag slot's item on (in town and in a run).
 	useEffect(() => {
 		const onKey = (e) => {
@@ -582,8 +616,7 @@ export default function HalcyonRift({ authUser, onExit }) {
 	}
 
 	return (
-		<div className={"app halcyon fg-table" + (run ? " hr-in-run" : "")} style={ACCENT}><style>{styles}</style>
-			{header}
+		<div className={"app halcyon fg-table hr-playing" + (run ? " hr-in-run" : "")} style={ACCENT}><style>{styles}</style>
 			<main className="hr-main">
 				<section className="hr-stage" aria-label={run ? run.dungeon.name : "The town"}
 					data-near={near || ""} data-panel={panel || ""}
@@ -594,7 +627,14 @@ export default function HalcyonRift({ authUser, onExit }) {
 							? <Dungeon run={run} client={client} onEnd={endRun} notify={notify} tips={slotCtx} />
 							: <Town st={townRef.current} notes={townNotes} ready={!!char && !busy} gear={equipped} level={char?.level || 1}
 								classId={char?.class_id || "ranger"}
-								onUse={use} onNear={setNear} onEscape={() => { setPanel(null); setDiscardAsk(null); }} />}
+								onUse={use} onNear={setNear} />}
+
+						<button className="hr-menu-btn" onClick={(e) => { e.currentTarget.blur(); setGameMenu((m) => !m); }}
+							aria-expanded={gameMenu} title="Menu (Esc)"><span aria-hidden="true">☰</span> Menu <kbd>Esc</kbd></button>
+						{gameMenu && <GameMenu inRun={!!run} practice={!!run?.practice}
+							onResume={() => setGameMenu(false)}
+							onRecall={() => { setGameMenu(false); run.ctl.recall = true; }}
+							onMainMenu={toMainMenu} />}
 
 						<Notices list={notices} />
 
@@ -647,7 +687,8 @@ export default function HalcyonRift({ authUser, onExit }) {
 
 						{panel?.startsWith?.("realm:") && !run && (() => {
 							const realm = panel.slice(6), d = (view.dungeons || []).find((x) => x.id === realm);
-							const r = mods.length, o = view.odds || {};
+							const r = mods.length, lo = view.odds?.loot?.[Math.min(r, (view.odds?.loot?.length || 1) - 1)] || {};
+							const pct = (x) => `${Math.round((x || 0) * 100)}%`;
 							return (
 								<Overlay title={d?.name || "Rift"} onClose={() => setPanel(null)} className="hr-rift-panel">
 									<p className="hr-hint">Add modifiers for a harder rift and rarer loot: higher tiers and a better
@@ -661,9 +702,9 @@ export default function HalcyonRift({ authUser, onExit }) {
 										})}
 									</div>
 									<dl className="hr-mod-sum">
-										<div><dt>Difficulty</dt><dd>{r ? "+".repeat(r) : "Normal"}</dd></div>
-										<div><dt>Higher tier</dt><dd>{r ? `+${Math.round(r * (o.tier_up_per_rarity || 0) * 100)}% a drop` : "Base"}</dd></div>
-										<div><dt>Boss unique</dt><dd>{Math.round(((o.unique_base || 0) + r * (o.unique_per_rarity || 0)) * 100)}%</dd></div>
+										<div><dt>Enemy drop T2+</dt><dd>{pct(lo.enemy_t2_plus)}</dd></div>
+										<div><dt>Boss drop T3+</dt><dd>{pct(lo.boss_t3_plus)}</dd></div>
+										<div><dt>Boss unique</dt><dd>{pct(lo.boss_unique)}</dd></div>
 									</dl>
 									<div className="hr-actions">
 										<button className="btn btn-gold" disabled={!char || busy}
@@ -701,13 +742,6 @@ export default function HalcyonRift({ authUser, onExit }) {
 								</div>
 							</Overlay>)}
 					</div>
-					<p className="hr-keys">
-						{run
-							? <><kbd>WASD</kbd> move · <kbd>mouse</kbd> aim, hold to shoot · <kbd>T</kbd> auto-fire ·
-								<kbd>Space</kbd> ability · <kbd>E</kbd> interact · <kbd>1</kbd>–<kbd>8</kbd> equip · <kbd>F</kbd> recall</>
-							: <><kbd>WASD</kbd> walk · <kbd>mouse</kbd> shoot · <kbd>E</kbd> interact ·{" "}
-								<kbd>1</kbd>–<kbd>8</kbd> or double-click to equip</>}
-					</p>
 				</section>
 
 				<aside className="hr-side fg-panel" aria-label="Your character">
@@ -806,10 +840,15 @@ function ItemTip({ tip, bases, ap = 0 }) {
 			</p>
 			{WEAPON_FEEL[it.base_id] && <p className="hr-tip-weapon">{WEAPON_FEEL[it.base_id]}</p>}
 			{lines.length > 0 && <ul className="hr-tip-lines hr-q">{lines.map((l) => <li key={l}>{l}</li>)}</ul>}
-			{it.slot_count > 0 && <p className="fg-label-soft">{it.enchants?.length || 0} of {it.slot_count} enchantment slot{it.slot_count === 1 ? "" : "s"}</p>}
-			{it.enchants?.length > 0 && (
-				<ul className="hr-tip-lines hr-enchants">
-					{it.enchants.map((e, i) => <li key={i}>+{enchantValue(e.id, e.q)} {ENCHANT_NAMES[e.id] || e.id}</li>)}
+			{/* The item's own stats above; its enchantment slots below a rule, one row a
+			    slot — filled or empty — so a count never has to be read (owner's ask). */}
+			{it.slot_count > 0 && (
+				<ul className="hr-tip-lines hr-enchants" aria-label="Enchantment slots">
+					{[...Array(it.slot_count).keys()].map((i) => {
+						const e = it.enchants?.[i];
+						return e ? <li key={i}><i aria-hidden="true">◆</i>+{enchantValue(e.id, e.q)} {ENCHANT_NAMES[e.id] || e.id}</li>
+							: <li key={i} className="empty"><i aria-hidden="true">◇</i>Empty slot</li>;
+					})}
 				</ul>)}
 		</div>
 	);
@@ -884,6 +923,31 @@ function ForgeReveal({ forged, where, onAgain, onDone }) {
 				<button className="btn btn-ghost" onClick={onDone}>Done</button>
 			</div>
 		</div>
+	);
+}
+
+/* The game menu: Escape (or the Menu button) over the town or a run. The keys live
+ * here now, not in a line under the stage, so the stage can have the room. */
+const KEYS = [
+	["W A S D", "Move"], ["Mouse", "Aim; hold the left button to shoot"], ["T", "Auto-fire on / off"],
+	["Space · Q · right-click", "Your ability"], ["E", "Use: vault, forge, portal, Dream Rift; pick up loot"],
+	["G", "Take all the loot here"], ["1 – 8", "Equip that bag slot (or double-click it)"],
+	["F", "Recall to town (in a rift)"], ["Esc", "This menu; closes a panel"],
+];
+function GameMenu({ inRun, practice, onResume, onRecall, onMainMenu }) {
+	return (
+		<Overlay title="Menu" onClose={onResume} className="hr-game-menu">
+			<div className="hr-game-menu-acts">
+				<button className="btn btn-gold" onClick={onResume}>Resume</button>
+				{inRun && <button className="btn btn-outline" onClick={onRecall}>Recall to town</button>}
+				<button className="btn btn-outline" onClick={onMainMenu}>{inRun ? "Recall and go to the main menu" : "Main menu"}</button>
+			</div>
+			{inRun && !practice && <p className="hr-hint">Recalling keeps what you carry; the rift is closed behind you.</p>}
+			<h3 className="fg-label">Keys</h3>
+			<dl className="hr-keylist">
+				{KEYS.map(([k, what]) => <div key={k}><dt><kbd>{k}</kbd></dt><dd>{what}</dd></div>)}
+			</dl>
+		</Overlay>
 	);
 }
 
@@ -1015,8 +1079,11 @@ function XpBar({ levels, xp }) {
 	);
 }
 
-/* How a run ended, as one notification (text, tone). */
+/* How a run ended, as one notification (text, tone) — or null. A CLEAR says nothing
+ * on the way back (owner's ask, 2026-11-18): the run already said "cleared" when
+ * the boss fell, with the time. */
 function outcomeNotice(r) {
+	if (r.status === "completed") return null;
 	const time = r.timeTicks != null ? ` Time ${formatRiftTime(r.timeTicks)}.` : "";
 	if (r.practice) return [{ completed: "Dream Rift complete.", recalled: "Dream Rift left.", dead: "Dream Rift failed." }[r.status]
 		+ time + " Nothing changed; your character is safe.", r.status === "dead" ? "bad" : "info"];
@@ -1066,10 +1133,10 @@ function fitCanvas(cv) {
 // ── the town ────────────────────────────────────────────────────────────────
 /* The plaza, walked at the same fixed 60 Hz step as the fight and drawn between
  * ticks the same way. `st` lives in the page, so the town keeps where you stood. */
-function Town({ st, notes, ready, onUse, onNear, onEscape, gear, level, classId }) {
+function Town({ st, notes, ready, onUse, onNear, gear, level, classId }) {
 	const canvasRef = useRef(null);
 	const cb = useRef(null);
-	cb.current = { ready, onUse, onNear, onEscape };
+	cb.current = { ready, onUse, onNear };
 	const gearKey = JSON.stringify([gear.map((g) => [g.base_id, g.tier, g.enchants]), level]);
 	useEffect(() => { setTownGear(st, gear, level, classId); }, [gearKey, classId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1127,8 +1194,7 @@ function Town({ st, notes, ready, onUse, onNear, onEscape, gear, level, classId 
 			if (e.code === "KeyE") {
 				const s = STATIONS.find((x) => x.id === st.near);
 				if (s) cb.current.onUse(s);
-			} else if (e.code === "Escape") cb.current.onEscape();
-			else if (e.code === "KeyT") auto = !auto;
+			} else if (e.code === "KeyT") auto = !auto;
 			else if (e.code === "Space" || e.code === "KeyQ") { ability = true; e.preventDefault(); }
 		};
 		const onKeyUp = (e) => keys.delete(e.code);
@@ -1249,13 +1315,17 @@ function Dungeon({ run, client, onEnd, notify, tips }) {
 			const out = { mx: Math.sign(mx), my: Math.sign(my), ax: (mouse.x - ox) / px - st.p.x, ay: (mouse.y - oy) / px - st.p.y,
 				fire: mouse.down || auto, ability: edge.ability, heal: edge.interact, take, lift, drop: ctl.drops.shift() || null,
 				recall: edge.recall, enter: edge.interact && !loot };
+			if (ctl.recall) { out.recall = true; ctl.recall = false; }      // Recall / Main menu in the game menu
 			edge.ability = edge.interact = edge.recall = false;
 			return out;
 		};
 
 		const handle = (ev) => {
 			if (ev.type === "level") note(`Level ${ev.level}!`, "good");
-			if (ev.type === "cleared") note(ev.xp > 0 ? `${run.dungeon.name} cleared! +${ev.xp} XP` : `${run.dungeon.name} cleared!`, "good");
+			if (ev.type === "cleared") {
+				const time = st.bossTimeTicks != null ? ` ${formatRiftTime(st.bossTimeTicks)}` : "";
+				note(`${run.practice ? "Dream Rift" : run.dungeon.name} cleared!${time}${ev.xp > 0 ? ` +${ev.xp} XP` : ""}`, "good");
+			}
 			if (ev.type === "lift") {
 				const it = ctl.floor.get(ev.key), slot = ctl.lift(ev.key);
 				if (slot === undefined) return;

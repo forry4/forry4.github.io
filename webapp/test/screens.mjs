@@ -10288,6 +10288,16 @@ try {
 			town && await page.locator(".hr-side .hr-grid-inv .hr-slot").count() === 16 && await page.locator(".hr-grid-vault").count() === 0);
 		const townPaint = await painted();
 		check("the town is drawn on the stage (a walkable plaza, not one flat fill)", townPaint.colors >= 6, JSON.stringify(townPaint));
+		// No banner in play; Escape opens the game menu (keys, Main menu) and closes it.
+		check("in the town the site's banner is gone (the stage has the room)", await page.locator(".halcyon .lby-header").count() === 0);
+		await page.keyboard.press("Escape");
+		const gm = await page.waitForSelector(".hr-game-menu", { timeout: 3_000 }).then(() => true).catch(() => false);
+		check("Escape opens the game menu with the keys and a way to the main menu", gm
+			&& await page.locator(".hr-game-menu .hr-keylist div").count() >= 8
+			&& await page.locator(".hr-game-menu button", { hasText: "Main menu" }).count() === 1);
+		await page.keyboard.press("Escape");
+		check("and Escape closes it again", await page.waitForFunction(() => !document.querySelector(".hr-game-menu"), null, { timeout: 3_000 })
+			.then(() => true).catch(() => false));
 		const geared = await page.waitForFunction(() => document.querySelectorAll(".hr-equip .hr-slot.has").length === 3,
 			null, { timeout: 15_000 }).then(() => true).catch(() => false);
 		check("the character menu makes a Ranger wearing its three starter items", geared);

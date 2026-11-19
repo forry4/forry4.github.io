@@ -6,7 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createSim, step, setGear, wallHit, enchantValue, STAT_SCALE, fingerprint, dsin, dcos, recoveryLimit, statsFor, levelFor, xpProgress, PER_LEVEL, WEAPONS, TPS, REACH, SHIELD_DURATION, SLOW_FACTOR, SLOW_DURATION, SLOW_RADIUS,
-	ABILITY_COOLDOWN, STARFALL_DELAY, COUNTER_WINDOW, COUNTER_GUARD } from "../../../halcyon/sim.js";
+	ABILITY_COOLDOWN, STARFALL_DELAY, COUNTER_WINDOW, COUNTER_GUARD, ENEMY } from "../../../halcyon/sim.js";
 
 const load = (s) => JSON.parse(readFileSync(new URL(`./fixtures/halcyon-dungeon-${s}.json`, import.meta.url)));
 const A = load("unit-a"), B = load("unit-b");
@@ -71,7 +71,7 @@ test("dsin and dcos match Math.sin and Math.cos to 1e-9 across many turns", () =
 
 test("the same dungeon and the same inputs make the same run, tick for tick", () => {
 	const a = play(A, { god: false, ticks: 40 * TPS }), b = play(A, { god: false, ticks: 40 * TPS });
-	assert.ok(a.prints.length > 600, `ran ${a.prints.length} ticks`);
+	assert.ok(a.prints.length > 450, `ran ${a.prints.length} ticks`);
 	assert.deepEqual(a.prints, b.prints);
 	assert.deepEqual(a.events, b.events);
 	const c = play(B, { god: false, ticks: 40 * TPS });
@@ -555,4 +555,31 @@ test("rift modifiers scale enemy health", () => {
 	const plain = createSim(A, STARTER);
 	const hard = createSim({ ...A, scale: { hp: 1.5 } }, STARTER);
 	assert.equal(hard.enemies[0].hp, plain.enemies[0].hp * 1.5);
+});
+
+test("a chaser up close telegraphs, then spits one short shot that dies within its range", () => {
+	const st = createSim(A, [{ base_id: "shortbow", tier: 1 }]);
+	const e = st.enemies.find((x) => x.type === "chaser");
+	st.enemies = [e];
+	e.x = st.p.x + 2.5; e.y = st.p.y; e.active = true; e.cd = 0;          // the open entrance room
+	let shot = null, teleSeen = false;
+	for (let i = 0; i < 40 && !shot; i++) {
+		step(st, {});
+		teleSeen ||= e.tele > 0;
+		shot = st.bullets.find((b) => b.owner === "e") || null;
+	}
+	assert.ok(teleSeen && shot, "a telegraph, then a shot");
+	const reach = Math.hypot(shot.vx, shot.vy) * shot.life / TPS;
+	assert.ok(reach <= ENEMY.chaser.shot.range + 0.5, `reaches ${reach} tiles`);
+	const far = createSim(A, [{ base_id: "shortbow", tier: 1 }]);
+	const f = far.enemies.find((x) => x.type === "chaser");
+	far.enemies = [f];
+	f.x = far.p.x + 8; f.y = far.p.y; f.active = true;
+	step(far, {});
+	assert.equal(f.tele, 0, "no shot from afar");
+});
+
+test("the Ninja throws slower, harder: shuriken and kunai keep about the same damage a second", () => {
+	assert.ok(WEAPONS.shuriken.rate <= 2.5 && WEAPONS.shuriken.dmg >= 18);
+	assert.ok(WEAPONS.kunai.rate <= 1.3 && WEAPONS.kunai.dmg >= 40);
 });

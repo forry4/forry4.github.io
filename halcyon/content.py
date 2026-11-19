@@ -123,11 +123,83 @@ RIFT_MODS: dict[str, dict] = {
     "brutal":    {"name": "Brutal", "text": "Enemies hit 40% harder.", "scale": {"dmg": 1.4}},
     "swift":     {"name": "Swift", "text": "Enemies and their shots move 25% faster.", "scale": {"speed": 1.25}},
 }
-TIER_UP_PER_RARITY = 0.25        # each rarity point: this chance (each) to raise a drop's tier by one
-UNIQUE_BASE = 0.12               # a boss roll's chance to be a unique, at rarity 0 ...
-UNIQUE_PER_RARITY = 0.10         # ... plus this per rarity point
+# ── LOOT TABLES (owner's ask, 2026-11-18: "rethink how to do loot drop tables") ──
+# EVERY RANDOM OUTCOME IS ONE ROLL ON ONE WEIGHTED TABLE THAT NAMES EVERY RESULT,
+# "nothing" included (Diablo II's NoDrop row). Never a cascade of independent
+# checks ("10% legendary, else 20% epic, else ...") — each later check only sees
+# what the earlier ones left, so its real rate is lower than written and the
+# bottom row soaks up the rest. With one weighted roll, an entry's chance is
+# exactly weight / total, which is what the rift panel shows.
+#
+# An enemy's loot is two rolls, as most ARPGs split it: HOW MANY items (DROP_COUNT),
+# then, for each, WHAT QUALITY (QUALITY: a tier, or a unique). The base item is a
+# third roll on the class's table, the slot count a fourth (SLOT_ODDS, the same
+# for every source). The BOSS is a better table, not a different game: one item
+# guaranteed, a chance of a second or third, a lean toward higher tiers, and the
+# only source of uniques.
+DROP_COUNT: dict[str, tuple] = {
+    "chaser":  ((0, 80), (1, 20)),
+    "shooter": ((0, 70), (1, 30)),
+    "radial":  ((0, 65), (1, 35)),
+    "boss":    ((1, 60), (2, 30), (3, 10)),
+}
+# (result, weight, + weight per RARITY point). Rarity (one point a rift modifier)
+# only ADDS weight to the better rows, so it shifts the odds up without touching
+# how many items drop or how many enchantment slots they have.
+QUALITY: dict[str, tuple] = {
+    "enemy": (("t1", 70, 0), ("t2", 25, 5), ("t3", 5, 3)),
+    "boss":  (("t1", 40, 0), ("t2", 35, 0), ("t3", 15, 5), ("t4", 2, 3), ("unique", 8, 0)),
+}
+# THE BOSS'S UNIQUE CHANCE RISES 15% (of itself) PER MODIFIER, so 45% with all three
+# (owner's call, 2026-11-18). A flat weight per point cannot do that — the other rows
+# grow too and the boss drops 1-3 items — so the unique row's weight is SOLVED for
+# that target at each rarity (`_unique_weight`), and tested to the percent.
+UNIQUE_PER_MODIFIER = 0.15
 MAX_TIER = 5
 
+
+def _boss_unique_chance(table) -> float:
+    """P(at least one unique) from a boss that rolls this quality table per item."""
+    u = chances(table)["unique"]
+    return 1 - sum(pc * (1 - u) ** n for n, pc in chances(DROP_COUNT["boss"]).items())
+
+
+def _unique_weight(rarity: int) -> float:
+    """The unique row's weight that puts the boss's unique chance at
+    base x (1 + UNIQUE_PER_MODIFIER x rarity), with the other rows as they are."""
+    rows = [(r, w + per * rarity) for r, w, per in QUALITY["boss"] if r != "unique"]
+    base = _boss_unique_chance(tuple((r, w) for r, w, _ in QUALITY["boss"]))
+    want = base * (1 + UNIQUE_PER_MODIFIER * rarity)
+    lo, hi = 0.0, 1000.0
+    for _ in range(60):                     # bisection: the chance only grows with the weight
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if _boss_unique_chance(tuple(rows) + (("unique", mid),)) < want else (lo, mid)
+    return round((lo + hi) / 2, 6)
+
+
+def quality_table(source: str, rarity: int = 0) -> tuple:
+    """The (result, weight) table a drop of this source rolls on, at this rarity."""
+    rows = tuple((r, w + per * rarity) for r, w, per in QUALITY[source])
+    if source == "boss" and rarity:
+        rows = tuple((r, _unique_weight(rarity) if r == "unique" else w) for r, w in rows)
+    return rows
+
+
+def chances(table) -> dict:
+    """Each result's exact chance on a weighted table."""
+    total = sum(w for _, w in table)
+    return {r: w / total for r, w in table}
+
+
+def loot_odds(rarity: int) -> dict:
+    """What the rift panel shows, worked out from the tables above (never typed twice)."""
+    boss_q, enemy_q = chances(quality_table("boss", rarity)), chances(quality_table("enemy", rarity))
+    counts = chances(DROP_COUNT["boss"])
+    unique = _boss_unique_chance(quality_table("boss", rarity))
+    return {"enemy_t2_plus": enemy_q["t2"] + enemy_q["t3"],
+            "boss_t3_plus": boss_q["t3"] + boss_q["t4"],
+            "boss_unique": unique,
+            "boss_items": sum(n * pc for n, pc in counts.items())}
 
 def base(base_id: str) -> dict:
     b = BASE_ITEMS.get(base_id)

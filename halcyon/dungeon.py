@@ -138,7 +138,6 @@ CORRIDOR = 3
 DUNGEONS = {"shallows": {"name": "The Shallows", "combat_rooms": 4, "complete_xp": 30}}
 
 ENEMY_WEIGHTS = (("chaser", 40), ("shooter", 35), ("radial", 25))
-DROP_CHANCE = {"chaser": 0.20, "shooter": 0.30, "radial": 0.35}
 # A heal orb drops from an ordinary enemy at this chance: about one a rift (0-2 is
 # the usual spread). The boss never drops one — the fight is over.
 HEAL_CHANCE = 0.035
@@ -152,9 +151,8 @@ DIVINER_LOOT = (("wand", 16), ("starstaff", 14), ("seer_robes", 22), ("star_tome
                 ("band_of_vigor", 14), ("band_of_focus", 14))
 NINJA_LOOT = (("shuriken", 16), ("kunai", 14), ("shadow_garb", 22), ("mirror_charm", 14),
               ("band_of_vigor", 14), ("band_of_focus", 14))
-# UNIQUES DROP ONLY FROM BOSSES (owner's ask, 2026-11-18), by their own roll
-# (content.UNIQUE_BASE, raised by rift modifiers). A class with none gets a
-# standard item instead.
+# UNIQUES DROP ONLY FROM BOSSES (owner's ask, 2026-11-18): the "unique" row of the
+# boss's quality table (content.QUALITY). The loot tables themselves are in content.py.
 UNIQUE_LOOT = {"ranger": (("kingfisher_eye", 1), ("tidecaller", 1), ("repeater", 1)),
                "paladin": (("kingfisher_eye", 1),), "diviner": (("kingfisher_eye", 1),),
                "ninja": (("kingfisher_eye", 1),)}
@@ -162,7 +160,11 @@ UNIQUE_LOOT = {"ranger": (("kingfisher_eye", 1), ("tidecaller", 1), ("repeater",
 # class-specific table below, so a Ranger never receives a Paladin's starter gear.
 LOOT = RANGER_LOOT + PALADIN_LOOT + DIVINER_LOOT + NINJA_LOOT + tuple(x for t in UNIQUE_LOOT.values() for x in t)
 LOOT_BY_CLASS = {"ranger": RANGER_LOOT, "paladin": PALADIN_LOOT, "diviner": DIVINER_LOOT, "ninja": NINJA_LOOT}
-SLOT_ODDS = ((0, 50), (1, 35), (2, 12), (3, 3))
+# Enchantment slots on a drop (owner's table, 2026-11-18), set by the CUMULATIVE
+# chance of at least n slots: 1+ 50%, 2+ 18.75% (50% x 37.5%), 3+ 4.6875% (x 25%),
+# 4 0.5859% (x 12.5%). As one weighted roll (in 2048ths) that is exactly
+# 0: 50%, 1: 31.25%, 2: 14.0625%, 3: 4.1016%, 4: 0.5859%.
+SLOT_ODDS = ((0, 1024), (1, 640), (2, 288), (3, 84), (4, 12))
 
 
 def _pick(rng: random.Random, table) -> object:
@@ -175,8 +177,15 @@ def _pick(rng: random.Random, table) -> object:
     return table[-1][0]
 
 
-def _item(rng: random.Random, tier: int, class_id: str, unique: bool = False) -> dict:
-    base_id = _pick(rng, UNIQUE_LOOT[class_id] if unique and UNIQUE_LOOT.get(class_id) else LOOT_BY_CLASS[class_id])
+def _item(rng: random.Random, tier: int, class_id: str, unique: bool = False,
+          exclude: frozenset = frozenset()) -> dict:
+    # ONE ENEMY NEVER DROPS THE SAME ITEM TWICE (owner's ask, 2026-11-18): what it
+    # already dropped is left out. A unique the boss already gave becomes a standard
+    # item instead (a class may have only one unique).
+    left = lambda t: tuple((b, w) for b, w in t if b not in exclude)
+    table = left(UNIQUE_LOOT.get(class_id, ())) if unique else ()
+    table = table or left(LOOT_BY_CLASS[class_id]) or LOOT_BY_CLASS[class_id]
+    base_id = _pick(rng, table)
     slots = _pick(rng, SLOT_ODDS)
     if C.base(base_id)["kind"] == "unique":
         tier = 1                  # a unique is its own thing, not a rung on the tier ladder
@@ -252,23 +261,19 @@ def generate(dungeon_id: str, seed: str | None = None, class_id: str = "ranger",
 
     drops, n_drop = {}, 0
     for eid, e in enemies.items():
-        boss_roll = e["type"] == "boss"
-        if boss_roll:
-            rolls = [2 if rng.random() < 0.7 else 3]
-            if rng.random() < 0.5:
-                rolls.append(2)
-        else:
-            rolls = [1 if rng.random() < 0.85 else 2] if rng.random() < DROP_CHANCE[e["type"]] else []
-            if rng.random() < HEAL_CHANCE:           # a heal orb, dropped where it falls
-                pickups.append({"id": f"h{len(pickups) + 1}", "kind": "heal", "enemy": eid})
-        for tier in rolls[:BAG_MAX]:
-            # Rarity (rift modifiers) can lift the tier, a step per point that hits.
-            for _ in range(rarity):
-                if rng.random() < C.TIER_UP_PER_RARITY:
-                    tier = min(C.MAX_TIER, tier + 1)
-            unique = boss_roll and rng.random() < C.UNIQUE_BASE + C.UNIQUE_PER_RARITY * rarity
+        is_boss = e["type"] == "boss"
+        n = _pick(rng, C.DROP_COUNT[e["type"]])               # how many items: one roll
+        if not is_boss and rng.random() < HEAL_CHANCE:           # a heal orb, dropped where it falls
+            pickups.append({"id": f"h{len(pickups) + 1}", "kind": "heal", "enemy": eid})
+        quality = C.quality_table("boss" if is_boss else "enemy", rarity)
+        dropped: set[str] = set()
+        for _ in range(min(n, BAG_MAX)):
+            q = _pick(rng, quality)                          # what each is: one roll
+            unique = q == "unique"
+            it = _item(rng, 1 if unique else int(q[1:]), class_id, unique, frozenset(dropped))
+            dropped.add(it["base_id"])
             n_drop += 1
-            drops[f"d{n_drop}"] = {**_item(rng, tier, class_id, unique), "enemy": eid}
+            drops[f"d{n_drop}"] = {**it, "enemy": eid}
 
     return {"id": dungeon_id, "name": spec["name"], "seed": seed, "width": width, "height": height,
             "tiles": ["".join(r) for r in grid], "start": start, "rooms": room_spans,

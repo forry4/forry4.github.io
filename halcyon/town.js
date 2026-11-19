@@ -43,7 +43,9 @@ export const REALMS = [{ id: "shallows", name: "The Shallows" }];
 export const STATIONS = [
 	{ id: "vault", kind: "vault", label: "Vault", x: 3.5, y: 8, hw: 1.2, hh: 0.8, solid: true, reach: 0.9 },
 	{ id: "forge", kind: "forge", label: "Forge", x: 18.5, y: 8, hw: 1.0, hh: 0.8, solid: true, reach: 0.9 },
-	{ id: "dream", kind: "dream", label: "Dream Rift", x: 6, y: 4.7, hw: 1.25, hh: 0.7, solid: true, reach: 0.9 },
+	// The Dream Rift is drawn ROUND, so it is solid as a circle (`rad`), not a box: it
+	// was a 2.5 x 1.4 rectangle under a one-tile disc and stopped you in thin air.
+	{ id: "dream", kind: "dream", label: "Dream Rift", x: 6, y: 4.7, hw: 0.75, hh: 0.75, rad: 0.75, solid: true, reach: 0.9 },
 	...REALMS.map((r, i) => ({ id: `realm:${r.id}`, kind: "portal", realm: r.id, label: r.name,
 		x: 11 + (i - (REALMS.length - 1) / 2) * 5, y: 2.6, hw: 0, hh: 0, solid: false, reach: 1.3 })),
 ];
@@ -79,7 +81,9 @@ const tileAt = (st, x, y) => {
 	const ty = Math.floor(y), tx = Math.floor(x);
 	return ty < 0 || ty >= st.h || tx < 0 || tx >= st.w ? "#" : st.tiles[ty][tx];
 };
-const inStation = (st, x, y, r) => st.stations.some((s) => s.solid && Math.abs(x - s.x) < s.hw + r && Math.abs(y - s.y) < s.hh + r);
+const inStation = (st, x, y, r) => st.stations.some((s) => s.solid && (s.rad
+	? (x - s.x) ** 2 + (y - s.y) ** 2 < (s.rad + r) ** 2
+	: Math.abs(x - s.x) < s.hw + r && Math.abs(y - s.y) < s.hh + r));
 const inPost = (st, x, y, r) => st.posts.some((q) => (x - q.x) * (x - q.x) + (y - q.y) * (y - q.y) < (q.r + r) * (q.r + r));
 
 function blocked(st, x, y, r) {
@@ -101,6 +105,7 @@ export function postDps(st, q) {
 /* How far the player is from a station: from its EDGE for a solid one, its centre
  * for a portal. */
 export function distanceTo(p, s) {
+	if (s.rad) return Math.max(0, Math.hypot(p.x - s.x, p.y - s.y) - s.rad);
 	const dx = Math.max(0, Math.abs(p.x - s.x) - s.hw), dy = Math.max(0, Math.abs(p.y - s.y) - s.hh);
 	return Math.sqrt(dx * dx + dy * dy);
 }

@@ -164,8 +164,8 @@ def setup_halcyon(app, get_db_conn, get_user_by_session, token_resolver=None) ->
                 # The odds the page shows (the forge's and the modifiers' panels), read
                 # off the same constants the generator and the store roll against.
                 "odds": {"fuse_slot_gain": [list(g) for g in C.FUSE_SLOT_GAIN], "max_slots": C.MAX_ENCHANT_SLOTS,
-                         "tier_up_per_rarity": C.TIER_UP_PER_RARITY,
-                         "unique_base": C.UNIQUE_BASE, "unique_per_rarity": C.UNIQUE_PER_RARITY},
+                         # The loot odds at 0..N modifiers, worked out from the tables.
+                         "loot": [C.loot_odds(r) for r in range(len(C.RIFT_MODS) + 1)]},
                 "bases": C.BASE_ITEMS}
 
     @app.post("/halcyon/characters")

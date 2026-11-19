@@ -277,15 +277,16 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
   `dungeon.generate` gives each non-boss enemy a `HEAL_CHANCE` (3.5%) heal, written as
   a pickup with an `enemy` field (~0.9 a rift, `test_dungeon`). The sim keeps those off
   the floor (`healsBy`) and `kill()` drops one where its carrier died.
-- **Uniques drop only from the boss** (`UNIQUE_LOOT` by class, rolled at
-  `UNIQUE_BASE + UNIQUE_PER_RARITY * modifiers`); a bag holds at most `BAG_MAX` (8).
+- **Uniques drop only from the boss** (`UNIQUE_LOOT` by class, the "unique" row of the
+  boss's quality table — see "Loot tables"); a bag holds at most `BAG_MAX` (8).
 - **Rift modifiers** (`content.RIFT_MODS`: fortified / brutal / swift). E at a portal
   opens its panel; E again (or Enter the rift) goes in with what is picked. The run
   POST carries `mods`; `generate` validates them, writes `mods` + `scale` into the
-  dungeon, and adds `TIER_UP_PER_RARITY` per modifier to each drop's tier-up chance and
-  `UNIQUE_PER_RARITY` to the boss's unique — **never the slot count** (owner's rule,
+  dungeon, and each modifier is one RARITY point that adds weight to the better rows
+  of the quality tables — **never the drop count or the slot count** (owner's rule,
   tested). The sim reads `dungeon.scale` (enemy HP, enemy damage, enemy move and shot
-  speed). The panel's numbers come from `/halcyon/state`'s `odds`, the same constants.
+  speed). The panel's numbers are `/halcyon/state`'s `odds.loot` (`content.loot_odds`,
+  computed from the same tables at 0..3 modifiers, never typed twice).
 - **AP (ability power) is a stat**, as Attack is the weapon's: `ability_power`
   enchants add points, `PER_LEVEL.ap` 1; `abilityPower = 1 + ap/STAT_SCALE` multiplies
   each ability's own lever (see "One ability per class": never a duration or a guard). An ability item's tooltip says
@@ -334,3 +335,59 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
   (and a Diviner's equipped Stillness Orb into a Star Tome).
 - **Rings: two of the same base are fine; two of the same UNIQUE are not**, whatever their
   enchantment slots (`_check_fits`).
+
+## The engine: stays in the browser (2026-11-18, owner's call)
+- **Halcyon is a browser game on the site, and stays one.** The deterministic JavaScript sim
+  (`sim.js`, shared with `town.js`) and the Python server are kept. When the look outgrows raw
+  canvas (sprite art, animation, particles, shaders), swap ONLY the drawing — `render.js` — to
+  PixiJS; if the sim ever gets slow, move just that hot part to Rust→WASM like the AI cores.
+- **Keep `render.js` a pure "draw this state" layer** (it reads the sim, never changes it), so
+  that swap stays a renderer swap and the sim, server and tests do not move.
+- Godot and a Rust engine were weighed and declined: Godot's web export is heavy and would sit
+  apart from the site's login, lobby and gates; Rust buys speed, not looks. Only shipping
+  OUTSIDE the browser (Steam, app stores) would reopen this — and then Godot is the answer.
+
+## Feel and loot pass (2026-11-18, owner's asks)
+- **Chasers shoot too**: inside 3.5 tiles, a 14-tick telegraph, then one slow bolt that
+  dies at its range (`ENEMY.chaser.shot`; own cooldown `e.scd`, in the fingerprint).
+- **The Ninja throws slower and harder** (shuriken 20 dmg at 2.4/s, kunai 42 at 1.2/s —
+  about the same damage a second) so the countered shot can be aimed. **A countered shot is
+  drawn apart**: gold-white core at twice the size, a halo and a long gold trail; the player
+  wears a gold ring while the next shot is countered.
+- **Drops**: one enemy never drops the same base twice (a unique the boss already gave turns
+  into a standard item). The boss's better odds are in "Loot tables" below.
+- **The Dream Rift is solid as the disc it is drawn as** (`rad` on a station; `inStation` and
+  `distanceTo` read it). It was a 2.5 x 1.4 box under a one-tile disc.
+- **Coming back from a clear says nothing**; the in-run "cleared!" note carries the time.
+- **Tooltip**: the item's own stats, then a rule, then ONE ROW A SLOT (◆ enchantment, ◇ empty
+  slot). No "x of y enchantment slots" line.
+- **No banner in play.** The site's `LobbyHeader` shows only on the main menu (and while
+  loading). **Escape** closes what is open (tooltip, panel, question), else toggles the GAME
+  MENU (`GameMenu`): Resume, the keys (they moved here from the line under the stage), Main
+  menu — in a run, Recall and Recall-to-main-menu. **Nothing pauses under it** (owner's
+  call): the fight goes on and the keys still work. The ☰ Menu button opens it with a
+  mouse. `--slot`/`--vslot` were given the banner's room back (414→361, 330→250).
+
+## Loot tables (2026-11-18, owner's ask: "rethink how to do loot drop tables")
+- **Every random outcome is ONE roll on ONE weighted table that names every result,
+  "nothing" included** (Diablo II's NoDrop row) — `content.DROP_COUNT`, `content.QUALITY`,
+  `dungeon.SLOT_ODDS`, the class base tables. **Never a cascade of independent checks**
+  ("10% unique, else 20% tier 3, else …"): each later check only sees what the earlier ones
+  left, so its real rate is below what is written and the last row soaks up the rest.
+  With one weighted roll a row's chance is exactly weight / total, and
+  `test_drops_come_at_the_rates_the_tables_say` holds the generator to that (4 standard
+  errors, at 0 and 3 modifiers). (The forge's slot gain IS a checked-in-order list, but the
+  page computes its true odds — `slotOdds` — and shows those.)
+- **An enemy's loot is: how many (DROP_COUNT by enemy type), then for each item its quality
+  (QUALITY: t1-t4 or unique), then its base, then its slots.** Ordinary enemies drop 0 or 1
+  (20-35%) at T1 70 / T2 25 / T3 5. **The boss is a better table, not a jackpot** (owner):
+  ONE item guaranteed, 30% a second and 10% a third (1.5 on average); T1 40 / T2 35 /
+  T3 15 / T4 2 / unique 8 per item, so about 12% of bosses give a unique.
+  Enchantment slots on a drop (owner's cumulative table: 1+ 50%, 2+ 18.75%, 3+ 4.69%,
+  4 0.59%): 0 50% / 1 31.25% / 2 14.06% / 3 4.10% / 4 0.59% — `dungeon.SLOT_ODDS`, in 2048ths. Same slot odds
+  for every source.
+- **Rarity** (one point a modifier) adds each row's `per` weight: better rows only, never
+  the count or the slots. At three modifiers: enemy T2+ 30%→44%, boss T3+ 17%→32%.
+  **The boss's unique chance rises 15% of itself per modifier** (owner's call): 11.6% →
+  13.4% → 15.1% → 16.9%. A flat weight cannot hit that evenly, so the unique row's weight
+  is solved for it at each rarity (`content._unique_weight`), tested to 0.01%. The rift panel shows exactly these, from `content.loot_odds`.

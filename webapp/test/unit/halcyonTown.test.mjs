@@ -77,3 +77,15 @@ test("nobody can stand inside a practice post", () => {
 		assert.ok(Math.hypot(st.p.x - q.x, st.p.y - q.y) >= q.r + st.p.r - 1e-9, q.id);
 	}
 });
+
+test("the Dream Rift is solid as the disc it is drawn as, not a box around it", () => {
+	const s = STATIONS.find((x) => x.id === "dream");
+	const st = createTown({ x: s.x + 1.05, y: s.y + 0.9 });     // beside the disc, where the old box's corner was
+	const x0 = st.p.x;
+	for (let i = 0; i < 10; i++) stepTown(st, { mx: -1, my: 0 });
+	assert.ok(st.p.x < x0 - 0.3, "walks past the corner a box would have blocked");
+	const head = createTown({ x: s.x + 2, y: s.y });
+	for (let i = 0; i < 120; i++) stepTown(head, { mx: -1, my: 0 });
+	assert.ok(Math.abs(head.p.x - (s.x + s.rad + head.p.r)) < 0.1, `stopped at the disc's edge, at ${head.p.x}`);
+	assert.equal(head.near, "dream");
+});

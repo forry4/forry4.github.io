@@ -14,12 +14,13 @@
   --g-ink:#120f22;
   --g-label:#cdc6fb;
   --gap:6px;
-  /* 4.8 squares tall (4 inventory rows + the equipment row at 4/5 width); 414px is
-     the header, the panel's padding, the HP and MP bars, the stats, two titles, the
-     name and XP line and the bin. (The roster is on the main menu.) */
-  --slot:clamp(30px, min(calc((100dvh - 414px) / 4.8), 5vw), 70px);
+  /* 4.8 squares tall (4 inventory rows + the equipment row at 4/5 width); 361px is
+     the panel's padding, the HP and MP bars, the stats, two titles, the name and XP
+     line and the bin. There is no banner in play since 2026-11-18 (it was 53px of
+     this, net) — the main menu is the only screen that wears it. */
+  --slot:clamp(30px, min(calc((100dvh - 361px) / 4.8), 5vw), 70px);
   --side-w:calc(var(--slot) * 4 + var(--gap) * 3 + 28px);
-  --vslot:clamp(22px, min(calc((100dvh - 330px) / 8.6), calc((100vw - var(--side-w) - 130px) / 8.6)), 58px);
+  --vslot:clamp(22px, min(calc((100dvh - 250px) / 8.6), calc((100vw - var(--side-w) - 130px) / 8.6)), 58px);
   height:100vh;
   height:100dvh;
   min-height:0;
@@ -201,6 +202,12 @@
 .hr-bar-reg{margin-left:4px;font-size:.66rem;opacity:.75;font-variant-numeric:tabular-nums}
 .hr-live-hero{display:contents}
 .hr-tip-lines{list-style:none;margin:4px 0 0;padding:0;display:grid;gap:1px}
+/* The enchantment slots sit under a rule, apart from the item's own stats: one row a
+   slot, a filled diamond for an enchantment, a hollow one for an empty slot. */
+.hr-tip-lines.hr-enchants{margin-top:8px;padding-top:7px;border-top:1px solid rgba(255,255,255,.16);gap:3px;color:#9fe7ff}
+.hr-enchants li i{font-style:normal;display:inline-block;width:1.1em;color:#9fe7ff}
+.hr-enchants li.empty{color:var(--text-soft);opacity:.8}
+.hr-enchants li.empty i{color:var(--text-soft)}
 
 /* ── notifications: top left, fading; the log opens them all again ─────────── */
 .hr-notices{position:absolute;left:10px;top:10px;z-index:5;display:flex;flex-direction:column;align-items:flex-start;gap:6px;
@@ -295,3 +302,20 @@ button.hr-forge-card:hover{border-color:#f08a80}
 .hr-inv-hd{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .hr-inv-hd h2{margin:0}
 .hr-sort{padding:1px 8px}
+
+/* ── the game menu (Escape) and its button ─────────────────────────────────── */
+.hr-playing .hr-main{padding-top:12px}
+.hr-menu-btn{position:absolute;right:10px;top:10px;z-index:4;display:flex;align-items:center;gap:6px;
+  font:inherit;font-size:.8rem;padding:4px 10px;border-radius:999px;cursor:pointer;
+  color:var(--text-soft);background:rgba(10,14,13,.72);border:1px solid rgba(255,255,255,.16)}
+.hr-menu-btn:hover,.hr-menu-btn[aria-expanded="true"]{color:#f4efe4;border-color:var(--g-accent)}
+.hr-menu-btn kbd{font:inherit;font-size:.7rem;padding:0 4px;border-radius:4px;border:1px solid rgba(255,255,255,.2)}
+.hr-in-run .hr-menu-btn{top:54px}               /* under the rift timer the canvas draws */
+.hr-game-menu{width:min(460px,calc(100% - 24px));z-index:6}
+.hr-game-menu h3{margin:4px 0 0}
+.hr-game-menu-acts{display:flex;flex-wrap:wrap;gap:8px}
+.hr-keylist{margin:0;display:grid;gap:4px;overflow:auto;min-height:0}
+.hr-keylist div{display:grid;grid-template-columns:minmax(120px,auto) minmax(0,1fr);gap:12px;align-items:baseline}
+.hr-keylist dt{text-align:right}
+.hr-keylist dd{margin:0;color:var(--text-soft);font-size:.88rem}
+.hr-keylist kbd{font:inherit;font-size:.8rem;padding:0 6px;border-radius:4px;border:1px solid rgba(255,255,255,.2);white-space:nowrap}

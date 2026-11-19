@@ -163,7 +163,7 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here }) {
 /* What an ability leaves on the ground: the Paladin's field (gold, around the player),
  * a falling star (its spot ringed, filling as it comes) and its blast, and the
  * Ninja's counter — a white ring while it is ready to catch a hit, a solid guard
- * just after, and a red glow while the next shot is empowered. Shared by the town. */
+ * just after, and a gold ring while the next shot is countered. Shared by the town. */
 function drawAbilityFx(g, st, sx, sy, px, pp) {
 	const p = st.p, lw = Math.max(1, px * 0.05);
 	if (st.slowUntil > st.tick) {
@@ -187,24 +187,44 @@ function drawAbilityFx(g, st, sx, sy, px, pp) {
 		g.beginPath(); g.arc(X, Y, R, 0, Math.PI * 2); g.stroke();
 	}
 	if (p.guardUntil > st.tick) circle(g, X, Y, R, "rgba(255,255,255,.35)");
-	if (p.empower > 0) circle(g, X, Y, R * 1.15, "rgba(255,110,90,.22)");
+	if (p.empower > 0) {                                    // the next shot is countered: gold, as it will be
+		circle(g, X, Y, R * 1.2, "rgba(255,196,80,.22)");
+		g.strokeStyle = "#ffb43c"; g.lineWidth = Math.max(1.5, px * 0.05);
+		g.beginPath(); g.arc(X, Y, R * 1.2, 0, Math.PI * 2); g.stroke();
+	}
+}
+
+/* A countered (empowered) shot is drawn as its own thing (owner's ask, 2026-11-18):
+ * a gold-white core twice the size, a pulsing halo and a long gold trail, so the
+ * one doubled shot is unmistakable in a crowd of ordinary ones. */
+function drawPowerTrail(g, X, Y, b, px) {
+	const L = px * 0.09, pulse = 0.75 + 0.25 * Math.sin((b.x + b.y) * 3);
+	g.lineCap = "round";
+	g.strokeStyle = "rgba(255,196,80,.35)"; g.lineWidth = Math.max(4, px * 0.42);
+	g.beginPath(); g.moveTo(X, Y); g.lineTo(X - b.vx * L, Y - b.vy * L); g.stroke();
+	g.strokeStyle = "rgba(255,240,200,.9)"; g.lineWidth = Math.max(2, px * 0.14);
+	g.beginPath(); g.moveTo(X, Y); g.lineTo(X - b.vx * L * 0.6, Y - b.vy * L * 0.6); g.stroke();
+	g.lineCap = "butt";
+	circle(g, X, Y, px * 0.5 * pulse, "rgba(255,206,92,.28)");
 }
 
 function drawShots(g, bullets, sx, sy, px, at) {
 	for (const b of bullets) {
 		const bp = at(b), X = sx(bp.x), Y = sy(bp.y);
+		if (b.owner === "p" && b.power) drawPowerTrail(g, X, Y, b, px);
 		if (b.owner === "p" && b.look === "star") {          // a spinning four-point star
-			const r = px * 0.2 * (b.power ? 1.4 : 1), a = (b.x + b.y) * 2.4;
-			g.fillStyle = b.power ? "#ff8c74" : "#dfe7ea";
+			const r = px * 0.2 * (b.power ? 2 : 1), a = (b.x + b.y) * 2.4;
+			g.fillStyle = b.power ? "#fff1c2" : "#dfe7ea";
 			g.beginPath();
 			for (let i = 0; i < 8; i++) {
 				const rr = i % 2 ? r * 0.38 : r, t = a + (i * Math.PI) / 4;
 				g.lineTo(X + Math.cos(t) * rr, Y + Math.sin(t) * rr);
 			}
 			g.closePath(); g.fill();
+			if (b.power) { g.strokeStyle = "#ffb43c"; g.lineWidth = Math.max(1.5, px * 0.05); g.stroke(); }
 		} else if (b.owner === "p") {
-			g.strokeStyle = b.power ? "#ff8c74" : COLORS.playerShot;
-			g.lineWidth = Math.max(2, b.r * px * (b.power ? 1.5 : 0.9));
+			g.strokeStyle = b.power ? "#fff1c2" : COLORS.playerShot;
+			g.lineWidth = Math.max(2, b.r * px * (b.power ? 2 : 0.9));
 			const tail = b.look === "blade" ? 0.022 : 0.03;
 			g.beginPath(); g.moveTo(X, Y); g.lineTo(X - b.vx * tail * px, Y - b.vy * tail * px); g.stroke();
 		} else {

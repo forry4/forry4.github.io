@@ -87,7 +87,9 @@ export const CLASS_INFO = {
  * 2026-11-18 — it used to be "the player entered the room"). HP went up by about a
  * third at the same time ("slightly harder"). */
 export const ENEMY = {
-	chaser: { hp: 55, r: 0.4, speed: 3.4, touch: 16, wake: 7 },
+	// A chaser also spits a short shot when it is close (owner's ask, 2026-11-18): a
+	// short telegraph, then one slow bolt that dies after `shot.range` tiles.
+	chaser: { hp: 55, r: 0.4, speed: 3.4, touch: 16, wake: 7, shot: { range: 3.5, speed: 7, dmg: 9, tele: 14, every: 75 } },
 	shooter: { hp: 48, r: 0.38, speed: 2.4, wake: 7.5 },
 	radial: { hp: 95, r: 0.45, speed: 0, wake: 7 },
 	boss: { hp: 1150, r: 1.0, speed: 1.2, wake: 9 },
@@ -115,8 +117,10 @@ export const WEAPONS = {
 	tidecaller: { dmg: 13, rate: 2.5, range: 6, speed: 16, shots: 3, spread: 0.24, pierce: 0, burst: 1, gap: 0, bounce: 1 },
 	repeater: { dmg: 14, rate: 1.5, range: 6, speed: 17, shots: 1, spread: 0, pierce: 0, burst: 3, gap: 5 },
 	// The Ninja's (2026-11-18): stars spin through one enemy; a kunai is one heavy, fast blade.
-	shuriken: { dmg: 11, rate: 4.5, range: 5, speed: 15, shots: 1, spread: 0, pierce: 1, burst: 1, gap: 0, look: "star" },
-	kunai: { dmg: 30, rate: 1.7, range: 6.5, speed: 22, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0, look: "blade" },
+	// Slower and harder since 2026-11-18 (owner's ask): at 4.5 a second the doubled
+	// countered shot left before the player could aim it.
+	shuriken: { dmg: 20, rate: 2.4, range: 5, speed: 15, shots: 1, spread: 0, pierce: 1, burst: 1, gap: 0, look: "star" },
+	kunai: { dmg: 42, rate: 1.2, range: 6.5, speed: 22, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0, look: "blade" },
 };
 
 /* EVERY NUMBER A PLAYER READS IS FLAT (owner's ask, 2026-11-18: "stop with all the
@@ -271,7 +275,7 @@ export function createSim(dungeon, gear = [], hero = {}) {
 		.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))      // a fixed order, never insertion order
 		.map(([id, e]) => ({ id, type: e.type, room: e.room, x: e.x, y: e.y, xp: e.xp || 0,
 			r: ENEMY[e.type].r, hp: Math.round(ENEMY[e.type].hp * scale.hp), maxHp: Math.round(ENEMY[e.type].hp * scale.hp),
-			active: false, cd: 30 + (e.type === "boss" ? 60 : 0), tele: 0, flash: 0,
+			active: false, cd: 30 + (e.type === "boss" ? 60 : 0), tele: 0, scd: 0, flash: 0,
 			side: 1, phase: 1, mode: 0, modeT: e.type === "boss" ? BOSS_CYCLE[0][1] : 0, ang: 0, aimX: 0, aimY: 0 }));
 	const dropsBy = {};
 	for (const [id, d] of Object.entries(dungeon.drops)) (dropsBy[d.enemy] ||= []).push(id);
@@ -352,6 +356,14 @@ function enemyStep(st, e) {
 	if (e.type === "chaser") {
 		moveBody(st, e, ux * sp, uy * sp);
 		if (d < e.r + p.r + 0.05 && e.cd === 0) { hurtPlayer(st, ENEMY.chaser.touch); e.cd = 36; }
+		const sh = ENEMY.chaser.shot;
+		if (e.scd > 0) e.scd--;
+		if (e.tele > 0) {
+			if (--e.tele === 0) {
+				shootAt(st, "e", e.x, e.y, p.x, p.y, sh.speed, sh.dmg, 0.16, Math.round((sh.range / sh.speed) * TPS));
+				e.scd = sh.every;
+			}
+		} else if (!(e.scd > 0) && d < sh.range) e.tele = sh.tele;
 		return;
 	}
 	if (e.type === "shooter") {
@@ -711,7 +723,7 @@ export function fingerprint(st) {
 	const r = (v) => Math.round(v * 1e6) / 1e6;
 	return JSON.stringify([st.tick, st.elapsedTicks, st.bossTimeTicks, st.rng, st.status, st.classId, st.practice,
 		st.hero.level, st.hero.xp, st.p.burstLeft, r(st.p.x), r(st.p.y), r(st.p.hp), r(st.p.low), r(st.p.mp),
-		st.enemies.map((e) => [e.id, r(e.x), r(e.y), r(e.hp), e.cd, e.tele, e.mode, e.modeT]),
+		st.enemies.map((e) => [e.id, r(e.x), r(e.y), r(e.hp), e.cd, e.tele, e.scd, e.mode, e.modeT]),
 		st.bullets.length, st.bullets.map((b) => [r(b.x), r(b.y)]).slice(0, 40),
 		st.bags.map((b) => b.drops.join(",")), st.pickups.length, st.shield && [r(st.shield.x), r(st.shield.y), st.shield.until], st.slowUntil,
 		st.p.abilityCd, st.p.counterUntil, st.p.guardUntil, st.p.empower, (st.starfalls || []).map((f) => [r(f.x), r(f.y), f.at])]);
