@@ -16,7 +16,8 @@ Tiles (one character each, a row is a string):
   '~' water         — blocks movement, projectiles fly over it
   '.' floor
 Template-only markers, replaced by floor when laid: 'E' enemy spawn, 'B' boss
-spawn, 'H' healing pickup, 'S' the player's start.
+spawn, 'S' the player's start. Healing orbs are not placed: they DROP from
+enemies (owner's ask, 2026-11-18), about one a rift.
 
 GREYBOX: the templates, odds and loot table are placeholders for play-testing.
 """
@@ -35,7 +36,7 @@ from halcyon import store
 ENTRANCE = [
     "..........",
     "..........",
-    "...H......",
+    "..........",
     "..........",
     "....S.....",
     "..........",
@@ -55,7 +56,7 @@ COMBAT = [
         "................",
         "...~~.....oo....",
         "...~~...E.oo..E.",
-        "..H.............",
+        "................",
         "................",
     ],
     [
@@ -68,7 +69,7 @@ COMBAT = [
         "...o........o...",
         "................",
         "......~~~~.E....",
-        ".H....~~~~....E.",
+        "......~~~~....E.",
         "................",
     ],
     [
@@ -81,7 +82,7 @@ COMBAT = [
         "......~~~~~~......",
         "..................",
         "..oo......E...oo..",
-        "..oo....E.....ooH.",
+        "..oo....E.....oo..",
         "..................",
     ],
     [
@@ -93,7 +94,7 @@ COMBAT = [
         "........E.....",
         "..o...........",
         "..o....~~.....",
-        "..H..E.~~...E.",
+        ".....E.~~...E.",
         "..............",
         "..............",
     ],
@@ -107,7 +108,7 @@ COMBAT = [
         "..~~............~~..",
         "....................",
         "........oooo.E......",
-        "...H............E...",
+        "................E...",
         "....................",
     ],
 ]
@@ -119,7 +120,7 @@ BOSS_ROOM = [
     "...oo............oo...",
     "......................",
     "......................",
-    "..H...................",
+    "......................",
     ".........B............",
     "......................",
     "......................",
@@ -138,17 +139,29 @@ DUNGEONS = {"shallows": {"name": "The Shallows", "combat_rooms": 4, "complete_xp
 
 ENEMY_WEIGHTS = (("chaser", 40), ("shooter", 35), ("radial", 25))
 DROP_CHANCE = {"chaser": 0.20, "shooter": 0.30, "radial": 0.35}
+# A heal orb drops from an ordinary enemy at this chance: about one a rift (0-2 is
+# the usual spread). The boss never drops one — the fight is over.
+HEAL_CHANCE = 0.035
+# Bags hold at most this many items (the page's loot panel is one row of eight).
+BAG_MAX = 8
 RANGER_LOOT = (("shortbow", 16), ("longbow", 14), ("leather_vest", 22), ("volley_quiver", 14),
-               ("band_of_vigor", 14), ("band_of_focus", 14), ("kingfisher_eye", 2), ("tidecaller", 2),
-               ("repeater", 2))
-PALADIN_LOOT = (("mace", 16), ("greatsword", 14), ("plate_armor", 22), ("grounding_aegis", 14),
+               ("band_of_vigor", 14), ("band_of_focus", 14))
+PALADIN_LOOT = (("mace", 16), ("greatsword", 14), ("plate_armor", 22), ("stillness_orb", 14),
                 ("band_of_vigor", 14), ("band_of_focus", 14))
-DIVINER_LOOT = (("wand", 16), ("starstaff", 14), ("seer_robes", 22), ("stillness_orb", 14),
+DIVINER_LOOT = (("wand", 16), ("starstaff", 14), ("seer_robes", 22), ("star_tome", 14),
                 ("band_of_vigor", 14), ("band_of_focus", 14))
+NINJA_LOOT = (("shuriken", 16), ("kunai", 14), ("shadow_garb", 22), ("mirror_charm", 14),
+              ("band_of_vigor", 14), ("band_of_focus", 14))
+# UNIQUES DROP ONLY FROM BOSSES (owner's ask, 2026-11-18), by their own roll
+# (content.UNIQUE_BASE, raised by rift modifiers). A class with none gets a
+# standard item instead.
+UNIQUE_LOOT = {"ranger": (("kingfisher_eye", 1), ("tidecaller", 1), ("repeater", 1)),
+               "paladin": (("kingfisher_eye", 1),), "diviner": (("kingfisher_eye", 1),),
+               "ninja": (("kingfisher_eye", 1),)}
 # Kept as the complete content list for audits and content tests. A run uses the
 # class-specific table below, so a Ranger never receives a Paladin's starter gear.
-LOOT = RANGER_LOOT + PALADIN_LOOT + DIVINER_LOOT
-LOOT_BY_CLASS = {"ranger": RANGER_LOOT, "paladin": PALADIN_LOOT, "diviner": DIVINER_LOOT}
+LOOT = RANGER_LOOT + PALADIN_LOOT + DIVINER_LOOT + NINJA_LOOT + tuple(x for t in UNIQUE_LOOT.values() for x in t)
+LOOT_BY_CLASS = {"ranger": RANGER_LOOT, "paladin": PALADIN_LOOT, "diviner": DIVINER_LOOT, "ninja": NINJA_LOOT}
 SLOT_ODDS = ((0, 50), (1, 35), (2, 12), (3, 3))
 
 
@@ -162,8 +175,8 @@ def _pick(rng: random.Random, table) -> object:
     return table[-1][0]
 
 
-def _item(rng: random.Random, tier: int, class_id: str) -> dict:
-    base_id = _pick(rng, LOOT_BY_CLASS[class_id])
+def _item(rng: random.Random, tier: int, class_id: str, unique: bool = False) -> dict:
+    base_id = _pick(rng, UNIQUE_LOOT[class_id] if unique and UNIQUE_LOOT.get(class_id) else LOOT_BY_CLASS[class_id])
     slots = _pick(rng, SLOT_ODDS)
     if C.base(base_id)["kind"] == "unique":
         tier = 1                  # a unique is its own thing, not a rung on the tier ladder
@@ -175,12 +188,26 @@ def _mirror(rows: list[str]) -> list[str]:
     return [r[::-1] for r in rows]
 
 
-def generate(dungeon_id: str, seed: str | None = None, class_id: str = "ranger") -> dict:
+def mod_scale(mods: list[str]) -> dict:
+    """What the chosen rift modifiers do to the enemies, multiplied together."""
+    out = {"hp": 1.0, "dmg": 1.0, "speed": 1.0}
+    for m in mods:
+        for k, v in C.RIFT_MODS[m]["scale"].items():
+            out[k] *= v
+    return out
+
+
+def generate(dungeon_id: str, seed: str | None = None, class_id: str = "ranger",
+             mods: list[str] | tuple = ()) -> dict:
     """The whole dungeon for one run, as JSON-safe data."""
     if dungeon_id not in DUNGEONS:
         raise store.HalcyonError("no such dungeon")
     if class_id not in C.CLASSES:
         raise store.HalcyonError("no such class")
+    mods = sorted(set(mods))
+    if any(m not in C.RIFT_MODS for m in mods):
+        raise store.HalcyonError("no such rift modifier")
+    rarity = len(mods)
     seed = seed or secrets.token_hex(8)
     rng = random.Random(f"{dungeon_id}:{seed}")
     spec = DUNGEONS[dungeon_id]
@@ -207,8 +234,6 @@ def generate(dungeon_id: str, seed: str | None = None, class_id: str = "ranger")
                 pos = {"x": gx + 0.5, "y": gy + 0.5}
                 if ch == "S":
                     start = pos
-                elif ch == "H":
-                    pickups.append({"id": f"h{len(pickups) + 1}", "kind": "heal", **pos})
                 elif ch in "EB":
                     eid = "boss" if ch == "B" else f"e{len(enemies) + 1}"
                     etype = "boss" if ch == "B" else _pick(rng, ENEMY_WEIGHTS)
@@ -227,20 +252,29 @@ def generate(dungeon_id: str, seed: str | None = None, class_id: str = "ranger")
 
     drops, n_drop = {}, 0
     for eid, e in enemies.items():
-        if e["type"] == "boss":
+        boss_roll = e["type"] == "boss"
+        if boss_roll:
             rolls = [2 if rng.random() < 0.7 else 3]
             if rng.random() < 0.5:
                 rolls.append(2)
         else:
             rolls = [1 if rng.random() < 0.85 else 2] if rng.random() < DROP_CHANCE[e["type"]] else []
-        for tier in rolls:
+            if rng.random() < HEAL_CHANCE:           # a heal orb, dropped where it falls
+                pickups.append({"id": f"h{len(pickups) + 1}", "kind": "heal", "enemy": eid})
+        for tier in rolls[:BAG_MAX]:
+            # Rarity (rift modifiers) can lift the tier, a step per point that hits.
+            for _ in range(rarity):
+                if rng.random() < C.TIER_UP_PER_RARITY:
+                    tier = min(C.MAX_TIER, tier + 1)
+            unique = boss_roll and rng.random() < C.UNIQUE_BASE + C.UNIQUE_PER_RARITY * rarity
             n_drop += 1
-            drops[f"d{n_drop}"] = {**_item(rng, tier, class_id), "enemy": eid}
+            drops[f"d{n_drop}"] = {**_item(rng, tier, class_id, unique), "enemy": eid}
 
     return {"id": dungeon_id, "name": spec["name"], "seed": seed, "width": width, "height": height,
             "tiles": ["".join(r) for r in grid], "start": start, "rooms": room_spans,
             "enemies": enemies, "boss": boss, "drops": drops, "pickups": pickups,
-            "complete_xp": spec["complete_xp"], "class_id": class_id}
+            "complete_xp": spec["complete_xp"], "class_id": class_id,
+            "mods": mods, "scale": mod_scale(mods)}
 
 
 def walkable(d: dict, x: int, y: int) -> bool:

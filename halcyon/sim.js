@@ -58,10 +58,28 @@ export const SLOW_DURATION = 5 * TPS;
 export const SLOW_RADIUS = 3;
 export const SLOW_FACTOR = 0.45;
 
+/* EVERY ABILITY HAS A COOLDOWN as well as its MP cost (owner's worry, 2026-11-18: with
+ * enough MP regeneration a defensive ability could be kept up for good). Regen helps
+ * only up to the cooldown. Ticks, from the cast. */
+export const ABILITY_COOLDOWN = { volley: 3 * TPS, slow: 10 * TPS, starfall: 4 * TPS, counter: 4 * TPS, shield: 8 * TPS };
+// Starfall (the Diviner): a star lands where you aim, after a beat, on everything near it.
+export const STARFALL_DELAY = 36;
+export const STARFALL_RADIUS = 1.5;
+export const STARFALL_RANGE = 8;
+// Counter (the Ninja): a hit inside the window is ignored, guards for a moment after,
+// and the next shot hits harder. The guard does NOT scale (owner: no late-game
+// invincibility); Ability power scales the damage.
+export const COUNTER_WINDOW = TPS;
+export const COUNTER_GUARD = 30;
+export const COUNTER_MULT = 2;
+
+/* One standard ability per class (owner's call, 2026-11-18). The shield is retired
+ * with its item, kept in the code for a future class. */
 export const CLASS_INFO = {
 	ranger: { name: "Ranger", description: "A quick ranged fighter with a volley of arrows.", ability: "volley" },
-	paladin: { name: "Paladin", description: "A close-range guardian who plants a projectile-eating shield.", ability: "shield" },
-	diviner: { name: "Diviner", description: "A long-range mage who slows enemy projectiles around them.", ability: "slow" },
+	paladin: { name: "Paladin", description: "A close-range guardian whose field slows enemy shots around them.", ability: "slow" },
+	diviner: { name: "Diviner", description: "A long-range mage who calls stars down on a spot.", ability: "starfall" },
+	ninja: { name: "Ninja", description: "A quick thrower who counters a hit and strikes back twice as hard.", ability: "counter" },
 };
 
 /* `wake` is the trigger range in tiles: an enemy sleeps until the player comes that
@@ -96,6 +114,9 @@ export const WEAPONS = {
 	starstaff: { dmg: 25, rate: 1.5, range: 8, speed: 20, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0 },
 	tidecaller: { dmg: 13, rate: 2.5, range: 6, speed: 16, shots: 3, spread: 0.24, pierce: 0, burst: 1, gap: 0, bounce: 1 },
 	repeater: { dmg: 14, rate: 1.5, range: 6, speed: 17, shots: 1, spread: 0, pierce: 0, burst: 3, gap: 5 },
+	// The Ninja's (2026-11-18): stars spin through one enemy; a kunai is one heavy, fast blade.
+	shuriken: { dmg: 11, rate: 4.5, range: 5, speed: 15, shots: 1, spread: 0, pierce: 1, burst: 1, gap: 0, look: "star" },
+	kunai: { dmg: 30, rate: 1.7, range: 6.5, speed: 22, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0, look: "blade" },
 };
 
 /* EVERY NUMBER A PLAYER READS IS FLAT (owner's ask, 2026-11-18: "stop with all the
@@ -110,7 +131,7 @@ export const STAT_SCALE = 25;
  * The store keeps the QUALITY, so changing a row here re-scales every item. */
 export const ENCHANT_FLAT = {
 	max_hp: [5, 25], max_mp: [5, 25], attack: [1, 6], attack_speed: [1, 6], defense: [1, 5],
-	ability_power: [2, 10], mp_regen: [0.5, 2.5], hp_regen: [0.5, 2.5],
+	ability_power: [2, 10], mp_regen: [0.5, 2.5], hp_regen: [0.2, 1.2],
 };
 export const enchantValue = (id, q) => {
 	const r = ENCHANT_FLAT[id];
@@ -121,14 +142,15 @@ export const enchantValue = (id, q) => {
 
 /* What each level past the first adds (design §10.1: levels are separate from
  * the per-dungeon stat rewards and their caps). Greybox numbers. */
-export const PER_LEVEL = { maxHp: 6, maxMp: 4, att: 1 };
+export const PER_LEVEL = { maxHp: 6, maxMp: 4, att: 1, ap: 1 };
 
 const tierScale = (it) => 1 + 0.2 * ((it.tier || 1) - 1);
 
 /* A character's numbers from its level and what it wears. `gear` is the equipped
  * items as the server lists them ({base_id, tier, enchants: [{id, q}]}). */
 export function statsFor(gear = [], level = 1, classId = "ranger") {
-	const s = { maxHp: 100, maxMp: 100, att: 0, dex: 0, def: 0, hpRegen: 1.0, mpRegen: 2.5,
+	// HP regeneration halved 2026-11-18 (owner: "decrease hp/s regen"); heals are rarer drops now.
+	const s = { maxHp: 100, maxMp: 100, att: 0, dex: 0, def: 0, ap: 0, hpRegen: 0.5, mpRegen: 2.5,
 		arrows: 0, abilityDmg: 0, abilityKind: null, classId,
 		...weaponStats(WEAPONS.none, 1) };
 	// Points gather first and apply once the weapon is known, so the order the
@@ -144,6 +166,9 @@ export function statsFor(gear = [], level = 1, classId = "ranger") {
 		if (it.base_id === "grounding_aegis") s.abilityKind = "shield";
 		if (it.base_id === "seer_robes") { s.maxMp += 18 * tier; s.mpRegen += 0.5; }
 		if (it.base_id === "stillness_orb") s.abilityKind = "slow";
+		if (it.base_id === "star_tome") { s.abilityKind = "starfall"; s.abilityDmg += Math.round(45 * t); }
+		if (it.base_id === "shadow_garb") { s.def += tier; s.dex += 2 + tier; s.maxHp += 8 * (tier - 1); }
+		if (it.base_id === "mirror_charm") s.abilityKind = "counter";
 		if (it.base_id === "band_of_vigor") s.maxHp += Math.round(15 * t);
 		if (it.base_id === "band_of_focus") { s.maxMp += Math.round(15 * t); s.mpRegen += 2; }
 		if (it.base_id === "kingfisher_eye") { pierce += 1; s.att += 5; }
@@ -154,7 +179,7 @@ export function statsFor(gear = [], level = 1, classId = "ranger") {
 			else if (e.id === "attack") s.att += v;
 			else if (e.id === "attack_speed") s.dex += v;
 			else if (e.id === "defense") s.def += v;
-			else if (e.id === "ability_power") s.abilityDmg += v;
+			else if (e.id === "ability_power") s.ap += v;
 			else if (e.id === "mp_regen") s.mpRegen += v;
 			else if (e.id === "hp_regen") s.hpRegen += v;
 		}
@@ -163,17 +188,25 @@ export function statsFor(gear = [], level = 1, classId = "ranger") {
 	s.maxHp += PER_LEVEL.maxHp * up;
 	s.maxMp += PER_LEVEL.maxMp * up;
 	s.att += PER_LEVEL.att * up;
+	s.ap += PER_LEVEL.ap * up;
 	s.pierce += pierce;
 	s.weaponDmg = s.dmg;                                   // per arrow, before Attack
 	s.dmg = Math.round(s.dmg * (1 + s.att / STAT_SCALE));
 	s.rate = s.rate * (1 + s.dex / STAT_SCALE);
-	s.abilityDmg = s.arrows ? Math.round(s.abilityDmg * (1 + s.att / STAT_SCALE)) : 0;
+	// ABILITY POWER (owner's ask, 2026-11-18) is the ability's own stat, as Attack is
+	// the weapon's: each point is 1/STAT_SCALE more of what the ability does — the
+	// volley's and the starfall's damage, the slowing field's REACH (not its time),
+	// the counter's damage (not its guard).
+	s.abilityPower = 1 + s.ap / STAT_SCALE;
+	s.abilityDmg = s.abilityKind === "volley" || s.abilityKind === "starfall" ? Math.round(s.abilityDmg * s.abilityPower) : 0;
+	s.slowRadius = Math.round(SLOW_RADIUS * s.abilityPower * 100) / 100;
+	s.counterMult = Math.round(COUNTER_MULT * s.abilityPower * 100) / 100;
 	return s;
 }
 
 function weaponStats(w, t) {
 	return { dmg: Math.round(w.dmg * t), rate: w.rate, range: w.range, shotSpeed: w.speed, shots: w.shots,
-		spread: w.spread, pierce: w.pierce, burst: w.burst, gap: w.gap, bounce: w.bounce || 0 };
+		spread: w.spread, pierce: w.pierce, burst: w.burst, gap: w.gap, bounce: w.bounce || 0, look: w.look || null };
 }
 
 // ── the map ─────────────────────────────────────────────────────────────────
@@ -233,10 +266,11 @@ export function createSim(dungeon, gear = [], hero = {}) {
 	const xp = hero.xp || 0, level = Math.max(hero.level || 1, levelFor(levels, xp));
 	const classId = hero.class_id || hero.classId || dungeon.class_id || "ranger";
 	const stats = statsFor(gear, level, classId);
+	const scale = { hp: 1, dmg: 1, speed: 1, ...(dungeon.scale || {}) };
 	const enemies = Object.entries(dungeon.enemies)
 		.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))      // a fixed order, never insertion order
 		.map(([id, e]) => ({ id, type: e.type, room: e.room, x: e.x, y: e.y, xp: e.xp || 0,
-			r: ENEMY[e.type].r, hp: ENEMY[e.type].hp, maxHp: ENEMY[e.type].hp,
+			r: ENEMY[e.type].r, hp: Math.round(ENEMY[e.type].hp * scale.hp), maxHp: Math.round(ENEMY[e.type].hp * scale.hp),
 			active: false, cd: 30 + (e.type === "boss" ? 60 : 0), tele: 0, flash: 0,
 			side: 1, phase: 1, mode: 0, modeT: e.type === "boss" ? BOSS_CYCLE[0][1] : 0, ang: 0, aimX: 0, aimY: 0 }));
 	const dropsBy = {};
@@ -249,10 +283,14 @@ export function createSim(dungeon, gear = [], hero = {}) {
 		stats, gear, levels, completeXp: dungeon.complete_xp || 0,
 		hero: { level, xp, startLevel: level, startXp: xp },
 		p: { x: dungeon.start.x, y: dungeon.start.y, r: PLAYER_R, hp: stats.maxHp, low: stats.maxHp,
-			mp: stats.maxMp, fireCd: 0, hurt: 0, burstLeft: 0, burstCd: 0 },
-		enemies, bullets: [], dropsBy,
-		pickups: dungeon.pickups.map((p) => ({ ...p })),
-		bags: [], floor: [], portal: null, shield: null, slowUntil: 0, damageNumbers: [], events: [],
+			mp: stats.maxMp, fireCd: 0, hurt: 0, burstLeft: 0, burstCd: 0,
+			abilityCd: 0, counterUntil: 0, guardUntil: 0, empower: 0 },
+		enemies, bullets: [], dropsBy, scale,
+		// Heal orbs DROP from the enemy that carries one (dungeon.py); one with a
+		// position of its own (an older dungeon) lies where it was placed.
+		pickups: dungeon.pickups.filter((h) => h.enemy == null).map((h) => ({ ...h })),
+		healsBy: Object.fromEntries(dungeon.pickups.filter((h) => h.enemy != null).map((h) => [h.enemy, h.id])),
+		bags: [], floor: [], portal: null, shield: null, slowUntil: 0, starfalls: [], blasts: [], damageNumbers: [], events: [],
 	};
 }
 
@@ -260,7 +298,16 @@ export const recoveryLimit = (st) => Math.min(st.stats.maxHp, st.p.low + RECOVER
 
 function hurtPlayer(st, dmg) {
 	if (st.status !== "play") return;
+	dmg *= st.scale ? st.scale.dmg : 1;                     // the Brutal modifier
 	const p = st.p;
+	if (p.guardUntil > st.tick) return;                      // just countered: nothing lands
+	if (p.counterUntil >= st.tick) {                         // the counter catches this hit
+		p.counterUntil = 0;
+		p.guardUntil = st.tick + COUNTER_GUARD;
+		p.empower = st.stats.counterMult;                    // the next shot; a second counter does not stack
+		st.events.push({ type: "counter", local: true });
+		return;
+	}
 	const taken = Math.round(Math.max(dmg * 0.4, dmg - st.stats.def) * 10) / 10;
 	p.hp -= taken;
 	p.hurt = 8;
@@ -276,10 +323,12 @@ function hurtPlayer(st, dmg) {
 }
 
 function shoot(st, owner, x, y, ang, speed, dmg, r, life, pierce = 0) {
+	if (owner === "e") { speed *= st.scale.speed; life = Math.round(life / st.scale.speed); }
 	st.bullets.push({ owner, x, y, vx: dcos(ang) * speed, vy: dsin(ang) * speed, dmg, r, life, pierce, hit: [] });
 }
 
 function shootAt(st, owner, x, y, tx, ty, speed, dmg, r, life) {
+	if (owner === "e") { speed *= st.scale.speed; life = Math.round(life / st.scale.speed); }
 	const dx = tx - x, dy = ty - y, d = Math.sqrt(dx * dx + dy * dy) || 1;
 	st.bullets.push({ owner, x, y, vx: dx / d * speed, vy: dy / d * speed, dmg, r, life, pierce: 0, hit: [] });
 }
@@ -297,7 +346,7 @@ function enemyStep(st, e) {
 	if (e.flash > 0) e.flash--;
 	const dx = p.x - e.x, dy = p.y - e.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
 	const ux = dx / d, uy = dy / d;
-	const sp = ENEMY[e.type].speed * DT;
+	const sp = ENEMY[e.type].speed * st.scale.speed * DT;
 	if (e.cd > 0) e.cd--;
 
 	if (e.type === "chaser") {
@@ -347,7 +396,7 @@ function bossStep(st, e, d, ux, uy) {
 	const cycle = e.phase === 1 ? BOSS_CYCLE : BOSS_CYCLE_2;
 	const [mode] = cycle[e.mode];
 	const t = cycle[e.mode][1] - e.modeT;              // ticks into this mode
-	if (e.phase === 2 && d > 3) moveBody(st, e, ux * ENEMY.boss.speed * DT, uy * ENEMY.boss.speed * DT);
+	if (e.phase === 2 && d > 3) moveBody(st, e, ux * ENEMY.boss.speed * st.scale.speed * DT, uy * ENEMY.boss.speed * st.scale.speed * DT);
 
 	if (mode === "spiral") {
 		const every = e.phase === 1 ? 6 : 5, arms = e.phase === 1 ? 3 : 5;
@@ -452,17 +501,30 @@ export function step(st, input) {
 		if (st.status !== "play") return st;
 	}
 
+	// stars landing (the Diviner's ability)
+	landStarfalls(st, (f) => {
+		for (const e of st.enemies) {
+			if (e.hp <= 0 || e.phase === 0) continue;
+			const dx = e.x - f.x, dy = e.y - f.y, rr = f.r + e.r;
+			if (dx * dx + dy * dy >= rr * rr) continue;
+			e.hp -= f.dmg; e.flash = 6; e.active = true;
+			if (e.hp <= 0) kill(st, e);
+		}
+	});
+	if (st.status !== "play") return st;
+
 	// bullets
 	const keep = [];
 	for (const b of st.bullets) {
 		const dxp = st.p.x - b.x, dyp = st.p.y - b.y;
-		const slowed = b.owner === "e" && st.slowUntil > st.tick && dxp * dxp + dyp * dyp <= SLOW_RADIUS * SLOW_RADIUS;
+		const sr = st.slowR || SLOW_RADIUS;
+		const slowed = b.owner === "e" && st.slowUntil > st.tick && dxp * dxp + dyp * dyp <= sr * sr;
 		const speedScale = slowed ? SLOW_FACTOR : 1;
 		b.x += b.vx * DT * speedScale; b.y += b.vy * DT * speedScale;
 		if (b.owner === "e" && st.shield) {
 			const sx = st.shield.x - b.x, sy = st.shield.y - b.y;
 			const rr = st.shield.r + b.r;
-			if (sx * sx + sy * sy < rr * rr) { st.shield = null; continue; }
+			if (sx * sx + sy * sy < rr * rr) { if (--st.shield.hits <= 0) st.shield = null; continue; }
 		}
 		if (--b.life <= 0 || wallHit(b, (x, y) => shotSolid(tileAt(st, x, y)))) continue;
 		let gone = false;
@@ -505,8 +567,10 @@ export function playerFire(st, input) {
 		volley(st, ax, ay);
 		p.burstLeft--; p.burstCd = s.gap;
 	}
-	if (input.ability && s.abilityKind && p.mp >= ABILITY_COST) {
+	if (p.abilityCd > 0) p.abilityCd--;
+	if (input.ability && s.abilityKind && p.mp >= ABILITY_COST && !(p.abilityCd > 0)) {
 		p.mp -= ABILITY_COST;
+		p.abilityCd = ABILITY_COOLDOWN[s.abilityKind] || 0;
 		if (s.abilityKind === "volley") {
 			for (let i = 0; i < s.arrows; i++) {
 				const [vx, vy] = rotate(ax, ay, (i - (s.arrows - 1) / 2) * 0.14);
@@ -514,20 +578,47 @@ export function playerFire(st, input) {
 					r: 0.16, life: 45, pierce: 1, bounce: 0, hit: [] });
 			}
 		} else if (s.abilityKind === "shield") {
-			st.shield = { x: p.x + ax * 0.95, y: p.y + ay * 0.95, r: 0.72, until: st.tick + SHIELD_DURATION };
+			st.shield = { x: p.x + ax * 0.95, y: p.y + ay * 0.95, r: 0.72, hits: 1 + Math.floor(s.ap / 8),
+				until: st.tick + Math.round(SHIELD_DURATION * s.abilityPower) };
 		} else if (s.abilityKind === "slow") {
 			st.slowUntil = st.tick + SLOW_DURATION;
+			st.slowR = s.slowRadius;
+		} else if (s.abilityKind === "starfall") {
+			// Where the cursor is, no farther than STARFALL_RANGE.
+			const k = al > STARFALL_RANGE ? STARFALL_RANGE / al : 1;
+			(st.starfalls ||= []).push({ x: p.x + ix * k, y: p.y + iy * k, r: STARFALL_RADIUS, dmg: s.abilityDmg,
+				at: st.tick + STARFALL_DELAY, cast: st.tick });
+		} else if (s.abilityKind === "counter") {
+			p.counterUntil = st.tick + COUNTER_WINDOW;
 		}
 	}
 }
 
-/* One volley from the player: `shots` arrows fanned around the aim. */
+/* One volley from the player: `shots` arrows fanned around the aim. A counter's
+ * empowerment is spent on the whole of the next volley. */
 function volley(st, ax, ay) {
 	const p = st.p, s = st.stats, life = Math.round(s.range / s.shotSpeed * TPS);
+	const mult = p.empower > 0 ? p.empower : 1;
+	p.empower = 0;
 	for (let i = 0; i < s.shots; i++) {
 		const [vx, vy] = s.shots > 1 ? rotate(ax, ay, (i - (s.shots - 1) / 2) * s.spread) : [ax, ay];
 		st.bullets.push({ owner: "p", x: p.x, y: p.y, vx: vx * s.shotSpeed, vy: vy * s.shotSpeed,
-			dmg: s.dmg, r: 0.14, life, pierce: s.pierce, bounce: s.bounce, hit: [] });
+			dmg: Math.round(s.dmg * mult), r: 0.14, life, pierce: s.pierce, bounce: s.bounce, hit: [],
+			...(s.look ? { look: s.look } : {}), ...(mult > 1 ? { power: true } : {}) });
+	}
+}
+
+/* Stars that are due land now: `hit(star)` deals the damage (enemies in a rift,
+ * the practice posts in town). Each leaves a short-lived blast for the renderer. */
+export function landStarfalls(st, hit) {
+	if (st.blasts?.length) st.blasts = st.blasts.filter((b) => b.until > st.tick);
+	if (!st.starfalls?.length) return;
+	const due = st.starfalls.filter((f) => f.at <= st.tick);
+	if (!due.length) return;
+	st.starfalls = st.starfalls.filter((f) => f.at > st.tick);
+	for (const f of due) {
+		hit(f);
+		(st.blasts ||= []).push({ x: f.x, y: f.y, r: f.r, until: st.tick + 18 });
 	}
 }
 
@@ -574,6 +665,7 @@ export function setGear(st, gear) {
 	p.low = Math.min(p.low, s.maxHp);
 	p.mp = Math.min(p.mp, s.maxMp);
 	p.burstLeft = 0; p.burstCd = 0;
+	p.empower = 0;
 }
 
 /* XP, and a level when it crosses one: the new stats apply at once, and the HP,
@@ -600,6 +692,8 @@ function kill(st, e) {
 	const drops = st.practice ? [] : st.dropsBy[e.id];
 	if (e.type === "boss") st.bossTimeTicks = st.elapsedTicks;
 	if (drops && drops.length) st.bags.push({ enemy: e.id, x: e.x, y: e.y, drops: [...drops] });
+	const heal = st.healsBy && st.healsBy[e.id];
+	if (heal) st.pickups.push({ id: heal, kind: "heal", x: e.x, y: e.y + (drops && drops.length ? 0.6 : 0) });
 	if (e.type === "boss") {
 		st.portal = portalSpot(st, e);
 		// The dungeon is CLEARED when its boss falls: the bonus and the news come now,
@@ -619,5 +713,6 @@ export function fingerprint(st) {
 		st.hero.level, st.hero.xp, st.p.burstLeft, r(st.p.x), r(st.p.y), r(st.p.hp), r(st.p.low), r(st.p.mp),
 		st.enemies.map((e) => [e.id, r(e.x), r(e.y), r(e.hp), e.cd, e.tele, e.mode, e.modeT]),
 		st.bullets.length, st.bullets.map((b) => [r(b.x), r(b.y)]).slice(0, 40),
-		st.bags.map((b) => b.drops.join(",")), st.pickups.length, st.shield && [r(st.shield.x), r(st.shield.y), st.shield.until], st.slowUntil]);
+		st.bags.map((b) => b.drops.join(",")), st.pickups.length, st.shield && [r(st.shield.x), r(st.shield.y), st.shield.until], st.slowUntil,
+		st.p.abilityCd, st.p.counterUntil, st.p.guardUntil, st.p.empower, (st.starfalls || []).map((f) => [r(f.x), r(f.y), f.at])]);
 }

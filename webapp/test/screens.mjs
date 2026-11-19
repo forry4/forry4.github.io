@@ -10280,8 +10280,8 @@ try {
 			await page.locator(".hr-menu-card").count() === 4 && await page.locator(".hr-menu-new").count() === 4);
 		await page.locator(".hr-menu-new").first().click().catch(() => {});
 		const classMenu = await page.waitForSelector(".hr-menu .hr-character-menu", { timeout: 5_000 }).then(() => true).catch(() => false);
-		check("an empty slot opens the class choice on the menu, all three classes offered",
-			classMenu && await page.locator(".hr-class-option").count() === 3);
+		check("an empty slot opens the class choice on the menu, all four classes offered",
+			classMenu && await page.locator(".hr-class-option").count() === 4);
 		await page.locator(".hr-class-option.hr-class-ranger").click().catch(() => {});
 		const town = await page.waitForSelector(".halcyon .hr-main .hr-canvas", { timeout: 15_000 }).then(() => true).catch(() => false);
 		check("making a Ranger goes straight to the town, the inventory beside the stage and no vault until it is opened",
@@ -10340,12 +10340,13 @@ try {
 		const back2 = await readBack;
 		await page.waitForFunction(() => true, null, { polling: "raf" });   // one frame for React to draw the read-back
 		const kept1 = await page.evaluate(() => document.querySelectorAll(".hr-equip .hr-slot.has").length === 3
-			&& !document.querySelector(".hr-grid-inv .hr-slot.has") && !document.querySelector(".hr-error"));
+			&& !document.querySelector(".hr-grid-inv .hr-slot.has") && !document.querySelector(".hr-notice.tone-bad"));
 		check("the quick off-and-on series reached the server and read back the same", !!back2 && answered === 2 && kept1,
-			await page.locator(".hr-error").textContent().catch(() => ""));
+			(await page.locator(".hr-notice.tone-bad").allTextContents().catch(() => [])).join(" | "));
 		const flat = await page.evaluate(() => [...document.querySelectorAll(".hr-stats dd")].map((d) => d.textContent));
-		check("the stats are on screen as flat numbers, never percentages",
-			flat.length === 5 && flat.every((t) => /^[0-9.]+(?:×\d)?(?:\/s)?$/.test(t)), JSON.stringify(flat));
+		const statKeys = await page.evaluate(() => [...document.querySelectorAll(".hr-stats dt")].map((d) => d.textContent));
+		check("the stats are the character's (ATT DEX DEF AP; damage and rate are the weapon's), flat numbers",
+			JSON.stringify(statKeys) === '["ATT","DEX","DEF","AP"]' && flat.every((t) => /^\d+$/.test(t)), JSON.stringify([statKeys, flat]));
 		await page.locator(".hr-equip .hr-slot").first().hover();
 		const tipText = await page.locator(".hr-tip").textContent({ timeout: 3_000 }).catch(() => "");
 		const tipLines = await page.locator(".hr-tip .hr-tip-lines li").allTextContents().catch(() => []);
@@ -10369,8 +10370,20 @@ try {
 		// The portal is up and to the right of the vault: a diagonal walk passes through it.
 		check("walking to the Shallows' portal", await walkTo("realm:shallows", ["KeyD", "KeyW"]));
 		await page.keyboard.press("KeyE");
+		const riftPanel = await page.waitForSelector(".hr-rift-panel", { timeout: 5_000 }).then(() => true).catch(() => false);
+		check("E at the portal opens its modifiers", riftPanel && await page.locator(".hr-rift-panel .hr-mod").count() === 3);
+		const uniqueOdds = () => page.locator(".hr-mod-sum div").nth(2).locator("dd").textContent().catch(() => "");
+		const before = await uniqueOdds();
+		await page.locator(".hr-rift-panel .hr-mod").first().click();
+		const after = await uniqueOdds();
+		check("a modifier raises the boss's unique chance on the panel", parseInt(after, 10) > parseInt(before, 10)
+			&& await page.locator(".hr-rift-panel .hr-mod.on").count() === 1, `${before} -> ${after}`);
+		const runReq = page.waitForRequest((r) => r.url().endsWith("/halcyon/runs") && r.method() === "POST", { timeout: 15_000 }).catch(() => null);
+		await page.locator(".hr-rift-panel .btn-gold").click();
 		const stage = await page.waitForSelector(".hr-canvas-run", { timeout: 15_000 }).then(() => true).catch(() => false);
-		check("E at the portal enters the Shallows", stage);
+		const sent = JSON.parse((await runReq)?.postData() || "{}");
+		check("Enter the rift enters the Shallows with the modifier picked", stage && JSON.stringify(sent.mods) === '["fortified"]',
+			JSON.stringify(sent));
 		const runPaint = await painted();
 		check("the dungeon is drawn (the canvas holds the map, not one flat fill)", runPaint.colors >= 6, JSON.stringify(runPaint));
 		check("the inventory stays on screen during the run", await page.locator(".hr-side .hr-grid-inv .hr-slot").count() === 16);
@@ -10405,17 +10418,28 @@ try {
 		const grounded = await page.waitForFunction(() => !document.querySelector(".hr-grid-inv .hr-slot.has"), null, { timeout: 5_000 }).then(() => true).catch(() => false);
 		check("dragging the vest onto the ground puts it at the Ranger's feet and reports it",
 			grounded && await reported() === n0 + 1, String(await queued()));
-		await page.locator(".hr-canvas").hover();
-		await page.keyboard.press("KeyE");
-		const lifted = await page.waitForFunction(() => document.querySelector(".hr-grid-inv .hr-slot")?.getAttribute("aria-label")?.startsWith("Leather Vest"),
+		const lootShown = await page.waitForFunction(() => document.querySelectorAll(".hr-loot .hr-slot").length === 1,
 			null, { timeout: 5_000 }).then(() => true).catch(() => false);
-		check("and E picks it back up into the bag, reporting it", lifted && await reported() === n0 + 2, String(await queued()));
+		check("standing on it, the loot panel in the stage's corner shows it", lootShown
+			&& (await page.locator(".hr-loot .hr-slot").getAttribute("aria-label") || "").includes("Leather Vest"));
+		await page.locator(".hr-loot .hr-slot").click();
+		const lifted = await page.waitForFunction(() => document.querySelector(".hr-grid-inv .hr-slot")?.getAttribute("aria-label")?.startsWith("Leather Vest")
+			&& !document.querySelector(".hr-loot"), null, { timeout: 5_000 }).then(() => true).catch(() => false);
+		check("and clicking it there picks it back up into the bag, reporting it", lifted && await reported() === n0 + 2, String(await queued()));
+		await page.locator(".hr-grid-inv .hr-slot").first().dragTo(page.locator(".hr-grid-inv .hr-slot").nth(5)).catch(() => {});
+		await page.waitForFunction(() => document.querySelectorAll(".hr-grid-inv .hr-slot")[5]?.classList.contains("has"), null, { timeout: 5_000 }).catch(() => {});
+		await page.locator(".hr-sort").click();
+		const sorted = await page.waitForFunction(() => document.querySelectorAll(".hr-grid-inv .hr-slot")[0]?.classList.contains("has"),
+			null, { timeout: 5_000 }).then(() => true).catch(() => false);
+		check("Sort packs the bag back to its first slot (as run moves)", sorted && await reported() === n0 + 4, String(await queued()));
 		await page.keyboard.down("KeyD");
 		await page.waitForTimeout(900);
 		await page.keyboard.up("KeyD");
 		await page.keyboard.press("KeyF");
-		const recalled = await page.waitForSelector(".hr-result.res-recalled", { timeout: 15_000 }).then(() => true).catch(() => false);
-		check("F recalls to town and says so", recalled && await page.locator(".hr-menu").count() === 0);
+		const recalled = await page.waitForFunction(() => [...document.querySelectorAll(".hr-notice")].some((n) => n.textContent.startsWith("Recalled to town")),
+			null, { timeout: 15_000 }).then(() => true).catch(() => false);
+		check("F recalls to town and says so in a notification (no banner to click away)", recalled
+			&& await page.locator(".hr-menu").count() === 0 && await page.locator(".hr-notices .hr-notices-btn").count() === 1);
 		const drained = await page.waitForFunction(() => localStorage.getItem("halcyon.queue.v1.guest") === null,
 			null, { timeout: 15_000 }).then(() => true).catch(() => false);
 		check("the recall reached the server (the device's queue emptied)", drained, String(await queued()));

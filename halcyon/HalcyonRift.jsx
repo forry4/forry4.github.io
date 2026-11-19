@@ -24,7 +24,9 @@ import { baseCss } from "../shared/theme.js";
 import { lobbyCss, LobbyHeader, LobbyUser, LobbyLoading } from "../shared/lobby.jsx";
 import { GAME_ACCENTS } from "../shared/accents.js";
 import { makeClient } from "./client.js";
-import { createSim, step, TPS, REACH, xpProgress, WEAPONS, statsFor, enchantValue, recoveryLimit, CLASS_INFO } from "./sim.js";
+import { createSim, step, TPS, REACH, xpProgress, WEAPONS, statsFor, enchantValue, recoveryLimit, CLASS_INFO,
+	STAT_SCALE, ABILITY_COST, ABILITY_COOLDOWN, SHIELD_DURATION, SLOW_DURATION, SLOW_FACTOR,
+	STARFALL_DELAY, STARFALL_RADIUS, STARFALL_RANGE, COUNTER_WINDOW, COUNTER_GUARD } from "./sim.js";
 import { camera, draw, drawTown, promptFor, formatRiftTime } from "./render.js";
 import { createTown, stepTown, setTownGear, postDps, STATIONS, SPAWN, standAt } from "./town.js";
 import cssText from "./HalcyonRift.css?inline";
@@ -37,22 +39,25 @@ const NAMES = { shortbow: "Shortbow", longbow: "Longbow", mace: "Mace", greatswo
 	wand: "Wand", starstaff: "Starstaff", repeater: "Repeater", tidecaller: "Tidecaller",
 	leather_vest: "Leather Vest", volley_quiver: "Volley Quiver", plate_armor: "Plate Armor",
 	grounding_aegis: "Grounding Aegis", seer_robes: "Seer Robes", stillness_orb: "Stillness Orb",
-	band_of_vigor: "Band of Vigor", band_of_focus: "Band of Focus", kingfisher_eye: "Kingfisher's Eye" };
+	band_of_vigor: "Band of Vigor", band_of_focus: "Band of Focus", kingfisher_eye: "Kingfisher's Eye",
+	star_tome: "Star Tome", shuriken: "Shuriken", kunai: "Kunai", shadow_garb: "Shadow Garb", mirror_charm: "Mirror Charm" };
 // Every enchantment reads as flat points ("+4 Attack"), never a percentage.
 const ENCHANT_NAMES = { max_hp: "Max HP", max_mp: "Max MP", attack: "Attack", defense: "Defense",
-	attack_speed: "Dexterity", ability_power: "Ability damage", mp_regen: "MP regen", hp_regen: "HP regen" };
+	attack_speed: "Dexterity", ability_power: "Ability power", mp_regen: "MP regen", hp_regen: "HP regen" };
 const SLOT_NAMES = { weapon: "Weapon", armor: "Armor", ability: "Ability", ring1: "Ring", ring2: "Ring" };
 const FAMILY = { weapon: "Weapon", armor: "Armor", ability: "Ability", ring: "Ring" };
 const ABBR = { shortbow: "SB", longbow: "LB", mace: "MC", greatsword: "GS", wand: "WD", starstaff: "SS",
 	repeater: "RP", tidecaller: "TC", leather_vest: "LV", volley_quiver: "VQ", plate_armor: "PA",
 	grounding_aegis: "GA", seer_robes: "SR", stillness_orb: "SO", band_of_vigor: "BV", band_of_focus: "BF",
-	kingfisher_eye: "KE" };
+	kingfisher_eye: "KE", star_tome: "ST", shuriken: "SH", kunai: "KN", shadow_garb: "SG", mirror_charm: "MR" };
 const WEAPON_FEEL = { shortbow: "Fast and close: twin arrows that spread with distance.",
 	longbow: "Slow and far: one heavy arrow that passes through enemies.",
 	mace: "Melee range: a quick, solid strike.", greatsword: "Short range: a heavy sweeping strike.",
 	wand: "A steady bolt with medium range.", starstaff: "Long range: a heavy star that reaches eight tiles.",
 	tidecaller: "Three arrows in a wide fan that glance off a wall once.",
-	repeater: "A three-bolt burst, then a reload." };
+	repeater: "A three-bolt burst, then a reload.",
+	shuriken: "Fast and short: a spinning star that cuts through one enemy.",
+	kunai: "A slow, heavy blade thrown hard and far." };
 /* A UNIQUE is named, not tiered: it is its own thing, not a rung on the ladder. */
 const nameOf = (it) => (it.kind === "unique" ? NAMES[it.base_id] || it.base_id : `${NAMES[it.base_id] || it.base_id} · T${it.tier}`);
 const num = (x) => (Number.isInteger(x) ? String(x) : x.toFixed(1));
@@ -72,11 +77,31 @@ function weaponLines(it) {
 
 /* What an item's base gives, flat, worked out by the sim (what it adds to bare stats). */
 const STAT_WORDS = [["maxHp", "Max HP"], ["maxMp", "Max MP"], ["att", "Attack"], ["dex", "Dexterity"],
-	["def", "Defense"], ["mpRegen", "MP regen"], ["hpRegen", "HP regen"], ["abilityDmg", "Ability damage"], ["pierce", "Pierce"]];
+	["def", "Defense"], ["mpRegen", "MP regen"], ["hpRegen", "HP regen"], ["abilityDmg", "Ability damage"], ["ap", "Ability power"], ["pierce", "Pierce"]];
 function baseLines(it) {
 	if (WEAPONS[it.base_id]) return [];
 	const bare = statsFor([]), s = statsFor([{ ...it, enchants: [] }]);
 	return STAT_WORDS.filter(([k]) => s[k] !== bare[k]).map(([k, w]) => `+${num(s[k] - bare[k])} ${w}`);
+}
+
+/* What an ability item DOES, at the Ability power the character has now (owner's ask,
+ * 2026-11-18: AP is the ability's stat, as Attack is the weapon's). */
+function abilityLines(it, ap = 0) {
+	const s = statsFor([{ ...it, enchants: [] }]), pw = 1 + ap / STAT_SCALE, secs = (t) => num(Math.round(t / TPS * 10) / 10);
+	const kind = s.abilityKind, cost = `Costs ${ABILITY_COST} MP, ${secs(ABILITY_COOLDOWN[kind] || 0)}s cooldown`;
+	const r2 = (x) => num(Math.round(x * 100) / 100);
+	if (kind === "volley") return [`Space: a fan of ${s.arrows} arrows`, `${Math.round(s.abilityDmg * pw)} damage each`, cost];
+	if (kind === "slow") return ["Space: a field that slows enemy shots inside it",
+		`${r2(statsFor([{ ...it, enchants: [] }]).slowRadius * pw)}-tile radius (Ability power widens it)`,
+		`${Math.round((1 - SLOW_FACTOR) * 100)}% slower, lasts ${secs(SLOW_DURATION)}s`, cost];
+	if (kind === "starfall") return [`Space: a star falls where you aim (up to ${STARFALL_RANGE} tiles)`,
+		`Lands after ${secs(STARFALL_DELAY)}s, ${Math.round(s.abilityDmg * pw)} damage to all within ${STARFALL_RADIUS} tiles`, cost];
+	if (kind === "counter") return [`Space: the next hit within ${secs(COUNTER_WINDOW)}s is ignored`,
+		`Then ${secs(COUNTER_GUARD)}s untouchable, and your next attack does ${r2(2 * pw)}x damage`,
+		"A second counter before attacking does not stack", cost];
+	if (kind === "shield") return ["Space: plant a shield in front of you",
+		`Blocks ${1 + Math.floor(ap / 8)} enemy shot${ap >= 8 ? "s" : ""}, lasts ${secs(SHIELD_DURATION)}s`, cost];
+	return [];
 }
 
 // The three places an item can be in town, as the wire writes them.
@@ -182,13 +207,22 @@ export default function HalcyonRift({ authUser, onExit }) {
 	// carried in, what it picked up (named by drop until the server mints it), moved
 	// wherever the player moved it. Kept until the town's refresh replaces it.
 	const [runItems, setRunItems] = useState(null);
-	const [result, setResult] = useState(null);
+	// NOTIFICATIONS (owner's ask, 2026-11-18): a line in the top left that fades on its
+	// own, kept in a log you can open again — never a banner you have to click away.
+	const [notices, setNotices] = useState([]);
+	const noticeId = useRef(0);
+	const notify = useCallback((text, tone = "info") => {
+		const id = ++noticeId.current;
+		setNotices((l) => [...l.slice(-49), { id, text, tone, at: Date.now() }]);
+	}, []);
+	const [flash, setFlash] = useState(null);         // an item id lit in the panel for a moment
 	// THE MAIN MENU (owner's ask, 2026-11-18): where you make or pick a character,
 	// and where a death sends you. The town is entered from it with one character.
 	const [menu, setMenu] = useState(true);
 	const townRef = useRef(null);
 	if (!townRef.current) townRef.current = createTown();
 	const townNotes = useRef([]);
+	const [mods, setMods] = useState([]);             // the rift modifiers picked at a portal
 
 	const refresh = useCallback(async () => {
 		try {
@@ -204,6 +238,8 @@ export default function HalcyonRift({ authUser, onExit }) {
 		}
 	}, [client]);
 	useEffect(() => { refresh(); }, [refresh]);
+	// Once the page is up, a failure is a notification; before, it is the page.
+	useEffect(() => { if (error && view) { notify(error, "bad"); setError(null); } }, [error, view, notify]);
 
 	// One heartbeat for the queue: during a run it delivers the fight's reports every
 	// few seconds, and after one it keeps trying until the last of them has landed.
@@ -245,10 +281,8 @@ export default function HalcyonRift({ authUser, onExit }) {
 	useEffect(() => { if (panel && near !== panel) setPanel(null); }, [near, panel]);
 	useEffect(() => { if (panel !== "forge") setForge([]); }, [panel]);
 
-	const townNote = (text, color) => townNotes.current.push({ text, color, until: townRef.current.tick + 3 * TPS });
-
 	const chooseChar = (c) => {
-		setPicked(null); setPanel(null); setResult(null);
+		setPicked(null); setPanel(null);
 		setSelChar(c.char_id);
 		Object.assign(townRef.current.p, SPAWN);
 		setMenu(false);
@@ -258,20 +292,20 @@ export default function HalcyonRift({ authUser, onExit }) {
 	const newChar = (slot, classId) => act(async () => {
 		const c = await client.createCharacter(slot, classId);
 		setCreateSlot(null);
-		setSelChar(c.char_id); setResult(null); setPanel(null);
+		setSelChar(c.char_id); setPanel(null);
 		Object.assign(townRef.current.p, SPAWN);
 		setMenu(false);
 	});
 
-	const enter = (realm, practice = false) => {
+	const enter = (realm, practice = false, riftMods = []) => {
 		if (!char) { setMenu(true); return; }
 		act(async () => {
 			await client.flush();
 			if (client.pendingRun()) throw new Error("Your last run is still being saved. Try again in a moment.");
-			const { run_id, dungeon, class_id } = await client.startRun(char.char_id, realm, practice);
+			const { run_id, dungeon, class_id } = await client.startRun(char.char_id, realm, practice, riftMods);
 			client.beginRun(run_id);
 			const ctl = runControl(items.filter((it) => onChar(it, char.char_id)), char.char_id, view, setRunItems);
-			setResult(null); setPanel(null); setTip(null); setPicked(null);
+			setPanel(null); setTip(null); setPicked(null);
 			setRunItems(ctl.items);
 			setRun({ run_id, dungeon, gear: ctl.equipped(), ctl, realm, bases: view.bases, practice,
 				class_id: class_id || char.class_id,
@@ -280,9 +314,18 @@ export default function HalcyonRift({ authUser, onExit }) {
 	};
 	const enterRef = useRef(enter);
 	enterRef.current = enter;
+	const modsRef = useRef(mods);
+	modsRef.current = mods;
+	const panelRef = useRef(panel);
+	panelRef.current = panel;
 
 	const use = useCallback((station) => {
-		if (station.kind === "portal") { enterRef.current(station.realm); return; }
+		// A portal opens its modifiers first; Enter (or E again) goes in.
+		if (station.kind === "portal") {
+			if (panelRef.current === station.id) enterRef.current(station.realm, false, modsRef.current);
+			else setPanel(station.id);
+			return;
+		}
 		if (station.kind === "dream") { setPanel("dream"); setForged(null); return; }
 		setPanel((p) => (p === station.kind ? null : station.kind));
 		setForged(null);
@@ -293,35 +336,75 @@ export default function HalcyonRift({ authUser, onExit }) {
 		Object.assign(t.p, standAt(`realm:${outcome.realm}`));    // back out of the portal you took
 		setRun(null);
 		setPicked(null); setDrag(null); setTip(null);
-		setResult(outcome);
+		notify(...outcomeNotice(outcome));
 		// The XP the fight already showed stays on screen until the server's copy lands.
 		if (outcome.status !== "dead" && !outcome.practice) setView((v) => v && ({ ...v, characters: v.characters.map((c) =>
 			c.char_id === selChar ? { ...c, xp: Math.max(c.xp, outcome.heroXp), level: Math.max(c.level, outcome.level) } : c) }));
 		if (outcome.status === "dead" && !outcome.practice) setMenu(true);   // a fallen character: back to the menu
 		// The town's copy replaces the run's once it has landed — unless a new run began meanwhile.
 		refresh().then(() => setRunItems((cur) => (cur === outcome.items ? null : cur)));
-	}, [refresh, selChar]);
+	}, [refresh, selChar, notify]);
 
 	// A town move lands on the page in the same frame: the item and whatever it
 	// swaps with change places, each one version on (the server bumps both by one,
 	// so the next move in a quick series names the version it will find). Requests
 	// go one at a time, in order; once the last has answered, the server's state is
 	// read back — a refusal shows its reason and that read puts things back.
+	const sendMoves = (moves) => {
+		let failed = false;
+		for (const [id, to, version] of moves) {
+			movesOut.current += 1;
+			moveChain.current = moveChain.current
+				.then(() => (failed ? null : client.move(id, to, version)))
+				.catch((e) => { failed = true; const m = e.message || "That did not work."; setError(m[0].toUpperCase() + m.slice(1)); })
+				.then(async () => {
+					if ((movesOut.current -= 1) > 0) return;
+					try {
+						const v = await client.state();
+						if (movesOut.current === 0) setView(v);   // a move made meanwhile reads back after itself
+					} catch { /* the next refresh will do */ }
+				});
+		}
+	};
 	const townMove = (it, to) => {
 		const from = placeOf(it), there = byPlace[keyOf(to)];
 		setView((v) => ({ ...v, items: v.items.map((x) => (x.item_id === it.item_id ? putAt(x, to)
 			: there && x.item_id === there.item_id ? putAt(x, from) : x)) }));
-		movesOut.current += 1;
-		moveChain.current = moveChain.current
-			.then(() => client.move(it.item_id, to, it.version))
-			.catch((e) => { const m = e.message || "That did not work."; setError(m[0].toUpperCase() + m.slice(1)); })
-			.then(async () => {
-				if ((movesOut.current -= 1) > 0) return;
-				try {
-					const v = await client.state();
-					if (movesOut.current === 0) setView(v);   // a move made meanwhile reads back after itself
-				} catch { /* the next refresh will do */ }
-			});
+		sendMoves([[it.item_id, to, it.version]]);
+	};
+
+	// SORT (owner's ask, 2026-11-18): the bag by kind (weapon, armor, ability, ring),
+	// uniques first, then tier and slots, highest first. In town it is a series of
+	// swaps worked out here and sent in order; in a run, the run's own moves.
+	const sortBag = () => {
+		if (!char || busy) return;
+		const order = { weapon: 0, armor: 1, ability: 2, ring: 3 };
+		const key = (it) => [order[view.bases[it.base_id]?.slot] ?? 9, it.kind === "unique" ? 0 : 1, -(it.tier || 0),
+			-(it.slot_count || 0), NAMES[it.base_id] || it.base_id, String(it.item_id)];
+		const cmp = (a, b) => { const x = key(a), y = key(b); for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] < y[i] ? -1 : 1; return 0; };
+		const bag = [...Array(view.limits.inventory).keys()].map(invItem).filter(Boolean);
+		const want = [...bag].sort(cmp);
+		if (want.every((it, i) => it.slot_index === i)) { notify("Your bag is already sorted."); return; }
+		if (run) {
+			for (const [i, w] of want.entries()) {
+				const cur = run.ctl.items.find((x) => x.item_id === w.item_id);
+				if (cur && cur.slot_index !== i) runMove(cur, at.inv(char.char_id, i));
+			}
+			return;
+		}
+		const local = Object.fromEntries(bag.map((it) => [it.item_id, { ...it }]));
+		const bySlot = new Map(bag.map((it) => [it.slot_index, it.item_id]));
+		const moves = [];
+		for (const [i, w] of want.entries()) {
+			const me = local[w.item_id];
+			if (me.slot_index === i) continue;
+			const from = me.slot_index, other = bySlot.get(i);
+			moves.push([me.item_id, at.inv(char.char_id, i), me.version]);
+			me.version += 1; me.slot_index = i; bySlot.set(i, me.item_id);
+			if (other) { local[other].version += 1; local[other].slot_index = from; bySlot.set(from, other); } else bySlot.delete(from);
+		}
+		setView((v) => ({ ...v, items: v.items.map((x) => local[x.item_id] || x) }));
+		sendMoves(moves);
 	};
 
 	// ── moving items: drag and drop, or click one and then click where it goes ──
@@ -339,7 +422,7 @@ export default function HalcyonRift({ authUser, onExit }) {
 		if (ctl.ended) return;                         // the run is closed; the server takes nothing more
 		if (keyOf(here) === keyOf(to)) return;
 		const other = ctl.items.find((x) => placeKey(x) === keyOf(to));
-		if (!fits(it, to) || (other && !fits(other, here))) { setError(`${nameOf(other && fits(it, to) ? other : it)} does not go there.`); return; }
+		if (!fits(it, to) || (other && !fits(other, here))) { notify(`${nameOf(other && fits(it, to) ? other : it)} does not go there.`, "bad"); return; }
 		ctl.move(it, to, other, here);
 		client.report({ type: "move", ...(it.fresh ? { drop: it.drop } : { item: it.item_id }), to: [to[0], to[2]] });
 	};
@@ -349,7 +432,7 @@ export default function HalcyonRift({ authUser, onExit }) {
 	const runDrop = (it) => {
 		const ctl = run.ctl;
 		if (ctl.ended || !ctl.items.some((x) => x.item_id === it.item_id)) return;
-		if (run.practice) { setError("Nothing can be dropped in a Dream Rift."); return; }   // the store refuses it too
+		if (run.practice) { notify("Nothing can be dropped in a Dream Rift.", "bad"); return; }   // the store refuses it too
 		ctl.drop(it);
 		client.report({ type: "drop_item", ...(it.fresh ? { drop: it.drop } : { item: it.item_id }) });
 	};
@@ -384,7 +467,7 @@ export default function HalcyonRift({ authUser, onExit }) {
 			return slot ? at.eq(char.char_id, slot) : null;
 		}
 		const free = [...Array(view.limits.inventory).keys()].find((i) => !byPlace[keyOf(at.inv(char.char_id, i))]);
-		if (free === undefined) { setError("Your bag is full."); return null; }
+		if (free === undefined) { notify("Your bag is full.", "bad"); return null; }
 		return at.inv(char.char_id, free);
 	};
 	const quick = (it) => {
@@ -406,11 +489,11 @@ export default function HalcyonRift({ authUser, onExit }) {
 	}, []);
 	// At the forge a click PICKS an item for fusion (it stays where it is, lit).
 	const forgePick = (it) => {
-		setForged(null);
+		if (forged) setForged(null);
 		setForge((f) => (f.includes(it.item_id) ? f.filter((id) => id !== it.item_id) : [...f, it.item_id].slice(-2)));
 	};
 	const slotCtx = {
-		bases: view?.bases || {}, picked, drag, dragItem: drag ? byId[drag] : null, accepts, inRun: !!run, forge, quick,
+		bases: view?.bases || {}, picked, drag, flash, dragItem: drag ? byId[drag] : null, accepts, inRun: !!run, forge, quick,
 		startDrag: (it) => { setDrag(it.item_id); setTip(null); },
 		endDrag: () => setDrag(null),
 		dropAt: (target) => placeAt(target, byId[drag]),
@@ -442,8 +525,16 @@ export default function HalcyonRift({ authUser, onExit }) {
 	const slots = [...Array(view.limits.characters).keys()];
 	const [fa, fb] = [byId[forge[0]] || null, byId[forge[1]] || null];
 	const fusable = fa && fb && ["base_id", "tier", "kind", "slot_count"].every((k) => fa[k] === fb[k]);
+	const fuse = () => act(async () => {
+		const made = await client.fuse(fa.item_id, fb.item_id);
+		setForged({ item: made, a: fa, b: fb });
+		setForge([]);
+		setFlash(made.item_id);
+		setTimeout(() => setFlash((f) => (f === made.item_id ? null : f)), 2600);
+	});
 	const invItem = (i) => (char ? byPlace[keyOf(at.inv(char.char_id, i))] : null);
 	const equipped = char ? view.limits.equip.map((s) => byPlace[keyOf(at.eq(char.char_id, s))]).filter(Boolean) : [];
+	const stats = char ? statsFor(equipped, char.level, char.class_id) : null;
 
 	if (menu && !run) {
 		return (
@@ -452,7 +543,7 @@ export default function HalcyonRift({ authUser, onExit }) {
 				<main className="hr-menu">
 					<h1 className="hr-menu-title">Halcyon Rift</h1>
 					<p className="hr-hint">{view.characters.length ? "Choose a character, or make a new one." : "Make a character to begin."}</p>
-					{result && <ResultPanel result={result} onClose={() => setResult(null)} />}
+					<Notices list={notices} />
 					<div className="hr-menu-cards" role="group" aria-label="Characters">
 						{slots.map((s) => {
 							const c = view.characters.find((x) => x.slot === s);
@@ -485,8 +576,6 @@ export default function HalcyonRift({ authUser, onExit }) {
 							</div>
 						</section>)}
 					{view.fallen.length > 0 && <p className="hr-hint">{view.fallen.length} fallen</p>}
-					{error && <div className="hr-error" role="alert">{error}
-						<button className="hr-x" aria-label="Dismiss" onClick={() => setError(null)}>×</button></div>}
 				</main>
 			</div>
 		);
@@ -502,14 +591,12 @@ export default function HalcyonRift({ authUser, onExit }) {
 					onDrop={(e) => { if (run && drag) { e.preventDefault(); slotCtx.dropAt({ kind: "trash" }); setDrag(null); } }}>
 					<div className="hr-view">
 						{run
-							? <Dungeon run={run} client={client} onEnd={endRun} />
+							? <Dungeon run={run} client={client} onEnd={endRun} notify={notify} tips={slotCtx} />
 							: <Town st={townRef.current} notes={townNotes} ready={!!char && !busy} gear={equipped} level={char?.level || 1}
 								classId={char?.class_id || "ranger"}
 								onUse={use} onNear={setNear} onEscape={() => { setPanel(null); setDiscardAsk(null); }} />}
 
-						{result && !run && <ResultPanel result={result} onClose={() => setResult(null)} />}
-						{error && <div className="hr-error" role="alert">{error}
-							<button className="hr-x" aria-label="Dismiss" onClick={() => setError(null)}>×</button></div>}
+						<Notices list={notices} />
 
 						{panel === "vault" && !run && (
 							<Overlay title="Vault" onClose={() => setPanel(null)} className="hr-vault">
@@ -523,27 +610,68 @@ export default function HalcyonRift({ authUser, onExit }) {
 
 						{panel === "forge" && !run && (
 							<Overlay title="Forge" onClose={() => setPanel(null)} className="hr-forge-panel">
-								<p className="hr-hint">Click two identical items in your bag or equipment — same item,
-									tier and number of enchantment slots. They fuse into one with fresh enchantments,
-									and now and then an extra slot.</p>
-								<div className="hr-forge">
-									<span className={"hr-forge-pick" + (fa ? " on" : "")}>{fa ? nameOf(fa) : "First item"}</span>
-									<span className="hr-plus" aria-hidden="true">+</span>
-									<span className={"hr-forge-pick" + (fb ? " on" : "")}>{fb ? nameOf(fb) : "Second item"}</span>
-									<button className="btn btn-gold" disabled={!fusable || locked}
-										onClick={() => act(async () => { setForged(await client.fuse(fa.item_id, fb.item_id)); setForge([]); })}>
-										Fuse</button>
-								</div>
-								<p className="hr-forge-note" role="status">
-									{forged ? `Made ${nameOf(forged)} with ${forged.enchants.length} enchantment${forged.enchants.length === 1 ? "" : "s"}.`
-										: !fa || !fb ? "Pick two items."
-										: fusable ? "Ready to fuse. Both items are used up."
-										: fa.base_id !== fb.base_id ? "Not the same item."
-										: fa.tier !== fb.tier ? `Not the same tier (${fa.tier} and ${fb.tier}).`
-										: fa.slot_count !== fb.slot_count ? `Not the same number of enchantment slots (${fa.slot_count} and ${fb.slot_count}).`
-										: "These two are not identical."}
-								</p>
+								{forged ? <ForgeReveal forged={forged} ap={stats?.ap || 0}
+									where={forged.item.loc === "equipped" ? `Equipped as your ${(SLOT_NAMES[forged.item.equip_slot] || "gear").toLowerCase()}`
+										: forged.item.loc === "inventory" ? `In your bag, slot ${forged.item.slot_index + 1}` : "In the vault"}
+									onAgain={() => setForged(null)} onDone={() => { setForged(null); setPanel(null); }} />
+								: <>
+									<p className="hr-hint">Click two identical items in your bag or equipment: same item, tier and
+										number of enchantment slots. Both are used up; one comes back with fresh enchantments.</p>
+									<div className="hr-forge">
+										<ForgeCard item={fa} label="First item" ap={stats?.ap || 0} onClear={fa ? () => forgePick(fa) : null} />
+										<span className="hr-plus" aria-hidden="true">+</span>
+										<ForgeCard item={fb} label="Second item" ap={stats?.ap || 0} onClear={fb ? () => forgePick(fb) : null} />
+										<span className="hr-plus" aria-hidden="true">=</span>
+										<div className={"hr-forge-card hr-forge-out" + (fusable ? " ready" : "")}>
+											{fusable ? <>
+												<span className="hr-forge-glyph">{ABBR[fa.base_id]}<b>?</b></span>
+												<strong>{nameOf(fa)}</strong>
+												<span className="hr-forge-slots">{fa.slot_count} slot{fa.slot_count === 1 ? "" : "s"}, maybe more</span>
+												<ul className="hr-forge-odds">
+													{slotOdds(view.odds?.fuse_slot_gain, fa.slot_count, view.odds?.max_slots).map(([g, pct]) =>
+													<li key={g}>+{g} slot{g > 1 ? "s" : ""}: {pct}%</li>)}
+												</ul>
+												<span className="hr-hint">Every enchantment rerolled</span>
+											</> : <span className="hr-hint">{!fa || !fb ? "Pick two items"
+												: fa.base_id !== fb.base_id ? "Not the same item"
+												: fa.tier !== fb.tier ? `Not the same tier (${fa.tier} and ${fb.tier})`
+												: fa.slot_count !== fb.slot_count ? `Not the same number of slots (${fa.slot_count} and ${fb.slot_count})`
+												: "These two are not identical"}</span>}
+										</div>
+									</div>
+									<div className="hr-actions hr-forge-go">
+										<button className="btn btn-gold" disabled={!fusable || locked} onClick={fuse}>Fuse</button>
+									</div>
+								</>}
 							</Overlay>)}
+
+						{panel?.startsWith?.("realm:") && !run && (() => {
+							const realm = panel.slice(6), d = (view.dungeons || []).find((x) => x.id === realm);
+							const r = mods.length, o = view.odds || {};
+							return (
+								<Overlay title={d?.name || "Rift"} onClose={() => setPanel(null)} className="hr-rift-panel">
+									<p className="hr-hint">Add modifiers for a harder rift and rarer loot: higher tiers and a better
+										chance of the boss's unique. The number of enchantment slots is not changed.</p>
+									<div className="hr-mods" role="group" aria-label="Rift modifiers">
+										{(view.rift_mods || []).map((m) => {
+											const on = mods.includes(m.id);
+											return <button key={m.id} className={"hr-mod" + (on ? " on" : "")} aria-pressed={on}
+												onClick={() => setMods((cur) => (on ? cur.filter((x) => x !== m.id) : [...cur, m.id]))}>
+												<strong>{m.name || m.id}</strong><span>{m.text}</span></button>;
+										})}
+									</div>
+									<dl className="hr-mod-sum">
+										<div><dt>Difficulty</dt><dd>{r ? "+".repeat(r) : "Normal"}</dd></div>
+										<div><dt>Higher tier</dt><dd>{r ? `+${Math.round(r * (o.tier_up_per_rarity || 0) * 100)}% a drop` : "Base"}</dd></div>
+										<div><dt>Boss unique</dt><dd>{Math.round(((o.unique_base || 0) + r * (o.unique_per_rarity || 0)) * 100)}%</dd></div>
+									</dl>
+									<div className="hr-actions">
+										<button className="btn btn-gold" disabled={!char || busy}
+											onClick={() => enterRef.current(realm, false, mods)}>Enter the rift</button>
+										{r > 0 && <button className="btn btn-ghost" onClick={() => setMods([])}>Clear</button>}
+									</div>
+								</Overlay>);
+						})()}
 
 						{panel === "dream" && !run && (
 							<Overlay title="Dream Rifts" onClose={() => setPanel(null)} className="hr-dream-panel">
@@ -576,8 +704,8 @@ export default function HalcyonRift({ authUser, onExit }) {
 					<p className="hr-keys">
 						{run
 							? <><kbd>WASD</kbd> move · <kbd>mouse</kbd> aim, hold to shoot · <kbd>T</kbd> auto-fire ·
-								<kbd>Space</kbd> ability · <kbd>E</kbd> pick up · <kbd>1</kbd>–<kbd>8</kbd> equip · <kbd>F</kbd> recall</>
-							: <><kbd>WASD</kbd> walk · <kbd>mouse</kbd> shoot · <kbd>E</kbd> use the vault, forge, Dream Rift or a portal ·
+								<kbd>Space</kbd> ability · <kbd>E</kbd> interact · <kbd>1</kbd>–<kbd>8</kbd> equip · <kbd>F</kbd> recall</>
+							: <><kbd>WASD</kbd> walk · <kbd>mouse</kbd> shoot · <kbd>E</kbd> interact ·{" "}
 								<kbd>1</kbd>–<kbd>8</kbd> or double-click to equip</>}
 					</p>
 				</section>
@@ -602,7 +730,11 @@ export default function HalcyonRift({ authUser, onExit }) {
 								target={to && { kind: "place", to }} locked={locked} ctx={slotCtx} />;
 						})}
 					</div>
-					<h2 className="fg-label">Inventory</h2>
+					<div className="hr-inv-hd">
+						<h2 className="fg-label">Inventory</h2>
+						<button className="btn btn-ghost btn-sm hr-sort" disabled={!char || locked} onClick={sortBag}
+							title="Weapons, armor, abilities, rings; best first">Sort</button>
+					</div>
 					<div className="hr-grid hr-grid-inv">
 						{[...Array(view.limits.inventory).keys()].map((i) => {
 							const to = char ? at.inv(char.char_id, i) : null;
@@ -617,7 +749,7 @@ export default function HalcyonRift({ authUser, onExit }) {
 					</div>
 				</aside>
 			</main>
-			{tip && <ItemTip tip={tip} bases={view.bases} />}
+			{tip && <ItemTip tip={tip} bases={view.bases} ap={stats?.ap || 0} />}
 		</div>
 	);
 }
@@ -631,7 +763,7 @@ function Slot({ label, item, target, locked, ctx, num: n = null }) {
 	const forged = item && ctx.forge.includes(item.item_id);
 	return (
 		<button className={"hr-slot" + (item ? ` has fam-${fam}` : "") + (item && item.item_id === ctx.picked ? " sel" : "")
-			+ (item?.kind === "unique" ? " unique" : "") + (forged ? " forging" : "")
+			+ (item?.kind === "unique" ? " unique" : "") + (forged ? " forging" : "") + (item && item.item_id === ctx.flash ? " flash" : "")
 			+ (ok === true ? " ok" : ok === false ? " no" : "") + (item && item.item_id === ctx.drag ? " dragging" : "")}
 			aria-label={name} aria-pressed={forged || undefined} disabled={!target && !item}
 			draggable={!!item && !locked && (!item.fresh || ctx.inRun)}
@@ -656,7 +788,7 @@ function Slot({ label, item, target, locked, ctx, num: n = null }) {
 }
 
 /* What an item is, beside the slot under the pointer — kept inside the window. */
-function ItemTip({ tip, bases }) {
+function ItemTip({ tip, bases, ap = 0 }) {
 	const ref = useRef(null);
 	const [pos, setPos] = useState(null);
 	useLayoutEffect(() => {
@@ -665,7 +797,7 @@ function ItemTip({ tip, bases }) {
 		setPos({ left: Math.max(8, Math.min(window.innerWidth - w - 8, left)),
 			top: Math.max(8, Math.min(window.innerHeight - h - 8, r.top)) });
 	}, [tip]);
-	const it = tip.item, fam = bases[it.base_id]?.slot, lines = [...weaponLines(it), ...baseLines(it)];
+	const it = tip.item, fam = bases[it.base_id]?.slot, lines = [...weaponLines(it), ...abilityLines(it, ap), ...baseLines(it)];
 	return (
 		<div ref={ref} className={"hr-tip fg-panel" + (it.kind === "unique" ? " fg-lit unique" : "")} role="tooltip"
 			style={pos ? { left: pos.left, top: pos.top } : { left: 0, top: 0, visibility: "hidden" }}>
@@ -674,10 +806,83 @@ function ItemTip({ tip, bases }) {
 			</p>
 			{WEAPON_FEEL[it.base_id] && <p className="hr-tip-weapon">{WEAPON_FEEL[it.base_id]}</p>}
 			{lines.length > 0 && <ul className="hr-tip-lines hr-q">{lines.map((l) => <li key={l}>{l}</li>)}</ul>}
+			{it.slot_count > 0 && <p className="fg-label-soft">{it.enchants?.length || 0} of {it.slot_count} enchantment slot{it.slot_count === 1 ? "" : "s"}</p>}
 			{it.enchants?.length > 0 && (
 				<ul className="hr-tip-lines hr-enchants">
 					{it.enchants.map((e, i) => <li key={i}>+{enchantValue(e.id, e.q)} {ENCHANT_NAMES[e.id] || e.id}</li>)}
 				</ul>)}
+		</div>
+	);
+}
+
+/* The forge's slot odds, as the store rolls them: each gain is tried in turn, the
+ * first that lands wins, and nothing passes the cap. */
+function slotOdds(gains = [], have = 0, max = 4) {
+	let left = 1;
+	const out = new Map();
+	for (const [g, pr] of gains) {
+		const real = Math.min(max, have + g) - have;
+		if (real > 0) out.set(real, (out.get(real) || 0) + left * pr);
+		left *= 1 - pr;
+	}
+	return [...out].sort((a, b) => a[0] - b[0]).map(([g, pr]) => [g, Math.round(pr * 1000) / 10]);
+}
+
+function Dots({ n, of = n, lit = 0 }) {
+	return <span className="hr-forge-dots" aria-label={`${n} enchantment slot${n === 1 ? "" : "s"}`}>
+		{[...Array(Math.max(n, of)).keys()].map((i) => <i key={i} className={(i < n ? "on" : "") + (i >= n - lit && i < n ? " new" : "")} />)}</span>;
+}
+
+const enchantLine = (e) => `+${enchantValue(e.id, e.q)} ${ENCHANT_NAMES[e.id] || e.id}`;
+
+/* One input on the forge: the item picked, or an empty socket. */
+function ForgeCard({ item, label, onClear }) {
+	if (!item) return <div className="hr-forge-card empty"><span className="hr-hint">{label}</span></div>;
+	return (
+		<button className={"hr-forge-card" + (item.kind === "unique" ? " unique" : "")} onClick={onClear} title="Click to put it back">
+			<span className="hr-forge-glyph">{ABBR[item.base_id] || "?"}</span>
+			<strong>{nameOf(item)}</strong>
+			<Dots n={item.slot_count} />
+			<ul className="hr-forge-ench">{(item.enchants || []).map((e, i) => <li key={i}>{enchantLine(e)}</li>)}</ul>
+		</button>
+	);
+}
+
+/* What came out of the forge, side by side with what went in: the slot count before
+ * and after (a gained slot is the headline), and each enchantment against the best
+ * of the same kind on either input. */
+function ForgeReveal({ forged, where, onAgain, onDone }) {
+	const { item, a, b } = forged;
+	const before = a.slot_count, after = item.slot_count, gained = after - before;
+	const best = {};
+	for (const e of [...(a.enchants || []), ...(b.enchants || [])]) best[e.id] = Math.max(best[e.id] ?? -Infinity, enchantValue(e.id, e.q));
+	return (
+		<div className={"hr-reveal" + (gained > 0 ? " gained" : "")}>
+			<div className="hr-reveal-in" aria-label="Used up">
+				{[a, b].map((x, i) => <span key={i} className="hr-reveal-used">{nameOf(x)}</span>)}
+			</div>
+			<div className={"hr-forge-card hr-reveal-card" + (item.kind === "unique" ? " unique" : "")}>
+				<span className="hr-forge-glyph">{ABBR[item.base_id] || "?"}</span>
+				<strong>{nameOf(item)}</strong>
+				<Dots n={after} lit={Math.max(0, gained)} />
+				{gained > 0
+					? <p className="hr-reveal-gain">+{gained} enchantment slot{gained > 1 ? "s" : ""}! {before} → {after}</p>
+					: <p className="hr-hint">{after} slot{after === 1 ? "" : "s"}, as before</p>}
+				<ul className="hr-forge-ench hr-reveal-ench">
+					{(item.enchants || []).map((e, i) => {
+						const v = enchantValue(e.id, e.q), was = best[e.id];
+						const tag = was === undefined ? ["new", "New"] : v > was ? ["up", `was +${was}`] : v < was ? ["down", `was +${was}`] : ["same", "same"];
+						return <li key={i} className={"tag-" + tag[0]} style={{ animationDelay: `${300 + i * 180}ms` }}>
+							{enchantLine(e)} <small>{tag[1]}</small></li>;
+					})}
+					{!item.enchants?.length && <li className="hr-hint">No enchantments</li>}
+				</ul>
+			</div>
+			<p className="hr-hint hr-reveal-where">{where}.</p>
+			<div className="hr-actions">
+				<button className="btn btn-gold" onClick={onAgain}>Fuse again</button>
+				<button className="btn btn-ghost" onClick={onDone}>Done</button>
+			</div>
 		</div>
 	);
 }
@@ -697,9 +902,9 @@ function Overlay({ title, onClose, className = "", children }) {
 /* The character's numbers, all flat: what the sim will use with this gear on. */
 function Stats({ gear, level, classId = "ranger" }) {
 	const s = statsFor(gear, level, classId);
-	const cells = [["ATT", s.att, "Attack: each point adds to every arrow's damage"], ["DEX", s.dex, "Dexterity: each point adds to how fast you shoot"],
-		["DEF", s.def, "Defense: taken off every hit"], ["DMG", s.shots > 1 ? `${s.dmg}×${s.shots}` : s.dmg, "Damage per arrow, with Attack"],
-		["RATE", `${num(Math.round(s.rate * 10) / 10)}/s`, "Shots a second, with Dexterity"]];
+	// Damage and fire rate are the WEAPON's (its tooltip), not the character's.
+	const cells = [["ATT", s.att, "Attack: each point adds to your weapon's damage"], ["DEX", s.dex, "Dexterity: each point adds to how fast you shoot"],
+		["DEF", s.def, "Defense: taken off every hit"], ["AP", s.ap, "Ability power: each point makes your ability stronger"]];
 	return (
 		<dl className="hr-stats" aria-label="Stats">
 			{cells.map(([k, v, t]) => <div key={k} title={t}><dt>{k}</dt><dd>{v}</dd></div>)}
@@ -810,23 +1015,40 @@ function XpBar({ levels, xp }) {
 	);
 }
 
-function ResultPanel({ result, onClose }) {
-	const title = result.practice
-		? { completed: "Dream Rift complete", recalled: "Dream Rift left", dead: "Dream Rift failed" }[result.status]
-		: { completed: `${result.dungeonName || "The Rift"} cleared`, recalled: "Recalled to town", dead: `Your ${className(result.classId)} has fallen` }[result.status];
+/* How a run ended, as one notification (text, tone). */
+function outcomeNotice(r) {
+	const time = r.timeTicks != null ? ` Time ${formatRiftTime(r.timeTicks)}.` : "";
+	if (r.practice) return [{ completed: "Dream Rift complete.", recalled: "Dream Rift left.", dead: "Dream Rift failed." }[r.status]
+		+ time + " Nothing changed; your character is safe.", r.status === "dead" ? "bad" : "info"];
+	if (r.status === "dead") return [`Your ${className(r.classId)} has fallen. Everything it carried is gone; the vault is untouched.`, "bad"];
+	const head = r.status === "completed" ? `${r.dungeonName || "The Rift"} cleared.` : "Recalled to town.";
+	return [`${head}${time} ${r.loot.length ? `Brought back: ${r.loot.join(", ")}.` : "Nothing was picked up."}`, r.status === "completed" ? "good" : "info"];
+}
+
+/* The notifications: the newest few in the top left, each fading after a few
+ * seconds; the button opens every one of them again. */
+const NOTICE_MS = 6000;
+function Notices({ list }) {
+	const [open, setOpen] = useState(false);
+	const [now, setNow] = useState(() => Date.now());
+	const live = list.filter((n) => now - n.at < NOTICE_MS);
+	useEffect(() => {
+		if (!live.length) return undefined;
+		const id = setInterval(() => setNow(Date.now()), 500);
+		return () => clearInterval(id);
+	}, [live.length, list]);
+	if (!list.length) return null;
 	return (
-		<section className={"hr-result fg-panel fg-lit res-" + result.status} role="status">
-			<h2 className="fg-label">{title}</h2>
-			{result.practice
-				? <p>No loot, XP, stats or items changed. Your character is safe.</p>
-				: result.status === "dead"
-					? <p>Everything your {className(result.classId)} carried is gone. The vault is untouched.</p>
-				: result.loot.length
-					? <p>Brought back: {result.loot.join(", ")}.</p>
-					: <p>Nothing was picked up.</p>}
-			{result.timeTicks != null && <p className="hr-result-time">Time {formatRiftTime(result.timeTicks)}</p>}
-			<button className="btn btn-outline" onClick={onClose}>OK</button>
-		</section>
+		<div className={"hr-notices" + (open ? " open" : "")}>
+			<button className="hr-notices-btn" aria-expanded={open} onClick={() => setOpen((o) => !o)}
+				title={open ? "Hide messages" : "Show every message"}>{open ? "Hide" : `Log ${list.length}`}</button>
+			{open
+				? <ol className="hr-notice-log fg-panel" aria-label="Messages">
+					{[...list].reverse().map((n) => <li key={n.id} className={"hr-notice tone-" + n.tone}>{n.text}</li>)}</ol>
+				: <div className="hr-notice-live" role="status" aria-live="polite">
+					{live.slice(-5).map((n) => <div key={n.id} className={"hr-notice tone-" + n.tone}
+						style={{ animationDelay: `${Math.min(0, n.at - Date.now())}ms` }}>{n.text}</div>)}</div>}
+		</div>
 	);
 }
 
@@ -944,10 +1166,15 @@ function Town({ st, notes, ready, onUse, onNear, onEscape, gear, level, classId 
 }
 
 // ── the dungeon ─────────────────────────────────────────────────────────────
-function Dungeon({ run, client, onEnd }) {
+function Dungeon({ run, client, onEnd, notify, tips }) {
 	const canvasRef = useRef(null);
-	const [ending, setEnding] = useState(null);
-	const [cleared, setCleared] = useState(false);
+	const notifyRef = useRef(notify);
+	notifyRef.current = notify;
+	// What lies within reach (the bags and what the player put down), shown as slots in
+	// the stage's bottom right; and the bag under the mouse, named in a tooltip.
+	const [loot, setLoot] = useState([]);
+	const [hover, setHover] = useState(null);
+	const lootApi = useRef(null);
 
 	useEffect(() => {
 		const cv = canvasRef.current;
@@ -955,20 +1182,38 @@ function Dungeon({ run, client, onEnd }) {
 		const st = createSim(run.dungeon, run.gear, run.hero);
 		const ctl = run.ctl;
 		ctl.st = st;                                 // the side panel's HP and MP bars read it live
-		const notes = [];
 		const keys = new Set();
-		const mouse = { x: 0, y: 0, down: false };
+		const mouse = { x: 0, y: 0, down: false, cx: 0, cy: 0, over: false };
+		const want = [];                             // takes asked for from the loot panel, one a tick
+		let lootKey = "", hoverKey = "";
 		const edge = { ability: false, interact: false, recall: false };
 		let auto = false, px = 32, raf = 0, ended = false;
 		// Where each moving thing was before the last tick, so a frame can draw it part
 		// of the way to where it is now (the sim steps at 60 Hz; a screen may run at 144).
 		let prev = new WeakMap(), alpha = 1;
-		let cam = camera(st, 1, 1, px);              // the camera of the last drawn frame
+		let cam = camera(st, 1, 1, px, st.p, true);              // the camera of the last drawn frame
 		// DEV ONLY (stripped from a production build): the live sim, and a seam for a
 		// scripted driver, so a whole run can be played through the real page.
 		if (import.meta.env.DEV) window.__halcyon = { st, drive: null };
 
-		const note = (text, color) => { notes.push({ text, color, until: st.tick + 4 * TPS }); };
+		const note = (text, tone = "info") => notifyRef.current(text, tone);
+		const specOf = (dropId) => { const d = run.dungeon.drops[dropId]; return { ...d, kind: run.bases[d.base_id]?.kind || "standard" }; };
+		// Everything in reach, nearest bag first: what the loot panel shows.
+		const inReach = () => {
+			const out = [];
+			const d2 = (o) => (o.x - st.p.x) ** 2 + (o.y - st.p.y) ** 2;
+			for (const b of [...st.bags].sort((x, y) => d2(x) - d2(y))) if (d2(b) <= REACH * REACH)
+				for (const id of b.drops) out.push({ key: `d:${id}`, take: id, item: { ...specOf(id), item_id: `drop:${id}` } });
+			for (const f of st.floor) if (d2(f) <= REACH * REACH) {
+				const it = ctl.floor.get(f.key);
+				if (it) out.push({ key: `f:${f.key}`, lift: f.key, item: it });
+			}
+			return out;
+		};
+		lootApi.current = {
+			take: (entry) => { if (!want.some((w) => w.key === entry.key)) want.push(entry); },
+			takeAll: () => { for (const e of inReach()) if (!want.some((w) => w.key === e.key)) want.push(e); },
+		};
 		const resize = () => { px = fitCanvas(cv); };
 		const ro = new ResizeObserver(resize);
 		ro.observe(cv);
@@ -995,7 +1240,12 @@ function Dungeon({ run, client, onEnd }) {
 			const loot = edge.interact ? nearestLoot() : null;
 			let take = null, lift = null;
 			if (loot && ctl.room()) { if (loot.bag) take = loot.bag.drops[0]; else lift = loot.floor.key; }
-			else if (loot) note("Inventory full", "#f3a39c");
+			else if (loot) note("Your bag is full.", "bad");
+			else if (want.length) {
+				const w = want.shift();
+				if (!ctl.room()) { want.length = 0; note("Your bag is full.", "bad"); }
+				else if (w.take) take = w.take; else lift = w.lift;
+			}
 			const out = { mx: Math.sign(mx), my: Math.sign(my), ax: (mouse.x - ox) / px - st.p.x, ay: (mouse.y - oy) / px - st.p.y,
 				fire: mouse.down || auto, ability: edge.ability, heal: edge.interact, take, lift, drop: ctl.drops.shift() || null,
 				recall: edge.recall, enter: edge.interact && !loot };
@@ -1004,20 +1254,15 @@ function Dungeon({ run, client, onEnd }) {
 		};
 
 		const handle = (ev) => {
-			if (ev.type === "level") note(`Level ${ev.level}!`, "#cdc6fb");
-			if (ev.type === "cleared") {
-				note(ev.xp > 0 ? `${run.dungeon.name} cleared! +${ev.xp} XP` : `${run.dungeon.name} cleared!`, "#9fe7ff");
-				setCleared(true);
-				setTimeout(() => setCleared(false), 2600);
-			}
+			if (ev.type === "level") note(`Level ${ev.level}!`, "good");
+			if (ev.type === "cleared") note(ev.xp > 0 ? `${run.dungeon.name} cleared! +${ev.xp} XP` : `${run.dungeon.name} cleared!`, "good");
 			if (ev.type === "lift") {
 				const it = ctl.floor.get(ev.key), slot = ctl.lift(ev.key);
 				if (slot === undefined) return;
 				client.report({ type: "pickup_item", ...(it.fresh ? { drop: it.drop } : { item: it.item_id }), slot });
-				note(`Picked up ${nameOf(it)}`, "#e9c25a");
+				note(`Picked up ${nameOf(it)}`, "loot");
 				return;
 			}
-			if (ev.type === "damage") note(`-${num(ev.amount)} damage`, "#ff9b8d");
 			if (ev.local) return;
 			if (ev.type === "pickup") {
 				const d = run.dungeon.drops[ev.drop];
@@ -1025,7 +1270,7 @@ function Dungeon({ run, client, onEnd }) {
 				if (slot === undefined) return;            // input() never takes into a full bag
 				client.report({ ...ev, slot });
 				const name = nameOf({ ...d, kind: run.bases[d.base_id]?.kind });
-				note(`Picked up ${name}`, "#e9c25a");
+				note(`Picked up ${name}`, d && run.bases[d.base_id]?.kind === "unique" ? "unique" : "loot");
 				return;
 			}
 			client.report(ev.type === "kill" && ev.enemy === run.dungeon.boss
@@ -1035,7 +1280,7 @@ function Dungeon({ run, client, onEnd }) {
 		const finish = (status) => {
 			ended = true;
 			ctl.ended = true;
-			setEnding(status);
+			setLoot([]); setHover(null);
 			client.flush();
 			const h = st.hero;
 			// What came back is what is still carried (an item put down and left is gone).
@@ -1055,22 +1300,16 @@ function Dungeon({ run, client, onEnd }) {
 			const gear = ctl.gear;                      // a swap made in the side panel
 			ctl.gear = null;
 			step(st, gear ? { ...(drive ? drive(st) : input()), gear } : drive ? drive(st) : input());
-			if (gear) note("Gear changed", "#cdc6fb");
+
 			for (const ev of st.events) handle(ev);
 			if (st.status === "dead" || st.status === "recalled" || st.status === "complete") {
 				finish(st.status === "complete" ? "completed" : st.status);
 			}
 		};
 
-		const bagHint = () => {
-			const l = nearestLoot(), b = l?.bag;
-			if (l?.floor) return [{ text: `E: take ${nameOf(ctl.floor.get(l.floor.key))}`, color: "#e9c25a" }];
-			if (!b && st.portal && Math.hypot(st.portal.x - st.p.x, st.portal.y - st.p.y) <= REACH)
-				return [{ text: "E: leave the Shallows", color: "#9fe7ff" }];
-			if (!b) return [];
-			const d = run.dungeon.drops[b.drops[0]];
-			return [{ text: `E: take ${nameOf({ ...d, kind: run.bases[d.base_id]?.kind })}${b.drops.length > 1 ? ` (+${b.drops.length - 1})` : ""}`, color: "#e9c25a" }];
-		};
+		// What is in reach is in the loot panel; the canvas keeps only the way out.
+		const bagHint = () => (!nearestLoot() && st.portal && Math.hypot(st.portal.x - st.p.x, st.portal.y - st.p.y) <= REACH
+			? [{ text: `E: leave ${run.dungeon.name}`, color: "#9fe7ff" }] : []);
 
 		// DEV ONLY: step the real loop without frames (a hidden tab gets none).
 		if (import.meta.env.DEV) window.__halcyon.advance = (n) => { for (let i = 0; i < n && !ended; i++) tick(); return st.status; };
@@ -1080,17 +1319,28 @@ function Dungeon({ run, client, onEnd }) {
 			acc += Math.min(250, now - last);
 			last = now;
 			while (acc >= STEP_MS && !ended) { acc -= STEP_MS; tick(); }
-			while (notes.length && notes[0].until < st.tick) notes.shift();
+			// The loot panel and the bag tooltip: React hears only when what they show changes.
+			const near = ended ? [] : inReach();
+			const k = near.map((e) => e.key).join(",");
+			if (k !== lootKey) { lootKey = k; setLoot(near); }
+			let hv = null;
+			if (mouse.over && !ended) {
+				const wx = (mouse.x - cam.ox) / px, wy = (mouse.y - cam.oy) / px;
+				const bag = st.bags.find((b) => (b.x - wx) ** 2 + (b.y - wy) ** 2 < 0.5 * 0.5);
+				if (bag) hv = { key: `${bag.enemy}:${bag.drops.join(",")}`, x: mouse.cx, y: mouse.cy, items: bag.drops.map(specOf) };
+			}
+			const hk = hv ? `${hv.key}@${Math.round(hv.x)},${Math.round(hv.y)}` : "";
+			if (hk !== hoverKey) { hoverKey = hk; setHover(hv); }
 			alpha = ended ? 1 : acc / STEP_MS;
 			const at = (o) => {
 				const q = prev.get(o);
 				return q ? { x: q[0] + (o.x - q[0]) * alpha, y: q[1] + (o.y - q[1]) * alpha } : o;
 			};
 			const pp = at(st.p);
-			cam = camera(st, cv.width, cv.height, px, pp);
+			cam = camera(st, cv.width, cv.height, px, pp, true);
 			draw(g, st, { width: cv.width, height: cv.height, px, at,
 				aim: { x: (mouse.x - cam.ox) / px - pp.x, y: (mouse.y - cam.oy) / px - pp.y },
-				notes: [...notes, ...(ended ? [] : bagHint())] });
+				notes: ended ? [] : bagHint() });
 			raf = requestAnimationFrame(frame);
 		};
 		raf = requestAnimationFrame(frame);
@@ -1102,13 +1352,16 @@ function Dungeon({ run, client, onEnd }) {
 			else if (e.code === "KeyE") edge.interact = true;
 			else if (e.code === "KeyF") edge.recall = true;
 			else if (e.code === "KeyT") { auto = !auto; note(auto ? "Auto-fire on" : "Auto-fire off"); }
+			else if (e.code === "KeyG") lootApi.current?.takeAll();
 		};
 		const onKeyUp = (e) => keys.delete(e.code);
 		const toCanvas = (e) => {
 			const r = cv.getBoundingClientRect(), dpr = cv.width / Math.max(1, r.width);
 			mouse.x = (e.clientX - r.left) * dpr; mouse.y = (e.clientY - r.top) * dpr;
+			mouse.cx = e.clientX; mouse.cy = e.clientY; mouse.over = true;
 		};
 		const onMove = (e) => toCanvas(e);
+		const onLeave = () => { mouse.over = false; };
 		const onDown = (e) => { toCanvas(e); if (e.button === 0) mouse.down = true; if (e.button === 2) edge.ability = true; };
 		const onUp = (e) => { if (e.button === 0) mouse.down = false; };
 		const onBlur = () => { keys.clear(); mouse.down = false; };
@@ -1118,6 +1371,7 @@ function Dungeon({ run, client, onEnd }) {
 		window.addEventListener("blur", onBlur);
 		window.addEventListener("mouseup", onUp);
 		cv.addEventListener("mousemove", onMove);
+		cv.addEventListener("mouseleave", onLeave);
 		cv.addEventListener("mousedown", onDown);
 		cv.addEventListener("contextmenu", noMenu);
 		return () => {
@@ -1128,6 +1382,7 @@ function Dungeon({ run, client, onEnd }) {
 			window.removeEventListener("blur", onBlur);
 			window.removeEventListener("mouseup", onUp);
 			cv.removeEventListener("mousemove", onMove);
+			cv.removeEventListener("mouseleave", onLeave);
 			cv.removeEventListener("mousedown", onDown);
 			cv.removeEventListener("contextmenu", noMenu);
 		};
@@ -1136,8 +1391,34 @@ function Dungeon({ run, client, onEnd }) {
 	return (
 		<>
 			<canvas ref={canvasRef} className="hr-canvas hr-canvas-run" aria-label="The dungeon" />
-			{cleared && !ending && <div className="hr-ending hr-cleared res-completed" role="status">Cleared</div>}
-			{ending && <div className={"hr-ending res-" + ending}>{{ completed: "Cleared", recalled: "Recalled", dead: "Fallen" }[ending]}</div>}
+			{loot.length > 0 && (
+				<section className="hr-loot fg-panel" aria-label="Loot here">
+					<header className="hr-loot-hd">
+						<h2 className="fg-label">Loot</h2>
+						<button className="btn btn-ghost btn-sm hr-loot-all" onClick={(e) => { lootApi.current?.takeAll(); e.currentTarget.blur(); }}
+							title="Take everything here (G)">Take all</button>
+					</header>
+					<div className="hr-loot-grid">
+						{loot.map((e) => {
+							const it = e.item, fam = run.bases[it.base_id]?.slot;
+							return <button key={e.key} className={`hr-slot has fam-${fam}` + (it.kind === "unique" ? " unique" : "")}
+								aria-label={`Take ${nameOf(it)}`}
+								onClick={(ev) => { lootApi.current?.take(e); tips.hideTip(); ev.currentTarget.blur(); }}
+								onMouseEnter={(ev) => tips.showTip(it, ev.currentTarget)} onMouseLeave={tips.hideTip}>
+								<span className="hr-abbr">{ABBR[it.base_id] || "?"}</span>
+								{it.kind === "unique" ? <span className="hr-tier hr-star" aria-hidden="true">★</span> : <span className="hr-tier">{it.tier}</span>}
+								{it.slot_count > 0 && <span className="hr-dots">{"•".repeat(it.slot_count)}</span>}
+							</button>;
+						})}
+					</div>
+					<p className="hr-loot-keys">Click to take · <kbd>E</kbd> the first · <kbd>G</kbd> all</p>
+				</section>)}
+			{hover && (
+				<div className="hr-bag-tip fg-panel" role="tooltip" style={{ left: hover.x + 14, top: hover.y + 14 }}>
+					<h3 className="fg-label">Loot bag</h3>
+					<ul>{hover.items.map((it, i) => <li key={i} className={it.kind === "unique" ? "unique" : ""}>{nameOf(it)}
+						{it.slot_count > 0 && <small> · {it.slot_count} slot{it.slot_count > 1 ? "s" : ""}</small>}</li>)}</ul>
+				</div>)}
 		</>
 	);
 }

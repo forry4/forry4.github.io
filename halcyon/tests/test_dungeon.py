@@ -7,6 +7,8 @@ import pytest
 from core.db import _Conn
 from halcyon import dungeon as D
 from halcyon import store as S
+from halcyon import store
+from halcyon import content as C
 
 SEEDS = [f"s{i}" for i in range(200)]
 
@@ -36,8 +38,8 @@ def test_every_dungeon_is_completable(seed):
     reach = D.reachable(d)
     for eid, e in d["enemies"].items():
         assert (int(e["x"]), int(e["y"])) in reach, f"{eid} cannot be reached"
-    for p in d["pickups"]:
-        assert (int(p["x"]), int(p["y"])) in reach, f"pickup {p['id']} cannot be reached"
+    for p in d["pickups"]:      # heal orbs drop from an ordinary enemy, never from the boss
+        assert p["kind"] == "heal" and p["enemy"] in d["enemies"] and p["enemy"] != d["boss"], p
     assert d["boss"] == "boss" and d["enemies"]["boss"]["type"] == "boss"
     assert d["rooms"][0]["kind"] == "entrance" and d["rooms"][-1]["kind"] == "boss"
     assert sum(r["kind"] == "combat" for r in d["rooms"]) == 4
@@ -102,3 +104,42 @@ def test_a_unique_drop_has_no_tier_to_climb():
                 seen += 1
                 assert d["tier"] == 1, d
     assert seen > 0, "300 dungeons rolled no unique at all"
+
+
+def test_heal_orbs_come_about_one_a_rift_and_none_are_placed_in_rooms():
+    counts = [len(D.generate("shallows", f"h{i}")["pickups"]) for i in range(400)]
+    mean = sum(counts) / len(counts)
+    assert 0.5 <= mean <= 1.5, mean
+    assert sum(c <= 2 for c in counts) / len(counts) >= 0.85
+    assert all("H" not in row for t in D.COMBAT + [D.ENTRANCE, D.BOSS_ROOM] for row in t)
+
+
+def test_uniques_drop_only_from_the_boss():
+    seen_boss_unique = False
+    for i in range(300):
+        d = D.generate("shallows", f"u{i}", mods=["fortified", "brutal", "swift"])
+        for dr in d["drops"].values():
+            if C.base(dr["base_id"])["kind"] == "unique":
+                assert dr["enemy"] == d["boss"], dr
+                seen_boss_unique = True
+    assert seen_boss_unique
+
+
+def test_rift_modifiers_raise_tiers_and_uniques_but_not_slot_counts():
+    def tally(mods):
+        tiers, uniques, slots, n = 0, 0, 0, 0
+        for i in range(400):
+            for dr in D.generate("shallows", f"m{i}", mods=mods)["drops"].values():
+                n += 1
+                tiers += dr["tier"]
+                uniques += C.base(dr["base_id"])["kind"] == "unique"
+                slots += dr["slot_count"]
+        return tiers / n, uniques, slots / n
+    t0, u0, s0 = tally([])
+    t3, u3, s3 = tally(["fortified", "brutal", "swift"])
+    assert t3 > t0 + 0.3 and u3 > u0 * 2
+    assert abs(s3 - s0) < 0.15          # the same chance of enchantment slots
+    d = D.generate("shallows", "x", mods=["swift", "fortified"])
+    assert d["mods"] == ["fortified", "swift"] and d["scale"] == {"hp": 1.5, "dmg": 1.0, "speed": 1.25}
+    with pytest.raises(store.HalcyonError):
+        D.generate("shallows", "x", mods=["nope"])

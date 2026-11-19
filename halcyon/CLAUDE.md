@@ -105,13 +105,13 @@ drag the vest off mid-run → put it on the ground and take it back → recall �
 - **The forge is a pick, not a drop target** (owner's ask: dragging into it "felt
   janky"). At the forge a click PICKS an item in the bag or equipment — it stays where
   it is, ringed in the accent — two at most, then Fuse. It says why two will not fuse
-  (item, tier or slot count). Leaving the forge drops the picks.
+  (item, tier or slot count). Leaving the forge drops the picks. Since 2026-11-18 it is
+  laid out as two input cards + a result card (see "Loot, the forge, modifiers").
 - **Two STANDARD weapon types per class, plus uniques** (owner's calls, 2026-11-18). The
   Ranger's are the shortbow (twin fanned arrows, fast, range 5) and the longbow (one
   heavy slow arrow that pierces two, range 7 — the longest); Paladin has the short-range
-  mace and greatsword; Diviner has the wand and the range-8 starstaff. Paladin's ability
-  plants a shield in front of the character for five seconds or one enemy projectile;
-  Diviner's ability slows enemy projectiles within three tiles while active. The repeater
+  mace and greatsword; Diviner has the wand and the range-8 starstaff; Ninja the shuriken
+  and kunai. Each class's ability is in "One ability per class" below. The repeater
   (a three-bolt burst, range 6) is a rare UNIQUE drop. **A base's kind belongs to the base**:
   `store.init_schema` brings existing items into line with `content.py` (kind, and
   tier 1 for a unique), so an item minted before a base changed kind follows it (tested).
@@ -126,7 +126,7 @@ drag the vest off mid-run → put it on the ground and take it back → recall �
   numbers — an enchantment's value is `sim.enchantValue(id, q)` off `ENCHANT_FLAT`, so the
   store still keeps only quality. HP/MP regeneration is the one intentional exception: it
   is tunable to one decimal place and displayed as `/s`. The side panel's stats row (ATT,
-  DEX, DEF over DMG, RATE — range is in the weapon's tooltip) is `statsFor` of what is on, so it is what the fight
+  DEX, DEF, AP — damage, rate and range are the WEAPON's, in its tooltip) is `statsFor` of what is on, so it is what the fight
   will use. Points apply after the loop over gear, so gear order cannot change a number
   (tested). Base MP regeneration is 2.5/s; the Ranger's Volley starts at 8 damage per arrow.
 - **HP and MP bars sit in the side panel**, under the character and above the stats,
@@ -228,12 +228,13 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
 ## The main menu, keys and waking (2026-11-18)
 - **The page opens on a main menu** (`.hr-menu`): one card per character slot — a
   character's card (level, XP bar, weapon) enters the town as it; an empty one makes a
-  new Ranger and enters with it. **A death returns you there**, with the result panel
-  over the cards; a recall stays in town. Back in town goes to the menu, Back on the
+  new Ranger and enters with it. **A death returns you there**, with a notification
+  saying so; a recall stays in town. Back in town goes to the menu, Back on the
   menu leaves the game. The side panel no longer has a roster. A new Ranger starts
   with the LONGBOW (`api.STARTER`).
-- **Keys:** F recall, T auto-fire (in town and in a run), E use / pick up, Space
-  volley, 1–8 equip from the bag.
+- **Keys:** F recall, T auto-fire (in town and in a run), E interact (use a station,
+  take the first item in reach, leave by the portal), G take everything in reach, Space
+  ability, 1–8 equip from the bag.
 - **Enemies wake by TRIGGER RANGE, not by room**: each `ENEMY` type has a `wake`
   radius (tiles); an asleep enemy wakes when the player is inside it with a clear line
   (`sim.clearLine` — walls and rocks block it, water does not), or when an arrow hits
@@ -252,12 +253,12 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
   (discard, fuse, runs) waits for the chain first. Run moves were always local.
   `halcyonPlay` holds the move route back 1.5s and still sees the swap at once.
 - **Range is the weapon's, not the Ranger's**: it is in the weapon's tooltip, not in
-  the stats (ATT DEX DEF over DMG RATE). Every tooltip number is its own line.
+  the stats (ATT DEX DEF AP). Every tooltip number is its own line.
 - **Regeneration a second is on the HP and MP bars.** The town has NO bonus regen: MP
   refills at the gear's `mpRegen`, and a gear change only clamps it.
 - **XP shows as it is earned**: in a run the level and XP bar are read off the sim
   each frame (`LiveHero`), so the boss kill (which carries the clear) moves the bar
-  then, and nothing arrives on the way back — the result panel has no "+XP" line, and
+  then, and nothing arrives on the way back — the end-of-run notification has no "+XP", and
   `endRun` keeps the run's XP on screen until the server's copy lands.
 
 ## Putting items down (2026-11-18)
@@ -268,5 +269,68 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
   free bag slot. The page reports `drop_item` / `pickup_item`, naming the item by its
   drop if it was picked up this run (the store already accepted both). Whatever is
   still on the floor when the run ends is gone (the store destroys `ground` items at
-  run end), and the result panel's "Brought back" counts only what is still carried.
+  run end), and the end-of-run notification's "Brought back" counts only what is still carried.
 - In town there is no floor (`move_item` refuses `ground`); the bin discards.
+
+## Loot, the forge, modifiers, AP and notifications (2026-11-18, owner's asks)
+- **Heals drop from enemies, never lie in rooms.** The templates have no `H` markers;
+  `dungeon.generate` gives each non-boss enemy a `HEAL_CHANCE` (3.5%) heal, written as
+  a pickup with an `enemy` field (~0.9 a rift, `test_dungeon`). The sim keeps those off
+  the floor (`healsBy`) and `kill()` drops one where its carrier died.
+- **Uniques drop only from the boss** (`UNIQUE_LOOT` by class, rolled at
+  `UNIQUE_BASE + UNIQUE_PER_RARITY * modifiers`); a bag holds at most `BAG_MAX` (8).
+- **Rift modifiers** (`content.RIFT_MODS`: fortified / brutal / swift). E at a portal
+  opens its panel; E again (or Enter the rift) goes in with what is picked. The run
+  POST carries `mods`; `generate` validates them, writes `mods` + `scale` into the
+  dungeon, and adds `TIER_UP_PER_RARITY` per modifier to each drop's tier-up chance and
+  `UNIQUE_PER_RARITY` to the boss's unique — **never the slot count** (owner's rule,
+  tested). The sim reads `dungeon.scale` (enemy HP, enemy damage, enemy move and shot
+  speed). The panel's numbers come from `/halcyon/state`'s `odds`, the same constants.
+- **AP (ability power) is a stat**, as Attack is the weapon's: `ability_power`
+  enchants add points, `PER_LEVEL.ap` 1; `abilityPower = 1 + ap/STAT_SCALE` multiplies
+  each ability's own lever (see "One ability per class": never a duration or a guard). An ability item's tooltip says
+  what it does at the character's current AP (`abilityLines`). Base HP regen is 0.5/s
+  (was 1.0); the `hp_regen` enchant rolls 0.2–1.2.
+- **The forge** shows two input cards (each item's slots and enchantments) and a
+  result card with the slot odds as the store rolls them (`slotOdds` — each gain tried
+  in turn, capped at `max_slots`; `FUSE_SLOT_GAIN` is now 4% +2, else 20% +1). After
+  Fuse it REVEALS: the inputs struck through, the new item's slot dots with gained ones
+  lit, "+1 enchantment slot! 2 → 3", each enchantment tagged New / was +N against the
+  best of its kind on either input, and where the item went — that slot flashes.
+- **What is in reach shows as slots in the stage's bottom right** (`.hr-loot`): every
+  bag drop and put-down item within `REACH`, click one to take it (queued, one a tick,
+  through the same `take` / `lift` inputs E uses), or Take all / G. Hovering a bag on
+  the canvas lists its contents (`.hr-bag-tip`). The canvas keeps only the portal
+  prompt. A hidden pane gets almost no frames, so the panel updates only when it draws.
+- **Sort** (beside Inventory): weapons, armor, abilities, rings; uniques first, then
+  tier and slots. In town it works out the swaps on a local copy (each move one version
+  on, as `townMove`) and sends them in order through `sendMoves`; in a run it is run
+  moves. `halcyonPlay` drags the vest to slot 6 in a run and sorts it back.
+- **Notifications, not banners**: `notify(text, tone)` puts a line in the top left
+  (`Notices`), fading after 6s; "Log N" opens every one of this page load's messages.
+  It replaced the result panel (its OK button), the error box (`setError` once the page
+  is up becomes a notification), the Cleared/Recalled/Fallen banners and the canvas
+  notes (pickups, levels, auto-fire). The floating damage numbers stay on the canvas.
+- **The camera follows the player from the first frame** (`camera(..., follow=true)`):
+  it used to sit on the start until the player walked off it.
+
+## One ability per class (2026-11-18, owner's calls)
+- **ONE standard ability per class, each on a cooldown** (`ABILITY_COOLDOWN` in `sim.js`:
+  volley 3s, slow 10s, starfall 4s, counter 4s). The cooldown is what stops MP regeneration
+  from keeping an ability up forever; a cast during it spends nothing.
+- **Ranger — Volley Quiver**: the arrow fan. AP raises its damage.
+- **Paladin — Stillness Orb** (moved from the Diviner): a field that slows ENEMY SHOTS
+  inside it (not enemies), 5s. **AP widens it (`slowRadius`) and never lengthens it.**
+- **Diviner — Star Tome**: a star falls where you aim (clamped to 8 tiles), lands after 36
+  ticks, hits everything within 1.5 tiles. AP raises its damage. `landStarfalls` is shared
+  with the town, where it hits the posts.
+- **Ninja — Mirror Charm** (new class; shuriken and kunai, Shadow Garb armor): for 1s the
+  next hit is ignored, then 0.5s untouchable, and the next volley does `counterMult` x
+  (2 x abilityPower). **AP scales the damage, NEVER the guard** — the owner does not want a
+  late-game character to be invincible. A second counter before attacking does not stack;
+  a counter that catches nothing still costs its MP and its cooldown.
+- **The Grounding Aegis shield is retired, not deleted** — kept in the sim for a future
+  class. Its content row is `retired`, and `init_schema` turns any into a Stillness Orb
+  (and a Diviner's equipped Stillness Orb into a Star Tome).
+- **Rings: two of the same base are fine; two of the same UNIQUE are not**, whatever their
+  enchantment slots (`_check_fits`).

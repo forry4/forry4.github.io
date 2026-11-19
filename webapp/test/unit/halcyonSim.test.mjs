@@ -5,7 +5,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { createSim, step, setGear, wallHit, enchantValue, STAT_SCALE, fingerprint, dsin, dcos, recoveryLimit, statsFor, levelFor, xpProgress, PER_LEVEL, WEAPONS, TPS, REACH, SHIELD_DURATION, SLOW_FACTOR } from "../../../halcyon/sim.js";
+import { createSim, step, setGear, wallHit, enchantValue, STAT_SCALE, fingerprint, dsin, dcos, recoveryLimit, statsFor, levelFor, xpProgress, PER_LEVEL, WEAPONS, TPS, REACH, SHIELD_DURATION, SLOW_FACTOR, SLOW_DURATION, SLOW_RADIUS,
+	ABILITY_COOLDOWN, STARFALL_DELAY, COUNTER_WINDOW, COUNTER_GUARD } from "../../../halcyon/sim.js";
 
 const load = (s) => JSON.parse(readFileSync(new URL(`./fixtures/halcyon-dungeon-${s}.json`, import.meta.url)));
 const A = load("unit-a"), B = load("unit-b");
@@ -137,8 +138,9 @@ test("health regenerates only to the recovery limit, and a heal raises both", ()
 	for (let t = 0; t < 120 * TPS; t++) step(st, {});
 	assert.equal(recoveryLimit(st), 60);
 	assert.equal(st.p.hp, 60, "regen stops at lowest + 40");
-	const orb = st.pickups[0];
-	st.p.x = orb.x; st.p.y = orb.y;
+	assert.equal(st.pickups.length, 0, "no heal lies in a room: they drop from enemies");
+	const orb = { id: "h-test", kind: "heal", x: st.p.x, y: st.p.y };
+	st.pickups.push(orb);
 	step(st, { heal: true });
 	assert.equal(st.p.low, 55);
 	assert.equal(st.p.hp, 95);
@@ -347,23 +349,124 @@ test("every number a player reads is flat, with one decimal place for regenerati
 	assert.equal(strong.dmg, Math.round(bare.weaponDmg * (1 + strong.att / STAT_SCALE)));
 });
 
-test("Paladin and Diviner have their intended starter ranges and abilities", () => {
-	const paladin = statsFor([
-		{ base_id: "mace", tier: 1 }, { base_id: "plate_armor", tier: 1 }, { base_id: "grounding_aegis", tier: 1 },
-	], 1, "paladin");
-	const diviner = statsFor([
-		{ base_id: "starstaff", tier: 1 }, { base_id: "seer_robes", tier: 1 }, { base_id: "stillness_orb", tier: 1 },
-	], 1, "diviner");
-	assert.equal(paladin.range, 3);
-	assert.equal(paladin.abilityKind, "shield");
-	assert.equal(diviner.range, 8);
-	assert.equal(diviner.abilityKind, "slow");
+const PALADIN = [{ base_id: "mace", tier: 1 }, { base_id: "plate_armor", tier: 1 }, { base_id: "stillness_orb", tier: 1 }];
+const DIVINER = [{ base_id: "starstaff", tier: 1 }, { base_id: "seer_robes", tier: 1 }, { base_id: "star_tome", tier: 1 }];
+const NINJA = [{ base_id: "shuriken", tier: 1 }, { base_id: "shadow_garb", tier: 1 }, { base_id: "mirror_charm", tier: 1 }];
+const withAp = (kit, q) => kit.map((it, i) => (i === 2 && q ? { ...it, enchants: [{ id: "ability_power", q }, { id: "ability_power", q }] } : it));
+
+test("one standard ability per class: field, stars, counter (and the volley)", () => {
+	assert.equal(statsFor(PALADIN, 1, "paladin").range, 3);
+	assert.equal(statsFor(PALADIN, 1, "paladin").abilityKind, "slow");
+	assert.equal(statsFor(DIVINER, 1, "diviner").range, 8);
+	assert.equal(statsFor(DIVINER, 1, "diviner").abilityKind, "starfall");
+	assert.equal(statsFor(NINJA, 1, "ninja").abilityKind, "counter");
+	assert.equal(WEAPONS.shuriken.look, "star");
 });
 
-test("Paladin's shield absorbs one enemy projectile, lets player shots through, and expires", () => {
-	const st = createSim(A, [
-		{ base_id: "mace", tier: 1 }, { base_id: "plate_armor", tier: 1 }, { base_id: "grounding_aegis", tier: 1 },
-	], { class_id: "paladin" });
+test("an ability has a cooldown, so MP regeneration cannot keep it up", () => {
+	const st = createSim(A, PALADIN, { class_id: "paladin" });
+	st.enemies = [];
+	st.p.mp = 1000; st.stats.maxMp = 1000;
+	step(st, { ability: true });
+	const mp = st.p.mp;
+	assert.ok(st.p.abilityCd > ABILITY_COOLDOWN.slow - 3, "casting starts the cooldown");
+	step(st, { ability: true });
+	assert.ok(st.p.mp >= mp, "a second cast during the cooldown spends nothing");
+	assert.ok(st.slowUntil <= SLOW_DURATION + 2, "and starts nothing");
+	for (let i = 0; i < ABILITY_COOLDOWN.slow; i++) step(st, {});
+	step(st, { ability: true });
+	assert.ok(st.p.mp < mp + 50, "after the cooldown it casts again");
+	assert.ok(st.slowUntil > SLOW_DURATION + 2);
+});
+
+test("the Paladin's field slows enemy shots inside it; AP widens it, never lengthens it", () => {
+	const st = createSim(A, PALADIN, { class_id: "paladin" });
+	st.enemies = [];
+	step(st, { ability: true });
+	const b = { owner: "e", x: st.p.x - 1, y: st.p.y, vx: 6, vy: 0, dmg: 1, r: 0.1, life: 5, pierce: 0, hit: [] };
+	st.bullets.push(b);
+	step(st, {});
+	assert.equal(b.x, st.p.x - 1 + 6 * (1 / TPS) * SLOW_FACTOR);
+	const field = (q) => { const s = createSim(A, withAp(PALADIN, q), { class_id: "paladin" }); step(s, { ability: true }); return [s.slowR, s.slowUntil]; };
+	const [r0, t0] = field(0), [r1, t1] = field(1);
+	assert.equal(r0, SLOW_RADIUS);
+	assert.ok(r1 > r0, "AP widens the field");
+	assert.equal(t1, t0, "AP does not lengthen it");
+});
+
+test("the Diviner's star lands where you aim after a beat and hits everything near it", () => {
+	const st = createSim(A, DIVINER, { class_id: "diviner" });
+	const [e1, e2] = st.enemies.filter((e) => e.type !== "boss");
+	st.enemies = [e1, e2];
+	st.p.x = 10; st.p.y = 10;
+	e1.x = 14; e1.y = 10; e2.x = 14.6; e2.y = 10.4;
+	const h1 = e1.hp, h2 = e2.hp;
+	step(st, { ability: true, ax: 4, ay: 0 });
+	assert.equal(st.starfalls.length, 1);
+	for (let i = 0; i < STARFALL_DELAY - 2; i++) step(st, {});
+	assert.equal(e1.hp, h1, "nothing yet: the star is still falling");
+	for (let i = 0; i < 3; i++) step(st, {});
+	assert.equal(st.starfalls.length, 0);
+	assert.ok(e1.hp < h1 && e2.hp < h2, "both enemies under it are hit");
+	const far = createSim(A, DIVINER, { class_id: "diviner" });
+	far.enemies = [];
+	step(far, { ability: true, ax: 40, ay: 0 });
+	assert.ok(Math.abs(far.starfalls[0].x - far.p.x - 8) < 1e-9, "no farther than its range");
+	assert.ok(statsFor(withAp(DIVINER, 1), 1, "diviner").abilityDmg > statsFor(DIVINER, 1, "diviner").abilityDmg, "AP raises its damage");
+});
+
+test("the Ninja's counter: a hit in the window is ignored, a short guard, the next shot doubled once", () => {
+	const st = createSim(A, NINJA, { class_id: "ninja" });
+	st.enemies = [];
+	const hp = st.p.hp;
+	const hit = () => st.bullets.push({ owner: "e", x: st.p.x, y: st.p.y, vx: 0, vy: 0, dmg: 30, r: 0.1, life: 5, pierce: 0, hit: [] });
+	step(st, { ability: true });
+	for (let i = 0; i < COUNTER_WINDOW - 5; i++) step(st, {});
+	hit(); step(st, {});
+	assert.equal(st.p.hp, hp, "the countered hit does nothing");
+	assert.ok(st.p.empower === 2);
+	hit(); step(st, {});
+	assert.equal(st.p.hp, hp, "the guard ignores what follows at once");
+	for (let i = 0; i < COUNTER_GUARD; i++) step(st, {});
+	hit(); step(st, {});
+	assert.ok(st.p.hp < hp, "the guard is over");
+	step(st, { fire: true, ax: 1, ay: 0 });
+	const shot = st.bullets.find((b) => b.owner === "p");
+	assert.equal(shot.dmg, st.stats.dmg * 2, "the next shot does twice the damage");
+	for (let i = 0; i < TPS; i++) step(st, {});
+	step(st, { fire: true, ax: 1, ay: 0 });
+	assert.ok(st.bullets.filter((b) => b.owner === "p").every((b) => b.dmg <= st.stats.dmg * 2), "only once");
+	assert.ok(st.bullets.some((b) => b.owner === "p" && b.dmg === st.stats.dmg));
+});
+
+test("countering twice before attacking does not stack; AP raises the damage but not the guard", () => {
+	const st = createSim(A, withAp(NINJA, 1), { class_id: "ninja" });
+	st.enemies = [];
+	const mult = st.stats.counterMult;
+	assert.ok(mult > 2, "AP raises the counter's damage");
+	const hit = () => st.bullets.push({ owner: "e", x: st.p.x, y: st.p.y, vx: 0, vy: 0, dmg: 30, r: 0.1, life: 5, pierce: 0, hit: [] });
+	for (let n = 0; n < 2; n++) {
+		st.p.abilityCd = 0; st.p.mp = 100;
+		step(st, { ability: true });
+		hit(); step(st, {});
+		assert.ok(st.p.guardUntil - st.tick <= COUNTER_GUARD, "the guard is the same at any AP");
+	}
+	assert.equal(st.p.empower, mult, "still one empowered shot, not two");
+});
+
+test("a counter that catches nothing still costs its MP and starts its cooldown", () => {
+	const st = createSim(A, NINJA, { class_id: "ninja" });
+	st.enemies = [];
+	const mp = st.p.mp;
+	step(st, { ability: true });
+	for (let i = 0; i < COUNTER_WINDOW + 2; i++) step(st, {});
+	assert.equal(st.p.empower, 0);
+	assert.ok(st.p.mp < mp + (COUNTER_WINDOW + 3) * st.stats.mpRegen / TPS);
+	assert.ok(st.p.abilityCd > 0);
+});
+
+test("the retired shield still works for the class that gets it later", () => {
+	const st = createSim(A, [{ base_id: "mace", tier: 1 }, { base_id: "grounding_aegis", tier: 1 }], { class_id: "paladin" });
 	st.enemies = [];
 	step(st, { ax: 1, ay: 0, ability: true });
 	assert.ok(st.shield);
@@ -372,23 +475,11 @@ test("Paladin's shield absorbs one enemy projectile, lets player shots through, 
 	step(st, { ax: 1, ay: 0, fire: true });
 	assert.equal(st.shield, null);
 	assert.equal(st.p.hp, hp);
-	assert.ok(st.bullets.some((b) => b.owner === "p"), "the shield does not block player fire");
+	for (let i = 0; i < ABILITY_COOLDOWN.shield; i++) step(st, {});
 	step(st, { ax: 1, ay: 0, ability: true });
 	assert.ok(st.shield);
-	for (let i = 0; i < SHIELD_DURATION; i++) step(st, {});
+	for (let i = 0; i < SHIELD_DURATION * 2; i++) step(st, {});
 	assert.equal(st.shield, null);
-});
-
-test("Diviner's ability slows enemy projectiles inside its three-tile aura", () => {
-	const st = createSim(A, [
-		{ base_id: "starstaff", tier: 1 }, { base_id: "seer_robes", tier: 1 }, { base_id: "stillness_orb", tier: 1 },
-	], { class_id: "diviner" });
-	st.enemies = [];
-	step(st, { ability: true });
-	const b = { owner: "e", x: st.p.x - 1, y: st.p.y, vx: 6, vy: 0, dmg: 1, r: 0.1, life: 5, pierce: 0, hit: [] };
-	st.bullets.push(b);
-	step(st, {});
-	assert.equal(b.x, st.p.x - 1 + 6 * (1 / TPS) * SLOW_FACTOR);
 });
 
 test("damage taken creates a visible one-decimal damage event, and the rift timer freezes at boss death", () => {
@@ -437,4 +528,31 @@ test("enemies sleep until the player comes within their trigger range, in sight"
 	e.x = st.p.x + 3; e.y = st.p.y;
 	step(st, {});
 	assert.ok(e.active, "close and in sight: awake");
+});
+
+test("a heal drops where the enemy that carries it dies", () => {
+	const carrier = { id: "e1" };
+	const st = createSim({ ...A, pickups: [{ id: "h-kill", kind: "heal", enemy: carrier.id }] }, STARTER);
+	assert.equal(st.pickups.length, 0, "a carried heal is not on the floor before the kill");
+	const eid = carrier.id, e = st.enemies.find((x) => x.id === eid);
+	e.hp = 1;
+	st.p.x = e.x - 2; st.p.y = e.y;
+	for (let t = 0; t < 3 * TPS && e.hp > 0; t++) step(st, { fire: true, ax: 1, ay: 0 });
+	assert.ok(e.hp <= 0, "the carrier died");
+	const orb = st.pickups.find((h) => h.id === st.healsBy[eid]);
+	assert.ok(orb && Math.abs(orb.x - e.x) < 0.01, "its heal lies where it fell");
+});
+
+test("ability power raises the volley's damage and leaves the bow alone", () => {
+	const ap = (q) => [{ base_id: "longbow", tier: 1 }, { base_id: "volley_quiver", tier: 1,
+		enchants: q ? [{ id: "ability_power", q }] : [] }];
+	const lo = statsFor(ap(0), 1), hi = statsFor(ap(1), 1);
+	assert.ok(hi.ap > lo.ap && hi.abilityDmg > lo.abilityDmg, "AP raises volley damage");
+	assert.equal(hi.dmg, lo.dmg, "and leaves the bow alone");
+});
+
+test("rift modifiers scale enemy health", () => {
+	const plain = createSim(A, STARTER);
+	const hard = createSim({ ...A, scale: { hp: 1.5 } }, STARTER);
+	assert.equal(hard.enemies[0].hp, plain.enemies[0].hp * 1.5);
 });

@@ -33,10 +33,13 @@ STARTERS = {
                ({"base_id": "volley_quiver", "tier": 1, "slot_count": 0, "enchants": []}, "ability")],
     "paladin": [({"base_id": "mace", "tier": 1, "slot_count": 0, "enchants": []}, "weapon"),
                 ({"base_id": "plate_armor", "tier": 1, "slot_count": 0, "enchants": []}, "armor"),
-                ({"base_id": "grounding_aegis", "tier": 1, "slot_count": 0, "enchants": []}, "ability")],
+                ({"base_id": "stillness_orb", "tier": 1, "slot_count": 0, "enchants": []}, "ability")],
     "diviner": [({"base_id": "starstaff", "tier": 1, "slot_count": 0, "enchants": []}, "weapon"),
                 ({"base_id": "seer_robes", "tier": 1, "slot_count": 0, "enchants": []}, "armor"),
-                ({"base_id": "stillness_orb", "tier": 1, "slot_count": 0, "enchants": []}, "ability")],
+                ({"base_id": "star_tome", "tier": 1, "slot_count": 0, "enchants": []}, "ability")],
+    "ninja": [({"base_id": "shuriken", "tier": 1, "slot_count": 0, "enchants": []}, "weapon"),
+              ({"base_id": "shadow_garb", "tier": 1, "slot_count": 0, "enchants": []}, "armor"),
+              ({"base_id": "mirror_charm", "tier": 1, "slot_count": 0, "enchants": []}, "ability")],
 }
 # Kept as a named Ranger alias for the existing route tests and tools.
 STARTER = STARTERS["ranger"]
@@ -61,6 +64,7 @@ class RunIn(BaseModel):
     char_id: str = Field(max_length=64)
     dungeon_id: str = Field(default="shallows", max_length=32)
     practice: bool = False
+    mods: list[str] = Field(default_factory=list, max_length=8)
 
 
 class EventsIn(BaseModel):
@@ -156,6 +160,12 @@ def setup_halcyon(app, get_db_conn, get_user_by_session, token_resolver=None) ->
                 "classes": [{"id": k, "name": C.CLASS_NAMES[k], "description": C.CLASS_DESCRIPTIONS[k]}
                             for k in C.CLASSES],
                 "levels": list(C.LEVEL_XP),
+                "rift_mods": [{"id": k, **v} for k, v in C.RIFT_MODS.items()],
+                # The odds the page shows (the forge's and the modifiers' panels), read
+                # off the same constants the generator and the store roll against.
+                "odds": {"fuse_slot_gain": [list(g) for g in C.FUSE_SLOT_GAIN], "max_slots": C.MAX_ENCHANT_SLOTS,
+                         "tier_up_per_rarity": C.TIER_UP_PER_RARITY,
+                         "unique_base": C.UNIQUE_BASE, "unique_per_rarity": C.UNIQUE_PER_RARITY},
                 "bases": C.BASE_ITEMS}
 
     @app.post("/halcyon/characters")
@@ -174,7 +184,7 @@ def setup_halcyon(app, get_db_conn, get_user_by_session, token_resolver=None) ->
         _runs_hour.record(who)
         try:
             class_id = S.character_class(connect, who, body.char_id)
-            d = D.generate(body.dungeon_id, class_id=class_id)
+            d = D.generate(body.dungeon_id, class_id=class_id, mods=body.mods)
             run = S.start_run(connect, who, body.char_id, body.dungeon_id, d["seed"], d,
                               practice=body.practice)
         except S.HalcyonError as e:

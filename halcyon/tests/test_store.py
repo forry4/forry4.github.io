@@ -9,6 +9,8 @@ the same wrapper prod uses over Turso — and the all-or-nothing tests inject a
 failure between statements to prove the transaction leaves nothing behind.
 """
 import random
+
+from halcyon import content as C
 import sqlite3
 
 import pytest
@@ -417,8 +419,9 @@ def test_equipment_rules(db, me):
     with pytest.raises(S.HalcyonError, match="slot"):
         S.move_item(db, ME, bow["item_id"], ("equipped", cid, "armor"))
     S.move_item(db, ME, r1["item_id"], ("equipped", cid, "ring1"))
-    with pytest.raises(S.HalcyonError, match="two of the same ring"):
-        S.move_item(db, ME, r2["item_id"], ("equipped", cid, "ring2"))
+    # Two of the same STANDARD ring are fine (owner's call, 2026-11-18) ...
+    S.move_item(db, ME, r2["item_id"], ("equipped", cid, "ring2"))
+    S.move_item(db, ME, r2["item_id"], ("vault", 2))
     S.move_item(db, ME, r3["item_id"], ("equipped", cid, "ring2"))
     # swapping the same base into the slot it already fills is fine
     S.move_item(db, ME, r2["item_id"], ("equipped", cid, "ring1"))
@@ -490,6 +493,18 @@ def test_a_fusion_that_fails_half_way_changes_nothing(db, me):
         S.fuse(_failing(db, "INSERT INTO hr_items"), ME, a["item_id"], b["item_id"])
     assert _snapshot(db) == before
     assert_invariants(db)
+
+
+def test_fusion_gains_a_slot_often_enough_to_be_seen():
+    """Owner, 2026-11-18: the forge must have a real chance of more slots (5% never showed)."""
+    rng = random.Random(7)
+    hits = 0
+    for _ in range(4000):
+        for gain, p in C.FUSE_SLOT_GAIN:
+            if rng.random() < p:
+                hits += 1
+                break
+    assert 0.18 <= hits / 4000 <= 0.30, hits / 4000
 
 
 def test_fusion_can_rarely_gain_slots_and_never_passes_four(db, me):
@@ -660,3 +675,35 @@ def test_the_clear_bonus_comes_with_the_boss_so_a_recall_after_it_keeps_it(db, m
     run = S.start_run(db, ME, me["char_id"], "shallows", "seed", _xp_dungeon())
     S.apply_events(db, ME, run["run_id"], _seq({"type": "kill", "enemy": "boss"}, {"type": "recall"}))
     assert _char(db, me["char_id"])["xp"] == 50          # boss 20 + the clear's 30, no portal needed
+
+
+def test_never_two_of_the_same_unique_whatever_their_slots(db, me):
+    eye = lambda n: {"base_id": "kingfisher_eye", "tier": 1, "slot_count": n,
+                     "enchants": [{"id": "attack", "q": 0.5}] * n}
+    a = S.grant_item(db, ME, eye(0), ("vault", 0))
+    b = S.grant_item(db, ME, eye(2), ("vault", 1))
+    cid = me["char_id"]
+    S.move_item(db, ME, a["item_id"], ("equipped", cid, "ring1"))
+    with pytest.raises(S.HalcyonError, match="two of the same unique"):
+        S.move_item(db, ME, b["item_id"], ("equipped", cid, "ring2"))
+    assert_invariants(db)
+
+
+def test_init_schema_moves_abilities_to_their_new_classes(db):
+    """The shield retired (2026-11-18): every Grounding Aegis becomes a Stillness Orb
+    (now the Paladin's), and a Diviner WEARING an orb gets a Star Tome instead. Run
+    twice: the second pass changes nothing."""
+    S.register_owner(db, ME, "account")
+    div = S.create_character(db, ME, 1, "diviner")
+    aegis = S.grant_item(db, ME, {"base_id": "grounding_aegis", "tier": 2, "slot_count": 1,
+                                  "enchants": [{"id": "ability_power", "q": 0.4}]}, ("vault", 0))
+    orb = S.grant_item(db, ME, {"base_id": "stillness_orb", "tier": 1, "slot_count": 0, "enchants": []}, ("vault", 1))
+    # An orb a Diviner already wore before the change (the store refuses it now).
+    raw = sqlite3.connect(db.path)
+    raw.execute("UPDATE hr_items SET loc='equipped', char_id=?, slot_index=? WHERE item_id=?",
+                (div["char_id"], EQUIP_SLOTS.index("ability"), orb["item_id"]))
+    raw.commit(); raw.close()
+    for _ in range(2):
+        conn = db(); S.init_schema(conn); conn.close()
+        got = {i["item_id"]: i["base_id"] for i in _live(db)}
+        assert got[aegis["item_id"]] == "stillness_orb" and got[orb["item_id"]] == "star_tome"

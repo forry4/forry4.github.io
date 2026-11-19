@@ -167,6 +167,13 @@ def init_schema(conn) -> None:
     # Whether a base is standard or unique belongs to the BASE, so items follow
     # content.py when it changes (the repeater became a unique, 2026-11-18). A unique
     # has no tier ladder: it is tier 1. Cheap, and a no-op once everything agrees.
+    # One ability per class (2026-11-18): the Diviner's equipped Stillness Orbs become
+    # Star Tomes FIRST (the orb is the Paladin's now, so no Diviner can be wearing one
+    # after this), then every retired shield becomes the Paladin's orb. Both are no-ops
+    # once done. Enchantments carry over: all three are ability items.
+    cur.execute("UPDATE hr_items SET base_id='star_tome' WHERE base_id='stillness_orb' AND loc='equipped' "
+                "AND char_id IN (SELECT char_id FROM hr_characters WHERE class_id='diviner')")
+    cur.execute("UPDATE hr_items SET base_id='stillness_orb' WHERE base_id='grounding_aegis'")
     for base_id, b in C.BASE_ITEMS.items():
         cur.execute("UPDATE hr_items SET kind=? WHERE base_id=? AND kind<>?", (b["kind"], base_id, b["kind"]))
         if b["kind"] == "unique":
@@ -280,7 +287,8 @@ def _occupant(cur, owner_id: str, cols: tuple) -> dict | None:
 
 def _check_fits(cur, it: dict, cols: tuple, ignore_item: str | None = None) -> None:
     """May this item sit in this place? Equipment rules live here: the slot
-    family, the class, and one of each ring (design §11.2)."""
+    family, the class, and never two of the same UNIQUE (owner's call, 2026-11-18:
+    two of the same standard ring are fine, whatever their slots)."""
     loc, char_id, _run, slot = cols
     if loc != "equipped":
         return
@@ -295,8 +303,9 @@ def _check_fits(cur, it: dict, cols: tuple, ignore_item: str | None = None) -> N
         other = C.EQUIP_SLOTS.index("ring2" if name == "ring1" else "ring1")
         twin = _one(cur, "SELECT item_id, base_id FROM hr_items WHERE char_id=? AND loc='equipped' "
                          "AND slot_index=?", (char_id, other))
-        if twin and twin["item_id"] not in (it["item_id"], ignore_item) and twin["base_id"] == it["base_id"]:
-            raise HalcyonError("you cannot wear two of the same ring")
+        if (twin and twin["item_id"] not in (it["item_id"], ignore_item) and twin["base_id"] == it["base_id"]
+                and C.base(it["base_id"])["kind"] == "unique"):
+            raise HalcyonError("you cannot wear two of the same unique")
 
 
 def _set_place(cur, item_id: str, cols: tuple, now: float) -> None:

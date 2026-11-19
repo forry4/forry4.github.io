@@ -14,7 +14,7 @@
  *
  * A new realm is one more entry in REALMS and one more portal here.
  */
-import { PLAYER_R, PLAYER_SPEED, DT, TPS, statsFor, playerFire, wallHit } from "./sim.js";
+import { PLAYER_R, PLAYER_SPEED, DT, TPS, statsFor, playerFire, wallHit, landStarfalls } from "./sim.js";
 
 // '#' wall, 'o' planter (blocks), '~' fountain water (blocks), '.' flagstone.
 const MAP = [
@@ -56,8 +56,8 @@ export const DPS_WINDOW = 3 * TPS;
 
 export function createTown(at = SPAWN, classId = "ranger") {
 	const st = { tick: 0, w: MAP[0].length, h: MAP.length, tiles: MAP, stations: STATIONS,
-		p: { x: at.x, y: at.y, r: PLAYER_R, mp: 0, fireCd: 0, burstLeft: 0, burstCd: 0 }, near: null,
-		bullets: [], posts: POSTS.map((q) => ({ ...q, hits: [] })), floats: [] };
+		p: { x: at.x, y: at.y, r: PLAYER_R, mp: 0, fireCd: 0, burstLeft: 0, burstCd: 0, abilityCd: 0, empower: 0 }, near: null,
+		bullets: [], starfalls: [], blasts: [], posts: POSTS.map((q) => ({ ...q, hits: [] })), floats: [] };
 	setTownGear(st, [], 1, classId);
 	return st;
 }
@@ -119,6 +119,15 @@ export function stepTown(st, input) {
 
 	p.mp = Math.min(st.stats.maxMp, p.mp + st.stats.mpRegen * DT);
 	playerFire(st, input);
+	// A star lands on the posts as on enemies, so the Diviner can try it here.
+	landStarfalls(st, (f) => {
+		for (const q of st.posts) {
+			const ddx = q.x - f.x, ddy = q.y - f.y, rr = q.r + f.r;
+			if (ddx * ddx + ddy * ddy >= rr * rr) continue;
+			q.hits.push({ t: st.tick, dmg: f.dmg });
+			st.floats.push({ x: q.x, y: q.y - 0.6, text: String(f.dmg), until: st.tick + 40 });
+		}
+	});
 	const keep = [];
 	for (const b of st.bullets) {
 		b.x += b.vx * DT; b.y += b.vy * DT;

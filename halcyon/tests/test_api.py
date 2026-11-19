@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException
 
 from core.db import _Conn
 from halcyon import api as A
+from halcyon import content as C
 from halcyon import store as S
 
 
@@ -73,7 +74,7 @@ def test_the_whole_loop_through_the_routes(app):
     who = owner_dep(app)("tok", None, None)
     ch = route(app, "POST", "/halcyon/characters")(A.CharacterIn(slot=0), who)
     state = route(app, "GET", "/halcyon/state")(who)
-    assert [c["id"] for c in state["classes"]] == ["ranger", "paladin", "diviner"]
+    assert [c["id"] for c in state["classes"]] == ["ranger", "paladin", "diviner", "ninja"]
     gear = {i["equip_slot"]: i["base_id"] for i in state["items"] if i["loc"] == "equipped"}
     assert gear == {"weapon": "longbow", "armor": "leather_vest", "ability": "volley_quiver"}
     assert [c["char_id"] for c in state["characters"]] == [ch["char_id"]]
@@ -105,7 +106,7 @@ def test_character_menu_starts_class_specific_practice_runs(app):
     ch = route(app, "POST", "/halcyon/characters")(A.CharacterIn(slot=0, class_id="paladin"), who)
     state = route(app, "GET", "/halcyon/state")(who)
     gear = {i["equip_slot"]: i["base_id"] for i in state["items"] if i["loc"] == "equipped"}
-    assert gear == {"weapon": "mace", "armor": "plate_armor", "ability": "grounding_aegis"}
+    assert gear == {"weapon": "mace", "armor": "plate_armor", "ability": "stillness_orb"}
     run = route(app, "POST", "/halcyon/runs")(A.RunIn(char_id=ch["char_id"], practice=True), who)
     assert run["practice"] is True and run["class_id"] == "paladin" and run["dungeon"]["class_id"] == "paladin"
 
@@ -140,3 +141,17 @@ def test_the_site_lets_a_browser_send_the_guest_headers():
     cors = next(m for m in root.app.user_middleware if m.cls is CORSMiddleware)
     allowed = {h.lower() for h in cors.kwargs["allow_headers"]}
     assert {"x-halcyon-owner", "x-halcyon-secret"} <= allowed
+
+
+def test_every_class_starts_with_its_own_kit(app):
+    """One standard ability per class (2026-11-18): the Paladin's field, the Diviner's
+    stars, the Ninja's counter; every starter item is one that class can wear."""
+    who = owner_dep(app)("tok", None, None)
+    want = {"ranger": "volley_quiver", "paladin": "stillness_orb", "diviner": "star_tome", "ninja": "mirror_charm"}
+    for slot, (cls, ability) in enumerate(want.items()):
+        ch = route(app, "POST", "/halcyon/characters")(A.CharacterIn(slot=slot, class_id=cls), who)
+        state = route(app, "GET", "/halcyon/state")(who)
+        gear = [i for i in state["items"] if i["loc"] == "equipped" and i["char_id"] == ch["char_id"]]
+        assert {i["equip_slot"]: i["base_id"] for i in gear}["ability"] == ability
+        assert all(C.BASE_ITEMS[i["base_id"]]["cls"] in (None, cls) for i in gear)
+        assert not any(C.BASE_ITEMS[i["base_id"]].get("retired") for i in gear)

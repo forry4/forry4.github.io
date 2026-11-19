@@ -7,7 +7,7 @@
  * rock), the player cyan/white, every enemy and every enemy shot red/orange/
  * magenta, pickups gold (loot) and green (healing).
  */
-import { recoveryLimit, xpProgress } from "./sim.js";
+import { recoveryLimit, xpProgress, STARFALL_DELAY, TPS } from "./sim.js";
 
 export const COLORS = {
 	wall: "#3c4a45", wallTop: "#4a5a54", sand: "#a99e80", sandDark: "#a3987a",
@@ -16,8 +16,8 @@ export const COLORS = {
 	chaser: "#e8573f", shooter: "#ef8a3a", radial: "#c8458f", boss: "#d63a5a",
 	enemyShot: "#ff5a4a", enemyShotHeavy: "#ff3d8b", tele: "rgba(255,90,74,.55)",
 	heal: "#6fd36a", bag: "#e9c25a", portal: "#9fe7ff", dream: "#b9a7ff",
-	paladin: "#f1c46b", diviner: "#c4a5ff", shield: "rgba(241,196,107,.72)",
-	slow: "rgba(196,165,255,.2)", damage: "#ff9b8d",
+	paladin: "#f1c46b", diviner: "#c4a5ff", ninja: "#8fd6a4", shield: "rgba(241,196,107,.72)",
+	slow: "rgba(241,196,107,.16)", star: "#ffe9a6", damage: "#ff9b8d",
 	hp: "#e2564e", mp: "#5a8de8", xp: "#9d8ff2", hudBack: "rgba(16,18,20,.72)",
 	// The town: cool flagstone, so the safe place never reads like a dungeon floor.
 	stone: "#56605c", stoneDark: "#515b57", townWall: "#2e3836", townWallTop: "#3c4845",
@@ -72,7 +72,11 @@ function circle(g, x, y, r, fill) {
 /* Where the world sits on the canvas: it follows the player (at `at`, the drawn —
  * interpolated — position), clamped so the map never scrolls past its edge. The page
  * uses it too, to turn the mouse into aim. */
-export function camera(st, width, height, px, at = st.p) {
+/* The dungeon camera FOLLOWS the player everywhere (owner's ask, 2026-11-18: it
+ * sat still at the start until you walked off the map's edge); the void past the
+ * map is drawn as the background. The town still fits its plaza to the stage. */
+export function camera(st, width, height, px, at = st.p, follow = false) {
+	if (follow) return { ox: width / 2 - at.x * px, oy: height / 2 - at.y * px };
 	const vw = width / px, vh = height / px;
 	const cx = st.w < vw ? st.w / 2 : Math.max(vw / 2, Math.min(st.w - vw / 2, at.x));
 	const cy = st.h < vh ? st.h / 2 : Math.max(vh / 2, Math.min(st.h - vh / 2, at.y));
@@ -85,16 +89,12 @@ export function camera(st, width, height, px, at = st.p) {
 const here = (o) => o;
 export function draw(g, st, { width, height, px, aim, notes = [], at = here }) {
 	const p = st.p, pp = at(p);
-	const { ox, oy } = camera(st, width, height, px, pp);
+	const { ox, oy } = camera(st, width, height, px, pp, true);
 	const sx = (x) => ox + x * px, sy = (y) => oy + y * px;
 
 	g.fillStyle = "#1b2220"; g.fillRect(0, 0, width, height);
 	drawMap(g, st, ox, oy, px, width, height);
-	if (st.slowUntil > st.tick) {
-		circle(g, sx(pp.x), sy(pp.y), px * 3, COLORS.slow);
-		g.strokeStyle = COLORS.diviner; g.lineWidth = Math.max(1, px * 0.05);
-		g.beginPath(); g.arc(sx(pp.x), sy(pp.y), px * 3, 0, Math.PI * 2); g.stroke();
-	}
+	drawAbilityFx(g, st, sx, sy, px, pp);
 	if (st.shield) {
 		circle(g, sx(st.shield.x), sy(st.shield.y), px * st.shield.r, COLORS.shield);
 		g.strokeStyle = "#fff0b7"; g.lineWidth = Math.max(2, px * 0.08);
@@ -160,12 +160,53 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here }) {
 	drawHud(g, st, { width, height, px, notes });
 }
 
+/* What an ability leaves on the ground: the Paladin's field (gold, around the player),
+ * a falling star (its spot ringed, filling as it comes) and its blast, and the
+ * Ninja's counter — a white ring while it is ready to catch a hit, a solid guard
+ * just after, and a red glow while the next shot is empowered. Shared by the town. */
+function drawAbilityFx(g, st, sx, sy, px, pp) {
+	const p = st.p, lw = Math.max(1, px * 0.05);
+	if (st.slowUntil > st.tick) {
+		circle(g, sx(pp.x), sy(pp.y), px * (st.slowR || 3), COLORS.slow);
+		g.strokeStyle = COLORS.paladin; g.lineWidth = lw;
+		g.beginPath(); g.arc(sx(pp.x), sy(pp.y), px * (st.slowR || 3), 0, Math.PI * 2); g.stroke();
+	}
+	for (const f of st.starfalls || []) {
+		const k = Math.min(1, Math.max(0, 1 - (f.at - st.tick) / STARFALL_DELAY));
+		g.strokeStyle = COLORS.star; g.lineWidth = lw;
+		g.beginPath(); g.arc(sx(f.x), sy(f.y), px * f.r, 0, Math.PI * 2); g.stroke();
+		circle(g, sx(f.x), sy(f.y), px * f.r * k, "rgba(255,233,166,.28)");
+	}
+	for (const b of st.blasts || []) {
+		const a = Math.max(0, (b.until - st.tick) / 18);
+		circle(g, sx(b.x), sy(b.y), px * b.r * (1.1 - 0.1 * a), `rgba(255,240,190,${(0.75 * a).toFixed(3)})`);
+	}
+	const X = sx(pp.x), Y = sy(pp.y), R = px * (p.r + 0.22);
+	if (p.counterUntil >= st.tick) {
+		g.strokeStyle = "rgba(255,255,255,.85)"; g.lineWidth = Math.max(1.5, px * 0.06);
+		g.beginPath(); g.arc(X, Y, R, 0, Math.PI * 2); g.stroke();
+	}
+	if (p.guardUntil > st.tick) circle(g, X, Y, R, "rgba(255,255,255,.35)");
+	if (p.empower > 0) circle(g, X, Y, R * 1.15, "rgba(255,110,90,.22)");
+}
+
 function drawShots(g, bullets, sx, sy, px, at) {
 	for (const b of bullets) {
 		const bp = at(b), X = sx(bp.x), Y = sy(bp.y);
-		if (b.owner === "p") {
-			g.strokeStyle = COLORS.playerShot; g.lineWidth = Math.max(2, b.r * px * 0.9);
-			g.beginPath(); g.moveTo(X, Y); g.lineTo(X - b.vx * 0.03 * px, Y - b.vy * 0.03 * px); g.stroke();
+		if (b.owner === "p" && b.look === "star") {          // a spinning four-point star
+			const r = px * 0.2 * (b.power ? 1.4 : 1), a = (b.x + b.y) * 2.4;
+			g.fillStyle = b.power ? "#ff8c74" : "#dfe7ea";
+			g.beginPath();
+			for (let i = 0; i < 8; i++) {
+				const rr = i % 2 ? r * 0.38 : r, t = a + (i * Math.PI) / 4;
+				g.lineTo(X + Math.cos(t) * rr, Y + Math.sin(t) * rr);
+			}
+			g.closePath(); g.fill();
+		} else if (b.owner === "p") {
+			g.strokeStyle = b.power ? "#ff8c74" : COLORS.playerShot;
+			g.lineWidth = Math.max(2, b.r * px * (b.power ? 1.5 : 0.9));
+			const tail = b.look === "blade" ? 0.022 : 0.03;
+			g.beginPath(); g.moveTo(X, Y); g.lineTo(X - b.vx * tail * px, Y - b.vy * tail * px); g.stroke();
 		} else {
 			circle(g, X, Y, b.r * px * 1.15, "rgba(255,240,235,.9)");
 			circle(g, X, Y, b.r * px, b.dmg >= 30 ? COLORS.enemyShotHeavy : COLORS.enemyShot);
@@ -176,7 +217,7 @@ function drawShots(g, bullets, sx, sy, px, at) {
 /* The player: cyan body, white core, a tick toward the aim. */
 function drawPlayer(g, p, PX, PY, px, aim, classId = "ranger") {
 	const pr = p.r * px;
-	const body = classId === "paladin" ? COLORS.paladin : classId === "diviner" ? COLORS.diviner : COLORS.player;
+	const body = COLORS[classId] && classId !== "ranger" ? COLORS[classId] : COLORS.player;
 	circle(g, PX, PY, pr + px * 0.06, p.hurt > 0 ? "#ffffff" : "#1d5f6a");
 	circle(g, PX, PY, pr, body);
 	circle(g, PX, PY, pr * 0.42, COLORS.playerCore);
@@ -258,6 +299,7 @@ export function drawTown(g, st, { width, height, px, at = here, notes = [], prom
 		// Below the stake: the hit numbers float up from above the post.
 		if (d > 0) label(g, `${d} / s`, X, Y + R * 1.3 + px * 0.38, px, "#e9c25a");
 	}
+	drawAbilityFx(g, st, sx, sy, px, pp);
 	drawPlayer(g, st.p, sx(pp.x), sy(pp.y), px, aim, st.classId);
 	drawShots(g, st.bullets, sx, sy, px, at);
 	g.font = `bold ${Math.round(Math.max(12, px * 0.4))}px "Crimson Pro", Georgia, serif`;
@@ -303,6 +345,14 @@ function drawHud(g, st, { width, height, px, notes }) {
 	g.textBaseline = "middle";
 	g.fillText(`${Math.ceil(p.hp)} / ${Math.round(s.maxHp)}`, X + 6, Y + H / 2 + 1);
 	g.fillText(`${Math.floor(p.mp)} / ${Math.round(s.maxMp)}`, X + 6, Y + H * 1.5 + 9);
+	// The ability's cooldown, at the MP bar's right end.
+	if (s.abilityKind) {
+		const cd = p.abilityCd || 0;
+		g.textAlign = "right";
+		g.fillStyle = cd > 0 ? "#c9cfd6" : "#9fe7ff";
+		g.fillText(cd > 0 ? `${(cd / TPS).toFixed(1)}s` : "Ready", X + W - 6, Y + H * 1.5 + 9);
+		g.textAlign = "left";
+	}
 	// XP inside the level, and the level itself at the bar's right end.
 	const xp = xpProgress(st.levels, st.hero.xp), XY = Y + H * 2 + 16;
 	g.fillStyle = "rgba(157,143,242,.2)"; g.fillRect(X, XY, W, XH);

@@ -16,12 +16,13 @@ from __future__ import annotations
 
 CONTENT_VERSION = 2
 
-CLASSES = ("ranger", "paladin", "diviner")
-CLASS_NAMES = {"ranger": "Ranger", "paladin": "Paladin", "diviner": "Diviner"}
+CLASSES = ("ranger", "paladin", "diviner", "ninja")
+CLASS_NAMES = {"ranger": "Ranger", "paladin": "Paladin", "diviner": "Diviner", "ninja": "Ninja"}
 CLASS_DESCRIPTIONS = {
     "ranger": "A quick ranged fighter with a volley of arrows.",
-    "paladin": "A close-range guardian who plants a projectile-eating shield.",
-    "diviner": "A long-range mage who slows enemy projectiles around them.",
+    "paladin": "A close-range guardian whose field slows enemy shots around them.",
+    "diviner": "A long-range mage who calls stars down on a spot.",
+    "ninja": "A quick thrower who counters a hit and strikes back twice as hard.",
 }
 
 # The five equipment slots, in the order the store numbers them.
@@ -48,9 +49,19 @@ BASE_ITEMS: dict[str, dict] = {
     "leather_vest":  {"slot": "armor",   "cls": "ranger", "kind": "standard"},
     "volley_quiver": {"slot": "ability", "cls": "ranger", "kind": "standard"},
     "plate_armor":   {"slot": "armor",   "cls": "paladin", "kind": "standard"},
-    "grounding_aegis": {"slot": "ability", "cls": "paladin", "kind": "standard"},
+    # ONE STANDARD ABILITY PER CLASS (owner's call, 2026-11-18). The shield is RETIRED
+    # (kept for a future class): it no longer drops, and store.init_schema turns every
+    # one into the Paladin's new ability, the Stillness Orb, which moved over from the
+    # Diviner. The Diviner's is now the Star Tome.
+    "grounding_aegis": {"slot": "ability", "cls": "paladin", "kind": "standard", "retired": True},
     "seer_robes":     {"slot": "armor",   "cls": "diviner", "kind": "standard"},
-    "stillness_orb":  {"slot": "ability", "cls": "diviner", "kind": "standard"},
+    "stillness_orb":  {"slot": "ability", "cls": "paladin", "kind": "standard"},
+    "star_tome":      {"slot": "ability", "cls": "diviner", "kind": "standard"},
+    # The Ninja (2026-11-18): throwing stars and kunai, light armor, the counter.
+    "shuriken":       {"slot": "weapon",  "cls": "ninja",   "kind": "standard"},
+    "kunai":          {"slot": "weapon",  "cls": "ninja",   "kind": "standard"},
+    "shadow_garb":    {"slot": "armor",   "cls": "ninja",   "kind": "standard"},
+    "mirror_charm":   {"slot": "ability", "cls": "ninja",   "kind": "standard"},
     "band_of_vigor": {"slot": "ring",    "cls": None,     "kind": "standard"},
     "band_of_focus": {"slot": "ring",    "cls": None,     "kind": "standard"},
     "kingfisher_eye": {"slot": "ring",   "cls": None,     "kind": "unique"},
@@ -98,8 +109,24 @@ def level_for(xp: int) -> int:
 
 
 # Fusion's chance to gain enchantment slots (design §11.7: "may rarely gain
-# multiple slots"). Checked in order; the first hit wins.
-FUSE_SLOT_GAIN = ((2, 0.01), (1, 0.05))
+# multiple slots"). Checked in order; the first hit wins. Raised 2026-11-18 (owner:
+# "make sure using the forge has a chance of increasing the number of slots") —
+# at 5% it never showed up in play.
+FUSE_SLOT_GAIN = ((2, 0.04), (1, 0.20))
+
+# Rift modifiers (owner's ask, 2026-11-18): picked before a run; each makes the
+# rift harder and adds one RARITY point. Rarity raises the odds of a higher TIER
+# and of a boss UNIQUE — never the number of enchantment slots. The scales are
+# read by the browser's fight (sim.js) off the dungeon the server generates.
+RIFT_MODS: dict[str, dict] = {
+    "fortified": {"name": "Fortified", "text": "Enemies have 50% more health.", "scale": {"hp": 1.5}},
+    "brutal":    {"name": "Brutal", "text": "Enemies hit 40% harder.", "scale": {"dmg": 1.4}},
+    "swift":     {"name": "Swift", "text": "Enemies and their shots move 25% faster.", "scale": {"speed": 1.25}},
+}
+TIER_UP_PER_RARITY = 0.25        # each rarity point: this chance (each) to raise a drop's tier by one
+UNIQUE_BASE = 0.12               # a boss roll's chance to be a unique, at rarity 0 ...
+UNIQUE_PER_RARITY = 0.10         # ... plus this per rarity point
+MAX_TIER = 5
 
 
 def base(base_id: str) -> dict:
