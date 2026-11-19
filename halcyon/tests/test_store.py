@@ -707,3 +707,137 @@ def test_init_schema_moves_abilities_to_their_new_classes(db):
         conn = db(); S.init_schema(conn); conn.close()
         got = {i["item_id"]: i["base_id"] for i in _live(db)}
         assert got[aegis["item_id"]] == "stillness_orb" and got[orb["item_id"]] == "star_tome"
+
+
+# ── going deeper (design §14.6) ────────────────────────────────────────────────
+def _make(dungeon_id, seed, class_id, mods, level):
+    from halcyon import dungeon as D
+    return D.generate(dungeon_id, seed, class_id=class_id, mods=mods, level=level)
+
+
+def _real_run(db, me):
+    from halcyon import dungeon as D
+    d = D.generate("shallows", "deep", class_id="ranger")
+    run = S.start_run(db, ME, me["char_id"], "shallows", "deep", d)
+    return run, d
+
+
+def test_descend_needs_the_boss_dead_and_an_offered_modifier(db, me):
+    run, d = _real_run(db, me)
+    rid, offer = run["run_id"], d["offers"][0]
+    with pytest.raises(S.HalcyonError, match="boss"):
+        S.descend(db, ME, rid, offer, 1, _make)
+    S.apply_events(db, ME, rid, _seq({"type": "kill", "enemy": d["boss"]}))
+    not_offered = next(m for m in C.RIFT_MODS if m not in d["offers"])
+    with pytest.raises(S.HalcyonError, match="offered"):
+        S.descend(db, ME, rid, not_offered, 1, _make)
+    with pytest.raises(S.HalcyonError):
+        S.descend(db, THEM, rid, offer, 1, _make)
+    two = S.descend(db, ME, rid, offer, 1, _make)
+    assert two["level"] == 2 and two["mods"] == [offer] and two["boss"] == "L2-boss"
+    assert S.descend(db, ME, rid, offer, 1, _make) == two, "a retried descent hands back the same level"
+    with pytest.raises(S.HalcyonError):
+        S.descend(db, ME, rid, two["offers"][0], 2, _make)     # level 2's boss still stands
+
+
+def test_a_deeper_level_pays_its_own_bonus_its_drops_mint_once_and_only_level_one_is_timed(db, me):
+    run, d = _real_run(db, me)
+    rid = run["run_id"]
+    S.apply_events(db, ME, rid, _seq({"type": "kill", "enemy": d["boss"], "elapsed_ticks": 3000}))
+    xp1 = _rows(db, "SELECT xp FROM hr_characters WHERE char_id=?", (me["char_id"],))[0]["xp"]
+    two = S.descend(db, ME, rid, d["offers"][0], 1, _make)
+    drop = next(k for k, v in two["drops"].items() if v["enemy"] == two["boss"])
+    out = S.apply_events(db, ME, rid, [
+        {"seq": 2, "type": "kill", "enemy": d["boss"]},                # level 1's boss, again
+        {"seq": 3, "type": "kill", "enemy": two["boss"], "elapsed_ticks": 900},
+        {"seq": 4, "type": "pickup", "drop": drop, "slot": 3},
+        {"seq": 5, "type": "complete"}])
+    assert out["refused"] == [2] and out["status"] == "completed"
+    xp2 = _rows(db, "SELECT xp FROM hr_characters WHERE char_id=?", (me["char_id"],))[0]["xp"]
+    assert xp2 - xp1 == two["enemies"][two["boss"]]["xp"] + two["complete_xp"]
+    times = _rows(db, "SELECT time_ticks FROM hr_rift_times WHERE run_id=?", (rid,))
+    assert [t["time_ticks"] for t in times] == [3000]
+    assert [i["origin_drop_id"] for i in _live(db) if i["origin"] == "drop"] == [drop]
+    assert_invariants(db)
+
+
+def test_descending_leaves_the_floor_behind(db, me):
+    run, d = _real_run(db, me)
+    rid = run["run_id"]
+    drop = next(k for k, v in d["drops"].items() if v["enemy"] == d["boss"])
+    out = S.apply_events(db, ME, rid, _seq({"type": "kill", "enemy": d["boss"]},
+                                           {"type": "pickup", "drop": drop, "slot": 0},
+                                           {"type": "drop_item", "drop": drop}))
+    assert out["refused"] == []
+    assert [i["loc"] for i in _live(db)] == ["ground"]
+    S.descend(db, ME, rid, d["offers"][0], 1, _make)
+    assert _live(db) == [], "what was left on level 1's floor is gone"
+    assert_invariants(db)
+
+
+# ── the QOL pass (design §19.1): lock, the graveyard, the one record ─────────
+def test_a_locked_item_cannot_be_discarded_fused_or_dropped_and_unlocks_again(db, me):
+    a = S.grant_item(db, ME, BOW, ("vault", 0))
+    b = S.grant_item(db, ME, BOW, ("vault", 1))
+    out = S.set_lock(db, ME, a["item_id"], True)
+    assert out["locked"] is True and out["version"] == a["version"]     # a lock is not a move
+    with pytest.raises(S.HalcyonError, match="locked"):
+        S.discard(db, ME, a["item_id"])
+    with pytest.raises(S.HalcyonError, match="locked"):
+        S.fuse(db, ME, b["item_id"], a["item_id"])
+    assert len(_live(db)) == 2
+    # Mid-run: it can be moved, never put on the floor.
+    S.move_item(db, ME, a["item_id"], ("inventory", me["char_id"], 0))
+    run = S.start_run(db, ME, me["char_id"], "shallows", "lock", _dungeon())
+    out = S.apply_events(db, ME, run["run_id"], [{"seq": 1, "type": "drop_item", "item": a["item_id"]},
+                                                   {"seq": 2, "type": "move", "item": a["item_id"], "to": ["inventory", 5]}])
+    assert out["refused"] == [1]
+    S.set_lock(db, ME, a["item_id"], False)                             # locking works mid-run too
+    out = S.apply_events(db, ME, run["run_id"], [{"seq": 3, "type": "drop_item", "item": a["item_id"]}])
+    assert 3 not in out["refused"]                                      # (the list is the run's so far)
+    assert next(i for i in _live(db) if i["item_id"] == a["item_id"])["loc"] == "ground"
+    assert_invariants(db)
+
+
+def test_nobody_locks_anyone_elses_items(db, me):
+    S.register_owner(db, THEM, "account")
+    it = S.grant_item(db, ME, BOW, ("vault", 0))
+    with pytest.raises(S.HalcyonError):
+        S.set_lock(db, THEM, it["item_id"], True)
+
+
+def test_a_death_leaves_its_screen_in_the_graveyard(db, me):
+    run = _carrying(db, me["char_id"])
+    S.apply_events(db, ME, run["run_id"], [{"seq": 6, "type": "death", "summary": {
+        "src": "boss:nova", "hit": 31.6, "taken": 412.4, "kills": 9, "ticks": 5400,
+        "dungeon_name": "made up", "items": ["not the page's to say"], "x" * 50: 1}}])
+    view = S.owner_view(db, ME)
+    d = view["fallen"][0]["death_summary"]
+    assert (d["src"], d["hit"], d["taken"], d["kills"], d["ticks"]) == ("boss:nova", 31.6, 412.4, 9, 5400)
+    # The server's own facts, not the page's: where, and what was carried as it fell.
+    assert d["dungeon_id"] == "shallows" and d["dungeon_name"] == "shallows" and d["depth"] == 1
+    assert sorted((i["base_id"], i["loc"]) for i in d["items"]) == [("leather_vest", "inventory"), ("shortbow", "equipped")]
+    assert next(i for i in d["items"] if i["base_id"] == "shortbow")["equip_slot"] == "weapon"
+    assert "x" * 50 not in d
+    assert view["fallen_count"] == 1
+
+
+def test_a_strange_death_summary_is_bounded_and_a_dream_death_writes_none(db, me):
+    run = S.start_run(db, ME, me["char_id"], "shallows", "odd", _dungeon())
+    S.apply_events(db, ME, run["run_id"], [{"seq": 1, "type": "death",
+                                            "summary": {"src": "y" * 500, "hit": 1e12, "kills": -4, "taken": "lots"}}])
+    d = S.owner_view(db, ME)["fallen"][0]["death_summary"]
+    assert len(d["src"]) == 40 and d["hit"] == 100_000 and d["kills"] == 0 and "taken" not in d
+    c = S.create_character(db, ME, 1, "ranger")
+    run = S.start_run(db, ME, c["char_id"], "shallows", "dream", _dungeon(), practice=True)
+    S.apply_events(db, ME, run["run_id"], [{"seq": 1, "type": "death", "summary": {"src": "boss:fan"}}])
+    assert _rows(db, "SELECT death_summary FROM hr_characters WHERE char_id=?", (c["char_id"],)) == [{"death_summary": None}]
+
+
+def test_the_best_level_counts_the_fallen_too(db, me):
+    assert S.owner_view(db, ME)["best_level"] == 1
+    conn = db()
+    conn.cursor().execute("UPDATE hr_characters SET level=7, status='dead' WHERE char_id=?", (me["char_id"],))
+    conn.commit(); conn.close()
+    S.create_character(db, ME, 0, "ninja")
+    assert S.owner_view(db, ME)["best_level"] == 7

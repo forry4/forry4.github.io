@@ -10381,7 +10381,7 @@ try {
 		check("walking to the Shallows' portal", await walkTo("realm:shallows", ["KeyD", "KeyW"]));
 		await page.keyboard.press("KeyE");
 		const riftPanel = await page.waitForSelector(".hr-rift-panel", { timeout: 5_000 }).then(() => true).catch(() => false);
-		check("E at the portal opens its modifiers", riftPanel && await page.locator(".hr-rift-panel .hr-mod").count() === 3);
+		check("E at the portal opens its modifiers (the one pool of eight)", riftPanel && await page.locator(".hr-rift-panel .hr-mod").count() === 8);
 		const uniqueOdds = () => page.locator(".hr-mod-sum div").nth(2).locator("dd").textContent().catch(() => "");
 		const before = await uniqueOdds();
 		await page.locator(".hr-rift-panel .hr-mod").first().click();

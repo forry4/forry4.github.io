@@ -101,6 +101,26 @@ def test_the_whole_loop_through_the_routes(app):
     assert e.value.status_code == 409
 
 
+def test_going_deeper_through_the_routes(app):
+    who = owner_dep(app)("tok", None, None)
+    ch = route(app, "POST", "/halcyon/characters")(A.CharacterIn(slot=0), who)
+    run = route(app, "POST", "/halcyon/runs")(A.RunIn(char_id=ch["char_id"], mods=["brutal"]), who)
+    d, rid = run["dungeon"], run["run_id"]
+    assert d["level"] == 1 and len(d["offers"]) == 3 and "brutal" not in d["offers"]
+    descend = route(app, "POST", "/halcyon/runs/{run_id}/descend")
+    with pytest.raises(HTTPException) as e:                        # the boss still stands
+        descend(rid, A.DescendIn(mod=d["offers"][0], from_level=1), who)
+    assert e.value.status_code == 409
+    route(app, "POST", "/halcyon/runs/{run_id}/events")(rid, A.EventsIn(events=[
+        {"seq": 1, "type": "kill", "enemy": "boss"}]), who)
+    two = descend(rid, A.DescendIn(mod=d["offers"][0], from_level=1), who)["dungeon"]
+    assert two["level"] == 2 and sorted(two["mods"]) == sorted(["brutal", d["offers"][0]])
+    assert two["tiles"] and two["boss"] == "L2-boss" and set(two["offers"]).isdisjoint(two["mods"])
+    out = route(app, "POST", "/halcyon/runs/{run_id}/events")(rid, A.EventsIn(events=[
+        {"seq": 2, "type": "kill", "enemy": "L2-boss"}, {"seq": 3, "type": "complete"}]), who)
+    assert out == {"status": "completed", "last_seq": 3, "refused": []}
+
+
 def test_character_menu_starts_class_specific_practice_runs(app):
     who = owner_dep(app)("tok", None, None)
     ch = route(app, "POST", "/halcyon/characters")(A.CharacterIn(slot=0, class_id="paladin"), who)
@@ -155,3 +175,23 @@ def test_every_class_starts_with_its_own_kit(app):
         assert {i["equip_slot"]: i["base_id"] for i in gear}["ability"] == ability
         assert all(C.BASE_ITEMS[i["base_id"]]["cls"] in (None, cls) for i in gear)
         assert not any(C.BASE_ITEMS[i["base_id"]].get("retired") for i in gear)
+
+
+def test_lock_and_the_graveyard_through_the_routes(app):
+    who = owner_dep(app)("tok", None, None)
+    ch = route(app, "POST", "/halcyon/characters")(A.CharacterIn(slot=0), who)
+    state = route(app, "GET", "/halcyon/state")(who)
+    bow = next(i for i in state["items"] if i["equip_slot"] == "weapon")
+    out = route(app, "POST", "/halcyon/items/{item_id}/lock")(bow["item_id"], A.LockIn(locked=True), who)
+    assert out["locked"] is True
+    state = route(app, "GET", "/halcyon/state")(who)
+    assert next(i for i in state["items"] if i["item_id"] == bow["item_id"])["locked"] is True
+    assert state["best_level"] == 1 and state["fallen"] == [] and state["fallen_count"] == 0
+    run = route(app, "POST", "/halcyon/runs")(A.RunIn(char_id=ch["char_id"]), who)
+    assert run["dungeon"]["boss_name"]
+    route(app, "POST", "/halcyon/runs/{run_id}/events")(run["run_id"], A.EventsIn(events=[
+        {"seq": 1, "type": "death", "summary": {"src": "radial:ring", "hit": 12}}]), who)
+    state = route(app, "GET", "/halcyon/state")(who)
+    grave = state["fallen"][0]["death_summary"]
+    assert grave["src"] == "radial:ring" and grave["dungeon_name"] == run["dungeon"]["name"]
+    assert {i["base_id"] for i in grave["items"]} >= {bow["base_id"]}

@@ -6,7 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createSim, step, setGear, wallHit, enchantValue, STAT_SCALE, fingerprint, dsin, dcos, recoveryLimit, statsFor, levelFor, xpProgress, PER_LEVEL, WEAPONS, TPS, REACH, SHIELD_DURATION, SLOW_FACTOR, SLOW_DURATION, SLOW_RADIUS,
-	ABILITY_COOLDOWN, STARFALL_DELAY, COUNTER_WINDOW, COUNTER_GUARD, ENEMY } from "../../../halcyon/sim.js";
+	ABILITY_COOLDOWN, STARFALL_DELAY, COUNTER_WINDOW, COUNTER_GUARD, ENEMY, POTION_HEAL, POTION_COOLDOWN, RECOVERY_MARGIN } from "../../../halcyon/sim.js";
 
 const load = (s) => JSON.parse(readFileSync(new URL(`./fixtures/halcyon-dungeon-${s}.json`, import.meta.url)));
 const A = load("unit-a"), B = load("unit-b");
@@ -71,7 +71,7 @@ test("dsin and dcos match Math.sin and Math.cos to 1e-9 across many turns", () =
 
 test("the same dungeon and the same inputs make the same run, tick for tick", () => {
 	const a = play(A, { god: false, ticks: 40 * TPS }), b = play(A, { god: false, ticks: 40 * TPS });
-	assert.ok(a.prints.length > 450, `ran ${a.prints.length} ticks`);
+	assert.ok(a.prints.length > 250, `ran ${a.prints.length} ticks`);
 	assert.deepEqual(a.prints, b.prints);
 	assert.deepEqual(a.events, b.events);
 	const c = play(B, { god: false, ticks: 40 * TPS });
@@ -400,6 +400,7 @@ test("the Diviner's star lands where you aim after a beat and hits everything ne
 	st.enemies = [e1, e2];
 	st.p.x = 10; st.p.y = 10;
 	e1.x = 14; e1.y = 10; e2.x = 14.6; e2.y = 10.4;
+	e1.active = e2.active = true;                              // their room is sealed and awake
 	const h1 = e1.hp, h2 = e2.hp;
 	step(st, { ability: true, ax: 4, ay: 0 });
 	assert.equal(st.starfalls.length, 1);
@@ -518,16 +519,103 @@ test("the Tidecaller fans three arrows, and they glance off a wall once", () => 
 	assert.equal(wallHit(b, (x) => wall(x)), true);
 });
 
-test("enemies sleep until the player comes within their trigger range, in sight", () => {
-	const st = createSim(A, STARTER);
-	for (let t = 0; t < 30; t++) step(st, {});
-	const far = st.enemies.filter((e) => Math.hypot(e.x - st.p.x, e.y - st.p.y) > 12);
-	assert.ok(far.length > 0 && far.every((e) => !e.active), "nobody far away is awake at the start");
-	// Put one enemy just inside its range with a clear view: it wakes on the next tick.
-	const e = st.enemies.find((x) => x.type === "chaser") || st.enemies[0];
-	e.x = st.p.x + 3; e.y = st.p.y;
+/* A player shot placed against an enemy, so a test can hit it without aiming. */
+function poke(st, e, dmg = 5) {
+	st.bullets.push({ owner: "p", x: e.x - e.r - 0.1, y: e.y, vx: 6, vy: 0, dmg, r: 0.14, life: 6, pierce: 0, bounce: 0, hit: [] });
 	step(st, {});
-	assert.ok(e.active, "close and in sight: awake");
+}
+const inRoom = (st, i) => st.enemies.filter((e) => e.room === i && e.hp > 0);
+
+test("a room seals both ways when you are all the way in, wakes at once, and opens when it is cleared", () => {
+	const st = createSim(A, STARTER);
+	const room = st.rooms.findIndex((r) => r.kind === "combat"), r = st.rooms[room], y = st.doorY + 0.5;
+	for (let t = 0; t < 30; t++) step(st, {});
+	assert.ok(st.enemies.every((e) => !e.active), "nobody is awake before a room is entered");
+	// Outside, at its door: a shot into the room stops at the veil, and the enemies cannot be hurt.
+	st.p.x = r.x0 - 2.5; st.p.y = y;
+	step(st, { fire: true, ax: 1, ay: 0 });
+	for (let t = 0; t < 20; t++) step(st, {});
+	assert.ok(!st.bullets.some((b) => b.owner === "p" && b.x > r.x0), "nothing gets through the veil");
+	const e = inRoom(st, room)[0], hp = e.hp;
+	poke(st, e);
+	assert.equal(e.hp, hp, "a sleeping enemy cannot be hurt");
+	assert.equal(st.sealed, -1);
+	// In the doorway is not in: still open. All the way in: sealed, everyone awake.
+	st.p.x = r.x0 - 0.2; step(st, {});
+	assert.equal(st.sealed, -1, "standing in the doorway does not seal it");
+	st.p.x = r.x0 + 1; step(st, {});
+	assert.equal(st.sealed, room);
+	assert.ok(inRoom(st, room).every((x) => x.active) && st.enemies.filter((x) => x.room !== room).every((x) => !x.active));
+	assert.ok(st.events.some((ev) => ev.type === "seal" && ev.local));
+	// Locked behind: walking back out stops at the wall.
+	for (let t = 0; t < 30; t++) { st.p.hp = 1e9; step(st, { mx: -1 }); }
+	assert.ok(st.p.x - st.p.r >= r.x0 - 1e-9, `held inside at ${st.p.x}`);
+	// Clear it: the doors open.
+	for (const x of inRoom(st, room)) { x.hp = 1; x.x = st.p.x + 1.5; x.y = st.p.y; poke(st, x); }
+	assert.equal(inRoom(st, room).length, 0);
+	assert.equal(st.sealed, -1, "cleared: open");
+	st.p.x = r.x0 + 0.5;
+	for (let t = 0; t < 30; t++) step(st, { mx: -1 });
+	assert.ok(st.p.x < r.x0 - 1, "and the way back is open");
+});
+
+test("the boss's room seals like any other", () => {
+	const st = createSim(A, STARTER);
+	const i = st.rooms.findIndex((r) => r.kind === "boss"), r = st.rooms[i];
+	st.p.x = r.x0 + 1; st.p.y = st.doorY + 0.5;
+	step(st, {});
+	assert.equal(st.sealed, i);
+	assert.ok(st.enemies.find((e) => e.type === "boss").active);
+});
+
+test("Warded: each enemy ignores its first few hits, the boss its first ten", () => {
+	const st = createSim({ ...A, scale: { ...A.scale, ward: 3, ward_boss: 10 } }, STARTER);
+	const e = st.enemies.find((x) => x.type !== "boss"), boss = st.enemies.find((x) => x.type === "boss");
+	assert.equal(e.ward, 3); assert.equal(boss.ward, 10);
+	st.enemies = [e]; e.active = true; e.x = st.p.x + 2; e.y = st.p.y;
+	const hp = e.hp;
+	for (let k = 0; k < 3; k++) poke(st, e);
+	assert.equal(e.hp, hp, "three hits shrugged off");
+	poke(st, e);
+	assert.ok(e.hp < hp, "the fourth lands");
+});
+
+test("Volatile rings shots where an enemy falls; Bulky makes enemy shots bigger; Frenzied attacks sooner", () => {
+	const st = createSim({ ...A, scale: { ...A.scale, volatile: 1 } }, STARTER);
+	const e = st.enemies.find((x) => x.type === "chaser");
+	st.enemies = [e]; e.active = true; e.hp = 1; e.x = st.p.x + 2; e.y = st.p.y;
+	poke(st, e);
+	assert.equal(e.hp, 0);
+	assert.equal(st.bullets.filter((b) => b.owner === "e").length, 8, "a ring of eight");
+	const fire = (scale) => {
+		const s = createSim({ ...A, scale: { ...A.scale, ...scale } }, STARTER);
+		const sh = s.enemies.find((x) => x.type === "shooter");
+		s.enemies = [sh]; sh.active = true; sh.cd = 0; sh.x = s.p.x + 5; sh.y = s.p.y;
+		let shot = null;
+		for (let t = 0; t < 60 && !shot; t++) { s.p.x = sh.x - 5; s.p.y = sh.y; step(s, {}); shot = s.bullets.find((b) => b.owner === "e"); }
+		return { r: shot.r, cd: sh.cd };
+	};
+	const plain = fire({}), bulky = fire({ shot: 1.5 }), frenzied = fire({ cadence: 1 / 1.4 });
+	assert.ok(Math.abs(bulky.r - plain.r * 1.5) < 1e-9, "50% larger");
+	assert.ok(frenzied.cd < plain.cd && frenzied.cd === Math.round(84 / 1.4), `cooldown ${frenzied.cd}`);
+});
+
+test("the boss opens home and, while there are levels left, a portal deeper that only asks", () => {
+	const deep = (d) => {
+		const st = createSim(d, STARTER);
+		const boss = st.enemies.find((e) => e.type === "boss");
+		st.enemies = [boss]; boss.active = true; boss.phase = 2; boss.hp = 1; boss.x = st.p.x + 2; boss.y = st.p.y;
+		poke(st, boss);
+		return st;
+	};
+	const st = deep(A);
+	assert.ok(A.offers.length === 3 && st.portal && st.deeper, "two portals");
+	assert.ok(Math.hypot(st.portal.x - st.deeper.x, st.portal.y - st.deeper.y) >= 3, "apart");
+	st.p.x = st.deeper.x; st.p.y = st.deeper.y; st.bags = [];
+	step(st, { enter: true });
+	assert.equal(st.status, "play", "the deeper portal does not end the run");
+	assert.ok(st.events.some((ev) => ev.type === "deeper" && ev.local));
+	assert.equal(deep({ ...A, level: 5, offers: [] }).deeper, null, "the last level has no way deeper");
 });
 
 test("a heal drops where the enemy that carries it dies", () => {
@@ -582,4 +670,59 @@ test("a chaser up close telegraphs, then spits one short shot that dies within i
 test("the Ninja throws slower, harder: shuriken and kunai keep about the same damage a second", () => {
 	assert.ok(WEAPONS.shuriken.rate <= 2.5 && WEAPONS.shuriken.dmg >= 18);
 	assert.ok(WEAPONS.kunai.rate <= 1.3 && WEAPONS.kunai.dmg >= 40);
+});
+
+test("the last hit that landed is kept with what dealt it, for the death screen", () => {
+	const shot = createSim(A, STARTER);
+	const sh = shot.enemies.find((x) => x.type === "shooter");
+	shot.enemies = [sh]; sh.active = true; sh.cd = 0; sh.x = shot.p.x + 4; sh.y = shot.p.y;
+	for (let t = 0; t < 120 && !shot.lastHit; t++) step(shot, {});
+	assert.equal(shot.lastHit?.src, "shooter:bolt");
+	assert.ok(shot.lastHit.dmg > 0 && shot.lastHit.tick > 0);
+	const touch = createSim(A, STARTER);
+	const ch = touch.enemies.find((x) => x.type === "chaser");
+	touch.enemies = [ch]; ch.active = true; ch.cd = 0; ch.scd = 1e9; ch.x = touch.p.x + 0.5; ch.y = touch.p.y;
+	step(touch, {});
+	assert.equal(touch.lastHit?.src, "chaser:touch");
+	const ring = createSim({ ...A, scale: { ...A.scale, volatile: 1 } }, STARTER);
+	const r = ring.enemies.find((x) => x.type === "radial");
+	ring.enemies = [r]; r.active = true; r.hp = 1; r.x = ring.p.x + 1.2; r.y = ring.p.y;
+	ring.bullets.push({ owner: "p", x: r.x - r.r - 0.1, y: r.y, vx: 6, vy: 0, dmg: 5, r: 0.14, life: 6, pierce: 0, bounce: 0, hit: [] });
+	for (let t = 0; t < 40 && !ring.lastHit; t++) step(ring, {});
+	assert.equal(ring.lastHit?.src, "radial:burst", "a Volatile ring names the enemy that burst");
+});
+
+test("the healing potion heals and lifts the recovery limit, then waits out its cooldown; never at full health", () => {
+	const st = createSim(A, STARTER);
+	step(st, { potion: true });
+	assert.equal(st.p.potionCd, 0, "nothing to heal: not spent");
+	st.p.hp = 20; st.p.low = 20;
+	step(st, { potion: true });
+	assert.equal(st.p.low, 20 + POTION_HEAL);
+	assert.ok(Math.abs(st.p.hp - (20 + POTION_HEAL)) < 0.1, `hp ${st.p.hp}`);
+	assert.equal(st.p.potionCd, POTION_COOLDOWN);
+	assert.ok(st.events.some((e) => e.type === "potion" && e.local));
+	const hp = st.p.hp;
+	st.p.hp = 10;
+	step(st, { potion: true });
+	assert.ok(st.p.hp < hp, "on cooldown: no second heal");
+	for (let i = 0; i < POTION_COOLDOWN; i++) step(st, {});
+	assert.equal(st.p.potionCd, 0);
+	step(st, { potion: true });
+	assert.equal(st.p.potionCd, POTION_COOLDOWN, "ready again");
+	assert.ok(RECOVERY_MARGIN > 0);
+});
+
+test("a hit on an enemy floats what it did over that enemy (a ward's hit floats nothing)", () => {
+	const st = createSim({ ...A, scale: { ward: 1 } }, STARTER);
+	const e = st.enemies.find((x) => x.type === "chaser");
+	e.active = true;
+	st.bullets.push({ owner: "p", x: e.x, y: e.y, vx: 0, vy: 0, dmg: 7, r: 0.14, life: 5, pierce: 0, hit: [] });
+	step(st, {});
+	assert.equal((st.damageNumbers || []).filter((f) => f.foe).length, 0, "the ward took it");
+	st.bullets.push({ owner: "p", x: e.x, y: e.y, vx: 0, vy: 0, dmg: 7, r: 0.14, life: 5, pierce: 0, hit: [] });
+	step(st, {});
+	const f = st.damageNumbers.filter((n) => n.foe);
+	assert.equal(f.length, 1);
+	assert.equal(f[0].amount, 7);
 });

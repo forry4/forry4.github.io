@@ -88,6 +88,19 @@ Every class should function alone. The initial game should be balanced around so
 
 There should be no mandatory healer, tank, or support role.
 
+### 3.1a What makes it distinct — DECIDED (2026-11-18)
+
+Halcyon Rift cannot out-content or out-populate Realm of the Mad God or Darza's Dominion, so it does not try to. It wins on what those games structurally cannot offer:
+
+- **Complete with one player.** Their best content needs a live population (shared realms, group dungeons, events). Halcyon is solo-first and fully playable alone at 2am.
+- **Masterable.** A deterministic simulation, authored rooms, deaths that are always explainable, a rift timer, and **Dream Rifts** — risk-free practice of any rift and boss. Learn it safely, then bet a character on it.
+- **Short sessions.** A rift is 5-10 minutes.
+- **Loot that is only yours.** No trading, shops, bots or gold sellers; an item is worth what it does for your characters.
+
+One line to design against: ***a bullet-hell permadeath dungeon crawler you can master alone in ten minutes — practice anything risk-free, then bet a character on it.***
+
+Two questions every system should answer yes to: **does it reward skill rather than time spent**, and **does it create a push-or-bank decision**?
+
 ### 3.2 Desired player feeling
 
 The desired emotional rhythm is:
@@ -714,9 +727,10 @@ DECIDED:
 
 What keeps instant recall from removing the risk is the combat design, not a recall cost: see §8.3.
 
+DECIDED (2026-11-18): the boss arena **seals** when the player enters it, as every room does (§14.1a). Recall still works there, so a sealed room is never a death trap.
+
 OPEN:
 
-- whether a boss arena prevents walking out (recall still works);
 - whether any future completion-only stat rewards are granted immediately on boss death or after a formal completion state.
 
 The intended design is that recall is a safe extraction option, not a failure. The player gives up the remaining dungeon and its completion rewards in exchange for safety.
@@ -735,11 +749,10 @@ Since a modified client could also suppress its own death report, "close the tab
 
 DECIDED for the greybox:
 
-- Defeating the boss opens an exit but does not end the run immediately.
+- Defeating the boss opens an exit but does not end the run immediately. It also opens the way **deeper** (§14.6), until the rift's deepest level.
 - The timer freezes on the boss-kill tick.
 - The player must reach the exit and press E to complete the rift.
-- Completion awards the dungeon bonus XP and preserves collected loot.
-- Recalling after the boss dies keeps the boss time but gives up the completion bonus.
+- The boss's fall pays the clear bonus XP at once (2026-11-18), so recalling after the kill keeps it, and the boss time too. Completion banks the collected loot like any way home.
 
 Future completion-only stat rewards may be granted on the formal completion event; that timing remains OPEN.
 
@@ -769,19 +782,29 @@ DECIDED:
 - There is no overworld.
 - Dungeons are named and finite.
 - Dungeons are procedurally generated from their dungeon type.
-- Dungeons are mostly linear initially.
-- Players may backtrack through ordinary areas.
-- Bosses are at the end.
+- Dungeons are **purely linear** (2026-11-18): a line of rooms joined by corridors, the boss at the end. No side rooms, no branches, no dead ends.
+- **Every room locks the player in** until it is cleared — the doors ahead AND behind (§14.1a). Players may walk back through rooms they have already cleared.
+- Bosses are at the end, and the boss arena seals the same way.
 - There are no fog-of-war requirements.
 - There are no secrets initially.
 - There are no shortcuts initially.
 - There are no world events initially.
 - There are no required safe areas inside dungeons.
-- Players may retreat through cleared areas.
-- Players may recall at any time.
+- Players may recall at any time. Inside a locked room, recall is the only way out.
 - Every dungeon is available immediately.
 - Dungeons have different difficulty levels.
 - There is no mandatory difficulty progression.
+
+### 14.1a Locked rooms — DECIDED (2026-11-18)
+
+Considered and rejected (owner's call): side rooms off the main path, branching paths with dead ends, and an item-gated shortcut to the boss. A shortcut makes "skip to the boss and farm it" the dominant strategy; branches add backtracking, which is dead time in a 5-10 minute run.
+
+- Stepping into a room with living enemies **seals it**: its doors close, ahead and behind, and **every enemy in it wakes at once** (they no longer wake one by one at range).
+- The doors open when the last enemy in the room dies. A cleared room stays open.
+- The boss arena is a room like any other: it seals on entry and opens on the kill.
+- So the fights ARE the content — each room is an arena the player must win or leave by recall — and a fast time means killing efficiently, not running past things. Fighting from a corridor ("pulling" enemies into a chokepoint) is no longer possible.
+- Consequence for room design: every room must be a fair fight in a closed space, since retreat is gone.
+- Before a room is entered its doorways are a faint red **veil**: the player can walk through, but shots stop there both ways, and the sleeping enemies cannot be hurt — nothing is fought through a door, ability splash included. Sealed doors draw as bars.
 
 ### 14.2 Procedural generation
 
@@ -847,6 +870,48 @@ DECIDED for the first slice:
 - The timer starts when the browser simulation starts and stops on the tick that the boss dies. Walking to the exit, recalling, or completing afterward does not change it.
 - Town shows the player's five fastest recorded boss-kill times for each dungeon, fastest first.
 - Each time is tagged as a normal Rift or a Dream Rift. The board is personal convenience data, not a competitive ranking or a reward authority; it does not make client-reported times trustworthy for competition.
+
+### 14.6 Going deeper — DECIDED (2026-11-18)
+
+Every rift has **levels**. Killing a level's boss opens two ways on: **home** (complete the rift, bank everything) or **deeper** (the next level of the same rift, carrying everything). This is the game's sharpest push-or-bank decision: each level deeper, a death costs everything carried so far.
+
+- **The deeper portal offers three modifiers; the player picks one** (or goes home). The pick is added to the run's modifiers for the rest of the run.
+- **A modifier the run already has is never offered again.** There are no other rules against combinations (owner's call): any mix can come up, and the player always sees it before choosing — home is always beside it.
+- **Modifiers have no difficulty cost**; each is worth one rarity point, the same as one picked in town (§12). The player will usually pick whatever suits their build — that is the intended choice.
+- **Each level also adds a small base scale** (more enemy health) on top of the modifiers, so depth always counts.
+- A deeper level is **shorter** than the first (fewer rooms, then the boss), so the climb does not drag.
+- **Depth is capped** (5 levels to start). Every run starts at level 1: there is no "repeat this level" portal — going home and coming back is the repeat, and the climb is what makes a run tense. The numbers will be tuned from run data (target: a skilled player breaks even around level 3).
+- Each level's boss pays its own clear bonus the moment it falls. The personal time record is the FIRST level's boss kill only (for now); a deeper level shows its own timer, labeled with the level.
+- What the player put down on a level's floor stays behind when they go deeper, as on any way out.
+
+As built (greybox numbers, `halcyon/dungeon.py`): a deeper level has 2 combat rooms; enemy health is ×(1 + 0.15 per level below the first); the three offers come from the run's seed (the same if asked again); the new level's enemies, drops and heals carry ids prefixed `L2-`, `L3-`… so every id is unique across the run. The server keeps every level's enemies and drops on the run (`store.descend`), and the route is safe to repeat.
+
+### 14.7 Rift modifiers — DECIDED (2026-11-18)
+
+**One pool.** The modifiers a player may pick in town before entering and the ones offered at each deeper portal are the same list. Town sets where a run starts; going deeper adds to it.
+
+**Each is worded to be true for every enemy, the boss included** — one line covers both, and the boss gets the stronger version. A good modifier changes how the player plays rather than only a number, is visible in the fight (no hidden damage), and never switches off a class's ability.
+
+| Modifier | Effect |
+|---|---|
+| Fortified | Enemies have more health. |
+| Brutal | Enemies hit harder. |
+| Swift | Enemies and their shots move faster. |
+| Warded | Enemies ignore the first few hits (an ordinary enemy its first 3, the boss its first 10). Shown as shield pips that pop as they are spent. Counted per enemy, so one area hit spends one ward on each enemy it touches. Deliberately harder on slow, heavy weapons — a reason to carry a second weapon or pick another option. |
+| Swarming | More enemies spawn — in every room, the boss arena included. |
+| Bulky | Enemy shots are larger. |
+| Frenzied | Enemies attack more often. |
+| Volatile | Enemies burst into a small ring of shots when they die. |
+
+As built (greybox numbers, `content.RIFT_MODS`): Fortified ×1.5 health; Brutal ×1.4 damage; Swift ×1.25 speed; Warded 3 hits / the boss 10; Swarming +50% enemies in each combat room and 3 more in the boss arena; Bulky shots ×1.5 radius; Frenzied ×1.4 attack rate (the boss's rests shorten, its spiral thickens); Volatile a ring of 8 shots (16 from the boss).
+
+Rejected: modifiers that hide information (invisible shots, darkness) — they break "every death is explainable" (§15.1).
+
+### 14.8 Later: optional challenges and records — RECOMMENDED (not built)
+
+- **Vows**, picked at the portal like modifiers: e.g. kill the boss under a par time, or take no hits in the boss fight. Meeting one adds rarity to the boss's drops; failing costs only the bonus. Opt-in, so careful players are never punished. (Times are client-reported; with no trading, a cheater only spoils their own loot.)
+- **Par-time medals** per rift and level, and personal bests per class — records, not power.
+- **A collection log** of every unique ever found.
 
 ## 15. Enemy and boss philosophy
 
@@ -1051,6 +1116,27 @@ RECOMMENDED:
 
 Mobile and controller support are not initial requirements, but UI layout should not be deliberately impossible at different desktop sizes.
 
+### 19.1 The QOL pass (owner's calls, 2026-11-18)
+
+After a comparison with RotMG, Darza's Dominion, Diablo/PoE, Hades and Enter the Gungeon. DECIDED:
+
+- **Loot bags are colored by their best item** (tier color; a unique bag glows gold). No sound until audio arrives.
+- **Item compare is SIDE BY SIDE, not stat deltas**: hovering an item shows it next to what is equipped in that slot (both rings for a ring). Every item lists its stats in ONE fixed order (weapon lines, then the base's stats, then enchantments in the `ENCHANT_ORDER`), so two cards line up row for row.
+- **A boss health bar** across the top of the stage, with its phase mark at half.
+- **Damage numbers on enemies** as well as on the player.
+- **NO low-HP warning** — nothing that is unpleasant to look at.
+- **NO off-screen arrows**: the MINIMAP (top right) does that job — rooms cleared, sealed and ahead, the player, the portals and the bags.
+- **The run summary is never shown on its own.** A clear (or a recall) in the notification log can be clicked to open it; a player who only wants to grind never sees it.
+- **Audio waits for the art pass**, and with it the volume settings.
+- **A healing potion on a cooldown**, not a stock: R heals and raises the recovery limit, then waits. Heal orbs still drop.
+- **Vault search, filter and sort**; **item lock** (Sort, discard and fuse never touch a locked item; it cannot be dropped in a run).
+- **NO auto-loot rules.**
+- **Records: just the best character level** ever reached on the account.
+- **A graveyard**: every fallen character keeps its death screen.
+- **Settings** (per device): key rebinding, reduced flashing, interface size. Colorblind-safe palettes wait for the art pass, which replaces every color anyway.
+
+LATER (noted, not built): a collection log of uniques and a records board (§14.8), a guided first rift, a loot preview at the portal. NEVER: controller support.
+
 ## 20. Economy, persistence and item identity
 
 There is no monetary economy and no player trading. There is no need to invent a currency simply to make the economy look more conventional.
@@ -1225,12 +1311,12 @@ These are the most important unresolved items.
 ### Dungeon structure
 
 - How many room templates are needed per dungeon type?
-- How is linearity guaranteed?
-- How much backtracking is expected?
+- ~~How is linearity guaranteed? How much backtracking?~~ Purely linear, rooms lock (§14.1a).
+- How many rooms does a deeper level have, and how fast does its base scale rise (§14.6)?
 - What makes a dungeon mechanically distinct from another?
 - Which dungeon types grant each stat?
 - How much more efficient are late-game stat dungeons?
-- Does the boss arena prevent walking out? (Recall always works there — §13.1.)
+- ~~Does the boss arena prevent walking out?~~ It seals, like every room (§14.1a); recall always works.
 
 ### Time boards and practice
 

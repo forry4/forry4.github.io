@@ -118,10 +118,23 @@ FUSE_SLOT_GAIN = ((2, 0.04), (1, 0.20))
 # rift harder and adds one RARITY point. Rarity raises the odds of a higher TIER
 # and of a boss UNIQUE — never the number of enchantment slots. The scales are
 # read by the browser's fight (sim.js) off the dungeon the server generates.
+# ONE MODIFIER POOL for the town's rift panel and the portal deeper (owner's call,
+# 2026-11-18). Each is worded to hold for ordinary enemies and the boss alike, and
+# each is one rarity point however hard it is: no difficulty costs and no rules
+# against a bad combination — the player picks, so a hard pair is a choice. A
+# run never holds one twice. `scale` multiplies (hp, dmg, speed, shot = enemy shot
+# size, cadence = time between attacks); `ward` is hits ignored (ordinary, boss);
+# `swarm` adds enemies (dungeon.py); `volatile` rings shots on death (sim.js).
 RIFT_MODS: dict[str, dict] = {
     "fortified": {"name": "Fortified", "text": "Enemies have 50% more health.", "scale": {"hp": 1.5}},
     "brutal":    {"name": "Brutal", "text": "Enemies hit 40% harder.", "scale": {"dmg": 1.4}},
     "swift":     {"name": "Swift", "text": "Enemies and their shots move 25% faster.", "scale": {"speed": 1.25}},
+    "warded":    {"name": "Warded", "text": "Enemies ignore their first few hits.", "scale": {}, "ward": (3, 10)},
+    "swarming":  {"name": "Swarming", "text": "More enemies spawn.", "scale": {}, "swarm": True},
+    "bulky":     {"name": "Bulky", "text": "Enemy shots are 50% larger.", "scale": {"shot": 1.5}},
+    "frenzied":  {"name": "Frenzied", "text": "Enemies attack 40% more often.", "scale": {"cadence": 1 / 1.4}},
+    "volatile":  {"name": "Volatile", "text": "Enemies burst into a ring of shots when they fall.", "scale": {},
+                  "volatile": True},
 }
 # ── LOOT TABLES (owner's ask, 2026-11-18: "rethink how to do loot drop tables") ──
 # EVERY RANDOM OUTCOME IS ONE ROLL ON ONE WEIGHTED TABLE THAT NAMES EVERY RESULT,

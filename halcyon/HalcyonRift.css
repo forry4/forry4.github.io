@@ -18,9 +18,11 @@
      the panel's padding, the HP and MP bars, the stats, two titles, the name and XP
      line and the bin. There is no banner in play since 2026-11-18 (it was 53px of
      this, net) — the main menu is the only screen that wears it. */
-  --slot:clamp(30px, min(calc((100dvh - 361px) / 4.8), 5vw), 70px);
+  /* 22.6rem is 361px at the normal interface size: the fixed rows are text, so they
+     grow with the Settings' interface size and the squares give the room back. */
+  --slot:clamp(30px, min(calc((100dvh - 22.6rem) / 4.8), 5vw), 70px);
   --side-w:calc(var(--slot) * 4 + var(--gap) * 3 + 28px);
-  --vslot:clamp(22px, min(calc((100dvh - 250px) / 8.6), calc((100vw - var(--side-w) - 130px) / 8.6)), 58px);
+  --vslot:clamp(22px, min(calc((100dvh - 290px) / 8.6), calc((100vw - var(--side-w) - 130px) / 8.6)), 58px);
   height:100vh;
   height:100dvh;
   min-height:0;
@@ -169,11 +171,20 @@
 .hr-tier{position:absolute;top:2px;right:4px;font-size:.66rem;opacity:.85}
 .hr-dots{position:absolute;bottom:1px;left:0;right:0;text-align:center;font-size:.62rem;line-height:1;color:#e9c25a}
 .hr-slot-label{font-size:.62rem;color:var(--text-soft)}
+/* Locked: a small padlock in the bottom right. Filtered out of a vault search: faded. */
+.hr-lock{position:absolute;right:3px;bottom:1px;font-size:.6rem;line-height:1;opacity:.9}
+.hr-slot.dim{opacity:.22}
 
-.hr-tip{position:fixed;z-index:50;width:250px;padding:10px 12px;pointer-events:none}
+.hr-tip{position:fixed;z-index:50;display:flex;align-items:flex-start;gap:8px;pointer-events:none}
+.hr-tip-card{width:15.6rem;padding:10px 12px}
 .hr-tip h3{margin:0 0 2px}
-.hr-tip.unique{--g-lit:#e9c25a;--g-label:#ffd85e}
+.hr-tip-card.unique{--g-lit:#e9c25a;--g-label:#ffd85e}
 .hr-tip p{margin:0 0 6px;font-size:.88rem}
+/* Side by side (design §19.1): the hovered item first, then what is worn there. */
+.hr-tip-kicker{color:var(--g-accent);font-size:.7rem !important;letter-spacing:.12em;text-transform:uppercase;margin:0 0 2px !important}
+.hr-tip-compare .hr-tip-card + .hr-tip-card{opacity:.92}
+.hr-tip-hint{margin:8px 0 0 !important;font-size:.76rem !important;color:var(--text-soft)}
+.hr-lock-mark{font-size:.8em}
 .hr-tip-weapon{line-height:1.35}
 .hr-enchants{list-style:none;margin:0;padding:0;display:grid;gap:3px;font-size:.9rem}
 .hr-q{color:var(--text-soft)}
@@ -271,8 +282,11 @@ button.hr-forge-card:hover{border-color:#f08a80}
 @keyframes hr-flash{0%,40%{box-shadow:0 0 0 2px #9fe7ff,0 0 16px #9fe7ff}100%{box-shadow:none}}
 
 /* ── a portal's modifiers ──────────────────────────────────────────────────── */
-.hr-rift-panel{width:min(520px,calc(100% - 24px))}
-.hr-mods{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.hr-rift-panel{width:min(620px,calc(100% - 24px))}
+.hr-deeper-panel{width:min(540px,calc(100% - 24px))}
+.hr-mods{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.hr-mods-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.hr-mod:disabled{opacity:.6;cursor:default}
 .hr-mod{display:flex;flex-direction:column;gap:4px;min-width:0;padding:9px 10px;border-radius:8px;text-align:left;font:inherit;
   color:inherit;cursor:pointer;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.14)}
 .hr-mod span{color:var(--text-soft);font-size:.8rem;line-height:1.25}
@@ -319,3 +333,80 @@ button.hr-forge-card:hover{border-color:#f08a80}
 .hr-keylist dt{text-align:right}
 .hr-keylist dd{margin:0;color:var(--text-soft);font-size:.88rem}
 .hr-keylist kbd{font:inherit;font-size:.8rem;padding:0 6px;border-radius:4px;border:1px solid rgba(255,255,255,.2);white-space:nowrap}
+
+/* The death screen: the run's end, centered on a dark page, before the menu. */
+.hr-death-page{min-height:100dvh;display:grid;place-items:center;padding:16px;
+  background:radial-gradient(ellipse at 50% 30%,rgba(214,58,90,.14),transparent 60%)}
+.hr-death{width:min(620px,100%);display:flex;flex-direction:column;gap:14px;padding:22px 24px}
+.hr-death-kicker{margin:0;color:#f08a80;font-family:Cinzel,serif;letter-spacing:.18em;text-transform:uppercase;font-size:.8rem}
+.hr-death-title{margin:0;font-family:Cinzel,serif;font-size:1.6rem;color:var(--g-label)}
+.hr-death-cause{margin:0;font-size:1.15rem;color:#f6c2bc}
+.hr-death-cause small{color:var(--text-soft);font-size:.85rem}
+.hr-death-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 16px;margin:0}
+.hr-death-facts div{display:flex;flex-direction:column;gap:2px}
+.hr-death-facts dt{color:var(--text-soft);font-size:.72rem;letter-spacing:.06em}
+.hr-death-facts dd{margin:0;font-variant-numeric:tabular-nums}
+.hr-death-gear{display:grid;grid-template-columns:auto 1fr;gap:18px;align-items:start}
+.hr-death-gear .fg-label{margin:0 0 8px}
+.hr-death .hr-equip{grid-template-columns:repeat(5,48px);gap:6px}
+.hr-death-bag{display:grid;grid-template-columns:repeat(4,48px);gap:6px}
+.hr-death .hr-slot{width:48px;height:48px}
+@media(max-width:560px){.hr-death-gear{grid-template-columns:1fr}}
+
+/* ── the vault's search, filter and sort ───────────────────────────────────── */
+.hr-vault-tools{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px}
+/* 16px at least: a smaller field makes iOS zoom the page (site rule). */
+.hr-vault-search{flex:1 1 180px;min-width:0;font:inherit;font-size:max(16px,1rem);padding:4px 10px;border-radius:7px;
+  color:#f4efe4;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.16)}
+.hr-vault-search:focus{outline:none;border-color:var(--g-accent)}
+.hr-vault-fams{display:flex;flex-wrap:wrap;gap:4px}
+.hr-chip{font:inherit;font-size:.78rem;padding:2px 9px;border-radius:999px;cursor:pointer;color:var(--text-soft);
+  background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.14)}
+.hr-chip:hover{color:#f4efe4}
+.hr-chip.on{color:#f4efe4;border-color:var(--g-accent);background:color-mix(in srgb,var(--g-accent) 16%,transparent)}
+
+/* ── the log: a run's lines open its summary ───────────────────────────────── */
+.hr-notice.has-report{padding:0}
+.hr-notice-open{display:flex;width:100%;align-items:baseline;justify-content:space-between;gap:10px;padding:5px 10px;
+  font:inherit;color:inherit;text-align:left;background:none;border:0;cursor:pointer}
+.hr-notice-open:hover{background:rgba(255,255,255,.05)}
+.hr-notice-more{flex:none;font-size:.72rem;color:var(--g-accent);letter-spacing:.04em}
+
+/* The run report opened from the log (or the graveyard): over whatever is showing. */
+.hr-report-scrim{position:absolute;inset:0;z-index:7;display:grid;place-items:center;padding:12px;
+  background:rgba(6,9,10,.55);overflow:auto}
+.hr-report-overlay{max-height:100%;overflow:auto}
+.hr-report-won .hr-death-kicker{color:#9fe7ff}
+
+/* ── the main menu's foot: the record and the graveyard ────────────────────── */
+.hr-menu-foot{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:10px 18px;color:var(--text-soft);font-size:.9rem}
+.hr-best strong{color:var(--g-label);font-variant-numeric:tabular-nums}
+.hr-graveyard{width:min(520px,calc(100% - 24px));z-index:6}
+.hr-grave-list{list-style:none;margin:0;padding:0;display:grid;gap:6px;overflow:auto;min-height:0}
+.hr-grave{width:100%;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 12px;padding:8px 10px;border-radius:8px;
+  text-align:left;font:inherit;color:inherit;cursor:pointer;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.12)}
+.hr-grave:hover:not(:disabled){border-color:var(--g-accent)}
+.hr-grave:disabled{cursor:default;opacity:.7}
+.hr-grave strong{font-family:"Cinzel",serif}
+.hr-grave span{grid-column:1;color:#f6c2bc;font-size:.85rem}
+.hr-grave small{grid-column:2;grid-row:1 / span 2;align-self:center;color:var(--text-soft);font-size:.78rem}
+
+/* ── settings ──────────────────────────────────────────────────────────────── */
+.hr-settings{width:min(480px,calc(100% - 24px));z-index:6;overflow:auto}
+.hr-settings h3{margin:2px 0 0}
+.hr-binds{margin:0;display:grid;gap:4px}
+.hr-binds div{display:grid;grid-template-columns:minmax(0,1fr) 9rem;align-items:center;gap:10px}
+.hr-binds dt{font-size:.9rem}
+.hr-binds dd{margin:0}
+.hr-bind{width:100%;font:inherit;font-size:.82rem;padding:3px 8px;border-radius:6px;cursor:pointer;color:#f4efe4;
+  background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.18)}
+.hr-bind:hover{border-color:var(--g-accent)}
+.hr-bind.waiting{border-color:var(--g-accent);background:color-mix(in srgb,var(--g-accent) 18%,transparent)}
+.hr-bind.unbound{color:#f08a80}
+.hr-check{display:flex;gap:8px;align-items:flex-start;font-size:.9rem;cursor:pointer}
+.hr-check input{margin-top:3px}
+.hr-sizes{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:.9rem}
+.hr-sizes > span{margin-right:4px}
+.hr-size{font:inherit;font-size:.8rem;padding:2px 10px;border-radius:999px;cursor:pointer;color:var(--text-soft);
+  background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.14)}
+.hr-size.on{color:#f4efe4;border-color:var(--g-accent);background:color-mix(in srgb,var(--g-accent) 16%,transparent)}

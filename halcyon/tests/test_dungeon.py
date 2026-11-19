@@ -2,6 +2,8 @@
 completable, and what it hands the item store is accepted by it."""
 import sqlite3
 
+import random
+
 import pytest
 
 from core.db import _Conn
@@ -197,7 +199,11 @@ def test_rift_modifiers_raise_quality_but_not_counts_or_slots():
 
 def test_rift_modifiers_are_named_and_scale_the_enemies():
     d = D.generate("shallows", "x", mods=["swift", "fortified"])
-    assert d["mods"] == ["fortified", "swift"] and d["scale"] == {"hp": 1.5, "dmg": 1.0, "speed": 1.25}
+    assert d["mods"] == ["fortified", "swift"]
+    assert {k: d["scale"][k] for k in ("hp", "dmg", "speed")} == {"hp": 1.5, "dmg": 1.0, "speed": 1.25}
+    w = D.generate("shallows", "x", mods=["warded", "bulky", "frenzied", "volatile"])["scale"]
+    assert (w["ward"], w["ward_boss"], w["shot"], w["volatile"]) == (3, 10, 1.5, 1) and w["cadence"] < 1
+    assert len(C.RIFT_MODS) == 8 and all(m["name"] and m["text"] for m in C.RIFT_MODS.values())
     with pytest.raises(store.HalcyonError):
         D.generate("shallows", "x", mods=["nope"])
 
@@ -213,3 +219,49 @@ def test_one_enemy_never_drops_the_same_item_twice():
             assert len(bases) == len(set(bases)), (seed, eid, bases)
             seen_multi += len(bases) > 1
     assert seen_multi > 50          # enemies with two or more drops were really checked
+
+
+# ── going deeper (design §14.6) ────────────────────────────────────────────────
+def test_level_one_is_what_it_always_was_and_deeper_levels_are_shorter_and_tougher():
+    one, two = D.generate("shallows", "lv", level=1), D.generate("shallows", "lv", level=2)
+    assert one["level"] == 1 and not any(k.startswith("L") for k in list(one["enemies"]) + list(one["drops"]))
+    assert len(one["rooms"]) == 2 + D.DUNGEONS["shallows"]["combat_rooms"]
+    assert len(two["rooms"]) == 2 + D.DEEP_ROOMS
+    assert two["boss"] == "L2-boss" and all(k.startswith("L2-") for k in list(two["enemies"]) + list(two["drops"]))
+    assert all(h["id"].startswith("L2-") for h in two["pickups"])
+    assert abs(two["scale"]["hp"] - (1 + D.LEVEL_HP)) < 1e-9 and one["scale"]["hp"] == 1.0
+    assert two["tiles"] != one["tiles"]
+    # Every level is reachable end to end: start to the boss.
+    for d in (one, two):
+        b = d["enemies"][d["boss"]]
+        assert (int(b["x"]), int(b["y"])) in D.reachable(d)
+
+
+def test_the_portal_deeper_offers_three_the_run_does_not_have_the_same_every_time():
+    for seed in range(60):
+        mods = sorted(random.Random(seed).sample(sorted(C.RIFT_MODS), seed % 4))
+        for level in range(1, D.MAX_LEVEL + 1):
+            d = D.generate("shallows", f"o{seed}", mods=mods, level=level)
+            if level == D.MAX_LEVEL:
+                assert d["offers"] == []
+                continue
+            assert len(d["offers"]) == min(3, 8 - len(mods)) and len(set(d["offers"])) == len(d["offers"])
+            assert not set(d["offers"]) & set(mods), "never one the run already has"
+            assert d["offers"] == D.generate("shallows", f"o{seed}", mods=mods, level=level)["offers"]
+
+
+def test_swarming_puts_more_enemies_in_every_fight_the_boss_room_included():
+    for seed in range(20):
+        plain = D.generate("shallows", f"s{seed}")
+        many = D.generate("shallows", f"s{seed}", mods=["swarming"])
+        count = lambda d, n: sum(1 for e in d["enemies"].values() if e["room"] == n)
+        for n, room in enumerate(plain["rooms"]):
+            if room["kind"] == "combat":
+                assert count(many, n) >= count(plain, n) + 1, (seed, n)
+            if room["kind"] == "boss":
+                assert count(many, n) == 1 + D.SWARM_BOSS
+        spots = {(int(e["x"]), int(e["y"])) for e in many["enemies"].values()}
+        assert len(spots) == len(many["enemies"]), "two enemies on one tile"
+        reach = D.reachable(many)
+        assert all((int(e["x"]), int(e["y"])) in reach for e in many["enemies"].values())
+        assert all(many["tiles"][int(e["y"])][int(e["x"])] == "." for e in many["enemies"].values())

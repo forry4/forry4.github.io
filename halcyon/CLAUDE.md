@@ -235,10 +235,8 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
 - **Keys:** F recall, T auto-fire (in town and in a run), E interact (use a station,
   take the first item in reach, leave by the portal), G take everything in reach, Space
   ability, 1–8 equip from the bag.
-- **Enemies wake by TRIGGER RANGE, not by room**: each `ENEMY` type has a `wake`
-  radius (tiles); an asleep enemy wakes when the player is inside it with a clear line
-  (`sim.clearLine` — walls and rocks block it, water does not), or when an arrow hits
-  it. There is no room bookkeeping left in the sim.
+- **Enemies wake by ROOM again, and the room LOCKS** (superseded the trigger-range
+  waking on 2026-11-18 — see "Locked rooms and going deeper" below).
 - **The Shallows are harder than at first**: chaser 55 HP, shooter 48, radial 95, boss
   1150, and each combat template has two more enemies.
 
@@ -279,14 +277,14 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
   the floor (`healsBy`) and `kill()` drops one where its carrier died.
 - **Uniques drop only from the boss** (`UNIQUE_LOOT` by class, the "unique" row of the
   boss's quality table — see "Loot tables"); a bag holds at most `BAG_MAX` (8).
-- **Rift modifiers** (`content.RIFT_MODS`: fortified / brutal / swift). E at a portal
+- **Rift modifiers** (`content.RIFT_MODS`: eight now — see "Locked rooms and going deeper"). E at a portal
   opens its panel; E again (or Enter the rift) goes in with what is picked. The run
   POST carries `mods`; `generate` validates them, writes `mods` + `scale` into the
   dungeon, and each modifier is one RARITY point that adds weight to the better rows
   of the quality tables — **never the drop count or the slot count** (owner's rule,
   tested). The sim reads `dungeon.scale` (enemy HP, enemy damage, enemy move and shot
   speed). The panel's numbers are `/halcyon/state`'s `odds.loot` (`content.loot_odds`,
-  computed from the same tables at 0..3 modifiers, never typed twice).
+  computed from the same tables at 0..8 modifiers, never typed twice).
 - **AP (ability power) is a stat**, as Attack is the weapon's: `ability_power`
   enchants add points, `PER_LEVEL.ap` 1; `abilityPower = 1 + ap/STAT_SCALE` multiplies
   each ability's own lever (see "One ability per class": never a duration or a guard). An ability item's tooltip says
@@ -391,3 +389,63 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
   **The boss's unique chance rises 15% of itself per modifier** (owner's call): 11.6% →
   13.4% → 15.1% → 16.9%. A flat weight cannot hit that evenly, so the unique row's weight
   is solved for it at each rarity (`content._unique_weight`), tested to 0.01%. The rift panel shows exactly these, from `content.loot_odds`.
+
+## Locked rooms and going deeper (2026-11-18, owner's calls; design §14.1a, §14.6, §14.7)
+- **Purely linear, and every room locks.** `sim.sealRoom`: the player ALL the way inside
+  a room (`p.x - p.r > x0 && p.x + p.r < x1`) that still has enemies seals it — both
+  doorways (`st.doorCols`, rows `doorY-1..doorY+1`, from `dungeon.rooms` + `door_y`)
+  read as `"="` in `tileAt`, solid to feet and shots — and every enemy in it wakes at
+  once. The last kill opens it (`roomLeft` is counted down in `kill`). Before a room is
+  entered its doorways are a VEIL (`"|"`: walkable, shot-solid) and its enemies are
+  IMMUNE (`!e.active` skips bullets and stars), so nothing is fought through a door.
+  The boss arena is a room like any other. The tiles themselves never change: doors
+  are a property of `tileAt`, so the renderer draws them from the same state.
+- **One modifier pool of eight** for the town panel and the portal deeper, each worded
+  for ordinary enemies and the boss alike, each one rarity point, no difficulty costs,
+  no anti-combo rules. `dungeon.mod_scale` folds them into `dungeon.scale`: `hp`,
+  `dmg`, `speed`, `shot` (enemy shot radius, Bulky), `cadence` (attack cooldown
+  multiplier, Frenzied — every enemy cooldown goes through `sim.cadence`), `ward` /
+  `ward_boss` (Warded: hits ignored per enemy, drawn as pips; `sim.hurtEnemy` spends
+  them), `volatile` (a ring of shots where an enemy falls, queued in `st.rings` and
+  fired AFTER the boss-death bullet clear). Swarming is the generator's: extra enemies
+  from a SEPARATE rng (`:swarm<level>`) so the rest of the dungeon is unchanged.
+- **Going deeper.** `generate(..., level=n)`: level 1 is byte-identical to before
+  (fixtures unchanged but for new keys); deeper levels have `DEEP_ROOMS` combat rooms,
+  health ×(1 + `LEVEL_HP`·(n-1)), ids prefixed `L<n>-`, their own seed. `offers` (three
+  modifiers the run lacks, from `:offers<n>`, none at `MAX_LEVEL`) ride on every level.
+  The boss's death opens `st.portal` (home) and `st.deeper`; E on `st.deeper` only
+  emits a local `deeper` event — the PAGE shows the pick-one overlay, flushes the
+  queue, calls `POST /halcyon/runs/{id}/descend {mod, from_level}`, and replaces
+  `run.dungeon` (carrying HP, recovery limit, MP, XP and the bag; the floor is left).
+  `store.descend` checks the boss is in `killed` and the mod was offered, MERGES the new
+  level's enemies and drops into the stored dungeon (so drop ids stay unique per run
+  and late events still validate), and answers a repeat of a descent that already
+  happened with the same level. The time record is level 1's only; each level's boss
+  pays its own clear bonus on the kill.
+- Tests: `test_dungeon.py` (levels, offers, swarming), `test_store.py` (descend rules,
+  merged drops, the floor left behind), `test_api.py` (the route end to end),
+  `halcyonSim.test.mjs` (seal/veil/immunity/open, the boss arena, Warded, Volatile,
+  Bulky, Frenzied, the two portals). Screens covers the eight-modifier panel; the
+  descent itself is unit-tested and was checked by hand in a dev build.
+
+## The death screen (2026-11-18, owner's ask)
+- A death no longer drops straight to the main menu: `endRun` sets `fallen` and the page
+  renders `DeathScreen` in place of everything (Escape does nothing; its one button goes
+  on — the main menu, or the town after a Dream Rift). It shows what killed you, the
+  run (rift, level, modifiers, time, kills, damage taken) and the equipment and bag that
+  were lost, as locked `Slot`s with the normal tooltips.
+- **What killed you comes from the sim**: every enemy shot carries `src`
+  ("shooter:bolt", "boss:nova", "radial:burst" for a Volatile ring…, set through
+  `st.src` at each attack), a chaser's charge passes "chaser:touch", and `hurtPlayer`
+  keeps the last hit that landed in `st.lastHit`. `causeOf` turns it into words. A new
+  enemy or attack needs a name in `ENEMY_NAMES` / `ATTACK_NAMES`.
+- The run's kills, damage and time are counted on `ctl` (`kills`, `taken`,
+  `ticksDone` across levels), not on a sim, because going deeper replaces the sim.
+
+## The QOL pass (2026-11-18, design §19.1)
+- **Settings live on the device** (`halcyon.prefs.v1`): `ACTIONS` in `HalcyonRift.jsx` is the one list of rebindable keys; both loops ask `actionOf(code)` / `dirOf(code)`, never a hard-coded `KeyE`. Escape, the arrows and 1–8 are fixed. The interface size sets the ROOT font size while the page is mounted (every size here is rem), and `--slot` subtracts `22.6rem`, not px, so the side panel still fits.
+- **Item compare is side by side**, and every stat list (`STAT_WORDS`, `ENCHANT_ORDER`, `sortedEnchants`) uses one order. A new stat goes into both lists at the same position.
+- **Lock** (`hr_items.locked`, `set_lock`): not a move, so no version bump; discard, fuse and a run's `drop_item` refuse it; Sort plans around it (`sortPlan`).
+- **The graveyard** is `hr_characters.death_summary`, written by the `death` event BEFORE `_close_run` destroys the gear. The page's fields (cause, tallies) are bounded and only describe; the items and the rift are the server's.
+- **The healing potion** is `input.potion` with `p.potionCd` (in the fingerprint); enemy damage numbers are drawing-only (`damageNumbers` with `foe`).
+- **The run summary never opens on its own**: a clear's or recall's line in the log gets `report` when the run ends, and only a click opens it.

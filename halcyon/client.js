@@ -118,8 +118,11 @@ export function makeClient(authUser, { base = BACKEND_HTTP, fetchImpl = (...a) =
 		openCharacter: (charId) => request(`/halcyon/characters/${encodeURIComponent(charId)}/open`, {}),
 		startRun: (charId, dungeonId = "shallows", practice = false, mods = []) => request("/halcyon/runs",
 			{ char_id: charId, dungeon_id: dungeonId, practice, mods }),
+		descend: (runId, mod, fromLevel) => request(`/halcyon/runs/${encodeURIComponent(runId)}/descend`,
+			{ mod, from_level: fromLevel }),
 		move: (itemId, to, version) => request(`/halcyon/items/${encodeURIComponent(itemId)}/move`, { to, version }),
 		discard: (itemId, version) => request(`/halcyon/items/${encodeURIComponent(itemId)}/discard`, { version }),
+		lock: (itemId, locked) => request(`/halcyon/items/${encodeURIComponent(itemId)}/lock`, { locked }),
 		fuse: (a, b) => request("/halcyon/fuse", { a, b }),
 		// A run with nothing left to deliver is not "pending": an open run that reported
 		// nothing (the tab closed at once) is the server's to close, not the queue's.

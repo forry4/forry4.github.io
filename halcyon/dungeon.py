@@ -135,7 +135,7 @@ CORRIDOR = 3
 # The Shallows (design §14.4): the gentlest dungeon. Four combat rooms.
 # `complete_xp` is the bonus for finishing it (design §10.1); each enemy's own XP
 # is content.ENEMY_XP, written onto the enemy here so the run keeps what it was worth.
-DUNGEONS = {"shallows": {"name": "The Shallows", "combat_rooms": 4, "complete_xp": 30}}
+DUNGEONS = {"shallows": {"name": "The Shallows", "boss_name": "The Tidewarden", "combat_rooms": 4, "complete_xp": 30}}
 
 ENEMY_WEIGHTS = (("chaser", 40), ("shooter", 35), ("radial", 25))
 # A heal orb drops from an ordinary enemy at this chance: about one a rift (0-2 is
@@ -197,31 +197,84 @@ def _mirror(rows: list[str]) -> list[str]:
     return [r[::-1] for r in rows]
 
 
-def mod_scale(mods: list[str]) -> dict:
-    """What the chosen rift modifiers do to the enemies, multiplied together."""
-    out = {"hp": 1.0, "dmg": 1.0, "speed": 1.0}
+# GOING DEEPER (design §14.6): a level's boss opens the way home AND a portal
+# deeper, which offers three modifiers the run does not have yet; the one picked
+# is added and the next level is generated. Deeper levels are SHORTER and carry a
+# small base scale on enemy health; their ids are prefixed ("L2-e1") so every
+# enemy and drop id stays unique across the whole run (the store keeps them all,
+# and a drop's UNIQUE index is per run). Level 1 is exactly what it always was.
+MAX_LEVEL = 5
+DEEP_ROOMS = 2
+LEVEL_HP = 0.15
+OFFERS = 3
+# Swarming (owner's wording, 2026-11-18: "more enemies spawn", the boss's room
+# included): half again as many in each combat room, and a few in the boss's.
+SWARM_ROOM = 0.5
+SWARM_BOSS = 3
+
+
+def mod_scale(mods: list[str], level: int = 1) -> dict:
+    """What the run's modifiers (and its depth) do to the enemies. Multipliers are
+    multiplied together; wards and the death ring are flags the sim reads."""
+    out = {"hp": 1.0, "dmg": 1.0, "speed": 1.0, "shot": 1.0, "cadence": 1.0,
+           "ward": 0, "ward_boss": 0, "volatile": 0}
     for m in mods:
-        for k, v in C.RIFT_MODS[m]["scale"].items():
+        spec = C.RIFT_MODS[m]
+        for k, v in spec["scale"].items():
             out[k] *= v
+        if "ward" in spec:
+            out["ward"], out["ward_boss"] = spec["ward"]
+        if spec.get("volatile"):
+            out["volatile"] = 1
+    out["hp"] *= 1 + LEVEL_HP * (level - 1)
+    return out
+
+
+def offers_for(dungeon_id: str, seed: str, mods, level: int) -> list[str]:
+    """The modifiers the portal out of `level` offers: three the run does not have,
+    from the run's seed — the same every time it is asked (a retried descent)."""
+    if level >= MAX_LEVEL:
+        return []
+    left = sorted(m for m in C.RIFT_MODS if m not in set(mods))
+    return random.Random(f"{dungeon_id}:{seed}:offers{level}").sample(left, min(OFFERS, len(left)))
+
+
+def _swarm_spots(rng: random.Random, t: list[str], taken: list[tuple[int, int]], n: int) -> list[tuple[int, int]]:
+    """`n` floor tiles in a template for extra enemies: clear of its side walls (so
+    nothing waits in a doorway) and of every other spawn."""
+    w = len(t[0])
+    spots = [(c, r) for r, row in enumerate(t) for c, ch in enumerate(row)
+             if ch == "." and 3 <= c < w - 3 and 1 <= r < len(t) - 1]
+    rng.shuffle(spots)
+    out = []
+    for c, r in spots:
+        if len(out) >= n:
+            break
+        if all((c - x) ** 2 + (r - y) ** 2 >= 4 for x, y in taken + out):
+            out.append((c, r))
     return out
 
 
 def generate(dungeon_id: str, seed: str | None = None, class_id: str = "ranger",
-             mods: list[str] | tuple = ()) -> dict:
-    """The whole dungeon for one run, as JSON-safe data."""
+             mods: list[str] | tuple = (), level: int = 1) -> dict:
+    """One level of a run's dungeon, as JSON-safe data."""
     if dungeon_id not in DUNGEONS:
         raise store.HalcyonError("no such dungeon")
     if class_id not in C.CLASSES:
         raise store.HalcyonError("no such class")
+    if not isinstance(level, int) or not 1 <= level <= MAX_LEVEL:
+        raise store.HalcyonError("no such level")
     mods = sorted(set(mods))
     if any(m not in C.RIFT_MODS for m in mods):
         raise store.HalcyonError("no such rift modifier")
     rarity = len(mods)
     seed = seed or secrets.token_hex(8)
-    rng = random.Random(f"{dungeon_id}:{seed}")
+    rng = random.Random(f"{dungeon_id}:{seed}" if level == 1 else f"{dungeon_id}:{seed}:L{level}")
+    swarm = random.Random(f"{dungeon_id}:{seed}:swarm{level}") if "swarming" in mods else None
+    pre = "" if level == 1 else f"L{level}-"
     spec = DUNGEONS[dungeon_id]
 
-    combat = rng.sample(COMBAT, spec["combat_rooms"])
+    combat = rng.sample(COMBAT, spec["combat_rooms"] if level == 1 else DEEP_ROOMS)
     rooms = [("entrance", ENTRANCE)] + [("combat", t) for t in combat] + [("boss", BOSS_ROOM)]
     rooms = [(k, _mirror(t) if rng.random() < 0.5 else list(t)) for k, t in rooms]
 
@@ -233,22 +286,31 @@ def generate(dungeon_id: str, seed: str | None = None, class_id: str = "ranger",
     enemies, pickups, room_spans = {}, [], []
     start = boss = None
     x = 0
+
+    def add(etype: str, n: int, gx: int, gy: int) -> str:
+        eid = f"{pre}boss" if etype == "boss" else f"{pre}e{sum(1 for k in enemies if not k.endswith('boss')) + 1}"
+        enemies[eid] = {"type": etype, "room": n, "xp": C.ENEMY_XP[etype], "x": gx + 0.5, "y": gy + 0.5}
+        return eid
+
     for n, (kind, t) in enumerate(rooms):
         h, w = len(t), len(t[0])
         top = (height - (h + 2)) // 2
+        spawns = []
         for r, row in enumerate(t):
             for c, ch in enumerate(row):
                 gx, gy = x + 1 + c, top + 1 + r
                 grid[gy][gx] = ch if ch in "o~." else "."
-                pos = {"x": gx + 0.5, "y": gy + 0.5}
                 if ch == "S":
-                    start = pos
+                    start = {"x": gx + 0.5, "y": gy + 0.5}
                 elif ch in "EB":
-                    eid = "boss" if ch == "B" else f"e{len(enemies) + 1}"
-                    etype = "boss" if ch == "B" else _pick(rng, ENEMY_WEIGHTS)
-                    enemies[eid] = {"type": etype, "room": n, "xp": C.ENEMY_XP[etype], **pos}
+                    spawns.append((c, r))
+                    eid = add("boss" if ch == "B" else _pick(rng, ENEMY_WEIGHTS), n, gx, gy)
                     if ch == "B":
                         boss = eid
+        if swarm and kind in ("combat", "boss"):
+            extra = SWARM_BOSS if kind == "boss" else -(-len(spawns) * SWARM_ROOM // 1)
+            for c, r in _swarm_spots(swarm, t, spawns, int(extra)):
+                add(_pick(swarm, ENEMY_WEIGHTS), n, x + 1 + c, top + 1 + r)
         if n > 0:                                    # door in the left wall
             for dy in (-1, 0, 1):
                 grid[mid + dy][x] = "."
@@ -264,7 +326,7 @@ def generate(dungeon_id: str, seed: str | None = None, class_id: str = "ranger",
         is_boss = e["type"] == "boss"
         n = _pick(rng, C.DROP_COUNT[e["type"]])               # how many items: one roll
         if not is_boss and rng.random() < HEAL_CHANCE:           # a heal orb, dropped where it falls
-            pickups.append({"id": f"h{len(pickups) + 1}", "kind": "heal", "enemy": eid})
+            pickups.append({"id": f"{pre}h{len(pickups) + 1}", "kind": "heal", "enemy": eid})
         quality = C.quality_table("boss" if is_boss else "enemy", rarity)
         dropped: set[str] = set()
         for _ in range(min(n, BAG_MAX)):
@@ -273,13 +335,14 @@ def generate(dungeon_id: str, seed: str | None = None, class_id: str = "ranger",
             it = _item(rng, 1 if unique else int(q[1:]), class_id, unique, frozenset(dropped))
             dropped.add(it["base_id"])
             n_drop += 1
-            drops[f"d{n_drop}"] = {**it, "enemy": eid}
+            drops[f"{pre}d{n_drop}"] = {**it, "enemy": eid}
 
-    return {"id": dungeon_id, "name": spec["name"], "seed": seed, "width": width, "height": height,
-            "tiles": ["".join(r) for r in grid], "start": start, "rooms": room_spans,
+    return {"id": dungeon_id, "name": spec["name"], "boss_name": spec["boss_name"], "seed": seed, "width": width, "height": height,
+            "tiles": ["".join(r) for r in grid], "start": start, "rooms": room_spans, "door_y": mid,
             "enemies": enemies, "boss": boss, "drops": drops, "pickups": pickups,
             "complete_xp": spec["complete_xp"], "class_id": class_id,
-            "mods": mods, "scale": mod_scale(mods)}
+            "mods": mods, "scale": mod_scale(mods, level), "level": level,
+            "offers": offers_for(dungeon_id, seed, mods, level)}
 
 
 def walkable(d: dict, x: int, y: int) -> bool:

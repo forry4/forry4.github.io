@@ -52,6 +52,10 @@ export const PLAYER_SPEED = 5.6;                     // tiles / s
 export const REACH = 1.3;                            // how close E has to be
 export const RECOVERY_MARGIN = 40;                   // design §9.2: limit = min(max, lowest + margin)
 export const HEAL = 35;                              // a heal pickup: +HP and +limit
+/* THE HEALING POTION (owner's call, 2026-11-18, design §19.1): never a stock, always
+ * a cooldown. It heals and raises the recovery limit like a smaller heal orb. */
+export const POTION_HEAL = 30;
+export const POTION_COOLDOWN = 20 * TPS;
 export const ABILITY_COST = 30;
 export const SHIELD_DURATION = 5 * TPS;
 export const SLOW_DURATION = 5 * TPS;
@@ -82,17 +86,18 @@ export const CLASS_INFO = {
 	ninja: { name: "Ninja", description: "A quick thrower who counters a hit and strikes back twice as hard.", ability: "counter" },
 };
 
-/* `wake` is the trigger range in tiles: an enemy sleeps until the player comes that
- * close with nothing solid between them, or an arrow hits it (owner's ask,
- * 2026-11-18 — it used to be "the player entered the room"). HP went up by about a
- * third at the same time ("slightly harder"). */
+/* ROOMS LOCK (owner's call, 2026-11-18, design §14.1a): an enemy sleeps — and
+ * cannot be hurt — until the player is all the way inside its room; then both of
+ * that room's doors seal and everything in it wakes at once. The doors open when
+ * the last of them falls. While a room has not been fought, its doorways are a
+ * VEIL that stops shots both ways, so nothing is fought through a door. */
 export const ENEMY = {
 	// A chaser also spits a short shot when it is close (owner's ask, 2026-11-18): a
 	// short telegraph, then one slow bolt that dies after `shot.range` tiles.
-	chaser: { hp: 55, r: 0.4, speed: 3.4, touch: 16, wake: 7, shot: { range: 3.5, speed: 7, dmg: 9, tele: 14, every: 75 } },
-	shooter: { hp: 48, r: 0.38, speed: 2.4, wake: 7.5 },
-	radial: { hp: 95, r: 0.45, speed: 0, wake: 7 },
-	boss: { hp: 1150, r: 1.0, speed: 1.2, wake: 9 },
+	chaser: { hp: 55, r: 0.4, speed: 3.4, touch: 16, shot: { range: 3.5, speed: 7, dmg: 9, tele: 14, every: 75 } },
+	shooter: { hp: 48, r: 0.38, speed: 2.4 },
+	radial: { hp: 95, r: 0.45, speed: 0 },
+	boss: { hp: 1150, r: 1.0, speed: 1.2 },
 };
 
 /* Each weapon fires its own PATTERN, not just its own numbers (owner's ask,
@@ -214,13 +219,21 @@ function weaponStats(w, t) {
 }
 
 // ── the map ─────────────────────────────────────────────────────────────────
+/* A doorway of a room that still has enemies in it reads as "=" while the room is
+ * sealed (nothing passes) and "|" before it is entered (a veil: shots stop, feet
+ * do not). Once the room is cleared it is plain floor again. */
 function tileAt(st, x, y) {
 	const ty = Math.floor(y), tx = Math.floor(x);
 	if (ty < 0 || ty >= st.h || tx < 0 || tx >= st.w) return "#";
+	if (st.doorCols && ty >= st.doorY - 1 && ty <= st.doorY + 1) {
+		const r = st.doorCols[tx];
+		if (r >= 0 && st.roomLeft[r] > 0) return st.sealed === r ? "=" : "|";
+	}
 	return st.tiles[ty][tx];
 }
-const walkSolid = (c) => c === "#" || c === "o" || c === "~";
-const shotSolid = (c) => c === "#" || c === "o";
+export const doorAt = (st, x, y) => tileAt(st, x, y);
+const walkSolid = (c) => c === "#" || c === "o" || c === "~" || c === "=";
+const shotSolid = (c) => c === "#" || c === "o" || c === "=" || c === "|";
 
 function blocked(st, x, y, r) {
 	for (let ty = Math.floor(y - r); ty <= Math.floor(y + r); ty++)
@@ -233,17 +246,6 @@ function blocked(st, x, y, r) {
 function moveBody(st, b, dx, dy) {
 	if (dx !== 0 && !blocked(st, b.x + dx, b.y, b.r)) b.x += dx;
 	if (dy !== 0 && !blocked(st, b.x, b.y + dy, b.r)) b.y += dy;
-}
-
-/* Nothing that blocks walking (wall, rock, water) between two points? Marched in
- * quarter tiles — enough for a one-tile wall, and exact arithmetic. */
-function clearLine(st, ax, ay, bx, by) {
-	const dx = bx - ax, dy = by - ay, d = Math.sqrt(dx * dx + dy * dy), n = Math.ceil(d * 4);
-	for (let i = 1; i < n; i++) {
-		const c = tileAt(st, ax + (dx * i) / n, ay + (dy * i) / n);
-		if (c === "#" || c === "o") return false;            // water is low: you can see across it
-	}
-	return true;
 }
 
 /* The level `xp` reaches on the server's table (`levels[n]` = the XP to BE
@@ -270,37 +272,48 @@ export function createSim(dungeon, gear = [], hero = {}) {
 	const xp = hero.xp || 0, level = Math.max(hero.level || 1, levelFor(levels, xp));
 	const classId = hero.class_id || hero.classId || dungeon.class_id || "ranger";
 	const stats = statsFor(gear, level, classId);
-	const scale = { hp: 1, dmg: 1, speed: 1, ...(dungeon.scale || {}) };
+	const scale = { hp: 1, dmg: 1, speed: 1, shot: 1, cadence: 1, ward: 0, ward_boss: 0, volatile: 0, ...(dungeon.scale || {}) };
 	const enemies = Object.entries(dungeon.enemies)
 		.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))      // a fixed order, never insertion order
 		.map(([id, e]) => ({ id, type: e.type, room: e.room, x: e.x, y: e.y, xp: e.xp || 0,
 			r: ENEMY[e.type].r, hp: Math.round(ENEMY[e.type].hp * scale.hp), maxHp: Math.round(ENEMY[e.type].hp * scale.hp),
 			active: false, cd: 30 + (e.type === "boss" ? 60 : 0), tele: 0, scd: 0, flash: 0,
+			ward: e.type === "boss" ? scale.ward_boss : scale.ward,
 			side: 1, phase: 1, mode: 0, modeT: e.type === "boss" ? BOSS_CYCLE[0][1] : 0, ang: 0, aimX: 0, aimY: 0 }));
+	// The doors: each room's left and right doorway columns, on the three rows
+	// around the map's middle row (dungeon.py cuts them there).
+	const rooms = dungeon.rooms || [];
+	const doorY = dungeon.door_y ?? Math.floor(dungeon.height / 2);
+	const doorCols = new Array(dungeon.width).fill(-1);
+	rooms.forEach((r, i) => { if (i > 0) doorCols[r.x0 - 1] = i; if (i < rooms.length - 1) doorCols[r.x1] = i; });
+	const roomLeft = rooms.map((_, i) => enemies.filter((e) => e.room === i).length);
 	const dropsBy = {};
 	for (const [id, d] of Object.entries(dungeon.drops)) (dropsBy[d.enemy] ||= []).push(id);
 	for (const k of Object.keys(dropsBy)) dropsBy[k].sort();
 	return {
 		tick: 0, elapsedTicks: 0, bossTimeTicks: null, rng: hashSeed(String(dungeon.seed)), status: "play",
 		classId, practice: !!hero.practice,
-		w: dungeon.width, h: dungeon.height, tiles: dungeon.tiles, rooms: dungeon.rooms,
+		w: dungeon.width, h: dungeon.height, tiles: dungeon.tiles, rooms,
+		doorY, doorCols, roomLeft, sealed: -1, depth: dungeon.level || 1, offers: dungeon.offers || [],
 		stats, gear, levels, completeXp: dungeon.complete_xp || 0,
 		hero: { level, xp, startLevel: level, startXp: xp },
 		p: { x: dungeon.start.x, y: dungeon.start.y, r: PLAYER_R, hp: stats.maxHp, low: stats.maxHp,
 			mp: stats.maxMp, fireCd: 0, hurt: 0, burstLeft: 0, burstCd: 0,
-			abilityCd: 0, counterUntil: 0, guardUntil: 0, empower: 0 },
+			abilityCd: 0, potionCd: 0, counterUntil: 0, guardUntil: 0, empower: 0 },
 		enemies, bullets: [], dropsBy, scale,
 		// Heal orbs DROP from the enemy that carries one (dungeon.py); one with a
 		// position of its own (an older dungeon) lies where it was placed.
 		pickups: dungeon.pickups.filter((h) => h.enemy == null).map((h) => ({ ...h })),
 		healsBy: Object.fromEntries(dungeon.pickups.filter((h) => h.enemy != null).map((h) => [h.enemy, h.id])),
-		bags: [], floor: [], portal: null, shield: null, slowUntil: 0, starfalls: [], blasts: [], damageNumbers: [], events: [],
+		bags: [], floor: [], portal: null, deeper: null, shield: null, slowUntil: 0, starfalls: [], blasts: [], damageNumbers: [], events: [],
 	};
 }
 
 export const recoveryLimit = (st) => Math.min(st.stats.maxHp, st.p.low + RECOVERY_MARGIN);
 
-function hurtPlayer(st, dmg) {
+/* `src` names what hit ("shooter:bolt", "boss:nova", "chaser:touch"…): the last hit
+ * that landed is kept in `st.lastHit`, so a death can say what did it. */
+function hurtPlayer(st, dmg, src = null) {
 	if (st.status !== "play") return;
 	dmg *= st.scale ? st.scale.dmg : 1;                     // the Brutal modifier
 	const p = st.p;
@@ -315,6 +328,7 @@ function hurtPlayer(st, dmg) {
 	const taken = Math.round(Math.max(dmg * 0.4, dmg - st.stats.def) * 10) / 10;
 	p.hp -= taken;
 	p.hurt = 8;
+	st.lastHit = { src, dmg: taken, tick: st.tick };
 	if (!st.damageNumbers) st.damageNumbers = [];
 	st.damageNumbers.push({ x: p.x, y: p.y, amount: taken, until: st.tick + 45 });
 	st.events.push({ type: "damage", amount: taken, local: true });
@@ -326,15 +340,20 @@ function hurtPlayer(st, dmg) {
 	}
 }
 
+/* An enemy's attack cooldown, shortened by Frenzied. */
+const cadence = (st, ticks) => Math.max(1, Math.round(ticks * st.scale.cadence));
+
 function shoot(st, owner, x, y, ang, speed, dmg, r, life, pierce = 0) {
-	if (owner === "e") { speed *= st.scale.speed; life = Math.round(life / st.scale.speed); }
-	st.bullets.push({ owner, x, y, vx: dcos(ang) * speed, vy: dsin(ang) * speed, dmg, r, life, pierce, hit: [] });
+	if (owner === "e") { speed *= st.scale.speed; life = Math.round(life / st.scale.speed); r *= st.scale.shot; }
+	st.bullets.push({ owner, x, y, vx: dcos(ang) * speed, vy: dsin(ang) * speed, dmg, r, life, pierce, hit: [],
+		...(owner === "e" ? { src: st.src } : {}) });
 }
 
 function shootAt(st, owner, x, y, tx, ty, speed, dmg, r, life) {
-	if (owner === "e") { speed *= st.scale.speed; life = Math.round(life / st.scale.speed); }
+	if (owner === "e") { speed *= st.scale.speed; life = Math.round(life / st.scale.speed); r *= st.scale.shot; }
 	const dx = tx - x, dy = ty - y, d = Math.sqrt(dx * dx + dy * dy) || 1;
-	st.bullets.push({ owner, x, y, vx: dx / d * speed, vy: dy / d * speed, dmg, r, life, pierce: 0, hit: [] });
+	st.bullets.push({ owner, x, y, vx: dx / d * speed, vy: dy / d * speed, dmg, r, life, pierce: 0, hit: [],
+		...(owner === "e" ? { src: st.src } : {}) });
 }
 
 // No atan2 (not deterministic): a pattern that needs an aimed FAN rotates the
@@ -355,13 +374,14 @@ function enemyStep(st, e) {
 
 	if (e.type === "chaser") {
 		moveBody(st, e, ux * sp, uy * sp);
-		if (d < e.r + p.r + 0.05 && e.cd === 0) { hurtPlayer(st, ENEMY.chaser.touch); e.cd = 36; }
+		if (d < e.r + p.r + 0.05 && e.cd === 0) { hurtPlayer(st, ENEMY.chaser.touch, "chaser:touch"); e.cd = 36; }
 		const sh = ENEMY.chaser.shot;
 		if (e.scd > 0) e.scd--;
 		if (e.tele > 0) {
 			if (--e.tele === 0) {
+				st.src = "chaser:spit";
 				shootAt(st, "e", e.x, e.y, p.x, p.y, sh.speed, sh.dmg, 0.16, Math.round((sh.range / sh.speed) * TPS));
-				e.scd = sh.every;
+				e.scd = cadence(st, sh.every);
 			}
 		} else if (!(e.scd > 0) && d < sh.range) e.tele = sh.tele;
 		return;
@@ -372,7 +392,7 @@ function enemyStep(st, e) {
 		else if (d > 6.5) moveBody(st, e, ux * sp, uy * sp);
 		else moveBody(st, e, -uy * sp * e.side, ux * sp * e.side);
 		if (e.tele > 0) {
-			if (--e.tele === 0) { shootAt(st, "e", e.x, e.y, p.x, p.y, 7.5, 14, 0.18, 150); e.cd = 84; }
+			if (--e.tele === 0) { st.src = "shooter:bolt"; shootAt(st, "e", e.x, e.y, p.x, p.y, 7.5, 14, 0.18, 150); e.cd = cadence(st, 84); }
 		} else if (e.cd === 0 && d < 11) e.tele = 21;
 		return;
 	}
@@ -380,8 +400,9 @@ function enemyStep(st, e) {
 		if (e.tele > 0) {
 			if (--e.tele === 0) {
 				e.ang = e.ang === 0 ? TAU / 20 : 0;
+				st.src = "radial:ring";
 				for (let k = 0; k < 10; k++) shoot(st, "e", e.x, e.y, e.ang + k * TAU / 10, 4.5, 16, 0.2, 200);
-				e.cd = 144;
+				e.cd = cadence(st, 144);
 			}
 		} else if (e.cd === 0) e.tele = 30;
 		return;
@@ -408,10 +429,11 @@ function bossStep(st, e, d, ux, uy) {
 	const cycle = e.phase === 1 ? BOSS_CYCLE : BOSS_CYCLE_2;
 	const [mode] = cycle[e.mode];
 	const t = cycle[e.mode][1] - e.modeT;              // ticks into this mode
+	st.src = `boss:${mode}`;
 	if (e.phase === 2 && d > 3) moveBody(st, e, ux * ENEMY.boss.speed * st.scale.speed * DT, uy * ENEMY.boss.speed * st.scale.speed * DT);
 
 	if (mode === "spiral") {
-		const every = e.phase === 1 ? 6 : 5, arms = e.phase === 1 ? 3 : 5;
+		const every = cadence(st, e.phase === 1 ? 6 : 5), arms = e.phase === 1 ? 3 : 5;
 		if (t % every === 0) {
 			for (let k = 0; k < arms; k++) shoot(st, "e", e.x, e.y, e.ang + k * TAU / arms, 5, 14, 0.2, 240);
 			e.ang += 0.21;
@@ -423,7 +445,7 @@ function bossStep(st, e, d, ux, uy) {
 			const dx = e.aimX - e.x, dy = e.aimY - e.y, n = Math.sqrt(dx * dx + dy * dy) || 1;
 			for (let i = -2; i <= 2; i++) {
 				const [vx, vy] = rotate(dx / n, dy / n, i * 0.22);
-				st.bullets.push({ owner: "e", x: e.x, y: e.y, vx: vx * 8, vy: vy * 8, dmg: 18, r: 0.22, life: 180, pierce: 0, hit: [] });
+				shootAt(st, "e", e.x, e.y, e.x + vx, e.y + vy, 8, 18, 0.22, 180);
 			}
 		}
 	} else if (mode === "nova") {
@@ -434,7 +456,10 @@ function bossStep(st, e, d, ux, uy) {
 		}
 	}
 	if (e.tele > 0) e.tele--;
-	if (--e.modeT <= 0) { e.mode = (e.mode + 1) % cycle.length; e.modeT = cycle[e.mode][1]; }
+	if (--e.modeT <= 0) {
+		e.mode = (e.mode + 1) % cycle.length;
+		e.modeT = cycle[e.mode][0] === "rest" ? cadence(st, cycle[e.mode][1]) : cycle[e.mode][1];
+	}
 }
 
 // ── one tick ────────────────────────────────────────────────────────────────
@@ -442,7 +467,7 @@ function bossStep(st, e, d, ux, uy) {
  *          ability: bool (this tick only); take: drop id | null;
  *          drop: an item the player put down (an opaque key the page names it by);
  *          lift: the key of an item on the floor to take back; heal: bool (E on
- *          an orb); enter: bool (E on the portal); recall: bool;
+ *          an orb); potion: bool (this tick only); enter: bool (E on the portal); recall: bool;
  *          gear: the whole equipped list, on the tick it changes (else absent) } */
 export function step(st, input) {
 	st.events = [];
@@ -468,6 +493,15 @@ export function step(st, input) {
 	if (p.hurt > 0) p.hurt--;
 
 	playerFire(st, input);
+
+	// the healing potion: only when it would heal, then a cooldown
+	if (p.potionCd > 0) p.potionCd--;
+	if (input.potion && !(p.potionCd > 0) && p.hp < s.maxHp) {
+		p.low = Math.min(s.maxHp, p.low + POTION_HEAL);
+		p.hp = Math.min(recoveryLimit(st), p.hp + POTION_HEAL);
+		p.potionCd = POTION_COOLDOWN;
+		st.events.push({ type: "potion", local: true });
+	}
 
 	// manual pickups (design §11.6, §9.4)
 	if (input.heal) {
@@ -501,26 +535,24 @@ export function step(st, input) {
 		st.events.push({ type: "complete" });
 		return st;
 	}
+	// The way deeper is a choice the PAGE makes (three modifiers, pick one, and a
+	// new level from the server): the sim only says the player asked.
+	if (input.enter && st.deeper && near(p, st.deeper, REACH)) st.events.push({ type: "deeper", local: true });
 
-	// enemies wake when the player comes within their trigger range, in sight
+	sealRoom(st);
 	for (const e of st.enemies) {
-		if (e.hp <= 0) continue;
-		if (!e.active) {
-			const dx = e.x - p.x, dy = e.y - p.y, w = ENEMY[e.type].wake;
-			if (dx * dx + dy * dy <= w * w && clearLine(st, p.x, p.y, e.x, e.y)) e.active = true;
-		}
-		if (e.active) enemyStep(st, e);
+		if (e.hp <= 0 || !e.active) continue;
+		enemyStep(st, e);
 		if (st.status !== "play") return st;
 	}
 
 	// stars landing (the Diviner's ability)
 	landStarfalls(st, (f) => {
 		for (const e of st.enemies) {
-			if (e.hp <= 0 || e.phase === 0) continue;
+			if (e.hp <= 0 || e.phase === 0 || !e.active) continue;
 			const dx = e.x - f.x, dy = e.y - f.y, rr = f.r + e.r;
 			if (dx * dx + dy * dy >= rr * rr) continue;
-			e.hp -= f.dmg; e.flash = 6; e.active = true;
-			if (e.hp <= 0) kill(st, e);
+			hurtEnemy(st, e, f.dmg, 6);
 		}
 	});
 	if (st.status !== "play") return st;
@@ -543,23 +575,30 @@ export function step(st, input) {
 		if (b.owner === "p") {
 			for (const e of st.enemies) {
 				if (e.hp <= 0 || b.hit.includes(e.id)) continue;
-				if (e.phase === 0) continue;                     // the boss's transition is untouchable
+				if (e.phase === 0 || !e.active) continue;        // the boss's turn, and a room not entered
 				const dx = e.x - b.x, dy = e.y - b.y, rr = e.r + b.r;
 				if (dx * dx + dy * dy < rr * rr) {
-					e.hp -= b.dmg; e.flash = 4; b.hit.push(e.id); e.active = true;   // a hit wakes it
-					if (e.hp <= 0) kill(st, e);
+					b.hit.push(e.id);
+					hurtEnemy(st, e, b.dmg, 4);
 					if (b.pierce-- <= 0) { gone = true; break; }
 				}
 			}
 		} else {
 			const dx = p.x - b.x, dy = p.y - b.y, rr = p.r + b.r;
-			if (dx * dx + dy * dy < rr * rr) { hurtPlayer(st, b.dmg); gone = true; }
+			if (dx * dx + dy * dy < rr * rr) { hurtPlayer(st, b.dmg, b.src || null); gone = true; }
 		}
 		if (!gone) keep.push(b);
 		if (st.status !== "play") break;
 	}
 	st.bullets = st.bossDown ? keep.filter((b) => b.owner === "p") : keep;
 	st.bossDown = false;
+	if (st.rings?.length) {                            // Volatile: what fell this tick bursts
+		for (const r of st.rings) {
+			st.src = `${r.type}:burst`;
+			for (let k = 0; k < r.n; k++) shoot(st, "e", r.x, r.y, r.a + k * TAU / r.n, 4, 10, 0.18, 110);
+		}
+		st.rings = [];
+	}
 	return st;
 }
 
@@ -656,12 +695,39 @@ function near(a, b, r) {
 /* The exit opens a few tiles from where the boss fell — clear of its loot bag, on
  * floor the player can stand on. Where it fell is the fallback (always walkable). */
 export const PORTAL_OFFSET = 3;
-function portalSpot(st, e) {
+function portalSpot(st, e, not = null) {
 	for (const [dx, dy] of [[0, PORTAL_OFFSET], [0, -PORTAL_OFFSET], [PORTAL_OFFSET, 0], [-PORTAL_OFFSET, 0]]) {
 		const x = e.x + dx, y = e.y + dy;
-		if (!blocked(st, x, y, PLAYER_R)) return { x, y };
+		if (blocked(st, x, y, PLAYER_R) || (not && near({ x, y }, not, PORTAL_OFFSET))) continue;
+		return { x, y };
 	}
 	return { x: e.x, y: e.y };
+}
+
+/* The player all the way inside a room that still has enemies: both its doors seal
+ * and everything in it wakes. One room at a time; the doors open in `kill`. */
+function sealRoom(st) {
+	if (st.sealed >= 0 || !st.rooms.length) return;
+	const p = st.p;
+	for (let i = 0; i < st.rooms.length; i++) {
+		const r = st.rooms[i];
+		if (st.roomLeft[i] > 0 && p.x - p.r > r.x0 && p.x + p.r < r.x1) {
+			st.sealed = i;
+			for (const e of st.enemies) if (e.room === i && e.hp > 0) e.active = true;
+			st.events.push({ type: "seal", room: i, local: true });
+			return;
+		}
+	}
+}
+
+/* A hit on an enemy. Warded: the first few hits (counted per enemy, each one —
+ * an arrow, a star — one hit) do nothing but flash. */
+function hurtEnemy(st, e, dmg, flash) {
+	if (e.ward > 0) { e.ward--; e.flash = 2; return; }
+	// What a hit did, floated over the enemy (drawing only: not in the fingerprint).
+	(st.damageNumbers ||= []).push({ x: e.x, y: e.y - e.r, amount: Math.round(Math.min(dmg, e.hp) * 10) / 10, until: st.tick + 36, foe: true });
+	e.hp -= dmg; e.flash = flash;
+	if (e.hp <= 0) kill(st, e);
 }
 
 /* Gear changed mid-run (the player moved an item in the side panel). It is an
@@ -700,6 +766,11 @@ function gainXp(st, amount) {
 function kill(st, e) {
 	e.hp = 0;
 	st.events.push({ type: "kill", enemy: e.id });
+	if (st.roomLeft && e.room != null && --st.roomLeft[e.room] === 0 && st.sealed === e.room) {
+		st.sealed = -1;
+		st.events.push({ type: "unseal", room: e.room, local: true });
+	}
+	if (st.scale.volatile) (st.rings ||= []).push({ x: e.x, y: e.y, n: e.type === "boss" ? 16 : 8, a: rand(st) * TAU, type: e.type });
 	gainXp(st, e.xp);
 	const drops = st.practice ? [] : st.dropsBy[e.id];
 	if (e.type === "boss") st.bossTimeTicks = st.elapsedTicks;
@@ -708,6 +779,7 @@ function kill(st, e) {
 	if (heal) st.pickups.push({ id: heal, kind: "heal", x: e.x, y: e.y + (drops && drops.length ? 0.6 : 0) });
 	if (e.type === "boss") {
 		st.portal = portalSpot(st, e);
+		if (st.offers.length && st.depth < 5) st.deeper = portalSpot(st, e, st.portal);
 		// The dungeon is CLEARED when its boss falls: the bonus and the news come now,
 		// not at the portal (owner's ask, 2026-11-18). The server credits it on the
 		// same kill event.
@@ -723,8 +795,9 @@ export function fingerprint(st) {
 	const r = (v) => Math.round(v * 1e6) / 1e6;
 	return JSON.stringify([st.tick, st.elapsedTicks, st.bossTimeTicks, st.rng, st.status, st.classId, st.practice,
 		st.hero.level, st.hero.xp, st.p.burstLeft, r(st.p.x), r(st.p.y), r(st.p.hp), r(st.p.low), r(st.p.mp),
-		st.enemies.map((e) => [e.id, r(e.x), r(e.y), r(e.hp), e.cd, e.tele, e.scd, e.mode, e.modeT]),
+		st.enemies.map((e) => [e.id, r(e.x), r(e.y), r(e.hp), e.cd, e.tele, e.scd, e.mode, e.modeT, e.ward, e.active]),
+		st.sealed, st.roomLeft,
 		st.bullets.length, st.bullets.map((b) => [r(b.x), r(b.y)]).slice(0, 40),
 		st.bags.map((b) => b.drops.join(",")), st.pickups.length, st.shield && [r(st.shield.x), r(st.shield.y), st.shield.until], st.slowUntil,
-		st.p.abilityCd, st.p.counterUntil, st.p.guardUntil, st.p.empower, (st.starfalls || []).map((f) => [r(f.x), r(f.y), f.at])]);
+		st.p.abilityCd, st.p.potionCd, st.p.counterUntil, st.p.guardUntil, st.p.empower, (st.starfalls || []).map((f) => [r(f.x), r(f.y), f.at])]);
 }

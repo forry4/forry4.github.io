@@ -67,6 +67,11 @@ class RunIn(BaseModel):
     mods: list[str] = Field(default_factory=list, max_length=8)
 
 
+class DescendIn(BaseModel):
+    mod: str = Field(max_length=32)
+    from_level: int = Field(ge=1, le=99)
+
+
 class EventsIn(BaseModel):
     events: list[dict] = Field(max_length=500)
 
@@ -78,6 +83,10 @@ class MoveIn(BaseModel):
 
 class DiscardIn(BaseModel):
     version: int | None = None
+
+
+class LockIn(BaseModel):
+    locked: bool
 
 
 class FuseIn(BaseModel):
@@ -191,6 +200,16 @@ def setup_halcyon(app, get_db_conn, get_user_by_session, token_resolver=None) ->
             _refuse(e)
         return {"run_id": run["run_id"], "dungeon": d, "practice": body.practice, "class_id": class_id}
 
+    @app.post("/halcyon/runs/{run_id}/descend")
+    def halcyon_descend(run_id: str, body: DescendIn, who: str = Depends(owner)):
+        if _events_minute.exceeded(who):
+            raise HTTPException(status_code=429, detail="slow down")
+        _events_minute.record(who)
+        make = lambda dungeon_id, seed, class_id, mods, level: D.generate(
+            dungeon_id, seed, class_id=class_id, mods=mods, level=level)
+        d = call(S.descend, who, run_id, body.mod, body.from_level, make)
+        return {"dungeon": d}
+
     @app.post("/halcyon/runs/{run_id}/events")
     def halcyon_events(run_id: str, body: EventsIn, who: str = Depends(owner)):
         if _events_minute.exceeded(who):
@@ -206,6 +225,10 @@ def setup_halcyon(app, get_db_conn, get_user_by_session, token_resolver=None) ->
     def halcyon_discard(item_id: str, body: DiscardIn, who: str = Depends(owner)):
         call(S.discard, who, item_id, body.version)
         return {"ok": True}
+
+    @app.post("/halcyon/items/{item_id}/lock")
+    def halcyon_lock(item_id: str, body: LockIn, who: str = Depends(owner)):
+        return call(S.set_lock, who, item_id, body.locked)
 
     @app.post("/halcyon/fuse")
     def halcyon_fuse(body: FuseIn, who: str = Depends(owner)):

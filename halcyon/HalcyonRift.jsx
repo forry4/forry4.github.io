@@ -26,7 +26,7 @@ import { GAME_ACCENTS } from "../shared/accents.js";
 import { makeClient } from "./client.js";
 import { createSim, step, TPS, REACH, xpProgress, WEAPONS, statsFor, enchantValue, recoveryLimit, CLASS_INFO,
 	STAT_SCALE, ABILITY_COST, ABILITY_COOLDOWN, SHIELD_DURATION, SLOW_DURATION, SLOW_FACTOR,
-	STARFALL_DELAY, STARFALL_RADIUS, STARFALL_RANGE, COUNTER_WINDOW, COUNTER_GUARD } from "./sim.js";
+	STARFALL_DELAY, STARFALL_RADIUS, STARFALL_RANGE, COUNTER_WINDOW, COUNTER_GUARD, POTION_HEAL, POTION_COOLDOWN } from "./sim.js";
 import { camera, draw, drawTown, promptFor, formatRiftTime } from "./render.js";
 import { createTown, stepTown, setTownGear, postDps, STATIONS, SPAWN, standAt } from "./town.js";
 import cssText from "./HalcyonRift.css?inline";
@@ -44,6 +44,12 @@ const NAMES = { shortbow: "Shortbow", longbow: "Longbow", mace: "Mace", greatswo
 // Every enchantment reads as flat points ("+4 Attack"), never a percentage.
 const ENCHANT_NAMES = { max_hp: "Max HP", max_mp: "Max MP", attack: "Attack", defense: "Defense",
 	attack_speed: "Dexterity", ability_power: "Ability power", mp_regen: "MP regen", hp_regen: "HP regen" };
+/* ONE ORDER FOR EVERY STAT, on every item (owner's ask, 2026-11-18): two tooltips side
+ * by side line up row for row. The base's stats (STAT_WORDS) and the enchantments
+ * (ENCHANT_ORDER) follow the same sequence. */
+const ENCHANT_ORDER = ["max_hp", "max_mp", "attack", "attack_speed", "defense", "ability_power", "hp_regen", "mp_regen"];
+const byEnchantOrder = (a, b) => ENCHANT_ORDER.indexOf(a.id) - ENCHANT_ORDER.indexOf(b.id);
+const sortedEnchants = (it) => [...(it.enchants || [])].sort(byEnchantOrder);
 const SLOT_NAMES = { weapon: "Weapon", armor: "Armor", ability: "Ability", ring1: "Ring", ring2: "Ring" };
 const FAMILY = { weapon: "Weapon", armor: "Armor", ability: "Ability", ring: "Ring" };
 const ABBR = { shortbow: "SB", longbow: "LB", mace: "MC", greatsword: "GS", wand: "WD", starstaff: "SS",
@@ -78,7 +84,7 @@ function weaponLines(it) {
 
 /* What an item's base gives, flat, worked out by the sim (what it adds to bare stats). */
 const STAT_WORDS = [["maxHp", "Max HP"], ["maxMp", "Max MP"], ["att", "Attack"], ["dex", "Dexterity"],
-	["def", "Defense"], ["mpRegen", "MP regen"], ["hpRegen", "HP regen"], ["abilityDmg", "Ability damage"], ["ap", "Ability power"], ["pierce", "Pierce"]];
+	["def", "Defense"], ["ap", "Ability power"], ["hpRegen", "HP regen"], ["mpRegen", "MP regen"], ["abilityDmg", "Ability damage"], ["pierce", "Pierce"]];
 function baseLines(it) {
 	if (WEAPONS[it.base_id]) return [];
 	const bare = statsFor([]), s = statsFor([{ ...it, enchants: [] }]);
@@ -135,6 +141,43 @@ function putAt(it, to) {
 function placeAt_(it) {
 	return it.loc === "equipped" ? at.eq(it.char_id, it.equip_slot) : at.inv(it.char_id, it.slot_index);
 }
+
+/* SETTINGS (design §19.1), kept on this device: the keys, reduced flashing and the
+ * interface size. `livePrefs` is what the fight's and the town's loops read on each
+ * key and frame; the page's state is what the settings panel draws. */
+const PREFS_KEY = "halcyon.prefs.v1";
+export const ACTIONS = [
+	["up", "Move up", ["KeyW"]], ["left", "Move left", ["KeyA"]], ["down", "Move down", ["KeyS"]], ["right", "Move right", ["KeyD"]],
+	["ability", "Ability", ["Space", "KeyQ"]], ["interact", "Use / pick up", ["KeyE"]], ["potion", "Healing potion", ["KeyR"]],
+	["takeAll", "Take all the loot here", ["KeyG"]], ["recall", "Recall to town", ["KeyF"]], ["auto", "Auto-fire on / off", ["KeyT"]],
+];
+const DEFAULT_KEYS = Object.fromEntries(ACTIONS.map(([id, , k]) => [id, k]));
+// Keys that are never rebound: Escape (the menu), the arrows (always move), 1-8 (the bag).
+const FIXED_KEY = (code) => code === "Escape" || /^Arrow/.test(code) || /^(?:Digit|Numpad)[1-8]$/.test(code);
+const UI_SIZES = [[0.9, "Small"], [1, "Normal"], [1.12, "Large"], [1.25, "Larger"]];
+function loadPrefs() {
+	let p = {};
+	try { p = JSON.parse(localStorage.getItem(PREFS_KEY) || "{}") || {}; } catch { p = {}; }
+	const keys = { ...DEFAULT_KEYS };
+	for (const [id] of ACTIONS) if (Array.isArray(p.keys?.[id]) && p.keys[id].every((c) => typeof c === "string" && !FIXED_KEY(c))) keys[id] = p.keys[id];
+	return { keys, calm: !!p.calm, ui: UI_SIZES.some(([v]) => v === p.ui) ? p.ui : 1 };
+}
+const livePrefs = { current: loadPrefs() };
+const actionOf = (code) => ACTIONS.find(([id]) => livePrefs.current.keys[id]?.includes(code))?.[0] || null;
+export function keyLabel(code) {
+	if (!code) return "—";
+	if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+	if (/^Digit\d$/.test(code)) return code.slice(5);
+	const names = { Space: "Space", ShiftLeft: "Shift", ShiftRight: "Right Shift", ControlLeft: "Ctrl", ControlRight: "Right Ctrl",
+		AltLeft: "Alt", AltRight: "Right Alt", Tab: "Tab", CapsLock: "Caps Lock", Enter: "Enter", Backquote: "`", Minus: "-", Equal: "=",
+		BracketLeft: "[", BracketRight: "]", Semicolon: ";", Quote: "'", Comma: ",", Period: ".", Slash: "/", Backslash: "\\" };
+	return names[code] || code.replace(/^Numpad/, "Num ");
+}
+const keysOf = (id) => (livePrefs.current.keys[id] || []).map(keyLabel).join(" · ") || "—";
+/* Where the movement keys point, for both loops: the bound four, and the arrows always. */
+const ARROWS = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
+const MOVE = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+const dirOf = (code) => ARROWS[code] || MOVE[actionOf(code)] || null;
 
 /* The run's own model of the character's bag and equipment, owned OUTSIDE React so
  * the fight's loop can ask it synchronously (is there room? which slot does this
@@ -209,6 +252,12 @@ export default function HalcyonRift({ authUser, onExit }) {
 	// that wears the site's banner. NOTHING PAUSES under it (owner's call): the fight
 	// goes on, and the keys still work.
 	const [gameMenu, setGameMenu] = useState(false);
+	// The portal deeper's offer, once the player walks into it: { offers, from, mods }.
+	const [deeper, setDeeper] = useState(null);
+	const [descending, setDescending] = useState(false);
+	// The death screen (owner's ask, 2026-11-18): what killed you and what was lost,
+	// before the main menu. The outcome of the run that ended.
+	const [fallen, setFallen] = useState(null);
 	const toMenuAfterRun = useRef(false);
 	// During a run, this character's equipment and bag as the PAGE knows them: what it
 	// carried in, what it picked up (named by drop until the server mints it), moved
@@ -218,10 +267,30 @@ export default function HalcyonRift({ authUser, onExit }) {
 	// own, kept in a log you can open again — never a banner you have to click away.
 	const [notices, setNotices] = useState([]);
 	const noticeId = useRef(0);
-	const notify = useCallback((text, tone = "info") => {
+	const notify = useCallback((text, tone = "info", extra = null) => {
 		const id = ++noticeId.current;
-		setNotices((l) => [...l.slice(-49), { id, text, tone, at: Date.now() }]);
+		setNotices((l) => [...l.slice(-49), { id, text, tone, at: Date.now(), ...(extra || {}) }]);
 	}, []);
+	// A run's summary, opened from its line in the log (never on its own: owner's call).
+	const [report, setReport] = useState(null);
+	const [graveyard, setGraveyard] = useState(false);
+	const [settings, setSettings] = useState(false);
+	const [prefs, setPrefsState] = useState(() => livePrefs.current);
+	const setPrefs = useCallback((fn) => setPrefsState((cur) => {
+		const next = typeof fn === "function" ? fn(cur) : fn;
+		livePrefs.current = next;
+		try { localStorage.setItem(PREFS_KEY, JSON.stringify(next)); } catch { /* kept for this visit only */ }
+		return next;
+	}), []);
+	// THE INTERFACE SIZE scales every rem on the page; the page is the whole window,
+	// so the root's font size is ours while it is mounted (and given back after).
+	useEffect(() => {
+		const root = document.documentElement, was = root.style.fontSize;
+		root.style.fontSize = prefs.ui === 1 ? was : `${16 * prefs.ui}px`;
+		return () => { root.style.fontSize = was; };
+	}, [prefs.ui]);
+	const [vaultQuery, setVaultQuery] = useState("");
+	const [vaultFam, setVaultFam] = useState("");
 	const [flash, setFlash] = useState(null);         // an item id lit in the panel for a moment
 	// THE MAIN MENU (owner's ask, 2026-11-18): where you make or pick a character,
 	// and where a death sends you. The town is entered from it with one character.
@@ -338,17 +407,45 @@ export default function HalcyonRift({ authUser, onExit }) {
 		setForged(null);
 	}, []);
 
+	/* Go deeper (design §14.6): everything the fight reported goes first, so the
+	 * server has seen this level's boss fall; then the next level comes back and the
+	 * run carries on in it — the same run, the same bag, HP and MP as they were. */
+	const descend = async (mod) => {
+		const r = run, from = deeper?.from;
+		if (!r || descending || from == null) return;
+		setDescending(true);
+		try {
+			await client.flush();
+			if (client.pendingRun()) throw new Error("The fight is still being saved. Try again in a moment.");
+			const { dungeon } = await client.descend(r.run_id, mod, from);
+			const st = r.ctl.st;
+			if (r.ctl.ended || !st || st.status !== "play") return;   // it ended while we asked
+			r.ctl.floor.clear();                                    // what was put down stays behind
+			r.ctl.ticksDone = (r.ctl.ticksDone || 0) + st.tick;     // the death screen's time in the rift
+			setDeeper(null);
+			setRun({ ...r, dungeon, gear: r.ctl.equipped(),
+				hero: { ...r.hero, level: st.hero.level, xp: st.hero.xp },
+				carry: { hp: st.p.hp, low: st.p.low, mp: st.p.mp } });
+		} catch (e) {
+			setError(e.message || "Could not go deeper.");
+		} finally {
+			setDescending(false);
+		}
+	};
+
 	const endRun = useCallback((outcome) => {
 		const t = townRef.current;
 		Object.assign(t.p, standAt(`realm:${outcome.realm}`));    // back out of the portal you took
-		setRun(null);
+		setRun(null); setDeeper(null);
 		setPicked(null); setDrag(null); setTip(null);
-		const said = outcomeNotice(outcome);
-		if (said) notify(...said);
+		const said = outcome.status === "dead" ? null : outcomeNotice(outcome);   // a death has its own screen
+		if (said) notify(...said, { runId: outcome.runId });
+		// The run's lines in the log (its clears, its return) now open its summary.
+		if (outcome.status !== "dead") setTimeout(() => setNotices((l) => l.map((n) => (n.runId === outcome.runId ? { ...n, report: outcome } : n))), 0);
 		// The XP the fight already showed stays on screen until the server's copy lands.
 		if (outcome.status !== "dead" && !outcome.practice) setView((v) => v && ({ ...v, characters: v.characters.map((c) =>
 			c.char_id === selChar ? { ...c, xp: Math.max(c.xp, outcome.heroXp), level: Math.max(c.level, outcome.level) } : c) }));
-		if (outcome.status === "dead" && !outcome.practice) setMenu(true);   // a fallen character: back to the menu
+		if (outcome.status === "dead") setFallen(outcome);        // the death screen; it goes on to the menu
 		if (toMenuAfterRun.current) { toMenuAfterRun.current = false; setMenu(true); }
 		// The town's copy replaces the run's once it has landed — unless a new run began meanwhile.
 		refresh().then(() => setRunItems((cur) => (cur === outcome.items ? null : cur)));
@@ -383,37 +480,64 @@ export default function HalcyonRift({ authUser, onExit }) {
 	};
 
 	// SORT (owner's ask, 2026-11-18): the bag by kind (weapon, armor, ability, ring),
-	// uniques first, then tier and slots, highest first. In town it is a series of
-	// swaps worked out here and sent in order; in a run, the run's own moves.
-	const sortBag = () => {
-		if (!char || busy) return;
-		const order = { weapon: 0, armor: 1, ability: 2, ring: 3 };
-		const key = (it) => [order[view.bases[it.base_id]?.slot] ?? 9, it.kind === "unique" ? 0 : 1, -(it.tier || 0),
-			-(it.slot_count || 0), NAMES[it.base_id] || it.base_id, String(it.item_id)];
-		const cmp = (a, b) => { const x = key(a), y = key(b); for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] < y[i] ? -1 : 1; return 0; };
-		const bag = [...Array(view.limits.inventory).keys()].map(invItem).filter(Boolean);
-		const want = [...bag].sort(cmp);
-		if (want.every((it, i) => it.slot_index === i)) { notify("Your bag is already sorted."); return; }
-		if (run) {
-			for (const [i, w] of want.entries()) {
-				const cur = run.ctl.items.find((x) => x.item_id === w.item_id);
-				if (cur && cur.slot_index !== i) runMove(cur, at.inv(char.char_id, i));
-			}
-			return;
-		}
-		const local = Object.fromEntries(bag.map((it) => [it.item_id, { ...it }]));
-		const bySlot = new Map(bag.map((it) => [it.slot_index, it.item_id]));
+	// uniques first, then tier and slots, highest first. A LOCKED item keeps its slot
+	// and the rest sort around it. In town it is a series of swaps worked out here and
+	// sent in order; in a run, the run's own moves. The vault sorts the same way.
+	const sortKey = (it) => [{ weapon: 0, armor: 1, ability: 2, ring: 3 }[view.bases[it.base_id]?.slot] ?? 9, it.kind === "unique" ? 0 : 1,
+		-(it.tier || 0), -(it.slot_count || 0), NAMES[it.base_id] || it.base_id, String(it.item_id)];
+	const cmpItems = (a, b) => { const x = sortKey(a), y = sortKey(b); for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] < y[i] ? -1 : 1; return 0; };
+	/* Where each item should go: `list` the items, `n` the slots; locked items stay. */
+	const sortPlan = (list, n) => {
+		const fixed = new Set(list.filter((it) => it.locked).map((it) => it.slot_index));
+		const free = [...Array(n).keys()].filter((i) => !fixed.has(i));
+		const want = list.filter((it) => !it.locked).sort(cmpItems);
+		return want.map((it, k) => [it, free[k]]);
+	};
+	const sortPlaces = (list, n, placeFor, what) => {
+		const plan = sortPlan(list, n);
+		if (plan.every(([it, i]) => it.slot_index === i)) { notify(`Your ${what} is already sorted.`); return; }
+		const local = Object.fromEntries(list.map((it) => [it.item_id, { ...it }]));
+		const bySlot = new Map(list.map((it) => [it.slot_index, it.item_id]));
 		const moves = [];
-		for (const [i, w] of want.entries()) {
+		for (const [w, i] of plan) {
 			const me = local[w.item_id];
 			if (me.slot_index === i) continue;
 			const from = me.slot_index, other = bySlot.get(i);
-			moves.push([me.item_id, at.inv(char.char_id, i), me.version]);
+			moves.push([me.item_id, placeFor(i), me.version]);
 			me.version += 1; me.slot_index = i; bySlot.set(i, me.item_id);
 			if (other) { local[other].version += 1; local[other].slot_index = from; bySlot.set(from, other); } else bySlot.delete(from);
 		}
 		setView((v) => ({ ...v, items: v.items.map((x) => local[x.item_id] || x) }));
 		sendMoves(moves);
+	};
+	const sortBag = () => {
+		if (!char || busy) return;
+		const bag = [...Array(view.limits.inventory).keys()].map(invItem).filter(Boolean);
+		if (run) {
+			const plan = sortPlan(bag, view.limits.inventory);
+			if (plan.every(([it, i]) => it.slot_index === i)) { notify("Your bag is already sorted."); return; }
+			for (const [w, i] of plan) {
+				const cur = run.ctl.items.find((x) => x.item_id === w.item_id);
+				if (cur && cur.slot_index !== i) runMove(cur, at.inv(char.char_id, i));
+			}
+			return;
+		}
+		sortPlaces(bag, view.limits.inventory, (i) => at.inv(char.char_id, i), "bag");
+	};
+	const sortVault = () => {
+		if (busy || run) return;
+		sortPlaces(items.filter((it) => it.loc === "vault"), view.limits.vault, (i) => at.vault(i), "vault");
+	};
+
+	/* LOCK (design §19.1): right-click an item. It changes nothing about where the
+	 * item is, so the page shows it at once and the server is told behind it. */
+	const toggleLock = (it) => {
+		if (!it || it.fresh) { if (it?.fresh) notify("An item found this run can be locked once you are back in town.", "bad"); return; }
+		const locked = !it.locked, flip = (x) => (x.item_id === it.item_id ? { ...x, locked } : x);
+		setView((v) => ({ ...v, items: v.items.map(flip) }));
+		if (run) { run.ctl.items = run.ctl.items.map(flip); setRunItems(run.ctl.items); }
+		setTip((t) => (t && t.item.item_id === it.item_id ? { ...t, item: { ...t.item, locked } } : t));
+		client.lock(it.item_id, locked).catch((e) => { setError(e.message || "Could not lock that."); refresh(); });
 	};
 
 	// ── moving items: drag and drop, or click one and then click where it goes ──
@@ -442,6 +566,7 @@ export default function HalcyonRift({ authUser, onExit }) {
 		const ctl = run.ctl;
 		if (ctl.ended || !ctl.items.some((x) => x.item_id === it.item_id)) return;
 		if (run.practice) { notify("Nothing can be dropped in a Dream Rift.", "bad"); return; }   // the store refuses it too
+		if (it.locked) { notify(`${nameOf(it)} is locked. Right-click it to unlock.`, "bad"); return; }
 		ctl.drop(it);
 		client.report({ type: "drop_item", ...(it.fresh ? { drop: it.drop } : { item: it.item_id }) });
 	};
@@ -461,7 +586,10 @@ export default function HalcyonRift({ authUser, onExit }) {
 				setError(`${nameOf(fits(it, target.to) ? other : it)} does not go there.`); setPicked(null); return;
 			}
 			townMove(it, target.to);
-		} else if (target.kind === "trash") setDiscardAsk(it);
+		} else if (target.kind === "trash") {
+			if (it.locked) notify(`${nameOf(it)} is locked. Right-click it to unlock.`, "bad");
+			else setDiscardAsk(it);
+		}
 		setPicked(null);
 	};
 	// Where a double click or a number key sends an item: from the bag, onto the
@@ -489,9 +617,14 @@ export default function HalcyonRift({ authUser, onExit }) {
 	// Escape: close what is open (a tooltip, a station's panel, a question), else the game menu.
 	const escRef = useRef(null);
 	escRef.current = () => {
-		if (menu && !run) return;
+		if (fallen) return;                         // the death screen is left by its own button
+		if (menu && !run && !report && !graveyard) return;
 		if (tip) { setTip(null); return; }
+		if (report) { setReport(null); return; }
+		if (graveyard) { setGraveyard(false); return; }
+		if (settings) { setSettings(false); return; }
 		if (gameMenu) { setGameMenu(false); return; }
+		if (deeper) { setDeeper(null); return; }
 		if (discardAsk) { setDiscardAsk(null); return; }
 		if (panel && !run) { setPanel(null); return; }
 		setGameMenu(true);
@@ -523,6 +656,7 @@ export default function HalcyonRift({ authUser, onExit }) {
 	}, []);
 	// At the forge a click PICKS an item for fusion (it stays where it is, lit).
 	const forgePick = (it) => {
+		if (it.locked && !forge.includes(it.item_id)) { notify(`${nameOf(it)} is locked, so it cannot be fused.`, "bad"); return; }
 		if (forged) setForged(null);
 		setForge((f) => (f.includes(it.item_id) ? f.filter((id) => id !== it.item_id) : [...f, it.item_id].slice(-2)));
 	};
@@ -539,6 +673,7 @@ export default function HalcyonRift({ authUser, onExit }) {
 			placeAt(target, held);
 		},
 		showTip: (it, el) => { if (!drag) setTip({ item: it, rect: el.getBoundingClientRect() }); },
+		lock: toggleLock,
 		hideTip: () => setTip(null),
 	};
 
@@ -567,8 +702,41 @@ export default function HalcyonRift({ authUser, onExit }) {
 		setTimeout(() => setFlash((f) => (f === made.item_id ? null : f)), 2600);
 	});
 	const invItem = (i) => (char ? byPlace[keyOf(at.inv(char.char_id, i))] : null);
+	// The vault's search and filter dim what does not match; nothing moves.
+	const vaultMatch = (it) => {
+		const fam = view.bases[it.base_id]?.slot;
+		if (vaultFam === "unique" ? it.kind !== "unique" : vaultFam && fam !== vaultFam) return false;
+		const q = vaultQuery.trim().toLowerCase();
+		if (!q) return true;
+		const words = [nameOf(it), FAMILY[fam] || "", it.kind === "unique" ? "unique" : `tier ${it.tier}`,
+			...(it.enchants || []).map((e) => ENCHANT_NAMES[e.id] || e.id)].join(" ").toLowerCase();
+		return q.split(/\s+/).every((w) => words.includes(w));
+	};
 	const equipped = char ? view.limits.equip.map((s) => byPlace[keyOf(at.eq(char.char_id, s))]).filter(Boolean) : [];
 	const stats = char ? statsFor(equipped, char.level, char.class_id) : null;
+	// What a hovered item is set beside: what is worn in its slot (both rings for a ring).
+	const compareFor = (it) => {
+		if (!char || !it || it.loc === "equipped" || String(it.item_id).startsWith("grave:")) return [];
+		const fam = view.bases[it.base_id]?.slot;
+		return fam ? equipped.filter((e) => e.item_id !== it.item_id && (fam === "ring" ? e.equip_slot?.startsWith("ring") : e.equip_slot === fam)) : [];
+	};
+	const reportView = report && (
+		<div className="hr-report-scrim">
+			<RunReport r={report} equip={view.limits.equip} ctx={{ ...slotCtx, lock: null }} overlay doneLabel="Close" onDone={() => { setReport(null); setTip(null); }} />
+		</div>);
+
+	if (fallen && !run && !report) {
+		const gear = fallen.items.filter((it) => it.loc === "equipped");
+		const done = () => { const r = fallen; setFallen(null); setTip(null); if (!r.practice) setMenu(true); };
+		return (
+			<div className="app halcyon fg-table hr-playing" style={ACCENT}><style>{styles}</style>
+				<main className="hr-death-page">
+					<RunReport r={fallen} equip={view.limits.equip} ctx={{ ...slotCtx, lock: null }} onDone={done} />
+				</main>
+				{tip && <ItemTip tip={tip} bases={view.bases} ap={statsFor(gear, fallen.level, fallen.classId).ap} />}
+			</div>
+		);
+	}
 
 	if (menu && !run) {
 		return (
@@ -577,7 +745,7 @@ export default function HalcyonRift({ authUser, onExit }) {
 				<main className="hr-menu">
 					<h1 className="hr-menu-title">Halcyon Rift</h1>
 					<p className="hr-hint">{view.characters.length ? "Choose a character, or make a new one." : "Make a character to begin."}</p>
-					<Notices list={notices} />
+					<Notices list={notices} onReport={(r) => { setReport(r); setTip(null); }} />
 					<div className="hr-menu-cards" role="group" aria-label="Characters">
 						{slots.map((s) => {
 							const c = view.characters.find((x) => x.slot === s);
@@ -609,8 +777,17 @@ export default function HalcyonRift({ authUser, onExit }) {
 								</button>)}
 							</div>
 						</section>)}
-					{view.fallen.length > 0 && <p className="hr-hint">{view.fallen.length} fallen</p>}
+					<div className="hr-menu-foot">
+						{view.best_level > 0 && <span className="hr-best">Best level reached: <strong>{view.best_level}</strong></span>}
+						{(view.fallen_count ?? view.fallen.length) > 0 && <button className="btn btn-ghost btn-sm" onClick={() => setGraveyard(true)}>
+							Graveyard ({view.fallen_count ?? view.fallen.length})</button>}
+					</div>
+					{graveyard && <Graveyard fallen={view.fallen} count={view.fallen_count ?? view.fallen.length}
+						onOpen={(c) => { const r = reportOfFallen(c); if (r) { setReport(r); setGraveyard(false); } }}
+						onClose={() => setGraveyard(false)} />}
+					{reportView}
 				</main>
+				{tip && <ItemTip tip={tip} bases={view.bases} ap={0} />}
 			</div>
 		);
 	}
@@ -624,27 +801,64 @@ export default function HalcyonRift({ authUser, onExit }) {
 					onDrop={(e) => { if (run && drag) { e.preventDefault(); slotCtx.dropAt({ kind: "trash" }); setDrag(null); } }}>
 					<div className="hr-view">
 						{run
-							? <Dungeon run={run} client={client} onEnd={endRun} notify={notify} tips={slotCtx} />
+							? <Dungeon run={run} client={client} onEnd={endRun} notify={notify} tips={slotCtx} onDeeper={setDeeper} />
 							: <Town st={townRef.current} notes={townNotes} ready={!!char && !busy} gear={equipped} level={char?.level || 1}
 								classId={char?.class_id || "ranger"}
 								onUse={use} onNear={setNear} />}
 
 						<button className="hr-menu-btn" onClick={(e) => { e.currentTarget.blur(); setGameMenu((m) => !m); }}
 							aria-expanded={gameMenu} title="Menu (Esc)"><span aria-hidden="true">☰</span> Menu <kbd>Esc</kbd></button>
-						{gameMenu && <GameMenu inRun={!!run} practice={!!run?.practice}
+						{run && deeper && !gameMenu && (() => {
+							const names = Object.fromEntries((view.rift_mods || []).map((m) => [m.id, m]));
+							const r = deeper.mods.length + 1, lo = view.odds?.loot?.[Math.min(r, (view.odds?.loot?.length || 1) - 1)] || {};
+							const pct = (x) => `${Math.round((x || 0) * 100)}%`;
+							return (
+								<Overlay title={`Deeper: level ${deeper.from + 1}`} onClose={() => setDeeper(null)} className="hr-deeper-panel">
+									<p className="hr-hint">Pick one modifier to add. It stays for the rest of this run, and every
+										modifier makes the loot rarer. Recall is the only way out.</p>
+									<div className="hr-mods hr-mods-3" role="group" aria-label="Pick a modifier">
+										{deeper.offers.map((id) => (
+											<button key={id} className="hr-mod" disabled={descending} onClick={() => descend(id)}>
+												<strong>{names[id]?.name || id}</strong><span>{names[id]?.text}</span></button>))}
+									</div>
+									{deeper.mods.length > 0 && <p className="hr-hint">This run: {deeper.mods.map((m) => names[m]?.name || m).join(", ")}</p>}
+									<dl className="hr-mod-sum">
+										<div><dt>Enemy drop T2+</dt><dd>{pct(lo.enemy_t2_plus)}</dd></div>
+										<div><dt>Boss drop T3+</dt><dd>{pct(lo.boss_t3_plus)}</dd></div>
+										<div><dt>Boss unique</dt><dd>{pct(lo.boss_unique)}</dd></div>
+									</dl>
+									{descending && <p className="hr-hint" role="status">Descending…</p>}
+								</Overlay>);
+						})()}
+						{gameMenu && !settings && <GameMenu inRun={!!run} practice={!!run?.practice}
+							onSettings={() => setSettings(true)}
 							onResume={() => setGameMenu(false)}
 							onRecall={() => { setGameMenu(false); run.ctl.recall = true; }}
 							onMainMenu={toMainMenu} />}
+						{settings && <Settings prefs={prefs} setPrefs={setPrefs} onClose={() => setSettings(false)} />}
+						{reportView}
 
-						<Notices list={notices} />
+						<Notices list={notices} onReport={(r) => { setReport(r); setTip(null); }} />
 
 						{panel === "vault" && !run && (
 							<Overlay title="Vault" onClose={() => setPanel(null)} className="hr-vault">
 								<p className="hr-hint">Shared by every character. Drag items in and out.</p>
+								<div className="hr-vault-tools">
+									<input className="hr-vault-search" type="search" placeholder="Search: name or enchantment" value={vaultQuery}
+										aria-label="Search the vault" onChange={(e) => setVaultQuery(e.target.value)} />
+									<div className="hr-vault-fams" role="group" aria-label="Show only">
+										{[["", "All"], ["weapon", "Weapons"], ["armor", "Armor"], ["ability", "Abilities"], ["ring", "Rings"], ["unique", "Uniques"]].map(([f, label]) =>
+											<button key={f || "all"} className={"hr-chip" + (vaultFam === f ? " on" : "")} aria-pressed={vaultFam === f}
+												onClick={() => setVaultFam(f)}>{label}</button>)}
+									</div>
+									<button className="btn btn-ghost btn-sm" disabled={locked} onClick={sortVault} title="Weapons, armor, abilities, rings; best first. Locked items stay put.">Sort</button>
+								</div>
 								<div className="hr-grid hr-grid-vault">
-									{[...Array(view.limits.vault).keys()].map((i) => (
-										<Slot key={i} item={byPlace[keyOf(at.vault(i))]} target={{ kind: "place", to: at.vault(i) }}
-											locked={locked} ctx={slotCtx} />))}
+									{[...Array(view.limits.vault).keys()].map((i) => {
+										const it = byPlace[keyOf(at.vault(i))];
+										return <Slot key={i} item={it} target={{ kind: "place", to: at.vault(i) }} dim={!!it && !vaultMatch(it)}
+											locked={locked} ctx={slotCtx} />;
+									})}
 								</div>
 							</Overlay>)}
 
@@ -783,20 +997,20 @@ export default function HalcyonRift({ authUser, onExit }) {
 					</div>
 				</aside>
 			</main>
-			{tip && <ItemTip tip={tip} bases={view.bases} ap={stats?.ap || 0} />}
+			{tip && <ItemTip tip={tip} bases={view.bases} ap={stats?.ap || 0} compare={compareFor(tip.item)} />}
 		</div>
 	);
 }
 
 /* An item slot: a drag source, a drop target, and a click target. `target` says
  * what dropping here means: a place, a forge input, or nothing. */
-function Slot({ label, item, target, locked, ctx, num: n = null }) {
+function Slot({ label, item, target, locked, ctx, num: n = null, dim = false }) {
 	const fam = item ? ctx.bases[item.base_id]?.slot : null;
 	const ok = ctx.dragItem && target ? ctx.accepts(target, ctx.dragItem) : null;
-	const name = item ? nameOf(item) : `${label || "Empty"} slot`;
+	const name = item ? nameOf(item) + (item.locked ? ", locked" : "") : `${label || "Empty"} slot`;
 	const forged = item && ctx.forge.includes(item.item_id);
 	return (
-		<button className={"hr-slot" + (item ? ` has fam-${fam}` : "") + (item && item.item_id === ctx.picked ? " sel" : "")
+		<button className={"hr-slot" + (item ? ` has fam-${fam}` : "") + (item && item.item_id === ctx.picked ? " sel" : "") + (dim ? " dim" : "")
 			+ (item?.kind === "unique" ? " unique" : "") + (forged ? " forging" : "") + (item && item.item_id === ctx.flash ? " flash" : "")
 			+ (ok === true ? " ok" : ok === false ? " no" : "") + (item && item.item_id === ctx.drag ? " dragging" : "")}
 			aria-label={name} aria-pressed={forged || undefined} disabled={!target && !item}
@@ -810,8 +1024,10 @@ function Slot({ label, item, target, locked, ctx, num: n = null }) {
 			onFocus={(e) => item && ctx.showTip(item, e.currentTarget)}
 			onBlur={ctx.hideTip}
 			onClick={(e) => { if (!locked && target) ctx.clickAt(target, item); if (ctx.inRun) e.currentTarget.blur(); }}
-			onDoubleClick={(e) => { if (!locked && item && target) ctx.quick(item); if (ctx.inRun) e.currentTarget.blur(); }}>
+			onDoubleClick={(e) => { if (!locked && item && target) ctx.quick(item); if (ctx.inRun) e.currentTarget.blur(); }}
+			onContextMenu={(e) => { e.preventDefault(); if (item && target && ctx.lock) ctx.lock(item); }}>
 			{n && <span className="hr-num" aria-hidden="true">{n}</span>}
+			{item?.locked && <span className="hr-lock" aria-hidden="true">🔒︎</span>}
 			{item ? <><span className="hr-abbr">{ABBR[item.base_id] || "?"}</span>
 				{item.kind === "unique" ? <span className="hr-tier hr-star" aria-hidden="true">★</span>
 					: <span className="hr-tier">{item.tier}</span>}
@@ -821,21 +1037,37 @@ function Slot({ label, item, target, locked, ctx, num: n = null }) {
 	);
 }
 
-/* What an item is, beside the slot under the pointer — kept inside the window. */
-function ItemTip({ tip, bases, ap = 0 }) {
+/* What an item is, beside the slot under the pointer — kept inside the window. With
+ * `compare` (what is equipped in that slot: both rings for a ring), the cards stand
+ * SIDE BY SIDE (owner's ask, 2026-11-18: not stat deltas), every stat in one order. */
+function ItemTip({ tip, bases, ap = 0, compare = [] }) {
 	const ref = useRef(null);
 	const [pos, setPos] = useState(null);
+	const key = `${tip.item.item_id}|${compare.map((c) => c.item_id).join(",")}`;
 	useLayoutEffect(() => {
 		const el = ref.current, r = tip.rect, w = el.offsetWidth, h = el.offsetHeight;
 		const left = r.left > window.innerWidth / 2 ? r.left - w - 10 : r.right + 10;
 		setPos({ left: Math.max(8, Math.min(window.innerWidth - w - 8, left)),
 			top: Math.max(8, Math.min(window.innerHeight - h - 8, r.top)) });
-	}, [tip]);
-	const it = tip.item, fam = bases[it.base_id]?.slot, lines = [...weaponLines(it), ...abilityLines(it, ap), ...baseLines(it)];
+	}, [tip, key]); // eslint-disable-line react-hooks/exhaustive-deps
+	const unique = tip.item.kind === "unique";
 	return (
-		<div ref={ref} className={"hr-tip fg-panel" + (it.kind === "unique" ? " fg-lit unique" : "")} role="tooltip"
+		<div ref={ref} className={"hr-tip" + (compare.length ? " hr-tip-compare" : "")} role="tooltip"
 			style={pos ? { left: pos.left, top: pos.top } : { left: 0, top: 0, visibility: "hidden" }}>
-			<h3 className="fg-label">{nameOf(it)}</h3>
+			<TipCard it={tip.item} bases={bases} ap={ap} lit={unique} kicker={compare.length ? "This item" : null} />
+			{compare.map((c) => <TipCard key={c.item_id} it={c} bases={bases} ap={ap} equipped />)}
+		</div>
+	);
+}
+
+/* One item's card in a tooltip: name, kind, its own stats, then its enchantment slots. */
+function TipCard({ it, bases, ap, lit = false, equipped = false, kicker = null }) {
+	const fam = bases[it.base_id]?.slot, lines = [...weaponLines(it), ...abilityLines(it, ap), ...baseLines(it)];
+	const ench = sortedEnchants(it);
+	return (
+		<div className={"hr-tip-card fg-panel" + (it.kind === "unique" ? " unique" : "") + (lit ? " fg-lit" : "")}>
+			{(equipped || kicker) && <p className="hr-tip-kicker">{equipped ? "Equipped" : kicker}</p>}
+			<h3 className="fg-label">{it.locked && <span className="hr-lock-mark" aria-label="Locked">🔒︎ </span>}{nameOf(it)}</h3>
 			<p className="fg-label-soft">{it.kind === "unique" ? `Unique ${(FAMILY[fam] || "item").toLowerCase()}` : `${FAMILY[fam] || ""} · Tier ${it.tier}`}
 			</p>
 			{WEAPON_FEEL[it.base_id] && <p className="hr-tip-weapon">{WEAPON_FEEL[it.base_id]}</p>}
@@ -845,11 +1077,13 @@ function ItemTip({ tip, bases, ap = 0 }) {
 			{it.slot_count > 0 && (
 				<ul className="hr-tip-lines hr-enchants" aria-label="Enchantment slots">
 					{[...Array(it.slot_count).keys()].map((i) => {
-						const e = it.enchants?.[i];
+						const e = ench[i];
 						return e ? <li key={i}><i aria-hidden="true">◆</i>+{enchantValue(e.id, e.q)} {ENCHANT_NAMES[e.id] || e.id}</li>
 							: <li key={i} className="empty"><i aria-hidden="true">◇</i>Empty slot</li>;
 					})}
 				</ul>)}
+			{!equipped && it.item_id && !String(it.item_id).startsWith("drop:") && !it.fresh && it.loc &&
+				<p className="hr-tip-hint">{it.locked ? "Locked: Sort, discard and fuse leave it alone. Right-click to unlock." : "Right-click to lock."}</p>}
 		</div>
 	);
 }
@@ -882,7 +1116,7 @@ function ForgeCard({ item, label, onClear }) {
 			<span className="hr-forge-glyph">{ABBR[item.base_id] || "?"}</span>
 			<strong>{nameOf(item)}</strong>
 			<Dots n={item.slot_count} />
-			<ul className="hr-forge-ench">{(item.enchants || []).map((e, i) => <li key={i}>{enchantLine(e)}</li>)}</ul>
+			<ul className="hr-forge-ench">{sortedEnchants(item).map((e, i) => <li key={i}>{enchantLine(e)}</li>)}</ul>
 		</button>
 	);
 }
@@ -908,7 +1142,7 @@ function ForgeReveal({ forged, where, onAgain, onDone }) {
 					? <p className="hr-reveal-gain">+{gained} enchantment slot{gained > 1 ? "s" : ""}! {before} → {after}</p>
 					: <p className="hr-hint">{after} slot{after === 1 ? "" : "s"}, as before</p>}
 				<ul className="hr-forge-ench hr-reveal-ench">
-					{(item.enchants || []).map((e, i) => {
+					{sortedEnchants(item).map((e, i) => {
 						const v = enchantValue(e.id, e.q), was = best[e.id];
 						const tag = was === undefined ? ["new", "New"] : v > was ? ["up", `was +${was}`] : v < was ? ["down", `was +${was}`] : ["same", "same"];
 						return <li key={i} className={"tag-" + tag[0]} style={{ animationDelay: `${300 + i * 180}ms` }}>
@@ -927,25 +1161,175 @@ function ForgeReveal({ forged, where, onAgain, onDone }) {
 }
 
 /* The game menu: Escape (or the Menu button) over the town or a run. The keys live
- * here now, not in a line under the stage, so the stage can have the room. */
-const KEYS = [
-	["W A S D", "Move"], ["Mouse", "Aim; hold the left button to shoot"], ["T", "Auto-fire on / off"],
-	["Space · Q · right-click", "Your ability"], ["E", "Use: vault, forge, portal, Dream Rift; pick up loot"],
-	["G", "Take all the loot here"], ["1 – 8", "Equip that bag slot (or double-click it)"],
-	["F", "Recall to town (in a rift)"], ["Esc", "This menu; closes a panel"],
+ * here now, not in a line under the stage, so the stage can have the room. They read
+ * off the player's own bindings (Settings). */
+const keyRows = () => [
+	[[keysOf("up"), keysOf("left"), keysOf("down"), keysOf("right")].join(" "), "Move (the arrow keys too)"],
+	["Mouse", "Aim; hold the left button to shoot"], [keysOf("auto"), "Auto-fire on / off"],
+	[`${keysOf("ability")} · right-click`, "Your ability"], [keysOf("interact"), "Use: vault, forge, portal, Dream Rift; pick up loot"],
+	[keysOf("potion"), `Healing potion: +${POTION_HEAL} HP, then ${Math.round(POTION_COOLDOWN / TPS)}s to refill (in a rift)`],
+	[keysOf("takeAll"), "Take all the loot here"], ["1 – 8", "Equip that bag slot (or double-click it)"],
+	["Right-click an item", "Lock or unlock it"], [keysOf("recall"), "Recall to town (in a rift)"], ["Esc", "This menu; closes a panel"],
 ];
-function GameMenu({ inRun, practice, onResume, onRecall, onMainMenu }) {
+/* What dealt the killing blow, in words: the sim tags every enemy shot (and a
+ * chaser's charge) with "<enemy>:<attack>" and keeps the last hit that landed. */
+const ENEMY_NAMES = { chaser: "a Chaser", shooter: "a Shooter", radial: "a Radial", boss: "the boss" };
+const ATTACK_NAMES = { touch: "charge", spit: "spit", bolt: "bolt", ring: "ring of shots", spiral: "spiral",
+	fan: "fan of shots", nova: "nova", burst: "dying burst" };
+function causeOf(hit) {
+	if (!hit || !hit.src) return "Fell in the rift";
+	const [who, how] = hit.src.split(":");
+	return `Slain by ${ENEMY_NAMES[who] || "an enemy"}’s ${ATTACK_NAMES[how] || "attack"}`;
+}
+
+/* THE RUN REPORT. A death shows it at once (owner's ask, 2026-11-18): what killed you,
+ * how the run went, what was on the character — lost for good, or (a Dream Rift)
+ * kept. A clear or a recall shows it only when its line in the log is clicked, and
+ * the graveyard keeps every death's. `r` is the run's outcome (see Dungeon's finish). */
+function RunReport({ r, equip, ctx, onDone, doneLabel = null, overlay = false }) {
+	const dead = r.status === "dead";
+	const lost = dead && !r.practice;
+	const gear = r.items.filter((it) => it.loc === "equipped");
+	const bag = r.items.filter((it) => it.loc === "inventory").sort((a, b) => a.slot_index - b.slot_index);
+	const found = r.items.filter((it) => it.fresh);
+	const hit = r.lastHit;
+	const btn = useRef(null);
+	useEffect(() => { btn.current?.focus(); }, []);
+	const kicker = dead ? (r.practice ? "Dream Rift failed" : "Fallen")
+		: r.status === "completed" ? (r.practice ? "Dream Rift complete" : "Cleared") : "Recalled";
+	return (
+		<section className={"hr-death fg-panel" + (dead ? "" : " hr-report-won") + (overlay ? " hr-report-overlay" : "")}
+			role="dialog" aria-labelledby="hr-death-title">
+			<p className="hr-death-kicker">{kicker}</p>
+			<h1 id="hr-death-title" className="hr-death-title">{className(r.classId)} · Level {r.level}</h1>
+			{dead && <p className="hr-death-cause">{causeOf(hit)}{hit && hit.dmg > 0 && <small> · the last hit dealt {Math.round(hit.dmg * 10) / 10}</small>}</p>}
+			<dl className="hr-death-facts">
+				<div><dt>Rift</dt><dd>{r.practice ? "Dream: " : ""}{r.dungeonName}{r.depth > 1 ? `, level ${r.depth}` : ""}</dd></div>
+				<div><dt>Modifiers</dt><dd>{r.mods?.length ? r.mods.map((m) => m[0].toUpperCase() + m.slice(1)).join(", ") : "None"}</dd></div>
+				{r.ticks != null && <div><dt>Time in the rift</dt><dd>{formatRiftTime(r.ticks)}</dd></div>}
+				{!dead && r.timeTicks != null && <div><dt>Boss time</dt><dd>{formatRiftTime(r.timeTicks)}</dd></div>}
+				{r.kills != null && <div><dt>Enemies slain</dt><dd>{r.kills}</dd></div>}
+				{r.taken != null && <div><dt>Damage taken</dt><dd>{Math.round(r.taken)}</dd></div>}
+				{r.diedAt && <div><dt>Fell</dt><dd>{new Date(r.diedAt * 1000).toLocaleDateString()}</dd></div>}
+			</dl>
+			<div className="hr-death-gear">
+				<div>
+					<h2 className="fg-label">{lost ? "Equipment lost" : "Equipment"}</h2>
+					<div className="hr-equip">{equip.map((s) => <Slot key={s} label={SLOT_NAMES[s]}
+						item={gear.find((it) => it.equip_slot === s) || null} locked ctx={ctx} />)}</div>
+				</div>
+				<div>
+					<h2 className="fg-label">{lost ? "Bag lost" : "Bag"}</h2>
+					{bag.length ? <div className="hr-death-bag">{bag.map((it) => <Slot key={it.item_id} item={it} locked ctx={ctx} />)}</div>
+						: <p className="hr-hint">The bag was empty.</p>}
+				</div>
+			</div>
+			{found.length > 0 && <p className="hr-hint">{dead ? "Found this run" : "Brought back"}: {found.map(nameOf).join(", ")}.</p>}
+			{!dead && !found.length && !r.practice && <p className="hr-hint">Nothing new was brought back.</p>}
+			{dead && <p className="hr-hint">{r.practice ? "Nothing changed: a Dream Rift never costs your character anything."
+				: "Everything it carried is gone. The vault is untouched."}</p>}
+			<div className="hr-actions">
+				<button ref={btn} className="btn btn-gold" onClick={onDone}>{doneLabel || (dead ? (r.practice ? "Back to town" : "Main menu") : "Close")}</button>
+			</div>
+		</section>
+	);
+}
+
+/* A fallen character's death screen, from the graveyard's record of it (the store
+ * wrote it as the character died). An older death, from before the record, has none. */
+function reportOfFallen(c) {
+	const d = c.death_summary;
+	if (!d) return null;
+	return { status: "dead", practice: false, classId: c.class_id, level: c.level, diedAt: c.died_at,
+		lastHit: d.src ? { src: d.src, dmg: d.hit || 0 } : null, dungeonName: d.dungeon_name, depth: d.depth || 1, mods: d.mods || [],
+		ticks: d.ticks ?? null, kills: d.kills ?? null, taken: d.taken ?? null,
+		items: (d.items || []).map((it, i) => ({ ...it, item_id: `grave:${c.char_id}:${i}`, fresh: it.origin_run_id === d.run_id })) };
+}
+
+/* The graveyard: every fallen character, newest first; each opens its death screen. */
+function Graveyard({ fallen, count, onOpen, onClose }) {
+	return (
+		<Overlay title="Graveyard" onClose={onClose} className="hr-graveyard">
+			{fallen.length ? <ol className="hr-grave-list">
+				{fallen.map((c) => {
+					const d = c.death_summary;
+					return <li key={c.char_id}>
+						<button className={`hr-grave hr-class-${c.class_id}`} onClick={() => onOpen(c)} disabled={!d}>
+							<strong>{className(c.class_id)} · Level {c.level}</strong>
+							<span>{d ? `${causeOf(d.src ? { src: d.src } : null)} in ${d.dungeon_name}${d.depth > 1 ? `, level ${d.depth}` : ""}` : "Fell before the graveyard kept records"}</span>
+							{c.died_at && <small>{new Date(c.died_at * 1000).toLocaleDateString()}</small>}
+						</button></li>;
+				})}
+			</ol> : <p className="hr-hint">Nobody has fallen yet.</p>}
+			{count > fallen.length && <p className="hr-hint">The newest {fallen.length} of {count}.</p>}
+		</Overlay>
+	);
+}
+
+/* SETTINGS (design §19.1), kept on this device: the keys, reduced flashing, the
+ * interface's size. A key is rebound by clicking it and pressing the new one; a key
+ * already in use moves over (the other action loses it). */
+function Settings({ prefs, setPrefs, onClose }) {
+	const [wait, setWait] = useState(null);      // the action waiting for a key
+	useEffect(() => {
+		if (!wait) return undefined;
+		const onKey = (e) => {
+			e.preventDefault(); e.stopImmediatePropagation();
+			if (e.code === "Escape") { setWait(null); return; }
+			if (FIXED_KEY(e.code)) return;            // Escape, the arrows and 1-8 are fixed
+			setPrefs((p) => {
+				const keys = Object.fromEntries(Object.entries(p.keys).map(([id, ks]) => [id, ks.filter((k) => k !== e.code)]));
+				keys[wait] = [e.code];
+				return { ...p, keys };
+			});
+			setWait(null);
+		};
+		window.addEventListener("keydown", onKey, { capture: true });
+		return () => window.removeEventListener("keydown", onKey, { capture: true });
+	}, [wait, setPrefs]);
+	return (
+		<Overlay title="Settings" onClose={onClose} className="hr-settings">
+			<h3 className="fg-label">Keys</h3>
+			<p className="hr-hint">Click a key, then press the new one. Escape, the arrow keys and 1 – 8 stay as they are.</p>
+			<dl className="hr-binds">
+				{ACTIONS.map(([id, what]) => <div key={id}>
+					<dt>{what}</dt>
+					<dd><button className={"hr-bind" + (wait === id ? " waiting" : "") + (!prefs.keys[id]?.length ? " unbound" : "")}
+						onClick={() => setWait((w) => (w === id ? null : id))}>
+						{wait === id ? "Press a key…" : (prefs.keys[id] || []).map(keyLabel).join(" · ") || "Not set"}</button></dd>
+				</div>)}
+			</dl>
+			<h3 className="fg-label">Display</h3>
+			<label className="hr-check"><input type="checkbox" checked={prefs.calm}
+				onChange={(e) => setPrefs((p) => ({ ...p, calm: e.target.checked }))} />
+				<span>Reduced flashing: no white hit flashes, and the boss's phase change holds still</span></label>
+			<div className="hr-sizes" role="group" aria-label="Interface size">
+				<span>Interface size</span>
+				{UI_SIZES.map(([v, label]) => <button key={v} className={"hr-size" + (prefs.ui === v ? " on" : "")} aria-pressed={prefs.ui === v}
+					onClick={() => setPrefs((p) => ({ ...p, ui: v }))}>{label}</button>)}
+			</div>
+			<div className="hr-actions">
+				<button className="btn btn-ghost" onClick={() => setPrefs((p) => ({ ...p, keys: { ...DEFAULT_KEYS } }))}>Reset keys</button>
+				<button className="btn btn-gold" onClick={onClose}>Done</button>
+			</div>
+			<p className="hr-hint">Sound settings arrive with the sound.</p>
+		</Overlay>
+	);
+}
+
+function GameMenu({ inRun, practice, onResume, onRecall, onMainMenu, onSettings }) {
 	return (
 		<Overlay title="Menu" onClose={onResume} className="hr-game-menu">
 			<div className="hr-game-menu-acts">
 				<button className="btn btn-gold" onClick={onResume}>Resume</button>
 				{inRun && <button className="btn btn-outline" onClick={onRecall}>Recall to town</button>}
 				<button className="btn btn-outline" onClick={onMainMenu}>{inRun ? "Recall and go to the main menu" : "Main menu"}</button>
+				<button className="btn btn-ghost" onClick={onSettings}>Settings</button>
 			</div>
 			{inRun && !practice && <p className="hr-hint">Recalling keeps what you carry; the rift is closed behind you.</p>}
 			<h3 className="fg-label">Keys</h3>
 			<dl className="hr-keylist">
-				{KEYS.map(([k, what]) => <div key={k}><dt><kbd>{k}</kbd></dt><dd>{what}</dd></div>)}
+				{keyRows().map(([k, what]) => <div key={what}><dt><kbd>{k}</kbd></dt><dd>{what}</dd></div>)}
 			</dl>
 		</Overlay>
 	);
@@ -1095,7 +1479,7 @@ function outcomeNotice(r) {
 /* The notifications: the newest few in the top left, each fading after a few
  * seconds; the button opens every one of them again. */
 const NOTICE_MS = 6000;
-function Notices({ list }) {
+function Notices({ list, onReport }) {
 	const [open, setOpen] = useState(false);
 	const [now, setNow] = useState(() => Date.now());
 	const live = list.filter((n) => now - n.at < NOTICE_MS);
@@ -1111,7 +1495,9 @@ function Notices({ list }) {
 				title={open ? "Hide messages" : "Show every message"}>{open ? "Hide" : `Log ${list.length}`}</button>
 			{open
 				? <ol className="hr-notice-log fg-panel" aria-label="Messages">
-					{[...list].reverse().map((n) => <li key={n.id} className={"hr-notice tone-" + n.tone}>{n.text}</li>)}</ol>
+					{[...list].reverse().map((n) => <li key={n.id} className={"hr-notice tone-" + n.tone + (n.report ? " has-report" : "")}>
+						{n.report && onReport ? <button className="hr-notice-open" onClick={() => onReport(n.report)}
+							title="Open this run's summary">{n.text}<span className="hr-notice-more">Summary ›</span></button> : n.text}</li>)}</ol>
 				: <div className="hr-notice-live" role="status" aria-live="polite">
 					{live.slice(-5).map((n) => <div key={n.id} className={"hr-notice tone-" + n.tone}
 						style={{ animationDelay: `${Math.min(0, n.at - Date.now())}ms` }}>{n.text}</div>)}</div>}
@@ -1119,8 +1505,6 @@ function Notices({ list }) {
 	);
 }
 
-const KEY_DIR = { KeyW: [0, -1], ArrowUp: [0, -1], KeyS: [0, 1], ArrowDown: [0, 1],
-	KeyA: [-1, 0], ArrowLeft: [-1, 0], KeyD: [1, 0], ArrowRight: [1, 0] };
 
 /* A canvas's backing size and the tile size: about 16 x 12 tiles of view. */
 function fitCanvas(cv) {
@@ -1159,7 +1543,7 @@ function Town({ st, notes, ready, onUse, onNear, gear, level, classId }) {
 		const tick = () => {
 			prev = [st.p.x, st.p.y];
 			let mx = 0, my = 0;
-			for (const k of keys) { const d = KEY_DIR[k]; if (d) { mx += d[0]; my += d[1]; } }
+			for (const k of keys) { const d = dirOf(k); if (d) { mx += d[0]; my += d[1]; } }
 			stepTown(st, { mx: Math.sign(mx), my: Math.sign(my), ax: (mouse.x - cam.ox) / px - st.p.x,
 				ay: (mouse.y - cam.oy) / px - st.p.y, fire: mouse.down || auto, ability });
 			ability = false;
@@ -1189,13 +1573,14 @@ function Town({ st, notes, ready, onUse, onNear, gear, level, classId }) {
 		const typing = (e) => /^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName || "");
 		const onKeyDown = (e) => {
 			if (typing(e)) return;
-			if (KEY_DIR[e.code]) { keys.add(e.code); e.preventDefault(); return; }
+			if (dirOf(e.code)) { keys.add(e.code); e.preventDefault(); return; }
 			if (e.repeat) return;
-			if (e.code === "KeyE") {
+			const act = actionOf(e.code);
+			if (act === "interact") {
 				const s = STATIONS.find((x) => x.id === st.near);
 				if (s) cb.current.onUse(s);
-			} else if (e.code === "KeyT") auto = !auto;
-			else if (e.code === "Space" || e.code === "KeyQ") { ability = true; e.preventDefault(); }
+			} else if (act === "auto") auto = !auto;
+			else if (act === "ability") { ability = true; e.preventDefault(); }
 		};
 		const onKeyUp = (e) => keys.delete(e.code);
 		const onBlur = () => { keys.clear(); mouse.down = false; };
@@ -1232,10 +1617,12 @@ function Town({ st, notes, ready, onUse, onNear, gear, level, classId }) {
 }
 
 // ── the dungeon ─────────────────────────────────────────────────────────────
-function Dungeon({ run, client, onEnd, notify, tips }) {
+function Dungeon({ run, client, onEnd, notify, tips, onDeeper }) {
 	const canvasRef = useRef(null);
 	const notifyRef = useRef(notify);
 	notifyRef.current = notify;
+	const onDeeperRef = useRef(onDeeper);
+	onDeeperRef.current = onDeeper;
 	// What lies within reach (the bags and what the player put down), shown as slots in
 	// the stage's bottom right; and the bag under the mouse, named in a tooltip.
 	const [loot, setLoot] = useState([]);
@@ -1247,12 +1634,13 @@ function Dungeon({ run, client, onEnd, notify, tips }) {
 		const g = cv.getContext("2d");
 		const st = createSim(run.dungeon, run.gear, run.hero);
 		const ctl = run.ctl;
+		if (run.carry) Object.assign(st.p, run.carry);   // a level deeper: as you left the last one
 		ctl.st = st;                                 // the side panel's HP and MP bars read it live
 		const keys = new Set();
 		const mouse = { x: 0, y: 0, down: false, cx: 0, cy: 0, over: false };
 		const want = [];                             // takes asked for from the loot panel, one a tick
 		let lootKey = "", hoverKey = "";
-		const edge = { ability: false, interact: false, recall: false };
+		const edge = { ability: false, interact: false, recall: false, potion: false };
 		let auto = false, px = 32, raf = 0, ended = false;
 		// Where each moving thing was before the last tick, so a frame can draw it part
 		// of the way to where it is now (the sim steps at 60 Hz; a screen may run at 144).
@@ -1280,7 +1668,18 @@ function Dungeon({ run, client, onEnd, notify, tips }) {
 			take: (entry) => { if (!want.some((w) => w.key === entry.key)) want.push(entry); },
 			takeAll: () => { for (const e of inReach()) if (!want.some((w) => w.key === e.key)) want.push(e); },
 		};
-		const resize = () => { px = fitCanvas(cv); };
+		let dpr = 1;
+		const resize = () => { px = fitCanvas(cv); dpr = cv.width / Math.max(1, cv.getBoundingClientRect().width); };
+		// A bag's best item (unique, else the highest tier), for its color.
+		const bests = new WeakMap();
+		const bagBest = (b) => {
+			const key = b.drops.join(","), had = bests.get(b);
+			if (had && had.key === key) return had;
+			const specs = b.drops.map(specOf);
+			const best = { key, unique: specs.some((d) => d.kind === "unique"), tier: Math.max(1, ...specs.map((d) => d.tier || 1)) };
+			bests.set(b, best);
+			return best;
+		};
 		const ro = new ResizeObserver(resize);
 		ro.observe(cv);
 		resize();
@@ -1301,7 +1700,7 @@ function Dungeon({ run, client, onEnd, notify, tips }) {
 
 		const input = () => {
 			let mx = 0, my = 0;
-			for (const k of keys) { const d = KEY_DIR[k]; if (d) { mx += d[0]; my += d[1]; } }
+			for (const k of keys) { const d = dirOf(k); if (d) { mx += d[0]; my += d[1]; } }
 			const { ox, oy } = cam;                    // aim through what the player SEES
 			const loot = edge.interact ? nearestLoot() : null;
 			let take = null, lift = null;
@@ -1314,17 +1713,30 @@ function Dungeon({ run, client, onEnd, notify, tips }) {
 			}
 			const out = { mx: Math.sign(mx), my: Math.sign(my), ax: (mouse.x - ox) / px - st.p.x, ay: (mouse.y - oy) / px - st.p.y,
 				fire: mouse.down || auto, ability: edge.ability, heal: edge.interact, take, lift, drop: ctl.drops.shift() || null,
-				recall: edge.recall, enter: edge.interact && !loot };
+				recall: edge.recall, enter: edge.interact && !loot, potion: edge.potion };
 			if (ctl.recall) { out.recall = true; ctl.recall = false; }      // Recall / Main menu in the game menu
-			edge.ability = edge.interact = edge.recall = false;
+			edge.ability = edge.interact = edge.recall = edge.potion = false;
 			return out;
 		};
 
 		const handle = (ev) => {
 			if (ev.type === "level") note(`Level ${ev.level}!`, "good");
+			if (ev.type === "kill") ctl.kills = (ctl.kills || 0) + 1;
+			if (ev.type === "damage") ctl.taken = (ctl.taken || 0) + ev.amount;
+			if (ev.type === "deeper") { onDeeperRef.current?.({ offers: st.offers, from: st.depth, mods: run.dungeon.mods || [] }); return; }
 			if (ev.type === "cleared") {
 				const time = st.bossTimeTicks != null ? ` ${formatRiftTime(st.bossTimeTicks)}` : "";
-				note(`${run.practice ? "Dream Rift" : run.dungeon.name} cleared!${time}${ev.xp > 0 ? ` +${ev.xp} XP` : ""}`, "good");
+				// The log keeps this line; once the run is over, clicking it opens the run's summary.
+				notifyRef.current(`${run.practice ? "Dream Rift" : run.dungeon.name}${st.depth > 1 ? ` level ${st.depth}` : ""} cleared!${time}${ev.xp > 0 ? ` +${ev.xp} XP` : ""}`,
+					"good", { runId: run.run_id });
+			}
+			if (ev.type === "death") {
+				// The graveyard's death screen: what killed it and the run's tallies (the
+				// server adds what it wore, where, and the rift's facts of its own).
+				const h = st.lastHit;
+				client.report({ ...ev, summary: { src: h?.src || "", hit: h?.dmg || 0, taken: ctl.taken || 0,
+					kills: ctl.kills || 0, ticks: (ctl.ticksDone || 0) + st.tick } });
+				return;
 			}
 			if (ev.type === "lift") {
 				const it = ctl.floor.get(ev.key), slot = ctl.lift(ev.key);
@@ -1355,9 +1767,11 @@ function Dungeon({ run, client, onEnd, notify, tips }) {
 			const h = st.hero;
 			// What came back is what is still carried (an item put down and left is gone).
 			const brought = ctl.items.filter((it) => it.fresh).map(nameOf);
-			setTimeout(() => onEnd({ status, loot: brought, items: ctl.items, realm: run.realm, dungeonName: run.dungeon.name,
+			setTimeout(() => onEnd({ status, runId: run.run_id, loot: brought, items: ctl.items, realm: run.realm, dungeonName: run.dungeon.name,
 				classId: run.class_id || st.classId, practice: run.practice, timeTicks: st.bossTimeTicks,
-				heroXp: h.xp, level: h.level }),
+				heroXp: h.xp, level: h.level, startLevel: run.startLevel ?? h.startLevel,
+				lastHit: st.lastHit || null, depth: st.depth, mods: run.dungeon.mods || [],
+				kills: ctl.kills || 0, taken: ctl.taken || 0, ticks: (ctl.ticksDone || 0) + st.tick, maxHp: st.stats.maxHp }),
 				status === "dead" ? 1400 : 700);
 		};
 
@@ -1378,8 +1792,10 @@ function Dungeon({ run, client, onEnd, notify, tips }) {
 		};
 
 		// What is in reach is in the loot panel; the canvas keeps only the way out.
-		const bagHint = () => (!nearestLoot() && st.portal && Math.hypot(st.portal.x - st.p.x, st.portal.y - st.p.y) <= REACH
-			? [{ text: `E: leave ${run.dungeon.name}`, color: "#9fe7ff" }] : []);
+		const by = (o) => o && Math.hypot(o.x - st.p.x, o.y - st.p.y) <= REACH;
+		const bagHint = () => (nearestLoot() ? []
+			: by(st.portal) ? [{ text: `${keysOf("interact")}: leave ${run.dungeon.name}`, color: "#9fe7ff" }]
+			: by(st.deeper) ? [{ text: `${keysOf("interact")}: go deeper`, color: "#ff9f5a" }] : []);
 
 		// DEV ONLY: step the real loop without frames (a hidden tab gets none).
 		if (import.meta.env.DEV) window.__halcyon.advance = (n) => { for (let i = 0; i < n && !ended; i++) tick(); return st.status; };
@@ -1408,21 +1824,25 @@ function Dungeon({ run, client, onEnd, notify, tips }) {
 			};
 			const pp = at(st.p);
 			cam = camera(st, cv.width, cv.height, px, pp, true);
+			const pf = livePrefs.current;
 			draw(g, st, { width: cv.width, height: cv.height, px, at,
 				aim: { x: (mouse.x - cam.ox) / px - pp.x, y: (mouse.y - cam.oy) / px - pp.y },
-				notes: ended ? [] : bagHint() });
+				notes: ended ? [] : bagHint(), bagBest, calm: pf.calm, ui: pf.ui, dpr,
+				bossName: run.dungeon.boss_name || "The boss", keys: { potion: keyLabel(pf.keys.potion?.[0]) } });
 			raf = requestAnimationFrame(frame);
 		};
 		raf = requestAnimationFrame(frame);
 
 		const onKeyDown = (e) => {
-			if (KEY_DIR[e.code]) { keys.add(e.code); e.preventDefault(); return; }
-			if (e.repeat) return;
-			if (e.code === "Space" || e.code === "KeyQ") { edge.ability = true; e.preventDefault(); }
-			else if (e.code === "KeyE") edge.interact = true;
-			else if (e.code === "KeyF") edge.recall = true;
-			else if (e.code === "KeyT") { auto = !auto; note(auto ? "Auto-fire on" : "Auto-fire off"); }
-			else if (e.code === "KeyG") lootApi.current?.takeAll();
+			if (dirOf(e.code)) { keys.add(e.code); e.preventDefault(); return; }
+			if (e.repeat || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName || "")) return;
+			const act = actionOf(e.code);
+			if (act === "ability") { edge.ability = true; e.preventDefault(); }
+			else if (act === "interact") edge.interact = true;
+			else if (act === "recall") edge.recall = true;
+			else if (act === "potion") edge.potion = true;
+			else if (act === "auto") { auto = !auto; note(auto ? "Auto-fire on" : "Auto-fire off"); }
+			else if (act === "takeAll") lootApi.current?.takeAll();
 		};
 		const onKeyUp = (e) => keys.delete(e.code);
 		const toCanvas = (e) => {

@@ -93,7 +93,8 @@ SCHEMA = [
         status TEXT NOT NULL,                -- alive | dead
         created_at REAL NOT NULL,
         died_at REAL,
-        death_run_id TEXT)""",
+        death_run_id TEXT,
+        death_summary TEXT)""",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_hr_char_alive_slot "
     "ON hr_characters (owner_id, slot) WHERE status = 'alive'",
     """CREATE TABLE IF NOT EXISTS hr_items (
@@ -117,7 +118,8 @@ SCHEMA = [
         destroyed_at REAL,
         created_at REAL NOT NULL,
         updated_at REAL NOT NULL,
-        version INTEGER NOT NULL DEFAULT 1)""",
+        version INTEGER NOT NULL DEFAULT 1,
+        locked INTEGER NOT NULL DEFAULT 0)""",
     # THE DUPLICATION GUARD: a drop is minted once, however often its pickup is sent.
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_hr_items_drop "
     "ON hr_items (origin_run_id, origin_drop_id)",
@@ -164,6 +166,14 @@ def init_schema(conn) -> None:
     cur.execute("PRAGMA table_info(hr_runs)")
     if not any(row[1] == "practice" for row in cur.fetchall()):
         cur.execute("ALTER TABLE hr_runs ADD COLUMN practice INTEGER NOT NULL DEFAULT 0")
+    # The QOL pass (2026-11-18, design §19.1), additive like the one above: an item
+    # LOCK, and the graveyard's copy of each death screen.
+    cur.execute("PRAGMA table_info(hr_items)")
+    if not any(row[1] == "locked" for row in cur.fetchall()):
+        cur.execute("ALTER TABLE hr_items ADD COLUMN locked INTEGER NOT NULL DEFAULT 0")
+    cur.execute("PRAGMA table_info(hr_characters)")
+    if not any(row[1] == "death_summary" for row in cur.fetchall()):
+        cur.execute("ALTER TABLE hr_characters ADD COLUMN death_summary TEXT")
     # Whether a base is standard or unique belongs to the BASE, so items follow
     # content.py when it changes (the repeater became a unique, 2026-11-18). A unique
     # has no tier ladder: it is tier 1. Cheap, and a no-op once everything agrees.
@@ -197,6 +207,7 @@ def _item_out(row: dict) -> dict:
     out = dict(row)
     out["enchants"] = json.loads(row["enchants"])
     out["fused_from"] = json.loads(row["fused_from"]) if row.get("fused_from") else None
+    out["locked"] = bool(row.get("locked") or 0)
     if row["loc"] == "equipped" and row["slot_index"] is not None:
         out["equip_slot"] = C.EQUIP_SLOTS[row["slot_index"]]
     return out
@@ -495,8 +506,17 @@ def _validate_dungeon(dungeon: dict) -> dict:
             raise HalcyonError("an enemy's XP is not a whole number")
     if not _is_xp(dungeon.get("complete_xp", 0)):
         raise HalcyonError("the completion XP is not a whole number")
+    level = dungeon.get("level", 1)
+    if not isinstance(level, int) or isinstance(level, bool) or not 1 <= level <= 99:
+        raise HalcyonError("the dungeon's level is not a level")
+    mods, offers = list(dungeon.get("mods") or []), list(dungeon.get("offers") or [])
+    if any(m not in C.RIFT_MODS for m in mods + offers) or set(mods) & set(offers):
+        raise HalcyonError("the dungeon names a modifier it cannot")
     return {"enemies": {str(k): v for k, v in enemies.items()}, "boss": boss, "drops": drops,
-            "complete_xp": dungeon.get("complete_xp", 0), "class_id": class_id}
+            "complete_xp": dungeon.get("complete_xp", 0), "class_id": class_id,
+            "level": level, "mods": mods, "offers": offers,
+            # Only for the graveyard's words; nothing is decided by it.
+            "name": str(dungeon.get("name") or "")[:60]}
 
 
 def _is_xp(v) -> bool:
@@ -574,6 +594,38 @@ class _Refused(Exception):
     pass
 
 
+# What the page may add to a death (the cause and its tallies). It only DESCRIBES the
+# run, for the graveyard: nothing is credited from it, so a bad value costs nothing
+# but a strange gravestone. Each field is bounded; anything else is dropped.
+_DEATH_TEXT = {"src": 40}
+_DEATH_NUMS = {"hit": 100_000, "taken": 10_000_000, "kills": 100_000, "ticks": 100_000_000}
+
+
+def _write_death(cur, run: dict, dungeon: dict, state: dict, summary) -> None:
+    """The graveyard's death screen, written while the character still carries
+    everything (the run's close destroys it next): what it wore and carried, as
+    item specs, and where it fell. The server's own facts win over the page's."""
+    page = summary if isinstance(summary, dict) else {}
+    out = {}
+    for k, n in _DEATH_TEXT.items():
+        if isinstance(page.get(k), str):
+            out[k] = page[k][:n]
+    for k, cap in _DEATH_NUMS.items():
+        v = page.get(k)
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and v == v:
+            out[k] = max(0, min(cap, round(float(v), 1)))
+    cur.execute("SELECT * FROM hr_items WHERE char_id=? AND loc IN ('inventory','equipped')", (run["char_id"],))
+    items = []
+    for row in _dicts(cur):
+        it = _item_out(row)
+        items.append({k: it.get(k) for k in ("base_id", "tier", "kind", "slot_count", "enchants", "loc",
+                                             "equip_slot", "slot_index", "origin_run_id")})
+    out.update({"dungeon_id": run["dungeon_id"], "dungeon_name": dungeon.get("name") or run["dungeon_id"],
+                "depth": dungeon.get("level", 1), "mods": list(dungeon.get("mods") or []),
+                "items": items, "run_id": run["run_id"]})
+    cur.execute("UPDATE hr_characters SET death_summary=? WHERE char_id=?", (json.dumps(out), run["char_id"]))
+
+
 def _apply_one(cur, run: dict, dungeon: dict, state: dict, ev: dict, now: float) -> str | None:
     """Apply one run event. Validates fully BEFORE writing, so a refusal never
     leaves half an event behind. Returns the run's new status if the event ended it."""
@@ -592,7 +644,10 @@ def _apply_one(cur, run: dict, dungeon: dict, state: dict, ev: dict, now: float)
             # a recall after the kill keeps it. Practice runs earn nothing.
             if not practice:
                 _credit_xp(cur, char_id, dungeon.get("complete_xp", 0))
-            _record_time(cur, run, ev.get("elapsed_ticks"), now)
+            # Each level's boss pays its own clear bonus; the time is the FIRST
+            # level's (a deeper run is not a faster clear of the rift).
+            if dungeon.get("level", 1) == 1:
+                _record_time(cur, run, ev.get("elapsed_ticks"), now)
     elif t == "pickup":
         if practice:
             raise _Refused
@@ -626,7 +681,7 @@ def _apply_one(cur, run: dict, dungeon: dict, state: dict, ev: dict, now: float)
         on_me = it["loc"] in ("inventory", "equipped") and it["char_id"] == char_id
         on_floor = it["loc"] == "ground" and it["run_id"] == run_id
         if t == "drop_item":
-            if not on_me:
+            if not on_me or it.get("locked"):
                 raise _Refused
             _set_place(cur, it["item_id"], ("ground", None, run_id, None), now)
             return None
@@ -643,6 +698,8 @@ def _apply_one(cur, run: dict, dungeon: dict, state: dict, ev: dict, now: float)
         except HalcyonError:
             raise _Refused
     elif t == "death":
+        if not practice:
+            _write_death(cur, run, dungeon, state, ev.get("summary"))
         return "died"
     elif t == "recall":
         return "recalled"
@@ -696,6 +753,49 @@ def apply_events(connect, owner_id: str, run_id: str, events: list[dict], now: f
         if status != "open":
             _close_run(cur, run, status, now)
         return {"status": status, "last_seq": last, "refused": refused}
+
+
+def descend(connect, owner_id: str, run_id: str, mod: str, from_level: int, make,
+            now: float | None = None) -> dict:
+    """Go deeper (design §14.6): the current level's boss is dead and `mod` is one
+    of the modifiers its portal offered. `make(dungeon_id, seed, class_id, mods,
+    level)` generates the next level (the generator lives in dungeon.py, which imports this module).
+
+    The new level's enemies and drops are ADDED to the run's record, so every id
+    the run ever had stays checkable and a drop's UNIQUE index (per run) still
+    holds; the boss, the bonus and the offers become the new level's. What the
+    player left on the floor stays behind and is destroyed, as on any way out.
+    Safe to repeat: asked again for a descent that already happened (the answer was
+    lost), it hands back the level the run is on."""
+    now = _now(now)
+    with _tx(connect, owner_id) as cur:
+        run = _one(cur, "SELECT * FROM hr_runs WHERE run_id=?", (run_id,))
+        if run is None or run["owner_id"] != owner_id:
+            raise HalcyonError("no such run")
+        _require_owner(cur, owner_id, now)
+        dungeon, state = json.loads(run["dungeon"]), json.loads(run["state"])
+        level, mods = dungeon.get("level", 1), list(dungeon.get("mods") or [])
+        if run["status"] == "open" and level == from_level + 1 and mod in mods:
+            return make(run["dungeon_id"], run["seed"], dungeon["class_id"], mods, level)   # a retry
+        if run["status"] != "open":
+            raise HalcyonError("that run is over")
+        if level != from_level:
+            raise HalcyonError("the run is not on that level")
+        if dungeon.get("boss") is None or dungeon["boss"] not in state["killed"]:
+            raise HalcyonError("the way deeper opens when the boss falls")
+        if mod not in (dungeon.get("offers") or []):
+            raise HalcyonError("that modifier was not offered")
+        d = make(run["dungeon_id"], run["seed"], dungeon["class_id"], mods + [mod], level + 1)
+        nxt = _validate_dungeon(d)
+        if nxt["class_id"] != dungeon["class_id"] or set(nxt["enemies"]) & set(dungeon["enemies"])                 or set(nxt["drops"]) & set(dungeon["drops"]):
+            raise HalcyonError("the next level does not fit this run")
+        merged = {**nxt, "enemies": {**dungeon["enemies"], **nxt["enemies"]},
+                  "drops": {**dungeon["drops"], **nxt["drops"]}}
+        if not bool(run.get("practice", 0)):
+            _destroy(cur, "loc='ground' AND run_id=?", (run_id,), "run_end", now)
+        cur.execute("UPDATE hr_runs SET dungeon=?, last_event_at=? WHERE run_id=?",
+                    (json.dumps(merged), now, run_id))
+        return d
 
 
 def sweep_runs(connect, now: float | None = None, max_idle: float = 24 * 3600) -> int:
@@ -756,8 +856,22 @@ def discard(connect, owner_id: str, item_id: str, expected_version: int | None =
     now = _now(now)
     with _tx(connect, owner_id) as cur:
         _require_owner(cur, owner_id, now)
-        _town_item(cur, owner_id, item_id, expected_version)
+        it = _town_item(cur, owner_id, item_id, expected_version)
+        if it.get("locked"):
+            raise HalcyonError("that item is locked")
         _destroy(cur, "item_id=?", (item_id,), "discard", now)
+
+
+def set_lock(connect, owner_id: str, item_id: str, locked: bool, now: float | None = None) -> dict:
+    """Lock or unlock an item (design §19.1): a locked item cannot be discarded,
+    fused or dropped on a run's floor, and Sort leaves it where it is. It is not a
+    move, so the item's version does not change — anywhere, even mid-run."""
+    now = _now(now)
+    with _tx(connect, owner_id) as cur:
+        _require_owner(cur, owner_id, now)
+        _require_item(cur, owner_id, item_id)
+        cur.execute("UPDATE hr_items SET locked=?, updated_at=? WHERE item_id=?", (1 if locked else 0, now, item_id))
+        return _item_out(_one(cur, "SELECT * FROM hr_items WHERE item_id=?", (item_id,)))
 
 
 def fuse(connect, owner_id: str, a: str, b: str, rng: random.Random | None = None,
@@ -773,6 +887,8 @@ def fuse(connect, owner_id: str, a: str, b: str, rng: random.Random | None = Non
         ev = expected_versions or (None, None)
         ia = _town_item(cur, owner_id, a, ev[0])
         ib = _town_item(cur, owner_id, b, ev[1])
+        if ia.get("locked") or ib.get("locked"):
+            raise HalcyonError("a locked item cannot be fused")
         for k in ("base_id", "tier", "kind", "slot_count"):
             if ia[k] != ib[k]:
                 raise HalcyonError("only identical items fuse")
@@ -791,6 +907,9 @@ def fuse(connect, owner_id: str, a: str, b: str, rng: random.Random | None = Non
 
 
 # ── reading and pruning ──────────────────────────────────────────────────────
+FALLEN_SHOWN = 30                                   # the graveyard lists the newest this many
+
+
 def owner_view(connect, owner_id: str) -> dict:
     conn = connect()
     try:
@@ -810,8 +929,16 @@ def owner_view(connect, owner_id: str) -> dict:
             })
     finally:
         conn.close()
+    fallen = []
+    for c in sorted((c for c in chars if c["status"] == "dead"), key=lambda c: -(c["died_at"] or 0))[:FALLEN_SHOWN]:
+        c = dict(c)
+        c["death_summary"] = json.loads(c["death_summary"]) if c.get("death_summary") else None
+        fallen.append(c)
     return {"characters": [c for c in chars if c["status"] == "alive"],
-            "fallen": [c for c in chars if c["status"] == "dead"],
+            "fallen": fallen, "fallen_count": sum(1 for c in chars if c["status"] == "dead"),
+            # THE ONE RECORD (owner's call, 2026-11-18): the best level any character on
+            # the account has reached, alive or fallen.
+            "best_level": max((c["level"] for c in chars), default=0),
             "items": items, "open_runs": runs, "leaderboards": times}
 
 

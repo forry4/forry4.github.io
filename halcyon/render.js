@@ -9,13 +9,19 @@
  */
 import { recoveryLimit, xpProgress, STARFALL_DELAY, TPS } from "./sim.js";
 
+/* A loot bag wears the color of the best thing in it (design §19.1): a tier color, and
+ * a unique's gold with a glow. The tier number in every slot is the non-color cue. */
+export const TIER_COLORS = { 1: "#c9bfa6", 2: "#6fd36a", 3: "#5aa9ff", 4: "#b77cff", 5: "#ff9f43" };
+export const UNIQUE_COLOR = "#ffd85e";
+
 export const COLORS = {
 	wall: "#3c4a45", wallTop: "#4a5a54", sand: "#a99e80", sandDark: "#a3987a",
 	water: "#5f8f93", waterLight: "#6d9ea1", rock: "#7b7a70", rockTop: "#918f84",
 	player: "#7fe3f0", playerCore: "#f4fdff", playerShot: "#c9f6ff",
 	chaser: "#e8573f", shooter: "#ef8a3a", radial: "#c8458f", boss: "#d63a5a",
 	enemyShot: "#ff5a4a", enemyShotHeavy: "#ff3d8b", tele: "rgba(255,90,74,.55)",
-	heal: "#6fd36a", bag: "#e9c25a", portal: "#9fe7ff", dream: "#b9a7ff",
+	heal: "#6fd36a", bag: "#e9c25a", portal: "#9fe7ff", dream: "#b9a7ff", deeper: "#ff9f5a",
+	veil: "rgba(214,58,90,.22)", veilEdge: "rgba(255,138,150,.55)", bars: "#2a2f2d", barsLit: "#d63a5a", ward: "#cfe3ff",
 	paladin: "#f1c46b", diviner: "#c4a5ff", ninja: "#8fd6a4", shield: "rgba(241,196,107,.72)",
 	slow: "rgba(241,196,107,.16)", star: "#ffe9a6", damage: "#ff9b8d",
 	hp: "#e2564e", mp: "#5a8de8", xp: "#9d8ff2", hudBack: "rgba(16,18,20,.72)",
@@ -65,6 +71,26 @@ function drawMap(g, st, ox, oy, px, width, height, pal = SHALLOWS) {
 	}
 }
 
+/* The doors of rooms that still hold enemies (sim.js): a faint red veil before the
+ * room is entered (shots stop there; you can walk through), iron bars once it is
+ * sealed. A cleared room's doorway is plain floor. */
+function drawDoors(g, st, ox, oy, px) {
+	if (!st.doorCols) return;
+	const P = Math.ceil(px) + 1, Y = Math.floor(oy + (st.doorY - 1) * px), H = px * 3;
+	st.doorCols.forEach((room, x) => {
+		if (room < 0 || !(st.roomLeft[room] > 0)) return;
+		const X = Math.floor(ox + x * px);
+		if (st.sealed === room) {
+			g.fillStyle = COLORS.bars; g.fillRect(X, Y, P, H);
+			g.fillStyle = COLORS.barsLit;
+			for (let k = 0; k < 4; k++) g.fillRect(X + px * (0.12 + k * 0.24), Y, Math.max(2, px * 0.08), H);
+		} else {
+			g.fillStyle = COLORS.veil; g.fillRect(X, Y, P, H);
+			g.fillStyle = COLORS.veilEdge; g.fillRect(X + px * 0.45, Y, Math.max(1, px * 0.1), H);
+		}
+	});
+}
+
 function circle(g, x, y, r, fill) {
 	g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fillStyle = fill; g.fill();
 }
@@ -87,13 +113,15 @@ export function camera(st, width, height, px, at = st.p, follow = false) {
  * the page passes its position interpolated between the last two ticks, so motion
  * is smooth at any refresh rate while the simulation stays a fixed 60 Hz. */
 const here = (o) => o;
-export function draw(g, st, { width, height, px, aim, notes = [], at = here }) {
+export function draw(g, st, { width, height, px, aim, notes = [], at = here, bagBest = () => ({ tier: 1 }),
+	calm = false, ui = 1, dpr = 1, bossName = "The boss", keys = {} }) {
 	const p = st.p, pp = at(p);
 	const { ox, oy } = camera(st, width, height, px, pp, true);
 	const sx = (x) => ox + x * px, sy = (y) => oy + y * px;
 
 	g.fillStyle = "#1b2220"; g.fillRect(0, 0, width, height);
 	drawMap(g, st, ox, oy, px, width, height);
+	drawDoors(g, st, ox, oy, px);
 	drawAbilityFx(g, st, sx, sy, px, pp);
 	if (st.shield) {
 		circle(g, sx(st.shield.x), sy(st.shield.y), px * st.shield.r, COLORS.shield);
@@ -106,10 +134,15 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here }) {
 		circle(g, X, Y, px * 0.3, "rgba(111,211,106,.28)");
 		g.fillStyle = COLORS.heal; g.fillRect(X - s * 1.5, Y - s / 2, s * 3, s); g.fillRect(X - s / 2, Y - s * 1.5, s, s * 3);
 	}
-	for (const b of st.bags) {                        // loot: gold
-		const X = sx(b.x), Y = sy(b.y);
-		g.fillStyle = COLORS.bag; g.fillRect(X - px * 0.22, Y - px * 0.18, px * 0.44, px * 0.38);
-		g.fillStyle = "#7a5a1c"; g.fillRect(X - px * 0.22, Y - px * 0.06, px * 0.44, px * 0.05);
+	for (const b of st.bags) {                        // loot: the color of its best item
+		const X = sx(b.x), Y = sy(b.y), best = bagBest(b);
+		const col = best.unique ? UNIQUE_COLOR : TIER_COLORS[best.tier] || COLORS.bag;
+		if (best.unique) {
+			const pulse = calm ? 0.5 : 0.5 + 0.5 * Math.sin(st.tick / 10);
+			circle(g, X, Y, px * (0.48 + 0.08 * pulse), "rgba(255,216,94,.28)");
+		} else if (best.tier >= 3) circle(g, X, Y, px * 0.42, col + "33");
+		g.fillStyle = col; g.fillRect(X - px * 0.22, Y - px * 0.18, px * 0.44, px * 0.38);
+		g.fillStyle = "rgba(20,16,10,.55)"; g.fillRect(X - px * 0.22, Y - px * 0.06, px * 0.44, px * 0.05);
 	}
 	for (const f of st.floor || []) {                 // what the player put down: pale, a bundle
 		const X = sx(f.x), Y = sy(f.y);
@@ -120,6 +153,12 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here }) {
 		const pulse = 0.5 + 0.5 * Math.sin(st.tick / 9);
 		circle(g, sx(st.portal.x), sy(st.portal.y), px * (0.55 + 0.1 * pulse), "rgba(159,231,255,.35)");
 		circle(g, sx(st.portal.x), sy(st.portal.y), px * 0.32, COLORS.portal);
+	}
+	if (st.deeper) {                                  // the way deeper: ember orange, a dark heart
+		const pulse = 0.5 + 0.5 * Math.sin(st.tick / 7);
+		circle(g, sx(st.deeper.x), sy(st.deeper.y), px * (0.58 + 0.12 * pulse), "rgba(255,159,90,.32)");
+		circle(g, sx(st.deeper.x), sy(st.deeper.y), px * 0.34, COLORS.deeper);
+		circle(g, sx(st.deeper.x), sy(st.deeper.y), px * 0.14, "#3a1a10");
 	}
 
 	for (const e of st.enemies) {
@@ -135,7 +174,8 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here }) {
 				g.beginPath(); g.arc(X, Y, r * grow + px * 0.2, 0, Math.PI * 2); g.stroke();
 			}
 		}
-		const col = e.flash > 0 ? "#fff3ea" : COLORS[e.type];
+		// Reduced flashing (a setting): a hit tints, and the boss's turn holds still.
+		const col = e.flash > 0 ? (calm ? "#f3b9a8" : "#fff3ea") : COLORS[e.type];
 		if (e.type === "chaser") {
 			g.save(); g.translate(X, Y); g.rotate(Math.PI / 4); g.fillStyle = col; g.fillRect(-r * 0.8, -r * 0.8, r * 1.6, r * 1.6); g.restore();
 		} else if (e.type === "shooter") {
@@ -143,8 +183,12 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here }) {
 		} else if (e.type === "radial") {
 			circle(g, X, Y, r, col); circle(g, X, Y, r * 0.45, "#5c1b3f");
 		} else {
-			circle(g, X, Y, r, e.phase === 0 && st.tick % 10 < 5 ? "#fff3ea" : col);
+			circle(g, X, Y, r, e.phase === 0 && !calm && st.tick % 10 < 5 ? "#fff3ea" : col);
 			circle(g, X, Y, r * 0.55, "#5a1424");
+		}
+		if (e.ward > 0) {                                 // Warded: one pip per hit it will still ignore
+			const n = e.ward, gap = px * 0.16, w0 = (n - 1) * gap, py = Y + r + px * 0.2;
+			for (let k = 0; k < n; k++) circle(g, X - w0 / 2 + k * gap, py, Math.max(1.5, px * 0.055), COLORS.ward);
 		}
 		if (e.active && e.hp < e.maxHp) {
 			const w = Math.max(px * 0.8, r * 2);
@@ -153,11 +197,74 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here }) {
 		}
 	}
 
-	drawPlayer(g, p, sx(pp.x), sy(pp.y), px, aim, st.classId);
+	drawPlayer(g, p, sx(pp.x), sy(pp.y), px, aim, st.classId, calm);
 
 	drawShots(g, st.bullets, sx, sy, px, at);
 	drawDamageNumbers(g, st.damageNumbers || [], sx, sy, px, st.tick);
-	drawHud(g, st, { width, height, px, notes });
+	drawHud(g, st, { width, height, px, notes, ui, keys });
+	drawBossBar(g, st, { width, ui, name: bossName });
+	drawMinimap(g, st, { width, ui, dpr, bagBest });
+}
+
+/* The boss's health across the top of the stage while it fights (design §19.1),
+ * with a mark at half: the phase change. */
+function drawBossBar(g, st, { width, ui, name }) {
+	const b = st.enemies.find((e) => e.type === "boss" && e.active && e.hp > 0);
+	if (!b) return;
+	const W = Math.min(width * 0.44, 520 * ui), H = Math.max(8, 12 * ui), X = width / 2 - W / 2, Y = 30 * ui;
+	g.font = `600 ${Math.round(14 * ui)}px "Cinzel", Georgia, serif`;
+	g.textAlign = "center"; g.textBaseline = "middle";
+	g.fillStyle = "rgba(10,12,14,.75)"; g.fillText(name, width / 2 + 1, Y - 11 * ui + 1.5);
+	g.fillStyle = "#f6c2bc"; g.fillText(name, width / 2, Y - 11 * ui);
+	g.textAlign = "left";
+	g.fillStyle = "rgba(10,12,14,.78)"; g.fillRect(X - 3, Y - 3, W + 6, H + 6);
+	g.fillStyle = "#3a1f24"; g.fillRect(X, Y, W, H);
+	g.fillStyle = COLORS.boss; g.fillRect(X, Y, W * (b.hp / b.maxHp), H);
+	if (b.phase === 1) { g.fillStyle = "rgba(255,240,235,.8)"; g.fillRect(X + W / 2 - 1, Y - 2, 2, H + 4); }
+	if (b.ward > 0) {
+		g.font = `${Math.round(11 * ui)}px "Crimson Pro", Georgia, serif`;
+		g.fillStyle = COLORS.ward; g.textAlign = "right";
+		g.fillText(`Warded ×${b.ward}`, X + W, Y + H + 10 * ui);
+		g.textAlign = "left";
+	}
+}
+
+/* The minimap, top right under the timer (design §19.1: it replaces off-screen
+ * arrows). The dungeon is one line of rooms, so the whole map fits a strip: a
+ * room still to fight is dark, the sealed one red, a cleared one green-gray; the
+ * player, the portals and the loot bags are dots on it. */
+const MINI = { open: "#5c645f", ahead: "#2f3437", sealed: "#a5443f", cleared: "#4f7262", boss: "#4a2a33" };
+function drawMinimap(g, st, { width, ui, dpr, bagBest }) {
+	if (!st.rooms?.length) return;
+	const W = Math.min(width * 0.3, 240 * ui * dpr), m = W / st.w, H = st.h * m;
+	const X = width - 16 - W, Y = 90 * dpr;                         // under the timer and the Menu button
+	g.fillStyle = "rgba(10,12,14,.66)"; g.fillRect(X - 5, Y - 5, W + 10, H + 10);
+	const roomOf = new Array(st.w).fill(-1);
+	st.rooms.forEach((r, i) => { for (let x = r.x0; x < r.x1; x++) roomOf[x] = i; });
+	const colorAt = (x) => {
+		const i = roomOf[x];
+		if (i < 0) return MINI.open;
+		if (st.sealed === i) return MINI.sealed;
+		if (st.roomLeft[i] > 0) return st.rooms[i].kind === "boss" ? MINI.boss : MINI.ahead;
+		return st.rooms[i].kind === "entrance" ? MINI.open : MINI.cleared;
+	};
+	for (let y = 0; y < st.h; y++) {                          // floor, in runs of one color
+		const row = st.tiles[y];
+		let x = 0;
+		while (x < st.w) {
+			if (row[x] === "#") { x++; continue; }
+			const c = colorAt(x);
+			let e = x + 1;
+			while (e < st.w && row[e] !== "#" && colorAt(e) === c) e++;
+			g.fillStyle = c; g.fillRect(X + x * m, Y + y * m, (e - x) * m + 0.5, m + 0.5);
+			x = e;
+		}
+	}
+	const dot = (o, r, c) => circle(g, X + o.x * m, Y + o.y * m, Math.max(1.5, r * ui * dpr), c);
+	for (const b of st.bags) { const best = bagBest(b); dot(b, 2, best.unique ? UNIQUE_COLOR : TIER_COLORS[best.tier] || COLORS.bag); }
+	if (st.portal) dot(st.portal, 2.6, COLORS.portal);
+	if (st.deeper) dot(st.deeper, 2.6, COLORS.deeper);
+	dot(st.p, 2.8, "#ffffff");
 }
 
 /* What an ability leaves on the ground: the Paladin's field (gold, around the player),
@@ -235,10 +342,10 @@ function drawShots(g, bullets, sx, sy, px, at) {
 }
 
 /* The player: cyan body, white core, a tick toward the aim. */
-function drawPlayer(g, p, PX, PY, px, aim, classId = "ranger") {
+function drawPlayer(g, p, PX, PY, px, aim, classId = "ranger", calm = false) {
 	const pr = p.r * px;
 	const body = COLORS[classId] && classId !== "ranger" ? COLORS[classId] : COLORS.player;
-	circle(g, PX, PY, pr + px * 0.06, p.hurt > 0 ? "#ffffff" : "#1d5f6a");
+	circle(g, PX, PY, pr + px * 0.06, p.hurt > 0 ? (calm ? "#e2564e" : "#ffffff") : "#1d5f6a");
 	circle(g, PX, PY, pr, body);
 	circle(g, PX, PY, pr * 0.42, COLORS.playerCore);
 	if (aim) {
@@ -253,10 +360,12 @@ function drawDamageNumbers(g, numbers, sx, sy, px, tick) {
 	g.font = `bold ${Math.round(Math.max(13, px * 0.38))}px "Crimson Pro", Georgia, serif`;
 	g.textAlign = "center"; g.textBaseline = "middle";
 	for (const f of numbers) {
-		const rise = (45 - (f.until - tick)) * 0.018;
-		const text = Number.isInteger(f.amount) ? `-${f.amount}` : `-${f.amount.toFixed(1)}`;
-		g.fillStyle = "rgba(16,18,20,.8)"; g.fillText(text, sx(f.x) + 1, sy(f.y - 0.55 - rise) + 1.5);
-		g.fillStyle = COLORS.damage; g.fillText(text, sx(f.x), sy(f.y - 0.55 - rise));
+		// Yours: red, "-7", over the player. What you dealt: pale gold, "7", over the enemy.
+		const rise = ((f.foe ? 36 : 45) - (f.until - tick)) * 0.018;
+		const n = Number.isInteger(f.amount) ? String(f.amount) : f.amount.toFixed(1);
+		const text = f.foe ? n : `-${n}`, y = sy(f.y - (f.foe ? 0.25 : 0.55) - rise);
+		g.fillStyle = "rgba(16,18,20,.8)"; g.fillText(text, sx(f.x) + 1, y + 1.5);
+		g.fillStyle = f.foe ? "#ffe9a6" : COLORS.damage; g.fillText(text, sx(f.x), y);
 	}
 	g.textAlign = "left";
 }
@@ -349,9 +458,9 @@ export function promptFor(station, ready = true) {
 	return `E — ${PROMPT[station.kind]}`;
 }
 
-function drawHud(g, st, { width, height, px, notes }) {
+function drawHud(g, st, { width, height, px, notes, ui = 1, keys = {} }) {
 	const p = st.p, s = st.stats;
-	const W = Math.min(320, width * 0.42), H = Math.max(10, px * 0.32), X = 16;
+	const W = Math.min(320 * ui, width * 0.42), H = Math.max(10, px * 0.32) * ui, X = 16;
 	const XH = Math.max(4, Math.round(H * 0.4)), Y = height - 16 - H * 2 - 8 - XH - 8;
 	g.fillStyle = COLORS.hudBack; g.fillRect(X - 8, Y - 8, W + 16, H * 2 + XH + 32);
 	// HP in three parts, as in the side panel: red what you have, light gray what
@@ -377,13 +486,24 @@ function drawHud(g, st, { width, height, px, notes }) {
 	const xp = xpProgress(st.levels, st.hero.xp), XY = Y + H * 2 + 16;
 	g.fillStyle = "rgba(157,143,242,.2)"; g.fillRect(X, XY, W, XH);
 	g.fillStyle = COLORS.xp; g.fillRect(X, XY, W * (xp.span ? xp.into / xp.span : 1), XH);
-	g.textAlign = "right"; g.fillStyle = "#f4efe4";
-	g.fillText(`Lv ${st.hero.level}`, X + W - 6, Y + H / 2 + 1);
+	// The potion's cooldown at the HP bar's right end, then the level.
+	const pcd = p.potionCd || 0, pk = keys.potion || "R";
+	g.textAlign = "right";
+	g.fillStyle = pcd > 0 ? "#c9cfd6" : "#9ff0a0";
+	const ptxt = pcd > 0 ? `${pk} ${Math.ceil(pcd / TPS)}s` : `${pk} potion`;
+	g.fillText(ptxt, X + W - 6, Y + H / 2 + 1);
+	const pw = g.measureText(ptxt).width;
+	g.fillStyle = "#f4efe4";
+	g.fillText(`Lv ${st.hero.level}`, X + W - 18 - pw, Y + H / 2 + 1);
 	g.textAlign = "left";
 	const timer = formatRiftTime(st.bossTimeTicks == null ? st.elapsedTicks : st.bossTimeTicks);
-	g.fillStyle = COLORS.hudBack; g.fillRect(width - 154, 16, 138, 30);
-	g.fillStyle = "#f4efe4"; g.font = `${Math.round(Math.max(13, px * 0.38))}px "Crimson Pro", Georgia, serif`;
-	g.fillText(`${st.practice ? "Dream " : "Rift "}${timer}`, width - 144, 31);
+	// The box fits its words: a level deeper adds "L2 " to the label.
+	const label = `${st.practice ? "Dream " : "Rift "}${st.depth > 1 ? `L${st.depth} ` : ""}${timer}`;
+	g.font = `${Math.round(Math.max(13, px * 0.38) * ui)}px "Crimson Pro", Georgia, serif`;
+	const tw = Math.max(138, Math.ceil(g.measureText(label).width) + 22);
+	g.fillStyle = COLORS.hudBack; g.fillRect(width - 16 - tw, 16, tw, 30);
+	g.fillStyle = "#f4efe4";
+	g.fillText(label, width - 16 - tw + 10, 31);
 
 	drawNotes(g, notes, width, height, px);
 }
