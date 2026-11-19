@@ -97,15 +97,21 @@ def test_loot_is_two_weapons_per_class_plus_uniques_and_nothing_retired():
     assert any(C.BASE_ITEMS[b]["kind"] == "unique" and C.BASE_ITEMS[b]["slot"] == "weapon" for b in names)
 
 
-def test_a_unique_drop_has_no_tier_to_climb():
+def test_a_unique_drop_is_tiered_like_its_boss_and_deeper_is_higher():
+    """Owner's call, 2026-11-19: a unique takes a tier from its boss's own table."""
     from halcyon import content as C
-    seen = 0
-    for seed in map(str, range(300)):
-        for d in D.generate("shallows", seed)["drops"].values():
-            if C.BASE_ITEMS[d["base_id"]]["kind"] == "unique":
-                seen += 1
-                assert d["tier"] == 1, d
-    assert seen > 0, "300 dungeons rolled no unique at all"
+
+    def tiers(level):
+        out = []
+        for seed in map(str, range(400)):
+            d = D.generate("shallows", seed, level=level) if level > 1 else D.generate("shallows", seed)
+            out += [x["tier"] for x in d["drops"].values() if C.BASE_ITEMS[x["base_id"]]["kind"] == "unique"]
+        return out
+    shallow, deep = tiers(1), tiers(4)
+    assert shallow and deep, "no unique rolled"
+    allowed = {int(r[1:]) for r, _ in C.quality_table("boss", 0, 1) if r != "unique"}
+    assert set(shallow) <= allowed and len(set(shallow)) > 1, set(shallow)
+    assert sum(deep) / len(deep) > sum(shallow) / len(shallow) + 2, "depth lifts a unique's tier too"
 
 
 def test_heal_orbs_come_about_one_a_rift_and_none_are_placed_in_rooms():
@@ -382,3 +388,14 @@ def test_depth_pays_its_own_bonus_and_lifts_tiers_up_to_ten():
     d = D.generate("fracture", "deep", mods=["fortified", "brutal", "swift", "warded"], level=D.MAX_LEVEL)
     got = [x["tier"] for x in d["drops"].values() if C.base(x["base_id"])["kind"] == "standard"]
     assert got and min(got) >= 6 and max(got) <= 10
+
+
+def test_every_unique_drops_for_a_class_that_can_wear_it():
+    """The unique roster (2026-11-19): each unique is in some class's boss table, and
+    only in tables of classes that can wear it."""
+    from halcyon import content as C
+    uniques = {b for b, x in C.BASE_ITEMS.items() if x["kind"] == "unique"}
+    dropped = {b for t in D.UNIQUE_LOOT.values() for b, _ in t}
+    assert uniques == dropped
+    for cls, table in D.UNIQUE_LOOT.items():
+        assert all(C.usable_by(b, cls) for b, _ in table), cls

@@ -161,7 +161,7 @@
 .hr-slot.unique{background:linear-gradient(150deg,#7a5a1c,#3b2a0c 70%);border-color:#e9c25a;
   box-shadow:0 0 8px rgba(233,194,90,.35), inset 0 0 0 1px rgba(255,230,160,.35)}
 .hr-slot.unique .hr-abbr{color:#ffe7a6}
-.hr-star{color:#ffd85e;font-size:.78rem}
+.hr-star{color:#ffd85e}
 .hr-slot.forging{outline:3px solid var(--g-accent);outline-offset:1px;
   box-shadow:0 0 0 5px color-mix(in srgb,var(--g-accent) 30%,transparent)}
 .hr-num{position:absolute;top:2px;left:4px;font-size:.62rem;line-height:1;color:var(--text-soft)}

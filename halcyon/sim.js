@@ -96,6 +96,24 @@ export const STARFALL_RANGE = 8;
 export const COUNTER_WINDOW = TPS;
 export const COUNTER_GUARD = 30;
 export const COUNTER_MULT = 2;
+/* THE UNIQUES' numbers (owner's list, 2026-11-19). A ring's effect grows with its tier
+ * like a band's (`tierScale`); an armor's stats follow the armor ladder. */
+export const UNIQUE = {
+	burn: { dmg: 3, every: 30, last: 120 },          // Ember Loop: per tick of burning, at T1
+	coilCut: 10, coilHp: 20,                          // Miser's Coil: MP off each cast, HP it costs
+	leech: 5,                                         // Leechstone: HP a kill heals, at T1
+	glass: { att: 12, def: 6 },                       // Glass Ring
+	windrunner: 1.15,                                 // move speed
+	fullMoon: 1.2,                                    // shot damage while MP is full
+	thorns: { n: 4, dmg: 10, speed: 10, life: 30 },  // shards each hit sends out, at T1
+	dusk: 1.5,                                        // the next shot after a kill
+	gale: { speed: 18, range: 10, r: 0.3 },           // the volley as one arrow through everything
+	anchor: 1.5,                                      // the anchored field: radius and burn
+	echo: { delay: TPS, share: 0.5, cost: 10 },       // the star lands again
+	echoRing: { n: 8, speed: 14, life: 21 },          // blades a caught hit sends out
+	splash: { r: 1, share: 0.5 },
+	comet: { n: 4, share: 0.4, speed: 10, life: 24 },
+};
 
 /* One standard ability per class (owner's call, 2026-11-18). The shield is retired
  * with its item, kept in the code for a future class. */
@@ -137,29 +155,44 @@ export const CRACK = { period: 480, warn: 60, open: 180, stagger: 160, dmg: 14 }
 /* Each weapon fires its own PATTERN, not just its own numbers (owner's ask,
  * 2026-11-18). `rate` is volleys a second; a volley is `shots` arrows fanned
  * `spread` radians apart, or a `burst` of bolts `gap` ticks apart. `pierce` is how
- * many enemies a shot passes through. Damage is per arrow, scaled by tier.
+ * many enemies a shot passes through (no base weapon pierces since 2026-11-19; the
+ * Kingfisher's Eye adds it). `dmg` is per arrow AT TIER 0, and each tier adds a FIFTH of
+ * it, flat, so tier 10 is three times tier 0 (owner's call, 2026-11-19).
+ * THE DAMAGE FOLLOWS THE RANGE (owner's call, 2026-11-19): one target, every shot
+ * landing, a weapon's tier-1 damage a second is about 55 x sqrt(5 / range), so each
+ * tile of reach costs a share in proportion to the range. Twin arrows get +10% (both
+ * land only up close) and the kunai -5% (the fastest shot is the easiest to land); each
+ * `dmg` is a multiple of 5 and `rate` was nudged to meet the curve. The uniques sit off
+ * it on purpose.
  * Two STANDARD types per class plus uniques (owner's call, 2026-11-18); ranges in
  * tiles are the owner's: shortbow 5, repeater 6, longbow 7.
  *   shortbow   — twin arrows, fast, short: strong up close, spreads out at range.
- *   longbow    — one heavy arrow, slow, the longest reach, punches through two enemies.
+ *   longbow    — one heavy arrow, slow, the longest reach.
  *   tidecaller — UNIQUE: three arrows in a wide fan that glance off a wall once.
  *   repeater   — UNIQUE: a three-bolt burst, then a reload: front-loaded damage.
  * `bounce` is how many walls a shot glances off before it breaks. */
 export const WEAPONS = {
 	none: { dmg: 6, rate: 3, range: 5, speed: 14, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0 },
-	shortbow: { dmg: 7, rate: 5, range: 5, speed: 15, shots: 2, spread: 0.12, pierce: 0, burst: 1, gap: 0 },
-	longbow: { dmg: 34, rate: 1.5, range: 7, speed: 20, shots: 1, spread: 0, pierce: 2, burst: 1, gap: 0 },
-	mace: { dmg: 26, rate: 2.2, range: 3, speed: 15, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0 },
-	greatsword: { dmg: 42, rate: 1.1, range: 4, speed: 17, shots: 1, spread: 0, pierce: 1, burst: 1, gap: 0 },
-	wand: { dmg: 13, rate: 3.2, range: 6, speed: 16, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0 },
-	starstaff: { dmg: 25, rate: 1.5, range: 8, speed: 20, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0 },
-	tidecaller: { dmg: 13, rate: 2.5, range: 6, speed: 16, shots: 3, spread: 0.24, pierce: 0, burst: 1, gap: 0, bounce: 1 },
-	repeater: { dmg: 14, rate: 1.5, range: 6, speed: 17, shots: 1, spread: 0, pierce: 0, burst: 3, gap: 5 },
+	shortbow: { dmg: 5, rate: 5, range: 5, speed: 15, shots: 2, spread: 0.12, pierce: 0, burst: 1, gap: 0 },
+	longbow: { dmg: 25, rate: 1.5, range: 7, speed: 20, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0 },
+	mace: { dmg: 25, rate: 2.4, range: 3, speed: 15, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0 },
+	greatsword: { dmg: 45, rate: 1.1, range: 4, speed: 17, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0 },
+	wand: { dmg: 15, rate: 2.8, range: 6, speed: 16, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0 },
+	starstaff: { dmg: 25, rate: 1.4, range: 8, speed: 20, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0 },
+	tidecaller: { dmg: 10, rate: 2.5, range: 6, speed: 16, shots: 3, spread: 0.24, pierce: 0, burst: 1, gap: 0, bounce: 1 },
+	repeater: { dmg: 10, rate: 1.5, range: 6, speed: 17, shots: 1, spread: 0, pierce: 0, burst: 3, gap: 5 },
 	// The Ninja's (2026-11-18): stars spin through one enemy; a kunai is one heavy, fast blade.
 	// Slower and harder since 2026-11-18 (owner's ask): at 4.5 a second the doubled
 	// countered shot left before the player could aim it.
-	shuriken: { dmg: 20, rate: 2.4, range: 5, speed: 15, shots: 1, spread: 0, pierce: 1, burst: 1, gap: 0, look: "star" },
-	kunai: { dmg: 42, rate: 1.2, range: 6.5, speed: 22, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0, look: "blade" },
+	shuriken: { dmg: 20, rate: 2.3, range: 5, speed: 15, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0, look: "star" },
+	kunai: { dmg: 30, rate: 1.3, range: 6.5, speed: 22, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0, look: "blade" },
+	// UNIQUE weapons (owner's list, 2026-11-19), each a twist on its class's pair:
+	//   oathhammer — a mace whose hits SPLASH half damage on whatever stands within a tile;
+	//   comet_rod  — a slow bolt that BURSTS into four shards where it hits or where it ends;
+	//   chakram    — flies out, turns back half way, and cuts through everything both ways.
+	oathhammer: { dmg: 25, rate: 2.2, range: 3, speed: 15, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0, splash: 1 },
+	comet_rod: { dmg: 25, rate: 1.2, range: 7, speed: 14, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0, comet: 1 },
+	chakram: { dmg: 10, rate: 2, range: 5, speed: 15, shots: 1, spread: 0, pierce: 99, burst: 1, gap: 0, ret: 1, look: "star" },
 };
 
 /* EVERY NUMBER A PLAYER READS IS FLAT (owner's ask, 2026-11-18: "stop with all the
@@ -201,28 +234,46 @@ export function statsFor(gear = [], level = 1, classId = "ranger") {
 	// HP regeneration halved 2026-11-18 (owner: "decrease hp/s regen"); heals are rarer drops now.
 	const s = { maxHp: 100, maxMp: 100, att: 0, dex: 0, def: 0, ap: 0, hpRegen: 0.5, mpRegen: 2.5,
 		arrows: 0, abilityDmg: 0, abilityKind: null, classId,
-		...weaponStats(WEAPONS.none, 1) };
+		...weaponStats(WEAPONS.none, 0) };
 	// Points gather first and apply once the weapon is known, so the order the
 	// server lists gear in can never change the numbers.
 	let pierce = 0;
 	for (const it of gear) {
 		const t = tierScale(it), tier = it.tier ?? 1, up = Math.max(0, tier - 1);
 		const w = WEAPONS[it.base_id];
-		if (w) Object.assign(s, weaponStats(w, t));
-		if (it.base_id === "leather_vest") { s.def += 1 + tier; s.maxHp += 10 * up; }
+		if (w) Object.assign(s, weaponStats(w, tier));
+		// ARMOR (owner's numbers, 2026-11-19): every armor gives Defense and HP, and the
+		// two of a type lean only a little apart. Light: the vest (HP, a little MP) and
+		// the robes (MP and regen); heavy: plate (Defense, HP) and the garb (Dexterity).
+		if (it.base_id === "leather_vest") { s.def += 1 + tier; s.maxHp += 10 * up; s.maxMp += 5 * tier; }
 		const T = tier;                                       // an ability item's tier, 0-10
 		if (it.base_id === "volley_quiver") { s.arrows = 7; s.abilityDmg += (ABILITY.volley.dmg + ABILITY.volley.perTier * T) / 7; s.abilityKind = "volley"; s.abilityItemTier = T; }
-		if (it.base_id === "plate_armor") { s.def += 3 + tier; s.maxHp += 18 * up; }
+		if (it.base_id === "plate_armor") { s.def += 2 + tier; s.maxHp += 15 * up; }
 		if (it.base_id === "grounding_aegis") { s.abilityKind = "shield"; s.abilityTier = effectScale(it); }
-		if (it.base_id === "seer_robes") { s.maxMp += 18 * tier; s.mpRegen += 0.5; }
+		if (it.base_id === "seer_robes") { s.def += tier; s.maxHp += 5 * up; s.maxMp += 12 * tier; s.mpRegen += 0.5; }
 		if (it.base_id === "stillness_orb") { s.abilityKind = "slow"; s.abilityDmg += ABILITY.slow.pulse * (1 + ABILITY.slow.pulsePerTier * T);
 			s.abilityTier = 1 + ABILITY.slow.radiusPerTier * T; s.abilityItemTier = T; }
 		if (it.base_id === "star_tome") { s.abilityKind = "starfall"; s.abilityDmg += ABILITY.starfall.dmg + ABILITY.starfall.perTier * T; s.abilityItemTier = T; }
-		if (it.base_id === "shadow_garb") { s.def += tier; s.dex += 2 + tier; s.maxHp += 8 * up; }
+		if (it.base_id === "shadow_garb") { s.def += 1 + tier; s.dex += 1 + Math.floor(tier / 2); s.maxHp += 10 * up; }
 		if (it.base_id === "mirror_charm") { s.abilityKind = "counter"; s.abilityItemTier = T; }
 		if (it.base_id === "band_of_vigor") s.maxHp += Math.round(15 * t);
 		if (it.base_id === "band_of_focus") { s.maxMp += Math.round(15 * t); s.mpRegen += 2; }
-		if (it.base_id === "kingfisher_eye") { pierce += 1; s.att += 5; }
+		if (it.base_id === "kingfisher_eye") { pierce += 1; s.att += Math.round(5 * t); }   // tiered since 2026-11-19
+		// the unique roster (UNIQUE above)
+		if (it.base_id === "ember_loop") s.burn = Math.max(1, Math.round(UNIQUE.burn.dmg * t));
+		if (it.base_id === "misers_coil") { s.costCut = Math.round(UNIQUE.coilCut * t); s.maxHp -= UNIQUE.coilHp; }
+		if (it.base_id === "leechstone") s.leech = Math.round(UNIQUE.leech * t);
+		if (it.base_id === "glass_ring") { s.att += Math.round(UNIQUE.glass.att * t); s.def -= Math.round(UNIQUE.glass.def * t); }
+		if (it.base_id === "windrunner_cloak") { s.def += tier; s.maxHp += 5 * up; s.moveMult = UNIQUE.windrunner; }
+		if (it.base_id === "full_moon_mantle") { s.def += tier; s.maxMp += 10 * tier; s.fullMoon = UNIQUE.fullMoon; }
+		if (it.base_id === "thornplate") { s.def += 1 + tier; s.maxHp += 15 * up; s.thorns = Math.round(UNIQUE.thorns.dmg * t); }
+		if (it.base_id === "duskmail") { s.def += 1 + tier; s.maxHp += 10 * up; s.dusk = UNIQUE.dusk; }
+		if (it.base_id === "gale_quiver") { s.arrows = 1; s.gale = true; s.abilityDmg += ABILITY.volley.dmg + ABILITY.volley.perTier * T; s.abilityKind = "volley"; s.abilityItemTier = T; }
+		if (it.base_id === "anchor_orb") { s.abilityKind = "slow"; s.anchored = true; s.abilityDmg += ABILITY.slow.pulse * (1 + ABILITY.slow.pulsePerTier * T) * UNIQUE.anchor;
+			s.abilityTier = (1 + ABILITY.slow.radiusPerTier * T) * UNIQUE.anchor; s.abilityItemTier = T; }
+		if (it.base_id === "echo_codex") { s.abilityKind = "starfall"; s.abilityDmg += ABILITY.starfall.dmg + ABILITY.starfall.perTier * T; s.abilityItemTier = T;
+			s.echo = UNIQUE.echo.share; s.costExtra = UNIQUE.echo.cost; }
+		if (it.base_id === "echo_charm") { s.abilityKind = "counter"; s.abilityItemTier = T; s.echoRing = true; }
 		for (const e of it.enchants || []) {
 			const v = enchantValue(e.id, e.q);
 			if (e.id === "max_hp") s.maxHp += v;
@@ -260,13 +311,16 @@ export function statsFor(gear = [], level = 1, classId = "ranger") {
 	s.slowRadius = Math.round(ABILITY.slow.radius * at * s.abilityPower * 100) / 100;
 	s.counterMult = Math.round((ABILITY.counter.mult + ABILITY.counter.perTier * (s.abilityItemTier ?? 0)) * s.abilityPower * 100) / 100;
 	s.shieldTime = Math.round(SHIELD_DURATION * at * s.abilityPower);
-	s.abilityCost = abilityCost(s.abilityKind, s.abilityItemTier ?? 0);
+	s.abilityCost = Math.max(5, abilityCost(s.abilityKind, s.abilityItemTier ?? 0) + (s.costExtra || 0) - (s.costCut || 0));
 	return s;
 }
 
-function weaponStats(w, t) {
-	return { dmg: Math.round(w.dmg * t), rate: w.rate, range: w.range, shotSpeed: w.speed, shots: w.shots,
-		spread: w.spread, pierce: w.pierce, burst: w.burst, gap: w.gap, bounce: w.bounce || 0, look: w.look || null };
+/* A weapon at a tier: its tier-0 damage plus a fifth of it a tier (T10 = 3 x T0). */
+export const weaponDmgAt = (w, tier = 0) => Math.round(w.dmg * (1 + 0.2 * Math.max(0, tier)));
+function weaponStats(w, tier) {
+	return { dmg: weaponDmgAt(w, tier), rate: w.rate, range: w.range, shotSpeed: w.speed, shots: w.shots,
+		spread: w.spread, pierce: w.pierce, burst: w.burst, gap: w.gap, bounce: w.bounce || 0, look: w.look || null,
+		splash: w.splash || 0, comet: w.comet || 0, ret: w.ret || 0 };
 }
 
 // ── the map ─────────────────────────────────────────────────────────────────
@@ -362,7 +416,7 @@ export function createSim(dungeon, gear = [], hero = {}) {
 		hero: { level, xp, startLevel: level, startXp: xp },
 		p: { x: dungeon.start.x, y: dungeon.start.y, r: PLAYER_R, hp: stats.maxHp, low: stats.maxHp,
 			mp: stats.maxMp, fireCd: 0, hurt: 0, burstLeft: 0, burstCd: 0,
-			potionCd: 0, counterUntil: 0, guardUntil: 0, empower: 0, abilityCd: 0 },
+			potionCd: 0, counterUntil: 0, guardUntil: 0, empower: 0, abilityCd: 0, primed: 0 },
 		enemies, bullets: [], dropsBy, scale,
 		// Heal orbs DROP from the enemy that carries one (dungeon.py); one with a
 		// position of its own (an older dungeon) lies where it was placed.
@@ -386,6 +440,10 @@ function hurtPlayer(st, dmg, src = null) {
 		p.guardUntil = st.tick + COUNTER_GUARD;
 		p.empower = st.stats.counterMult;                    // the next shot; a second counter does not stack
 		st.events.push({ type: "counter", local: true });
+		if (st.stats.echoRing) {                             // the Echo Charm: blades out from where you stand
+			const q = UNIQUE.echoRing;
+			for (let k = 0; k < q.n; k++) playerShot(st, p.x, p.y, k * TAU / q.n, q.speed, st.stats.dmg, q.life, { look: "blade" });
+		}
 		return;
 	}
 	const taken = Math.round(Math.max(dmg * 0.4, dmg - st.stats.def) * 10) / 10;
@@ -396,11 +454,37 @@ function hurtPlayer(st, dmg, src = null) {
 	st.damageNumbers.push({ x: p.x, y: p.y, amount: taken, until: st.tick + 45 });
 	st.events.push({ type: "damage", amount: taken, local: true });
 	if (p.hp < p.low) p.low = Math.max(0, p.hp);
+	if (st.stats.thorns && p.hp > 0) {                       // Thornplate: shards out from the hit
+		const q = UNIQUE.thorns;
+		for (let k = 0; k < q.n; k++) playerShot(st, p.x, p.y, k * TAU / q.n + PI / 4, q.speed, st.stats.thorns, q.life);
+	}
 	if (p.hp <= 0) {
 		p.hp = 0;
 		st.status = "dead";
 		st.events.push({ type: "death" });
 	}
+}
+
+/* One of the player's shots that is not the weapon's (thorns, blades, shards). */
+function playerShot(st, x, y, ang, speed, dmg, life, extra = {}) {
+	st.bullets.push({ owner: "p", x, y, vx: dcos(ang) * speed, vy: dsin(ang) * speed, dmg, r: 0.12, life,
+		pierce: 0, bounce: 0, hit: [], ...extra });
+}
+
+/* The Comet Rod's bolt bursting into shards (a shard never bursts again). Shared with
+ * the town. `skip` is what it just hit, which its shards fly past. */
+export function cometBurst(st, b, x, y, skip = null) {
+	const q = UNIQUE.comet, dmg = Math.max(1, Math.round(b.dmg * q.share));
+	for (let k = 0; k < q.n; k++) {
+		const a = k * TAU / q.n + PI / 4;
+		st.bullets.push({ owner: "p", x, y, vx: dcos(a) * q.speed, vy: dsin(a) * q.speed, dmg, r: 0.11, life: q.life,
+			pierce: 0, bounce: 0, hit: skip ? [skip] : [], shard: 1 });
+	}
+}
+
+/* A chakram turns back half way, and may cut the same enemies again. Shared with the town. */
+export function turnBack(b) {
+	if (b.ret && b.life === b.ret) { b.vx = -b.vx; b.vy = -b.vy; b.hit = []; b.ret = 0; }
 }
 
 /* An enemy's attack cooldown, shortened by Frenzied. */
@@ -804,7 +888,8 @@ export function step(st, input) {
 	// movement
 	let mx = input.mx || 0, my = input.my || 0;
 	if (mx && my) { mx *= 0.7071067811865476; my *= 0.7071067811865476; }
-	moveBody(st, p, mx * PLAYER_SPEED * DT, my * PLAYER_SPEED * DT);
+	const speed = PLAYER_SPEED * (s.moveMult || 1);                // the Windrunner's Cloak
+	moveBody(st, p, mx * speed * DT, my * speed * DT);
 
 	// regeneration, never past the recovery limit (design §9.3)
 	const limit = recoveryLimit(st);
@@ -873,6 +958,10 @@ export function step(st, input) {
 
 	stepMortars(st);
 	if (st.status !== "play") return st;
+	for (const e of st.enemies) {                         // the Ember Loop's burning
+		if (!(e.burnUntil > st.tick) || e.hp <= 0) continue;
+		if ((e.burnUntil - st.tick) % UNIQUE.burn.every === 0) hurtEnemy(st, e, e.burnDmg, 2);
+	}
 
 	// stars landing (the Diviner's ability)
 	landStarfalls(st, (f) => {
@@ -888,7 +977,7 @@ export function step(st, input) {
 	slowPulse(st, (r) => {
 		for (const e of st.enemies) {
 			if (e.hp <= 0 || e.phase === 0 || !e.active) continue;
-			const dx = e.x - st.p.x, dy = e.y - st.p.y, rr = r + e.r;
+			const c = st.slowAt || st.p, dx = e.x - c.x, dy = e.y - c.y, rr = r + e.r;
 			if (dx * dx + dy * dy < rr * rr) { hurtEnemy(st, e, st.slowDmg, 3); if (st.status !== "play") return; }
 		}
 	});
@@ -897,7 +986,7 @@ export function step(st, input) {
 	// bullets
 	const keep = [];
 	for (const b of st.bullets) {
-		const dxp = st.p.x - b.x, dyp = st.p.y - b.y;
+		const fc = st.slowAt || st.p, dxp = fc.x - b.x, dyp = fc.y - b.y;
 		const sr = st.slowR || SLOW_RADIUS;
 		const slowed = b.owner === "e" && st.slowUntil > st.tick && dxp * dxp + dyp * dyp <= sr * sr;
 		const speedScale = slowed ? SLOW_FACTOR : 1;
@@ -913,7 +1002,11 @@ export function step(st, input) {
 			st.src = src;
 			continue;
 		}
-		if (--b.life <= 0 || wallHit(b, (x, y) => shotSolid(tileAt(st, x, y)))) continue;
+		turnBack(b);
+		if (--b.life <= 0 || wallHit(b, (x, y) => shotSolid(tileAt(st, x, y)))) {
+			if (b.comet) cometBurst(st, b, b.x - b.vx * DT, b.y - b.vy * DT);
+			continue;
+		}
 		let gone = false;
 		if (b.owner === "p") {
 			for (const e of st.enemies) {
@@ -923,6 +1016,13 @@ export function step(st, input) {
 				if (dx * dx + dy * dy < rr * rr) {
 					b.hit.push(e.id);
 					hurtEnemy(st, e, b.dmg, 4);
+					if (b.burn && e.hp > 0) { e.burnUntil = st.tick + UNIQUE.burn.last; e.burnDmg = b.burn; }   // refreshed, never stacked
+					if (b.splash) for (const o of st.enemies) {    // the Oathhammer
+						if (o === e || o.hp <= 0 || o.phase === 0 || !o.active) continue;
+						const ox = o.x - e.x, oy = o.y - e.y, sr = UNIQUE.splash.r + o.r;
+						if (ox * ox + oy * oy < sr * sr) hurtEnemy(st, o, Math.round(b.dmg * UNIQUE.splash.share), 3);
+					}
+					if (b.comet) { cometBurst(st, b, b.x, b.y, e.id); gone = true; break; }
 					if (b.pierce-- <= 0) { gone = true; break; }
 				}
 			}
@@ -965,7 +1065,11 @@ export function playerFire(st, input) {
 	if (p.abilityCd > 0) p.abilityCd--;
 	if (input.ability && s.abilityKind && p.mp >= s.abilityCost && !(p.abilityCd > 0)) {
 		p.mp -= s.abilityCost;
-		if (s.abilityKind === "volley") {
+		if (s.abilityKind === "volley" && s.gale) {           // the Gale Quiver: one arrow through everything
+			const q = UNIQUE.gale;
+			st.bullets.push({ owner: "p", x: p.x, y: p.y, vx: ax * q.speed, vy: ay * q.speed, dmg: s.abilityDmg,
+				r: q.r, life: Math.round(q.range / q.speed * TPS), pierce: 99, bounce: 0, hit: [], look: "gale" });
+		} else if (s.abilityKind === "volley") {
 			for (let i = 0; i < s.arrows; i++) {
 				const [vx, vy] = rotate(ax, ay, (i - (s.arrows - 1) / 2) * 0.14);
 				st.bullets.push({ owner: "p", x: p.x, y: p.y, vx: vx * 16, vy: vy * 16, dmg: s.abilityDmg,
@@ -978,11 +1082,14 @@ export function playerFire(st, input) {
 			st.slowUntil = st.tick + SLOW_DURATION;
 			st.slowR = s.slowRadius;
 			st.slowDmg = s.abilityDmg;
+			st.slowAt = s.anchored ? { x: p.x, y: p.y } : null;   // the Anchor Orb stays where it was cast
 		} else if (s.abilityKind === "starfall") {
 			// Where the cursor is, no farther than STARFALL_RANGE.
 			const k = al > STARFALL_RANGE ? STARFALL_RANGE / al : 1;
 			(st.starfalls ||= []).push({ x: p.x + ix * k, y: p.y + iy * k, r: STARFALL_RADIUS, dmg: s.abilityDmg,
 				at: st.tick + STARFALL_DELAY, cast: st.tick });
+			if (s.echo) st.starfalls.push({ x: p.x + ix * k, y: p.y + iy * k, r: STARFALL_RADIUS,   // the Codex's echo
+				dmg: Math.round(s.abilityDmg * s.echo * 100) / 100, at: st.tick + STARFALL_DELAY + UNIQUE.echo.delay, cast: st.tick, echo: true });
 		} else if (s.abilityKind === "counter") {
 			p.counterUntil = st.tick + COUNTER_WINDOW;
 			p.abilityCd = ABILITY.counter.cooldown;          // the one ability with a cooldown
@@ -994,13 +1101,17 @@ export function playerFire(st, input) {
  * empowerment is spent on the whole of the next volley. */
 function volley(st, ax, ay) {
 	const p = st.p, s = st.stats, life = Math.round(s.range / s.shotSpeed * TPS);
-	const mult = p.empower > 0 ? p.empower : 1;
+	let mult = p.empower > 0 ? p.empower : 1;
 	p.empower = 0;
+	if (s.fullMoon && p.mp >= s.maxMp) mult *= s.fullMoon;      // the Mantle of the Full Moon
+	if (p.primed > 0) { mult *= p.primed; p.primed = 0; }       // Duskmail: the shot after a kill
 	for (let i = 0; i < s.shots; i++) {
 		const [vx, vy] = s.shots > 1 ? rotate(ax, ay, (i - (s.shots - 1) / 2) * s.spread) : [ax, ay];
 		st.bullets.push({ owner: "p", x: p.x, y: p.y, vx: vx * s.shotSpeed, vy: vy * s.shotSpeed,
 			dmg: Math.round(s.dmg * mult), r: 0.14, life, pierce: s.pierce, bounce: s.bounce, hit: [],
-			...(s.look ? { look: s.look } : {}), ...(mult > 1 ? { power: true } : {}) });
+			...(s.look ? { look: s.look } : {}), ...(mult > 1 ? { power: true } : {}),
+			...(s.burn ? { burn: s.burn } : {}), ...(s.splash ? { splash: 1 } : {}), ...(s.comet ? { comet: 1 } : {}),
+			...(s.ret ? { ret: Math.floor(life / 2) } : {}) });
 	}
 }
 
@@ -1096,7 +1207,7 @@ export function setGear(st, gear) {
 	p.low = Math.min(p.low, s.maxHp);
 	p.mp = Math.min(p.mp, s.maxMp);
 	p.burstLeft = 0; p.burstCd = 0;
-	p.empower = 0;
+	p.empower = 0; p.primed = 0;
 }
 
 /* XP, and a level when it crosses one: the new stats apply at once, and the HP,
@@ -1125,6 +1236,8 @@ function kill(st, e) {
 	}
 	if (st.scale.volatile) (st.rings ||= []).push({ x: e.x, y: e.y, n: e.type === "boss" ? 16 : 8, a: rand(st) * TAU, type: e.type });
 	gainXp(st, e.xp);
+	if (st.stats.leech) st.p.hp = Math.min(recoveryLimit(st), st.p.hp + st.stats.leech);   // the Leechstone
+	if (st.stats.dusk) st.p.primed = st.stats.dusk;                                       // Duskmail
 	// A Splitter breaks into its Splinters: they come into play where it fell.
 	let k = 0;
 	for (const s of st.enemies) {
@@ -1160,7 +1273,8 @@ export function fingerprint(st) {
 		st.sealed, st.roomLeft,
 		st.bullets.length, st.bullets.map((b) => [r(b.x), r(b.y)]).slice(0, 40),
 		st.bags.map((b) => b.drops.join(",")), st.pickups.length, st.shield && [r(st.shield.x), r(st.shield.y), st.shield.until], st.slowUntil, st.slowDmg || 0,
-		st.p.potionCd, st.p.counterUntil, st.p.guardUntil, st.p.empower, st.p.abilityCd || 0, (st.starfalls || []).map((f) => [r(f.x), r(f.y), f.at]),
+		st.p.potionCd, st.p.counterUntil, st.p.guardUntil, st.p.empower, st.p.abilityCd || 0, st.p.primed || 0,
+		st.slowAt ? [r(st.slowAt.x), r(st.slowAt.y)] : 0, st.enemies.map((e) => e.burnUntil || 0), (st.starfalls || []).map((f) => [r(f.x), r(f.y), f.at]),
 		(st.mortars || []).map((m) => [r(m.x), r(m.y), m.at]), (st.fires || []).map((f) => [r(f.x), r(f.y), f.until]), st.enemies.map((e) => e.hidden || 0),
 		(st.cracks || []).map((c) => c.t), st.fastRoom ?? -1, st.enemies.map((e) => (e.dormant ? 1 : 0))]);
 }

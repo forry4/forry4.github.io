@@ -448,10 +448,10 @@ test("the Ninja's counter: a hit in the window is ignored, a short guard, the ne
 	assert.ok(st.p.hp < hp, "the guard is over");
 	step(st, { fire: true, ax: 1, ay: 0 });
 	const shot = st.bullets.find((b) => b.owner === "p");
-	assert.equal(shot.dmg, st.stats.dmg * st.stats.counterMult, "the next shot is multiplied");
+	assert.equal(shot.dmg, Math.round(st.stats.dmg * st.stats.counterMult), "the next shot is multiplied");
 	for (let i = 0; i < TPS; i++) step(st, {});
 	step(st, { fire: true, ax: 1, ay: 0 });
-	assert.ok(st.bullets.filter((b) => b.owner === "p").every((b) => b.dmg <= st.stats.dmg * st.stats.counterMult), "only once");
+	assert.ok(st.bullets.filter((b) => b.owner === "p").every((b) => b.dmg <= Math.round(st.stats.dmg * st.stats.counterMult)), "only once");
 	assert.ok(st.bullets.some((b) => b.owner === "p" && b.dmg === st.stats.dmg));
 });
 
@@ -680,9 +680,19 @@ test("a chaser up close telegraphs, then spits one short shot that dies within i
 	assert.equal(f.tele, 0, "no shot from afar");
 });
 
-test("the Ninja throws slower, harder: shuriken and kunai keep about the same damage a second", () => {
-	assert.ok(WEAPONS.shuriken.rate <= 2.5 && WEAPONS.shuriken.dmg >= 18);
-	assert.ok(WEAPONS.kunai.rate <= 1.3 && WEAPONS.kunai.dmg >= 40);
+test("weapon damage follows the range, climbs a flat fifth a tier, and no base weapon pierces", () => {
+	const nudge = { shortbow: 1.1, kunai: 0.95 };
+	for (const id of ["mace", "greatsword", "shortbow", "shuriken", "wand", "kunai", "longbow", "starstaff"]) {
+		const w = WEAPONS[id];
+		assert.equal(w.pierce, 0, `${id} pierces`);
+		assert.equal(w.dmg % 5, 0, `${id}'s tier-0 damage is a multiple of 5`);
+		const at = (t) => statsFor([{ base_id: id, tier: t }], 1).dmg;
+		assert.equal(at(10), 3 * at(0), `${id}: T10 is 3x T0`);
+		for (let t = 1; t <= 10; t++) assert.equal(at(t) - at(t - 1), w.dmg / 5, `${id}: a flat step at T${t}`);
+		const dps = at(1) * w.shots * w.burst * w.rate, want = 55 * Math.sqrt(5 / w.range) * (nudge[id] || 1);
+		assert.ok(Math.abs(dps / want - 1) < 0.04, `${id}: ${dps} a second, the curve says ${want.toFixed(1)}`);
+	}
+	assert.ok(WEAPONS.shuriken.rate <= 2.5, "the Ninja's stars stay slow enough to aim a countered one");
 });
 
 test("the last hit that landed is kept with what dealt it, for the death screen", () => {
@@ -898,4 +908,20 @@ test("the counter alone has a cooldown: six seconds, whatever the MP", () => {
 	assert.ok(st.p.mp >= mp, "nothing more was spent during the cooldown");
 	for (let i = 0; i < 3; i++) step(st, { ability: true });
 	assert.ok(st.p.mp < mp, "and it casts again once it is over");
+});
+
+test("the two armors of a type stay close: Defense one apart, small leans", () => {
+	const at = (id, t) => statsFor([{ base_id: id, tier: t }], 1);
+	const bare = statsFor([], 1);
+	for (const [a, b] of [["leather_vest", "seer_robes"], ["plate_armor", "shadow_garb"]])
+		for (let t = 0; t <= 10; t++) {
+			const x = at(a, t), y = at(b, t);
+			assert.equal(x.def - y.def, 1, `${a} vs ${b} at T${t}`);
+			assert.ok(x.maxHp >= y.maxHp && x.maxHp - y.maxHp <= 50, `${a} vs ${b} HP at T${t}`);
+		}
+	const v = at("leather_vest", 5), r = at("seer_robes", 5), p = at("plate_armor", 5), g = at("shadow_garb", 5);
+	assert.deepEqual([v.def, v.maxHp - bare.maxHp, v.maxMp - bare.maxMp], [6, 40, 25]);
+	assert.deepEqual([r.def, r.maxHp - bare.maxHp, r.maxMp - bare.maxMp, r.mpRegen - bare.mpRegen], [5, 20, 60, 0.5]);
+	assert.deepEqual([p.def, p.maxHp - bare.maxHp], [7, 60]);
+	assert.deepEqual([g.def, g.maxHp - bare.maxHp, g.dex], [6, 40, 3]);
 });

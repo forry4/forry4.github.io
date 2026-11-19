@@ -64,11 +64,11 @@ test("the town can be shot in: arrows hit a practice post and it shows what it t
 	assert.equal(postDps(st, post), 0, "and the reading falls back to nothing when you stop");
 });
 
-test("each weapon fires in town as it does in a rift: the shortbow's pair, the longbow's pierce", () => {
+test("each weapon fires in town as it does in a rift: the shortbow's pair, the longbow's single heavy arrow", () => {
 	const short = practice("shortbow", 1).st, long = practice("longbow", 1).st;
 	assert.equal(short.bullets.length, 2);
 	assert.equal(long.bullets.length, 1);
-	assert.ok(long.bullets[0].pierce > 0 && long.bullets[0].dmg > short.bullets[0].dmg);
+	assert.ok(long.bullets[0].pierce === 0 && long.bullets[0].dmg > short.bullets[0].dmg);
 });
 
 test("nobody can stand inside a practice post", () => {

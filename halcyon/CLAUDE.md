@@ -109,17 +109,20 @@ drag the vest off mid-run → put it on the ground and take it back → recall �
   laid out as two input cards + a result card (see "Loot, the forge, modifiers").
 - **Two STANDARD weapon types per class, plus uniques** (owner's calls, 2026-11-18). The
   Ranger's are the shortbow (twin fanned arrows, fast, range 5) and the longbow (one
-  heavy slow arrow that pierces two, range 7 — the longest); Paladin has the short-range
+  heavy slow arrow, range 7); Paladin has the short-range
   mace and greatsword; Diviner has the wand and the range-8 starstaff; Ninja the shuriken
   and kunai. Each class's ability is in "One ability per class" below. The repeater
   (a three-bolt burst, range 6) is a rare UNIQUE drop. **A base's kind belongs to the base**:
   `store.init_schema` brings existing items into line with `content.py` (kind, and
-  tier 1 for a unique), so an item minted before a base changed kind follows it (tested).
-- **A unique is named, not tiered.** It always drops at tier 1, its slot is a gold face
-  with a ★ where the tier number goes, its name has no "· T1", and its tooltip is lit
-  gold. The first
-  unique weapon is the Tidecaller: three arrows in a wide fan that glance off a wall
-  once (`bounce`, `sim.wallHit`).
+  its tier is kept), so an item minted before a base changed kind follows it (tested).
+- **A unique is TIERED like everything else (owner's call, 2026-11-19; it used to be
+  tier 1 for good).** `dungeon._unique_tier` rolls its tier from its boss's own quality
+  table (depth lift included) less the unique row, on its OWN stream so every other roll
+  in the dungeon is unchanged. Its slot is a gold face with ★ and the tier, its name
+  reads "Tidecaller · T4" like any item, and its tooltip is lit gold. The Kingfisher's
+  Eye's Attack grows with tier like a band; unique weapons use the weapon ladder. The
+  first unique weapon is the Tidecaller: three arrows in a wide fan that glance off a
+  wall once (`bounce`, `sim.wallHit`).
 - **Every number a player reads is flat** (owner's ask: "stop with all the
   percentages"). Attack and Dexterity are POINTS; each is worth 1/`STAT_SCALE` (25) more
   damage or shots a second. Damage per arrow, the points and every enchantment are whole
@@ -485,8 +488,9 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
   `boss_rush`, split out in `enter`.
 - **No contact damage**: the chaser's touch is gone (`ENEMY.chaser.touch` removed). The
   potion heals to `recoveryLimit` and no further, never moving `p.low`.
-- **Auto-fire** is `livePrefs.current.auto`, flipped by `toggleAuto()` and saved with the other
-  prefs; both loops read it live. `setPrefs` builds from `livePrefs.current`, not React's copy,
+- **Auto-fire** is `livePrefs.current.auto`, flipped by `toggleAuto()`; both loops read it
+  live. It lasts the VISIT (town and every run) but is never read back from storage, so a
+  fresh load starts with it off (owner, 2026-11-19). `setPrefs` builds from `livePrefs.current`, not React's copy,
   so a settings change never puts back an old auto-fire value.
 - **A run's modifiers** are `runModRows(run)`: drawn under the minimap (`draw`'s `mods`) and
   listed with their wording in the game menu.
@@ -511,7 +515,8 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
 - **Tier 0 is starter gear** (`content.TIERS` now starts at 0; `api.STARTERS` are all
   tier 0). Nothing drops at it, so a new character's first finds are upgrades.
   `sim.tierScale` uses `tier ?? 1` (a `|| 1` would read 0 as 1) — 0.8x — and tier 0
-  never SUBTRACTS max HP (armor's HP bonus is `max(0, tier - 1)`).
+  never SUBTRACTS max HP (armor's HP bonus is `max(0, tier - 1)`). Weapons no longer use
+  it (see "Weapons follow the range").
 - **EVERY item grows with its tier, abilities included** (owner's ask: "a t5 ability
   should have higher base effectiveness than a t2"). Damage abilities scale `abilityDmg`;
   the rest scale through `abilityTier` (the tier's 0.8–1.8 scale) — the Stillness Orb's
@@ -605,3 +610,47 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
   (Dream Rifts too) and `owner_view` lists each living character's `cleared`; the portal
   panel says what opens it.
 - **The Stillness field lasts 4s** (`SLOW_DURATION`); full uptime at T0 needs 7.5 MP/s, past early gear.
+
+## Weapons follow the range (2026-11-19, owner's calls)
+- **A weapon's `dmg` is its TIER-0 damage, and each tier adds a fifth of it, flat**
+  (`sim.weaponDmgAt`): tier 10 is 3x tier 0 and every tier is a different number. Each
+  `dmg` is a multiple of 5 so the step is whole. Later upgrades mean less, by choice.
+- **Damage a second follows the range**: one target, every shot landing, tier 1 is about
+  `55 x sqrt(5 / range)`: mace 72 (3 tiles), greatsword 59, shortbow 60, shuriken 55,
+  wand 50, kunai 47, longbow 45, starstaff 42 (8). The shortbow gets +10% (both arrows
+  land only up close), the kunai -5% (the fastest shot). `rate` was nudged to meet it.
+  The uniques (Repeater, Tidecaller) sit off the curve on purpose.
+- **No base weapon pierces** (the longbow, greatsword and shuriken did); the Kingfisher's
+  Eye is the one source. The unit test `weapon damage follows the range` holds all of it.
+
+## Armor is shared by type (2026-11-19, owner's calls)
+- **Two LIGHT armors (Ranger, Diviner) and two HEAVY (Paladin, Ninja)**, so a build can
+  choose; abilities stay one per class. `cls` may be a TUPLE (`content.usable_by`, the
+  store's equip check, and `classOk`/`classWords` in `HalcyonRift.jsx`, which name both
+  classes: "Ranger or Diviner only"). No item converts: the four armors kept their ids.
+- **The pair stays close** (owner: "don't make the stats that dramatically different").
+  Every armor gives Defense and HP; the two of a type are 1 Defense apart and lean a
+  little: Leather Vest Def 1+t, HP +10/tier above 1, MP +5/t; Seer Robes Def t, HP +5,
+  MP +12/t, regen +0.5; Plate Def 2+t, HP +15; Shadow Garb Def 1+t, HP +10, Dex
+  1+floor(t/2). Held by the unit test `the two armors of a type stay close`.
+- **A class's armor share of its loot (22) is split 11/11** between its two armors.
+
+## The unique roster (2026-11-19, owner's list)
+- **Fifteen more uniques**: rings for anyone (Ember Loop, Miser's Coil, Leechstone, Glass
+  Ring, beside the Kingfisher's Eye); two unique armors per type (light: Windrunner's
+  Cloak, Mantle of the Full Moon; heavy: Thornplate, Duskmail); and per class the Gale
+  Quiver (Ranger), Oathhammer + Anchor Orb (Paladin), Comet Rod + Codex of Echoes
+  (Diviner), Ricochet Chakram + Echo Charm (Ninja). Every number is `sim.UNIQUE`; the
+  effects are flags `statsFor` sets (`burn`, `costCut`, `leech`, `moveMult`, `fullMoon`,
+  `thorns`, `dusk`, `gale`, `anchored`, `echo`, `echoRing`) and weapon fields (`splash`,
+  `comet`, `ret`) copied onto each shot.
+- **`dungeon.UNIQUE_LOOT` is derived**: each class gets the five rings, its armor type's
+  two and its own, all weight 1. The boss's unique CHANCE is unchanged, so each one is
+  rarer than the three were. `test_every_unique_drops_for_a_class_that_can_wear_it`.
+- **The town runs them too** (`cometBurst`, `turnBack` and the burn are shared; the
+  cloak's speed reads `st.stats.moveMult`); the Oathhammer's splash does not, because
+  the posts stand apart. The Anchor Orb's field sits at `st.slowAt`, which the pulse, the
+  shot slowing and the drawing all read (null = round the player).
+- **Nothing here adds invulnerability**: the Echo Charm keeps the counter's window,
+  guard and 6s cooldown; it only adds blades. `halcyonUniques.test.mjs` drives each one
+  through the real sim, and fails any base with no name or a duplicate abbreviation.

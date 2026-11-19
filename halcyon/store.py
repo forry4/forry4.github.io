@@ -175,8 +175,9 @@ def init_schema(conn) -> None:
     if not any(row[1] == "death_summary" for row in cur.fetchall()):
         cur.execute("ALTER TABLE hr_characters ADD COLUMN death_summary TEXT")
     # Whether a base is standard or unique belongs to the BASE, so items follow
-    # content.py when it changes (the repeater became a unique, 2026-11-18). A unique
-    # has no tier ladder: it is tier 1. Cheap, and a no-op once everything agrees.
+    # content.py when it changes (the repeater became a unique, 2026-11-18). Uniques
+    # are tiered like everything else since 2026-11-19 (they were all tier 1, and
+    # stay so). Cheap, and a no-op once everything agrees.
     # One ability per class (2026-11-18): the Diviner's equipped Stillness Orbs become
     # Star Tomes FIRST (the orb is the Paladin's now, so no Diviner can be wearing one
     # after this), then every retired shield becomes the Paladin's orb. Both are no-ops
@@ -186,8 +187,6 @@ def init_schema(conn) -> None:
     cur.execute("UPDATE hr_items SET base_id='stillness_orb' WHERE base_id='grounding_aegis'")
     for base_id, b in C.BASE_ITEMS.items():
         cur.execute("UPDATE hr_items SET kind=? WHERE base_id=? AND kind<>?", (b["kind"], base_id, b["kind"]))
-        if b["kind"] == "unique":
-            cur.execute("UPDATE hr_items SET tier=1 WHERE base_id=? AND tier<>1", (base_id,))
     conn.commit()
 
 
@@ -315,8 +314,7 @@ def _check_fits(cur, it: dict, cols: tuple, ignore_item: str | None = None) -> N
     if not C.slot_fits(it["base_id"], name):
         raise HalcyonError("that does not go in that slot")
     ch = _one(cur, "SELECT class_id FROM hr_characters WHERE char_id=?", (char_id,))
-    need = C.base(it["base_id"])["cls"]
-    if need is not None and ch is not None and ch["class_id"] != need:
+    if ch is not None and not C.usable_by(it["base_id"], ch["class_id"]):
         raise HalcyonError("that character's class cannot use it")
     if name in ("ring1", "ring2"):
         other = C.EQUIP_SLOTS.index("ring2" if name == "ring1" else "ring1")

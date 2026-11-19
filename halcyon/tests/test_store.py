@@ -689,14 +689,14 @@ def test_a_drop_from_another_run_cannot_be_named(db, me):
     assert out["refused"] == [1], "a drop id names an item of THIS run only"
 
 
-def test_items_follow_their_base_when_content_makes_it_unique(db, me):
+def test_items_follow_their_base_when_content_makes_it_unique_and_keep_their_tier(db, me):
     S.grant_item(db, ME, {"base_id": "repeater", "tier": 3, "slot_count": 0, "enchants": []}, ("vault", 5))
     conn = db()
     conn.execute("UPDATE hr_items SET kind='standard' WHERE base_id='repeater'")   # as minted before the change
     conn.commit()
     S.init_schema(conn)
     conn.close()
-    assert _rows(db, "SELECT kind, tier FROM hr_items WHERE base_id='repeater'") == [{"kind": "unique", "tier": 1}]
+    assert _rows(db, "SELECT kind, tier FROM hr_items WHERE base_id='repeater'") == [{"kind": "unique", "tier": 3}]
 
 
 def test_the_clear_bonus_comes_with_the_boss_so_a_recall_after_it_keeps_it(db, me):
@@ -1013,3 +1013,28 @@ def test_a_splinter_is_credited_only_after_its_splitter(db, me):
         {"type": "kill", "enemy": splitter},
         {"type": "kill", "enemy": kid}))
     assert out["refused"] == [1]
+
+
+def test_armor_is_shared_by_type():
+    """Light armor is the Ranger's and the Diviner's, heavy the Paladin's and the Ninja's."""
+    for base in ("leather_vest", "seer_robes"):
+        assert C.usable_by(base, "ranger") and C.usable_by(base, "diviner")
+        assert not C.usable_by(base, "paladin") and not C.usable_by(base, "ninja")
+    for base in ("plate_armor", "shadow_garb"):
+        assert C.usable_by(base, "paladin") and C.usable_by(base, "ninja")
+        assert not C.usable_by(base, "ranger") and not C.usable_by(base, "diviner")
+    from halcyon import dungeon as D
+    for cls, table in D.LOOT_BY_CLASS.items():
+        armor = [(b, w) for b, w in table if C.BASE_ITEMS[b]["slot"] == "armor"]
+        assert len(armor) == 2 and sum(w for _, w in armor) == 22, cls
+        assert all(C.usable_by(b, cls) for b, _ in armor), cls
+
+
+def test_a_ranger_wears_light_armor_of_either_kind_but_not_heavy(db, me):
+    robes = S.grant_item(db, ME, {"base_id": "seer_robes", "tier": 1, "slot_count": 0, "enchants": []},
+                         ("inventory", me["char_id"], 0))
+    S.move_item(db, ME, robes["item_id"], ("equipped", me["char_id"], "armor"))
+    plate = S.grant_item(db, ME, {"base_id": "plate_armor", "tier": 1, "slot_count": 0, "enchants": []},
+                         ("inventory", me["char_id"], 1))
+    with pytest.raises(S.HalcyonError, match="class cannot use it"):
+        S.move_item(db, ME, plate["item_id"], ("equipped", me["char_id"], "armor"))

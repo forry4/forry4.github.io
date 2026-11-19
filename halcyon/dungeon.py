@@ -255,19 +255,27 @@ DUNGEONS = {
 HEAL_CHANCE = 0.035
 # Bags hold at most this many items (the page's loot panel is one row of eight).
 BAG_MAX = 8
-RANGER_LOOT = (("shortbow", 16), ("longbow", 14), ("leather_vest", 22), ("volley_quiver", 14),
+# Each class's armor share (22) is split between the two armors of its type
+# (owner's call, 2026-11-19), so armor drops as often as before.
+RANGER_LOOT = (("shortbow", 16), ("longbow", 14), ("leather_vest", 11), ("seer_robes", 11), ("volley_quiver", 14),
                ("band_of_vigor", 14), ("band_of_focus", 14))
-PALADIN_LOOT = (("mace", 16), ("greatsword", 14), ("plate_armor", 22), ("stillness_orb", 14),
+PALADIN_LOOT = (("mace", 16), ("greatsword", 14), ("plate_armor", 11), ("shadow_garb", 11), ("stillness_orb", 14),
                 ("band_of_vigor", 14), ("band_of_focus", 14))
-DIVINER_LOOT = (("wand", 16), ("starstaff", 14), ("seer_robes", 22), ("star_tome", 14),
+DIVINER_LOOT = (("wand", 16), ("starstaff", 14), ("leather_vest", 11), ("seer_robes", 11), ("star_tome", 14),
                 ("band_of_vigor", 14), ("band_of_focus", 14))
-NINJA_LOOT = (("shuriken", 16), ("kunai", 14), ("shadow_garb", 22), ("mirror_charm", 14),
+NINJA_LOOT = (("shuriken", 16), ("kunai", 14), ("plate_armor", 11), ("shadow_garb", 11), ("mirror_charm", 14),
               ("band_of_vigor", 14), ("band_of_focus", 14))
 # UNIQUES DROP ONLY FROM BOSSES (owner's ask, 2026-11-18): the "unique" row of the
 # boss's quality table (content.QUALITY). The loot tables themselves are in content.py.
-UNIQUE_LOOT = {"ranger": (("kingfisher_eye", 1), ("tidecaller", 1), ("repeater", 1)),
-               "paladin": (("kingfisher_eye", 1),), "diviner": (("kingfisher_eye", 1),),
-               "ninja": (("kingfisher_eye", 1),)}
+# Every unique a class can wear, equally likely (owner's list, 2026-11-19): the five
+# rings, the two unique armors of its type, and its own weapons and abilities.
+_RINGS = ("kingfisher_eye", "ember_loop", "misers_coil", "leechstone", "glass_ring")
+_LIGHT, _HEAVY = ("windrunner_cloak", "full_moon_mantle"), ("thornplate", "duskmail")
+UNIQUE_LOOT = {cls: tuple((b, 1) for b in _RINGS + arm + own) for cls, arm, own in (
+    ("ranger", _LIGHT, ("tidecaller", "repeater", "gale_quiver")),
+    ("paladin", _HEAVY, ("oathhammer", "anchor_orb")),
+    ("diviner", _LIGHT, ("comet_rod", "echo_codex")),
+    ("ninja", _HEAVY, ("chakram", "echo_charm")))}
 # Kept as the complete content list for audits and content tests. A run uses the
 # class-specific table below, so a Ranger never receives a Paladin's starter gear.
 LOOT = RANGER_LOOT + PALADIN_LOOT + DIVINER_LOOT + NINJA_LOOT + tuple(x for t in UNIQUE_LOOT.values() for x in t)
@@ -305,10 +313,17 @@ def _item(rng: random.Random, tier: int, class_id: str, unique: bool = False,
     table = table or left(LOOT_BY_CLASS[class_id]) or LOOT_BY_CLASS[class_id]
     base_id = _pick(rng, table)
     slots = _pick(rng, slot_odds(bonus))
-    if C.base(base_id)["kind"] == "unique":
-        tier = 1                  # a unique is its own thing, not a rung on the tier ladder
     return {"base_id": base_id, "tier": tier, "slot_count": slots,
             "enchants": store.roll_enchants(base_id, slots, rng)}
+
+
+def _unique_tier(stream: str, quality) -> int:
+    """A UNIQUE IS TIERED LIKE ANYTHING ELSE (owner's call, 2026-11-19): it takes a
+    tier rolled from the same table its boss rolls (depth lift included), less the
+    unique row, so a deep boss's unique keeps up with the gear around it. Its own
+    stream, so every other roll in the dungeon is what it was."""
+    rows = tuple((r, w) for r, w in quality if r != "unique")
+    return int(_pick(random.Random(stream), rows)[1:])
 
 
 def _mirror(rows: list[str]) -> list[str]:
@@ -465,7 +480,8 @@ def generate(dungeon_id: str, seed: str | None = None, class_id: str = "ranger",
         for _ in range(min(n, BAG_MAX)):
             q = _pick(rng, quality)                          # what each is: one roll
             unique = q == "unique"
-            it = _item(rng, 1 if unique else int(q[1:]), class_id, unique, frozenset(dropped), bonus)
+            tier = _unique_tier(f"{dungeon_id}:{seed}:utier{level}:{eid}:{n_drop}", quality) if unique else int(q[1:])
+            it = _item(rng, tier, class_id, unique, frozenset(dropped), bonus)
             dropped.add(it["base_id"])
             n_drop += 1
             drops[f"{pre}d{n_drop}"] = {**it, "enemy": eid}

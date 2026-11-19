@@ -36,7 +36,11 @@ CHARACTER_SLOTS = 4
 TIERS = tuple(range(11))
 MAX_ENCHANT_SLOTS = 4
 
-# base_id -> what kind of thing it is. `cls` None means any class (rings).
+# base_id -> what kind of thing it is. `cls` None means any class (rings); a tuple
+# means any of those classes. ARMOR IS SHARED BY TYPE (owner's call, 2026-11-19), the
+# way an ability is not: LIGHT armor (the leather vest, the seer robes) is the Ranger's
+# and the Diviner's, HEAVY (plate, the shadow garb) the Paladin's and the Ninja's, so a
+# build can choose between two.
 # `slot` is the equipment slot family: a ring fits ring1 or ring2.
 BASE_ITEMS: dict[str, dict] = {
     "shortbow":      {"slot": "weapon",  "cls": "ranger", "kind": "standard"},
@@ -49,25 +53,43 @@ BASE_ITEMS: dict[str, dict] = {
     # The repeater was a third standard bow; it is now a rare unique.
     "repeater":      {"slot": "weapon",  "cls": "ranger", "kind": "unique"},
     "tidecaller":    {"slot": "weapon",  "cls": "ranger", "kind": "unique"},
-    "leather_vest":  {"slot": "armor",   "cls": "ranger", "kind": "standard"},
+    "leather_vest":  {"slot": "armor",   "cls": ("ranger", "diviner"), "kind": "standard"},
     "volley_quiver": {"slot": "ability", "cls": "ranger", "kind": "standard"},
-    "plate_armor":   {"slot": "armor",   "cls": "paladin", "kind": "standard"},
+    "plate_armor":   {"slot": "armor",   "cls": ("paladin", "ninja"), "kind": "standard"},
     # ONE STANDARD ABILITY PER CLASS (owner's call, 2026-11-18). The shield is RETIRED
     # (kept for a future class): it no longer drops, and store.init_schema turns every
     # one into the Paladin's new ability, the Stillness Orb, which moved over from the
     # Diviner. The Diviner's is now the Star Tome.
     "grounding_aegis": {"slot": "ability", "cls": "paladin", "kind": "standard", "retired": True},
-    "seer_robes":     {"slot": "armor",   "cls": "diviner", "kind": "standard"},
+    "seer_robes":     {"slot": "armor",   "cls": ("ranger", "diviner"), "kind": "standard"},
     "stillness_orb":  {"slot": "ability", "cls": "paladin", "kind": "standard"},
     "star_tome":      {"slot": "ability", "cls": "diviner", "kind": "standard"},
     # The Ninja (2026-11-18): throwing stars and kunai, light armor, the counter.
     "shuriken":       {"slot": "weapon",  "cls": "ninja",   "kind": "standard"},
     "kunai":          {"slot": "weapon",  "cls": "ninja",   "kind": "standard"},
-    "shadow_garb":    {"slot": "armor",   "cls": "ninja",   "kind": "standard"},
+    "shadow_garb":    {"slot": "armor",   "cls": ("paladin", "ninja"), "kind": "standard"},
     "mirror_charm":   {"slot": "ability", "cls": "ninja",   "kind": "standard"},
     "band_of_vigor": {"slot": "ring",    "cls": None,     "kind": "standard"},
     "band_of_focus": {"slot": "ring",    "cls": None,     "kind": "standard"},
     "kingfisher_eye": {"slot": "ring",   "cls": None,     "kind": "unique"},
+    # THE UNIQUE ROSTER (owner's list, 2026-11-19): four more rings for anyone, two
+    # armors of each type, and a weapon or ability for each class. Each changes how a
+    # build plays; their effects are sim.statsFor's.
+    "ember_loop":     {"slot": "ring",   "cls": None,     "kind": "unique"},
+    "misers_coil":    {"slot": "ring",   "cls": None,     "kind": "unique"},
+    "leechstone":     {"slot": "ring",   "cls": None,     "kind": "unique"},
+    "glass_ring":     {"slot": "ring",   "cls": None,     "kind": "unique"},
+    "windrunner_cloak": {"slot": "armor", "cls": ("ranger", "diviner"), "kind": "unique"},
+    "full_moon_mantle": {"slot": "armor", "cls": ("ranger", "diviner"), "kind": "unique"},
+    "thornplate":     {"slot": "armor",  "cls": ("paladin", "ninja"), "kind": "unique"},
+    "duskmail":       {"slot": "armor",  "cls": ("paladin", "ninja"), "kind": "unique"},
+    "gale_quiver":    {"slot": "ability", "cls": "ranger",  "kind": "unique"},
+    "oathhammer":     {"slot": "weapon", "cls": "paladin", "kind": "unique"},
+    "anchor_orb":     {"slot": "ability", "cls": "paladin", "kind": "unique"},
+    "comet_rod":      {"slot": "weapon", "cls": "diviner", "kind": "unique"},
+    "echo_codex":     {"slot": "ability", "cls": "diviner", "kind": "unique"},
+    "chakram":        {"slot": "weapon", "cls": "ninja",   "kind": "unique"},
+    "echo_charm":     {"slot": "ability", "cls": "ninja",   "kind": "unique"},
     # KEYS (owner's ask, 2026-11-18). A key is carried in a character's bag and spent
     # on entering: the Dream Key opens the Dream Rift for one practice run, the Boss
     # Rush key one Boss Rush run. Slot family "key" fits no equipment slot, a key has
@@ -76,6 +98,12 @@ BASE_ITEMS: dict[str, dict] = {
     "boss_rush_key":  {"slot": "key",    "cls": None,     "kind": "key"},
 }
 DREAM_KEY, BOSS_RUSH_KEY = "dream_key", "boss_rush_key"
+
+
+def usable_by(base_id: str, class_id: str) -> bool:
+    """Whether a character of `class_id` may wear this base (None = any class)."""
+    need = BASE_ITEMS[base_id]["cls"]
+    return need is None or class_id == need or (isinstance(need, tuple) and class_id in need)
 # What a level's boss drops besides its items, rolled on their own stream so the
 # rest of the loot is unchanged: each a flat chance per boss, any rift, any level,
 # never touched by rarity. A Boss Rush run never drops a Boss Rush key.

@@ -179,7 +179,7 @@ def test_every_class_starts_with_its_own_kit(app):
         state = route(app, "GET", "/halcyon/state")(who)
         gear = [i for i in state["items"] if i["loc"] == "equipped" and i["char_id"] == ch["char_id"]]
         assert {i["equip_slot"]: i["base_id"] for i in gear}["ability"] == ability
-        assert all(C.BASE_ITEMS[i["base_id"]]["cls"] in (None, cls) for i in gear)
+        assert all(C.usable_by(i["base_id"], cls) for i in gear)
         assert not any(C.BASE_ITEMS[i["base_id"]].get("retired") for i in gear)
 
 

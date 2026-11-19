@@ -222,6 +222,10 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here, bag
 				g.beginPath(); g.arc(X, Y, r * grow + px * 0.2, 0, Math.PI * 2); g.stroke();
 			}
 		}
+		if (e.burnUntil > st.tick) {                      // burning (the Ember Loop): an orange ring
+			g.strokeStyle = "#ff8a3c"; g.lineWidth = Math.max(1, px * 0.06);
+			g.beginPath(); g.arc(X, Y, r + px * 0.1, 0, Math.PI * 2); g.stroke();
+		}
 		// Reduced flashing (a setting): a hit tints, and the boss's turn holds still.
 		const col = e.flash > 0 ? (calm ? "#f3b9a8" : "#fff3ea") : COLORS[e.form === "breach" ? "breach" : e.type];
 		if (e.type === "chaser") {
@@ -273,7 +277,7 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here, bag
 	drawMinimap(g, st, { width, ui, dpr, bagBest, mods });
 }
 
-/* "Auto-fire" over the HP box while it is on (it is remembered between visits, so
+/* "Auto-fire" over the HP box while it is on (it stays on across town and runs, so
  * it must be visible). `bottom` is the top edge of what it sits on. */
 function drawAutoTag(g, x, bottom, ui) {
 	g.font = `600 ${Math.round(12 * ui)}px "Crimson Pro", Georgia, serif`;
@@ -380,9 +384,10 @@ function drawHazards(g, st, sx, sy, px) {
 function drawAbilityFx(g, st, sx, sy, px, pp) {
 	const p = st.p, lw = Math.max(1, px * 0.05);
 	if (st.slowUntil > st.tick) {
-		circle(g, sx(pp.x), sy(pp.y), px * (st.slowR || 3), COLORS.slow);
+		const c = st.slowAt || pp;                          // the Anchor Orb's field stays where it was cast
+		circle(g, sx(c.x), sy(c.y), px * (st.slowR || 3), COLORS.slow);
 		g.strokeStyle = COLORS.paladin; g.lineWidth = lw;
-		g.beginPath(); g.arc(sx(pp.x), sy(pp.y), px * (st.slowR || 3), 0, Math.PI * 2); g.stroke();
+		g.beginPath(); g.arc(sx(c.x), sy(c.y), px * (st.slowR || 3), 0, Math.PI * 2); g.stroke();
 	}
 	for (const f of st.starfalls || []) {
 		const k = Math.min(1, Math.max(0, 1 - (f.at - st.tick) / STARFALL_DELAY));

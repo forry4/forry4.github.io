@@ -14,7 +14,7 @@
  *
  * A new realm is one more entry in REALMS and one more portal here.
  */
-import { PLAYER_R, PLAYER_SPEED, DT, TPS, REACH, statsFor, playerFire, wallHit, landStarfalls, slowPulse } from "./sim.js";
+import { PLAYER_R, PLAYER_SPEED, DT, TPS, REACH, statsFor, playerFire, wallHit, landStarfalls, slowPulse, cometBurst, turnBack, UNIQUE } from "./sim.js";
 
 // '#' wall, 'o' planter (blocks), '~' fountain water (blocks), '.' flagstone.
 const MAP = [
@@ -120,7 +120,8 @@ export function stepTown(st, input) {
 	const p = st.p;
 	let mx = input.mx || 0, my = input.my || 0;
 	if (mx && my) { mx *= 0.7071067811865476; my *= 0.7071067811865476; }
-	const dx = mx * PLAYER_SPEED * DT, dy = my * PLAYER_SPEED * DT;
+	const speed = PLAYER_SPEED * (st.stats?.moveMult || 1);
+	const dx = mx * speed * DT, dy = my * speed * DT;
 	if (dx !== 0 && !blocked(st, p.x + dx, p.y, p.r)) p.x += dx;
 	if (dy !== 0 && !blocked(st, p.x, p.y + dy, p.r)) p.y += dy;
 
@@ -138,7 +139,7 @@ export function stepTown(st, input) {
 	// and the Paladin's field burns them too
 	slowPulse(st, (r) => {
 		for (const q of st.posts) {
-			const ddx = q.x - p.x, ddy = q.y - p.y, rr = q.r + r;
+			const c = st.slowAt || p, ddx = q.x - c.x, ddy = q.y - c.y, rr = q.r + r;
 			if (ddx * ddx + ddy * ddy >= rr * rr) continue;
 			q.hits.push({ t: st.tick, dmg: st.slowDmg });
 			st.floats.push({ x: q.x, y: q.y - 0.6, text: String(st.slowDmg), until: st.tick + 40 });
@@ -147,7 +148,11 @@ export function stepTown(st, input) {
 	const keep = [];
 	for (const b of st.bullets) {
 		b.x += b.vx * DT; b.y += b.vy * DT;
-		if (--b.life <= 0 || wallHit(b, (x, y) => shotSolidTile(tileAt(st, x, y)) || inStation(st, x, y, 0))) continue;
+		turnBack(b);
+		if (--b.life <= 0 || wallHit(b, (x, y) => shotSolidTile(tileAt(st, x, y)) || inStation(st, x, y, 0))) {
+			if (b.comet) cometBurst(st, b, b.x - b.vx * DT, b.y - b.vy * DT);
+			continue;
+		}
 		let gone = false;
 		for (const q of st.posts) {
 			if (b.hit.includes(q.id)) continue;
@@ -156,11 +161,17 @@ export function stepTown(st, input) {
 			b.hit.push(q.id);
 			q.hits.push({ t: st.tick, dmg: b.dmg });
 			st.floats.push({ x: q.x + (st.tick % 7 - 3) * 0.08, y: q.y - 0.6, text: String(b.dmg), until: st.tick + 40 });
+			if (b.burn) { q.burnUntil = st.tick + UNIQUE.burn.last; q.burnDmg = b.burn; }   // the Ember Loop
+			if (b.comet) { cometBurst(st, b, b.x, b.y, q.id); gone = true; break; }
 			if (b.pierce-- <= 0) { gone = true; break; }
 		}
 		if (!gone) keep.push(b);
 	}
 	st.bullets = keep;
+	for (const q of st.posts) if (q.burnUntil > st.tick && (q.burnUntil - st.tick) % UNIQUE.burn.every === 0) {
+		q.hits.push({ t: st.tick, dmg: q.burnDmg });
+		st.floats.push({ x: q.x, y: q.y - 0.6, text: String(q.burnDmg), until: st.tick + 40 });
+	}
 	for (const q of st.posts) while (q.hits.length && q.hits[0].t <= st.tick - DPS_WINDOW) q.hits.shift();
 	st.floats = st.floats.filter((f) => f.until > st.tick);
 

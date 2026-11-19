@@ -26,7 +26,7 @@ import { GAME_ACCENTS } from "../shared/accents.js";
 import { makeClient } from "./client.js";
 import { createSim, step, TPS, REACH, xpProgress, WEAPONS, statsFor, enchantValue, recoveryLimit, CLASS_INFO,
 	STAT_SCALE, ABILITY_COST, ABILITY, SLOW_DURATION, SLOW_FACTOR, SLOW_PULSE,
-	STARFALL_DELAY, STARFALL_RADIUS, STARFALL_RANGE, COUNTER_WINDOW, COUNTER_GUARD, POTION_HEAL, POTION_COOLDOWN } from "./sim.js";
+	STARFALL_DELAY, STARFALL_RADIUS, STARFALL_RANGE, COUNTER_WINDOW, COUNTER_GUARD, POTION_HEAL, POTION_COOLDOWN, UNIQUE } from "./sim.js";
 import { camera, draw, drawTown, promptFor, formatRiftTime, TIER_COLORS, UNIQUE_COLOR } from "./render.js";
 import { createTown, stepTown, setTownGear, postDps, STATIONS, SPAWN, standAt } from "./town.js";
 import cssText from "./HalcyonRift.css?inline";
@@ -41,7 +41,11 @@ const NAMES = { shortbow: "Shortbow", longbow: "Longbow", mace: "Mace", greatswo
 	grounding_aegis: "Grounding Aegis", seer_robes: "Seer Robes", stillness_orb: "Stillness Orb",
 	band_of_vigor: "Band of Vigor", band_of_focus: "Band of Focus", kingfisher_eye: "Kingfisher's Eye",
 	star_tome: "Star Tome", shuriken: "Shuriken", kunai: "Kunai", shadow_garb: "Shadow Garb", mirror_charm: "Mirror Charm",
-	dream_key: "Dream Key", boss_rush_key: "Boss Rush Key" };
+	dream_key: "Dream Key", boss_rush_key: "Boss Rush Key",
+	ember_loop: "Ember Loop", misers_coil: "Miser's Coil", leechstone: "Leechstone", glass_ring: "Glass Ring",
+	windrunner_cloak: "Windrunner's Cloak", full_moon_mantle: "Mantle of the Full Moon", thornplate: "Thornplate",
+	duskmail: "Duskmail", gale_quiver: "Gale Quiver", oathhammer: "Oathhammer", anchor_orb: "Anchor Orb",
+	comet_rod: "Comet Rod", echo_codex: "Codex of Echoes", chakram: "Ricochet Chakram", echo_charm: "Echo Charm" };
 /* KEYS (owner's ask, 2026-11-18): carried in the bag, spent on entering. */
 const KEY_TEXT = { dream_key: "Opens the Dream Rift for one practice run. Spent on entering.",
 	boss_rush_key: "Lets you pick Boss Rush at a realm portal: every level is only its boss. Spent on entering; no time is recorded." };
@@ -66,19 +70,29 @@ const ABBR = { shortbow: "SB", longbow: "LB", mace: "MC", greatsword: "GS", wand
 	repeater: "RP", tidecaller: "TC", leather_vest: "LV", volley_quiver: "VQ", plate_armor: "PA",
 	grounding_aegis: "GA", seer_robes: "SR", stillness_orb: "SO", band_of_vigor: "BV", band_of_focus: "BF",
 	kingfisher_eye: "KE", star_tome: "ST", shuriken: "SH", kunai: "KN", shadow_garb: "SG", mirror_charm: "MR",
-	dream_key: "DK", boss_rush_key: "BR" };
+	dream_key: "DK", boss_rush_key: "BR",
+	ember_loop: "EL", misers_coil: "MI", leechstone: "LS", glass_ring: "GR", windrunner_cloak: "WC",
+	full_moon_mantle: "FM", thornplate: "TP", duskmail: "DM", gale_quiver: "GQ", oathhammer: "OH",
+	anchor_orb: "AO", comet_rod: "CR", echo_codex: "EC", chakram: "CK", echo_charm: "EH" };
 const WEAPON_FEEL = { shortbow: "Fast and close: twin arrows that spread with distance.",
-	longbow: "Slow and far: one heavy arrow that passes through enemies.",
+	longbow: "Slow and far: one heavy arrow.",
 	mace: "Melee range: a quick, solid strike.", greatsword: "Short range: a heavy sweeping strike.",
 	wand: "A steady bolt with medium range.", starstaff: "Long range: a heavy star that reaches eight tiles.",
 	tidecaller: "Three arrows in a wide fan that glance off a wall once.",
 	repeater: "A three-bolt burst, then a reload.",
-	shuriken: "A spinning star with a short reach that cuts through one enemy.",
-	kunai: "A slow, heavy blade thrown hard and far." };
-/* A UNIQUE is named, not tiered: it is its own thing, not a rung on the ladder. */
-const nameOf = (it) => (it.kind === "unique" || it.kind === "key" ? NAMES[it.base_id] || it.base_id : `${NAMES[it.base_id] || it.base_id} · T${it.tier}`);
+	shuriken: "A spinning star with a short reach.",
+	kunai: "A slow, heavy blade thrown hard and far.",
+	oathhammer: "A mace whose every hit also strikes what stands beside its target.",
+	comet_rod: "A slow bolt that bursts into shards where it lands.",
+	chakram: "Flies out, turns back half way, and cuts through everything both ways." };
+/* Every item but a key says its tier; a UNIQUE is tiered too since 2026-11-19 (owner's
+ * call), and is marked by its gold, not by a missing tier. */
+const nameOf = (it) => (it.kind === "key" ? NAMES[it.base_id] || it.base_id : `${NAMES[it.base_id] || it.base_id} · T${it.tier}`);
 const num = (x) => (Number.isInteger(x) ? String(x) : x.toFixed(1));
 const classInfo = (id) => CLASS_INFO[id] || CLASS_INFO.ranger;
+/* An item's class: none (any class), one id, or a list (shared armor, 2026-11-19). */
+const classOk = (cls, id) => !cls || (Array.isArray(cls) ? cls.includes(id) : cls === id);
+const classWords = (cls) => [].concat(cls).map((c) => CLASS_INFO[c]?.name || c).join(" or ");
 const className = (id) => classInfo(id).name;
 
 /* A weapon's numbers, one per line, off the sim's own (so they cannot drift). Range
@@ -99,7 +113,26 @@ const STAT_WORDS = [["maxHp", "Max HP"], ["maxMp", "Max MP"], ["att", "Attack"],
 function baseLines(it) {
 	if (WEAPONS[it.base_id]) return [];
 	const bare = statsFor([]), s = statsFor([{ ...it, enchants: [] }]);
-	return STAT_WORDS.filter(([k]) => s[k] !== bare[k]).map(([k, w]) => `+${num(s[k] - bare[k])} ${w}`);
+	return STAT_WORDS.filter(([k]) => s[k] !== bare[k]).map(([k, w]) => `${s[k] > bare[k] ? "+" : "−"}${num(Math.abs(s[k] - bare[k]))} ${w}`);
+}
+
+/* What a UNIQUE does besides its stats, in words, off the sim's own numbers. */
+function uniqueLines(it) {
+	const s = statsFor([{ ...it, enchants: [] }]), secs = (t) => num(Math.round(t / TPS * 10) / 10), pct = (m) => `${Math.round((m - 1) * 100)}%`;
+	const w = WEAPONS[it.base_id];
+	switch (it.base_id) {
+	case "ember_loop": return [`Weapon hits set enemies burning: ${s.burn} damage every ${secs(UNIQUE.burn.every)}s for ${secs(UNIQUE.burn.last)}s`, "A new hit restarts the burn; it never stacks"];
+	case "misers_coil": return [`Abilities cost ${s.costCut} less MP`];
+	case "leechstone": return [`Each kill heals ${s.leech} HP, up to your recovery limit`];
+	case "windrunner_cloak": return [`Move ${pct(UNIQUE.windrunner)} faster`];
+	case "full_moon_mantle": return [`While your MP is full, your shots do ${pct(UNIQUE.fullMoon)} more damage`];
+	case "thornplate": return [`Each hit you take throws ${UNIQUE.thorns.n} shards outward for ${s.thorns} damage each`];
+	case "duskmail": return [`A kill makes your next shot do ${pct(UNIQUE.dusk)} more damage`];
+	case "oathhammer": return [`Each hit also does ${Math.round(UNIQUE.splash.share * 100)}% to enemies within ${UNIQUE.splash.r} tile of the target`];
+	case "comet_rod": return [`Bursts into ${UNIQUE.comet.n} shards (${Math.round(UNIQUE.comet.share * 100)}% damage each) where it hits or ends`];
+	case "chakram": return [`Turns back after ${num(w.range / 2)} tiles; passes through every enemy, both ways`];
+	default: return [];
+	}
 }
 
 /* What an ability item DOES, at the Ability power the character has now (owner's ask,
@@ -108,16 +141,21 @@ function abilityLines(it, ap = 0) {
 	const s = statsFor([{ ...it, enchants: [] }]), pw = 1 + ap / STAT_SCALE, secs = (t) => num(Math.round(t / TPS * 10) / 10);
 	const kind = s.abilityKind, cost = `Costs ${s.abilityCost ?? ABILITY_COST} MP`;
 	const r2 = (x) => num(Math.round(x * 100) / 100);
+	if (kind === "volley" && s.gale) return [`Space: one great arrow through every enemy in ${UNIQUE.gale.range} tiles`,
+		`${Math.round(s.abilityDmg * pw)} damage to each enemy it passes`, cost];
 	if (kind === "volley") return [`Space: a fan of ${s.arrows} arrows`, `${Math.round(s.abilityDmg * s.arrows * pw)} damage in all, shared by the arrows`, cost];
-	if (kind === "slow") return ["Space: a field around you that slows enemy shots inside it",
+	if (kind === "slow") return [s.anchored ? "Space: a field where you stand that STAYS there, slowing enemy shots inside it" : "Space: a field around you that slows enemy shots inside it",
 		`and burns enemies inside it for ${r2(s.abilityDmg * pw)} damage every ${secs(SLOW_PULSE)}s`,
 		`${r2(s.slowRadius * pw)}-tile radius (its tier and Ability power widen it)`,
 		`${Math.round((1 - SLOW_FACTOR) * 100)}% slower, lasts ${secs(SLOW_DURATION)}s`, cost];
 	if (kind === "starfall") return [`Space: a star falls where you aim (up to ${STARFALL_RANGE} tiles)`,
-		`Lands after ${secs(STARFALL_DELAY)}s, ${Math.round(s.abilityDmg * pw)} damage to all within ${STARFALL_RADIUS} tiles`, cost];
+		`Lands after ${secs(STARFALL_DELAY)}s, ${Math.round(s.abilityDmg * pw)} damage to all within ${STARFALL_RADIUS} tiles`,
+		...(s.echo ? [`Lands again ${secs(UNIQUE.echo.delay)}s later for ${Math.round(s.abilityDmg * s.echo * pw)}`] : []), cost];
 	if (kind === "counter") return [`Space: the next hit within ${secs(COUNTER_WINDOW)}s is ignored`,
 		`Then ${secs(COUNTER_GUARD)}s untouchable, and your next attack does ${r2(s.counterMult * pw)}x damage`,
-		"A second counter before attacking does not stack", cost, `Cooldown ${secs(ABILITY.counter.cooldown)}s`];
+		"A second counter before attacking does not stack",
+		...(s.echoRing ? [`A caught hit also throws ${UNIQUE.echoRing.n} blades out around you for your weapon's damage`] : []),
+		cost, `Cooldown ${secs(ABILITY.counter.cooldown)}s`];
 	if (kind === "shield") return ["Space: plant a shield in front of you",
 		`Blocks ${1 + Math.floor(ap / 8)} enemy shot${ap >= 8 ? "s" : ""}, lasts ${secs(s.shieldTime * pw)}s`, cost];
 	return [];
@@ -179,14 +217,15 @@ function loadPrefs() {
 	try { p = JSON.parse(localStorage.getItem(PREFS_KEY) || "{}") || {}; } catch { p = {}; }
 	const keys = { ...DEFAULT_KEYS };
 	for (const [id] of ACTIONS) if (Array.isArray(p.keys?.[id]) && p.keys[id].every((c) => typeof c === "string" && !FIXED_KEY(c))) keys[id] = p.keys[id];
-	return { keys, calm: !!p.calm, ui: UI_SIZES.some(([v]) => v === p.ui) ? p.ui : 1, auto: !!p.auto };
+	// auto-fire is never read back: every visit starts with it off (below)
+	return { keys, calm: !!p.calm, ui: UI_SIZES.some(([v]) => v === p.ui) ? p.ui : 1, auto: false };
 }
 const livePrefs = { current: loadPrefs() };
-/* AUTO-FIRE IS REMEMBERED (owner's ask, 2026-11-18): across town and every run, and
- * the next visit. It lives with the other preferences; the loops read it live. */
+/* AUTO-FIRE IS REMEMBERED FOR THE VISIT, NOT THE NEXT ONE (owner, 2026-11-18 and
+ * 2026-11-19): it stays on across town and every run, but a fresh load of the game
+ * starts with it off. So it is never written to storage; the loops read it live. */
 function toggleAuto() {
 	livePrefs.current = { ...livePrefs.current, auto: !livePrefs.current.auto };
-	try { localStorage.setItem(PREFS_KEY, JSON.stringify(livePrefs.current)); } catch { /* this visit only */ }
 	return livePrefs.current.auto;
 }
 const actionOf = (code) => ACTIONS.find(([id]) => livePrefs.current.keys[id]?.includes(code))?.[0] || null;
@@ -583,22 +622,22 @@ export default function HalcyonRift({ authUser, onExit }) {
 	const fits = (it, to) => {
 		if (to[0] !== "equipped") return true;
 		const b = view.bases[it.base_id];
-		return !!b && (!b.cls || b.cls === char?.class_id)
+		return !!b && classOk(b.cls, char?.class_id)
 			&& (b.slot === to[2] || (b.slot === "ring" && to[2].startsWith("ring")));
 	};
 	/* Why an item does not go in a place, in words (owner's ask, 2026-11-19: "does not
 	 * go there" said nothing). The class first: that is the one a player cannot see. */
 	const whyNot = (it, to) => {
 		const b = view.bases[it.base_id], cls = b?.cls;
-		if (cls && cls !== char?.class_id)
-			return `Only a ${CLASS_INFO[cls]?.name || cls} can use ${nameOf(it)}; this is a ${CLASS_INFO[char?.class_id]?.name || "different class"}.`;
+		if (!classOk(cls, char?.class_id))
+			return `Only a ${classWords(cls)} can use ${nameOf(it)}; this is a ${CLASS_INFO[char?.class_id]?.name || "different class"}.`;
 		if (b?.slot === "key") return `${nameOf(it)} is carried, not worn.`;
 		return `${nameOf(it)} goes in ${b?.slot === "ring" ? "a ring" : `the ${b?.slot || "right"}`} slot.`;
 	};
 	// Something the open character could put on: a worn slot, and its class (or any).
 	const usable = (it) => {
 		const b = view.bases[it.base_id];
-		return !!b && b.slot !== "key" && (!b.cls || b.cls === char?.class_id);
+		return !!b && b.slot !== "key" && classOk(b.cls, char?.class_id);
 	};
 	const accepts = (target, it) => (target.kind === "place" ? fits(it, target.to) : true);
 	// Mid-run, a move is a run EVENT (queued with the fight's reports, so it lands after
@@ -806,7 +845,7 @@ export default function HalcyonRift({ authUser, onExit }) {
 		if (vaultUsable && !usable(it)) return false;
 		const q = vaultQuery.trim().toLowerCase();
 		if (!q) return true;
-		const words = [nameOf(it), FAMILY[fam] || "", it.kind === "unique" ? "unique" : `tier ${it.tier}`,
+		const words = [nameOf(it), FAMILY[fam] || "", it.kind === "unique" ? `unique tier ${it.tier}` : `tier ${it.tier}`,
 			...(it.enchants || []).map((e) => ENCHANT_NAMES[e.id] || e.id)].join(" ").toLowerCase();
 		return q.split(/\s+/).every((w) => words.includes(w));
 	};
@@ -1135,7 +1174,7 @@ function Slot({ label, item, target, locked, ctx, num: n = null, dim = false }) 
 			{n && <span className="hr-num" aria-hidden="true">{n}</span>}
 			{item?.locked && <span className="hr-lock" aria-hidden="true">🔒︎</span>}
 			{item ? <><span className="hr-abbr">{ABBR[item.base_id] || "?"}</span>
-				{item.kind === "unique" ? <span className="hr-tier hr-star" aria-hidden="true">★</span>
+				{item.kind === "unique" ? <span className="hr-tier hr-star" aria-hidden="true">★{item.tier}</span>
 					: item.kind === "key" ? <span className="hr-tier hr-key" aria-hidden="true">⚷</span>
 					: <span className="hr-tier">{item.tier}</span>}
 				{item.slot_count > 0 && <span className="hr-dots">{"•".repeat(item.slot_count)}</span>}</>
@@ -1170,17 +1209,17 @@ function ItemTip({ tip, bases, ap = 0, compare = [], classId = null }) {
 
 /* One item's card in a tooltip: name, kind, its own stats, then its enchantment slots. */
 function TipCard({ it, bases, ap, lit = false, equipped = false, kicker = null, classId = null, canLock }) {
-	const fam = bases[it.base_id]?.slot, cls = bases[it.base_id]?.cls, lines = [...weaponLines(it), ...abilityLines(it, ap), ...baseLines(it)];
+	const fam = bases[it.base_id]?.slot, cls = bases[it.base_id]?.cls, lines = [...weaponLines(it), ...abilityLines(it, ap), ...baseLines(it), ...uniqueLines(it)];
 	const ench = sortedEnchants(it);
 	return (
 		<div className={"hr-tip-card fg-panel" + (it.kind === "unique" ? " unique" : "") + (lit ? " fg-lit" : "")}>
 			{(equipped || kicker) && <p className="hr-tip-kicker">{equipped ? "Equipped" : kicker}</p>}
 			<h3 className="fg-label">{it.locked && <span className="hr-lock-mark" aria-label="Locked">🔒︎ </span>}{nameOf(it)}</h3>
-			<p className="fg-label-soft">{it.kind === "key" ? "Key" : it.kind === "unique" ? `Unique ${(FAMILY[fam] || "item").toLowerCase()}` : `${FAMILY[fam] || ""} · Tier ${it.tier}`}
+			<p className="fg-label-soft">{it.kind === "key" ? "Key" : it.kind === "unique" ? `Unique ${(FAMILY[fam] || "item").toLowerCase()} · Tier ${it.tier}` : `${FAMILY[fam] || ""} · Tier ${it.tier}`}
 			</p>
-			{fam && fam !== "key" && (cls && classId && cls !== classId
-				? <p className="hr-tip-class cant">{CLASS_INFO[cls]?.name || cls} only — your {CLASS_INFO[classId]?.name || "character"} cannot use it</p>
-				: <p className="hr-tip-class">{cls ? `${CLASS_INFO[cls]?.name || cls} only` : "Any class"}</p>)}
+			{fam && fam !== "key" && (classId && !classOk(cls, classId)
+				? <p className="hr-tip-class cant">{classWords(cls)} only — your {CLASS_INFO[classId]?.name || "character"} cannot use it</p>
+				: <p className="hr-tip-class">{cls ? `${classWords(cls)} only` : "Any class"}</p>)}
 			{WEAPON_FEEL[it.base_id] && <p className="hr-tip-weapon">{WEAPON_FEEL[it.base_id]}</p>}
 			{KEY_TEXT[it.base_id] && <p className="hr-tip-weapon">{KEY_TEXT[it.base_id]}</p>}
 			{lines.length > 0 && <ul className="hr-tip-lines hr-q">{lines.map((l) => <li key={l}>{l}</li>)}</ul>}
@@ -2034,7 +2073,7 @@ function Dungeon({ run, client, onEnd, notify, tips, onDeeper }) {
 								onClick={(ev) => { lootApi.current?.take(e); tips.hideTip(); ev.currentTarget.blur(); }}
 								onMouseEnter={(ev) => tips.showTip(it, ev.currentTarget)} onMouseLeave={tips.hideTip}>
 								<span className="hr-abbr">{ABBR[it.base_id] || "?"}</span>
-								{it.kind === "unique" ? <span className="hr-tier hr-star" aria-hidden="true">★</span>
+								{it.kind === "unique" ? <span className="hr-tier hr-star" aria-hidden="true">★{it.tier}</span>
 									: it.kind === "key" ? <span className="hr-tier hr-key" aria-hidden="true">⚷</span> : <span className="hr-tier">{it.tier}</span>}
 								{it.slot_count > 0 && <span className="hr-dots">{"•".repeat(it.slot_count)}</span>}
 							</button>;
