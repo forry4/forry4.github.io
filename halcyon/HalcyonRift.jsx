@@ -25,7 +25,7 @@ import { lobbyCss, LobbyHeader, LobbyUser, LobbyLoading } from "../shared/lobby.
 import { GAME_ACCENTS } from "../shared/accents.js";
 import { makeClient } from "./client.js";
 import { createSim, step, TPS, REACH, xpProgress, WEAPONS, statsFor, enchantValue, recoveryLimit, CLASS_INFO,
-	STAT_SCALE, ABILITY_COST, SLOW_DURATION, SLOW_FACTOR, SLOW_PULSE,
+	STAT_SCALE, ABILITY_COST, ABILITY, SLOW_DURATION, SLOW_FACTOR, SLOW_PULSE,
 	STARFALL_DELAY, STARFALL_RADIUS, STARFALL_RANGE, COUNTER_WINDOW, COUNTER_GUARD, POTION_HEAL, POTION_COOLDOWN } from "./sim.js";
 import { camera, draw, drawTown, promptFor, formatRiftTime, TIER_COLORS, UNIQUE_COLOR } from "./render.js";
 import { createTown, stepTown, setTownGear, postDps, STATIONS, SPAWN, standAt } from "./town.js";
@@ -108,16 +108,16 @@ function abilityLines(it, ap = 0) {
 	const s = statsFor([{ ...it, enchants: [] }]), pw = 1 + ap / STAT_SCALE, secs = (t) => num(Math.round(t / TPS * 10) / 10);
 	const kind = s.abilityKind, cost = `Costs ${s.abilityCost ?? ABILITY_COST} MP`;
 	const r2 = (x) => num(Math.round(x * 100) / 100);
-	if (kind === "volley") return [`Space: a fan of ${s.arrows} arrows`, `${Math.round(s.abilityDmg * pw)} damage each`, cost];
+	if (kind === "volley") return [`Space: a fan of ${s.arrows} arrows`, `${Math.round(s.abilityDmg * s.arrows * pw)} damage in all, shared by the arrows`, cost];
 	if (kind === "slow") return ["Space: a field around you that slows enemy shots inside it",
-		`and burns enemies inside it for ${Math.round(s.abilityDmg * pw)} damage every ${secs(SLOW_PULSE)}s`,
+		`and burns enemies inside it for ${r2(s.abilityDmg * pw)} damage every ${secs(SLOW_PULSE)}s`,
 		`${r2(s.slowRadius * pw)}-tile radius (its tier and Ability power widen it)`,
 		`${Math.round((1 - SLOW_FACTOR) * 100)}% slower, lasts ${secs(SLOW_DURATION)}s`, cost];
 	if (kind === "starfall") return [`Space: a star falls where you aim (up to ${STARFALL_RANGE} tiles)`,
 		`Lands after ${secs(STARFALL_DELAY)}s, ${Math.round(s.abilityDmg * pw)} damage to all within ${STARFALL_RADIUS} tiles`, cost];
 	if (kind === "counter") return [`Space: the next hit within ${secs(COUNTER_WINDOW)}s is ignored`,
 		`Then ${secs(COUNTER_GUARD)}s untouchable, and your next attack does ${r2(s.counterMult * pw)}x damage`,
-		"A second counter before attacking does not stack", cost];
+		"A second counter before attacking does not stack", cost, `Cooldown ${secs(ABILITY.counter.cooldown)}s`];
 	if (kind === "shield") return ["Space: plant a shield in front of you",
 		`Blocks ${1 + Math.floor(ap / 8)} enemy shot${ap >= 8 ? "s" : ""}, lasts ${secs(s.shieldTime * pw)}s`, cost];
 	return [];

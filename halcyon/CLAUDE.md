@@ -586,12 +586,22 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
   10; `quality_table(source, rarity, level)` merges rows that land on one tier). Tiers
   6-10 come only from depth; the Fracture's boss has a rare T6 row so its level-5 boss
   can reach T10. `content.TIERS` is 0-10; `render.TIER_COLORS` names all eleven.
-- **An ability's non-damage reach grows 12% a tier, not 20%** (`sim.effectScale`: the
-  field's radius, the counter's multiplier, the shield's time), so T10 is not absurd.
+- **Abilities run off one table, `sim.ABILITY` (owner's numbers, 2026-11-19).** Every
+  ability costs 30 MP at T0 and 5 more a tier (`abilityCost`, 80 at T10). Effects:
+  Volley 55 damage in all (+10 a tier, shared by its 7 arrows), Starfall 45 (+10), the
+  Stillness field 2.0 tiles (+10% a tier, 4.0 at T10) burning 6 a pulse (+20% a tier), the
+  Mirror counter x2.0 (+0.4 a tier, x6 at T10). Each step was checked to be worth at
+  least as much PER MP as the one below it (`the ability table` unit test), so a higher
+  tier is never the worse buy.
+- **The counter is the one ability with a cooldown: a flat 6s, and no refund.** Its catch
+  window (1s) and guard do not grow with tier. Without the cooldown a cheap T0 bought the
+  most invulnerability per MP; with it, how much you are protected is fixed and the tier
+  buys damage. 6s keeps early MP and regen meaningful (a 12s cooldown would have made them
+  pointless at T0). `p.abilityCd` is in the fingerprint; the HUD shows the seconds left.
+  `effectScale` (12% a tier) now drives only the retired Grounding Aegis.
 - **The Fracture opens per CHARACTER, once it has felled the Shallows' boss in a real run**
   (`content.REQUIRES`; `store._cleared` reads the boss id with `json_extract` and the small
   state, never the whole dungeon; a Dream Rift does not count). The store refuses the run
   (Dream Rifts too) and `owner_view` lists each living character's `cleared`; the portal
   panel says what opens it.
-- **The Paladin's Stillness Orb costs 45 MP and lasts 4s** (`sim.ABILITY_COSTS`; other
-  abilities stay 30). Full uptime would need ~11 MP/s, past any gear.
+- **The Stillness field lasts 4s** (`SLOW_DURATION`); full uptime at T0 needs 7.5 MP/s, past early gear.

@@ -338,7 +338,7 @@ test("every number a player reads is flat, with one decimal place for regenerati
 	for (const base of ["shortbow", "longbow", "tidecaller"])
 		for (const tier of [1, 2, 3, 4, 5]) {
 			const s = statsFor([{ base_id: base, tier, enchants: ench }, STARTER[1], STARTER[2]], 3);
-			for (const k of ["maxHp", "maxMp", "att", "dex", "def", "dmg", "weaponDmg", "abilityDmg"])
+			for (const k of ["maxHp", "maxMp", "att", "dex", "def", "dmg", "weaponDmg"])
 				assert.ok(Number.isInteger(s[k]), `${base} T${tier}: ${k} = ${s[k]}`);
 		}
 	assert.equal(statsFor([]).mpRegen, 2.5, "base MP regeneration is deliberately lower");
@@ -363,11 +363,11 @@ test("one standard ability per class: field, stars, counter (and the volley)", (
 	assert.equal(WEAPONS.shuriken.look, "star");
 });
 
-test("an ability has no cooldown: MP is its only limit", () => {
+test("an ability has no cooldown (but the counter): MP is its only limit", () => {
 	const st = createSim(A, PALADIN, { class_id: "paladin" });
 	st.enemies = [];
 	const cost = st.stats.abilityCost;
-	assert.equal(cost, 45, "the Paladin's field costs 45 MP");
+	assert.equal(cost, 35, "a tier 1 ability costs 35 MP");
 	st.p.mp = 2 * cost + 1;
 	step(st, { ability: true });
 	const first = st.slowUntil;
@@ -403,7 +403,7 @@ test("the Paladin's field slows enemy shots inside it; AP widens it, never lengt
 	assert.equal(b.x, st.p.x - 1 + 6 * (1 / TPS) * SLOW_FACTOR);
 	const field = (q) => { const s = createSim(A, withAp(PALADIN, q), { class_id: "paladin" }); step(s, { ability: true }); return [s.slowR, s.slowUntil]; };
 	const [r0, t0] = field(0), [r1, t1] = field(1);
-	assert.equal(r0, SLOW_RADIUS);
+	assert.ok(Math.abs(r0 - SLOW_RADIUS * 1.1) < 1e-9, `a tier 1 field is 2.2 tiles: ${r0}`);
 	assert.ok(r1 > r0, "AP widens the field");
 	assert.equal(t1, t0, "AP does not lengthen it");
 });
@@ -439,7 +439,8 @@ test("the Ninja's counter: a hit in the window is ignored, a short guard, the ne
 	for (let i = 0; i < COUNTER_WINDOW - 5; i++) step(st, {});
 	hit(); step(st, {});
 	assert.equal(st.p.hp, hp, "the countered hit does nothing");
-	assert.ok(st.p.empower === 2);
+	assert.equal(st.stats.counterMult, 2.4, "a tier 1 counter is x2.4");
+	assert.ok(st.p.empower === st.stats.counterMult);
 	hit(); step(st, {});
 	assert.equal(st.p.hp, hp, "the guard ignores what follows at once");
 	for (let i = 0; i < COUNTER_GUARD; i++) step(st, {});
@@ -447,10 +448,10 @@ test("the Ninja's counter: a hit in the window is ignored, a short guard, the ne
 	assert.ok(st.p.hp < hp, "the guard is over");
 	step(st, { fire: true, ax: 1, ay: 0 });
 	const shot = st.bullets.find((b) => b.owner === "p");
-	assert.equal(shot.dmg, st.stats.dmg * 2, "the next shot does twice the damage");
+	assert.equal(shot.dmg, st.stats.dmg * st.stats.counterMult, "the next shot is multiplied");
 	for (let i = 0; i < TPS; i++) step(st, {});
 	step(st, { fire: true, ax: 1, ay: 0 });
-	assert.ok(st.bullets.filter((b) => b.owner === "p").every((b) => b.dmg <= st.stats.dmg * 2), "only once");
+	assert.ok(st.bullets.filter((b) => b.owner === "p").every((b) => b.dmg <= st.stats.dmg * st.stats.counterMult), "only once");
 	assert.ok(st.bullets.some((b) => b.owner === "p" && b.dmg === st.stats.dmg));
 });
 
@@ -861,4 +862,40 @@ test("every standard item is stronger at a higher tier, abilities included", () 
 		const p = Array.from({ length: 11 }, (_, t) => f(at(id, t)));     // T0 to T10
 		for (let t = 1; t < p.length; t++) assert.ok(p[t] > p[t - 1], `${id}: T${t} (${p[t]}) is not above T${t - 1} (${p[t - 1]})`);
 	}
+});
+
+test("the ability table: 30 MP and 5 more a tier, effects that are never worse per MP", () => {
+	const at = (base_id, tier) => statsFor([{ base_id, tier }], 1);
+	const per = {
+		volley_quiver: (s) => s.abilityDmg * s.arrows, star_tome: (s) => s.abilityDmg,
+		stillness_orb: (s) => s.abilityDmg * s.slowRadius ** 2, mirror_charm: (s) => s.counterMult,
+	};
+	const want = { volley_quiver: [55, 155], star_tome: [45, 145], mirror_charm: [2, 6] };
+	for (const [id, f] of Object.entries(per)) {
+		let last = 0;
+		for (let t = 0; t <= 10; t++) {
+			const s = at(id, t);
+			assert.equal(s.abilityCost, 30 + 5 * t, `${id} T${t} cost`);
+			const v = f(s) / s.abilityCost;
+			assert.ok(v >= last - 1e-9, `${id} T${t} is worse per MP (${v} < ${last})`);
+			last = v;
+		}
+		if (want[id]) {
+			assert.ok(Math.abs(f(at(id, 0)) - want[id][0]) < 1e-9 && Math.abs(f(at(id, 10)) - want[id][1]) < 1e-9, id);
+		}
+	}
+	assert.ok(Math.abs(at("stillness_orb", 0).slowRadius - 2) < 1e-9 && Math.abs(at("stillness_orb", 10).slowRadius - 4) < 1e-9);
+});
+
+test("the counter alone has a cooldown: six seconds, whatever the MP", () => {
+	const st = createSim(A, NINJA, { class_id: "ninja" });
+	st.enemies = [];
+	st.p.mp = st.stats.maxMp = 1000;
+	step(st, { ability: true });
+	const mp = st.p.mp;
+	assert.ok(st.p.counterUntil > st.tick, "cast");
+	for (let i = 0; i < 6 * TPS - 2; i++) step(st, { ability: true });
+	assert.ok(st.p.mp >= mp, "nothing more was spent during the cooldown");
+	for (let i = 0; i < 3; i++) step(st, { ability: true });
+	assert.ok(st.p.mp < mp, "and it casts again once it is over");
 });

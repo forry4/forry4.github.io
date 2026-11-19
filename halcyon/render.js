@@ -597,10 +597,10 @@ function drawHud(g, st, { width, height, px, notes, ui = 1, keys = {}, auto = fa
 	g.fillText(`${Math.floor(p.mp)} / ${Math.round(s.maxMp)}`, X + 6, Y + H * 1.5 + 9);
 	// Whether the ability can be cast, at the MP bar's right end: MP is its only limit.
 	if (s.abilityKind) {
-		const cost = s.abilityCost ?? ABILITY_COST, ok = p.mp >= cost;
+		const cost = s.abilityCost ?? ABILITY_COST, cd = p.abilityCd > 0, ok = p.mp >= cost && !cd;
 		g.textAlign = "right";
 		g.fillStyle = ok ? "#9fe7ff" : "#c9cfd6";
-		g.fillText(ok ? "Ready" : `${cost} MP`, X + W - 6, Y + H * 1.5 + 9);
+		g.fillText(ok ? "Ready" : cd ? `${Math.ceil(p.abilityCd / TPS)}s` : `${cost} MP`, X + W - 6, Y + H * 1.5 + 9);
 		g.textAlign = "left";
 	}
 	// XP inside the level, and the level itself at the bar's right end.

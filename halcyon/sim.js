@@ -56,19 +56,32 @@ export const HEAL = 35;                              // a heal pickup: +HP and +
  * a cooldown. It heals and raises the recovery limit like a smaller heal orb. */
 export const POTION_HEAL = 30;
 export const POTION_COOLDOWN = 20 * TPS;
+/* THE ABILITY TABLE (owner's calls, 2026-11-19). Every ability costs 30 MP at tier 0
+ * and 5 more a tier (80 at tier 10); what it does grows a little faster, so a higher
+ * tier is always a little better per MP and never worse:
+ *   volley   — 55 damage in all (its arrows share it), +10 a tier;
+ *   starfall — 45, +10 a tier;
+ *   field    — a 2.0-tile radius, +10% of that a tier; burns 6 a pulse, +20% a tier;
+ *   counter  — the next shot x2.0, +0.4 a tier (x6 at tier 10), with a FLAT cooldown:
+ *              its cost rising cannot alone stop a cheap charm being the best guard.
+ * Ability power multiplies the effects, never the cost. */
 export const ABILITY_COST = 30;
-/* An ability's MP cost, where it is not the usual. The Paladin's field was up all the
- * time on modest MP gear (owner's note, 2026-11-19): 45 MP and 4 seconds puts full
- * uptime at ~11 MP/s, past any gear; a fresh character gets about a fifth of it. */
-export const ABILITY_COSTS = { slow: 45 };
-export const abilityCost = (kind) => ABILITY_COSTS[kind] ?? ABILITY_COST;
+export const ABILITY_COST_PER_TIER = 5;
+export const abilityCost = (kind, tier = 0) => ABILITY_COST + ABILITY_COST_PER_TIER * (tier ?? 0);
+export const ABILITY = {
+	volley: { dmg: 55, perTier: 10 },
+	starfall: { dmg: 45, perTier: 10 },
+	slow: { radius: 2, radiusPerTier: 0.1, pulse: 6, pulsePerTier: 0.2 },
+	counter: { mult: 2, perTier: 0.4, cooldown: 6 * TPS },
+};
 export const SHIELD_DURATION = 5 * TPS;
 export const SLOW_DURATION = 4 * TPS;
-export const SLOW_RADIUS = 3;
+export const SLOW_RADIUS = 2;
 export const SLOW_FACTOR = 0.45;
 
 /* NO ABILITY COOLDOWN (owner's call, 2026-11-19, reversing 2026-11-18's): MP is the
- * only limit on casting. The Paladin's field also BURNS (owner's ask, 2026-11-19):
+ * only limit on casting — except the Ninja's counter, which has a flat 6s one
+ * (ABILITY.counter.cooldown, owner's call the same day) so it is never constant safety. The Paladin's field also BURNS (owner's ask, 2026-11-19):
  * every SLOW_PULSE ticks it hits every enemy inside it for its damage — slight,
  * tier- and Ability-power-scaled like the other abilities' damage. */
 export const SLOW_PULSE = 30;
@@ -197,14 +210,16 @@ export function statsFor(gear = [], level = 1, classId = "ranger") {
 		const w = WEAPONS[it.base_id];
 		if (w) Object.assign(s, weaponStats(w, t));
 		if (it.base_id === "leather_vest") { s.def += 1 + tier; s.maxHp += 10 * up; }
-		if (it.base_id === "volley_quiver") { s.arrows = 7; s.abilityDmg += Math.round(8 * t); s.abilityKind = "volley"; }
+		const T = tier;                                       // an ability item's tier, 0-10
+		if (it.base_id === "volley_quiver") { s.arrows = 7; s.abilityDmg += (ABILITY.volley.dmg + ABILITY.volley.perTier * T) / 7; s.abilityKind = "volley"; s.abilityItemTier = T; }
 		if (it.base_id === "plate_armor") { s.def += 3 + tier; s.maxHp += 18 * up; }
 		if (it.base_id === "grounding_aegis") { s.abilityKind = "shield"; s.abilityTier = effectScale(it); }
 		if (it.base_id === "seer_robes") { s.maxMp += 18 * tier; s.mpRegen += 0.5; }
-		if (it.base_id === "stillness_orb") { s.abilityKind = "slow"; s.abilityDmg += Math.round(SLOW_DAMAGE * t); s.abilityTier = effectScale(it); }
-		if (it.base_id === "star_tome") { s.abilityKind = "starfall"; s.abilityDmg += Math.round(45 * t); }
+		if (it.base_id === "stillness_orb") { s.abilityKind = "slow"; s.abilityDmg += ABILITY.slow.pulse * (1 + ABILITY.slow.pulsePerTier * T);
+			s.abilityTier = 1 + ABILITY.slow.radiusPerTier * T; s.abilityItemTier = T; }
+		if (it.base_id === "star_tome") { s.abilityKind = "starfall"; s.abilityDmg += ABILITY.starfall.dmg + ABILITY.starfall.perTier * T; s.abilityItemTier = T; }
 		if (it.base_id === "shadow_garb") { s.def += tier; s.dex += 2 + tier; s.maxHp += 8 * up; }
-		if (it.base_id === "mirror_charm") { s.abilityKind = "counter"; s.abilityTier = effectScale(it); }
+		if (it.base_id === "mirror_charm") { s.abilityKind = "counter"; s.abilityItemTier = T; }
 		if (it.base_id === "band_of_vigor") s.maxHp += Math.round(15 * t);
 		if (it.base_id === "band_of_focus") { s.maxMp += Math.round(15 * t); s.mpRegen += 2; }
 		if (it.base_id === "kingfisher_eye") { pierce += 1; s.att += 5; }
@@ -234,16 +249,18 @@ export function statsFor(gear = [], level = 1, classId = "ranger") {
 	// volley's and the starfall's damage, the slowing field's REACH (not its time),
 	// the counter's damage (not its guard).
 	s.abilityPower = 1 + s.ap / STAT_SCALE;
-	s.abilityDmg = s.abilityKind === "volley" || s.abilityKind === "starfall" || s.abilityKind === "slow" ? Math.round(s.abilityDmg * s.abilityPower) : 0;
+	// Not rounded: a volley's 55 is shared by its 7 arrows (each hit's number is shown to
+	// a tenth), and the tooltip reads the whole volley.
+	s.abilityDmg = s.abilityKind === "volley" || s.abilityKind === "starfall" || s.abilityKind === "slow" ? s.abilityDmg * s.abilityPower : 0;
 	// EVERY ABILITY GROWS WITH ITS TIER (owner's ask, 2026-11-19: "a t5 ability should
 	// have higher base effectiveness than a t2"): `abilityTier` is the tier's scale, the
 	// same 20% a tier as weapons and armor. The damage abilities take it in abilityDmg;
 	// the field's reach, the counter's multiplier and the shield's time take it here.
 	const at = s.abilityTier || 1;
-	s.slowRadius = Math.round(SLOW_RADIUS * at * s.abilityPower * 100) / 100;
-	s.counterMult = Math.round(COUNTER_MULT * at * s.abilityPower * 100) / 100;
+	s.slowRadius = Math.round(ABILITY.slow.radius * at * s.abilityPower * 100) / 100;
+	s.counterMult = Math.round((ABILITY.counter.mult + ABILITY.counter.perTier * (s.abilityItemTier ?? 0)) * s.abilityPower * 100) / 100;
 	s.shieldTime = Math.round(SHIELD_DURATION * at * s.abilityPower);
-	s.abilityCost = abilityCost(s.abilityKind);
+	s.abilityCost = abilityCost(s.abilityKind, s.abilityItemTier ?? 0);
 	return s;
 }
 
@@ -345,7 +362,7 @@ export function createSim(dungeon, gear = [], hero = {}) {
 		hero: { level, xp, startLevel: level, startXp: xp },
 		p: { x: dungeon.start.x, y: dungeon.start.y, r: PLAYER_R, hp: stats.maxHp, low: stats.maxHp,
 			mp: stats.maxMp, fireCd: 0, hurt: 0, burstLeft: 0, burstCd: 0,
-			potionCd: 0, counterUntil: 0, guardUntil: 0, empower: 0 },
+			potionCd: 0, counterUntil: 0, guardUntil: 0, empower: 0, abilityCd: 0 },
 		enemies, bullets: [], dropsBy, scale,
 		// Heal orbs DROP from the enemy that carries one (dungeon.py); one with a
 		// position of its own (an older dungeon) lies where it was placed.
@@ -945,7 +962,8 @@ export function playerFire(st, input) {
 		volley(st, ax, ay);
 		p.burstLeft--; p.burstCd = s.gap;
 	}
-	if (input.ability && s.abilityKind && p.mp >= s.abilityCost) {
+	if (p.abilityCd > 0) p.abilityCd--;
+	if (input.ability && s.abilityKind && p.mp >= s.abilityCost && !(p.abilityCd > 0)) {
 		p.mp -= s.abilityCost;
 		if (s.abilityKind === "volley") {
 			for (let i = 0; i < s.arrows; i++) {
@@ -967,6 +985,7 @@ export function playerFire(st, input) {
 				at: st.tick + STARFALL_DELAY, cast: st.tick });
 		} else if (s.abilityKind === "counter") {
 			p.counterUntil = st.tick + COUNTER_WINDOW;
+			p.abilityCd = ABILITY.counter.cooldown;          // the one ability with a cooldown
 		}
 	}
 }
@@ -1141,7 +1160,7 @@ export function fingerprint(st) {
 		st.sealed, st.roomLeft,
 		st.bullets.length, st.bullets.map((b) => [r(b.x), r(b.y)]).slice(0, 40),
 		st.bags.map((b) => b.drops.join(",")), st.pickups.length, st.shield && [r(st.shield.x), r(st.shield.y), st.shield.until], st.slowUntil, st.slowDmg || 0,
-		st.p.potionCd, st.p.counterUntil, st.p.guardUntil, st.p.empower, (st.starfalls || []).map((f) => [r(f.x), r(f.y), f.at]),
+		st.p.potionCd, st.p.counterUntil, st.p.guardUntil, st.p.empower, st.p.abilityCd || 0, (st.starfalls || []).map((f) => [r(f.x), r(f.y), f.at]),
 		(st.mortars || []).map((m) => [r(m.x), r(m.y), m.at]), (st.fires || []).map((f) => [r(f.x), r(f.y), f.until]), st.enemies.map((e) => e.hidden || 0),
 		(st.cracks || []).map((c) => c.t), st.fastRoom ?? -1, st.enemies.map((e) => (e.dormant ? 1 : 0))]);
 }
