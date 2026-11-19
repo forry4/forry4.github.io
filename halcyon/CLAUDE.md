@@ -654,3 +654,9 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
 - **Nothing here adds invulnerability**: the Echo Charm keeps the counter's window,
   guard and 6s cooldown; it only adds blades. `halcyonUniques.test.mjs` drives each one
   through the real sim, and fails any base with no name or a duplicate abbreviation.
+- **Each unique has ONE home dungeon** (owner's ask, 2026-11-19: an incentive to run a
+  specific rift for a specific unique). `content.UNIQUE_HOME` names it and sets `home` on
+  the base; `dungeon._item` keeps only uniques at home in the dungeon being generated.
+  Every class has uniques in both dungeons, and each armor type has one in each. The
+  tooltip says "Found in The Shallows". `test_every_unique_has_one_home_dungeon...`.
+- **The Dream Key drops 25% of the time per boss** (was 10%; owner's ask, 2026-11-19).

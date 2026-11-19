@@ -304,12 +304,13 @@ def _pick(rng: random.Random, table) -> object:
 
 
 def _item(rng: random.Random, tier: int, class_id: str, unique: bool = False,
-          exclude: frozenset = frozenset(), bonus: float = 0.0) -> dict:
+          exclude: frozenset = frozenset(), bonus: float = 0.0, dungeon_id: str = "shallows") -> dict:
     # ONE ENEMY NEVER DROPS THE SAME ITEM TWICE (owner's ask, 2026-11-18): what it
     # already dropped is left out. A unique the boss already gave becomes a standard
     # item instead (a class may have only one unique).
     left = lambda t: tuple((b, w) for b, w in t if b not in exclude)
-    table = left(UNIQUE_LOOT.get(class_id, ())) if unique else ()
+    # Only the uniques whose home is THIS dungeon (content.UNIQUE_HOME).
+    table = left(tuple((b, w) for b, w in UNIQUE_LOOT.get(class_id, ()) if C.UNIQUE_HOME.get(b) == dungeon_id)) if unique else ()
     table = table or left(LOOT_BY_CLASS[class_id]) or LOOT_BY_CLASS[class_id]
     base_id = _pick(rng, table)
     slots = _pick(rng, slot_odds(bonus))
@@ -481,7 +482,7 @@ def generate(dungeon_id: str, seed: str | None = None, class_id: str = "ranger",
             q = _pick(rng, quality)                          # what each is: one roll
             unique = q == "unique"
             tier = _unique_tier(f"{dungeon_id}:{seed}:utier{level}:{eid}:{n_drop}", quality) if unique else int(q[1:])
-            it = _item(rng, tier, class_id, unique, frozenset(dropped), bonus)
+            it = _item(rng, tier, class_id, unique, frozenset(dropped), bonus, dungeon_id)
             dropped.add(it["base_id"])
             n_drop += 1
             drops[f"{pre}d{n_drop}"] = {**it, "enemy": eid}

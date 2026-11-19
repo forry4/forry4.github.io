@@ -99,6 +99,24 @@ BASE_ITEMS: dict[str, dict] = {
 }
 DREAM_KEY, BOSS_RUSH_KEY = "dream_key", "boss_rush_key"
 
+# EVERY UNIQUE HAS ONE HOME DUNGEON (owner's ask, 2026-11-19: "there should be an
+# incentive to run specific ones for specific uniques"): only that dungeon's bosses
+# drop it. Each class can find uniques in both; each armor type has one in each.
+# The Shallows keeps the sea and the hunt; the Fracture the crystal, the void and the
+# echoes. `home` is set on the base (below), so the page can say where to look.
+UNIQUE_HOME: dict[str, str] = {
+    "kingfisher_eye": "shallows", "leechstone": "shallows", "misers_coil": "shallows",
+    "ember_loop": "fracture", "glass_ring": "fracture",
+    "windrunner_cloak": "shallows", "thornplate": "shallows",
+    "full_moon_mantle": "fracture", "duskmail": "fracture",
+    "tidecaller": "shallows", "repeater": "shallows", "gale_quiver": "fracture",
+    "anchor_orb": "shallows", "oathhammer": "fracture",
+    "echo_codex": "shallows", "comet_rod": "fracture",
+    "chakram": "shallows", "echo_charm": "fracture",
+}
+for _b, _h in UNIQUE_HOME.items():
+    BASE_ITEMS[_b]["home"] = _h
+
 
 def usable_by(base_id: str, class_id: str) -> bool:
     """Whether a character of `class_id` may wear this base (None = any class)."""
@@ -107,7 +125,8 @@ def usable_by(base_id: str, class_id: str) -> bool:
 # What a level's boss drops besides its items, rolled on their own stream so the
 # rest of the loot is unchanged: each a flat chance per boss, any rift, any level,
 # never touched by rarity. A Boss Rush run never drops a Boss Rush key.
-KEY_DROPS = ((DREAM_KEY, 0.10), (BOSS_RUSH_KEY, 0.03))
+# The Dream Key raised 10% -> 25% (owner's ask, 2026-11-19): practice should be easy to reach.
+KEY_DROPS = ((DREAM_KEY, 0.25), (BOSS_RUSH_KEY, 0.03))
 BOSS_RUSH = {"name": "Boss Rush", "text": "No ordinary rooms: every level is its boss. Spends a Boss Rush key; "
                                           "no time is recorded."}
 

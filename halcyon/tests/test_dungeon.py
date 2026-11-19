@@ -305,7 +305,7 @@ def test_keys_drop_from_the_boss_at_their_rates_and_a_boss_rush_never_drops_its_
             if x["base_id"] in got:
                 assert x["enemy"] == d["boss"] and x["slot_count"] == 0 and x["enchants"] == []
                 got[x["base_id"]] += 1
-    assert abs(got["dream_key"] / n - 0.10) < 0.02, got
+    assert abs(got["dream_key"] / n - 0.25) < 0.03, got
     assert abs(got["boss_rush_key"] / n - 0.03) < 0.012, got
     for i in range(300):
         d = D.generate("shallows", f"rush-{i}", boss_rush=True)
@@ -388,6 +388,22 @@ def test_depth_pays_its_own_bonus_and_lifts_tiers_up_to_ten():
     d = D.generate("fracture", "deep", mods=["fortified", "brutal", "swift", "warded"], level=D.MAX_LEVEL)
     got = [x["tier"] for x in d["drops"].values() if C.base(x["base_id"])["kind"] == "standard"]
     assert got and min(got) >= 6 and max(got) <= 10
+
+
+def test_every_unique_has_one_home_dungeon_and_drops_only_there():
+    """Owner's ask, 2026-11-19: a reason to run a specific dungeon for a specific unique."""
+    from halcyon import content as C
+    uniques = {b for b, x in C.BASE_ITEMS.items() if x["kind"] == "unique"}
+    assert set(C.UNIQUE_HOME) == uniques and set(C.UNIQUE_HOME.values()) <= set(D.DUNGEONS)
+    for cls in D.UNIQUE_LOOT:
+        for dungeon_id in D.DUNGEONS:
+            assert any(C.UNIQUE_HOME[b] == dungeon_id for b, _ in D.UNIQUE_LOOT[cls]), (cls, dungeon_id)
+    for dungeon_id in D.DUNGEONS:
+        seen = set()
+        for seed in map(str, range(500)):
+            d = D.generate(dungeon_id, seed, class_id="ranger")
+            seen |= {x["base_id"] for x in d["drops"].values() if C.BASE_ITEMS[x["base_id"]]["kind"] == "unique"}
+        assert seen and all(C.UNIQUE_HOME[b] == dungeon_id for b in seen), (dungeon_id, seen)
 
 
 def test_every_unique_drops_for_a_class_that_can_wear_it():

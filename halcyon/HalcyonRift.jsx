@@ -28,7 +28,7 @@ import { createSim, step, TPS, REACH, xpProgress, WEAPONS, statsFor, enchantValu
 	STAT_SCALE, ABILITY_COST, ABILITY, SLOW_DURATION, SLOW_FACTOR, SLOW_PULSE,
 	STARFALL_DELAY, STARFALL_RADIUS, STARFALL_RANGE, COUNTER_WINDOW, COUNTER_GUARD, POTION_HEAL, POTION_COOLDOWN, UNIQUE } from "./sim.js";
 import { camera, draw, drawTown, promptFor, formatRiftTime, TIER_COLORS, UNIQUE_COLOR } from "./render.js";
-import { createTown, stepTown, setTownGear, postDps, STATIONS, SPAWN, standAt } from "./town.js";
+import { createTown, stepTown, setTownGear, postDps, STATIONS, SPAWN, standAt, REALMS } from "./town.js";
 import cssText from "./HalcyonRift.css?inline";
 
 const styles = baseCss + lobbyCss + cssText;
@@ -1220,6 +1220,7 @@ function TipCard({ it, bases, ap, lit = false, equipped = false, kicker = null, 
 			{fam && fam !== "key" && (classId && !classOk(cls, classId)
 				? <p className="hr-tip-class cant">{classWords(cls)} only — your {CLASS_INFO[classId]?.name || "character"} cannot use it</p>
 				: <p className="hr-tip-class">{cls ? `${classWords(cls)} only` : "Any class"}</p>)}
+			{bases[it.base_id]?.home && <p className="hr-tip-class hr-tip-home">Found in {REALMS.find((r) => r.id === bases[it.base_id].home)?.name || bases[it.base_id].home}</p>}
 			{WEAPON_FEEL[it.base_id] && <p className="hr-tip-weapon">{WEAPON_FEEL[it.base_id]}</p>}
 			{KEY_TEXT[it.base_id] && <p className="hr-tip-weapon">{KEY_TEXT[it.base_id]}</p>}
 			{lines.length > 0 && <ul className="hr-tip-lines hr-q">{lines.map((l) => <li key={l}>{l}</li>)}</ul>}

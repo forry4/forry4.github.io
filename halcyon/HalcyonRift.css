@@ -190,6 +190,7 @@
 .hr-tip-weapon{line-height:1.35}
 .hr-tip-class{font-size:.82rem;letter-spacing:.02em;color:#b9c4cf}
 .hr-tip-class.cant{color:#ff8d7d}
+.hr-tip-home{color:#e9cf86}
 .hr-enchants{list-style:none;margin:0;padding:0;display:grid;gap:3px;font-size:.9rem}
 .hr-q{color:var(--text-soft)}
 
