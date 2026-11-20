@@ -8,7 +8,7 @@
  *      by whole pixels only when it is well off the shared pixel size;
  *   3. every pixel is fully in or out, and lone specks are dropped;
  *   4. every color is swapped for the nearest one in the shared list that its JOB
- *      allows (art.paletteFor);
+ *      allows (art.paletteFor), and shades that are nearly the same become one;
  *   5. one outline, the same near-black: the generator's own when it drew one.
  *
  * Pure: it works on { w, h, data } (RGBA bytes, as canvas ImageData), so the gallery
@@ -153,6 +153,49 @@ export function snap(img, colors) {
 		img.data[k] = best[0]; img.data[k + 1] = best[1]; img.data[k + 2] = best[2];
 	}
 	return img;
+}
+
+/* 4b. Shades that are nearly the same color become one (`keep`, the outline, is left
+ * alone). A generator paints SMOOTH shading under its pixels, and a smooth color that
+ * falls between two list colors lands half its blocks on each: the owner's Ranger
+ * cloak (2026-11-19) flipped between a grayer and a bluer slate, which read as
+ * speckle. Pairs closer than `near` (OKLab distance) merge, the pair whose merge
+ * changes the picture least first (pixels changed times distance squared, Ward's
+ * rule); the smaller takes the bigger's color, which is already from the list. Only
+ * NEAR shades merge: a first version merged down to a color COUNT and turned the
+ * little cyan arrowhead white. */
+export const NEAR_SHADES = 0.07;
+export function mergeShades(imgs, near = NEAR_SHADES, keep = []) {
+	const fixed = new Set(keep.map((c) => { const [r, g, b] = hex(c); return (r << 16) | (g << 8) | b; }));
+	const count = new Map();
+	for (const img of imgs) for (let k = 0; k < img.data.length; k += 4) {
+		if (!img.data[k + 3]) continue;
+		const key = (img.data[k] << 16) | (img.data[k + 1] << 8) | img.data[k + 2];
+		if (!fixed.has(key)) count.set(key, (count.get(key) || 0) + 1);
+	}
+	const cs = [...count].map(([key, n]) => ({ key, n, lab: oklab(key >> 16, (key >> 8) & 255, key & 255) }));
+	const into = new Map();
+	for (;;) {
+		let best = Infinity, bi = -1, bj = -1;
+		for (let i = 0; i < cs.length; i++) for (let j = i + 1; j < cs.length; j++) {
+			const a = cs[i], b = cs[j], d = (a.lab[0] - b.lab[0]) ** 2 + (a.lab[1] - b.lab[1]) ** 2 + (a.lab[2] - b.lab[2]) ** 2;
+			const cost = a.n * b.n / (a.n + b.n) * d;
+			if (d < near * near && cost < best) { best = cost; bi = i; bj = j; }
+		}
+		if (bi < 0) break;
+		const [big, small] = cs[bi].n >= cs[bj].n ? [cs[bi], cs[bj]] : [cs[bj], cs[bi]];
+		into.set(small.key, big.key);
+		for (const [k, v] of into) if (v === small.key) into.set(k, big.key);
+		big.n += small.n;
+		cs.splice(cs.indexOf(small), 1);
+	}
+	if (!into.size) return imgs;
+	for (const img of imgs) for (let k = 0; k < img.data.length; k += 4) {
+		if (!img.data[k + 3]) continue;
+		const to = into.get((img.data[k] << 16) | (img.data[k + 1] << 8) | img.data[k + 2]);
+		if (to !== undefined) { img.data[k] = to >> 16; img.data[k + 1] = (to >> 8) & 255; img.data[k + 2] = to & 255; }
+	}
+	return imgs;
 }
 
 /* 5. One outline: every see-through pixel touching the sprite becomes `color`. */
@@ -407,7 +450,8 @@ export function cleanFor(key, img, { artPx = 16, keyed = false, exact = false } 
 		const { added } = fixOutline(snap(dropSpecks(pad, 1), colors));
 		return { img: pad, added };
 	});
-	const W = Math.max(...done.map((d) => d.img.w)), Hf = Math.max(...done.map((d) => d.img.h));
+	mergeShades(done.map((d) => d.img), NEAR_SHADES, PALETTE.outline);   // one set of shades for every facing
+	const W =Math.max(...done.map((d) => d.img.w)), Hf = Math.max(...done.map((d) => d.img.h));
 	const sheet = image(W, Hf * done.length);
 	done.forEach((d, k) => blit(sheet, d.img, Math.floor((W - d.img.w) / 2), k * Hf + (key.startsWith("shot.") ? Math.floor((Hf - d.img.h) / 2) : Hf - d.img.h)));
 	if (blurry) notes.push("no clear pixel grid was found, so it was shrunk instead — it may look soft; ask for chunkier pixel art");

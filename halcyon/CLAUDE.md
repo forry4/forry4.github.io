@@ -773,9 +773,11 @@ Modeled on RotMG's enchanting, minus its percentages, dust colors and artifacts.
   the height it must be (`targetHeight` = `tall` x `artPx`), else resized by whole pixels
   (nearest, never averaged). Tiles are read the same way, then made `artPx` square.
 - **One game, not forty generations: `MASTER` + `paletteFor`.** Every color snaps (OKLab)
-  to one broad shared list built in OKLCH (12 hues x 8 lightness x 3 chroma + grays) —
+  to one broad shared list built in OKLCH (12 hues x 8 lightness x 4 chroma + grays) —
   broad so a navy cloak stays navy (the first, narrow palette turned it purple) — filtered
-  by JOB: a player cannot use the vivid danger hues, an enemy or boss cannot use vivid
+  by JOB: a player cannot use the HOT danger hues (strongest chroma only — the middle
+  strength of red/orange is wood, leather and skin, and forbidding it turned the Ranger's
+  bow and hands yellow-tan), an enemy or boss cannot use vivid
   cyan/blue, a tile only the quiet colors plus its own place's ground colors. One shared
   outline color: `fixOutline` recolors the generator's own dark outline when it drew one
   (adding a second ring made sprites fat) and adds a ring when it did not. The background
@@ -783,6 +785,13 @@ Modeled on RotMG's enchanting, minus its percentages, dust colors and artifacts.
   gaps between a bow and its archer included. A class picture with three figures side by
   side becomes its three facings; one image of several things (a rift's enemies, the
   shots) is cut left to right into its slots.
+- **Generators paint SMOOTH shading under their pixels, so near shades are merged**
+  (`mergeShades`, 2026-11-19). Read one color per block, a slope that falls between two
+  list colors lands its squares on both, and the Ranger's cloak came out speckled. Shades
+  closer than `NEAR_SHADES` (OKLab) merge, least-change pair first; the 0.065 chroma step
+  was added for the same reason (a muted slate sat halfway between 0.04 and 0.09). Merge
+  by DISTANCE, never down to a color count: the count version turned the little cyan
+  arrowhead white.
 - **Prompts ask for sizes in GAME pixels** (`artPrompts.js` `sizeLine`, from the density:
   "exactly 25 pixels tall, every pixel one big square block, as if enlarged with
   nearest-neighbor"; a row of creatures gets one height each; a tile "exactly 21 by 21").
@@ -791,6 +800,13 @@ Modeled on RotMG's enchanting, minus its percentages, dust colors and artifacts.
   keeps them as drawn rather than resizing. STYLE also asks for hard edges, ~10 colors,
   a low-detail look (the owner's wizard example, ANCHOR_PX's note) and a margin round everything — what the block reader and the background cut
   need most.
+- **Longer prompts made WORSE pictures — keep subjects short** (tried and backed out
+  2026-11-19). A rewrite that spelled out every view, every color, a "Do not" list and a
+  closing checklist (~3,500 characters for the Ranger) gave the owner's worst Ranger yet:
+  the "one or two pixel" cyan arrowhead became a big gem on top of the bow, so the bow
+  read as a staff. Image generators weigh every phrase, so a long prompt dilutes the
+  ones that matter, and naming a thing to forbid it ("no cyan trim") puts it in the
+  picture. Fix one mistake with one short positive phrase, and change one thing at a time.
 - **`npm run art` (in `webapp/`) opens the studio** — `/halcyon?art` on the dev server,
   `ArtGallery.jsx`, dropped from builds with the `import.meta.env.DEV` branch. It holds
   the whole workflow: `artPrompts.js`'s batches in order with Copy prompt (STYLE pasted

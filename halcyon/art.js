@@ -96,7 +96,9 @@ export const MANIFEST = ART.pictures || {};
  * a floor is never vivid.
  *
  * The list is built in OKLCH (lightness, chroma = how vivid, hue angle): twelve hues
- * every 30 degrees, eight lightness steps, three strengths, plus grays. It is broad
+ * every 30 degrees, eight lightness steps, four strengths, plus grays. (The 0.065
+ * strength came 2026-11-19: a muted slate cloak sat halfway between 0.04 and 0.09
+ * and its squares flipped between the two.) It is broad
  * on purpose — the first one (40 hand-picked colors) had no navy, and snapped the
  * Ranger's blue hood to violet. */
 const toHex = (r, g, b) => "#" + [r, g, b].map((v) => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, "0")).join("");
@@ -115,7 +117,7 @@ const LIGHT = [0.2, 0.29, 0.38, 0.48, 0.58, 0.68, 0.79, 0.9];
 export const MASTER = [...new Map([
 	...[0.13, 0.24, 0.35, 0.47, 0.6, 0.73, 0.86, 0.97].map((L) => ({ L, C: 0, h: 0 })),
 	...[0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330].flatMap((h) =>
-		LIGHT.flatMap((L) => [0.04, 0.09, 0.15].map((C) => ({ L, C, h })))),
+		LIGHT.flatMap((L) => [0.04, 0.065, 0.09, 0.15].map((C) => ({ L, C, h })))),
 ].map((c) => { const hex = oklchHex(c.L, c.C, c.h); return [hex, { hex, ...c }]; })).values()];
 
 export const PALETTE = {
@@ -136,13 +138,17 @@ export const PALETTE = {
 const vivid = (c) => c.C >= 0.09;
 export const isDanger = (c) => vivid(c) && (c.h <= 60 || c.h >= 330);       // red, orange, magenta
 export const isPlayerHue = (c) => vivid(c) && c.h >= 180 && c.h <= 270;     // cyan, blue
+/* What the player may NOT wear: only the strongest reds and oranges. The middle
+ * strength of a warm hue is wood, leather and skin — the Ranger's bow and hands —
+ * and forbidding it snapped them to yellow-tan (2026-11-19). */
+export const isHotDanger = (c) => isDanger(c) && c.C >= 0.15;
 /* Which part of the shared list a slot's picture may use. */
 export function paletteFor(key) {
 	const slot = SLOTS[key];
 	if (!slot) return [];
 	const kind = key.split(".")[0], hex = (list) => list.map((c) => c.hex);
 	if (kind === "tile") return [...hex(MASTER.filter((c) => c.C <= 0.04)), ...PALETTE.env[slot.rift]];
-	if (kind === "player") return [...PALETTE.outline, ...hex(MASTER.filter((c) => !isDanger(c)))];
+	if (kind === "player") return [...PALETTE.outline, ...hex(MASTER.filter((c) => !isHotDanger(c)))];
 	if (key === "shot.player") return [...PALETTE.outline, ...hex(MASTER.filter((c) => isPlayerHue(c) || (c.C === 0 && c.L > 0.6) || (c.C <= 0.04 && c.L >= 0.79 && c.h >= 180 && c.h <= 270)))];
 	if (kind === "shot") return [...PALETTE.outline, ...hex(MASTER.filter((c) => isDanger(c) || (c.L >= 0.79 && (c.h <= 90 || c.h >= 330 || c.C === 0))))];
 	return [...PALETTE.outline, ...hex(MASTER.filter((c) => !isPlayerHue(c)))];   // enemies and bosses

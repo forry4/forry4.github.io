@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
-import { image, removeBackground, segments, shrink, dropSpecks, snap, outline, fixOutline, cleanFor, splitFor, targetHeight, readBlocks, blockSize, edgeProfile, oklab } from "../../../halcyon/artClean.js";
+import { image, removeBackground, segments, shrink, dropSpecks, snap, outline, fixOutline, cleanFor, splitFor, targetHeight, readBlocks, blockSize, edgeProfile, oklab, mergeShades } from "../../../halcyon/artClean.js";
 import { SLOTS, PALETTE, MASTER, paletteFor, isPlayerHue } from "../../../halcyon/art.js";
 
 const rgb = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
@@ -151,6 +151,32 @@ test("snapping picks the nearest allowed color: an enemy cannot come out cyan, t
 		assert.ok(h > 180 && h < 300 && Math.hypot(a, b) > 0.05, `${kind} as the player came out ${asPlayer} (hue ${h.toFixed(0)})`);
 		assert.ok(!isPlayerHue(hue(asEnemy) || { C: 0 }), `${kind} as an enemy came out ${asEnemy}`);
 	}
+});
+
+test("the hero keeps a warm brown bow and skin, but never a hot danger orange", () => {
+	const hue = (c) => { const [L, a, b] = oklab(...rgb(c)); return { L, C: Math.hypot(a, b), h: (Math.atan2(b, a) * 180 / Math.PI + 360) % 360 }; };
+	for (const color of [[189, 116, 70], [127, 62, 32]]) {     // the owner's Ranger: bow and hands
+		const out = hue([...colorsOf(snap(fill(image(1, 1), 0, 0, 1, 1, color), paletteFor("player.ranger")))][0]);
+		assert.ok(out.h > 25 && out.h < 75 && out.C > 0.08, `${color} came out hue ${out.h.toFixed(0)}, chroma ${out.C.toFixed(2)}: not a warm brown`);
+	}
+	const hot = hue([...colorsOf(snap(fill(image(1, 1), 0, 0, 1, 1, [255, 90, 20]), paletteFor("player.ranger")))][0]);
+	assert.ok(hot.C < 0.15, `a hot orange stayed vivid on the hero (chroma ${hot.C.toFixed(2)})`);
+});
+
+test("near shades merge into one, a distinct little accent survives", () => {
+	// a cloak whose squares flip between two close slates, with a 2-pixel cyan tip
+	const img = image(10, 10);
+	for (let p = 0; p < 100; p++) img.data.set([...(p % 3 ? [58, 66, 88] : [48, 62, 114]), 255], p * 4);
+	img.data.set([17, 209, 234, 255], 0); img.data.set([17, 209, 234, 255], 4);
+	const before = colorsOf(img).size;
+	mergeShades([img]);
+	const after = colorsOf(img);
+	assert.equal(before, 3);
+	assert.equal(after.size, 2, [...after].join(" "));
+	assert.ok([...after].some((c) => rgb(c)[2] > 200 && rgb(c)[1] > 150), "the cyan tip is still there");
+	const other = image(2, 1); other.data.set([58, 66, 88, 255, 48, 62, 114, 255]);
+	mergeShades([other], 0.02);
+	assert.equal(colorsOf(other).size, 2, "nothing merges past `near`");
 });
 
 test("the outline goes round the outside, once", () => {
