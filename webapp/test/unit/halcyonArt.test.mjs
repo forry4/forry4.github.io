@@ -8,6 +8,7 @@ import { SLOTS, MANIFEST, sheetOf, frameOf, override, drawSprite, drawTile, chec
 import { ENEMY, BOSS_HP, CLASS_INFO } from "../../../halcyon/sim.js";
 import { PALETTES, drawEnemyBody, drawMap, drawShots, decorations, deepWall } from "../../../halcyon/render.js";
 import { paletteFor, MASTER, isPlayerHue, isHotDanger } from "../../../halcyon/art.js";
+import { createSceneMotion, gait } from "../../../halcyon/motion.js";
 
 const ART_DIR = new URL("../../public/art/halcyon/", import.meta.url);
 /* A PNG's size, off its header; null when there is no such file. */
@@ -100,6 +101,46 @@ test("a picture in place is drawn at art size, on its anchor, and mirrored facin
 		assert.ok(!g.calls.some(([k]) => k === "fillRect"), "no shape under the picture");
 	} finally { override("enemy.chaser", null); }
 	assert.equal(sprite("enemy.chaser"), null);
+});
+
+test("walking lifts alternating boots from the selected facing row", () => {
+	const key = "player.ranger";
+	override(key, {}, { w: 28, h: 24, facings: 3 });
+	try {
+		const feet = (stride) => {
+			const g = fakeG();
+			drawSprite(g, key, 200, 200, artPx(), { stride, facing: { x: -1, y: 0 } });
+			assert.ok(g.calls.some(([op, x, y]) => op === "scale" && x === -1 && y === 1));
+			return g.calls.filter(([op]) => op === "drawImage");
+		};
+		const a = feet(1), b = feet(-1);
+		assert.deepEqual(a.map((call) => call.slice(2, 6)), [[0, 44, 14, 4], [14, 44, 14, 4], [0, 24, 28, 20]]);
+		assert.equal(a[0][7] - b[0][7], -1);
+		assert.equal(a[1][7] - b[1][7], 1);
+		assert.equal(feet(0).length, 1);
+	} finally { override(key, null); }
+});
+
+test("drawing history follows actual walk distance and keeps visual transitions off the simulation", () => {
+	const p = { x: 0, y: 0, hp: 10 }, foe = { x: 1, y: 0, hp: 10, tele: 2, active: true };
+	const st = { p, enemies: [foe], tick: 0, sealed: -1 };
+	const motion = createSceneMotion(st);
+	p.x = 0.1; foe.tele = 0; st.tick = 1; st.sealed = 2;
+	const snapshot = structuredClone(st);
+	motion.advance();
+	assert.deepEqual(st, snapshot);
+	assert.equal(motion.body(foe).releasedAt, 1);
+	assert.equal(gait(motion.body(p), 0.35), 1);
+	assert.ok(motion.door(2, 1) > 0 && motion.door(2, 1) < 1);
+	assert.equal(motion.door(2, 12), 1);
+	p.x = 8; foe.hp = 0; st.tick = 12; st.sealed = -1;
+	motion.advance();
+	assert.equal(motion.body(p).travel, 0.1, "a blink does not count as walking");
+	assert.equal(motion.body(foe).defeatedAt, 12);
+	assert.ok(motion.door(2, 12) < 1);
+	assert.equal(motion.door(2, 24), 0);
+	for (let i = 0; i < 5; i++) motion.advance();
+	assert.equal(gait(motion.body(p), 0.35), 0);
 });
 
 test("the map draws a floor picture in each cell, edge to edge", () => {

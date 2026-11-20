@@ -273,7 +273,7 @@ export function override(key, image, entry = {}) {
 /* Draw `key` with its anchor on (X, Y), at `px` screen pixels a tile. Returns false
  * (and draws nothing) when the picture is not there, so the caller draws its shape.
  * `rot` turns it (a shot along its flight); `size` scales it (a big enemy). */
-export function drawSprite(g, key, X, Y, px, { facing = null, tick = 0, seed = 0, rot = 0, size = 1, alpha = 1 } = {}) {
+export function drawSprite(g, key, X, Y, px, { facing = null, tick = 0, seed = 0, rot = 0, size = 1, alpha = 1, stretch = 1, squash = 1, stride = 0 } = {}) {
 	const rec = sprite(key);
 	if (!rec) return false;
 	// The anchor is worked out per draw, so a new density in the studio moves the feet too.
@@ -284,8 +284,20 @@ export function drawSprite(g, key, X, Y, px, { facing = null, tick = 0, seed = 0
 	if (alpha !== 1) g.globalAlpha *= alpha;
 	g.translate(Math.round(X), Math.round(Y));
 	if (rot) g.rotate(rot);
-	if (f.flip) g.scale(-1, 1);
-	g.drawImage(rec.img, f.sx, f.sy, s.w, s.h, -s.anchor[0] * W, -s.anchor[1] * H, W, H);
+	if (f.flip || stretch !== 1 || squash !== 1) g.scale(f.flip ? -stretch : stretch, squash);
+	const x = -s.anchor[0] * W, y = -s.anchor[1] * H;
+	if (Math.abs(stride) >= 0.5 && key.startsWith("player.") && s.w === 28 && s.h === 24 && s.facings === 3 && s.frames === 1) {
+		// The shipped class sheets share the same 24px frame and four boot rows.
+		// Lift either boot by one native pixel and keep the other planted.
+		const boot = s.h - 4, half = s.w / 2, lift = Math.round(Math.abs(stride));
+		for (let side = 0; side < 2; side++) {
+			const dx = side * half, dy = (stride > 0 ? side === 0 : side === 1) ? lift : 0;
+			g.drawImage(rec.img, f.sx + dx, f.sy + boot, half, 4, x + dx * k, y + (boot - dy) * k, half * k, 4 * k);
+		}
+		g.drawImage(rec.img, f.sx, f.sy, s.w, boot, x, y, W, boot * k);
+	} else {
+		g.drawImage(rec.img, f.sx, f.sy, s.w, s.h, x, y, W, H);
+	}
 	g.restore();
 	return true;
 }

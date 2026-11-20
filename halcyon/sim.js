@@ -1343,15 +1343,16 @@ export function playerFire(st, input) {
 	if (p.abilityCd > 0) p.abilityCd--;
 	if (input.ability && s.abilityKind && p.mp >= s.abilityCost && !(p.abilityCd > 0)) {
 		p.mp -= s.abilityCost;
+		p.castPose = { tick: st.tick, x: ax, y: ay };
 		if (s.kindle) p.kindled = SPECIAL.kindling.shots;       // Kindling: the next volleys burn
 		if (s.abilityKind === "volley" && s.gale) {           // the Gale Quiver: one arrow through everything
 			const q = UNIQUE.gale;
-			st.bullets.push({ owner: "p", x: p.x, y: p.y, vx: ax * q.speed, vy: ay * q.speed, dmg: s.abilityDmg,
+			st.bullets.push({ owner: "p", x: p.x, y: p.y, launchedAt: st.tick, vx: ax * q.speed, vy: ay * q.speed, dmg: s.abilityDmg,
 				r: q.r, life: Math.round(q.range / q.speed * TPS), pierce: 99, bounce: 0, hit: [], look: "gale" });
 		} else if (s.abilityKind === "volley") {
 			for (let i = 0; i < s.arrows; i++) {
 				const [vx, vy] = rotate(ax, ay, (i - (s.arrows - 1) / 2) * 0.14);
-				st.bullets.push({ owner: "p", x: p.x, y: p.y, vx: vx * 16, vy: vy * 16, dmg: s.abilityDmg,
+				st.bullets.push({ owner: "p", x: p.x, y: p.y, launchedAt: st.tick, vx: vx * 16, vy: vy * 16, dmg: s.abilityDmg,
 					r: 0.16, life: 45, pierce: 1, bounce: 0, hit: [] });
 			}
 		} else if (s.abilityKind === "shield") {
@@ -1381,6 +1382,7 @@ export function playerFire(st, input) {
  * empowerment is spent on the whole of the next volley. */
 function volley(st, ax, ay) {
 	const p = st.p, s = st.stats, life = Math.round(s.range / s.shotSpeed * TPS);
+	p.shotPose = { tick: st.tick, x: ax, y: ay, look: s.look };
 	let mult = p.empower > 0 ? p.empower : 1;
 	p.empower = 0;
 	if (s.fullMoon && p.mp >= s.maxMp) mult *= s.fullMoon;      // the Mantle of the Full Moon
@@ -1394,7 +1396,7 @@ function volley(st, ax, ay) {
 	const flare = s.flare > 0 && (p.volleys = (p.volleys || 0) + 1) % s.flare === 0;   // the Flare Bow
 	for (let i = 0; i < s.shots; i++) {
 		const [vx, vy] = s.shots > 1 ? rotate(ax, ay, (i - (s.shots - 1) / 2) * s.spread) : [ax, ay];
-		st.bullets.push({ owner: "p", x: p.x, y: p.y, vx: vx * s.shotSpeed, vy: vy * s.shotSpeed,
+		st.bullets.push({ owner: "p", x: p.x, y: p.y, launchedAt: st.tick, vx: vx * s.shotSpeed, vy: vy * s.shotSpeed,
 			dmg: Math.round(s.dmg * mult), r: 0.14, life, pierce: s.pierce, bounce: s.bounce, hit: [],
 			...(s.look ? { look: s.look } : {}), ...(mult > 1 ? { power: true } : {}),
 			...(burn ? { burn } : {}), ...(s.splash ? { splash: 1 } : {}), ...(s.comet ? { comet: 1 } : {}),

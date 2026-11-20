@@ -59,7 +59,7 @@ function Room({ rift, px: cssPx, facing, tick }) {
 			drawTown(g, s, { width: cv.width, height: cv.height, px, aim: FACE[facing] });
 			return;
 		}
-		drawMap(g, s, 0, 0, px, cv.width, cv.height, PALETTES[rift]);
+		drawMap(g, s, 0, 0, px, cv.width, cv.height, PALETTES[rift], tick);
 		const face = FACE[facing], clock = { tick };
 		CLASSES.forEach((c, i) => drawPlayer(g, { r: 0.4, hurt: 0 }, (2 + i * 1.6) * px, 2.6 * px, px, face, c, false, tick));
 		FOES[rift].forEach((type, i) => drawEnemyBody(g, clock, { type, r: ENEMY[type].r, flash: 0, phase: 1 }, (2 + i * 1.6) * px, 4.6 * px, px, COLORS[type], false, face));

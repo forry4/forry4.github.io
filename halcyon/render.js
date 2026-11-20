@@ -9,6 +9,7 @@
  */
 import { recoveryLimit, xpProgress, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT, VENT } from "./sim.js";
 import { drawSprite, drawTile, artPx, PALETTE, sprite } from "./art.js";
+import { clamp01, DEFEAT_TICKS, gait } from "./motion.js";
 
 /* ART (art.js): every thing below asks for its picture first and draws its shape
  * only when there is none, so art lands one picture at a time with nothing waiting. */
@@ -61,7 +62,7 @@ export function formatRiftTime(ticks) {
  * dungeon at screen resolution; on a 150% display that canvas was ~20,500 x 2,800
  * pixels, and copying it every frame halved the frame rate (measured: 33ms frames
  * at 2560x1440@1.5 against 16.7ms at 1080p). */
-export function drawMap(g, st, ox, oy, px, width, height, pal = SHALLOWS) {
+export function drawMap(g, st, ox, oy, px, width, height, pal = SHALLOWS, tick = st.tick || 0, calm = false) {
 	const x0 = Math.max(0, Math.floor(-ox / px)), x1 = Math.min(st.w - 1, Math.floor((width - ox) / px));
 	const y0 = Math.max(0, Math.floor(-oy / px)), y1 = Math.min(st.h - 1, Math.floor((height - oy) / px));
 	// Whole pixels, one tile wide plus a pixel, so neighbours never leave a seam.
@@ -82,9 +83,14 @@ export function drawMap(g, st, ox, oy, px, width, height, pal = SHALLOWS) {
 				g.fillStyle = COLORS.void; g.fillRect(X, Y, P, P);
 				if (seed % 5 === 0) { g.fillStyle = COLORS.voidSpeck; g.fillRect(X + px * 0.3, Y + px * 0.55, px * 0.08, px * 0.08); }
 			} else if (t === "~") {
-				if (drawTile(g, t0 + "water", X, Y, TW, TH, seed)) continue;
-				g.fillStyle = COLORS.water; g.fillRect(X, Y, P, P);
-				g.fillStyle = COLORS.waterLight; g.fillRect(X + px * 0.15, Y + px * 0.3, px * 0.4, px * 0.08);
+				if (!drawTile(g, t0 + "water", X, Y, TW, TH, seed)) {
+					g.fillStyle = COLORS.water; g.fillRect(X, Y, P, P);
+				}
+				if (seed % 3 === 0) {
+					const t = calm ? 0.42 : ((tick + seed * 11) % 84) / 84;
+					pixel(g, X + px * (0.12 + t * 0.57), Y + px * 0.38, px,
+						"rgba(181,231,239," + (0.42 * Math.sin(Math.PI * t)).toFixed(3) + ")", 3);
+				}
 			} else {
 				// The Fracture's broad flagstones span a 2×2 repeat.
 				const floorSeed = pal === FRACTURE ? (x % 2) + 2 * (y % 2) : seed;
@@ -97,7 +103,7 @@ export function drawMap(g, st, ox, oy, px, width, height, pal = SHALLOWS) {
 		}
 	}
 	drawEdges(g, st, ox, oy, px, { x0, x1, y0, y1 }, pal === FRACTURE && sprite("rift.fracture.buttress"));
-	drawDecor(g, st, ox, oy, px, { x0, x1, y0, y1 }, pal);
+	drawDecor(g, st, ox, oy, px, { x0, x1, y0, y1 }, pal, tick, calm);
 }
 
 /* DECORATIONS (art.js DECO_PARTS): where each goes is worked out once per map, from
@@ -156,20 +162,24 @@ export function decorations(st) {
  * (2026-11-19), and a room with nothing on its walls looks better than one with
  * placeholders on them. So a place stays bare until its decorations are made. */
 const DECO_Y = { light: 0.55, hang: 0.12, growth: 0.95, scatter: null };   // where on its tile each sits (scatter: its own spot)
-function drawDecor(g, st, ox, oy, px, { x0, x1, y0, y1 }, pal) {
+function drawDecor(g, st, ox, oy, px, { x0, x1, y0, y1 }, pal, tick, calm) {
 	const keys = Object.fromEntries(Object.keys(DECO_Y).map((part) => [part, `deco.${pal.id}.${part}`]));
 	if (!Object.values(keys).some(sprite)) return;
 	for (const d of decorations(st)) {
 		if (d.x < x0 - 1 || d.x > x1 + 1 || d.y < y0 - 1 || d.y > y1 + 1) continue;
 		const fy = DECO_Y[d.part];
 		const X = ox + (d.x + (d.dx ?? 0.5)) * px, Y = oy + (d.y + (fy ?? d.dy)) * px;
-		if (pal === FRACTURE && d.part === "light" && sprite(keys.light)) {
+		const light = d.part === "light" && sprite(keys.light), phase = d.x * 7 + d.y * 13;
+		if (pal === FRACTURE && light) {
 			const step = Math.max(1, Math.round(px / artPx()));
 			const x = Math.round(X / step) * step, y = Math.round(Y / step) * step;
 			g.fillStyle = "rgba(235,129,48,.10)"; g.fillRect(x - step * 8, y - step * 4, step * 16, step * 15);
-			g.fillStyle = "rgba(255,161,61,.12)"; g.fillRect(x - step * 5, y - step * 3, step * 10, step * 10);
+			const glow = calm ? 0.12 : 0.12 + 0.035 * Math.sin((tick + phase) * 0.19);
+			g.fillStyle = "rgba(255,161,61," + glow.toFixed(3) + ")";
+			g.fillRect(x - step * 5, y - step * 3, step * 10, step * 10);
 		}
-		drawSprite(g, keys[d.part], X, Y, px, { seed: d.x * 7 + d.y * 13 });
+		drawSprite(g, keys[d.part], X, Y, px, { seed: phase, tick });
+		if (light && !calm) ember(g, X, Y - px * 0.13, px, tick + phase, "#ffc278");
 	}
 }
 
@@ -293,35 +303,64 @@ function drawCracks(g, st, ox, oy, px, calm) {
 /* The doors of rooms that still hold enemies (sim.js): a faint red veil before the
  * room is entered (shots stop there; you can walk through), iron bars once it is
  * sealed. A cleared room's doorway is plain floor. */
-function drawDoors(g, st, ox, oy, px) {
+function drawDoors(g, st, ox, oy, px, motion, tick, calm) {
 	if (!st.doorCols) return;
-	const P = Math.ceil(px) + 1, Y = Math.floor(oy + (st.doorY - 1) * px), H = px * 3;
+	const Y = Math.floor(oy + (st.doorY - 1) * px), H = px * 3;
 	const paneled = st.dungeonId === "fracture" && sprite("rift.fracture.gate");
 	st.doorCols.forEach((room, x) => {
-		if (room < 0 || !(st.roomLeft[room] > 0)) return;
-		const X = Math.floor(ox + x * px);
-		if (st.sealed === room) {
-			if (paneled) {
-				const W = Math.floor(ox + (x + 1) * px) - X;
-				g.fillStyle = "#281f34"; g.fillRect(X, Y, W, H);
-				for (let y = st.doorY - 1; y <= st.doorY + 1; y++) {
-					const top = Math.floor(oy + y * px), height = Math.floor(oy + (y + 1) * px) - top;
-					drawTile(g, "rift.fracture.gate", X, top, W, height);
-				}
-				return;
-			}
-			g.fillStyle = COLORS.bars; g.fillRect(X, Y, P, H);
-			g.fillStyle = COLORS.barsLit;
-			for (let k = 0; k < 4; k++) g.fillRect(X + px * (0.12 + k * 0.24), Y, Math.max(2, px * 0.08), H);
-		} else {
-			g.fillStyle = COLORS.veil; g.fillRect(X, Y, P, H);
+		if (room < 0) return;
+		const X = Math.floor(ox + x * px), W = Math.floor(ox + (x + 1) * px) - X;
+		const cover = !calm && motion ? motion.door(room, tick) : Number(st.sealed === room);
+		if (st.roomLeft[room] > 0 && cover < 1) {
+			g.fillStyle = COLORS.veil; g.fillRect(X, Y, W, H);
 			g.fillStyle = COLORS.veilEdge; g.fillRect(X + px * 0.45, Y, Math.max(1, px * 0.1), H);
+		}
+		if (cover <= 0) return;
+		const height = Math.ceil(H * cover);
+		if (paneled) {
+			g.save();
+			g.beginPath(); g.rect(X, Y, W, height); g.clip();
+			g.fillStyle = "#281f34"; g.fillRect(X, Y, W, height);
+			for (let i = 0; i < 3; i++) drawTile(g, "rift.fracture.gate", X, Math.floor(Y + height - H + i * px), W, Math.ceil(px));
+			g.restore();
+		} else {
+			g.fillStyle = COLORS.bars; g.fillRect(X, Y, W, height);
+			g.fillStyle = COLORS.barsLit;
+			for (let k = 0; k < 4; k++) g.fillRect(X + px * (0.12 + k * 0.24), Y, Math.max(2, px * 0.08), height);
 		}
 	});
 }
 
 function circle(g, x, y, r, fill) {
 	g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fillStyle = fill; g.fill();
+}
+
+function pixel(g, x, y, px, color, width = 1) {
+	const k = Math.max(1, Math.round(px / artPx()));
+	g.fillStyle = color;
+	g.fillRect(Math.round(x / k) * k, Math.round(y / k) * k, width * k, k);
+}
+
+function ember(g, X, Y, px, tick, color) {
+	const t = (tick % 46) / 46;
+	if (t < 0.68) pixel(g, X + px * (0.03 + 0.15 * Math.sin(t * 5)), Y - px * t * 0.5, px, color);
+}
+
+function orbit(g, X, Y, px, tick, color) {
+	for (let i = 0; i < 3; i++) {
+		const a = tick / 17 + i * 2 * Math.PI / 3;
+		pixel(g, X + Math.cos(a) * px * 0.33, Y + Math.sin(a) * px * 0.22, px, color);
+	}
+}
+
+function shadow(g, X, Y, px, r = 0.36) {
+	g.beginPath(); g.ellipse(X, Y + px * 0.2, px * r, px * r * 0.34, 0, 0, 2 * Math.PI);
+	g.fillStyle = "rgba(13,9,17,.32)"; g.fill();
+}
+
+function arrivalLift(motion, item, tick, px) {
+	const t = clamp01((motion?.age(item, tick) ?? 20) / 20);
+	return Math.abs(Math.sin(t * Math.PI * 1.65)) * (1 - t) * px * 0.58;
 }
 
 /* Where the world sits on the canvas: it follows the player (at `at`, the drawn —
@@ -343,18 +382,18 @@ export function camera(st, width, height, px, at = st.p, follow = false) {
  * is smooth at any refresh rate while the simulation stays a fixed 60 Hz. */
 const here = (o) => o;
 export function draw(g, st, { width, height, px, aim, notes = [], at = here, bagBest = () => ({ tier: 1 }),
-	calm = false, ui = 1, dpr = 1, bossName = "The boss", keys = {}, mods = [], auto = false }) {
+	calm = false, aiming = false, ui = 1, dpr = 1, bossName = "The boss", keys = {}, mods = [], auto = false, motion = null, frameTick = st.tick }) {
 	const p = st.p, pp = at(p);
 	const { ox, oy } = camera(st, width, height, px, pp, true);
 	const sx = (x) => ox + x * px, sy = (y) => oy + y * px;
 
 	const pal = PALETTES[st.dungeonId] || SHALLOWS;
 	g.fillStyle = pal.deep; g.fillRect(0, 0, width, height);
-	drawMap(g, st, ox, oy, px, width, height, pal);
+	drawMap(g, st, ox, oy, px, width, height, pal, frameTick, calm);
 	drawCracks(g, st, ox, oy, px, calm);
-	drawDoors(g, st, ox, oy, px);
-	drawHazards(g, st, sx, sy, px);
-	drawAbilityFx(g, st, sx, sy, px, pp);
+	drawDoors(g, st, ox, oy, px, motion, frameTick, calm);
+	drawHazards(g, st, sx, sy, px, calm);
+	drawAbilityFx(g, st, sx, sy, px, pp, calm);
 	if (st.shield) {
 		circle(g, sx(st.shield.x), sy(st.shield.y), px * st.shield.r, COLORS.shield);
 		g.strokeStyle = "#fff0b7"; g.lineWidth = Math.max(2, px * 0.08);
@@ -362,19 +401,26 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here, bag
 	}
 
 	for (const h of st.pickups) {                     // healing: green, a cross
-		const X = sx(h.x), Y = sy(h.y), s = px * 0.16;
-		circle(g, X, Y, px * 0.3, "rgba(111,211,106,.28)");
+		const X = sx(h.x), ground = sy(h.y), s = px * 0.16;
+		const Y = ground - (calm ? 0 : px * (0.08 + 0.07 * Math.sin(frameTick / 13 + h.x)) + arrivalLift(motion, h, frameTick, px));
+		circle(g, X, ground, px * 0.3, "rgba(111,211,106,.28)");
 		g.fillStyle = COLORS.heal; g.fillRect(X - s * 1.5, Y - s / 2, s * 3, s); g.fillRect(X - s / 2, Y - s * 1.5, s, s * 3);
 	}
 	for (const b of st.bags) {                        // loot: the color of its best item
-		const X = sx(b.x), Y = sy(b.y), best = bagBest(b);
+		const X = sx(b.x), ground = sy(b.y), best = bagBest(b);
+		const Y = ground - (calm ? 0 : arrivalLift(motion, b, frameTick, px));
+		shadow(g, X, ground - px * 0.14, px, 0.27);
 		const col = best.unique ? UNIQUE_COLOR : TIER_COLORS[best.tier] || COLORS.bag;
 		if (best.unique) {
 			const pulse = calm ? 0.5 : 0.5 + 0.5 * Math.sin(st.tick / 10);
 			circle(g, X, Y, px * (0.48 + 0.08 * pulse), "rgba(255,216,94,.28)");
 		} else if (best.tier >= 3) circle(g, X, Y, px * 0.42, col + "33");
-		g.fillStyle = col; g.fillRect(X - px * 0.22, Y - px * 0.18, px * 0.44, px * 0.38);
-		g.fillStyle = "rgba(20,16,10,.55)"; g.fillRect(X - px * 0.22, Y - px * 0.06, px * 0.44, px * 0.05);
+		if (drawSprite(g, "town.bag", X, Y, px)) {
+			pixel(g, X - px * 0.11, Y + px * 0.1, px, col, 4);
+		} else {
+			g.fillStyle = col; g.fillRect(X - px * 0.22, Y - px * 0.18, px * 0.44, px * 0.38);
+			g.fillStyle = "rgba(20,16,10,.55)"; g.fillRect(X - px * 0.22, Y - px * 0.06, px * 0.44, px * 0.05);
+		}
 	}
 	for (const f of st.floor || []) {                 // what the player put down: pale, a bundle
 		const X = sx(f.x), Y = sy(f.y);
@@ -382,19 +428,33 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here, bag
 		g.fillStyle = "#6c747d"; g.fillRect(X - px * 0.18, Y - px * 0.04, px * 0.36, px * 0.05);
 	}
 	if (st.portal) {
-		const pulse = 0.5 + 0.5 * Math.sin(st.tick / 9);
+		const pulse = calm ? 0.5 : 0.5 + 0.5 * Math.sin(frameTick / 9);
 		circle(g, sx(st.portal.x), sy(st.portal.y), px * (0.55 + 0.1 * pulse), "rgba(159,231,255,.35)");
 		circle(g, sx(st.portal.x), sy(st.portal.y), px * 0.32, COLORS.portal);
+		if (!calm) orbit(g, sx(st.portal.x), sy(st.portal.y), px, frameTick, "#c7faff");
 	}
 	if (st.deeper) {                                  // the way deeper: ember orange, a dark heart
-		const pulse = 0.5 + 0.5 * Math.sin(st.tick / 7);
+		const pulse = calm ? 0.5 : 0.5 + 0.5 * Math.sin(frameTick / 7);
 		circle(g, sx(st.deeper.x), sy(st.deeper.y), px * (0.58 + 0.12 * pulse), "rgba(255,159,90,.32)");
 		circle(g, sx(st.deeper.x), sy(st.deeper.y), px * 0.34, COLORS.deeper);
 		circle(g, sx(st.deeper.x), sy(st.deeper.y), px * 0.14, "#3a1a10");
+		if (!calm) orbit(g, sx(st.deeper.x), sy(st.deeper.y), px, frameTick, "#ffc278");
 	}
 
 	for (const e of st.enemies) {
-		if (e.hp <= 0 || e.dormant) continue;
+		const body = motion?.body(e);
+		if (e.dormant) continue;
+		if (e.hp <= 0) {
+			const age = frameTick - (body?.defeatedAt ?? -Infinity);
+			if (!calm && age >= 0 && age < DEFEAT_TICKS) {
+				const t = age / DEFEAT_TICKS;
+				g.save(); g.globalAlpha *= 1 - t;
+				drawEnemyBody(g, st, e, sx(e.x), sy(e.y) + px * t * 0.14, px,
+					COLORS[e.form || e.type] || COLORS.boss, true, body?.facing, null, frameTick, t);
+				g.restore();
+			}
+			continue;
+		}
 		const ep = at(e), X = sx(ep.x), Y = sy(ep.y), r = e.r * px;
 		// The Breach's fault lines: dashed, thickening until they tear.
 		if (e.faults && e.faultT > 0 && e.active) {
@@ -427,7 +487,8 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here, bag
 		// Reduced flashing (a setting): a hit tints, and the boss's turn holds still.
 		const col = e.flash > 0 ? (calm ? "#f3b9a8" : "#fff3ea")
 			: e.form === "breach" || e.form === "pyre" ? COLORS[e.form] : e.type === "smolder" && e.lit ? COLORS.smolderLit : COLORS[e.type];
-		drawEnemyBody(g, st, e, X, Y, px, col, calm, { x: pp.x - ep.x, y: pp.y - ep.y });
+		const facing = e.tele > 0 || !body?.pace ? { x: pp.x - ep.x, y: pp.y - ep.y } : body.facing;
+		drawEnemyBody(g, st, e, X, Y, px, col, calm, facing, body, frameTick);
 		if (e.ward > 0) {                                 // Warded: one pip per hit it will still ignore
 			const n = e.ward, gap = px * 0.16, w0 = (n - 1) * gap, py = Y + r + px * 0.2;
 			for (let k = 0; k < n; k++) circle(g, X - w0 / 2 + k * gap, py, Math.max(1.5, px * 0.055), COLORS.ward);
@@ -439,9 +500,9 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here, bag
 		}
 	}
 
-	drawPlayer(g, p, sx(pp.x), sy(pp.y), px, aim, st.classId, calm, st.tick);
+	drawPlayer(g, p, sx(pp.x), sy(pp.y), px, aim, st.classId, calm, frameTick, motion?.body(p), aiming);
 
-	drawShots(g, st.bullets, sx, sy, px, at);
+	drawShots(g, st.bullets, sx, sy, px, at, calm, frameTick);
 	drawDamageNumbers(g, st.damageNumbers || [], sx, sy, px, st.tick);
 	drawHud(g, st, { width, height, px, notes, ui, keys, auto });
 	drawBossBar(g, st, { width, ui, name: bossName });
@@ -451,8 +512,18 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here, bag
 /* One enemy's body at (X, Y): its picture, facing the player, when there is one —
  * a hit flashes it brighter — else its greybox shape in `col`. Exported for the art
  * gallery, which draws every enemy on every rift's floor. */
-export function drawEnemyBody(g, st, e, X, Y, px, col, calm = false, facing = null) {
-	const r = e.r * px, key = `enemy.${e.form || e.type}`, opt = { facing, tick: st.tick };
+export function drawEnemyBody(g, st, e, X, Y, px, col, calm = false, facing = null, body = null, tick = st.tick, defeat = 0) {
+	const kind = e.form || e.type, key = "enemy." + kind, r = e.r * px;
+	const hover = kind === "radial" || kind === "shard" || kind === "flicker" || kind === "pyre";
+	const step = calm ? 0 : Math.abs(gait(body, e.type === "boss" ? 2 : 1.24));
+	const windup = e.active && e.tele > 0 && !calm ? Math.min(1, e.tele / 16) : 0;
+	const release = calm ? 0 : clamp01(1 - (tick - (body?.releasedAt ?? -Infinity)) / 10);
+	const lift = calm ? 0 : hover ? 0.10 + 0.065 * Math.sin((tick + (e.homeX || 0) * 31) / 13) : step * 0.075;
+	const squash = 1 + release * 0.08 - windup * 0.12 - defeat * 0.68;
+	const stretch = 1 - release * 0.065 + windup * 0.07 + defeat * 0.13;
+	const opt = { facing, tick, stretch, squash };
+	if (!defeat) shadow(g, X, Y, px, e.r * 0.92);
+	Y -= lift * px;
 	if (drawSprite(g, key, X, Y, px, opt)) {
 		if (e.flash > 0) {
 			g.save(); g.globalCompositeOperation = "lighter";
@@ -460,6 +531,10 @@ export function drawEnemyBody(g, st, e, X, Y, px, col, calm = false, facing = nu
 			g.restore();
 		}
 		return;
+	}
+	const shapeFx = windup || release || defeat;
+	if (shapeFx) {
+		g.save(); g.translate(X, Y); g.scale(stretch, squash); g.translate(-X, -Y);
 	}
 	if (e.type === "chaser") {
 		g.save(); g.translate(X, Y); g.rotate(Math.PI / 4); g.fillStyle = col; g.fillRect(-r * 0.8, -r * 0.8, r * 1.6, r * 1.6); g.restore();
@@ -494,14 +569,14 @@ export function drawEnemyBody(g, st, e, X, Y, px, col, calm = false, facing = nu
 		g.beginPath(); g.moveTo(X - r * 0.5, Y - r * 0.2); g.lineTo(X, Y + r * 0.15); g.lineTo(X + r * 0.45, Y - r * 0.35);
 		g.moveTo(X, Y + r * 0.15); g.lineTo(X + r * 0.1, Y + r * 0.6); g.stroke();
 	} else if (e.form === "pyre") {                     // the Pyre: a ring of flame tongues round a white-hot heart
-		const n = 10, spin = st.tick * 0.03;
+		const n = 10, spin = calm ? 0 : tick * 0.03;
 		g.beginPath();
 		for (let k = 0; k < n * 2; k++) { const a = spin + k * Math.PI / n, rr = k % 2 ? r * 0.7 : r * 1.12; g[k ? "lineTo" : "moveTo"](X + Math.cos(a) * rr, Y + Math.sin(a) * rr); }
 		g.closePath(); g.fillStyle = e.phase === 0 && !calm && st.tick % 10 < 5 ? "#fff3ea" : col; g.fill();
 		circle(g, X, Y, r * 0.5, "#ffd27a");
 		circle(g, X, Y, r * 0.26, "#fff7ec");
 	} else if (e.form === "breach") {                   // the Breach: a torn violet star
-		const n = 8, spin = st.tick * 0.02;
+		const n = 8, spin = calm ? 0 : tick * 0.02;
 		g.beginPath();
 		for (let k = 0; k < n * 2; k++) { const a = spin + k * Math.PI / n, rr = k % 2 ? r * 0.55 : r * 1.05; g[k ? "lineTo" : "moveTo"](X + Math.cos(a) * rr, Y + Math.sin(a) * rr); }
 		g.closePath(); g.fillStyle = e.phase === 0 && !calm && st.tick % 10 < 5 ? "#fff3ea" : col; g.fill();
@@ -510,6 +585,7 @@ export function drawEnemyBody(g, st, e, X, Y, px, col, calm = false, facing = nu
 		circle(g, X, Y, r, e.phase === 0 && !calm && st.tick % 10 < 5 ? "#fff3ea" : col);
 		circle(g, X, Y, r * 0.55, "#5a1424");
 	}
+	if (shapeFx) g.restore();
 }
 
 /* "Auto-fire" over the HP box while it is on (it stays on across town and runs, so
@@ -596,18 +672,19 @@ function drawMinimap(g, st, { width, ui, dpr, bagBest, mods = [] }) {
 
 /* The boss's mortar: burning ground (a flickering orange pool that fades in its last
  * second), and each shell's landing spot, ringed red and filling as it comes. */
-function drawHazards(g, st, sx, sy, px) {
+function drawHazards(g, st, sx, sy, px, calm) {
 	for (const f of st.embers || []) {                // the player's own fire: pale blue, white at heart
 		const left = f.until - st.tick, fade = Math.min(1, left / TPS);
-		const flick = 0.85 + 0.15 * Math.sin((st.tick + f.y * 7) * 0.35);
+		const flick = calm ? 1 : 0.85 + 0.15 * Math.sin((st.tick + f.y * 7) * 0.35);
 		circle(g, sx(f.x), sy(f.y), px * f.r, `rgba(120,214,255,${(0.28 * fade * flick).toFixed(3)})`);
 		circle(g, sx(f.x), sy(f.y), px * f.r * 0.55, `rgba(230,250,255,${(0.2 * fade * flick).toFixed(3)})`);
 	}
 	for (const f of st.fires || []) {
 		const left = f.until - st.tick, fade = Math.min(1, left / TPS);
-		const flick = 0.85 + 0.15 * Math.sin((st.tick + f.x * 7) * 0.35);
+		const flick = calm ? 1 : 0.85 + 0.15 * Math.sin((st.tick + f.x * 7) * 0.35);
 		circle(g, sx(f.x), sy(f.y), px * f.r, `rgba(255,112,40,${(0.34 * fade * flick).toFixed(3)})`);
 		circle(g, sx(f.x), sy(f.y), px * f.r * 0.6, `rgba(255,190,80,${(0.22 * fade * flick).toFixed(3)})`);
+		if (!calm && fade > 0.3) ember(g, sx(f.x), sy(f.y), px, st.tick + Math.floor(f.x * 17), "#ffad56");
 	}
 	const lw = Math.max(1.5, px * 0.07);
 	for (const m of st.mortars || []) {
@@ -623,7 +700,7 @@ function drawHazards(g, st, sx, sy, px) {
  * a falling star (its spot ringed, filling as it comes) and its blast, and the
  * Ninja's counter — a white ring while it is ready to catch a hit, a solid guard
  * just after, and a gold ring while the next shot is countered. Shared by the town. */
-function drawAbilityFx(g, st, sx, sy, px, pp) {
+function drawAbilityFx(g, st, sx, sy, px, pp, calm) {
 	const p = st.p, lw = Math.max(1, px * 0.05);
 	if (st.slowUntil > st.tick) {
 		const c = st.slowAt || pp;                          // the Anchor Orb's field stays where it was cast
@@ -636,6 +713,9 @@ function drawAbilityFx(g, st, sx, sy, px, pp) {
 		g.strokeStyle = COLORS.star; g.lineWidth = lw;
 		g.beginPath(); g.arc(sx(f.x), sy(f.y), px * f.r, 0, Math.PI * 2); g.stroke();
 		circle(g, sx(f.x), sy(f.y), px * f.r * k, "rgba(255,233,166,.28)");
+		if (!calm && k > 0.45) {
+			drawSprite(g, "shot.bolt", sx(f.x), sy(f.y) - px * (1 - k) * 3.2, px, { rot: Math.PI / 2, size: 1.1 });
+		}
 	}
 	for (const b of st.blasts || []) {
 		const a = Math.max(0, (b.until - st.tick) / 18);
@@ -683,11 +763,22 @@ function shotSprite(g, b, X, Y, px) {
 	const rot = type === "star" ? (b.life || 0) * 0.35 : Math.atan2(b.vy, b.vx);
 	return drawSprite(g, key, X, Y, px, { rot, size });
 }
-export function drawShots(g, bullets, sx, sy, px, at) {
+export function drawShots(g, bullets, sx, sy, px, at, calm = false, tick = 0) {
 	for (const b of bullets) {
-		const bp = at(b), X = sx(bp.x), Y = sy(bp.y);
+		const bp = at(b), X = sx(bp.x);
+		// New friendly shots start at hand height and settle into the hit plane.
+		// The hostile sprite always draws at its collision position.
+		const lift = !calm && b.launchedAt != null ? 0.34 * clamp01(1 - (tick - b.launchedAt) / 10) : 0;
+		const Y = sy(bp.y) - px * lift;
 		if (b.owner === "p" && b.power) drawPowerTrail(g, X, Y, b, px);
-		if (shotSprite(g, b, X, Y, px)) continue;
+		if (shotSprite(g, b, X, Y, px)) {
+			if (!calm && b.owner === "p" && !b.power && b.look !== "slash") {
+				g.strokeStyle = "rgba(194,242,250,.32)"; g.lineWidth = Math.max(1, px * 0.04);
+				g.beginPath(); g.moveTo(X - b.vx * px * 0.012, Y - b.vy * px * 0.012);
+				g.lineTo(X - b.vx * px * 0.043, Y - b.vy * px * 0.043); g.stroke();
+			}
+			continue;
+		}
 		if (b.owner === "p" && b.look === "flare") {         // the Flare Bow's flare: a bright ball of fire
 			circle(g, X, Y, px * 0.24, "rgba(120,214,255,.45)");
 			circle(g, X, Y, px * 0.14, "#e6faff");
@@ -720,8 +811,35 @@ export function drawShots(g, bullets, sx, sy, px, at) {
 
 /* The player: cyan body, white core, a tick toward the aim — or the class's picture,
  * facing the aim. A hit flashes it brighter. */
-export function drawPlayer(g, p, PX, PY, px, aim, classId = "ranger", calm = false, tick = 0) {
-	const key = `player.${classId}`, opt = { facing: aim, tick };
+export function drawPlayer(g, p, PX, PY, px, aim, classId = "ranger", calm = false, tick = 0, motion = null, aiming = false) {
+	const stride = calm ? 0 : gait(motion, 1.08);
+	const shot = p.shotPose, cast = p.castPose;
+	const shotAge = tick - (shot?.tick ?? -Infinity), castAge = tick - (cast?.tick ?? -Infinity);
+	const attacking = shotAge >= 0 && shotAge < 10, casting = castAge >= 0 && castAge < 15;
+	const cursor = aim && Math.hypot(aim.x, aim.y) > 0.16 ? aim : null;
+	const facing = casting ? cast : attacking ? shot
+		: (aiming || !(motion?.pace > 0.15)) && cursor ? cursor : motion?.facing;
+	const recoil = !calm && attacking ? (1 - shotAge / 10) ** 2 * (shot.look === "slash" ? 0.17 : -0.095) : 0;
+	const charge = !calm && casting ? Math.sin(Math.PI * castAge / 15) : 0;
+	const defeat = !calm && motion?.defeatedAt != null ? clamp01((tick - motion.defeatedAt) / DEFEAT_TICKS) : 0;
+	const idle = !calm && !motion?.pace ? (0.5 + 0.5 * Math.sin(tick / 17)) * 0.038 : 0;
+	const key = "player." + classId, opt = { facing, tick, stride,
+		stretch: 1 + defeat * 0.12, squash: 1 + charge * 0.065 - defeat * 0.63 };
+	const color = COLORS[classId] || COLORS.player;
+	shadow(g, PX, PY, px);
+	if (charge > 0.04) {
+		g.save(); g.globalAlpha *= 0.55 * charge;
+		g.strokeStyle = color; g.lineWidth = Math.max(1, px * 0.038);
+		g.beginPath(); g.arc(PX, PY, px * (0.48 + 0.3 * castAge / 15), 0, Math.PI * 2); g.stroke();
+		g.restore();
+	}
+	if (!calm && attacking && shotAge < 5) {
+		g.save(); g.globalAlpha *= (1 - shotAge / 5) * 0.72;
+		pixel(g, PX + shot.x * px * 0.58, PY + (shot.y * 0.58 - 0.34) * px, px, "#f4fdff", 2);
+		g.restore();
+	}
+	PX += (shot?.x || 0) * px * recoil;
+	PY += (shot?.y || 0) * px * recoil - px * (Math.abs(stride) * 0.065 + idle) + px * defeat * 0.15;
 	if (drawSprite(g, key, PX, PY, px, opt)) {
 		if (p.hurt > 0) {
 			g.save(); g.globalCompositeOperation = "lighter";
@@ -730,16 +848,16 @@ export function drawPlayer(g, p, PX, PY, px, aim, classId = "ranger", calm = fal
 		}
 		return;
 	}
-	const pr = p.r * px;
-	const body = COLORS[classId] && classId !== "ranger" ? COLORS[classId] : COLORS.player;
+	const pr = p.r * px * (1 - defeat * 0.4);
+	const body = color;
 	circle(g, PX, PY, pr + px * 0.06, p.hurt > 0 ? (calm ? "#e2564e" : "#ffffff") : "#1d5f6a");
 	circle(g, PX, PY, pr, body);
 	circle(g, PX, PY, pr * 0.42, COLORS.playerCore);
-	if (aim) {
-		const l = Math.hypot(aim.x, aim.y) || 1;
+	if (facing) {
+		const l = Math.hypot(facing.x, facing.y) || 1;
 		g.strokeStyle = COLORS.playerCore; g.lineWidth = Math.max(1.5, px * 0.06);
-		g.beginPath(); g.moveTo(PX + aim.x / l * pr * 1.2, PY + aim.y / l * pr * 1.2);
-		g.lineTo(PX + aim.x / l * pr * 1.9, PY + aim.y / l * pr * 1.9); g.stroke();
+		g.beginPath(); g.moveTo(PX + facing.x / l * pr * 1.2, PY + facing.y / l * pr * 1.2);
+		g.lineTo(PX + facing.x / l * pr * 1.9, PY + facing.y / l * pr * 1.9); g.stroke();
 	}
 }
 
@@ -769,23 +887,36 @@ function label(g, text, X, Y, px, color = "#f4efe4") {
 /* The town (town.js): flagstones, the vault, the forge, a portal per realm. The
  * station in reach glows, and the prompt for it sits at the bottom of the view. */
 const PROMPT = { vault: "Open the vault", forge: "Use the forge", dream: "Practice a rift", portal: "Enter" };
-export function drawTown(g, st, { width, height, px, at = here, notes = [], prompt = null, aim = null, dps = () => 0, auto = false, ui = 1 }) {
+export function drawTown(g, st, { width, height, px, at = here, notes = [], prompt = null, aim = null,
+	dps = () => 0, auto = false, aiming = false, ui = 1, calm = false, motion = null, frameTick = st.tick }) {
 	const pp = at(st.p);
 	const { ox, oy } = camera(st, width, height, px, pp);
 	const sx = (x) => ox + x * px, sy = (y) => oy + y * px;
 	g.fillStyle = TOWN.deep; g.fillRect(0, 0, width, height);
-	drawMap(g, st, ox, oy, px, width, height, TOWN);
-	if (st.fountain) drawSprite(g, "town.fountain", sx(st.fountain.x), sy(st.fountain.y), px);
+	drawMap(g, st, ox, oy, px, width, height, TOWN, frameTick, calm);
+	if (st.fountain) {
+		const X = sx(st.fountain.x), Y = sy(st.fountain.y);
+		if (drawSprite(g, "town.fountain", X, Y, px) && !calm) {
+			for (let i = 0; i < 3; i++) {
+				const t = ((frameTick + i * 15) % 45) / 45, side = i - 1;
+				pixel(g, X + px * side * (0.09 + t * 0.24), Y - px * (0.07 + Math.sin(t * Math.PI) * 0.36),
+					px, t > 0.7 ? "#6cb3d3" : "#c5edf5");
+			}
+		}
+	}
 
 	for (const s of st.stations) {
 		const X = sx(s.x), Y = sy(s.y), lit = st.near === s.id;
 		const gate = s.kind === "portal" || s.kind === "dream";
 		const key = "town." + (s.kind === "portal" ? s.realm : s.kind);
+		const phase = frameTick + s.x * 21, pulse = calm ? 0.5 : 0.5 + 0.5 * Math.sin(phase / 14);
 		if (sprite(key)) {
-			if (lit) circle(g, X, Y + px * 0.28, px * (gate ? 0.94 : 1.15), "rgba(205,198,251,.30)");
-			drawSprite(g, key, X, Y, px);
+			if (lit) circle(g, X, Y + px * 0.28, px * ((gate ? 0.94 : 1.15) + 0.045 * pulse), "rgba(205,198,251,.30)");
+			drawSprite(g, key, X, Y, px, { tick: frameTick });
+			if (!calm && gate) orbit(g, X, Y - px * 0.21, px, phase, s.realm === "ashen" ? "#ffc278" : "#c3ecff");
+			if (!calm && s.kind === "forge") ember(g, X, Y - px * 0.16, px, phase, "#ffc278");
+			if (!calm && lit && s.kind === "vault" && phase % 80 < 10) pixel(g, X, Y + px * 0.1, px, "#ffe6ac");
 		} else if (gate) {
-			const pulse = 0.5 + 0.5 * Math.sin(st.tick / 14);
 			const core = s.kind === "dream" ? COLORS.dream : COLORS.realm;
 			circle(g, X, Y, px * (0.95 + 0.12 * pulse), lit ? "rgba(205,198,251,.45)" : "rgba(157,143,242,.28)");
 			circle(g, X, Y, px * 0.7, core);
@@ -801,7 +932,7 @@ export function drawTown(g, st, { width, height, px, at = here, notes = [], prom
 				g.fillRect(X - px * 0.13, Y - H * 0.2, px * 0.26, px * 0.34);
 			} else {                                    // a forge: stone hearth, the fire showing
 				g.fillStyle = COLORS.forge; g.fillRect(X - W / 2, Y - H / 2, W, H);
-				const glow = 0.75 + 0.25 * Math.sin(st.tick / 7);
+				const glow = 0.75 + 0.25 * pulse;
 				circle(g, X, Y + H * 0.08, px * 0.5 * glow, "rgba(239,138,58,.4)");
 				circle(g, X, Y + H * 0.08, px * 0.3, COLORS.forgeFire);
 				g.fillStyle = "#33373c"; g.fillRect(X - W / 2, Y - H / 2, W, H * 0.22);
@@ -825,7 +956,9 @@ export function drawTown(g, st, { width, height, px, at = here, notes = [], prom
 	// The practice posts: a straw target on a stake, and what it is taking a second.
 	for (const q of st.posts) {
 		const X = sx(q.x), Y = sy(q.y), R = q.r * px;
-		if (!drawSprite(g, "town.target", X, Y, px, { size: q.r / 0.45 })) {
+		const since = frameTick - (q.hits?.at(-1)?.t ?? -Infinity);
+		const sway = !calm && since >= 0 && since < 13 ? Math.sin(since * 0.56) * (1 - since / 13) * 0.18 : 0;
+		if (!drawSprite(g, "town.target", X, Y, px, { size: q.r / 0.45, rot: sway })) {
 			g.fillStyle = "#5a4127"; g.fillRect(X - px * 0.07, Y, px * 0.14, R * 1.3);
 			circle(g, X, Y, R, "#c9a25e");
 			circle(g, X, Y, R * 0.66, "#efe3c4");
@@ -835,10 +968,10 @@ export function drawTown(g, st, { width, height, px, at = here, notes = [], prom
 		// Below the stake: the hit numbers float up from above the post.
 		if (d > 0) label(g, `${d} / s`, X, Y + R * 1.3 + px * 0.38, px, "#e9c25a");
 	}
-	drawHazards(g, st, sx, sy, px);                    // the player's own fire (the town has no other)
-	drawAbilityFx(g, st, sx, sy, px, pp);
-	drawPlayer(g, st.p, sx(pp.x), sy(pp.y), px, aim, st.classId, false, st.tick);
-	drawShots(g, st.bullets, sx, sy, px, at);
+	drawHazards(g, st, sx, sy, px, calm);              // the player's own fire (the town has no other)
+	drawAbilityFx(g, st, sx, sy, px, pp, calm);
+	drawPlayer(g, st.p, sx(pp.x), sy(pp.y), px, aim, st.classId, calm, frameTick, motion?.body(st.p), aiming);
+	drawShots(g, st.bullets, sx, sy, px, at, calm, frameTick);
 	g.font = `bold ${Math.round(Math.max(12, px * 0.4))}px "Crimson Pro", Georgia, serif`;
 	g.textAlign = "center"; g.textBaseline = "middle";
 	for (const f of st.floats) {

@@ -744,6 +744,12 @@ Modeled on RotMG's enchanting, minus its percentages, dust colors and artifacts.
   shared DENSITY (art pixels a tile is wide), and one line per file in
   `webapp/public/art/halcyon/` (not `public/halcyon/`: a static folder named like the
   `/halcyon` route would sit on it). `v` busts the browser cache.
+- **Motion follows the fixed simulation tick.** Each town or run owns a drawing
+  history that records displacement, wind-ups and defeats. A successful volley or
+  cast records its aim for recoil. The current class sheets lift alternating boots
+  in the renderer. Drawings, including door motion and loot settling, never affect
+  collision or reports. Reduced effects and the OS reduced-motion preference keep
+  gameplay telegraphs visible and suppress the new ambient motion.
 - **Nothing waits for art.** Every draw in `render.js` asks `drawSprite`/`drawTile` first
   and draws its greybox shape when the answer is false, so an empty manifest is the
   greybox exactly. A sheet is frames across and facings down (`FACINGS`: down, side, up);

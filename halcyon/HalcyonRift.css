@@ -47,6 +47,10 @@
 .hr-overlay{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:2;
   max-width:calc(100% - 24px);max-height:calc(100% - 24px);overflow:hidden;
   padding:12px 16px 14px;display:flex;flex-direction:column;gap:10px}
+@media (prefers-reduced-motion: no-preference){
+  .hr-overlay:not(.hr-cleared){animation:hr-panel-in .14s ease-out}
+  @keyframes hr-panel-in{from{opacity:0;transform:translate(-50%,calc(-50% + 5px))}to{opacity:1;transform:translate(-50%,-50%)}}
+}
 .hr-overlay-hd{display:flex;align-items:center;justify-content:space-between;gap:16px}
 .hr-overlay-hd h2{margin:0}
 .hr-overlay p{margin:0}

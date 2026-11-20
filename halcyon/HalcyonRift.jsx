@@ -30,6 +30,7 @@ import { createSim, step, TPS, REACH, xpProgress, WEAPONS, statsFor, enchantValu
 import { camera, draw, drawTown, promptFor, formatRiftTime, TIER_COLORS, UNIQUE_COLOR } from "./render.js";
 import { createTown, stepTown, setTownGear, postDps, STATIONS, SPAWN, standAt, REALMS } from "./town.js";
 import { loadArt, setArtEnabled } from "./art.js";
+import { createSceneMotion } from "./motion.js";
 import cssText from "./HalcyonRift.css?inline";
 
 /* The art gallery (ArtGallery.jsx) is a dev-server page, /halcyon?art: the
@@ -1573,7 +1574,7 @@ function Settings({ prefs, setPrefs, onClose }) {
 			</div>
 			<label className="hr-check"><input type="checkbox" checked={prefs.calm}
 				onChange={(e) => setPrefs((p) => ({ ...p, calm: e.target.checked }))} />
-				<span>Reduced flashing: no white hit flashes, and the boss's phase change holds still</span></label>
+				<span>Reduced effects: softer hit flashes and quieter ambient motion</span></label>
 			<div className="hr-sizes" role="group" aria-label="Interface size">
 				<span>Interface size</span>
 				{UI_SIZES.map(([v, label]) => <button key={v} className={"hr-size" + (prefs.ui === v ? " on" : "")} aria-pressed={prefs.ui === v}
@@ -1830,7 +1831,8 @@ function Town({ st, notes, ready, onUse, onNear, onLift, gear, level, classId, f
 		const cv = canvasRef.current;
 		const g = cv.getContext("2d");
 		const keys = new Set();
-		const mouse = { x: 0, y: 0, down: false };
+		const mouse = { x: 0, y: 0, down: false, over: false };
+		const motion = createSceneMotion(st), reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
 		let px = 32, raf = 0, prev = null, lastNear, ability = false, cam = { ox: 0, oy: 0 };
 		// The whole plaza is always in view: where everything is should never be a search.
 		const fit = () => {
@@ -1848,6 +1850,7 @@ function Town({ st, notes, ready, onUse, onNear, onLift, gear, level, classId, f
 			for (const k of keys) { const d = dirOf(k); if (d) { mx += d[0]; my += d[1]; } }
 			stepTown(st, { mx: Math.sign(mx), my: Math.sign(my), ax: (mouse.x - cam.ox) / px - st.p.x,
 				ay: (mouse.y - cam.oy) / px - st.p.y, fire: mouse.down || livePrefs.current.auto, ability });
+			motion.advance();
 			ability = false;
 			if (st.near !== lastNear) { lastNear = st.near; cb.current.onNear(st.near); }
 		};
@@ -1864,8 +1867,9 @@ function Town({ st, notes, ready, onUse, onNear, onLift, gear, level, classId, f
 			const pp = atPos(st.p);
 			cam = camera(st, cv.width, cv.height, px, pp);
 			drawTown(g, st, { width: cv.width, height: cv.height, px, at: atPos, notes: list, dps: (q) => postDps(st, q),
-				auto: livePrefs.current.auto, ui: livePrefs.current.ui,
-				aim: { x: (mouse.x - cam.ox) / px - pp.x, y: (mouse.y - cam.oy) / px - pp.y },
+				auto: livePrefs.current.auto, aiming: mouse.down || livePrefs.current.auto, ui: livePrefs.current.ui, motion, frameTick: st.tick + a,
+				calm: livePrefs.current.calm || reduced.matches,
+				aim: mouse.over ? { x: (mouse.x - cam.ox) / px - pp.x, y: (mouse.y - cam.oy) / px - pp.y } : null,
 				prompt: st.nearFloor ? `E — Pick up ${st.floor.find((f) => f.key === st.nearFloor)?.name || "it"}`
 					: promptFor(station, !["portal", "dream"].includes(station?.kind) || cb.current.ready) });
 			raf = requestAnimationFrame(frame);
@@ -1892,8 +1896,10 @@ function Town({ st, notes, ready, onUse, onNear, onLift, gear, level, classId, f
 		const toCanvas = (e) => {
 			const r = cv.getBoundingClientRect(), dpr = cv.width / Math.max(1, r.width);
 			mouse.x = (e.clientX - r.left) * dpr; mouse.y = (e.clientY - r.top) * dpr;
+			mouse.over = true;
 		};
 		const onMove = (e) => toCanvas(e);
+		const onLeave = () => { mouse.over = false; };
 		const onDown = (e) => { toCanvas(e); if (e.button === 0) mouse.down = true; if (e.button === 2) ability = true; };
 		const onUp = (e) => { if (e.button === 0) mouse.down = false; };
 		const noMenu = (e) => e.preventDefault();
@@ -1902,6 +1908,7 @@ function Town({ st, notes, ready, onUse, onNear, onLift, gear, level, classId, f
 		window.addEventListener("blur", onBlur);
 		window.addEventListener("mouseup", onUp);
 		cv.addEventListener("mousemove", onMove);
+		cv.addEventListener("mouseleave", onLeave);
 		cv.addEventListener("mousedown", onDown);
 		cv.addEventListener("contextmenu", noMenu);
 		return () => {
@@ -1912,6 +1919,7 @@ function Town({ st, notes, ready, onUse, onNear, onLift, gear, level, classId, f
 			window.removeEventListener("blur", onBlur);
 			window.removeEventListener("mouseup", onUp);
 			cv.removeEventListener("mousemove", onMove);
+			cv.removeEventListener("mouseleave", onLeave);
 			cv.removeEventListener("mousedown", onDown);
 			cv.removeEventListener("contextmenu", noMenu);
 		};
@@ -1946,7 +1954,8 @@ function Dungeon({ run, client, onEnd, notify, tips, onDeeper }) {
 		const want = [];                             // takes asked for from the loot panel, one a tick
 		let lootKey = "", hoverKey = "";
 		const edge = { ability: false, interact: false, recall: false, potion: false };
-		let px = 32, raf = 0, ended = false;
+		let px = 32, raf = 0, ended = false, endedAt = 0;
+		const motion = createSceneMotion(st), reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
 		const modNames = runModRows(run).map((m) => m.name);
 		// Where each moving thing was before the last tick, so a frame can draw it part
 		// of the way to where it is now (the sim steps at 60 Hz; a screen may run at 144).
@@ -2067,6 +2076,7 @@ function Dungeon({ run, client, onEnd, notify, tips, onDeeper }) {
 
 		const finish = (status) => {
 			ended = true;
+			endedAt = performance.now();
 			ctl.ended = true;
 			setLoot([]); setHover(null);
 			client.flush();
@@ -2089,6 +2099,7 @@ function Dungeon({ run, client, onEnd, notify, tips, onDeeper }) {
 			const gear = ctl.gear;                      // a swap made in the side panel
 			ctl.gear = null;
 			step(st, gear ? { ...(drive ? drive(st) : input()), gear } : drive ? drive(st) : input());
+			motion.advance();
 
 			for (const ev of st.events) handle(ev);
 			if (st.status === "dead" || st.status === "recalled" || st.status === "complete") {
@@ -2131,8 +2142,10 @@ function Dungeon({ run, client, onEnd, notify, tips, onDeeper }) {
 			cam = camera(st, cv.width, cv.height, px, pp, true);
 			const pf = livePrefs.current;
 			draw(g, st, { width: cv.width, height: cv.height, px, at,
-				aim: { x: (mouse.x - cam.ox) / px - pp.x, y: (mouse.y - cam.oy) / px - pp.y },
-				notes: ended ? [] : bagHint(), bagBest, calm: pf.calm, ui: pf.ui, dpr,
+				aim: mouse.over ? { x: (mouse.x - cam.ox) / px - pp.x, y: (mouse.y - cam.oy) / px - pp.y } : null,
+				motion, aiming: mouse.down || pf.auto,
+				frameTick: ended ? st.tick + Math.max(0, now - endedAt) / STEP_MS : st.tick + alpha,
+				notes: ended ? [] : bagHint(), bagBest, calm: pf.calm || reduced.matches, ui: pf.ui, dpr,
 				bossName: run.dungeon.boss_name || "The boss", keys: { potion: keyLabel(pf.keys.potion?.[0]) },
 				mods: modNames, auto: pf.auto });
 			raf = requestAnimationFrame(frame);
