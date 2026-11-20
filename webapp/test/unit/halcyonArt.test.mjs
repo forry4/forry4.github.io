@@ -151,10 +151,12 @@ test("every slot is made in exactly one step of the prompt guide, and every prom
 test("every prompt asks for its size in game pixels, from the density", async () => {
 	const { BATCHES, sizeLine } = await import("../../../halcyon/artPrompts.js");
 	const item = (k) => BATCHES.flatMap((b) => b.items).find((it) => it.keys.includes(k));
-	assert.match(sizeLine(item("player.ranger"), 20), /Each of the three figures is exactly 25 pixels tall/);
+	assert.match(sizeLine(item("player.ranger"), 20), /Each of the three figures is exactly 20 pixels tall/);
+	assert.equal(sizeLine(item("player.ranger"), 16), sizeLine(item("player.ranger"), 30), "the Ranger SETS the density, so its size is fixed");
+	assert.match(sizeLine(item("player.paladin"), 20), /exactly 25 pixels tall/);
 	assert.match(sizeLine(item("enemy.tidewarden"), 20), /exactly 48 pixels tall/);
 	assert.match(sizeLine(item("tile.ashen.floor"), 20), /exactly 20 by 20 pixels/);
 	assert.match(sizeLine(item("enemy.shard"), 20), /left to right: \(1\) \d+ pixels tall, \(2\) \d+ pixels tall, \(3\) 12 pixels tall, \(4\)/);
 	assert.match(sizeLine(item("shot.player"), 20), /\(1\) 9 pixels long/);
-	assert.notEqual(sizeLine(item("player.ranger"), 16), sizeLine(item("player.ranger"), 24), "the size follows the density");
+	assert.notEqual(sizeLine(item("player.paladin"), 16), sizeLine(item("player.paladin"), 24), "the size follows the density");
 });

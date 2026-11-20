@@ -784,11 +784,12 @@ Modeled on RotMG's enchanting, minus its percentages, dust colors and artifacts.
   side becomes its three facings; one image of several things (a rift's enemies, the
   shots) is cut left to right into its slots.
 - **Prompts ask for sizes in GAME pixels** (`artPrompts.js` `sizeLine`, from the density:
-  "exactly 26 pixels tall, every pixel one big square block, as if enlarged with
+  "exactly 25 pixels tall, every pixel one big square block, as if enlarged with
   nearest-neighbor"; a row of creatures gets one height each; a tile "exactly 21 by 21").
-  The generator still draws big blocks but about the right NUMBER of them, so the cleanup
-  keeps them as drawn rather than resizing. STYLE also asks for hard edges, a ~16-color
-  palette and a margin round everything — what the block reader and the background cut
+  The Ranger's own prompt asks for a FIXED 20 (`ANCHOR_PX`: it sets the density, so it
+  cannot follow it). The generator still draws big blocks but about the right NUMBER of them, so the cleanup
+  keeps them as drawn rather than resizing. STYLE also asks for hard edges, ~10 colors,
+  a low-detail look (the owner's wizard example, ANCHOR_PX's note) and a margin round everything — what the block reader and the background cut
   need most.
 - **`npm run art` (in `webapp/`) opens the studio** — `/halcyon?art` on the dev server,
   `ArtGallery.jsx`, dropped from builds with the `import.meta.env.DEV` branch. It holds

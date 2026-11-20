@@ -16,31 +16,43 @@
  * them, so the cleanup can keep its pixels as drawn instead of resizing (anything more
  * than 15% off is resized by whole pixels, which drops detail). The format rules in
  * STYLE — hard edges, a margin, a small palette — are the things the cleanup reads
- * worst when they are missing. */
+ * worst when they are missing.
+ *
+ * THE LOOK (owner, 2026-11-19, from a wizard they generated and liked): simple, bold,
+ * cute and low-detail — a head about HALF the height, big flat areas, ~10 colors, ONE
+ * bright accent. The first prompts asked for a third-height head, cyan trim on every
+ * edge and ~16 colors at 26 pixels tall, and the first Ranger came out busy. */
 import { artPx } from "./art.js";
 import { targetHeight } from "./artClean.js";
 
-export const STYLE = "Original 2D pixel art game asset for a top-down action RPG, seen from slightly above (three-quarter top-down view). " +
-	"Chunky, crisp pixel clusters with one consistent pixel size, a clean near-black outline around every figure, simple flat shading with " +
-	"two or three tones per color, light coming from above. Hard pixel edges: no anti-aliasing, no dithering, no soft or half-transparent " +
-	"pixels, no detail smaller than one pixel. A limited palette of about 16 colors. No glow, no blur, no gradients, no shadow on the ground. " +
-	"Readable silhouette even when shrunk very small. Plain flat solid #00FF00 green background, nothing else behind the subject, and a " +
-	"wide empty margin of background around everything: nothing touches the edges of the image. No text, no logo, no watermark, no border, " +
-	"no extra objects.";
+export const STYLE = "Original 2D pixel art game sprite for a top-down action RPG, seen from the front and slightly above. " +
+	"Simple, bold, cute and LOW-DETAIL: big simple shapes and large flat areas of color, very few small details, no tiny straps, " +
+	"buckles, stitches or patterns. One dark outline around the figure. Flat shading: each color has one shadow tone and at most one " +
+	"small highlight. About 10 colors in the whole figure. Hard pixel edges: no anti-aliasing, no dithering, no soft or half-transparent " +
+	"pixels, no detail smaller than one pixel. No glow, no blur, no gradients, no shadow on the ground. Readable silhouette even when " +
+	"shrunk very small. Plain flat solid #00FF00 green background, nothing else behind the subject, and a wide empty margin of " +
+	"background around everything: nothing touches the edges of the image. No text, no logo, no watermark, no border, no extra objects.";
 
-export const TILE_STYLE = "Original 2D pixel art game tile for a top-down action RPG. Chunky, crisp pixel clusters with one consistent " +
-	"pixel size, simple flat shading with two or three tones per color, light coming from above. Hard pixel edges: no anti-aliasing, no " +
+export const TILE_STYLE = "Original 2D pixel art game tile for a top-down action RPG. Simple and low-detail: large flat areas of color, " +
+	"few small details, about 6 colors, one consistent pixel size, flat shading, light coming from above. Hard pixel edges: no anti-aliasing, no " +
 	"dithering, no detail smaller than one pixel. No glow, no blur, no gradients. " +
 	"Quiet, low-contrast colors: the ground must never compete with the characters on it. Fill the whole square edge to edge, with no " +
 	"border, no frame and no background. No text, no logo, no watermark.";
 
+/* Step 1 only: a picture in the style the owner wants (made by them), attached to the
+ * Ranger's prompt. The Ranger then carries that style to every later step. */
+export const STYLE_EXAMPLE = "If an example image is attached, it shows the art style I want: match its pixel size, proportions, " +
+	"outline, shading, number of colors and level of detail exactly, but draw the new character described below, not the one in the example.";
+
 export const REFERENCE = "Attached is this game's approved style reference. Match its pixel size, outline, shading and level of detail " +
 	"exactly; draw only the new subject described below, not the character in the reference.";
 
-const ACCENT = "with bright cyan and white trim so the hero stands out on any floor";
-const THREE = (who) => `${who}, drawn three times in one row on a wide landscape image, with wide empty space between them: facing the viewer, facing right, ` +
-	"facing away from the viewer. The same character, size and colors in all three. Compact, slightly chunky proportions, head about " +
-	"a third of the height.";
+/* The hero's ONE bright spot (the art direction's cyan), in one place — trim on
+ * every edge made the first Ranger busy. */
+const ACCENT = (what) => `The only bright color is one small glowing cyan accent, ${what}, so the hero stands out on any floor`;
+const THREE = (who, accent) => `${who}, drawn three times in one row on a wide landscape image, with wide empty space between them: facing the viewer, facing right, ` +
+	"facing away from the viewer. The same character, size and colors in all three. Cute chunky proportions: the head (or hood) is about " +
+	`HALF the figure's height, with a small body and short legs. ${ACCENT(accent)}.`;
 const ROW = (n) => `${n} different creatures standing in one row on a wide landscape image, left to right in the order listed, with ` +
 	"wide empty space between them, all facing the viewer:";
 const SEAMLESS = "It must repeat seamlessly when placed next to copies of itself on all four sides.";
@@ -50,11 +62,12 @@ const SEAMLESS = "It must repeat seamlessly when placed next to copies of itself
 export const BATCHES = [
 	{
 		title: "1. The style anchor: the Ranger",
-		why: "Everything else will be matched to this one picture, so take your time. Generate it several times, drop each try here, " +
+		why: "Everything else will be matched to this one picture, so take your time. If you have a picture in the style you want, attach " +
+			"it to this prompt as the example. Generate it several times, drop each try here, " +
 			"and keep the one you like best at game size. If it looks too big or too small next to a tile, change \"Ranger height\" above the " +
 			"steps: that sets the pixel size every other picture is matched to. The original image is kept for you; every later prompt attaches it.",
 		anchor: true,
-		items: [{ keys: ["player.ranger"], subject: THREE(`A small hooded ranger with a short bow, a dark slate-blue cloak and brown leather, ${ACCENT} on the hood and bow`) }],
+		items: [{ keys: ["player.ranger"], subject: THREE(`A small hooded ranger with a short bow and a plain dark slate-blue hooded cloak, the face hidden in the hood's shadow with two small pale eyes`, "the arrowhead") }],
 	},
 	{
 		title: "2. The Shallows' ground",
@@ -94,9 +107,9 @@ export const BATCHES = [
 		title: "6. The other three classes",
 		why: "One picture each, three facings, the Ranger attached as the reference so the four look like one party.",
 		items: [
-			{ keys: ["player.paladin"], subject: THREE(`A small armored paladin with a mace and a round shield, warm steel plate over a muted brown tabard, ${ACCENT} on the shield rim and helmet`) },
-			{ keys: ["player.diviner"], subject: THREE(`A small robed mage holding a staff topped with a star, a deep violet hooded robe, ${ACCENT} on the hood edge and the staff's star`) },
-			{ keys: ["player.ninja"], subject: THREE(`A small nimble ninja with throwing knives, dark green wrappings and a mask, ${ACCENT} on the scarf and the blades`) },
+			{ keys: ["player.paladin"], subject: THREE(`A small armored paladin with a mace and a round shield, plain warm steel armor over a muted brown tabard`, "a gem in the middle of the shield") },
+			{ keys: ["player.diviner"], subject: THREE(`A small robed mage holding a staff topped with a star, a plain deep violet hooded robe`, "the star on the staff") },
+			{ keys: ["player.ninja"], subject: THREE(`A small nimble ninja with throwing knives, plain dark green wrappings and a mask`, "the blades of the knives") },
 		],
 	},
 	{
@@ -146,10 +159,14 @@ export const BATCHES = [
 
 /* The size line for an item at density `px` (art pixels a tile): game pixels tall
  * for each thing in it, and the one pixel grid they share. */
+/* The Ranger's own height in game pixels: it SETS the density (art.js), so its prompt
+ * asks for a fixed size rather than following the density. ~20, as in the owner's
+ * style example (a wizard about 21 pixels tall). */
+export const ANCHOR_PX = 20;
 export function sizeLine(item, px = artPx()) {
 	const grid = "every pixel drawn as one big square block, as if a tiny sprite were enlarged with nearest-neighbor scaling";
 	if (item.tile) return `Size: the tile is exactly ${px} by ${px} pixels, ${grid}. Count the pixels: ${px} across, ${px} down.`;
-	const hs = item.keys.map((k) => targetHeight(k, px));
+	const hs = item.keys.map((k) => (k === "player.ranger" ? ANCHOR_PX : targetHeight(k, px)));
 	const what = item.keys[0].startsWith("shot.") ? "long" : "tall";
 	if (item.keys.length === 1) {
 		const n = item.keys[0].startsWith("player.") ? "Each of the three figures is" : "It is";
@@ -161,5 +178,6 @@ export function sizeLine(item, px = artPx()) {
 /* The full text to paste for an item: the style, the reference line after batch 1,
  * the subject, then the size at the current density. */
 export function promptFor(item, batch, px = artPx()) {
-	return [item.tile ? TILE_STYLE : STYLE, !batch.anchor && !item.tile ? REFERENCE : null, item.subject, sizeLine(item, px)].filter(Boolean).join("\n\n");
+	return [item.tile ? TILE_STYLE : STYLE, batch.anchor ? STYLE_EXAMPLE : null, !batch.anchor && !item.tile ? REFERENCE : null,
+		item.subject, sizeLine(item, px)].filter(Boolean).join("\n\n");
 }
