@@ -19,6 +19,8 @@
  * fraction of the frame: [0.5, 0.5] is the middle, [0.5, 0.8] puts the position near
  * the feet, so a character stands on the spot it occupies.
  */
+import { MANIFEST } from "./artManifest.js";
+
 export const ART_PX = 16;
 export const FACINGS = ["down", "side", "up"];
 
@@ -30,6 +32,16 @@ const CHAR = { w: 24, h: 24, anchor: [0.5, 0.7] };
 const BOSS = { w: 48, h: 48, anchor: [0.5, 0.62] };
 const TILE = { w: 16, h: 16, anchor: [0, 0] };
 const SHOT = { w: 8, h: 8, anchor: [0.5, 0.5] };
+/* The tile kinds each place really has (dungeon.py's and town.js's maps): the
+ * Shallows' water, the Fracture's torn floor (void), the town's planters and fountain. */
+export const TILE_PARTS = {
+	shallows: ["floor", "wall", "wallTop", "rock", "water"],
+	fracture: ["floor", "wall", "wallTop", "rock", "void"],
+	ashen: ["floor", "wall", "wallTop", "rock"],
+	town: ["floor", "wall", "wallTop", "rock", "water"],
+};
+const TILE_LABEL = { any: { floor: "Floor", wall: "Wall", wallTop: "Wall edge", rock: "Rock", water: "Water", void: "Torn floor" },
+	shallows: {}, fracture: { rock: "Pillar" }, ashen: { rock: "Slag rock" }, town: { rock: "Planter", water: "Fountain" } };
 export const SLOTS = {
 	"player.ranger": { ...CHAR, label: "Ranger", group: "Classes" },
 	"player.paladin": { ...CHAR, label: "Paladin", group: "Classes" },
@@ -51,17 +63,61 @@ export const SLOTS = {
 	"shot.player": { ...SHOT, label: "Your shot", group: "Shots" },
 	"shot.enemy": { ...SHOT, label: "Enemy shot", group: "Shots" },
 	"shot.enemyHeavy": { ...SHOT, label: "Heavy enemy shot", group: "Shots" },
-	...Object.fromEntries(["shallows", "fracture", "ashen", "town"].flatMap((rift) =>
-		["floor", "wall", "wallTop", "rock", "water"].map((part) => [`tile.${rift}.${part}`,
-			{ ...TILE, label: part === "wallTop" ? "Wall edge" : part[0].toUpperCase() + part.slice(1),
+	...Object.fromEntries(Object.entries(TILE_PARTS).flatMap(([rift, parts]) =>
+		parts.map((part) => [`tile.${rift}.${part}`,
+			{ ...TILE, label: TILE_LABEL[rift][part] || TILE_LABEL.any[part],
 				group: rift === "town" ? "Town tiles" : `${RIFT_NAMES[rift]} tiles`, rift }]))),
 };
 
-/* THE PICTURES THAT EXIST. One line per file in webapp/public/art/halcyon/:
- *   "enemy.chaser": { src: "chaser.png", frames: 4, fps: 8, facings: 3 },
- * w/h/anchor default to the slot's; give them only to override. Empty on purpose
- * until the first approved picture lands — every key draws its shape until then. */
-export const MANIFEST = {};
+/* THE PICTURES THAT EXIST live in artManifest.js, one line per file in
+ * webapp/public/art/halcyon/:
+ *   "enemy.chaser": { src: "enemy.chaser.png", v: 1763500000000, frames: 4, fps: 8, facings: 3 },
+ * w/h/anchor default to the slot's; give them only to override. `v` changes when the
+ * file does, so a browser never keeps the old picture. The gallery's "Use this"
+ * writes that file through the dev server; it is plain data so a person can too. */
+export { MANIFEST };
+
+/* THE SHARED COLOR LIST (art direction §2.3): every finished picture uses ONLY these,
+ * and only the families its job allows (`paletteFor`). That is what makes pictures
+ * from different generations look like one game, and it is the color-role rule made
+ * mechanical: an enemy cannot come out cyan, a floor cannot come out enemy-red. */
+export const PALETTE = {
+	outline: ["#14111a"],
+	white: ["#f4f6f8"],
+	// cloth, leather, skin, steel: low saturation, for bodies of every kind
+	neutral: ["#2b3140", "#414a5c", "#606b7f", "#3b2a22", "#5c4232", "#86644a", "#c58f6e", "#e8b896", "#8f97a3", "#c4cad2"],
+	// each class's own clothing, muted so it never competes with a danger color
+	cloth: ["#3d2f5c", "#5a4785", "#7b68a8", "#2c4a3a", "#3f6b52", "#5f8a6c", "#4a3a26", "#7a6440", "#a08a5c"],
+	// the player's accent, its shots and abilities: cyan, blue, white
+	player: ["#123e52", "#1d6f86", "#2fb6d0", "#7fe3f0", "#c9f6ff"],
+	// every enemy and everything an enemy fires: red, orange, hot magenta, a hot core
+	enemy: ["#3a0f1a", "#5a1424", "#a3262f", "#e8573f", "#c8551d", "#ef8a3a", "#ffb347", "#6e1a4a", "#c8458f", "#ff6ac1", "#fff1c2"],
+	// pickups and loot: gold and green, never warm red
+	loot: ["#7a5a1e", "#e9c25a", "#ffe9a6", "#2f7a3a", "#6fd36a"],
+	// each place's ground: always the quietest thing on screen
+	env: {
+		// daylit sandbars, gray-green rock, shallow water, a faint seam (design §14.4)
+		shallows: ["#5e5747", "#7d7460", "#a3987a", "#bfb491", "#d3c9a6", "#4f6058", "#6e7d70", "#918f84", "#3f6a6e", "#5f8f93", "#82aeb0", "#b8d8d0"],
+		// dark violet stone over a black void (design §14.4a)
+		fracture: ["#0d0a14", "#17131f", "#1f1830", "#2a2338", "#3d3550", "#564a70", "#7a6b99", "#b9a5e6"],
+		// charcoal and ash, embers banked low
+		ashen: ["#120e0c", "#1a1411", "#231b17", "#372e29", "#4a3f38", "#6b5a50", "#8a7d72", "#7a3a22"],
+		// cool flagstone, timber
+		town: ["#1c2322", "#2e3836", "#3c4845", "#515b57", "#6a7570", "#8a948f", "#3e2a18", "#58391f", "#7a5534"],
+	},
+};
+/* Which families a slot's picture may use. */
+export function paletteFor(key) {
+	const slot = SLOTS[key];
+	if (!slot) return [];
+	const P = PALETTE, [kind, name] = key.split(".");
+	if (kind === "tile") return [...P.env[slot.rift]];
+	if (kind === "player") return [...P.outline, ...P.white, ...P.neutral, ...P.cloth, ...P.player];
+	if (key === "shot.player") return [...P.outline, ...P.white, ...P.player];
+	if (kind === "shot") return [...P.outline, ...P.enemy];
+	if (slot.h >= 40) return [...P.outline, ...P.neutral, ...P.cloth, ...P.enemy, ...P.env[slot.rift]];   // a boss: free body, danger attacks
+	return [...P.outline, ...P.neutral, ...P.enemy];
+}
 
 /* The frame layout of one manifest line, with the slot's defaults filled in. */
 export function sheetOf(key, entry = MANIFEST[key]) {
@@ -102,7 +158,7 @@ export function loadArt(manifest = MANIFEST) {
 		const img = new Image();
 		const rec = { img, sheet: sheetOf(key, entry), ready: false };
 		img.onload = () => { rec.ready = true; };
-		img.src = artBase() + entry.src;
+		img.src = artBase() + entry.src + (entry.v ? `?v=${entry.v}` : "");
 		loaded.set(key, rec);
 	}
 }

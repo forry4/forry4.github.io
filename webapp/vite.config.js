@@ -4,6 +4,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import halcyonArtDev from '../halcyon/artDevPlugin.js'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repo = path.join(here, '..')
@@ -56,6 +57,8 @@ export default defineConfig({
   },
   plugins: [
     react(),
+    // Halcyon's art gallery saves a finished picture through the dev server (never a build).
+    halcyonArtDev(),
     (() => {
       let appId = null
       return {

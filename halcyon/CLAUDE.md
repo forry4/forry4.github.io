@@ -734,27 +734,36 @@ Modeled on RotMG's enchanting, minus its percentages, dust colors and artifacts.
   portals does not land in its reach. Rules: `webapp/test/unit/halcyonAshen.test.mjs`;
   fixture `halcyon-dungeon-ashen-a.json`.
 
-## Art: the loader, the slots and the gallery (2026-11-19, owner's plan step 2)
+## Art: the loader, the slots and the studio (2026-11-19, owner's plan steps 2-3)
 - **`halcyon/art.js` is the one place art is named.** `SLOTS` lists every picture the
-  renderer can ask for (four classes, every enemy and boss kind, the plain shots, five tile
-  parts per rift and the town) with its frame size in ART pixels — a tile is `ART_PX` (16)
-  wide, so a picture is drawn at `px / 16` screen pixels per art pixel. `MANIFEST` lists
-  the pictures that EXIST, one line per file in `webapp/public/art/halcyon/` (not
-  `public/halcyon/`: a static folder named like the `/halcyon` route would sit on it).
+  renderer can ask for (four classes, every enemy and boss kind, the plain shots, and the
+  tile kinds each place really has — `TILE_PARTS`: the Shallows' water, the Fracture's
+  void, the town's planters and fountain) with its frame size in ART pixels — a tile is
+  `ART_PX` (16) wide, drawn at `px / 16` screen pixels per art pixel. The pictures that
+  EXIST are `artManifest.js` (plain JSON in a JS file, rewritten by the studio), one
+  line per file in `webapp/public/art/halcyon/` (not `public/halcyon/`: a static folder
+  named like the `/halcyon` route would sit on it). `v` busts the browser cache.
 - **Nothing waits for art.** Every draw in `render.js` asks `drawSprite`/`drawTile` first
-  and draws its greybox shape when the answer is false — no line in the manifest, still
-  loading, or failed. So art lands one picture at a time and an empty manifest is the
+  and draws its greybox shape when the answer is false, so an empty manifest is the
   greybox exactly. A sheet is frames across and facings down (`FACINGS`: down, side, up);
-  facing left mirrors the side row. Only the PLAIN shots take a picture so far; the shaped
-  ones (flare, star, blade, shard, power) keep their shapes until they get slots.
-- **`/halcyon?art` on the dev server is the gallery** (`ArtGallery.jsx`; the production
-  build drops it with the `import.meta.env.DEV` branch). It draws every slot on each rift's
-  floor through the game's own draw functions, at a chosen tile size and facing, and takes
-  a dropped generated image for any slot: the flat `#00FF00` background keyed out, cropped,
-  shrunk to the slot (characters to a chosen height, bosses twice that), edges made fully
-  in or out, optionally three facings side by side. A preview lives in that tab only.
-- **The gate:** `webapp/test/unit/halcyonArt.test.mjs` derives the roster from `sim.js`
-  (every enemy type, boss kind and class must have a slot) and holds `MANIFEST` to the
-  files with `checkManifest` (unknown slot, missing file, a sheet the wrong size).
-  Still to add with the first real art: a color-role check (a picture using a color
-  reserved for another job).
+  left mirrors the side row. Only the PLAIN shots take a picture so far.
+- **One game, not forty generations: `PALETTE` + `paletteFor` + `artClean.js`.** The
+  generator only draws; the cleanup step enforces what every picture shares — background
+  cut from the edges in, crop, shrink to the slot (characters to a chosen height, bosses
+  twice that), every pixel in or out, specks dropped, every color snapped (OKLab) to the
+  families its JOB allows, one near-black outline. The job rule is the art doc's color
+  roles made mechanical: an enemy cannot come out cyan, a floor cannot come out red.
+  A class picture with three figures side by side becomes its three facings; one image
+  of several things (a rift's enemies, the shots) is cut left to right into its slots.
+- **`npm run art` (in `webapp/`) opens the studio** — `/halcyon?art` on the dev server,
+  `ArtGallery.jsx`, dropped from builds with the `import.meta.env.DEV` branch. It holds
+  the whole workflow: `artPrompts.js`'s batches in order with Copy prompt (STYLE pasted
+  word for word every time; from step 4 the approved Ranger attached as a reference),
+  drop the result, see it cleaned in a real room drawn by the game's own functions, and
+  **Use this**, which `artDevPlugin.js` (a Vite plugin, `apply: "serve"`) writes as the
+  PNG + manifest line, keeping the original in `halcyon/art/source/<key>/` (gitignored,
+  stays on the machine; the newest Ranger original is served back as the reference).
+- **Gates** (`webapp/test/unit/halcyonArt*.test.mjs`): every enemy type, boss kind and
+  class has a slot; every tile in the dungeon fixtures and the town has one; every slot
+  is in exactly one prompt step; `MANIFEST` matches the files (`checkManifest`); and the
+  cleanup is held on made-up pictures (size, height, outline, in-or-out, job colors).

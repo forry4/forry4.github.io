@@ -127,3 +127,6 @@ astralguide/tools/cache/
 lolstats/tools/cache/
 animefilter/tools/cache/
 animefilter/tools/results_all.json
+
+# Halcyon Rift: generated originals kept on this machine by the art gallery
+halcyon/art/source/

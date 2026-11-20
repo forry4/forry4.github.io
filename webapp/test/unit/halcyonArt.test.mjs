@@ -30,7 +30,8 @@ test("every thing the game draws has a slot", () => {
 	for (const kind of Object.keys(BOSS_HP)) assert.ok(SLOTS[`enemy.${kind}`], `enemy.${kind}`);
 	for (const c of Object.keys(CLASS_INFO)) assert.ok(SLOTS[`player.${c}`], `player.${c}`);
 	for (const rift of [...Object.keys(PALETTES), "town"])
-		for (const part of ["floor", "wall", "wallTop", "rock", "water"]) assert.ok(SLOTS[`tile.${rift}.${part}`], `tile.${rift}.${part}`);
+		for (const part of ["floor", "wall", "wallTop", "rock"]) assert.ok(SLOTS[`tile.${rift}.${part}`], `tile.${rift}.${part}`);
+	assert.ok(SLOTS["tile.shallows.water"] && SLOTS["tile.town.water"] && SLOTS["tile.fracture.void"]);
 	for (const [key, s] of Object.entries(SLOTS)) assert.ok(s.w > 0 && s.h > 0 && s.label && s.group && s.anchor.length === 2, key);
 });
 
@@ -108,4 +109,36 @@ test("the map draws a floor picture in each cell, edge to edge", () => {
 		drawMap(other, st, 0, 0, 50, 150, 50, PALETTES.shallows);    // another rift: still its shapes
 		assert.ok(!other.calls.some(([k]) => k === "drawImage"));
 	} finally { override("tile.ashen.floor", null); }
+});
+
+test("every tile a dungeon or the town is built from has a slot", async () => {
+	const { readdirSync } = await import("node:fs");
+	const { createTown } = await import("../../../halcyon/town.js");
+	const PART = { "#": "wall", ".": "floor", o: "rock", "~": "water", x: "void" };
+	const dir = new URL("./fixtures/", import.meta.url);
+	let seen = 0;
+	for (const f of readdirSync(dir).filter((f) => /^halcyon-dungeon-.*\.json$/.test(f))) {
+		const d = JSON.parse(readFileSync(new URL(f, dir)));
+		const rift = f.includes("fracture") ? "fracture" : f.includes("ashen") ? "ashen" : "shallows";
+		for (const row of d.tiles) for (const c of row) {
+			assert.ok(PART[c], `${f}: tile ${c}`);
+			assert.ok(SLOTS[`tile.${rift}.${PART[c]}`], `${f}: tile.${rift}.${PART[c]}`);
+			seen++;
+		}
+	}
+	assert.ok(seen > 1000, "the fixtures were read");
+	for (const row of createTown().tiles) for (const c of row) assert.ok(SLOTS[`tile.town.${PART[c]}`], `town: ${c}`);
+});
+
+test("every slot is made in exactly one step of the prompt guide, and every prompt carries the style", async () => {
+	const { BATCHES, promptFor, STYLE, TILE_STYLE, REFERENCE } = await import("../../../halcyon/artPrompts.js");
+	const count = {};
+	for (const b of BATCHES) for (const it of b.items) {
+		for (const k of it.keys) { assert.ok(SLOTS[k], k); count[k] = (count[k] || 0) + 1; }
+		const text = promptFor(it, b);
+		assert.ok(text.startsWith(it.tile ? TILE_STYLE : STYLE), it.keys.join());
+		assert.equal(text.includes(REFERENCE), !b.anchor && !it.tile, it.keys.join());
+		assert.equal(!!it.tile, it.keys.every((k) => k.startsWith("tile.")), it.keys.join());
+	}
+	assert.deepEqual(Object.keys(SLOTS).filter((k) => count[k] !== 1), []);
 });

@@ -76,6 +76,7 @@ export function drawMap(g, st, ox, oy, px, width, height, pal = SHALLOWS) {
 				if (!drawTile(g, t0 + "wall", X, Y, TW, TH, seed)) { g.fillStyle = pal.wall; g.fillRect(X, Y, P, P); }
 				if (edge) { g.fillStyle = pal.wallTop; g.fillRect(X, Y + px * 0.72, P, px * 0.28 + 1); }
 			} else if (t === "x") {                       // torn floor: the void under the Rift
+				if (drawTile(g, t0 + "void", X, Y, TW, TH, seed)) continue;
 				g.fillStyle = COLORS.void; g.fillRect(X, Y, P, P);
 				if (seed % 5 === 0) { g.fillStyle = COLORS.voidSpeck; g.fillRect(X + px * 0.3, Y + px * 0.55, px * 0.08, px * 0.08); }
 			} else if (t === "~") {
