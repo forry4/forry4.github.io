@@ -733,3 +733,28 @@ Modeled on RotMG's enchanting, minus its percentages, dust colors and artifacts.
 - **The town**: the Dream Rift moved to (7, 9.6) so stepping out of the first of three
   portals does not land in its reach. Rules: `webapp/test/unit/halcyonAshen.test.mjs`;
   fixture `halcyon-dungeon-ashen-a.json`.
+
+## Art: the loader, the slots and the gallery (2026-11-19, owner's plan step 2)
+- **`halcyon/art.js` is the one place art is named.** `SLOTS` lists every picture the
+  renderer can ask for (four classes, every enemy and boss kind, the plain shots, five tile
+  parts per rift and the town) with its frame size in ART pixels — a tile is `ART_PX` (16)
+  wide, so a picture is drawn at `px / 16` screen pixels per art pixel. `MANIFEST` lists
+  the pictures that EXIST, one line per file in `webapp/public/art/halcyon/` (not
+  `public/halcyon/`: a static folder named like the `/halcyon` route would sit on it).
+- **Nothing waits for art.** Every draw in `render.js` asks `drawSprite`/`drawTile` first
+  and draws its greybox shape when the answer is false — no line in the manifest, still
+  loading, or failed. So art lands one picture at a time and an empty manifest is the
+  greybox exactly. A sheet is frames across and facings down (`FACINGS`: down, side, up);
+  facing left mirrors the side row. Only the PLAIN shots take a picture so far; the shaped
+  ones (flare, star, blade, shard, power) keep their shapes until they get slots.
+- **`/halcyon?art` on the dev server is the gallery** (`ArtGallery.jsx`; the production
+  build drops it with the `import.meta.env.DEV` branch). It draws every slot on each rift's
+  floor through the game's own draw functions, at a chosen tile size and facing, and takes
+  a dropped generated image for any slot: the flat `#00FF00` background keyed out, cropped,
+  shrunk to the slot (characters to a chosen height, bosses twice that), edges made fully
+  in or out, optionally three facings side by side. A preview lives in that tab only.
+- **The gate:** `webapp/test/unit/halcyonArt.test.mjs` derives the roster from `sim.js`
+  (every enemy type, boss kind and class must have a slot) and holds `MANIFEST` to the
+  files with `checkManifest` (unknown slot, missing file, a sheet the wrong size).
+  Still to add with the first real art: a color-role check (a picture using a color
+  reserved for another job).

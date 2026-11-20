@@ -19,7 +19,7 @@
 // names a drop id, and the server mints the item it rolled for that drop.
 //
 // Route: /halcyon. No room segment — there is nothing to share a link to.
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { baseCss } from "../shared/theme.js";
 import { lobbyCss, LobbyHeader, LobbyUser, LobbyLoading } from "../shared/lobby.jsx";
 import { GAME_ACCENTS } from "../shared/accents.js";
@@ -29,7 +29,12 @@ import { createSim, step, TPS, REACH, xpProgress, WEAPONS, statsFor, enchantValu
 	STARFALL_DELAY, STARFALL_RADIUS, STARFALL_RANGE, COUNTER_WINDOW, COUNTER_GUARD, POTION_HEAL, POTION_COOLDOWN, UNIQUE, EMBER } from "./sim.js";
 import { camera, draw, drawTown, promptFor, formatRiftTime, TIER_COLORS, UNIQUE_COLOR } from "./render.js";
 import { createTown, stepTown, setTownGear, postDps, STATIONS, SPAWN, standAt, REALMS } from "./town.js";
+import { loadArt } from "./art.js";
 import cssText from "./HalcyonRift.css?inline";
+
+/* The art gallery (ArtGallery.jsx) is a dev-server page, /halcyon?art: the
+ * production build drops the import with the branch. */
+const ArtGallery = import.meta.env.DEV ? lazy(() => import("./ArtGallery.jsx")) : null;
 
 const styles = baseCss + lobbyCss + cssText;
 const ACCENT = { "--lby-accent": GAME_ACCENTS.halcyon };
@@ -332,7 +337,14 @@ function runControl(mine, charId, view, setRunItems) {
 	return ctl;
 }
 
-export default function HalcyonRift({ authUser, onExit }) {
+export default function HalcyonRift(props) {
+	const [gallery] = useState(() => !!ArtGallery && new URLSearchParams(window.location.search).has("art"));
+	if (gallery) return <Suspense fallback={null}><style>{styles}</style><ArtGallery onExit={props.onExit} /></Suspense>;
+	return <HalcyonGame {...props} />;
+}
+
+function HalcyonGame({ authUser, onExit }) {
+	useEffect(() => { loadArt(); }, []);
 	const client = useMemo(() => makeClient(authUser), [authUser?.id, authUser?.session_token]); // eslint-disable-line react-hooks/exhaustive-deps
 	const [view, setView] = useState(null);
 	const [error, setError] = useState(null);
