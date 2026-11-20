@@ -3,14 +3,14 @@
 //
 //   1. copy a prompt (artPrompts.js, in the order to make things),
 //   2. paste it into the image generator, and drop what comes back here,
-//   3. the cleanup step (artClean.js) cuts it out, shrinks it and puts it on the
+//   3. the cleanup step (artClean.js) cuts it out, reads it at its own pixels and puts it on the
 //      shared colors, and it appears in a real room at game size,
 //   4. "Use this" writes the finished picture into the game (artDevPlugin.js).
 //
 // The rooms are drawn by the game's own draw functions, so what they show is what a
 // run shows: the picture where one exists, the greybox shape where none does.
 import { useEffect, useRef, useState } from "react";
-import { SLOTS, MANIFEST, ART_PX, RIFT_NAMES, loadArt, override, sprite } from "./art.js";
+import { SLOTS, MANIFEST, RIFT_NAMES, loadArt, override, sprite, artPx, setArtPx } from "./art.js";
 import { cleanFor, splitFor } from "./artClean.js";
 import { BATCHES, promptFor } from "./artPrompts.js";
 import { drawMap, drawEnemyBody, drawPlayer, drawShots, COLORS, PALETTES, TOWN } from "./render.js";
@@ -67,10 +67,12 @@ function Room({ rift, px: cssPx, facing, tick }) {
 	return <canvas ref={ref} style={{ display: "block", imageRendering: "pixelated", border: "1px solid #2c3532" }} />;
 }
 
-/* A file to RGBA, shrunk first if it is huge (the cleanup only needs ~1000px). */
+/* A file to RGBA at its OWN size: reading the generator's pixel grid needs every
+ * screen pixel of it (a shrink here would blur the grid before it is read). Only a
+ * truly huge file is reduced. */
 async function decode(file) {
 	const bmp = await createImageBitmap(file);
-	const k = Math.min(1, 1024 / Math.max(bmp.width, bmp.height));
+	const k = Math.min(1, 3072 / Math.max(bmp.width, bmp.height));
 	const cv = document.createElement("canvas");
 	cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k);
 	const g = cv.getContext("2d", { willReadFrequently: true });
@@ -93,12 +95,12 @@ function Big({ canvas, scale = 4 }) {
 		ref={(cv) => { if (cv) { const g = cv.getContext("2d"); g.clearRect(0, 0, cv.width, cv.height); g.drawImage(canvas, 0, 0); } }} />;
 }
 
-function Item({ item, batch, pending, onFile, onUse, onDiscard, busy }) {
+function Item({ item, batch, pending, onFile, onUse, onDiscard, busy, px }) {
 	const [over, setOver] = useState(false);
 	const [copied, setCopied] = useState(false);
 	const made = item.keys.every((k) => MANIFEST[k]);
 	const copy = async () => {
-		const text = promptFor(item, batch);
+		const text = promptFor(item, batch, px);
 		try { await navigator.clipboard.writeText(text); } catch {
 			const ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove();
 		}
@@ -144,7 +146,12 @@ export default function ArtGallery({ onExit }) {
 	const [tick, setTick] = useState(0);
 	const [rift, setRift] = useState("shallows");
 	const [pending, setPending] = useState({});      // itemId -> { item, file, canvases, notes, facings, error }
-	const [charH, setCharH] = useState(20);
+	/* The Ranger's height in tiles; with the Ranger's own pixel count it sets the
+	 * shared density (art pixels a tile) that every other picture is matched to. */
+	const saved = MANIFEST["player.ranger"];
+	const [tall, setTall] = useState(() => (saved?.h ? Math.round(((saved.h - 2) / artPx()) * 20) / 20 : 1.25));
+	const [rangerH, setRangerH] = useState(saved?.h ? saved.h - 2 : 0);   // its native height, saved or being tried
+	const [density, setDensity] = useState(artPx());
 	const [busy, setBusy] = useState(false);
 	const [message, setMessage] = useState("");
 	const [refOk, setRefOk] = useState(false);
@@ -157,7 +164,10 @@ export default function ArtGallery({ onExit }) {
 	}, []);
 	useEffect(() => { fetch("/__halcyon-art/source/player.ranger", { method: "HEAD" }).then((r) => setRefOk(r.ok)).catch(() => {}); }, [MANIFEST["player.ranger"]?.v]);
 
-	const process = async (item, file, height = charH) => {
+	/* The density a Ranger of `h` art pixels gives at `t` tiles tall. */
+	const densityFor = (h, t) => Math.max(8, Math.min(64, Math.round(h / t)));
+	const applyDensity = (n) => { setArtPx(n); setDensity(n); };
+	const process = async (item, file, px = density) => {
 		setRift(riftOf(item.keys));
 		try {
 			const img = await decode(file);
@@ -165,23 +175,34 @@ export default function ArtGallery({ onExit }) {
 			if (item.keys.length > 1) {
 				const split = splitFor(item.keys, img);
 				if (split.error) { setPending((p) => ({ ...p, [itemId(item)]: { item, file, error: `${split.error}.` } })); return; }
-				results = split.parts.map(([k, part]) => [k, cleanFor(k, part, { charH: height, keyed: true })]);
+				results = split.parts.map(([k, part]) => [k, cleanFor(k, part, { artPx: px, keyed: true })]);
 				if (!split.plain) results[0][1].notes.push("the background was not one flat color, so some of it may be left — ask for a plain background");
-			} else results = [[item.keys[0], cleanFor(item.keys[0], img, { charH: height })]];
+			} else if (item.keys[0] === "player.ranger") {
+				// The Ranger is kept exactly as drawn and SETS the density.
+				const r = cleanFor("player.ranger", img, { artPx: px, exact: true });
+				setRangerH(r.native);
+				applyDensity(densityFor(r.native, tall));
+				results = [["player.ranger", r]];
+			} else results = [[item.keys[0], cleanFor(item.keys[0], img, { artPx: px })]];
 			const canvases = results.map(([k, r]) => [k, toCanvas(r.sheet)]);
-			canvases.forEach(([k, cv], i) => override(k, cv, { facings: results[i][1].facings }));
-			setPending((p) => ({ ...p, [itemId(item)]: { item, file, canvases, facings: results.map(([, r]) => r.facings), notes: [...new Set(results.flatMap(([, r]) => r.notes))] } }));
+			const sizes = results.map(([, r]) => ({ w: r.w, h: r.h, facings: r.facings }));
+			canvases.forEach(([k, cv], i) => override(k, cv, sizes[i]));
+			setPending((p) => ({ ...p, [itemId(item)]: { item, file, canvases, sizes, notes: [...new Set(results.flatMap(([, r]) => r.notes))] } }));
 			setMessage("");
 		} catch (err) {
 			setPending((p) => ({ ...p, [itemId(item)]: { item, file, error: `Could not read ${file.name}: ${err.message}` } }));
 		}
 	};
-	const charRef = useRef(charH);
-	useEffect(() => {                      // a new character height re-runs every unsaved try
-		if (charRef.current === charH) return;
-		charRef.current = charH;
-		for (const p of Object.values(pending)) if (p.file && !p.error) process(p.item, p.file, charH);
-	}, [charH]); // eslint-disable-line react-hooks/exhaustive-deps
+	/* A new character height: a new density from the Ranger, every unsaved try redone
+	 * at it, and — once the Ranger is saved — the density written for the game. */
+	const pickTall = (t) => {
+		setTall(t);
+		if (!rangerH) return;
+		const n = densityFor(rangerH, t);
+		applyDensity(n);
+		for (const p of Object.values(pending)) if (p.file && !p.error && !p.item.keys.includes("player.ranger")) process(p.item, p.file, n);
+		if (MANIFEST["player.ranger"]) fetch("/__halcyon-art/settings", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ artPx: n }) });
+	};
 
 	const discard = (item) => {
 		for (const k of item.keys) override(k, null);
@@ -193,9 +214,9 @@ export default function ArtGallery({ onExit }) {
 		if (!p?.canvases) return;
 		setBusy(true);
 		try {
-			const items = p.canvases.map(([key, cv], i) => ({ key, png: cv.toDataURL("image/png").split(",")[1], facings: p.facings[i] }));
+			const items = p.canvases.map(([key, cv], i) => ({ key, png: cv.toDataURL("image/png").split(",")[1], ...p.sizes[i] }));
 			const res = await fetch("/__halcyon-art/save", { method: "POST", headers: { "content-type": "application/json" },
-				body: JSON.stringify({ items, raw: await base64Of(p.file), rawName: p.file.name }) });
+				body: JSON.stringify({ items, artPx: density, raw: await base64Of(p.file), rawName: p.file.name }) });
 			const out = await res.json();
 			if (!res.ok) throw new Error(out.error || res.status);
 			setMessage(`Saved ${item.keys.map((k) => SLOTS[k].label).join(", ")} — it is in the game now.`);
@@ -211,7 +232,7 @@ export default function ArtGallery({ onExit }) {
 
 	const total = Object.keys(SLOTS).length, made = Object.keys(MANIFEST).length;
 	const firstOpen = BATCHES.findIndex((b) => !b.items.every((it) => it.keys.every((k) => MANIFEST[k])));
-	const scale = px / ART_PX;
+	const scale = +(px / density).toFixed(2);
 	return (
 		<div style={{ minHeight: "100vh", background: "#121615", color: "#e8e3d6", padding: "16px 20px 48px" }}>
 			<div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 6 }}>
@@ -233,8 +254,9 @@ export default function ArtGallery({ onExit }) {
 						<span>Tile {SIZES.map((s) => <button key={s} className={`btn ${s === px ? "btn-gold" : "btn-ghost"}`} onClick={() => setPx(s)}>{s}px</button>)}
 							<span style={{ opacity: 0.6 }}> {scale} screen px per art px</span></span>
 						<span>Facing {Object.keys(FACE).map((f) => <button key={f} className={`btn ${f === facing ? "btn-gold" : "btn-ghost"}`} onClick={() => setFacing(f)}>{f}</button>)}</span>
-						<label>Character height <select value={charH} onChange={(e) => setCharH(Number(e.target.value))} style={{ fontSize: 16 }}>
-							{[16, 18, 20, 22].map((h) => <option key={h} value={h}>{h} px</option>)}</select></label>
+						<label>Ranger height <select value={tall} onChange={(e) => pickTall(Number(e.target.value))} style={{ fontSize: 16 }}>
+							{[1, 1.15, 1.25, 1.4, 1.6].map((t) => <option key={t} value={t}>{t} tiles</option>)}</select>
+							<span style={{ opacity: 0.6 }}> {density} art px a tile{rangerH ? `, Ranger ${rangerH} px tall` : ""}</span></label>
 					</div>
 				</div>
 				<div style={{ flex: "1 1 440px", minWidth: 0 }}>
@@ -243,7 +265,7 @@ export default function ArtGallery({ onExit }) {
 						<ol style={{ lineHeight: 1.5, paddingLeft: 20 }}>
 							<li>Work through the steps in order. In each one, Copy prompt, paste it into the image generator, and generate.</li>
 							<li>From step 4 on, also attach the Ranger reference image (step 1 has a button to download it).</li>
-							<li>Drop the result on its box. It is cut out, shrunk and recolored to the game's colors, and shows in the room at game size.</li>
+							<li>Drop the result on its box. It is cut out, read at the generator's own pixel size, put on the game's shared colors, and shows in the room at game size.</li>
 							<li>Not right? Generate again and drop the new one. Right? Use this. It is in the game at once.</li>
 							<li>Tell Claude when a step is done; Claude checks it in a real run and ships it.</li>
 						</ol>
@@ -255,7 +277,7 @@ export default function ArtGallery({ onExit }) {
 							</summary>
 							<p style={{ opacity: 0.8, margin: "6px 0" }}>{batch.why}</p>
 							{batch.anchor && refOk && <p style={{ margin: "6px 0" }}><a href="/__halcyon-art/source/player.ranger" style={{ color: "#7fe3f0" }}>Download the Ranger reference image</a> to attach from step 4 on.</p>}
-							{batch.items.map((item) => <Item key={itemId(item)} item={item} batch={batch} pending={pending} busy={busy}
+							{batch.items.map((item) => <Item key={itemId(item)} item={item} batch={batch} pending={pending} busy={busy} px={density}
 								onFile={(it, f) => process(it, f)} onUse={use} onDiscard={discard} />)}
 						</details>
 					))}

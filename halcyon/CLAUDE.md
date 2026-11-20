@@ -738,23 +738,58 @@ Modeled on RotMG's enchanting, minus its percentages, dust colors and artifacts.
 - **`halcyon/art.js` is the one place art is named.** `SLOTS` lists every picture the
   renderer can ask for (four classes, every enemy and boss kind, the plain shots, and the
   tile kinds each place really has — `TILE_PARTS`: the Shallows' water, the Fracture's
-  void, the town's planters and fountain) with its frame size in ART pixels — a tile is
-  `ART_PX` (16) wide, drawn at `px / 16` screen pixels per art pixel. The pictures that
-  EXIST are `artManifest.js` (plain JSON in a JS file, rewritten by the studio), one
-  line per file in `webapp/public/art/halcyon/` (not `public/halcyon/`: a static folder
-  named like the `/halcyon` route would sit on it). `v` busts the browser cache.
+  void, the town's planters and fountain). A character slot says how TALL it stands in
+  tiles (`tall`) and how far its feet sit below its position (`foot`); the frame size of
+  a finished picture is its own (`w`/`h` on its manifest line). The pictures that EXIST
+  are `artManifest.js` (plain JSON in a JS file, rewritten by the studio): `artPx`, the
+  shared DENSITY (art pixels a tile is wide), and one line per file in
+  `webapp/public/art/halcyon/` (not `public/halcyon/`: a static folder named like the
+  `/halcyon` route would sit on it). `v` busts the browser cache.
 - **Nothing waits for art.** Every draw in `render.js` asks `drawSprite`/`drawTile` first
   and draws its greybox shape when the answer is false, so an empty manifest is the
   greybox exactly. A sheet is frames across and facings down (`FACINGS`: down, side, up);
-  left mirrors the side row. Only the PLAIN shots take a picture so far.
-- **One game, not forty generations: `PALETTE` + `paletteFor` + `artClean.js`.** The
-  generator only draws; the cleanup step enforces what every picture shares — background
-  cut from the edges in, crop, shrink to the slot (characters to a chosen height, bosses
-  twice that), every pixel in or out, specks dropped, every color snapped (OKLab) to the
-  families its JOB allows, one near-black outline. The job rule is the art doc's color
-  roles made mechanical: an enemy cannot come out cyan, a floor cannot come out red.
-  A class picture with three figures side by side becomes its three facings; one image
-  of several things (a rift's enemies, the shots) is cut left to right into its slots.
+  left mirrors the side row. Only the PLAIN shots take a picture so far. A sprite is drawn
+  at `px / artPx` screen pixels per art pixel, its anchor worked out per draw from `foot`,
+  so a new density in the studio moves the feet too.
+- **The generator's pixels are READ, never shrunk (2026-11-19).** An image generator asked
+  for pixel art draws big square blocks (about 17-18 screen pixels on the first Ranger) on
+  a grid that wobbles 16-21. The first cleanup averaged the picture down to a chosen
+  height, which smeared neighboring blocks into each other — the owner's verdict was
+  "blurry, you can't tell what's what". `readBlocks` instead finds the block size, follows
+  each block edge (`blockEdges`, adaptive, so the wobble is tracked rather than drifted
+  off) and takes the most common color in each block's middle: the generator's own
+  picture at its own pixel count. **`blockSize` is the part that has been wrong twice**:
+  scoring "lines every P pixels" picked two and three times the block on two of the three
+  facings (a multiple lands on edges as well as the block does), and counting edge gaps
+  equally let the faint specks inside blocks pull it down to ~7. What works: the gaps
+  between neighboring edges are whole numbers of blocks, each weighted by its weaker
+  edge's strength SQUARED; the block is the largest size that fits about as well as the
+  best, with the wobble allowed capped at a quarter block; read from every figure in the
+  picture at once (one square block for all). Synthetic tests hold the multiple trap and
+  a sparse sprite; the real picture is the final word — re-check on one after any change.
+- **The Ranger SETS the density.** Its picture is kept exactly as read; `artPx` = its
+  height / its chosen height in tiles (the studio's "Ranger height" select, default
+  1.25). Every later picture is kept at its own pixel count when that is within 15% of
+  the height it must be (`targetHeight` = `tall` x `artPx`), else resized by whole pixels
+  (nearest, never averaged). Tiles are read the same way, then made `artPx` square.
+- **One game, not forty generations: `MASTER` + `paletteFor`.** Every color snaps (OKLab)
+  to one broad shared list built in OKLCH (12 hues x 8 lightness x 3 chroma + grays) —
+  broad so a navy cloak stays navy (the first, narrow palette turned it purple) — filtered
+  by JOB: a player cannot use the vivid danger hues, an enemy or boss cannot use vivid
+  cyan/blue, a tile only the quiet colors plus its own place's ground colors. One shared
+  outline color: `fixOutline` recolors the generator's own dark outline when it drew one
+  (adding a second ring made sprites fat) and adds a ring when it did not. The background
+  is cut from the edges in, and a vivid key color (the asked-for #00FF00) goes everywhere,
+  gaps between a bow and its archer included. A class picture with three figures side by
+  side becomes its three facings; one image of several things (a rift's enemies, the
+  shots) is cut left to right into its slots.
+- **Prompts ask for sizes in GAME pixels** (`artPrompts.js` `sizeLine`, from the density:
+  "exactly 26 pixels tall, every pixel one big square block, as if enlarged with
+  nearest-neighbor"; a row of creatures gets one height each; a tile "exactly 21 by 21").
+  The generator still draws big blocks but about the right NUMBER of them, so the cleanup
+  keeps them as drawn rather than resizing. STYLE also asks for hard edges, a ~16-color
+  palette and a margin round everything — what the block reader and the background cut
+  need most.
 - **`npm run art` (in `webapp/`) opens the studio** — `/halcyon?art` on the dev server,
   `ArtGallery.jsx`, dropped from builds with the `import.meta.env.DEV` branch. It holds
   the whole workflow: `artPrompts.js`'s batches in order with Copy prompt (STYLE pasted
@@ -766,4 +801,6 @@ Modeled on RotMG's enchanting, minus its percentages, dust colors and artifacts.
 - **Gates** (`webapp/test/unit/halcyonArt*.test.mjs`): every enemy type, boss kind and
   class has a slot; every tile in the dungeon fixtures and the town has one; every slot
   is in exactly one prompt step; `MANIFEST` matches the files (`checkManifest`); and the
-  cleanup is held on made-up pictures (size, height, outline, in-or-out, job colors).
+  cleanup is held on made-up block-art pictures with a wobbling grid (read back exactly,
+  never a multiple of the block, a smooth picture refused, the outline once, the navy
+  kept and an enemy never cyan, sizes by density).

@@ -8,16 +8,29 @@
  *   - The cleanup step (artClean.js) then forces the shared size, colors and
  *     outline, whatever the generator did.
  * Colors are described by job (art direction §2.3): the player cyan/white, enemies
- * red/orange/magenta, the ground quiet. */
+ * red/orange/magenta, the ground quiet.
+ *
+ * SIZES are asked for in GAME pixels, worked out from the shared density (art.js
+ * `artPx`, which the approved Ranger sets): "26 pixels tall, enlarged with
+ * nearest-neighbor". A generator still draws big blocks, but about the right NUMBER of
+ * them, so the cleanup can keep its pixels as drawn instead of resizing (anything more
+ * than 15% off is resized by whole pixels, which drops detail). The format rules in
+ * STYLE — hard edges, a margin, a small palette — are the things the cleanup reads
+ * worst when they are missing. */
+import { artPx } from "./art.js";
+import { targetHeight } from "./artClean.js";
 
 export const STYLE = "Original 2D pixel art game asset for a top-down action RPG, seen from slightly above (three-quarter top-down view). " +
 	"Chunky, crisp pixel clusters with one consistent pixel size, a clean near-black outline around every figure, simple flat shading with " +
-	"two or three tones per color, light coming from above. No glow, no blur, no gradients, no shadow on the ground. Readable silhouette " +
-	"even when shrunk very small. Plain flat solid #00FF00 green background, nothing else behind the subject. No text, no logo, no " +
-	"watermark, no border, no extra objects.";
+	"two or three tones per color, light coming from above. Hard pixel edges: no anti-aliasing, no dithering, no soft or half-transparent " +
+	"pixels, no detail smaller than one pixel. A limited palette of about 16 colors. No glow, no blur, no gradients, no shadow on the ground. " +
+	"Readable silhouette even when shrunk very small. Plain flat solid #00FF00 green background, nothing else behind the subject, and a " +
+	"wide empty margin of background around everything: nothing touches the edges of the image. No text, no logo, no watermark, no border, " +
+	"no extra objects.";
 
 export const TILE_STYLE = "Original 2D pixel art game tile for a top-down action RPG. Chunky, crisp pixel clusters with one consistent " +
-	"pixel size, simple flat shading with two or three tones per color, light coming from above. No glow, no blur, no gradients. " +
+	"pixel size, simple flat shading with two or three tones per color, light coming from above. Hard pixel edges: no anti-aliasing, no " +
+	"dithering, no detail smaller than one pixel. No glow, no blur, no gradients. " +
 	"Quiet, low-contrast colors: the ground must never compete with the characters on it. Fill the whole square edge to edge, with no " +
 	"border, no frame and no background. No text, no logo, no watermark.";
 
@@ -25,11 +38,11 @@ export const REFERENCE = "Attached is this game's approved style reference. Matc
 	"exactly; draw only the new subject described below, not the character in the reference.";
 
 const ACCENT = "with bright cyan and white trim so the hero stands out on any floor";
-const THREE = (who) => `${who}, drawn three times in one row with wide empty space between them: facing the viewer, facing right, ` +
+const THREE = (who) => `${who}, drawn three times in one row on a wide landscape image, with wide empty space between them: facing the viewer, facing right, ` +
 	"facing away from the viewer. The same character, size and colors in all three. Compact, slightly chunky proportions, head about " +
 	"a third of the height.";
-const ROW = (n) => `${n} different creatures standing in one row, left to right in the order listed, with wide empty space between ` +
-	"them, all the same height, all facing the viewer:";
+const ROW = (n) => `${n} different creatures standing in one row on a wide landscape image, left to right in the order listed, with ` +
+	"wide empty space between them, all facing the viewer:";
 const SEAMLESS = "It must repeat seamlessly when placed next to copies of itself on all four sides.";
 
 /* One BATCH is one sitting. An item is one generated image: `keys` are the slots it
@@ -38,7 +51,8 @@ export const BATCHES = [
 	{
 		title: "1. The style anchor: the Ranger",
 		why: "Everything else will be matched to this one picture, so take your time. Generate it several times, drop each try here, " +
-			"and keep the one you like best at game size. Then keep that ORIGINAL image file: every later prompt attaches it.",
+			"and keep the one you like best at game size. If it looks too big or too small next to a tile, change \"Ranger height\" above the " +
+			"steps: that sets the pixel size every other picture is matched to. The original image is kept for you; every later prompt attaches it.",
 		anchor: true,
 		items: [{ keys: ["player.ranger"], subject: THREE(`A small hooded ranger with a short bow, a dark slate-blue cloak and brown leather, ${ACCENT} on the hood and bow`) }],
 	},
@@ -130,8 +144,22 @@ export const BATCHES = [
 	},
 ];
 
+/* The size line for an item at density `px` (art pixels a tile): game pixels tall
+ * for each thing in it, and the one pixel grid they share. */
+export function sizeLine(item, px = artPx()) {
+	const grid = "every pixel drawn as one big square block, as if a tiny sprite were enlarged with nearest-neighbor scaling";
+	if (item.tile) return `Size: the tile is exactly ${px} by ${px} pixels, ${grid}. Count the pixels: ${px} across, ${px} down.`;
+	const hs = item.keys.map((k) => targetHeight(k, px));
+	const what = item.keys[0].startsWith("shot.") ? "long" : "tall";
+	if (item.keys.length === 1) {
+		const n = item.keys[0].startsWith("player.") ? "Each of the three figures is" : "It is";
+		return `Size: ${n} exactly ${hs[0]} pixels ${what}, ${grid}.`;
+	}
+	return `Size, left to right: ${hs.map((h, i) => `(${i + 1}) ${h} pixels ${what}`).join(", ")}. All on the same pixel grid, ${grid}.`;
+}
+
 /* The full text to paste for an item: the style, the reference line after batch 1,
- * then the subject. */
-export function promptFor(item, batch) {
-	return [item.tile ? TILE_STYLE : STYLE, !batch.anchor && !item.tile ? REFERENCE : null, item.subject].filter(Boolean).join("\n\n");
+ * the subject, then the size at the current density. */
+export function promptFor(item, batch, px = artPx()) {
+	return [item.tile ? TILE_STYLE : STYLE, !batch.anchor && !item.tile ? REFERENCE : null, item.subject, sizeLine(item, px)].filter(Boolean).join("\n\n");
 }

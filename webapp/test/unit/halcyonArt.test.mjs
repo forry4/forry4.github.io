@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
-import { SLOTS, MANIFEST, sheetOf, frameOf, override, drawSprite, drawTile, checkManifest, sprite } from "../../../halcyon/art.js";
+import { SLOTS, MANIFEST, sheetOf, frameOf, override, drawSprite, drawTile, checkManifest, sprite, artPx } from "../../../halcyon/art.js";
 import { ENEMY, BOSS_HP, CLASS_INFO } from "../../../halcyon/sim.js";
 import { PALETTES, drawEnemyBody, drawMap } from "../../../halcyon/render.js";
 
@@ -32,7 +32,7 @@ test("every thing the game draws has a slot", () => {
 	for (const rift of [...Object.keys(PALETTES), "town"])
 		for (const part of ["floor", "wall", "wallTop", "rock"]) assert.ok(SLOTS[`tile.${rift}.${part}`], `tile.${rift}.${part}`);
 	assert.ok(SLOTS["tile.shallows.water"] && SLOTS["tile.town.water"] && SLOTS["tile.fracture.void"]);
-	for (const [key, s] of Object.entries(SLOTS)) assert.ok(s.w > 0 && s.h > 0 && s.label && s.group && s.anchor.length === 2, key);
+	for (const [key, s] of Object.entries(SLOTS)) assert.ok(s.w > 0 && s.h > 0 && s.label && s.group && (s.anchor ? s.anchor.length === 2 : s.tall > 0 && s.foot >= 0), key);
 });
 
 test("the manifest matches the files on disk", () => {
@@ -88,8 +88,12 @@ test("a picture in place is drawn at art size, on its anchor, and mirrored facin
 		const g = fakeG();
 		drawEnemyBody(g, { tick: 0 }, { type: "chaser", r: 0.4, flash: 0 }, 100, 200, 48, "#e8573f", false, { x: -1, y: 0 });
 		const draw = g.calls.find(([k]) => k === "drawImage");
-		// 48 screen px a tile = 3 per art pixel: a 24-pixel frame is 72 wide, anchor [0.5, 0.7].
-		assert.deepEqual(draw.slice(1), [img, 0, 24, 24, 24, -36, -72 * 0.7, 72, 72]);
+		// 48 screen px a tile at the density's art px a tile: a 24-pixel frame drawn
+		// 24 * 48 / artPx wide, its feet (one row up from the bottom) `foot` tiles below
+		// the position, whatever the density is.
+		const k = 48 / artPx(), W = 24 * k, ay = 1 - (1 + SLOTS["enemy.chaser"].foot * artPx()) / 24;
+		assert.deepEqual(draw.slice(1), [img, 0, 24, 24, 24, -0.5 * W, -ay * W, W, W]);
+		assert.ok(Math.abs((1 - ay) * W - (1 / 24 * W + SLOTS["enemy.chaser"].foot * 48)) < 1e-9, "feet `foot` tiles below");
 		assert.ok(g.calls.some(([k, x, y]) => k === "translate" && x === 100 && y === 200));
 		assert.ok(g.calls.some(([k, x, y]) => k === "scale" && x === -1 && y === 1), "mirrored");
 		assert.ok(!g.calls.some(([k]) => k === "fillRect"), "no shape under the picture");
@@ -131,7 +135,7 @@ test("every tile a dungeon or the town is built from has a slot", async () => {
 });
 
 test("every slot is made in exactly one step of the prompt guide, and every prompt carries the style", async () => {
-	const { BATCHES, promptFor, STYLE, TILE_STYLE, REFERENCE } = await import("../../../halcyon/artPrompts.js");
+	const { BATCHES, promptFor, sizeLine, STYLE, TILE_STYLE, REFERENCE } = await import("../../../halcyon/artPrompts.js");
 	const count = {};
 	for (const b of BATCHES) for (const it of b.items) {
 		for (const k of it.keys) { assert.ok(SLOTS[k], k); count[k] = (count[k] || 0) + 1; }
@@ -139,6 +143,18 @@ test("every slot is made in exactly one step of the prompt guide, and every prom
 		assert.ok(text.startsWith(it.tile ? TILE_STYLE : STYLE), it.keys.join());
 		assert.equal(text.includes(REFERENCE), !b.anchor && !it.tile, it.keys.join());
 		assert.equal(!!it.tile, it.keys.every((k) => k.startsWith("tile.")), it.keys.join());
+		assert.ok(text.endsWith(sizeLine(it)), it.keys.join());
 	}
 	assert.deepEqual(Object.keys(SLOTS).filter((k) => count[k] !== 1), []);
+});
+
+test("every prompt asks for its size in game pixels, from the density", async () => {
+	const { BATCHES, sizeLine } = await import("../../../halcyon/artPrompts.js");
+	const item = (k) => BATCHES.flatMap((b) => b.items).find((it) => it.keys.includes(k));
+	assert.match(sizeLine(item("player.ranger"), 20), /Each of the three figures is exactly 25 pixels tall/);
+	assert.match(sizeLine(item("enemy.tidewarden"), 20), /exactly 48 pixels tall/);
+	assert.match(sizeLine(item("tile.ashen.floor"), 20), /exactly 20 by 20 pixels/);
+	assert.match(sizeLine(item("enemy.shard"), 20), /left to right: \(1\) \d+ pixels tall, \(2\) \d+ pixels tall, \(3\) 12 pixels tall, \(4\)/);
+	assert.match(sizeLine(item("shot.player"), 20), /\(1\) 9 pixels long/);
+	assert.notEqual(sizeLine(item("player.ranger"), 16), sizeLine(item("player.ranger"), 24), "the size follows the density");
 });

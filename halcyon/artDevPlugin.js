@@ -9,6 +9,7 @@
  *        originals are big; they stay on this machine as the record).
  *   GET  /__halcyon-art/source/<key>  -> the newest original kept for that key (the
  *        style reference to attach to later prompts).
+ *   POST /__halcyon-art/settings { artPx }  -> the shared density (art pixels a tile).
  *   POST /__halcyon-art/remove  { key }
  *     -> the manifest line and the finished picture go (the originals stay).
  *
@@ -24,15 +25,17 @@ const SOURCE = path.join(here, "art", "source");
 const MANIFEST_FILE = path.join(here, "artManifest.js");
 
 export function readManifest(text = readFileSync(MANIFEST_FILE, "utf8")) {
-	const m = text.match(/export const MANIFEST = (\{[\s\S]*\});\s*$/);
+	const m = text.match(/export const ART = (\{[\s\S]*\});\s*$/);
 	if (!m) throw new Error("artManifest.js is not in its expected shape");
-	return JSON.parse(m[1]);
+	const art = JSON.parse(m[1]);
+	art.pictures ||= {};
+	return art;
 }
-export function manifestText(manifest) {
-	const sorted = Object.fromEntries(Object.keys(manifest).sort().map((k) => [k, manifest[k]]));
-	return "/* The pictures that exist (art.js explains the fields). Written by the art gallery's\n" +
-		" * \"Use this\" (dev server only) — keep it plain JSON inside the braces. */\n" +
-		`export const MANIFEST = ${JSON.stringify(sorted, null, "\t")};\n`;
+export function manifestText(art) {
+	const pictures = Object.fromEntries(Object.keys(art.pictures).sort().map((k) => [k, art.pictures[k]]));
+	return "/* The pictures that exist and the shared density (art.js explains the fields).\n" +
+		" * Written by the art studio's \"Use this\" (dev server only) — keep it plain JSON. */\n" +
+		`export const ART = ${JSON.stringify({ artPx: art.artPx, pictures }, null, "\t")};\n`;
 }
 
 function body(req) {
@@ -64,7 +67,9 @@ export default function halcyonArtDev() {
 						return res.end(readFileSync(path.join(dir, newest)));
 					}
 					if (req.method !== "POST") return next();
-					const msg = await body(req), manifest = readManifest();
+					const msg = await body(req), art = readManifest(), manifest = art.pictures;
+					if (Number.isInteger(msg.artPx) && msg.artPx >= 8 && msg.artPx <= 64) art.artPx = msg.artPx;
+					if (req.url === "/__halcyon-art/settings") { writeFileSync(MANIFEST_FILE, manifestText(art)); return send(200, { ok: true }); }
 					if (req.url === "/__halcyon-art/save") {
 						const items = Array.isArray(msg.items) ? msg.items : [];
 						if (!items.length || items.some((it) => !SLOTS[it.key] || typeof it.png !== "string")) return send(400, { error: "bad items" });
@@ -78,15 +83,15 @@ export default function halcyonArtDev() {
 								const name = String(msg.rawName || "original.png").replace(/[^A-Za-z0-9._-]/g, "_").slice(-80);
 								writeFileSync(path.join(dir, `${v}-${name}`), Buffer.from(msg.raw, "base64"));
 							}
-							manifest[it.key] = { src: `${it.key}.png`, v, ...(it.facings > 1 ? { facings: it.facings } : {}) };
+							manifest[it.key] = { src: `${it.key}.png`, v, ...(it.w ? { w: it.w, h: it.h } : {}), ...(it.facings > 1 ? { facings: it.facings } : {}) };
 						}
-						writeFileSync(MANIFEST_FILE, manifestText(manifest));
+						writeFileSync(MANIFEST_FILE, manifestText(art));
 						return send(200, { ok: true });
 					}
 					if (req.url === "/__halcyon-art/remove") {
 						if (!SLOTS[msg.key]) return send(400, { error: `no slot ${msg.key}` });
 						delete manifest[msg.key];
-						writeFileSync(MANIFEST_FILE, manifestText(manifest));
+						writeFileSync(MANIFEST_FILE, manifestText(art));
 						const file = path.join(PUBLIC, `${msg.key}.png`);
 						if (existsSync(file)) rmSync(file);
 						return send(200, { ok: true });

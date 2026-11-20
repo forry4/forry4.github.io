@@ -19,19 +19,30 @@
  * fraction of the frame: [0.5, 0.5] is the middle, [0.5, 0.8] puts the position near
  * the feet, so a character stands on the spot it occupies.
  */
-import { MANIFEST } from "./artManifest.js";
+import { ART } from "./artManifest.js";
 
+/* ART PIXELS PER TILE — the one density every picture shares. It is not chosen in
+ * the abstract: the approved Ranger is kept at the generator's own pixel count, and
+ * this is set so the Ranger stands the chosen height (studio: "Character height"),
+ * so every later picture is matched to the Ranger rather than the Ranger squeezed
+ * into a guessed number. `setArtPx` is the studio's live preview of a new choice. */
 export const ART_PX = 16;
+let artPxNow = ART.artPx || ART_PX;
+export const artPx = () => artPxNow;
+export function setArtPx(n) { if (n > 0) artPxNow = n; }
 export const FACINGS = ["down", "side", "up"];
 
 /* EVERY picture the renderer can ask for, with the frame size the art plan budgets
  * for it. The gallery shows each one, and the art gate holds MANIFEST to it: a
  * picture for a key that is not here would never be drawn. */
 export const RIFT_NAMES = { shallows: "The Shallows", fracture: "The Fracture", ashen: "The Ashen Breach", town: "The town" };
-const CHAR = { w: 24, h: 24, anchor: [0.5, 0.7] };
-const BOSS = { w: 48, h: 48, anchor: [0.5, 0.62] };
-const TILE = { w: 16, h: 16, anchor: [0, 0] };
-const SHOT = { w: 8, h: 8, anchor: [0.5, 0.5] };
+/* `tall` is how tall the thing stands on screen, in tiles (a shot: its length);
+ * `foot` how far below its position its feet sit, in tiles. w/h are only the frame
+ * a picture with no size of its own would use (a hand-made sheet, a test). */
+const CHAR = { w: 24, h: 24, tall: 1.0, foot: 0.3 };
+const BOSS = { w: 48, h: 48, tall: 2.4, foot: 0.7 };
+const TILE = { w: 16, h: 16, tall: 1, anchor: [0, 0] };
+const SHOT = { w: 8, h: 8, tall: 0.45, anchor: [0.5, 0.5] };
 /* The tile kinds each place really has (dungeon.py's and town.js's maps): the
  * Shallows' water, the Fracture's torn floor (void), the town's planters and fountain. */
 export const TILE_PARTS = {
@@ -43,22 +54,22 @@ export const TILE_PARTS = {
 const TILE_LABEL = { any: { floor: "Floor", wall: "Wall", wallTop: "Wall edge", rock: "Rock", water: "Water", void: "Torn floor" },
 	shallows: {}, fracture: { rock: "Pillar" }, ashen: { rock: "Slag rock" }, town: { rock: "Planter", water: "Fountain" } };
 export const SLOTS = {
-	"player.ranger": { ...CHAR, label: "Ranger", group: "Classes" },
-	"player.paladin": { ...CHAR, label: "Paladin", group: "Classes" },
-	"player.diviner": { ...CHAR, label: "Diviner", group: "Classes" },
-	"player.ninja": { ...CHAR, label: "Ninja", group: "Classes" },
-	"enemy.chaser": { ...CHAR, label: "Chaser", group: "The Shallows", rift: "shallows" },
-	"enemy.shooter": { ...CHAR, label: "Shooter", group: "The Shallows", rift: "shallows" },
+	"player.ranger": { ...CHAR, tall: 1.25, label: "Ranger", group: "Classes" },
+	"player.paladin": { ...CHAR, tall: 1.25, label: "Paladin", group: "Classes" },
+	"player.diviner": { ...CHAR, tall: 1.25, label: "Diviner", group: "Classes" },
+	"player.ninja": { ...CHAR, tall: 1.25, label: "Ninja", group: "Classes" },
+	"enemy.chaser": { ...CHAR, tall: 0.95, label: "Chaser", group: "The Shallows", rift: "shallows" },
+	"enemy.shooter": { ...CHAR, tall: 1.1, label: "Shooter", group: "The Shallows", rift: "shallows" },
 	"enemy.radial": { ...CHAR, label: "Spinner", group: "The Shallows", rift: "shallows" },
 	"enemy.tidewarden": { ...BOSS, label: "The Tidewarden", group: "The Shallows", rift: "shallows" },
 	"enemy.shard": { ...CHAR, label: "Shard", group: "The Fracture", rift: "fracture" },
-	"enemy.splitter": { ...CHAR, label: "Splitter", group: "The Fracture", rift: "fracture" },
-	"enemy.splinter": { ...CHAR, w: 16, h: 16, label: "Splinter", group: "The Fracture", rift: "fracture" },
+	"enemy.splitter": { ...CHAR, tall: 1.1, label: "Splitter", group: "The Fracture", rift: "fracture" },
+	"enemy.splinter": { ...CHAR, w: 16, h: 16, tall: 0.6, foot: 0.2, label: "Splinter", group: "The Fracture", rift: "fracture" },
 	"enemy.flicker": { ...CHAR, label: "Flicker", group: "The Fracture", rift: "fracture" },
 	"enemy.breach": { ...BOSS, label: "The Schism", group: "The Fracture", rift: "fracture" },
-	"enemy.cinder": { ...CHAR, label: "Cinder", group: "The Ashen Breach", rift: "ashen" },
-	"enemy.kiln": { ...CHAR, label: "Kiln", group: "The Ashen Breach", rift: "ashen" },
-	"enemy.smolder": { ...CHAR, label: "Smolder", group: "The Ashen Breach", rift: "ashen" },
+	"enemy.cinder": { ...CHAR, tall: 0.95, label: "Cinder", group: "The Ashen Breach", rift: "ashen" },
+	"enemy.kiln": { ...CHAR, tall: 1.05, label: "Kiln", group: "The Ashen Breach", rift: "ashen" },
+	"enemy.smolder": { ...CHAR, tall: 0.95, label: "Smolder", group: "The Ashen Breach", rift: "ashen" },
 	"enemy.pyre": { ...BOSS, label: "The Pyre", group: "The Ashen Breach", rift: "ashen" },
 	"shot.player": { ...SHOT, label: "Your shot", group: "Shots" },
 	"shot.enemy": { ...SHOT, label: "Enemy shot", group: "Shots" },
@@ -75,26 +86,41 @@ export const SLOTS = {
  * w/h/anchor default to the slot's; give them only to override. `v` changes when the
  * file does, so a browser never keeps the old picture. The gallery's "Use this"
  * writes that file through the dev server; it is plain data so a person can too. */
-export { MANIFEST };
+export const MANIFEST = ART.pictures || {};
 
-/* THE SHARED COLOR LIST (art direction §2.3): every finished picture uses ONLY these,
- * and only the families its job allows (`paletteFor`). That is what makes pictures
- * from different generations look like one game, and it is the color-role rule made
- * mechanical: an enemy cannot come out cyan, a floor cannot come out enemy-red. */
+/* THE SHARED COLOR LIST (art direction §2.3). Every finished picture's colors are
+ * snapped to ONE list of shared values, so pictures from different generations use
+ * the very same blues, browns and reds; and a picture may only use the part of the
+ * list its JOB allows (`paletteFor`) — the color-role rule made mechanical: an enemy
+ * cannot come out the player's cyan or blue, the player cannot wear danger red,
+ * a floor is never vivid.
+ *
+ * The list is built in OKLCH (lightness, chroma = how vivid, hue angle): twelve hues
+ * every 30 degrees, eight lightness steps, three strengths, plus grays. It is broad
+ * on purpose — the first one (40 hand-picked colors) had no navy, and snapped the
+ * Ranger's blue hood to violet. */
+const toHex = (r, g, b) => "#" + [r, g, b].map((v) => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, "0")).join("");
+const gam = (c) => (c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055);
+/* OKLCH to sRGB, lowering the chroma until the color exists on a screen. */
+export function oklchHex(L, C, hDeg) {
+	for (let c = C; c >= 0; c -= 0.005) {
+		const a = c * Math.cos(hDeg * Math.PI / 180), b = c * Math.sin(hDeg * Math.PI / 180);
+		const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3, m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3, s = (L - 0.0894841775 * a - 1.291485548 * b) ** 3;
+		const rgb = [4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s, -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s];
+		if (rgb.every((v) => v >= -0.001 && v <= 1.001)) return toHex(...rgb.map(gam));
+	}
+	return toHex(L, L, L);
+}
+const LIGHT = [0.2, 0.29, 0.38, 0.48, 0.58, 0.68, 0.79, 0.9];
+export const MASTER = [...new Map([
+	...[0.13, 0.24, 0.35, 0.47, 0.6, 0.73, 0.86, 0.97].map((L) => ({ L, C: 0, h: 0 })),
+	...[0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330].flatMap((h) =>
+		LIGHT.flatMap((L) => [0.04, 0.09, 0.15].map((C) => ({ L, C, h })))),
+].map((c) => { const hex = oklchHex(c.L, c.C, c.h); return [hex, { hex, ...c }]; })).values()];
+
 export const PALETTE = {
 	outline: ["#14111a"],
-	white: ["#f4f6f8"],
-	// cloth, leather, skin, steel: low saturation, for bodies of every kind
-	neutral: ["#2b3140", "#414a5c", "#606b7f", "#3b2a22", "#5c4232", "#86644a", "#c58f6e", "#e8b896", "#8f97a3", "#c4cad2"],
-	// each class's own clothing, muted so it never competes with a danger color
-	cloth: ["#3d2f5c", "#5a4785", "#7b68a8", "#2c4a3a", "#3f6b52", "#5f8a6c", "#4a3a26", "#7a6440", "#a08a5c"],
-	// the player's accent, its shots and abilities: cyan, blue, white
-	player: ["#123e52", "#1d6f86", "#2fb6d0", "#7fe3f0", "#c9f6ff"],
-	// every enemy and everything an enemy fires: red, orange, hot magenta, a hot core
-	enemy: ["#3a0f1a", "#5a1424", "#a3262f", "#e8573f", "#c8551d", "#ef8a3a", "#ffb347", "#6e1a4a", "#c8458f", "#ff6ac1", "#fff1c2"],
-	// pickups and loot: gold and green, never warm red
-	loot: ["#7a5a1e", "#e9c25a", "#ffe9a6", "#2f7a3a", "#6fd36a"],
-	// each place's ground: always the quietest thing on screen
+	// each place's own ground colors, beside the quiet part of the shared list
 	env: {
 		// daylit sandbars, gray-green rock, shallow water, a faint seam (design §14.4)
 		shallows: ["#5e5747", "#7d7460", "#a3987a", "#bfb491", "#d3c9a6", "#4f6058", "#6e7d70", "#918f84", "#3f6a6e", "#5f8f93", "#82aeb0", "#b8d8d0"],
@@ -106,24 +132,31 @@ export const PALETTE = {
 		town: ["#1c2322", "#2e3836", "#3c4845", "#515b57", "#6a7570", "#8a948f", "#3e2a18", "#58391f", "#7a5534"],
 	},
 };
-/* Which families a slot's picture may use. */
+/* The hue families that carry a meaning (OKLCH hue angles, vivid only). */
+const vivid = (c) => c.C >= 0.09;
+export const isDanger = (c) => vivid(c) && (c.h <= 60 || c.h >= 330);       // red, orange, magenta
+export const isPlayerHue = (c) => vivid(c) && c.h >= 180 && c.h <= 270;     // cyan, blue
+/* Which part of the shared list a slot's picture may use. */
 export function paletteFor(key) {
 	const slot = SLOTS[key];
 	if (!slot) return [];
-	const P = PALETTE, [kind, name] = key.split(".");
-	if (kind === "tile") return [...P.env[slot.rift]];
-	if (kind === "player") return [...P.outline, ...P.white, ...P.neutral, ...P.cloth, ...P.player];
-	if (key === "shot.player") return [...P.outline, ...P.white, ...P.player];
-	if (kind === "shot") return [...P.outline, ...P.enemy];
-	if (slot.h >= 40) return [...P.outline, ...P.neutral, ...P.cloth, ...P.enemy, ...P.env[slot.rift]];   // a boss: free body, danger attacks
-	return [...P.outline, ...P.neutral, ...P.enemy];
+	const kind = key.split(".")[0], hex = (list) => list.map((c) => c.hex);
+	if (kind === "tile") return [...hex(MASTER.filter((c) => c.C <= 0.04)), ...PALETTE.env[slot.rift]];
+	if (kind === "player") return [...PALETTE.outline, ...hex(MASTER.filter((c) => !isDanger(c)))];
+	if (key === "shot.player") return [...PALETTE.outline, ...hex(MASTER.filter((c) => isPlayerHue(c) || (c.C === 0 && c.L > 0.6) || (c.C <= 0.04 && c.L >= 0.79 && c.h >= 180 && c.h <= 270)))];
+	if (kind === "shot") return [...PALETTE.outline, ...hex(MASTER.filter((c) => isDanger(c) || (c.L >= 0.79 && (c.h <= 90 || c.h >= 330 || c.C === 0))))];
+	return [...PALETTE.outline, ...hex(MASTER.filter((c) => !isPlayerHue(c)))];   // enemies and bosses
 }
 
 /* The frame layout of one manifest line, with the slot's defaults filled in. */
 export function sheetOf(key, entry = MANIFEST[key]) {
 	const slot = SLOTS[key];
 	if (!slot || !entry) return null;
-	return { w: entry.w || slot.w, h: entry.h || slot.h, anchor: entry.anchor || slot.anchor,
+	const h = entry.h || slot.h;
+	/* A character's feet sit `foot` tiles below its position; the picture's bottom row
+	 * is its feet (the cleanup leaves one row under them for the outline). */
+	const anchor = entry.anchor || slot.anchor || [0.5, Math.max(0, 1 - (1 + slot.foot * artPx()) / h)];
+	return { w: entry.w || slot.w, h, anchor,
 		frames: entry.frames || 1, fps: entry.fps || 8, facings: entry.facings || 1, variants: entry.variants || 1, src: entry.src };
 }
 
@@ -156,7 +189,7 @@ export function loadArt(manifest = MANIFEST) {
 	for (const [key, entry] of Object.entries(manifest)) {
 		if (loaded.has(key) || !SLOTS[key]) continue;
 		const img = new Image();
-		const rec = { img, sheet: sheetOf(key, entry), ready: false };
+		const rec = { img, entry, sheet: sheetOf(key, entry), ready: false };
 		img.onload = () => { rec.ready = true; };
 		img.src = artBase() + entry.src + (entry.v ? `?v=${entry.v}` : "");
 		loaded.set(key, rec);
@@ -169,7 +202,8 @@ export function sprite(key) {
 export function override(key, image, entry = {}) {
 	if (!SLOTS[key]) return;
 	if (!image) { loaded.delete(key); return; }
-	loaded.set(key, { img: image, sheet: sheetOf(key, { src: "(preview)", ...entry }), ready: true });
+	const e = { src: "(preview)", ...entry };
+	loaded.set(key, { img: image, entry: e, sheet: sheetOf(key, e), ready: true });
 }
 
 /* Draw `key` with its anchor on (X, Y), at `px` screen pixels a tile. Returns false
@@ -178,7 +212,8 @@ export function override(key, image, entry = {}) {
 export function drawSprite(g, key, X, Y, px, { facing = null, tick = 0, seed = 0, rot = 0, size = 1, alpha = 1 } = {}) {
 	const rec = sprite(key);
 	if (!rec) return false;
-	const s = rec.sheet, k = (px / ART_PX) * size, f = frameOf(s, { facing, tick, seed });
+	// The anchor is worked out per draw, so a new density in the studio moves the feet too.
+	const s = sheetOf(key, rec.entry), k = (px / artPx()) * size, f = frameOf(s, { facing, tick, seed });
 	const W = s.w * k, H = s.h * k;
 	g.save();
 	g.imageSmoothingEnabled = false;
