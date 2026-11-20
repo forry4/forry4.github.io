@@ -77,6 +77,7 @@ const GAME_EMBLEM = {
 	// A rift: an upright portal with a jagged tear down its middle, and the
 	// arrow's point at its foot — the way in, and what you carry through it.
 	halcyon: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><ellipse cx="12" cy="11.4" rx="6.1" ry="8.3" /><path d="M12.9 5.4 10.7 9.9l2.7 2.2-2.1 5.1" /><path d="M7.6 21h8.8" /></svg>),
+	bossrush: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"><circle cx="12" cy="13.5" r="6.5" /><path d="M10 4h4m-2 0v3m5 .9L19 6m-7 4.5v3l2 1.5" /></svg>),
 };
 
 export { GAME_EMBLEM };

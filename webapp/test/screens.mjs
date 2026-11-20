@@ -68,6 +68,7 @@ const SCREENS = [
 	{ path: "/lolstats", chunk: "LolStats", marker: ".lol" },
 	{ path: "/animefilter", chunk: "AnimeFilter", marker: ".anf" },
 	{ path: "/halcyon", chunk: "HalcyonRift", marker: ".halcyon" },
+	{ path: "/bossrush", chunk: "BossRush", marker: ".bossrush" },
 ];
 
 // EVERY GAME LOBBY, IN ONE PLACE. Three blocks below drive "each game's lobby" —
@@ -100,7 +101,10 @@ const LOBBY_PAGES = [
 // like an Extra (design §20a): its page is a roster and a vault, not open tables,
 // so there are no lobby columns, create row or identity band to measure. Its own
 // render check is `halcyonPlay`.
-const NOT_A_LOBBY = { halcyon: "solo ARPG, coded like an Extra — no lobby (halcyonPlay covers it)" };
+const NOT_A_LOBBY = {
+	halcyon: "solo ARPG, coded like an Extra — no lobby (halcyonPlay covers it)",
+	bossrush: "solo speedrun with a character picker (bossRushPlay covers it)",
+};
 const LOBBY_PAGES_UNLISTED = Object.keys(GAME_ACCENTS)
 	.filter((k) => !LOBBY_PAGES.some((g) => g.id === k) && !NOT_A_LOBBY[k]);
 
@@ -127,7 +131,7 @@ function newestSourceMtime() {
 			}
 		}
 	};
-	for (const d of ["webapp", "games", "shared", "books", "notes"]) walk(path.join(repoRoot, d));
+	for (const d of ["webapp", "games", "shared", "books", "notes", "bossrush"]) walk(path.join(repoRoot, d));
 	return newest;
 }
 
@@ -10221,6 +10225,61 @@ try {
 	//     through engine.py before it counts — so a drift between the two engines fails
 	//     here as a refused solve — and the blue "fewest moves" row that only its owner
 	//     sees (checked again from a second viewer, who must not see it).
+	async function bossRushPlay(log) {
+		const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "boss-rush-harness", name: "Wren", guest: true })));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (error) => errors.push(error.message));
+		let order;
+		// Use the real routes, rooms and portal positions. Reduce HP so this test
+		// exercises the clear flow without having to win three full-length fights.
+		await page.route("**/bossrush/runs", async (route) => {
+			const response = await route.fetch();
+			const run = await response.json();
+			order = run.stages.map((d) => d.name);
+			for (const d of run.stages) d.scale = { hp: 0.003, dmg: 0, speed: 0 };
+			await route.fulfill({ response, json: run });
+		});
+		try {
+			await page.clock.install();
+			await page.goto(`http://localhost:${PORT}/bossrush`);
+			await page.getByRole("button", { name: /^Ranger/ }).click();
+			for (let i = 0; i < 3; i++) {
+				await page.locator(".br-stage").filter({ hasText: `Boss ${i + 1} / 3` }).waitFor();
+				const canvas = page.getByRole("img", { name: `${order[i]} boss arena` });
+				const box = await canvas.boundingBox();
+				await page.mouse.move(box.x + box.width * 0.8, box.y + box.height * 0.5);
+				await page.keyboard.down("d");
+				await page.mouse.down();
+				await page.clock.runFor(3640);
+				await page.mouse.up();
+				await page.keyboard.up("d");
+				if (i < 2) {
+					await page.getByText("Boss defeated. Approach the blue portal and press E.").waitFor();
+					await page.keyboard.down("s");
+					await page.clock.runFor(510);
+					await page.keyboard.up("s");
+					await page.keyboard.press("e");
+					await page.clock.runFor(80);
+				}
+			}
+			await page.getByText("Time posted to the leaderboard.").waitFor();
+			const time = await page.locator(".br-final-time").innerText();
+			await page.getByRole("button", { name: "View leaderboard" }).click();
+			const row = page.locator(".br-board tbody tr").filter({ hasText: "Guest" }).filter({ hasText: time });
+			await row.first().waitFor();
+			if (errors.length) throw new Error(errors.join(", "));
+			log("  OK   Boss Rush clears three arenas by portal and posts its time");
+		} catch (error) {
+			shell.push("bossrush: three-boss run and leaderboard");
+			log(`  FAIL Boss Rush  ${error.message}`);
+		} finally {
+			await ctx.close();
+		}
+	}
+
 	// HALCYON RIFT — the greybox, end to end on the real backend: a guest roster is
 	// minted, the character menu makes a Ranger with its starter gear, the Shallows are entered and
 	// DRAWN, the player walks, and R recalls — and the run's reports reach the server
@@ -11937,7 +11996,7 @@ try {
 		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, historyRecovery, dmAdventures,
 		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, formControlZoom, lastDifficulty,
 		dissonanceQuartet, orbitPlay, lobbyFinishSync, blackCastlePlay, pinchPlay, pipMarketPlay, secretNamesPlay, lobbyChrome, gameKit,
-		notesEditor, profilePage, offlineRead, boxPuzzles, boxDaily, halcyonPlay, astralGuide, lolStats, steamSaved, updateNudgeLayout,
+		notesEditor, profilePage, offlineRead, boxPuzzles, boxDaily, halcyonPlay, bossRushPlay, astralGuide, lolStats, steamSaved, updateNudgeLayout,
 		crashScreen, bootWithoutServer];
 
 	// EVERY BLOCK MUST BE IN A LANE. Before the lanes existed, adding a block meant

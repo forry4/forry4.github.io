@@ -66,6 +66,7 @@ const AstralGuide = lazyChunk("AstralGuide", () => import("../../astralguide/Ast
 const LolStats = lazyChunk("LolStats", () => import("../../lolstats/LolStats.jsx"));
 const AnimeFilter = lazyChunk("AnimeFilter", () => import("../../animefilter/AnimeFilter.jsx"));
 const BoxPuzzles = lazyChunk("BoxPuzzles", () => import("../../boxpuzzles/BoxPuzzles.jsx"));
+const BossRush = lazyChunk("BossRush", () => import("../../bossrush/BossRush.jsx"));
 const HalcyonRift = lazyChunk("HalcyonRift", () => import("../../halcyon/HalcyonRift.jsx"));
 
 // The chunk behind each URL mode (shared/router.js). The boot calls its importer the
@@ -77,7 +78,7 @@ const CHUNK_FOR_MODE = { coc: "CastlesOfCrimson", werewolf: "WhereWolf", duel: "
 	blackcastle: "BlackCastle", secretnames: "SecretNames", pinch: "Pinch", pipmarket: "PipMarket",
 	books: "Books", notes: "Notes", profile: "Profile", bggfilter: "BggFilter",
 	steamfilter: "SteamFilter", astral: "AstralGuide", lolstats: "LolStats",
-	animefilter: "AnimeFilter", boxpuzzles: "BoxPuzzles", halcyon: "HalcyonRift" };
+	animefilter: "AnimeFilter", boxpuzzles: "BoxPuzzles", halcyon: "HalcyonRift", bossrush: "BossRush" };
 const prefetchScreen = (mode) => {
 	const importer = CHUNK_IMPORTERS[CHUNK_FOR_MODE[mode]];
 	if (importer) importer().catch(() => {});   // a failure is lazyChunk's to handle at mount
@@ -155,8 +156,8 @@ const HTTP_BASE = WS_BASE.replace(/^ws/, "http").replace(/\/ws$/, "");
 // tables — GAMES[].id ≠ path for wherewolf; Spender is one site-level screen now.
 // The shell owns segment 1; each sub-game owns its own segment 2 (room id). The Spender
 // Spender's own waiting/game map to "spender" (or "puzzles" while puzzling) in applyPopRoute.
-const SCREEN_FOR_MODE = { spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", pipmarket: "pipmarket", books: "books", notes: "notes", profile: "profile", puzzles: "puzzles", bggfilter: "bggfilter", steamfilter: "steamfilter", boxpuzzles: "boxpuzzles", astral: "astral", lolstats: "lolstats", animefilter: "animefilter", halcyon: "halcyon", offline: "offline", login: "login" };
-const MODE_FOR_SCREEN = { home: "home", spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", pipmarket: "pipmarket", books: "books", notes: "notes", profile: "profile", puzzles: "puzzles", bggfilter: "bggfilter", steamfilter: "steamfilter", boxpuzzles: "boxpuzzles", astral: "astral", lolstats: "lolstats", animefilter: "animefilter", halcyon: "halcyon", offline: "offline", login: "login" };
+const SCREEN_FOR_MODE = { spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", pipmarket: "pipmarket", books: "books", notes: "notes", profile: "profile", puzzles: "puzzles", bggfilter: "bggfilter", steamfilter: "steamfilter", boxpuzzles: "boxpuzzles", astral: "astral", lolstats: "lolstats", animefilter: "animefilter", halcyon: "halcyon", bossrush: "bossrush", offline: "offline", login: "login" };
+const MODE_FOR_SCREEN = { home: "home", spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", dissonance: "dissonance", ragtag: "ragtag", orbit: "orbit", blackcastle: "blackcastle", secretnames: "secretnames", pinch: "pinch", pipmarket: "pipmarket", books: "books", notes: "notes", profile: "profile", puzzles: "puzzles", bggfilter: "bggfilter", steamfilter: "steamfilter", boxpuzzles: "boxpuzzles", astral: "astral", lolstats: "lolstats", animefilter: "animefilter", halcyon: "halcyon", bossrush: "bossrush", offline: "offline", login: "login" };
 
 // Per-game emblem — inline SVG tinted via currentColor (=the card's --accent), so no
 // raster asset / CDN (keeps the self-hosted, no-CLS constraint). Small motifs that read
@@ -3235,6 +3236,14 @@ export default function SpenderApp() {
 		return (
 			<ScreenBoundary key={screen} onHome={crashHome}><Suspense fallback={<GameChunkLoading />}>
 				<HalcyonRift authUser={authUser} onExit={() => nav("home")} />
+			</Suspense></ScreenBoundary>
+		);
+	}
+
+	if (screen === "bossrush") {
+		return (
+			<ScreenBoundary key={screen} onHome={crashHome}><Suspense fallback={<GameChunkLoading />}>
+				<BossRush authUser={authUser} onExit={() => nav("home")} />
 			</Suspense></ScreenBoundary>
 		);
 	}

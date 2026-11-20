@@ -73,6 +73,7 @@ export const GAME_ACCENTS = {
 	// hue ~248, between Where Wolf's periwinkle (228) and Duel's orchid (290), and
 	// well clear of SecretNames' #4fb3e8, which a kingfisher blue sat almost on top of.
 	halcyon: "#9d8ff2",
+	bossrush: "#f6ac61",
 };
 
 // Titles that do not clear the 4.5:1 AA floor on the card, and are shipped anyway

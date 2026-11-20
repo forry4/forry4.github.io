@@ -30,6 +30,7 @@ REGISTER = re.compile(r'_results\.register\(\s*"(\w+)"')
 # Catalogue entries that are not table games and so have no win or loss to put on
 # a profile. Self-policing: a row whose game starts registering a reader is STALE.
 NOT_TABLE_GAMES = {
+    "bossrush": "a solo speedrun with a dedicated leaderboard",
     "halcyon": "a solo ARPG coded like an Extra (docs/halcyon-rift-game-design.md §20a); "
                "a run ends in a recall, a clear or a death, never a result against anyone",
 }

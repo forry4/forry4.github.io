@@ -50,6 +50,7 @@ export const FEATURE_BLOCKS = {
 	"notes": ["notesEditor", "offlineRead"],
 	"boxpuzzles": ["boxPuzzles", "boxDaily"],
 	"halcyon": ["halcyonPlay", "gameKit"],
+	"bossrush": ["bossRushPlay", "routeMounts"],
 	"bggfilter": ["formControlZoom", "offlineRead", "crashScreen"],
 	"steamfilter": ["formControlZoom", "offlineRead", "steamSaved"],
 	"astralguide": ["astralGuide", "formControlZoom", "offlineRead"],
