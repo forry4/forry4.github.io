@@ -37,6 +37,24 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
 
 ---
 
+## Giving the owner a command to run — ALWAYS say where to run it
+
+**Every command for the owner to run starts with the `cd` that gets there, as a full
+path, in the same code block** — never "in the `webapp` folder" or "from the repo root",
+leaving them to find the folder (owner, 2026-11-19: "ALWAYS give me the cd
+instructions"). Use the full Windows path of the checkout that actually has the code:
+this repo has several worktrees (`forrestm_projects`, `forrestm_projects-halcyon`, …) on
+different branches, so name the right one. For example:
+
+```powershell
+cd C:\Users\Forrest\forrestm_projects-halcyon\webapp
+npm run art
+```
+
+If the command needs anything else first (a server stopped, a port free), say that too.
+
+---
+
 ## Tech stack
 
 | Layer | Tech |
