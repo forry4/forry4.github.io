@@ -10253,6 +10253,7 @@ try {
 			await page.clock.install();
 			await page.goto(`http://localhost:${PORT}/bossrush`);
 			await page.getByRole("button", { name: /^Ranger/ }).click();
+			await page.getByRole("button", { name: /^Rift Trio/ }).click();
 			for (let i = 0; i < 3; i++) {
 				await page.locator(".br-stage").filter({ hasText: `Boss ${i + 1} / 3` }).waitFor();
 				const canvas = page.getByRole("img", { name: `${order[i]} boss arena` });
@@ -10282,9 +10283,11 @@ try {
 				await page.keyboard.up("d");
 				if (i < 2) {
 					await page.getByText("Boss defeated. Approach the blue portal and press E.").waitFor();
-					await page.keyboard.down("s");
-					await page.clock.runFor(510);
-					await page.keyboard.up("s");
+					const fracture = order[i] === "The Fracture";
+					const key = fracture ? "a" : "s";
+					await page.keyboard.down(key);
+					await page.clock.runFor(fracture ? 280 : 510);
+					await page.keyboard.up(key);
 					await page.keyboard.press("e");
 					await page.clock.runFor(80);
 				}

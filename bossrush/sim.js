@@ -22,6 +22,7 @@
 
 export const TPS = 60;
 export const DT = 1 / TPS;
+const FOCUS_ZONE = { duration: 5 * TPS, radius: 2.5, multiplier: 1.5 };
 const PI = 3.141592653589793;
 const TAU = 6.283185307179586;
 const HALF_PI = 1.5707963267948966;
@@ -54,10 +55,6 @@ export const PLAYER_SPEED = 5.6;                     // tiles / s
 export const REACH = 1.3;                            // how close E has to be
 export const RECOVERY_MARGIN = 40;                   // design §9.2: limit = min(max, lowest + margin)
 export const HEAL = 35;                              // a heal pickup: +HP and +limit
-/* THE HEALING POTION (owner's call, 2026-11-18, design §19.1): never a stock, always
- * a cooldown. It heals and raises the recovery limit like a smaller heal orb. */
-export const POTION_HEAL = 30;
-export const POTION_COOLDOWN = 20 * TPS;
 /* THE ABILITY TABLE (owner's calls, 2026-11-19). Every ability costs 30 MP at tier 0
  * and 5 more a tier (80 at tier 10); what it does grows a little faster, so a higher
  * tier is always a little better per MP and never worse:
@@ -132,7 +129,7 @@ export const UNIQUE = {
 export const CLASS_INFO = {
 	ranger: { name: "Ranger", description: "A quick ranged fighter with a volley of arrows.", ability: "volley" },
 	paladin: { name: "Paladin", description: "A close-range guardian whose field slows enemy shots and burns enemies around them.", ability: "slow" },
-	diviner: { name: "Diviner", description: "A long-range mage who calls stars down on a spot.", ability: "starfall" },
+	diviner: { name: "Diviner", description: "A long-range mage who creates a stationary zone for 5 seconds. Shots fired from inside deal 50% more damage.", ability: "focus" },
 	ninja: { name: "Ninja", description: "A quick thrower who counters a hit and strikes back twice as hard.", ability: "counter" },
 };
 
@@ -159,14 +156,16 @@ export const ENEMY = {
 	smolder: { hp: 90, r: 0.44, speed: 0 },
 };
 // Each dungeon's boss is a `boss` enemy of its own KIND (dungeon.boss_kind).
-export const BOSS_HP = { tidewarden: 1150, breach: 1950, pyre: 2800 };
+export const BOSS_HP = { tidewarden: 3000, breach: 3000, pyre: 3000 };
 
 /* CRACKS (the Fracture, design §14.4a): authored lines of floor that open into void
  * while their room is being fought. Each counts `t` round a `period`: closed, then
  * `warn` ticks of a flickering seam, then `open` ticks as void (walking blocked,
  * shots fly over). One that opens under a body throws it to the nearest solid
  * ground, and hurts the player `dmg`. Groups start `stagger` apart. */
-export const CRACK = { period: 480, warn: 60, open: 180, stagger: 160, dmg: 14 };
+// Offset crossings never fail at the same time. Each warning lasts 1.25s,
+// even while the Schism doubles the rate of the cycle.
+export const CRACK = { period: 480, warn: 75, open: 210, stagger: 240, start: 60, dmg: 14 };
 
 /* Each weapon fires its own PATTERN, not just its own numbers (owner's ask,
  * 2026-11-18). `rate` is volleys a second; a volley is `shots` arrows fanned
@@ -181,26 +180,27 @@ export const CRACK = { period: 480, warn: 60, open: 180, stagger: 160, dmg: 14 }
  * `dmg` is a multiple of 5 and `rate` was nudged to meet the curve. The uniques sit off
  * it on purpose.
  * Two STANDARD types per class plus uniques (owner's call, 2026-11-18); ranges in
- * tiles are the owner's: shortbow 5, repeater 6, longbow 7.
+ * tiles: shortbow 5, repeater 6, longbow 6.
  *   shortbow   — twin arrows, fast, short: strong up close, spreads out at range.
- *   longbow    — one heavy arrow, slow, the longest reach.
+ *   longbow    — one heavy arrow, slow and long-range.
  *   tidecaller — UNIQUE: three arrows in a wide fan that glance off a wall once.
  *   repeater   — UNIQUE: a three-bolt burst, then a reload: front-loaded damage.
  * `bounce` is how many walls a shot glances off before it breaks. */
 export const WEAPONS = {
 	none: { dmg: 6, rate: 3, range: 5, speed: 14, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0 },
 	shortbow: { dmg: 5, rate: 5, range: 5, speed: 15, shots: 2, spread: 0.12, pierce: 0, burst: 1, gap: 0 },
-	longbow: { dmg: 25, rate: 1.5, range: 7, speed: 20, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0 },
-	mace: { dmg: 25, rate: 2.4, range: 3, speed: 15, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0 },
+	longbow: { dmg: 50, rate: 1.5, range: 6, speed: 20, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0 },
+	mace: { dmg: 62.5, rate: 1.5, range: 4, speed: 15, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0 },
 	greatsword: { dmg: 45, rate: 1.1, range: 4, speed: 17, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0 },
 	wand: { dmg: 15, rate: 2.8, range: 6, speed: 16, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0 },
-	starstaff: { dmg: 25, rate: 1.4, range: 8, speed: 20, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0 },
+	starstaff: { dmg: 43.75, rate: 1.5, range: 7, speed: 20, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0 },
 	tidecaller: { dmg: 10, rate: 2.5, range: 6, speed: 16, shots: 3, spread: 0.24, pierce: 0, burst: 1, gap: 0, bounce: 1 },
 	repeater: { dmg: 10, rate: 1.5, range: 6, speed: 17, shots: 1, spread: 0, pierce: 0, burst: 3, gap: 5 },
 	// The Ninja's (2026-11-18): stars spin through one enemy; a kunai is one heavy, fast blade.
 	// Slower and harder since 2026-11-18 (owner's ask): at 4.5 a second the doubled
 	// countered shot left before the player could aim it.
-	shuriken: { dmg: 20, rate: 2.3, range: 5, speed: 15, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0, look: "star" },
+	// The starter Shadow Garb adds 8% fire rate, so the equipped Ninja fires at 1.5/s.
+	shuriken: { dmg: 56.25, rate: 1.5 / 1.08, range: 5, speed: 15, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0, look: "star" },
 	kunai: { dmg: 30, rate: 1.3, range: 6.5, speed: 22, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0, look: "blade" },
 	// UNIQUE weapons (owner's list, 2026-11-19), each a twist on its class's pair:
 	//   oathhammer — a mace whose hits SPLASH half damage on whatever stands within a tile;
@@ -270,8 +270,8 @@ const effectScale = (it) => 1 + 0.12 * ((it.tier ?? 1) - 1);
 /* A character's numbers from its level and what it wears. `gear` is the equipped
  * items as the server lists them ({base_id, tier, enchants: [{id, q}]}). */
 export function statsFor(gear = [], level = 1, classId = "ranger") {
-	// HP regeneration halved 2026-11-18 (owner: "decrease hp/s regen"); heals are rarer drops now.
-	const s = { maxHp: 100, maxMp: 100, att: 0, dex: 0, def: 0, ap: 0, hpRegen: 0.5, mpRegen: 2.5,
+	// Boss Rush has passive HP recovery up to the current recovery limit.
+	const s = { maxHp: 100, maxMp: 100, att: 0, dex: 0, def: 0, ap: 0, hpRegen: 0.6, mpRegen: 2.5,
 		arrows: 0, abilityDmg: 0, abilityKind: null, classId,
 		...weaponStats(WEAPONS.none, 0) };
 	// Points gather first and apply once the weapon is known, so the order the
@@ -281,19 +281,17 @@ export function statsFor(gear = [], level = 1, classId = "ranger") {
 		const t = tierScale(it), tier = it.tier ?? 1, up = Math.max(0, tier - 1);
 		const w = WEAPONS[it.base_id];
 		if (w) Object.assign(s, weaponStats(w, tier));
-		// ARMOR (owner's numbers, 2026-11-19): every armor gives Defense and HP, and the
-		// two of a type lean only a little apart. Light: the vest (HP, a little MP) and
-		// the robes (MP and regen); heavy: plate (Defense, HP) and the garb (Dexterity).
-		if (it.base_id === "leather_vest") { s.def += 1 + tier; s.maxHp += 10 * up; s.maxMp += 5 * tier; }
+		// Fixed kits use tier 3. Plate favors HP and defense, and robes favor mana.
+		if (it.base_id === "leather_vest") { s.def += 1 + tier; s.maxHp += 5 * up; s.maxMp += 5 * (tier + 1); }
 		const T = tier;                                       // an ability item's tier, 0-10
 		if (it.base_id === "volley_quiver") { s.arrows = 7; s.abilityDmg += (ABILITY.volley.dmg + ABILITY.volley.perTier * T) / 7; s.abilityKind = "volley"; s.abilityItemTier = T; }
-		if (it.base_id === "plate_armor") { s.def += 2 + tier; s.maxHp += 15 * up; }
+		if (it.base_id === "plate_armor") { s.def += 3 + tier; s.maxHp += 15 * up; }
 		if (it.base_id === "grounding_aegis") { s.abilityKind = "shield"; s.abilityTier = effectScale(it); }
-		if (it.base_id === "seer_robes") { s.def += tier; s.maxHp += 5 * up; s.maxMp += 12 * tier; s.mpRegen += 0.5; }
+		if (it.base_id === "seer_robes") { s.def += tier; s.maxMp += 10 * tier; }
 		if (it.base_id === "stillness_orb") { s.abilityKind = "slow"; s.abilityDmg += ABILITY.slow.pulse * (1 + ABILITY.slow.pulsePerTier * T);
 			s.abilityTier = 1 + ABILITY.slow.radiusPerTier * T; s.abilityItemTier = T; }
-		if (it.base_id === "star_tome") { s.abilityKind = "starfall"; s.abilityDmg += ABILITY.starfall.dmg + ABILITY.starfall.perTier * T; s.abilityItemTier = T; }
-		if (it.base_id === "shadow_garb") { s.def += 1 + tier; s.dex += 1 + Math.floor(tier / 2); s.maxHp += 10 * up; }
+		if (it.base_id === "star_tome") { s.abilityKind = "focus"; s.abilityItemTier = T; }
+		if (it.base_id === "shadow_garb") { s.def += 2 + tier; s.dex += 1 + Math.floor(tier / 2); s.maxHp += 10 * up; s.maxMp += 5 * up; }
 		if (it.base_id === "mirror_charm") { s.abilityKind = "counter"; s.abilityItemTier = T; }
 		if (it.base_id === "band_of_vigor") s.maxHp += Math.round(15 * t);
 		if (it.base_id === "band_of_focus") { s.maxMp += Math.round(15 * t); s.mpRegen += 2; }
@@ -440,10 +438,11 @@ export function createSim(dungeon, gear = [], hero = {}) {
 	const bossKind = dungeon.boss_kind || "tidewarden";
 	const hpOf = (e) => (e.type === "boss" ? BOSS_HP[bossKind] || ENEMY.boss.hp : ENEMY[e.type].hp);
 	const enemies = Object.entries(dungeon.enemies)
+		.filter(([, e]) => !e.summon) // Older arenas can still list the Pyre's former summons.
 		.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))      // a fixed order, never insertion order
 		.map(([id, e]) => ({ id, type: e.type, room: e.room, x: e.x, y: e.y, xp: e.xp || 0,
 			r: ENEMY[e.type].r, hp: Math.round(hpOf(e) * scale.hp), maxHp: Math.round(hpOf(e) * scale.hp),
-			parent: e.parent || null, summon: e.summon || null, dormant: !!(e.parent || e.summon),
+			parent: e.parent || null, dormant: !!e.parent,
 			form: e.type === "boss" ? bossKind : null, homeX: e.x, homeY: e.y, lit: false, charge: 0, scorched: 0,
 			active: false, cd: 30 + (e.type === "boss" ? 60 : 0), tele: 0, scd: 0, flash: 0,
 			ward: e.type === "boss" ? scale.ward_boss : scale.ward,
@@ -464,7 +463,7 @@ export function createSim(dungeon, gear = [], hero = {}) {
 		return [y0, y1];
 	});
 	const cracks = (dungeon.cracks || []).map((c) => ({ room: c.room, group: c.group, tiles: c.tiles,
-		t: c.group * CRACK.stagger, open: false, warn: false }));
+		t: CRACK.start + c.group * CRACK.stagger, open: false, warn: false }));
 	const crackAt = {};
 	cracks.forEach((c, i) => { for (const [x, y] of c.tiles) crackAt[y * dungeon.width + x] = i; });
 	const dropsBy = {};
@@ -474,20 +473,21 @@ export function createSim(dungeon, gear = [], hero = {}) {
 		tick: 0, elapsedTicks: 0, bossTimeTicks: null, rng: hashSeed(String(dungeon.seed)), status: "play",
 		classId, practice: !!hero.practice,
 		w: dungeon.width, h: dungeon.height, tiles: dungeon.tiles, rooms, dungeonId: dungeon.id || "shallows",
-		cracks, crackAt, fastRoom: -1, roomY,
+		cracks, crackAt, fastRoom: -1, roomY, fissure: dungeon.fissure, bankSweep: null,
+		cinderwake: bossKind === "cinderwake" ? { index: 0, age: 0, progress: 0, lantern: null } : null,
 		doorY, doorCols, roomLeft, sealed: -1, depth: dungeon.level || 1, offers: dungeon.offers || [],
 		stats, gear, levels, completeXp: dungeon.complete_xp || 0,
 		hero: { level, xp, startLevel: level, startXp: xp },
 		p: { x: dungeon.start.x, y: dungeon.start.y, r: PLAYER_R, hp: Math.min(stats.maxHp, low + RECOVERY_MARGIN), low,
 			mp: stats.maxMp, fireCd: 0, hurt: 0, burstLeft: 0, burstCd: 0,
-			potionCd: 0, counterUntil: 0, guardUntil: 0, empower: 0, abilityCd: 0, primed: 0,
+			counterUntil: 0, guardUntil: 0, empower: 0, abilityCd: 0, primed: 0,
 			kindled: 0, windAt: 0, bulwarkUntil: 0, bulwarkAt: 0, hitAt: 0, volleys: 0, phoenixUsed: false, inFire: false },
 		enemies, bullets: [], dropsBy, scale,
 		// Heal orbs DROP from the enemy that carries one (dungeon.py); one with a
 		// position of its own (an older dungeon) lies where it was placed.
 		pickups: dungeon.pickups.filter((h) => h.enemy == null).map((h) => ({ ...h })),
 		healsBy: Object.fromEntries(dungeon.pickups.filter((h) => h.enemy != null).map((h) => [h.enemy, h.id])),
-		bags: [], floor: [], portal: null, deeper: null, shield: null, slowUntil: 0, starfalls: [], blasts: [], mortars: [], fires: [], damageNumbers: [], events: [],
+		bags: [], floor: [], portal: null, deeper: null, shield: null, focusZone: null, slowUntil: 0, starfalls: [], blasts: [], mortars: [], fires: [], damageNumbers: [], events: [],
 		embers: [], stuck: [],
 	};
 }
@@ -612,13 +612,14 @@ function stepCracks(st) {
 	for (const c of st.cracks) {
 		if (st.sealed !== c.room) {                    // only while its room is fought
 			c.open = c.warn = false;
-			c.t = c.group * CRACK.stagger;
+			c.t = CRACK.start + c.group * CRACK.stagger;
 			continue;
 		}
-		c.t = (c.t + (st.fastRoom === c.room ? 2 : 1)) % CRACK.period;
+		const speed = st.fastRoom === c.room ? 2 : 1;
+		c.t = (c.t + speed) % CRACK.period;
 		const was = c.open;
 		c.open = c.t >= CRACK.period - CRACK.open;
-		c.warn = !c.open && c.t >= CRACK.period - CRACK.open - CRACK.warn;
+		c.warn = !c.open && c.t >= CRACK.period - CRACK.open - CRACK.warn * speed;
 		if (c.open && !was) opened = true;
 	}
 	if (!opened) return;
@@ -629,6 +630,8 @@ function stepCracks(st) {
 		hurtPlayer(st, CRACK.dmg, "rift:crack");
 	}
 	for (const e of st.enemies) {
+		// The Schism hovers over the fissure until its first blink.
+		if (e.form === "breach" && e.x === e.homeX && e.y === e.homeY) continue;
 		if (e.hp <= 0 || e.dormant || !blocked(st, e.x, e.y, e.r)) continue;
 		const to = nearestClear(st, e);
 		if (to) { e.x = to.x; e.y = to.y; }
@@ -802,6 +805,7 @@ function enemyStep(st, e) {
 	}
 	if (e.form === "breach") breachStep(st, e, ux, uy);
 	else if (e.form === "pyre") pyreStep(st, e);
+	else if (e.form === "cinderwake") cinderwakeStep(st, e, d, ux, uy);
 	else bossStep(st, e, d, ux, uy);
 }
 
@@ -811,13 +815,13 @@ function enemyStep(st, e) {
  *           for a moment; a pillar stops a line. Three (a Y aimed at the player) in
  *           phase 1, four (an X) in phase 2, in waves.
  *  SHATTER — slow heavy shards aimed round the player that burst into rings.
- *  TEAR   — an aimed line of shots, fast to slow.
+ *  SWEEP  — a slow wall of shots sweeps the full width of one bank.
  * Phase 2 (half health, after the same telegraphed pause): its room's cracks run
  * twice as fast, and it BLINKS between four anchors round where it started, a ring
  * on each landing. It lobs the mortar at a player who hides, as every boss does. */
-const BREACH_CYCLE = [["fault", 100], ["rest", 24], ["shatter", 66], ["rest", 24], ["tear", 80], ["rest", 24]];
-const BREACH_CYCLE_2 = [["fault", 110], ["blink", 50], ["shatter", 66], ["blink", 50], ["tear", 70], ["blink", 50]];
-const BREACH_ANCHORS = [[-5, -3], [5, 3], [5, -3], [-5, 3]];
+const BREACH_CYCLE = [["fault", 100], ["rest", 24], ["shatter", 66], ["rest", 24], ["sweep", 80], ["rest", 24]];
+const BREACH_CYCLE_2 = [["fault", 110], ["blink", 50], ["shatter", 66], ["blink", 50], ["sweep", 78], ["blink", 50]];
+const BREACH_ANCHORS = [[-4.5, -3], [6.5, 3], [-4.5, 3], [6.5, -3]];
 export const FAULT = { tele: 34, reach: 14, gap: 0.55, life: 40, dmg: 18, waves: [0, 50] };
 export const SHATTER = { fuse: 58, n: 8, speed: 6, dmg: 12 };
 /* Mark fault lines from the body, the first at the player: [vx, vy, length], each
@@ -839,9 +843,39 @@ function tearFaults(st, e) {
 		for (let s = 1; s <= len; s += FAULT.gap) shoot(st, "e", e.x + vx * s, e.y + vy * s, 0, 0, FAULT.dmg, 0.24, FAULT.life);
 	e.faults = null; e.faultT = 0;
 }
+// The warning locks in the targeted bank. The wall spans its full width.
+const BANK_SWEEP = { warn: 56, spacing: 0.65 };
+
+function startBankSweep(st, e) {
+	if (!st.fissure) return;
+	const [left, right] = st.fissure;
+	const room = st.rooms[e.room];
+	const [top, bottom] = st.roomY[e.room];
+	const west = st.p.x < (left + right) / 2;
+	const north = e.sweepNorth = !e.sweepNorth;
+	const x0 = west ? room.x0 : right, x1 = west ? left : room.x1;
+	st.bankSweep = { west, north, top, bottom: bottom + 1, x0, x1 };
+}
+
+function fireBankSweep(st, e) {
+	const sweep = st.bankSweep;
+	if (!sweep) return;
+	const speed = e.phase === 1 ? 3.8 : 4.5;
+	const y = sweep.north ? sweep.top + 0.4 : sweep.bottom - 0.4;
+	const direction = sweep.north ? 1 : -1;
+	const life = Math.floor((sweep.bottom - sweep.top - 0.7) / speed * TPS);
+	const width = sweep.x1 - sweep.x0;
+	const count = Math.ceil(width / BANK_SWEEP.spacing);
+	for (let i = 0; i < count; i++) {
+		const x = sweep.x0 + (i + 0.5) * width / count;
+		shootAt(st, "e", x, y, x, y + direction, speed, 20, 0.22, life);
+	}
+	st.bankSweep = null;
+}
+
 function breachStep(st, e, ux, uy) {
 	const p = st.p;
-	if (e.phase === 1 && e.hp <= e.maxHp / 2) { e.phase = 0; e.modeT = 70; e.tele = 70; e.faults = null; e.faultT = 0; return; }
+	if (e.phase === 1 && e.hp <= e.maxHp / 2) { e.phase = 0; e.modeT = 70; e.tele = 70; e.faults = null; e.faultT = 0; st.bankSweep = null; return; }
 	if (e.phase === 0) {
 		if (--e.modeT <= 0) { e.phase = 2; e.mode = 0; e.modeT = BREACH_CYCLE_2[0][1]; e.tele = 0; st.fastRoom = e.room; }
 		else e.tele = e.modeT;
@@ -857,6 +891,11 @@ function breachStep(st, e, ux, uy) {
 		const lines = e.phase === 1 ? 3 : 4;
 		for (const w of FAULT.waves) if (t === w) markFaults(st, e, lines);
 		if (e.faultT > 0 && --e.faultT === 0) tearFaults(st, e);
+		if (e.phase === 1 && t % 22 === 8) {
+			st.src = "boss:fault-fan";
+			const aim = Math.atan2(uy, ux);
+			for (let k = -1; k <= 1; k++) shoot(st, "e", e.x, e.y, aim + k * 0.29, 5.5, 13, 0.18, 190);
+		}
 	} else if (mode === "shatter") {
 		if (t === 0) e.tele = 20;
 		if (t === 20 || t === 44) {
@@ -868,18 +907,15 @@ function breachStep(st, e, ux, uy) {
 				b.fuse = SHATTER.fuse; b.shard = true;
 			}
 		}
-	} else if (mode === "tear") {
-		const k = t % 34;
-		if (k === 0) { e.aimX = p.x; e.aimY = p.y; e.tele = 16; }
-		if (k === 16) {
-			const dx = e.aimX - e.x, dy = e.aimY - e.y, n = Math.sqrt(dx * dx + dy * dy) || 1;
-			for (let i = 0; i < 7; i++) shootAt(st, "e", e.x, e.y, e.x + dx / n, e.y + dy / n, 6.5 + i, 14, 0.2, 200);
-		}
+	} else if (mode === "sweep") {
+		if (t === 0) startBankSweep(st, e);
+		if (t === BANK_SWEEP.warn) fireBankSweep(st, e);
 	} else if (mode === "blink") {
 		if (t === 0) {
-			e.anchor = ((e.anchor || 0) + 1) % BREACH_ANCHORS.length;
+			e.anchor = ((e.anchor ?? -1) + 1) % BREACH_ANCHORS.length;
 			const [ax, ay] = BREACH_ANCHORS[e.anchor];
-			e.toX = e.homeX + ax; e.toY = e.homeY + ay; e.tele = 40;
+			const { x0, x1 } = st.rooms[e.room];
+			e.toX = (x0 + x1) / 2 + ax; e.toY = e.homeY + ay; e.tele = 40;
 		}
 		if (t === 40) {
 			const to = blocked(st, e.toX, e.toY, e.r) ? nearestClear(st, { x: e.toX, y: e.toY, r: e.r }) : { x: e.toX, y: e.toY };
@@ -900,13 +936,9 @@ function breachStep(st, e, ux, uy) {
  * rings of heavy shots. Caught in the open, a nova is lethal; behind a rock, or
  * in a gap read early, it is not (design §8.3). */
 const BOSS_CYCLE = [["spiral", 150], ["rest", 40], ["fan", 100], ["rest", 40]];
-/* THE MORTAR (owner's ask, 2026-11-19): cover is for a moment, not for good. Once the
- * player has been out of the boss's sight for `after` ticks, it lobs a shell at
- * where they stand every `every` ticks while they stay hidden: a ring that fills for
- * `delay` ticks, `dmg` on landing, then BURNING ground for `burn` ticks that hurts
- * `burnDmg` every `burnEvery` ticks — so the same spot behind the same pillar cannot
- * be gone back to for a while. In sight, the boss fires as before and lobs nothing. */
-export const MORTAR = { after: 60, every: 100, delay: 54, r: 1.4, dmg: 22, burn: 300, burnEvery: 20, burnDmg: 6 };
+/* Mortars mark the player's current position, then land and leave fire behind.
+ * The Tidewarden uses a steady timer; the other mortar users track time out of sight. */
+export const MORTAR = { after: 60, every: 100, delay: 54, r: 1.4, dmg: 22, burn: 300, burnEvery: 20, burnDmg: 7 };
 
 // ── the Ashen Breach (owner's design, 2026-11-19) ───────────────────────────
 export const CINDER = { every: 12, r: 0.45, last: 80 };            // the trail it leaves
@@ -917,14 +949,15 @@ export const SMOLDER = { flare: 30, charge: 150, speed: 5, reach: 1, fuse: 24, r
  * one's damage, once. Shared with the town's posts. */
 export const EMBER = { every: 20 };
 
-/* The Pyre threads aimed volleys between its opening rings. At half health it
- * summons Kilns and alternates rings with barrages that force a lane change. */
+/* The Pyre marks the player's position for a firebomb between its opening rings.
+ * At half health it alternates rings with barrages that force a lane change. */
 const PYRE_CYCLE = [["rings", 120], ["rest", 30], ["cross", 110], ["rest", 30]];
 const PYRE_CYCLE_2 = [["rings", 100], ["rest", 24], ["lanes", 180], ["rest", 24]];
 export const PYRE = {
 	ring: { n: 16, n2: 20, speed: 5, dmg: 16, every: 40 },
-	cross: { arm: 6, gap: 1.1, r: 0.6, delay: 48, dmg: 16, burn: 150, waves: [0, 38, 76] },
-	kilns: [[-6, -4], [6, 4]],                                     // where its Kilns come in, from its spawn
+	ringFlare: { r: 1.15, delay: 54, dmg: 16, burn: 120 },
+	laneSpiral: { start: 8, every: TPS / 4, arms: 3, turn: 0.35, speed: 4.4, dmg: 14 },
+	cross: { arm: 6, gap: 1.1, r: 0.6, delay: 48, dmg: 16, burn: 4.5 * TPS, waves: [0, 38, 76] },
 };
 /* A cross of shells on (cx, cy): a + or (diagonal) an x, each arm stopped by a wall or rock. */
 function flameCross(st, cx, cy, diagonal) {
@@ -940,22 +973,20 @@ function flameCross(st, cx, cy, diagonal) {
 			lob(x, y);
 		}
 }
-// Two offset waves in one direction, then two across it. Each floor marker
-// detonates once, leaving safe bands and keeping the whole arena traversable.
+// Crossing rows and columns leave pockets between them. Both axes shift
+// together on the next wave. The perimeter fires too, closing the wall route.
 function flameLanes(st, e, wave) {
-	const room = st.rooms[e.room];
+	const { x0, x1 } = st.rooms[e.room];
 	const [top, bottom] = st.roomY[e.room];
-	const vertical = wave >= 2;
-	const first = vertical ? room.x0 : top;
-	const end = vertical ? room.x1 : bottom + 1;
+	const offset = 1 + (wave % 2) * 2;
 	const delay = 48;
-	for (let line = first + 1 + (wave % 2) * 2; line < end; line += 4) {
-		for (let pos = vertical ? top : room.x0; pos < (vertical ? bottom + 1 : room.x1); pos++) {
-			const x = (vertical ? line : pos) + 0.5;
-			const y = (vertical ? pos : line) + 0.5;
-			if (!walkSolid(tileAt(st, x, y))) st.mortars.push({
-				x, y, r: 0.64, at: st.tick + delay, d: delay, dmg: 24, burn: 0, src: "boss:barrage",
-			});
+	for (let y = top; y <= bottom; y++) {
+		const row = y === top || y === bottom || (y - top) % 4 === offset;
+		for (let x = x0; x < x1; x++) {
+			if (!row && x !== x0 && x !== x1 - 1 && (x - x0) % 4 !== offset) continue;
+			if (walkSolid(tileAt(st, x + 0.5, y + 0.5))) continue;
+			st.mortars.push({ x: x + 0.5, y: y + 0.5, r: 0.86,
+				at: st.tick + delay, d: delay, dmg: 24, burn: 0, src: "boss:barrage" });
 		}
 	}
 }
@@ -966,14 +997,6 @@ function pyreStep(st, e) {
 	if (e.phase === 0) {
 		if (--e.modeT <= 0) {
 			e.phase = 2; e.mode = 0; e.modeT = PYRE_CYCLE_2[0][1]; e.tele = 0;
-			let k = 0;
-			for (const o of st.enemies) {                    // its Kilns come into the fight
-				if (o.summon !== e.id || !o.dormant || o.hp <= 0) continue;
-				const [ax, ay] = PYRE.kilns[k++ % PYRE.kilns.length];
-				o.x = e.homeX + ax; o.y = e.homeY + ay;
-				if (blocked(st, o.x, o.y, o.r)) { const to = nearestClear(st, o); if (to) { o.x = to.x; o.y = to.y; } }
-				o.dormant = false; o.active = true; o.cd = 40;
-			}
 		} else e.tele = e.modeT;
 		return;
 	}
@@ -990,21 +1013,109 @@ function pyreStep(st, e) {
 			for (let k = 0; k < n; k++) shoot(st, "e", e.x, e.y, e.ang + k * TAU / n, q.speed, q.dmg, 0.22, 240);
 		}
 		if (e.phase === 1 && t % q.every === 20) {
-			const a = Math.atan2(p.y - e.y, p.x - e.x);
-			for (let i = -2; i <= 2; i++) shoot(st, "e", e.x, e.y, a + i * 0.19, 8, 18, 0.19, 180);
+			const { r, delay, dmg, burn } = PYRE.ringFlare;
+			st.mortars.push({ x: p.x, y: p.y, r, at: st.tick + delay, d: delay, dmg, burn,
+				src: "boss:flame", fire: "boss:fire" });
 		}
 		if (t % q.every === q.every - 16 && t + 16 < len) e.tele = 16;
 	} else if (mode === "cross") {
 		const w = PYRE.cross.waves.indexOf(t);
 		if (w >= 0) flameCross(st, p.x, p.y, w % 2 === 1);
-	} else if (mode === "lanes" && t % 45 === 0) {
-		flameLanes(st, e, t / 45);
+	} else if (mode === "lanes") {
+		if (t % 45 === 0) flameLanes(st, e, t / 45);
+		const q = PYRE.laneSpiral;
+		const pulse = (t - q.start) / q.every;
+		if (pulse >= 0 && Number.isInteger(pulse)) {
+			st.src = "boss:lane-spiral";
+			const angle = PI / 6 + pulse * q.turn;
+			for (let k = 0; k < q.arms; k++) {
+				shoot(st, "e", e.x, e.y, angle + k * TAU / q.arms, q.speed, q.dmg, 0.18, 220);
+			}
+		}
 	}
 	if (e.tele > 0) e.tele--;
 	if (--e.modeT <= 0) {
 		e.mode = (e.mode + 1) % cycle.length;
 		e.modeT = cycle[e.mode][0] === "rest" ? cadence(st, cycle[e.mode][1]) : cycle[e.mode][1];
 	}
+}
+
+// The three damage windows alternate with lantern survival. A slow passive
+// gain keeps every beat finishable; committing to the objective saves run time.
+export const CINDERWAKE_BEATS = [
+	{ name: "Chase", goal: 850, damage: true },
+	{ name: "Turning Gate", goal: 740 },
+	{ name: "Crosswind", goal: 900, damage: true },
+	{ name: "Driftwood", goal: 780 },
+	{ name: "Sparks on the Tide", goal: 950, damage: true },
+	{ name: "Finale", goal: 1080 },
+];
+
+function cinderwakeStep(st, e, distance, ux, uy) {
+	if (e.cd > 0) return;
+	const cue = st.cinderwake;
+	const beat = CINDERWAKE_BEATS[cue.index];
+	const age = cue.age++;
+	cue.progress += 1;
+	st.src = "boss:cinderwake";
+	if (beat.damage) {
+		// Close the distance in bursts, then hold still long enough to keep melee viable.
+		const cycle = age % 165;
+		e.tele = cycle < 36 ? 36 - cycle : 0;
+		if (cycle >= 36 && cycle < 104 && distance > 1.75) {
+			const drift = cue.index === 2 ? (cycle < 70 ? 0.7 : -0.7) : 0;
+			const speed = (cue.index === 4 ? 4.5 : 3.8) * st.scale.speed * DT;
+			moveBody(st, e, (ux - uy * drift) * speed, (uy + ux * drift) * speed);
+		}
+		if (cycle === 36 || cycle === 114) {
+			const aim = Math.atan2(uy, ux);
+			const count = cue.index === 0 ? 3 : 5;
+			for (let k = 0; k < count; k++) {
+				shoot(st, "e", e.x, e.y, aim + (k - (count - 1) / 2) * 0.23, 4.7, 13, 0.18, 200);
+			}
+		}
+	} else {
+		const turn = cue.index === 3 ? -1 : 1;
+		const a = (age * (cue.index === 5 ? 0.021 : 0.014)) * turn + PI;
+		const lantern = { x: e.homeX + 4.5 * dcos(a), y: e.homeY + 3.1 * dsin(a), r: 1.45 };
+		lantern.lit = near(st.p, lantern, lantern.r);
+		cue.lantern = lantern;
+		if (lantern.lit) cue.progress += 2.3;
+
+		// The ring's opening leads the lantern so moving with it threads the
+		// shots. The second survival beat adds staggered inward side streams.
+		const period = cue.index === 5 ? 39 : 63;
+		if (age % period === 29) {
+			const lead = a + turn * 0.95;
+			const count = cue.index === 5 ? 28 : 22;
+			for (let k = 2; k < count - 1; k++) {
+				shoot(st, "e", e.homeX, e.homeY, lead + k * TAU / count, 4.2, 15, 0.17, 220);
+			}
+		}
+		if (cue.index >= 3 && age % 82 === 57) {
+			const room = st.rooms[e.room];
+			const east = Math.floor(age / 82) % 2 === 0;
+			const x = east ? room.x1 - 0.6 : room.x0 + 0.6;
+			for (let k = -3; k <= 3; k++) {
+				const y = e.homeY + k * 1.65 + (east ? 0.75 : -0.75);
+				shoot(st, "e", x, y, east ? PI : 0, 5.2, 12, 0.17, 245);
+			}
+		}
+	}
+
+	if (cue.progress < beat.goal) return;
+	st.bullets = st.bullets.filter((b) => b.owner === "p");
+	if (cue.index === CINDERWAKE_BEATS.length - 1) {
+		cue.lantern = null;
+		kill(st, e);
+		return;
+	}
+	cue.index++;
+	cue.age = cue.progress = 0;
+	cue.lantern = null;
+	e.tele = 0;
+	e.x = e.homeX;
+	e.y = e.homeY;
 }
 
 /* One pulse of the player's fire (embers): `hurt(target, dmg)` for each target standing
@@ -1054,12 +1165,13 @@ export function inSight(st, a, b) {
 	return true;
 }
 
-function bossMortar(st, e) {
-	if (inSight(st, e, st.p)) { e.hidden = 0; return; }
-	e.hidden = (e.hidden || 0) + 1;
-	const k = e.hidden - MORTAR.after;
+function bossMortar(st, e, periodic = false) {
+	if (!periodic && inSight(st, e, st.p)) { e.mortarTicks = 0; return; }
+	e.mortarTicks = (e.mortarTicks || 0) + 1;
+	const k = e.mortarTicks - MORTAR.after;
 	if (k < 0 || k % cadence(st, MORTAR.every) !== 0) return;
-	(st.mortars ||= []).push({ x: st.p.x, y: st.p.y, r: MORTAR.r, at: st.tick + MORTAR.delay, d: MORTAR.delay });
+	(st.mortars ||= []).push({ x: st.p.x, y: st.p.y, r: MORTAR.r, at: st.tick + MORTAR.delay, d: MORTAR.delay,
+		burn: MORTAR.burn + (periodic ? 4 * TPS : 0) });
 }
 
 /* Shells landing, and the ground they leave burning. A shell may say its own damage,
@@ -1072,9 +1184,15 @@ function stepMortars(st) {
 	if (st.mortars?.length) {
 		const due = st.mortars.filter((m) => m.at <= st.tick);
 		st.mortars = st.mortars.filter((m) => m.at > st.tick);
+		let barrageHit = false;
 		for (const m of due) {
 			const dx = p.x - m.x, dy = p.y - m.y, rr = m.r + p.r;
-			if (dx * dx + dy * dy < rr * rr) hurtPlayer(st, m.dmg ?? MORTAR.dmg, m.src || "boss:mortar");
+			const barrage = m.src === "boss:barrage";
+			// Adjacent markers and intersections are one explosion wave.
+			if (dx * dx + dy * dy < rr * rr && !(barrage && barrageHit)) {
+				hurtPlayer(st, m.dmg ?? MORTAR.dmg, m.src || "boss:mortar");
+				if (barrage) barrageHit = true;
+			}
 			const burn = m.burn ?? MORTAR.burn;
 			if (burn > 0) st.fires.push({ x: m.x, y: m.y, r: m.r, until: st.tick + burn, ...(m.fire ? { src: m.fire } : {}) });
 			(st.blasts ||= []).push({ x: m.x, y: m.y, r: m.r, until: st.tick + 18, hot: true });
@@ -1090,27 +1208,30 @@ const BOSS_CYCLE_2 = [["spiral", 140], ["rest", 30], ["nova", 80], ["rest", 40],
 
 function bossStep(st, e, d, ux, uy) {
 	const p = st.p;
+	if (e.cd === 0) bossMortar(st, e, true);
 	if (e.phase === 1 && e.hp <= e.maxHp / 2) { e.phase = 0; e.modeT = 70; e.tele = 70; return; }
-	if (e.phase === 0) {                              // the transition: telegraphed, harmless
+	if (e.phase === 0) {                              // the regular attack pattern pauses through the transition
 		if (--e.modeT <= 0) { e.phase = 2; e.mode = 0; e.modeT = BOSS_CYCLE_2[0][1]; e.tele = 0; }
 		else e.tele = e.modeT;
 		return;
 	}
 	if (e.cd > 0) return;                             // the opening beat after the room wakes it
-	bossMortar(st, e);
 	const cycle = e.phase === 1 ? BOSS_CYCLE : BOSS_CYCLE_2;
 	const [mode] = cycle[e.mode];
 	const t = cycle[e.mode][1] - e.modeT;              // ticks into this mode
 	st.src = `boss:${mode}`;
 	if (e.phase === 2 && d > 3) moveBody(st, e, ux * ENEMY.boss.speed * st.scale.speed * DT, uy * ENEMY.boss.speed * st.scale.speed * DT);
 
-	if (mode === "spiral") {
-		const every = cadence(st, e.phase === 1 ? 6 : 5), arms = e.phase === 1 ? 3 : 5;
+	if (mode === "spiral" || (e.phase === 1 && mode === "fan")) {
+		const every = cadence(st, mode === "fan" ? 9 : e.phase === 1 ? 6 : 5), arms = e.phase === 1 ? 3 : 5;
 		if (t % every === 0) {
+			st.src = "boss:spiral";
 			for (let k = 0; k < arms; k++) shoot(st, "e", e.x, e.y, e.ang + k * TAU / arms, 5, 14, 0.2, 240);
 			e.ang += 0.21;
 		}
-	} else if (mode === "fan") {
+	}
+	if (mode === "fan") {
+		st.src = "boss:fan";
 		const k = t % 33;
 		if (k === 0) { e.aimX = p.x; e.aimY = p.y; e.tele = 18; }
 		if (k === 18) {
@@ -1138,7 +1259,7 @@ function bossStep(st, e, d, ux, uy) {
 /* input: { mx, my: -1|0|1; ax, ay: the aim vector (any length); fire: bool;
  *          ability: bool (this tick only); take: drop id | null;
  *          drop: an item the player put down (an opaque key the page names it by);
- *          lift: the key of an item on the floor to take back; potion: bool (this tick only); enter: bool (E on the portal); recall: bool;
+ *          lift: the key of an item on the floor to take back; enter: bool (E on the portal); recall: bool;
  *          gear: the whole equipped list, on the tick it changes (else absent) } */
 export function step(st, input) {
 	st.events = [];
@@ -1146,6 +1267,7 @@ export function step(st, input) {
 	st.tick++;
 	if (st.bossTimeTicks == null) st.elapsedTicks++;
 	if (st.shield && st.shield.until <= st.tick) st.shield = null;
+	if (st.focusZone && st.focusZone.until <= st.tick) st.focusZone = null;
 	if (st.damageNumbers) st.damageNumbers = st.damageNumbers.filter((f) => f.until > st.tick);
 	if (input.gear) setGear(st, input.gear);
 	const p = st.p, s = st.stats;
@@ -1166,16 +1288,6 @@ export function step(st, input) {
 	if (p.hurt > 0) p.hurt--;
 
 	playerFire(st, input);
-
-	// the healing potion: only when it would heal, then a cooldown
-	if (p.potionCd > 0) p.potionCd--;
-	// It heals only up to the recovery limit and never raises it (owner's call,
-	// 2026-11-18): a potion tops up what regeneration could reach, faster.
-	if (input.potion && !(p.potionCd > 0) && p.hp < limit) {
-		p.hp = Math.min(limit, p.hp + POTION_HEAL);
-		p.potionCd = POTION_COOLDOWN;
-		st.events.push({ type: "potion", local: true });
-	}
 
 	// HEAL ORBS ARE TAKEN BY WALKING OVER THEM (owner's ask, 2026-11-19; was E) —
 	// unless it would do nothing (full HP and a full recovery limit), so a full-health
@@ -1244,7 +1356,7 @@ export function step(st, input) {
 	});
 	if (st.status !== "play") return st;
 
-	// stars landing (the Diviner's ability)
+	// stars landing (the legacy tomes' ability)
 	landStarfalls(st, (f) => {
 		for (const e of st.enemies) {
 			if (e.hp <= 0 || e.phase === 0 || !e.active) continue;
@@ -1284,7 +1396,8 @@ export function step(st, input) {
 			continue;
 		}
 		turnBack(b);
-		if (--b.life <= 0 || wallHit(b, (x, y) => shotSolid(tileAt(st, x, y)))) {
+		// The Schism's sweep crosses the entire bank, including its pillars.
+		if (--b.life <= 0 || (b.src !== "boss:sweep" && wallHit(b, (x, y) => shotSolid(tileAt(st, x, y))))) {
 			if (b.comet) cometBurst(st, b, b.x - b.vx * DT, b.y - b.vy * DT);
 			if (b.flare) flareLand(st, b, b.x - b.vx * DT, b.y - b.vy * DT);
 			continue;
@@ -1369,6 +1482,8 @@ export function playerFire(st, input) {
 			st.slowDmg = s.abilityDmg;
 			st.slowAt = s.anchored ? { x: p.x, y: p.y } : null;   // the Anchor Orb stays where it was cast
 			st.slowF = s.censer ? UNIQUE.censer.slow : SLOW_FACTOR;
+		} else if (s.abilityKind === "focus") {
+			st.focusZone = { x: p.x, y: p.y, r: FOCUS_ZONE.radius, until: st.tick + FOCUS_ZONE.duration };
 		} else if (s.abilityKind === "starfall") {
 			// Where the cursor is, no farther than STARFALL_RANGE.
 			const k = al > STARFALL_RANGE ? STARFALL_RANGE / al : 1;
@@ -1383,12 +1498,19 @@ export function playerFire(st, input) {
 	}
 }
 
+export function inFocusZone(st) {
+	const zone = st.focusZone;
+	return !!zone && zone.until > st.tick && near(st.p, zone, zone.r);
+}
+
 /* One volley from the player: `shots` arrows fanned around the aim. A counter's
  * empowerment is spent on the whole of the next volley. */
 function volley(st, ax, ay) {
 	const p = st.p, s = st.stats, life = Math.round(s.range / s.shotSpeed * TPS);
 	let mult = p.empower > 0 ? p.empower : 1;
 	p.empower = 0;
+	const focused = inFocusZone(st);
+	if (focused) mult *= FOCUS_ZONE.multiplier;
 	if (s.fullMoon && p.mp >= s.maxMp) mult *= s.fullMoon;      // the Mantle of the Full Moon
 	if (p.primed > 0) { mult *= p.primed; p.primed = 0; }       // Duskmail: the shot after a kill
 	let burn = s.burn || 0;
@@ -1403,6 +1525,7 @@ function volley(st, ax, ay) {
 		st.bullets.push({ owner: "p", x: p.x, y: p.y, vx: vx * s.shotSpeed, vy: vy * s.shotSpeed,
 			dmg: Math.round(s.dmg * mult), r: 0.14, life, pierce: s.pierce, bounce: s.bounce, hit: [],
 			...(s.look ? { look: s.look } : {}), ...(mult > 1 ? { power: true } : {}),
+			...(focused ? { focused: true } : {}),
 			...(burn ? { burn } : {}), ...(s.splash ? { splash: 1 } : {}), ...(s.comet ? { comet: 1 } : {}),
 			...(s.ret ? { ret: Math.floor(life / 2) } : {}), ...(flare ? { flare: 1, look: "flare" } : {}),
 			...(s.stick ? { stick: 1 } : {}) });
@@ -1452,13 +1575,19 @@ function near(a, b, r) {
 	return dx * dx + dy * dy <= r * r;
 }
 
-/* The exit opens a few tiles from where the boss fell — clear of its loot bag, on
- * floor the player can stand on. Where it fell is the fallback (always walkable). */
+/* The exit opens a few tiles from where the boss fell, on walkable floor. */
 export const PORTAL_OFFSET = 3;
 function portalSpot(st, e, not = null) {
-	for (const [dx, dy] of [[0, PORTAL_OFFSET], [0, -PORTAL_OFFSET], [PORTAL_OFFSET, 0], [-PORTAL_OFFSET, 0]]) {
+	const offsets = [[0, PORTAL_OFFSET], [0, -PORTAL_OFFSET], [PORTAL_OFFSET, 0], [-PORTAL_OFFSET, 0]];
+	if (st.fissure && e.x >= st.fissure[0] && e.x < st.fissure[1]) {
+		// When the Schism falls over the fissure, prefer the player's bank.
+		const [left, right] = st.fissure;
+		const west = st.p.x < (left + right) / 2;
+		offsets.unshift([west ? -PORTAL_OFFSET : PORTAL_OFFSET, 0]);
+	}
+	for (const [dx, dy] of offsets) {
 		const x = e.x + dx, y = e.y + dy;
-		if (blocked(st, x, y, PLAYER_R) || (not && near({ x, y }, not, PORTAL_OFFSET))) continue;
+		if (blocked(st, x, y, PLAYER_R) || nearCrack(st, x, y, PLAYER_R) || (not && near({ x, y }, not, PORTAL_OFFSET))) continue;
 		return { x, y };
 	}
 	return { x: e.x, y: e.y };
@@ -1483,6 +1612,14 @@ function sealRoom(st) {
 /* A hit on an enemy. Warded: the first few hits (counted per enemy, each one —
  * an arrow, a star — one hit) do nothing but flash. */
 function hurtEnemy(st, e, dmg, flash) {
+	if (e.form === "cinderwake") {
+		const cue = st.cinderwake;
+		if (CINDERWAKE_BEATS[cue.index].damage) {
+			cue.progress += dmg * 0.78;
+			e.flash = flash;
+		}
+		return;
+	}
 	if (e.type === "smolder" && !e.lit) { e.lit = true; e.tele = SMOLDER.flare; e.charge = SMOLDER.charge; }   // it wakes
 	if (e.ward > 0) { e.ward--; e.flash = 2; return; }
 	// What a hit did, floated over the enemy (drawing only: not in the fingerprint).
@@ -1560,8 +1697,8 @@ function kill(st, e) {
 		// same kill event.
 		gainXp(st, st.completeXp);
 		st.events.push({ type: "cleared", xp: st.completeXp, local: true });
+		st.bankSweep = null;
 		st.bossDown = true;                                        // its fire dies with it (below)
-		for (const o of st.enemies) if (o.summon === e.id && o.hp > 0) kill(st, o);   // its Kilns fall with it
 	}
 	if (st.stats.ashSigil && (e.burnUntil > st.tick || e.scorched > st.tick)) {   // the Ash Sigil
 		const q = UNIQUE.ash;
@@ -1580,12 +1717,14 @@ export function fingerprint(st) {
 	const r = (v) => Math.round(v * 1e6) / 1e6;
 	return JSON.stringify([st.tick, st.elapsedTicks, st.bossTimeTicks, st.rng, st.status, st.classId, st.practice,
 		st.hero.level, st.hero.xp, st.p.burstLeft, r(st.p.x), r(st.p.y), r(st.p.hp), r(st.p.low), r(st.p.mp),
+		st.cinderwake && [st.cinderwake.index, st.cinderwake.age, r(st.cinderwake.progress)],
 		st.enemies.map((e) => [e.id, r(e.x), r(e.y), r(e.hp), e.cd, e.tele, e.scd, e.mode, e.modeT, e.ward, e.active]),
 		st.sealed, st.roomLeft,
 		st.bullets.length, st.bullets.map((b) => [r(b.x), r(b.y)]).slice(0, 40),
 		st.bags.map((b) => b.drops.join(",")), st.pickups.length, st.shield && [r(st.shield.x), r(st.shield.y), st.shield.until], st.slowUntil, st.slowDmg || 0,
-		st.p.potionCd, st.p.counterUntil, st.p.guardUntil, st.p.empower, st.p.abilityCd || 0, st.p.primed || 0,
+		st.p.counterUntil, st.p.guardUntil, st.p.empower, st.p.abilityCd || 0, st.p.primed || 0,
 		st.p.kindled || 0, st.p.windAt || 0, st.p.bulwarkUntil || 0, st.p.bulwarkAt || 0,
+		st.focusZone && [r(st.focusZone.x), r(st.focusZone.y), st.focusZone.until],
 		st.slowAt ? [r(st.slowAt.x), r(st.slowAt.y)] : 0, st.enemies.map((e) => e.burnUntil || 0), (st.starfalls || []).map((f) => [r(f.x), r(f.y), f.at]),
 		(st.mortars || []).map((m) => [r(m.x), r(m.y), m.at]), (st.fires || []).map((f) => [r(f.x), r(f.y), f.until]), st.enemies.map((e) => e.hidden || 0),
 		(st.cracks || []).map((c) => c.t), st.fastRoom ?? -1, st.enemies.map((e) => (e.dormant ? 1 : 0)),

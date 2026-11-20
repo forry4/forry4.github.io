@@ -1,6 +1,6 @@
 // Boss Rush combat baseline from Halcyon Rift's last greybox (d52d2f57).
 // This is a standalone copy for Boss Rush balance changes.
-import { recoveryLimit, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT } from "./sim.js";
+import { recoveryLimit, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT, CINDERWAKE_BEATS, inFocusZone } from "./sim.js";
 
 export const COLORS = {
 	wall: "#3c4a45", wallTop: "#4a5a54", sand: "#a99e80", sandDark: "#a3987a",
@@ -12,7 +12,7 @@ export const COLORS = {
 	void: "#0d0a14", voidSpeck: "#3a2a5c", seam: "rgba(185,150,255,.35)", seamHot: "#e7d8ff",
 	// the Ashen Breach's: embers on charcoal. The player's own fire burns pale blue, so it
 	// never reads as the enemy's orange.
-	cinder: "#ffb347", kiln: "#c8553d", smolder: "#6b5a50", smolderLit: "#ff7a2e", pyre: "#ff6a2a", ash: "#8a7d72",
+	cinder: "#ffb347", kiln: "#c8553d", smolder: "#6b5a50", smolderLit: "#ff7a2e", pyre: "#ff6a2a", ash: "#8a7d72", cinderwake: "#f5ad61",
 	enemyShot: "#ff5a4a", enemyShotHeavy: "#ff3d8b", tele: "rgba(255,90,74,.55)",
 	portal: "#9fe7ff",
 	veil: "rgba(214,58,90,.22)", veilEdge: "rgba(255,138,150,.55)", bars: "#2a2f2d", barsLit: "#d63a5a", ward: "#cfe3ff",
@@ -24,7 +24,8 @@ export const COLORS = {
 const SHALLOWS = { floorA: COLORS.sand, floorB: COLORS.sandDark, wall: COLORS.wall, wallTop: COLORS.wallTop };
 const FRACTURE = { floorA: "#3d3550", floorB: "#39324b", wall: "#17131f", wallTop: "#2a2338" };
 const ASHEN = { floorA: "#3b322d", floorB: "#372e29", wall: "#1a1411", wallTop: "#2c221c" };
-const PALETTES = { shallows: SHALLOWS, fracture: FRACTURE, ashen: ASHEN };
+const FEN = { floorA: "#354547", floorB: "#303e40", wall: "#171e25", wallTop: "#27323a" };
+const PALETTES = { shallows: SHALLOWS, fracture: FRACTURE, ashen: ASHEN, fen: FEN };
 
 function drawMap(g, st, ox, oy, px, width, height, pal = SHALLOWS) {
 	const x0 = Math.max(0, Math.floor(-ox / px)), x1 = Math.min(st.w - 1, Math.floor((width - ox) / px));
@@ -72,7 +73,8 @@ function drawCracks(g, st, ox, oy, px, calm) {
 				g.fillStyle = on ? "rgba(231,216,255,.55)" : "rgba(185,150,255,.3)"; g.fillRect(X, Y, P, P);
 				g.fillStyle = COLORS.seamHot; g.fillRect(X + px * 0.15, Y + px * 0.45, px * 0.7, Math.max(1.5, px * 0.1));
 			} else {
-				g.fillStyle = COLORS.seam; g.fillRect(X + px * 0.2, Y + px * 0.47, px * 0.6, Math.max(1, px * 0.06));
+				g.fillStyle = "rgba(155,107,255,.25)"; g.fillRect(X, Y, P, P);
+				g.fillStyle = COLORS.seam; g.fillRect(X, Y + px * 0.47, P, Math.max(1, px * 0.06));
 			}
 		}
 	}
@@ -168,7 +170,7 @@ export function draw(g, st, { width, height, px, aim, at = here, calm = false, u
 		}
 		// Reduced flashing (a setting): a hit tints, and the boss's turn holds still.
 		const col = e.flash > 0 ? (calm ? "#f3b9a8" : "#fff3ea")
-			: e.form === "breach" || e.form === "pyre" ? COLORS[e.form] : e.type === "smolder" && e.lit ? COLORS.smolderLit : COLORS[e.type];
+			: (COLORS[e.form] ?? (e.type === "smolder" && e.lit ? COLORS.smolderLit : COLORS[e.type]));
 		if (e.type === "chaser") {
 			g.save(); g.translate(X, Y); g.rotate(Math.PI / 4); g.fillStyle = col; g.fillRect(-r * 0.8, -r * 0.8, r * 1.6, r * 1.6); g.restore();
 		} else if (e.type === "shooter") {
@@ -208,6 +210,13 @@ export function draw(g, st, { width, height, px, aim, at = here, calm = false, u
 			g.closePath(); g.fillStyle = e.phase === 0 && !calm && st.tick % 10 < 5 ? "#fff3ea" : col; g.fill();
 			circle(g, X, Y, r * 0.5, "#ffd27a");
 			circle(g, X, Y, r * 0.26, "#fff7ec");
+		} else if (e.form === "cinderwake") {
+			circle(g, X, Y, r * 1.08, "rgba(241,152,68,.24)");
+			g.save();
+			g.translate(X, Y); g.rotate(Math.PI / 4);
+			g.fillStyle = col; g.fillRect(-r * 0.61, -r * 0.61, r * 1.22, r * 1.22);
+			g.restore();
+			circle(g, X, Y, r * 0.38, st.cinderwake.lantern ? "#c5d8e8" : "#fff4ca");
 		} else if (e.form === "breach") {                   // the Breach: a torn violet star
 			const n = 8, spin = st.tick * 0.02;
 			g.beginPath();
@@ -252,7 +261,9 @@ function drawAutoTag(g, x, bottom, ui) {
 function drawBossBar(g, st, { width, ui, name }) {
 	const b = st.enemies.find((e) => e.type === "boss" && e.active && e.hp > 0);
 	if (!b) return;
-	const W = Math.min(width * 0.44, 520 * ui), H = Math.max(8, 12 * ui), X = width / 2 - W / 2, Y = 30 * ui;
+	const cue = b.form === "cinderwake" ? st.cinderwake : null;
+	const beat = cue && CINDERWAKE_BEATS[cue.index];
+	const W = Math.min(width * (beat ? 0.64 : 0.44), 520 * ui), H = Math.max(8, 12 * ui), X = width / 2 - W / 2, Y = 30 * ui;
 	g.font = `600 ${Math.round(14 * ui)}px "Cinzel", Georgia, serif`;
 	g.textAlign = "center"; g.textBaseline = "middle";
 	g.fillStyle = "rgba(10,12,14,.75)"; g.fillText(name, width / 2 + 1, Y - 11 * ui + 1.5);
@@ -260,9 +271,25 @@ function drawBossBar(g, st, { width, ui, name }) {
 	g.textAlign = "left";
 	g.fillStyle = "rgba(10,12,14,.78)"; g.fillRect(X - 3, Y - 3, W + 6, H + 6);
 	g.fillStyle = "#3a1f24"; g.fillRect(X, Y, W, H);
-	g.fillStyle = COLORS.boss; g.fillRect(X, Y, W * (b.hp / b.maxHp), H);
-	if (b.phase === 1) { g.fillStyle = "rgba(255,240,235,.8)"; g.fillRect(X + W / 2 - 1, Y - 2, 2, H + 4); }
-	if (b.ward > 0) {
+	g.fillStyle = beat ? (beat.damage ? COLORS.cinderwake : "#8dddc8") : COLORS.boss;
+	const filled = beat ? Math.min(1, cue.progress / beat.goal) : b.hp / b.maxHp;
+	g.fillRect(X, Y, W * filled, H);
+	if (beat) {
+		g.font = `600 ${Math.round(15 * ui)}px "Crimson Pro", Georgia, serif`;
+		g.textAlign = "center";
+		const label = `${cue.index + 1}/${CINDERWAKE_BEATS.length} · ${beat.name} · ${beat.damage ? "Attack" : "Follow the lantern"}`;
+		g.fillStyle = "rgba(10,12,14,.85)"; g.fillText(label, width / 2 + 1, Y + H + 13 * ui + 1);
+		g.fillStyle = "#fff4ca"; g.fillText(label, width / 2, Y + H + 13 * ui);
+		g.textAlign = "left";
+	}
+	if (!beat && b.phase === 1) { g.fillStyle = "rgba(255,240,235,.8)"; g.fillRect(X + W / 2 - 1, Y - 2, 2, H + 4); }
+	if (st.bankSweep) {
+		g.font = `600 ${Math.round(15 * ui)}px "Crimson Pro", Georgia, serif`;
+		g.textAlign = "center";
+		g.fillStyle = "#d8bcfc";
+		g.fillText(`${st.bankSweep.north ? "North" : "South"} wall sweep · ${st.bankSweep.west ? "West" : "East"} bank`, width / 2, Y + H + 13 * ui);
+		g.textAlign = "left";
+	} else if (b.ward > 0) {
 		g.font = `${Math.round(11 * ui)}px "Crimson Pro", Georgia, serif`;
 		g.fillStyle = COLORS.ward; g.textAlign = "right";
 		g.fillText(`Warded ×${b.ward}`, X + W, Y + H + 10 * ui);
@@ -273,6 +300,27 @@ function drawBossBar(g, st, { width, ui, name }) {
 /* The boss's mortar: burning ground (a flickering orange pool that fades in its last
  * second), and each shell's landing spot, ringed red and filling as it comes. */
 function drawHazards(g, st, sx, sy, px) {
+	const sweep = st.bankSweep;
+	if (sweep) {
+		const { north, x0, x1, top, bottom } = sweep;
+		g.fillStyle = "rgba(177,104,241,.23)";
+		g.fillRect(sx(x0), sy(top), (x1 - x0) * px, (bottom - top) * px);
+		const edge = sy(north ? top + 0.4 : bottom - 0.4);
+		g.strokeStyle = "#efcfff"; g.lineWidth = Math.max(2, px * 0.05);
+		g.beginPath();
+		g.moveTo(sx(x0), edge); g.lineTo(sx(x1), edge);
+		g.stroke();
+	}
+	const lantern = st.cinderwake?.lantern;
+	if (lantern) {
+		const x = sx(lantern.x), y = sy(lantern.y);
+		circle(g, x, y, px * lantern.r, lantern.lit ? "rgba(146,255,213,.30)" : "rgba(250,207,114,.17)");
+		g.strokeStyle = lantern.lit ? "#b4ffe2" : "#f9cb72";
+		g.lineWidth = Math.max(2, px * 0.04);
+		g.beginPath(); g.arc(x, y, px * lantern.r, 0, Math.PI * 2); g.stroke();
+		circle(g, x, y, px * 0.23, "#ffbd52");
+		circle(g, x, y, px * 0.11, "#fff8cb");
+	}
 	for (const f of st.embers || []) {                // the player's own fire: pale blue, white at heart
 		const left = f.until - st.tick, fade = Math.min(1, left / TPS);
 		const flick = 0.85 + 0.15 * Math.sin((st.tick + f.y * 7) * 0.35);
@@ -288,7 +336,8 @@ function drawHazards(g, st, sx, sy, px) {
 	const lw = Math.max(1.5, px * 0.07);
 	for (const m of st.mortars || []) {
 		const k = Math.min(1, Math.max(0, 1 - (m.at - st.tick) / (m.d || MORTAR.delay)));
-		g.strokeStyle = "#ff5a3c"; g.lineWidth = lw;
+		g.strokeStyle = "#ff5a3c";
+		g.lineWidth = lw;
 		g.beginPath(); g.arc(sx(m.x), sy(m.y), px * m.r, 0, Math.PI * 2); g.stroke();
 		circle(g, sx(m.x), sy(m.y), px * m.r * k, "rgba(255,90,60,.3)");
 	}
@@ -300,6 +349,15 @@ function drawHazards(g, st, sx, sy, px) {
  * just after, and a gold ring while the next shot is countered. Shared by the town. */
 function drawAbilityFx(g, st, sx, sy, px, pp) {
 	const p = st.p, lw = Math.max(1, px * 0.05);
+	const zone = st.focusZone;
+	if (zone) {
+		const x = sx(zone.x), y = sy(zone.y), r = px * zone.r;
+		const inside = inFocusZone(st);
+		circle(g, x, y, r, inside ? "rgba(196,165,255,.20)" : "rgba(196,165,255,.09)");
+		g.strokeStyle = inside ? COLORS.diviner : "rgba(196,165,255,.55)";
+		g.lineWidth = lw;
+		g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.stroke();
+	}
 	if (st.slowUntil > st.tick) {
 		const c = st.slowAt || pp;                          // the Anchor Orb's field stays where it was cast
 		circle(g, sx(c.x), sy(c.y), px * (st.slowR || 3), COLORS.slow);
@@ -329,29 +387,28 @@ function drawAbilityFx(g, st, sx, sy, px, pp) {
 	}
 }
 
-/* A countered (empowered) shot is drawn as its own thing (owner's ask, 2026-11-18):
- * a gold-white core twice the size, a pulsing halo and a long gold trail, so the
- * one doubled shot is unmistakable in a crowd of ordinary ones. */
-function drawPowerTrail(g, X, Y, b, px) {
-	const L = px * 0.09, pulse = 0.75 + 0.25 * Math.sin((b.x + b.y) * 3);
+/* Empowered shots have a gold-white core, a pulsing halo and a gold trail. */
+function drawPowerTrail(g, X, Y, b, px, scale) {
+	const L = px * 0.09 * scale, pulse = 0.75 + 0.25 * Math.sin((b.x + b.y) * 3);
 	g.lineCap = "round";
-	g.strokeStyle = "rgba(255,196,80,.35)"; g.lineWidth = Math.max(4, px * 0.42);
+	g.strokeStyle = "rgba(255,196,80,.35)"; g.lineWidth = Math.max(4, px * 0.42) * scale;
 	g.beginPath(); g.moveTo(X, Y); g.lineTo(X - b.vx * L, Y - b.vy * L); g.stroke();
-	g.strokeStyle = "rgba(255,240,200,.9)"; g.lineWidth = Math.max(2, px * 0.14);
+	g.strokeStyle = "rgba(255,240,200,.9)"; g.lineWidth = Math.max(2, px * 0.14) * scale;
 	g.beginPath(); g.moveTo(X, Y); g.lineTo(X - b.vx * L * 0.6, Y - b.vy * L * 0.6); g.stroke();
 	g.lineCap = "butt";
-	circle(g, X, Y, px * 0.5 * pulse, "rgba(255,206,92,.28)");
+	circle(g, X, Y, px * 0.5 * pulse * scale, "rgba(255,206,92,.28)");
 }
 
 function drawShots(g, bullets, sx, sy, px, at) {
 	for (const b of bullets) {
 		const bp = at(b), X = sx(bp.x), Y = sy(bp.y);
-		if (b.owner === "p" && b.power) drawPowerTrail(g, X, Y, b, px);
+		const powerScale = b.focused ? 0.5 : 1;
+		if (b.owner === "p" && b.power) drawPowerTrail(g, X, Y, b, px, powerScale);
 		if (b.owner === "p" && b.look === "flare") {         // the Flare Bow's flare: a bright ball of fire
 			circle(g, X, Y, px * 0.24, "rgba(120,214,255,.45)");
 			circle(g, X, Y, px * 0.14, "#e6faff");
 		} else if (b.owner === "p" && b.look === "star") {   // a spinning four-point star
-			const r = px * 0.2 * (b.power ? 2 : 1), a = (b.x + b.y) * 2.4;
+			const r = px * 0.2 * (b.power ? 2 * powerScale : 1), a = (b.x + b.y) * 2.4;
 			g.fillStyle = b.power ? "#fff1c2" : "#dfe7ea";
 			g.beginPath();
 			for (let i = 0; i < 8; i++) {
@@ -359,12 +416,13 @@ function drawShots(g, bullets, sx, sy, px, at) {
 				g.lineTo(X + Math.cos(t) * rr, Y + Math.sin(t) * rr);
 			}
 			g.closePath(); g.fill();
-			if (b.power) { g.strokeStyle = "#ffb43c"; g.lineWidth = Math.max(1.5, px * 0.05); g.stroke(); }
+			if (b.power) { g.strokeStyle = "#ffb43c"; g.lineWidth = Math.max(1.5, px * 0.05) * powerScale; g.stroke(); }
 		} else if (b.owner === "p") {
 			g.strokeStyle = b.power ? "#fff1c2" : COLORS.playerShot;
-			g.lineWidth = Math.max(2, b.r * px * (b.power ? 2 : 0.9));
+			g.lineWidth = b.power ? Math.max(2, b.r * px * 2) * powerScale : Math.max(2, b.r * px * 0.9);
 			const tail = b.look === "blade" ? 0.022 : 0.03;
-			g.beginPath(); g.moveTo(X, Y); g.lineTo(X - b.vx * tail * px, Y - b.vy * tail * px); g.stroke();
+			const length = tail * px * powerScale;
+			g.beginPath(); g.moveTo(X, Y); g.lineTo(X - b.vx * length, Y - b.vy * length); g.stroke();
 		} else if (b.shard) {                                 // a shatter shard: a crystal that will burst
 			const r = b.r * px * 1.2;
 			g.beginPath(); g.moveTo(X, Y - r); g.lineTo(X + r * 0.7, Y); g.lineTo(X, Y + r); g.lineTo(X - r * 0.7, Y); g.closePath();
@@ -372,7 +430,9 @@ function drawShots(g, bullets, sx, sy, px, at) {
 			g.strokeStyle = "rgba(255,240,235,.9)"; g.lineWidth = Math.max(1, px * 0.05); g.stroke();
 		} else {
 			circle(g, X, Y, b.r * px * 1.15, "rgba(255,240,235,.9)");
-			circle(g, X, Y, b.r * px, b.dmg >= 30 ? COLORS.enemyShotHeavy : COLORS.enemyShot);
+			const color = b.src === "boss:lane-spiral" ? "#ffc45e" : b.src === "boss:sweep" ? "#d591fa"
+				: b.dmg >= 30 ? COLORS.enemyShotHeavy : COLORS.enemyShot;
+			circle(g, X, Y, b.r * px, color);
 		}
 	}
 }
@@ -431,9 +491,4 @@ function drawHud(g, st, { width, height, px, ui = 1, auto = false }) {
 		g.fillText(ok ? "Ready" : cd ? `${Math.ceil(p.abilityCd / TPS)}s` : `${cost} MP`, X + W - 6, Y + H * 1.5 + 9);
 		g.textAlign = "left";
 	}
-	const pcd = p.potionCd || 0;
-	g.textAlign = "right";
-	g.fillStyle = pcd > 0 ? "#c9cfd6" : "#9ff0a0";
-	g.fillText(pcd > 0 ? `R ${Math.ceil(pcd / TPS)}s` : "R potion", X + W - 6, Y + H / 2 + 1);
-	g.textAlign = "left";
 }
