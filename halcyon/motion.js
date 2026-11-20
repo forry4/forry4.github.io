@@ -4,13 +4,26 @@ export const DEFEAT_TICKS = 24;
 const DOOR_TICKS = 12;
 export const clamp01 = (n) => Math.max(0, Math.min(1, n));
 
+const LEFT = { x: -1, y: 0 }, RIGHT = { x: 1, y: 0 };
+const UP = { x: 0, y: -1 }, DOWN = { x: 0, y: 1 };
+
+/* Let the previous facing win near a diagonal. Small mouse changes and rounding
+ * in each movement axis should not flip the entire silhouette back and forth. */
+export function spriteFacing(direction, previous = null) {
+	if (!direction || (!direction.x && !direction.y)) return previous;
+	const { x, y } = direction, horizontal = Math.abs(x), vertical = Math.abs(y);
+	const margin = previous ? (previous.x ? 1 / 1.2 : 1.2) : 1;
+	if (horizontal > vertical * margin) return x < 0 ? LEFT : RIGHT;
+	return y < 0 ? UP : DOWN;
+}
+
 export function createSceneMotion(st) {
 	const bodies = new WeakMap(), arrivals = new WeakMap(), doors = new Map();
 	let sealed = st.sealed;
 	const record = (body) => {
 		let m = bodies.get(body);
 		if (!m) {
-			m = { x: body.x, y: body.y, facing: { x: 0, y: 1 }, travel: 0, pace: 0,
+			m = { x: body.x, y: body.y, facing: DOWN, travel: 0, pace: 0,
 				tele: body.tele || 0, releasedAt: -Infinity, defeatedAt: null };
 			bodies.set(body, m);
 		}
@@ -18,7 +31,7 @@ export function createSceneMotion(st) {
 		// A teleport has a destination but no walk between the two points.
 		if (distance > 0.001 && distance < 0.45) {
 			m.travel += distance;
-			m.facing = { x: dx / distance, y: dy / distance };
+			m.facing = spriteFacing({ x: dx, y: dy }, m.facing);
 			m.pace = Math.min(1, distance / 0.045);
 		} else {
 			m.pace = Math.max(0, m.pace - 0.24);

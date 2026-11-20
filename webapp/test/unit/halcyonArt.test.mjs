@@ -6,9 +6,9 @@ import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
 import { SLOTS, MANIFEST, sheetOf, frameOf, override, drawSprite, drawTile, checkManifest, sprite, artPx } from "../../../halcyon/art.js";
 import { ENEMY, BOSS_HP, CLASS_INFO } from "../../../halcyon/sim.js";
-import { PALETTES, drawEnemyBody, drawMap, drawShots, decorations, deepWall } from "../../../halcyon/render.js";
+import { PALETTES, drawEnemyBody, drawPlayer, drawMap, drawShots, decorations, deepWall } from "../../../halcyon/render.js";
 import { paletteFor, MASTER, isPlayerHue, isHotDanger } from "../../../halcyon/art.js";
-import { createSceneMotion, gait } from "../../../halcyon/motion.js";
+import { createSceneMotion, gait, spriteFacing } from "../../../halcyon/motion.js";
 
 const ART_DIR = new URL("../../public/art/halcyon/", import.meta.url);
 /* A PNG's size, off its header; null when there is no such file. */
@@ -119,6 +119,40 @@ test("walking lifts alternating boots from the selected facing row", () => {
 		assert.equal(a[1][7] - b[1][7], 1);
 		assert.equal(feet(0).length, 1);
 	} finally { override(key, null); }
+});
+
+test("walking, firing and casting share the same living player anchor", () => {
+	const key = "player.paladin", img = {};
+	override(key, img, { w: 28, h: 24, facings: 3 });
+	try {
+		const body = { pace: 1, travel: 0.5, facing: { x: 1, y: 0 } };
+		const paint = (player, tick) => {
+			const g = fakeG();
+			g.globalAlpha = 1;
+			drawPlayer(g, { r: 0.4, ...player }, 300, 250, 60, { x: 1, y: 0 }, "paladin", false, tick, body, true);
+			return g.calls;
+		};
+		const walking = paint({}, 99);
+		const firing = paint({ shotPose: { tick: 100, x: 1, y: 0, look: "slash" } }, 100);
+		const casting = paint({ castPose: { tick: 100, x: 1, y: 0 } }, 106);
+		for (const frame of [walking, firing, casting]) {
+			assert.deepEqual(frame.filter(([op]) => op === "translate"), [["translate", 300, 250]]);
+			assert.ok(!frame.some(([op]) => op === "scale"), "the body does not stretch when acting");
+		}
+		assert.equal(firing.filter(([op]) => op === "drawImage").length, 3, "footwork continues during the swing");
+		assert.ok(firing.some(([op]) => op === "stroke"), "the swing still has a visual cue");
+	} finally { override(key, null); }
+});
+
+test("facing holds around a diagonal and turns when the direction is clear", () => {
+	let facing = spriteFacing({ x: 1, y: 0 });
+	facing = spriteFacing({ x: 0.99, y: 1 }, facing);
+	assert.deepEqual(facing, { x: 1, y: 0 });
+	facing = spriteFacing({ x: 0.7, y: 1 }, facing);
+	assert.deepEqual(facing, { x: 0, y: 1 });
+	facing = spriteFacing({ x: 1.01, y: 1 }, facing);
+	assert.deepEqual(facing, { x: 0, y: 1 });
+	assert.deepEqual(spriteFacing({ x: -1, y: 0.65 }, facing), { x: -1, y: 0 });
 });
 
 test("drawing history follows actual walk distance and keeps visual transitions off the simulation", () => {

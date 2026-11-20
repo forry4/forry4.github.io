@@ -9,7 +9,7 @@
  */
 import { recoveryLimit, xpProgress, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT, VENT } from "./sim.js";
 import { drawSprite, drawTile, artPx, PALETTE, sprite } from "./art.js";
-import { clamp01, DEFEAT_TICKS, gait } from "./motion.js";
+import { clamp01, DEFEAT_TICKS, gait, spriteFacing } from "./motion.js";
 
 /* ART (art.js): every thing below asks for its picture first and draws its shape
  * only when there is none, so art lands one picture at a time with nothing waiting. */
@@ -172,7 +172,7 @@ function drawDecor(g, st, ox, oy, px, { x0, x1, y0, y1 }, pal, tick, calm) {
 		const light = d.part === "light" && sprite(keys.light), phase = d.x * 7 + d.y * 13;
 		if (pal === FRACTURE && light) {
 			const step = Math.max(1, Math.round(px / artPx()));
-			const x = Math.round(X / step) * step, y = Math.round(Y / step) * step;
+			const x = Math.round(X), y = Math.round(Y);
 			g.fillStyle = "rgba(235,129,48,.10)"; g.fillRect(x - step * 8, y - step * 4, step * 16, step * 15);
 			const glow = calm ? 0.12 : 0.12 + 0.035 * Math.sin((tick + phase) * 0.19);
 			g.fillStyle = "rgba(255,161,61," + glow.toFixed(3) + ")";
@@ -338,7 +338,7 @@ function circle(g, x, y, r, fill) {
 function pixel(g, x, y, px, color, width = 1) {
 	const k = Math.max(1, Math.round(px / artPx()));
 	g.fillStyle = color;
-	g.fillRect(Math.round(x / k) * k, Math.round(y / k) * k, width * k, k);
+	g.fillRect(Math.round(x), Math.round(y), width * k, k);
 }
 
 function ember(g, X, Y, px, tick, color) {
@@ -370,7 +370,8 @@ function arrivalLift(motion, item, tick, px) {
  * sat still at the start until you walked off the map's edge); the void past the
  * map is drawn as the background. The town still fits its plaza to the stage. */
 export function camera(st, width, height, px, at = st.p, follow = false) {
-	if (follow) return { ox: width / 2 - at.x * px, oy: height / 2 - at.y * px };
+	// The whole scrolling world shares one backing-pixel origin.
+	if (follow) return { ox: Math.round(width / 2 - at.x * px), oy: Math.round(height / 2 - at.y * px) };
 	const vw = width / px, vh = height / px;
 	const cx = st.w < vw ? st.w / 2 : Math.max(vw / 2, Math.min(st.w - vw / 2, at.x));
 	const cy = st.h < vh ? st.h / 2 : Math.max(vh / 2, Math.min(st.h - vh / 2, at.y));
@@ -500,13 +501,13 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here, bag
 		}
 	}
 
-	drawPlayer(g, p, sx(pp.x), sy(pp.y), px, aim, st.classId, calm, frameTick, motion?.body(p), aiming);
+	drawPlayer(g, p, width / 2, height / 2, px, aim, st.classId, calm, frameTick, motion?.body(p), aiming);
 
 	drawShots(g, st.bullets, sx, sy, px, at, calm, frameTick);
 	drawDamageNumbers(g, st.damageNumbers || [], sx, sy, px, st.tick);
 	drawHud(g, st, { width, height, px, notes, ui, keys, auto });
 	drawBossBar(g, st, { width, ui, name: bossName });
-	drawMinimap(g, st, { width, ui, dpr, bagBest, mods });
+	drawMinimap(g, st, { width, ui, dpr, bagBest, mods, player: pp });
 }
 
 /* One enemy's body at (X, Y): its picture, facing the player, when there is one —
@@ -626,12 +627,13 @@ function drawBossBar(g, st, { width, ui, name }) {
  * room still to fight is dark, the sealed one red, a cleared one green-gray; the
  * player, the portals and the loot bags are dots on it. */
 const MINI = { open: "#5c645f", ahead: "#2f3437", sealed: "#a5443f", cleared: "#4f7262", boss: "#4a2a33" };
-function drawMinimap(g, st, { width, ui, dpr, bagBest, mods = [] }) {
-	if (!st.rooms?.length) return;
-	const W = Math.min(width * 0.3, 240 * ui * dpr), m = W / st.w, H = st.h * m;
-	const X = width - 16 - W, Y = 90 * dpr;                         // under the timer and the Menu button
-	g.fillStyle = "rgba(10,12,14,.66)"; g.fillRect(X - 5, Y - 5, W + 10, H + 10);
-	const roomOf = new Array(st.w).fill(-1);
+const miniRuns = new WeakMap();
+function minimapRuns(st) {
+	// Geometry only changes on seal or clear. Frame draws still use live markers.
+	const key = st.sealed + ":" + st.roomLeft.map((n) => Number(n > 0)).join("");
+	const cached = miniRuns.get(st);
+	if (cached?.key === key) return cached.runs;
+	const runs = [], roomOf = new Array(st.w).fill(-1);
 	st.rooms.forEach((r, i) => { for (let x = r.x0; x < r.x1; x++) roomOf[x] = i; });
 	const colorAt = (x) => {
 		const i = roomOf[x];
@@ -648,15 +650,27 @@ function drawMinimap(g, st, { width, ui, dpr, bagBest, mods = [] }) {
 			const c = colorAt(x);
 			let e = x + 1;
 			while (e < st.w && row[e] !== "#" && colorAt(e) === c) e++;
-			g.fillStyle = c; g.fillRect(X + x * m, Y + y * m, (e - x) * m + 0.5, m + 0.5);
+			runs.push([x, y, e - x, c]);
 			x = e;
 		}
+	}
+	miniRuns.set(st, { key, runs });
+	return runs;
+}
+
+function drawMinimap(g, st, { width, ui, dpr, bagBest, mods = [], player = st.p }) {
+	if (!st.rooms?.length) return;
+	const W = Math.min(width * 0.3, 240 * ui * dpr), m = W / st.w, H = st.h * m;
+	const X = width - 16 - W, Y = 90 * dpr;                         // under the timer and the Menu button
+	g.fillStyle = "rgba(10,12,14,.66)"; g.fillRect(X - 5, Y - 5, W + 10, H + 10);
+	for (const [x, y, span, color] of minimapRuns(st)) {
+		g.fillStyle = color; g.fillRect(X + x * m, Y + y * m, span * m + 0.5, m + 0.5);
 	}
 	const dot = (o, r, c) => circle(g, X + o.x * m, Y + o.y * m, Math.max(1.5, r * ui * dpr), c);
 	for (const b of st.bags) { const best = bagBest(b); dot(b, 2, best.unique ? UNIQUE_COLOR : TIER_COLORS[best.tier] || COLORS.bag); }
 	if (st.portal) dot(st.portal, 2.6, COLORS.portal);
 	if (st.deeper) dot(st.deeper, 2.6, COLORS.deeper);
-	dot(st.p, 2.8, "#ffffff");
+	dot(player, 2.8, "#ffffff");
 	// THE RUN'S MODIFIERS, under the map (owner's ask, 2026-11-18: viewable in a run).
 	if (mods.length) {
 		const fs = Math.round(12 * ui * dpr), lh = fs + 4 * dpr;
@@ -812,19 +826,20 @@ export function drawShots(g, bullets, sx, sy, px, at, calm = false, tick = 0) {
 /* The player: cyan body, white core, a tick toward the aim — or the class's picture,
  * facing the aim. A hit flashes it brighter. */
 export function drawPlayer(g, p, PX, PY, px, aim, classId = "ranger", calm = false, tick = 0, motion = null, aiming = false) {
-	const stride = calm ? 0 : gait(motion, 1.08);
+	const stride = calm ? 0 : gait(motion, 1.76);
 	const shot = p.shotPose, cast = p.castPose;
 	const shotAge = tick - (shot?.tick ?? -Infinity), castAge = tick - (cast?.tick ?? -Infinity);
-	const attacking = shotAge >= 0 && shotAge < 10, casting = castAge >= 0 && castAge < 15;
+	const attacking = shotAge >= 0 && shotAge < 5, casting = castAge >= 0 && castAge < 15;
 	const cursor = aim && Math.hypot(aim.x, aim.y) > 0.16 ? aim : null;
-	const facing = casting ? cast : attacking ? shot
-		: (aiming || !(motion?.pace > 0.15)) && cursor ? cursor : motion?.facing;
-	const recoil = !calm && attacking ? (1 - shotAge / 10) ** 2 * (shot.look === "slash" ? 0.17 : -0.095) : 0;
+	const walking = motion?.pace > 0.15;
+	const direction = (aiming && cursor) || (casting && cast) || (attacking && shot)
+		|| (walking ? motion.facing : cursor || motion?.facing);
+	const facing = spriteFacing(direction, motion?.shownFacing ?? motion?.facing);
+	if (motion) motion.shownFacing = facing;
 	const charge = !calm && casting ? Math.sin(Math.PI * castAge / 15) : 0;
 	const defeat = !calm && motion?.defeatedAt != null ? clamp01((tick - motion.defeatedAt) / DEFEAT_TICKS) : 0;
-	const idle = !calm && !motion?.pace ? (0.5 + 0.5 * Math.sin(tick / 17)) * 0.038 : 0;
 	const key = "player." + classId, opt = { facing, tick, stride,
-		stretch: 1 + defeat * 0.12, squash: 1 + charge * 0.065 - defeat * 0.63 };
+		stretch: 1 + defeat * 0.12, squash: 1 - defeat * 0.63 };
 	const color = COLORS[classId] || COLORS.player;
 	shadow(g, PX, PY, px);
 	if (charge > 0.04) {
@@ -833,13 +848,19 @@ export function drawPlayer(g, p, PX, PY, px, aim, classId = "ranger", calm = fal
 		g.beginPath(); g.arc(PX, PY, px * (0.48 + 0.3 * castAge / 15), 0, Math.PI * 2); g.stroke();
 		g.restore();
 	}
-	if (!calm && attacking && shotAge < 5) {
+	if (!calm && attacking) {
 		g.save(); g.globalAlpha *= (1 - shotAge / 5) * 0.72;
-		pixel(g, PX + shot.x * px * 0.58, PY + (shot.y * 0.58 - 0.34) * px, px, "#f4fdff", 2);
+		if (shot.look === "slash") {
+			const a = Math.atan2(shot.y, shot.x);
+			g.strokeStyle = "#fff0cc"; g.lineWidth = Math.max(1, px * 0.045);
+			g.beginPath(); g.arc(PX, PY - px * 0.22, px * 0.62, a - 0.42, a + 0.42); g.stroke();
+		} else {
+			pixel(g, PX + shot.x * px * 0.58, PY + (shot.y * 0.58 - 0.34) * px, px, "#f4fdff");
+		}
 		g.restore();
 	}
-	PX += (shot?.x || 0) * px * recoil;
-	PY += (shot?.y || 0) * px * recoil - px * (Math.abs(stride) * 0.065 + idle) + px * defeat * 0.15;
+	// Walking and attacks change local art and effects, never the body's anchor.
+	PY += px * defeat * 0.15;
 	if (drawSprite(g, key, PX, PY, px, opt)) {
 		if (p.hurt > 0) {
 			g.save(); g.globalCompositeOperation = "lighter";
@@ -853,11 +874,11 @@ export function drawPlayer(g, p, PX, PY, px, aim, classId = "ranger", calm = fal
 	circle(g, PX, PY, pr + px * 0.06, p.hurt > 0 ? (calm ? "#e2564e" : "#ffffff") : "#1d5f6a");
 	circle(g, PX, PY, pr, body);
 	circle(g, PX, PY, pr * 0.42, COLORS.playerCore);
-	if (facing) {
-		const l = Math.hypot(facing.x, facing.y) || 1;
+	if (direction || facing) {
+		const { x, y } = direction || facing, l = Math.hypot(x, y) || 1;
 		g.strokeStyle = COLORS.playerCore; g.lineWidth = Math.max(1.5, px * 0.06);
-		g.beginPath(); g.moveTo(PX + facing.x / l * pr * 1.2, PY + facing.y / l * pr * 1.2);
-		g.lineTo(PX + facing.x / l * pr * 1.9, PY + facing.y / l * pr * 1.9); g.stroke();
+		g.beginPath(); g.moveTo(PX + x / l * pr * 1.2, PY + y / l * pr * 1.2);
+		g.lineTo(PX + x / l * pr * 1.9, PY + y / l * pr * 1.9); g.stroke();
 	}
 }
 

@@ -1808,9 +1808,10 @@ function Notices({ list, onReport }) {
 /* A canvas's backing size and the tile size: about 16 x 12 tiles of view. */
 function fitCanvas(cv) {
 	const dpr = window.devicePixelRatio || 1, r = cv.getBoundingClientRect();
-	cv.width = Math.max(1, Math.round(r.width * dpr));
-	cv.height = Math.max(1, Math.round(r.height * dpr));
-	return Math.max(18, Math.floor(Math.min(cv.height / 12, cv.width / 16)));
+	const width = Math.max(1, Math.round(r.width * dpr)), height = Math.max(1, Math.round(r.height * dpr));
+	if (cv.width !== width) cv.width = width;
+	if (cv.height !== height) cv.height = height;
+	return Math.max(18, Math.floor(Math.min(height / 12, width / 16)));
 }
 
 // ── the town ────────────────────────────────────────────────────────────────
@@ -1961,6 +1962,9 @@ function Dungeon({ run, client, onEnd, notify, tips, onDeeper }) {
 		// of the way to where it is now (the sim steps at 60 Hz; a screen may run at 144).
 		let prev = new WeakMap(), alpha = 1;
 		let cam = camera(st, 1, 1, px, st.p, true);              // the camera of the last drawn frame
+		// The rift camera keeps the hero centered. Derive firing and display aim
+		// from that center, independent of which tick last updated the camera.
+		const aimFromCenter = () => ({ x: (mouse.x - cv.width / 2) / px, y: (mouse.y - cv.height / 2) / px });
 		// DEV ONLY (stripped from a production build): the live sim, and a seam for a
 		// scripted driver, so a whole run can be played through the real page.
 		if (import.meta.env.DEV) window.__halcyon = { st, drive: null };
@@ -2016,7 +2020,7 @@ function Dungeon({ run, client, onEnd, notify, tips, onDeeper }) {
 		const input = () => {
 			let mx = 0, my = 0;
 			for (const k of keys) { const d = dirOf(k); if (d) { mx += d[0]; my += d[1]; } }
-			const { ox, oy } = cam;                    // aim through what the player SEES
+			const aim = aimFromCenter();
 			const loot = edge.interact ? nearestLoot() : null;
 			let take = null, lift = null;
 			if (loot && ctl.room()) { if (loot.bag) take = loot.bag.drops[0]; else lift = loot.floor.key; }
@@ -2026,7 +2030,7 @@ function Dungeon({ run, client, onEnd, notify, tips, onDeeper }) {
 				if (!ctl.room()) { want.length = 0; note("Your bag is full.", "bad"); }
 				else if (w.take) take = w.take; else lift = w.lift;
 			}
-			const out = { mx: Math.sign(mx), my: Math.sign(my), ax: (mouse.x - ox) / px - st.p.x, ay: (mouse.y - oy) / px - st.p.y,
+			const out = { mx: Math.sign(mx), my: Math.sign(my), ax: aim.x, ay: aim.y,
 				fire: mouse.down || livePrefs.current.auto, ability: edge.ability, take, lift, drop: ctl.drops.shift() || null,
 				recall: edge.recall, enter: edge.interact && !loot, potion: edge.potion };
 			if (ctl.recall) { out.recall = true; ctl.recall = false; }      // Recall / Main menu in the game menu
@@ -2141,9 +2145,9 @@ function Dungeon({ run, client, onEnd, notify, tips, onDeeper }) {
 			const pp = at(st.p);
 			cam = camera(st, cv.width, cv.height, px, pp, true);
 			const pf = livePrefs.current;
+			const aiming = mouse.down || pf.auto;
 			draw(g, st, { width: cv.width, height: cv.height, px, at,
-				aim: mouse.over ? { x: (mouse.x - cam.ox) / px - pp.x, y: (mouse.y - cam.oy) / px - pp.y } : null,
-				motion, aiming: mouse.down || pf.auto,
+				aim: mouse.over || aiming ? aimFromCenter() : null, motion, aiming,
 				frameTick: ended ? st.tick + Math.max(0, now - endedAt) / STEP_MS : st.tick + alpha,
 				notes: ended ? [] : bagHint(), bagBest, calm: pf.calm || reduced.matches, ui: pf.ui, dpr,
 				bossName: run.dungeon.boss_name || "The boss", keys: { potion: keyLabel(pf.keys.potion?.[0]) },
