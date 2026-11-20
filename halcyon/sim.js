@@ -186,13 +186,13 @@ export const CRACK = { period: 480, warn: 60, open: 180, stagger: 160, dmg: 14 }
  *   repeater   — UNIQUE: a three-bolt burst, then a reload: front-loaded damage.
  * `bounce` is how many walls a shot glances off before it breaks. */
 export const WEAPONS = {
-	none: { dmg: 6, rate: 3, range: 5, speed: 14, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0 },
+	none: { dmg: 6, rate: 3, range: 5, speed: 14, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0, look: "bolt" },
 	shortbow: { dmg: 5, rate: 5, range: 5, speed: 15, shots: 2, spread: 0.12, pierce: 0, burst: 1, gap: 0 },
 	longbow: { dmg: 25, rate: 1.5, range: 7, speed: 20, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0 },
-	mace: { dmg: 25, rate: 2.4, range: 3, speed: 15, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0 },
-	greatsword: { dmg: 45, rate: 1.1, range: 4, speed: 17, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0 },
-	wand: { dmg: 15, rate: 2.8, range: 6, speed: 16, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0 },
-	starstaff: { dmg: 25, rate: 1.4, range: 8, speed: 20, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0 },
+	mace: { dmg: 25, rate: 2.4, range: 3, speed: 15, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0, look: "slash" },
+	greatsword: { dmg: 45, rate: 1.1, range: 4, speed: 17, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0, look: "slash" },
+	wand: { dmg: 15, rate: 2.8, range: 6, speed: 16, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0, look: "bolt" },
+	starstaff: { dmg: 25, rate: 1.4, range: 8, speed: 20, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0, look: "bolt" },
 	tidecaller: { dmg: 10, rate: 2.5, range: 6, speed: 16, shots: 3, spread: 0.24, pierce: 0, burst: 1, gap: 0, bounce: 1 },
 	repeater: { dmg: 10, rate: 1.5, range: 6, speed: 17, shots: 1, spread: 0, pierce: 0, burst: 3, gap: 5 },
 	// The Ninja's (2026-11-18): stars spin through one enemy; a kunai is one heavy, fast blade.
@@ -204,8 +204,8 @@ export const WEAPONS = {
 	//   oathhammer — a mace whose hits SPLASH half damage on whatever stands within a tile;
 	//   comet_rod  — a slow bolt that BURSTS into four shards where it hits or where it ends;
 	//   chakram    — flies out, turns back half way, and cuts through everything both ways.
-	oathhammer: { dmg: 25, rate: 2.2, range: 3, speed: 15, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0, splash: 1 },
-	comet_rod: { dmg: 25, rate: 1.2, range: 7, speed: 14, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0, comet: 1 },
+	oathhammer: { dmg: 25, rate: 2.2, range: 3, speed: 15, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0, splash: 1, look: "slash" },
+	comet_rod: { dmg: 25, rate: 1.2, range: 7, speed: 14, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0, comet: 1, look: "bolt" },
 	chakram: { dmg: 10, rate: 2, range: 5, speed: 15, shots: 1, spread: 0, pierce: 99, burst: 1, gap: 0, ret: 1, look: "star" },
 	// The Ashen Breach's (2026-11-19):
 	//   flare_bow   — every `flare`th shot is a flare, and leaves the ground burning where it lands;
@@ -526,7 +526,7 @@ function hurtPlayer(st, dmg, src = null) {
 	if (p.hp < p.low) p.low = Math.max(0, p.hp);
 	if (st.stats.thorns && p.hp > 0) {                       // Thornplate: shards out from the hit
 		const q = UNIQUE.thorns;
-		for (let k = 0; k < q.n; k++) playerShot(st, p.x, p.y, k * TAU / q.n + PI / 4, q.speed, st.stats.thorns, q.life);
+		for (let k = 0; k < q.n; k++) playerShot(st, p.x, p.y, k * TAU / q.n + PI / 4, q.speed, st.stats.thorns, q.life, { look: "bolt" });
 	}
 	if (p.hp <= 0 && st.stats.phoenix && !p.phoenixUsed) {    // the Phoenix Feather: once a level
 		const q = UNIQUE.phoenix;

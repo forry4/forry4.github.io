@@ -303,7 +303,32 @@ export function blockSize(profiles, min = 4) {
 		const ok = fit(P);
 		P = ok.reduce((a, [g, w]) => a + g * w, 0) / ok.reduce((a, [g, w]) => a + k(g, P) * w, 0);
 	}
-	return { P, ratio: share(fit(P)) };
+	// Every other size the gaps clearly favor (each local best of the fit, refined the
+	// same way), for settleBlock when the gaps are not sure.
+	const refine = (p) => { for (let n = 0; n < 3; n++) { const ok = fit(p); if (!ok.length) break; p = ok.reduce((a, [g, w]) => a + g * w, 0) / ok.reduce((a, [g, w]) => a + k(g, p) * w, 0); } return p; };
+	const candidates = [P];
+	for (let i = 1; i < shares.length - 1; i++) {
+		const [q, sh] = shares[i];
+		if (sh < 0.3 || sh < shares[i - 1][1] || sh < shares[i + 1][1]) continue;
+		const r = refine(q);
+		if (candidates.every((c) => Math.abs(c - r) > 1)) candidates.push(r);
+	}
+	return { P, ratio: share(fit(P)), candidates: candidates.sort((a, b) => b - a) };
+}
+
+/* The block size when the edges are NOT sure of it. A generator does not always keep
+ * one grid: the owner's green archer (2026-11-19) mixes ~25-pixel blocks with half
+ * blocks, rounded corners and a soft rim, and only 66% of its edge gaps fit any one
+ * size — the best of them was 5 pixels, which read it 100 tall instead of ~20. Every
+ * picture read right so far fits 86% or more; the two read wrong (this archer, and an
+ * uneven Ranger) fit 64-70%. Below UNSURE, then, of the sizes the edges support
+ * (blockSize's candidates), take the one that makes the tallest figure closest to the
+ * height the game wants it — what the picture is FOR breaks the tie the grid cannot. */
+export const UNSURE = 0.8;
+export function settleBlock(g, tallest, want) {
+	if (!g.ratio || g.ratio >= UNSURE || !g.candidates || !want) return g;
+	const P = g.candidates.reduce((a, c) => (Math.abs(Math.log(tallest / c / want)) < Math.abs(Math.log(tallest / a / want)) ? c : a));
+	return { ...g, P };
 }
 /* Where the block edges really are: from the start, step about one block and take
  * the strongest edge near there, so a wobbling grid is followed rather than drifted
@@ -425,7 +450,7 @@ export function cleanFor(key, img, { artPx = 16, keyed = false, exact = false } 
 	let native = 0, blurry = false, resized = false;
 	const boxes = parts.map((seg) => bbox(src, seg.x0, seg.x1)).filter(Boolean);
 	// One block size for the whole picture, from every figure in it.
-	const grid = blockSize(boxes.flatMap((b) => [edgeProfile(src, b, "x"), edgeProfile(src, b, "y")]));
+	const grid = settleBlock(blockSize(boxes.flatMap((b) => [edgeProfile(src, b, "x"), edgeProfile(src, b, "y")])), Math.max(...boxes.map((b) => b.h)), want);
 	const frames = boxes.map((box) => {
 		const read = readBlocks(src, box, grid);
 		let part;

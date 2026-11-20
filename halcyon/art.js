@@ -42,7 +42,8 @@ export const RIFT_NAMES = { shallows: "The Shallows", fracture: "The Fracture", 
 const CHAR = { w: 24, h: 24, tall: 1.0, foot: 0.3 };
 const BOSS = { w: 48, h: 48, tall: 2.4, foot: 0.7 };
 const TILE = { w: 16, h: 16, tall: 1, anchor: [0, 0] };
-const SHOT = { w: 8, h: 8, tall: 0.45, anchor: [0.5, 0.5] };
+const SHOT = { w: 8, h: 8, tall: 0.45, anchor: [0.5, 0.5], group: "Shots" };
+const TOWN_PROP = { w: 32, h: 28, tall: 1.55, anchor: [0.5, 0.5], group: "Town props", rift: "town" };
 /* The tile kinds each place really has (dungeon.py's and town.js's maps): the
  * Shallows' water, the Fracture's torn floor (void), the town's planters and fountain. */
 export const TILE_PARTS = {
@@ -53,6 +54,25 @@ export const TILE_PARTS = {
 };
 const TILE_LABEL = { any: { floor: "Floor", wall: "Wall", wallTop: "Wall edge", rock: "Rock", water: "Water", void: "Torn floor" },
 	shallows: {}, fracture: { rock: "Pillar" }, ashen: { rock: "Slag rock" }, town: { rock: "Planter", water: "Fountain" } };
+/* DECORATIONS (2026-11-19, after the owner's reference room): four per place, placed
+ * by the renderer (render.decorations) — a LIGHT and a HANGING on the walls that face
+ * into a room, a GROWTH in its corners, a SCATTER on open floor. Each is one connected
+ * object, so a place's four can be drawn in one picture and cut apart. The anchor is
+ * the point that sits on the spot the renderer picks: a hanging hangs from its top, a
+ * growth stands on its foot. */
+const DECO = { w: 16, h: 16, foot: 0 };
+export const DECO_PARTS = {
+	light: { tall: 0.85, anchor: [0.5, 0.5], label: "Wall light" },
+	hang: { tall: 1.0, anchor: [0.5, 0], label: "Wall hanging" },
+	growth: { tall: 0.7, anchor: [0.5, 1], label: "Corner growth" },
+	scatter: { tall: 0.35, anchor: [0.5, 0.5], label: "Floor scatter" },
+};
+const DECO_LABEL = {
+	shallows: { light: "Lantern", hang: "Kelp", growth: "Reeds", scatter: "Shells" },
+	fracture: { light: "Flame sconce", hang: "Torn banner", growth: "Corner ivy", scatter: "Rubble" },
+	ashen: { light: "Brazier", hang: "Chains", growth: "Dead thorns", scatter: "Slag" },
+	town: { light: "Lantern", hang: "Banner", growth: "Ivy", scatter: "Slate chips" },
+};
 export const SLOTS = {
 	"player.ranger": { ...CHAR, tall: 1.25, label: "Ranger", group: "Classes" },
 	"player.paladin": { ...CHAR, tall: 1.25, label: "Paladin", group: "Classes" },
@@ -71,13 +91,38 @@ export const SLOTS = {
 	"enemy.kiln": { ...CHAR, tall: 1.05, label: "Kiln", group: "The Ashen Breach", rift: "ashen" },
 	"enemy.smolder": { ...CHAR, tall: 0.95, label: "Smolder", group: "The Ashen Breach", rift: "ashen" },
 	"enemy.pyre": { ...BOSS, label: "The Pyre", group: "The Ashen Breach", rift: "ashen" },
-	"shot.player": { ...SHOT, label: "Your shot", group: "Shots" },
-	"shot.enemy": { ...SHOT, label: "Enemy shot", group: "Shots" },
-	"shot.enemyHeavy": { ...SHOT, label: "Heavy enemy shot", group: "Shots" },
+	"shot.player": { ...SHOT, tall: 0.75, label: "Arrow" },
+	"shot.bolt": { ...SHOT, label: "Magic bolt" },
+	"shot.slash": { ...SHOT, tall: 0.9, label: "Melee wave" },
+	"shot.star": { ...SHOT, label: "Shuriken" },
+	"shot.blade": { ...SHOT, tall: 0.7, label: "Throwing blade" },
+	"shot.gale": { ...SHOT, tall: 1.0, label: "Gale arrow" },
+	"shot.flare": { ...SHOT, tall: 0.8, label: "Blue flare" },
+	"shot.power": { ...SHOT, tall: 0.8, label: "Empowered shot" },
+	"shot.enemy": { ...SHOT, label: "Enemy shot" },
+	"shot.enemyHeavy": { ...SHOT, tall: 0.6, label: "Heavy enemy shot" },
+	"shot.enemyShard": { ...SHOT, tall: 0.75, label: "Shatter shard" },
+	"shot.impact": { ...SHOT, label: "Hit spark" },
+	"town.vault": { ...TOWN_PROP, w: 40, label: "Vault chest" },
+	"town.forge": { ...TOWN_PROP, w: 34, label: "Forge" },
+	"town.fountain": { ...TOWN_PROP, w: 24, h: 24, tall: 1.3, anchor: [0.5, 0.68], label: "Fountain centerpiece" },
+	"town.target": { ...TOWN_PROP, w: 16, h: 19, tall: 1.05, anchor: [0.5, 0.41], label: "Practice target" },
+	"town.bag": { ...TOWN_PROP, w: 9, h: 9, tall: 0.45, label: "Loot sack" },
+	"town.shallows": { ...TOWN_PROP, label: "Shallows gate" },
+	"town.fracture": { ...TOWN_PROP, label: "Fracture gate" },
+	"rift.fracture.buttress": { ...DECO, tall: 1, anchor: [0.5, 0.5], label: "Wall buttress", group: "The Fracture", rift: "fracture" },
+	"rift.fracture.crack": { ...DECO, tall: 1, anchor: [0.5, 0.5], label: "Warning fissure", group: "The Fracture", rift: "fracture" },
+	"rift.fracture.gate": { ...DECO, tall: 1, anchor: [0.5, 0.5], label: "Iron gate panel", group: "The Fracture", rift: "fracture" },
+	"town.ashen": { ...TOWN_PROP, label: "Ashen Breach gate" },
+	"town.dream": { ...TOWN_PROP, label: "Dream gate" },
 	...Object.fromEntries(Object.entries(TILE_PARTS).flatMap(([rift, parts]) =>
 		parts.map((part) => [`tile.${rift}.${part}`,
 			{ ...TILE, label: TILE_LABEL[rift][part] || TILE_LABEL.any[part],
 				group: rift === "town" ? "Town tiles" : `${RIFT_NAMES[rift]} tiles`, rift }]))),
+	...Object.fromEntries(Object.entries(DECO_LABEL).flatMap(([rift, labels]) =>
+		Object.entries(DECO_PARTS).map(([part, d]) => [`deco.${rift}.${part}`,
+			{ ...DECO, tall: d.tall, anchor: d.anchor, label: labels[part],
+				group: rift === "town" ? "Town decorations" : `${RIFT_NAMES[rift]} decorations`, rift }]))),
 };
 
 /* THE PICTURES THAT EXIST live in artManifest.js, one line per file in
@@ -148,9 +193,17 @@ export function paletteFor(key) {
 	if (!slot) return [];
 	const kind = key.split(".")[0], hex = (list) => list.map((c) => c.hex);
 	if (kind === "tile") return [...hex(MASTER.filter((c) => c.C <= 0.04)), ...PALETTE.env[slot.rift]];
-	if (kind === "player") return [...PALETTE.outline, ...hex(MASTER.filter((c) => !isHotDanger(c)))];
-	if (key === "shot.player") return [...PALETTE.outline, ...hex(MASTER.filter((c) => isPlayerHue(c) || (c.C === 0 && c.L > 0.6) || (c.C <= 0.04 && c.L >= 0.79 && c.h >= 180 && c.h <= 270)))];
-	if (kind === "shot") return [...PALETTE.outline, ...hex(MASTER.filter((c) => isDanger(c) || (c.L >= 0.79 && (c.h <= 90 || c.h >= 330 || c.C === 0))))];
+	// A decoration may glow warm (a torch's flame), but never the enemies' hottest reds
+	// and never the player's blues.
+	if (kind === "deco") return [...PALETTE.outline, ...hex(MASTER.filter((c) => !isPlayerHue(c) && !isHotDanger(c)))];
+	if (kind === "player" || kind === "town") return [...PALETTE.outline, ...hex(MASTER.filter((c) => !isHotDanger(c)))];
+	if (kind === "shot") {
+		const warm = key.startsWith("shot.enemy") || key === "shot.power" || key === "shot.impact";
+		const colors = warm
+			? MASTER.filter((c) => isDanger(c) || (c.h >= 30 && c.h <= 90) || (c.C === 0 && c.L > 0.6))
+			: MASTER.filter((c) => isPlayerHue(c) || c.C <= 0.04 || (key === "shot.player" && c.h >= 30 && c.h <= 90 && c.L <= 0.68));
+		return [...PALETTE.outline, ...hex(colors)];
+	}
 	return [...PALETTE.outline, ...hex(MASTER.filter((c) => !isPlayerHue(c)))];   // enemies and bosses
 }
 

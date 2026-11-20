@@ -8,13 +8,18 @@
  *        image kept in halcyon/art/source/<key>/ (not committed — generated
  *        originals are big; they stay on this machine as the record).
  *   GET  /__halcyon-art/source/<key>  -> the newest original kept for that key (the
- *        style reference to attach to later prompts).
+ *        Ranger as it was first drawn).
  *   POST /__halcyon-art/settings { artPx }  -> the shared density (art pixels a tile).
+ *   POST /__halcyon-art/board   { raw, rawName }  -> the owner's STYLE BOARD, kept in
+ *        halcyon/art/source/_board/ (with the originals: not committed); every prompt
+ *        asks the generator to match it.
+ *   GET  /__halcyon-art/board   -> the newest style board (to attach to every prompt).
  *   POST /__halcyon-art/remove  { key }
  *     -> the manifest line and the finished picture go (the originals stay).
  *
  * Only keys in art.js SLOTS are accepted, and nothing is written outside those
  * three places. */
+const BOARD = "_board";
 import { writeFileSync, readFileSync, mkdirSync, rmSync, existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,10 +61,11 @@ export default function halcyonArtDev() {
 				const send = (code, obj) => { res.statusCode = code; res.setHeader("content-type", "application/json"); res.end(JSON.stringify(obj)); };
 				try {
 					const { SLOTS } = await server.ssrLoadModule(path.join(here, "art.js"));
-					if ((req.method === "GET" || req.method === "HEAD") && req.url.startsWith("/__halcyon-art/source/")) {
-						const key = decodeURIComponent(req.url.slice("/__halcyon-art/source/".length));
+					const isBoard = req.url.split("?")[0] === "/__halcyon-art/board";
+					if ((req.method === "GET" || req.method === "HEAD") && (isBoard || req.url.startsWith("/__halcyon-art/source/"))) {
+						const key = isBoard ? BOARD : decodeURIComponent(req.url.slice("/__halcyon-art/source/".length));
 						const dir = path.join(SOURCE, key);
-						if (!SLOTS[key] || !existsSync(dir)) return send(404, { error: "none kept" });
+						if ((!isBoard && !SLOTS[key]) || !existsSync(dir)) return send(404, { error: "none kept" });
 						const newest = readdirSync(dir).sort().pop();
 						if (!newest) return send(404, { error: "none kept" });
 						res.setHeader("content-disposition", `attachment; filename="${newest.replace(/^\d+-/, "")}"`);
@@ -70,6 +76,14 @@ export default function halcyonArtDev() {
 					const msg = await body(req), art = readManifest(), manifest = art.pictures;
 					if (Number.isInteger(msg.artPx) && msg.artPx >= 8 && msg.artPx <= 64) art.artPx = msg.artPx;
 					if (req.url === "/__halcyon-art/settings") { writeFileSync(MANIFEST_FILE, manifestText(art)); return send(200, { ok: true }); }
+					if (isBoard) {
+						if (typeof msg.raw !== "string") return send(400, { error: "no picture" });
+						const dir = path.join(SOURCE, BOARD);
+						mkdirSync(dir, { recursive: true });
+						const name = String(msg.rawName || "board.png").replace(/[^A-Za-z0-9._-]/g, "_").slice(-80);
+						writeFileSync(path.join(dir, `${Date.now()}-${name}`), Buffer.from(msg.raw, "base64"));
+						return send(200, { ok: true });
+					}
 					if (req.url === "/__halcyon-art/save") {
 						const items = Array.isArray(msg.items) ? msg.items : [];
 						if (!items.length || items.some((it) => !SLOTS[it.key] || typeof it.png !== "string")) return send(400, { error: "bad items" });

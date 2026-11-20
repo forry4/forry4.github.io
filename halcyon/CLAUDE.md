@@ -810,14 +810,67 @@ Modeled on RotMG's enchanting, minus its percentages, dust colors and artifacts.
 - **`npm run art` (in `webapp/`) opens the studio** — `/halcyon?art` on the dev server,
   `ArtGallery.jsx`, dropped from builds with the `import.meta.env.DEV` branch. It holds
   the whole workflow: `artPrompts.js`'s batches in order with Copy prompt (STYLE pasted
-  word for word every time; from step 4 the approved Ranger attached as a reference),
+  word for word every time, and the owner's STYLE BOARD attached to every prompt),
   drop the result, see it cleaned in a real room drawn by the game's own functions, and
   **Use this**, which `artDevPlugin.js` (a Vite plugin, `apply: "serve"`) writes as the
   PNG + manifest line, keeping the original in `halcyon/art/source/<key>/` (gitignored,
-  stays on the machine; the newest Ranger original is served back as the reference).
+  stays on the machine).
+- **Sprites are asked for SMALL in the picture** (`sizeLine` → `small`: a hero about a
+  fifth of the image's height, the rest in proportion to `tall`). A generator smooths
+  every edge, and a subject alone in the frame turns that smoothing into blurry blocks
+  of UNEVEN sizes — the owner's Ranger came out in 24-, 32- and 39-pixel steps, so the
+  only grid fitting all of them was ~8 and it read 45 pixels tall; the same Ranger small
+  on the style board was crisp. Not a block-reader bug: re-reading such a picture
+  straight at the target size was tried (2026-11-19) and looked no better than the
+  plain resize (it merged an eye into a dash), so it was taken back out.
+- **When the edges are not sure of the grid, the size the game wants decides
+  (`settleBlock`, 2026-11-19).** Every picture read right fits 86%+ of its edge gaps to
+  one block size; the owner's green archer (now the Ranger) fits only 57-66% — ~25-pixel
+  blocks mixed with half blocks, rounded corners and a soft rim — and its best fit was
+  5 pixels, reading it ~100 tall. Under `UNSURE` (0.8) the reader takes, of the sizes
+  the edges support (`blockSize`'s `candidates`), the one that makes the tallest figure
+  closest to the slot's height at the current density. Tried first and dropped: a floor
+  on tiny color changes (the ripple was not the cause — the bare outline misreads too),
+  peeling the soft rim off the outline (helped the archer a little, moved two other
+  pictures), and picking the size that rebuilds the picture best (smaller always
+  rebuilds better on a picture with no one grid).
+- **The reference is the owner's STYLE BOARD, not the Ranger (2026-11-19).** One open
+  prompt — "Create an original visual style exploration board for a browser-based
+  top-down projectile action RPG" — gave a board (a hero, a slime, a golem, an arrow, a
+  potion and a room) that the owner rated far above everything made to our rules,
+  because a generator drawing a whole scene puts every part on one pixel size and one
+  set of colors. The studio keeps it once (`POST`/`GET /__halcyon-art/board`, in
+  `halcyon/art/source/_board/`, not committed) and offers it to download at the top of
+  the steps; every prompt's `REFERENCE` asks for its look, its subject alone, and the
+  green background rather than the board's dark one.
 - **Gates** (`webapp/test/unit/halcyonArt*.test.mjs`): every enemy type, boss kind and
   class has a slot; every tile in the dungeon fixtures and the town has one; every slot
   is in exactly one prompt step; `MANIFEST` matches the files (`checkManifest`); and the
   cleanup is held on made-up block-art pictures with a wobbling grid (read back exactly,
   never a multiple of the block, a smooth picture refused, the outline once, the navy
   kept and an enemy never cyan, sizes by density).
+
+## The room's edges (2026-11-19, owner's ask: rifts as good as a reference room)
+- **Most of what made the owner's reference room look good was STRUCTURE, not the
+  stone pictures**, so it is drawn in code over the tiles (`render.drawEdges`, after the
+  tile pass in `drawMap`), on the art's own pixel grid (one art pixel = a tile /
+  `artPx()`): a two-art-pixel outline wherever wall meets floor AND on the wall band's
+  outer side; a wall facing the room below shows a shadowed FRONT under a lit lip; the
+  floor is in shadow along its walls (two steps under a north wall, since the light
+  comes from above); water and torn floor get an outline and a sunken lip.
+- **A wall no floor touches (all eight neighbors wall) is drawn as `pal.deep`**, the
+  same color as the frame's background, so every wall is a band one tile thick and a
+  room reads as a shape cut out of the dark. Each palette (`render.PALETTES`, `TOWN`)
+  needs a `deep` darker than its `wall`: the Fracture's and Ashen Breach's plain wall
+  colors were lifted for this (they were as dark as the outline, which then vanished).
+- **Decorations (2026-11-19): four per place** (`art.DECO_PARTS`: a wall light, a wall
+  hanging, a corner growth, a floor scatter), made in ONE picture per place (studio
+  step 10) and placed by `render.decorations` from the map alone (cached per map, so the
+  same map is always dressed the same way; the sim never knows): a light at each end
+  of every wall run that faces into a room, hangings between, growth in corners,
+  scatter on open floor. **They are drawn ONLY from their pictures** — the stand-in
+  shapes (a yellow block for a torch, a strip for a banner) looked "comically bad" to
+  the owner, and a bare wall beats a placeholder on it. Decorations may use warm hues
+  but never the player's blues or the enemies' hottest reds (`paletteFor`).
+- Next steps the owner agreed to: a warm glow round each wall light, and rooms with cut
+  corners.

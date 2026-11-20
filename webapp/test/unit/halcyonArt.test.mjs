@@ -6,7 +6,8 @@ import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
 import { SLOTS, MANIFEST, sheetOf, frameOf, override, drawSprite, drawTile, checkManifest, sprite, artPx } from "../../../halcyon/art.js";
 import { ENEMY, BOSS_HP, CLASS_INFO } from "../../../halcyon/sim.js";
-import { PALETTES, drawEnemyBody, drawMap } from "../../../halcyon/render.js";
+import { PALETTES, drawEnemyBody, drawMap, drawShots, decorations, deepWall } from "../../../halcyon/render.js";
+import { paletteFor, MASTER, isPlayerHue, isHotDanger } from "../../../halcyon/art.js";
 
 const ART_DIR = new URL("../../public/art/halcyon/", import.meta.url);
 /* A PNG's size, off its header; null when there is no such file. */
@@ -141,7 +142,7 @@ test("every slot is made in exactly one step of the prompt guide, and every prom
 		for (const k of it.keys) { assert.ok(SLOTS[k], k); count[k] = (count[k] || 0) + 1; }
 		const text = promptFor(it, b);
 		assert.ok(text.startsWith(it.tile ? TILE_STYLE : STYLE), it.keys.join());
-		assert.equal(text.includes(REFERENCE), !b.anchor && !it.tile, it.keys.join());
+		assert.ok(text.includes(REFERENCE), `${it.keys.join()}: every prompt asks for the style board's look`);
 		assert.equal(!!it.tile, it.keys.every((k) => k.startsWith("tile.")), it.keys.join());
 		assert.ok(text.endsWith(sizeLine(it)), it.keys.join());
 	}
@@ -157,6 +158,55 @@ test("every prompt asks for its size in game pixels, from the density", async ()
 	assert.match(sizeLine(item("enemy.tidewarden"), 20), /exactly 48 pixels tall/);
 	assert.match(sizeLine(item("tile.ashen.floor"), 20), /exactly 20 by 20 pixels/);
 	assert.match(sizeLine(item("enemy.shard"), 20), /left to right: \(1\) \d+ pixels tall, \(2\) \d+ pixels tall, \(3\) 12 pixels tall, \(4\)/);
-	assert.match(sizeLine(item("shot.player"), 20), /\(1\) 9 pixels long/);
+	assert.match(sizeLine(item("shot.player"), 20), /\(1\) 15 pixels long/);
 	assert.notEqual(sizeLine(item("player.paladin"), 16), sizeLine(item("player.paladin"), 24), "the size follows the density");
+});
+
+test("decorations: lights end each wall facing a room, nothing sits on a wall or in water, and a map is dressed the same every time", () => {
+	const tiles = [
+		"################",
+		"################",
+		"##............##",
+		"##..~~........##",
+		"##............##",
+		"################",
+	];
+	const st = { w: 16, h: 6, tiles }, d = decorations(st);
+	assert.equal(decorations({ ...st }), decorations({ ...st }), "cached per map");
+	assert.deepEqual(decorations({ w: 16, h: 6, tiles: [...tiles] }), d, "the same map, the same dressing");
+	const wallRow = d.filter((x) => x.part === "light" || x.part === "hang");
+	assert.ok(wallRow.length >= 2 && wallRow.every((x) => x.y === 1), "on the wall facing the room, not the deep one above it");
+	assert.ok(!deepWall(st, 3, 1) && deepWall(st, 3, 0));
+	const xs = wallRow.map((x) => x.x).sort((a, b) => a - b);
+	assert.deepEqual([wallRow.find((x) => x.x === xs[0]).part, wallRow.find((x) => x.x === xs.at(-1)).part], ["light", "light"]);
+	assert.equal(xs[0], 3, "a light one tile in from the run's end");
+	for (const x of d.filter((x) => x.part === "growth" || x.part === "scatter")) assert.equal(tiles[x.y][x.x], ".", `${x.part} at ${x.x},${x.y}`);
+	for (const k of Object.keys(SLOTS).filter((k) => k.startsWith("deco."))) {
+		const allowed = new Set(paletteFor(k));
+		assert.ok(MASTER.every((c) => !(isPlayerHue(c) || isHotDanger(c)) || !allowed.has(c.hex)), `${k}: never the player's blues or the enemies' hottest reds`);
+	}
+});
+
+test("special shots use their own art and hostile cores follow collision size", () => {
+	const types = [
+		["power", { owner: "p", power: true }],
+		["gale", { owner: "p", look: "gale" }],
+		["blade", { owner: "p", shard: 1 }],
+		["enemyShard", { owner: "e", shard: true }],
+		["enemyHeavy", { owner: "e", dmg: 30 }],
+	];
+	for (const [type, style] of types) {
+		const key = `shot.${type}`, g = fakeG(), img = {};
+		override(key, img, { w: 10, h: 10 });
+		try {
+			const b = { x: 0, y: 0, vx: 0, vy: 7, r: 0.2, ...style };
+			drawShots(g, [b], (x) => x, (y) => y, 20, (o) => o);
+			const draw = g.calls.find(([method]) => method === "drawImage");
+			assert.equal(draw[1], img);
+			assert.deepEqual(g.calls.find(([method]) => method === "rotate"), ["rotate", Math.PI / 2]);
+			if (b.owner === "e") assert.ok(Math.abs(draw.at(-1) * 0.8 - 8) < 1e-9, "opaque core is two radii tall");
+		} finally {
+			override(key, null);
+		}
+	}
 });

@@ -62,6 +62,7 @@ export const DPS_WINDOW = 3 * TPS;
 
 export function createTown(at = SPAWN, classId = "ranger") {
 	const st = { tick: 0, w: MAP[0].length, h: MAP.length, tiles: MAP, stations: STATIONS,
+		fountain: { x: 11, y: 11.5 },
 		p: { x: at.x, y: at.y, r: PLAYER_R, mp: 0, fireCd: 0, burstLeft: 0, burstCd: 0, empower: 0 }, near: null,
 		bullets: [], starfalls: [], blasts: [], embers: [], stuck: [], posts: POSTS.map((q) => ({ ...q, hits: [] })), floats: [],
 		// What lies on the town's ground: { key, x, y } (the page keeps it from the store).

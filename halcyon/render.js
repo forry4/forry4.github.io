@@ -8,7 +8,7 @@
  * magenta, pickups gold (loot) and green (healing).
  */
 import { recoveryLimit, xpProgress, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT, CREEP, creepAt } from "./sim.js";
-import { drawSprite, drawTile } from "./art.js";
+import { drawSprite, drawTile, artPx, PALETTE, sprite } from "./art.js";
 
 /* ART (art.js): every thing below asks for its picture first and draws its shape
  * only when there is none, so art lands one picture at a time with nothing waiting. */
@@ -42,11 +42,13 @@ export const COLORS = {
 	vault: "#6b4a2a", vaultTrim: "#e9c25a", forge: "#4a4f55", forgeFire: "#ef8a3a", realm: "#9d8ff2",
 };
 
-const SHALLOWS = { id: "shallows", floorA: COLORS.sand, floorB: COLORS.sandDark, wall: COLORS.wall, wallTop: COLORS.wallTop };
-const FRACTURE = { id: "fracture", floorA: "#3d3550", floorB: "#39324b", wall: "#17131f", wallTop: "#2a2338" };
-const ASHEN = { id: "ashen", floorA: "#3b322d", floorB: "#372e29", wall: "#1a1411", wallTop: "#2c221c" };
+// `deep` is the dark past the walls: the inside of a wall no floor touches, and the
+// world beyond the map, so a room reads as one shape cut out of the dark.
+const SHALLOWS = { id: "shallows", floorA: COLORS.sand, floorB: COLORS.sandDark, wall: COLORS.wall, wallTop: COLORS.wallTop, deep: "#1b2220" };
+const FRACTURE = { id: "fracture", floorA: "#3d3550", floorB: "#39324b", wall: "#2b2439", wallTop: "#3a3150", deep: "#0f0c16" };
+const ASHEN = { id: "ashen", floorA: "#3b322d", floorB: "#372e29", wall: "#2e2520", wallTop: "#40332b", deep: "#120e0c" };
 export const PALETTES = { shallows: SHALLOWS, fracture: FRACTURE, ashen: ASHEN };
-export const TOWN = { id: "town", floorA: COLORS.stone, floorB: COLORS.stoneDark, wall: COLORS.townWall, wallTop: COLORS.townWallTop };
+export const TOWN = { id: "town", floorA: COLORS.stone, floorB: COLORS.stoneDark, wall: COLORS.townWall, wallTop: COLORS.townWallTop, deep: "#151b1a" };
 
 export function formatRiftTime(ticks) {
 	const seconds = Math.max(0, Number(ticks) || 0) / 60;
@@ -70,11 +72,11 @@ export function drawMap(g, st, ox, oy, px, width, height, pal = SHALLOWS) {
 		for (let x = x0; x <= x1; x++) {
 			const t = row[x], X = Math.floor(ox + x * px), TW = Math.floor(ox + (x + 1) * px) - X, seed = x * 7 + y * 13;
 			if (t === "#") {
+				if (deepWall(st, x, y)) { g.fillStyle = pal.deep; g.fillRect(X, Y, P, P); continue; }
 				// A lit top edge where a wall meets floor below it: light comes from above.
-				const edge = below && below[x] !== "#";
+				const edge = (below && below[x] !== "#") || (pal === FRACTURE && (!below || deepWall(st, x, y + 1)));
 				if (edge && drawTile(g, t0 + "wallTop", X, Y, TW, TH, seed)) continue;
-				if (!drawTile(g, t0 + "wall", X, Y, TW, TH, seed)) { g.fillStyle = pal.wall; g.fillRect(X, Y, P, P); }
-				if (edge) { g.fillStyle = pal.wallTop; g.fillRect(X, Y + px * 0.72, P, px * 0.28 + 1); }
+				if (!drawTile(g, t0 + "wall", X, Y, TW, TH, seed)) { g.fillStyle = edge ? pal.wallTop : pal.wall; g.fillRect(X, Y, P, P); }
 			} else if (t === "x") {                       // torn floor: the void under the Rift
 				if (drawTile(g, t0 + "void", X, Y, TW, TH, seed)) continue;
 				g.fillStyle = COLORS.void; g.fillRect(X, Y, P, P);
@@ -84,12 +86,164 @@ export function drawMap(g, st, ox, oy, px, width, height, pal = SHALLOWS) {
 				g.fillStyle = COLORS.water; g.fillRect(X, Y, P, P);
 				g.fillStyle = COLORS.waterLight; g.fillRect(X + px * 0.15, Y + px * 0.3, px * 0.4, px * 0.08);
 			} else {
-				if (!drawTile(g, t0 + "floor", X, Y, TW, TH, seed)) { g.fillStyle = (x + y) % 2 ? pal.floorA : pal.floorB; g.fillRect(X, Y, P, P); }
+				// The Fracture's broad flagstones span a 2×2 repeat.
+				const floorSeed = pal === FRACTURE ? (x % 2) + 2 * (y % 2) : seed;
+				if (!drawTile(g, t0 + "floor", X, Y, TW, TH, floorSeed)) { g.fillStyle = (x + y) % 2 ? pal.floorA : pal.floorB; g.fillRect(X, Y, P, P); }
 				if (t === "o" && !drawTile(g, t0 + "rock", X, Y, TW, TH, seed)) {
 					g.fillStyle = COLORS.rock; g.fillRect(X + px * 0.06, Y + px * 0.12, px * 0.88, px * 0.84);
 					g.fillStyle = COLORS.rockTop; g.fillRect(X + px * 0.06, Y + px * 0.12, px * 0.88, px * 0.22);
 				}
 			}
+		}
+	}
+	drawEdges(g, st, ox, oy, px, { x0, x1, y0, y1 }, pal === FRACTURE && sprite("rift.fracture.buttress"));
+	drawDecor(g, st, ox, oy, px, { x0, x1, y0, y1 }, pal);
+}
+
+/* DECORATIONS (art.js DECO_PARTS): where each goes is worked out once per map, from
+ * the map alone, so the same map is always dressed the same way and the sim never
+ * knows. Lights and hangings go on the walls that face INTO a room (a run of wall
+ * with plain floor below it): a light at each end of the run, hangings between;
+ * growth in a room's corners and now and then along a wall; scatter here and there on
+ * open floor. All of it is drawn under everything that moves. */
+const placed = new WeakMap();
+function noise(x, y, k = 0) {
+	let h = Math.imul(x, 374761393) + Math.imul(y, 668265263) + Math.imul(k, 1442695041) | 0;
+	h = Math.imul(h ^ (h >>> 13), 1274126177);
+	return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+export function decorations(st) {
+	let list = placed.get(st.tiles);
+	if (list) return list;
+	list = [];
+	const at = (x, y) => st.tiles[y]?.[x], wall = (x, y) => isWall(st, x, y);
+	const front = new Set();
+	for (let y = 0; y < st.h; y++) {
+		let start = -1;
+		for (let x = 0; x <= st.w; x++) {
+			const ok = x < st.w && at(x, y) === "#" && at(x, y + 1) === "." && !deepWall(st, x, y);
+			if (ok && start < 0) start = x;
+			if (!ok && start >= 0) {
+				const L = x - start;
+				if (L >= 3) {
+					const k = Math.max(2, Math.floor((L - 3) / 3) + 1);
+					for (let i = 0; i < k; i++) {
+						const p = start + Math.round(1 + i * (L - 3) / (k - 1)), end = i === 0 || i === k - 1;
+						if (!end && noise(p, y, 1) > 0.75) continue;
+						list.push({ part: end ? "light" : "hang", x: p, y });
+						front.add(p + "," + y);
+					}
+				}
+				start = -1;
+			}
+		}
+	}
+	for (let y = 0; y < st.h; y++) for (let x = 0; x < st.w; x++) {
+		if (at(x, y) !== ".") continue;
+		const N = wall(x, y - 1), S = wall(x, y + 1), W = wall(x - 1, y), E = wall(x + 1, y), r = noise(x, y, 2);
+		if (N && front.has(x + "," + (y - 1))) continue;           // under a light or hanging
+		const corner = (N || S) && (W || E);
+		if ((corner && r < (N ? 0.6 : 0.35)) || (!corner && (N || W || E) && r < 0.05))
+			list.push({ part: "growth", x, y, dx: W ? 0.3 : E ? 0.7 : 0.25 + 0.5 * noise(x, y, 3) });
+		else if (!N && !S && !W && !E && r > 0.965)
+			list.push({ part: "scatter", x, y, dx: 0.25 + 0.5 * noise(x, y, 4), dy: 0.25 + 0.5 * noise(x, y, 5) });
+	}
+	placed.set(st.tiles, list);
+	return list;
+}
+/* A decoration is drawn ONLY from its picture: the stand-in shapes tried first (a
+ * yellow block for a torch, a strip for a banner) looked comically bad to the owner
+ * (2026-11-19), and a room with nothing on its walls looks better than one with
+ * placeholders on them. So a place stays bare until its decorations are made. */
+const DECO_Y = { light: 0.55, hang: 0.12, growth: 0.95, scatter: null };   // where on its tile each sits (scatter: its own spot)
+function drawDecor(g, st, ox, oy, px, { x0, x1, y0, y1 }, pal) {
+	const keys = Object.fromEntries(Object.keys(DECO_Y).map((part) => [part, `deco.${pal.id}.${part}`]));
+	if (!Object.values(keys).some(sprite)) return;
+	for (const d of decorations(st)) {
+		if (d.x < x0 - 1 || d.x > x1 + 1 || d.y < y0 - 1 || d.y > y1 + 1) continue;
+		const fy = DECO_Y[d.part];
+		const X = ox + (d.x + (d.dx ?? 0.5)) * px, Y = oy + (d.y + (fy ?? d.dy)) * px;
+		if (pal === FRACTURE && d.part === "light" && sprite(keys.light)) {
+			const step = Math.max(1, Math.round(px / artPx()));
+			const x = Math.round(X / step) * step, y = Math.round(Y / step) * step;
+			g.fillStyle = "rgba(235,129,48,.10)"; g.fillRect(x - step * 8, y - step * 4, step * 16, step * 15);
+			g.fillStyle = "rgba(255,161,61,.12)"; g.fillRect(x - step * 5, y - step * 3, step * 10, step * 10);
+		}
+		drawSprite(g, keys[d.part], X, Y, px, { seed: d.x * 7 + d.y * 13 });
+	}
+}
+
+/* THE ROOM'S EDGES, drawn over the tiles on the art's own pixel grid (one art pixel
+ * is a tile / artPx): what makes a room read as a SHAPE rather than wallpaper, after
+ * the owner's reference room (2026-11-19) — a thick dark outline wherever wall meets
+ * floor, and the floor in shadow along its walls (deepest under the wall to the north,
+ * since the light comes from above). The inside of a wall no floor touches is drawn
+ * as the dark beyond (in drawMap), so every wall is a band one tile thick. */
+const isWall = (st, x, y) => x < 0 || y < 0 || x >= st.w || y >= st.h || st.tiles[y][x] === "#";
+export function deepWall(st, x, y) {
+	for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (!isWall(st, x + dx, y + dy)) return false;
+	return true;
+}
+const OUTLINE = PALETTE.outline[0], SHADE = "20,17,26";
+function drawEdges(g, st, ox, oy, px, { x0, x1, y0, y1 }, buttresses) {
+	const a = px / (artPx() || 16), n = (k) => Math.max(1, Math.round(k * a));
+	const o = n(2);                                         // the outline: two art pixels
+	for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+		const X = Math.floor(ox + x * px), Y = Math.floor(oy + y * px);
+		const W = Math.floor(ox + (x + 1) * px) - X, H = Math.floor(oy + (y + 1) * px) - Y;
+		const N = isWall(st, x, y - 1), S = isWall(st, x, y + 1), Wl = isWall(st, x - 1, y), E = isWall(st, x + 1, y);
+		if (isWall(st, x, y)) {
+			if (deepWall(st, x, y)) continue;
+			// A wall facing the room below shows its FRONT: the lower part of the tile in
+			// shadow under a lit lip, so the wall reads as standing up out of the floor.
+			if (!S) {
+				const f = n(6);
+				g.fillStyle = `rgba(${SHADE},.34)`; g.fillRect(X, Y + H - f, W, f);
+				g.fillStyle = "rgba(255,255,255,.16)"; g.fillRect(X, Y + H - f - n(1), W, n(1));
+			}
+			// The outline: on every side that meets floor, and on the outer side, where
+			// the band meets the dark (the reference room has both).
+			const out = (dx, dy) => !isWall(st, x + dx, y + dy) || deepWall(st, x + dx, y + dy);
+			g.fillStyle = OUTLINE;
+			if (out(0, -1)) g.fillRect(X, Y, W, o);
+			if (out(0, 1)) g.fillRect(X, Y + H - o, W, o);
+			if (out(-1, 0)) g.fillRect(X, Y, o, H);
+			if (out(1, 0)) g.fillRect(X + W - o, Y, o, H);
+			// an outer corner (floor only on the diagonal) would leave a notch
+			if (!out(0, -1) && !out(-1, 0) && out(-1, -1)) g.fillRect(X, Y, o, o);
+			if (!out(0, -1) && !out(1, 0) && out(1, -1)) g.fillRect(X + W - o, Y, o, o);
+			if (!out(0, 1) && !out(-1, 0) && out(-1, 1)) g.fillRect(X, Y + H - o, o, o);
+			if (!out(0, 1) && !out(1, 0) && out(1, 1)) g.fillRect(X + W - o, Y + H - o, o, o);
+			if (buttresses) {
+				const horizontal = !N || !S, vertical = !Wl || !E;
+				const corner = horizontal && vertical;
+				// Stone caps mark corners and break up long runs without adding collision.
+				if (corner || (horizontal && x % 7 === 3) || (vertical && y % 5 === 2))
+					drawTile(g, "rift.fracture.buttress", X, Y, W, H);
+			}
+			continue;
+		}
+		// The floor's shadow: two steps under a north wall, one beside a side wall.
+		const shade = (alpha, x, y, w, h) => { g.fillStyle = `rgba(${SHADE},${alpha})`; g.fillRect(x, y, w, h); };
+		if (N) { shade(0.42, X, Y, W, n(3)); shade(0.22, X, Y + n(3), W, n(4)); }
+		if (Wl) { shade(0.30, X, Y, n(2), H); shade(0.14, X + n(2), Y, n(2), H); }
+		if (E) { shade(0.30, X + W - n(2), Y, n(2), H); shade(0.14, X + W - n(4), Y, n(2), H); }
+		if (S) shade(0.16, X, Y + H - n(1), W, n(1));
+		if (!N && !Wl && isWall(st, x - 1, y - 1)) shade(0.30, X, Y, n(2), n(3));
+		if (!N && !E && isWall(st, x + 1, y - 1)) shade(0.30, X + W - n(2), Y, n(2), n(3));
+		// Water and torn floor sit BELOW the floor: an outline round them, their own
+		// shadow under the near (north) lip, and the far lip catching the light.
+		const t = st.tiles[y][x];
+		if (t === "~" || t === "x") {
+			const lip = (dx, dy) => { const c = st.tiles[y + dy]?.[x + dx]; return c !== undefined && c !== t && c !== "#"; };
+			g.fillStyle = OUTLINE;
+			if (lip(0, -1)) g.fillRect(X, Y, W, n(1));
+			if (lip(0, 1)) g.fillRect(X, Y + H - n(1), W, n(1));
+			if (lip(-1, 0)) g.fillRect(X, Y, n(1), H);
+			if (lip(1, 0)) g.fillRect(X + W - n(1), Y, n(1), H);
+			if (lip(0, -1)) shade(0.38, X, Y + n(1), W, n(3));
+			if (lip(-1, 0)) shade(0.22, X + n(1), Y, n(2), H);
+			if (lip(0, 1)) { g.fillStyle = "rgba(255,255,255,.22)"; g.fillRect(X, Y + H - n(2), W, n(1)); }
 		}
 	}
 }
@@ -98,19 +252,39 @@ export function drawMap(g, st, ox, oy, px, width, height, pal = SHALLOWS) {
  * before it opens, and the void while open. */
 function drawCracks(g, st, ox, oy, px, calm) {
 	if (!st.cracks?.length) return;
-	const P = Math.ceil(px) + 1;
+	const step = Math.max(1, Math.round(px / artPx()));
+	const open = new Set();
+	const isVoid = (x, y) => st.tiles[y]?.[x] === "x" || (x >= 0 && x < st.w && open.has(y * st.w + x));
 	for (const c of st.cracks) {
+		if (c.open) for (const [x, y] of c.tiles) open.add(y * st.w + x);
+	}
+	for (const c of st.cracks) {
+		const group = new Set(c.tiles.map(([x, y]) => y * st.w + x));
 		for (const [x, y] of c.tiles) {
 			const X = Math.floor(ox + x * px), Y = Math.floor(oy + y * px);
+			const W = Math.floor(ox + (x + 1) * px) - X, H = Math.floor(oy + (y + 1) * px) - Y;
 			if (c.open) {
-				g.fillStyle = COLORS.void; g.fillRect(X, Y, P, P);
-				g.fillStyle = "rgba(155,107,255,.35)"; g.fillRect(X, Y, P, Math.max(1, px * 0.08));
-			} else if (c.warn) {
-				const on = calm || st.tick % 8 < 5;
-				g.fillStyle = on ? "rgba(231,216,255,.55)" : "rgba(185,150,255,.3)"; g.fillRect(X, Y, P, P);
-				g.fillStyle = COLORS.seamHot; g.fillRect(X + px * 0.15, Y + px * 0.45, px * 0.7, Math.max(1.5, px * 0.1));
+				if (!drawTile(g, "tile.fracture.void", X, Y, W, H, x * 7 + y * 13)) {
+					g.fillStyle = COLORS.void; g.fillRect(X, Y, W, H);
+				}
+				g.fillStyle = "#211832";
+				if (!isVoid(x, y - 1)) g.fillRect(X, Y, W, step);
+				if (!isVoid(x - 1, y)) g.fillRect(X, Y, step, H);
+				g.fillStyle = "#675481";
+				if (!isVoid(x, y + 1)) g.fillRect(X, Y + H - step, W, step);
+				if (!isVoid(x + 1, y)) g.fillRect(X + W - step, Y, step, H);
 			} else {
-				g.fillStyle = COLORS.seam; g.fillRect(X + px * 0.2, Y + px * 0.47, px * 0.6, Math.max(1, px * 0.06));
+				const pulse = calm || st.tick % 8 < 5;
+				if (c.warn) {
+					g.fillStyle = pulse ? "rgba(205,168,247,.40)" : "rgba(185,150,255,.23)"; g.fillRect(X, Y, W, H);
+				}
+				const vertical = group.has((y - 1) * st.w + x) || group.has((y + 1) * st.w + x);
+				const rot = vertical ? 0 : Math.PI / 2;
+				const alpha = c.warn ? (pulse ? 1 : 0.72) : 0.18;
+				if (!drawSprite(g, "rift.fracture.crack", X + W / 2, Y + H / 2, px, { rot, alpha })) {
+					g.fillStyle = c.warn ? COLORS.seamHot : COLORS.seam;
+					g.fillRect(X + px * 0.15, Y + px * 0.45, px * 0.7, Math.max(1, px * (c.warn ? 0.10 : 0.06)));
+				}
 			}
 		}
 	}
@@ -145,10 +319,20 @@ function drawCreep(g, st, ox, oy, px, calm) {
 function drawDoors(g, st, ox, oy, px) {
 	if (!st.doorCols) return;
 	const P = Math.ceil(px) + 1, Y = Math.floor(oy + (st.doorY - 1) * px), H = px * 3;
+	const paneled = st.dungeonId === "fracture" && sprite("rift.fracture.gate");
 	st.doorCols.forEach((room, x) => {
 		if (room < 0 || !(st.roomLeft[room] > 0)) return;
 		const X = Math.floor(ox + x * px);
 		if (st.sealed === room) {
+			if (paneled) {
+				const W = Math.floor(ox + (x + 1) * px) - X;
+				g.fillStyle = "#281f34"; g.fillRect(X, Y, W, H);
+				for (let y = st.doorY - 1; y <= st.doorY + 1; y++) {
+					const top = Math.floor(oy + y * px), height = Math.floor(oy + (y + 1) * px) - top;
+					drawTile(g, "rift.fracture.gate", X, top, W, height);
+				}
+				return;
+			}
 			g.fillStyle = COLORS.bars; g.fillRect(X, Y, P, H);
 			g.fillStyle = COLORS.barsLit;
 			for (let k = 0; k < 4; k++) g.fillRect(X + px * (0.12 + k * 0.24), Y, Math.max(2, px * 0.08), H);
@@ -187,8 +371,9 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here, bag
 	const { ox, oy } = camera(st, width, height, px, pp, true);
 	const sx = (x) => ox + x * px, sy = (y) => oy + y * px;
 
-	g.fillStyle = "#1b2220"; g.fillRect(0, 0, width, height);
-	drawMap(g, st, ox, oy, px, width, height, PALETTES[st.dungeonId] || SHALLOWS);
+	const pal = PALETTES[st.dungeonId] || SHALLOWS;
+	g.fillStyle = pal.deep; g.fillRect(0, 0, width, height);
+	drawMap(g, st, ox, oy, px, width, height, pal);
 	drawCracks(g, st, ox, oy, px, calm);
 	drawCreep(g, st, ox, oy, px, calm);
 	drawDoors(g, st, ox, oy, px);
@@ -506,12 +691,20 @@ function drawPowerTrail(g, X, Y, b, px) {
 	circle(g, X, Y, px * 0.5 * pulse, "rgba(255,206,92,.28)");
 }
 
-/* A shot's picture, turned along its flight. Only the PLAIN shots take one for now:
- * the shaped ones (flare, star, blade, shard) keep their shapes until they get slots. */
+const PLAYER_SHOTS = { bolt: "bolt", slash: "slash", star: "star", blade: "blade", gale: "gale", flare: "flare" };
+
+/* Keep the hostile core the size of the collision circle. Each projectile PNG has
+ * a one-pixel transparent border; friendly trails and empowered shots are cosmetic. */
 function shotSprite(g, b, X, Y, px) {
-	if (b.look || b.shard || b.power) return false;
-	const key = b.owner === "p" ? "shot.player" : b.dmg >= 30 ? "shot.enemyHeavy" : "shot.enemy";
-	return drawSprite(g, key, X, Y, px, { rot: Math.atan2(b.vy || 0, b.vx || 1) });
+	const friendly = b.owner === "p";
+	const type = friendly
+		? (b.power ? "power" : b.shard ? "blade" : PLAYER_SHOTS[b.look] || "player")
+		: (b.shard ? "enemyShard" : b.dmg >= 30 ? "enemyHeavy" : "enemy");
+	const key = "shot." + type, rec = sprite(key);
+	if (!rec) return false;
+	const size = friendly ? 1 : 2 * b.r * artPx() / Math.max(1, rec.sheet.h - 2);
+	const rot = type === "star" ? (b.life || 0) * 0.35 : Math.atan2(b.vy, b.vx);
+	return drawSprite(g, key, X, Y, px, { rot, size });
 }
 export function drawShots(g, bullets, sx, sy, px, at) {
 	for (const b of bullets) {
@@ -581,6 +774,7 @@ function drawDamageNumbers(g, numbers, sx, sy, px, tick) {
 		const rise = ((f.foe ? 36 : 45) - (f.until - tick)) * 0.018;
 		const n = Number.isInteger(f.amount) ? String(f.amount) : f.amount.toFixed(1);
 		const text = f.foe ? n : `-${n}`, y = sy(f.y - (f.foe ? 0.25 : 0.55) - rise);
+		if (f.foe && rise < 0.10) drawSprite(g, "shot.impact", sx(f.x), sy(f.y), px, { alpha: 1 - rise / 0.10 });
 		g.fillStyle = "rgba(16,18,20,.8)"; g.fillText(text, sx(f.x) + 1, y + 1.5);
 		g.fillStyle = f.foe ? "#ffe9a6" : COLORS.damage; g.fillText(text, sx(f.x), y);
 	}
@@ -602,12 +796,18 @@ export function drawTown(g, st, { width, height, px, at = here, notes = [], prom
 	const pp = at(st.p);
 	const { ox, oy } = camera(st, width, height, px, pp);
 	const sx = (x) => ox + x * px, sy = (y) => oy + y * px;
-	g.fillStyle = "#151b1a"; g.fillRect(0, 0, width, height);
+	g.fillStyle = TOWN.deep; g.fillRect(0, 0, width, height);
 	drawMap(g, st, ox, oy, px, width, height, TOWN);
+	if (st.fountain) drawSprite(g, "town.fountain", sx(st.fountain.x), sy(st.fountain.y), px);
 
 	for (const s of st.stations) {
 		const X = sx(s.x), Y = sy(s.y), lit = st.near === s.id;
-		if (s.kind === "portal" || s.kind === "dream") {
+		const gate = s.kind === "portal" || s.kind === "dream";
+		const key = "town." + (s.kind === "portal" ? s.realm : s.kind);
+		if (sprite(key)) {
+			if (lit) circle(g, X, Y + px * 0.28, px * (gate ? 0.94 : 1.15), "rgba(205,198,251,.30)");
+			drawSprite(g, key, X, Y, px);
+		} else if (gate) {
 			const pulse = 0.5 + 0.5 * Math.sin(st.tick / 14);
 			const core = s.kind === "dream" ? COLORS.dream : COLORS.realm;
 			circle(g, X, Y, px * (0.95 + 0.12 * pulse), lit ? "rgba(205,198,251,.45)" : "rgba(157,143,242,.28)");
@@ -630,7 +830,7 @@ export function drawTown(g, st, { width, height, px, at = here, notes = [], prom
 				g.fillStyle = "#33373c"; g.fillRect(X - W / 2, Y - H / 2, W, H * 0.22);
 			}
 		}
-		label(g, s.label, X, Y - (s.kind === "portal" || s.kind === "dream" ? px * 1.25 : s.hh * px + px * 0.42), px,
+		label(g, s.label, X, Y - (gate ? px * 1.25 : s.hh * px + px * 0.42), px,
 			lit ? "#ffffff" : "#e6e1f7");
 	}
 
@@ -638,17 +838,22 @@ export function drawTown(g, st, { width, height, px, at = here, notes = [], prom
 	for (const f of st.floor || []) {
 		const X = sx(f.x), Y = sy(f.y);
 		if (st.nearFloor === f.key) circle(g, X, Y, px * 0.38, "rgba(255,255,255,.28)");
-		circle(g, X, Y, px * 0.24, "#2b2418");
-		circle(g, X, Y, px * 0.18, f.color || COLORS.bag);
+		if (f.color) circle(g, X, Y, px * 0.32, f.color + "99");
+		if (!drawSprite(g, "town.bag", X, Y, px)) {
+			circle(g, X, Y, px * 0.24, "#2b2418");
+			circle(g, X, Y, px * 0.18, f.color || COLORS.bag);
+		}
 	}
 
 	// The practice posts: a straw target on a stake, and what it is taking a second.
 	for (const q of st.posts) {
 		const X = sx(q.x), Y = sy(q.y), R = q.r * px;
-		g.fillStyle = "#5a4127"; g.fillRect(X - px * 0.07, Y, px * 0.14, R * 1.3);
-		circle(g, X, Y, R, "#c9a25e");
-		circle(g, X, Y, R * 0.66, "#efe3c4");
-		circle(g, X, Y, R * 0.33, "#c0503f");
+		if (!drawSprite(g, "town.target", X, Y, px, { size: q.r / 0.45 })) {
+			g.fillStyle = "#5a4127"; g.fillRect(X - px * 0.07, Y, px * 0.14, R * 1.3);
+			circle(g, X, Y, R, "#c9a25e");
+			circle(g, X, Y, R * 0.66, "#efe3c4");
+			circle(g, X, Y, R * 0.33, "#c0503f");
+		}
 		const d = dps(q);
 		// Below the stake: the hit numbers float up from above the post.
 		if (d > 0) label(g, `${d} / s`, X, Y + R * 1.3 + px * 0.38, px, "#e9c25a");
@@ -660,8 +865,9 @@ export function drawTown(g, st, { width, height, px, at = here, notes = [], prom
 	g.font = `bold ${Math.round(Math.max(12, px * 0.4))}px "Crimson Pro", Georgia, serif`;
 	g.textAlign = "center"; g.textBaseline = "middle";
 	for (const f of st.floats) {
-		const rise = (40 - (f.until - st.tick)) * 0.012;
-		g.fillStyle = "#fff4d6"; g.fillText(f.text, sx(f.x), sy(f.y - rise));
+		const age = 40 - (f.until - st.tick);
+		if (age < 6) drawSprite(g, "shot.impact", sx(f.x), sy(f.y + 0.55), px, { alpha: (6 - age) / 6 });
+		g.fillStyle = "#fff4d6"; g.fillText(f.text, sx(f.x), sy(f.y - age * 0.012));
 	}
 	g.textAlign = "left";
 

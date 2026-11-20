@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
-import { image, removeBackground, segments, shrink, dropSpecks, snap, outline, fixOutline, cleanFor, splitFor, targetHeight, readBlocks, blockSize, edgeProfile, oklab, mergeShades } from "../../../halcyon/artClean.js";
+import { image, removeBackground, segments, shrink, dropSpecks, snap, outline, fixOutline, cleanFor, splitFor, targetHeight, readBlocks, blockSize, edgeProfile, oklab, mergeShades, settleBlock, UNSURE } from "../../../halcyon/artClean.js";
 import { SLOTS, PALETTE, MASTER, paletteFor, isPlayerHue } from "../../../halcyon/art.js";
 
 const rgb = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
@@ -264,4 +264,14 @@ test("the size each thing must be: its height in tiles times the density", () =>
 	assert.equal(targetHeight("enemy.chaser", 20), 19);
 	assert.equal(targetHeight("enemy.tidewarden", 20), 48);
 	assert.equal(targetHeight("player.ranger", 16), 20);
+});
+
+test("an UNSURE grid is read at the size the game wants; a sure one is left alone", () => {
+	// The green archer: 66% of its gaps fit, best at 5 pixels; the figure is 517 tall.
+	const unsure = { P: 5, ratio: 0.66, candidates: [22.7, 20.5, 12.8, 9, 5] };
+	assert.equal(settleBlock(unsure, 517, 23).P, 22.7);   // 517 / 22.7 = 22.8 tall
+	assert.equal(settleBlock(unsure, 517, 57).P, 9);       // 517 / 9 = 57.4 tall
+	const sure = { P: 10.75, ratio: UNSURE + 0.1, candidates: [21.5, 10.75] };
+	assert.equal(settleBlock(sure, 517, 24).P, 10.75);
+	assert.equal(settleBlock({ P: 1, ratio: 0 }, 517, 24).P, 1);   // no grid stays no grid
 });

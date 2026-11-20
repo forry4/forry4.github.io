@@ -13,8 +13,9 @@ import { useEffect, useRef, useState } from "react";
 import { SLOTS, MANIFEST, RIFT_NAMES, loadArt, override, sprite, artPx, setArtPx } from "./art.js";
 import { cleanFor, splitFor } from "./artClean.js";
 import { BATCHES, promptFor } from "./artPrompts.js";
-import { drawMap, drawEnemyBody, drawPlayer, drawShots, COLORS, PALETTES, TOWN } from "./render.js";
+import { drawMap, drawEnemyBody, drawPlayer, drawShots, drawTown, COLORS, PALETTES } from "./render.js";
 import { ENEMY } from "./sim.js";
+import { createTown } from "./town.js";
 
 const RIFTS = ["shallows", "fracture", "ashen", "town"];
 const CLASSES = ["ranger", "paladin", "diviner", "ninja"];
@@ -46,13 +47,19 @@ function room(rift) {
 function Room({ rift, px: cssPx, facing, tick }) {
 	const ref = useRef(null);
 	const st = useRef(null);
-	if (!st.current || st.current.rift !== rift) st.current = { ...room(rift), rift };
+	if (!st.current || st.current.rift !== rift) st.current = { ...(rift === "town" ? createTown() : room(rift)), rift };
 	useEffect(() => {
 		const cv = ref.current, g = cv.getContext("2d"), dpr = window.devicePixelRatio || 1, px = cssPx * dpr, s = st.current;
 		cv.width = s.w * px; cv.height = s.h * px;
 		cv.style.width = `${s.w * cssPx}px`;
 		g.fillStyle = "#1b2220"; g.fillRect(0, 0, cv.width, cv.height);
-		drawMap(g, s, 0, 0, px, cv.width, cv.height, PALETTES[rift] || TOWN);
+		if (rift === "town") {
+			s.tick = tick;
+			s.floor = [{ x: 9.5, y: 8.7, color: "#c9a25e" }];
+			drawTown(g, s, { width: cv.width, height: cv.height, px, aim: FACE[facing] });
+			return;
+		}
+		drawMap(g, s, 0, 0, px, cv.width, cv.height, PALETTES[rift]);
 		const face = FACE[facing], clock = { tick };
 		CLASSES.forEach((c, i) => drawPlayer(g, { r: 0.4, hurt: 0 }, (2 + i * 1.6) * px, 2.6 * px, px, face, c, false, tick));
 		FOES[rift].forEach((type, i) => drawEnemyBody(g, clock, { type, r: ENEMY[type].r, flash: 0, phase: 1 }, (2 + i * 1.6) * px, 4.6 * px, px, COLORS[type], false, face));
@@ -154,7 +161,7 @@ export default function ArtGallery({ onExit }) {
 	const [density, setDensity] = useState(artPx());
 	const [busy, setBusy] = useState(false);
 	const [message, setMessage] = useState("");
-	const [refOk, setRefOk] = useState(false);
+	const [board, setBoard] = useState(0);     // the style board's version: 0 = none kept yet
 	useEffect(() => { loadArt(); }, []);
 	useEffect(() => {                      // the clock, so animated sheets play and loads show up
 		let raf = 0;
@@ -162,7 +169,15 @@ export default function ArtGallery({ onExit }) {
 		raf = requestAnimationFrame(go);
 		return () => cancelAnimationFrame(raf);
 	}, []);
-	useEffect(() => { fetch("/__halcyon-art/source/player.ranger", { method: "HEAD" }).then((r) => setRefOk(r.ok)).catch(() => {}); }, [MANIFEST["player.ranger"]?.v]);
+	useEffect(() => { fetch("/__halcyon-art/board", { method: "HEAD" }).then((r) => r.ok && setBoard(Date.now())).catch(() => {}); }, []);
+	/* The style board: the owner's own picture of the look, kept once and attached to
+	 * every prompt (artPrompts.js REFERENCE). */
+	const keepBoard = async (file) => {
+		const res = await fetch("/__halcyon-art/board", { method: "POST", headers: { "content-type": "application/json" },
+			body: JSON.stringify({ raw: await base64Of(file), rawName: file.name }) });
+		if (res.ok) { setBoard(Date.now()); setMessage("Style board kept — attach it to every prompt."); }
+		else setMessage(`Could not keep the style board: ${res.status}`);
+	};
 
 	/* The density a Ranger of `h` art pixels gives at `t` tiles tall. */
 	const densityFor = (h, t) => Math.max(8, Math.min(64, Math.round(h / t)));
@@ -264,19 +279,29 @@ export default function ArtGallery({ onExit }) {
 						<summary style={{ cursor: "pointer" }}>How this works</summary>
 						<ol style={{ lineHeight: 1.5, paddingLeft: 20 }}>
 							<li>Work through the steps in order. In each one, Copy prompt, paste it into the image generator, and generate.</li>
-							<li>From step 4 on, also attach the Ranger reference image (step 1 has a button to download it).</li>
+							<li>Attach the style board (the box above the steps) to EVERY prompt: it is the look every picture is asked to match.</li>
 							<li>Drop the result on its box. It is cut out, read at the generator's own pixel size, put on the game's shared colors, and shows in the room at game size.</li>
 							<li>Not right? Generate again and drop the new one. Right? Use this. It is in the game at once.</li>
 							<li>Tell Claude when a step is done; Claude checks it in a real run and ships it.</li>
 						</ol>
 					</details>
+					<div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", padding: "8px 0", borderTop: "1px solid #2c3532" }}>
+						{board ? <a href="/__halcyon-art/board" title="Download the style board"><img src={`/__halcyon-art/board?v=${board}`} alt="The style board"
+							style={{ height: 96, imageRendering: "pixelated", border: "1px solid #2c3532", borderRadius: 4 }} /></a> : null}
+						<div style={{ flex: "1 1 240px" }}>
+							<strong>Style board</strong>
+							<p style={{ margin: "4px 0", opacity: 0.8 }}>{board
+								? <>Attach it to every prompt. <a href="/__halcyon-art/board" style={{ color: "#7fe3f0" }}>Download the style board</a> · or drop a new one: </>
+								: <>Drop the picture of the look you want (a style board you generated). Every prompt asks the generator to match it. </>}
+								<input type="file" accept="image/*" onChange={(e) => e.target.files[0] && keepBoard(e.target.files[0])} /></p>
+						</div>
+					</div>
 					{BATCHES.map((batch, i) => (
 						<details key={batch.title} open={i === (firstOpen < 0 ? 0 : firstOpen)} style={{ borderTop: "1px solid #2c3532", padding: "8px 0" }}>
 							<summary style={{ cursor: "pointer", fontSize: "1.05rem" }}>
 								{batch.title} {batch.items.every((it) => it.keys.every((k) => MANIFEST[k])) ? <span style={{ color: "#6fd36a" }}>✓</span> : null}
 							</summary>
 							<p style={{ opacity: 0.8, margin: "6px 0" }}>{batch.why}</p>
-							{batch.anchor && refOk && <p style={{ margin: "6px 0" }}><a href="/__halcyon-art/source/player.ranger" style={{ color: "#7fe3f0" }}>Download the Ranger reference image</a> to attach from step 4 on.</p>}
 							{batch.items.map((item) => <Item key={itemId(item)} item={item} batch={batch} pending={pending} busy={busy} px={density}
 								onFile={(it, f) => process(it, f)} onUse={use} onDiscard={discard} />)}
 						</details>
