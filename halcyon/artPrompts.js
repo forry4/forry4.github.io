@@ -67,7 +67,9 @@ export const BATCHES = [
 			"and keep the one you like best at game size. If it looks too big or too small next to a tile, change \"Ranger height\" above the " +
 			"steps: that sets the pixel size every other picture is matched to. The original image is kept for you; every later prompt attaches it.",
 		anchor: true,
-		items: [{ keys: ["player.ranger"], subject: THREE(`A small hooded ranger with a short bow and a plain dark slate-blue hooded cloak, the face hidden in the hood's shadow with two small pale eyes`, "the arrowhead") }],
+		items: [{ keys: ["player.ranger"], subject: THREE(`A small hooded ranger with a plain dark slate-blue hooded cloak, the face hidden in the hood's shadow with two small pale eyes, ` +
+			"holding a short bow UPRIGHT at its side, never across its body: the bow a clean, simple curve two pixels thick in a light warm brown that " +
+			"stands out against the dark cloak, with a thin pale string. In the side view the bow is held out in front, upright", "the arrowhead") }],
 	},
 	{
 		title: "2. The Shallows' ground",

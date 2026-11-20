@@ -4,6 +4,7 @@
  * generator's own pixel count — crisp, not smeared — on the slot's colors, with one
  * outline. */
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { image, removeBackground, segments, shrink, dropSpecks, snap, outline, fixOutline, cleanFor, splitFor, targetHeight, readBlocks, blockSize, edgeProfile, oklab } from "../../../halcyon/artClean.js";
 import { SLOTS, PALETTE, MASTER, paletteFor, isPlayerHue } from "../../../halcyon/art.js";
@@ -39,7 +40,7 @@ function blockArt(art, { sizes = [18, 17, 19], ox = 40, oy = 30, bg = [0, 255, 0
 /* A seeded pattern of `colors`, so a test fails the same way every run. */
 function noise(w, h, colors, seed = 7) {
 	const art = image(w, h);
-	for (let k = 0; k < w * h; k++) { seed = (seed * 1103515245 + 12345) & 0x7fffffff; art.data.set([...colors[seed % colors.length], 255], k * 4); }
+	for (let k = 0; k < w * h; k++) { seed = (seed * 1103515245 + 12345) & 0x7fffffff; art.data.set([...colors[(seed >> 16) % colors.length], 255], k * 4); }
 	return art;
 }
 /* A little figure in art pixels: a near-black rim, a body, a pale face. */
@@ -120,6 +121,18 @@ test("the block size is the block, not a multiple of it", () => {
 	const { P } = blockSize([edgeProfile(img, box, "x"), edgeProfile(img, box, "y")]);
 	assert.ok(P > 16.5 && P < 19.5, `block ${P}`);
 	assert.ok(same(readBlocks(img, box).img, art));
+});
+
+test("real generated pictures: the block size the eye sees, not half or twice it", () => {
+	// Edge profiles measured off two real generated pictures (fixtures, numbers only):
+	// the second Ranger, whose faint shading partway across many blocks made HALF the
+	// block read best (a 23-pixel figure came out 46), and the owner's wizard style
+	// example. Synthetic pictures did not reproduce the first — keep the real one.
+	const real = JSON.parse(readFileSync(new URL("./fixtures/halcyonEdgeProfiles.json", import.meta.url), "utf8"));
+	for (const [name, lo, hi] of [["ranger2", 13, 15], ["wizard", 10.5, 12]]) {
+		const { P } = blockSize(real[name].map((p) => Float64Array.from(p)));
+		assert.ok(P > lo && P < hi, `${name}: block ${P.toFixed(2)}`);
+	}
 });
 
 test("no block grid (a smooth picture) is reported, not misread", () => {

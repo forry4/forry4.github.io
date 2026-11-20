@@ -223,10 +223,16 @@ function edgePeaks(E) {
  * `ratio` is the share of the gaps that fit (0 to 1); 0 means no grid at all. */
 export function blockSize(profiles, min = 4) {
 	const Es = Array.isArray(profiles) ? profiles : [profiles];
+	// Gaps between neighboring edges, counted again among only the stronger edges:
+	// a faint speck halfway across a block splits one real gap into two half gaps,
+	// which made HALF the block fit best on the second Ranger (46 pixels tall, not 23).
 	const gaps = [];
 	for (const E of Es) {
-		const p = edgePeaks(E);
-		for (let i = 1; i < p.length; i++) gaps.push([p[i][0] - p[i - 1][0], Math.min(p[i][1], p[i - 1][1]) ** 2]);
+		const all = edgePeaks(E);
+		for (const level of [0, 0.15, 0.3]) {
+			const p = all.filter(([, st]) => st >= level);
+			for (let i = 1; i < p.length; i++) gaps.push([p[i][0] - p[i - 1][0], Math.min(p[i][1], p[i - 1][1]) ** 2]);
+		}
 	}
 	if (gaps.length < 6) return { P: 1, ratio: 0 };
 	const all = gaps.reduce((a, [, w]) => a + w, 0);
