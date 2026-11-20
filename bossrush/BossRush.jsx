@@ -98,7 +98,7 @@ export default function BossRush({ authUser, onExit }) {
 						</div>
 						{starting && <p role="status">Opening rift…</p>}
 						{error && <p className="br-error" role="alert">{error}</p>}
-						<p className="br-controls">WASD or arrows to move · Mouse to aim and fire · Q for ability · R for potion · E for portal</p>
+						<p className="br-controls">WASD or arrows to move · Mouse to aim and fire · Space for ability · R for potion · E for portal · Esc to pause</p>
 					</section>
 					<Leaderboard />
 				</main>
@@ -109,6 +109,13 @@ export default function BossRush({ authUser, onExit }) {
 function RushRun({ run, onLeave }) {
 	const [stage, setStage] = useState(0);
 	const [status, setStatus] = useState("fight");
+	const [paused, setPaused] = useState(false);
+	const pause = useRef(false);
+	const carriedLow = useRef(null);
+	const changePause = useCallback((value) => {
+		pause.current = value;
+		setPaused(value);
+	}, []);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState("");
 	const [elapsed, setElapsed] = useState(0);
@@ -139,9 +146,14 @@ function RushRun({ run, onLeave }) {
 		}
 	}, [run.run_id, stage, final]);
 
-	const fightEvent = useCallback((event) => {
+	const fightEvent = useCallback((event, low) => {
 		if (event === "portal") { setStatus("portal"); return; }
-		if (event === "advance") { setStatus("advance"); save(); return; }
+		if (event === "advance") {
+			carriedLow.current = low;
+			setStatus("advance");
+			save();
+			return;
+		}
 		setElapsed(performance.now() - run.started);
 		setStatus(event);
 		if (event === "won") save();
@@ -151,12 +163,21 @@ function RushRun({ run, onLeave }) {
 		<header className="br-run-head">
 			<div><span className="br-stage">Boss {stage + 1} / {run.stages.length}</span> <strong>{dungeon.name}</strong></div>
 			<time aria-label="Run time">{formatTime(savedTime ?? elapsed)}</time>
-			<button type="button" className="btn btn-outline" disabled={busy} onClick={onLeave}>
+			<button type="button" className="btn btn-outline" disabled={busy || paused} onClick={onLeave}>
 				{status === "won" || status === "dead" ? "Characters" : "End run"}
 			</button>
 		</header>
 		<div className="br-arena">
-			<Encounter key={stage} dungeon={dungeon} character={run.character} final={final} onEvent={fightEvent} />
+			<Encounter key={stage} dungeon={dungeon} character={run.character} final={final} onEvent={fightEvent}
+				carriedLow={carriedLow} pause={pause} changePause={changePause} />
+			{paused && <div className="br-shade">
+				<section className="br-panel br-result" role="dialog" aria-modal="true" aria-labelledby="br-pause-title">
+					<h2 id="br-pause-title">Paused</h2>
+					<p>The leaderboard clock keeps running.</p>
+					<button type="button" className="btn btn-outline" autoFocus onClick={() => changePause(false)}>Resume</button>
+					<button type="button" className="btn btn-outline" onClick={onLeave}>End run</button>
+				</section>
+			</div>}
 			{(status === "advance" || status === "won" || status === "dead") && <div className="br-shade">
 				<section className="br-panel br-result" aria-live="polite">
 					<h2>{status === "won" ? "Boss Rush cleared" : status === "dead" ? "Run ended" : `${dungeon.boss_name} defeated`}</h2>
@@ -175,17 +196,17 @@ function RushRun({ run, onLeave }) {
 			</div>}
 		</div>
 		<p className="br-run-foot" aria-live="polite">
-			{status === "portal" ? "Boss defeated. Approach the blue portal and press E." : "WASD move · Click fire · Q ability · R potion · T auto-fire"}
+			{status === "portal" ? "Boss defeated. Approach the blue portal and press E." : "WASD move · Click fire · Space ability · R potion · T auto-fire · Esc pause"}
 		</p>
 	</main>;
 }
 
-function Encounter({ dungeon, character, final, onEvent }) {
+function Encounter({ dungeon, character, final, onEvent, carriedLow, pause, changePause }) {
 	const canvas = useRef(null);
 	useEffect(() => {
 		const cv = canvas.current;
 		const ctx = cv.getContext("2d");
-		const st = createSim(dungeon, CHARACTERS[character].gear, { classId: character });
+		const st = createSim(dungeon, CHARACTERS[character].gear, { classId: character, low: carriedLow.current });
 		const keys = new Set();
 		const edge = { ability: false, potion: false, enter: false };
 		const pointer = { x: 0, y: 0, fire: false };
@@ -198,8 +219,8 @@ function Encounter({ dungeon, character, final, onEvent }) {
 			cv.width = Math.max(1, Math.round(cv.clientWidth * dpr));
 			cv.height = Math.max(1, Math.round(cv.clientHeight * dpr));
 			ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-			px = Math.max(18, Math.min(cv.clientWidth / 23, cv.clientHeight / 16, 42));
-			cam = camera(st, cv.clientWidth, cv.clientHeight, px, st.p, true);
+			px = Math.max(cv.clientWidth / 24, cv.clientHeight / 10);
+			cam = camera(st, cv.clientWidth, cv.clientHeight, px);
 		}
 		const observer = new ResizeObserver(resize);
 		observer.observe(cv);
@@ -215,7 +236,7 @@ function Encounter({ dungeon, character, final, onEvent }) {
 			});
 			edge.ability = edge.potion = edge.enter = false;
 			if (st.status === "dead") { ended = true; onEvent("dead"); }
-			else if (st.status === "complete") { ended = true; onEvent("advance"); }
+			else if (st.status === "complete") { ended = true; onEvent("advance", st.p.low); }
 			else if (st.events.some((e) => e.type === "cleared")) {
 				if (final) { ended = true; st.portal = null; onEvent("won"); }
 				else onEvent("portal");
@@ -223,11 +244,11 @@ function Encounter({ dungeon, character, final, onEvent }) {
 		}
 
 		function frame(now) {
-			acc += Math.min(100, now - last);
+			acc = pause.current ? 0 : acc + Math.min(100, now - last);
 			last = now;
 			while (!ended && acc >= STEP_MS) { acc -= STEP_MS; tick(); }
 			const width = cv.clientWidth, height = cv.clientHeight;
-			cam = camera(st, width, height, px, st.p, true);
+			cam = camera(st, width, height, px);
 			draw(ctx, st, { width, height, px, calm, auto, bossName: dungeon.boss_name,
 				aim: { x: (pointer.x - cam.ox) / px - st.p.x, y: (pointer.y - cam.oy) / px - st.p.y } });
 			if (!ended) raf = requestAnimationFrame(frame);
@@ -236,9 +257,15 @@ function Encounter({ dungeon, character, final, onEvent }) {
 
 		function keyDown(e) {
 			if (ended || e.altKey || e.ctrlKey || e.metaKey) return;
+			if (e.code === "Escape") {
+				e.preventDefault();
+				if (!e.repeat) { blur(); changePause(!pause.current); }
+				return;
+			}
+			if (pause.current) return;
 			if (DIRECTIONS[e.code]) { keys.add(e.code); e.preventDefault(); return; }
 			if (e.repeat) return;
-			if (e.code === "KeyQ" || (e.code === "Space" && e.target === cv)) { edge.ability = true; e.preventDefault(); }
+			if (e.code === "KeyQ" || e.code === "Space") { edge.ability = true; e.preventDefault(); }
 			else if (e.code === "KeyR") edge.potion = true;
 			else if (e.code === "KeyE") edge.enter = true;
 			else if (e.code === "KeyT") auto = !auto;
@@ -251,6 +278,7 @@ function Encounter({ dungeon, character, final, onEvent }) {
 			pointer.y = e.clientY - rect.top;
 		};
 		const down = (e) => {
+			if (ended || pause.current) return;
 			move(e);
 			if (e.button === 0) pointer.fire = true;
 			if (e.button === 2) edge.ability = true;
@@ -275,7 +303,7 @@ function Encounter({ dungeon, character, final, onEvent }) {
 			cv.removeEventListener("mousedown", down);
 			cv.removeEventListener("contextmenu", noMenu);
 		};
-	}, [dungeon, character, final, onEvent]);
+	}, [dungeon, character, final, onEvent, carriedLow, pause, changePause]);
 
 	return <canvas ref={canvas} tabIndex={0} role="img" aria-label={`${dungeon.name} boss arena`} />;
 }

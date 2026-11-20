@@ -1,6 +1,6 @@
 // Boss Rush combat baseline from Halcyon Rift's last greybox (d52d2f57).
 // This is a standalone copy for Boss Rush balance changes.
-import { recoveryLimit, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT, CREEP, creepAt } from "./sim.js";
+import { recoveryLimit, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT } from "./sim.js";
 
 export const COLORS = {
 	wall: "#3c4a45", wallTop: "#4a5a54", sand: "#a99e80", sandDark: "#a3987a",
@@ -78,32 +78,6 @@ function drawCracks(g, st, ox, oy, px, calm) {
 	}
 }
 
-/* THE CREEPING FIRE (the Ashen Breach, sim.CREEP): burning tiles glow orange and
- * flicker; the ring about to catch pulses a warning in its last second. */
-function drawCreep(g, st, ox, oy, px, calm) {
-	const c = st.creep;
-	if (!c) return;
-	const r = st.rooms[c.room], [y0, y1] = st.roomY?.[c.room] || [0, -1], P = Math.ceil(px) + 1;
-	if (!r) return;
-	for (let y = y0; y <= y1; y++)
-		for (let x = r.x0; x < r.x1; x++) {
-			const k = creepAt(st, x, y);
-			if (!k || st.tiles[y][x] === "#") continue;
-			const X = Math.floor(ox + x * px), Y = Math.floor(oy + y * px);
-			if (k === 2) {
-				const flick = calm ? 1 : 0.85 + 0.15 * Math.sin((st.tick + x * 5 + y * 3) * 0.3);
-				g.fillStyle = `rgba(255,98,32,${(0.42 * flick).toFixed(3)})`; g.fillRect(X, Y, P, P);
-				g.fillStyle = `rgba(255,196,90,${(0.22 * flick).toFixed(3)})`; g.fillRect(X + px * 0.25, Y + px * 0.25, px * 0.5, px * 0.5);
-			} else {
-				const on = calm || st.tick % 10 < 6;
-				g.fillStyle = on ? "rgba(255,138,60,.26)" : "rgba(255,138,60,.1)"; g.fillRect(X, Y, P, P);
-			}
-		}
-}
-
-/* The doors of rooms that still hold enemies (sim.js): a faint red veil before the
- * room is entered (shots stop there; you can walk through), iron bars once it is
- * sealed. A cleared room's doorway is plain floor. */
 function drawDoors(g, st, ox, oy, px) {
 	if (!st.doorCols) return;
 	const P = Math.ceil(px) + 1, Y = Math.floor(oy + (st.doorY - 1) * px), H = px * 3;
@@ -128,11 +102,7 @@ function circle(g, x, y, r, fill) {
 /* Where the world sits on the canvas: it follows the player (at `at`, the drawn —
  * interpolated — position), clamped so the map never scrolls past its edge. The page
  * uses it too, to turn the mouse into aim. */
-/* The dungeon camera FOLLOWS the player everywhere (owner's ask, 2026-11-18: it
- * sat still at the start until you walked off the map's edge); the void past the
- * map is drawn as the background. The town still fits its plaza to the stage. */
-export function camera(st, width, height, px, at = st.p, follow = false) {
-	if (follow) return { ox: width / 2 - at.x * px, oy: height / 2 - at.y * px };
+export function camera(st, width, height, px, at = st.p) {
 	const vw = width / px, vh = height / px;
 	const cx = st.w < vw ? st.w / 2 : Math.max(vw / 2, Math.min(st.w - vw / 2, at.x));
 	const cy = st.h < vh ? st.h / 2 : Math.max(vh / 2, Math.min(st.h - vh / 2, at.y));
@@ -145,13 +115,12 @@ export function camera(st, width, height, px, at = st.p, follow = false) {
 const here = (o) => o;
 export function draw(g, st, { width, height, px, aim, at = here, calm = false, ui = 1, bossName = "The boss", auto = false }) {
 	const p = st.p, pp = at(p);
-	const { ox, oy } = camera(st, width, height, px, pp, true);
+	const { ox, oy } = camera(st, width, height, px, pp);
 	const sx = (x) => ox + x * px, sy = (y) => oy + y * px;
 
 	g.fillStyle = "#1b2220"; g.fillRect(0, 0, width, height);
 	drawMap(g, st, ox, oy, px, width, height, PALETTES[st.dungeonId] || SHALLOWS);
 	drawCracks(g, st, ox, oy, px, calm);
-	drawCreep(g, st, ox, oy, px, calm);
 	drawDoors(g, st, ox, oy, px);
 	drawHazards(g, st, sx, sy, px);
 	drawAbilityFx(g, st, sx, sy, px, pp);
@@ -266,7 +235,6 @@ export function draw(g, st, { width, height, px, aim, at = here, calm = false, u
 	drawDamageNumbers(g, st.damageNumbers || [], sx, sy, px, st.tick);
 	drawHud(g, st, { width, height, px, ui, auto });
 	drawBossBar(g, st, { width, ui, name: bossName });
-	drawMinimap(g, st, { width, ui });
 }
 
 /* "Auto-fire" over the HP box while it is on (it stays on across town and runs, so
@@ -300,42 +268,6 @@ function drawBossBar(g, st, { width, ui, name }) {
 		g.fillText(`Warded ×${b.ward}`, X + W, Y + H + 10 * ui);
 		g.textAlign = "left";
 	}
-}
-
-/* The minimap, top right under the timer (design §19.1: it replaces off-screen
- * arrows). The dungeon is one line of rooms, so the whole map fits a strip: a
- * room still to fight is dark, the sealed one red, a cleared one green-gray; the
- * player, the portals and the loot bags are dots on it. */
-const MINI = { open: "#5c645f", ahead: "#2f3437", sealed: "#a5443f", cleared: "#4f7262", boss: "#4a2a33" };
-function drawMinimap(g, st, { width, ui }) {
-	if (!st.rooms?.length) return;
-	const W = Math.min(width * 0.3, 184 * ui), m = W / st.w, H = st.h * m;
-	const X = width - 16 - W, Y = 54 * ui;
-	g.fillStyle = "rgba(10,12,14,.66)"; g.fillRect(X - 5, Y - 5, W + 10, H + 10);
-	const roomOf = new Array(st.w).fill(-1);
-	st.rooms.forEach((r, i) => { for (let x = r.x0; x < r.x1; x++) roomOf[x] = i; });
-	const colorAt = (x) => {
-		const i = roomOf[x];
-		if (i < 0) return MINI.open;
-		if (st.sealed === i) return MINI.sealed;
-		if (st.roomLeft[i] > 0) return st.rooms[i].kind === "boss" ? MINI.boss : MINI.ahead;
-		return st.rooms[i].kind === "entrance" ? MINI.open : MINI.cleared;
-	};
-	for (let y = 0; y < st.h; y++) {                          // floor, in runs of one color
-		const row = st.tiles[y];
-		let x = 0;
-		while (x < st.w) {
-			if (row[x] === "#") { x++; continue; }
-			const c = colorAt(x);
-			let e = x + 1;
-			while (e < st.w && row[e] !== "#" && colorAt(e) === c) e++;
-			g.fillStyle = c; g.fillRect(X + x * m, Y + y * m, (e - x) * m + 0.5, m + 0.5);
-			x = e;
-		}
-	}
-	const dot = (o, r, c) => circle(g, X + o.x * m, Y + o.y * m, Math.max(1.5, r * ui), c);
-	if (st.portal) dot(st.portal, 2.6, COLORS.portal);
-	dot(st.p, 2.8, "#ffffff");
 }
 
 /* The boss's mortar: burning ground (a flickering orange pool that fades in its last

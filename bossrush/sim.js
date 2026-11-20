@@ -435,6 +435,7 @@ export function createSim(dungeon, gear = [], hero = {}) {
 	const xp = hero.xp || 0, level = Math.max(hero.level || 1, levelFor(levels, xp));
 	const classId = hero.class_id || hero.classId || dungeon.class_id || "ranger";
 	const stats = statsFor(gear, level, classId);
+	const low = Math.min(stats.maxHp, hero.low ?? stats.maxHp);
 	const scale = { hp: 1, dmg: 1, speed: 1, shot: 1, cadence: 1, ward: 0, ward_boss: 0, volatile: 0, ...(dungeon.scale || {}) };
 	const bossKind = dungeon.boss_kind || "tidewarden";
 	const hpOf = (e) => (e.type === "boss" ? BOSS_HP[bossKind] || ENEMY.boss.hp : ENEMY[e.type].hp);
@@ -455,7 +456,7 @@ export function createSim(dungeon, gear = [], hero = {}) {
 	const doorCols = new Array(dungeon.width).fill(-1);
 	rooms.forEach((r, i) => { if (i > 0) doorCols[r.x0 - 1] = i; if (i < rooms.length - 1) doorCols[r.x1] = i; });
 	const roomLeft = rooms.map((_, i) => enemies.filter((e) => e.room === i).length);
-	// Each room's top and bottom rows (the creeping fire burns in from all four sides).
+	// Each room's top and bottom rows, used to place the Pyre's barrages.
 	const roomY = rooms.map((r) => {
 		let y0 = -1, y1 = -1;
 		for (let y = 0; y < dungeon.height; y++)
@@ -473,11 +474,11 @@ export function createSim(dungeon, gear = [], hero = {}) {
 		tick: 0, elapsedTicks: 0, bossTimeTicks: null, rng: hashSeed(String(dungeon.seed)), status: "play",
 		classId, practice: !!hero.practice,
 		w: dungeon.width, h: dungeon.height, tiles: dungeon.tiles, rooms, dungeonId: dungeon.id || "shallows",
-		cracks, crackAt, fastRoom: -1, hazard: dungeon.hazard || null, creep: null, roomY,
+		cracks, crackAt, fastRoom: -1, roomY,
 		doorY, doorCols, roomLeft, sealed: -1, depth: dungeon.level || 1, offers: dungeon.offers || [],
 		stats, gear, levels, completeXp: dungeon.complete_xp || 0,
 		hero: { level, xp, startLevel: level, startXp: xp },
-		p: { x: dungeon.start.x, y: dungeon.start.y, r: PLAYER_R, hp: stats.maxHp, low: stats.maxHp,
+		p: { x: dungeon.start.x, y: dungeon.start.y, r: PLAYER_R, hp: Math.min(stats.maxHp, low + RECOVERY_MARGIN), low,
 			mp: stats.maxMp, fireCd: 0, hurt: 0, burstLeft: 0, burstCd: 0,
 			potionCd: 0, counterUntil: 0, guardUntil: 0, empower: 0, abilityCd: 0, primed: 0,
 			kindled: 0, windAt: 0, bulwarkUntil: 0, bulwarkAt: 0, hitAt: 0, volleys: 0, phoenixUsed: false, inFire: false },
@@ -908,12 +909,6 @@ const BOSS_CYCLE = [["spiral", 150], ["rest", 40], ["fan", 100], ["rest", 40]];
 export const MORTAR = { after: 60, every: 100, delay: 54, r: 1.4, dmg: 22, burn: 300, burnEvery: 20, burnDmg: 6 };
 
 // ── the Ashen Breach (owner's design, 2026-11-19) ───────────────────────────
-/* FIRE CREEPS IN FROM THE WALLS: `after` ticks into a fight, a combat room's outermost
- * ring of tiles catches, and one more ring every `every` ticks (the next one flickers
- * for `warn` first), until about `keep` tiles are left open across the middle. It
- * hurts like the mortar's fire and goes out when the room is cleared. The Pyre's
- * arena starts burning at its half health instead, a ring every `bossEvery`. */
-export const CREEP = { after: 10 * TPS, every: 4 * TPS, warn: TPS, keep: 3, bossEvery: 3 * TPS };
 export const CINDER = { every: 12, r: 0.45, last: 80 };            // the trail it leaves
 export const KILN = { every: 140, tele: 24, delay: 50, r: 1.1, dmg: 18, burn: 150, range: 10 };
 export const SMOLDER = { flare: 30, charge: 150, speed: 5, reach: 1, fuse: 24, r: 1.6, dmg: 20, burn: 240 };
@@ -922,16 +917,13 @@ export const SMOLDER = { flare: 30, charge: 150, speed: 5, reach: 1, fuse: 24, r
  * one's damage, once. Shared with the town's posts. */
 export const EMBER = { every: 20 };
 
-/* THE PYRE (the Ashen Breach's boss). Phase 1: RINGS of shots, and CROSSES of fire —
- * a + or an x of shells centred on where the player stands, each ringed while it
- * falls and burning after. Phase 2 (half health, after the same telegraphed pause):
- * its arena burns in from the walls (CREEP) and it calls in its Kilns. It lobs the
- * mortar at a player who hides, as every boss does. */
+/* The Pyre threads aimed volleys between its opening rings. At half health it
+ * summons Kilns and alternates rings with barrages that force a lane change. */
 const PYRE_CYCLE = [["rings", 120], ["rest", 30], ["cross", 110], ["rest", 30]];
-const PYRE_CYCLE_2 = [["rings", 100], ["rest", 24], ["cross", 120], ["rest", 24]];
+const PYRE_CYCLE_2 = [["rings", 100], ["rest", 24], ["lanes", 180], ["rest", 24]];
 export const PYRE = {
 	ring: { n: 16, n2: 20, speed: 5, dmg: 16, every: 40 },
-	cross: { arm: 6, gap: 1.1, r: 0.6, delay: 48, dmg: 16, burn: 150, waves: [0, 55], waves2: [0, 40, 80] },
+	cross: { arm: 6, gap: 1.1, r: 0.6, delay: 48, dmg: 16, burn: 150, waves: [0, 38, 76] },
 	kilns: [[-6, -4], [6, 4]],                                     // where its Kilns come in, from its spawn
 };
 /* A cross of shells on (cx, cy): a + or (diagonal) an x, each arm stopped by a wall or rock. */
@@ -948,13 +940,32 @@ function flameCross(st, cx, cy, diagonal) {
 			lob(x, y);
 		}
 }
+// Two offset waves in one direction, then two across it. Each floor marker
+// detonates once, leaving safe bands and keeping the whole arena traversable.
+function flameLanes(st, e, wave) {
+	const room = st.rooms[e.room];
+	const [top, bottom] = st.roomY[e.room];
+	const vertical = wave >= 2;
+	const first = vertical ? room.x0 : top;
+	const end = vertical ? room.x1 : bottom + 1;
+	const delay = 48;
+	for (let line = first + 1 + (wave % 2) * 2; line < end; line += 4) {
+		for (let pos = vertical ? top : room.x0; pos < (vertical ? bottom + 1 : room.x1); pos++) {
+			const x = (vertical ? line : pos) + 0.5;
+			const y = (vertical ? pos : line) + 0.5;
+			if (!walkSolid(tileAt(st, x, y))) st.mortars.push({
+				x, y, r: 0.64, at: st.tick + delay, d: delay, dmg: 24, burn: 0, src: "boss:barrage",
+			});
+		}
+	}
+}
+
 function pyreStep(st, e) {
 	const p = st.p;
 	if (e.phase === 1 && e.hp <= e.maxHp / 2) { e.phase = 0; e.modeT = 70; e.tele = 70; return; }
 	if (e.phase === 0) {
 		if (--e.modeT <= 0) {
 			e.phase = 2; e.mode = 0; e.modeT = PYRE_CYCLE_2[0][1]; e.tele = 0;
-			st.creep = { room: e.room, ring: 0, next: st.tick + 1, every: CREEP.bossEvery };
 			let k = 0;
 			for (const o of st.enemies) {                    // its Kilns come into the fight
 				if (o.summon !== e.id || !o.dormant || o.hp <= 0) continue;
@@ -978,49 +989,22 @@ function pyreStep(st, e) {
 			e.ang = e.ang === 0 ? PI / n : 0;
 			for (let k = 0; k < n; k++) shoot(st, "e", e.x, e.y, e.ang + k * TAU / n, q.speed, q.dmg, 0.22, 240);
 		}
+		if (e.phase === 1 && t % q.every === 20) {
+			const a = Math.atan2(p.y - e.y, p.x - e.x);
+			for (let i = -2; i <= 2; i++) shoot(st, "e", e.x, e.y, a + i * 0.19, 8, 18, 0.19, 180);
+		}
 		if (t % q.every === q.every - 16 && t + 16 < len) e.tele = 16;
 	} else if (mode === "cross") {
-		const w = (e.phase === 1 ? PYRE.cross.waves : PYRE.cross.waves2).indexOf(t);
+		const w = PYRE.cross.waves.indexOf(t);
 		if (w >= 0) flameCross(st, p.x, p.y, w % 2 === 1);
+	} else if (mode === "lanes" && t % 45 === 0) {
+		flameLanes(st, e, t / 45);
 	}
 	if (e.tele > 0) e.tele--;
 	if (--e.modeT <= 0) {
 		e.mode = (e.mode + 1) % cycle.length;
 		e.modeT = cycle[e.mode][0] === "rest" ? cadence(st, cycle[e.mode][1]) : cycle[e.mode][1];
 	}
-}
-
-/* Where a tile sits in a room's creeping fire: its ring (0 = against the wall), or -1
- * outside the room. */
-function ringOf(st, room, tx, ty) {
-	const r = st.rooms[room], [y0, y1] = st.roomY?.[room] || [-1, -1];
-	if (!r || tx < r.x0 || tx >= r.x1 || ty < y0 || ty > y1) return -1;
-	return Math.min(tx - r.x0, r.x1 - 1 - tx, ty - y0, y1 - ty);
-}
-/* How many rings a room burns to: about CREEP.keep tiles left across its narrow way. */
-function creepMax(st, room) {
-	const r = st.rooms[room], [y0, y1] = st.roomY[room];
-	return Math.max(0, Math.floor((Math.min(r.x1 - r.x0, y1 - y0 + 1) - CREEP.keep) / 2));
-}
-/* The creeping fire at a tile, for the renderer and the burn: 2 burning, 1 about to, 0 not. */
-export function creepAt(st, tx, ty) {
-	const c = st.creep;
-	if (!c) return 0;
-	const k = ringOf(st, c.room, tx, ty);
-	if (k < 0) return 0;
-	if (k < c.ring) return 2;
-	return k === c.ring && c.ring < creepMax(st, c.room) && c.next - st.tick <= CREEP.warn ? 1 : 0;
-}
-function stepCreep(st) {
-	if (st.hazard !== "creep") return;
-	const c = st.creep;
-	if (c && st.sealed !== c.room) { st.creep = null; return; }      // cleared: the fire goes out
-	if (!c) {
-		if (st.sealed >= 0 && st.rooms[st.sealed]?.kind === "combat")
-			st.creep = { room: st.sealed, ring: 0, next: st.tick + CREEP.after, every: CREEP.every };
-		return;
-	}
-	if (st.tick >= c.next && c.ring < creepMax(st, c.room)) { c.ring++; c.next = st.tick + c.every; }
 }
 
 /* One pulse of the player's fire (embers): `hurt(target, dmg)` for each target standing
@@ -1080,7 +1064,7 @@ function bossMortar(st, e) {
 
 /* Shells landing, and the ground they leave burning. A shell may say its own damage,
  * burn and names (a Kiln's, a Smolder's, the Pyre's); the boss's mortar is the default.
- * The player burns standing in a fire pool or in a room's creeping fire, every
+ * The player burns standing in a fire pool, every
  * MORTAR.burnEvery ticks — unless their Cinderguard makes them fireproof. */
 function stepMortars(st) {
 	const p = st.p;
@@ -1091,15 +1075,15 @@ function stepMortars(st) {
 		for (const m of due) {
 			const dx = p.x - m.x, dy = p.y - m.y, rr = m.r + p.r;
 			if (dx * dx + dy * dy < rr * rr) hurtPlayer(st, m.dmg ?? MORTAR.dmg, m.src || "boss:mortar");
-			(st.fires ||= []).push({ x: m.x, y: m.y, r: m.r, until: st.tick + (m.burn ?? MORTAR.burn), ...(m.fire ? { src: m.fire } : {}) });
+			const burn = m.burn ?? MORTAR.burn;
+			if (burn > 0) st.fires.push({ x: m.x, y: m.y, r: m.r, until: st.tick + burn, ...(m.fire ? { src: m.fire } : {}) });
 			(st.blasts ||= []).push({ x: m.x, y: m.y, r: m.r, until: st.tick + 18, hot: true });
 			if (st.status !== "play") return;
 		}
 	}
 	const pool = st.fires?.length ? st.fires.find((f) => { const dx = p.x - f.x, dy = p.y - f.y, rr = f.r + p.r * 0.5; return dx * dx + dy * dy < rr * rr; }) : null;
-	const creeping = !pool && st.creep && creepAt(st, Math.floor(p.x), Math.floor(p.y)) === 2;
-	p.inFire = !!(pool || creeping);
-	if (p.inFire && !st.stats.fireproof && st.tick % MORTAR.burnEvery === 0) hurtPlayer(st, MORTAR.burnDmg, pool ? pool.src || "boss:fire" : "rift:fire");
+	p.inFire = !!pool;
+	if (p.inFire && !st.stats.fireproof && st.tick % MORTAR.burnEvery === 0) hurtPlayer(st, MORTAR.burnDmg, pool.src || "boss:fire");
 }
 
 const BOSS_CYCLE_2 = [["spiral", 140], ["rest", 30], ["nova", 80], ["rest", 40], ["fan", 90], ["rest", 30]];
@@ -1233,7 +1217,6 @@ export function step(st, input) {
 
 	sealRoom(st);
 	stepCracks(st);
-	stepCreep(st);
 	if (st.status !== "play") return st;
 	for (const e of st.enemies) {
 		if (e.hp <= 0 || !e.active) continue;
@@ -1335,7 +1318,7 @@ export function step(st, input) {
 		if (st.status !== "play") break;
 	}
 	st.bullets = st.bossDown ? keep.filter((b) => b.owner === "p") : keep;
-	if (st.bossDown) { st.mortars = []; st.fires = []; st.creep = null; }   // its shells and fires too
+	if (st.bossDown) { st.mortars = []; st.fires = []; }   // its shells and fires too
 	st.bossDown = false;
 	if (st.rings?.length) {                            // Volatile: what fell this tick bursts
 		for (const r of st.rings) {
@@ -1606,7 +1589,7 @@ export function fingerprint(st) {
 		st.slowAt ? [r(st.slowAt.x), r(st.slowAt.y)] : 0, st.enemies.map((e) => e.burnUntil || 0), (st.starfalls || []).map((f) => [r(f.x), r(f.y), f.at]),
 		(st.mortars || []).map((m) => [r(m.x), r(m.y), m.at]), (st.fires || []).map((f) => [r(f.x), r(f.y), f.until]), st.enemies.map((e) => e.hidden || 0),
 		(st.cracks || []).map((c) => c.t), st.fastRoom ?? -1, st.enemies.map((e) => (e.dormant ? 1 : 0)),
-		st.creep ? [st.creep.room, st.creep.ring, st.creep.next] : 0, (st.embers || []).map((f) => [r(f.x), r(f.y), f.until, f.dmg]),
+		(st.embers || []).map((f) => [r(f.x), r(f.y), f.until, f.dmg]),
 		(st.stuck || []).map((k) => [k.id, k.at, k.dmg]), st.p.hitAt || 0, st.p.volleys || 0, st.p.phoenixUsed ? 1 : 0, st.p.inFire ? 1 : 0,
 		st.slowF || 0, st.enemies.map((e) => [e.lit ? 1 : 0, e.charge || 0, e.scorched || 0])]);
 }

@@ -10229,6 +10229,13 @@ try {
 		const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
 		await ctx.addInitScript(() => localStorage.setItem("spender_user",
 			JSON.stringify({ id: "boss-rush-harness", name: "Wren", guest: true })));
+		await ctx.addInitScript(() => {
+			const fillText = CanvasRenderingContext2D.prototype.fillText;
+			CanvasRenderingContext2D.prototype.fillText = function (label, ...args) {
+				if (/^\d+ \/ \d+$/.test(label)) this.canvas.dataset.resource = label;
+				return fillText.call(this, label, ...args);
+			};
+		});
 		const page = await ctx.newPage();
 		const errors = [];
 		page.on("pageerror", (error) => errors.push(error.message));
@@ -10250,6 +10257,23 @@ try {
 				await page.locator(".br-stage").filter({ hasText: `Boss ${i + 1} / 3` }).waitFor();
 				const canvas = page.getByRole("img", { name: `${order[i]} boss arena` });
 				const box = await canvas.boundingBox();
+				if (i === 0) {
+					await page.clock.runFor(100);
+					await page.keyboard.press("Escape");
+					const pause = page.getByRole("dialog", { name: "Paused" });
+					await pause.waitFor();
+					const frozen = await canvas.evaluate((cv) => cv.toDataURL());
+					await page.keyboard.down("d");
+					await page.clock.runFor(1000);
+					await page.keyboard.up("d");
+					if (await canvas.evaluate((cv) => cv.toDataURL()) !== frozen) throw new Error("Pause let the arena move");
+					await page.keyboard.press("Escape");
+					await pause.waitFor({ state: "detached" });
+					await page.keyboard.press("Space");
+					await page.clock.runFor(100);
+					const [mp, max] = (await canvas.getAttribute("data-resource")).split(" / ").map(Number);
+					if (mp >= max) throw new Error("Space did not spend MP");
+				}
 				await page.mouse.move(box.x + box.width * 0.8, box.y + box.height * 0.5);
 				await page.keyboard.down("d");
 				await page.mouse.down();
