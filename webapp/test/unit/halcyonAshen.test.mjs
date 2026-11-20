@@ -1,11 +1,10 @@
-/* The Ashen Breach (owner's design, 2026-11-19) in the browser's fight: the creeping
- * fire, the Cinder, the Kiln, the Smolder and the Pyre, and the nine uniques that set
+/* The Ashen Breach (owner's design, 2026-11-19) in the browser's fight: fire vents, the Cinder, the Kiln, the Smolder and the Pyre, and the nine uniques that set
  * fire of the player's own. The fixture is a real dungeon from halcyon/dungeon.py,
  * held to the generator by halcyon/tests/test_sim_fixtures.py. */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { createSim, step, fingerprint, statsFor, creepAt, BOSS_HP, TPS, CREEP, KILN, SMOLDER, PYRE, UNIQUE, EMBER,
+import { createSim, step, fingerprint, statsFor, BOSS_HP, TPS, VENT, KILN, SMOLDER, PYRE, UNIQUE, EMBER,
 	STARFALL_DELAY, MORTAR } from "../../../halcyon/sim.js";
 import { createTown, stepTown, setTownGear, POSTS } from "../../../halcyon/town.js";
 
@@ -27,12 +26,12 @@ function inRoom(st, i, keep = () => false, hp = 100000) {
 	for (const e of st.enemies) if (!keep(e)) e.active = false;
 	return r;
 }
-const roomWith = (st, type) => st.enemies.find((e) => e.type === type && st.rooms[e.room].kind === "combat").room;
 
-test("the Ashen Breach's boss is the Pyre; its Kilns wait out of play, and the rooms burn", () => {
+test("the Ashen Breach's boss is the Pyre; its Kilns wait out of play, and combat rooms use fire vents", () => {
 	const st = createSim(F, RANGER);
 	assert.equal(st.dungeonId, "ashen");
-	assert.equal(st.hazard, "creep");
+	assert.equal(st.hazard, "vents");
+	assert.equal(createSim({ ...F, hazard: "creep" }, RANGER).hazard, "vents", "older Ashen payloads also use vents");
 	const boss = st.enemies.find((e) => e.type === "boss");
 	assert.equal(boss.form, "pyre");
 	assert.equal(boss.maxHp, BOSS_HP.pyre);
@@ -42,32 +41,78 @@ test("the Ashen Breach's boss is the Pyre; its Kilns wait out of play, and the r
 	for (const t of ["cinder", "kiln", "smolder", "shooter"]) assert.ok(st.enemies.some((e) => e.type === t), `the fixture has a ${t}`);
 });
 
-test("fire creeps in from the walls a ring at a time, warns first, stops short of the middle and goes out on a clear", () => {
+function ventFight() {
 	const st = createSim(F, RANGER);
-	const i = roomWith(st, "smolder"), r = inRoom(st, i);
-	const [y0, y1] = st.roomY[i], mid = Math.floor((r.x0 + r.x1) / 2), doorY = st.doorY;
-	run(st, CREEP.after - 3);
-	assert.equal(st.creep.ring, 0, "nothing burns for the first ten seconds");
-	assert.equal(creepAt(st, r.x0, doorY), 1, "the edge warns before it catches");
-	run(st, 4);
-	assert.equal(st.creep.ring, 1);
-	assert.equal(creepAt(st, r.x0, doorY), 2, "the outermost ring burns");
-	assert.equal(creepAt(st, r.x0 + 1, doorY), 0, "and only it");
-	st.p.x = r.x0 + 0.5; st.p.y = doorY + 0.5;
-	const hp = st.p.hp;
-	run(st, MORTAR.burnEvery + 1);
-	assert.ok(st.p.hp < hp && st.lastHit.src === "rift:fire", "standing in it hurts");
-	st.p.x = mid + 0.5;
-	run(st, 30 * CREEP.every);
-	const max = Math.floor((Math.min(r.x1 - r.x0, y1 - y0 + 1) - CREEP.keep) / 2);
-	assert.equal(st.creep.ring, max, "it stops");
-	const open = [];
-	for (let y = y0; y <= y1; y++) if (creepAt(st, mid, y) === 0) open.push(y);
-	assert.ok(open.length >= CREEP.keep, `${open.length} tiles open across the middle`);
-	for (const e of st.enemies) if (e.room === i && e.hp > 0) { e.active = true; e.hp = 1; st.bullets.push(shot(e.x, e.y)); }
-	run(st, 2);
-	assert.equal(st.sealed, -1);
-	assert.equal(st.creep, null, "a cleared room stops burning");
+	const kiln = st.enemies.find((e) => e.type === "kiln" && st.rooms[e.room].kind === "combat");
+	const room = inRoom(st, kiln.room, (e) => e === kiln);
+	const y = st.doorY;
+	st.tiles = [...st.tiles];
+	st.tiles[y] = st.tiles[y].slice(0, room.x0) + ".".repeat(room.x1 - room.x0) + st.tiles[y].slice(room.x1);
+	st.p.x = room.x0 + 2.5;
+	kiln.x = st.p.x + 5; kiln.y = st.p.y; kiln.cd = 1e9; kiln.tele = 0;
+	return { st, kiln, room };
+}
+
+test("a fire vent warns at a fixed spot, erupts once, and burns out", () => {
+	const { st } = ventFight(), hp = st.p.hp;
+	run(st, VENT.after - 1);
+	assert.equal(st.mortars?.length ?? 0, 0);
+	step(st, {});
+	const [vent] = st.mortars;
+	assert.deepEqual([vent.src, vent.x, vent.y, vent.at - st.tick], [VENT.impact, st.p.x, st.p.y, VENT.delay]);
+	assert.equal(vent.r, VENT.r);
+	run(st, VENT.delay - 1);
+	assert.equal(st.p.hp, hp, "the warning is harmless");
+	st.p.x -= 2;
+	step(st, {});
+	assert.equal(st.p.hp, hp, "two tiles away is safe");
+	assert.equal(st.mortars.length, 0);
+	assert.equal(st.fires.length, 1);
+	assert.equal(st.fires[0].src, VENT.fire);
+	st.p.x = vent.x;
+	run(st, MORTAR.burnEvery);
+	assert.ok(st.p.hp < hp && st.lastHit.src === VENT.fire, "standing in the pool burns");
+	run(st, VENT.burn - MORTAR.burnEvery);
+	assert.equal(st.fires.length, 0);
+	assert.equal(st.mortars.length, 0, "the previous vent is gone before the next one");
+});
+
+test("a far or wall-blocked enemy cannot trigger vents in a sealed room", () => {
+	const { st, kiln, room } = ventFight(), hp = st.p.hp;
+	kiln.x = room.x1 - 1.5;
+	assert.ok(kiln.x - st.p.x > VENT.range);
+	run(st, VENT.after + 3 * VENT.every);
+	assert.equal(st.mortars?.length ?? 0, 0, "out of range despite clear sight");
+	kiln.x = st.p.x + 5;
+	const y = st.doorY, x = Math.floor(st.p.x + 2);
+	const open = st.tiles[y];
+	st.tiles[y] = open.slice(0, x) + "#" + open.slice(x + 1);
+	run(st, 3 * VENT.every);
+	assert.equal(st.sealed, kiln.room);
+	assert.equal(st.mortars?.length ?? 0, 0, "in range but behind a wall");
+	assert.equal(st.fires?.length ?? 0, 0);
+	assert.equal(st.p.hp, hp);
+	st.tiles[y] = open;
+	run(st, TPS);
+	assert.equal(st.mortars.length, 1, "only one warning once the fight resumes");
+});
+
+test("clearing a room cancels a pending vent or puts out its active fire", () => {
+	for (const burning of [false, true]) {
+		const { st, kiln } = ventFight();
+		run(st, VENT.after);
+		if (burning) run(st, VENT.delay);
+		assert.ok(burning ? st.fires.some((f) => f.src === VENT.fire) : st.mortars.some((m) => m.src === VENT.impact));
+		for (const e of st.enemies) if (e.room === kiln.room && e.hp > 0) {
+			e.active = true; e.hp = 1; e.x = st.p.x + 2; e.y = st.p.y;
+			st.bullets.push(shot(e.x, e.y));
+		}
+		step(st, {});
+		assert.equal(st.sealed, -1);
+		assert.equal(st.nextVent, null);
+		assert.ok(!st.mortars.some((m) => m.src === VENT.impact));
+		assert.ok(!st.fires?.some((f) => f.src === VENT.fire));
+	}
 });
 
 test("a Cinder runs at you and leaves fire behind it", () => {
@@ -117,7 +162,7 @@ test("a Smolder does nothing until it is hit, then flares, charges and bursts in
 	assert.ok(st.fires.some((f) => f.src === "smolder:fire"));
 });
 
-test("the Pyre: rings of shots, crosses of fire, then a burning arena and its Kilns; they fall with it", () => {
+test("the Pyre: rings of shots, crosses of fire, then fire vents and its Kilns; they fall with it", () => {
 	const st = createSim(F, RANGER);
 	const boss = st.enemies.find((e) => e.type === "boss");
 	inRoom(st, boss.room, (e) => e === boss);
@@ -130,11 +175,11 @@ test("the Pyre: rings of shots, crosses of fire, then a burning arena and its Ki
 	const cross = st.mortars.filter((m) => m.src === "boss:flame");
 	assert.ok(cross.length >= 5, `a cross of ${cross.length} shells`);
 	assert.ok(cross.some((m) => Math.abs(m.x - st.p.x) < 1e-9 && Math.abs(m.y - st.p.y) < 1e-9), "centred where you stand");
-	assert.equal(st.creep, null, "the arena does not burn in phase 1");
+	assert.equal(st.nextVent, null, "no arena vents in phase 1");
 	boss.hp = boss.maxHp / 2;
 	run(st, 75);
 	assert.equal(boss.phase, 2);
-	assert.equal(st.creep.room, boss.room, "phase 2: the arena burns");
+	assert.ok(st.nextVent > st.tick, "phase 2 schedules the first vent");
 	const kilns = st.enemies.filter((e) => e.summon === boss.id);
 	assert.ok(kilns.every((k) => !k.dormant && k.active && k.hp > 0), "its Kilns come in");
 	const events = [];
@@ -143,7 +188,7 @@ test("the Pyre: rings of shots, crosses of fire, then a burning arena and its Ki
 	assert.ok(kilns.every((k) => k.hp <= 0), "and fall with it");
 	for (const k of kilns) assert.ok(events.some((e) => e.type === "kill" && e.enemy === k.id), `${k.id} is credited`);
 	assert.equal(st.sealed, -1, "the arena opens");
-	assert.equal(st.creep, null);
+	assert.equal(st.nextVent, null);
 });
 
 // ── the uniques ─────────────────────────────────────────────────────────────

@@ -572,6 +572,50 @@ test("a room seals both ways when you are all the way in, wakes at once, and ope
 	assert.ok(st.p.x < r.x0 - 1, "and the way back is open");
 });
 
+test("HP and MP regenerate five times as fast only inside cleared combat and boss rooms", () => {
+	const st = createSim(A, STARTER);
+	const { p, stats } = st;
+	const checkRegen = (multiple) => {
+		p.hp = p.low = 20; p.mp = 0;
+		for (let t = 0; t < TPS; t++) step(st, {});
+		assert.ok(Math.abs(p.hp - 20 - stats.hpRegen * multiple) < 1e-8, "health rate");
+		assert.ok(Math.abs(p.mp - stats.mpRegen * multiple) < 1e-8, "mana rate");
+	};
+	checkRegen(1); // the entrance has no encounter
+	const room = st.rooms.findIndex((r) => r.kind === "combat"), r = st.rooms[room];
+	p.x = r.x0 + 1; p.y = st.doorY + 0.5;
+	step(st, {});
+	const targets = inRoom(st, room);
+	assert.ok(targets.length > 1);
+	for (const e of targets) e.active = false;
+	checkRegen(1); // sealed with enemies remaining
+	p.mp = 0;
+	for (const e of targets) {
+		e.active = true; e.hp = 1; e.x = p.x + 1.5; e.y = p.y;
+		poke(st, e);
+	}
+	assert.equal(st.roomLeft[room], 0);
+	assert.ok(p.mp < 1, "the final kill grants no instant mana refill");
+	checkRegen(5);
+	p.hp = recoveryLimit(st) - 0.01; p.mp = stats.maxMp - 0.01;
+	step(st, {});
+	assert.equal(p.hp, recoveryLimit(st));
+	assert.equal(p.mp, stats.maxMp);
+	p.x = r.x0;
+	checkRegen(1); // doorway
+	p.x = r.x0 - 2.5;
+	checkRegen(1); // corridor
+	p.x = r.x0 + 1;
+	checkRegen(5); // returning to the cleared room
+
+	const boss = st.enemies.find((e) => e.type === "boss");
+	p.x = boss.x - 4;
+	step(st, {});
+	poke(st, boss, boss.hp);
+	assert.equal(st.roomLeft[boss.room], 0);
+	checkRegen(5);
+});
+
 test("the boss's room seals like any other", () => {
 	const st = createSim(A, STARTER);
 	const i = st.rooms.findIndex((r) => r.kind === "boss"), r = st.rooms[i];

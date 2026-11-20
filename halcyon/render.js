@@ -7,7 +7,7 @@
  * rock), the player cyan/white, every enemy and every enemy shot red/orange/
  * magenta, pickups gold (loot) and green (healing).
  */
-import { recoveryLimit, xpProgress, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT, CREEP, creepAt } from "./sim.js";
+import { recoveryLimit, xpProgress, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT, VENT } from "./sim.js";
 import { drawSprite, drawTile, artPx, PALETTE, sprite } from "./art.js";
 
 /* ART (art.js): every thing below asks for its picture first and draws its shape
@@ -290,29 +290,6 @@ function drawCracks(g, st, ox, oy, px, calm) {
 	}
 }
 
-/* THE CREEPING FIRE (the Ashen Breach, sim.CREEP): burning tiles glow orange and
- * flicker; the ring about to catch pulses a warning in its last second. */
-function drawCreep(g, st, ox, oy, px, calm) {
-	const c = st.creep;
-	if (!c) return;
-	const r = st.rooms[c.room], [y0, y1] = st.roomY?.[c.room] || [0, -1], P = Math.ceil(px) + 1;
-	if (!r) return;
-	for (let y = y0; y <= y1; y++)
-		for (let x = r.x0; x < r.x1; x++) {
-			const k = creepAt(st, x, y);
-			if (!k || st.tiles[y][x] === "#") continue;
-			const X = Math.floor(ox + x * px), Y = Math.floor(oy + y * px);
-			if (k === 2) {
-				const flick = calm ? 1 : 0.85 + 0.15 * Math.sin((st.tick + x * 5 + y * 3) * 0.3);
-				g.fillStyle = `rgba(255,98,32,${(0.42 * flick).toFixed(3)})`; g.fillRect(X, Y, P, P);
-				g.fillStyle = `rgba(255,196,90,${(0.22 * flick).toFixed(3)})`; g.fillRect(X + px * 0.25, Y + px * 0.25, px * 0.5, px * 0.5);
-			} else {
-				const on = calm || st.tick % 10 < 6;
-				g.fillStyle = on ? "rgba(255,138,60,.26)" : "rgba(255,138,60,.1)"; g.fillRect(X, Y, P, P);
-			}
-		}
-}
-
 /* The doors of rooms that still hold enemies (sim.js): a faint red veil before the
  * room is entered (shots stop there; you can walk through), iron bars once it is
  * sealed. A cleared room's doorway is plain floor. */
@@ -375,7 +352,6 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here, bag
 	g.fillStyle = pal.deep; g.fillRect(0, 0, width, height);
 	drawMap(g, st, ox, oy, px, width, height, pal);
 	drawCracks(g, st, ox, oy, px, calm);
-	drawCreep(g, st, ox, oy, px, calm);
 	drawDoors(g, st, ox, oy, px);
 	drawHazards(g, st, sx, sy, px);
 	drawAbilityFx(g, st, sx, sy, px, pp);
@@ -636,9 +612,10 @@ function drawHazards(g, st, sx, sy, px) {
 	const lw = Math.max(1.5, px * 0.07);
 	for (const m of st.mortars || []) {
 		const k = Math.min(1, Math.max(0, 1 - (m.at - st.tick) / (m.d || MORTAR.delay)));
-		g.strokeStyle = "#ff5a3c"; g.lineWidth = lw;
+		const vent = m.src === VENT.impact;
+		g.strokeStyle = vent ? "#ffc261" : "#ff5a3c"; g.lineWidth = lw;
 		g.beginPath(); g.arc(sx(m.x), sy(m.y), px * m.r, 0, Math.PI * 2); g.stroke();
-		circle(g, sx(m.x), sy(m.y), px * m.r * k, "rgba(255,90,60,.3)");
+		circle(g, sx(m.x), sy(m.y), px * m.r * k, vent ? "rgba(255,164,58,.32)" : "rgba(255,90,60,.3)");
 	}
 }
 

@@ -397,7 +397,7 @@ def test_the_pyre_calls_in_kilns_the_server_credits_in_any_order():
         kilns = [e for e in d["enemies"].values() if e.get("summon")]
         assert len(kilns) == D.PYRE_KILNS and all(k["summon"] == d["boss"] and k["type"] == "kiln" for k in kilns)
         assert not any("parent" in k for k in kilns)
-        assert d["boss_kind"] == "pyre" and d["boss_name"] == "The Pyre" and d["hazard"] == "creep"
+        assert d["boss_kind"] == "pyre" and d["boss_name"] == "The Pyre" and d["hazard"] == "vents"
         if not d["mods"]:                                  # a modifier pays a little more
             assert d["enemies"][d["boss"]]["xp"] == D.DUNGEONS["ashen"]["boss_xp"]
         assert len(D.reachable(d)) > 0 and all((int(e["x"]), int(e["y"])) in D.reachable(d)

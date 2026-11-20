@@ -24,12 +24,12 @@ import { baseCss } from "../shared/theme.js";
 import { lobbyCss, LobbyHeader, LobbyUser, LobbyLoading } from "../shared/lobby.jsx";
 import { GAME_ACCENTS } from "../shared/accents.js";
 import { makeClient } from "./client.js";
-import { createSim, step, TPS, REACH, xpProgress, WEAPONS, statsFor, enchantValue, recoveryLimit, CLASS_INFO, SPECIAL, isSpecial, lineLevel,
+import { createSim, step, TPS, REACH, xpProgress, WEAPONS, statsFor, enchantValue, recoveryLimit, roomRegenMultiplier, CLASS_INFO, SPECIAL, isSpecial, lineLevel,
 	STAT_SCALE, ABILITY_COST, ABILITY, SLOW_DURATION, SLOW_FACTOR, SLOW_PULSE,
 	STARFALL_DELAY, STARFALL_RADIUS, STARFALL_RANGE, COUNTER_WINDOW, COUNTER_GUARD, POTION_HEAL, POTION_COOLDOWN, UNIQUE, EMBER } from "./sim.js";
 import { camera, draw, drawTown, promptFor, formatRiftTime, TIER_COLORS, UNIQUE_COLOR } from "./render.js";
 import { createTown, stepTown, setTownGear, postDps, STATIONS, SPAWN, standAt, REALMS } from "./town.js";
-import { loadArt } from "./art.js";
+import { loadArt, setArtEnabled } from "./art.js";
 import cssText from "./HalcyonRift.css?inline";
 
 /* The art gallery (ArtGallery.jsx) is a dev-server page, /halcyon?art: the
@@ -259,7 +259,8 @@ function loadPrefs() {
 	const keys = { ...DEFAULT_KEYS };
 	for (const [id] of ACTIONS) if (Array.isArray(p.keys?.[id]) && p.keys[id].every((c) => typeof c === "string" && !FIXED_KEY(c))) keys[id] = p.keys[id];
 	// auto-fire is never read back: every visit starts with it off (below)
-	return { keys, calm: !!p.calm, ui: UI_SIZES.some(([v]) => v === p.ui) ? p.ui : 1, auto: false };
+	return { keys, calm: !!p.calm, ui: UI_SIZES.some(([v]) => v === p.ui) ? p.ui : 1,
+		artStyle: p.artStyle === "greybox" ? "greybox" : "pixel", auto: false };
 }
 const livePrefs = { current: loadPrefs() };
 /* AUTO-FIRE IS REMEMBERED FOR THE VISIT, NOT THE NEXT ONE (owner, 2026-11-18 and
@@ -398,6 +399,10 @@ function HalcyonGame({ authUser, onExit }) {
 		try { localStorage.setItem(PREFS_KEY, JSON.stringify(next)); } catch { /* kept for this visit only */ }
 		return next;
 	}), []);
+	useLayoutEffect(() => {
+		setArtEnabled(prefs.artStyle === "pixel");
+		return () => setArtEnabled(true);
+	}, [prefs.artStyle]);
 	// THE INTERFACE SIZE scales every rem on the page; the page is the whole window,
 	// so the root's font size is ours while it is mounted (and given back after).
 	useEffect(() => {
@@ -743,6 +748,15 @@ function HalcyonGame({ authUser, onExit }) {
 		}
 		setPicked(null);
 	};
+	const firstFreePlace = (toVault = false) => {
+		const limit = toVault ? view.limits.vault : view.limits.inventory;
+		for (let i = 0; i < limit; i++) {
+			const to = toVault ? at.vault(i) : at.inv(char.char_id, i);
+			if (!byPlace[keyOf(to)]) return to;
+		}
+		notify(toVault ? "Your vault is full." : "Your bag is full.", "bad");
+		return null;
+	};
 	// Where a double click or a number key sends an item: from the bag, onto the
 	// slot it fits (a ring: the empty ring slot, else the first), swapping whatever
 	// is there; from the equipment or the vault, into the first empty bag slot.
@@ -754,9 +768,7 @@ function HalcyonGame({ authUser, onExit }) {
 				: !byPlace[keyOf(at.eq(char.char_id, "ring2"))] ? "ring2" : "ring1";
 			return slot ? at.eq(char.char_id, slot) : null;
 		}
-		const free = [...Array(view.limits.inventory).keys()].find((i) => !byPlace[keyOf(at.inv(char.char_id, i))]);
-		if (free === undefined) { notify("Your bag is full.", "bad"); return null; }
-		return at.inv(char.char_id, free);
+		return firstFreePlace();
 	};
 	const quick = (it) => {
 		if (!it || busy || panel === "forge") return;
@@ -769,7 +781,7 @@ function HalcyonGame({ authUser, onExit }) {
 	const escRef = useRef(null);
 	escRef.current = () => {
 		if (fallen) return;                         // the death screen is left by its own button
-		if (menu && !run && !report && !graveyard) return;
+		if (menu && !run && !report && !graveyard && !settings) return;
 		if (tip) { setTip(null); return; }
 		if (report) { setReport(null); return; }
 		if (graveyard) { setGraveyard(false); return; }
@@ -838,12 +850,19 @@ function HalcyonGame({ authUser, onExit }) {
 		const most = forgeTab === "fuse" ? 2 : 1;
 		setForge((f) => (f.includes(it.item_id) ? f.filter((id) => id !== it.item_id) : [...f, it.item_id].slice(-most)));
 	};
+	const vaultOpen = panel === "vault" && !run;
 	const slotCtx = {
-		bases: view?.bases || {}, picked, drag, flash, dragItem: drag ? byId[drag] : null, accepts, inRun: !!run, forge, quick,
+		bases: view?.bases || {}, picked, drag, flash, dragItem: drag ? byId[drag] : null, accepts, inRun: !!run, forge, quick, vaultOpen,
 		startDrag: (it) => { setDrag(it.item_id); setTip(null); },
 		endDrag: () => setDrag(null),
 		dropAt: (target) => placeAt(target, byId[drag]),
-		clickAt: (target, it) => {
+		clickAt: (target, it, shift) => {
+			if (shift && vaultOpen && (it?.loc === "inventory" || it?.loc === "vault")) {
+				if (busy || !char) return;
+				const to = firstFreePlace(it.loc === "inventory");
+				if (to) { placeAt({ kind: "place", to }, it); setTip(null); }
+				return;
+			}
 			if (panel === "forge" && !run && target.to?.[0] !== "vault") { if (it) forgePick(it); return; }
 			const held = picked ? byId[picked] : null;
 			if (!held) { if (it && (run || !it.fresh)) setPicked(it.item_id); return; }
@@ -990,6 +1009,7 @@ function HalcyonGame({ authUser, onExit }) {
 							</div>
 						</section>)}
 					<div className="hr-menu-foot">
+						<button className="btn btn-ghost btn-sm" onClick={() => setSettings(true)}>Settings</button>
 						{view.best_level > 0 && <span className="hr-best">Best level reached: <strong>{view.best_level}</strong></span>}
 						{(view.fallen_count ?? view.fallen.length) > 0 && <button className="btn btn-ghost btn-sm" onClick={() => setGraveyard(true)}>
 							Graveyard ({view.fallen_count ?? view.fallen.length})</button>}
@@ -997,6 +1017,7 @@ function HalcyonGame({ authUser, onExit }) {
 					{graveyard && <Graveyard fallen={view.fallen} count={view.fallen_count ?? view.fallen.length}
 						onOpen={(c) => { const r = reportOfFallen(c); if (r) { setReport(r); setGraveyard(false); } }}
 						onClose={() => setGraveyard(false)} />}
+					{settings && <Settings prefs={prefs} setPrefs={setPrefs} onClose={() => setSettings(false)} />}
 					{reportView}
 				</main>
 				{tip && <ItemTip tip={{ ...tip, canLock: false }} bases={view.bases} ap={0} />}
@@ -1052,9 +1073,9 @@ function HalcyonGame({ authUser, onExit }) {
 
 						<Notices list={notices} onReport={(r) => { setReport(r); setTip(null); }} />
 
-						{panel === "vault" && !run && (
+						{vaultOpen && (
 							<Overlay title="Vault" onClose={() => setPanel(null)} className="hr-vault">
-								<p className="hr-hint">Shared by every character. Drag items in and out.</p>
+								<p className="hr-hint">Shift-click an item to move it between your bag and the shared vault.</p>
 								<div className="hr-vault-tools">
 									<input className="hr-vault-search" type="search" placeholder="Search: name or enchantment" value={vaultQuery}
 										aria-label="Search the vault" onChange={(e) => setVaultQuery(e.target.value)} />
@@ -1279,8 +1300,8 @@ function Slot({ label, item, target, locked, ctx, num: n = null, dim = false }) 
 			onMouseLeave={ctx.hideTip}
 			onFocus={(e) => item && ctx.showTip(item, e.currentTarget, !!(ctx.lock && target))}
 			onBlur={ctx.hideTip}
-			onClick={(e) => { if (!locked && target) ctx.clickAt(target, item); if (ctx.inRun) e.currentTarget.blur(); }}
-			onDoubleClick={(e) => { if (!locked && item && target) ctx.quick(item); if (ctx.inRun) e.currentTarget.blur(); }}
+			onClick={(e) => { if (!locked && target) ctx.clickAt(target, item, e.shiftKey); if (ctx.inRun) e.currentTarget.blur(); }}
+			onDoubleClick={(e) => { if (!locked && item && target && !(ctx.vaultOpen && e.shiftKey)) ctx.quick(item); if (ctx.inRun) e.currentTarget.blur(); }}
 			onContextMenu={(e) => { e.preventDefault(); if (item && target && ctx.lock) ctx.lock(item); }}>
 			{n && <span className="hr-num" aria-hidden="true">{n}</span>}
 			{item?.locked && <span className="hr-lock" aria-hidden="true">🔒︎</span>}
@@ -1429,7 +1450,7 @@ const ENEMY_NAMES = { chaser: "a Chaser", shooter: "a Shooter", radial: "a Radia
 const ATTACK_NAMES = { touch: "charge", spit: "spit", bolt: "bolt", ring: "ring of shots", spiral: "spiral",
 	fan: "fan of shots", nova: "nova", burst: "dying burst", mortar: "mortar", fire: "burning ground",
 	cross: "cross of shots", pair: "pair of shots", fault: "fault line", shatter: "shatter shard", tear: "tear", blink: "ring", crack: "opening crack",
-	bomb: "firebomb", flame: "cross of fire" };
+	bomb: "firebomb", flame: "cross of fire", eruption: "vent eruption", vent: "vent fire" };
 function causeOf(hit) {
 	if (!hit || !hit.src) return "Fell in the rift";
 	const [who, how] = hit.src.split(":");
@@ -1543,6 +1564,21 @@ function Settings({ prefs, setPrefs, onClose }) {
 	}, [wait, setPrefs]);
 	return (
 		<Overlay title="Settings" onClose={onClose} className="hr-settings">
+			<h3 className="fg-label">Display</h3>
+			<div className="hr-sizes" role="group" aria-label="Art style">
+				<span>Art style</span>
+				{[["pixel", "Pixel art"], ["greybox", "Greybox"]].map(([v, label]) => <button key={v}
+					className={"hr-size" + (prefs.artStyle === v ? " on" : "")} aria-pressed={prefs.artStyle === v}
+					onClick={() => setPrefs((p) => ({ ...p, artStyle: v }))}>{label}</button>)}
+			</div>
+			<label className="hr-check"><input type="checkbox" checked={prefs.calm}
+				onChange={(e) => setPrefs((p) => ({ ...p, calm: e.target.checked }))} />
+				<span>Reduced flashing: no white hit flashes, and the boss's phase change holds still</span></label>
+			<div className="hr-sizes" role="group" aria-label="Interface size">
+				<span>Interface size</span>
+				{UI_SIZES.map(([v, label]) => <button key={v} className={"hr-size" + (prefs.ui === v ? " on" : "")} aria-pressed={prefs.ui === v}
+					onClick={() => setPrefs((p) => ({ ...p, ui: v }))}>{label}</button>)}
+			</div>
 			<h3 className="fg-label">Keys</h3>
 			<p className="hr-hint">Click a key, then press the new one. Escape, the arrow keys and 1 – 8 stay as they are.</p>
 			<dl className="hr-binds">
@@ -1553,15 +1589,6 @@ function Settings({ prefs, setPrefs, onClose }) {
 						{wait === id ? "Press a key…" : (prefs.keys[id] || []).map(keyLabel).join(" · ") || "Not set"}</button></dd>
 				</div>)}
 			</dl>
-			<h3 className="fg-label">Display</h3>
-			<label className="hr-check"><input type="checkbox" checked={prefs.calm}
-				onChange={(e) => setPrefs((p) => ({ ...p, calm: e.target.checked }))} />
-				<span>Reduced flashing: no white hit flashes, and the boss's phase change holds still</span></label>
-			<div className="hr-sizes" role="group" aria-label="Interface size">
-				<span>Interface size</span>
-				{UI_SIZES.map(([v, label]) => <button key={v} className={"hr-size" + (prefs.ui === v ? " on" : "")} aria-pressed={prefs.ui === v}
-					onClick={() => setPrefs((p) => ({ ...p, ui: v }))}>{label}</button>)}
-			</div>
 			<div className="hr-actions">
 				<button className="btn btn-ghost" onClick={() => setPrefs((p) => ({ ...p, keys: { ...DEFAULT_KEYS } }))}>Reset keys</button>
 				<button className="btn btn-gold" onClick={onClose}>Done</button>
@@ -1625,9 +1652,9 @@ function Stats({ gear, level, classId = "ranger" }) {
  * what it cannot until a heal raises the limit (dark gray). */
 function vitalsOf(st) {
 	if (!st || !st.stats) return null;
-	const s = st.stats, p = st.p, town = p.hp === undefined;
+	const s = st.stats, p = st.p, town = p.hp === undefined, regen = roomRegenMultiplier(st);
 	return { hp: town ? s.maxHp : p.hp, limit: town ? s.maxHp : recoveryLimit(st), maxHp: s.maxHp, mp: p.mp, maxMp: s.maxMp,
-		hpRegen: s.hpRegen, mpRegen: s.mpRegen };
+		hpRegen: s.hpRegen * regen, mpRegen: s.mpRegen * regen };
 }
 
 /* The bars repaint themselves each frame from `read()` and touch the DOM only when a

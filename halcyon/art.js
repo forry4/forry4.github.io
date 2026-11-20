@@ -238,6 +238,7 @@ export function frameOf(sheet, { facing = null, tick = 0, seed = 0 } = {}) {
  * picture and its layout, or null. `override(key, canvas)` puts a picture in place
  * without a file — the gallery uses it to preview a dropped image in the real game. */
 const loaded = new Map();
+let artEnabled = true;
 let base = null;
 function artBase() {
 	if (base === null) base = `${(typeof import.meta !== "undefined" && import.meta.env && import.meta.env.BASE_URL) || "/"}art/halcyon/`;
@@ -254,7 +255,11 @@ export function loadArt(manifest = MANIFEST) {
 		loaded.set(key, rec);
 	}
 }
+export function setArtEnabled(enabled) {
+	artEnabled = enabled;
+}
 export function sprite(key) {
+	if (!artEnabled) return null;
 	const rec = loaded.get(key);
 	return rec && rec.ready ? rec : null;
 }

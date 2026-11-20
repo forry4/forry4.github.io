@@ -254,8 +254,10 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
   `halcyonPlay` holds the move route back 1.5s and still sees the swap at once.
 - **Range is the weapon's, not the Ranger's**: it is in the weapon's tooltip, not in
   the stats (ATT DEX DEF AP). Every tooltip number is its own line.
-- **Regeneration a second is on the HP and MP bars.** The town has NO bonus regen: MP
-  refills at the gear's `mpRegen`, and a gear change only clamps it.
+- **The HP and MP bars show the current regeneration per second.** Both rates are
+  multiplied by five while the player is fully inside a cleared combat room or boss
+  arena. Health still stops at the recovery limit, and mana stops at its maximum.
+  Town, dungeon entrances and corridors use the base rates.
 - **XP shows as it is earned**: in a run the level and XP bar are read off the sim
   each frame (`LiveHero`), so the boss kill (which carries the clear) moves the bar
   then, and nothing arrives on the way back — the end-of-run notification has no "+XP", and
@@ -698,14 +700,11 @@ Modeled on RotMG's enchanting, minus its percentages, dust colors and artifacts.
   Clear bonus 100 XP, boss 60. **The Fracture's boss is NAMED the Schism now** (the word
   "breach" went to this rift); its `boss_kind` stays `"breach"`, which old saves and the
   sim read — rename display names only.
-- **The rooms burn: `sim.CREEP`.** A spec's `hazard: "creep"` reaches the dungeon (only
-  when set, so older dungeons are byte-identical). Ten seconds after a COMBAT room seals,
-  its outermost ring of tiles catches, then one ring every 4s (the next flickers for its
-  last second), until about three tiles are left across the narrow way (`creepMax`).
-  A ring is `min(distance to each of the room's four sides)`; the room's top and bottom
-  rows are `st.roomY`, found from the tiles. It hurts like the mortar's fire
-  (`rift:fire`) and `st.creep` goes null when the room clears. `creepAt(st, x, y)` is
-  the one reader (2 burning, 1 warning) for the burn and the renderer.
+- **Fire vents** (sim.VENT). After eight seconds in a sealed combat room, a nearby
+  enemy with a clear line of sight can trigger a vent at the player's current spot.
+  The warning lasts 1.1s, then a small circle burns for 1.8s. Only one vent can be
+  active, and clearing the room removes it. The sim maps older "creep" payloads
+  to the current "vents" hazard.
 - **Enemies**: Cinder (a fast chaser that drops `cinder:fire` every 12 ticks), Kiln
   (stands still and lobs a firebomb at where you stand — a mortar entry with its own
   `dmg`, `burn`, `d` (delay, for the fill), `src` and `fire`), Smolder (does NOTHING until
@@ -713,7 +712,7 @@ Modeled on RotMG's enchanting, minus its percentages, dust colors and artifacts.
   the burst is a kill the server credits). Shooters are mixed in.
 - **The Pyre** (`pyreStep`, 2800 HP): rings of 16 shots, and CROSSES of fire — a + then
   an x of shells centred on the player (`flameCross`, each arm stopped by a wall). At
-  half health its arena burns in (`st.creep` with `bossEvery`) and its two Kilns come in.
+  half health it enables fire vents and its two Kilns come in.
   **The Kilns are generated with it, marked `summon`, NOT `parent`**: dormant until then,
   killed with it if it falls first, and the store takes their kills in any order (a
   `parent` kill is refused before its parent's).

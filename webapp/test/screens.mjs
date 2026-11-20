@@ -10229,8 +10229,15 @@ try {
 	// the page around it.
 	async function halcyonPlay(log) {
 		const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-		await ctx.addInitScript(() => localStorage.setItem("spender_user",
-			JSON.stringify({ id: "halcyon-harness", name: "Wren", guest: true })));
+		await ctx.addInitScript(() => {
+			localStorage.setItem("spender_user", JSON.stringify({ id: "halcyon-harness", name: "Wren", guest: true }));
+			window.halcyonArtDraws = 0;
+			const drawImage = CanvasRenderingContext2D.prototype.drawImage;
+			CanvasRenderingContext2D.prototype.drawImage = function (image, ...args) {
+				if (this.canvas.matches?.(".hr-canvas") && image.src?.includes("/art/halcyon/")) window.halcyonArtDraws++;
+				return drawImage.call(this, image, ...args);
+			};
+		});
 		const page = await ctx.newPage();
 		const errors = [];
 		page.on("pageerror", (e) => errors.push(String(e)));
@@ -10276,6 +10283,17 @@ try {
 		await page.goto(`http://localhost:${PORT}/halcyon`, { waitUntil: "load" });
 		const menu = await page.waitForSelector(".halcyon .hr-menu", { timeout: 30_000 }).then(() => true).catch(() => false);
 		check("the page opens on the main menu, from the server's state", menu);
+		const settings = page.getByRole("dialog", { name: "Settings" });
+		const greybox = settings.getByRole("button", { name: "Greybox", exact: true });
+		const pixelArt = settings.getByRole("button", { name: "Pixel art", exact: true });
+		await page.getByRole("button", { name: "Settings", exact: true }).click();
+		check("pixel art is the default", await pixelArt.getAttribute("aria-pressed") === "true");
+		await greybox.click();
+		await page.reload({ waitUntil: "load" });
+		await page.getByRole("button", { name: "Settings", exact: true }).click();
+		check("the main menu remembers Greybox after a reload", await greybox.getAttribute("aria-pressed") === "true");
+		await page.keyboard.press("Escape");
+		await settings.waitFor({ state: "hidden" });
 		check("the menu offers four character slots, all empty for a new guest",
 			await page.locator(".hr-menu-card").count() === 4 && await page.locator(".hr-menu-new").count() === 4);
 		await page.locator(".hr-menu-new").first().click().catch(() => {});
@@ -10288,6 +10306,7 @@ try {
 			town && await page.locator(".hr-side .hr-grid-inv .hr-slot").count() === 16 && await page.locator(".hr-grid-vault").count() === 0);
 		const townPaint = await painted();
 		check("the town is drawn on the stage (a walkable plaza, not one flat fill)", townPaint.colors >= 6, JSON.stringify(townPaint));
+		check("Greybox paints the town with fallback shapes", await page.evaluate(() => window.halcyonArtDraws === 0));
 		// No banner in play; Escape opens the game menu (keys, Main menu) and closes it.
 		check("in the town the site's banner is gone (the stage has the room)", await page.locator(".halcyon .lby-header").count() === 0);
 		await page.keyboard.press("Escape");
@@ -10295,6 +10314,11 @@ try {
 		check("Escape opens the game menu with the keys and a way to the main menu", gm
 			&& await page.locator(".hr-game-menu .hr-keylist div").count() >= 8
 			&& await page.locator(".hr-game-menu button", { hasText: "Main menu" }).count() === 1);
+		await page.locator(".hr-game-menu").getByRole("button", { name: "Settings", exact: true }).click();
+		await pixelArt.click();
+		check("switching to Pixel art in town draws loaded sprites immediately", await page.waitForFunction(() => window.halcyonArtDraws > 0,
+			null, { timeout: 10_000 }).then(() => true).catch(() => false));
+		await settings.getByRole("button", { name: "Done", exact: true }).click();
 		await page.keyboard.press("Escape");
 		check("and Escape closes it again", await page.waitForFunction(() => !document.querySelector(".hr-game-menu"), null, { timeout: 3_000 })
 			.then(() => true).catch(() => false));
@@ -10312,7 +10336,7 @@ try {
 			null, { timeout: 5_000 }).then(() => true).catch(() => false);
 		check("E at the vault opens its 64 slots over the stage", vault);
 		const weapon = page.locator(".hr-equip .hr-slot").first();
-		await weapon.dragTo(page.locator(".hr-grid-vault .hr-slot").first()).catch(() => {});
+		await weapon.dragTo(page.locator(".hr-grid-vault .hr-slot").nth(2)).catch(() => {});
 		const stored = await page.waitForFunction(() => document.querySelectorAll(".hr-equip .hr-slot.has").length === 2
 			&& document.querySelector(".hr-grid-vault .hr-slot.has"), null, { timeout: 10_000 }).then(() => true).catch(() => false);
 		check("dragging the bow onto the vault stores it", stored);
@@ -10327,7 +10351,23 @@ try {
 		await page.locator(".hr-chip-usable").click().catch(() => {});
 		check("the vault's Equippable chip keeps the Ranger's bow lit, and with Armor it dims", usableLit === false && armorDim === true,
 			JSON.stringify([usableLit, armorDim]));
-		await page.locator(".hr-grid-vault .hr-slot.has").first().dragTo(weapon).catch(() => {});
+		const bagFirst = page.locator(".hr-grid-inv .hr-slot").first();
+		const vaultFirst = page.locator(".hr-grid-vault .hr-slot").first();
+		// Check each transfer against the server response as well as the optimistic slots.
+		const move = () => page.waitForResponse((r) => /\/halcyon\/items\/[^/]+\/move$/.test(r.url()), { timeout: 10_000 });
+		const withdraw = move();
+		await page.locator(".hr-grid-vault .hr-slot.has").first().click({ modifiers: ["Shift"] });
+		check("Shift-click withdraws the bow to the first free bag slot", (await withdraw).ok()
+			&& await bagFirst.evaluate((el) => el.classList.contains("has"))
+			&& await page.locator(".hr-grid-vault .hr-slot.has").count() === 0);
+		const deposit = move();
+		await bagFirst.click({ modifiers: ["Shift"] });
+		check("Shift-click deposits the bow in the first free vault slot", (await deposit).ok()
+			&& await vaultFirst.evaluate((el) => el.classList.contains("has"))
+			&& await page.locator(".hr-grid-inv .hr-slot.has").count() === 0);
+		const equippedAgain = move();
+		await vaultFirst.dragTo(weapon).catch(() => {});
+		await equippedAgain;
 		const back = await page.waitForFunction(() => document.querySelectorAll(".hr-equip .hr-slot.has").length === 3
 			&& !document.querySelector(".hr-grid-vault .hr-slot.has"), null, { timeout: 10_000 }).then(() => true).catch(() => false);
 		check("and dragging it back onto the weapon slot equips it again", back);

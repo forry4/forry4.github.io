@@ -225,9 +225,7 @@ FRACTURE_BOSS = [
 ]
 
 # ── the Ashen Breach (owner's design, 2026-11-19) ───────────────────────────
-# No cracks: its rooms burn instead. FIRE CREEPS IN FROM THE WALLS once a room has
-# been fought a while (sim.CREEP), so the rocks here are cover to fight from early,
-# and the middle of every room is left open to fall back to.
+# Fire vents follow the fight, so the rocks provide cover between eruptions.
 ASHEN_COMBAT = [
     [
         "................",
@@ -349,7 +347,7 @@ DUNGEONS = {
                  "quality": ("fracture_enemy", "fracture_boss"), "boss_kind": "breach"},
     "ashen": {"name": "The Ashen Breach", "boss_name": "The Pyre", "combat_rooms": 4, "complete_xp": 100,
               "boss_xp": 60, "combat": ASHEN_COMBAT, "boss_room": ASHEN_BOSS, "weights": ASHEN_WEIGHTS,
-              "quality": ("ashen_enemy", "ashen_boss"), "boss_kind": "pyre", "hazard": "creep",
+              "quality": ("ashen_enemy", "ashen_boss"), "boss_kind": "pyre", "hazard": "vents",
               "summons": ("kiln", PYRE_KILNS)},
 }
 # A heal orb drops from an ordinary enemy at this chance: about one a rift (0-2 is
