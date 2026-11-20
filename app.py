@@ -126,6 +126,13 @@ try:
 except Exception as _halcyon_err:  # pragma: no cover - defensive
     LOG.warning("Halcyon Rift not wired: %s", _halcyon_err)
 
+try:
+    from bossrush.api import setup_boss_rush
+    setup_boss_rush(app, get_db_conn, get_user_by_session, bearer_token)
+    LOG.info("wired Boss Rush routes (/bossrush)")
+except Exception as _boss_rush_err:  # pragma: no cover - defensive
+    LOG.warning("Boss Rush not wired: %s", _boss_rush_err)
+
 # Steam Filter — the page is static files; its one server feature is each account's
 # saved games (/steamfilter/saved). Same injected deps.
 try:

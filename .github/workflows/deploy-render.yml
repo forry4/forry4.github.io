@@ -32,6 +32,7 @@ on:
       # Halcyon Rift — the store, the dungeon generator and the routes. A single `*`
       # keeps tests/ out; the .js/.jsx beside them are bundle-only.
       - 'halcyon/*.py'
+      - 'bossrush/*.py'
       # Steam Filter — only api.py serves (saved games); a single `*` keeps tools/
       # (the harvesters) and the page's own files out.
       - 'steamfilter/*.py'
