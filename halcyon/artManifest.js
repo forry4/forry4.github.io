@@ -29,7 +29,7 @@ export const ART = {
 		},
 		"player.diviner": {
 			"src": "player.diviner.v2.png",
-			"v": 228013806933210,
+			"v": 19900770277953,
 			"w": 28,
 			"h": 24,
 			"facings": 3
