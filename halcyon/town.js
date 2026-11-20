@@ -14,7 +14,8 @@
  *
  * A new realm is one more entry in REALMS and one more portal here.
  */
-import { PLAYER_R, PLAYER_SPEED, DT, TPS, REACH, statsFor, playerFire, wallHit, landStarfalls, slowPulse, cometBurst, turnBack, UNIQUE } from "./sim.js";
+import { PLAYER_R, PLAYER_SPEED, DT, TPS, REACH, statsFor, playerFire, wallHit, landStarfalls, slowPulse, cometBurst, turnBack, UNIQUE,
+	emberPulse, trailEmber, flareLand, stickKunai, burstStuck } from "./sim.js";
 
 // '#' wall, 'o' planter (blocks), '~' fountain water (blocks), '.' flagstone.
 const MAP = [
@@ -36,7 +37,8 @@ const MAP = [
 ];
 
 /* The realms a portal can lead to, gentlest first (design §14.4, §14.4a). */
-export const REALMS = [{ id: "shallows", name: "The Shallows" }, { id: "fracture", name: "The Fracture" }];
+export const REALMS = [{ id: "shallows", name: "The Shallows" }, { id: "fracture", name: "The Fracture" },
+	{ id: "ashen", name: "The Ashen Breach" }];
 
 /* Places to use. `hw`/`hh` are a solid station's half-size; a portal is walked
  * onto, so it is not solid. `reach` is how close counts as "at" it. */
@@ -44,8 +46,10 @@ export const STATIONS = [
 	{ id: "vault", kind: "vault", label: "Vault", x: 3.5, y: 8, hw: 1.2, hh: 0.8, solid: true, reach: 0.9 },
 	{ id: "forge", kind: "forge", label: "Forge", x: 18.5, y: 8, hw: 1.0, hh: 0.8, solid: true, reach: 0.9 },
 	// The Dream Rift is a portal like a realm's (owner's call, 2026-11-18): walked
-	// onto, not solid, and "at" it measured from its centre.
-	{ id: "dream", kind: "dream", label: "Dream Rift", x: 6, y: 4.7, hw: 0, hh: 0, solid: false, reach: 1.3 },
+	// onto, not solid, and "at" it measured from its centre. Moved down off the portals'
+	// row when a third realm came (2026-11-19): stepping out of the first portal would
+	// have put you in its reach.
+	{ id: "dream", kind: "dream", label: "Dream Rift", x: 7, y: 9.6, hw: 0, hh: 0, solid: false, reach: 1.3 },
 	...REALMS.map((r, i) => ({ id: `realm:${r.id}`, kind: "portal", realm: r.id, label: r.name,
 		x: 11 + (i - (REALMS.length - 1) / 2) * 5, y: 2.6, hw: 0, hh: 0, solid: false, reach: 1.3 })),
 ];
@@ -59,7 +63,7 @@ export const DPS_WINDOW = 3 * TPS;
 export function createTown(at = SPAWN, classId = "ranger") {
 	const st = { tick: 0, w: MAP[0].length, h: MAP.length, tiles: MAP, stations: STATIONS,
 		p: { x: at.x, y: at.y, r: PLAYER_R, mp: 0, fireCd: 0, burstLeft: 0, burstCd: 0, empower: 0 }, near: null,
-		bullets: [], starfalls: [], blasts: [], posts: POSTS.map((q) => ({ ...q, hits: [] })), floats: [],
+		bullets: [], starfalls: [], blasts: [], embers: [], stuck: [], posts: POSTS.map((q) => ({ ...q, hits: [] })), floats: [],
 		// What lies on the town's ground: { key, x, y } (the page keeps it from the store).
 		floor: [], nearFloor: null };
 	setTownGear(st, [], 1, classId);
@@ -124,6 +128,7 @@ export function stepTown(st, input) {
 	const dx = mx * speed * DT, dy = my * speed * DT;
 	if (dx !== 0 && !blocked(st, p.x + dx, p.y, p.r)) p.x += dx;
 	if (dy !== 0 && !blocked(st, p.x, p.y + dy, p.r)) p.y += dy;
+	trailEmber(st, mx !== 0 || my !== 0);                        // the Emberweave, as in a rift
 
 	p.mp = Math.min(st.stats.maxMp, p.mp + st.stats.mpRegen * DT);
 	playerFire(st, input);
@@ -151,6 +156,7 @@ export function stepTown(st, input) {
 		turnBack(b);
 		if (--b.life <= 0 || wallHit(b, (x, y) => shotSolidTile(tileAt(st, x, y)) || inStation(st, x, y, 0))) {
 			if (b.comet) cometBurst(st, b, b.x - b.vx * DT, b.y - b.vy * DT);
+			if (b.flare) flareLand(st, b, b.x - b.vx * DT, b.y - b.vy * DT);
 			continue;
 		}
 		let gone = false;
@@ -162,6 +168,8 @@ export function stepTown(st, input) {
 			q.hits.push({ t: st.tick, dmg: b.dmg });
 			st.floats.push({ x: q.x + (st.tick % 7 - 3) * 0.08, y: q.y - 0.6, text: String(b.dmg), until: st.tick + 40 });
 			if (b.burn) { q.burnUntil = st.tick + UNIQUE.burn.last; q.burnDmg = b.burn; }   // the Ember Loop
+			if (b.stick) stickKunai(st, b, q.id);                                         // the Ember Kunai
+			if (b.flare) { flareLand(st, b, q.x, q.y); gone = true; break; }              // the Flare Bow
 			if (b.comet) { cometBurst(st, b, b.x, b.y, q.id); gone = true; break; }
 			if (b.pierce-- <= 0) { gone = true; break; }
 		}
@@ -172,6 +180,13 @@ export function stepTown(st, input) {
 		q.hits.push({ t: st.tick, dmg: q.burnDmg });
 		st.floats.push({ x: q.x, y: q.y - 0.6, text: String(q.burnDmg), until: st.tick + 40 });
 	}
+	// the player's own fire and the stuck kunai, on the posts as on enemies
+	const mark = (q, dmg) => {
+		q.hits.push({ t: st.tick, dmg });
+		st.floats.push({ x: q.x, y: q.y - 0.6, text: String(dmg), until: st.tick + 40 });
+	};
+	emberPulse(st, st.posts, mark);
+	burstStuck(st, (k) => { const q = st.posts.find((x) => x.id === k.id); if (q) mark(q, k.dmg); });
 	for (const q of st.posts) while (q.hits.length && q.hits[0].t <= st.tick - DPS_WINDOW) q.hits.shift();
 	st.floats = st.floats.filter((f) => f.until > st.tick);
 

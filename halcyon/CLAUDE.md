@@ -691,3 +691,45 @@ Modeled on RotMG's enchanting, minus its percentages, dust colors and artifacts.
 - Tests: `test_store.py` (reroll, locks, salvage, fusion floors and odds, shards banked
   / lost), `test_dungeon.py` (level weights, special odds by depth, their own stream),
   `webapp/test/unit/halcyonSpecialLines.test.mjs` (every special line in the sim).
+
+## The Ashen Breach — the third rift (2026-11-19, owner's pick)
+- **Opens after the Fracture** (`content.REQUIRES["ashen"]`), per character like the
+  Fracture. Loot: `ashen_enemy` T3–T5, `ashen_boss` T4–T7 plus the unique (weight 8).
+  Clear bonus 100 XP, boss 60. **The Fracture's boss is NAMED the Schism now** (the word
+  "breach" went to this rift); its `boss_kind` stays `"breach"`, which old saves and the
+  sim read — rename display names only.
+- **The rooms burn: `sim.CREEP`.** A spec's `hazard: "creep"` reaches the dungeon (only
+  when set, so older dungeons are byte-identical). Ten seconds after a COMBAT room seals,
+  its outermost ring of tiles catches, then one ring every 4s (the next flickers for its
+  last second), until about three tiles are left across the narrow way (`creepMax`).
+  A ring is `min(distance to each of the room's four sides)`; the room's top and bottom
+  rows are `st.roomY`, found from the tiles. It hurts like the mortar's fire
+  (`rift:fire`) and `st.creep` goes null when the room clears. `creepAt(st, x, y)` is
+  the one reader (2 burning, 1 warning) for the burn and the renderer.
+- **Enemies**: Cinder (a fast chaser that drops `cinder:fire` every 12 ticks), Kiln
+  (stands still and lobs a firebomb at where you stand — a mortar entry with its own
+  `dmg`, `burn`, `d` (delay, for the fill), `src` and `fire`), Smolder (does NOTHING until
+  hit — `lit` — then flares, charges and bursts into a mortar where it is, and dies;
+  the burst is a kill the server credits). Shooters are mixed in.
+- **The Pyre** (`pyreStep`, 2800 HP): rings of 16 shots, and CROSSES of fire — a + then
+  an x of shells centred on the player (`flameCross`, each arm stopped by a wall). At
+  half health its arena burns in (`st.creep` with `bossEvery`) and its two Kilns come in.
+  **The Kilns are generated with it, marked `summon`, NOT `parent`**: dormant until then,
+  killed with it if it falls first, and the store takes their kills in any order (a
+  `parent` kill is refused before its parent's).
+- **Player-owned fire: `st.embers`** (`{x, y, r, until, dmg}`), drawn pale blue so it never
+  reads as the enemies' orange. `emberPulse` hurts each target once per `EMBER.every`
+  ticks by the hottest ember it stands in; it never hurts the player. Shared with the
+  town's posts, as are `trailEmber`, `flareLand` and `burstStuck`.
+- **The nine uniques** (all home `ashen`): Phoenix Feather (a killing hit leaves 1 HP once
+  a LEVEL — `p.phoenixUsed` is not carried deeper — with a 1s guard and fire round you),
+  Ash Sigil (an enemy dying while burning — `burnUntil` or `scorched` from an ember —
+  blasts its neighbours), Banked Coal (+1 Attack per 1.5s unhit, to a cap; `p.hitAt`),
+  Emberweave (a trail of embers while moving), Cinderguard (fireproof, + Defense while
+  `p.inFire`), Flare Bow (every 4th volley, `p.volleys`, is a flare that lands as an
+  ember), Censer (a field that burns 2x and slows to 75% — `st.slowF`), Meteor Tome (the
+  star leaves a crater ember), Ember Kunai (sticks — `st.stuck` — and bursts 1s later
+  for 60%). Every new piece of state is in `fingerprint`.
+- **The town**: the Dream Rift moved to (7, 9.6) so stepping out of the first of three
+  portals does not land in its reach. Rules: `webapp/test/unit/halcyonAshen.test.mjs`;
+  fixture `halcyon-dungeon-ashen-a.json`.

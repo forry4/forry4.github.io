@@ -1095,6 +1095,22 @@ def test_a_splinter_is_credited_only_after_its_splitter(db, me):
     assert out["refused"] == [1]
 
 
+def test_the_ashen_breach_opens_after_the_fracture_and_takes_a_kiln_before_its_pyre(db, me):
+    from halcyon import dungeon as D
+    _clear_shallows(db, me["char_id"])
+    d = D.generate("ashen", "ash-gate")
+    with pytest.raises(S.HalcyonError, match="clear The Fracture"):
+        S.start_run(db, ME, me["char_id"], "ashen", d["seed"], d)
+    f = D.generate("fracture", "opens-ashen")
+    run = S.start_run(db, ME, me["char_id"], "fracture", f["seed"], f)
+    S.apply_events(db, ME, run["run_id"], _seq({"type": "kill", "enemy": f["boss"]}))
+    assert "fracture" in S.owner_view(db, ME)["characters"][0]["cleared"]
+    run = S.start_run(db, ME, me["char_id"], "ashen", d["seed"], d)
+    kiln = next(k for k, e in d["enemies"].items() if e.get("summon"))
+    out = S.apply_events(db, ME, run["run_id"], _seq({"type": "kill", "enemy": kiln}, {"type": "kill", "enemy": d["boss"]}))
+    assert out["refused"] == []
+
+
 def test_armor_is_shared_by_type():
     """Light armor is the Ranger's and the Diviner's, heavy the Paladin's and the Ninja's."""
     for base in ("leather_vest", "seer_robes"):

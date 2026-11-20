@@ -224,6 +224,101 @@ FRACTURE_BOSS = [
     "......................",
 ]
 
+# ── the Ashen Breach (owner's design, 2026-11-19) ───────────────────────────
+# No cracks: its rooms burn instead. FIRE CREEPS IN FROM THE WALLS once a room has
+# been fought a while (sim.CREEP), so the rocks here are cover to fight from early,
+# and the middle of every room is left open to fall back to.
+ASHEN_COMBAT = [
+    [
+        "................",
+        "..E..........E..",
+        "....oo....oo....",
+        "....oo....oo....",
+        "................",
+        "......E..E......",
+        "................",
+        "....oo....oo....",
+        "....oo..E.oo....",
+        "..E..........E..",
+        "................",
+    ],
+    [
+        "..................",
+        ".E......oo......E.",
+        "........oo........",
+        "...o..........o...",
+        "...o...E..E...o...",
+        "..................",
+        "...o...E..E...o...",
+        "...o..........o...",
+        "........oo........",
+        ".E......oo......E.",
+        "..................",
+    ],
+    [
+        "................",
+        "...E........E...",
+        "..oo........oo..",
+        "................",
+        ".......E........",
+        "................",
+        "........E.......",
+        "................",
+        "..oo........oo..",
+        "...E........E...",
+        "................",
+    ],
+    [
+        "....................",
+        "..E..............E..",
+        "......oo....oo......",
+        "....................",
+        "...o.....E......o...",
+        "...o............o...",
+        "...o......E.....o...",
+        "....................",
+        "......oo....oo......",
+        "..E..............E..",
+        "....................",
+    ],
+    [
+        "..............",
+        "..E.......E...",
+        "..............",
+        "..oo....oo....",
+        "..............",
+        "......E.......",
+        "..............",
+        "....oo....oo..",
+        "..............",
+        "...E.......E..",
+        "..............",
+    ],
+]
+
+ASHEN_BOSS = [
+    "......................",
+    "......................",
+    "...oo............oo...",
+    "...oo............oo...",
+    "......................",
+    "......................",
+    "......................",
+    "..........B...........",
+    "......................",
+    "......................",
+    "......................",
+    "...oo............oo...",
+    "...oo............oo...",
+    "......................",
+    "......................",
+]
+ASHEN_WEIGHTS = (("cinder", 28), ("kiln", 20), ("smolder", 22), ("shooter", 30))
+# The Pyre calls this many Kilns into its fight at half health. They are generated
+# with it (so each is a real enemy the server credits), kept out of play until then,
+# and fall with it if it falls first.
+PYRE_KILNS = 2
+
 CORRIDOR = 3
 # MODIFIERS PAY XP TOO (owner's ask, 2026-11-19: "it should increase it a bit"): each
 # modifier adds MOD_XP of the level's whole XP. Each enemy's share is rounded DOWN, and the
@@ -241,14 +336,21 @@ SPLINTERS = 2
 
 # Each dungeon: its rooms, its enemies, its loot tables (content.QUALITY rows), and
 # what its boss is (`boss_kind`, read by the fight). `boss_xp` overrides the boss's
-# usual XP. The Fracture is design §14.4a.
+# usual XP. The Fracture is design §14.4a. `hazard` names what a room does while it
+# is fought (the sim reads it); `summons` is what the boss calls in at half health.
 DUNGEONS = {
     "shallows": {"name": "The Shallows", "boss_name": "The Tidewarden", "combat_rooms": 4, "complete_xp": 30,
                  "combat": COMBAT, "boss_room": BOSS_ROOM, "weights": ENEMY_WEIGHTS,
                  "quality": ("enemy", "boss"), "boss_kind": "tidewarden"},
-    "fracture": {"name": "The Fracture", "boss_name": "The Breach", "combat_rooms": 4, "complete_xp": 60,
+    # The boss is NAMED the Schism (owner's call, 2026-11-19: the Ashen Breach took the
+    # word); its kind stays "breach", which saved runs and the sim read.
+    "fracture": {"name": "The Fracture", "boss_name": "The Schism", "combat_rooms": 4, "complete_xp": 60,
                  "boss_xp": 40, "combat": FRACTURE_COMBAT, "boss_room": FRACTURE_BOSS, "weights": FRACTURE_WEIGHTS,
                  "quality": ("fracture_enemy", "fracture_boss"), "boss_kind": "breach"},
+    "ashen": {"name": "The Ashen Breach", "boss_name": "The Pyre", "combat_rooms": 4, "complete_xp": 100,
+              "boss_xp": 60, "combat": ASHEN_COMBAT, "boss_room": ASHEN_BOSS, "weights": ASHEN_WEIGHTS,
+              "quality": ("ashen_enemy", "ashen_boss"), "boss_kind": "pyre", "hazard": "creep",
+              "summons": ("kiln", PYRE_KILNS)},
 }
 # A heal orb drops from an ordinary enemy at this chance: about one a rift (0-2 is
 # the usual spread). The boss never drops one — the fight is over.
@@ -269,13 +371,14 @@ NINJA_LOOT = (("shuriken", 16), ("kunai", 14), ("plate_armor", 11), ("shadow_gar
 # boss's quality table (content.QUALITY). The loot tables themselves are in content.py.
 # Every unique a class can wear, equally likely (owner's list, 2026-11-19): the five
 # rings, the two unique armors of its type, and its own weapons and abilities.
-_RINGS = ("kingfisher_eye", "ember_loop", "misers_coil", "leechstone", "glass_ring")
-_LIGHT, _HEAVY = ("windrunner_cloak", "full_moon_mantle"), ("thornplate", "duskmail")
+_RINGS = ("kingfisher_eye", "ember_loop", "misers_coil", "leechstone", "glass_ring",
+          "phoenix_feather", "ash_sigil", "banked_coal")
+_LIGHT, _HEAVY = ("windrunner_cloak", "full_moon_mantle", "emberweave"), ("thornplate", "duskmail", "cinderguard")
 UNIQUE_LOOT = {cls: tuple((b, 1) for b in _RINGS + arm + own) for cls, arm, own in (
-    ("ranger", _LIGHT, ("tidecaller", "repeater", "gale_quiver")),
-    ("paladin", _HEAVY, ("oathhammer", "anchor_orb")),
-    ("diviner", _LIGHT, ("comet_rod", "echo_codex")),
-    ("ninja", _HEAVY, ("chakram", "echo_charm")))}
+    ("ranger", _LIGHT, ("tidecaller", "repeater", "gale_quiver", "flare_bow")),
+    ("paladin", _HEAVY, ("oathhammer", "anchor_orb", "censer")),
+    ("diviner", _LIGHT, ("comet_rod", "echo_codex", "meteor_tome")),
+    ("ninja", _HEAVY, ("chakram", "echo_charm", "ember_kunai")))}
 # Kept as the complete content list for audits and content tests. A run uses the
 # class-specific table below, so a Ranger never receives a Paladin's starter gear.
 LOOT = RANGER_LOOT + PALADIN_LOOT + DIVINER_LOOT + NINJA_LOOT + tuple(x for t in UNIQUE_LOOT.values() for x in t)
@@ -444,14 +547,22 @@ def generate(dungeon_id: str, seed: str | None = None, class_id: str = "ranger",
     weights = spec["weights"]
     worth = lambda etype: spec.get("boss_xp", C.ENEMY_XP["boss"]) if etype == "boss" else C.ENEMY_XP[etype]
 
-    def add(etype: str, n: int, gx: int, gy: int, parent: str | None = None) -> str:
+    def add(etype: str, n: int, gx: int, gy: int, parent: str | None = None, summon: str | None = None) -> str:
         eid = f"{pre}boss" if etype == "boss" else f"{pre}e{sum(1 for k in enemies if not k.endswith('boss')) + 1}"
         enemies[eid] = {"type": etype, "room": n, "xp": int(worth(etype) * xp_mult + 1e-9), "x": gx + 0.5, "y": gy + 0.5}
         if parent:
             enemies[eid]["parent"] = parent
+        if summon:
+            # Called into the boss's fight, so NOT a parent: the server takes its kill
+            # whether the boss has fallen or not (it may be killed first or after).
+            enemies[eid]["summon"] = summon
         if etype == "splitter":
             for _ in range(SPLINTERS):
                 add("splinter", n, gx, gy, parent=eid)
+        if etype == "boss" and spec.get("summons"):
+            kind, count = spec["summons"]
+            for _ in range(count):
+                add(kind, n, gx, gy, summon=eid)
         return eid
 
     for n, (kind, t) in enumerate(rooms):
@@ -520,6 +631,7 @@ def generate(dungeon_id: str, seed: str | None = None, class_id: str = "ranger",
             "mods": mods, "scale": mod_scale(mods, level), "level": level,
             "offers": offers_for(dungeon_id, seed, mods, level), "boss_rush": bool(boss_rush),
             "boss_kind": spec["boss_kind"],
+            **({"hazard": spec["hazard"]} if spec.get("hazard") else {}),
             # Cracks (design §14.4a), one entry per room and group, in a fixed order.
             "cracks": [{"room": n, "group": g, "tiles": t} for (n, g), t in sorted(cracks.items())]}
 

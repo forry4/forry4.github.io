@@ -90,6 +90,16 @@ BASE_ITEMS: dict[str, dict] = {
     "echo_codex":     {"slot": "ability", "cls": "diviner", "kind": "unique"},
     "chakram":        {"slot": "weapon", "cls": "ninja",   "kind": "unique"},
     "echo_charm":     {"slot": "ability", "cls": "ninja",   "kind": "unique"},
+    # THE ASHEN BREACH'S (owner's ask, 2026-11-19): fire you set and fire you survive.
+    "phoenix_feather": {"slot": "ring",  "cls": None,     "kind": "unique"},
+    "ash_sigil":      {"slot": "ring",   "cls": None,     "kind": "unique"},
+    "banked_coal":    {"slot": "ring",   "cls": None,     "kind": "unique"},
+    "emberweave":     {"slot": "armor",  "cls": ("ranger", "diviner"), "kind": "unique"},
+    "cinderguard":    {"slot": "armor",  "cls": ("paladin", "ninja"), "kind": "unique"},
+    "flare_bow":      {"slot": "weapon", "cls": "ranger",  "kind": "unique"},
+    "censer":         {"slot": "ability", "cls": "paladin", "kind": "unique"},
+    "meteor_tome":    {"slot": "ability", "cls": "diviner", "kind": "unique"},
+    "ember_kunai":    {"slot": "weapon", "cls": "ninja",   "kind": "unique"},
     # KEYS (owner's ask, 2026-11-18). A key is carried in a character's bag and spent
     # on entering: the Dream Key opens the Dream Rift for one practice run, the Boss
     # Rush key one Boss Rush run. Slot family "key" fits no equipment slot, a key has
@@ -103,7 +113,7 @@ DREAM_KEY, BOSS_RUSH_KEY = "dream_key", "boss_rush_key"
 # incentive to run specific ones for specific uniques"): only that dungeon's bosses
 # drop it. Each class can find uniques in both; each armor type has one in each.
 # The Shallows keeps the sea and the hunt; the Fracture the crystal, the void and the
-# echoes. `home` is set on the base (below), so the page can say where to look.
+# echoes; the Ashen Breach fire. `home` is set on the base (below), so the page can say where to look.
 UNIQUE_HOME: dict[str, str] = {
     "kingfisher_eye": "shallows", "leechstone": "shallows", "misers_coil": "shallows",
     "ember_loop": "fracture", "glass_ring": "fracture",
@@ -113,6 +123,10 @@ UNIQUE_HOME: dict[str, str] = {
     "anchor_orb": "shallows", "oathhammer": "fracture",
     "echo_codex": "shallows", "comet_rod": "fracture",
     "chakram": "shallows", "echo_charm": "fracture",
+    # the Ashen Breach: three rings, an armor of each type, one for each class
+    "phoenix_feather": "ashen", "ash_sigil": "ashen", "banked_coal": "ashen",
+    "emberweave": "ashen", "cinderguard": "ashen",
+    "flare_bow": "ashen", "censer": "ashen", "meteor_tome": "ashen", "ember_kunai": "ashen",
 }
 for _b, _h in UNIQUE_HOME.items():
     BASE_ITEMS[_b]["home"] = _h
@@ -188,7 +202,9 @@ def reroll_cost(tier: int, slot_count: int, locks: int) -> int:
 MAX_LEVEL = 20
 ENEMY_XP = {"chaser": 4, "shooter": 5, "radial": 6, "boss": 20,
             # the Fracture's (design §14.4a): tougher, and worth more
-            "shard": 8, "splitter": 9, "splinter": 3, "flicker": 9}
+            "shard": 8, "splitter": 9, "splinter": 3, "flicker": 9,
+            # the Ashen Breach's
+            "cinder": 10, "kiln": 12, "smolder": 11}
 
 
 def _level_table() -> tuple[int, ...]:
@@ -272,6 +288,9 @@ DROP_COUNT: dict[str, tuple] = {
     "splitter": ((0, 83), (1, 17)),
     "splinter": ((0, 92), (1, 8)),
     "flicker":  ((0, 83), (1, 17)),
+    "cinder":   ((0, 83), (1, 17)),
+    "kiln":     ((0, 83), (1, 17)),
+    "smolder":  ((0, 83), (1, 17)),
 }
 # (result, weight, + weight per RARITY point). Rarity (one point a rift modifier)
 # only ADDS weight to the better rows, so it shifts the odds up a little.
@@ -282,6 +301,9 @@ QUALITY: dict[str, tuple] = {
     # tier 5 is possible. The same rarity rules: modifiers only add to the better rows.
     "fracture_enemy": (("t2", 60, 0), ("t3", 32, 5), ("t4", 8, 3)),
     "fracture_boss":  (("t3", 45, 0), ("t4", 32, 5), ("t5", 15, 3), ("t6", 3, 1), ("unique", 8, 0)),
+    # The Ashen Breach (owner's call, 2026-11-19): enemies tier 3-5, its boss tier 4-7.
+    "ashen_enemy": (("t3", 60, 0), ("t4", 32, 5), ("t5", 8, 3)),
+    "ashen_boss":  (("t4", 45, 0), ("t5", 32, 5), ("t6", 15, 3), ("t7", 3, 1), ("unique", 8, 0)),
 }
 # THE BOSS'S UNIQUE CHANCE RISES 15% (of itself) PER MODIFIER, so 45% with all three
 # (owner's call, 2026-11-18). A flat weight per point cannot do that — the other rows
@@ -308,8 +330,10 @@ MOD_XP = 0.10
 # (owner's call, 2026-11-19), so the only way past it is down.
 START_MODS = 3
 # A rift that must be cleared first, BY THE SAME CHARACTER (owner's call, 2026-11-19):
-# new players start gentle; the Fracture opens once the Shallows' boss has fallen.
-REQUIRES: dict[str, tuple] = {"fracture": ("shallows", "The Shallows")}
+# new players start gentle; the Fracture opens once the Shallows' boss has fallen, and
+# the Ashen Breach once the Fracture's has.
+REQUIRES: dict[str, tuple] = {"fracture": ("shallows", "The Shallows"),
+                               "ashen": ("fracture", "The Fracture")}
 # Each level past the first lifts every standard drop's tier by this much (capped).
 DEPTH_TIER = 1
 MAX_TIER = 10

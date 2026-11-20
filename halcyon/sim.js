@@ -113,6 +113,16 @@ export const UNIQUE = {
 	echoRing: { n: 8, speed: 14, life: 21 },          // blades a caught hit sends out
 	splash: { r: 1, share: 0.5 },
 	comet: { n: 4, share: 0.4, speed: 10, life: 24 },
+	// THE ASHEN BREACH'S (owner's list, 2026-11-19). Damage and caps here are at T1.
+	phoenix: { guard: TPS, r: 2.5, last: 3 * TPS, dmg: 8 },       // the fire it sets, per pulse
+	ash: { r: 1.8, dmg: 20 },                                      // an enemy dying while it burns
+	coal: { every: 90, cap: 8 },                                   // +1 Attack each 1.5 s unhit, to the cap
+	emberweave: { every: 12, r: 0.55, last: 90, dmg: 4 },          // the trail, per pulse
+	cinderguard: { def: 6 },                                       // Defense while standing in fire
+	flare: { r: 1.2, last: 3 * TPS, share: 0.3 },                  // a flare's fire, per pulse, of the shot
+	censer: { burn: 2, slow: 0.75 },                               // twice the burn; shots keep 75% speed
+	meteor: { last: 3 * TPS, share: 0.08 },                        // the crater, per pulse, of the star
+	kunai: { delay: TPS, share: 0.6 },                             // the stuck blade's burst, of the throw
 };
 
 /* One standard ability per class (owner's call, 2026-11-18). The shield is retired
@@ -141,9 +151,13 @@ export const ENEMY = {
 	splitter: { hp: 110, r: 0.5, speed: 2.0 },
 	splinter: { hp: 30, r: 0.28, speed: 3.6, shot: { range: 3, speed: 7, dmg: 8, tele: 12, every: 70 } },
 	flicker: { hp: 75, r: 0.38, speed: 0 },
+	// The Ashen Breach (owner's design, 2026-11-19)
+	cinder: { hp: 70, r: 0.36, speed: 4.2, shot: { range: 3.5, speed: 7, dmg: 10, tele: 14, every: 80 } },
+	kiln: { hp: 120, r: 0.5, speed: 0 },
+	smolder: { hp: 90, r: 0.44, speed: 0 },
 };
 // Each dungeon's boss is a `boss` enemy of its own KIND (dungeon.boss_kind).
-export const BOSS_HP = { tidewarden: 1150, breach: 1950 };
+export const BOSS_HP = { tidewarden: 1150, breach: 1950, pyre: 2800 };
 
 /* CRACKS (the Fracture, design §14.4a): authored lines of floor that open into void
  * while their room is being fought. Each counts `t` round a `period`: closed, then
@@ -193,6 +207,11 @@ export const WEAPONS = {
 	oathhammer: { dmg: 25, rate: 2.2, range: 3, speed: 15, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0, splash: 1 },
 	comet_rod: { dmg: 25, rate: 1.2, range: 7, speed: 14, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0, comet: 1 },
 	chakram: { dmg: 10, rate: 2, range: 5, speed: 15, shots: 1, spread: 0, pierce: 99, burst: 1, gap: 0, ret: 1, look: "star" },
+	// The Ashen Breach's (2026-11-19):
+	//   flare_bow   — every `flare`th shot is a flare, and leaves the ground burning where it lands;
+	//   ember_kunai — a kunai that STICKS, and bursts a second later for more (UNIQUE.kunai).
+	flare_bow: { dmg: 20, rate: 2.2, range: 6, speed: 16, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0, flare: 4 },
+	ember_kunai: { dmg: 25, rate: 1.3, range: 6.5, speed: 22, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0, look: "blade", stick: 1 },
 };
 
 /* EVERY NUMBER A PLAYER READS IS FLAT (owner's ask, 2026-11-18: "stop with all the
@@ -292,6 +311,15 @@ export function statsFor(gear = [], level = 1, classId = "ranger") {
 		if (it.base_id === "echo_codex") { s.abilityKind = "starfall"; s.abilityDmg += ABILITY.starfall.dmg + ABILITY.starfall.perTier * T; s.abilityItemTier = T;
 			s.echo = UNIQUE.echo.share; s.costExtra = UNIQUE.echo.cost; }
 		if (it.base_id === "echo_charm") { s.abilityKind = "counter"; s.abilityItemTier = T; s.echoRing = true; }
+		// the Ashen Breach's
+		if (it.base_id === "phoenix_feather") s.phoenix = Math.round(UNIQUE.phoenix.dmg * t);
+		if (it.base_id === "ash_sigil") s.ashSigil = Math.round(UNIQUE.ash.dmg * t);
+		if (it.base_id === "banked_coal") s.coalCap = Math.round(UNIQUE.coal.cap * t);
+		if (it.base_id === "emberweave") { s.def += tier; s.maxHp += 5 * up; s.trail = Math.round(UNIQUE.emberweave.dmg * t); }
+		if (it.base_id === "cinderguard") { s.def += 1 + tier; s.maxHp += 15 * up; s.fireproof = true; s.cinderDef = Math.round(UNIQUE.cinderguard.def * t); }
+		if (it.base_id === "censer") { s.abilityKind = "slow"; s.censer = true; s.abilityDmg += ABILITY.slow.pulse * (1 + ABILITY.slow.pulsePerTier * T) * UNIQUE.censer.burn;
+			s.abilityTier = 1 + ABILITY.slow.radiusPerTier * T; s.abilityItemTier = T; }
+		if (it.base_id === "meteor_tome") { s.abilityKind = "starfall"; s.abilityDmg += ABILITY.starfall.dmg + ABILITY.starfall.perTier * T; s.abilityItemTier = T; s.crater = true; }
 		for (const e of it.enchants || []) {
 			const v = enchantValue(e.id, e.q);
 			if (e.id === "max_hp") s.maxHp += v;
@@ -344,7 +372,7 @@ export const weaponDmgAt = (w, tier = 0) => Math.round(w.dmg * (1 + 0.2 * Math.m
 function weaponStats(w, tier) {
 	return { dmg: weaponDmgAt(w, tier), rate: w.rate, range: w.range, shotSpeed: w.speed, shots: w.shots,
 		spread: w.spread, pierce: w.pierce, burst: w.burst, gap: w.gap, bounce: w.bounce || 0, look: w.look || null,
-		splash: w.splash || 0, comet: w.comet || 0, ret: w.ret || 0 };
+		splash: w.splash || 0, comet: w.comet || 0, ret: w.ret || 0, flare: w.flare || 0, stick: w.stick || 0 };
 }
 
 // ── the map ─────────────────────────────────────────────────────────────────
@@ -412,10 +440,12 @@ export function createSim(dungeon, gear = [], hero = {}) {
 		.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))      // a fixed order, never insertion order
 		.map(([id, e]) => ({ id, type: e.type, room: e.room, x: e.x, y: e.y, xp: e.xp || 0,
 			r: ENEMY[e.type].r, hp: Math.round(hpOf(e) * scale.hp), maxHp: Math.round(hpOf(e) * scale.hp),
-			parent: e.parent || null, dormant: !!e.parent, form: e.type === "boss" ? bossKind : null, homeX: e.x, homeY: e.y,
+			parent: e.parent || null, summon: e.summon || null, dormant: !!(e.parent || e.summon),
+			form: e.type === "boss" ? bossKind : null, homeX: e.x, homeY: e.y, lit: false, charge: 0, scorched: 0,
 			active: false, cd: 30 + (e.type === "boss" ? 60 : 0), tele: 0, scd: 0, flash: 0,
 			ward: e.type === "boss" ? scale.ward_boss : scale.ward,
-			side: 1, phase: 1, mode: 0, modeT: e.type === "boss" ? (bossKind === "breach" ? BREACH_CYCLE : BOSS_CYCLE)[0][1] : 0, ang: 0, aimX: 0, aimY: 0, toX: 0, toY: 0 }));
+			side: 1, phase: 1, mode: 0, modeT: e.type === "boss" ? ({ breach: BREACH_CYCLE, pyre: PYRE_CYCLE }[bossKind] || BOSS_CYCLE)[0][1] : 0,
+			ang: 0, aimX: 0, aimY: 0, toX: 0, toY: 0 }));
 	// The doors: each room's left and right doorway columns, on the three rows
 	// around the map's middle row (dungeon.py cuts them there).
 	const rooms = dungeon.rooms || [];
@@ -423,6 +453,13 @@ export function createSim(dungeon, gear = [], hero = {}) {
 	const doorCols = new Array(dungeon.width).fill(-1);
 	rooms.forEach((r, i) => { if (i > 0) doorCols[r.x0 - 1] = i; if (i < rooms.length - 1) doorCols[r.x1] = i; });
 	const roomLeft = rooms.map((_, i) => enemies.filter((e) => e.room === i).length);
+	// Each room's top and bottom rows (the creeping fire burns in from all four sides).
+	const roomY = rooms.map((r) => {
+		let y0 = -1, y1 = -1;
+		for (let y = 0; y < dungeon.height; y++)
+			if (dungeon.tiles[y].slice(r.x0, r.x1).replace(/#/g, "").length) { if (y0 < 0) y0 = y; y1 = y; }
+		return [y0, y1];
+	});
 	const cracks = (dungeon.cracks || []).map((c) => ({ room: c.room, group: c.group, tiles: c.tiles,
 		t: c.group * CRACK.stagger, open: false, warn: false }));
 	const crackAt = {};
@@ -434,20 +471,21 @@ export function createSim(dungeon, gear = [], hero = {}) {
 		tick: 0, elapsedTicks: 0, bossTimeTicks: null, rng: hashSeed(String(dungeon.seed)), status: "play",
 		classId, practice: !!hero.practice,
 		w: dungeon.width, h: dungeon.height, tiles: dungeon.tiles, rooms, dungeonId: dungeon.id || "shallows",
-		cracks, crackAt, fastRoom: -1,
+		cracks, crackAt, fastRoom: -1, hazard: dungeon.hazard || null, creep: null, roomY,
 		doorY, doorCols, roomLeft, sealed: -1, depth: dungeon.level || 1, offers: dungeon.offers || [],
 		stats, gear, levels, completeXp: dungeon.complete_xp || 0,
 		hero: { level, xp, startLevel: level, startXp: xp },
 		p: { x: dungeon.start.x, y: dungeon.start.y, r: PLAYER_R, hp: stats.maxHp, low: stats.maxHp,
 			mp: stats.maxMp, fireCd: 0, hurt: 0, burstLeft: 0, burstCd: 0,
 			potionCd: 0, counterUntil: 0, guardUntil: 0, empower: 0, abilityCd: 0, primed: 0,
-			kindled: 0, windAt: 0, bulwarkUntil: 0, bulwarkAt: 0 },
+			kindled: 0, windAt: 0, bulwarkUntil: 0, bulwarkAt: 0, hitAt: 0, volleys: 0, phoenixUsed: false, inFire: false },
 		enemies, bullets: [], dropsBy, scale,
 		// Heal orbs DROP from the enemy that carries one (dungeon.py); one with a
 		// position of its own (an older dungeon) lies where it was placed.
 		pickups: dungeon.pickups.filter((h) => h.enemy == null).map((h) => ({ ...h })),
 		healsBy: Object.fromEntries(dungeon.pickups.filter((h) => h.enemy != null).map((h) => [h.enemy, h.id])),
 		bags: [], floor: [], portal: null, deeper: null, shield: null, slowUntil: 0, starfalls: [], blasts: [], mortars: [], fires: [], damageNumbers: [], events: [],
+		embers: [], stuck: [],
 	};
 }
 
@@ -471,7 +509,8 @@ function hurtPlayer(st, dmg, src = null) {
 		}
 		return;
 	}
-	const def = st.stats.def + (p.bulwarkUntil > st.tick ? st.stats.bulwark : 0);
+	const def = st.stats.def + (p.bulwarkUntil > st.tick ? st.stats.bulwark : 0)
+		+ (p.inFire && st.stats.cinderDef ? st.stats.cinderDef : 0);           // Cinderguard, standing in fire
 	const taken = Math.round(Math.max(dmg * 0.4, dmg - def) * 10) / 10;
 	if (st.stats.bulwark && !(p.bulwarkAt > st.tick)) {      // Bulwark: Defense up for the hits after this one
 		p.bulwarkUntil = st.tick + SPECIAL.bulwark.last;
@@ -479,6 +518,7 @@ function hurtPlayer(st, dmg, src = null) {
 	}
 	p.hp -= taken;
 	p.hurt = 8;
+	p.hitAt = st.tick;                                       // Banked Coal starts over
 	st.lastHit = { src, dmg: taken, tick: st.tick };
 	if (!st.damageNumbers) st.damageNumbers = [];
 	st.damageNumbers.push({ x: p.x, y: p.y, amount: taken, until: st.tick + 45 });
@@ -487,6 +527,20 @@ function hurtPlayer(st, dmg, src = null) {
 	if (st.stats.thorns && p.hp > 0) {                       // Thornplate: shards out from the hit
 		const q = UNIQUE.thorns;
 		for (let k = 0; k < q.n; k++) playerShot(st, p.x, p.y, k * TAU / q.n + PI / 4, q.speed, st.stats.thorns, q.life);
+	}
+	if (p.hp <= 0 && st.stats.phoenix && !p.phoenixUsed) {    // the Phoenix Feather: once a level
+		const q = UNIQUE.phoenix;
+		p.phoenixUsed = true; p.hp = 1; p.low = 1;
+		p.guardUntil = st.tick + q.guard;
+		(st.embers ||= []).push({ x: p.x, y: p.y, r: q.r, until: st.tick + q.last, dmg: st.stats.phoenix });
+		for (const e of st.enemies) {
+			if (e.hp <= 0 || !e.active) continue;
+			const dx = e.x - p.x, dy = e.y - p.y, rr = q.r + e.r;
+			if (dx * dx + dy * dy < rr * rr) { e.burnUntil = st.tick + UNIQUE.burn.last; e.burnDmg = st.stats.phoenix; }
+		}
+		(st.blasts ||= []).push({ x: p.x, y: p.y, r: q.r, until: st.tick + 18, hot: true });
+		st.events.push({ type: "phoenix", local: true });
+		return;
 	}
 	if (p.hp <= 0) {
 		p.hp = 0;
@@ -693,6 +747,45 @@ function enemyStep(st, e) {
 		}
 		return;
 	}
+	if (e.type === "cinder") {                         // a fast chaser that leaves fire where it runs
+		moveBody(st, e, ux * sp, uy * sp);
+		if (st.tick % CINDER.every === 0) (st.fires ||= []).push({ x: e.x, y: e.y, r: CINDER.r, until: st.tick + CINDER.last, src: "cinder:fire" });
+		const sh = ENEMY.cinder.shot;
+		if (e.scd > 0) e.scd--;
+		if (e.tele > 0) {
+			if (--e.tele === 0) {
+				st.src = "cinder:spit";
+				shootAt(st, "e", e.x, e.y, p.x, p.y, sh.speed, sh.dmg, 0.16, Math.round((sh.range / sh.speed) * TPS));
+				e.scd = cadence(st, sh.every);
+			}
+		} else if (!(e.scd > 0) && d < sh.range) e.tele = sh.tele;
+		return;
+	}
+	if (e.type === "kiln") {                           // stands still and lobs firebombs where you are
+		if (e.tele > 0) {
+			if (--e.tele === 0) {
+				(st.mortars ||= []).push({ x: p.x, y: p.y, r: KILN.r, at: st.tick + KILN.delay, d: KILN.delay,
+					dmg: KILN.dmg, burn: KILN.burn, src: "kiln:bomb", fire: "kiln:fire" });
+				e.cd = cadence(st, KILN.every);
+			}
+		} else if (e.cd === 0 && d < KILN.range) e.tele = KILN.tele;
+		return;
+	}
+	if (e.type === "smolder") {                        // harmless until hit; then it flares, charges and bursts
+		if (!e.lit) return;
+		if (e.tele > 0) { e.tele--; return; }
+		const q = SMOLDER;
+		if (e.charge > 0) {
+			e.charge--;
+			const s2 = q.speed * st.scale.speed * DT;
+			moveBody(st, e, ux * s2, uy * s2);
+			if (d > q.reach && e.charge > 0) return;
+		}
+		(st.mortars ||= []).push({ x: e.x, y: e.y, r: q.r, at: st.tick + q.fuse, d: q.fuse,
+			dmg: q.dmg, burn: q.burn, src: "smolder:burst", fire: "smolder:fire" });
+		kill(st, e);
+		return;
+	}
 	if (e.type === "radial") {
 		if (e.tele > 0) {
 			if (--e.tele === 0) {
@@ -705,6 +798,7 @@ function enemyStep(st, e) {
 		return;
 	}
 	if (e.form === "breach") breachStep(st, e, ux, uy);
+	else if (e.form === "pyre") pyreStep(st, e);
 	else bossStep(st, e, d, ux, uy);
 }
 
@@ -811,6 +905,160 @@ const BOSS_CYCLE = [["spiral", 150], ["rest", 40], ["fan", 100], ["rest", 40]];
  * be gone back to for a while. In sight, the boss fires as before and lobs nothing. */
 export const MORTAR = { after: 60, every: 100, delay: 54, r: 1.4, dmg: 22, burn: 300, burnEvery: 20, burnDmg: 6 };
 
+// ── the Ashen Breach (owner's design, 2026-11-19) ───────────────────────────
+/* FIRE CREEPS IN FROM THE WALLS: `after` ticks into a fight, a combat room's outermost
+ * ring of tiles catches, and one more ring every `every` ticks (the next one flickers
+ * for `warn` first), until about `keep` tiles are left open across the middle. It
+ * hurts like the mortar's fire and goes out when the room is cleared. The Pyre's
+ * arena starts burning at its half health instead, a ring every `bossEvery`. */
+export const CREEP = { after: 10 * TPS, every: 4 * TPS, warn: TPS, keep: 3, bossEvery: 3 * TPS };
+export const CINDER = { every: 12, r: 0.45, last: 80 };            // the trail it leaves
+export const KILN = { every: 140, tele: 24, delay: 50, r: 1.1, dmg: 18, burn: 150, range: 10 };
+export const SMOLDER = { flare: 30, charge: 150, speed: 5, reach: 1, fuse: 24, r: 1.6, dmg: 20, burn: 240 };
+/* PLAYER FIRE ("embers"): burning ground the PLAYER sets (the Ashen uniques). It never
+ * hurts the player. Every `every` ticks each enemy standing in it takes the hottest
+ * one's damage, once. Shared with the town's posts. */
+export const EMBER = { every: 20 };
+
+/* THE PYRE (the Ashen Breach's boss). Phase 1: RINGS of shots, and CROSSES of fire —
+ * a + or an x of shells centred on where the player stands, each ringed while it
+ * falls and burning after. Phase 2 (half health, after the same telegraphed pause):
+ * its arena burns in from the walls (CREEP) and it calls in its Kilns. It lobs the
+ * mortar at a player who hides, as every boss does. */
+const PYRE_CYCLE = [["rings", 120], ["rest", 30], ["cross", 110], ["rest", 30]];
+const PYRE_CYCLE_2 = [["rings", 100], ["rest", 24], ["cross", 120], ["rest", 24]];
+export const PYRE = {
+	ring: { n: 16, n2: 20, speed: 5, dmg: 16, every: 40 },
+	cross: { arm: 6, gap: 1.1, r: 0.6, delay: 48, dmg: 16, burn: 150, waves: [0, 55], waves2: [0, 40, 80] },
+	kilns: [[-6, -4], [6, 4]],                                     // where its Kilns come in, from its spawn
+};
+/* A cross of shells on (cx, cy): a + or (diagonal) an x, each arm stopped by a wall or rock. */
+function flameCross(st, cx, cy, diagonal) {
+	const q = PYRE.cross, at = st.tick + q.delay;
+	const lob = (x, y) => st.mortars.push({ x, y, r: q.r, at, d: q.delay, dmg: q.dmg, burn: q.burn, src: "boss:flame", fire: "boss:fire" });
+	const dirs = diagonal ? [[0.7071, 0.7071], [-0.7071, 0.7071], [0.7071, -0.7071], [-0.7071, -0.7071]] : [[1, 0], [-1, 0], [0, 1], [0, -1]];
+	st.mortars ||= [];
+	lob(cx, cy);
+	for (const [vx, vy] of dirs)
+		for (let k = 1; k <= q.arm; k++) {
+			const x = cx + vx * k * q.gap, y = cy + vy * k * q.gap;
+			if (walkSolid(tileAt(st, x, y))) break;
+			lob(x, y);
+		}
+}
+function pyreStep(st, e) {
+	const p = st.p;
+	if (e.phase === 1 && e.hp <= e.maxHp / 2) { e.phase = 0; e.modeT = 70; e.tele = 70; return; }
+	if (e.phase === 0) {
+		if (--e.modeT <= 0) {
+			e.phase = 2; e.mode = 0; e.modeT = PYRE_CYCLE_2[0][1]; e.tele = 0;
+			st.creep = { room: e.room, ring: 0, next: st.tick + 1, every: CREEP.bossEvery };
+			let k = 0;
+			for (const o of st.enemies) {                    // its Kilns come into the fight
+				if (o.summon !== e.id || !o.dormant || o.hp <= 0) continue;
+				const [ax, ay] = PYRE.kilns[k++ % PYRE.kilns.length];
+				o.x = e.homeX + ax; o.y = e.homeY + ay;
+				if (blocked(st, o.x, o.y, o.r)) { const to = nearestClear(st, o); if (to) { o.x = to.x; o.y = to.y; } }
+				o.dormant = false; o.active = true; o.cd = 40;
+			}
+		} else e.tele = e.modeT;
+		return;
+	}
+	if (e.cd > 0) return;
+	bossMortar(st, e);
+	const cycle = e.phase === 1 ? PYRE_CYCLE : PYRE_CYCLE_2;
+	const [mode, len] = cycle[e.mode];
+	const t = len - e.modeT;
+	st.src = mode === "cross" ? "boss:flame" : "boss:ring";
+	if (mode === "rings") {
+		const q = PYRE.ring, n = e.phase === 1 ? q.n : q.n2;
+		if (t % q.every === 0) {
+			e.ang = e.ang === 0 ? PI / n : 0;
+			for (let k = 0; k < n; k++) shoot(st, "e", e.x, e.y, e.ang + k * TAU / n, q.speed, q.dmg, 0.22, 240);
+		}
+		if (t % q.every === q.every - 16 && t + 16 < len) e.tele = 16;
+	} else if (mode === "cross") {
+		const w = (e.phase === 1 ? PYRE.cross.waves : PYRE.cross.waves2).indexOf(t);
+		if (w >= 0) flameCross(st, p.x, p.y, w % 2 === 1);
+	}
+	if (e.tele > 0) e.tele--;
+	if (--e.modeT <= 0) {
+		e.mode = (e.mode + 1) % cycle.length;
+		e.modeT = cycle[e.mode][0] === "rest" ? cadence(st, cycle[e.mode][1]) : cycle[e.mode][1];
+	}
+}
+
+/* Where a tile sits in a room's creeping fire: its ring (0 = against the wall), or -1
+ * outside the room. */
+function ringOf(st, room, tx, ty) {
+	const r = st.rooms[room], [y0, y1] = st.roomY?.[room] || [-1, -1];
+	if (!r || tx < r.x0 || tx >= r.x1 || ty < y0 || ty > y1) return -1;
+	return Math.min(tx - r.x0, r.x1 - 1 - tx, ty - y0, y1 - ty);
+}
+/* How many rings a room burns to: about CREEP.keep tiles left across its narrow way. */
+function creepMax(st, room) {
+	const r = st.rooms[room], [y0, y1] = st.roomY[room];
+	return Math.max(0, Math.floor((Math.min(r.x1 - r.x0, y1 - y0 + 1) - CREEP.keep) / 2));
+}
+/* The creeping fire at a tile, for the renderer and the burn: 2 burning, 1 about to, 0 not. */
+export function creepAt(st, tx, ty) {
+	const c = st.creep;
+	if (!c) return 0;
+	const k = ringOf(st, c.room, tx, ty);
+	if (k < 0) return 0;
+	if (k < c.ring) return 2;
+	return k === c.ring && c.ring < creepMax(st, c.room) && c.next - st.tick <= CREEP.warn ? 1 : 0;
+}
+function stepCreep(st) {
+	if (st.hazard !== "creep") return;
+	const c = st.creep;
+	if (c && st.sealed !== c.room) { st.creep = null; return; }      // cleared: the fire goes out
+	if (!c) {
+		if (st.sealed >= 0 && st.rooms[st.sealed]?.kind === "combat")
+			st.creep = { room: st.sealed, ring: 0, next: st.tick + CREEP.after, every: CREEP.every };
+		return;
+	}
+	if (st.tick >= c.next && c.ring < creepMax(st, c.room)) { c.ring++; c.next = st.tick + c.every; }
+}
+
+/* One pulse of the player's fire (embers): `hurt(target, dmg)` for each target standing
+ * in it, by the hottest one. Shared with the town's posts. */
+export function emberPulse(st, targets, hurt) {
+	if (st.embers?.length) st.embers = st.embers.filter((f) => f.until > st.tick);
+	if (!st.embers?.length || st.tick % EMBER.every !== 0) return;
+	for (const t of targets) {
+		let best = 0;
+		for (const f of st.embers) {
+			const dx = t.x - f.x, dy = t.y - f.y, rr = f.r + (t.r || 0);
+			if (dx * dx + dy * dy < rr * rr && f.dmg > best) best = f.dmg;
+		}
+		if (best > 0) hurt(t, best);
+	}
+}
+/* The Emberweave's trail: fire under the player's feet while they move. Shared with the town. */
+export function trailEmber(st, moving) {
+	const s = st.stats, q = UNIQUE.emberweave;
+	if (s.trail && moving && st.tick % q.every === 0) (st.embers ||= []).push({ x: st.p.x, y: st.p.y, r: q.r, until: st.tick + q.last, dmg: s.trail });
+}
+/* A Flare Bow's flare coming down: fire where it lands. Shared with the town. */
+export function flareLand(st, b, x, y) {
+	const q = UNIQUE.flare;
+	(st.embers ||= []).push({ x, y, r: q.r, until: st.tick + q.last, dmg: Math.max(1, Math.round(b.dmg * q.share)) });
+	(st.blasts ||= []).push({ x, y, r: q.r, until: st.tick + 18, hot: true });
+}
+/* An Ember Kunai stuck in what it hit: the burst comes `UNIQUE.kunai.delay` later. */
+export function stickKunai(st, b, id) {
+	(st.stuck ||= []).push({ id, at: st.tick + UNIQUE.kunai.delay, dmg: Math.max(1, Math.round(b.dmg * UNIQUE.kunai.share)) });
+}
+/* The stuck kunai that are due: `hit(k)` deals each burst. Shared with the town. */
+export function burstStuck(st, hit) {
+	if (!st.stuck?.length) return;
+	const due = st.stuck.filter((k) => k.at <= st.tick);
+	if (!due.length) return;
+	st.stuck = st.stuck.filter((k) => k.at > st.tick);
+	for (const k of due) hit(k);
+}
+
 /* Can the boss see the player? A shot's line: no rock or wall between them. */
 export function inSight(st, a, b) {
 	const dx = b.x - a.x, dy = b.y - a.y, n = Math.ceil(Math.sqrt(dx * dx + dy * dy) / 0.25);
@@ -825,10 +1073,13 @@ function bossMortar(st, e) {
 	e.hidden = (e.hidden || 0) + 1;
 	const k = e.hidden - MORTAR.after;
 	if (k < 0 || k % cadence(st, MORTAR.every) !== 0) return;
-	(st.mortars ||= []).push({ x: st.p.x, y: st.p.y, r: MORTAR.r, at: st.tick + MORTAR.delay });
+	(st.mortars ||= []).push({ x: st.p.x, y: st.p.y, r: MORTAR.r, at: st.tick + MORTAR.delay, d: MORTAR.delay });
 }
 
-/* Shells landing, and the ground they leave burning. */
+/* Shells landing, and the ground they leave burning. A shell may say its own damage,
+ * burn and names (a Kiln's, a Smolder's, the Pyre's); the boss's mortar is the default.
+ * The player burns standing in a fire pool or in a room's creeping fire, every
+ * MORTAR.burnEvery ticks — unless their Cinderguard makes them fireproof. */
 function stepMortars(st) {
 	const p = st.p;
 	if (st.fires?.length) st.fires = st.fires.filter((f) => f.until > st.tick);
@@ -837,16 +1088,16 @@ function stepMortars(st) {
 		st.mortars = st.mortars.filter((m) => m.at > st.tick);
 		for (const m of due) {
 			const dx = p.x - m.x, dy = p.y - m.y, rr = m.r + p.r;
-			if (dx * dx + dy * dy < rr * rr) hurtPlayer(st, MORTAR.dmg, "boss:mortar");
-			(st.fires ||= []).push({ x: m.x, y: m.y, r: m.r, until: st.tick + MORTAR.burn });
+			if (dx * dx + dy * dy < rr * rr) hurtPlayer(st, m.dmg ?? MORTAR.dmg, m.src || "boss:mortar");
+			(st.fires ||= []).push({ x: m.x, y: m.y, r: m.r, until: st.tick + (m.burn ?? MORTAR.burn), ...(m.fire ? { src: m.fire } : {}) });
 			(st.blasts ||= []).push({ x: m.x, y: m.y, r: m.r, until: st.tick + 18, hot: true });
 			if (st.status !== "play") return;
 		}
 	}
-	if (st.fires?.length && st.tick % MORTAR.burnEvery === 0) {
-		const burning = st.fires.some((f) => { const dx = p.x - f.x, dy = p.y - f.y, rr = f.r + p.r * 0.5; return dx * dx + dy * dy < rr * rr; });
-		if (burning) hurtPlayer(st, MORTAR.burnDmg, "boss:fire");
-	}
+	const pool = st.fires?.length ? st.fires.find((f) => { const dx = p.x - f.x, dy = p.y - f.y, rr = f.r + p.r * 0.5; return dx * dx + dy * dy < rr * rr; }) : null;
+	const creeping = !pool && st.creep && creepAt(st, Math.floor(p.x), Math.floor(p.y)) === 2;
+	p.inFire = !!(pool || creeping);
+	if (p.inFire && !st.stats.fireproof && st.tick % MORTAR.burnEvery === 0) hurtPlayer(st, MORTAR.burnDmg, pool ? pool.src || "boss:fire" : "rift:fire");
 }
 
 const BOSS_CYCLE_2 = [["spiral", 140], ["rest", 30], ["nova", 80], ["rest", 40], ["fan", 90], ["rest", 30]];
@@ -920,6 +1171,7 @@ export function step(st, input) {
 	if (mx && my) { mx *= 0.7071067811865476; my *= 0.7071067811865476; }
 	const speed = PLAYER_SPEED * (s.moveMult || 1);                // the Windrunner's Cloak
 	moveBody(st, p, mx * speed * DT, my * speed * DT);
+	trailEmber(st, mx !== 0 || my !== 0);                          // the Emberweave
 
 	// regeneration, never past the recovery limit (design §9.3)
 	const limit = recoveryLimit(st);
@@ -979,6 +1231,7 @@ export function step(st, input) {
 
 	sealRoom(st);
 	stepCracks(st);
+	stepCreep(st);
 	if (st.status !== "play") return st;
 	for (const e of st.enemies) {
 		if (e.hp <= 0 || !e.active) continue;
@@ -992,6 +1245,19 @@ export function step(st, input) {
 		if (!(e.burnUntil > st.tick) || e.hp <= 0) continue;
 		if ((e.burnUntil - st.tick) % UNIQUE.burn.every === 0) hurtEnemy(st, e, e.burnDmg, 2);
 	}
+	// the player's own fire, and the Ember Kunai's stuck blades
+	emberPulse(st, st.enemies, (e, dmg) => {
+		if (e.hp <= 0 || !e.active || e.phase === 0) return;
+		e.scorched = st.tick + EMBER.every + 10;
+		hurtEnemy(st, e, dmg, 2);
+	});
+	burstStuck(st, (k) => {
+		const e = st.enemies.find((x) => x.id === k.id);
+		if (!e || e.hp <= 0 || !e.active || e.phase === 0) return;
+		(st.blasts ||= []).push({ x: e.x, y: e.y, r: 0.55, until: st.tick + 18, hot: true });
+		hurtEnemy(st, e, k.dmg, 4);
+	});
+	if (st.status !== "play") return st;
 
 	// stars landing (the Diviner's ability)
 	landStarfalls(st, (f) => {
@@ -1019,7 +1285,7 @@ export function step(st, input) {
 		const fc = st.slowAt || st.p, dxp = fc.x - b.x, dyp = fc.y - b.y;
 		const sr = st.slowR || SLOW_RADIUS;
 		const slowed = b.owner === "e" && st.slowUntil > st.tick && dxp * dxp + dyp * dyp <= sr * sr;
-		const speedScale = slowed ? SLOW_FACTOR : 1;
+		const speedScale = slowed ? st.slowF || SLOW_FACTOR : 1;          // the Censer slows less
 		b.x += b.vx * DT * speedScale; b.y += b.vy * DT * speedScale;
 		if (b.owner === "e" && st.shield) {
 			const sx = st.shield.x - b.x, sy = st.shield.y - b.y;
@@ -1035,6 +1301,7 @@ export function step(st, input) {
 		turnBack(b);
 		if (--b.life <= 0 || wallHit(b, (x, y) => shotSolid(tileAt(st, x, y)))) {
 			if (b.comet) cometBurst(st, b, b.x - b.vx * DT, b.y - b.vy * DT);
+			if (b.flare) flareLand(st, b, b.x - b.vx * DT, b.y - b.vy * DT);
 			continue;
 		}
 		let gone = false;
@@ -1047,6 +1314,8 @@ export function step(st, input) {
 					b.hit.push(e.id);
 					hurtEnemy(st, e, b.dmg, 4);
 					if (b.burn && e.hp > 0) { e.burnUntil = st.tick + UNIQUE.burn.last; e.burnDmg = b.burn; }   // refreshed, never stacked
+					if (b.stick && e.hp > 0) stickKunai(st, b, e.id);                // the Ember Kunai
+					if (b.flare) { flareLand(st, b, e.x, e.y); gone = true; break; }  // the Flare Bow's flare comes down
 					if (b.splash) for (const o of st.enemies) {    // the Oathhammer
 						if (o === e || o.hp <= 0 || o.phase === 0 || !o.active) continue;
 						const ox = o.x - e.x, oy = o.y - e.y, sr = UNIQUE.splash.r + o.r;
@@ -1064,7 +1333,7 @@ export function step(st, input) {
 		if (st.status !== "play") break;
 	}
 	st.bullets = st.bossDown ? keep.filter((b) => b.owner === "p") : keep;
-	if (st.bossDown) { st.mortars = []; st.fires = []; }        // its shells and fires too
+	if (st.bossDown) { st.mortars = []; st.fires = []; st.creep = null; }   // its shells and fires too
 	st.bossDown = false;
 	if (st.rings?.length) {                            // Volatile: what fell this tick bursts
 		for (const r of st.rings) {
@@ -1114,11 +1383,12 @@ export function playerFire(st, input) {
 			st.slowR = s.slowRadius;
 			st.slowDmg = s.abilityDmg;
 			st.slowAt = s.anchored ? { x: p.x, y: p.y } : null;   // the Anchor Orb stays where it was cast
+			st.slowF = s.censer ? UNIQUE.censer.slow : SLOW_FACTOR;
 		} else if (s.abilityKind === "starfall") {
 			// Where the cursor is, no farther than STARFALL_RANGE.
 			const k = al > STARFALL_RANGE ? STARFALL_RANGE / al : 1;
 			(st.starfalls ||= []).push({ x: p.x + ix * k, y: p.y + iy * k, r: STARFALL_RADIUS, dmg: s.abilityDmg,
-				at: st.tick + STARFALL_DELAY, cast: st.tick });
+				at: st.tick + STARFALL_DELAY, cast: st.tick, ...(s.crater ? { crater: 1 } : {}) });
 			if (s.echo) st.starfalls.push({ x: p.x + ix * k, y: p.y + iy * k, r: STARFALL_RADIUS,   // the Codex's echo
 				dmg: Math.round(s.abilityDmg * s.echo * 100) / 100, at: st.tick + STARFALL_DELAY + UNIQUE.echo.delay, cast: st.tick, echo: true });
 		} else if (s.abilityKind === "counter") {
@@ -1138,13 +1408,19 @@ function volley(st, ax, ay) {
 	if (p.primed > 0) { mult *= p.primed; p.primed = 0; }       // Duskmail: the shot after a kill
 	let burn = s.burn || 0;
 	if (p.kindled > 0) { burn = Math.max(burn, s.kindle || 0); p.kindled--; }   // Kindling
+	if (s.coalCap) {                                            // Banked Coal: Attack while unhit
+		const b = Math.min(s.coalCap, Math.floor((st.tick - (p.hitAt || 0)) / UNIQUE.coal.every));
+		if (b > 0) mult *= (1 + (s.att + b) / STAT_SCALE) / (1 + s.att / STAT_SCALE);
+	}
+	const flare = s.flare > 0 && (p.volleys = (p.volleys || 0) + 1) % s.flare === 0;   // the Flare Bow
 	for (let i = 0; i < s.shots; i++) {
 		const [vx, vy] = s.shots > 1 ? rotate(ax, ay, (i - (s.shots - 1) / 2) * s.spread) : [ax, ay];
 		st.bullets.push({ owner: "p", x: p.x, y: p.y, vx: vx * s.shotSpeed, vy: vy * s.shotSpeed,
 			dmg: Math.round(s.dmg * mult), r: 0.14, life, pierce: s.pierce, bounce: s.bounce, hit: [],
 			...(s.look ? { look: s.look } : {}), ...(mult > 1 ? { power: true } : {}),
 			...(burn ? { burn } : {}), ...(s.splash ? { splash: 1 } : {}), ...(s.comet ? { comet: 1 } : {}),
-			...(s.ret ? { ret: Math.floor(life / 2) } : {}) });
+			...(s.ret ? { ret: Math.floor(life / 2) } : {}), ...(flare ? { flare: 1, look: "flare" } : {}),
+			...(s.stick ? { stick: 1 } : {}) });
 	}
 }
 
@@ -1167,6 +1443,8 @@ export function landStarfalls(st, hit) {
 	for (const f of due) {
 		hit(f);
 		(st.blasts ||= []).push({ x: f.x, y: f.y, r: f.r, until: st.tick + 18 });
+		if (f.crater) (st.embers ||= []).push({ x: f.x, y: f.y, r: f.r, until: st.tick + UNIQUE.meteor.last,   // the Meteor Tome
+			dmg: Math.max(1, Math.round(f.dmg * UNIQUE.meteor.share)) });
 	}
 }
 
@@ -1220,6 +1498,7 @@ function sealRoom(st) {
 /* A hit on an enemy. Warded: the first few hits (counted per enemy, each one —
  * an arrow, a star — one hit) do nothing but flash. */
 function hurtEnemy(st, e, dmg, flash) {
+	if (e.type === "smolder" && !e.lit) { e.lit = true; e.tele = SMOLDER.flare; e.charge = SMOLDER.charge; }   // it wakes
 	if (e.ward > 0) { e.ward--; e.flash = 2; return; }
 	// What a hit did, floated over the enemy (drawing only: not in the fingerprint).
 	(st.damageNumbers ||= []).push({ x: e.x, y: e.y - e.r, amount: Math.round(Math.min(dmg, e.hp) * 10) / 10, until: st.tick + 36, foe: true });
@@ -1240,7 +1519,7 @@ export function setGear(st, gear) {
 	p.low = Math.min(p.low, s.maxHp);
 	p.mp = Math.min(p.mp, s.maxMp);
 	p.burstLeft = 0; p.burstCd = 0;
-	p.empower = 0; p.primed = 0; p.kindled = 0;
+	p.empower = 0; p.primed = 0; p.kindled = 0; p.volleys = 0;
 }
 
 /* XP, and a level when it crosses one: the new stats apply at once, and the HP,
@@ -1297,6 +1576,16 @@ function kill(st, e) {
 		gainXp(st, st.completeXp);
 		st.events.push({ type: "cleared", xp: st.completeXp, local: true });
 		st.bossDown = true;                                        // its fire dies with it (below)
+		for (const o of st.enemies) if (o.summon === e.id && o.hp > 0) kill(st, o);   // its Kilns fall with it
+	}
+	if (st.stats.ashSigil && (e.burnUntil > st.tick || e.scorched > st.tick)) {   // the Ash Sigil
+		const q = UNIQUE.ash;
+		(st.blasts ||= []).push({ x: e.x, y: e.y, r: q.r, until: st.tick + 18, hot: true });
+		for (const o of st.enemies) {
+			if (o === e || o.hp <= 0 || !o.active || o.phase === 0) continue;
+			const dx = o.x - e.x, dy = o.y - e.y, rr = q.r + o.r;
+			if (dx * dx + dy * dy < rr * rr) hurtEnemy(st, o, st.stats.ashSigil, 4);
+		}
 	}
 }
 
@@ -1314,5 +1603,8 @@ export function fingerprint(st) {
 		st.p.kindled || 0, st.p.windAt || 0, st.p.bulwarkUntil || 0, st.p.bulwarkAt || 0,
 		st.slowAt ? [r(st.slowAt.x), r(st.slowAt.y)] : 0, st.enemies.map((e) => e.burnUntil || 0), (st.starfalls || []).map((f) => [r(f.x), r(f.y), f.at]),
 		(st.mortars || []).map((m) => [r(m.x), r(m.y), m.at]), (st.fires || []).map((f) => [r(f.x), r(f.y), f.until]), st.enemies.map((e) => e.hidden || 0),
-		(st.cracks || []).map((c) => c.t), st.fastRoom ?? -1, st.enemies.map((e) => (e.dormant ? 1 : 0))]);
+		(st.cracks || []).map((c) => c.t), st.fastRoom ?? -1, st.enemies.map((e) => (e.dormant ? 1 : 0)),
+		st.creep ? [st.creep.room, st.creep.ring, st.creep.next] : 0, (st.embers || []).map((f) => [r(f.x), r(f.y), f.until, f.dmg]),
+		(st.stuck || []).map((k) => [k.id, k.at, k.dmg]), st.p.hitAt || 0, st.p.volleys || 0, st.p.phoenixUsed ? 1 : 0, st.p.inFire ? 1 : 0,
+		st.slowF || 0, st.enemies.map((e) => [e.lit ? 1 : 0, e.charge || 0, e.scorched || 0])]);
 }

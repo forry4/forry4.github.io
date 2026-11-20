@@ -10388,8 +10388,9 @@ try {
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await page.keyboard.press("Escape");
 
-		// The portal is up and to the right of the vault: a diagonal walk passes through it.
-		check("walking to the Shallows' portal", await walkTo("realm:shallows", ["KeyD", "KeyW"]));
+		// The Shallows' portal is straight up from where the vault is used (three portals
+		// since the Ashen Breach, 2026-11-19: the first sits at x 6).
+		check("walking to the Shallows' portal", await walkTo("realm:shallows", ["KeyW"]));
 		await page.keyboard.press("KeyE");
 		const riftPanel = await page.waitForSelector(".hr-rift-panel", { timeout: 5_000 }).then(() => true).catch(() => false);
 		check("E at the portal opens its modifiers (the one pool of eight)", riftPanel && await page.locator(".hr-rift-panel .hr-mod").count() === 8);

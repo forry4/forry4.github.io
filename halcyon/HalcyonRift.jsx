@@ -26,7 +26,7 @@ import { GAME_ACCENTS } from "../shared/accents.js";
 import { makeClient } from "./client.js";
 import { createSim, step, TPS, REACH, xpProgress, WEAPONS, statsFor, enchantValue, recoveryLimit, CLASS_INFO, SPECIAL, isSpecial, lineLevel,
 	STAT_SCALE, ABILITY_COST, ABILITY, SLOW_DURATION, SLOW_FACTOR, SLOW_PULSE,
-	STARFALL_DELAY, STARFALL_RADIUS, STARFALL_RANGE, COUNTER_WINDOW, COUNTER_GUARD, POTION_HEAL, POTION_COOLDOWN, UNIQUE } from "./sim.js";
+	STARFALL_DELAY, STARFALL_RADIUS, STARFALL_RANGE, COUNTER_WINDOW, COUNTER_GUARD, POTION_HEAL, POTION_COOLDOWN, UNIQUE, EMBER } from "./sim.js";
 import { camera, draw, drawTown, promptFor, formatRiftTime, TIER_COLORS, UNIQUE_COLOR } from "./render.js";
 import { createTown, stepTown, setTownGear, postDps, STATIONS, SPAWN, standAt, REALMS } from "./town.js";
 import cssText from "./HalcyonRift.css?inline";
@@ -45,7 +45,9 @@ const NAMES = { shortbow: "Shortbow", longbow: "Longbow", mace: "Mace", greatswo
 	ember_loop: "Ember Loop", misers_coil: "Miser's Coil", leechstone: "Leechstone", glass_ring: "Glass Ring",
 	windrunner_cloak: "Windrunner's Cloak", full_moon_mantle: "Mantle of the Full Moon", thornplate: "Thornplate",
 	duskmail: "Duskmail", gale_quiver: "Gale Quiver", oathhammer: "Oathhammer", anchor_orb: "Anchor Orb",
-	comet_rod: "Comet Rod", echo_codex: "Codex of Echoes", chakram: "Ricochet Chakram", echo_charm: "Echo Charm" };
+	comet_rod: "Comet Rod", echo_codex: "Codex of Echoes", chakram: "Ricochet Chakram", echo_charm: "Echo Charm",
+	phoenix_feather: "Phoenix Feather", ash_sigil: "Ash Sigil", banked_coal: "Banked Coal", emberweave: "Emberweave",
+	cinderguard: "Cinderguard", flare_bow: "Flare Bow", censer: "Censer", meteor_tome: "Meteor Tome", ember_kunai: "Ember Kunai" };
 /* KEYS (owner's ask, 2026-11-18): carried in the bag, spent on entering. */
 const KEY_TEXT = { dream_key: "Opens the Dream Rift for one practice run. Spent on entering.",
 	boss_rush_key: "Lets you pick Boss Rush at a realm portal: every level is only its boss. Spent on entering; no time is recorded." };
@@ -91,7 +93,9 @@ const ABBR = { shortbow: "SB", longbow: "LB", mace: "MC", greatsword: "GS", wand
 	dream_key: "DK", boss_rush_key: "BR",
 	ember_loop: "EL", misers_coil: "MI", leechstone: "LS", glass_ring: "GR", windrunner_cloak: "WC",
 	full_moon_mantle: "FM", thornplate: "TP", duskmail: "DM", gale_quiver: "GQ", oathhammer: "OH",
-	anchor_orb: "AO", comet_rod: "CR", echo_codex: "EC", chakram: "CK", echo_charm: "EH" };
+	anchor_orb: "AO", comet_rod: "CR", echo_codex: "EC", chakram: "CK", echo_charm: "EH",
+	phoenix_feather: "PF", ash_sigil: "AS", banked_coal: "BC", emberweave: "EW", cinderguard: "CG",
+	flare_bow: "FB", censer: "CE", meteor_tome: "MT", ember_kunai: "EK" };
 const WEAPON_FEEL = { shortbow: "Fast and close: twin arrows that spread with distance.",
 	longbow: "Slow and far: one heavy arrow.",
 	mace: "Melee range: a quick, solid strike.", greatsword: "Short range: a heavy sweeping strike.",
@@ -102,7 +106,9 @@ const WEAPON_FEEL = { shortbow: "Fast and close: twin arrows that spread with di
 	kunai: "A slow, heavy blade thrown hard and far.",
 	oathhammer: "A mace whose every hit also strikes what stands beside its target.",
 	comet_rod: "A slow bolt that bursts into shards where it lands.",
-	chakram: "Flies out, turns back half way, and cuts through everything both ways." };
+	chakram: "Flies out, turns back half way, and cuts through everything both ways.",
+	flare_bow: "A steady bow whose every fourth shot is a flare that sets the ground burning.",
+	ember_kunai: "A kunai that sticks where it hits and bursts a second later." };
 /* Every item but a key says its tier; a UNIQUE is tiered too since 2026-11-19 (owner's
  * call), and is marked by its gold, not by a missing tier. */
 const nameOf = (it) => (it.kind === "key" ? NAMES[it.base_id] || it.base_id : `${NAMES[it.base_id] || it.base_id} · T${it.tier}`);
@@ -149,6 +155,16 @@ function uniqueLines(it) {
 	case "oathhammer": return [`Each hit also does ${Math.round(UNIQUE.splash.share * 100)}% to enemies within ${UNIQUE.splash.r} tile of the target`];
 	case "comet_rod": return [`Bursts into ${UNIQUE.comet.n} shards (${Math.round(UNIQUE.comet.share * 100)}% damage each) where it hits or ends`];
 	case "chakram": return [`Turns back after ${num(w.range / 2)} tiles; passes through every enemy, both ways`];
+	// the Ashen Breach's
+	case "phoenix_feather": return ["Once each dungeon level, a hit that would kill you leaves you at 1 HP instead",
+		`and sets the ground around you burning for ${secs(UNIQUE.phoenix.last)}s: ${s.phoenix} damage every ${secs(EMBER.every)}s to enemies in it`];
+	case "ash_sigil": return [`An enemy that dies while burning explodes for ${s.ashSigil} damage to enemies within ${UNIQUE.ash.r} tiles`];
+	case "banked_coal": return [`+1 Attack for every ${secs(UNIQUE.coal.every)}s you go without being hit, up to +${s.coalCap}`, "A hit starts it over"];
+	case "emberweave": return [`Moving leaves a trail of fire behind you: ${s.trail} damage every ${secs(EMBER.every)}s to enemies in it`];
+	case "cinderguard": return ["Burning ground does not hurt you", `+${s.cinderDef} Defense while you stand in it`];
+	case "flare_bow": return [`Every ${w.flare}th shot is a flare: where it lands the ground burns for ${secs(UNIQUE.flare.last)}s`,
+		`for ${Math.round(UNIQUE.flare.share * 100)}% of the shot's damage every ${secs(EMBER.every)}s, to enemies in it`];
+	case "ember_kunai": return [`Sticks in what it hits, and bursts ${secs(UNIQUE.kunai.delay)}s later for ${Math.round(UNIQUE.kunai.share * 100)}% more damage`];
 	default: return [];
 	}
 }
@@ -165,10 +181,12 @@ function abilityLines(it, ap = 0) {
 	if (kind === "slow") return [s.anchored ? "Space: a field where you stand that STAYS there, slowing enemy shots inside it" : "Space: a field around you that slows enemy shots inside it",
 		`and burns enemies inside it for ${r2(s.abilityDmg * pw)} damage every ${secs(SLOW_PULSE)}s`,
 		`${r2(s.slowRadius * pw)}-tile radius (its tier and Ability power widen it)`,
-		`${Math.round((1 - SLOW_FACTOR) * 100)}% slower, lasts ${secs(SLOW_DURATION)}s`, cost];
+		`${Math.round((1 - (s.censer ? UNIQUE.censer.slow : SLOW_FACTOR)) * 100)}% slower, lasts ${secs(SLOW_DURATION)}s`,
+		...(s.censer ? [`Burns ${UNIQUE.censer.burn}x as hard as a Stillness Orb, but slows shots less`] : []), cost];
 	if (kind === "starfall") return [`Space: a star falls where you aim (up to ${STARFALL_RANGE} tiles)`,
 		`Lands after ${secs(STARFALL_DELAY)}s, ${Math.round(s.abilityDmg * pw)} damage to all within ${STARFALL_RADIUS} tiles`,
-		...(s.echo ? [`Lands again ${secs(UNIQUE.echo.delay)}s later for ${Math.round(s.abilityDmg * s.echo * pw)}`] : []), cost];
+		...(s.echo ? [`Lands again ${secs(UNIQUE.echo.delay)}s later for ${Math.round(s.abilityDmg * s.echo * pw)}`] : []),
+		...(s.crater ? [`Leaves a burning crater for ${secs(UNIQUE.meteor.last)}s: ${Math.max(1, Math.round(s.abilityDmg * pw * UNIQUE.meteor.share))} damage every ${secs(EMBER.every)}s to enemies in it`] : []), cost];
 	if (kind === "counter") return [`Space: the next hit within ${secs(COUNTER_WINDOW)}s is ignored`,
 		`Then ${secs(COUNTER_GUARD)}s untouchable, and your next attack does ${r2(s.counterMult * pw)}x damage`,
 		"A second counter before attacking does not stack",
@@ -1394,10 +1412,12 @@ const keyRows = () => [
 /* What dealt the killing blow, in words: the sim tags every enemy shot (and a
  * chaser's charge) with "<enemy>:<attack>" and keeps the last hit that landed. */
 const ENEMY_NAMES = { chaser: "a Chaser", shooter: "a Shooter", radial: "a Radial", boss: "the boss",
-	shard: "a Shard", splitter: "a Splitter", splinter: "a Splinter", flicker: "a Flicker", rift: "the Rift" };
+	shard: "a Shard", splitter: "a Splitter", splinter: "a Splinter", flicker: "a Flicker", rift: "the Rift",
+	cinder: "a Cinder", kiln: "a Kiln", smolder: "a Smolder" };
 const ATTACK_NAMES = { touch: "charge", spit: "spit", bolt: "bolt", ring: "ring of shots", spiral: "spiral",
 	fan: "fan of shots", nova: "nova", burst: "dying burst", mortar: "mortar", fire: "burning ground",
-	cross: "cross of shots", pair: "pair of shots", fault: "fault line", shatter: "shatter shard", tear: "tear", blink: "ring", crack: "opening crack" };
+	cross: "cross of shots", pair: "pair of shots", fault: "fault line", shatter: "shatter shard", tear: "tear", blink: "ring", crack: "opening crack",
+	bomb: "firebomb", flame: "cross of fire" };
 function causeOf(hit) {
 	if (!hit || !hit.src) return "Fell in the rift";
 	const [who, how] = hit.src.split(":");
@@ -1968,6 +1988,7 @@ function Dungeon({ run, client, onEnd, notify, tips, onDeeper }) {
 
 		const handle = (ev) => {
 			if (ev.type === "level") note(`Level ${ev.level}!`, "good");
+			if (ev.type === "phoenix") note("The Phoenix Feather caught you at 1 HP.", "good");
 			if (ev.type === "kill") ctl.kills = (ctl.kills || 0) + 1;
 			if (ev.type === "damage") ctl.taken = (ctl.taken || 0) + ev.amount;
 			if (ev.type === "deeper") { onDeeperRef.current?.({ offers: st.offers, from: st.depth, mods: run.dungeon.mods || [] }); return; }

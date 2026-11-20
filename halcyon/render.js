@@ -7,7 +7,7 @@
  * rock), the player cyan/white, every enemy and every enemy shot red/orange/
  * magenta, pickups gold (loot) and green (healing).
  */
-import { recoveryLimit, xpProgress, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT } from "./sim.js";
+import { recoveryLimit, xpProgress, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT, CREEP, creepAt } from "./sim.js";
 
 /* A loot bag wears the color of the best thing in it (design §19.1): a tier color, and
  * a unique's gold with a glow. The tier number in every slot is the non-color cue. */
@@ -24,6 +24,9 @@ export const COLORS = {
 	// the Fracture's (design §14.4a): violet stone over a black void
 	shard: "#7fd4ff", splitter: "#ff7a59", splinter: "#ffb199", flicker: "#e16bff", breach: "#9b6bff",
 	void: "#0d0a14", voidSpeck: "#3a2a5c", seam: "rgba(185,150,255,.35)", seamHot: "#e7d8ff",
+	// the Ashen Breach's: embers on charcoal. The player's own fire burns pale blue, so it
+	// never reads as the enemy's orange.
+	cinder: "#ffb347", kiln: "#c8553d", smolder: "#6b5a50", smolderLit: "#ff7a2e", pyre: "#ff6a2a", ash: "#8a7d72",
 	enemyShot: "#ff5a4a", enemyShotHeavy: "#ff3d8b", tele: "rgba(255,90,74,.55)",
 	heal: "#6fd36a", bag: "#e9c25a", portal: "#9fe7ff", dream: "#b9a7ff", deeper: "#ff9f5a",
 	veil: "rgba(214,58,90,.22)", veilEdge: "rgba(255,138,150,.55)", bars: "#2a2f2d", barsLit: "#d63a5a", ward: "#cfe3ff",
@@ -37,7 +40,8 @@ export const COLORS = {
 
 const SHALLOWS = { floorA: COLORS.sand, floorB: COLORS.sandDark, wall: COLORS.wall, wallTop: COLORS.wallTop };
 const FRACTURE = { floorA: "#3d3550", floorB: "#39324b", wall: "#17131f", wallTop: "#2a2338" };
-const PALETTES = { shallows: SHALLOWS, fracture: FRACTURE };
+const ASHEN = { floorA: "#3b322d", floorB: "#372e29", wall: "#1a1411", wallTop: "#2c221c" };
+const PALETTES = { shallows: SHALLOWS, fracture: FRACTURE, ashen: ASHEN };
 const TOWN = { floorA: COLORS.stone, floorB: COLORS.stoneDark, wall: COLORS.townWall, wallTop: COLORS.townWallTop };
 
 export function formatRiftTime(ticks) {
@@ -103,6 +107,29 @@ function drawCracks(g, st, ox, oy, px, calm) {
 	}
 }
 
+/* THE CREEPING FIRE (the Ashen Breach, sim.CREEP): burning tiles glow orange and
+ * flicker; the ring about to catch pulses a warning in its last second. */
+function drawCreep(g, st, ox, oy, px, calm) {
+	const c = st.creep;
+	if (!c) return;
+	const r = st.rooms[c.room], [y0, y1] = st.roomY?.[c.room] || [0, -1], P = Math.ceil(px) + 1;
+	if (!r) return;
+	for (let y = y0; y <= y1; y++)
+		for (let x = r.x0; x < r.x1; x++) {
+			const k = creepAt(st, x, y);
+			if (!k || st.tiles[y][x] === "#") continue;
+			const X = Math.floor(ox + x * px), Y = Math.floor(oy + y * px);
+			if (k === 2) {
+				const flick = calm ? 1 : 0.85 + 0.15 * Math.sin((st.tick + x * 5 + y * 3) * 0.3);
+				g.fillStyle = `rgba(255,98,32,${(0.42 * flick).toFixed(3)})`; g.fillRect(X, Y, P, P);
+				g.fillStyle = `rgba(255,196,90,${(0.22 * flick).toFixed(3)})`; g.fillRect(X + px * 0.25, Y + px * 0.25, px * 0.5, px * 0.5);
+			} else {
+				const on = calm || st.tick % 10 < 6;
+				g.fillStyle = on ? "rgba(255,138,60,.26)" : "rgba(255,138,60,.1)"; g.fillRect(X, Y, P, P);
+			}
+		}
+}
+
 /* The doors of rooms that still hold enemies (sim.js): a faint red veil before the
  * room is entered (shots stop there; you can walk through), iron bars once it is
  * sealed. A cleared room's doorway is plain floor. */
@@ -154,6 +181,7 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here, bag
 	g.fillStyle = "#1b2220"; g.fillRect(0, 0, width, height);
 	drawMap(g, st, ox, oy, px, width, height, PALETTES[st.dungeonId] || SHALLOWS);
 	drawCracks(g, st, ox, oy, px, calm);
+	drawCreep(g, st, ox, oy, px, calm);
 	drawDoors(g, st, ox, oy, px);
 	drawHazards(g, st, sx, sy, px);
 	drawAbilityFx(g, st, sx, sy, px, pp);
@@ -227,7 +255,8 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here, bag
 			g.beginPath(); g.arc(X, Y, r + px * 0.1, 0, Math.PI * 2); g.stroke();
 		}
 		// Reduced flashing (a setting): a hit tints, and the boss's turn holds still.
-		const col = e.flash > 0 ? (calm ? "#f3b9a8" : "#fff3ea") : COLORS[e.form === "breach" ? "breach" : e.type];
+		const col = e.flash > 0 ? (calm ? "#f3b9a8" : "#fff3ea")
+			: e.form === "breach" || e.form === "pyre" ? COLORS[e.form] : e.type === "smolder" && e.lit ? COLORS.smolderLit : COLORS[e.type];
 		if (e.type === "chaser") {
 			g.save(); g.translate(X, Y); g.rotate(Math.PI / 4); g.fillStyle = col; g.fillRect(-r * 0.8, -r * 0.8, r * 1.6, r * 1.6); g.restore();
 		} else if (e.type === "shooter") {
@@ -247,6 +276,26 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here, bag
 			g.strokeStyle = col; g.lineWidth = Math.max(2, r * 0.45);
 			g.beginPath(); g.arc(X, Y, r * 0.75, 0.3, Math.PI * 2 - 0.3); g.stroke();
 			circle(g, X, Y, r * 0.25, col);
+		} else if (e.type === "cinder") {                   // a flame: a teardrop pointing up
+			g.beginPath(); g.moveTo(X, Y - r * 1.3); g.quadraticCurveTo(X + r * 1.1, Y + r * 0.2, X, Y + r);
+			g.quadraticCurveTo(X - r * 1.1, Y + r * 0.2, X, Y - r * 1.3); g.fillStyle = col; g.fill();
+			circle(g, X, Y + r * 0.3, r * 0.35, "#fff1c2");
+		} else if (e.type === "kiln") {                     // a squat oven with a glowing mouth
+			g.fillStyle = col; g.fillRect(X - r, Y - r * 0.9, r * 2, r * 1.8);
+			g.fillStyle = "#2a1410"; g.fillRect(X - r * 0.55, Y - r * 0.1, r * 1.1, r * 0.7);
+			g.fillStyle = e.tele > 0 ? "#ffd27a" : "#ff8a3c"; g.fillRect(X - r * 0.4, Y + r * 0.05, r * 0.8, r * 0.45);
+		} else if (e.type === "smolder") {                  // a banked coal: dull until hit, then it glows
+			circle(g, X, Y, r, col);
+			g.strokeStyle = e.lit ? "#fff1c2" : "#ff7a2e"; g.lineWidth = Math.max(1, px * (e.lit ? 0.07 : 0.04));
+			g.beginPath(); g.moveTo(X - r * 0.5, Y - r * 0.2); g.lineTo(X, Y + r * 0.15); g.lineTo(X + r * 0.45, Y - r * 0.35);
+			g.moveTo(X, Y + r * 0.15); g.lineTo(X + r * 0.1, Y + r * 0.6); g.stroke();
+		} else if (e.form === "pyre") {                     // the Pyre: a ring of flame tongues round a white-hot heart
+			const n = 10, spin = st.tick * 0.03;
+			g.beginPath();
+			for (let k = 0; k < n * 2; k++) { const a = spin + k * Math.PI / n, rr = k % 2 ? r * 0.7 : r * 1.12; g[k ? "lineTo" : "moveTo"](X + Math.cos(a) * rr, Y + Math.sin(a) * rr); }
+			g.closePath(); g.fillStyle = e.phase === 0 && !calm && st.tick % 10 < 5 ? "#fff3ea" : col; g.fill();
+			circle(g, X, Y, r * 0.5, "#ffd27a");
+			circle(g, X, Y, r * 0.26, "#fff7ec");
 		} else if (e.form === "breach") {                   // the Breach: a torn violet star
 			const n = 8, spin = st.tick * 0.02;
 			g.beginPath();
@@ -362,6 +411,12 @@ function drawMinimap(g, st, { width, ui, dpr, bagBest, mods = [] }) {
 /* The boss's mortar: burning ground (a flickering orange pool that fades in its last
  * second), and each shell's landing spot, ringed red and filling as it comes. */
 function drawHazards(g, st, sx, sy, px) {
+	for (const f of st.embers || []) {                // the player's own fire: pale blue, white at heart
+		const left = f.until - st.tick, fade = Math.min(1, left / TPS);
+		const flick = 0.85 + 0.15 * Math.sin((st.tick + f.y * 7) * 0.35);
+		circle(g, sx(f.x), sy(f.y), px * f.r, `rgba(120,214,255,${(0.28 * fade * flick).toFixed(3)})`);
+		circle(g, sx(f.x), sy(f.y), px * f.r * 0.55, `rgba(230,250,255,${(0.2 * fade * flick).toFixed(3)})`);
+	}
 	for (const f of st.fires || []) {
 		const left = f.until - st.tick, fade = Math.min(1, left / TPS);
 		const flick = 0.85 + 0.15 * Math.sin((st.tick + f.x * 7) * 0.35);
@@ -370,7 +425,7 @@ function drawHazards(g, st, sx, sy, px) {
 	}
 	const lw = Math.max(1.5, px * 0.07);
 	for (const m of st.mortars || []) {
-		const k = Math.min(1, Math.max(0, 1 - (m.at - st.tick) / MORTAR.delay));
+		const k = Math.min(1, Math.max(0, 1 - (m.at - st.tick) / (m.d || MORTAR.delay)));
 		g.strokeStyle = "#ff5a3c"; g.lineWidth = lw;
 		g.beginPath(); g.arc(sx(m.x), sy(m.y), px * m.r, 0, Math.PI * 2); g.stroke();
 		circle(g, sx(m.x), sy(m.y), px * m.r * k, "rgba(255,90,60,.3)");
@@ -430,7 +485,10 @@ function drawShots(g, bullets, sx, sy, px, at) {
 	for (const b of bullets) {
 		const bp = at(b), X = sx(bp.x), Y = sy(bp.y);
 		if (b.owner === "p" && b.power) drawPowerTrail(g, X, Y, b, px);
-		if (b.owner === "p" && b.look === "star") {          // a spinning four-point star
+		if (b.owner === "p" && b.look === "flare") {         // the Flare Bow's flare: a bright ball of fire
+			circle(g, X, Y, px * 0.24, "rgba(120,214,255,.45)");
+			circle(g, X, Y, px * 0.14, "#e6faff");
+		} else if (b.owner === "p" && b.look === "star") {   // a spinning four-point star
 			const r = px * 0.2 * (b.power ? 2 : 1), a = (b.x + b.y) * 2.4;
 			g.fillStyle = b.power ? "#fff1c2" : "#dfe7ea";
 			g.beginPath();
@@ -552,6 +610,7 @@ export function drawTown(g, st, { width, height, px, at = here, notes = [], prom
 		// Below the stake: the hit numbers float up from above the post.
 		if (d > 0) label(g, `${d} / s`, X, Y + R * 1.3 + px * 0.38, px, "#e9c25a");
 	}
+	drawHazards(g, st, sx, sy, px);                    // the player's own fire (the town has no other)
 	drawAbilityFx(g, st, sx, sy, px, pp);
 	drawPlayer(g, st.p, sx(pp.x), sy(pp.y), px, aim, st.classId);
 	drawShots(g, st.bullets, sx, sy, px, at);

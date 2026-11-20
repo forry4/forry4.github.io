@@ -3,10 +3,8 @@ dungeons written out from the real generator. This holds those files to it: chan
 the generator and this fails until the fixtures are rewritten, so the sim is never
 tested against a dungeon shape the server no longer makes.
 
-Rewrite them with:
-    python -c "import json; from halcyon import dungeon as D; [open(f'webapp/test/unit/fixtures/halcyon-dungeon-{s}.json','w').write(json.dumps(D.generate('shallows', s), sort_keys=True)+'\\n') for s in ('unit-a','unit-b')]"
-    python -c "import json; from halcyon import dungeon as D; open('webapp/test/unit/fixtures/halcyon-dungeon-fracture-a.json','w').write(json.dumps(D.generate('fracture', 'fracture-a'), sort_keys=True)+'
-')"
+Rewrite them all with:
+    python -c "import json; from halcyon import dungeon as D; [open(f'webapp/test/unit/fixtures/halcyon-dungeon-{s}.json', 'w', newline='\n').write(json.dumps(D.generate(d, s), sort_keys=True) + '\n') for d, s in (('shallows', 'unit-a'), ('shallows', 'unit-b'), ('fracture', 'fracture-a'), ('ashen', 'ashen-a'))]"
 """
 import json
 from pathlib import Path
@@ -18,7 +16,8 @@ from halcyon import dungeon as D
 FIXTURES = Path(__file__).resolve().parents[2] / "webapp" / "test" / "unit" / "fixtures"
 
 
-@pytest.mark.parametrize("dungeon,seed", [("shallows", "unit-a"), ("shallows", "unit-b"), ("fracture", "fracture-a")])
+@pytest.mark.parametrize("dungeon,seed", [("shallows", "unit-a"), ("shallows", "unit-b"), ("fracture", "fracture-a"),
+                                          ("ashen", "ashen-a")])
 def test_the_sim_fixtures_are_what_the_generator_makes(dungeon, seed):
     on_disk = json.loads((FIXTURES / f"halcyon-dungeon-{seed}.json").read_text(encoding="utf-8"))
     assert on_disk == D.generate(dungeon, seed), "stale fixture: rewrite it (see this module's docstring)"

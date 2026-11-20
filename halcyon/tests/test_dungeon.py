@@ -376,6 +376,38 @@ def test_fracture_loot_starts_at_tier_two_and_its_boss_at_three():
             assert dr["tier"] >= floor, dr
 
 
+def test_the_ashen_breach_drops_tier_three_to_five_and_its_boss_four_to_seven():
+    """Owner's design, 2026-11-19: the third rift's loot sits above the Fracture's."""
+    seen = {"enemy": set(), "boss": set()}
+    for i in range(300):
+        d = D.generate("ashen", f"tiers-{i}")
+        for dr in d["drops"].values():
+            if C.base(dr["base_id"])["kind"] != "standard":
+                continue
+            seen["boss" if dr["enemy"] == d["boss"] else "enemy"].add(dr["tier"])
+    assert seen["enemy"] == {3, 4, 5} and seen["boss"] == {4, 5, 6, 7}, seen
+
+
+def test_the_pyre_calls_in_kilns_the_server_credits_in_any_order():
+    """Its Kilns are generated with it, marked as SUMMONED (not as children: the server
+    must take a Kiln's kill before or after the Pyre's). Its rooms burn; the Fracture's
+    boss is the Schism now (the word went to the Ashen Breach)."""
+    for i in range(20):
+        d = D.generate("ashen", f"pyre-{i}", mods=["swarming"] if i % 2 else [])
+        kilns = [e for e in d["enemies"].values() if e.get("summon")]
+        assert len(kilns) == D.PYRE_KILNS and all(k["summon"] == d["boss"] and k["type"] == "kiln" for k in kilns)
+        assert not any("parent" in k for k in kilns)
+        assert d["boss_kind"] == "pyre" and d["boss_name"] == "The Pyre" and d["hazard"] == "creep"
+        if not d["mods"]:                                  # a modifier pays a little more
+            assert d["enemies"][d["boss"]]["xp"] == D.DUNGEONS["ashen"]["boss_xp"]
+        assert len(D.reachable(d)) > 0 and all((int(e["x"]), int(e["y"])) in D.reachable(d)
+                                               for e in d["enemies"].values())
+    f = D.generate("fracture", "names")
+    assert f["boss_name"] == "The Schism" and f["boss_kind"] == "breach" and "hazard" not in f
+    total = lambda x: x["complete_xp"] + sum(e["xp"] for e in x["enemies"].values())
+    assert total(D.generate("ashen", "pay")) > total(f)
+
+
 def test_depth_pays_its_own_bonus_and_lifts_tiers_up_to_ten():
     """Going deeper is the only way past three modifiers, and the only way to tiers
     6-10: each level adds LOOT_PER_LEVEL and lifts every standard tier by one."""
