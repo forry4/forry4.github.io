@@ -1,4 +1,4 @@
-"""Two-room boss arenas from the Halcyon Rift greybox (d52d2f57)."""
+"""Two-room Boss Rush arenas, based on the Halcyon Rift greybox (d52d2f57)."""
 
 ENTRANCE = (
     "..........",
@@ -30,23 +30,25 @@ BOSS_ROOM = (
     "......................",
 )
 
+# A full-height fissure divides the room. The two five-tile crossings trade off.
 FRACTURE_BOSS = (
-    "......................",
-    "......................",
-    "...oo.....1......oo...",
-    "...oo.....1......oo...",
-    "..........1...........",
-    "......................",
-    "..222...........333...",
-    "..........B...........",
-    "..333...........222...",
-    "......................",
-    "..........1...........",
-    "...oo.....1......oo...",
-    "...oo.....1......oo...",
-    "......................",
-    "......................",
+    "..........xx..........",
+    "..........xx..........",
+    "..oo......11......oo..",
+    "..oo......11......oo..",
+    "..........11..........",
+    "..........11..........",
+    "..........11..........",
+    "..........xx..........",
+    "..........22..........",
+    "..........22..........",
+    "..........22..........",
+    "..oo......22......oo..",
+    "..oo......22......oo..",
+    "..........xx..........",
+    "..........xx..........",
 )
+
 
 ASHEN_BOSS = (
     "......................",
@@ -66,10 +68,36 @@ ASHEN_BOSS = (
     "......................",
 )
 
+LANTERN_FEN = (
+    "......................",
+    "......................",
+    ".....oo...............",
+    ".....oo.........o.....",
+    "................o.....",
+    "......................",
+    "......................",
+    "..........B...........",
+    "......................",
+    "......................",
+    ".................oo...",
+    "....o............oo...",
+    "....o.................",
+    "......................",
+    "......................",
+)
+
 BOSSES = {
     "shallows": ("The Shallows", "The Tidewarden", "tidewarden", BOSS_ROOM),
     "fracture": ("The Fracture", "The Schism", "breach", FRACTURE_BOSS),
     "ashen": ("The Ashen Breach", "The Pyre", "pyre", ASHEN_BOSS),
+    "fen": ("The Lantern Fen", "The Cinderwake", "cinderwake", LANTERN_FEN),
+}
+
+
+DEFAULT_BOSS_SET = "rift-trio"
+BOSS_SETS = {
+    DEFAULT_BOSS_SET: ("Rift Trio", ("shallows", "fracture", "ashen")),
+    "lantern-trio": ("Lantern Trio", ("fen",)),
 }
 
 
@@ -90,7 +118,7 @@ def arena(rift: str, seed: str) -> dict:
         for dy, row in enumerate(rows):
             for dx, tile in enumerate(row):
                 x, y = x0 + dx, y0 + dy
-                grid[y][x] = "o" if tile == "o" else "."
+                grid[y][x] = tile if tile in "ox" else "."
                 if tile == "S":
                     start = {"x": x + 0.5, "y": y + 0.5}
                 elif tile == "B":
@@ -105,11 +133,12 @@ def arena(rift: str, seed: str) -> dict:
         for x in range(rooms[0]["x1"], rooms[1]["x0"]):
             grid[y][x] = "."
 
+    fissure = [x for x, tile in enumerate(grid[mid]) if tile == "x"]
+    if rift == "fracture":
+        # The Schism starts suspended over the fissure between the two banks.
+        room = rooms[1]
+        boss = {"x": (room["x0"] + room["x1"]) / 2, "y": mid + 0.5}
     enemies = {"boss": {"type": "boss", "room": 1, **boss}}
-    if rift == "ashen":
-        # The Pyre wakes these adds halfway through its fight.
-        for n in range(2):
-            enemies[f"kiln{n + 1}"] = {"type": "kiln", "room": 1, "summon": "boss", **boss}
 
     return {
         "id": rift, "name": name, "boss_name": boss_name, "boss_kind": boss_kind,
@@ -117,5 +146,6 @@ def arena(rift: str, seed: str) -> dict:
         "tiles": ["".join(row) for row in grid], "rooms": rooms,
         "start": start, "enemies": enemies, "drops": {}, "pickups": [],
         "cracks": [{"room": 1, "group": group, "tiles": cracks[group]} for group in sorted(cracks)],
+        **({"fissure": [fissure[0], fissure[-1] + 1]} if fissure else {}),
         "hazard": "creep" if rift == "ashen" else None,
     }

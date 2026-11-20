@@ -14,18 +14,37 @@ def test_a_run_draws_each_arena_once_and_posts_one_server_timed_clear(tmp_path, 
     clock = [1000]
     monkeypatch.setattr(api, "time", type("Clock", (), {"time": lambda: clock[0]}))
     monkeypatch.setattr(api, "_starts", api.SlidingWindowLimiter(30, 60))
-    orders = iter([["ashen", "shallows", "fracture"], ["fracture", "ashen", "shallows"]])
-    monkeypatch.setattr(api, "random", type("Order", (), {"sample": lambda keys, n: next(orders)}))
+    orders = iter([
+        ["ashen", "shallows", "fracture"],
+        ["fracture", "ashen", "shallows"],
+        ["shallows", "fracture", "ashen"],
+    ])
+
+    def sample(keys, n):
+        assert set(keys) == {"shallows", "fracture", "ashen"} and n == 3
+        return next(orders)
+
+    monkeypatch.setattr(api, "random", type("Order", (), {"sample": sample}))
     app = FastAPI()
 
     api.setup_boss_rush(app, lambda: _Conn(sqlite3.connect(tmp_path / "runs.db")),
                         lambda token: {"name": "Wren"} if token == "wren" else None, lambda: None)
     endpoints = {route.path: route.endpoint for route in app.routes if route.path.startswith("/bossrush")}
+    sets = endpoints["/bossrush/sets"]
     board = endpoints["/bossrush/leaderboard"]
     start = endpoints["/bossrush/runs"]
     clear = endpoints["/bossrush/runs/{run_id}/clears/{stage}"]
+    enter = endpoints["/bossrush/runs/{run_id}/entries/{stage}"]
+    set_clock = endpoints["/bossrush/runs/{run_id}/clock/{stage}/{action}"]
     request = SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"))
+    available = {entry["id"]: entry for entry in sets()["sets"]}
+    assert available["rift-trio"]["playable"]
+    assert available["lantern-trio"]["bosses"] == ["The Cinderwake"]
+    assert not available["lantern-trio"]["playable"]
     assert board() == {"entries": []}
+    with pytest.raises(HTTPException) as incomplete:
+        start(api.StartIn(character="ninja", set_id="lantern-trio"), request, None)
+    assert incomplete.value.status_code == 409
     with pytest.raises(ValidationError):
         api.StartIn(character="alien")
     with pytest.raises(HTTPException) as expired:
@@ -42,6 +61,9 @@ def test_a_run_draws_each_arena_once_and_posts_one_server_timed_clear(tmp_path, 
         assert all(e["room"] == 1 for e in stage["enemies"].values())
 
     run_id = run["run_id"]
+    with pytest.raises(HTTPException) as too_far:
+        clear(run_id, 4)
+    assert too_far.value.status_code == 404
     with pytest.raises(HTTPException) as early:
         clear(run_id, 3)
     assert early.value.status_code == 409
@@ -58,10 +80,71 @@ def test_a_run_draws_each_arena_once_and_posts_one_server_timed_clear(tmp_path, 
         {"rank": 1, "name": "Wren", "character": "ninja", "elapsed_ms": 42500},
     ]}
 
+    timed = start(api.StartIn(character="paladin", starter_timer=True), request, None)
+    assert timed["starter_timer"] is True
+    assert [stage["id"] for stage in timed["stages"]] == ["fracture", "ashen", "shallows"]
+    with pytest.raises(HTTPException) as wrong_room:
+        enter(timed["run_id"], 2)
+    assert wrong_room.value.status_code == 409
+    for stage in range(1, 4):
+        clock[0] += 30  # waiting in the starter room is free
+        with pytest.raises(HTTPException) as too_soon:
+            clear(timed["run_id"], stage)
+        assert too_soon.value.status_code == 409
+        assert enter(timed["run_id"], stage) == {"entered": stage}
+        clock[0] += 1
+        assert enter(timed["run_id"], stage) == {"entered": stage}
+        assert set_clock(timed["run_id"], stage, "pause") == {"paused": True}
+        clock[0] += 5
+        assert set_clock(timed["run_id"], stage, "pause") == {"paused": True}
+        with pytest.raises(HTTPException) as still_paused:
+            clear(timed["run_id"], stage)
+        assert still_paused.value.status_code == 409
+        clock[0] += 12
+        assert set_clock(timed["run_id"], stage, "resume") == {"paused": False}
+        clock[0] += 1
+        assert set_clock(timed["run_id"], stage, "resume") == {"paused": False}
+        clock[0] += 0.5
+        timed_result = clear(timed["run_id"], stage)
+    assert timed_result == {"cleared": 3, "elapsed_ms": 7500}
+    assert board()["entries"][0] == {
+        "rank": 1, "name": "Guest", "character": "paladin", "elapsed_ms": 7500,
+    }
+
     guest = start(api.StartIn(character="paladin"), request, None)
-    assert [stage["id"] for stage in guest["stages"]] == ["fracture", "ashen", "shallows"]
     clock[0] += api.RUN_TTL + 1
     with pytest.raises(HTTPException) as timed_out:
         clear(guest["run_id"], 1)
     assert timed_out.value.status_code == 404
-    assert len(board()["entries"]) == 1
+    assert len(board()["entries"]) == 2
+    assert board(character="ninja")["entries"] == [
+        {"rank": 1, "name": "Wren", "character": "ninja", "elapsed_ms": 42500},
+    ]
+    assert board(set_id="lantern-trio") == {"entries": []}
+
+
+def test_existing_scores_migrate_to_rift_trio_and_future_scores_stay_in_their_set(tmp_path):
+    database = tmp_path / "legacy.db"
+    with sqlite3.connect(database) as conn:
+        conn.execute("""
+            CREATE TABLE boss_rush_runs (
+                run_id TEXT PRIMARY KEY, player_name TEXT NOT NULL, character TEXT NOT NULL,
+                started_at REAL NOT NULL, cleared INTEGER NOT NULL DEFAULT 0, elapsed_ms INTEGER
+            )
+        """)
+        conn.execute("INSERT INTO boss_rush_runs VALUES ('legacy', 'Wren', 'ranger', 1000, 3, 9876)")
+    app = FastAPI()
+    api.setup_boss_rush(app, lambda: _Conn(sqlite3.connect(database)), lambda _: None, lambda: None)
+    board = next(route.endpoint for route in app.routes if route.path == "/bossrush/leaderboard")
+    with sqlite3.connect(database) as conn:
+        conn.execute("""
+            INSERT INTO boss_rush_runs (run_id, player_name, character, started_at, cleared, elapsed_ms, set_id)
+            VALUES ('future', 'Kai', 'ranger', 1100, 3, 1234, 'lantern-trio')
+        """)
+    assert board("rift-trio", "ranger")["entries"] == [
+        {"rank": 1, "name": "Wren", "character": "ranger", "elapsed_ms": 9876},
+    ]
+    assert board("lantern-trio", "ranger")["entries"] == [
+        {"rank": 1, "name": "Kai", "character": "ranger", "elapsed_ms": 1234},
+    ]
+    assert board("rift-trio", "diviner") == {"entries": []}
