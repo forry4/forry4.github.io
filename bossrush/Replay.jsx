@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { draw } from "./render.js";
 import { buildTimeline, cursor, formatClock } from "./replay.js";
-import { exportReplay, saveBlob } from "./replayExport.js";
+import { exportPlan, exportReplay, saveBlob } from "./replayExport.js";
 import { TPS } from "./sim.js";
 
 const STEP_MS = 1000 / TPS;
@@ -143,6 +143,7 @@ export default function Replay({ recording, stageCount, onClose }) {
 	const setFrom = () => setClip((k) => ({ from: Math.min(pos, k.to - TPS), to: k.to }));
 	const setTo = () => setClip((k) => ({ from: k.from, to: Math.max(pos, k.from + TPS) }));
 	const fullClip = clip.from === 0 && clip.to === total;
+	const plan = exportPlan(clip.to - clip.from);
 
 	async function doExport() {
 		const abort = new AbortController();
@@ -206,7 +207,9 @@ export default function Replay({ recording, stageCount, onClose }) {
 					<button type="button" className="btn btn-outline" onClick={setTo}>Set end</button>
 					<button type="button" className="btn btn-outline" onClick={thisBoss}>This boss</button>
 					{!fullClip && <button type="button" className="btn btn-outline" onClick={() => setClip({ from: 0, to: total })}>Full run</button>}
-					<button type="button" className="btn btn-gold" onClick={doExport} disabled={!!exporting}>Export video</button>
+					<button type="button" className="btn btn-gold" onClick={doExport} disabled={!!exporting}
+							title={plan.overDiscord ? "Over Discord's 20 MB: set a shorter clip to share it there" : undefined}>
+							Export video · ~{Math.max(1, Math.round(plan.mb))} MB{plan.overDiscord ? " (over 20 MB)" : ""}</button>
 					<button type="button" className="btn btn-ghost" onClick={fullscreen} aria-label="Full screen" title="Full screen (F)">⛶</button>
 				</div>
 			</div>

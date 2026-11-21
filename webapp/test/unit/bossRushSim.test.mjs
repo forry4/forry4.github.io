@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { CHARACTERS } from "../../../bossrush/loadouts.js";
-import { BELL, FEN, PLAYER_SPEED, PYRE, SIDESTEP, TPS, WARDEN, createSim, pyreArmAngle, step } from "../../../bossrush/sim.js";
+import { ABILITY_COOLDOWN, BELL, CRACK, FEN, PLAYER_SPEED, PYRE, SIDESTEP, TPS, WARDEN, createSim, inCrack, pyreArmAngle, step } from "../../../bossrush/sim.js";
 
 function encounter(kind, objectives = [], gear = CHARACTERS.ranger.gear) {
 	const border = "#".repeat(24);
@@ -35,7 +35,7 @@ test("Sidestep dashes across the aim to the side you lean, diagonally on two key
 	assert(Math.abs(st.p.x - x) < 0.05, "straight across the aim");
 	const walked = PLAYER_SPEED / TPS;                // the lean is also a step, on the tick you cast
 	assert(Math.abs(st.p.y - y - SIDESTEP.dist - walked) < 0.01, `the dash carries ${SIDESTEP.dist} tiles (moved ${st.p.y - y})`);
-	const dash = (input) => { const x0 = st.p.x, y0 = st.p.y; st.p.mp = st.stats.maxMp; step(st, { ability: true, ...input }); for (let i = 0; i < SIDESTEP.ticks + 3; i++) step(st, {}); return [st.p.x - x0, st.p.y - y0]; };
+	const dash = (input) => { const x0 = st.p.x, y0 = st.p.y; st.p.mp = st.stats.maxMp; st.p.abilityCd = 0; step(st, { ability: true, ...input }); for (let i = 0; i < SIDESTEP.ticks + 3; i++) step(st, {}); return [st.p.x - x0, st.p.y - y0]; };
 	const [fx, fy] = dash({ ax: 0, ay: -1 });         // no key held: toward the aim (up)
 	assert(Math.abs(fx) < 0.01 && Math.abs(fy + SIDESTEP.dist) < 0.01, `no key dashes toward the aim (${fx}, ${fy})`);
 	const [ax2, ay2] = dash({ ax: 0, ay: 1, my: 1 });  // a key held along the aim: that way
@@ -209,4 +209,60 @@ test("from half health the Pyre turns a plus sign of shots, crossed only through
 	hits = 0;
 	for (let i = 0; i < TPS; i++) { pin(k, boss.r + 0.8); quiet(); touch(); }
 	assert.equal(hits, Math.ceil(TPS / PYRE.arms.every), "touching an arm hurts, at most once per beat");
+});
+
+test("an open crack is a slow, painful floor for the player, never a shove to the bank", () => {
+	const border = "#".repeat(24);
+	const dungeon = {
+		id: "fracture", boss_kind: "breach", seed: "crack-test", width: 24, height: 17,
+		tiles: [border, ...Array(15).fill("#" + ".".repeat(22) + "#"), border],
+		rooms: [{ kind: "boss", x0: 1, x1: 23 }], start: { x: 10.5, y: 8.5 },
+		enemies: { boss: { type: "boss", room: 0, x: 20.5, y: 3.5 } },
+		cracks: [{ room: 0, group: 0, tiles: Array.from({ length: 15 }, (_, i) => [12, i + 1]) }],
+		drops: {}, pickups: [], objectives: [], scale: { dmg: 1 },
+	};
+	const st = createSim(dungeon, CHARACTERS.ranger.gear);
+	st.enemies[0].dormant = true;                     // only the crack can hurt here
+	const crack = st.cracks[0];
+	advance(st, () => crack.open);
+	const hp0 = st.p.hp;
+	advance(st, () => inCrack(st), () => ({ mx: 1 }));
+	assert(st.p.hp < hp0, "the first bite lands on the step in");
+	const x0 = st.p.x;
+	step(st, { mx: 1 });
+	const stride = st.p.x - x0;
+	assert(Math.abs(stride - PLAYER_SPEED * CRACK.slow / TPS) < 1e-9, `wading is slow (${stride} a tick)`);
+	advance(st, () => st.p.x > 13.6, () => ({ mx: 1 }));
+	assert(crack.open, "crossed while it was still open");
+	assert(hp0 - st.p.hp > CRACK.dmg, `wading costs more than one bite (${hp0 - st.p.hp})`);
+	// Standing on a bridge as it fails: you stay where you are and start to burn.
+	advance(st, () => !crack.open);
+	advance(st, () => st.p.x < 12.5, () => ({ mx: -1 }));
+	const at = { x: st.p.x, y: st.p.y }, hp1 = st.p.hp;
+	advance(st, () => crack.open);
+	assert.deepEqual({ x: st.p.x, y: st.p.y }, at, "a failing bridge does not throw you");
+	step(st, {});                                     // the bite comes on the next tick
+	assert(st.p.hp < hp1, "and it hurts");
+	// The fissure's permanent void wades the same way.
+	const solid = createSim({ ...dungeon, cracks: [],
+		tiles: dungeon.tiles.map((row, y) => y === 0 || y === 16 ? row : row.slice(0, 12) + "x" + row.slice(13)) }, CHARACTERS.ranger.gear);
+	solid.enemies[0].dormant = true;
+	const hp2 = solid.p.hp;
+	advance(solid, () => solid.p.x > 13.6, () => ({ mx: 1 }));
+	assert(solid.p.hp < hp2 - CRACK.dmg, `the fissure hurts to wade (${hp2 - solid.p.hp})`);
+	assert(solid.enemies.every((e) => !inCrack(solid, e)), "enemies stay out of it");
+});
+
+test("every ability waits one second between casts, the Ninja's counter included", () => {
+	for (const id of Object.keys(CHARACTERS)) {
+		const st = encounter("warden", [], CHARACTERS[id].gear);
+		st.enemies[0].active = false;
+		assert.equal(ABILITY_COOLDOWN, TPS);
+		const cast = () => { st.p.mp = st.stats.maxMp; step(st, { ability: true, ax: 1, ay: 0 }); return st.p.mp < st.stats.maxMp; };
+		assert(cast(), `${id} casts`);
+		for (let i = 0; i < 20; i++) step(st, {});
+		assert(!cast(), `${id} cannot cast again inside a second`);
+		for (let i = 0; i < TPS; i++) step(st, {});
+		assert(cast(), `${id} casts again after a second`);
+	}
 });

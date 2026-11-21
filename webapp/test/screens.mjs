@@ -10273,7 +10273,7 @@ try {
 					// doorway's row, then back left, so the walk below starts where it did.
 					await page.mouse.move(box.x + box.width * 0.8, box.y + box.height * 0.5);
 					await page.keyboard.press("Space");
-					await page.clock.runFor(450);
+					await page.clock.runFor(1050);                 // the one-second ability cooldown
 					await page.mouse.move(box.x + box.width * 0.1, box.y + box.height * 0.5);
 					await page.keyboard.press("Space");
 					await page.clock.runFor(450);
@@ -10342,11 +10342,18 @@ try {
 			await page.clock.runFor(800);
 			await page.keyboard.up("r");
 			await fresh(3, "Hold R");
+			// End run stops the fight on the Run ended screen: Play again and the replay,
+			// no Choose character, and the corner button leads to the main menu.
 			await page.getByRole("button", { name: "End run" }).click();
+			await page.getByRole("heading", { name: "Run ended" }).waitFor();
+			const endedButtons = await page.locator(".br-result button").allInnerTexts();
+			if (endedButtons.join("|") !== "Play again|Watch replay" || await page.getByRole("button", { name: "Choose character" }).count())
+				throw new Error(`Run ended offers: ${endedButtons.join(", ")}`);
+			await page.getByRole("button", { name: "Main menu" }).click();
 			const row = page.locator(".br-board tbody tr").filter({ hasText: "Guest" }).filter({ hasText: time });
 			await row.first().waitFor();
 			if (errors.length) throw new Error(errors.join(", "));
-			log("  OK   Boss Rush clears three arenas by portal, posts its time, and replays the run; Play again and holding R restart it");
+			log("  OK   Boss Rush clears three arenas by portal, posts its time, and replays the run; Play again and holding R restart it; End run shows the run's end");
 		} catch (error) {
 			shell.push("bossrush: three-boss run and leaderboard");
 			log(`  FAIL Boss Rush  ${error.message}`);

@@ -287,6 +287,18 @@ function RushRun({ run, onLeave, onRestart }) {
 		syncClock().catch(() => {}); // Save retries any clock events that could not be sent.
 	}, [stopClock, syncClock]);
 
+	// End run: the fight stops where it stands and the run ends as a death would, so
+	// the replay and Play again are one click away (owner's ask, 2026-11-21).
+	const quit = useRef(false);
+	const endRun = useCallback(() => {
+		quit.current = true;
+		pause.current = false;
+		setPaused(false);
+		clock.current.active = false;
+		stopClock();
+		setStatus("ended");
+	}, [stopClock]);
+
 	const save = useCallback(async () => {
 		setBusy(true);
 		setError("");
@@ -328,43 +340,41 @@ function RushRun({ run, onLeave, onRestart }) {
 		if (event === "won") save();
 	}, [save, stopClock, syncClock]);
 
+	const over = status === "won" || status === "dead" || status === "ended";
 	return <main className="br-run">
 		<header className="br-run-head">
 			<div><span className="br-stage">Boss {stage + 1} / {run.stages.length}</span> <strong>{dungeon.name}</strong></div>
 			<time aria-label="Run time">{formatTime(savedTime ?? elapsed)}</time>
-			<button type="button" className="btn btn-outline" disabled={busy || paused} onClick={onLeave}>
-				{status === "won" || status === "dead" ? "Characters" : "End run"}
-			</button>
+			{over ? <button type="button" className="btn btn-outline" disabled={busy} onClick={onLeave}>Main menu</button>
+				: <button type="button" className="btn btn-outline" disabled={busy || paused || status === "advance"} onClick={endRun}>End run</button>}
 		</header>
 		<div className="br-arena">
 			<Encounter key={stage} stage={stage} dungeon={dungeon} character={run.character} final={final} onEvent={fightEvent}
-				carriedLow={carriedLow} pause={pause} changePause={changePause} recording={recording.current} />
+				carriedLow={carriedLow} pause={pause} changePause={changePause} recording={recording.current} quit={quit} />
 			{paused && <div className="br-shade">
 				<section className="br-panel br-result" role="dialog" aria-modal="true" aria-labelledby="br-pause-title">
 					<h2 id="br-pause-title">Paused</h2>
 					<p>The run timer is paused.</p>
 					<button type="button" className="btn btn-outline" autoFocus onClick={() => changePause(false)}>Resume</button>
-					<button type="button" className="btn btn-outline" onClick={onLeave}>End run</button>
+					<button type="button" className="btn btn-outline" onClick={endRun}>End run</button>
 				</section>
 			</div>}
-			{(status === "advance" || status === "won" || status === "dead") && <div className="br-shade">
+			{(status === "advance" || over) && <div className="br-shade">
 				<section className="br-panel br-result" aria-live="polite">
-					<h2>{status === "won" ? "Boss Rush cleared" : status === "dead" ? "Run ended" : `${dungeon.boss_name} defeated`}</h2>
+					<h2>{status === "won" ? "Boss Rush cleared" : status === "dead" || status === "ended" ? "Run ended" : `${dungeon.boss_name} defeated`}</h2>
 					{status === "won" && <p className="br-final-time">{formatTime(savedTime ?? elapsed)}</p>}
 					{busy && <p>{final ? "Posting your time…" : "Entering next rift…"}</p>}
 					{savedTime !== null && <p>Time posted to the leaderboard.</p>}
-					{status === "dead" && <p>You reached {dungeon.boss_name}, boss {stage + 1} of {run.stages.length}.</p>}
+					{(status === "dead" || status === "ended") && <p>You reached {dungeon.boss_name}, boss {stage + 1} of {run.stages.length}.</p>}
 					{error && <p className="br-error">{error}</p>}
 					{error && <button type="button" className="btn btn-outline" onClick={save}>
 						{final ? "Retry posting time" : "Retry portal"}
 					</button>}
-					{(status === "won" || status === "dead") && <button type="button" className="btn btn-gold"
+					{over && <button type="button" className="btn btn-gold"
 						disabled={restarting} onClick={restartNow}>{restarting ? "Opening rift…" : "Play again"}</button>}
-					{(status === "won" || status === "dead") && <button type="button" className="btn btn-outline"
+					{over && <button type="button" className="btn btn-outline"
 						disabled={restarting} onClick={() => setWatching(true)}>Watch replay</button>}
-					{status !== "advance" && <button type="button" className="btn btn-outline" disabled={busy} onClick={onLeave}>
-						{status === "won" && savedTime !== null ? "View leaderboard" : "Choose character"}
-					</button>}
+					{status === "won" && savedTime !== null && <button type="button" className="btn btn-outline" onClick={onLeave}>View leaderboard</button>}
 				</section>
 			</div>}
 		</div>
@@ -380,7 +390,7 @@ function RushRun({ run, onLeave, onRestart }) {
 	</main>;
 }
 
-function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, pause, changePause, recording }) {
+function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, pause, changePause, recording, quit }) {
 	const canvas = useRef(null);
 	useEffect(() => {
 		const cv = canvas.current;
@@ -429,6 +439,7 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, paus
 		}
 
 		function frame(now) {
+			if (quit.current) ended = true;                 // End run: freeze where it stands
 			acc = pause.current ? 0 : acc + Math.min(100, now - last);
 			last = now;
 			while (!ended && acc >= STEP_MS) { acc -= STEP_MS; tick(); }

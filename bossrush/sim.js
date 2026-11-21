@@ -65,8 +65,8 @@ export const HEAL = 35;                              // a heal pickup: +HP and +
  *   volley   — 55 damage in all (its arrows share it), +10 a tier;
  *   starfall — 45, +10 a tier;
  *   field    — a 2.0-tile radius, +10% of that a tier; burns 6 a pulse, +20% a tier;
- *   counter  — the next shot x2.0, +0.4 a tier (x6 at tier 10), with a FLAT cooldown:
- *              its cost rising cannot alone stop a cheap charm being the best guard.
+ *   counter  — the next shot x2.0, +0.4 a tier (x6 at tier 10).
+ * Every ability shares one flat ABILITY_COOLDOWN (below).
  * Ability power multiplies the effects, never the cost. */
 export const ABILITY_COST = 30;
 export const ABILITY_COST_PER_TIER = 5;
@@ -75,18 +75,19 @@ export const ABILITY = {
 	volley: { dmg: 55, perTier: 10 },
 	starfall: { dmg: 45, perTier: 10 },
 	slow: { radius: 2, radiusPerTier: 0.1, pulse: 6, pulsePerTier: 0.2 },
-	counter: { mult: 1.4, perTier: 0.2, cooldown: 6 * TPS },   // 2.0x with the Boss Rush kit (owner, 2026-11-21)
+	counter: { mult: 1.4, perTier: 0.2 },   // 2.0x with the Boss Rush kit (owner, 2026-11-21)
 };
 export const SHIELD_DURATION = 5 * TPS;
 export const SLOW_DURATION = 4 * TPS;
 export const SLOW_RADIUS = 2;
 export const SLOW_FACTOR = 0.45;
 
-/* NO ABILITY COOLDOWN (owner's call, 2026-11-19, reversing 2026-11-18's): MP is the
- * only limit on casting — except the Ninja's counter, which has a flat 6s one
- * (ABILITY.counter.cooldown, owner's call the same day) so it is never constant safety. The Paladin's field also BURNS (owner's ask, 2026-11-19):
+/* ONE ABILITY COOLDOWN, 1s, for every ability (owner's call, 2026-11-21; the counter's
+ * own 6s went with it): MP still sets how often you can cast over a fight, the
+ * cooldown only stops two casts landing back to back. The Paladin's field also BURNS (owner's ask, 2026-11-19):
  * every SLOW_PULSE ticks it hits every enemy inside it for its damage — slight,
  * tier- and Ability-power-scaled like the other abilities' damage. */
+export const ABILITY_COOLDOWN = TPS;
 export const SLOW_PULSE = 30;
 export const SLOW_DAMAGE = 6;
 // Starfall (the Diviner): a star lands where you aim, after a beat, on everything near it.
@@ -165,13 +166,16 @@ export const BOSS_HP = { tidewarden: 3000, breach: 3000, pyre: 3000, warden: 300
 
 /* CRACKS (the Fracture, design §14.4a): authored lines of floor that open into void
  * while their room is being fought. Each counts `t` round a `period`: closed, then
- * `warn` ticks of a flickering seam, then `open` ticks as void (walking blocked,
- * shots fly over). One that opens under a body throws it to the nearest solid
- * ground, and hurts the player `dmg`. Groups start `stagger` apart. */
+ * `warn` ticks of a flickering seam, then `open` ticks as void (shots fly over).
+ * Groups start `stagger` apart. An open crack is a wall to enemies (one that opens
+ * under an enemy throws it to solid ground), but the PLAYER can wade it (owner,
+ * 2026-11-21: a bridge failing under you used to throw you to a bank): at `slow` x
+ * speed, taking `dmg` every `every` ticks from the step in. The same goes for the
+ * fissure's permanent void ("x"), so the whole line can be waded (owner, same day). */
 // Offset crossings never fail at the same time. Each warning lasts 1.75s
 // (0.5s longer since 2026-11-21, owner's call), even while the Schism doubles
 // the rate of the cycle.
-export const CRACK = { period: 480, warn: 105, open: 210, stagger: 240, start: 60, dmg: 14 };
+export const CRACK = { period: 480, warn: 105, open: 210, stagger: 240, start: 60, dmg: 12, every: 20, slow: 0.4 };
 
 /* Each weapon fires its own PATTERN, not just its own numbers (owner's ask,
  * 2026-11-18). `rate` is volleys a second; a volley is `shots` arrows fanned
@@ -394,26 +398,29 @@ function tileAt(st, x, y) {
 	}
 	if (st.cracks?.length) {
 		const k = st.crackAt[ty * st.w + tx];
-		if (k !== undefined && st.cracks[k].open) return "x";
+		if (k !== undefined && st.cracks[k].open) return "v";   // an open crack: void the player may wade
 	}
 	return st.tiles[ty][tx];
 }
 export const doorAt = (st, x, y) => tileAt(st, x, y);
-const walkSolid = (c) => c === "#" || c === "o" || c === "~" || c === "=" || c === "x";
+const walkSolid = (c) => c === "#" || c === "o" || c === "~" || c === "=" || c === "x" || c === "v";
+const wadeSolid = (c) => c !== "v" && c !== "x" && walkSolid(c);   // the player's feet: the whole fissure is crossable
 const shotSolid = (c) => c === "#" || c === "o" || c === "=" || c === "|";
 
-function blocked(st, x, y, r) {
+function blocked(st, x, y, r, solid = walkSolid) {
 	for (let ty = Math.floor(y - r); ty <= Math.floor(y + r); ty++)
 		for (let tx = Math.floor(x - r); tx <= Math.floor(x + r); tx++)
-			if (walkSolid(tileAt(st, tx, ty))) return true;
+			if (solid(tileAt(st, tx, ty))) return true;
 	return false;
 }
 
 /* Move a circle (as its bounding square) axis by axis, so it slides along walls. */
-function moveBody(st, b, dx, dy) {
-	if (dx !== 0 && !blocked(st, b.x + dx, b.y, b.r)) b.x += dx;
-	if (dy !== 0 && !blocked(st, b.x, b.y + dy, b.r)) b.y += dy;
+function moveBody(st, b, dx, dy, solid = walkSolid) {
+	if (dx !== 0 && !blocked(st, b.x + dx, b.y, b.r, solid)) b.x += dx;
+	if (dy !== 0 && !blocked(st, b.x, b.y + dy, b.r, solid)) b.y += dy;
 }
+/* Is the player standing in the void — an open crack or the fissure (by the middle of their feet)? */
+export const inCrack = (st, b = st.p) => { const c = tileAt(st, b.x, b.y); return c === "v" || c === "x"; };
 
 /* The level `xp` reaches on the server's table (`levels[n]` = the XP to BE
  * level n + 1 — the state route ships it, so the two sides read one table). */
@@ -642,12 +649,6 @@ function stepCracks(st) {
 		if (c.open && !was) opened = true;
 	}
 	if (!opened) return;
-	const p = st.p;
-	if (blocked(st, p.x, p.y, p.r)) {
-		const to = nearestClear(st, p);
-		if (to) { p.x = to.x; p.y = to.y; }
-		hurtPlayer(st, CRACK.dmg, "rift:crack");
-	}
 	for (const e of st.enemies) {
 		// The Schism hovers over the fissure until its first blink.
 		if (e.form === "breach" && e.x === e.homeX && e.y === e.homeY) continue;
@@ -1506,9 +1507,14 @@ export function step(st, input) {
 	// movement
 	let mx = input.mx || 0, my = input.my || 0;
 	if (mx && my) { mx *= 0.7071067811865476; my *= 0.7071067811865476; }
-	const speed = PLAYER_SPEED * (s.moveMult || 1);                // the Windrunner's Cloak
-	if (p.dashLeft > 0) { p.dashLeft--; moveBody(st, p, p.dashX, p.dashY); }   // the Ranger's Sidestep
-	else moveBody(st, p, mx * speed * DT, my * speed * DT);
+	const wading = inCrack(st);
+	const speed = PLAYER_SPEED * (s.moveMult || 1) * (wading ? CRACK.slow : 1);   // the Windrunner's Cloak; an open crack drags
+	if (p.dashLeft > 0) { p.dashLeft--; moveBody(st, p, p.dashX, p.dashY, wadeSolid); }   // the Ranger's Sidestep
+	else moveBody(st, p, mx * speed * DT, my * speed * DT, wadeSolid);
+	if (inCrack(st) && !(st.tick - (p.crackHitAt ?? -1e9) < CRACK.every)) {
+		p.crackHitAt = st.tick;                                      // the first bite lands on the step in
+		hurtPlayer(st, CRACK.dmg, "rift:crack");
+	}
 	trailEmber(st, mx !== 0 || my !== 0);                          // the Emberweave
 
 	// regeneration, never past the recovery limit (design §9.3)
@@ -1696,6 +1702,7 @@ export function playerFire(st, input) {
 	if (p.abilityCd > 0) p.abilityCd--;
 	if (input.ability && s.abilityKind && p.mp >= s.abilityCost && !(p.abilityCd > 0) && !(p.dashLeft > 0)) {
 		p.mp -= s.abilityCost;
+		p.abilityCd = ABILITY_COOLDOWN;
 		if (s.kindle) p.kindled = SPECIAL.kindling.shots;       // Kindling: the next volleys burn
 		if (s.abilityKind === "volley" && s.gale) {           // the Gale Quiver: one arrow through everything
 			const q = UNIQUE.gale;
@@ -1739,7 +1746,6 @@ export function playerFire(st, input) {
 				dmg: s.dmg * SIDESTEP.mult, r: 0.19, life: Math.round(s.range / s.shotSpeed * TPS), pierce: 0, hit: [], power: true });
 		} else if (s.abilityKind === "counter") {
 			p.counterUntil = st.tick + COUNTER_WINDOW;
-			p.abilityCd = ABILITY.counter.cooldown;          // the one ability with a cooldown
 		}
 	}
 }
@@ -1973,7 +1979,7 @@ export function fingerprint(st) {
 		st.bellkeeper && [st.bellkeeper.next, st.bellkeeper.phase2, st.bellkeeper.rungOfLit, st.bellkeeper.lastLit.join(""),
 			st.bellkeeper.bells.map((bell) => bell.litUntil)],
 		st.addSeq,
-		st.p.dashLeft, r(st.p.dashX || 0), r(st.p.dashY || 0),
+		st.p.dashLeft, r(st.p.dashX || 0), r(st.p.dashY || 0), st.p.crackHitAt ?? 0,
 		st.enemies.map((e) => [e.id, r(e.x), r(e.y), r(e.hp), e.cd, e.tele, e.scd, e.mode, e.modeT, e.ward, e.active,
 			e.arms ? [r(e.arms.at), e.arms.spin, e.arms.gaps.join(","), e.arms.hitAt] : 0]),
 		st.sealed, st.roomLeft,
