@@ -74,6 +74,19 @@
 }
 .br-sets { margin: 12px 0 20px; }
 .br-set:disabled { cursor: default; }
+.br-set-pick { display: grid; gap: 6px; align-content: start; min-width: 0; }
+.br-set-pick .br-set { width: 100%; }
+.br-first { display: grid; gap: 4px; color: var(--br-muted); font-size: .9rem; }
+.br-first select {
+	width: 100%;
+	padding: 6px;
+	font: inherit;
+	font-size: max(16px, 1rem);
+	color: var(--br-ink);
+	background: #2b2323;
+	border: 1px solid #514139;
+	border-radius: 5px;
+}
 .br-filters > div { display: grid; gap: 4px; min-width: 0; }
 .br-filters label { color: var(--br-muted); }
 .br-filters select {

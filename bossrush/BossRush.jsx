@@ -88,6 +88,7 @@ export default function BossRush({ authUser, onExit }) {
 	const [pickedCharacter, setPickedCharacter] = useState(null);
 	const [boardSet, setBoardSet] = useState("");
 	const [boardCharacter, setBoardCharacter] = useState("");
+	const [firstBoss, setFirstBoss] = useState({});          // per set: a boss key, or "" for random
 
 	useEffect(() => {
 		const controller = new AbortController();
@@ -109,7 +110,8 @@ export default function BossRush({ authUser, onExit }) {
 		try {
 			const headers = { "Content-Type": "application/json" };
 			if (authUser?.session_token) headers.Authorization = `Bearer ${authUser.session_token}`;
-			const attempt = await request("/runs", { method: "POST", headers, body: JSON.stringify({ character: pickedCharacter, set_id: setId, starter_timer: true }) });
+			const attempt = await request("/runs", { method: "POST", headers, body: JSON.stringify({ character: pickedCharacter, set_id: setId, starter_timer: true,
+				...(firstBoss[setId] ? { first: firstBoss[setId] } : {}) }) });
 			if (!attempt.starter_timer) throw new Error("Boss Rush timing is updating. Try again shortly.");
 			setBoardSet(setId);
 			setRun({ ...attempt, character: pickedCharacter });
@@ -129,7 +131,7 @@ export default function BossRush({ authUser, onExit }) {
 				<main className="br-menu">
 					<section className="br-panel br-select">
 						<h1>Choose your character</h1>
-						<p>Choose a set after picking your character. Its three bosses appear in random order.</p>
+						<p>Choose a set after picking your character. Its three bosses appear in random order, unless you pick the first.</p>
 						<div className="br-characters">
 							{Object.entries(CHARACTERS).map(([id, character]) => <button
 								key={id} type="button" className="br-character" aria-pressed={pickedCharacter === id}
@@ -144,12 +146,21 @@ export default function BossRush({ authUser, onExit }) {
 							onClick={() => setSetsRetry((n) => n + 1)}>Retry</button></p>}
 						{!setsError && sets.length === 0 && <p role="status">Loading boss sets…</p>}
 						<div className="br-sets">
-							{sets.map((set) => <button key={set.id} type="button" className="br-character br-set"
-								disabled={!set.playable || !pickedCharacter || starting} onClick={() => start(set.id)}>
-								<strong>{set.name}</strong>
-								<span>{set.bosses.join(", ")}</span>
-								{!set.playable && <span>Coming soon</span>}
-							</button>)}
+							{sets.map((set) => <div key={set.id} className="br-set-pick">
+								<button type="button" className="br-character br-set"
+									disabled={!set.playable || !pickedCharacter || starting} onClick={() => start(set.id)}>
+									<strong>{set.name}</strong>
+									<span>{set.bosses.join(", ")}</span>
+									{!set.playable && <span>Coming soon</span>}
+								</button>
+								{set.playable && set.keys && <label className="br-first">First boss
+									<select value={firstBoss[set.id] || ""} disabled={starting}
+										onChange={(e) => setFirstBoss((all) => ({ ...all, [set.id]: e.target.value }))}>
+										<option value="">Random</option>
+										{set.keys.map((key, i) => <option key={key} value={key}>{set.bosses[i]}</option>)}
+									</select>
+								</label>}
+							</div>)}
 						</div>
 						{starting && <p role="status">Opening rift…</p>}
 						{error && <p className="br-error" role="alert">{error}</p>}

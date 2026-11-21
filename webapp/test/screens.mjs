@@ -10239,13 +10239,14 @@ try {
 		const page = await ctx.newPage();
 		const errors = [];
 		page.on("pageerror", (error) => errors.push(error.message));
-		let order;
+		let order, firstId;
 		// Use the real routes, rooms and portal positions. Reduce HP so this test
 		// exercises the clear flow without having to win three full-length fights.
 		await page.route("**/bossrush/runs", async (route) => {
 			const response = await route.fetch();
 			const run = await response.json();
 			order = run.stages.map((d) => d.name);
+			firstId = run.stages[0]?.id;
 			for (const d of run.stages) d.scale = { hp: 0.003, dmg: 0, speed: 0 };
 			await route.fulfill({ response, json: run });
 		});
@@ -10253,6 +10254,10 @@ try {
 			await page.clock.install();
 			await page.goto(`http://localhost:${PORT}/bossrush`);
 			await page.getByRole("button", { name: /^Ranger/ }).click();
+			const pick = page.locator(".br-set-pick").filter({ has: page.getByRole("button", { name: /^Rift Trio/ }) });
+			const firstMenu = pick.getByLabel("First boss");
+			if (await firstMenu.inputValue() !== "") throw new Error("The first boss should default to Random");
+			await firstMenu.selectOption("ashen");
 			await page.getByRole("button", { name: /^Rift Trio/ }).click();
 			for (let i = 0; i < 3; i++) {
 				await page.locator(".br-stage").filter({ hasText: `Boss ${i + 1} / 3` }).waitFor();
@@ -10270,8 +10275,12 @@ try {
 					if (await canvas.evaluate((cv) => cv.toDataURL()) !== frozen) throw new Error("Pause let the arena move");
 					await page.keyboard.press("Escape");
 					await pause.waitFor({ state: "detached" });
+					// Sidestep dashes across the aim; a second one with no lean dashes back,
+					// so the walk below still starts on the doorway's row.
 					await page.keyboard.press("Space");
-					await page.clock.runFor(900);
+					await page.clock.runFor(450);
+					await page.keyboard.press("Space");
+					await page.clock.runFor(450);
 					const [mp, max] = (await canvas.getAttribute("data-resource")).split(" / ").map(Number);
 					if (mp >= max) throw new Error("Space did not spend MP");
 				}
@@ -10292,6 +10301,7 @@ try {
 					await page.clock.runFor(80);
 				}
 			}
+			if (firstId !== "ashen") throw new Error(`Picking the first boss opened on ${firstId}`);
 			await page.getByText("Time posted to the leaderboard.").waitFor();
 			const time = await page.locator(".br-final-time").innerText();
 			await page.getByRole("button", { name: "View leaderboard" }).click();

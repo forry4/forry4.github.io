@@ -26,6 +26,8 @@ class StartIn(BaseModel):
     character: Character
     set_id: str = DEFAULT_BOSS_SET
     starter_timer: bool = False
+    # The boss to fight first (a key of the set), or None for a random order (owner, 2026-11-21).
+    first: str | None = None
 
 
 def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
@@ -64,7 +66,7 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
     def sets(lantern: bool = False):
         # Bundles cached before Lantern Trio shipped cannot simulate its bosses.
         return {"sets": [
-            {"id": set_id, "name": name, "bosses": [BOSSES[key][1] for key in bosses],
+            {"id": set_id, "name": name, "bosses": [BOSSES[key][1] for key in bosses], "keys": list(bosses),
              "playable": len(bosses) == STAGES_PER_RUN and (set_id != "lantern-trio" or lantern)}
             for set_id, (name, bosses) in BOSS_SETS.items()
         ]}
@@ -96,6 +98,8 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
         _, bosses = boss_set
         if len(bosses) != STAGES_PER_RUN:
             raise HTTPException(409, "This boss set is still in development.")
+        if body.first is not None and body.first not in bosses:
+            raise HTTPException(422, "That boss is not in this set.")
         ip = request.client.host if request.client else "unknown"
         if _starts.exceeded(ip):
             raise HTTPException(429, "Too many starts. Try again in a minute.")
@@ -104,7 +108,11 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
         if token and user is None:
             raise HTTPException(401, "Your session expired. Sign in again to start a run.")
         run_id = secrets.token_urlsafe(24)
-        order = random.sample(bosses, STAGES_PER_RUN)
+        if body.first is None:
+            order = random.sample(bosses, STAGES_PER_RUN)
+        else:   # the chosen boss first, the other two in a random order
+            rest = [key for key in bosses if key != body.first]
+            order = [body.first, *random.sample(rest, len(rest))]
         stages = [arena(rift, f"{run_id}:{rift}") for rift in order]
         now = time.time()
         with closing(connect()) as conn:

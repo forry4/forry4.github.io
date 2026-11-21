@@ -164,3 +164,28 @@ def test_existing_scores_migrate_to_rift_trio_and_future_scores_stay_in_their_se
         {"rank": 1, "name": "Kai", "character": "ranger", "elapsed_ms": 1234},
     ]
     assert board("rift-trio", "diviner") == {"entries": []}
+
+
+def test_a_run_can_open_on_the_boss_you_pick_and_otherwise_stays_random(tmp_path, monkeypatch):
+    monkeypatch.setattr(api, "_starts", api.SlidingWindowLimiter(1000, 60))
+    monkeypatch.setattr(api, "random", __import__("random").Random(7))   # seeded: the checks below cannot flake
+    app = FastAPI()
+    api.setup_boss_rush(app, lambda: _Conn(sqlite3.connect(tmp_path / "runs.db")),
+                        lambda token: None, lambda: None)
+    endpoints = {route.path: route.endpoint for route in app.routes if route.path.startswith("/bossrush")}
+    start, sets = endpoints["/bossrush/runs"], endpoints["/bossrush/sets"]
+    request = SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"))
+    trio = {entry["id"]: entry for entry in sets()["sets"]}["rift-trio"]
+    assert trio["keys"] == ["shallows", "fracture", "ashen"], "the picker gets each boss's key"
+    for key in trio["keys"]:
+        seen = set()
+        for _ in range(30):
+            order = [s["id"] for s in start(api.StartIn(character="ranger", first=key), request, None)["stages"]]
+            assert order[0] == key and sorted(order) == sorted(trio["keys"])
+            seen.add(tuple(order[1:]))
+        assert len(seen) == 2, "the other two still come in either order"
+    with pytest.raises(HTTPException) as wrong:
+        start(api.StartIn(character="ranger", first="warden"), request, None)
+    assert wrong.value.status_code == 422
+    firsts = {start(api.StartIn(character="ranger"), request, None)["stages"][0]["id"] for _ in range(40)}
+    assert firsts == set(trio["keys"]), "with no pick, any boss can open"
