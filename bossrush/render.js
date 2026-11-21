@@ -1,7 +1,7 @@
 // Boss Rush combat baseline from Halcyon Rift's last greybox (d52d2f57).
 // This is a standalone copy for Boss Rush balance changes.
 import { recoveryLimit, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT,
-	BELL_LOCK, CINDERWAKE_BEATS, FULL_DRAW_TICKS, SEAL_TICKS, inFocusZone } from "./sim.js";
+	FULL_DRAW_TICKS, inFocusZone, WARDEN, BELL, FEN, wardenBehind } from "./sim.js";
 
 export const COLORS = {
 	wall: "#3c4a45", wallTop: "#4a5a54", sand: "#a99e80", sandDark: "#a3987a",
@@ -25,10 +25,10 @@ export const COLORS = {
 const SHALLOWS = { floorA: COLORS.sand, floorB: COLORS.sandDark, wall: COLORS.wall, wallTop: COLORS.wallTop };
 const FRACTURE = { floorA: "#3d3550", floorB: "#39324b", wall: "#17131f", wallTop: "#2a2338" };
 const ASHEN = { floorA: "#3b322d", floorB: "#372e29", wall: "#1a1411", wallTop: "#2c221c" };
-const FEN = { floorA: "#354547", floorB: "#303e40", wall: "#171e25", wallTop: "#27323a" };
+const FEN_PAL = { floorA: "#354547", floorB: "#303e40", wall: "#171e25", wallTop: "#27323a" };
 const SEAL_COURT = { floorA: "#44424a", floorB: "#3c3a43", wall: "#1e1d26", wallTop: "#302d3a" };
 const BELL_COURT = { floorA: "#49413a", floorB: "#413a34", wall: "#211c1b", wallTop: "#392e29" };
-const PALETTES = { shallows: SHALLOWS, fracture: FRACTURE, ashen: ASHEN, fen: FEN,
+const PALETTES = { shallows: SHALLOWS, fracture: FRACTURE, ashen: ASHEN, fen: FEN_PAL,
 	"seal-court": SEAL_COURT, "bell-court": BELL_COURT };
 
 function drawMap(g, st, ox, oy, px, width, height, pal = SHALLOWS) {
@@ -215,21 +215,35 @@ export function draw(g, st, { width, height, px, aim, at = here, calm = false, u
 			circle(g, X, Y, r * 0.5, "#ffd27a");
 			circle(g, X, Y, r * 0.26, "#fff7ec");
 		} else if (e.form === "cinderwake") {
-			circle(g, X, Y, r * 1.08, "rgba(241,152,68,.24)");
-			g.save();
-			g.translate(X, Y); g.rotate(Math.PI / 4);
-			g.fillStyle = col; g.fillRect(-r * 0.61, -r * 0.61, r * 1.22, r * 1.22);
+			circle(g, X, Y, r * 1.25, "rgba(241,152,68,.28)");
+			g.save(); g.translate(X, Y); g.rotate(Math.PI / 4 + st.tick * 0.01);
+			g.fillStyle = e.flash > 0 && !calm ? "#fff3ea" : col; g.fillRect(-r * 0.66, -r * 0.66, r * 1.32, r * 1.32);
 			g.restore();
-			circle(g, X, Y, r * 0.38, st.cinderwake.lantern ? "#c5d8e8" : "#fff4ca");
+			circle(g, X, Y, r * 0.42, "#fff4ca");
 		} else if (e.form === "warden") {
-			g.fillStyle = e.flash ? "#faf1ff" : "#aa78d0";
-			g.fillRect(X - r * 0.75, Y - r * 0.75, r * 1.5, r * 1.5);
-			circle(g, X, Y, r * 0.36, "#39254e");
+			const w = st.warden, fx = e.fx ?? 1, fy = e.fy ?? 0, bound = w.chainedUntil > st.tick;
+			if (!bound) {                                 // his gaze: what is in front of him
+				g.fillStyle = "rgba(196,150,240,.10)";
+				g.beginPath(); g.moveTo(X, Y);
+				const a = Math.atan2(fy, fx);
+				g.arc(X, Y, px * 4.5, a - 0.55, a + 0.55); g.closePath(); g.fill();
+			}
+			g.save(); g.translate(X, Y); g.rotate(Math.atan2(fy, fx));
+			g.fillStyle = e.flash ? "#faf1ff" : bound ? "#7d6a8c" : "#aa78d0";
+			g.fillRect(-r * 0.75, -r * 0.75, r * 1.5, r * 1.5);
+			g.fillStyle = "#39254e"; g.fillRect(r * 0.2, -r * 0.3, r * 0.45, r * 0.6);   // his face, toward his gaze
+			const behind = wardenBehind(st, e);
+			g.fillStyle = behind ? "#fff0be" : "rgba(255,240,190,.55)";                    // the weak spot on his back
+			g.beginPath(); g.moveTo(-r * 0.95, 0); g.lineTo(-r * 0.7, -r * 0.22); g.lineTo(-r * 0.45, 0); g.lineTo(-r * 0.7, r * 0.22); g.closePath(); g.fill();
+			g.restore();
+			if (bound) {
+				g.fillStyle = "#fff0be"; g.font = `600 ${Math.round(px * 0.42)}px "Crimson Pro", Georgia, serif`;
+				g.textAlign = "center"; g.fillText("Chained!", X, Y - r - px * 0.5); g.textAlign = "left";
+			}
 		} else if (e.form === "bellkeeper") {
-			const stunned = st.bellkeeper.mode === "stunned";
-			circle(g, X, Y, r, stunned ? (e.flash ? "#fff4bd" : "#cc9755") : "#a88666");
-			circle(g, X, Y, r * 0.73, stunned ? "#6e412d" : "#55453d");
-			circle(g, X, Y, r * 0.25, stunned ? "#ffda89" : "#988373");
+			circle(g, X, Y, r, e.flash ? "#fff4bd" : "#cc9755");
+			circle(g, X, Y, r * 0.73, "#2a140c");
+			circle(g, X, Y, r * 0.5, "#ffb84d"); circle(g, X, Y, r * 0.26, "#fff1c2");
 		} else if (e.form === "breach") {                   // the Breach: a torn violet star
 			const n = 8, spin = st.tick * 0.02;
 			g.beginPath();
@@ -252,9 +266,11 @@ export function draw(g, st, { width, height, px, aim, at = here, calm = false, u
 	}
 
 	drawPlayer(g, p, sx(pp.x), sy(pp.y), px, aim, st.classId, calm);
+	if (st.cinderwake?.carrying) drawLantern(g, sx(pp.x) + px * 0.32, sy(pp.y) - px * 0.3, px, st.tick);   // in your hands
 
 	drawShots(g, st.bullets, sx, sy, px, at);
 	drawDamageNumbers(g, st.damageNumbers || [], sx, sy, px, st.tick);
+	drawFlashes(g, st, width, height, calm);
 	drawHud(g, st, { width, height, px, ui, auto });
 	drawBossBar(g, st, { width, ui, name: bossName });
 }
@@ -274,9 +290,7 @@ function drawAutoTag(g, x, bottom, ui) {
 function drawBossBar(g, st, { width, ui, name }) {
 	const b = st.enemies.find((e) => e.type === "boss" && e.active && e.hp > 0);
 	if (!b) return;
-	const cue = b.form === "cinderwake" ? st.cinderwake : null;
-	const beat = cue && CINDERWAKE_BEATS[cue.index];
-	const W = Math.min(width * (beat ? 0.64 : 0.44), 520 * ui), H = Math.max(8, 12 * ui), X = width / 2 - W / 2, Y = 30 * ui;
+	const W = Math.min(width * 0.5, 560 * ui), H = Math.max(8, 12 * ui), X = width / 2 - W / 2, Y = 30 * ui;
 	g.font = `600 ${Math.round(14 * ui)}px "Cinzel", Georgia, serif`;
 	g.textAlign = "center"; g.textBaseline = "middle";
 	g.fillStyle = "rgba(10,12,14,.75)"; g.fillText(name, width / 2 + 1, Y - 11 * ui + 1.5);
@@ -284,19 +298,9 @@ function drawBossBar(g, st, { width, ui, name }) {
 	g.textAlign = "left";
 	g.fillStyle = "rgba(10,12,14,.78)"; g.fillRect(X - 3, Y - 3, W + 6, H + 6);
 	g.fillStyle = "#3a1f24"; g.fillRect(X, Y, W, H);
-	g.fillStyle = beat ? (beat.damage ? COLORS.cinderwake : "#8dddc8") : COLORS.boss;
-	const filled = beat ? Math.min(1, cue.progress / beat.goal) : b.hp / b.maxHp;
-	g.fillRect(X, Y, W * filled, H);
-	const bellkeeper = st.bellkeeper;
-	let hint;
-	if (beat) hint = `${cue.index + 1}/${CINDERWAKE_BEATS.length} · ${beat.name} · ${beat.damage ? "Land hits" : "Stay with the lantern"}`;
-	else if (b.form === "warden") {
-		const used = st.seals.filter((seal) => seal.progress === SEAL_TICKS).length;
-		hint = used < st.seals.length ? `${used}/${st.seals.length} seals · Hold a seal to deal 300 damage` : "All seals captured";
-	} else if (bellkeeper) {
-		hint = bellkeeper.mode === "stunned" ?
-			`Stunned · ${Math.ceil((bellkeeper.until - st.tick) / TPS)}s to attack` : "Lure the charge into a bell";
-	}
+	g.fillStyle = COLORS.boss;
+	g.fillRect(X, Y, W * (b.hp / b.maxHp), H);
+	const hint = trioHint(st, b), trio = !!(st.warden || st.bellkeeper || st.cinderwake);
 	if (hint) {
 		g.font = `600 ${Math.round(15 * ui)}px "Crimson Pro", Georgia, serif`;
 		g.textAlign = "center";
@@ -304,7 +308,7 @@ function drawBossBar(g, st, { width, ui, name }) {
 		g.fillStyle = "#fff4ca"; g.fillText(hint, width / 2, Y + H + 13 * ui);
 		g.textAlign = "left";
 	}
-	if (!beat && b.phase === 1) { g.fillStyle = "rgba(255,240,235,.8)"; g.fillRect(X + W / 2 - 1, Y - 2, 2, H + 4); }
+	if (trio ? b.hp > b.maxHp / 2 : b.phase === 1) { g.fillStyle = "rgba(255,240,235,.8)"; g.fillRect(X + W / 2 - 1, Y - 2, 2, H + 4); }
 	if (st.bankSweep) {
 		g.font = `600 ${Math.round(15 * ui)}px "Crimson Pro", Georgia, serif`;
 		g.textAlign = "center";
@@ -317,6 +321,26 @@ function drawBossBar(g, st, { width, ui, name }) {
 		g.fillText(`Warded ×${b.ward}`, X + W, Y + H + 10 * ui);
 		g.textAlign = "left";
 	}
+}
+
+const secs = (st, until) => `${Math.max(0, (until - st.tick) / TPS).toFixed(1)}s`;
+/* What the Lantern Trio's mechanic wants of you right now, under its bar. */
+function trioHint(st, b) {
+	const w = st.warden, bk = st.bellkeeper, c = st.cinderwake;
+	if (w) {
+		if (w.chainedUntil > st.tick) return `Chained · ${secs(st, w.chainedUntil)} — double damage`;
+		if (w.glow) return `Stand in the glowing seal · ${secs(st, w.glow.at)}`;
+		return "His back takes extra damage";
+	}
+	if (bk) {
+		const lit = bk.bells.filter((bell) => bell.litUntil > st.tick).length;
+		if (lit) return lit > 1 ? "Shoot both glowing bells" : "Shoot the glowing bell";
+	}
+	if (c) {
+		if (c.carrying) return "Walk the lantern into a dark brazier";
+		if (c.lantern) return "It dropped a lantern — carry it to a brazier to burn it";
+	}
+	return null;
 }
 
 /* The boss's mortar: burning ground (a flickering orange pool that fades in its last
@@ -333,16 +357,6 @@ function drawHazards(g, st, sx, sy, px) {
 		g.beginPath();
 		g.moveTo(sx(x0), edge); g.lineTo(sx(x1), edge);
 		g.stroke();
-	}
-	const lantern = st.cinderwake?.lantern;
-	if (lantern) {
-		const x = sx(lantern.x), y = sy(lantern.y);
-		circle(g, x, y, px * lantern.r, lantern.lit ? "rgba(146,255,213,.30)" : "rgba(250,207,114,.17)");
-		g.strokeStyle = lantern.lit ? "#b4ffe2" : "#f9cb72";
-		g.lineWidth = Math.max(2, px * 0.04);
-		g.beginPath(); g.arc(x, y, px * lantern.r, 0, Math.PI * 2); g.stroke();
-		circle(g, x, y, px * 0.23, "#ffbd52");
-		circle(g, x, y, px * 0.11, "#fff8cb");
 	}
 	for (const f of st.embers || []) {                // the player's own fire: pale blue, white at heart
 		const left = f.until - st.tick, fade = Math.min(1, left / TPS);
@@ -361,49 +375,126 @@ function drawHazards(g, st, sx, sy, px) {
 		const k = Math.min(1, Math.max(0, 1 - (m.at - st.tick) / (m.d || MORTAR.delay)));
 		g.strokeStyle = "#ff5a3c";
 		g.lineWidth = lw;
+		if (m.square) {
+			g.strokeRect(sx(m.x - m.r), sy(m.y - m.r), 2 * m.r * px, 2 * m.r * px);
+			g.fillStyle = "rgba(255,90,60,.28)";
+			g.fillRect(sx(m.x - m.r * k), sy(m.y - m.r * k), 2 * m.r * k * px, 2 * m.r * k * px);
+			continue;
+		}
 		g.beginPath(); g.arc(sx(m.x), sy(m.y), px * m.r, 0, Math.PI * 2); g.stroke();
 		circle(g, sx(m.x), sy(m.y), px * m.r * k, "rgba(255,90,60,.3)");
 	}
 }
 
 function drawRaidObjectives(g, st, sx, sy, px) {
-	for (const seal of st.seals) {
-		const x = sx(seal.x), y = sy(seal.y), r = seal.r * px;
-		const used = seal.progress === SEAL_TICKS;
-		circle(g, x, y, r, used ? "rgba(134,167,152,.11)" : "rgba(160,123,208,.18)");
-		g.strokeStyle = used ? "#658a7c" : "#ac8bc6"; g.lineWidth = Math.max(2, px * 0.05);
-		g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.stroke();
-		if (seal.progress && !used) {
-			g.strokeStyle = seal.occupied ? "#fff0be" : "#d0a6ef"; g.lineWidth *= 2;
-			g.beginPath(); g.arc(x, y, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * seal.progress / SEAL_TICKS); g.stroke();
-		}
-		if (seal.volley) {
-			const from = sy(seal.volley.y), to = sy(seal.volley.endY);
-			g.fillStyle = "rgba(238,123,180,.30)";
-			g.fillRect(x - px * 0.89, Math.min(from, to), px * 1.78, Math.abs(from - to));
-		}
-	}
-	const state = st.bellkeeper;
-	if (!state) return;
-	const boss = st.enemies.find((e) => e.form === "bellkeeper" && e.active && e.hp > 0);
-	if (boss && (state.mode === "windup" || state.mode === "charge")) {
-		const x = sx(boss.x), y = sy(boss.y);
-		const tracking = state.mode === "windup" && state.until - st.tick > BELL_LOCK;
-		g.strokeStyle = tracking ? "rgba(250,208,146,.40)" : "rgba(255,124,98,.78)";
-		g.lineWidth = Math.max(2, px * (tracking ? 0.10 : 0.18));
-		g.beginPath(); g.moveTo(x, y); g.lineTo(x + state.dx * px * 20, y + state.dy * px * 20); g.stroke();
-	}
-	for (const bell of state.bells) {
-		const x = sx(bell.x), y = sy(bell.y), r = bell.r * px;
-		const ready = bell.readyAt <= st.tick;
-		circle(g, x, y, r, ready ? "#87623f" : "#51463e");
-		circle(g, x, y, r * 0.72, ready ? "#efbc67" : "#7e6d53");
-		circle(g, x, y, r * 0.24, ready ? "#ffe8a4" : "#b29370");
-		if (boss && bell.pulseAt > st.tick && bell.pulseAt - st.tick <= 34) {
-			g.strokeStyle = "#ffb067"; g.lineWidth = Math.max(2, px * 0.08);
-			g.beginPath(); g.arc(x, y, r * 2, 0, Math.PI * 2); g.stroke();
+	const lw = Math.max(2, px * 0.05);
+	const w = st.warden;
+	if (w) {
+		const boss = st.enemies.find((e) => e.form === "warden" && e.hp > 0);
+		const bound = w.chainedUntil > st.tick;
+		for (const [i, seal] of w.seals.entries()) {
+			const x = sx(seal.x), y = sy(seal.y), r = seal.r * px;
+			const glowing = w.glow?.seal === i, held = bound && w.last?.seal === i;
+			if (glowing) {                                // stand here before the ring closes
+				const k = (w.glow.at - st.tick) / (w.glow.at - w.glow.from), pulse = 0.5 + 0.5 * Math.sin(st.tick * 0.25);
+				circle(g, x, y, r, `rgba(255,226,150,${(0.22 + 0.12 * pulse).toFixed(3)})`);
+				g.strokeStyle = "#ffe7a6"; g.lineWidth = lw * 2;
+				g.beginPath(); g.arc(x, y, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * k); g.stroke();
+			} else {
+				circle(g, x, y, r, held ? "rgba(255,226,150,.16)" : "rgba(160,123,208,.12)");
+				g.strokeStyle = held ? "#ffe7a6" : "rgba(172,139,198,.55)"; g.lineWidth = lw;
+				g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.stroke();
+			}
+			if (held && boss) {                           // the chains, seal to Warden
+				g.strokeStyle = "rgba(255,236,190,.75)"; g.lineWidth = lw * 1.4;
+				g.setLineDash?.([px * 0.25, px * 0.12]);
+				g.beginPath(); g.moveTo(x, y); g.lineTo(sx(boss.x), sy(boss.y)); g.stroke();
+				g.setLineDash?.([]);
+			}
+			const last = w.last;
+			if (last && last.seal === i && st.tick - last.at < 40) {
+				const a = 1 - (st.tick - last.at) / 40;
+				g.strokeStyle = last.ok ? `rgba(255,236,170,${a})` : `rgba(200,190,210,${a * 0.6})`; g.lineWidth = lw * 2;
+				g.beginPath(); g.arc(x, y, r * (1 + 0.4 * (1 - a)), 0, Math.PI * 2); g.stroke();
+			}
 		}
 	}
+	const bk = st.bellkeeper;
+	if (bk) {
+		for (const bell of bk.bells) {
+			const x = sx(bell.x), y = sy(bell.y), r = bell.r * px;
+			const lit = bell.litUntil > st.tick, rung = st.tick - bell.rungAt < 14;
+			if (lit) {                                    // shoot it before it fades
+				const k = (bell.litUntil - st.tick) / BELL.glow, pulse = 0.5 + 0.5 * Math.sin(st.tick * 0.3);
+				circle(g, x, y, r * (1.6 + 0.25 * pulse), "rgba(255,214,120,.30)");
+				g.strokeStyle = "#ffe08a"; g.lineWidth = lw * 1.5;
+				g.beginPath(); g.arc(x, y, r * 1.35, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * k); g.stroke();
+			}
+			circle(g, x, y, r, rung ? "#fff6d8" : "#87623f");
+			circle(g, x, y, r * 0.72, lit ? "#ffe08a" : "#9c7a50");
+			circle(g, x, y, r * 0.24, lit ? "#fffbe8" : "#d9bf8a");
+		}
+		const boss = st.enemies.find((e) => e.form === "bellkeeper" && e.hp > 0);
+		const pt = bk.peal ? st.tick - bk.peal.at : 99;
+		if (boss && pt < 20) {                            // the peal, rung into him
+			const k = 1 - pt / 20, big = bk.peal.chord ? 1.6 : 1;
+			g.strokeStyle = `rgba(255,226,140,${k.toFixed(3)})`; g.lineWidth = Math.max(3, px * 0.18 * k * big);
+			g.beginPath(); g.moveTo(sx(bk.peal.x), sy(bk.peal.y)); g.lineTo(sx(boss.x), sy(boss.y)); g.stroke();
+			for (const d of [0, 0.5]) {
+				const t = (pt / 20 + d) % 1;
+				g.strokeStyle = `rgba(255,236,170,${(0.6 * (1 - t)).toFixed(3)})`; g.lineWidth = lw;
+				g.beginPath(); g.arc(sx(bk.peal.x), sy(bk.peal.y), px * (0.8 + t * 1.4 * big), 0, Math.PI * 2); g.stroke();
+			}
+		}
+	}
+	const c = st.cinderwake;
+	if (c) {
+		for (const bz of c.braziers) {
+			const x = sx(bz.x), y = sy(bz.y);
+			if (!bz.lit) {                                // dark: drop a lantern in here
+				g.strokeStyle = c.carrying ? "rgba(255,210,122,.85)" : "rgba(255,200,140,.4)"; g.lineWidth = lw;
+				g.setLineDash?.([px * 0.2, px * 0.15]);
+				g.beginPath(); g.arc(x, y, px * FEN.reach, 0, Math.PI * 2); g.stroke();
+				g.setLineDash?.([]);
+			}
+			g.fillStyle = "#3b3330"; g.fillRect(x - px * 0.34, y - px * 0.1, px * 0.68, px * 0.36);
+			g.fillStyle = "#57493f"; g.fillRect(x - px * 0.42, y - px * 0.18, px * 0.84, px * 0.12);
+			if (bz.lit) {                                 // full: burning down until it takes another
+				const f = 0.85 + 0.15 * Math.sin(st.tick * 0.35 + bz.x);
+				g.beginPath(); g.moveTo(x, y - px * 0.75 * f); g.quadraticCurveTo(x + px * 0.32, y - px * 0.2, x, y - px * 0.12);
+				g.quadraticCurveTo(x - px * 0.32, y - px * 0.2, x, y - px * 0.75 * f); g.fillStyle = "#ffb347"; g.fill();
+				circle(g, x, y - px * 0.28, px * 0.1, "#fff1c2");
+				g.strokeStyle = "rgba(255,210,122,.6)"; g.lineWidth = lw;
+				g.beginPath(); g.arc(x, y, px * 0.7, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.max(0, bz.litUntil - st.tick) / FEN.full); g.stroke();
+			}
+		}
+		const boss = st.enemies.find((e) => e.form === "cinderwake" && e.hp > 0);
+		const bt = c.blast ? st.tick - c.blast.at : 99;
+		if (boss && bt < 20) {                            // the brazier's fire, flung at it
+			const k = 1 - bt / 20;
+			g.strokeStyle = `rgba(255,190,90,${k.toFixed(3)})`; g.lineWidth = Math.max(3, px * 0.22 * k);
+			g.beginPath(); g.moveTo(sx(c.blast.x), sy(c.blast.y) - px * 0.3); g.lineTo(sx(boss.x), sy(boss.y)); g.stroke();
+			circle(g, sx(boss.x), sy(boss.y), px * (0.8 + bt * 0.06), `rgba(255,220,150,${(0.5 * k).toFixed(3)})`);
+		}
+		if (c.lantern) drawLantern(g, sx(c.lantern.x), sy(c.lantern.y), px, st.tick);
+	}
+}
+
+function drawLantern(g, x, y, px, tick) {
+	const f = 0.85 + 0.15 * Math.sin(tick * 0.3);
+	circle(g, x, y, px * 0.55 * f, "rgba(255,190,90,.25)");
+	g.fillStyle = "#5b4630"; g.fillRect(x - px * 0.16, y - px * 0.24, px * 0.32, px * 0.42);
+	circle(g, x, y, px * 0.12, "#ffd27a");
+	g.strokeStyle = "#5b4630"; g.lineWidth = Math.max(1.5, px * 0.05);
+	g.beginPath(); g.arc(x, y - px * 0.26, px * 0.12, Math.PI, 0); g.stroke();
+}
+
+/* A big moment, over the whole screen: the Warden chained flashes soft gold. */
+function drawFlashes(g, st, width, height, calm) {
+	const w = st.warden, t = w?.last?.ok ? st.tick - w.last.at : 99, len = 24;
+	if (t >= len) return;
+	g.fillStyle = `rgba(255,230,160,${((calm ? 0.12 : 0.28) * (1 - t / len)).toFixed(3)})`;
+	g.fillRect(0, 0, width, height);
 }
 
 /* What an ability leaves on the ground: the Paladin's field (gold, around the player),

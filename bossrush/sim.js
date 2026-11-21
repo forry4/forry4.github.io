@@ -24,14 +24,6 @@ export const TPS = 60;
 export const DT = 1 / TPS;
 const FOCUS_ZONE = { duration: 5 * TPS, radius: 2.5, multiplier: 1.5 };
 export const FULL_DRAW_TICKS = Math.round(0.8 * TPS);
-export const SEAL_TICKS = 3 * TPS;
-const SEAL_RADIUS = 1.45;
-const SEAL_DAMAGE = 300;
-const BELL_RADIUS = 0.7;
-const BELL_STUN = 7 * TPS;
-const BELL_WINDUP = 66;
-export const BELL_LOCK = 42;
-const BELL_CHARGE = 82;
 const PI = 3.141592653589793;
 const TAU = 6.283185307179586;
 const HALF_PI = 1.5707963267948966;
@@ -163,9 +155,10 @@ export const ENEMY = {
 	cinder: { hp: 70, r: 0.36, speed: 4.2, shot: { range: 3.5, speed: 7, dmg: 10, tele: 14, every: 80 } },
 	kiln: { hp: 120, r: 0.5, speed: 0 },
 	smolder: { hp: 90, r: 0.44, speed: 0 },
+	// The Lantern Trio's adds (2026-11-20): they come in with a mechanic, never with a room.
 };
 // Each dungeon's boss is a `boss` enemy of its own KIND (dungeon.boss_kind).
-export const BOSS_HP = { tidewarden: 3000, breach: 3000, pyre: 3000, warden: 3000, bellkeeper: 3000 };
+export const BOSS_HP = { tidewarden: 3000, breach: 3000, pyre: 3000, warden: 3000, bellkeeper: 3000, cinderwake: 3000 };
 
 /* CRACKS (the Fracture, design §14.4a): authored lines of floor that open into void
  * while their room is being fought. Each counts `t` round a `period`: closed, then
@@ -483,12 +476,19 @@ export function createSim(dungeon, gear = [], hero = {}) {
 		classId, practice: !!hero.practice,
 		w: dungeon.width, h: dungeon.height, tiles: dungeon.tiles, rooms, dungeonId: dungeon.id || "shallows",
 		cracks, crackAt, fastRoom: -1, roomY, fissure: dungeon.fissure, bankSweep: null,
-		cinderwake: bossKind === "cinderwake" ? { index: 0, age: 0, progress: 0, lantern: null, away: 0 } : null,
-		seals: bossKind === "warden" ? (dungeon.objectives || []).map((position) =>
-			({ ...position, r: SEAL_RADIUS, progress: 0, volley: null, occupied: false })) : [],
+		addSeq: 0,
+		cinderwake: bossKind === "cinderwake" ? {
+			braziers: (dungeon.objectives || []).map((position) => ({ ...position, lit: false, litUntil: 0 })),
+			lantern: null, carrying: false, from: 0, next: 0, blast: null,
+			geysers: 0, geyserAt: 0, phase2: false, started: false,
+		} : null,
+		warden: bossKind === "warden" ? {
+			seals: (dungeon.objectives || []).map((position) => ({ ...position, r: SEAL_RADIUS })),
+			glow: null, next: 0, chainedUntil: 0, phase2: false, last: null, age: 0, started: false,
+		} : null,
 		bellkeeper: bossKind === "bellkeeper" ? {
-			bells: (dungeon.objectives || []).map((position) => ({ ...position, r: BELL_RADIUS, readyAt: 0, pulseAt: 0 })),
-			mode: "stalk", until: 0, dx: 1, dy: 0, retry: false, hit: false,
+			bells: (dungeon.objectives || []).map((position) => ({ ...position, r: BELL.r, litUntil: 0, rungAt: -99 })),
+			from: 0, next: 0, lastLit: [], rungOfLit: 0, peal: null, phase2: false, started: false,
 		} : null,
 		doorY, doorCols, roomLeft, sealed: -1, depth: dungeon.level || 1, offers: dungeon.offers || [],
 		stats, gear, levels, completeXp: dungeon.complete_xp || 0,
@@ -1057,198 +1057,254 @@ function pyreStep(st, e) {
 	}
 }
 
-// A beat advances only by landing hits or staying with the moving lantern.
-export const CINDERWAKE_BEATS = [
-	{ name: "Chase", goal: 680, damage: true },
-	{ name: "Turning Gate", goal: 330, radius: 1.45 },
-	{ name: "Crosswind", goal: 760, damage: true },
-	{ name: "Driftwood", goal: 375, radius: 1.35 },
-	{ name: "Sparks on the Tide", goal: 850, damage: true },
-	{ name: "Finale", goal: 445, radius: 1.3 },
-];
+/* THE LANTERN TRIO (owner's ask, 2026-11-20). Each boss can always be shot, and has ONE
+ * simple thing to do that only ever HELPS — ignoring it costs nothing, doing it well
+ * shortens the fight. One verb each:
+ *   the Warden      — stand in the glowing seal when its countdown ends: he is chained
+ *                     (double damage, no attacks). His back takes extra, always.
+ *   the Bellkeeper  — shoot the glowing bell: its peal hits him. At half, two at once.
+ *   the Cinderwake  — carry its lantern into a dark brazier: the fire hits it.
+ * The challenge is the attacks you dodge while you do it. */
 
-function cinderwakeStep(st, e, distance, ux, uy) {
-	if (e.cd > 0) return;
-	const cue = st.cinderwake;
-	const beat = CINDERWAKE_BEATS[cue.index];
-	const age = cue.age++;
-	st.src = "boss:cinderwake";
-	if (beat.damage) {
-		// Close the distance in bursts, then hold still long enough to keep melee viable.
-		const cycle = age % 165;
-		e.tele = cycle < 36 ? 36 - cycle : 0;
-		if (cycle >= 36 && cycle < 104 && distance > 1.75) {
-			const drift = cue.index === 2 ? (cycle < 70 ? 0.7 : -0.7) : 0;
-			const speed = (cue.index === 4 ? 4.5 : 3.8) * st.scale.speed * DT;
-			moveBody(st, e, (ux - uy * drift) * speed, (uy + ux * drift) * speed);
-		}
-		if (cycle === 36 || cycle === 114) {
-			const aim = Math.atan2(uy, ux);
-			const count = cue.index === 0 ? 3 : 5;
-			for (let k = 0; k < count; k++) {
-				shoot(st, "e", e.x, e.y, aim + (k - (count - 1) / 2) * 0.23, 4.7, 13, 0.18, 200);
-			}
-		}
-	} else {
-		const turn = cue.index === 3 ? -1 : 1;
-		const a = age * (cue.index === 5 ? 0.018 : 0.014) * turn + PI;
-		const lantern = { x: e.homeX + 4.5 * dcos(a), y: e.homeY + 3.1 * dsin(a), r: beat.radius };
-		lantern.lit = near(st.p, lantern, lantern.r);
-		cue.lantern = lantern;
-		if (lantern.lit) {
-			cue.progress++;
-			cue.away = 0;
-		} else if (++cue.away >= 90 && (cue.away - 90) % 75 === 0) {
-			const delay = 42;
-			st.mortars.push({ x: st.p.x, y: st.p.y, r: 1.3, at: st.tick + delay, d: delay,
-				dmg: 21, burn: 2 * TPS, src: "boss:lantern-flare" });
-		}
+// ── shared ──────────────────────────────────────────────────────────────────
+function bossBox(st, e) {
+	const room = st.rooms[e.room], [top, bottom] = st.roomY[e.room];
+	return { x0: room.x0, x1: room.x1, y0: top, y1: bottom + 1 };
+}
 
-		// The ring's opening leads the lantern so moving with it threads the
-		// shots. The second survival beat adds staggered inward side streams.
-		const period = cue.index === 5 ? 36 : 55;
-		if (age % period === 29) {
-			const lead = a + turn * 0.95;
-			const count = cue.index === 5 ? 28 : 22;
-			for (let k = 2; k < count - 1; k++) {
-				shoot(st, "e", e.homeX, e.homeY, lead + k * TAU / count, 4.2, 15, 0.17, 220);
-			}
-		}
-		if (cue.index >= 3 && age % 82 === 57) {
-			const room = st.rooms[e.room];
-			const east = Math.floor(age / 82) % 2 === 0;
-			const x = east ? room.x1 - 0.6 : room.x0 + 0.6;
-			for (let k = -3; k <= 3; k++) {
-				const y = e.homeY + k * 1.65 + (east ? 0.75 : -0.75);
-				shoot(st, "e", x, y, east ? PI : 0, 5.2, 12, 0.17, 245);
-			}
-		}
+// Turn the facing vector (e.fx, e.fy) toward (ux, uy) by at most `step` radians.
+function turnToward(e, ux, uy, step) {
+	if (e.fx * ux + e.fy * uy >= dcos(step)) { e.fx = ux; e.fy = uy; return; }
+	const [fx, fy] = rotate(e.fx, e.fy, e.fx * uy - e.fy * ux >= 0 ? step : -step);
+	const n = Math.sqrt(fx * fx + fy * fy) || 1;
+	e.fx = fx / n; e.fy = fy / n;
+}
+
+function walkTo(st, e, x, y, speed, stop = 0.1) {
+	const dx = x - e.x, dy = y - e.y, d = Math.sqrt(dx * dx + dy * dy);
+	if (d <= stop) return true;
+	const sp = Math.min(d, speed * st.scale.speed * DT);
+	moveBody(st, e, dx / d * sp, dy / d * sp);
+	return false;
+}
+
+function fanAt(st, e, ux, uy, n, spread, speed, dmg, offset = 0) {
+	for (let k = 0; k < n; k++) {
+		const [vx, vy] = rotate(ux, uy, offset + (k - (n - 1) / 2) * spread);
+		shootAt(st, "e", e.x, e.y, e.x + vx, e.y + vy, speed, dmg, 0.18, 220);
 	}
+}
 
-	if (cue.progress < beat.goal) return;
-	st.bullets = st.bullets.filter((b) => b.owner === "p");
-	st.mortars = [];
-	st.fires = [];
-	if (cue.index === CINDERWAKE_BEATS.length - 1) {
-		cue.lantern = null;
-		kill(st, e);
-		return;
-	}
-	cue.index++;
-	cue.age = cue.progress = cue.away = 0;
-	cue.lantern = null;
-	e.tele = 0;
-	e.x = e.homeX;
-	e.y = e.homeY;
+// ── the Warden ──────────────────────────────────────────────────────────────
+/* Stand in the glowing seal. Every few seconds one of the three seals glows with a
+ * countdown; be inside it when the countdown ends and he is chained: no attacks, double
+ * damage. Miss it and nothing happens. His back takes extra damage, always. */
+export const WARDEN = {
+	warn: 5 * TPS, warn2: 4 * TPS,   // the glowing seal's countdown (after half health: shorter)
+	gap: 6 * TPS,                    // from one seal (or the chains breaking) to the next
+	chained: 5 * TPS, bound: 2,      // the chains, and his damage taken in them
+	back: 1.5,                       // at his back
+	turn: 0.016,                     // how fast his gaze follows you, radians a tick
+	cycle: 240, cycle2: 200,
+};
+const SEAL_RADIUS = 1.2;
+
+export function wardenBehind(st, e) {
+	const dx = st.p.x - e.x, dy = st.p.y - e.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
+	return (dx * e.fx + dy * e.fy) / d < -0.5;
 }
 
 function wardenStep(st, e, ux, uy) {
-	e.phase = e.hp <= e.maxHp / 2 ? 2 : 1;
-	const [top, bottom] = st.roomY[e.room];
-	for (const seal of st.seals) {
-		seal.occupied = seal.progress < SEAL_TICKS && near(st.p, seal, seal.r);
-		if (seal.occupied && seal.progress === 0) {
-			const north = seal.y < (top + bottom + 1) / 2;
-			seal.volley = { y: north ? top + 0.4 : bottom + 0.6, endY: north ? bottom + 1 : top,
-				at: st.tick + 44 };
-		}
-		if (seal.volley?.at === st.tick) {
-			const { y, endY } = seal.volley;
-			st.src = "boss:seal-volley";
-			for (let i = -2; i <= 2; i++) {
-				const x = seal.x + i * 0.35;
-				shootAt(st, "e", x, y, x, endY, 8, 17, 0.17, 120);
-			}
-			seal.volley = null;
-		}
-		if (seal.occupied && ++seal.progress === SEAL_TICKS) {
-			seal.occupied = false;
-			hurtEnemy(st, e, SEAL_DAMAGE, 8);
-			if (!e.hp) return;
-		}
-	}
+	const w = st.warden;
 	if (e.cd > 0) return;
-	const age = e.patternAge = (e.patternAge || 0) + 1;
-	const cycle = age % (e.phase === 1 ? 156 : 126);
+	if (!w.started) { w.started = true; e.fx = ux; e.fy = uy; w.next = st.tick + 3 * TPS; }
+	if (!w.phase2 && e.hp <= e.maxHp / 2) w.phase2 = true;
 	st.src = "boss:warden";
-	if (cycle === 26) {
-		for (let i = -2; i <= 2; i++) {
-			const [vx, vy] = rotate(ux, uy, i * 0.24);
-			shootAt(st, "e", e.x, e.y, e.x + vx, e.y + vy, 5.6, 16, 0.18, 210);
+	if (w.chainedUntil > st.tick) return;                   // bound: he does nothing
+	if (w.chainedUntil) { w.chainedUntil = 0; w.next = st.tick + WARDEN.gap; }
+	sealStep(st, w);
+	if (w.chainedUntil) return;
+	turnToward(e, ux, uy, WARDEN.turn * (w.phase2 ? 1.25 : 1));
+	wardenAttack(st, e, w);
+}
+
+function sealStep(st, w) {
+	if (!w.glow) {
+		if (st.tick < w.next || !w.seals.length) return;
+		let i = Math.floor(rand(st) * w.seals.length);
+		if (w.last && i === w.last.seal && w.seals.length > 1) i = (i + 1) % w.seals.length;   // never the same twice
+		w.glow = { seal: i, from: st.tick, at: st.tick + (w.phase2 ? WARDEN.warn2 : WARDEN.warn) };
+		return;
+	}
+	if (st.tick < w.glow.at) return;
+	const seal = w.seals[w.glow.seal], ok = near(st.p, seal, seal.r);
+	w.last = { ok, at: st.tick, seal: w.glow.seal };
+	w.glow = null;
+	if (!ok) { w.next = st.tick + WARDEN.gap; return; }
+	w.chainedUntil = st.tick + WARDEN.chained;
+	st.bullets = st.bullets.filter((b) => b.owner === "p");
+	st.mortars = [];
+}
+
+function wardenAttack(st, e, w) {
+	const len = w.phase2 ? WARDEN.cycle2 : WARDEN.cycle;
+	w.age = (w.age || 0) + 1;
+	const t = w.age % len, round = Math.floor(w.age / len);
+	if (t === 20 || (w.phase2 && t === 115)) {             // the gavel: a fan from his front
+		st.src = "boss:gavel";
+		fanAt(st, e, e.fx, e.fy, 7, 0.2, 6.2, 16);
+	}
+	if (t >= 50 && t < 130 && t % 5 === 0) {              // the chains: two streams crossing his front
+		st.src = "boss:chains";
+		const s = -1.2 + 2.4 * (t - 50) / 80;
+		for (const a of [s, -s]) {
+			const [vx, vy] = rotate(e.fx, e.fy, a);
+			shootAt(st, "e", e.x, e.y, e.x + vx, e.y + vy, 5.4, 14, 0.18, 220);
 		}
 	}
-	if (cycle === 94 || (e.phase === 2 && cycle === 57)) {
-		for (let i = 0; i < 13; i++) shoot(st, "e", e.x, e.y, i * TAU / 13 + age * 0.07, 4.6, 13, 0.16, 215);
+	if (t === 150 && (w.phase2 || round % 2 === 0)) checkerFloor(st, e, round % 2);
+	if (w.phase2 && t === 185) closingWalls(st, e);
+}
+
+// Every other 2x2 square of the floor goes off, a beat after it is marked.
+function checkerFloor(st, e, parity) {
+	const box = bossBox(st, e);
+	for (let y = box.y0; y + 2 <= box.y1; y += 2)
+		for (let x = box.x0; x + 2 <= box.x1; x += 2) {
+			if (((x - box.x0) / 2 + (y - box.y0) / 2) % 2 !== parity) continue;
+			st.mortars.push({ x: x + 1, y: y + 1, r: 1, square: true, at: st.tick + 70, d: 70,
+				dmg: 22, burn: 0, src: "boss:checker" });
+		}
+}
+
+// Two walls of shots, from the left and right walls, with one gap in the same row.
+function closingWalls(st, e) {
+	const box = bossBox(st, e);
+	const gap = box.y0 + 2.5 + Math.floor(rand(st) * (box.y1 - box.y0 - 5));
+	st.src = "boss:walls";
+	for (let y = box.y0 + 0.5; y < box.y1; y += 0.7) {
+		if (Math.abs(y - gap) < 1.1) continue;
+		shoot(st, "e", box.x0 + 0.4, y, 0, 3.2, 15, 0.2, 420);
+		shoot(st, "e", box.x1 - 0.4, y, PI, 3.2, 15, 0.2, 420);
 	}
 }
 
+// ── the Hollow Bellkeeper ───────────────────────────────────────────────────
+/* Shoot the glowing bell. Every few seconds a bell lights up for a moment; a shot that
+ * reaches it while it glows rings it, and the peal hits him. After half health two
+ * light at once, and ringing both makes the second peal twice as hard. A bell that
+ * fades unrung costs nothing. */
+export const BELL = {
+	r: 0.75,
+	every: 4 * TPS, every2: 3.5 * TPS,   // from one lighting to the next
+	glow: 2.5 * TPS,                     // how long a bell stays lit
+	peal: 200,                           // a rung bell's hit on him
+	chord: 2,                            // the second of a pair, rung: its peal times this
+};
+
 function bellkeeperStep(st, e, distance, ux, uy) {
+	const b = st.bellkeeper;
 	if (e.cd > 0) return;
-	const state = st.bellkeeper;
-	e.phase = e.hp <= e.maxHp / 2 ? 2 : 1;
+	if (!b.started) { b.started = true; b.from = st.tick; b.next = st.tick + 2 * TPS; }
+	if (!b.phase2 && e.hp <= e.maxHp / 2) b.phase2 = true;
+	for (const bell of b.bells) if (bell.litUntil && st.tick >= bell.litUntil) bell.litUntil = 0;
+	if (st.tick >= b.next && b.bells.length) lightBells(st, b);
 	st.src = "boss:bellkeeper";
-	for (const bell of state.bells) {
-		if (bell.pulseAt !== st.tick) continue;
-		for (let i = 0; i < 14; i++) shoot(st, "e", bell.x, bell.y, i * TAU / 14 + st.tick * 0.09, 4.5, 14, 0.19, 170);
-		bell.pulseAt = state.until - st.tick > 3 * TPS ? st.tick + 2.5 * TPS : 0;
+	const t = st.tick - b.from;
+	if (distance > 2.5) moveBody(st, e, ux * 0.9 * st.scale.speed * DT, uy * 0.9 * st.scale.speed * DT);
+	if (t % 60 === 30) clapper(st, e, ux, uy, b.phase2 ? 9 : 7, b.phase2 ? 4.4 : 4.0);
+	if (b.phase2 && t % 120 === 90) {
+		st.src = "boss:echo";
+		const a0 = rand(st) * TAU;
+		for (let k = 0; k < 18; k++) shoot(st, "e", e.x, e.y, a0 + k * TAU / 18, 3.2, 13, 0.18, 260);
 	}
-	if (state.mode === "stunned") {
-		if (st.tick >= state.until) {
-			state.mode = "stalk";
-			state.until = st.tick + 85;
-		}
-		return;
+}
+
+function lightBells(st, b) {
+	const n = b.bells.length, count = b.phase2 && n > 1 ? 2 : 1, picked = [];
+	while (picked.length < count) {
+		const i = Math.floor(rand(st) * n);
+		if (!picked.includes(i) && (n <= count || !b.lastLit.includes(i))) picked.push(i);
 	}
-	if (state.mode === "stalk") {
-		const speed = (distance > 3 ? 1.7 : -1.1) * st.scale.speed * DT;
-		moveBody(st, e, ux * speed, uy * speed);
-		if (st.tick >= state.until) {
-			state.mode = "windup";
-			state.until = st.tick + BELL_WINDUP;
-		}
-		return;
+	for (const i of picked) b.bells[i].litUntil = st.tick + BELL.glow;
+	b.lastLit = picked; b.rungOfLit = 0;
+	b.next = st.tick + (b.phase2 ? BELL.every2 : BELL.every);
+}
+
+// The clapper swings: an arc aimed at you, from alternate sides.
+function clapper(st, e, ux, uy, n, speed) {
+	const b = st.bellkeeper;
+	b.swing = -(b.swing || 1);
+	st.src = "boss:clapper";
+	fanAt(st, e, ux, uy, n, 0.16, speed, 14, b.swing * 0.35);
+}
+
+/* A player's shot reached bell `i`. A glowing bell takes the shot and rings: its peal
+ * hits him. Shots pass through a dark bell. */
+function ringBell(st, i) {
+	const b = st.bellkeeper, bell = b.bells[i];
+	if (!bell.litUntil || st.tick >= bell.litUntil) return false;
+	bell.litUntil = 0; bell.rungAt = st.tick;
+	const pair = b.lastLit.length > 1 && ++b.rungOfLit === b.lastLit.length;
+	const boss = st.enemies.find((e) => e.form === "bellkeeper" && e.hp > 0);
+	b.peal = { x: bell.x, y: bell.y, at: st.tick, chord: pair };
+	if (boss) hurtEnemy(st, boss, BELL.peal * (pair ? BELL.chord : 1), 8);
+	return true;
+}
+
+// ── the Cinderwake ──────────────────────────────────────────────────────────
+/* A plain fight you can win by shooting it. The extra, for whoever notices: it drops
+ * a lantern, and walking one into a brazier blasts it for a big chunk. You can still
+ * shoot while you carry it; the cost is the walk. A brazier that took one stays lit
+ * (full) for a while, so the next goes to another. Owner's call, 2026-11-20: no
+ * darkness, no Chill, never untargetable — a mechanic must be skippable. */
+export const FEN = {
+	lanternEvery: 4 * TPS,   // the next lantern, after one is used
+	reach: 1.1,              // how close to a brazier to drop it in
+	blast: 300,              // what a lantern delivered does to it (a tenth of its HP)
+	full: 10 * TPS,          // how long a brazier stays lit after taking one
+};
+
+function cinderwakeStep(st, e, distance, ux, uy) {
+	const c = st.cinderwake;
+	if (c.started) fenStep(st, e, c);
+	if (st.status !== "play" || e.hp <= 0 || e.cd > 0) return;
+	if (!c.started) { c.started = true; c.from = st.tick; c.next = st.tick + FEN.lanternEvery; }
+	const t = st.tick - c.from;
+	if (!c.phase2 && e.hp <= e.maxHp / 2) c.phase2 = true;
+	// It follows you, and the fen erupts where you stand.
+	if (distance > 2) moveBody(st, e, ux * 1.6 * st.scale.speed * DT, uy * 1.6 * st.scale.speed * DT);
+	if (t % 150 === 60) { c.geysers = c.phase2 ? 4 : 3; c.geyserAt = st.tick; }
+	if (c.geysers > 0 && st.tick >= c.geyserAt) {
+		c.geysers--; c.geyserAt = st.tick + 22;
+		st.mortars.push({ x: st.p.x, y: st.p.y, r: 1.1, at: st.tick + 45, d: 45, dmg: 20, burn: 0, src: "boss:geyser" });
 	}
-	if (state.mode === "windup") {
-		if (state.until - st.tick >= BELL_LOCK && (ux || uy)) {
-			state.dx = ux;
-			state.dy = uy;
-		}
-		if (st.tick >= state.until) {
-			state.mode = "charge";
-			state.until = st.tick + BELL_CHARGE;
-			state.hit = false;
-		}
-		return;
+	if (t % (c.phase2 ? 100 : 130) === 90) {
+		st.src = "boss:ripple";
+		const a0 = rand(st) * TAU;
+		for (let k = 0; k < 16; k++) shoot(st, "e", e.x, e.y, a0 + k * TAU / 16, 3.6, 14, 0.18, 240);
 	}
-	const speed = 15 * st.scale.speed * DT;
-	const x = e.x + state.dx * speed, y = e.y + state.dy * speed;
-	const bell = state.bells.find((item) => item.readyAt <= st.tick && near({ x, y }, item, item.r + e.r));
-	if (bell) {
-		state.mode = "stunned";
-		state.until = st.tick + BELL_STUN;
-		state.retry = false;
-		bell.readyAt = st.tick + 16 * TPS;
-		bell.pulseAt = st.tick + 2 * TPS;
-		return;
+	if (c.phase2 && t % 120 === 30) { st.src = "boss:flare-fan"; fanAt(st, e, ux, uy, 5, 0.22, 5.6, 15); }
+	// It drops a lantern at its feet.
+	if (!c.lantern && !c.carrying && st.tick >= c.next) {
+		const at = blocked(st, e.x, e.y, 0.4) ? nearestClear(st, { x: e.x, y: e.y, r: 0.4 }) || e : e;
+		c.lantern = { x: at.x, y: at.y };
 	}
-	if (st.tick < state.until && !blocked(st, x, y, e.r)) {
-		e.x = x;
-		e.y = y;
-		if (!state.hit && near(e, st.p, e.r + st.p.r)) {
-			state.hit = true;
-			hurtPlayer(st, 32, "boss:bell-charge");
-		}
-		return;
-	}
-	if (e.phase === 2 && !state.retry) {
-		state.mode = "windup";
-		state.until = st.tick + BELL_LOCK + 16;
-		state.retry = true;
-	} else {
-		state.mode = "stalk";
-		state.until = st.tick + 65;
-		state.retry = false;
-	}
+}
+
+/* The player's side: walking over the lantern takes it, walking it to a dark brazier
+ * blasts the boss, and lit braziers burn back down. */
+function fenStep(st, e, c) {
+	const p = st.p;
+	for (const b of c.braziers) if (b.lit && st.tick >= b.litUntil) b.lit = false;
+	if (c.lantern && !c.carrying && near(p, c.lantern, p.r + 0.45)) { c.lantern = null; c.carrying = true; }
+	if (!c.carrying) return;
+	const bz = c.braziers.find((b) => !b.lit && near(p, b, FEN.reach));
+	if (!bz) return;
+	bz.lit = true; bz.litUntil = st.tick + FEN.full;
+	c.carrying = false; c.next = st.tick + FEN.lanternEvery;
+	c.blast = { x: bz.x, y: bz.y, at: st.tick };
+	hurtEnemy(st, e, FEN.blast, 10);
 }
 
 /* One pulse of the player's fire (embers): `hurt(target, dmg)` for each target standing
@@ -1321,8 +1377,10 @@ function stepMortars(st) {
 		for (const m of due) {
 			const dx = p.x - m.x, dy = p.y - m.y, rr = m.r + p.r;
 			const barrage = m.src === "boss:barrage";
+			// A square shell (the Warden's checkerboard) covers its whole square.
+			const inside = m.square ? Math.abs(dx) < m.r && Math.abs(dy) < m.r : dx * dx + dy * dy < rr * rr;
 			// Adjacent markers and intersections are one explosion wave.
-			if (dx * dx + dy * dy < rr * rr && !(barrage && barrageHit)) {
+			if (inside && !(barrage && barrageHit)) {
 				hurtPlayer(st, m.dmg ?? MORTAR.dmg, m.src || "boss:mortar");
 				if (barrage) barrageHit = true;
 			}
@@ -1402,6 +1460,7 @@ export function step(st, input) {
 	if (st.shield && st.shield.until <= st.tick) st.shield = null;
 	if (st.focusZone && st.focusZone.until <= st.tick) st.focusZone = null;
 	if (st.damageNumbers) st.damageNumbers = st.damageNumbers.filter((f) => f.until > st.tick);
+	if (st.addSeq && st.enemies.some((e) => e.add && e.hp <= 0)) st.enemies = st.enemies.filter((e) => !e.add || e.hp > 0);
 	if (input.gear) setGear(st, input.gear);
 	const p = st.p, s = st.stats;
 
@@ -1536,6 +1595,10 @@ export function step(st, input) {
 			continue;
 		}
 		let gone = false;
+		if (b.owner === "p" && st.bellkeeper) {           // a glowing bell takes the shot and rings
+			const i = st.bellkeeper.bells.findIndex((bell) => near(b, bell, bell.r + b.r));
+			if (i >= 0 && ringBell(st, i)) continue;
+		}
 		if (b.owner === "p") {
 			for (const e of st.enemies) {
 				if (e.hp <= 0 || b.hit.includes(e.id)) continue;
@@ -1761,15 +1824,12 @@ function sealRoom(st) {
 /* A hit on an enemy. Warded: the first few hits (counted per enemy, each one —
  * an arrow, a star — one hit) do nothing but flash. */
 function hurtEnemy(st, e, dmg, flash) {
-	if (e.form === "cinderwake") {
-		const cue = st.cinderwake;
-		if (CINDERWAKE_BEATS[cue.index].damage) {
-			cue.progress += dmg;
-			e.flash = flash;
-		}
-		return;
+	if (e.form === "warden") {                      // double in the chains; weak at his back
+		const w = st.warden;
+		if (w.chainedUntil > st.tick) dmg *= WARDEN.bound;
+		if (wardenBehind(st, e)) dmg *= WARDEN.back;
+		dmg = Math.round(dmg * 10) / 10;
 	}
-	if (e.form === "bellkeeper" && st.bellkeeper.mode !== "stunned") return;
 	if (e.type === "smolder" && !e.lit) { e.lit = true; e.tele = SMOLDER.flare; e.charge = SMOLDER.charge; }   // it wakes
 	if (e.ward > 0) { e.ward--; e.flash = 2; return; }
 	// What a hit did, floated over the enemy (drawing only: not in the fingerprint).
@@ -1813,6 +1873,7 @@ function gainXp(st, amount) {
 
 function kill(st, e) {
 	e.hp = 0;
+	if (e.add) return;                                   // a fight's add: none of the below
 	st.events.push({ type: "kill", enemy: e.id });
 	if (st.roomLeft && e.room != null && --st.roomLeft[e.room] === 0 && st.sealed === e.room) {
 		st.sealed = -1;
@@ -1848,7 +1909,9 @@ function kill(st, e) {
 		gainXp(st, st.completeXp);
 		st.events.push({ type: "cleared", xp: st.completeXp, local: true });
 		st.bankSweep = null;
-		for (const seal of st.seals) { seal.occupied = false; seal.volley = null; }
+		for (const o of st.enemies) if (o.add) o.hp = 0;
+		if (st.cinderwake) { st.cinderwake.lantern = null; st.cinderwake.carrying = false; }
+		if (st.warden) st.warden.glow = null;
 		st.bossDown = true;                                        // its fire dies with it (below)
 	}
 	if (st.stats.ashSigil && (e.burnUntil > st.tick || e.scorched > st.tick)) {   // the Ash Sigil
@@ -1868,10 +1931,14 @@ export function fingerprint(st) {
 	const r = (v) => Math.round(v * 1e6) / 1e6;
 	return JSON.stringify([st.tick, st.elapsedTicks, st.bossTimeTicks, st.rng, st.status, st.classId, st.practice,
 		st.hero.level, st.hero.xp, st.p.burstLeft, r(st.p.x), r(st.p.y), r(st.p.hp), r(st.p.low), r(st.p.mp),
-		st.cinderwake && [st.cinderwake.index, st.cinderwake.age, r(st.cinderwake.progress), st.cinderwake.away],
-		st.seals.map((seal) => [seal.progress, seal.volley?.at]),
-		st.bellkeeper && [st.bellkeeper.mode, st.bellkeeper.until, r(st.bellkeeper.dx), r(st.bellkeeper.dy),
-			st.bellkeeper.retry, st.bellkeeper.hit, st.bellkeeper.bells.map((bell) => [bell.readyAt, bell.pulseAt])],
+		st.cinderwake && [st.cinderwake.carrying, st.cinderwake.next, st.cinderwake.phase2, st.cinderwake.geysers,
+			st.cinderwake.lantern && [r(st.cinderwake.lantern.x), r(st.cinderwake.lantern.y)],
+			st.cinderwake.braziers.map((b) => [b.lit ? 1 : 0, b.litUntil])],
+		st.warden && [st.warden.next, st.warden.chainedUntil, st.warden.phase2, st.warden.age,
+			st.warden.glow && [st.warden.glow.seal, st.warden.glow.at]],
+		st.bellkeeper && [st.bellkeeper.next, st.bellkeeper.phase2, st.bellkeeper.rungOfLit, st.bellkeeper.lastLit.join(""),
+			st.bellkeeper.bells.map((bell) => bell.litUntil)],
+		st.addSeq,
 		st.p.drawUntil,
 		st.enemies.map((e) => [e.id, r(e.x), r(e.y), r(e.hp), e.cd, e.tele, e.scd, e.mode, e.modeT, e.ward, e.active]),
 		st.sealed, st.roomLeft,

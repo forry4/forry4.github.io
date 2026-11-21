@@ -124,8 +124,9 @@ def test_a_run_draws_each_arena_once_and_posts_one_server_timed_clear(tmp_path, 
     assert board(set_id="lantern-trio") == {"entries": []}
     lantern_run = start(api.StartIn(character="ranger", set_id="lantern-trio"), request, "wren")
     assert [stage["boss_kind"] for stage in lantern_run["stages"]] == ["bellkeeper", "cinderwake", "warden"]
-    for stage in [lantern_run["stages"][i] for i in (0, 2)]:
-        assert len(stage["objectives"]) == 3
+    # Five bells, three braziers, three seals.
+    for stage, count in zip(lantern_run["stages"], (5, 3, 3)):
+        assert len(stage["objectives"]) == count
         for point in stage["objectives"]:
             assert stage["tiles"][int(point["y"])][int(point["x"])] == "."
     for stage in range(1, 4):
