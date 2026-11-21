@@ -196,12 +196,12 @@ def test_the_boss_is_a_better_table_not_a_jackpot():
 
 
 def test_each_modifier_is_one_loot_bonus_on_count_slots_tier_and_unique():
-    """One number, +15% a modifier, moves all four a little (content.LOOT_PER_MODIFIER)."""
+    """One number, +10% a modifier, moves all four a little (content.LOOT_PER_MODIFIER)."""
     for r in range(4):
         o = C.loot_odds(r)
-        assert abs(o["loot_bonus"] - 0.15 * r) < 1e-12 and abs(o["xp_bonus"] - 0.10 * r) < 1e-12
+        assert abs(o["loot_bonus"] - 0.10 * r) < 1e-12 and abs(o["xp_bonus"] - 0.10 * r) < 1e-12
         # the boss's unique chance is (1 + bonus) times its base, solved exactly
-        assert abs(o["boss_unique"] / C.loot_odds(0)["boss_unique"] - (1 + 0.15 * r)) < 1e-4, r
+        assert abs(o["boss_unique"] / C.loot_odds(0)["boss_unique"] - (1 + C.LOOT_PER_MODIFIER * r)) < 1e-4, r
     o0, o3 = C.loot_odds(0), C.loot_odds(3)
     assert o3["boss_items"] > o0["boss_items"]                                  # more items ...
     drops = lambda r: 1 - C.chances(C.drop_count("chaser", C.loot_bonus(r)))[0]
@@ -232,8 +232,11 @@ def test_rift_modifiers_are_named_and_scale_the_enemies():
     assert d["mods"] == ["fortified", "swift"]
     assert {k: d["scale"][k] for k in ("hp", "dmg", "speed")} == {"hp": 1.5, "dmg": 1.0, "speed": 1.25}
     w = D.generate("shallows", "x", mods=["warded", "bulky", "frenzied", "volatile"])["scale"]
-    assert (w["ward"], w["ward_boss"], w["shot"], w["volatile"]) == (3, 10, 1.5, 1) and w["cadence"] < 1
-    assert len(C.RIFT_MODS) == 8 and all(m["name"] and m["text"] for m in C.RIFT_MODS.values())
+    assert (w["ward"], w["ward_boss"], w["shot"], w["volatile"]) == (5, 15, 1.5, 1) and w["cadence"] < 1
+    n = D.generate("shallows", "x", mods=["drained", "scorched", "mending", "enraged"])["scale"]
+    assert (n["regen"], n["boss_hp"], n["scorched"], n["mend"]) == (0.5, 1.5, 1, 1)
+    assert n["hp"] == 1.0 and n["dmg"] == 1.0                                  # none of them touch the rest
+    assert len(C.RIFT_MODS) == 12 and all(m["name"] and m["text"] for m in C.RIFT_MODS.values())
     with pytest.raises(store.HalcyonError):
         D.generate("shallows", "x", mods=["nope"])
 
@@ -411,7 +414,8 @@ def test_the_pyre_calls_in_kilns_the_server_credits_in_any_order():
 def test_depth_pays_its_own_bonus_and_lifts_tiers_up_to_ten():
     """Going deeper is the only way past three modifiers, and the only way to tiers
     6-10: each level adds LOOT_PER_LEVEL and lifts every standard tier by one."""
-    assert abs(C.loot_bonus(3, 1) - 0.45) < 1e-12 and abs(C.loot_bonus(3, 5) - 0.85) < 1e-12
+    assert abs(C.loot_bonus(3, 1) - 0.30) < 1e-12 and abs(C.loot_bonus(3, 5) - 0.60) < 1e-12
+    assert abs(C.loot_bonus(7, 5) - 1.0) < 1e-12 and C.loot_bonus(12, 5) == C.LOOT_BONUS_CAP == 1.0   # capped
     tiers = lambda t: {int(r[1:]) for r, _ in t if r != "unique"}
     assert max(tiers(C.quality_table("boss", 0, 1))) == 4
     assert tiers(C.quality_table("enemy", 0, 3)) == {t + 2 for t in tiers(C.quality_table("enemy", 0, 1))}

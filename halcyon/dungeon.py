@@ -389,8 +389,9 @@ SLOT_ODDS = C.SLOT_ODDS
 
 
 def slot_odds(bonus: float = 0.0) -> tuple:
-    """The slot table at this loot bonus: n slots weigh (1 + bonus)^n more (content.loot_bonus)."""
-    k = 1 + bonus
+    """The slot table at this loot bonus: n slots weigh (1 + SLOT_SHARE x bonus)^n more
+    (content.loot_bonus; only HALF the bonus reaches slots)."""
+    k = 1 + C.SLOT_SHARE * bonus
     return tuple((n, w * k ** n) for n, w in SLOT_ODDS)
 
 
@@ -467,15 +468,16 @@ def mod_scale(mods: list[str], level: int = 1) -> dict:
     """What the run's modifiers (and its depth) do to the enemies. Multipliers are
     multiplied together; wards and the death ring are flags the sim reads."""
     out = {"hp": 1.0, "dmg": 1.0, "speed": 1.0, "shot": 1.0, "cadence": 1.0,
-           "ward": 0, "ward_boss": 0, "volatile": 0}
+           "regen": 1.0, "boss_hp": 1.0, "ward": 0, "ward_boss": 0, "volatile": 0, "scorched": 0, "mend": 0}
     for m in mods:
         spec = C.RIFT_MODS[m]
         for k, v in spec["scale"].items():
             out[k] *= v
         if "ward" in spec:
             out["ward"], out["ward_boss"] = spec["ward"]
-        if spec.get("volatile"):
-            out["volatile"] = 1
+        for flag in ("volatile", "scorched", "mend"):
+            if spec.get(flag):
+                out[flag] = 1
     out["hp"] *= 1 + LEVEL_HP * (level - 1)
     return out
 

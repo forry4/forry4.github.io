@@ -969,3 +969,54 @@ test("the two armors of a type stay close: Defense one apart, small leans", () =
 	assert.deepEqual([p.def, p.maxHp - bare.maxHp], [7, 60]);
 	assert.deepEqual([g.def, g.maxHp - bare.maxHp, g.dex], [6, 40, 3]);
 });
+
+test("Drained halves HP and MP regeneration", () => {
+	const regen = (scale) => {
+		const st = createSim({ ...A, scale: { ...A.scale, ...scale } }, STARTER);
+		st.p.hp = st.p.low = 50; st.p.mp = 10;
+		for (let t = 0; t < 2 * TPS; t++) step(st, {});
+		return [st.p.hp - 50, st.p.mp - 10];
+	};
+	const [hp, mp] = regen({}), [hp2, mp2] = regen({ regen: 0.5 });
+	assert.ok(hp > 0 && mp > 0);
+	assert.ok(Math.abs(hp2 - hp / 2) < 1e-6 && Math.abs(mp2 - mp / 2) < 1e-6, `${hp}/${hp2} ${mp}/${mp2}`);
+});
+
+test("Scorched leaves burning ground where an enemy falls, and the ground burns you", () => {
+	const st = createSim({ ...A, scale: { ...A.scale, scorched: 1 } }, STARTER);
+	const e = st.enemies.find((x) => x.type === "chaser");
+	st.enemies = [e]; e.active = true; e.hp = 1; e.x = st.p.x + 0.3; e.y = st.p.y; e.cd = 1e9;
+	st.bullets.push({ owner: "p", x: e.x, y: e.y, vx: 0, vy: 0, dmg: 5, r: 0.14, life: 5, pierce: 0, hit: [] });
+	step(st, {});
+	assert.equal(e.hp, 0);
+	assert.ok(st.fires.some((f) => f.src === "mod:scorched"));
+	for (let t = 0; t < 40 && !st.lastHit; t++) step(st, {});
+	assert.equal(st.lastHit?.src, "mod:scorched");
+	const plain = createSim(A, STARTER), f = plain.enemies.find((x) => x.type === "chaser");
+	plain.enemies = [f]; f.active = true; f.hp = 1; f.cd = 1e9;
+	plain.bullets.push({ owner: "p", x: f.x, y: f.y, vx: 0, vy: 0, dmg: 5, r: 0.14, life: 5, pierce: 0, hit: [] });
+	step(plain, {});
+	assert.ok(!(plain.fires || []).length, "no ground fire without the modifier");
+});
+
+test("Mending heals an enemy nobody has hit for a moment, and never past full", () => {
+	const st = createSim({ ...A, scale: { ...A.scale, mend: 1 } }, STARTER);
+	const e = st.enemies.find((x) => x.type === "chaser");
+	st.enemies = [e]; e.active = true; e.cd = 1e9; e.scd = 1e9; e.x = st.p.x + 6;
+	st.bullets.push({ owner: "p", x: e.x, y: e.y, vx: 0, vy: 0, dmg: 10, r: 0.14, life: 5, pierce: 0, hit: [] });
+	step(st, {});
+	const hurt = e.hp;
+	assert.ok(hurt < e.maxHp);
+	for (let t = 0; t < 80; t++) { e.cd = e.scd = 1e9; e.tele = 0; step(st, {}); }
+	assert.equal(e.hp, hurt, "not yet: it was hit a moment ago");
+	for (let t = 0; t < 10 * TPS; t++) { e.cd = e.scd = 1e9; e.tele = 0; step(st, {}); }
+	assert.equal(e.hp, e.maxHp, "healed back to full, and no further");
+});
+
+test("Enraged gives the boss, and only the boss, 50% more health", () => {
+	const plain = createSim(A, STARTER), mad = createSim({ ...A, scale: { ...A.scale, boss_hp: 1.5 } }, STARTER);
+	const boss = (s) => s.enemies.find((x) => x.type === "boss");
+	assert.equal(boss(mad).maxHp, Math.round(boss(plain).maxHp * 1.5));
+	const other = (s) => s.enemies.find((x) => x.type !== "boss");
+	assert.equal(other(mad).maxHp, other(plain).maxHp);
+});

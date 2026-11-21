@@ -256,12 +256,22 @@ RIFT_MODS: dict[str, dict] = {
     "fortified": {"name": "Fortified", "text": "Enemies have 50% more health.", "scale": {"hp": 1.5}},
     "brutal":    {"name": "Brutal", "text": "Enemies hit 40% harder.", "scale": {"dmg": 1.4}},
     "swift":     {"name": "Swift", "text": "Enemies and their shots move 25% faster.", "scale": {"speed": 1.25}},
-    "warded":    {"name": "Warded", "text": "Enemies ignore their first few hits.", "scale": {}, "ward": (3, 10)},
+    "warded":    {"name": "Warded", "text": "Enemies ignore their first few hits.", "scale": {}, "ward": (5, 15)},
     "swarming":  {"name": "Swarming", "text": "More enemies spawn.", "scale": {}, "swarm": True},
     "bulky":     {"name": "Bulky", "text": "Enemy shots are 50% larger.", "scale": {"shot": 1.5}},
     "frenzied":  {"name": "Frenzied", "text": "Enemies attack 40% more often.", "scale": {"cadence": 1 / 1.4}},
     "volatile":  {"name": "Volatile", "text": "Enemies burst into a ring of shots when they fall.", "scale": {},
                   "volatile": True},
+    # 2026-11-20 (owner: "add more modifiers and balance them"). Each is meant to cost about
+    # what one of the eight above does, since each pays the same loot bonus. A bot pass
+    # (no dodging) put Warded below a plain run at 3/10 hits, so it went to 5/15, and
+    # Enraged level with Brutal at 1.6, so it went to 1.5. Tune further by hand.
+    "drained":   {"name": "Drained", "text": "You regenerate HP and MP half as fast.", "scale": {"regen": 0.5}},
+    "scorched":  {"name": "Scorched", "text": "Enemies leave burning ground where they fall.", "scale": {},
+                  "scorched": True},
+    "mending":   {"name": "Mending", "text": "Enemies you stop hitting heal back quickly.", "scale": {},
+                  "mend": True},
+    "enraged":   {"name": "Enraged", "text": "The boss has 50% more health.", "scale": {"boss_hp": 1.5}},
 }
 # ── LOOT TABLES (owner's ask, 2026-11-18: "rethink how to do loot drop tables") ──
 # EVERY RANDOM OUTCOME IS ONE ROLL ON ONE WEIGHTED TABLE THAT NAMES EVERY RESULT,
@@ -305,7 +315,7 @@ QUALITY: dict[str, tuple] = {
     "ashen_enemy": (("t3", 60, 0), ("t4", 32, 5), ("t5", 8, 3)),
     "ashen_boss":  (("t4", 45, 0), ("t5", 32, 5), ("t6", 15, 3), ("t7", 3, 1), ("unique", 8, 0)),
 }
-# THE BOSS'S UNIQUE CHANCE RISES 15% (of itself) PER MODIFIER, so 45% with all three
+# THE BOSS'S UNIQUE CHANCE RISES ONE LOOT BONUS (of itself) PER MODIFIER, so +30% with all three
 # (owner's call, 2026-11-18). A flat weight per point cannot do that — the other rows
 # grow too and the boss drops 1-3 items — so the unique row's weight is SOLVED for
 # that target at each rarity (`_unique_weight`), and tested to the percent.
@@ -316,13 +326,19 @@ QUALITY: dict[str, tuple] = {
 #   QUANTITY — LINEAR: an ordinary enemy's drop chance and a boss's mean item count
 #              are (1 + bonus) times their base (`drop_count`), so every modifier
 #              adds the same amount: 17% -> 19.6% -> 22.1%, 1.70 -> 1.96 -> 2.21;
-#   SLOTS    — an n-slot result weighs (1 + bonus)^n more (`dungeon.slot_odds`), so a
-#              second, third or fourth slot is likelier, the fourth most of all;
+#   SLOTS    — an n-slot result weighs (1 + SLOT_SHARE x bonus)^n more (`dungeon.slot_odds`),
+#              so a second, third or fourth slot is likelier, the fourth most of all.
+#              HALF the bonus (owner's call, 2026-11-20): at full bonus the deepest,
+#              most-modified run made 4-slots 12x as common (7.2%); at half, ~2.6%;
 #   TIERS    — the QUALITY rows' own per-MODIFIER weights above (depth lifts tiers
 #              outright instead: DEPTH_TIER);
 #   UNIQUES  — the boss's unique chance is (1 + bonus) times its base (solved below).
-LOOT_PER_MODIFIER = 0.15
-LOOT_PER_LEVEL = 0.10
+# Lowered 2026-11-20 (owner: "reduce how much loot bonus you get, cap it out at 100%"):
+# the deepest level at its most modifiers (7 + 4 levels) lands exactly on the cap.
+LOOT_PER_MODIFIER = 0.10
+LOOT_PER_LEVEL = 0.075
+LOOT_BONUS_CAP = 1.0
+SLOT_SHARE = 0.5
 UNIQUE_PER_MODIFIER = LOOT_PER_MODIFIER
 # Each modifier also pays this share of the level's whole XP (dungeon.py).
 MOD_XP = 0.10
@@ -340,7 +356,7 @@ MAX_TIER = 10
 
 
 def loot_bonus(rarity: int, level: int = 1) -> float:
-    return LOOT_PER_MODIFIER * rarity + LOOT_PER_LEVEL * (level - 1)
+    return min(LOOT_BONUS_CAP, LOOT_PER_MODIFIER * rarity + LOOT_PER_LEVEL * (level - 1))
 
 
 def drop_count(etype: str, bonus: float = 0.0) -> tuple:

@@ -434,9 +434,10 @@ export function createSim(dungeon, gear = [], hero = {}) {
 	const level = levelFor(levels, xp);
 	const classId = hero.class_id || hero.classId || dungeon.class_id || "ranger";
 	const stats = statsFor(gear, level, classId);
-	const scale = { hp: 1, dmg: 1, speed: 1, shot: 1, cadence: 1, ward: 0, ward_boss: 0, volatile: 0, ...(dungeon.scale || {}) };
+	const scale = { hp: 1, dmg: 1, speed: 1, shot: 1, cadence: 1, regen: 1, boss_hp: 1, ward: 0, ward_boss: 0,
+		volatile: 0, scorched: 0, mend: 0, ...(dungeon.scale || {}) };
 	const bossKind = dungeon.boss_kind || "tidewarden";
-	const hpOf = (e) => (e.type === "boss" ? BOSS_HP[bossKind] || ENEMY.boss.hp : ENEMY[e.type].hp);
+	const hpOf = (e) => (e.type === "boss" ? (BOSS_HP[bossKind] || ENEMY.boss.hp) * scale.boss_hp : ENEMY[e.type].hp);   // Enraged
 	const enemies = Object.entries(dungeon.enemies)
 		.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))      // a fixed order, never insertion order
 		.map(([id, e]) => ({ id, type: e.type, room: e.room, x: e.x, y: e.y, xp: e.xp || 0,
@@ -657,6 +658,8 @@ function blinkSpot(st, e, lo, hi) {
 function enemyStep(st, e) {
 	const p = st.p;
 	if (e.flash > 0) e.flash--;
+	if (st.scale.mend && e.hp < e.maxHp && st.tick - (e.hurtAt || 0) >= MEND.after && st.tick % MEND.every === 0)
+		e.hp = Math.min(e.maxHp, e.hp + Math.round(e.maxHp * MEND.share));   // Mending
 	const dx = p.x - e.x, dy = p.y - e.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
 	const ux = dx / d, uy = dy / d;
 	const sp = ENEMY[e.type].speed * st.scale.speed * DT;
@@ -905,6 +908,11 @@ const BOSS_CYCLE = [["spiral", 150], ["rest", 40], ["fan", 100], ["rest", 40]];
  * `burnDmg` every `burnEvery` ticks — so the same spot behind the same pillar cannot
  * be gone back to for a while. In sight, the boss fires as before and lobs nothing. */
 export const MORTAR = { after: 60, every: 100, delay: 54, r: 1.4, dmg: 22, burn: 300, burnEvery: 20, burnDmg: 6 };
+// Rift modifiers the sim runs itself (content.RIFT_MODS). Scorched: a fallen enemy's
+// ground burns (MORTAR's burn damage) for `last` ticks. Mending: an enemy nobody has
+// hit for `after` ticks heals `share` of its health every `every` ticks (4% a second).
+export const SCORCH = { r: 1.1, last: 4 * 60 };
+export const MEND = { after: 1.5 * 60, every: 30, share: 0.02 };
 
 // ── the Ashen Breach (owner's design, 2026-11-19) ───────────────────────────
 /* A vent marks the player's current spot during an active fight. The warning and
@@ -1154,7 +1162,7 @@ export function step(st, input) {
 	trailEmber(st, mx !== 0 || my !== 0);                          // the Emberweave
 
 	// regeneration, never past the recovery limit (design §9.3)
-	const limit = recoveryLimit(st), regenDt = roomRegenMultiplier(st) * DT;
+	const limit = recoveryLimit(st), regenDt = roomRegenMultiplier(st) * (st.scale?.regen ?? 1) * DT;   // Drained
 	if (p.hp < limit) p.hp = Math.min(limit, p.hp + s.hpRegen * regenDt);
 	p.mp = Math.min(s.maxMp, p.mp + s.mpRegen * regenDt);
 	if (p.hurt > 0) p.hurt--;
@@ -1483,6 +1491,7 @@ function sealRoom(st) {
 function hurtEnemy(st, e, dmg, flash) {
 	if (e.type === "smolder" && !e.lit) { e.lit = true; e.tele = SMOLDER.flare; e.charge = SMOLDER.charge; }   // it wakes
 	if (e.ward > 0) { e.ward--; e.flash = 2; return; }
+	e.hurtAt = st.tick;                                         // Mending waits for a quiet spell
 	// What a hit did, floated over the enemy (drawing only: not in the fingerprint).
 	(st.damageNumbers ||= []).push({ x: e.x, y: e.y - e.r, amount: Math.round(Math.min(dmg, e.hp) * 10) / 10, until: st.tick + 36, foe: true });
 	e.hp -= dmg; e.flash = flash;
@@ -1534,6 +1543,8 @@ function kill(st, e) {
 		}
 		st.events.push({ type: "unseal", room: e.room, local: true });
 	}
+	if (st.scale.scorched && e.type !== "boss")                                          // Scorched
+		(st.fires ||= []).push({ x: e.x, y: e.y, r: SCORCH.r, until: st.tick + SCORCH.last, src: "mod:scorched" });
 	if (st.scale.volatile) (st.rings ||= []).push({ x: e.x, y: e.y, n: e.type === "boss" ? 16 : 8, a: rand(st) * TAU, type: e.type });
 	gainXp(st, e.xp);
 	if (st.stats.leech) st.p.hp = Math.min(recoveryLimit(st), st.p.hp + st.stats.leech);   // the Leechstone
@@ -1584,7 +1595,7 @@ export function fingerprint(st) {
 	const r = (v) => Math.round(v * 1e6) / 1e6;
 	return JSON.stringify([st.tick, st.elapsedTicks, st.bossTimeTicks, st.rng, st.status, st.classId, st.practice,
 		st.hero.level, st.hero.xp, st.p.burstLeft, r(st.p.x), r(st.p.y), r(st.p.hp), r(st.p.low), r(st.p.mp),
-		st.enemies.map((e) => [e.id, r(e.x), r(e.y), r(e.hp), e.cd, e.tele, e.scd, e.mode, e.modeT, e.ward, e.active]),
+		st.enemies.map((e) => [e.id, r(e.x), r(e.y), r(e.hp), e.cd, e.tele, e.scd, e.mode, e.modeT, e.ward, e.active, e.hurtAt || 0]),
 		st.sealed, st.roomLeft,
 		st.bullets.length, st.bullets.map((b) => [r(b.x), r(b.y)]).slice(0, 40),
 		st.bags.map((b) => b.drops.join(",")), st.pickups.length, st.shield && [r(st.shield.x), r(st.shield.y), st.shield.until], st.slowUntil, st.slowDmg || 0,

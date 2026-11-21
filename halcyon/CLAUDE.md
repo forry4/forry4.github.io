@@ -290,7 +290,7 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
   the floor (`healsBy`) and `kill()` drops one where its carrier died.
 - **Uniques drop only from the boss** (`UNIQUE_LOOT` by class, the "unique" row of the
   boss's quality table — see "Loot tables"); a bag holds at most `BAG_MAX` (8).
-- **Rift modifiers** (`content.RIFT_MODS`: eight now — see "Locked rooms and going deeper"). E at a portal
+- **Rift modifiers** (`content.RIFT_MODS`: twelve now — see "Locked rooms and going deeper"). E at a portal
   opens its panel; E again (or Enter the rift) goes in with what is picked. The run
   POST carries `mods`; `generate` validates them, writes `mods` + `scale` into the
   dungeon, and each modifier is one RARITY point that adds weight to the better rows
@@ -395,15 +395,19 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
   Enchantment slots on a drop (owner's cumulative table: 1+ 50%, 2+ 18.75%, 3+ 4.69%,
   4 0.59%): 0 50% / 1 31.25% / 2 14.06% / 3 4.10% / 4 0.59% — `dungeon.SLOT_ODDS`, in 2048ths. Same slot odds
   for every source.
-- **Each modifier is ONE LOOT BONUS, +15% (`content.LOOT_PER_MODIFIER`), and each level
-  past the first another +10% (`LOOT_PER_LEVEL`)** (owner's calls 2026-11-19, "rarity for
+- **Each modifier is ONE LOOT BONUS, +10% (`content.LOOT_PER_MODIFIER`), and each level
+  past the first another +7.5% (`LOOT_PER_LEVEL`), the total CAPPED at +100%
+  (`LOOT_BONUS_CAP`; the deepest level at 7 modifiers lands exactly on it)** (owner's
+  calls 2026-11-19, lowered from +15%/+10% on 2026-11-20; "rarity for
   us is the number of enchantment slots"). The panels say only "Loot +N%" and "XP +N%",
   worked out on the page from the server's `loot_rule` — no odds, by the owner's wish.
   The bonus moves four things: QUANTITY, LINEARLY (`content.drop_count`: an ordinary
   enemy's 17% and a boss's 1.7-item mean are each (1+bonus) times base, so every
   modifier adds the same amount; a boss's extra comes as whole extra items plus one at
-  the remainder's chance), SLOTS (an n-slot result weighs (1+bonus)^n more,
-  `dungeon.slot_odds`, so the fourth slot gains most), TIERS (each `QUALITY` row's own
+  the remainder's chance), SLOTS (an n-slot result weighs (1 + `SLOT_SHARE`·bonus)^n
+  more, `dungeon.slot_odds`, so the fourth slot gains most — HALF the bonus since
+  2026-11-20: at the full bonus the deepest, most-modified run made 4-slots 12x as
+  common, 7.2%; at half ~2.6%), TIERS (each `QUALITY` row's own
   `per` weight) and UNIQUES (the boss's chance is 1+bonus times its base, the unique
   row solved at each bonus, `content._unique_weight`). Every ordinary enemy drops at
   17% (a Splinter 8%: its Splitter spawns two), every boss 45/40/15 for 1/2/3 items.
@@ -582,7 +586,7 @@ plausibility checks (design §18.3), input-log upload (§18.6), hiding the drop 
 - **A run starts with at most `content.START_MODS` (3) modifiers**; each level deeper adds
   one (up to 7 at level 5). The store refuses more at level 1; the panel greys the rest
   once three are on. Going deeper is the only way past three.
-- **Depth pays what modifiers cannot**: +10% loot a level, and every standard drop's tier
+- **Depth pays what modifiers cannot**: +7.5% loot a level, and every standard drop's tier
   is LIFTED one per level past the first (`content.DEPTH_TIER`, capped at `MAX_TIER`
   10; `quality_table(source, rarity, level)` merges rows that land on one tier). Tiers
   6-10 come only from depth; the Fracture's boss has a rare T6 row so its level-5 boss
@@ -691,6 +695,15 @@ Modeled on RotMG's enchanting, minus its percentages, dust colors and artifacts.
   (`content.fuse_slot_odds`: 0 -> 50% for 1+, 1 -> 37.5% for 2+, 2 -> 25% for 3+,
   3 -> 12.5% for 4), the higher tier and fresh regular lines; the page warns when an
   input carries a special line. The old 4%/20% `FUSE_SLOT_GAIN` is gone.
+- **Fusion stays as it is (owner, 2026-11-20).** Feeding a high-tier item cheap low-tier
+  copies can ratchet its slots up (0 -> 4 costs ~200 same-base T1 copies, ~90 with
+  modifiers); the owner judged that grind acceptable. Do not re-propose a tier-gap
+  penalty or a once-per-item limit.
+- **Four more rift modifiers (2026-11-20)**: Drained (HP/MP regen x0.5, `scale.regen`),
+  Scorched (a fallen non-boss enemy leaves `sim.SCORCH` ground fire), Mending (an enemy
+  unhit for `MEND.after` heals 4%/s, `e.hurtAt`), Enraged (boss HP x1.5, `scale.boss_hp`).
+  Warded went 3/10 -> 5/15 hits. Balanced by a no-dodge bot pass only — Bulky and Swift
+  read too hard to it and Drained/Scorched/Mending barely register — so tune by play.
 - Tests: `test_store.py` (reroll, locks, salvage, fusion floors and odds, shards banked
   / lost), `test_dungeon.py` (level weights, special odds by depth, their own stream),
   `webapp/test/unit/halcyonSpecialLines.test.mjs` (every special line in the sim).

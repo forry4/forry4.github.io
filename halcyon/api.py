@@ -178,7 +178,7 @@ def setup_halcyon(app, get_db_conn, get_user_by_session, token_resolver=None) ->
                                   "loot": [C.loot_odds(r, *v["quality"]) for r in range(C.START_MODS + 1)]}
                                  for k, v in D.DUNGEONS.items()],
                 # What the panels say: one loot bonus per modifier and per level deeper.
-                "loot_rule": {"per_mod": C.LOOT_PER_MODIFIER, "per_level": C.LOOT_PER_LEVEL,
+                "loot_rule": {"per_mod": C.LOOT_PER_MODIFIER, "per_level": C.LOOT_PER_LEVEL, "cap": C.LOOT_BONUS_CAP,
                               "xp_per_mod": C.MOD_XP, "start_mods": C.START_MODS},
                 "limits": {"vault": C.VAULT_SIZE, "inventory": C.INVENTORY_SIZE,
                            "characters": C.CHARACTER_SLOTS, "equip": list(C.EQUIP_SLOTS)},

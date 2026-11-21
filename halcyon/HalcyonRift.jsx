@@ -1058,7 +1058,7 @@ function HalcyonGame({ authUser, onExit }) {
 									</div>
 									{deeper.mods.length > 0 && <p className="hr-hint">This run: {deeper.mods.map((m) => names[m]?.name || m).join(", ")}</p>}
 									<dl className="hr-mod-sum">
-										<div><dt>Loot</dt><dd>{plus(rule.per_mod * r + rule.per_level * deeper.from)}</dd></div>
+										<div><dt>Loot</dt><dd>{plus(Math.min(rule.cap, rule.per_mod * r + rule.per_level * deeper.from))}</dd></div>
 										<div><dt>XP</dt><dd>{plus(rule.xp_per_mod * r)}</dd></div>
 									</dl>
 									{descending && <p className="hr-hint" role="status">Descending…</p>}
@@ -1201,7 +1201,7 @@ function HalcyonGame({ authUser, onExit }) {
 											: <p className="hr-hint">With a Boss Rush key in your bag you can skip straight to each level's boss.</p>;
 									})()}
 									<dl className="hr-mod-sum">
-										<div><dt>Loot</dt><dd>{plus(rule.per_mod * r)}</dd></div>
+										<div><dt>Loot</dt><dd>{plus(Math.min(rule.cap, rule.per_mod * r))}</dd></div>
 										<div><dt>XP</dt><dd>{plus(rule.xp_per_mod * r)}</dd></div>
 									</dl>
 									<div className="hr-actions">
@@ -1754,7 +1754,7 @@ function XpBar({ levels, xp }) {
 /* The loot rule the panels say (the server's; an older server sends none, so the
  * same numbers stand in). */
 function lootRule(view) {
-	return { per_mod: 0.15, per_level: 0.10, xp_per_mod: 0.10, start_mods: 3, ...(view.loot_rule || {}) };
+	return { per_mod: 0.10, per_level: 0.075, cap: 1, xp_per_mod: 0.10, start_mods: 3, ...(view.loot_rule || {}) };
 }
 /* Why this character cannot enter a rift yet (a rift opened by clearing another), or null. */
 function riftShut(view, d, char) {
