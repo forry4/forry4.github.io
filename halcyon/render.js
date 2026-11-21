@@ -102,7 +102,9 @@ export function drawMap(g, st, ox, oy, px, width, height, pal = SHALLOWS, tick =
 			}
 		}
 	}
-	drawEdges(g, st, ox, oy, px, { x0, x1, y0, y1 }, pal === FRACTURE && sprite("rift.fracture.buttress"));
+	const masonry = (pal === FRACTURE || pal === TOWN) && sprite(t0 + "wall");
+	drawEdges(g, st, ox, oy, px, { x0, x1, y0, y1 }, pal, masonry);
+	if (pal === FRACTURE && masonry) drawFractureSupports(g, st, ox, oy, px, { x0, x1, y0, y1 });
 	drawDecor(g, st, ox, oy, px, { x0, x1, y0, y1 }, pal, tick, calm);
 }
 
@@ -167,17 +169,11 @@ function drawDecor(g, st, ox, oy, px, { x0, x1, y0, y1 }, pal, tick, calm) {
 	if (!Object.values(keys).some(sprite)) return;
 	for (const d of decorations(st)) {
 		if (d.x < x0 - 1 || d.x > x1 + 1 || d.y < y0 - 1 || d.y > y1 + 1) continue;
+		if (pal === TOWN && (d.part === "light" || d.part === "hang")) continue;
 		const fy = DECO_Y[d.part];
 		const X = ox + (d.x + (d.dx ?? 0.5)) * px, Y = oy + (d.y + (fy ?? d.dy)) * px;
 		const light = d.part === "light" && sprite(keys.light), phase = d.x * 7 + d.y * 13;
-		if (pal === FRACTURE && light) {
-			const step = Math.max(1, Math.round(px / artPx()));
-			const x = Math.round(X), y = Math.round(Y);
-			g.fillStyle = "rgba(235,129,48,.10)"; g.fillRect(x - step * 8, y - step * 4, step * 16, step * 15);
-			const glow = calm ? 0.12 : 0.12 + 0.035 * Math.sin((tick + phase) * 0.19);
-			g.fillStyle = "rgba(255,161,61," + glow.toFixed(3) + ")";
-			g.fillRect(x - step * 5, y - step * 3, step * 10, step * 10);
-		}
+		if (pal === FRACTURE && light) torchLight(g, X, Y, px, tick + phase, calm);
 		drawSprite(g, keys[d.part], X, Y, px, { seed: phase, tick });
 		if (light && !calm) ember(g, X, Y - px * 0.13, px, tick + phase, "#ffc278");
 	}
@@ -195,7 +191,7 @@ export function deepWall(st, x, y) {
 	return true;
 }
 const OUTLINE = PALETTE.outline[0], SHADE = "20,17,26";
-function drawEdges(g, st, ox, oy, px, { x0, x1, y0, y1 }, buttresses) {
+function drawEdges(g, st, ox, oy, px, { x0, x1, y0, y1 }, pal, masonry) {
 	const a = px / (artPx() || 16), n = (k) => Math.max(1, Math.round(k * a));
 	const o = n(2);                                         // the outline: two art pixels
 	for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
@@ -224,12 +220,13 @@ function drawEdges(g, st, ox, oy, px, { x0, x1, y0, y1 }, buttresses) {
 			if (!out(0, -1) && !out(1, 0) && out(1, -1)) g.fillRect(X + W - o, Y, o, o);
 			if (!out(0, 1) && !out(-1, 0) && out(-1, 1)) g.fillRect(X, Y + H - o, o, o);
 			if (!out(0, 1) && !out(1, 0) && out(1, 1)) g.fillRect(X + W - o, Y + H - o, o, o);
-			if (buttresses) {
-				const horizontal = !N || !S, vertical = !Wl || !E;
+			if (masonry) {
+				const horizontal = out(0, -1) || out(0, 1), vertical = out(-1, 0) || out(1, 0);
 				const corner = horizontal && vertical;
-				// Stone caps mark corners and break up long runs without adding collision.
-				if (corner || (horizontal && x % 7 === 3) || (vertical && y % 5 === 2))
-					drawTile(g, "rift.fracture.buttress", X, Y, W, H);
+				if (corner || (horizontal && x % 7 === 3) || (vertical && y % 5 === 2)) {
+					if (pal === FRACTURE) drawTile(g, "rift.fracture.buttress", X, Y, W, H);
+					else stonePier(pixelSpace(g, X, Y, px), 1, 2, 14, 14);
+				}
 			}
 			continue;
 		}
@@ -256,6 +253,55 @@ function drawEdges(g, st, ox, oy, px, { x0, x1, y0, y1 }, buttresses) {
 			if (lip(0, 1)) { g.fillStyle = "rgba(255,255,255,.22)"; g.fillRect(X, Y + H - n(2), W, n(1)); }
 		}
 	}
+}
+
+// Architectural details use a 16-unit tile grid, snapped to backing pixels.
+function pixelSpace(g, X, Y, px) {
+	const scale = px / 16;
+	return (x, y, w, h, color) => {
+		const left = Math.round(X + x * scale), top = Math.round(Y + y * scale);
+		g.fillStyle = color;
+		g.fillRect(left, top, Math.round(X + (x + w) * scale) - left, Math.round(Y + (y + h) * scale) - top);
+	};
+}
+
+function stonePier(rect, x, y, w, h) {
+	rect(x + 1, y + h - 3, w + 2, 5, "#18142166");
+	rect(x, y, w, h, OUTLINE);
+	rect(x + 2, y + 2, w - 4, h - 4, "#494157");
+	rect(x + 3, y + 2, w - 6, 4, "#82768d");
+	rect(x + 4, y + 3, w - 8, 2, "#6b617a");
+	rect(x + 3, y + 6, w - 6, 2, "#63586e");
+	rect(x + 3, y + h - 5, w - 6, 2, "#322b43");
+	rect(x + 2, y + h - 3, w - 4, 1, "#665a73");
+}
+
+function drawFractureSupports(g, st, ox, oy, px, { x0, x1, y0, y1 }) {
+	const at = (x, y) => st.tiles[y]?.[x];
+	// The room templates already group these solid stones into rectangular
+	// footprints. Draw each as one support so cover reads as a single object.
+	for (let y = Math.max(0, y0 - 2); y <= y1; y++) for (let x = Math.max(0, x0 - 4); x <= x1; x++) {
+		if (at(x, y) !== "o" || at(x - 1, y) === "o" || at(x, y - 1) === "o") continue;
+		let w = 1, h = 1;
+		while (at(x + w, y) === "o") w++;
+		while (at(x, y + h) === "o") h++;
+		const rect = pixelSpace(g, ox + x * px, oy + y * px, px);
+		rect(0, 0, w * 16, h * 16, "#322b41");
+		stonePier(rect, 1, 0, w * 16 - 2, h * 16);
+		for (let joint = 1; joint < w; joint++) {
+			rect(joint * 16, 2, 1, 6, "#494157");
+			rect(joint * 16 + (joint % 2 ? -2 : 2), 9, 1, h * 16 - 15, "#393146");
+		}
+	}
+}
+
+function torchLight(g, X, Y, px, tick, calm) {
+	const rect = pixelSpace(g, X, Y, px);
+	const pulse = calm ? 0.17 : 0.17 + 0.025 * Math.sin(tick * 0.16);
+	rect(-15, -3, 30, 9, "rgba(223,122,61,.08)");
+	rect(-11, -7, 22, 17, "rgba(224,125,63,.09)");
+	rect(-7, -8, 14, 14, `rgba(246,147,65,${pulse})`);
+	rect(-4, -8, 8, 9, "rgba(255,168,79,.16)");
 }
 
 /* CRACKS (sim.js): a faint seam while closed, a bright flickering one in the second
@@ -908,6 +954,58 @@ function label(g, text, X, Y, px, color = "#f4efe4") {
 /* The town (town.js): flagstones, the vault, the forge, a portal per realm. The
  * station in reach glows, and the prompt for it sits at the bottom of the view. */
 const PROMPT = { vault: "Open the vault", forge: "Use the forge", dream: "Practice a rift", portal: "Enter" };
+
+function drawTownCourt(g, st, ox, oy, px, tick, calm) {
+	const at = (x, y) => pixelSpace(g, ox + x * px, oy + y * px, px);
+	const court = at(st.w / 2, 0);
+	// A trimmed central walk connects the gate court, arrival point and fountain.
+	court(-30, 52, 60, 108, "#504959");
+	court(-27, 52, 54, 108, "#3d364a");
+	court(-24, 52, 48, 108, "#66546d");
+	court(-22, 52, 44, 108, "#4e3c51");
+	for (let y = 66; y < 155; y += 16) {
+		for (const x of [-20, 17]) {
+			court(x, y, 3, 5, "#766076");
+			court(x - 1, y + 1, 5, 3, "#766076");
+		}
+	}
+	court(-7, 114, 14, 8, "#5e4b60");
+	court(-4, 111, 8, 14, "#5e4b60");
+	court(-2, 114, 4, 8, "#867076");
+
+	if (sprite("deco.town.light")) {
+		for (const x of [4.4, 17.6]) {
+			const X = ox + x * px, Y = oy + px * 0.55, phase = tick + x * 13;
+			torchLight(g, X, Y, px, phase, calm);
+			drawSprite(g, "deco.town.light", X, Y, px, { tick });
+			if (!calm) ember(g, X, Y - px * 0.1, px, phase, "#ffc278");
+		}
+	}
+	for (const x of [2.8, 8.5, 13.5, 19.2]) {
+		drawSprite(g, "deco.town.hang", ox + x * px, oy + px * 0.42, px, { tick });
+	}
+
+	if (st.fountain) {
+		const rim = at(st.fountain.x, st.fountain.y);
+		// Trace the existing cross-shaped basin so the stone lip matches the water.
+		const boundary = [[-16, -24], [16, -24], [16, -8], [32, -8], [32, 8], [16, 8],
+			[16, 24], [-16, 24], [-16, 8], [-32, 8], [-32, -8], [-16, -8]];
+		for (let i = 0; i < boundary.length; i++) {
+			const [x, y] = boundary[i], [nx, ny] = boundary[(i + 1) % boundary.length];
+			const left = Math.min(x, nx), top = Math.min(y, ny);
+			const w = Math.abs(nx - x), h = Math.abs(ny - y);
+			rim(left - 3, top - 3, w + 6, h + 6, OUTLINE);
+		}
+		for (let i = 0; i < boundary.length; i++) {
+			const [x, y] = boundary[i], [nx, ny] = boundary[(i + 1) % boundary.length];
+			const left = Math.min(x, nx), top = Math.min(y, ny);
+			const w = Math.abs(nx - x), h = Math.abs(ny - y);
+			rim(left - 1, top - 2, w + 2, h + 4, "#797088");
+			rim(left, top, w || 1, h || 1, "#a499ac");
+		}
+	}
+}
+
 export function drawTown(g, st, { width, height, px, at = here, notes = [], prompt = null, aim = null,
 	dps = () => 0, auto = false, aiming = false, ui = 1, calm = false, motion = null, frameTick = st.tick }) {
 	const pp = at(st.p);
@@ -915,6 +1013,8 @@ export function drawTown(g, st, { width, height, px, at = here, notes = [], prom
 	const sx = (x) => ox + x * px, sy = (y) => oy + y * px;
 	g.fillStyle = TOWN.deep; g.fillRect(0, 0, width, height);
 	drawMap(g, st, ox, oy, px, width, height, TOWN, frameTick, calm);
+	const dressed = sprite("tile.town.wall") && sprite("town.fountain");
+	if (dressed) drawTownCourt(g, st, ox, oy, px, frameTick, calm);
 	if (st.fountain) {
 		const X = sx(st.fountain.x), Y = sy(st.fountain.y);
 		if (drawSprite(g, "town.fountain", X, Y, px) && !calm) {
