@@ -91,24 +91,32 @@ over the games that have it and the tile says how many.
   `tools/refresh_due.py` skips a retry once any year's `built` is on or after the 15th, so a
   good month still costs one download. `lolstats/tests/test_refresh.py` pins both halves and
   the cron.
-- **Worlds seeds:** `lol-worlds.yml` runs every Monday in October and November and
-  re-renders only the current year's pages (`worlds.py fetch <year>`; the cache keeps the
-  rest). A series counts once Liquipedia marks its winner (`match-info-header-winner`), so
+- **Worlds seeds:** `lol-worlds.yml` runs DAILY in October and November and re-renders
+  only the current year's pages (`worlds.py fetch <year>`; the cache keeps the rest), and
+  `worlds.py due <year>` makes a run a no-op once that year is in `complete` with its
+  matches. A series counts once Liquipedia marks its winner (`match-info-header-winner`), so
   a live Bo5 at 1-1 or an undrawn "TBD" slot waits for a later run; a year with matches
   still to play may have seeds that have not played yet, and `lol-worlds.json`'s
-  `complete` lists the years that are done. A 429/5xx or an API `ratelimited` from
-  Liquipedia is retried (Retry-After, else 60s, 120s, ...; four tries, never under 31s);
-  anything else fails at once, and every failure on a runner is an `::error::` annotation
-  naming the status and body, because the log needs a sign-in to read
-  (`lolstats/tests/test_worlds_fetch.py`).
+  `complete` lists the years that are done.
+  **HTTP 429 from Liquipedia is an IP BLOCK, not a throttle** — a "Rate Limited" page that
+  lifts by CAPTCHA or by time, and that names "a shared IP address that was rate limited by
+  someone else", which is what a GitHub runner has (2026-11-16 met it on the first request;
+  a home connection drew it 16 pages into a full fetch on 2026-11-21 and four tries over six
+  minutes all met it). So `worlds.py` never retries a 429: it exits **75**, the workflow
+  stays green while a later day remains (a new runner, a new IP), and only Nov 30's run goes
+  red. A 5xx, a dropped connection or the API's `ratelimited` IS retried; anything else
+  fails at once. Every failure on a runner is an `::error::` annotation naming the status
+  and body, because the log needs a sign-in to read (`lolstats/tests/test_worlds_fetch.py`).
+  **Do not run a full fetch by hand casually** — 21 pages at 31s each is exactly the
+  pattern that got the dev box blocked.
 - **ONE HAND STEP A YEAR, once the field is known (late September):** add the year to
   `SEEDS` and `PAGES` in `worlds.py` and to `SEED_YEARS` in `derive.js`. Until then the
-  weekly job fails and names what to write. Seeds come from Liquipedia's
+  daily job fails and names what to write. Seeds come from Liquipedia's
   `World_Championship/<year>/Qualification` page (it lists qualifying paths, not seeds,
   and team CODES — the names to use are the RENDERED ones the build reports as unseeded).
   The build fails on any team without a seed. From 2022 on the match pages carry
   `{{ApiMap}}` instead of scores, so the tool reads RENDERED pages.
-- **The two sources disagree while the newest year is played** (Liquipedia weekly,
+- **The two sources disagree while the newest year is played** (Liquipedia daily,
   Oracle's Elixir monthly), so `lolstats.test.mjs` holds the newest year to `oe <= lp`
   once Liquipedia has it whole and to nothing before, and every older year to equality.
 

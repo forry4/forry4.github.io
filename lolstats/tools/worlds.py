@@ -3,6 +3,7 @@
     python -I lolstats/tools/worlds.py fetch    # ~10 min: renders each stage page (Liquipedia's parse limit is 1 per 30s)
     python -I lolstats/tools/worlds.py fetch 2026   # just that year's pages, plus any page not in the cache
     python -I lolstats/tools/worlds.py build    # cache -> webapp/public/data/lol-worlds.json
+    EVENT=schedule python -I lolstats/tools/worlds.py due 2026   # the workflow's gate: is 2026 still being played?
 
 WHY LIQUIPEDIA AND NOT ORACLE'S ELIXIR: the seeds tab splits Play-In from the main
 event, and Oracle's Elixir carries no stage marker on Worlds games (it also files the
@@ -127,15 +128,23 @@ REGION = {"LCK": "LCK", "LPL": "LPL", "LEC": "LEC", "LCS": "LCS/LTA", "LTA": "LC
 NON_MAJOR_TEAMS = ["Vivo Keyd Stars"]
 
 
-# A refusal worth waiting out: Liquipedia (behind Cloudflare) answers a busy moment, or a
-# runner IP somebody else has been hammering, with a 429 or a 5xx, and its API with a
-# `ratelimited`/`maxlag` error. 2026-11-16's run died on its FIRST request after 7 seconds
-# with only "exit code 1" to show for it, and the same three pages rendered fine from a home
-# connection on the 20th. Anything else (a 403, a missing page) is not transient and fails
-# at once, naming the status and the start of the body.
-TRANSIENT_HTTP = {429, 500, 502, 503, 504}
+# HTTP 429 FROM LIQUIPEDIA IS AN IP BLOCK, NOT A THROTTLE. Its "Rate Limited" page says the
+# IP "has been temporarily blocked", lifted by a CAPTCHA or by time, and names "a dynamic /
+# shared IP address that was rate limited by someone else" as a cause, which is what a
+# GitHub runner's IP is. 2026-11-16's run died on its FIRST request in 7 seconds; on
+# 2026-11-21 a home connection drew the block 16 pages into a full fetch, and four tries over
+# six minutes all met it. So a 429 is never retried: it exits TEMPFAIL (75) at once, and the
+# workflow tries again the next day on a fresh runner (and IP). A 5xx, a dropped connection
+# or the API's own `ratelimited`/`maxlag` error is waited out; anything else (a 403, a
+# missing page) fails at once. Every failure names the status and the start of the body.
+EX_TEMPFAIL = 75
+TRANSIENT_HTTP = {500, 502, 503, 504}
 TRANSIENT_API = {"ratelimited", "maxlag"}
 TRIES = 4
+
+
+class Blocked(Exception):
+    pass
 
 
 def _body(b, headers):
@@ -155,6 +164,16 @@ def _wait(attempt, headers=None):
         return 60 * attempt
 
 
+def due(event, year, payload):
+    """Is a scheduled refresh due? Not once `year` is in the payload's `complete` with its
+    matches in it: the bracket is played out, and every further run would only spend
+    Liquipedia requests (and risk a block) to learn nothing. A run by hand always is."""
+    if event != "schedule":
+        return True
+    return not (year in (payload.get("complete") or [])
+                and any(m.get("y") == year for m in payload.get("matches") or []))
+
+
 def get(params, tries=TRIES, sleep=time.sleep):
     url = API + "?" + urllib.parse.urlencode({**params, "format": "json"})
     what = params.get("page") or params.get("action")
@@ -166,6 +185,9 @@ def get(params, tries=TRIES, sleep=time.sleep):
                 d = json.loads(_body(r.read(), r.headers))
         except urllib.error.HTTPError as e:
             body = _body(e.read() or b"", e.headers)[:300]
+            if e.code == 429:
+                raise Blocked(f"{what}: Liquipedia answered HTTP 429, a temporary block on this IP "
+                              f"(it lifts on its own; tomorrow's run gets another IP): {body[:120]!r}")
             if e.code in TRANSIENT_HTTP and not last:
                 wait = _wait(attempt, e.headers)
                 print(f"{what}: HTTP {e.code}, retrying in {wait}s ({attempt}/{tries})", flush=True)
@@ -196,7 +218,7 @@ def cache_path(page):
 
 def fetch(years=()):
     """Renders every page of `years` (all of them when none are named), and any other
-    page the cache does not have yet, so a weekly refresh asks Liquipedia for three."""
+    page the cache does not have yet, so a daily refresh asks Liquipedia for three."""
     os.makedirs(CACHE, exist_ok=True)
     want = [p for p in PAGES if not years or int(p[:4]) in years or not os.path.exists(cache_path(p))]
     for i, page in enumerate(want):
@@ -296,18 +318,35 @@ def annotate(cmd, message):
 
 def main(argv):
     cmd, years = (argv[0] if argv else "build"), {int(a) for a in argv[1:]}
-    # The weekly refresh names the current year, so a Worlds nobody has set up yet
+    # The daily refresh names the current year, so a Worlds nobody has set up yet
     # fails here with what to do, rather than refreshing nothing in silence.
     unset = sorted(y for y in years if y not in SEEDS or not any(p.startswith(f"{y}/") for p in PAGES))
     if unset:
         raise SystemExit(f"{unset}: no SEEDS/PAGES yet. Write them from Liquipedia's "
                          "World_Championship/<year>/Qualification page, and add the year to SEED_YEARS in derive.js")
+    if cmd == "due":
+        # The workflow's gate: due=true|false to $GITHUB_OUTPUT, off the payload it took.
+        try:
+            with open(OUT, encoding="utf-8") as f:
+                payload = json.load(f)
+        except FileNotFoundError:
+            payload = {}
+        ok = all(due(os.environ.get("EVENT", ""), y, payload) for y in years)
+        print("due" if ok else f"{sorted(years)} already complete; nothing to do")
+        out = os.environ.get("GITHUB_OUTPUT")
+        if out:
+            with open(out, "a", encoding="utf-8") as f:
+                f.write(f"due={'true' if ok else 'false'}\n")
+        return
     fetch(years) if cmd == "fetch" else build()
 
 
 if __name__ == "__main__":
     try:
         main(sys.argv[1:])
+    except Blocked as e:
+        print(e, file=sys.stderr)
+        sys.exit(EX_TEMPFAIL)
     except SystemExit as e:
         if isinstance(e.code, str):
             annotate(sys.argv[1] if len(sys.argv) > 1 else "build", e.code)

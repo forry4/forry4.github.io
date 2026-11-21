@@ -31,16 +31,28 @@ The owner's Site health panel showed four `Pipeline failed` alerts.
   `refresh_due.py` still makes every retry after a good build a no-op.
 - **LoL Worlds `43942633653` (Nov 16)** failed `worlds.py fetch 2026` in 7 seconds with the
   cache restored, i.e. on its FIRST Liquipedia request. Its only annotation was "exit code
-  1", and the log needs a sign-in to read, so the cause is not known; the same three pages
-  rendered fine from a home connection on the 21st. `worlds.py` now retries a 429/5xx or an
-  API `ratelimited` (Retry-After, else 60s/120s/180s; never under Liquipedia's 31s) and
-  fails anything else at once, and any failure on a runner prints an `::error::` naming
-  the HTTP status and the start of the body. Two Mondays remain in the window (Nov 23, 30)
-  to land 2026's completed bracket.
+  1" and the log needs a sign-in to read, so the Nov 16 response itself is unseen, but the
+  cause was then reproduced: a full 21-page fetch from the dev box (31s apart, as the API
+  terms ask) drew **HTTP 429** on page 17, and four retries over six minutes all met it.
+  The body is Liquipedia's "Rate Limited" page: the IP "has been temporarily blocked",
+  lifted by a CAPTCHA or by time, and one listed cause is "a dynamic / shared IP address
+  that was rate limited by someone else" — a GitHub runner exactly. A 429 there is a
+  BLOCK, not a throttle, so retrying it in-run is wrong. `worlds.py` now exits **75** on a
+  429 at once (still retrying a 5xx or the API's own `ratelimited`), and `lol-worlds.yml`
+  runs DAILY through Oct–Nov instead of Mondays: each run is a new runner and IP, a 75 is a
+  warning while a later day remains, and only Nov 30 goes red. `worlds.py due` makes every
+  run a no-op once the year is in `complete` with its matches, so the daily cadence costs
+  nothing after the bracket lands. Every failure on a runner is now an `::error::`
+  annotation naming the status and body.
 
-**Not verified:** either LoL job succeeding on a runner. If Worlds fails again, the
-annotation will now say why; if it is a 403 from Cloudflare on GitHub's IPs, retries will
-not help and the fetch needs another route.
+**Not verified:** either LoL job succeeding on a runner. The Worlds fix assumes some runner
+IPs are not blocked on a given day (Nov 9's run fetched all 21 pages from one); if every
+runner is blocked, the fetch needs another route — Liquipedia's terms point scrapers at
+their API, which needs a key.
+
+**Side effect:** the dev box's own IP was blocked by Liquipedia on 2026-11-21 by the
+diagnosis above (an extra 3-page probe plus a cache-less 21-page fetch inside ~15 minutes).
+It lifts by time or by the CAPTCHA on any Liquipedia page.
 
 **Carry:** the public annotation is the only diagnosis anyone without a sign-in can read,
 so a scheduled tool that can fail should put its reason THERE, not only in the log.

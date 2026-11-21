@@ -4,10 +4,16 @@ name: LoL Worlds refresh
 # (webapp/public/data/lol-worlds.json), commits it to main and dispatches the Pages
 # deploy (a GITHUB_TOKEN push triggers no workflow on its own).
 #
-# Weekly on Mondays through October and November, which is when Worlds is played
-# (2026: Oct 15 - Nov 14), after the weekend's series. A series still being played,
-# or not yet drawn, is left out until a later run has its winner; a run that finds
-# nothing new commits nothing and deploys nothing.
+# DAILY through October and November, which is when Worlds is played (2026: Oct 15 -
+# Nov 14), and a no-op once this year's bracket is complete (`worlds.py due`). A series
+# still being played, or not yet drawn, is left out until a later run has its winner; a
+# run that finds nothing new commits nothing and deploys nothing.
+#
+# WHY DAILY: Liquipedia answers an IP it has blocked with HTTP 429 (a "Rate Limited" page
+# lifted by a CAPTCHA or by time), and a GitHub runner's IP is shared with whoever else
+# ran on it. 2026-11-16's weekly run met that on its first request. worlds.py exits 75
+# for it, which stays GREEN while another day remains (the next run gets another runner
+# and IP); only Nov 30's, the last chance, goes red. A run by hand always fails on it.
 #
 # ONE HAND STEP A YEAR, once the field is known (late September): add the year to
 # SEEDS and PAGES in lolstats/tools/worlds.py and to SEED_YEARS in lolstats/derive.js.
@@ -23,7 +29,7 @@ name: LoL Worlds refresh
 # and the pages read it from there. vars.DATA_COMMITS=off stops the commit + deploy.
 on:
   schedule:
-    - cron: "31 9 * 10,11 1"
+    - cron: "31 9 * 10,11 *"
   workflow_dispatch:
 
 permissions:
@@ -43,31 +49,58 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.14'
+      # The data store's copy is what the build must start from (data-worker/datastore.py),
+      # and what tells `due` whether this year's bracket is already complete.
+      - name: Take the published files
+        env:
+          DATA_URL: ${{ vars.DATA_URL }}
+        run: python data-worker/datastore.py take lol-worlds.json
+      - name: Due
+        id: due
+        env:
+          EVENT: ${{ github.event_name }}
+        run: python -I lolstats/tools/worlds.py due "$(date -u +%Y)"
       - uses: actions/cache/restore@v4
+        if: steps.due.outputs.due == 'true'
         with:
           path: lolstats/tools/cache/worlds
           key: lol-worlds-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: lol-worlds-
       - name: Fetch this year's pages
-        run: python -I lolstats/tools/worlds.py fetch "$(date -u +%Y)"
+        id: fetch
+        if: steps.due.outputs.due == 'true'
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          set +e
+          python -I lolstats/tools/worlds.py fetch "$(date -u +%Y)"
+          code=$?
+          set -e
+          if [ "$code" = 75 ]; then
+            if [ "$EVENT" = schedule ] && [ "$(date -u +%m%d)" != 1130 ]; then
+              echo "::warning::Liquipedia has blocked this runner's IP (HTTP 429); tomorrow's run gets another runner and tries again (the last is Nov 30)"
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::error::Liquipedia has blocked this runner's IP (HTTP 429), and no scheduled run is left this year"
+          fi
+          exit "$code"
       - uses: actions/cache/save@v4
+        if: steps.due.outputs.due == 'true' && steps.fetch.outputs.skip != 'true'
         with:
           path: lolstats/tools/cache/worlds
           key: lol-worlds-${{ github.run_id }}-${{ github.run_attempt }}
-      # The data store's copy is what the build must start from (data-worker/datastore.py).
-      - name: Take the published files
-        env:
-          DATA_URL: ${{ vars.DATA_URL }}
-        run: python data-worker/datastore.py take lol-worlds.json
       - name: Build the payload
+        if: steps.due.outputs.due == 'true' && steps.fetch.outputs.skip != 'true'
         run: python -I lolstats/tools/worlds.py build
       - name: Publish to the data store
+        if: steps.due.outputs.due == 'true' && steps.fetch.outputs.skip != 'true'
         env:
           DATA_URL: ${{ vars.DATA_URL }}
           DATA_PUBLISH_TOKEN: ${{ secrets.DATA_PUBLISH_TOKEN }}
         run: python data-worker/datastore.py publish lol-worlds.json
       - name: Commit and deploy
-        if: vars.DATA_COMMITS != 'off'
+        if: vars.DATA_COMMITS != 'off' && steps.due.outputs.due == 'true' && steps.fetch.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
