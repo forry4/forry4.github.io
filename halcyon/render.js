@@ -7,7 +7,7 @@
  * rock), the player cyan/white, every enemy and every enemy shot red/orange/
  * magenta, pickups gold (loot) and green (healing).
  */
-import { recoveryLimit, xpProgress, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT, VENT } from "./sim.js";
+import { recoveryLimit, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT, VENT } from "./sim.js";
 import { drawSprite, drawTile, artPx, PALETTE, sprite } from "./art.js";
 import { clamp01, DEFEAT_TICKS, gait, spriteFacing } from "./motion.js";
 
@@ -37,7 +37,7 @@ export const COLORS = {
 	veil: "rgba(214,58,90,.22)", veilEdge: "rgba(255,138,150,.55)", bars: "#2a2f2d", barsLit: "#d63a5a", ward: "#cfe3ff",
 	paladin: "#f1c46b", diviner: "#c4a5ff", ninja: "#8fd6a4", shield: "rgba(241,196,107,.72)",
 	slow: "rgba(241,196,107,.16)", star: "#ffe9a6", damage: "#ff9b8d",
-	hp: "#e2564e", mp: "#5a8de8", xp: "#9d8ff2", hudBack: "rgba(16,18,20,.72)",
+	hp: "#e2564e", hudBack: "rgba(16,18,20,.72)",
 	// The town: cool flagstone, so the safe place never reads like a dungeon floor.
 	stone: "#56605c", stoneDark: "#515b57", townWall: "#2e3836", townWallTop: "#3c4845",
 	vault: "#6b4a2a", vaultTrim: "#e9c25a", forge: "#4a4f55", forgeFire: "#ef8a3a", realm: "#9d8ff2",
@@ -614,11 +614,13 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here, bag
 	}
 
 	const launch = drawPlayer(g, p, width / 2, height / 2, px, aim, st.classId, calm, frameTick, motion?.body(p), aiming);
-	if (p.hp > 0) drawPlayerHealth(g, st, width / 2, height / 2, px);
+	if (p.hp > 0) drawPlayerBars(g, st, width / 2, height / 2, px);
 
 	drawShots(g, st.bullets, sx, sy, px, at, calm, frameTick, { launch, flatLaunch: st.classId === "diviner" });
 	drawDamageNumbers(g, st.damageNumbers || [], sx, sy, px, st.tick);
-	drawHud(g, st, { width, height, notes, ui, keys, auto });
+	const hudScale = Math.max(18, Math.floor(Math.min(height / 12, width / 16)));
+	drawRiftStatus(g, st, width, hudScale, ui, keys.potion, auto);
+	drawNotes(g, notes, width, height, hudScale);
 	drawBossBar(g, st, { width, ui, name: bossName });
 	drawMinimap(g, st, { width, ui, dpr, bagBest, mods, player: pp });
 }
@@ -700,16 +702,6 @@ export function drawEnemyBody(g, st, e, X, Y, px, col, calm = false, facing = nu
 		circle(g, X, Y, r * 0.55, "#5a1424");
 	}
 	if (shapeFx) g.restore();
-}
-
-/* "Auto-fire" over the HP box while it is on (it stays on across town and runs, so
- * it must be visible). `bottom` is the top edge of what it sits on. */
-function drawAutoTag(g, x, bottom, ui) {
-	g.font = `600 ${Math.round(12 * ui)}px "Crimson Pro", Georgia, serif`;
-	g.textBaseline = "middle"; g.textAlign = "left";
-	const t = "Auto-fire", w = g.measureText(t).width + 14, h = Math.round(20 * ui);
-	g.fillStyle = COLORS.hudBack; g.fillRect(x - 8, bottom - h - 6, w, h);
-	g.fillStyle = "#e9c25a"; g.fillText(t, x - 1, bottom - h / 2 - 6);
 }
 
 /* The boss's health across the top of the stage while it fights (design §19.1),
@@ -1099,7 +1091,7 @@ function drawTownCourt(g, st, ox, oy, px, tick, calm) {
 }
 
 export function drawTown(g, st, { width, height, px, at = here, notes = [], prompt = null, aim = null,
-	dps = () => 0, auto = false, aiming = false, ui = 1, calm = false, motion = null, frameTick = st.tick }) {
+	dps = () => 0, auto = false, aiming = false, calm = false, motion = null, frameTick = st.tick }) {
 	const pp = at(st.p);
 	const { ox, oy } = camera(st, width, height, px, pp);
 	const sx = (x) => ox + x * px, sy = (y) => oy + y * px;
@@ -1202,8 +1194,7 @@ export function drawTown(g, st, { width, height, px, at = here, notes = [], prom
 		g.fillText(prompt, width / 2, Y + 1);
 		g.textAlign = "left";
 	}
-	if (auto) drawAutoTag(g, 24, height - 16, ui);
-	drawNotes(g, notes, width, height, px);
+	drawNotes(g, auto ? [...notes, { text: "Auto-fire", color: "#e9c25a" }] : notes, width, height, px);
 }
 
 /* What the prompt for a station says, given whether it can be used now. */
@@ -1214,59 +1205,38 @@ export function promptFor(station, ready = true) {
 	return `E — ${PROMPT[station.kind]}`;
 }
 
-function drawPlayerHealth(g, st, x, y, px) {
-	const max = st.stats.maxHp;
-	const w = Math.max(12, Math.round(px * 0.82)), h = Math.max(2, Math.round(px * 0.09));
-	const left = Math.round(x - w / 2), top = Math.round(y + px * 0.47);
-	g.fillStyle = "#14111a"; g.fillRect(left - 1, top - 1, w + 2, h + 2);
+function drawPlayerBars(g, st, x, y, px) {
+	const p = st.p, s = st.stats;
+	const w = Math.max(14, Math.round(px * 0.9)), h = Math.max(3, Math.round(px * 0.1));
+	const left = Math.round(x - w / 2), top = Math.round(y + px * 0.47), gap = 2;
+	const fill = (ratio) => Math.round(w * clamp01(ratio));
+	g.fillStyle = "#14111a"; g.fillRect(left - 1, top - 1, w + 2, h * 2 + gap + 2);
 	g.fillStyle = "#34383d"; g.fillRect(left, top, w, h);
-	g.fillStyle = "#8d9298"; g.fillRect(left, top, Math.round(w * clamp01(recoveryLimit(st) / max)), h);
-	g.fillStyle = "#83dc78"; g.fillRect(left, top, Math.round(w * clamp01(st.p.hp / max)), h);
+	g.fillStyle = "#8d9298"; g.fillRect(left, top, fill(recoveryLimit(st) / s.maxHp), h);
+	g.fillStyle = "#83dc78"; g.fillRect(left, top, fill(p.hp / s.maxHp), h);
+
+	// As in Boss Rush, the blue bar brightens when the ability is ready.
+	const my = top + h + gap, cost = s.abilityKind ? (s.abilityCost ?? ABILITY_COST) : 0;
+	const ready = s.abilityKind && p.mp >= cost && !(p.abilityCd > 0);
+	g.fillStyle = "#1a2238"; g.fillRect(left, my, w, h);
+	g.fillStyle = ready ? "#6fd0ff" : "#3f6fa8"; g.fillRect(left, my, fill(p.mp / s.maxMp), h);
+	if (cost > 0 && cost < s.maxMp) {
+		g.fillStyle = "#f4efe4"; g.fillRect(left + fill(cost / s.maxMp) - 1, my - 1, 2, h + 2);
+	}
 }
 
-function drawHud(g, st, { width, height, notes, ui = 1, keys = {}, auto = false }) {
-	const p = st.p, s = st.stats;
-	// Keep the existing HUD size when the camera zoom changes.
-	const hudScale = Math.max(18, Math.floor(Math.min(height / 12, width / 16)));
-	const W = Math.min(320 * ui, width * 0.42), H = Math.max(10, hudScale * 0.32) * ui, X = 16;
-	const XH = Math.max(4, Math.round(H * 0.4)), Y = height - 16 - H * 2 - 8 - XH - 8;
-	g.fillStyle = COLORS.hudBack; g.fillRect(X - 8, Y - 8, W + 16, H * 2 + XH + 32);
-	if (auto) drawAutoTag(g, X, Y - 8, ui);
-	g.fillStyle = "#1a2238"; g.fillRect(X, Y + H + 8, W, H);
-	g.fillStyle = COLORS.mp; g.fillRect(X, Y + H + 8, W * (p.mp / s.maxMp), H);
-	g.fillStyle = "#f4efe4"; g.font = `${Math.round(H * 0.85)}px "Crimson Pro", Georgia, serif`;
-	g.textBaseline = "middle";
-	g.fillText(`Lv ${st.hero.level}`, X + 6, Y + H / 2 + 1);
-	g.fillText(`${Math.floor(p.mp)} / ${Math.round(s.maxMp)}`, X + 6, Y + H * 1.5 + 9);
-	// Whether the ability can be cast, at the MP bar's right end: MP is its only limit.
-	if (s.abilityKind) {
-		const cost = s.abilityCost ?? ABILITY_COST, cd = p.abilityCd > 0, ok = p.mp >= cost && !cd;
-		g.textAlign = "right";
-		g.fillStyle = ok ? "#9fe7ff" : "#c9cfd6";
-		g.fillText(ok ? "Ready" : cd ? `${Math.ceil(p.abilityCd / TPS)}s` : `${cost} MP`, X + W - 6, Y + H * 1.5 + 9);
-		g.textAlign = "left";
-	}
-	// XP inside the level, and the level itself at the bar's right end.
-	const xp = xpProgress(st.levels, st.hero.xp), XY = Y + H * 2 + 16;
-	g.fillStyle = "rgba(157,143,242,.2)"; g.fillRect(X, XY, W, XH);
-	g.fillStyle = COLORS.xp; g.fillRect(X, XY, W * (xp.span ? xp.into / xp.span : 1), XH);
-	// The potion cooldown stays beside the level in the HUD.
-	const pcd = p.potionCd || 0, pk = keys.potion || "R";
-	g.textAlign = "right";
-	g.fillStyle = pcd > 0 ? "#c9cfd6" : "#9ff0a0";
-	const ptxt = pcd > 0 ? `${pk} ${Math.ceil(pcd / TPS)}s` : `${pk} potion`;
-	g.fillText(ptxt, X + W - 6, Y + H / 2 + 1);
+function drawRiftStatus(g, st, width, hudScale, ui, potionKey = "R", auto = false) {
 	g.textAlign = "left";
+	g.textBaseline = "middle";
 	const timer = formatRiftTime(st.bossTimeTicks == null ? st.elapsedTicks : st.bossTimeTicks);
-	// The box fits its words: a level deeper adds "L2 " to the label.
-	const label = `${st.practice ? "Dream " : "Rift "}${st.depth > 1 ? `L${st.depth} ` : ""}${timer}`;
+	let label = `${st.practice ? "Dream " : "Rift "}${st.depth > 1 ? `L${st.depth} ` : ""}${timer}`;
+	if (auto) label += " · Auto-fire";
+	if (st.p.potionCd > 0) label += ` · ${potionKey} potion ${Math.ceil(st.p.potionCd / TPS)}s`;
 	g.font = `${Math.round(Math.max(13, hudScale * 0.38) * ui)}px "Crimson Pro", Georgia, serif`;
 	const tw = Math.max(138, Math.ceil(g.measureText(label).width) + 22);
 	g.fillStyle = COLORS.hudBack; g.fillRect(width - 16 - tw, 16, tw, 30);
 	g.fillStyle = "#f4efe4";
 	g.fillText(label, width - 16 - tw + 10, 31);
-
-	drawNotes(g, notes, width, height, hudScale);
 }
 
 /* Notes (what was picked up, what is under you) — newest last, bottom right. */

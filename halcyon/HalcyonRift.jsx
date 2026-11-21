@@ -1870,7 +1870,7 @@ function Town({ st, notes, ready, onUse, onNear, onLift, gear, level, classId, f
 			const pp = atPos(st.p);
 			cam = camera(st, cv.width, cv.height, px, pp);
 			drawTown(g, st, { width: cv.width, height: cv.height, px, at: atPos, notes: list, dps: (q) => postDps(st, q),
-				auto: livePrefs.current.auto, aiming: mouse.down || livePrefs.current.auto, ui: livePrefs.current.ui, motion, frameTick: st.tick + a,
+				auto: livePrefs.current.auto, aiming: mouse.down || livePrefs.current.auto, motion, frameTick: st.tick + a,
 				calm: livePrefs.current.calm || reduced.matches,
 				aim: mouse.over ? { x: (mouse.x - cam.ox) / px - pp.x, y: (mouse.y - cam.oy) / px - pp.y } : null,
 				prompt: st.nearFloor ? `E — Pick up ${st.floor.find((f) => f.key === st.nearFloor)?.name || "it"}`
