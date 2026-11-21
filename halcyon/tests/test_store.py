@@ -706,7 +706,7 @@ def test_the_boss_kill_adds_the_clear_bonus_and_reaches_the_level_the_table_says
     assert _char(db, me["char_id"])["level"] == 2
 
 
-def test_the_level_table_climbs_to_twenty_and_a_shallows_clear_is_about_one_level():
+def test_the_level_table_climbs_to_ten_and_a_shallows_clear_is_about_one_level():
     from halcyon import content as C
     from halcyon import dungeon as D
     assert len(C.LEVEL_XP) == C.MAX_LEVEL and C.LEVEL_XP[0] == 0
@@ -718,6 +718,26 @@ def test_the_level_table_climbs_to_twenty_and_a_shallows_clear_is_about_one_leve
         d = D.generate("shallows", seed)
         clear = sum(e["xp"] for e in d["enemies"].values()) + d["complete_xp"]
         assert C.LEVEL_XP[1] <= clear < C.LEVEL_XP[2], (seed, clear)
+
+
+def test_startup_caps_existing_characters_and_future_xp(db, me):
+    fallen = S.create_character(db, ME, 1, "paladin")
+    low = S.create_character(db, ME, 2, "diviner")
+    conn = db()
+    conn.execute("UPDATE hr_characters SET level=15, xp=15340 WHERE char_id IN (?, ?)",
+                 (me["char_id"], fallen["char_id"]))
+    conn.execute("UPDATE hr_characters SET status='dead' WHERE char_id=?", (fallen["char_id"],))
+    conn.commit()
+    S.init_schema(conn)
+    S.init_schema(conn)
+    conn.close()
+    cap = {"level": 10, "xp": 3840, "status": "alive"}
+    assert _char(db, fallen["char_id"]) == {**cap, "status": "dead"}
+    assert _char(db, low["char_id"]) == {"level": 1, "xp": 0, "status": "alive"}
+    assert _char(db, me["char_id"]) == cap
+    run = S.start_run(db, ME, me["char_id"], "shallows", "seed", _xp_dungeon())
+    S.apply_events(db, ME, run["run_id"], _seq({"type": "kill", "enemy": "boss"}))
+    assert _char(db, me["char_id"]) == cap
 
 
 def test_a_dungeon_with_a_made_up_xp_value_is_refused(db, me):

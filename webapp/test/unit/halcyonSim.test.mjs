@@ -211,7 +211,7 @@ test("gear changes the numbers: a longbow hits harder and slower, enchantments s
 });
 
 // The server's level table (halcyon/content.py LEVEL_XP), as the state route ships it.
-const LEVELS = [0, 120, 280, 480, 740, 1080, 1530, 2110, 2860, 3840, 5110, 6760, 8910, 11710, 15340, 20060, 26200, 34180, 44560, 58050];
+const LEVELS = [0, 120, 280, 480, 740, 1080, 1530, 2110, 2860, 3840];
 
 test("a full clear earns every enemy's XP plus the completion bonus, and levels up on the way", () => {
 	for (const d of [A, B]) {
@@ -253,7 +253,7 @@ test("levels add a little to the base numbers, and a character keeps its level i
 	const st = createSim(A, STARTER, { level: 5, xp: 760, levels: LEVELS });
 	assert.equal(st.p.hp, five.maxHp);
 	assert.deepEqual(xpProgress(LEVELS, 760), { level: 5, into: 20, span: 340 });
-	assert.deepEqual(xpProgress(LEVELS, 10 ** 9), { level: 20, into: 0, span: 0 });
+	assert.deepEqual(xpProgress(LEVELS, 10 ** 9), { level: 10, into: 0, span: 0 });
 });
 
 test("a levelled run is as deterministic as any other", () => {

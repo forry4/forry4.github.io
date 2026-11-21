@@ -485,7 +485,7 @@ OPEN:
 DECIDED:
 
 - Characters begin at level 1.
-- Characters progress to level 20.
+- Characters progress to level 10. XP stops accumulating at the level 10 threshold.
 - Early levels should be gained relatively quickly.
 - The XP requirement increases at each level.
 - The easiest dungeon provides enough XP for approximately level 1 → level 2.
@@ -507,7 +507,7 @@ DECIDED (2026-11-18):
 
 OPEN:
 
-- exact level 20 pacing (the greybox table is a placeholder: each level asks ~30% more).
+- exact level 10 pacing (the greybox table is a placeholder: each level asks ~30% more).
 
 ### 10.2 Stats
 

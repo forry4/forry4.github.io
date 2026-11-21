@@ -429,8 +429,9 @@ export function xpProgress(levels, xp) {
  * server's level table. The XP a run earns is shown and levelled on here, but it
  * is CREDITED by the server from its own dungeon (each enemy's `xp`). */
 export function createSim(dungeon, gear = [], hero = {}) {
-	const levels = hero.levels || [0];
-	const xp = hero.xp || 0, level = Math.max(hero.level || 1, levelFor(levels, xp));
+	const levels = hero.levels?.length ? hero.levels : [0];
+	const xp = Math.min(hero.xp || 0, levels[levels.length - 1]);
+	const level = levelFor(levels, xp);
 	const classId = hero.class_id || hero.classId || dungeon.class_id || "ranger";
 	const stats = statsFor(gear, level, classId);
 	const scale = { hp: 1, dmg: 1, speed: 1, shot: 1, cadence: 1, ward: 0, ward_boss: 0, volatile: 0, ...(dungeon.scale || {}) };
@@ -1509,7 +1510,7 @@ export function setGear(st, gear) {
 function gainXp(st, amount) {
 	const h = st.hero;
 	if (st.practice || amount <= 0) return;
-	h.xp += amount;
+	h.xp = Math.min(h.xp + amount, st.levels[st.levels.length - 1]);
 	const level = levelFor(st.levels, h.xp);
 	if (level <= h.level) return;
 	const was = st.stats, now = statsFor(st.gear, level, st.classId), p = st.p;
@@ -1560,8 +1561,9 @@ function kill(st, e) {
 		// The dungeon is CLEARED when its boss falls: the bonus and the news come now,
 		// not at the portal (owner's ask, 2026-11-18). The server credits it on the
 		// same kill event.
+		const xpBeforeBonus = st.hero.xp;
 		gainXp(st, st.completeXp);
-		st.events.push({ type: "cleared", xp: st.completeXp, local: true });
+		st.events.push({ type: "cleared", xp: st.hero.xp - xpBeforeBonus, local: true });
 		st.bossDown = true;                                        // its fire dies with it (below)
 		for (const o of st.enemies) if (o.summon === e.id && o.hp > 0) kill(st, o);   // its Kilns fall with it
 	}

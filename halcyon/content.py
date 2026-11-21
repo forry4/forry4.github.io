@@ -199,7 +199,7 @@ def reroll_cost(tier: int, slot_count: int, locks: int) -> int:
 # XP comes from kills, plus a bonus for completing a dungeon; recall keeps what a
 # run earned (owner's call, 2026-11-18). The SERVER credits it, from the XP it
 # wrote into the dungeon it generated — a request never names an amount.
-MAX_LEVEL = 20
+MAX_LEVEL = 10
 ENEMY_XP = {"chaser": 4, "shooter": 5, "radial": 6, "boss": 20,
             # the Fracture's (design §14.4a): tougher, and worth more
             "shard": 8, "splitter": 9, "splinter": 3, "flicker": 9,

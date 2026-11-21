@@ -161,10 +161,11 @@ drag the vest off mid-run → put it on the ground and take it back → recall �
   written as each kill lands, which is why a recall keeps it with no extra rule. An
   `xp` field on an event is ignored (tested).
 - **One level table, shipped as data.** `content.LEVEL_XP[n]` is the XP to BE level
-  n + 1 (20 levels, each step ~30% bigger, a Shallows clear ~140 XP against 120 for
+  n + 1 (10 levels, each step ~30% bigger, a Shallows clear ~140 XP against 120 for
   level 2). `/halcyon/state` sends it as `levels`; the sim and the page read that,
   never a copy. The sim's unit tests DO carry a copy, held to the real one by
-  `tests/test_sim_fixtures.py`.
+  `tests/test_sim_fixtures.py`. Startup clamps existing living and fallen records
+  to level 10 and its XP threshold; run and server XP stop at that threshold too.
 - **A level gives a little to the base numbers** (`sim.PER_LEVEL`: +6 HP, +4 MP,
   +3% damage, +0.3 defense per level), separate from the per-dungeon stat rewards
   and their caps (§10.2, not built). It applies MID-RUN: the sim levels on the XP

@@ -178,6 +178,10 @@ def init_schema(conn) -> None:
     cur.execute("PRAGMA table_info(hr_characters)")
     if not any(row[1] == "death_summary" for row in cur.fetchall()):
         cur.execute("ALTER TABLE hr_characters ADD COLUMN death_summary TEXT")
+    # Bring existing characters, including the fallen roster, to the new cap.
+    xp_cap = C.LEVEL_XP[-1]
+    cur.execute("UPDATE hr_characters SET xp=?, level=? WHERE level>? OR xp>?",
+                (xp_cap, C.MAX_LEVEL, C.MAX_LEVEL, xp_cap))
     # Whether a base is standard or unique belongs to the BASE, so items follow
     # content.py when it changes (the repeater became a unique, 2026-11-18). Uniques
     # are tiered like everything else since 2026-11-19 (they were all tier 1, and
@@ -550,7 +554,9 @@ def _credit_xp(cur, char_id: str, amount: int) -> None:
     if amount <= 0:
         return
     ch = _one(cur, "SELECT xp FROM hr_characters WHERE char_id=?", (char_id,))
-    xp = ch["xp"] + amount
+    xp = min(ch["xp"] + amount, C.LEVEL_XP[-1])
+    if xp == ch["xp"]:
+        return
     cur.execute("UPDATE hr_characters SET xp=?, level=? WHERE char_id=?", (xp, C.level_for(xp), char_id))
 
 
