@@ -1474,7 +1474,7 @@ function bossStep(st, e, d, ux, uy) {
 		if (t === 0) e.tele = 48;
 		if (t === 48 || t === 60) {
 			const off = t === 48 ? 0 : TAU / 56;
-			for (let k = 0; k < 28; k++) shoot(st, "e", e.x, e.y, off + k * TAU / 28, 6.5, 34, 0.26, 260);
+			for (let k = 0; k < 28; k++) shoot(st, "e", e.x, e.y, off + k * TAU / 28, 6.5, 34, 0.234, 260);   // 10% smaller (owner, 2026-11-21)
 		}
 	}
 	if (e.tele > 0) e.tele--;
